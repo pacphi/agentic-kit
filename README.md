@@ -98,7 +98,7 @@ ruflo-machine-ref/
 ## Quick start
 
 ```bash
-git clone <this-repo> ruflo-machine-ref && cd ruflo-machine-ref
+git clone https://github.com/pacphi/ruflo-machine-ref.git && cd ruflo-machine-ref
 ./install.sh                    # see --dry-run first if you like
 exec $SHELL                     # load the helper functions
 
