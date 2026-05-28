@@ -1,0 +1,21 @@
+# macOS
+.DS_Store
+
+# Editor / IDE
+*.swp
+*~
+.vscode/
+.idea/
+
+# Backups created by install.sh / uninstall.sh / the helpers
+*.bak
+*.bak.*
+
+# Local shell/env overrides
+.env
+.env.*
+
+# Test scratch (ruflo-parity-test writes to /tmp, but guard against stray copies)
+test-*.log
+.swarm/
+.claude-flow/
