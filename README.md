@@ -39,6 +39,42 @@ This kit fixes all three.
 
 ---
 
+## Why not just the one-liner?
+
+The ruflo quickstart most people run is:
+
+```bash
+ruflo init --full --start-all --force && claude mcp add ruflo -- ruflo mcp start && ruflo doctor
+```
+
+It works, and for a quick try it's fine. But it bakes in choices that don't age
+well across many projects:
+
+| Concern | `ruflo init … && claude mcp add … && ruflo doctor` | This kit (`ruflo-setup-project`) |
+|---|---|---|
+| **Scope mentality** | **Per-project, repeated.** You re-run the whole chain in every repo, and `claude mcp add` (no `-s`) registers ruflo at **local** scope — private to *that* project. New repo → do it all again. | **Set once per machine, reuse everywhere.** Register the MCP at **user** scope once (or skip it); the CLAUDE.md reference is machine-wide. Per repo you run one idempotent command. |
+| **`.mcp.json`** | Written with `ruv-swarm` + `flow-nexus` (auth-gated cloud SaaS) — easy to commit and force on teammates. | Stripped. Nothing project-scoped gets committed unless you mean it. |
+| **MCP scope hygiene** | `--start-all` *also* registers ruflo at local scope in `~/.claude.json`, so a later `claude mcp remove ruflo -s user` leaves a copy behind. | Local-scope leftovers removed; `ruflo-remove-mcp` clears all scopes. |
+| **Context cost** | MCP always on → ~84k tokens of tool defs every session, every project. | MCP optional. The machine-wide CLAUDE.md teaches Claude Code to drive ruflo via Bash — CLI-only saves ~84k tokens/session. |
+| **Memory on Node 24/26** | `ruflo doctor` reports "healthy" while the deeper agentdb runs on the sql.js WASM backend that **silently loses writes**. Green check, lost data. | `ruflo-patch-native` puts agentdb on native better-sqlite3; setup **verifies a store lands an on-disk row** before declaring success. |
+| **Memory DB creation** | `--start-all` initializes it — but `--minimal` (or any flags without `--start-all`) doesn't, and the first store no-ops. | Memory/swarm/daemon activated explicitly, in order, **after** pinning an absolute DB path. |
+| **`CLAUDE_FLOW_DB_PATH`** | Not set. Subject to Claude Code's Bash-subprocess cwd drift (store and retrieve hit different DBs). | Pinned to a resolved absolute path; `${CLAUDE_PROJECT_DIR}` literal trap avoided. |
+| **Generated CLAUDE.md** | Legacy `npx @claude-flow/cli@latest` commands; duplicated into every repo (drift inevitable). | Single machine-wide reference; per-project file sanitized and pointed at it. |
+| **Verification** | `ruflo doctor` checks the install, not whether memory actually round-trips. | `ruflo-parity-test` does a 20-check end-to-end store→retrieve→native-sqlite cross-check. |
+| **Reversibility** | Manual cleanup. | `uninstall.sh` reverses everything with backups. |
+
+**Rule of thumb:**
+
+- Trying ruflo in one repo for an afternoon? The one-liner is fine.
+- Running ruflo across many repos, on Node 24/26, and/or watching your token
+  budget? This kit encodes "configure the machine once, keep each repo clean,
+  and prove memory actually works."
+
+It's not a replacement for ruflo — it's a thin, reversible layer that picks
+safe defaults and closes the gaps the quickstart leaves open.
+
+---
+
 ## What's in the box
 
 ```
