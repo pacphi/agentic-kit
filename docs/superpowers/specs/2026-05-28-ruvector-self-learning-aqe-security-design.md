@@ -232,8 +232,9 @@ upgrade ruflo ──► binaries present, bsq3 .node MISSING ──► agentdb=W
   capture it from `ruflo neural train` output and cache it for the footer to read.
 - **R17.** It MUST append a security segment (`🛡 aidefence on`) when
   `@claude-flow/aidefence` is loaded, and a separate agentic-qe line
-  (`🎓 Agentic QE <patterns>[· traj][· vec] · <size>`, one guarded `sqlite3` read of
-  `.agentic-qe/memory.db`) when AQE is initialized in the project. The security segment
+  (`🎓 Agentic QE <patterns>[· traj][· vec] · <size>`, a few guarded `sqlite3` reads of
+  `.agentic-qe/memory.db`; the `vec` count reads `qe_pattern_embeddings` and falls back
+  to `vectors`/`embeddings` across aqe versions) when AQE is initialized in the project. The security segment
   is purely additive — ruflo's native render already shows `CVE n/m`, so `🛡` signals
   the distinct fact that proactive defense is loaded.
 - **R18.** Status-line patching MUST be append-only (never rewrite ruflo's native

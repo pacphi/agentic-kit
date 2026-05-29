@@ -163,7 +163,9 @@ not cover this (it assumed `aqe init` just works).
 The kit appends a two-line footer **below** ruflo's native status line (never rewriting
 ruflo's lines — chosen over the gist's in-place relabel for upgrade-safety). Most fields
 are cheap reads: SONA `patterns`/`traj` from `.claude-flow/neural/stats.json`, the
-agentic-qe metrics from one guarded `sqlite3` read of `.agentic-qe/memory.db`.
+agentic-qe metrics from a few guarded `sqlite3` reads of `.agentic-qe/memory.db` (the
+`vec` count reads `qe_pattern_embeddings`, falling back to `vectors`/`embeddings` —
+they vary by aqe version).
 
 One field — `Δ LoRA` (the MicroLoRA delta norm Ciprian's status line shows) — required
 digging into ruflo source. In `@claude-flow/cli/.../services/ruvector-training.js`,

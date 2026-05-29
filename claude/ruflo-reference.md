@@ -339,8 +339,9 @@ status-line render (append-only, so it never breaks on a ruflo template change):
 Each field renders only when active: SONA `patterns`/`traj` from
 `.claude-flow/neural/stats.json` (the `[bar]` is a ~10-patterns/dot volume gauge),
 `⚡ HNSW` only when `.swarm/hnsw.index` exists, `🛡` when `@claude-flow/aidefence` is
-loaded, and the `🎓 Agentic QE` line (one guarded `sqlite3` read of
-`.agentic-qe/memory.db`) only when AQE is initialized. `Δ LoRA` appears only after
+loaded, and the `🎓 Agentic QE` line (a few guarded `sqlite3` reads of
+`.agentic-qe/memory.db`; `vec` reads `qe_pattern_embeddings`, falling back to
+`vectors`/`embeddings`) only when AQE is initialized. `Δ LoRA` appears only after
 `ruflo-neural-train` (which caches the transient MicroLoRA delta that ruflo itself
 does not persist).
 
