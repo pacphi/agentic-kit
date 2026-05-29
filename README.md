@@ -62,7 +62,7 @@ The deep dive — ABI tables, the exact files, why "HNSW: Not loaded" is a cosme
 - 📟 **A status-line footer** that shows 🧠 self-learning, 🛡️ security, and 🎓 agentic-qe — each only when genuinely active.
 - 🔁 **`ruflo-resync`** — one command to re-apply *everything* after a ruflo or agentic-qe upgrade.
 - 🧹 **Clean repos & cheap sessions** — strips MCP cruft `ruflo init` would commit, pins an absolute memory path, and keeps MCP optional to save ~84k tokens/session.
-- ↩️ **Fully reversible** — `uninstall.sh` backs up and removes everything it added.
+- ↩️ **Reversible** — `uninstall.sh` backs up and removes the machine-level setup; `--this-project` also reverts a repo's statusline patches.
 
 ---
 
@@ -111,12 +111,15 @@ ruflo-learning-verify           # prove self-learning actually persists
 When set up with this kit, a two-line footer is appended **below** ruflo's own status line. It's append-only — it never rewrites ruflo's lines, so a ruflo update can't break it. Each piece appears **only when that feature is genuinely active**:
 
 ```
-▊ RuFlo V3.10.5 ● you  │  ⏇ main  │  Opus 4.x        (ruflo's native lines)
-🏗️  Learning … 🤖 Swarm … 🔧 Architecture … 📊 AgentDB …
-────────────────────────────────────────────
+▊ RuFlo V3.10.5 ● you  │  ⏇ main  │  Opus 4.x        ┐
+🏗️  DDD Domains … 🤖 Swarm … 🔧 Architecture …       ├ ruflo's own lines (unchanged)
+📊 AgentDB …                                          ┘
+────────────────────────────────────────────         ← the kit's appended footer ↓
 🧠 SONA  50 patterns · 55 traj · ⚡ HNSW        🛡 aidefence on
 🎓 Agentic QE  23 patterns · 16MB
 ```
+
+*(The `⚡ HNSW` marker and the `🎓 Agentic QE` line appear only when a vector index / agentic-qe are actually present; the numbers above are illustrative.)*
 
 - 🧠 **SONA** — pattern & trajectory counts from `.claude-flow/neural/stats.json`; `⚡ HNSW` shows only when a vector index exists.
 - 🛡️ **aidefence on** — proactive prompt-injection/PII defense is loaded (ruflo's native line already shows the `CVE n/m` count, so this signals the *other* half).
@@ -167,7 +170,7 @@ ruflo init --full --start-all --force && claude mcp add ruflo -- ruflo mcp start
 | 💰 **Token cost** | MCP always on → ~84k tokens/session | MCP optional; CLI-first reference keeps sessions lean |
 | 💾 **Memory on Node 24/26** | `doctor` says "healthy" while writes silently vanish | Native SQLite + a real store→disk verification |
 | 🧠 **Self-learning** | Looks "Not loaded"; no way to tell if it works | Activated and **proven** via a train/persist test |
-| ↩️ **Reversibility** | Manual cleanup | `uninstall.sh` reverses everything with backups |
+| ↩️ **Reversibility** | Manual cleanup | `uninstall.sh` reverses the setup with backups (`--this-project` also reverts a repo's statusline) |
 
 It's not a replacement for ruflo — just a thin, reversible layer that picks safe defaults and closes the gaps.
 
@@ -200,10 +203,16 @@ ruflo-machine-ref/
 ## 🗑️ Uninstall
 
 ```bash
-./uninstall.sh        # removes bin scripts, template, CLAUDE.md block, rc source line
+./uninstall.sh                  # removes bin scripts, template, CLAUDE.md block, rc source line
+./uninstall.sh --this-project   # ALSO revert the kit's statusline patches in the current repo
+./uninstall.sh --dry-run        # preview without changing anything
 ```
 
-Your ruflo install, memory DBs, and project files are left untouched.
+The plain `uninstall.sh` removes only machine-level setup; your ruflo install, memory
+DBs, and **project files** (including any statusline a project already had) are left
+untouched. Add `--this-project` from a repo root to revert that repo's statusline
+patches too (it backs up first and leaves all ruflo/agentic-qe data alone — use
+`ruflo cleanup --force` for per-project data).
 
 ---
 

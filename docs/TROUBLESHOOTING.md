@@ -121,6 +121,17 @@ without the footer. Re-apply: `ruflo-resync` (or `ruflo-fix-statusline-version`
 directly). The footer is append-only and the patcher is upgrade-safe — it strips any
 stale block and re-injects.
 
+### Status line shows a bare "▊ Agentic QE v3" line (footer hidden after `aqe init`)
+`aqe init` repoints `.claude/settings.json` `statusLine.command` at its own minimal
+`statusline-v3.cjs`, so Claude Code stops rendering the rich `statusline.cjs` (your
+footer is still patched in — just not the file being run). Fix:
+```bash
+ruflo-resync            # or: ruflo-fix-statusline-version
+```
+This re-points `settings.json` so `statusline.cjs` is primary (falling back to
+`statusline-v3.cjs`, then a literal). The status line refreshes within ~5s, or restart
+Claude Code.
+
 ### "@ruvector/core not available" persists even after the patch
 This line in `ruflo neural status` is usually **cosmetic**, not real dormancy.
 `getHNSWStatus()` (`memory-initializer.js`) reports "available" only if a lazy

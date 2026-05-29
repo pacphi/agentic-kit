@@ -202,6 +202,37 @@ fs.writeFileSync(f,s);
 		echo "✓ Statusline activation footer present (🧠 SONA / 🛡 aidefence / 🎓 Agentic QE)"
 	fi
 
+	# Ensure Claude Code actually RUNS the rich statusline.cjs. `aqe init` (and
+	# `ruflo init`) can repoint .claude/settings.json at a minimal statusline-v3.cjs,
+	# which would hide the footer. Make statusline.cjs primary (falls back to v3, then
+	# a literal). Only when patching the default project statusline.
+	if [ "$sl" = ".claude/helpers/statusline.cjs" ] && [ -f ".claude/settings.json" ] && command -v python3 >/dev/null 2>&1; then
+		if python3 - <<'PY' 2>/dev/null
+import json, re, sys
+p = ".claude/settings.json"
+d = json.load(open(p))
+sl = d.get("statusLine") or {}
+cur = sl.get("command", "")
+m = re.search(r'statusline(-v3)?\.cjs', cur)
+if m and m.group(0) == 'statusline.cjs':
+    sys.exit(0)  # already primary — no change
+sl["type"] = "command"
+sl["command"] = ('sh -c \'node "${CLAUDE_PROJECT_DIR:-.}/.claude/helpers/statusline.cjs" 2>/dev/null '
+                 '|| node "${CLAUDE_PROJECT_DIR:-.}/.claude/helpers/statusline-v3.cjs" 2>/dev/null '
+                 '|| echo "▊ RuFlo + Agentic QE v3"\'')
+sl.setdefault("refreshMs", 5000)
+sl.setdefault("enabled", True)
+d["statusLine"] = sl
+json.dump(d, open(p, "w"), indent=2)
+sys.exit(1)  # changed
+PY
+		then
+			echo "✓ settings.json already runs the rich statusline.cjs"
+		else
+			echo "✓ Pointed settings.json statusLine at statusline.cjs (restore the rich footer)"
+		fi
+	fi
+
 	local shown
 	shown="$(printf '{}' | node "$sl" 2>/dev/null | sed -E 's/\x1b\[[0-9;]*m//g' \
 		| grep -oE 'RuFlo V[0-9]+\.[0-9]+(\.[0-9]+)?' | head -1 | sed 's/RuFlo V//')"
