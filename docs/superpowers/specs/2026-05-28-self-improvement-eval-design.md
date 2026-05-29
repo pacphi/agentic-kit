@@ -6,6 +6,52 @@
 - **Author:** Chris Phillipson (with Claude)
 - **Builds on:** the merged self-learning/agentic-qe/security work (PR #1)
 
+## 0. Plain-language primer (read this first — no ML background needed)
+
+Use a **delivery company** as the analogy. ruflo has *three different* learning systems
+that people often conflate:
+
+1. **The Q-learner = the dispatcher.** Its job: "which specialist should handle this
+   task?" (coder, tester, reviewer…). It keeps a scorecard of which agent tends to do
+   well on which kind of task and updates it from results. "Q-learning" is just the
+   textbook name for *try → see if it worked → nudge the preference*.
+   - **ε (epsilon)** — how often it gambles on a random pick vs. its current favorite.
+     Starts at **1.0 (100% random)**; should **shrink** as it learns to trust itself.
+     Stuck at 1.0 = "still guessing, hasn't committed to anything learned."
+   - **TD error (δ)** — "how surprised it was": the gap between expectation and outcome.
+     Shrinking toward 0 = its expectations now match reality (it has converged).
+   - **|Q| (Q-table size)** — how many distinct task-types it has opinions about.
+
+2. **SONA = a driver's real-time muscle memory.** A fast engine that nudges itself after
+   each action based on whether it went well. It banks **trajectories** (sequences of
+   what it did) and **patterns** (distilled "this worked" recipes) — the counts in the
+   status line.
+
+3. **LoRA = the *format* SONA stores its tweaks in.** "Low-Rank Adaptation" — instead of
+   rewriting the whole brain, it keeps a small **diff sheet of sticky-note corrections**
+   on a frozen base. **Δ LoRA** = "how big was the *last* tweak" (≈0 = barely adjusted).
+
+**The crux (the Tier-2 gap):** the LoRA sticky-notes *are being written* (they pile up),
+**but when ruflo decides which agent to use it never *reads* them** — it reads a simpler
+"confidence" number instead. So the notes accumulate yet change no decision. Wiring the
+decision to read them is a change *inside ruflo* (Tier 2), which we don't own.
+
+**Why this work is worth doing now, without the Tier-2 fix** — there are two learning
+loops, in very different shape:
+
+| Loop | Learns? | Does its learning change decisions today? |
+|---|---|---|
+| **Q-learner (dispatcher)** | Yes | **Yes — wired end-to-end** |
+| **SONA/LoRA (driver notes)** | Yes | **No — not consumed (Tier-2 gap)** |
+
+This work proves the **Q-learner loop** self-improves — a loop that genuinely drives
+behavior today. It (1) answers "is it self-improving?" with measured evidence instead of
+a hand-wave, (2) shows that proof on the status line in credible terms, (3) documents the
+two real bugs (CLI feedback never saves; LoRA never read), and (4) builds the exact
+measuring stick Tier-2 will need (re-run the same A/B once LoRA-consumption is fixed
+upstream). We prove what's true (the dispatcher improves) and clearly label what isn't yet
+(the driver-notes path). That honesty *is* the value.
+
 ## 1. Problem
 
 The kit proved the system is **self-learning** (experience accumulates and persists). It
