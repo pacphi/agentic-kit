@@ -33,19 +33,19 @@ while (( $# )); do
 	shift
 done
 
-if [[ -t 1 ]]; then
-	C_OK=$'\033[32m'; C_WARN=$'\033[33m'; C_FAIL=$'\033[31m'; C_DIM=$'\033[2m'; C_RESET=$'\033[0m'
-else C_OK=""; C_WARN=""; C_FAIL=""; C_DIM=""; C_RESET=""; fi
-ok()   { printf '%s✓%s %s\n' "$C_OK" "$C_RESET" "$*"; }
-warn() { printf '%s⚠%s  %s\n' "$C_WARN" "$C_RESET" "$*"; }
-fail() { printf '%s✗%s %s\n' "$C_FAIL" "$C_RESET" "$*"; }
-dim()  { printf '%s%s%s\n' "$C_DIM" "$*" "$C_RESET"; }
+# Shared helpers (colors, ok/warn/fail/dim, _ruflo_need, ABI/root) from ruflo-lib.sh:
+# installed copy first, then repo-relative (bin/ ↔ ../shell/).
+for _cand in "$HOME/.config/ruflo/ruflo-lib.sh" "$(dirname "${BASH_SOURCE[0]:-$0}")/../shell/ruflo-lib.sh"; do
+	# shellcheck source=/dev/null
+	[ -f "$_cand" ] && { . "$_cand"; break; }
+done
+unset _cand
+[ -n "${_RUFLO_LIB:-}" ] || { echo "ruflo-lib.sh not found — run install.sh" >&2; exit 2; }
 
-command -v node  >/dev/null 2>&1 || { fail "node not on PATH"; exit 2; }
-command -v ruflo >/dev/null 2>&1 || { fail "ruflo not on PATH"; exit 2; }
+_ruflo_need node ruflo
 command -v ruflo-patch-native >/dev/null 2>&1 || { fail "ruflo-patch-native not on PATH (run install.sh)"; exit 2; }
 
-NODE_ABI=$(node -e 'process.stdout.write(process.versions.modules)')
+NODE_ABI=$(_ruflo_node_abi)
 echo "Node ABI $NODE_ABI | ruflo $(ruflo --version 2>/dev/null | tr -d '\n')"
 echo ""
 
@@ -60,7 +60,7 @@ fi
 # On ruflo >= 3.10 the gist's controller-registry patches are already upstream:
 # agentdb resolves >= 3.0 and ReasoningBank gets an embedder. We only WARN if a
 # regression is detected; we do not patch a non-regressed install.
-RUFLO_ROOT="$(npm root -g)/ruflo"
+RUFLO_ROOT="$(_ruflo_global_root)/ruflo"
 MEM="$RUFLO_ROOT/node_modules/@claude-flow/memory"
 ADB_VER=$(node -e "
 try{const p=require.resolve('agentdb',{paths:['$MEM']});process.stdout.write(require(p.split('/agentdb/')[0]+'/agentdb/package.json').version);}catch(e){process.stdout.write('MISSING');}" 2>/dev/null)
@@ -81,9 +81,11 @@ ruvector_repair() {
 		  const {createRequire}=await import('node:module');
 		  const r=createRequire('$d/package.json');
 		  try{ r(r.resolve('$m')); process.exit(0);}catch(e){process.exit(1);}" 2>/dev/null; then
-			( cd "$d" && npm install "$m" --no-save --no-audit --no-fund >/dev/null 2>&1 ) \
-				&& ok "  repaired $m in ${d#$RUFLO_ROOT/node_modules/}" \
-				|| warn "  could not repair $m in ${d#$RUFLO_ROOT/node_modules/}"
+			if ( cd "$d" && npm install "$m" --no-save --no-audit --no-fund >/dev/null 2>&1 ); then
+				ok "  repaired $m in ${d#"$RUFLO_ROOT"/node_modules/}"
+			else
+				warn "  could not repair $m in ${d#"$RUFLO_ROOT"/node_modules/}"
+			fi
 		fi
 	done
 }
@@ -115,24 +117,36 @@ cap() {
 	" 2>/dev/null
 }
 
+# Direct if/then assertions (no eval) — each runs a probe and tallies green/total.
 declare -i green=0 total=0
-report() { total+=1; if eval "$2"; then ok "$1"; green+=1; else fail "$1 — $3"; fi; }
+pass() { total+=1; ok "$1"; green+=1; }
+miss() { total+=1; fail "$1 — $2"; }
 
-report "native better-sqlite3 (no WASM fallback)" \
-	'! echo "$NS" | grep -q "Using sql.js" && echo "$PN" | grep -qE "Nothing to do|already resolve native"' \
-	"still on sql.js/WASM — patch-native did not take"
-report "HNSW vector engine (@ruvector/core → VectorDb)" \
-	'cap "$CLI" "@ruvector/core" "VectorDb"' \
-	"core present but VectorDb missing"
-report "SONA engine (@ruvector/sona → SonaEngine)" \
-	'cap "$NEURAL" "@ruvector/sona" "SonaEngine"' \
-	"sona native module not loadable from @claude-flow/neural"
-report "GNN layer (@ruvector/gnn → RuvectorLayer)" \
-	'cap "$NEURAL" "@ruvector/gnn" "RuvectorLayer"' \
-	"gnn native module not loadable from @claude-flow/neural"
-report "ReasoningBank (agentdb v3)" \
-	'[[ "$ADB_VER" == 3.* ]]' \
-	"agentdb not v3 — ReasoningBank unavailable"
+if ! echo "$NS" | grep -q "Using sql.js" && echo "$PN" | grep -qE "Nothing to do|already resolve native"; then
+	pass "native better-sqlite3 (no WASM fallback)"
+else
+	miss "native better-sqlite3 (no WASM fallback)" "still on sql.js/WASM — patch-native did not take"
+fi
+if cap "$CLI" "@ruvector/core" "VectorDb"; then
+	pass "HNSW vector engine (@ruvector/core → VectorDb)"
+else
+	miss "HNSW vector engine (@ruvector/core → VectorDb)" "core present but VectorDb missing"
+fi
+if cap "$NEURAL" "@ruvector/sona" "SonaEngine"; then
+	pass "SONA engine (@ruvector/sona → SonaEngine)"
+else
+	miss "SONA engine (@ruvector/sona → SonaEngine)" "sona native module not loadable from @claude-flow/neural"
+fi
+if cap "$NEURAL" "@ruvector/gnn" "RuvectorLayer"; then
+	pass "GNN layer (@ruvector/gnn → RuvectorLayer)"
+else
+	miss "GNN layer (@ruvector/gnn → RuvectorLayer)" "gnn native module not loadable from @claude-flow/neural"
+fi
+if [[ "$ADB_VER" == 3.* ]]; then
+	pass "ReasoningBank (agentdb v3)"
+else
+	miss "ReasoningBank (agentdb v3)" "agentdb not v3 — ReasoningBank unavailable"
+fi
 echo ""
 dim "Note: 'ruflo neural status' may still print HNSW/Training as 'Not loaded' — that is"
 dim "a lazy per-process display (getHNSWStatus), not real dormancy. Prove the loop with"

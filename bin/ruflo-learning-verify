@@ -24,17 +24,20 @@ while (( $# )); do
 	esac
 	shift
 done
-if [[ -t 1 ]]; then C_OK=$'\033[32m'; C_FAIL=$'\033[31m'; C_DIM=$'\033[2m'; C_RESET=$'\033[0m'
-else C_OK=""; C_FAIL=""; C_DIM=""; C_RESET=""; fi
-ok()  { printf '%s✓%s %s\n' "$C_OK" "$C_RESET" "$*"; }
-fail(){ printf '%s✗%s %s\n' "$C_FAIL" "$C_RESET" "$*"; }
-dim() { printf '%s%s%s\n' "$C_DIM" "$*" "$C_RESET"; }
+# Shared helpers (colors, ok/fail/dim, _ruflo_need) from ruflo-lib.sh:
+# installed copy first, then repo-relative (bin/ ↔ ../shell/).
+for _cand in "$HOME/.config/ruflo/ruflo-lib.sh" "$(dirname "${BASH_SOURCE[0]:-$0}")/../shell/ruflo-lib.sh"; do
+	# shellcheck source=/dev/null
+	[ -f "$_cand" ] && { . "$_cand"; break; }
+done
+unset _cand
+[ -n "${_RUFLO_LIB:-}" ] || { echo "ruflo-lib.sh not found — run install.sh" >&2; exit 2; }
 
-command -v node  >/dev/null 2>&1 || { fail "node not on PATH"; exit 2; }
-command -v ruflo >/dev/null 2>&1 || { fail "ruflo not on PATH"; exit 2; }
+_ruflo_need node ruflo
 
 T=$(mktemp -d)
 export CLAUDE_FLOW_DB_PATH="$T/.swarm/memory.db"
+# shellcheck disable=SC2329  # invoked via trap below
 cleanup(){ if (( KEEP )); then echo "kept: $T"; else rm -rf "$T"; fi; }
 trap cleanup EXIT
 

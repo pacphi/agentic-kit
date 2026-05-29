@@ -71,23 +71,13 @@ while [ "$#" -gt 0 ]; do
 	shift
 done
 
-if [ -t 1 ]; then C_OK=$'\033[32m'; C_WARN=$'\033[33m'; C_DIM=$'\033[2m'; C_RESET=$'\033[0m'; else C_OK=""; C_WARN=""; C_DIM=""; C_RESET=""; fi
-ok()   { printf '%s✓%s %s\n' "$C_OK" "$C_RESET" "$*"; }
-warn() { printf '%s⚠%s  %s\n' "$C_WARN" "$C_RESET" "$*"; }
-run()  { if [ "$DRY" -eq 1 ]; then printf '%s[dry-run]%s %s\n' "$C_DIM" "$C_RESET" "$*"; else eval "$*"; fi; }
-
-# ask_yes_no PROMPT DEFAULT(Y|N) -> 0 yes / 1 no. Honors --yes and no-TTY.
-ask_yes_no() {
-	local prompt="$1" def="${2:-Y}" reply hint="[Y/n]"
-	[ "$def" = "N" ] && hint="[y/N]"
-	if [ "$ASSUME_YES" -eq 1 ] || [ ! -t 0 ]; then
-		[ "$def" = "Y" ]; return
-	fi
-	printf '%s %s ' "$prompt" "$hint"
-	read -r reply || reply=""
-	reply="${reply:-$def}"
-	case "$reply" in [Yy]*) return 0 ;; *) return 1 ;; esac
-}
+# Shared helpers (colors, ok/warn/run, ask_yes_no, _ruflo_daemon_list) from
+# ruflo-lib.sh — repo copy first (we run from the repo), installed copy as fallback.
+for _cand in "$HERE/shell/ruflo-lib.sh" "$HOME/.config/ruflo/ruflo-lib.sh"; do
+	# shellcheck source=/dev/null
+	[ -f "$_cand" ] && { . "$_cand"; break; }
+done
+[ -n "${_RUFLO_LIB:-}" ] || { echo "error: ruflo-lib.sh not found (expected shell/ruflo-lib.sh)" >&2; exit 2; }
 
 # 1. bin scripts — derived from this repo's bin/, so it always matches install.sh.
 for src in "$HERE"/bin/*; do
@@ -98,6 +88,9 @@ done
 
 # 2. template
 [ -f "$HOME/.config/ruflo/claude-md-template.md" ] && { run "rm -f '$HOME/.config/ruflo/claude-md-template.md'"; ok "removed template"; }
+
+# 2b. shared helper lib (already sourced at the top, so removing it here is safe)
+[ -f "$HOME/.config/ruflo/ruflo-lib.sh" ] && { run "rm -f '$HOME/.config/ruflo/ruflo-lib.sh'"; ok "removed helper lib"; }
 
 # 3. CLAUDE.md managed block
 CLAUDE_MD="$HOME/.claude/CLAUDE.md"
@@ -139,6 +132,7 @@ if [ "$THIS_PROJECT" -eq 1 ]; then
 		printf '%s[dry-run]%s strip activation footer + version-probe injection + console.log wrap from %s\n' "$C_DIM" "$C_RESET" "$SL"
 	else
 		cp "$SL" "$SL.bak.$(date +%Y%m%d-%H%M%S)"
+		# shellcheck disable=SC2016  # single-quoted JS for node -e, not shell expansion
 		SL="$SL" node -e '
 const fs=require("fs"); const f=process.env.SL; let s=fs.readFileSync(f,"utf8");
 s=s.replace(/\/\* ruflo-seg:BEGIN \*\/[\s\S]*?\/\* ruflo-seg:END \*\/\n?/,"");
@@ -152,7 +146,44 @@ fs.writeFileSync(f,s);
 	fi
 fi
 
-# 6. (--remove-ruflo / --remove-aqe / --purge) remove global npm packages.
+# 6. Daemon teardown (issue #3): always reap stale (workspace-gone) daemons;
+#    with --this-project also stop the daemon bound to THIS repo's workspace.
+#    Never touches unrelated live-workspace daemons. The ps-parser (_ruflo_daemon_list)
+#    is provided by ruflo-lib.sh, sourced at the top of this script.
+echo ""
+echo "## Daemon teardown"
+if ! command -v _ruflo_daemon_list >/dev/null 2>&1; then
+	warn "ruflo-lib.sh not loaded — skipping daemon teardown"
+else
+	THIS_WS="$(pwd -P)"
+	DAEMON_HITS=0
+	while IFS="$(printf '\t')" read -r dpid dws; do
+		[ -n "${dpid:-}" ] || continue
+		stale=0; mine=0
+		[ -d "$dws" ] || stale=1
+		[ "$dws" = "$THIS_WS" ] && [ "$THIS_PROJECT" -eq 1 ] && mine=1
+		if [ "$stale" -eq 1 ] || [ "$mine" -eq 1 ]; then
+			DAEMON_HITS=$((DAEMON_HITS+1))
+			if [ "$stale" -eq 1 ]; then reason="workspace gone"; else reason="this project"; fi
+			if [ "$DRY" -eq 1 ]; then
+				printf '%s[dry-run]%s stop daemon pid=%s (%s): %s\n' "$C_DIM" "$C_RESET" "$dpid" "$reason" "$dws"
+			else
+				if kill "$dpid" 2>/dev/null; then ok "stopped daemon pid=$dpid ($reason): $dws"; else warn "could not stop pid=$dpid"; fi
+			fi
+		fi
+	done <<EOF
+$(_ruflo_daemon_list)
+EOF
+	if [ "$DAEMON_HITS" -eq 0 ]; then
+		if [ "$THIS_PROJECT" -eq 1 ]; then
+			ok "no daemons to stop (none stale; none for this project)"
+		else
+			ok "no stale daemons to stop"
+		fi
+	fi
+fi
+
+# 7. (--remove-ruflo / --remove-aqe / --purge) remove global npm packages.
 npm_remove_global() {
 	local pkg="$1"
 	command -v npm >/dev/null 2>&1 || { warn "npm not on PATH — cannot remove $pkg"; return 1; }

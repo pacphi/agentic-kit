@@ -48,6 +48,7 @@ SHELL_CHOICE="auto"
 EDIT_RC=1
 DRY=0
 ASSUME_YES=0
+export ASSUME_YES   # read by ask_yes_no() in ruflo-lib.sh (export marks it used)
 PROFILE=""
 WANT_RUFLO="auto"
 WANT_AQE="auto"
@@ -83,24 +84,13 @@ while [ "$#" -gt 0 ]; do
 	shift
 done
 
-if [ -t 1 ]; then C_OK=$'\033[32m'; C_WARN=$'\033[33m'; C_DIM=$'\033[2m'; C_RESET=$'\033[0m'; else C_OK=""; C_WARN=""; C_DIM=""; C_RESET=""; fi
-ok()   { printf '%s✓%s %s\n' "$C_OK" "$C_RESET" "$*"; }
-warn() { printf '%s⚠%s  %s\n' "$C_WARN" "$C_RESET" "$*"; }
-run()  { if [ "$DRY" -eq 1 ]; then printf '%s[dry-run]%s %s\n' "$C_DIM" "$C_RESET" "$*"; else eval "$*"; fi; }
-have() { command -v "$1" >/dev/null 2>&1; }
-
-# ask_yes_no PROMPT DEFAULT(Y|N) -> 0 yes / 1 no. Honors --yes and no-TTY.
-ask_yes_no() {
-	local prompt="$1" def="${2:-Y}" reply hint="[Y/n]"
-	[ "$def" = "N" ] && hint="[y/N]"
-	if [ "$ASSUME_YES" -eq 1 ] || [ ! -t 0 ]; then
-		[ "$def" = "Y" ]; return
-	fi
-	printf '%s %s ' "$prompt" "$hint"
-	read -r reply || reply=""
-	reply="${reply:-$def}"
-	case "$reply" in [Yy]*) return 0 ;; *) return 1 ;; esac
-}
+# Shared helpers (colors, ok/warn/run/have, ask_yes_no) from ruflo-lib.sh — repo
+# copy first (we run from the repo), installed copy as fallback.
+for _cand in "$HERE/shell/ruflo-lib.sh" "$HOME/.config/ruflo/ruflo-lib.sh"; do
+	# shellcheck source=/dev/null
+	[ -f "$_cand" ] && { . "$_cand"; break; }
+done
+[ -n "${_RUFLO_LIB:-}" ] || { echo "error: ruflo-lib.sh not found (expected shell/ruflo-lib.sh)" >&2; exit 2; }
 
 BIN_DIR="$HOME/.local/bin"
 CFG_DIR="$HOME/.config/ruflo"
@@ -202,6 +192,13 @@ echo "## CLAUDE.md reference template -> $CFG_DIR/claude-md-template.md"
 run "mkdir -p '$CFG_DIR'"
 run "cp '$HERE/claude/ruflo-reference.md' '$CFG_DIR/claude-md-template.md'"
 ok "template installed"
+echo ""
+
+# Shared helper lib — deployed to a stable absolute path so the standalone bin
+# scripts (which run from ~/.local/bin, no repo nearby) can source it.
+echo "## shared helper lib -> $CFG_DIR/ruflo-lib.sh"
+run "cp '$HERE/shell/ruflo-lib.sh' '$CFG_DIR/ruflo-lib.sh'"
+ok "helper lib installed"
 echo ""
 
 # Merge the reference block into ~/.claude/CLAUDE.md (sentinel-managed)

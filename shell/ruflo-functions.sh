@@ -1,3 +1,4 @@
+# shellcheck shell=bash
 # ruflo-functions.sh — portable shell helpers for a clean, correct ruflo setup.
 #
 # Source this from your interactive shell rc:
@@ -87,6 +88,55 @@ ruflo-remove-mcp() {
 #   (b) refresh the hard-coded fallback default to the installed version.
 # Idempotent (guarded by a marker) and re-applied on every setup, so each new
 # ruflo release self-heals. Optional arg 1 overrides the statusline path.
+
+# ---------------------------------------------------------------------------
+# Daemon lifecycle (issue #3). ruflo-setup-project starts a per-workspace daemon
+# (continuous self-learning). Without reaping, throwaway/removed workspaces (e.g.
+# ruflo-parity-test's /tmp dirs) leave orphan daemons running forever.
+#
+# Shared helpers (colored output, daemon ps-parser, native better-sqlite3
+# primitives) live in ruflo-lib.sh. Prefer the installed copy (~/.config/ruflo);
+# fall back to the repo sibling. The sourced-file path is BASH_SOURCE[0] in bash
+# and $0 in zsh (with FUNCTION_ARGZERO, the default).
+_ruflo_self="${BASH_SOURCE[0]:-$0}"
+for _ruflo_cand in \
+	"$HOME/.config/ruflo/ruflo-lib.sh" \
+	"$(dirname "$_ruflo_self")/ruflo-lib.sh"; do
+	# shellcheck source=/dev/null
+	[ -f "$_ruflo_cand" ] && { . "$_ruflo_cand"; break; }
+done
+unset _ruflo_self _ruflo_cand
+
+# List (or, with --kill, stop) ruflo daemons whose --workspace no longer exists.
+# Never touches a daemon whose workspace is still present (a live project).
+#   ruflo-daemon-gc           # list orphans (dry preview)
+#   ruflo-daemon-gc --kill    # stop them
+ruflo-daemon-gc() {
+	command -v _ruflo_daemon_list >/dev/null 2>&1 || { echo "⚠  ruflo-daemon-lib.sh not loaded — run install.sh, then re-source your shell"; return 1; }
+	local do_kill=0
+	[ "${1:-}" = "--kill" ] && do_kill=1
+	local found=0 pid ws
+	while IFS="$(printf '\t')" read -r pid ws; do
+		[ -n "${pid:-}" ] || continue
+		[ -d "$ws" ] && continue
+		found=$((found+1))
+		if [ "$do_kill" -eq 1 ]; then
+			kill "$pid" 2>/dev/null && echo "✓ stopped orphan daemon pid=$pid (workspace gone: $ws)" \
+				|| echo "⚠  could not stop pid=$pid (already exited?)"
+		else
+			echo "orphan daemon pid=$pid → $ws (workspace gone)"
+		fi
+	done <<EOF
+$(_ruflo_daemon_list)
+EOF
+	if [ "$found" -eq 0 ]; then
+		echo "✓ no orphan daemons (every running daemon's --workspace still exists)"
+	elif [ "$do_kill" -eq 0 ]; then
+		echo "Found $found orphan(s). Run 'ruflo-daemon-gc --kill' to stop them."
+	fi
+	return 0
+}
+
 ruflo-fix-statusline-version() {
 	local sl="${1:-.claude/helpers/statusline.cjs}"
 	[ -f "$sl" ] || sl="$HOME/.claude/helpers/statusline.cjs"
@@ -100,6 +150,7 @@ ruflo-fix-statusline-version() {
 		echo "⚠  Could not determine ruflo version (skipping statusline version fix)"
 		return 0
 	fi
+	# shellcheck disable=SC2016  # single-quoted JS for node -e, not shell expansion
 	if ! SL="$sl" LIVE_VER="$live_ver" node -e '
 const fs=require("fs"); const f=process.env.SL; let s=fs.readFileSync(f,"utf8");
 const marker="/* ruflo-machine-ref: global-install version probe */";
@@ -158,23 +209,48 @@ function rufloActivationSegments(cwd){
       var ad = path.join(path.dirname(process.execPath), "..", "lib", "node_modules", "ruflo", "node_modules", "@claude-flow", "aidefence", "package.json");
       if (fs.existsSync(ad)) sec = G + "🛡 aidefence on" + R;
     } catch(e){}
-    // ── agentic-qe (one guarded sqlite3 read) — branch + icon-tagged metrics ──
+    // ── agentic-qe — TTL-cached; one sqlite3 spawn only on a cache miss (issue #3) ──
     var qe = "";
     try {
       var db = path.join(cwd, ".agentic-qe", "memory.db");
       if (fs.existsSync(db)) {
-        var qp = [];
-        var pat = q(db, "SELECT COUNT(*) FROM qe_patterns");
-        if (pat && Number(pat) > 0) qp.push("🎓 " + pat + " patterns");
-        var qtj = q(db, "SELECT COUNT(*) FROM qe_trajectories");
-        if (qtj && Number(qtj) > 0) qp.push("🧭 " + qtj + " traj");
-        // QE vectors live in different tables across aqe versions (qe_pattern_embeddings
-        // is the per-pattern embedding store; older/other builds use vectors/embeddings).
-        var qv = 0;
-        for (var vt of ["qe_pattern_embeddings", "vectors", "embeddings"]) { var vc = q(db, "SELECT COUNT(*) FROM " + vt); if (vc && Number(vc) > 0) { qv = Number(vc); break; } }
-        if (qv > 0) qp.push("🧬 " + qv + " vec" + G + "⚡" + R);
-        try { var kb = Math.round(fs.statSync(db).size / 1024); qp.push("💾 " + (kb >= 1024 ? (kb/1024).toFixed(1) + "MB" : kb + "KB")); } catch(e){}
-        qe = Y + "🎓 Agentic QE" + R + "  " + (qp.length ? qp.join(DIM + " · " + R) : "on");
+        var cacheDir = path.join(cwd, ".claude-flow", "cache");
+        var cacheFile = path.join(cacheDir, "qe-statusline.json");
+        var ttl = Number(process.env.RUFLO_QE_STATUSLINE_TTL_MS || 60000);
+        var cachedLine = null;
+        try {
+          var cc = JSON.parse(fs.readFileSync(cacheFile, "utf8"));
+          if (cc && typeof cc.line === "string" && ttl > 0 && (Date.now() - cc.ts) < ttl) cachedLine = cc.line;
+        } catch(e){}
+        if (cachedLine !== null) {
+          qe = cachedLine;                   // hit: zero sqlite3 spawns
+        } else {
+          // miss: ONE sqlite3 call. SQL on stdin + ".bail off" so a missing vector
+          // table (name varies by aqe version) doesn't abort the batch. sqlite3 still
+          // exits non-zero on the error, so execFileSync throws — recover e.stdout.
+          var sql = ".bail off\n"
+            + "SELECT 'pat',COUNT(*) FROM qe_patterns;\n"
+            + "SELECT 'vec',COUNT(*) FROM qe_pattern_embeddings;\n"
+            + "SELECT 'vec',COUNT(*) FROM vectors;\n"
+            + "SELECT 'vec',COUNT(*) FROM embeddings;\n"
+            + "SELECT 'traj',COUNT(*) FROM qe_trajectories;\n";
+          var raw = "";
+          try { raw = cp.execFileSync("sqlite3", [db], {input: sql, stdio:["pipe","pipe","ignore"], timeout:1500}).toString(); }
+          catch(e){ raw = (e && e.stdout) ? e.stdout.toString() : ""; }
+          var pat = 0, qtj = 0, qv = 0;
+          raw.split("\n").forEach(function(ln){
+            var i = ln.indexOf("|"); if (i < 0) return;
+            var k = ln.slice(0, i), v = Number(ln.slice(i + 1)) || 0;
+            if (k === "pat") pat = v; else if (k === "traj") qtj = v; else if (k === "vec" && qv === 0) qv = v;
+          });
+          var qp = [];
+          if (pat > 0) qp.push("🎓 " + pat + " patterns");
+          if (qtj > 0) qp.push("🧭 " + qtj + " traj");
+          if (qv > 0) qp.push("🧬 " + qv + " vec" + G + "⚡" + R);
+          try { var kb = Math.round(fs.statSync(db).size / 1024); qp.push("💾 " + (kb >= 1024 ? (kb/1024).toFixed(1) + "MB" : kb + "KB")); } catch(e){}
+          qe = Y + "🎓 Agentic QE" + R + "  " + (qp.length ? qp.join(DIM + " · " + R) : "on");
+          try { fs.mkdirSync(cacheDir, {recursive:true}); fs.writeFileSync(cacheFile, JSON.stringify({ts: Date.now(), line: qe})); } catch(e){}
+        }
       }
     } catch(e){}
     // ── assemble: line 1 = learning + security; line 2 = agentic-qe ──
@@ -210,6 +286,9 @@ fs.writeFileSync(f,s);
 	else
 		rm -f "$_seg_tmp"
 		echo "✓ Statusline activation footer present (🧠 SONA / 🛡 aidefence / 🎓 Agentic QE)"
+		if ! node --check "$sl" 2>/dev/null; then
+			echo "⚠  Injected statusline failed node --check — review $sl"
+		fi
 	fi
 
 	# Ensure Claude Code actually RUNS the rich statusline.cjs. `aqe init` (and
@@ -317,7 +396,39 @@ import sys; sys.exit(0 if prev == os.environ['RUFLO_DB_PATH'] else 1)
 		echo "⚠  ruflo memory init failed — memory writes may not persist"
 	fi
 	ruflo swarm init --v3-mode >/dev/null 2>&1 && echo "✓ Swarm initialized (v3-mode)" || echo "⚠  ruflo swarm init failed"
-	ruflo daemon start >/dev/null 2>&1 && echo "✓ Daemon started" || echo "⚠  ruflo daemon start failed (may already be running)"
+	# Idempotent daemon start: never spawn a 2nd daemon for this workspace (issue #3).
+	local _ws; _ws="$(pwd -P)"
+	if command -v _ruflo_daemon_list >/dev/null 2>&1 && [ -n "$(_ruflo_daemon_list | awk -F'\t' -v w="$_ws" '$2==w{print $1; exit}')" ]; then
+		echo "✓ Daemon already running for this workspace (not starting another)"
+	else
+		ruflo daemon start >/dev/null 2>&1 && echo "✓ Daemon started" || echo "⚠  ruflo daemon start failed (may already be running)"
+	fi
+
+	# Defensive (issue #3 RC3): if upstream `ruflo init` wrote daemon.autoStart:true,
+	# flip it to false so opening Claude Code does not auto-restart the daemon.
+	# No-op when the file/key is absent or already false.
+	if [ -f ".claude/settings.json" ] && command -v python3 >/dev/null 2>&1; then
+		if python3 - <<'PY' 2>/dev/null
+import json, sys
+p = ".claude/settings.json"
+try:
+    with open(p) as f: d = json.load(f)
+except Exception:
+    sys.exit(0)
+cf = d.get("claudeFlow")
+dm = cf.get("daemon") if isinstance(cf, dict) else None
+if isinstance(dm, dict) and dm.get("autoStart") is True:
+    dm["autoStart"] = False
+    with open(p, "w") as f: json.dump(d, f, indent=2)
+    sys.exit(1)  # changed
+sys.exit(0)      # no change
+PY
+		then
+			:  # unchanged (absent/false) — stay quiet
+		else
+			echo "✓ Set claudeFlow.daemon.autoStart=false in .claude/settings.json (was true)"
+		fi
+	fi
 
 	# WAL checkpoint so the sql.js reader (if used) sees a consistent snapshot.
 	if [ -f .swarm/memory.db ] && [ -f .swarm/memory.db-wal ] && command -v sqlite3 >/dev/null 2>&1; then
@@ -386,13 +497,14 @@ import sys; sys.exit(0 if prev == os.environ['RUFLO_DB_PATH'] else 1)
 # ruflo-resync so an agentic-qe upgrade is one command away from healed.
 _ruflo_aqe_ensure_native() {
 	command -v aqe >/dev/null 2>&1 && command -v npm >/dev/null 2>&1 && command -v node >/dev/null 2>&1 || return 0
-	local aqe_root; aqe_root="$(npm root -g)/agentic-qe"
+	command -v _ruflo_bsq3_is_native >/dev/null 2>&1 || return 0   # ruflo-lib.sh not loaded
+	local aqe_root; aqe_root="$(_ruflo_global_root)/agentic-qe"
 	[ -d "$aqe_root" ] || return 0
-	local abi; abi="$(node -e 'process.stdout.write(process.versions.modules)')"
+	local abi; abi="$(_ruflo_node_abi)"
 	[ "${abi:-0}" -ge 137 ] 2>/dev/null || return 0
-	if ! node -e "const b='$aqe_root/node_modules/better-sqlite3';process.exit(require('fs').existsSync(b+'/build/Release/better_sqlite3.node')?0:1)" 2>/dev/null; then
+	if ! _ruflo_bsq3_is_native "$aqe_root"; then
 		echo "Patching native better-sqlite3 into agentic-qe (Node ABI $abi)…"
-		( cd "$aqe_root" && npm install better-sqlite3@^12 --no-save --no-audit --no-fund >/dev/null 2>&1 ) \
+		_ruflo_bsq3_install "$aqe_root" \
 			&& echo "✓ agentic-qe better-sqlite3 is native" \
 			|| echo "⚠  could not patch agentic-qe better-sqlite3 — aqe init may fail"
 	fi
@@ -426,7 +538,7 @@ ruflo-setup-aqe() {
 	fi
 
 	if [ -f "$sdk" ] && [ -d "$marker" ]; then
-		local nskills; nskills="$(ls .claude/skills/ 2>/dev/null | wc -l | tr -d ' ')"
+		local nskills; nskills="$(find .claude/skills -mindepth 1 -maxdepth 1 2>/dev/null | wc -l | tr -d ' ')"
 		echo "✓ agentic-qe initialized (SDK db + marker present, $nskills skills)"
 		# refresh the statusline so the 🎓 segment appears
 		command -v ruflo-fix-statusline-version >/dev/null 2>&1 && ruflo-fix-statusline-version >/dev/null 2>&1

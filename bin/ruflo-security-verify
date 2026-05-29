@@ -24,15 +24,17 @@ while (( $# )); do
 	esac
 	shift
 done
-if [[ -t 1 ]]; then C_OK=$'\033[32m'; C_WARN=$'\033[33m'; C_FAIL=$'\033[31m'; C_RESET=$'\033[0m'
-else C_OK=""; C_WARN=""; C_FAIL=""; C_RESET=""; fi
-ok()  { printf '%s✓%s %s\n' "$C_OK" "$C_RESET" "$*"; }
-warn(){ printf '%s⚠%s  %s\n' "$C_WARN" "$C_RESET" "$*"; }
-fail(){ printf '%s✗%s %s\n' "$C_FAIL" "$C_RESET" "$*"; }
+# Shared helpers (colors, ok/warn/fail, _ruflo_need, global-root) from ruflo-lib.sh:
+# installed copy first, then repo-relative (bin/ ↔ ../shell/).
+for _cand in "$HOME/.config/ruflo/ruflo-lib.sh" "$(dirname "${BASH_SOURCE[0]:-$0}")/../shell/ruflo-lib.sh"; do
+	# shellcheck source=/dev/null
+	[ -f "$_cand" ] && { . "$_cand"; break; }
+done
+unset _cand
+[ -n "${_RUFLO_LIB:-}" ] || { echo "ruflo-lib.sh not found — run install.sh" >&2; exit 2; }
 
-command -v node  >/dev/null 2>&1 || { fail "node not on PATH"; exit 2; }
-command -v ruflo >/dev/null 2>&1 || { fail "ruflo not on PATH"; exit 2; }
-RUFLO_ROOT="$(npm root -g)/ruflo"
+_ruflo_need node ruflo
+RUFLO_ROOT="$(_ruflo_global_root)/ruflo"
 declare -i bad=0
 
 # 1. modules load
@@ -71,4 +73,8 @@ if ruflo security cve --list 2>&1 | grep -qi "no cve database"; then
 fi
 
 echo ""
-(( bad == 0 )) && { ok "Security surface verified."; exit 0; } || { fail "$bad security capability/ies need attention."; exit 1; }
+if (( bad == 0 )); then
+	ok "Security surface verified."; exit 0
+else
+	fail "$bad security capability/ies need attention."; exit 1
+fi
