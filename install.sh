@@ -52,6 +52,7 @@ PROFILE=""
 WANT_RUFLO="auto"
 WANT_AQE="auto"
 DO_HEAL="auto"
+ALL_ARGS=" $* "
 
 while [ "$#" -gt 0 ]; do
 	case "$1" in
@@ -68,7 +69,11 @@ while [ "$#" -gt 0 ]; do
 		--shell)
 			shift
 			SHELL_CHOICE="${1:-}"
-			[ -z "$SHELL_CHOICE" ] && { echo "error: --shell requires an argument (zsh or bash)" >&2; exit 2; }
+			case "$SHELL_CHOICE" in
+				zsh|bash) ;;
+				"") echo "error: --shell requires an argument (zsh or bash)" >&2; exit 2 ;;
+				*)  echo "error: --shell must be 'zsh' or 'bash' (got '$SHELL_CHOICE')" >&2; exit 2 ;;
+			esac
 			;;
 		--no-shell-rc) EDIT_RC=0 ;;
 		--dry-run)     DRY=1 ;;
@@ -123,6 +128,14 @@ have git     || warn "git not found (needed to update this kit later)"
 have sqlite3 || warn "sqlite3 not found — statusline + memory checks need it"
 have claude  || warn "claude (Claude Code) not found — that's what this configures"
 echo ""
+
+# --- Warn on conflicting granular flags (last one wins, but flag the conflict) ---
+warn_conflict() {
+	case "$ALL_ARGS" in *" $1 "*) case "$ALL_ARGS" in *" $2 "*) warn "both $1 and $2 passed — last one wins" ;; esac ;; esac
+}
+warn_conflict --with-ruflo --no-ruflo
+warn_conflict --with-aqe --no-aqe
+warn_conflict --heal --no-heal
 
 # --- Resolve plan: profile fills only 'auto' slots; granular flags win ----
 case "$PROFILE" in
@@ -262,15 +275,16 @@ fi
 ok "Done."
 echo ""
 echo "Next steps:"
-echo "  1. exec \$SHELL                 # load the helper functions"
+n=1
+echo "  $n. exec \$SHELL                 # load the helper functions"; n=$((n+1))
 if [ "$DO_HEAL" != yes ]; then
-	echo "  2. ruflo-resync                # native SQLite + self-learning + statusline"
+	echo "  $n. ruflo-resync                # native SQLite + self-learning + statusline"; n=$((n+1))
 fi
 TARGET=""
 if [ "$(pwd -P)" != "$HERE" ] && [ -d ".git" ]; then TARGET="$(pwd -P)"; fi
 if [ -n "$TARGET" ]; then
-	echo "  3. ruflo-onboard               # you're in a repo ($TARGET) — set it up now"
+	echo "  $n. ruflo-onboard               # you're in a repo ($TARGET) — set it up now"; n=$((n+1))
 else
-	echo "  3. cd <your-repo> && ruflo-onboard   # per-project: setup + verify in one step"
+	echo "  $n. cd <your-repo> && ruflo-onboard   # per-project: setup + verify in one step"; n=$((n+1))
 fi
-echo "  4. ruflo-parity-test           # end-to-end memory smoke test (isolated /tmp dir)"
+echo "  $n. ruflo-parity-test           # end-to-end memory smoke test (isolated /tmp dir)"

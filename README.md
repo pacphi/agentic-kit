@@ -19,7 +19,7 @@ The catch: on the versions of Node.js most developers run today, ruflo **silentl
 
 This kit closes all of those gaps with a few small, reversible helper scripts — and gives you a **status line** that shows, at a glance, exactly what's live.
 
-> 🙂 **Not a developer?** You only need three commands: `./install.sh`, then `ruflo-setup-project` in a project, and `ruflo-resync` after any upgrade. The rest of this README explains the "why" for the curious.
+> 🙂 **Not a developer?** You only need three commands: `./install.sh` (once), then `ruflo-onboard` inside a project, and `ruflo-resync` after any upgrade. The rest of this README explains the "why" for the curious.
 
 ---
 
@@ -76,7 +76,7 @@ npm packages for you (interactively, or via flags).
 
 | Tool | Why | Get it |
 |---|---|---|
-| Node.js 20–26 | runtime for ruflo & the helpers | <https://nodejs.org> |
+| Node.js (20–26 supported) | runtime for ruflo & the helpers | <https://nodejs.org> |
 | npm | installs the global packages | ships with Node.js |
 | `ruflo` | the orchestration toolkit this kit configures | `npm i -g ruflo` (install.sh can do this) |
 
