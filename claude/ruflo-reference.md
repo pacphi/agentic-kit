@@ -326,12 +326,31 @@ ruflo-setup-project --with-security   # run the security pass during project set
 dependency CVEs. `ruflo security defend` detects prompt-injection (exit 1=threat)
 but has an upstream cosmetic render crash after the verdict; the exit code is correct.
 
-### Status-line activation indicators
+### Status-line activation footer
 
-When set up via this kit, the Claude Code status line shows a segment per active
-feature: `🧠 N` (N trained patterns in `.claude-flow/neural/patterns.json`),
-`🛡 on` (aidefence present), `🎓 qe` (agentic-qe initialized in the repo). A segment
-appears only when its feature is genuinely active.
+When set up via this kit, a two-line footer is appended **below** ruflo's native
+status-line render (append-only, so it never breaks on a ruflo template change):
+
+```
+🧠 SONA  50 patterns · 55 traj · ⚡ HNSW        🛡 aidefence on
+🎓 Agentic QE  23 patterns · 16MB
+```
+
+Each segment renders only when its feature is genuinely active: SONA counts come from
+`.claude-flow/neural/stats.json`, `⚡ HNSW` shows only when `.swarm/hnsw.index` exists,
+`🛡` shows when `@claude-flow/aidefence` is loaded, and the `🎓 Agentic QE` line (one
+guarded `sqlite3` read of `.agentic-qe/memory.db`) shows only when AQE is initialized.
+
+### Re-apply after a ruflo / agentic-qe upgrade — one command
+
+`npm install -g ruflo@latest` (or `agentic-qe@latest`) re-resolves pins, drops the
+native better-sqlite3 binaries, and regenerates the statusline — so self-learning goes
+dormant and the footer disappears. Heal it in one step from a project root:
+
+```bash
+ruflo-resync            # enable-learning + agentic-qe native repair + statusline
+ruflo-resync --aqe      # also refresh agentic-qe skills (aqe init --auto --upgrade)
+```
 
 ### Autopilot (persistent task completion)
 
@@ -442,6 +461,7 @@ Need to ... ?
 ├─ Coordinate 3+ agents              → native Agent tool first; ruflo swarm only if topology/consensus needed
 ├─ Scan untrusted text               → ruflo security defend -i "..."
 ├─ Activate + verify self-learning   → ruflo-enable-learning && ruflo-learning-verify
+├─ Re-apply after a ruflo/aqe upgrade → ruflo-resync   (one command heals everything)
 ├─ Verify the security surface       → ruflo-security-verify
 ├─ Set up agentic-qe in a repo       → ruflo-setup-aqe   (opt-in)
 └─ Background analysis (long task)   → ruflo hooks worker dispatch -t <type>

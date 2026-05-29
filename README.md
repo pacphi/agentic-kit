@@ -94,7 +94,8 @@ ruflo-machine-ref/
 │   ├── ruflo-parity-test      # 20-check end-to-end memory smoke test
 │   ├── ruflo-enable-learning  # activate + assert ruvector self-learning (SONA/HNSW/ReasoningBank)
 │   ├── ruflo-learning-verify  # prove the learning loop persists (patterns 0 -> N)
-│   └── ruflo-security-verify  # verify security scan/defend/secrets + aidefence
+│   ├── ruflo-security-verify  # verify security scan/defend/secrets + aidefence
+│   └── (ruflo-resync, ruflo-setup-aqe live in shell/ruflo-functions.sh)
 ├── shell/
 │   └── ruflo-functions.sh     # ruflo-setup-project, ruflo-setup-aqe, ruflo-remove-mcp, etc.
 ├── claude/
@@ -138,6 +139,7 @@ Claude Code to drive ruflo through Bash.
 | `ruflo-patch-native [--check]` | Make agentdb use native `better-sqlite3` on Node ≥24. Re-run after every ruflo upgrade. |
 | `ruflo-enable-learning [--check]` | Patch native SQLite + assert ruvector self-learning is active (5 capability probes). Re-run after every ruflo upgrade. |
 | `ruflo-learning-verify [--keep]` | Prove the learning loop: train in an isolated dir, assert patterns persist 0 → N on disk. |
+| `ruflo-resync [--aqe]` | **After any ruflo/agentic-qe upgrade**, one command re-applies everything the upgrade wipes: native SQLite (ruflo + agentic-qe) + self-learning assert + statusline footer. `--aqe` also refreshes QE skills. |
 | `ruflo-security-verify [--quick]` | Verify `@claude-flow/security`/`aidefence` load, `defend` detects injection, `scan`/`secrets` run; flags the CVE-DB gap. |
 | `ruflo-setup-aqe [--force]` | **Opt-in.** Initialize agentic-qe in a repo (native-SQLite + half-init repair). Not run by `ruflo-setup-project`. |
 | `ruflo-memory-checkpoint [db]` | Force a WAL checkpoint to recover stale memory reads. |
@@ -165,13 +167,20 @@ Alternative: run ruflo on **Node 22 LTS** and skip patching entirely.
 ## Upgrading ruflo
 
 ```bash
-npm install -g ruflo@latest
-ruflo-patch-native            # re-apply native SQLite on Node >= 24
+npm install -g ruflo@latest     # (or agentic-qe@latest)
+ruflo-resync                    # ONE command: re-apply native SQLite (ruflo + aqe),
+                                # re-assert self-learning, re-patch the statusline footer
 ruflo-reference-refresh --diff  # check if the CLAUDE.md template needs a refresh
 ```
 
-When ruflo bumps `agentdb`'s `better-sqlite3` to `^12` (see #2219), the patch
-becomes a no-op and you can drop it.
+`ruflo-resync` exists because every `npm install -g` re-resolves dependency pins,
+drops the native better-sqlite3 binaries, and regenerates the statusline — so
+self-learning goes dormant and the activation footer disappears until re-applied.
+(Under the hood it runs `ruflo-enable-learning` + the agentic-qe native repair +
+the statusline patch; `ruflo-resync --aqe` also refreshes QE skills.)
+
+When ruflo bumps `agentdb`'s `better-sqlite3` to `^12` (see #2219), the native
+patch becomes a no-op and `ruflo-resync` simply confirms everything's already green.
 
 ---
 

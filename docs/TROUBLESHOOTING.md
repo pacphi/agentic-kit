@@ -111,7 +111,15 @@ ruflo-enable-learning               # patch native bsq3 + assert real capability
 ruflo-learning-verify               # train in a temp dir; assert patterns 0 -> N persist
 ```
 `ruflo-enable-learning` re-runs `ruflo-patch-native`, so re-run it after every
-`npm install -g ruflo`.
+`npm install -g ruflo`. **Simplest after any upgrade:** `ruflo-resync` (one command
+that does enable-learning + agentic-qe native repair + statusline footer; `--aqe`
+also refreshes QE skills).
+
+### Status-line activation footer missing after an upgrade
+`ruflo init` (run by upgrades/`ruflo-setup-project`) regenerates `statusline.cjs`
+without the footer. Re-apply: `ruflo-resync` (or `ruflo-fix-statusline-version`
+directly). The footer is append-only and the patcher is upgrade-safe — it strips any
+stale block and re-injects.
 
 ### "@ruvector/core not available" persists even after the patch
 This line in `ruflo neural status` is usually **cosmetic**, not real dormancy.

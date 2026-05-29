@@ -60,6 +60,9 @@ activates, then add the genuinely-missing pieces.**
 - G6. Surface live activation state in the Claude Code **status line**: when
   self-learning, security, and agentic-qe are each active, show a corresponding
   indicator (with counts where meaningful), so a glance confirms what's enabled.
+- G7. Make re-application after a ruflo / agentic-qe upgrade a **single command**
+  (`ruflo-resync`), since upgrades wipe the native binaries and regenerate the
+  statusline. Re-applying must never be a multi-step chore.
 
 **Non-goals**
 - N1. Do **not** re-port the gist's obsolete `controller-registry.js` patches.
@@ -78,6 +81,8 @@ executables), consistent with the current structure.
 Machine layer  (once per machine / per ruflo upgrade)
   ├─ ruflo-patch-native           [EXISTING] native better-sqlite3 in 6 agentdb dirs
   ├─ ruflo-enable-learning        [NEW] patch-native → activate → assert ruvector live
+  ├─ ruflo-resync                 [NEW] one command: re-apply ALL of the above + statusline
+  │                                  after a ruflo / agentic-qe upgrade (--aqe refreshes skills)
   └─ ruflo-setup-machine          [EXISTING] register MCP at user scope
 
 Verification layer  (read-mostly, idempotent)
@@ -208,15 +213,39 @@ upgrade ruflo ──► binaries present, bsq3 .node MISSING ──► agentdb=W
   without the flag, setup behavior is unchanged.
 
 ### Status line
-- **R16.** The generated `statusline.cjs` MUST render a self-learning segment when
-  ReasoningBank/SONA is active (showing pattern/trajectory count), and omit/dim it
-  when dormant — so the status line distinguishes activated from not.
-- **R17.** It MUST render a security segment when `@claude-flow/aidefence`/security is
-  loaded, and an agentic-qe segment (reading `.agentic-qe/memory.db`) when AQE is
-  initialized in the project.
-- **R18.** Status-line patching MUST remain idempotent, marker-guarded, and re-applied
-  on every `ruflo-setup-project`, preserving the existing live-version heal. Each
-  segment renders only when its feature is genuinely active (no false positives).
+> **Decision (revised after review):** the status line uses an **append-only** design
+> — a footer added *below* ruflo's native render — NOT an in-place rewrite of ruflo's
+> own lines. This was chosen over a faithful gist-style rewrite for upgrade-robustness:
+> appending cannot break when ruflo changes its statusline template. The footer is two
+> labeled lines (richer than the initial single-line minimal form).
+
+- **R16.** The generated `statusline.cjs` MUST append a self-learning line when SONA is
+  active, showing real counts read from `.claude-flow/neural/stats.json`
+  (`🧠 SONA <patterns> · <traj>`), plus an `⚡ HNSW` marker only when a vector index
+  (`.swarm/hnsw.index`) exists. Omitted entirely when no learning has occurred.
+- **R17.** It MUST append a security segment (`🛡 aidefence on`) when
+  `@claude-flow/aidefence` is loaded, and a separate agentic-qe line
+  (`🎓 Agentic QE <patterns>[· traj][· vec] · <size>`, one guarded `sqlite3` read of
+  `.agentic-qe/memory.db`) when AQE is initialized in the project. The security segment
+  is purely additive — ruflo's native render already shows `CVE n/m`, so `🛡` signals
+  the distinct fact that proactive defense is loaded.
+- **R18.** Status-line patching MUST be append-only (never rewrite ruflo's native
+  lines), idempotent, and **upgrade-safe**: the injector MUST strip any prior block
+  (legacy single-line marker or the `ruflo-seg:BEGIN/END` block) and the prior
+  `console.log` wrap, then re-inject — so re-running after a ruflo upgrade replaces a
+  stale helper rather than duplicating or skipping it. Each segment renders only when
+  its feature is genuinely active (no false positives). Self-learning + security are
+  `fs`-only; the agentic-qe line's single `sqlite3` call is gated behind a file-exists
+  check so it costs nothing when AQE is absent.
+
+### Re-apply after upgrade
+- **R19.** A single command (`ruflo-resync`) MUST re-apply everything that a
+  `npm install -g ruflo@latest` or `agentic-qe@latest` upgrade wipes — native
+  better-sqlite3 for ruflo's agentdb (via `ruflo-enable-learning`), native
+  better-sqlite3 for the global agentic-qe (shared `_ruflo_aqe_ensure_native` helper),
+  and the statusline version-pin + activation footer for the current project. An opt-in
+  `--aqe` flag MAY additionally refresh agentic-qe skills (`aqe init --auto --upgrade`).
+  It MUST be idempotent and documented as THE post-upgrade step.
 
 ### Compatibility / safety
 - **R14.** The kit MUST NOT apply the gist's `controller-registry.js` patches on a

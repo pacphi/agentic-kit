@@ -10,6 +10,18 @@
 
 **Reference spec:** `docs/superpowers/specs/2026-05-28-ruvector-self-learning-aqe-security-design.md`
 
+> **Amendments (post-review, during execution):**
+> - **Task 5 (status line)** evolved from a single-line minimal footer to a **two-line
+>   labeled append footer** (`🧠 SONA <patterns>·<traj>[·⚡HNSW]  🛡 aidefence on` /
+>   `🎓 Agentic QE <patterns>[·traj][·vec]·<size>`). Still append-only (chosen over a
+>   faithful in-place rewrite for upgrade-robustness), now upgrade-safe: the injector
+>   strips any prior block (legacy or `ruflo-seg:BEGIN/END`) and re-injects.
+> - **New: `ruflo-resync`** — a single command to re-apply everything a ruflo /
+>   agentic-qe upgrade wipes (enable-learning + agentic-qe native repair + statusline).
+>   Extracts a shared `_ruflo_aqe_ensure_native` helper. See spec R19 / G7.
+> - **New finding:** `agentic-qe` carries the same Node-≥24 native-SQLite bug as ruflo
+>   (`aqe init` fails at persistence-db init); `ruflo-setup-aqe` repairs it first.
+
 **Conventions inherited from the existing kit (match these exactly):**
 - Color helpers `ok()/warn()/fail()/dim()` with TTY guard, as in `bin/ruflo-patch-native`.
 - `set -u`. Flag parsing via `while`/`case`. `--help` via `sed -n '3,NNp' "$0" | sed 's|^# \{0,1\}||'`.
