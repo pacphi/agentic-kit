@@ -187,10 +187,10 @@ When set up with this kit, a two-line footer is appended **below** ruflo's own s
 
 ```
 ▊ RuFlo V3.10.5 ● you  │  ⏇ main  │  Opus 4.x        ┐
-🏗️  DDD Domains … 🤖 Swarm … 🔧 Architecture …       ├ ruflo's own lines (unchanged)
-📊 AgentDB …                                          ┘
-────────────────────────────────────────────         ← the kit's appended footer ↓
-🧠 SONA  [●●●●●]  50 patterns · 55 traj · Δ1.32 LoRA · ⚡ HNSW      🛡 aidefence on
+🏗️  DDD Domains … 🤖 Swarm … 🔧 Architecture …       │ ruflo's own lines + the kit's
+📊 AgentDB …                                          │ SONA/aidefence line (all ruflo)
+🧠 SONA  [●●●●●]  50 patterns · 55 traj · Δ1.32 LoRA · ⚡ HNSW      🛡 aidefence on  ┘
+─────────────────────────────────────────────────────  ← divider (matches ruflo's header rule)
 🎓 Agentic QE V3.10.1  🎓 23 patterns · 🧭 114 traj · 🧬 543 vec⚡ · 💾 16MB
 ```
 

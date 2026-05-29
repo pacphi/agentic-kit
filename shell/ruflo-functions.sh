@@ -263,13 +263,18 @@ function rufloActivationSegments(cwd){
         }
       }
     } catch(e){}
-    // ── assemble: line 1 = learning + security; line 2 = agentic-qe ──
+    // ── assemble: line 1 = learning + security (ruflo features); line 2 = agentic-qe ──
+    // No rule above the SONA line — SONA + aidefence are ruflo features and sit flush
+    // under ruflo's native lines. The divider goes BETWEEN the ruflo block and the
+    // agentic-qe line, matching ruflo's native header divider width ('─'.repeat(53) in
+    // statusline.cjs) so the two rules line up.
     var l1 = []; if (learn) l1.push(learn); if (sec) l1.push(sec);
     var out = [];
     if (l1.length) out.push(l1.join("      "));
+    if (out.length && qe) out.push(DIM + "─".repeat(53) + R);
     if (qe) out.push(qe);
     if (!out.length) return "";
-    return "\n" + DIM + "─".repeat(44) + R + "\n" + out.join("\n");
+    return "\n" + out.join("\n");
   } catch(e){ return ""; }
 }
 /* ruflo-seg:END */
