@@ -113,6 +113,40 @@ fs.writeFileSync(f,s);
 		echo "⚠  Statusline version patch failed (left as-is)"
 		return 1
 	fi
+
+	# Activation segments: append 🧠 self-learning / 🛡 security / 🎓 agentic-qe to the
+	# status line, each rendered ONLY when its feature is genuinely active. The helper
+	# is fs-only (no subprocess) so it stays cheap on every status-line render.
+	# Idempotent (marker-guarded); re-applied on every setup so each ruflo release heals.
+	local HELPER_JS='function rufloActivationSegments(cwd){
+  try{
+    var fs=require("fs"), path=require("path"); var seg=[];
+    try{ var p=path.join(cwd,".claude-flow","neural","patterns.json");
+      if(fs.existsSync(p)){ var d=JSON.parse(fs.readFileSync(p,"utf8")); var n=Array.isArray(d)?d.length:0; if(n>0) seg.push("🧠 "+n); } }catch(e){}
+    try{ var ad=path.join(path.dirname(process.execPath),"..","lib","node_modules","ruflo","node_modules","@claude-flow","aidefence","package.json");
+      if(fs.existsSync(ad)) seg.push("🛡 on"); }catch(e){}
+    try{ if(fs.existsSync(path.join(cwd,".agentic-qe","memory.db"))) seg.push("🎓 qe"); }catch(e){}
+    return seg.length? "\n"+seg.join("  ") : "";
+  }catch(e){ return ""; }
+}'
+	if ! SL="$sl" HELPER_JS="$HELPER_JS" node -e '
+const fs=require("fs"); const f=process.env.SL; let s=fs.readFileSync(f,"utf8");
+const marker="/* ruflo-machine-ref: activation segments */";
+if(!s.includes(marker)){
+  const lines=s.split("\n");
+  const at=lines[0].startsWith("#!")?1:0;   // keep any shebang on line 1
+  lines.splice(at,0,marker,process.env.HELPER_JS);
+  s=lines.join("\n");
+  s=s.replace(/console\.log\(generateStatusline\(\)\)/,
+              "console.log(generateStatusline() + rufloActivationSegments(process.cwd()))");
+  fs.writeFileSync(f,s);
+}
+'; then
+		echo "⚠  Statusline activation-segment patch failed (left as-is)"
+	else
+		echo "✓ Statusline activation segments present (🧠 learning / 🛡 security / 🎓 qe)"
+	fi
+
 	local shown
 	shown="$(printf '{}' | node "$sl" 2>/dev/null | sed -E 's/\x1b\[[0-9;]*m//g' \
 		| grep -oE 'RuFlo V[0-9]+\.[0-9]+(\.[0-9]+)?' | head -1 | sed 's/RuFlo V//')"
