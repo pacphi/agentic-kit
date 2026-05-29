@@ -114,37 +114,91 @@ fs.writeFileSync(f,s);
 		return 1
 	fi
 
-	# Activation segments: append 🧠 self-learning / 🛡 security / 🎓 agentic-qe to the
-	# status line, each rendered ONLY when its feature is genuinely active. The helper
-	# is fs-only (no subprocess) so it stays cheap on every status-line render.
-	# Idempotent (marker-guarded); re-applied on every setup so each ruflo release heals.
-	local HELPER_JS='function rufloActivationSegments(cwd){
-  try{
-    var fs=require("fs"), path=require("path"); var seg=[];
-    try{ var p=path.join(cwd,".claude-flow","neural","patterns.json");
-      if(fs.existsSync(p)){ var d=JSON.parse(fs.readFileSync(p,"utf8")); var n=Array.isArray(d)?d.length:0; if(n>0) seg.push("🧠 "+n); } }catch(e){}
-    try{ var ad=path.join(path.dirname(process.execPath),"..","lib","node_modules","ruflo","node_modules","@claude-flow","aidefence","package.json");
-      if(fs.existsSync(ad)) seg.push("🛡 on"); }catch(e){}
-    try{ if(fs.existsSync(path.join(cwd,".agentic-qe","memory.db"))) seg.push("🎓 qe"); }catch(e){}
-    return seg.length? "\n"+seg.join("  ") : "";
-  }catch(e){ return ""; }
-}'
-	if ! SL="$sl" HELPER_JS="$HELPER_JS" node -e '
-const fs=require("fs"); const f=process.env.SL; let s=fs.readFileSync(f,"utf8");
-const marker="/* ruflo-machine-ref: activation segments */";
-if(!s.includes(marker)){
-  const lines=s.split("\n");
-  const at=lines[0].startsWith("#!")?1:0;   // keep any shebang on line 1
-  lines.splice(at,0,marker,process.env.HELPER_JS);
-  s=lines.join("\n");
-  s=s.replace(/console\.log\(generateStatusline\(\)\)/,
-              "console.log(generateStatusline() + rufloActivationSegments(process.cwd()))");
-  fs.writeFileSync(f,s);
+	# Activation footer: append (below ruflo's native render) a two-line footer that
+	# shows ONLY the features genuinely active in this project:
+	#   🧠 SONA  <patterns> · <traj> [· ⚡ HNSW]        🛡 aidefence on
+	#   🎓 Agentic QE  <patterns> [· <traj>] [· <vec>] · <size>
+	# Append-only: never rewrites ruflo's own lines, so it can't break on a ruflo
+	# template change. self-learning + security are fs-only; the agentic-qe line uses
+	# one guarded sqlite3 call only when .agentic-qe/memory.db exists. The injector is
+	# UPGRADE-SAFE: it strips any prior block (legacy or BEGIN/END) and re-injects, so
+	# re-running after a ruflo/agentic-qe upgrade always lands the current helper.
+	local _seg_tmp; _seg_tmp=$(mktemp)
+	cat > "$_seg_tmp" <<'RUFLO_SEG_EOF'
+/* ruflo-seg:BEGIN */
+function rufloActivationSegments(cwd){
+  try {
+    var fs = require("fs"), path = require("path"), cp = require("child_process");
+    var DIM = "[2m", G = "[1;32m", Y = "[1;33m", C = "[1;36m", R = "[0m";
+    function q(db, sql){ try { return cp.execSync('sqlite3 "' + db + '" "' + sql + '"', {stdio:["ignore","pipe","ignore"], timeout:1500}).toString().trim(); } catch(e){ return ""; } }
+    // ── self-learning (SONA) ──
+    var learn = "";
+    try {
+      var sp = path.join(cwd, ".claude-flow", "neural", "stats.json");
+      if (fs.existsSync(sp)) {
+        var s = JSON.parse(fs.readFileSync(sp, "utf8"));
+        var pn = s.patternsLearned || 0, tj = s.trajectoriesRecorded || 0, parts = [];
+        if (pn > 0) parts.push(pn + " patterns");
+        if (tj > 0) parts.push(tj + " traj");
+        if (fs.existsSync(path.join(cwd, ".swarm", "hnsw.index"))) parts.push(G + "⚡ HNSW" + R);
+        if (parts.length) learn = C + "🧠 SONA" + R + "  " + parts.join(DIM + " · " + R);
+      }
+    } catch(e){}
+    // ── security (aidefence loaded in the global ruflo install) ──
+    var sec = "";
+    try {
+      var ad = path.join(path.dirname(process.execPath), "..", "lib", "node_modules", "ruflo", "node_modules", "@claude-flow", "aidefence", "package.json");
+      if (fs.existsSync(ad)) sec = G + "🛡 aidefence on" + R;
+    } catch(e){}
+    // ── agentic-qe (one guarded sqlite3 read) ──
+    var qe = "";
+    try {
+      var db = path.join(cwd, ".agentic-qe", "memory.db");
+      if (fs.existsSync(db)) {
+        var qp = [];
+        var pat = q(db, "SELECT COUNT(*) FROM qe_patterns");
+        if (pat && Number(pat) > 0) qp.push(pat + " patterns");
+        var qtj = q(db, "SELECT COUNT(*) FROM qe_trajectories");
+        if (qtj && Number(qtj) > 0) qp.push(qtj + " traj");
+        var qv = q(db, "SELECT COUNT(*) FROM vectors");
+        if (qv && Number(qv) > 0) qp.push(qv + " vec");
+        try { var kb = Math.round(fs.statSync(db).size / 1024); qp.push(kb >= 1024 ? (kb/1024).toFixed(1) + "MB" : kb + "KB"); } catch(e){}
+        qe = Y + "🎓 Agentic QE" + R + "  " + (qp.length ? qp.join(DIM + " · " + R) : "on");
+      }
+    } catch(e){}
+    // ── assemble: line 1 = learning + security; line 2 = agentic-qe ──
+    var l1 = []; if (learn) l1.push(learn); if (sec) l1.push(sec);
+    var out = [];
+    if (l1.length) out.push(l1.join("      "));
+    if (qe) out.push(qe);
+    if (!out.length) return "";
+    return "\n" + DIM + "─".repeat(44) + R + "\n" + out.join("\n");
+  } catch(e){ return ""; }
 }
+/* ruflo-seg:END */
+RUFLO_SEG_EOF
+	if ! SL="$sl" SEG="$_seg_tmp" node -e '
+const fs=require("fs"); const f=process.env.SL; let s=fs.readFileSync(f,"utf8");
+const helper=fs.readFileSync(process.env.SEG,"utf8").trim();
+// Strip any prior block: new BEGIN/END, and the legacy marker+function form.
+s=s.replace(/\/\* ruflo-seg:BEGIN \*\/[\s\S]*?\/\* ruflo-seg:END \*\/\n?/,"");
+s=s.replace(/\/\* ruflo-machine-ref: activation segments \*\/\s*\nfunction rufloActivationSegments\(cwd\)\{[\s\S]*?\n\}\n/,"");
+// Strip any prior console.log wrap so we can re-add cleanly.
+s=s.replace(/ \+ rufloActivationSegments\(process\.cwd\(\)\)/g,"");
+// Re-inject helper after the shebang (keep shebang on line 1).
+const lines=s.split("\n");
+const at=lines[0].startsWith("#!")?1:0;
+lines.splice(at,0,helper);
+s=lines.join("\n");
+// Wrap the final render.
+s=s.replace(/console\.log\(generateStatusline\(\)\)/,"console.log(generateStatusline() + rufloActivationSegments(process.cwd()))");
+fs.writeFileSync(f,s);
 '; then
-		echo "⚠  Statusline activation-segment patch failed (left as-is)"
+		rm -f "$_seg_tmp"
+		echo "⚠  Statusline activation-footer patch failed (left as-is)"
 	else
-		echo "✓ Statusline activation segments present (🧠 learning / 🛡 security / 🎓 qe)"
+		rm -f "$_seg_tmp"
+		echo "✓ Statusline activation footer present (🧠 SONA / 🛡 aidefence / 🎓 Agentic QE)"
 	fi
 
 	local shown
@@ -283,27 +337,31 @@ import sys; sys.exit(0 if prev == os.environ['RUFLO_DB_PATH'] else 1)
 #   2. Half-init: `.agentic-qe/memory.db` exists but the project marker
 #      `.claude/skills/agentic-quality-engineering` is missing → re-run with --upgrade.
 #
+# Ensure a globally-installed agentic-qe has a native better-sqlite3 (Node >= 24).
+# Same root cause as ruflo-patch-native, different package. Idempotent; no-op on
+# Node <= 22 or when no global agentic-qe is present. Shared by ruflo-setup-aqe and
+# ruflo-resync so an agentic-qe upgrade is one command away from healed.
+_ruflo_aqe_ensure_native() {
+	command -v aqe >/dev/null 2>&1 && command -v npm >/dev/null 2>&1 && command -v node >/dev/null 2>&1 || return 0
+	local aqe_root; aqe_root="$(npm root -g)/agentic-qe"
+	[ -d "$aqe_root" ] || return 0
+	local abi; abi="$(node -e 'process.stdout.write(process.versions.modules)')"
+	[ "${abi:-0}" -ge 137 ] 2>/dev/null || return 0
+	if ! node -e "const b='$aqe_root/node_modules/better-sqlite3';process.exit(require('fs').existsSync(b+'/build/Release/better_sqlite3.node')?0:1)" 2>/dev/null; then
+		echo "Patching native better-sqlite3 into agentic-qe (Node ABI $abi)…"
+		( cd "$aqe_root" && npm install better-sqlite3@^12 --no-save --no-audit --no-fund >/dev/null 2>&1 ) \
+			&& echo "✓ agentic-qe better-sqlite3 is native" \
+			|| echo "⚠  could not patch agentic-qe better-sqlite3 — aqe init may fail"
+	fi
+}
+
 #   ruflo-setup-aqe            # init (or repair) agentic-qe in this repo
 #   ruflo-setup-aqe --force    # force reinitialize (--upgrade)
 ruflo-setup-aqe() {
 	local force=0
 	[ "${1:-}" = "--force" ] && force=1
 
-	# Ensure a globally-installed agentic-qe has a native better-sqlite3 (Node >= 24).
-	if command -v aqe >/dev/null 2>&1 && command -v npm >/dev/null 2>&1; then
-		local aqe_root; aqe_root="$(npm root -g)/agentic-qe"
-		if [ -d "$aqe_root" ] && command -v node >/dev/null 2>&1; then
-			local abi; abi="$(node -e 'process.stdout.write(process.versions.modules)')"
-			if [ "${abi:-0}" -ge 137 ] 2>/dev/null; then
-				if ! node -e "const b='$aqe_root/node_modules/better-sqlite3';process.exit(require('fs').existsSync(b+'/build/Release/better_sqlite3.node')?0:1)" 2>/dev/null; then
-					echo "Patching native better-sqlite3 into agentic-qe (Node ABI $abi)…"
-					( cd "$aqe_root" && npm install better-sqlite3@^12 --no-save --no-audit --no-fund >/dev/null 2>&1 ) \
-						&& echo "✓ agentic-qe better-sqlite3 is native" \
-						|| echo "⚠  could not patch agentic-qe better-sqlite3 — aqe init may fail"
-				fi
-			fi
-		fi
-	fi
+	_ruflo_aqe_ensure_native
 
 	local AQE
 	if command -v aqe >/dev/null 2>&1; then AQE="aqe"; else AQE="npx -y agentic-qe@latest"; fi
@@ -333,6 +391,48 @@ ruflo-setup-aqe() {
 	fi
 	echo "⚠  agentic-qe not fully initialized — SDK db: $([ -f "$sdk" ] && echo yes || echo no), marker: $([ -d "$marker" ] && echo yes || echo no)"
 	return 1
+}
+
+# ---------------------------------------------------------------------------
+# ONE command to re-apply everything that a ruflo / agentic-qe upgrade wipes.
+# `npm install -g ruflo@latest` (or agentic-qe@latest) re-resolves dependency pins,
+# drops the native better-sqlite3 binaries, and regenerates the statusline — so the
+# self-learning stack goes dormant and the activation footer disappears. Run this
+# from a project root after ANY such upgrade and you are healed in one step:
+#
+#   1. ruflo-enable-learning   → native bsq3 for ruflo's agentdb + assert 5/5 active
+#   2. agentic-qe native repair → native bsq3 for the global agentic-qe (if present)
+#   3. statusline re-patch      → version pin + activation footer for THIS project
+#   4. --aqe (opt-in)           → re-run aqe init --auto --upgrade to refresh QE skills
+#
+#   ruflo-resync           # re-apply learning + statusline (recommended after upgrade)
+#   ruflo-resync --aqe     # also refresh agentic-qe skills in this repo
+ruflo-resync() {
+	local do_aqe=0
+	[ "${1:-}" = "--aqe" ] && do_aqe=1
+
+	echo "## 1/4 self-learning (ruflo agentdb native + assert)"
+	if command -v ruflo-enable-learning >/dev/null 2>&1; then
+		ruflo-enable-learning || echo "⚠  self-learning not fully active — see docs/TROUBLESHOOTING.md"
+	else
+		echo "⚠  ruflo-enable-learning not on PATH (run install.sh)"
+	fi
+
+	echo ""; echo "## 2/4 agentic-qe native better-sqlite3 (if installed)"
+	_ruflo_aqe_ensure_native
+
+	echo ""; echo "## 3/4 statusline (version + activation footer) for this project"
+	ruflo-fix-statusline-version
+
+	if [ "$do_aqe" -eq 1 ]; then
+		echo ""; echo "## 4/4 refresh agentic-qe skills (--aqe)"
+		if [ -f .agentic-qe/memory.db ]; then
+			ruflo-setup-aqe --force
+		else
+			echo "   (no .agentic-qe in this repo — run 'ruflo-setup-aqe' to initialize)"
+		fi
+	fi
+	echo ""; echo "✓ resync complete"
 }
 
 # ---------------------------------------------------------------------------
