@@ -168,7 +168,7 @@ fs.writeFileSync(f,s);
 	# Activation footer: append (below ruflo's native render) a two-line footer that
 	# shows ONLY the features genuinely active in this project:
 	#   🧠 SONA  <patterns> · <traj> [· ⚡ HNSW]        🛡 aidefence on
-	#   🎓 Agentic QE  <patterns> [· <traj>] [· <vec>] · <size>
+	#   🎓 Agentic QE V<version>  <patterns> [· <traj>] [· <vec>] · <size>
 	# Append-only: never rewrites ruflo's own lines, so it can't break on a ruflo
 	# template change. self-learning + security are fs-only; the agentic-qe line uses
 	# one guarded sqlite3 call only when .agentic-qe/memory.db exists. The injector is
@@ -248,7 +248,17 @@ function rufloActivationSegments(cwd){
           if (qtj > 0) qp.push("🧭 " + qtj + " traj");
           if (qv > 0) qp.push("🧬 " + qv + " vec" + G + "⚡" + R);
           try { var kb = Math.round(fs.statSync(db).size / 1024); qp.push("💾 " + (kb >= 1024 ? (kb/1024).toFixed(1) + "MB" : kb + "KB")); } catch(e){}
-          qe = Y + "🎓 Agentic QE" + R + "  " + (qp.length ? qp.join(DIM + " · " + R) : "on");
+          // Installed agentic-qe version — shown next to the label, mirroring "RuFlo V<x>"
+          // in ruflo's native header. Prefer the global install (matches the aidefence
+          // probe above); fall back to a project-local node_modules copy.
+          var qver = "";
+          try {
+            var qpkg = path.join(path.dirname(process.execPath), "..", "lib", "node_modules", "agentic-qe", "package.json");
+            if (!fs.existsSync(qpkg)) qpkg = path.join(cwd, "node_modules", "agentic-qe", "package.json");
+            var qv2 = JSON.parse(fs.readFileSync(qpkg, "utf8")).version;
+            if (qv2) qver = " V" + qv2;
+          } catch(e){}
+          qe = Y + "🎓 Agentic QE" + qver + R + "  " + (qp.length ? qp.join(DIM + " · " + R) : "on");
           try { fs.mkdirSync(cacheDir, {recursive:true}); fs.writeFileSync(cacheFile, JSON.stringify({ts: Date.now(), line: qe})); } catch(e){}
         }
       }
