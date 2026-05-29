@@ -157,16 +157,32 @@ npm_remove_global() {
 	local pkg="$1"
 	command -v npm >/dev/null 2>&1 || { warn "npm not on PATH — cannot remove $pkg"; return 1; }
 	if [ "$DRY" -eq 1 ]; then printf '%s[dry-run]%s npm uninstall -g %s\n' "$C_DIM" "$C_RESET" "$pkg"; return 0; fi
-	npm uninstall -g "$pkg" >/dev/null 2>&1 && ok "removed global $pkg" || warn "could not remove $pkg (try: sudo npm uninstall -g $pkg)"
+	if npm uninstall -g "$pkg" >/dev/null 2>&1; then
+		ok "removed global $pkg"
+	else
+		warn "could not remove $pkg (try: sudo npm uninstall -g $pkg)"
+	fi
 }
 if [ "$REMOVE_RUFLO" -eq 1 ] || [ "$REMOVE_AQE" -eq 1 ]; then
 	echo ""
 	echo "## Remove global npm packages (machine-wide — affects ALL projects)"
 	if [ "$REMOVE_RUFLO" -eq 1 ]; then
-		if [ "$DRY" -eq 1 ] || ask_yes_no "Remove global ruflo for ALL projects on this machine?" N; then npm_remove_global ruflo; else ok "kept ruflo"; fi
+		if [ "$DRY" -eq 1 ] || [ "$ASSUME_YES" -eq 1 ] || ask_yes_no "Remove global ruflo for ALL projects on this machine?" N; then
+			npm_remove_global ruflo
+		elif [ ! -t 0 ]; then
+			warn "ruflo not removed — no TTY to confirm; pass --yes to remove non-interactively"
+		else
+			ok "kept ruflo"
+		fi
 	fi
 	if [ "$REMOVE_AQE" -eq 1 ]; then
-		if [ "$DRY" -eq 1 ] || ask_yes_no "Remove global agentic-qe for ALL projects on this machine?" N; then npm_remove_global agentic-qe; else ok "kept agentic-qe"; fi
+		if [ "$DRY" -eq 1 ] || [ "$ASSUME_YES" -eq 1 ] || ask_yes_no "Remove global agentic-qe for ALL projects on this machine?" N; then
+			npm_remove_global agentic-qe
+		elif [ ! -t 0 ]; then
+			warn "agentic-qe not removed — no TTY to confirm; pass --yes to remove non-interactively"
+		else
+			ok "kept agentic-qe"
+		fi
 	fi
 fi
 
