@@ -50,7 +50,7 @@ echo ""
 # 1. bin scripts
 echo "## CLI helpers -> $BIN_DIR"
 run "mkdir -p '$BIN_DIR'"
-for f in ruflo-patch-native ruflo-parity-test; do
+for f in ruflo-patch-native ruflo-parity-test ruflo-enable-learning ruflo-learning-verify ruflo-security-verify; do
 	run "install -m 0755 '$HERE/bin/$f' '$BIN_DIR/$f'"
 	ok "$f"
 done

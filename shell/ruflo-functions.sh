@@ -158,8 +158,14 @@ if(!s.includes(marker)){
 }
 
 ruflo-setup-project() {
-	local extra_args
-	if [ "$#" -gt 0 ]; then extra_args="$*"; else extra_args="--full"; fi
+	local with_security=0 extra_args="" a
+	for a in "$@"; do
+		case "$a" in
+			--with-security) with_security=1 ;;
+			*) extra_args="$extra_args $a" ;;
+		esac
+	done
+	[ -z "${extra_args// }" ] && extra_args="--full"
 	# shellcheck disable=SC2086
 	ruflo init $extra_args --force || return $?
 
@@ -249,6 +255,16 @@ import sys; sys.exit(0 if prev == os.environ['RUFLO_DB_PATH'] else 1)
 			local tmp; tmp=$(mktemp)
 			{ echo "<!-- Full ruflo CLI reference: see machine-wide ruflo reference at ~/.claude/CLAUDE.md -->"; echo ""; cat CLAUDE.md; } > "$tmp"
 			mv "$tmp" CLAUDE.md
+		fi
+	fi
+
+	# Optional security pass (--with-security): verify the built-in security surface.
+	if [ "$with_security" -eq 1 ]; then
+		echo "## Security pass (--with-security)"
+		if command -v ruflo-security-verify >/dev/null 2>&1; then
+			ruflo-security-verify --quick || echo "⚠  security verification reported issues"
+		else
+			echo "⚠  --with-security requested but ruflo-security-verify not on PATH (run install.sh)"
 		fi
 	fi
 
