@@ -65,7 +65,11 @@ while [ "$#" -gt 0 ]; do
 		--heal)        DO_HEAL="yes" ;;
 		--no-heal)     DO_HEAL="no" ;;
 		--yes|-y)      ASSUME_YES=1 ;;
-		--shell)       shift; SHELL_CHOICE="${1:-}" ;;
+		--shell)
+			shift
+			SHELL_CHOICE="${1:-}"
+			[ -z "$SHELL_CHOICE" ] && { echo "error: --shell requires an argument (zsh or bash)" >&2; exit 2; }
+			;;
 		--no-shell-rc) EDIT_RC=0 ;;
 		--dry-run)     DRY=1 ;;
 		-h|--help)     usage; exit 0 ;;
@@ -105,7 +109,12 @@ echo "## Preflight"
 have node || { warn "Node.js (20-26) is required — https://nodejs.org"; exit 2; }
 have npm  || { warn "npm is required (ships with Node.js)"; exit 2; }
 NODE_MAJOR="$(node -p 'process.versions.node.split(".")[0]' 2>/dev/null || echo 0)"
-if { [ "$NODE_MAJOR" -lt 20 ] || [ "$NODE_MAJOR" -gt 26 ]; } 2>/dev/null; then
+case "$NODE_MAJOR" in
+	''|*[!0-9]*)
+		warn "could not determine Node major version (got: '${NODE_MAJOR:-empty}') — proceeding"
+		NODE_MAJOR=0 ;;
+esac
+if [ "$NODE_MAJOR" -lt 20 ] || [ "$NODE_MAJOR" -gt 26 ]; then
 	warn "Node $NODE_MAJOR is outside the tested 20-26 range — proceeding anyway"
 else
 	ok "Node $NODE_MAJOR, npm $(npm -v 2>/dev/null)"
@@ -151,7 +160,12 @@ if [ "$WANT_RUFLO" = yes ] || [ "$WANT_AQE" = yes ]; then
 	echo ""
 fi
 if [ "$DRY" -ne 1 ] && ! have ruflo; then
-	warn "ruflo is not on PATH — the kit's helpers will not work until it is installed"
+	if [ "$WANT_RUFLO" = yes ]; then
+		warn "ruflo install failed or not yet on PATH — heal will be skipped."
+		warn "Fix: sudo npm install -g ruflo  (or add npm's global bin to PATH), then re-run."
+	else
+		warn "ruflo is not on PATH — the kit's helpers will not work until it is installed"
+	fi
 fi
 
 # --- Lay down the kit -----------------------------------------------------
