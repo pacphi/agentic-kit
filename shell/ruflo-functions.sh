@@ -168,8 +168,11 @@ function rufloActivationSegments(cwd){
         if (pat && Number(pat) > 0) qp.push("🎓 " + pat + " patterns");
         var qtj = q(db, "SELECT COUNT(*) FROM qe_trajectories");
         if (qtj && Number(qtj) > 0) qp.push("🧭 " + qtj + " traj");
-        var qv = q(db, "SELECT COUNT(*) FROM vectors");
-        if (qv && Number(qv) > 0) qp.push("🧬 " + qv + " vec" + G + "⚡" + R);
+        // QE vectors live in different tables across aqe versions (qe_pattern_embeddings
+        // is the per-pattern embedding store; older/other builds use vectors/embeddings).
+        var qv = 0;
+        for (var vt of ["qe_pattern_embeddings", "vectors", "embeddings"]) { var vc = q(db, "SELECT COUNT(*) FROM " + vt); if (vc && Number(vc) > 0) { qv = Number(vc); break; } }
+        if (qv > 0) qp.push("🧬 " + qv + " vec" + G + "⚡" + R);
         try { var kb = Math.round(fs.statSync(db).size / 1024); qp.push("💾 " + (kb >= 1024 ? (kb/1024).toFixed(1) + "MB" : kb + "KB")); } catch(e){}
         qe = Y + "🎓 Agentic QE" + R + "  " + (qp.length ? qp.join(DIM + " · " + R) : "on");
       }
