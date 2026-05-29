@@ -66,24 +66,67 @@ The deep dive — ABI tables, the exact files, why "HNSW: Not loaded" is a cosme
 
 ---
 
+## ✅ Prerequisites
+
+This kit *configures and heals* ruflo — it doesn't bundle it. You need a few
+things on your machine first. `install.sh` checks for these and can install the
+npm packages for you (interactively, or via flags).
+
+**Required (install.sh aborts if missing):**
+
+| Tool | Why | Get it |
+|---|---|---|
+| Node.js 20–26 | runtime for ruflo & the helpers | <https://nodejs.org> |
+| npm | installs the global packages | ships with Node.js |
+| `ruflo` | the orchestration toolkit this kit configures | `npm i -g ruflo` (install.sh can do this) |
+
+**Recommended (install.sh warns, then continues):**
+
+| Tool | Why |
+|---|---|
+| `claude` (Claude Code) | the agent this all runs inside |
+| `sqlite3` | the status line + memory verifications read the DBs |
+| `git` | to clone/update this kit |
+
+**Optional (only for the QE fleet):**
+
+| Tool | Why | Get it |
+|---|---|---|
+| `agentic-qe` (`aqe`) | the standalone quality-engineering fleet (🎓 segment) | `npm i -g agentic-qe` (install.sh `--with-aqe`) |
+
+> 🔑 **"Security" and "learning" are not separate installs.** `@claude-flow/security`,
+> `@claude-flow/aidefence`, and the ruvector self-learning engine all ship *inside*
+> ruflo — this kit *activates and verifies* them. So the "full boat" is just two
+> npm packages (`ruflo` + `agentic-qe`); the kit lights up the rest.
+
+---
+
 ## 🚀 Quick start
+
+The fastest path — install the kit, prereqs, and heal in one go:
 
 ```bash
 # 1. Get the kit
 git clone https://github.com/pacphi/ruflo-machine-ref.git && cd ruflo-machine-ref
-./install.sh                    # idempotent; try --dry-run first if you like
-exec $SHELL                     # load the helper functions
 
-# 2. Make the global ruflo install healthy (once, and after each upgrade)
-ruflo-resync                    # native SQLite + self-learning + statusline, all at once
+# 2. Bootstrap the machine (pick your level)
+./install.sh                 # friendly interactive onboard (asks per step)
+./install.sh --full --yes    # "full boat": ruflo + agentic-qe + heal, no prompts
+./install.sh --ruflo-only    # just ruflo + heal
+./install.sh --minimal       # only lay down the kit files (you have the prereqs)
+exec $SHELL                  # load the helper functions
 
 # 3. In any project you work in
 cd ~/my-project
-ruflo-setup-project             # clean init: no MCP cruft, native SQLite, verified writes
-ruflo-learning-verify           # prove self-learning actually persists
+ruflo-onboard                # clean setup + prove self-learning persists, in one step
+ruflo-onboard --aqe          # …and also initialize the agentic-qe fleet here
 ```
 
-🪙 **Prefer CLI-only (no MCP, ~84k tokens saved per session)?** Skip `ruflo-setup-machine`; the installed `~/.claude/CLAUDE.md` reference teaches Claude Code to drive ruflo through plain Bash.
+Try `./install.sh --dry-run` first to preview exactly what it will do.
+
+🪙 **Prefer CLI-only (no MCP, ~84k tokens saved per session)?** Skip
+`ruflo-setup-machine`; the installed `~/.claude/CLAUDE.md` reference teaches
+Claude Code to drive ruflo through plain Bash.
 
 ---
 
