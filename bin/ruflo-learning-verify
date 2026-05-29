@@ -62,6 +62,7 @@ traj="$(stat_field trajectoriesRecorded)"
 echo "patterns on disk: $before → $after   (stats: patternsLearned=$plearned, trajectories=$traj)"
 if [ -f "$PATTERNS" ] && (( after > before )) && (( plearned > 0 )); then
 	ok "Self-learning loop verified — patterns trained and persisted to disk."
+	echo "Done. After any 'npm i -g ruflo@latest', run: ruflo-resync"
 	exit 0
 else
 	fail "No learning persisted. Run 'ruflo-enable-learning' first; if it stays 0, see"

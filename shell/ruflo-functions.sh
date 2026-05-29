@@ -365,6 +365,7 @@ import sys; sys.exit(0 if prev == os.environ['RUFLO_DB_PATH'] else 1)
 	fi
 
 	ruflo doctor
+	echo "Next: ruflo-learning-verify   (prove self-learning persists on disk)"
 }
 
 # ---------------------------------------------------------------------------
@@ -549,6 +550,8 @@ ruflo-resync() {
 		fi
 	fi
 	echo ""; echo "✓ resync complete"
+	echo ""
+	echo "Next: cd <your-repo> && ruflo-onboard   (per-project setup + verify)"
 }
 
 # ---------------------------------------------------------------------------
