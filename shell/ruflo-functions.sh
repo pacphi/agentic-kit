@@ -651,6 +651,25 @@ ruflo-neural-train() {
 #
 #   ruflo-resync           # re-apply learning + statusline (recommended after upgrade)
 #   ruflo-resync --aqe     # also refresh agentic-qe skills in this repo
+# Sync the conditional agentic-qe sub-block in ~/.claude/CLAUDE.md: present iff `aqe` is
+# installed (upsert from the staged template), stripped otherwise (self-healing on uninstall).
+# Quiet unless the block's presence actually changes. Needs ruflo-lib.sh (_ruflo_block_*).
+_ruflo_sync_aqe_block() {
+	local ref="$HOME/.claude/CLAUDE.md"
+	local tmpl="$HOME/.config/ruflo/aqe-md-template.md"
+	local b='<!-- BEGIN ruflo-aqe-reference -->' e='<!-- END ruflo-aqe-reference -->'
+	command -v _ruflo_block_upsert >/dev/null 2>&1 || return 0
+	[ -f "$ref" ] || return 0
+	if command -v aqe >/dev/null 2>&1; then
+		[ -f "$tmpl" ] || return 0
+		grep -qF "$b" "$ref" || echo "  + agentic-qe present → adding ruflo-aqe-reference block to $ref"
+		_ruflo_block_upsert "$ref" "$b" "$e" "$tmpl"
+	elif grep -qF "$b" "$ref" 2>/dev/null; then
+		echo "  - agentic-qe absent → stripping stale ruflo-aqe-reference block from $ref"
+		_ruflo_block_strip "$ref" "$b" "$e"
+	fi
+}
+
 ruflo-resync() {
 	local do_aqe=0
 	[ "${1:-}" = "--aqe" ] && do_aqe=1
@@ -672,6 +691,9 @@ ruflo-resync() {
 
 	echo ""; echo "## 3/4 statusline (version + activation footer) for this project"
 	ruflo-fix-statusline-version
+
+	echo ""; echo "## machine-wide ~/.claude/CLAUDE.md: conditional agentic-qe reference block"
+	_ruflo_sync_aqe_block && echo "✓ ruflo-aqe-reference block in sync with agentic-qe install state"
 
 	if [ "$do_aqe" -eq 1 ]; then
 		echo ""; echo "## 4/4 refresh agentic-qe skills (--aqe)"
@@ -702,22 +724,31 @@ ruflo-reference-refresh() {
 		case "$1" in
 			--diff) mode="diff" ;;
 			--regenerate) mode="regenerate" ;;
+			--sync-aqe) mode="sync-aqe" ;;
 			-y|--yes) yes=1 ;;
-			-h|--help) echo "Usage: ruflo-reference-refresh [--diff|--regenerate [-y]]"; return 0 ;;
+			-h|--help) echo "Usage: ruflo-reference-refresh [--diff|--regenerate [-y]|--sync-aqe]"; return 0 ;;
 			*) echo "Unknown flag: $1"; return 2 ;;
 		esac
 		shift
 	done
+	# --sync-aqe only touches the conditional agentic-qe block; no ruflo template needed.
+	if [ "$mode" = "sync-aqe" ]; then _ruflo_sync_aqe_block; return 0; fi
 	if [ ! -f "$template" ]; then
 		echo "No template at $template (run install.sh, or extract from $ref)."
 		return 1
 	fi
+	local aqe_begin='<!-- BEGIN ruflo-aqe-reference -->'
 	case "$mode" in
 		status)
 			echo "ruflo: $(ruflo --version 2>/dev/null || echo 'not installed')"
 			echo "installed sentinel: $(grep -E 'ruflo-version' "$ref" 2>/dev/null || echo 'none')"
 			echo "template  sentinel: $(grep -E 'ruflo-version' "$template" 2>/dev/null || echo 'none')"
-			echo "Use --diff to compare, --regenerate to rebuild."
+			if command -v aqe >/dev/null 2>&1; then
+				grep -qF "$aqe_begin" "$ref" 2>/dev/null && echo "agentic-qe: installed — aqe block present" || echo "agentic-qe: installed — aqe block MISSING (run --sync-aqe)"
+			else
+				grep -qF "$aqe_begin" "$ref" 2>/dev/null && echo "agentic-qe: absent — aqe block STALE (run --sync-aqe to strip)" || echo "agentic-qe: absent — aqe block correctly absent"
+			fi
+			echo "Use --diff to compare, --regenerate to rebuild, --sync-aqe to fix the agentic-qe block."
 			;;
 		diff)
 			local blk; blk=$(mktemp)
@@ -726,13 +757,13 @@ ruflo-reference-refresh() {
 			rm -f "$blk"
 			;;
 		regenerate)
-			if [ ! -f "$ref" ]; then cp "$template" "$ref"; echo "✓ Installed reference at $ref"; return 0; fi
+			if [ ! -f "$ref" ]; then cp "$template" "$ref"; echo "✓ Installed reference at $ref"; _ruflo_sync_aqe_block; return 0; fi
 			local pre post new
 			pre=$(mktemp); post=$(mktemp); new=$(mktemp)
 			awk '/<!-- BEGIN ruflo-reference -->/{exit} {print}' "$ref" > "$pre"
 			awk 'f; /<!-- END ruflo-reference -->/{f=1}' "$ref" > "$post"
 			cat "$pre" "$template" "$post" > "$new"
-			if diff -q "$ref" "$new" >/dev/null 2>&1; then echo "✓ Already up-to-date."; rm -f "$pre" "$post" "$new"; return 0; fi
+			if diff -q "$ref" "$new" >/dev/null 2>&1; then echo "✓ Already up-to-date."; rm -f "$pre" "$post" "$new"; _ruflo_sync_aqe_block; return 0; fi
 			diff -u "$ref" "$new" | head -80
 			if [ "$yes" -eq 0 ]; then
 				printf "Apply this regeneration? [y/N] "; local r; read -r r
@@ -741,6 +772,7 @@ ruflo-reference-refresh() {
 			cp "$ref" "$ref.bak.$(date +%Y%m%d-%H%M%S)"
 			mv "$new" "$ref"; rm -f "$pre" "$post"
 			echo "✓ Regenerated $ref (backup saved)"
+			_ruflo_sync_aqe_block
 			;;
 	esac
 }

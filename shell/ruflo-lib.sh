@@ -99,4 +99,44 @@ _ruflo_bsq3_install() {
 	( cd "$1" && npm install "better-sqlite3@${2:-^12}" --no-save --no-audit --no-fund >/dev/null 2>&1 )
 }
 
+# --- sentinel-delimited block management (CLAUDE.md sub-blocks) -------------
+# Manage a `<!-- BEGIN x -->`…`<!-- END x -->` block in a file. Used for the
+# conditional ruflo-aqe-reference block in ~/.claude/CLAUDE.md (present only when
+# agentic-qe is installed). Idempotent; preserves everything outside the markers.
+# Markers are matched as fixed substrings (awk index()).
+
+# _ruflo_block_upsert FILE BEGIN END SRC — replace the BEGIN..END block in FILE with
+# the contents of SRC (which must itself contain the markers); append if the block is
+# absent; create FILE from SRC if FILE is missing. Returns 1 if SRC is unreadable.
+_ruflo_block_upsert() {
+	local file="$1" begin="$2" end="$3" src="$4"
+	[ -f "$src" ] || return 1
+	mkdir -p "$(dirname "$file")" 2>/dev/null
+	if [ ! -f "$file" ]; then cat "$src" > "$file"; return 0; fi
+	if grep -qF "$begin" "$file"; then
+		local pre post new; pre=$(mktemp); post=$(mktemp); new=$(mktemp)
+		awk -v b="$begin" 'index($0,b){exit} {print}' "$file" > "$pre"
+		awk -v e="$end" 'f; index($0,e){f=1}' "$file" > "$post"
+		cat "$pre" "$src" "$post" > "$new"
+		cat "$new" > "$file"; rm -f "$pre" "$post" "$new"
+	else
+		{ printf '\n'; cat "$src"; } >> "$file"
+	fi
+}
+
+# _ruflo_block_strip FILE BEGIN END — remove the BEGIN..END block (inclusive) from
+# FILE. No-op if FILE or the block is absent.
+_ruflo_block_strip() {
+	local file="$1" begin="$2" end="$3"
+	[ -f "$file" ] || return 0
+	grep -qF "$begin" "$file" || return 0
+	local new; new=$(mktemp)
+	awk -v b="$begin" -v e="$end" '
+		index($0,b){skip=1}
+		!skip{print}
+		index($0,e){skip=0}
+	' "$file" > "$new"
+	cat "$new" > "$file"; rm -f "$new"
+}
+
 _RUFLO_LIB=1   # sentinel: consumers check this to confirm the lib loaded

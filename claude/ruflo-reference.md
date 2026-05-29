@@ -314,6 +314,12 @@ ruflo-setup-aqe --force          # force reinitialize (aqe init --auto --upgrade
 
 Opt-in only — `ruflo-setup-project` does NOT run it.
 
+When agentic-qe **is** installed, the kit also merges a conditional **`ruflo-aqe-reference`**
+block (AQE operating guidance — policies + MCP tool usage + QE-agent patterns) into this same
+`~/.claude/CLAUDE.md`, just below this `ruflo-reference` block. It is added when `aqe` is on
+PATH and **stripped automatically when agentic-qe is absent**. Source: `claude/aqe-reference.md`;
+applied by `install.sh` and re-asserted by `ruflo-reference-refresh` / `ruflo-resync`.
+
 ### Security surface (verify + activate)
 
 ```bash
