@@ -51,14 +51,16 @@ for arg in "$@"; do
 	esac
 done
 
-# --- terminal helpers -------------------------------------------------------
-if [[ -t 1 ]]; then
-	C_OK=$'\033[32m'; C_FAIL=$'\033[31m'; C_DIM=$'\033[2m'
-	C_HEAD=$'\033[1;36m'; C_RESET=$'\033[0m'
-else
-	C_OK=""; C_FAIL=""; C_DIM=""; C_HEAD=""; C_RESET=""
-fi
+# Shared helpers (colors C_OK/C_FAIL/C_DIM/C_HEAD/C_RESET, _ruflo_daemon_list) from
+# ruflo-lib.sh: installed copy first, then repo-relative (bin/ ↔ ../shell/).
+for _cand in "$HOME/.config/ruflo/ruflo-lib.sh" "$(dirname "${BASH_SOURCE[0]:-$0}")/../shell/ruflo-lib.sh"; do
+	# shellcheck source=/dev/null
+	[ -f "$_cand" ] && { . "$_cand"; break; }
+done
+unset _cand
+[ -n "${_RUFLO_LIB:-}" ] || { echo "ruflo-lib.sh not found — run install.sh" >&2; exit 2; }
 
+# --- test-specific helpers (PASS/FAIL tally, headers) -----------------------
 PASS=0
 FAIL=0
 LOG_FILE=""
@@ -80,8 +82,22 @@ check() {
 	fi
 }
 
+# shellcheck disable=SC2329  # invoked via trap below
 cleanup_on_exit() {
 	local rc=$?
+	# Stop the daemon ruflo-setup-project started for this throwaway workspace
+	# (issue #3) — orphaned whether or not we keep the dir, since the test is done.
+	# The daemon records the RESOLVED (pwd -P) path, so match that too.
+	if [[ -n "${TEST_DIR:-}" ]] && command -v _ruflo_daemon_list >/dev/null 2>&1; then
+		local _rdir; _rdir="$(cd "$TEST_DIR" 2>/dev/null && pwd -P || echo "$TEST_DIR")"
+		local _dp _dws
+		while IFS="$(printf '\t')" read -r _dp _dws; do
+			[[ "$_dws" == "$_rdir" || "$_dws" == "$TEST_DIR" ]] || continue
+			[[ -n "$_dp" ]] && kill "$_dp" 2>/dev/null && log "Stopped test daemon pid=$_dp ($_dws)"
+		done <<EOF
+$(_ruflo_daemon_list)
+EOF
+	fi
 	if (( FAIL == 0 && KEEP == 0 )) && [[ -n "${TEST_DIR:-}" && -d "$TEST_DIR" ]]; then
 		rm -rf "$TEST_DIR"
 		log ""
@@ -91,7 +107,7 @@ cleanup_on_exit() {
 		log "Test dir kept at: $TEST_DIR"
 		[[ -n "$LOG_FILE" ]] && log "Full log:        $LOG_FILE"
 	fi
-	exit $rc
+	exit "$rc"
 }
 trap cleanup_on_exit EXIT INT TERM
 
@@ -143,7 +159,7 @@ LOG_FILE="${TEST_DIR}.log"
 
 head_line "Create test dir"
 mkdir -p "$TEST_DIR"
-cd "$TEST_DIR"
+cd "$TEST_DIR" || { check "test dir created" "cannot cd to $TEST_DIR" "fail"; exit 2; }
 check "test dir created" "$TEST_DIR" "ok"
 
 # Capture full output to a log file alongside the test dir
@@ -188,9 +204,12 @@ if [[ ! -f "$SETTINGS_FILE" ]]; then
 	check "settings.local.json present" "missing" "fail"
 else
 	DB_PATH=$(python3 -c "import json; print(json.load(open('$SETTINGS_FILE')).get('env', {}).get('CLAUDE_FLOW_DB_PATH', ''))" 2>/dev/null)
+	# The literal token Claude Code does NOT expand — matched verbatim, never expanded here.
+	# shellcheck disable=SC2016
+	UNEXPANDED_CPD='${CLAUDE_PROJECT_DIR}'
 	if [[ -z "$DB_PATH" ]]; then
 		check "CLAUDE_FLOW_DB_PATH set" "absent or unreadable" "fail"
-	elif [[ "$DB_PATH" == *'${CLAUDE_PROJECT_DIR}'* ]]; then
+	elif [[ "$DB_PATH" == *"$UNEXPANDED_CPD"* ]]; then
 		check "CLAUDE_FLOW_DB_PATH resolved" "literal \${CLAUDE_PROJECT_DIR} present — Claude Code does NOT expand it; writes will silently fail" "fail"
 	elif [[ "$DB_PATH" != /* ]]; then
 		check "CLAUDE_FLOW_DB_PATH absolute" "not absolute: $DB_PATH" "fail"

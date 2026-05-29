@@ -52,24 +52,20 @@ while (( $# )); do
 	shift
 done
 
-if [[ -t 1 ]]; then
-	C_OK=$'\033[32m'; C_WARN=$'\033[33m'; C_FAIL=$'\033[31m'; C_DIM=$'\033[2m'; C_RESET=$'\033[0m'
-else
-	C_OK=""; C_WARN=""; C_FAIL=""; C_DIM=""; C_RESET=""
-fi
-ok()   { printf '%s✓%s %s\n' "$C_OK" "$C_RESET" "$*"; }
-warn() { printf '%s⚠%s  %s\n' "$C_WARN" "$C_RESET" "$*"; }
-fail() { printf '%s✗%s %s\n' "$C_FAIL" "$C_RESET" "$*"; }
-dim()  { printf '%s%s%s\n' "$C_DIM" "$*" "$C_RESET"; }
+# Shared helpers (colors, ok/warn/fail/dim, _ruflo_need, native bsq3 primitives)
+# from ruflo-lib.sh: installed copy first, then repo-relative (bin/ ↔ ../shell/).
+for _cand in "$HOME/.config/ruflo/ruflo-lib.sh" "$(dirname "${BASH_SOURCE[0]:-$0}")/../shell/ruflo-lib.sh"; do
+	# shellcheck source=/dev/null
+	[ -f "$_cand" ] && { . "$_cand"; break; }
+done
+unset _cand
+[ -n "${_RUFLO_LIB:-}" ] || { echo "ruflo-lib.sh not found — run install.sh" >&2; exit 2; }
 
-command -v node >/dev/null 2>&1 || { fail "node not on PATH"; exit 2; }
-command -v npm  >/dev/null 2>&1 || { fail "npm not on PATH"; exit 2; }
-command -v ruflo >/dev/null 2>&1 || { fail "ruflo not on PATH"; exit 2; }
+_ruflo_need node npm ruflo
 
 NODE_VER=$(node --version)
-NODE_ABI=$(node -e 'process.stdout.write(process.versions.modules)')
-NODE_MAJOR=$(node -e 'process.stdout.write(String(process.versions.node.split(".")[0]))')
-RUFLO_ROOT="$(npm root -g)/ruflo"
+NODE_ABI=$(_ruflo_node_abi)
+RUFLO_ROOT="$(_ruflo_global_root)/ruflo"
 
 echo "Node $NODE_VER (ABI $NODE_ABI) | ruflo $(ruflo --version 2>/dev/null | tr -d '\n')"
 echo "ruflo root: $RUFLO_ROOT"
@@ -107,21 +103,13 @@ if (( ${#AGENTDB_DIRS[@]} == 0 )); then
 fi
 
 needs_patch() {
-	# returns 0 if this agentdb dir cannot resolve a native better-sqlite3
-	local agentdb_dir="$1"
-	node -e "
-try {
-  const p = require.resolve('better-sqlite3', { paths: ['$agentdb_dir'] });
-  const base = p.split('/better-sqlite3/')[0] + '/better-sqlite3';
-  const hasBin = require('fs').existsSync(base + '/build/Release/better_sqlite3.node');
-  process.exit(hasBin ? 1 : 0);   // exit 1 = native present (no patch); 0 = needs patch
-} catch (e) { process.exit(0); }   // unresolvable = needs patch
-" 2>/dev/null
+	# 0 if this agentdb dir cannot resolve a native better-sqlite3 (i.e. needs the patch)
+	! _ruflo_bsq3_is_native "$1"
 }
 
 TO_PATCH=()
 for d in "${AGENTDB_DIRS[@]}"; do
-	rel="${d#$RUFLO_ROOT/node_modules/}"
+	rel="${d#"$RUFLO_ROOT"/node_modules/}"
 	if needs_patch "$d"; then
 		echo "  needs patch: $rel"
 		TO_PATCH+=("$d")
@@ -146,7 +134,7 @@ echo "Installing better-sqlite3@$BSQ_RANGE into ${#TO_PATCH[@]} location(s)..."
 PATCH_LOG=$(mktemp)
 patched=0
 for d in "${TO_PATCH[@]}"; do
-	rel="${d#$RUFLO_ROOT/node_modules/}"
+	rel="${d#"$RUFLO_ROOT"/node_modules/}"
 	if ( cd "$d" && npm install "better-sqlite3@$BSQ_RANGE" --no-save --no-audit --no-fund >>"$PATCH_LOG" 2>&1 ); then
 		ok "patched $rel"
 		patched=$((patched+1))
@@ -160,7 +148,7 @@ echo ""
 echo "Verifying native binaries..."
 allnative=1
 for d in "${TO_PATCH[@]}"; do
-	rel="${d#$RUFLO_ROOT/node_modules/}"
+	rel="${d#"$RUFLO_ROOT"/node_modules/}"
 	if needs_patch "$d"; then
 		fail "$rel still not native"
 		allnative=0
@@ -179,7 +167,7 @@ echo ""
 # --- Functional smoke test --------------------------------------------------
 echo "Smoke test (store → retrieve via native path)..."
 TMPD=$(mktemp -d)
-( cd "$TMPD"
+( cd "$TMPD" || exit 1
   export CLAUDE_FLOW_DB_PATH="$TMPD/.swarm/memory.db"
   ruflo init --minimal --force >/dev/null 2>&1
   ruflo memory init >/dev/null 2>&1

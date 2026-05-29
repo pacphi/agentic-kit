@@ -191,3 +191,43 @@ ruflo cleanup --force               # remove ruflo artifacts (dry-run by default
 rm -rf .swarm .claude-flow .mcp.json
 ruflo-setup-project                 # re-create cleanly
 ```
+
+## Claude Code crashes with ENOSPC / orphan `ruflo daemon` processes pile up
+
+**Symptom.** Claude Code dies mid-session with
+`the temp filesystem at /private/tmp/claude-501/<project>/<uuid>/tasks is full
+(0MB free)`, and/or `ps axww | grep "daemon start"` shows many `ruflo daemon`
+processes — some pointed at `--workspace` directories that no longer exist
+(e.g. `/tmp/test-*` from `ruflo-parity-test` runs). See issue #3.
+
+**Why.** `ruflo-setup-project` starts a per-workspace `ruflo daemon` (this is what
+makes self-learning continuous). Before this fix, nothing stopped them, so each
+throwaway/removed workspace left a daemon running forever. Separately, the
+statusline footer used to spawn several `sqlite3` subprocesses on every render;
+that volume of captured subprocess output is what fills Claude Code's size-limited
+sandbox `tasks` tmpfs.
+
+**Fix is built in now.** The statusline footer caches its QE metrics
+(`RUFLO_QE_STATUSLINE_TTL_MS`, default 60000ms) and makes at most one `sqlite3`
+call per TTL window. The daemon start is idempotent per workspace, and orphans are
+reaped.
+
+**Reap existing orphans:**
+
+```bash
+ruflo-daemon-gc            # list daemons whose --workspace is gone
+ruflo-daemon-gc --kill     # stop exactly those (live-project daemons untouched)
+```
+
+`uninstall.sh` also reaps stale daemons; `uninstall.sh --this-project` additionally
+stops the current repo's daemon.
+
+**If you run many hooks and still hit the tmpfs limit**, point Claude Code's
+subprocess tmpdir at your main filesystem (more space than the sandbox tmpfs) by
+adding to `~/.claude/settings.json`:
+
+```json
+{ "env": { "CLAUDE_CODE_TMPDIR": "/Users/<you>/tmp/claude-code" } }
+```
+
+Create the directory first (`mkdir -p ~/tmp/claude-code`).

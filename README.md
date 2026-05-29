@@ -19,7 +19,7 @@ The catch: on the versions of Node.js most developers run today, ruflo **silentl
 
 This kit closes all of those gaps with a few small, reversible helper scripts — and gives you a **status line** that shows, at a glance, exactly what's live.
 
-> 🙂 **Not a developer?** You only need three commands: `./install.sh`, then `ruflo-setup-project` in a project, and `ruflo-resync` after any upgrade. The rest of this README explains the "why" for the curious.
+> 🙂 **Not a developer?** You only need three commands: `./install.sh` (once), then `ruflo-onboard` inside a project, and `ruflo-resync` after any upgrade. The rest of this README explains the "why" for the curious.
 
 ---
 
@@ -66,24 +66,67 @@ The deep dive — ABI tables, the exact files, why "HNSW: Not loaded" is a cosme
 
 ---
 
+## ✅ Prerequisites
+
+This kit *configures and heals* ruflo — it doesn't bundle it. You need a few
+things on your machine first. `install.sh` checks for these and can install the
+npm packages for you (interactively, or via flags).
+
+**Required (install.sh aborts if missing):**
+
+| Tool | Why | Get it |
+|---|---|---|
+| Node.js (20–26 supported) | runtime for ruflo & the helpers | <https://nodejs.org> |
+| npm | installs the global packages | ships with Node.js |
+| `ruflo` | the orchestration toolkit this kit configures | `npm i -g ruflo` (install.sh can do this) |
+
+**Recommended (install.sh warns, then continues):**
+
+| Tool | Why |
+|---|---|
+| `claude` (Claude Code) | the agent this all runs inside |
+| `sqlite3` | the status line + memory verifications read the DBs |
+| `git` | to clone/update this kit |
+
+**Optional (only for the QE fleet):**
+
+| Tool | Why | Get it |
+|---|---|---|
+| `agentic-qe` (`aqe`) | the standalone quality-engineering fleet (🎓 segment) | `npm i -g agentic-qe` (install.sh `--with-aqe`) |
+
+> 🔑 **"Security" and "learning" are not separate installs.** `@claude-flow/security`,
+> `@claude-flow/aidefence`, and the ruvector self-learning engine all ship *inside*
+> ruflo — this kit *activates and verifies* them. So the "full boat" is just two
+> npm packages (`ruflo` + `agentic-qe`); the kit lights up the rest.
+
+---
+
 ## 🚀 Quick start
+
+The fastest path — install the kit, prereqs, and heal in one go:
 
 ```bash
 # 1. Get the kit
 git clone https://github.com/pacphi/ruflo-machine-ref.git && cd ruflo-machine-ref
-./install.sh                    # idempotent; try --dry-run first if you like
-exec $SHELL                     # load the helper functions
 
-# 2. Make the global ruflo install healthy (once, and after each upgrade)
-ruflo-resync                    # native SQLite + self-learning + statusline, all at once
+# 2. Bootstrap the machine (pick your level)
+./install.sh                 # friendly interactive onboard (asks per step)
+./install.sh --full --yes    # "full boat": ruflo + agentic-qe + heal, no prompts
+./install.sh --ruflo-only    # just ruflo + heal
+./install.sh --minimal       # only lay down the kit files (you have the prereqs)
+exec $SHELL                  # load the helper functions
 
 # 3. In any project you work in
 cd ~/my-project
-ruflo-setup-project             # clean init: no MCP cruft, native SQLite, verified writes
-ruflo-learning-verify           # prove self-learning actually persists
+ruflo-onboard                # clean setup + prove self-learning persists, in one step
+ruflo-onboard --aqe          # …and also initialize the agentic-qe fleet here
 ```
 
-🪙 **Prefer CLI-only (no MCP, ~84k tokens saved per session)?** Skip `ruflo-setup-machine`; the installed `~/.claude/CLAUDE.md` reference teaches Claude Code to drive ruflo through plain Bash.
+Try `./install.sh --dry-run` first to preview exactly what it will do.
+
+🪙 **Prefer CLI-only (no MCP, ~84k tokens saved per session)?** Skip
+`ruflo-setup-machine`; the installed `~/.claude/CLAUDE.md` reference teaches
+Claude Code to drive ruflo through plain Bash.
 
 ---
 
@@ -92,6 +135,7 @@ ruflo-learning-verify           # prove self-learning actually persists
 | Command | What it does |
 |---|---|
 | 🔁 `ruflo-resync [--aqe]` | **The one you'll use most.** After any ruflo/agentic-qe upgrade, re-applies everything the upgrade wipes: native SQLite (ruflo + agentic-qe) + self-learning assert + statusline footer. `--aqe` also refreshes QE skills. |
+| 📂 `ruflo-onboard [--with-security] [--aqe]` | **Per-repo, run from inside it.** One command: clean `setup-project` → prove learning persists → (`--aqe`) initialize agentic-qe. Prints what's active + what's next. |
 | 🏗️ `ruflo-setup-project [--with-security]` | Per repo: clean init, strip MCP cruft, pin an absolute DB path, native patch, activate memory/swarm/daemon, **verify a write persists**, sanitize CLAUDE.md, heal the status line. `--with-security` adds a security pass. |
 | 🩹 `ruflo-patch-native [--check]` | Make ruflo's agentdb use native `better-sqlite3` on Node ≥24. |
 | 🧠 `ruflo-enable-learning [--check]` | Activate ruvector self-learning and assert it (5 capability probes). |
@@ -109,29 +153,59 @@ ruflo-learning-verify           # prove self-learning actually persists
 
 ---
 
+## 🧭 Which command do I run?
+
+**`install.sh` is the front door you walk through once; the functions are how you live in the house.**
+
+| | `install.sh` | The functions |
+|---|---|---|
+| **Nature** | a script run *from the kit repo* | commands on your `PATH`, available everywhere after install |
+| **Frequency** | once per machine (+ rarely, to re-lay the kit) | ongoing, day-to-day |
+| **Scope** | machine-level bootstrap | machine-recurring **and** per-project |
+
+On first run the functions aren't sourced yet, so `install.sh` sources them
+in-process and calls the *same* `ruflo-patch-native` / `ruflo-enable-learning`
+to heal — one source of truth, no drift. After that you never need `install.sh`
+for healing again.
+
+| Situation | Run this | Why not the other |
+|---|---|---|
+| 🆕 Brand-new machine | **`install.sh`** | nothing's on PATH yet — only the script can bootstrap |
+| 🔁 Re-cloned kit / new shell / wiped `~/.local/bin` | **`install.sh`** | re-lays the kit files (idempotent, backs up) |
+| ⬆️ After `npm i -g ruflo@latest` (or aqe) | **`ruflo-resync`** | the upgrade only wiped native binaries — re-running install.sh is the heavier wrong tool |
+| 📂 Starting in a new repo | **`ruflo-onboard`** | per-project; install.sh is machine-level and won't touch your repo |
+| 🔍 Routine checks | **functions** (`ruflo-parity-test`, `ruflo-learning-verify`) | no reason to re-bootstrap |
+
+**Rule of thumb:**
+- *"I'm setting up"* → `install.sh` (once).
+- *"I upgraded ruflo/aqe"* → `ruflo-resync`.
+- *"I'm starting work in a repo"* → `ruflo-onboard`.
+
+---
+
 ## 📟 The status line
 
 When set up with this kit, a two-line footer is appended **below** ruflo's own status line. It's append-only — it never rewrites ruflo's lines, so a ruflo update can't break it. Each piece appears **only when that feature is genuinely active**:
 
 ```
 ▊ RuFlo V3.10.5 ● you  │  ⏇ main  │  Opus 4.x        ┐
-🏗️  DDD Domains … 🤖 Swarm … 🔧 Architecture …       ├ ruflo's own lines (unchanged)
-📊 AgentDB …                                          ┘
-────────────────────────────────────────────         ← the kit's appended footer ↓
-🧠 SONA  [●●●●●]  50 patterns · 55 traj · Δ1.32 LoRA · ⚡ HNSW      🛡 aidefence on
-🎓 Agentic QE  🎓 23 patterns · 🧭 114 traj · 🧬 543 vec⚡ · 💾 16MB
+🏗️  DDD Domains … 🤖 Swarm … 🔧 Architecture …       │ ruflo's own lines + the kit's
+📊 AgentDB …                                          │ SONA/aidefence line (all ruflo)
+🧠 SONA  [●●●●●]  50 patterns · 55 traj · Δ1.32 LoRA · ⚡ HNSW      🛡 aidefence on  ┘
+─────────────────────────────────────────────────────  ← divider (matches ruflo's header rule)
+🎓 Agentic QE V3.10.1  🎓 23 patterns · 🧭 114 traj · 🧬 543 vec⚡ · 💾 16MB
 ```
 
 Every field renders only when its data is actually present (numbers above are illustrative):
 - 🧠 **SONA** — `[bar]` is a volume gauge (~10 patterns/dot); `patterns`/`traj` from `.claude-flow/neural/stats.json`; `Δ LoRA` is shown only after you run `ruflo-neural-train` (it caches the transient MicroLoRA delta, which ruflo doesn't persist); `⚡ HNSW` only when a vector index exists.
 - 🛡️ **aidefence on** — proactive prompt-injection/PII defense is loaded (ruflo's native line already shows the `CVE n/m` count, so this signals the *other* half).
-- 🎓 **Agentic QE** — `🎓 patterns` / `🧭 traj` / `🧬 vec` / `💾 size` from a few guarded `sqlite3` reads of `.agentic-qe/memory.db` (the `vec` count comes from `qe_pattern_embeddings`, falling back to `vectors`/`embeddings` across aqe versions). The branch is already in ruflo's header line, so it's not repeated here.
+- 🎓 **Agentic QE** — `V<version>` is the installed `agentic-qe` package version (read from its `package.json`, mirroring `RuFlo V<x>` in ruflo's header); `🎓 patterns` / `🧭 traj` / `🧬 vec` / `💾 size` from a few guarded `sqlite3` reads of `.agentic-qe/memory.db` (the `vec` count comes from `qe_pattern_embeddings`, falling back to `vectors`/`embeddings` across aqe versions). The branch is already in ruflo's header line, so it's not repeated here.
 
 ---
 
 ## 🔁 Keeping it working after upgrades
 
-Every `npm install -g ruflo@latest` (or `agentic-qe@latest`) re-resolves dependency pins, **drops the native binaries again**, and regenerates the status line — so self-learning goes dormant and the footer disappears. You don't have to remember the five things to redo:
+Every `npm install -g ruflo@latest` (or `agentic-qe@latest`) re-resolves dependency pins, **drops the native binaries again**, and regenerates the status line — so self-learning goes dormant and the footer disappears. You don't have to remember everything an upgrade wipes:
 
 ```bash
 npm install -g ruflo@latest     # or agentic-qe@latest
@@ -182,8 +256,8 @@ It's not a replacement for ruflo — just a thin, reversible layer that picks sa
 
 ```
 ruflo-machine-ref/
-├── install.sh                 # idempotent installer (backs up what it touches)
-├── uninstall.sh               # clean reversal
+├── install.sh                 # machine bootstrap: prereqs + kit + heal (profiles, interactive)
+├── uninstall.sh               # clean reversal (opt-in --purge for global npm packages)
 ├── bin/
 │   ├── ruflo-patch-native     # native better-sqlite3 on Node ≥24
 │   ├── ruflo-parity-test      # 20-check end-to-end memory smoke test
@@ -191,7 +265,7 @@ ruflo-machine-ref/
 │   ├── ruflo-learning-verify  # prove the learning loop persists
 │   └── ruflo-security-verify  # verify security scan/defend/secrets + aidefence
 ├── shell/
-│   └── ruflo-functions.sh     # ruflo-resync, ruflo-setup-project, ruflo-setup-aqe, …
+│   └── ruflo-functions.sh     # ruflo-resync, ruflo-onboard, ruflo-setup-project, ruflo-setup-aqe, …
 ├── claude/
 │   └── ruflo-reference.md     # the machine-wide CLAUDE.md ruflo block (CLI-first)
 └── docs/
@@ -223,16 +297,21 @@ Full analysis, the three findings, and a ready-to-file upstream issue:
 ## 🗑️ Uninstall
 
 ```bash
-./uninstall.sh                  # removes bin scripts, template, CLAUDE.md block, rc source line
+./uninstall.sh                  # kit footprint only: bin scripts, template, CLAUDE.md block, rc line
 ./uninstall.sh --this-project   # ALSO revert the kit's statusline patches in the current repo
+./uninstall.sh --remove-ruflo   # ALSO npm-uninstall global ruflo (machine-wide; asks first)
+./uninstall.sh --remove-aqe     # ALSO npm-uninstall global agentic-qe (machine-wide; asks first)
+./uninstall.sh --purge          # --remove-ruflo + --remove-aqe
 ./uninstall.sh --dry-run        # preview without changing anything
 ```
 
-The plain `uninstall.sh` removes only machine-level setup; your ruflo install, memory
-DBs, and **project files** (including any statusline a project already had) are left
-untouched. Add `--this-project` from a repo root to revert that repo's statusline
-patches too (it backs up first and leaves all ruflo/agentic-qe data alone — use
-`ruflo cleanup --force` for per-project data).
+The plain `uninstall.sh` removes only machine-level kit setup; your ruflo
+install, memory DBs, and **project files** are left untouched. The
+`--remove-ruflo` / `--remove-aqe` / `--purge` flags reach the *global npm
+packages* — they affect every project on the machine, so each one prompts to
+confirm (pass `--yes` to skip in scripts). Add `--this-project` from a repo root
+to revert that repo's statusline patches too (it backs up first and leaves all
+ruflo/agentic-qe data alone — use `ruflo cleanup --force` for per-project data).
 
 ---
 
