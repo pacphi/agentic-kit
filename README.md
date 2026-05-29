@@ -203,7 +203,7 @@ Every field renders only when its data is actually present (numbers above are il
 
 ## 🔁 Keeping it working after upgrades
 
-Every `npm install -g ruflo@latest` (or `agentic-qe@latest`) re-resolves dependency pins, **drops the native binaries again**, and regenerates the status line — so self-learning goes dormant and the footer disappears. You don't have to remember the five things to redo:
+Every `npm install -g ruflo@latest` (or `agentic-qe@latest`) re-resolves dependency pins, **drops the native binaries again**, and regenerates the status line — so self-learning goes dormant and the footer disappears. You don't have to remember everything an upgrade wipes:
 
 ```bash
 npm install -g ruflo@latest     # or agentic-qe@latest
