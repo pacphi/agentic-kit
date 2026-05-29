@@ -4,9 +4,9 @@
 #
 # By default removes ONLY the kit's own footprint:
 #   - every helper this repo ships in bin/ from ~/.local/bin/ (derived from bin/)
-#   - ~/.config/ruflo/claude-md-template.md
-#   - the BEGIN/END ruflo-reference block from ~/.claude/CLAUDE.md (content
-#     outside the sentinels is preserved)
+#   - ~/.config/ruflo/{claude-md-template,aqe-md-template}.md
+#   - the BEGIN/END ruflo-reference AND ruflo-aqe-reference blocks from
+#     ~/.claude/CLAUDE.md (content outside the sentinels is preserved)
 #   - the source line from ~/.zshrc / ~/.bashrc
 #
 # Leaves your ruflo install, memory DBs, and project files untouched. Per-project
@@ -86,23 +86,24 @@ for src in "$HERE"/bin/*; do
 	[ -f "$f" ] && { run "rm -f '$f'"; ok "removed $f"; }
 done
 
-# 2. template
+# 2. templates (ruflo-reference + conditional agentic-qe block)
 [ -f "$HOME/.config/ruflo/claude-md-template.md" ] && { run "rm -f '$HOME/.config/ruflo/claude-md-template.md'"; ok "removed template"; }
+[ -f "$HOME/.config/ruflo/aqe-md-template.md" ] && { run "rm -f '$HOME/.config/ruflo/aqe-md-template.md'"; ok "removed agentic-qe template"; }
 
 # 2b. shared helper lib (already sourced at the top, so removing it here is safe)
 [ -f "$HOME/.config/ruflo/ruflo-lib.sh" ] && { run "rm -f '$HOME/.config/ruflo/ruflo-lib.sh'"; ok "removed helper lib"; }
 
-# 3. CLAUDE.md managed block
+# 3. CLAUDE.md managed blocks (ruflo-reference + the conditional ruflo-aqe-reference)
 CLAUDE_MD="$HOME/.claude/CLAUDE.md"
-if [ -f "$CLAUDE_MD" ] && grep -q '<!-- BEGIN ruflo-reference -->' "$CLAUDE_MD"; then
+if [ -f "$CLAUDE_MD" ] && grep -qE '<!-- BEGIN ruflo-(reference|aqe-reference) -->' "$CLAUDE_MD"; then
 	if [ "$DRY" -eq 1 ]; then
-		printf '%s[dry-run]%s strip ruflo-reference block from %s\n' "$C_DIM" "$C_RESET" "$CLAUDE_MD"
+		printf '%s[dry-run]%s strip ruflo-reference + ruflo-aqe-reference blocks from %s\n' "$C_DIM" "$C_RESET" "$CLAUDE_MD"
 	else
 		cp "$CLAUDE_MD" "$CLAUDE_MD.bak.$(date +%Y%m%d-%H%M%S)"
 		new=$(mktemp)
-		awk '/<!-- BEGIN ruflo-reference -->/{skip=1} /<!-- END ruflo-reference -->/{skip=0; next} !skip' "$CLAUDE_MD" > "$new"
+		awk '/<!-- BEGIN ruflo-reference -->/{skip=1} /<!-- BEGIN ruflo-aqe-reference -->/{skip=1} /<!-- END ruflo-reference -->/{skip=0; next} /<!-- END ruflo-aqe-reference -->/{skip=0; next} !skip' "$CLAUDE_MD" > "$new"
 		mv "$new" "$CLAUDE_MD"
-		ok "stripped ruflo-reference block (backup saved; rest of file preserved)"
+		ok "stripped ruflo-reference + ruflo-aqe-reference blocks (backup saved; rest of file preserved)"
 	fi
 fi
 

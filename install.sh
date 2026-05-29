@@ -187,11 +187,12 @@ case ":$PATH:" in
 esac
 echo ""
 
-# CLAUDE.md reference template
+# CLAUDE.md reference template (+ the conditional agentic-qe sub-block template)
 echo "## CLAUDE.md reference template -> $CFG_DIR/claude-md-template.md"
 run "mkdir -p '$CFG_DIR'"
 run "cp '$HERE/claude/ruflo-reference.md' '$CFG_DIR/claude-md-template.md'"
-ok "template installed"
+run "cp '$HERE/claude/aqe-reference.md' '$CFG_DIR/aqe-md-template.md'"
+ok "templates installed (ruflo-reference + conditional aqe-reference)"
 echo ""
 
 # Shared helper lib — deployed to a stable absolute path so the standalone bin
@@ -221,6 +222,26 @@ else
 	cp "$CLAUDE_MD" "$CLAUDE_MD.bak.$(date +%Y%m%d-%H%M%S)"
 	{ echo ""; cat "$HERE/claude/ruflo-reference.md"; } >> "$CLAUDE_MD"
 	ok "appended ruflo-reference block (backup saved)"
+fi
+echo ""
+
+# Conditional agentic-qe operating block: present in ~/.claude/CLAUDE.md ONLY when agentic-qe
+# is installed; stripped otherwise (self-healing on uninstall). Idempotent.
+echo "## ruflo-aqe-reference block (conditional on agentic-qe) -> $CLAUDE_MD"
+AQE_BEGIN='<!-- BEGIN ruflo-aqe-reference -->'; AQE_END='<!-- END ruflo-aqe-reference -->'
+if [ "$DRY" -eq 1 ]; then
+	if have aqe; then printf '%s[dry-run]%s upsert ruflo-aqe-reference block (aqe present)\n' "$C_DIM" "$C_RESET"
+	else printf '%s[dry-run]%s strip ruflo-aqe-reference block (aqe absent)\n' "$C_DIM" "$C_RESET"; fi
+elif have aqe; then
+	_ruflo_block_upsert "$CLAUDE_MD" "$AQE_BEGIN" "$AQE_END" "$HERE/claude/aqe-reference.md" \
+		&& ok "agentic-qe present — merged ruflo-aqe-reference block" \
+		|| warn "could not merge ruflo-aqe-reference block (aqe-reference.md unreadable)"
+else
+	if [ -f "$CLAUDE_MD" ] && grep -qF "$AQE_BEGIN" "$CLAUDE_MD"; then
+		_ruflo_block_strip "$CLAUDE_MD" "$AQE_BEGIN" "$AQE_END"; ok "agentic-qe absent — stripped stale ruflo-aqe-reference block"
+	else
+		dim "agentic-qe absent — no ruflo-aqe-reference block to manage"
+	fi
 fi
 echo ""
 
