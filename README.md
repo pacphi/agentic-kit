@@ -135,6 +135,7 @@ Claude Code to drive ruflo through plain Bash.
 | Command | What it does |
 |---|---|
 | 🔁 `ruflo-resync [--aqe]` | **The one you'll use most.** After any ruflo/agentic-qe upgrade, re-applies everything the upgrade wipes: native SQLite (ruflo + agentic-qe) + self-learning assert + statusline footer. `--aqe` also refreshes QE skills. |
+| 📂 `ruflo-onboard [--with-security] [--aqe]` | **Per-repo, run from inside it.** One command: clean `setup-project` → prove learning persists → (`--aqe`) initialize agentic-qe. Prints what's active + what's next. |
 | 🏗️ `ruflo-setup-project [--with-security]` | Per repo: clean init, strip MCP cruft, pin an absolute DB path, native patch, activate memory/swarm/daemon, **verify a write persists**, sanitize CLAUDE.md, heal the status line. `--with-security` adds a security pass. |
 | 🩹 `ruflo-patch-native [--check]` | Make ruflo's agentdb use native `better-sqlite3` on Node ≥24. |
 | 🧠 `ruflo-enable-learning [--check]` | Activate ruvector self-learning and assert it (5 capability probes). |
@@ -147,6 +148,36 @@ Claude Code to drive ruflo through plain Bash.
 | 📇 `ruflo-setup-machine` | One-time: register ruflo MCP at **user** scope (all projects). Optional. |
 | 🔍 `ruflo-parity-test [--cleanup]` | 20-check end-to-end memory smoke test in an isolated `/tmp` dir. |
 | 📝 `ruflo-reference-refresh [--diff\|--regenerate]` | Inspect/rebuild the machine-wide CLAUDE.md ruflo block from the template. |
+
+---
+
+## 🧭 Which command do I run?
+
+**`install.sh` is the front door you walk through once; the functions are how you live in the house.**
+
+| | `install.sh` | The functions |
+|---|---|---|
+| **Nature** | a script run *from the kit repo* | commands on your `PATH`, available everywhere after install |
+| **Frequency** | once per machine (+ rarely, to re-lay the kit) | ongoing, day-to-day |
+| **Scope** | machine-level bootstrap | machine-recurring **and** per-project |
+
+On first run the functions aren't sourced yet, so `install.sh` sources them
+in-process and calls the *same* `ruflo-patch-native` / `ruflo-enable-learning`
+to heal — one source of truth, no drift. After that you never need `install.sh`
+for healing again.
+
+| Situation | Run this | Why not the other |
+|---|---|---|
+| 🆕 Brand-new machine | **`install.sh`** | nothing's on PATH yet — only the script can bootstrap |
+| 🔁 Re-cloned kit / new shell / wiped `~/.local/bin` | **`install.sh`** | re-lays the kit files (idempotent, backs up) |
+| ⬆️ After `npm i -g ruflo@latest` (or aqe) | **`ruflo-resync`** | the upgrade only wiped native binaries — re-running install.sh is the heavier wrong tool |
+| 📂 Starting in a new repo | **`ruflo-onboard`** | per-project; install.sh is machine-level and won't touch your repo |
+| 🔍 Routine checks | **functions** (`ruflo-parity-test`, `ruflo-learning-verify`) | no reason to re-bootstrap |
+
+**Rule of thumb:**
+- *"I'm setting up"* → `install.sh` (once).
+- *"I upgraded ruflo/aqe"* → `ruflo-resync`.
+- *"I'm starting work in a repo"* → `ruflo-onboard`.
 
 ---
 
@@ -223,8 +254,8 @@ It's not a replacement for ruflo — just a thin, reversible layer that picks sa
 
 ```
 ruflo-machine-ref/
-├── install.sh                 # idempotent installer (backs up what it touches)
-├── uninstall.sh               # clean reversal
+├── install.sh                 # machine bootstrap: prereqs + kit + heal (profiles, interactive)
+├── uninstall.sh               # clean reversal (opt-in --purge for global npm packages)
 ├── bin/
 │   ├── ruflo-patch-native     # native better-sqlite3 on Node ≥24
 │   ├── ruflo-parity-test      # 20-check end-to-end memory smoke test
@@ -232,7 +263,7 @@ ruflo-machine-ref/
 │   ├── ruflo-learning-verify  # prove the learning loop persists
 │   └── ruflo-security-verify  # verify security scan/defend/secrets + aidefence
 ├── shell/
-│   └── ruflo-functions.sh     # ruflo-resync, ruflo-setup-project, ruflo-setup-aqe, …
+│   └── ruflo-functions.sh     # ruflo-resync, ruflo-onboard, ruflo-setup-project, ruflo-setup-aqe, …
 ├── claude/
 │   └── ruflo-reference.md     # the machine-wide CLAUDE.md ruflo block (CLI-first)
 └── docs/
@@ -246,16 +277,21 @@ ruflo-machine-ref/
 ## 🗑️ Uninstall
 
 ```bash
-./uninstall.sh                  # removes bin scripts, template, CLAUDE.md block, rc source line
+./uninstall.sh                  # kit footprint only: bin scripts, template, CLAUDE.md block, rc line
 ./uninstall.sh --this-project   # ALSO revert the kit's statusline patches in the current repo
+./uninstall.sh --remove-ruflo   # ALSO npm-uninstall global ruflo (machine-wide; asks first)
+./uninstall.sh --remove-aqe     # ALSO npm-uninstall global agentic-qe (machine-wide; asks first)
+./uninstall.sh --purge          # --remove-ruflo + --remove-aqe
 ./uninstall.sh --dry-run        # preview without changing anything
 ```
 
-The plain `uninstall.sh` removes only machine-level setup; your ruflo install, memory
-DBs, and **project files** (including any statusline a project already had) are left
-untouched. Add `--this-project` from a repo root to revert that repo's statusline
-patches too (it backs up first and leaves all ruflo/agentic-qe data alone — use
-`ruflo cleanup --force` for per-project data).
+The plain `uninstall.sh` removes only machine-level kit setup; your ruflo
+install, memory DBs, and **project files** are left untouched. The
+`--remove-ruflo` / `--remove-aqe` / `--purge` flags reach the *global npm
+packages* — they affect every project on the machine, so each one prompts to
+confirm (pass `--yes` to skip in scripts). Add `--this-project` from a repo root
+to revert that repo's statusline patches too (it backs up first and leaves all
+ruflo/agentic-qe data alone — use `ruflo cleanup --force` for per-project data).
 
 ---
 
