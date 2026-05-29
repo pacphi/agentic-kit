@@ -3,13 +3,18 @@
 # uninstall.sh — remove what install.sh placed on this machine.
 #
 # Removes:
-#   ~/.local/bin/ruflo-patch-native, ~/.local/bin/ruflo-parity-test
+#   every helper this repo ships in bin/ from ~/.local/bin/ (derived from bin/,
+#     so it always matches what install.sh placed — no drift)
 #   ~/.config/ruflo/claude-md-template.md
 #   the BEGIN/END ruflo-reference block from ~/.claude/CLAUDE.md (content
 #     outside the sentinels is preserved)
-#   the source line from ~/.zshrc / ~/.bashrc
+#   the source line from ~/.zshrc / ~/.bashrc (this also disables the sourced
+#     shell functions: ruflo-resync, ruflo-setup-project, ruflo-setup-aqe, etc.)
 #
-# Leaves your ruflo installation, memory DBs, and project files untouched.
+# Leaves your ruflo installation, memory DBs, and project files untouched. Per-project
+# artifacts this kit may have created (.swarm/, .claude-flow/, .agentic-qe/, statusline
+# patches in a repo's .claude/helpers/) are project files and are intentionally NOT
+# touched — remove those per-project with `ruflo cleanup --force` if you want them gone.
 #
 # Usage: ./uninstall.sh [--dry-run]
 
@@ -17,14 +22,16 @@ set -u
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 DRY=0
 [ "${1:-}" = "--dry-run" ] && DRY=1
-[ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ] && { sed -n '3,17p' "$0" | sed 's|^# \{0,1\}||'; exit 0; }
+[ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ] && { sed -n '3,19p' "$0" | sed 's|^# \{0,1\}||'; exit 0; }
 
 if [ -t 1 ]; then C_OK=$'\033[32m'; C_DIM=$'\033[2m'; C_RESET=$'\033[0m'; else C_OK=""; C_DIM=""; C_RESET=""; fi
 ok()  { printf '%s✓%s %s\n' "$C_OK" "$C_RESET" "$*"; }
 run() { if [ "$DRY" -eq 1 ]; then printf '%s[dry-run]%s %s\n' "$C_DIM" "$C_RESET" "$*"; else eval "$*"; fi; }
 
-# 1. bin scripts
-for f in "$HOME/.local/bin/ruflo-patch-native" "$HOME/.local/bin/ruflo-parity-test"; do
+# 1. bin scripts — derived from this repo's bin/, so it always matches install.sh.
+for src in "$HERE"/bin/*; do
+	[ -f "$src" ] || continue
+	f="$HOME/.local/bin/$(basename "$src")"
 	[ -f "$f" ] && { run "rm -f '$f'"; ok "removed $f"; }
 done
 

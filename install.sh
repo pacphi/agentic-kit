@@ -47,11 +47,13 @@ CLAUDE_MD="$HOME/.claude/CLAUDE.md"
 echo "Installing ruflo machine reference from: $HERE"
 echo ""
 
-# 1. bin scripts
+# 1. bin scripts — installed from bin/ (derived, so install/uninstall never drift).
 echo "## CLI helpers -> $BIN_DIR"
 run "mkdir -p '$BIN_DIR'"
-for f in ruflo-patch-native ruflo-parity-test ruflo-enable-learning ruflo-learning-verify ruflo-security-verify; do
-	run "install -m 0755 '$HERE/bin/$f' '$BIN_DIR/$f'"
+for src in "$HERE"/bin/*; do
+	[ -f "$src" ] || continue
+	f="$(basename "$src")"
+	run "install -m 0755 '$src' '$BIN_DIR/$f'"
 	ok "$f"
 done
 case ":$PATH:" in
