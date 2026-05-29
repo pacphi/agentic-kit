@@ -19,3 +19,17 @@
 test-*.log
 .swarm/
 .claude-flow/
+
+# ruflo/agentic-qe dogfooding artifacts (created by running `ruflo init` / `aqe init` /
+# `ruflo-onboard` against this repo itself — runtime output, not source).
+.agentic-qe/
+.claude/
+*.db
+# CLAUDE.md backups: `aqe init` writes CLAUDE.md.backup; `ruflo init --force` writes
+# CLAUDE.md.pre-ruflo (executor.js #2208). Both are regenerable — never commit them.
+CLAUDE.md.backup
+CLAUDE.md.pre-ruflo
+CLAUDE.md.pre-ruflo.*
+# NOTE: project-local CLAUDE.md is intentionally NOT ignored here — see the open decision
+# in docs/upstream/ruflo-self-improvement-findings.md / PR discussion (commit a curated
+# AQE-instructions CLAUDE.md vs. fold AQE guidance into the global template).
