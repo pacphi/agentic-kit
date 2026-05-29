@@ -256,6 +256,70 @@ import sys; sys.exit(0 if prev == os.environ['RUFLO_DB_PATH'] else 1)
 }
 
 # ---------------------------------------------------------------------------
+# Opt-in: initialize agentic-qe (a SEPARATE package) in the current repo, with
+# native-SQLite repair + half-init repair. NOT called by ruflo-setup-project.
+#
+# Two bugs handled:
+#   1. agentic-qe depends on better-sqlite3@^12 directly; on Node >= 24 its prebuilt
+#      .node is missing (native:false) → `aqe init` fails at "Initialize persistence
+#      database". We install the native binary into the global agentic-qe first.
+#      (Same root cause as ruflo-patch-native, different package.)
+#   2. Half-init: `.agentic-qe/memory.db` exists but the project marker
+#      `.claude/skills/agentic-quality-engineering` is missing → re-run with --upgrade.
+#
+#   ruflo-setup-aqe            # init (or repair) agentic-qe in this repo
+#   ruflo-setup-aqe --force    # force reinitialize (--upgrade)
+ruflo-setup-aqe() {
+	local force=0
+	[ "${1:-}" = "--force" ] && force=1
+
+	# Ensure a globally-installed agentic-qe has a native better-sqlite3 (Node >= 24).
+	if command -v aqe >/dev/null 2>&1 && command -v npm >/dev/null 2>&1; then
+		local aqe_root; aqe_root="$(npm root -g)/agentic-qe"
+		if [ -d "$aqe_root" ] && command -v node >/dev/null 2>&1; then
+			local abi; abi="$(node -e 'process.stdout.write(process.versions.modules)')"
+			if [ "${abi:-0}" -ge 137 ] 2>/dev/null; then
+				if ! node -e "const b='$aqe_root/node_modules/better-sqlite3';process.exit(require('fs').existsSync(b+'/build/Release/better_sqlite3.node')?0:1)" 2>/dev/null; then
+					echo "Patching native better-sqlite3 into agentic-qe (Node ABI $abi)…"
+					( cd "$aqe_root" && npm install better-sqlite3@^12 --no-save --no-audit --no-fund >/dev/null 2>&1 ) \
+						&& echo "✓ agentic-qe better-sqlite3 is native" \
+						|| echo "⚠  could not patch agentic-qe better-sqlite3 — aqe init may fail"
+				fi
+			fi
+		fi
+	fi
+
+	local AQE
+	if command -v aqe >/dev/null 2>&1; then AQE="aqe"; else AQE="npx -y agentic-qe@latest"; fi
+	local sdk=".agentic-qe/memory.db"
+	local marker=".claude/skills/agentic-quality-engineering"
+
+	if [ "$force" -eq 0 ] && [ -f "$sdk" ] && [ -d "$marker" ]; then
+		echo "✓ agentic-qe already initialized (SDK db + project marker present)"
+		return 0
+	fi
+
+	if [ "$force" -eq 1 ] || { [ -f "$sdk" ] && [ ! -d "$marker" ]; }; then
+		[ -f "$sdk" ] && [ ! -d "$marker" ] && echo "⚠  Detected agentic-qe half-init (SDK db present, marker missing) — repairing…"
+		# shellcheck disable=SC2086
+		$AQE init --auto --upgrade || { echo "⚠  aqe init --upgrade failed"; return 1; }
+	else
+		# shellcheck disable=SC2086
+		$AQE init --auto || { echo "⚠  aqe init failed"; return 1; }
+	fi
+
+	if [ -f "$sdk" ] && [ -d "$marker" ]; then
+		local nskills; nskills="$(ls .claude/skills/ 2>/dev/null | wc -l | tr -d ' ')"
+		echo "✓ agentic-qe initialized (SDK db + marker present, $nskills skills)"
+		# refresh the statusline so the 🎓 segment appears
+		command -v ruflo-fix-statusline-version >/dev/null 2>&1 && ruflo-fix-statusline-version >/dev/null 2>&1
+		return 0
+	fi
+	echo "⚠  agentic-qe not fully initialized — SDK db: $([ -f "$sdk" ] && echo yes || echo no), marker: $([ -d "$marker" ] && echo yes || echo no)"
+	return 1
+}
+
+# ---------------------------------------------------------------------------
 # Inspect / regenerate the machine-wide CLAUDE.md ruflo block from the template
 # at ~/.config/ruflo/claude-md-template.md.
 #   ruflo-reference-refresh              status (versions + sentinel)
