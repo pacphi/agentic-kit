@@ -1,5 +1,19 @@
 # Self-Improvement Eval + RL Status-Line Telemetry — Implementation Plan
 
+> ### 🕰️ HISTORICAL — superseded by upstream (updated 2026‑05‑29)
+> This plan is preserved as the record of *where we've been*. Since it was written, upstream
+> ruflo shipped 3.10.6→3.10.9, which **resolved the centerpiece of this plan**:
+> - **F2 (route feedback persistence)** → fixed upstream in **3.10.6 (#2222)** via `saveModel()`
+>   (@pacphi credited). Task 0 here (`ruflo-patch-route-learning`) is therefore **retired** — the
+>   script is now a version-gated no-op on ≥3.10.6 (legacy stopgap only on <3.10.6) and is no
+>   longer wired into `ruflo-resync`.
+> - A deeper follow-up (negative-reward inversion) was fixed in **3.10.7**; route-cache staleness
+>   + `--explore false` in **3.10.8**.
+> - **Carry-forward (still valid):** `ruflo-improvement-eval` (the proof harness) and the F3/F4
+>   findings, which remain unaddressed/deferred upstream.
+>
+> Current truth-of-record: [`docs/upstream/ruflo-self-improvement-findings.md`](../../upstream/ruflo-self-improvement-findings.md).
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 > **SCOPE REVISED after the Tier-2 spike (see spec "Revised scope"):** Tier-2 (LoRA

@@ -141,8 +141,8 @@ Claude Code to drive ruflo through plain Bash.
 | 🧠 `ruflo-enable-learning [--check]` | Activate ruvector self-learning and assert it (5 capability probes). |
 | ✅ `ruflo-learning-verify [--keep]` | Prove the learning loop: train in an isolated dir, assert patterns persist 0 → N on disk. |
 | 🎚️ `ruflo-neural-train [args…]` | Wraps `ruflo neural train` in the current project and caches the MicroLoRA Δ for the status-line SONA segment (ruflo doesn't persist it). Args pass through. |
-| 🔁 `ruflo-patch-route-learning [--check]` | Fix bug F2 so the route Q-learner persists CLI feedback (`autoSaveInterval:1`) — makes route learning actually accumulate from use. Re-run after each ruflo upgrade (in `ruflo-resync`). |
-| 🔬 `ruflo-improvement-eval [--smoke\|--json\|--check]` | Held-out, ablated, multi-seed proof that the route Q-learner self-improves (permutation p + Cohen's d). Writes `.claude-flow/improvement.json`. |
+| 🔁 `ruflo-patch-route-learning [--check]` | **Retired on ruflo ≥3.10.6** — bug F2 (route feedback never persisted) is fixed upstream in **3.10.6 (#2222)** via `saveModel()`. Now a version-gated no-op; applies the legacy `autoSaveInterval:1` stopgap only on installs <3.10.6. Removed from `ruflo-resync`. |
+| 🔬 `ruflo-improvement-eval [--smoke\|--json\|--check]` | Held-out, ablated, multi-seed proof that the route Q-learner self-improves (permutation p + Cohen's d). Writes `.claude-flow/improvement.json`. `--cli-check` is version-aware (recognizes the 3.10.6 fix). |
 | 🛡️ `ruflo-security-verify [--quick]` | Verify `@claude-flow/security` + `aidefence` load, injection defense fires, scan/secrets run; flag the CVE-DB gap. |
 | 🎓 `ruflo-setup-aqe [--force]` | **Opt-in.** Fix agentic-qe's native-SQLite bug, then initialize it in a repo (with half-init repair). |
 | 💾 `ruflo-memory-checkpoint [db]` | Force a WAL checkpoint to recover stale memory reads. |
@@ -284,14 +284,16 @@ ruflo has three learning systems (delivery-company analogy): the **Q-learner** =
 
 - **Self-learning (banking experience): yes** — the 🧠/🎓 status-line counts grow as ruflo's
   hooks record your work.
-- **Self-improving (provably getting better): partial, and we made it better.** Two bugs
-  blocked it: the route learner never persisted CLI feedback (**fixed** by
-  `ruflo-patch-route-learning`), and the trained LoRA is never consumed at inference (an
-  **upstream** gap). With the fix, `ruflo-improvement-eval` proves the route learner
-  self-improves — *significantly but modestly* (held-out +16pp over a no-learning ablation,
-  permutation p=0.004). We report what's true and label what isn't.
+- **Self-improving (provably getting better): partial — and we reported it upstream.** The
+  route learner never persisted CLI feedback (bug **F2**) — **fixed upstream in ruflo 3.10.6
+  (#2222)**, @pacphi credited; our `ruflo-patch-route-learning` stopgap is now retired. A
+  deeper follow-up (negative-reward inversion) was fixed in 3.10.7. Still open: the state
+  encoder collapses keyword-distinct tasks (**F3**), and the trained LoRA/SONA is never
+  consumed at inference (**F4**, confirmed + deferred upstream in 3.10.9). `ruflo-improvement-eval`
+  proves the route learner self-improves — *significantly but modestly* (held-out +16pp over a
+  no-learning ablation, permutation p=0.004). We report what's true and label what isn't.
 
-Full analysis, the three findings, and a ready-to-file upstream issue:
+Full analysis, the upstream reconciliation (3.10.6→3.10.9), and the carry-forward scope:
 [docs/upstream/ruflo-self-improvement-findings.md](docs/upstream/ruflo-self-improvement-findings.md).
 
 ## 🗑️ Uninstall

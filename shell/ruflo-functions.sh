@@ -655,28 +655,26 @@ ruflo-resync() {
 	local do_aqe=0
 	[ "${1:-}" = "--aqe" ] && do_aqe=1
 
-	echo "## 1/5 self-learning (ruflo agentdb native + assert)"
+	echo "## 1/4 self-learning (ruflo agentdb native + assert)"
 	if command -v ruflo-enable-learning >/dev/null 2>&1; then
 		ruflo-enable-learning || echo "⚠  self-learning not fully active — see docs/TROUBLESHOOTING.md"
 	else
 		echo "⚠  ruflo-enable-learning not on PATH (run install.sh)"
 	fi
 
-	echo ""; echo "## 2/5 route-learning persistence (F2 fix — CLI feedback accumulates)"
-	if command -v ruflo-patch-route-learning >/dev/null 2>&1; then
-		ruflo-patch-route-learning || echo "⚠  route-learning persistence not applied — see docs/TROUBLESHOOTING.md"
-	else
-		echo "⚠  ruflo-patch-route-learning not on PATH (run install.sh)"
-	fi
+	# NOTE: route-learning persistence (bug F2) is RETIRED from resync — fixed upstream in
+	# ruflo 3.10.6 (#2222, saveModel() after feedback). `ruflo-patch-route-learning` is now a
+	# version-gated no-op on >=3.10.6 (legacy stopgap only on older installs); run it manually
+	# if you are pinned below 3.10.6.
 
-	echo ""; echo "## 3/5 agentic-qe native better-sqlite3 (if installed)"
+	echo ""; echo "## 2/4 agentic-qe native better-sqlite3 (if installed)"
 	_ruflo_aqe_ensure_native
 
-	echo ""; echo "## 4/5 statusline (version + activation footer) for this project"
+	echo ""; echo "## 3/4 statusline (version + activation footer) for this project"
 	ruflo-fix-statusline-version
 
 	if [ "$do_aqe" -eq 1 ]; then
-		echo ""; echo "## 5/5 refresh agentic-qe skills (--aqe)"
+		echo ""; echo "## 4/4 refresh agentic-qe skills (--aqe)"
 		if [ -f .agentic-qe/memory.db ]; then
 			ruflo-setup-aqe --force
 		else

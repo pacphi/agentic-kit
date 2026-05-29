@@ -1,10 +1,19 @@
 # Design: Proving (and surfacing) self-improvement — `ruflo-improvement-eval` + RL status-line telemetry
 
-- **Status:** Draft (awaiting user review)
+- **Status:** 🕰️ HISTORICAL — partially superseded by upstream ruflo 3.10.6→3.10.9 (see banner below)
 - **Branch:** `feat/self-improvement-eval`
-- **Date:** 2026-05-28
+- **Date:** 2026-05-28 (design); 2026-05-29 (upstream reconciliation)
 - **Author:** Chris Phillipson (with Claude)
 - **Builds on:** the merged self-learning/agentic-qe/security work (PR #1)
+
+> ### Upstream reconciliation (added 2026‑05‑29)
+> Preserved as the record of where we've been. The F2 fix this design relies on **landed
+> upstream** in ruflo **3.10.6 (#2222)** (`saveModel()` after feedback; @pacphi credited), so the
+> `ruflo-patch-route-learning` patch is **retired** (version-gated no-op on ≥3.10.6). The Tier-2
+> / F4 verdict below was **independently confirmed upstream in 3.10.9** (`apply()` empirically
+> inert; upstream deliberately won't fake a gradient). **F3** (state-encoder collapse) remains
+> open and is the primary carry-forward item. Current truth-of-record:
+> [`docs/upstream/ruflo-self-improvement-findings.md`](../../upstream/ruflo-self-improvement-findings.md).
 
 ## ⚠️ Revised scope (after the Tier-2 feasibility spike — supersedes §2–§4 framing)
 

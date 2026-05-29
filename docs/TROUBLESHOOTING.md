@@ -174,14 +174,18 @@ ruflo-security-verify               # verifies scan/defend/secrets + aidefence l
 
 ## `ruflo route stats` stuck at `Update Count 0 / Epsilon 1.0`
 
-The route Q-learner isn't persisting CLI feedback (bug F2: `route feedback` never
-`saveModel()`s and `autoSaveInterval` is 100, so single-update CLI processes exit without
-saving). Fix:
+This was bug **F2**: `route feedback` never `saveModel()`'d and `autoSaveInterval` was 100, so
+single-update CLI processes exited without saving. **Fixed upstream in ruflo 3.10.6 (#2222)** —
+`feedbackCommand` now calls `saveModel()` after the update. So the fix is simply:
 ```bash
-ruflo-patch-route-learning          # sets autoSaveInterval:1; CLI feedback now accumulates
+npm install -g ruflo@latest         # >=3.10.6 — CLI route feedback now persists
 ```
-Re-run after every `npm install -g ruflo` (or just run `ruflo-resync`). Prove the learner
-self-improves with `ruflo-improvement-eval`. Full analysis:
+If you are **pinned below 3.10.6**, the kit's legacy stopgap still works:
+```bash
+ruflo-patch-route-learning          # version-gated: no-op on >=3.10.6; sets autoSaveInterval:1 on older
+```
+Prove the learner self-improves with `ruflo-improvement-eval` (`--cli-check` reports whether
+feedback persists on your version). Full analysis + upstream reconciliation:
 [docs/upstream/ruflo-self-improvement-findings.md](upstream/ruflo-self-improvement-findings.md).
 
 ## Reset a project's ruflo state entirely

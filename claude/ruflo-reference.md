@@ -470,7 +470,7 @@ Need to ... ?
 ├─ Coordinate 3+ agents              → native Agent tool first; ruflo swarm only if topology/consensus needed
 ├─ Scan untrusted text               → ruflo security defend -i "..."
 ├─ Activate + verify self-learning   → ruflo-enable-learning && ruflo-learning-verify
-├─ Fix route learning (persist feedback) → ruflo-patch-route-learning   (bug F2)
+├─ Fix route learning (persist feedback) → upgrade to ruflo >=3.10.6 (#2222 — F2 fixed upstream; patch retired)
 ├─ Prove self-improvement            → ruflo-improvement-eval   (held-out A/B; not from `route stats`)
 ├─ Re-apply after a ruflo/aqe upgrade → ruflo-resync   (one command heals everything)
 ├─ Verify the security surface       → ruflo-security-verify

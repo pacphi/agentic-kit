@@ -50,15 +50,29 @@ function resolveRouterIdx() {
   try { return createRequire(cliPkg).resolve('./dist/src/ruvector/index.js'); } catch { return null; }
 }
 
-// ── --cli-check: is the F2 fix applied (CLI feedback persists)? ─────────────
+// ── --cli-check: does CLI `route feedback` persist? ─────────────────────────
+// F2 (route feedback never saveModel()'d) is FIXED UPSTREAM in ruflo 3.10.6 (#2222):
+// feedbackCommand now calls `await router.saveModel()`. So persistence holds on >=3.10.6
+// regardless of autoSaveInterval. On <3.10.6 it holds only if the legacy stopgap
+// (autoSaveInterval:1, via ruflo-patch-route-learning) has been applied.
 if (has('--cli-check')) {
   let groot; try { groot = execSync('npm root -g', { stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim(); } catch { groot = ''; }
+  let ver = ''; try { ver = (execSync('ruflo --version', { stdio: ['ignore', 'pipe', 'ignore'] }).toString().match(/\d+\.\d+\.\d+/) || [''])[0]; } catch { /* unknown */ }
+  const ge = (v, a, b, c) => { const [x, y, z] = (v || '0.0.0').split('.').map(Number); return x > a || (x === a && (y > b || (y === b && z >= c))); };
+  const upstreamFixed = ver && ge(ver, 3, 10, 6);
+  const route = join(groot, 'ruflo', 'node_modules', '@claude-flow', 'cli', 'dist', 'src', 'commands', 'route.js');
+  const hasSaveModel = existsSync(route) && /feedbackCommand[\s\S]{0,2000}saveModel\(\)/.test(readFileSync(route, 'utf8'));
   const ql = join(groot, 'ruflo', 'node_modules', '@claude-flow', 'cli', 'dist', 'src', 'ruvector', 'q-learning-router.js');
-  const fixed = existsSync(ql) && /autoSaveInterval: 1,/.test(readFileSync(ql, 'utf8'));
-  console.log(fixed
-    ? `${C.ok}✓${C.r} F2 fixed: CLI 'route feedback' persists (autoSaveInterval:1). Route learning accumulates from real use.`
-    : `${C.warn}⚠${C.r}  F2 present: CLI 'route feedback' does NOT persist. Run ruflo-patch-route-learning.`);
-  process.exit(fixed ? 0 : 1);
+  const legacyStopgap = existsSync(ql) && /autoSaveInterval: 1,/.test(readFileSync(ql, 'utf8'));
+  const persists = upstreamFixed || hasSaveModel || legacyStopgap;
+  if (upstreamFixed || hasSaveModel) {
+    console.log(`${C.ok}✓${C.r} CLI 'route feedback' persists — fixed upstream in ruflo 3.10.6 (#2222), saveModel() after feedback (ruflo ${ver || '>=3.10.6'}). The kit's autoSaveInterval stopgap is retired.`);
+  } else if (legacyStopgap) {
+    console.log(`${C.ok}✓${C.r} CLI 'route feedback' persists via the legacy stopgap (autoSaveInterval:1) on ruflo ${ver || '<3.10.6'}. Upgrade to >=3.10.6 to retire it.`);
+  } else {
+    console.log(`${C.warn}⚠${C.r}  CLI 'route feedback' does NOT persist on ruflo ${ver || '<3.10.6'}. Upgrade to >=3.10.6 (recommended) or run ruflo-patch-route-learning (legacy stopgap).`);
+  }
+  process.exit(persists ? 0 : 1);
 }
 
 const routerIdx = resolveRouterIdx();

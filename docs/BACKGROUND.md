@@ -181,14 +181,18 @@ footer shows `Δ` only when that cache exists.
 ### Self-improvement: route-learning persistence (F2) + the LoRA inference gap
 
 A separate investigation asked whether ruflo is *self-improving*, not just self-learning.
-Findings: the route Q-learner never persisted CLI feedback (`route feedback` never
-`saveModel()`s; `autoSaveInterval:100`) — **fixed** by `ruflo-patch-route-learning`
-(`autoSaveInterval:1`); the trained LoRA/SONA is never consumed at inference (no
-`predict`/`forward`; the matrix-LoRA `forward_array` has zero callers) — an upstream gap;
-and the state encoder collapses keyword-distinct tasks. With the fix,
-`ruflo-improvement-eval` proves the route learner self-improves significantly but modestly
-(held-out +16pp vs a no-learning ablation, permutation p=0.004). Full writeup + the
-ready-to-file upstream issue:
+We found the route Q-learner never persisted CLI feedback (`route feedback` never
+`saveModel()`s; `autoSaveInterval:100`) — **this is now fixed upstream in ruflo 3.10.6
+(#2222)** with an explicit `saveModel()` after feedback (@pacphi credited), so our
+`ruflo-patch-route-learning` stopgap is **retired** (version-gated no-op on ≥3.10.6). A deeper
+follow-up — `route feedback -r -1.0` parsed as +1.0, so negative feedback reinforced the bad
+agent — was fixed in **3.10.7**. **Still open:** the trained LoRA/SONA is never consumed at
+inference (no `predict`/`forward`; the matrix-LoRA `forward_array` has no decision-path
+callers) — confirmed and deferred upstream in 3.10.9; and the state encoder collapses
+keyword-distinct tasks (F3) — unaddressed upstream. `ruflo-improvement-eval` proves the route
+learner self-improves significantly but modestly (held-out +16pp vs a no-learning ablation,
+permutation p=0.004). Full writeup, the upstream reconciliation (3.10.6→3.10.9), and the
+carry-forward scope:
 [docs/upstream/ruflo-self-improvement-findings.md](upstream/ruflo-self-improvement-findings.md).
 
 ### Security surface
