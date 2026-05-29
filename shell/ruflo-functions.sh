@@ -130,7 +130,8 @@ function rufloActivationSegments(cwd){
   try {
     var fs = require("fs"), path = require("path"), cp = require("child_process");
     var DIM = "[2m", G = "[1;32m", Y = "[1;33m", C = "[1;36m", R = "[0m";
-    function q(db, sql){ try { return cp.execSync('sqlite3 "' + db + '" "' + sql + '"', {stdio:["ignore","pipe","ignore"], timeout:1500}).toString().trim(); } catch(e){ return ""; } }
+    // execFileSync (no shell) — db path / sql are passed as argv, never interpolated into a command line.
+    function q(db, sql){ try { return cp.execFileSync("sqlite3", [db, sql], {stdio:["ignore","pipe","ignore"], timeout:1500}).toString().trim(); } catch(e){ return ""; } }
     // ── self-learning (SONA) ──
     var learn = "";
     try {
