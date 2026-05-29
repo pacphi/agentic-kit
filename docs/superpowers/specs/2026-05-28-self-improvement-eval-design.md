@@ -6,6 +6,43 @@
 - **Author:** Chris Phillipson (with Claude)
 - **Builds on:** the merged self-learning/agentic-qe/security work (PR #1)
 
+## ⚠️ Revised scope (after the Tier-2 feasibility spike — supersedes §2–§4 framing)
+
+A time-boxed spike into ruflo source produced a decisive verdict that **changed this
+work's scope**:
+
+- **Tier-2 (make a decision consume the trained LoRA) is NOT feasible as a patch.** Every
+  `SonaCoordinator` call in ruflo is training/recording (`recordSignal`,
+  `recordTrajectory`, `addTrajectoryStep`, `endTrajectory`, `distillLearning`); the
+  coordinator exposes **no inference method** (`predict`/`forward`/`infer`); and the
+  matrix-LoRA `forward_array` has **zero callers** outside its own training file. It's not
+  a disconnected wire — *there is no socket*. Consuming the LoRA would require adding an
+  inference path to a native/WASM package — upstream R&D, not a kit patch. → **filed as an
+  upstream issue, not built here.**
+- **F2 (route Q-learner CLI persistence) IS a feasible, real fix — validated.** `route.js`
+  `feedbackCommand` calls `update()` but never `saveModel()`, and
+  `q-learning-router.js` defaults `autoSaveInterval: 100`, so single-update CLI processes
+  never persist. Patching `autoSaveInterval → 1` made six separate CLI `route feedback`
+  calls accumulate (Update Count 0→6, ε 1.0→0.9973, model persisted). This makes ruflo's
+  route learner actually **learn from real CLI use across invocations**.
+
+**Revised deliverables (a mix of "fix it" + "document it"):**
+1. **`bin/ruflo-patch-route-learning`** — idempotent, re-appliable global-dist patch for F2
+   (sets `autoSaveInterval: 1`; verifies CLI feedback accumulates). Wired into
+   `ruflo-resync`. Re-run after each ruflo upgrade (like `ruflo-patch-native`).
+2. **`bin/ruflo-improvement-eval`** — **minimal** in-process proof that the route Q-learner
+   self-improves (cold→warm held-out accuracy, no-learning ablation, permutation p +
+   Cohen's d), **plus** a check that after the F2 patch CLI-driven feedback persists. Writes
+   `.claude-flow/improvement.json` and prints the result. **No status-line telemetry** (the
+   `📈 RL` line is dropped — it was thin without live value).
+3. **Docs + upstream issue** — a findings writeup (decision-path map, what's wired vs not,
+   the §0 primer) and a ready-to-file upstream issue covering F2 + the Tier-2 inference-seam
+   gap.
+
+The §2–§8 sections below describe the *original* (full Tier-1 + telemetry) design and are
+retained for context; where they conflict with this revised scope, **this section wins**
+(notably: no `📈 RL` status-line line; add the F2 patch + upstream issue).
+
 ## 0. Plain-language primer (read this first — no ML background needed)
 
 Use a **delivery company** as the analogy. ruflo has *three different* learning systems
@@ -151,23 +188,30 @@ shell/ruflo-functions.sh  (statusline footer helper — append-only, fs-only)
   the EVAL split before any training.
 - **R3.** MUST train K episodes on the TRAIN split (decide-with-exploration → reward →
   `update`), evaluating EVAL **greedily (exploration off, no updates)** at each checkpoint.
-- **R4.** PASS criteria (pre-registered, all must hold): (a) mean held-out accuracy at final
-  checkpoint ≥ cold baseline + a margin (default ≥ +20pp) and ≥ a floor (default ≥ 0.6);
-  (b) the curve is non-decreasing across checkpoints within noise; (c) the **no-update
-  ablation** stays within noise of chance (`1/numActions`); (d) results aggregated over
-  N seeds with a reported CI. Fail otherwise.
+- **R4.** PASS criteria MUST be pre-registered and **statistically grounded** (this is an
+  A/B experiment — learning arm vs no-learning ablation), NOT arbitrary thresholds. All
+  must hold: (a) **causal significance** — a one-sided **permutation test** of the learning
+  arm's held-out accuracy vs the ablation arm's (exact C(2N,N) enumeration for small N,
+  Monte-Carlo fallback) yields **p < 0.05**; (b) **effect size** — **Cohen's d ≥ 0.8**
+  ("large", Cohen 1988) on that difference; (c) **above chance** — warm accuracy's 95%-CI
+  lower bound > `1/numActions`. Corroborating signals MUST be reported but are NOT gating:
+  ε decreased, mean TD error decreased, and **Spearman ρ(K, accuracy) > 0** (monotone
+  learning curve). A permutation test (not a t-test) is used because N is small and
+  accuracies are bounded (no normality assumption).
 - **R5.** MUST run a **no-update ablation** (same decisions, rewards withheld / `update`
   skipped) and assert it does **not** improve — proving gains are *caused* by learning.
 - **R6.** MUST aggregate over N seeds (router uses unseedable `Math.random`) and report
   mean ± CI; MUST NOT claim improvement from a single run.
-- **R7.** MUST write `.claude-flow/improvement.json` with the curve, cold/warm accuracy,
-  effect size + CI, ε (initial/final), avgTDError, |Q|, seed count, verdict, timestamp.
+- **R7.** MUST write `.claude-flow/improvement.json` with: the curve, cold/warm accuracy,
+  Δpp + 95% CI, ablation accuracy, **permutation p-value**, **Cohen's d**, **Spearman ρ**,
+  above-chance flag, ε (initial/final), avgTDError, |Q|, seed count, verdict, timestamp.
 - **R8.** MUST print an ASCII learning curve and a clear PASS/FAIL verdict; honor `--json`.
 
 ### Status line
-- **R9.** The footer MUST gain a `📈 RL` line rendered **only** when
+- **R9.** The footer MUST gain a **full** `📈 RL` line rendered **only** when
   `.claude-flow/improvement.json` exists, showing: learning-curve sparkline, held-out
-  accuracy cold→warm, effect size Δpp with CI, ε decay, mean TD error, and |Q|.
+  accuracy cold→warm, effect size Δpp with CI, **permutation p**, **Cohen's d**, ε decay,
+  mean TD error, and |Q|. A FAIL verdict renders as `◷ RL` (same fields).
 - **R10.** The `📈 RL` line MUST be fs-only (no subprocess), marker-guarded, and injected by
   the existing upgrade-safe statusline patcher (so `ruflo-resync` maintains it).
 - **R11.** The kit MUST NOT render any learning/improvement signal sourced from
@@ -185,9 +229,10 @@ shell/ruflo-functions.sh  (statusline footer helper — append-only, fs-only)
 
 ## 5. Behavioral scenarios
 
-- **S1 (proof passes):** cold acc ≈ 1/8 (~12%); after K=300 over 5 seeds, held-out greedy
-  acc ≈ 75–90%; ablation stays ≈ 12%; ε decayed, δ̄ shrunk → verdict PASS; footer shows
-  `📈 RL ▁▂▄▆▇ acc 12%→78% Δ+66pp (95% CI ±7) · ε1.0→0.12↓ · δ̄0.01↓ · |Q|24`.
+- **S1 (proof passes):** cold acc ≈ 1/8 (~12%); after training over N seeds, held-out greedy
+  acc ≈ 75–90%; ablation stays ≈ 12%; permutation p<0.05, Cohen's d≥0.8, above chance,
+  ε decayed, δ̄ shrunk → verdict PASS; footer shows
+  `📈 RL ▁▂▄▆▇ acc 12%→78% Δ+66pp (CI±7) · p<.001 · d=2.1 · ε0.12↓ · δ̄0.01↓ · |Q|24`.
 - **S2 (honest failure):** if held-out acc does **not** beat the ablation beyond CI, verdict
   FAIL and the footer reads `◷ RL unproven` — we report the negative result truthfully.
 - **S3 (no eval run yet):** `improvement.json` absent → footer omits the `📈 RL` line
