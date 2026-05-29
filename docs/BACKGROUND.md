@@ -102,3 +102,58 @@ usage is the common subset. No code changes required.
 
 All of the above are filed/summarized in
 [ruvnet/ruflo#2219](https://github.com/ruvnet/ruflo/issues/2219).
+
+## Self-learning activation (the second investigation)
+
+A follow-up question — "is the ruvector self-learning stack actually *on*?" — led
+to a second round of diagnosis on ruflo **3.10.5** / Node **26**. Findings:
+
+### The gist's controller-registry patches are already upstream
+
+A colleague's project-scoped kit (written against ruflo ~3.6) patched
+`@claude-flow/memory/dist/controller-registry.js` three ways: ESM `require`→dynamic
+import, forcing agentdb ≥3.x, and adding a missing `embedder` to ReasoningBank. On
+3.10.5 **all three are already in the shipped code**: `agentdb` resolves to
+`3.0.0-alpha.14`, the ESM fix is at `controller-registry.js:313-315`, and
+ReasoningBank is constructed with an embedder at `:655`. Porting those patches
+verbatim would be redundant. The kit instead keeps a **guarded** compat check
+(`ruflo-enable-learning`) that only warns/patches if a *regression* appears
+(agentdb < 3.0, or a missing embedder).
+
+### The real reason self-learning looked dormant
+
+`ruflo neural status` reported `Using sql.js (WASM)`, HNSW "Not loaded —
+@ruvector/core not available", ReasoningBank "Empty". Two distinct things:
+
+1. **Same root cause as the memory bug**: the agentdb `better-sqlite3` *binary*
+   was missing (`native:false` though the version was already `^12`), so agentdb
+   ran on WASM. `ruflo-patch-native` fixes it; it had simply been wiped by the
+   upgrade to 3.10.5. This is the dominant lever.
+2. **A cosmetic lazy-status artifact**: `getHNSWStatus()`
+   (`@claude-flow/cli/.../memory-initializer.js:663`) returns `available:true`
+   only if a lazy `_bridge`/`hnswIndex` singleton was initialized *in that
+   process*. The `neural status` command never triggers it, so it prints "Not
+   loaded" even though `@ruvector/core` loads fine and exposes `VectorDb` (on
+   `.default`). It is **not** real dormancy.
+
+So `ruflo-enable-learning` asserts **real capability** (native bsq3 + `@ruvector/core`→`VectorDb`,
+`@ruvector/sona`→`SonaEngine`, `@ruvector/gnn`→`RuvectorLayer`, agentdb v3), not the
+lazy display strings. `ruflo-learning-verify` proves the loop persists by training
+in an isolated dir and confirming `.claude-flow/neural/patterns.json` goes 0→N.
+
+### agentic-qe has the *same* Node-26 native-SQLite bug
+
+`aqe init --auto` failed at "Initialize persistence database" on Node 26.
+agentic-qe depends on `better-sqlite3@^12` **directly** (not via agentdb) and also
+ships without the prebuilt `.node` → `native:false`. `ruflo-setup-aqe` installs the
+native binary into the global `agentic-qe` before running `aqe init`. The gist did
+not cover this (it assumed `aqe init` just works).
+
+### Security surface
+
+ruflo ships `@claude-flow/security` (3.0.0-alpha.8) and `@claude-flow/aidefence`
+(3.0.3). `ruflo security defend` correctly **detects** prompt-injection (signals via
+exit code: 1=threat, 0=clean) but has an upstream cosmetic crash after detection
+(`Cannot read properties of undefined (reading 'color')`) — verdict/exit code are
+still correct. `ruflo security cve --list` has **no CVE database configured**; use
+`npm audit` for dependency CVEs. `ruflo-security-verify` checks all of this.

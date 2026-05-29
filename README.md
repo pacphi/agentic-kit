@@ -35,7 +35,15 @@ Three problems bite ruflo users and are hard to diagnose:
    nonexistent file. It also emits a per-project `CLAUDE.md` full of legacy
    `npx @claude-flow/cli@latest` commands.
 
-This kit fixes all three.
+This kit fixes all three — and, building on the native-SQLite fix, also **activates
+and verifies the features that silently stay dormant** on Node 24/26: ruvector
+self-learning (SONA/HNSW/ReasoningBank), the built-in security surface
+(`@claude-flow/security` + `aidefence`), and — opt-in — the separate `agentic-qe`
+fleet (which has the same native-SQLite bug). When active, the Claude Code status
+line shows `🧠`/`🛡`/`🎓` indicators. See [docs/BACKGROUND.md](docs/BACKGROUND.md)
+for the corrected diagnosis (notably: the colleague-gist's `controller-registry.js`
+patches are already upstream as of ruflo 3.10.5; the real lever is the missing
+native binary).
 
 ---
 
@@ -83,14 +91,18 @@ ruflo-machine-ref/
 ├── uninstall.sh               # clean reversal
 ├── bin/
 │   ├── ruflo-patch-native     # swap agentdb's better-sqlite3 -> ^12 on Node >= 24
-│   └── ruflo-parity-test      # 20-check end-to-end memory smoke test
+│   ├── ruflo-parity-test      # 20-check end-to-end memory smoke test
+│   ├── ruflo-enable-learning  # activate + assert ruvector self-learning (SONA/HNSW/ReasoningBank)
+│   ├── ruflo-learning-verify  # prove the learning loop persists (patterns 0 -> N)
+│   └── ruflo-security-verify  # verify security scan/defend/secrets + aidefence
 ├── shell/
-│   └── ruflo-functions.sh     # ruflo-setup-project, ruflo-remove-mcp, etc. (bash+zsh)
+│   └── ruflo-functions.sh     # ruflo-setup-project, ruflo-setup-aqe, ruflo-remove-mcp, etc.
 ├── claude/
 │   └── ruflo-reference.md     # the machine-wide CLAUDE.md ruflo block (CLI-first, MCP-optional)
 └── docs/
-    ├── BACKGROUND.md          # the full root-cause story (Node/ABI/WASM/better-sqlite3)
-    └── TROUBLESHOOTING.md     # diagnostic tables + fixes
+    ├── BACKGROUND.md          # root-cause story (memory + self-learning + agentic-qe + security)
+    ├── TROUBLESHOOTING.md     # diagnostic tables + fixes
+    └── superpowers/           # design spec + implementation plan for the self-learning work
 ```
 
 ---
@@ -122,8 +134,12 @@ Claude Code to drive ruflo through Bash.
 |---|---|
 | `ruflo-setup-machine` | One-time: register ruflo MCP at **user** scope (all projects). Optional. |
 | `ruflo-remove-mcp` | Remove ruflo MCP from **all** scopes (recover ~84k tokens/session). |
-| `ruflo-setup-project` | Per repo: init + strip MCP cruft + pin absolute DB path + native patch + activate memory/swarm/daemon + **verify a write persists** + sanitize CLAUDE.md. |
+| `ruflo-setup-project [--with-security]` | Per repo: init + strip MCP cruft + pin absolute DB path + native patch + activate memory/swarm/daemon + **verify a write persists** + sanitize CLAUDE.md + heal status line. `--with-security` adds a security verification pass. |
 | `ruflo-patch-native [--check]` | Make agentdb use native `better-sqlite3` on Node ≥24. Re-run after every ruflo upgrade. |
+| `ruflo-enable-learning [--check]` | Patch native SQLite + assert ruvector self-learning is active (5 capability probes). Re-run after every ruflo upgrade. |
+| `ruflo-learning-verify [--keep]` | Prove the learning loop: train in an isolated dir, assert patterns persist 0 → N on disk. |
+| `ruflo-security-verify [--quick]` | Verify `@claude-flow/security`/`aidefence` load, `defend` detects injection, `scan`/`secrets` run; flags the CVE-DB gap. |
+| `ruflo-setup-aqe [--force]` | **Opt-in.** Initialize agentic-qe in a repo (native-SQLite + half-init repair). Not run by `ruflo-setup-project`. |
 | `ruflo-memory-checkpoint [db]` | Force a WAL checkpoint to recover stale memory reads. |
 | `ruflo-reference-refresh [--diff\|--regenerate]` | Inspect/rebuild the CLAUDE.md ruflo block from the template. |
 | `ruflo-parity-test [--cleanup]` | 20-check end-to-end memory smoke test in an isolated dated `/tmp` dir. |
