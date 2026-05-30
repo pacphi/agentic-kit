@@ -187,12 +187,17 @@ case ":$PATH:" in
 esac
 echo ""
 
-# CLAUDE.md reference template (+ the conditional agentic-qe sub-block template)
-echo "## CLAUDE.md reference template -> $CFG_DIR/claude-md-template.md"
+# CLAUDE.md reference templates: the always-on ruflo-reference base + every conditional
+# sub-block template from the registry in ruflo-lib.sh (agentic-qe, superpowers, …).
+# Staging is registry-driven — adding a tool there auto-stages its template, no edit here.
+echo "## CLAUDE.md reference templates -> $CFG_DIR/"
 run "mkdir -p '$CFG_DIR'"
 run "cp '$HERE/claude/ruflo-reference.md' '$CFG_DIR/claude-md-template.md'"
-run "cp '$HERE/claude/aqe-reference.md' '$CFG_DIR/aqe-md-template.md'"
-ok "templates installed (ruflo-reference + conditional aqe-reference)"
+_ruflo_cond_blocks | while IFS='|' read -r _slug _src _tmpl _detector; do
+	[ -n "$_slug" ] || continue
+	run "cp '$HERE/claude/$_src' '$CFG_DIR/$_tmpl'"
+done
+ok "templates installed (ruflo-reference + $(_ruflo_cond_blocks | grep -c .) conditional blocks)"
 echo ""
 
 # Shared helper lib — deployed to a stable absolute path so the standalone bin
@@ -225,23 +230,22 @@ else
 fi
 echo ""
 
-# Conditional agentic-qe operating block: present in ~/.claude/CLAUDE.md ONLY when agentic-qe
-# is installed; stripped otherwise (self-healing on uninstall). Idempotent.
-echo "## ruflo-aqe-reference block (conditional on agentic-qe) -> $CLAUDE_MD"
-AQE_BEGIN='<!-- BEGIN ruflo-aqe-reference -->'; AQE_END='<!-- END ruflo-aqe-reference -->'
+# Conditional operating blocks (agentic-qe, superpowers, …): each present in
+# ~/.claude/CLAUDE.md ONLY when its tool is detected; stripped otherwise (self-healing on
+# uninstall). Driven by the registry in ruflo-lib.sh — see docs/CONDITIONAL-BLOCKS.md.
+echo "## conditional CLAUDE.md blocks (per detected tool) -> $CLAUDE_MD"
 if [ "$DRY" -eq 1 ]; then
-	if have aqe; then printf '%s[dry-run]%s upsert ruflo-aqe-reference block (aqe present)\n' "$C_DIM" "$C_RESET"
-	else printf '%s[dry-run]%s strip ruflo-aqe-reference block (aqe absent)\n' "$C_DIM" "$C_RESET"; fi
-elif have aqe; then
-	_ruflo_block_upsert "$CLAUDE_MD" "$AQE_BEGIN" "$AQE_END" "$HERE/claude/aqe-reference.md" \
-		&& ok "agentic-qe present — merged ruflo-aqe-reference block" \
-		|| warn "could not merge ruflo-aqe-reference block (aqe-reference.md unreadable)"
+	_ruflo_cond_blocks | while IFS='|' read -r _slug _src _tmpl _detector; do
+		[ -n "$_slug" ] || continue
+		if eval "$_detector" >/dev/null 2>&1; then
+			printf '%s[dry-run]%s upsert %s (detector matched)\n' "$C_DIM" "$C_RESET" "$_slug"
+		else
+			printf '%s[dry-run]%s strip %s (detector did not match)\n' "$C_DIM" "$C_RESET" "$_slug"
+		fi
+	done
 else
-	if [ -f "$CLAUDE_MD" ] && grep -qF "$AQE_BEGIN" "$CLAUDE_MD"; then
-		_ruflo_block_strip "$CLAUDE_MD" "$AQE_BEGIN" "$AQE_END"; ok "agentic-qe absent — stripped stale ruflo-aqe-reference block"
-	else
-		dim "agentic-qe absent — no ruflo-aqe-reference block to manage"
-	fi
+	_ruflo_sync_cond_blocks "$CLAUDE_MD" "$CFG_DIR"
+	ok "conditional blocks synced to detected tools"
 fi
 echo ""
 

@@ -651,23 +651,15 @@ ruflo-neural-train() {
 #
 #   ruflo-resync           # re-apply learning + statusline (recommended after upgrade)
 #   ruflo-resync --aqe     # also refresh agentic-qe skills in this repo
-# Sync the conditional agentic-qe sub-block in ~/.claude/CLAUDE.md: present iff `aqe` is
-# installed (upsert from the staged template), stripped otherwise (self-healing on uninstall).
-# Quiet unless the block's presence actually changes. Needs ruflo-lib.sh (_ruflo_block_*).
+# Sync ALL conditional reference sub-blocks in ~/.claude/CLAUDE.md (agentic-qe,
+# superpowers, …) against their detectors: present when the tool is installed, stripped
+# otherwise. The registry and the upsert/strip logic live in ruflo-lib.sh
+# (_ruflo_cond_blocks, _ruflo_sync_cond_blocks); see docs/CONDITIONAL-BLOCKS.md. The name
+# is kept for back-compat with existing callers and the `--sync-aqe` flag that predate the
+# registry — it now reconciles every block, not just agentic-qe.
 _ruflo_sync_aqe_block() {
-	local ref="$HOME/.claude/CLAUDE.md"
-	local tmpl="$HOME/.config/ruflo/aqe-md-template.md"
-	local b='<!-- BEGIN ruflo-aqe-reference -->' e='<!-- END ruflo-aqe-reference -->'
-	command -v _ruflo_block_upsert >/dev/null 2>&1 || return 0
-	[ -f "$ref" ] || return 0
-	if command -v aqe >/dev/null 2>&1; then
-		[ -f "$tmpl" ] || return 0
-		grep -qF "$b" "$ref" || echo "  + agentic-qe present → adding ruflo-aqe-reference block to $ref"
-		_ruflo_block_upsert "$ref" "$b" "$e" "$tmpl"
-	elif grep -qF "$b" "$ref" 2>/dev/null; then
-		echo "  - agentic-qe absent → stripping stale ruflo-aqe-reference block from $ref"
-		_ruflo_block_strip "$ref" "$b" "$e"
-	fi
+	command -v _ruflo_sync_cond_blocks >/dev/null 2>&1 || return 0
+	_ruflo_sync_cond_blocks "$HOME/.claude/CLAUDE.md" "$HOME/.config/ruflo"
 }
 
 ruflo-resync() {
@@ -687,8 +679,8 @@ ruflo-resync() {
 	echo ""; echo "## 3/4 statusline (version + activation footer) for this project"
 	ruflo-fix-statusline-version
 
-	echo ""; echo "## machine-wide ~/.claude/CLAUDE.md: conditional agentic-qe reference block"
-	_ruflo_sync_aqe_block && echo "✓ ruflo-aqe-reference block in sync with agentic-qe install state"
+	echo ""; echo "## machine-wide ~/.claude/CLAUDE.md: conditional reference blocks (agentic-qe, superpowers, …)"
+	_ruflo_sync_aqe_block && echo "✓ conditional blocks in sync with detected tools"
 
 	if [ "$do_aqe" -eq 1 ]; then
 		echo ""; echo "## 4/4 refresh agentic-qe skills (--aqe)"
@@ -711,6 +703,8 @@ ruflo-resync() {
 #   ruflo-reference-refresh --regenerate replace managed block (preserves content
 #                                        outside the BEGIN/END sentinels)
 #   ruflo-reference-refresh --regenerate -y   skip the y/n prompt
+#   ruflo-reference-refresh --sync-blocks reconcile conditional blocks (aqe, superpowers,
+#                                        …) with detected tools (--sync-aqe is an alias)
 ruflo-reference-refresh() {
 	local ref="$HOME/.claude/CLAUDE.md"
 	local template="$HOME/.config/ruflo/claude-md-template.md"
@@ -719,31 +713,37 @@ ruflo-reference-refresh() {
 		case "$1" in
 			--diff) mode="diff" ;;
 			--regenerate) mode="regenerate" ;;
-			--sync-aqe) mode="sync-aqe" ;;
+			--sync-aqe|--sync-blocks) mode="sync-blocks" ;;
 			-y|--yes) yes=1 ;;
-			-h|--help) echo "Usage: ruflo-reference-refresh [--diff|--regenerate [-y]|--sync-aqe]"; return 0 ;;
+			-h|--help) echo "Usage: ruflo-reference-refresh [--diff|--regenerate [-y]|--sync-blocks]"; return 0 ;;
 			*) echo "Unknown flag: $1"; return 2 ;;
 		esac
 		shift
 	done
-	# --sync-aqe only touches the conditional agentic-qe block; no ruflo template needed.
-	if [ "$mode" = "sync-aqe" ]; then _ruflo_sync_aqe_block; return 0; fi
+	# --sync-blocks (a.k.a. --sync-aqe) only reconciles the conditional blocks; no ruflo template needed.
+	if [ "$mode" = "sync-blocks" ]; then _ruflo_sync_aqe_block; return 0; fi
 	if [ ! -f "$template" ]; then
 		echo "No template at $template (run install.sh, or extract from $ref)."
 		return 1
 	fi
-	local aqe_begin='<!-- BEGIN ruflo-aqe-reference -->'
 	case "$mode" in
 		status)
 			echo "ruflo: $(ruflo --version 2>/dev/null || echo 'not installed')"
 			echo "installed sentinel: $(grep -E 'ruflo-version' "$ref" 2>/dev/null || echo 'none')"
 			echo "template  sentinel: $(grep -E 'ruflo-version' "$template" 2>/dev/null || echo 'none')"
-			if command -v aqe >/dev/null 2>&1; then
-				grep -qF "$aqe_begin" "$ref" 2>/dev/null && echo "agentic-qe: installed — aqe block present" || echo "agentic-qe: installed — aqe block MISSING (run --sync-aqe)"
-			else
-				grep -qF "$aqe_begin" "$ref" 2>/dev/null && echo "agentic-qe: absent — aqe block STALE (run --sync-aqe to strip)" || echo "agentic-qe: absent — aqe block correctly absent"
+			# Reconcile every conditional block (agentic-qe, superpowers, …) against its detector.
+			if command -v _ruflo_cond_blocks >/dev/null 2>&1; then
+				_ruflo_cond_blocks | while IFS='|' read -r _slug _src _tmpl _detector; do
+					[ -n "$_slug" ] || continue
+					_present=no; eval "$_detector" >/dev/null 2>&1 && _present=yes
+					_inref=no; grep -qF "<!-- BEGIN $_slug -->" "$ref" 2>/dev/null && _inref=yes
+					if   [ "$_present" = yes ] && [ "$_inref" = yes ]; then echo "$_slug: tool present — block present ✓"
+					elif [ "$_present" = yes ] && [ "$_inref" = no  ]; then echo "$_slug: tool present — block MISSING (run --sync-blocks)"
+					elif [ "$_present" = no  ] && [ "$_inref" = yes ]; then echo "$_slug: tool absent — block STALE (run --sync-blocks to strip)"
+					else echo "$_slug: tool absent — block correctly absent"; fi
+				done
 			fi
-			echo "Use --diff to compare, --regenerate to rebuild, --sync-aqe to fix the agentic-qe block."
+			echo "Use --diff to compare, --regenerate to rebuild, --sync-blocks to fix conditional blocks."
 			;;
 		diff)
 			local blk; blk=$(mktemp)

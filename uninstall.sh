@@ -4,9 +4,10 @@
 #
 # By default removes ONLY the kit's own footprint:
 #   - every helper this repo ships in bin/ from ~/.local/bin/ (derived from bin/)
-#   - ~/.config/ruflo/{claude-md-template,aqe-md-template}.md
-#   - the BEGIN/END ruflo-reference AND ruflo-aqe-reference blocks from
-#     ~/.claude/CLAUDE.md (content outside the sentinels is preserved)
+#   - ~/.config/ruflo/claude-md-template.md + every staged conditional template
+#     (aqe-md-template.md, superpowers-md-template.md, … — per the registry)
+#   - the BEGIN/END ruflo-reference block AND every conditional block (ruflo-aqe-reference,
+#     ruflo-superpowers-reference, …) from ~/.claude/CLAUDE.md (content outside is preserved)
 #   - the source line from ~/.zshrc / ~/.bashrc
 #
 # Leaves your ruflo install, memory DBs, and project files untouched. Per-project
@@ -86,24 +87,33 @@ for src in "$HERE"/bin/*; do
 	[ -f "$f" ] && { run "rm -f '$f'"; ok "removed $f"; }
 done
 
-# 2. templates (ruflo-reference + conditional agentic-qe block)
+# 2. templates (ruflo-reference base + every conditional sub-block, per the registry in ruflo-lib.sh)
 [ -f "$HOME/.config/ruflo/claude-md-template.md" ] && { run "rm -f '$HOME/.config/ruflo/claude-md-template.md'"; ok "removed template"; }
-[ -f "$HOME/.config/ruflo/aqe-md-template.md" ] && { run "rm -f '$HOME/.config/ruflo/aqe-md-template.md'"; ok "removed agentic-qe template"; }
+_ruflo_cond_blocks | while IFS='|' read -r _slug _src _tmpl _detector; do
+	[ -n "$_slug" ] || continue
+	[ -f "$HOME/.config/ruflo/$_tmpl" ] && { run "rm -f '$HOME/.config/ruflo/$_tmpl'"; ok "removed $_slug template"; }
+done
 
 # 2b. shared helper lib (already sourced at the top, so removing it here is safe)
 [ -f "$HOME/.config/ruflo/ruflo-lib.sh" ] && { run "rm -f '$HOME/.config/ruflo/ruflo-lib.sh'"; ok "removed helper lib"; }
 
-# 3. CLAUDE.md managed blocks (ruflo-reference + the conditional ruflo-aqe-reference)
+# 3. CLAUDE.md managed blocks: the ruflo-reference base + every conditional block (registry-driven,
+#    so any block added to ruflo-lib.sh is cleaned here too). Content outside the sentinels is preserved.
 CLAUDE_MD="$HOME/.claude/CLAUDE.md"
-if [ -f "$CLAUDE_MD" ] && grep -qE '<!-- BEGIN ruflo-(reference|aqe-reference) -->' "$CLAUDE_MD"; then
+# All managed blocks share the "ruflo-" sentinel prefix (ruflo-reference, ruflo-aqe-reference,
+# ruflo-superpowers-reference, …), so one substring check covers the base block and every
+# registry block without enumerating them here.
+if [ -f "$CLAUDE_MD" ] && grep -qF "<!-- BEGIN ruflo-" "$CLAUDE_MD" 2>/dev/null; then
 	if [ "$DRY" -eq 1 ]; then
-		printf '%s[dry-run]%s strip ruflo-reference + ruflo-aqe-reference blocks from %s\n' "$C_DIM" "$C_RESET" "$CLAUDE_MD"
+		printf '%s[dry-run]%s strip ruflo-reference + conditional blocks from %s\n' "$C_DIM" "$C_RESET" "$CLAUDE_MD"
 	else
 		cp "$CLAUDE_MD" "$CLAUDE_MD.bak.$(date +%Y%m%d-%H%M%S)"
-		new=$(mktemp)
-		awk '/<!-- BEGIN ruflo-reference -->/{skip=1} /<!-- BEGIN ruflo-aqe-reference -->/{skip=1} /<!-- END ruflo-reference -->/{skip=0; next} /<!-- END ruflo-aqe-reference -->/{skip=0; next} !skip' "$CLAUDE_MD" > "$new"
-		mv "$new" "$CLAUDE_MD"
-		ok "stripped ruflo-reference + ruflo-aqe-reference blocks (backup saved; rest of file preserved)"
+		_ruflo_block_strip "$CLAUDE_MD" "<!-- BEGIN ruflo-reference -->" "<!-- END ruflo-reference -->"
+		_ruflo_cond_blocks | while IFS='|' read -r _slug _src _tmpl _detector; do
+			[ -n "$_slug" ] || continue
+			_ruflo_block_strip "$CLAUDE_MD" "<!-- BEGIN $_slug -->" "<!-- END $_slug -->"
+		done
+		ok "stripped ruflo-reference + conditional blocks (backup saved; rest of file preserved)"
 	fi
 fi
 

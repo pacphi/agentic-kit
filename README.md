@@ -265,10 +265,13 @@ ruflo-machine-ref/
 ├── shell/
 │   └── ruflo-functions.sh     # ruflo-resync, ruflo-onboard, ruflo-setup-project, ruflo-setup-aqe, …
 ├── claude/
-│   └── ruflo-reference.md     # the machine-wide CLAUDE.md ruflo block (CLI-first)
+│   ├── ruflo-reference.md         # the machine-wide CLAUDE.md ruflo block (always on, CLI-first)
+│   ├── aqe-reference.md           # conditional block — present only when agentic-qe is installed
+│   └── superpowers-reference.md   # conditional block — house rules so superpowers + ruflo coexist
 └── docs/
     ├── BACKGROUND.md          # the full root-cause story (memory + learning + aqe + security)
     ├── TROUBLESHOOTING.md     # symptom → diagnosis → fix
+    ├── CONDITIONAL-BLOCKS.md  # how the per-tool CLAUDE.md blocks work + how to add one
     └── superpowers/           # the design spec + implementation plan
 ```
 
@@ -299,6 +302,7 @@ ruflo/agentic-qe data alone — use `ruflo cleanup --force` for per-project data
 
 - 📖 [docs/BACKGROUND.md](docs/BACKGROUND.md) — the full root-cause investigation (Node/ABI/WASM, why self-learning looked dormant, the agentic-qe variant, the security surface)
 - 🔧 [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) — symptom → diagnosis → fix runbook
+- 🧩 [docs/CONDITIONAL-BLOCKS.md](docs/CONDITIONAL-BLOCKS.md) — how the per-tool CLAUDE.md blocks work (agentic-qe, superpowers), why superpowers needs "house rules," and how to add support for a new tool
 - 🧱 [docs/superpowers/](docs/superpowers/) — the design spec and implementation plan behind the self-learning work
 
 ---

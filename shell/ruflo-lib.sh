@@ -100,10 +100,10 @@ _ruflo_bsq3_install() {
 }
 
 # --- sentinel-delimited block management (CLAUDE.md sub-blocks) -------------
-# Manage a `<!-- BEGIN x -->`…`<!-- END x -->` block in a file. Used for the
-# conditional ruflo-aqe-reference block in ~/.claude/CLAUDE.md (present only when
-# agentic-qe is installed). Idempotent; preserves everything outside the markers.
-# Markers are matched as fixed substrings (awk index()).
+# Manage a `<!-- BEGIN x -->`…`<!-- END x -->` block in a file. These are the generic
+# primitives behind every conditional block in ~/.claude/CLAUDE.md (see the
+# conditional-block registry below). Idempotent; preserve everything outside the
+# markers. Markers are matched as fixed substrings (awk index()).
 
 # _ruflo_block_upsert FILE BEGIN END SRC — replace the BEGIN..END block in FILE with
 # the contents of SRC (which must itself contain the markers); append if the block is
@@ -137,6 +137,57 @@ _ruflo_block_strip() {
 		index($0,e){skip=0}
 	' "$file" > "$new"
 	cat "$new" > "$file"; rm -f "$new"
+}
+
+# --- conditional-block registry --------------------------------------------
+# Some CLAUDE.md sub-blocks belong in ~/.claude/CLAUDE.md only when a companion
+# tool is installed (the agentic-qe fleet, the superpowers plugin, …). Rather than
+# hand-code the present/absent gate for each one across install.sh, uninstall.sh,
+# and ruflo-reference-refresh, every conditional block is listed here ONCE. Adding a
+# tool = ship claude/<name>-reference.md and add a single row below; install, resync,
+# status, and uninstall all pick it up with no further edits. See
+# docs/CONDITIONAL-BLOCKS.md for the design and how to author a new block's content.
+#
+# Row format (pipe-separated, one block per line):
+#   <slug> | <source file in claude/> | <staged template in ~/.config/ruflo/> | <detector>
+# - <slug>     doubles as the sentinel name: <!-- BEGIN <slug> --> … <!-- END <slug> -->
+# - <detector> is any command; exit 0 means "tool present → include the block".
+_ruflo_cond_blocks() {
+	cat <<'EOF'
+ruflo-aqe-reference|aqe-reference.md|aqe-md-template.md|have aqe
+ruflo-superpowers-reference|superpowers-reference.md|superpowers-md-template.md|have_superpowers
+EOF
+}
+
+# have_superpowers — true if the superpowers plugin is installed on disk at
+# ~/.claude/plugins/cache/<marketplace>/superpowers/<version>/. This is
+# presence-on-disk, mirroring how `have aqe` means "installed" (not "provably active
+# this session"). `find … -quit` returns on the first match; empty output if none, and
+# a missing cache dir is swallowed by 2>/dev/null. Works in both bash and zsh.
+have_superpowers() {
+	[ -n "$(find "$HOME/.claude/plugins/cache" -maxdepth 4 -type d -name superpowers -print -quit 2>/dev/null)" ]
+}
+
+# _ruflo_sync_cond_blocks REF CFG — reconcile every registry block against its detector:
+# upsert from CFG/<staged template> when the detector passes, strip the block otherwise.
+# Idempotent; prints a line only when a block is actually added or removed. No-op if REF
+# is missing or the block primitives are not loaded. Shared by install.sh and ruflo-resync.
+_ruflo_sync_cond_blocks() {
+	local ref="$1" cfg="$2" slug src tmpl detector b e
+	[ -f "$ref" ] || return 0
+	command -v _ruflo_block_upsert >/dev/null 2>&1 || return 0
+	_ruflo_cond_blocks | while IFS='|' read -r slug src tmpl detector; do
+		[ -n "$slug" ] || continue
+		b="<!-- BEGIN $slug -->"; e="<!-- END $slug -->"
+		if eval "$detector" >/dev/null 2>&1; then
+			[ -f "$cfg/$tmpl" ] || continue
+			grep -qF "$b" "$ref" 2>/dev/null || echo "  + $slug → tool present, adding block"
+			_ruflo_block_upsert "$ref" "$b" "$e" "$cfg/$tmpl"
+		elif grep -qF "$b" "$ref" 2>/dev/null; then
+			echo "  - $slug → tool absent, stripping stale block"
+			_ruflo_block_strip "$ref" "$b" "$e"
+		fi
+	done
 }
 
 _RUFLO_LIB=1   # sentinel: consumers check this to confirm the lib loaded

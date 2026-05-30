@@ -19,3 +19,13 @@
 test-*.log
 .swarm/
 .claude-flow/
+
+# Dogfooding artifacts — running ruflo init / aqe init / ruflo-onboard against THIS
+# repo writes these. They are NOT source (see CLAUDE.md "Dogfooding artifacts are not
+# source"); never commit them.
+.agentic-qe/
+.claude/
+ruvector.db
+*.db
+CLAUDE.md.backup
+CLAUDE.md.pre-ruflo
