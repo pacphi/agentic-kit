@@ -221,15 +221,24 @@ upgrade ruflo ──► binaries present, bsq3 .node MISSING ──► agentdb=W
 
 - **R16.** The generated `statusline.cjs` MUST append a self-learning line when SONA is
   active, showing real counts read from `.claude-flow/neural/stats.json`
-  (`🧠 SONA [bar] <patterns> · <traj>`), a `[bar]` volume gauge (~10 patterns/dot), an
-  `⚡ HNSW` marker only when a vector index (`.swarm/hnsw.index`) exists, and a
-  `Δ<n> LoRA` field only when `.claude-flow/neural/lora-delta.json` exists. Omitted
+  (`🧠 SONA [bar] <patterns> · <traj>`), a `[bar]` volume gauge (~10 patterns/dot), and an
+  `⚡ HNSW` marker only when a vector index (`.swarm/hnsw.index`) exists. Omitted
   entirely when no learning has occurred. The agentic-qe line MUST be icon-tagged
   (`🎓 patterns · 🧭 traj · 🧬 vec⚡ · 💾 size`). It MUST NOT repeat the git branch —
   ruflo's native header line already shows it.
-- **R16a.** `Δ LoRA` is a transient last-step metric ruflo neither persists nor exposes
-  via a file (verified in `ruvector-training.js`), so a `ruflo-neural-train` wrapper MUST
-  capture it from `ruflo neural train` output and cache it for the footer to read.
+- **R16a.** (Superseded 2026-06-01.) The footer MUST NOT show a `Δ LoRA` field while the
+  matrix-LoRA path is inert upstream (ruvnet/RuVector#519: `processInstantLearning` is a
+  no-op stub, the trained delta is never consumed in a decision, `deltaNorm` stays 0). A
+  value that changes no decision is not an improvement signal. The earlier requirement —
+  a `ruflo-neural-train` wrapper capturing the transient delta — is withdrawn; re-introduce
+  both the field and the capture only after #519 closes and the delta provably moves.
+  (Tracked in issue #8 / F4.)
+- **R16b.** The footer MUST append a route Q-learner line (`📈 RL ε↓ · δ̄↓ · |Q| · upd`)
+  when the learner has actually run, read fs-only from `.swarm/q-learning-model.json`
+  (fallback `.claude-flow/metrics/learning.json` `routing.{accuracy,decisions}`), never the
+  broken `route stats` CLI. Honesty-gated: rendered only when `updateCount > 0` (or
+  `decisions > 0`), omitted otherwise. `|Q|` is a real task-state count since the encoder
+  fix (ruflo #2239 / F3).
 - **R17.** It MUST append a security segment (`🛡 aidefence on`) when
   `@claude-flow/aidefence` is loaded, and a separate agentic-qe line
   (`🎓 Agentic QE <patterns>[· traj][· vec] · <size>`, a few guarded `sqlite3` reads of

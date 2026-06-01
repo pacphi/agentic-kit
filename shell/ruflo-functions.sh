@@ -184,7 +184,12 @@ function rufloActivationSegments(cwd){
     // execFileSync (no shell) — db path / sql are passed as argv, never interpolated into a command line.
     function q(db, sql){ try { return cp.execFileSync("sqlite3", [db, sql], {stdio:["ignore","pipe","ignore"], timeout:1500}).toString().trim(); } catch(e){ return ""; } }
     function bar(n, max){ n = Math.max(0, Math.min(max, n)); return "[" + "●".repeat(n) + "○".repeat(max - n) + "]"; }
-    // ── self-learning (SONA): own line with a volume bar + Δ LoRA (cached at train) ──
+    // ── self-learning (SONA): own line with a volume bar (patterns/traj/HNSW) ──
+    // Δ LoRA is intentionally NOT shown: the matrix-LoRA path is inert until the
+    // learn→inference seam lands upstream (ruvnet/RuVector#519 — processInstantLearning
+    // is a no-op stub, forward_array is never consumed in a decision, deltaNorm=0). It
+    // would render a number that is not a real adaptation signal. Re-add the Δ LoRA field
+    // here only after #519 closes and the delta provably moves. (#8 F4 gate.)
     var learn = "";
     try {
       var sp = path.join(cwd, ".claude-flow", "neural", "stats.json");
@@ -194,12 +199,49 @@ function rufloActivationSegments(cwd){
         if (pn > 0 || tj > 0) {
           if (pn > 0) parts.push(pn + " patterns");
           if (tj > 0) parts.push(tj + " traj");
-          // Δ LoRA — transient last-step metric, NOT persisted by ruflo and not derivable
-          // from the lora-checkpoint (ruvector-training.js). Cached by ruflo-neural-train.
-          try { var ld = JSON.parse(fs.readFileSync(path.join(cwd, ".claude-flow", "neural", "lora-delta.json"), "utf8")); if (typeof ld.deltaNorm === "number") parts.push(DIM + "Δ" + R + ld.deltaNorm.toFixed(2) + " LoRA"); } catch(e){}
           if (fs.existsSync(path.join(cwd, ".swarm", "hnsw.index"))) parts.push(G + "⚡ HNSW" + R);
           var dots = Math.max(0, Math.min(5, Math.round(pn / 10)));   // volume gauge: ~10 patterns per dot
           learn = C + "🧠 SONA" + R + "  " + DIM + bar(dots, 5) + R + "  " + parts.join(DIM + " · " + R);
+        }
+      }
+    } catch(e){}
+    // ── route Q-learner (📈 RL): live agent-routing metrics, fs-only, honesty-gated ──
+    // F3 (ruvnet/ruflo#2239) is fixed in ruflo 3.10.6+/3.10.31 — the state encoder no
+    // longer collapses keyword-distinct tasks (FNV-1a, ENCODER_VERSION=2), so |Q| is a
+    // real task-diversity count. Source the persisted Q-model directly; never the broken
+    // `route stats` CLI. Gate hard: render ONLY when the learner has actually run
+    // (updateCount>0), else emit nothing — no zero-state noise.
+    var route = "";
+    try {
+      var qp = path.join(cwd, ".swarm", "q-learning-model.json");
+      if (fs.existsSync(qp)) {
+        var qm = JSON.parse(fs.readFileSync(qp, "utf8"));
+        var st = qm.stats || {};
+        var upd = st.updateCount || 0;
+        if (upd > 0) {
+          var eps = typeof st.epsilon === "number" ? st.epsilon : null;
+          var td = typeof st.avgTDError === "number" ? st.avgTDError : null;
+          var qn = qm.qTable && typeof qm.qTable === "object" ? Object.keys(qm.qTable).length : 0;
+          var rp = [];
+          if (eps !== null) rp.push("ε" + eps.toFixed(2) + DIM + "↓" + R);
+          if (td !== null) rp.push("δ̄" + td.toFixed(3) + DIM + "↓" + R);
+          if (qn > 0) rp.push("|Q|" + qn);
+          rp.push("upd" + upd);
+          route = C + "📈 RL" + R + "  " + rp.join(DIM + " · " + R);
+        }
+      } else {
+        // Fallback: ruflo's metrics surface (no broken route-stats CLI). Only when it
+        // reflects real routing decisions.
+        var lp = path.join(cwd, ".claude-flow", "metrics", "learning.json");
+        if (fs.existsSync(lp)) {
+          var lj = JSON.parse(fs.readFileSync(lp, "utf8"));
+          var rt = lj.routing || {};
+          if ((rt.decisions || 0) > 0) {
+            var rp2 = [];
+            if (typeof rt.accuracy === "number") rp2.push("acc" + Math.round(rt.accuracy * 100) + "%");
+            rp2.push("dec" + rt.decisions);
+            route = C + "📈 RL" + R + "  " + rp2.join(DIM + " · " + R);
+          }
         }
       }
     } catch(e){}
@@ -268,7 +310,7 @@ function rufloActivationSegments(cwd){
     // under ruflo's native lines. The divider goes BETWEEN the ruflo block and the
     // agentic-qe line, matching ruflo's native header divider width ('─'.repeat(53) in
     // statusline.cjs) so the two rules line up.
-    var l1 = []; if (learn) l1.push(learn); if (sec) l1.push(sec);
+    var l1 = []; if (learn) l1.push(learn); if (route) l1.push(route); if (sec) l1.push(sec);
     var out = [];
     if (l1.length) out.push(l1.join("      "));
     if (out.length && qe) out.push(DIM + "─".repeat(53) + R);
@@ -613,28 +655,21 @@ ruflo-onboard() {
 }
 
 # ---------------------------------------------------------------------------
-# Run `ruflo neural train` in the CURRENT project and cache the (transient) MicroLoRA
-# Delta Norm so the status-line SONA segment can display Δ<n> LoRA.
+# Thin passthrough to `ruflo neural train` in the CURRENT project.
 #
-# Why a wrapper: deltaNorm is the magnitude of the LAST adaptation step (see
-# ruvector-training.js JsMicroLoRA._deltaNorm). ruflo computes it at runtime, prints it
-# in the train output, but does NOT persist it — and it cannot be recovered from the
-# lora-checkpoint (which stores the accumulated A/B matrices, not the last step). So we
-# capture it from the command output here and write .claude-flow/neural/lora-delta.json.
+# Historically this wrapper also captured the transient MicroLoRA Delta Norm and wrote
+# .claude-flow/neural/lora-delta.json so the status line could show Δ<n> LoRA. That
+# caching is REMOVED: the Δ LoRA footer field was dropped because the matrix-LoRA path
+# is inert until the learn→inference seam lands upstream (ruvnet/RuVector#519 — see the
+# SONA segment note in rufloActivationSegments). A deltaNorm that changes no decision is
+# not a real adaptation signal, so there is nothing honest to display or cache yet.
+# Re-add the capture here (and the footer field) only once #519 closes.
 #
 #   ruflo-neural-train                 # = ruflo neural train -p coordination (default)
 #   ruflo-neural-train -p security -e 100   # any `ruflo neural train` args pass through
 ruflo-neural-train() {
 	command -v ruflo >/dev/null 2>&1 || { echo "ruflo not on PATH" >&2; return 2; }
-	local out
-	out="$(ruflo neural train "$@" 2>&1)"
-	printf '%s\n' "$out"
-	local d
-	d="$(printf '%s\n' "$out" | grep -i "MicroLoRA Delta Norm" | grep -oE '[0-9]+\.[0-9]+' | head -1)"
-	if [ -n "$d" ] && [ -d .claude-flow/neural ]; then
-		printf '{"deltaNorm": %s, "ts": %s}\n' "$d" "$(date +%s)" > .claude-flow/neural/lora-delta.json
-		echo "✓ cached Δ LoRA = $d → .claude-flow/neural/lora-delta.json (status line SONA segment will show it)"
-	fi
+	ruflo neural train "$@"
 }
 
 # ---------------------------------------------------------------------------
