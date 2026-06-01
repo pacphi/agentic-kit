@@ -1,0 +1,118 @@
+#!/usr/bin/env bash
+#
+# ruflo-patch-route-learning — RETIRED on ruflo >= 3.10.6 (fix is upstream).
+#
+# HISTORY (bug F2): `route feedback` (route.js feedbackCommand) called the learner's
+# update() but never saveModel(), and q-learning-router.js defaulted `autoSaveInterval: 100`.
+# Each CLI call is a fresh process that loads the model, applies ONE update, and exits before
+# the %100 auto-save fires — so the persisted model never advanced and `ruflo route stats`
+# stayed at `Update Count 0 / Epsilon 1.0`. This kit shipped a stopgap that set
+# `autoSaveInterval: 1`. We reported it upstream; @pacphi is credited in the 3.10.6 notes.
+#
+# FIXED UPSTREAM:
+#   • ruflo 3.10.6 (#2222) — feedbackCommand now calls `await router.saveModel()` after the
+#     update, so CLI feedback persists. The autoSaveInterval stopgap is no longer needed.
+#   • ruflo 3.10.7        — follow-up: `route feedback -r -1.0` had been parsed as +1.0 (the
+#     flag parser dropped '-'-prefixed values), so NEGATIVE feedback reinforced the bad agent.
+#     Fixed in parser.ts. (Our in-process eval bypassed the CLI parser, so we never hit it.)
+#   • ruflo 3.10.8        — stale route-cache (Bug B) + `--explore false` ignored (Bug C).
+#
+# Therefore on ruflo >= 3.10.6 this script is a NO-OP and simply confirms the upstream fix.
+# It still applies the legacy `autoSaveInterval: 1` stopgap on installs < 3.10.6 (with an
+# upgrade nudge). Carry-forward scope for the route learner now lives in F3 (state-encoder
+# collapse) and F4 (LoRA/SONA not consumed) — see docs/upstream/ruflo-self-improvement-findings.md.
+#
+# Usage:
+#   ruflo-patch-route-learning           # report upstream status; legacy stopgap only on <3.10.6
+#   ruflo-patch-route-learning --check    # report only, change nothing
+#   ruflo-patch-route-learning --help
+#
+# Exit: 0 fixed upstream / patched (legacy) · 1 verify failed · 2 environment error
+set -u
+MODE="apply"
+case "${1:-}" in
+	--check) MODE="check" ;;
+	-h|--help) sed -n '3,29p' "$0" | sed 's|^# \{0,1\}||'; exit 0 ;;
+	"") ;;
+	*) echo "Unknown flag: $1 (try --help)" >&2; exit 2 ;;
+esac
+
+if [[ -t 1 ]]; then C_OK=$'\033[32m'; C_WARN=$'\033[33m'; C_FAIL=$'\033[31m'; C_DIM=$'\033[2m'; C_R=$'\033[0m'
+else C_OK=""; C_WARN=""; C_FAIL=""; C_DIM=""; C_R=""; fi
+ok()   { printf '%s✓%s %s\n' "$C_OK" "$C_R" "$*"; }
+warn() { printf '%s⚠%s  %s\n' "$C_WARN" "$C_R" "$*"; }
+fail() { printf '%s✗%s %s\n' "$C_FAIL" "$C_R" "$*"; }
+
+command -v npm >/dev/null 2>&1 && command -v node >/dev/null 2>&1 && command -v ruflo >/dev/null 2>&1 \
+	|| { fail "npm/node/ruflo must be on PATH"; exit 2; }
+
+# ── Version gate: >= 3.10.6 means the #2222 fix is upstream → this patch is retired ──
+ver="$(ruflo --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)"
+ge_3_10_6=0
+if [ -n "$ver" ]; then
+	IFS=. read -r vmaj vmin vpat <<<"$ver"
+	if [ "${vmaj:-0}" -gt 3 ] 2>/dev/null; then ge_3_10_6=1
+	elif [ "${vmaj:-0}" -eq 3 ] 2>/dev/null; then
+		if [ "${vmin:-0}" -gt 10 ] 2>/dev/null; then ge_3_10_6=1
+		elif [ "${vmin:-0}" -eq 10 ] 2>/dev/null && [ "${vpat:-0}" -ge 6 ] 2>/dev/null; then ge_3_10_6=1
+		fi
+	fi
+fi
+
+if [ "$ge_3_10_6" -eq 1 ]; then
+	ok "RETIRED: route-feedback persistence is fixed upstream in ruflo 3.10.6 (#2222) — you are on ${ver}."
+	printf '%s   feedbackCommand now calls await router.saveModel(); no kit patch needed.%s\n' "$C_DIM" "$C_R"
+	printf '%s   Carry-forward (still open): F3 state-encoder collapse, F4 LoRA/SONA not consumed.%s\n' "$C_DIM" "$C_R"
+	printf '%s   See docs/upstream/ruflo-self-improvement-findings.md%s\n' "$C_DIM" "$C_R"
+	exit 0
+fi
+
+# ── Legacy path: ruflo < 3.10.6 (or version undetectable) — apply the autoSaveInterval stopgap ──
+warn "ruflo ${ver:-<unknown>} predates the 3.10.6 (#2222) upstream fix — applying the legacy stopgap."
+printf '%s   Recommended: npm install -g ruflo@latest (>=3.10.6) and this script becomes a no-op.%s\n' "$C_DIM" "$C_R"
+
+QL="$(npm root -g)/ruflo/node_modules/@claude-flow/cli/dist/src/ruvector/q-learning-router.js"
+[ -f "$QL" ] || { fail "route Q-learner not found: $QL"; exit 2; }
+
+echo "router: ${QL#"$(npm root -g)"/}"
+
+if grep -qE "autoSaveInterval: 1," "$QL"; then
+	ok "route learner already persists every update (autoSaveInterval: 1) — legacy stopgap in place."
+	exit 0
+fi
+if ! grep -qE "autoSaveInterval: 100," "$QL"; then
+	warn "unexpected autoSaveInterval value in $QL — review manually (not the known F2 shape)."
+	exit 1
+fi
+if [ "$MODE" = "check" ]; then
+	warn "F2 present (autoSaveInterval: 100): CLI 'route feedback' will NOT persist. Re-run without --check to fix."
+	exit 1
+fi
+
+if node -e "const fs=require('fs');let s=fs.readFileSync('$QL','utf8');s=s.replace(/autoSaveInterval: 100,/,'autoSaveInterval: 1,');fs.writeFileSync('$QL',s);"; then
+	ok "patched autoSaveInterval → 1"
+else
+	fail "patch write failed"; exit 1
+fi
+
+# Verify: separate CLI processes must now accumulate into the persisted model.
+echo "verifying CLI feedback accumulation (3 separate processes)…"
+T=$(mktemp -d)
+(
+	cd "$T" || exit 0
+	export CLAUDE_FLOW_DB_PATH="$T/.swarm/memory.db"
+	ruflo init --minimal --force >/dev/null 2>&1
+	for i in 1 2 3; do ruflo route feedback -t "implement feature $i" -a coder -r 0.9 >/dev/null 2>&1; done
+)
+uc="$(cd "$T" && CLAUDE_FLOW_DB_PATH="$T/.swarm/memory.db" ruflo route stats 2>/dev/null \
+	| sed 's/\x1b\[[0-9;]*m//g' | grep -iE "Update Count" | grep -oE '[0-9]+' | head -1)"
+rm -rf "$T"
+
+if [ "${uc:-0}" -ge 1 ] 2>/dev/null; then
+	ok "verified: CLI route feedback now accumulates (Update Count=$uc across separate calls)."
+	printf '%s   Upgrade to ruflo >=3.10.6 to retire this stopgap entirely.%s\n' "$C_DIM" "$C_R"
+	exit 0
+else
+	fail "patched, but CLI feedback still not accumulating (Update Count=${uc:-0}). Investigate route.js."
+	exit 1
+fi
