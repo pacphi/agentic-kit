@@ -175,8 +175,19 @@ step only** (`adapt_array`/`adapt_with_reward`), and is partly stochastic
 it **cannot be recovered** from the `lora-checkpoint-*.json` (which stores the
 accumulated `{A, B, scaling}` matrices, not the last step's delta). So the only faithful
 way to surface it is to **capture it from `ruflo neural train` output and cache it** —
-which `ruflo-neural-train` does (writing `.claude-flow/neural/lora-delta.json`). The
-footer shows `Δ` only when that cache exists.
+which `ruflo-neural-train` did (writing `.claude-flow/neural/lora-delta.json`).
+
+> **Update (2026-06-01, ruflo 3.10.31).** The `Δ LoRA` field has been **removed** from the
+> footer, and the `ruflo-neural-train` capture with it. Two things changed on
+> reconciliation: (1) ruflo 3.10.31 now **does** persist `lora-delta.json` + timestamped
+> `lora-checkpoint-*.json` natively (so the "not persisted" obstacle is gone), but more
+> importantly (2) the matrix-LoRA path is still **inert** — `processInstantLearning` is a
+> no-op stub and the trained delta is never consumed in any decision (`deltaNorm` stays 0),
+> pending the upstream learn→inference seam (ruvnet/RuVector#519). A delta that changes no
+> decision is not an improvement signal, so the honest move is to show nothing until #519
+> lands. In its place the footer now carries a **`📈 RL`** route-Q line (ε/δ̄/|Q|/upd from
+> `.swarm/q-learning-model.json`), unblocked by the encoder fix (ruflo #2239 / F3). See
+> issue #8 and `docs/upstream/ruflo-self-improvement-findings.md`.
 
 ### Security surface
 

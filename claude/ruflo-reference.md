@@ -338,21 +338,33 @@ When set up via this kit, a two-line footer is appended **below** ruflo's native
 status-line render (append-only, so it never breaks on a ruflo template change):
 
 ```
-🧠 SONA  [●●●●●]  50 patterns · 55 traj · Δ1.32 LoRA · ⚡ HNSW      🛡 aidefence on
+🧠 SONA  [●●●●●]  50 patterns · 55 traj · ⚡ HNSW    📈 RL  ε0.83↓ · δ̄0.012↓ · |Q|6 · upd42    🛡 aidefence on
 🎓 Agentic QE  🎓 23 patterns · 🧭 114 traj · 🧬 543 vec⚡ · 💾 16MB
 ```
 
 Each field renders only when active: SONA `patterns`/`traj` from
-`.claude-flow/neural/stats.json` (the `[bar]` is a ~10-patterns/dot volume gauge),
-`⚡ HNSW` only when `.swarm/hnsw.index` exists, `🛡` when `@claude-flow/aidefence` is
-loaded, and the `🎓 Agentic QE` line (a few guarded `sqlite3` reads of
-`.agentic-qe/memory.db`; `vec` reads `qe_pattern_embeddings`, falling back to
-`vectors`/`embeddings`) only when AQE is initialized. `Δ LoRA` appears only after
-`ruflo-neural-train` (which caches the transient MicroLoRA delta that ruflo itself
-does not persist).
+`.claude-flow/neural/stats.json` (the `[bar]` is a ~10-patterns/dot volume gauge;
+both counts persist across restarts since ruflo #2245), `⚡ HNSW` only when
+`.swarm/hnsw.index` exists, `🛡` when `@claude-flow/aidefence` is loaded, and the
+`🎓 Agentic QE` line (a few guarded `sqlite3` reads of `.agentic-qe/memory.db`;
+`vec` reads `qe_pattern_embeddings`, falling back to `vectors`/`embeddings`) only
+when AQE is initialized.
+
+`📈 RL` shows live route Q-learner metrics — `ε`↓ (exploration), `δ̄`↓ (mean TD
+error), `|Q|` (distinct task-states; a real count since the encoder fix, ruflo
+#2239), `upd` — read fs-only from `.swarm/q-learning-model.json` (fallback
+`.claude-flow/metrics/learning.json` `routing.{accuracy,decisions}`), never the
+broken `route stats` CLI. Honesty-gated: rendered only once the learner has run
+(`updateCount > 0` / `decisions > 0`), so it stays absent until routing is used.
+
+There is **no `Δ LoRA` field**: the matrix-LoRA path is inert until the
+learn→inference seam lands upstream (ruvnet/RuVector#519 — `processInstantLearning`
+is a no-op stub and the trained delta is never consumed in a decision). A number
+that changes no decision is not an improvement signal, so it is omitted until #519
+closes. (Tracked in issue #8.)
 
 ```bash
-ruflo-neural-train               # = ruflo neural train, + caches Δ LoRA for the status line
+ruflo-neural-train               # = ruflo neural train (thin passthrough)
 ruflo-neural-train -p security -e 100   # any `ruflo neural train` args pass through
 ```
 
