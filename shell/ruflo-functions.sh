@@ -506,20 +506,41 @@ PY
 		echo "   Run 'ruflo doctor -c memory' and 'ruflo-patch-native' to investigate."
 	fi
 
-	# Sanitize generated CLAUDE.md (legacy npx -> ruflo; drop legacy mcp-add line).
+	# Replace generated CLAUDE.md with a lean project-specific stub.
+	# The machine-wide ~/.claude/CLAUDE.md already supplies all generic guidance
+	# (operating rules, agent comms, routing tables, memory patterns, CLI reference).
+	# Only project-specific facts belong here: swarm topology, build commands, and
+	# any AQE config written later by ruflo-setup-aqe.
 	if [ -f CLAUDE.md ]; then
-		if sed --version >/dev/null 2>&1; then
-			sed -i 's|npx @claude-flow/cli@latest|ruflo|g' CLAUDE.md
-			sed -i '/claude mcp add claude-flow/d' CLAUDE.md
-		else
-			sed -i '' 's|npx @claude-flow/cli@latest|ruflo|g' CLAUDE.md
-			sed -i '' '/claude mcp add claude-flow/d' CLAUDE.md
-		fi
-		if ! grep -q 'machine-wide ruflo reference' CLAUDE.md; then
-			local tmp; tmp=$(mktemp)
-			{ echo "<!-- Full ruflo CLI reference: see machine-wide ruflo reference at ~/.claude/CLAUDE.md -->"; echo ""; cat CLAUDE.md; } > "$tmp"
-			mv "$tmp" CLAUDE.md
-		fi
+		local _project_name; _project_name="$(basename "$(pwd)")"
+		cat > CLAUDE.md <<STUB
+<!-- Full ruflo CLI reference: see machine-wide ruflo reference at ~/.claude/CLAUDE.md -->
+
+# ${_project_name}
+
+## Swarm Config
+
+- **Topology**: hierarchical-mesh (anti-drift)
+- **Max Agents**: 15
+- **Memory**: hybrid
+- **HNSW**: Enabled
+- **Neural**: Enabled
+
+\`\`\`bash
+ruflo swarm init --topology hierarchical --max-agents 8 --strategy specialized
+\`\`\`
+
+## Build & Test
+
+\`\`\`bash
+npm run build && npm test
+\`\`\`
+
+## Agentic QE v3
+<!-- managed by ruflo-setup-aqe — aqe init skips regeneration when this sentinel is present -->
+<!-- see ~/.claude/CLAUDE.md for full AQE operating guidance -->
+STUB
+		ok "wrote lean project CLAUDE.md (generic guidance lives in ~/.claude/CLAUDE.md)"
 	fi
 
 	# Optional security pass (--with-security): verify the built-in security surface.
@@ -583,6 +604,14 @@ ruflo-setup-aqe() {
 	if [ "$force" -eq 0 ] && [ -f "$sdk" ] && [ -d "$marker" ]; then
 		echo "✓ agentic-qe already initialized (SDK db + project marker present)"
 		return 0
+	fi
+
+	# Ensure the AQE sentinel is in CLAUDE.md before aqe init runs.
+	# Phase 11 (claude-md) skips regeneration when '## Agentic QE v3' already exists,
+	# so the sentinel prevents the generic duplicate content from being appended.
+	if [ -f CLAUDE.md ] && ! grep -q '## Agentic QE v3' CLAUDE.md; then
+		printf '\n## Agentic QE v3\n<!-- managed by ruflo-setup-aqe — aqe init skips regeneration when this sentinel is present -->\n<!-- see ~/.claude/CLAUDE.md for full AQE operating guidance -->\n' >> CLAUDE.md
+		echo "✓ wrote AQE sentinel into CLAUDE.md (prevents duplicate guidance from aqe init)"
 	fi
 
 	if [ "$force" -eq 1 ] || { [ -f "$sdk" ] && [ ! -d "$marker" ]; }; then
