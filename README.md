@@ -124,9 +124,9 @@ ruflo-onboard --aqe          # …and also initialize the agentic-qe fleet here
 
 Try `./install.sh --dry-run` first to preview exactly what it will do.
 
-🪙 **Prefer CLI-only (no MCP, ~84k tokens saved per session)?** Skip
-`ruflo-setup-machine`; the installed `~/.claude/CLAUDE.md` reference teaches
-Claude Code to drive ruflo through plain Bash.
+> **Key distinction:** `install.sh` runs **once on the machine** and never inside a project repo — it deploys the shell functions and heals global packages. `ruflo-onboard` runs **once per project** and never touches global state. If you're unsure which to use, see [Which command do I run?](#-which-command-do-i-run).
+
+🪙 **Prefer CLI-only (no MCP, ~84k tokens saved per session)?** The Quick Start above gives you CLI-only by default — `ruflo-setup-machine` is a separate, optional step that registers the ruflo MCP server. Skip it (the default) and Claude Code drives ruflo through plain Bash using the installed `~/.claude/CLAUDE.md` reference. Run it only if you specifically want the MCP tool schema available in-session.
 
 ---
 
@@ -170,6 +170,7 @@ for healing again.
 |---|---|---|
 | 🆕 Brand-new machine | **`install.sh`** | nothing's on PATH yet — only the script can bootstrap |
 | 🔁 Re-cloned kit / new shell / wiped `~/.local/bin` | **`install.sh`** | re-lays the kit files (idempotent, backs up) |
+| 📥 After `git pull` on this kit repo | **`install.sh --minimal`** | redeploys updated shell functions + CLAUDE.md template; `ruflo-resync` doesn't touch kit files |
 | ⬆️ After `npm i -g ruflo@latest` (or aqe) | **`ruflo-resync`** | the upgrade only wiped native binaries — re-running install.sh is the heavier wrong tool |
 | 📂 Starting in a new repo | **`ruflo-onboard`** | per-project; install.sh is machine-level and won't touch your repo |
 | 🔍 Routine checks | **functions** (`ruflo-parity-test`, `ruflo-learning-verify`) | no reason to re-bootstrap |
@@ -211,6 +212,8 @@ npm install -g ruflo@latest     # or agentic-qe@latest
 ruflo-resync                    # ✨ one command heals it all
 ruflo-resync --aqe              # …and also refresh agentic-qe skills
 ```
+
+**After `git pull` on this kit itself:** Run `./install.sh --minimal` to copy the updated shell functions and CLAUDE.md template to `~/.config/ruflo/`. It is idempotent and won't reinstall npm packages. This is the right step whenever you pull a new version of this repo — `ruflo-resync` only heals native binaries and self-learning; it does not redeploy the kit files.
 
 ---
 
@@ -282,7 +285,7 @@ ruflo-machine-ref/
 
 ```bash
 ./uninstall.sh                  # kit footprint only: bin scripts, template, CLAUDE.md block, rc line
-./uninstall.sh --this-project   # ALSO revert the kit's statusline patches in the current repo
+./uninstall.sh --this-project   # ALSO revert the kit's per-project patches (statusline + local MCP config) in the current repo
 ./uninstall.sh --remove-ruflo   # ALSO npm-uninstall global ruflo (machine-wide; asks first)
 ./uninstall.sh --remove-aqe     # ALSO npm-uninstall global agentic-qe (machine-wide; asks first)
 ./uninstall.sh --purge          # --remove-ruflo + --remove-aqe
@@ -293,9 +296,10 @@ The plain `uninstall.sh` removes only machine-level kit setup; your ruflo
 install, memory DBs, and **project files** are left untouched. The
 `--remove-ruflo` / `--remove-aqe` / `--purge` flags reach the *global npm
 packages* — they affect every project on the machine, so each one prompts to
-confirm (pass `--yes` to skip in scripts). Add `--this-project` from a repo root
-to revert that repo's statusline patches too (it backs up first and leaves all
-ruflo/agentic-qe data alone — use `ruflo cleanup --force` for per-project data).
+confirm (pass `--yes` to skip in scripts). Add `--this-project` from a repo root to revert that repo's per-project
+patches (statusline and any local-scope MCP config — these are repo-level, not
+machine-level). It backs up first and leaves all ruflo/agentic-qe data alone —
+use `ruflo cleanup --force` for per-project data.
 
 ---
 

@@ -205,6 +205,13 @@ echo ""
 echo "## shared helper lib -> $CFG_DIR/ruflo-lib.sh"
 run "cp '$HERE/shell/ruflo-lib.sh' '$CFG_DIR/ruflo-lib.sh'"
 ok "helper lib installed"
+
+# Shell functions — also deployed to the stable CFG_DIR so the repo can be
+# moved or deleted after install without breaking the shell. Re-run install.sh
+# to pick up function changes (intentional — updates should be explicit).
+echo "## shell functions -> $CFG_DIR/ruflo-functions.sh"
+run "cp '$HERE/shell/ruflo-functions.sh' '$CFG_DIR/ruflo-functions.sh'"
+ok "shell functions installed"
 echo ""
 
 # Merge the reference block into ~/.claude/CLAUDE.md (sentinel-managed)
@@ -249,9 +256,11 @@ else
 fi
 echo ""
 
-# Shell rc source line
+# Shell rc source line — point at the STABLE installed copy, not the repo.
+# This lets the repo be moved or deleted after install without breaking the shell.
+# Existing installs with a legacy repo-path source line are migrated automatically.
 if [ "$EDIT_RC" -eq 1 ]; then
-	echo "## shell functions"
+	echo "## shell rc source line"
 	RC=""
 	case "$SHELL_CHOICE" in
 		zsh)  RC="$HOME/.zshrc" ;;
@@ -262,18 +271,28 @@ if [ "$EDIT_RC" -eq 1 ]; then
 		*) warn "unknown --shell '$SHELL_CHOICE'; skipping rc edit"; RC="" ;;
 	esac
 	if [ -n "$RC" ]; then
-		SRC_LINE="source \"$HERE/shell/ruflo-functions.sh\""
-		if [ -f "$RC" ] && grep -qF "$SRC_LINE" "$RC" 2>/dev/null; then
-			ok "$RC already sources ruflo-functions.sh"
+		STABLE_LINE="source \"$CFG_DIR/ruflo-functions.sh\""
+		if [ "$DRY" -eq 1 ]; then
+			printf '%s[dry-run]%s ensure %s sources %s\n' "$C_DIM" "$C_RESET" "$RC" "$CFG_DIR/ruflo-functions.sh"
+		elif [ -f "$RC" ] && grep -qF "$STABLE_LINE" "$RC" 2>/dev/null; then
+			ok "$RC already sources ruflo-functions.sh from stable path"
+		elif [ -f "$RC" ] && grep -qF "ruflo-functions.sh" "$RC" 2>/dev/null; then
+			# Migrate legacy repo-path source line to the stable installed path
+			if sed --version >/dev/null 2>&1; then
+				sed -i "s|source \".*ruflo-functions\.sh\"|$STABLE_LINE|g" "$RC"
+			else
+				sed -i '' "s|source \".*ruflo-functions\.sh\"|$STABLE_LINE|g" "$RC"
+			fi
+			ok "migrated $RC: repo-path source → stable path"
 		else
-			run "printf '\n# ruflo machine reference helpers\n%s\n' '$SRC_LINE' >> '$RC'"
+			printf '\n# ruflo machine reference helpers\n%s\n' "$STABLE_LINE" >> "$RC"
 			ok "added source line to $RC"
 		fi
 		echo "   (run 'exec \$SHELL' or open a new terminal to load the functions)"
 	fi
 else
-	echo "## shell functions (skipped --no-shell-rc)"
-	echo "   Add manually:  source \"$HERE/shell/ruflo-functions.sh\""
+	echo "## shell rc source line (skipped --no-shell-rc)"
+	echo "   Add manually:  source \"$CFG_DIR/ruflo-functions.sh\""
 fi
 echo ""
 
@@ -284,7 +303,7 @@ if [ "$DO_HEAL" = yes ]; then
 		printf '%s[dry-run]%s run ruflo-patch-native, ruflo-enable-learning, agentic-qe native patch\n' "$C_DIM" "$C_RESET"
 	elif have ruflo; then
 		# shellcheck source=/dev/null
-		[ -f "$HERE/shell/ruflo-functions.sh" ] && . "$HERE/shell/ruflo-functions.sh"
+		[ -f "$CFG_DIR/ruflo-functions.sh" ] && . "$CFG_DIR/ruflo-functions.sh"
 		"$BIN_DIR/ruflo-patch-native"    || warn "native patch reported issues — see docs/TROUBLESHOOTING.md"
 		"$BIN_DIR/ruflo-enable-learning" || warn "self-learning activation reported issues"
 		if command -v _ruflo_aqe_ensure_native >/dev/null 2>&1; then _ruflo_aqe_ensure_native; fi
