@@ -193,6 +193,9 @@ echo ""
 echo "## CLAUDE.md reference templates -> $CFG_DIR/"
 run "mkdir -p '$CFG_DIR'"
 run "cp '$HERE/claude/ruflo-reference.md' '$CFG_DIR/claude-md-template.md'"
+# Full on-demand reference: NOT injected into CLAUDE.md (the compact block points here).
+# Deployed to a stable path so the pointer resolves from any project/session.
+run "cp '$HERE/claude/ruflo-reference-full.md' '$CFG_DIR/ruflo-reference-full.md'"
 _ruflo_cond_blocks | while IFS='|' read -r _slug _src _tmpl _detector; do
 	[ -n "$_slug" ] || continue
 	run "cp '$HERE/claude/$_src' '$CFG_DIR/$_tmpl'"
