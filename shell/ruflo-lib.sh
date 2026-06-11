@@ -76,6 +76,20 @@ _ruflo_daemon_list() {
 	done
 }
 
+# _ruflo_daemon_age_secs PID — elapsed seconds since the process started, parsed
+# from `ps -o etime=` ([[dd-]hh:]mm:ss; portable across macOS BSD ps and Linux,
+# neither of which guarantees the `etimes` field). Echoes 0 if the pid is gone or
+# unparseable, so callers can compare numerically without guarding.
+_ruflo_daemon_age_secs() {
+	local et
+	et=$(ps -o etime= -p "$1" 2>/dev/null | tr -d ' ')
+	[ -n "$et" ] || { echo 0; return; }
+	printf '%s' "$et" | awk -F'[:-]' '{
+		n=NF; s=$n; m=(n>=2)?$(n-1):0; h=(n>=3)?$(n-2):0; d=(n>=4)?$(n-3):0;
+		print ((d*24+h)*60+m)*60+s
+	}'
+}
+
 # --- Node ABI / native better-sqlite3 primitives ----------------------------
 # _ruflo_node_abi — the running Node's NODE_MODULE_VERSION (ABI), e.g. 137.
 _ruflo_node_abi() { node -e 'process.stdout.write(process.versions.modules)' 2>/dev/null; }

@@ -90,9 +90,11 @@ ruflo-remove-mcp() {
 # ruflo release self-heals. Optional arg 1 overrides the statusline path.
 
 # ---------------------------------------------------------------------------
-# Daemon lifecycle (issue #3). ruflo-setup-project starts a per-workspace daemon
-# (continuous self-learning). Without reaping, throwaway/removed workspaces (e.g.
-# ruflo-parity-test's /tmp dirs) leave orphan daemons running forever.
+# Daemon lifecycle (issue #3 + token-burn incident). The daemon is now OPT-IN:
+# ruflo-setup-project does NOT auto-start one. If you start a daemon yourself,
+# ruflo-daemon-gc and the interactive-shell auto-reaper stop it once it is orphaned
+# (workspace deleted) or exceeds RUFLO_DAEMON_TTL_SECS (default 12h) — so a started-
+# and-forgotten daemon can no longer spawn worker sessions 24/7 for weeks.
 #
 # Shared helpers (colored output, daemon ps-parser, native better-sqlite3
 # primitives) live in ruflo-lib.sh. Prefer the installed copy (~/.config/ruflo);
@@ -107,33 +109,88 @@ for _ruflo_cand in \
 done
 unset _ruflo_self _ruflo_cand
 
-# List (or, with --kill, stop) ruflo daemons whose --workspace no longer exists.
-# Never touches a daemon whose workspace is still present (a live project).
-#   ruflo-daemon-gc           # list orphans (dry preview)
-#   ruflo-daemon-gc --kill    # stop them
+# List (or, with --kill, stop) STALE ruflo daemons. A daemon is stale if EITHER
+# its --workspace was deleted (an orphan) OR it has been running longer than the
+# TTL (RUFLO_DAEMON_TTL_SECS, default 12h). Rationale: the kit auto-started one
+# permanent daemon per onboarded project and nothing ever stopped them, so six
+# projects leaked six immortal daemons spawning worker sessions 24/7 for weeks
+# (the token-burn incident). A wall-clock TTL is a robust "you're not actively
+# working this one project for 12h straight" proxy; orphan-only reaping (the old
+# behaviour) missed every one because the projects still existed.
+#   ruflo-daemon-gc              # dry preview of stale daemons
+#   ruflo-daemon-gc --kill       # stop them
+#   RUFLO_DAEMON_TTL_SECS=0 ...  # disable the age rule (orphan-only, legacy)
 ruflo-daemon-gc() {
 	command -v _ruflo_daemon_list >/dev/null 2>&1 || { echo "⚠  ruflo-daemon-lib.sh not loaded — run install.sh, then re-source your shell"; return 1; }
 	local do_kill=0
 	[ "${1:-}" = "--kill" ] && do_kill=1
-	local found=0 pid ws
+	local ttl="${RUFLO_DAEMON_TTL_SECS:-43200}"
+	local found=0 live=0 pid ws age reason
 	while IFS="$(printf '\t')" read -r pid ws; do
 		[ -n "${pid:-}" ] || continue
-		[ -d "$ws" ] && continue
+		age=$(_ruflo_daemon_age_secs "$pid")
+		reason=""
+		if [ ! -d "$ws" ]; then
+			reason="workspace gone"
+		elif [ "$ttl" -gt 0 ] && [ "${age:-0}" -gt "$ttl" ]; then
+			reason="age ${age}s > ttl ${ttl}s"
+		else
+			live=$((live+1)); continue
+		fi
 		found=$((found+1))
 		if [ "$do_kill" -eq 1 ]; then
-			kill "$pid" 2>/dev/null && echo "✓ stopped orphan daemon pid=$pid (workspace gone: $ws)" \
+			kill "$pid" 2>/dev/null && echo "✓ stopped stale daemon pid=$pid ($reason): $ws" \
 				|| echo "⚠  could not stop pid=$pid (already exited?)"
 		else
-			echo "orphan daemon pid=$pid → $ws (workspace gone)"
+			echo "stale daemon pid=$pid → $ws ($reason)"
 		fi
 	done <<EOF
 $(_ruflo_daemon_list)
 EOF
 	if [ "$found" -eq 0 ]; then
-		echo "✓ no orphan daemons (every running daemon's --workspace still exists)"
+		echo "✓ no stale daemons ($live live within TTL ${ttl}s)"
 	elif [ "$do_kill" -eq 0 ]; then
-		echo "Found $found orphan(s). Run 'ruflo-daemon-gc --kill' to stop them."
+		echo "Found $found stale daemon(s). Run 'ruflo-daemon-gc --kill' to stop them."
 	fi
+	return 0
+}
+
+# Auto-reap stale daemons on interactive shell start, and surface any that remain.
+# This is the safety net behind the opt-in policy (daemons are no longer auto-started
+# by ruflo-setup-project): even if one gets started and forgotten, it is reaped once it
+# exceeds the TTL. Interactive-only (never kills/prints from scripts or subshells).
+# Throttled to once per RUFLO_DAEMON_AUTOREAP_THROTTLE secs (default 300) via a stamp,
+# so a burst of new terminals does one ps scan, not N. Opt out: RUFLO_DAEMON_AUTOREAP=0.
+_ruflo_daemon_autoreap() {
+	[ "${RUFLO_DAEMON_AUTOREAP:-1}" = "0" ] && return 0
+	case "$-" in *i*) ;; *) return 0 ;; esac            # interactive shells only
+	command -v _ruflo_daemon_list >/dev/null 2>&1 || return 0
+	local stamp="${TMPDIR:-/tmp}/.ruflo-autoreap.stamp"
+	local throttle="${RUFLO_DAEMON_AUTOREAP_THROTTLE:-300}"
+	local now; now=$(date +%s 2>/dev/null) || return 0
+	if [ -f "$stamp" ]; then
+		local last; last=$(cat "$stamp" 2>/dev/null || echo 0)
+		[ $((now - ${last:-0})) -lt "$throttle" ] && return 0
+	fi
+	printf '%s' "$now" > "$stamp" 2>/dev/null
+	local ttl="${RUFLO_DAEMON_TTL_SECS:-43200}"
+	local killed=0 remain=0 pid ws age
+	while IFS="$(printf '\t')" read -r pid ws; do
+		[ -n "${pid:-}" ] || continue
+		age=$(_ruflo_daemon_age_secs "$pid")
+		if [ ! -d "$ws" ] || { [ "$ttl" -gt 0 ] && [ "${age:-0}" -gt "$ttl" ]; }; then
+			if kill "$pid" 2>/dev/null; then
+				killed=$((killed+1))
+				printf '🧹 reaped stale ruflo daemon pid=%s (%s)\n' "$pid" \
+					"$( [ -d "$ws" ] && echo "age ${age}s>ttl" || echo "workspace gone" )" >&2
+			fi
+		else
+			remain=$((remain+1))
+		fi
+	done <<EOF
+$(_ruflo_daemon_list)
+EOF
+	[ "$remain" -gt 0 ] && printf 'ℹ  %s ruflo daemon(s) running (within TTL). ruflo-daemon-gc to inspect.\n' "$remain" >&2
 	return 0
 }
 
@@ -280,6 +337,35 @@ function rufloActivationSegments(cwd){
       var ad = path.join(path.dirname(process.execPath), "..", "lib", "node_modules", "ruflo", "node_modules", "@claude-flow", "aidefence", "package.json");
       if (fs.existsSync(ad)) sec = G + "🛡 aidefence on" + R;
     } catch(e){}
+    // ── stray-daemon alarm (⚙): GLOBAL count of running ruflo daemons, so a
+    // started-and-forgotten daemon can never again be invisible (token-burn
+    // incident). Machine-global, not per-project, so it is cached in tmpdir and
+    // shared across every project's statusline — one pgrep per TTL window, not per
+    // render. Alarm-only: absent at 0 (the expected opt-in steady state), dim at
+    // 1-2 (a daemon you likely started on purpose), YELLOW at >=3 (a leak — run
+    // ruflo-daemon-gc --kill). Opt out: RUFLO_DAEMON_STATUSLINE=0.
+    var daemon = "";
+    try {
+      if (process.env.RUFLO_DAEMON_STATUSLINE !== "0") {
+        var os = require("os");
+        var dCache = path.join(os.tmpdir(), "ruflo-daemon-count.json");
+        var dTtl = Number(process.env.RUFLO_DAEMON_STATUSLINE_TTL_MS || 30000);
+        var dCount = null;
+        try { var dc = JSON.parse(fs.readFileSync(dCache, "utf8")); if (dc && typeof dc.n === "number" && dTtl > 0 && (Date.now() - dc.ts) < dTtl) dCount = dc.n; } catch(e){}
+        if (dCount === null) {
+          try {
+            var pg = cp.execFileSync("pgrep", ["-f", "cli.js daemon start"], {stdio:["ignore","pipe","ignore"], timeout:1500}).toString().trim();
+            dCount = pg ? pg.split("\n").filter(Boolean).length : 0;
+          } catch(e){ dCount = 0; }   // pgrep exits 1 (=> throws) when nothing matches
+          try { fs.writeFileSync(dCache, JSON.stringify({ts: Date.now(), n: dCount})); } catch(e){}
+        }
+        if (dCount > 0) {
+          var dCol = dCount >= 3 ? Y : DIM;
+          daemon = dCol + "⚙ " + dCount + " ruflo daemon" + (dCount === 1 ? "" : "s") + R
+                 + (dCount >= 3 ? DIM + " — ruflo-daemon-gc --kill" + R : "");
+        }
+      }
+    } catch(e){}
     // ── agentic-qe — TTL-cached; one sqlite3 spawn only on a cache miss (issue #3) ──
     var qe = "";
     try {
@@ -345,6 +431,7 @@ function rufloActivationSegments(cwd){
     if (route) out.push(route);
     if (proof) out.push(proof);
     if (sec) out.push(sec);
+    if (daemon) out.push(daemon);
     if (out.length && qe) out.push(DIM + "─".repeat(53) + R);
     if (qe) out.push(qe);
     if (!out.length) return "";
@@ -485,12 +572,16 @@ import sys; sys.exit(0 if prev == os.environ['RUFLO_DB_PATH'] else 1)
 		echo "⚠  ruflo memory init failed — memory writes may not persist"
 	fi
 	ruflo swarm init --v3-mode >/dev/null 2>&1 && echo "✓ Swarm initialized (v3-mode)" || echo "⚠  ruflo swarm init failed"
-	# Idempotent daemon start: never spawn a 2nd daemon for this workspace (issue #3).
+	# Daemon is OPT-IN (token-burn incident): setup no longer auto-starts a
+	# per-workspace daemon. Each one ran forever and nothing ever stopped it, so N
+	# onboarded projects leaked N immortal daemons spawning worker sessions 24/7.
+	# Start one yourself only when you want continuous background self-learning for a
+	# project you are actively working — and the auto-reaper will still TTL-reap it.
 	local _ws; _ws="$(pwd -P)"
 	if command -v _ruflo_daemon_list >/dev/null 2>&1 && [ -n "$(_ruflo_daemon_list | awk -F'\t' -v w="$_ws" '$2==w{print $1; exit}')" ]; then
-		echo "✓ Daemon already running for this workspace (not starting another)"
+		echo "✓ Daemon already running for this workspace"
 	else
-		ruflo daemon start >/dev/null 2>&1 && echo "✓ Daemon started" || echo "⚠  ruflo daemon start failed (may already be running)"
+		echo "ℹ  Daemon NOT started (opt-in). Run 'ruflo daemon start' for background self-learning; 'ruflo-daemon-gc' to inspect/reap."
 	fi
 
 	# Defensive (issue #3 RC3): if upstream `ruflo init` wrote daemon.autoStart:true,
@@ -868,3 +959,7 @@ ruflo-reference-refresh() {
 			;;
 	esac
 }
+
+# Run the stale-daemon safety net once this file is sourced into an interactive
+# shell (no-op in scripts; throttled; opt out with RUFLO_DAEMON_AUTOREAP=0).
+_ruflo_daemon_autoreap
