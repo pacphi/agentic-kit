@@ -149,8 +149,10 @@ verbatim would be redundant. The kit instead keeps a **guarded** compat check
 
 1. **Same root cause as the memory bug**: the agentdb `better-sqlite3` *binary*
    was missing (`native:false` though the version was already `^12`), so agentdb
-   ran on WASM. `ruflo-patch-native` fixes it; it had simply been wiped by the
-   upgrade to 3.10.5. This is the dominant lever.
+   ran on WASM. `ruflo-patch-native` fixes it; on 3.10.5 it had simply been wiped by
+   the upgrade. This was the dominant lever **at the time** — on ruflo ≥3.10.6 the
+   [#2219](https://github.com/ruvnet/ruflo/issues/2219) override keeps that binary
+   native across upgrades, so it is now handled by default and the patch only re-asserts.
 2. **A cosmetic lazy-status artifact**: `getHNSWStatus()`
    (`@claude-flow/cli/.../memory-initializer.js:663`) returns `available:true`
    only if a lazy `_bridge`/`hnswIndex` singleton was initialized *in that
@@ -197,15 +199,23 @@ which `ruflo-neural-train` did (writing `.claude-flow/neural/lora-delta.json`).
 > importantly (2) the matrix-LoRA path is still **inert** — `processInstantLearning` is a
 > no-op stub and the trained delta is never consumed in any decision (`deltaNorm` stays 0),
 > pending the upstream learn→inference seam (ruvnet/RuVector#519). A delta that changes no
-> decision is not an improvement signal, so the honest move is to show nothing until #519
-> lands. In its place the footer now carries a **`📈 RL`** route-Q line (ε/δ̄/|Q|/upd from
-> `.swarm/q-learning-model.json`), unblocked by the encoder fix (ruflo #2239 / F3). See
-> issue #8 and `docs/upstream/ruflo-self-improvement-findings.md`.
+> decision is not an improvement signal, so the honest move is to show nothing until the
+> seam lands. In its place the footer now carries a **`📈 RL`** route-Q line (ε/δ̄/|Q|/upd from
+> `.swarm/q-learning-model.json`), unblocked by the encoder fix (ruflo #2239 / F3, closed
+> 2026-05-29). See issue #8 and `docs/upstream/ruflo-self-improvement-findings.md`.
+>
+> **Update (2026-06-11).** [ruvnet/RuVector#519](https://github.com/ruvnet/RuVector/issues/519)
+> was **closed without a published fix**; the live follow-up is now
+> [ruvnet/RuVector#553](https://github.com/ruvnet/RuVector/issues/553) —
+> `processInstantLearning` is still a no-op stub in the published `@ruvector/ruvllm` 2.5.5
+> (the version ruflo 3.10.40–3.10.42 ship), so `deltaNorm` stays `0`. The `Δ LoRA` field
+> therefore remains omitted; it returns automatically once a `@ruvector/ruvllm` release
+> wires the seam and the delta provably moves.
 
 ### Security surface
 
-ruflo ships `@claude-flow/security` (3.0.0-alpha.8) and `@claude-flow/aidefence`
-(3.0.3). `ruflo security defend` correctly **detects** prompt-injection (signals via
+ruflo ships `@claude-flow/security` (3.0.0-alpha.10) and `@claude-flow/aidefence`
+(3.0.3) (versions as of ruflo 3.10.40). `ruflo security defend` correctly **detects** prompt-injection (signals via
 exit code: 1=threat, 0=clean) but has an upstream cosmetic crash after detection
 (`Cannot read properties of undefined (reading 'color')`) — verdict/exit code are
 still correct. `ruflo security cve --list` has **no CVE database configured**; use
