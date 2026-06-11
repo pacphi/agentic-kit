@@ -334,11 +334,15 @@ but has an upstream cosmetic render crash after the verdict; the exit code is co
 
 ### Status-line activation footer
 
-When set up via this kit, a two-line footer is appended **below** ruflo's native
-status-line render (append-only, so it never breaks on a ruflo template change):
+When set up via this kit, a footer is appended **below** ruflo's native status-line
+render (append-only, so it never breaks on a ruflo template change). Each ruflo
+feature renders on **its own line** so the live metrics are individually scannable:
 
 ```
-🧠 SONA  [●●●●●]  50 patterns · 55 traj · ⚡ HNSW    📈 RL  ε0.83↓ · δ̄0.012↓ · |Q|6 · upd42    🛡 aidefence on
+🧠 SONA  [●●●●●]  50 patterns · 55 traj · ⚡ HNSW
+📈 RL  ε0.83↓ · δ̄0.012↓ · |Q|6 · upd42
+🛡 aidefence on
+─────────────────────────────────────────────────────
 🎓 Agentic QE  🎓 23 patterns · 🧭 114 traj · 🧬 543 vec⚡ · 💾 16MB
 ```
 
@@ -350,18 +354,16 @@ both counts persist across restarts since ruflo #2245), `⚡ HNSW` only when
 `vec` reads `qe_pattern_embeddings`, falling back to `vectors`/`embeddings`) only
 when AQE is initialized.
 
-`📈 RL` shows live route Q-learner metrics — `ε`↓ (exploration), `δ̄`↓ (mean TD
-error), `|Q|` (distinct task-states; a real count since the encoder fix, ruflo
-#2239), `upd` — read fs-only from `.swarm/q-learning-model.json` (fallback
-`.claude-flow/metrics/learning.json` `routing.{accuracy,decisions}`), never the
-broken `route stats` CLI. Honesty-gated: rendered only once the learner has run
-(`updateCount > 0` / `decisions > 0`), so it stays absent until routing is used.
-
-There is **no `Δ LoRA` field**: the matrix-LoRA path is inert until the
-learn→inference seam lands upstream (ruvnet/RuVector#519 — `processInstantLearning`
-is a no-op stub and the trained delta is never consumed in a decision). A number
-that changes no decision is not an improvement signal, so it is omitted until #519
-closes. (Tracked in issue #8.)
+`📈 RL` is **live** route Q-learner metrics, read fs-only from
+`.swarm/q-learning-model.json` (fallback `.claude-flow/metrics/learning.json`), never
+the broken `route stats` CLI: `ε`↓ (exploration), `δ̄`↓ (mean TD error), `|Q|`
+(distinct task-states), `upd`. Gated on `updateCount > 0`, so it stays absent until
+routing feedback runs. `◷ proof FAIL` is an **alarm-only** segment from
+`.claude-flow/improvement.json` (the `ruflo-improvement-eval` verdict): a `PASS`
+renders nothing, only a regression surfaces (`◷ proof FAIL  Δpp · CI · p · d · <age>`).
+There is **no `Δ LoRA` field** — the adaptation seam (`@ruvector/ruvllm`
+`processInstantLearning`) is an unshipped no-op stub, so `deltaNorm` is always 0;
+omitting it avoids a fabricated signal.
 
 ```bash
 ruflo-neural-train               # = ruflo neural train (thin passthrough)

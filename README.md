@@ -140,7 +140,7 @@ Try `./install.sh --dry-run` first to preview exactly what it will do.
 | 🩹 `ruflo-patch-native [--check]` | Make ruflo's agentdb use native `better-sqlite3` on Node ≥24. |
 | 🧠 `ruflo-enable-learning [--check]` | Activate ruvector self-learning and assert it (5 capability probes). |
 | ✅ `ruflo-learning-verify [--keep]` | Prove the learning loop: train in an isolated dir, assert patterns persist 0 → N on disk. |
-| 🎚️ `ruflo-neural-train [args…]` | Thin passthrough to `ruflo neural train` in the current project. Args pass through. (No longer caches a MicroLoRA Δ — the `Δ LoRA` footer field is gated off until ruvnet/RuVector#519 lands; see issue #8.) |
+| 🎚️ `ruflo-neural-train [args…]` | Thin passthrough to `ruflo neural train` in the current project. Args pass through. (No longer caches a MicroLoRA Δ — the `Δ LoRA` footer field is gated off until `@ruvector/ruvllm` ships a real `processInstantLearning`; tracked upstream in ruvnet/RuVector#553, see issue #8.) |
 | 🛡️ `ruflo-security-verify [--quick]` | Verify `@claude-flow/security` + `aidefence` load, injection defense fires, scan/secrets run; flag the CVE-DB gap. |
 | 🎓 `ruflo-setup-aqe [--force]` | **Opt-in.** Fix agentic-qe's native-SQLite bug, then initialize it in a repo (with half-init repair). |
 | 💾 `ruflo-memory-checkpoint [db]` | Force a WAL checkpoint to recover stale memory reads. |
@@ -184,21 +184,25 @@ for healing again.
 
 ## 📟 The status line
 
-When set up with this kit, a two-line footer is appended **below** ruflo's own status line. It's append-only — it never rewrites ruflo's lines, so a ruflo update can't break it. Each piece appears **only when that feature is genuinely active**:
+When set up with this kit, a footer is appended **below** ruflo's own status line. It's append-only — it never rewrites ruflo's lines, so a ruflo update can't break it. Each ruflo feature renders on **its own line** (so the live metrics are individually scannable), and each piece appears **only when that feature is genuinely active**:
 
 ```
-▊ RuFlo V3.10.5 ● you  │  ⏇ main  │  Opus 4.x        ┐
+▊ RuFlo V3.10.40 ● you  │  ⏇ main  │  Opus 4.x       ┐
 🏗️  DDD Domains … 🤖 Swarm … 🔧 Architecture …       │ ruflo's own lines + the kit's
-📊 AgentDB …                                          │ SONA/aidefence line (all ruflo)
-🧠 SONA  [●●●●●]  50 patterns · 55 traj · ⚡ HNSW    📈 RL  ε0.83↓ · δ̄0.012↓ · |Q|6 · upd42    🛡 aidefence on  ┘
+📊 AgentDB …                                          │ per-feature lines (all ruflo)
+🧠 SONA  [●●●●●]  50 patterns · 110 traj · ⚡ HNSW    │
+📈 RL  ε1.00↓ · δ̄0.779↓ · |Q|6 · upd9                │ live route Q-learner metrics
+🛡 aidefence on                                       ┘
 ─────────────────────────────────────────────────────  ← divider (matches ruflo's header rule)
-🎓 Agentic QE V3.10.1  🎓 23 patterns · 🧭 114 traj · 🧬 543 vec⚡ · 💾 16MB
+🎓 Agentic QE V3.10.5  🎓 23 patterns · 🧭 114 traj · 🧬 543 vec⚡ · 💾 16MB
 ```
 
 Every field renders only when its data is actually present (numbers above are illustrative):
-- 🧠 **SONA** — `[bar]` is a volume gauge (~10 patterns/dot); `patterns`/`traj` from `.claude-flow/neural/stats.json` (these now persist across restarts, ruflo #2245); `⚡ HNSW` only when a vector index exists. (No `Δ LoRA` field: the matrix-LoRA delta is inert until the learn→inference seam lands upstream — ruvnet/RuVector#519 — so showing it would be a number that changes no decision. It returns once #519 closes.)
-- 📈 **RL** — live route Q-learner metrics, shown only once the learner has actually run (`updateCount > 0`): `ε`↓ (exploration), `δ̄`↓ (mean TD error), `|Q|` (distinct task-states — a real count since the encoder fix, ruflo #2239), `upd` (updates). Read fs-only from `.swarm/q-learning-model.json` (fallback `.claude-flow/metrics/learning.json` `routing.{accuracy,decisions}`); never the broken `route stats` CLI.
+- 🧠 **SONA** — `[bar]` is a volume gauge (~10 patterns/dot); `patterns`/`traj` from `.claude-flow/neural/stats.json` (these now persist across restarts, ruflo #2245); `⚡ HNSW` only when a vector index exists.
+- 📈 **RL** — **live** route Q-learner metrics, shown only once the learner has actually run (`updateCount > 0`): `ε`↓ (exploration), `δ̄`↓ (mean TD error), `|Q|` (distinct task-states — a real count since the encoder fix F3, ruflo #2239, **verified shipped in 3.10.40**: 6 tasks → 6 distinct Q-states), `upd` (updates). Read fs-only from `.swarm/q-learning-model.json` — which persists across `ruflo route feedback` calls (saveModel, ruflo 3.10.6+); never the broken `route stats` CLI.
+- ◷ **proof** (alarm-only) — the most recent `ruflo-improvement-eval` verdict (`.claude-flow/improvement.json`), a *synthetic* proof-of-mechanism (its own reward env: permutation `p` + Cohen's `d` + above-chance vs a no-learning ablation), **not** a live measure of real routing. A `PASS` (expected) renders **nothing**; only a regression surfaces as `◷ proof FAIL  Δpp · CI · p · d · <age>` (the age keeps a stale FAIL honest). Never fabricated.
 - 🛡️ **aidefence on** — proactive prompt-injection/PII defense is loaded (ruflo's native line already shows the `CVE n/m` count, so this signals the *other* half).
+- ⏳ **No `Δ LoRA` field yet** — it's waiting on an upstream release, and no upgrade *available today* adds it. The matrix-LoRA adaptation lives in `@ruvector/ruvllm`, whose **latest npm release (2.5.5) is the one ruflo 3.10.40–3.10.42 already ship**, and it still contains the no-op stub `processInstantLearning(signal) { /* In full implementation, this updates LoRA weights */ }` — so `deltaNorm` is provably `0.000000`. RuVector#519 was *closed on GitHub but never published to npm*; the live follow-up tracker is **ruvnet/RuVector#553**. Showing a value now would mean fabricating a zero, so the field stays omitted **until a future `@ruvector/ruvllm` release ships the real implementation** — at which point ruflo picking up that version lights it up automatically (it returns once the delta provably moves; issue #8).
 - 🎓 **Agentic QE** — `V<version>` is the installed `agentic-qe` package version (read from its `package.json`, mirroring `RuFlo V<x>` in ruflo's header); `🎓 patterns` / `🧭 traj` / `🧬 vec` / `💾 size` from a few guarded `sqlite3` reads of `.agentic-qe/memory.db` (the `vec` count comes from `qe_pattern_embeddings`, falling back to `vectors`/`embeddings` across aqe versions). The branch is already in ruflo's header line, so it's not repeated here.
 
 ---

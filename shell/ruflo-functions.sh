@@ -185,11 +185,11 @@ function rufloActivationSegments(cwd){
     function q(db, sql){ try { return cp.execFileSync("sqlite3", [db, sql], {stdio:["ignore","pipe","ignore"], timeout:1500}).toString().trim(); } catch(e){ return ""; } }
     function bar(n, max){ n = Math.max(0, Math.min(max, n)); return "[" + "●".repeat(n) + "○".repeat(max - n) + "]"; }
     // ── self-learning (SONA): own line with a volume bar (patterns/traj/HNSW) ──
-    // Δ LoRA is intentionally NOT shown: the matrix-LoRA path is inert until the
-    // learn→inference seam lands upstream (ruvnet/RuVector#519 — processInstantLearning
-    // is a no-op stub, forward_array is never consumed in a decision, deltaNorm=0). It
-    // would render a number that is not a real adaptation signal. Re-add the Δ LoRA field
-    // here only after #519 closes and the delta provably moves. (#8 F4 gate.)
+    // Δ LoRA is intentionally NOT shown: the matrix-LoRA path is inert because
+    // processInstantLearning is a no-op stub in the published @ruvector/ruvllm (latest
+    // 2.5.5), so the delta is never consumed in a decision and deltaNorm=0. #519 was
+    // closed WITHOUT a published fix; the live tracker is ruvnet/RuVector#553. Re-add the
+    // Δ LoRA field only once ruvllm ships a real impl and the delta moves. (#8 F4 gate.)
     var learn = "";
     try {
       var sp = path.join(cwd, ".claude-flow", "neural", "stats.json");
@@ -242,6 +242,35 @@ function rufloActivationSegments(cwd){
             rp2.push("dec" + rt.decisions);
             route = C + "📈 RL" + R + "  " + rp2.join(DIM + " · " + R);
           }
+        }
+      }
+    } catch(e){}
+    // ── proof verdict (self-improvement eval): ALARM-ONLY, fs-only ──
+    // Sources the most recent ruflo-improvement-eval run (.claude-flow/improvement.json):
+    // a pre-registered causal test (one-sided permutation p + Cohen's d + above-chance)
+    // that the route Q-learner self-improves vs a no-learning ablation. It is a SYNTHETIC
+    // proof-of-mechanism (its own reward env), NOT a live measure of real routing — that
+    // is what the 📈 RL line above is. So PASS is the expected state and is rendered
+    // SILENTLY; only a FAIL (a real regression worth a look) surfaces, as ◷ proof FAIL.
+    // The run age (im.ts) is appended so a stale FAIL reads honestly. Never a fabricated
+    // source. Fields per #8: Δpp · CI · p · d · age. (#8 — alarm-only per user decision.)
+    var proof = "";
+    try {
+      var ip = path.join(cwd, ".claude-flow", "improvement.json");
+      if (fs.existsSync(ip)) {
+        var im = JSON.parse(fs.readFileSync(ip, "utf8"));
+        if (im && im.verdict === "FAIL") {
+          var pp = [];
+          if (typeof im.deltaPP === "number") pp.push("Δ" + (im.deltaPP >= 0 ? "+" : "") + im.deltaPP + "pp");
+          if (typeof im.ci95 === "number") pp.push("CI±" + im.ci95);
+          if (typeof im.pValue === "number") pp.push("p" + (im.pValue < 0.001 ? "<.001" : "=" + im.pValue.toFixed(3)));
+          if (typeof im.cohensD === "number") pp.push("d" + (im.cohensD >= 999 ? "∞" : im.cohensD));
+          if (typeof im.ts === "number") {
+            var ageSec = Math.floor(Date.now() / 1000) - im.ts;
+            if (ageSec >= 86400) pp.push(Math.floor(ageSec / 86400) + "d ago");
+            else if (ageSec >= 3600) pp.push(Math.floor(ageSec / 3600) + "h ago");
+          }
+          proof = Y + "◷ proof FAIL" + R + (pp.length ? "  " + DIM + pp.join(" · ") + R : "");
         }
       }
     } catch(e){}
@@ -305,14 +334,17 @@ function rufloActivationSegments(cwd){
         }
       }
     } catch(e){}
-    // ── assemble: line 1 = learning + security (ruflo features); line 2 = agentic-qe ──
-    // No rule above the SONA line — SONA + aidefence are ruflo features and sit flush
-    // under ruflo's native lines. The divider goes BETWEEN the ruflo block and the
-    // agentic-qe line, matching ruflo's native header divider width ('─'.repeat(53) in
-    // statusline.cjs) so the two rules line up.
-    var l1 = []; if (learn) l1.push(learn); if (route) l1.push(route); if (sec) l1.push(sec);
+    // ── assemble: one ruflo feature per line (SONA, 📈 RL, ◷ proof FAIL alarm,
+    // aidefence), then a divider, then the agentic-qe line. Each segment renders on its
+    // OWN line so the live route metrics and the security state are individually scannable
+    // and don't wrap. No rule above the SONA line — these are ruflo features and sit flush
+    // under ruflo's native lines. The divider matches ruflo's native header width
+    // ('─'.repeat(53) in statusline.cjs) so the two rules line up.
     var out = [];
-    if (l1.length) out.push(l1.join("      "));
+    if (learn) out.push(learn);
+    if (route) out.push(route);
+    if (proof) out.push(proof);
+    if (sec) out.push(sec);
     if (out.length && qe) out.push(DIM + "─".repeat(53) + R);
     if (qe) out.push(qe);
     if (!out.length) return "";
@@ -689,10 +721,11 @@ ruflo-onboard() {
 # Historically this wrapper also captured the transient MicroLoRA Delta Norm and wrote
 # .claude-flow/neural/lora-delta.json so the status line could show Δ<n> LoRA. That
 # caching is REMOVED: the Δ LoRA footer field was dropped because the matrix-LoRA path
-# is inert until the learn→inference seam lands upstream (ruvnet/RuVector#519 — see the
-# SONA segment note in rufloActivationSegments). A deltaNorm that changes no decision is
-# not a real adaptation signal, so there is nothing honest to display or cache yet.
-# Re-add the capture here (and the footer field) only once #519 closes.
+# is inert until @ruvector/ruvllm ships a real processInstantLearning (see the SONA
+# segment note in rufloActivationSegments). #519 was closed without a published fix;
+# the live tracker is ruvnet/RuVector#553. A deltaNorm that changes no decision is not a
+# real adaptation signal, so there is nothing honest to display or cache yet. Re-add the
+# capture here (and the footer field) only once ruvllm ships the wired impl.
 #
 #   ruflo-neural-train                 # = ruflo neural train -p coordination (default)
 #   ruflo-neural-train -p security -e 100   # any `ruflo neural train` args pass through
