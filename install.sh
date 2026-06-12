@@ -220,6 +220,11 @@ if [ -d "$SKILLS_SRC" ]; then
 		_skill_n=$((_skill_n + 1))
 	done
 	[ "$_skill_n" -eq 0 ] && ok "(no skills to install)"
+	# Skills bundle their own executable scripts (so the skill works standalone, with
+	# no repo). Also expose the token-audit engine on PATH for CLI users — single source
+	# of truth lives in the skill; this just symlinks/copies it to ~/.local/bin.
+	_ta="$SKILLS_SRC/ruflo-token-audit/scripts/ruflo-token-audit.py"
+	[ -f "$_ta" ] && { run "install -m 0755 '$_ta' '$BIN_DIR/ruflo-token-audit'"; ok "ruflo-token-audit (CLI -> $BIN_DIR)"; }
 	echo ""
 fi
 

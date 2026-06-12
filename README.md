@@ -149,7 +149,7 @@ Try `./install.sh --dry-run` first to preview exactly what it will do.
 | 📇 `ruflo-setup-machine` | One-time: register ruflo MCP at **user** scope (all projects). Optional. |
 | 🔍 `ruflo-parity-test [--cleanup]` | 20-check end-to-end memory smoke test in an isolated `/tmp` dir. |
 | 📝 `ruflo-reference-refresh [--diff\|--regenerate]` | Inspect/rebuild the machine-wide CLAUDE.md ruflo block from the template. |
-| 📊 `ruflo-token-audit [--days N] [--json]` | **Where did my tokens go?** Audits local Claude Code transcripts across N days (default 7): tokens by day/model/project, sessions/day, per-session startup tax, and a cross-reference of running `ruflo` daemons against your top-burn projects. Use when usage spikes unexpectedly. |
+| 📊 `ruflo-token-audit [--days N] [--json]` | **Where's my usage going?** Comprehensive Claude Code usage report across N days (default 7): tokens by day/model/project, **tool & MCP usage**, **subagent fan-out**, **web-tool calls**, **cache efficiency**, **busiest sessions**, **hourly activity**, and a cross-reference of running `ruflo` daemons vs your top-burn projects. The engine is bundled inside the skill (works standalone) and also installed here on PATH. |
 
 > 💡 **Token-audit skill.** The kit also installs a user-scope Claude skill,
 > `ruflo-token-audit`, available in every project. Just ask Claude in plain language —
@@ -286,8 +286,8 @@ ruflo-machine-ref/
 │   ├── ruflo-learning-verify    # prove the learning loop persists
 │   ├── ruflo-improvement-eval   # causal self-improvement eval (route Q-learner)
 │   ├── ruflo-patch-route-learning # retired no-op on ruflo ≥3.10.6 (kept for older installs)
-│   ├── ruflo-security-verify    # verify security scan/defend/secrets + aidefence
-│   └── ruflo-token-audit        # audit token usage across sessions (daemon cross-ref)
+│   └── ruflo-security-verify    # verify security scan/defend/secrets + aidefence
+│                                #   (ruflo-token-audit lives in the skill below; install.sh also puts it on PATH)
 ├── shell/
 │   ├── ruflo-functions.sh     # ruflo-resync, ruflo-onboard, ruflo-setup-project, ruflo-daemon-gc, …
 │   └── ruflo-lib.sh           # shared helpers (deployed to ~/.config/ruflo for the bin scripts)
@@ -297,7 +297,8 @@ ruflo-machine-ref/
 │   ├── ruflo-reference-full.md    # full reference, deployed on-demand (not auto-loaded)
 │   ├── aqe-reference.md           # conditional block — present only when agentic-qe is installed
 │   ├── superpowers-reference.md   # conditional block — house rules so superpowers + ruflo coexist
-│   └── skills/                    # user-scope Claude skills (e.g. ruflo-token-audit)
+│   └── skills/
+│       └── ruflo-token-audit/      # user-scope skill; bundles its own engine (scripts/) → works standalone
 └── docs/
     ├── BACKGROUND.md          # the full root-cause story (memory + learning + aqe + security)
     ├── TROUBLESHOOTING.md     # symptom → diagnosis → fix

@@ -109,6 +109,9 @@ if [ -d "$HERE/claude/skills" ]; then
 		[ -d "$_dst" ] && { run "rm -rf '$_dst'"; ok "removed skill $_name"; }
 	done
 fi
+# 2d. token-audit CLI copy on PATH (install.sh deploys it from the skill, so it is NOT
+# in bin/ and the bin loop above won't catch it).
+[ -f "$HOME/.local/bin/ruflo-token-audit" ] && { run "rm -f '$HOME/.local/bin/ruflo-token-audit'"; ok "removed ruflo-token-audit CLI"; }
 
 # 3. CLAUDE.md managed blocks: the ruflo-reference base + every conditional block (registry-driven,
 #    so any block added to ruflo-lib.sh is cleaned here too). Content outside the sentinels is preserved.
