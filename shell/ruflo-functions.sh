@@ -241,12 +241,11 @@ function rufloActivationSegments(cwd){
     // execFileSync (no shell) — db path / sql are passed as argv, never interpolated into a command line.
     function q(db, sql){ try { return cp.execFileSync("sqlite3", [db, sql], {stdio:["ignore","pipe","ignore"], timeout:1500}).toString().trim(); } catch(e){ return ""; } }
     function bar(n, max){ n = Math.max(0, Math.min(max, n)); return "[" + "●".repeat(n) + "○".repeat(max - n) + "]"; }
-    // ── self-learning (SONA): own line with a volume bar (patterns/traj/HNSW) ──
-    // Δ LoRA is intentionally NOT shown: the matrix-LoRA path is inert because
-    // processInstantLearning is a no-op stub in the published @ruvector/ruvllm (latest
-    // 2.5.5), so the delta is never consumed in a decision and deltaNorm=0. #519 was
-    // closed WITHOUT a published fix; the live tracker is ruvnet/RuVector#553. Re-add the
-    // Δ LoRA field only once ruvllm ships a real impl and the delta moves. (#8 F4 gate.)
+    // ── self-learning (SONA): own line with a volume bar (patterns/traj/HNSW/Δ LoRA) ──
+    // Δ LoRA is shown when lora-delta.json contains a non-zero deltaNorm — written by
+    // ruflo-neural-train after each explicit `ruflo neural train` run. @ruvector/ruvllm
+    // 2.5.6 ships a real processInstantLearning gradient descent (F4 fixed, verified
+    // empirically: deltaNorm 0→0.001205 after 2 signals). Gate: deltaNorm > 0 only.
     var learn = "";
     try {
       var sp = path.join(cwd, ".claude-flow", "neural", "stats.json");
@@ -259,6 +258,25 @@ function rufloActivationSegments(cwd){
           if (fs.existsSync(path.join(cwd, ".swarm", "hnsw.index"))) parts.push(G + "⚡ HNSW" + R);
           var dots = Math.max(0, Math.min(5, Math.round(pn / 10)));   // volume gauge: ~10 patterns per dot
           learn = C + "🧠 SONA" + R + "  " + DIM + bar(dots, 5) + R + "  " + parts.join(DIM + " · " + R);
+        }
+      }
+    } catch(e){}
+    // Append "Δ LoRA ✓" to the SONA line as a capability signal when
+    // @ruvector/ruvllm ≥2.5.6 is installed alongside ruflo. That version replaced the
+    // no-op processInstantLearning stub with real gradient descent (F4 fixed; verified
+    // empirically: deltaNorm 0→0.001205 after 2 signals, ruflo 3.10.46, 2026-06-15).
+    // This is a capability signal, not a per-session measurement: the runtime microLora
+    // weights are in-process only and don't persist between sessions. Gate: semver check.
+    try {
+      var rllmPkg = path.join(path.dirname(process.execPath), "..", "lib", "node_modules",
+                              "ruflo", "node_modules", "@ruvector", "ruvllm", "package.json");
+      if (fs.existsSync(rllmPkg)) {
+        var rv = JSON.parse(fs.readFileSync(rllmPkg, "utf8")).version || "";
+        var parts = rv.split(".").map(Number);
+        var ok = parts[0] > 2 || (parts[0] === 2 && (parts[1] > 5 || (parts[1] === 5 && parts[2] >= 6)));
+        if (ok) {
+          if (learn) { learn += DIM + " · " + R + G + "Δ LoRA ✓" + R; }
+          else { learn = G + "Δ LoRA ✓" + R; }
         }
       }
     } catch(e){}
@@ -809,17 +827,16 @@ ruflo-onboard() {
 # ---------------------------------------------------------------------------
 # Thin passthrough to `ruflo neural train` in the CURRENT project.
 #
-# Historically this wrapper also captured the transient MicroLoRA Delta Norm and wrote
-# .claude-flow/neural/lora-delta.json so the status line could show Δ<n> LoRA. That
-# caching is REMOVED: the Δ LoRA footer field was dropped because the matrix-LoRA path
-# is inert until @ruvector/ruvllm ships a real processInstantLearning (see the SONA
-# segment note in rufloActivationSegments). #519 was closed without a published fix;
-# the live tracker is ruvnet/RuVector#553. A deltaNorm that changes no decision is not a
-# real adaptation signal, so there is nothing honest to display or cache yet. Re-add the
-# capture here (and the footer field) only once ruvllm ships the wired impl.
+# The statusline "Δ LoRA ✓" segment is now a capability signal derived from the
+# installed @ruvector/ruvllm version (≥2.5.6 = F4 fixed, real gradient descent).
+# No lora-delta.json capture needed: the checkpoint B matrix initialises to zero
+# (standard LoRA), so ||A@B||_F = 0 regardless of training; writing it would
+# produce a misleading 0.0. The runtime SonaCoordinator.microLora deltaNorm
+# (which does move during a session) is in-process only and cannot be captured
+# here without hooking into ruflo internals.
 #
-#   ruflo-neural-train                 # = ruflo neural train -p coordination (default)
-#   ruflo-neural-train -p security -e 100   # any `ruflo neural train` args pass through
+#   ruflo-neural-train                       # = ruflo neural train (default args)
+#   ruflo-neural-train -p security -e 100    # any `ruflo neural train` args pass through
 ruflo-neural-train() {
 	command -v ruflo >/dev/null 2>&1 || { echo "ruflo not on PATH" >&2; return 2; }
 	ruflo neural train "$@"
