@@ -283,9 +283,18 @@ function rufloActivationSegments(cwd){
       if (fs.existsSync(pPath)) {
         var st = null; try { st = JSON.parse(fs.readFileSync(sPath, "utf8")); } catch(e){}
         var nowS = Math.floor(Date.now() / 1000);
-        var pMtime = Math.floor(fs.statSync(pPath).mtimeMs / 1000);
+        var pMtimeMs = fs.statSync(pPath).mtimeMs;   // ms precision: same-second writes still detected
         var TTL = Number(process.env.RUFLO_LORA_TTL_S || 60);
-        var stale = !st || (pMtime > (st.ts || 0) && (nowS - (st.ts || 0)) >= TTL);
+        // Session boundary: prefer Claude Code's real session_id (piped on stdin) so the
+        // +<session> delta resets exactly when YOU start a new session — not on a clock.
+        // getStdinData() is the host statusline's cached single-read of that JSON; guard the
+        // call so the segment still works on a template that lacks it, or run standalone.
+        var sid = "";
+        try { if (typeof getStdinData === "function") { var _sd = getStdinData(); sid = (_sd && (_sd.session_id || _sd.sessionId)) || ""; } } catch(e){}
+        // Refresh when: no state yet, the session changed (reset the +session baseline even
+        // with no new patterns), or patterns changed and the TTL has elapsed.
+        var sidChanged = !!(sid && st && (st.sessionId || "") !== sid);
+        var stale = !st || sidChanged || (pMtimeMs > (st.pms || 0) && (nowS - (st.ts || 0)) >= TTL);
         if (stale) {
           // Resolve the installed ruvllm SonaCoordinator (same global layout as the version probe).
           var SC = null;
@@ -304,8 +313,14 @@ function rufloActivationSegments(cwd){
             var applied = new Set((st && st.appliedIds) || []);
             var n = (st && st.n) || 0;
             if (st && st.loraA) { try { coord.microLora.setWeights({ loraA: st.loraA, loraB: st.loraB, scaling: st.scaling }); } catch(e){} }
-            // Session rollover on first run or after a >30min idle gap.
-            var newSession = !st || (nowS - (st.ts || 0) > 1800);
+            var prevSid = st ? (st.sessionId || "") : "";
+            var newSession;
+            if (sid) {
+              newSession = !st || prevSid !== sid;          // real per-session boundary
+            } else {
+              newSession = !st || (nowS - (st.ts || 0) > 1800);  // no id (manual run): idle fallback
+              sid = prevSid;                                // preserve the session we're in
+            }
             var sessionBase = newSession ? (st ? (st.deltaNorm || 0) : 0) : (st.sessionBase || 0);
             var sessionTs = newSession ? nowS : (st.sessionTs || nowS);
             for (var i = 0; i < (Array.isArray(pats) ? pats.length : 0); i++) {
@@ -318,7 +333,8 @@ function rufloActivationSegments(cwd){
             }
             var w = coord.microLora.getWeights(), nm = coord.stats().microLora.deltaNorm;
             var rec = { loraA: w.loraA, loraB: w.loraB, scaling: w.scaling, appliedIds: Array.from(applied),
-                        n: n, deltaNorm: nm, sessionBase: sessionBase, sessionTs: sessionTs, ts: nowS };
+                        n: n, deltaNorm: nm, sessionBase: sessionBase, sessionTs: sessionTs, sessionId: sid,
+                        pms: pMtimeMs, ts: nowS };
             try { var tmp = sPath + ".tmp"; fs.writeFileSync(tmp, JSON.stringify(rec)); fs.renameSync(tmp, sPath); } catch(e){}
             st = rec;
           }
