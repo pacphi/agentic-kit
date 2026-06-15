@@ -241,11 +241,10 @@ function rufloActivationSegments(cwd){
     // execFileSync (no shell) — db path / sql are passed as argv, never interpolated into a command line.
     function q(db, sql){ try { return cp.execFileSync("sqlite3", [db, sql], {stdio:["ignore","pipe","ignore"], timeout:1500}).toString().trim(); } catch(e){ return ""; } }
     function bar(n, max){ n = Math.max(0, Math.min(max, n)); return "[" + "●".repeat(n) + "○".repeat(max - n) + "]"; }
-    // ── self-learning (SONA): own line with a volume bar (patterns/traj/HNSW/Δ LoRA) ──
-    // Δ LoRA is shown when lora-delta.json contains a non-zero deltaNorm — written by
-    // ruflo-neural-train after each explicit `ruflo neural train` run. @ruvector/ruvllm
-    // 2.5.6 ships a real processInstantLearning gradient descent (F4 fixed, verified
-    // empirically: deltaNorm 0→0.001205 after 2 signals). Gate: deltaNorm > 0 only.
+    // ── self-learning (SONA): own line with a volume bar (patterns/traj/HNSW) plus a
+    // LIVE micro-LoRA adaptation field (Δ‖W‖, appended further below). The Δ‖W‖ tracker
+    // is maintained inline in this same function — see the "micro-LoRA LIVE adaptation"
+    // block after the route-Q segment.
     var learn = "";
     try {
       var sp = path.join(cwd, ".claude-flow", "neural", "stats.json");
@@ -261,22 +260,79 @@ function rufloActivationSegments(cwd){
         }
       }
     } catch(e){}
-    // Append "Δ LoRA ✓" to the SONA line as a capability signal when
-    // @ruvector/ruvllm ≥2.5.6 is installed alongside ruflo. That version replaced the
-    // no-op processInstantLearning stub with real gradient descent (F4 fixed; verified
-    // empirically: deltaNorm 0→0.001205 after 2 signals, ruflo 3.10.46, 2026-06-15).
-    // This is a capability signal, not a per-session measurement: the runtime microLora
-    // weights are in-process only and don't persist between sessions. Gate: semver check.
+    // ── micro-LoRA LIVE adaptation: Δ‖W‖<cum> +<session> <trend> n<count> ──
+    // Shows the model ACTUALLY ADAPTING FROM YOUR WORK, live. ruflo's own micro-LoRA is
+    // per-process scratch ("resets per process", intelligence.js) — every hook reinits it
+    // (random A, B=0), applies that call's signals, then DISCARDS the weights; only
+    // patterns.json / stats.json persist. So the kit persists what ruflo throws away: a
+    // single cumulative micro-LoRA in lora-live.json, advanced HERE (inline, mtime+TTL
+    // gated) by feeding each NEW distilled pattern ruflo has learned from your work
+    // (.claude-flow/neural/patterns.json) through the genuine @ruvector/ruvllm 2.5.6
+    // gradient path (real since F4 fixed), weighted by ruflo's OWN per-pattern confidence
+    // (no fabricated reward). The init RNG is seeded and weights are restored each tick, so
+    // the result is DETERMINISTIC (no 41%-CV random-init noise) and cumulative.
+    //   Δ‖W‖ = ‖scaling·(A·B)‖_F  (federated-LoRA's standard adaptation-magnitude monitor)
+    //   +<session> = growth since this session began (the live "from your work" signal)
+    //   n = distinct patterns fed (REINFORCE updates).  Gate: cum norm > 0.
+    // Honest scope: a kit-persisted MIRROR of ruflo's discarded adapter, fed ruflo's real
+    // confidence-weighted patterns. NOT shown: amplification factor (no frozen base W) and
+    // a live reward curve (neural-train's WASM path records trajectories, not signals → 0).
     try {
-      var rllmPkg = path.join(path.dirname(process.execPath), "..", "lib", "node_modules",
-                              "ruflo", "node_modules", "@ruvector", "ruvllm", "package.json");
-      if (fs.existsSync(rllmPkg)) {
-        var rv = JSON.parse(fs.readFileSync(rllmPkg, "utf8")).version || "";
-        var parts = rv.split(".").map(Number);
-        var ok = parts[0] > 2 || (parts[0] === 2 && (parts[1] > 5 || (parts[1] === 5 && parts[2] >= 6)));
-        if (ok) {
-          if (learn) { learn += DIM + " · " + R + G + "Δ LoRA ✓" + R; }
-          else { learn = G + "Δ LoRA ✓" + R; }
+      var nd = path.join(cwd, ".claude-flow", "neural");
+      var pPath = path.join(nd, "patterns.json"), sPath = path.join(nd, "lora-live.json");
+      if (fs.existsSync(pPath)) {
+        var st = null; try { st = JSON.parse(fs.readFileSync(sPath, "utf8")); } catch(e){}
+        var nowS = Math.floor(Date.now() / 1000);
+        var pMtime = Math.floor(fs.statSync(pPath).mtimeMs / 1000);
+        var TTL = Number(process.env.RUFLO_LORA_TTL_S || 60);
+        var stale = !st || (pMtime > (st.ts || 0) && (nowS - (st.ts || 0)) >= TTL);
+        if (stale) {
+          // Resolve the installed ruvllm SonaCoordinator (same global layout as the version probe).
+          var SC = null;
+          try {
+            var sj = path.join(path.dirname(process.execPath), "..", "lib", "node_modules", "ruflo",
+                               "node_modules", "@ruvector", "ruvllm", "dist", "cjs", "sona.js");
+            if (fs.existsSync(sj)) SC = require(sj).SonaCoordinator;
+          } catch(e){}
+          if (SC) {
+            var pats = JSON.parse(fs.readFileSync(pPath, "utf8"));
+            // Seed Math.random so the first-ever loraA init is deterministic; restore after ctor.
+            var seed = 0x9e3779b9, orig = Math.random;
+            Math.random = function(){ seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff; };
+            var coord = new SC({ backgroundLoopEnabled: false });
+            Math.random = orig;
+            var applied = new Set((st && st.appliedIds) || []);
+            var n = (st && st.n) || 0;
+            if (st && st.loraA) { try { coord.microLora.setWeights({ loraA: st.loraA, loraB: st.loraB, scaling: st.scaling }); } catch(e){} }
+            // Session rollover on first run or after a >30min idle gap.
+            var newSession = !st || (nowS - (st.ts || 0) > 1800);
+            var sessionBase = newSession ? (st ? (st.deltaNorm || 0) : 0) : (st.sessionBase || 0);
+            var sessionTs = newSession ? nowS : (st.sessionTs || nowS);
+            for (var i = 0; i < (Array.isArray(pats) ? pats.length : 0); i++) {
+              var p = pats[i], id = String(p.id || i);
+              if (applied.has(id)) continue;
+              var conf = (typeof p.confidence === "number") ? p.confidence : Number(p.confidence);
+              coord.recordSignal({ requestId: id, type: p.type || "pattern",
+                                   quality: (conf >= 0 && conf <= 1) ? conf : 0.7, correction: String(p.content || id) });
+              applied.add(id); n++;
+            }
+            var w = coord.microLora.getWeights(), nm = coord.stats().microLora.deltaNorm;
+            var rec = { loraA: w.loraA, loraB: w.loraB, scaling: w.scaling, appliedIds: Array.from(applied),
+                        n: n, deltaNorm: nm, sessionBase: sessionBase, sessionTs: sessionTs, ts: nowS };
+            try { var tmp = sPath + ".tmp"; fs.writeFileSync(tmp, JSON.stringify(rec)); fs.renameSync(tmp, sPath); } catch(e){}
+            st = rec;
+          }
+        }
+        if (st && typeof st.deltaNorm === "number" && st.deltaNorm > 0) {
+          var sess = st.deltaNorm - (st.sessionBase || 0);
+          var trend = "";
+          if (Math.abs(sess) / st.deltaNorm < 0.005) trend = DIM + "→" + R;
+          else trend = sess > 0 ? (G + "▲" + R) : (Y + "▼" + R);
+          var sessStr = (Math.abs(sess) / st.deltaNorm >= 0.005)
+            ? (" " + (sess > 0 ? G : Y) + (sess > 0 ? "+" : "") + sess.toFixed(4) + R) : "";
+          var dseg = C + "Δ‖W‖" + st.deltaNorm.toFixed(4) + R + sessStr + trend + DIM + " n" + st.n + R;
+          if (learn) { learn += DIM + " · " + R + dseg; }
+          else { learn = C + "🧠 Δ LoRA" + R + "  " + dseg; }
         }
       }
     } catch(e){}
@@ -825,21 +881,42 @@ ruflo-onboard() {
 }
 
 # ---------------------------------------------------------------------------
-# Thin passthrough to `ruflo neural train` in the CURRENT project.
+# Advance the LIVE micro-LoRA adaptation tracker for the current project.
 #
-# The statusline "Δ LoRA ✓" segment is now a capability signal derived from the
-# installed @ruvector/ruvllm version (≥2.5.6 = F4 fixed, real gradient descent).
-# No lora-delta.json capture needed: the checkpoint B matrix initialises to zero
-# (standard LoRA), so ||A@B||_F = 0 regardless of training; writing it would
-# produce a misleading 0.0. The runtime SonaCoordinator.microLora deltaNorm
-# (which does move during a session) is in-process only and cannot be captured
-# here without hooking into ruflo internals.
+# The actual tracking logic lives INLINE in the statusline (rufloActivationSegments):
+# it maintains a kit-persisted, deterministic, cumulative micro-LoRA in
+# .claude-flow/neural/lora-live.json, advancing it by feeding each NEW pattern ruflo has
+# distilled from your work through the genuine @ruvector/ruvllm 2.5.6 gradient path
+# (confidence-weighted, seeded init → no random-init noise). ruflo's own micro-LoRA is
+# per-process scratch and discarded; the kit persists what it throws away. The statusline
+# advances it automatically on render (mtime+TTL gated), so it tracks live as you work.
+# This helper just triggers one render so the file refreshes on demand (after a train, a
+# resync, or an upgrade) without waiting for the next statusline tick.
+#
+#   ruflo-lora-track            # advance lora-live.json now (else: auto on next render)
+ruflo-lora-track() {
+	command -v node >/dev/null 2>&1 || { echo "node not on PATH" >&2; return 2; }
+	local sl=".claude/helpers/statusline.cjs"
+	[ -f "$sl" ] || sl="$HOME/.claude/helpers/statusline.cjs"
+	[ -f "$sl" ] || { echo "no statusline.cjs — run ruflo-onboard first" >&2; return 0; }
+	# Force the inline updater past its TTL by clearing the cached state's ts, then render.
+	RUFLO_LORA_TTL_S=0 node "$sl" >/dev/null 2>&1 || true
+	local lv=".claude-flow/neural/lora-live.json"
+	[ -f "$lv" ] && node -e 'const s=require("fs").readFileSync(".claude-flow/neural/lora-live.json","utf8");const j=JSON.parse(s);process.stdout.write("  Δ‖W‖ "+(+j.deltaNorm).toFixed(6)+" · n"+j.n+" patterns adapted\n")' 2>/dev/null
+}
+
+# ---------------------------------------------------------------------------
+# Thin passthrough to `ruflo neural train` in the CURRENT project, then advance the
+# live micro-LoRA tracker so the statusline Δ‖W‖ field reflects any newly-learned patterns.
 #
 #   ruflo-neural-train                       # = ruflo neural train (default args)
 #   ruflo-neural-train -p security -e 100    # any `ruflo neural train` args pass through
 ruflo-neural-train() {
 	command -v ruflo >/dev/null 2>&1 || { echo "ruflo not on PATH" >&2; return 2; }
 	ruflo neural train "$@"
+	local _exit=$?
+	[ $_exit -eq 0 ] && command -v ruflo-lora-track >/dev/null 2>&1 && ruflo-lora-track
+	return $_exit
 }
 
 # ---------------------------------------------------------------------------
@@ -883,6 +960,9 @@ ruflo-resync() {
 
 	echo ""; echo "## 3/4 statusline (version + activation footer) for this project"
 	ruflo-fix-statusline-version
+	# Advance the live micro-LoRA tracker so the Δ‖W‖ field reflects the new
+	# @ruvector/ruvllm (an upgrade may change the gradient path). Best-effort.
+	command -v ruflo-lora-track >/dev/null 2>&1 && ruflo-lora-track
 
 	echo ""; echo "## machine-wide ~/.claude/CLAUDE.md: conditional reference blocks (agentic-qe, superpowers, …)"
 	_ruflo_sync_aqe_block && echo "✓ conditional blocks in sync with detected tools"

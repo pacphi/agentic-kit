@@ -116,7 +116,7 @@ route Q-learner · 5 seeds · learning vs no-learning ablation
 | Bug B — stale route cache hid learning | **Fixed 3.10.8** — per-state cache invalidation in `update()` | aligns with the "no effect" symptom |
 | Bug C — `--explore false` ignored | **Fixed 3.10.8** — parser honors explicit boolean values | exploration knob now controllable |
 | **F3** state encoder collapses tasks | ✅ **Fixed 3.10.11** — FNV-1a lossless fold; keyword block no longer discarded | `--probe-states` should now show N tasks → N states |
-| **F4** LoRA/SONA not consumed at inference | ✅ **Fixed in `@ruvector/ruvllm@2.5.6`** — real gradient descent in `processInstantLearning`; `deltaNorm` empirically > 0 | Δ LoRA segment can be un-gated in statusline |
+| **F4** LoRA/SONA not consumed at inference | ✅ **Fixed in `@ruvector/ruvllm@2.5.6`** — real gradient descent in `processInstantLearning`; `deltaNorm` empirically > 0 | live `Δ‖W‖` tracker on the SONA line (kit-persisted adapter) |
 | Fabricated Flash-Attention metric (RNG) | **Removed 3.10.7**; "150×–12,500× / 2.49–7.47×" marked unverified | update any kit docs that still quote those |
 
 The most striking takeaway is **methodological convergence**: this kit, Ciprian Melian's
@@ -133,7 +133,7 @@ What this PR still contributes, now that F1/F2 are upstream:
   measuring stick for any future F4/Tier-2 work. `--cli-check` is now version-aware (recognizes
   the 3.10.6 `saveModel()` fix).
 - **F3 (state-encoder collapse)** — ✅ fixed upstream in ruflo 3.10.11 (FNV-1a lossless fold). No longer a carry-forward item.
-- **F4 (LoRA/SONA inference gap)** — ✅ fixed in `@ruvector/ruvllm@2.5.6` (shipped with ruflo 3.10.46). `processInstantLearning` now does real gradient descent; `Δ LoRA ✓` is live in the statusline as a version-gated capability signal.
+- **F4 (LoRA/SONA inference gap)** — ✅ fixed in `@ruvector/ruvllm@2.5.6` (shipped with ruflo 3.10.46). `processInstantLearning` now does real gradient descent. The statusline shows a live `Δ‖W‖` adaptation field from a kit-persisted micro-LoRA (ruflo's own resets per process — see docs/BACKGROUND.md), fed ruflo's confidence-weighted patterns through the real gradient path; deterministic (seeded) and cumulative.
 - **`ruflo-patch-route-learning`** — retained only as a **version-gated legacy shim** for
   installs <3.10.6; no longer part of `ruflo-resync`.
 
@@ -151,7 +151,7 @@ The downstream kit carry-forward — a **live RL statusline panel** — is track
 [pacphi/ruflo-machine-ref#8](https://github.com/pacphi/ruflo-machine-ref/issues/8), which is
 **closed**: both upstream blockers (F3: ruflo 3.10.11; F4: ruvllm 2.5.6) landed, and
 `rufloActivationSegments` in `shell/ruflo-functions.sh` now renders the `📈 RL` route-Q
-line and `Δ LoRA ✓` capability signal.
+line and the live `Δ‖W‖` micro-LoRA adaptation field.
 
 Environment: ruflo 3.10.10, Node 26, `ruvnet/ruvector@c2089c4`. Repro tool:
 `ruflo-improvement-eval` (https://github.com/pacphi/ruflo-machine-ref).

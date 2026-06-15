@@ -206,12 +206,27 @@ which `ruflo-neural-train` did (writing `.claude-flow/neural/lora-delta.json`).
 > **Update (2026-06-15, ruflo 3.10.46 / `@ruvector/ruvllm@2.5.6`).** F4 is **fixed**.
 > `processInstantLearning` now does real gradient descent — `LoraAdapter.backward()`
 > updates both `loraA` and `loraB`; empirically verified: `deltaNorm` moves
-> `0.000000 → 0.001205` after 2 signals. `Δ LoRA ✓` is re-introduced in the statusline
-> as a **version-gated capability signal** (semver check ≥2.5.6 on the installed
-> `@ruvector/ruvllm`). Displayed as a capability flag rather than a measurement because
-> the runtime microLora weights are in-process only and don't persist between sessions.
-> Issue [pacphi/ruflo-machine-ref#8](https://github.com/pacphi/ruflo-machine-ref/issues/8)
+> `0.000000 → 0.001205` after 2 signals. Issue
+> [pacphi/ruflo-machine-ref#8](https://github.com/pacphi/ruflo-machine-ref/issues/8)
 > is closed.
+>
+> **Update (2026-06-15b — live `Δ‖W‖` tracker, replacing the capability flag).** A first
+> cut showed `Δ LoRA ✓` (a version flag) — academically vacuous (asserts the code path is
+> wired, not that learning is meaningful). Investigation then surfaced the real
+> architecture: ruflo's micro-LoRA is **per-process scratch** (`intelligence.js:732`:
+> `source: 'sonaCoordinator (in-memory, resets per process)'`) — every hook reinitialises
+> it (random `A`, `B=0`), applies that call's signals, then **discards the weights**; the
+> saved `lora-checkpoint-*.json` has `B=0` so its norm is always 0, and `ruflo neural
+> train` reports `deltaNorm 0` because it records *trajectories*, not *signals*. A naïve
+> probe over the patterns was also **41%-CV noisy** because `loraA` is Kaiming-random
+> per construction. So the kit now **persists what ruflo discards**: a single cumulative
+> micro-LoRA in `.claude-flow/neural/lora-live.json`, advanced inline by the statusline
+> (mtime+TTL gated) by feeding each **new** distilled pattern through the genuine ruvllm
+> 2.5.6 gradient path, **weighted by ruflo's own per-pattern confidence**, with a **seeded
+> init** and **restored weights** each tick → deterministic and cumulative. The statusline
+> shows `Δ‖W‖<cum> +<session>▲ n<count>` — the model *actually adapting from your work,
+> live*. Honest scope: a kit-persisted mirror of ruflo's discarded adapter; not the
+> amplification factor (no frozen base `W`) or a live reward curve (not persisted).
 
 ### Security surface
 
