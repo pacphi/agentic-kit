@@ -5,19 +5,19 @@ self-learning), **which of our findings have since landed upstream (ruflo 3.10.6
 and **what remains as the carry-forward scope for this branch/PR**. Plain-language primer
 first; findings, the upstream reconciliation, and the remaining-issue text follow.
 
-> **Status (2026‑05‑29):** original investigation ran against ruflo **3.10.5**; latest is
-> **3.10.10**. Upstream shipped four releases in one day that absorb most of this — **F1/F2
-> are fixed (#2222, 3.10.6; @pacphi credited)**, a deeper follow-up bug (negative‑reward
-> inversion) was fixed in 3.10.7, route cache + `--explore false` in 3.10.8, and ADR‑142's
-> model-router bandit in 3.10.9. **F3 and F4 remain open and are now filed as two separate,
-> independently-reproduced upstream issues:**
+> **Status (2026‑05‑29, updated 2026‑06‑15):** original investigation ran against ruflo **3.10.5**;
+> current installed versions are **ruflo 3.10.46** and **agentic-qe 3.10.7**. Upstream shipped
+> four releases in one day that absorbed most of the original findings — F1/F2 fixed (#2222,
+> 3.10.6; @pacphi credited), negative‑reward inversion fixed in 3.10.7, route cache +
+> `--explore false` in 3.10.8, ADR‑142 model-router bandit in 3.10.9. **F3 and F4 are now
+> also fixed upstream:**
 >
-> - **F3** (route Q-state encoder collapse) → **[ruvnet/ruflo#2239](https://github.com/ruvnet/ruflo/issues/2239)**
-> - **F4** (SONA learn→inference loop unwired at the JS/WASM boundary) → **[ruvnet/ruvector#519](https://github.com/ruvnet/RuVector/issues/519)**
-> - Kit carry-forward (the live RL statusline panel, gated on both) → tracking issue **[pacphi/ruflo-machine-ref#8](https://github.com/pacphi/ruflo-machine-ref/issues/8)**
+> - **F3** (route Q-state encoder collapse) → **[ruvnet/ruflo#2239](https://github.com/ruvnet/ruflo/issues/2239)** — ✅ **FIXED in ruflo 3.10.11** (FNV-1a lossless fold; confirmed in [ruflo#2360](https://github.com/ruvnet/ruflo/issues/2360) reconciliation table)
+> - **F4** (SONA learn→inference loop unwired at the JS/WASM boundary) → **[ruvnet/ruvector#519](https://github.com/ruvnet/RuVector/issues/519)** — ✅ **FIXED in `@ruvector/ruvllm@2.5.6`** (real `processInstantLearning` gradient descent, verified empirically: `deltaNorm` moves from `0.000000` → `0.001205` after 2 signals; both ruflo 3.10.46 and agentic-qe 3.10.7 ship the identical fixed binary)
+> - Kit carry-forward → **[pacphi/ruflo-machine-ref#8](https://github.com/pacphi/ruflo-machine-ref/issues/8)** — ✅ **Both blockers resolved; ready for implementation**
 >
-> The filed issues are the authoritative write-ups; **F4's framing was corrected during that
-> verification** (see F4 below). Details in the reconciliation table.
+> The filed issues are the authoritative write-ups; F4's framing was corrected during the
+> original verification (see F4 below). Details in the reconciliation table.
 
 ## Plain-language primer (no ML background needed)
 
@@ -61,19 +61,15 @@ flag parser dropped any `-`-prefixed value, so giving **negative** feedback acti
 `ruflo-improvement-eval` drives the router **in-process** and bypasses the CLI flag parser.
 Worth recording: any workflow doing `route feedback -r -<n>` before 3.10.7 trained backwards.
 
-### F3 — The state encoder collapses semantically-distinct tasks → **STILL OPEN**
+### F3 — The state encoder collapses semantically-distinct tasks → ✅ **FIXED in ruflo 3.10.11**
 `featureVectorToKey`/`extractFeatures` key features 1–32 on keyword *presence* and 33–48 on
 length/word-count buckets; tasks with different routing keywords but similar shape hash to the
-**same** Q-state (verified: six keyword-distinct tasks → 1 state). **Confirmed still open in
-3.10.9 (latest):** the entire `ruvector/q-learning-router.js` is **byte-identical** between the
-installed 3.10.8 and the published 3.10.9 — `extractFeatures`, `featureVectorToKey`, and
-`FEATURE_KEYWORDS` are all unchanged. Note: 3.10.9's ADR‑142 "per-task bandit priors" is a
-**separate subsystem** — `ruvector/model-router.js`, a Thompson‑sampling bandit that selects the
-*LLM model* (Haiku/Sonnet/Opus) by complexity bucket — and has **zero references** to the
-agent-route encoder. So even with F2 fixed, task-specific routing is limited because distinct
-tasks share a policy slot. **This is the carry-forward finding most worth a PR.**
+**same** Q-state (verified: six keyword-distinct tasks → 1 state). Was confirmed still open in
+3.10.9. **Fixed in ruflo 3.10.11** via FNV-1a lossless fold — the keyword-presence block is no
+longer discarded by the 31-bit truncating hash. Confirmed in the [ruflo#2360](https://github.com/ruvnet/ruflo/issues/2360)
+reconciliation table. The `ruflo-improvement-eval --probe-states` check should now show N tasks → N distinct Q-states.
 
-### F4 — SONA learn→inference loop is unwired at the JS/WASM boundary → **FILED: [ruvnet/ruvector#519](https://github.com/ruvnet/RuVector/issues/519)**
+### F4 — SONA learn→inference loop is unwired at the JS/WASM boundary → ✅ **FIXED in `@ruvector/ruvllm@2.5.6`**
 The ruflo-bundled view was: every `SonaCoordinator` call is training/recording, the coordinator
 exposes no `predict`/`forward`, and the trained `Δ LoRA` changes no decision (written, never
 read); 3.10.9 documented the WASM MicroLoRA `apply()` as *"empirically inert (Δ=0 after 200
@@ -82,23 +78,19 @@ adapts)"* and refused to fake a gradient.
 **Corrected against actual `ruvnet/ruvector` source (`c2089c4`), before filing** — the bundled
 wording was imprecise and was *not* carried over verbatim:
 - Inference seams **do exist and work**: `applyLora`, `MicroLoRA::forward`, `LoraAdapter.forward`.
-  So this is **not** "no forward path."
-- The real gap is the **learn→adapt loop is unwired through the bindings consumers actually call**:
-  - `WasmSonaEngine::learn_from_feedback` is a **no-op** — it `console.log`s a reward and returns
-    (`crates/sona/src/wasm.rs:183-192`).
-  - The JS `@ruvector/ruvllm` `SonaCoordinator.processInstantLearning` is an **empty stub**
-    (`sona.js:449-452`, "In full implementation, this updates LoRA weights").
-  - The Rust trajectory path adapts **only on multi-step, varying-reward trajectories** — a
-    single-step "one outcome per task" feedback has REINFORCE advantage 0 → **Δ=0 exactly**
-    (reproduced over 200 adapts).
-  - `accumulate_gradient` only writes `up_proj`; `down_proj` is **never** updated (rank-deficient).
-  - Bonus smell: `estimate_gradient` L2-normalizes a near-zero gradient → **amplifies f32 residue
-    into a unit-norm update** for a no-information signal.
-- Reproduced with a `cargo test` against the real crate (`crates/sona/tests/repro_delta_zero.rs`,
-  included verbatim in #519). Consuming a *working* adapter downstream in ruflo is a follow-up
-  gated on ruvector exposing a non-inert seam — not a kit patch. **[#519 closed 2026-06-11
-  without a published fix; the live follow-up is [ruvnet/RuVector#553](https://github.com/ruvnet/RuVector/issues/553)
-  — `processInstantLearning` still a no-op stub in the published `@ruvector/ruvllm` 2.5.5.]**
+- The real gap was the **learn→adapt loop unwired through the bindings consumers actually call**:
+  - `WasmSonaEngine::learn_from_feedback` was a **no-op**.
+  - The JS `SonaCoordinator.processInstantLearning` was an **empty stub** ("In full implementation, this updates LoRA weights").
+  - Reproduced with a `cargo test` (`crates/sona/tests/repro_delta_zero.rs`, included verbatim in #519).
+
+**`@ruvector/ruvllm@2.5.6` ships a real implementation** (comment: "fixes #553 — this was a no-op stub"):
+- `processInstantLearning` computes `reward = quality - 0.5`, creates a correction embedding,
+  derives `gradOutput = input.map(x => -reward * x)`, and calls `this.microLora.backward(input, gradOutput, lr)`.
+- `LoraAdapter.backward()` applies gradient descent updates to both `loraA` and `loraB` weight matrices.
+- `microLoraDeltaNorm()` computes the actual Frobenius norm of the combined delta.
+- **Empirically verified 2026-06-15** against ruflo 3.10.46's installed binary: `deltaNorm` moves
+  from `0.000000` → `0.001205` after 2 learning signals. Not a no-op.
+- Both ruflo 3.10.46 and agentic-qe 3.10.7 ship the **identical** `sona.js` (MD5: `0b1d3b2bd4292acc312bb51423561149`).
 
 ### F5 — With F2 fixed, the route learner self-improves — significantly but modestly
 Our held-out, ablated, multi-seed experiment (`ruflo-improvement-eval`) over a synthetic
@@ -123,8 +115,8 @@ route Q-learner · 5 seeds · learning vs no-learning ablation
 | **F2b** negative-reward inversion (we missed) | **Fixed 3.10.7** — parser accepts `-`-prefixed values | n/a (our eval is in-process) |
 | Bug B — stale route cache hid learning | **Fixed 3.10.8** — per-state cache invalidation in `update()` | aligns with the "no effect" symptom |
 | Bug C — `--explore false` ignored | **Fixed 3.10.8** — parser honors explicit boolean values | exploration knob now controllable |
-| **F3** state encoder collapses tasks | **Still open in 3.10.9** (`q-learning-router.js` byte-identical 3.10.8→3.10.9; ADR‑142 is the separate `model-router.js`) | **carry-forward — offer a PR** |
-| **F4** LoRA/SONA not consumed at inference | **Confirmed + deferred** (3.10.9: `apply()` inert, won't fake it) | upstream R&D in `@ruvector/ruvllm` |
+| **F3** state encoder collapses tasks | ✅ **Fixed 3.10.11** — FNV-1a lossless fold; keyword block no longer discarded | `--probe-states` should now show N tasks → N states |
+| **F4** LoRA/SONA not consumed at inference | ✅ **Fixed in `@ruvector/ruvllm@2.5.6`** — real gradient descent in `processInstantLearning`; `deltaNorm` empirically > 0 | Δ LoRA segment can be un-gated in statusline |
 | Fabricated Flash-Attention metric (RNG) | **Removed 3.10.7**; "150×–12,500× / 2.49–7.47×" marked unverified | update any kit docs that still quote those |
 
 The most striking takeaway is **methodological convergence**: this kit, Ciprian Melian's
