@@ -42,7 +42,7 @@ required digging.
 
 ### F1 — The route Q-learner *does* learn (in-process)
 ruflo's `createQLearningRouter` genuinely learns: 200 in-process updates → Q-table grows,
-ε decays (1.0→0.91), TD error nonzero. The algorithm works. **[Still true on 3.10.9.]**
+ε decays (1.0→0.91), TD error nonzero. The algorithm works. **[Still true on 3.10.46.]**
 
 ### F2 — CLI `route feedback` could not persist (BUG) → **FIXED UPSTREAM (3.10.6 #2222)**
 `route.js` `feedbackCommand` called `update()` but **never `saveModel()`**, and
@@ -107,7 +107,7 @@ route Q-learner · 5 seeds · learning vs no-learning ablation
   (modest ceiling — partial learning; see F3 encoder collapse + slow ε decay)
 ```
 
-## Upstream reconciliation (ruflo 3.10.6 → 3.10.9)
+## Upstream reconciliation (ruflo 3.10.6 → 3.10.46)
 
 | Our finding / kit artifact | Upstream status | Verdict for this kit |
 |---|---|---|
@@ -132,10 +132,8 @@ What this PR still contributes, now that F1/F2 are upstream:
   p + Cohen's d). Still unique; complements upstream's `benchmark-intelligence.mjs`. The
   measuring stick for any future F4/Tier-2 work. `--cli-check` is now version-aware (recognizes
   the 3.10.6 `saveModel()` fix).
-- **F3 (state-encoder collapse)** — the one finding entirely unaddressed upstream. Carry forward
-  as a proposed encoder tweak / upstream PR.
-- **F4 (LoRA/SONA inference gap)** — keep as a tracked upstream item; aligned with ruflo's own
-  deferred punch-list (`docs/reviews/intelligence-system-audit-2026-05-29.md`).
+- **F3 (state-encoder collapse)** — ✅ fixed upstream in ruflo 3.10.11 (FNV-1a lossless fold). No longer a carry-forward item.
+- **F4 (LoRA/SONA inference gap)** — ✅ fixed in `@ruvector/ruvllm@2.5.6` (shipped with ruflo 3.10.46). `processInstantLearning` now does real gradient descent; `Δ LoRA ✓` is live in the statusline as a version-gated capability signal.
 - **`ruflo-patch-route-learning`** — retained only as a **version-gated legacy shim** for
   installs <3.10.6; no longer part of `ruflo-resync`.
 
@@ -149,10 +147,11 @@ owns the code (not an omnibus), keeping #2222's evidence-first, reproducible ton
 | **F3** — route Q-state encoder discards the keyword block (31-bit hash-fold truncation); keyword-distinct tasks collapse to one Q-state | `ruvnet/ruflo` (`q-learning-router.js`) | [#2239](https://github.com/ruvnet/ruflo/issues/2239) | `ruflo-improvement-eval --probe-states`; group-survival + zero-keyword-groups probe |
 | **F4** — SONA learn→inference loop unwired at the JS/WASM boundary (`learn_from_feedback` no-op; single-step REINFORCE Δ=0; up-only adaptation) | `ruvnet/ruvector` (`crates/sona`, `@ruvector/ruvllm`) | [#519](https://github.com/ruvnet/RuVector/issues/519) | `cargo test -p ruvector-sona --test repro_delta_zero` (4 cases, included in the issue) |
 
-The downstream kit carry-forward — a **live RL statusline panel** (route ε/δ̄/|Q| from the
-persisted Q-model, eval verdict, SONA signal gated on F4) — is tracked separately in
-[pacphi/ruflo-machine-ref#8](https://github.com/pacphi/ruflo-machine-ref/issues/8) and is gated
-on both upstream fixes landing.
+The downstream kit carry-forward — a **live RL statusline panel** — is tracked in
+[pacphi/ruflo-machine-ref#8](https://github.com/pacphi/ruflo-machine-ref/issues/8), which is
+**closed**: both upstream blockers (F3: ruflo 3.10.11; F4: ruvllm 2.5.6) landed, and
+`rufloActivationSegments` in `shell/ruflo-functions.sh` now renders the `📈 RL` route-Q
+line and `Δ LoRA ✓` capability signal.
 
 Environment: ruflo 3.10.10, Node 26, `ruvnet/ruvector@c2089c4`. Repro tool:
 `ruflo-improvement-eval` (https://github.com/pacphi/ruflo-machine-ref).

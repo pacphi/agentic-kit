@@ -281,8 +281,8 @@ function rufloActivationSegments(cwd){
       }
     } catch(e){}
     // ── route Q-learner (📈 RL): live agent-routing metrics, fs-only, honesty-gated ──
-    // F3 (ruvnet/ruflo#2239) is fixed in ruflo 3.10.6+/3.10.31 — the state encoder no
-    // longer collapses keyword-distinct tasks (FNV-1a, ENCODER_VERSION=2), so |Q| is a
+    // F3 (ruvnet/ruflo#2239) is fixed in ruflo 3.10.11 (FNV-1a lossless fold) — the
+    // state encoder no longer collapses keyword-distinct tasks, so |Q| is a
     // real task-diversity count. Source the persisted Q-model directly; never the broken
     // `route stats` CLI. Gate hard: render ONLY when the learner has actually run
     // (updateCount>0), else emit nothing — no zero-state noise.

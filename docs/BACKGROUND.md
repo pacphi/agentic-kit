@@ -192,25 +192,26 @@ accumulated `{A, B, scaling}` matrices, not the last step's delta). So the only 
 way to surface it is to **capture it from `ruflo neural train` output and cache it** —
 which `ruflo-neural-train` did (writing `.claude-flow/neural/lora-delta.json`).
 
-> **Update (2026-06-01, ruflo 3.10.31).** The `Δ LoRA` field has been **removed** from the
-> footer, and the `ruflo-neural-train` capture with it. Two things changed on
-> reconciliation: (1) ruflo 3.10.31 now **does** persist `lora-delta.json` + timestamped
-> `lora-checkpoint-*.json` natively (so the "not persisted" obstacle is gone), but more
-> importantly (2) the matrix-LoRA path is still **inert** — `processInstantLearning` is a
-> no-op stub and the trained delta is never consumed in any decision (`deltaNorm` stays 0),
-> pending the upstream learn→inference seam (ruvnet/RuVector#519). A delta that changes no
-> decision is not an improvement signal, so the honest move is to show nothing until the
-> seam lands. In its place the footer now carries a **`📈 RL`** route-Q line (ε/δ̄/|Q|/upd from
-> `.swarm/q-learning-model.json`), unblocked by the encoder fix (ruflo #2239 / F3, closed
-> 2026-05-29). See issue #8 and `docs/upstream/ruflo-self-improvement-findings.md`.
+> **Update (2026-06-01, ruflo 3.10.31).** The `Δ LoRA` field was **removed** from the
+> footer: the matrix-LoRA path was still **inert** — `processInstantLearning` was a no-op
+> stub and `deltaNorm` stayed 0. In its place the footer carries a **`📈 RL`** route-Q line
+> (ε/δ̄/|Q|/upd from `.swarm/q-learning-model.json`), unblocked by the encoder fix (ruflo
+> #2239 / F3, fixed in 3.10.11). See `docs/upstream/ruflo-self-improvement-findings.md`.
 >
 > **Update (2026-06-11).** [ruvnet/RuVector#519](https://github.com/ruvnet/RuVector/issues/519)
-> was **closed without a published fix**; the live follow-up is now
-> [ruvnet/RuVector#553](https://github.com/ruvnet/RuVector/issues/553) —
-> `processInstantLearning` is still a no-op stub in the published `@ruvector/ruvllm` 2.5.5
-> (the version ruflo 3.10.40–3.10.42 ship), so `deltaNorm` stays `0`. The `Δ LoRA` field
-> therefore remains omitted; it returns automatically once a `@ruvector/ruvllm` release
-> wires the seam and the delta provably moves.
+> was closed without a published fix; live follow-up was ruvnet/RuVector#553.
+> `processInstantLearning` was still a no-op stub in `@ruvector/ruvllm` 2.5.5 (ruflo
+> 3.10.40–3.10.42), so `deltaNorm` stayed `0` and the field remained omitted.
+>
+> **Update (2026-06-15, ruflo 3.10.46 / `@ruvector/ruvllm@2.5.6`).** F4 is **fixed**.
+> `processInstantLearning` now does real gradient descent — `LoraAdapter.backward()`
+> updates both `loraA` and `loraB`; empirically verified: `deltaNorm` moves
+> `0.000000 → 0.001205` after 2 signals. `Δ LoRA ✓` is re-introduced in the statusline
+> as a **version-gated capability signal** (semver check ≥2.5.6 on the installed
+> `@ruvector/ruvllm`). Displayed as a capability flag rather than a measurement because
+> the runtime microLora weights are in-process only and don't persist between sessions.
+> Issue [pacphi/ruflo-machine-ref#8](https://github.com/pacphi/ruflo-machine-ref/issues/8)
+> is closed.
 
 ### Security surface
 
