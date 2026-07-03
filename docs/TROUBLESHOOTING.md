@@ -190,6 +190,35 @@ If `.agentic-qe/memory.db` exists but `.claude/skills/agentic-quality-engineerin
 does not, init only half-completed. `ruflo-setup-aqe` detects this and re-runs with
 `--upgrade`. Force a full reinit with `ruflo-setup-aqe --force`.
 
+### agentic-qe RVF FsyncFailed (silently OFF ruvector)
+Symptom — every `aqe` start prints:
+```
+[RVF] Shared adapter init failed: RVF error 0x0303: FsyncFailed
+```
+agentic-qe looks fine (`aqe upgrade` shows `@ruvector/rvf-node ✓`, flags on) and
+`.rvf` files exist, but the **live** shared RVF adapter never initializes — so aqe
+silently runs on the SQLite/hnswlib fallback and is **not benefiting from ruvector**.
+
+Root cause: a corrupt/oversized pattern store. A healthy per-repo `.agentic-qe/*.rvf`
+is KB–MB; after a hard exit mid-write it can balloon to an absurd size (we found a
+`patterns.rvf` at ~277 GB of real disk) that the next start cannot fsync. The store is
+a *derived cache* rebuilt from `.agentic-qe/memory.db`, so deleting it is safe.
+
+```bash
+ruflo-verify-aqe            # assert AQE is on ruvector (rvf-node loaded + live init OK)
+ruflo-verify-aqe --repair   # delete a corrupt/oversized .rvf first, then assert
+```
+`ruflo-setup-aqe` and `ruflo-resync` now run this repair automatically
+(`_ruflo_aqe_repair_rvf`): any `.agentic-qe/*.rvf` over 2 GiB is deleted with its
+`.idmap.json`/`.manifest.json`/`.lock` sidecars, and aqe rebuilds a fresh store on
+next run. Tune or disable the cap with `RUFLO_AQE_RVF_MAX_BYTES` (bytes; `0` disables).
+Stale `*.rvf.lock` files are left alone — current aqe self-heals them
+("Removed stale lock file … Retrying open").
+
+**Optional native:** `aqe upgrade` may flag `@ruvector/solver-node` as missing
+(sublinear PageRank falls back to TypeScript power iteration, fine for <50K nodes).
+`install.sh --with-aqe`, `ruflo-resync`, and `ruflo-setup-aqe` best-effort install it.
+
 ## Security: `defend` prints a "color" crash / `cve --list` is empty
 
 ```bash

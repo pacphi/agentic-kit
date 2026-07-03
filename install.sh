@@ -335,6 +335,9 @@ if [ "$DO_HEAL" = yes ]; then
 		"$BIN_DIR/ruflo-patch-native"    || warn "native patch reported issues — see docs/TROUBLESHOOTING.md"
 		"$BIN_DIR/ruflo-enable-learning" || warn "self-learning activation reported issues"
 		if command -v _ruflo_aqe_ensure_native >/dev/null 2>&1; then _ruflo_aqe_ensure_native; fi
+		# agentic-qe on ruvector: optional native sublinear solver (rvf-node/attention/gnn
+		# already ship with aqe). Corrupt-RVF repair runs per-project via ruflo-setup-aqe.
+		if command -v _ruflo_aqe_ensure_ruvector_native >/dev/null 2>&1; then _ruflo_aqe_ensure_ruvector_native; fi
 	else
 		warn "skipping heal — ruflo not on PATH"
 	fi

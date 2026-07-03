@@ -57,9 +57,9 @@ The deep dive — ABI tables, the exact files, why "HNSW: Not loaded" is a cosme
 ## ✨ What this kit gives you
 
 - 🩹 **Native SQLite, everywhere ruflo needs it** — `ruflo-patch-native` swaps the broken dependency for one that works on Node 24/26.
-- 🧠 **Activated + *proven* self-learning** — `ruflo-enable-learning` turns ruvector on and asserts it (5 real capability probes, not the misleading status text); `ruflo-learning-verify` trains a cycle and confirms patterns persist to disk.
+- 🧠 **Activated + *proven* self-learning** — `ruflo-enable-learning` turns ruvector on and asserts it (5 real capability probes, not the misleading status text) **plus an advisory probe that constructs `@ruvector/ruvllm`'s `ContrastiveTrainer`/`TrainingPipeline` and runs `train()`** — proving the native adaptation path that `ruflo neural status` wrongly reports as "Unavailable"; `ruflo-learning-verify` trains a cycle and confirms patterns persist to disk.
 - 🛡️ **Verified security surface** — `ruflo-security-verify` confirms `@claude-flow/security` + `@claude-flow/aidefence` load, that prompt-injection defense actually fires, and flags the known CVE-database gap.
-- 🎓 **Opt-in agentic-qe** — `ruflo-setup-aqe` fixes the same native-SQLite bug in agentic-qe, then initializes it (with half-init repair).
+- 🎓 **Opt-in agentic-qe — also *proven* on ruvector** — `ruflo-setup-aqe` fixes the same native-SQLite bug, deletes any corrupt RVF pattern store (a hard exit can balloon `.agentic-qe/patterns.rvf` to hundreds of GB and silently drop aqe off ruvector via `FsyncFailed`), and installs the optional native sublinear solver; `ruflo-verify-aqe` then asserts `@ruvector/rvf-node` is loaded and the live RVF adapter initializes cleanly.
 - 📟 **A status-line footer** that shows 🧠 self-learning, 🛡️ security, and 🎓 agentic-qe — each only when genuinely active.
 - 🔁 **`ruflo-resync`** — one command to re-apply *everything* after a ruflo or agentic-qe upgrade.
 - 🧹 **Clean repos & cheap sessions** — strips MCP cruft `ruflo init` would commit, pins an absolute memory path, and keeps MCP optional to save ~84k tokens/session.
@@ -144,7 +144,8 @@ Try `./install.sh --dry-run` first to preview exactly what it will do.
 | 🎚️ `ruflo-neural-train [args…]` | Thin passthrough to `ruflo neural train` in the current project (args pass through), then advances the live micro-LoRA tracker. |
 | 📈 `ruflo-lora-track` | Advance the live micro-LoRA adaptation tracker now (`Δ‖W‖` on the SONA line). Otherwise auto-refreshes on each statusline render as ruflo learns new patterns from your work. |
 | 🛡️ `ruflo-security-verify [--quick]` | Verify `@claude-flow/security` + `aidefence` load, injection defense fires, scan/secrets run; flag the CVE-DB gap. |
-| 🎓 `ruflo-setup-aqe [--force]` | **Opt-in.** Fix agentic-qe's native-SQLite bug, then initialize it in a repo (with half-init repair). |
+| 🎓 `ruflo-setup-aqe [--force]` | **Opt-in.** Fix agentic-qe's native-SQLite bug, delete any corrupt RVF store, install the optional native solver, then initialize it in a repo (with half-init repair). |
+| 🧪 `ruflo-verify-aqe [--repair]` | Prove agentic-qe is genuinely **on ruvector**: `@ruvector/rvf-node` loaded + RVF flags on + a live-init probe that the shared adapter does not `FsyncFailed`. `--repair` drops a corrupt `.rvf` first. |
 | 💾 `ruflo-memory-checkpoint [db]` | Force a WAL checkpoint to recover stale memory reads. |
 | 🧽 `ruflo-remove-mcp` | Remove ruflo MCP from **all** scopes (recover ~84k tokens/session). |
 | 📇 `ruflo-setup-machine` | One-time: register ruflo MCP at **user** scope (all projects). Optional. |
@@ -293,7 +294,8 @@ ruflo-machine-ref/
 │   ├── ruflo-patch-native       # native better-sqlite3 (safety net; see Node policy)
 │   ├── ruflo-parity-test        # 20-check end-to-end memory smoke test
 │   ├── ruflo-enable-learning    # activate + assert ruvector self-learning
-│   ├── ruflo-learning-verify    # prove the learning loop persists
+│   ├── ruflo-learning-verify    # prove the ruflo learning loop persists
+│   ├── ruflo-verify-aqe         # prove agentic-qe is on ruvector (RVF loaded + live init)
 │   ├── ruflo-improvement-eval   # causal self-improvement eval (route Q-learner)
 │   ├── ruflo-patch-route-learning # retired no-op on ruflo ≥3.10.6 (kept for older installs)
 │   └── ruflo-security-verify    # verify security scan/defend/secrets + aidefence

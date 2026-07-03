@@ -801,6 +801,66 @@ _ruflo_aqe_ensure_native() {
 	fi
 }
 
+# Quarantine corrupt/oversized RVF (ruvector) pattern stores in a project's
+# .agentic-qe/ so agentic-qe's shared RVF adapter initializes cleanly instead of
+# failing with "RVF error 0x0303: FsyncFailed" and silently dropping OFF ruvector
+# for the whole run (falling back to the SQLite/hnswlib path).
+#
+# Root cause seen in the wild: a pattern store balloons to an absurd size
+# (a real per-repo store is KB–MB; we found a patterns.rvf at ~277 GB) after a
+# hard exit mid-write. The next `aqe` startup cannot fsync it, so the RVF backend
+# is disabled for that run. Any .rvf past a sane cap is therefore corrupt: it is
+# DELETED (it is a derived cache, rebuilt from the source of truth
+# .agentic-qe/memory.db on the next run — not primary data) along with its
+# .idmap.json/.manifest.json/.lock sidecars. Idempotent; no-op when there is no
+# .agentic-qe/ or nothing is oversized. Stale *.rvf.lock files are left for aqe,
+# which already self-heals them ("Removed stale lock file … Retrying open").
+#
+# Cap override: RUFLO_AQE_RVF_MAX_BYTES (default 2147483648 = 2 GiB; 0 disables).
+_ruflo_aqe_repair_rvf() {
+	local dir="${1:-.agentic-qe}"
+	[ -d "$dir" ] || return 0
+	local cap="${RUFLO_AQE_RVF_MAX_BYTES:-2147483648}"
+	[ "${cap:-0}" -gt 0 ] 2>/dev/null || return 0   # 0 / unset-to-0 disables the guard
+	local repaired=0 f sz gib
+	for f in "$dir"/*.rvf; do
+		[ -e "$f" ] || continue
+		# Portable size: BSD stat (-f%z) then GNU stat (-c%s).
+		sz="$(stat -f%z "$f" 2>/dev/null || stat -c%s "$f" 2>/dev/null)"
+		[ -n "$sz" ] || continue
+		if [ "$sz" -gt "$cap" ] 2>/dev/null; then
+			gib="$(awk "BEGIN{printf \"%.1f\", $sz/1073741824}")"
+			warn "corrupt agentic-qe RVF store: $f (~${gib} GiB, over $((cap/1073741824)) GiB cap) — deleting; aqe will rebuild from memory.db"
+			rm -f "$f" "$f".idmap.json "$f".manifest.json "$f".lock 2>/dev/null
+			repaired=1
+		fi
+	done
+	[ "$repaired" -eq 1 ] && ok "quarantined corrupt RVF store(s) — ruvector adapter will initialize cleanly next run"
+	return 0
+}
+
+# Best-effort: install the OPTIONAL @ruvector/solver-node into the global
+# agentic-qe so `useSublinearSolver` uses the native sublinear-PageRank path over
+# the pattern citation graph instead of the TypeScript power-iteration fallback
+# (practical cap ≈ 50K nodes). agentic-qe already ships @ruvector/rvf-node,
+# @ruvector/attention and @ruvector/gnn as its own deps; solver-node is the one
+# optional native `aqe upgrade` recommends. Idempotent; no-op if present or if
+# aqe/npm absent. Failure is non-fatal — the TS fallback still works.
+_ruflo_aqe_ensure_ruvector_native() {
+	command -v aqe >/dev/null 2>&1 && command -v npm >/dev/null 2>&1 && command -v node >/dev/null 2>&1 || return 0
+	local aqe_root; aqe_root="$(_ruflo_global_root)/agentic-qe"
+	[ -d "$aqe_root" ] || return 0
+	if node -e "require.resolve('@ruvector/solver-node',{paths:['$aqe_root']})" >/dev/null 2>&1; then
+		return 0   # already present
+	fi
+	echo "Installing optional @ruvector/solver-node into agentic-qe (native sublinear PageRank)…"
+	if ( cd "$aqe_root" && npm install @ruvector/solver-node --no-save --no-audit --no-fund >/dev/null 2>&1 ); then
+		ok "@ruvector/solver-node installed — native sublinear solver active"
+	else
+		warn "could not install @ruvector/solver-node — sublinear PageRank uses TS fallback (fine for <50K nodes)"
+	fi
+}
+
 #   ruflo-setup-aqe            # init (or repair) agentic-qe in this repo
 #   ruflo-setup-aqe --force    # force reinitialize (--upgrade)
 ruflo-setup-aqe() {
@@ -808,6 +868,8 @@ ruflo-setup-aqe() {
 	[ "${1:-}" = "--force" ] && force=1
 
 	_ruflo_aqe_ensure_native
+	_ruflo_aqe_repair_rvf              # delete corrupt/oversized .rvf so RVF init won't FsyncFail
+	_ruflo_aqe_ensure_ruvector_native  # optional native sublinear solver
 
 	local AQE
 	if command -v aqe >/dev/null 2>&1; then AQE="aqe"; else AQE="npx -y agentic-qe@latest"; fi
@@ -886,6 +948,10 @@ ruflo-onboard() {
 		echo ""; echo "## 3/3 agentic-qe"
 		if command -v aqe >/dev/null 2>&1; then
 			ruflo-setup-aqe || echo "⚠  setup-aqe reported issues — see docs/TROUBLESHOOTING.md"
+			if command -v ruflo-verify-aqe >/dev/null 2>&1; then
+				echo ""; echo "## prove agentic-qe is on ruvector"
+				ruflo-verify-aqe || echo "⚠  agentic-qe not fully on ruvector — see docs/TROUBLESHOOTING.md"
+			fi
 		else
 			echo "⚠  agentic-qe not installed — re-run:  install.sh --with-aqe   (or npm i -g agentic-qe)"
 		fi
@@ -971,8 +1037,10 @@ ruflo-resync() {
 		echo "⚠  ruflo-enable-learning not on PATH (run install.sh)"
 	fi
 
-	echo ""; echo "## 2/4 agentic-qe native better-sqlite3 (if installed)"
+	echo ""; echo "## 2/4 agentic-qe native + ruvector health (if installed)"
 	_ruflo_aqe_ensure_native
+	_ruflo_aqe_ensure_ruvector_native
+	[ -d .agentic-qe ] && _ruflo_aqe_repair_rvf
 
 	echo ""; echo "## 3/4 statusline (version + activation footer) for this project"
 	ruflo-fix-statusline-version

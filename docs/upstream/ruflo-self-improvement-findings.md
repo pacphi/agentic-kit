@@ -107,6 +107,47 @@ route Q-learner · 5 seeds · learning vs no-learning ablation
   (modest ceiling — partial learning; see F3 encoder collapse + slow ε decay)
 ```
 
+### F6 — `neural status` misreports the native ruvllm training path as unavailable (BUG) → filed against `ruvnet/ruflo`
+
+**Verified against `ruflo 3.17.0` / `@claude-flow/cli 3.17.0` / bundled `@ruvector/ruvllm 2.5.6`, Node 26.3.0 (darwin arm64) — all latest published (`npm view ruflo dist-tags` → latest/alpha/v3alpha = 3.17.0).**
+
+`ruflo neural status` prints two rows that are **false negatives** — the native training path is bundled and functional, but the status aggregator can never reflect it:
+
+| Row | What it prints | Reality |
+|---|---|---|
+| `Contrastive Trainer` | `Unavailable — Install @ruvector/ruvllm` | Module is installed (`2.5.6`) and `ContrastiveTrainer.train()` runs — the "Install" hint is wrong |
+| `Training Pipeline` | `unavailable — JS fallback (no checkpoints)` | `TrainingPipeline.train()` runs natively; the row is hard-wired to `unavailable` |
+
+**Two distinct defects + one integration gap** (`@claude-flow/cli@3.17.0` source, paths under `dist/src/`):
+
+1. **Dead variable (wiring bug).** `memory/intelligence.js` `getIntelligenceStats()` (L997) declares `let trainingBackend = 'unavailable'` (L1011) and **never reassigns it** before `return { …, _trainingBackend: trainingBackend }` (L1032). The *real* value is computed in `ruvector/lora-adapter.js` `getStats()` (L298–299: `_trainingBackend: pipelineLoaded ? (ruvllmPipeline ? 'ruvllm' : 'js-fallback') : 'js-fallback'`) but `getIntelligenceStats()` never reads the LoRAAdapter's stats — the value is orphaned. So `neural.js` L461 (`stats._trainingBackend === 'ruvllm'`) is unreachable.
+2. **Cross-process-blind global (reporting bug).** `contrastiveTrainer` is read from `globalThis.__claudeFlowSonaStats` (L1015–1017), an **in-process** global set only after an in-process SONA/contrastive session. `neural status` is a fresh read-only process → global unset → `'unavailable'` → `neural.js` L457 prints the misleading `Install @ruvector/ruvllm`.
+3. **Integration shortcoming.** ruflo has two disjoint training paths — the CLI's WASM trainer (`services/ruvector-training.js`, used by `neural train`) and the native `@ruvector/ruvllm` `TrainingPipeline`/`ContrastiveTrainer` (`ruvector/lora-adapter.js`). `neural train` never routes through the native pipeline, and the status surface bridges neither. Separately, native `TrainingPipeline.saveCheckpoint(path)` returns `undefined` and writes **0 bytes** — so the "no checkpoints" substance is real for that call, on top of the reporting bug.
+
+**Reproduction (tool-agnostic, no kit required):**
+```bash
+npm i -g ruflo@3.17.0            # Node >= 24; bundles @ruvector/ruvllm@2.5.6
+ruflo neural status              # → Contrastive Trainer: Unavailable — Install @ruvector/ruvllm
+                                 #   Training Pipeline:   unavailable — JS fallback (no checkpoints)
+ruflo neural train -p coordination -e 5   # succeeds on the RuVector WASM backend (InfoNCE, SONA)
+ruflo neural status              # UNCHANGED — CLI train never touches the native pipeline's stats
+
+# Prove the native path IS present and works (capability, not environment):
+RUFLO="$(npm root -g)/ruflo" node --input-type=module -e '
+import { createRequire } from "node:module";
+const x = createRequire(process.env.RUFLO + "/package.json")("@ruvector/ruvllm");
+const v = s => Array.from({length:8}, (_,i) => Math.sin(s+i));
+const tp = new x.TrainingPipeline({ learningRate:0.01, batchSize:2, epochs:1, inputDim:8, outputDim:8 });
+tp.addBatch([v(1),v(2)], [v(1.1),v(2.1)], [0.9,0.8]);
+console.log("native TrainingPipeline.train():", tp.train());        // → { finalLoss: ~1e-4, … }
+console.log("ContrastiveTrainer:", typeof x.ContrastiveTrainer);    // → function
+' RUFLO="$RUFLO"
+```
+
+**Suggested fix (minimal):** in `getIntelligenceStats()`, populate `trainingBackend` from the LoRAAdapter's `getStats()._trainingBackend` (and expose `contrastiveTrainer` availability by module resolution, not just the in-process global); in `neural.js`, drop the `Install @ruvector/ruvllm` hint when `require.resolve('@ruvector/ruvllm')` succeeds. Deeper: route `neural train` through the native `TrainingPipeline` when present, and make `saveCheckpoint()` persist.
+
+**Kit workaround (shipped):** `ruflo-enable-learning` now runs an advisory probe that constructs `@ruvector/ruvllm`'s `ContrastiveTrainer` + `TrainingPipeline` and asserts `train()` returns a real loss — proving the native path directly, since `neural status` can't be trusted here.
+
 ## Upstream reconciliation (ruflo 3.10.6 → 3.10.46)
 
 | Our finding / kit artifact | Upstream status | Verdict for this kit |
