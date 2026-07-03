@@ -107,7 +107,7 @@ route Q-learner · 5 seeds · learning vs no-learning ablation
   (modest ceiling — partial learning; see F3 encoder collapse + slow ε decay)
 ```
 
-### F6 — `neural status` misreports the native ruvllm training path as unavailable (BUG) → filed against `ruvnet/ruflo`
+### F6 — `neural status` misreports the native ruvllm training path as unavailable (BUG) → [ruvnet/ruflo#2549](https://github.com/ruvnet/ruflo/issues/2549)
 
 **Verified against `ruflo 3.17.0` / `@claude-flow/cli 3.17.0` / bundled `@ruvector/ruvllm 2.5.6`, Node 26.3.0 (darwin arm64) — all latest published (`npm view ruflo dist-tags` → latest/alpha/v3alpha = 3.17.0).**
 
@@ -187,6 +187,7 @@ owns the code (not an omnibus), keeping #2222's evidence-first, reproducible ton
 |---|---|---|---|
 | **F3** — route Q-state encoder discards the keyword block (31-bit hash-fold truncation); keyword-distinct tasks collapse to one Q-state | `ruvnet/ruflo` (`q-learning-router.js`) | [#2239](https://github.com/ruvnet/ruflo/issues/2239) | `ruflo-improvement-eval --probe-states`; group-survival + zero-keyword-groups probe |
 | **F4** — SONA learn→inference loop unwired at the JS/WASM boundary (`learn_from_feedback` no-op; single-step REINFORCE Δ=0; up-only adaptation) | `ruvnet/ruvector` (`crates/sona`, `@ruvector/ruvllm`) | [#519](https://github.com/ruvnet/RuVector/issues/519) | `cargo test -p ruvector-sona --test repro_delta_zero` (4 cases, included in the issue) |
+| **F6** — `neural status` misreports the native ruvllm training path as unavailable: dead `_trainingBackend` var + cross-process-blind `contrastiveTrainer` global in `getIntelligenceStats()`; false `Install @ruvector/ruvllm` hint (verified ruflo 3.17.0 / `@claude-flow/cli` 3.17.0 / `@ruvector/ruvllm` 2.5.6) | `ruvnet/ruflo` (`memory/intelligence.js`, `ruvector/lora-adapter.js`, `commands/neural.js`) | [#2549](https://github.com/ruvnet/ruflo/issues/2549) | `npm i -g ruflo@3.17.0`; `neural status` → train → `neural status` unchanged; native `TrainingPipeline.train()` returns real loss (snippet in issue) |
 
 The downstream kit carry-forward — a **live RL statusline panel** — is tracked in
 [pacphi/ruflo-machine-ref#8](https://github.com/pacphi/ruflo-machine-ref/issues/8), which is
