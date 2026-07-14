@@ -23,6 +23,9 @@ jobs:
         with:
           node-version: 22
 
+      # Deliberately npm, not pnpm: this simulates the kit's TARGET environment —
+      # ruflo/agentic-qe installed via `npm i -g`, whose trees the kit heals with
+      # npm (lib/heal.mjs). pnpm-managed globals are a separate follow-up.
       - name: Install latest ruflo + agentic-qe (native build scripts allowed)
         run: npm install -g --allow-scripts=ruflo,agentic-qe,@claude-flow/cli,better-sqlite3,hnswlib-node,agentdb,agentic-flow,argon2,onnxruntime-node,sharp,protobufjs,@google/genai,tldjs,vibium ruflo@latest agentic-qe@latest
 

@@ -30,5 +30,6 @@
     "claude-code",
     "setup",
     "cross-platform"
-  ]
+  ],
+  "packageManager": "pnpm@11.13.0"
 }

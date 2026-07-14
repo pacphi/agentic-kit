@@ -67,7 +67,10 @@ count, and 🎓 Agentic-QE stats.
 ## Requirements
 
 Node ≥ 22, npm, and the `claude` CLI (Claude Code). Everything else — including
-SQLite — is embedded; there are no runtime npm dependencies.
+SQLite — is embedded; there are no runtime dependencies. npm stays required at
+runtime even though this repo develops with pnpm: the kit heals the *npm-managed*
+global ruflo/agentic-qe trees (`npm root -g`, `npm i -g`), which is how those
+packages are installed on target machines. (pnpm-managed globals: tracked follow-up.)
 
 ## Troubleshooting
 

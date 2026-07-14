@@ -17,13 +17,14 @@ jobs:
         node: [22, 24, 26]
     steps:
       - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6   # version comes from package.json packageManager
       - uses: actions/setup-node@v6
         with:
           node-version: ${{ matrix.node }}
 
-      # Zero runtime dependencies — no npm install step by design.
+      # Zero runtime dependencies — no install step by design.
       - name: Unit + statusline tests
-        run: npm test
+        run: pnpm test
 
       - name: CLI smoke (sandboxed HOME)
         shell: bash

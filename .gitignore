@@ -38,3 +38,6 @@ CLAUDE.md.pre-ruflo
 *.rvf.lock
 *.rvf.idmap.json
 *.rvf.manifest.json
+
+# package-manager artifacts (repo is zero-dependency; lockfile IS tracked)
+node_modules/

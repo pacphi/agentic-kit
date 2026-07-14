@@ -17,13 +17,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6   # version comes from package.json packageManager
       - uses: actions/setup-node@v6
         with:
           node-version: 22
           registry-url: https://registry.npmjs.org
 
       - name: Test gate
-        run: npm test
+        run: pnpm test
 
       - name: Tag ↔ package.json version guard
         env:
@@ -35,12 +36,12 @@ jobs:
             exit 1
           fi
 
-      - name: Publish to npm (with provenance)
+      - name: Publish to npm registry (with provenance)
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
           # prereleases (…-alpha.N) go to the 'next' dist-tag; releases to 'latest'
           case "$(node -p "require('./package.json').version")" in
-            *-*) npm publish --provenance --access public --tag next ;;
-            *)   npm publish --provenance --access public ;;
+            *-*) pnpm publish --provenance --access public --tag next --no-git-checks ;;
+            *)   pnpm publish --provenance --access public --no-git-checks ;;
           esac
