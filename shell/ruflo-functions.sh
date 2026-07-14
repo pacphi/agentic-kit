@@ -36,6 +36,9 @@
 #
 #   ruflo-setup-machine          # show family inventory, pick exclusions, register
 #   ruflo-setup-machine --all    # non-interactive: register with every family allowed
+# (unalias guard: this was an alias before 2026-07; zsh cannot define a function over
+#  a live alias, so any stale copy in a user's rc would otherwise break this file.)
+unalias ruflo-setup-machine 2>/dev/null
 ruflo-setup-machine() {
 	command -v claude >/dev/null 2>&1 || { echo "claude CLI not on PATH" >&2; return 2; }
 	command -v node >/dev/null 2>&1 || { echo "node not on PATH" >&2; return 2; }
