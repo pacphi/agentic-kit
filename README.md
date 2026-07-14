@@ -3,7 +3,7 @@
 **One npm package that makes [ruflo](https://github.com/ruvnet/ruflo) (claude-flow) and [agentic-qe](https://github.com/proffesor-for-testing/agentic-qe) actually work — installed, healed, and *proven* — on macOS, Linux, and Windows.**
 
 ```bash
-npm install -g github:pacphi/agentic-kit
+npm install -g @pacphi/agentic-kit@next   # alpha channel until 4.0.0 GA
 ak setup        # once per machine; run it inside a repo to set that project up too
 ```
 
