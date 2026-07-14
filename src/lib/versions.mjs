@@ -16,20 +16,42 @@ export function installedVersion(pkg) {
   }
 }
 
-async function latestVersion(pkg) {
-  const r = await run('npm', ['view', pkg, 'version'], { timeout: 20_000 });
+async function latestVersion(pkg, tag = 'latest') {
+  const r = await run('npm', ['view', `${pkg}@${tag}`, 'version'], { timeout: 20_000 });
   return r.code === 0 ? r.stdout.trim() : null;
 }
 
-const newer = (a, b) => {
-  // semver-lite compare, prerelease-insensitive (enough for drift detection)
-  const pa = String(a).split(/[.-]/).map(Number);
-  const pb = String(b).split(/[.-]/).map(Number);
+/** Semver compare, prerelease-aware (4.0.0 > 4.0.0-alpha.1 > 4.0.0-alpha.0).
+ *  Exported for tests. */
+export function cmpVersions(a, b) {
+  const parse = (v) => {
+    const [core, ...rest] = String(v).split('-');
+    return {
+      core: core.split('.').map(Number),
+      pre: rest.length ? rest.join('-').split('.') : null,
+    };
+  };
+  const A = parse(a); const B = parse(b);
   for (let i = 0; i < 3; i++) {
-    if ((pa[i] || 0) !== (pb[i] || 0)) return (pa[i] || 0) > (pb[i] || 0);
+    const d = (A.core[i] || 0) - (B.core[i] || 0);
+    if (d) return d;
   }
-  return false;
-};
+  if (!A.pre && !B.pre) return 0;
+  if (!A.pre) return 1;  // a release outranks any prerelease of the same core
+  if (!B.pre) return -1;
+  for (let i = 0; i < Math.max(A.pre.length, B.pre.length); i++) {
+    const x = A.pre[i]; const y = B.pre[i];
+    if (x === undefined) return -1; // shorter prerelease list is lower
+    if (y === undefined) return 1;
+    const nx = /^\d+$/.test(x); const ny = /^\d+$/.test(y);
+    if (nx && ny) { const d = Number(x) - Number(y); if (d) return d; }
+    else if (nx !== ny) return nx ? -1 : 1; // numeric identifiers < alphanumeric
+    else if (x !== y) return x < y ? -1 : 1;
+  }
+  return 0;
+}
+
+const newer = (a, b) => cmpVersions(a, b) > 0;
 
 /** Drift report for the managed packages. Network hit at most once per TTL
  *  window (cached in kit.json); force=true bypasses the cache. */
@@ -56,4 +78,38 @@ export async function driftReport({ force = false } = {}) {
     });
   }
   return report;
+}
+
+export const KIT_PKG = '@pacphi/agentic-kit';
+
+/** Drift for the kit itself. Installed = the running copy's package.json
+ *  (pkgRoot). Prerelease installs also consult the `next` dist-tag —
+ *  prereleases publish there, so `latest` alone would never see them; the
+ *  higher of latest/next wins. Cached in kit.json alongside versionCheck. */
+export async function selfDrift({ pkgRoot, force = false } = {}) {
+  let installed = null;
+  try {
+    installed = JSON.parse(fs.readFileSync(path.join(pkgRoot, 'package.json'), 'utf8')).version;
+  } catch { /* unreadable pkgRoot: report as not installed */ }
+  const cfg = loadKitConfig();
+  const ttlMs = (cfg.versionCheck?.ttlHours ?? 24) * 3600_000;
+  const cached = cfg.versionCheck?.self;
+  const fresh = !force && cached?.last && Date.now() - cached.last < ttlMs;
+  let best = fresh ? cached.best ?? null : null;
+  if (!fresh) {
+    const tags = installed?.includes('-') ? ['latest', 'next'] : ['latest'];
+    for (const tag of tags) {
+      const v = await latestVersion(KIT_PKG, tag);
+      if (v && (!best || newer(v, best.version))) best = { version: v, tag };
+    }
+    cfg.versionCheck = { ...cfg.versionCheck, self: { last: Date.now(), best } };
+    try { saveKitConfig(cfg); } catch { /* read-only envs: next call re-fetches */ }
+  }
+  return {
+    pkg: KIT_PKG,
+    installed,
+    latest: best?.version ?? null,
+    tag: best?.tag ?? null,
+    outdated: !!(installed && best && newer(best.version, installed)),
+  };
 }

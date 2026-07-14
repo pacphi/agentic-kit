@@ -11,7 +11,7 @@ import { listDaemons, staleDaemons } from '../lib/daemons.mjs';
 import { scanRvf } from '../lib/rvf.mjs';
 import { registry, syncBlocks } from '../lib/blocks.mjs';
 import { loadKitConfig } from '../lib/config.mjs';
-import { driftReport } from '../lib/versions.mjs';
+import { driftReport, selfDrift } from '../lib/versions.mjs';
 import { readJson } from '../lib/settings.mjs';
 
 export const options = {
@@ -41,6 +41,20 @@ export async function collect({ pkgRoot, cwd = process.cwd() }) {
     }
   } catch (e) {
     rows.push(row('versions', 'warn', `version check unavailable: ${e.message}`));
+  }
+
+  // self (the kit's own version — prerelease installs track the `next` tag)
+  try {
+    const s = await selfDrift({ pkgRoot });
+    if (s.outdated) {
+      rows.push(row('self', 'warn',
+        `kit ${s.installed} installed, ${s.latest} available (${s.tag} tag)`,
+        'sync self-updates the kit (runs last)'));
+    } else if (s.installed) {
+      rows.push(row('self', 'ok', `kit ${s.installed}${s.latest ? ' (latest)' : ''}`));
+    }
+  } catch (e) {
+    rows.push(row('self', 'warn', `kit version check unavailable: ${e.message}`));
   }
 
   // natives (better-sqlite3 in agentdb locations + aqe)
