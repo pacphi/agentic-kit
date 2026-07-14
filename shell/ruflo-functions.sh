@@ -11,17 +11,107 @@
 #
 # Provided commands:
 #   ruflo-setup-machine      one-time per machine: register ruflo MCP at user scope
+#                            (interactive tool-family picker; --all to allow everything)
 #   ruflo-setup-project      per repo: init + sanitize + activate + verify (recommended)
 #   ruflo-patch / -native    make ruflo use native better-sqlite3 on Node >= 24
-#   ruflo-remove-mcp         remove ruflo MCP from all scopes (recover ~84k tokens/session)
+#   ruflo-remove-mcp         remove the ruflo MCP registration (and kit deny rules)
 #   ruflo-memory-checkpoint  force a WAL checkpoint to recover stale memory reads
 #   ruflo-reference-refresh  inspect/regenerate the machine-wide CLAUDE.md ruflo block
 
 # ---------------------------------------------------------------------------
-# One-time per machine: register ruflo MCP at user scope (all projects).
-# Skip this entirely if you prefer CLI-only (saves ~84k tokens/session; the
-# machine-wide ~/.claude/CLAUDE.md reference makes the MCP optional).
-alias ruflo-setup-machine='claude mcp add ruflo -s user -- ruflo mcp start'
+# One-time per machine: register the ruflo MCP server at USER scope (all projects),
+# with a tool-family picker.
+#
+# Why this is safe now (it wasn't always): Claude Code defers MCP tool schemas and
+# loads them on demand (ToolSearch), so registration no longer front-loads ~84k tokens
+# of tool definitions per session — the residual context cost is roughly one name line
+# per tool. ruflo 3.28 exposes ~276 tools across ~35 families and has NO server-side
+# tool gating, so the picker enforces exclusions client-side: every tool in a family
+# you exclude gets an exact `mcp__claude-flow__<tool>` entry in permissions.deny in
+# ~/.claude/settings.json (backed up first).
+#
+# The registration key is `claude-flow` (upstream #2206 — plugin tool refs like
+# mcp__claude-flow__* resolve, and `ruflo init`'s dedup guard (#1779/#2612) detects the
+# user-scope entry, so init stops writing a per-project .mcp.json).
+#
+#   ruflo-setup-machine          # show family inventory, pick exclusions, register
+#   ruflo-setup-machine --all    # non-interactive: register with every family allowed
+ruflo-setup-machine() {
+	command -v claude >/dev/null 2>&1 || { echo "claude CLI not on PATH" >&2; return 2; }
+	command -v node >/dev/null 2>&1 || { echo "node not on PATH" >&2; return 2; }
+	local all=0
+	[ "${1:-}" = "--all" ] && all=1
+
+	# Enumerate tool families from the installed package (source of truth, so the
+	# inventory tracks whatever ruflo version is installed).
+	local inv
+	inv="$(node -e '
+const fs=require("fs"),path=require("path"),cp=require("child_process");
+let root; try{root=cp.execSync("npm root -g",{stdio:["ignore","pipe","ignore"]}).toString().trim();}catch(e){process.exit(1);}
+const dir=path.join(root,"ruflo","node_modules","@claude-flow","cli","dist","src","mcp-tools");
+if(!fs.existsSync(dir))process.exit(1);
+const names=new Set();
+for(const f of fs.readdirSync(dir)){
+  if(!f.endsWith(".js"))continue;
+  const s=fs.readFileSync(path.join(dir,f),"utf8");
+  for(const m of s.matchAll(/name:\s*["\x27]([a-z][a-z0-9]*_[a-z0-9_]+)["\x27]/g)) names.add(m[1]);
+}
+const fam={};
+for(const n of names){const p=n.split("_")[0];(fam[p]=fam[p]||[]).push(n);}
+for(const [p,l] of Object.entries(fam).sort((a,b)=>b[1].length-a[1].length))
+  console.log(p+"\t"+l.length+"\t"+l.sort().join(","));
+' 2>/dev/null)"
+	if [ -z "$inv" ]; then
+		echo "⚠  Could not enumerate MCP tools from the installed ruflo — registering without a picker."
+		all=1
+	fi
+
+	local exclude=""
+	if [ "$all" -eq 0 ]; then
+		echo "ruflo MCP tool families (from the installed ruflo):"
+		printf '%s\n' "$inv" | awk -F'\t' '{printf "  %-14s %3d tools\n", $1, $2}'
+		echo ""
+		echo "Schemas load on demand, so allowing everything is cheap; exclude families you"
+		echo "never want callable (each excluded tool becomes a permissions.deny rule)."
+		printf "Families to EXCLUDE (comma-separated, or Enter for none): "
+		local r; read -r r
+		exclude="$(printf '%s' "$r" | tr -d ' ')"
+	fi
+
+	# Migrate: drop a legacy `ruflo`-keyed registration so we never double-register.
+	claude mcp remove ruflo -s user >/dev/null 2>&1 && echo "✓ removed legacy 'ruflo' MCP registration (re-adding as 'claude-flow')"
+
+	if claude mcp list 2>/dev/null | grep -q '^claude-flow[[:space:]:]'; then
+		echo "✓ claude-flow MCP already registered"
+	elif claude mcp add claude-flow -s user -- ruflo mcp start >/dev/null 2>&1; then
+		echo "✓ registered claude-flow MCP at user scope (ruflo mcp start)"
+	else
+		echo "⚠  claude mcp add failed — run manually: claude mcp add claude-flow -s user -- ruflo mcp start"
+		return 1
+	fi
+
+	# Apply exclusions as exact-name deny rules (client-side gate; see comment above).
+	if [ -n "$exclude" ]; then
+		INV="$inv" EXCLUDE="$exclude" node -e '
+const fs=require("fs"),os=require("os"),path=require("path");
+const p=path.join(os.homedir(),".claude","settings.json");
+let d={}; try{d=JSON.parse(fs.readFileSync(p,"utf8"));}catch(e){}
+try{fs.copyFileSync(p,p+".bak");}catch(e){}
+const excl=new Set(process.env.EXCLUDE.split(",").filter(Boolean));
+const deny=new Set((d.permissions&&d.permissions.deny)||[]);
+let n=0;
+for(const line of process.env.INV.split("\n")){
+  const [fam,,tools]=line.split("\t");
+  if(!excl.has(fam))continue;
+  for(const t of (tools||"").split(",").filter(Boolean)){deny.add("mcp__claude-flow__"+t);n++;}
+}
+d.permissions=d.permissions||{};d.permissions.deny=Array.from(deny).sort();
+fs.writeFileSync(p,JSON.stringify(d,null,2)+"\n");
+console.log("✓ denied "+n+" tool(s) in excluded families via ~/.claude/settings.json (backup: settings.json.bak)");
+' || echo "⚠  could not write deny rules — edit ~/.claude/settings.json permissions.deny manually"
+	fi
+	echo "Revisit anytime: ruflo-remove-mcp to unregister, or re-run ruflo-setup-machine."
+}
 
 # Reminder alias for the native-SQLite patch (the real work is the PATH binary).
 alias ruflo-patch='ruflo-patch-native'
@@ -45,17 +135,33 @@ ruflo-memory-checkpoint() {
 }
 
 # ---------------------------------------------------------------------------
-# Remove ruflo MCP from all scopes (user, local for this project, project).
-# Idempotent; silently skips scopes where ruflo isn't registered.
+# Remove the ruflo MCP registration from all scopes (user, local, project), under
+# both the current `claude-flow` key (#2206) and the legacy `ruflo` key, and strip
+# any kit-written mcp__claude-flow__* deny rules (meaningless without the server).
+# Idempotent; silently skips scopes where nothing is registered.
 ruflo-remove-mcp() {
-	local s removed=0
-	for s in user local project; do
-		if claude mcp remove ruflo -s "$s" >/dev/null 2>&1; then
-			echo "✓ Removed ruflo from $s scope"
-			removed=1
-		fi
+	local s k removed=0
+	for k in claude-flow ruflo; do
+		for s in user local project; do
+			if claude mcp remove "$k" -s "$s" >/dev/null 2>&1; then
+				echo "✓ Removed $k from $s scope"
+				removed=1
+			fi
+		done
 	done
 	[ "$removed" -eq 0 ] && echo "ruflo MCP not registered in any scope for this project."
+	command -v node >/dev/null 2>&1 && node -e '
+const fs=require("fs"),os=require("os"),path=require("path");
+const p=path.join(os.homedir(),".claude","settings.json");
+let d; try{d=JSON.parse(fs.readFileSync(p,"utf8"));}catch(e){process.exit(0);}
+const deny=(d.permissions&&d.permissions.deny)||[];
+const kept=deny.filter(r=>!/^mcp__claude-flow__/.test(r));
+if(kept.length!==deny.length){
+  d.permissions.deny=kept;
+  fs.writeFileSync(p,JSON.stringify(d,null,2)+"\n");
+  console.log("✓ removed "+(deny.length-kept.length)+" kit deny rule(s) for mcp__claude-flow__*");
+}
+' 2>/dev/null
 	return 0
 }
 
@@ -75,26 +181,29 @@ ruflo-remove-mcp() {
 #   ruflo-setup-project            # --full scaffold + full activation (recommended)
 #   ruflo-setup-project --minimal  # smaller agent/skill footprint (still activated)
 
-# Heal the statusline so it shows the LIVE ruflo version instead of the stale
-# hard-coded '3.6' fallback. Upstream ruflo — through the #2195 "delegation
-# build" shipped in the latest releases (v3.10.5 at time of writing) — still
-# resolves the version from a LOCAL-ONLY package.json probe list that never
-# checks a GLOBAL npm install. So `ruflo init` and `ruflo init upgrade` keep
-# regenerating a statusline.cjs that prints "RuFlo V3.6" even though
-# `ruflo --version` is correct. We patch the freshly generated file:
-#   (a) inject the global node_modules path (derived from the node binary that
-#       runs the statusline) as the FIRST probe candidate — stays live-correct
-#       across future upgrades, and
-#   (b) refresh the hard-coded fallback default to the installed version.
-# Idempotent (guarded by a marker) and re-applied on every setup, so each new
-# ruflo release self-heals. Optional arg 1 overrides the statusline path.
+# Statusline heal. Historically this injected a global-node_modules version probe
+# because upstream's statusline only checked LOCAL package.json paths and rendered a
+# stale hard-coded version. ruflo 3.28 ships that fix natively (#2221: probes global
+# roots derived from process.execPath + npm_config_prefix, highest-version-wins), so
+# the probe injection is gone. What remains kit-owned:
+#   (a) refresh the hard-coded fallback version string to the installed version, and
+#   (b) inject the activation FOOTER (ruflo-seg block: SONA / Δ‖W‖ / RL / daemon /
+#       Agentic QE segments) — kit-unique, re-applied after every init/upgrade.
+# Idempotent and re-applied on every setup. Optional arg 1 overrides the path.
 
 # ---------------------------------------------------------------------------
-# Daemon lifecycle (issue #3 + token-burn incident). The daemon is now OPT-IN:
-# ruflo-setup-project does NOT auto-start one. If you start a daemon yourself,
-# ruflo-daemon-gc and the interactive-shell auto-reaper stop it once it is orphaned
-# (workspace deleted) or exceeds RUFLO_DAEMON_TTL_SECS (default 12h) — so a started-
-# and-forgotten daemon can no longer spawn worker sessions 24/7 for weeks.
+# Daemon lifecycle. Since ruflo 3.27/3.28 (#2661) the daemon is safe by default:
+# AI workers (headless `claude --print` runs that spend tokens) are OPT-IN
+# (RUFLO_DAEMON_AI_WORKERS=1 / --headless), governed by a machine-wide launch budget
+# (`ruflo daemon budget show|pause|resume`; defaults 1 concurrent, 2/hour, 12/day),
+# deduped across worktrees, and the daemon self-terminates after a native TTL
+# (RUFLO_DAEMON_TTL_SECS, default 12h, #2356). So ruflo-setup-project now STARTS a
+# local-only daemon by default (kit policy — $0 workers: map/audit/optimize local
+# paths). The June-2026 token-burn incident (immortal auto-started daemons spawning
+# uncapped worker sessions) cannot recur from this path: the expensive part is
+# opt-in + budgeted upstream, and the reapers below remain as an independent check.
+# ruflo-daemon-gc / the interactive-shell auto-reaper stop daemons that are orphaned
+# (workspace deleted) or outlive the TTL — belt-and-suspenders over upstream's own TTL.
 #
 # Shared helpers (colored output, daemon ps-parser, native better-sqlite3
 # primitives) live in ruflo-lib.sh. Prefer the installed copy (~/.config/ruflo);
@@ -156,9 +265,9 @@ EOF
 }
 
 # Auto-reap stale daemons on interactive shell start, and surface any that remain.
-# This is the safety net behind the opt-in policy (daemons are no longer auto-started
-# by ruflo-setup-project): even if one gets started and forgotten, it is reaped once it
-# exceeds the TTL. Interactive-only (never kills/prints from scripts or subshells).
+# Independent safety net over upstream's native TTL (#2356): even if a daemon predates
+# 3.28, loses its workspace, or has TTL disabled, it is reaped here once it exceeds
+# the kit TTL. Interactive-only (never kills/prints from scripts or subshells).
 # Throttled to once per RUFLO_DAEMON_AUTOREAP_THROTTLE secs (default 300) via a stamp,
 # so a burst of new terminals does one ps scan, not N. Opt out: RUFLO_DAEMON_AUTOREAP=0.
 _ruflo_daemon_autoreap() {
@@ -207,14 +316,12 @@ ruflo-fix-statusline-version() {
 		echo "⚠  Could not determine ruflo version (skipping statusline version fix)"
 		return 0
 	fi
+	# Refresh only the hard-coded fallback version string; 3.28's own probing (#2221)
+	# handles live resolution, and any legacy kit probe marker is stripped if present.
 	# shellcheck disable=SC2016  # single-quoted JS for node -e, not shell expansion
 	if ! SL="$sl" LIVE_VER="$live_ver" node -e '
 const fs=require("fs"); const f=process.env.SL; let s=fs.readFileSync(f,"utf8");
-const marker="/* ruflo-machine-ref: global-install version probe */";
-if(!s.includes(marker)){
-  s=s.replace(/const pkgPaths = \[/,
-    `const pkgPaths = [ ${marker} require("path").join(require("path").dirname(process.execPath),"..","lib","node_modules","ruflo","package.json"),`);
-}
+s=s.replace(/ \/\* ruflo-machine-ref: global-install version probe \*\/ require\("path"\)\.join\(require\("path"\)\.dirname\(process\.execPath\),"\.\.","lib","node_modules","ruflo","package\.json"\),/,"");
 s=s.replace(/(let (?:ver|pkgVersion) = )(["\x27])\d+\.\d+(?:\.\d+)?\2/, `$1$2${process.env.LIVE_VER}$2`);
 fs.writeFileSync(f,s);
 '; then
@@ -421,19 +528,24 @@ function rufloActivationSegments(cwd){
         }
       }
     } catch(e){}
-    // ── security (aidefence loaded in the global ruflo install) ──
+    // ── security surface in the global ruflo install. ruflo <=3.25 shipped a separate
+    // @claude-flow/aidefence package; 3.28 absorbed it into @claude-flow/security (the
+    // `security defend` banner still says AIDefence). Probe security first, keep the
+    // legacy aidefence probe for older installs.
     var sec = "";
     try {
-      var ad = path.join(path.dirname(process.execPath), "..", "lib", "node_modules", "ruflo", "node_modules", "@claude-flow", "aidefence", "package.json");
-      if (fs.existsSync(ad)) sec = G + "🛡 aidefence on" + R;
+      var nmBase = path.join(path.dirname(process.execPath), "..", "lib", "node_modules", "ruflo", "node_modules", "@claude-flow");
+      if (fs.existsSync(path.join(nmBase, "security", "package.json"))) sec = G + "🛡 security on" + R;
+      else if (fs.existsSync(path.join(nmBase, "aidefence", "package.json"))) sec = G + "🛡 aidefence on" + R;
     } catch(e){}
-    // ── stray-daemon alarm (⚙): GLOBAL count of running ruflo daemons, so a
-    // started-and-forgotten daemon can never again be invisible (token-burn
-    // incident). Machine-global, not per-project, so it is cached in tmpdir and
-    // shared across every project's statusline — one pgrep per TTL window, not per
-    // render. Alarm-only: absent at 0 (the expected opt-in steady state), dim at
-    // 1-2 (a daemon you likely started on purpose), YELLOW at >=3 (a leak — run
-    // ruflo-daemon-gc --kill). Opt out: RUFLO_DAEMON_STATUSLINE=0.
+    // ── daemon visibility (⚙): GLOBAL count of running ruflo daemons, so no daemon
+    // is ever invisible (token-burn incident lesson). Machine-global, not per-project,
+    // so it is cached in tmpdir and shared across every project's statusline — one
+    // pgrep per TTL window, not per render. Daemons are default-on (local-only
+    // workers, budget-governed AI workers) since the 3.28 baseline, so one per active
+    // project is the EXPECTED steady state: dim up to 3, YELLOW at >=4 (more daemons
+    // than you're plausibly working projects — ruflo-daemon-gc to inspect; upstream
+    // TTL + kit auto-reap will also converge it). Opt out: RUFLO_DAEMON_STATUSLINE=0.
     var daemon = "";
     try {
       if (process.env.RUFLO_DAEMON_STATUSLINE !== "0") {
@@ -450,9 +562,9 @@ function rufloActivationSegments(cwd){
           try { fs.writeFileSync(dCache, JSON.stringify({ts: Date.now(), n: dCount})); } catch(e){}
         }
         if (dCount > 0) {
-          var dCol = dCount >= 3 ? Y : DIM;
+          var dCol = dCount >= 4 ? Y : DIM;
           daemon = dCol + "⚙ " + dCount + " ruflo daemon" + (dCount === 1 ? "" : "s") + R
-                 + (dCount >= 3 ? DIM + " — ruflo-daemon-gc --kill" + R : "");
+                 + (dCount >= 4 ? DIM + " — ruflo-daemon-gc to inspect" + R : "");
         }
       }
     } catch(e){}
@@ -557,10 +669,12 @@ fs.writeFileSync(f,s);
 		fi
 	fi
 
-	# Ensure Claude Code actually RUNS the rich statusline.cjs. `aqe init` (and
-	# `ruflo init`) can repoint .claude/settings.json at a minimal statusline-v3.cjs,
-	# which would hide the footer. Make statusline.cjs primary (falls back to v3, then
-	# a literal). Only when patching the default project statusline.
+	# LEGACY-STATE healing: aqe <3.12.1 used to repoint .claude/settings.json at its
+	# minimal statusline-v3.cjs (hiding the footer). aqe >=3.12.1 preserves a custom
+	# statusLine (isAqeStatusLine guard), so new inits can no longer cause this — but
+	# projects initialized under older aqe still carry the v3 pointer, and this heals
+	# them on the next setup/resync. Make statusline.cjs primary (falls back to v3,
+	# then a literal). Only when patching the default project statusline.
 	if [ "$sl" = ".claude/helpers/statusline.cjs" ] && [ -f ".claude/settings.json" ] && command -v python3 >/dev/null 2>&1; then
 		if python3 - <<'PY' 2>/dev/null
 import json, re, sys
@@ -662,16 +776,19 @@ import sys; sys.exit(0 if prev == os.environ['RUFLO_DB_PATH'] else 1)
 		echo "⚠  ruflo memory init failed — memory writes may not persist"
 	fi
 	ruflo swarm init --v3-mode >/dev/null 2>&1 && echo "✓ Swarm initialized (v3-mode)" || echo "⚠  ruflo swarm init failed"
-	# Daemon is OPT-IN (token-burn incident): setup no longer auto-starts a
-	# per-workspace daemon. Each one ran forever and nothing ever stopped it, so N
-	# onboarded projects leaked N immortal daemons spawning worker sessions 24/7.
-	# Start one yourself only when you want continuous background self-learning for a
-	# project you are actively working — and the auto-reaper will still TTL-reap it.
+	# Daemon: default-ON with LOCAL-ONLY workers (kit policy on the 3.28 baseline).
+	# Safe because upstream #2661 made the expensive part opt-in: AI workers (headless
+	# `claude --print`) only run with RUFLO_DAEMON_AI_WORKERS=1 / --headless, governed
+	# by the machine-wide launch budget, and the daemon self-terminates after
+	# RUFLO_DAEMON_TTL_SECS (native, default 12h). Local workers are $0 Node work.
 	local _ws; _ws="$(pwd -P)"
 	if command -v _ruflo_daemon_list >/dev/null 2>&1 && [ -n "$(_ruflo_daemon_list | awk -F'\t' -v w="$_ws" '$2==w{print $1; exit}')" ]; then
 		echo "✓ Daemon already running for this workspace"
+	elif ruflo daemon start >/dev/null 2>&1; then
+		echo "✓ Daemon started (local-only workers; self-terminates after 12h TTL)"
+		echo "   AI workers are OFF — enable with RUFLO_DAEMON_AI_WORKERS=1; caps: 'ruflo daemon budget show'"
 	else
-		echo "ℹ  Daemon NOT started (opt-in). Run 'ruflo daemon start' for background self-learning; 'ruflo-daemon-gc' to inspect/reap."
+		echo "⚠  Daemon failed to start — run 'ruflo daemon start' manually; 'ruflo daemon status' to inspect"
 	fi
 
 	# Defensive (issue #3 RC3): if upstream `ruflo init` wrote daemon.autoStart:true,
@@ -774,13 +891,18 @@ STUB
 # Opt-in: initialize agentic-qe (a SEPARATE package) in the current repo, with
 # native-SQLite repair + half-init repair. NOT called by ruflo-setup-project.
 #
-# Two bugs handled:
+# Two failure modes handled:
 #   1. agentic-qe depends on better-sqlite3@^12 directly; on Node >= 24 its prebuilt
 #      .node is missing (native:false) → `aqe init` fails at "Initialize persistence
 #      database". We install the native binary into the global agentic-qe first.
 #      (Same root cause as ruflo-patch-native, different package.)
 #   2. Half-init: `.agentic-qe/memory.db` exists but the project marker
-#      `.claude/skills/agentic-quality-engineering` is missing → re-run with --upgrade.
+#      `.claude/skills/agentic-quality-engineering` is missing (interrupted init) →
+#      re-run with --upgrade.
+# NOTE: since aqe 3.12.1, `aqe init` merges .claude/settings.json non-destructively
+# (one-time backup; preserves ruflo hooks, custom statusLine, user AQE_* env). The
+# hook-stripping / statusLine-clobbering hazards this function used to defend against
+# are fixed upstream — keep aqe >= 3.12.1.
 #
 # Ensure a globally-installed agentic-qe has a native better-sqlite3 (Node >= 24).
 # Same root cause as ruflo-patch-native, different package. Idempotent; no-op on
@@ -813,16 +935,30 @@ _ruflo_aqe_ensure_native() {
 # DELETED (it is a derived cache, rebuilt from the source of truth
 # .agentic-qe/memory.db on the next run — not primary data) along with its
 # .idmap.json/.manifest.json/.lock sidecars. Idempotent; no-op when there is no
-# .agentic-qe/ or nothing is oversized. Stale *.rvf.lock files are left for aqe,
-# which already self-heals them ("Removed stale lock file … Retrying open").
+# .agentic-qe/ or nothing is corrupt. Ordinary stale *.rvf.lock files are left for
+# aqe, which self-heals them ("Removed stale lock file … Retrying open") — EXCEPT
+# a lock whose content starts with the RVF magic "FLVR": that means store bytes were
+# written into the lock path by an interrupted write (seen in the wild 2026-07-14:
+# a 162-byte brain.rvf + FLVR-content lock → FsyncFailed on every init, and aqe did
+# NOT self-heal it). Those locks and their truncated sibling .rvf are quarantined.
 #
 # Cap override: RUFLO_AQE_RVF_MAX_BYTES (default 2147483648 = 2 GiB; 0 disables).
 _ruflo_aqe_repair_rvf() {
 	local dir="${1:-.agentic-qe}"
 	[ -d "$dir" ] || return 0
+	local repaired=0 f sz gib lk
+	# Corrupt-lock quarantine: RVF magic bytes in a .lock = interrupted write.
+	for lk in "$dir"/*.rvf.lock; do
+		[ -e "$lk" ] || continue
+		if [ "$(head -c 4 "$lk" 2>/dev/null)" = "FLVR" ]; then
+			f="${lk%.lock}"
+			warn "corrupt agentic-qe RVF lock: $lk (contains store bytes — interrupted write) — quarantining lock + $f; aqe will rebuild from memory.db"
+			rm -f "$lk" "$f" "$f".idmap.json "$f".manifest.json 2>/dev/null
+			repaired=1
+		fi
+	done
 	local cap="${RUFLO_AQE_RVF_MAX_BYTES:-2147483648}"
-	[ "${cap:-0}" -gt 0 ] 2>/dev/null || return 0   # 0 / unset-to-0 disables the guard
-	local repaired=0 f sz gib
+	[ "${cap:-0}" -gt 0 ] 2>/dev/null || { [ "$repaired" -eq 1 ] && ok "quarantined corrupt RVF store(s) — ruvector adapter will initialize cleanly next run"; return 0; }
 	for f in "$dir"/*.rvf; do
 		[ -e "$f" ] || continue
 		# Portable size: BSD stat (-f%z) then GNU stat (-c%s).
@@ -954,6 +1090,17 @@ ruflo-onboard() {
 			fi
 		else
 			echo "⚠  agentic-qe not installed — re-run:  install.sh --with-aqe   (or npm i -g agentic-qe)"
+		fi
+	fi
+
+	# Machine-level MCP: offered by default (deferred schemas make it cheap; the
+	# family picker lets you exclude tool families). One-time — skipped once registered.
+	if command -v claude >/dev/null 2>&1 && ! claude mcp list 2>/dev/null | grep -q '^claude-flow[[:space:]:]'; then
+		echo ""
+		if ask_yes_no "Register the ruflo MCP server at user scope (one-time, tool-family picker)?" "y"; then
+			ruflo-setup-machine || echo "⚠  MCP setup failed — re-run 'ruflo-setup-machine' later"
+		else
+			echo "  Skipped. Register later with: ruflo-setup-machine"
 		fi
 	fi
 
