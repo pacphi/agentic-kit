@@ -259,21 +259,27 @@ Genuinely stale locks with no RVF magic are still left alone for aqe to self-hea
 (sublinear PageRank falls back to TypeScript power iteration, fine for <50K nodes).
 `install.sh --with-aqe`, `ruflo-resync`, and `ruflo-setup-aqe` best-effort install it.
 
-## Security: `defend` is non-functional on 3.28.0 / `cve --list` is empty
+## Security: `defend` prints only a banner on 3.28.0 / `cve --list` is empty
 
 ```bash
-ruflo-security-verify               # verifies scan/defend/secrets; reports the defend regression
+ruflo-security-verify               # verifies scan/defend/secrets; diagnoses the defend failure
+ruflo-resync                        # heals it (reinstalls the dropped aidefence package)
 ```
-- **`ruflo security defend` is non-functional on ruflo 3.28.0 (upstream
-  regression).** It prints only its AIDefence banner, completes in ~0ms, and emits
-  **no verdict** with an inconsistent exit code — so it can no longer be relied on to
-  detect prompt injection. (On 3.10.x it *did* detect correctly and only crashed on a
-  cosmetic `'color'` render after the verdict; that is not the current behavior.)
-  `ruflo-security-verify` detects and reports this as an upstream defect rather than
-  keying off an exit code.
-- The separate `@claude-flow/aidefence` package **no longer ships** — AIDefence is
-  absorbed into `@claude-flow/security`, and the statusline security segment renders
-  `🛡 security on`.
+- **`ruflo security defend` is silently non-functional on a bare ruflo 3.28.0
+  install** ([ruvnet/ruflo#2670](https://github.com/ruvnet/ruflo/issues/2670)): it
+  prints only its AIDefence banner, completes in ~0ms, and emits **no verdict** with
+  an inconsistent exit code. Root cause: 3.28 **dropped `@claude-flow/aidefence`
+  from the dependency tree while defend still `import`s it** — and the "package not
+  installed" error message is swallowed, so nothing tells you. (This is NOT an
+  absorption: `@claude-flow/security` has no detection API.)
+- **Fix:** `ruflo-resync` installs `@claude-flow/aidefence --no-save` into the
+  global ruflo tree (`_ruflo_ensure_aidefence`), verified to restore correct
+  behavior — exit 1=threat / 0=clean, threat report rendered. The long-standing
+  *cosmetic* `'color'` render crash after the verdict returns with it; the
+  verdict/exit code are correct. Re-run resync after every `npm i -g ruflo` (the
+  `--no-save` install is wiped by upgrades).
+- The statusline `🛡 aidefence on` segment probes this package specifically — no
+  shield showing on 3.28 means defend is broken; resync brings both back.
 - `ruflo security cve --list` has **no CVE database** configured. Use `npm audit`
   for dependency CVEs.
 

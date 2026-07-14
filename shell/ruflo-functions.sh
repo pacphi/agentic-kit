@@ -531,15 +531,16 @@ function rufloActivationSegments(cwd){
         }
       }
     } catch(e){}
-    // ── security surface in the global ruflo install. ruflo <=3.25 shipped a separate
-    // @claude-flow/aidefence package; 3.28 absorbed it into @claude-flow/security (the
-    // `security defend` banner still says AIDefence). Probe security first, keep the
-    // legacy aidefence probe for older installs.
+    // ── security: 🛡 renders ONLY when @claude-flow/aidefence (the actual runtime
+    // defense engine behind `security defend`) is resolvable. ruflo 3.28 dropped it
+    // from the dependency tree while the command still imports it (ruvnet/ruflo#2670),
+    // so a bare 3.28 install has NO working injection defense — the segment honestly
+    // disappears until ruflo-resync reinstalls the package (@claude-flow/security is
+    // auth/validation primitives, not detection; probing it would overstate).
     var sec = "";
     try {
       var nmBase = path.join(path.dirname(process.execPath), "..", "lib", "node_modules", "ruflo", "node_modules", "@claude-flow");
-      if (fs.existsSync(path.join(nmBase, "security", "package.json"))) sec = G + "🛡 security on" + R;
-      else if (fs.existsSync(path.join(nmBase, "aidefence", "package.json"))) sec = G + "🛡 aidefence on" + R;
+      if (fs.existsSync(path.join(nmBase, "aidefence", "package.json"))) sec = G + "🛡 aidefence on" + R;
     } catch(e){}
     // ── daemon visibility (⚙): GLOBAL count of running ruflo daemons, so no daemon
     // is ever invisible (token-burn incident lesson). Machine-global, not per-project,
@@ -907,6 +908,31 @@ STUB
 # hook-stripping / statusLine-clobbering hazards this function used to defend against
 # are fixed upstream — keep aqe >= 3.12.1.
 #
+# Ensure @claude-flow/aidefence is present in the global ruflo tree. ruflo 3.28
+# dropped it from the dependency tree while `security defend` still dynamically
+# imports it, leaving the CLI's prompt-injection defense silently non-functional
+# (filed: ruvnet/ruflo#2670). Installing it --no-save restores correct behavior
+# (exit 1=threat / 0=clean). The install is wiped by the next `npm i -g ruflo`,
+# so this runs from ruflo-resync — the kit's standard re-heal path. Idempotent;
+# no-op when the package already resolves or ruflo/npm are absent.
+_ruflo_ensure_aidefence() {
+	command -v ruflo >/dev/null 2>&1 && command -v npm >/dev/null 2>&1 && command -v node >/dev/null 2>&1 || return 0
+	command -v _ruflo_global_root >/dev/null 2>&1 || return 0
+	local ruflo_root; ruflo_root="$(_ruflo_global_root)/ruflo"
+	[ -d "$ruflo_root" ] || return 0
+	# fs check, not require.resolve — the package's `exports` map does not expose
+	# ./package.json as a resolvable subpath.
+	if [ -f "$ruflo_root/node_modules/@claude-flow/aidefence/package.json" ]; then
+		return 0   # already present
+	fi
+	echo "Installing @claude-flow/aidefence into ruflo ('security defend' imports it but 3.28 stopped shipping it — ruvnet/ruflo#2670)…"
+	if ( cd "$ruflo_root" && npm install @claude-flow/aidefence --no-save --no-audit --no-fund >/dev/null 2>&1 ); then
+		ok "@claude-flow/aidefence installed — 'ruflo security defend' functional again"
+	else
+		warn "could not install @claude-flow/aidefence — 'ruflo security defend' stays non-functional (see ruvnet/ruflo#2670)"
+	fi
+}
+
 # Ensure a globally-installed agentic-qe has a native better-sqlite3 (Node >= 24).
 # Same root cause as ruflo-patch-native, different package. Idempotent; no-op on
 # Node <= 22 or when no global agentic-qe is present. Shared by ruflo-setup-aqe and
@@ -1186,6 +1212,9 @@ ruflo-resync() {
 	else
 		echo "⚠  ruflo-enable-learning not on PATH (run install.sh)"
 	fi
+	# Security defense engine: re-install the package 3.28 dropped but still imports
+	# (ruvnet/ruflo#2670) — an `npm i -g ruflo` upgrade wipes the --no-save install.
+	_ruflo_ensure_aidefence
 
 	echo ""; echo "## 2/4 agentic-qe native + ruvector health (if installed)"
 	_ruflo_aqe_ensure_native

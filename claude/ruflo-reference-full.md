@@ -334,18 +334,18 @@ applied by `install.sh` and re-asserted by `ruflo-reference-refresh` / `ruflo-re
 ### Security surface (verify + activate)
 
 ```bash
-ruflo-security-verify            # verify @claude-flow/security loads (it absorbed the
-                                 # separate aidefence package in 3.28), defend detects
-                                 # injection, scan/secrets run
+ruflo-security-verify            # verify @claude-flow/security + @claude-flow/aidefence
+                                 # load, defend detects injection, scan/secrets run
 ruflo-setup-project --with-security   # run the security pass during project setup
 ```
 
 `ruflo security cve --list` has no CVE database configured — use `npm audit` for
-dependency CVEs. **Known upstream regression on 3.28.0:** `ruflo security defend`
-prints only its AIDefence banner and returns no verdict (and its exit code is not
-trustworthy); `ruflo-security-verify` detects that signature and reports it as an
-upstream defect. On pre-3.28 versions defend worked (exit 1=threat) with only a
-cosmetic render crash after the verdict.
+dependency CVEs. **Known upstream defect on 3.28.0** (ruvnet/ruflo#2670): the tree
+no longer ships `@claude-flow/aidefence` but `security defend` still imports it, so
+on a bare install defend prints only its banner with no verdict and an untrustworthy
+exit code. **`ruflo-resync` heals this** (reinstalls the package `--no-save`),
+restoring exit 1=threat / 0=clean — with only the old cosmetic render crash after
+the verdict. Re-run resync after every `npm i -g ruflo`.
 
 ### Status-line activation footer
 
@@ -356,7 +356,7 @@ feature renders on **its own line** so the live metrics are individually scannab
 ```
 🧠 SONA  [●●●●●]  50 patterns · 55 traj · ⚡ HNSW
 📈 RL  ε0.83↓ · δ̄0.012↓ · |Q|6 · upd42
-🛡 security on
+🛡 aidefence on
 ⚙ 1 ruflo daemon
 ─────────────────────────────────────────────────────
 🎓 Agentic QE  🎓 23 patterns · 🧭 114 traj · 🧬 543 vec⚡ · 💾 16MB
@@ -365,9 +365,10 @@ feature renders on **its own line** so the live metrics are individually scannab
 Each field renders only when active: SONA `patterns`/`traj` from
 `.claude-flow/neural/stats.json` (the `[bar]` is a ~10-patterns/dot volume gauge;
 both counts persist across restarts since ruflo #2245), `⚡ HNSW` only when
-`.swarm/hnsw.index` exists, `🛡` when `@claude-flow/security` is loaded (older
-installs render `aidefence on` from the pre-3.28 standalone package), `⚙` counting
-running daemons machine-wide (yellow ≥4 — one per active project is normal), and the
+`.swarm/hnsw.index` exists, `🛡` when `@claude-flow/aidefence` (the engine behind
+`security defend`) is resolvable — absent on a bare 3.28 install until `ruflo-resync`
+reinstalls it (ruvnet/ruflo#2670), `⚙` counting running daemons machine-wide
+(yellow ≥4 — one per active project is normal), and the
 `🎓 Agentic QE` line (a few guarded `sqlite3` reads of `.agentic-qe/memory.db`;
 `vec` reads `qe_pattern_embeddings`, falling back to `vectors`/`embeddings`) only
 when AQE is initialized.

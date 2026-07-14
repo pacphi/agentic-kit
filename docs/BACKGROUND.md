@@ -248,16 +248,22 @@ which `ruflo-neural-train` did (writing `.claude-flow/neural/lora-delta.json`).
 
 ### Security surface
 
-On the 3.28.0 baseline ruflo ships **`@claude-flow/security` (3.0.0-alpha.10)** and
-no longer ships a separate `@claude-flow/aidefence` package — AIDefence has been
-**absorbed into `@claude-flow/security`** (`npm ls -g` under ruflo 3.28.0 shows only
-`@claude-flow/security`; the statusline security segment now renders `🛡 security
-on`). Earlier (ruflo 3.10.x) the two shipped as distinct packages.
+On the 3.28.0 baseline ruflo ships **`@claude-flow/security` (3.0.0-alpha.10)** but
+**no longer ships `@claude-flow/aidefence`** — the package was **dropped from the
+dependency tree, not absorbed**: `@claude-flow/security`'s 71 exports are
+auth/validation/credential primitives with no detection API, while
+`dist/src/commands/security.js`'s defend action still does
+`await import('@claude-flow/aidefence')`. The import fails (`ERR_MODULE_NOT_FOUND`),
+the catch-path error message is never rendered, and `security defend` becomes
+**silently non-functional**: banner only, ~0ms, no verdict, inconsistent exit codes
+(filed: [ruvnet/ruflo#2670](https://github.com/ruvnet/ruflo/issues/2670)). Earlier
+trees (through 3.25.6) bundled `@claude-flow/aidefence@3.0.3` and defend worked,
+with only a cosmetic `'color'` render crash *after* the verdict.
 
-`ruflo security defend` has a **new upstream regression on 3.28.0**: it prints only
-its AIDefence banner, completes in ~0ms, emits **no verdict** and an inconsistent
-exit code — i.e. it is **non-functional**, not merely cosmetically broken as it was
-on 3.10.x (where it detected correctly but crashed on a `'color'` render *after* the
-verdict). `ruflo-security-verify` detects and reports the defend regression as an
-upstream defect. `ruflo security cve --list` still has **no CVE database
-configured**; use `npm audit` for dependency CVEs.
+**Kit heal:** `ruflo-resync` (via `_ruflo_ensure_aidefence`) installs
+`@claude-flow/aidefence` `--no-save` into the global ruflo tree — verified to fully
+restore detection (exit 1=threat / 0=clean; the cosmetic crash returns but the
+verdict/exit are correct). The statusline `🛡 aidefence on` segment probes this
+package specifically, so a bare 3.28 install honestly shows no shield until healed.
+`ruflo security cve --list` still has **no CVE database configured**; use
+`npm audit` for dependency CVEs. `ruflo-security-verify` checks all of this.
