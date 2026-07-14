@@ -16,18 +16,23 @@ export function agentdbLocations() {
     .filter((p) => fs.existsSync(p));
 }
 
-/** Does better-sqlite3, as resolved from `fromDir` (real Node resolution),
- *  have a native binding? Mirrors ruflo-patch-native's check. */
-export function bsq3IsNative(fromDir) {
-  let entry;
+/** Package root of better-sqlite3 as resolved from `fromDir` (real Node
+ *  resolution), or null if not resolvable. */
+export function bsq3Root(fromDir) {
   try {
     const req = createRequire(path.join(fromDir, 'noop.js'));
-    entry = req.resolve('better-sqlite3'); // …/better-sqlite3/lib/index.js
+    const entry = req.resolve('better-sqlite3'); // …/better-sqlite3/lib/index.js
+    return path.join(entry.slice(0, entry.lastIndexOf(`${path.sep}better-sqlite3${path.sep}`)), 'better-sqlite3');
   } catch {
-    return false; // not resolvable at all
+    return null;
   }
-  const pkgRoot = path.join(entry.slice(0, entry.lastIndexOf(`${path.sep}better-sqlite3${path.sep}`)), 'better-sqlite3');
-  return fs.existsSync(path.join(pkgRoot, 'build', 'Release', 'better_sqlite3.node'));
+}
+
+/** Does better-sqlite3, as resolved from `fromDir`, have a native binding?
+ *  Mirrors ruflo-patch-native's check. */
+export function bsq3IsNative(fromDir) {
+  const root = bsq3Root(fromDir);
+  return !!root && fs.existsSync(path.join(root, 'build', 'Release', 'better_sqlite3.node'));
 }
 
 export function nativesStatus() {
