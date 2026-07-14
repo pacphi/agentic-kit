@@ -11,13 +11,13 @@
 - **Neural**: Enabled
 
 ```bash
-ruflo swarm init --topology hierarchical --max-agents 8 --strategy specialized
+ruflo swarm init --topology hierarchical --max-agents 15 --strategy specialized
 ```
 
 ## Build & Test
 
 ```bash
-npm run build && npm test
+node tests/statusline-segments.test.cjs
 ```
 
 ## Agentic QE v3
