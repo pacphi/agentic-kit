@@ -42,31 +42,12 @@ prints its plan with reasons — you always see the impact before anything chang
 
 What the verbs cover:
 
-- **setup** — installs/updates ruflo + agentic-qe globally (handling npm ≥11.17's
-  `allow-scripts` so natives build), deploys the token-audit skill, merges the
-  managed guidance blocks into `~/.claude/CLAUDE.md`, offers one-time MCP
-  registration (user scope, with a tool-family picker), and — inside a repo —
-  initializes the project: sanitized `ruflo init`, absolute memory-path pin, a
-  **verified** store→disk write, statusline footer, and a background daemon with
-  **local-only ($0) workers** (token-spending AI workers stay opt-in behind
-  upstream's machine-wide budget). Project scope triggers on a `.git` directory
-  in the current folder; without one it's skipped with a note. `--project`
-  forces it anyway (e.g. a not-yet-`git init`-ed folder), `--minimal` skips it,
-  `--yes` accepts all prompts (non-interactive), `--no-aqe` / `--no-security`
-  disable those subsystems, and `--reconfigure` re-offers MCP registration.
-- **status** — per-subsystem ✓/⚠/✗ (versions, the kit's own version, natives,
-  security, learning, aqe/RVF, MCP, daemons, CLAUDE.md blocks, statusline), each
-  drift row naming what `sync` would do about it.
-- **sync** — the one convergence verb: upgrades first when a new release exists,
-  then re-heals everything an upgrade wipes, then re-checks and reports. It also
-  **self-updates the kit**: when a newer `@pacphi/agentic-kit` exists it installs
-  it as the *last* step (the new code applies from the next `ak` run, never
-  mid-sync). Prerelease installs (`4.0.0-alpha.*`) track the `next` npm dist-tag
-  as well as `latest`, so alphas see their successors; stable installs only ever
-  follow `latest`. `--no-upgrade` skips the self-update along with the package
-  upgrades.
-- **uninstall** — removes the kit's footprint (and any legacy shell-kit install);
-  project data is never touched; `--purge` also offers to remove the global packages.
+| Verb | What it does |
+|------|--------------|
+| **setup** | Installs/updates ruflo + agentic-qe globally (handling npm ≥11.17's `allow-scripts` so natives build), deploys the token-audit skill, merges the managed guidance blocks into `~/.claude/CLAUDE.md`, offers one-time MCP registration (user scope, with a tool-family picker), and — inside a repo — initializes the project: sanitized `ruflo init`, absolute memory-path pin, a **verified** store→disk write, statusline footer, and a background daemon with **local-only ($0) workers** (token-spending AI workers stay opt-in behind upstream's machine-wide budget). Project scope triggers on a `.git` directory in the current folder; without one it's skipped with a note. `--project` forces it anyway (e.g. a not-yet-`git init`-ed folder), `--minimal` skips it, `--yes` accepts all prompts (non-interactive), `--no-aqe` / `--no-security` disable those subsystems, and `--reconfigure` re-offers MCP registration. |
+| **status** | Per-subsystem ✓/⚠/✗ (versions, the kit's own version, natives, security, learning, aqe/RVF, MCP, daemons, CLAUDE.md blocks, statusline), each drift row naming what `sync` would do about it. |
+| **sync** | The one convergence verb: upgrades first when a new release exists, then re-heals everything an upgrade wipes, then re-checks and reports. It also **self-updates the kit**: when a newer `@pacphi/agentic-kit` exists it installs it as the *last* step (the new code applies from the next `ak` run, never mid-sync). Prerelease installs (`4.0.0-alpha.*`) track the `next` npm dist-tag as well as `latest`, so alphas see their successors; stable installs only ever follow `latest`. `--no-upgrade` skips the self-update along with the package upgrades. |
+| **uninstall** | Removes the kit's footprint (and any legacy shell-kit install); project data is never touched; `--purge` also offers to remove the global packages. |
 
 Power-user mechanisms live under `ak x …` (`daemon-gc`, `mcp pick|off`,
 `reference diff|sync`, `verify learning|security|aqe`, `improvement-eval`) — see
