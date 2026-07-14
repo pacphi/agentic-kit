@@ -7,7 +7,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { run } from './exec.mjs';
 import { rufloRoot, aqeRoot } from './paths.mjs';
-import { agentdbLocations, bsq3IsNative, aidefencePresent } from './natives.mjs';
+import { agentdbLocations, bsq3IsNative, bsq3Root, aidefencePresent } from './natives.mjs';
 import { KIT_PKG } from './versions.mjs';
 import { scanRvf, quarantine } from './rvf.mjs';
 
@@ -28,6 +28,34 @@ async function npmInstallInto(dir, spec) {
     { cwd: dir, timeout: 300_000 });
 }
 
+const failTail = (r) =>
+  `FAILED (${(r.stderr || `exit ${r.code}`).trim().split('\n').slice(-2).join(' ').slice(0, 200)})`;
+
+/** Deterministic native better-sqlite3 for one location — an escalation
+ *  ladder, verifying after each rung, stopping at the first binding:
+ *  1. plain install — enough on npm <11.17, or when npm's content store
+ *     already holds a built copy of the exact version (why plain installs
+ *     look like they "work": it depends on cache history, not on scripts).
+ *  2. npm approve-scripts + rebuild — npm ≥11.17's sanctioned path for the
+ *     blocked install script (approve-scripts pins the exact version into
+ *     the location's package.json; harmless no-op failure on older npm).
+ *     rebuild also recovers a stale half-built build/ dir.
+ *  3. run the package's own install script directly — explicit `npm run`
+ *     is user-invoked and never gated by allow-scripts. */
+export async function ensureNativeBsq3(dir) {
+  let r = await npmInstallInto(dir, 'better-sqlite3@^12');
+  if (bsq3IsNative(dir)) return { ok: true, how: 'native installed' };
+  await run('npm', ['approve-scripts', 'better-sqlite3'], { cwd: dir, timeout: 60_000 });
+  r = await run('npm', ['rebuild', 'better-sqlite3'], { cwd: dir, timeout: 300_000 });
+  if (bsq3IsNative(dir)) return { ok: true, how: 'native rebuilt (scripts approved)' };
+  const pkgRoot = bsq3Root(dir);
+  if (pkgRoot) {
+    r = await run('npm', ['run', 'install'], { cwd: pkgRoot, timeout: 300_000 });
+    if (bsq3IsNative(dir)) return { ok: true, how: 'native built via package install script' };
+  }
+  return { ok: false, how: failTail(r) };
+}
+
 /** Native better-sqlite3 into every agentdb location that lacks it. */
 export async function healNatives() {
   const details = [];
@@ -37,16 +65,10 @@ export async function healNatives() {
     // the 3.29.0 tree) between enumeration and heal.
     if (!fs.existsSync(dir)) continue;
     if (bsq3IsNative(dir)) continue;
-    const r = await npmInstallInto(dir, 'better-sqlite3@^12');
-    details.push(`${dir}: ${r.code === 0 && bsq3IsNative(dir)
-      ? 'native installed'
-      : `FAILED (${(r.stderr || `exit ${r.code}`).trim().split('\n').slice(-2).join(' ').slice(0, 200)})`}`);
+    details.push(`${dir}: ${(await ensureNativeBsq3(dir)).how}`);
   }
   if (fs.existsSync(aqeRoot()) && !bsq3IsNative(aqeRoot())) {
-    const r = await npmInstallInto(aqeRoot(), 'better-sqlite3@^12');
-    details.push(`agentic-qe: ${r.code === 0 && bsq3IsNative(aqeRoot())
-      ? 'native installed'
-      : `FAILED (${(r.stderr || `exit ${r.code}`).trim().split('\n').slice(-2).join(' ').slice(0, 200)})`}`);
+    details.push(`agentic-qe: ${(await ensureNativeBsq3(aqeRoot())).how}`);
   }
   return { ok: !details.some((d) => d.includes('FAILED')), detail: details.join('; ') || 'already native everywhere' };
 }
