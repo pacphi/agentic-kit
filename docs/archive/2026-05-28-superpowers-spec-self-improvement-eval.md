@@ -13,7 +13,7 @@
 > / F4 verdict below was **independently confirmed upstream in 3.10.9** (`apply()` empirically
 > inert; upstream deliberately won't fake a gradient). **F3** (state-encoder collapse) remains
 > open and is the primary carry-forward item. Current truth-of-record:
-> [`docs/upstream/ruflo-self-improvement-findings.md`](../../upstream/ruflo-self-improvement-findings.md).
+> [`docs/upstream/ruflo-self-improvement-findings.md`](2026-06-upstream-findings-f1-f6.md).
 
 ## ⚠️ Revised scope (after the Tier-2 feasibility spike — supersedes §2–§4 framing)
 

@@ -10,7 +10,7 @@ had already killed every one** ~1–2h before the audit. Cleaned up the litter t
 removed 20 stale daemon-state files, disabled the `playwright` + `context7` plugins, and
 cleared a 598 MB / ~35K-file headless-log backlog.
 
-> Companion to [`token-consumption-findings-and-mitigation-2026-06.md`](./token-consumption-findings-and-mitigation-2026-06.md),
+> Companion to [`token-consumption-findings-and-mitigation-2026-06.md`](2026-06-token-consumption-incident.md),
 > which documents the original incident and the opt-in-daemon + TTL-reaper policy that
 > caught this recurrence.
 

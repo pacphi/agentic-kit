@@ -8,7 +8,7 @@
 
 **Tech Stack:** Bash 3.2+ (macOS `/bin/bash`), Node 24/26 (ABI ≥137), ruflo 3.10.5, `sqlite3`, `python3` (already used by the kit), `aqe` (agentic-qe).
 
-**Reference spec:** `docs/superpowers/specs/2026-05-28-ruvector-self-learning-aqe-security-design.md`
+**Reference spec:** `2026-05-28-superpowers-spec-ruvector-self-learning-aqe-security.md`
 
 > **Amendments (post-review, during execution):**
 > - **Task 5 (status line)** evolved from a single-line minimal footer to a **two-line

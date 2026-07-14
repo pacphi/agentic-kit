@@ -1,5 +1,5 @@
 <!-- BEGIN ruflo-reference -->
-<!-- ruflo-version: 3.10.x | last-updated: 2026-06-11 -->
+<!-- ruflo-version: 3.28.x | last-updated: 2026-07-14 -->
 <!-- Compact pointer block. Full reference: ~/.config/ruflo/ruflo-reference-full.md -->
 <!-- Refresh this block with: ruflo-reference-refresh -->
 
@@ -8,9 +8,12 @@
 Ruflo is an AI orchestration toolkit (memory, hooks, swarms, neural learning,
 security). Two surfaces, same functionality:
 
-- **CLI** — `ruflo <subcommand>` via Bash. **Default to this.** Zero context cost.
-- **MCP** — `mcp__ruflo__*` tools. ~84k tokens/session in tool defs; use only for tight,
-  repeated, schema-typed integration.
+- **CLI** — `ruflo <subcommand>` via Bash. Zero context cost; right for one-off calls.
+- **MCP** — `mcp__claude-flow__*` tools (registered once at user scope; schemas are
+  deferred and load on demand, so the old ~84k-token session tax no longer applies).
+  Prefer MCP for tight, repeated, schema-typed integration; excluded tool families are
+  blocked via permissions.deny (`ruflo-setup-machine` to revisit, `ruflo-remove-mcp`
+  to opt out).
 
 **Full reference** (every subcommand, flags, the Node/WASM gotchas, statusline internals):
 read `~/.config/ruflo/ruflo-reference-full.md` on demand, or run `ruflo <cmd> --help`.
@@ -51,12 +54,14 @@ Need to ... ?
 └─ Anything else                     → ruflo-reference-full.md  or  ruflo <cmd> --help
 ```
 
-### Daemon hygiene (token-burn safeguard)
+### Daemon (default-on, budget-governed)
 
-The background daemon is **opt-in** — `ruflo-setup-project` does NOT start one. Start it
-yourself only for a project you're actively working (`ruflo daemon start`); it is
-TTL-reaped (12h) and auto-reaped on shell start. Inspect/stop strays with
-`ruflo-daemon-gc [--kill]`. A leak shows as `⚙ N ruflo daemons` (yellow at ≥3) in the
-statusline.
+`ruflo-setup-project` starts a background daemon with **local-only ($0) workers**; it
+self-terminates after a 12h TTL and is auto-reaped on shell start as a backstop.
+Token-spending **AI workers are opt-in** (`RUFLO_DAEMON_AI_WORKERS=1`) and governed by
+ruflo's machine-wide launch budget — inspect/control with `ruflo daemon budget
+show|pause|resume`; stop everything with `ruflo daemon stop --all`. One ⚙ daemon per
+active project in the statusline is normal; yellow at ≥4 means inspect with
+`ruflo-daemon-gc [--kill]`.
 
 <!-- END ruflo-reference -->

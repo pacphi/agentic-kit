@@ -3,6 +3,17 @@
 This documents *why* the kit exists, so future maintainers understand the
 reasoning rather than cargo-culting the fixes.
 
+> **Dateline.** This was written against the ruflo 3.10.x-era bugs. Every root
+> cause below has since been fixed upstream — as of the **2026-07-14 baseline
+> (ruflo 3.28.0, agentic-qe 3.12.2, Node 20–26)** the memory data-loss (#2219,
+> fixed 3.10.6), route persistence (#2222/F2, 3.10.6), encoder (#2239/F3,
+> 3.10.11), SONA wiring (F4, `@ruvector/ruvllm` 2.5.6), and neural-status
+> misreport (#2549/F6, 3.18.1–3.19.0 + ruvllm 2.5.7) are all resolved. The kit's
+> patchers (`ruflo-patch-native` etc.) are now **safety nets / re-asserters**, not
+> the primary fix. This document is kept as the root-cause story behind the kit's
+> verifiers — read it to understand *what they guard against*, not as a list of
+> live defects.
+
 ## The presenting symptom
 
 `ruflo memory store` prints `[OK] Data stored successfully`, but `ruflo memory
@@ -103,8 +114,15 @@ usage is the common subset. No code changes required.
   behind for that project.
 - The generated per-project `CLAUDE.md` uses legacy `npx @claude-flow/cli@latest`
   and a `claude mcp add claude-flow` line (claude-flow == ruflo).
-- `claude-flow`, `ruv-swarm`, `flow-nexus` as MCP servers cost ~84k tokens of
-  tool defs per session; `claude-flow` is a duplicate of `ruflo`.
+- Committing multiple MCP servers (`ruv-swarm`, `flow-nexus`) into a project's
+  `.mcp.json` is duplicate/auth-gated cruft; `claude-flow` is the same package as
+  `ruflo`. **(Historical note on cost:** these once read as "~84k tokens of tool
+  defs per session," and that framing drove an MCP-off-by-default stance. It no
+  longer holds — **Claude Code now defers MCP tool schemas and loads them on
+  demand**, so registering the server is nearly free at session start. The current
+  posture is therefore *register once at user scope and pick which tool families to
+  exclude*, not *keep MCP off to save tokens* — see the MCP section of
+  `TROUBLESHOOTING.md`.)
 - `ruflo memory delete` reports success but does **not** remove on-disk rows on
   the WASM backend (so cleanup uses native `sqlite3`).
 - The sql.js reader can't replay an uncheckpointed `.swarm/memory.db-wal`,
@@ -196,7 +214,7 @@ which `ruflo-neural-train` did (writing `.claude-flow/neural/lora-delta.json`).
 > footer: the matrix-LoRA path was still **inert** — `processInstantLearning` was a no-op
 > stub and `deltaNorm` stayed 0. In its place the footer carries a **`📈 RL`** route-Q line
 > (ε/δ̄/|Q|/upd from `.swarm/q-learning-model.json`), unblocked by the encoder fix (ruflo
-> #2239 / F3, fixed in 3.10.11). See `docs/upstream/ruflo-self-improvement-findings.md`.
+> #2239 / F3, fixed in 3.10.11). See `archive/2026-06-upstream-findings-f1-f6.md`.
 >
 > **Update (2026-06-11).** [ruvnet/RuVector#519](https://github.com/ruvnet/RuVector/issues/519)
 > was closed without a published fix; live follow-up was ruvnet/RuVector#553.
@@ -230,9 +248,22 @@ which `ruflo-neural-train` did (writing `.claude-flow/neural/lora-delta.json`).
 
 ### Security surface
 
-ruflo ships `@claude-flow/security` (3.0.0-alpha.10) and `@claude-flow/aidefence`
-(3.0.3) (versions as of ruflo 3.10.40). `ruflo security defend` correctly **detects** prompt-injection (signals via
-exit code: 1=threat, 0=clean) but has an upstream cosmetic crash after detection
-(`Cannot read properties of undefined (reading 'color')`) — verdict/exit code are
-still correct. `ruflo security cve --list` has **no CVE database configured**; use
+On the 3.28.0 baseline ruflo ships **`@claude-flow/security` (3.0.0-alpha.10)** but
+**no longer ships `@claude-flow/aidefence`** — the package was **dropped from the
+dependency tree, not absorbed**: `@claude-flow/security`'s 71 exports are
+auth/validation/credential primitives with no detection API, while
+`dist/src/commands/security.js`'s defend action still does
+`await import('@claude-flow/aidefence')`. The import fails (`ERR_MODULE_NOT_FOUND`),
+the catch-path error message is never rendered, and `security defend` becomes
+**silently non-functional**: banner only, ~0ms, no verdict, inconsistent exit codes
+(filed: [ruvnet/ruflo#2670](https://github.com/ruvnet/ruflo/issues/2670)). Earlier
+trees (through 3.25.6) bundled `@claude-flow/aidefence@3.0.3` and defend worked,
+with only a cosmetic `'color'` render crash *after* the verdict.
+
+**Kit heal:** `ruflo-resync` (via `_ruflo_ensure_aidefence`) installs
+`@claude-flow/aidefence` `--no-save` into the global ruflo tree — verified to fully
+restore detection (exit 1=threat / 0=clean; the cosmetic crash returns but the
+verdict/exit are correct). The statusline `🛡 aidefence on` segment probes this
+package specifically, so a bare 3.28 install honestly shows no shield until healed.
+`ruflo security cve --list` still has **no CVE database configured**; use
 `npm audit` for dependency CVEs. `ruflo-security-verify` checks all of this.

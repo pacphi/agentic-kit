@@ -33,6 +33,18 @@ called first**, e.g. `fleet_init({ topology:"hierarchical", maxAgents:15, memory
 | `task_orchestrate` | Multi-agent QE tasks across domains (`parallel:true`) |
 | `memory_store` / `memory_query` | Patterns with `namespace` + `persist:true` (learning) |
 | `security_scan_comprehensive` | SAST/DAST scanning |
+| `qe/quality/gate` | Two-gate quality verdict (mechanical + LLM judge): pass / fail / inconclusive (aqe ≥3.12.0; CLI: `aqe quality-gate`) |
+
+### Billing & init behavior (aqe ≥3.12)
+- **`aqe init` merges, never clobbers** (≥3.12.1): existing hooks (incl. ruflo's), a custom
+  `statusLine`, and user `AQE_*` env overrides survive re-init; a one-time
+  `.claude/settings.json.backup` is written first. Keep aqe ≥3.12.1 — 3.11.x init
+  stripped foreign hooks.
+- **Run QE on a Claude subscription instead of an API key** (≥3.12.2, runtime env — init
+  never writes these): `AQE_LLM_PROVIDER=claude-code` routes analysis through `claude -p`;
+  `AQE_MAX_BUDGET_USD` (or `--max-budget-usd`) enforces a fleet-wide spend cap that aborts
+  over-budget requests before spending. `aqe health` shows an "LLM Billing" section saying
+  who pays for each call.
 
 ### QE agents via the native Task tool
 QE agents live under `.claude/agents/v3/` once `aqe init` has run in the repo:

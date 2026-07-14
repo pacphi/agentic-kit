@@ -112,6 +112,10 @@ fi
 # 2d. token-audit CLI copy on PATH (install.sh deploys it from the skill, so it is NOT
 # in bin/ and the bin loop above won't catch it).
 [ -f "$HOME/.local/bin/ruflo-token-audit" ] && { run "rm -f '$HOME/.local/bin/ruflo-token-audit'"; ok "removed ruflo-token-audit CLI"; }
+# 2e. retired helpers no longer shipped in bin/ (the bin loop can't catch these):
+#     ruflo-patch-route-learning — F2 route-persistence patch, fixed upstream in ruflo 3.10.6
+#     (#2222) and removed from the kit once the fleet baseline moved to 3.28.
+[ -f "$HOME/.local/bin/ruflo-patch-route-learning" ] && { run "rm -f '$HOME/.local/bin/ruflo-patch-route-learning'"; ok "removed retired ruflo-patch-route-learning"; }
 
 # 3. CLAUDE.md managed blocks: the ruflo-reference base + every conditional block (registry-driven,
 #    so any block added to ruflo-lib.sh is cleaned here too). Content outside the sentinels is preserved.
@@ -226,6 +230,13 @@ if [ "$REMOVE_RUFLO" -eq 1 ] || [ "$REMOVE_AQE" -eq 1 ]; then
 	echo "## Remove global npm packages (machine-wide — affects ALL projects)"
 	if [ "$REMOVE_RUFLO" -eq 1 ]; then
 		if [ "$DRY" -eq 1 ] || [ "$ASSUME_YES" -eq 1 ] || ask_yes_no "Remove global ruflo for ALL projects on this machine?" N; then
+			# Stop every ruflo daemon machine-wide first (3.27+ native command; older
+			# versions lack it — the stale/this-project reaper above already ran).
+			if [ "$DRY" -eq 1 ]; then
+				printf '%s[dry-run]%s ruflo daemon stop --all\n' "$C_DIM" "$C_RESET"
+			else
+				ruflo daemon stop --all >/dev/null 2>&1 && ok "stopped all ruflo daemons (daemon stop --all)"
+			fi
 			npm_remove_global ruflo
 		elif [ ! -t 0 ]; then
 			warn "ruflo not removed — no TTY to confirm; pass --yes to remove non-interactively"

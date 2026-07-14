@@ -6,17 +6,20 @@
 > Deployed copy: `~/.config/ruflo/ruflo-reference-full.md`.
 
 
-## Ruflo CLI Reference (MCP-optional)
+## Ruflo CLI Reference
 
 Ruflo is an AI orchestration toolkit (memory, hooks, swarms, neural learning,
 security). It exposes the same functionality via two surfaces:
 
-- **CLI** — `ruflo <subcommand>` via Bash. Zero context cost.
-- **MCP** — `mcp__ruflo__*` tools. Costs ~84k tokens per session in tool defs.
-
-**Default to the CLI.** Only use MCP tools if they're already registered AND
-you're doing very tight, repeated integration where the schema-typed I/O of MCP
-materially helps. Otherwise, drive ruflo through Bash.
+- **CLI** — `ruflo <subcommand>` via Bash. Zero context cost; right for one-off calls
+  and scripting.
+- **MCP** — `mcp__claude-flow__*` tools, registered once at USER scope under the
+  `claude-flow` key (`ruflo-setup-machine`). Claude Code defers MCP tool schemas and
+  loads them on demand, so registration no longer costs the historical ~84k tokens of
+  always-loaded tool definitions per session. ruflo 3.28 exposes ~276 tools across ~35
+  families with no server-side gating; the kit's family picker turns exclusions into
+  `permissions.deny` rules. Prefer MCP for tight, repeated, schema-typed integration;
+  `ruflo-remove-mcp` opts back out entirely.
 
 ### When NOT to use ruflo
 
@@ -331,14 +334,18 @@ applied by `install.sh` and re-asserted by `ruflo-reference-refresh` / `ruflo-re
 ### Security surface (verify + activate)
 
 ```bash
-ruflo-security-verify            # verify @claude-flow/security + aidefence load,
-                                 # defend detects injection, scan/secrets run
+ruflo-security-verify            # verify @claude-flow/security + @claude-flow/aidefence
+                                 # load, defend detects injection, scan/secrets run
 ruflo-setup-project --with-security   # run the security pass during project setup
 ```
 
 `ruflo security cve --list` has no CVE database configured — use `npm audit` for
-dependency CVEs. `ruflo security defend` detects prompt-injection (exit 1=threat)
-but has an upstream cosmetic render crash after the verdict; the exit code is correct.
+dependency CVEs. **Known upstream defect on 3.28.0** (ruvnet/ruflo#2670): the tree
+no longer ships `@claude-flow/aidefence` but `security defend` still imports it, so
+on a bare install defend prints only its banner with no verdict and an untrustworthy
+exit code. **`ruflo-resync` heals this** (reinstalls the package `--no-save`),
+restoring exit 1=threat / 0=clean — with only the old cosmetic render crash after
+the verdict. Re-run resync after every `npm i -g ruflo`.
 
 ### Status-line activation footer
 
@@ -350,6 +357,7 @@ feature renders on **its own line** so the live metrics are individually scannab
 🧠 SONA  [●●●●●]  50 patterns · 55 traj · ⚡ HNSW
 📈 RL  ε0.83↓ · δ̄0.012↓ · |Q|6 · upd42
 🛡 aidefence on
+⚙ 1 ruflo daemon
 ─────────────────────────────────────────────────────
 🎓 Agentic QE  🎓 23 patterns · 🧭 114 traj · 🧬 543 vec⚡ · 💾 16MB
 ```
@@ -357,7 +365,10 @@ feature renders on **its own line** so the live metrics are individually scannab
 Each field renders only when active: SONA `patterns`/`traj` from
 `.claude-flow/neural/stats.json` (the `[bar]` is a ~10-patterns/dot volume gauge;
 both counts persist across restarts since ruflo #2245), `⚡ HNSW` only when
-`.swarm/hnsw.index` exists, `🛡` when `@claude-flow/aidefence` is loaded, and the
+`.swarm/hnsw.index` exists, `🛡` when `@claude-flow/aidefence` (the engine behind
+`security defend`) is resolvable — absent on a bare 3.28 install until `ruflo-resync`
+reinstalls it (ruvnet/ruflo#2670), `⚙` counting running daemons machine-wide
+(yellow ≥4 — one per active project is normal), and the
 `🎓 Agentic QE` line (a few guarded `sqlite3` reads of `.agentic-qe/memory.db`;
 `vec` reads `qe_pattern_embeddings`, falling back to `vectors`/`embeddings`) only
 when AQE is initialized.
@@ -440,15 +451,25 @@ ruflo daemon status                              # background worker daemon
 ### Daemon
 
 ```bash
-ruflo daemon start                               # start background workers
-ruflo daemon status
+ruflo daemon start                               # start background workers (local-only by default)
+ruflo daemon status                              # --all adds the per-repo supervisor panel
 ruflo daemon trigger -w audit                    # manually trigger one worker
-ruflo daemon stop
+ruflo daemon budget show                         # machine-wide AI-worker launch budget (3.28)
+ruflo daemon budget pause                        # halt autonomous AI launches everywhere; resume to undo
+ruflo daemon stop                                # this workspace
+ruflo daemon stop --all                          # every workspace/worktree on the machine (3.27+)
 ruflo daemon install-supervisor                  # launchd/systemd auto-start
 ```
 
-The daemon is what makes self-learning continuous. Without it, hooks fire but
-no pattern training happens in the background.
+The daemon is what makes self-learning continuous. Without it, hooks fire but no
+pattern training happens in the background. `ruflo-setup-project` starts one per
+project by default — safe because its workers run the local ($0) path. Headless
+**AI workers** (they spawn `claude --print` and spend tokens) are opt-in:
+`RUFLO_DAEMON_AI_WORKERS=1` (or `daemon start --headless`), governed by the
+machine-wide budget above (defaults: 1 concurrent, 2/hour, 12/day; override with
+`RUFLO_AI_MAX_CONCURRENT` / `RUFLO_AI_MAX_PER_HOUR` / `RUFLO_AI_MAX_PER_DAY`).
+The daemon self-terminates after `RUFLO_DAEMON_TTL_SECS` (default 12h); the kit's
+`ruflo-daemon-gc` and shell auto-reaper remain as an independent backstop.
 
 ### Cleanup
 
@@ -467,10 +488,10 @@ For uninstalling ruflo from a project.
 | Don't | Do |
 |---|---|
 | `npx @claude-flow/cli@latest ...` | `ruflo ...` (CLI binary, no npm fetch) |
-| `claude mcp add ruflo -- ruflo mcp start` | `claude mcp add ruflo -s user -- ruflo mcp start` (user scope = all projects) |
-| Commit `.mcp.json` with ruflo entry | Add ruflo at user scope; project `.mcp.json` only for project-specific MCP servers |
-| Adding `claude-flow`, `ruv-swarm`, `flow-nexus` to MCP | They're duplicative (claude-flow == ruflo) or unused (ruv-swarm subset, flow-nexus is cloud SaaS) |
-| `mcp__ruflo__memory_store(...)` when not needed | `Bash("ruflo memory store -k K --value V")` |
+| `claude mcp add ruflo ...` (project/local scope, `ruflo` key) | `ruflo-setup-machine` → registers `claude-flow` at **user** scope (the key upstream tooling expects, #2206; one registration for all projects) |
+| Commit `.mcp.json` with a ruflo entry | User-scope registration; project `.mcp.json` only for project-specific MCP servers (upstream init dedup then skips writing one) |
+| Adding `ruv-swarm` / `flow-nexus` to MCP | Unused subset / cloud SaaS — cruft in a committed `.mcp.json` |
+| `mcp__claude-flow__memory_store(...)` for a one-off | `Bash("ruflo memory store -k K --value V")` |
 | Storing in memory what's already in git | Use git history; store decisions and constraints, not facts |
 
 ## Key environment variables

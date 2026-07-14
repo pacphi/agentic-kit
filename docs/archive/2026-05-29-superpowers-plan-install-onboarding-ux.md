@@ -8,7 +8,7 @@
 
 **Tech Stack:** POSIX-ish bash, `npm i -g`, existing `bin/` helpers (`ruflo-patch-native`, `ruflo-enable-learning`, `ruflo-learning-verify`), `shell/ruflo-functions.sh`. Verification: `bash -n`, `shellcheck` (if installed), `--dry-run`/`--help` greps.
 
-**Spec:** `docs/superpowers/specs/2026-05-29-install-onboarding-ux-design.md`
+**Spec:** `2026-05-29-superpowers-spec-install-onboarding-ux.md`
 
 **Conventions:**
 - No `Co-Authored-By` trailer (project `.claude/settings.json` has no `attribution.commit`).
