@@ -29,7 +29,7 @@ export async function run({ flags }) {
     for (const d of stale) {
       warn(`stale daemon pid=${d.pid} ${dim(d.workspace ?? '(unknown workspace)')} ${dim(d.workspaceExists ? `age ${d.ageSecs}s > TTL` : 'workspace gone')}`);
     }
-    console.log(`run: ruflo-kit x daemon-gc --kill`);
+    console.log(`run: ak x daemon-gc --kill`);
   }
   return 0;
 }

@@ -1,4 +1,4 @@
-// ruflo-kit uninstall — remove the kit's machine footprint (default), a
+// ak uninstall — remove the kit's machine footprint (default), a
 // project's patches (--this-project), and optionally the global packages
 // (--remove-ruflo / --remove-aqe / --purge, each confirmed). Also cleans a
 // LEGACY shell-kit install (rc source lines, ~/.local/bin/ruflo-*,
@@ -74,11 +74,12 @@ export async function run({ flags }) {
   }
   const localBin = path.join(paths.home, '.local', 'bin');
   if (fs.existsSync(localBin)) {
-    for (const f of fs.readdirSync(localBin).filter((f) => f.startsWith('ruflo-') && f !== 'ruflo-kit')) {
+    // every ruflo-* here is shell-kit era (the npm kit's bins live in npm's global bin)
+    for (const f of fs.readdirSync(localBin).filter((f) => f.startsWith('ruflo-'))) {
       act(`removed legacy ${path.join(localBin, f)}`, () => fs.rmSync(path.join(localBin, f)));
     }
   }
-  const cfgDir = paths.configDir();
+  const cfgDir = paths.legacyConfigDir(); // shell-kit files lived in ~/.config/ruflo
   if (fs.existsSync(cfgDir)) {
     for (const f of fs.readdirSync(cfgDir).filter((f) => f.endsWith('.sh') || f.endsWith('-template.md') || f === 'ruflo-reference-full.md')) {
       act(`removed legacy ${path.join(cfgDir, f)}`, () => fs.rmSync(path.join(cfgDir, f)));

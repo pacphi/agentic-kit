@@ -3,7 +3,7 @@
 // `sync`/`status` reapply them without re-asking.
 import fs from 'node:fs';
 import path from 'node:path';
-import { kitConfigPath } from './paths.mjs';
+import { kitConfigPath, legacyKitConfigPath } from './paths.mjs';
 
 const DEFAULTS = {
   aqe: true,            // manage agentic-qe alongside ruflo
@@ -14,12 +14,15 @@ const DEFAULTS = {
 };
 
 export function loadKitConfig(file = kitConfigPath()) {
-  try {
-    const parsed = JSON.parse(fs.readFileSync(file, 'utf8'));
-    return { ...structuredClone(DEFAULTS), ...parsed, mcp: { ...DEFAULTS.mcp, ...parsed.mcp } };
-  } catch {
-    return structuredClone(DEFAULTS);
+  // Migration: fall back to the ruflo-era location; the next save lands at the
+  // new path (saves always write `file`, i.e. ~/.config/agentic-kit/kit.json).
+  for (const cand of file === kitConfigPath() ? [file, legacyKitConfigPath()] : [file]) {
+    try {
+      const parsed = JSON.parse(fs.readFileSync(cand, 'utf8'));
+      return { ...structuredClone(DEFAULTS), ...parsed, mcp: { ...DEFAULTS.mcp, ...parsed.mcp } };
+    } catch { /* try next */ }
   }
+  return structuredClone(DEFAULTS);
 }
 
 export function saveKitConfig(cfg, file = kitConfigPath()) {

@@ -1,16 +1,17 @@
 {
-  "name": "ruflo-machine-kit",
+  "name": "@pacphi/agentic-kit",
   "version": "4.0.0-alpha.0",
-  "description": "Machine-level setup, healing, and verification kit for ruflo (claude-flow) + agentic-qe — cross-platform npm successor to the shell kit",
+  "description": "Machine-level setup, healing, and verification kit for your AI agent stack (ruflo/claude-flow, agentic-qe, Claude Code glue) — cross-platform, zero-dependency",
   "type": "module",
   "bin": {
-    "ruflo-kit": "bin/ruflo-kit.mjs"
+    "agentic-kit": "bin/agentic-kit.mjs",
+    "ak": "bin/agentic-kit.mjs"
   },
   "engines": {
     "node": ">=22"
   },
   "files": [
-    "bin/ruflo-kit.mjs",
+    "bin/agentic-kit.mjs",
     "src/",
     "claude/",
     "docs/TROUBLESHOOTING.md"
@@ -20,7 +21,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/pacphi/ruflo-machine-ref.git"
+    "url": "git+https://github.com/pacphi/agentic-kit.git"
   },
   "license": "MIT",
   "keywords": [

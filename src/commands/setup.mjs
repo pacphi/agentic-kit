@@ -1,4 +1,4 @@
-// ruflo-kit setup — context-aware first-time setup.
+// ak setup — context-aware first-time setup.
 //   Machine scope (always ensured): ruflo + agentic-qe installed globally
 //   (security surface is part of ruflo — verified, not separately installed),
 //   token-audit skill deployed, CLAUDE.md managed blocks merged, MCP offered.
@@ -83,8 +83,8 @@ export async function run_machine({ flags, pkgRoot, cfg }) {
   if (wantMcp && await ask('Register the ruflo MCP server at user scope (schemas load on demand)?', true, flags.yes)) {
     if (await mcpRegister()) {
       const { denied } = applyExclusions(cfg.mcp.excludeFamilies ?? []);
-      ok(`MCP registered${denied ? ` (${denied} tool(s) denied per kit.json)` : ''} — exclude families anytime: ruflo-kit x mcp pick`);
-    } else warn('claude mcp add failed — run: ruflo-kit x mcp pick');
+      ok(`MCP registered${denied ? ` (${denied} tool(s) denied per kit.json)` : ''} — exclude families anytime: ak x mcp pick`);
+    } else warn('claude mcp add failed — run: ak x mcp pick');
   }
   return true;
 }
@@ -152,7 +152,7 @@ export async function run_project({ flags, cfg }) {
     withDb(dbPath, (db) => db.exec(`DELETE FROM memory_entries WHERE key='${probeKey}'; PRAGMA wal_checkpoint(TRUNCATE);`), null, { readonly: false });
     ok('memory write VERIFIED (store → on-disk row confirmed)');
   } else {
-    fail('memory write verification FAILED — run: ruflo-kit status / ruflo doctor -c memory');
+    fail('memory write verification FAILED — run: ak status / ruflo doctor -c memory');
   }
 
   // 8. lean project CLAUDE.md (generic guidance lives machine-wide)
@@ -166,7 +166,7 @@ export async function run_project({ flags, cfg }) {
   if (cfg.aqe && !flags['no-aqe'] && await have('aqe')) {
     let md = fs.existsSync(projectMd) ? fs.readFileSync(projectMd, 'utf8') : '';
     if (!md.includes('## Agentic QE v3')) {
-      fs.appendFileSync(projectMd, '\n## Agentic QE v3\n<!-- managed by ruflo-kit — aqe init skips regeneration when this sentinel is present -->\n');
+      fs.appendFileSync(projectMd, '\n## Agentic QE v3\n<!-- managed by agentic-kit — aqe init skips regeneration when this sentinel is present -->\n');
     }
     heal.healRvf(paths.projectAqeDir(root));
     const aqe = await runCmd('aqe', ['init', '--auto'], { cwd: root, timeout: 300_000 });
@@ -175,7 +175,7 @@ export async function run_project({ flags, cfg }) {
   return true;
 }
 
-const leanStub = (name) => `<!-- Full ruflo reference: machine-wide ~/.claude/CLAUDE.md (managed by ruflo-kit) -->
+const leanStub = (name) => `<!-- Full ruflo reference: machine-wide ~/.claude/CLAUDE.md (managed by agentic-kit) -->
 
 # ${name}
 
@@ -203,9 +203,9 @@ export async function run({ flags, pkgRoot }) {
   if (inProject && !flags.minimal) {
     if (!(await run_project({ flags, cfg }))) return 1;
   } else if (!flags.minimal) {
-    info('not inside a project (no .git here) — run `ruflo-kit setup` from a repo to set one up');
+    info('not inside a project (no .git here) — run `ak setup` from a repo to set one up');
   }
   console.log('');
-  ok(bold('setup complete — `ruflo-kit` anytime for status, `ruflo-kit sync` after upgrades'));
+  ok(bold('setup complete — `agentic-kit` anytime for status, `ak sync` after upgrades'));
   return 0;
 }

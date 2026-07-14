@@ -34,8 +34,8 @@ jobs:
           HOME: ${{ runner.temp }}/kit-home
         run: |
           mkdir -p "$HOME"
-          node bin/ruflo-kit.mjs sync --no-upgrade || true
-          node bin/ruflo-kit.mjs status --json > status.json || true
+          node bin/agentic-kit.mjs sync --no-upgrade || true
+          node bin/agentic-kit.mjs status --json > status.json || true
           node -e "
             const s = require('./status.json');
             console.log(JSON.stringify(s, null, 2));
@@ -48,5 +48,5 @@ jobs:
         env:
           HOME: ${{ runner.temp }}/kit-home
         run: |
-          node bin/ruflo-kit.mjs x verify security
-          node bin/ruflo-kit.mjs x verify learning
+          node bin/agentic-kit.mjs x verify security
+          node bin/agentic-kit.mjs x verify learning

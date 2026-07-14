@@ -1,4 +1,4 @@
-// ruflo-kit sync — converge to good. Plan comes from the same collector status
+// ak sync — converge to good. Plan comes from the same collector status
 // uses; --dry-run prints it and stops. Apply order: upgrades first (they wipe
 // natives), then heals, then re-collect to prove convergence.
 import path from 'node:path';
@@ -57,7 +57,7 @@ export async function run({ flags, pkgRoot }) {
     if (okReg) {
       const { denied } = applyExclusions(cfg.mcp.excludeFamilies ?? []);
       ok(`mcp: claude-flow registered (user scope), ${denied} tool(s) denied per kit.json`);
-    } else warn('mcp: claude mcp add failed — run: ruflo-kit x mcp pick');
+    } else warn('mcp: claude mcp add failed — run: ak x mcp pick');
   }
   if (subsystems.has('daemons')) {
     const stale = staleDaemons(await listDaemons({ cwd }));

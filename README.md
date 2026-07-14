@@ -1,10 +1,10 @@
-# 🧰 ruflo-machine-kit
+# 🧰 @pacphi/agentic-kit
 
 **One npm package that makes [ruflo](https://github.com/ruvnet/ruflo) (claude-flow) and [agentic-qe](https://github.com/proffesor-for-testing/agentic-qe) actually work — installed, healed, and *proven* — on macOS, Linux, and Windows.**
 
 ```bash
-npm install -g github:pacphi/ruflo-machine-ref
-ruflo-kit setup        # once per machine; run it inside a repo to set that project up too
+npm install -g github:pacphi/agentic-kit
+ak setup        # once per machine; run it inside a repo to set that project up too
 ```
 
 ## Why this exists
@@ -25,14 +25,18 @@ in [docs/archive/](docs/archive/).
 ## Four commands
 
 ```text
-ruflo-kit              status + one suggested next action
-ruflo-kit setup        first-time setup — machine and/or the project you're standing in
-ruflo-kit status       read-only dashboard: what's true, what's drifted   [--json] [--deep]
-ruflo-kit sync         converge to good: upgrade + heal + verify          [--dry-run] [--no-upgrade]
-ruflo-kit uninstall    leave cleanly                                      [--dry-run] [--purge]
+ak              status + one suggested next action
+ak setup        first-time setup — machine and/or the project you're standing in
+ak status       read-only dashboard: what's true, what's drifted   [--json] [--deep]
+ak sync         converge to good: upgrade + heal + verify          [--dry-run] [--no-upgrade]
+ak uninstall    leave cleanly                                      [--dry-run] [--purge]
 ```
 
-**When in doubt: `ruflo-kit sync`.** Every mutating command takes `--dry-run` and
+(`ak` is the daily-driver alias; the full `agentic-kit` command is identical.
+Heads-up if you also use AutoKitteh: its CLI is also named `ak` — the full
+command always works.)
+
+**When in doubt: `ak sync`.** Every mutating command takes `--dry-run` and
 prints its plan with reasons — you always see the impact before anything changes.
 
 What the verbs cover:
@@ -53,9 +57,9 @@ What the verbs cover:
 - **uninstall** — removes the kit's footprint (and any legacy shell-kit install);
   project data is never touched; `--purge` also offers to remove the global packages.
 
-Power-user mechanisms live under `ruflo-kit x …` (`daemon-gc`, `mcp pick|off`,
+Power-user mechanisms live under `ak x …` (`daemon-gc`, `mcp pick|off`,
 `reference diff|sync`, `verify learning|security|aqe`, `improvement-eval`) — see
-`ruflo-kit --help --all`.
+`ak --help --all`.
 
 ## The status line
 
@@ -74,7 +78,7 @@ packages are installed on target machines. (pnpm-managed globals: tracked follow
 
 ## Troubleshooting
 
-[docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) — symptom → `ruflo-kit` command.
+[docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) — symptom → `agentic-kit` command.
 
 ## Credits
 
@@ -88,5 +92,5 @@ work: [#2219](https://github.com/ruvnet/ruflo/issues/2219),
 [#2670](https://github.com/ruvnet/ruflo/issues/2670).
 
 > v4 (npm, cross-platform). The shell-based v3 kit is archived in
-> [docs/archive/](docs/archive/) — `ruflo-kit setup` migrates an existing shell-kit
+> [docs/archive/](docs/archive/) — `ak setup` migrates an existing shell-kit
 > install automatically. A thin, reversible layer — not a fork. PRs welcome.

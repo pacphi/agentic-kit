@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-// ruflo-kit — porcelain: setup | status | sync | uninstall. Everything else is
-// plumbing under `ruflo-kit x <cmd>`. Bare invocation = status + one hint.
+// agentic-kit — porcelain: setup | status | sync | uninstall. Everything else is
+// plumbing under `ak x <cmd>`. Bare invocation = status + one hint.
 import { parseArgs } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
@@ -22,28 +22,28 @@ const PLUMBING = {
   'verify': () => import('../src/commands/x/verify.mjs'),
 };
 
-const HELP = `ruflo-kit — machine-level setup, healing, and verification for ruflo + agentic-qe
+const HELP = `agentic-kit — machine-level setup, healing, and verification for ruflo + agentic-qe
 
-Usage:
-  ruflo-kit                 status + suggested next action
-  ruflo-kit setup           first-time setup (machine and/or this project)
-  ruflo-kit status          read-only dashboard: what's true, what's drifted  [--json] [--deep]
-  ruflo-kit sync            converge to good: upgrade + heal + verify         [--dry-run] [--no-upgrade]
-  ruflo-kit uninstall       leave cleanly                                     [--dry-run] [--purge]
+Usage (ak = alias of agentic-kit):
+  ak                 status + suggested next action
+  ak setup           first-time setup (machine and/or this project)
+  ak status          read-only dashboard: what's true, what's drifted  [--json] [--deep]
+  ak sync            converge to good: upgrade + heal + verify         [--dry-run] [--no-upgrade]
+  ak uninstall       leave cleanly                                     [--dry-run] [--purge]
 
-  When in doubt: ruflo-kit sync
+  When in doubt: ak sync
 
 Every mutating command accepts --dry-run (prints the plan, changes nothing).
-Plumbing (power users): ruflo-kit x <cmd>   — see: ruflo-kit --help --all`;
+Plumbing (power users): ak x <cmd>   — see: ak --help --all`;
 
 const HELP_ALL = `${HELP}
 
 Plumbing commands:
-  ruflo-kit x daemon-gc [--kill]      list/stop stale ruflo daemons
-  ruflo-kit x mcp [pick|off|status]   MCP registration + tool-family deny rules
-  ruflo-kit x reference [diff|sync]   CLAUDE.md managed-block inspection/reconcile
-  ruflo-kit x verify [learning|security|aqe|all]   deep proofs (slow, spawns real CLIs)
-  ruflo-kit x improvement-eval [...]  causal self-improvement eval (route Q-learner)`;
+  ak x daemon-gc [--kill]      list/stop stale ruflo daemons
+  ak x mcp [pick|off|status]   MCP registration + tool-family deny rules
+  ak x reference [diff|sync]   CLAUDE.md managed-block inspection/reconcile
+  ak x verify [learning|security|aqe|all]   deep proofs (slow, spawns real CLIs)
+  ak x improvement-eval [...]  causal self-improvement eval (route Q-learner)`;
 
 async function main() {
   const argv = process.argv.slice(2);
@@ -100,7 +100,7 @@ async function main() {
     try {
       const { driftReport } = await import('../src/lib/versions.mjs');
       for (const r of await driftReport()) {
-        if (r.outdated) console.log(dim(`↑ ${r.pkg} ${r.latest} available (installed ${r.installed}) — run: ruflo-kit sync`));
+        if (r.outdated) console.log(dim(`↑ ${r.pkg} ${r.latest} available (installed ${r.installed}) — run: ak sync`));
       }
     } catch { /* nudge is best-effort */ }
   }

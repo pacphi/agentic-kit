@@ -27,7 +27,7 @@ export function fixStatusline(root = process.cwd(), { dryRun = false } = {}) {
   let s = raw.replace(/\r\n/g, '\n');
 
   // (a) legacy probe strip + fallback version refresh
-  s = s.replace(/ \/\* ruflo-machine-ref: global-install version probe \*\/ require\("path"\)\.join\(require\("path"\)\.dirname\(process\.execPath\),"\.\.","lib","node_modules","ruflo","package\.json"\),/, '');
+  s = s.replace(/ \/\* agentic-kit: global-install version probe \*\/ require\("path"\)\.join\(require\("path"\)\.dirname\(process\.execPath\),"\.\.","lib","node_modules","ruflo","package\.json"\),/, '');
   const ver = installedVersion('ruflo');
   if (ver) s = s.replace(/(let (?:ver|pkgVersion) = )(["'])\d+\.\d+(?:\.\d+)?\2/, `$1$2${ver}$2`);
 

@@ -1,4 +1,4 @@
-// ruflo-kit status — read-only dashboard. Each row: subsystem, level, message,
+// ak status — read-only dashboard. Each row: subsystem, level, message,
 // and (for drift) what `sync` would do. --json emits the raw rows; --hint
 // (set by bare invocation) appends exactly one suggested next action.
 import fs from 'node:fs';
@@ -176,7 +176,7 @@ export async function run({ flags, pkgRoot }) {
     return worst === 'fail' ? 1 : 0;
   }
 
-  console.log(bold('ruflo-kit status'));
+  console.log(bold('ak status'));
   let last = '';
   for (const r of rows) {
     const label = r.subsystem === last ? ' '.repeat(r.subsystem.length) : r.subsystem;
@@ -188,7 +188,7 @@ export async function run({ flags, pkgRoot }) {
     const actionable = rows.filter((r) => r.fix);
     console.log('');
     if (worst === 'ok') console.log(`${glyph('ok')} all healthy — nothing to do`);
-    else console.log(`${actionable.length} item(s) need attention — run: ${bold('ruflo-kit sync')}${worst === 'fail' ? '' : dim('  (or --dry-run to preview)')}`);
+    else console.log(`${actionable.length} item(s) need attention — run: ${bold('ak sync')}${worst === 'fail' ? '' : dim('  (or --dry-run to preview)')}`);
   }
   return worst === 'fail' ? 1 : 0;
 }

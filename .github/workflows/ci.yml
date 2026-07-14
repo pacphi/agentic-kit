@@ -35,13 +35,13 @@ jobs:
           APPDATA: ${{ runner.temp }}\kit-home\AppData\Roaming
         run: |
           mkdir -p "$HOME"
-          node bin/ruflo-kit.mjs --version
-          node bin/ruflo-kit.mjs --help --all > /dev/null
+          node bin/agentic-kit.mjs --version
+          node bin/agentic-kit.mjs --help --all > /dev/null
           # status must emit valid JSON and exit deterministically even on a
           # machine with no ruflo installed (rows degrade to warn/fail).
-          node bin/ruflo-kit.mjs status --json > status.json || true
+          node bin/agentic-kit.mjs status --json > status.json || true
           node -e "const s=require('./status.json'); if(!Array.isArray(s.rows)||!s.overall) throw new Error('bad status JSON'); console.log('status rows:', s.rows.length, 'overall:', s.overall)"
           # managed-block engine round-trip against the sandbox HOME
-          node bin/ruflo-kit.mjs x reference sync
+          node bin/agentic-kit.mjs x reference sync
           node -e "const fs=require('fs'),os=require('os'),p=require('path').join(os.homedir(),'.claude','CLAUDE.md'); const t=fs.readFileSync(p,'utf8'); for (const s of ['ruflo-preamble','ruflo-reference']) if(!t.includes('<!-- BEGIN '+s+' -->')) throw new Error('missing block '+s); console.log('blocks OK')"
-          node bin/ruflo-kit.mjs uninstall --dry-run
+          node bin/agentic-kit.mjs uninstall --dry-run

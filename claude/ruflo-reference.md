@@ -1,7 +1,7 @@
 <!-- BEGIN ruflo-reference -->
 <!-- ruflo-version: 3.28.x | last-updated: 2026-07-14 -->
 <!-- Compact pointer block. Full reference: ~/.config/ruflo/ruflo-reference-full.md -->
-<!-- Refresh this block with: ruflo-kit x reference sync -->
+<!-- Refresh this block with: ak x reference sync -->
 
 ## Ruflo CLI Reference (compact)
 
@@ -12,7 +12,7 @@ security). Two surfaces, same functionality:
 - **MCP** — `mcp__claude-flow__*` tools (registered once at user scope; schemas are
   deferred and load on demand, so the old ~84k-token session tax no longer applies).
   Prefer MCP for tight, repeated, schema-typed integration; excluded tool families are
-  blocked via permissions.deny (`ruflo-kit x mcp pick` to revisit, `ruflo-kit x mcp off`
+  blocked via permissions.deny (`ak x mcp pick` to revisit, `ak x mcp off`
   to opt out).
 
 **Full reference** (every subcommand, flags, the Node/WASM gotchas, statusline internals):
@@ -49,19 +49,19 @@ Need to ... ?
 ├─ Find natural refactor boundaries  → ruflo analyze boundaries src/
 ├─ Coordinate 3+ agents              → native Agent tool first; ruflo swarm if topology/consensus needed
 ├─ Scan untrusted text               → ruflo security defend -i "..."
-├─ Activate + verify self-learning   → ruflo-kit sync && ruflo-kit x verify learning
-├─ Re-apply after a ruflo/aqe upgrade → ruflo-kit sync   (one command heals everything)
+├─ Activate + verify self-learning   → ak sync && ak x verify learning
+├─ Re-apply after a ruflo/aqe upgrade → ak sync   (one command heals everything)
 └─ Anything else                     → ruflo-reference-full.md  or  ruflo <cmd> --help
 ```
 
 ### Daemon (default-on, budget-governed)
 
-`ruflo-kit setup` starts a background daemon with **local-only ($0) workers**; it
+`ak setup` starts a background daemon with **local-only ($0) workers**; it
 self-terminates after a 12h TTL and is auto-reaped on shell start as a backstop.
 Token-spending **AI workers are opt-in** (`RUFLO_DAEMON_AI_WORKERS=1`) and governed by
 ruflo's machine-wide launch budget — inspect/control with `ruflo daemon budget
 show|pause|resume`; stop everything with `ruflo daemon stop --all`. One ⚙ daemon per
 active project in the statusline is normal; yellow at ≥4 means inspect with
-`ruflo-kit x daemon-gc [--kill]`.
+`ak x daemon-gc [--kill]`.
 
 <!-- END ruflo-reference -->

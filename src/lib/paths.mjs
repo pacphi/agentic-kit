@@ -8,16 +8,18 @@ import fs from 'node:fs';
 const home = os.homedir();
 const isWindows = process.platform === 'win32';
 
-/** Kit config dir: XDG on POSIX, %APPDATA% on Windows. Same content as the
- *  shell kit's ~/.config/ruflo so an in-place migration is a no-op on POSIX. */
-export function configDir() {
-  if (isWindows) {
-    return path.join(process.env.APPDATA || path.join(home, 'AppData', 'Roaming'), 'ruflo');
-  }
-  return path.join(process.env.XDG_CONFIG_HOME || path.join(home, '.config'), 'ruflo');
+/** Kit config dir: XDG on POSIX, %APPDATA% on Windows. */
+function configBase() {
+  if (isWindows) return process.env.APPDATA || path.join(home, 'AppData', 'Roaming');
+  return process.env.XDG_CONFIG_HOME || path.join(home, '.config');
 }
+export const configDir = () => path.join(configBase(), 'agentic-kit');
+/** The ruflo-era config dir — read-fallback for kit.json migration and the
+ *  target of uninstall's legacy shell-kit cleanup. */
+export const legacyConfigDir = () => path.join(configBase(), 'ruflo');
 
 export const kitConfigPath = () => path.join(configDir(), 'kit.json');
+export const legacyKitConfigPath = () => path.join(legacyConfigDir(), 'kit.json');
 
 /** Claude Code user-level locations (same shape on all platforms). */
 export const claudeDir = () => path.join(home, '.claude');
