@@ -31,13 +31,21 @@ async function npmInstallInto(dir, spec) {
 export async function healNatives() {
   const details = [];
   for (const dir of agentdbLocations()) {
+    // Re-check right before installing: an upgrade earlier in the same sync
+    // can remove a location (e.g. agentic-flow/node_modules/agentdb, gone in
+    // the 3.29.0 tree) between enumeration and heal.
+    if (!fs.existsSync(dir)) continue;
     if (bsq3IsNative(dir)) continue;
     const r = await npmInstallInto(dir, 'better-sqlite3@^12');
-    details.push(`${dir}: ${r.code === 0 && bsq3IsNative(dir) ? 'native installed' : 'FAILED'}`);
+    details.push(`${dir}: ${r.code === 0 && bsq3IsNative(dir)
+      ? 'native installed'
+      : `FAILED (${(r.stderr || `exit ${r.code}`).trim().split('\n').slice(-2).join(' ').slice(0, 200)})`}`);
   }
   if (fs.existsSync(aqeRoot()) && !bsq3IsNative(aqeRoot())) {
     const r = await npmInstallInto(aqeRoot(), 'better-sqlite3@^12');
-    details.push(`agentic-qe: ${r.code === 0 && bsq3IsNative(aqeRoot()) ? 'native installed' : 'FAILED'}`);
+    details.push(`agentic-qe: ${r.code === 0 && bsq3IsNative(aqeRoot())
+      ? 'native installed'
+      : `FAILED (${(r.stderr || `exit ${r.code}`).trim().split('\n').slice(-2).join(' ').slice(0, 200)})`}`);
   }
   return { ok: !details.some((d) => d.includes('FAILED')), detail: details.join('; ') || 'already native everywhere' };
 }
