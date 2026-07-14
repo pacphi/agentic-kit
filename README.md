@@ -1,5 +1,10 @@
 # 🧰 @pacphi/agentic-kit
 
+[![CI](https://github.com/pacphi/agentic-kit/actions/workflows/ci.yml/badge.svg)](https://github.com/pacphi/agentic-kit/actions/workflows/ci.yml)
+[![npm version](https://img.shields.io/npm/v/@pacphi/agentic-kit/next?label=npm%40next)](https://www.npmjs.com/package/@pacphi/agentic-kit)
+[![node](https://img.shields.io/node/v/@pacphi/agentic-kit)](https://nodejs.org)
+[![license: MIT](https://img.shields.io/npm/l/@pacphi/agentic-kit)](LICENSE)
+
 **One npm package that makes [ruflo](https://github.com/ruvnet/ruflo) (claude-flow) and [agentic-qe](https://github.com/proffesor-for-testing/agentic-qe) actually work — installed, healed, and *proven* — on macOS, Linux, and Windows.**
 
 ```bash
