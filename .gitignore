@@ -30,3 +30,11 @@ ruvector.db
 *.db
 CLAUDE.md.backup
 CLAUDE.md.pre-ruflo
+
+# RVF pattern stores + locks are derived runtime caches (rebuilt from memory.db);
+# ruflo/aqe processes can drop them in cwd (e.g. `ruflo mcp start`), and an
+# interrupted write leaves a corrupt FLVR-content .lock (see _ruflo_aqe_repair_rvf).
+*.rvf
+*.rvf.lock
+*.rvf.idmap.json
+*.rvf.manifest.json
