@@ -12,6 +12,10 @@ npm install -g @pacphi/agentic-kit@next   # alpha channel until 4.0.0 GA
 ak setup        # once per machine; run it inside a git repo to set that project up too
 ```
 
+That's the only package you install by hand — **you do not need to install ruflo or
+agentic-qe yourself.** `ak setup` installs them globally for you (building natives past
+npm ≥11.17's `allow-scripts` gate), then heals and proves them.
+
 ## Why this exists
 
 ruflo promises persistent memory, self-learning, security scanning, and background
@@ -67,11 +71,13 @@ count, and 🎓 Agentic-QE stats.
 
 ## Requirements
 
-Node ≥ 22, npm, and the `claude` CLI (Claude Code). Everything else — including
-SQLite — is embedded; there are no runtime dependencies. npm stays required at
-runtime even though this repo develops with pnpm: the kit heals the *npm-managed*
-global ruflo/agentic-qe trees (`npm root -g`, `npm i -g`), which is how those
-packages are installed on target machines. (pnpm-managed globals: tracked follow-up.)
+Node ≥ 22, npm, and the `claude` CLI (Claude Code). That's the whole list —
+**ruflo and agentic-qe are not prerequisites; `ak setup` installs them for you**
+(pre-installing them is fine too — setup just detects and reuses them). Everything
+else — including SQLite — is embedded; there are no runtime dependencies. npm stays
+required at runtime even though this repo develops with pnpm: the kit heals the
+*npm-managed* global ruflo/agentic-qe trees (`npm root -g`, `npm i -g`), which is how
+those packages are installed on target machines. (pnpm-managed globals: tracked follow-up.)
 
 ## Troubleshooting
 
