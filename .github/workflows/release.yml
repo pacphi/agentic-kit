@@ -1,0 +1,46 @@
+name: release
+
+# Publishes to npm when a version tag is pushed (v4.0.0, v4.1.0-alpha.1, …).
+# Requires the NPM_TOKEN repository secret (npm "Automation" token: repo
+# Settings → Secrets and variables → Actions → New repository secret).
+# The tag must match package.json's version — the guard below enforces it.
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+  id-token: write   # npm provenance attestation
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+
+      - name: Test gate
+        run: npm test
+
+      - name: Tag ↔ package.json version guard
+        env:
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          PKG_VERSION=$(node -p "require('./package.json').version")
+          if [ "v$PKG_VERSION" != "$REF_NAME" ]; then
+            echo "tag $REF_NAME does not match package.json version v$PKG_VERSION" >&2
+            exit 1
+          fi
+
+      - name: Publish to npm (with provenance)
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          # prereleases (…-alpha.N) go to the 'next' dist-tag; releases to 'latest'
+          case "$(node -p "require('./package.json').version")" in
+            *-*) npm publish --provenance --access public --tag next ;;
+            *)   npm publish --provenance --access public ;;
+          esac
