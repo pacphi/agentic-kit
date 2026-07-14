@@ -8,6 +8,7 @@ import path from 'node:path';
 import { run } from './exec.mjs';
 import { rufloRoot, aqeRoot } from './paths.mjs';
 import { agentdbLocations, bsq3IsNative, aidefencePresent } from './natives.mjs';
+import { KIT_PKG } from './versions.mjs';
 import { scanRvf, quarantine } from './rvf.mjs';
 
 // Packages whose install scripts must run for natives to build (npm >=11.17
@@ -78,6 +79,20 @@ export async function upgradePackage(pkg) {
   const r = await run('npm', ['install', '-g', `--allow-scripts=${ALLOW_SCRIPTS}`, `${pkg}@latest`],
     { timeout: 600_000 });
   return { ok: r.code === 0, detail: r.code === 0 ? 'upgraded' : r.stderr.split('\n').slice(-3).join(' ') };
+}
+
+/** Upgrade the kit itself to a pinned version. Runs LAST in sync: npm
+ *  replaces the kit's files on disk, so the new code applies from the next
+ *  ak invocation — never mid-run. Pinning the exact version (not a dist-tag)
+ *  installs precisely what the drift check saw. */
+export async function selfUpdate(version) {
+  const r = await run('npm', ['install', '-g', `${KIT_PKG}@${version}`], { timeout: 300_000 });
+  return {
+    ok: r.code === 0,
+    detail: r.code === 0
+      ? `kit upgraded to ${version} (applies from the next ak run)`
+      : `FAILED (${(r.stderr || `exit ${r.code}`).trim().split('\n').slice(-2).join(' ').slice(0, 200)})`,
+  };
 }
 
 /** Stop all ruflo daemons before an upgrade (3.27+; best-effort). */

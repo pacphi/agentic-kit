@@ -9,7 +9,7 @@ import { registry, syncBlocks } from '../lib/blocks.mjs';
 import { register as mcpRegister, applyExclusions } from '../lib/mcp.mjs';
 import { listDaemons, staleDaemons, reap } from '../lib/daemons.mjs';
 import { loadKitConfig } from '../lib/config.mjs';
-import { driftReport } from '../lib/versions.mjs';
+import { driftReport, selfDrift } from '../lib/versions.mjs';
 import * as paths from '../lib/paths.mjs';
 import { ok, warn, fail, bold, dim } from '../lib/output.mjs';
 
@@ -23,7 +23,7 @@ export async function run({ flags, pkgRoot }) {
   const cwd = process.cwd();
   const rows = await collect({ pkgRoot, cwd });
   const plan = rows.filter((r) => r.fix)
-    .filter((r) => !(flags['no-upgrade'] && r.subsystem === 'versions'));
+    .filter((r) => !(flags['no-upgrade'] && (r.subsystem === 'versions' || r.subsystem === 'self')));
 
   if (plan.length === 0) { ok('nothing to do — all subsystems healthy'); return 0; }
 
@@ -76,6 +76,14 @@ export async function run({ flags, pkgRoot }) {
   if (subsystems.has('statusline') || subsystems.has('versions')) {
     const r = fixStatusline(cwd);
     (r.applied || !r.reason ? ok : warn)(`statusline: ${r.applied ? `footer injected (v${r.version})` : r.reason ?? 'in sync'}`);
+  }
+
+  // kit self-update — LAST, after every other heal: npm replaces the kit's
+  // files on disk, and the new code applies from the next ak run, so nothing
+  // after this point should depend on the kit's own modules being current.
+  if (subsystems.has('self') && !flags['no-upgrade']) {
+    const s = await selfDrift({ pkgRoot, force: true });
+    if (s.outdated) report('self-update', await heal.selfUpdate(s.latest));
   }
 
   // converge proof
