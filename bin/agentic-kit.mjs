@@ -26,7 +26,9 @@ const HELP = `agentic-kit — machine-level setup, healing, and verification for
 
 Usage (ak = alias of agentic-kit):
   ak                 status + suggested next action
-  ak setup           first-time setup (machine and/or this project)
+  ak setup           first-time setup (machine and/or this project)    [--project] [--minimal] [--yes]
+                     project scope auto-runs when .git is present; --project forces it,
+                     --minimal skips it; also: [--no-aqe] [--no-security] [--reconfigure]
   ak status          read-only dashboard: what's true, what's drifted  [--json] [--deep]
   ak sync            converge to good: upgrade + heal + verify         [--dry-run] [--no-upgrade]
   ak uninstall       leave cleanly                                     [--dry-run] [--purge]

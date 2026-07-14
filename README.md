@@ -4,7 +4,7 @@
 
 ```bash
 npm install -g @pacphi/agentic-kit@next   # alpha channel until 4.0.0 GA
-ak setup        # once per machine; run it inside a repo to set that project up too
+ak setup        # once per machine; run it inside a git repo to set that project up too
 ```
 
 ## Why this exists
@@ -27,6 +27,7 @@ in [docs/archive/](docs/archive/).
 ```text
 ak              status + one suggested next action
 ak setup        first-time setup — machine and/or the project you're standing in
+                                                    [--project] [--minimal] [--yes] [--no-aqe] [--no-security] [--reconfigure]
 ak status       read-only dashboard: what's true, what's drifted   [--json] [--deep]
 ak sync         converge to good: upgrade + heal + verify          [--dry-run] [--no-upgrade]
 ak uninstall    leave cleanly                                      [--dry-run] [--purge]
@@ -48,7 +49,11 @@ What the verbs cover:
   initializes the project: sanitized `ruflo init`, absolute memory-path pin, a
   **verified** store→disk write, statusline footer, and a background daemon with
   **local-only ($0) workers** (token-spending AI workers stay opt-in behind
-  upstream's machine-wide budget).
+  upstream's machine-wide budget). Project scope triggers on a `.git` directory
+  in the current folder; without one it's skipped with a note. `--project`
+  forces it anyway (e.g. a not-yet-`git init`-ed folder), `--minimal` skips it,
+  `--yes` accepts all prompts (non-interactive), `--no-aqe` / `--no-security`
+  disable those subsystems, and `--reconfigure` re-offers MCP registration.
 - **status** — per-subsystem ✓/⚠/✗ (versions, the kit's own version, natives,
   security, learning, aqe/RVF, MCP, daemons, CLAUDE.md blocks, statusline), each
   drift row naming what `sync` would do about it.
