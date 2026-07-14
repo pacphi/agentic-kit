@@ -1,0 +1,25 @@
+version: 2
+updates:
+  # Keep the pinned action majors current (checkout, setup-node, …).
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    groups:
+      actions:
+        patterns: ['*']
+    labels: [dependencies, ci]
+
+  # The kit is deliberately zero-dependency (node:sqlite, node:test) — this
+  # watches package.json anyway so anything added later gets updates, and
+  # engine-range advisories still surface.
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    groups:
+      npm:
+        patterns: ['*']
+    labels: [dependencies]
