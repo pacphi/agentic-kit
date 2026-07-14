@@ -12,7 +12,7 @@
 > - **Carry-forward (still valid):** `ruflo-improvement-eval` (the proof harness) and the F3/F4
 >   findings, which remain unaddressed/deferred upstream.
 >
-> Current truth-of-record: [`docs/upstream/ruflo-self-improvement-findings.md`](../../upstream/ruflo-self-improvement-findings.md).
+> Current truth-of-record: [`docs/upstream/ruflo-self-improvement-findings.md`](2026-06-upstream-findings-f1-f6.md).
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -28,7 +28,7 @@
 
 **Tech Stack:** Node 20–26 (ESM), ruflo 3.10.5 (`@claude-flow/cli` → `dist/src/ruvector/index.js`), bash 3.2 (statusline patcher), `sqlite3` (existing footer reads). No new dependencies.
 
-**Reference spec:** `docs/superpowers/specs/2026-05-28-self-improvement-eval-design.md`
+**Reference spec:** `2026-05-28-superpowers-spec-self-improvement-eval.md`
 
 **Conventions (match the kit):**
 - Color/`ok()/warn()/fail()` helpers with TTY guard; `--help` via the `sed -n` idiom; exit codes `0` ok / `1` not-proven / `2` env error.

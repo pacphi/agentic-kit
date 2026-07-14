@@ -196,7 +196,7 @@ which `ruflo-neural-train` did (writing `.claude-flow/neural/lora-delta.json`).
 > footer: the matrix-LoRA path was still **inert** — `processInstantLearning` was a no-op
 > stub and `deltaNorm` stayed 0. In its place the footer carries a **`📈 RL`** route-Q line
 > (ε/δ̄/|Q|/upd from `.swarm/q-learning-model.json`), unblocked by the encoder fix (ruflo
-> #2239 / F3, fixed in 3.10.11). See `docs/upstream/ruflo-self-improvement-findings.md`.
+> #2239 / F3, fixed in 3.10.11). See `archive/2026-06-upstream-findings-f1-f6.md`.
 >
 > **Update (2026-06-11).** [ruvnet/RuVector#519](https://github.com/ruvnet/RuVector/issues/519)
 > was closed without a published fix; live follow-up was ruvnet/RuVector#553.

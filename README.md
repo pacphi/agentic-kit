@@ -46,7 +46,7 @@ What this kit still adds, because the override doesn't cover everything:
 1. 💾 **Verifies memory actually persists** — a real store→disk check, instead of trusting `doctor`'s "healthy". (The data-loss bug itself is now fixed upstream on ruflo ≥3.10.6.)
 2. 🧠 **Activates & proves self-learning** — puts the native binary in place where needed and *asserts* the ruvector engine (SONA, HNSW, ReasoningBank) is genuinely on, not just reported on.
 3. 🎓 **Agentic-QE won't initialize** — it's a *separate* package ([`agentic-qe`](https://github.com/proffesor-for-testing/agentic-qe)) **not** covered by ruflo's override, so it still hits the same Node-ABI wall; `ruflo-setup-aqe` fixes it.
-4. 🧹 **MCP-cruft, token, and daemon hygiene** — strips committed `.mcp.json`, keeps sessions CLI-lean, and (as of the [token-consumption work](docs/usage/token-consumption-findings-and-mitigation-2026-06.md)) makes the background daemon opt-in + self-reaping.
+4. 🧹 **MCP-cruft, token, and daemon hygiene** — strips committed `.mcp.json`, keeps sessions CLI-lean, and (as of the [token-consumption work](docs/archive/2026-06-token-consumption-incident.md)) makes the background daemon opt-in + self-reaping.
 
 > 📎 **A note on prior art.** A colleague, **Ciprian Melian**, wrote an excellent project-scoped repair kit as a gist ([link](https://gist.github.com/ciprianmelian/eb7e8ff7d24018141ca34bb8a7e216a6)) that pairs ruflo with agentic-qe. This kit builds on those ideas but takes a **machine-wide, upgrade-safe** approach — and our investigation found that several of the gist's source patches are now **already upstream in ruflo 3.10.5** (the real remaining lever is the missing native binary, not the source patches). The full story is in [docs/BACKGROUND.md](docs/BACKGROUND.md).
 
@@ -157,7 +157,7 @@ Try `./install.sh --dry-run` first to preview exactly what it will do.
 > `ruflo-token-audit`, available in every project. Just ask Claude in plain language —
 > e.g. *"Audit my Claude Code token usage for the last 7 days — what's burning my
 > tokens?"* — and it runs the audit, checks for runaway daemons, and recommends fixes.
-> Background: [docs/usage/token-consumption-findings-and-mitigation-2026-06.md](docs/usage/token-consumption-findings-and-mitigation-2026-06.md).
+> Background: [docs/archive/2026-06-token-consumption-incident.md](docs/archive/2026-06-token-consumption-incident.md).
 
 ---
 
@@ -349,7 +349,7 @@ use `ruflo cleanup --force` for per-project data.
 - 📖 [docs/BACKGROUND.md](docs/BACKGROUND.md) — the full root-cause investigation (Node/ABI/WASM, why self-learning looked dormant, the agentic-qe variant, the security surface)
 - 🔧 [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) — symptom → diagnosis → fix runbook
 - 🧩 [docs/CONDITIONAL-BLOCKS.md](docs/CONDITIONAL-BLOCKS.md) — how the per-tool CLAUDE.md blocks work (agentic-qe, superpowers), why superpowers needs "house rules," and how to add support for a new tool
-- 🧱 [docs/superpowers/](docs/superpowers/) — the design spec and implementation plan behind the self-learning work
+- 🧱 [docs/archive/](docs/archive/) (superpowers plans/specs, dated 2026-05) — the design spec and implementation plan behind the self-learning work
 
 ---
 

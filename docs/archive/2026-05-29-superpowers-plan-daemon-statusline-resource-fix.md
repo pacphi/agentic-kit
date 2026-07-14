@@ -8,7 +8,7 @@
 
 **Tech Stack:** POSIX-ish bash + zsh (functions are sourced into the user's interactive shell), `ps axww -o pid=,args=`, `sqlite3`, Node (injected `statusline.cjs`), `python3` (JSON edits). Verification: `bash -n`, `shellcheck` (if installed), `node --check`, behavioral greps, and a live orphan-daemon round-trip.
 
-**Spec:** `docs/superpowers/specs/2026-05-29-daemon-statusline-resource-fix-design.md`
+**Spec:** `2026-05-29-superpowers-spec-daemon-statusline-resource-fix.md`
 
 **Conventions:**
 - No `Co-Authored-By` trailer (project `.claude/settings.json` has no `attribution.commit`).
