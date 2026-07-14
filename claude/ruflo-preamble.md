@@ -1,6 +1,6 @@
 <!-- BEGIN ruflo-preamble -->
 <!-- ruflo-preamble-version: 1.1.0 | last-updated: 2026-07-14 -->
-<!-- Refresh this block with: ruflo-reference-refresh --sync-blocks -->
+<!-- Refresh this block with: ruflo-kit x reference sync -->
 
 # Machine-wide Claude Code Reference
 

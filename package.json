@@ -1,0 +1,34 @@
+{
+  "name": "ruflo-machine-kit",
+  "version": "4.0.0-alpha.0",
+  "description": "Machine-level setup, healing, and verification kit for ruflo (claude-flow) + agentic-qe — cross-platform npm successor to the shell kit",
+  "type": "module",
+  "bin": {
+    "ruflo-kit": "bin/ruflo-kit.mjs"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "files": [
+    "bin/ruflo-kit.mjs",
+    "src/",
+    "claude/",
+    "docs/TROUBLESHOOTING.md"
+  ],
+  "scripts": {
+    "test": "node --test \"tests/kit/*.test.mjs\" && node tests/statusline-segments.test.cjs"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/pacphi/ruflo-machine-ref.git"
+  },
+  "license": "MIT",
+  "keywords": [
+    "ruflo",
+    "claude-flow",
+    "agentic-qe",
+    "claude-code",
+    "setup",
+    "cross-platform"
+  ]
+}
