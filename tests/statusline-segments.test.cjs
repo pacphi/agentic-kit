@@ -17,18 +17,18 @@ const os = require('os');
 const path = require('path');
 
 const ROOT = path.resolve(__dirname, '..');
-const SRC = path.join(ROOT, 'shell', 'ruflo-functions.sh');
+const SRC = path.join(ROOT, 'src', 'templates', 'statusline-footer.cjs');
 
-// ── Extract the renderer source from the shell heredoc ──────────────────────
+// ── Load the renderer source from the kit template ───────────────────────────
 const sh = fs.readFileSync(SRC, 'utf8');
 const m = sh.match(/\/\* ruflo-seg:BEGIN \*\/([\s\S]*?)\/\* ruflo-seg:END \*\//);
 if (!m) { console.error('FATAL: could not find ruflo-seg block in ' + SRC); process.exit(2); }
 const block = m[1];
 
 // Load the function into this process. The block defines `function rufloActivationSegments(cwd){…}`.
-// SECURITY: eval() here runs FIRST-PARTY source — the exact bytes of shell/ruflo-functions.sh
-// from this repo (read above), not external/user input. This is the only faithful way to test
-// the embedded renderer without duplicating it. The eval doubles as a syntax check on the block.
+// SECURITY: eval() here runs FIRST-PARTY source — the exact bytes of the kit's own template
+// (read above), not external/user input. This is the only faithful way to test
+// the injected renderer without duplicating it. The eval doubles as a syntax check on the block.
 let rufloActivationSegments;
 try {
   // eslint-disable-next-line no-eval

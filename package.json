@@ -1,0 +1,36 @@
+{
+  "name": "@pacphi/agentic-kit",
+  "version": "4.0.0-alpha.0",
+  "description": "Machine-level setup, healing, and verification kit for your AI agent stack (ruflo/claude-flow, agentic-qe, Claude Code glue) — cross-platform, zero-dependency",
+  "type": "module",
+  "bin": {
+    "agentic-kit": "bin/agentic-kit.mjs",
+    "ak": "bin/agentic-kit.mjs"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "files": [
+    "bin/agentic-kit.mjs",
+    "src/",
+    "claude/",
+    "docs/TROUBLESHOOTING.md"
+  ],
+  "scripts": {
+    "test": "node --test \"tests/kit/*.test.mjs\" && node tests/statusline-segments.test.cjs"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/pacphi/agentic-kit.git"
+  },
+  "license": "MIT",
+  "keywords": [
+    "ruflo",
+    "claude-flow",
+    "agentic-qe",
+    "claude-code",
+    "setup",
+    "cross-platform"
+  ],
+  "packageManager": "pnpm@11.13.0"
+}

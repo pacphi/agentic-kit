@@ -1,0 +1,52 @@
+name: nightly-live
+
+# Installs the REAL latest ruflo + agentic-qe and runs the kit's checks against
+# them — catches upstream drift the day it ships (e.g. the 3.28 aidefence drop,
+# ruvnet/ruflo#2670). Scheduled + manual only; failures here mean "upstream
+# changed", not "this repo broke".
+on:
+  schedule:
+    - cron: '17 6 * * *'
+  workflow_dispatch:
+
+jobs:
+  live:
+    name: live (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+
+      # Deliberately npm, not pnpm: this simulates the kit's TARGET environment —
+      # ruflo/agentic-qe installed via `npm i -g`, whose trees the kit heals with
+      # npm (lib/heal.mjs). pnpm-managed globals are a separate follow-up.
+      - name: Install latest ruflo + agentic-qe (native build scripts allowed)
+        run: npm install -g --allow-scripts=ruflo,agentic-qe,@claude-flow/cli,better-sqlite3,hnswlib-node,agentdb,agentic-flow,argon2,onnxruntime-node,sharp,protobufjs,@google/genai,tldjs,vibium ruflo@latest agentic-qe@latest
+
+      - name: Kit heals a fresh install (sync --no-upgrade)
+        env:
+          HOME: ${{ runner.temp }}/kit-home
+        run: |
+          mkdir -p "$HOME"
+          node bin/agentic-kit.mjs sync --no-upgrade || true
+          node bin/agentic-kit.mjs status --json > status.json || true
+          node -e "
+            const s = require('./status.json');
+            console.log(JSON.stringify(s, null, 2));
+            // Upstream-drift gate: natives + security must be healable to ok.
+            const bad = s.rows.filter(r => r.level === 'fail' && ['natives','security'].includes(r.subsystem));
+            if (bad.length) { console.error('UPSTREAM DRIFT:', bad.map(b => b.message).join(' | ')); process.exit(1); }
+          "
+
+      - name: Deep proofs against the live packages
+        env:
+          HOME: ${{ runner.temp }}/kit-home
+        run: |
+          node bin/agentic-kit.mjs x verify security
+          node bin/agentic-kit.mjs x verify learning

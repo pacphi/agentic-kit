@@ -14,12 +14,12 @@ security). It exposes the same functionality via two surfaces:
 - **CLI** — `ruflo <subcommand>` via Bash. Zero context cost; right for one-off calls
   and scripting.
 - **MCP** — `mcp__claude-flow__*` tools, registered once at USER scope under the
-  `claude-flow` key (`ruflo-setup-machine`). Claude Code defers MCP tool schemas and
+  `claude-flow` key (`ak x mcp pick`). Claude Code defers MCP tool schemas and
   loads them on demand, so registration no longer costs the historical ~84k tokens of
   always-loaded tool definitions per session. ruflo 3.28 exposes ~276 tools across ~35
   families with no server-side gating; the kit's family picker turns exclusions into
   `permissions.deny` rules. Prefer MCP for tight, repeated, schema-typed integration;
-  `ruflo-remove-mcp` opts back out entirely.
+  `ak x mcp off` opts back out entirely.
 
 ### When NOT to use ruflo
 
@@ -82,8 +82,7 @@ doubt — see diagnostic table below.
    ```bash
    sqlite3 .swarm/memory.db "PRAGMA wal_checkpoint(TRUNCATE);"
    ```
-   `ruflo-memory-checkpoint` is the shell alias. `ruflo-setup-project` runs
-   this automatically post-init.
+   `ak sync` checkpoints this automatically; `ak setup` also runs it post-init.
 
 3. **`${CLAUDE_PROJECT_DIR}` is NOT expanded by Claude Code in settings env
    values** (at least in v2.1.x). The literal string passes through to the
@@ -94,7 +93,7 @@ doubt — see diagnostic table below.
    ```json
    "env": {"CLAUDE_FLOW_DB_PATH": "/Users/you/project/.swarm/memory.db"}
    ```
-   NOT `"${CLAUDE_PROJECT_DIR}/.swarm/memory.db"`. `ruflo-setup-project`
+   NOT `"${CLAUDE_PROJECT_DIR}/.swarm/memory.db"`. `ak setup`
    writes the resolved path automatically and heals stale broken values
    when re-run.
 
@@ -113,7 +112,7 @@ doubt — see diagnostic table below.
 > Node 20–26 prebuilts) across the agentdb copies, with a CI guard. So on ruflo ≥3.10.6
 > the WASM fallback **no longer happens by default**, even on Node 24/26, and the override
 > lives in ruflo's own `package.json` — an `npm i -g ruflo` upgrade keeps it, it does not
-> wipe it. `ruflo-patch-native` is now a **safety net**, not a requirement.
+> wipe it. the kit's natives heal (part of `ak sync`) is now a **safety net**, not a requirement.
 
 Background (why the bug existed, and the two cases where patching still matters):
 
@@ -128,18 +127,18 @@ install time, so the declared pin no longer decides the backend.
 | 24 | 137 | **native (v12 prebuilt)** | ❌ WASM (buggy) |
 | 26 | 147 | **native (v12 prebuilt)** | ❌ WASM (buggy) |
 
-**When `ruflo-patch-native` still earns its keep:**
+**When the kit's natives heal still earns its keep:**
 - **npm ≥ 11.17** — npm's new `allow-scripts` blocks `better-sqlite3`'s build/`prebuild-install`
   during a global upgrade, so the native `.node` is skipped (the override resolves v12 but the
-  prebuilt is never fetched) → WASM. **Always run `ruflo-resync` after a global upgrade on npm
-  ≥ 11.17**; its `ruflo-patch-native` step installs the binary even under `allow-scripts`.
+  prebuilt is never fetched) → WASM. **Always run `ak sync` after a global upgrade on npm
+  ≥ 11.17**; its natives-heal step installs the binary even under `allow-scripts`.
 - **ruflo < 3.10.6** on Node ≥24 — no override yet, so the agentdb copies fall to WASM;
   patch (or upgrade ruflo) to fix.
 - **agentic-qe** — a *separate* package with its own native-SQLite init that the override
-  doesn't cover; `ruflo-setup-aqe` repairs it.
+  doesn't cover; `ak setup` repairs it.
 - As an idempotent re-assert if anything ever resolves a stale v11 binary.
 
-To check current state without changing anything: `ruflo-patch-native --check` (it reports
+To check current state without changing anything: `ak status` (it reports
 `already native` when the override has done its job). Alternative to all of this: run ruflo
 on **Node 22 LTS** (e.g. `mise install node@22`), where native resolves cleanly regardless.
 
@@ -300,16 +299,16 @@ better-sqlite3 binary is in place — the same root cause as the memory bug, and
 wiped by every `npm install -g ruflo` upgrade.
 
 ```bash
-ruflo-enable-learning            # patch native bsq3 + assert real capability (5 probes)
-ruflo-enable-learning --check    # report activation only, change nothing
-ruflo-learning-verify            # prove the loop: train in a temp dir, patterns 0 -> N
+ak sync            # patch native bsq3 + assert real capability (5 probes)
+ak sync --check    # report activation only, change nothing
+ak x verify learning            # prove the loop: train in a temp dir, patterns 0 -> N
 ```
 
 Note: `ruflo neural status` may still print HNSW/Training as "Not loaded" — that is a
 **lazy per-process display** (`getHNSWStatus`), not real dormancy. Trust
-`ruflo-enable-learning`'s capability probes (`@ruvector/core`→`VectorDb`, `sona`,
-`gnn`, agentdb v3) and `ruflo-learning-verify`'s on-disk pattern count instead. Re-run
-`ruflo-enable-learning` after every ruflo upgrade.
+`ak sync`'s capability probes (`@ruvector/core`→`VectorDb`, `sona`,
+`gnn`, agentdb v3) and `ak x verify learning`'s on-disk pattern count instead. Re-run
+`ak sync` after every ruflo upgrade.
 
 ### Agentic-QE (opt-in quality-engineering fleet)
 
@@ -319,31 +318,31 @@ for the same native-SQLite reason. The machine-ref helper repairs that and handl
 half-init:
 
 ```bash
-ruflo-setup-aqe                  # native-bsq3 repair + aqe init --auto + half-init repair
-ruflo-setup-aqe --force          # force reinitialize (aqe init --auto --upgrade)
+ak setup                  # native-bsq3 repair + aqe init --auto + half-init repair
+ak setup          # force reinitialize (aqe init --auto --upgrade)
 ```
 
-Opt-in only — `ruflo-setup-project` does NOT run it.
+Opt-in only — `ak setup` does NOT run it.
 
 When agentic-qe **is** installed, the kit also merges a conditional **`ruflo-aqe-reference`**
 block (AQE operating guidance — policies + MCP tool usage + QE-agent patterns) into this same
 `~/.claude/CLAUDE.md`, just below this `ruflo-reference` block. It is added when `aqe` is on
 PATH and **stripped automatically when agentic-qe is absent**. Source: `claude/aqe-reference.md`;
-applied by `install.sh` and re-asserted by `ruflo-reference-refresh` / `ruflo-resync`.
+applied by `install.sh` and re-asserted by `ak x reference sync` / `ak sync`.
 
 ### Security surface (verify + activate)
 
 ```bash
-ruflo-security-verify            # verify @claude-flow/security + @claude-flow/aidefence
+ak x verify security            # verify @claude-flow/security + @claude-flow/aidefence
                                  # load, defend detects injection, scan/secrets run
-ruflo-setup-project --with-security   # run the security pass during project setup
+ak setup   # run the security pass during project setup
 ```
 
 `ruflo security cve --list` has no CVE database configured — use `npm audit` for
 dependency CVEs. **Known upstream defect on 3.28.0** (ruvnet/ruflo#2670): the tree
 no longer ships `@claude-flow/aidefence` but `security defend` still imports it, so
 on a bare install defend prints only its banner with no verdict and an untrustworthy
-exit code. **`ruflo-resync` heals this** (reinstalls the package `--no-save`),
+exit code. **`ak sync` heals this** (reinstalls the package `--no-save`),
 restoring exit 1=threat / 0=clean — with only the old cosmetic render crash after
 the verdict. Re-run resync after every `npm i -g ruflo`.
 
@@ -366,7 +365,7 @@ Each field renders only when active: SONA `patterns`/`traj` from
 `.claude-flow/neural/stats.json` (the `[bar]` is a ~10-patterns/dot volume gauge;
 both counts persist across restarts since ruflo #2245), `⚡ HNSW` only when
 `.swarm/hnsw.index` exists, `🛡` when `@claude-flow/aidefence` (the engine behind
-`security defend`) is resolvable — absent on a bare 3.28 install until `ruflo-resync`
+`security defend`) is resolvable — absent on a bare 3.28 install until `ak sync`
 reinstalls it (ruvnet/ruflo#2670), `⚙` counting running daemons machine-wide
 (yellow ≥4 — one per active project is normal), and the
 `🎓 Agentic QE` line (a few guarded `sqlite3` reads of `.agentic-qe/memory.db`;
@@ -385,8 +384,8 @@ There is **no `Δ LoRA` field** — the adaptation seam (`@ruvector/ruvllm`
 omitting it avoids a fabricated signal.
 
 ```bash
-ruflo-neural-train               # = ruflo neural train (thin passthrough)
-ruflo-neural-train -p security -e 100   # any `ruflo neural train` args pass through
+ruflo neural train               # train directly; the statusline Δ‖W‖ tracker
+ruflo neural train -p security -e 100   # auto-refreshes on the next render
 ```
 
 ### Re-apply after a ruflo / agentic-qe upgrade — one command
@@ -396,8 +395,8 @@ native better-sqlite3 binaries, and regenerates the statusline — so self-learn
 dormant and the footer disappears. Heal it in one step from a project root:
 
 ```bash
-ruflo-resync            # enable-learning + agentic-qe native repair + statusline
-ruflo-resync --aqe      # also refresh agentic-qe skills (aqe init --auto --upgrade)
+ak sync            # enable-learning + agentic-qe native repair + statusline
+ak sync      # also refresh agentic-qe skills (aqe init --auto --upgrade)
 ```
 
 ### Autopilot (persistent task completion)
@@ -462,14 +461,14 @@ ruflo daemon install-supervisor                  # launchd/systemd auto-start
 ```
 
 The daemon is what makes self-learning continuous. Without it, hooks fire but no
-pattern training happens in the background. `ruflo-setup-project` starts one per
+pattern training happens in the background. `ak setup` starts one per
 project by default — safe because its workers run the local ($0) path. Headless
 **AI workers** (they spawn `claude --print` and spend tokens) are opt-in:
 `RUFLO_DAEMON_AI_WORKERS=1` (or `daemon start --headless`), governed by the
 machine-wide budget above (defaults: 1 concurrent, 2/hour, 12/day; override with
 `RUFLO_AI_MAX_CONCURRENT` / `RUFLO_AI_MAX_PER_HOUR` / `RUFLO_AI_MAX_PER_DAY`).
 The daemon self-terminates after `RUFLO_DAEMON_TTL_SECS` (default 12h); the kit's
-`ruflo-daemon-gc` and shell auto-reaper remain as an independent backstop.
+`ak x daemon-gc` and shell auto-reaper remain as an independent backstop.
 
 ### Cleanup
 
@@ -488,7 +487,7 @@ For uninstalling ruflo from a project.
 | Don't | Do |
 |---|---|
 | `npx @claude-flow/cli@latest ...` | `ruflo ...` (CLI binary, no npm fetch) |
-| `claude mcp add ruflo ...` (project/local scope, `ruflo` key) | `ruflo-setup-machine` → registers `claude-flow` at **user** scope (the key upstream tooling expects, #2206; one registration for all projects) |
+| `claude mcp add ruflo ...` (project/local scope, `ruflo` key) | `ak x mcp pick` → registers `claude-flow` at **user** scope (the key upstream tooling expects, #2206; one registration for all projects) |
 | Commit `.mcp.json` with a ruflo entry | User-scope registration; project `.mcp.json` only for project-specific MCP servers (upstream init dedup then skips writing one) |
 | Adding `ruv-swarm` / `flow-nexus` to MCP | Unused subset / cloud SaaS — cruft in a committed `.mcp.json` |
 | `mcp__claude-flow__memory_store(...)` for a one-off | `Bash("ruflo memory store -k K --value V")` |
@@ -518,10 +517,10 @@ Need to ... ?
 ├─ Find natural refactor boundaries  → ruflo analyze boundaries src/
 ├─ Coordinate 3+ agents              → native Agent tool first; ruflo swarm only if topology/consensus needed
 ├─ Scan untrusted text               → ruflo security defend -i "..."
-├─ Activate + verify self-learning   → ruflo-enable-learning && ruflo-learning-verify
-├─ Re-apply after a ruflo/aqe upgrade → ruflo-resync   (one command heals everything)
-├─ Verify the security surface       → ruflo-security-verify
-├─ Set up agentic-qe in a repo       → ruflo-setup-aqe   (opt-in)
+├─ Activate + verify self-learning   → ak sync && ak x verify learning
+├─ Re-apply after a ruflo/aqe upgrade → ak sync   (one command heals everything)
+├─ Verify the security surface       → ak x verify security
+├─ Set up agentic-qe in a repo       → ak setup   (opt-in)
 └─ Background analysis (long task)   → ruflo hooks worker dispatch -t <type>
 ```
 

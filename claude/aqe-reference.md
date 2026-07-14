@@ -1,7 +1,7 @@
 <!-- BEGIN ruflo-aqe-reference -->
 <!-- ruflo-aqe-reference: merged into ~/.claude/CLAUDE.md ONLY when agentic-qe is installed.
-     Managed by install.sh / ruflo-reference-refresh — stripped automatically when `aqe` is
-     absent. Source of truth: claude/aqe-reference.md in the ruflo-machine-ref kit. -->
+     Managed by install.sh / ak x reference sync — stripped automatically when `aqe` is
+     absent. Source of truth: claude/aqe-reference.md in the agentic-kit kit. -->
 
 ## Agentic-QE — operating guidance
 

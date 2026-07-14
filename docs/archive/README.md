@@ -26,3 +26,12 @@ exist. Do not update them; the living docs are `../BACKGROUND.md`,
 then the topic. Internal links between archived files were rewritten to same-directory
 targets when the tree was flattened (2026-07-14); quoted transcripts inside the
 incident reports intentionally keep their original, now-dangling paths.
+
+## Added 2026-07-14 — the shell-kit era ends (v4 npm cutover)
+
+| File | Original location | What it was | Why it's historical |
+|---|---|---|---|
+| [2026-07-14-shell-kit-readme.md](2026-07-14-shell-kit-readme.md) | `README.md` | The shell-kit README (install.sh profiles, 16 shell commands, the full "what's actually wrong" story). | Replaced by the v4 npm kit (`agentic-kit` — 4 verbs) and a rewritten README. |
+| [2026-07-14-shell-kit-background.md](2026-07-14-shell-kit-background.md) | `docs/BACKGROUND.md` | Root-cause investigation behind every guard: Node-ABI/WASM memory loss, dormant self-learning, aqe's variant, the security surface, the Δ‖W‖ tracker design. | The guards live on inside `agentic-kit` (`src/lib/`); the investigation is finished history. Still the best deep-dive on *why*. |
+| [2026-07-14-shell-kit-troubleshooting.md](2026-07-14-shell-kit-troubleshooting.md) | `docs/TROUBLESHOOTING.md` | Symptom→fix runbook keyed to the shell commands (`ruflo-resync`, `ruflo-patch-native`, …). | Superseded by the much shorter npm-command runbook at `../TROUBLESHOOTING.md` (`status` to look, `sync` to fix). |
+| [2026-07-14-shell-kit-conditional-blocks.md](2026-07-14-shell-kit-conditional-blocks.md) | `docs/CONDITIONAL-BLOCKS.md` | Design doc for the sentinel-block registry in shell (`_ruflo_cond_blocks`). | The mechanism ported to `src/lib/blocks.mjs` with a user-extensible registry (custom rows + declarative detectors in `kit.json`); sentinel format unchanged. |

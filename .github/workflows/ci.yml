@@ -1,0 +1,47 @@
+name: ci
+
+on:
+  push:
+    branches: [main, npm-kit]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    name: test (${{ matrix.os }}, node ${{ matrix.node }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        node: [22, 24, 26]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6   # version comes from package.json packageManager
+      - uses: actions/setup-node@v6
+        with:
+          node-version: ${{ matrix.node }}
+
+      # Zero runtime dependencies — no install step by design.
+      - name: Unit + statusline tests
+        run: pnpm test
+
+      - name: CLI smoke (sandboxed HOME)
+        shell: bash
+        env:
+          # Isolate every home-relative write (kit.json, CLAUDE.md, settings).
+          HOME: ${{ runner.temp }}/kit-home
+          USERPROFILE: ${{ runner.temp }}\kit-home
+          APPDATA: ${{ runner.temp }}\kit-home\AppData\Roaming
+        run: |
+          mkdir -p "$HOME"
+          node bin/agentic-kit.mjs --version
+          node bin/agentic-kit.mjs --help --all > /dev/null
+          # status must emit valid JSON and exit deterministically even on a
+          # machine with no ruflo installed (rows degrade to warn/fail).
+          node bin/agentic-kit.mjs status --json > status.json || true
+          node -e "const s=require('./status.json'); if(!Array.isArray(s.rows)||!s.overall) throw new Error('bad status JSON'); console.log('status rows:', s.rows.length, 'overall:', s.overall)"
+          # managed-block engine round-trip against the sandbox HOME
+          node bin/agentic-kit.mjs x reference sync
+          node -e "const fs=require('fs'),os=require('os'),p=require('path').join(os.homedir(),'.claude','CLAUDE.md'); const t=fs.readFileSync(p,'utf8'); for (const s of ['ruflo-preamble','ruflo-reference']) if(!t.includes('<!-- BEGIN '+s+' -->')) throw new Error('missing block '+s); console.log('blocks OK')"
+          node bin/agentic-kit.mjs uninstall --dry-run

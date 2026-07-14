@@ -13,7 +13,7 @@ ALL Claude Code activity (interactive, subagents, hooks, MCP, web tools) and ans
 questions: *where is my usage going?* and *is any of it runaway automation?*
 
 This skill is **self-contained** — it bundles its own engine, so it works even if the full
-ruflo-machine-ref kit isn't installed.
+agentic-kit kit isn't installed.
 
 ## When to use
 
@@ -28,7 +28,7 @@ Claude Code activity", "I'm hitting my Max/Pro limit", "what am I spending token
    ```bash
    # self-contained (always available wherever this skill is installed):
    python3 ~/.claude/skills/ruflo-token-audit/scripts/ruflo-token-audit.py --days 7
-   # …or, if the ruflo-machine-ref kit put it on PATH:
+   # …or, if the agentic-kit kit put it on PATH:
    ruflo-token-audit --days 7
    ```
    - Honor any window the user gives ("past month" → `--days 30`).
