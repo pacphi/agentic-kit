@@ -99,9 +99,10 @@ export async function run_project({ flags, cfg }) {
   (init.code === 0 ? ok : fail)('ruflo init --full');
   if (init.code !== 0) return false;
 
-  // 2. statusline heal (footer + fallback version + legacy repoint)
-  const sl = fixStatusline(root);
-  (sl.applied ? ok : info)(`statusline: ${sl.applied ? 'footer injected' : sl.reason ?? 'in sync'}`);
+  // 2. statusline heal is DEFERRED to the end of project setup (see step 10):
+  //    fixStatusline is a no-op until ruflo/aqe have finished writing
+  //    .claude/helpers/statusline.cjs, so injecting the footer here can silently
+  //    miss (helper not settled) — running it last guarantees convergence.
 
   // 3. strip committed MCP cruft (keep any agentic-qe entry)
   const mcpJson = path.join(root, '.mcp.json');
@@ -172,6 +173,14 @@ export async function run_project({ flags, cfg }) {
     const aqe = await runCmd('aqe', ['init', '--auto'], { cwd: root, timeout: 300_000 });
     (aqe.code === 0 ? ok : warn)('agentic-qe initialized');
   }
+
+  // 10. statusline footer — LAST, after ruflo + aqe have settled the helper.
+  //     A still-missing footer is a WARN (not silent info): it means the AQE /
+  //     SONA segments won't render and `ak sync` is needed to heal it.
+  const sl = fixStatusline(root);
+  if (sl.applied) ok(`statusline: footer injected (v${sl.version})`);
+  else if (sl.reason) warn(`statusline: ${sl.reason} — run \`ak sync\` to re-inject`);
+  else ok('statusline: footer in sync');
   return true;
 }
 
