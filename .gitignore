@@ -22,9 +22,13 @@ test-*.log
 
 # Dogfooding artifacts — running ruflo init / aqe init / ruflo-onboard against THIS
 # repo writes these. They are NOT source (see CLAUDE.md "Dogfooding artifacts are not
-# source"); never commit them.
+# source"); never commit them. The authored instruction files (CLAUDE.md for claude,
+# AGENTS.md for codex) ARE tracked; only their generated dirs (.claude/, .agents/) and
+# local overrides (.codex/) are ignored.
 .agentic-qe/
 .claude/
+.agents/
+.codex/
 .mcp.json
 ruvector.db
 *.db
