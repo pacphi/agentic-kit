@@ -25,7 +25,7 @@ export const options = {
 /** Billing is the non-obvious axis of the aqe provider list. Three categories,
  *  and claude-code is the ONLY same-vendor subscription alternative to a metered
  *  key (codex/gemini OAuth live on the host axis, not as aqe provider types). */
-export const AQE_BILLING_HINT = 'billing: claude-code = your Claude subscription ($0), ollama = local ($0), all others = metered API key';
+export const AQE_BILLING_HINT = 'billing: claude-code = your Claude subscription ($0), ollama/onnx = local ($0), all others = metered API key';
 
 export const help = `ak x provider — frontier-host + LLM-provider detection and wiring
 
@@ -41,8 +41,8 @@ Subcommands:
 Options (pick, all optional — omit for interactive):
   --host claude,codex          enable these ruflo host CLIs
   --aqe-provider <type>        set aqe's primary LLM (or 'none' to unset)
-                                 billing: claude-code = Claude sub ($0), ollama =
-                                 local ($0), all others = metered API key
+                                 billing: claude-code = Claude sub ($0),
+                                 ollama/onnx = local ($0), all others = metered key
   --aqe-fallback '<chain>'     ordered aqe chain, e.g.
                                  'claude-code:claude-opus-4-8; openai:gpt-5.6'
   --provider <csv>             register ruflo API providers (e.g. openai:gpt-5.6)

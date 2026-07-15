@@ -52,12 +52,13 @@ export const API_PROVIDERS = [
   { id: 'ollama', keyEnv: [] }, // local; presence = reachable daemon (not checked here)
 ];
 
-/** Valid `AQE_LLM_PROVIDER` values (grounded: aqe billing-modes + router types).
- *  aqe force-selects any of these for its QE analysis, independent of ruflo's
- *  host. `claude-code` = Claude subscription; ollama = local; the rest metered. */
+/** Valid `AQE_LLM_PROVIDER` values (grounded: aqe ALL_PROVIDER_TYPES in
+ *  dist/shared/llm/router/types.js). aqe force-selects any of these for its QE
+ *  analysis, independent of ruflo's host. `claude-code` = Claude subscription;
+ *  `ollama`/`onnx` = local ($0); the rest metered. Keep in sync with aqe's list. */
 export const AQE_PROVIDER_TYPES = [
   'claude-code', 'claude', 'openai', 'gemini', 'openrouter',
-  'azure-openai', 'bedrock', 'cognitum', 'ollama',
+  'azure-openai', 'bedrock', 'cognitum', 'ollama', 'onnx',
 ];
 
 /** Every env key this module owns — the reversible surface for `off`/undo. */

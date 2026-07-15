@@ -91,7 +91,7 @@ you opt in. Two independent axes:
   install (mise/brew/native) is detected, reused, and never shadowed.
 - **Providers** — which LLM the routers use, independent of the host: agentic-qe's
   `AQE_LLM_PROVIDER` (`claude-code`/`claude`/`openai`/`gemini`/`openrouter`/`azure-openai`/
-  `bedrock`/`cognitum`/`ollama`) plus an ordered fallback chain, and ruflo's API providers.
+  `bedrock`/`cognitum`/`ollama`/`onnx`) plus an ordered fallback chain, and ruflo's API providers.
   API keys stay in the environment — never written to `kit.json`.
 
 `ak x provider status` shows what's detected and wired; `ak x provider pick` chooses and

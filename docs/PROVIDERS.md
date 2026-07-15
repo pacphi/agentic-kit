@@ -52,11 +52,11 @@ ak x provider pick --host claude,codex --yes     # non-interactive
 
 agentic-qe can run its analysis on any of: `claude-code` (your Claude subscription),
 `claude` / `openai` / `gemini` / `openrouter` / `azure-openai` / `bedrock` / `cognitum`
-(metered API key), or `ollama` (local).
+(metered API key), or `ollama` / `onnx` (local).
 
 **Billing is the axis that isn't obvious from the names** — three categories:
-`claude-code` runs on your Claude plan ($0 metered), `ollama` is local ($0), and
-**everything else bills a metered API key**. `claude-code` is the *only* subscription
+`claude-code` runs on your Claude plan ($0 metered), `ollama` and `onnx` are local ($0),
+and **everything else bills a metered API key**. `claude-code` is the *only* subscription
 option here: the codex and gemini CLIs also support OAuth/subscription login, but that
 lives on the **host axis** (Level 1, which CLI runs the loop) — not as an aqe provider
 *type*. So there's no `openai`-subscription or `gemini`-subscription entry; their OAuth
