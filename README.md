@@ -59,8 +59,8 @@ What the verbs cover:
 | **uninstall** | Removes the kit's footprint (and any legacy shell-kit install); project data is never touched; `--purge` also offers to remove the global packages. |
 
 Power-user mechanisms live under `ak x …` (`daemon-gc`, `mcp pick|off`,
-`reference diff|sync`, `verify learning|security|aqe`, `improvement-eval`) — see
-`ak --help --all`.
+`provider status|pick|off`, `reference diff|sync`, `verify learning|security|aqe`,
+`improvement-eval`) — see `ak --help --all`.
 
 ## The status line
 
@@ -78,6 +78,25 @@ else — including SQLite — is embedded; there are no runtime dependencies. np
 required at runtime even though this repo develops with pnpm: the kit heals the
 *npm-managed* global ruflo/agentic-qe trees (`npm root -g`, `npm i -g`), which is how
 those packages are installed on target machines. (pnpm-managed globals: tracked follow-up.)
+
+### Frontier hosts & LLM providers
+
+`ak` detects the frontier-agent CLIs on your machine and can wire ruflo + agentic-qe to
+one or both — **claude-default, codex opt-in**, so existing repos see zero change until
+you opt in. Two independent axes:
+
+- **Hosts** — which agent CLI runs the ruflo loop: `claude` (Claude Code) and/or `codex`
+  (OpenAI Codex), both at once via dual-mode. A host that is *entirely absent* is installed
+  for you (`npm i -g @anthropic-ai/claude-code` / `@openai/codex`); an externally-managed
+  install (mise/brew/native) is detected, reused, and never shadowed.
+- **Providers** — which LLM the routers use, independent of the host: agentic-qe's
+  `AQE_LLM_PROVIDER` (`claude-code`/`claude`/`openai`/`gemini`/`openrouter`/`azure-openai`/
+  `bedrock`/`cognitum`/`ollama`) plus an ordered fallback chain, and ruflo's API providers.
+  API keys stay in the environment — never written to `kit.json`.
+
+`ak x provider status` shows what's detected and wired; `ak x provider pick` chooses and
+applies (reversibly); `ak x provider off` restores the claude-only default. Full guide:
+[docs/PROVIDERS.md](docs/PROVIDERS.md).
 
 ## Troubleshooting
 
