@@ -1,0 +1,5 @@
+# URL patterns to skip in link checks (one regex per line).
+# Example placeholders / non-resolvable references go here.
+^https?://localhost
+^https?://127\.0\.0\.1
+^https?://example\.(com|org)

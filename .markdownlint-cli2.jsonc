@@ -1,0 +1,26 @@
+{
+  // Lint only OUR authored markdown. Vendored ruflo/aqe docs (.claude, .agentic-qe,
+  // .agents) and archived docs are excluded — not ours to fix.
+  "globs": [
+    "README.md",
+    "CLAUDE.md",
+    "AGENTS.md",
+    "docs/**/*.md"
+  ],
+  "ignores": [
+    "node_modules",
+    ".claude",
+    ".agentic-qe",
+    ".agents",
+    "docs/archive"
+  ],
+  "config": {
+    "default": true,
+    "MD013": false, // line length — prose/tables wrap naturally
+    "MD033": false, // inline HTML — used deliberately in docs
+    "MD041": false, // first line need not be a top-level heading
+    "MD024": { "siblings_only": true }, // allow repeated headings in different sections
+    "MD029": { "style": "ordered" },
+    "MD060": false // table pipe-alignment — cosmetic, fights hand-maintained wide tables
+  }
+}

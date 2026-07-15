@@ -8,6 +8,7 @@ import { loadKitConfig } from '../../src/lib/config.mjs';
 import {
   isDefault, managedEnv, applyHosts, undoProviders, MANAGED_ENV_KEYS,
   HOSTS, installHost, updateHost, applyAqeRouter, undoAqeRouter, aqeRouterFile,
+  CODEX_ADAPTER_PKG, codexAdapterAction, ensureCodexAdapter, AQE_PROVIDER_TYPES,
 } from '../../src/lib/providers.mjs';
 
 // A tmp dir with a .git marker → settingsTarget() writes the ISOLATED
@@ -221,4 +222,49 @@ test('isDefault is false once an aqe provider is pinned (independent of hosts)',
   const cfg = defaultCfg();
   cfg.providers.aqeProvider = 'openai';
   assert.equal(isDefault(cfg), false);
+});
+
+test('AQE_PROVIDER_TYPES mirrors aqe ALL_PROVIDER_TYPES (incl. local onnx)', () => {
+  // Guards against drift from aqe's dist/shared/llm/router/types.js. Order-
+  // independent set comparison; the point is coverage, not sequence.
+  const expected = [
+    'claude', 'claude-code', 'openai', 'ollama', 'openrouter',
+    'gemini', 'azure-openai', 'bedrock', 'cognitum', 'onnx',
+  ];
+  assert.deepEqual([...AQE_PROVIDER_TYPES].sort(), [...expected].sort());
+  assert.equal(AQE_PROVIDER_TYPES.includes('onnx'), true, 'onnx (local) is a valid aqe provider');
+});
+
+test('the codex host descriptor carries the dual-mode adapter package name', () => {
+  const codex = HOSTS.find((h) => h.id === 'codex');
+  assert.equal(codex.adapterPkg, CODEX_ADAPTER_PKG);
+  assert.equal(CODEX_ADAPTER_PKG, '@claude-flow/codex');
+});
+
+test('codexAdapterAction skips when codex host is not opted in', () => {
+  const action = codexAdapterAction({ opted: false, cliPresent: true, adapterInstalled: false });
+  assert.equal(action, 'skip-not-opted');
+});
+
+test('codexAdapterAction skips when opted in but the codex CLI is not detected', () => {
+  const action = codexAdapterAction({ opted: true, cliPresent: false, adapterInstalled: false });
+  assert.equal(action, 'skip-no-cli');
+});
+
+test('codexAdapterAction is a no-op when the adapter is already installed', () => {
+  const action = codexAdapterAction({ opted: true, cliPresent: true, adapterInstalled: true });
+  assert.equal(action, 'already-installed');
+});
+
+test('codexAdapterAction installs only when opted in, CLI present, adapter absent', () => {
+  const action = codexAdapterAction({ opted: true, cliPresent: true, adapterInstalled: false });
+  assert.equal(action, 'install');
+});
+
+test('ensureCodexAdapter is a no-op without shelling out when codex is disabled', async () => {
+  const cfg = defaultCfg(); // claude-only default → hosts.codex false
+  const res = await ensureCodexAdapter(cfg);
+  assert.equal(res.ok, true);
+  assert.equal(res.changed, false);
+  assert.match(res.detail, /codex disabled/);
 });

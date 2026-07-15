@@ -17,7 +17,28 @@
     "docs/TROUBLESHOOTING.md"
   ],
   "scripts": {
-    "test": "node --test \"tests/kit/*.test.mjs\" && node tests/statusline-segments.test.cjs"
+    "test": "node --test \"tests/kit/*.test.mjs\" && node tests/statusline-segments.test.cjs",
+    "typecheck": "tsc -p tsconfig.json",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "lint:md": "markdownlint-cli2",
+    "lint:md:fix": "markdownlint-cli2 --fix",
+    "lint:links": "lychee --config lychee.toml README.md CLAUDE.md AGENTS.md 'docs/**/*.md'",
+    "lint:links:internal": "lychee --offline --config lychee.toml README.md CLAUDE.md AGENTS.md 'docs/**/*.md'",
+    "build": "node scripts/build-check.mjs",
+    "audit": "pnpm audit --audit-level=moderate",
+    "audit:fix": "pnpm audit --fix",
+    "outdated": "pnpm outdated",
+    "upgrade": "pnpm up",
+    "check": "pnpm run typecheck && pnpm run lint && pnpm run lint:md && pnpm run build && pnpm test"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@types/node": "^26.1.1",
+    "eslint": "^10.7.0",
+    "globals": "^17.7.0",
+    "markdownlint-cli2": "^0.23.0",
+    "typescript": "^7.0.2"
   },
   "repository": {
     "type": "git",
