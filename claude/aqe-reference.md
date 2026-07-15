@@ -40,11 +40,17 @@ called first**, e.g. `fleet_init({ topology:"hierarchical", maxAgents:15, memory
   `statusLine`, and user `AQE_*` env overrides survive re-init; a one-time
   `.claude/settings.json.backup` is written first. Keep aqe ≥3.12.1 — 3.11.x init
   stripped foreign hooks.
-- **Run QE on a Claude subscription instead of an API key** (≥3.12.2, runtime env — init
-  never writes these): `AQE_LLM_PROVIDER=claude-code` routes analysis through `claude -p`;
-  `AQE_MAX_BUDGET_USD` (or `--max-budget-usd`) enforces a fleet-wide spend cap that aborts
-  over-budget requests before spending. `aqe health` shows an "LLM Billing" section saying
-  who pays for each call.
+- **Choose which LLM runs QE** (≥3.12.2, runtime env; ADR-123): `AQE_LLM_PROVIDER=<type>`
+  force-selects the provider for analysis — `claude-code` (your Claude subscription, via
+  `claude -p`), `claude`/`openai`/`gemini`/`openrouter`/`azure-openai`/`bedrock`/`cognitum`
+  (metered API key), or `ollama` (local). It normalizes `anthropic`→`claude` and ignores
+  unknown values. `AQE_MAX_BUDGET_USD` (or `--max-budget-usd`) caps metered spend; `aqe health`
+  shows an "LLM Billing" section saying who pays. `aqe init` never writes these — but
+  **`ak x provider pick` now manages `AQE_LLM_PROVIDER` for you** (into
+  `.claude/settings.local.json` `env`, reversibly), and can write an ordered **fallback chain**
+  into `.agentic-qe/llm-config.json` from `kit.json` (`--aqe-fallback 'claude-code:claude-opus-4-8; openai:gpt-5.6'`) —
+  keys stay in the env, never the file. aqe is NOT limited to claude-code: codex the *CLI* isn't a
+  provider type, but its OpenAI models are reachable via `AQE_LLM_PROVIDER=openai`.
 
 ### QE agents via the native Task tool
 QE agents live under `.claude/agents/v3/` once `aqe init` has run in the repo:

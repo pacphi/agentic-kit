@@ -41,6 +41,14 @@ export const BUILTIN_BLOCKS = [
     // shell impl: find ~/.claude/plugins/cache -maxdepth 4 -type d -name superpowers
     detector: { type: 'glob-dir', target: 'superpowers', root: 'plugins/cache', maxDepth: 4 },
   },
+  {
+    // Only surfaces once the codex CLI is on PATH — mirrors the aqe block gated on
+    // `command: aqe`. Documents the claude/codex host axis + `ak x provider`.
+    slug: 'ruflo-providers-reference',
+    template: 'providers-reference.md',
+    position: 'append',
+    detector: { type: 'command', target: 'codex' },
+  },
 ];
 
 /** Evaluate a declarative detector. Returns boolean. */
