@@ -1,0 +1,29 @@
+# Link checker config (internal + external). Scope is set by the invoking glob
+# in CI/scripts (our authored docs), and vendored trees are excluded below so we
+# never validate ruflo/aqe's links.
+#
+# On PRs we check INTERNAL/relative links only (fast, deterministic); external
+# links run in nightly (network + rate-limits make them flaky per-PR).
+
+# Treat these as success (GitHub/CI sometimes rate-limits or 403s bots).
+accept = [200, 206, 429]
+
+max_retries = 2
+retry_wait_time = 2
+timeout = 20
+max_concurrency = 8
+
+# Don't descend into vendored or archived trees.
+exclude_path = [
+  "node_modules",
+  ".claude",
+  ".agentic-qe",
+  ".agents",
+  "docs/archive",
+]
+
+# Hosts that reliably 403/rate-limit automated requests — noise, not broken links.
+exclude = [
+  "^https://img\\.shields\\.io",
+  "^https://www\\.npmjs\\.com",  # npm package pages 403 bots/CI
+]

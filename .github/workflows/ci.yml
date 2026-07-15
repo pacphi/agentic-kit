@@ -45,3 +45,43 @@ jobs:
           node bin/agentic-kit.mjs x reference sync
           node -e "const fs=require('fs'),os=require('os'),p=require('path').join(os.homedir(),'.claude','CLAUDE.md'); const t=fs.readFileSync(p,'utf8'); for (const s of ['ruflo-preamble','ruflo-reference']) if(!t.includes('<!-- BEGIN '+s+' -->')) throw new Error('missing block '+s); console.log('blocks OK')"
           node bin/agentic-kit.mjs uninstall --dry-run
+
+  # Static quality gates. Platform-independent → single OS. This is the only job
+  # that installs devDependencies (the published package stays zero-runtime-dep).
+  quality:
+    name: quality (typecheck, lint, build, audit)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install devDependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck (tsc --checkJs)
+        run: pnpm run typecheck
+      - name: Lint (eslint)
+        run: pnpm run lint
+      - name: Markdown lint
+        run: pnpm run lint:md
+      - name: Build (packaging + load validation)
+        run: pnpm run build
+      - name: Dependency audit
+        run: pnpm run audit
+
+  # Internal/relative links only (fast, deterministic). External links run in
+  # nightly — network + rate-limits make them flaky per-PR.
+  links:
+    name: links (internal)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Check internal links (offline)
+        uses: lycheeverse/lychee-action@v2
+        with:
+          args: "--offline --config lychee.toml README.md CLAUDE.md 'docs/**/*.md'"
+          fail: true

@@ -70,6 +70,7 @@ async function main() {
     return 0;
   }
 
+  /** @type {Record<string, () => Promise<any>>} */
   let table = PORCELAIN;
   if (cmd === 'x') {
     table = PLUMBING;

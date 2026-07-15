@@ -91,7 +91,8 @@ export const KIT_PKG = '@pacphi/agentic-kit';
 /** Drift for the kit itself. Installed = the running copy's package.json
  *  (pkgRoot). Prerelease installs also consult the `next` dist-tag —
  *  prereleases publish there, so `latest` alone would never see them; the
- *  higher of latest/next wins. Cached in kit.json alongside versionCheck. */
+ *  higher of latest/next wins. Cached in kit.json alongside versionCheck.
+ *  @param {{ pkgRoot?: string, force?: boolean }} [opts] */
 export async function selfDrift({ pkgRoot, force = false } = {}) {
   let installed = null;
   try {

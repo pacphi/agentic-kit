@@ -20,7 +20,7 @@ Install `ak`, run `ak setup`. Claude Code is the host, agentic-qe uses its own d
 nothing about providers is written anywhere. This is the whole feature for most people:
 **it already works, and `kit.json` stays at its defaults.**
 
-```
+```bash
 ak setup      # claude just works; codex/other providers are opt-in
 ak status     # shows a "hosts" + "providers" row so you can see what's true
 ```
@@ -28,23 +28,24 @@ ak status     # shows a "hosts" + "providers" row so you can see what's true
 If you happen to have `codex` installed, `ak` notices and *offers* — it never flips it on
 for you:
 
-```
+```text
 ℹ codex CLI detected — run `ak x provider pick` to let ruflo use both claude and codex
 ```
 
 ## Level 1 — turn on codex (one command)
 
-```
+```bash
 ak x provider pick
 ```
 
 An interactive picker (or flags for scripts). Enable `codex` and `ak`:
+
 - installs it if it's missing (`npm i -g @openai/codex`) — but leaves an existing
   mise/brew/native install alone,
 - runs `ruflo init --dual` (ruflo's "Claude Code + Codex hybrid" mode),
 - writes `ENABLE_CLAUDE_CODE` / `ENABLE_CODEX` into `.claude/settings.local.json`.
 
-```
+```bash
 ak x provider pick --host claude,codex --yes     # non-interactive
 ```
 
@@ -62,7 +63,7 @@ lives on the **host axis** (Level 1, which CLI runs the loop) — not as an aqe 
 *type*. So there's no `openai`-subscription or `gemini`-subscription entry; their OAuth
 paths are reached by enabling those *hosts*, while the provider list is API-metered.
 
-```
+```bash
 ak x provider pick --aqe-provider claude-code    # run QE on your subscription, no API bill
 ```
 
@@ -74,7 +75,7 @@ router will **auto-enable** OpenAI as a fallback on its own — you don't have t
 When you want explicit ordering rather than env auto-enable, `ak` manages agentic-qe's
 `.agentic-qe/llm-config.json` from `kit.json`:
 
-```
+```bash
 ak x provider pick \
   --aqe-provider claude-code \
   --aqe-fallback 'claude-code:claude-opus-4-8; openai:gpt-5.6; gemini:gemini-3.5-flash'
@@ -109,7 +110,7 @@ If you hand-edit `.agentic-qe/llm-config.json` yourself and *don't* use `ak`'s
 
 ## Undo, always
 
-```
+```bash
 ak x provider off     # reset to the claude-only default, reversibly
 ```
 

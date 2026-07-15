@@ -50,3 +50,16 @@ jobs:
         run: |
           node bin/agentic-kit.mjs x verify security
           node bin/agentic-kit.mjs x verify learning
+
+  links-external:
+    name: links (external)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      # External link validation runs here, not on PRs: network + rate-limits
+      # (npm/GitHub 403 bots) make it flaky per-PR. Config + excludes: lychee.toml.
+      - name: Check all links (internal + external)
+        uses: lycheeverse/lychee-action@v2
+        with:
+          args: "--config lychee.toml README.md CLAUDE.md 'docs/**/*.md'"
+          fail: true

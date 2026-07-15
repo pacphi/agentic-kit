@@ -208,7 +208,7 @@ export async function run_project({ flags, cfg }) {
 
   // 9. agentic-qe in this repo (sentinel first so aqe init skips duplicate guidance)
   if (cfg.aqe && !flags['no-aqe'] && await have('aqe')) {
-    let md = fs.existsSync(projectMd) ? fs.readFileSync(projectMd, 'utf8') : '';
+    const md = fs.existsSync(projectMd) ? fs.readFileSync(projectMd, 'utf8') : '';
     if (!md.includes('## Agentic QE v3')) {
       fs.appendFileSync(projectMd, '\n## Agentic QE v3\n<!-- managed by agentic-kit — aqe init skips regeneration when this sentinel is present -->\n');
     }

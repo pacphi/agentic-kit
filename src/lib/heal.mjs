@@ -43,10 +43,10 @@ const failTail = (r) =>
  *  3. run the package's own install script directly — explicit `npm run`
  *     is user-invoked and never gated by allow-scripts. */
 export async function ensureNativeBsq3(dir) {
-  let r = await npmInstallInto(dir, 'better-sqlite3@^12');
+  await npmInstallInto(dir, 'better-sqlite3@^12');
   if (bsq3IsNative(dir)) return { ok: true, how: 'native installed' };
   await run('npm', ['approve-scripts', 'better-sqlite3'], { cwd: dir, timeout: 60_000 });
-  r = await run('npm', ['rebuild', 'better-sqlite3'], { cwd: dir, timeout: 300_000 });
+  let r = await run('npm', ['rebuild', 'better-sqlite3'], { cwd: dir, timeout: 300_000 });
   if (bsq3IsNative(dir)) return { ok: true, how: 'native rebuilt (scripts approved)' };
   const pkgRoot = bsq3Root(dir);
   if (pkgRoot) {

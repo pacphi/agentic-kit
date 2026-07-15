@@ -15,7 +15,7 @@ fix; `sync` applies them in the right order and re-checks afterward.
 ## Common situations
 
 | Symptom | What's happening | Fix |
-|---|---|---|
+| --- | --- | --- |
 | Just upgraded ruflo/agentic-qe (`npm i -g …`) and things feel off | Upgrades re-resolve dependencies: native SQLite bindings and the aidefence package get dropped, the statusline is regenerated without the footer | `ak sync` (this is its main job) |
 | `status` shows `natives … WASM fallback` | agentdb resolved a non-native better-sqlite3 — on this path **memory writes can silently vanish**. Root cause is npm ≥11.17 blocking install scripts during upgrades | `ak sync` installs the native binding |
 | `status` shows `aidefence missing` | ruflo ≥3.28 stopped shipping `@claude-flow/aidefence` but `ruflo security defend` still imports it — injection defense is silently non-functional ([ruvnet/ruflo#2670](https://github.com/ruvnet/ruflo/issues/2670)) | `ak sync` reinstalls it; `ak x verify security` proves defend works (exit 1=threat / 0=clean) |

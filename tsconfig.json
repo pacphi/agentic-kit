@@ -1,0 +1,18 @@
+{
+  "// note": "Type-CHECK only (noEmit). This is a plain-ESM JS package — no transpile. checkJs + @types/node catches real bugs via inference without requiring the source to be TypeScript. Kept non-strict on purpose: the value is catching genuine mistakes (wrong property, bad arg count), not annotating every value.",
+  "compilerOptions": {
+    "allowJs": true,
+    "checkJs": true,
+    "noEmit": true,
+    "module": "esnext",
+    "target": "es2022",
+    "moduleResolution": "bundler",
+    "skipLibCheck": true,
+    "types": ["node"],
+    "strict": false,
+    "noImplicitAny": false,
+    "forceConsistentCasingInFileNames": true
+  },
+  "// scope": "Shipped code + scripts. Tests are fixture-heavy (dynamic shapes) — typechecking them yields inference noise, not bugs; they're covered by `pnpm test`.",
+  "include": ["src/**/*.mjs", "bin/**/*.mjs", "scripts/**/*.mjs"]
+}
