@@ -33,9 +33,15 @@ import * as paths from './paths.mjs';
 /** Frontier agent-CLI hosts. `pkg` is the npm global package; `enableEnv` is
  *  ruflo's ADR-034 backend flag; `aqe` is the AQE_LLM_PROVIDER value (null when
  *  aqe can't host it). */
+/** ruflo's dual-mode adapter — a SEPARATE npm global from the codex CLI. Without
+ *  it, `ruflo init --dual` aborts with "The @claude-flow/codex package is not
+ *  installed". ak treats it as a managed prerequisite of dual-mode (installed
+ *  only when codex is opted-in AND the codex CLI is detected). */
+export const CODEX_ADAPTER_PKG = '@claude-flow/codex';
+
 export const HOSTS = [
   { id: 'claude', bin: 'claude', pkg: '@anthropic-ai/claude-code', enableEnv: 'ENABLE_CLAUDE_CODE', aqe: 'claude-code' },
-  { id: 'codex', bin: 'codex', pkg: '@openai/codex', enableEnv: 'ENABLE_CODEX', aqe: null },
+  { id: 'codex', bin: 'codex', pkg: '@openai/codex', enableEnv: 'ENABLE_CODEX', aqe: null, adapterPkg: CODEX_ADAPTER_PKG },
 ];
 
 /** API-key LLM providers ruflo's router understands (`ruflo providers`). */
@@ -295,12 +301,40 @@ export async function applyProviders(cfg, cwd = process.cwd()) {
   return { ok: done.every((d) => !d.includes('failed')), changed: true, detail: `configured: ${done.join(', ')}` };
 }
 
+/** Pure decision for the codex dual-mode adapter, factored out for tests:
+ *  install ONLY when codex is opted-in, the codex CLI is present, and the adapter
+ *  is not already installed. Never install the adapter for an absent CLI. */
+export function codexAdapterAction({ opted, cliPresent, adapterInstalled }) {
+  if (!opted) return 'skip-not-opted';
+  if (!cliPresent) return 'skip-no-cli';
+  if (adapterInstalled) return 'already-installed';
+  return 'install';
+}
+
+/** Ensure ruflo's dual-mode adapter (@claude-flow/codex) is installed before we
+ *  run `ruflo init --dual`. Guarded: opted-in codex host + detected codex CLI. */
+export async function ensureCodexAdapter(cfg, cwd = process.cwd()) {
+  const opted = !!cfg.providers?.hosts?.codex;
+  if (!opted) return { ok: true, changed: false, detail: 'codex disabled — adapter not needed' };
+  const cliPresent = await have('codex');
+  const adapterInstalled = !!installedVersion(CODEX_ADAPTER_PKG);
+  const action = codexAdapterAction({ opted, cliPresent, adapterInstalled });
+  if (action === 'skip-no-cli') return { ok: true, changed: false, detail: 'codex CLI not detected — adapter install skipped' };
+  if (action === 'already-installed') return { ok: true, changed: false, detail: `${CODEX_ADAPTER_PKG} already installed` };
+  const r = await run('npm', ['install', '-g', `${CODEX_ADAPTER_PKG}@latest`], { cwd, timeout: 600_000 });
+  return { ok: r.code === 0, changed: r.code === 0, detail: r.code === 0 ? `installed ${CODEX_ADAPTER_PKG}` : r.stderr.split('\n').slice(-2).join(' ').slice(0, 200) };
+}
+
 /** Heavy, pick/setup-time only: regenerate dual-mode agents when codex is on.
  *  Kept OUT of the sync hot path (it force-regenerates project files). */
 export async function ensureDualAgents(cfg, cwd = process.cwd()) {
   if (!cfg.providers?.hosts?.codex) return { ok: true, changed: false, detail: 'codex disabled — no dual agents' };
   if (!fs.existsSync(path.join(cwd, '.git'))) return { ok: true, changed: false, detail: 'not a project — skipped `ruflo init --dual`' };
   if (!(await have('ruflo'))) return { ok: false, detail: 'ruflo not on PATH' };
+  // Prerequisite: dual-init aborts unless @claude-flow/codex is present. Install
+  // it first (guarded on opted-in codex + detected CLI) so a fresh machine just works.
+  const adapter = await ensureCodexAdapter(cfg, cwd);
+  if (!adapter.ok) return { ok: false, changed: adapter.changed, detail: `adapter prerequisite failed: ${adapter.detail}` };
   const r = await run('ruflo', ['init', '--dual', '--force'], { cwd, timeout: 300_000 });
   return { ok: r.code === 0, changed: r.code === 0, detail: r.code === 0 ? 'ruflo init --dual applied' : 'ruflo init --dual failed' };
 }
