@@ -30,6 +30,28 @@ export const options = {
   reconfigure: { type: 'boolean', default: false },
 };
 
+export const help = `ak setup — first-time setup (machine and/or this project)
+
+Machine scope always runs: installs ruflo + agentic-qe globally, deploys the
+token-audit skill, merges the CLAUDE.md managed blocks, and offers MCP. Project
+scope auto-runs when a .git directory is present.
+
+Usage: ak setup [options]
+
+Options:
+  --project        force project-scope setup even outside a git repo
+  --minimal        machine scope only; skip project setup
+  --no-aqe         skip agentic-qe install + configuration
+  --no-security    skip the security-surface verification
+  --reconfigure    re-run interactive choices, ignoring saved kit.json
+  --yes            accept all prompts (non-interactive)
+  --dry-run        print the plan; change nothing
+
+Examples:
+  ak setup                    machine + project (when inside a git repo)
+  ak setup --minimal          machine only
+  ak setup --project --yes    force project setup, no prompts`;
+
 const ask = async (q, dflt, yes) => {
   if (yes || !process.stdin.isTTY) return dflt;
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout });

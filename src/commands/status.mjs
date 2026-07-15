@@ -22,6 +22,23 @@ export const options = {
   hint: { type: 'boolean', default: false },
 };
 
+export const help = `ak status — read-only dashboard of what's true and what's drifted
+
+Prints one row per subsystem (versions, natives, security, learning, providers,
+…). Read-only: it never changes anything. A bare \`ak\` runs this plus one
+suggested next action.
+
+Usage: ak status [options]
+
+Options:
+  --deep    run the slower probes (spawns CLIs) for a fuller picture
+  --json    emit the raw rows as JSON (suppresses the drift nudge)
+
+Examples:
+  ak status           quick dashboard
+  ak status --deep    thorough check
+  ak status --json    machine-readable rows`;
+
 const row = (subsystem, level, message, fix = null) => ({ subsystem, level, message, fix });
 
 export async function collect({ pkgRoot, cwd = process.cwd() }) {

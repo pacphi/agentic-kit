@@ -22,6 +22,30 @@ export const options = {
   json: { type: 'boolean', default: false },
 };
 
+export const help = `ak x provider — frontier-host + LLM-provider detection and wiring
+
+Two independent axes: which host CLI runs the ruflo loop (claude/codex, can be
+both), and which LLM the routers use (aqe + ruflo). Mirrors \`ak x mcp\`: detect →
+persist to kit.json → idempotent heal. \`ak sync\` reapplies your choice.
+
+Subcommands:
+  status   (default) detected CLIs, aqe provider, ruflo providers, what's wired
+  pick     choose hosts / aqe provider / ruflo providers → persist → apply
+  off      reversible teardown (reset to claude-only; strip managed env keys)
+
+Options (pick, all optional — omit for interactive):
+  --host claude,codex          enable these ruflo host CLIs
+  --aqe-provider <type>        set aqe's primary LLM (or 'none' to unset)
+  --aqe-fallback '<chain>'     ordered aqe chain, e.g.
+                                 'claude-code:claude-opus-4-8; openai:gpt-5.6'
+  --provider <csv>             register ruflo API providers (e.g. openai:gpt-5.6)
+  --yes                        accept defaults without prompting
+
+Examples:
+  ak x provider                          show what's detected + wired
+  ak x provider pick --host claude,codex
+  ak x provider off`;
+
 /** Parse 'claude-code:m1,m2; openai:gpt-5.6' → [{provider, models:[…]}, …]. */
 const parseFallback = (str) => str.split(';').map((s) => s.trim()).filter(Boolean).map((tok) => {
   const [provider, models] = tok.split(':');

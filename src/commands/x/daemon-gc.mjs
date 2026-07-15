@@ -9,6 +9,22 @@ export const options = {
   json: { type: 'boolean', default: false },
 };
 
+export const help = `ak x daemon-gc — list or reap stale ruflo daemons
+
+Stale = the daemon's workspace is gone, OR it's older than RUFLO_DAEMON_TTL_SECS
+(default 12h). Lists by default; --kill actually stops them.
+
+Usage: ak x daemon-gc [options]
+
+Options:
+  --kill    stop the stale daemons (default is list-only)
+  --quiet   print nothing when there's nothing stale
+  --json    emit the daemon list + stale PIDs as JSON
+
+Examples:
+  ak x daemon-gc          show stale daemons
+  ak x daemon-gc --kill    reap them`;
+
 export async function run({ flags }) {
   const daemons = await listDaemons();
   const stale = staleDaemons(daemons);

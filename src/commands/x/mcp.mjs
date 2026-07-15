@@ -13,6 +13,23 @@ export const options = {
   yes: { type: 'boolean', default: false },
 };
 
+export const help = `ak x mcp — MCP registration + tool-family management
+
+Subcommands:
+  status   (default) registration + deny-rule summary + family inventory
+  pick     interactive family-exclusion picker (re-runnable)
+  off      unregister everything + clean deny rules
+
+Options (pick):
+  --exclude a,b,c   families to exclude, non-interactive
+  --all             allow every family (skip the prompt)
+  --yes             accept defaults without prompting
+
+Examples:
+  ak x mcp                       show families + what's denied
+  ak x mcp pick --exclude wasm,browser
+  ak x mcp off`;
+
 export async function run({ flags, positionals }) {
   const sub = positionals[0] ?? 'status';
   const families = toolFamilies();

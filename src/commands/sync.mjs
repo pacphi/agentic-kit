@@ -20,6 +20,24 @@ export const options = {
   json: { type: 'boolean', default: false },
 };
 
+export const help = `ak sync — converge to good: upgrade + heal + verify
+
+Builds a plan from the same collector \`ak status\` uses, then applies it in
+order: upgrades first (they wipe native modules), then heals, then re-collects
+to prove convergence. Idempotent — safe to run any time. When in doubt, run this.
+
+Usage: ak sync [options]
+
+Options:
+  --dry-run       print the plan and stop; change nothing
+  --no-upgrade    heal only; don't upgrade ruflo/aqe/kit versions
+  --json          emit results as JSON
+
+Examples:
+  ak sync                 upgrade, heal, verify
+  ak sync --dry-run       preview the plan
+  ak sync --no-upgrade    re-heal without touching versions`;
+
 export async function run({ flags, pkgRoot }) {
   const cwd = process.cwd();
   const rows = await collect({ pkgRoot, cwd });

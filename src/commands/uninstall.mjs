@@ -22,6 +22,28 @@ export const options = {
   yes: { type: 'boolean', default: false },
 };
 
+export const help = `ak uninstall — leave cleanly
+
+By default removes only the kit's own machine footprint (CLAUDE.md managed
+blocks, MCP registration) and cleans any legacy shell-kit install. The global
+packages (ruflo, agentic-qe) stay unless you ask for them. Each removal is
+confirmed unless --yes.
+
+Usage: ak uninstall [options]
+
+Options:
+  --this-project   also remove this project's patches (settings, .claude-flow)
+  --remove-ruflo   uninstall the global ruflo package (confirmed)
+  --remove-aqe     uninstall the global agentic-qe package (confirmed)
+  --purge          remove everything: kit footprint + both global packages
+  --yes            skip confirmation prompts
+  --dry-run        print what would be removed; change nothing
+
+Examples:
+  ak uninstall                    remove the kit's footprint only
+  ak uninstall --this-project     also unpatch the current repo
+  ak uninstall --purge --dry-run  preview a full teardown`;
+
 const confirm = async (q, yes) => {
   if (yes) return true;
   if (!process.stdin.isTTY) return false;

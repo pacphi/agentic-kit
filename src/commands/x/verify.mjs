@@ -15,6 +15,24 @@ import { ok, warn, fail, heading } from '../../lib/output.mjs';
 
 export const options = { json: { type: 'boolean', default: false } };
 
+export const help = `ak x verify — deep proofs (slow; spawns real CLIs)
+
+Runs live end-to-end checks, not just presence probes. Pick one suite or run
+all (the default). Exit code is non-zero if any selected proof fails.
+
+Usage: ak x verify [suite]
+
+Suites:
+  learning    train a cycle in a temp dir; assert patterns persist
+  security    packages load; defend flags injection / passes clean
+  aqe         RVF store healthy; aqe status has no FsyncFailed
+  providers   kit config matches installed CLIs; ruflo/aqe see the wiring
+  all         (default) run every suite
+
+Examples:
+  ak x verify              run all proofs
+  ak x verify security     just the security suite`;
+
 async function verifyLearning() {
   heading('learning — train a cycle in an isolated dir, assert patterns persist');
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'agentic-kit-learn-'));
