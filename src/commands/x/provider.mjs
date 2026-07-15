@@ -22,6 +22,11 @@ export const options = {
   json: { type: 'boolean', default: false },
 };
 
+/** Billing is the non-obvious axis of the aqe provider list. Three categories,
+ *  and claude-code is the ONLY same-vendor subscription alternative to a metered
+ *  key (codex/gemini OAuth live on the host axis, not as aqe provider types). */
+export const AQE_BILLING_HINT = 'billing: claude-code = your Claude subscription ($0), ollama = local ($0), all others = metered API key';
+
 export const help = `ak x provider — frontier-host + LLM-provider detection and wiring
 
 Two independent axes: which host CLI runs the ruflo loop (claude/codex, can be
@@ -36,6 +41,8 @@ Subcommands:
 Options (pick, all optional — omit for interactive):
   --host claude,codex          enable these ruflo host CLIs
   --aqe-provider <type>        set aqe's primary LLM (or 'none' to unset)
+                                 billing: claude-code = Claude sub ($0), ollama =
+                                 local ($0), all others = metered API key
   --aqe-fallback '<chain>'     ordered aqe chain, e.g.
                                  'claude-code:claude-opus-4-8; openai:gpt-5.6'
   --provider <csv>             register ruflo API providers (e.g. openai:gpt-5.6)
@@ -92,6 +99,7 @@ async function status({ flags, cwd }) {
   const ap = cfg.providers.aqeProvider;
   console.log(bold('\nagentic-qe LLM provider') + dim('  (AQE_LLM_PROVIDER)'));
   console.log(`  ${(ap ?? dim('aqe default (unset)')).padEnd(24)} ${dim(`supported: ${AQE_PROVIDER_TYPES.join(', ')}`)}`);
+  console.log(`  ${dim(AQE_BILLING_HINT)}`);
   const chain = cfg.providers.aqeFallback ?? [];
   if (chain.length) {
     const rendered = chain.map((e) => `${e.provider}${e.models?.length ? `(${e.models.join(',')})` : dim('(no models)')}`).join(' → ');
@@ -161,6 +169,7 @@ async function pick({ flags, cwd }) {
     const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
     const hAns = (await rl.question(`Enable which ruflo host(s)? (comma-separated) [${installed.join(',')}]: `)).trim();
     enabled = (hAns || installed.join(',')).split(',').map((s) => s.trim()).filter(Boolean);
+    console.log(dim(`  ${AQE_BILLING_HINT}`));
     const aAns = (await rl.question(`agentic-qe primary LLM provider — ${AQE_PROVIDER_TYPES.join('/')} (blank = leave aqe default): `)).trim().toLowerCase();
     aqeProvider = aAns ? aAns : null;
     const fAns = (await rl.question('aqe fallback chain, ordered (e.g. "claude-code:claude-opus-4-8; openai:gpt-5.6", blank = none): ')).trim().toLowerCase();
