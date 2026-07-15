@@ -9,6 +9,7 @@ import { registry, syncBlocks } from '../lib/blocks.mjs';
 import { register as mcpRegister, applyExclusions } from '../lib/mcp.mjs';
 import { listDaemons, staleDaemons, reap } from '../lib/daemons.mjs';
 import { loadKitConfig } from '../lib/config.mjs';
+import { HOSTS, applyHosts, applyProviders, hostInstallState, installHost, applyAqeRouter } from '../lib/providers.mjs';
 import { driftReport, selfDrift } from '../lib/versions.mjs';
 import * as paths from '../lib/paths.mjs';
 import { ok, warn, fail, bold, dim } from '../lib/output.mjs';
@@ -72,6 +73,22 @@ export async function run({ flags, pkgRoot }) {
       : path.join(pkgRoot, 'claude', r.template));
     const res = await syncBlocks(paths.claudeMdPath(), rowsReg, resolve);
     ok(`blocks: ${res.filter((r) => r.action !== 'unchanged').map((r) => `${r.slug} ${r.action}`).join(', ') || 'in sync'}`);
+  }
+  // hosts: install any ENABLED host that is entirely absent (updates to
+  // npm-managed hosts ride the versions branch above via driftReport).
+  if (subsystems.has('hosts')) {
+    for (const h of HOSTS) {
+      if (!cfg.providers.hosts[h.id]) continue;
+      if ((await hostInstallState(h)).method !== 'absent') continue;
+      report(`install ${h.id}`, await installHost(h.id));
+    }
+  }
+  if (subsystems.has('providers')) {
+    report('providers', applyHosts(cfg, cwd));
+    const router = applyAqeRouter(cfg, cwd);
+    if (router.changed || !router.ok) report('aqe router', router);
+    const prov = await applyProviders(cfg, cwd);
+    if (prov.changed || !prov.ok) report('providers (api)', prov);
   }
   if (subsystems.has('statusline') || subsystems.has('versions')) {
     const r = fixStatusline(cwd);

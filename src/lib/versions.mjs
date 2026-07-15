@@ -59,7 +59,13 @@ export async function driftReport({ force = false } = {}) {
   const cfg = loadKitConfig();
   const ttlMs = (cfg.versionCheck?.ttlHours ?? 24) * 3600_000;
   const fresh = !force && cfg.versionCheck?.last && Date.now() - cfg.versionCheck.last < ttlMs;
-  const pkgs = ['ruflo', 'agentic-qe'];
+  // Frontier host CLIs are kept current only when npm-managed (a global
+  // package.json exists). External installs (mise/native/brew) have no global
+  // package.json → installedVersion is null → filtered out here, so ak never
+  // claims to manage an update it doesn't own. Pkg names mirror HOSTS in
+  // providers.mjs (kept local to avoid an import cycle).
+  const HOST_PKGS = ['@anthropic-ai/claude-code', '@openai/codex'];
+  const pkgs = ['ruflo', 'agentic-qe', ...HOST_PKGS.filter((p) => installedVersion(p))];
   const report = [];
   let latest = cfg.versionCheck?.seen ?? {};
   if (!fresh) {

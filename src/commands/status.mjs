@@ -13,6 +13,8 @@ import { registry, syncBlocks } from '../lib/blocks.mjs';
 import { loadKitConfig } from '../lib/config.mjs';
 import { driftReport, selfDrift } from '../lib/versions.mjs';
 import { readJson } from '../lib/settings.mjs';
+import { have } from '../lib/exec.mjs';
+import { HOSTS, settingsTarget, isDefault, managedEnv, MANAGED_ENV_KEYS, hostInstallState, aqeRouterFile } from '../lib/providers.mjs';
 
 export const options = {
   json: { type: 'boolean', default: false },
@@ -128,6 +130,58 @@ export async function collect({ pkgRoot, cwd = process.cwd() }) {
   }
   if (mcp.legacyRuflo) {
     rows.push(row('mcp', 'warn', "legacy 'ruflo'-keyed MCP registration present", 'sync migrates it to claude-flow'));
+  }
+
+  // hosts (install-if-missing) — cheap: file read + `which`, no network.
+  // An enabled host that is entirely absent is installable by sync; an external
+  // install (mise/native/brew) is reported but never touched.
+  try {
+    for (const h of HOSTS) {
+      if (!cfg.providers.hosts[h.id]) continue;
+      const st = await hostInstallState(h);
+      if (st.method === 'absent') {
+        rows.push(row('hosts', h.id === 'claude' ? 'fail' : 'warn',
+          `${h.id} enabled but not installed`, `sync installs ${h.pkg}`));
+      } else {
+        rows.push(row('hosts', 'ok', `${h.id} ${st.version ?? ''} (${st.method}${st.method === 'external' ? ' — self-managed' : ''})`));
+      }
+    }
+  } catch (e) {
+    rows.push(row('hosts', 'warn', `host check unavailable: ${e.message}`));
+  }
+
+  // providers (frontier host wiring) — light: `have` probe + env read, no --version
+  try {
+    const { file, scope } = settingsTarget(cwd);
+    const env = readJson(file, {})?.env ?? {};
+    if (isDefault(cfg)) {
+      // advisory only (no fix): opting codex in is a deliberate `x provider pick`
+      if (await have('codex')) {
+        rows.push(row('providers', 'info', 'codex CLI installed but not enabled (claude-only default)'));
+      } else {
+        rows.push(row('providers', 'info', 'claude-only (default host)'));
+      }
+    } else {
+      const desired = managedEnv(cfg);
+      const envDrift = MANAGED_ENV_KEYS.some((k) => (k in desired ? env[k] !== desired[k] : k in env));
+      // aqe fallback chain: on-disk llm-config.json must match kit.json order
+      const chain = cfg.providers.aqeFallback ?? [];
+      let routerDrift = false;
+      if (chain.length) {
+        const disk = readJson(aqeRouterFile(cwd));
+        const diskOrder = (disk?.fallbackChain?.entries ?? []).map((e) => e.provider).join('→');
+        routerDrift = disk?._managedBy !== 'agentic-kit' || diskOrder !== chain.map((e) => e.provider).join('→');
+      }
+      const on = HOSTS.filter((h) => cfg.providers.hosts[h.id]).map((h) => h.id).join('+') || 'none';
+      const chainStr = chain.length ? `; aqe chain ${chain.map((e) => e.provider).join('→')}` : '';
+      if (envDrift || routerDrift) {
+        rows.push(row('providers', 'warn', `provider config drifted (want ${on}${chainStr}, ${scope})`, 'sync re-applies provider env + aqe router'));
+      } else {
+        rows.push(row('providers', 'ok', `wired: ${on}${chainStr} (${scope})`));
+      }
+    }
+  } catch (e) {
+    rows.push(row('providers', 'warn', `provider check unavailable: ${e.message}`));
   }
 
   // daemons

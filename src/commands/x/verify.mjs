@@ -4,10 +4,13 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { run as runCmd } from '../../lib/exec.mjs';
+import { run as runCmd, have } from '../../lib/exec.mjs';
 import { aidefencePresent, securityPresent } from '../../lib/natives.mjs';
 import { scanRvf } from '../../lib/rvf.mjs';
 import { projectAqeDir } from '../../lib/paths.mjs';
+import { loadKitConfig } from '../../lib/config.mjs';
+import { HOSTS, detectHosts, aqeRouterFile } from '../../lib/providers.mjs';
+import { readJson } from '../../lib/settings.mjs';
 import { ok, warn, fail, heading } from '../../lib/output.mjs';
 
 export const options = { json: { type: 'boolean', default: false } };
@@ -57,11 +60,45 @@ async function verifyAqe() {
   return true;
 }
 
+async function verifyProviders() {
+  heading('providers — kit config matches installed CLIs; ruflo/aqe see the wiring');
+  const cfg = loadKitConfig();
+  let good = true;
+  // enabled hosts must actually be installed
+  const hosts = await detectHosts(process.cwd());
+  for (const h of HOSTS) {
+    if (!cfg.providers?.hosts?.[h.id]) continue;
+    if (hosts[h.id].present) ok(`host '${h.id}' enabled and installed${hosts[h.id].version ? ` (v${hosts[h.id].version})` : ''}`);
+    else { fail(`host '${h.id}' enabled in kit.json but not on PATH`); good = false; }
+  }
+  // ruflo sees its provider list
+  if (await have('ruflo')) {
+    const list = await runCmd('ruflo', ['providers', 'list'], { timeout: 60_000 });
+    (list.code === 0 ? ok : warn)(`ruflo providers list ${list.code === 0 ? 'ok' : 'unavailable'}`);
+  }
+  // aqe billing section reflects the host selector
+  if (cfg.aqe !== false && await have('aqe')) {
+    const h = await runCmd('aqe', ['health'], { timeout: 120_000 });
+    const seen = /LLM Billing|claude-code|provider|billing/i.test(h.stdout + h.stderr);
+    (seen ? ok : warn)('aqe health reports an LLM billing/provider section');
+  }
+  // aqe fallback chain: on-disk llm-config.json matches kit.json (order + ak-managed)
+  const chain = cfg.providers?.aqeFallback ?? [];
+  if (chain.length) {
+    const disk = readJson(aqeRouterFile(process.cwd()));
+    const diskOrder = (disk?.fallbackChain?.entries ?? []).map((e) => e.provider).join(' → ');
+    const want = chain.map((e) => e.provider).join(' → ');
+    if (disk?._managedBy === 'agentic-kit' && diskOrder === want) ok(`aqe fallback chain on disk matches kit.json (${want})`);
+    else { fail(`aqe fallback chain drift — disk="${diskOrder}" want="${want}" (run: ak sync)`); good = false; }
+  }
+  return good;
+}
+
 export async function run({ positionals }) {
   const which = positionals[0] ?? 'all';
-  const suites = { learning: verifyLearning, security: verifySecurity, aqe: verifyAqe };
+  const suites = { learning: verifyLearning, security: verifySecurity, aqe: verifyAqe, providers: verifyProviders };
   const selected = which === 'all' ? Object.entries(suites) : [[which, suites[which]]];
-  if (!selected.every(([, fn]) => fn)) { fail(`unknown suite: ${which} (learning|security|aqe|all)`); return 2; }
+  if (!selected.every(([, fn]) => fn)) { fail(`unknown suite: ${which} (learning|security|aqe|providers|all)`); return 2; }
   let allGood = true;
   for (const [, fn] of selected) allGood = (await fn()) && allGood;
   console.log('');

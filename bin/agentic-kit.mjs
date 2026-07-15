@@ -18,6 +18,7 @@ const PORCELAIN = {
 const PLUMBING = {
   'daemon-gc': () => import('../src/commands/x/daemon-gc.mjs'),
   'mcp': () => import('../src/commands/x/mcp.mjs'),
+  'provider': () => import('../src/commands/x/provider.mjs'),
   'reference': () => import('../src/commands/x/reference.mjs'),
   'verify': () => import('../src/commands/x/verify.mjs'),
 };
@@ -43,8 +44,9 @@ const HELP_ALL = `${HELP}
 Plumbing commands:
   ak x daemon-gc [--kill]      list/stop stale ruflo daemons
   ak x mcp [pick|off|status]   MCP registration + tool-family deny rules
+  ak x provider [pick|off|status]   detect claude/codex CLIs; wire ruflo + aqe hosts/providers
   ak x reference [diff|sync]   CLAUDE.md managed-block inspection/reconcile
-  ak x verify [learning|security|aqe|all]   deep proofs (slow, spawns real CLIs)
+  ak x verify [learning|security|aqe|providers|all]   deep proofs (slow, spawns real CLIs)
   ak x improvement-eval [...]  causal self-improvement eval (route Q-learner)`;
 
 async function main() {
