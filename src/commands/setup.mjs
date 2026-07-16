@@ -88,7 +88,7 @@ export async function run_machine({ flags, pkgRoot, cfg }) {
         const r = await heal.installRuvnetBrain();
         (r.ok ? ok : warn)(`ruvnet-brain: ${r.detail}`);
       } else warn('ruvnet-brain skipped — install later with `ak sync` (or `ak setup --no-ruvnet-brain` to stop asking)');
-    } else ok(`ruvnet-brain ${rb.installedVersion() ?? ''} present`);
+    } else ok('ruvnet-brain present (refresh to the latest release with `ak sync`)');
   }
 
   // 2. heal natives + the #2670 aidefence gap up front

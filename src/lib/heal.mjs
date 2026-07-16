@@ -10,7 +10,7 @@ import { rufloRoot, aqeRoot } from './paths.mjs';
 import { agentdbLocations, bsq3IsNative, bsq3Root, aidefencePresent } from './natives.mjs';
 import { KIT_PKG } from './versions.mjs';
 import { scanRvf, quarantine } from './rvf.mjs';
-import { INSTALL_SPEC, INSTALL_ARGS, present as rbPresent, installedVersion as rbVersion } from './ruvnet-brain.mjs';
+import { INSTALL_SPEC, INSTALL_ARGS, present as rbPresent, latestVersion as rbLatest, recordInstalledRelease as rbRecord } from './ruvnet-brain.mjs';
 
 // Packages whose install scripts must run for natives to build (npm >=11.17
 // blocks them by default). Curated on the live 3.28/3.12.2 upgrade.
@@ -124,12 +124,15 @@ export async function selfUpdate(version) {
  *  check saw a newer release). Runs `--no-stack --no-enhance`: ak already
  *  manages ruflo/RuVector and owns the CLAUDE.md grounding block. */
 export async function installRuvnetBrain({ force = false } = {}) {
-  const was = rbVersion();
   const args = ['-y', INSTALL_SPEC, ...INSTALL_ARGS, ...(force ? ['--force'] : [])];
   const r = await run('npx', args, { timeout: 900_000 });
   if (r.code === 0) {
-    const now = rbVersion();
-    return { ok: true, detail: now ? (was && was !== now ? `updated ${was} → ${now}` : `installed ${now}`) : 'installed' };
+    // A default install pulls GitHub releases/latest, so the release now on disk
+    // == latest at this moment. Stamp it (release-tag namespace) so drift converges
+    // — the plugin's own semver never tracks the KB release, so we can't use it.
+    const tag = await rbLatest();
+    if (tag) rbRecord(tag);
+    return { ok: true, detail: tag ? `installed release v${tag}` : 'installed (release tag unknown)' };
   }
   // A non-zero exit can still leave a usable install (post-verify smoke test may
   // fail offline); report the tail but reflect actual presence.

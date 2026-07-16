@@ -71,10 +71,12 @@ export async function collect({ pkgRoot, cwd = process.cwd() }) {
       if (!b.present) {
         rows.push(row('ruvnet-brain', 'warn', 'RuvNet Brain not installed', 'setup installs it (or `ak sync`)'));
       } else if (b.outdated) {
+        const have = b.installedRelease ? `release v${b.installedRelease}` : 'present (unversioned install)';
         rows.push(row('ruvnet-brain', 'warn',
-          `ruvnet-brain ${b.installed} installed, ${b.latest} available`, 'sync re-runs the installer'));
+          `ruvnet-brain ${have}, release v${b.latest} available`, 'sync refreshes the KB'));
       } else {
-        rows.push(row('ruvnet-brain', 'ok', `ruvnet-brain ${b.installed ?? 'present'}${b.latest ? ' (latest)' : ''}`));
+        const shown = b.installedRelease ? `release v${b.installedRelease}${b.latest ? ' (latest)' : ''}` : 'present';
+        rows.push(row('ruvnet-brain', 'ok', `ruvnet-brain ${shown}`));
       }
     } catch (e) {
       rows.push(row('ruvnet-brain', 'warn', `ruvnet-brain check unavailable: ${e.message}`));
