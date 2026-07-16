@@ -45,6 +45,7 @@ src/
     natives.mjs          # better-sqlite3 / agentdb native detection
     sqlite.mjs           # node:sqlite helpers (scalar, checkpoint, withDb)
     versions.mjs         # installedVersion, driftReport, KIT_PKG
+    ruvnet-brain.mjs     # RuvNet Brain: on-disk detection + GitHub-release drift (NOT an npm pkg)
     blocks.mjs           # CLAUDE.md managed-block registry + syncBlocks
     mcp.mjs  settings.mjs  config.mjs  paths.mjs  statusline.mjs
     rvf.mjs  daemons.mjs  exec.mjs  output.mjs
@@ -65,6 +66,18 @@ docs/
 **Published tarball** = the `files` whitelist in `package.json`:
 `bin/agentic-kit.mjs`, `src/`, `claude/`, `docs/TROUBLESHOOTING.md`. Nothing else
 ships — verify with `npm pack --dry-run` before a release if you touch `files`.
+
+**RuvNet Brain is the odd one out.** ruflo/agentic-qe/the host CLIs are global npm
+packages: detected via `installedVersion` (npm global root) and drift-checked with
+`npm view`. The RuvNet Brain is *not* — `npx github:stuinfla/ruvnet-brain` installs a
+~512 MB offline KB to `~/.cache/ruvnet-brain/kb` (override `$RUVNET_BRAIN_KB`) and a
+user-scope Claude Code plugin (the `search_ruvnet` MCP + hooks + a skill). So it gets a
+*parallel* lifecycle in `src/lib/ruvnet-brain.mjs`: `present()`/`installedVersion()` probe
+disk, `latestVersion()`/`drift()` hit the GitHub releases API (TTL-cached in kit.json like
+`selfDrift`). setup/sync install via `heal.installRuvnetBrain()` with `--no-stack --no-enhance`
+(ak already manages ruflo/RuVector and owns the `ruvnet-brain-reference` CLAUDE.md block).
+Toggle with the `ruvnetBrain` kit.json flag / `--no-ruvnet-brain`. Note: the installer's
+`--enable-nightly` does **not** exist (nightly is a separate, unmanaged LaunchAgent).
 
 ### Dogfooding artifacts are NOT source
 

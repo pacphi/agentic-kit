@@ -42,7 +42,7 @@ export async function run({ flags, pkgRoot }) {
   const cwd = process.cwd();
   const rows = await collect({ pkgRoot, cwd });
   const plan = rows.filter((r) => r.fix)
-    .filter((r) => !(flags['no-upgrade'] && (r.subsystem === 'versions' || r.subsystem === 'self')));
+    .filter((r) => !(flags['no-upgrade'] && (r.subsystem === 'versions' || r.subsystem === 'self' || r.subsystem === 'ruvnet-brain')));
 
   if (plan.length === 0) { ok('nothing to do — all subsystems healthy'); return 0; }
 
@@ -63,6 +63,12 @@ export async function run({ flags, pkgRoot }) {
   }
   if (subsystems.has('natives') || subsystems.has('versions')) {
     report('natives', await heal.healNatives());
+  }
+  // ruvnet-brain: install if absent / re-run installer to pull latest when
+  // drifted (force bypasses the installer's skip-if-present). Not an npm pkg, so
+  // it rides its own branch rather than the driftReport loop above.
+  if (subsystems.has('ruvnet-brain') && !flags['no-upgrade']) {
+    report('ruvnet-brain', await heal.installRuvnetBrain({ force: true }));
   }
   if (subsystems.has('security') || subsystems.has('versions')) {
     report('aidefence', await heal.healAidefence());

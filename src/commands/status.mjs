@@ -12,6 +12,7 @@ import { scanRvf } from '../lib/rvf.mjs';
 import { registry, syncBlocks } from '../lib/blocks.mjs';
 import { loadKitConfig } from '../lib/config.mjs';
 import { driftReport, selfDrift } from '../lib/versions.mjs';
+import { drift as ruvnetBrainDrift } from '../lib/ruvnet-brain.mjs';
 import { readJson } from '../lib/settings.mjs';
 import { have } from '../lib/exec.mjs';
 import { HOSTS, settingsTarget, isDefault, managedEnv, MANAGED_ENV_KEYS, hostInstallState, aqeRouterFile } from '../lib/providers.mjs';
@@ -60,6 +61,24 @@ export async function collect({ pkgRoot, cwd = process.cwd() }) {
     }
   } catch (e) {
     rows.push(row('versions', 'warn', `version check unavailable: ${e.message}`));
+  }
+
+  // ruvnet-brain (offline KB + search_ruvnet MCP; not an npm package — detected
+  // on disk, drift via GitHub releases, TTL-cached like `self`)
+  if (cfg.ruvnetBrain) {
+    try {
+      const b = await ruvnetBrainDrift();
+      if (!b.present) {
+        rows.push(row('ruvnet-brain', 'warn', 'RuvNet Brain not installed', 'setup installs it (or `ak sync`)'));
+      } else if (b.outdated) {
+        rows.push(row('ruvnet-brain', 'warn',
+          `ruvnet-brain ${b.installed} installed, ${b.latest} available`, 'sync re-runs the installer'));
+      } else {
+        rows.push(row('ruvnet-brain', 'ok', `ruvnet-brain ${b.installed ?? 'present'}${b.latest ? ' (latest)' : ''}`));
+      }
+    } catch (e) {
+      rows.push(row('ruvnet-brain', 'warn', `ruvnet-brain check unavailable: ${e.message}`));
+    }
   }
 
   // self (the kit's own version — prerelease installs track the `next` tag)
