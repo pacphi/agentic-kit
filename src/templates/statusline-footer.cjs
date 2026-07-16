@@ -2,6 +2,7 @@
 function rufloActivationSegments(cwd){
   try {
     var fs = require("fs"), path = require("path"), cp = require("child_process");
+    var RED = "\x1b[1;31m";   // alarm-only segments (aidefence OFF) — matches ruflo's own brightRed
     var DIM = "[2m", G = "[1;32m", Y = "[1;33m", C = "[1;36m", R = "[0m";
     // execFileSync (no shell) — db path / sql are passed as argv, never interpolated into a command line.
     function q(db, sql){ try { return cp.execFileSync("sqlite3", [db, sql], {stdio:["ignore","pipe","ignore"], timeout:1500}).toString().trim(); } catch(e){ return ""; } }
@@ -186,16 +187,41 @@ function rufloActivationSegments(cwd){
         }
       }
     } catch(e){}
-    // ── security: 🛡 renders ONLY when @claude-flow/aidefence (the actual runtime
-    // defense engine behind `security defend`) is resolvable. ruflo 3.28 dropped it
-    // from the dependency tree while the command still imports it (ruvnet/ruflo#2670),
-    // so a bare 3.28 install has NO working injection defense — the segment honestly
-    // disappears until ruflo-resync reinstalls the package (@claude-flow/security is
-    // auth/validation primitives, not detection; probing it would overstate).
+    // ── AI defense (AIMDS) — ALARM-ONLY: renders only when it is MISSING ────────
+    // Was a permanent green "🛡 aidefence on". Two reasons it inverted:
+    //   1. Issue #8's rule, already law for the proof segment below: the expected state
+    //      is rendered SILENTLY, only a regression surfaces, no static green badge. A
+    //      constant "on" carries no information after the first glance — unlike SONA/QE,
+    //      whose counts move — so it was the one pure binary badge in this footer.
+    //   2. Glyph collision: ruflo's line 2 uses 🛡 for the SCAN state, a different
+    //      concern entirely (`security scan` audits your SOURCE; this is `security
+    //      defend` / AIMDS screening PROMPTS for injection, jailbreak and PII). Two
+    //      shields meaning different things read as one duplicated thing. The alarm
+    //      carries no 🛡 at all, so it can never be confused with the scan shield.
+    //
+    // Still load-bearing, not decoration: @claude-flow/aidefence is NOT a declared
+    // dependency of ruflo or @claude-flow/cli (verified still true on 3.32.0) while
+    // `security defend` imports it (ruvnet/ruflo#2670). It is present ONLY because the
+    // kit's healAidefence npm-installs it into rufloRoot(). A plain `npm i -g ruflo`
+    // can therefore silently remove your injection defense — and under the old polarity
+    // that catastrophe was signalled by a line quietly VANISHING, which is ambiguous
+    // (off? probe threw? forgot to look?). Now the dangerous state is the loud one.
+    //
+    // FAIL-SAFE POLARITY (the reason for the two-step probe): alarm only on POSITIVE
+    // evidence of absence — we located a ruflo install AND aidefence is not inside it.
+    // If ruflo itself cannot be found (custom npm prefix, or the statusline running
+    // under a different node than the one that installed it), we cannot know, so we say
+    // NOTHING. Inverting a signal also inverts its failure mode: a probe miss used to
+    // fail silent, and would now fail LOUD and WRONG. Claiming "your defense is off"
+    // when it is on is the same crime as the fabricated CVE counter overlaid above.
+    // Probe + verdict live in rufloAidefenceState/rufloFindRufloRoot (below) so the
+    // three-state logic is unit-testable against fixture trees — it cannot be exercised
+    // from here, where it depends on the real process.execPath.
     var sec = "";
     try {
-      var nmBase = path.join(path.dirname(process.execPath), "..", "lib", "node_modules", "ruflo", "node_modules", "@claude-flow");
-      if (fs.existsSync(path.join(nmBase, "aidefence", "package.json"))) sec = G + "🛡 aidefence on" + R;
+      if (rufloAidefenceState(rufloFindRufloRoot()) === "off") {
+        sec = RED + "⚠ aidefence OFF" + R + DIM + " — no prompt-injection defense · ak sync restores it" + R;
+      }
     } catch(e){}
     // ── daemon visibility (⚙): GLOBAL count of running ruflo daemons, so no daemon
     // is ever invisible (token-burn incident lesson). Machine-global, not per-project,
@@ -282,7 +308,9 @@ function rufloActivationSegments(cwd){
       }
     } catch(e){}
     // ── assemble: one ruflo feature per line (SONA, 📈 RL, ◷ proof FAIL alarm,
-    // aidefence), then a divider, then the agentic-qe line. Each segment renders on its
+    // ⚠ aidefence OFF alarm), then a divider, then the agentic-qe line. The two alarms
+    // are silent in the healthy case, so a well-configured machine shows only the live
+    // metrics. Each segment renders on its
     // OWN line so the live route metrics and the security state are individually scannable
     // and don't wrap. No rule above the SONA line — these are ruflo features and sit flush
     // under ruflo's native lines. The divider matches ruflo's native header width
@@ -298,5 +326,121 @@ function rufloActivationSegments(cwd){
     if (!out.length) return "";
     return "\n" + out.join("\n");
   } catch(e){ return ""; }
+}
+// ── AI-defense probe (companion to the alarm-only segment above) ─────────────
+// Locates the global ruflo install WITHOUT spawning npm (this runs on every render).
+// Returns "" when no candidate resolves — the caller must treat that as "unknown",
+// never as "off".
+function rufloFindRufloRoot(){
+  try {
+    var fs = require("fs"), path = require("path"), os = require("os");
+    var binDir = path.dirname(process.execPath);
+    var cands = [
+      path.join(binDir, "..", "lib", "node_modules", "ruflo"),   // nvm / mise layout
+      path.join(binDir, "node_modules", "ruflo"),                // Windows layout
+    ];
+    // A custom npm prefix (~/.npm-global, npm_config_prefix) is decoupled from the node
+    // binary, so the execPath-derived probes above all miss it — same gap as upstream #2221.
+    var prefixes = [process.env.npm_config_prefix, process.env.PREFIX, path.join(os.homedir(), ".npm-global")];
+    for (var pi = 0; pi < prefixes.length; pi++) {
+      if (prefixes[pi]) cands.push(path.join(prefixes[pi], "lib", "node_modules", "ruflo"));
+    }
+    for (var ci = 0; ci < cands.length; ci++) {
+      if (fs.existsSync(path.join(cands[ci], "package.json"))) return cands[ci];
+    }
+    return "";
+  } catch(e){ return ""; }
+}
+// Three states, not two — the distinction IS the fail-safe. "off" is asserted only on
+// positive evidence: a real ruflo install that does not contain aidefence. Anything we
+// cannot verify is "unknown" and stays silent, because a false "your injection defense
+// is off" would be exactly the fabricated-alarm bug this footer exists to correct.
+// @claude-flow/security is auth/validation primitives, not detection — probing it
+// instead would overstate, so only aidefence counts.
+function rufloAidefenceState(rufloRoot){
+  try {
+    var fs = require("fs"), path = require("path");
+    if (!rufloRoot || !fs.existsSync(path.join(rufloRoot, "package.json"))) return "unknown";
+    var ad = path.join(rufloRoot, "node_modules", "@claude-flow", "aidefence", "package.json");
+    return fs.existsSync(ad) ? "on" : "off";
+  } catch(e){ return "unknown"; }
+}
+// ── security overlay: replaces ruflo's FABRICATED CVE counter with the real scan ──
+// Upstream (@claude-flow/cli dist/src/funnel/local-signals.js, getSecurityStatus) does:
+//     let cvesFixed = 0; const totalCves = 3;
+//     cvesFixed = Math.min(totalCves, scans.length);   // counts FILES, not findings
+// Two independent defects. (1) `totalCves = 3` is a hardcoded constant referring to
+// ruflo's OWN v3 remediation roadmap — CVE-1/2/3 in .claude/agents/v3/v3-security-architect.md
+// are an outdated @anthropic-ai/claude-code dep + SHA-256 hashing + hardcoded creds in
+// THEIR api/auth-service.ts. They are not public CVE IDs and have nothing to do with the
+// project being rendered, so every clean repo is told it has 3 CVEs. (2) `cvesFixed`
+// counts .json files in .claude/security-scans/, so running the very scan the warning
+// tells you to run "fixes" a CVE by writing a file. The counter converges to CLEAN
+// without anything being scanned, let alone fixed. Upstream: ruvnet/ruflo#2694.
+//
+// This overlay reports what the newest scan ACTUALLY found, and never invents a CVE:
+// totalCves/cvesFixed are pinned to 0 so the "⚠ N CVEs" branch can never fire again;
+// real state is carried in `status`, which ruflo's own renderer prints verbatim.
+//   no scan yet        → PENDING    → "🛡 scan pending"  (honest unknown, not green)
+//   findings > 0       → "N ISSUES" → red "🛡 n issues"   (real count from the scan)
+//   clean + fresh      → CLEAN      → "🛡 ✓"
+//   clean + stale >7d  → STALE      → "🛡 scan stale"
+// Returns `upstream` untouched on any unexpected error — a wrong overlay would be worse
+// than the bug, so the failure mode is "no worse than ruflo".
+function rufloLocalSecurity(cwd, upstream){
+  try {
+    var fs = require("fs"), path = require("path");
+    var dir = path.join(cwd, ".claude", "security-scans");
+    var newest = null;
+    try {
+      fs.readdirSync(dir).forEach(function(f){
+        if (f.slice(-5) !== ".json") return;
+        try {
+          var j = JSON.parse(fs.readFileSync(path.join(dir, f), "utf8"));
+          // Prefer the scan's own timestamp; fall back to mtime so a hand-written or
+          // older-format scan file still orders correctly instead of sorting to epoch 0.
+          var t = Date.parse(j && j.timestamp);
+          if (!t) { try { t = fs.statSync(path.join(dir, f)).mtimeMs; } catch(e){ t = 0; } }
+          if (!newest || t > newest.t) newest = { t: t, j: j };
+        } catch(e){}   // unreadable/!JSON scan file: ignore, never let it break the render
+      });
+    } catch(e){}       // no directory => never scanned
+    if (!newest) return { status: "PENDING", cvesFixed: 0, totalCves: 0 };
+    var s = newest.j.summary || {};
+    var n = typeof s.total === "number" ? s.total
+          : (Array.isArray(newest.j.findings) ? newest.j.findings.length : 0);
+    if (n > 0) return { status: n + " ISSUE" + (n === 1 ? "" : "S"), cvesFixed: 0, totalCves: 0 };
+    var staleMs = Number(process.env.RUFLO_SCAN_STALE_MS || 7 * 24 * 3600 * 1000);
+    if (staleMs > 0 && newest.t && (Date.now() - newest.t) > staleMs) {
+      return { status: "STALE", cvesFixed: 0, totalCves: 0 };
+    }
+    return { status: "CLEAN", cvesFixed: 0, totalCves: 0 };
+  } catch(e){ return upstream; }
+}
+// ── insight-row companion to rufloLocalSecurity ──────────────────────────────
+// The fabricated count reaches the render through a SECOND, independent path: the
+// CLI builds the line-3 insight itself (funnel/insights.js securityInsight →
+// `pending = s.totalCves - s.cvesFixed`) and ships it as pre-rendered promo TEXT.
+// Overlaying data.security cannot fix that — the sentence is already baked, so a
+// repo with a clean scan still gets "⚠ 1 CVE pending". This rebuilds that one
+// sentence from the real scan, or drops it when there is nothing to say.
+// Matched on TEXT, not id: promo.js reduces the insight to {text, kind} and throws
+// the id away, so `insight-cves-pending` is not observable by the time we see it.
+// Only ever touches a CVE-worded insight — every other insight/tip/promo passes
+// through untouched, so the funnel rotation is preserved.
+function rufloHonestInsight(promo, sec){
+  try {
+    if (!promo || promo.kind !== "insight" || typeof promo.text !== "string") return promo;
+    if (!/\bCVEs?\b/.test(promo.text)) return promo;   // a different insight — not ours to touch
+    if (!sec) return null;
+    if (sec.status === "PENDING") return { text: "🛡 Security scan pending — Run ruflo security scan --depth full", kind: "insight" };
+    if (sec.status === "STALE") return { text: "🛡 Security scan stale — Run ruflo security scan --depth full", kind: "insight" };
+    var m = /^(\d+) ISSUE/.exec(sec.status || "");
+    if (m) {
+      var n = Number(m[1]);
+      return { text: "⚠ " + n + " security issue" + (n === 1 ? "" : "s") + " found — see .claude/security-scans", kind: "insight" };
+    }
+    return null;   // CLEAN: say nothing. The slot falls blank rather than nagging about a lie.
+  } catch(e){ return promo; }
 }
 /* ruflo-seg:END */
