@@ -45,3 +45,35 @@ test('bsq3IsNative is false for a WASM-fallback install (no binding file)', () =
   assert.equal(bsq3IsNative(dir), false);
   fs.rmSync(dir, { recursive: true, force: true });
 });
+
+test('bsq3Root finds better-sqlite3 hoisted up the node_modules chain', () => {
+  // Real layout: ruflo/node_modules/agentdb resolves better-sqlite3 from the
+  // hoisted ruflo/node_modules/better-sqlite3 — walk up, don't only look nested.
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-natives-hoist-'));
+  const fromDir = path.join(root, 'node_modules', 'agentdb');
+  const hoisted = path.join(root, 'node_modules', 'better-sqlite3');
+  fs.mkdirSync(fromDir, { recursive: true });
+  fs.mkdirSync(hoisted, { recursive: true });
+  fs.writeFileSync(path.join(hoisted, 'package.json'), JSON.stringify({ name: 'better-sqlite3' }));
+  assert.equal(bsq3Root(fromDir), hoisted);
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test('bsq3Root follows a nested→hoisted move in-process (sync convergence bug)', () => {
+  // The false-negative: healNatives resolves better-sqlite3 to a NESTED copy,
+  // then an in-process `npm install` (aidefence) dedupes it away, leaving only a
+  // HOISTED copy. The final proof must resolve to the hoisted copy — reading disk
+  // fresh — not a stale cached root pointing at the removed nested path.
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-natives-move-'));
+  const fromDir = path.join(root, 'node_modules', 'agentdb');
+  const nested = path.join(fromDir, 'node_modules', 'better-sqlite3');
+  const hoisted = path.join(root, 'node_modules', 'better-sqlite3');
+  for (const p of [nested, hoisted]) {
+    fs.mkdirSync(p, { recursive: true });
+    fs.writeFileSync(path.join(p, 'package.json'), JSON.stringify({ name: 'better-sqlite3' }));
+  }
+  assert.equal(bsq3Root(fromDir), nested, 'prefers the nested copy while it exists');
+  fs.rmSync(nested, { recursive: true, force: true }); // simulate npm dedupe mid-sync
+  assert.equal(bsq3Root(fromDir), hoisted, 'resolves to the hoisted copy after the move');
+  fs.rmSync(root, { recursive: true, force: true });
+});
