@@ -49,6 +49,15 @@ export const BUILTIN_BLOCKS = [
     position: 'append',
     detector: { type: 'command', target: 'codex' },
   },
+  {
+    // Surfaces once the RuvNet Brain KB is on disk. `dir` supports ~/ expansion;
+    // uses the default KB path (honoring $RUVNET_BRAIN_KB in the detector is a
+    // minor follow-up — the override is rare).
+    slug: 'ruvnet-brain-reference',
+    template: 'ruvnet-brain-reference.md',
+    position: 'append',
+    detector: { type: 'dir', target: '~/.cache/ruvnet-brain/kb' },
+  },
 ];
 
 /** Evaluate a declarative detector. Returns boolean. */

@@ -7,9 +7,10 @@ import fs from 'node:fs';
 import path from 'node:path';
 import readline from 'node:readline/promises';
 import { run as runCmd } from '../lib/exec.mjs';
-import { stripBlock, BEGIN } from '../lib/blocks.mjs';
+import { stripBlock, BEGIN, BUILTIN_BLOCKS } from '../lib/blocks.mjs';
 import { unregister } from '../lib/mcp.mjs';
 import { loadKitConfig } from '../lib/config.mjs';
+import { present as rbPresent } from '../lib/ruvnet-brain.mjs';
 import * as paths from '../lib/paths.mjs';
 import { ok, warn, info } from '../lib/output.mjs';
 
@@ -57,11 +58,14 @@ export async function run({ flags }) {
   const dry = flags['dry-run'];
   const act = (msg, fn) => { if (dry) info(`[dry-run] ${msg}`); else { fn(); ok(msg); } };
 
-  // 1. CLAUDE.md managed blocks (all ruflo-* slugs + any custom slugs from kit.json)
+  // 1. CLAUDE.md managed blocks: every built-in slug (registry-driven, so
+  // non-ruflo blocks like ruvnet-brain-reference are covered), the legacy
+  // ruflo-* pattern as a catch-all, plus any custom slugs from kit.json.
   const md = paths.claudeMdPath();
   if (fs.existsSync(md)) {
     let content = fs.readFileSync(md, 'utf8');
     const slugs = new Set([...content.matchAll(/<!-- BEGIN (ruflo-[\w-]+) -->/g)].map((m) => m[1]));
+    for (const b of BUILTIN_BLOCKS) if (content.includes(BEGIN(b.slug))) slugs.add(b.slug);
     for (const b of loadKitConfig().customBlocks) if (content.includes(BEGIN(b.slug))) slugs.add(b.slug);
     if (slugs.size) {
       act(`stripped ${slugs.size} managed block(s) from ~/.claude/CLAUDE.md (backup written)`, () => {
@@ -133,6 +137,12 @@ export async function run({ flags }) {
       const r = await runCmd('npm', ['uninstall', '-g', pkg], { timeout: 300_000 });
       (r.code === 0 ? ok : warn)(`${pkg}: ${r.code === 0 ? 'removed' : 'could not remove'}`);
     } else info(`kept ${pkg}`);
+  }
+
+  // RuvNet Brain: a user-scope plugin + a large (~512 MB) KB cache — left in
+  // place (like ruflo/aqe) rather than force-deleted. Point at the manual path.
+  if (rbPresent()) {
+    info('RuvNet Brain left installed — remove manually: `claude plugin uninstall ruvnet-brain@ruvnet-brain` + `rm -rf ~/.cache/ruvnet-brain`');
   }
 
   ok('uninstall complete — project data (.swarm/.claude-flow/.agentic-qe) untouched');

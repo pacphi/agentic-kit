@@ -7,6 +7,7 @@ import { kitConfigPath, legacyKitConfigPath } from './paths.mjs';
 
 const DEFAULTS = {
   aqe: true,            // manage agentic-qe alongside ruflo
+  ruvnetBrain: true,    // install/manage the RuvNet Brain (offline KB + search_ruvnet MCP)
   security: true,       // run the security verification surface by default
   mcp: { register: true, excludeFamilies: [] },
   // Frontier hosts + LLM providers (prompts-once via `ak x provider pick`).

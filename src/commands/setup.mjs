@@ -15,6 +15,7 @@ import { register as mcpRegister, applyExclusions } from '../lib/mcp.mjs';
 import { loadKitConfig, saveKitConfig } from '../lib/config.mjs';
 import { HOSTS, applyHosts, applyProviders, ensureDualAgents, hostInstallState, installHost, applyAqeRouter } from '../lib/providers.mjs';
 import { installedVersion } from '../lib/versions.mjs';
+import * as rb from '../lib/ruvnet-brain.mjs';
 import { readJson, writeJsonWithBackup } from '../lib/settings.mjs';
 import { scalar, checkpoint, withDb } from '../lib/sqlite.mjs';
 import * as paths from '../lib/paths.mjs';
@@ -26,6 +27,7 @@ export const options = {
   minimal: { type: 'boolean', default: false },
   project: { type: 'boolean', default: false },
   'no-aqe': { type: 'boolean', default: false },
+  'no-ruvnet-brain': { type: 'boolean', default: false },
   'no-security': { type: 'boolean', default: false },
   reconfigure: { type: 'boolean', default: false },
 };
@@ -42,6 +44,7 @@ Options:
   --project        force project-scope setup even outside a git repo
   --minimal        machine scope only; skip project setup
   --no-aqe         skip agentic-qe install + configuration
+  --no-ruvnet-brain  skip the RuvNet Brain (~512 MB offline KB) setup step
   --no-security    skip the security-surface verification
   --reconfigure    re-run interactive choices, ignoring saved kit.json
   --yes            accept all prompts (non-interactive)
@@ -62,7 +65,7 @@ const ask = async (q, dflt, yes) => {
 
 export async function run_machine({ flags, pkgRoot, cfg }) {
   heading('machine setup');
-  if (flags['dry-run']) { info('dry-run: would ensure packages, deploy skill, merge blocks, offer MCP'); return true; }
+  if (flags['dry-run']) { info('dry-run: would ensure packages (incl. ruvnet-brain), deploy skill, merge blocks, offer MCP'); return true; }
 
   // 1. global packages
   if (!installedVersion('ruflo')) {
@@ -77,6 +80,15 @@ export async function run_machine({ flags, pkgRoot, cfg }) {
       const r = await heal.upgradePackage('agentic-qe');
       (r.ok ? ok : warn)(`agentic-qe: ${r.detail}`);
     } else ok(`agentic-qe ${installedVersion('agentic-qe')} present`);
+  }
+  if (cfg.ruvnetBrain) {
+    if (!rb.present()) {
+      if (await ask('Install the RuvNet Brain (~512 MB offline KB, powers the search_ruvnet MCP)?', true, flags.yes)) {
+        info('installing ruvnet-brain via npx (downloads the KB — may take a while)…');
+        const r = await heal.installRuvnetBrain();
+        (r.ok ? ok : warn)(`ruvnet-brain: ${r.detail}`);
+      } else warn('ruvnet-brain skipped — install later with `ak sync` (or `ak setup --no-ruvnet-brain` to stop asking)');
+    } else ok(`ruvnet-brain ${rb.installedVersion() ?? ''} present`);
   }
 
   // 2. heal natives + the #2670 aidefence gap up front
@@ -261,6 +273,7 @@ ruflo swarm init --topology hierarchical --max-agents 15 --strategy specialized
 export async function run({ flags, pkgRoot }) {
   const cfg = loadKitConfig();
   if (flags['no-aqe']) cfg.aqe = false;
+  if (flags['no-ruvnet-brain']) cfg.ruvnetBrain = false;
   if (flags['no-security']) cfg.security = false;
 
   if (!(await run_machine({ flags, pkgRoot, cfg }))) return 1;

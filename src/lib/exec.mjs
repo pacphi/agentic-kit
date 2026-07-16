@@ -7,7 +7,7 @@ import { isWindows } from './paths.mjs';
 
 const pexecFile = promisify(execFile);
 
-const CMD_SHIMS = new Set(['npm', 'claude', 'ruflo', 'aqe', 'claude-flow']);
+const CMD_SHIMS = new Set(['npm', 'npx', 'claude', 'ruflo', 'aqe', 'claude-flow']);
 
 /** Run a command; never throws. Returns {code, stdout, stderr}. */
 export async function run(cmd, args = [], opts = {}) {
