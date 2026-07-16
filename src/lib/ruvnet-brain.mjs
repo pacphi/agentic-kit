@@ -77,26 +77,49 @@ export async function latestVersion({ timeout = 8000 } = {}) {
   }
 }
 
-/** Presence + drift, TTL-cached in kit.json (mirrors selfDrift in versions.mjs)
- *  so status/nudge hit GitHub at most once per window. force=true bypasses the
- *  cache. `latest` is null when the release check is unavailable — treat that as
- *  "unknown", never "outdated". */
+/** Record the release tag ak just pulled, so future drift compares like-for-like.
+ *  ruvnet-brain has THREE unrelated version tracks — the plugin semver
+ *  (plugin.json, e.g. 0.5.0-dev), the KB bundle's brainVersion (e.g. v0.3.0-dev),
+ *  and the GitHub *release* tags the installer downloads by (e.g. v3.0.1). None of
+ *  them is stamped on disk in the release namespace, so ak keeps its own record of
+ *  "which release did I last install" in kit.json. */
+export function recordInstalledRelease(tag, cfg = loadKitConfig()) {
+  if (!tag) return;
+  const cur = cfg.versionCheck?.ruvnetBrain ?? {};
+  cfg.versionCheck = { ...cfg.versionCheck, ruvnetBrain: { ...cur, installedRelease: String(tag).replace(/^v/, '') } };
+  try { saveKitConfig(cfg); } catch { /* read-only envs: best-effort */ }
+}
+
+/** Pure drift classifier — both sides in the RELEASE-TAG namespace.
+ *  installedRelease = the release ak last pulled (null = ak never installed it,
+ *  e.g. a manual/pre-existing install); latest = GitHub releases/latest.
+ *  A present-but-unstamped install counts as outdated when a latest is known, so
+ *  `ak sync` refreshes it onto ak's managed track once, then converges. `latest`
+ *  null (offline / rate-limited) is always "unknown", never "outdated". */
+export function classifyDrift({ present: isPresent, installedRelease, latest }) {
+  if (!isPresent) return { present: false, outdated: false, unversioned: false, installedRelease: null, latest: latest ?? null };
+  const unversioned = !installedRelease;
+  const outdated = !!(latest && (unversioned || cmpVersions(latest, installedRelease) > 0));
+  return { present: true, outdated, unversioned, installedRelease: installedRelease ?? null, latest: latest ?? null };
+}
+
+/** Presence + release drift, TTL-cached in kit.json (mirrors selfDrift in
+ *  versions.mjs) so status/nudge hit GitHub at most once per window. force=true
+ *  bypasses the cache. */
 export async function drift({ force = false } = {}) {
-  const installed = installedVersion();
   const cfg = loadKitConfig();
   const ttlMs = (cfg.versionCheck?.ttlHours ?? 24) * 3600_000;
-  const cached = cfg.versionCheck?.ruvnetBrain;
-  const fresh = !force && cached?.last && Date.now() - cached.last < ttlMs;
+  const cached = cfg.versionCheck?.ruvnetBrain ?? {};
+  const fresh = !force && cached.last && Date.now() - cached.last < ttlMs;
   let latest = fresh ? cached.latest ?? null : null;
   if (!fresh) {
     latest = await latestVersion();
-    cfg.versionCheck = { ...cfg.versionCheck, ruvnetBrain: { last: Date.now(), latest } };
+    // Preserve installedRelease across the cache write.
+    cfg.versionCheck = { ...cfg.versionCheck, ruvnetBrain: { ...cached, last: Date.now(), latest } };
     try { saveKitConfig(cfg); } catch { /* read-only envs: next call re-fetches */ }
   }
   return {
-    present: present(),
-    installed,
-    latest,
-    outdated: !!(installed && latest && cmpVersions(latest, installed) > 0),
+    ...classifyDrift({ present: present(), installedRelease: cached.installedRelease ?? null, latest }),
+    pluginVersion: installedVersion(),
   };
 }

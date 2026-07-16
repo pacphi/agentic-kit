@@ -4,7 +4,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import {
-  kbDir, present, installedVersion, INSTALL_SPEC, INSTALL_ARGS, REPO,
+  kbDir, present, installedVersion, classifyDrift,
+  INSTALL_SPEC, INSTALL_ARGS, REPO,
 } from '../../src/lib/ruvnet-brain.mjs';
 import { BUILTIN_BLOCKS, detect } from '../../src/lib/blocks.mjs';
 import { loadKitConfig, saveKitConfig } from '../../src/lib/config.mjs';
@@ -50,6 +51,32 @@ test('present() is true when the KB entrypoint exists (forge-mcp-all.mjs)', () =
 test('installedVersion() returns null or a version string (never throws)', () => {
   const v = installedVersion();
   assert.ok(v === null || typeof v === 'string');
+});
+
+test('classifyDrift compares in the RELEASE-TAG namespace and converges', () => {
+  // absent → never outdated
+  assert.deepEqual(
+    classifyDrift({ present: false, installedRelease: null, latest: '3.0.1' }),
+    { present: false, outdated: false, unversioned: false, installedRelease: null, latest: '3.0.1' });
+
+  // present + ak-stamped older release + newer latest → outdated
+  const older = classifyDrift({ present: true, installedRelease: '3.0.0', latest: '3.0.1' });
+  assert.equal(older.outdated, true);
+  assert.equal(older.unversioned, false);
+
+  // present + stamp == latest → converged (this is what a refresh achieves; the
+  // OLD bug compared plugin semver 0.5.0-dev vs 3.0.1 and could never reach this)
+  assert.equal(classifyDrift({ present: true, installedRelease: '3.0.1', latest: '3.0.1' }).outdated, false);
+
+  // present but ak never stamped a release (manual/pre-existing) + latest known →
+  // surfaced as outdated ONCE so `ak sync` pulls it onto the managed track
+  const unstamped = classifyDrift({ present: true, installedRelease: null, latest: '3.0.1' });
+  assert.equal(unstamped.outdated, true);
+  assert.equal(unstamped.unversioned, true);
+
+  // latest unknown (offline / rate-limited) → never falsely outdated
+  assert.equal(classifyDrift({ present: true, installedRelease: null, latest: null }).outdated, false);
+  assert.equal(classifyDrift({ present: true, installedRelease: '3.0.0', latest: null }).outdated, false);
 });
 
 test('BUILTIN_BLOCKS carries the ruvnet-brain-reference row gated on the KB dir', async () => {
