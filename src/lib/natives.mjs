@@ -5,7 +5,6 @@
 // `security defend` needs (dropped from the 3.28 tree — ruvnet/ruflo#2670).
 import fs from 'node:fs';
 import path from 'node:path';
-import { createRequire } from 'node:module';
 import { rufloNodeModules, aqeRoot } from './paths.mjs';
 
 /** agentdb locations under the global ruflo tree (mirrors ruflo-patch-native). */
@@ -16,15 +15,21 @@ export function agentdbLocations() {
     .filter((p) => fs.existsSync(p));
 }
 
-/** Package root of better-sqlite3 as resolved from `fromDir` (real Node
- *  resolution), or null if not resolvable. */
+/** Package root of better-sqlite3 as resolved from `fromDir`, or null if not
+ *  found. Walks up the node_modules chain reading disk fresh on every call —
+ *  the node resolution equivalent, but WITHOUT createRequire().resolve(), whose
+ *  process-wide cache (Module._pathCache/_realpathCache) goes stale after an
+ *  in-process `npm install` reshapes the tree. That staleness made `sync`'s
+ *  final convergence proof report a false WASM fallback on a location the
+ *  earlier heal (and a fresh process) both saw as native. */
 export function bsq3Root(fromDir) {
-  try {
-    const req = createRequire(path.join(fromDir, 'noop.js'));
-    const entry = req.resolve('better-sqlite3'); // …/better-sqlite3/lib/index.js
-    return path.join(entry.slice(0, entry.lastIndexOf(`${path.sep}better-sqlite3${path.sep}`)), 'better-sqlite3');
-  } catch {
-    return null;
+  let dir = path.resolve(fromDir);
+  for (;;) {
+    const cand = path.join(dir, 'node_modules', 'better-sqlite3');
+    if (fs.existsSync(path.join(cand, 'package.json'))) return cand;
+    const parent = path.dirname(dir);
+    if (parent === dir) return null; // reached filesystem root
+    dir = parent;
   }
 }
 
