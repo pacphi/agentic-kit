@@ -11,6 +11,7 @@ import { listDaemons, staleDaemons, reap } from '../lib/daemons.mjs';
 import { loadKitConfig } from '../lib/config.mjs';
 import { HOSTS, applyHosts, applyProviders, hostInstallState, installHost, applyAqeRouter } from '../lib/providers.mjs';
 import { driftReport, selfDrift } from '../lib/versions.mjs';
+import { pruneNpxStale } from '../lib/npx.mjs';
 import * as paths from '../lib/paths.mjs';
 import { ok, warn, fail, bold, dim } from '../lib/output.mjs';
 
@@ -81,6 +82,14 @@ export async function run({ flags, pkgRoot }) {
   // plan never flagged natives.
   if (subsystems.has('natives') || subsystems.has('versions') || subsystems.has('security')) {
     report('natives', await heal.healNatives());
+  }
+  // npx: prune cached envs serving outdated ruflo-family code — the statusline/
+  // hook `npx --prefer-offline` fallbacks execute these verbatim, so a stale env
+  // keeps retired defects (the fabricated CVE counter) alive on an upgraded
+  // machine. Runs on `versions` too: an upgrade is precisely what turns a
+  // previously-current cache stale.
+  if (subsystems.has('npx') || subsystems.has('versions')) {
+    report('npx', pruneNpxStale());
   }
   if (subsystems.has('aqe')) {
     report('rvf', heal.healRvf(paths.projectAqeDir(cwd)));
