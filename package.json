@@ -17,7 +17,7 @@
     "docs/TROUBLESHOOTING.md"
   ],
   "scripts": {
-    "test": "node --test \"tests/kit/*.test.mjs\" && node tests/statusline-segments.test.cjs",
+    "test": "node --test \"tests/kit/*.test.mjs\" && node tests/statusline-segments.test.cjs && node tests/statusline-brain.test.cjs && node tests/agentdb.test.cjs && node tests/health-history.test.cjs && node tests/harvest.test.cjs && node tests/dashboard.test.cjs",
     "typecheck": "tsc -p tsconfig.json",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
