@@ -24,36 +24,50 @@ const ALLOW_SCRIPTS = [
 // npm >=11.17) — it is a global-install flag only. Plain installs still get
 // native better-sqlite3 because 12.x resolves a usable prebuilt without a
 // lifecycle script (verified live 2026-07-14).
-async function npmInstallInto(dir, spec) {
-  return run('npm', ['install', spec, '--no-save', '--no-audit', '--no-fund'],
+async function npmInstallInto(dir, spec, runner = run) {
+  return runner('npm', ['install', spec, '--no-save', '--no-audit', '--no-fund'],
     { cwd: dir, timeout: 300_000 });
 }
 
 const failTail = (r) =>
   `FAILED (${(r.stderr || `exit ${r.code}`).trim().split('\n').slice(-2).join(' ').slice(0, 200)})`;
 
-/** Deterministic native better-sqlite3 for one location — an escalation
- *  ladder, verifying after each rung, stopping at the first binding:
- *  1. plain install — enough on npm <11.17, or when npm's content store
- *     already holds a built copy of the exact version (why plain installs
- *     look like they "work": it depends on cache history, not on scripts).
- *  2. npm approve-scripts + rebuild — npm ≥11.17's sanctioned path for the
- *     blocked install script (approve-scripts pins the exact version into
- *     the location's package.json; harmless no-op failure on older npm).
- *     rebuild also recovers a stale half-built build/ dir.
- *  3. run the package's own install script directly — explicit `npm run`
- *     is user-invoked and never gated by allow-scripts. */
-export async function ensureNativeBsq3(dir) {
-  await npmInstallInto(dir, 'better-sqlite3@^12');
-  if (bsq3IsNative(dir)) return { ok: true, how: 'native installed' };
-  await run('npm', ['approve-scripts', 'better-sqlite3'], { cwd: dir, timeout: 60_000 });
-  let r = await run('npm', ['rebuild', 'better-sqlite3'], { cwd: dir, timeout: 300_000 });
-  if (bsq3IsNative(dir)) return { ok: true, how: 'native rebuilt (scripts approved)' };
-  const pkgRoot = bsq3Root(dir);
-  if (pkgRoot) {
-    r = await run('npm', ['run', 'install'], { cwd: pkgRoot, timeout: 300_000 });
-    if (bsq3IsNative(dir)) return { ok: true, how: 'native built via package install script' };
+/** Deterministic native better-sqlite3 for one location.
+ *
+ *  Heals the copy that node resolution ALREADY finds, IN PLACE. Installing
+ *  better-sqlite3 into `dir` itself is the last resort, not the first rung:
+ *  a `--no-save` install plants a copy no package.json in the tree declares,
+ *  and the next `npm install` into the ruflo root (healAidefence's, say)
+ *  reconciles the tree and PRUNES it as extraneous — silently reverting the
+ *  heal to the shared, half-built copy underneath. That is exactly how a sync
+ *  reported "native installed" and then failed its own convergence proof with
+ *  a WASM fallback: both reports were true, 30 seconds apart.
+ *
+ *  Ladder, verifying after each rung, stopping at the first binding:
+ *  1. the resolved package's own install script — `prebuild-install ||
+ *     node-gyp rebuild`, which fetches a prebuilt when one exists. Explicit
+ *     `npm run` is user-invoked and never gated by npm >=11.17 allow-scripts,
+ *     and it recovers a stale half-built build/ dir.
+ *  2. npm approve-scripts + rebuild — npm >=11.17's sanctioned path for the
+ *     blocked install script (harmless no-op failure on older npm).
+ *  3. install a copy into `dir` — only when better-sqlite3 is not resolvable
+ *     from `dir` at all, so there is nothing in place to build.
+ *
+ *  `runner` is injectable so the ladder is testable without npm or a network. */
+export async function ensureNativeBsq3(dir, { runner = run } = {}) {
+  let pkgRoot = bsq3Root(dir);
+  if (!pkgRoot) {
+    await npmInstallInto(dir, 'better-sqlite3@^12', runner);
+    if (bsq3IsNative(dir)) return { ok: true, how: 'native installed' };
+    pkgRoot = bsq3Root(dir);
+    if (!pkgRoot) return { ok: false, how: 'FAILED (better-sqlite3 not resolvable)' };
   }
+  // node-gyp compiling sqlite3 from source is slow; 300s truncated it mid-build.
+  await runner('npm', ['run', 'install'], { cwd: pkgRoot, timeout: 600_000 });
+  if (bsq3IsNative(dir)) return { ok: true, how: 'native built in place' };
+  await runner('npm', ['approve-scripts', 'better-sqlite3'], { cwd: pkgRoot, timeout: 60_000 });
+  const r = await runner('npm', ['rebuild', 'better-sqlite3'], { cwd: pkgRoot, timeout: 600_000 });
+  if (bsq3IsNative(dir)) return { ok: true, how: 'native rebuilt (scripts approved)' };
   return { ok: false, how: failTail(r) };
 }
 
