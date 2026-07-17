@@ -164,9 +164,12 @@ export async function collect({ pkgRoot, cwd = process.cwd() }) {
   if (fs.existsSync(aqeDir)) {
     const findings = scanRvf(aqeDir);
     if (findings.length) {
+      // On aqe < 3.12.3 only: a stale-lock or oversized artifact aqe can't yet
+      // self-heal. aqe >= 3.12.3 makes scanRvf return nothing here (it repairs
+      // its own stores non-destructively), so this row goes quiet on upgrade.
       rows.push(row('aqe', 'fail',
-        `${findings.length} corrupt/oversized RVF artifact(s) — aqe will drop OFF ruvector (FsyncFailed)`,
-        'sync quarantines them (rebuilt from memory.db)'));
+        `${findings.length} stale/oversized RVF artifact(s) — aqe will drop OFF ruvector (FsyncFailed)`,
+        'sync quarantines them (aqe 3.12.3 self-heals this)'));
     } else {
       rows.push(row('aqe', 'ok', 'agentic-qe initialized here; RVF store healthy'));
     }
