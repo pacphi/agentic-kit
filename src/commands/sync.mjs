@@ -61,9 +61,6 @@ export async function run({ flags, pkgRoot }) {
       if (d.outdated || !d.installed) report(`upgrade ${d.pkg}`, await heal.upgradePackage(d.pkg));
     }
   }
-  if (subsystems.has('natives') || subsystems.has('versions')) {
-    report('natives', await heal.healNatives());
-  }
   // ruvnet-brain: install if absent / re-run installer to pull latest when
   // drifted (force bypasses the installer's skip-if-present). Not an npm pkg, so
   // it rides its own branch rather than the driftReport loop above.
@@ -73,6 +70,17 @@ export async function run({ flags, pkgRoot }) {
   if (subsystems.has('security') || subsystems.has('versions')) {
     report('aidefence', await heal.healAidefence());
     report('aqe solver', await heal.healAqeSolver());
+  }
+  // natives LAST among the npm-tree mutations. Every agentdb location resolves up
+  // to the single shared ruflo/node_modules/better-sqlite3, so any later `npm
+  // install` into the ruflo/aqe root re-resolves that copy and drops the freshly
+  // built binding — project-scoped installs can't pass --allow-scripts, so the
+  // build script never re-runs and a half-built build/ dir (obj/, sqlite3.a, no
+  // .node) is left behind. Healing here means nothing reshapes the tree after us.
+  // Runs on `security` too: an aidefence install wipes the binding even when the
+  // plan never flagged natives.
+  if (subsystems.has('natives') || subsystems.has('versions') || subsystems.has('security')) {
+    report('natives', await heal.healNatives());
   }
   if (subsystems.has('aqe')) {
     report('rvf', heal.healRvf(paths.projectAqeDir(cwd)));
