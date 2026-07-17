@@ -1,6 +1,6 @@
 {
   "name": "@pacphi/agentic-kit",
-  "version": "4.0.0-alpha.16",
+  "version": "4.0.0-alpha.17",
   "description": "Machine-level setup, healing, and verification kit for your AI agent stack (ruflo/claude-flow, agentic-qe, Claude Code glue) — cross-platform, zero-dependency",
   "type": "module",
   "bin": {
