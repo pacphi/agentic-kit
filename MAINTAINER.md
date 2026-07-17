@@ -24,7 +24,7 @@ release this kit. User-facing docs live in [README.md](README.md); this file is 
 
 ### CLI shape (`bin/agentic-kit.mjs`)
 
-- **Porcelain** (daily): `setup`, `status`, `sync`, `uninstall`. Bare `ak` → `status --hint`.
+- **Porcelain** (daily): `setup`, `status`, `sync`, `dashboard`, `uninstall`. Bare `ak` → `status --hint`. (`dashboard` is also reachable as `ak x dashboard`.)
 - **Plumbing** (power users): `ak x daemon-gc | mcp | reference | verify | improvement-eval`.
 - Each command module exports `options` (a `parseArgs` config) and `run({ flags, positionals, pkgRoot })`.
 - A best-effort drift nudge runs after non-`sync`, non-`--json` commands.

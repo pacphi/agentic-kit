@@ -14,7 +14,7 @@ export const options = {
   'no-open': { type: 'boolean', default: false },
 };
 
-export const help = `ak x dashboard — read-only local health dashboard (localhost only)
+export const help = `ak dashboard — read-only local health dashboard (localhost only)  [alias: ak x dashboard]
 
 Serves a self-contained web panel that visualizes the same subsystem rows
 \`ak status\` reports — versions, natives, security, learning, providers, hosts,

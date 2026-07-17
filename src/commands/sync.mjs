@@ -16,7 +16,7 @@ import { nativesStatus, securityPresent } from '../lib/natives.mjs';
 import { readJson } from '../lib/settings.mjs';
 import { appendToConfig } from '../lib/health-history.mjs';
 import * as paths from '../lib/paths.mjs';
-import { ok, warn, fail, bold, dim } from '../lib/output.mjs';
+import { ok, warn, fail, info, bold, dim } from '../lib/output.mjs';
 
 export const options = {
   'dry-run': { type: 'boolean', default: false },
@@ -171,7 +171,11 @@ export async function run({ flags, pkgRoot }) {
   } catch { /* health snapshot is best-effort — never fail a sync over it */ }
 
   const remaining = after.filter((r) => r.level === 'fail');
-  if (remaining.length === 0) { ok(bold('converged — no failing subsystems')); return 0; }
+  if (remaining.length === 0) {
+    ok(bold('converged — no failing subsystems'));
+    info(dim('📊 dashboard: run `ak dashboard` → opens http://127.0.0.1:7431 (local, read-only)'));
+    return 0;
+  }
   for (const r of remaining) fail(`still failing: [${r.subsystem}] ${r.message}`);
   return 1;
 }

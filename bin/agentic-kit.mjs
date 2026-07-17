@@ -12,6 +12,7 @@ const PORCELAIN = {
   status: () => import('../src/commands/status.mjs'),
   sync: () => import('../src/commands/sync.mjs'),
   setup: () => import('../src/commands/setup.mjs'),
+  dashboard: () => import('../src/commands/x/dashboard.mjs'),
   uninstall: () => import('../src/commands/uninstall.mjs'),
 };
 
@@ -32,6 +33,7 @@ Usage (ak = alias of agentic-kit):
   ak setup           first-time setup (machine and/or this project)    [--project] [--minimal] [--yes]
   ak status          read-only dashboard: what's true, what's drifted  [--json] [--deep]
   ak sync            converge to good: upgrade + heal + verify          [--dry-run] [--no-upgrade]
+  ak dashboard       open the local web dashboard (localhost; auto-opens browser)  [--port N] [--no-open]
   ak uninstall       leave cleanly                                      [--this-project] [--purge]
 
   When in doubt: ak sync

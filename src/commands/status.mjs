@@ -362,6 +362,7 @@ export async function run({ flags, pkgRoot }) {
     console.log('');
     if (worst === 'ok') console.log(`${glyph('ok')} all healthy — nothing to do`);
     else console.log(`${actionable.length} item(s) need attention — run: ${bold('ak sync')}${worst === 'fail' ? '' : dim('  (or --dry-run to preview)')}`);
+    console.log(dim('📊 ak dashboard — open the local web dashboard (http://127.0.0.1:7431)'));
   }
   return worst === 'fail' ? 1 : 0;
 }

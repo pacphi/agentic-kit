@@ -20,7 +20,7 @@ import * as adb from '../lib/agentdb.mjs';
 import { readJson, writeJsonWithBackup } from '../lib/settings.mjs';
 import { scalar, checkpoint, withDb } from '../lib/sqlite.mjs';
 import * as paths from '../lib/paths.mjs';
-import { ok, warn, fail, info, heading, bold } from '../lib/output.mjs';
+import { ok, warn, fail, info, heading, bold, dim } from '../lib/output.mjs';
 
 export const options = {
   'dry-run': { type: 'boolean', default: false },
@@ -300,5 +300,6 @@ export async function run({ flags, pkgRoot }) {
   }
   console.log('');
   ok(bold('setup complete — `agentic-kit` anytime for status, `ak sync` after upgrades'));
+  info(dim('📊 dashboard: run `ak dashboard` → opens http://127.0.0.1:7431 (local, read-only)'));
   return 0;
 }
