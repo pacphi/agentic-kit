@@ -11,6 +11,7 @@ import { agentdbLocations, bsq3IsNative, bsq3Root, aidefencePresent } from './na
 import { KIT_PKG } from './versions.mjs';
 import { scanRvf, quarantine } from './rvf.mjs';
 import { INSTALL_SPEC, INSTALL_ARGS, present as rbPresent, latestVersion as rbLatest, recordInstalledRelease as rbRecord } from './ruvnet-brain.mjs';
+import { PKG as ADB_PKG, present as adbPresent, coherence as adbCoherence } from './agentdb.mjs';
 
 // Packages whose install scripts must run for natives to build (npm >=11.17
 // blocks them by default). Curated on the live 3.28/3.12.2 upgrade.
@@ -151,6 +152,27 @@ export async function installRuvnetBrain({ force = false } = {}) {
   // A non-zero exit can still leave a usable install (post-verify smoke test may
   // fail offline); report the tail but reflect actual presence.
   return { ok: rbPresent(), detail: (r.stderr || `exit ${r.code}`).trim().split('\n').slice(-2).join(' ').slice(0, 200) };
+}
+
+/** Ensure the standalone agentdb CLI is present AND coherent with ruflo's
+ *  bundled agentdb. Pins the global to the bundled version (not npm-latest) so
+ *  the shared cognitive store never skews on the core version — a core skew is
+ *  the corruption risk this heal exists to prevent. Idempotent: a no-op when
+ *  already present and coherent. */
+export async function healAgentdb() {
+  const c = adbCoherence();
+  // Already present and coherent (identical or prerelease-only diff) → nothing.
+  if (c.present && c.ok && c.skew !== 'core') {
+    return { ok: true, detail: `present ${c.global}${c.skew === 'prerelease' ? ` (bundled ${c.bundled}; prerelease diff ok)` : ' (coherent with ruflo)'}` };
+  }
+  // Pin to ruflo's bundled version; fall back to latest only when unknown.
+  const spec = c.target ? `${ADB_PKG}@${c.target}` : `${ADB_PKG}@latest`;
+  const r = await run('npm', ['install', '-g', `--allow-scripts=${ALLOW_SCRIPTS}`, spec], { timeout: 600_000 });
+  if (r.code !== 0) {
+    return { ok: adbPresent(), detail: (r.stderr || `exit ${r.code}`).trim().split('\n').slice(-2).join(' ').slice(0, 200) };
+  }
+  const verb = !c.present ? 'installed' : 'repaired coherence →';
+  return { ok: true, detail: `${verb} ${c.target ?? 'latest'} (matches ruflo's bundled agentdb)` };
 }
 
 /** Stop all ruflo daemons before an upgrade (3.27+; best-effort). */

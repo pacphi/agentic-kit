@@ -3,7 +3,8 @@
 // (set by bare invocation) appends exactly one suggested next action.
 import fs from 'node:fs';
 import path from 'node:path';
-import { glyph, dim, bold } from '../lib/output.mjs';
+import { glyph, dim, bold, warn } from '../lib/output.mjs';
+import { loadRing, detectRegression } from '../lib/health-history.mjs';
 import * as paths from '../lib/paths.mjs';
 import { nativesStatus, aidefencePresent, securityPresent } from '../lib/natives.mjs';
 import { scanNpxStale } from '../lib/npx.mjs';
@@ -15,6 +16,7 @@ import { loadKitConfig } from '../lib/config.mjs';
 import { driftReport, selfDrift } from '../lib/versions.mjs';
 import { upstreamCveCounterFabricated, fixStatusline } from '../lib/statusline.mjs';
 import { drift as ruvnetBrainDrift } from '../lib/ruvnet-brain.mjs';
+import { coherence as adbCoherence } from '../lib/agentdb.mjs';
 import { readJson } from '../lib/settings.mjs';
 import { have } from '../lib/exec.mjs';
 import { HOSTS, settingsTarget, isDefault, managedEnv, MANAGED_ENV_KEYS, hostInstallState, aqeRouterFile } from '../lib/providers.mjs';
@@ -172,6 +174,25 @@ export async function collect({ pkgRoot, cwd = process.cwd() }) {
     }
   } else {
     rows.push(row('aqe', 'info', 'agentic-qe not initialized in this project'));
+  }
+
+  // agentdb (data-plane CLI `ak x harvest` drives). Pinned to ruflo's BUNDLED
+  // agentdb so the shared cognitive store never skews on the core version.
+  if (cfg.agentdb === false) {
+    rows.push(row('agentdb', 'info', 'agentdb management disabled in kit.json'));
+  } else {
+    const c = adbCoherence();
+    if (!c.present) {
+      rows.push(row('agentdb', 'warn', 'agentdb CLI not installed (harvest write path unavailable)',
+        "setup/sync installs it (pinned to ruflo's bundled agentdb)"));
+    } else if (c.skew === 'core') {
+      rows.push(row('agentdb', 'warn',
+        `agentdb ${c.global} skewed from ruflo-bundled ${c.bundled} — shared-store corruption risk`,
+        "sync repins agentdb to ruflo's bundled version"));
+    } else {
+      rows.push(row('agentdb', 'ok',
+        `agentdb ${c.global}${c.bundled ? ` (coherent with ruflo${c.skew === 'prerelease' ? ' — prerelease diff' : ''})` : ''}`));
+    }
   }
 
   // MCP
@@ -332,6 +353,9 @@ export async function run({ flags, pkgRoot }) {
     last = r.subsystem;
     console.log(`  ${glyph(r.level)} ${label.padEnd(11)} ${r.message}${r.fix ? dim(`  → ${r.fix}`) : ''}`);
   }
+
+  // health-history: alarm on any backslide since the previous sync snapshot.
+  for (const reg of detectRegression(loadRing(loadKitConfig()))) warn(`regression: ${reg.message}`);
 
   if (flags.hint) {
     const actionable = rows.filter((r) => r.fix);

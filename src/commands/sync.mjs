@@ -8,10 +8,13 @@ import { fixStatusline } from '../lib/statusline.mjs';
 import { registry, syncBlocks } from '../lib/blocks.mjs';
 import { register as mcpRegister, applyExclusions } from '../lib/mcp.mjs';
 import { listDaemons, staleDaemons, reap } from '../lib/daemons.mjs';
-import { loadKitConfig } from '../lib/config.mjs';
+import { loadKitConfig, saveKitConfig } from '../lib/config.mjs';
 import { HOSTS, applyHosts, applyProviders, hostInstallState, installHost, applyAqeRouter } from '../lib/providers.mjs';
 import { driftReport, selfDrift } from '../lib/versions.mjs';
 import { pruneNpxStale } from '../lib/npx.mjs';
+import { nativesStatus, securityPresent } from '../lib/natives.mjs';
+import { readJson } from '../lib/settings.mjs';
+import { appendToConfig } from '../lib/health-history.mjs';
 import * as paths from '../lib/paths.mjs';
 import { ok, warn, fail, bold, dim } from '../lib/output.mjs';
 
@@ -94,6 +97,11 @@ export async function run({ flags, pkgRoot }) {
   if (subsystems.has('aqe')) {
     report('rvf', heal.healRvf(paths.projectAqeDir(cwd)));
   }
+  // agentdb: install/repin the standalone CLI to ruflo's bundled version so the
+  // shared cognitive store stays coherent (harvest's write path depends on it).
+  if (subsystems.has('agentdb') && cfg.agentdb !== false) {
+    report('agentdb', await heal.healAgentdb());
+  }
   if (subsystems.has('mcp') && cfg.mcp.register) {
     const okReg = await mcpRegister();
     if (okReg) {
@@ -147,6 +155,21 @@ export async function run({ flags, pkgRoot }) {
   // converge proof
   console.log('');
   const after = await collect({ pkgRoot, cwd });
+
+  // health-history: append one post-heal snapshot so `status` can flag backslides
+  // (learning shrank, native slots dropped, drift/security regressed) across syncs.
+  try {
+    const stats = readJson(path.join(paths.projectClaudeFlowDir(cwd), 'neural', 'stats.json'));
+    appendToConfig(cfg, {
+      ts: Math.floor(Date.now() / 1000),
+      learningRows: stats?.patternsLearned ?? 0,
+      nativeSlots: nativesStatus()?.locations?.length ?? 0,
+      driftOutdated: (await driftReport()).some((r) => !r.installed || r.outdated),
+      securityPresent: securityPresent(),
+    });
+    saveKitConfig(cfg);
+  } catch { /* health snapshot is best-effort — never fail a sync over it */ }
+
   const remaining = after.filter((r) => r.level === 'fail');
   if (remaining.length === 0) { ok(bold('converged — no failing subsystems')); return 0; }
   for (const r of remaining) fail(`still failing: [${r.subsystem}] ${r.message}`);

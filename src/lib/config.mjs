@@ -7,8 +7,11 @@ import { kitConfigPath, legacyKitConfigPath } from './paths.mjs';
 
 const DEFAULTS = {
   aqe: true,            // manage agentic-qe alongside ruflo
+  agentdb: true,        // manage the standalone agentdb CLI (harvest's write path), pinned to ruflo's bundled version
   ruvnetBrain: true,    // install/manage the RuvNet Brain (offline KB + search_ruvnet MCP)
   security: true,       // run the security verification surface by default
+  harvest: false,       // opt-in learning-write (`ak x harvest`); off = never runs writes
+  health: { ring: [] }, // persisted stack-health snapshot ring (see health-history.mjs)
   mcp: { register: true, excludeFamilies: [] },
   // Frontier hosts + LLM providers (prompts-once via `ak x provider pick`).
   // Default = claude-only, codex opt-in — preserves today's behavior exactly:
@@ -33,6 +36,7 @@ export function loadKitConfig(file = kitConfigPath()) {
       return {
         ...structuredClone(DEFAULTS),
         ...parsed,
+        health: { ...DEFAULTS.health, ...parsed.health },
         mcp: { ...DEFAULTS.mcp, ...parsed.mcp },
         providers: {
           ...DEFAULTS.providers,

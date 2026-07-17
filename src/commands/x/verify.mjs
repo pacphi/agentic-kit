@@ -11,6 +11,7 @@ import { projectAqeDir } from '../../lib/paths.mjs';
 import { loadKitConfig } from '../../lib/config.mjs';
 import { HOSTS, detectHosts, aqeRouterFile } from '../../lib/providers.mjs';
 import { readJson } from '../../lib/settings.mjs';
+import { runHarvest } from '../../lib/harvest.mjs';
 import { ok, warn, fail, heading } from '../../lib/output.mjs';
 
 export const options = { json: { type: 'boolean', default: false } };
@@ -27,6 +28,7 @@ Suites:
   security    packages load; defend flags injection / passes clean
   aqe         RVF store healthy; aqe status has no FsyncFailed
   providers   kit config matches installed CLIs; ruflo/aqe see the wiring
+  harvest     seed real episodes, run the write path, assert real skills come back
   all         (default) run every suite
 
 Examples:
@@ -112,11 +114,48 @@ async function verifyProviders() {
   return good;
 }
 
+async function verifyHarvest() {
+  heading('harvest — seed REAL episodes, run the write path, assert real skills come back');
+  if (!(await have('agentdb'))) { warn('agentdb CLI not installed — skipping harvest proof (run: ak sync)'); return true; }
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'agentic-kit-harvest-'));
+  try {
+    // Seed real episodes into agentdb's default store (./agentdb.db in cwd).
+    for (let i = 1; i <= 3; i++) {
+      const r = await runCmd('agentdb',
+        ['reflexion', 'store', `verify-ep-${i}`, 'implement_feature', '0.9', 'true', `did the work ${i}`],
+        { cwd: tmp, timeout: 120_000 });
+      if (r.code !== 0) { fail(`agentdb reflexion store failed: ${(r.stderr || '').slice(0, 140)}`); return false; }
+    }
+    ok('seeded 3 real episodes via agentdb reflexion store');
+    // Run the REAL write path (no mock) with low thresholds so the seeds qualify.
+    const res = await runHarvest({ cwd: tmp, minAttempts: 1, minReward: 0.5, days: 365 });
+    const created = res.harvested?.skillsCreated ?? 0;
+    if (created > 0) {
+      ok(`harvest consolidated REAL skills: created ${created}` +
+        (res.harvested.avgReward != null ? ` (avg reward ${res.harvested.avgReward})` : ''));
+    } else {
+      const step = res.steps.find((s) => s.name === 'consolidate-skills');
+      fail(`harvest ran but consolidated 0 skills — ${step ? step.detail : 'no consolidate step'}`);
+      return false;
+    }
+    // Round-trip: the consolidated skill is searchable (real data back).
+    const search = await runCmd('agentdb', ['skill', 'search', 'implement', '5'], { cwd: tmp, timeout: 120_000 });
+    const found = /Found\s+([1-9]\d*)\s+matching/i.test(`${search.stdout}${search.stderr}`);
+    (found ? ok : warn)('agentdb skill search reads the consolidated skill back');
+    return true;
+  } catch (e) {
+    fail(`harvest verify error: ${e.message}`);
+    return false;
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+}
+
 export async function run({ positionals }) {
   const which = positionals[0] ?? 'all';
-  const suites = { learning: verifyLearning, security: verifySecurity, aqe: verifyAqe, providers: verifyProviders };
+  const suites = { learning: verifyLearning, security: verifySecurity, aqe: verifyAqe, providers: verifyProviders, harvest: verifyHarvest };
   const selected = which === 'all' ? Object.entries(suites) : [[which, suites[which]]];
-  if (!selected.every(([, fn]) => fn)) { fail(`unknown suite: ${which} (learning|security|aqe|providers|all)`); return 2; }
+  if (!selected.every(([, fn]) => fn)) { fail(`unknown suite: ${which} (learning|security|aqe|providers|harvest|all)`); return 2; }
   let allGood = true;
   for (const [, fn] of selected) allGood = (await fn()) && allGood;
   console.log('');

@@ -16,6 +16,7 @@ import { loadKitConfig, saveKitConfig } from '../lib/config.mjs';
 import { HOSTS, applyHosts, applyProviders, ensureDualAgents, hostInstallState, installHost, applyAqeRouter } from '../lib/providers.mjs';
 import { installedVersion } from '../lib/versions.mjs';
 import * as rb from '../lib/ruvnet-brain.mjs';
+import * as adb from '../lib/agentdb.mjs';
 import { readJson, writeJsonWithBackup } from '../lib/settings.mjs';
 import { scalar, checkpoint, withDb } from '../lib/sqlite.mjs';
 import * as paths from '../lib/paths.mjs';
@@ -80,6 +81,17 @@ export async function run_machine({ flags, pkgRoot, cfg }) {
       const r = await heal.upgradePackage('agentic-qe');
       (r.ok ? ok : warn)(`agentic-qe: ${r.detail}`);
     } else ok(`agentic-qe ${installedVersion('agentic-qe')} present`);
+  }
+  if (cfg.agentdb) {
+    const c = adb.coherence();
+    if (!c.present) {
+      info("installing agentdb globally (harvest write path; pinned to ruflo's bundled version)…");
+      const r = await heal.healAgentdb();
+      (r.ok ? ok : warn)(`agentdb: ${r.detail}`);
+    } else if (c.skew === 'core') {
+      const r = await heal.healAgentdb();
+      (r.ok ? ok : warn)(`agentdb: ${r.detail}`);
+    } else ok(`agentdb ${c.global} present (coherent with ruflo)`);
   }
   if (cfg.ruvnetBrain) {
     if (!rb.present()) {

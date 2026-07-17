@@ -45,7 +45,7 @@ export default [
     // deliberately old-school (var, literal ANSI escape bytes, bare catch bindings)
     // because the snippet runs embedded in the user's shell, not as normal source.
     // Relax the idiom rules here; syntax/undef checks still apply.
-    files: ['src/templates/statusline-footer.cjs', 'tests/statusline-segments.test.cjs'],
+    files: ['src/templates/statusline-footer.cjs', 'tests/statusline-segments.test.cjs', 'tests/statusline-brain.test.cjs'],
     // getStdinData is injected by the host statusline runtime (guarded with typeof).
     languageOptions: { globals: { getStdinData: 'readonly' } },
     rules: {

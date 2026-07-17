@@ -17,6 +17,8 @@ const PORCELAIN = {
 
 const PLUMBING = {
   'daemon-gc': () => import('../src/commands/x/daemon-gc.mjs'),
+  'dashboard': () => import('../src/commands/x/dashboard.mjs'),
+  'harvest': () => import('../src/commands/x/harvest.mjs'),
   'mcp': () => import('../src/commands/x/mcp.mjs'),
   'provider': () => import('../src/commands/x/provider.mjs'),
   'reference': () => import('../src/commands/x/reference.mjs'),
@@ -46,6 +48,8 @@ const HELP_ALL = `${HELP}
 
 Plumbing (power users) — each takes --help:
   ak x daemon-gc [--kill]      list/stop stale ruflo daemons
+  ak x dashboard [--port N]    read-only local health dashboard (localhost only)
+  ak x harvest [--dry-run]     opt-in learning-write: replay experiences into the substrate
   ak x mcp [status|pick|off]   MCP registration + tool-family deny rules
   ak x provider [status|pick|off]   detect claude/codex CLIs; wire ruflo + aqe hosts/providers
   ak x reference [diff|sync]   CLAUDE.md managed-block inspection/reconcile
