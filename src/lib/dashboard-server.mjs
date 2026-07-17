@@ -20,6 +20,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execFile } from 'node:child_process';
 import { driftReport } from './versions.mjs';
+import { drift as ruvnetBrainDrift } from './ruvnet-brain.mjs';
+import { loadKitConfig } from './config.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const PKG_ROOT = path.resolve(HERE, '..', '..');
@@ -69,7 +71,17 @@ async function collectData({ cwd, fetchStatus }) {
   // Version drift: prefer what the status payload already carried; otherwise
   // ask versions.mjs directly (TTL-cached, so no extra network within the window).
   let drift = Array.isArray(status?.drift) ? status.drift : null;
-  if (!drift) { try { drift = await driftReport(); } catch { drift = null; } }
+  if (!drift) {
+    try { drift = await driftReport(); } catch { drift = null; }
+    // The RuvNet Brain is release-managed outside npm, so driftReport never
+    // carries it — fold it into the same array so the update banner covers ALL
+    // tools under management. Self-computed path only: a payload that supplied
+    // its own drift owns the whole array (tests inject network-free payloads).
+    // ruvnetBrainDrift is TTL-cached in kit.json, like driftReport's window.
+    try {
+      if (loadKitConfig().ruvnetBrain) drift = foldBrainDrift(drift, await ruvnetBrainDrift());
+    } catch { /* banner is best-effort — the subsystem card still carries the brain row */ }
+  }
 
   return {
     generatedAt: new Date().toISOString(),
@@ -86,6 +98,22 @@ async function collectData({ cwd, fetchStatus }) {
 function kitVersion() {
   const pj = readJsonSafe(path.join(PKG_ROOT, 'package.json'));
   return pj?.version ?? '0.0.0';
+}
+
+/** Fold the RuvNet Brain into the npm drift array, same {pkg, installed, latest,
+ *  outdated} shape renderDrift expects. `b` is a src/lib/ruvnet-brain.mjs drift()
+ *  result (release-tag namespace, disk-first — the same value `ak status` and the
+ *  statusline show, so the banner can never disagree with them). Absent brain →
+ *  array unchanged (the "not installed" story lives on the subsystem card).
+ *  Pure; exported for tests. */
+export function foldBrainDrift(drift, b) {
+  if (!b?.present) return drift;
+  return [...(drift ?? []), {
+    pkg: 'ruvnet-brain',
+    installed: b.installedRelease ?? '(unversioned)',
+    latest: b.latest,
+    outdated: !!b.outdated,
+  }];
 }
 
 /**

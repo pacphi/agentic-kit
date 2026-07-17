@@ -103,8 +103,11 @@ Toggle with the `ruvnetBrain` kit.json flag / `--no-ruvnet-brain`.
 > installed side resolves disk-first: `installedReleaseOnDisk()`, then **ak's own record**
 > of the release it last pulled (`kit.json` → `versionCheck.ruvnetBrain.installedRelease`,
 > written by `recordInstalledRelease()` after a successful install) for pre-stamping
-> bundles. The statusline footer mirrors the same order, so `ak status` and the footer
-> can never disagree. `classifyDrift()` compares that resolved value vs `releases/latest` —
+> bundles. The statusline footer mirrors the same order, and the dashboard's update
+> banner folds the brain in from the same `drift()` result (`foldBrainDrift()` in
+> dashboard-server.mjs — driftReport only carries npm tools), so `ak status`, the
+> footer, and the dashboard can never disagree.
+> `classifyDrift()` compares that resolved value vs `releases/latest` —
 > same namespace, so it converges. A present-but-unstamped install (manual / pre-existing)
 > surfaces as outdated once, so `ak sync` pulls it onto the managed track. Do **not**
 > compare `installedVersion()` (plugin semver) against a release tag — that was the

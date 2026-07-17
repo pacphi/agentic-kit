@@ -149,6 +149,31 @@ async function main() {
     await srv2.close();
   }
 
+  // ── foldBrainDrift: the brain joins the npm drift array (banner covers ALL managed tools) ──
+  const { foldBrainDrift } = await import('file://' + MOD);
+  const npmDrift = [{ pkg: 'ruflo', installed: '4.0.0', latest: '4.1.0', outdated: true }];
+
+  await test('foldBrainDrift appends an outdated brain in renderDrift shape', async () => {
+    const out = foldBrainDrift(npmDrift, { present: true, installedRelease: '3.3.1', latest: '3.4.0', outdated: true });
+    assert(out.length === 2, 'brain entry must be appended');
+    const b = out[1];
+    assert(b.pkg === 'ruvnet-brain' && b.installed === '3.3.1' && b.latest === '3.4.0' && b.outdated === true,
+      'entry must carry {pkg, installed, latest, outdated}: ' + JSON.stringify(b));
+    assert(out[0] === npmDrift[0], 'npm entries pass through untouched');
+  });
+
+  await test('foldBrainDrift: absent brain → array unchanged; null drift → brain-only array', async () => {
+    assert(foldBrainDrift(npmDrift, { present: false }) === npmDrift, 'absent brain must not add an entry');
+    assert(foldBrainDrift(npmDrift, null) === npmDrift, 'null drift result must be a no-op');
+    const solo = foldBrainDrift(null, { present: true, installedRelease: '3.3.1', latest: '3.3.1', outdated: false });
+    assert(Array.isArray(solo) && solo.length === 1 && solo[0].outdated === false, 'null npm drift still yields the brain entry');
+  });
+
+  await test('foldBrainDrift labels a pre-stamping install honestly (unversioned, never fabricated)', async () => {
+    const out = foldBrainDrift([], { present: true, installedRelease: null, latest: '3.4.0', outdated: true });
+    assert(out[0].installed === '(unversioned)', 'no release known → "(unversioned)", got ' + out[0].installed);
+  });
+
   console.log(`\n${failed === 0 ? '\x1b[32m' : '\x1b[31m'}${passed} passed, ${failed} failed\x1b[0m`);
   process.exit(failed === 0 ? 0 : 1);
 }
