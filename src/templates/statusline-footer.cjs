@@ -351,6 +351,30 @@ function rufloFindRufloRoot(){
     return "";
   } catch(e){ return ""; }
 }
+// ── real CLI bins (companion to the ruflo-bin wrapper) ──────────────────────
+// Upstream's resolveCliBinCandidates looks for `ruflo/bin/cli.js`, but the ruflo
+// package ships `bin/ruflo.js` (package.json bin: {"ruflo": "bin/ruflo.js"}) —
+// a filename that never exists. @claude-flow/cli DOES ship bin/cli.js, but it is
+// ruflo's nested dependency, not a global top-level install, so that candidate
+// misses too. Every candidate therefore fails and the statusline silently falls
+// through to `npx --prefer-offline @claude-flow/cli`, which serves whatever stale
+// version happens to sit in the npx cache — that is how a machine running a fixed
+// ruflo 3.32.2 still rendered the FABRICATED "⚠ 1 CVE" from a cached 3.28.0.
+// Returns only paths that exist; [] means "nothing found", never a guess.
+function rufloRealCliBins(cwd){
+  try {
+    var fs = require("fs"), path = require("path");
+    var roots = [], out = [];
+    var g = rufloFindRufloRoot();
+    if (g) roots.push(g);
+    if (cwd) roots.push(path.join(cwd, "node_modules", "ruflo"));
+    for (var i = 0; i < roots.length; i++) {
+      out.push(path.join(roots[i], "bin", "ruflo.js"));
+      out.push(path.join(roots[i], "node_modules", "@claude-flow", "cli", "bin", "cli.js"));
+    }
+    return out.filter(function(p){ try { return fs.existsSync(p); } catch(e){ return false; } });
+  } catch(e){ return []; }
+}
 // Three states, not two — the distinction IS the fail-safe. "off" is asserted only on
 // positive evidence: a real ruflo install that does not contain aidefence. Anything we
 // cannot verify is "unknown" and stays silent, because a false "your injection defense

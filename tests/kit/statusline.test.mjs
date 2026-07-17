@@ -16,12 +16,16 @@ import { execFileSync } from 'node:child_process';
 import { _setGlobalRootForTest } from '../../src/lib/paths.mjs';
 import { fixStatusline, upstreamCveCounterFabricated } from '../../src/lib/statusline.mjs';
 
-// Minimal stand-in for ruflo's real statusline: only the shapes fixStatusline keys off.
+// Minimal stand-in for ruflo's real statusline: only the shapes fixStatusline keys
+// off. resolveCliBinCandidates models the upstream defect — candidates that never
+// exist — and generateStatusline prints what the resolver returns so a test can RUN
+// the patched file and observe the wrapper's effect, not just its presence.
 const HOST = `#!/usr/bin/env node
 let ver = "3.0.0";
 function applyLocalOverlays(data) { return data; }
 function getStatuslineData() { return { security: { status: 'IN_PROGRESS', cvesFixed: 2, totalCves: 3 } }; }
-function generateStatusline() { return 'x'; }
+function resolveCliBinCandidates() { return ['/orig']; }
+function generateStatusline() { return 'BINS:' + resolveCliBinCandidates().join('|'); }
 console.log(generateStatusline())
 `;
 
@@ -80,7 +84,49 @@ test('injection is idempotent — repeated syncs never stack blocks', () => {
   const out = fs.readFileSync(sl, 'utf8');
   assert.equal(count(out, /ruflo-sec:BEGIN/g), 1);
   assert.equal(count(out, /ruflo-seg:BEGIN/g), 1);
+  assert.equal(count(out, /ruflo-bin:BEGIN/g), 1);
   assert.equal(r3.applied, false, 'a converged file must report no change');
+});
+
+// ── bin-resolution wrapper ────────────────────────────────────────────────────
+// Upstream's resolveCliBinCandidates probes filenames no shipped package ships,
+// so delegation silently falls through to a possibly-stale npx cache. The wrapper
+// prepends bins that actually exist. Crucially it has NO retirement gate — the
+// fabricated "⚠ 1 CVE" survived on a machine whose gate had correctly retired the
+// security overlay, precisely because the render path executed a stale npx copy
+// the gate never probed.
+
+test('bin wrapper is injected even when the security overlay is retired', () => {
+  // buggyUpstream:false = the exact state that bit us: CVE gate retired, bin path broken.
+  const { proj, sl } = fixture({ buggyUpstream: false });
+  const r = fixStatusline(proj);
+  assert.equal(r.securityOverlay, false, 'precondition: the gated overlay must be off');
+  const out = fs.readFileSync(sl, 'utf8');
+  assert.match(out, /ruflo-bin:BEGIN/);
+  assert.match(out, /function rufloRealCliBins/, 'footer helper the wrapper depends on');
+});
+
+test('bin wrapper prepends real bins ahead of upstream candidates at run time', () => {
+  const { proj, sl } = fixture({ buggyUpstream: false });
+  // A project-local ruflo whose REAL bin layout (bin/ruflo.js, nested cli) exists on disk.
+  const rufloBin = path.join(proj, 'node_modules', 'ruflo', 'bin');
+  fs.mkdirSync(rufloBin, { recursive: true });
+  fs.writeFileSync(path.join(rufloBin, 'ruflo.js'), '');
+  fixStatusline(proj);
+  const stdout = execFileSync(process.execPath, [sl], { cwd: proj, encoding: 'utf8' });
+  const real = stdout.indexOf(path.join(rufloBin, 'ruflo.js'));
+  const orig = stdout.indexOf('/orig');
+  assert.notEqual(real, -1, 'the on-disk bin upstream can never find must be a candidate');
+  assert.notEqual(orig, -1, "upstream's own candidates must survive as the tail");
+  assert.ok(real < orig, 'real bins come first — they are the ones verified to exist');
+});
+
+test('bin wrapper is inert on a template without resolveCliBinCandidates', () => {
+  const { proj, sl } = fixture({ buggyUpstream: false });
+  fs.writeFileSync(sl, '#!/usr/bin/env node\nlet ver = "3.0.0";\nconsole.log("x")\n');
+  fixStatusline(proj);
+  const stdout = execFileSync(process.execPath, [sl], { cwd: proj, encoding: 'utf8' });
+  assert.match(stdout, /^x/, 'typeof guard: the wrapper must not break a template it does not fit');
 });
 
 // The self-retirement contract: no version pin, no manual cleanup step.
