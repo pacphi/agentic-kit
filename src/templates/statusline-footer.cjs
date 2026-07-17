@@ -270,13 +270,29 @@ function rufloActivationSegments(cwd){
       var os2 = require("os");
       var kbDir = process.env.RUVNET_BRAIN_KB || path.join(os2.homedir(), ".cache", "ruvnet-brain", "kb");
       if (fs.existsSync(path.join(kbDir, "forge-mcp-all.mjs"))) {
-        // plugin version — best-effort, empty on any failure (never blocks the row).
+        // Version — best-effort, empty on any failure (never blocks the row).
+        // Prefer the GitHub RELEASE tag ak tracks (what `ak status` shows, e.g.
+        // 3.3.1) over the plugin.json SEMVER (e.g. 0.5.0-dev) — they are DIFFERENT
+        // version namespaces for the same install, and showing the plugin semver
+        // here confused users (it disagreed with `ak status`). Three-namespace
+        // gotcha; see MAINTAINER.md. Fall back to the plugin semver only when ak
+        // has no recorded release (manual/pre-existing install).
         var bver = "";
         try {
-          var bpkg = path.join(os2.homedir(), ".claude", "plugins", "marketplaces",
-                               "ruvnet-brain", "plugin", ".claude-plugin", "plugin.json");
-          var bv = JSON.parse(fs.readFileSync(bpkg, "utf8")).version;
-          if (bv) bver = " V" + String(bv).replace(/^v/, "");
+          var relTag = null;
+          try {
+            var kitCfg = path.join(os2.homedir(), ".config", "agentic-kit", "kit.json");
+            var kj = JSON.parse(fs.readFileSync(kitCfg, "utf8"));
+            if (kj && kj.versionCheck && kj.versionCheck.ruvnetBrain) relTag = kj.versionCheck.ruvnetBrain.installedRelease;
+          } catch(e){}
+          if (relTag) {
+            bver = " V" + String(relTag).replace(/^v/, "");
+          } else {
+            var bpkg = path.join(os2.homedir(), ".claude", "plugins", "marketplaces",
+                                 "ruvnet-brain", "plugin", ".claude-plugin", "plugin.json");
+            var bv = JSON.parse(fs.readFileSync(bpkg, "utf8")).version;
+            if (bv) bver = " V" + String(bv).replace(/^v/, "");
+          }
         } catch(e){}
         // KB size — TTL-cached shallow sum of top-level files, keyed on kbDir so an
         // env-overridden path (or a moved KB) never serves a stale foreign size.
