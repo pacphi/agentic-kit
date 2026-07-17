@@ -253,6 +253,58 @@ function rufloActivationSegments(cwd){
         }
       }
     } catch(e){}
+    // ── RuvNet Brain (🧿): offline rUv-stack knowledge base — honesty-gated, fs-only ──
+    // The brain is NOT an npm package — `npx github:stuinfla/ruvnet-brain` drops a
+    // ~2GB offline knowledge base at ~/.cache/ruvnet-brain/kb (honors RUVNET_BRAIN_KB)
+    // and wires a user-scope Claude Code plugin. Presence probe MIRRORS
+    // src/lib/ruvnet-brain.mjs exactly: existence of the KB's forge-mcp-all.mjs
+    // entrypoint. Render NOTHING when absent — never a fabricated row. The KB is a flat
+    // dir of data files, so the true size is a shallow sum of its top-level files
+    // (the __MACOSX zip-artifact dir is a directory, so isFile() correctly excludes it);
+    // that sum is TTL-cached machine-globally in tmpdir (like the ⚙ daemon / 🎓 QE
+    // chips) so ~600 stat() calls run at most once per window, not per render. The 💾
+    // chip reuses the QE size formatting. The plugin semver (marketplace manifest,
+    // best-effort) rides next to the label like "RuFlo V<x>" / "Agentic QE V<x>".
+    var brain = "";
+    try {
+      var os2 = require("os");
+      var kbDir = process.env.RUVNET_BRAIN_KB || path.join(os2.homedir(), ".cache", "ruvnet-brain", "kb");
+      if (fs.existsSync(path.join(kbDir, "forge-mcp-all.mjs"))) {
+        // plugin version — best-effort, empty on any failure (never blocks the row).
+        var bver = "";
+        try {
+          var bpkg = path.join(os2.homedir(), ".claude", "plugins", "marketplaces",
+                               "ruvnet-brain", "plugin", ".claude-plugin", "plugin.json");
+          var bv = JSON.parse(fs.readFileSync(bpkg, "utf8")).version;
+          if (bv) bver = " V" + String(bv).replace(/^v/, "");
+        } catch(e){}
+        // KB size — TTL-cached shallow sum of top-level files, keyed on kbDir so an
+        // env-overridden path (or a moved KB) never serves a stale foreign size.
+        var bBytes = null;
+        try {
+          var bCache = path.join(os2.tmpdir(), "ruvnet-brain-kb-size.json");
+          var bTtl = Number(process.env.RUVNET_BRAIN_KB_TTL_MS || 300000);
+          try {
+            var bc = JSON.parse(fs.readFileSync(bCache, "utf8"));
+            if (bc && bc.dir === kbDir && typeof bc.bytes === "number" && bTtl > 0 && (Date.now() - bc.ts) < bTtl) bBytes = bc.bytes;
+          } catch(e){}
+          if (bBytes === null) {
+            var sum = 0;
+            fs.readdirSync(kbDir).forEach(function(f){
+              try { var s = fs.statSync(path.join(kbDir, f)); if (s.isFile()) sum += s.size; } catch(e){}
+            });
+            bBytes = sum;
+            try { fs.writeFileSync(bCache, JSON.stringify({ts: Date.now(), dir: kbDir, bytes: sum})); } catch(e){}
+          }
+        } catch(e){}
+        var bp = [];
+        if (bBytes && bBytes > 0) {
+          var bkb = Math.round(bBytes / 1024);
+          bp.push("💾 " + (bkb >= 1024 ? (bkb/1024).toFixed(1) + "MB" : bkb + "KB"));
+        }
+        brain = C + "🧿 RuvNet Brain" + bver + R + "  " + (bp.length ? bp.join(DIM + " · " + R) : G + "✓" + R);
+      }
+    } catch(e){}
     // ── agentic-qe — TTL-cached; one sqlite3 spawn only on a cache miss (issue #3) ──
     var qe = "";
     try {
@@ -321,6 +373,7 @@ function rufloActivationSegments(cwd){
     if (proof) out.push(proof);
     if (sec) out.push(sec);
     if (daemon) out.push(daemon);
+    if (brain) out.push(brain);
     if (out.length && qe) out.push(DIM + "─".repeat(53) + R);
     if (qe) out.push(qe);
     if (!out.length) return "";
