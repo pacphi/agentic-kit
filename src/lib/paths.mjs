@@ -64,6 +64,19 @@ export function globalRoot() {
 /** For tests: override the cached global root. */
 export function _setGlobalRootForTest(p) { _globalRoot = p; }
 
+/** npm's npx cache (`<npm-cache>/_npx`). Resolved from npm_config_cache or the
+ *  platform default (~/.npm on POSIX, %LocalAppData%\npm-cache on npm>=7
+ *  Windows) WITHOUT spawning npm: a `npm config set cache` userconfig custom
+ *  path would be missed, but a miss only means an empty scan — the stale-env
+ *  prune quietly does nothing, it never prunes the wrong directory. */
+export const npxCacheDir = () => {
+  const cache = process.env.npm_config_cache
+    || (isWindows
+      ? path.join(process.env.LOCALAPPDATA || path.join(home, 'AppData', 'Local'), 'npm-cache')
+      : path.join(home, '.npm'));
+  return path.join(cache, '_npx');
+};
+
 export const rufloRoot = () => path.join(globalRoot(), 'ruflo');
 export const rufloNodeModules = () => path.join(rufloRoot(), 'node_modules');
 export const rufloCliDist = () =>

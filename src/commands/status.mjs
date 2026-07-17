@@ -6,6 +6,7 @@ import path from 'node:path';
 import { glyph, dim, bold } from '../lib/output.mjs';
 import * as paths from '../lib/paths.mjs';
 import { nativesStatus, aidefencePresent, securityPresent } from '../lib/natives.mjs';
+import { scanNpxStale } from '../lib/npx.mjs';
 import { registrationStatus } from '../lib/mcp.mjs';
 import { listDaemons, staleDaemons } from '../lib/daemons.mjs';
 import { scanRvf } from '../lib/rvf.mjs';
@@ -116,6 +117,22 @@ export async function collect({ pkgRoot, cwd = process.cwd() }) {
     }
   } catch (e) {
     rows.push(row('natives', 'warn', `native check unavailable: ${e.message}`));
+  }
+
+  // npx (stale ruflo-family cache envs — `npx --prefer-offline` fallbacks in the
+  // statusline/hooks execute these verbatim, keeping retired defects alive)
+  try {
+    const stale = scanNpxStale();
+    if (stale.length) {
+      const what = stale.flatMap((e) => e.stale.map((s) => `${s.pkg}@${s.cached}`)).join(', ');
+      rows.push(row('npx', 'warn',
+        `${stale.length} stale npx env(s) serve outdated code (${what})`,
+        'sync prunes them (npx re-fetches on demand)'));
+    } else {
+      rows.push(row('npx', 'ok', 'npx cache holds no stale ruflo-family envs'));
+    }
+  } catch (e) {
+    rows.push(row('npx', 'warn', `npx cache check unavailable: ${e.message}`));
   }
 
   // security surface
