@@ -15,10 +15,30 @@ import { cmpVersions } from './versions.mjs';
 import { loadKitConfig, saveKitConfig } from './config.mjs';
 
 export const REPO = 'stuinfla/ruvnet-brain';
-/** npx spec + flags: --no-stack (ak manages ruflo/RuVector) and --no-enhance
- *  (ak owns the CLAUDE.md grounding block) prevent double-management. */
-export const INSTALL_SPEC = `github:${REPO}`;
-export const INSTALL_ARGS = ['--yes', '--no-stack', '--no-enhance'];
+/** npx spec + flags. The PUBLISHED npm installer, not `github:` — a github: spec
+ *  runs the default-branch HEAD (an unreleased -dev installer, audited live
+ *  2026-07-17: HEAD was 3.4.5-dev while releases/latest was v3.3.1), which is
+ *  inconsistent with every other tool ak manages by released artifact.
+ *  --no-stack (ak manages ruflo/RuVector) and --no-enhance (ak owns the
+ *  CLAUDE.md grounding block) prevent double-management. --no-nightly-prompt and
+ *  --no-telemetry exist because the installer's `--yes` accepts EVERY optional
+ *  offer — without them it silently enables the 03:47 nightly self-update
+ *  LaunchAgent (macOS) and writes telemetry consent, both audited on the v3.3.1
+ *  installer. ak owns brain updates (`ak sync`), so the self-updater must stay off. */
+export const INSTALL_SPEC = 'ruvnet-brain@latest';
+export const INSTALL_ARGS = ['--yes', '--no-stack', '--no-enhance', '--no-nightly-prompt', '--no-telemetry'];
+
+/** The installer's nightly self-update LaunchAgent (macOS). Its label/path are the
+ *  installer's own (`--enable-nightly` writes it; `--disable-nightly` removes it).
+ *  ak detects it as drift because that 03:47 forge-update job rewrites the KB
+ *  outside ak's release stamp — status/statusline would go stale against disk. */
+export const NIGHTLY_LABEL = 'com.ruvnet.brain-update';
+export function nightlyAgentPlist() {
+  return path.join(home, 'Library', 'LaunchAgents', `${NIGHTLY_LABEL}.plist`);
+}
+export function nightlyAgentPresent() {
+  return process.platform === 'darwin' && fs.existsSync(nightlyAgentPlist());
+}
 
 /** KB cache dir — the installer honors RUVNET_BRAIN_KB, so we do too. */
 export function kbDir() {
@@ -57,6 +77,21 @@ export function installedVersion() {
   }
 }
 
+/** Release tag stamped ON DISK by the bundle itself (SOURCE.json → releaseTag).
+ *  Release bundles carry it since the evergreen mechanism (the brain's own
+ *  installer/telemetry read the same field); older or locally-built bundles
+ *  don't → null. This is ground truth in the RELEASE namespace: it stays
+ *  correct even when the KB changes outside ak (e.g. a user runs the bundle's
+ *  forge-update.mjs by hand), where ak's kit.json stamp would go stale. */
+export function installedReleaseOnDisk() {
+  try {
+    const j = JSON.parse(fs.readFileSync(path.join(kbDir(), 'SOURCE.json'), 'utf8'));
+    const raw = String(j.releaseTag ?? '');
+    if (/^[A-Za-z0-9._-]{1,32}$/.test(raw)) return raw.replace(/^v/, '');
+  } catch { /* absent / unreadable / pre-stamping bundle — fall back to the kit.json stamp */ }
+  return null;
+}
+
 /** Latest release tag from GitHub, best-effort (null on any failure or rate
  *  limit — callers must treat null as "unknown", never as "up to date"). */
 export async function latestVersion({ timeout = 8000 } = {}) {
@@ -80,9 +115,11 @@ export async function latestVersion({ timeout = 8000 } = {}) {
 /** Record the release tag ak just pulled, so future drift compares like-for-like.
  *  ruvnet-brain has THREE unrelated version tracks — the plugin semver
  *  (plugin.json, e.g. 0.5.0-dev), the KB bundle's brainVersion (e.g. v0.3.0-dev),
- *  and the GitHub *release* tags the installer downloads by (e.g. v3.0.1). None of
- *  them is stamped on disk in the release namespace, so ak keeps its own record of
- *  "which release did I last install" in kit.json. */
+ *  and the GitHub *release* tags the installer downloads by (e.g. v3.3.1).
+ *  Evergreen-era release bundles stamp the release tag on disk
+ *  (SOURCE.json → releaseTag; see installedReleaseOnDisk), but older bundles
+ *  don't — so ak still keeps its own record of "which release did I last
+ *  install" in kit.json as the fallback for pre-stamping installs. */
 export function recordInstalledRelease(tag, cfg = loadKitConfig()) {
   if (!tag) return;
   const cur = cfg.versionCheck?.ruvnetBrain ?? {};
@@ -105,7 +142,9 @@ export function classifyDrift({ present: isPresent, installedRelease, latest }) 
 
 /** Presence + release drift, TTL-cached in kit.json (mirrors selfDrift in
  *  versions.mjs) so status/nudge hit GitHub at most once per window. force=true
- *  bypasses the cache. */
+ *  bypasses the cache. Installed side resolves disk-first: the bundle's own
+ *  SOURCE.json releaseTag when stamped, else ak's kit.json record — the same
+ *  order the statusline uses, so `ak status` and the footer can never disagree. */
 export async function drift({ force = false } = {}) {
   const cfg = loadKitConfig();
   const ttlMs = (cfg.versionCheck?.ttlHours ?? 24) * 3600_000;
@@ -118,8 +157,9 @@ export async function drift({ force = false } = {}) {
     cfg.versionCheck = { ...cfg.versionCheck, ruvnetBrain: { ...cached, last: Date.now(), latest } };
     try { saveKitConfig(cfg); } catch { /* read-only envs: next call re-fetches */ }
   }
+  const installedRelease = installedReleaseOnDisk() ?? cached.installedRelease ?? null;
   return {
-    ...classifyDrift({ present: present(), installedRelease: cached.installedRelease ?? null, latest }),
+    ...classifyDrift({ present: present(), installedRelease, latest }),
     pluginVersion: installedVersion(),
   };
 }

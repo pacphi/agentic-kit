@@ -69,26 +69,46 @@ ships — verify with `npm pack --dry-run` before a release if you touch `files`
 
 **RuvNet Brain is the odd one out.** ruflo/agentic-qe/the host CLIs are global npm
 packages: detected via `installedVersion` (npm global root) and drift-checked with
-`npm view`. The RuvNet Brain is *not* — `npx github:stuinfla/ruvnet-brain` installs a
+`npm view`. The RuvNet Brain is *not* — `npx ruvnet-brain@latest` (the **published**
+installer; never `github:`, which runs the unreleased default-branch HEAD) installs a
 ~512 MB offline KB to `~/.cache/ruvnet-brain/kb` (override `$RUVNET_BRAIN_KB`) and a
 user-scope Claude Code plugin (the `search_ruvnet` MCP + hooks + a skill). So it gets a
 *parallel* lifecycle in `src/lib/ruvnet-brain.mjs`: `present()` probes disk,
 `latestVersion()`/`drift()` hit the GitHub releases API (TTL-cached in kit.json like
-`selfDrift`). setup/sync install via `heal.installRuvnetBrain()` with `--no-stack --no-enhance`
-(ak already manages ruflo/RuVector and owns the `ruvnet-brain-reference` CLAUDE.md block).
-Toggle with the `ruvnetBrain` kit.json flag / `--no-ruvnet-brain`. Note: the installer's
-`--enable-nightly` does **not** exist (nightly is a separate, unmanaged LaunchAgent).
+`selfDrift`). setup/sync install via `heal.installRuvnetBrain()`, which resolves the
+latest release tag FIRST and pins the installer to it (`--version v<tag>`), so the
+bundle on disk is exactly the release ak stamps — no install-then-stamp race.
+Toggle with the `ruvnetBrain` kit.json flag / `--no-ruvnet-brain`.
+
+> **Installer flag gotcha — `--yes` accepts *every* optional offer.** Audited live on the
+> v3.3.1 installer (2026-07-17): under `--yes` it silently enables a nightly self-update
+> LaunchAgent (`com.ruvnet.brain-update`, macOS, 03:47 — runs the bundle's
+> `forge-update.mjs --apply`, which at v3.3.1 applies downloads **without signature
+> verification**), writes telemetry consent, installs a spend-watchdog agent, and
+> materializes model-router files. Hence `INSTALL_ARGS` carries FOUR suppression flags:
+> `--no-stack --no-enhance` (ak manages ruflo/RuVector + the CLAUDE.md block) and
+> `--no-nightly-prompt --no-telemetry` (ak owns updates; consent stays the user's).
+> The nightly self-updater bypasses ak-managed updates, so `ak status` flags an existing
+> agent as its own subsystem (`ruvnet-brain-nightly`) and `ak sync` disables it
+> (`heal.disableRuvnetBrainNightly()`: `launchctl bootout` + plist removal — both steps,
+> mirroring the installer's own `--disable-nightly`). Deliberate re-enrollment
+> (`npx ruvnet-brain --enable-nightly`) gets re-flagged; opt ak out entirely with
+> `ruvnetBrain:false`. The spend watchdog and telemetry consent of already-affected
+> machines are left alone on purpose — local-only / a recorded user answer.
 
 > **Version gotcha — three unrelated namespaces.** The plugin semver (`plugin.json`, e.g.
 > `0.5.0-dev`), the KB bundle's `brainVersion` (e.g. `v0.3.0-dev`), and the GitHub **release
-> tags** the installer downloads by (e.g. `v3.0.1`) are all different tracks, and *none* is
-> stamped on disk in the release namespace. So drift is computed against **ak's own record**
+> tags** the installer downloads by (e.g. `v3.3.1`) are all different tracks. Evergreen-era
+> release bundles stamp the release tag **on disk** (`SOURCE.json` → `releaseTag`), so the
+> installed side resolves disk-first: `installedReleaseOnDisk()`, then **ak's own record**
 > of the release it last pulled (`kit.json` → `versionCheck.ruvnetBrain.installedRelease`,
-> written by `recordInstalledRelease()` after a successful install). `classifyDrift()` compares
-> that stamp vs `releases/latest` — same namespace, so it converges. A present-but-unstamped
-> install (manual / pre-existing) surfaces as outdated once, so `ak sync` pulls it onto the
-> managed track. Do **not** compare `installedVersion()` (plugin semver) against a release tag —
-> that was the original bug and it can never converge.
+> written by `recordInstalledRelease()` after a successful install) for pre-stamping
+> bundles. The statusline footer mirrors the same order, so `ak status` and the footer
+> can never disagree. `classifyDrift()` compares that resolved value vs `releases/latest` —
+> same namespace, so it converges. A present-but-unstamped install (manual / pre-existing)
+> surfaces as outdated once, so `ak sync` pulls it onto the managed track. Do **not**
+> compare `installedVersion()` (plugin semver) against a release tag — that was the
+> original bug and it can never converge.
 
 ### Dogfooding artifacts are NOT source
 

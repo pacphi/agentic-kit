@@ -508,7 +508,7 @@ const JS = `
 
   // severity rank for rollups + triage sort; preferred order breaks ties.
   var RANK={fail:3,warn:2,ok:1,info:0,unknown:0};
-  var PREF=["versions","self","natives","security","learning","providers","hosts","mcp","ruvnet-brain","aqe","daemons","blocks","statusline","npx"];
+  var PREF=["versions","self","natives","security","learning","providers","hosts","mcp","ruvnet-brain","ruvnet-brain-nightly","aqe","daemons","blocks","statusline","npx"];
 
   // Collapse rows into one group per subsystem (kills repeated labels); the
   // group's level is the worst of its rows. Sort worst-first, then by PREF.

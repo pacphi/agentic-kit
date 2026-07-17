@@ -15,7 +15,7 @@ import { registry, syncBlocks } from '../lib/blocks.mjs';
 import { loadKitConfig } from '../lib/config.mjs';
 import { driftReport, selfDrift } from '../lib/versions.mjs';
 import { upstreamCveCounterFabricated, fixStatusline } from '../lib/statusline.mjs';
-import { drift as ruvnetBrainDrift } from '../lib/ruvnet-brain.mjs';
+import { drift as ruvnetBrainDrift, nightlyAgentPresent as rbNightlyPresent, NIGHTLY_LABEL as RB_NIGHTLY_LABEL } from '../lib/ruvnet-brain.mjs';
 import { coherence as adbCoherence } from '../lib/agentdb.mjs';
 import { readJson } from '../lib/settings.mjs';
 import { have } from '../lib/exec.mjs';
@@ -84,6 +84,15 @@ export async function collect({ pkgRoot, cwd = process.cwd() }) {
       }
     } catch (e) {
       rows.push(row('ruvnet-brain', 'warn', `ruvnet-brain check unavailable: ${e.message}`));
+    }
+    // The installer's own nightly self-updater (macOS LaunchAgent, 03:47) bypasses
+    // ak-managed updates: it rewrites the KB outside ak's release stamp, so status
+    // and the statusline drift from disk. Own subsystem so sync's fix is "disable
+    // the agent", never a needless force-reinstall of the brain itself.
+    if (rbNightlyPresent()) {
+      rows.push(row('ruvnet-brain-nightly', 'warn',
+        `ruvnet-brain nightly self-updater active (${RB_NIGHTLY_LABEL}) — bypasses ak-managed updates`,
+        'sync disables it (re-enable deliberately: `npx ruvnet-brain --enable-nightly`)'));
     }
   }
 

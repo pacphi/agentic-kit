@@ -53,11 +53,14 @@ function renderWithKb(kb) {
   finally { if (prev === undefined) delete process.env.RUVNET_BRAIN_KB; else process.env.RUVNET_BRAIN_KB = prev; }
 }
 
-// Build a fixture KB dir. `entry` controls whether the forge-mcp-all.mjs probe file exists.
-function mkKb({ entry = true, dataBytes = 0 } = {}) {
+// Build a fixture KB dir. `entry` controls whether the forge-mcp-all.mjs probe file
+// exists; `source` (string) is written verbatim as SOURCE.json (the bundle's own
+// on-disk release stamp, read FIRST by the version resolution).
+function mkKb({ entry = true, dataBytes = 0, source = null } = {}) {
   const kb = mkdir();
   if (entry) fs.writeFileSync(path.join(kb, 'forge-mcp-all.mjs'), '// entrypoint\n');
   if (dataBytes > 0) fs.writeFileSync(path.join(kb, 'agentdb.rvf'), Buffer.alloc(dataBytes));
+  if (source !== null) fs.writeFileSync(path.join(kb, 'SOURCE.json'), source);
   // A __MACOSX artifact dir must never be counted toward KB size (it is a directory).
   fs.mkdirSync(path.join(kb, '__MACOSX'), { recursive: true });
   return kb;
@@ -97,6 +100,27 @@ test('brain row occupies its OWN line, never merged with other segments', () => 
   const lines = out.split('\n').filter(Boolean);
   const bl = lines.find((l) => l.includes('🧿'));
   assert(bl, 'expected a 🧿 line, got: ' + JSON.stringify(lines));
+});
+
+// ── version resolution: SOURCE.json releaseTag is ground truth (mirrors drift()) ──
+test('SOURCE.json releaseTag renders as the version — release namespace, disk-first', () => {
+  const out = renderWithKb(mkKb({ entry: true, source: '{"releaseTag":"v3.3.1"}' }));
+  contains(out, 'V3.3.1');
+});
+
+test('unprefixed releaseTag renders with the V chip prefix intact', () => {
+  const out = renderWithKb(mkKb({ entry: true, source: '{"releaseTag":"3.3.1"}' }));
+  contains(out, 'V3.3.1');
+});
+
+test('junk releaseTag is rejected (validated, never rendered verbatim)', () => {
+  const out = renderWithKb(mkKb({ entry: true, source: '{"releaseTag":"not a tag !!"}' }));
+  absent(out, 'not a tag');
+});
+
+test('malformed SOURCE.json never breaks the row (falls back, 🧿 still renders)', () => {
+  const out = renderWithKb(mkKb({ entry: true, source: '{nope' }));
+  contains(out, '🧿');
 });
 
 console.log(`\n${failed === 0 ? '\x1b[32m' : '\x1b[31m'}${passed} passed, ${failed} failed\x1b[0m`);
