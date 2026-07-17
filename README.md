@@ -53,21 +53,33 @@ What the verbs cover:
 
 | Verb | What it does |
 | ------ | -------------- |
-| **setup** | Installs/updates ruflo + agentic-qe globally (handling npm ≥11.17's `allow-scripts` so natives build), installs the **RuvNet Brain** (an offline knowledge base over the rUv stack, powering the `search_ruvnet` MCP — a ~512 MB one-time download, prompted; skip with `--no-ruvnet-brain`), deploys the token-audit skill, merges the managed guidance blocks into `~/.claude/CLAUDE.md`, offers one-time MCP registration (user scope, with a tool-family picker), and — inside a repo — initializes the project: sanitized `ruflo init`, absolute memory-path pin, a **verified** store→disk write, statusline footer, and a background daemon with **local-only ($0) workers** (token-spending AI workers stay opt-in behind upstream's machine-wide budget). Project scope triggers on a `.git` directory in the current folder; without one it's skipped with a note. `--project` forces it anyway (e.g. a not-yet-`git init`-ed folder), `--minimal` skips it, `--yes` accepts all prompts (non-interactive), `--no-aqe` / `--no-ruvnet-brain` / `--no-security` disable those subsystems, and `--reconfigure` re-offers MCP registration. |
-| **status** | Per-subsystem ✓/⚠/✗ (versions, the kit's own version, **ruvnet-brain** (present + release drift, or "not installed"), natives, security, learning, aqe/RVF, MCP, **hosts** (claude/codex — version + install method, or "enabled but not installed"), **providers** (host wiring + aqe fallback chain, or "drifted"/claude-only default), daemons, CLAUDE.md blocks, statusline), each drift row naming what `sync` would do about it. |
-| **sync** | The one convergence verb: upgrades first when a new release exists, then re-heals everything an upgrade wipes, then re-checks and reports. Included in that heal: it **installs any enabled frontier host** (claude/codex) that's entirely absent — never touching an external (mise/brew/native) install — and **re-applies provider wiring** (the `ENABLE_*` host env, the aqe fallback chain, and ruflo API providers) whenever it has drifted. It also **re-runs the RuvNet Brain installer** to pull the latest release when the on-disk KB has drifted (or installs it if absent, when enabled). It also **self-updates the kit**: when a newer `@pacphi/agentic-kit` exists it installs it as the *last* step (the new code applies from the next `ak` run, never mid-sync). Prerelease installs (`4.0.0-alpha.*`) track the `next` npm dist-tag as well as `latest`, so alphas see their successors; stable installs only ever follow `latest`. `--no-upgrade` skips the self-update along with the package upgrades. |
+| **setup** | Installs/updates ruflo + agentic-qe + the **agentdb** CLI globally (handling npm ≥11.17's `allow-scripts` so natives build; agentdb is pinned to ruflo's bundled version so the shared learning store stays coherent), installs the **RuvNet Brain** (an offline knowledge base over the rUv stack, powering the `search_ruvnet` MCP — a ~512 MB one-time download, prompted; skip with `--no-ruvnet-brain`), deploys the token-audit skill, merges the managed guidance blocks into `~/.claude/CLAUDE.md`, offers one-time MCP registration (user scope, with a tool-family picker), and — inside a repo — initializes the project: sanitized `ruflo init`, absolute memory-path pin, a **verified** store→disk write, statusline footer, and a background daemon with **local-only ($0) workers** (token-spending AI workers stay opt-in behind upstream's machine-wide budget). Project scope triggers on a `.git` directory in the current folder; without one it's skipped with a note. `--project` forces it anyway (e.g. a not-yet-`git init`-ed folder), `--minimal` skips it, `--yes` accepts all prompts (non-interactive), `--no-aqe` / `--no-ruvnet-brain` / `--no-security` disable those subsystems, and `--reconfigure` re-offers MCP registration. |
+| **status** | Per-subsystem ✓/⚠/✗ (versions, the kit's own version, **ruvnet-brain** (present + release drift, or "not installed"), natives, security, learning, aqe/RVF, **agentdb** (CLI present + coherent with ruflo's bundled version, or a store-skew warning), MCP, **hosts** (claude/codex — version + install method, or "enabled but not installed"), **providers** (host wiring + aqe fallback chain, or "drifted"/claude-only default), daemons, CLAUDE.md blocks, statusline), each drift row naming what `sync` would do about it — plus a **health-history** line that flags regressions since the last sync (learning shrank, native slots dropped, drift/security backslid). |
+| **sync** | The one convergence verb: upgrades first when a new release exists, then re-heals everything an upgrade wipes, then re-checks and reports. Included in that heal: it **installs any enabled frontier host** (claude/codex) that's entirely absent — never touching an external (mise/brew/native) install — and **re-applies provider wiring** (the `ENABLE_*` host env, the aqe fallback chain, and ruflo API providers) whenever it has drifted. It also **installs/repins the standalone `agentdb` CLI** to ruflo's bundled version (keeping the shared cognitive store coherent) and appends a **health-history snapshot** so `status` can flag regressions across syncs. It also **re-runs the RuvNet Brain installer** to pull the latest release when the on-disk KB has drifted (or installs it if absent, when enabled). It also **self-updates the kit**: when a newer `@pacphi/agentic-kit` exists it installs it as the *last* step (the new code applies from the next `ak` run, never mid-sync). Prerelease installs (`4.0.0-alpha.*`) track the `next` npm dist-tag as well as `latest`, so alphas see their successors; stable installs only ever follow `latest`. `--no-upgrade` skips the self-update along with the package upgrades. |
 | **uninstall** | Removes the kit's footprint (and any legacy shell-kit install); project data is never touched; `--purge` also offers to remove the global packages. |
 
-Power-user mechanisms live under `ak x …` (`daemon-gc`, `mcp pick|off`,
-`provider status|pick|off`, `reference diff|sync`, `verify learning|security|aqe`,
-`improvement-eval`) — see `ak --help --all`.
+Power-user mechanisms live under `ak x …` (`daemon-gc`, `dashboard`, `harvest`,
+`mcp pick|off`, `provider status|pick|off`, `reference diff|sync`,
+`verify learning|security|aqe|providers|harvest`, `improvement-eval`) — see `ak --help --all`.
+
+Two of those are worth calling out:
+
+- **`ak x dashboard`** — a read-only local web dashboard (`127.0.0.1:7431`, localhost-only,
+  never detaches) that renders the same subsystem view as `ak status`, grouped one card per
+  subsystem with severity triage and a learning-over-time strip. Self-contained and offline —
+  no external fetches. Stop with Ctrl-C.
+- **`ak x harvest`** — an **opt-in** (`kit.json` `harvest:true`), foreground learning-*write*:
+  it records the session outcome and consolidates accumulated episodes into durable skills via
+  the real `ruflo hooks post-task` / `agentdb skill consolidate` verbs, reporting the actual
+  skills created/updated. Off and `--dry-run`-safe by default; no daemon, ever.
+  `ak x verify harvest` proves the whole path end-to-end against real CLIs.
 
 ## The status line
 
 Projects set up by the kit get an append-only footer under ruflo's own status line,
 each segment shown **only when genuinely active**: 🧠 SONA patterns/trajectories (+
-live micro-LoRA Δ‖W‖), 📈 route-RL metrics, 🛡 aidefence, ⚙ machine-wide daemon
-count, and 🎓 Agentic-QE stats.
+live micro-LoRA Δ‖W‖), 📈 route-RL metrics, 🛡 aidefence, 🧿 RuvNet Brain KB,
+⚙ machine-wide daemon count, and 🎓 Agentic-QE stats.
 
 ## Requirements
 
