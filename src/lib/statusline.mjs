@@ -53,6 +53,46 @@ const SEC_WRAP = [
 ].join('\n');
 const SEC_WRAP_STRIP = /\/\* ruflo-sec:BEGIN \*\/[\s\S]*?\/\* ruflo-sec:END \*\/\n?/g;
 
+// (e) Bin-resolution wrapper. Upstream's resolveCliBinCandidates probes filenames
+// that no shipped package ships: ruflo's bin map is {"ruflo": "bin/ruflo.js"} (no
+// cli.js), and @claude-flow/cli — which DOES ship bin/cli.js — is ruflo's nested
+// dependency, not a top-level global install. Every candidate therefore misses and
+// the statusline silently falls through to `npx --prefer-offline @claude-flow/cli`,
+// i.e. whatever stale version the npx cache holds. That is how a machine whose
+// installed 3.32.2 carried the CVE-counter fix still rendered the fabricated
+// "⚠ 1 CVE" / perpetual "scanning…" from a cached 3.28.0.
+//
+// Unlike the security overlay there is deliberately NO retirement gate: the wrapper
+// only PREPENDS bins verified to exist on disk (rufloRealCliBins, injected with the
+// footer) and keeps upstream's own candidates as the tail, so on a fixed upstream it
+// converges to the same delegation instead of fighting it. A gate would be one more
+// proxy-probe that can misfire — the CVE gate watched the global install while the
+// render path executed a stale npx copy. Same function-declaration-hoisting
+// mechanism as the security wrapper; typeof-guarded so it is inert on templates
+// without the function (e.g. the minimal statusline-v3.cjs). The inner try around
+// the CWD read absorbs the TDZ ReferenceError if a future template declares CWD
+// with let/const after this block yet calls the resolver during top-level eval.
+const BIN_WRAP = [
+  '/* ruflo-bin:BEGIN */',
+  'try {',
+  '  if (typeof resolveCliBinCandidates === "function") {',
+  '    var _rufloOrigResolveCliBins = resolveCliBinCandidates;',
+  '    resolveCliBinCandidates = function(){',
+  '      var orig = [];',
+  '      try { orig = _rufloOrigResolveCliBins.apply(this, arguments) || []; } catch(e){}',
+  '      try {',
+  '        var cwd = process.cwd();',
+  '        try { if (typeof CWD === "string" && CWD) cwd = CWD; } catch(e){}',
+  '        var real = (typeof rufloRealCliBins === "function") ? rufloRealCliBins(cwd) : [];',
+  '        return real.concat(orig.filter(function(p){ return real.indexOf(p) === -1; }));',
+  '      } catch(e){ return orig; }',
+  '    };',
+  '  }',
+  '} catch(e){}',
+  '/* ruflo-bin:END */',
+].join('\n');
+const BIN_WRAP_STRIP = /\/\* ruflo-bin:BEGIN \*\/[\s\S]*?\/\* ruflo-bin:END \*\/\n?/g;
+
 /** Upstream defect: ruvnet/ruflo#2694.
  *  True while ruflo's getSecurityStatus() still FABRICATES the CVE count — i.e. the
  *  installed CLI still has `const totalCves = 3` (a hardcoded constant naming ruflo's
@@ -93,10 +133,16 @@ export function fixStatusline(root = process.cwd(), { dryRun = false } = {}) {
   // (d) security overlay: stripped unconditionally BEFORE the gate is consulted, so the
   //     stopgap retires itself on the first sync after upstream fixes getSecurityStatus.
   s = s.replace(SEC_WRAP_STRIP, '');
+  // (e) bin wrapper: stripped unconditionally like the others, re-injected always —
+  //     no gate (see BIN_WRAP), it self-neutralizes on a template it doesn't fit.
+  s = s.replace(BIN_WRAP_STRIP, '');
   const securityOverlay = upstreamCveCounterFabricated();
   const lines = s.split('\n');
   const at = lines[0]?.startsWith('#!') ? 1 : 0;
-  lines.splice(at, 0, securityOverlay ? footer + '\n' + SEC_WRAP : footer);
+  const blocks = [footer];
+  if (securityOverlay) blocks.push(SEC_WRAP);
+  blocks.push(BIN_WRAP);
+  lines.splice(at, 0, blocks.join('\n'));
   s = lines.join('\n');
   s = s.replace(/console\.log\(generateStatusline\(\)\)/, 'console.log(generateStatusline() + rufloActivationSegments(process.cwd()))');
 
