@@ -4,7 +4,7 @@
 import path from 'node:path';
 import { collect } from './status.mjs';
 import * as heal from '../lib/heal.mjs';
-import { fixStatusline } from '../lib/statusline.mjs';
+import { fixStatusline, helperStampStale } from '../lib/statusline.mjs';
 import { registry, syncBlocks } from '../lib/blocks.mjs';
 import { register as mcpRegister, applyExclusions } from '../lib/mcp.mjs';
 import { listDaemons, staleDaemons, reap } from '../lib/daemons.mjs';
@@ -149,9 +149,26 @@ export async function run({ flags, pkgRoot }) {
     const prov = await withProgress('providers (api)', () => applyProviders(cfg, cwd));
     if (prov.changed || !prov.ok) report('providers (api)', prov);
   }
-  if (subsystems.has('statusline') || subsystems.has('versions')) {
-    const r = fixStatusline(cwd);
+  // Gate includes 'providers': applyProviders runs ruflo CLI commands, and any
+  // ruflo command is a potential helper-refresh wiper — so a providers-only
+  // sync must re-heal the statusline afterwards (this step runs after the
+  // providers step by design). Without this, a stale-oracle miss could let a
+  // providers sync wipe the footer with no re-inject planned.
+  if (subsystems.has('statusline') || subsystems.has('versions') || subsystems.has('providers')) {
+    // withProgress: fixStatusline blocks on a node subprocess (ruflo's helper
+    // refresh, up to 30s). The interval can't animate through a synchronous
+    // execFileSync, but the initial "⏳ statusline" render lands before the
+    // block — a visible label beats a frozen prompt.
+    const r = await withProgress('statusline', async () => fixStatusline(cwd));
     (r.applied || !r.reason ? ok : warn)(`statusline: ${r.applied ? `footer injected (v${r.version})` : r.reason ?? 'in sync'}`);
+    // Honest success: fixStatusline invokes ruflo's PRIVATE helper-refresh
+    // internal, best-effort. If the stamp is STILL stale after the heal, that
+    // refresh silently no-oped (e.g. upstream moved the dist module) and the
+    // next ruflo command will wipe the footer we just injected — say so
+    // instead of letting "footer injected" read as converged.
+    if (helperStampStale(cwd)) {
+      warn('statusline: helper stamp still stale after heal — ruflo\'s refresh did not run; the footer may not survive the next ruflo command');
+    }
   }
 
   // kit self-update — LAST, after every other heal: npm replaces the kit's

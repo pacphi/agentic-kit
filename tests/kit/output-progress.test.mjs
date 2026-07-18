@@ -48,3 +48,39 @@ test('TTY: erases the line even when the thunk throws', async () => {
     /boom/);
   assert.equal(out.writes.at(-1), '\r\x1b[K');
 });
+
+test('the interval actually ticks: elapsed time advances second by second', async (t) => {
+  // Mocked clock so the 1s interval and Date.now() are driven, not real-time —
+  // without this, every thunk resolves before the first tick and the entire
+  // ticker (the feature) could be deleted with the suite staying green.
+  t.mock.timers.enable({ apis: ['setInterval', 'Date'] });
+  const out = sink();
+  let release;
+  const p = withProgress('upgrade ruflo', () => new Promise((r) => { release = r; }), { tty: true, out });
+  assert.match(out.writes[0], /upgrade ruflo/);
+  assert.match(out.writes[0], /0s/); // initial render at t=0
+  t.mock.timers.tick(1000);
+  assert.match(out.writes.at(-1), /1s/); // interval fired, elapsed advanced
+  release('done');
+  assert.equal(await p, 'done');
+  assert.equal(out.writes.at(-1), '\r\x1b[K');
+});
+
+test('minute rollover formats as XmYYs with zero-padded seconds', async (t) => {
+  t.mock.timers.enable({ apis: ['setInterval', 'Date'] });
+  const out = sink();
+  let release;
+  const p = withProgress('brain KB', () => new Promise((r) => { release = r; }), { tty: true, out });
+  t.mock.timers.tick(61_000); // 61 ticks; last render at t=61s
+  assert.match(out.writes.at(-1), /1m01s/); // not '1m1s', not '61s'
+  release('v');
+  await p;
+});
+
+test('labels are interpolated verbatim — including real callers with metachars', async () => {
+  // Real sync labels include 'providers (api)' and 'upgrade @openai/codex';
+  // the ticker must render them literally (plain interpolation, no formatting).
+  const out = sink();
+  await withProgress('providers (api)', async () => 'v', { tty: true, out });
+  assert.ok(out.writes[0].includes('providers (api)'));
+});

@@ -28,7 +28,13 @@ export const glyph = (level) =>
  *  TTY-only: piped/redirected output gets no ticker (the caller's result line is
  *  enough) so logs and `--json` stay clean. Always clears its line before
  *  returning, so the caller's ok/fail prints fresh. Rejects exactly as `thunk`
- *  does — never swallows errors. */
+ *  does — never swallows errors.
+ *
+ *  INVARIANT (load-bearing): the thunk must not write to stdout — the ticker
+ *  owns the line via \r-rewrites with no trailing newline. Every current sync
+ *  thunk routes child output through the buffered run() in exec.mjs, which is
+ *  why this holds; a thunk that console.logs or spawns stdio:'inherit' will
+ *  garble the line. */
 export async function withProgress(label, thunk, {
   tty = process.stdout.isTTY, // injectable for hermetic tests
   out = process.stdout,

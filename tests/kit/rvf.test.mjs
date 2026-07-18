@@ -78,6 +78,36 @@ test('capBytes <= 0 disables the backstop entirely', () => {
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
+test('the cap is exclusive: size === capBytes is NOT oversized, cap+1 is', () => {
+  const dir = aqeDir();
+  writeStore(dir, 'at-cap.rvf', 1024);
+  writeStore(dir, 'over-cap.rvf', 1025);
+  const findings = scanRvf(dir, { capBytes: 1024 });
+  assert.equal(findings.length, 1);
+  assert.equal(path.basename(findings[0].file), 'over-cap.rvf');
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test('only .rvf files are candidates — an oversized sidecar is never flagged', () => {
+  const dir = aqeDir();
+  fs.writeFileSync(path.join(dir, 'patterns.rvf.idmap.json'), Buffer.alloc(4096));
+  assert.deepEqual(scanRvf(dir, { capBytes: 1024 }), []);
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test('a store that vanishes between readdir and stat is skipped, not a crash', () => {
+  // The aqe daemon renames/quarantines stores while we scan (observed live:
+  // 35 renames in 7 min). A dangling symlink models the vanished entry
+  // deterministically: readdir lists it, stat throws ENOENT.
+  const dir = aqeDir();
+  fs.symlinkSync(path.join(dir, 'gone-away'), path.join(dir, 'brain.rvf'));
+  writeStore(dir, 'patterns.rvf', 4096);
+  const findings = scanRvf(dir, { capBytes: 1024 }); // must not throw
+  assert.equal(findings.length, 1);
+  assert.equal(path.basename(findings[0].file), 'patterns.rvf');
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
 test('scanRvf on a missing .agentic-qe dir returns empty, never throws', () => {
   assert.deepEqual(scanRvf(path.join(os.tmpdir(), 'ak-rvf-nope-123')), []);
 });

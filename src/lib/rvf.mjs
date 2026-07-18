@@ -2,8 +2,12 @@
 // a hard exit; seen at ~277 GB). This is the ONLY filesystem-observable
 // corruption mode left for the kit: every other RVF failure is agentic-qe's own
 // job since 3.12.3 (issue #563 → aqe PR #564 — atomic tmp+rename exports plus
-// non-destructive, pid-guarded self-healing), and `ak sync` keeps aqe current,
-// so the kit never runs beside an older aqe for more than one sync.
+// non-destructive, pid-guarded self-healing). The legacy corrupt-lock branch
+// was NOT dead code when removed — it stayed reachable on `ak status` (never
+// upgrades), `ak sync --no-upgrade`, and offline syncs against a pre-3.12.3
+// aqe — it was removed because on exactly those paths its false-positive
+// data-loss risk (deleting a healthy store beside a stale lock) outweighed the
+// marginal protection it offered.
 //
 // HISTORY, kept because the mistake carried real data-loss risk: the kit once
 // flagged any `.rvf.lock` whose first four bytes are `FLVR` as corruption and
@@ -32,7 +36,12 @@ export function scanRvf(dir, { capBytes = defaultCapBytes() } = {}) {
   for (const name of fs.readdirSync(dir)) {
     if (!name.endsWith('.rvf')) continue;
     const file = path.join(dir, name);
-    const size = fs.statSync(file).size;
+    // Per-entry guard: aqe daemon workers rename/quarantine stores in this dir
+    // while we scan (observed live: 35 renames in 7 minutes), so a file listed
+    // by readdir can be gone by stat time. A vanished entry is not a finding —
+    // and it must never crash `ak status`/`ak sync` (collect() calls us bare).
+    let size;
+    try { size = fs.statSync(file).size; } catch { continue; }
     if (size > capBytes) findings.push({ kind: 'oversized', file, size });
   }
   return findings;

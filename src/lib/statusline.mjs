@@ -9,7 +9,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { execFileSync } from 'node:child_process';
-import { projectStatusline, projectSettings, rufloCliDist } from './paths.mjs';
+import { createRequire } from 'node:module';
+import { projectStatusline, projectSettings, rufloCliDist, rufloNodeModules } from './paths.mjs';
 import { installedVersion, cmpVersions } from './versions.mjs';
 import { readJson, writeJsonWithBackup } from './settings.mjs';
 
@@ -128,6 +129,15 @@ function rufloCliVersion() {
   try {
     const pkg = path.join(rufloCliDist(), '..', '..', 'package.json');
     return JSON.parse(fs.readFileSync(pkg, 'utf8')).version ?? null;
+  } catch { /* fall through to resolver */ }
+  // Resolver fallback: ruflo finds its own version via require.resolve, which
+  // can succeed where the fixed path.join fails (symlinked/relocated cli). The
+  // two staleness oracles — ours and ruflo's — must not disagree: if we
+  // under-report ("not stale") while ruflo would refresh, a providers-only
+  // sync runs a ruflo command that wipes the footer with no re-inject planned.
+  try {
+    const req = createRequire(pathToFileURL(path.join(rufloNodeModules(), 'noop.js')));
+    return JSON.parse(fs.readFileSync(req.resolve('@claude-flow/cli/package.json'), 'utf8')).version ?? null;
   } catch { return null; }
 }
 
@@ -140,7 +150,12 @@ export function helperStampStale(root = process.cwd()) {
   const installed = rufloCliVersion();
   if (!installed) return false; // no ruflo cli → nothing will refresh anything
   try {
-    const stamp = fs.readFileSync(helperStampFile(root), 'utf8').trim();
+    // Tolerate a `v` prefix: ruflo writes the stamp bare today, but a prefixed
+    // stamp fed raw into cmpVersions goes NaN and reads as PERMANENTLY stale —
+    // arming a pointless refresh on every status/sync forever. Genuine garbage
+    // still reads stale BY DESIGN: the refresh it arms rewrites a clean stamp,
+    // so the state self-corrects in one sync rather than sticking.
+    const stamp = fs.readFileSync(helperStampFile(root), 'utf8').trim().replace(/^v/i, '');
     return cmpVersions(installed, stamp) > 0;
   } catch { return true; } // stamp unreadable/absent → first ruflo command will refresh
 }
@@ -154,14 +169,19 @@ export function helperStampStale(root = process.cwd()) {
  *  never load into the kit's module graph. Best-effort — absent module or any
  *  failure returns false and injection proceeds on the file as-is (no worse
  *  than the pre-fix behavior). */
-export function refreshRufloHelpers(root = process.cwd()) {
+export function refreshRufloHelpers(root = process.cwd(), { timeoutMs = 30_000 } = {}) {
   const mod = helperRefreshModule();
   if (!fs.existsSync(mod)) return false;
   try {
+    // A failed import / rejecting refresh exits 1; a BLOCKED refresh — upstream
+    // resolves {blocked:'…signature invalid'} rather than rejecting when the
+    // signed-manifest gate refuses to copy — exits 2. Both surface as false:
+    // "true = the refresh ran unblocked", never "a child spawned". (A resolved
+    // {refreshed:false} without blocked is a current-stamp no-op — success.)
     execFileSync(process.execPath, ['-e',
-      'import(process.argv[2]).then((m)=>m.autoRefreshHelpersIfStale(process.argv[1],{alsoRefreshGlobal:true})).then(()=>{},()=>{})',
+      'import(process.argv[2]).then((m)=>m.autoRefreshHelpersIfStale(process.argv[1],{alsoRefreshGlobal:true})).then((r)=>{if(r&&r.blocked)process.exit(2)},()=>process.exit(1))',
       root, pathToFileURL(mod).href,
-    ], { stdio: 'ignore', timeout: 30_000 });
+    ], { stdio: 'ignore', timeout: timeoutMs });
     return true;
   } catch { return false; }
 }
