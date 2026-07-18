@@ -105,7 +105,9 @@ export async function healAqeSolver() {
   return { ok: true, detail: r.code === 0 ? 'installed' : 'unavailable (TS fallback is fine <50K nodes)' };
 }
 
-/** Quarantine corrupt/oversized RVF artifacts in a project. */
+/** Quarantine stale-lock / oversized RVF artifacts in a project. No-op once the
+ *  installed aqe self-heals its own stores (>= 3.12.3): scanRvf returns nothing,
+ *  so this reports healthy without touching disk. See src/lib/rvf.mjs. */
 export function healRvf(projectAqeDir) {
   const findings = scanRvf(projectAqeDir);
   const removed = findings.flatMap((f) => quarantine(f));
