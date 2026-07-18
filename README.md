@@ -112,6 +112,13 @@ applies (reversibly); `ak x provider off` restores the claude-only default. Full
 
 [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) — symptom → `agentic-kit` command.
 
+## How tools are managed
+
+[docs/MANAGED-TOOLS.md](docs/MANAGED-TOOLS.md) — the consistency contract every
+managed tool follows (release-pinned installs, sync as the single updater,
+disk-first version truth, one drift story across status/statusline/dashboard),
+with the per-tool table and the checklist for adding a new tool.
+
 ## Credits
 
 ruflo/claude-flow by ruvnet · agentic-qe by proffesor-for-testing · prior art:

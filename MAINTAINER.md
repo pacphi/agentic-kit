@@ -67,6 +67,11 @@ docs/
 `bin/agentic-kit.mjs`, `src/`, `claude/`, `docs/TROUBLESHOOTING.md`. Nothing else
 ships — verify with `npm pack --dry-run` before a release if you touch `files`.
 
+> The consistency contract all managed tools share — install/update/version/display
+> invariants, the per-tool table, and the add-a-tool checklist — lives in
+> [docs/MANAGED-TOOLS.md](docs/MANAGED-TOOLS.md). The notes below are the
+> brain-specific details behind that contract.
+
 **RuvNet Brain is the odd one out.** ruflo/agentic-qe/the host CLIs are global npm
 packages: detected via `installedVersion` (npm global root) and drift-checked with
 `npm view`. The RuvNet Brain is *not* — `npx ruvnet-brain@latest` (the **published**
