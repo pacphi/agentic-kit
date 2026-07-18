@@ -12,9 +12,10 @@ npm install -g @pacphi/agentic-kit@next   # alpha channel until 4.0.0 GA
 ak setup        # once per machine; run it inside a git repo to set that project up too
 ```
 
-That's the only package you install by hand — **you do not need to install ruflo or
-agentic-qe yourself.** `ak setup` installs them globally for you (building natives past
-npm ≥11.17's `allow-scripts` gate), then heals and proves them.
+> [!IMPORTANT]
+> That's the only package you install by hand — **you do not need to install ruflo or
+> agentic-qe yourself.** `ak setup` installs them globally for you (building natives past
+> npm ≥11.17's `allow-scripts` gate), then heals and proves them.
 
 ## Why this exists
 
@@ -43,12 +44,13 @@ ak dashboard    open the local web dashboard (auto-opens your browser)   [--port
 ak uninstall    leave cleanly                [--dry-run] [--this-project] [--remove-ruflo] [--remove-aqe] [--purge] [--yes]
 ```
 
-(`ak` is the daily-driver alias; the full `agentic-kit` command is identical.
-Heads-up if you also use AutoKitteh: its CLI is also named `ak` — the full
-command always works.)
+> [!TIP]
+> **When in doubt: `ak sync`.** Every mutating command takes `--dry-run` and
+> prints its plan with reasons — you always see the impact before anything changes.
 
-**When in doubt: `ak sync`.** Every mutating command takes `--dry-run` and
-prints its plan with reasons — you always see the impact before anything changes.
+`ak` is the daily-driver alias; the full `agentic-kit` command is identical.
+(Heads-up if you also use AutoKitteh: its CLI is also named `ak` — the full
+command always works.)
 
 What the verbs cover:
 

@@ -16,7 +16,7 @@ security). It exposes the same functionality via two surfaces:
 - **MCP** — `mcp__claude-flow__*` tools, registered once at USER scope under the
   `claude-flow` key (`ak x mcp pick`). Claude Code defers MCP tool schemas and
   loads them on demand, so registration no longer costs the historical ~84k tokens of
-  always-loaded tool definitions per session. ruflo 3.28 exposes ~276 tools across ~35
+  always-loaded tool definitions per session. ruflo (3.28+) exposes ~276 tools across ~35
   families with no server-side gating; the kit's family picker turns exclusions into
   `permissions.deny` rules. Prefer MCP for tight, repeated, schema-typed integration;
   `ak x mcp off` opts back out entirely.
@@ -328,7 +328,7 @@ When agentic-qe **is** installed, the kit also merges a conditional **`ruflo-aqe
 block (AQE operating guidance — policies + MCP tool usage + QE-agent patterns) into this same
 `~/.claude/CLAUDE.md`, just below this `ruflo-reference` block. It is added when `aqe` is on
 PATH and **stripped automatically when agentic-qe is absent**. Source: `claude/aqe-reference.md`;
-applied by `install.sh` and re-asserted by `ak x reference sync` / `ak sync`.
+applied by `ak setup` and re-asserted by `ak x reference sync` / `ak sync`.
 
 ### Security surface (verify + activate)
 

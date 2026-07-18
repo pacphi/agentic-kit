@@ -27,7 +27,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { run, have } from './exec.mjs';
 import { readJson, writeJsonWithBackup } from './settings.mjs';
-import { installedVersion, cmpVersions } from './versions.mjs';
+import { installedVersion } from './versions.mjs';
 import * as paths from './paths.mjs';
 
 /** Frontier agent-CLI hosts. `pkg` is the npm global package; `enableEnv` is

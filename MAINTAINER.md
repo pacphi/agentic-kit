@@ -76,7 +76,7 @@ ships — verify with `npm pack --dry-run` before a release if you touch `files`
 packages: detected via `installedVersion` (npm global root) and drift-checked with
 `npm view`. The RuvNet Brain is *not* — `npx ruvnet-brain@latest` (the **published**
 installer; never `github:`, which runs the unreleased default-branch HEAD) installs a
-~512 MB offline KB to `~/.cache/ruvnet-brain/kb` (override `$RUVNET_BRAIN_KB`) and a
+~2 GB offline KB to `~/.cache/ruvnet-brain/kb` (override `$RUVNET_BRAIN_KB`) and a
 user-scope Claude Code plugin (the `search_ruvnet` MCP + hooks + a skill). So it gets a
 *parallel* lifecycle in `src/lib/ruvnet-brain.mjs`: `present()` probes disk,
 `latestVersion()`/`drift()` hit the GitHub releases API (TTL-cached in kit.json like
