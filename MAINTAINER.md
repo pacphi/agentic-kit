@@ -105,8 +105,9 @@ Toggle with the `ruvnetBrain` kit.json flag / `--no-ruvnet-brain`.
 > written by `recordInstalledRelease()` after a successful install) for pre-stamping
 > bundles. The statusline footer mirrors the same order, and the dashboard's update
 > banner folds the brain in from the same `drift()` result (`foldBrainDrift()` in
-> dashboard-server.mjs — driftReport only carries npm tools), so `ak status`, the
-> footer, and the dashboard can never disagree.
+> dashboard-server.mjs — driftReport only carries npm tools; the kit's own
+> `selfDrift` is folded the same way), so `ak status`, the footer, and the
+> dashboard can never disagree.
 > `classifyDrift()` compares that resolved value vs `releases/latest` —
 > same namespace, so it converges. A present-but-unstamped install (manual / pre-existing)
 > surfaces as outdated once, so `ak sync` pulls it onto the managed track. Do **not**

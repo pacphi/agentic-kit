@@ -19,7 +19,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execFile } from 'node:child_process';
-import { driftReport } from './versions.mjs';
+import { driftReport, selfDrift } from './versions.mjs';
 import { drift as ruvnetBrainDrift } from './ruvnet-brain.mjs';
 import { loadKitConfig } from './config.mjs';
 
@@ -73,11 +73,17 @@ async function collectData({ cwd, fetchStatus }) {
   let drift = Array.isArray(status?.drift) ? status.drift : null;
   if (!drift) {
     try { drift = await driftReport(); } catch { drift = null; }
-    // The RuvNet Brain is release-managed outside npm, so driftReport never
-    // carries it — fold it into the same array so the update banner covers ALL
-    // tools under management. Self-computed path only: a payload that supplied
-    // its own drift owns the whole array (tests inject network-free payloads).
-    // ruvnetBrainDrift is TTL-cached in kit.json, like driftReport's window.
+    // driftReport only carries the npm-managed tools — fold in the two managed
+    // outside it so the update banner covers ALL tools under management: the
+    // RuvNet Brain (release-managed; foldBrainDrift) and the kit itself
+    // (selfDrift already returns the banner's {pkg, installed, latest, outdated}
+    // shape). Self-computed path only: a payload that supplied its own drift
+    // owns the whole array (tests inject network-free payloads). Both folds are
+    // TTL-cached in kit.json, like driftReport's window.
+    try {
+      const s = await selfDrift({ pkgRoot: PKG_ROOT });
+      if (s.installed) drift = [...(drift ?? []), s];
+    } catch { /* banner is best-effort — the subsystem card still carries the self row */ }
     try {
       if (loadKitConfig().ruvnetBrain) drift = foldBrainDrift(drift, await ruvnetBrainDrift());
     } catch { /* banner is best-effort — the subsystem card still carries the brain row */ }
