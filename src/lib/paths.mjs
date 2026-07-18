@@ -77,6 +77,23 @@ export const npxCacheDir = () => {
   return path.join(cache, '_npx');
 };
 
+/** Nearest ancestor of `cwd` (inclusive) containing `.git`, or null. Bounded
+ *  walk. The project-vs-user scope decision MUST use this, not a cwd-only
+ *  probe: a cwd-only check run from a repo SUBDIR reports "not a project" and
+ *  sends project-scoped env (ENABLE_* and AQE_LLM_PROVIDER) into the machine-wide
+ *  user settings — while the sibling gates skip their project work — and the
+ *  leak is then invisible/unreversible from the repo root. */
+export function repoRoot(cwd = process.cwd()) {
+  let dir = path.resolve(cwd);
+  for (let i = 0; i < 30; i++) {
+    if (fs.existsSync(path.join(dir, '.git'))) return dir;
+    const parent = path.dirname(dir);
+    if (parent === dir) return null;
+    dir = parent;
+  }
+  return null;
+}
+
 export const rufloRoot = () => path.join(globalRoot(), 'ruflo');
 export const rufloNodeModules = () => path.join(rufloRoot(), 'node_modules');
 export const rufloCliDist = () =>

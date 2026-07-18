@@ -146,8 +146,12 @@ export async function collect({ pkgRoot, cwd = process.cwd() }) {
     rows.push(row('npx', 'warn', `npx cache check unavailable: ${e.message}`));
   }
 
-  // security surface
-  if (securityPresent()) {
+  // security surface — honors kit.json security:false (`ak setup
+  // --no-security`): an info row with NO fix, so sync never plans (or heals)
+  // the surface a user turned off. Previously the flag was write-only.
+  if (cfg.security === false) {
+    rows.push(row('security', 'info', 'security checks disabled (kit.json security:false)'));
+  } else if (securityPresent()) {
     if (aidefencePresent()) {
       rows.push(row('security', 'ok', '@claude-flow/security + aidefence present (defend functional)'));
     } else {

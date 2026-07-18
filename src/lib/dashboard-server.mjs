@@ -134,6 +134,16 @@ export function startDashboard({ port = 7431, cwd = process.cwd(), fetchStatus }
   const server = http.createServer(async (req, res) => {
     const url = (req.url || '/').split('?')[0];
     if (req.method !== 'GET') { res.writeHead(405).end('method not allowed'); return; }
+    // DNS-rebinding guard: the socket binds loopback-only, but a hostile page
+    // can rebind its own hostname to 127.0.0.1 and read /api/status cross-
+    // origin (the browser's SOP keys on the NAME, not the address). Only
+    // loopback literals are legitimate Hosts for this panel.
+    const host = String(req.headers.host || '').toLowerCase();
+    if (!/^(127\.0\.0\.1|localhost|\[::1\])(:\d+)?$/.test(host)) {
+      res.writeHead(403, { 'content-type': 'text/plain; charset=utf-8' });
+      res.end('forbidden (unexpected Host)');
+      return;
+    }
 
     if (url === '/' || url === '/index.html') {
       res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' });

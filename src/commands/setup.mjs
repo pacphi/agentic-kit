@@ -18,7 +18,7 @@ import { installedVersion } from '../lib/versions.mjs';
 import * as rb from '../lib/ruvnet-brain.mjs';
 import * as adb from '../lib/agentdb.mjs';
 import { readJson, writeJsonWithBackup } from '../lib/settings.mjs';
-import { scalar, checkpoint, withDb } from '../lib/sqlite.mjs';
+import { checkpoint, withDb } from '../lib/sqlite.mjs';
 import * as paths from '../lib/paths.mjs';
 import { ok, warn, fail, info, heading, bold, dim } from '../lib/output.mjs';
 
@@ -45,7 +45,7 @@ Options:
   --project        force project-scope setup even outside a git repo
   --minimal        machine scope only; skip project setup
   --no-aqe         skip agentic-qe install + configuration
-  --no-ruvnet-brain  skip the RuvNet Brain (~512 MB offline KB) setup step
+  --no-ruvnet-brain  skip the RuvNet Brain (~2 GB offline KB) setup step
   --no-security    skip the security-surface verification
   --reconfigure    re-run interactive choices, ignoring saved kit.json
   --yes            accept all prompts (non-interactive)
@@ -95,7 +95,7 @@ export async function run_machine({ flags, pkgRoot, cfg }) {
   }
   if (cfg.ruvnetBrain) {
     if (!rb.present()) {
-      if (await ask('Install the RuvNet Brain (~512 MB offline KB, powers the search_ruvnet MCP)?', true, flags.yes)) {
+      if (await ask('Install the RuvNet Brain (~2 GB offline KB, powers the search_ruvnet MCP)?', true, flags.yes)) {
         info('installing ruvnet-brain via npx (downloads the KB — may take a while)…');
         const r = await heal.installRuvnetBrain();
         (r.ok ? ok : warn)(`ruvnet-brain: ${r.detail}`);
@@ -103,9 +103,12 @@ export async function run_machine({ flags, pkgRoot, cfg }) {
     } else ok('ruvnet-brain present (refresh to the latest release with `ak sync`)');
   }
 
-  // 2. heal natives + the #2670 aidefence gap up front
+  // 2. heal natives + the #2670 aidefence gap up front. The aidefence heal is
+  // the security surface — it honors `--no-security` (cfg.security=false),
+  // which was previously write-only: documented, persisted, read by nothing.
   ok(`natives: ${(await heal.healNatives()).detail}`);
-  ok(`aidefence: ${(await heal.healAidefence()).detail}`);
+  if (cfg.security !== false) ok(`aidefence: ${(await heal.healAidefence()).detail}`);
+  else info('security surface skipped (kit.json security:false — re-enable by removing the key)');
   if (cfg.aqe) info(`aqe solver: ${(await heal.healAqeSolver()).detail}`);
 
   // 3. token-audit skill → ~/.claude/skills
@@ -176,8 +179,11 @@ export async function run_project({ flags, cfg }) {
   const mcpCfg = readJson(mcpJson);
   if (mcpCfg?.mcpServers) {
     for (const k of ['ruflo', 'claude-flow', 'ruv-swarm', 'flow-nexus']) delete mcpCfg.mcpServers[k];
-    if (Object.keys(mcpCfg.mcpServers).length === 0) fs.rmSync(mcpJson, { force: true });
-    else fs.writeFileSync(mcpJson, JSON.stringify(mcpCfg, null, 2) + '\n');
+    // Delete the FILE only when mcpServers was its only content — a repo may
+    // carry other top-level keys in .mcp.json that must survive the strip.
+    if (Object.keys(mcpCfg.mcpServers).length === 0 && Object.keys(mcpCfg).length === 1) {
+      fs.rmSync(mcpJson, { force: true });
+    } else fs.writeFileSync(mcpJson, JSON.stringify(mcpCfg, null, 2) + '\n');
     ok('.mcp.json sanitized (no committed ruflo/ruv-swarm/flow-nexus entries)');
   }
   await runCmd('claude', ['mcp', 'remove', 'ruflo', '-s', 'local'], { cwd: root });
@@ -215,9 +221,15 @@ export async function run_project({ flags, cfg }) {
   checkpoint(dbPath);
   const probeKey = `_setup/verify-${process.pid}`;
   const stored = (await runCmd('ruflo', ['memory', 'store', '-k', probeKey, '--value', 'setup-verify', '-n', '_setup'], { cwd: root, env })).code === 0;
-  const onDisk = stored && scalar(dbPath, `SELECT COUNT(*) FROM memory_entries WHERE key='${probeKey}'`) === 1;
+  // Bound parameters, not string interpolation — probeKey is pid-derived and
+  // safe today, but interpolated SQL is a habit this codebase doesn't keep.
+  const onDisk = stored && withDb(dbPath,
+    (db) => db.prepare('SELECT COUNT(*) AS n FROM memory_entries WHERE key = ?').get(probeKey)?.n) === 1;
   if (onDisk) {
-    withDb(dbPath, (db) => db.exec(`DELETE FROM memory_entries WHERE key='${probeKey}'; PRAGMA wal_checkpoint(TRUNCATE);`), null, { readonly: false });
+    withDb(dbPath, (db) => {
+      db.prepare('DELETE FROM memory_entries WHERE key = ?').run(probeKey);
+      db.exec('PRAGMA wal_checkpoint(TRUNCATE);');
+    }, null, { readonly: false });
     ok('memory write VERIFIED (store → on-disk row confirmed)');
   } else {
     fail('memory write verification FAILED — run: ak status / ruflo doctor -c memory');

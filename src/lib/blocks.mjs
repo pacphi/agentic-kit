@@ -117,9 +117,14 @@ export function upsertBlock(content, slug, blockText, position = 'append') {
   const e = END(slug);
   let out;
   const bi = text.indexOf(b);
-  if (bi !== -1) {
-    const afterEndLine = endOfSentinelLine(text, e, bi);
+  const afterEndLine = bi !== -1 ? endOfSentinelLine(text, e, bi) : null;
+  if (bi !== -1 && afterEndLine !== null) {
     out = text.slice(0, lineStart(text, bi)) + block + text.slice(afterEndLine);
+  } else if (bi !== -1) {
+    // Orphaned BEGIN (no END): append a fresh block instead of replacing "to
+    // end-of-file" — the orphan stays visible for the user to clean up, and
+    // nothing below it is destroyed.
+    out = text.replace(/\n*$/, '\n') + '\n' + block;
   } else if (position === 'prepend') {
     out = block + '\n' + text;
   } else {
@@ -138,6 +143,7 @@ export function stripBlock(content, slug) {
   const bi = text.indexOf(b);
   if (bi === -1) return content;
   const afterEndLine = endOfSentinelLine(text, e, bi);
+  if (afterEndLine === null) return content; // orphaned BEGIN — never strip to EOF
   const tail = text.slice(afterEndLine).replace(/^\n/, '');
   // Collapse the blank separator line upsert added before the block.
   const head = text.slice(0, lineStart(text, bi)).replace(/\n+$/, '\n');
@@ -149,12 +155,14 @@ function lineStart(text, index) {
   return nl === -1 ? 0 : nl + 1;
 }
 
-/** Index just past the newline that terminates the sentinel `e`'s line
- *  (or end-of-string). Searches from `from`; if the END sentinel is missing
- *  the block is treated as running to end-of-file (defensive). */
+/** Index just past the newline that terminates the sentinel `e`'s line, or
+ *  NULL when the END sentinel is missing. Callers must treat null as "no
+ *  well-formed block here" — the old fallback (run to end-of-file) meant an
+ *  orphaned BEGIN silently deleted everything below it on the next upsert:
+ *  irreversible loss of the user's global CLAUDE.md content. */
 function endOfSentinelLine(text, e, from) {
   const ei = text.indexOf(e, from);
-  if (ei === -1) return text.length;
+  if (ei === -1) return null;
   const nl = text.indexOf('\n', ei);
   return nl === -1 ? text.length : nl + 1;
 }
@@ -200,6 +208,14 @@ export async function syncBlocks(file, rows, resolveTemplate, { dryRun = false }
   }
   if (changed && !dryRun) {
     fs.mkdirSync(path.dirname(file), { recursive: true });
+    // One-time backup before the first rewrite of the user's CLAUDE.md —
+    // same contract as settings.mjs writeJsonWithBackup (never overwrite an
+    // existing .bak): this file is the user's global instructions, and every
+    // other writer in the kit is backup-first.
+    const bak = `${file}.bak`;
+    if (fs.existsSync(file) && !fs.existsSync(bak)) {
+      try { fs.copyFileSync(file, bak); } catch { /* best-effort */ }
+    }
     fs.writeFileSync(file, content);
   }
   return results;

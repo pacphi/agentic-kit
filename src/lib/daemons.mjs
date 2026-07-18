@@ -4,6 +4,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
+import { execFileSync } from 'node:child_process';
 import { run } from './exec.mjs';
 import { isWindows, home } from './paths.mjs';
 
@@ -66,7 +67,7 @@ async function processSweep() {
   return found;
 }
 
-function parseSweepLine(line, found) {
+export function parseSweepLine(line, found) {
   const m = line.trim().match(/^(\d+)[\s\t]+(.*)$/);
   if (!m) return;
   const wsMatch = m[2].match(/--workspace[= ]([^\s"]+|"[^"]+")/);
@@ -101,9 +102,26 @@ export function staleDaemons(daemons, ttlSecs = Number(process.env.RUFLO_DAEMON_
     !d.workspaceExists || (ttlSecs > 0 && d.ageSecs !== null && d.ageSecs > ttlSecs));
 }
 
+/** True when `pid`'s command line looks like a ruflo daemon (`daemon start`).
+ *  Guards reap() against pidfile pid-reuse: an orphaned daemon.pid whose pid
+ *  the OS recycled onto an unrelated same-user process must not get our
+ *  SIGTERM. The process-sweep path already matches cmdline; this brings the
+ *  workspace/registry path up to the same standard. POSIX ps only — on
+ *  Windows there is no cheap sync probe, so prior behavior is retained.
+ *  Unconfirmable (ps fails, no output) → false: never kill what we can't
+ *  identify. */
+function isDaemonProcess(pid) {
+  if (isWindows) return true;
+  try {
+    const args = execFileSync('ps', ['-p', String(pid), '-o', 'args='], { encoding: 'utf8' });
+    return /daemon start/.test(args);
+  } catch { return false; }
+}
+
 export function reap(daemons) {
   const results = [];
   for (const d of daemons) {
+    if (!isDaemonProcess(d.pid)) { results.push({ ...d, killed: false, pidReused: true }); continue; }
     try { process.kill(d.pid); results.push({ ...d, killed: true }); }
     catch { results.push({ ...d, killed: false }); }
   }

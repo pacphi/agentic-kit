@@ -136,7 +136,7 @@ export async function selfUpdate(version) {
 }
 
 /** Install (or update to latest) the RuvNet Brain via its npx installer.
- *  The installer is idempotent and skips the ~512 MB download when the KB is
+ *  The installer is idempotent and skips the ~2 GB download when the KB is
  *  already present — pass force:true to bypass that skip (used when a drift
  *  check saw a newer release). Runs `--no-stack --no-enhance`: ak already
  *  manages ruflo/RuVector and owns the CLAUDE.md grounding block. */

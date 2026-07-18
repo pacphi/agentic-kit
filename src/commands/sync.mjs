@@ -81,7 +81,9 @@ export async function run({ flags, pkgRoot }) {
   if (subsystems.has('ruvnet-brain-nightly')) {
     report('ruvnet-brain nightly', await heal.disableRuvnetBrainNightly());
   }
-  if (subsystems.has('security') || subsystems.has('versions')) {
+  // cfg.security gate: on `versions` this branch would otherwise heal the
+  // security surface even when the user disabled it (`ak setup --no-security`).
+  if ((subsystems.has('security') || subsystems.has('versions')) && cfg.security !== false) {
     await step('aidefence', () => heal.healAidefence());
     await step('aqe solver', () => heal.healAqeSolver());
   }
@@ -190,7 +192,15 @@ export async function run({ flags, pkgRoot }) {
     appendToConfig(cfg, {
       ts: Math.floor(Date.now() / 1000),
       learningRows: stats?.patternsLearned ?? 0,
-      nativeSlots: nativesStatus()?.locations?.length ?? 0,
+      // Count NATIVE bindings (incl. the aqe slot), not directories: a location
+      // flipping native→WASM must move this number or the regression detector
+      // named "native agentdb slots dropped" can never fire; and a benign tree
+      // reshape (a location legitimately vanishing) must not fake an alarm
+      // when its binding was WASM anyway.
+      nativeSlots: (() => {
+        const n = nativesStatus();
+        return (n?.locations?.filter((l) => l.native).length ?? 0) + (n?.aqe?.native ? 1 : 0);
+      })(),
       driftOutdated: (await driftReport()).some((r) => !r.installed || r.outdated),
       securityPresent: securityPresent(),
     });

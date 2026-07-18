@@ -126,3 +126,32 @@ test('syncBlocks reports missing-template without corrupting the file', async ()
   assert.equal(fs.readFileSync(file, 'utf8'), 'keep\n');
   fs.rmSync(tmp, { recursive: true, force: true });
 });
+
+// ── Orphaned-BEGIN safety (a corrupt sentinel must never eat the file) ──────
+
+test('an orphaned BEGIN (no END) never truncates content below it', () => {
+  // The old endOfSentinelLine fallback ran the "block" to end-of-file, so the
+  // next upsert silently deleted everything under the corrupt sentinel —
+  // irreversible loss of the user's global CLAUDE.md content.
+  const initial = 'above\n<!-- BEGIN s1 -->\nstale, END missing\n\n# User content that must survive\n';
+  const out = upsertBlock(initial, 's1', block('s1', 'fresh'));
+  assert.ok(out.includes('# User content that must survive'), 'content below the orphan survives');
+  assert.ok(out.includes('fresh'), 'a fresh block was appended');
+  assert.ok(out.includes('<!-- END s1 -->'), 'the appended block is well-formed');
+});
+
+test('stripBlock leaves content untouched when the END sentinel is missing', () => {
+  const initial = 'above\n<!-- BEGIN s1 -->\nno end here\nbelow\n';
+  assert.equal(stripBlock(initial, 's1'), initial);
+});
+
+test('syncBlocks takes a one-time .bak before first rewriting the file', async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'kit-bak-'));
+  const file = path.join(tmp, 'CLAUDE.md');
+  fs.writeFileSync(file, 'original\n');
+  fs.writeFileSync(path.join(tmp, 't.md'), 'body\n');
+  const rows = [{ slug: 'b1', template: 't.md', position: 'append', detector: { type: 'always' } }];
+  await syncBlocks(file, rows, () => path.join(tmp, 't.md'));
+  assert.equal(fs.readFileSync(`${file}.bak`, 'utf8'), 'original\n', 'pre-rewrite content preserved');
+  fs.rmSync(tmp, { recursive: true, force: true });
+});

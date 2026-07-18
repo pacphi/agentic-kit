@@ -78,11 +78,6 @@ async function hostVersion(bin) {
   return m ? m[1] : null;
 }
 
-async function npmLatest(pkg) {
-  const r = await run('npm', ['view', `${pkg}@latest`, 'version'], { timeout: 20_000 });
-  return r.code === 0 ? r.stdout.trim() : null;
-}
-
 /** How a host is installed, so we never clobber a non-npm install:
  *   'npm'      — an npm global copy exists (we may update it)
  *   'external' — on PATH but not the npm global copy (mise/native/brew — advise only)
@@ -103,30 +98,10 @@ export async function installHost(id) {
   return { ok: r.code === 0, changed: r.code === 0, detail: r.code === 0 ? `installed ${host.pkg}` : r.stderr.split('\n').slice(-2).join(' ').slice(0, 200) };
 }
 
-/** Update an npm-managed host to latest. No-op guidance for external installs. */
-export async function updateHost(id) {
-  const host = HOSTS.find((h) => h.id === id);
-  if (!host) return { ok: false, detail: `unknown host: ${id}` };
-  const st = await hostInstallState(host);
-  if (st.method !== 'npm') return { ok: true, changed: false, detail: `${id} is ${st.method}-managed — update it with your own tool` };
-  const r = await run('npm', ['install', '-g', `${host.pkg}@latest`], { timeout: 600_000 });
-  return { ok: r.code === 0, changed: r.code === 0, detail: r.code === 0 ? `updated ${host.pkg}` : r.stderr.split('\n').slice(-2).join(' ').slice(0, 200) };
-}
-
-/** Version drift per host. npm-managed hosts get a live `latest` lookup (network,
- *  cached by npm); external installs report installed-only (outdated=false, we
- *  don't own the update). Absent hosts report method 'absent'. */
-export async function hostDrift() {
-  const out = [];
-  for (const h of HOSTS) {
-    const st = await hostInstallState(h);
-    if (st.method === 'absent') { out.push({ id: h.id, method: 'absent', installed: null, latest: null, outdated: false }); continue; }
-    const latest = st.method === 'npm' ? await npmLatest(h.pkg) : null;
-    const outdated = !!(latest && st.version && cmpVersions(latest, st.version) > 0);
-    out.push({ id: h.id, method: st.method, installed: st.version, latest, outdated });
-  }
-  return out;
-}
+// NOTE: host UPDATES ride versions.mjs `driftReport` (which lists the host
+// packages) + heal.upgradePackage — there is deliberately no parallel
+// updateHost/hostDrift pair here. Two earlier ones were dead code (zero
+// production callers) and were removed; don't reintroduce a second drift path.
 
 /** Detect installed hosts + whether they are currently wired on in `cwd`. */
 export async function detectHosts(cwd = process.cwd()) {
@@ -153,11 +128,15 @@ export function detectProviders() {
 }
 
 /** Where host-enable env lands: project settings.local.json inside a repo (same
- *  seam as CLAUDE_FLOW_DB_PATH), else the user settings.json. */
+ *  seam as CLAUDE_FLOW_DB_PATH), else the user settings.json. Repo membership
+ *  is resolved by WALKING UP to .git (paths.repoRoot) and the project file is
+ *  anchored at that root — a cwd-only probe run from a repo subdir would
+ *  silently retarget machine-wide user settings (and undo/status, run from
+ *  the root, would never find the leaked keys). */
 export function settingsTarget(cwd = process.cwd()) {
-  const inProject = fs.existsSync(path.join(cwd, '.git'));
-  return inProject
-    ? { file: paths.projectSettingsLocal(cwd), scope: 'project' }
+  const root = paths.repoRoot(cwd);
+  return root
+    ? { file: paths.projectSettingsLocal(root), scope: 'project' }
     : { file: paths.claudeSettingsPath(), scope: 'user' };
 }
 
@@ -214,10 +193,13 @@ function buildChain(entries) {
 export function applyAqeRouter(cfg, cwd = process.cwd()) {
   const chain = cfg.providers?.aqeFallback ?? [];
   if (chain.length === 0) return { ok: true, changed: false, detail: 'no aqe fallback chain configured' };
-  if (!fs.existsSync(path.join(cwd, '.git'))) return { ok: true, changed: false, detail: 'not a project — aqe router unmanaged' };
+  // Same repo-root resolution as settingsTarget — the three scope gates must
+  // never disagree about what "in a project" means (see paths.repoRoot).
+  const root = paths.repoRoot(cwd);
+  if (!root) return { ok: true, changed: false, detail: 'not a project — aqe router unmanaged' };
   const valid = chain.filter((e) => e?.provider && AQE_PROVIDER_TYPES.includes(e.provider));
   if (valid.length === 0) return { ok: false, detail: 'no valid providers in fallback chain' };
-  const file = aqeRouterFile(cwd);
+  const file = aqeRouterFile(root);
   const existing = readJson(file, {}) ?? {};
   const next = { ...existing };
   next._managedBy = AQE_MANAGED_TAG;
@@ -330,13 +312,16 @@ export async function ensureCodexAdapter(cfg, cwd = process.cwd()) {
  *  Kept OUT of the sync hot path (it force-regenerates project files). */
 export async function ensureDualAgents(cfg, cwd = process.cwd()) {
   if (!cfg.providers?.hosts?.codex) return { ok: true, changed: false, detail: 'codex disabled — no dual agents' };
-  if (!fs.existsSync(path.join(cwd, '.git'))) return { ok: true, changed: false, detail: 'not a project — skipped `ruflo init --dual`' };
+  // Repo-root walk, matching settingsTarget/applyAqeRouter — and init runs at
+  // the ROOT, so a subdir invocation can't scatter project files mid-tree.
+  const root = paths.repoRoot(cwd);
+  if (!root) return { ok: true, changed: false, detail: 'not a project — skipped `ruflo init --dual`' };
   if (!(await have('ruflo'))) return { ok: false, detail: 'ruflo not on PATH' };
   // Prerequisite: dual-init aborts unless @claude-flow/codex is present. Install
   // it first (guarded on opted-in codex + detected CLI) so a fresh machine just works.
-  const adapter = await ensureCodexAdapter(cfg, cwd);
+  const adapter = await ensureCodexAdapter(cfg, root);
   if (!adapter.ok) return { ok: false, changed: adapter.changed, detail: `adapter prerequisite failed: ${adapter.detail}` };
-  const r = await run('ruflo', ['init', '--dual', '--force'], { cwd, timeout: 300_000 });
+  const r = await run('ruflo', ['init', '--dual', '--force'], { cwd: root, timeout: 300_000 });
   return { ok: r.code === 0, changed: r.code === 0, detail: r.code === 0 ? 'ruflo init --dual applied' : 'ruflo init --dual failed' };
 }
 
