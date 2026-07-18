@@ -7,10 +7,10 @@
 // CRLF-safe: operates on normalized text, re-emits the file's dominant ending.
 import fs from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { execFileSync } from 'node:child_process';
 import { projectStatusline, projectSettings, rufloCliDist } from './paths.mjs';
-import { installedVersion } from './versions.mjs';
+import { installedVersion, cmpVersions } from './versions.mjs';
 import { readJson, writeJsonWithBackup } from './settings.mjs';
 
 const FOOTER_TEMPLATE = path.join(
@@ -113,9 +113,68 @@ export function upstreamCveCounterFabricated() {
   } catch { return false; }
 }
 
+/** @claude-flow/cli's helper auto-refresh module (helper-refresh.js) — the
+ *  writer that wiped the kit's footer between syncs. On EVERY ruflo CLI command
+ *  it compares `.claude/helpers/.helpers-version` to the installed CLI version
+ *  and, when the stamp lags, pristine-copies the CRITICAL_HELPERS (statusline.cjs
+ *  among them) over ours. */
+const helperRefreshModule = () => path.join(rufloCliDist(), 'init', 'helper-refresh.js');
+const helperStampFile = (root) => path.join(root, '.claude', 'helpers', '.helpers-version');
+
+/** Installed @claude-flow/cli version (the value ruflo stamps helpers with),
+ *  or null. Versioned in lockstep with ruflo, but read from the cli package
+ *  itself so a skewed tree can't fool the compare. */
+function rufloCliVersion() {
+  try {
+    const pkg = path.join(rufloCliDist(), '..', '..', 'package.json');
+    return JSON.parse(fs.readFileSync(pkg, 'utf8')).version ?? null;
+  } catch { return null; }
+}
+
+/** True when ruflo's helper stamp lags the installed CLI — the armed state in
+ *  which the NEXT ruflo command (in practice the daemon start) auto-refreshes
+ *  the helpers and wipes the kit footer. Status uses this to flag the wipe
+ *  BEFORE it happens; sync closes it via refreshRufloHelpers(). Missing stamp
+ *  with a resolvable CLI counts as stale (first refresh hasn't run yet). */
+export function helperStampStale(root = process.cwd()) {
+  const installed = rufloCliVersion();
+  if (!installed) return false; // no ruflo cli → nothing will refresh anything
+  try {
+    const stamp = fs.readFileSync(helperStampFile(root), 'utf8').trim();
+    return cmpVersions(installed, stamp) > 0;
+  } catch { return true; } // stamp unreadable/absent → first ruflo command will refresh
+}
+
+/** Run ruflo's helper auto-refresh NOW, under the kit's control, so the
+ *  pristine-copy happens BEFORE footer injection instead of on the first ruflo
+ *  command after an upgrade. Root cause of the recurring footer wipe (observed
+ *  2026-07-18: daemon start at 12:20:35 rewrote statusline.cjs + .helpers-version
+ *  the same second — sync had injected onto a stale-stamped helper, so the wipe
+ *  was already armed). Subprocess, not in-process import: ruflo's ESM tree must
+ *  never load into the kit's module graph. Best-effort — absent module or any
+ *  failure returns false and injection proceeds on the file as-is (no worse
+ *  than the pre-fix behavior). */
+export function refreshRufloHelpers(root = process.cwd()) {
+  const mod = helperRefreshModule();
+  if (!fs.existsSync(mod)) return false;
+  try {
+    execFileSync(process.execPath, ['-e',
+      'import(process.argv[2]).then((m)=>m.autoRefreshHelpersIfStale(process.argv[1],{alsoRefreshGlobal:true})).then(()=>{},()=>{})',
+      root, pathToFileURL(mod).href,
+    ], { stdio: 'ignore', timeout: 30_000 });
+    return true;
+  } catch { return false; }
+}
+
 export function fixStatusline(root = process.cwd(), { dryRun = false } = {}) {
   const file = projectStatusline(root);
   if (!fs.existsSync(file)) return { file, applied: false, reason: 'no statusline.cjs (created by ruflo init)' };
+
+  // Order matters: refresh ruflo's helpers BEFORE reading, so we inject onto the
+  // freshly-stamped copy and nothing rewrites it until the next ruflo upgrade
+  // (where sync repeats this, again under its own control). dryRun (status) must
+  // stay read-only — helperStampStale() reports the armed wipe there instead.
+  if (!dryRun) refreshRufloHelpers(root);
 
   const raw = fs.readFileSync(file, 'utf8');
   const ending = eol(raw);

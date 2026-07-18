@@ -20,3 +20,36 @@ export const heading = (msg) => console.log(`\n${bold(msg)}`);
 /** Status glyph for dashboard rows. */
 export const glyph = (level) =>
   level === 'ok' ? green('✓') : level === 'warn' ? yellow('⚠') : level === 'fail' ? red('✗') : dim('·');
+
+/** Run `thunk` while showing a live elapsed-time ticker on one rewritten line, so
+ *  long heals (npm -g installs, the ~512 MB brain KB download, native rebuilds)
+ *  visibly progress instead of leaving the prompt frozen — our `run()` buffers
+ *  child output, so without this the terminal is silent until the process exits.
+ *  TTY-only: piped/redirected output gets no ticker (the caller's result line is
+ *  enough) so logs and `--json` stay clean. Always clears its line before
+ *  returning, so the caller's ok/fail prints fresh. Rejects exactly as `thunk`
+ *  does — never swallows errors. */
+export async function withProgress(label, thunk, {
+  tty = process.stdout.isTTY, // injectable for hermetic tests
+  out = process.stdout,
+} = {}) {
+  const start = Date.now();
+  const fmt = (ms) => {
+    const s = Math.round(ms / 1000);
+    return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m${String(s % 60).padStart(2, '0')}s`;
+  };
+  let timer;
+  if (tty) {
+    const render = () =>
+      out.write(`\r${dim('⏳')} ${label} ${dim(`— ${fmt(Date.now() - start)}…`)}`);
+    render();
+    timer = setInterval(render, 1000);
+    if (timer.unref) timer.unref();
+  }
+  try {
+    return await thunk();
+  } finally {
+    if (timer) clearInterval(timer);
+    if (tty) out.write('\r\x1b[K'); // erase the ticker line
+  }
+}
