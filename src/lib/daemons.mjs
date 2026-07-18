@@ -106,14 +106,19 @@ export function staleDaemons(daemons, ttlSecs = Number(process.env.RUFLO_DAEMON_
  *  Guards reap() against pidfile pid-reuse: an orphaned daemon.pid whose pid
  *  the OS recycled onto an unrelated same-user process must not get our
  *  SIGTERM. The process-sweep path already matches cmdline; this brings the
- *  workspace/registry path up to the same standard. POSIX ps only — on
- *  Windows there is no cheap sync probe, so prior behavior is retained.
- *  Unconfirmable (ps fails, no output) → false: never kill what we can't
- *  identify. */
+ *  workspace/registry path up to the same standard, on every platform —
+ *  POSIX via `ps`, Windows via the same CIM query the sweep uses (pid is
+ *  numeric-coerced into the filter, so nothing user-shaped reaches the
+ *  command). Unconfirmable (probe fails, no output) → false: never kill what
+ *  we can't identify. */
 function isDaemonProcess(pid) {
-  if (isWindows) return true;
+  if (!Number.isFinite(pid)) return false;
   try {
-    const args = execFileSync('ps', ['-p', String(pid), '-o', 'args='], { encoding: 'utf8' });
+    const args = isWindows
+      ? execFileSync('powershell', ['-NoProfile', '-Command',
+          `(Get-CimInstance Win32_Process -Filter 'ProcessId=${Number(pid)}').CommandLine`],
+        { encoding: 'utf8', timeout: 10_000 })
+      : execFileSync('ps', ['-p', String(pid), '-o', 'args='], { encoding: 'utf8' });
     return /daemon start/.test(args);
   } catch { return false; }
 }

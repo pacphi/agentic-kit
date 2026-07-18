@@ -52,7 +52,11 @@ test('pid-reuse guard: a LIVE process that is not a ruflo daemon is never killed
 });
 
 test('a real child whose argv matches "daemon start" IS reaped', async (t) => {
-  if (process.platform === 'win32') { t.skip('POSIX ps guard; Windows keeps prior behavior'); return; }
+  // The guard itself is cross-platform (ps on POSIX, CIM on Windows) and the
+  // never-kill side is covered above on every OS; this kill-true path stays
+  // POSIX-only because Windows CI's spawn + CIM probe latency makes the
+  // 200ms settle window flake-prone, not because the behavior differs.
+  if (process.platform === 'win32') { t.skip('kill-true path exercised on POSIX only (CI timing)'); return; }
   // Spawn a keep-alive child whose ps args contain "daemon start" (extra argv
   // after -e lands in the command line), so the identity guard matches it.
   const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)', 'daemon', 'start'], { stdio: 'ignore' });
