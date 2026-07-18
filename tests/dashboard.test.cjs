@@ -135,9 +135,14 @@ async function main() {
   }
 
   // A second fixture WITHOUT improvement.json / health ring: those keys must be
-  // null/absent, never a crash.
+  // null/absent, never a crash. `drift: []` is REQUIRED to keep this suite
+  // network-free: without it collectData takes the self-computed path
+  // (driftReport's npm views + the brain fold-in's GitHub fetch), and the
+  // fetch's undici keep-alive handle trips libuv's
+  // `!(handle->flags & UV_HANDLE_CLOSING)` assert (win/async.c:94) at process
+  // exit on Windows CI — every test passed, then the exit code was 1.
   const bare = mkFixture({});
-  const srv2 = await startDashboard({ port: 0, cwd: bare, fetchStatus: async () => ({ overall: 'ok', rows: [] }) });
+  const srv2 = await startDashboard({ port: 0, cwd: bare, fetchStatus: async () => ({ overall: 'ok', rows: [], drift: [] }) });
   try {
     await test('missing improvement.json / health ring → null, no crash', async () => {
       const r = await get(srv2.url + 'api/status');
