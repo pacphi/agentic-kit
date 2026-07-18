@@ -19,7 +19,9 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execFile } from 'node:child_process';
-import { driftReport } from './versions.mjs';
+import { driftReport, selfDrift } from './versions.mjs';
+import { drift as ruvnetBrainDrift } from './ruvnet-brain.mjs';
+import { loadKitConfig } from './config.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const PKG_ROOT = path.resolve(HERE, '..', '..');
@@ -69,7 +71,23 @@ async function collectData({ cwd, fetchStatus }) {
   // Version drift: prefer what the status payload already carried; otherwise
   // ask versions.mjs directly (TTL-cached, so no extra network within the window).
   let drift = Array.isArray(status?.drift) ? status.drift : null;
-  if (!drift) { try { drift = await driftReport(); } catch { drift = null; } }
+  if (!drift) {
+    try { drift = await driftReport(); } catch { drift = null; }
+    // driftReport only carries the npm-managed tools — fold in the two managed
+    // outside it so the update banner covers ALL tools under management: the
+    // RuvNet Brain (release-managed; foldBrainDrift) and the kit itself
+    // (selfDrift already returns the banner's {pkg, installed, latest, outdated}
+    // shape). Self-computed path only: a payload that supplied its own drift
+    // owns the whole array (tests inject network-free payloads). Both folds are
+    // TTL-cached in kit.json, like driftReport's window.
+    try {
+      const s = await selfDrift({ pkgRoot: PKG_ROOT });
+      if (s.installed) drift = [...(drift ?? []), s];
+    } catch { /* banner is best-effort — the subsystem card still carries the self row */ }
+    try {
+      if (loadKitConfig().ruvnetBrain) drift = foldBrainDrift(drift, await ruvnetBrainDrift());
+    } catch { /* banner is best-effort — the subsystem card still carries the brain row */ }
+  }
 
   return {
     generatedAt: new Date().toISOString(),
@@ -86,6 +104,22 @@ async function collectData({ cwd, fetchStatus }) {
 function kitVersion() {
   const pj = readJsonSafe(path.join(PKG_ROOT, 'package.json'));
   return pj?.version ?? '0.0.0';
+}
+
+/** Fold the RuvNet Brain into the npm drift array, same {pkg, installed, latest,
+ *  outdated} shape renderDrift expects. `b` is a src/lib/ruvnet-brain.mjs drift()
+ *  result (release-tag namespace, disk-first — the same value `ak status` and the
+ *  statusline show, so the banner can never disagree with them). Absent brain →
+ *  array unchanged (the "not installed" story lives on the subsystem card).
+ *  Pure; exported for tests. */
+export function foldBrainDrift(drift, b) {
+  if (!b?.present) return drift;
+  return [...(drift ?? []), {
+    pkg: 'ruvnet-brain',
+    installed: b.installedRelease ?? '(unversioned)',
+    latest: b.latest,
+    outdated: !!b.outdated,
+  }];
 }
 
 /**
@@ -508,7 +542,7 @@ const JS = `
 
   // severity rank for rollups + triage sort; preferred order breaks ties.
   var RANK={fail:3,warn:2,ok:1,info:0,unknown:0};
-  var PREF=["versions","self","natives","security","learning","providers","hosts","mcp","ruvnet-brain","aqe","daemons","blocks","statusline","npx"];
+  var PREF=["versions","self","natives","security","learning","providers","hosts","mcp","ruvnet-brain","ruvnet-brain-nightly","aqe","daemons","blocks","statusline","npx"];
 
   // Collapse rows into one group per subsystem (kills repeated labels); the
   // group's level is the worst of its rows. Sort worst-first, then by PREF.

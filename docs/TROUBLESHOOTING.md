@@ -25,7 +25,7 @@ fix; `sync` applies them in the right order and re-checks afterward.
 | Want to change which MCP tool families are callable | Exclusions are `permissions.deny` rules, persisted in kit.json | `ak x mcp pick` (re-runnable); `x mcp status` shows the inventory; `x mcp off` unregisters |
 | `ruflo memory store` says OK but reads return nothing | Absolute-DB-path pin missing, or WAL not checkpointed, or the WASM fallback above | `ak setup` in the project re-pins + verifies a real write lands on disk |
 | Suspicious token burn | Background automation vs interactive usage | ask Claude to run the **ruflo-token-audit** skill (deployed by `setup`) |
-| `status` shows `ruvnet-brain … not installed` | The RuvNet Brain (offline KB + `search_ruvnet` MCP) isn't on disk | `ak sync` (or `ak setup`) runs the installer; `npx github:stuinfla/ruvnet-brain --doctor` health-checks it |
+| `status` shows `ruvnet-brain … not installed` | The RuvNet Brain (offline KB + `search_ruvnet` MCP) isn't on disk | `ak sync` (or `ak setup`) runs the installer; `npx ruvnet-brain --doctor` health-checks it |
 | Don't want the RuvNet Brain (the ~512 MB KB download) | It's on by default | `ak setup --no-ruvnet-brain`, or set `ruvnetBrain: false` in `~/.config/agentic-kit/kit.json` |
 | RuvNet Brain KB lives somewhere non-default | The installer + ak honor `$RUVNET_BRAIN_KB` (default `~/.cache/ruvnet-brain/kb`) | export `RUVNET_BRAIN_KB` so detection points at your KB |
 

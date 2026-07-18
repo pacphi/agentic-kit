@@ -4,8 +4,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import {
-  kbDir, present, installedVersion, classifyDrift,
-  INSTALL_SPEC, INSTALL_ARGS, REPO,
+  kbDir, present, installedVersion, installedReleaseOnDisk, classifyDrift,
+  INSTALL_SPEC, INSTALL_ARGS, REPO, NIGHTLY_LABEL, nightlyAgentPlist, nightlyAgentPresent,
 } from '../../src/lib/ruvnet-brain.mjs';
 import { BUILTIN_BLOCKS, detect } from '../../src/lib/blocks.mjs';
 import { loadKitConfig, saveKitConfig } from '../../src/lib/config.mjs';
@@ -29,14 +29,53 @@ test('kbDir honors $RUVNET_BRAIN_KB, else defaults under ~/.cache', () => {
   });
 });
 
-test('install spec/args stay pinned to the GitHub installer with --no-stack --no-enhance', () => {
-  // Regression lock: ak owns ruflo/RuVector + the CLAUDE.md block, so these two
-  // flags MUST persist or the installer double-manages them.
+test('install spec/args stay pinned to the PUBLISHED installer with the four suppression flags', () => {
+  // Regression locks, each audited live on the v3.3.1 installer (2026-07-17):
+  // - npm spec, never github: — a github: spec runs the unreleased default-branch
+  //   HEAD installer, inconsistent with ak's release-versioned management.
+  // - --no-stack/--no-enhance: ak owns ruflo/RuVector + the CLAUDE.md block.
+  // - --no-nightly-prompt/--no-telemetry: the installer's --yes accepts EVERY
+  //   optional offer, silently enabling the 03:47 self-update LaunchAgent (macOS)
+  //   and telemetry consent. ak owns updates, so these MUST persist.
   assert.equal(REPO, 'stuinfla/ruvnet-brain');
-  assert.equal(INSTALL_SPEC, 'github:stuinfla/ruvnet-brain');
+  assert.equal(INSTALL_SPEC, 'ruvnet-brain@latest');
   assert.ok(INSTALL_ARGS.includes('--no-stack'));
   assert.ok(INSTALL_ARGS.includes('--no-enhance'));
+  assert.ok(INSTALL_ARGS.includes('--no-nightly-prompt'));
+  assert.ok(INSTALL_ARGS.includes('--no-telemetry'));
   assert.ok(INSTALL_ARGS.includes('--yes'));
+});
+
+test('installedReleaseOnDisk reads SOURCE.json releaseTag — validated, v-stripped, null-safe', () => {
+  const writeSource = (body) => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'rb-src-'));
+    if (body !== null) fs.writeFileSync(path.join(tmp, 'SOURCE.json'), body);
+    return tmp;
+  };
+  const readWith = (body) =>
+    withEnv('RUVNET_BRAIN_KB', writeSource(body), () => installedReleaseOnDisk());
+
+  // stamped release bundle → tag in the RELEASE namespace, leading v stripped
+  assert.equal(readWith('{"releaseTag":"v3.3.1"}'), '3.3.1');
+  // already unprefixed stays as-is
+  assert.equal(readWith('{"releaseTag":"3.3.1"}'), '3.3.1');
+  // pre-stamping bundle (no field) → null, so the kit.json stamp takes over
+  assert.equal(readWith('{"builder":"rvf-kb-forge"}'), null);
+  // malformed JSON / missing file / junk tag → null, never a throw
+  assert.equal(readWith('{nope'), null);
+  assert.equal(readWith(null), null);
+  assert.equal(readWith('{"releaseTag":"not a tag !!"}'), null);
+  assert.equal(readWith(`{"releaseTag":"${'x'.repeat(40)}"}`), null);
+});
+
+test('nightly self-updater detection: label/plist fixed, present() is darwin-gated and never throws', () => {
+  // The label + path are the brain installer's own (--enable-nightly writes them);
+  // lock them so the sync heal keeps targeting the right LaunchAgent.
+  assert.equal(NIGHTLY_LABEL, 'com.ruvnet.brain-update');
+  assert.ok(nightlyAgentPlist().endsWith(path.join('Library', 'LaunchAgents', 'com.ruvnet.brain-update.plist')));
+  const p = nightlyAgentPresent();
+  assert.equal(typeof p, 'boolean');
+  if (process.platform !== 'darwin') assert.equal(p, false, 'installer never schedules off-macOS');
 });
 
 test('present() is true when the KB entrypoint exists (forge-mcp-all.mjs)', () => {
@@ -77,6 +116,16 @@ test('classifyDrift compares in the RELEASE-TAG namespace and converges', () => 
   // latest unknown (offline / rate-limited) → never falsely outdated
   assert.equal(classifyDrift({ present: true, installedRelease: null, latest: null }).outdated, false);
   assert.equal(classifyDrift({ present: true, installedRelease: '3.0.0', latest: null }).outdated, false);
+});
+
+test('disableRuvnetBrainNightly no-ops cleanly when nothing is scheduled', async (t) => {
+  // Guard: on a macOS machine that IS enrolled, running this would remove the
+  // real LaunchAgent — a unit test must never mutate the host. Skip there.
+  if (nightlyAgentPresent()) return t.skip('real nightly LaunchAgent present — not mutating the host');
+  const { disableRuvnetBrainNightly } = await import('../../src/lib/heal.mjs');
+  const r = await disableRuvnetBrainNightly({ runner: async () => ({ code: 0 }) });
+  assert.equal(r.ok, true);
+  assert.match(r.detail, /not macOS|already off/);
 });
 
 test('BUILTIN_BLOCKS carries the ruvnet-brain-reference row gated on the KB dir', async () => {

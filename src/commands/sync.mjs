@@ -71,6 +71,12 @@ export async function run({ flags, pkgRoot }) {
   if (subsystems.has('ruvnet-brain') && !flags['no-upgrade']) {
     report('ruvnet-brain', await heal.installRuvnetBrain({ force: true }));
   }
+  // The brain installer's own nightly self-updater (macOS LaunchAgent) bypasses
+  // ak-managed updates — disabling it is a heal, not an upgrade, so it runs even
+  // under --no-upgrade. Reversible: `npx ruvnet-brain --enable-nightly`.
+  if (subsystems.has('ruvnet-brain-nightly')) {
+    report('ruvnet-brain nightly', await heal.disableRuvnetBrainNightly());
+  }
   if (subsystems.has('security') || subsystems.has('versions')) {
     report('aidefence', await heal.healAidefence());
     report('aqe solver', await heal.healAqeSolver());

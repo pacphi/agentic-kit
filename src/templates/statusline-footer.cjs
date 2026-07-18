@@ -271,16 +271,26 @@ function rufloActivationSegments(cwd){
       var kbDir = process.env.RUVNET_BRAIN_KB || path.join(os2.homedir(), ".cache", "ruvnet-brain", "kb");
       if (fs.existsSync(path.join(kbDir, "forge-mcp-all.mjs"))) {
         // Version — best-effort, empty on any failure (never blocks the row).
-        // Prefer the GitHub RELEASE tag ak tracks (what `ak status` shows, e.g.
-        // 3.3.1) over the plugin.json SEMVER (e.g. 0.5.0-dev) — they are DIFFERENT
-        // version namespaces for the same install, and showing the plugin semver
-        // here confused users (it disagreed with `ak status`). Three-namespace
-        // gotcha; see MAINTAINER.md. Fall back to the plugin semver only when ak
-        // has no recorded release (manual/pre-existing install).
+        // RELEASE-tag namespace (what `ak status` shows, e.g. 3.3.1), never the
+        // plugin.json SEMVER (e.g. 0.5.0-dev) — different namespaces for the same
+        // install; showing the semver here confused users (it disagreed with
+        // `ak status`). Three-namespace gotcha; see MAINTAINER.md. Resolution
+        // order MIRRORS drift() in src/lib/ruvnet-brain.mjs so this row and
+        // `ak status` can never disagree:
+        //   1) the bundle's own on-disk stamp (SOURCE.json.releaseTag) — ground
+        //      truth, current even when the KB changed outside ak (e.g. a manual
+        //      forge-update.mjs run);
+        //   2) ak's kit.json record of the release it last installed;
+        //   3) plugin semver — last resort for manual/pre-stamping installs.
         var bver = "";
         try {
           var relTag = null;
           try {
+            var srcJ = JSON.parse(fs.readFileSync(path.join(kbDir, "SOURCE.json"), "utf8"));
+            var rawTag = String(srcJ.releaseTag || "");
+            if (/^[A-Za-z0-9._-]{1,32}$/.test(rawTag)) relTag = rawTag;
+          } catch(e){}
+          if (!relTag) try {
             var kitCfg = path.join(os2.homedir(), ".config", "agentic-kit", "kit.json");
             var kj = JSON.parse(fs.readFileSync(kitCfg, "utf8"));
             if (kj && kj.versionCheck && kj.versionCheck.ruvnetBrain) relTag = kj.versionCheck.ruvnetBrain.installedRelease;

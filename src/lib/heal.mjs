@@ -10,7 +10,7 @@ import { rufloRoot, aqeRoot } from './paths.mjs';
 import { agentdbLocations, bsq3IsNative, bsq3Root, aidefencePresent } from './natives.mjs';
 import { KIT_PKG } from './versions.mjs';
 import { scanRvf, quarantine } from './rvf.mjs';
-import { INSTALL_SPEC, INSTALL_ARGS, present as rbPresent, latestVersion as rbLatest, recordInstalledRelease as rbRecord } from './ruvnet-brain.mjs';
+import { INSTALL_SPEC, INSTALL_ARGS, NIGHTLY_LABEL as RB_NIGHTLY_LABEL, nightlyAgentPlist as rbNightlyPlist, present as rbPresent, latestVersion as rbLatest, recordInstalledRelease as rbRecord } from './ruvnet-brain.mjs';
 import { PKG as ADB_PKG, present as adbPresent, coherence as adbCoherence } from './agentdb.mjs';
 
 // Packages whose install scripts must run for natives to build (npm >=11.17
@@ -139,19 +139,49 @@ export async function selfUpdate(version) {
  *  check saw a newer release). Runs `--no-stack --no-enhance`: ak already
  *  manages ruflo/RuVector and owns the CLAUDE.md grounding block. */
 export async function installRuvnetBrain({ force = false } = {}) {
-  const args = ['-y', INSTALL_SPEC, ...INSTALL_ARGS, ...(force ? ['--force'] : [])];
+  // Resolve the release tag FIRST and pin the installer to it (--version v<tag>),
+  // so the bundle that lands on disk is exactly the release ak stamps — the old
+  // install-then-stamp order left a window where a release published mid-install
+  // made the stamp disagree with disk. Offline (tag null): the installer's own
+  // latest logic applies and the stamp is best-effort afterwards, as before.
+  const tag = await rbLatest();
+  const args = ['-y', INSTALL_SPEC, ...INSTALL_ARGS,
+    ...(tag ? ['--version', `v${tag}`] : []),
+    ...(force ? ['--force'] : [])];
   const r = await run('npx', args, { timeout: 900_000 });
   if (r.code === 0) {
-    // A default install pulls GitHub releases/latest, so the release now on disk
-    // == latest at this moment. Stamp it (release-tag namespace) so drift converges
-    // — the plugin's own semver never tracks the KB release, so we can't use it.
-    const tag = await rbLatest();
-    if (tag) rbRecord(tag);
-    return { ok: true, detail: tag ? `installed release v${tag}` : 'installed (release tag unknown)' };
+    // Stamp the release-tag namespace so drift converges — the plugin's own
+    // semver never tracks the KB release, so we can't use it.
+    const stamped = tag ?? await rbLatest();
+    if (stamped) rbRecord(stamped);
+    return { ok: true, detail: stamped ? `installed release v${stamped}` : 'installed (release tag unknown)' };
   }
   // A non-zero exit can still leave a usable install (post-verify smoke test may
   // fail offline); report the tail but reflect actual presence.
   return { ok: rbPresent(), detail: (r.stderr || `exit ${r.code}`).trim().split('\n').slice(-2).join(' ').slice(0, 200) };
+}
+
+/** Disable the brain installer's nightly self-update LaunchAgent (macOS-only —
+ *  the installer never schedules anything elsewhere). ak is the single owner of
+ *  brain updates (`ak sync` + the release stamp); the installer's 03:47
+ *  forge-update job rewrites the KB outside that record, and on the released
+ *  v3.3.1 bundle it applies downloads without signature verification. Mirrors
+ *  `npx ruvnet-brain --disable-nightly` exactly, and BOTH steps are required:
+ *  bootout unloads the job from the live launchd session (file removal alone
+ *  leaves it scheduled until logout); removing the plist stops launchd from
+ *  re-registering it at next login. Idempotent; the user can re-enroll
+ *  deliberately with `npx ruvnet-brain --enable-nightly` (status will re-flag),
+ *  or set ruvnetBrain:false in kit.json to have ak stand down entirely. */
+export async function disableRuvnetBrainNightly({ runner = run } = {}) {
+  if (process.platform !== 'darwin') return { ok: true, detail: 'not macOS — installer never schedules here' };
+  const plist = rbNightlyPlist();
+  if (!fs.existsSync(plist)) return { ok: true, detail: 'nightly self-updater already off' };
+  // Failure is fine: "not loaded" is exactly the state we want.
+  await runner('launchctl', ['bootout', `gui/${process.getuid()}/${RB_NIGHTLY_LABEL}`]);
+  try { fs.rmSync(plist); } catch (e) {
+    return { ok: false, detail: `couldn't remove ${plist}: ${e.message} — remove it by hand or run \`npx ruvnet-brain --disable-nightly\`` };
+  }
+  return { ok: true, detail: 'nightly self-updater disabled (LaunchAgent removed; brain updates flow through ak sync)' };
 }
 
 /** Ensure the standalone agentdb CLI is present AND coherent with ruflo's

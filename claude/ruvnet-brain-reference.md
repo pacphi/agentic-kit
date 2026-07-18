@@ -1,9 +1,11 @@
 <!-- BEGIN ruvnet-brain-reference -->
 <!-- ruvnet-brain-reference: merged into ~/.claude/CLAUDE.md ONLY when the RuvNet Brain
      KB is present (~/.cache/ruvnet-brain/kb, or $RUVNET_BRAIN_KB). Managed by ak —
-     stripped automatically when the brain is removed. ak installs it with
-     `npx github:stuinfla/ruvnet-brain --no-stack --no-enhance` (ak owns this block, so
-     the installer's own --enhance-claude-md is disabled). Source of truth:
+     stripped automatically when the brain is removed. ak installs the PUBLISHED
+     installer pinned to the release it tracks:
+     `npx ruvnet-brain@latest --no-stack --no-enhance --no-nightly-prompt --no-telemetry --version v<tag>`
+     (ak owns this block, updates, and telemetry consent, so the installer's own
+     --enhance-claude-md / nightly / telemetry offers are disabled). Source of truth:
      claude/ruvnet-brain-reference.md in the agentic-kit kit. -->
 
 ## RuvNet Brain — ground before you assert
@@ -28,7 +30,7 @@
   pull the latest release. `ak status` reports presence + drift (checked against GitHub
   releases, TTL-cached). Opt out with `ak setup --no-ruvnet-brain` (or set `ruvnetBrain:false`
   in `~/.config/agentic-kit/kit.json`).
-- **Health check:** `npx github:stuinfla/ruvnet-brain --doctor` (verifies the KB, reader, and
+- **Health check:** `npx ruvnet-brain --doctor` (verifies the KB, reader, and
   runs a smoke query). Not installed? that command also installs it.
 - It is an npx-driven Claude Code **plugin** (MCP server + hooks + a skill) at user scope, not
   a global npm package — so it is detected on disk, not via `npm ls`.
