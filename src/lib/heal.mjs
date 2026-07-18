@@ -105,9 +105,9 @@ export async function healAqeSolver() {
   return { ok: true, detail: r.code === 0 ? 'installed' : 'unavailable (TS fallback is fine <50K nodes)' };
 }
 
-/** Quarantine stale-lock / oversized RVF artifacts in a project. No-op once the
- *  installed aqe self-heals its own stores (>= 3.12.3): scanRvf returns nothing,
- *  so this reports healthy without touching disk. See src/lib/rvf.mjs. */
+/** Quarantine oversized (runaway-append) RVF stores in a project — the one RVF
+ *  failure mode left to the kit. Lock/corruption handling is agentic-qe's own
+ *  job since 3.12.3; see src/lib/rvf.mjs for the history. */
 export function healRvf(projectAqeDir) {
   const findings = scanRvf(projectAqeDir);
   const removed = findings.flatMap((f) => quarantine(f));
@@ -136,7 +136,7 @@ export async function selfUpdate(version) {
 }
 
 /** Install (or update to latest) the RuvNet Brain via its npx installer.
- *  The installer is idempotent and skips the ~512 MB download when the KB is
+ *  The installer is idempotent and skips the ~2 GB download when the KB is
  *  already present — pass force:true to bypass that skip (used when a drift
  *  check saw a newer release). Runs `--no-stack --no-enhance`: ak already
  *  manages ruflo/RuVector and owns the CLAUDE.md grounding block. */

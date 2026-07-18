@@ -4,7 +4,7 @@
 import path from 'node:path';
 import { collect } from './status.mjs';
 import * as heal from '../lib/heal.mjs';
-import { fixStatusline } from '../lib/statusline.mjs';
+import { fixStatusline, helperStampStale } from '../lib/statusline.mjs';
 import { registry, syncBlocks } from '../lib/blocks.mjs';
 import { register as mcpRegister, applyExclusions } from '../lib/mcp.mjs';
 import { listDaemons, staleDaemons, reap } from '../lib/daemons.mjs';
@@ -16,7 +16,7 @@ import { nativesStatus, securityPresent } from '../lib/natives.mjs';
 import { readJson } from '../lib/settings.mjs';
 import { appendToConfig } from '../lib/health-history.mjs';
 import * as paths from '../lib/paths.mjs';
-import { ok, warn, fail, info, bold, dim } from '../lib/output.mjs';
+import { ok, warn, fail, info, bold, dim, withProgress } from '../lib/output.mjs';
 
 export const options = {
   'dry-run': { type: 'boolean', default: false },
@@ -58,18 +58,22 @@ export async function run({ flags, pkgRoot }) {
   const cfg = loadKitConfig();
   const subsystems = new Set(plan.map((p) => p.subsystem));
   const report = (name, r) => (r.ok ? ok(`${name}: ${r.detail}`) : fail(`${name}: ${r.detail}`));
+  // Run a managed heal under a live elapsed-time ticker, then print its result.
+  // Keeps every slow tool (npm upgrades, brain KB download, native rebuild)
+  // visibly alive instead of freezing the prompt; fast/local steps clear in <1s.
+  const step = async (name, thunk) => { const r = await withProgress(name, thunk); report(name, r); return r; };
 
   if (subsystems.has('versions') && !flags['no-upgrade']) {
     report('daemons', await heal.stopAllDaemons());
     for (const d of await driftReport({ force: true })) {
-      if (d.outdated || !d.installed) report(`upgrade ${d.pkg}`, await heal.upgradePackage(d.pkg));
+      if (d.outdated || !d.installed) await step(`upgrade ${d.pkg}`, () => heal.upgradePackage(d.pkg));
     }
   }
   // ruvnet-brain: install if absent / re-run installer to pull latest when
   // drifted (force bypasses the installer's skip-if-present). Not an npm pkg, so
   // it rides its own branch rather than the driftReport loop above.
   if (subsystems.has('ruvnet-brain') && !flags['no-upgrade']) {
-    report('ruvnet-brain', await heal.installRuvnetBrain({ force: true }));
+    await step('ruvnet-brain', () => heal.installRuvnetBrain({ force: true }));
   }
   // The brain installer's own nightly self-updater (macOS LaunchAgent) bypasses
   // ak-managed updates — disabling it is a heal, not an upgrade, so it runs even
@@ -77,9 +81,11 @@ export async function run({ flags, pkgRoot }) {
   if (subsystems.has('ruvnet-brain-nightly')) {
     report('ruvnet-brain nightly', await heal.disableRuvnetBrainNightly());
   }
-  if (subsystems.has('security') || subsystems.has('versions')) {
-    report('aidefence', await heal.healAidefence());
-    report('aqe solver', await heal.healAqeSolver());
+  // cfg.security gate: on `versions` this branch would otherwise heal the
+  // security surface even when the user disabled it (`ak setup --no-security`).
+  if ((subsystems.has('security') || subsystems.has('versions')) && cfg.security !== false) {
+    await step('aidefence', () => heal.healAidefence());
+    await step('aqe solver', () => heal.healAqeSolver());
   }
   // natives LAST among the npm-tree mutations. Every agentdb location resolves up
   // to the single shared ruflo/node_modules/better-sqlite3, so any later `npm
@@ -90,7 +96,7 @@ export async function run({ flags, pkgRoot }) {
   // Runs on `security` too: an aidefence install wipes the binding even when the
   // plan never flagged natives.
   if (subsystems.has('natives') || subsystems.has('versions') || subsystems.has('security')) {
-    report('natives', await heal.healNatives());
+    await step('natives', () => heal.healNatives());
   }
   // npx: prune cached envs serving outdated ruflo-family code — the statusline/
   // hook `npx --prefer-offline` fallbacks execute these verbatim, so a stale env
@@ -106,10 +112,10 @@ export async function run({ flags, pkgRoot }) {
   // agentdb: install/repin the standalone CLI to ruflo's bundled version so the
   // shared cognitive store stays coherent (harvest's write path depends on it).
   if (subsystems.has('agentdb') && cfg.agentdb !== false) {
-    report('agentdb', await heal.healAgentdb());
+    await step('agentdb', () => heal.healAgentdb());
   }
   if (subsystems.has('mcp') && cfg.mcp.register) {
-    const okReg = await mcpRegister();
+    const okReg = await withProgress('mcp', () => mcpRegister());
     if (okReg) {
       const { denied } = applyExclusions(cfg.mcp.excludeFamilies ?? []);
       ok(`mcp: claude-flow registered (user scope), ${denied} tool(s) denied per kit.json`);
@@ -135,19 +141,36 @@ export async function run({ flags, pkgRoot }) {
     for (const h of HOSTS) {
       if (!cfg.providers.hosts[h.id]) continue;
       if ((await hostInstallState(h)).method !== 'absent') continue;
-      report(`install ${h.id}`, await installHost(h.id));
+      await step(`install ${h.id}`, () => installHost(h.id));
     }
   }
   if (subsystems.has('providers')) {
     report('providers', applyHosts(cfg, cwd));
     const router = applyAqeRouter(cfg, cwd);
     if (router.changed || !router.ok) report('aqe router', router);
-    const prov = await applyProviders(cfg, cwd);
+    const prov = await withProgress('providers (api)', () => applyProviders(cfg, cwd));
     if (prov.changed || !prov.ok) report('providers (api)', prov);
   }
-  if (subsystems.has('statusline') || subsystems.has('versions')) {
-    const r = fixStatusline(cwd);
+  // Gate includes 'providers': applyProviders runs ruflo CLI commands, and any
+  // ruflo command is a potential helper-refresh wiper — so a providers-only
+  // sync must re-heal the statusline afterwards (this step runs after the
+  // providers step by design). Without this, a stale-oracle miss could let a
+  // providers sync wipe the footer with no re-inject planned.
+  if (subsystems.has('statusline') || subsystems.has('versions') || subsystems.has('providers')) {
+    // withProgress: fixStatusline blocks on a node subprocess (ruflo's helper
+    // refresh, up to 30s). The interval can't animate through a synchronous
+    // execFileSync, but the initial "⏳ statusline" render lands before the
+    // block — a visible label beats a frozen prompt.
+    const r = await withProgress('statusline', async () => fixStatusline(cwd));
     (r.applied || !r.reason ? ok : warn)(`statusline: ${r.applied ? `footer injected (v${r.version})` : r.reason ?? 'in sync'}`);
+    // Honest success: fixStatusline invokes ruflo's PRIVATE helper-refresh
+    // internal, best-effort. If the stamp is STILL stale after the heal, that
+    // refresh silently no-oped (e.g. upstream moved the dist module) and the
+    // next ruflo command will wipe the footer we just injected — say so
+    // instead of letting "footer injected" read as converged.
+    if (helperStampStale(cwd)) {
+      warn('statusline: helper stamp still stale after heal — ruflo\'s refresh did not run; the footer may not survive the next ruflo command');
+    }
   }
 
   // kit self-update — LAST, after every other heal: npm replaces the kit's
@@ -155,7 +178,7 @@ export async function run({ flags, pkgRoot }) {
   // after this point should depend on the kit's own modules being current.
   if (subsystems.has('self') && !flags['no-upgrade']) {
     const s = await selfDrift({ pkgRoot, force: true });
-    if (s.outdated) report('self-update', await heal.selfUpdate(s.latest));
+    if (s.outdated) await step('self-update', () => heal.selfUpdate(s.latest));
   }
 
   // converge proof
@@ -169,7 +192,15 @@ export async function run({ flags, pkgRoot }) {
     appendToConfig(cfg, {
       ts: Math.floor(Date.now() / 1000),
       learningRows: stats?.patternsLearned ?? 0,
-      nativeSlots: nativesStatus()?.locations?.length ?? 0,
+      // Count NATIVE bindings (incl. the aqe slot), not directories: a location
+      // flipping native→WASM must move this number or the regression detector
+      // named "native agentdb slots dropped" can never fire; and a benign tree
+      // reshape (a location legitimately vanishing) must not fake an alarm
+      // when its binding was WASM anyway.
+      nativeSlots: (() => {
+        const n = nativesStatus();
+        return (n?.locations?.filter((l) => l.native).length ?? 0) + (n?.aqe?.native ? 1 : 0);
+      })(),
       driftOutdated: (await driftReport()).some((r) => !r.installed || r.outdated),
       securityPresent: securityPresent(),
     });

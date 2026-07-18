@@ -17,7 +17,8 @@ ruflo swarm init --topology hierarchical --max-agents 15 --strategy specialized
 ## Build & Test
 
 ```bash
-node tests/statusline-segments.test.cjs
+pnpm test          # full unit suite (node --test tests/kit + the cjs suites)
+pnpm run check     # typecheck + lint + markdown lint + build + test
 ```
 
 ## Agentic QE v3

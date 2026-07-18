@@ -72,7 +72,7 @@ async function verifySecurity() {
 async function verifyAqe() {
   heading('aqe — on ruvector: RVF store healthy, no FsyncFailed at startup');
   const findings = scanRvf(projectAqeDir(process.cwd()));
-  if (findings.length) { fail(`${findings.length} corrupt/oversized RVF artifact(s) — run: ak sync`); return false; }
+  if (findings.length) { fail(`${findings.length} oversized RVF store(s) — run: ak sync`); return false; }
   ok('RVF store artifacts healthy');
   const st = await runCmd('aqe', ['status'], { timeout: 120_000 });
   if (/FsyncFailed|0x0303/.test(st.stdout + st.stderr)) { fail('aqe status reports FsyncFailed — off ruvector'); return false; }

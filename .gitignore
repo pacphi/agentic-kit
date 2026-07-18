@@ -26,6 +26,7 @@ test-*.log
 # AGENTS.md for codex) ARE tracked; only their generated dirs (.claude/, .agents/) and
 # local overrides (.codex/) are ignored.
 .agentic-qe/
+.ruvnet-brain/
 .claude/
 .agents/
 .codex/

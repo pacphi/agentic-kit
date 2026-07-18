@@ -1,5 +1,5 @@
 <!-- BEGIN ruflo-reference -->
-<!-- ruflo-version: 3.28.x | last-updated: 2026-07-14 -->
+<!-- ruflo-version: 3.32.x | last-updated: 2026-07-18 -->
 <!-- Compact pointer block. Full reference: ~/.config/ruflo/ruflo-reference-full.md -->
 <!-- Refresh this block with: ak x reference sync -->
 

@@ -14,7 +14,7 @@ import { scanRvf } from '../lib/rvf.mjs';
 import { registry, syncBlocks } from '../lib/blocks.mjs';
 import { loadKitConfig } from '../lib/config.mjs';
 import { driftReport, selfDrift } from '../lib/versions.mjs';
-import { upstreamCveCounterFabricated, fixStatusline } from '../lib/statusline.mjs';
+import { upstreamCveCounterFabricated, fixStatusline, helperStampStale } from '../lib/statusline.mjs';
 import { drift as ruvnetBrainDrift, nightlyAgentPresent as rbNightlyPresent, NIGHTLY_LABEL as RB_NIGHTLY_LABEL } from '../lib/ruvnet-brain.mjs';
 import { coherence as adbCoherence } from '../lib/agentdb.mjs';
 import { readJson } from '../lib/settings.mjs';
@@ -146,8 +146,12 @@ export async function collect({ pkgRoot, cwd = process.cwd() }) {
     rows.push(row('npx', 'warn', `npx cache check unavailable: ${e.message}`));
   }
 
-  // security surface
-  if (securityPresent()) {
+  // security surface — honors kit.json security:false (`ak setup
+  // --no-security`): an info row with NO fix, so sync never plans (or heals)
+  // the surface a user turned off. Previously the flag was write-only.
+  if (cfg.security === false) {
+    rows.push(row('security', 'info', 'security checks disabled (kit.json security:false)'));
+  } else if (securityPresent()) {
     if (aidefencePresent()) {
       rows.push(row('security', 'ok', '@claude-flow/security + aidefence present (defend functional)'));
     } else {
@@ -175,12 +179,12 @@ export async function collect({ pkgRoot, cwd = process.cwd() }) {
   if (fs.existsSync(aqeDir)) {
     const findings = scanRvf(aqeDir);
     if (findings.length) {
-      // On aqe < 3.12.3 only: a stale-lock or oversized artifact aqe can't yet
-      // self-heal. aqe >= 3.12.3 makes scanRvf return nothing here (it repairs
-      // its own stores non-destructively), so this row goes quiet on upgrade.
+      // Oversized = the #495 runaway-append mode, the one RVF failure aqe's own
+      // self-healing (>= 3.12.3) doesn't cover and the kit can see from the
+      // filesystem. Everything lock-shaped is aqe's job now — see src/lib/rvf.mjs.
       rows.push(row('aqe', 'fail',
-        `${findings.length} stale/oversized RVF artifact(s) — aqe will drop OFF ruvector (FsyncFailed)`,
-        'sync quarantines them (aqe 3.12.3 self-heals this)'));
+        `${findings.length} oversized RVF store(s) (runaway append) — quarantine before they eat the disk`,
+        'sync quarantines them (aqe rebuilds the store)'));
     } else {
       rows.push(row('aqe', 'ok', 'agentic-qe initialized here; RVF store healthy'));
     }
@@ -322,11 +326,20 @@ export async function collect({ pkgRoot, cwd = process.cwd() }) {
     // an updated overlay silently failed to land for exactly this reason.
     let wouldChange = !hasFooter;
     try { wouldChange = fixStatusline(cwd, { dryRun: true }).applied; } catch { /* keep marker fallback */ }
-    rows.push(row('statusline', wouldChange ? 'warn' : 'ok',
+    // Armed wipe: the footer can be present AND current while ruflo's helper
+    // stamp lags the installed CLI — the next ruflo command (in practice the
+    // daemon start) then pristine-copies statusline.cjs over ours. That is how
+    // the footer kept vanishing BETWEEN syncs. Surface it as the same drift
+    // story; sync closes it by refreshing the helpers before re-injecting.
+    let stampStale = false;
+    try { stampStale = helperStampStale(cwd); } catch { /* best-effort */ }
+    rows.push(row('statusline', (wouldChange || stampStale) ? 'warn' : 'ok',
       wouldChange
         ? (hasFooter ? 'injected blocks are out of date' : 'statusline present but footer missing')
-        : 'activation footer present and current',
-      wouldChange ? 'sync re-injects the footer' : null));
+        : stampStale
+          ? 'footer present but ruflo helper stamp is stale — next ruflo command wipes it'
+          : 'activation footer present and current',
+      (wouldChange || stampStale) ? 'sync refreshes helpers, then re-injects the footer' : null));
     // The CVE-counter overlay is tracked SEPARATELY from the footer: a footer-only
     // check reports 'ok' while the statusline still renders ruflo's fabricated
     // "⚠ 3 CVEs" (hardcoded totalCves, cvesFixed from a file count). Only warn while

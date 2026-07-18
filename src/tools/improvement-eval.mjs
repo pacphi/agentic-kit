@@ -22,7 +22,12 @@
 //
 // Exit: 0 self-improvement demonstrated / 1 not demonstrated / 2 environment error
 import { createRequire } from 'node:module';
-import { execSync } from 'node:child_process';
+// argv arrays only, per the exec.mjs binding rule — shell:true solely for the
+// Windows .cmd shims (npm/ruflo), mirroring exec.mjs's CMD_SHIMS exception.
+import { execFileSync } from 'node:child_process';
+const shim = { shell: process.platform === 'win32' };
+const execOut = (cmd, args) =>
+  execFileSync(cmd, args, { stdio: ['ignore', 'pipe', 'ignore'], ...shim }).toString();
 import { existsSync, mkdirSync, writeFileSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
@@ -44,7 +49,7 @@ const fail = (s) => console.log(`${C.fail}✗${C.r} ${s}`);
 // ── Resolve ruflo's real Q-learning router from the global install ──────────
 function resolveRouterIdx() {
   let groot;
-  try { groot = execSync('npm root -g', { stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim(); } catch { return null; }
+  try { groot = execOut('npm', ['root', '-g']).trim(); } catch { return null; }
   const cliPkg = join(groot, 'ruflo', 'node_modules', '@claude-flow', 'cli', 'package.json');
   if (!existsSync(cliPkg)) return null;
   try { return createRequire(cliPkg).resolve('./dist/src/ruvector/index.js'); } catch { return null; }
@@ -56,8 +61,8 @@ function resolveRouterIdx() {
 // regardless of autoSaveInterval. On <3.10.6 it holds only if the legacy stopgap
 // (autoSaveInterval:1, via ruflo-patch-route-learning) has been applied.
 if (has('--cli-check')) {
-  let groot; try { groot = execSync('npm root -g', { stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim(); } catch { groot = ''; }
-  let ver = ''; try { ver = (execSync('ruflo --version', { stdio: ['ignore', 'pipe', 'ignore'] }).toString().match(/\d+\.\d+\.\d+/) || [''])[0]; } catch { /* unknown */ }
+  let groot; try { groot = execOut('npm', ['root', '-g']).trim(); } catch { groot = ''; }
+  let ver = ''; try { ver = (execOut('ruflo', ['--version']).match(/\d+\.\d+\.\d+/) || [''])[0]; } catch { /* unknown */ }
   const ge = (v, a, b, c) => { const [x, y, z] = (v || '0.0.0').split('.').map(Number); return x > a || (x === a && (y > b || (y === b && z >= c))); };
   const upstreamFixed = ver && ge(ver, 3, 10, 6);
   const route = join(groot, 'ruflo', 'node_modules', '@claude-flow', 'cli', 'dist', 'src', 'commands', 'route.js');

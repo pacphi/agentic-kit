@@ -1,7 +1,7 @@
 // RuvNet Brain — detection / install-locate / version primitives.
 //
 // Unlike ruflo/agentic-qe/the host CLIs, the brain is NOT a global npm package:
-// `npx github:stuinfla/ruvnet-brain` is an installer that (a) downloads a ~512 MB
+// `npx github:stuinfla/ruvnet-brain` is an installer that (a) downloads a ~2 GB
 // offline knowledge base to ~/.cache/ruvnet-brain/kb and (b) wires a user-scope
 // Claude Code plugin (the `search_ruvnet` MCP server + hooks + a skill). So the
 // npm primitives in versions.mjs (`installedVersion` → npm global root,
@@ -71,7 +71,8 @@ export function installedVersion() {
     const vers = fs.readdirSync(inner, { withFileTypes: true })
       .filter((e) => e.isDirectory() && /\d/.test(e.name))
       .map((e) => e.name);
-    return vers.length ? vers.sort().at(-1).replace(/^v/, '') : null;
+    // Semver order, not lexical — .sort() alone ranks 0.9.0 above 0.10.0.
+    return vers.length ? vers.sort(cmpVersions).at(-1).replace(/^v/, '') : null;
   } catch {
     return null;
   }

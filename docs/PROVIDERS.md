@@ -45,6 +45,11 @@ An interactive picker (or flags for scripts). Enable `codex` and `ak`:
 - runs `ruflo init --dual` (ruflo's "Claude Code + Codex hybrid" mode),
 - writes `ENABLE_CLAUDE_CODE` / `ENABLE_CODEX` into `.claude/settings.local.json`.
 
+> [!NOTE]
+> Project scope is resolved by walking up to the repo root (`.git`), so running
+> from a subdirectory writes the same project file at the root — never the
+> machine-wide user settings. Outside any repo, user scope is used and said so.
+
 ```bash
 ak x provider pick --host claude,codex --yes     # non-interactive
 ```

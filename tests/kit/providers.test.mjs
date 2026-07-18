@@ -7,7 +7,7 @@ import { readJson } from '../../src/lib/settings.mjs';
 import { loadKitConfig } from '../../src/lib/config.mjs';
 import {
   isDefault, managedEnv, applyHosts, undoProviders, MANAGED_ENV_KEYS,
-  HOSTS, installHost, updateHost, applyAqeRouter, undoAqeRouter, aqeRouterFile,
+  HOSTS, installHost, applyAqeRouter, undoAqeRouter, aqeRouterFile,
   CODEX_ADAPTER_PKG, codexAdapterAction, ensureCodexAdapter, AQE_PROVIDER_TYPES,
 } from '../../src/lib/providers.mjs';
 
@@ -201,12 +201,6 @@ test('installHost rejects an unknown host id without shelling out', async () => 
   assert.match(r.detail, /unknown host/);
 });
 
-test('updateHost rejects an unknown host id without shelling out', async () => {
-  const r = await updateHost('bogus');
-  assert.equal(r.ok, false);
-  assert.match(r.detail, /unknown host/);
-});
-
 test('config merge: providers partial merges over defaults (hosts deep-merged)', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'kit-merge-'));
   const f = path.join(dir, 'kit.json');
@@ -267,4 +261,22 @@ test('ensureCodexAdapter is a no-op without shelling out when codex is disabled'
   assert.equal(res.ok, true);
   assert.equal(res.changed, false);
   assert.match(res.detail, /codex disabled/);
+});
+
+// ── settingsTarget repo-root walk (scope-leak regression pin) ───────────────
+
+test('settingsTarget from a repo SUBDIR anchors project scope at the ROOT', async () => {
+  // A cwd-only .git probe here would fall through to USER scope — leaking
+  // ENABLE_*/AQE_LLM_PROVIDER machine-wide from any subdir invocation, with
+  // undo (run at the root) unable to find the keys.
+  const { settingsTarget } = await import('../../src/lib/providers.mjs');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'kit-scope-'));
+  fs.mkdirSync(path.join(dir, '.git'));
+  const sub = path.join(dir, 'src', 'deep');
+  fs.mkdirSync(sub, { recursive: true });
+  const t = settingsTarget(sub);
+  assert.equal(t.scope, 'project');
+  assert.ok(t.file.startsWith(dir + path.sep), 'settings file anchored under the repo root');
+  assert.ok(!t.file.includes('deep'), 'not anchored at the subdir');
+  fs.rmSync(dir, { recursive: true, force: true });
 });
