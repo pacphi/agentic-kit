@@ -155,6 +155,37 @@ export function isDefault(cfg) {
     && (!p.aqeFallback || p.aqeFallback.length === 0);
 }
 
+/** True when both frontier hosts are enabled in persisted intent (kit.json),
+ *  regardless of whether the env is wired yet — this is the same source
+ *  `status()` already keys "enabled" off of. Guards the dual-mode/judge-bias
+ *  guidance below: only relevant once both are actually opted in. */
+export const bothHostsEnabled = (cfg) => !!cfg.providers?.hosts?.claude && !!cfg.providers?.hosts?.codex;
+
+/** Guidance printed once both hosts are enabled — pointers to capability that
+ *  already exists one layer up from ak's own wiring (see issue #36):
+ *   - role-based dual-mode delegation lives in the separate @claude-flow/codex
+ *     npm package's `dual` CLI, which ak installs as a prerequisite but never
+ *     surfaces itself.
+ *   - judge-vendor-bias: a same-vendor LLM judge scores ~8-10pp inflated versus
+ *     a cross-vendor judge (still ordinally correct, not calibrated) — measured
+ *     in openrouter-alts.json's judge_bias_check_2026_06_15. */
+export const DUAL_ROLE_TIP = 'both hosts enabled — try role delegation: claude-flow-codex dual run --template feature|security|refactor (or custom --worker specs)';
+export const JUDGE_BIAS_TIP = 'tip: for LLM-judged scoring, use a different vendor than the writer as judge — same-vendor judges run ~8-10pp inflated (still ordinally correct, but not calibrated)';
+
+/** Cross-sell for agentic-qe's qe-court (ADR-124, shipped 3.13.0): its jury
+ *  requires >= 2 distinct vendors seated, which a dual-host setup already
+ *  satisfies. Only meaningful once both hosts are enabled AND aqe is new
+ *  enough to ship the skill — callers gate on both. */
+export const QE_COURT_TIP = 'agentic-qe ≥ 3.13.0 ships qe-court (adversarial review) — its jury requires ≥ 2 distinct vendors, which your dual-host setup already satisfies';
+
+/** Suggested aqe-fallback chain when codex is among the enabled hosts: codex's
+ *  models are reached via the `openai` provider type (not as an aqe provider
+ *  itself), so pairing claude-code + openai is a direct inference from the
+ *  hosts already chosen in the same session. Literal reused from
+ *  docs/PROVIDERS.md's own example rather than inventing new model ids. */
+export const AQE_FALLBACK_CODEX_SUGGESTION = 'claude-code:claude-opus-4-8; openai:gpt-5.6';
+export const suggestedFallbackFor = (enabledHosts) => (enabledHosts.includes('codex') ? AQE_FALLBACK_CODEX_SUGGESTION : null);
+
 // ── agentic-qe router config (.agentic-qe/llm-config.json) ──────────────────
 // Grounded in aqe's router config-store + types (ADR-123):
 //   - mergeRouterConfig deep-merges `providers` but SHALLOW-replaces

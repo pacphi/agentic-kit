@@ -9,9 +9,30 @@ import {
   HOSTS, API_PROVIDERS, AQE_PROVIDER_TYPES, detectHosts, detectProviders,
   settingsTarget, isDefault, applyHosts, applyProviders, ensureDualAgents,
   undoProviders, hostInstallState, installHost, applyAqeRouter, undoAqeRouter,
+  bothHostsEnabled, DUAL_ROLE_TIP, JUDGE_BIAS_TIP, QE_COURT_TIP, suggestedFallbackFor,
 } from '../../lib/providers.mjs';
 import { loadKitConfig, saveKitConfig } from '../../lib/config.mjs';
 import { ok, warn, fail, info, dim, bold } from '../../lib/output.mjs';
+import { installedVersion, cmpVersions } from '../../lib/versions.mjs';
+import { repoRoot } from '../../lib/paths.mjs';
+import { writeJsonWithBackup } from '../../lib/settings.mjs';
+import { panelFromRouting, validatePanel, readQeCourtConfig, qeCourtConfigPath, vendorOf } from '../../lib/qeCourt.mjs';
+
+const QE_COURT_MIN_VERSION = '3.13.0';
+const qeCourtShipped = () => {
+  const v = installedVersion('agentic-qe');
+  return !!v && cmpVersions(v, QE_COURT_MIN_VERSION) >= 0;
+};
+
+/** Print the dual-host guidance tips (role delegation, judge-bias, qe-court
+ *  cross-sell) once both hosts are enabled — shared by `pick()` and
+ *  `status()` so the strings/gating never drift between the two. */
+function printDualHostTips(cfg) {
+  if (!bothHostsEnabled(cfg)) return;
+  info(DUAL_ROLE_TIP);
+  info(JUDGE_BIAS_TIP);
+  if (qeCourtShipped()) info(QE_COURT_TIP);
+}
 
 export const options = {
   host: { type: 'string' },          // csv: claude,codex (pick, non-interactive)
@@ -117,11 +138,35 @@ async function status({ flags, cwd }) {
     console.log(`  ${p.id.padEnd(10)} ${key.padEnd(12)} ${conf}`);
   }
 
+  printQeCourtStatus(cwd);
+
   const codexIdle = hosts.codex.present && !cfg.providers.hosts.codex;
   console.log('');
   if (codexIdle) info('codex is installed but disabled — enable it with: ak x provider pick');
   else ok('provider config reflects installed CLIs');
+  printDualHostTips(cfg);
   return 0;
+}
+
+/** Read-only awareness of qe-court's per-role routing (ADR-124, aqe >= 3.13.0)
+ *  — a third config surface alongside ruflo host env + aqe's fallback chain.
+ *  No-op unless aqe is new enough AND the skill has already created its
+ *  config.json (ak never creates it). */
+function printQeCourtStatus(cwd) {
+  if (!qeCourtShipped()) return;
+  const root = repoRoot(cwd);
+  if (!root) return;
+  const qc = readQeCourtConfig(root);
+  if (!qc) return;
+  const panel = panelFromRouting(qc.routing);
+  const minVendors = qc.options?.minDistinctVendors ?? 2;
+  const violations = validatePanel(panel, { minVendors });
+  console.log(bold('\nqe-court routing') + dim('  (.claude/skills/qe-court/config.json)'));
+  for (const { role, provider } of panel) {
+    console.log(`  ${role.padEnd(28)} ${provider ?? dim('(unset)')}`);
+  }
+  if (violations.length) warn(`qe-court panel invalid: ${violations.join(', ')}`);
+  else ok('qe-court panel valid (vendor-diverse, jury independent of writer)');
 }
 
 async function off({ cwd }) {
@@ -138,6 +183,49 @@ const parseModels = (csv) => csv.split(',').map((s) => s.trim()).filter(Boolean)
   const [id, model] = tok.split(':');
   return model ? { id, model } : { id };
 });
+
+/** Opt-in write of qe-court routing defaults (Phase C, issue #36). Only offers
+ *  when: interactive session, aqe >= 3.13.0, the skill has already created its
+ *  config.json (ak never creates it), and an aqeProvider was chosen. Defaults
+ *  prosecutor.codex-review/deeperReviewer -> codex when codex is enabled, and
+ *  jury -> aqeProvider (picking a different vendor if it would collide with
+ *  the writer/defense). Validates the resulting panel BEFORE writing — never
+ *  produces an invalid panel on disk. Only ever touches the `routing` key. */
+async function maybeWriteQeCourtDefaults({ nonInteractive, cwd, enabled, aqeProvider }) {
+  if (nonInteractive || !aqeProvider) return;
+  if (!qeCourtShipped()) return;
+  const root = repoRoot(cwd);
+  if (!root) return;
+  const qc = readQeCourtConfig(root);
+  if (!qc) return;
+
+  const codexOn = enabled.includes('codex');
+  const routing = { ...(qc.routing ?? {}) };
+  const defenseProvider = routing.defense?.provider;
+  let juryProvider = aqeProvider;
+  let juryNote = '';
+  if (defenseProvider && vendorOf(juryProvider) === vendorOf(defenseProvider)) {
+    const alt = AQE_PROVIDER_TYPES.find((p) => vendorOf(p) !== vendorOf(defenseProvider) && p !== juryProvider);
+    if (alt) { juryNote = ` (switched from ${juryProvider} — same vendor as defense/writer)`; juryProvider = alt; }
+  }
+
+  const changes = codexOn ? [['prosecutor.codex-review', 'codex'], ['deeperReviewer', 'codex'], ['jury', juryProvider]]
+    : [['jury', juryProvider]];
+
+  console.log(bold('\nqe-court detected') + dim('  (.claude/skills/qe-court/config.json)'));
+  console.log(dim(`  would set: ${changes.map(([role, p]) => `${role} → ${p}`).join(', ')}${juryNote}`));
+  const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+  const ans = (await rl.question('apply these qe-court routing defaults? [y/N]: ')).trim().toLowerCase();
+  rl.close();
+  if (ans !== 'y' && ans !== 'yes') { info('qe-court routing left unchanged'); return; }
+
+  for (const [role, provider] of changes) routing[role] = { ...(routing[role] ?? {}), provider };
+  const violations = validatePanel(panelFromRouting(routing), { minVendors: qc.options?.minDistinctVendors ?? 2 });
+  if (violations.length) { warn(`qe-court routing defaults would be invalid (${violations.join(', ')}) — not written`); return; }
+
+  writeJsonWithBackup(qeCourtConfigPath(root), { ...qc, routing });
+  ok(`qe-court routing updated: ${changes.map(([role, p]) => `${role}→${p}`).join(', ')}`);
+}
 
 async function pick({ flags, cwd }) {
   const cfg = loadKitConfig();
@@ -172,8 +260,11 @@ async function pick({ flags, cwd }) {
     console.log(dim(`  ${AQE_BILLING_HINT}`));
     const aAns = (await rl.question(`agentic-qe primary LLM provider — ${AQE_PROVIDER_TYPES.join('/')} (blank = leave aqe default): `)).trim().toLowerCase();
     aqeProvider = aAns ? aAns : null;
-    const fAns = (await rl.question('aqe fallback chain, ordered (e.g. "claude-code:claude-opus-4-8; openai:gpt-5.6", blank = none): ')).trim().toLowerCase();
-    aqeFallback = fAns ? parseFallback(fAns) : [];
+    const suggestion = suggestedFallbackFor(enabled);
+    const fAns = (await rl.question(
+      `aqe fallback chain, ordered (e.g. "claude-code:claude-opus-4-8; openai:gpt-5.6"${suggestion ? `, blank = use suggested [${suggestion}]` : ', blank = none'}): `,
+    )).trim().toLowerCase();
+    aqeFallback = fAns ? parseFallback(fAns) : (suggestion ? parseFallback(suggestion.toLowerCase()) : []);
     const provAns = (await rl.question('ruflo API-key providers to register (e.g. openai:gpt-5.6, blank to skip): ')).trim();
     if (provAns) models = parseModels(provAns);
     rl.close();
@@ -227,5 +318,7 @@ async function pick({ flags, cwd }) {
   const prov = await applyProviders(cfg, cwd);
   (prov.ok ? (prov.changed ? ok : info) : warn)(`ruflo providers: ${prov.detail}`);
   ok('saved to kit.json — reapplied on every `ak sync`; undo with `ak x provider off`');
+  await maybeWriteQeCourtDefaults({ nonInteractive, cwd, enabled, aqeProvider });
+  printDualHostTips(cfg);
   return 0;
 }
