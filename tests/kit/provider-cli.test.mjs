@@ -1,7 +1,10 @@
 // `ak x provider status` is read-only (detect + report), so — unlike `pick`,
 // which can trigger real installs/network calls — it's safe to exercise via a
-// real CLI spawn. XDG_CONFIG_HOME/HOME are pointed at a throwaway sandbox so
-// this never touches the real machine's kit.json or ~/.claude.
+// real CLI spawn. HOME/XDG_CONFIG_HOME (POSIX) and USERPROFILE/APPDATA
+// (Windows) are all pointed at a throwaway sandbox so this never touches the
+// real machine's kit.json or ~/.claude — src/lib/paths.mjs's configBase()
+// reads APPDATA (not XDG_CONFIG_HOME) on win32, so both must be set or the
+// sandbox is silently bypassed there.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
@@ -28,10 +31,18 @@ function rm(...dirs) {
 }
 
 function ak(args, { cwd, home }) {
+  const cfgDir = path.join(home, '.config');
   return spawnSync(process.execPath, [BIN, ...args], {
     encoding: 'utf8',
     cwd,
-    env: { ...process.env, NO_COLOR: '1', HOME: home, XDG_CONFIG_HOME: path.join(home, '.config') },
+    env: {
+      ...process.env,
+      NO_COLOR: '1',
+      HOME: home,
+      USERPROFILE: home, // Windows os.homedir() reads USERPROFILE, not HOME
+      XDG_CONFIG_HOME: cfgDir,
+      APPDATA: cfgDir, // Windows configBase() reads APPDATA, not XDG_CONFIG_HOME
+    },
   });
 }
 
