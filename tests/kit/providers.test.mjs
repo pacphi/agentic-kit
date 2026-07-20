@@ -9,6 +9,7 @@ import {
   isDefault, managedEnv, applyHosts, undoProviders, MANAGED_ENV_KEYS,
   HOSTS, installHost, applyAqeRouter, undoAqeRouter, aqeRouterFile,
   CODEX_ADAPTER_PKG, codexAdapterAction, ensureCodexAdapter, AQE_PROVIDER_TYPES,
+  bothHostsEnabled, suggestedFallbackFor, AQE_FALLBACK_CODEX_SUGGESTION,
 } from '../../src/lib/providers.mjs';
 
 // A tmp dir with a .git marker → settingsTarget() writes the ISOLATED
@@ -264,6 +265,33 @@ test('ensureCodexAdapter is a no-op without shelling out when codex is disabled'
 });
 
 // ── settingsTarget repo-root walk (scope-leak regression pin) ───────────────
+
+// ── issue #36 Phase 1/2 guidance helpers ────────────────────────────────────
+
+test('bothHostsEnabled is false at the claude-only default', () => {
+  assert.equal(bothHostsEnabled(defaultCfg()), false);
+});
+
+test('bothHostsEnabled is false with only codex enabled', () => {
+  const cfg = defaultCfg();
+  cfg.providers.hosts = { claude: false, codex: true };
+  assert.equal(bothHostsEnabled(cfg), false);
+});
+
+test('bothHostsEnabled is true once both hosts are enabled', () => {
+  const cfg = defaultCfg();
+  cfg.providers.hosts.codex = true;
+  assert.equal(bothHostsEnabled(cfg), true);
+});
+
+test('suggestedFallbackFor returns the codex-paired suggestion when codex is enabled', () => {
+  assert.equal(suggestedFallbackFor(['claude', 'codex']), AQE_FALLBACK_CODEX_SUGGESTION);
+});
+
+test('suggestedFallbackFor returns null when codex is not among the enabled hosts', () => {
+  assert.equal(suggestedFallbackFor(['claude']), null);
+  assert.equal(suggestedFallbackFor([]), null);
+});
 
 test('settingsTarget from a repo SUBDIR anchors project scope at the ROOT', async () => {
   // A cwd-only .git probe here would fall through to USER scope — leaking
