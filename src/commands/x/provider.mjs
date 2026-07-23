@@ -10,7 +10,9 @@ import {
   settingsTarget, isDefault, applyHosts, applyProviders, ensureDualAgents,
   undoProviders, hostInstallState, installHost, applyAqeRouter, undoAqeRouter,
   bothHostsEnabled, DUAL_ROLE_TIP, JUDGE_BIAS_TIP, QE_COURT_TIP, suggestedFallbackFor,
+  seedDualRoutingIfDualHost, printActivityRoutingTable, ensureCodexMcp, undoCodexMcp,
 } from '../../lib/providers.mjs';
+import { parseRouteSpecs, formatModelHelp } from '../../lib/routing.mjs';
 import { loadKitConfig, saveKitConfig } from '../../lib/config.mjs';
 import { ok, warn, fail, info, dim, bold } from '../../lib/output.mjs';
 import { installedVersion, cmpVersions } from '../../lib/versions.mjs';
@@ -39,6 +41,7 @@ export const options = {
   'aqe-provider': { type: 'string' }, // one of AQE_PROVIDER_TYPES, or 'none' to unset
   'aqe-fallback': { type: 'string' }, // 'claude-code:model1,model2;openai:gpt-5.6'  ('none' clears)
   provider: { type: 'string' },      // csv of ruflo API providers, optional id:model (openai:gpt-5.6)
+  route: { type: 'string', multiple: true }, // repeatable: 'activity:host[:model]' per-activity routing override
   yes: { type: 'boolean', default: false },
   json: { type: 'boolean', default: false },
 };
@@ -67,11 +70,23 @@ Options (pick, all optional — omit for interactive):
   --aqe-fallback '<chain>'     ordered aqe chain, e.g.
                                  'claude-code:claude-opus-4-8; openai:gpt-5.6'
   --provider <csv>             register ruflo API providers (e.g. openai:gpt-5.6)
+  --route 'act:host[:model]'   override one activity's routing (repeatable), e.g.
+                                 --route 'implementation:claude:claude-opus-4-8'
+                                 activities: specification, architecture, design,
+                                 implementation, testing, review, security-scan,
+                                 security-analysis, documentation, debugging,
+                                 packaging, release
   --yes                        accept defaults without prompting
 
+When both claude and codex hosts are enabled (and aqe ≥ 3.13.1), ak seeds a
+per-activity routing policy from sensible defaults and materializes it into
+.agentic-qe/llm-config.json (agentOverrides). Override any activity with --route;
+your edits are preserved across syncs. ${formatModelHelp()}
+
 Examples:
-  ak x provider                          show what's detected + wired
+  ak x provider                          show what's detected + wired + routing
   ak x provider pick --host claude,codex
+  ak x provider pick --route 'testing:claude:claude-sonnet-5'
   ak x provider off`;
 
 /** Parse 'claude-code:m1,m2; openai:gpt-5.6' → [{provider, models:[…]}, …]. */
@@ -138,6 +153,7 @@ async function status({ flags, cwd }) {
     console.log(`  ${p.id.padEnd(10)} ${key.padEnd(12)} ${conf}`);
   }
 
+  printActivityRoutingTable(cfg);
   printQeCourtStatus(cwd);
 
   const codexIdle = hosts.codex.present && !cfg.providers.hosts.codex;
@@ -171,11 +187,13 @@ function printQeCourtStatus(cwd) {
 
 async function off({ cwd }) {
   const cfg = loadKitConfig();
-  cfg.providers = { hosts: { claude: true, codex: false }, aqeProvider: null, aqeFallback: [], models: [], maxBudgetUsd: null };
+  const codexMcpManaged = cfg.providers?.codexMcp === 'ak';
+  cfg.providers = { hosts: { claude: true, codex: false }, aqeProvider: null, aqeFallback: [], models: [], maxBudgetUsd: null, dualRouting: {}, codexMcp: null };
   saveKitConfig(cfg);
   const env = undoProviders(cwd);
   const router = undoAqeRouter(cwd);
-  ok(`reset to claude-only default — ${env.detail}; ${router.detail}`);
+  const mcp = await undoCodexMcp(cwd, { managed: codexMcpManaged });
+  ok(`reset to claude-only default — ${env.detail}; ${router.detail}; ${mcp.detail}`);
   return 0;
 }
 
@@ -296,7 +314,17 @@ async function pick({ flags, cwd }) {
     aqeFallback,
     models,
     maxBudgetUsd: cfg.providers.maxBudgetUsd ?? null,
+    dualRouting: { ...(cfg.providers.dualRouting ?? {}) },
   };
+  // dual-host: seed per-activity routing from defaults (only when the policy is
+  // empty), then layer any explicit --route overrides on top (marked user, never
+  // re-seeded). Single-host / older aqe → no-op, policy stays empty (ADR-0003).
+  const seed = seedDualRoutingIfDualHost(cfg);
+  if (flags.route?.length) {
+    const { policy, warnings } = parseRouteSpecs(flags.route);
+    for (const w of warnings) warn(w);
+    cfg.providers.dualRouting = { ...cfg.providers.dualRouting, ...policy };
+  }
   saveKitConfig(cfg);
 
   // install any enabled host that is entirely absent (external installs untouched)
@@ -315,9 +343,14 @@ async function pick({ flags, cwd }) {
   if (router.changed || !router.ok) (router.ok ? ok : warn)(`aqe router: ${router.detail}`);
   const dual = await ensureDualAgents(cfg, cwd);
   (dual.ok ? (dual.changed ? ok : info) : warn)(`dual agents: ${dual.detail}`);
+  const mcp = await ensureCodexMcp(cfg, cwd);
+  if (mcp.changed) saveKitConfig(cfg); // persist the codexMcp ownership marker
+  if (mcp.changed || !mcp.ok) (mcp.ok ? ok : warn)(`codex MCP: ${mcp.detail}`);
   const prov = await applyProviders(cfg, cwd);
   (prov.ok ? (prov.changed ? ok : info) : warn)(`ruflo providers: ${prov.detail}`);
   ok('saved to kit.json — reapplied on every `ak sync`; undo with `ak x provider off`');
+  if (seed.seeded) ok(`per-activity routing seeded — ${seed.count} activities (dual-host defaults; tune with --route or edit kit.json)`);
+  printActivityRoutingTable(cfg);
   await maybeWriteQeCourtDefaults({ nonInteractive, cwd, enabled, aqeProvider });
   printDualHostTips(cfg);
   return 0;

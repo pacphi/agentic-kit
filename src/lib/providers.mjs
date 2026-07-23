@@ -27,8 +27,10 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { run, have } from './exec.mjs';
 import { readJson, writeJsonWithBackup } from './settings.mjs';
-import { installedVersion } from './versions.mjs';
+import { installedVersion, cmpVersions } from './versions.mjs';
 import * as paths from './paths.mjs';
+import { bold, dim, cyan } from './output.mjs';
+import { policyToAgentOverrides, seedDualRouting, resolveRoutes, routingSummary, ACTIVITIES } from './routing.mjs';
 
 /** Frontier agent-CLI hosts. `pkg` is the npm global package; `enableEnv` is
  *  ruflo's ADR-034 backend flag; `aqe` is the AQE_LLM_PROVIDER value (null when
@@ -196,6 +198,14 @@ export const suggestedFallbackFor = (enabledHosts) => (enabledHosts.includes('co
 const AQE_CHAIN_DEFAULTS = { maxRetries: 3, retryDelayMs: 100, backoffMultiplier: 2, maxDelayMs: 5000 };
 const AQE_MANAGED_TAG = 'agentic-kit';
 
+// agentic-qe ≥ 3.13.1 shipped on-disk per-agent routing (`agentOverrides`, issue
+// #568). Below that, aqe ignores the key, so ak gates writing it on the version.
+const AGENT_OVERRIDES_MIN_AQE = '3.13.1';
+export function aqeSupportsAgentOverrides() {
+  const v = installedVersion('agentic-qe');
+  return !!v && cmpVersions(v, AGENT_OVERRIDES_MIN_AQE) >= 0;
+}
+
 export function aqeRouterFile(cwd = process.cwd()) {
   return path.join(paths.projectAqeDir(cwd), 'llm-config.json');
 }
@@ -217,32 +227,67 @@ function buildChain(entries) {
   };
 }
 
-/** Write ak's managed router config: the ordered fallback chain + enabled set +
- *  default provider, merged into any existing llm-config.json (backup-first,
- *  never persisting apiKey). No-op unless a fallback chain is configured and we
- *  are in a project. Returns {ok, changed, detail}. */
+/** Write ak's managed router config into `.agentic-qe/llm-config.json`, merged
+ *  into any existing file (backup-first, never persisting apiKey):
+ *    - the ordered fallback chain + enabled set + default provider (from
+ *      `aqeFallback`), and
+ *    - the per-activity `agentOverrides` map projected from `dualRouting`
+ *      (issue #568; only when installed aqe ≥ 3.13.1).
+ *  No-op unless at least one of those is configured and we are in a project.
+ *  Returns {ok, changed, detail}. */
 export function applyAqeRouter(cfg, cwd = process.cwd()) {
   const chain = cfg.providers?.aqeFallback ?? [];
-  if (chain.length === 0) return { ok: true, changed: false, detail: 'no aqe fallback chain configured' };
+  const policy = cfg.providers?.dualRouting ?? {};
+  const hasChain = chain.length > 0;
+  const hasPolicy = Object.keys(policy).length > 0;
+  if (!hasChain && !hasPolicy) return { ok: true, changed: false, detail: 'no aqe router config to apply' };
   // Same repo-root resolution as settingsTarget — the three scope gates must
   // never disagree about what "in a project" means (see paths.repoRoot).
   const root = paths.repoRoot(cwd);
   if (!root) return { ok: true, changed: false, detail: 'not a project — aqe router unmanaged' };
-  const valid = chain.filter((e) => e?.provider && AQE_PROVIDER_TYPES.includes(e.provider));
-  if (valid.length === 0) return { ok: false, detail: 'no valid providers in fallback chain' };
   const file = aqeRouterFile(root);
   const existing = readJson(file, {}) ?? {};
   const next = { ...existing };
   next._managedBy = AQE_MANAGED_TAG;
-  next.defaultProvider = cfg.providers.aqeProvider ?? valid[0].provider;
-  next.providers = { ...(existing.providers ?? {}) };
-  for (const e of valid) next.providers[e.provider] = { ...(existing.providers?.[e.provider] ?? {}), enabled: true };
-  next.fallbackChain = buildChain(valid);
+  const details = [];
+  let wrote = false;
+
+  let chainError = null;
+  if (hasChain) {
+    const valid = chain.filter((e) => e?.provider && AQE_PROVIDER_TYPES.includes(e.provider));
+    if (valid.length === 0) {
+      // A bad chain must NOT block the independent agentOverrides projection — the
+      // dualRouting policy is validated separately. Record it and carry on.
+      chainError = 'no valid providers in fallback chain';
+      details.push(`chain: ⚠ ${chainError}`);
+    } else {
+      next.defaultProvider = cfg.providers.aqeProvider ?? valid[0].provider;
+      next.providers = { ...(existing.providers ?? {}) };
+      for (const e of valid) next.providers[e.provider] = { ...(existing.providers?.[e.provider] ?? {}), enabled: true };
+      next.fallbackChain = buildChain(valid);
+      const emptyModels = valid.filter((e) => !e.models || e.models.length === 0).map((e) => e.provider);
+      details.push(`chain: ${valid.map((e) => e.provider).join(' → ')}${emptyModels.length ? ` (⚠ no models for: ${emptyModels.join(', ')})` : ''}`);
+      wrote = true;
+    }
+  }
+
+  if (hasPolicy && aqeSupportsAgentOverrides()) {
+    // MERGE, don't replace: ak owns only the curated agent-types it projects;
+    // preserve foreign entries (aqe's own defaults or a hand-added agent). The
+    // projector drops non-constructible providers (mirrors sanitizeAgentOverrides)
+    // and only ever emits {provider, model} — no apiKey.
+    const projected = policyToAgentOverrides(policy);
+    next.agentOverrides = { ...(existing.agentOverrides ?? {}), ...projected };
+    details.push(`agentOverrides: ${Object.keys(projected).length} agents`);
+    wrote = true;
+  } else if (hasPolicy) {
+    details.push('agentOverrides: skipped (needs agentic-qe ≥ 3.13.1)');
+  }
+
+  if (!wrote) return { ok: !chainError, changed: false, detail: details.join('; ') || 'nothing to apply' };
   fs.mkdirSync(path.dirname(file), { recursive: true });
   writeJsonWithBackup(file, next);
-  const emptyModels = valid.filter((e) => !e.models || e.models.length === 0).map((e) => e.provider);
-  const warn = emptyModels.length ? ` (⚠ no models for: ${emptyModels.join(', ')})` : '';
-  return { ok: true, changed: true, detail: `chain: ${valid.map((e) => e.provider).join(' → ')}${warn}` };
+  return { ok: !chainError, changed: true, detail: details.join('; ') };
 }
 
 /** Reversible teardown of ak's router management. Restores the pre-ak file from
@@ -261,6 +306,80 @@ export function undoAqeRouter(cwd = process.cwd()) {
   }
   fs.rmSync(file, { force: true });
   return { ok: true, changed: true, detail: 'removed ak-created llm-config.json' };
+}
+
+// ── per-activity dual-host routing (kit.json providers.dualRouting) ──────────
+// Seed/format helpers shared by `ak x provider` and `ak setup`. The pure policy
+// core + projectors live in routing.mjs; these bridge it to kit.json + the CLI.
+
+/** Seed the per-activity routing policy from defaults when BOTH hosts are enabled
+ *  and aqe supports agentOverrides — but only if the user has no policy yet (empty
+ *  map). Subscription-only targeting + `seeded` provenance come from seedDualRouting
+ *  (ADR-0003). Mutates cfg.providers.dualRouting. Returns {seeded, count}. */
+export function seedDualRoutingIfDualHost(cfg) {
+  const p = cfg.providers ?? (cfg.providers = {});
+  const existing = p.dualRouting ?? {};
+  if (Object.keys(existing).length > 0) return { seeded: false, count: Object.keys(existing).length };
+  if (!bothHostsEnabled(cfg) || !aqeSupportsAgentOverrides()) return { seeded: false, count: 0 };
+  p.dualRouting = seedDualRouting({ hosts: ['claude', 'codex'] });
+  return { seeded: true, count: Object.keys(p.dualRouting).length };
+}
+
+/** Render the effective per-activity routing as a colorized table, or null when
+ *  no policy is set. Shared by `pick`/`status`/`setup` so the view never drifts. */
+export function formatRoutingTable(cfg) {
+  const policy = cfg.providers?.dualRouting ?? {};
+  if (Object.keys(policy).length === 0) return null;
+  const routes = resolveRoutes(policy);
+  const s = routingSummary(policy);
+  const lines = [bold('\nper-activity routing')
+    + dim(`  (${s.byHost.claude ?? 0} claude · ${s.byHost.codex ?? 0} codex · ${s.custom} custom · .agentic-qe/llm-config.json)`)];
+  for (const act of ACTIVITIES) {
+    const r = routes[act];
+    const src = r.source === 'user' ? cyan('custom') : dim(r.source);
+    const esc = r.escalate?.length ? dim(`  ↑ ${r.escalate.map((e) => e.host).join('→')}`) : '';
+    const tag = r.akOriginated ? dim(' [ak]') : '';
+    lines.push(`  ${act.padEnd(18)} ${r.host.padEnd(7)} ${(r.model ?? '').padEnd(24)} ${src}${tag}${esc}`);
+  }
+  return lines.join('\n');
+}
+
+/** Print the routing table (no-op when no policy is set). */
+export function printActivityRoutingTable(cfg) {
+  const t = formatRoutingTable(cfg);
+  if (t) console.log(t);
+}
+
+// ── codex MCP backend (mcp__codex__codex) ───────────────────────────────────
+// Register `codex mcp-server` (stdio) as a project-scoped Claude Code MCP server
+// so a Claude orchestrator can call Codex inline via the mcp__codex__codex tool
+// (the dual-host swarm's MCP path, ADR-0001 projection #3). Reversible via
+// undoCodexMcp. Best-effort: a failure here never fails the caller.
+// Ownership: a `codex` MCP server that PRE-EXISTS ak's registration is the user's
+// and must never be torn down (there's no `_managedBy` on an MCP entry). ak only
+// removes a server it actually added, tracked by `providers.codexMcp === 'ak'` in
+// kit.json. On mutation ak sets the marker; the caller persists cfg.
+export async function ensureCodexMcp(cfg, cwd = process.cwd()) {
+  if (!cfg.providers?.hosts?.codex) return { ok: true, changed: false, detail: 'codex not enabled — codex MCP unmanaged' };
+  if (!(await have('codex'))) return { ok: true, changed: false, detail: 'codex CLI not installed' };
+  const r = await run('claude', ['mcp', 'add', 'codex', '-s', 'project', '--', 'codex', 'mcp-server'], { cwd });
+  if (r.code === 0) {
+    if (cfg.providers) cfg.providers.codexMcp = 'ak'; // ak owns it → safe to remove later
+    return { ok: true, changed: true, detail: 'codex MCP registered (mcp__codex__codex)' };
+  }
+  if (/already exists|already configured/i.test(`${r.stderr}${r.stdout}`)) {
+    // pre-existing: leave ownership as-is (only a prior ak run would have set it)
+    return { ok: true, changed: false, detail: 'codex MCP already registered' };
+  }
+  return { ok: false, changed: false, detail: `codex MCP registration failed: ${(r.stderr || r.stdout || '').split('\n')[0].slice(0, 120)}` };
+}
+
+/** Remove the project-scoped codex MCP server — ONLY when ak registered it
+ *  (managed === true). Never tears down a server the user added themselves. */
+export async function undoCodexMcp(cwd = process.cwd(), { managed = false } = {}) {
+  if (!managed) return { ok: true, changed: false, detail: 'codex MCP left as-is (not ak-registered)' };
+  const r = await run('claude', ['mcp', 'remove', 'codex', '-s', 'project'], { cwd });
+  return { ok: true, changed: r.code === 0, detail: r.code === 0 ? 'codex MCP removed' : 'codex MCP not registered' };
 }
 
 /** The exact env this config wants written. `AQE_LLM_PROVIDER` is written only

@@ -94,6 +94,49 @@ writes your API keys.
 > or `gpt-5.3-codex` for agentic coding — Google Gemini 3.5 Flash). Use whatever IDs your
 > provider currently offers; `ak` writes the strings you give it verbatim.
 
+## Level 3.5 — per-activity routing across Claude + Codex
+
+When **both** hosts are enabled and `agentic-qe ≥ 3.13.1` is installed, `ak` seeds a
+**per-activity routing policy**: each kind of work (architecture, implementation, testing,
+review, …) is routed to the host and model that suits it — Claude for reasoning/review,
+Codex for execution — and materialized into `.agentic-qe/llm-config.json` (`agentOverrides`).
+It's seeded automatically on `ak x provider pick` / `ak setup`; nothing happens for
+claude-only projects. Grounded in ruflo's own dual-mode templates (see
+[docs/adr/](adr/) — ADR-0001..0005).
+
+```bash
+ak x provider pick --host claude,codex        # enables both → seeds routing → prints the table
+ak status                                     # a "routing" row; the dashboard shows the matrix
+ak x provider pick --route 'testing:claude:claude-sonnet-5'   # override one activity (persisted)
+```
+
+Defaults (all overridable; your edits are marked `custom` and never re-seeded):
+
+| Activity | Host | Default model |
+|---|---|---|
+| specification, review, release | claude | `claude-sonnet-5` |
+| architecture, design, debugging, security-analysis | claude | `claude-opus-4-8` |
+| implementation, testing, security-scan | codex | `gpt-5.4` |
+| documentation, packaging | codex | `gpt-5.3-codex` |
+
+*(packaging & release are `ak`-added — ruflo ships templates for feature/security/refactor only.)*
+
+**Known-good model choices** (verified 2026-07; any model your host CLI accepts also works):
+
+| Host | Model | When to use |
+|---|---|---|
+| claude | `claude-opus-4-8` | deep reasoning — architecture, design, hard debugging |
+| claude | `claude-sonnet-5` | near-Opus at lower cost — review, spec, release |
+| claude | `claude-fable-5` | top capability (above Opus), premium — hardest problems |
+| claude | `claude-haiku-4-5-20251001` | cheap/fast — high-volume mechanical |
+| codex | `gpt-5.4` | coding + reasoning + agentic — recommended execution default |
+| codex | `gpt-5.6-sol` | newest line; first-class max reasoning effort |
+| codex | `gpt-5.3-codex` | pure coding-tuned — mechanical implementation & docs |
+| codex | `gpt-5-codex-mini` | smallest/cheapest — escalation floor, high volume |
+
+`ak x provider pick --help` prints this list too. Tuning is per-route and reversible: hand-edit
+`kit.json` `providers.dualRouting`, pass `--route`, or `ak x provider off` to clear it entirely.
+
 ## Level 4 — drop down to raw ruflo / agentic-qe
 
 This is the part that matters: **`ak` is a facilitator, not a wall.** Every value it manages

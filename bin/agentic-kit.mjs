@@ -13,6 +13,7 @@ const PORCELAIN = {
   sync: () => import('../src/commands/sync.mjs'),
   setup: () => import('../src/commands/setup.mjs'),
   dashboard: () => import('../src/commands/x/dashboard.mjs'),
+  dual: () => import('../src/commands/dual.mjs'),
   uninstall: () => import('../src/commands/uninstall.mjs'),
 };
 
@@ -34,6 +35,7 @@ Usage (ak = alias of agentic-kit):
   ak status          read-only dashboard: what's true, what's drifted  [--json] [--deep]
   ak sync            converge to good: upgrade + heal + verify          [--dry-run] [--no-upgrade]
   ak dashboard       open the local web dashboard (localhost; auto-opens browser)  [--port N] [--no-open]
+  ak dual            run a Claude+Codex collaboration swarm (dual-host)  [run <template> "task"] [--dry-run]
   ak uninstall       leave cleanly                                      [--this-project] [--purge]
 
   When in doubt: ak sync

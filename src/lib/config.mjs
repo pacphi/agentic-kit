@@ -22,6 +22,8 @@ const DEFAULTS = {
     aqeFallback: [],                        // [{ provider, models:[...] }] — ordered aqe fallback chain (.agentic-qe/llm-config.json)
     models: [],                             // [{ id:'openai', model:'gpt-5.6' }] — ruflo API-key providers
     maxBudgetUsd: null,                     // → AQE_MAX_BUDGET_USD when set
+    dualRouting: {},                        // activity → {host,model,escalate?,source} per-activity routing policy (ADR-0001; seeded on dual-host)
+    codexMcp: null,                         // 'ak' when ak registered the codex MCP server (ownership guard for teardown)
   },
   customBlocks: [],     // [{slug, templatePath, detector:{type:'command'|'dir'|'file', target}}]
   versionCheck: { ttlHours: 24, last: null, seen: {} },

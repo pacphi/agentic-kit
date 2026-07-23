@@ -19,7 +19,8 @@ import { drift as ruvnetBrainDrift, nightlyAgentPresent as rbNightlyPresent, NIG
 import { coherence as adbCoherence } from '../lib/agentdb.mjs';
 import { readJson } from '../lib/settings.mjs';
 import { have } from '../lib/exec.mjs';
-import { HOSTS, settingsTarget, isDefault, managedEnv, MANAGED_ENV_KEYS, hostInstallState, aqeRouterFile } from '../lib/providers.mjs';
+import { HOSTS, settingsTarget, isDefault, managedEnv, MANAGED_ENV_KEYS, hostInstallState, aqeRouterFile, aqeSupportsAgentOverrides } from '../lib/providers.mjs';
+import { policyToAgentOverrides, routingSummary } from '../lib/routing.mjs';
 
 export const options = {
   json: { type: 'boolean', default: false },
@@ -275,6 +276,29 @@ export async function collect({ pkgRoot, cwd = process.cwd() }) {
     }
   } catch (e) {
     rows.push(row('providers', 'warn', `provider check unavailable: ${e.message}`));
+  }
+
+  // per-activity routing (dualRouting → agentOverrides projection). Only surfaces
+  // once a policy is set; the dashboard renders this row like any other subsystem.
+  try {
+    const policy = cfg.providers?.dualRouting ?? {};
+    if (Object.keys(policy).length) {
+      const s = routingSummary(policy);
+      const want = policyToAgentOverrides(policy);
+      const base = `dual-host · ${s.total} activities (${s.custom} custom) → ${Object.keys(want).length} agent overrides`;
+      if (!aqeSupportsAgentOverrides()) {
+        rows.push(row('routing', 'info', `${base} · needs agentic-qe ≥ 3.13.1 to materialize`));
+      } else {
+        // resolve the repo root — applyAqeRouter writes at repoRoot(cwd), so a
+        // raw-cwd read from a subdir would false-warn "out of sync" (M2).
+        const disk = readJson(aqeRouterFile(paths.repoRoot(cwd) ?? cwd))?.agentOverrides ?? null;
+        const drift = !disk || JSON.stringify(disk) !== JSON.stringify(want);
+        if (drift) rows.push(row('routing', 'warn', `${base} — llm-config.json out of sync`, 'sync re-applies agentOverrides'));
+        else rows.push(row('routing', 'ok', base));
+      }
+    }
+  } catch (e) {
+    rows.push(row('routing', 'warn', `routing check unavailable: ${e.message}`));
   }
 
   // daemons

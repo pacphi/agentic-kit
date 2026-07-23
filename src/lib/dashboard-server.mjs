@@ -22,6 +22,7 @@ import { execFile } from 'node:child_process';
 import { driftReport, selfDrift } from './versions.mjs';
 import { drift as ruvnetBrainDrift } from './ruvnet-brain.mjs';
 import { loadKitConfig } from './config.mjs';
+import { resolveRoutes, routingSummary, ACTIVITIES, HOST_PROVIDER } from './routing.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const PKG_ROOT = path.resolve(HERE, '..', '..');
@@ -98,7 +99,29 @@ async function collectData({ cwd, fetchStatus }) {
     drift,
     improvement: readJsonSafe(path.join(cwd, '.claude-flow', 'improvement.json')),
     health: readHealthRing(cwd),
+    routing: routingPayload(),
   };
+}
+
+/** The per-activity routing matrix for the dashboard (ADR-0005). Null unless a
+ *  dualRouting policy is set, so single-host projects render nothing new. */
+function routingPayload() {
+  try {
+    const policy = loadKitConfig().providers?.dualRouting ?? {};
+    if (!Object.keys(policy).length) return null;
+    const routes = resolveRoutes(policy);
+    return {
+      summary: routingSummary(policy),
+      routes: ACTIVITIES.map((activity) => {
+        const r = routes[activity];
+        return {
+          activity, host: r.host, provider: HOST_PROVIDER[r.host], model: r.model ?? '',
+          source: r.source, akOriginated: !!r.akOriginated,
+          escalate: (r.escalate ?? []).map((e) => e.host),
+        };
+      }),
+    };
+  } catch { return null; }
 }
 
 function kitVersion() {
@@ -236,6 +259,14 @@ function renderPage({ name, version }) {
         <div class="spark-svg" id="spark-delta"></div>
       </figure>
     </div>
+  </section>
+
+  <section class="strip" id="routing" hidden>
+    <div class="strip-head">
+      <h2 class="strip-title">per-activity routing</h2>
+      <span class="mono strip-note" id="routing-note"></span>
+    </div>
+    <div class="route-matrix" id="route-matrix"></div>
   </section>
 
   <footer class="foot mono">
@@ -497,6 +528,20 @@ body::before{
 .strip-head{display:flex; align-items:baseline; justify-content:space-between; gap:12px; margin-bottom:14px}
 .strip-title{font-family:var(--serif); font-size:18px; font-weight:600; margin:0; letter-spacing:.2px}
 .strip-note{color:var(--ink-dim); font-size:12px}
+.route-matrix{display:flex; flex-direction:column; gap:1px; background:var(--line); border:1px solid var(--line); border-radius:10px; overflow:hidden}
+.r-row{display:grid; grid-template-columns:minmax(140px,1.4fr) 84px minmax(120px,1.4fr) minmax(90px,1fr); gap:10px; align-items:center; padding:8px 14px; background:var(--panel)}
+.r-row:hover{background:var(--panel-2)}
+.r-act{color:var(--ink); font-size:12.5px; display:flex; align-items:center; gap:6px}
+.r-host{font-size:11px; font-weight:600; text-align:center; padding:2px 0; border-radius:100px; border:1px solid var(--line-2)}
+.r-host-claude{color:#e0a06a; background:rgba(224,160,106,.12); border-color:rgba(224,160,106,.32)}
+.r-host-codex{color:var(--accent); background:var(--accent-soft); border-color:rgba(79,182,168,.32)}
+.r-model{color:var(--ink-2); font-size:11.5px}
+.r-meta{display:flex; align-items:center; gap:8px; justify-content:flex-end; font-size:10.5px}
+.r-esc{color:var(--ink-dim)}
+.r-src{text-transform:uppercase; letter-spacing:.04em; color:var(--ink-dim); font-size:9.5px}
+.r-src-user{color:var(--accent)}
+.r-tag{font-size:8.5px; text-transform:uppercase; letter-spacing:.05em; color:var(--accent); border:1px solid var(--accent-soft); border-radius:3px; padding:0 3px}
+@media(max-width:560px){.r-row{grid-template-columns:1fr 70px} .r-model,.r-meta{grid-column:1/-1; justify-content:flex-start}}
 .spark-row{display:grid; grid-template-columns:repeat(auto-fit,minmax(240px,1fr)); gap:20px}
 .spark figcaption{color:var(--ink-dim); font-size:11px; letter-spacing:.06em; text-transform:uppercase; margin-bottom:6px}
 .spark-svg{width:100%; overflow-x:auto}
@@ -552,7 +597,7 @@ const JS = `
 
   // severity rank for rollups + triage sort; preferred order breaks ties.
   var RANK={fail:3,warn:2,ok:1,info:0,unknown:0};
-  var PREF=["versions","self","natives","security","learning","providers","hosts","mcp","ruvnet-brain","ruvnet-brain-nightly","aqe","daemons","blocks","statusline","npx"];
+  var PREF=["versions","self","natives","security","learning","providers","hosts","routing","mcp","ruvnet-brain","ruvnet-brain-nightly","aqe","daemons","blocks","statusline","npx"];
 
   // Collapse rows into one group per subsystem (kills repeated labels); the
   // group's level is the worst of its rows. Sort worst-first, then by PREF.
@@ -697,6 +742,28 @@ const JS = `
     document.getElementById("spark-delta").innerHTML=deltas.length>1?sparkline(deltas):flat(deltas.length?(deltas[0]>=0?"+":"")+deltas[0]+"pp (one sample)":"no data");
   }
 
+  function renderRouting(rt){
+    var strip=document.getElementById("routing");
+    if(!rt||!rt.routes||!rt.routes.length){strip.hidden=true;return;}
+    strip.hidden=false;
+    var s=rt.summary||{}, byHost=s.byHost||{};
+    document.getElementById("routing-note").textContent=
+      (byHost.claude||0)+" claude · "+(byHost.codex||0)+" codex · "+(s.custom||0)+" custom · "+(s.vendors||0)+" vendors";
+    var html="";
+    for(var i=0;i<rt.routes.length;i++){
+      var r=rt.routes[i];
+      var tag=r.akOriginated?' <span class="r-tag">ak</span>':'';
+      var escHtml=(r.escalate&&r.escalate.length)?'<span class="r-esc mono">↑ '+esc(r.escalate.join("→"))+"</span>":"";
+      html+='<div class="r-row">'
+        +'<span class="r-act mono">'+esc(r.activity)+tag+"</span>"
+        +'<span class="r-host r-host-'+esc(r.host)+'">'+esc(r.host)+"</span>"
+        +'<span class="r-model mono">'+esc(r.model)+"</span>"
+        +'<span class="r-meta">'+escHtml+'<span class="r-src r-src-'+esc(r.source)+'">'+esc(r.source)+"</span></span>"
+      +"</div>";
+    }
+    document.getElementById("route-matrix").innerHTML=html;
+  }
+
   function render(data){
     if(!data)return;
     LAST=data;
@@ -704,6 +771,7 @@ const JS = `
     renderDrift(data.drift);
     renderCards(data.rows);
     renderHistory(data);
+    renderRouting(data.routing);
   }
 
   function ago(sec){

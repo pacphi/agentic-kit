@@ -9,7 +9,7 @@ import { registry, syncBlocks } from '../lib/blocks.mjs';
 import { register as mcpRegister, applyExclusions } from '../lib/mcp.mjs';
 import { listDaemons, staleDaemons, reap } from '../lib/daemons.mjs';
 import { loadKitConfig, saveKitConfig } from '../lib/config.mjs';
-import { HOSTS, applyHosts, applyProviders, hostInstallState, installHost, applyAqeRouter } from '../lib/providers.mjs';
+import { HOSTS, applyHosts, applyProviders, hostInstallState, installHost, applyAqeRouter, seedDualRoutingIfDualHost, ensureCodexMcp } from '../lib/providers.mjs';
 import { driftReport, selfDrift } from '../lib/versions.mjs';
 import { pruneNpxStale } from '../lib/npx.mjs';
 import { nativesStatus, securityPresent } from '../lib/natives.mjs';
@@ -144,10 +144,17 @@ export async function run({ flags, pkgRoot }) {
       await step(`install ${h.id}`, () => installHost(h.id));
     }
   }
-  if (subsystems.has('providers')) {
+  if (subsystems.has('providers') || subsystems.has('routing')) {
     report('providers', applyHosts(cfg, cwd));
+    // heal per-activity routing: seed from defaults if dual-host only just became
+    // eligible (e.g. aqe upgraded ≥3.13.1 since enablement), before materializing.
+    const seed = seedDualRoutingIfDualHost(cfg);
+    if (seed.seeded) { saveKitConfig(cfg); report('routing', { ok: true, changed: true, detail: `seeded ${seed.count} activities` }); }
     const router = applyAqeRouter(cfg, cwd);
     if (router.changed || !router.ok) report('aqe router', router);
+    const mcp = await ensureCodexMcp(cfg, cwd);
+    if (mcp.changed) saveKitConfig(cfg);
+    if (mcp.changed || !mcp.ok) report('codex MCP', mcp);
     const prov = await withProgress('providers (api)', () => applyProviders(cfg, cwd));
     if (prov.changed || !prov.ok) report('providers (api)', prov);
   }
