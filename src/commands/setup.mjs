@@ -13,7 +13,7 @@ import { fixStatusline } from '../lib/statusline.mjs';
 import { registry, syncBlocks } from '../lib/blocks.mjs';
 import { register as mcpRegister, applyExclusions } from '../lib/mcp.mjs';
 import { loadKitConfig, saveKitConfig } from '../lib/config.mjs';
-import { HOSTS, applyHosts, applyProviders, ensureDualAgents, hostInstallState, installHost, applyAqeRouter } from '../lib/providers.mjs';
+import { HOSTS, applyHosts, applyProviders, ensureDualAgents, hostInstallState, installHost, applyAqeRouter, seedDualRoutingIfDualHost, printActivityRoutingTable, aqeSupportsAgentOverrides, ensureCodexMcp } from '../lib/providers.mjs';
 import { installedVersion } from '../lib/versions.mjs';
 import * as rb from '../lib/ruvnet-brain.mjs';
 import * as adb from '../lib/agentdb.mjs';
@@ -249,8 +249,10 @@ export async function run_project({ flags, cfg }) {
       fs.appendFileSync(projectMd, '\n## Agentic QE v3\n<!-- managed by agentic-kit — aqe init skips regeneration when this sentinel is present -->\n');
     }
     heal.healRvf(paths.projectAqeDir(root));
-    const aqe = await runCmd('aqe', ['init', '--auto'], { cwd: root, timeout: 300_000 });
-    (aqe.code === 0 ? ok : warn)('agentic-qe initialized');
+    // aqe ≥ 3.13.1 with codex enabled → install the Codex-native QE skills too.
+    const withCodex = !!cfg.providers?.hosts?.codex && aqeSupportsAgentOverrides();
+    const aqe = await runCmd('aqe', ['init', '--auto', ...(withCodex ? ['--with-codex'] : [])], { cwd: root, timeout: 300_000 });
+    (aqe.code === 0 ? ok : warn)(`agentic-qe initialized${withCodex ? ' (+ codex skills)' : ''}`);
   }
 
   // 9.5 frontier host/provider wiring — reapply kit.json prefs (no-op at the
@@ -258,11 +260,19 @@ export async function run_project({ flags, cfg }) {
   //     enabled: write ENABLE_* env, regenerate dual-mode agents, register providers.
   const ph = applyHosts(cfg, root);
   if (ph.changed) ok(`providers: ${ph.detail}`);
+  // dual-host: seed the per-activity routing policy from defaults (persist first
+  // so the router materialization below writes agentOverrides). No-op single-host.
+  const seed = seedDualRoutingIfDualHost(cfg);
+  if (seed.seeded) { saveKitConfig(cfg); ok(`per-activity routing seeded — ${seed.count} activities (dual-host defaults)`); }
   const rt = applyAqeRouter(cfg, root);
   if (rt.changed) (rt.ok ? ok : warn)(`aqe router: ${rt.detail}`);
+  if (Object.keys(cfg.providers?.dualRouting ?? {}).length) printActivityRoutingTable(cfg);
   if (cfg.providers?.hosts?.codex) {
     const dual = await ensureDualAgents(cfg, root);
     (dual.ok ? ok : warn)(`dual agents: ${dual.detail}`);
+    const mcp = await ensureCodexMcp(cfg, root);
+    if (mcp.changed) saveKitConfig(cfg); // persist the codexMcp ownership marker
+    if (mcp.changed || !mcp.ok) (mcp.ok ? ok : warn)(`codex MCP: ${mcp.detail}`);
     const prov = await applyProviders(cfg, root);
     if (prov.changed) (prov.ok ? ok : warn)(`providers: ${prov.detail}`);
   } else if (await have('codex')) {
