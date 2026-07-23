@@ -82,8 +82,17 @@ function runSwarm(configUrl, task, flags) {
   if (flags.parallel) args.push('--parallel-workers');
   if (flags['max-concurrent']) args.push('--max-concurrent', flags['max-concurrent']);
   if (flags.timeout) args.push('--timeout', flags.timeout);
+  // WORKAROUND (upstream @claude-flow/codex, github.com/ruvnet/ruflo): the
+  // orchestrator bootstraps shared memory via `npx ruflo@alpha memory init`, whose
+  // default DB path differs from where the spawned workers read it → the whole run
+  // dies with "Database not initialized". Pinning CLAUDE_FLOW_DB_PATH makes the init
+  // and the workers share ONE db (verified: "✓ Shared memory initialized"). We only
+  // set it when the user hasn't, and the adapter inherits it via its own spawn env.
+  // Remove once the adapter uses the local ruflo / a consistent path upstream.
+  const dbPath = process.env.CLAUDE_FLOW_DB_PATH ?? path.join(process.cwd(), '.claude-flow', 'dual-run-memory.db');
+  fs.mkdirSync(path.dirname(dbPath), { recursive: true });
   return new Promise((resolve) => {
-    const child = spawn(ADAPTER, args, { stdio: 'inherit' });
+    const child = spawn(ADAPTER, args, { stdio: 'inherit', env: { ...process.env, CLAUDE_FLOW_DB_PATH: dbPath } });
     child.on('error', () => resolve(1));
     child.on('close', (code) => resolve(code ?? 1));
   });
@@ -151,11 +160,11 @@ async function doRun({ positionals, flags }) {
 
   if (code === 0) { ok('dual run complete'); return 0; }
   fail(`dual run failed (exit ${code})`);
-  // Known upstream snag: the adapter bootstraps shared memory via `npx ruflo@alpha
-  // memory init`, which can pull a different ruflo than your installed one and fail
-  // with "Database not initialized". ak's routing/config is fine; this is in
-  // @claude-flow/codex's orchestrator (candidate upstream fix).
-  info('if this failed on shared-memory init, run `ruflo memory init` here first; the adapter bootstraps memory via `npx ruflo@alpha` (upstream limitation, not your routing).');
+  // ak already pins CLAUDE_FLOW_DB_PATH to neutralize the upstream @claude-flow/codex
+  // shared-memory bootstrap bug, so a failure here is usually a worker (auth, sandbox,
+  // or model access) — not routing. The materialized config + host/model assignment
+  // are ak's part and are correct.
+  info('workers run as `claude -p` / `codex exec`; a failure here is typically host auth/sandbox/model access, not your routing. Re-run a single step with --route to isolate.');
   return code;
 }
 
