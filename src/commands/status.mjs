@@ -8,7 +8,7 @@ import { loadRing, detectRegression } from '../lib/health-history.mjs';
 import * as paths from '../lib/paths.mjs';
 import { nativesStatus, aidefencePresent, securityPresent } from '../lib/natives.mjs';
 import { scanNpxStale } from '../lib/npx.mjs';
-import { registrationStatus } from '../lib/mcp.mjs';
+import { registrationStatus, codexMcpStatus } from '../lib/mcp.mjs';
 import { listDaemons, staleDaemons } from '../lib/daemons.mjs';
 import { scanRvf } from '../lib/rvf.mjs';
 import { registry, syncBlocks } from '../lib/blocks.mjs';
@@ -224,6 +224,28 @@ export async function collect({ pkgRoot, cwd = process.cwd() }) {
   }
   if (mcp.legacyRuflo) {
     rows.push(row('mcp', 'warn', "legacy 'ruflo'-keyed MCP registration present", 'sync migrates it to claude-flow'));
+  }
+
+  // codex MCP backend (mcp__codex__codex) — the dual-host swarm's inline Claude→Codex
+  // path (ADR-0001 projection #3). Only surfaces when the codex host is enabled;
+  // setup/sync register it project-scoped via ensureCodexMcp. Spawn-free: reads the
+  // project .mcp.json (== `claude mcp get codex`) plus the kit.json ownership marker.
+  if (cfg.providers?.hosts?.codex) {
+    try {
+      const { registered, owned } = codexMcpStatus(cfg, cwd);
+      if (registered) {
+        rows.push(row('codex-mcp', 'ok',
+          `codex MCP registered (mcp__codex__codex)${owned ? '' : ' — pre-existing (not ak-managed)'}`));
+      } else if (await have('codex')) {
+        rows.push(row('codex-mcp', 'warn', 'codex enabled but codex MCP not registered',
+          'sync registers the codex MCP server'));
+      } else {
+        rows.push(row('codex-mcp', 'warn', 'codex enabled but codex CLI not installed',
+          'sync installs codex, then registers the codex MCP'));
+      }
+    } catch (e) {
+      rows.push(row('codex-mcp', 'warn', `codex MCP check unavailable: ${e.message}`));
+    }
   }
 
   // hosts (install-if-missing) — cheap: file read + `which`, no network.

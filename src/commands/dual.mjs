@@ -82,13 +82,13 @@ function runSwarm(configUrl, task, flags) {
   if (flags.parallel) args.push('--parallel-workers');
   if (flags['max-concurrent']) args.push('--max-concurrent', flags['max-concurrent']);
   if (flags.timeout) args.push('--timeout', flags.timeout);
-  // WORKAROUND (upstream @claude-flow/codex, github.com/ruvnet/ruflo): the
-  // orchestrator bootstraps shared memory via `npx ruflo@alpha memory init`, whose
-  // default DB path differs from where the spawned workers read it → the whole run
-  // dies with "Database not initialized". Pinning CLAUDE_FLOW_DB_PATH makes the init
-  // and the workers share ONE db (verified: "✓ Shared memory initialized"). We only
-  // set it when the user hasn't, and the adapter inherits it via its own spawn env.
-  // Remove once the adapter uses the local ruflo / a consistent path upstream.
+  // WORKAROUND (upstream @claude-flow/codex, ruvnet/ruflo#2766): the orchestrator
+  // bootstraps shared memory via `npx ruflo@alpha memory init`, whose default DB path
+  // differs from where the spawned workers read it → the whole run dies with "Database
+  // not initialized". Pinning CLAUDE_FLOW_DB_PATH makes the init and the workers share
+  // ONE db (verified: "✓ Shared memory initialized"). We only set it when the user
+  // hasn't, and the adapter inherits it via its own spawn env. Remove once #2766 ships
+  // (the adapter uses the local ruflo / a consistent path) — then re-verify a live run.
   const dbPath = process.env.CLAUDE_FLOW_DB_PATH ?? path.join(process.cwd(), '.claude-flow', 'dual-run-memory.db');
   fs.mkdirSync(path.dirname(dbPath), { recursive: true });
   return new Promise((resolve) => {
@@ -161,7 +161,7 @@ async function doRun({ positionals, flags }) {
   if (code === 0) { ok('dual run complete'); return 0; }
   fail(`dual run failed (exit ${code})`);
   // ak already pins CLAUDE_FLOW_DB_PATH to neutralize the upstream @claude-flow/codex
-  // shared-memory bootstrap bug, so a failure here is usually a worker (auth, sandbox,
+  // shared-memory bootstrap bug (ruvnet/ruflo#2766), so a failure here is usually a worker (auth, sandbox,
   // or model access) — not routing. The materialized config + host/model assignment
   // are ak's part and are correct.
   info('workers run as `claude -p` / `codex exec`; a failure here is typically host auth/sandbox/model access, not your routing. Re-run a single step with --route to isolate.');
