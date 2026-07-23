@@ -4,7 +4,7 @@
 // Registration key is `claude-flow` (#2206), user scope.
 import fs from 'node:fs';
 import path from 'node:path';
-import { rufloNodeModules, claudeUserMcpPath, claudeSettingsPath } from './paths.mjs';
+import { rufloNodeModules, claudeUserMcpPath, claudeSettingsPath, repoRoot } from './paths.mjs';
 import { run } from './exec.mjs';
 import { readJson, addDenyRules, removeDenyRules } from './settings.mjs';
 
@@ -39,6 +39,21 @@ export function registrationStatus() {
     denyCount: (readJson(claudeSettingsPath(), {})?.permissions?.deny ?? [])
       .filter((r) => r.startsWith('mcp__claude-flow__')).length,
   };
+}
+
+/**
+ * Project-scoped codex MCP (mcp__codex__codex) registration state. `ensureCodexMcp`
+ * registers it via `claude mcp add codex -s project`, which persists to `.mcp.json`
+ * at the repo root — so reading that file is the spawn-free equivalent of
+ * `claude mcp get codex` (deterministic + testable, matching `registrationStatus`'s
+ * file-read approach). `owned` reflects kit.json's ak-ownership marker
+ * (`providers.codexMcp === 'ak'`), which gates teardown.
+ * @returns {{ registered: boolean, owned: boolean }}
+ */
+export function codexMcpStatus(cfg, cwd = process.cwd()) {
+  const root = repoRoot(cwd) ?? cwd;
+  const servers = readJson(path.join(root, '.mcp.json'), {})?.mcpServers ?? {};
+  return { registered: 'codex' in servers, owned: cfg?.providers?.codexMcp === 'ak' };
 }
 
 export async function register() {
