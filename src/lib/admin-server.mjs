@@ -153,7 +153,13 @@ export function startAdmin({ port = 7432, collect, resolveToken, pkg: injectedPk
 
 // ── the page. One document, everything inline. Only first-party source is
 // interpolated: `${CSS}` (the style), `${modelSrc}` + `${viewSrc}` (the one
-// module scope). The client fetches /api/admin-stats and renders live. ─────────
+// module scope). The client fetches /api/admin-stats and renders live.
+//
+// Layout: the dashboard's sticky segmented control (ADR-0005) splits the panel
+// into five views — Overview (reach + momentum), Review (since you last looked +
+// waiting on you), Humans, Activity (feed + referrers), Gaps — so each view fits
+// a viewport instead of one long scroll. Attention never hides behind a tab:
+// Review/Humans/Activity carry count badges when something needs eyes. ─────────
 function renderPage({ modelSrc, viewSrc }) {
   return `<!doctype html>
 <html lang="en">
@@ -171,9 +177,9 @@ function renderPage({ modelSrc, viewSrc }) {
     <h1>agentic-kit — admin</h1>
     <span class="stamp mono" data-stamp></span>
   </div>
-  <p class="sub">What moved since you last looked, who moved it, and what is waiting on you. Every number is read live from GitHub or npm — nothing here is stored, assumed, or estimated. Maintainer-only, localhost-only, deliberate egress.</p>
 
   <div class="gate" data-gate>
+    <p>What moved since you last looked, who moved it, and what is waiting on you. Every number is read live from GitHub or npm — nothing here is stored, assumed, or estimated.</p>
     <p>Maintainer dashboard. Paste the one-time session token printed in your terminal (it also rode in on the launch URL's <code>#</code> fragment).</p>
     <input type="password" placeholder="admin token" data-token-input autocomplete="off" spellcheck="false">
     <button class="primary" data-token-go>Open dashboard</button>
@@ -189,58 +195,79 @@ function renderPage({ modelSrc, viewSrc }) {
       <button class="right" data-logout>Forget token</button>
     </div>
 
-    <section class="sec first">
-      <h2>How many people <span class="qual mono" data-reach-qual></span></h2>
-      <p class="lead">The closest honest answer to "how many people use this". Each tile says what it counts <em>and</em> what it cannot — three of the four are machine-side, so the tile that means <em>humans</em> is the first.</p>
-      <div class="reach" data-reach></div>
-      <p class="note" data-reach-note></p>
+    <nav class="tabbar">
+      <div class="seg" role="tablist" aria-label="admin sections" data-seg>
+        <span class="seg-thumb" data-seg-thumb aria-hidden="true"></span>
+        <button class="seg-btn" role="tab" id="tab-overview" data-tab="overview" aria-selected="true" aria-controls="panel-overview" type="button">Overview</button>
+        <button class="seg-btn" role="tab" id="tab-review" data-tab="review" aria-selected="false" aria-controls="panel-review" type="button">Review<span class="tbadge" data-badge="review" hidden></span></button>
+        <button class="seg-btn" role="tab" id="tab-humans" data-tab="humans" aria-selected="false" aria-controls="panel-humans" type="button">Humans<span class="tbadge" data-badge="humans" hidden></span></button>
+        <button class="seg-btn" role="tab" id="tab-activity" data-tab="activity" aria-selected="false" aria-controls="panel-activity" type="button">Activity<span class="tbadge" data-badge="activity" hidden></span></button>
+        <button class="seg-btn" role="tab" id="tab-gaps" data-tab="gaps" aria-selected="false" aria-controls="panel-gaps" type="button">Gaps</button>
+      </div>
+    </nav>
+
+    <section class="panel" id="panel-overview" data-panel="overview" role="tabpanel" aria-labelledby="tab-overview">
+      <section class="sec first">
+        <h2>How many people <span class="qual mono" data-reach-qual></span></h2>
+        <p class="lead">The closest honest answer to "how many people use this". Each tile says what it counts <em>and</em> what it cannot — three of the four are machine-side, so the tile that means <em>humans</em> is the first.</p>
+        <div class="reach" data-reach></div>
+        <p class="note" data-reach-note></p>
+      </section>
+
+      <section class="sec">
+        <h2>Momentum <span class="qual mono">last 7 days vs the 7 before — direction, not totals</span></h2>
+        <p class="lead">Computed inside each source's own daily series, so both halves cover an equal window. These are machine counters; read them for <em>shape</em> and the humans in their tab for truth.</p>
+        <div class="mom" data-momentum></div>
+        <p class="note" data-momentum-note></p>
+      </section>
     </section>
 
-    <section class="sec">
-      <h2>Momentum <span class="qual mono">last 7 days vs the 7 before — direction, not totals</span></h2>
-      <p class="lead">Computed inside each source's own daily series, so both halves cover an equal window. These are machine counters; read them for <em>shape</em> and the humans below for truth.</p>
-      <div class="mom" data-momentum></div>
-      <p class="note" data-momentum-note></p>
+    <section class="panel" id="panel-review" data-panel="review" role="tabpanel" aria-labelledby="tab-review" hidden>
+      <section class="sec first">
+        <h2>Since you last looked</h2>
+        <div class="since" data-since></div>
+      </section>
+
+      <section class="sec">
+        <h2>Waiting on you</h2>
+        <p class="lead">Open issues and PRs opened by someone other than you, oldest first. Closing the loop <em>is</em> the work.</p>
+        <div data-todo></div>
+      </section>
     </section>
 
-    <section class="sec">
-      <h2>Since you last looked</h2>
-      <div class="since" data-since></div>
+    <section class="panel" id="panel-humans" data-panel="humans" role="tabpanel" aria-labelledby="tab-humans" hidden>
+      <section class="sec first">
+        <h2>The humans <span class="qual mono" data-people-qual></span></h2>
+        <p class="lead">Everyone outside you who filed an issue, opened a PR, or forked — ranked by how recently they showed up, not alphabetically.</p>
+        <div data-people></div>
+      </section>
     </section>
 
-    <section class="sec">
-      <h2>Waiting on you</h2>
-      <p class="lead">Open issues and PRs opened by someone other than you, oldest first. Closing the loop <em>is</em> the work.</p>
-      <div data-todo></div>
+    <section class="panel" id="panel-activity" data-panel="activity" role="tabpanel" aria-labelledby="tab-activity" hidden>
+      <section class="sec first">
+        <h2>Every human event <span class="qual mono" data-feed-qual></span></h2>
+        <p class="lead">The one place the conversation lives. Titles link straight into the thread; this page deliberately does not paraphrase the sentiment (see the Gaps tab).</p>
+        <div data-feed></div>
+      </section>
+
+      <section class="sec">
+        <h2>Where they arrived from <span class="qual mono">rolling 14 days</span></h2>
+        <div class="tbl-scroll"><table class="adm" data-referrers></table></div>
+        <p class="note" data-referrers-note></p>
+      </section>
     </section>
 
-    <section class="sec">
-      <h2>The humans <span class="qual mono" data-people-qual></span></h2>
-      <p class="lead">Everyone outside you who filed an issue, opened a PR, or forked — ranked by how recently they showed up, not alphabetically.</p>
-      <div data-people></div>
-    </section>
+    <section class="panel" id="panel-gaps" data-panel="gaps" role="tabpanel" aria-labelledby="tab-gaps" hidden>
+      <section class="sec first">
+        <h2>Not instrumented yet</h2>
+        <p class="lead">Things this page genuinely cannot see — listed rather than estimated. A dashboard that fills a gap with a plausible number is worse than one that admits it.</p>
+        <ul class="gaps" data-gaps></ul>
+      </section>
 
-    <section class="sec">
-      <h2>Every human event <span class="qual mono" data-feed-qual></span></h2>
-      <p class="lead">The one place the conversation lives. Titles link straight into the thread; this page deliberately does not paraphrase the sentiment (see "Not instrumented yet").</p>
-      <div data-feed></div>
-    </section>
-
-    <section class="sec">
-      <h2>Where they arrived from <span class="qual mono">rolling 14 days</span></h2>
-      <div class="tbl-scroll"><table class="adm" data-referrers></table></div>
-      <p class="note" data-referrers-note></p>
-    </section>
-
-    <section class="sec">
-      <h2>Not instrumented yet</h2>
-      <p class="lead">Things this page genuinely cannot see — listed rather than estimated. A dashboard that fills a gap with a plausible number is worse than one that admits it.</p>
-      <ul class="gaps" data-gaps></ul>
-    </section>
-
-    <section class="sec">
-      <h2>Doors</h2>
-      <p class="doors" data-doors></p>
+      <section class="sec">
+        <h2>Doors</h2>
+        <p class="doors" data-doors></p>
+      </section>
     </section>
   </div>
 
@@ -272,12 +299,11 @@ const CSS = `
 html,body{margin:0;padding:0}
 body{background:var(--bg);color:var(--ink);font-family:var(--sans);font-size:14px;line-height:1.55;-webkit-font-smoothing:antialiased;font-variant-numeric:tabular-nums;min-height:100vh;overflow-x:hidden}
 .mono{font-family:var(--mono)}
-.wrap{max-width:1120px;margin:0 auto;padding:44px clamp(16px,4vw,28px) 90px}
-.head{display:flex;align-items:baseline;gap:14px;flex-wrap:wrap;margin-bottom:8px}
-.head h1{font-family:var(--display);font-weight:600;font-size:1.9rem;letter-spacing:-.012em;color:var(--ink);margin:0}
+.wrap{max-width:1120px;margin:0 auto;padding:26px clamp(16px,4vw,28px) 44px}
+.head{display:flex;align-items:baseline;gap:14px;flex-wrap:wrap;margin-bottom:16px}
+.head h1{font-family:var(--display);font-weight:600;font-size:1.6rem;letter-spacing:-.012em;color:var(--ink);margin:0}
 .head::after{content:"";flex-basis:100%;height:2px;background:var(--spectrum);opacity:.9;border-radius:2px;margin-top:6px}
 .stamp{font-size:12px;color:var(--faint)}
-.sub{color:var(--muted);font-size:14px;margin:14px 0 26px;max-width:80ch}
 
 .gate{max-width:460px;background:var(--surface);border:1px solid var(--ridge);border-radius:12px;padding:26px 28px}
 .gate p{font-size:14px;color:var(--ink-2);margin:0 0 14px}
@@ -289,18 +315,46 @@ button{cursor:pointer;background:var(--surface);color:var(--ink);border:1px soli
 button:hover{border-color:var(--accent)}
 button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 button.primary{background:var(--accent);color:var(--on-accent);border:0;border-radius:10px;font-weight:700;font-size:14px;padding:10px 18px;font-family:var(--sans)}
-.controls{display:flex;align-items:center;gap:12px;margin-bottom:24px;font-family:var(--mono);font-size:12.5px;color:var(--muted);flex-wrap:wrap}
+.controls{display:flex;align-items:center;gap:12px;margin-bottom:12px;font-family:var(--mono);font-size:12.5px;color:var(--muted);flex-wrap:wrap}
 .controls label{display:flex;align-items:center;gap:6px;cursor:pointer}
 .controls .undo{border-color:color-mix(in srgb,var(--accent) 50%,transparent);color:var(--accent)}
 .controls .right{margin-left:auto}
 
-.sec{margin-top:38px}
-.sec.first{margin-top:8px}
+/* ── sticky segmented control (the dashboard's tab idiom, amber-keyed) ── */
+.tabbar{position:sticky;top:0;z-index:20;display:flex;padding:10px 0 12px;margin-bottom:10px;
+  background:color-mix(in srgb,var(--bg) 80%,transparent);
+  -webkit-backdrop-filter:saturate(160%) blur(16px);backdrop-filter:saturate(160%) blur(16px);
+  border-bottom:1px solid var(--ridge)}
+.seg{position:relative;display:inline-flex;gap:2px;padding:3px;border-radius:999px;
+  background:var(--surface);border:1px solid var(--ridge);
+  max-width:100%;overflow-x:auto;scrollbar-width:none}
+.seg::-webkit-scrollbar{display:none}
+.seg-btn{position:relative;z-index:1;border:0;background:transparent;color:var(--muted);
+  font-family:var(--mono);font-size:12.5px;letter-spacing:.01em;padding:6px 15px;border-radius:999px;
+  cursor:pointer;white-space:nowrap;display:inline-flex;align-items:center;gap:7px;transition:color .2s ease}
+.seg-btn[aria-selected="true"]{color:var(--ink)}
+.seg-btn:hover{color:var(--ink-2)}
+.seg-btn:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+.seg-thumb{position:absolute;top:3px;left:3px;height:calc(100% - 6px);width:0;border-radius:999px;
+  background:var(--bg-2);border:1px solid color-mix(in srgb,var(--accent) 55%,var(--ridge));
+  box-shadow:0 1px 6px rgba(0,0,0,.45);
+  transition:left .25s cubic-bezier(.3,.7,.3,1),width .25s cubic-bezier(.3,.7,.3,1)}
+.tbadge{min-width:16px;height:16px;padding:0 4px;border-radius:8px;background:var(--bad);color:#fff;
+  font-size:10px;font-weight:700;display:inline-flex;align-items:center;justify-content:center;line-height:1}
+.tbadge[data-tone="warn"]{background:var(--accent);color:var(--on-accent)}
+.tbadge[hidden]{display:none}
+
+.panel{animation:fade .25s ease}
+.panel[hidden]{display:none}
+@keyframes fade{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
+
+.sec{margin-top:26px}
+.sec.first{margin-top:6px}
 .sec h2{font-family:var(--display);font-weight:600;font-size:1.25rem;color:var(--ink);margin:0 0 4px}
 .sec h2 .qual{font-size:11px;color:var(--faint);font-weight:400;letter-spacing:.03em}
 .sec .lead{font-size:13px;color:var(--muted);margin:0 0 12px;max-width:80ch}
 .sec .note{font-size:12.5px;color:var(--faint);margin:12px 0 0;max-width:80ch;line-height:1.55}
-.sec .lead em,.sub em{color:var(--ink-2);font-style:italic}
+.sec .lead em,.gate p em{color:var(--ink-2);font-style:italic}
 
 .reach{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-top:12px}
 .rcell{border:1px solid var(--ridge);border-radius:12px;padding:16px 18px;background:var(--surface);min-width:0}
@@ -337,7 +391,8 @@ button.primary{background:var(--accent);color:var(--on-accent);border:0;border-r
 .dcell span{display:block;margin-top:5px;font-family:var(--mono);font-size:10.5px;letter-spacing:.03em;color:var(--muted);line-height:1.4}
 .dcell em{display:block;margin-top:4px;font-style:normal;font-family:var(--mono);font-size:10px;color:var(--faint)}
 
-.todo,.tl{border:1px solid var(--ridge);border-radius:12px;background:var(--surface);overflow:hidden;margin-top:12px}
+/* long lists scroll inside their card, never the page (the no-scroll contract) */
+.todo,.tl{border:1px solid var(--ridge);border-radius:12px;background:var(--surface);overflow:hidden;margin-top:12px;max-height:52vh;overflow-y:auto}
 .todo-row{display:flex;gap:14px;align-items:baseline;padding:13px 16px;border-bottom:1px solid var(--ridge)}
 .todo-row:last-child{border-bottom:none}
 .todo-row .age{font-family:var(--mono);font-size:11.5px;color:var(--bad);white-space:nowrap;min-width:74px}
@@ -382,7 +437,7 @@ table.adm tr:last-child td{border-bottom:none}
 table.adm td.num{font-family:var(--mono)}
 
 .gaps{border:1px dashed var(--ridge);border-radius:12px;background:var(--bg-2);padding:6px 20px;margin-top:12px}
-.gaps li{list-style:none;padding:13px 0;border-bottom:1px solid var(--ridge);font-size:13.5px;color:var(--ink-2);line-height:1.55}
+.gaps li{list-style:none;padding:10px 0;border-bottom:1px solid var(--ridge);font-size:13.5px;color:var(--ink-2);line-height:1.55}
 .gaps li:last-child{border-bottom:none}
 .gaps li b{color:var(--ink);font-weight:500}
 .gaps li .fix{display:block;margin-top:4px;font-family:var(--mono);font-size:11.5px;color:var(--faint)}
@@ -393,7 +448,7 @@ table.adm td.num{font-family:var(--mono)}
 
 .doors{font-size:14px;color:var(--ink-2);background:var(--surface);border:1px solid var(--ridge);border-radius:12px;padding:16px 20px;margin-top:12px}
 .doors a{color:var(--accent-2)}
-.foot{margin-top:40px;padding-top:16px;border-top:1px solid var(--ridge);color:var(--faint);font-size:11.5px}
+.foot{margin-top:26px;padding-top:14px;border-top:1px solid var(--ridge);color:var(--faint);font-size:11.5px}
 
 @media (max-width:880px){
   .dstrip,.mom,.reach{grid-template-columns:1fr 1fr}
