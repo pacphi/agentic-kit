@@ -3,17 +3,30 @@
 // last two and alarms on any backslide (learning shrank, native agentdb slots
 // dropped, drift regressed current→outdated, security present→absent).
 //
+// The ring is MACHINE-global (kit.json) but learningRows is PROJECT-local (read
+// from the sync cwd's .claude-flow/neural/stats.json), so entries carry the
+// project they were recorded from and the learning comparison only ever pairs
+// entries from the SAME project. An absent learning store records null (unknown),
+// never a fabricated 0 — the same honesty rule the admin page lives by — so a
+// sync run from a store-less project can never fake a "learning shrank" alarm.
+//
 // The core (append / summarize / detectRegression) is PURE — no file I/O. The
 // loadRing / appendToConfig shims only read/mutate a plain cfg object so the
 // caller can persist via saveKitConfig; they have no side effects beyond the cfg.
 //
 // An entry looks like:
-//   { ts, learningRows, nativeSlots, driftOutdated: bool, securityPresent: bool }
+//   { ts, project, learningRows: number|null, nativeSlots, driftOutdated: bool, securityPresent: bool }
 
 const DEFAULT_CAP = 30;
 
 /** Coerce a possibly-missing numeric field to a finite number (default 0). */
 const num = (v) => (Number.isFinite(v) ? v : 0);
+
+/** A finite count, or null for unknown — never a fabricated 0. */
+const numOrNull = (v) => (Number.isFinite(v) ? v : null);
+
+/** Last path segment for display (handles / and \ so messages read the same on Windows). */
+const projLabel = (p) => String(p).split(/[\\/]/).filter(Boolean).pop() ?? String(p);
 
 /**
  * Append `entry` to `ring`, returning a NEW array capped at `cap` entries.
@@ -24,10 +37,12 @@ export function append(ring, entry, cap = DEFAULT_CAP) {
   return next.length > cap ? next.slice(next.length - cap) : next;
 }
 
-/** Project an entry down to just the tracked scalar fields. */
+/** Project an entry down to just the tracked scalar fields. learningRows and
+ *  project keep null for "unknown" — an absent learning store is not a zero. */
 export function summarize(entry = {}) {
   return {
-    learningRows: num(entry.learningRows),
+    project: typeof entry.project === 'string' && entry.project ? entry.project : null,
+    learningRows: numOrNull(entry.learningRows),
     nativeSlots: num(entry.nativeSlots),
     driftOutdated: Boolean(entry.driftOutdated),
     securityPresent: Boolean(entry.securityPresent),
@@ -35,11 +50,14 @@ export function summarize(entry = {}) {
 }
 
 /**
- * Compare the last two entries of `ring` and return an array of regressions:
- *   { metric, from, to, message }
- * Regressions: learningRows shrank, nativeSlots dropped, drift current→outdated,
- * security present→absent. Recoveries (the reverse) are never flagged. Fewer than
- * two entries → []. Missing numeric fields count as 0; missing bools as falsy.
+ * Compare the newest entry of `ring` against its baselines and return an array
+ * of regressions: { metric, from, to, message }.
+ *
+ * Machine-global metrics (nativeSlots, drift, security) compare the last two
+ * entries. learningRows is project-local, so its baseline is the most recent
+ * PRIOR entry from the SAME project with a KNOWN count — entries from other
+ * projects, legacy entries with no project stamp, and unknown (null) readings
+ * are never compared. Recoveries are never flagged. Fewer than two entries → [].
  */
 export function detectRegression(ring) {
   if (!Array.isArray(ring) || ring.length < 2) return [];
@@ -47,13 +65,20 @@ export function detectRegression(ring) {
   const curr = summarize(ring[ring.length - 1]);
   const out = [];
 
-  if (curr.learningRows < prev.learningRows) {
-    out.push({
-      metric: 'learningRows',
-      from: prev.learningRows,
-      to: curr.learningRows,
-      message: `learning rows shrank ${prev.learningRows} → ${curr.learningRows}`,
-    });
+  if (curr.learningRows != null && curr.project != null) {
+    let base = null;
+    for (let i = ring.length - 2; i >= 0; i--) {
+      const s = summarize(ring[i]);
+      if (s.project === curr.project && s.learningRows != null) { base = s; break; }
+    }
+    if (base && curr.learningRows < base.learningRows) {
+      out.push({
+        metric: 'learningRows',
+        from: base.learningRows,
+        to: curr.learningRows,
+        message: `learning rows shrank ${base.learningRows} → ${curr.learningRows} (${projLabel(curr.project)})`,
+      });
+    }
   }
   if (curr.nativeSlots < prev.nativeSlots) {
     out.push({

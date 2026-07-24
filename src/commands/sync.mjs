@@ -218,7 +218,12 @@ export async function run({ flags, pkgRoot }) {
     const stats = readJson(path.join(paths.projectClaudeFlowDir(cwd), 'neural', 'stats.json'));
     appendToConfig(cfg, {
       ts: Math.floor(Date.now() / 1000),
-      learningRows: stats?.patternsLearned ?? 0,
+      // learningRows is PROJECT-local (this cwd's learning store) in a MACHINE-
+      // global ring, so stamp the project and record null (unknown) when the
+      // store is absent — a fabricated 0 would let a sync run from a store-less
+      // project fake a "learning shrank" alarm against another project's count.
+      project: cwd,
+      learningRows: Number.isFinite(stats?.patternsLearned) ? stats.patternsLearned : null,
       // Count NATIVE bindings (incl. the aqe slot), not directories: a location
       // flipping native→WASM must move this number or the regression detector
       // named "native agentdb slots dropped" can never fire; and a benign tree
