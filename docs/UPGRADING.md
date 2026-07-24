@@ -68,8 +68,9 @@ Every `ak` command ends with a best-effort, never-blocking drift nudge. It has t
 - **Local artifact drift** (spawn-light file compares, evaluated on every run):
   `↻ drifted: 2 CLAUDE.md block(s) · codex MCP unregistered — run: ak sync`
 
-The second half covers the artifacts `ak` *renders*: managed guidance blocks in
-`~/.claude/CLAUDE.md` and the project `AGENTS.md`, the Claude↔Codex MCP bridge (both
+The second half covers the artifacts `ak` *renders*: managed guidance blocks in the
+machine-wide guidance files (`~/.claude/CLAUDE.md`, and `~/.codex/AGENTS.md` on codex
+machines), the Claude↔Codex MCP bridge (both
 directions), and the statusline footer. These can drift with **no version change at all** —
 a kit update (or, on an npm-linked dev checkout, merely merging a PR that edits a
 `claude/*.md` template) revises the source of truth, and the rendered copies lag until the

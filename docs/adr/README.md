@@ -16,10 +16,14 @@ Consequences**, and cites the grounded source it rests on where relevant.
 | [0005](0005-dashboard-in-page-routing-reveal.md) | Dashboard surfaces routing via in-page reveal | Accepted |
 | [0006](0006-primary-host-and-ambidextrous-mirroring.md) | Primary host & ambidextrous mirroring (which host leads) | Accepted |
 | [0007](0007-maintainer-admin-local-telemetry.md) | Maintainer admin: a loopback telemetry page with deliberate egress | Accepted |
+| [0008](0008-guidance-target-scope-split.md) | Machine-scoped guidance blocks land in machine files, not a repo's AGENTS.md | Accepted |
 
 Theme: ADRs **0001–0006** define **dual-host LLM routing and leadership** — how `ak` lets ruflo route
 each development activity (architecture, implementation, testing, review, …) to the right host (Claude
 or Codex) and model, which host **leads** (0006), seeded on detection, tunable by the user, and surfaced
 across `setup`/`sync`/`status`/`dashboard`. **0007** covers the local diagnostic surfaces — splitting the
 offline-first `dashboard` from the deliberately-egressing, credential-touching maintainer `admin` along
-the network-egress line. See also `docs/PROVIDERS.md`.
+the network-egress line. **0008** draws a second scope line — machine-scoped guidance blocks belong in
+machine-wide files (`~/.claude/CLAUDE.md`, `~/.codex/AGENTS.md`), never a repo's checked-in `AGENTS.md` —
+and folds the two duplicated target lists into one shared `guidanceTargets` helper. See also
+`docs/PROVIDERS.md`.

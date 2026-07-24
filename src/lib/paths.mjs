@@ -28,6 +28,13 @@ export const claudeSettingsPath = () => path.join(claudeDir(), 'settings.json');
 export const claudeUserMcpPath = () => path.join(home, '.claude.json');
 export const claudeSkillsDir = () => path.join(claudeDir(), 'skills');
 
+/** OpenAI Codex user-level locations. `~/.codex` is codex's home; its global
+ *  guidance file is AGENTS.md (the codex analogue of ~/.claude/CLAUDE.md). ak
+ *  reads/writes this dir but NEVER creates it — its existence is the signal that
+ *  codex is installed on the machine (see blocks.guidanceTargets). */
+export const codexDir = () => path.join(home, '.codex');
+export const codexAgentsMdPath = () => path.join(codexDir(), 'AGENTS.md');
+
 /** Per-project locations, relative to a project root. */
 export const projectSettings = (root) => path.join(root, '.claude', 'settings.json');
 export const projectSettingsLocal = (root) => path.join(root, '.claude', 'settings.local.json');

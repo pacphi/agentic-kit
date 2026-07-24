@@ -1,8 +1,11 @@
 <!-- BEGIN ruflo-dual-mode-reference -->
-<!-- ruflo-dual-mode-reference: merged into the guidance files (CLAUDE.md AND AGENTS.md)
-     ONLY when BOTH hosts (claude + codex) are enabled in kit.json — i.e. dual mode is on.
-     Managed by agentic-kit / `ak sync` — stripped automatically when either host is
-     disabled. Do not hand-edit between the sentinels. -->
+<!-- ruflo-dual-mode-reference: merged into the two MACHINE-scoped guidance files —
+     ~/.claude/CLAUDE.md AND ~/.codex/AGENTS.md — ONLY when BOTH hosts (claude + codex)
+     are enabled in kit.json (i.e. dual mode is on). This is machine state, so it never
+     lands in a repo's checked-in AGENTS.md (ADR-0008). Managed by agentic-kit / `ak
+     sync` — stripped automatically when either host is disabled. The ~/.codex/AGENTS.md
+     copy only appears on machines where ~/.codex exists. Do not hand-edit between the
+     sentinels. -->
 
 ## Ambidextrous dual-host mode (claude + codex)
 

@@ -16,7 +16,7 @@
 // `blocksForTarget(rows, name)`. Logical names only; paths stay a caller concern.
 import fs from 'node:fs';
 import path from 'node:path';
-import { claudeDir, home } from './paths.mjs';
+import { claudeDir, claudeMdPath, codexDir, home } from './paths.mjs';
 import { have } from './exec.mjs';
 
 export const BEGIN = (slug) => `<!-- BEGIN ${slug} -->`;
@@ -62,14 +62,16 @@ export const BUILTIN_BLOCKS = [
   {
     // Surfaces only when BOTH hosts are enabled in kit.json (dual mode) — gated
     // on a caller flag, not PATH, so it does not fire just because `codex` is
-    // installed. Lands in BOTH guidance files (CLAUDE.md + AGENTS.md) via the
-    // `guidanceFiles` fan-out. Documents `ak dual`, the Claude↔Codex bridge, and
-    // per-activity routing/escalation.
+    // installed. Its content is MACHINE state (both hosts enabled in kit.json),
+    // so it lands in the two MACHINE-scoped guidance files — ~/.claude/CLAUDE.md
+    // (claude) and ~/.codex/AGENTS.md (agents-user) — never a repo's checked-in
+    // AGENTS.md, which would leak machine truths into shared git history (ADR-0008).
+    // Documents `ak dual`, the Claude↔Codex bridge, and per-activity routing.
     slug: 'ruflo-dual-mode-reference',
     template: 'dual-mode-reference.md',
     position: 'append',
     detector: { type: 'flag', target: 'dualMode' },
-    guidanceFiles: ['claude', 'agents'],
+    guidanceFiles: ['claude', 'agents-user'],
   },
   {
     // Surfaces once the RuvNet Brain KB is on disk. `dir` supports ~/ expansion;
@@ -214,6 +216,42 @@ export function registry(customBlocks = []) {
  *  without hardcoding paths in this module. */
 export function blocksForTarget(rows, targetName) {
   return rows.filter((r) => (r.guidanceFiles ?? ['claude']).includes(targetName));
+}
+
+/** Registry rows whose sentinel might linger in a target's file but which no
+ *  longer belong there (they don't list `targetName` in guidanceFiles). This is
+ *  the migration path for a RE-SCOPED block: pass these to `syncBlocks` alongside
+ *  `blocksForTarget` and they are force-stripped when present. Each returned row
+ *  carries a detector that never fires (`{type:'retired'}` → detect() falls to
+ *  its default false), so a present block is stripped and an absent one is a
+ *  no-op — the original detector (e.g. a live `flag`) can never re-upsert it into
+ *  a file it must stay out of. Absent from the file → nothing happens (no write). */
+export function retiredForTarget(rows, targetName) {
+  return rows
+    .filter((r) => !(r.guidanceFiles ?? ['claude']).includes(targetName))
+    .map((r) => ({ ...r, detector: { type: 'retired' } }));
+}
+
+/** The logical guidance targets `sync` (apply) and `status` (dry-run) both loop.
+ *  ONE source of truth so the two commands can never drift. Always: machine-wide
+ *  `~/.claude/CLAUDE.md` (claude) + the project's own `<cwd>/AGENTS.md` (agents).
+ *  The machine-scoped `~/.codex/AGENTS.md` (agents-user) is included ONLY when
+ *  `~/.codex` already exists — codex's presence signal — and is NEVER created by
+ *  this discovery (dir-exists gate, no mkdir). That single gate covers both cases:
+ *  a codex machine that is momentarily single-host still gets the target (so a
+ *  stale block can be stripped), and a codex-less machine never grows a ~/.codex.
+ *  `cfg` is accepted for call-site symmetry/forward-compat; the target set is
+ *  cfg-independent today. `codexRoot` is a test seam (defaults to the real dir).
+ *  @param {{ cwd?: string, cfg?: object, codexRoot?: string }} opts */
+export function guidanceTargets({ cwd = process.cwd(), codexRoot = codexDir() } = {}) {
+  const targets = [
+    { name: 'claude', label: 'CLAUDE.md', file: claudeMdPath() },
+    { name: 'agents', label: 'AGENTS.md', file: path.join(cwd, 'AGENTS.md') },
+  ];
+  if (fs.existsSync(codexRoot)) {
+    targets.push({ name: 'agents-user', label: '~/.codex/AGENTS.md', file: path.join(codexRoot, 'AGENTS.md') });
+  }
+  return targets;
 }
 
 /** Reconcile every registry row against its detector on a file.
