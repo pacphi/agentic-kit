@@ -34,24 +34,32 @@ release this kit. User-facing docs live in [README.md](README.md); this file is 
 ## 2. Repository layout
 
 ```
-bin/agentic-kit.mjs      # single entrypoint — arg parse + command dispatch
+bin/agentic-kit.mjs      # single entrypoint — arg parse + command dispatch (PORCELAIN/PLUMBING maps)
 src/
   commands/              # porcelain verbs
-    setup.mjs  status.mjs  sync.mjs  uninstall.mjs
+    setup.mjs  status.mjs  sync.mjs  dual.mjs  uninstall.mjs
     x/                   # plumbing verbs
-      daemon-gc.mjs  mcp.mjs  reference.mjs  verify.mjs
+      daemon-gc.mjs  dashboard.mjs  harvest.mjs  mcp.mjs  provider.mjs  reference.mjs  verify.mjs
   lib/                   # the engine — each file is one concern
     heal.mjs             # the mutations sync/setup apply (idempotent, {ok,detail})
     natives.mjs          # better-sqlite3 / agentdb native detection
     sqlite.mjs           # node:sqlite helpers (scalar, checkpoint, withDb)
     versions.mjs         # installedVersion, driftReport, KIT_PKG
     ruvnet-brain.mjs     # RuvNet Brain: on-disk detection + GitHub-release drift (NOT an npm pkg)
-    blocks.mjs           # CLAUDE.md managed-block registry + syncBlocks
+    blocks.mjs           # CLAUDE.md / AGENTS.md managed-block registry + syncBlocks
+    hosts.mjs            # host-adapter core: drivingHost() + HOST_ADAPTERS (guidance file, auth, statusline)
+    providers.mjs        # frontier-host + LLM-provider detect/wire (hosts, auth, MCP bridges, aqe router)
+    routing.mjs          # pure dual-host routing policy: defaults, projections, primary-host swap
+    qeCourt.mjs          # qe-court vendor-diversity panel helpers
+    agentdb.mjs          # agentdb CLI coherence (harvest write path)
+    health-history.mjs   # regression ring appended by sync, read by status
+    dashboard-server.mjs # read-only localhost dashboard (shells `ak status --json`)
+    npx.mjs              # stale npx-cache detection/prune
     mcp.mjs  settings.mjs  config.mjs  paths.mjs  statusline.mjs
     rvf.mjs  daemons.mjs  exec.mjs  output.mjs
   templates/statusline-footer.cjs   # injected into projects
   tools/improvement-eval.mjs        # causal self-improvement eval (raw passthrough)
-claude/                  # skills + managed CLAUDE.md block templates (shipped)
+claude/                  # skills + managed CLAUDE.md/AGENTS.md block templates (shipped)
 tests/
   kit/*.test.mjs         # node:test unit suites
   statusline-segments.test.cjs      # statusline renderer suite
@@ -66,6 +74,16 @@ docs/
 **Published tarball** = the `files` whitelist in `package.json`:
 `bin/agentic-kit.mjs`, `src/`, `claude/`, `docs/TROUBLESHOOTING.md`. Nothing else
 ships — verify with `npm pack --dry-run` before a release if you touch `files`.
+
+**Dual-host subsystem** (the `providers`/`routing`/`dual` cluster): one policy in
+`kit.json` `providers` is the source of truth — `hosts {claude,codex}` (which are
+enabled), `primaryHost` (which leads; default `claude`), and `dualRouting` (the
+per-activity host+model map). `routing.mjs` is pure (defaults, `seedDualRouting`,
+`swapRoute` for codex-primary mirroring, and the projections to aqe `agentOverrides`
++ the dual-run config); `providers.mjs` does the I/O (host/auth detection, env
+wiring, both MCP-bridge directions, aqe router file). Seeded/healed by `setup` +
+`sync` + `x provider pick`, surfaced by `status` + `dashboard`. Design records:
+ADRs [0001–0006](docs/adr/); user guide: `docs/PROVIDERS.md`.
 
 > The consistency contract all managed tools share — install/update/version/display
 > invariants, the per-tool table, and the add-a-tool checklist — lives in

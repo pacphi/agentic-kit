@@ -25,9 +25,10 @@ ak dual run refactor "extract the payment module" --dry-run
 ak dual templates                     # list the pipelines
 ```
 
-- **Templates** — `feature` (coder → tester → reviewer), `security`
-  (scanner → analyzer → fixer), `refactor` (architect → coder → tester → reviewer). Each
-  step's host/model comes from your routing policy, not the template.
+- **Templates** — `feature` (architect → coder → tester → reviewer), `security`
+  (scanner → analyzer → fixer), `refactor` (architect → coder → tester → reviewer),
+  `packaging` (packager → reviewer), `release` (preparer → reviewer). Each step's
+  host/model comes from your routing policy, not the template.
 - **`--route 'act:host[:model]'`** — per-run routing override (repeatable, not persisted).
 - **`--parallel`** — run independent workers concurrently instead of sequentially.
 - **`--escalate`** — on failure, retry once **up the escalation ladder** (see below).
@@ -52,6 +53,12 @@ security-analysis lean Claude, and so on (`ak x provider` shows and edits the ta
 `--escalate` walks a **cross-vendor** ladder: a failed step retries on the other vendor's
 stronger model, so a Codex miss escalates into Claude (and vice-versa) rather than just
 burning retries on the same engine.
+
+**Which host leads.** The two are peers, but `ak x provider pick --primary-host claude|codex`
+(default `claude`) picks which one leads: codex-primary **mirrors** the default table so Codex
+takes the reasoning/review lead and Claude becomes the alternate/escalation target — the same
+ambidextrous experience with the roles flipped. `ak status` marks the primary and **fails**
+(not warns) if the primary host is missing.
 
 ### qe-court: ≥2-vendor cross-check
 

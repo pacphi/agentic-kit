@@ -13,8 +13,9 @@ agentic-qe to use one or both. Two independent axes:
 - **Provider axis** — which LLM the *routers* use, independent of the host:
   - **agentic-qe** — `AQE_LLM_PROVIDER=<type>` selects any of `claude-code` (subscription),
     `claude` / `openai` / `gemini` / `openrouter` / `azure-openai` / `bedrock` / `cognitum`
-    (metered API key), or `ollama` (local). codex the CLI isn't a provider type, but its OpenAI
-    models are reachable via `openai`.
+    (metered API key), or `ollama` / `onnx` (local). codex the CLI isn't a provider type, but its
+    OpenAI models are reachable via `openai`; GLM models are reachable via `openrouter`
+    (e.g. `z-ai/glm-5.2`).
   - **ruflo** — `anthropic` / `openai` / `google` / `ollama` via `ruflo providers configure`.
   - API keys live in the environment; they are never persisted to `kit.json`.
 
@@ -61,6 +62,11 @@ ak x provider off      # reset to claude-only default; strip managed env keys
 `ak sync` reapplies the same choice idempotently; `ak status` shows **hosts** and
 **providers** rows and flags drift. At the claude-only default nothing is written — behavior
 is unchanged until you opt in.
+
+When **both** hosts are enabled, `ak` also seeds a **per-activity routing policy** and wires a
+**two-way Claude↔Codex MCP bridge** (Claude reaches Codex via `mcp__codex__codex`; Codex reaches
+ruflo via `[mcp_servers.ruflo]`). `--primary-host claude|codex` chooses which host leads. See the
+dual-mode reference block and `docs/PROVIDERS.md` §3.5 for the routing table and `ak dual run`.
 
 ### Install & update (install-method-aware)
 

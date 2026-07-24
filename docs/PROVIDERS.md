@@ -54,6 +54,14 @@ An interactive picker (or flags for scripts). Enable `codex` and `ak`:
 ak x provider pick --host claude,codex --yes     # non-interactive
 ```
 
+Or enable codex during **first-time setup**, in one shot — same gated/prompted/external-safe
+install, plus the full dual-mode wiring:
+
+```bash
+ak setup --codex --yes                # install everything incl. codex
+ak setup --primary-host codex --yes   # …and make codex the leading host
+```
+
 ## Level 2 — choose which LLM runs QE
 
 agentic-qe can run its analysis on any of: `claude-code` (your Claude subscription),
