@@ -5,7 +5,9 @@
 // `security defend` needs (dropped from the 3.28 tree — ruvnet/ruflo#2670).
 import fs from 'node:fs';
 import path from 'node:path';
-import { rufloNodeModules, aqeRoot } from './paths.mjs';
+import { rufloRoot, rufloNodeModules, aqeRoot } from './paths.mjs';
+import { run } from './exec.mjs';
+import { readJson } from './settings.mjs';
 
 /** agentdb locations under the global ruflo tree (mirrors ruflo-patch-native). */
 export function agentdbLocations() {
@@ -46,6 +48,90 @@ export function nativesStatus() {
     ? { dir: aqeRoot(), native: bsq3IsNative(aqeRoot()) }
     : null;
   return { locations, aqe };
+}
+
+// The packages ruflo's memory RUNTIME resolves better-sqlite3 from — not the
+// agentdb copies above. @claude-flow/memory is the store; @claude-flow/cli is what
+// `npx ruflo memory` runs. #45: these can be WASM-only while the agentdb copy is
+// native, so the agentdb-only status was a false positive. Older ruflo trees may
+// lack either package — filter to what exists so heal/status skip silently.
+export function rufloMemoryContexts() {
+  const nm = rufloNodeModules();
+  return [
+    { context: 'memory', dir: path.join(nm, '@claude-flow', 'memory') },
+    { context: 'cli', dir: path.join(nm, '@claude-flow', 'cli') },
+  ].filter((c) => fs.existsSync(c.dir));
+}
+
+// A PLAIN semver range/version — the only override/dependency form npm install can
+// take by value. Reference forms (`$agentdb`) and protocols (workspace:/file:/link:/
+// npm:/git+ssh:) are NOT installable specs, so they must be skipped during
+// derivation rather than emitted (they'd make npm error). Requires a version digit
+// so bare `*`/`latest`/`x` fall through to the caller's fallback.
+const isPlainSemver = (v) =>
+  typeof v === 'string' && /\d/.test(v) && !v.includes(':') && !v.trimStart().startsWith('$');
+
+/** The install spec for better-sqlite3 in `dir`, derived from that tree's OWN
+ *  declarations so an npm `overrides` pin isn't fought with EOVERRIDE (verified
+ *  live: `install better-sqlite3@^12` under @claude-flow/cli, which pins ^12.9.0,
+ *  is rejected; the declared spec succeeds). Precedence: overrides →
+ *  optionalDependencies → dependencies → fallback; the first PLAIN-semver value
+ *  wins, non-semver forms are skipped. */
+export function deriveBsq3Spec(dir, fallback = '^12') {
+  const pkg = readJson(path.join(dir, 'package.json'), {}) ?? {};
+  for (const field of ['overrides', 'optionalDependencies', 'dependencies']) {
+    const v = pkg[field]?.['better-sqlite3'];
+    if (isPlainSemver(v)) return v;
+  }
+  return fallback;
+}
+
+// A truthful load-test of the binding as node resolution finds it FROM `dir`: an
+// ABI-mismatched or absent binding throws on `require` (exactly `ruflo doctor`'s
+// "Could not locate the bindings file"), so requiring it, opening :memory:, and
+// running SELECT 1 in a child process is the real WASM-vs-native answer — not a
+// file-existence guess. Kept in a child process so a broken addon can't crash ak.
+const RUNTIME_PROBE =
+  "const D=require(require.resolve('better-sqlite3',{paths:[process.argv[1]]}));"
+  + "const db=new D(':memory:');const r=db.prepare('SELECT 1 AS ok').get();db.close();"
+  + 'process.exit(r&&r.ok===1?0:3);';
+
+/** Load-test better-sqlite3 as resolved from `dir`. Injectable runner keeps the
+ *  test spawn-free. Returns {ok} or {ok:false, reason}. */
+export async function probeBsq3Runtime(dir, { runner = run } = {}) {
+  // Generous timeout for a cold `node` spawn on CI; a real native require returns
+  // well under the status budget (probes run in parallel, see rufloRuntimeNatives).
+  const r = await runner('node', ['-e', RUNTIME_PROBE, dir], { cwd: dir, timeout: 8000 });
+  if (r.code === 0) return { ok: true };
+  return { ok: false, reason: (r.stderr || `exit ${r.code}`).trim().split('\n').pop().slice(0, 160) };
+}
+
+/** Per-context native-binding truth for ruflo's memory runtime. {installed:false}
+ *  when ruflo is absent (EC-1: status/pre-flight skip, never crash). Probes run in
+ *  parallel to stay inside the status time budget. */
+export async function rufloRuntimeNatives({ runner = run } = {}) {
+  let installed;
+  try { installed = fs.existsSync(rufloRoot()); } catch { installed = false; }
+  if (!installed) return { installed: false, contexts: [] };
+  const contexts = await Promise.all(rufloMemoryContexts().map(async ({ context, dir }) => {
+    const res = await probeBsq3Runtime(dir, { runner });
+    return { context, dir, ok: res.ok, reason: res.reason };
+  }));
+  return { installed: true, contexts };
+}
+
+/** Drift for a CLAUDE_FLOW_DB_PATH pin in .claude/settings.local.json `env`: warn
+ *  when the pinned DB's directory is missing OR the path lies outside the project.
+ *  Warn-only (the pin may be deliberate); `sync` never touches it. path.relative
+ *  for containment so drive-letter/Windows paths compare correctly, not by prefix.
+ *  Returns null when there is no pin (EC-4: absent/unparseable settings). */
+export function dbPathPinStatus({ settingsLocalFile, projectRoot }) {
+  const pinned = readJson(settingsLocalFile)?.env?.CLAUDE_FLOW_DB_PATH;
+  if (!pinned) return null;
+  if (!fs.existsSync(path.dirname(pinned))) return { warn: true, pinned, reason: 'directory does not exist' };
+  const rel = path.relative(projectRoot, pinned);
+  if (rel.startsWith('..') || path.isAbsolute(rel)) return { warn: true, pinned, reason: 'outside the project root' };
+  return { warn: false, pinned };
 }
 
 export const aidefencePresent = () =>

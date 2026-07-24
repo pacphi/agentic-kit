@@ -13,8 +13,9 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { ensureNativeBsq3 } from '../../src/lib/heal.mjs';
+import { ensureNativeBsq3, healNatives } from '../../src/lib/heal.mjs';
 import { bsq3IsNative } from '../../src/lib/natives.mjs';
+import { _setGlobalRootForTest } from '../../src/lib/paths.mjs';
 
 const BINDING = path.join('build', 'Release', 'better_sqlite3.node');
 
@@ -128,4 +129,131 @@ test('heal reports failure when better-sqlite3 stays unresolvable', async () => 
   assert.equal(r.ok, false);
   assert.match(r.how, /not resolvable/);
   fs.rmSync(root, { recursive: true, force: true });
+});
+
+// ── FR-2: the install rung derives its spec from the tree (EOVERRIDE fix) ─────
+
+/** A better-sqlite3 that node resolution CANNOT find, in a dir that pins an npm
+ *  `overrides` for it — the npm-12 state where a direct `@^12` install is
+ *  EOVERRIDE-rejected but the declared `^12.9.0` succeeds. */
+function overrideDir(pin) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-heal-override-'));
+  fs.writeFileSync(path.join(dir, 'package.json'),
+    JSON.stringify({ name: '@claude-flow/cli', overrides: { 'better-sqlite3': pin } }));
+  return dir;
+}
+
+/** Runner that mimics npm's EOVERRIDE: `install better-sqlite3@^12` fails, the
+ *  declared spec succeeds and plants a built copy. Records install specs seen. */
+function eoverrideNpm(declared) {
+  const specs = [];
+  const runner = async (cmd, args, opts) => {
+    if (args[0] === 'install' && String(args[1]).startsWith('better-sqlite3')) {
+      const spec = String(args[1]);
+      specs.push(spec);
+      if (spec === 'better-sqlite3@^12') {
+        return { code: 1, stdout: '', stderr: 'npm error code EOVERRIDE\nOverride for better-sqlite3@^12 conflicts with direct dependency\n' };
+      }
+      const pkg = path.join(opts.cwd, 'node_modules', 'better-sqlite3');
+      fs.mkdirSync(path.join(pkg, 'build', 'Release'), { recursive: true });
+      fs.writeFileSync(path.join(pkg, 'package.json'), JSON.stringify({ name: 'better-sqlite3', version: '12.9.0' }));
+      fs.writeFileSync(path.join(pkg, BINDING), '');
+      return { code: 0, stdout: '', stderr: '' };
+    }
+    return { code: 0, stdout: '', stderr: '' };
+  };
+  return { runner, specs, declared };
+}
+
+test('ensureNativeBsq3 installs the tree-derived override spec, never the hardcoded ^12', async () => {
+  const dir = overrideDir('^12.9.0');
+  const { runner, specs } = eoverrideNpm('^12.9.0');
+
+  const r = await ensureNativeBsq3(dir, { runner });
+
+  assert.equal(r.ok, true, 'heal succeeds with the derived spec');
+  assert.ok(specs.includes('better-sqlite3@^12.9.0'), `derived spec used (saw ${JSON.stringify(specs)})`);
+  assert.ok(!specs.includes('better-sqlite3@^12'), 'never falls into the EOVERRIDE-rejected hardcoded ^12');
+  assert.equal(bsq3IsNative(dir), true);
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+// ── FR-1: healNatives also heals the ruflo memory runtime contexts ──────────
+
+test('healNatives heals @claude-flow/memory + /cli with each tree\'s derived spec (AC-1)', async () => {
+  // Fake global tree: ruflo/node_modules/@claude-flow/{memory,cli}, each pinning
+  // better-sqlite3 via overrides, none resolvable — the npm-12 WASM-only state.
+  const g = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-heal-global-'));
+  const nm = path.join(g, 'ruflo', 'node_modules');
+  for (const c of ['memory', 'cli']) {
+    const dir = path.join(nm, '@claude-flow', c);
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, 'package.json'),
+      JSON.stringify({ name: `@claude-flow/${c}`, overrides: { 'better-sqlite3': '^12.9.0' } }));
+  }
+  _setGlobalRootForTest(g);
+  const { runner, specs } = eoverrideNpm('^12.9.0');
+
+  const r = await healNatives({ runner });
+
+  assert.ok(specs.length >= 2, 'installed into both contexts');
+  assert.ok(specs.every((s) => s === 'better-sqlite3@^12.9.0'), `only the derived spec (saw ${JSON.stringify(specs)})`);
+  assert.match(r.detail, /@claude-flow\/memory/);
+  assert.match(r.detail, /@claude-flow\/cli/);
+  assert.equal(r.ok, true);
+  _setGlobalRootForTest(null);
+  fs.rmSync(g, { recursive: true, force: true });
+});
+
+test('healNatives skips a ruflo tree with no @claude-flow packages, without crashing (EC-2)', async () => {
+  const g = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-heal-bare-global-'));
+  fs.mkdirSync(path.join(g, 'ruflo', 'node_modules'), { recursive: true });
+  _setGlobalRootForTest(g);
+  let installed = false;
+  const runner = async (cmd, args) => { if (args[0] === 'install') installed = true; return { code: 0 }; };
+
+  const r = await healNatives({ runner });
+
+  assert.equal(installed, false, 'nothing to heal → no install');
+  assert.equal(r.ok, true);
+  _setGlobalRootForTest(null);
+  fs.rmSync(g, { recursive: true, force: true });
+});
+
+// ── AC-2 / NFR-1: the ladder tolerates npm 9–12 approve-scripts behavior ─────
+
+test('ladder tolerates an npm-9 approve-scripts unknown-command and still succeeds', async () => {
+  // npm ≤11.16 has no `approve-scripts`; its failure must not abort the ladder.
+  const { agentdb, shared, cleanup } = makeTree();
+  const calls = [];
+  const runner = async (cmd, args, _opts) => {
+    calls.push(args.join(' '));
+    if (args[0] === 'run' && args[1] === 'install') return { code: 0 }; // rung 1: no build (simulated miss)
+    if (args[0] === 'approve-scripts') return { code: 1, stdout: '', stderr: 'Unknown command: "approve-scripts"\n' };
+    if (args[0] === 'rebuild') { addBinding(shared); return { code: 0 }; }
+    return { code: 0 };
+  };
+
+  const r = await ensureNativeBsq3(agentdb, { runner });
+
+  assert.equal(r.ok, true, 'ladder recovers at rebuild despite approve-scripts failing');
+  assert.ok(calls.some((c) => c.startsWith('approve-scripts')), 'approve-scripts rung was attempted');
+  assert.ok(calls.some((c) => c.startsWith('rebuild')), 'ladder proceeded to rebuild after the failure');
+  cleanup();
+});
+
+test('ladder succeeds on npm-12 (run install blocked, approve-scripts then rebuild builds)', async () => {
+  const { agentdb, shared, cleanup } = makeTree();
+  const runner = async (cmd, args) => {
+    if (args[0] === 'run' && args[1] === 'install') return { code: 0 }; // blocked → no build
+    if (args[0] === 'approve-scripts') return { code: 0 }; // npm 12: command exists
+    if (args[0] === 'rebuild') { addBinding(shared); return { code: 0 }; }
+    return { code: 0 };
+  };
+
+  const r = await ensureNativeBsq3(agentdb, { runner });
+
+  assert.equal(r.ok, true);
+  assert.match(r.how, /rebuilt/);
+  cleanup();
 });
