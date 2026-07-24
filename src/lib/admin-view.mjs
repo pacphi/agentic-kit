@@ -15,6 +15,8 @@ import { esc, safeUrl, metric, ascend, momentum, daysAgo, agoLabel, shape, snaps
 const TOKEN_STORE = 'ak-admin-token';
 const BASE_STORE = 'ak-admin-baseline';
 const BASE_PREV = 'ak-admin-baseline-prev';
+const TAB_STORE = 'ak-admin-tab';
+const TABS = ['overview', 'review', 'humans', 'activity', 'gaps'];
 const FEED_STEP = 25;
 
 const $ = (s) => document.querySelector(s);
@@ -23,6 +25,7 @@ const num = (v) => Number(v).toLocaleString();
 let LAST = null;
 let feedShown = FEED_STEP;
 let autoTimer = null;
+let activeTab = 'overview';
 
 // ── token bootstrap (FR-3): fragment → localStorage, then strip ────────────────
 // The fragment is never sent to the server, never logged, never proxied. We lift
@@ -44,6 +47,44 @@ function clearError() { $('[data-err]').textContent = ''; }
 
 function readBaseline() {
   try { return JSON.parse(localStorage.getItem(BASE_STORE) || 'null'); } catch { return null; }
+}
+
+// ── tabs: the dashboard's segmented-control idiom (ADR-0005), amber-keyed ─────
+// Deep-link (#review) wins over the stored tab; the token fragment never
+// collides because bootToken() strips it before this runs.
+function positionThumb() {
+  const seg = $('[data-seg]');
+  const thumb = $('[data-seg-thumb]');
+  if (!seg || !thumb) return;
+  const btn = seg.querySelector('[data-tab="' + activeTab + '"]');
+  if (!btn) return;
+  thumb.style.left = btn.offsetLeft + 'px';
+  thumb.style.width = btn.offsetWidth + 'px';
+}
+
+function setTab(id, focus) {
+  if (TABS.indexOf(id) === -1) id = 'overview';
+  activeTab = id;
+  try { localStorage.setItem(TAB_STORE, id); } catch { /* private mode */ }
+  try { if (history.replaceState) history.replaceState(null, '', '#' + id); } catch { /* older browsers */ }
+  TABS.forEach((t) => {
+    const on = t === id;
+    const btn = document.querySelector('[data-tab="' + t + '"]');
+    const panel = document.querySelector('[data-panel="' + t + '"]');
+    if (btn) { btn.setAttribute('aria-selected', on ? 'true' : 'false'); btn.tabIndex = on ? 0 : -1; if (on && focus) btn.focus(); }
+    if (panel) panel.hidden = !on;
+  });
+  positionThumb();
+}
+
+// Attention never hides behind a tab: a count badge on the tab itself.
+function setBadge(tab, n, tone) {
+  const el = $('[data-badge="' + tab + '"]');
+  if (!el) return;
+  if (!n) { el.hidden = true; el.textContent = ''; el.removeAttribute('data-tone'); return; }
+  el.hidden = false;
+  el.textContent = String(n);
+  el.setAttribute('data-tone', tone || 'warn');
 }
 
 // ── tiny presentation helpers (SVG sparkline, delta cell) ─────────────────────
@@ -302,6 +343,12 @@ function render(d) {
   renderReferrers(d);
   renderGaps(d);
   renderDoors(d);
+  // Tab badges: open items are red (waiting on YOU); new-since-baseline is amber.
+  const newPeople = base ? s.people.filter((p) => base.people.indexOf(p.login) === -1).length : 0;
+  setBadge('review', s.openItems.length || (since.newIds.length + newPeople), s.openItems.length ? 'fail' : 'warn');
+  setBadge('humans', newPeople, 'warn');
+  setBadge('activity', since.newIds.length, 'warn');
+  positionThumb(); // first render unhides the dash; badges change segment widths
   // First visit ONLY: seed the baseline so the NEXT visit has an honest diff.
   // Never auto-advanced — that would consume the very deltas this page exists for.
   if (!base) { try { localStorage.setItem(BASE_STORE, JSON.stringify(snapshot(d, s))); } catch { /* private mode */ } }
@@ -368,8 +415,31 @@ function wire() {
     if (el.hasAttribute('data-feed-more')) { feedShown += FEED_STEP; if (LAST) render(LAST); }
     if (el.hasAttribute('data-feed-less')) { feedShown = FEED_STEP; if (LAST) render(LAST); }
   });
+
+  // Segmented control: click, arrow-key roving focus, resize re-measure.
+  const seg = $('[data-seg]');
+  if (seg) {
+    seg.addEventListener('click', (e) => {
+      const b = e.target.closest ? e.target.closest('[data-tab]') : null;
+      if (b) setTab(b.getAttribute('data-tab'));
+    });
+    seg.addEventListener('keydown', (e) => {
+      if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+      let i = TABS.indexOf(activeTab);
+      i = (i + (e.key === 'ArrowRight' ? 1 : TABS.length - 1)) % TABS.length;
+      setTab(TABS[i], true);
+      e.preventDefault();
+    });
+  }
+  window.addEventListener('resize', positionThumb);
 }
 
 wire();
 const boot = bootToken();
+// Initial tab: stored choice, then a #deep-link (bootToken already stripped any
+// #token=… fragment, so whatever hash survives here is a tab name or noise).
+try { const st = localStorage.getItem(TAB_STORE); if (st && TABS.indexOf(st) >= 0) activeTab = st; } catch { /* private mode */ }
+const deepLink = String(location.hash || '').slice(1);
+if (TABS.indexOf(deepLink) >= 0) activeTab = deepLink;
+setTab(activeTab);
 if (boot) load(boot); else showGate();
