@@ -56,19 +56,78 @@ export const MODEL_CATALOG = {
   ],
 };
 
+// Provider-axis model catalog — LLMs reached through the aqe fallback chain
+// (`--aqe-fallback`) or ruflo's routers, NOT hosts (they don't drive the ruflo
+// loop, so they never appear in HOSTS/HOST_PROVIDER). Metered: keys live in the
+// env (e.g. OPENROUTER_API_KEY), never kit.json, and these must never be an
+// auto-seed target (SUBSCRIPTION_PROVIDERS excludes them — ADR-0003 cost safety).
+// GLM ids web-verified against openrouter on MODEL_CATALOG_VERIFIED.
+export const PROVIDER_MODEL_CATALOG = {
+  openrouter: [
+    { id: 'z-ai/glm-5.2', tier: 'flagship', note: 'GLM 5.2 — 1M context, strong tool-use, long-horizon agent work (metered)' },
+    { id: 'z-ai/glm-5', tier: 'value', note: 'GLM 5 — 205K context, cheapest of the 5.x line (metered)' },
+  ],
+};
+
 /** Model choices for a host (for prompts / help). Unknown host → []. */
 export function modelChoices(host) {
   return MODEL_CATALOG[host] ?? [];
 }
 
-/** Human-readable model-choice lines for CLI help / interactive prompts. */
+/** Curated model choices for a provider-axis LLM (openrouter/GLM, …). Unknown → []. */
+export function providerModelChoices(provider) {
+  return PROVIDER_MODEL_CATALOG[provider] ?? [];
+}
+
+/** Human-readable model-choice lines for CLI help / interactive prompts. Covers
+ *  host models (claude/codex) and provider-axis models (openrouter/GLM) reachable
+ *  via the aqe fallback chain. */
 export function formatModelHelp() {
   const lines = [`known-good models (verified ${MODEL_CATALOG_VERIFIED}; any model your host accepts also works):`];
   for (const host of HOSTS) {
     lines.push(`  ${host}:`);
     for (const m of MODEL_CATALOG[host]) lines.push(`    ${m.id.padEnd(28)} ${m.tier.padEnd(10)} ${m.note}`);
   }
+  for (const [prov, models] of Object.entries(PROVIDER_MODEL_CATALOG)) {
+    lines.push(`  ${prov} (aqe-fallback provider — metered):`);
+    for (const m of models) lines.push(`    ${m.id.padEnd(28)} ${m.tier.padEnd(10)} ${m.note}`);
+  }
   return lines.join('\n');
+}
+
+// ── Primary-host swap (ambidextrous defaults) ────────────────────────────────
+// DEFAULT_ROUTES encode rUv's shipped role→host assignments (claude leads the
+// reasoning roles). When codex is chosen as PRIMARY, we mirror each default route
+// to the opposite host so codex takes the lead and claude becomes the alternate —
+// a defaults/policy change only (DualModeOrchestrator workers are symmetric).
+export const PRIMARY_HOSTS = HOSTS; // both hosts may be primary
+export const DEFAULT_PRIMARY_HOST = 'claude';
+
+// Model id → tier, so a host swap can pick the counterpart's tier-equivalent.
+// Built from the catalog so it never drifts from the curated model lines.
+const MODEL_TIER = Object.fromEntries(
+  HOSTS.flatMap((h) => (MODEL_CATALOG[h] ?? []).map((m) => [m.id, m.tier])),
+);
+
+/** The opposite host's best model when swapping. Tier names differ between claude
+ *  and codex, so an exact-tier match is best-effort; else fall back to that host's
+ *  first (recommended) model. Pure. */
+export function swapHostModel(host, model) {
+  const other = host === 'claude' ? 'codex' : 'claude';
+  const cat = MODEL_CATALOG[other] ?? [];
+  const tier = MODEL_TIER[model];
+  const pick = (tier && cat.find((m) => m.tier === tier)) || cat[0];
+  return { host: other, model: pick?.id };
+}
+
+/** Mirror a route to the opposite host (host + model + escalation ladder). Pure.
+ *  @param {{host: string, model?: string, escalate?: Array<{host: string, model?: string}>}} route */
+export function swapRoute(route) {
+  const { host, model } = swapHostModel(route.host, route.model);
+  /** @type {{host: string, model?: string, escalate?: Array<{host: string, model?: string}>}} */
+  const out = { host, ...(model ? { model } : {}) };
+  if (route.escalate?.length) out.escalate = route.escalate.map((e) => swapHostModel(e.host, e.model));
+  return out;
 }
 
 // ── Default routes ───────────────────────────────────────────────────────────
@@ -141,15 +200,18 @@ export function resolveRoutes(policy = {}) {
 /**
  * Seed a policy from defaults for the seedable activities (ADR-0003). Cost-safety:
  * only routes whose host maps to a subscription/local provider are seeded, and
- * only for the hosts the caller passes as usable. Gating on enablement + aqe
- * version is the caller's job (seedDualRoutingIfDualHost); this function does NOT
- * verify the host CLI is actually installed. Returns entries stamped `source: 'seeded'`.
+ * only for the hosts the caller passes as usable. When `primary` is 'codex', each
+ * default route is mirrored to the opposite host (swapRoute) so codex leads and
+ * claude is the alternate. Gating on enablement + aqe version is the caller's job
+ * (seedDualRoutingIfDualHost); this does NOT verify the host CLI is installed.
+ * Returns entries stamped `source: 'seeded'`.
  */
-export function seedDualRouting({ hosts = HOSTS } = {}) {
+export function seedDualRouting({ hosts = HOSTS, primary = DEFAULT_PRIMARY_HOST } = {}) {
   const usable = new Set(hosts);
+  const swap = primary === 'codex';
   const policy = {};
   for (const act of ACTIVITIES) {
-    const def = DEFAULT_ROUTES[act];
+    const def = swap ? { ...DEFAULT_ROUTES[act], ...swapRoute(DEFAULT_ROUTES[act]) } : DEFAULT_ROUTES[act];
     if (!usable.has(def.host)) continue;
     if (!SUBSCRIPTION_PROVIDERS.has(HOST_PROVIDER[def.host])) continue;
     policy[act] = {

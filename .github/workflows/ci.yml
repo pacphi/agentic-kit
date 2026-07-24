@@ -26,6 +26,11 @@ jobs:
       - name: Unit + statusline tests
         run: pnpm test
 
+      # Explicit guard: every dispatchable command must ship a --help/Examples
+      # surface. Fails the build if a new command lands without one.
+      - name: Dispatch surface (help/Examples for every command)
+        run: pnpm run test:surface
+
       - name: CLI smoke (sandboxed HOME)
         shell: bash
         env:

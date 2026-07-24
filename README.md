@@ -5,17 +5,26 @@
 [![node](https://img.shields.io/node/v/@pacphi/agentic-kit)](https://nodejs.org)
 [![license: MIT](https://img.shields.io/npm/l/@pacphi/agentic-kit)](LICENSE)
 
-**One npm package that makes [ruflo](https://github.com/ruvnet/ruflo) (claude-flow) and [agentic-qe](https://github.com/proffesor-for-testing/agentic-qe) actually work — installed, healed, and *proven* — on macOS, Linux, and Windows.**
+**One npm package that installs, heals, and *proves* [ruflo](https://github.com/ruvnet/ruflo) (claude-flow) + [agentic-qe](https://github.com/proffesor-for-testing/agentic-qe) — and wires Claude Code + Codex into one ambidextrous, self-routing setup. macOS · Linux · Windows.**
 
 ```bash
 npm install -g @pacphi/agentic-kit@next   # alpha channel until 4.0.0 GA
-ak setup        # once per machine; run it inside a git repo to set that project up too
+ak setup            # once per machine; run inside a git repo to set that project up too
+ak setup --codex    # …or bring up Claude + Codex together in one shot
 ```
 
 > [!IMPORTANT]
 > That's the only package you install by hand — **you do not need to install ruflo or
 > agentic-qe yourself.** `ak setup` installs them globally for you (building natives past
 > npm ≥11.17's `allow-scripts` gate), then heals and proves them.
+
+**What you get:**
+
+- **One command** installs + heals + *proves* ruflo & agentic-qe — native SQLite, memory, security, statusline (past npm's `allow-scripts` gate).
+- **Dual-host (optional):** Claude *and* Codex at once, per-activity model routing, **$0 on your subscriptions** — `ak setup --codex`.
+- **Self-healing:** `ak sync` re-converges after every upgrade; `ak status` and a local dashboard show what's *actually* on — never assumed.
+- **Honest by construction:** every guard traces to a filed upstream issue, and `ak x verify` proves the paths end-to-end against real CLIs.
+- Cross-platform, **zero runtime dependencies** (SQLite embedded).
 
 ## Why this exists
 
@@ -37,7 +46,7 @@ in [docs/archive/](docs/archive/).
 ```text
 ak              status + one suggested next action
 ak setup        first-time setup — machine and/or the project you're standing in
-                                                    [--project] [--minimal] [--yes] [--no-aqe] [--no-security] [--reconfigure]
+                [--codex] [--primary-host claude|codex] [--project] [--minimal] [--yes] [--no-aqe] [--no-security] [--reconfigure]
 ak status       read-only dashboard: what's true, what's drifted   [--json] [--deep]
 ak sync         converge to good: upgrade + heal + verify          [--dry-run] [--no-upgrade]
 ak dashboard    open the local web dashboard (auto-opens your browser)   [--port N] [--no-open]
@@ -57,11 +66,11 @@ What the verbs cover:
 
 | Verb | What it does |
 | ------ | -------------- |
-| **setup** | Installs/updates ruflo + agentic-qe + the **agentdb** CLI globally (handling npm ≥11.17's `allow-scripts` so natives build; agentdb is pinned to ruflo's bundled version so the shared learning store stays coherent), installs the **RuvNet Brain** (an offline knowledge base over the rUv stack, powering the `search_ruvnet` MCP — a ~2 GB one-time download, prompted; skip with `--no-ruvnet-brain`), deploys the token-audit skill, merges the managed guidance blocks into `~/.claude/CLAUDE.md`, offers one-time MCP registration (user scope, with a tool-family picker), and — inside a repo — initializes the project: sanitized `ruflo init`, absolute memory-path pin, a **verified** store→disk write, statusline footer, and a background daemon with **local-only ($0) workers** (token-spending AI workers stay opt-in behind upstream's machine-wide budget). Project scope triggers on a `.git` directory in the current folder; without one it's skipped with a note. `--project` forces it anyway (e.g. a not-yet-`git init`-ed folder), `--minimal` skips it, `--yes` accepts all prompts (non-interactive), `--no-aqe` / `--no-ruvnet-brain` / `--no-security` disable those subsystems, and `--reconfigure` re-offers MCP registration. |
-| **status** | Per-subsystem ✓/⚠/✗ (versions, the kit's own version, **ruvnet-brain** (present + release drift, or "not installed"), natives, security, learning, aqe/RVF, **agentdb** (CLI present + coherent with ruflo's bundled version, or a store-skew warning), MCP, **hosts** (claude/codex — version + install method, or "enabled but not installed"), **providers** (host wiring + aqe fallback chain, or "drifted"/claude-only default), **routing** (per-activity Claude/Codex host+model policy, when dual-host — with drift vs the on-disk `agentOverrides`), daemons, CLAUDE.md blocks, statusline), each drift row naming what `sync` would do about it — plus a **health-history** line that flags regressions since the last sync (learning shrank, native slots dropped, drift/security backslid). |
+| **setup** | Installs/updates ruflo + agentic-qe + the **agentdb** CLI globally (handling npm ≥11.17's `allow-scripts` so natives build; agentdb is pinned to ruflo's bundled version so the shared learning store stays coherent), installs the **RuvNet Brain** (an offline knowledge base over the rUv stack, powering the `search_ruvnet` MCP — a ~2 GB one-time download, prompted; skip with `--no-ruvnet-brain`), deploys the token-audit skill, merges the managed guidance blocks into `~/.claude/CLAUDE.md`, offers one-time MCP registration (user scope, with a tool-family picker), and — inside a repo — initializes the project: sanitized `ruflo init`, absolute memory-path pin, a **verified** store→disk write, statusline footer, and a background daemon with **local-only ($0) workers** (token-spending AI workers stay opt-in behind upstream's machine-wide budget). Project scope triggers on a `.git` directory in the current folder; without one it's skipped with a note. `--project` forces it anyway (e.g. a not-yet-`git init`-ed folder), `--minimal` skips it, `--yes` accepts all prompts (non-interactive), `--no-aqe` / `--no-ruvnet-brain` / `--no-security` disable those subsystems, and `--reconfigure` re-offers MCP registration. `--codex` enables + installs the Codex host during setup (dual-mode; both hosts then run at once), and `--primary-host claude\|codex` picks which host leads (codex implies `--codex`). |
+| **status** | Per-subsystem ✓/⚠/✗ (versions, the kit's own version, **ruvnet-brain** (present + release drift, or "not installed"), natives, security, learning, aqe/RVF, **agentdb** (CLI present + coherent with ruflo's bundled version, or a store-skew warning), MCP, **hosts** (claude/codex — version + install method + **auth mode** (subscription $0 vs metered api-key), with the **primary** host marked and a *fail* when the primary host is absent), **providers** (host wiring + aqe fallback chain, or "drifted"/claude-only default), **routing** (per-activity Claude/Codex host+model policy, when dual-host — with drift vs the on-disk `agentOverrides`), daemons, CLAUDE.md blocks, statusline), each drift row naming what `sync` would do about it — plus a **health-history** line that flags regressions since the last sync (learning shrank, native slots dropped, drift/security backslid). |
 | **sync** | The one convergence verb: upgrades first when a new release exists, then re-heals everything an upgrade wipes, then re-checks and reports. Included in that heal: it **installs any enabled frontier host** (claude/codex) that's entirely absent — never touching an external (mise/brew/native) install — and **re-applies provider wiring** (the `ENABLE_*` host env, the aqe fallback chain, and ruflo API providers) whenever it has drifted — and, on a dual-host project, **seeds/heals the per-activity routing policy** (materializing it into agentic-qe's `agentOverrides`, e.g. after an aqe upgrade first makes it eligible). It also **installs/repins the standalone `agentdb` CLI** to ruflo's bundled version (keeping the shared cognitive store coherent) and appends a **health-history snapshot** so `status` can flag regressions across syncs. It also **re-runs the RuvNet Brain installer** to pull the latest release when the on-disk KB has drifted (or installs it if absent, when enabled). It also **self-updates the kit**: when a newer `@pacphi/agentic-kit` exists it installs it as the *last* step (the new code applies from the next `ak` run, never mid-sync). Prerelease installs (`4.0.0-alpha.*`) track the `next` npm dist-tag as well as `latest`, so alphas see their successors; stable installs only ever follow `latest`. `--no-upgrade` skips the self-update along with the package upgrades. |
 | **dashboard** | Opens a read-only local web dashboard (`127.0.0.1:7431`, localhost-only, never detaches) that renders the same subsystem view as `ak status` — grouped one card per subsystem with severity triage and a learning-over-time strip, plus a **per-activity routing matrix** (vendor-coded Claude/Codex host + model per activity) when dual-host routing is configured. Fully self-contained and offline (no external fetches, nothing leaves your machine). **Auto-opens your browser** (`--no-open` to just print the URL for headless/SSH); `--port N` to change the port. Stop with Ctrl-C. (Also available as `ak x dashboard`.) |
-| **dual** | Runs a **Claude + Codex collaboration swarm** using your per-activity routing policy: `ak dual run <template> "<task>"` materializes a dual-run config (each pipeline step assigned to the host + model your policy chose) and drives it via `claude-flow-codex`. Templates: `feature`, `security`, `refactor`, `packaging`, `release`. `--dry-run` prints the plan + config without running; `--route 'activity:host[:model]'` overrides one step for that run; `--escalate` retries once up the cross-vendor ladder on failure. Requires dual-host enabled (`ak x provider pick --host claude,codex`). |
+| **dual** | Runs a **Claude + Codex collaboration swarm** using your per-activity routing policy: `ak dual run <template> "<task>"` materializes a dual-run config (each pipeline step assigned to the host + model your policy chose) and drives it via `claude-flow-codex`. Templates: `feature`, `security`, `refactor`, `packaging`, `release`. `--dry-run` prints the plan + config without running; `--route 'activity:host[:model]'` overrides one step for that run; `--escalate` retries once up the cross-vendor ladder on failure. Requires dual-host enabled (`ak setup --codex`, or `ak x provider pick --host claude,codex`). |
 | **uninstall** | Removes the kit's footprint (and any legacy shell-kit install); project data is never touched; `--purge` also offers to remove the global packages. |
 
 Power-user mechanisms live under `ak x …` (`daemon-gc`, `harvest`,
@@ -100,9 +109,11 @@ one or both — **claude-default, codex opt-in**, so existing repos see zero cha
 you opt in. Two independent axes:
 
 - **Hosts** — which agent CLI runs the ruflo loop: `claude` (Claude Code) and/or `codex`
-  (OpenAI Codex), both at once via dual-mode. A host that is *entirely absent* is installed
-  for you (`npm i -g @anthropic-ai/claude-code` / `@openai/codex`); an externally-managed
-  install (mise/brew/native) is detected, reused, and never shadowed.
+  (OpenAI Codex), **both at once** via dual-mode (enabling codex doesn't disable claude).
+  Turn codex on at first-time setup with `ak setup --codex` (add `--primary-host codex` to
+  make it lead), or later with `ak x provider pick`. A host that is *entirely absent* is
+  installed for you (`npm i -g @anthropic-ai/claude-code` / `@openai/codex`); an
+  externally-managed install (mise/brew/native) is detected, reused, and never shadowed.
 - **Providers** — which LLM the routers use, independent of the host: agentic-qe's
   `AQE_LLM_PROVIDER` (`claude-code`/`claude`/`openai`/`gemini`/`openrouter`/`azure-openai`/
   `bedrock`/`cognitum`/`ollama`/`onnx`) plus an ordered fallback chain, and ruflo's API providers.
@@ -113,8 +124,10 @@ you opt in. Two independent axes:
   `agentOverrides` (adopting upstream [#568](https://github.com/proffesor-for-testing/agentic-qe/issues/568)).
   It's seeded automatically (subscription-only, so no metered surprises), shown in `status` and the
   dashboard matrix, and **tunable per activity** (`ak x provider pick --route 'testing:claude:claude-sonnet-5'`)
-  with your edits preserved across syncs. `ak dual run <template> "<task>"` then drives a Claude+Codex
-  collaboration swarm off that policy. Nothing is seeded for claude-only projects.
+  with your edits preserved across syncs. **`--primary-host claude|codex`** chooses which host leads:
+  codex-primary *mirrors* the default table so Codex drives and Claude is the alternate — symmetric
+  either way. `ak dual run <template> "<task>"` then drives a Claude+Codex collaboration swarm off that
+  policy. Nothing is seeded for claude-only projects.
 
 `ak x provider status` shows what's detected, wired, and routed; `ak x provider pick` chooses and
 applies (reversibly); `ak x provider off` restores the claude-only default. Full guide:

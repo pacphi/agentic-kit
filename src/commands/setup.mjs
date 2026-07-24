@@ -13,7 +13,7 @@ import { fixStatusline } from '../lib/statusline.mjs';
 import { registry, syncBlocks } from '../lib/blocks.mjs';
 import { register as mcpRegister, applyExclusions } from '../lib/mcp.mjs';
 import { loadKitConfig, saveKitConfig } from '../lib/config.mjs';
-import { HOSTS, applyHosts, applyProviders, ensureDualAgents, hostInstallState, installHost, applyAqeRouter, seedDualRoutingIfDualHost, printActivityRoutingTable, aqeSupportsAgentOverrides, ensureCodexMcp } from '../lib/providers.mjs';
+import { HOSTS, applyHosts, applyProviders, ensureDualAgents, hostInstallState, installHost, applyAqeRouter, seedDualRoutingIfDualHost, printActivityRoutingTable, aqeSupportsAgentOverrides, ensureCodexMcp, ensureRufloMcpInCodex, applySetupHostFlags } from '../lib/providers.mjs';
 import { installedVersion } from '../lib/versions.mjs';
 import * as rb from '../lib/ruvnet-brain.mjs';
 import * as adb from '../lib/agentdb.mjs';
@@ -30,6 +30,8 @@ export const options = {
   'no-aqe': { type: 'boolean', default: false },
   'no-ruvnet-brain': { type: 'boolean', default: false },
   'no-security': { type: 'boolean', default: false },
+  codex: { type: 'boolean', default: false },
+  'primary-host': { type: 'string' },
   reconfigure: { type: 'boolean', default: false },
 };
 
@@ -47,6 +49,13 @@ Options:
   --no-aqe         skip agentic-qe install + configuration
   --no-ruvnet-brain  skip the RuvNet Brain (~2 GB offline KB) setup step
   --no-security    skip the security-surface verification
+  --codex          enable + install the OpenAI Codex host during setup (dual-mode;
+                     default is claude-only, codex opt-in). Installs @openai/codex
+                     if absent (prompted; external installs untouched) and wires
+                     the Claude↔Codex bridges + per-activity routing.
+  --primary-host <h>  which host leads: claude|codex (default claude). Passing
+                     codex implies --codex and mirrors the routing defaults so
+                     codex drives with claude as the alternate.
   --reconfigure    re-run interactive choices, ignoring saved kit.json
   --yes            accept all prompts (non-interactive)
   --dry-run        print the plan; change nothing
@@ -54,6 +63,8 @@ Options:
 Examples:
   ak setup                    machine + project (when inside a git repo)
   ak setup --minimal          machine only
+  ak setup --codex --yes      install everything incl. codex, non-interactive
+  ak setup --primary-host codex --yes   dual-host with codex leading
   ak setup --project --yes    force project setup, no prompts`;
 
 const ask = async (q, dflt, yes) => {
@@ -273,6 +284,11 @@ export async function run_project({ flags, cfg }) {
     const mcp = await ensureCodexMcp(cfg, root);
     if (mcp.changed) saveKitConfig(cfg); // persist the codexMcp ownership marker
     if (mcp.changed || !mcp.ok) (mcp.ok ? ok : warn)(`codex MCP: ${mcp.detail}`);
+    // reverse bridge: register ruflo MCP into codex (codex→ruflo) so the bridge is
+    // two-way — parity with `ak sync` / `ak x provider pick`.
+    const rmcp = await ensureRufloMcpInCodex(cfg, root);
+    if (rmcp.changed) saveKitConfig(cfg); // persist the rufloCodexMcp ownership marker
+    if (rmcp.changed || !rmcp.ok) (rmcp.ok ? ok : warn)(`ruflo→codex MCP: ${rmcp.detail}`);
     const prov = await applyProviders(cfg, root);
     if (prov.changed) (prov.ok ? ok : warn)(`providers: ${prov.detail}`);
   } else if (await have('codex')) {
@@ -309,6 +325,23 @@ export async function run({ flags, pkgRoot }) {
   if (flags['no-aqe']) cfg.aqe = false;
   if (flags['no-ruvnet-brain']) cfg.ruvnetBrain = false;
   if (flags['no-security']) cfg.security = false;
+
+  // --codex / --primary-host: opt codex in BEFORE run_machine's host-install loop
+  // and run_project's dual wiring, so the existing gated/prompted/external-safe
+  // paths install + wire codex. No-op (claude-only) when neither flag is passed.
+  // Skipped on --dry-run: saveKitConfig below runs unconditionally, so mutating
+  // cfg here would persist during a dry-run — "change nothing" must hold.
+  if (flags['dry-run']) {
+    if (flags.codex || flags['primary-host']) info('dry-run: --codex/--primary-host would enable + install the codex host and wire dual-mode (no changes made)');
+  } else {
+    const hostFlags = applySetupHostFlags(cfg, flags);
+    for (const w of hostFlags.warnings) warn(w);
+    if (hostFlags.changed) {
+      const primary = cfg.providers.primaryHost && cfg.providers.primaryHost !== 'claude'
+        ? ` (primary: ${cfg.providers.primaryHost})` : '';
+      info(`codex host enabled${primary} — will install + wire dual-mode`);
+    }
+  }
 
   if (!(await run_machine({ flags, pkgRoot, cfg }))) return 1;
   saveKitConfig(cfg);

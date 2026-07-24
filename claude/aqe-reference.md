@@ -43,7 +43,7 @@ called first**, e.g. `fleet_init({ topology:"hierarchical", maxAgents:15, memory
 - **Choose which LLM runs QE** (≥3.12.2, runtime env; ADR-123): `AQE_LLM_PROVIDER=<type>`
   force-selects the provider for analysis — `claude-code` (your Claude subscription, via
   `claude -p`), `claude`/`openai`/`gemini`/`openrouter`/`azure-openai`/`bedrock`/`cognitum`
-  (metered API key), or `ollama` (local). It normalizes `anthropic`→`claude` and ignores
+  (metered API key), or `ollama`/`onnx` (local). It normalizes `anthropic`→`claude` and ignores
   unknown values. `AQE_MAX_BUDGET_USD` (or `--max-budget-usd`) caps metered spend; `aqe health`
   shows an "LLM Billing" section saying who pays. `aqe init` never writes these — but
   **`ak x provider pick` now manages `AQE_LLM_PROVIDER` for you** (into

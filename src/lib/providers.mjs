@@ -24,13 +24,15 @@
 //                   (`ruflo providers configure`) and aqe's `AQE_LLM_PROVIDER`.
 //                   Independent of the host axis; keys live in the env, never kit.json.
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { run, have } from './exec.mjs';
 import { readJson, writeJsonWithBackup } from './settings.mjs';
 import { installedVersion, cmpVersions } from './versions.mjs';
 import * as paths from './paths.mjs';
 import { bold, dim, cyan } from './output.mjs';
-import { policyToAgentOverrides, seedDualRouting, resolveRoutes, routingSummary, ACTIVITIES } from './routing.mjs';
+import { policyToAgentOverrides, seedDualRouting, resolveRoutes, routingSummary, ACTIVITIES, DEFAULT_PRIMARY_HOST, PRIMARY_HOSTS } from './routing.mjs';
+import { HOST_ADAPTERS } from './hosts.mjs';
 
 /** Frontier agent-CLI hosts. `pkg` is the npm global package; `enableEnv` is
  *  ruflo's ADR-034 backend flag; `aqe` is the AQE_LLM_PROVIDER value (null when
@@ -89,6 +91,35 @@ export async function hostInstallState(host) {
   if (npmVer) return { method: 'npm', version: npmVer };
   if (await have(host.bin)) return { method: 'external', version: await hostVersion(host.bin) };
   return { method: 'absent', version: null };
+}
+
+/** How a host is AUTHENTICATED (distinct from how it's installed) — the axis that
+ *  drives billing. Grounded, evidence-based (no over-claiming):
+ *   - api key env present → 'api-key' (metered). For codex, an api key OVERRIDES a
+ *     ChatGPT login (keyOverridesLogin) — flagged in `note`.
+ *   - else a readable login file present → 'oauth' (subscription, $0).
+ *   - else, claude only: macOS stores the login in the Keychain (no readable file),
+ *     so when the CLI is present with no api key we INFER subscription and say so.
+ *   - else → 'none'.
+ *  Pure-ish: reads env + one fs.existsSync per host. `present` lets the caller pass
+ *  the already-known install state so an absent host reads 'none' without a probe. */
+export function hostAuthState(id, { env = process.env, present = true } = {}) {
+  const a = HOST_ADAPTERS[id]?.auth;
+  if (!a) return { mode: 'unknown', billing: 'unknown', source: null, note: null };
+  const keyEnv = a.apiKeyEnv.find((k) => !!env[k]);
+  const loginPath = a.loginFile ? path.join(os.homedir(), ...a.loginFile) : null;
+  const loginPresent = !!loginPath && fs.existsSync(loginPath);
+  if (keyEnv) {
+    return {
+      mode: 'api-key', billing: 'metered', source: keyEnv,
+      note: a.keyOverridesLogin && loginPresent ? 'api key overrides login' : null,
+    };
+  }
+  if (loginPresent) return { mode: 'oauth', billing: 'subscription', source: `~/${a.loginFile.join('/')}`, note: null };
+  // claude on macOS keeps the subscription login in the Keychain (unreadable here);
+  // when the CLI is present with no api key, subscription is the only live option.
+  if (id === 'claude' && present) return { mode: 'oauth', billing: 'subscription', source: 'login (keychain — inferred)', note: null };
+  return { mode: 'none', billing: 'unknown', source: null, note: null };
 }
 
 /** Install a missing host globally via npm. Intended for the 'absent' case only —
@@ -321,8 +352,36 @@ export function seedDualRoutingIfDualHost(cfg) {
   const existing = p.dualRouting ?? {};
   if (Object.keys(existing).length > 0) return { seeded: false, count: Object.keys(existing).length };
   if (!bothHostsEnabled(cfg) || !aqeSupportsAgentOverrides()) return { seeded: false, count: 0 };
-  p.dualRouting = seedDualRouting({ hosts: ['claude', 'codex'] });
+  // primary host (default claude) biases the seed: codex-primary mirrors the
+  // default routes so codex leads and claude is the alternate (ADR-0004 escalation).
+  p.dualRouting = seedDualRouting({ hosts: ['claude', 'codex'], primary: p.primaryHost ?? DEFAULT_PRIMARY_HOST });
   return { seeded: true, count: Object.keys(p.dualRouting).length };
+}
+
+/** Apply `ak setup` host flags to a kit.json cfg IN PLACE (before setup's
+ *  install/wiring runs), so the existing gated/prompted/external-safe paths pick
+ *  codex up. `--codex` (or `--primary-host codex`) enables BOTH hosts; keeps the
+ *  default claude-only behavior untouched when neither flag is passed. Returns
+ *  {changed, warnings} — pure except for the intended cfg mutation. */
+export function applySetupHostFlags(cfg, flags = {}) {
+  const p = cfg.providers ?? (cfg.providers = {});
+  p.hosts ?? (p.hosts = { claude: true, codex: false });
+  const warnings = [];
+  let changed = false;
+  const wantPrimary = typeof flags['primary-host'] === 'string' ? flags['primary-host'].trim().toLowerCase() : null;
+  // choosing codex as primary implies wanting codex enabled
+  if (flags.codex || wantPrimary === 'codex') {
+    if (!p.hosts.codex || !p.hosts.claude) changed = true;
+    p.hosts = { ...p.hosts, claude: true, codex: true };
+  }
+  if (wantPrimary) {
+    if (PRIMARY_HOSTS.includes(wantPrimary)) {
+      if (p.primaryHost !== wantPrimary) { p.primaryHost = wantPrimary; changed = true; }
+    } else {
+      warnings.push(`unknown --primary-host '${wantPrimary}' (valid: ${PRIMARY_HOSTS.join('|')}) — ignored`);
+    }
+  }
+  return { changed, warnings };
 }
 
 /** Render the effective per-activity routing as a colorized table, or null when
@@ -380,6 +439,40 @@ export async function undoCodexMcp(cwd = process.cwd(), { managed = false } = {}
   if (!managed) return { ok: true, changed: false, detail: 'codex MCP left as-is (not ak-registered)' };
   const r = await run('claude', ['mcp', 'remove', 'codex', '-s', 'project'], { cwd });
   return { ok: true, changed: r.code === 0, detail: r.code === 0 ? 'codex MCP removed' : 'codex MCP not registered' };
+}
+
+// ── reverse MCP bridge: ruflo MCP → Codex ───────────────────────────────────
+// ensureCodexMcp above wires claude→codex (Claude calls Codex via mcp__codex__codex).
+// This is the MIRROR: register the ruflo MCP server INTO Codex so a Codex-driven
+// session can reach ruflo's tools — the codex→ruflo half that makes the bridge
+// bidirectional (ambidextrous parity). Grounded in @claude-flow/codex mcp-config.ts:
+// `codex mcp add ruflo -- <cmd> mcp start` writes a [mcp_servers.ruflo] table into
+// ~/.codex/config.toml. aqe's own codex MCP is handled by `aqe init --with-codex`
+// (setup runs it), and Claude Code is not itself an MCP server, so those two legs
+// live elsewhere; this owns the ruflo leg. Best-effort; a failure never fails the
+// caller. Ownership marker: providers.rufloCodexMcp === 'ak'.
+export async function ensureRufloMcpInCodex(cfg, cwd = process.cwd()) {
+  if (!cfg.providers?.hosts?.codex) return { ok: true, changed: false, detail: 'codex not enabled — ruflo→codex MCP unmanaged' };
+  if (!(await have('codex'))) return { ok: true, changed: false, detail: 'codex CLI not installed' };
+  if (!(await have('ruflo'))) return { ok: true, changed: false, detail: 'ruflo not on PATH — ruflo→codex MCP skipped' };
+  const r = await run('codex', ['mcp', 'add', 'ruflo', '--', 'ruflo', 'mcp', 'start'], { cwd });
+  if (r.code === 0) {
+    if (cfg.providers) cfg.providers.rufloCodexMcp = 'ak'; // ak owns it → safe to remove later
+    return { ok: true, changed: true, detail: 'ruflo MCP registered into codex ([mcp_servers.ruflo])' };
+  }
+  if (/already exists|already configured/i.test(`${r.stderr}${r.stdout}`)) {
+    return { ok: true, changed: false, detail: 'ruflo MCP already registered in codex' };
+  }
+  return { ok: false, changed: false, detail: `ruflo→codex MCP registration failed: ${(r.stderr || r.stdout || '').split('\n')[0].slice(0, 120)}` };
+}
+
+/** Remove the ruflo MCP server from Codex — ONLY when ak registered it
+ *  (managed === true). Never tears down a server the user added themselves. */
+export async function undoRufloMcpInCodex(cwd = process.cwd(), { managed = false } = {}) {
+  if (!managed) return { ok: true, changed: false, detail: 'ruflo→codex MCP left as-is (not ak-registered)' };
+  if (!(await have('codex'))) return { ok: true, changed: false, detail: 'codex CLI not installed' };
+  const r = await run('codex', ['mcp', 'remove', 'ruflo'], { cwd });
+  return { ok: true, changed: r.code === 0, detail: r.code === 0 ? 'ruflo MCP removed from codex' : 'ruflo→codex MCP not registered' };
 }
 
 /** The exact env this config wants written. `AQE_LLM_PROVIDER` is written only

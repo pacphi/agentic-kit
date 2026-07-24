@@ -8,10 +8,10 @@ import { loadRing, detectRegression } from '../lib/health-history.mjs';
 import * as paths from '../lib/paths.mjs';
 import { nativesStatus, aidefencePresent, securityPresent } from '../lib/natives.mjs';
 import { scanNpxStale } from '../lib/npx.mjs';
-import { registrationStatus, codexMcpStatus } from '../lib/mcp.mjs';
+import { registrationStatus, codexMcpStatus, rufloCodexMcpStatus } from '../lib/mcp.mjs';
 import { listDaemons, staleDaemons } from '../lib/daemons.mjs';
 import { scanRvf } from '../lib/rvf.mjs';
-import { registry, syncBlocks } from '../lib/blocks.mjs';
+import { registry, syncBlocks, blocksForTarget } from '../lib/blocks.mjs';
 import { loadKitConfig } from '../lib/config.mjs';
 import { driftReport, selfDrift } from '../lib/versions.mjs';
 import { upstreamCveCounterFabricated, fixStatusline, helperStampStale } from '../lib/statusline.mjs';
@@ -19,7 +19,7 @@ import { drift as ruvnetBrainDrift, nightlyAgentPresent as rbNightlyPresent, NIG
 import { coherence as adbCoherence } from '../lib/agentdb.mjs';
 import { readJson } from '../lib/settings.mjs';
 import { have } from '../lib/exec.mjs';
-import { HOSTS, settingsTarget, isDefault, managedEnv, MANAGED_ENV_KEYS, hostInstallState, aqeRouterFile, aqeSupportsAgentOverrides } from '../lib/providers.mjs';
+import { HOSTS, settingsTarget, isDefault, managedEnv, MANAGED_ENV_KEYS, hostInstallState, hostAuthState, bothHostsEnabled, aqeRouterFile, aqeSupportsAgentOverrides } from '../lib/providers.mjs';
 import { policyToAgentOverrides, routingSummary } from '../lib/routing.mjs';
 
 export const options = {
@@ -246,20 +246,44 @@ export async function collect({ pkgRoot, cwd = process.cwd() }) {
     } catch (e) {
       rows.push(row('codex-mcp', 'warn', `codex MCP check unavailable: ${e.message}`));
     }
+    // reverse bridge: ruflo MCP → codex (a codex-driven session reaches ruflo's
+    // tools). The mirror of the claude→codex row above; makes the bridge two-way.
+    try {
+      const { registered, owned } = rufloCodexMcpStatus(cfg);
+      if (registered) {
+        rows.push(row('codex-mcp', 'ok',
+          `ruflo MCP registered in codex ([mcp_servers.ruflo])${owned ? '' : ' — pre-existing (not ak-managed)'}`));
+      } else if (await have('codex')) {
+        rows.push(row('codex-mcp', 'warn', 'codex enabled but ruflo MCP not registered in codex',
+          'sync registers the ruflo MCP into codex'));
+      }
+    } catch (e) {
+      rows.push(row('codex-mcp', 'warn', `ruflo→codex MCP check unavailable: ${e.message}`));
+    }
   }
 
   // hosts (install-if-missing) — cheap: file read + `which`, no network.
   // An enabled host that is entirely absent is installable by sync; an external
   // install (mise/native/brew) is reported but never touched.
   try {
+    // primary host absent = fail (nothing can drive); alternate absent = warn.
+    const primaryHost = cfg.providers?.primaryHost ?? 'claude';
     for (const h of HOSTS) {
       if (!cfg.providers.hosts[h.id]) continue;
       const st = await hostInstallState(h);
       if (st.method === 'absent') {
-        rows.push(row('hosts', h.id === 'claude' ? 'fail' : 'warn',
-          `${h.id} enabled but not installed`, `sync installs ${h.pkg}`));
+        rows.push(row('hosts', h.id === primaryHost ? 'fail' : 'warn',
+          `${h.id} enabled but not installed${h.id === primaryHost ? ' (primary)' : ''}`, `sync installs ${h.pkg}`));
       } else {
         rows.push(row('hosts', 'ok', `${h.id} ${st.version ?? ''} (${st.method}${st.method === 'external' ? ' — self-managed' : ''})`));
+        // auth mode (billing axis): oauth/subscription ($0) vs metered api-key.
+        // A distinct row so `ak status --json` (and the dashboard) can badge it.
+        const auth = hostAuthState(h.id, { present: true });
+        const billing = auth.billing === 'subscription' ? 'subscription, $0'
+          : auth.billing === 'metered' ? 'metered' : auth.billing;
+        rows.push(row('hosts', auth.mode === 'none' ? 'warn' : 'ok',
+          `${h.id} auth: ${auth.mode} (${billing})${auth.source ? ` · ${auth.source}` : ''}${auth.note ? ` — ${auth.note}` : ''}`,
+          auth.mode === 'none' ? `${h.id} login` : null));
       }
     }
   } catch (e) {
@@ -338,23 +362,37 @@ export async function collect({ pkgRoot, cwd = process.cwd() }) {
     rows.push(row('daemons', 'warn', `daemon check unavailable: ${e.message}`));
   }
 
-  // CLAUDE.md blocks (dry-run reconcile = drift report)
+  // guidance-file blocks (dry-run reconcile = drift report). Two targets: the
+  // machine-wide CLAUDE.md (claude) and the project AGENTS.md (codex). The
+  // dual-mode block is gated on both hosts being enabled (flag detector), so
+  // AGENTS.md stays unmanaged/quiet until dual mode is on.
   try {
-    const rows_ = registry(cfg.customBlocks);
+    const rowsReg = registry(cfg.customBlocks);
     const resolve = (r) => (r.custom
       ? (r.template.startsWith('~/') ? path.join(paths.home, r.template.slice(2)) : r.template)
       : path.join(pkgRoot, 'claude', r.template));
-    const res = await syncBlocks(paths.claudeMdPath(), rows_, resolve, { dryRun: true });
-    const drift = res.filter((r) => r.action === 'upserted' || r.action === 'stripped');
-    const missing = res.filter((r) => r.action === 'missing-template');
-    if (drift.length) {
-      rows.push(row('blocks', 'warn',
-        `${drift.length} CLAUDE.md block(s) drifted: ${drift.map((d) => `${d.slug}→${d.action.replace('ped', 'p')}`).join(', ')}`,
-        'sync reconciles blocks'));
-    } else {
-      rows.push(row('blocks', 'ok', `CLAUDE.md managed blocks in sync (${res.length} in registry)`));
+    const ctx = { flags: { dualMode: bothHostsEnabled(cfg) } };
+    const targets = [
+      { name: 'claude', label: 'CLAUDE.md', file: paths.claudeMdPath() },
+      { name: 'agents', label: 'AGENTS.md', file: path.join(cwd, 'AGENTS.md') },
+    ];
+    for (const t of targets) {
+      const treg = blocksForTarget(rowsReg, t.name);
+      const res = await syncBlocks(t.file, treg, resolve, { dryRun: true, context: ctx });
+      const drift = res.filter((r) => r.action === 'upserted' || r.action === 'stripped');
+      // AGENTS.md is unmanaged on single-host setups — stay quiet unless there's
+      // actual drift (e.g. a block to strip after disabling dual mode).
+      if (t.name === 'agents' && !ctx.flags.dualMode && drift.length === 0) continue;
+      const missing = res.filter((r) => r.action === 'missing-template');
+      if (drift.length) {
+        rows.push(row('blocks', 'warn',
+          `${drift.length} ${t.label} block(s) drifted: ${drift.map((d) => `${d.slug}→${d.action.replace('ped', 'p')}`).join(', ')}`,
+          'sync reconciles blocks'));
+      } else {
+        rows.push(row('blocks', 'ok', `${t.label} managed blocks in sync (${res.length} in registry)`));
+      }
+      for (const m of missing) rows.push(row('blocks', 'warn', `template missing for block '${m.slug}'`));
     }
-    for (const m of missing) rows.push(row('blocks', 'warn', `template missing for block '${m.slug}'`));
   } catch (e) {
     rows.push(row('blocks', 'warn', `block check unavailable: ${e.message}`));
   }
@@ -402,6 +440,14 @@ export async function collect({ pkgRoot, cwd = process.cwd() }) {
     }
   } else {
     rows.push(row('statusline', 'info', 'no project statusline here (created by setup)'));
+  }
+  // show + explain: the statusline is a Claude Code feature. Codex has no
+  // command-backed statusline (enum-only `tui.status_line`), so when codex is
+  // enabled we surface the asymmetry with its native compensating path rather
+  // than hiding it — the ambidextrous UX convention.
+  if (cfg.providers?.hosts?.codex) {
+    rows.push(row('statusline', 'info',
+      'statusline is claude-only — codex has no command-backed statusline; its guidance ships via AGENTS.md'));
   }
 
   return rows;
