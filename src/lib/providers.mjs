@@ -31,7 +31,7 @@ import { readJson, writeJsonWithBackup } from './settings.mjs';
 import { installedVersion, cmpVersions } from './versions.mjs';
 import * as paths from './paths.mjs';
 import { bold, dim, cyan } from './output.mjs';
-import { policyToAgentOverrides, seedDualRouting, resolveRoutes, routingSummary, ACTIVITIES, DEFAULT_PRIMARY_HOST } from './routing.mjs';
+import { policyToAgentOverrides, seedDualRouting, resolveRoutes, routingSummary, ACTIVITIES, DEFAULT_PRIMARY_HOST, PRIMARY_HOSTS } from './routing.mjs';
 import { HOST_ADAPTERS } from './hosts.mjs';
 
 /** Frontier agent-CLI hosts. `pkg` is the npm global package; `enableEnv` is
@@ -356,6 +356,32 @@ export function seedDualRoutingIfDualHost(cfg) {
   // default routes so codex leads and claude is the alternate (ADR-0004 escalation).
   p.dualRouting = seedDualRouting({ hosts: ['claude', 'codex'], primary: p.primaryHost ?? DEFAULT_PRIMARY_HOST });
   return { seeded: true, count: Object.keys(p.dualRouting).length };
+}
+
+/** Apply `ak setup` host flags to a kit.json cfg IN PLACE (before setup's
+ *  install/wiring runs), so the existing gated/prompted/external-safe paths pick
+ *  codex up. `--codex` (or `--primary-host codex`) enables BOTH hosts; keeps the
+ *  default claude-only behavior untouched when neither flag is passed. Returns
+ *  {changed, warnings} — pure except for the intended cfg mutation. */
+export function applySetupHostFlags(cfg, flags = {}) {
+  const p = cfg.providers ?? (cfg.providers = {});
+  p.hosts ?? (p.hosts = { claude: true, codex: false });
+  const warnings = [];
+  let changed = false;
+  const wantPrimary = typeof flags['primary-host'] === 'string' ? flags['primary-host'].trim().toLowerCase() : null;
+  // choosing codex as primary implies wanting codex enabled
+  if (flags.codex || wantPrimary === 'codex') {
+    if (!p.hosts.codex || !p.hosts.claude) changed = true;
+    p.hosts = { ...p.hosts, claude: true, codex: true };
+  }
+  if (wantPrimary) {
+    if (PRIMARY_HOSTS.includes(wantPrimary)) {
+      if (p.primaryHost !== wantPrimary) { p.primaryHost = wantPrimary; changed = true; }
+    } else {
+      warnings.push(`unknown --primary-host '${wantPrimary}' (valid: ${PRIMARY_HOSTS.join('|')}) — ignored`);
+    }
+  }
+  return { changed, warnings };
 }
 
 /** Render the effective per-activity routing as a colorized table, or null when
