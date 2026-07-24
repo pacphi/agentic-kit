@@ -32,6 +32,28 @@ for you:
 ℹ codex CLI detected — run `ak x provider pick` to let ruflo use both claude and codex
 ```
 
+## Two configs, one front door
+
+A question that trips people up: **do ruflo and agentic-qe read the same config?** No.
+They are two independent routing subsystems, each with its **own config store and its own
+escalation machinery**. There is no shared file they both read. What unifies them is `ak`:
+it takes your intent once (in `kit.json`) and writes **each tool's own native config** —
+converging, proving, and able to undo. `ak` is a facilitator, not a config layer the tools
+depend on.
+
+| | **agentic-qe** (`HybridRouter`) | **ruflo** (provider router) |
+|---|---|---|
+| **Config store** | `.agentic-qe/llm-config.json` (per project) + env | `~/.agentic-flow/router.config.json` (or `--router-config`) + env |
+| **Precedence** (highest wins) | explicit override → env (`AQE_LLM_*`, API keys) → disk file → built-in defaults | file (`defaultProvider`, `fallbackChain`) + CLI overrides |
+| **Change the provider** | `AQE_LLM_PROVIDER=<type>` (env) — a provider whose API key is in the env is auto-enabled | `ruflo providers configure -p <id> -m <model>` |
+| **Change the model** | per-provider `models` in the chain; per-activity `agentOverrides` (aqe ≥ 3.13.1) | `models.{default,fast,advanced}` per provider in the file |
+| **Escalation / fallback** | ordered `fallbackChain` + circuit breaker + retry/backoff | `fallbackChain` + `routing.mode` (cost/quality/perf/rule-based) + circuit breaker |
+| **The `ak` way** | `--aqe-provider` / `--aqe-fallback` / `--route` | `--provider <id>:<model>` |
+
+Two axes cut across both (see the intro): **hosts** (which agent CLI runs the ruflo loop —
+`ENABLE_CLAUDE_CODE` / `ENABLE_CODEX`) are separate from **providers** (which LLM the routers
+use). Level 4 below is the full `ak`-way ↔ raw-tool-way map for every knob in this table.
+
 ## Level 1 — turn on codex (one command)
 
 > [!NOTE]
@@ -177,6 +199,9 @@ This is the part that matters: **`ak` is a facilitator, not a wall.** Every valu
 is the tool's own native config, and you can set it by hand — or let `ak` and hand-edits
 coexist. `ak` merges-not-clobbers and backs up first, mirroring how rUv itself layers config
 (`mergeWithDefaults(config, defaults)` — sensible defaults, override with your partial).
+
+The two config stores each knob below lives in — and their precedence — are summarized in
+[Two configs, one front door](#two-configs-one-front-door) above.
 
 | You want to…                         | `ak` way                          | The raw ruflo/aqe way it maps to                    |
 | ------------------------------------ | --------------------------------- | --------------------------------------------------- |
