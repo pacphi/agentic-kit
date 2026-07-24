@@ -6,7 +6,7 @@ import path from 'node:path';
 import { glyph, dim, bold, warn } from '../lib/output.mjs';
 import { loadRing, detectRegression } from '../lib/health-history.mjs';
 import * as paths from '../lib/paths.mjs';
-import { nativesStatus, aidefencePresent, securityPresent } from '../lib/natives.mjs';
+import { nativesStatus, rufloRuntimeNatives, dbPathPinStatus, aidefencePresent, securityPresent } from '../lib/natives.mjs';
 import { scanNpxStale } from '../lib/npx.mjs';
 import { registrationStatus, codexMcpStatus, rufloCodexMcpStatus } from '../lib/mcp.mjs';
 import { listDaemons, staleDaemons } from '../lib/daemons.mjs';
@@ -127,9 +127,38 @@ export async function collect({ pkgRoot, cwd = process.cwd() }) {
     if (n.aqe && !n.aqe.native) {
       rows.push(row('natives', 'fail', 'agentic-qe better-sqlite3 not native', 'sync repairs it'));
     }
+    // #45: the agentdb copies above are NOT what `npx ruflo memory` loads — probe
+    // the binding as resolved from ruflo's own memory runtime (@claude-flow/memory
+    // + /cli), or the row reads ✓ while memory store runs on the WASM fallback.
+    const rt = await rufloRuntimeNatives();
+    if (rt.installed && rt.contexts.length) {
+      const wasm = rt.contexts.filter((c) => !c.ok);
+      if (wasm.length) {
+        rows.push(row('natives', 'fail',
+          `ruflo memory runtime on WASM fallback (${wasm.map((c) => `@claude-flow/${c.context}`).join(', ')}) — memory store/dual run degrade`,
+          'sync builds the native binding'));
+      } else {
+        rows.push(row('natives', 'ok', `ruflo memory runtime native (${rt.contexts.map((c) => c.context).join(', ')})`));
+      }
+    }
   } catch (e) {
     rows.push(row('natives', 'warn', `native check unavailable: ${e.message}`));
   }
+
+  // #45 aftermath: a CLAUDE_FLOW_DB_PATH pin aimed at a dead or foreign path makes
+  // every memory op target the wrong DB ("Database not initialized" with a healthy
+  // DB in-repo). Warn-only — the pin may be deliberate; sync never touches it.
+  try {
+    const pin = dbPathPinStatus({
+      settingsLocalFile: path.join(process.cwd(), '.claude', 'settings.local.json'),
+      projectRoot: process.cwd(),
+    });
+    if (pin?.warn) {
+      rows.push(row('memory-pin', 'warn',
+        `CLAUDE_FLOW_DB_PATH pins ${pin.pinned} (${pin.reason})`,
+        'repoint it in .claude/settings.local.json env, or remove the pin'));
+    }
+  } catch { /* pin check is best-effort — never blocks status */ }
 
   // npx (stale ruflo-family cache envs — `npx --prefer-offline` fallbacks in the
   // statusline/hooks execute these verbatim, keeping retired defects alive)

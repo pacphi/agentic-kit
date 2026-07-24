@@ -9,6 +9,7 @@ import path from 'node:path';
 import { pathToFileURL, fileURLToPath } from 'node:url';
 import { loadKitConfig } from '../lib/config.mjs';
 import { have } from '../lib/exec.mjs';
+import { rufloRuntimeNatives } from '../lib/natives.mjs';
 import { ok, warn, fail, info, dim, bold } from '../lib/output.mjs';
 import {
   DUAL_RUN_TEMPLATES, DUAL_RUN_TEMPLATE_NAMES, policyToDualRunConfig, escalatePolicy, parseRouteSpecs,
@@ -98,6 +99,23 @@ function runSwarm(configUrl, task, flags) {
   });
 }
 
+/** #45 defect 2: the dual orchestrator opens a NATIVE better-sqlite3 WAL on the
+ *  shared DB, then shells `npx ruflo memory store`, which resolves the SAME global
+ *  tree — if that tree is WASM-only, the sql.js writer refuses to whole-image-write
+ *  over the live native WAL and the whole run dies at the first shared write. Refuse
+ *  PRE-SPAWN when BOTH hold: the ruflo memory runtime lacks a native binding AND
+ *  `-wal`/`-shm` sidecars sit beside the target DB. existsSync-based on purpose
+ *  (EC-6): a false refusal costs one `ak sync`, a false pass corrupts the store.
+ *  Pure + injectable so it's tested without a spawn or a global tree.
+ *  @param {string} dbPath
+ *  @param {{ runtime?: { installed: boolean, contexts: Array<{ ok: boolean }> } | null,
+ *            existsSync?: typeof fs.existsSync }} [opts] */
+export function nativeWalConflict(dbPath, { runtime, existsSync = fs.existsSync } = {}) {
+  const wasmOnly = !!runtime?.installed && runtime.contexts.some((c) => !c.ok);
+  const sidecar = existsSync(`${dbPath}-wal`) || existsSync(`${dbPath}-shm`);
+  return { refuse: wasmOnly && sidecar, wasmOnly, sidecar };
+}
+
 function printPlan(template, task, config) {
   console.log(bold(`dual run: ${template}`) + dim(`  "${task}"`));
   for (const w of config.workers) {
@@ -136,6 +154,20 @@ async function doRun({ positionals, flags }) {
   if (!(await have(ADAPTER))) {
     fail(`${ADAPTER} not found — enable dual-host to install the adapter: ak x provider pick --host claude,codex`);
     return 1;
+  }
+
+  // #45 defect 2 pre-flight: refuse BEFORE spawning a worker (the crash is otherwise
+  // mid-run, at the first shared-memory write). Sidecar check is a cheap fs stat, so
+  // only pay for the runtime probe (a child `node`) when a WAL is actually live.
+  const dbPath = process.env.CLAUDE_FLOW_DB_PATH ?? path.join(process.cwd(), '.claude-flow', 'dual-run-memory.db');
+  if (fs.existsSync(`${dbPath}-wal`) || fs.existsSync(`${dbPath}-shm`)) {
+    const { refuse } = nativeWalConflict(dbPath, { runtime: await rufloRuntimeNatives() });
+    if (refuse) {
+      fail(`refusing to start: ruflo's memory runtime lacks a native better-sqlite3 binding AND ${dbPath} has an active native WAL (-wal/-shm sidecars). `
+        + 'The orchestrator\'s native WAL writer and the sql.js (WASM) `npx ruflo memory store` cannot share this DB — it would corrupt the store.');
+      info('fix: run: ak sync   (builds the native binding for ruflo\'s memory runtime), then retry');
+      return 1;
+    }
   }
 
   // track the temp config-module dirs so we don't leak them (L3).

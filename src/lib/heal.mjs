@@ -7,7 +7,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { run } from './exec.mjs';
 import { rufloRoot, aqeRoot } from './paths.mjs';
-import { agentdbLocations, bsq3IsNative, bsq3Root, aidefencePresent } from './natives.mjs';
+import { agentdbLocations, bsq3IsNative, bsq3Root, deriveBsq3Spec, rufloMemoryContexts, aidefencePresent } from './natives.mjs';
 import { KIT_PKG } from './versions.mjs';
 import { scanRvf, quarantine } from './rvf.mjs';
 import { INSTALL_SPEC, INSTALL_ARGS, NIGHTLY_LABEL as RB_NIGHTLY_LABEL, nightlyAgentPlist as rbNightlyPlist, present as rbPresent, latestVersion as rbLatest, recordInstalledRelease as rbRecord } from './ruvnet-brain.mjs';
@@ -58,7 +58,11 @@ const failTail = (r) =>
 export async function ensureNativeBsq3(dir, { runner = run } = {}) {
   let pkgRoot = bsq3Root(dir);
   if (!pkgRoot) {
-    await npmInstallInto(dir, 'better-sqlite3@^12', runner);
+    // Derive the spec from THIS tree's own overrides/deps: a hardcoded `@^12` is
+    // EOVERRIDE-rejected in a tree that pins better-sqlite3 (ruflo root pins
+    // 12.9.0, @claude-flow/cli pins ^12.9.0) — verified live. The declared spec
+    // installs clean and resolves a prebuilt.
+    await npmInstallInto(dir, `better-sqlite3@${deriveBsq3Spec(dir)}`, runner);
     if (bsq3IsNative(dir)) return { ok: true, how: 'native installed' };
     pkgRoot = bsq3Root(dir);
     if (!pkgRoot) return { ok: false, how: 'FAILED (better-sqlite3 not resolvable)' };
@@ -72,8 +76,12 @@ export async function ensureNativeBsq3(dir, { runner = run } = {}) {
   return { ok: false, how: failTail(r) };
 }
 
-/** Native better-sqlite3 into every agentdb location that lacks it. */
-export async function healNatives() {
+/** Native better-sqlite3 into every location the runtime resolves: the agentdb
+ *  copies, agentic-qe, AND the ruflo memory-runtime contexts (@claude-flow/memory
+ *  + /cli) — the copies `npx ruflo memory` actually loads. #45: healing only
+ *  agentdb left ruflo's own memory on the WASM fallback (memory store failing)
+ *  while status still read agentdb-native. `runner` injectable for hermetic tests. */
+export async function healNatives({ runner = run } = {}) {
   const details = [];
   for (const dir of agentdbLocations()) {
     // Re-check right before installing: an upgrade earlier in the same sync
@@ -81,10 +89,16 @@ export async function healNatives() {
     // the 3.29.0 tree) between enumeration and heal.
     if (!fs.existsSync(dir)) continue;
     if (bsq3IsNative(dir)) continue;
-    details.push(`${dir}: ${(await ensureNativeBsq3(dir)).how}`);
+    details.push(`${dir}: ${(await ensureNativeBsq3(dir, { runner })).how}`);
   }
   if (fs.existsSync(aqeRoot()) && !bsq3IsNative(aqeRoot())) {
-    details.push(`agentic-qe: ${(await ensureNativeBsq3(aqeRoot())).how}`);
+    details.push(`agentic-qe: ${(await ensureNativeBsq3(aqeRoot(), { runner })).how}`);
+  }
+  // ruflo memory runtime — missing contexts are already filtered out (older trees
+  // may lack either package, EC-2), so this is a silent no-op on them.
+  for (const { context, dir } of rufloMemoryContexts()) {
+    if (bsq3IsNative(dir)) continue;
+    details.push(`@claude-flow/${context}: ${(await ensureNativeBsq3(dir, { runner })).how}`);
   }
   return { ok: !details.some((d) => d.includes('FAILED')), detail: details.join('; ') || 'already native everywhere' };
 }
