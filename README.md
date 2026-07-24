@@ -118,6 +118,11 @@ you opt in. Two independent axes:
   `AQE_LLM_PROVIDER` (`claude-code`/`claude`/`openai`/`gemini`/`openrouter`/`azure-openai`/
   `bedrock`/`cognitum`/`ollama`/`onnx`) plus an ordered fallback chain, and ruflo's API providers.
   API keys stay in the environment — never written to `kit.json`.
+
+  > [!NOTE]
+  > ruflo and agentic-qe keep **separate config stores** — they don't share one file. `ak`
+  > converges both from `kit.json`. Which store to edit for which knob is in
+  > [docs/PROVIDERS.md](docs/PROVIDERS.md#two-configs-one-front-door).
 - **Per-activity routing** — when **both** hosts are enabled (and agentic-qe ≥ 3.13.1), `ak` seeds a
   policy that routes each kind of work to the host + model that suits it — Claude for architecture,
   design, review; Codex for implementation, testing — and materializes it into agentic-qe's
