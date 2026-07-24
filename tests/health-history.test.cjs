@@ -29,7 +29,7 @@ function eq(a, b, msg) {
   assert(A === B, (msg || 'not equal') + `\n      got:      ${A}\n      expected: ${B}`);
 }
 const entry = (o = {}) => ({
-  ts: 1000, learningRows: 10, nativeSlots: 5, driftOutdated: false, securityPresent: true, ...o,
+  ts: 1000, project: '/p/alpha', learningRows: 10, nativeSlots: 5, driftOutdated: false, securityPresent: true, ...o,
 });
 
 // ── append: cap behavior + immutability ──────────────────────────────────────
@@ -75,12 +75,20 @@ test('append onto undefined/missing ring treats it as empty', () => {
 console.log('\nsummarize');
 
 test('summarize projects an entry to the tracked scalar fields', () => {
-  const s = summarize({ ts: 9, learningRows: 3, nativeSlots: 2, driftOutdated: true, securityPresent: false, junk: 'x' });
+  const s = summarize({ ts: 9, project: '/p/a', learningRows: 3, nativeSlots: 2, driftOutdated: true, securityPresent: false, junk: 'x' });
+  eq(s.project, '/p/a');
   eq(s.learningRows, 3);
   eq(s.nativeSlots, 2);
   eq(s.driftOutdated, true);
   eq(s.securityPresent, false);
   assert(!('junk' in s), 'summarize drops untracked fields');
+});
+
+test('summarize keeps null (unknown) for absent learningRows/project — never a fabricated 0', () => {
+  const s = summarize({ ts: 9 });
+  eq(s.learningRows, null, 'absent learning store is unknown, not 0');
+  eq(s.project, null, 'legacy entry has no project stamp');
+  eq(s.nativeSlots, 0, 'machine-global counts still default to 0');
 });
 
 // ── detectRegression: every branch ───────────────────────────────────────────
@@ -181,9 +189,72 @@ test('only the LAST two entries are compared', () => {
   eq(detectRegression(ring), []);
 });
 
-test('missing numeric fields are treated as 0 (no spurious regression, no crash)', () => {
+test('bare entries (no fields at all) → no spurious regression, no crash', () => {
   const ring = [{ ts: 1 }, { ts: 2 }];
   eq(detectRegression(ring), []);
+});
+
+// ── detectRegression: per-project learning comparison + unknown semantics ────
+console.log('\ndetectRegression (per-project learning, unknown ≠ 0)');
+
+test('a sync from a project with NO learning store (null) never alarms against another project\'s count', () => {
+  // the real-world false positive this guards: sync ran in project beta (no
+  // store) right after a sync in alpha had recorded 75 — 75 → 0 is a lie.
+  const ring = [
+    entry({ project: '/p/alpha', learningRows: 75 }),
+    entry({ project: '/p/beta', learningRows: null }),
+  ];
+  eq(detectRegression(ring), []);
+});
+
+test('a KNOWN count in one project is never compared against a different project\'s count', () => {
+  const ring = [
+    entry({ project: '/p/alpha', learningRows: 75 }),
+    entry({ project: '/p/beta', learningRows: 3 }), // beta has no prior entry → no baseline
+  ];
+  eq(detectRegression(ring), []);
+});
+
+test('learning baseline skips other projects and unknowns to find the same project\'s last KNOWN count', () => {
+  const ring = [
+    entry({ project: '/p/alpha', learningRows: 20 }), // ← the baseline
+    entry({ project: '/p/beta', learningRows: 999 }), // other project, skipped
+    entry({ project: '/p/alpha', learningRows: null }), // unknown reading, skipped
+    entry({ project: '/p/alpha', learningRows: 12 }),
+  ];
+  const r = detectRegression(ring);
+  eq(r.length, 1);
+  eq(r[0].metric, 'learningRows');
+  eq(r[0].from, 20);
+  eq(r[0].to, 12);
+});
+
+test('legacy entries with no project stamp are never used as a learning baseline', () => {
+  const ring = [
+    entry({ project: undefined, learningRows: 75 }), // pre-fix entry
+    entry({ project: '/p/alpha', learningRows: 3 }),
+  ];
+  eq(detectRegression(ring), []);
+});
+
+test('the learning message names the project (last path segment, either separator)', () => {
+  const posix = detectRegression([entry({ learningRows: 9 }), entry({ learningRows: 4 })]);
+  assert(posix[0].message.includes('(alpha)'), 'posix path label: ' + posix[0].message);
+  const win = detectRegression([
+    entry({ project: 'C:\\dev\\gamma', learningRows: 9 }),
+    entry({ project: 'C:\\dev\\gamma', learningRows: 4 }),
+  ]);
+  assert(win[0].message.includes('(gamma)'), 'windows path label: ' + win[0].message);
+});
+
+test('machine-global metrics still compare across projects (a native-slot drop is machine truth)', () => {
+  const ring = [
+    entry({ project: '/p/alpha', nativeSlots: 8 }),
+    entry({ project: '/p/beta', nativeSlots: 3 }),
+  ];
+  const r = detectRegression(ring);
+  eq(r.length, 1);
+  eq(r[0].metric, 'nativeSlots');
 });
 
 // ── loadRing / appendToConfig (thin cfg shims) ───────────────────────────────
