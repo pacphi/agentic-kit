@@ -11,7 +11,7 @@ import { scanNpxStale } from '../lib/npx.mjs';
 import { registrationStatus, codexMcpStatus, rufloCodexMcpStatus } from '../lib/mcp.mjs';
 import { listDaemons, staleDaemons } from '../lib/daemons.mjs';
 import { scanRvf } from '../lib/rvf.mjs';
-import { registry, syncBlocks, blocksForTarget } from '../lib/blocks.mjs';
+import { registry, syncBlocks, blocksForTarget, retiredForTarget, guidanceTargets } from '../lib/blocks.mjs';
 import { loadKitConfig } from '../lib/config.mjs';
 import { driftReport, selfDrift } from '../lib/versions.mjs';
 import { upstreamCveCounterFabricated, fixStatusline, helperStampStale } from '../lib/statusline.mjs';
@@ -391,28 +391,28 @@ export async function collect({ pkgRoot, cwd = process.cwd() }) {
     rows.push(row('daemons', 'warn', `daemon check unavailable: ${e.message}`));
   }
 
-  // guidance-file blocks (dry-run reconcile = drift report). Two targets: the
-  // machine-wide CLAUDE.md (claude) and the project AGENTS.md (codex). The
-  // dual-mode block is gated on both hosts being enabled (flag detector), so
-  // AGENTS.md stays unmanaged/quiet until dual mode is on.
+  // guidance-file blocks (dry-run reconcile = drift report). Three targets
+  // (guidanceTargets): machine-wide ~/.claude/CLAUDE.md (claude), the project
+  // <cwd>/AGENTS.md (agents), and — only when ~/.codex exists — machine-wide
+  // ~/.codex/AGENTS.md (agents-user). The dual-mode block is gated on both hosts
+  // being enabled (flag detector), so the agents targets stay unmanaged/quiet
+  // until dual mode is on. retiredForTarget force-strips re-scoped blocks (the
+  // migration path that clears the dual block from any project AGENTS.md).
   try {
     const rowsReg = registry(cfg.customBlocks);
     const resolve = (r) => (r.custom
       ? (r.template.startsWith('~/') ? path.join(paths.home, r.template.slice(2)) : r.template)
       : path.join(pkgRoot, 'claude', r.template));
     const ctx = { flags: { dualMode: bothHostsEnabled(cfg) } };
-    const targets = [
-      { name: 'claude', label: 'CLAUDE.md', file: paths.claudeMdPath() },
-      { name: 'agents', label: 'AGENTS.md', file: path.join(cwd, 'AGENTS.md') },
-    ];
-    for (const t of targets) {
-      const treg = blocksForTarget(rowsReg, t.name);
+    for (const t of guidanceTargets({ cwd, cfg })) {
+      const treg = [...blocksForTarget(rowsReg, t.name), ...retiredForTarget(rowsReg, t.name)];
       const res = await syncBlocks(t.file, treg, resolve, { dryRun: true, context: ctx });
       const drift = res.filter((r) => r.action === 'upserted' || r.action === 'stripped');
-      // AGENTS.md is unmanaged on single-host setups — stay quiet unless there's
-      // actual drift (e.g. a block to strip after disabling dual mode).
-      if (t.name === 'agents' && !ctx.flags.dualMode && drift.length === 0) continue;
       const missing = res.filter((r) => r.action === 'missing-template');
+      // The agents targets are unmanaged on single-host setups — stay quiet
+      // unless there's actual drift (e.g. a block to strip after disabling dual
+      // mode) or a missing template. Only the claude target always reports.
+      if (t.name !== 'claude' && drift.length === 0 && missing.length === 0) continue;
       if (drift.length) {
         rows.push(row('blocks', 'warn',
           `${drift.length} ${t.label} block(s) drifted: ${drift.map((d) => `${d.slug}→${d.action.replace('ped', 'p')}`).join(', ')}`,

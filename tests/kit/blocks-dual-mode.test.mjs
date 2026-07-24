@@ -125,7 +125,7 @@ test('the dual-mode block is registered as a flag-gated multi-target row', () =>
   const dual = BUILTIN_BLOCKS.find((b) => b.slug === 'ruflo-dual-mode-reference');
   assert.ok(dual, 'ruflo-dual-mode-reference is a builtin');
   assert.deepEqual(dual.detector, { type: 'flag', target: 'dualMode' });
-  assert.deepEqual(dual.guidanceFiles, ['claude', 'agents']);
+  assert.deepEqual(dual.guidanceFiles, ['claude', 'agents-user']);
 });
 
 test('registry defaults a custom row without guidanceFiles to claude', () => {

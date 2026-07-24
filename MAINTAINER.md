@@ -46,7 +46,7 @@ src/
     sqlite.mjs           # node:sqlite helpers (scalar, checkpoint, withDb)
     versions.mjs         # installedVersion, driftReport, KIT_PKG
     ruvnet-brain.mjs     # RuvNet Brain: on-disk detection + GitHub-release drift (NOT an npm pkg)
-    blocks.mjs           # CLAUDE.md / AGENTS.md managed-block registry + syncBlocks
+    blocks.mjs           # managed-block registry + syncBlocks + guidanceTargets (3 targets: ~/.claude/CLAUDE.md, project AGENTS.md, ~/.codex/AGENTS.md)
     hosts.mjs            # host-adapter core: drivingHost() + HOST_ADAPTERS (guidance file, auth, statusline)
     providers.mjs        # frontier-host + LLM-provider detect/wire (hosts, auth, MCP bridges, aqe router)
     routing.mjs          # pure dual-host routing policy: defaults, projections, primary-host swap

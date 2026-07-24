@@ -5,7 +5,7 @@ import path from 'node:path';
 import { collect } from './status.mjs';
 import * as heal from '../lib/heal.mjs';
 import { fixStatusline, helperStampStale } from '../lib/statusline.mjs';
-import { registry, syncBlocks, blocksForTarget } from '../lib/blocks.mjs';
+import { registry, syncBlocks, blocksForTarget, retiredForTarget, guidanceTargets } from '../lib/blocks.mjs';
 import { register as mcpRegister, applyExclusions } from '../lib/mcp.mjs';
 import { listDaemons, staleDaemons, reap } from '../lib/daemons.mjs';
 import { loadKitConfig, saveKitConfig } from '../lib/config.mjs';
@@ -132,21 +132,22 @@ export async function run({ flags, pkgRoot }) {
     const resolve = (r) => (r.custom
       ? (r.template.startsWith('~/') ? path.join(paths.home, r.template.slice(2)) : r.template)
       : path.join(pkgRoot, 'claude', r.template));
-    // Two guidance targets: machine-wide CLAUDE.md (claude) + project AGENTS.md
-    // (codex). The dual-mode block's flag detector gates AGENTS.md on both hosts
-    // being enabled, so single-host setups leave AGENTS.md untouched (no .bak).
+    // Three guidance targets (guidanceTargets): machine-wide ~/.claude/CLAUDE.md
+    // (claude), the project's own <cwd>/AGENTS.md (agents), and — only when
+    // ~/.codex exists — machine-wide ~/.codex/AGENTS.md (agents-user). The
+    // dual-mode block's flag detector gates it on both hosts being enabled, so
+    // single-host setups leave the agents files untouched (no .bak). Each target
+    // also force-strips blocks that no longer belong in it (retiredForTarget) —
+    // the migration path that clears the dual block out of any project AGENTS.md
+    // that still carries it after the re-scope (ADR-0008).
     const ctx = { flags: { dualMode: bothHostsEnabled(cfg) } };
-    const targets = [
-      { name: 'claude', label: 'CLAUDE.md', file: paths.claudeMdPath() },
-      { name: 'agents', label: 'AGENTS.md', file: path.join(cwd, 'AGENTS.md') },
-    ];
-    for (const t of targets) {
-      const treg = blocksForTarget(rowsReg, t.name);
+    for (const t of guidanceTargets({ cwd, cfg })) {
+      const treg = [...blocksForTarget(rowsReg, t.name), ...retiredForTarget(rowsReg, t.name)];
       const res = await syncBlocks(t.file, treg, resolve, { context: ctx });
       const changed = res.filter((r) => r.action !== 'unchanged' && r.action !== 'skipped')
         .map((r) => `${r.slug} ${r.action}`).join(', ');
-      // stay quiet on the AGENTS.md target unless it actually changed (single-host
-      // leaves it unmanaged); always report the claude target.
+      // stay quiet on the agents targets unless they actually changed (single-host
+      // leaves them unmanaged); always report the claude target.
       if (t.name === 'claude' || changed) ok(`blocks(${t.label}): ${changed || 'in sync'}`);
     }
   }
