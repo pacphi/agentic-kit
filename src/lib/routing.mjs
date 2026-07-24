@@ -40,13 +40,14 @@ export const SUBSCRIPTION_PROVIDERS = new Set(['claude-code', 'codex', 'ollama',
 // `--help`, and docs/PROVIDERS.md. NOT a hard allow-list: any model your host CLI
 // accepts also works — these are ak's curated picks. Web-verified on the date
 // below; model lines move fast, so re-check and let users override (ADR-0002/0003).
-export const MODEL_CATALOG_VERIFIED = '2026-07-23';
+export const MODEL_CATALOG_VERIFIED = '2026-07-24';
 export const MODEL_CATALOG = {
   claude: [
-    { id: 'claude-opus-4-8', tier: 'reasoning', note: 'deep reasoning — architecture, design, hard debugging' },
+    { id: 'claude-opus-5', tier: 'reasoning', note: 'new top Opus — ~2× Opus 4.8 at the same price, near-Fable on coding/agentic; premium reasoning default' },
     { id: 'claude-sonnet-5', tier: 'balanced', note: 'near-Opus at lower cost — review, spec, release' },
-    { id: 'claude-fable-5', tier: 'flagship', note: 'top capability (above Opus), premium — hardest problems' },
+    { id: 'claude-fable-5', tier: 'flagship', note: 'top capability (Mythos-class, above Opus 5) — hardest problems' },
     { id: 'claude-haiku-4-5-20251001', tier: 'fast', note: 'cheap/fast — high-volume mechanical work' },
+    { id: 'claude-opus-4-8', tier: 'prior', note: 'prior Opus generation — same price as opus-5, kept for pinned configs' },
   ],
   codex: [
     { id: 'gpt-5.4', tier: 'flagship', note: 'coding + reasoning + agentic — recommended execution default' },
@@ -138,15 +139,15 @@ export function swapRoute(route) {
 const R = (host, model, escalate) => ({ host, model, ...(escalate ? { escalate } : {}) });
 export const DEFAULT_ROUTES = {
   specification:       R('claude', 'claude-sonnet-5'),
-  architecture:        R('claude', 'claude-opus-4-8'),
-  design:              R('claude', 'claude-opus-4-8'),
-  implementation:      R('codex',  'gpt-5.4', [{ host: 'claude', model: 'claude-opus-4-8' }]),
-  testing:             R('codex',  'gpt-5.4', [{ host: 'claude', model: 'claude-opus-4-8' }]),
+  architecture:        R('claude', 'claude-opus-5'),
+  design:              R('claude', 'claude-opus-5'),
+  implementation:      R('codex',  'gpt-5.4', [{ host: 'claude', model: 'claude-opus-5' }]),
+  testing:             R('codex',  'gpt-5.4', [{ host: 'claude', model: 'claude-opus-5' }]),
   review:              R('claude', 'claude-sonnet-5'),
   'security-scan':     R('codex',  'gpt-5.4'),
-  'security-analysis': R('claude', 'claude-opus-4-8'),
+  'security-analysis': R('claude', 'claude-opus-5'),
   documentation:       R('codex',  'gpt-5.3-codex'),
-  debugging:           R('claude', 'claude-opus-4-8'),
+  debugging:           R('claude', 'claude-opus-5'),
   packaging:           R('codex',  'gpt-5.3-codex'),
   release:             R('claude', 'claude-sonnet-5'),
 };

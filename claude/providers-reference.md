@@ -35,7 +35,7 @@ For **deterministic** ordering (rather than relying on env auto-enable), `ak` wr
 
 ```bash
 ak x provider pick --aqe-provider claude-code \
-  --aqe-fallback 'claude-code:claude-opus-4-8; openai:gpt-5.6; gemini:gemini-3.5-flash'
+  --aqe-fallback 'claude-code:claude-opus-5; openai:gpt-5.6; gemini:gemini-3.5-flash'
 ```
 
 Each `provider:model,model` entry becomes an ordered `fallbackChain` entry (first = highest

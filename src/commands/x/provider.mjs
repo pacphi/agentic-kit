@@ -73,13 +73,13 @@ Options (pick, all optional — omit for interactive):
                                  billing: claude-code = Claude sub ($0),
                                  ollama/onnx = local ($0), all others = metered key
   --aqe-fallback '<chain>'     ordered aqe chain, e.g.
-                                 'claude-code:claude-opus-4-8; openai:gpt-5.6'
+                                 'claude-code:claude-opus-5; openai:gpt-5.6'
                                  (metered providers work too, e.g. add
                                  'openrouter:z-ai/glm-5.2' — GLM via OpenRouter,
                                  needs OPENROUTER_API_KEY in the env)
   --provider <csv>             register ruflo API providers (e.g. openai:gpt-5.6)
   --route 'act:host[:model]'   override one activity's routing (repeatable), e.g.
-                                 --route 'implementation:claude:claude-opus-4-8'
+                                 --route 'implementation:claude:claude-opus-5'
                                  activities: specification, architecture, design,
                                  implementation, testing, review, security-scan,
                                  security-analysis, documentation, debugging,
@@ -296,7 +296,7 @@ async function pick({ flags, cwd }) {
     aqeProvider = aAns ? aAns : null;
     const suggestion = suggestedFallbackFor(enabled);
     const fAns = (await rl.question(
-      `aqe fallback chain, ordered (e.g. "claude-code:claude-opus-4-8; openai:gpt-5.6"${suggestion ? `, blank = use suggested [${suggestion}]` : ', blank = none'}): `,
+      `aqe fallback chain, ordered (e.g. "claude-code:claude-opus-5; openai:gpt-5.6"${suggestion ? `, blank = use suggested [${suggestion}]` : ', blank = none'}): `,
     )).trim().toLowerCase();
     aqeFallback = fAns ? parseFallback(fAns) : (suggestion ? parseFallback(suggestion.toLowerCase()) : []);
     const provAns = (await rl.question('ruflo API-key providers to register (e.g. openai:gpt-5.6, blank to skip): ')).trim();
