@@ -133,6 +133,18 @@ async function main() {
         if (r.outdated) console.log(dim(`↑ ${r.pkg} ${r.latest} available (installed ${r.installed}) — run: ak sync`));
       }
     } catch { /* nudge is best-effort */ }
+    // Local artifact drift (guidance blocks, codex MCP bridge, statusline) —
+    // spawn-light file compares, so template/registration drift surfaces after
+    // ANY command, not only when someone happens to run `ak status`. Skipped
+    // where it would be pure noise: status/reference display the same drift
+    // themselves, sync just healed it, uninstall is leaving.
+    if (!['status', 'reference', 'uninstall'].includes(cmd)) {
+      try {
+        const { localDrift } = await import('../src/lib/nudge.mjs');
+        const drifted = await localDrift({ pkgRoot: PKG_ROOT });
+        if (drifted.length) console.log(dim(`↻ drifted: ${drifted.join(' · ')} — run: ak sync`));
+      } catch { /* nudge is best-effort */ }
+    }
   }
   return code ?? 0;
 }

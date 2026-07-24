@@ -59,6 +59,25 @@ The full menu of host/provider levels — QE provider selection, deterministic f
 chains, per-activity routing defaults, undo — lives in [PROVIDERS.md](PROVIDERS.md). This
 page is only about the *upgrade motion*.
 
+## How drift surfaces (you don't have to go looking)
+
+Every `ak` command ends with a best-effort, never-blocking drift nudge. It has two halves:
+
+- **Version drift** (npm-managed tools; TTL-cached network check):
+  `↑ ruflo 4.1.0 available (installed 4.0.0) — run: ak sync`
+- **Local artifact drift** (spawn-light file compares, evaluated on every run):
+  `↻ drifted: 2 CLAUDE.md block(s) · codex MCP unregistered — run: ak sync`
+
+The second half covers the artifacts `ak` *renders*: managed guidance blocks in
+`~/.claude/CLAUDE.md` and the project `AGENTS.md`, the Claude↔Codex MCP bridge (both
+directions), and the statusline footer. These can drift with **no version change at all** —
+a kit update (or, on an npm-linked dev checkout, merely merging a PR that edits a
+`claude/*.md` template) revises the source of truth, and the rendered copies lag until the
+next `ak sync`. Previously that lag was silent until someone happened to run `ak status`;
+the nudge closes the window. It uses the exact drift definitions `ak status` uses (the two
+can never disagree) and stays quiet after `status`, `sync`, and `ak x reference`, which
+already show the same information.
+
 ## Why `ak sync` pulled a prerelease
 
 The `4.0.0-alpha.*` train publishes to npm's **`next`** dist-tag, not `latest` (`latest`
