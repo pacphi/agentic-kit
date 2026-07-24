@@ -205,6 +205,11 @@ export function startDashboard({ port = 7431, cwd = process.cwd(), fetchStatus }
 // ─────────────────────────────────────────────────────────────────────────────
 // The page. One document, everything inline. Only `name` and `version` are
 // interpolated server-side; the client fetches /api/status and renders live.
+//
+// Layout: a sticky segmented control (Apple's tab idiom) splits the panel into
+// five views — Overview, Hosts & Routing, Providers, Runtime, Intelligence.
+// Problems never hide behind a tab: Overview aggregates every attention card,
+// and each tab carries a count badge when something in it is failing/warning.
 // ─────────────────────────────────────────────────────────────────────────────
 function renderPage({ name, version }) {
   return `<!doctype html>
@@ -222,7 +227,7 @@ function renderPage({ name, version }) {
     <div class="mark" aria-hidden="true"></div>
     <div class="band-titles">
       <h1 class="kit-name">${escapeHtml(name)}</h1>
-      <div class="kit-sub"><span class="mono ver">v${escapeHtml(version)}</span><span class="sep">·</span><span class="mono">local diagnostic panel</span></div>
+      <div class="kit-sub"><span class="mono ver">v${escapeHtml(version)}</span><span class="sep">·</span><span>local diagnostic panel</span></div>
     </div>
   </div>
   <div class="band-verdict">
@@ -240,35 +245,70 @@ function renderPage({ name, version }) {
   </div>
 </header>
 
-<div class="drift-banner" id="drift-banner" hidden></div>
+<nav class="tabbar">
+  <div class="seg" role="tablist" aria-label="dashboard sections" id="seg">
+    <span class="seg-thumb" id="seg-thumb" aria-hidden="true"></span>
+    <button class="seg-btn" role="tab" id="tab-overview" data-tab="overview" aria-selected="true" aria-controls="panel-overview" type="button">Overview<span class="badge" id="badge-overview" hidden></span></button>
+    <button class="seg-btn" role="tab" id="tab-hosts" data-tab="hosts" aria-selected="false" aria-controls="panel-hosts" type="button">Hosts &amp; Routing<span class="badge" id="badge-hosts" hidden></span></button>
+    <button class="seg-btn" role="tab" id="tab-providers" data-tab="providers" aria-selected="false" aria-controls="panel-providers" type="button">Providers<span class="badge" id="badge-providers" hidden></span></button>
+    <button class="seg-btn" role="tab" id="tab-runtime" data-tab="runtime" aria-selected="false" aria-controls="panel-runtime" type="button">Runtime<span class="badge" id="badge-runtime" hidden></span></button>
+    <button class="seg-btn" role="tab" id="tab-intel" data-tab="intel" aria-selected="false" aria-controls="panel-intel" type="button">Intelligence<span class="badge" id="badge-intel" hidden></span></button>
+  </div>
+</nav>
 
 <main class="wrap">
-  <div class="summary" id="summary" hidden></div>
-  <section id="cards" aria-live="polite"></section>
-
-  <section class="strip" id="history" hidden>
-    <div class="strip-head">
-      <h2 class="strip-title">learning over time</h2>
-      <span class="mono strip-note" id="strip-note"></span>
-    </div>
-    <div class="spark-row">
-      <figure class="spark">
-        <figcaption class="mono">patterns learned</figcaption>
-        <div class="spark-svg" id="spark-patterns"></div>
-      </figure>
-      <figure class="spark">
-        <figcaption class="mono">improvement Δpp</figcaption>
-        <div class="spark-svg" id="spark-delta"></div>
-      </figure>
-    </div>
+  <section class="panel" id="panel-overview" role="tabpanel" aria-labelledby="tab-overview">
+    <div class="summary" id="summary" hidden></div>
+    <div class="notice" id="update-notice" hidden></div>
+    <div id="attention" aria-live="polite"></div>
+    <h2 class="subhead" id="map-head" hidden>all subsystems</h2>
+    <div class="statusmap" id="statusmap"></div>
   </section>
 
-  <section class="strip" id="routing" hidden>
-    <div class="strip-head">
-      <h2 class="strip-title">per-activity routing</h2>
-      <span class="mono strip-note" id="routing-note"></span>
-    </div>
-    <div class="route-matrix" id="route-matrix"></div>
+  <section class="panel" id="panel-hosts" role="tabpanel" aria-labelledby="tab-hosts" hidden>
+    <div id="cards-hosts"></div>
+    <section class="strip" id="routing" hidden>
+      <div class="strip-head">
+        <h2 class="strip-title">per-activity routing</h2>
+        <span class="mono strip-note" id="routing-note"></span>
+      </div>
+      <div class="route-matrix" id="route-matrix"></div>
+    </section>
+  </section>
+
+  <section class="panel" id="panel-providers" role="tabpanel" aria-labelledby="tab-providers" hidden>
+    <div id="cards-providers"></div>
+    <section class="strip" id="models" hidden>
+      <div class="strip-head">
+        <h2 class="strip-title">models in play</h2>
+        <span class="mono strip-note" id="models-note"></span>
+      </div>
+      <div class="model-list" id="model-list"></div>
+    </section>
+  </section>
+
+  <section class="panel" id="panel-runtime" role="tabpanel" aria-labelledby="tab-runtime" hidden>
+    <div id="cards-runtime"></div>
+  </section>
+
+  <section class="panel" id="panel-intel" role="tabpanel" aria-labelledby="tab-intel" hidden>
+    <div id="cards-intel"></div>
+    <section class="strip" id="history" hidden>
+      <div class="strip-head">
+        <h2 class="strip-title">learning over time</h2>
+        <span class="mono strip-note" id="strip-note"></span>
+      </div>
+      <div class="spark-row">
+        <figure class="spark">
+          <figcaption class="mono">patterns learned</figcaption>
+          <div class="spark-svg" id="spark-patterns"></div>
+        </figure>
+        <figure class="spark">
+          <figcaption class="mono">improvement Δpp</figcaption>
+          <div class="spark-svg" id="spark-delta"></div>
+        </figure>
+      </div>
+    </section>
   </section>
 
   <footer class="foot mono">
@@ -288,35 +328,34 @@ function escapeHtml(s) {
 }
 
 // ── Styles ───────────────────────────────────────────────────────────────────
-// Design: "refined technical instrument". Editorial serif for display, a mono
-// stack for all data/labels — that serif+mono contrast is the signature. One
-// slate ground + a single teal signal accent; status semantics carry their own
-// calm green / amber / red / muted. CSS variables drive BOTH themes.
+// Design: Apple system motif. SF stack with a tight-tracked large title, a
+// frosted sticky segmented control (the macOS/iOS tab idiom), hairline
+// separators, soft diffuse shadows, and the Apple system palette — systemBlue
+// accent, systemGreen/Orange/Red status semantics. Restraint over ornament;
+// CSS variables drive BOTH themes.
 const CSS = `
 :root{
-  --serif:"Iowan Old Style","Palatino Linotype","Palatino","Georgia",serif;
-  --mono:ui-monospace,"SF Mono","JetBrains Mono","Cascadia Code","Menlo",monospace;
-  --r:14px; --r-sm:9px;
+  --sans:-apple-system,BlinkMacSystemFont,"SF Pro Text","SF Pro Display","Helvetica Neue","Segoe UI",sans-serif;
+  --mono:ui-monospace,"SF Mono","Menlo","Cascadia Code",monospace;
+  --r:16px; --r-sm:11px;
 }
 :root[data-theme="dark"]{
-  --bg:#0d1017; --bg-2:#0a0c11;
-  --panel:#151b23; --panel-2:#1a212b; --raised:#1e2732;
-  --ink:#e8e4d8; --ink-2:#b7bdc6; --ink-dim:#7f8895;
-  --line:rgba(255,255,255,.075); --line-2:rgba(255,255,255,.13);
-  --accent:#4fb6a8; --accent-soft:rgba(79,182,168,.16);
-  --ok:#5fbf82; --warn:#e0a83e; --fail:#e46b64; --info:#8a93a0;
-  --shadow:0 1px 0 rgba(255,255,255,.03),0 12px 30px -12px rgba(0,0,0,.7);
-  --grain:rgba(255,255,255,.018);
+  --bg:#000000; --panel:#1c1c1e; --panel-2:#2c2c2e; --raised:#3a3a3c; --thumb:#48484a;
+  --ink:#f5f5f7; --ink-2:rgba(235,235,245,.64); --ink-dim:rgba(235,235,245,.38);
+  --line:rgba(255,255,255,.09); --line-2:rgba(255,255,255,.17);
+  --accent:#0a84ff; --accent-soft:rgba(10,132,255,.16);
+  --ok:#30d158; --warn:#ff9f0a; --fail:#ff453a; --info:#98989d;
+  --material:rgba(16,16,18,.72);
+  --shadow:0 1px 2px rgba(0,0,0,.4),0 12px 32px -20px rgba(0,0,0,.9);
 }
 :root[data-theme="light"]{
-  --bg:#f2efe6; --bg-2:#eae6da;
-  --panel:#fbfaf5; --panel-2:#f5f2ea; --raised:#ffffff;
-  --ink:#242830; --ink-2:#454b54; --ink-dim:#767c85;
-  --line:rgba(20,24,30,.10); --line-2:rgba(20,24,30,.18);
-  --accent:#2c8578; --accent-soft:rgba(44,133,120,.13);
-  --ok:#2f8b52; --warn:#a9741a; --fail:#c04a44; --info:#6c727b;
-  --shadow:0 1px 0 rgba(255,255,255,.6),0 14px 30px -16px rgba(40,40,50,.35);
-  --grain:rgba(20,24,30,.02);
+  --bg:#f5f5f7; --panel:#ffffff; --panel-2:#f2f2f7; --raised:#ffffff; --thumb:#ffffff;
+  --ink:#1d1d1f; --ink-2:rgba(60,60,67,.68); --ink-dim:rgba(60,60,67,.42);
+  --line:rgba(60,60,67,.12); --line-2:rgba(60,60,67,.22);
+  --accent:#007aff; --accent-soft:rgba(0,122,255,.12);
+  --ok:#34c759; --warn:#ff9500; --fail:#ff3b30; --info:#8e8e93;
+  --material:rgba(249,249,251,.78);
+  --shadow:0 1px 2px rgba(0,0,0,.05),0 12px 30px -22px rgba(0,0,0,.22);
 }
 @media (prefers-color-scheme:light){
   :root:not([data-theme]){ color-scheme:light; }
@@ -326,66 +365,52 @@ html,body{margin:0;padding:0}
 body{
   background:var(--bg);
   color:var(--ink);
-  font-family:var(--mono);
-  font-size:14px; line-height:1.55;
+  font-family:var(--sans);
+  font-size:14px; line-height:1.5;
   -webkit-font-smoothing:antialiased;
   font-variant-numeric:tabular-nums;
   min-height:100vh;
   overflow-x:hidden;
-  background-image:
-    radial-gradient(1200px 600px at 15% -10%, var(--accent-soft), transparent 60%),
-    radial-gradient(900px 500px at 110% 0%, rgba(0,0,0,.10), transparent 55%);
-  background-attachment:fixed;
-}
-body::before{
-  content:""; position:fixed; inset:0; pointer-events:none; z-index:0;
-  background-image:radial-gradient(var(--grain) 1px, transparent 1px);
-  background-size:3px 3px; opacity:.9;
 }
 .mono{font-family:var(--mono)}
 
 /* ── header band ── */
 .band{
-  position:relative; z-index:1;
   display:flex; align-items:center; gap:20px; flex-wrap:wrap;
-  padding:20px clamp(16px,4vw,40px);
-  border-bottom:1px solid var(--line);
-  background:linear-gradient(180deg,var(--panel),transparent);
+  padding:24px clamp(16px,4vw,40px) 14px;
 }
-.band-lead{display:flex; align-items:center; gap:15px; min-width:0}
+.band-lead{display:flex; align-items:center; gap:14px; min-width:0}
 .mark{
-  width:34px; height:34px; flex:none; border-radius:9px;
-  background:
-    linear-gradient(145deg,var(--accent),transparent 70%),
-    var(--raised);
-  border:1px solid var(--line-2);
-  box-shadow:inset 0 0 0 1px rgba(255,255,255,.03), 0 6px 16px -8px var(--accent);
+  width:40px; height:40px; flex:none; border-radius:10px;
+  background:linear-gradient(165deg,#5ac8fa,#007aff 55%,#0a5fd6);
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.35),0 8px 18px -8px rgba(0,122,255,.55);
   position:relative;
 }
 .mark::after{
-  content:""; position:absolute; inset:9px; border-radius:3px;
-  border:1.5px solid var(--accent); opacity:.85;
+  content:""; position:absolute; inset:11px; border-radius:50%;
+  border:2.5px solid rgba(255,255,255,.92);
+  border-top-color:rgba(255,255,255,.35);
+  transform:rotate(-45deg);
 }
 .band-titles{min-width:0}
 .kit-name{
-  font-family:var(--serif); font-weight:600; font-style:italic;
-  font-size:clamp(20px,2.6vw,27px); line-height:1.05; margin:0;
-  letter-spacing:.2px;
+  font-size:clamp(21px,2.6vw,28px); font-weight:700; letter-spacing:-.022em;
+  line-height:1.1; margin:0;
 }
 .kit-sub{color:var(--ink-dim); font-size:12px; display:flex; gap:8px; align-items:center; margin-top:3px}
 .kit-sub .sep{opacity:.5}
 .ver{color:var(--accent)}
 .band-verdict{
-  display:flex; align-items:center; gap:10px; margin-left:auto;
-  padding:8px 15px; border:1px solid var(--line); border-radius:100px;
-  background:var(--panel-2);
+  display:flex; align-items:center; gap:9px; margin-left:auto;
+  padding:7px 15px; border:1px solid var(--line); border-radius:100px;
+  background:var(--panel);
 }
-.verdict-text{font-size:13px; letter-spacing:.3px}
+.verdict-text{font-size:13px; font-weight:500; letter-spacing:-.006em}
 .band-tools{display:flex; align-items:center; gap:16px}
 .refresh{display:flex; align-items:center; gap:8px; color:var(--ink-dim); font-size:12px}
 .pulse{
   width:8px; height:8px; border-radius:50%; background:var(--accent);
-  box-shadow:0 0 0 0 var(--accent); animation:pulse 2.4s ease-out infinite;
+  animation:pulse 2.4s ease-out infinite;
 }
 @keyframes pulse{
   0%{box-shadow:0 0 0 0 var(--accent-soft)}
@@ -394,55 +419,111 @@ body::before{
 }
 .toggle{
   display:inline-flex; align-items:center; justify-content:center;
-  width:36px; height:36px; padding:0;
-  color:var(--ink-2); background:var(--panel-2);
+  width:34px; height:34px; padding:0;
+  color:var(--ink-2); background:var(--panel);
   border:1px solid var(--line); border-radius:50%; cursor:pointer;
   transition:border-color .2s ease, color .2s ease, background .2s ease;
 }
-.toggle:hover{border-color:var(--line-2); color:var(--accent); background:var(--raised)}
+.toggle:hover{border-color:var(--line-2); color:var(--accent); background:var(--panel-2)}
 .toggle:focus-visible{outline:2px solid var(--accent); outline-offset:2px}
 .toggle .icon{display:inline-flex}
-.toggle .icon svg{width:17px; height:17px; display:block}
+.toggle .icon svg{width:16px; height:16px; display:block}
 
-/* ── drift banner ── */
-.drift-banner{
-  position:relative; z-index:1;
-  margin:14px clamp(16px,4vw,40px) 0;
-  padding:11px 16px; border-radius:var(--r-sm);
-  border:1px solid var(--warn); color:var(--ink);
-  background:linear-gradient(180deg,rgba(224,168,62,.12),transparent);
-  font-size:13px; display:flex; gap:10px; align-items:baseline;
+/* ── sticky frosted segmented control ── */
+.tabbar{
+  position:sticky; top:0; z-index:20;
+  display:flex; padding:8px clamp(16px,4vw,40px) 10px;
+  background:var(--material);
+  -webkit-backdrop-filter:saturate(180%) blur(20px);
+  backdrop-filter:saturate(180%) blur(20px);
+  border-bottom:1px solid var(--line);
 }
-.drift-banner b{color:var(--warn); font-family:var(--mono)}
+.seg{
+  position:relative; display:inline-flex; gap:2px; padding:3px;
+  border-radius:12px; background:var(--panel-2);
+  max-width:100%; overflow-x:auto; scrollbar-width:none;
+}
+.seg::-webkit-scrollbar{display:none}
+.seg-btn{
+  position:relative; z-index:1; border:0; background:transparent;
+  color:var(--ink-2); font-family:inherit; font-size:13px; font-weight:500;
+  letter-spacing:-.006em; padding:6px 14px; border-radius:9px; cursor:pointer;
+  white-space:nowrap; display:inline-flex; align-items:center; gap:6px;
+  transition:color .2s ease;
+}
+.seg-btn[aria-selected="true"]{color:var(--ink); font-weight:600}
+.seg-btn:focus-visible{outline:2px solid var(--accent); outline-offset:1px}
+.seg-thumb{
+  position:absolute; top:3px; left:3px; height:calc(100% - 6px); width:0;
+  border-radius:9px; background:var(--thumb);
+  box-shadow:0 1px 4px rgba(0,0,0,.18),0 0 0 .5px rgba(0,0,0,.04);
+  transition:left .25s cubic-bezier(.3,.7,.3,1), width .25s cubic-bezier(.3,.7,.3,1);
+}
+.badge{
+  min-width:16px; height:16px; padding:0 4px; border-radius:8px;
+  background:var(--fail); color:#fff; font-size:10.5px; font-weight:600;
+  display:inline-flex; align-items:center; justify-content:center; line-height:1;
+}
+.badge[data-tone="warn"]{background:var(--warn)}
+.badge[hidden]{display:none}
 
 /* ── layout ── */
-.wrap{position:relative; z-index:1; padding:clamp(16px,4vw,40px); max-width:1180px; margin:0 auto}
+.wrap{padding:clamp(16px,4vw,40px); max-width:1180px; margin:0 auto}
+.panel{animation:fade .25s ease}
+.panel[hidden]{display:none}
+@keyframes fade{from{opacity:0; transform:translateY(4px)}to{opacity:1; transform:none}}
+
+/* ── triage summary + update notice (Overview) ── */
+.summary{
+  display:flex; flex-wrap:wrap; gap:9px; align-items:center;
+  margin-bottom:14px; font-size:12.5px;
+}
+.pill{
+  display:inline-flex; align-items:center; gap:7px;
+  padding:5px 12px; border-radius:100px;
+  border:1px solid var(--line); background:var(--panel);
+  color:var(--ink-2); letter-spacing:-.006em;
+}
+.pill .dot{width:8px; height:8px}
+.pill b{color:var(--ink); font-weight:600}
+.pill[data-level="fail"]{border-color:color-mix(in srgb,var(--fail) 50%,transparent)}
+.pill[data-level="warn"]{border-color:color-mix(in srgb,var(--warn) 45%,transparent)}
+.pill[data-tone="calm"]{opacity:.72}
+.notice{
+  display:flex; align-items:baseline; gap:9px;
+  padding:10px 14px; margin-bottom:14px;
+  border-radius:var(--r-sm); background:var(--accent-soft);
+  color:var(--ink-2); font-size:13px;
+}
+.notice .up{color:var(--accent); font-weight:700}
+.notice code{font-family:var(--mono); color:var(--ink); font-size:12px}
+.notice b{color:var(--ink); font-weight:600}
+.allclear{
+  display:flex; align-items:center; gap:10px;
+  padding:20px 22px; margin-bottom:6px;
+  border-radius:var(--r); background:var(--panel); border:1px solid var(--line);
+  box-shadow:var(--shadow); color:var(--ink-2); font-size:14px;
+}
+
+/* ── cards ── */
 .grid{
   display:grid; gap:14px;
   grid-template-columns:repeat(auto-fill,minmax(272px,1fr));
 }
-
-/* ── card ── */
 .card{
-  position:relative;
   background:var(--panel); border:1px solid var(--line);
   border-radius:var(--r); padding:16px 17px 15px;
   box-shadow:var(--shadow);
-  opacity:0; transform:translateY(8px);
-  animation:rise .5s cubic-bezier(.2,.7,.3,1) forwards;
+  opacity:0; transform:translateY(6px);
+  animation:rise .45s cubic-bezier(.2,.7,.3,1) forwards;
   overflow:hidden;
-}
-.card::before{
-  content:""; position:absolute; left:0; top:0; bottom:0; width:3px;
-  background:var(--lvl,var(--info)); opacity:.75;
 }
 @keyframes rise{to{opacity:1; transform:none}}
 .card-top{display:flex; align-items:center; gap:10px; margin-bottom:9px}
 .dot{
-  width:11px; height:11px; border-radius:50%; flex:none;
+  width:10px; height:10px; border-radius:50%; flex:none;
   background:var(--lvl,var(--info));
-  box-shadow:0 0 0 3px color-mix(in srgb,var(--lvl,var(--info)) 22%, transparent),
-             0 0 10px -1px var(--lvl,var(--info));
+  box-shadow:0 0 0 3px color-mix(in srgb,var(--lvl,var(--info)) 20%, transparent);
 }
 .card[data-level="ok"]{--lvl:var(--ok)}
 .card[data-level="warn"]{--lvl:var(--warn)}
@@ -454,41 +535,11 @@ body::before{
 .dot[data-level="fail"]{--lvl:var(--fail)}
 .dot[data-level="info"]{--lvl:var(--info)}
 .dot[data-level="unknown"]{--lvl:var(--ink-dim)}
-.card-name{
-  font-family:var(--serif); font-size:17px; font-weight:600;
-  letter-spacing:.2px; color:var(--ink);
-}
+.card-name{font-size:15px; font-weight:600; letter-spacing:-.014em; color:var(--ink)}
 .card-level{
-  margin-left:auto; font-size:10.5px; letter-spacing:.14em; text-transform:uppercase;
-  color:var(--lvl,var(--info));
+  margin-left:auto; font-size:10.5px; font-weight:600; letter-spacing:.1em;
+  text-transform:uppercase; color:var(--lvl,var(--info));
 }
-.card-msg{color:var(--ink-2); font-size:13px; line-height:1.5; word-break:break-word}
-.card-fix{
-  margin-top:10px; padding-top:9px; border-top:1px solid var(--line);
-  font-size:12px; color:var(--ink-dim); display:flex; gap:7px; align-items:baseline;
-}
-.card-fix .arrow{color:var(--accent)}
-.card-fix code{color:var(--ink-2)}
-
-/* ── triage summary strip ── */
-.summary{
-  position:relative; z-index:1;
-  display:flex; flex-wrap:wrap; gap:9px; align-items:center;
-  margin-bottom:18px; font-size:12.5px;
-}
-.pill{
-  display:inline-flex; align-items:center; gap:7px;
-  padding:5px 12px; border-radius:100px;
-  border:1px solid var(--line); background:var(--panel);
-  color:var(--ink-2); letter-spacing:.2px;
-}
-.pill .dot{width:8px; height:8px}
-.pill b{color:var(--ink); font-family:var(--mono)}
-.pill[data-level="fail"]{border-color:color-mix(in srgb,var(--fail) 55%,transparent)}
-.pill[data-level="warn"]{border-color:color-mix(in srgb,var(--warn) 50%,transparent)}
-.pill[data-tone="calm"]{opacity:.7}
-
-/* ── grouped subsystem card ── */
 .card-count{
   margin-left:auto; font-size:11px; color:var(--ink-dim);
   border:1px solid var(--line); border-radius:100px; padding:1px 8px;
@@ -508,36 +559,47 @@ body::before{
 .row-msg{min-width:0; word-break:break-word}
 .row-fix{display:block; margin-top:3px; color:var(--ink-dim); font-size:12px}
 .row-fix .arrow{color:var(--accent); margin-right:5px}
-.row-fix code{color:var(--ink-2)}
+.row-fix code{font-family:var(--mono); color:var(--ink-2); font-size:11.5px}
 
-/* healthy section: present but recessed so problems dominate the eye */
-.section-label{
-  grid-column:1/-1;
-  display:flex; align-items:center; gap:12px;
-  margin:28px 0 4px; color:var(--ink-dim); font-size:11px;
-  letter-spacing:.16em; text-transform:uppercase;
+/* ── overview status map ── */
+.subhead{
+  margin:24px 0 10px; color:var(--ink-dim); font-size:12px; font-weight:600;
+  letter-spacing:.07em; text-transform:uppercase;
 }
-.section-label::after{content:""; flex:1; height:1px; background:var(--line)}
-.grid.calm .card{opacity:.62; transition:opacity .2s ease}
-.grid.calm .card:hover,.grid.calm .card:focus-within{opacity:1}
+.statusmap{
+  display:grid; gap:8px;
+  grid-template-columns:repeat(auto-fill,minmax(160px,1fr));
+}
+.tile{
+  display:flex; align-items:center; gap:9px; text-align:left;
+  padding:10px 13px; border-radius:var(--r-sm);
+  background:var(--panel); border:1px solid var(--line);
+  color:var(--ink); font-family:inherit; font-size:12.5px; font-weight:500;
+  letter-spacing:-.006em; cursor:pointer;
+  transition:background .15s ease, border-color .15s ease;
+}
+.tile:hover{background:var(--panel-2); border-color:var(--line-2)}
+.tile:focus-visible{outline:2px solid var(--accent); outline-offset:1px}
+.tile .dot{width:8px; height:8px}
+.tile .tile-go{margin-left:auto; color:var(--ink-dim); font-weight:400}
 
-/* ── history strip ── */
+/* ── strips (routing / models / learning) ── */
 .strip{
-  margin-top:26px; padding:20px clamp(16px,3vw,26px);
+  margin-top:22px; padding:18px clamp(14px,3vw,24px);
   background:var(--panel); border:1px solid var(--line);
   border-radius:var(--r); box-shadow:var(--shadow);
 }
 .strip-head{display:flex; align-items:baseline; justify-content:space-between; gap:12px; margin-bottom:14px}
-.strip-title{font-family:var(--serif); font-size:18px; font-weight:600; margin:0; letter-spacing:.2px}
+.strip-title{font-size:16px; font-weight:600; letter-spacing:-.014em; margin:0}
 .strip-note{color:var(--ink-dim); font-size:12px}
-.route-matrix{display:flex; flex-direction:column; gap:1px; background:var(--line); border:1px solid var(--line); border-radius:10px; overflow:hidden}
+.route-matrix{display:flex; flex-direction:column; gap:1px; background:var(--line); border:1px solid var(--line); border-radius:var(--r-sm); overflow:hidden}
 .r-row{display:grid; grid-template-columns:minmax(140px,1.4fr) 84px minmax(120px,1.4fr) minmax(90px,1fr); gap:10px; align-items:center; padding:8px 14px; background:var(--panel)}
 .r-row:hover{background:var(--panel-2)}
 .r-act{color:var(--ink); font-size:12.5px; display:flex; align-items:center; gap:6px}
 .r-host{font-size:11px; font-weight:600; text-align:center; padding:2px 0; border-radius:100px; border:1px solid var(--line-2)}
-.r-host-claude{color:#e0a06a; background:rgba(224,160,106,.12); border-color:rgba(224,160,106,.32)}
-.r-host-codex{color:var(--accent); background:var(--accent-soft); border-color:rgba(79,182,168,.32)}
-.r-host[data-primary]{box-shadow:inset 0 0 0 1.5px var(--accent), 0 0 0 1px var(--accent-soft); font-weight:700}
+.r-host-claude{color:#ff9f0a; background:rgba(255,159,10,.12); border-color:rgba(255,159,10,.3)}
+.r-host-codex{color:var(--accent); background:var(--accent-soft); border-color:color-mix(in srgb,var(--accent) 35%,transparent)}
+.r-host[data-primary]{box-shadow:inset 0 0 0 1.5px var(--accent); font-weight:700}
 .r-model{color:var(--ink-2); font-size:11.5px}
 .r-meta{display:flex; align-items:center; gap:8px; justify-content:flex-end; font-size:10.5px}
 .r-esc{color:var(--ink-dim)}
@@ -545,7 +607,13 @@ body::before{
 .r-src-user{color:var(--accent)}
 .r-tag{font-size:8.5px; text-transform:uppercase; letter-spacing:.05em; color:var(--accent); border:1px solid var(--accent-soft); border-radius:3px; padding:0 3px}
 @media(max-width:560px){.r-row{grid-template-columns:1fr 70px} .r-model,.r-meta{grid-column:1/-1; justify-content:flex-start}}
+.model-list{display:flex; flex-direction:column; gap:1px; background:var(--line); border:1px solid var(--line); border-radius:var(--r-sm); overflow:hidden}
+.m-row{display:grid; grid-template-columns:84px 1fr auto; gap:12px; align-items:center; padding:9px 14px; background:var(--panel)}
+.m-row:hover{background:var(--panel-2)}
+.m-model{color:var(--ink); font-size:12.5px}
+.m-n{color:var(--ink-dim); font-size:11.5px}
 .spark-row{display:grid; grid-template-columns:repeat(auto-fit,minmax(240px,1fr)); gap:20px}
+.spark{margin:0}
 .spark figcaption{color:var(--ink-dim); font-size:11px; letter-spacing:.06em; text-transform:uppercase; margin-bottom:6px}
 .spark-svg{width:100%; overflow-x:auto}
 .spark-svg svg{display:block; width:100%; height:auto}
@@ -553,7 +621,7 @@ body::before{
 /* ── footer ── */
 .foot{margin-top:24px; padding-top:16px; border-top:1px solid var(--line); color:var(--ink-dim); font-size:12px}
 
-.empty{color:var(--ink-dim); font-size:13px; padding:30px 4px}
+.empty{color:var(--ink-dim); font-size:13px; padding:26px 4px}
 
 @media (max-width:560px){
   .band{gap:12px}
@@ -573,7 +641,7 @@ const JS = `
 (function(){
   "use strict";
   var root=document.documentElement;
-  var LS="ak-dash-theme";
+  var LS="ak-dash-theme", LS_TAB="ak-dash-tab";
 
   // theme: stored choice wins; otherwise follow the OS.
   function sysTheme(){return window.matchMedia&&window.matchMedia("(prefers-color-scheme:light)").matches?"light":"dark";}
@@ -597,6 +665,64 @@ const JS = `
   var LAST=null, lastUpdated=0;
 
   function esc(s){return String(s==null?"":s).replace(/[&<>"']/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c];});}
+
+  // ── tabs (segmented control) ──
+  // Category map: every subsystem lands in exactly one tab; unknown/future
+  // subsystems fall back to Runtime so nothing is ever dropped. Overview
+  // aggregates all attention cards regardless of category.
+  var TABS=["overview","hosts","providers","runtime","intel"];
+  var CAT={
+    hosts:"hosts", mcp:"hosts", "codex-mcp":"hosts", routing:"hosts",
+    providers:"providers",
+    learning:"intel", "ruvnet-brain":"intel", "ruvnet-brain-nightly":"intel", aqe:"intel", agentdb:"intel"
+  };
+  function catOf(s){return CAT[s]||"runtime";}
+
+  var activeTab="overview";
+  try{var st=localStorage.getItem(LS_TAB); if(st&&TABS.indexOf(st)>=0)activeTab=st;}catch(e){}
+  // deep-link: #providers etc. wins over the stored tab
+  try{var h=location.hash.slice(1); if(h&&TABS.indexOf(h)>=0)activeTab=h;}catch(e){}
+
+  function positionThumb(){
+    var segEl=document.getElementById("seg"), thumb=document.getElementById("seg-thumb");
+    if(!segEl||!thumb)return;
+    var btn=segEl.querySelector('[data-tab="'+activeTab+'"]');
+    if(!btn)return;
+    thumb.style.left=btn.offsetLeft+"px";
+    thumb.style.width=btn.offsetWidth+"px";
+  }
+  function setTab(id,focus){
+    activeTab=id;
+    try{localStorage.setItem(LS_TAB,id);}catch(e){}
+    try{if(history.replaceState)history.replaceState(null,"","#"+id);}catch(e){}
+    for(var i=0;i<TABS.length;i++){
+      var t=TABS[i], on=(t===id);
+      var btn=document.querySelector('[data-tab="'+t+'"]');
+      var panel=document.getElementById("panel-"+t);
+      if(btn){btn.setAttribute("aria-selected",on?"true":"false"); btn.tabIndex=on?0:-1; if(on&&focus)btn.focus();}
+      if(panel)panel.hidden=!on;
+    }
+    positionThumb();
+  }
+  var seg=document.getElementById("seg");
+  if(seg){
+    seg.addEventListener("click",function(e){
+      var b=e.target.closest?e.target.closest("[data-tab]"):null;
+      if(b)setTab(b.getAttribute("data-tab"));
+    });
+    seg.addEventListener("keydown",function(e){
+      if(e.key!=="ArrowLeft"&&e.key!=="ArrowRight")return;
+      var i=TABS.indexOf(activeTab);
+      i=(i+(e.key==="ArrowRight"?1:TABS.length-1))%TABS.length;
+      setTab(TABS[i],true); e.preventDefault();
+    });
+  }
+  window.addEventListener("resize",positionThumb);
+  var mapEl=document.getElementById("statusmap");
+  if(mapEl)mapEl.addEventListener("click",function(e){
+    var t=e.target.closest?e.target.closest("[data-go]"):null;
+    if(t)setTab(t.getAttribute("data-go"));
+  });
 
   // severity rank for rollups + triage sort; preferred order breaks ties.
   var RANK={fail:3,warn:2,ok:1,info:0,unknown:0};
@@ -644,8 +770,12 @@ const JS = `
     +"</article>";
   }
 
-  function gridHtml(groups,calm){
-    return '<div class="grid'+(calm?" calm":"")+'">'+groups.map(groupCard).join("")+"</div>";
+  function gridHtml(groups){
+    return '<div class="grid">'+groups.map(groupCard).join("")+"</div>";
+  }
+  function stagger(el){
+    var cards=el.querySelectorAll(".card");
+    for(var i=0;i<cards.length;i++){cards[i].style.animationDelay=(i*40)+"ms";}
   }
 
   function renderSummary(groups){
@@ -661,20 +791,59 @@ const JS = `
     el.hidden=false;
   }
 
-  function renderCards(rows){
-    var el=document.getElementById("cards");
-    if(!rows||!rows.length){el.innerHTML='<div class="empty">no subsystem rows reported.</div>';return;}
-    var groups=groupRows(rows);
+  function renderBadges(cats){
+    for(var c in cats){
+      var el=document.getElementById("badge-"+c);
+      if(!el)continue;
+      var f=0,w=0;
+      for(var i=0;i<cats[c].length;i++){
+        var L=cats[c][i].level;
+        if(L==="fail")f++; else if(L==="warn")w++;
+      }
+      var n=f+w;
+      if(!n){el.hidden=true;el.textContent="";el.removeAttribute("data-tone");}
+      else{el.hidden=false;el.textContent=String(n);el.setAttribute("data-tone",f?"fail":"warn");}
+    }
+  }
+
+  function tile(g){
+    return '<button class="tile" type="button" data-go="'+esc(catOf(g.subsystem))+'" title="open in its tab">'
+      +'<span class="dot" data-level="'+esc(g.level)+'"></span>'
+      +esc(g.subsystem)
+      +'<span class="tile-go">&rsaquo;</span>'
+    +"</button>";
+  }
+
+  function renderPanels(rows){
+    var groups=groupRows(rows||[]);
     renderSummary(groups);
+
+    // Overview: every attention card, in full, regardless of category.
     var attn=groups.filter(function(x){return x.level==="fail"||x.level==="warn";});
-    var calm=groups.filter(function(x){return x.level!=="fail"&&x.level!=="warn";});
-    var html="";
-    if(attn.length)html+=gridHtml(attn,false);
-    if(calm.length)html+=(attn.length?'<div class="section-label">healthy · '+calm.length+" subsystems</div>":"")+gridHtml(calm,true);
-    el.innerHTML=html;
-    // staggered reveal, attention cards first
-    var cards=el.querySelectorAll(".card");
-    for(var i=0;i<cards.length;i++){cards[i].style.animationDelay=(i*40)+"ms";}
+    var ael=document.getElementById("attention");
+    if(!groups.length){
+      ael.innerHTML='<div class="empty">no subsystem rows reported.</div>';
+    }else if(attn.length){
+      ael.innerHTML=gridHtml(attn); stagger(ael);
+    }else{
+      ael.innerHTML='<div class="allclear"><span class="dot" data-level="ok"></span>All systems nominal — nothing needs attention.</div>';
+    }
+
+    // Overview: compact status map of every subsystem; tiles jump to the tab.
+    var mh=document.getElementById("map-head");
+    document.getElementById("statusmap").innerHTML=groups.map(tile).join("");
+    mh.hidden=!groups.length;
+
+    // Category panels.
+    var cats={hosts:[],providers:[],runtime:[],intel:[]};
+    for(var i=0;i<groups.length;i++)cats[catOf(groups[i].subsystem)].push(groups[i]);
+    for(var c in cats){
+      var el=document.getElementById("cards-"+c);
+      if(!el)continue;
+      if(cats[c].length){el.innerHTML=gridHtml(cats[c]); stagger(el);}
+      else{el.innerHTML='<div class="empty">nothing reported here.</div>';}
+    }
+    renderBadges(cats);
   }
 
   function renderVerdict(overall){
@@ -685,18 +854,20 @@ const JS = `
     txt.textContent=LEVEL_WORD[overall]||LEVEL_WORD.unknown;
   }
 
-  function renderDrift(drift){
-    var b=document.getElementById("drift-banner");
+  // Update drift renders as a quiet notice line in Overview — no banner. The
+  // versions cards still carry the per-tool detail.
+  function renderNotice(drift){
+    var b=document.getElementById("update-notice");
     var out=(drift||[]).filter(function(d){return d&&d.outdated;});
     if(!out.length){b.hidden=true;b.innerHTML="";return;}
     var parts=out.map(function(d){return "<b>"+esc(d.pkg)+"</b> "+esc(d.installed)+" &rarr; "+esc(d.latest);});
-    b.innerHTML='<span>&#9053;</span><span>update available: '+parts.join(" &nbsp;·&nbsp; ")+' &mdash; run <b>ak sync</b></span>';
+    b.innerHTML='<span class="up">&uarr;</span><span>'+out.length+" update"+(out.length>1?"s":"")
+      +" available: "+parts.join(" &nbsp;·&nbsp; ")+" &mdash; run <code>ak sync</code></span>";
     b.hidden=false;
   }
 
   // ── sparkline (pure SVG) ──
-  function accent(){return getComputedStyle(root).getPropertyValue("--accent").trim()||"#4fb6a8";}
-  function dimc(){return getComputedStyle(root).getPropertyValue("--ink-dim").trim()||"#7f8895";}
+  function accent(){return getComputedStyle(root).getPropertyValue("--accent").trim()||"#0a84ff";}
   function sparkline(values){
     var W=100,H=32,pad=3;
     if(!values.length)return "";
@@ -768,14 +939,44 @@ const JS = `
     document.getElementById("route-matrix").innerHTML=html;
   }
 
+  // Providers tab: the distinct host+model pairs the routing policy puts in
+  // play, with how many activities each covers. Hidden without a dual policy.
+  function renderModels(rt){
+    var strip=document.getElementById("models");
+    if(!rt||!rt.routes||!rt.routes.length){strip.hidden=true;return;}
+    var seen={},list=[];
+    for(var i=0;i<rt.routes.length;i++){
+      var r=rt.routes[i];
+      if(!r.model)continue;
+      var k=r.host+"|"+r.model;
+      if(!seen[k]){seen[k]={host:r.host,model:r.model,n:0};list.push(seen[k]);}
+      seen[k].n++;
+    }
+    if(!list.length){strip.hidden=true;return;}
+    strip.hidden=false;
+    document.getElementById("models-note").textContent="primary: "+(rt.primaryHost||"claude");
+    var html="";
+    for(var j=0;j<list.length;j++){
+      var m=list[j];
+      html+='<div class="m-row">'
+        +'<span class="r-host r-host-'+esc(m.host)+'">'+esc(m.host)+"</span>"
+        +'<span class="m-model mono">'+esc(m.model)+"</span>"
+        +'<span class="m-n">'+m.n+" activit"+(m.n>1?"ies":"y")+"</span>"
+      +"</div>";
+    }
+    document.getElementById("model-list").innerHTML=html;
+  }
+
   function render(data){
     if(!data)return;
     LAST=data;
     renderVerdict(data.overall);
-    renderDrift(data.drift);
-    renderCards(data.rows);
+    renderNotice(data.drift);
+    renderPanels(data.rows);
     renderHistory(data);
     renderRouting(data.routing);
+    renderModels(data.routing);
+    positionThumb(); // badges can change segment widths
   }
 
   function ago(sec){
@@ -798,6 +999,7 @@ const JS = `
     });
   }
 
+  setTab(activeTab);
   poll();
   setInterval(poll,5000);
   setInterval(tickClock,1000);
