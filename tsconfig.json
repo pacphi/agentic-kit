@@ -14,5 +14,7 @@
     "forceConsistentCasingInFileNames": true
   },
   "// scope": "Shipped code + scripts. Tests are fixture-heavy (dynamic shapes) — typechecking them yields inference noise, not bugs; they're covered by `pnpm test`.",
-  "include": ["src/**/*.mjs", "bin/**/*.mjs", "scripts/**/*.mjs"]
+  "include": ["src/**/*.mjs", "bin/**/*.mjs", "scripts/**/*.mjs"],
+  "// exclude": "admin-view.mjs is BROWSER code (DOM globals, no node types) — never node-imported, only read as text and embedded into the served admin page (ADR-0007 §5). Typechecking it against node lib yields only 'Cannot find name document' noise.",
+  "exclude": ["src/lib/admin-view.mjs"]
 }

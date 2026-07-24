@@ -24,7 +24,7 @@ release this kit. User-facing docs live in [README.md](README.md); this file is 
 
 ### CLI shape (`bin/agentic-kit.mjs`)
 
-- **Porcelain** (daily): `setup`, `status`, `sync`, `dashboard`, `uninstall`. Bare `ak` → `status --hint`. (`dashboard` is also reachable as `ak x dashboard`.)
+- **Porcelain** (daily): `setup`, `status`, `sync`, `dashboard`, `admin`, `dual`, `uninstall`. Bare `ak` → `status --hint`. (`dashboard` and `admin` are also reachable as `ak x dashboard` / `ak x admin`.)
 - **Plumbing** (power users): `ak x daemon-gc | mcp | reference | verify | improvement-eval`.
 - Each command module exports `options` (a `parseArgs` config) and `run({ flags, positionals, pkgRoot })`.
 - A best-effort drift nudge runs after non-`sync`, non-`--json` commands.
@@ -39,7 +39,7 @@ src/
   commands/              # porcelain verbs
     setup.mjs  status.mjs  sync.mjs  dual.mjs  uninstall.mjs
     x/                   # plumbing verbs
-      daemon-gc.mjs  dashboard.mjs  harvest.mjs  mcp.mjs  provider.mjs  reference.mjs  verify.mjs
+      admin.mjs  daemon-gc.mjs  dashboard.mjs  harvest.mjs  mcp.mjs  provider.mjs  reference.mjs  verify.mjs
   lib/                   # the engine — each file is one concern
     heal.mjs             # the mutations sync/setup apply (idempotent, {ok,detail})
     natives.mjs          # better-sqlite3 / agentdb native detection
@@ -54,6 +54,11 @@ src/
     agentdb.mjs          # agentdb CLI coherence (harvest write path)
     health-history.mjs   # regression ring appended by sync, read by status
     dashboard-server.mjs # read-only localhost dashboard (shells `ak status --json`)
+    admin-server.mjs     # maintainer admin: loopback server, per-session token auth, page assembly (ADR-0007)
+    admin-collect.mjs    # admin's server-side GitHub/npm fan-out → typed payload (injectable fetchers)
+    admin-model.mjs      # PURE admin number model — imports nothing; embedded in the page AND node-tested
+    admin-view.mjs       # admin browser controller (embedded into the page; not node-imported)
+    browser.mjs          # openInBrowser — shared by dashboard + admin
     npx.mjs              # stale npx-cache detection/prune
     mcp.mjs  settings.mjs  config.mjs  paths.mjs  statusline.mjs
     rvf.mjs  daemons.mjs  exec.mjs  output.mjs

@@ -13,11 +13,13 @@ const PORCELAIN = {
   sync: () => import('../src/commands/sync.mjs'),
   setup: () => import('../src/commands/setup.mjs'),
   dashboard: () => import('../src/commands/x/dashboard.mjs'),
+  admin: () => import('../src/commands/x/admin.mjs'),
   dual: () => import('../src/commands/dual.mjs'),
   uninstall: () => import('../src/commands/uninstall.mjs'),
 };
 
 const PLUMBING = {
+  'admin': () => import('../src/commands/x/admin.mjs'),
   'daemon-gc': () => import('../src/commands/x/daemon-gc.mjs'),
   'dashboard': () => import('../src/commands/x/dashboard.mjs'),
   'harvest': () => import('../src/commands/x/harvest.mjs'),
@@ -35,6 +37,7 @@ Usage (ak = alias of agentic-kit):
   ak status          read-only dashboard: what's true, what's drifted  [--json] [--deep]
   ak sync            converge to good: upgrade + heal + verify          [--dry-run] [--no-upgrade]
   ak dashboard       open the local web dashboard (localhost; auto-opens browser)  [--port N] [--no-open]
+  ak admin           maintainer-only telemetry admin (localhost; GitHub/npm egress)  [--port N] [--no-open]
   ak dual            run a Claude+Codex collaboration swarm (dual-host)  [run <template> "task"] [--dry-run]
   ak uninstall       leave cleanly                                      [--this-project] [--purge]
 
@@ -51,6 +54,7 @@ More:
 const HELP_ALL = `${HELP}
 
 Plumbing (power users) — each takes --help:
+  ak x admin [--port N]        maintainer-only telemetry admin (localhost; GitHub/npm egress)
   ak x daemon-gc [--kill]      list/stop stale ruflo daemons
   ak x dashboard [--port N]    read-only local health dashboard (localhost only)
   ak x harvest [--dry-run]     opt-in learning-write: replay experiences into the substrate
