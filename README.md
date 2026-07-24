@@ -131,7 +131,8 @@ you opt in. Two independent axes:
 
 `ak x provider status` shows what's detected, wired, and routed; `ak x provider pick` chooses and
 applies (reversibly); `ak x provider off` restores the claude-only default. Full guide:
-[docs/PROVIDERS.md](docs/PROVIDERS.md).
+[docs/PROVIDERS.md](docs/PROVIDERS.md). Already on an older `ak` and adopting a later capability
+(like dual-host)? [docs/UPGRADING.md](docs/UPGRADING.md) covers the `sync` vs `provider pick` motion.
 
 ## Troubleshooting
 

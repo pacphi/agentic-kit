@@ -34,6 +34,11 @@ for you:
 
 ## Level 1 — turn on codex (one command)
 
+> [!NOTE]
+> Already have an older `ak` installed and want a capability that shipped later (like
+> dual-host)? Updating the binary and enabling the feature are two separate motions —
+> see [UPGRADING.md](UPGRADING.md) for the `sync` vs `provider pick` distinction.
+
 ```bash
 ak x provider pick
 ```
