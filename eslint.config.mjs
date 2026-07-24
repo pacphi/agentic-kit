@@ -41,6 +41,14 @@ export default [
     languageOptions: { sourceType: 'commonjs' },
   },
   {
+    // admin-view.mjs is BROWSER code — never node-imported, only read as text and
+    // embedded into the served admin page (ADR-0007 §5). It legitimately uses DOM
+    // globals (document, localStorage, location, fetch, history, setInterval).
+    // Lint it for correctness with the browser environment, not the node one.
+    files: ['src/lib/admin-view.mjs'],
+    languageOptions: { globals: { ...globals.browser } },
+  },
+  {
     // The statusline footer is an EMITTED shell-statusline template + its test:
     // deliberately old-school (var, literal ANSI escape bytes, bare catch bindings)
     // because the snippet runs embedded in the user's shell, not as normal source.

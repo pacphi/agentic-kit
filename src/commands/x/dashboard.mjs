@@ -5,8 +5,8 @@
 // `ak status --json` (plus version drift, improvement.json, and the health
 // ring). Runs FOREGROUND and blocks until Ctrl-C; nothing is detached and
 // nothing mutates state.
-import { spawn } from 'node:child_process';
 import { startDashboard } from '../../lib/dashboard-server.mjs';
+import { openInBrowser } from '../../lib/browser.mjs';
 import { ok, info, dim, warn } from '../../lib/output.mjs';
 
 export const options = {
@@ -35,23 +35,6 @@ Examples:
   ak x dashboard              serve + open http://127.0.0.1:7431
   ak x dashboard --port 8080  pick a port
   ak x dashboard --no-open    print the URL only (SSH / headless)`;
-
-/** Open a URL in the OS default browser, best-effort (never throws). Zero-dep:
- *  macOS `open`, Windows `cmd /c start`, else `xdg-open`. */
-function openInBrowser(url) {
-  const cmd = process.platform === 'darwin' ? 'open'
-    : process.platform === 'win32' ? 'cmd'
-      : 'xdg-open';
-  const args = process.platform === 'win32' ? ['/c', 'start', '', url] : [url];
-  try {
-    const child = spawn(cmd, args, { stdio: 'ignore', detached: true });
-    child.on('error', () => { /* no browser / headless — URL is already printed */ });
-    child.unref();
-    return true;
-  } catch {
-    return false;
-  }
-}
 
 export async function run({ flags }) {
   let port = 7431;

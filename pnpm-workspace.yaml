@@ -1,0 +1,8 @@
+minimumReleaseAgeExclude:
+  - js-yaml@5.2.2
+# pnpm settings (pnpm ≥11 reads overrides from here, not package.json).
+# js-yaml: markdownlint-cli2@0.23.1 pins 5.2.1 exactly, which carries
+# GHSA-pm4m-ph32-ghv5 (flow-collection DoS, patched in 5.2.2). Drop this
+# override once markdownlint-cli2 ships a bumped js-yaml.
+overrides:
+  'js-yaml@<5.2.2': 5.2.2
