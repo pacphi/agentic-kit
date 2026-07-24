@@ -1,6 +1,7 @@
 name: release
 
-# Publishes to npm when a version tag is pushed (v4.0.0, v4.1.0-alpha.1, …).
+# Publishes to npm when a version tag is pushed (v4.0.0, v4.1.0-alpha.1, …),
+# then creates the matching GitHub Release with auto-generated notes.
 # Requires the NPM_TOKEN repository secret (npm "Automation" token: repo
 # Settings → Secrets and variables → Actions → New repository secret).
 # The tag must match package.json's version — the guard below enforces it.
@@ -44,4 +45,24 @@ jobs:
           case "$(node -p "require('./package.json').version")" in
             *-*) pnpm publish --provenance --access public --tag next --no-git-checks ;;
             *)   pnpm publish --provenance --access public --no-git-checks ;;
+          esac
+
+  # Runs only after a successful npm publish, so a Release object never exists
+  # for a version that didn't actually ship.
+  github-release:
+    needs: publish
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+      - name: Create GitHub Release (auto-generated notes)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # mirror the npm dist-tag split: prereleases get the badge and are
+          # excluded from releases/latest; stable versions become Latest
+          case "$GITHUB_REF_NAME" in
+            *-*) gh release create "$GITHUB_REF_NAME" --verify-tag --generate-notes --prerelease ;;
+            *)   gh release create "$GITHUB_REF_NAME" --verify-tag --generate-notes --latest ;;
           esac

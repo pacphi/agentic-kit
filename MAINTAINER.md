@@ -245,6 +245,12 @@ Publishing is driven **entirely by pushing a `v*` tag**. `release.yml` re-runs t
 test gate, enforces `tag == package.json version`, and `pnpm publish`es with npm
 provenance. There is no manual `npm publish` step — and you should never run one.
 
+After a successful publish, the workflow's `github-release` job **automatically
+creates the matching GitHub Release** with auto-generated notes. Prereleases are
+flagged `--prerelease` (excluded from `releases/latest`); stable versions are
+marked `--latest` — the same version-shape split as the npm dist-tag. No manual
+`gh release create` step exists anymore.
+
 ### Checklist
 
 ```bash
@@ -273,6 +279,9 @@ gh run watch "$(gh run list --workflow=release.yml -L1 --json databaseId -q '.[0
 # 6. Verify it landed on the right dist-tag.
 npm dist-tag ls @pacphi/agentic-kit
 npm view @pacphi/agentic-kit@4.0.0-alpha.5 version dist.tarball
+
+# 7. Confirm the GitHub Release object was created (automatic, after publish).
+gh release view v4.0.0-alpha.5 --json tagName,isPrerelease
 ```
 
 **The tag↔version guard is unforgiving:** if the tag name and `package.json`
@@ -301,7 +310,7 @@ if a release run fails on the guard, you tagged the wrong string.
 | Workflow | Trigger | What it does | Gate? |
 |----------|---------|--------------|-------|
 | **`ci.yml`** | push to `main`/`npm-kit`, any PR, `workflow_dispatch` | Matrix **3 OS × 3 Node** (ubuntu/macos/windows × 22/24/26): `pnpm test` + CLI smoke against a sandboxed `HOME` | PR merge signal |
-| **`release.yml`** | push tag `v*` | Test gate → **tag↔version guard** → `pnpm publish --provenance` (prerelease→`next`, stable→`latest`) | **Publishes** |
+| **`release.yml`** | push tag `v*` | Test gate → **tag↔version guard** → `pnpm publish --provenance` (prerelease→`next`, stable→`latest`) → **GitHub Release** with generated notes (prerelease-flagged by version shape) | **Publishes** |
 | **`nightly.yml`** | cron `17 6 * * *` (06:17 UTC), `workflow_dispatch` | Installs the **real latest** ruflo + agentic-qe via `npm -g`, runs `ak sync --no-upgrade` + deep proofs; fails on upstream drift in `natives`/`security` | Upstream-drift alarm |
 | **`dependabot.yml`** | weekly, Monday | Grouped bumps: `github-actions` (keeps action majors current) + `npm` (watchdog even though repo is zero-dep) | Opens PRs |
 
@@ -351,12 +360,19 @@ gh secret set NPM_TOKEN                               # rotate the publish token
 gh repo view --web                                    # open on GitHub
 ```
 
-**Optional — GitHub Releases**
-The kit currently ships via npm on tag push and does **not** create GitHub Release
-objects. To add human-readable release notes alongside a tag:
+**GitHub Releases (automated)**
+Every tag push that publishes successfully also creates the GitHub Release
+automatically (`github-release` job in `release.yml`). Manual `gh release`
+commands are only for inspection or repair:
 ```bash
-gh release create v4.0.0-alpha.5 --generate-notes     # after the tag is pushed
+gh release view v4.0.0-alpha.5                        # inspect one
+gh release list --limit 10                            # recent ledger
+# Backfill/repair only — notes bounded to exactly one release:
+gh release create vX --verify-tag --prerelease --generate-notes --notes-start-tag vW
 ```
+Note: `--generate-notes` diffs against the **previous Release object**, not the
+previous tag — a missing Release corrupts the next one's notes window, which is
+why the ledger must stay gap-free (history was backfilled 2026-07-24).
 
 ---
 
