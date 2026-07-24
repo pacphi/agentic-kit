@@ -5,17 +5,26 @@
 [![node](https://img.shields.io/node/v/@pacphi/agentic-kit)](https://nodejs.org)
 [![license: MIT](https://img.shields.io/npm/l/@pacphi/agentic-kit)](LICENSE)
 
-**One npm package that makes [ruflo](https://github.com/ruvnet/ruflo) (claude-flow) and [agentic-qe](https://github.com/proffesor-for-testing/agentic-qe) actually work — installed, healed, and *proven* — on macOS, Linux, and Windows.**
+**One npm package that installs, heals, and *proves* [ruflo](https://github.com/ruvnet/ruflo) (claude-flow) + [agentic-qe](https://github.com/proffesor-for-testing/agentic-qe) — and wires Claude Code + Codex into one ambidextrous, self-routing setup. macOS · Linux · Windows.**
 
 ```bash
 npm install -g @pacphi/agentic-kit@next   # alpha channel until 4.0.0 GA
-ak setup        # once per machine; run it inside a git repo to set that project up too
+ak setup            # once per machine; run inside a git repo to set that project up too
+ak setup --codex    # …or bring up Claude + Codex together in one shot
 ```
 
 > [!IMPORTANT]
 > That's the only package you install by hand — **you do not need to install ruflo or
 > agentic-qe yourself.** `ak setup` installs them globally for you (building natives past
 > npm ≥11.17's `allow-scripts` gate), then heals and proves them.
+
+**What you get:**
+
+- **One command** installs + heals + *proves* ruflo & agentic-qe — native SQLite, memory, security, statusline (past npm's `allow-scripts` gate).
+- **Dual-host (optional):** Claude *and* Codex at once, per-activity model routing, **$0 on your subscriptions** — `ak setup --codex`.
+- **Self-healing:** `ak sync` re-converges after every upgrade; `ak status` and a local dashboard show what's *actually* on — never assumed.
+- **Honest by construction:** every guard traces to a filed upstream issue, and `ak x verify` proves the paths end-to-end against real CLIs.
+- Cross-platform, **zero runtime dependencies** (SQLite embedded).
 
 ## Why this exists
 
