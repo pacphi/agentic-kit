@@ -176,7 +176,8 @@ test('escalatePolicy bumps ladder activities to their next (cross-vendor) rung',
 
 test('escalatePolicy skips a rung that equals the current route (no same-model retry)', () => {
   // a user override to the ladder rung itself must not "escalate" to the same thing
-  const policy = { implementation: { host: 'claude', model: 'claude-opus-4-8', source: 'user' } };
+  const rung = DEFAULT_ROUTES.implementation.escalate[0];
+  const policy = { implementation: { host: rung.host, model: rung.model, source: 'user' } };
   assert.ok(!('implementation' in escalatePolicy(policy)));
 });
 

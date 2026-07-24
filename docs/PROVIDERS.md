@@ -118,14 +118,14 @@ When you want explicit ordering rather than env auto-enable, `ak` manages agenti
 ```bash
 ak x provider pick \
   --aqe-provider claude-code \
-  --aqe-fallback 'claude-code:claude-opus-4-8; openai:gpt-5.6; gemini:gemini-3.5-flash'
+  --aqe-fallback 'claude-code:claude-opus-5; openai:gpt-5.6; gemini:gemini-3.5-flash'
 ```
 
 Each `provider:model,model` becomes an ordered chain entry (first = highest priority). `ak`
 writes a complete, schema-correct chain, tags it `_managedBy: agentic-kit`, and **never**
 writes your API keys.
 
-> Model IDs above are examples current as of July 2026 (Claude Opus 4.8, OpenAI GPT-5.6 —
+> Model IDs above are examples current as of July 2026 (Claude Opus 5, OpenAI GPT-5.6 —
 > or `gpt-5.3-codex` for agentic coding — Google Gemini 3.5 Flash). Use whatever IDs your
 > provider currently offers; `ak` writes the strings you give it verbatim.
 
@@ -135,7 +135,7 @@ provider — add them to the chain and put `OPENROUTER_API_KEY` in your env:
 ```bash
 ak x provider pick \
   --aqe-provider claude-code \
-  --aqe-fallback 'claude-code:claude-opus-4-8; openrouter:z-ai/glm-5.2'
+  --aqe-fallback 'claude-code:claude-opus-5; openrouter:z-ai/glm-5.2'
 ```
 
 Curated picks (verified July 2026): `z-ai/glm-5.2` (flagship — 1M context, strong
@@ -171,7 +171,7 @@ Defaults (all overridable; your edits are marked `custom` and never re-seeded):
 | Activity | Host | Default model |
 |---|---|---|
 | specification, review, release | claude | `claude-sonnet-5` |
-| architecture, design, debugging, security-analysis | claude | `claude-opus-4-8` |
+| architecture, design, debugging, security-analysis | claude | `claude-opus-5` |
 | implementation, testing, security-scan | codex | `gpt-5.4` |
 | documentation, packaging | codex | `gpt-5.3-codex` |
 
@@ -181,14 +181,24 @@ Defaults (all overridable; your edits are marked `custom` and never re-seeded):
 
 | Host | Model | When to use |
 |---|---|---|
-| claude | `claude-opus-4-8` | deep reasoning — architecture, design, hard debugging |
+| claude | `claude-opus-5` | new top Opus — ~2× Opus 4.8 at the same price; premium reasoning default |
 | claude | `claude-sonnet-5` | near-Opus at lower cost — review, spec, release |
-| claude | `claude-fable-5` | top capability (above Opus), premium — hardest problems |
+| claude | `claude-fable-5` | top capability (Mythos-class, above Opus 5) — hardest problems |
 | claude | `claude-haiku-4-5-20251001` | cheap/fast — high-volume mechanical |
+| claude | `claude-opus-4-8` | prior Opus generation — same price as opus-5, kept for pinned configs |
 | codex | `gpt-5.4` | coding + reasoning + agentic — recommended execution default |
 | codex | `gpt-5.6-sol` | newest line; first-class max reasoning effort |
 | codex | `gpt-5.3-codex` | pure coding-tuned — mechanical implementation & docs |
 | codex | `gpt-5-codex-mini` | smallest/cheapest — escalation floor, high volume |
+
+> **Where Opus 5 sits** ([announcement](https://www.anthropic.com/news/claude-opus-5), July 2026):
+> same $5/$25 per-Mtok pricing as Opus 4.8 with roughly double the Frontier-Bench
+> performance, so it strictly supersedes 4.8 as the reasoning-tier default — a capability
+> tier above Opus 4.8 at no added cost. It is **not** Mythos-class: `claude-fable-5`
+> remains the flagship tier. Opus 5 lands within ~0.5% of Fable on coding/agentic
+> benchmarks at about half the cost per task, but stays behind the Mythos-class models on
+> frontier domains. Rule of thumb: `claude-opus-5` is the premium default;
+> `claude-fable-5` is the escalation ceiling.
 
 `ak x provider pick --help` prints this list too. Tuning is per-route and reversible: hand-edit
 `kit.json` `providers.dualRouting`, pass `--route`, or `ak x provider off` to clear it entirely.

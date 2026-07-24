@@ -216,7 +216,7 @@ export const QE_COURT_TIP = 'agentic-qe ≥ 3.13.0 ships qe-court (adversarial r
  *  itself), so pairing claude-code + openai is a direct inference from the
  *  hosts already chosen in the same session. Literal reused from
  *  docs/PROVIDERS.md's own example rather than inventing new model ids. */
-export const AQE_FALLBACK_CODEX_SUGGESTION = 'claude-code:claude-opus-4-8; openai:gpt-5.6';
+export const AQE_FALLBACK_CODEX_SUGGESTION = 'claude-code:claude-opus-5; openai:gpt-5.6';
 export const suggestedFallbackFor = (enabledHosts) => (enabledHosts.includes('codex') ? AQE_FALLBACK_CODEX_SUGGESTION : null);
 
 // ── agentic-qe router config (.agentic-qe/llm-config.json) ──────────────────
