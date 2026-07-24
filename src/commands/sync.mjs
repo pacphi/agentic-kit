@@ -5,11 +5,11 @@ import path from 'node:path';
 import { collect } from './status.mjs';
 import * as heal from '../lib/heal.mjs';
 import { fixStatusline, helperStampStale } from '../lib/statusline.mjs';
-import { registry, syncBlocks } from '../lib/blocks.mjs';
+import { registry, syncBlocks, blocksForTarget } from '../lib/blocks.mjs';
 import { register as mcpRegister, applyExclusions } from '../lib/mcp.mjs';
 import { listDaemons, staleDaemons, reap } from '../lib/daemons.mjs';
 import { loadKitConfig, saveKitConfig } from '../lib/config.mjs';
-import { HOSTS, applyHosts, applyProviders, hostInstallState, installHost, applyAqeRouter, seedDualRoutingIfDualHost, ensureCodexMcp } from '../lib/providers.mjs';
+import { HOSTS, applyHosts, applyProviders, hostInstallState, installHost, applyAqeRouter, seedDualRoutingIfDualHost, ensureCodexMcp, ensureRufloMcpInCodex, bothHostsEnabled } from '../lib/providers.mjs';
 import { driftReport, selfDrift } from '../lib/versions.mjs';
 import { pruneNpxStale } from '../lib/npx.mjs';
 import { nativesStatus, securityPresent } from '../lib/natives.mjs';
@@ -132,8 +132,23 @@ export async function run({ flags, pkgRoot }) {
     const resolve = (r) => (r.custom
       ? (r.template.startsWith('~/') ? path.join(paths.home, r.template.slice(2)) : r.template)
       : path.join(pkgRoot, 'claude', r.template));
-    const res = await syncBlocks(paths.claudeMdPath(), rowsReg, resolve);
-    ok(`blocks: ${res.filter((r) => r.action !== 'unchanged').map((r) => `${r.slug} ${r.action}`).join(', ') || 'in sync'}`);
+    // Two guidance targets: machine-wide CLAUDE.md (claude) + project AGENTS.md
+    // (codex). The dual-mode block's flag detector gates AGENTS.md on both hosts
+    // being enabled, so single-host setups leave AGENTS.md untouched (no .bak).
+    const ctx = { flags: { dualMode: bothHostsEnabled(cfg) } };
+    const targets = [
+      { name: 'claude', label: 'CLAUDE.md', file: paths.claudeMdPath() },
+      { name: 'agents', label: 'AGENTS.md', file: path.join(cwd, 'AGENTS.md') },
+    ];
+    for (const t of targets) {
+      const treg = blocksForTarget(rowsReg, t.name);
+      const res = await syncBlocks(t.file, treg, resolve, { context: ctx });
+      const changed = res.filter((r) => r.action !== 'unchanged' && r.action !== 'skipped')
+        .map((r) => `${r.slug} ${r.action}`).join(', ');
+      // stay quiet on the AGENTS.md target unless it actually changed (single-host
+      // leaves it unmanaged); always report the claude target.
+      if (t.name === 'claude' || changed) ok(`blocks(${t.label}): ${changed || 'in sync'}`);
+    }
   }
   // hosts: install any ENABLED host that is entirely absent (updates to
   // npm-managed hosts ride the versions branch above via driftReport).
@@ -144,7 +159,7 @@ export async function run({ flags, pkgRoot }) {
       await step(`install ${h.id}`, () => installHost(h.id));
     }
   }
-  if (subsystems.has('providers') || subsystems.has('routing')) {
+  if (subsystems.has('providers') || subsystems.has('routing') || subsystems.has('codex-mcp')) {
     report('providers', applyHosts(cfg, cwd));
     // heal per-activity routing: seed from defaults if dual-host only just became
     // eligible (e.g. aqe upgraded ≥3.13.1 since enablement), before materializing.
@@ -155,6 +170,10 @@ export async function run({ flags, pkgRoot }) {
     const mcp = await ensureCodexMcp(cfg, cwd);
     if (mcp.changed) saveKitConfig(cfg);
     if (mcp.changed || !mcp.ok) report('codex MCP', mcp);
+    // reverse bridge: register ruflo MCP into codex (codex→ruflo half)
+    const rmcp = await ensureRufloMcpInCodex(cfg, cwd);
+    if (rmcp.changed) saveKitConfig(cfg);
+    if (rmcp.changed || !rmcp.ok) report('ruflo→codex MCP', rmcp);
     const prov = await withProgress('providers (api)', () => applyProviders(cfg, cwd));
     if (prov.changed || !prov.ok) report('providers (api)', prov);
   }

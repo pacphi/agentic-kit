@@ -94,6 +94,20 @@ writes your API keys.
 > or `gpt-5.3-codex` for agentic coding — Google Gemini 3.5 Flash). Use whatever IDs your
 > provider currently offers; `ak` writes the strings you give it verbatim.
 
+**GLM via OpenRouter.** Zhipu/Z.ai's GLM models are reachable through the `openrouter`
+provider — add them to the chain and put `OPENROUTER_API_KEY` in your env:
+
+```bash
+ak x provider pick \
+  --aqe-provider claude-code \
+  --aqe-fallback 'claude-code:claude-opus-4-8; openrouter:z-ai/glm-5.2'
+```
+
+Curated picks (verified July 2026): `z-ai/glm-5.2` (flagship — 1M context, strong
+tool-use, long-horizon agent work) and `z-ai/glm-5` (value — 205K context, cheapest of
+the 5.x line). Both are **metered** — GLM is never an auto-seed target (seeding only ever
+routes to subscription/local providers).
+
 ## Level 3.5 — per-activity routing across Claude + Codex
 
 When **both** hosts are enabled and `agentic-qe ≥ 3.13.1` is installed, `ak` seeds a
@@ -108,7 +122,14 @@ claude-only projects. Grounded in ruflo's own dual-mode templates (see
 ak x provider pick --host claude,codex        # enables both → seeds routing → prints the table
 ak status                                     # a "routing" row; the dashboard shows the matrix
 ak x provider pick --route 'testing:claude:claude-sonnet-5'   # override one activity (persisted)
+ak x provider pick --primary-host codex       # make codex the lead; claude becomes the alternate
 ```
+
+**Which host leads.** `--primary-host claude|codex` (default `claude`) chooses the primary.
+Codex-primary **mirrors** the default table below — codex takes the reasoning/review lead
+and claude becomes the alternate/escalation target — so the experience is ambidextrous
+regardless of which CLI drives. `ak status` marks the primary and fails (not warns) if the
+primary host is missing.
 
 Defaults (all overridable; your edits are marked `custom` and never re-seeded):
 

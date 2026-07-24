@@ -18,6 +18,7 @@
   ],
   "scripts": {
     "test": "node --test \"tests/kit/*.test.mjs\" && node tests/statusline-segments.test.cjs && node tests/statusline-brain.test.cjs && node tests/agentdb.test.cjs && node tests/health-history.test.cjs && node tests/harvest.test.cjs && node tests/dashboard.test.cjs",
+    "test:surface": "node --test tests/kit/dispatch-surface.test.mjs",
     "typecheck": "tsc -p tsconfig.json",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",

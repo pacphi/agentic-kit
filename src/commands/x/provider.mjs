@@ -8,11 +8,12 @@ import readline from 'node:readline/promises';
 import {
   HOSTS, API_PROVIDERS, AQE_PROVIDER_TYPES, detectHosts, detectProviders,
   settingsTarget, isDefault, applyHosts, applyProviders, ensureDualAgents,
-  undoProviders, hostInstallState, installHost, applyAqeRouter, undoAqeRouter,
+  undoProviders, hostInstallState, hostAuthState, installHost, applyAqeRouter, undoAqeRouter,
   bothHostsEnabled, DUAL_ROLE_TIP, JUDGE_BIAS_TIP, QE_COURT_TIP, suggestedFallbackFor,
   seedDualRoutingIfDualHost, printActivityRoutingTable, ensureCodexMcp, undoCodexMcp,
+  ensureRufloMcpInCodex, undoRufloMcpInCodex,
 } from '../../lib/providers.mjs';
-import { parseRouteSpecs, formatModelHelp } from '../../lib/routing.mjs';
+import { parseRouteSpecs, formatModelHelp, PRIMARY_HOSTS, DEFAULT_PRIMARY_HOST } from '../../lib/routing.mjs';
 import { loadKitConfig, saveKitConfig } from '../../lib/config.mjs';
 import { ok, warn, fail, info, dim, bold } from '../../lib/output.mjs';
 import { installedVersion, cmpVersions } from '../../lib/versions.mjs';
@@ -38,6 +39,7 @@ function printDualHostTips(cfg) {
 
 export const options = {
   host: { type: 'string' },          // csv: claude,codex (pick, non-interactive)
+  'primary-host': { type: 'string' }, // claude|codex — which host leads (default claude)
   'aqe-provider': { type: 'string' }, // one of AQE_PROVIDER_TYPES, or 'none' to unset
   'aqe-fallback': { type: 'string' }, // 'claude-code:model1,model2;openai:gpt-5.6'  ('none' clears)
   provider: { type: 'string' },      // csv of ruflo API providers, optional id:model (openai:gpt-5.6)
@@ -64,11 +66,17 @@ Subcommands:
 
 Options (pick, all optional — omit for interactive):
   --host claude,codex          enable these ruflo host CLIs
+  --primary-host claude|codex  which host leads (default claude); codex-primary
+                                 mirrors the routing defaults so codex drives and
+                                 claude is the alternate
   --aqe-provider <type>        set aqe's primary LLM (or 'none' to unset)
                                  billing: claude-code = Claude sub ($0),
                                  ollama/onnx = local ($0), all others = metered key
   --aqe-fallback '<chain>'     ordered aqe chain, e.g.
                                  'claude-code:claude-opus-4-8; openai:gpt-5.6'
+                                 (metered providers work too, e.g. add
+                                 'openrouter:z-ai/glm-5.2' — GLM via OpenRouter,
+                                 needs OPENROUTER_API_KEY in the env)
   --provider <csv>             register ruflo API providers (e.g. openai:gpt-5.6)
   --route 'act:host[:model]'   override one activity's routing (repeatable), e.g.
                                  --route 'implementation:claude:claude-opus-4-8'
@@ -128,7 +136,10 @@ async function status({ flags, cwd }) {
       : dflt ? 'enabled (default — ruflo default-on, no env written)'
       : d.wired ? 'enabled, wired'
       : 'enabled, not wired → ak sync';
-    console.log(`  ${h.id.padEnd(7)} ${(d.version ? `v${d.version}` : '—').padEnd(12)} ${state}`);
+    // auth/billing axis — subscription ($0) vs metered key, per host.
+    const auth = d.present ? hostAuthState(h.id, { present: true }) : null;
+    const authStr = auth ? dim(`  ${auth.mode}/${auth.billing === 'subscription' ? '$0' : auth.billing}`) : '';
+    console.log(`  ${h.id.padEnd(7)} ${(d.version ? `v${d.version}` : '—').padEnd(12)} ${state}${authStr}`);
   }
 
   // agentic-qe LLM provider (AQE_LLM_PROVIDER) + fallback chain
@@ -188,12 +199,14 @@ function printQeCourtStatus(cwd) {
 async function off({ cwd }) {
   const cfg = loadKitConfig();
   const codexMcpManaged = cfg.providers?.codexMcp === 'ak';
-  cfg.providers = { hosts: { claude: true, codex: false }, aqeProvider: null, aqeFallback: [], models: [], maxBudgetUsd: null, dualRouting: {}, codexMcp: null };
+  const rufloCodexManaged = cfg.providers?.rufloCodexMcp === 'ak';
+  cfg.providers = { hosts: { claude: true, codex: false }, primaryHost: 'claude', aqeProvider: null, aqeFallback: [], models: [], maxBudgetUsd: null, dualRouting: {}, codexMcp: null, rufloCodexMcp: null };
   saveKitConfig(cfg);
   const env = undoProviders(cwd);
   const router = undoAqeRouter(cwd);
   const mcp = await undoCodexMcp(cwd, { managed: codexMcpManaged });
-  ok(`reset to claude-only default — ${env.detail}; ${router.detail}; ${mcp.detail}`);
+  const rmcp = await undoRufloMcpInCodex(cwd, { managed: rufloCodexManaged });
+  ok(`reset to claude-only default — ${env.detail}; ${router.detail}; ${mcp.detail}; ${rmcp.detail}`);
   return 0;
 }
 
@@ -252,9 +265,12 @@ async function pick({ flags, cwd }) {
   let aqeProvider = cfg.providers.aqeProvider ?? null;
   let aqeFallback = cfg.providers.aqeFallback ?? [];
   let models = cfg.providers.models ?? [];
+  const prevPrimary = cfg.providers.primaryHost ?? DEFAULT_PRIMARY_HOST;
+  const oldPolicy = cfg.providers.dualRouting ?? {};
 
   const nonInteractive = flags.host !== undefined || flags['aqe-provider'] !== undefined
-    || flags['aqe-fallback'] !== undefined || flags.provider !== undefined;
+    || flags['aqe-fallback'] !== undefined || flags.provider !== undefined
+    || flags['primary-host'] !== undefined;
   if (nonInteractive) {
     enabled = flags.host !== undefined
       ? flags.host.split(',').map((s) => s.trim()).filter(Boolean)
@@ -292,6 +308,18 @@ async function pick({ flags, cwd }) {
   const known = new Set(HOSTS.map((h) => h.id));
   enabled = enabled.filter((h) => known.has(h));
   if (!enabled.includes('claude') && !enabled.includes('codex')) enabled = ['claude'];
+  // primary host — which host leads (default claude); must be an enabled host.
+  let primaryHost = prevPrimary;
+  if (flags['primary-host'] !== undefined) {
+    const v = flags['primary-host'].trim().toLowerCase();
+    if (PRIMARY_HOSTS.includes(v)) primaryHost = v;
+    else warn(`unknown primary host '${v}' (valid: ${PRIMARY_HOSTS.join('|')}) — keeping ${primaryHost}`);
+  }
+  if (!enabled.includes(primaryHost)) primaryHost = enabled[0] ?? DEFAULT_PRIMARY_HOST;
+  // re-seed when the primary changed AND the current policy is entirely seeded
+  // (no user overrides to preserve) — so mirrored defaults reflect the new primary.
+  const policyAllSeeded = Object.keys(oldPolicy).length > 0 && Object.values(oldPolicy).every((r) => r.source === 'seeded');
+  const reseedForPrimary = primaryHost !== prevPrimary && policyAllSeeded;
   // validate aqe primary provider
   if (aqeProvider && !AQE_PROVIDER_TYPES.includes(aqeProvider)) {
     const norm = aqeProvider === 'anthropic' ? 'claude' : aqeProvider;
@@ -313,8 +341,9 @@ async function pick({ flags, cwd }) {
     aqeProvider,
     aqeFallback,
     models,
+    primaryHost,
     maxBudgetUsd: cfg.providers.maxBudgetUsd ?? null,
-    dualRouting: { ...(cfg.providers.dualRouting ?? {}) },
+    dualRouting: reseedForPrimary ? {} : { ...oldPolicy },
   };
   // dual-host: seed per-activity routing from defaults (only when the policy is
   // empty), then layer any explicit --route overrides on top (marked user, never
@@ -338,6 +367,10 @@ async function pick({ flags, cwd }) {
 
   const h = applyHosts(cfg, cwd);
   (h.ok ? ok : fail)(`hosts: ${h.detail}`);
+  if (primaryHost !== DEFAULT_PRIMARY_HOST) {
+    const alt = enabled.filter((e) => e !== primaryHost).join(', ') || 'none';
+    ok(`primary host: ${primaryHost} (alternate: ${alt})`);
+  }
   if (aqeProvider) ok(`aqe provider: AQE_LLM_PROVIDER=${aqeProvider}`);
   const router = applyAqeRouter(cfg, cwd);
   if (router.changed || !router.ok) (router.ok ? ok : warn)(`aqe router: ${router.detail}`);
@@ -346,6 +379,11 @@ async function pick({ flags, cwd }) {
   const mcp = await ensureCodexMcp(cfg, cwd);
   if (mcp.changed) saveKitConfig(cfg); // persist the codexMcp ownership marker
   if (mcp.changed || !mcp.ok) (mcp.ok ? ok : warn)(`codex MCP: ${mcp.detail}`);
+  // reverse bridge — register ruflo MCP into codex (codex→ruflo) so the bridge is
+  // two-way. aqe's codex MCP is handled by `aqe init --with-codex` (setup runs it).
+  const rmcp = await ensureRufloMcpInCodex(cfg, cwd);
+  if (rmcp.changed) saveKitConfig(cfg); // persist the rufloCodexMcp ownership marker
+  if (rmcp.changed || !rmcp.ok) (rmcp.ok ? ok : warn)(`ruflo→codex MCP: ${rmcp.detail}`);
   const prov = await applyProviders(cfg, cwd);
   (prov.ok ? (prov.changed ? ok : info) : warn)(`ruflo providers: ${prov.detail}`);
   ok('saved to kit.json — reapplied on every `ak sync`; undo with `ak x provider off`');

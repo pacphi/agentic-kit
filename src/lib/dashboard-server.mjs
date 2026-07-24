@@ -107,10 +107,12 @@ async function collectData({ cwd, fetchStatus }) {
  *  dualRouting policy is set, so single-host projects render nothing new. */
 function routingPayload() {
   try {
-    const policy = loadKitConfig().providers?.dualRouting ?? {};
+    const cfg = loadKitConfig();
+    const policy = cfg.providers?.dualRouting ?? {};
     if (!Object.keys(policy).length) return null;
     const routes = resolveRoutes(policy);
     return {
+      primaryHost: cfg.providers?.primaryHost ?? 'claude',
       summary: routingSummary(policy),
       routes: ACTIVITIES.map((activity) => {
         const r = routes[activity];
@@ -535,6 +537,7 @@ body::before{
 .r-host{font-size:11px; font-weight:600; text-align:center; padding:2px 0; border-radius:100px; border:1px solid var(--line-2)}
 .r-host-claude{color:#e0a06a; background:rgba(224,160,106,.12); border-color:rgba(224,160,106,.32)}
 .r-host-codex{color:var(--accent); background:var(--accent-soft); border-color:rgba(79,182,168,.32)}
+.r-host[data-primary]{box-shadow:inset 0 0 0 1.5px var(--accent), 0 0 0 1px var(--accent-soft); font-weight:700}
 .r-model{color:var(--ink-2); font-size:11.5px}
 .r-meta{display:flex; align-items:center; gap:8px; justify-content:flex-end; font-size:10.5px}
 .r-esc{color:var(--ink-dim)}
@@ -746,17 +749,18 @@ const JS = `
     var strip=document.getElementById("routing");
     if(!rt||!rt.routes||!rt.routes.length){strip.hidden=true;return;}
     strip.hidden=false;
-    var s=rt.summary||{}, byHost=s.byHost||{};
+    var s=rt.summary||{}, byHost=s.byHost||{}, primary=rt.primaryHost||"claude";
     document.getElementById("routing-note").textContent=
-      (byHost.claude||0)+" claude · "+(byHost.codex||0)+" codex · "+(s.custom||0)+" custom · "+(s.vendors||0)+" vendors";
+      "primary: "+primary+" · "+(byHost.claude||0)+" claude · "+(byHost.codex||0)+" codex · "+(s.custom||0)+" custom · "+(s.vendors||0)+" vendors";
     var html="";
     for(var i=0;i<rt.routes.length;i++){
       var r=rt.routes[i];
       var tag=r.akOriginated?' <span class="r-tag">ak</span>':'';
       var escHtml=(r.escalate&&r.escalate.length)?'<span class="r-esc mono">↑ '+esc(r.escalate.join("→"))+"</span>":"";
+      var primAttr=(r.host===primary)?' data-primary="1"':'';
       html+='<div class="r-row">'
         +'<span class="r-act mono">'+esc(r.activity)+tag+"</span>"
-        +'<span class="r-host r-host-'+esc(r.host)+'">'+esc(r.host)+"</span>"
+        +'<span class="r-host r-host-'+esc(r.host)+'"'+primAttr+' title="'+(r.host===primary?"primary host":"alternate host")+'">'+esc(r.host)+"</span>"
         +'<span class="r-model mono">'+esc(r.model)+"</span>"
         +'<span class="r-meta">'+escHtml+'<span class="r-src r-src-'+esc(r.source)+'">'+esc(r.source)+"</span></span>"
       +"</div>";

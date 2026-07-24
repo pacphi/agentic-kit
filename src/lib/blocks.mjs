@@ -4,6 +4,16 @@
 // the shell kit upgrade in place. Detectors are declarative (no eval'd shell —
 // Windows-safe): {type: 'always'|'command'|'dir'|'file'|'glob-dir', target}.
 // Built-in rows ship here; custom rows come from kit.json `customBlocks`.
+//
+// A `flag` detector ({type:'flag', target:'dualMode'}) gates a block on a
+// caller-supplied boolean rather than the filesystem/PATH — the caller passes
+// `syncBlocks(..., { context: { flags: { dualMode: <bool> } } })`. This is how
+// we gate on kit.json enablement (both hosts on) instead of merely `codex` being
+// on PATH. Absent context => false, so every legacy caller is unaffected.
+//
+// Rows may carry `guidanceFiles` (logical names, default ['claude']) declaring
+// which guidance files they belong in — the caller loops targets via
+// `blocksForTarget(rows, name)`. Logical names only; paths stay a caller concern.
 import fs from 'node:fs';
 import path from 'node:path';
 import { claudeDir, home } from './paths.mjs';
@@ -50,6 +60,18 @@ export const BUILTIN_BLOCKS = [
     detector: { type: 'command', target: 'codex' },
   },
   {
+    // Surfaces only when BOTH hosts are enabled in kit.json (dual mode) — gated
+    // on a caller flag, not PATH, so it does not fire just because `codex` is
+    // installed. Lands in BOTH guidance files (CLAUDE.md + AGENTS.md) via the
+    // `guidanceFiles` fan-out. Documents `ak dual`, the Claude↔Codex bridge, and
+    // per-activity routing/escalation.
+    slug: 'ruflo-dual-mode-reference',
+    template: 'dual-mode-reference.md',
+    position: 'append',
+    detector: { type: 'flag', target: 'dualMode' },
+    guidanceFiles: ['claude', 'agents'],
+  },
+  {
     // Surfaces once the RuvNet Brain KB is on disk. `dir` supports ~/ expansion;
     // uses the default KB path (honoring $RUVNET_BRAIN_KB in the detector is a
     // minor follow-up — the override is rare).
@@ -60,11 +82,15 @@ export const BUILTIN_BLOCKS = [
   },
 ];
 
-/** Evaluate a declarative detector. Returns boolean. */
-export async function detect(detector) {
+/** Evaluate a declarative detector. Returns boolean. `context` carries
+ *  caller-supplied signals the filesystem can't provide (e.g. kit.json
+ *  enablement) — currently `context.flags` for the `flag` detector. Defaulted
+ *  so `detect(detector)` keeps working for every existing caller. */
+export async function detect(detector, context = {}) {
   switch (detector?.type) {
     case 'always': return true;
     case 'command': return have(detector.target);
+    case 'flag': return !!context?.flags?.[detector.target];
     case 'file': return fs.existsSync(expand(detector.target));
     case 'dir': {
       const p = expand(detector.target);
@@ -171,22 +197,39 @@ function endOfSentinelLine(text, e, from) {
 export function registry(customBlocks = []) {
   const custom = customBlocks
     .filter((r) => r && r.slug && r.templatePath && r.detector)
-    .map((r) => ({ slug: r.slug, template: r.templatePath, position: r.position ?? 'append', detector: r.detector, custom: true }));
+    .map((r) => ({
+      slug: r.slug,
+      template: r.templatePath,
+      position: r.position ?? 'append',
+      detector: r.detector,
+      guidanceFiles: Array.isArray(r.guidanceFiles) ? r.guidanceFiles : ['claude'],
+      custom: true,
+    }));
   return [...BUILTIN_BLOCKS, ...custom];
+}
+
+/** Filter rows to those belonging in a given logical guidance file (default
+ *  membership is ['claude'] when a row omits `guidanceFiles`). Pure — lets a
+ *  caller loop guidance-file targets (claude → CLAUDE.md, agents → AGENTS.md)
+ *  without hardcoding paths in this module. */
+export function blocksForTarget(rows, targetName) {
+  return rows.filter((r) => (r.guidanceFiles ?? ['claude']).includes(targetName));
 }
 
 /** Reconcile every registry row against its detector on a file.
  *  resolveTemplate(row) → absolute template path (built-ins resolve against the
  *  package's claude/ dir; custom rows are absolute or ~-expanded already).
  *  Returns [{slug, action: 'upserted'|'stripped'|'unchanged'|'missing-template', present}] —
- *  dryRun skips writes but reports the same actions. */
-export async function syncBlocks(file, rows, resolveTemplate, { dryRun = false } = {}) {
+ *  dryRun skips writes but reports the same actions. `context` is forwarded to
+ *  every detector (see detect) so `flag`-gated rows can read caller signals such
+ *  as `{ flags: { dualMode: <bool> } }`; omitting it preserves prior behavior. */
+export async function syncBlocks(file, rows, resolveTemplate, { dryRun = false, context = {} } = {}) {
   const results = [];
   let content = fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : '';
   let changed = false;
   for (const row of rows) {
     const present = hasBlock(content, row.slug);
-    const wanted = await detect(row.detector);
+    const wanted = await detect(row.detector, context);
     if (wanted) {
       const tpl = resolveTemplate(row);
       if (!tpl || !fs.existsSync(tpl)) {

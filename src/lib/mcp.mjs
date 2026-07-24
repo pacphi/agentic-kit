@@ -3,6 +3,7 @@
 // permissions.deny rules in ~/.claude/settings.json — see ruvnet/ruflo#952.
 // Registration key is `claude-flow` (#2206), user scope.
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { rufloNodeModules, claudeUserMcpPath, claudeSettingsPath, repoRoot } from './paths.mjs';
 import { run } from './exec.mjs';
@@ -54,6 +55,22 @@ export function codexMcpStatus(cfg, cwd = process.cwd()) {
   const root = repoRoot(cwd) ?? cwd;
   const servers = readJson(path.join(root, '.mcp.json'), {})?.mcpServers ?? {};
   return { registered: 'codex' in servers, owned: cfg?.providers?.codexMcp === 'ak' };
+}
+
+/**
+ * Reverse-bridge state: is the ruflo MCP registered INTO Codex? `ensureRufloMcpInCodex`
+ * runs `codex mcp add ruflo …`, which writes a `[mcp_servers.ruflo]` table into
+ * ~/.codex/config.toml — so a spawn-free presence check reads that file (mirrors
+ * codexMcpStatus's file-read approach; no TOML parser needed for a header check).
+ * `owned` reflects kit.json's ak-ownership marker (`providers.rufloCodexMcp === 'ak'`).
+ * @returns {{ registered: boolean, owned: boolean }}
+ */
+export function rufloCodexMcpStatus(cfg, { home = os.homedir() } = {}) {
+  let registered = false;
+  try {
+    registered = /^\s*\[mcp_servers\.ruflo\]/m.test(fs.readFileSync(path.join(home, '.codex', 'config.toml'), 'utf8'));
+  } catch { /* config absent → not registered */ }
+  return { registered, owned: cfg?.providers?.rufloCodexMcp === 'ak' };
 }
 
 export async function register() {
