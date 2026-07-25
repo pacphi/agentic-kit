@@ -10,19 +10,33 @@ import { readSession, maskSecrets, MAX_TURN_CHARS, _resetForTest } from '../../s
 // something was. A reader who cannot tell 1% loss from 90% loss has been told
 // nothing actionable, which is the shape of an evidence claim §6 would refuse.
 //
-// `MAX_TURN_CHARS` is IMPORTED, not mirrored. It was module-private and this
-// file carried a literal 40_000; that mirror was safe in one direction only.
-// Lowering the limit, or raising it against an over-the-limit fixture, fails
-// loudly — but RAISING it silently guts the "exactly at the limit" boundary
-// test, which stops testing a boundary and becomes trivially true. A boundary
-// test that quietly stops being one is the failure mode this file exists to
-// prevent, so the constant is now exported and read from source.
+// `MAX_TURN_CHARS` is IMPORTED, not mirrored, which matches the sibling
+// judgement-call constant: `IDLE_GAP_MS` is exported one line above it
+// (usage-index.mjs:45) for the reason ADR-0009 §4 gives — "a judgement call the
+// numbers depend on, not a magic constant." MAX_TURN_CHARS is that too: the
+// truncation badge states user-visible figures derived from it.
 //
-// This also matches the sibling judgement-call constant: `IDLE_GAP_MS` is
-// exported one line above it (usage-index.mjs:45) for exactly the reason
-// ADR-0009 §4 gives — "a judgement call the numbers depend on, not a magic
-// constant." MAX_TURN_CHARS is now that too: the truncation badge states
-// user-visible figures derived from it.
+// The import buys the boundary tests below their real property — they test that
+// the limit is INCLUSIVE, against whatever the limit currently is. What it costs
+// is the ability to notice the limit MOVING, and that loss is total: with the
+// constant imported, `prose(MAX)` and `prose(MAX + 1)` are defined in terms of
+// the same value the implementation uses, so every test here passes for any
+// value whatsoever. Verified, not assumed — setting the constant to 60_000 in a
+// scratch copy leaves all six green.
+//
+// So the value is pinned separately, once, immediately below. Semantics are
+// tested against the constant; the constant is tested against the spec. Neither
+// job is left to the other.
+
+test('MAX_TURN_CHARS is the 40,000 the spec states', () => {
+  // The ONLY assertion in this file that would notice the limit moving. Design
+  // decision 2 and ADR-0009 §8 state 40,000 explicitly, and the truncation badge
+  // renders figures derived from it ("40.0K of 128.4K shown"), so the value is
+  // part of the user-visible contract rather than a tuning knob. Changing it is
+  // allowed — the ADR says re-litigating the number is out of scope for THIS
+  // work, not forever — but it must be a deliberate edit here, not a silent one.
+  assert.equal(MAX_TURN_CHARS, 40_000);
+});
 
 /** A sandbox with no fixture corpus: one hand-written session is the whole answer. */
 function soloSandbox() {
