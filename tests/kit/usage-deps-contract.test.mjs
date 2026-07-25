@@ -232,44 +232,31 @@ test('every finding severity is one renderFindings knows how to style', async ()
   }
 });
 
-test('a finding impact is a finite number or null, and the key is always present', async () => {
-  // `null` is this module's EXPLICIT encoding of "no $ claimed", not a defect:
-  // usage-insights.mjs:211 defaults every finding to `impact: null` via `push`,
-  // the JSDoc at :199 declares `impact:number|null`, and
-  // tests/kit/usage-insights.test.mjs asserts `impact === null` for every
-  // non-computable detector as an ADR §6 invariant. renderFindings branches on
-  // `typeof f.impact === "number"` (dashboard-server.mjs:1941), and null fails
-  // that check, so it renders "no $ claimed" — exactly right.
+test('a finding impact is a finite number or null — never NaN, string, or undefined', async () => {
+  // `null` is this module's EXPLICIT encoding of "no $ claimed" — it IS the
+  // ADR §6 guarantee, not a defect. usage-insights.mjs:211 defaults every
+  // finding to `impact: null` via `push`, the JSDoc at :199 declares
+  // `impact:number|null`, and tests/kit/usage-insights.test.mjs:79 asserts
+  // `impact === null` for every non-computable detector as an invariant.
+  // renderFindings branches on `typeof f.impact === "number"`
+  // (dashboard-server.mjs:1941), and null fails that check, so it lands on the
+  // "no $ claimed" path correctly.
   //
-  // Note the opposite convention in decision 2's `originalChars`, where ABSENCE
-  // is the signal. Both are deliberate; asserting one module's convention on the
-  // other is the mistake this test is written to avoid.
+  // The negative half is what earns this test its place. NaN and Infinity PASS
+  // the typeof check and would render "~$NaN/window" — the fabricated dollar
+  // claim §6 exists to forbid. A numeric STRING fails it and silently
+  // suppresses a claim that WAS computed. `undefined` is indistinguishable from
+  // a detector that dropped the field.
+  //
+  // Note the DELIBERATE asymmetry with decision 2's `originalChars`, where
+  // ABSENCE is the signal. The two modules use opposite conventions on purpose;
+  // a future reader should not unify them.
   const { agg } = await seam();
   for (const f of agg.insights) {
-    assert.equal('impact' in f, true, `${f.id} omits impact; the key is part of the contract`);
-    assert.ok(
-      f.impact === null || (typeof f.impact === 'number' && Number.isFinite(f.impact)),
-      `${f.id} impact must be null or a finite number, got ${JSON.stringify(f.impact)}`,
-    );
-  }
-});
-
-test('a finding impact is never NaN, a string, or undefined', async () => {
-  // This is the assertion that earns its place. renderFindings picks between
-  // "~$N/window" and "no $ claimed" on `typeof f.impact === "number"`:
-  //   - NaN and Infinity PASS that check and render a dollar claim the panel
-  //     never computed — the fabrication ADR §6 exists to forbid.
-  //   - a numeric STRING fails it and silently suppresses a claim that was
-  //     computed.
-  //   - undefined is indistinguishable from a detector that forgot the field.
-  const { agg } = await seam();
-  for (const f of agg.insights) {
-    assert.notEqual(typeof f.impact, 'string', `${f.id} impact is a string`);
-    assert.notEqual(typeof f.impact, 'undefined', `${f.id} impact is undefined`);
-    if (typeof f.impact === 'number') {
-      assert.equal(Number.isNaN(f.impact), false, `${f.id} impact is NaN and would render as a dollar claim`);
-      assert.ok(Number.isFinite(f.impact), `${f.id} impact is ${f.impact}`);
-    }
+    assert.ok('impact' in f, `${f.id} omits impact entirely`);
+    if (f.impact === null) continue;              // the "no $ claimed" encoding (ADR §6)
+    assert.equal(typeof f.impact, 'number', `${f.id} impact is ${typeof f.impact}`);
+    assert.ok(Number.isFinite(f.impact), `${f.id} impact is ${f.impact}`);
   }
 });
 
