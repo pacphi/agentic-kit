@@ -18,6 +18,7 @@
   ],
   "scripts": {
     "test": "node --test \"tests/kit/*.test.mjs\" && node tests/statusline-segments.test.cjs && node tests/statusline-brain.test.cjs && node tests/agentdb.test.cjs && node tests/health-history.test.cjs && node tests/harvest.test.cjs && node tests/dashboard.test.cjs && node tests/admin-model.test.cjs && node tests/admin.test.cjs",
+    "test:ui": "node tests/ui/dashboard-ui.mjs",
     "test:surface": "node --test tests/kit/dispatch-surface.test.mjs",
     "typecheck": "tsc -p tsconfig.json",
     "lint": "eslint .",
@@ -39,6 +40,7 @@
     "eslint": "^10.7.0",
     "globals": "^17.7.0",
     "markdownlint-cli2": "^0.23.0",
+    "playwright": "^1.62.0",
     "typescript": "^7.0.2"
   },
   "repository": {
