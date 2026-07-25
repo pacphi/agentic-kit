@@ -100,7 +100,16 @@ function realDeps(log) {
   };
 }
 
-/** Build the aggregate once per test run, through the real seam. */
+/**
+ * Build the aggregate once per test run, through the real seam.
+ *
+ * ⚠ This memo is only sound because `node --test` runs the tests within a file
+ * SEQUENTIALLY by default, which is what the repo's `test` script relies on.
+ * Adding `{ concurrency: true }` to this file would let two tests race into the
+ * unguarded `if (_built)` and build twice — and the `_resetForTest()` below
+ * would then clear module state out from under an in-flight build. If this file
+ * ever needs concurrency, memoise the PROMISE rather than the result.
+ */
 let _built = null;
 async function seam() {
   if (_built) return _built;
