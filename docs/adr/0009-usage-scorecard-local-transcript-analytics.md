@@ -96,6 +96,16 @@ marathon idle sessions rather than broad deflation; and no session collapses to 
 A metric implying a person worked 21-hour days is not a rounding error, it is a false statement —
 and neither is 16.5.
 
+**Amendment (2026-07-25).** `spanUnionSeconds` shipped computed but rendered nowhere. It is **retained
+and surfaced as a tooltip** on the engaged-time KPI, carrying all three tiers, rather than dropped or
+promoted into the visible sub-line. Promoting it would give hero-row density to a figure this section
+argues is *not* the honest one; dropping it would delete the middle term of the invariant, leaving the
+reader no way to check the ladder from the running panel — the ordering is the argument for why 7.2 h/day
+is trustworthy, and an argument whose middle step is missing is not checkable. **Hover is a weak channel**:
+undiscoverable by accident, absent on touch. That is accepted because the ladder is *supporting evidence
+for a headline figure*, not a figure in its own right — a reader who never hovers is less informed, not
+misled. This ADR records that trade-off rather than implying the tier is prominently displayed.
+
 ### 4b. A session's *location* is not its project — worktrees collapse to the repo
 
 `path.basename(cwd)` was the whole project derivation, so a git worktree reported
@@ -137,6 +147,21 @@ to reach 100% coverage would make the categories untrustworthy everywhere, not j
 This replaces the word map from the first design pass. That map was not *wrong* — 492 of 558 titles
 are distinct, so `review`/`security` was a genuine theme, not one job repeated — but it reported
 vocabulary when the question was categories.
+
+**Amendment (2026-07-25).** "Confidence is displayed, not hidden" was only half-true at ship: the
+confidence *value* reached the category rows, but `basis` — the string saying **why** a category was
+assigned — travelled to the browser and rendered nowhere, alongside nine other Session fields
+(`skill`, `plugin`, `sidechain`, `models`, `input`, `output`, `cacheRead`, `cacheWrite`, `tools`).
+All ten are now **surfaced in a per-session row expander** in the Sessions view, with `basis` placed
+directly beneath the category chip it explains. The alternative — trimming them from the wire — was
+rejected because it would make the classifier's reasoning uninspectable, which is this section's
+claim inverted. `Unclassified` sessions show their basis too (usually `no signal`) rather than being
+blanked: the absence of a signal is itself the explanation.
+
+Keeping the fields on the wire has a measured cost, recorded here so the choice is not free-floating:
+`/api/usage` grows by **{{PAYLOAD_DELTA_USAGE}}** and a representative `/api/sessions` response by
+**{{PAYLOAD_DELTA_SESSIONS}}** on the reference corpus, versus the same responses with the ten fields
+stripped.
 
 ### 6. Findings are evidence-graded, and the panel refuses to market
 
@@ -197,6 +222,20 @@ Masking covers `meta` as well as turns; forwarding metadata around the gate was 
 in review. The data is already on the user's disk; the panel's job is to
 avoid *amplifying* it into a screenshare or a file, not to pretend it is secret from its owner.
 `/api/session/:id` streams a single file by id and never triggers a full scan.
+
+**Amendment (2026-07-25).** Marking redactions covered masking but not the *other* way content is
+withheld: `MAX_TURN_CHARS` (40 000) silently abridged a long turn and set a `truncated` flag the
+renderer ignored, so an abridged turn was indistinguishable from a complete one — the same honesty
+failure this ADR exists to prevent, in the one view that shows raw content. A truncated turn now
+**announces itself in the turn header**, stating how much of the turn is shown rather than a bare
+"truncated": a reader who cannot tell 1% loss from 90% loss has learned that something is missing and
+nothing about whether it matters, which is precisely the un-graded claim §6 refuses from a finding.
+
+The producer emits `originalChars` **only on truncated turns**, so the field's presence is itself the
+signal and a complete turn cannot be misread as an abridged one. That length is measured **after**
+masking, because masking already runs before the slice — so `originalChars` describes loss due to
+*truncation* alone, and must not be read as a raw-file length. Marking the two kinds of withholding
+with different vocabulary keeps them distinguishable to the reader.
 
 ## Consequences
 
