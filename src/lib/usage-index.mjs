@@ -202,7 +202,11 @@ const WORKTREE_MARKERS = ['.autopilot', '.claude', '.git'];
  */
 export function projectLabel(cwd, dirName) {
   if (cwd && typeof cwd === 'string') {
-    const segs = cwd.split(path.sep).filter(Boolean);
+    // Split on BOTH separators, not path.sep. On Windows path.sep is '\\', but a
+    // transcript's recorded cwd may be POSIX-style (WSL, a synced dotfile, a
+    // fixture) — splitting on the host separator alone yields one segment and
+    // silently disables worktree detection on that platform.
+    const segs = cwd.split(/[\\/]+/).filter(Boolean);
 
     // <repo>/<marker>/worktrees/<...rest>  →  repo = <repo>, worktree = rest
     for (let i = 1; i < segs.length - 1; i++) {
@@ -218,12 +222,16 @@ export function projectLabel(cwd, dirName) {
     // be decoded unambiguously (a `-` may be a separator or part of a name).
     // Positional indexing is wrong here — the temp root varies (`/tmp/...` vs
     // `/private/tmp/...`), so match the marker segment wherever it lands.
+    // `segs` already holds the trailing component, and unlike path.basename() it
+    // is separator-agnostic — basename('/a/b') is 'b' on POSIX but the whole
+    // string on Windows, which would have made every project label wrong there.
+    const base = segs[segs.length - 1];
+
     if (segs.includes('scratchpad') && segs.some((seg) => /^claude-\d+$/.test(seg))) {
-      return { project: 'scratchpad', worktree: path.basename(cwd) };
+      return { project: 'scratchpad', worktree: base || null };
     }
 
-    const base = path.basename(cwd);
-    if (base && base !== '.' && base !== path.sep) return { project: base, worktree: null };
+    if (base && base !== '.') return { project: base, worktree: null };
   }
 
   if (!dirName) return { project: 'unknown', worktree: null };

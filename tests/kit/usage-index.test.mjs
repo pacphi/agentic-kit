@@ -935,3 +935,19 @@ test('projectLabel falls back to the encoded dir name when cwd is absent', () =>
   assert.equal(projectLabel(null, '-Users-x-ai-thing').project, 'thing');
   assert.equal(projectLabel(null, null).project, 'unknown');
 });
+
+test('worktree detection is separator-agnostic (Windows CI carries POSIX fixtures)', () => {
+  // path.sep is '\\' on Windows, so splitting on it alone turns a POSIX cwd into
+  // ONE segment and silently disables every rule below. Both forms must work on
+  // every host, because a recorded cwd may come from WSL or a synced dotfile.
+  const posix = projectLabel('/Users/x/ai/keel/.autopilot/worktrees/agent-runtime/phase-1');
+  assert.equal(posix.project, 'keel');
+  assert.equal(posix.worktree, 'agent-runtime/phase-1');
+
+  const win = projectLabel('C:\\Users\\x\\ai\\keel\\.claude\\worktrees\\wt-9');
+  assert.equal(win.project, 'keel', 'a backslash path must resolve the same way');
+  assert.equal(win.worktree, 'wt-9');
+
+  assert.equal(projectLabel('C:\\Users\\x\\ai\\agentic-kit').project, 'agentic-kit',
+    'a plain backslash checkout must not return the whole string as the project');
+});
