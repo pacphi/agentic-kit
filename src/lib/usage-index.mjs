@@ -1048,12 +1048,22 @@ export async function readSession(id, o = {}) {
       cost: sessionCost(rec, await loadDeps(o.deps)),
       ...usage, tokens: usage.input + usage.output + usage.cacheRead + usage.cacheWrite,
     },
+    // ADR-0009 §8: truncation is the other way content is withheld, and it used
+    // to be silent — `truncated` was set and the renderer ignored it, so an
+    // abridged turn read as a complete one. Both keys are emitted only when the
+    // slice actually fired, so the field's *presence* is the signal and a whole
+    // turn cannot be misread as an abridged one. `originalChars` is measured
+    // after `maskSecrets`, so it describes loss due to truncation alone — it is
+    // not a raw-file length, and must not be rendered as one.
     turns: parsed.turns.map((t) => {
       const text = maskSecrets(t.text);
+      const originalChars = text.length;
+      if (originalChars <= MAX_TURN_CHARS) return { ...t, text };
       return {
         ...t,
-        text: text.length > MAX_TURN_CHARS ? `${text.slice(0, MAX_TURN_CHARS)}\n…[truncated]` : text,
-        truncated: text.length > MAX_TURN_CHARS,
+        text: `${text.slice(0, MAX_TURN_CHARS)}\n…[truncated]`,
+        truncated: true,
+        originalChars,
       };
     }),
   };
