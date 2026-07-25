@@ -1,0 +1,5 @@
+{"type":"ai-title","aiTitle":"Fix the flaky test","sessionId":"bbbb2222"}
+{"type":"user","sessionId":"bbbb2222","cwd":"/Users/me/proj","isSidechain":false,"timestamp":"2026-07-24T11:00:00.000Z","message":{"role":"user","content":[{"type":"text","text":"the retry test is flaky"}]}}
+{"type":"assistant","sessionId":"bbbb2222","cwd":"/Users/me/proj","isSidechain":false,"timestamp":"2026-07-24T11:01:00.000Z","message":{"role":"assistant","model":"claude-haiku-4-5-20251001","usage":{"input_tokens":10,"output_tokens":10,"cache_read_input_tokens":0,"cache_creation_input_tokens":0},"content":[{"type":"text","text":"Looking."}]}}
+{"type":"assistant","sessionId":"bbbb2222","cwd":"/Users/me/proj","timestamp":"2026-07-24T11:01:30.000Z","message":{"role":"assistant","model":"claude-haiku
+{"type":"assistant","sessionId":"bbbb2222","cwd":"/Users/me/proj","isSidechain":false,"timestamp":"2026-07-24T11:02:00.000Z","message":{"role":"assistant","model":"claude-haiku-4-5-20251001","usage":{"input_tokens":20,"output_tokens":20,"cache_read_input_tokens":0,"cache_creation_input_tokens":0},"content":[{"type":"text","text":"Fixed the wait."}]}}

@@ -1,0 +1,7 @@
+{"timestamp":"2026-07-24T09:00:00.000Z","type":"session_meta","payload":{"id":"dddd4444","timestamp":"2026-07-24T09:00:00.000Z","cwd":"/Users/me/other","cli_version":"0.139.0","model_provider":"openai"}}
+{"timestamp":"2026-07-24T09:00:01.000Z","type":"turn_context","payload":{"turn_id":"t1","model":"gpt-5.6","cwd":"/Users/me/other"}}
+{"timestamp":"2026-07-24T09:00:02.000Z","type":"event_msg","payload":{"type":"user_message","message":"port the parser to rust"}}
+{"timestamp":"2026-07-24T09:00:30.000Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":1000,"cached_input_tokens":400,"output_tokens":100,"reasoning_output_tokens":0,"total_tokens":1100},"last_token_usage":{"input_tokens":1000,"cached_input_tokens":400,"output_tokens":100,"total_tokens":1100}}}}
+{"timestamp":"2026-07-24T09:01:00.000Z","type":"event_msg","payload":{"type":"agent_message","message":"Started the port."}}
+{"timestamp":"2026-07-24T09:02:00.000Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":3000,"cached_input_tokens":1200,"output_tokens":300,"reasoning_output_tokens":0,"total_tokens":3300},"last_token_usage":{"input_tokens":2000,"cached_input_tokens":800,"output_tokens":200,"total_tokens":2200}}}}
+{"timestamp":"2026-07-24T09:03:00.000Z","type":"event_msg","payload":{"type":"agent_message","message":"Done."}}

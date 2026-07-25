@@ -1,11 +1,14 @@
 // dashboard-server.mjs — a read-only, localhost-only web dashboard for the kit.
 //
-// Zero runtime deps: a plain node:http server bound to 127.0.0.1. Two routes:
+// Zero runtime deps: a plain node:http server bound to 127.0.0.1. Routes:
 //   GET /            → one self-contained HTML document (all CSS + JS inline,
 //                      no external fetches — offline-first, matches the kit ethos)
 //   GET /api/status  → JSON: the same subsystem rows `ak status --json` emits,
 //                      PLUS version drift, the project's .claude-flow/improvement.json
 //                      (if present), and the health-history ring (if present).
+//   GET /api/usage    → the usage Aggregate MINUS sessions[] (ADR-0009)
+//   GET /api/sessions → the session list, filtered + paginated
+//   GET /api/session/:id → one transcript, secrets masked SERVER-side
 //
 // The status rows are gathered by SHELLING OUT to the installed CLI
 // (`node bin/agentic-kit.mjs status --json`) so we never duplicate status.mjs's
@@ -16,6 +19,7 @@
 // close() on SIGINT.
 import http from 'node:http';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execFile } from 'node:child_process';
@@ -147,17 +151,130 @@ export function foldBrainDrift(drift, b) {
   }];
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Usage tab plumbing (ADR-0009). Everything here is either a pure guard or a
+// thin adapter over usage-index.mjs — no parsing, no aggregation, no pricing.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** The transcript stores. Only used to assert containment — usage-index.mjs owns
+ *  the actual reads and may override its own roots for test. */
+/** Session rows per project embedded in /api/usage. Matches what the tree
+ *  renders before "load all"; the rest come from /api/sessions on demand. */
+const USAGE_TREE_PREVIEW = 25;
+
+const TRANSCRIPT_ROOTS = [
+  path.join(os.homedir(), '.claude', 'projects'),
+  path.join(os.homedir(), '.codex', 'sessions'),
+];
+
+/** Session ids are an OPAQUE, closed alphabet — no separators, no dot segments.
+ *  Decoding happens FIRST, so `%2e%2e%2f` is judged as the `../` it becomes;
+ *  validating the raw form and decoding after is the classic way this guard is
+ *  defeated. Returns the safe id, or null (→ 400) for anything else. Pure. */
+export function parseSessionId(raw) {
+  let id;
+  try { id = decodeURIComponent(String(raw ?? '')); } catch { return null; }
+  if (id !== String(raw ?? '') && /%[0-9a-f]{2}/i.test(id)) return null; // double-encoded
+  if (!/^[A-Za-z0-9._-]{1,128}$/.test(id)) return null;
+  if (id === '.' || id === '..') return null;   // legal chars, illegal meaning
+  return id;
+}
+
+/** Defence in depth behind parseSessionId: the id, resolved against a transcript
+ *  root, must land as a DIRECT child of that root. parseSessionId already bars
+ *  every separator, so this cannot currently reject anything it accepted — it is
+ *  here so that a future loosening of the alphabet fails this check loudly
+ *  instead of quietly opening a traversal. Pure. */
+export function resolvesInsideRoot(root, id) {
+  const base = path.resolve(root);
+  const resolved = path.resolve(base, id);
+  return resolved !== base
+    && resolved.startsWith(base + path.sep)
+    && path.dirname(resolved) === base;
+}
+
+/** Run every turn body through the masker before it reaches the wire (ADR-0009
+ *  §8). Copies — never mutates the caller's turns. THROWS when no masker is
+ *  supplied: an unmasked transcript must fail the request, not slip out. Pure. */
+export function maskTurns(turns, maskFn) {
+  if (typeof maskFn !== 'function') throw new Error('no secret masker available — refusing to serve an unmasked transcript');
+  return (Array.isArray(turns) ? turns : []).map((t) => {
+    const out = { ...t };
+    for (const k of Object.keys(out)) {
+      if (typeof out[k] === 'string') out[k] = maskFn(out[k]);
+    }
+    return out;
+  });
+}
+
+/**
+ * Mask a session's metadata. Sibling of `maskTurns` and deliberately as strict:
+ * `title` is the ai-title, or the first 100 chars of the user's opening prompt
+ * when there is none, and `project` / `skill` / `plugin` are transcript-derived
+ * too. Forwarding `meta` around the gate meant a secret in any of them reached
+ * the browser unmasked. Throws on a missing masker for the same reason
+ * `maskTurns` does — fail closed, and cover the WHOLE payload, not just part.
+ */
+export function maskMeta(meta, maskFn) {
+  if (typeof maskFn !== 'function') throw new Error('no secret masker available — refusing to serve unmasked metadata');
+  if (!meta || typeof meta !== 'object') return null;
+  const out = { ...meta };
+  for (const k of Object.keys(out)) {
+    if (typeof out[k] === 'string') out[k] = maskFn(out[k]);
+  }
+  return out;
+}
+
+/** Lazily bind usage-index.mjs. Deliberately NOT a static import: the module
+ *  walks two transcript stores, and the panel must boot (and serve /api/status)
+ *  without paying for that until the Usage tab is actually opened. Same named
+ *  exports the spec specifies — `readIndex`, `readSession`, `maskSecrets`. */
+function lazyUsage() {
+  let mod = null;
+  const load = async () => (mod ||= await import('./usage-index.mjs'));
+  return {
+    readIndex: async (opts) => (await load()).readIndex(opts),
+    readSession: async (id) => (await load()).readSession(id),
+    maskSecrets: async (s) => (await load()).maskSecrets(s),
+    // resolved at call time so a module that ships masking later still fails
+    // closed rather than silently serving raw text.
+    masker: async () => (await load()).maskSecrets,
+  };
+}
+
+/** ?days=N → a sane window. Junk falls back to the 14-day default rather than
+ *  reaching the indexer as NaN. */
+function clampDays(raw, fallback = 14) {
+  const n = Number.parseInt(String(raw ?? ''), 10);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.min(365, Math.max(1, n));
+}
+function clampInt(raw, fallback, min, max) {
+  const n = Number.parseInt(String(raw ?? ''), 10);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.min(max, Math.max(min, n));
+}
+
+function sendJson(res, status, payload) {
+  res.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' });
+  res.end(JSON.stringify(payload));
+}
+
 /**
  * Start the dashboard HTTP server, bound to loopback only.
- * @param {{ port?: number, cwd?: string, fetchStatus?: () => Promise<any> }} [opts]
+ * @param {{ port?: number, cwd?: string, fetchStatus?: () => Promise<any>, usage?: any }} [opts]
  * @returns {Promise<{ url: string, port: number, close: () => Promise<void> }>}
  */
-export function startDashboard({ port = 7431, cwd = process.cwd(), fetchStatus } = {}) {
+export function startDashboard({ port = 7431, cwd = process.cwd(), fetchStatus, usage } = {}) {
   const provide = fetchStatus || shellOutStatus(cwd);
+  const usageApi = usage || lazyUsage();
   const html = renderPage({ name: '@pacphi/agentic-kit', version: kitVersion() });
 
   const server = http.createServer(async (req, res) => {
-    const url = (req.url || '/').split('?')[0];
+    const raw = req.url || '/';
+    const qi = raw.indexOf('?');
+    const url = qi < 0 ? raw : raw.slice(0, qi);
+    const query = new URLSearchParams(qi < 0 ? '' : raw.slice(qi + 1));
     if (req.method !== 'GET') { res.writeHead(405).end('method not allowed'); return; }
     // DNS-rebinding guard: the socket binds loopback-only, but a hostile page
     // can rebind its own hostname to 127.0.0.1 and read /api/status cross-
@@ -167,6 +284,31 @@ export function startDashboard({ port = 7431, cwd = process.cwd(), fetchStatus }
     if (!/^(127\.0\.0\.1|localhost|\[::1\])(:\d+)?$/.test(host)) {
       res.writeHead(403, { 'content-type': 'text/plain; charset=utf-8' });
       res.end('forbidden (unexpected Host)');
+      return;
+    }
+
+    // Cross-site request guard. The Host check above stops a hostile page from
+    // READING a response, and no ACAO is emitted — but a plain <img>/<script>
+    // GET to 127.0.0.1 still carries a loopback Host, needs no preflight, and
+    // EXECUTES. On /api/usage that means a full-corpus parse plus a cache
+    // rewrite, and since the memo is keyed on `days`, iterating days=1..365
+    // defeats it. Blind, but a real CPU/disk DoS from any page the user visits
+    // while the panel is open.
+    //
+    // Fetch-metadata is the right tool: our own page sends `same-origin`;
+    // a hostile page sends `cross-site`. Absent (curl, older browsers) is
+    // allowed so the panel stays scriptable from the terminal — this raises the
+    // bar for the drive-by case without breaking legitimate non-browser use.
+    const fetchSite = String(req.headers['sec-fetch-site'] || '').toLowerCase();
+    if (fetchSite && fetchSite !== 'same-origin' && fetchSite !== 'none') {
+      res.writeHead(403, { 'content-type': 'text/plain; charset=utf-8' });
+      res.end('forbidden (cross-site request)');
+      return;
+    }
+    const origin = String(req.headers.origin || '').toLowerCase();
+    if (origin && !/^https?:\/\/(127\.0\.0\.1|localhost|\[::1\])(:\d+)?$/.test(origin)) {
+      res.writeHead(403, { 'content-type': 'text/plain; charset=utf-8' });
+      res.end('forbidden (foreign Origin)');
       return;
     }
 
@@ -183,6 +325,83 @@ export function startDashboard({ port = 7431, cwd = process.cwd(), fetchStatus }
       res.end(JSON.stringify(payload));
       return;
     }
+
+    // ── Usage (ADR-0009). Lazy: nothing below runs until the tab is opened. ──
+
+    // Rollups only. Dropping the top-level sessions[] is NOT sufficient on its
+    // own: projectTree[].rows holds the SAME object references, so every session
+    // still shipped and the "order of magnitude" saving was really about 20%.
+    // The tree preview is therefore trimmed to what the client actually renders
+    // (USAGE_TREE_PREVIEW rows per project), with rowsTotal kept so the "load
+    // all" control still knows the true count and calls /api/sessions for the rest.
+    if (url === '/api/usage') {
+      try {
+        const agg = await usageApi.readIndex({ days: clampDays(query.get('days')) });
+        const { sessions: _sessions, projectTree, ...rollups } = agg || {};
+        sendJson(res, 200, {
+          ...rollups,
+          projectTree: (projectTree || []).map((n) => ({
+            ...n,
+            rowsTotal: Array.isArray(n.rows) ? n.rows.length : 0,
+            rows: Array.isArray(n.rows) ? n.rows.slice(0, USAGE_TREE_PREVIEW) : [],
+          })),
+        });
+      } catch (e) {
+        sendJson(res, 500, { error: String(e && e.message || e) });
+      }
+      return;
+    }
+
+    if (url === '/api/sessions') {
+      try {
+        const agg = await usageApi.readIndex({ days: clampDays(query.get('days')) });
+        const project = query.get('project') || '';
+        const category = query.get('category') || '';
+        const offset = clampInt(query.get('offset'), 0, 0, 1_000_000);
+        const limit = clampInt(query.get('limit'), 200, 1, 1000);
+        const all = (Array.isArray(agg?.sessions) ? agg.sessions : []).filter((s) => (
+          (!project || s.project === project) && (!category || s.category === category)
+        ));
+        sendJson(res, 200, { sessions: all.slice(offset, offset + limit), total: all.length, offset, limit });
+      } catch (e) {
+        sendJson(res, 500, { error: String(e && e.message || e) });
+      }
+      return;
+    }
+
+    if (url.startsWith('/api/session/')) {
+      // Validate BEFORE touching the index — a rejected id must never reach a
+      // filesystem call, so the 400 happens here and nowhere deeper.
+      const id = parseSessionId(url.slice('/api/session/'.length));
+      if (!id || !TRANSCRIPT_ROOTS.some((r) => resolvesInsideRoot(r, id))) {
+        sendJson(res, 400, { error: 'invalid session id' });
+        return;
+      }
+      try {
+        const maskFn = typeof usageApi.masker === 'function' ? await usageApi.masker() : usageApi.maskSecrets;
+        const found = await usageApi.readSession(id);
+        // A well-formed id that matches no file is 404, not 200-with-a-null-body.
+        // Returning 200 here made every nonexistent session look like an empty
+        // one, and turned the route into a mild existence oracle.
+        if (!found || !found.meta) {
+          sendJson(res, 404, { error: 'no such session' });
+          return;
+        }
+        // maskTurns is the gate, but `meta` used to be forwarded verbatim around
+        // it — meta.title happened to be masked upstream at parse time while
+        // project/skill/plugin never were. Masking the whole payload here means
+        // the fail-closed throw covers meta too, instead of only the turns.
+        sendJson(res, 200, {
+          meta: maskMeta(found.meta, maskFn),
+          turns: maskTurns(found.turns, maskFn),
+        });
+      } catch (e) {
+        // Includes the fail-closed path: no masker → no transcript, ever.
+        sendJson(res, 500, { error: String(e && e.message || e) });
+      }
+      return;
+    }
+
     res.writeHead(404, { 'content-type': 'text/plain; charset=utf-8' });
     res.end('not found');
   });
@@ -235,13 +454,29 @@ function renderPage({ name, version }) {
     <span class="verdict-text" id="verdict-text">connecting…</span>
   </div>
   <div class="band-tools">
-    <div class="refresh" title="live — polling every 5s">
-      <span class="pulse" id="pulse"></span>
-      <span class="mono" id="updated">—</span>
+    <span class="pulse" id="pulse"></span>
+    <span class="upd mono" id="updated">—</span>
+    <div class="poll">
+      <button class="play on" id="poll-play" type="button" title="polling on — click to pause" aria-label="pause polling">&#9208;</button>
+      <button class="ivl mono" id="poll-ivl" type="button" title="polling interval" aria-haspopup="true" aria-expanded="false">30s <span class="caret" aria-hidden="true">&#9662;</span></button>
+      <button class="refresh" id="poll-now" type="button" title="refresh now" aria-label="refresh now">&#8635;</button>
     </div>
     <button class="toggle" id="theme-toggle" type="button" aria-label="toggle theme" title="toggle theme">
       <span class="icon" id="theme-icon" aria-hidden="true"></span>
     </button>
+  </div>
+  <div class="menu" id="poll-menu" hidden>
+    <button type="button" data-ms="15000">15s</button>
+    <button type="button" data-ms="30000">30s</button>
+    <button type="button" data-ms="60000">1m</button>
+    <button type="button" data-ms="300000">5m</button>
+    <button type="button" data-ms="900000">15m</button>
+    <button type="button" data-ms="1800000">30m</button>
+    <div class="sep"></div>
+    <button type="button" data-ms="3600000">1h</button>
+    <button type="button" data-ms="21600000">6h</button>
+    <button type="button" data-ms="43200000">12h</button>
+    <button type="button" data-ms="86400000">24h</button>
   </div>
 </header>
 
@@ -253,6 +488,7 @@ function renderPage({ name, version }) {
     <button class="seg-btn" role="tab" id="tab-providers" data-tab="providers" aria-selected="false" aria-controls="panel-providers" type="button">Providers<span class="badge" id="badge-providers" hidden></span></button>
     <button class="seg-btn" role="tab" id="tab-runtime" data-tab="runtime" aria-selected="false" aria-controls="panel-runtime" type="button">Runtime<span class="badge" id="badge-runtime" hidden></span></button>
     <button class="seg-btn" role="tab" id="tab-intel" data-tab="intel" aria-selected="false" aria-controls="panel-intel" type="button">Intelligence<span class="badge" id="badge-intel" hidden></span></button>
+    <button class="seg-btn" role="tab" id="tab-usage" data-tab="usage" aria-selected="false" aria-controls="panel-usage" type="button">Usage</button>
   </div>
 </nav>
 
@@ -311,6 +547,85 @@ function renderPage({ name, version }) {
     </section>
   </section>
 
+  <section class="panel" id="panel-usage" role="tabpanel" aria-labelledby="tab-usage" hidden>
+    <div class="usage-bar">
+      <div class="seg subseg" role="tablist" aria-label="usage views" id="usage-seg">
+        <button class="seg-btn" role="tab" data-view="score" aria-selected="true" type="button">Scorecard</button>
+        <button class="seg-btn" role="tab" data-view="findings" aria-selected="false" type="button">Findings<span class="segbadge" id="u-findings-n" hidden></span></button>
+        <button class="seg-btn" role="tab" data-view="sessions" aria-selected="false" type="button">Sessions<span class="mono seg-n" id="u-sessions-n"></span></button>
+        <button class="seg-btn" role="tab" data-view="transcript" aria-selected="false" type="button">Transcript</button>
+      </div>
+      <div class="filters" id="usage-days" role="group" aria-label="window">
+        <button class="chipf" type="button" data-days="7">7d</button>
+        <button class="chipf on" type="button" data-days="14">14d</button>
+        <button class="chipf" type="button" data-days="30">30d</button>
+      </div>
+    </div>
+
+    <section class="view" id="v-score">
+      <div class="hero" id="u-hero"></div>
+      <div class="note"><span class="i">&#8505;</span><span>Dollar figures are <b>API list-price equivalents</b> &mdash;
+        what these tokens would cost metered. On a Max/Pro subscription you are not billed this.
+        Cache reads bill at 0.1&times; input and cache writes at 1.25&times;; ignoring that would overstate
+        a window by roughly <b>10&times;</b>. <span class="mono" id="u-asof"></span></span></div>
+      <section class="strip">
+        <div class="sh"><h2>cost per day</h2><span class="n mono" id="u-days-note"></span></div>
+        <div class="days" id="u-daybars"></div>
+      </section>
+      <div class="two">
+        <section class="strip">
+          <div class="sh"><h2>by host</h2><span class="n mono">claude vs codex</span></div>
+          <div class="psplit" id="u-hosts"></div>
+          <div class="tokbar" id="u-tokbar"></div>
+          <div class="legend" id="u-toklegend"></div>
+        </section>
+        <section class="strip">
+          <div class="sh"><h2>when you work</h2><span class="n mono">responses &middot; local time</span></div>
+          <div id="u-punch"></div>
+        </section>
+      </div>
+      <div class="two">
+        <section class="strip">
+          <div class="sh"><h2>models in play</h2><span class="n mono">by api-equivalent cost</span></div>
+          <div id="u-models"></div>
+        </section>
+        <section class="strip">
+          <div class="sh"><h2>projects</h2><span class="n mono" id="u-projects-note"></span></div>
+          <div id="u-projects"></div>
+        </section>
+      </div>
+      <section class="strip">
+        <div class="sh"><h2>what you worked on</h2>
+          <span class="n mono">classified from titles, skills &amp; tool mix &middot; click to filter</span></div>
+        <div id="u-cats"></div>
+        <div class="legend" style="margin-top:11px">
+          <span class="lg"><i class="conf"></i>dot opacity = classifier confidence</span>
+          <span class="lg">Unclassified is shown, never force-fit</span>
+        </div>
+      </section>
+    </section>
+
+    <section class="view" id="v-findings" hidden>
+      <div class="note"><span class="i">&#8505;</span><span id="u-findings-note"></span></div>
+      <div class="ins-grid" id="u-insights"></div>
+      <div class="foot">grounded in local measurement first; vendor benchmarks are labelled as such &middot;
+        third-party &ldquo;model X vs Y&rdquo; blog comparisons are deliberately not used as evidence</div>
+    </section>
+
+    <section class="view" id="v-sessions" hidden>
+      <div class="note"><span class="i">&#8505;</span><span>Grouped by project, aggregate first.
+        Expand a project to see its sessions; click <b>&#9707;</b> on any session to read its transcript.</span></div>
+      <div class="ptree" id="u-tree"></div>
+      <div class="foot">durations are session span (first&rarr;last event), not exclusive wall-clock</div>
+    </section>
+
+    <section class="view" id="v-transcript" hidden>
+      <div class="tcrumb" id="u-crumb"></div>
+      <section class="strip" id="u-turns"></section>
+      <div class="foot">secret-shaped strings are masked server-side &mdash; the original never reaches this page &middot; no export button by design</div>
+    </section>
+  </section>
+
   <footer class="foot mono">
     <span id="foot-note">read-only · 127.0.0.1 · nothing here mutates state</span>
   </footer>
@@ -338,13 +653,20 @@ const CSS = `
   --sans:-apple-system,BlinkMacSystemFont,"SF Pro Text","SF Pro Display","Helvetica Neue","Segoe UI",sans-serif;
   --mono:ui-monospace,"SF Mono","Menlo","Cascadia Code",monospace;
   --r:16px; --r-sm:11px;
+  /* One height for every scrollable list, so the page frame never changes
+     between Findings / Sessions / Transcript. The 420px subtrahend is the fixed
+     chrome above and below: header band + tab bar + sub-tabs + note + footer.
+     Without it the region ran to the viewport edge and the footer sat below the
+     fold, forcing a window scroll to read it — the thing in-place scrolling was
+     supposed to avoid. */
+  --listh:clamp(200px, calc(100vh - 420px), 520px);
 }
 :root[data-theme="dark"]{
   --bg:#000000; --panel:#1c1c1e; --panel-2:#2c2c2e; --raised:#3a3a3c; --thumb:#48484a;
   --ink:#f5f5f7; --ink-2:rgba(235,235,245,.64); --ink-dim:rgba(235,235,245,.38);
   --line:rgba(255,255,255,.09); --line-2:rgba(255,255,255,.17);
   --accent:#0a84ff; --accent-soft:rgba(10,132,255,.16);
-  --ok:#30d158; --warn:#ff9f0a; --fail:#ff453a; --info:#98989d;
+  --ok:#30d158; --warn:#ff9f0a; --fail:#ff453a; --info:#98989d; --purple:#bf5af2;
   --material:rgba(16,16,18,.72);
   --shadow:0 1px 2px rgba(0,0,0,.4),0 12px 32px -20px rgba(0,0,0,.9);
 }
@@ -353,7 +675,7 @@ const CSS = `
   --ink:#1d1d1f; --ink-2:rgba(60,60,67,.68); --ink-dim:rgba(60,60,67,.42);
   --line:rgba(60,60,67,.12); --line-2:rgba(60,60,67,.22);
   --accent:#007aff; --accent-soft:rgba(0,122,255,.12);
-  --ok:#34c759; --warn:#ff9500; --fail:#ff3b30; --info:#8e8e93;
+  --ok:#34c759; --warn:#ff9500; --fail:#ff3b30; --info:#8e8e93; --purple:#af52de;
   --material:rgba(249,249,251,.78);
   --shadow:0 1px 2px rgba(0,0,0,.05),0 12px 30px -22px rgba(0,0,0,.22);
 }
@@ -376,6 +698,7 @@ body{
 
 /* ── header band ── */
 .band{
+  position:relative;
   display:flex; align-items:center; gap:20px; flex-wrap:wrap;
   padding:24px clamp(16px,4vw,40px) 14px;
 }
@@ -406,17 +729,56 @@ body{
   background:var(--panel);
 }
 .verdict-text{font-size:13px; font-weight:500; letter-spacing:-.006em}
-.band-tools{display:flex; align-items:center; gap:16px}
-.refresh{display:flex; align-items:center; gap:8px; color:var(--ink-dim); font-size:12px}
+.band-tools{display:flex; align-items:center; gap:10px}
 .pulse{
-  width:8px; height:8px; border-radius:50%; background:var(--accent);
+  width:8px; height:8px; border-radius:50%; background:var(--accent); flex:none;
   animation:pulse 2.4s ease-out infinite;
 }
+/* paused reads as paused: the pulse greys and stops, so "live" is never implied
+   by a still-animating dot over stale numbers. */
+.pulse.off{background:var(--ink-dim); animation:none}
 @keyframes pulse{
   0%{box-shadow:0 0 0 0 var(--accent-soft)}
   70%{box-shadow:0 0 0 7px transparent}
   100%{box-shadow:0 0 0 0 transparent}
 }
+.upd{font-size:11.5px; color:var(--ink-dim); min-width:96px}
+
+/* ── poll control (governs EVERY tab, not just Usage) ── */
+.poll{
+  display:flex; align-items:center; gap:2px; padding:3px;
+  border:1px solid var(--line); border-radius:100px; background:var(--panel);
+}
+.poll button{
+  display:inline-flex; align-items:center; justify-content:center; gap:6px;
+  border:0; background:transparent; color:var(--ink-2);
+  font-family:inherit; font-size:12px; height:26px; padding:0 10px;
+  border-radius:100px; cursor:pointer; transition:background .15s ease, color .15s ease;
+}
+.poll button:hover:not(:disabled){background:var(--panel-2); color:var(--ink)}
+.poll button:focus-visible{outline:2px solid var(--accent); outline-offset:1px}
+.poll button:disabled{opacity:.38; cursor:not-allowed}
+.poll .play{width:28px; padding:0}
+.poll .play.on{color:var(--accent)}
+.poll .ivl{min-width:56px; justify-content:space-between}
+.poll .caret{opacity:.5}
+.poll .refresh{width:28px; padding:0; font-size:14px}
+.poll .refresh.spin{animation:spin .6s linear}
+@keyframes spin{to{transform:rotate(360deg)}}
+.menu{
+  position:absolute; z-index:60; right:clamp(16px,4vw,40px); top:100%; margin-top:-6px;
+  background:var(--panel); border:1px solid var(--line-2); border-radius:var(--r-sm);
+  box-shadow:var(--shadow); padding:5px; min-width:118px;
+}
+.menu[hidden]{display:none}
+.menu button{
+  display:flex; width:100%; justify-content:space-between; align-items:center;
+  font-family:var(--mono); font-size:12px; height:26px; padding:0 9px;
+  border-radius:7px; background:transparent; border:0; color:var(--ink-2); cursor:pointer;
+}
+.menu button:hover{background:var(--panel-2); color:var(--ink)}
+.menu button.sel{color:var(--accent)}
+.menu .sep{height:1px; background:var(--line); margin:4px 2px}
 .toggle{
   display:inline-flex; align-items:center; justify-content:center;
   width:34px; height:34px; padding:0;
@@ -618,6 +980,271 @@ body{
 .spark-svg{width:100%; overflow-x:auto}
 .spark-svg svg{display:block; width:100%; height:auto}
 
+/* ── Usage tab (ADR-0009) ───────────────────────────────────────────────────
+   Same Apple system motif as the rest of the panel: hairline-separated rows,
+   soft-shadowed strips, systemBlue for magnitude and systemPurple as the second
+   series. Nothing here fetches; every figure below is rendered from /api/usage. */
+.usage-bar{display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:18px}
+.subseg{gap:2px}
+.subseg .seg-btn[aria-selected="true"]{
+  background:var(--thumb); box-shadow:0 1px 4px rgba(0,0,0,.18),0 0 0 .5px rgba(0,0,0,.04);
+}
+.seg-n{opacity:.6; font-size:11px}
+.segbadge{
+  min-width:16px; height:16px; padding:0 5px; border-radius:8px; background:var(--warn);
+  color:#000; font-size:10.5px; font-weight:700; display:inline-flex;
+  align-items:center; justify-content:center;
+}
+.segbadge[hidden]{display:none}
+.filters{display:flex; gap:8px; flex-wrap:wrap; margin-left:auto}
+.chipf{
+  font-size:12px; padding:4px 11px; border-radius:100px; border:1px solid var(--line);
+  background:var(--panel); color:var(--ink-2); cursor:pointer; font-family:inherit;
+}
+.chipf.on{border-color:var(--accent); color:var(--accent); background:var(--accent-soft)}
+.chipf:focus-visible{outline:2px solid var(--accent); outline-offset:1px}
+.view[hidden]{display:none}
+
+/* hero KPIs */
+.hero{display:grid; gap:12px; grid-template-columns:repeat(auto-fit,minmax(168px,1fr)); margin-bottom:14px}
+.kpi{background:var(--panel); border:1px solid var(--line); border-radius:var(--r); padding:15px 16px; box-shadow:var(--shadow)}
+.kpi .k{font-size:10.5px; font-weight:600; letter-spacing:.09em; text-transform:uppercase; color:var(--ink-dim)}
+.kpi .v{font-size:27px; font-weight:700; letter-spacing:-.028em; margin-top:5px; line-height:1.05}
+.kpi .d{font-size:11.5px; color:var(--ink-2); margin-top:5px}
+/* A parenthetical qualifier belongs on its own line, not wrapped mid-phrase.
+   "297h summed (sessions" / "overlap)" split the caveat across the break and
+   made the number harder to read than no caveat at all. */
+.kpi .d-note{display:block; color:var(--ink-dim); font-size:11px; margin-top:2px}
+.kpi.accent .v{color:var(--accent)}
+.kpi.warnv .v{color:var(--warn)}
+.note{
+  display:flex; gap:9px; padding:10px 14px; margin-bottom:16px; border-radius:var(--r-sm);
+  background:var(--accent-soft); color:var(--ink-2); font-size:12.5px; align-items:baseline;
+}
+.note b{color:var(--ink)}
+.note .i{color:var(--accent); font-weight:700}
+.sh{display:flex; align-items:baseline; justify-content:space-between; gap:12px; margin-bottom:14px}
+.sh h2{font-size:15px; font-weight:600; letter-spacing:-.014em; margin:0}
+.sh .n{color:var(--ink-dim); font-size:11.5px}
+.two{display:grid; gap:16px; grid-template-columns:repeat(auto-fit,minmax(330px,1fr))}
+#panel-usage .strip{margin-top:0; margin-bottom:16px}
+
+/* day bars */
+.days{display:flex; gap:5px; align-items:flex-end; height:118px}
+.daybar{flex:1; display:flex; flex-direction:column; justify-content:flex-end; align-items:center; height:100%}
+.db-fill{
+  width:100%; border-radius:5px 5px 2px 2px;
+  background:linear-gradient(180deg,var(--accent),color-mix(in srgb,var(--accent) 35%,transparent));
+  transition:filter .15s ease;
+}
+.daybar:hover .db-fill{filter:brightness(1.35)}
+.db-lab{font-family:var(--mono); font-size:9.5px; color:var(--ink-dim); margin-top:6px}
+
+/* punchcard */
+.pc-row{display:flex; align-items:center; gap:3px; margin-bottom:3px}
+.pc-day{font-family:var(--mono); font-size:10px; color:var(--ink-dim); width:28px; flex:none}
+.pc{flex:1; height:13px; border-radius:3px; background:color-mix(in srgb,var(--accent) calc(var(--v)*100%),var(--panel-2))}
+.pc-axis{display:flex; gap:3px; margin-left:31px; margin-top:5px}
+.pc-axis span{flex:1; font-family:var(--mono); font-size:8.5px; color:var(--ink-dim); text-align:center}
+
+/* magnitude rows (models / projects / categories) */
+.mrow{
+  display:grid; grid-template-columns:minmax(120px,1.5fr) 2fr 62px minmax(96px,auto);
+  gap:11px; align-items:center; padding:7px 0; border-bottom:1px solid var(--line);
+}
+.mrow:last-child{border-bottom:0}
+.mname{font-size:12.5px; color:var(--ink); overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+.mbar{height:7px; border-radius:4px; background:var(--panel-2); overflow:hidden}
+.mbar i{display:block; height:100%; border-radius:4px; background:var(--accent)}
+.mbar i.alt{background:var(--purple)}
+.mval{font-size:12.5px; text-align:right; color:var(--ink)}
+.msub{font-size:10.5px; color:var(--ink-dim); text-align:right}
+.crow{
+  display:grid; grid-template-columns:minmax(140px,1.4fr) 2fr 62px minmax(128px,auto);
+  gap:11px; align-items:center; padding:7px 0; border-bottom:1px solid var(--line);
+  cursor:pointer; font-family:inherit; text-align:left; background:transparent; border-left:0; border-right:0; border-top:0; width:100%; color:inherit;
+}
+.crow:last-child{border-bottom:0}
+.crow:hover{background:var(--panel-2)}
+.crow:focus-visible{outline:2px solid var(--accent); outline-offset:-2px}
+.crow.uncl{opacity:.6}
+.c-name{font-size:12.5px; display:flex; align-items:center; gap:7px; color:var(--ink)}
+.conf{width:6px; height:6px; border-radius:50%; background:var(--ok); flex:none; display:inline-block}
+
+/* provider split */
+.psplit{display:flex; gap:10px; flex-wrap:wrap}
+.pcard{flex:1; min-width:190px; border:1px solid var(--line); border-radius:var(--r-sm); padding:13px 15px; background:var(--panel-2)}
+.pcard .ph{display:flex; align-items:center; gap:8px; font-size:13px; font-weight:600; margin-bottom:9px}
+.pdot{width:9px; height:9px; border-radius:50%}
+.pdot.c{background:var(--warn)}
+.pdot.x{background:var(--accent)}
+.pcard .pv{font-size:21px; font-weight:700; letter-spacing:-.02em}
+.pcard .pl{font-size:11.5px; color:var(--ink-dim); margin-top:4px}
+.pcard.idle{opacity:.55}
+.tokbar{display:flex; height:9px; border-radius:5px; overflow:hidden; margin-top:11px}
+.tokbar i{display:block; height:100%}
+.legend{display:flex; gap:14px; flex-wrap:wrap; margin-top:9px; font-size:11px; color:var(--ink-dim)}
+.legend b{color:var(--ink); font-weight:600}
+.lg{display:inline-flex; align-items:center; gap:5px}
+.lg i{width:8px; height:8px; border-radius:2px; display:inline-block}
+
+/* findings */
+.ins-grid{display:grid; gap:11px; margin-bottom:11px}
+/* Findings scrolls in place too, so the window keeps a fixed frame across all
+   three list views instead of each one growing the document to a different
+   height. Padding-right keeps the scrollbar off the card border. */
+#u-insights{
+  max-height:var(--listh);
+  min-height:200px;
+  overflow-y:auto;
+  overscroll-behavior:contain;
+  padding-right:4px;
+  scrollbar-width:thin;
+  scrollbar-color:var(--thumb) transparent;
+}
+#u-insights::-webkit-scrollbar{width:10px}
+#u-insights::-webkit-scrollbar-thumb{background:var(--thumb); border-radius:6px; border:3px solid transparent; background-clip:content-box}
+#u-insights::-webkit-scrollbar-track{background:transparent}
+
+.icard{
+  background:var(--panel); border:1px solid var(--line); border-left:3px solid var(--sv,var(--accent));
+  border-radius:var(--r-sm); padding:13px 15px; box-shadow:var(--shadow);
+}
+.icard[data-sev="warn"]{--sv:var(--warn)}
+.icard[data-sev="info"]{--sv:var(--accent)}
+.icard[data-sev="ok"]{--sv:var(--ok)}
+.i-top{display:flex; align-items:center; gap:9px; margin-bottom:7px; flex-wrap:wrap}
+.i-n{
+  width:19px; height:19px; border-radius:50%; background:var(--sv); color:#000;
+  font-size:11px; font-weight:700; display:inline-flex; align-items:center; justify-content:center; flex:none;
+}
+.i-title{font-size:14px; font-weight:600; letter-spacing:-.012em; color:var(--ink)}
+.i-kind{font-size:9.5px; text-transform:uppercase; letter-spacing:.07em; color:var(--ink-dim); border:1px solid var(--line); border-radius:100px; padding:1px 7px}
+.i-imp{margin-left:auto; font-size:12.5px; font-weight:600; color:var(--sv); white-space:nowrap}
+.i-imp.soft{color:var(--ink-dim); font-weight:400; font-size:11px}
+.i-find{margin:0 0 5px; font-size:12.5px; color:var(--ink-2); line-height:1.52}
+.i-ev{margin:0 0 9px; font-size:11.5px; color:var(--ink-dim); line-height:1.5}
+.i-act{display:flex; gap:8px; font-size:12.5px; color:var(--ink); align-items:baseline; border-top:1px solid var(--line); padding-top:9px}
+.i-arrow{color:var(--sv); font-weight:700}
+.i-cmd{font-family:var(--mono); font-size:11.5px; color:var(--accent); background:var(--accent-soft); border-radius:5px; padding:1px 6px; white-space:nowrap}
+.i-src{margin-top:9px; border-top:1px solid var(--line); padding-top:8px}
+.i-src summary{font-size:11.5px; color:var(--ink-dim); cursor:pointer; list-style:none}
+.i-src summary::-webkit-details-marker{display:none}
+.i-src summary::before{content:"\\25B8 "; color:var(--accent)}
+.i-src[open] summary::before{content:"\\25BE "}
+.i-src ul{margin:8px 0 0; padding-left:16px}
+.i-src li{font-size:11.5px; color:var(--ink-2); margin-bottom:4px}
+.i-src a{color:var(--accent); text-decoration:none}
+.i-src a:hover{text-decoration:underline}
+
+/* tiered project tree */
+.ptree{display:flex; flex-direction:column; gap:8px}
+.pgroup{border:1px solid var(--line); border-radius:var(--r-sm); overflow:hidden; background:var(--panel)}
+.phead{
+  display:grid; grid-template-columns:16px minmax(120px,1.1fr) minmax(150px,1.6fr) 64px 44px 58px 66px;
+  gap:10px; align-items:center; width:100%; padding:11px 13px; background:var(--panel-2);
+  border:0; color:var(--ink); font-family:inherit; font-size:13px; cursor:pointer; text-align:left;
+}
+.phead:hover{background:var(--raised)}
+.phead:focus-visible{outline:2px solid var(--accent); outline-offset:-2px}
+.chev{color:var(--ink-dim); transition:transform .18s ease; display:inline-block}
+.pgroup[data-open] .chev{transform:rotate(90deg); color:var(--accent)}
+.pname{font-weight:600; letter-spacing:-.01em; overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+.pchips{display:flex; gap:5px; flex-wrap:wrap; overflow:hidden}
+.pchip{font-size:10px; color:var(--ink-dim); border:1px solid var(--line); border-radius:100px; padding:1px 7px; white-space:nowrap}
+.pchip b{color:var(--ink-2); font-weight:600}
+.pn{font-size:11.5px; color:var(--ink-dim); text-align:right}
+.pcost{font-size:13px; font-weight:600; text-align:right; color:var(--ink)}
+.pbody{display:none; background:var(--line); gap:1px; flex-direction:column}
+/* Each expanded project scrolls INSIDE its own group. A project with 108
+   sessions otherwise pushes every project below it off-screen and forces the
+   whole window to scroll, so you lose the group headers you were comparing. */
+.pgroup[data-open] .pbody{
+  display:flex;
+  max-height:var(--listh);
+  overflow-y:auto;
+  overscroll-behavior:contain;   /* reaching the end must not scroll the page */
+  scrollbar-width:thin;
+  scrollbar-color:var(--thumb) transparent;
+}
+.smore{background:var(--panel); padding:9px 13px; font-size:11.5px; color:var(--ink-dim)}
+.smore button{background:transparent; border:0; color:var(--accent); cursor:pointer; font-family:inherit; font-size:11.5px; padding:0}
+.cat{
+  font-size:10px; border-radius:100px; padding:1px 8px; white-space:nowrap; overflow:hidden;
+  text-overflow:ellipsis; border:1px solid color-mix(in srgb,var(--ok) 30%,transparent);
+  color:var(--ok); background:color-mix(in srgb,var(--ok) 11%,transparent);
+}
+.cat[data-w="0"]{
+  border-color:color-mix(in srgb,var(--warn) 30%,transparent);
+  color:var(--warn); background:color-mix(in srgb,var(--warn) 10%,transparent);
+}
+.cat.uncl{border-color:var(--line); color:var(--ink-dim); background:transparent}
+
+/* session rows */
+.srow{
+  display:grid; grid-template-columns:58px minmax(150px,2.1fr) minmax(90px,1fr) 106px 46px 60px 62px 68px 20px;
+  gap:10px; align-items:center; padding:9px 13px; background:var(--panel); font-size:12.5px; cursor:pointer;
+}
+.srow:hover{background:var(--panel-2)}
+.s-host{font-size:10px; font-weight:600; text-align:center; padding:2px 0; border-radius:100px; border:1px solid var(--line-2)}
+.s-claude{color:var(--warn); background:color-mix(in srgb,var(--warn) 12%,transparent); border-color:color-mix(in srgb,var(--warn) 30%,transparent)}
+.s-codex{color:var(--accent); background:var(--accent-soft); border-color:color-mix(in srgb,var(--accent) 35%,transparent)}
+.s-title{overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+.s-proj,.s-when,.s-dur,.s-turns,.s-tok{color:var(--ink-2); font-size:11.5px}
+.s-cost{text-align:right; color:var(--ink); font-size:12px}
+.s-tx{background:transparent; border:0; color:var(--ink-dim); font-size:14px; cursor:pointer; padding:0; border-radius:5px}
+.s-tx:hover{color:var(--accent); background:var(--accent-soft)}
+
+/* transcript reader */
+/* The crumb stays put while the turns scroll beneath it — on a 2,216-turn
+   session the header is exactly what you lose first when the page scrolls. */
+.tcrumb{display:flex; align-items:center; gap:9px; font-size:12.5px; color:var(--ink-2); margin-bottom:14px; flex-wrap:wrap}
+#u-turns{
+  max-height:var(--listh);
+  min-height:200px;
+  overflow-y:auto;
+  overscroll-behavior:contain;
+  scrollbar-width:thin;
+  scrollbar-color:var(--thumb) transparent;
+}
+/* WebKit needs its own scrollbar rules; keep them quiet and on-motif. */
+#u-turns::-webkit-scrollbar,.pgroup[data-open] .pbody::-webkit-scrollbar{width:10px}
+#u-turns::-webkit-scrollbar-thumb,.pgroup[data-open] .pbody::-webkit-scrollbar-thumb{
+  background:var(--thumb); border-radius:6px; border:3px solid transparent; background-clip:content-box;
+}
+#u-turns::-webkit-scrollbar-track,.pgroup[data-open] .pbody::-webkit-scrollbar-track{background:transparent}
+@media (max-width:700px){ :root{--listh:clamp(180px, calc(100vh - 340px), 460px)} }
+.tcrumb button{
+  background:var(--panel); border:1px solid var(--line); color:var(--ink-2); border-radius:100px;
+  padding:4px 12px; font-family:inherit; font-size:12px; cursor:pointer;
+}
+.tcrumb button:hover{border-color:var(--line-2); color:var(--ink)}
+.turn{display:grid; grid-template-columns:78px 1fr; gap:14px; padding:13px 0; border-bottom:1px solid var(--line)}
+.turn:last-child{border-bottom:0}
+.t-who{font-family:var(--mono); font-size:10.5px; color:var(--ink-dim); text-transform:uppercase; letter-spacing:.06em}
+.t-user .t-who{color:var(--accent)}
+.t-meta{display:block; font-size:9.5px; margin-top:3px; text-transform:none; letter-spacing:0}
+.t-body{font-size:13px; color:var(--ink-2); white-space:pre-wrap; word-break:break-word; min-width:0}
+.t-user .t-body{color:var(--ink)}
+.chips{margin-top:8px; display:flex; gap:6px; flex-wrap:wrap}
+.tool{
+  font-family:var(--mono); font-size:10px; color:var(--purple);
+  border:1px solid color-mix(in srgb,var(--purple) 32%,transparent);
+  background:color-mix(in srgb,var(--purple) 11%,transparent); border-radius:5px; padding:2px 7px;
+}
+/* click-to-reveal, never a download: the bytes are already the user's, the risk
+   is amplifying them into a screenshare (ADR-0009 §8). */
+.masked{background:var(--fail); color:transparent; border-radius:3px; cursor:pointer; opacity:.75; padding:0 3px}
+.masked:hover,.masked.shown{color:#fff; opacity:1}
+.masked.shown{background:transparent; box-shadow:inset 0 0 0 1px var(--fail); color:var(--ink)}
+
+@media(max-width:720px){
+  .srow{grid-template-columns:58px 1fr 68px 20px}
+  .srow .s-proj,.srow .s-when,.srow .s-dur,.srow .s-turns,.srow .s-tok{display:none}
+  .phead{grid-template-columns:16px 1fr 58px 66px}
+  .phead .pchips,.phead .p-h,.phead .p-tok{display:none}
+}
+
 /* ── footer ── */
 .foot{margin-top:24px; padding-top:16px; border-top:1px solid var(--line); color:var(--ink-dim); font-size:12px}
 
@@ -670,7 +1297,8 @@ const JS = `
   // Category map: every subsystem lands in exactly one tab; unknown/future
   // subsystems fall back to Runtime so nothing is ever dropped. Overview
   // aggregates all attention cards regardless of category.
-  var TABS=["overview","hosts","providers","runtime","intel"];
+  var TABS=["overview","hosts","providers","runtime","intel","usage"];
+  var VIEWS=["score","findings","sessions","transcript"];
   var CAT={
     hosts:"hosts", mcp:"hosts", "codex-mcp":"hosts", routing:"hosts",
     providers:"providers",
@@ -679,9 +1307,27 @@ const JS = `
   function catOf(s){return CAT[s]||"runtime";}
 
   var activeTab="overview";
+  var usageView="score", usageSession=null, usageDays=14;
   try{var st=localStorage.getItem(LS_TAB); if(st&&TABS.indexOf(st)>=0)activeTab=st;}catch(e){}
-  // deep-link: #providers etc. wins over the stored tab
-  try{var h=location.hash.slice(1); if(h&&TABS.indexOf(h)>=0)activeTab=h;}catch(e){}
+  // deep-link: #providers etc. wins over the stored tab. Usage carries a second
+  // segment: #usage/findings, #usage/sessions, or #usage/<sessionId> — anything
+  // that is not a known view name is read as a session id.
+  try{
+    var parts=location.hash.slice(1).split("/");
+    if(parts[0]&&TABS.indexOf(parts[0])>=0)activeTab=parts[0];
+    if(parts[0]==="usage"&&parts[1]){
+      if(VIEWS.indexOf(parts[1])>=0){usageView=parts[1];}
+      else{usageView="transcript"; usageSession=decodeURIComponent(parts[1]);}
+    }
+  }catch(e){}
+
+  function usageHash(){
+    if(usageView==="transcript")return "#usage/"+(usageSession?encodeURIComponent(usageSession):"transcript");
+    return usageView==="score"?"#usage":"#usage/"+usageView;
+  }
+  function syncHash(){
+    try{if(history.replaceState)history.replaceState(null,"",activeTab==="usage"?usageHash():"#"+activeTab);}catch(e){}
+  }
 
   function positionThumb(){
     var segEl=document.getElementById("seg"), thumb=document.getElementById("seg-thumb");
@@ -694,7 +1340,10 @@ const JS = `
   function setTab(id,focus){
     activeTab=id;
     try{localStorage.setItem(LS_TAB,id);}catch(e){}
-    try{if(history.replaceState)history.replaceState(null,"","#"+id);}catch(e){}
+    syncHash();
+    // Usage is LAZY (ADR-0009 §2): the index is only read once the tab is
+    // actually opened, never on the shared status poll.
+    if(id==="usage"&&!usageLoaded)loadUsage();
     for(var i=0;i<TABS.length;i++){
       var t=TABS[i], on=(t===id);
       var btn=document.querySelector('[data-tab="'+t+'"]');
@@ -987,21 +1636,519 @@ const JS = `
   }
   function tickClock(){
     var el=document.getElementById("updated");
-    if(!lastUpdated){el.textContent="—";return;}
-    el.textContent="updated "+ago(Math.round((Date.now()-lastUpdated)/1000));
+    if(el){
+      if(!lastUpdated){el.textContent="—";}
+      else{el.textContent=(pollOn?"updated ":"paused · ")+ago(Math.round((Date.now()-lastUpdated)/1000));}
+    }
+    // Manual refresh is live except while a fetch is in the air or inside the
+    // cooldown — the button's own disabled state IS the visible cooldown.
+    var btn=document.getElementById("poll-now");
+    if(btn)btn.disabled=inflight||(Date.now()-lastAttempt)<POLL_COOLDOWN_MS;
   }
 
-  function poll(){
-    fetch("/api/status",{cache:"no-store"}).then(function(r){return r.json();}).then(function(d){
+  // ══ poll control ═══════════════════════════════════════════════════════════
+  // Governs EVERY tab, not just Usage (ADR-0009 §7). The old hardcoded 5 s poll
+  // predated any expensive view; 30 s is the default now, and the whole range is
+  // user-chosen and persisted. Every refresh path — automatic or manual — funnels
+  // through refreshAll(), so the single-flight guard and the cooldown are
+  // impossible to route around.
+  var LS_POLL="ak-dash-poll";
+  var POLL_DEFAULT_MS=30000;
+  var POLL_COOLDOWN_MS=3000;
+  var POLL_LABEL={15000:"15s",30000:"30s",60000:"1m",300000:"5m",900000:"15m",
+    1800000:"30m",3600000:"1h",21600000:"6h",43200000:"12h",86400000:"24h"};
+  var pollOn=true, pollMs=POLL_DEFAULT_MS, pollTimer=null, inflight=false, lastAttempt=0;
+
+  try{
+    var savedPoll=JSON.parse(localStorage.getItem(LS_POLL)||"null");
+    if(savedPoll&&typeof savedPoll==="object"){
+      if(typeof savedPoll.on==="boolean")pollOn=savedPoll.on;
+      if(POLL_LABEL[savedPoll.intervalMs])pollMs=savedPoll.intervalMs;
+    }
+  }catch(e){}
+
+  function savePoll(){
+    try{localStorage.setItem(LS_POLL,JSON.stringify({on:pollOn,intervalMs:pollMs}));}catch(e){}
+  }
+
+  function pollStatus(){
+    return fetch("/api/status",{cache:"no-store"}).then(function(r){return r.json();}).then(function(d){
       lastUpdated=Date.now(); render(d); tickClock();
     }).catch(function(){
       var t=document.getElementById("verdict-text"); if(t)t.textContent="server unreachable";
     });
   }
 
+  function refreshAll(){
+    // single-flight: a refresh already in the air is joined, never duplicated.
+    if(inflight)return;
+    // cooldown: a double-click (or a held Enter) cannot stack requests.
+    if(Date.now()-lastAttempt<POLL_COOLDOWN_MS)return;
+    inflight=true; lastAttempt=Date.now();
+    var btn=document.getElementById("poll-now");
+    if(btn)btn.classList.add("spin");
+    var jobs=[pollStatus()];
+    if(activeTab==="usage")jobs.push(loadUsage(true));
+    Promise.all(jobs).catch(function(){}).then(function(){
+      inflight=false;
+      if(btn)btn.classList.remove("spin");
+      tickClock();
+    });
+  }
+
+  function schedulePoll(){
+    if(pollTimer){clearInterval(pollTimer); pollTimer=null;}
+    if(pollOn)pollTimer=setInterval(refreshAll,pollMs);
+    var pulse=document.getElementById("pulse");
+    if(pulse)pulse.classList.toggle("off",!pollOn);
+    var play=document.getElementById("poll-play");
+    if(play){
+      play.classList.toggle("on",pollOn);
+      play.innerHTML=pollOn?"&#9208;":"&#9654;";
+      play.title=pollOn?"polling on — click to pause":"polling paused — click to resume";
+      play.setAttribute("aria-label",pollOn?"pause polling":"resume polling");
+    }
+    var ivl=document.getElementById("poll-ivl");
+    if(ivl){
+      ivl.innerHTML=POLL_LABEL[pollMs]+' <span class="caret" aria-hidden="true">&#9662;</span>';
+      ivl.style.opacity=pollOn?1:.55;
+    }
+    var menu=document.getElementById("poll-menu");
+    if(menu){
+      var opts=menu.querySelectorAll("[data-ms]");
+      for(var i=0;i<opts.length;i++){
+        var on=(Number(opts[i].getAttribute("data-ms"))===pollMs);
+        opts[i].classList.toggle("sel",on);
+        opts[i].innerHTML=POLL_LABEL[opts[i].getAttribute("data-ms")]+(on?" <span>&#10003;</span>":"");
+      }
+    }
+    tickClock();
+  }
+
+  function wirePoll(){
+    var play=document.getElementById("poll-play");
+    var ivl=document.getElementById("poll-ivl");
+    var now=document.getElementById("poll-now");
+    var menu=document.getElementById("poll-menu");
+    if(play)play.addEventListener("click",function(){pollOn=!pollOn; savePoll(); schedulePoll();});
+    // Manual refresh survives the pause — that is the whole point of the off
+    // state: stale on purpose, refreshable on demand.
+    if(now)now.addEventListener("click",refreshAll);
+    if(ivl&&menu)ivl.addEventListener("click",function(e){
+      e.stopPropagation();
+      menu.hidden=!menu.hidden;
+      ivl.setAttribute("aria-expanded",menu.hidden?"false":"true");
+    });
+    document.addEventListener("click",function(){
+      if(menu&&!menu.hidden){menu.hidden=true; if(ivl)ivl.setAttribute("aria-expanded","false");}
+    });
+    if(menu)menu.addEventListener("click",function(e){
+      var b=e.target.closest?e.target.closest("[data-ms]"):null;
+      if(!b)return;
+      pollMs=Number(b.getAttribute("data-ms"))||POLL_DEFAULT_MS;
+      if(!pollOn)pollOn=true;          // picking an interval implies resume
+      savePoll(); schedulePoll();
+      menu.hidden=true; if(ivl)ivl.setAttribute("aria-expanded","false");
+    });
+  }
+
+  // ══ Usage tab ══════════════════════════════════════════════════════════════
+  var USAGE=null, usageLoaded=false, usageBusy=false, TRANSCRIPT=null;
+
+  function fmtUsd(n){
+    n=Number(n)||0;
+    if(n>=1000)return "$"+Math.round(n).toLocaleString();
+    if(n>=10)return "$"+n.toFixed(0);
+    return "$"+n.toFixed(2);
+  }
+  function fmtNum(n){return (Number(n)||0).toLocaleString();}
+  function fmtTok(n){
+    n=Number(n)||0;
+    if(n>=1e9)return (n/1e9).toFixed(1)+"B";
+    if(n>=1e6)return (n/1e6).toFixed(1)+"M";
+    if(n>=1e3)return (n/1e3).toFixed(1)+"K";
+    return String(Math.round(n));
+  }
+  function fmtHours(sec){var h=(Number(sec)||0)/3600; return (h>=10?Math.round(h):h.toFixed(1))+"h";}
+  function fmtMins(m){m=Number(m)||0; return m>=60?Math.round(m/60)+"h":Math.round(m)+"m";}
+  function fld(v,k){
+    if(v==null)return 0;
+    if(typeof v==="number")return k==="cost"?v:0;
+    return Number(v[k])||0;
+  }
+  function pct(a,b){return b?(a/b*100):0;}
+  function entries(map,key){
+    var out=[];
+    for(var k in (map||{}))out.push({name:k,v:map[k],cost:fld(map[k],key||"cost")});
+    out.sort(function(a,b){return b.cost-a.cost;});
+    return out;
+  }
+
+  function loadUsage(force){
+    if(usageBusy)return Promise.resolve();
+    usageBusy=true;
+    var jobs=[fetch("/api/usage?days="+usageDays,{cache:"no-store"}).then(function(r){return r.json();})
+      .then(function(d){USAGE=d; usageLoaded=true;})];
+    if(usageView==="transcript"&&usageSession&&(force||!TRANSCRIPT||TRANSCRIPT.id!==usageSession))
+      jobs.push(loadTranscript(usageSession));
+    return Promise.all(jobs).catch(function(){
+      USAGE={error:"usage index unavailable"};
+    }).then(function(){usageBusy=false; renderUsage();});
+  }
+
+  function loadTranscript(id){
+    return fetch("/api/session/"+encodeURIComponent(id),{cache:"no-store"})
+      .then(function(r){return r.json();})
+      .then(function(d){TRANSCRIPT=d&&!d.error?{id:id,meta:d.meta,turns:d.turns||[]}:{id:id,error:(d&&d.error)||"unreadable"};});
+  }
+
+  function setUsageView(v,session){
+    usageView=v;
+    if(session!==undefined)usageSession=session;
+    var btns=document.querySelectorAll("#usage-seg [data-view]");
+    for(var i=0;i<btns.length;i++)btns[i].setAttribute("aria-selected",btns[i].getAttribute("data-view")===v?"true":"false");
+    for(var j=0;j<VIEWS.length;j++){
+      var el=document.getElementById("v-"+VIEWS[j]);
+      if(el)el.hidden=(VIEWS[j]!==v);
+    }
+    syncHash();
+    if(v==="transcript"&&usageSession&&(!TRANSCRIPT||TRANSCRIPT.id!==usageSession)){
+      loadTranscript(usageSession).then(renderTranscript);
+    }
+  }
+
+  function kpi(k,v,d,cls){
+    return '<div class="kpi '+cls+'"><div class="k">'+esc(k)+'</div><div class="v">'+esc(v)+'</div>'
+      +'<div class="d">'+d+"</div></div>";
+  }
+  function bar(label,valueTxt,subTxt,share,alt,extra){
+    return '<div class="mrow"'+(extra||"")+'><span class="mname'+(alt?"":" mono")+'">'+label+"</span>"
+      +'<span class="mbar"><i class="'+(alt?"alt":"")+'" style="width:'+share.toFixed(1)+'%"></i></span>'
+      +'<span class="mval mono">'+esc(valueTxt)+"</span>"
+      +'<span class="msub mono">'+esc(subTxt)+"</span></div>";
+  }
+
+  function renderScore(d){
+    var t=d.totals||{};
+    var cacheShare=pct(t.cacheRead,t.tokens);
+    document.getElementById("u-hero").innerHTML=
+      kpi("sessions",fmtNum(t.sessions),esc(fmtNum(t.responses))+" assistant turns","")
+      +kpi("api-equivalent",fmtUsd(t.cost),"list price &middot; not plan billing","accent")
+      +kpi("tokens",fmtTok(t.tokens),esc(fmtTok(t.output))+" out &middot; "+esc(fmtTok(t.cacheRead))+" cached","")
+      +kpi("engaged time",fmtHours(t.engagedSeconds),
+        esc(fmtMins(t.spanMinutes))+" summed"
+        +'<span class="d-note">sessions overlap</span>',"")
+      +kpi("cache read",cacheShare.toFixed(1)+"%","priced at 0.1&times; input","warnv");
+    document.getElementById("u-asof").textContent=d.pricesAsOf?("rates as of "+d.pricesAsOf):"";
+
+    // cost per day
+    var days=[],k;
+    for(k in (d.byDay||{}))days.push({day:k,v:d.byDay[k]});
+    days.sort(function(a,b){return a.day<b.day?-1:1;});
+    var maxDay=0;
+    for(var i=0;i<days.length;i++)maxDay=Math.max(maxDay,fld(days[i].v,"cost"));
+    document.getElementById("u-days-note").textContent="api-equivalent · "+usageDays+"-day window";
+    document.getElementById("u-daybars").innerHTML=days.length?days.map(function(x){
+      var c=fld(x.v,"cost"), h=maxDay?Math.max(2,c/maxDay*100):2;
+      var tip=x.day+" · "+fmtUsd(c)+" · "+fmtTok(fld(x.v,"tokens"))+" tok · "+fmtNum(fld(x.v,"sessions"))+" sessions";
+      return '<div class="daybar" title="'+esc(tip)+'"><div class="db-fill" style="height:'+h.toFixed(1)+'%"></div>'
+        +'<span class="db-lab">'+esc(x.day.slice(8))+"</span></div>";
+    }).join(""):'<div class="empty">no days in window.</div>';
+
+    // by host
+    var prov=d.byProvider||{};
+    var order=["claude","codex"];
+    for(k in prov)if(order.indexOf(k)<0)order.push(k);
+    document.getElementById("u-hosts").innerHTML=order.map(function(name){
+      var v=prov[name], cost=fld(v,"cost"), sess=fld(v,"sessions"), tok=fld(v,"tokens");
+      var idle=!sess&&!cost;
+      return '<div class="pcard'+(idle?" idle":"")+'"><div class="ph"><span class="pdot '
+        +(name==="codex"?"x":"c")+'"></span>'+esc(name)+"</div>"
+        +'<div class="pv mono">'+esc(fmtUsd(cost))+"</div>"
+        +'<div class="pl">'+(idle?"no sessions in window":esc(fmtNum(sess))+" sessions &middot; "+esc(fmtTok(tok))+" tokens")+"</div></div>";
+    }).join("");
+
+    var segs=[["cache read",t.cacheRead,"var(--warn)"],["cache write",t.cacheWrite,"var(--purple)"],
+      ["output",t.output,"var(--accent)"],["input",t.input,"var(--ok)"]];
+    document.getElementById("u-tokbar").innerHTML=segs.map(function(sg){
+      return '<i style="width:'+pct(sg[1],t.tokens).toFixed(2)+"%;background:"+sg[2]+'"></i>';
+    }).join("");
+    document.getElementById("u-toklegend").innerHTML=segs.map(function(sg){
+      return '<span class="lg"><i style="background:'+sg[2]+'"></i>'+esc(sg[0])+" <b>"+esc(fmtTok(sg[1]))+"</b></span>";
+    }).join("");
+
+    // punchcard — dow 0 = Mon
+    var DOW=["Mon","Tue","Wed","Thu","Fri","Sat","Sun"], pcMax=0, key;
+    for(key in (d.punchcard||{}))pcMax=Math.max(pcMax,Number(d.punchcard[key])||0);
+    var pcHtml="";
+    for(var dw=0;dw<7;dw++){
+      pcHtml+='<div class="pc-row"><span class="pc-day">'+DOW[dw]+"</span>";
+      for(var hr=0;hr<24;hr++){
+        var n=Number((d.punchcard||{})[dw+"-"+hr])||0;
+        var v=pcMax?(n/pcMax):0;
+        pcHtml+='<i class="pc" style="--v:'+v.toFixed(3)+'" title="'+DOW[dw]+" "+(hr<10?"0":"")+hr
+          +':00 — '+n+' responses"></i>';
+      }
+      pcHtml+="</div>";
+    }
+    pcHtml+='<div class="pc-axis">';
+    for(var ax=0;ax<24;ax++)pcHtml+="<span>"+(ax%3===0?ax:"")+"</span>";
+    pcHtml+="</div>";
+    document.getElementById("u-punch").innerHTML=pcMax?pcHtml:'<div class="empty">no responses in window.</div>';
+
+    // models + projects
+    var models=entries(d.byModel), mMax=models.length?models[0].cost:0;
+    document.getElementById("u-models").innerHTML=models.length?models.map(function(m){
+      return bar(esc(m.name),fmtUsd(m.cost),fmtTok(fld(m.v,"tokens"))+" · "+fmtNum(fld(m.v,"responses"))+" resp",
+        pct(m.cost,mMax),false);
+    }).join(""):'<div class="empty">no models in window.</div>';
+
+    var projects=entries(d.byProject), pMax=projects.length?projects[0].cost:0;
+    var shown=projects.slice(0,8);
+    document.getElementById("u-projects-note").textContent=
+      projects.length>8?("top 8 of "+projects.length):(projects.length+" project"+(projects.length===1?"":"s"));
+    document.getElementById("u-projects").innerHTML=shown.length?shown.map(function(pr){
+      return bar(esc(pr.name),fmtUsd(pr.cost),fmtNum(fld(pr.v,"sessions"))+" sess · "+fmtMins(fld(pr.v,"minutes")),
+        pct(pr.cost,pMax),true);
+    }).join(""):'<div class="empty">no projects in window.</div>';
+
+    // categories — confidence is DISPLAYED, and Unclassified is never hidden.
+    var cats=entries(d.byCategory), cMax=cats.length?cats[0].cost:0;
+    document.getElementById("u-cats").innerHTML=cats.length?cats.map(function(c){
+      var sess=fld(c.v,"sessions")||1, conf=fld(c.v,"confidence");
+      var uncl=(c.name==="Unclassified");
+      var dot=uncl?"":'<i class="conf" style="opacity:'+(0.5+conf*0.5).toFixed(2)
+        +'" title="mean classifier confidence '+conf.toFixed(2)+'"></i>';
+      return '<button type="button" class="crow'+(uncl?" uncl":"")+'" data-cat="'+esc(c.name)+'" title="click to filter sessions">'
+        +'<span class="c-name">'+esc(c.name)+dot+"</span>"
+        +'<span class="mbar"><i style="width:'+pct(c.cost,cMax).toFixed(1)+"%;background:"+(uncl?"var(--ink-dim)":"var(--accent)")+'"></i></span>'
+        +'<span class="mval mono">'+esc(fmtUsd(c.cost))+"</span>"
+        +'<span class="msub mono">'+esc(fmtNum(fld(c.v,"sessions"))+" sess · "+fmtUsd(c.cost/sess)+"/sess")+"</span></button>";
+    }).join(""):'<div class="empty">nothing classified in window.</div>';
+  }
+
+  function renderFindings(d){
+    var ins=Array.isArray(d.insights)?d.insights:[];
+    var badge=document.getElementById("u-findings-n");
+    var warns=ins.filter(function(x){return x.severity==="warn";}).length;
+    if(badge){if(warns){badge.hidden=false; badge.textContent=String(warns);}else{badge.hidden=true;}}
+    document.getElementById("u-findings-note").innerHTML=
+      ins.length+" finding"+(ins.length===1?"":"s")+", ranked by estimated impact. A finding only claims a "
+      +"dollar figure when it can compute one from your data &mdash; the rest say <b>no $ claimed</b> rather "
+      +"than inventing a number. Recommendations that depend on model-capability claims carry their sources.";
+    document.getElementById("u-insights").innerHTML=ins.length?ins.map(function(f,i){
+      var imp=(typeof f.impact==="number")
+        ? '<span class="i-imp mono">~'+esc(fmtUsd(f.impact))+"/window</span>"
+        : '<span class="i-imp mono soft">no $ claimed</span>';
+      var cmd=f.command?' <code class="i-cmd">'+esc(f.command)+"</code>":"";
+      var src="";
+      if(f.sources&&f.sources.length){
+        src='<details class="i-src"><summary>grounding &mdash; '+f.sources.length+" source"
+          +(f.sources.length===1?"":"s")+"</summary><ul>"
+          +f.sources.map(function(sc){
+            return "<li><a href=\\""+esc(sc.url)+"\\" target=\\"_blank\\" rel=\\"noreferrer noopener\\">"+esc(sc.label)+"</a></li>";
+          }).join("")+"</ul></details>";
+      }
+      return '<article class="icard" data-sev="'+esc(f.severity||"info")+'">'
+        +'<div class="i-top"><span class="i-n">'+(i+1)+"</span>"
+        +'<span class="i-title">'+esc(f.title)+"</span>"
+        +'<span class="i-kind">'+esc(f.kind==="trend"?"trend":"coaching")+"</span>"+imp+"</div>"
+        +'<p class="i-find">'+esc(f.finding)+"</p>"
+        +(f.evidence?'<p class="i-ev">'+esc(f.evidence)+"</p>":"")
+        +'<div class="i-act"><span class="i-arrow">&rarr;</span><span>'+esc(f.action)+cmd+"</span></div>"
+        +src+"</article>";
+    }).join(""):'<div class="empty">no findings — nothing in this window crossed a detector threshold.</div>';
+  }
+
+  function sessionRow(sx){
+    var host=(sx.provider==="codex")?"codex":"claude";
+    var cat=sx.category||"Unclassified";
+    var uncl=(cat==="Unclassified");
+    var weak=(typeof sx.confidence==="number"&&sx.confidence<0.6)?"0":"1";
+    var when=sx.start?new Date(sx.start):null;
+    var whenTxt=when&&!isNaN(when)?when.toLocaleString(undefined,{month:"short",day:"numeric",hour:"2-digit",minute:"2-digit"}):"—";
+    return '<div class="srow" data-id="'+esc(sx.id)+'" title="open transcript">'
+      +'<span class="s-host s-'+host+'">'+esc(host)+"</span>"
+      +'<span class="s-title">'+esc(sx.title||"(untitled)")+"</span>"
+      +'<span class="cat'+(uncl?" uncl":"")+'" data-w="'+weak+'">'+esc(cat)+"</span>"
+      +'<span class="s-when mono">'+esc(whenTxt)+"</span>"
+      +'<span class="s-dur mono">'+esc(fmtMins(sx.minutes))+"</span>"
+      +'<span class="s-turns mono">'+esc((sx.prompts||0)+"/"+(sx.responses||0))+"</span>"
+      +'<span class="s-tok mono">'+esc(fmtTok(sx.tokens))+"</span>"
+      +'<span class="s-cost mono">'+esc(fmtUsd(sx.cost))+"</span>"
+      +'<button class="s-tx" type="button" data-tx="'+esc(sx.id)+'" title="open transcript" aria-label="open transcript">&#9707;</button>'
+    +"</div>";
+  }
+
+  function renderSessions(d){
+    var tree=Array.isArray(d.projectTree)?d.projectTree:[];
+    var n=document.getElementById("u-sessions-n");
+    if(n)n.textContent=tree.length?" "+fmtNum((d.totals||{}).sessions):"";
+    document.getElementById("u-tree").innerHTML=tree.length?tree.map(function(g){
+      var chips="";
+      // usage-index emits categories as a COST-RANKED ARRAY of
+      // {category, sessions, cost} — already ordered, so no re-sort here. The
+      // keyed-map fallback below is for older cached payloads only; treating an
+      // array as a map yields Object.keys() === ["0","1"...] and renders
+      // "0 [object Object]", so the shape check is load-bearing, not defensive noise.
+      var cs=g.categories;
+      if(Array.isArray(cs)){
+        for(var i=0;i<cs.length&&i<3;i++){
+          var c=cs[i]||{};
+          chips+='<span class="pchip">'+esc(c.category)+" <b>"+esc(String(c.sessions))+"</b></span>";
+        }
+      }else if(cs&&typeof cs==="object"){
+        var ck=Object.keys(cs).sort(function(a,b){return (cs[b]||0)-(cs[a]||0);}).slice(0,3);
+        for(var j=0;j<ck.length;j++)chips+='<span class="pchip">'+esc(ck[j])+" <b>"+esc(String(cs[ck[j]]))+"</b></span>";
+      }
+      var rows=Array.isArray(g.rows)?g.rows:[];
+      var body=rows.length?rows.slice(0,25).map(sessionRow).join(""):'<div class="smore">no sessions loaded for this project.</div>';
+      if(rows.length>25||g.sessions>rows.length){
+        body+='<div class="smore">showing '+Math.min(25,rows.length)+" of "+fmtNum(g.sessions)
+          +' · <button type="button" data-more="'+esc(g.project)+'">load all</button></div>';
+      }
+      // Every project starts COLLAPSED. Auto-opening the first one pushed the
+      // remaining projects below the fold, which defeats the point of the
+      // aggregate view — the comparison across projects IS the top-level answer.
+      return '<div class="pgroup">'
+        +'<button class="phead" type="button"><span class="chev">&rsaquo;</span>'
+        +'<span class="pname">'+esc(g.project)+"</span>"
+        +'<span class="pchips">'+chips+"</span>"
+        +'<span class="pn mono">'+esc(fmtNum(g.sessions))+" sess</span>"
+        +'<span class="pn mono p-h">'+esc(fmtMins(g.minutes))+"</span>"
+        +'<span class="pn mono p-tok">'+esc(fmtTok(g.tokens))+"</span>"
+        +'<span class="pcost mono">'+esc(fmtUsd(g.cost))+"</span></button>"
+        +'<div class="pbody" data-body="'+esc(g.project)+'">'+body+"</div></div>";
+    }).join(""):'<div class="empty">no sessions in window.</div>';
+  }
+
+  // Secrets are masked SERVER-side (ADR-0009 §8) — nothing here can un-redact
+  // what never left the process. This only makes the redactions visible as
+  // redactions, so a reader can see that something was withheld.
+  // The masker emits "<prefix>\u2026redacted" (sk-\u2026redacted, Bearer \u2026redacted).
+  // This used to hunt for ***, \u2022\u2022\u2022 or [REDACTED] \u2014 sentinels nothing ever
+  // produced \u2014 so no .masked span was ever created and the styling below was
+  // dead code. There is deliberately NO click-to-reveal: masking happens
+  // server-side and the original never reaches the browser, so there is nothing
+  // here to reveal. Marking it is the whole feature.
+  function markRedactions(text){
+    return esc(text).replace(/([A-Za-z_.-]*\u2026redacted)/g,function(m){
+      return '<span class="masked" title="masked server-side \u2014 the original was never sent to this page">'+m+"</span>";
+    });
+  }
+
+  function renderTranscript(){
+    var crumb=document.getElementById("u-crumb"), body=document.getElementById("u-turns");
+    if(!usageSession){
+      crumb.innerHTML='<button type="button" data-back="1">&lsaquo; sessions</button><span>no session selected</span>';
+      body.innerHTML='<div class="empty">pick a session in the Sessions view to read it here.</div>';
+      return;
+    }
+    var t=TRANSCRIPT&&TRANSCRIPT.id===usageSession?TRANSCRIPT:null;
+    var m=(t&&t.meta)||{};
+    crumb.innerHTML='<button type="button" data-back="1">&lsaquo; sessions</button>'
+      +'<b style="color:var(--ink)">'+esc(m.title||usageSession)+"</b>"
+      +'<span class="mono">'+esc([m.project,fmtMins(m.minutes),
+        (m.prompts||0)+" prompts / "+(m.responses||0)+" responses",fmtTok(m.tokens),fmtUsd(m.cost)]
+        .filter(Boolean).join(" · "))+"</span>";
+    if(!t){body.innerHTML='<div class="empty">loading transcript…</div>'; return;}
+    if(t.error){body.innerHTML='<div class="empty">'+esc(t.error)+"</div>"; return;}
+    body.innerHTML=t.turns.length?t.turns.map(function(tn){
+      var user=(tn.role==="user");
+      var text=tn.text!=null?tn.text:(tn.body!=null?tn.body:(tn.content!=null?tn.content:""));
+      var tools=(tn.tools&&tn.tools.length)
+        ?'<div class="chips">'+tn.tools.map(function(x){return '<span class="tool">'+esc(x)+"</span>";}).join("")+"</div>":"";
+      var meta=tn.output?'<span class="t-meta mono">'+esc(fmtNum(tn.output))+" out</span>":"";
+      return '<div class="turn '+(user?"t-user":"t-asst")+'"><div class="t-who">'
+        +esc(user?"you":(tn.model||tn.role||"assistant"))+meta+"</div>"
+        +'<div class="t-body">'+markRedactions(String(text))+tools+"</div></div>";
+    }).join(""):'<div class="empty">this session has no readable turns.</div>';
+  }
+
+  function renderUsage(){
+    if(!USAGE)return;
+    if(USAGE.error){
+      document.getElementById("u-hero").innerHTML='<div class="empty">'+esc(USAGE.error)+"</div>";
+      return;
+    }
+    renderScore(USAGE);
+    renderFindings(USAGE);
+    renderSessions(USAGE);
+    if(usageView==="transcript")renderTranscript();
+  }
+
+  function wireUsage(){
+    var seg=document.getElementById("usage-seg");
+    if(seg)seg.addEventListener("click",function(e){
+      var b=e.target.closest?e.target.closest("[data-view]"):null;
+      if(b)setUsageView(b.getAttribute("data-view"));
+    });
+    var chips=document.getElementById("usage-days");
+    if(chips)chips.addEventListener("click",function(e){
+      var b=e.target.closest?e.target.closest("[data-days]"):null;
+      if(!b)return;
+      usageDays=Number(b.getAttribute("data-days"))||14;
+      var all=chips.querySelectorAll("[data-days]");
+      for(var i=0;i<all.length;i++)all[i].classList.toggle("on",all[i]===b);
+      usageLoaded=false; loadUsage(true);
+    });
+    var panel=document.getElementById("panel-usage");
+    if(panel)panel.addEventListener("click",function(e){
+      var tgt=e.target;
+      var head=tgt.closest?tgt.closest(".phead"):null;
+      if(head){
+        var g=head.parentElement;
+        if(g.hasAttribute("data-open"))g.removeAttribute("data-open"); else g.setAttribute("data-open","1");
+        return;
+      }
+      var more=tgt.closest?tgt.closest("[data-more]"):null;
+      if(more){loadProjectSessions(more.getAttribute("data-more")); return;}
+      // the glyph is the explicit affordance, but the whole row is a target too —
+      // a 14px icon is a cruel click target for a row you can already see.
+      var row=tgt.closest?tgt.closest("[data-id]"):null;
+      if(row){setUsageView("transcript",row.getAttribute("data-id")); return;}
+      var cat=tgt.closest?tgt.closest("[data-cat]"):null;
+      if(cat){filterByCategory(cat.getAttribute("data-cat")); return;}
+      var back=tgt.closest?tgt.closest("[data-back]"):null;
+      if(back){setUsageView("sessions",null); return;}
+      var mask=tgt.closest?tgt.closest(".masked"):null;
+      if(mask)mask.classList.toggle("shown");
+    });
+  }
+
+  function loadProjectSessions(project){
+    fetch("/api/sessions?days="+usageDays+"&project="+encodeURIComponent(project)+"&limit=1000",{cache:"no-store"})
+      .then(function(r){return r.json();}).then(function(d){
+        var el=document.querySelector('[data-body="'+project.replace(/"/g,"")+'"]');
+        if(!el)return;
+        el.innerHTML=(d.sessions||[]).map(sessionRow).join("")
+          ||'<div class="smore">no sessions.</div>';
+      }).catch(function(){});
+  }
+
+  function filterByCategory(cat){
+    setUsageView("sessions");
+    fetch("/api/sessions?days="+usageDays+"&category="+encodeURIComponent(cat)+"&limit=1000",{cache:"no-store"})
+      .then(function(r){return r.json();}).then(function(d){
+        document.getElementById("u-tree").innerHTML=
+          '<div class="pgroup" data-open="1"><button class="phead" type="button">'
+          +'<span class="chev">&rsaquo;</span><span class="pname">'+esc(cat)+"</span>"
+          +'<span class="pchips"><span class="pchip">filtered <b>'+fmtNum(d.total||0)+"</b></span></span>"
+          +'<span class="pn mono"></span><span class="pn mono"></span><span class="pn mono"></span>'
+          +'<span class="pcost mono"></span></button>'
+          +'<div class="pbody">'+((d.sessions||[]).map(sessionRow).join("")
+            ||'<div class="smore">no sessions in this category.</div>')+"</div></div>";
+      }).catch(function(){});
+  }
+
   setTab(activeTab);
-  poll();
-  setInterval(poll,5000);
+  setUsageView(usageView);
+  wirePoll();
+  wireUsage();
+  schedulePoll();
+  lastAttempt=Date.now(); inflight=true;
+  Promise.all([pollStatus()].concat(activeTab==="usage"?[loadUsage()]:[]))
+    .catch(function(){}).then(function(){inflight=false; tickClock();});
   setInterval(tickClock,1000);
 })();
 `;
