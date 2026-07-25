@@ -45,7 +45,7 @@ export const SCHEMA_VERSION = 3;
 export const IDLE_GAP_MS = 15 * 60 * 1000;
 
 const DAY_MS = 86_400_000;
-const MAX_TURN_CHARS = 40_000;
+export const MAX_TURN_CHARS = 40_000;
 /** Largest single transcript readSession will pull into memory. The corpus's
  *  biggest real file is ~18 MB; JSON expansion runs ~5x, so 64 MB caps the
  *  spike near 320 MB instead of unbounded. Above this the session reads as

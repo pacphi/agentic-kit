@@ -3,18 +3,26 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { readSession, maskSecrets, _resetForTest } from '../../src/lib/usage-index.mjs';
+import { readSession, maskSecrets, MAX_TURN_CHARS, _resetForTest } from '../../src/lib/usage-index.mjs';
 
 // ADR-0009 §8 / design decision 2 — "turn truncation is announced, with both
 // figures". A truncated turn must say HOW MUCH was withheld, not merely that
 // something was. A reader who cannot tell 1% loss from 90% loss has been told
 // nothing actionable, which is the shape of an evidence claim §6 would refuse.
 //
-// `MAX_TURN_CHARS` is a module-private constant (src/lib/usage-index.mjs:48), so
-// this literal is a deliberate mirror of it. The spec states 40000 explicitly,
-// so the number is part of the contract rather than an implementation detail
-// this file happens to have read.
-const MAX_TURN_CHARS = 40_000;
+// `MAX_TURN_CHARS` is IMPORTED, not mirrored. It was module-private and this
+// file carried a literal 40_000; that mirror was safe in one direction only.
+// Lowering the limit, or raising it against an over-the-limit fixture, fails
+// loudly — but RAISING it silently guts the "exactly at the limit" boundary
+// test, which stops testing a boundary and becomes trivially true. A boundary
+// test that quietly stops being one is the failure mode this file exists to
+// prevent, so the constant is now exported and read from source.
+//
+// This also matches the sibling judgement-call constant: `IDLE_GAP_MS` is
+// exported one line above it (usage-index.mjs:45) for exactly the reason
+// ADR-0009 §4 gives — "a judgement call the numbers depend on, not a magic
+// constant." MAX_TURN_CHARS is now that too: the truncation badge states
+// user-visible figures derived from it.
 
 /** A sandbox with no fixture corpus: one hand-written session is the whole answer. */
 function soloSandbox() {
