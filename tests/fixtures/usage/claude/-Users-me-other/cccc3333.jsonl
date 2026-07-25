@@ -1,0 +1,2 @@
+{"type":"user","sessionId":"cccc3333","cwd":"/Users/me/other","isSidechain":false,"timestamp":"2026-07-24T12:00:00.000Z","message":{"role":"user","content":[{"type":"text","text":"never answered"}]}}
+{"type":"queue-operation","operation":"enqueue","sessionId":"cccc3333","timestamp":"2026-07-24T12:00:01.000Z","content":"queued"}

@@ -46,3 +46,6 @@ CLAUDE.md.pre-ruflo
 
 # package-manager artifacts (repo is zero-dependency; lockfile IS tracked)
 node_modules/
+
+# superpowers brainstorm mockups (local only)
+.superpowers/

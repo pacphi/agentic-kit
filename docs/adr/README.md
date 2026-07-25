@@ -17,6 +17,7 @@ Consequences**, and cites the grounded source it rests on where relevant.
 | [0006](0006-primary-host-and-ambidextrous-mirroring.md) | Primary host & ambidextrous mirroring (which host leads) | Accepted |
 | [0007](0007-maintainer-admin-local-telemetry.md) | Maintainer admin: a loopback telemetry page with deliberate egress | Accepted |
 | [0008](0008-guidance-target-scope-split.md) | Machine-scoped guidance blocks land in machine files, not a repo's AGENTS.md | Accepted |
+| [0009](0009-usage-scorecard-local-transcript-analytics.md) | Usage scorecard: local transcript analytics with graded evidence | Accepted |
 
 Theme: ADRs **0001–0006** define **dual-host LLM routing and leadership** — how `ak` lets ruflo route
 each development activity (architecture, implementation, testing, review, …) to the right host (Claude
@@ -25,5 +26,9 @@ across `setup`/`sync`/`status`/`dashboard`. **0007** covers the local diagnostic
 offline-first `dashboard` from the deliberately-egressing, credential-touching maintainer `admin` along
 the network-egress line. **0008** draws a second scope line — machine-scoped guidance blocks belong in
 machine-wide files (`~/.claude/CLAUDE.md`, `~/.codex/AGENTS.md`), never a repo's checked-in `AGENTS.md` —
-and folds the two duplicated target lists into one shared `guidanceTargets` helper. See also
+and folds the two duplicated target lists into one shared `guidanceTargets` helper. **0009** adds the
+usage scorecard — local transcript analytics as a dashboard tab (no egress, so it stays inside 0005's
+offline contract rather than joining 0007's egressing admin), with an incremental index over a
+multi-GB corpus and an explicit evidence grading rule: findings claim a dollar figure only when they
+can compute one, and capability claims carry citations or are not made. See also
 `docs/PROVIDERS.md`.
