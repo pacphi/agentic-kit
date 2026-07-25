@@ -202,9 +202,19 @@ the code — the same condition that produced the `[object Object]` chips.
 - `costOf()` returns a finite non-negative number for every model id the fixture emits,
   including at least one model absent from the rate table.
 - `detectInsights()` returns an array whose entries carry `title`/`finding`/`action` as
-  strings, `severity` from the known set, and `impact` either a finite number or absent
-   — never `null`, `NaN`, or a string, because `renderFindings` branches on
-  `typeof f.impact === "number"` to decide between a dollar claim and `no $ claimed`.
+  strings, `severity` from the known set, and `impact` that is **either a finite number
+  or `null`** — never `NaN`, never a string, never `undefined`. `renderFindings` branches
+  on `typeof f.impact === "number"` to choose between a dollar claim and `no $ claimed`,
+  so any *other* type silently fabricates or suppresses a claim.
+
+  **`null` is correct here and must not be "fixed".** `usage-insights.mjs:211` defaults
+  every finding to `impact: null` and the JSDoc at `:199` declares `number|null`; the
+  existing suite asserts `impact === null` as an ADR §6 invariant ("non-computable
+  detectors always report impact === null"). In this module `null` is the *explicit
+  encoding* of "no $ claimed" — the opposite convention to decision 2's `originalChars`,
+  where absence is the signal. Both are deliberate. A contract test that demanded absence
+  here would break roughly eight passing tests and invert the §6 guarantee it exists to
+  protect. Assert the union, not one arm of it.
 - The aggregate produced through the real seam still satisfies §4's ordering invariant.
 
 This is a **contract** test: it asserts shapes at the boundary, not analytic values. It
