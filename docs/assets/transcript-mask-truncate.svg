@@ -1,0 +1,107 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="880" height="422" viewBox="0 0 880 422"
+     role="img" aria-labelledby="fig-title fig-desc">
+  <title id="fig-title">Mask, then truncate</title>
+  <desc id="fig-desc">A single turn body passes through two server-side withholding stages in readSession: maskSecrets replaces the 21 secret shapes with a redacted mark, then a 40,000-character length cap slices the body and appends a truncated marker. Each kind of withholding gets its own vocabulary.</desc>
+  <style>
+    svg { font-family: system-ui, -apple-system, "Segoe UI", sans-serif; }
+    :root {
+      --surface: #fcfcfb; --border: rgba(11,11,11,0.10);
+      --ink: #0b0b0b; --ink2: #52514e; --muted: #898781;
+      --grid: #e1e0d9; --axis: #c3c2b7;
+      --s1: #2a78d6; --s2: #eb6834; --s3: #1baf7a;
+      --r1: #86b6ef; --r2: #5598e7; --r3: #2a78d6; --r4: #184f95;
+      --wash1: rgba(42,120,214,0.08); --wash2: rgba(235,104,52,0.08);
+      --wash3: rgba(27,175,122,0.08); --washg: rgba(137,135,129,0.10);
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --surface: #1a1a19; --border: rgba(255,255,255,0.10);
+        --ink: #ffffff; --ink2: #c3c2b7; --muted: #898781;
+        --grid: #2c2c2a; --axis: #383835;
+        --s1: #3987e5; --s2: #d95926; --s3: #199e70;
+        --wash1: rgba(57,135,229,0.14); --wash2: rgba(217,89,38,0.14);
+        --wash3: rgba(25,158,112,0.14); --washg: rgba(137,135,129,0.14);
+      }
+    }
+    text { fill: var(--ink); font-size: 12px; }
+    .h1 { font-size: 16px; font-weight: 600; }
+    .h2 { font-size: 13px; font-weight: 600; }
+    .hb { font-size: 12.5px; font-weight: 600; }
+    .t2 { fill: var(--ink2); } .tm { fill: var(--muted); }
+    .small { font-size: 11px; }
+    .mono { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 11.5px; }
+    .monob { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 12.5px; font-weight: 600; }
+    .num { font-variant-numeric: tabular-nums; }
+    .box { fill: var(--surface); stroke: var(--border); }
+    .flow { stroke: var(--muted); stroke-width: 1.5; fill: none; }
+    .arrfill { fill: var(--muted); }
+    .lbl { letter-spacing: 0.8px; }
+  </style>
+  <defs>
+    <marker id="arr" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7"
+            markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0L10 5L0 10z" class="arrfill"/>
+    </marker>
+  </defs>
+  <rect x="0.5" y="0.5" width="879" height="421" rx="8" fill="var(--surface)" stroke="var(--border)"/>
+
+  <!-- ── title block ─────────────────────────────────────────────────── -->
+  <text class="h1" x="24" y="36">Mask, then truncate — two kinds of withholding, marked differently</text>
+  <text class="t2 small" x="24" y="55">Both happen server-side in <tspan class="mono">readSession</tspan>, before anything is serialized.</text>
+
+  <!-- legend: two accents, two identities -->
+  <rect x="690" y="31" width="10" height="10" rx="2" fill="var(--s2)"/>
+  <text class="t2 small" x="706" y="40">masking</text>
+  <rect x="768" y="31" width="10" height="10" rx="2" fill="var(--s1)"/>
+  <text class="t2 small" x="784" y="40">truncation</text>
+
+  <!-- ── input: the raw turn body ────────────────────────────────────── -->
+  <text class="t2" x="24" y="89">turn body (raw text)</text>
+  <text class="tm small" x="24" y="105">as it arrives from the session file</text>
+  <rect class="box" x="344" y="76" width="512" height="26" rx="3"/>
+  <text class="mono t2" x="356" y="93">api_key = sk-live-7f2c; deploy failed, retrying now, tail goes on…</text>
+
+  <line class="flow" x1="600" y1="108" x2="600" y2="138" marker-end="url(#arr)"/>
+
+  <!-- ── stage 1: maskSecrets ────────────────────────────────────────── -->
+  <rect x="24" y="118" width="300" height="74" rx="6" fill="var(--wash2)" stroke="var(--border)"/>
+  <rect x="25" y="132" width="4" height="46" rx="2" fill="var(--s2)"/>
+  <text x="44" y="141"><tspan class="tm small lbl">STAGE 1</tspan><tspan class="tm small"> · </tspan><tspan class="monob">maskSecrets</tspan></text>
+  <text class="t2 small" x="44" y="161">the 21 secret shapes are replaced</text>
+  <text class="t2 small" x="44" y="177">before serialization</text>
+
+  <rect class="box" x="344" y="142" width="512" height="26" rx="3"/>
+  <text class="mono t2" x="356" y="159">api_key = </text>
+  <rect x="429" y="147" width="76" height="16" rx="3" fill="var(--wash2)" stroke="var(--s2)"/>
+  <text class="mono t2" x="436" y="159">…redacted</text>
+  <text class="mono t2" x="509" y="159">; deploy failed, retrying now, tail goes on…</text>
+
+  <line class="flow" x1="600" y1="174" x2="600" y2="226" marker-end="url(#arr)"/>
+
+  <!-- ── stage 2: length cap ─────────────────────────────────────────── -->
+  <rect x="24" y="206" width="300" height="74" rx="6" fill="var(--wash1)" stroke="var(--border)"/>
+  <rect x="25" y="220" width="4" height="46" rx="2" fill="var(--s1)"/>
+  <text x="44" y="229"><tspan class="tm small lbl">STAGE 2</tspan><tspan class="tm small"> · </tspan><tspan class="hb">length cap</tspan></text>
+  <text class="t2 small" x="44" y="249"><tspan class="mono num">MAX_TURN_CHARS = 40,000</tspan> — the slice</text>
+  <text class="t2 small" x="44" y="265">appends a marker</text>
+
+  <rect class="box" x="344" y="230" width="321" height="26" rx="3"/>
+  <text class="mono t2" x="356" y="247">api_key = </text>
+  <rect x="429" y="235" width="76" height="16" rx="3" fill="var(--wash2)" stroke="var(--s2)"/>
+  <text class="mono t2" x="436" y="247">…redacted</text>
+  <rect x="513" y="235" width="140" height="16" rx="3" fill="var(--wash1)" stroke="var(--s1)"/>
+  <text class="mono t2" x="521" y="247">truncated · N of M</text>
+
+  <rect x="673" y="230" width="183" height="26" rx="3" fill="none" stroke="var(--axis)" stroke-dasharray="4 3"/>
+  <text class="tm small" x="764" y="247" text-anchor="middle">sliced away</text>
+
+  <!-- ── invariants ──────────────────────────────────────────────────── -->
+  <rect x="24" y="298" width="832" height="100" rx="6" fill="var(--washg)" stroke="var(--border)"/>
+  <text class="tm small lbl" x="42" y="320">INVARIANTS</text>
+  <text class="tm" x="42" y="344">·</text>
+  <text class="t2 small" x="56" y="344">Presence is the signal — <tspan class="mono">truncated</tspan> / <tspan class="mono">originalChars</tspan> are emitted only when the slice fired; a complete turn cannot be misread as abridged.</text>
+  <text class="tm" x="42" y="365">·</text>
+  <text class="t2 small" x="56" y="365"><tspan class="mono">originalChars</tspan> is measured AFTER masking — it describes loss due to truncation alone, never a raw-file length.</text>
+  <text class="tm" x="42" y="386">·</text>
+  <text class="t2 small" x="56" y="386">Distinct vocabulary end-to-end: masking → <tspan class="mono">…redacted</tspan> marks; truncation → a <tspan class="mono">truncated · N of M</tspan> badge.</text>
+</svg>

@@ -15,14 +15,15 @@ transcript stores → parsers → turn model → `readSession` → masking/trunc
 → HTTP → UI. Its companion,
 [`USAGE-SCORECARD-METRICS.md`](USAGE-SCORECARD-METRICS.md), covers the
 *aggregate* pipeline (cost/token/time arithmetic); this document covers the
-*per-session* pipeline. The design rationale for both is ADR-0009
-([`docs/adr/0009-usage-scorecard-local-transcript-analytics.md`](adr/0009-usage-scorecard-local-transcript-analytics.md)),
-§8 in particular.
+*per-session* pipeline. The design rationale for both is mapped in
+[Appendix C](#appendix-c--design-rationale-adr-map).
 
-**Pinned to.** branch `fix/codex-usage-scorecard-metrics`, 2026-07-26 (the
-commit introducing turn `kind` attribution). Line numbers drift as code
-changes; every citation below was content-verified against the source at
-writing time.
+**Citations are machine-checked.** Every `file:line` citation below is
+verified against the current source by the test suite
+(`tests/kit/doc-citations.test.mjs`; see
+[Appendix B](#appendix-b--verification-record)).
+
+![Figure: the per-session pipeline — a session file passes from the transcript stores through readSession's numbered gates (id grammar, locate, realpath containment, size cap, parse, secret masking, truncation), then the guarded HTTP route, into the Transcript view](assets/transcript-pipeline.svg)
 
 ---
 
@@ -67,7 +68,7 @@ Codex rollout lines carry `type` + `payload`. The parser (`parseCodex`,
 
 | `type` / `payload.type` | What the parser takes from it |
 |---|---|
-| `session_meta` | Authoritative session id, `cwd`, and `thread_source` (`usage-index.mjs:529-534`) — `"subagent"` marks a thread_spawn replay whose tokens are excluded from aggregation (`usage-index.mjs:572`; `USAGE-SCORECARD-METRICS.md` §15 Bug B) |
+| `session_meta` | Authoritative session id, `cwd`, and `thread_source` (`usage-index.mjs:529-534`) — `"subagent"` marks a thread_spawn replay whose tokens are excluded from aggregation (`usage-index.mjs:572`; `USAGE-SCORECARD-METRICS.md` Appendix A, Bug B) |
 | `turn_context` | The model id in effect from this point on (`usage-index.mjs:535`) |
 | `event_msg` → `token_count` | A **cumulative** usage snapshot; only the last one is kept (`usage-index.mjs:542`) |
 | `event_msg` → `user_message` | A real human prompt — Codex does not route tool output through this event (`usage-index.mjs:547-555`) |
@@ -90,12 +91,14 @@ The same parsers serve two very different callers, switched by `withTurns`:
 | **Scan** — the aggregate index behind the Scorecard/Findings/Sessions views | `buildIndex` → `parseFile` (`usage-index.mjs:652`) | `false` | never held — holding them would balloon memory across 3,000+ files (`usage-index.mjs:413-416`) | yes: per-file derived records in `~/.config/agentic-kit/usage-index.json`, keyed `(path, mtime, size)`, invalidated wholesale by `SCHEMA_VERSION` (`usage-index.mjs:50`) |
 | **Reader** — one transcript for the Transcript view | `readSession` (`usage-index.mjs:1078`) | `true` | full turn list built | **never** — every call re-reads and re-parses the one file |
 
+![Figure: one parser, two read paths — the scan path (withTurns false) caches per-file records keyed by path, mtime and size; the reader path (withTurns true) builds full turns and is never cached](assets/transcript-read-paths.svg)
+
 The reader path being cache-free is load-bearing for maintainers: **turn-shape
 changes (like the `kind` field, §3) need no `SCHEMA_VERSION` bump**, because
 no turn is ever served from cache — whereas *session-record* fields (like
 `exceptions`) do, since stale cached records would otherwise sum `undefined`
-into totals (the v4/v5 bump notes, `usage-index.mjs:39-49`, records exactly that
-incident).
+into totals (`usage-index.mjs:39-49`; the incidents behind that rule are
+recorded in `USAGE-SCORECARD-METRICS.md` Appendix A).
 
 ---
 
@@ -123,9 +126,11 @@ output back as a user-role message — that is the wire format, not a kit
 choice) and **harness context injections** (`isMeta` entries: command outputs,
 system reminders). In a heavily agentic session these dominate: a measured
 real session on the reference machine had **20 human prompts and 276 tool
-results** — so a renderer that labels by role attributes ~93% of "you" turns
-to a person who never typed them. That was the shipped bug this section's
-machinery fixes (ADR-0009 §8, Amendment 2026-07-26).
+results** — so a renderer that labels by role would attribute ~93% of "you"
+turns to a person who never typed them. (Such a renderer shipped once; the
+story is [Appendix A](#appendix-a--fix-history).)
+
+![Figure: the kind decision cascade for user-role turns — tool_result block, then isMeta or harness envelope, else prompt — and the measured 884-turn session where 276 of 302 user-role turns are tool results](assets/transcript-turn-attribution.svg)
 
 ### 3.2 `kind` — the attribution field
 
@@ -134,7 +139,7 @@ machinery fixes (ADR-0009 §8, Amendment 2026-07-26).
 | `kind` | Test | Meaning |
 |---|---|---|
 | `tool-result` | content carries a `tool_result` block | Output the **harness** fed back to the model after a tool call |
-| `context` | `isMeta`, **or** the text opens with a harness-output envelope (`HARNESS_OUTPUT_RE`: `task-notification`, `bash-stdout`/`-stderr`, `local-command-stdout`/`-stderr`, `local-command-caveat`) | Harness-injected content — neither the person **nor the model**. These envelopes carry neither `isMeta` nor a `tool_result`, so text shape is the only signal; measured on the real corpus: task-notification 550, bash-stdout 85, local-command-stdout 60 — all previously labelled "you" |
+| `context` | `isMeta`, **or** the text opens with a harness-output envelope (`HARNESS_OUTPUT_RE`: `task-notification`, `bash-stdout`/`-stderr`, `local-command-stdout`/`-stderr`, `local-command-caveat`) | Harness-injected content — neither the person **nor the model**. These envelopes carry neither `isMeta` nor a `tool_result`, so text shape is the only signal (the envelope census is in §6.2) |
 | `prompt` | everything else | The person — including `bash-input` (a `! command` the person typed) and slash-command records (the person invoked them) |
 
 Two deliberate subtleties:
@@ -143,14 +148,12 @@ Two deliberate subtleties:
   paste has no text block, so `isHumanPrompt` returns `false` (it is not
   *counted* as a text prompt) — but it **is** the person acting, and
   `userTurnKind` returns `'prompt'` for it. "Not countable as a text prompt"
-  and "not the human" are different claims; conflating them was how the
-  original bug happened.
+  and "not the human" are different claims.
 - **Harness-output envelopes are excluded from the prompt *count* too.**
   `isHumanPrompt` shares `HARNESS_OUTPUT_RE`, so a session's `prompts` figure
-  no longer counts stdout dumps or task notifications as things the person
-  said — on the reference session this corrected 32 claimed prompts to 20
-  real ones. Cached session records carry the old inflated counts, hence
-  `SCHEMA_VERSION` 5 (`usage-index.mjs:46-50`).
+  never counts stdout dumps or task notifications as things the person said
+  (`SCHEMA_VERSION` 5, `usage-index.mjs:46-50`; the correction this shipped
+  with is in [Appendix A](#appendix-a--fix-history)).
 - **`tool-result` outranks `context`**: a `tool_result` block on an `isMeta`
   entry is still tool feedback.
 
@@ -198,7 +201,7 @@ hardcoded `$0.00`; the comment at the site records why).
 ### 4.3 Mask, then truncate — both marked, differently
 
 Every turn body is passed through `maskSecrets` (`usage-index.mjs:166` — the
-21 secret shapes ADR-0009 §8 enumerates) **server-side, before
+21 secret shapes) **server-side, before
 serialization**, then length-capped at `MAX_TURN_CHARS` (40,000,
 `usage-index.mjs:59`) with the marker appended
 (`usage-index.mjs:1144-1160`). Two invariants:
@@ -214,13 +217,15 @@ renders as `…redacted` marks (`markRedactions`,
 (`truncBadge`, `dashboard-server.mjs:2228`, deriving N from the received
 text so a changed constant can't desync the display).
 
+![Figure: a turn body passes through maskSecrets (leaving redaction marks) and then the 40,000-character cap (leaving a truncated · N of M badge); originalChars is measured after masking](assets/transcript-mask-truncate.svg)
+
 ---
 
 ## 5. The HTTP surface
 
 All routes inherit the dashboard's loopback bind, DNS-rebinding `Host` guard,
-and cross-site fetch-metadata guard (ADR-0005/0007; `dashboard-server.mjs`
-request handler preamble). Transcript-relevant routes:
+and cross-site fetch-metadata guard (`dashboard-server.mjs` request handler
+preamble). Transcript-relevant routes:
 
 | Route | Serves | Notes |
 |---|---|---|
@@ -247,7 +252,7 @@ request handler preamble). Transcript-relevant routes:
 
 There is deliberately **no download or copy-all control, and no
 click-to-reveal**: the original never reaches the browser, so there is
-nothing on the page to reveal (ADR-0009 §8).
+nothing on the page to reveal.
 
 ---
 
@@ -261,11 +266,10 @@ comparison stays above the fold). Each session is a `sessionRow`
 (`dashboard-server.mjs:2107-2131`): host chip (claude/codex), title,
 worktree glyph, category chip (dimmed when confidence < 0.6 or
 Unclassified), start, duration, `prompts/responses`, tokens, cost — and an
-expander (`sdetail`, `dashboard-server.mjs:2074-2104`) carrying the ten
-fields that once shipped on the wire and rendered nowhere (ADR-0009 §5
-Amendment): classification `basis` + confidence, per-session `models`, the
-token split, top tools, and the `skill`/`plugin`/`sidechain`/`worktree`
-flags. A measured-but-absent value renders as `—`, never disappears — a
+expander (`sdetail`, `dashboard-server.mjs:2074-2104`) carrying the
+per-session detail fields: classification `basis` + confidence, per-session
+`models`, the token split, top tools, and the
+`skill`/`plugin`/`sidechain`/`worktree` flags. A measured-but-absent value renders as `—`, never disappears — a
 field that vanishes when null teaches the reader it doesn't exist.
 
 ### 6.2 Transcript view — attribution, redaction, truncation
@@ -311,17 +315,6 @@ Deep links: `#usage/<sessionId>` opens the Transcript view directly
 (`syncHash`, `dashboard-server.mjs:1403-1404`); the view lazy-fetches via
 `loadTranscript` (`dashboard-server.mjs:1877`).
 
-### 6.3 Verified against real data
-
-Run against this machine's real stores at implementation time (2026-07-26):
-
-- A real Claude session (this feature's own working session, 884 turns):
-  `{ prompt: 20, context: 6, 'tool-result': 276, assistant: 588 }`, zero
-  user turns missing `kind`. All 276 tool results previously rendered as
-  `YOU`.
-- A real Codex rollout (8 user turns): every one `kind: 'prompt'`, as §1.2
-  predicts.
-
 ---
 
 ## 7. Provider differences at a glance
@@ -344,12 +337,56 @@ pricing → by-host UI) is tracked as
 
 ---
 
-## 8. Verification methodology
+## Appendix A — Fix history
 
-Every citation above was content-checked against the live source at writing
-time (the same automated approach `USAGE-SCORECARD-METRICS.md` §16 records:
-extract every `file:line` reference, assert an expected substring at that
-line, zero tolerance). The kind-attribution behavior is pinned by unit tests
-at both layers — parser (`tests/kit/usage-index.test.mjs`) and served page +
-masking gate (`tests/dashboard.test.cjs`) — and was additionally verified
-against real transcripts from both providers (§6.3), not only fixtures.
+The main body describes only current behavior; this appendix records what
+was wrong before, for the curious.
+
+- **User-role turns rendered as "you" (fixed 2026-07-26).** Before `kind`
+  existed, the Transcript view labelled every user-role turn as the person.
+  On the reference session that misattributed 276 tool results and 6 harness
+  context injections — ~93% of its "you" turns (§3.1's measured split). The
+  turn-`kind` machinery in §3 is the fix.
+- **Prompt counts included harness output (SCHEMA_VERSION 5).**
+  `isHumanPrompt` once counted harness-output envelopes as human prompts —
+  32 claimed vs 20 real on the reference session. Cached session records
+  carried the inflated counts, hence the wholesale `SCHEMA_VERSION` 5 cache
+  invalidation (`usage-index.mjs:46-50`).
+- **Session expander fields shipped but unrendered.** The per-session fields
+  §6.1's expander now renders (classification `basis` + confidence, the
+  token split, flags) once travelled on the wire and rendered nowhere.
+- **Aggregate-side incidents** (the v4/v5 cache bumps, the Codex parsing
+  defects) are recorded in `USAGE-SCORECARD-METRICS.md` Appendix A.
+
+---
+
+## Appendix B — Verification record
+
+**Methodology.** Every `file:line` citation above is checked against the
+current source on every test run by `tests/kit/doc-citations.test.mjs`
+(mechanism and upkeep: `USAGE-SCORECARD-METRICS.md` Appendix B). The
+kind-attribution behavior is pinned by unit tests at both layers — parser
+(`tests/kit/usage-index.test.mjs`) and served page + masking gate
+(`tests/dashboard.test.cjs`).
+
+**Against real data** (this machine's real stores, 2026-07-26):
+
+- A real Claude session (this feature's own working session, 884 turns):
+  `{ prompt: 20, context: 6, 'tool-result': 276, assistant: 588 }`, zero
+  user turns missing `kind`.
+- A real Codex rollout (8 user turns): every one `kind: 'prompt'`, as §1.2
+  predicts.
+
+---
+
+## Appendix C — Design rationale (ADR map)
+
+Design decisions are deliberately kept out of the main body; they live in
+the ADRs:
+
+| Main-body topic | Design record |
+|---|---|
+| Masking, truncation, no-reveal transcript rules (§4–§6) | [ADR-0009](adr/0009-usage-scorecard-local-transcript-analytics.md) §8 |
+| Turn-`kind` attribution (§3) | ADR-0009 §8 (amendment 2026-07-26) |
+| Session-expander classification fields (§6.1) | ADR-0009 §5 |
+| Dashboard HTTP guards — loopback bind, `Host` guard, fetch metadata (§5) | ADR-0005, ADR-0007 |

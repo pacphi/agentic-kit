@@ -1,0 +1,127 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="880" height="474" viewBox="0 0 880 474"
+     role="img" aria-labelledby="fig-title fig-desc">
+  <title id="fig-title">One parser, two read paths</title>
+  <desc id="fig-desc">The shared transcript parsers fork into a cached scan path used by the scorecard views and an uncached reader path used by the transcript view.</desc>
+  <style>
+    svg { font-family: system-ui, -apple-system, "Segoe UI", sans-serif; }
+    :root {
+      --surface: #fcfcfb; --border: rgba(11,11,11,0.10);
+      --ink: #0b0b0b; --ink2: #52514e; --muted: #898781;
+      --grid: #e1e0d9; --axis: #c3c2b7;
+      --s1: #2a78d6; --s2: #eb6834; --s3: #1baf7a;
+      --r1: #86b6ef; --r2: #5598e7; --r3: #2a78d6; --r4: #184f95;
+      --wash1: rgba(42,120,214,0.08); --wash2: rgba(235,104,52,0.08);
+      --wash3: rgba(27,175,122,0.08); --washg: rgba(137,135,129,0.10);
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --surface: #1a1a19; --border: rgba(255,255,255,0.10);
+        --ink: #ffffff; --ink2: #c3c2b7; --muted: #898781;
+        --grid: #2c2c2a; --axis: #383835;
+        --s1: #3987e5; --s2: #d95926; --s3: #199e70;
+        --wash1: rgba(57,135,229,0.14); --wash2: rgba(217,89,38,0.14);
+        --wash3: rgba(25,158,112,0.14); --washg: rgba(137,135,129,0.14);
+      }
+    }
+    text { fill: var(--ink); font-size: 12px; }
+    .h1 { font-size: 16px; font-weight: 600; }
+    .h2 { font-size: 13px; font-weight: 600; }
+    .t2 { fill: var(--ink2); } .tm { fill: var(--muted); }
+    .small { font-size: 11px; }
+    .mono { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 11.5px; }
+    .path { font-size: 10.8px; }
+    .num { font-variant-numeric: tabular-nums; }
+    .box { fill: var(--surface); stroke: var(--border); }
+    .flow { stroke: var(--muted); stroke-width: 1.5; fill: none; }
+    .arrfill { fill: var(--muted); }
+    .mid { text-anchor: middle; }
+  </style>
+  <defs>
+    <marker id="arr" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7"
+            markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0L10 5L0 10z" class="arrfill"/>
+    </marker>
+  </defs>
+  <rect x="0.5" y="0.5" width="879" height="473" rx="8" fill="var(--surface)" stroke="var(--border)"/>
+
+  <!-- header -->
+  <text class="h1" x="24" y="36">One parser, two read paths</text>
+  <text class="t2 small" x="24" y="56">The same parsers serve two very different callers, switched by <tspan class="mono">withTurns</tspan>.</text>
+
+  <!-- legend -->
+  <rect x="670" y="31" width="11" height="11" rx="2" fill="var(--s1)"/>
+  <text class="t2 small" x="687" y="41">scan path</text>
+  <rect x="766" y="31" width="11" height="11" rx="2" fill="var(--s2)"/>
+  <text class="t2 small" x="783" y="41">reader path</text>
+
+  <!-- left column: source file -> shared parser -->
+  <rect class="box" x="24" y="124" width="128" height="50" rx="6"/>
+  <text class="mid" x="88" y="146">JSONL</text>
+  <text class="mid t2" x="88" y="163">transcript file</text>
+
+  <path class="flow" d="M88 174 V196" marker-end="url(#arr)"/>
+
+  <rect class="box" x="24" y="198" width="128" height="76" rx="6"/>
+  <text class="h2 mid" x="88" y="221">shared parser</text>
+  <text class="mono mid t2" x="88" y="241">parseClaude</text>
+  <text class="mono mid t2" x="88" y="258">parseCodex</text>
+
+  <!-- fork -->
+  <path class="flow" d="M152 236 H166 Q176 236 176 226 V172 Q176 162 186 162 H190" marker-end="url(#arr)"/>
+  <path class="flow" d="M152 236 H166 Q176 236 176 246 V300 Q176 310 186 310 H190" marker-end="url(#arr)"/>
+
+  <!-- ==================== top branch: scan ==================== -->
+  <rect x="196" y="80" width="146" height="22" rx="11" fill="var(--wash1)" stroke="var(--s1)"/>
+  <circle cx="209" cy="91" r="4" fill="var(--s1)"/>
+  <text class="mono" x="220" y="95">withTurns: false</text>
+
+  <rect class="box" x="196" y="124" width="224" height="76" rx="6"/>
+  <text x="208" y="148"><tspan class="mono">buildIndex</tspan><tspan class="tm" dx="7">&#8594;</tspan><tspan class="mono" dx="7">parseFile</tspan></text>
+  <text class="t2 small" x="208" y="170">message bodies never held</text>
+  <text class="t2 small" x="208" y="186">(3,000+ files would balloon memory)</text>
+
+  <path class="flow" d="M420 162 H434" marker-end="url(#arr)"/>
+
+  <rect x="440" y="118" width="276" height="88" rx="6" fill="var(--wash1)" stroke="var(--s1)"/>
+  <text class="small" x="452" y="140">per-file records cached in</text>
+  <text class="mono path" x="452" y="158">~/.config/agentic-kit/usage-index.json</text>
+  <text class="t2 small" x="452" y="178">&#8212; keyed (<tspan class="mono">path, mtime, size</tspan>), invalidated</text>
+  <text class="t2 small" x="452" y="194">wholesale by <tspan class="mono">SCHEMA_VERSION</tspan></text>
+
+  <path class="flow" d="M716 162 H730" marker-end="url(#arr)"/>
+
+  <rect class="box" x="736" y="127" width="120" height="70" rx="6"/>
+  <text class="mid" x="796" y="150" font-size="11.5">Scorecard &#183;</text>
+  <text class="mid" x="796" y="167" font-size="11.5">Findings &#183;</text>
+  <text class="mid" x="796" y="184" font-size="11.5">Sessions views</text>
+
+  <!-- ==================== bottom branch: reader ==================== -->
+  <rect x="196" y="228" width="140" height="22" rx="11" fill="var(--wash2)" stroke="var(--s2)"/>
+  <circle cx="209" cy="239" r="4" fill="var(--s2)"/>
+  <text class="mono" x="220" y="243">withTurns: true</text>
+
+  <rect class="box" x="196" y="280" width="224" height="60" rx="6"/>
+  <text class="mono" x="208" y="304">readSession</text>
+  <text class="t2 small" x="208" y="324">full turn list built</text>
+
+  <path class="flow" d="M420 310 H434" marker-end="url(#arr)"/>
+
+  <rect x="440" y="270" width="276" height="80" rx="6" fill="var(--wash2)" stroke="var(--s2)"/>
+  <rect class="box" x="452" y="282" width="52" height="20" rx="6"/>
+  <text class="t2 small mid" x="478" y="296">cache</text>
+  <path d="M446 292 H510" stroke="var(--s2)" stroke-width="1.8" stroke-linecap="round" fill="none"/>
+  <text class="h2" x="516" y="297">never cached</text>
+  <text class="t2 small" x="452" y="321">&#8212; every call re-reads and re-parses</text>
+  <text class="t2 small" x="452" y="337">the one file</text>
+
+  <path class="flow" d="M716 310 H730" marker-end="url(#arr)"/>
+
+  <rect class="box" x="736" y="288" width="120" height="44" rx="6"/>
+  <text class="mid" x="796" y="315">Transcript view</text>
+
+  <!-- ==================== callout ==================== -->
+  <rect x="24" y="376" width="832" height="74" rx="6" fill="var(--washg)" stroke="var(--border)"/>
+  <text x="44" y="400">Why the <tspan class="mono">kind</tspan> field needed no <tspan class="mono">SCHEMA_VERSION</tspan> bump: turns are never served from cache.</text>
+  <text class="t2" x="44" y="419">Session-record fields (<tspan class="mono">prompts</tspan>, <tspan class="mono">exceptions</tspan>) DO need one &#8212; stale cached records</text>
+  <text class="t2" x="44" y="437">would sum <tspan class="mono">undefined</tspan> into totals.</text>
+</svg>

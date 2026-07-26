@@ -15,26 +15,25 @@ maintainer reviewing a pricing-table change — can verify every claim here
 against either the cited source code or the cited external page, without
 having to trust this document on faith.
 
-**Pinned to.** commit `540be18` on branch `fix/codex-usage-scorecard-metrics`
-(2026-07-25). Line numbers below will drift as the code changes; if a citation
-no longer matches, `git log -p -L<line>,<line>:<file>` from this commit is the
-fastest way to find where it moved.
+**Citations are machine-checked.** Every `file:line` citation below is
+verified against the current source by the test suite
+(`tests/kit/doc-citations.test.mjs`): an identifier named beside the citation
+must appear at the cited lines. A passing build means the citations match the
+code you have; upkeep is covered in
+[Appendix B](#appendix-b--verification-methodology).
 
 **Scope.** This document covers the **Scorecard** tab only — the five hero KPIs
 (Sessions, API-Equivalent, Tokens, Engaged Time, Cache Read) and the six
 supporting panels (cost per day, by host, token composition bar, when you work,
 models in play, projects, what you worked on). The **Findings**, **Sessions**,
-and **Transcript** tabs are governed by separate rules (ADR-0009 §6 and §8) and
-are out of scope here except where they share a data source with a Scorecard
-metric.
+and **Transcript** tabs are governed by separate rules and are out of scope
+here except where they share a data source with a Scorecard metric.
 
-**Companion document.** This is a *metrics reference*, not a design record. The
-"why" behind each design choice — why three time tiers, why rules-based
-classification, why cost is never called billing — is ADR-0009's job and is
-cited, not repeated, below. Read
-[`docs/adr/0009-usage-scorecard-local-transcript-analytics.md`](adr/0009-usage-scorecard-local-transcript-analytics.md)
-first if you want motivation; read this document if you want to check an
-arithmetic claim.
+**Companion document.** This is a *metrics reference*, not a design record.
+The "why" behind each design choice — why three time tiers, why rules-based
+classification, why cost is never called billing — lives with the design
+records mapped in [Appendix C](#appendix-c--design-rationale-adr-map). Read
+this document to check an arithmetic claim.
 
 ---
 
@@ -57,7 +56,7 @@ Every metric section below follows the same shape:
 ## 1. Data provenance
 
 Two transcript stores, read-only, parsed at most once per file (cache keyed by
-`(path, mtime, size)`; SCHEMA_VERSION `5` invalidates the whole cache on a
+`(path, mtime, size)`; `SCHEMA_VERSION` invalidates the whole cache on a
 schema change — `src/lib/usage-index.mjs:50`):
 
 | Provider | Store | Format |
@@ -117,9 +116,8 @@ text the harness wrote — task notifications, `bash-stdout`/
 `local-command-stdout` dumps, caveats — are not human prompts and no longer
 count as such (`isHumanPrompt` + `HARNESS_OUTPUT_RE`; the full envelope
 taxonomy is [`TRANSCRIPTS.md`](TRANSCRIPTS.md) §3.2). A `! command` the
-person typed (`bash-input`) still counts. On a reference session this
-corrected 32 claimed prompts to 20 real ones; cached records carried the
-inflated figure, hence the v5 cache invalidation.
+person typed (`bash-input`) still counts. (The correction this rule shipped
+with is recorded in [Appendix A](#appendix-a--fix-history).)
 
 ---
 
@@ -192,8 +190,8 @@ figure for a plain Messages-API session with these token counts.
 **What this does not model:** the panel prices every session as if it were
 metered per-token API usage. On a Claude Max/Pro subscription, or Codex via a
 ChatGPT plan, **the user is not billed this way at all** — this is why the
-subtitle says "list price · not plan billing" as a first-class UI element
-(ADR-0009 §3), not a footnote. See §14 for the full list of pricing factors
+subtitle says "list price · not plan billing" as a first-class UI element,
+not a footnote. See §14 for the full list of pricing factors
 this cost figure does not include (regional-processing uplift, large-prompt
 surcharges, service tiers, `inference_geo` multiplier, Batch API discount,
 Managed Agents session-runtime billing).
@@ -238,6 +236,8 @@ cumulative snapshots (4000/1600/400) would be wrong, and the correct
 last-event-only answer (3000/1200/300, split into `input: 1800, cacheRead:
 1200`) is what the assertion requires.
 
+![Figure: Claude sums per-turn usage deltas while Codex reports cumulative token_count snapshots where only the last one counts — summing snapshots would double-count](assets/usage-token-accounting.svg)
+
 **What this does not model:** reasoning tokens (`reasoning_output_tokens`,
 present in Codex's `token_count` payload) are not broken out as a separate
 figure — they are folded into `output` implicitly via the provider's own
@@ -265,11 +265,10 @@ figures (`cacheRead = 1464.3B`, `tokens = 1495.2B`): `1464.3 / 1495.2 × 100 =
 **Source:** `dashboard-server.mjs:1931` (`cacheShare = pct(t.cacheRead,
 t.tokens)`), rendered `dashboard-server.mjs:1939`.
 
-**Why this number matters more than it looks like it should.** ADR-0009's
-own motivating data point: on the reference corpus, 96.3% of tokens were
-cache reads, and pricing them as fresh input (rather than at the 0.1×
-multiplier) would overstate cost by roughly 10× (`pricing.mjs:8-9`, ADR-0009
-§Context point 2). A cache-read share this high is not an anomaly to be
+**Why this number matters more than it looks like it should.** On the
+reference corpus, 96.3% of tokens were cache reads — pricing them as fresh
+input (rather than at the 0.1× multiplier) would overstate cost by roughly
+10× (`pricing.mjs:8-9`). A cache-read share this high is not an anomaly to be
 suspicious of on its own — it is the expected steady state for any
 long-running agentic session that resends a large, mostly-unchanged system
 prompt and tool-result history on every turn, which both Claude Code and
@@ -281,11 +280,11 @@ Codex CLI do by default.
 
 **Displayed as:** `ENGAGED TIME` hero tile — `403h`, subtitle `3286h summed`
 plus a `sessions overlap` note. Hovering the tile reveals a tooltip with all
-three tiers (ADR-0009's "ladder," `dashboard-server.mjs:1921-1927`).
+three tiers (the "ladder," `dashboard-server.mjs:1921-1927`).
 
 This is the single most heavily-caveated metric on the tab, because a naive
-version of it was **wrong by roughly 3×** during ADR-0009's own design pass
-(ADR-0009 §4) — worth understanding in full before trusting the number.
+version of it is **wrong by roughly 3×** on the reference corpus — worth
+understanding in full before trusting the number.
 
 **Three tiers**, each a genuinely different question, computed as three
 separate interval-union operations:
@@ -335,9 +334,9 @@ session data, and each needs its own fix:
   (`dashboard-server.mjs:1851`, `≥60min` rounds to hours, else whole
   minutes).
 
-**Worked example**, ADR-0009's own reference-corpus measurement (14-day
-window, 582–584 sessions depending on exact cutoff), reproduced here as the
-canonical sanity check of the three-tier design:
+**Worked example**, the reference-corpus measurement (14-day window, 582–584
+sessions depending on exact cutoff), the canonical sanity check of the
+three-tier design:
 
 | Tier | Total | Per day |
 |---|---|---|
@@ -346,14 +345,14 @@ canonical sanity check of the three-tier design:
 | `spanMinutes×60` | 296.4 h | 21.2 h |
 
 The naive sum (296.4 h / 21.2 h/day) implies a person working 21-hour days —
-"not a rounding error, it is a false statement" (ADR-0009 §4). The
+not a rounding error but a false statement. The
 span-union fixes overlap but still implies 16.5 h/day, because 11 in-window
 sessions individually spanned over 6 hours (the longest 27.4 h) without
 splitting at idle gaps. Only the fully-split, unioned figure — 7.2 h/day — is
 both overlap-corrected and idle-corrected, which is why it is the one
 promoted to the hero tile; the other two are demoted to a subtitle and a
 tooltip respectively, never deleted, so the invariant chain stays checkable
-from the running panel (ADR-0009 §4, "Amendment (2026-07-25)").
+from the running panel.
 
 **What this does not model:** `IDLE_GAP_MS = 15 min` is a judgement call, not
 a measured constant — a maintainer who believes work with 20-minute pauses
@@ -381,7 +380,7 @@ time as **local calendar day**, not UTC
 (`usage-index.mjs:474`/`usage-index.mjs:576` call `localDay(at)`) — so a
 session that runs from 23:58 local to 00:05 local is billed to the day its
 *first* row landed on (test:
-`tests/kit/usage-index.test.mjs:556`, "a session that opens before midnight
+`tests/kit/usage-index.test.mjs:608`, "a session that opens before midnight
 is counted on its first billed day"). Accumulation:
 `byDay[row.day].cost += rowCost` (`usage-index.mjs:786`). Bar height:
 `h = maxDay ? max(2, cost/maxDay*100) : 2` (`dashboard-server.mjs:1950`) —
@@ -418,8 +417,8 @@ rows. Any divergence between the two hosts' per-session averages is
 therefore either (a) a genuine usage-pattern difference, or (b) a defect in
 how one provider's raw transcript is *parsed into rows* upstream of
 aggregation — never a defect in the aggregation itself, since both hosts
-share it. §15 documents two real defects of exactly that kind, found and
-fixed on 2026-07-25 in `parseCodex` specifically.
+share it. [Appendix A](#appendix-a--fix-history) documents two real defects
+of exactly that kind, both in `parseCodex`.
 
 **What this does not model:** the by-host cards do not distinguish a session
 that used both providers (not currently possible in this data model — a
@@ -484,18 +483,17 @@ byModel[model].sessions  = count of DISTINCT sessions whose s.models includes th
 **so that a model can appear in `byModel` — with a nonzero session count —
 even in a session that contributed zero cost/tokens/responses for that
 model.** This is not an edge case invented for this document: it is the
-exact mechanism that makes §15's subagent-replay fix safe (a model used only
-by an excluded subagent-replay session still shows up as "used," at zero
-cost, rather than vanishing).
+exact mechanism that makes the subagent-replay exclusion
+([Appendix A](#appendix-a--fix-history)) safe — a model used only by an
+excluded subagent-replay session still shows up as "used," at zero cost,
+rather than vanishing.
 
 `byModel[...].responses` is populated from `row.responses`
 (`usage-index.mjs:788`), which in turn comes from the `responses` field
 passed into `addUsage()` at the call site — `1` per Claude assistant turn
 (`usage-index.mjs:474-480`), or `rec.responses` (the session's whole response
 count) once per Codex session, passed at the single point Codex calls
-`addUsage` (`usage-index.mjs:576-583`; see §15 Bug A for why this field was
-previously omitted for Codex and every Codex model showed 0 responses
-regardless of real activity).
+`addUsage` (`usage-index.mjs:576-583`).
 
 **Render:** `bar(name, fmtUsd(cost), fmtTok(tokens)+" · "+fmtNum(responses)+"
 resp", pct(cost, topModelCost), false)` (`dashboard-server.mjs:1999-2002`),
@@ -506,15 +504,11 @@ list itself sorted cost-descending by the shared `entries()` helper
 shown as a $0 row.** A dropped connection, rate limit, or authentication
 failure makes Claude Code synthesize a local placeholder turn — `model:
 "<synthetic>"`, `isApiErrorMessage: true`, every usage field zero — rather
-than a real completion (confirmed directly against this machine's own
-transcripts: 33 such turns across the whole corpus, split `server_error`
-27, `authentication_failed` 3, `rate_limit` 3 — three distinct underlying
-causes, one placeholder shape). Before this was handled explicitly, that
-placeholder's model id landed in `rec.models` like any other, so it
-surfaced here as its own ranked row: `<synthetic> · $0.00 · 0 tok · N
-resp` — real-looking but meaningless, since no model ever ran.
+than a real completion (measured on the reference corpus: 33 such turns,
+split `server_error` 27, `authentication_failed` 3, `rate_limit` 3 — three
+distinct underlying causes, one placeholder shape).
 
-The parser now branches on `isApiErrorMessage === true`
+The parser branches on `isApiErrorMessage === true`
 (`usage-index.mjs:459-468`): the turn still increments `rec.responses`
 and the punchcard (`usage-index.mjs:447-450`) — it *is* real engaged
 time, someone was genuinely waiting on it — but it is never pushed into
@@ -530,30 +524,11 @@ when it's zero, the note renders empty rather than always claiming a
 count of zero.
 
 This is the same "never hide it, don't misrepresent it either" principle
-as §15's Codex exclusions and Unclassified in §12 — the difference is
-*where* the exception surfaces: a `$0`, `0`-token, real-looking model row
-was actively misleading (it implies a model ran and simply cost nothing),
-so the fix removes it from the ranking entirely rather than merely
-re-labeling it in place.
-
-**A cache-schema gotcha this change surfaced, worth recording exactly
-because a unit test could not have caught it:** `exceptions` is a new
-required field on every session record, but the on-disk index
-(`~/.config/agentic-kit/usage-index.json`) caches previously-parsed
-records keyed by `(path, mtime, size)` — a session parsed before this
-change has no `exceptions` field at all. Summing `undefined` into
-`totals.exceptions` silently produces `NaN`, which `JSON.stringify`
-serializes as `null` over the wire — a live query against this machine's
-real cached index (1,656 sessions, 90-day window) returned
-`totals.exceptions: null` and still showed the `<synthetic>` row in
-`byModel` on the first run after this change, purely because the cache
-predated it; every unit test still passed, since they only ever exercise
-a fresh parse with no cache involved. `SCHEMA_VERSION` went to `4` for this
-(`usage-index.mjs:35-50`; since superseded by `5` — the prompts correction,
-§2) specifically to force that one-time re-parse. Re-querying the same live server after the bump returned
-`totals.exceptions: 20` and confirmed `<synthetic>` no longer appears
-in `byModel` at all — the number this section describes, not a
-projected one.
+as the Codex exclusions ([Appendix A](#appendix-a--fix-history)) and
+Unclassified in §12 — the difference is *where* the exception surfaces: a
+`$0`, `0`-token, real-looking model row would be actively misleading (it
+implies a model ran and simply cost nothing), so it is excluded from the
+ranking entirely rather than merely re-labelled in place.
 
 ---
 
@@ -563,15 +538,12 @@ projected one.
 N"` when more exist; each row shows `cost`, `N sess · minutes`.
 
 **Formula:** identical shape to §10 (`byProject[project]`), plus a `project
-= 'unknown'` fallback and a repo/worktree collapsing rule that is worth
-citing precisely because it was itself the subject of an ADR-0009 amendment:
+= 'unknown'` fallback and a repo/worktree collapsing rule:
 `projectLabel(cwd)` collapses `<repo>/<marker>/worktrees/<rest>` (marker ∈
 `.autopilot`, `.claude`, `.git`) to `<repo>`, keeping `rest` as a separate
 `worktree` field on the session rather than either discarding it or letting
-it masquerade as a sibling project (ADR-0009 §4b). Before this fix, a git
-worktree's *branch name* was reported as its own project, silently
-undercounting the true repo's total by whatever work happened in the
-worktree.
+it masquerade as a sibling project. (The mislabelling this rule corrected is
+recorded in [Appendix A](#appendix-a--fix-history).)
 
 **Source:** ranking and truncation, `dashboard-server.mjs:2010-2017`
 (`shown = projects.slice(0,8)`); accumulation via the same `addTo()`/
@@ -598,7 +570,7 @@ session's title and tool-call mix. Because it is the metric most likely to
 be second-guessed ("why did it call this a bug fix"), its full decision
 procedure is reproduced here rather than summarized.
 
-**Three layers, strictly ordered** (`src/lib/usage-classify.mjs:199-254`):
+**Three layers, strictly ordered** (`classify()`, `src/lib/usage-classify.mjs:199-254`):
 
 1. **Provenance (confidence = 1.0, unconditional).** If the session carries
    an `attributionSkill` or `attributionPlugin` matching a known prefix in
@@ -627,7 +599,9 @@ procedure is reproduced here rather than summarized.
    at all (`usage-classify.mjs:234`, `:252`). `Unclassified` is a **first
    class outcome**, not a failure state: forcing every session into a
    category to reach 100% coverage would make every category
-   untrustworthy, not just the residue (ADR-0009 §5).
+   untrustworthy, not just the residue.
+
+![Figure: the classifier's three layers — the provenance early exit at confidence 1.0, the all-rules scoring round with a worked title, and the 0.28 confidence floor below which a session stays Unclassified](assets/usage-classifier-layers.svg)
 
 **Confidence formula** (`usage-classify.mjs:236-250`), for the top-scoring
 category against its runner-up:
@@ -649,8 +623,10 @@ reserved exclusively for provenance-layer matches, so a `1.0` in the UI is
 always traceable to a specific attributed skill/plugin id, never to a lucky
 keyword hit.
 
-**Worked example**, from ADR-0009's own reference-corpus measurement
-(§5): signal coverage was `ai-title` 93%, tool mix 100%,
+![Figure: confidence versus margin for four topScore levels, with the shaded Unclassified region below 0.28, the dashed 0.9 rules cap, and the lone 1.0 provenance point](assets/usage-classifier-confidence.svg)
+
+**Worked example**, from the reference-corpus measurement: signal
+coverage was `ai-title` 93%, tool mix 100%,
 `attributionSkill`/`attributionPlugin` 8%, slash commands 13% (mostly
 `/clear`/`/model`, not task-descriptive). This is why provenance alone
 cannot classify most sessions and layer 2 (title + tool-mix rules) carries
@@ -666,10 +642,10 @@ end) and its *tool-call mix* — never the transcript body. A session with a
 generic or misleading title and an atypical tool mix for its actual work
 will be misclassified or land in `Unclassified`; the confidence figure and
 `basis` string exist specifically so a reader can tell when that has
-happened rather than trusting the category blindly (ADR-0009 §5 Amendment).
+happened rather than trusting the category blindly.
 An **optional**, off-by-default LLM-labelling layer 3 exists for exactly
 this residue (`--enrich`, applied only below the confidence floor, cached
-permanently per session — ADR-0009 §5) but is out of scope for this document
+permanently per session) but is out of scope for this document
 since it is opt-in and not part of a default Scorecard render.
 
 ---
@@ -809,26 +785,30 @@ reading every section above:
 - [x] A day, project, or model with zero window activity is simply absent
   from its list — never rendered as a fabricated zero (§7, §11).
 - [x] Price tables are hand-maintained and date-stamped in the UI
-  (`rates as of <PRICES_AS_OF>`) precisely because they *will* drift
-  (ADR-0009 "Costs and risks").
+  (`rates as of <PRICES_AS_OF>`) precisely because they *will* drift.
 - [x] The pricing formula applies identically to every provider; a
   cross-provider discrepancy in the by-host breakdown (§8) is diagnostic
-  evidence of a **parsing** defect upstream, not a pricing defect — see §15
-  for two real examples of exactly this kind of defect, found via this same
-  reasoning.
+  evidence of a **parsing** defect upstream, not a pricing defect — see
+  [Appendix A](#appendix-a--fix-history) for two real examples found via
+  this same reasoning.
 
 ---
 
-## 15. Bugs found and fixed during this audit (2026-07-25)
+## Appendix A — Fix history
 
-This section exists because a user (via a friend using Codex) reported the
-Codex side of the by-host breakdown (§8) "looked questionable" compared to
-Claude's. Investigation traced two real defects — both in `parseCodex`
-specifically, neither in the shared aggregation or pricing logic those two
-parsers feed into (consistent with §8's claim that the aggregation code is
-provider-agnostic). Fixed in commit `540be18` on this branch.
+The main body describes only current behavior; this appendix records what
+was wrong before, for the curious.
 
-### Bug A — Codex model rows always showed 0 responses
+### The 2026-07-25 Codex audit
+
+A user (via a friend using Codex) reported the Codex side of the by-host
+breakdown (§8) "looked questionable" compared to Claude's. Investigation
+traced two real defects — both in `parseCodex` specifically, neither in the
+shared aggregation or pricing logic those two parsers feed into (consistent
+with §8's claim that the aggregation code is provider-agnostic). Fixed in
+commit `540be18` on this branch.
+
+#### Bug A — Codex model rows always showed 0 responses
 
 `parseCodex`'s single `addUsage()` call never included a `responses` field —
 Claude's parser passes `responses: 1` per assistant turn
@@ -841,14 +821,14 @@ Play" list displayed `0 resp` regardless of real token/cost volume or actual
 rec.responses` (the session's own tallied response count,
 `usage-index.mjs:558`) on its `addUsage()` call.
 
-### Bug B — subagent thread-replay could double-bill tokens
+#### Bug B — subagent thread-replay could double-bill tokens
 
 Codex CLI's `thread_spawn` subagent-delegation mechanism writes a rollout
 file for the spawned subagent that **replays its parent thread's entire
 prior cumulative token history as duplicate events**, re-timestamped to the
 subagent's creation time, before the subagent's own new turns begin. This is
 a documented, previously-reported Codex CLI behavior, not a hypothesis
-invented for this audit — see **[C4]**, **[C5]**, **[C6]** below, the last
+invented for this audit — see **[C5]**, **[C6]**, **[C7]** below, the last
 of which measured up to **91×** cost inflation in a real corpus from exactly
 this mechanism (one parent session with 12 spawned subagents, each replaying
 the parent's full history, so the parent's usage was counted 13 times over —
@@ -904,16 +884,49 @@ result with no transcript content. Point anyone questioning their own
 Codex numbers there first — it produces the real number instead of a
 promise.
 
+### Smaller corrections
+
+- **Prompt counts included harness output (SCHEMA_VERSION 5).**
+  `isHumanPrompt` counted harness-written user-role text — task
+  notifications, stdout dumps — as human prompts: 32 claimed vs 20 real on
+  the reference session (§2 states the current rule). Cached records carried
+  the inflated counts, hence the v5 wholesale cache invalidation.
+- **`<synthetic>` placeholder turns ranked as a model row.** Before §10's
+  `isApiErrorMessage` branch, the placeholder's model id landed in
+  `rec.models` like any other and surfaced as its own ranked row —
+  `<synthetic> · $0.00 · 0 tok · N resp` — real-looking but meaningless,
+  since no model ever ran.
+- **The cache-schema gotcha behind SCHEMA_VERSION 4** — recorded exactly
+  because a unit test could not have caught it: `exceptions` was a new
+  required field on every session record, but the on-disk index caches
+  previously-parsed records keyed by `(path, mtime, size)` — a session
+  parsed before the change had no `exceptions` field at all. Summing
+  `undefined` into `totals.exceptions` silently produced `NaN`, which
+  `JSON.stringify` serialized as `null` over the wire — a live query against
+  a real cached index (1,656 sessions, 90-day window) returned
+  `totals.exceptions: null` and still showed the `<synthetic>` row in
+  `byModel` on the first run after the change, purely because the cache
+  predated it; every unit test still passed, since tests only exercise a
+  fresh parse. `SCHEMA_VERSION` went to `4` (`usage-index.mjs:35-50`; since
+  superseded by `5`, above) specifically to force the one-time re-parse.
+  Re-querying the same live server after the bump returned
+  `totals.exceptions: 20` with `<synthetic>` absent from `byModel` —
+  measured, not projected.
+- **Worktree branches masqueraded as projects.** Before §11's collapsing
+  rule, a git worktree's *branch name* was reported as its own project,
+  silently undercounting the true repo's total by whatever work happened in
+  the worktree.
+
 ---
 
-## 16. Verification methodology for this document
+## Appendix B — Verification methodology
 
 Every code citation above was read directly from the source files at commit
 `540be18` (not recalled from memory or summarized secondhand); every
 external pricing claim was either fetched directly (Anthropic, §13.1) or
 corroborated across multiple independent third-party sources with the
 sourcing tier disclosed rather than implied (OpenAI, §13.2); every GitHub
-issue cited (§15) was located and its content quoted or paraphrased from the
+issue cited (Appendix A) was located and its content quoted or paraphrased from the
 actual issue text, not inferred from its title. Where verification was
 incomplete (the OpenAI primary-source fetch, the Bug B real-data check),
 that incompleteness is stated in the relevant section rather than omitted —
@@ -921,9 +934,37 @@ a maintainer-facing document that hides the edges of its own verification is
 exactly the failure mode this document exists to avoid in the metrics it
 describes.
 
+**Citation upkeep.** `tests/kit/doc-citations.test.mjs` extracts every
+`file:line` citation from this document (and from `TRANSCRIPTS.md`) and
+asserts that an identifier or quoted string named beside the citation occurs
+within the cited range (±10 lines) of the **current** source — so citation
+rot fails `pnpm test` instead of accumulating silently. On failure, the error
+names the citation and where its anchor now lives; update the line number (or
+the named anchor, if the code was renamed). When the hint isn't enough,
+`git log -p -L<start>,<end>:<file>` reconstructs where a range moved.
+
 ---
 
-## 17. References
+## Appendix C — Design rationale (ADR map)
+
+The "why" behind the design is deliberately kept out of the main body; it
+lives in
+[`docs/adr/0009-usage-scorecard-local-transcript-analytics.md`](adr/0009-usage-scorecard-local-transcript-analytics.md).
+Where a main-body section implements a recorded decision:
+
+| Main-body topic | Design record |
+|---|---|
+| "API-equivalent, never billing" cost framing (§3) | ADR-0009 §3 |
+| The three-tier engaged-time ladder (§6) | ADR-0009 §4 (and its 2026-07-25 amendment) |
+| Worktree→repo project collapsing (§11) | ADR-0009 §4b |
+| Rule-based classification; Unclassified as first-class; `--enrich` (§12) | ADR-0009 §5 (amendment: confidence/basis surfacing) |
+| Findings / Sessions / Transcript tab rules (out of scope here) | ADR-0009 §6, §8 |
+| Hand-maintained, date-stamped price tables (§13) | ADR-0009 "Costs and risks" |
+| Reference-corpus figures quoted throughout (582–584 sessions, 96.3% cache share, the engaged-time ladder, signal coverage) | ADR-0009 |
+
+---
+
+## Appendix D — References
 
 - **[C1]** Anthropic — *Pricing*. `https://platform.claude.com/docs/en/about-claude/pricing`. Fetched in full 2026-07-25; primary source for §13.1 (model rate table, prompt-caching multiplier table, worked cost example, Batch API discount, Managed Agents session-runtime billing, `inference_geo` multiplier).
 - **[C2]** Anthropic — *Prompt caching*. `https://platform.claude.com/docs/en/build-with-claude/prompt-caching`. Fetched 2026-07-25; independent confirmation of the 1.25×/2×/0.1× cache multipliers in prose form.
@@ -931,7 +972,7 @@ describes.
 - **[C4]** OpenRouter — *GPT-5.6 Sol: API Pricing & Benchmarks*. `https://openrouter.ai/openai/gpt-5.6-sol`. Accessed 2026-07-25; context window (1.05M) and long-context (272K threshold) pricing corroboration.
 - **[C5]** GitHub — `ccusage/ccusage#884`, *Parser overcounts duplicate token_count rows with unchanged total_token_usage*. `https://github.com/ccusage/ccusage/issues/884`. A Codex-usage-analytics tool (functionally the same job as this scorecard's Codex path) documenting that naive summation of cumulative `token_count` snapshots — rather than diffing or taking the last snapshot — matched only 131/732 real sessions correctly; delta/last-event logic matched 100%.
 - **[C6]** GitHub — `openai/codex#14489`, *Change `TokenCount` to not re-emit `last_token_usage` on rate-limit-only updates*. `https://github.com/openai/codex/issues/14489`. Documents Codex CLI re-emitting a stale `last_token_usage` value on rate-limit-only updates with an unchanged cumulative total, which a parser reading `last_token_usage` naively double-counts.
-- **[C7]** GitHub — `ccusage/ccusage#950`, *Bug: Massive token overcounting for Codex subagent sessions (91x inflation)*. `https://github.com/ccusage/ccusage/issues/950`. Source for Bug B (§15): documents `thread_spawn` subagent rollout files replaying the parent thread's entire token history as duplicate, re-timestamped events; measured a 91× real-world cost inflation (reported ~$9,041 against actual spend of ~$100) from a parent session with 12 spawned subagents. Also the source that identifies `session_meta.thread_source` / `source.subagent.thread_spawn` as the detectable field for this pattern.
-- **[C8]** GitHub — `openai/codex#23001`, *Codex App upgrade can break opening older local threads when rollout session_meta lacks thread_source*. `https://github.com/openai/codex/issues/23001`. Confirms `thread_source` is a genuine, if not universally-present, `session_meta` field in real Codex rollout files (older/pre-upgrade rollouts may lack it entirely, which is why the fix in §15 Bug B treats an absent `thread_source` as `'user'`-equivalent — i.e. included — rather than excluded).
+- **[C7]** GitHub — `ccusage/ccusage#950`, *Bug: Massive token overcounting for Codex subagent sessions (91x inflation)*. `https://github.com/ccusage/ccusage/issues/950`. Documents `thread_spawn` subagent rollout files replaying the parent thread's entire token history as duplicate, re-timestamped events; measured a 91× real-world cost inflation (reported ~$9,041 against actual spend of ~$100) from a parent session with 12 spawned subagents. Also the source that identifies `session_meta.thread_source` / `source.subagent.thread_spawn` as the detectable field for this pattern. Source for Appendix A's Bug B.
+- **[C8]** GitHub — `openai/codex#23001`, *Codex App upgrade can break opening older local threads when rollout session_meta lacks thread_source*. `https://github.com/openai/codex/issues/23001`. Confirms `thread_source` is a genuine, if not universally-present, `session_meta` field in real Codex rollout files (older/pre-upgrade rollouts may lack it entirely, which is why Appendix A's Bug B fix treats an absent `thread_source` as `'user'`-equivalent — i.e. included — rather than excluded).
 - **ADR-0009** — [`docs/adr/0009-usage-scorecard-local-transcript-analytics.md`](adr/0009-usage-scorecard-local-transcript-analytics.md). The design record this document's formulas implement; source of every reference-corpus figure quoted above (582–584 sessions, 96.3% cache share, 100.7h/230.8h/296.4h engaged-time ladder, 93%/100%/8%/13% classification signal coverage).
 - **In-repo source files**, all pinned to commit `540be18`: `src/lib/usage-index.mjs`, `src/lib/pricing.mjs`, `src/lib/usage-classify.mjs`, `src/lib/dashboard-server.mjs`, `tests/kit/usage-index.test.mjs`.

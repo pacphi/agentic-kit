@@ -1,0 +1,167 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="880" height="556" viewBox="0 0 880 556"
+     role="img" aria-labelledby="fig-title fig-desc">
+  <title id="fig-title">From disk to browser: the per-session pipeline</title>
+  <desc id="fig-desc">A transcript session moves from the Claude Code and Codex CLI transcript stores through readSession's numbered gates — id grammar, location, realpath containment, size cap, parse, secret masking, truncation — then through the HTTP route's guards, and finally into the browser transcript view.</desc>
+  <style>
+    svg { font-family: system-ui, -apple-system, "Segoe UI", sans-serif; }
+    :root {
+      --surface: #fcfcfb; --border: rgba(11,11,11,0.10);
+      --ink: #0b0b0b; --ink2: #52514e; --muted: #898781;
+      --grid: #e1e0d9; --axis: #c3c2b7;
+      --s1: #2a78d6; --s2: #eb6834; --s3: #1baf7a;
+      --r1: #86b6ef; --r2: #5598e7; --r3: #2a78d6; --r4: #184f95;
+      --wash1: rgba(42,120,214,0.08); --wash2: rgba(235,104,52,0.08);
+      --wash3: rgba(27,175,122,0.08); --washg: rgba(137,135,129,0.10);
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --surface: #1a1a19; --border: rgba(255,255,255,0.10);
+        --ink: #ffffff; --ink2: #c3c2b7; --muted: #898781;
+        --grid: #2c2c2a; --axis: #383835;
+        --s1: #3987e5; --s2: #d95926; --s3: #199e70;
+        --wash1: rgba(57,135,229,0.14); --wash2: rgba(217,89,38,0.14);
+        --wash3: rgba(25,158,112,0.14); --washg: rgba(137,135,129,0.14);
+      }
+    }
+    text { fill: var(--ink); font-size: 12px; }
+    .h1 { font-size: 16px; font-weight: 600; }
+    .h2 { font-size: 13px; font-weight: 600; }
+    .t2 { fill: var(--ink2); } .tm { fill: var(--muted); }
+    .small { font-size: 11px; }
+    .mono { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 11.5px; }
+    .monoh { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 13px; font-weight: 600; }
+    .num { font-variant-numeric: tabular-nums; }
+    .box { fill: var(--surface); stroke: var(--border); }
+    .flow { stroke: var(--muted); stroke-width: 1.5; fill: none; }
+    .arrfill { fill: var(--muted); }
+    .rule { stroke: var(--border); stroke-width: 1; fill: none; }
+    .chip { fill: var(--surface); stroke: var(--border); }
+    .washp { fill: var(--washg); stroke: var(--border); }
+    .acc { fill: var(--wash1); stroke: var(--s1); }
+    .accchip { fill: var(--surface); stroke: var(--s1); }
+  </style>
+  <defs>
+    <marker id="arr" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7"
+            markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0L10 5L0 10z" class="arrfill"/>
+    </marker>
+  </defs>
+  <rect x="0.5" y="0.5" width="879" height="555" rx="8" fill="var(--surface)" stroke="var(--border)"/>
+
+  <!-- header -->
+  <text class="h1" x="24" y="36">From disk to browser: the per-session pipeline</text>
+  <text class="t2 small" x="24" y="56">Every step is a gate — content that fails a check reads as unavailable, never as risky.</text>
+
+  <!-- ===================== column 1 · transcript stores ===================== -->
+  <text class="h2" x="24" y="92">TRANSCRIPT STORES</text>
+  <path class="rule" d="M24 100H238"/>
+
+  <rect class="box" x="24" y="112" width="214" height="84" rx="6"/>
+  <text class="small t2" x="38" y="137">Claude Code</text>
+  <text class="mono" x="38" y="160">~/.claude/projects/</text>
+  <text class="mono" x="38" y="178">&lt;project&gt;/&lt;sessionId&gt;.jsonl</text>
+
+  <rect class="box" x="24" y="220" width="214" height="84" rx="6"/>
+  <text class="small t2" x="38" y="245">Codex CLI</text>
+  <text class="mono" x="38" y="268">~/.codex/sessions/</text>
+  <text class="mono" x="38" y="286">yyyy/mm/dd/rollout-*.jsonl</text>
+
+  <rect class="washp" x="24" y="340" width="214" height="82" rx="6"/>
+  <text class="small t2" x="38" y="368">read-only — transcripts are</text>
+  <text class="small t2" x="38" y="386">never rewritten; a malformed</text>
+  <text class="small t2" x="38" y="404">line is skipped, never fatal</text>
+
+  <!-- stores -> readSession -->
+  <path class="flow" d="M238 208H250V143H260" marker-end="url(#arr)"/>
+
+  <!-- ===================== column 2 · readSession corridor ===================== -->
+  <text class="monoh" x="264" y="92">readSession(id)</text>
+  <path class="rule" d="M264 100H600"/>
+
+  <!-- gate 1 -->
+  <rect class="box" x="264" y="112" width="336" height="62" rx="6"/>
+  <circle class="chip" cx="286" cy="143" r="9.5"/>
+  <text class="small num" x="286" y="147" text-anchor="middle">1</text>
+  <text x="306" y="132">id grammar — <tspan class="mono">VALID_ID</tspan></text>
+  <text class="mono" x="306" y="148">^[A-Za-z0-9._-]{1,128}$</text>
+  <text class="small t2" x="306" y="164">rejects traversal before any filesystem access</text>
+  <path class="flow" d="M286 174V186" marker-end="url(#arr)"/>
+
+  <!-- gate 2 -->
+  <rect class="box" x="264" y="186" width="336" height="34" rx="6"/>
+  <circle class="chip" cx="286" cy="203" r="9.5"/>
+  <text class="small num" x="286" y="207" text-anchor="middle">2</text>
+  <text x="306" y="207">locate across both roots</text>
+  <path class="flow" d="M286 220V232" marker-end="url(#arr)"/>
+
+  <!-- gate 3 -->
+  <rect class="box" x="264" y="232" width="336" height="48" rx="6"/>
+  <circle class="chip" cx="286" cy="256" r="9.5"/>
+  <text class="small num" x="286" y="260" text-anchor="middle">3</text>
+  <text x="306" y="253"><tspan class="mono">realpath</tspan> containment — symlinks collapsed;</text>
+  <text class="small t2" x="306" y="269">resolved file must live under a transcript root</text>
+  <path class="flow" d="M286 280V292" marker-end="url(#arr)"/>
+
+  <!-- gate 4 -->
+  <rect class="box" x="264" y="292" width="336" height="48" rx="6"/>
+  <circle class="chip" cx="286" cy="316" r="9.5"/>
+  <text class="small num" x="286" y="320" text-anchor="middle">4</text>
+  <text x="306" y="313">size cap — <tspan class="mono">MAX_SESSION_BYTES 64 MB</tspan></text>
+  <text class="small t2" x="306" y="329">(oversized reads as unavailable)</text>
+  <path class="flow" d="M286 340V352" marker-end="url(#arr)"/>
+
+  <!-- parse -->
+  <rect class="washp" x="264" y="352" width="336" height="48" rx="6"/>
+  <text class="mono" x="286" y="373">parseClaude / parseCodex</text>
+  <text x="286" y="389"><tspan class="mono">withTurns: true</tspan> → meta + turns</text>
+  <path class="flow" d="M286 400V412" marker-end="url(#arr)"/>
+
+  <!-- gate 5 · masking (accent) -->
+  <rect class="acc" x="264" y="412" width="336" height="48" rx="6"/>
+  <circle class="accchip" cx="286" cy="436" r="9.5"/>
+  <text class="small num" x="286" y="440" text-anchor="middle">5</text>
+  <text x="306" y="433"><tspan class="mono">maskSecrets</tspan> — 21 secret shapes,</text>
+  <text class="small t2" x="306" y="449">server-side, before serialization</text>
+  <path class="flow" d="M286 460V472" marker-end="url(#arr)"/>
+
+  <!-- gate 6 -->
+  <rect class="box" x="264" y="472" width="336" height="48" rx="6"/>
+  <circle class="chip" cx="286" cy="496" r="9.5"/>
+  <text class="small num" x="286" y="500" text-anchor="middle">6</text>
+  <text x="306" y="493"><tspan class="mono">truncate</tspan> — <tspan class="mono">MAX_TURN_CHARS 40,000</tspan></text>
+  <text class="small t2" x="306" y="509">marker appended (never silent)</text>
+
+  <!-- readSession -> HTTP -->
+  <path class="flow" d="M600 496H613V199H622" marker-end="url(#arr)"/>
+
+  <!-- ===================== column 3 · HTTP, then the view ===================== -->
+  <text class="h2" x="626" y="92">HTTP</text>
+  <path class="rule" d="M626 100H856"/>
+
+  <rect class="box" x="626" y="112" width="230" height="180" rx="6"/>
+  <text class="mono" x="640" y="133">GET /api/session/:id</text>
+  <text class="tm" x="640" y="155">–</text><text class="small t2" x="652" y="155">loopback bind</text>
+  <text class="tm" x="640" y="172">–</text><text class="small t2" x="652" y="172">Host guard</text>
+  <text class="tm" x="640" y="189">–</text><text class="small t2" x="652" y="189">fetch-metadata guard</text>
+  <text class="tm" x="640" y="206">–</text><text class="small t2" x="652" y="206">unknown id ⇒ 404 (not 200)</text>
+  <rect class="acc" x="634" y="216" width="214" height="62" rx="5"/>
+  <text x="646" y="236"><tspan class="mono">maskMeta</tspan> + <tspan class="mono">maskTurns</tspan></text>
+  <text class="small t2" x="646" y="252">fail-closed — no masker,</text>
+  <text class="small t2" x="646" y="268">no transcript</text>
+
+  <path class="flow" d="M741 292V318" marker-end="url(#arr)"/>
+
+  <text class="h2" x="626" y="340">TRANSCRIPT VIEW<tspan class="small t2"> (browser)</tspan></text>
+  <path class="rule" d="M626 348H856"/>
+
+  <rect class="box" x="626" y="360" width="230" height="170" rx="6"/>
+  <text class="tm" x="640" y="382">–</text><text x="652" y="382">labels come from <tspan class="mono">kind</tspan>,</text>
+  <text class="small t2" x="652" y="398">never <tspan class="mono">role</tspan></text>
+  <text class="tm" x="640" y="416">–</text><text x="652" y="416">redactions render as marks</text>
+  <text class="tm" x="640" y="434">–</text><text x="652" y="434">truncation as a</text>
+  <text class="mono" x="652" y="450">truncated · N of M<tspan class="small t2" style="font-family:system-ui"> badge</tspan></text>
+  <text class="tm" x="640" y="468">–</text><text x="652" y="468">no download, no copy-all,</text>
+  <text x="652" y="484">no click-to-reveal</text>
+  <text class="small t2" x="652" y="502">(the original never reaches</text>
+  <text class="small t2" x="652" y="518">the browser)</text>
+</svg>

@@ -36,9 +36,8 @@ activity. Never affected any dollar or token figure.
 that matters for your numbers. Codex CLI's `thread_spawn` subagent
 delegation writes a session-log file for the spawned subagent that
 **replays its parent thread's entire prior token history** as duplicate
-events, before the subagent's own new turns even begin. This is a
-documented, previously-reported behavior of Codex CLI itself — not a theory
-invented for this project:
+events, before the subagent's own new turns even begin. This is documented,
+previously-reported Codex CLI behavior:
 
 - [`openai/codex#14489`](https://github.com/openai/codex/issues/14489) —
   Codex re-emitting a stale cumulative token count on rate-limit-only
@@ -134,8 +133,8 @@ discrepancy has a different explanation worth digging into further. If a
 meaningful percentage is excluded, that's the concrete number behind it —
 not a guess.
 
-## Reference
+## Appendix — references
 
 - Script: [`scripts/codex-usage-diagnostic.mjs`](../scripts/codex-usage-diagnostic.mjs)
-- Full metrics reference: [`docs/USAGE-SCORECARD-METRICS.md`](USAGE-SCORECARD-METRICS.md) (§15 covers these two bugs in full engineering detail)
+- Full metrics reference: [`docs/USAGE-SCORECARD-METRICS.md`](USAGE-SCORECARD-METRICS.md) (its Appendix A covers these two bugs in full engineering detail)
 - Design record: [`docs/adr/0009-usage-scorecard-local-transcript-analytics.md`](adr/0009-usage-scorecard-local-transcript-analytics.md)
