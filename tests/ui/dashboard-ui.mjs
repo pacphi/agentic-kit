@@ -328,8 +328,9 @@ async function main() {
     await page.click('#theme-toggle').catch(() => {});
 
     // ═════════════════════════════════════════════════════════════════════════
-    // ADR-0009 follow-ups — spec docs/superpowers/specs/
-    //   2026-07-25-usage-scorecard-followups-design.md (decisions 1, 2, 3+5)
+    // ADR-0009 follow-ups — spec archived at
+    //   docs/archive/2026-07-25-superpowers-spec-usage-scorecard-followups.md
+    //   (decisions 1, 2, 3+5)
     //
     // Every check below is expected to FAIL until the renderer ships. They are
     // written against the SPEC, not against the current markup.

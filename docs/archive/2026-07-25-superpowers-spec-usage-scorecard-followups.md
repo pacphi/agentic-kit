@@ -2,8 +2,8 @@
 
 - **Date:** 2026-07-25
 - **Status:** Approved, not yet implemented
-- **Source:** [`docs/archive/2026-07-25-usage-scorecard-followups.md`](../../archive/2026-07-25-usage-scorecard-followups.md)
-- **Governs:** [ADR-0009](../../adr/0009-usage-scorecard-local-transcript-analytics.md) §4, §4b, §5, §6
+- **Source:** [`2026-07-25-usage-scorecard-followups.md`](2026-07-25-usage-scorecard-followups.md)
+- **Governs:** [ADR-0009](../adr/0009-usage-scorecard-local-transcript-analytics.md) §4, §4b, §5, §6
 
 ## Context
 
