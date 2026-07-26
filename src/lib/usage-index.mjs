@@ -274,7 +274,7 @@ function* jsonLines(raw) {
 function blankSession(id, provider) {
   return {
     id, provider, title: '', project: 'unknown', start: null, end: null,
-    prompts: 0, responses: 0, sidechain: false, models: [], tools: {},
+    prompts: 0, responses: 0, sidechain: false, threadSource: null, models: [], tools: {},
     skill: null, plugin: null, worktree: null, usage: [], punchcard: {}, active: [], stamps: [],
   };
 }
@@ -430,6 +430,15 @@ function parseClaude(raw, { id, dirName, withTurns = false }) {
  * token_count event is the session total — summing them would multiply the
  * figure by the number of turns. `input_tokens` there INCLUDES
  * `cached_input_tokens`, which bill as cache reads, so the two are separated.
+ *
+ * A rollout whose `session_meta.thread_source` is `subagent` is a delegated
+ * thread whose file replays its parent thread's ENTIRE prior token history
+ * as duplicate events before its own new turns (openai/codex thread_spawn
+ * behavior — see ccusage/ccusage#950, which measured up to 91x cost
+ * inflation from exactly this). Its cumulative `total_token_usage` therefore
+ * double-counts tokens the parent session already billed, so it is excluded
+ * from cost/token aggregation here; the session record itself is kept
+ * (`threadSource` is surfaced on it) so it stays visible/auditable.
  */
 function parseCodex(raw, { id, withTurns = false }) {
   const rec = blankSession(id, 'codex');
@@ -446,6 +455,7 @@ function parseCodex(raw, { id, withTurns = false }) {
     if (e.type === 'session_meta') {
       if (typeof p.id === 'string' && p.id) rec.id = p.id;
       if (typeof p.cwd === 'string') applyProject(rec, projectLabel(p.cwd, null));
+      if (typeof p.thread_source === 'string') rec.threadSource = p.thread_source;
       continue;
     }
     if (e.type === 'turn_context') {
@@ -482,7 +492,7 @@ function parseCodex(raw, { id, withTurns = false }) {
     }
   }
 
-  if (lastUsage) {
+  if (lastUsage && rec.threadSource !== 'subagent') {
     const cacheRead = Number(lastUsage.cached_input_tokens) || 0;
     const gross = Number(lastUsage.input_tokens) || 0;
     const at = Number.isFinite(lastUsageAt) ? lastUsageAt : (rec.end ?? rec.start ?? Date.now());
@@ -491,6 +501,7 @@ function parseCodex(raw, { id, withTurns = false }) {
       output: Number(lastUsage.output_tokens) || 0,
       cacheRead,
       cacheWrite: 0,
+      responses: rec.responses,
     });
   }
 
@@ -713,6 +724,7 @@ function aggregate(records, { days, now, cutoff, deps }) {
       start: new Date(rec.start ?? rec.end).toISOString(),
       minutes: Math.round(((rec.end - (rec.start ?? rec.end)) / 60_000) * 10) / 10,
       prompts: rec.prompts, responses: rec.responses, sidechain: rec.sidechain,
+      threadSource: rec.threadSource,
       models: rec.models.slice(),
       input, output, cacheRead, cacheWrite,
       tokens: input + output + cacheRead + cacheWrite,
@@ -1039,6 +1051,7 @@ export async function readSession(id, o = {}) {
       end: rec.end === null ? null : new Date(rec.end).toISOString(),
       minutes: rec.start === null ? 0 : Math.round(((rec.end - rec.start) / 60_000) * 10) / 10,
       prompts: rec.prompts, responses: rec.responses, sidechain: rec.sidechain,
+      threadSource: rec.threadSource,
       models: rec.models.slice(), tools: { ...rec.tools },
       skill: rec.skill, plugin: rec.plugin,
       // Priced here from the same per-model rows aggregate() uses, rather than

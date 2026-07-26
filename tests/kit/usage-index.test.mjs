@@ -347,6 +347,58 @@ test('Codex tokens come from the LAST token_count event, never the sum', async (
   assert.equal(s.prompts, 1);
   assert.equal(s.project, 'other');
   assert.equal(s.minutes, 3);
+  // byModel must carry the session's response count too — it used to be
+  // dropped for Codex rows (Claude passed `responses: 1` per turn into
+  // addUsage; Codex passed none), leaving every Codex model stuck at "0 resp"
+  // in the dashboard regardless of real token/cost volume.
+  assert.equal(agg.byModel['gpt-5.6'].responses, 2);
+});
+
+test('a subagent-sourced Codex rollout (thread_spawn replay) is excluded from cost/token aggregation', async () => {
+  // openai/codex spawns delegated subagent threads whose rollout file replays
+  // the PARENT thread's entire prior token history as duplicate events before
+  // its own new turns (ccusage/ccusage#950 measured up to 91x cost inflation
+  // from exactly this). Its cumulative total_token_usage therefore double-
+  // counts tokens the parent session already billed, so it must not
+  // contribute to cost/token aggregation — but the session record itself
+  // stays visible (with threadSource surfaced) so it's still auditable.
+  _resetForTest();
+  const sb = soloSandbox();
+  const day = path.join(sb.roots.codex, '2026', '07', '24');
+  fs.mkdirSync(day, { recursive: true });
+  const base = Date.parse('2026-07-24T09:00:00.000Z');
+  const ts = (offMs) => new Date(base + offMs).toISOString();
+  const lines = [
+    { timestamp: ts(0), type: 'session_meta', payload: { id: 'eeee5555', timestamp: ts(0), cwd: '/Users/me/proj', thread_source: 'subagent' } },
+    { timestamp: ts(1000), type: 'turn_context', payload: { turn_id: 't1', model: 'gpt-5.6-sol', cwd: '/Users/me/proj' } },
+    { timestamp: ts(2000), type: 'event_msg', payload: { type: 'user_message', message: 'delegated task' } },
+    // A "first" cumulative total that is already huge is the replay signature:
+    // a genuinely fresh thread's first token_count starts near its own system-
+    // prompt size, not hundreds of thousands of tokens in.
+    { timestamp: ts(30_000), type: 'event_msg', payload: { type: 'token_count', info: { total_token_usage: { input_tokens: 900_000, cached_input_tokens: 850_000, output_tokens: 9000, reasoning_output_tokens: 0, total_tokens: 909_000 } } } },
+    { timestamp: ts(60_000), type: 'event_msg', payload: { type: 'agent_message', message: 'Done.' } },
+  ];
+  fs.writeFileSync(
+    path.join(day, 'rollout-2026-07-24T09-00-00-eeee5555.jsonl'),
+    `${lines.map((l) => JSON.stringify(l)).join('\n')}\n`,
+  );
+
+  const agg = await buildIndex(opts(sb));
+  const s = byId(agg, 'eeee5555');
+
+  assert.ok(s, 'subagent session is still listed, not silently dropped');
+  assert.equal(s.threadSource, 'subagent');
+  assert.equal(s.tokens, 0, 'replayed parent history contributes no tokens to its own record');
+  assert.equal(s.cost, 0);
+  // The model still appears in byModel — it's a real session that used it, and
+  // "models in play" is tracked independently of cost attribution (see the
+  // `s.models` loop in aggregate()) — but it must carry none of the replayed
+  // volume: zero tokens, cost, and responses from this session.
+  const b = agg.byModel['gpt-5.6-sol'];
+  assert.ok(b, 'the model is still listed as used by this session');
+  assert.equal(b.tokens, 0, 'no replayed tokens leak into the model bucket');
+  assert.equal(b.cost, 0);
+  assert.equal(b.responses, 0);
 });
 
 test('buildIndex never mutates a transcript', async () => {
