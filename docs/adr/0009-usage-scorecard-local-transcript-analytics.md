@@ -159,9 +159,16 @@ claim inverted. `Unclassified` sessions show their basis too (usually `no signal
 blanked: the absence of a signal is itself the explanation.
 
 Keeping the fields on the wire has a measured cost, recorded here so the choice is not free-floating:
-`/api/usage` grows by **{{PAYLOAD_DELTA_USAGE}}** and a representative `/api/sessions` response by
-**{{PAYLOAD_DELTA_SESSIONS}}** on the reference corpus, versus the same responses with the ten fields
-stripped.
+`/api/usage` grows by **41.4 kB — 67.4 kB to 108.8 kB, +61.4%** and a representative `/api/sessions`
+response by **36.5 kB — 53.6 kB to 90.1 kB, +68.0%** on the reference corpus, versus the same
+responses with the ten fields stripped. The `/api/sessions` figure is the largest project's *load all*
+(`keel`, 176 rows), which is the biggest response the client ever asks for; the per-project spread is
+59–72%, so the proportion is stable and the absolute cost scales with row count. **This is a large
+relative cost on a small absolute one** — the ten fields are roughly two thirds of a session row
+because the row is otherwise ids and integers, but the whole payload is still under 110 kB, fetched
+once on tab activation over loopback, and never on the shared status poll (§2). Trading a tenth of a
+megabyte for an inspectable classifier is the trade this section already argued for; recording the
+number means a future reader can re-open it with evidence rather than intuition.
 
 ### 6. Findings are evidence-graded, and the panel refuses to market
 

@@ -1182,8 +1182,14 @@ body{
 .cat.uncl{border-color:var(--line); color:var(--ink-dim); background:transparent}
 
 /* session rows */
+/* The LEADING 18px column is the detail expander. It is deliberately first, so
+   the caret sits outside the row's content and reads as an affordance on the
+   row rather than on any one cell. Both grids below must carry it — a column
+   added here and forgotten in the breakpoint shifts every mobile cell by one,
+   which is silent: the row still renders, it just renders the wrong data under
+   each heading. */
 .srow{
-  display:grid; grid-template-columns:58px minmax(150px,2.1fr) minmax(90px,1fr) 106px 46px 60px 62px 68px 20px;
+  display:grid; grid-template-columns:18px 58px minmax(150px,2.1fr) minmax(90px,1fr) 106px 46px 60px 62px 68px 20px;
   gap:10px; align-items:center; padding:9px 13px; background:var(--panel); font-size:12.5px; cursor:pointer;
 }
 .srow:hover{background:var(--panel-2)}
@@ -1195,6 +1201,44 @@ body{
 .s-cost{text-align:right; color:var(--ink); font-size:12px}
 .s-tx{background:transparent; border:0; color:var(--ink-dim); font-size:14px; cursor:pointer; padding:0; border-radius:5px}
 .s-tx:hover{color:var(--accent); background:var(--accent-soft)}
+
+/* row expander — a real <button>, so it is tab-reachable and announced. The
+   chevron rotation reuses the .phead .chev idiom rather than inventing a
+   second vocabulary for "this opens". */
+.s-exp{
+  background:transparent; border:0; color:var(--ink-dim); font-size:13px; line-height:1; cursor:pointer;
+  padding:0; border-radius:4px; transition:transform .18s ease, color .18s ease; display:inline-block;
+}
+.s-exp:hover{color:var(--accent)}
+.s-exp:focus-visible{outline:2px solid var(--accent); outline-offset:2px}
+.s-exp[aria-expanded="true"]{transform:rotate(90deg); color:var(--accent)}
+/* ADR-0009 §4b — the repo answers "which project", this answers "which branch
+   of it". Rendered only when there IS one, so its presence is the signal. */
+.s-wt{
+  margin-left:7px; font-size:9.5px; font-family:var(--mono); color:var(--purple); white-space:nowrap;
+  border:1px solid color-mix(in srgb,var(--purple) 30%,transparent);
+  background:color-mix(in srgb,var(--purple) 10%,transparent); border-radius:100px; padding:1px 6px;
+}
+/* The detail strip is a SIBLING of .srow inside .pbody, not a grid child of
+   it — so it spans the full width instead of joining the column layout. No
+   display is set here: the UA's [hidden] rule must keep working. */
+.sdetail{background:var(--panel-2); padding:9px 13px 11px 41px; border-top:1px solid var(--line); font-size:11.5px}
+.sdetail[hidden]{display:none}
+/* Label and value are INLINE-level, not grid or flex tracks, and that is a
+   readability decision rather than a layout one. This markup is divs and
+   spans, not a real <dl> — so block-level cells would hand a screen reader two
+   unrelated blocks with nothing pairing them, and split the label from its
+   value for copy-paste and for anything else reading the rendered text. The
+   classifier's reasoning is one statement and should survive as one. The
+   fixed-width inline-block keeps the column alignment a grid would have given,
+   so nothing is lost visually. */
+.sd-line{padding:2px 0}
+.sd-k{
+  display:inline-block; width:74px; vertical-align:top; color:var(--ink-dim);
+  font-size:10px; text-transform:uppercase; letter-spacing:.06em;
+}
+.sd-v{display:inline-block; vertical-align:top; max-width:calc(100% - 84px); color:var(--ink-2); word-break:break-word}
+.sd-conf{color:var(--ink-dim)}
 
 /* transcript reader */
 /* The crumb stays put while the turns scroll beneath it — on a 2,216-turn
@@ -1238,10 +1282,26 @@ body{
 .masked{background:var(--fail); color:transparent; border-radius:3px; cursor:pointer; opacity:.75; padding:0 3px}
 .masked:hover,.masked.shown{color:#fff; opacity:1}
 .masked.shown{background:transparent; box-shadow:inset 0 0 0 1px var(--fail); color:var(--ink)}
+/* Same "content was withheld" family as .masked, deliberately quieter: masking
+   is a security measure, truncation is a designed limit. An alarm colour here
+   would teach the reader to distrust a turn that is merely long. */
+.t-trunc{
+  display:block; margin-top:3px; font-size:9px; line-height:1.35; text-transform:none; letter-spacing:0;
+  color:var(--ink-dim); border:1px solid var(--line-2); border-radius:4px; padding:1px 4px;
+  background:var(--panel-2); cursor:help;
+}
 
 @media(max-width:720px){
-  .srow{grid-template-columns:58px 1fr 68px 20px}
-  .srow .s-proj,.srow .s-when,.srow .s-dur,.srow .s-turns,.srow .s-tok{display:none}
+  /* Four data columns → five, because .srow above gained a LEADING one.
+     .cat joins the hidden set at the same time, and that is a FIX, not a
+     side-effect: the shipped rule declared four columns while the row still
+     rendered five visible cells, so .cat sat in the cost column, $-figures sat
+     in the 20px glyph column and were clipped, and the transcript glyph wrapped
+     onto a line of its own. Five columns for five cells is what makes the
+     arithmetic close. The category is still reachable — it is on the project
+     header chips and on the Scorecard's category rows. */
+  .srow{grid-template-columns:18px 58px 1fr 68px 20px}
+  .srow .s-proj,.srow .s-when,.srow .s-dur,.srow .s-turns,.srow .s-tok,.srow .cat{display:none}
   .phead{grid-template-columns:16px 1fr 58px 66px}
   .phead .pchips,.phead .p-h,.phead .p-tok{display:none}
 }
@@ -1818,8 +1878,13 @@ const JS = `
     }
   }
 
-  function kpi(k,v,d,cls){
-    return '<div class="kpi '+cls+'"><div class="k">'+esc(k)+'</div><div class="v">'+esc(v)+'</div>'
+  // titleTxt is optional and goes on the OUTER .kpi, so the whole card is the
+  // hover target — a tooltip anchored to the number alone would be a 40px
+  // target for a 200px card. Omitted entirely when not passed, so no card
+  // gains an empty title="".
+  function kpi(k,v,d,cls,titleTxt){
+    return '<div class="kpi '+cls+'"'+(titleTxt?' title="'+esc(titleTxt)+'"':"")
+      +'><div class="k">'+esc(k)+'</div><div class="v">'+esc(v)+'</div>'
       +'<div class="d">'+d+"</div></div>";
   }
   function bar(label,valueTxt,subTxt,share,alt,extra){
@@ -1827,6 +1892,21 @@ const JS = `
       +'<span class="mbar"><i class="'+(alt?"alt":"")+'" style="width:'+share.toFixed(1)+'%"></i></span>'
       +'<span class="mval mono">'+esc(valueTxt)+"</span>"
       +'<span class="msub mono">'+esc(subTxt)+"</span></div>";
+  }
+
+  // ADR-0009 §4 — all three time tiers, as the asserted ordering
+  // engaged <= open <= summed. The visible KPI still leads with the honest
+  // figure; this is the SUPPORTING EVIDENCE for it, which is why it lives in a
+  // tooltip and not in the hero row. Hover is a weak channel (undiscoverable by
+  // accident, absent on touch) and the ADR records that trade-off: a reader who
+  // never hovers is less informed, not misled. Every figure comes from totals —
+  // nothing here is computed a second way.
+  function ladder(t){
+    return "engaged "+fmtHours(t.engagedSeconds)
+      +" ≤ open "+fmtHours(t.spanUnionSeconds)
+      +" ≤ summed "+fmtHours((Number(t.spanMinutes)||0)*60)+"\\n"
+      +"engaged unions active sub-intervals split at 15-min silences; "
+      +"open unions whole session spans; summed double-counts overlap.";
   }
 
   function renderScore(d){
@@ -1838,7 +1918,7 @@ const JS = `
       +kpi("tokens",fmtTok(t.tokens),esc(fmtTok(t.output))+" out &middot; "+esc(fmtTok(t.cacheRead))+" cached","")
       +kpi("engaged time",fmtHours(t.engagedSeconds),
         esc(fmtMins(t.spanMinutes))+" summed"
-        +'<span class="d-note">sessions overlap</span>',"")
+        +'<span class="d-note">sessions overlap</span>',"",ladder(t))
       +kpi("cache read",cacheShare.toFixed(1)+"%","priced at 0.1&times; input","warnv");
     document.getElementById("u-asof").textContent=d.pricesAsOf?("rates as of "+d.pricesAsOf):"";
 
@@ -1961,6 +2041,46 @@ const JS = `
     }).join(""):'<div class="empty">no findings — nothing in this window crossed a detector threshold.</div>';
   }
 
+  // A missing signal renders as an em dash and is NEVER omitted: a line that
+  // disappears when the value is null teaches the reader that the field does
+  // not exist, when in fact it was measured and found absent (ADR-0009 §5).
+  function dash(v){return (v==null||v==="")?"—":String(v);}
+
+  /* The ten fields that shipped on the wire and rendered nowhere. Everything
+     here comes from the row the browser already holds — no route, no fetch. */
+  function sdetail(sx){
+    // basis is a STRING contract. Only null/empty falls back, so a non-string
+    // still renders as itself and trips the harness's [object Object] net —
+    // coercing it here would hide exactly the bug the net exists to catch.
+    var basis=(sx.basis==null||sx.basis==="")?"no signal":sx.basis;
+    var conf=(typeof sx.confidence==="number")
+      ? ' <span class="sd-conf">(conf '+esc(sx.confidence.toFixed(2))+")</span>" : "";
+    var models=(Array.isArray(sx.models)&&sx.models.length)?sx.models.join(", "):"—";
+    var toks="in "+fmtTok(sx.input)+" · out "+fmtTok(sx.output)
+      +" · cache r "+fmtTok(sx.cacheRead)+" / w "+fmtTok(sx.cacheWrite);
+    var tmap=(sx.tools&&typeof sx.tools==="object"&&!Array.isArray(sx.tools))?sx.tools:{};
+    var tl=[],tk;
+    for(tk in tmap)tl.push({n:tk,c:Number(tmap[tk])||0});
+    tl.sort(function(a,b){return b.c-a.c;});
+    var tools=tl.length?tl.slice(0,6).map(function(x){return x.n+" "+x.c;}).join(" · "):"—";
+    var flags="skill "+dash(sx.skill)+" · plugin "+dash(sx.plugin)
+      +" · sidechain "+(sx.sidechain==null?"—":(sx.sidechain?"yes":"no"))
+      +" · worktree "+dash(sx.worktree);
+    var rows=[["basis",esc(basis)+conf],["models",esc(models)],["tokens",esc(toks)],
+      ["tools",esc(tools)],["flags",esc(flags)]];
+    return '<div class="sdetail" id="sd-'+esc(sx.id)+'" hidden>'
+      +rows.map(function(r){
+        // The literal space is load-bearing, not formatting: adjacent
+        // inline-blocks with no whitespace between them collapse into one
+        // unbroken word in the rendered text ("FLAGSskill"), destroying the
+        // word boundary that anything reading it depends on.
+        return '<div class="sd-line"><span class="sd-k">'+r[0]+'</span> <span class="sd-v">'+r[1]+"</span></div>";
+      }).join("")+"</div>";
+  }
+
+  // Returns TWO siblings: the grid row, then its detail strip. The strip is a
+  // block-level sibling inside .pbody, not a grid child of .srow, so it spans
+  // the full width without joining the column layout.
   function sessionRow(sx){
     var host=(sx.provider==="codex")?"codex":"claude";
     var cat=sx.category||"Unclassified";
@@ -1968,17 +2088,23 @@ const JS = `
     var weak=(typeof sx.confidence==="number"&&sx.confidence<0.6)?"0":"1";
     var when=sx.start?new Date(sx.start):null;
     var whenTxt=when&&!isNaN(when)?when.toLocaleString(undefined,{month:"short",day:"numeric",hour:"2-digit",minute:"2-digit"}):"—";
-    return '<div class="srow" data-id="'+esc(sx.id)+'" title="open transcript">'
+    // Session ids are validated against [A-Za-z0-9._-]{1,128} by parseSessionId
+    // before they are ever indexed, so they are safe AND unique as DOM ids.
+    var sid=esc(sx.id);
+    var wt=sx.worktree!=null?'<span class="s-wt" title="git worktree — the repo is the project (ADR-0009 §4b)">⑂'+esc(sx.worktree)+"</span>":"";
+    return '<div class="srow" data-id="'+sid+'" title="open transcript">'
+      +'<button class="s-exp" type="button" aria-expanded="false" aria-controls="sd-'+sid+'"'
+        +' title="show session detail" aria-label="show session detail">&rsaquo;</button>'
       +'<span class="s-host s-'+host+'">'+esc(host)+"</span>"
-      +'<span class="s-title">'+esc(sx.title||"(untitled)")+"</span>"
+      +'<span class="s-title">'+esc(sx.title||"(untitled)")+wt+"</span>"
       +'<span class="cat'+(uncl?" uncl":"")+'" data-w="'+weak+'">'+esc(cat)+"</span>"
       +'<span class="s-when mono">'+esc(whenTxt)+"</span>"
       +'<span class="s-dur mono">'+esc(fmtMins(sx.minutes))+"</span>"
       +'<span class="s-turns mono">'+esc((sx.prompts||0)+"/"+(sx.responses||0))+"</span>"
       +'<span class="s-tok mono">'+esc(fmtTok(sx.tokens))+"</span>"
       +'<span class="s-cost mono">'+esc(fmtUsd(sx.cost))+"</span>"
-      +'<button class="s-tx" type="button" data-tx="'+esc(sx.id)+'" title="open transcript" aria-label="open transcript">&#9707;</button>'
-    +"</div>";
+      +'<button class="s-tx" type="button" data-tx="'+sid+'" title="open transcript" aria-label="open transcript">&#9707;</button>'
+    +"</div>"+sdetail(sx);
   }
 
   function renderSessions(d){
@@ -2038,6 +2164,32 @@ const JS = `
     });
   }
 
+  // ADR-0009 §8 — an abridged turn must not be readable as a complete one, and
+  // "truncated" alone is not enough: a reader who cannot tell 1% loss from 90%
+  // loss knows something is missing and nothing about whether it matters.
+  //
+  // The SHOWN figure is DERIVED, never hardcoded. MAX_TURN_CHARS lives in
+  // usage-index.mjs and the browser never sees it, so a literal 40000 here
+  // would silently desync the day someone changes the constant — which is the
+  // failure mode this whole ADR exists to prevent. We subtract the marker the
+  // producer appends from the text we actually received.
+  var TRUNC_MARK="\\n…[truncated]";
+  function truncBadge(tn){
+    if(!tn||tn.truncated!==true)return "";
+    var shown=String(tn.text==null?"":tn.text);
+    var n=shown.length-(shown.slice(-TRUNC_MARK.length)===TRUNC_MARK?TRUNC_MARK.length:0);
+    // A cached payload can carry truncated:true with no originalChars. Say so,
+    // rather than inventing a denominator or dropping the badge — §6's rule
+    // about claiming a figure only when you can compute one.
+    if(typeof tn.originalChars!=="number"||!isFinite(tn.originalChars)||tn.originalChars<=0)
+      return '<span class="t-trunc" title="this turn was abridged before it was sent to this page; '
+        +'the original length was not recorded">truncated</span>';
+    return '<span class="t-trunc" title="'
+      +esc(fmtNum(n)+" of "+fmtNum(tn.originalChars)
+        +" characters shown; the rest was not sent to this page")+'">truncated · '
+      +esc(fmtTok(n))+" of "+esc(fmtTok(tn.originalChars))+"</span>";
+  }
+
   function renderTranscript(){
     var crumb=document.getElementById("u-crumb"), body=document.getElementById("u-turns");
     if(!usageSession){
@@ -2059,7 +2211,8 @@ const JS = `
       var text=tn.text!=null?tn.text:(tn.body!=null?tn.body:(tn.content!=null?tn.content:""));
       var tools=(tn.tools&&tn.tools.length)
         ?'<div class="chips">'+tn.tools.map(function(x){return '<span class="tool">'+esc(x)+"</span>";}).join("")+"</div>":"";
-      var meta=tn.output?'<span class="t-meta mono">'+esc(fmtNum(tn.output))+" out</span>":"";
+      var meta=truncBadge(tn)
+        +(tn.output?'<span class="t-meta mono">'+esc(fmtNum(tn.output))+" out</span>":"");
       return '<div class="turn '+(user?"t-user":"t-asst")+'"><div class="t-who">'
         +esc(user?"you":(tn.model||tn.role||"assistant"))+meta+"</div>"
         +'<div class="t-body">'+markRedactions(String(text))+tools+"</div></div>";
@@ -2104,6 +2257,20 @@ const JS = `
       }
       var more=tgt.closest?tgt.closest("[data-more]"):null;
       if(more){loadProjectSessions(more.getAttribute("data-more")); return;}
+      // MUST come before the [data-id] branch below: the caret lives INSIDE the
+      // row, so closest("[data-id]") matches it too. stopPropagation() first,
+      // then toggle — the row's click-to-open-transcript path is shipped
+      // behaviour and this must not disturb it. State is ephemeral by design:
+      // not persisted, not in the hash (a poll refresh re-renders collapsed).
+      var exp=tgt.closest?tgt.closest(".s-exp"):null;
+      if(exp){
+        e.stopPropagation();
+        var wasOpen=exp.getAttribute("aria-expanded")==="true";
+        exp.setAttribute("aria-expanded",wasOpen?"false":"true");
+        var det=document.getElementById(exp.getAttribute("aria-controls"));
+        if(det)det.hidden=wasOpen;
+        return;
+      }
       // the glyph is the explicit affordance, but the whole row is a target too —
       // a 14px icon is a cruel click target for a row you can already see.
       var row=tgt.closest?tgt.closest("[data-id]"):null;
