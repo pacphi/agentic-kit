@@ -636,6 +636,49 @@ test('a session that opens before midnight is counted on its first billed day', 
   );
 });
 
+test('a dropped-connection turn (isApiErrorMessage) counts as an exception, never a $0 model', async () => {
+  // Claude Code synthesizes a local placeholder turn — model: "<synthetic>",
+  // isApiErrorMessage: true, all-zero usage — when a request's connection
+  // drops, rate-limits, or fails auth before a real completion returns. It
+  // must count as engaged time (a real turn happened) but must NOT create a
+  // byModel row: there was no model attempt to attribute cost/tokens to.
+  _resetForTest();
+  const sb = soloSandbox();
+  const base = Date.parse('2026-07-24T10:00:00.000Z');
+  const iso = (offMs) => new Date(base + offMs).toISOString();
+  const lines = [
+    { type: 'user', sessionId: 'iiii9999', cwd: '/Users/me/proj', timestamp: iso(0),
+      message: { role: 'user', content: [{ type: 'text', text: 'turn 1' }] } },
+    { type: 'assistant', sessionId: 'iiii9999', cwd: '/Users/me/proj', timestamp: iso(1000),
+      message: { role: 'assistant', model: 'claude-opus-5', usage: { input_tokens: 100, output_tokens: 50 }, content: [] } },
+    { type: 'user', sessionId: 'iiii9999', cwd: '/Users/me/proj', timestamp: iso(2000),
+      message: { role: 'user', content: [{ type: 'text', text: 'turn 2' }] } },
+    // The dropped-connection placeholder: same shape Claude Code actually writes.
+    { type: 'assistant', sessionId: 'iiii9999', cwd: '/Users/me/proj', timestamp: iso(3000),
+      isApiErrorMessage: true, error: 'server_error',
+      message: {
+        role: 'assistant', model: '<synthetic>', stop_reason: 'stop_sequence',
+        usage: { input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 },
+        content: [{ type: 'text', text: 'API Error: Connection closed mid-response.' }],
+      } },
+  ];
+  fs.writeFileSync(path.join(sb.claude, 'iiii9999.jsonl'), `${lines.map((l) => JSON.stringify(l)).join('\n')}\n`);
+
+  const agg = await buildIndex(opts(sb));
+  const s = byId(agg, 'iiii9999');
+
+  assert.ok(s, 'session indexed');
+  assert.equal(s.responses, 2, 'the error placeholder still counts as a real turn');
+  assert.equal(s.exceptions, 1);
+  assert.deepEqual(s.models, ['claude-opus-5'], '"<synthetic>" never enters the models list');
+  assert.equal(s.tokens, 150, 'only the real turn contributes tokens');
+  assert.ok(s.cost > 0);
+
+  assert.equal(agg.totals.exceptions, 1);
+  assert.equal(agg.byModel['<synthetic>'], undefined, 'no $0 "<synthetic>" row is ever created');
+  assert.equal(agg.byModel['claude-opus-5'].tokens, 150);
+});
+
 test('punchcard buckets responses by dow-hour with Monday as 0', async () => {
   _resetForTest();
   const sb = sandbox();

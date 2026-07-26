@@ -91,7 +91,7 @@ function rateFor(model) {
 function costOf({ model, input, output, cacheRead }) {
   const [rin, rout] = rateFor(model);
   const inputUnits = (Number(input) || 0) + (Number(cacheRead) || 0) * CACHE_READ_MULTIPLIER;
-  return (inputUnits * rin + (Number(output) || 0) * rout) / 1e6;
+  return (inputUnits * Number(rin) + (Number(output) || 0) * Number(rout)) / 1e6;
 }
 
 // ── walk root/<yyyy>/<mm>/<dd>/rollout-*.jsonl ──────────────────────────

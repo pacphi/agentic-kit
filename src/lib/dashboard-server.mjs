@@ -587,7 +587,7 @@ function renderPage({ name, version }) {
       </div>
       <div class="two">
         <section class="strip">
-          <div class="sh"><h2>models in play</h2><span class="n mono">by api-equivalent cost</span></div>
+          <div class="sh"><h2>models in play</h2><span class="n mono">by api-equivalent cost<span id="u-models-note"></span></span></div>
           <div id="u-models"></div>
         </section>
         <section class="strip">
@@ -1983,6 +1983,12 @@ const JS = `
       return bar(esc(m.name),fmtUsd(m.cost),fmtTok(fld(m.v,"tokens"))+" · "+fmtNum(fld(m.v,"responses"))+" resp",
         pct(m.cost,mMax),false);
     }).join(""):'<div class="empty">no models in window.</div>';
+    // Dropped-connection / rate-limit / auth-failure turns never resolve to a
+    // model — excluded from this list entirely rather than shown as a $0 row
+    // (see docs/USAGE-SCORECARD-METRICS.md §10). Surfaced here instead, only
+    // when nonzero, so they stay visible rather than silently vanishing.
+    var exc=fld(t,"exceptions");
+    document.getElementById("u-models-note").textContent=exc?(" · "+fmtNum(exc)+" dropped/errored turn"+(exc===1?"":"s")+" excluded"):"";
 
     var projects=entries(d.byProject), pMax=projects.length?projects[0].cost:0;
     var shown=projects.slice(0,8);

@@ -35,8 +35,15 @@ import { configDir, claudeDir, codexDir } from './paths.mjs';
 /** Bump to invalidate every cached entry wholesale.
  *  v2: cached records carry `active` sub-intervals for the idle-gap split.
  *  v3: project is the REPO, with the worktree kept separately — cached v2
- *      records carry the old worktree-as-project labels and must be re-derived. */
-export const SCHEMA_VERSION = 3;
+ *      records carry the old worktree-as-project labels and must be re-derived.
+ *  v4: `exceptions` (dropped-connection/rate-limit/auth-failure placeholder
+ *      turns) is a new required field on every session record. Without this
+ *      bump, a v3-cached session has `exceptions: undefined`, and summing
+ *      that into `totals.exceptions` silently produces NaN (serialized as
+ *      `null` over JSON) instead of a real count — caught by querying a real
+ *      cached index during verification, not by the unit tests, which only
+ *      ever exercise a fresh parse. */
+export const SCHEMA_VERSION = 4;
 
 /** Silence longer than this ends a stretch of engagement. A session is split
  *  into active sub-intervals at gaps ABOVE this bound (exactly this much is not
@@ -274,7 +281,7 @@ function* jsonLines(raw) {
 function blankSession(id, provider) {
   return {
     id, provider, title: '', project: 'unknown', start: null, end: null,
-    prompts: 0, responses: 0, sidechain: false, threadSource: null, models: [], tools: {},
+    prompts: 0, responses: 0, exceptions: 0, sidechain: false, threadSource: null, models: [], tools: {},
     skill: null, plugin: null, worktree: null, usage: [], punchcard: {}, active: [], stamps: [],
   };
 }
@@ -390,11 +397,32 @@ function parseClaude(raw, { id, dirName, withTurns = false }) {
     if (e.type !== 'assistant' || !e.message) continue;
     noteSpan(rec, ms);
     rec.responses++;
+    const at = Number.isFinite(ms) ? ms : (rec.start ?? Date.now());
+    const pk = punchKey(at);
+    rec.punchcard[pk] = (rec.punchcard[pk] ?? 0) + 1;
+
+    // A dropped connection, rate limit, or auth failure makes Claude Code
+    // synthesize a local placeholder turn (model: "<synthetic>",
+    // isApiErrorMessage: true) with no real completion behind it — usage is
+    // always zero. It IS real engaged time (counted above), but it is not a
+    // model attempt: excluded from `models`/cost attribution so it can never
+    // appear as a $0 "model in play," and counted instead as an EXCEPTION so
+    // it stays visible rather than silently vanishing.
+    if (e.isApiErrorMessage === true) {
+      rec.exceptions++;
+      if (withTurns) {
+        turns.push({
+          role: 'assistant', at: new Date(at).toISOString(), model: 'exception',
+          text: claudeText(e.message.content), tools: [], exception: true,
+        });
+      }
+      continue;
+    }
+
     const model = typeof e.message.model === 'string' ? e.message.model : 'unknown';
     if (!rec.models.includes(model)) rec.models.push(model);
 
     const u = e.message.usage ?? {};
-    const at = Number.isFinite(ms) ? ms : (rec.start ?? Date.now());
     addUsage(rec, localDay(at), model, {
       input: Number(u.input_tokens) || 0,
       output: Number(u.output_tokens) || 0,
@@ -402,8 +430,6 @@ function parseClaude(raw, { id, dirName, withTurns = false }) {
       cacheWrite: Number(u.cache_creation_input_tokens) || 0,
       responses: 1,
     });
-    const pk = punchKey(at);
-    rec.punchcard[pk] = (rec.punchcard[pk] ?? 0) + 1;
 
     const tools = [];
     for (const b of Array.isArray(e.message.content) ? e.message.content : []) {
@@ -723,8 +749,8 @@ function aggregate(records, { days, now, cutoff, deps }) {
       worktree: rec.worktree ?? null,
       start: new Date(rec.start ?? rec.end).toISOString(),
       minutes: Math.round(((rec.end - (rec.start ?? rec.end)) / 60_000) * 10) / 10,
-      prompts: rec.prompts, responses: rec.responses, sidechain: rec.sidechain,
-      threadSource: rec.threadSource,
+      prompts: rec.prompts, responses: rec.responses, exceptions: rec.exceptions,
+      sidechain: rec.sidechain, threadSource: rec.threadSource,
       models: rec.models.slice(),
       input, output, cacheRead, cacheWrite,
       tokens: input + output + cacheRead + cacheWrite,
@@ -749,7 +775,7 @@ function aggregate(records, { days, now, cutoff, deps }) {
   sessions.sort((a, b) => b.cost - a.cost || Date.parse(b.start) - Date.parse(a.start));
 
   const totals = {
-    sessions: sessions.length, responses: 0, input: 0, output: 0,
+    sessions: sessions.length, responses: 0, exceptions: 0, input: 0, output: 0,
     cacheRead: 0, cacheWrite: 0, tokens: 0, cost: 0,
     spanMinutes: 0, spanUnionSeconds: 0, engagedSeconds: 0,
   };
@@ -759,7 +785,8 @@ function aggregate(records, { days, now, cutoff, deps }) {
   let spanMs = 0;
 
   for (const s of sessions) {
-    totals.responses += s.responses; totals.input += s.input; totals.output += s.output;
+    totals.responses += s.responses; totals.exceptions += s.exceptions;
+    totals.input += s.input; totals.output += s.output;
     totals.cacheRead += s.cacheRead; totals.cacheWrite += s.cacheWrite;
     totals.tokens += s.tokens; totals.cost += s.cost;
     spanMs += s._span[1] - s._span[0];
@@ -1050,8 +1077,8 @@ export async function readSession(id, o = {}) {
       start: rec.start === null ? null : new Date(rec.start).toISOString(),
       end: rec.end === null ? null : new Date(rec.end).toISOString(),
       minutes: rec.start === null ? 0 : Math.round(((rec.end - rec.start) / 60_000) * 10) / 10,
-      prompts: rec.prompts, responses: rec.responses, sidechain: rec.sidechain,
-      threadSource: rec.threadSource,
+      prompts: rec.prompts, responses: rec.responses, exceptions: rec.exceptions,
+      sidechain: rec.sidechain, threadSource: rec.threadSource,
       models: rec.models.slice(), tools: { ...rec.tools },
       skill: rec.skill, plugin: rec.plugin,
       // Priced here from the same per-model rows aggregate() uses, rather than
