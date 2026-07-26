@@ -1272,6 +1272,19 @@ body{
    are not the person — purple ties them visually to the tool chips, and the
    accent stays reserved for turns the human actually typed. */
 .t-tool .t-who{color:var(--purple)}
+/* Harness sentinel markup, restyled (fmtHarness): a slash command renders as
+   a chip, and system-reminder / caveat / stdout blocks get a labelled quiet
+   panel — the wrapped content stays verbatim, only the XML wrappers go. */
+.h-cmd{
+  font-family:var(--mono); font-size:12px; color:var(--accent);
+  border:1px solid color-mix(in srgb,var(--accent) 32%,transparent);
+  background:color-mix(in srgb,var(--accent) 10%,transparent); border-radius:5px; padding:1px 7px;
+}
+.h-note{display:block; border-left:2px solid var(--line-2); padding:5px 10px; margin:5px 0; color:var(--ink-dim)}
+.h-tag{
+  display:block; font-style:normal; font-family:var(--mono); font-size:9.5px;
+  text-transform:uppercase; letter-spacing:.06em; color:var(--ink-dim); opacity:.8; margin-bottom:2px;
+}
 .t-meta{display:block; font-size:9.5px; margin-top:3px; text-transform:none; letter-spacing:0}
 .t-body{font-size:13px; color:var(--ink-2); white-space:pre-wrap; word-break:break-word; min-width:0}
 .t-user .t-body{color:var(--ink)}
@@ -2174,6 +2187,28 @@ const JS = `
     });
   }
 
+  // Harness sentinel markup \u2014 the XML wrappers Claude Code writes into
+  // transcript text (<command-name>, <system-reminder>, <local-command-*>) \u2014
+  // rendered as styled structure instead of literal angle-bracket soup.
+  // PRESENTATION ONLY: the wrapped content is kept verbatim (ADR-0009 \u00a78's
+  // no-silent-alteration rule); only the wrapper tags become styling. Runs on
+  // ESCAPED html (after markRedactions), so patterns match &lt;tag&gt;. An
+  // unmatched tag (e.g. cut mid-sentinel by turn truncation) is left raw.
+  var H_TAGS={"system-reminder":"system reminder","local-command-caveat":"caveat","local-command-stdout":"command output"};
+  function fmtHarness(html){
+    return html
+      .replace(/&lt;command-name&gt;([\\s\\S]*?)&lt;\\/command-name&gt;\\s*(?:&lt;command-message&gt;([\\s\\S]*?)&lt;\\/command-message&gt;\\s*)?(?:&lt;command-args&gt;([\\s\\S]*?)&lt;\\/command-args&gt;)?/g,
+        function(_,name,msg,args){
+          var n=name.trim(), a=(args||"").trim(), m=(msg||"").trim();
+          return '<span class="h-cmd"'+(m&&m!==n.replace(/^\\//,"")?' title="'+m+'"':"")
+            +'>'+n+(a?" "+a:"")+"</span>";
+        })
+      .replace(/&lt;(system-reminder|local-command-caveat|local-command-stdout)&gt;\\s*([\\s\\S]*?)\\s*&lt;\\/\\1&gt;/g,
+        function(_,tag,body){
+          return '<span class="h-note"><i class="h-tag">'+H_TAGS[tag]+"</i>"+body+"</span>";
+        });
+  }
+
   // ADR-0009 §8 — an abridged turn must not be readable as a complete one, and
   // "truncated" alone is not enough: a reader who cannot tell 1% loss from 90%
   // loss knows something is missing and nothing about whether it matters.
@@ -2237,7 +2272,7 @@ const JS = `
       else{who="you"; cls="t-user";}
       return '<div class="turn '+cls+'"><div class="t-who"'+(title?' title="'+esc(title)+'"':"")+'>'
         +esc(who)+meta+"</div>"
-        +'<div class="t-body">'+markRedactions(String(text))+tools+"</div></div>";
+        +'<div class="t-body">'+fmtHarness(markRedactions(String(text)))+tools+"</div></div>";
     }).join(""):'<div class="empty">this session has no readable turns.</div>';
   }
 

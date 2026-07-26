@@ -99,7 +99,7 @@ responses = Σ over included sessions of session.responses
 - Totals: `totals.responses += s.responses` per included session
   (`usage-index.mjs:811`).
 - Render: `kpi("sessions", fmtNum(t.sessions), fmtNum(t.responses)+" assistant
-  turns", "")` (`dashboard-server.mjs:1920`).
+  turns", "")` (`dashboard-server.mjs:1933`).
 
 **Worked example.** A session with 3 user turns and 2 assistant turns
 contributes `sessions += 1, responses += 2` — prompts (user turns) are tracked
@@ -206,13 +206,13 @@ tokens = input + output + cacheRead + cacheWrite   (summed across all rows in wi
 `usage-index.mjs:755` (`rowTokens = row.input + row.output + row.cacheRead +
 row.cacheWrite`) and rolled into `totals.tokens` via `addTo`
 (`usage-index.mjs:710`). Rendered with `fmtTok()`
-(`dashboard-server.mjs:1830-1836`): `≥1e9` → `"X.XB"`, `≥1e6` → `"X.XM"`,
+(`dashboard-server.mjs:1843-1849`): `≥1e9` → `"X.XB"`, `≥1e6` → `"X.XM"`,
 `≥1e3` → `"X.XK"`, else the rounded integer.
 
 The **token composition bar** immediately below the hero row (cache read /
 cache write / output / input, as four coloured segments) is the same four
-numbers as percentages of `t.tokens` (`dashboard-server.mjs:1956-1963`,
-`pct(a,b) = b ? a/b*100 : 0`, `dashboard-server.mjs:1844`).
+numbers as percentages of `t.tokens` (`dashboard-server.mjs:1969-1976`,
+`pct(a,b) = b ? a/b*100 : 0`, `dashboard-server.mjs:1857`).
 
 **What "input" excludes.** For both providers, the `input` counter recorded
 per row is **gross input minus cached input** — Claude's parser reads
@@ -253,8 +253,8 @@ cacheRead + cacheWrite), **not** as a share of input alone. On the reference
 figures (`cacheRead = 1464.3B`, `tokens = 1495.2B`): `1464.3 / 1495.2 × 100 =
 97.93%`, which rounds to the displayed `97.9%` — confirming the denominator.
 
-**Source:** `dashboard-server.mjs:1918` (`cacheShare = pct(t.cacheRead,
-t.tokens)`), rendered `dashboard-server.mjs:1926`.
+**Source:** `dashboard-server.mjs:1931` (`cacheShare = pct(t.cacheRead,
+t.tokens)`), rendered `dashboard-server.mjs:1939`.
 
 **Why this number matters more than it looks like it should.** ADR-0009's
 own motivating data point: on the reference corpus, 96.3% of tokens were
@@ -272,7 +272,7 @@ Codex CLI do by default.
 
 **Displayed as:** `ENGAGED TIME` hero tile — `403h`, subtitle `3286h summed`
 plus a `sessions overlap` note. Hovering the tile reveals a tooltip with all
-three tiers (ADR-0009's "ladder," `dashboard-server.mjs:1908-1914`).
+three tiers (ADR-0009's "ladder," `dashboard-server.mjs:1921-1927`).
 
 This is the single most heavily-caveated metric on the tab, because a naive
 version of it was **wrong by roughly 3×** during ADR-0009's own design pass
@@ -321,9 +321,9 @@ session data, and each needs its own fix:
   mergeIntervals(sessions.map(s => s._span))` (`usage-index.mjs:853`);
   `totals.spanMinutes` is a running sum of `s._span[1] - s._span[0]` across
   the loop (`usage-index.mjs:815`, finalized `usage-index.mjs:852`).
-- Render: `fmtHours()` (`dashboard-server.mjs:1837`, `≥10h` rounds to the
+- Render: `fmtHours()` (`dashboard-server.mjs:1850`, `≥10h` rounds to the
   nearest hour, else one decimal place) and `fmtMins()`
-  (`dashboard-server.mjs:1838`, `≥60min` rounds to hours, else whole
+  (`dashboard-server.mjs:1851`, `≥60min` rounds to hours, else whole
   minutes).
 
 **Worked example**, ADR-0009's own reference-corpus measurement (14-day
@@ -375,7 +375,7 @@ session that runs from 23:58 local to 00:05 local is billed to the day its
 `tests/kit/usage-index.test.mjs:556`, "a session that opens before midnight
 is counted on its first billed day"). Accumulation:
 `byDay[row.day].cost += rowCost` (`usage-index.mjs:758`). Bar height:
-`h = maxDay ? max(2, cost/maxDay*100) : 2` (`dashboard-server.mjs:1937`) —
+`h = maxDay ? max(2, cost/maxDay*100) : 2` (`dashboard-server.mjs:1950`) —
 every non-empty day gets a visually nonzero bar (floor of 2%), so a very
 cheap day is never rendered as invisible.
 
@@ -392,7 +392,7 @@ rather than a continuous 30-day series.
 **Displayed as:** two cards, `claude` and `codex`, each showing cost,
 session count, and total tokens; an idle host (`sessions == 0 && cost == 0`)
 renders "no sessions in window" instead of zeroed figures
-(`dashboard-server.mjs:1949-1953`).
+(`dashboard-server.mjs:1962-1966`).
 
 **Formula:** identical aggregation to every other bucket
 (`byProvider[s.provider]`, populated via `addTo()`, `usage-index.mjs:706-715`,
@@ -438,7 +438,7 @@ punchcard[dow + "-" + hour] += 1   per assistant/agent_message response, at its 
 `agent_message` (`usage-index.mjs:532-533`), merged into the window-level
 `punchcard` object per session (`usage-index.mjs:832`). Cell intensity is
 linear against the single busiest cell in the window:
-`v = pcMax ? n/pcMax : 0` (`dashboard-server.mjs:1973`) — this is a
+`v = pcMax ? n/pcMax : 0` (`dashboard-server.mjs:1986`) — this is a
 **relative**, not absolute, scale, so the heatmap's brightest cell is always
 "the busiest hour-of-week in *this* window," not a fixed response-count
 threshold, and comparing brightness across two different date-range views is
@@ -489,9 +489,9 @@ previously omitted for Codex and every Codex model showed 0 responses
 regardless of real activity).
 
 **Render:** `bar(name, fmtUsd(cost), fmtTok(tokens)+" · "+fmtNum(responses)+"
-resp", pct(cost, topModelCost), false)` (`dashboard-server.mjs:1986-1989`),
+resp", pct(cost, topModelCost), false)` (`dashboard-server.mjs:1999-2002`),
 list itself sorted cost-descending by the shared `entries()` helper
-(`dashboard-server.mjs:1845-1850`).
+(`dashboard-server.mjs:1858-1863`).
 
 **Exceptions — a turn that never resolved to a model is excluded here, not
 shown as a $0 row.** A dropped connection, rate limit, or authentication
@@ -516,7 +516,7 @@ create a `byModel` row of any kind. It increments a separate
 (`usage-index.mjs:775`, alongside the existing `sidechain`/`threadSource`
 flags — inspectable in the Sessions tab, never hidden). When
 `totals.exceptions > 0`, the panel header shows a small `"· N
-dropped/errored turns excluded"` note (`dashboard-server.mjs:1990-1995`);
+dropped/errored turns excluded"` note (`dashboard-server.mjs:2003-2008`);
 when it's zero, the note renders empty rather than always claiming a
 count of zero.
 
@@ -564,7 +564,7 @@ worktree's *branch name* was reported as its own project, silently
 undercounting the true repo's total by whatever work happened in the
 worktree.
 
-**Source:** ranking and truncation, `dashboard-server.mjs:1997-2004`
+**Source:** ranking and truncation, `dashboard-server.mjs:2010-2017`
 (`shown = projects.slice(0,8)`); accumulation via the same `addTo()`/
 `entries()` machinery as §10, keyed by `s.project` instead of `s.models`.
 
@@ -580,7 +580,7 @@ rather than silently absent from the total.
 **Displayed as:** a ranked bar list of categories, bar width relative to
 the top category's cost; each row shows `cost`, `N sess · $/sess`; a small
 confidence dot on classified rows (opacity `0.5 + confidence×0.5`,
-`dashboard-server.mjs:2011-2012`); `Unclassified` is always shown, never
+`dashboard-server.mjs:2024-2025`); `Unclassified` is always shown, never
 hidden, and carries no confidence dot.
 
 This is the only Scorecard metric that is **not** pure arithmetic over
@@ -647,9 +647,9 @@ keyword hit.
 cannot classify most sessions and layer 2 (title + tool-mix rules) carries
 the bulk of the load.
 
-**Render:** `dashboard-server.mjs:2007-2018`, sorted cost-descending via the
+**Render:** `dashboard-server.mjs:2020-2031`, sorted cost-descending via the
 shared `entries()` helper, with `$/sess = cost / max(sessions, 1)` guarding
-the zero-session edge case (`dashboard-server.mjs:2009`).
+the zero-session edge case (`dashboard-server.mjs:2022`).
 
 **What this does not model:** the classifier reads only the session's
 *title* (Claude's own `ai-title`, written by the model itself at session
@@ -714,7 +714,7 @@ Anthropic which publishes a fetchable pricing document. OpenAI's rates in
 this table are therefore maintained by hand against OpenAI's own developer
 documentation and are the most drift-prone entries in the file — this is
 explicitly why `PRICES_AS_OF` is surfaced in the UI (`u-asof`,
-`dashboard-server.mjs:1927`) rather than assumed current.
+`dashboard-server.mjs:1940`) rather than assumed current.
 
 | Model (kit key) | Input | Output | Cache read (0.1×, derived) |
 |---|---|---|---|

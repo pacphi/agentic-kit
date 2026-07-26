@@ -1,4 +1,4 @@
-# Transcripts & Session Detail — Maintainer Reference
+# Transcripts & Session Detail — Reference
 
 **Audience.** agentic-kit maintainers and contributors touching the transcript
 pipeline — `src/lib/usage-index.mjs` (parsing, `readSession`) or
@@ -160,7 +160,7 @@ and image-only pastes get the right kind" (the two edges).
 
 ## 4. The `readSession` pipeline — how one session becomes a payload
 
-`readSession(id, opts)` (`usage-index.mjs:1050-1139`) is the only way
+`readSession(id, opts)` (`usage-index.mjs:1050-1133`) is the only way
 transcript content leaves the module, and every step is a gate:
 
 ### 4.1 Locate, contain, bound
@@ -205,8 +205,8 @@ serialization**, then length-capped at `MAX_TURN_CHARS` (40,000,
 
 The two kinds of withholding keep distinct vocabulary end-to-end: masking
 renders as `…redacted` marks (`markRedactions`,
-`dashboard-server.mjs:2171`), truncation as a `truncated · N of M` badge
-(`truncBadge`, `dashboard-server.mjs:2187`, deriving N from the received
+`dashboard-server.mjs:2184`), truncation as a `truncated · N of M` badge
+(`truncBadge`, `dashboard-server.mjs:2222`, deriving N from the received
 text so a changed constant can't desync the display).
 
 ---
@@ -250,13 +250,13 @@ nothing on the page to reveal (ADR-0009 §8).
 
 ### 6.1 Sessions view — the row and its expander
 
-`renderSessions` (`dashboard-server.mjs:2120`) renders the project tree
+`renderSessions` (`dashboard-server.mjs:2133`) renders the project tree
 (collapsed by default; every project starts closed so the cross-project
 comparison stays above the fold). Each session is a `sessionRow`
-(`dashboard-server.mjs:2094-2118`): host chip (claude/codex), title,
+(`dashboard-server.mjs:2107-2131`): host chip (claude/codex), title,
 worktree glyph, category chip (dimmed when confidence < 0.6 or
 Unclassified), start, duration, `prompts/responses`, tokens, cost — and an
-expander (`sdetail`, `dashboard-server.mjs:2061-2091`) carrying the ten
+expander (`sdetail`, `dashboard-server.mjs:2074-2104`) carrying the ten
 fields that once shipped on the wire and rendered nowhere (ADR-0009 §5
 Amendment): classification `basis` + confidence, per-session `models`, the
 token split, top tools, and the `skill`/`plugin`/`sidechain`/`worktree`
@@ -265,10 +265,10 @@ field that vanishes when null teaches the reader it doesn't exist.
 
 ### 6.2 Transcript view — attribution, redaction, truncation
 
-`renderTranscript` (`dashboard-server.mjs:2203`) renders the crumb (title,
+`renderTranscript` (`dashboard-server.mjs:2238`) renders the crumb (title,
 project, duration, `prompts/responses`, tokens, cost — all from masked
 `meta`) and the turn list. **The label comes from `kind`, never from role**
-(`dashboard-server.mjs:2219-2236`):
+(`dashboard-server.mjs:2254-2271`):
 
 | Turn | Label | Styling |
 |---|---|---|
@@ -280,9 +280,26 @@ project, duration, `prompts/responses`, tokens, cost — all from masked
 A turn without `kind` (defensive only — the reader path never serves cached
 turns) falls back to the `prompt` flag, `false` ⇒ `tool result`.
 
+**Harness sentinel markup is restyled, never rewritten.** Claude Code writes
+XML wrappers into transcript *text* — a slash command records as a
+`<command-name>/<command-message>/<command-args>` triple, and injected
+context as `<system-reminder>` / `<local-command-caveat>` /
+`<local-command-stdout>` blocks (the six shapes measured in the real corpus;
+`command-contents`/`stderr`: zero occurrences). Rendered literally they read
+as angle-bracket soup, so `fmtHarness` (`dashboard-server.mjs:2197-2210`)
+reformats them client-side: the command triple becomes a `/clear`-style chip
+(args kept, the redundant message surfaced as a hover title only when it
+differs from the name), and the three block wrappers become quiet labelled
+panels (`system reminder` / `caveat` / `command output` — CSS
+`dashboard-server.mjs:1275-1287`). This is presentation only, per the same
+no-silent-alteration rule that governs masking: **wrapped content stays
+verbatim; only the wrapper tags become styling.** It runs on escaped text
+(after `markRedactions`), and an unmatched tag — e.g. one cut mid-block by
+turn truncation — is left raw rather than half-formatted.
+
 Deep links: `#usage/<sessionId>` opens the Transcript view directly
-(`syncHash`, `dashboard-server.mjs:1390-1391`); the view lazy-fetches via
-`loadTranscript` (`dashboard-server.mjs:1864`).
+(`syncHash`, `dashboard-server.mjs:1403-1404`); the view lazy-fetches via
+`loadTranscript` (`dashboard-server.mjs:1877`).
 
 ### 6.3 Verified against real data
 

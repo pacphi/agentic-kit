@@ -413,6 +413,23 @@ async function main() {
       assert(!/esc\(user\?"you"/.test(r.body), 'the old role-only "you" label must be gone');
     });
 
+    await test('harness sentinel markup is restyled, not rendered as literal XML', async () => {
+      // fmtHarness turns <command-name>/<system-reminder>/<local-command-*>
+      // wrappers into styled structure — content verbatim, wrappers gone. The
+      // page must carry the formatter, its two regex families, the CSS, and
+      // the human-readable labels; and it must run INSIDE the turn body
+      // builder (after markRedactions, so it operates on escaped text).
+      const r = await get(uiSrv.url);
+      contains(r.body, 'function fmtHarness');
+      contains(r.body, 'command-name');
+      contains(r.body, 'system-reminder|local-command-caveat|local-command-stdout');
+      contains(r.body, 'fmtHarness(markRedactions(');
+      contains(r.body, '.h-cmd{');
+      contains(r.body, '.h-note{');
+      contains(r.body, '"system reminder"');
+      contains(r.body, '"command output"');
+    });
+
     await test('poll control: default 30s, ten intervals, persisted as ak-dash-poll', async () => {
       const r = await get(uiSrv.url);
       contains(r.body, 'ak-dash-poll');
