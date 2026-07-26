@@ -274,6 +274,11 @@ with different vocabulary keeps them distinguishable to the reader.
 
 ## References
 
+- **[`docs/USAGE-SCORECARD-METRICS.md`](../USAGE-SCORECARD-METRICS.md)** — the maintainer-facing
+  metrics reference: every Scorecard-tab figure's exact formula, source-line citation, worked
+  example, and external pricing citation, added 2026-07-25 after a user-reported Codex-vs-Claude
+  cost discrepancy traced to two real bugs in `parseCodex` (fixed same day). Read that document to
+  verify or dispute a specific number; read this ADR for the design motivation behind it.
 - ADR-0005 (dashboard as read-only offline-first diagnostic); ADR-0007 (egress split);
   ADR-0008 (machine vs repo scope).
 - Spec (archived on completion, per `docs/archive/README.md`): [`docs/archive/2026-07-25-superpowers-spec-usage-scorecard.md`](../archive/2026-07-25-superpowers-spec-usage-scorecard.md).
