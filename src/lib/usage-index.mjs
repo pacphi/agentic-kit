@@ -362,6 +362,26 @@ function isHumanPrompt(entry) {
 }
 
 /**
+ * What KIND of `user`-role turn is this, for transcript attribution? The
+ * Messages API records tool results and harness context injections under
+ * `role: "user"`, so role alone must never be read as "the human typed this":
+ *   'tool-result' — carries a tool_result block: output the HARNESS fed back
+ *                   to the model after a tool call.
+ *   'context'     — isMeta: harness-injected context (command output,
+ *                   system reminders), not typed by the person.
+ *   'prompt'      — the human. Deliberately broader than isHumanPrompt():
+ *                   an image-only paste has no text block (so it is not
+ *                   COUNTED as a prompt) but it IS the person acting, and
+ *                   labeling it "tool result" would misattribute it.
+ */
+function userTurnKind(entry) {
+  const content = entry?.message?.content;
+  if (Array.isArray(content) && content.some((b) => b?.type === 'tool_result')) return 'tool-result';
+  if (entry.isMeta) return 'context';
+  return 'prompt';
+}
+
+/**
  * Parse one Claude transcript. Returns `{ session, turns }`; `turns` is only
  * populated when `withTurns` (the reader path) — the scan path does not need
  * message bodies and holding them would balloon memory over 3,000 files.
@@ -389,7 +409,7 @@ function parseClaude(raw, { id, dirName, withTurns = false }) {
       }
       if (withTurns) {
         const text = claudeText(e.message?.content);
-        if (text) turns.push({ role: 'user', at: new Date(ms).toISOString(), text, prompt: human });
+        if (text) turns.push({ role: 'user', at: new Date(ms).toISOString(), text, prompt: human, kind: userTurnKind(e) });
       }
       continue;
     }
@@ -500,7 +520,10 @@ function parseCodex(raw, { id, withTurns = false }) {
       rec.prompts++;
       const text = typeof p.message === 'string' ? p.message : '';
       if (!firstPrompt) firstPrompt = text;
-      if (withTurns && text) turns.push({ role: 'user', at: new Date(ms).toISOString(), text, prompt: true });
+      // Codex rollouts record only real prompts as user_message events — tool
+      // output travels in other event types that are not surfaced as turns —
+      // so every Codex user turn is kind 'prompt' by construction.
+      if (withTurns && text) turns.push({ role: 'user', at: new Date(ms).toISOString(), text, prompt: true, kind: 'prompt' });
       continue;
     }
     if (p.type === 'agent_message') {

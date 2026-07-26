@@ -944,6 +944,59 @@ test('readSession returns codex user/agent messages as turns', async () => {
   assert.ok(turns[0].text.includes('port the parser'));
 });
 
+test('user-role turns carry a kind — a tool result is never attributed to the human', async () => {
+  // The Messages API records tool results under role "user", so role alone
+  // must never be read as "the person typed this". The parser stamps each
+  // user turn with kind: 'prompt' | 'tool-result' | 'context', and the
+  // transcript renderer labels from THAT, not from role.
+  _resetForTest();
+  const sb = sandbox();
+
+  // Claude: aaaa1111's fixture interleaves real prompts with a tool_result.
+  const claude = await readSession('aaaa1111', opts(sb));
+  const userTurns = claude.turns.filter((t) => t.role === 'user');
+  assert.equal(userTurns[0].kind, 'prompt', 'the opening human prompt is a prompt');
+  const toolTurn = userTurns.find((t) => t.text.startsWith('[tool result]'));
+  assert.ok(toolTurn, 'the tool_result user turn is present');
+  assert.equal(toolTurn.kind, 'tool-result');
+  assert.equal(toolTurn.prompt, false, 'and it never counted as a human prompt');
+
+  // Codex: rollouts only record real prompts as user_message events.
+  const codex = await readSession('dddd4444', opts(sb));
+  for (const t of codex.turns.filter((x) => x.role === 'user')) {
+    assert.equal(t.kind, 'prompt', 'every codex user turn is a prompt by construction');
+  }
+});
+
+test('isMeta context and image-only pastes get the right kind', async () => {
+  _resetForTest();
+  const sb = soloSandbox();
+  const base = Date.parse('2026-07-24T10:00:00.000Z');
+  const iso = (offMs) => new Date(base + offMs).toISOString();
+  const lines = [
+    // Harness-injected context (isMeta): not typed by the person.
+    { type: 'user', sessionId: 'jjjj0000', cwd: '/Users/me/proj', isMeta: true, timestamp: iso(0),
+      message: { role: 'user', content: [{ type: 'text', text: '<command-name>/status</command-name>' }] } },
+    // An image-only paste: no text block, so isHumanPrompt says false (it is
+    // not COUNTED as a prompt) — but it IS the person acting, and its kind
+    // must be 'prompt', never 'tool-result'.
+    { type: 'user', sessionId: 'jjjj0000', cwd: '/Users/me/proj', timestamp: iso(1000),
+      message: { role: 'user', content: [{ type: 'image', source: {} }] } },
+    { type: 'assistant', sessionId: 'jjjj0000', cwd: '/Users/me/proj', timestamp: iso(2000),
+      message: { role: 'assistant', model: 'claude-opus-5', usage: { input_tokens: 5, output_tokens: 5 }, content: [{ type: 'text', text: 'Looking at the screenshot.' }] } },
+  ];
+  fs.writeFileSync(path.join(sb.claude, 'jjjj0000.jsonl'), `${lines.map((l) => JSON.stringify(l)).join('\n')}\n`);
+
+  const { meta, turns } = await readSession('jjjj0000', {
+    days: 14, now: NOW, roots: sb.roots, cachePath: sb.cachePath, deps: deps(),
+  });
+  assert.equal(meta.prompts, 0, 'neither turn counts as a text prompt');
+  const userTurns = turns.filter((t) => t.role === 'user');
+  assert.equal(userTurns[0].kind, 'context', 'isMeta harness injection is context');
+  assert.equal(userTurns[1].kind, 'prompt', 'an image-only paste is still the person');
+  assert.equal(userTurns[1].text, '[image]');
+});
+
 test('readSession rejects a path-traversal id without touching the disk', async () => {
   _resetForTest();
   const sb = sandbox();

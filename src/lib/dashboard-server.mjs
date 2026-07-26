@@ -1268,6 +1268,10 @@ body{
 .turn:last-child{border-bottom:0}
 .t-who{font-family:var(--mono); font-size:10.5px; color:var(--ink-dim); text-transform:uppercase; letter-spacing:.06em}
 .t-user .t-who{color:var(--accent)}
+/* Tool results and harness context ride the user ROLE in the Messages API but
+   are not the person — purple ties them visually to the tool chips, and the
+   accent stays reserved for turns the human actually typed. */
+.t-tool .t-who{color:var(--purple)}
 .t-meta{display:block; font-size:9.5px; margin-top:3px; text-transform:none; letter-spacing:0}
 .t-body{font-size:13px; color:var(--ink-2); white-space:pre-wrap; word-break:break-word; min-width:0}
 .t-user .t-body{color:var(--ink)}
@@ -2219,8 +2223,20 @@ const JS = `
         ?'<div class="chips">'+tn.tools.map(function(x){return '<span class="tool">'+esc(x)+"</span>";}).join("")+"</div>":"";
       var meta=truncBadge(tn)
         +(tn.output?'<span class="t-meta mono">'+esc(fmtNum(tn.output))+" out</span>":"");
-      return '<div class="turn '+(user?"t-user":"t-asst")+'"><div class="t-who">'
-        +esc(user?"you":(tn.model||tn.role||"assistant"))+meta+"</div>"
+      // role "user" ≠ "the human typed this": the Messages API records tool
+      // results and harness context injections under the user role, and the
+      // parser marks WHICH via tn.kind. Only kind "prompt" earns "you" — a
+      // tool result labeled "you" attributes the harness's work to the person.
+      // Fallback for a turn without kind: the prompt flag (false ⇒ tool
+      // feedback was the overwhelmingly dominant non-prompt case).
+      var kind=tn.kind||(user?(tn.prompt===false?"tool-result":"prompt"):"");
+      var who,cls,title="";
+      if(!user){who=tn.model||tn.role||"assistant"; cls="t-asst";}
+      else if(kind==="tool-result"){who="tool result"; cls="t-tool"; title="output returned to the model by the tooling — not typed by you";}
+      else if(kind==="context"){who="context"; cls="t-tool"; title="context injected by the harness — not typed by you";}
+      else{who="you"; cls="t-user";}
+      return '<div class="turn '+cls+'"><div class="t-who"'+(title?' title="'+esc(title)+'"':"")+'>'
+        +esc(who)+meta+"</div>"
         +'<div class="t-body">'+markRedactions(String(text))+tools+"</div></div>";
     }).join(""):'<div class="empty">this session has no readable turns.</div>';
   }
