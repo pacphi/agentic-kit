@@ -832,6 +832,16 @@ describes.
   `ak dual run` / hierarchical-mesh swarm usage routing through Codex) should
   re-run this verification and update this note.
 
+**Independent, third-party verification.**
+[`docs/CODEX-USAGE-DIAGNOSTIC.md`](CODEX-USAGE-DIAGNOSTIC.md) is a
+non-maintainer-facing companion to this section: a standalone, zero-dependency
+script plus instructions for anyone with real Codex usage to compute the
+same before/after comparison on their own machine, from a separate
+reimplementation of the parsing logic, and report back an aggregate-only
+result with no transcript content. Point anyone questioning their own
+Codex numbers there first — it produces the real number instead of a
+promise.
+
 ---
 
 ## 16. Verification methodology for this document
