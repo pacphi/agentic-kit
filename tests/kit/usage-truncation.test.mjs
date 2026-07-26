@@ -127,6 +127,36 @@ test('originalChars is the length of the MASKED text, not of the raw file text',
   assert.notEqual(turn.originalChars, raw.length, 'the raw-file length must not be what is reported');
 });
 
+// ── the marker is a cross-module contract ───────────────────────────────────
+
+test('a truncated turn ends with the exact marker the renderer subtracts', async () => {
+  // This string is a REAL contract between this producer and the transcript
+  // renderer, and until now nothing tested it.
+  //
+  // The dashboard's client JS is a string literal embedded in the served HTML,
+  // so the browser never imports usage-index.mjs and `MAX_TURN_CHARS` genuinely
+  // cannot reach it — exporting the constant did not change that. Rather than
+  // hardcode 40000 on the far side (which would desync the day the constant
+  // moves), the truncation badge derives the shown figure by subtracting this
+  // marker from the received text length. So a change to the marker does not
+  // break the renderer loudly; it makes the badge overstate by the length
+  // delta, which is a false user-visible figure of exactly the kind ADR-0009 §6
+  // refuses. Pinned here because this side owns the string.
+  const MARKER = '\n…[truncated]';
+  const sb = soloSandbox();
+  writeSession(sb, 'trunc-marker', prose(MAX_TURN_CHARS + 2_000));
+
+  const turn = await firstTurn(sb, 'trunc-marker');
+  assert.ok(turn.text.endsWith(MARKER), `truncated text must end with ${JSON.stringify(MARKER)}`);
+  assert.equal(
+    turn.text.length - MARKER.length, MAX_TURN_CHARS,
+    'the renderer computes shown-characters exactly this way — a marker of a different '
+    + 'length silently shifts every truncation badge',
+  );
+  // Once only: a duplicated marker would double the renderer's subtraction.
+  assert.equal(turn.text.split(MARKER).length - 1, 1, 'the marker appears exactly once');
+});
+
 // ── absence is the signal ───────────────────────────────────────────────────
 
 test('an untruncated turn carries no originalChars key at all', async () => {
