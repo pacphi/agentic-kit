@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // codex-usage-diagnostic.mjs — standalone, zero-dependency (Node built-ins
 // only), read-only diagnostic for the two Codex usage-scorecard bugs fixed in
-// this branch (see docs/USAGE-SCORECARD-METRICS.md §15):
+// this branch (see docs/USAGE-SCORECARD-METRICS.md Appendix A):
 //
 //   Bug A — Codex model rows always showed 0 responses (display-only, no $/tok effect).
 //   Bug B — a rollout whose session_meta.thread_source is "subagent" replays its
