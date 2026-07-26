@@ -968,6 +968,37 @@ test('user-role turns carry a kind — a tool result is never attributed to the 
   }
 });
 
+test('harness-output envelopes are context, never the person — and never counted as prompts', async () => {
+  // A user-role entry whose text the HARNESS wrote (task notifications,
+  // bash/local-command stdout) carries neither isMeta nor a tool_result, so
+  // text shape is the only signal. It must not be labelled "you" and must
+  // not inflate the prompt count. bash-input is the opposite case: the
+  // person typed that `! command`, so it stays a prompt on both axes.
+  _resetForTest();
+  const sb = soloSandbox();
+  const base = Date.parse('2026-07-24T10:00:00.000Z');
+  const iso = (offMs) => new Date(base + offMs).toISOString();
+  const u = (off, text) => ({ type: 'user', sessionId: 'kkkk1111', cwd: '/Users/me/proj', timestamp: iso(off),
+    message: { role: 'user', content: [{ type: 'text', text }] } });
+  const lines = [
+    u(0, 'promote the pipeline'),                                              // real prompt
+    { type: 'assistant', sessionId: 'kkkk1111', cwd: '/Users/me/proj', timestamp: iso(1000),
+      message: { role: 'assistant', model: 'claude-opus-5', usage: { input_tokens: 5, output_tokens: 5 }, content: [{ type: 'text', text: 'ok' }] } },
+    u(2000, '<bash-input>git checkout main && git pull</bash-input>'),          // the person's ! command
+    u(3000, '<bash-stdout>Switched to branch main</bash-stdout>'),              // harness output
+    u(4000, '<local-command-stdout>Set model to Fable 5</local-command-stdout>'),
+    u(5000, '<task-notification>\n<task-id>abc</task-id>\n</task-notification>'),
+  ];
+  fs.writeFileSync(path.join(sb.claude, 'kkkk1111.jsonl'), `${lines.map((l) => JSON.stringify(l)).join('\n')}\n`);
+
+  const { meta, turns } = await readSession('kkkk1111', {
+    days: 14, now: NOW, roots: sb.roots, cachePath: sb.cachePath, deps: deps(),
+  });
+  assert.equal(meta.prompts, 2, 'the real prompt and the bash-input count; harness output does not');
+  const kinds = turns.filter((t) => t.role === 'user').map((t) => t.kind);
+  assert.deepEqual(kinds, ['prompt', 'prompt', 'context', 'context', 'context']);
+});
+
 test('isMeta context and image-only pastes get the right kind', async () => {
   _resetForTest();
   const sb = soloSandbox();

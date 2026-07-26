@@ -2194,7 +2194,9 @@ const JS = `
   // no-silent-alteration rule); only the wrapper tags become styling. Runs on
   // ESCAPED html (after markRedactions), so patterns match &lt;tag&gt;. An
   // unmatched tag (e.g. cut mid-sentinel by turn truncation) is left raw.
-  var H_TAGS={"system-reminder":"system reminder","local-command-caveat":"caveat","local-command-stdout":"command output"};
+  var H_TAGS={"system-reminder":"system reminder","local-command-caveat":"caveat",
+    "local-command-stdout":"command output","local-command-stderr":"command stderr",
+    "bash-stdout":"bash output","bash-stderr":"bash stderr","task-notification":"task notification"};
   function fmtHarness(html){
     return html
       .replace(/&lt;command-name&gt;([\\s\\S]*?)&lt;\\/command-name&gt;\\s*(?:&lt;command-message&gt;([\\s\\S]*?)&lt;\\/command-message&gt;\\s*)?(?:&lt;command-args&gt;([\\s\\S]*?)&lt;\\/command-args&gt;)?/g,
@@ -2203,7 +2205,11 @@ const JS = `
           return '<span class="h-cmd"'+(m&&m!==n.replace(/^\\//,"")?' title="'+m+'"':"")
             +'>'+n+(a?" "+a:"")+"</span>";
         })
-      .replace(/&lt;(system-reminder|local-command-caveat|local-command-stdout)&gt;\\s*([\\s\\S]*?)\\s*&lt;\\/\\1&gt;/g,
+      // bash-input is the person's own "! command" — a chip, prefixed so it
+      // reads as the shell invocation it was, not as prose.
+      .replace(/&lt;bash-input&gt;([\\s\\S]*?)&lt;\\/bash-input&gt;/g,
+        function(_,cmd){return '<span class="h-cmd" title="shell command run with the ! prefix">! '+cmd.trim()+"</span>";})
+      .replace(/&lt;(system-reminder|local-command-caveat|local-command-stdout|local-command-stderr|bash-stdout|bash-stderr|task-notification)&gt;\\s*([\\s\\S]*?)\\s*&lt;\\/\\1&gt;/g,
         function(_,tag,body){
           return '<span class="h-note"><i class="h-tag">'+H_TAGS[tag]+"</i>"+body+"</span>";
         });

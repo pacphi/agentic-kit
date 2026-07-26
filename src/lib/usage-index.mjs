@@ -42,8 +42,12 @@ import { configDir, claudeDir, codexDir } from './paths.mjs';
  *      that into `totals.exceptions` silently produces NaN (serialized as
  *      `null` over JSON) instead of a real count — caught by querying a real
  *      cached index during verification, not by the unit tests, which only
- *      ever exercise a fresh parse. */
-export const SCHEMA_VERSION = 4;
+ *      ever exercise a fresh parse.
+ *  v5: harness-output envelopes (task-notification, bash-stdout,
+ *      local-command-stdout, …) no longer count as human prompts, so the
+ *      cached `prompts` figure on every session parsed before this rule is
+ *      inflated and must be re-derived. */
+export const SCHEMA_VERSION = 5;
 
 /** Silence longer than this ends a stretch of engagement. A session is split
  *  into active sub-intervals at gaps ABOVE this bound (exactly this much is not
@@ -350,9 +354,30 @@ function claudeText(content) {
   return out.join('\n');
 }
 
-/** Is this `user` entry a human prompt, or a tool result being fed back? */
+/**
+ * Harness-output envelopes: user-role entries whose text the HARNESS wrote —
+ * background-task notifications, command stdout/stderr dumps, local-command
+ * caveats. They carry neither `isMeta` nor a tool_result block, so text shape
+ * is the only signal. Measured on the real corpus (envelope at start of user
+ * text): task-notification 550, bash-stdout 85, local-command-stdout 60,
+ * local-command-caveat 183; the stderr variants are the symmetric error-path
+ * siblings. NOT here: bash-input (the person typed that `! cmd`) and the
+ * command-name/-message/-args triple (the person invoked that slash command).
+ */
+const HARNESS_OUTPUT_RE = /^\s*<(task-notification|bash-stdout|bash-stderr|local-command-stdout|local-command-stderr|local-command-caveat)>/;
+
+function entryText(entry) {
+  const content = entry?.message?.content;
+  if (typeof content === 'string') return content;
+  if (!Array.isArray(content)) return '';
+  const t = content.find((b) => b?.type === 'text' && typeof b.text === 'string');
+  return t ? t.text : '';
+}
+
+/** Is this `user` entry a human prompt, or harness output being fed back? */
 function isHumanPrompt(entry) {
   if (entry.isMeta) return false;
+  if (HARNESS_OUTPUT_RE.test(entryText(entry))) return false;
   const content = entry?.message?.content;
   if (typeof content === 'string') return content.trim().length > 0;
   if (!Array.isArray(content)) return false;
@@ -367,17 +392,20 @@ function isHumanPrompt(entry) {
  * `role: "user"`, so role alone must never be read as "the human typed this":
  *   'tool-result' — carries a tool_result block: output the HARNESS fed back
  *                   to the model after a tool call.
- *   'context'     — isMeta: harness-injected context (command output,
- *                   system reminders), not typed by the person.
+ *   'context'     — isMeta OR a harness-output envelope (task notifications,
+ *                   command stdout/stderr, caveats): harness-injected, not
+ *                   typed by the person — and not the model either.
  *   'prompt'      — the human. Deliberately broader than isHumanPrompt():
  *                   an image-only paste has no text block (so it is not
  *                   COUNTED as a prompt) but it IS the person acting, and
- *                   labeling it "tool result" would misattribute it.
+ *                   labeling it "tool result" would misattribute it. Also
+ *                   covers bash-input (`! cmd`) and slash-command records —
+ *                   the person initiated those.
  */
 function userTurnKind(entry) {
   const content = entry?.message?.content;
   if (Array.isArray(content) && content.some((b) => b?.type === 'tool_result')) return 'tool-result';
-  if (entry.isMeta) return 'context';
+  if (entry.isMeta || HARNESS_OUTPUT_RE.test(entryText(entry))) return 'context';
   return 'prompt';
 }
 

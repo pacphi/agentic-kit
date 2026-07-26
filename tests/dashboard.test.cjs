@@ -422,12 +422,15 @@ async function main() {
       const r = await get(uiSrv.url);
       contains(r.body, 'function fmtHarness');
       contains(r.body, 'command-name');
-      contains(r.body, 'system-reminder|local-command-caveat|local-command-stdout');
+      contains(r.body, 'system-reminder|local-command-caveat|local-command-stdout|local-command-stderr|bash-stdout|bash-stderr|task-notification');
+      contains(r.body, 'bash-input');
       contains(r.body, 'fmtHarness(markRedactions(');
       contains(r.body, '.h-cmd{');
       contains(r.body, '.h-note{');
       contains(r.body, '"system reminder"');
       contains(r.body, '"command output"');
+      contains(r.body, '"bash output"');
+      contains(r.body, '"task notification"');
     });
 
     await test('poll control: default 30s, ten intervals, persisted as ak-dash-poll', async () => {
