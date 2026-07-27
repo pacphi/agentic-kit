@@ -107,31 +107,34 @@ doubt — see diagnostic table below.
 
 ### Node version compatibility (historically the ROOT cause of the WASM bugs)
 
-> **Resolved upstream in ruflo v3.10.6** ([ruvnet/ruflo#2219](https://github.com/ruvnet/ruflo/issues/2219)).
-> ruflo now ships an npm `overrides` entry forcing `better-sqlite3 ≥12.8.0` (which has
-> Node 20–26 prebuilts) across the agentdb copies, with a CI guard. So on ruflo ≥3.10.6
-> the WASM fallback **no longer happens by default**, even on Node 24/26, and the override
-> lives in ruflo's own `package.json` — an `npm i -g ruflo` upgrade keeps it, it does not
-> wipe it. the kit's natives heal (part of `ak sync`) is now a **safety net**, not a requirement.
+> **Partly resolved upstream in ruflo v3.10.6**
+> ([ruvnet/ruflo#2219](https://github.com/ruvnet/ruflo/issues/2219)). Ruflo added an
+> npm override forcing `better-sqlite3 ≥12.8.0` across the agentdb copies, which fixes
+> Node 24. Node 26 support starts at better-sqlite3 12.10.0; an exact 12.8/12.9
+> override can still fall back to WASM. The kit's natives heal (part of `ak sync`)
+> raises a stale v12 pin to a Node-compatible range and installs the binding.
 
-Background (why the bug existed, and the two cases where patching still matters):
+Background (why the bug existed, and the cases where patching still matters):
 
 The sql.js (WASM) backend is a *fallback*. ruflo prefers native `better-sqlite3`. The
 deeper `agentdb` packages still *declare* `better-sqlite3@^11.8.1` (no prebuilt for Node
-24+, won't compile against Node 26's V8) — but ruflo's `overrides` resolve that to v12 at
-install time, so the declared pin no longer decides the backend.
+24+, won't compile against Node 26's V8). Ruflo's ancestor override should decide the
+effective version, but nested repair installs must discover that override explicitly.
+On Node 26 they must also avoid v12 releases older than 12.10.0.
 
-| Node | ABI | ruflo ≥3.10.6 (override → v12) | ruflo <3.10.6 (declared ^11.8.1) |
-|------|-----|-------------------------------|----------------------------------|
+| Node | ABI | Compatible better-sqlite3 | Stale/incompatible resolution |
+|------|-----|---------------------------|-------------------------------|
 | ≤ 22 (LTS) | ≤ 127 | **native** | native |
-| 24 | 137 | **native (v12 prebuilt)** | ❌ WASM (buggy) |
-| 26 | 147 | **native (v12 prebuilt)** | ❌ WASM (buggy) |
+| 24 | 137 | **native (v12 prebuilt)** | v11 → ❌ WASM |
+| 26 | 147 | **native (v12.10+ prebuilt)** | v11 or v12.8/12.9 → ❌ WASM |
 
 **When the kit's natives heal still earns its keep:**
 - **npm ≥ 11.17** — npm's new `allow-scripts` blocks `better-sqlite3`'s build/`prebuild-install`
   during a global upgrade, so the native `.node` is skipped (the override resolves v12 but the
   prebuilt is never fetched) → WASM. **Always run `ak sync` after a global upgrade on npm
   ≥ 11.17**; its natives-heal step installs the binary even under `allow-scripts`.
+- **Node 26 with a stale v12 pin** — better-sqlite3 12.8/12.9 does not declare Node 26
+  support. `ak sync` raises it to `^12.10.0`, whose prebuilt supports ABI 147.
 - **ruflo < 3.10.6** on Node ≥24 — no override yet, so the agentdb copies fall to WASM;
   patch (or upgrade ruflo) to fix.
 - **agentic-qe** — a *separate* package with its own native-SQLite init that the override
@@ -139,7 +142,7 @@ install time, so the declared pin no longer decides the backend.
 - As an idempotent re-assert if anything ever resolves a stale v11 binary.
 
 To check current state without changing anything: `ak status` (it reports
-`already native` when the override has done its job). Alternative to all of this: run ruflo
+`already native` when resolution and the binding are healthy). Alternative to all of this: run ruflo
 on **Node 22 LTS** (e.g. `mise install node@22`), where native resolves cleanly regardless.
 
 ### Hooks (learning + routing + workers)
@@ -523,4 +526,3 @@ Need to ... ?
 ├─ Set up agentic-qe in a repo       → ak setup   (opt-in)
 └─ Background analysis (long task)   → ruflo hooks worker dispatch -t <type>
 ```
-
