@@ -86,6 +86,29 @@ export const THRESHOLDS = {
   // corpus's value of exactly this — an absolute floor would violate rule 2).
   automationMinSessions: 100,
   automationMaxAvgShare: 0.5,
+
+  // parallel-sessions: summed span ÷ union span — how many sessions were open
+  // at once, on average, while anything was open. All parallel sessions draw on
+  // ONE plan limit, which is why the factor matters at all.
+  parallelMinFactor: 2,
+
+  // subagent-share / long-session-share: cost share of sidechain (subagent)
+  // transcripts, and of sessions spanning 8+ hours. Both mirror characteristics
+  // Claude Code's own /usage panel reports, computed here from local data.
+  sidechainMinShare: 0.25,
+  longSessionMinutes: 480,
+  longSessionMinShare: 0.25,
+
+  // limit-pacing (detectLimitInsights): fires only past this utilization, and
+  // only when consumption is running ahead of the window's own elapsed share by
+  // this lead factor — pace alone at 5% used is noise, pace at 60% is a fact.
+  pacingMinUsedPercent: 50,
+  pacingLeadFactor: 1.25,
+
+  // cross-host-arbitrage (detectLimitInsights): one host's weekly window above
+  // the high mark while the other host has a lane under the low mark.
+  arbitrageHighPercent: 75,
+  arbitrageLowPercent: 25,
 };
 
 // ── Grounding for `model-routing` (ADR-0009 §6) ──────────────────────────────
@@ -386,9 +409,12 @@ export function detectInsights(agg) {
         evidence: 'Categories come from session provenance, titles and tool mix; short or '
           + 'generically-titled sessions carry little signal, and a forced label would make the '
           + 'other categories untrustworthy too.',
-        action: 'Enable optional LLM labelling to classify the residue once — results cache '
-          + 'permanently per session id.',
-        command: 'ak x usage classify --enrich',
+        // No command: the optional LLM-labelling pass (ADR-0009 §5 Layer 3) is
+        // designed but not shipped, and a dead command in a diagnostic is worse
+        // than none.
+        action: 'Short or generically-titled sessions are the usual cause — descriptive first '
+          + 'prompts and skill-invoked sessions classify well. An optional LLM labelling pass '
+          + 'is planned but not yet available.',
       });
     }
   }
@@ -489,8 +515,193 @@ export function detectInsights(agg) {
     }
   }
 
+  // 11 ── parallel-sessions. Summed span ÷ union span = mean concurrency while
+  // anything was open. Every parallel session draws on the SAME plan limit
+  // (Claude Code's own /usage panel makes the same point), so sustained
+  // parallelism is how a week's allowance disappears in two days. No dollar
+  // claim: parallelism shifts WHEN tokens are spent, not directly how many.
+  const spanSum = num(totals.spanMinutes) * 60;
+  const spanUnion = num(totals.spanUnionSeconds);
+  if (spanUnion > 0 && sessionCount >= 2) {
+    const factor = spanSum / spanUnion;
+    if (factor >= THRESHOLDS.parallelMinFactor) {
+      push({
+        id: 'parallel-sessions', kind: 'trend', severity: 'info',
+        title: `Sessions ran ~${factor.toFixed(1)}× in parallel`,
+        finding: `Summed session time is ${Math.round(spanSum / 3600)}h against ${Math.round(spanUnion / 3600)}h `
+          + `of wall-clock with anything open — on average ${factor.toFixed(1)} sessions at once.`,
+        evidence: 'All sessions on a subscription share one rate-limit pool, so parallel work '
+          + 'consumes the same allowance faster; queueing spreads it more evenly.',
+        action: 'Keep parallelism for genuinely independent work; queue the rest, or route some '
+          + 'lanes to the other host so the two pools share the load.',
+        command: 'ak x provider pick',
+      });
+    }
+  }
+
+  // 12 ── subagent-share. Sidechain/subagent transcripts as a share of spend —
+  // the local computation of the "subagent-heavy sessions" characteristic
+  // Claude Code's /usage panel reports. The dollar figure is measured, but NOT
+  // claimed as impact: subagent work is not waste, it is a composition fact.
+  const side = sessions.filter((s) => s.sidechain === true || s.threadSource === 'subagent');
+  if (side.length && windowCost > 0) {
+    const spend = sumBy(side, 'cost');
+    const share = spend / windowCost;
+    if (share >= THRESHOLDS.sidechainMinShare) {
+      push({
+        id: 'subagent-share', kind: 'trend', severity: 'info',
+        title: `Subagent transcripts carry ${pct(share)} of spend`,
+        finding: `${count(side.length)} sidechain/subagent transcripts account for ${usd(spend)} of `
+          + `this window's ${usd(windowCost)}.`,
+        evidence: 'Each spawned agent runs its own requests with its own context load, so '
+          + 'delegation multiplies token volume even when the main thread stays small.',
+        action: 'Be deliberate about fan-out: fewer, better-briefed subagents — and a cheaper '
+          + 'model for mechanical subagent roles — keep the leverage without the volume.',
+      });
+    }
+  }
+
+  // 13 ── long-session-share. Sessions spanning 8+ hours are usually loops,
+  // daemons, or forgotten terminals rather than a sitting; their spend share
+  // says how much of the window rides on unattended context.
+  const long = sessions.filter((s) => num(s.minutes) >= THRESHOLDS.longSessionMinutes);
+  if (long.length && windowCost > 0) {
+    const spend = sumBy(long, 'cost');
+    const share = spend / windowCost;
+    if (share >= THRESHOLDS.longSessionMinShare) {
+      push({
+        id: 'long-session-share', kind: 'trend', severity: 'info',
+        title: `${pct(share)} of spend sits in 8h+ sessions`,
+        finding: `${count(long.length)} sessions spanned ${Math.round(THRESHOLDS.longSessionMinutes / 60)}+ hours `
+          + `and carried ${usd(spend)} (${pct(share)}) of the window.`,
+        evidence: 'Very long spans are the signature of background loops and left-open sessions; '
+          + 'long-lived context is also the expensive kind — every turn re-reads it.',
+        action: 'Confirm the long-runners are intentional; close or /clear sessions that have '
+          + 'become idle context holders.',
+        command: 'ak x daemon-gc',
+      });
+    }
+  }
+
   // Ranked: measured dollars first (descending), then $-free findings by severity.
   // `Array.prototype.sort` is stable, so detector order breaks remaining ties.
+  return found.sort((x, y) => (num(y.impact) - num(x.impact))
+    || (SEVERITY_RANK[x.severity] - SEVERITY_RANK[y.severity]));
+}
+
+// ── Limit-aware findings (ADR-0010) ──────────────────────────────────────────
+// Same contract and rules as detectInsights, over the /api/limits payload from
+// quota.mjs instead of the transcript aggregate. Still PURE: "now" is
+// `limits.generatedAt` — data, not a clock — so every firing is reproducible
+// from its input. Vendor-reported percentages ARE the user's own data (rule 1):
+// they are the one denominator ADR-0009 §3 said local parsing could never
+// honestly invent.
+
+/** Flatten both providers' windows into rows detectors can iterate:
+ *  { host, lane, label, usedPercent, windowMinutes, resetsAt }. */
+function limitWindows(limits) {
+  const rows = [];
+  for (const w of limits?.claude?.windows ?? []) {
+    rows.push({ host: 'claude', lane: null, label: w.label ?? w.id, usedPercent: num(w.usedPercent), windowMinutes: w.windowMinutes ?? null, resetsAt: w.resetsAt ?? null });
+  }
+  for (const lane of limits?.codex?.lanes ?? []) {
+    for (const w of lane.windows ?? []) {
+      rows.push({ host: 'codex', lane: lane.name ?? lane.id, label: w.label ?? w.id, usedPercent: num(w.usedPercent), windowMinutes: w.windowMinutes ?? null, resetsAt: w.resetsAt ?? null });
+    }
+  }
+  return rows.filter((r) => Number.isFinite(r.usedPercent));
+}
+
+// "codex codex" reads as a stutter when the default lane carries the host's
+// own name — the lane is only worth naming when it distinguishes.
+const hostLane = (r) => r.host + (r.lane && r.lane !== r.host ? ` ${r.lane}` : '');
+
+/**
+ * Rank findings over vendor-reported plan limits (the /api/limits payload).
+ *
+ * @param {{ generatedAt?: string, claude?: any, codex?: any }} [limits]
+ * @param {UsageAggregate} [agg] optional transcript aggregate for composition
+ *   context (currently unused by the firing rules; reserved for evidence).
+ * @returns same Insight contract as detectInsights.
+ */
+export function detectLimitInsights(limits, agg) { // eslint-disable-line no-unused-vars
+  const rows = limitWindows(limits);
+  const nowMs = Date.parse(limits?.generatedAt ?? '') || null;
+  const found = [];
+  const push = (insight) => found.push({ command: null, impact: null, ...insight });
+
+  // A ── limit-pacing: consumption running ahead of the window's own clock.
+  // elapsedShare needs both resetsAt and the window duration; a window missing
+  // either stays silent rather than pacing against a guess.
+  for (const r of rows) {
+    if (!nowMs || !Number.isFinite(r.resetsAt) || !Number.isFinite(r.windowMinutes) || r.windowMinutes <= 0) continue;
+    const windowMs = r.windowMinutes * 60_000;
+    const remainingMs = r.resetsAt * 1000 - nowMs;
+    if (remainingMs <= 0 || remainingMs > windowMs) continue; // reset passed, or clock skew
+    const elapsedShare = 1 - remainingMs / windowMs;
+    const usedShare = r.usedPercent / 100;
+    if (r.usedPercent < THRESHOLDS.pacingMinUsedPercent || elapsedShare <= 0) continue;
+    if (usedShare < elapsedShare * THRESHOLDS.pacingLeadFactor) continue;
+    const remainH = Math.round(remainingMs / 3_600_000);
+    const projected = Math.round((usedShare / elapsedShare) * 100);
+    push({
+      id: `limit-pacing-${r.host}${r.lane ? `-${String(r.lane).toLowerCase().replace(/[^a-z0-9]+/g, '-')}` : ''}-${r.windowMinutes}`.replace(/-+$/, ''),
+      kind: 'trend', severity: usedShare >= 0.9 ? 'warn' : 'info',
+      title: `${hostLane(r)} ${r.label} window is ahead of pace at ${Math.round(r.usedPercent)}%`,
+      finding: `${Math.round(r.usedPercent)}% used with ${pct(1 - elapsedShare)} of the window still to run `
+        + `(${remainH}h to reset) — on current pace that projects to ~${projected}% of the limit.`,
+      evidence: `Vendor-reported utilization against the window's own elapsed time: `
+        + `${Math.round(r.usedPercent)}% consumed vs ${pct(elapsedShare)} elapsed.`,
+      action: 'Front-load what matters before the cap, shift routine work to the other host or a '
+        + 'cheaper lane, and let non-urgent automation wait for the reset.',
+      command: 'ak x provider pick',
+    });
+  }
+
+  // B ── cross-host-arbitrage: one host's window high while the other host has
+  // clear headroom. This is the dual-host case ak exists for.
+  const high = rows.filter((r) => r.usedPercent >= THRESHOLDS.arbitrageHighPercent);
+  for (const h of high) {
+    const spare = rows.filter((r) => r.host !== h.host && r.usedPercent <= THRESHOLDS.arbitrageLowPercent);
+    if (!spare.length) continue;
+    const best = spare.sort((x, y) => x.usedPercent - y.usedPercent)[0];
+    push({
+      id: `cross-host-arbitrage-${h.host}`,
+      kind: 'coach', severity: h.usedPercent >= 90 ? 'warn' : 'info',
+      title: `${hostLane(h)} is at ${Math.round(h.usedPercent)}% while ${hostLane(best)} sits at ${Math.round(best.usedPercent)}%`,
+      finding: `The ${h.label} window on ${hostLane(h)} has ${Math.round(100 - h.usedPercent)}% headroom left; `
+        + `${hostLane(best)} (${best.label}) is ${Math.round(best.usedPercent)}% used.`,
+      evidence: 'Both hosts are enabled on this machine and their plan pools are independent — '
+        + 'work routed to the idle pool costs nothing against the strained one.',
+      action: 'Shift routine and mechanical activities to the host with headroom in the '
+        + 'per-activity routing policy; reasoning-critical work can stay put.',
+      command: 'ak x provider pick',
+    });
+    break; // one arbitrage finding is guidance; one per hot window is nagging
+  }
+
+  // C ── codex-reset-credits: a granted, expiring resource the user may not
+  // know they hold. Redemption is deliberately left to codex's own /usage UI —
+  // consuming a finite grant is not a diagnostic's call to make.
+  const rc = limits?.codex?.resetCredits;
+  if (rc && Number.isFinite(rc.availableCount) && rc.availableCount > 0) {
+    const expiries = (rc.credits ?? [])
+      .filter((c) => c && c.status === 'available' && Number.isFinite(c.expiresAt))
+      .map((c) => c.expiresAt)
+      .sort((a, b) => a - b);
+    const soonest = expiries.length && nowMs ? Math.max(0, Math.round((expiries[0] * 1000 - nowMs) / 86_400_000)) : null;
+    push({
+      id: 'codex-reset-credits', kind: 'coach', severity: 'info',
+      title: `${count(rc.availableCount)} Codex rate-limit reset credit${rc.availableCount === 1 ? '' : 's'} available`,
+      finding: `Codex has granted ${count(rc.availableCount)} full rate-limit reset${rc.availableCount === 1 ? '' : 's'}`
+        + `${soonest !== null ? `; the soonest expires in ~${count(soonest)} day${soonest === 1 ? '' : 's'}` : ''}.`,
+      evidence: 'Reported by codex app-server (account/rateLimits/read → rateLimitResetCredits); '
+        + 'an unredeemed credit that expires is simply lost.',
+      action: 'If a Codex window is pinned at its cap, redeem a reset from codex’s own /usage '
+        + 'screen. This panel never consumes one on your behalf.',
+    });
+  }
+
   return found.sort((x, y) => (num(y.impact) - num(x.impact))
     || (SEVERITY_RANK[x.severity] - SEVERITY_RANK[y.severity]));
 }

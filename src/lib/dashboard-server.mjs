@@ -262,12 +262,16 @@ function sendJson(res, status, payload) {
 
 /**
  * Start the dashboard HTTP server, bound to loopback only.
- * @param {{ port?: number, cwd?: string, fetchStatus?: () => Promise<any>, usage?: any }} [opts]
+ * @param {{ port?: number, cwd?: string, fetchStatus?: () => Promise<any>, usage?: any,
+ *           limits?: () => Promise<any> }} [opts]
  * @returns {Promise<{ url: string, port: number, close: () => Promise<void> }>}
  */
-export function startDashboard({ port = 7431, cwd = process.cwd(), fetchStatus, usage } = {}) {
+export function startDashboard({ port = 7431, cwd = process.cwd(), fetchStatus, usage, limits } = {}) {
   const provide = fetchStatus || shellOutStatus(cwd);
   const usageApi = usage || lazyUsage();
+  // Injectable like `usage`: tests must never spawn a real codex or read the
+  // real ~/.config through this route. Lazy for the same reason lazyUsage is.
+  const provideLimits = limits || (async () => (await import('./quota.mjs')).readLimits());
   const html = renderPage({ name: '@pacphi/agentic-kit', version: kitVersion() });
 
   const server = http.createServer(async (req, res) => {
@@ -346,6 +350,22 @@ export function startDashboard({ port = 7431, cwd = process.cwd(), fetchStatus, 
             rows: Array.isArray(n.rows) ? n.rows.slice(0, USAGE_TREE_PREVIEW) : [],
           })),
         });
+      } catch (e) {
+        sendJson(res, 500, { error: String(e && e.message || e) });
+      }
+      return;
+    }
+
+    // Plan-limit utilization (ADR-0010). Claude side is a pure file read (the
+    // statusline tee); Codex side may spawn ONE vendor subprocess (`codex
+    // app-server`), TTL-cached — the same shell-out trust model as
+    // `ak status --json` above. No vendor credential is ever read here.
+    if (url === '/api/limits') {
+      try {
+        const agg = await usageApi.readIndex({ days: clampDays(query.get('days')) }).catch(() => null);
+        const payload = await provideLimits();
+        const { detectLimitInsights } = await import('./usage-insights.mjs');
+        sendJson(res, 200, { ...payload, insights: detectLimitInsights(payload, agg) ?? [] });
       } catch (e) {
         sendJson(res, 500, { error: String(e && e.message || e) });
       }
@@ -517,9 +537,16 @@ function renderPage({ name, version }) {
     <div id="cards-providers"></div>
     <section class="strip" id="models" hidden>
       <div class="strip-head">
-        <h2 class="strip-title">models in play</h2>
+        <h2 class="strip-title">routed models</h2>
         <span class="mono strip-note" id="models-note"></span>
       </div>
+      <div class="note"><span class="i">&#8505;</span><span>This is your <b>per-activity routing policy</b> &mdash;
+        which host and model ak <i>assigns</i> to each kind of work. It is projected into
+        <b>agentic-qe</b> agent overrides and <b>ak dual run</b> pipelines; agentic-qe also has its own
+        model router, so a route here is the assignment, not a guarantee.
+        It does <b>not</b> govern the model an interactive Claude Code or codex CLI session uses &mdash;
+        you choose that per session with <span class="mono">/model</span>.
+        For the models that <b>actually ran</b>, see <b>Usage &rarr; Scorecard</b>.</span></div>
       <div class="model-list" id="model-list"></div>
     </section>
   </section>
@@ -552,6 +579,7 @@ function renderPage({ name, version }) {
     <div class="usage-bar">
       <div class="seg subseg" role="tablist" aria-label="usage views" id="usage-seg">
         <button class="seg-btn" role="tab" data-view="score" aria-selected="true" type="button">Scorecard</button>
+        <button class="seg-btn" role="tab" data-view="limits" aria-selected="false" type="button">Limits</button>
         <button class="seg-btn" role="tab" data-view="findings" aria-selected="false" type="button">Findings<span class="segbadge" id="u-findings-n" hidden></span></button>
         <button class="seg-btn" role="tab" data-view="sessions" aria-selected="false" type="button">Sessions<span class="mono seg-n" id="u-sessions-n"></span></button>
         <button class="seg-btn" role="tab" data-view="transcript" aria-selected="false" type="button">Transcript</button>
@@ -587,7 +615,7 @@ function renderPage({ name, version }) {
       </div>
       <div class="two">
         <section class="strip">
-          <div class="sh"><h2>models in play</h2><span class="n mono">by api-equivalent cost<span id="u-models-note"></span></span></div>
+          <div class="sh"><h2>models in play</h2><span class="n mono">observed in transcripts &middot; by api-equivalent cost<span id="u-models-note"></span></span></div>
           <div id="u-models"></div>
         </section>
         <section class="strip">
@@ -604,6 +632,26 @@ function renderPage({ name, version }) {
           <span class="lg">Unclassified is shown, never force-fit</span>
         </div>
       </section>
+    </section>
+
+    <section class="view" id="v-limits" hidden>
+      <div class="note"><span class="i">&#8505;</span><span>Utilization here is <b>vendor-reported</b> &mdash;
+        the plan&rsquo;s own percentages, a denominator local transcripts cannot compute.
+        Claude&rsquo;s numbers arrive via the managed statusLine while a session runs; Codex&rsquo;s come from
+        <b>codex app-server</b> using codex&rsquo;s own login. This panel reads no vendor credential.</span></div>
+      <div class="two">
+        <section class="strip">
+          <div class="sh"><h2>claude plan limits</h2><span class="n mono" id="u-lim-claude-note"></span></div>
+          <div class="lim" id="u-lim-claude"></div>
+        </section>
+        <section class="strip">
+          <div class="sh"><h2>codex plan limits</h2><span class="n mono" id="u-lim-codex-note"></span></div>
+          <div class="lim" id="u-lim-codex"></div>
+        </section>
+      </div>
+      <div class="ins-grid" id="u-lim-insights"></div>
+      <div class="foot">windows are keyed by their duration, never by the vendor&rsquo;s primary/secondary slot &middot;
+        stale data is labelled stale, not hidden</div>
     </section>
 
     <section class="view" id="v-findings" hidden>
@@ -1376,7 +1424,7 @@ const JS = `
   // subsystems fall back to Runtime so nothing is ever dropped. Overview
   // aggregates all attention cards regardless of category.
   var TABS=["overview","hosts","providers","runtime","intel","usage"];
-  var VIEWS=["score","findings","sessions","transcript"];
+  var VIEWS=["score","limits","findings","sessions","transcript"];
   var CAT={
     hosts:"hosts", mcp:"hosts", "codex-mcp":"hosts", routing:"hosts",
     providers:"providers",
@@ -1893,6 +1941,9 @@ const JS = `
     if(v==="transcript"&&usageSession&&(!TRANSCRIPT||TRANSCRIPT.id!==usageSession)){
       loadTranscript(usageSession).then(renderTranscript);
     }
+    // Limits is LAZY like the tab itself: the Codex side may spawn one vendor
+    // subprocess server-side, so it runs when the view is opened, not on poll.
+    if(v==="limits"&&!LIMITS)loadLimits();
   }
 
   // titleTxt is optional and goes on the OUTER .kpi, so the whole card is the
@@ -2031,6 +2082,102 @@ const JS = `
     }).join(""):'<div class="empty">nothing classified in window.</div>';
   }
 
+  // ══ Limits view (ADR-0010) ═════════════════════════════════════════════════
+  var LIMITS=null, limitsBusy=false;
+
+  function loadLimits(){
+    if(limitsBusy)return;
+    limitsBusy=true;
+    fetch("/api/limits?days="+usageDays,{cache:"no-store"})
+      .then(function(r){return r.json();})
+      .then(function(d){LIMITS=d&&!d.error?d:{error:(d&&d.error)||"limits unavailable"};})
+      .catch(function(){LIMITS={error:"limits unavailable"};})
+      .then(function(){limitsBusy=false; renderLimits();});
+  }
+
+  // "as of 3m ago" — an epoch-ms fetchedAt against the browser clock. Stale is
+  // LABELLED, never hidden: a yesterday's-number bar with no timestamp is a lie
+  // of omission.
+  function limAge(ms){
+    if(!ms||!isFinite(ms))return "";
+    var m=Math.max(0,Math.round((Date.now()-ms)/60000));
+    if(m<1)return "just now";
+    if(m<60)return m+"m ago";
+    var h=Math.round(m/60);
+    return h<48?h+"h ago":Math.round(h/24)+"d ago";
+  }
+  function limStale(ms,freshMs){return !ms||!isFinite(ms)||(Date.now()-ms)>freshMs;}
+  function resetTxt(sec){
+    if(!sec||!isFinite(sec))return "";
+    var d=new Date(sec*1000);
+    if(isNaN(d))return "";
+    return "resets "+d.toLocaleString(undefined,{month:"short",day:"numeric",hour:"2-digit",minute:"2-digit"});
+  }
+  // One utilization row on the shared .mrow grid; fill color says how close to
+  // the cap this window is (ok <70, warn ≥70, fail ≥90).
+  function limRow(label,usedPercent,resetSec,sub){
+    var p=Math.max(0,Math.min(100,Number(usedPercent)||0));
+    var col=p>=90?"var(--fail)":(p>=70?"var(--warn)":"var(--ok)");
+    return '<div class="mrow"><span class="mname">'+esc(label)+"</span>"
+      +'<span class="mbar"><i style="width:'+p.toFixed(1)+"%;background:"+col+'"></i></span>'
+      +'<span class="mval mono">'+p.toFixed(0)+"%</span>"
+      +'<span class="msub mono">'+esc(sub||resetTxt(resetSec))+"</span></div>";
+  }
+
+  function renderLimits(){
+    var claudeEl=document.getElementById("u-lim-claude");
+    var codexEl=document.getElementById("u-lim-codex");
+    if(!claudeEl||!codexEl)return;
+    if(!LIMITS){claudeEl.innerHTML='<div class="empty">loading&hellip;</div>'; codexEl.innerHTML='<div class="empty">loading&hellip;</div>'; return;}
+    if(LIMITS.error){claudeEl.innerHTML='<div class="empty">'+esc(LIMITS.error)+"</div>"; codexEl.innerHTML=""; return;}
+
+    var c=LIMITS.claude;
+    var cn=document.getElementById("u-lim-claude-note");
+    if(c&&c.windows&&c.windows.length){
+      // Claude's tee is push-only: FRESH means a session wrote it in the last
+      // 10 minutes; anything older gets the stale badge rather than silence.
+      if(cn)cn.textContent="statusline tee · "+limAge(c.fetchedAt)+(limStale(c.fetchedAt,600000)?" · stale":"");
+      claudeEl.innerHTML=c.windows.map(function(w){
+        return limRow("claude · "+(w.label||w.id),w.usedPercent,w.resetsAt);
+      }).join("");
+    }else{
+      if(cn)cn.textContent="no data";
+      claudeEl.innerHTML='<div class="empty">no Claude limit data yet &mdash; it arrives while a Claude Code session runs '
+        +"with the kit's managed statusline (Pro/Max plans only). Run one session, then revisit.</div>";
+    }
+
+    var x=LIMITS.codex;
+    var xn=document.getElementById("u-lim-codex-note");
+    if(x&&x.lanes&&x.lanes.length){
+      if(xn)xn.textContent=(x.planType?("plan "+x.planType+" · "):"")+"app-server · "+limAge(x.fetchedAt);
+      var html="";
+      for(var i=0;i<x.lanes.length;i++){
+        var lane=x.lanes[i];
+        for(var j=0;j<(lane.windows||[]).length;j++){
+          var w=lane.windows[j];
+          html+=limRow(lane.name+" · "+(w.label||""),w.usedPercent,w.resetsAt);
+        }
+        if(!(lane.windows||[]).length)html+=limRow(lane.name,0,null,"no window reported");
+      }
+      var rc=x.resetCredits;
+      if(rc&&rc.availableCount>0){
+        html+='<div class="legend" style="margin-top:11px"><span class="lg"><i style="background:var(--ok)"></i>'
+          +esc(fmtNum(rc.availableCount))+" rate-limit reset credit"+(rc.availableCount===1?"":"s")
+          +" available &middot; redeem via codex /usage</span></div>";
+      }
+      codexEl.innerHTML=html;
+    }else{
+      if(xn)xn.textContent="no data";
+      codexEl.innerHTML='<div class="empty">no Codex limit data &mdash; codex is not installed, not logged in, '
+        +"or app-server did not answer.</div>";
+    }
+
+    var ins=Array.isArray(LIMITS.insights)?LIMITS.insights:[];
+    document.getElementById("u-lim-insights").innerHTML=ins.length
+      ?ins.map(insightCard).join("")
+      :'<div class="empty">no limit findings &mdash; nothing is ahead of pace and no arbitrage is open.</div>';
+  }
+
   function renderFindings(d){
     var ins=Array.isArray(d.insights)?d.insights:[];
     var badge=document.getElementById("u-findings-n");
@@ -2040,28 +2187,34 @@ const JS = `
       ins.length+" finding"+(ins.length===1?"":"s")+", ranked by estimated impact. A finding only claims a "
       +"dollar figure when it can compute one from your data &mdash; the rest say <b>no $ claimed</b> rather "
       +"than inventing a number. Recommendations that depend on model-capability claims carry their sources.";
-    document.getElementById("u-insights").innerHTML=ins.length?ins.map(function(f,i){
-      var imp=(typeof f.impact==="number")
-        ? '<span class="i-imp mono">~'+esc(fmtUsd(f.impact))+"/window</span>"
-        : '<span class="i-imp mono soft">no $ claimed</span>';
-      var cmd=f.command?' <code class="i-cmd">'+esc(f.command)+"</code>":"";
-      var src="";
-      if(f.sources&&f.sources.length){
-        src='<details class="i-src"><summary>grounding &mdash; '+f.sources.length+" source"
-          +(f.sources.length===1?"":"s")+"</summary><ul>"
-          +f.sources.map(function(sc){
-            return "<li><a href=\\""+esc(sc.url)+"\\" target=\\"_blank\\" rel=\\"noreferrer noopener\\">"+esc(sc.label)+"</a></li>";
-          }).join("")+"</ul></details>";
-      }
-      return '<article class="icard" data-sev="'+esc(f.severity||"info")+'">'
-        +'<div class="i-top"><span class="i-n">'+(i+1)+"</span>"
-        +'<span class="i-title">'+esc(f.title)+"</span>"
-        +'<span class="i-kind">'+esc(f.kind==="trend"?"trend":"coaching")+"</span>"+imp+"</div>"
-        +'<p class="i-find">'+esc(f.finding)+"</p>"
-        +(f.evidence?'<p class="i-ev">'+esc(f.evidence)+"</p>":"")
-        +'<div class="i-act"><span class="i-arrow">&rarr;</span><span>'+esc(f.action)+cmd+"</span></div>"
-        +src+"</article>";
-    }).join(""):'<div class="empty">no findings — nothing in this window crossed a detector threshold.</div>';
+    document.getElementById("u-insights").innerHTML=ins.length
+      ?ins.map(insightCard).join("")
+      :'<div class="empty">no findings — nothing in this window crossed a detector threshold.</div>';
+  }
+
+  // One finding card. Shared by the Findings view and the Limits view — both
+  // render the same Insight contract, so they must render it the same way.
+  function insightCard(f,i){
+    var imp=(typeof f.impact==="number")
+      ? '<span class="i-imp mono">~'+esc(fmtUsd(f.impact))+"/window</span>"
+      : '<span class="i-imp mono soft">no $ claimed</span>';
+    var cmd=f.command?' <code class="i-cmd">'+esc(f.command)+"</code>":"";
+    var src="";
+    if(f.sources&&f.sources.length){
+      src='<details class="i-src"><summary>grounding &mdash; '+f.sources.length+" source"
+        +(f.sources.length===1?"":"s")+"</summary><ul>"
+        +f.sources.map(function(sc){
+          return "<li><a href=\\""+esc(sc.url)+"\\" target=\\"_blank\\" rel=\\"noreferrer noopener\\">"+esc(sc.label)+"</a></li>";
+        }).join("")+"</ul></details>";
+    }
+    return '<article class="icard" data-sev="'+esc(f.severity||"info")+'">'
+      +'<div class="i-top"><span class="i-n">'+(i+1)+"</span>"
+      +'<span class="i-title">'+esc(f.title)+"</span>"
+      +'<span class="i-kind">'+esc(f.kind==="trend"?"trend":"coaching")+"</span>"+imp+"</div>"
+      +'<p class="i-find">'+esc(f.finding)+"</p>"
+      +(f.evidence?'<p class="i-ev">'+esc(f.evidence)+"</p>":"")
+      +'<div class="i-act"><span class="i-arrow">&rarr;</span><span>'+esc(f.action)+cmd+"</span></div>"
+      +src+"</article>";
   }
 
   // A missing signal renders as an em dash and is NEVER omitted: a line that
@@ -2080,7 +2233,10 @@ const JS = `
       ? ' <span class="sd-conf">(conf '+esc(sx.confidence.toFixed(2))+")</span>" : "";
     var models=(Array.isArray(sx.models)&&sx.models.length)?sx.models.join(", "):"—";
     var toks="in "+fmtTok(sx.input)+" · out "+fmtTok(sx.output)
-      +" · cache r "+fmtTok(sx.cacheRead)+" / w "+fmtTok(sx.cacheWrite);
+      +" · cache r "+fmtTok(sx.cacheRead)+" / w "+fmtTok(sx.cacheWrite)
+      // Codex-only detail: reasoning tokens are a SUBSET of output (they bill
+      // as output), so this annotates the split without changing any sum.
+      +((Number(sx.reasoningOutput)||0)>0?" · reasoning "+fmtTok(sx.reasoningOutput)+" (in out)":"");
     var tmap=(sx.tools&&typeof sx.tools==="object"&&!Array.isArray(sx.tools))?sx.tools:{};
     var tl=[],tk;
     for(tk in tmap)tl.push({n:tk,c:Number(tmap[tk])||0});
@@ -2114,7 +2270,7 @@ const JS = `
     // Session ids are validated against [A-Za-z0-9._-]{1,128} by parseSessionId
     // before they are ever indexed, so they are safe AND unique as DOM ids.
     var sid=esc(sx.id);
-    var wt=sx.worktree!=null?'<span class="s-wt" title="git worktree — the repo is the project (ADR-0009 §4b)">⑂'+esc(sx.worktree)+"</span>":"";
+    var wt=sx.worktree!=null?'<span class="s-wt" title="git worktree — the repo is the project">⑂'+esc(sx.worktree)+"</span>":"";
     return '<div class="srow" data-id="'+sid+'" title="open transcript">'
       +'<button class="s-exp" type="button" aria-expanded="false" aria-controls="sd-'+sid+'"'
         +' title="show session detail" aria-label="show session detail">&rsaquo;</button>'
@@ -2308,6 +2464,8 @@ const JS = `
       var all=chips.querySelectorAll("[data-days]");
       for(var i=0;i<all.length;i++)all[i].classList.toggle("on",all[i]===b);
       usageLoaded=false; loadUsage(true);
+      // limit findings are computed against the same window; refetch on change.
+      LIMITS=null; if(usageView==="limits")loadLimits();
     });
     var panel=document.getElementById("panel-usage");
     if(panel)panel.addEventListener("click",function(e){

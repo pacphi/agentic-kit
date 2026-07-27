@@ -60,6 +60,9 @@ const ARTIFACTS = [
   /\bInvalid Date\b/,
   /\$NaN/,
   /\bnull\b/,
+  // Internal design-record ids are for contributors, not the person reading
+  // the panel — an "ADR-0010" in visible text is documentation leaking into UI.
+  /\bADR-\d/,
 ];
 
 async function visibleText(page, selector) {
@@ -183,10 +186,35 @@ const TABS = [
 ];
 const USAGE_VIEWS = [
   ['score', '#v-score'],
+  ['limits', '#v-limits'],
   ['findings', '#v-findings'],
   ['sessions', '#v-sessions'],
   ['transcript', '#v-transcript'],
 ];
+
+// /api/limits stub (ADR-0010): injected so the harness never spawns a real
+// codex or reads ~/.config. Shape mirrors quota.mjs output, deliberately
+// including the null-heavy edges (missing resetsAt, credit without expiry)
+// that are exactly where fmtters leak "null"/"Invalid Date" into the DOM.
+const LIMITS_STUB = async () => ({
+  generatedAt: new Date().toISOString(),
+  claude: {
+    provider: 'claude', source: 'statusline', fetchedAt: Date.now() - 3 * 60_000,
+    sessionId: 'ui-stub', windows: [
+      { id: 'five_hour', label: '5h', usedPercent: 3, windowMinutes: 300, resetsAt: Math.round(Date.now() / 1000) + 7200 },
+      { id: 'seven_day', label: 'weekly', usedPercent: 89, windowMinutes: 10080, resetsAt: Math.round(Date.now() / 1000) + 172800 },
+      { id: 'seven_day_sonnet', label: 'weekly · sonnet', usedPercent: 46, windowMinutes: 10080, resetsAt: null },
+    ],
+  },
+  codex: {
+    provider: 'codex', source: 'app-server', fetchedAt: Date.now() - 60_000, planType: 'prolite',
+    lanes: [
+      { id: 'codex', name: 'codex', planType: 'prolite', windows: [{ label: 'weekly', usedPercent: 3, windowMinutes: 10080, resetsAt: Math.round(Date.now() / 1000) + 500000 }] },
+      { id: 'codex_bengalfox', name: 'GPT-5.3-Codex-Spark', planType: 'prolite', windows: [] },
+    ],
+    resetCredits: { availableCount: 2, credits: [{ status: 'available', title: 'Full reset', expiresAt: null }] },
+  },
+});
 
 async function main() {
   // The usage API is injected rather than reaching for the real stores, so the
@@ -215,6 +243,7 @@ async function main() {
       drift: [],
     }),
     usage,
+    limits: LIMITS_STUB,
   });
 
   const browser = await chromium.launch({ channel: 'chrome', headless: !HEADED });

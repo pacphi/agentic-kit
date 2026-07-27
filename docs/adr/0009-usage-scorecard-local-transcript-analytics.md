@@ -70,6 +70,13 @@ panel therefore labels every figure **"API-equivalent — not your plan billing"
 element, not a footnote. We do not model plan utilisation: Anthropic does not publish the limits that
 would make such a percentage honest, and an invented denominator is worse than no number.
 
+> **Amended by [ADR-0010](0010-provider-mediated-quota-reads.md) (2026-07-27):** the exclusion above
+> was about denominators the kit would have to *invent*. Both vendors now hand over their own
+> percentages through supported channels (Claude Code's statusLine `rate_limits` push; Codex's
+> `app-server` RPC), and the Limits sub-view renders those vendor-reported figures — with
+> provenance and freshness — under ADR-0010's provider-mediated rules. Locally *computed*
+> plan percentages remain excluded, exactly as stated here.
+
 OpenAI publishes no pricing in `~/.codex/models_cache.json` (verified), so Codex rates are a
 maintained table and are **date-stamped** in the UI so staleness is visible rather than silent.
 

@@ -31,6 +31,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { configDir, claudeDir, codexDir } from './paths.mjs';
+import { readCodexState } from './codex-state.mjs';
 
 /** Bump to invalidate every cached entry wholesale.
  *  v2: cached records carry `active` sub-intervals for the idle-gap split.
@@ -46,8 +47,13 @@ import { configDir, claudeDir, codexDir } from './paths.mjs';
  *  v5: harness-output envelopes (task-notification, bash-stdout,
  *      local-command-stdout, …) no longer count as human prompts, so the
  *      cached `prompts` figure on every session parsed before this rule is
- *      inflated and must be re-derived. */
-export const SCHEMA_VERSION = 5;
+ *      inflated and must be re-derived.
+ *  v6: Codex sessions grow `reasoningOutput` (reasoning tokens inside output)
+ *      and `rateLimits` (the LAST rate-limit snapshot embedded in the
+ *      rollout's token_count events). A v5-cached Codex session carries
+ *      neither and must be re-derived, or the Limits history reads as empty
+ *      for exactly the sessions that have data. */
+export const SCHEMA_VERSION = 6;
 
 /** Silence longer than this ends a stretch of engagement. A session is split
  *  into active sub-intervals at gaps ABOVE this bound (exactly this much is not
@@ -287,6 +293,10 @@ function blankSession(id, provider) {
     id, provider, title: '', project: 'unknown', start: null, end: null,
     prompts: 0, responses: 0, exceptions: 0, sidechain: false, threadSource: null, models: [], tools: {},
     skill: null, plugin: null, worktree: null, usage: [], punchcard: {}, active: [], stamps: [],
+    // Codex-only detail (v6): reasoning tokens inside output, and the last
+    // rate-limit snapshot the rollout carried. Claude sessions keep the zero
+    // and the null — absent, not unknown.
+    reasoningOutput: 0, rateLimits: null,
   };
 }
 
@@ -542,6 +552,33 @@ function parseCodex(raw, { id, withTurns = false }) {
     if (p.type === 'token_count') {
       const t = p.info?.total_token_usage;
       if (t && typeof t === 'object') { lastUsage = t; lastUsageAt = ms; }
+      // Every token_count also carries a live rate-limit snapshot — keep the
+      // LAST one, normalized. Field names are a trap upstream: `primary` is
+      // whichever window the server listed first, NOT reliably the 5-hour one
+      // (observed live: primary = the 10080-minute weekly). So windows are
+      // kept as a flat list keyed by window_minutes and never by field name.
+      const rl = p.rate_limits;
+      if (rl && typeof rl === 'object') {
+        const windows = [];
+        for (const w of [rl.primary, rl.secondary]) {
+          if (!w || typeof w !== 'object') continue;
+          const usedPercent = Number(w.used_percent);
+          const windowMinutes = Number(w.window_minutes);
+          if (!Number.isFinite(usedPercent) || !Number.isFinite(windowMinutes)) continue;
+          windows.push({
+            usedPercent, windowMinutes,
+            resetsAt: Number.isFinite(Number(w.resets_at)) ? Number(w.resets_at) : null,
+          });
+        }
+        if (windows.length) {
+          rec.rateLimits = {
+            at: Number.isFinite(ms) ? ms : null,
+            limitId: typeof rl.limit_id === 'string' ? rl.limit_id : null,
+            planType: typeof rl.plan_type === 'string' ? rl.plan_type : null,
+            windows,
+          };
+        }
+      }
       continue;
     }
     if (p.type === 'user_message') {
@@ -580,6 +617,10 @@ function parseCodex(raw, { id, withTurns = false }) {
       cacheWrite: 0,
       responses: rec.responses,
     });
+    // Reasoning tokens are a SUBSET of output_tokens (they bill as output) —
+    // recorded as detail, never added into any token sum, or the total would
+    // double-count exactly the reasoning share.
+    rec.reasoningOutput = Number(lastUsage.reasoning_output_tokens) || 0;
   }
 
   rec.title = maskSecrets(clip(firstPrompt)) || '(untitled)';
@@ -811,6 +852,10 @@ function aggregate(records, { days, now, cutoff, deps }) {
       confidence: verdict.confidence ?? 0,
       basis: verdict.basis ?? 'no signal',
       skill: rec.skill, plugin: rec.plugin,
+      // Codex-only detail (v6); zero / null on Claude sessions and on v5-cached
+      // records (the schema bump re-derives those).
+      reasoningOutput: rec.reasoningOutput ?? 0,
+      rateLimits: rec.rateLimits ?? null,
       _span: [rec.start ?? rec.end, rec.end],
       // Pre-v2 cache entries have no `active`; fall back to the whole span so a
       // stale record degrades to the old figure instead of vanishing.
@@ -891,12 +936,22 @@ function aggregate(records, { days, now, cutoff, deps }) {
 
   for (const s of sessions) { delete s._span; delete s._active; delete s._punchcard; delete s._day; }
 
+  // Local rate-limit history: every Codex rollout embeds live quota snapshots
+  // in its token_count events, so a utilization time series is reconstructable
+  // retroactively with ZERO network — one point per session (its last
+  // snapshot), oldest first. Claude has no local analogue (its quota arrives
+  // via the statusline push — see quota.mjs), hence codex-prefixed.
+  const codexRateLimits = sessions
+    .filter((s) => s.provider === 'codex' && s.rateLimits && Number.isFinite(s.rateLimits.at))
+    .map((s) => s.rateLimits)
+    .sort((x, y) => x.at - y.at);
+
   const agg = {
     generatedAt: new Date(now).toISOString(),
     windowDays: days,
     pricesAsOf: deps.pricesAsOf ?? null,
     totals, byDay, byModel, byProvider, byProject, byCategory,
-    punchcard, projectTree, sessions, insights: [],
+    punchcard, projectTree, sessions, codexRateLimits, insights: [],
   };
   agg.insights = deps.detectInsights(agg) ?? [];
   return agg;
@@ -936,6 +991,8 @@ function notify(onProgress, payload) {
  * @property {string} [cachePath]   override the index cache location (tests)
  * @property {number} [now]         override "now" (tests)
  * @property {number} [maxAgeMs]    readIndex only: memo TTL
+ * @property {object|null} [codexState] override the Codex SQLite thread ledger
+ *           (tests); null skips the read entirely, undefined reads the real db
  * @property {{costOf: Function, pricesAsOf?: string, classify: Function, detectInsights: Function}} [deps]
  *           inject the pricing/classification/insights seam (tests)
  */
@@ -1003,7 +1060,45 @@ async function scan(o = {}) {
   writeCache(cacheFile, { schemaVersion: SCHEMA_VERSION, updatedAt: new Date(now).toISOString(), entries });
   notify(onProgress, { scanned: total, total, phase: 'aggregate' });
 
-  return aggregate(records, { days, now, cutoff, deps });
+  // Codex's own thread ledger outranks the rollout heuristic (`undefined` →
+  // read the real db; tests pass an object, or null to skip). Applied AFTER the
+  // cache write, on copies: the cache stores what the FILE said, the aggregate
+  // reflects what Codex's ledger knows — a ledger that arrives later (or gets
+  // repaired) corrects old sessions without a cache invalidation.
+  // Overridden roots (tests, sandboxes) imply the REAL ~/.codex ledger is the
+  // wrong ledger for these records — reading it would break test hermeticity
+  // and mis-attribute fixture sessions. Only default roots read the real db.
+  const ledger = o.codexState !== undefined
+    ? o.codexState
+    : (roots?.codex ? null : readCodexState());
+  return aggregate(applyCodexLedger(records, ledger), { days, now, cutoff, deps });
+}
+
+/**
+ * Overlay Codex's SQLite thread ledger onto parsed session records. Pure —
+ * returns copies where anything changes, never mutates a (possibly cached)
+ * record. Two corrections, both attribution-only:
+ *   - a session whose rollout carried no `thread_source` is backfilled from
+ *     the ledger's `threads.thread_source` (or marked `subagent` when a
+ *     spawn edge names it as a child);
+ *   - a session the ledger says is a subagent has its token usage STRIPPED,
+ *     mirroring the parse-time exclusion: its rollout replays the parent's
+ *     entire token history, so keeping the tokens double-counts the parent
+ *     (ccusage/ccusage#950). The record itself stays visible/auditable.
+ * Exported for test.
+ */
+export function applyCodexLedger(records, ledger) {
+  if (!ledger || !(ledger.threads instanceof Map)) return records;
+  return records.map((rec) => {
+    if (!rec || rec.provider !== 'codex') return rec;
+    const t = ledger.threads.get(rec.id);
+    const fromEdges = ledger.parents instanceof Map && ledger.parents.has(rec.id) ? 'subagent' : null;
+    const source = rec.threadSource ?? t?.threadSource ?? fromEdges;
+    if (source === rec.threadSource && (source !== 'subagent' || !rec.usage.length)) return rec;
+    const out = { ...rec, threadSource: source };
+    if (source === 'subagent' && out.usage.length) out.usage = [];
+    return out;
+  });
 }
 
 /**
