@@ -135,12 +135,12 @@ cost = (inputUnits × rate_in + output × rate_out) / 1,000,000
 
 summed across every row in the window.
 
-**Source:** `costOf()`, `src/lib/pricing.mjs:169-176`, reproduced verbatim:
+**Source:** `costOf()`, `src/lib/pricing.mjs:247-253`, reproduced verbatim:
 
 ```js
 export function costOf(usage) {
-  const { model, provider, input, output, cacheRead, cacheWrite } = usage ?? {};
-  const { in: rin, out: rout } = priceFor(model, provider);
+  const { model, provider, input, output, cacheRead, cacheWrite, day } = usage ?? {};
+  const { in: rin, out: rout } = priceFor(model, provider, day);
   const inputUnits = tokens(input)
     + tokens(cacheWrite) * CACHE_WRITE_MULTIPLIER
     + tokens(cacheRead) * CACHE_READ_MULTIPLIER;
@@ -149,19 +149,65 @@ export function costOf(usage) {
 ```
 
 `CACHE_READ_MULTIPLIER = 0.1`, `CACHE_WRITE_MULTIPLIER = 1.25`
-(`pricing.mjs:112-113`) — see §13 for why these two numbers are correct for
+(`pricing.mjs:154-155`) — see §13 for why these two numbers are correct for
 **both** Anthropic and OpenAI, which is why `costOf` needs no per-provider
 branch on the multiplier (only on the base `rate_in`/`rate_out`, resolved by
-`priceFor`, `pricing.mjs:141-152`).
+`priceFor`, `pricing.mjs:214-227`).
 
 Rate resolution is **longest-prefix match** on a normalized model id
-(`pricing.mjs:121-130`), so a dated release (`claude-haiku-4-5-20251001`)
+(`pricing.mjs:163-172`), so a dated release (`claude-haiku-4-5-20251001`)
 resolves to the same entry as its bare alias, and a more specific entry
 (`gpt-5.6-sol`) is never shadowed by a shorter one (`gpt-5.6`). An id matching
 nothing gets `FALLBACK_PRICE` — Sonnet-class rate, `$3`/`$15`
-(`pricing.mjs:109`) — rather than `$0`, so an unrecognized model can never be
+(`pricing.mjs:151`) — rather than `$0`, so an unrecognized model can never be
 silently free; `matched: false` travels with the result so a maintainer can
 find fallback-priced rows if the table needs a new entry.
+
+### 3a. Rates are dated, and a row is priced on the day it was spent
+
+Each table entry is a **schedule** — an ordered list of periods, each with the
+day it takes effect. Nearly every entry has exactly one period that has always
+applied (`anthropic(5, 25)` builds that shape); an entry whose rate the vendor
+has *published* a change to carries more than one (`schedule`,
+`pricing.mjs:41-55`). `periodOn` (`pricing.mjs:187`) picks the last period
+already in effect on the given day, comparing ISO date strings
+lexicographically so no `Date` parsing is involved and the module stays
+clock-free.
+
+`aggregate()` passes each usage row's own `day` (`usage-index.mjs:832`), which
+it already has because rows are keyed by `(day, model)`. **This is the whole
+point:** tokens metered in August must still read as August's rate when the
+panel is opened in December. Pricing by *today's* date instead would restate a
+finished window the moment a published rate changed — a 50% jump in a
+Sonnet-heavy August, with no session having changed. A panel whose claim is
+"what these tokens would cost metered" cannot do that.
+
+Two rules bound the mechanism:
+
+- **Only published changes are encoded.** Anthropic announced that Sonnet 5's
+  introductory rate ends 2026-08-31, so that boundary is a recorded fact.
+  Encoding a *forecast* of some future repricing would fabricate data — the
+  same error as an invented denominator (§14).
+- **The mechanism is identical for both providers.** A date range is a fact
+  about a price, not about a vendor. As of the verification date OpenAI
+  publishes no promotional rates or expiry dates, so every OpenAI entry is a
+  single always-applied period — but that is a fact about the *data*, not a gap
+  in the table: `openai.dated([...])` exists and behaves identically, so a
+  Codex promo would be a one-line edit rather than new machinery. Rates that
+  vary by *how* a request was served — regional uplift, large-prompt surcharge,
+  service tiers — are a different axis, are deliberately **not** expressible
+  here, and remain in `UNMODELLED_PRICING_FACTORS` (`pricing.mjs:142-144`)
+  because a transcript does not record the endpoint or tier.
+
+A `priceFor` call with no day prices as of `PRICES_AS_OF`, the table's
+verification date — **not** the newest period. "Newest" only means "current"
+once every published change has landed, and deciding that requires a clock this
+module does not read. Using the verification date also means the default can
+never disagree with the `rates as of <date>` label the UI already prints.
+
+Boundary behavior is pinned by `tests/kit/pricing-revert.test.mjs`, including
+the property that matters most: a finished window is not restated when a later
+rate change takes effect.
 
 **Worked example** (from the Anthropic pricing page's own published example,
 [C1] below — reproduced here because it is the cleanest independent check of
@@ -670,8 +716,11 @@ own published table, not a transcription from a secondary source:
 | Claude Sonnet 4.6 / 4.5 | $3/MTok | $3.75/MTok | $6/MTok | $0.30/MTok | $15/MTok |
 | Claude Haiku 4.5 | $1/MTok | $1.25/MTok | $2/MTok | $0.10/MTok | $5/MTok |
 
-Every value in `pricing.mjs`'s Anthropic entries (`pricing.mjs:32-50`) matches
-this table's "Base input" and "Output" columns exactly. The cache-write and
+Every value in `pricing.mjs`'s Anthropic entries (`pricing.mjs:74-108`) matches
+this table's "Base input" and "Output" columns exactly. Note that the two Sonnet
+5 rows above are not a documentation convenience — they are exactly what the
+code encodes, as the two periods of that entry's schedule (§3a), so the table
+and the implementation state the same published change in the same shape. The cache-write and
 cache-read *columns* in this table are provider-published absolute rates; the
 kit's `pricing.mjs` instead stores the two **multipliers** (0.1× and 1.25×,
 5-minute TTL only — the kit does not currently distinguish 5-minute from
@@ -688,7 +737,7 @@ Anthropic's own prompt-caching documentation **[C2]** states the multipliers
 in prose, independent of the pricing table: *"5-minute cache write tokens are
 1.25 times the base input tokens price... Cache read tokens are 0.1 times the
 base input tokens price."* This is the second, independent confirmation of
-`CACHE_READ_MULTIPLIER`/`CACHE_WRITE_MULTIPLIER` (`pricing.mjs:112-113`).
+`CACHE_READ_MULTIPLIER`/`CACHE_WRITE_MULTIPLIER` (`pricing.mjs:154-155`).
 
 ### 13.2 OpenAI (Codex) — hand-maintained, no canonical machine-readable source
 
@@ -737,8 +786,8 @@ hand-maintained and drift-prone, not vendor-confirmed via automated fetch.
 
 ### 13.3 What the pricing table deliberately does not model
 
-Recorded verbatim from `pricing.mjs:82-99` (`UNMODELLED_PRICING_FACTORS`,
-`pricing.mjs:100-102`) because listing known gaps is what makes the
+Recorded verbatim from `pricing.mjs:125-141` (`UNMODELLED_PRICING_FACTORS`,
+`pricing.mjs:142-144`) because listing known gaps is what makes the
 *modelled* factors credible:
 
 - **Regional-processing uplift.** OpenAI charges +10% on data-residency

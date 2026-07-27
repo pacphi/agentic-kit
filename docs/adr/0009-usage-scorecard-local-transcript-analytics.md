@@ -65,6 +65,28 @@ single-flight: a refresh already in progress is joined, not duplicated.
 `src/lib/pricing.mjs` holds dated per-model rates and computes
 `input×rate + cacheWrite×rate×1.25 + cacheRead×rate×0.1 + output×outRate`.
 
+**Rates are a schedule, and a row is priced on the day it was spent.** Every table entry is an
+ordered list of periods (the common case being one period that has always applied), and
+`priceFor(model, provider, day)` selects the period in effect on that day. Cost attribution is
+historical: tokens metered in August must still read as August's rate in December. Switching rates
+by *today's* date instead would retroactively restate finished windows the moment a published rate
+changed — which a panel claiming "what these tokens would cost metered" cannot do. Two constraints
+follow, both enforced in code:
+
+- **Only published changes may be encoded.** A schedule records a rate change the vendor has
+  announced (Anthropic's Sonnet 5 introductory period ending 2026-08-31). Encoding a *forecast*
+  would fabricate data, the same error as the invented denominator above.
+- **The mechanism is identical for both providers**, because a date range is a fact about a price,
+  not about a vendor. That OpenAI currently publishes no dated promos is a fact about the data, not
+  a reason for a second code path — mirroring how `costOf` needs no per-provider branch. Rates that
+  vary by *how* a request was served (regional uplift, large-prompt surcharge, service tiers) are a
+  different axis, are not expressible as a schedule, and stay in `UNMODELLED_PRICING_FACTORS`
+  because transcripts do not record the endpoint or tier.
+
+A dateless `priceFor` prices as of `PRICES_AS_OF`, the table's verification date — not the newest
+period, which only becomes "current" once every published change has landed, a judgement requiring
+a clock this module deliberately does not read.
+
 On a Max/Pro subscription the user is **not billed per token**, and Codex-via-ChatGPT likewise. The
 panel therefore labels every figure **"API-equivalent — not your plan billing"** as a first-class UI
 element, not a footnote. We do not model plan utilisation: Anthropic does not publish the limits that

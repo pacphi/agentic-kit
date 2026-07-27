@@ -17,11 +17,23 @@ test('every PRICES entry carries finite in/out rates, a provider, and asOf', () 
   const keys = Object.keys(PRICES);
   assert.ok(keys.length >= 8, 'table covers the shipped model lines');
   for (const [key, p] of Object.entries(PRICES)) {
-    assert.ok(Number.isFinite(p.in) && p.in > 0, `${key} in rate`);
-    assert.ok(Number.isFinite(p.out) && p.out > 0, `${key} out rate`);
-    assert.ok(p.out >= p.in, `${key} output is never cheaper than input`);
     assert.ok(['anthropic', 'openai'].includes(p.provider), `${key} provider`);
     assert.match(p.asOf, /^\d{4}-\d{2}(-\d{2})?$/, `${key} asOf`);
+    // Every entry is a SCHEDULE, uniformly — the single-rate case is a
+    // one-period schedule, so there is no second shape to special-case.
+    assert.ok(Array.isArray(p.periods) && p.periods.length >= 1, `${key} periods`);
+    for (const r of p.periods) {
+      assert.ok(Number.isFinite(r.in) && r.in > 0, `${key} in rate`);
+      assert.ok(Number.isFinite(r.out) && r.out > 0, `${key} out rate`);
+      assert.ok(r.out >= r.in, `${key} output is never cheaper than input`);
+      assert.ok(r.from === null || /^\d{4}-\d{2}-\d{2}$/.test(r.from), `${key} period from`);
+    }
+    // The first period is the open-ended one ("has always applied"); only
+    // later periods carry a start date, and they must be strictly ordered.
+    assert.equal(p.periods[0].from, null, `${key} first period must be open-ended`);
+    const dated = p.periods.slice(1).map((r) => r.from);
+    assert.deepEqual(dated, [...dated].sort(), `${key} periods are chronological`);
+    assert.equal(new Set(dated).size, dated.length, `${key} has no duplicate boundaries`);
   }
 });
 

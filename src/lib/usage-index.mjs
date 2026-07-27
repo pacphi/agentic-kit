@@ -813,8 +813,13 @@ function aggregate(records, { days, now, cutoff, deps }) {
     let firstDay = null;
     for (const row of rec.usage) {
       if (firstDay === null || row.day < firstDay) firstDay = row.day;
+      // `day` prices the row at the rate in effect WHEN THOSE TOKENS WERE
+      // SPENT, not today's. A published rate change (Sonnet 5's introductory
+      // period ending 2026-09-01) must not retroactively restate a finished
+      // window — August's spend was metered at August's rate and has to keep
+      // reading that way. Rows are already keyed by day, so this costs nothing.
       const rowCost = deps.costOf({
-        model: row.model, provider: rec.provider,
+        model: row.model, provider: rec.provider, day: row.day,
         input: row.input, output: row.output, cacheRead: row.cacheRead, cacheWrite: row.cacheWrite,
       }) || 0;
       input += row.input; output += row.output;
