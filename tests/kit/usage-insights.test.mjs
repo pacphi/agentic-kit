@@ -421,7 +421,9 @@ test('classify-coverage: 26% unclassified fires', () => {
   const ins = byId(detectInsights(classifyAgg(26)), 'classify-coverage');
   assert.ok(ins);
   assert.equal(ins.impact, null);
-  assert.equal(ins.command, 'ak x usage classify --enrich');
+  // No command by design: the LLM-labelling pass (ADR-0009 §5 Layer 3) is not
+  // shipped, and the detector must not advertise a command that does not exist.
+  assert.equal(ins.command, null);
 });
 
 // model-routing

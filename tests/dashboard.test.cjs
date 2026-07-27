@@ -371,6 +371,50 @@ async function main() {
     await usageSrv.close();
   }
 
+  // ── /api/limits (ADR-0010): injected provider, insights computed server-side ──
+  const limitsSrv = await startDashboard({
+    port: 0, cwd: fixture, fetchStatus: async () => STUB_STATUS, usage: spyUsage().api,
+    limits: async () => ({
+      generatedAt: '2026-07-27T12:00:00.000Z',
+      claude: {
+        provider: 'claude', source: 'statusline', fetchedAt: 1785000000000,
+        windows: [{ id: 'seven_day', label: 'weekly', usedPercent: 89, windowMinutes: 10080, resetsAt: 1785600000 }],
+      },
+      codex: {
+        provider: 'codex', source: 'app-server', fetchedAt: 1785000000000, planType: 'prolite',
+        lanes: [{ id: 'codex', name: 'codex', windows: [{ label: 'weekly', usedPercent: 3, windowMinutes: 10080, resetsAt: 1785694902 }] }],
+        resetCredits: { availableCount: 2, credits: [] },
+      },
+    }),
+  });
+  try {
+    await test('GET /api/limits → both providers plus server-computed limit insights', async () => {
+      const r = await get(limitsSrv.url + 'api/limits');
+      assert(r.status === 200, 'expected 200, got ' + r.status);
+      const j = JSON.parse(r.body);
+      assert(j.claude && j.claude.windows[0].usedPercent === 89, 'claude windows must survive');
+      assert(j.codex && j.codex.planType === 'prolite', 'codex plan must survive');
+      assert(Array.isArray(j.insights), 'insights must be an array');
+      assert(j.insights.some((i) => i.id === 'cross-host-arbitrage-claude'),
+        'claude 89% vs codex 3% must yield the arbitrage finding, got ' + JSON.stringify(j.insights.map((i) => i.id)));
+      assert(j.insights.some((i) => i.id === 'codex-reset-credits'),
+        '2 reset credits must yield the credits finding');
+    });
+    await test('GET /api/limits degrades to 500 JSON when the provider throws', async () => {
+      const broken = await startDashboard({
+        port: 0, cwd: fixture, fetchStatus: async () => STUB_STATUS, usage: spyUsage().api,
+        limits: async () => { throw new Error('quota backend down'); },
+      });
+      try {
+        const r = await get(broken.url + 'api/limits');
+        assert(r.status === 500, 'expected 500, got ' + r.status);
+        contains(r.body, 'quota backend down');
+      } finally { await broken.close(); }
+    });
+  } finally {
+    await limitsSrv.close();
+  }
+
   // Masking is not optional: a usage module that cannot mask must fail the
   // request, never serve an unmasked transcript.
   const noMask = spyUsage({ maskSecrets: undefined });
@@ -388,12 +432,12 @@ async function main() {
   // ── the served page: sixth segment, four views, poll control ──
   const uiSrv = await startDashboard({ port: 0, cwd: fixture, fetchStatus: async () => STUB_STATUS, usage: spyUsage().api });
   try {
-    await test('served HTML carries the sixth "Usage" segment and its four sub-views', async () => {
+    await test('served HTML carries the sixth "Usage" segment and its five sub-views', async () => {
       const r = await get(uiSrv.url);
       contains(r.body, 'data-tab="usage"');
       contains(r.body, '>Usage<');
       contains(r.body, 'id="panel-usage"');
-      for (const v of ['score', 'findings', 'sessions', 'transcript']) {
+      for (const v of ['score', 'limits', 'findings', 'sessions', 'transcript']) {
         contains(r.body, 'id="v-' + v + '"');
         contains(r.body, 'data-view="' + v + '"');
       }

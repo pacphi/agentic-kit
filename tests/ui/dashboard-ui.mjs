@@ -60,6 +60,9 @@ const ARTIFACTS = [
   /\bInvalid Date\b/,
   /\$NaN/,
   /\bnull\b/,
+  // Internal design-record ids are for contributors, not the person reading
+  // the panel — an "ADR-0010" in visible text is documentation leaking into UI.
+  /\bADR-\d/,
 ];
 
 async function visibleText(page, selector) {
@@ -158,6 +161,28 @@ function extendedCorpus() {
     asst(TRUNC_ID, '/Users/me/proj', '2026-07-24T12:35:00.000Z', 'One warning.'),
   ));
 
+  // A dropped/rate-limited turn: model "<synthetic>", isApiErrorMessage, zero
+  // usage. Present so the "N dropped/errored turns excluded" qualifier under
+  // the models caption actually RENDERS here — with no exception in the corpus
+  // the element stayed empty, and the caption's line-wrap defect (the count
+  // orphaned onto the next line, reading as part of the caption) was invisible
+  // to this harness until it was seen by eye.
+  const EXC_ID = 'exc00001';
+  fs.writeFileSync(path.join(claude, '-Users-me-proj', `${EXC_ID}.jsonl`), jsonl(
+    { type: 'ai-title', aiTitle: 'Session that hit a rate limit', sessionId: EXC_ID },
+    usr(EXC_ID, '/Users/me/proj', '2026-07-24T13:00:00.000Z', 'keep going'),
+    asst(EXC_ID, '/Users/me/proj', '2026-07-24T13:01:00.000Z', 'Working on it.'),
+    {
+      type: 'assistant', sessionId: EXC_ID, cwd: '/Users/me/proj', isSidechain: false,
+      timestamp: '2026-07-24T13:02:00.000Z', isApiErrorMessage: true,
+      message: {
+        role: 'assistant', model: '<synthetic>',
+        usage: { input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 },
+        content: [{ type: 'text', text: 'API Error: 429 rate limit exceeded' }],
+      },
+    },
+  ));
+
   // <repo>/.git/worktrees/<rest> — collapses to project "proj" with worktree
   // "phase-1" (ADR-0009 §4b), so this row must render a chip and aaaa1111 must not.
   const wtCwd = `/Users/me/proj/.git/worktrees/${WT_NAME}`;
@@ -183,10 +208,35 @@ const TABS = [
 ];
 const USAGE_VIEWS = [
   ['score', '#v-score'],
+  ['limits', '#v-limits'],
   ['findings', '#v-findings'],
   ['sessions', '#v-sessions'],
   ['transcript', '#v-transcript'],
 ];
+
+// /api/limits stub (ADR-0010): injected so the harness never spawns a real
+// codex or reads ~/.config. Shape mirrors quota.mjs output, deliberately
+// including the null-heavy edges (missing resetsAt, credit without expiry)
+// that are exactly where fmtters leak "null"/"Invalid Date" into the DOM.
+const LIMITS_STUB = async () => ({
+  generatedAt: new Date().toISOString(),
+  claude: {
+    provider: 'claude', source: 'statusline', fetchedAt: Date.now() - 3 * 60_000,
+    sessionId: 'ui-stub', windows: [
+      { id: 'five_hour', label: '5h', usedPercent: 3, windowMinutes: 300, resetsAt: Math.round(Date.now() / 1000) + 7200 },
+      { id: 'seven_day', label: 'weekly', usedPercent: 89, windowMinutes: 10080, resetsAt: Math.round(Date.now() / 1000) + 172800 },
+      { id: 'seven_day_sonnet', label: 'weekly · sonnet', usedPercent: 46, windowMinutes: 10080, resetsAt: null },
+    ],
+  },
+  codex: {
+    provider: 'codex', source: 'app-server', fetchedAt: Date.now() - 60_000, planType: 'prolite',
+    lanes: [
+      { id: 'codex', name: 'codex', planType: 'prolite', windows: [{ label: 'weekly', usedPercent: 3, windowMinutes: 10080, resetsAt: Math.round(Date.now() / 1000) + 500000 }] },
+      { id: 'codex_bengalfox', name: 'GPT-5.3-Codex-Spark', planType: 'prolite', windows: [] },
+    ],
+    resetCredits: { availableCount: 2, credits: [{ status: 'available', title: 'Full reset', expiresAt: null }] },
+  },
+});
 
 async function main() {
   // The usage API is injected rather than reaching for the real stores, so the
@@ -215,6 +265,7 @@ async function main() {
       drift: [],
     }),
     usage,
+    limits: LIMITS_STUB,
   });
 
   const browser = await chromium.launch({ channel: 'chrome', headless: !HEADED });
@@ -414,6 +465,53 @@ async function main() {
       check('KPI tooltip states the ORDERING, not just three numbers',
         (tip.match(/≤/g) || []).length >= 2,
         `title carried ${(tip.match(/≤/g) || []).length} "≤" — the invariant is the argument (ADR-0009 §4)`);
+    }
+
+    // ── the models caption's exclusion qualifier owns its own line ───────────
+    // Geometry, not markup: the defect was that "· 4" wrapped to the end of the
+    // caption line with "dropped/errored turns excluded" orphaned below, so the
+    // count read as part of the caption. A display:block sub-line is the fix,
+    // and only a rect comparison can prove the reader sees two distinct lines.
+    const modelsNote = await page.evaluate(() => {
+      const sub = document.getElementById('u-models-note');
+      if (!sub) return null;
+      const caption = sub.parentElement;
+      const s = sub.getBoundingClientRect();
+      const c = caption.getBoundingClientRect();
+      // The caption's own first line: measure a range over the text node that
+      // precedes the sub-element, so this is the rendered lead, not a guess.
+      const r = document.createRange();
+      r.setStart(caption, 0);
+      r.setEndBefore(sub);
+      const lead = r.getBoundingClientRect();
+      return {
+        text: sub.textContent.trim(),
+        leadText: r.toString().trim(),
+        display: getComputedStyle(sub).display,
+        startsBelowLead: s.top >= lead.bottom - 1,
+        sharesLeftEdge: Math.abs(s.left - c.left) <= 1,
+      };
+    });
+    await shoot(page, 'followup-models-caption');
+
+    check('the exclusion qualifier actually renders (fixture has an errored turn)',
+      !!modelsNote && modelsNote.text.length > 0,
+      'the corpus produced no exception, so this layout is untested — the fixture must carry one');
+    if (modelsNote && modelsNote.text) {
+      check('the qualifier is a block, not an inline tail',
+        modelsNote.display === 'block', `computed display was "${modelsNote.display}"`);
+      check('the qualifier begins on its own line, below the caption',
+        modelsNote.startsBelowLead,
+        `qualifier top is not below the caption's last line — it is sharing a line with `
+        + `${JSON.stringify(modelsNote.leadText)}, which is the wrap defect`);
+      check('the qualifier is a whole phrase, not a fragment split across lines',
+        /^\d[\d,]* dropped\/errored turns? excluded$/.test(modelsNote.text),
+        `read ${JSON.stringify(modelsNote.text)} — expected the count and its noun together`);
+      check('the qualifier carries no leading separator now that it owns a line',
+        !/^[·.\-–—]/.test(modelsNote.text),
+        `read ${JSON.stringify(modelsNote.text)} — a leading "·" reads as a continuation of the caption`);
+      check('the qualifier aligns with the caption it sits under',
+        modelsNote.sharesLeftEdge, 'the sub-line is indented away from its caption');
     }
 
     // ── ITEM 2 · a truncated turn announces itself, with BOTH figures ────────

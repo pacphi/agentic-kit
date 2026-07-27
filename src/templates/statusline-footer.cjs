@@ -6,6 +6,39 @@ function rufloActivationSegments(cwd){
     var DIM = "[2m", G = "[1;32m", Y = "[1;33m", C = "[1;36m", R = "[0m";
     // execFileSync (no shell) — db path / sql are passed as argv, never interpolated into a command line.
     function q(db, sql){ try { return cp.execFileSync("sqlite3", [db, sql], {stdio:["ignore","pipe","ignore"], timeout:1500}).toString().trim(); } catch(e){ return ""; } }
+    // ── quota tee (ADR-0010): Claude Code pushes plan utilization into every
+    // statusline invocation (rate_limits: five_hour/seven_day used_percentage +
+    // reset epochs — code.claude.com/docs/en/statusline.md). This is the ONLY
+    // supported channel for those numbers on a Pro/Max plan, and it is push-
+    // only, so the kit persists the latest payload for the dashboard's Limits
+    // view to read (quota.mjs). Throttled to one write/min (the statusline
+    // refreshes every ~5s); atomic tmp+rename at 0600 — account utilization is
+    // the user's own business. Failure is silent by design: a broken tee must
+    // never cost a statusline render.
+    try {
+      if (typeof getStdinData === "function") {
+        var _qsd = getStdinData();
+        if (_qsd && _qsd.rate_limits && typeof _qsd.rate_limits === "object") {
+          var _qdir = path.join(process.env.XDG_CONFIG_HOME || path.join(require("os").homedir(), ".config"), "agentic-kit");
+          var _qf = path.join(_qdir, "claude-rate-limits.json");
+          var _qold = 0;
+          try { _qold = fs.statSync(_qf).mtimeMs; } catch(e){}
+          if (Date.now() - _qold > 60000) {
+            fs.mkdirSync(_qdir, { recursive: true });
+            var _qtmp = _qf + "." + process.pid + ".tmp";
+            fs.writeFileSync(_qtmp, JSON.stringify({
+              teedAt: Date.now(),
+              session_id: _qsd.session_id || null,
+              model: (_qsd.model && _qsd.model.id) || null,
+              rate_limits: _qsd.rate_limits,
+              context_window: _qsd.context_window || null,
+              cost: _qsd.cost || null
+            }), { mode: 0o600 });
+            fs.renameSync(_qtmp, _qf);
+          }
+        }
+      }
+    } catch(e){}
     function bar(n, max){ n = Math.max(0, Math.min(max, n)); return "[" + "●".repeat(n) + "○".repeat(max - n) + "]"; }
     // ── self-learning (SONA): own line with a volume bar (patterns/traj/HNSW) plus a
     // LIVE micro-LoRA adaptation field (Δ‖W‖, appended further below). The Δ‖W‖ tracker

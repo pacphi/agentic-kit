@@ -178,6 +178,20 @@ test('costOf returns a finite non-negative number for every call at the seam', a
   }
 });
 
+test('every costOf call at the seam carries the row day, so dated rates apply', async () => {
+  // The schedule in pricing.mjs is inert unless the caller says WHEN. This is
+  // the seam where that contract is kept or silently dropped: aggregate() holds
+  // `row.day` and must forward it, or every row would price at PRICES_AS_OF and
+  // a published rate change would never take effect on the panel.
+  const { log } = await seam();
+  assert.ok(log.cost.length > 0, 'the corpus must actually exercise pricing');
+  for (const { usage } of log.cost) {
+    assert.match(String(usage?.day), /^\d{4}-\d{2}-\d{2}$/,
+      `costOf(${usage?.model}) was called with day=${JSON.stringify(usage?.day)} — `
+      + 'the usage row is keyed by day, so dropping it here loses dated pricing');
+  }
+});
+
 test('a model absent from the rate table is still priced, not zeroed or NaN', async () => {
   // The fixture corpus emits `gpt-5.6`, which the table carries only as
   // `gpt-5.6-sol` / `-terra` / `-luna` — so the bare id falls to FALLBACK_PRICE.
