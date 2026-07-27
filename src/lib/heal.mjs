@@ -60,12 +60,19 @@ export async function ensureNativeBsq3(dir, { runner = run } = {}) {
   if (!pkgRoot) {
     // Derive the spec from THIS tree's own overrides/deps: a hardcoded `@^12` is
     // EOVERRIDE-rejected in a tree that pins better-sqlite3 (ruflo root pins
-    // 12.9.0, @claude-flow/cli pins ^12.9.0) — verified live. The declared spec
-    // installs clean and resolves a prebuilt.
-    await npmInstallInto(dir, `better-sqlite3@${deriveBsq3Spec(dir)}`, runner);
+    // 12.9.0, @claude-flow/cli pins ^12.9.0) — verified live. The derived spec
+    // also raises stale 12.x pins to Node 26's first supported release.
+    const installed = await npmInstallInto(dir, `better-sqlite3@${deriveBsq3Spec(dir)}`, runner);
     if (bsq3IsNative(dir)) return { ok: true, how: 'native installed' };
     pkgRoot = bsq3Root(dir);
-    if (!pkgRoot) return { ok: false, how: 'FAILED (better-sqlite3 not resolvable)' };
+    if (!pkgRoot) {
+      return {
+        ok: false,
+        how: installed.code === 0
+          ? 'FAILED (better-sqlite3 not resolvable after npm reported success)'
+          : failTail(installed),
+      };
+    }
   }
   // node-gyp compiling sqlite3 from source is slow; 300s truncated it mid-build.
   await runner('npm', ['run', 'install'], { cwd: pkgRoot, timeout: 600_000 });

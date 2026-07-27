@@ -37,7 +37,7 @@ function fakeGlobalTree({ contexts = ['memory', 'cli'], pkg = {} } = {}) {
 test('deriveBsq3Spec honors an override pin exactly (12.9.0-style)', () => {
   const dir = tmp('ak-derive-');
   writePkg(dir, { overrides: { 'better-sqlite3': '12.9.0' } });
-  assert.equal(deriveBsq3Spec(dir), '12.9.0');
+  assert.equal(deriveBsq3Spec(dir, '^12', 24), '12.9.0');
   rm(dir);
 });
 
@@ -47,15 +47,27 @@ test('deriveBsq3Spec prefers overrides over optionalDependencies (EOVERRIDE avoi
     overrides: { 'better-sqlite3': '^12.9.0' },
     optionalDependencies: { 'better-sqlite3': '^12.0.0' },
   });
-  assert.equal(deriveBsq3Spec(dir), '^12.9.0');
+  assert.equal(deriveBsq3Spec(dir, '^12', 24), '^12.9.0');
   rm(dir);
 });
 
 test('deriveBsq3Spec falls back through optionalDependencies when no override', () => {
   const dir = tmp('ak-derive-');
   writePkg(dir, { optionalDependencies: { 'better-sqlite3': '^12.9.0' } });
-  assert.equal(deriveBsq3Spec(dir), '^12.9.0');
+  assert.equal(deriveBsq3Spec(dir, '^12', 24), '^12.9.0');
   rm(dir);
+});
+
+test('deriveBsq3Spec upgrades a stale ancestor 12.9 override for Node 26 before agentdb optional ^11', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-bsq3-ancestor-'));
+  const agentdb = path.join(root, 'node_modules', 'agentdb');
+  fs.mkdirSync(agentdb, { recursive: true });
+  writePkg(root, { overrides: { 'better-sqlite3': '12.9.0' } });
+  writePkg(agentdb, { optionalDependencies: { 'better-sqlite3': '^11.8.1' } });
+
+  assert.equal(deriveBsq3Spec(agentdb, '^12', 26), '^12.10.0');
+  assert.equal(deriveBsq3Spec(agentdb, '^12', 24), '12.9.0');
+  fs.rmSync(root, { recursive: true, force: true });
 });
 
 test('deriveBsq3Spec skips a $ref override and a workspace protocol, falling back (EC-3)', () => {

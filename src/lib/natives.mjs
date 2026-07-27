@@ -71,19 +71,39 @@ export function rufloMemoryContexts() {
 const isPlainSemver = (v) =>
   typeof v === 'string' && /\d/.test(v) && !v.includes(':') && !v.trimStart().startsWith('$');
 
-/** The install spec for better-sqlite3 in `dir`, derived from that tree's OWN
- *  declarations so an npm `overrides` pin isn't fought with EOVERRIDE (verified
- *  live: `install better-sqlite3@^12` under @claude-flow/cli, which pins ^12.9.0,
- *  is rejected; the declared spec succeeds). Precedence: overrides →
- *  optionalDependencies → dependencies → fallback; the first PLAIN-semver value
- *  wins, non-semver forms are skipped. */
-export function deriveBsq3Spec(dir, fallback = '^12') {
-  const pkg = readJson(path.join(dir, 'package.json'), {}) ?? {};
-  for (const field of ['overrides', 'optionalDependencies', 'dependencies']) {
-    const v = pkg[field]?.['better-sqlite3'];
-    if (isPlainSemver(v)) return v;
+// better-sqlite3 first declares/supports Node 26 in 12.10.0. npm treats it as
+// optional through agentdb and silently removes 12.9.0 on Node 26 while still
+// exiting zero, so a stale exact ruflo override cannot be followed literally.
+const nodeCompatibleBsq3Spec = (spec, nodeMajor) => {
+  if (nodeMajor < 26) return spec;
+  const match = String(spec).match(/(\d+)\.(\d+)(?:\.\d+)?/);
+  if (match && Number(match[1]) === 12 && Number(match[2]) < 10) return '^12.10.0';
+  return spec;
+};
+
+/** The install spec for better-sqlite3 in `dir`, derived from the containing
+ *  npm tree. Ancestor overrides win over the nested package's dependency:
+ *  ruflo pins 12.x while agentdb still declares optional ^11.8.1, which npm
+ *  cannot build on Node 26. Installing from agentdb with the local declaration
+ *  therefore installs, fails, and removes 11.x even though the effective ruflo
+ *  tree requires 12.x. After overrides, use the target package's own optional
+ *  or regular dependency, then fallback. Non-semver forms are skipped. */
+export function deriveBsq3Spec(dir, fallback = '^12', nodeMajor = Number(process.versions.node.split('.')[0])) {
+  const start = path.resolve(dir);
+  let current = start;
+  for (;;) {
+    const override = readJson(path.join(current, 'package.json'), {})?.overrides?.['better-sqlite3'];
+    if (isPlainSemver(override)) return nodeCompatibleBsq3Spec(override, nodeMajor);
+    const parent = path.dirname(current);
+    if (parent === current) break;
+    current = parent;
   }
-  return fallback;
+  const pkg = readJson(path.join(start, 'package.json'), {}) ?? {};
+  for (const field of ['optionalDependencies', 'dependencies']) {
+    const declared = pkg[field]?.['better-sqlite3'];
+    if (isPlainSemver(declared)) return nodeCompatibleBsq3Spec(declared, nodeMajor);
+  }
+  return nodeCompatibleBsq3Spec(fallback, nodeMajor);
 }
 
 // A truthful load-test of the binding as node resolution finds it FROM `dir`: an
