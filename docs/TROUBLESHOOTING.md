@@ -37,17 +37,6 @@ ak sync             # apply it
 > The `natives … WASM fallback` row is the one that loses data: on the WASM path,
 > memory writes print "OK" and silently vanish. Treat it as the highest-priority fix.
 
-One entry above deserves its history spelled out:
-
-> [!NOTE]
-> **Historical:** earlier kit versions flagged any `.rvf.lock` starting with `FLVR`
-> bytes as corruption and deleted the store beside it. That signal was measured
-> unsound — `FLVR` is the *normal* lock magic (`SFVR` is the store's) — and
-> agentic-qe ≥ 3.12.3 self-heals genuinely unusable stores non-destructively
-> ([aqe #563](https://github.com/proffesor-for-testing/agentic-qe/issues/563)).
-> The kit now guards only store *size*. If you see `brain.rvf.corrupt-<pid>`
-> droppings from that era, they are safe to delete.
-
 ## Deep proofs (slow, spawn real CLIs)
 
 ```bash
@@ -64,7 +53,16 @@ ak x verify all
 - ruflo's generated CLI examples say `npx @claude-flow/cli@latest …`; prefer the
   installed `ruflo` binary (no npm fetch per call).
 
-## History
+## Appendix — history
+
+**The FLVR false-corruption signal.** Earlier kit versions flagged any
+`.rvf.lock` starting with `FLVR` bytes as corruption and deleted the store
+beside it. That signal was measured unsound — `FLVR` is the *normal* lock
+magic (`SFVR` is the store's) — and agentic-qe ≥ 3.12.3 self-heals genuinely
+unusable stores non-destructively
+([aqe #563](https://github.com/proffesor-for-testing/agentic-qe/issues/563)).
+The kit now guards only store *size*. If you see `brain.rvf.corrupt-<pid>`
+droppings from that era, they are safe to delete.
 
 Why this kit exists, the original root-cause investigations (Node-ABI/WASM memory
 loss, the F1–F6 self-improvement findings, the June-2026 token-burn incident), and

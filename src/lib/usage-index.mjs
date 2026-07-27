@@ -35,8 +35,19 @@ import { configDir, claudeDir, codexDir } from './paths.mjs';
 /** Bump to invalidate every cached entry wholesale.
  *  v2: cached records carry `active` sub-intervals for the idle-gap split.
  *  v3: project is the REPO, with the worktree kept separately — cached v2
- *      records carry the old worktree-as-project labels and must be re-derived. */
-export const SCHEMA_VERSION = 3;
+ *      records carry the old worktree-as-project labels and must be re-derived.
+ *  v4: `exceptions` (dropped-connection/rate-limit/auth-failure placeholder
+ *      turns) is a new required field on every session record. Without this
+ *      bump, a v3-cached session has `exceptions: undefined`, and summing
+ *      that into `totals.exceptions` silently produces NaN (serialized as
+ *      `null` over JSON) instead of a real count — caught by querying a real
+ *      cached index during verification, not by the unit tests, which only
+ *      ever exercise a fresh parse.
+ *  v5: harness-output envelopes (task-notification, bash-stdout,
+ *      local-command-stdout, …) no longer count as human prompts, so the
+ *      cached `prompts` figure on every session parsed before this rule is
+ *      inflated and must be re-derived. */
+export const SCHEMA_VERSION = 5;
 
 /** Silence longer than this ends a stretch of engagement. A session is split
  *  into active sub-intervals at gaps ABOVE this bound (exactly this much is not
@@ -274,7 +285,7 @@ function* jsonLines(raw) {
 function blankSession(id, provider) {
   return {
     id, provider, title: '', project: 'unknown', start: null, end: null,
-    prompts: 0, responses: 0, sidechain: false, models: [], tools: {},
+    prompts: 0, responses: 0, exceptions: 0, sidechain: false, threadSource: null, models: [], tools: {},
     skill: null, plugin: null, worktree: null, usage: [], punchcard: {}, active: [], stamps: [],
   };
 }
@@ -343,15 +354,59 @@ function claudeText(content) {
   return out.join('\n');
 }
 
-/** Is this `user` entry a human prompt, or a tool result being fed back? */
+/**
+ * Harness-output envelopes: user-role entries whose text the HARNESS wrote —
+ * background-task notifications, command stdout/stderr dumps, local-command
+ * caveats. They carry neither `isMeta` nor a tool_result block, so text shape
+ * is the only signal. Measured on the real corpus (envelope at start of user
+ * text): task-notification 550, bash-stdout 85, local-command-stdout 60,
+ * local-command-caveat 183; the stderr variants are the symmetric error-path
+ * siblings. NOT here: bash-input (the person typed that `! cmd`) and the
+ * command-name/-message/-args triple (the person invoked that slash command).
+ */
+const HARNESS_OUTPUT_RE = /^\s*<(task-notification|bash-stdout|bash-stderr|local-command-stdout|local-command-stderr|local-command-caveat)>/;
+
+function entryText(entry) {
+  const content = entry?.message?.content;
+  if (typeof content === 'string') return content;
+  if (!Array.isArray(content)) return '';
+  const t = content.find((b) => b?.type === 'text' && typeof b.text === 'string');
+  return t ? t.text : '';
+}
+
+/** Is this `user` entry a human prompt, or harness output being fed back? */
 function isHumanPrompt(entry) {
   if (entry.isMeta) return false;
+  if (HARNESS_OUTPUT_RE.test(entryText(entry))) return false;
   const content = entry?.message?.content;
   if (typeof content === 'string') return content.trim().length > 0;
   if (!Array.isArray(content)) return false;
   const hasResult = content.some((b) => b?.type === 'tool_result');
   const hasText = content.some((b) => b?.type === 'text' && String(b.text ?? '').trim());
   return hasText && !hasResult;
+}
+
+/**
+ * What KIND of `user`-role turn is this, for transcript attribution? The
+ * Messages API records tool results and harness context injections under
+ * `role: "user"`, so role alone must never be read as "the human typed this":
+ *   'tool-result' — carries a tool_result block: output the HARNESS fed back
+ *                   to the model after a tool call.
+ *   'context'     — isMeta OR a harness-output envelope (task notifications,
+ *                   command stdout/stderr, caveats): harness-injected, not
+ *                   typed by the person — and not the model either.
+ *   'prompt'      — the human. Deliberately broader than isHumanPrompt():
+ *                   an image-only paste has no text block (so it is not
+ *                   COUNTED as a prompt) but it IS the person acting, and
+ *                   labeling it "tool result" would misattribute it. Also
+ *                   covers bash-input (`! cmd`) and slash-command records —
+ *                   the person initiated those.
+ */
+function userTurnKind(entry) {
+  const content = entry?.message?.content;
+  if (Array.isArray(content) && content.some((b) => b?.type === 'tool_result')) return 'tool-result';
+  if (entry.isMeta || HARNESS_OUTPUT_RE.test(entryText(entry))) return 'context';
+  return 'prompt';
 }
 
 /**
@@ -382,7 +437,7 @@ function parseClaude(raw, { id, dirName, withTurns = false }) {
       }
       if (withTurns) {
         const text = claudeText(e.message?.content);
-        if (text) turns.push({ role: 'user', at: new Date(ms).toISOString(), text, prompt: human });
+        if (text) turns.push({ role: 'user', at: new Date(ms).toISOString(), text, prompt: human, kind: userTurnKind(e) });
       }
       continue;
     }
@@ -390,11 +445,32 @@ function parseClaude(raw, { id, dirName, withTurns = false }) {
     if (e.type !== 'assistant' || !e.message) continue;
     noteSpan(rec, ms);
     rec.responses++;
+    const at = Number.isFinite(ms) ? ms : (rec.start ?? Date.now());
+    const pk = punchKey(at);
+    rec.punchcard[pk] = (rec.punchcard[pk] ?? 0) + 1;
+
+    // A dropped connection, rate limit, or auth failure makes Claude Code
+    // synthesize a local placeholder turn (model: "<synthetic>",
+    // isApiErrorMessage: true) with no real completion behind it — usage is
+    // always zero. It IS real engaged time (counted above), but it is not a
+    // model attempt: excluded from `models`/cost attribution so it can never
+    // appear as a $0 "model in play," and counted instead as an EXCEPTION so
+    // it stays visible rather than silently vanishing.
+    if (e.isApiErrorMessage === true) {
+      rec.exceptions++;
+      if (withTurns) {
+        turns.push({
+          role: 'assistant', at: new Date(at).toISOString(), model: 'exception',
+          text: claudeText(e.message.content), tools: [], exception: true,
+        });
+      }
+      continue;
+    }
+
     const model = typeof e.message.model === 'string' ? e.message.model : 'unknown';
     if (!rec.models.includes(model)) rec.models.push(model);
 
     const u = e.message.usage ?? {};
-    const at = Number.isFinite(ms) ? ms : (rec.start ?? Date.now());
     addUsage(rec, localDay(at), model, {
       input: Number(u.input_tokens) || 0,
       output: Number(u.output_tokens) || 0,
@@ -402,8 +478,6 @@ function parseClaude(raw, { id, dirName, withTurns = false }) {
       cacheWrite: Number(u.cache_creation_input_tokens) || 0,
       responses: 1,
     });
-    const pk = punchKey(at);
-    rec.punchcard[pk] = (rec.punchcard[pk] ?? 0) + 1;
 
     const tools = [];
     for (const b of Array.isArray(e.message.content) ? e.message.content : []) {
@@ -430,6 +504,15 @@ function parseClaude(raw, { id, dirName, withTurns = false }) {
  * token_count event is the session total — summing them would multiply the
  * figure by the number of turns. `input_tokens` there INCLUDES
  * `cached_input_tokens`, which bill as cache reads, so the two are separated.
+ *
+ * A rollout whose `session_meta.thread_source` is `subagent` is a delegated
+ * thread whose file replays its parent thread's ENTIRE prior token history
+ * as duplicate events before its own new turns (openai/codex thread_spawn
+ * behavior — see ccusage/ccusage#950, which measured up to 91x cost
+ * inflation from exactly this). Its cumulative `total_token_usage` therefore
+ * double-counts tokens the parent session already billed, so it is excluded
+ * from cost/token aggregation here; the session record itself is kept
+ * (`threadSource` is surfaced on it) so it stays visible/auditable.
  */
 function parseCodex(raw, { id, withTurns = false }) {
   const rec = blankSession(id, 'codex');
@@ -446,6 +529,7 @@ function parseCodex(raw, { id, withTurns = false }) {
     if (e.type === 'session_meta') {
       if (typeof p.id === 'string' && p.id) rec.id = p.id;
       if (typeof p.cwd === 'string') applyProject(rec, projectLabel(p.cwd, null));
+      if (typeof p.thread_source === 'string') rec.threadSource = p.thread_source;
       continue;
     }
     if (e.type === 'turn_context') {
@@ -464,7 +548,10 @@ function parseCodex(raw, { id, withTurns = false }) {
       rec.prompts++;
       const text = typeof p.message === 'string' ? p.message : '';
       if (!firstPrompt) firstPrompt = text;
-      if (withTurns && text) turns.push({ role: 'user', at: new Date(ms).toISOString(), text, prompt: true });
+      // Codex rollouts record only real prompts as user_message events — tool
+      // output travels in other event types that are not surfaced as turns —
+      // so every Codex user turn is kind 'prompt' by construction.
+      if (withTurns && text) turns.push({ role: 'user', at: new Date(ms).toISOString(), text, prompt: true, kind: 'prompt' });
       continue;
     }
     if (p.type === 'agent_message') {
@@ -482,7 +569,7 @@ function parseCodex(raw, { id, withTurns = false }) {
     }
   }
 
-  if (lastUsage) {
+  if (lastUsage && rec.threadSource !== 'subagent') {
     const cacheRead = Number(lastUsage.cached_input_tokens) || 0;
     const gross = Number(lastUsage.input_tokens) || 0;
     const at = Number.isFinite(lastUsageAt) ? lastUsageAt : (rec.end ?? rec.start ?? Date.now());
@@ -491,6 +578,7 @@ function parseCodex(raw, { id, withTurns = false }) {
       output: Number(lastUsage.output_tokens) || 0,
       cacheRead,
       cacheWrite: 0,
+      responses: rec.responses,
     });
   }
 
@@ -712,7 +800,8 @@ function aggregate(records, { days, now, cutoff, deps }) {
       worktree: rec.worktree ?? null,
       start: new Date(rec.start ?? rec.end).toISOString(),
       minutes: Math.round(((rec.end - (rec.start ?? rec.end)) / 60_000) * 10) / 10,
-      prompts: rec.prompts, responses: rec.responses, sidechain: rec.sidechain,
+      prompts: rec.prompts, responses: rec.responses, exceptions: rec.exceptions,
+      sidechain: rec.sidechain, threadSource: rec.threadSource,
       models: rec.models.slice(),
       input, output, cacheRead, cacheWrite,
       tokens: input + output + cacheRead + cacheWrite,
@@ -737,7 +826,7 @@ function aggregate(records, { days, now, cutoff, deps }) {
   sessions.sort((a, b) => b.cost - a.cost || Date.parse(b.start) - Date.parse(a.start));
 
   const totals = {
-    sessions: sessions.length, responses: 0, input: 0, output: 0,
+    sessions: sessions.length, responses: 0, exceptions: 0, input: 0, output: 0,
     cacheRead: 0, cacheWrite: 0, tokens: 0, cost: 0,
     spanMinutes: 0, spanUnionSeconds: 0, engagedSeconds: 0,
   };
@@ -747,7 +836,8 @@ function aggregate(records, { days, now, cutoff, deps }) {
   let spanMs = 0;
 
   for (const s of sessions) {
-    totals.responses += s.responses; totals.input += s.input; totals.output += s.output;
+    totals.responses += s.responses; totals.exceptions += s.exceptions;
+    totals.input += s.input; totals.output += s.output;
     totals.cacheRead += s.cacheRead; totals.cacheWrite += s.cacheWrite;
     totals.tokens += s.tokens; totals.cost += s.cost;
     spanMs += s._span[1] - s._span[0];
@@ -1038,7 +1128,8 @@ export async function readSession(id, o = {}) {
       start: rec.start === null ? null : new Date(rec.start).toISOString(),
       end: rec.end === null ? null : new Date(rec.end).toISOString(),
       minutes: rec.start === null ? 0 : Math.round(((rec.end - rec.start) / 60_000) * 10) / 10,
-      prompts: rec.prompts, responses: rec.responses, sidechain: rec.sidechain,
+      prompts: rec.prompts, responses: rec.responses, exceptions: rec.exceptions,
+      sidechain: rec.sidechain, threadSource: rec.threadSource,
       models: rec.models.slice(), tools: { ...rec.tools },
       skill: rec.skill, plugin: rec.plugin,
       // Priced here from the same per-model rows aggregate() uses, rather than

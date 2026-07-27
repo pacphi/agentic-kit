@@ -150,8 +150,7 @@ When **both** hosts are enabled and `agentic-qe ≥ 3.13.1` is installed, `ak` s
 review, …) is routed to the host and model that suits it — Claude for reasoning/review,
 Codex for execution — and materialized into `.agentic-qe/llm-config.json` (`agentOverrides`).
 It's seeded automatically on `ak x provider pick` / `ak setup`; nothing happens for
-claude-only projects. Grounded in ruflo's own dual-mode templates (see
-[docs/adr/](adr/) — ADR-0001..0005).
+claude-only projects.
 
 ```bash
 ak x provider pick --host claude,codex        # enables both → seeds routing → prints the table
@@ -215,7 +214,7 @@ The two config stores each knob below lives in — and their precedence — are 
 
 | You want to…                         | `ak` way                          | The raw ruflo/aqe way it maps to                    |
 | ------------------------------------ | --------------------------------- | --------------------------------------------------- |
-| Enable claude/codex hosts            | `ak x provider pick`              | `ENABLE_CLAUDE_CODE` / `ENABLE_CODEX` env (ADR-034) + `ruflo init --dual` |
+| Enable claude/codex hosts            | `ak x provider pick`              | `ENABLE_CLAUDE_CODE` / `ENABLE_CODEX` env + `ruflo init --dual` |
 | Register a ruflo LLM provider        | `--provider openai:gpt-5.6`       | `ruflo providers configure -p openai -m gpt-5.6`    |
 | Set which LLM runs QE                | `--aqe-provider gemini`           | `AQE_LLM_PROVIDER=gemini` (env)                     |
 | Order QE's fallback chain            | `--aqe-fallback '…'`              | edit `.agentic-qe/llm-config.json` / `aqe llm-router config` |
@@ -240,3 +239,12 @@ status` and `ak sync` keep everything converged and flag drift in between.
 **The shape of the whole thing:** Level 0 is the 90% case and costs nothing. Each level up is
 one flag, and the bottom is always the tools' own knobs — `ak` never traps your config, it
 just makes the good default automatic and the customization reversible.
+
+## Appendix — design references
+
+- Per-activity routing and dual-host seeding: [docs/adr/](adr/) ADR-0001..0005;
+  grounded in ruflo's own dual-mode templates.
+- Primary-host selection and ambidextrous mirroring:
+  [ADR-0006](adr/0006-primary-host-and-ambidextrous-mirroring.md).
+- Host env flags (`ENABLE_CLAUDE_CODE` / `ENABLE_CODEX`): upstream ruflo
+  ADR-034, "Optional MCP Backends".

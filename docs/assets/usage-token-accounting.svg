@@ -1,0 +1,127 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="880" height="456" viewBox="0 0 880 456"
+     role="img" aria-labelledby="fig-title fig-desc">
+  <title id="fig-title">Two token vocabularies: per-turn deltas vs cumulative snapshots</title>
+  <desc id="fig-desc">Claude Code reports a usage delta on every assistant turn, so a session total is the sum of the turns; Codex CLI reports a cumulative token_count snapshot, so a session total is the last snapshot and summing the snapshots double-counts.</desc>
+  <style>
+    svg { font-family: system-ui, -apple-system, "Segoe UI", sans-serif; }
+    :root {
+      --surface: #fcfcfb; --border: rgba(11,11,11,0.10);
+      --ink: #0b0b0b; --ink2: #52514e; --muted: #898781;
+      --grid: #e1e0d9; --axis: #c3c2b7;
+      --s1: #2a78d6; --s2: #eb6834; --s3: #1baf7a;
+      --r1: #86b6ef; --r2: #5598e7; --r3: #2a78d6; --r4: #184f95;
+      --wash1: rgba(42,120,214,0.08); --wash2: rgba(235,104,52,0.08);
+      --wash3: rgba(27,175,122,0.08); --washg: rgba(137,135,129,0.10);
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --surface: #1a1a19; --border: rgba(255,255,255,0.10);
+        --ink: #ffffff; --ink2: #c3c2b7; --muted: #898781;
+        --grid: #2c2c2a; --axis: #383835;
+        --s1: #3987e5; --s2: #d95926; --s3: #199e70;
+        --wash1: rgba(57,135,229,0.14); --wash2: rgba(217,89,38,0.14);
+        --wash3: rgba(25,158,112,0.14); --washg: rgba(137,135,129,0.14);
+      }
+    }
+    text { fill: var(--ink); font-size: 12px; }
+    .h1 { font-size: 16px; font-weight: 600; }
+    .h2 { font-size: 13px; font-weight: 600; }
+    .t2 { fill: var(--ink2); } .tm { fill: var(--muted); }
+    .small { font-size: 11px; }
+    .tiny { font-size: 10.5px; }
+    .mono { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 11.5px; }
+    .num { font-variant-numeric: tabular-nums; }
+    .box { fill: var(--surface); stroke: var(--border); }
+    .flow { stroke: var(--muted); stroke-width: 1.5; fill: none; }
+    .arrfill { fill: var(--muted); }
+    .p1 { fill: var(--wash1); stroke: var(--border); }
+    .p2 { fill: var(--wash2); stroke: var(--border); }
+    .b1 { fill: var(--s1); }
+    .b2 { fill: var(--s2); }
+    .faded { fill-opacity: 0.3; stroke: var(--s2); stroke-opacity: 0.6; stroke-width: 1; }
+    .tot1 { fill: var(--surface); stroke: var(--s1); stroke-width: 1.5; }
+    .tot2 { fill: var(--surface); stroke: var(--s2); stroke-width: 1.5; }
+    .callout { fill: var(--wash2); stroke: var(--s2); stroke-width: 1.5; }
+    .sw1 { fill: var(--s1); }
+    .sw2 { fill: var(--s2); }
+  </style>
+  <defs>
+    <marker id="arr" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7"
+            markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0L10 5L0 10z" class="arrfill"/>
+    </marker>
+  </defs>
+  <rect x="0.5" y="0.5" width="879" height="455" rx="8" fill="var(--surface)" stroke="var(--border)"/>
+
+  <!-- header -->
+  <text class="h1" x="24" y="34">Two token vocabularies: per-turn deltas vs cumulative snapshots</text>
+  <text class="small t2" x="24" y="55">Illustrative numbers — the shapes, not the magnitudes, are the point.</text>
+
+  <!-- legend -->
+  <rect class="sw1" x="676" y="25" width="10" height="10" rx="2"/>
+  <text class="small" x="692" y="34">Claude Code</text>
+  <rect class="sw2" x="772" y="25" width="10" height="10" rx="2"/>
+  <text class="small" x="788" y="34">Codex CLI</text>
+  <text class="tiny tm" x="848" y="55" text-anchor="end">bar lengths scale within each panel</text>
+
+  <!-- ============ LEFT PANEL: Claude Code ============ -->
+  <rect class="p1" x="16.5" y="76.5" width="415" height="275" rx="6"/>
+  <rect class="sw1" x="32" y="92" width="10" height="10" rx="2"/>
+  <text class="h2" x="48" y="101">CLAUDE CODE</text>
+  <text class="small t2" x="32" y="121">each assistant turn carries its own <tspan class="mono">usage</tspan> object</text>
+
+  <rect class="box" x="32" y="140" width="118" height="30" rx="6"/>
+  <text class="small" x="44" y="159">assistant turn 1</text>
+  <rect class="b1" x="162" y="145" width="48" height="20" rx="3"/>
+  <text class="mono num" x="220" y="159">out 2k</text>
+
+  <rect class="box" x="32" y="188" width="118" height="30" rx="6"/>
+  <text class="small" x="44" y="207">assistant turn 2</text>
+  <rect class="b1" x="162" y="193" width="120" height="20" rx="3"/>
+  <text class="mono num" x="292" y="207">out 5k</text>
+
+  <rect class="box" x="32" y="236" width="118" height="30" rx="6"/>
+  <text class="small" x="44" y="255">assistant turn 3</text>
+  <rect class="b1" x="162" y="241" width="72" height="20" rx="3"/>
+  <text class="mono num" x="244" y="255">out 3k</text>
+
+  <path class="flow" d="M224 272 L224 288" marker-end="url(#arr)"/>
+  <rect class="tot1" x="32.75" y="292.75" width="382.5" height="43.5" rx="6"/>
+  <text x="224" y="319" text-anchor="middle">session total = Σ per-turn = <tspan class="mono num">10k</tspan></text>
+
+  <!-- ============ RIGHT PANEL: Codex CLI ============ -->
+  <rect class="p2" x="448.5" y="76.5" width="415" height="275" rx="6"/>
+  <rect class="sw2" x="464" y="92" width="10" height="10" rx="2"/>
+  <text class="h2" x="480" y="101">CODEX CLI</text>
+  <text class="small t2" x="464" y="121"><tspan class="mono">event_msg</tspan> → <tspan class="mono">token_count</tspan> is a CUMULATIVE snapshot</text>
+
+  <rect class="box" x="464" y="140" width="98" height="30" rx="6"/>
+  <text class="small" x="476" y="159">snapshot 1</text>
+  <rect class="b2 faded" x="574" y="145" width="38" height="20" rx="3"/>
+  <text class="mono num" x="622" y="159">10k</text>
+  <rect class="box" x="774" y="146" width="74" height="18" rx="4"/>
+  <text class="tiny tm" x="811" y="159" text-anchor="middle">superseded</text>
+
+  <rect class="box" x="464" y="188" width="98" height="30" rx="6"/>
+  <text class="small" x="476" y="207">snapshot 2</text>
+  <rect class="b2 faded" x="574" y="193" width="94" height="20" rx="3"/>
+  <text class="mono num" x="678" y="207">25k</text>
+  <rect class="box" x="774" y="194" width="74" height="18" rx="4"/>
+  <text class="tiny tm" x="811" y="207" text-anchor="middle">superseded</text>
+
+  <rect class="box" x="464" y="236" width="98" height="30" rx="6"/>
+  <text class="small" x="476" y="255">snapshot 3</text>
+  <rect class="b2" x="574" y="241" width="150" height="20" rx="3"/>
+  <text class="mono num" x="734" y="255">40k</text>
+
+  <path class="flow" d="M656 272 L656 288" marker-end="url(#arr)"/>
+  <rect class="tot2" x="464.75" y="292.75" width="382.5" height="43.5" rx="6"/>
+  <text x="656" y="319" text-anchor="middle">session total = LAST snapshot = <tspan class="mono num">40k</tspan></text>
+
+  <!-- ============ FOOTER: anti-pattern + subagent note ============ -->
+  <rect class="callout" x="16.75" y="366.75" width="846.5" height="37.5" rx="6"/>
+  <text class="small" x="32" y="390">summing snapshots double-counts: <tspan class="mono num">10k + 25k + 40k = 75k ≠ 40k</tspan> — never sum cumulative totals</text>
+
+  <text class="small tm" x="32" y="424"><tspan class="mono">session_meta</tspan> <tspan class="mono">thread_source: "subagent"</tspan> ⇒ the whole rollout is a <tspan class="mono">thread_spawn</tspan> replay of the</text>
+  <text class="small tm" x="32" y="440">parent's spend — excluded from aggregation, session kept visible</text>
+</svg>

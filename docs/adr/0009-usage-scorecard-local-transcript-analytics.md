@@ -244,6 +244,23 @@ masking, because masking already runs before the slice — so `originalChars` de
 *truncation* alone, and must not be read as a raw-file length. Marking the two kinds of withholding
 with different vocabulary keeps them distinguishable to the reader.
 
+**Amendment (2026-07-26).** The reader labelled every `role: "user"` turn **"you"** — but the
+Messages API records *tool results* and *harness context injections* under the user role, so in a
+heavily agentic session the overwhelming majority of "you" turns were output the harness fed back to
+the model, not anything the person typed (a measured real session: 20 human prompts against 276
+tool results, every one attributed to the human). Misattributing the harness's work to the person is
+the same honesty failure this section exists to prevent, in the attribution column instead of the
+content column. The parser now stamps each user turn with a `kind` — `prompt` (the person, including
+image-only pastes that carry no text block), `tool-result` (a `tool_result` block fed back after a
+tool call), or `context` (`isMeta` harness injections) — and the renderer labels from *kind*, never
+from role: `you` is reserved for `prompt`, tool results render as **tool result** and context as
+**context**, both purple like the tool chips and carrying a hover title stating the harness — not
+the person — sent them. The existing `prompt` boolean (which drives the prompt *counts*) is
+unchanged; `kind` is deliberately broader on the image-only edge, because "not countable as a text
+prompt" and "not the human" are different claims. Codex rollouts record only real prompts as
+`user_message` events, so every Codex user turn is `kind: prompt` by construction. Full mechanics:
+[`docs/TRANSCRIPTS.md`](../TRANSCRIPTS.md).
+
 ## Consequences
 
 ### Good
@@ -274,6 +291,11 @@ with different vocabulary keeps them distinguishable to the reader.
 
 ## References
 
+- **[`docs/USAGE-SCORECARD-METRICS.md`](../USAGE-SCORECARD-METRICS.md)** — the maintainer-facing
+  metrics reference: every Scorecard-tab figure's exact formula, source-line citation, worked
+  example, and external pricing citation, added 2026-07-25 after a user-reported Codex-vs-Claude
+  cost discrepancy traced to two real bugs in `parseCodex` (fixed same day). Read that document to
+  verify or dispute a specific number; read this ADR for the design motivation behind it.
 - ADR-0005 (dashboard as read-only offline-first diagnostic); ADR-0007 (egress split);
   ADR-0008 (machine vs repo scope).
 - Spec (archived on completion, per `docs/archive/README.md`): [`docs/archive/2026-07-25-superpowers-spec-usage-scorecard.md`](../archive/2026-07-25-superpowers-spec-usage-scorecard.md).

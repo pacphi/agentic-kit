@@ -1,0 +1,152 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="880" height="644" viewBox="0 0 880 644"
+     role="img" aria-labelledby="fig-title fig-desc">
+  <title id="fig-title">role is not author: how a user-role turn gets its kind</title>
+  <desc id="fig-desc">An ordered first-match-wins cascade that assigns kind tool-result, context, or prompt to a user-role transcript turn, and a stacked bar showing that of 302 user-role turns in a real 884-turn session, 276 were tool results, 20 were prompts, and 6 were harness context.</desc>
+  <style>
+    svg { font-family: system-ui, -apple-system, "Segoe UI", sans-serif; }
+    :root {
+      --surface: #fcfcfb; --border: rgba(11,11,11,0.10);
+      --ink: #0b0b0b; --ink2: #52514e; --muted: #898781;
+      --grid: #e1e0d9; --axis: #c3c2b7;
+      --s1: #2a78d6; --s2: #eb6834; --s3: #1baf7a;
+      --r1: #86b6ef; --r2: #5598e7; --r3: #2a78d6; --r4: #184f95;
+      --wash1: rgba(42,120,214,0.08); --wash2: rgba(235,104,52,0.08);
+      --wash3: rgba(27,175,122,0.08); --washg: rgba(137,135,129,0.10);
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --surface: #1a1a19; --border: rgba(255,255,255,0.10);
+        --ink: #ffffff; --ink2: #c3c2b7; --muted: #898781;
+        --grid: #2c2c2a; --axis: #383835;
+        --s1: #3987e5; --s2: #d95926; --s3: #199e70;
+        --wash1: rgba(57,135,229,0.14); --wash2: rgba(217,89,38,0.14);
+        --wash3: rgba(25,158,112,0.14); --washg: rgba(137,135,129,0.14);
+      }
+    }
+    text { fill: var(--ink); font-size: 12px; }
+    .h1 { font-size: 16px; font-weight: 600; }
+    .h2 { font-size: 13px; font-weight: 600; }
+    .t2 { fill: var(--ink2); } .tm { fill: var(--muted); }
+    .small { font-size: 11px; }
+    .mono { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 11.5px; }
+    .mi { font-family: ui-monospace, "SF Mono", Menlo, monospace; }
+    .num { font-variant-numeric: tabular-nums; }
+    .box { fill: var(--surface); stroke: var(--border); }
+    .flow { stroke: var(--muted); stroke-width: 1.5; fill: none; }
+    .arrfill { fill: var(--muted); }
+    .badge { fill: var(--washg); stroke: var(--border); }
+    .bnum { font-size: 11px; font-weight: 600; }
+  </style>
+  <defs>
+    <marker id="arr" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7"
+            markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0L10 5L0 10z" class="arrfill"/>
+    </marker>
+  </defs>
+  <rect x="0.5" y="0.5" width="879" height="643" rx="8" fill="var(--surface)" stroke="var(--border)"/>
+
+  <!-- ── header ───────────────────────────────────────────────────────────── -->
+  <text class="h1" x="28" y="34">role ≠ author: how a user-role turn gets its <tspan class="mi">kind</tspan></text>
+  <text class="t2 small" x="28" y="54">The Messages API records tool results and harness context under <tspan class="mono">role: "user"</tspan> — <tspan class="mono">kind</tspan> restores authorship.</text>
+
+  <!-- ── top half: ordered decision cascade ───────────────────────────────── -->
+  <text class="h2" x="28" y="80">Decision cascade</text>
+  <text class="tm small" x="158" y="80">first match wins, evaluated top to bottom</text>
+
+  <!-- entry -->
+  <rect class="box" x="168" y="90" width="140" height="26" rx="13"/>
+  <text x="238" y="107" text-anchor="middle">user-role turn</text>
+  <line class="flow" x1="238" y1="116" x2="238" y2="130" marker-end="url(#arr)"/>
+
+  <!-- test 1 -->
+  <rect class="box" x="28" y="132" width="420" height="46" rx="6"/>
+  <circle class="badge" cx="48" cy="155" r="10"/>
+  <text class="bnum" x="48" y="159" text-anchor="middle">1</text>
+  <text x="68" y="159">content carries a <tspan class="mono">tool_result</tspan> block?</text>
+  <line class="flow" x1="448" y1="155" x2="482" y2="155" marker-end="url(#arr)"/>
+  <text class="tm small" x="465" y="148" text-anchor="middle">yes</text>
+
+  <!-- outcome 1: tool-result -->
+  <rect x="484" y="132" width="368" height="110" rx="6" fill="var(--wash2)" stroke="var(--border)"/>
+  <rect x="498" y="145" width="10" height="10" rx="2" fill="var(--s2)"/>
+  <text class="mono" x="516" y="154">kind: 'tool-result'</text>
+  <text class="t2 small" x="498" y="173">output the harness fed back after a tool call</text>
+  <text class="t2 small" x="498" y="188">(labelled “tool result” in the UI)</text>
+  <rect class="box" x="498" y="198" width="340" height="34" rx="4"/>
+  <text class="tm small" x="508" y="213">outranks context: a <tspan class="mono">tool_result</tspan> on an <tspan class="mono">isMeta</tspan></text>
+  <text class="tm small" x="508" y="227">entry is still tool feedback.</text>
+
+  <!-- no → test 2 -->
+  <line class="flow" x1="238" y1="178" x2="238" y2="246" marker-end="url(#arr)"/>
+  <text class="tm small" x="248" y="202">no</text>
+
+  <!-- test 2 -->
+  <rect class="box" x="28" y="248" width="420" height="84" rx="6"/>
+  <circle class="badge" cx="48" cy="271" r="10"/>
+  <text class="bnum" x="48" y="275" text-anchor="middle">2</text>
+  <text class="small" x="68" y="275"><tspan class="mono">isMeta</tspan>, OR text opens with a harness-output envelope</text>
+  <text class="small" x="68" y="290">(<tspan class="mono">HARNESS_OUTPUT_RE</tspan>: <tspan class="mono">task-notification</tspan>,</text>
+  <text class="small" x="68" y="305"><tspan class="mono">bash-stdout/-stderr, local-command-stdout/-stderr,</tspan></text>
+  <text class="small" x="68" y="320"><tspan class="mono">local-command-caveat</tspan>)?</text>
+  <line class="flow" x1="448" y1="270" x2="482" y2="270" marker-end="url(#arr)"/>
+  <text class="tm small" x="465" y="263" text-anchor="middle">yes</text>
+
+  <!-- outcome 2: context -->
+  <rect x="484" y="248" width="368" height="54" rx="6" fill="var(--wash3)" stroke="var(--border)"/>
+  <rect x="498" y="261" width="10" height="10" rx="2" fill="var(--s3)"/>
+  <text class="mono" x="516" y="270">kind: 'context'</text>
+  <text class="t2 small" x="498" y="289">harness-injected; neither the person nor the model</text>
+
+  <!-- else → outcome 3 -->
+  <path class="flow" d="M238 332 L238 358 Q238 364 244 364 L482 364" marker-end="url(#arr)"/>
+  <text class="tm small" x="250" y="350">else</text>
+
+  <!-- outcome 3: prompt -->
+  <rect x="484" y="322" width="368" height="84" rx="6" fill="var(--wash1)" stroke="var(--border)"/>
+  <rect x="498" y="335" width="10" height="10" rx="2" fill="var(--s1)"/>
+  <text class="mono" x="516" y="344">kind: 'prompt'</text>
+  <text class="t2 small" x="498" y="363">the person — includes <tspan class="mono">bash-input</tspan> (a ! command they</text>
+  <text class="t2 small" x="498" y="378">typed), slash-command records, and image-only pastes</text>
+  <text class="t2 small" x="498" y="393">(not countable as a text prompt, but still the person acting)</text>
+
+  <!-- side note: codex -->
+  <rect x="28" y="376" width="3" height="32" rx="1.5" fill="var(--axis)"/>
+  <text class="tm small" x="42" y="389">Codex user turns are <tspan class="mono">kind: 'prompt'</tspan> by construction —</text>
+  <text class="tm small" x="42" y="404">rollouts only record real prompts.</text>
+
+  <line x1="28" y1="436" x2="852" y2="436" stroke="var(--border)"/>
+
+  <!-- ── bottom half: measured split ──────────────────────────────────────── -->
+  <text class="h2" x="28" y="464">Measured on a real 884-turn session</text>
+  <text class="t2 small" x="28" y="482">all 302 user-role turns in that session, by <tspan class="mono">kind</tspan></text>
+
+  <!-- value labels + leader ticks -->
+  <text class="num" x="55" y="506" text-anchor="middle">20</text>
+  <text class="tm small num" x="55" y="519" text-anchor="middle">6.6%</text>
+  <line x1="55" y1="524" x2="55" y2="532" stroke="var(--axis)"/>
+
+  <text class="num" x="459" y="506" text-anchor="middle">276</text>
+  <text class="tm small num" x="459" y="519" text-anchor="middle">91.4%</text>
+  <line x1="459" y1="524" x2="459" y2="532" stroke="var(--axis)"/>
+
+  <text class="num" x="844" y="506" text-anchor="middle">6</text>
+  <text class="tm small num" x="844" y="519" text-anchor="middle">2.0%</text>
+  <line x1="844" y1="524" x2="844" y2="532" stroke="var(--axis)"/>
+
+  <!-- stacked bar: 100% of the 302 user-role turns -->
+  <rect x="28" y="532" width="54.3" height="22" rx="3" fill="var(--s1)"/>
+  <rect x="84.3" y="532" width="749.4" height="22" rx="3" fill="var(--s2)"/>
+  <rect x="835.7" y="532" width="16.3" height="22" rx="3" fill="var(--s3)"/>
+
+  <!-- legend -->
+  <rect x="28" y="575" width="10" height="10" rx="2" fill="var(--s1)"/>
+  <text x="44" y="584"><tspan class="mono">prompt</tspan> (you)</text>
+  <rect x="138" y="575" width="10" height="10" rx="2" fill="var(--s2)"/>
+  <text class="mono" x="154" y="584">tool-result</text>
+  <rect x="250" y="575" width="10" height="10" rx="2" fill="var(--s3)"/>
+  <text class="mono" x="266" y="584">context</text>
+
+  <!-- takeaway -->
+  <rect x="28" y="598" width="824" height="30" rx="6" fill="var(--wash2)" stroke="var(--border)"/>
+  <text class="small" x="42" y="617">~93% of user-role turns are not the person — <tspan class="mono">kind</tspan> is what tells them apart.</text>
+</svg>

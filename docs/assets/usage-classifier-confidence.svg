@@ -1,0 +1,141 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="880" height="496" viewBox="0 0 880 496"
+     role="img" aria-labelledby="fig-title fig-desc">
+  <title id="fig-title">Classifier confidence curves</title>
+  <desc id="fig-desc">Confidence rises with the winner's margin over the runner-up and with its raw topScore, but is discarded below a floor of 0.28 and capped at 0.9, so only provenance can reach 1.0.</desc>
+  <style>
+    svg { font-family: system-ui, -apple-system, "Segoe UI", sans-serif; }
+    :root {
+      --surface: #fcfcfb; --border: rgba(11,11,11,0.10);
+      --ink: #0b0b0b; --ink2: #52514e; --muted: #898781;
+      --grid: #e1e0d9; --axis: #c3c2b7;
+      --s1: #2a78d6; --s2: #eb6834; --s3: #1baf7a;
+      --r1: #86b6ef; --r2: #5598e7; --r3: #2a78d6; --r4: #184f95;
+      --wash1: rgba(42,120,214,0.08); --wash2: rgba(235,104,52,0.08);
+      --wash3: rgba(27,175,122,0.08); --washg: rgba(137,135,129,0.10);
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --surface: #1a1a19; --border: rgba(255,255,255,0.10);
+        --ink: #ffffff; --ink2: #c3c2b7; --muted: #898781;
+        --grid: #2c2c2a; --axis: #383835;
+        --s1: #3987e5; --s2: #d95926; --s3: #199e70;
+        --wash1: rgba(57,135,229,0.14); --wash2: rgba(217,89,38,0.14);
+        --wash3: rgba(25,158,112,0.14); --washg: rgba(137,135,129,0.14);
+      }
+    }
+    text { fill: var(--ink); font-size: 12px; }
+    .h1 { font-size: 16px; font-weight: 600; }
+    .h2 { font-size: 13px; font-weight: 600; }
+    .t2 { fill: var(--ink2); } .tm { fill: var(--muted); }
+    .small { font-size: 11px; }
+    .mono { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 11.5px; }
+    .num { font-variant-numeric: tabular-nums; }
+    .box { fill: var(--surface); stroke: var(--border); }
+    .flow { stroke: var(--muted); stroke-width: 1.5; fill: none; }
+    .arrfill { fill: var(--muted); }
+    .grid { stroke: var(--grid); stroke-width: 1; }
+    .ax { stroke: var(--axis); stroke-width: 1; }
+    .ref { stroke: var(--muted); stroke-width: 1.25; stroke-dasharray: 4 3; fill: none; }
+    .curve { fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+    .c1 { stroke: var(--r1); } .c2 { stroke: var(--r2); }
+    .c3 { stroke: var(--r3); } .c4 { stroke: var(--r4); }
+    .f1 { fill: var(--r1); } .f2 { fill: var(--r2); }
+    .f3 { fill: var(--r3); } .f4 { fill: var(--r4); }
+    .lead { stroke: var(--muted); stroke-width: 1; fill: none; }
+    .halo { stroke: var(--surface); stroke-width: 1.75; }
+  </style>
+  <defs>
+    <marker id="arr" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7"
+            markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0L10 5L0 10z" class="arrfill"/>
+    </marker>
+  </defs>
+  <rect x="0.5" y="0.5" width="879" height="495" rx="8" fill="var(--surface)" stroke="var(--border)"/>
+
+  <!-- ── heading ───────────────────────────────────────────────────────── -->
+  <text class="h1" x="24" y="34">Confidence = strength × (0.35 + 0.65 × margin), gated</text>
+  <text class="t2 small" x="24" y="54">The floor discards weak winners; the cap reserves 1.0 for provenance.</text>
+
+  <!-- ── plot: x 96..656 (margin 0..1), y 376..96 (confidence 0..1) ────── -->
+
+  <!-- below-floor wash -->
+  <rect x="96" y="297.6" width="560" height="78.4" style="fill:var(--washg)"/>
+  <line x1="96" y1="297.6" x2="656" y2="297.6" class="ref"/>
+
+  <!-- gridline at 0.5 -->
+  <line x1="96" y1="236" x2="656" y2="236" class="grid"/>
+
+  <!-- axes -->
+  <line x1="96" y1="96" x2="96" y2="376" class="ax"/>
+  <line x1="96" y1="376" x2="656" y2="376" class="ax"/>
+  <line x1="96" y1="96" x2="108" y2="96" class="ax"/>
+  <line x1="96" y1="376" x2="96" y2="381" class="ax"/>
+  <line x1="236" y1="376" x2="236" y2="381" class="ax"/>
+  <line x1="376" y1="376" x2="376" y2="381" class="ax"/>
+  <line x1="516" y1="376" x2="516" y2="381" class="ax"/>
+  <line x1="656" y1="376" x2="656" y2="381" class="ax"/>
+
+  <!-- y tick labels -->
+  <text class="t2 small num" x="86" y="100"   text-anchor="end">1</text>
+  <text class="t2 small num" x="86" y="128"   text-anchor="end">0.9</text>
+  <text class="t2 small num" x="86" y="240"   text-anchor="end">0.5</text>
+  <text class="t2 small num" x="86" y="301.6" text-anchor="end">0.28</text>
+  <text class="t2 small num" x="86" y="380"   text-anchor="end">0</text>
+  <text class="t2 small" x="44" y="236" text-anchor="middle"
+        transform="rotate(-90 44 236)">confidence</text>
+
+  <!-- x tick labels -->
+  <text class="t2 small num" x="96"  y="393" text-anchor="middle">0</text>
+  <text class="t2 small num" x="236" y="393" text-anchor="middle">0.25</text>
+  <text class="t2 small num" x="376" y="393" text-anchor="middle">0.5</text>
+  <text class="t2 small num" x="516" y="393" text-anchor="middle">0.75</text>
+  <text class="t2 small num" x="656" y="393" text-anchor="middle">1</text>
+  <text class="t2 small" x="376" y="412" text-anchor="middle">margin over runner-up</text>
+
+  <!-- cap reference line -->
+  <line x1="96" y1="124" x2="656" y2="124" class="ref"/>
+  <text class="small" x="104" y="141"><tspan class="mono">RULE_CONFIDENCE_CAP</tspan><tspan class="t2"> — rules can never reach </tspan><tspan class="t2 num">1.0</tspan></text>
+
+  <!-- curves -->
+  <path class="curve c1" d="M96 347.58L656 294.80"/>
+  <path class="curve c2" d="M96 320.14L656 216.40"/>
+  <path class="curve c3" d="M96 291.72L656 135.20"/>
+  <path class="curve c4" d="M96 278.00L569.85 124.00L656 124.00"/>
+
+  <!-- below-floor annotation -->
+  <text class="small" x="112" y="364"><tspan class="t2">Unclassified — below </tspan><tspan class="mono">CONFIDENCE_FLOOR</tspan><tspan class="t2 num"> 0.28</tspan><tspan class="t2"> (“weak signal”)</tspan></text>
+
+  <!-- worked example on the topScore-6 curve -->
+  <path class="lead" d="M654 143L644 198"/>
+  <circle cx="656" cy="135.2" r="5" class="f3 halo"/>
+  <text class="small t2" x="640" y="208" text-anchor="end">sole scorer: margin <tspan class="num">1.0</tspan> → <tspan class="num">0.86</tspan></text>
+
+  <!-- provenance-only point, above the plotted frame -->
+  <path d="M600 89L606.5 96L600 103L593.5 96Z" style="fill:var(--s2)" class="halo"/>
+  <text class="small" x="586" y="100" text-anchor="end"><tspan class="num">1.0</tspan><tspan class="t2"> = provenance only (attributed skill/plugin)</tspan></text>
+
+  <!-- direct curve labels -->
+  <rect x="666" y="115.5" width="9" height="9" rx="2" class="f4"/>
+  <text x="681" y="124"><tspan class="mono">topScore</tspan> ≥7</text>
+  <rect x="666" y="145.5" width="9" height="9" rx="2" class="f3"/>
+  <text class="num" x="681" y="154">6</text>
+  <rect x="666" y="212" width="9" height="9" rx="2" class="f2"/>
+  <text class="num" x="681" y="220.5">4</text>
+  <rect x="666" y="290.3" width="9" height="9" rx="2" class="f1"/>
+  <text class="num" x="681" y="299">2</text>
+
+  <!-- ── legend ────────────────────────────────────────────────────────── -->
+  <text class="mono t2" x="96" y="436">topScore</text>
+  <rect x="166" y="427.5" width="10" height="10" rx="2" class="f4"/>
+  <text class="small" x="182" y="436">≥7 · <tspan class="t2">strength</tspan> <tspan class="num">1.0</tspan></text>
+  <rect x="304" y="427.5" width="10" height="10" rx="2" class="f3"/>
+  <text class="small" x="320" y="436"><tspan class="num">6</tspan> · <tspan class="t2">strength</tspan> <tspan class="num">0.86</tspan></text>
+  <rect x="442" y="427.5" width="10" height="10" rx="2" class="f2"/>
+  <text class="small" x="458" y="436"><tspan class="num">4</tspan> · <tspan class="t2">strength</tspan> <tspan class="num">0.57</tspan></text>
+  <rect x="580" y="427.5" width="10" height="10" rx="2" class="f1"/>
+  <text class="small" x="596" y="436"><tspan class="num">2</tspan> · <tspan class="t2">strength</tspan> <tspan class="num">0.29</tspan></text>
+
+  <!-- ── footnote ──────────────────────────────────────────────────────── -->
+  <text class="small tm" x="24" y="462">× grounded: if the winner has zero title evidence, confidence is ×<tspan class="num">0</tspan> — tool-mix alone can never classify.</text>
+  <text class="small tm" x="24" y="478">A dead-even tie keeps only <tspan class="mono">TIE_FLOOR</tspan> <tspan class="num">0.35</tspan> of its strength.</text>
+</svg>

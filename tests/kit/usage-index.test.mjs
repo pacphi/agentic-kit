@@ -347,6 +347,58 @@ test('Codex tokens come from the LAST token_count event, never the sum', async (
   assert.equal(s.prompts, 1);
   assert.equal(s.project, 'other');
   assert.equal(s.minutes, 3);
+  // byModel must carry the session's response count too — it used to be
+  // dropped for Codex rows (Claude passed `responses: 1` per turn into
+  // addUsage; Codex passed none), leaving every Codex model stuck at "0 resp"
+  // in the dashboard regardless of real token/cost volume.
+  assert.equal(agg.byModel['gpt-5.6'].responses, 2);
+});
+
+test('a subagent-sourced Codex rollout (thread_spawn replay) is excluded from cost/token aggregation', async () => {
+  // openai/codex spawns delegated subagent threads whose rollout file replays
+  // the PARENT thread's entire prior token history as duplicate events before
+  // its own new turns (ccusage/ccusage#950 measured up to 91x cost inflation
+  // from exactly this). Its cumulative total_token_usage therefore double-
+  // counts tokens the parent session already billed, so it must not
+  // contribute to cost/token aggregation — but the session record itself
+  // stays visible (with threadSource surfaced) so it's still auditable.
+  _resetForTest();
+  const sb = soloSandbox();
+  const day = path.join(sb.roots.codex, '2026', '07', '24');
+  fs.mkdirSync(day, { recursive: true });
+  const base = Date.parse('2026-07-24T09:00:00.000Z');
+  const ts = (offMs) => new Date(base + offMs).toISOString();
+  const lines = [
+    { timestamp: ts(0), type: 'session_meta', payload: { id: 'eeee5555', timestamp: ts(0), cwd: '/Users/me/proj', thread_source: 'subagent' } },
+    { timestamp: ts(1000), type: 'turn_context', payload: { turn_id: 't1', model: 'gpt-5.6-sol', cwd: '/Users/me/proj' } },
+    { timestamp: ts(2000), type: 'event_msg', payload: { type: 'user_message', message: 'delegated task' } },
+    // A "first" cumulative total that is already huge is the replay signature:
+    // a genuinely fresh thread's first token_count starts near its own system-
+    // prompt size, not hundreds of thousands of tokens in.
+    { timestamp: ts(30_000), type: 'event_msg', payload: { type: 'token_count', info: { total_token_usage: { input_tokens: 900_000, cached_input_tokens: 850_000, output_tokens: 9000, reasoning_output_tokens: 0, total_tokens: 909_000 } } } },
+    { timestamp: ts(60_000), type: 'event_msg', payload: { type: 'agent_message', message: 'Done.' } },
+  ];
+  fs.writeFileSync(
+    path.join(day, 'rollout-2026-07-24T09-00-00-eeee5555.jsonl'),
+    `${lines.map((l) => JSON.stringify(l)).join('\n')}\n`,
+  );
+
+  const agg = await buildIndex(opts(sb));
+  const s = byId(agg, 'eeee5555');
+
+  assert.ok(s, 'subagent session is still listed, not silently dropped');
+  assert.equal(s.threadSource, 'subagent');
+  assert.equal(s.tokens, 0, 'replayed parent history contributes no tokens to its own record');
+  assert.equal(s.cost, 0);
+  // The model still appears in byModel — it's a real session that used it, and
+  // "models in play" is tracked independently of cost attribution (see the
+  // `s.models` loop in aggregate()) — but it must carry none of the replayed
+  // volume: zero tokens, cost, and responses from this session.
+  const b = agg.byModel['gpt-5.6-sol'];
+  assert.ok(b, 'the model is still listed as used by this session');
+  assert.equal(b.tokens, 0, 'no replayed tokens leak into the model bucket');
+  assert.equal(b.cost, 0);
+  assert.equal(b.responses, 0);
 });
 
 test('buildIndex never mutates a transcript', async () => {
@@ -582,6 +634,49 @@ test('a session that opens before midnight is counted on its first billed day', 
     agg.totals.sessions,
     'no session is orphaned by the day split',
   );
+});
+
+test('a dropped-connection turn (isApiErrorMessage) counts as an exception, never a $0 model', async () => {
+  // Claude Code synthesizes a local placeholder turn — model: "<synthetic>",
+  // isApiErrorMessage: true, all-zero usage — when a request's connection
+  // drops, rate-limits, or fails auth before a real completion returns. It
+  // must count as engaged time (a real turn happened) but must NOT create a
+  // byModel row: there was no model attempt to attribute cost/tokens to.
+  _resetForTest();
+  const sb = soloSandbox();
+  const base = Date.parse('2026-07-24T10:00:00.000Z');
+  const iso = (offMs) => new Date(base + offMs).toISOString();
+  const lines = [
+    { type: 'user', sessionId: 'iiii9999', cwd: '/Users/me/proj', timestamp: iso(0),
+      message: { role: 'user', content: [{ type: 'text', text: 'turn 1' }] } },
+    { type: 'assistant', sessionId: 'iiii9999', cwd: '/Users/me/proj', timestamp: iso(1000),
+      message: { role: 'assistant', model: 'claude-opus-5', usage: { input_tokens: 100, output_tokens: 50 }, content: [] } },
+    { type: 'user', sessionId: 'iiii9999', cwd: '/Users/me/proj', timestamp: iso(2000),
+      message: { role: 'user', content: [{ type: 'text', text: 'turn 2' }] } },
+    // The dropped-connection placeholder: same shape Claude Code actually writes.
+    { type: 'assistant', sessionId: 'iiii9999', cwd: '/Users/me/proj', timestamp: iso(3000),
+      isApiErrorMessage: true, error: 'server_error',
+      message: {
+        role: 'assistant', model: '<synthetic>', stop_reason: 'stop_sequence',
+        usage: { input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 },
+        content: [{ type: 'text', text: 'API Error: Connection closed mid-response.' }],
+      } },
+  ];
+  fs.writeFileSync(path.join(sb.claude, 'iiii9999.jsonl'), `${lines.map((l) => JSON.stringify(l)).join('\n')}\n`);
+
+  const agg = await buildIndex(opts(sb));
+  const s = byId(agg, 'iiii9999');
+
+  assert.ok(s, 'session indexed');
+  assert.equal(s.responses, 2, 'the error placeholder still counts as a real turn');
+  assert.equal(s.exceptions, 1);
+  assert.deepEqual(s.models, ['claude-opus-5'], '"<synthetic>" never enters the models list');
+  assert.equal(s.tokens, 150, 'only the real turn contributes tokens');
+  assert.ok(s.cost > 0);
+
+  assert.equal(agg.totals.exceptions, 1);
+  assert.equal(agg.byModel['<synthetic>'], undefined, 'no $0 "<synthetic>" row is ever created');
+  assert.equal(agg.byModel['claude-opus-5'].tokens, 150);
 });
 
 test('punchcard buckets responses by dow-hour with Monday as 0', async () => {
@@ -847,6 +942,90 @@ test('readSession returns codex user/agent messages as turns', async () => {
   const { turns } = await readSession('dddd4444', opts(sb));
   assert.deepEqual(turns.map((t) => t.role), ['user', 'assistant', 'assistant']);
   assert.ok(turns[0].text.includes('port the parser'));
+});
+
+test('user-role turns carry a kind — a tool result is never attributed to the human', async () => {
+  // The Messages API records tool results under role "user", so role alone
+  // must never be read as "the person typed this". The parser stamps each
+  // user turn with kind: 'prompt' | 'tool-result' | 'context', and the
+  // transcript renderer labels from THAT, not from role.
+  _resetForTest();
+  const sb = sandbox();
+
+  // Claude: aaaa1111's fixture interleaves real prompts with a tool_result.
+  const claude = await readSession('aaaa1111', opts(sb));
+  const userTurns = claude.turns.filter((t) => t.role === 'user');
+  assert.equal(userTurns[0].kind, 'prompt', 'the opening human prompt is a prompt');
+  const toolTurn = userTurns.find((t) => t.text.startsWith('[tool result]'));
+  assert.ok(toolTurn, 'the tool_result user turn is present');
+  assert.equal(toolTurn.kind, 'tool-result');
+  assert.equal(toolTurn.prompt, false, 'and it never counted as a human prompt');
+
+  // Codex: rollouts only record real prompts as user_message events.
+  const codex = await readSession('dddd4444', opts(sb));
+  for (const t of codex.turns.filter((x) => x.role === 'user')) {
+    assert.equal(t.kind, 'prompt', 'every codex user turn is a prompt by construction');
+  }
+});
+
+test('harness-output envelopes are context, never the person — and never counted as prompts', async () => {
+  // A user-role entry whose text the HARNESS wrote (task notifications,
+  // bash/local-command stdout) carries neither isMeta nor a tool_result, so
+  // text shape is the only signal. It must not be labelled "you" and must
+  // not inflate the prompt count. bash-input is the opposite case: the
+  // person typed that `! command`, so it stays a prompt on both axes.
+  _resetForTest();
+  const sb = soloSandbox();
+  const base = Date.parse('2026-07-24T10:00:00.000Z');
+  const iso = (offMs) => new Date(base + offMs).toISOString();
+  const u = (off, text) => ({ type: 'user', sessionId: 'kkkk1111', cwd: '/Users/me/proj', timestamp: iso(off),
+    message: { role: 'user', content: [{ type: 'text', text }] } });
+  const lines = [
+    u(0, 'promote the pipeline'),                                              // real prompt
+    { type: 'assistant', sessionId: 'kkkk1111', cwd: '/Users/me/proj', timestamp: iso(1000),
+      message: { role: 'assistant', model: 'claude-opus-5', usage: { input_tokens: 5, output_tokens: 5 }, content: [{ type: 'text', text: 'ok' }] } },
+    u(2000, '<bash-input>git checkout main && git pull</bash-input>'),          // the person's ! command
+    u(3000, '<bash-stdout>Switched to branch main</bash-stdout>'),              // harness output
+    u(4000, '<local-command-stdout>Set model to Fable 5</local-command-stdout>'),
+    u(5000, '<task-notification>\n<task-id>abc</task-id>\n</task-notification>'),
+  ];
+  fs.writeFileSync(path.join(sb.claude, 'kkkk1111.jsonl'), `${lines.map((l) => JSON.stringify(l)).join('\n')}\n`);
+
+  const { meta, turns } = await readSession('kkkk1111', {
+    days: 14, now: NOW, roots: sb.roots, cachePath: sb.cachePath, deps: deps(),
+  });
+  assert.equal(meta.prompts, 2, 'the real prompt and the bash-input count; harness output does not');
+  const kinds = turns.filter((t) => t.role === 'user').map((t) => t.kind);
+  assert.deepEqual(kinds, ['prompt', 'prompt', 'context', 'context', 'context']);
+});
+
+test('isMeta context and image-only pastes get the right kind', async () => {
+  _resetForTest();
+  const sb = soloSandbox();
+  const base = Date.parse('2026-07-24T10:00:00.000Z');
+  const iso = (offMs) => new Date(base + offMs).toISOString();
+  const lines = [
+    // Harness-injected context (isMeta): not typed by the person.
+    { type: 'user', sessionId: 'jjjj0000', cwd: '/Users/me/proj', isMeta: true, timestamp: iso(0),
+      message: { role: 'user', content: [{ type: 'text', text: '<command-name>/status</command-name>' }] } },
+    // An image-only paste: no text block, so isHumanPrompt says false (it is
+    // not COUNTED as a prompt) — but it IS the person acting, and its kind
+    // must be 'prompt', never 'tool-result'.
+    { type: 'user', sessionId: 'jjjj0000', cwd: '/Users/me/proj', timestamp: iso(1000),
+      message: { role: 'user', content: [{ type: 'image', source: {} }] } },
+    { type: 'assistant', sessionId: 'jjjj0000', cwd: '/Users/me/proj', timestamp: iso(2000),
+      message: { role: 'assistant', model: 'claude-opus-5', usage: { input_tokens: 5, output_tokens: 5 }, content: [{ type: 'text', text: 'Looking at the screenshot.' }] } },
+  ];
+  fs.writeFileSync(path.join(sb.claude, 'jjjj0000.jsonl'), `${lines.map((l) => JSON.stringify(l)).join('\n')}\n`);
+
+  const { meta, turns } = await readSession('jjjj0000', {
+    days: 14, now: NOW, roots: sb.roots, cachePath: sb.cachePath, deps: deps(),
+  });
+  assert.equal(meta.prompts, 0, 'neither turn counts as a text prompt');
+  const userTurns = turns.filter((t) => t.role === 'user');
+  assert.equal(userTurns[0].kind, 'context', 'isMeta harness injection is context');
+  assert.equal(userTurns[1].kind, 'prompt', 'an image-only paste is still the person');
+  assert.equal(userTurns[1].text, '[image]');
 });
 
 test('readSession rejects a path-traversal id without touching the disk', async () => {

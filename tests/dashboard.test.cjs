@@ -244,6 +244,19 @@ async function main() {
     assert(threw, 'no masker → throw (fail closed); silently skipping masking is the bug this guards');
   });
 
+  await test('maskTurns preserves the non-string attribution fields (kind, prompt)', async () => {
+    // The transcript renderer labels turns from tn.kind / tn.prompt, so the
+    // masking gate must pass those through untouched — it rewrites strings
+    // only. If this ever fails, every tool result renders as "you" again.
+    const turns = [
+      { role: 'user', text: '[tool result] ok', prompt: false, kind: 'tool-result' },
+      { role: 'user', text: 'do the thing', prompt: true, kind: 'prompt' },
+    ];
+    const out = maskTurns(turns, (s) => s);
+    assert(out[0].kind === 'tool-result' && out[0].prompt === false, 'tool-result attribution survives masking');
+    assert(out[1].kind === 'prompt' && out[1].prompt === true, 'prompt attribution survives masking');
+  });
+
   // ── the routes, over real HTTP, with a spying usage module ──
   const AGG = {
     generatedAt: '2026-07-25T00:00:00.000Z', windowDays: 14, pricesAsOf: '2026-07-01',
@@ -384,6 +397,40 @@ async function main() {
         contains(r.body, 'id="v-' + v + '"');
         contains(r.body, 'data-view="' + v + '"');
       }
+    });
+
+    await test('transcript labels attribute by kind — a tool result never renders as "you"', async () => {
+      // The Messages API records tool results under role "user"; the renderer
+      // must label from tn.kind, and the page must carry the pieces that do it:
+      // the kind branch, the "tool result" label, the t-tool styling, and the
+      // hover title telling the reader the harness — not the person — sent it.
+      const r = await get(uiSrv.url);
+      contains(r.body, 'tn.kind');
+      contains(r.body, '"tool result"');
+      contains(r.body, 'kind==="context"');
+      contains(r.body, '.t-tool .t-who');
+      contains(r.body, 'not typed by you');
+      assert(!/esc\(user\?"you"/.test(r.body), 'the old role-only "you" label must be gone');
+    });
+
+    await test('harness sentinel markup is restyled, not rendered as literal XML', async () => {
+      // fmtHarness turns <command-name>/<system-reminder>/<local-command-*>
+      // wrappers into styled structure — content verbatim, wrappers gone. The
+      // page must carry the formatter, its two regex families, the CSS, and
+      // the human-readable labels; and it must run INSIDE the turn body
+      // builder (after markRedactions, so it operates on escaped text).
+      const r = await get(uiSrv.url);
+      contains(r.body, 'function fmtHarness');
+      contains(r.body, 'command-name');
+      contains(r.body, 'system-reminder|local-command-caveat|local-command-stdout|local-command-stderr|bash-stdout|bash-stderr|task-notification');
+      contains(r.body, 'bash-input');
+      contains(r.body, 'fmtHarness(markRedactions(');
+      contains(r.body, '.h-cmd{');
+      contains(r.body, '.h-note{');
+      contains(r.body, '"system reminder"');
+      contains(r.body, '"command output"');
+      contains(r.body, '"bash output"');
+      contains(r.body, '"task notification"');
     });
 
     await test('poll control: default 30s, ten intervals, persisted as ak-dash-poll', async () => {

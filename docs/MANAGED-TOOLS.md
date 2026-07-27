@@ -5,11 +5,8 @@ version-detected, and displayed. This doc states the contract's four
 invariants, maps every managed tool onto them, and gives the checklist for
 adding a new tool without breaking them.
 
-The contract exists because the failure modes it prevents were all observed
-live: a version stamp disagreeing with what was actually on disk, a statusline
-showing a different version than `ak status`, a third-party self-updater
-rewriting managed files behind ak's back, and an "update available" banner
-that stayed silent for tools it didn't know about.
+Each invariant traces to a live failure it prevents — the appendix records
+them.
 
 ## The four invariants
 
@@ -28,9 +25,9 @@ that stayed silent for tools it didn't know about.
 
 3. **Same-namespace comparisons.** Installed and latest are always compared
    in the same version namespace: npm semver vs npm semver, GitHub release
-   tag vs release tag. A comparison across namespaces (the original
-   ruvnet-brain bug: plugin semver `0.5.0-dev` vs release tag `3.0.1`) can
-   never converge. "Latest" is not always npm-latest either — agentdb's
+   tag vs release tag. A comparison across namespaces can never converge
+   (the appendix records the live case). "Latest" is not always npm-latest
+   either — agentdb's
    authority is ruflo's *bundled* version, because a latest-chasing agentdb
    is the store-corruption risk its coherence guard exists to prevent.
 
@@ -98,3 +95,14 @@ dashboard.
 6. **Lock it with tests**: the install spec + suppression flags (regression
    lock), the disk-read parser's edge cases (missing / malformed / junk),
    and the display resolution order.
+
+## Appendix — the observed failures behind the contract
+
+Each invariant exists because its failure mode was observed live, not
+hypothesized: a version stamp disagreeing with what was actually on disk; a
+statusline showing a different version than `ak status`; a third-party
+self-updater rewriting managed files behind ak's back; an "update available"
+banner that stayed silent for tools it didn't know about; and the original
+ruvnet-brain drift bug — a cross-namespace comparison (plugin semver
+`0.5.0-dev` vs release tag `3.0.1`) that could never converge, the live case
+behind invariant 3.

@@ -74,8 +74,7 @@ machines), the Claude↔Codex MCP bridge (both
 directions), and the statusline footer. These can drift with **no version change at all** —
 a kit update (or, on an npm-linked dev checkout, merely merging a PR that edits a
 `claude/*.md` template) revises the source of truth, and the rendered copies lag until the
-next `ak sync`. Previously that lag was silent until someone happened to run `ak status`;
-the nudge closes the window. It uses the exact drift definitions `ak status` uses (the two
+next `ak sync`. The nudge closes that window, using the exact drift definitions `ak status` uses (the two
 can never disagree) and stays quiet after `status`, `sync`, and `ak x reference`, which
 already show the same information.
 
@@ -91,7 +90,7 @@ check consults **both** the `latest` and `next` dist-tags and takes the higher o
 That's why `ak sync` on `alpha.19` correctly pulls `alpha.20` even though `latest` points
 further back. (If you'd rather move it by hand: `npm i -g @pacphi/agentic-kit@next`.)
 
-## Where the design lives
+## Appendix — design references
 
 The *why* behind primary-host selection and ambidextrous mirroring is captured as an ADR —
 [docs/adr/0006-primary-host-and-ambidextrous-mirroring.md](adr/0006-primary-host-and-ambidextrous-mirroring.md).
