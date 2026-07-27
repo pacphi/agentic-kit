@@ -131,6 +131,17 @@ test('heal reports failure when better-sqlite3 stays unresolvable', async () => 
   fs.rmSync(root, { recursive: true, force: true });
 });
 
+test('heal reports the npm install error when the package stays unresolvable', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-heal-install-fail-'));
+  const runner = async () => ({ code: 1, stdout: '', stderr: 'npm error native build failed\n' });
+
+  const r = await ensureNativeBsq3(root, { runner });
+
+  assert.equal(r.ok, false);
+  assert.match(r.how, /native build failed/);
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
 // ── FR-2: the install rung derives its spec from the tree (EOVERRIDE fix) ─────
 
 /** A better-sqlite3 that node resolution CANNOT find, in a dir that pins an npm
@@ -166,13 +177,13 @@ function eoverrideNpm(declared) {
 }
 
 test('ensureNativeBsq3 installs the tree-derived override spec, never the hardcoded ^12', async () => {
-  const dir = overrideDir('^12.9.0');
-  const { runner, specs } = eoverrideNpm('^12.9.0');
+  const dir = overrideDir('^12.10.0');
+  const { runner, specs } = eoverrideNpm('^12.10.0');
 
   const r = await ensureNativeBsq3(dir, { runner });
 
   assert.equal(r.ok, true, 'heal succeeds with the derived spec');
-  assert.ok(specs.includes('better-sqlite3@^12.9.0'), `derived spec used (saw ${JSON.stringify(specs)})`);
+  assert.ok(specs.includes('better-sqlite3@^12.10.0'), `derived spec used (saw ${JSON.stringify(specs)})`);
   assert.ok(!specs.includes('better-sqlite3@^12'), 'never falls into the EOVERRIDE-rejected hardcoded ^12');
   assert.equal(bsq3IsNative(dir), true);
   fs.rmSync(dir, { recursive: true, force: true });
@@ -189,15 +200,15 @@ test('healNatives heals @claude-flow/memory + /cli with each tree\'s derived spe
     const dir = path.join(nm, '@claude-flow', c);
     fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(path.join(dir, 'package.json'),
-      JSON.stringify({ name: `@claude-flow/${c}`, overrides: { 'better-sqlite3': '^12.9.0' } }));
+      JSON.stringify({ name: `@claude-flow/${c}`, overrides: { 'better-sqlite3': '^12.10.0' } }));
   }
   _setGlobalRootForTest(g);
-  const { runner, specs } = eoverrideNpm('^12.9.0');
+  const { runner, specs } = eoverrideNpm('^12.10.0');
 
   const r = await healNatives({ runner });
 
   assert.ok(specs.length >= 2, 'installed into both contexts');
-  assert.ok(specs.every((s) => s === 'better-sqlite3@^12.9.0'), `only the derived spec (saw ${JSON.stringify(specs)})`);
+  assert.ok(specs.every((s) => s === 'better-sqlite3@^12.10.0'), `only the derived spec (saw ${JSON.stringify(specs)})`);
   assert.match(r.detail, /@claude-flow\/memory/);
   assert.match(r.detail, /@claude-flow\/cli/);
   assert.equal(r.ok, true);
