@@ -213,8 +213,8 @@ serialization**, then length-capped at `MAX_TURN_CHARS` (40,000,
 
 The two kinds of withholding keep distinct vocabulary end-to-end: masking
 renders as `…redacted` marks (`markRedactions`,
-`dashboard-server.mjs:2333`), truncation as a `truncated · N of M` badge
-(`truncBadge`, `dashboard-server.mjs:2377`, deriving N from the received
+`dashboard-server.mjs:2341`), truncation as a `truncated · N of M` badge
+(`truncBadge`, `dashboard-server.mjs:2385`, deriving N from the received
 text so a changed constant can't desync the display).
 
 ![Figure: a turn body passes through maskSecrets (leaving redaction marks) and then the 40,000-character cap (leaving a truncated · N of M badge); originalChars is measured after masking](assets/transcript-mask-truncate.svg)
@@ -260,13 +260,13 @@ nothing on the page to reveal.
 
 ### 6.1 Sessions view — the row and its expander
 
-`renderSessions` (`dashboard-server.mjs:2282`) renders the project tree
+`renderSessions` (`dashboard-server.mjs:2290`) renders the project tree
 (collapsed by default; every project starts closed so the cross-project
 comparison stays above the fold). Each session is a `sessionRow`
-(`dashboard-server.mjs:2256-2280`): host chip (claude/codex), title,
+(`dashboard-server.mjs:2264-2288`): host chip (claude/codex), title,
 worktree glyph, category chip (dimmed when confidence < 0.6 or
 Unclassified), start, duration, `prompts/responses`, tokens, cost — and an
-expander (`sdetail`, `dashboard-server.mjs:2220-2253`) carrying the
+expander (`sdetail`, `dashboard-server.mjs:2228-2261`) carrying the
 per-session detail fields: classification `basis` + confidence, per-session
 `models`, the token split, top tools, and the
 `skill`/`plugin`/`sidechain`/`worktree` flags. A measured-but-absent value renders as `—`, never disappears — a
@@ -274,15 +274,15 @@ field that vanishes when null teaches the reader it doesn't exist.
 
 ### 6.2 Transcript view — attribution, redaction, truncation
 
-`renderTranscript` (`dashboard-server.mjs:2393`) renders the crumb (title,
+`renderTranscript` (`dashboard-server.mjs:2401`) renders the crumb (title,
 project, duration, `prompts/responses`, tokens, cost — all from masked
 `meta`) and the turn list. **The label comes from `kind`, never from role**
-(`dashboard-server.mjs:2409-2426`):
+(`dashboard-server.mjs:2417-2434`):
 
 | Turn | Label | Styling |
 |---|---|---|
-| user, `kind: 'prompt'` | `you` | accent — reserved for the person (`.t-user .t-who`, `dashboard-server.mjs:1311`) |
-| user, `kind: 'tool-result'` | `tool result` | purple, rhyming with the tool chips (`.t-tool .t-who`, `dashboard-server.mjs:1315`); hover title states the harness — not the person — sent it |
+| user, `kind: 'prompt'` | `you` | accent — reserved for the person (`.t-user .t-who`, `dashboard-server.mjs:1317`) |
+| user, `kind: 'tool-result'` | `tool result` | purple, rhyming with the tool chips (`.t-tool .t-who`, `dashboard-server.mjs:1321`); hover title states the harness — not the person — sent it |
 | user, `kind: 'context'` | `context` | same purple + hover title |
 | assistant | the model id | dim mono (`exception` placeholder turns label as `exception`) |
 
@@ -299,8 +299,8 @@ blocks (envelope census on the real corpus: task-notification 550,
 local-command-caveat 183, command-name 180, bash-input 85, bash-stdout 85,
 local-command-stdout 60; the stderr variants are the symmetric error-path
 siblings). Rendered literally they read as angle-bracket soup, so
-`fmtHarness` (`dashboard-server.mjs:2346-2365`; CSS
-`dashboard-server.mjs:1316-1328`) reformats them client-side: the command
+`fmtHarness` (`dashboard-server.mjs:2354-2373`; CSS
+`dashboard-server.mjs:1322-1334`) reformats them client-side: the command
 triple and `bash-input`
 become chips (`/clear`-style; the bash chip prefixed `!` so it reads as the
 shell invocation it was), and the block wrappers become quiet labelled
@@ -312,8 +312,8 @@ verbatim; only the wrapper tags become styling.** It runs on escaped text
 turn truncation — is left raw rather than half-formatted.
 
 Deep links: `#usage/<sessionId>` opens the Transcript view directly
-(`syncHash`, `dashboard-server.mjs:1444-1445`); the view lazy-fetches via
-`loadTranscript` (`dashboard-server.mjs:1918`).
+(`syncHash`, `dashboard-server.mjs:1450-1451`); the view lazy-fetches via
+`loadTranscript` (`dashboard-server.mjs:1924`).
 
 ---
 

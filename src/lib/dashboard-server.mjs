@@ -615,7 +615,7 @@ function renderPage({ name, version }) {
       </div>
       <div class="two">
         <section class="strip">
-          <div class="sh"><h2>models in play</h2><span class="n mono">observed in transcripts &middot; by api-equivalent cost<span id="u-models-note"></span></span></div>
+          <div class="sh"><h2>models in play</h2><span class="n mono">observed in transcripts &middot; by api-equivalent cost<span class="n-sub" id="u-models-note"></span></span></div>
           <div id="u-models"></div>
         </section>
         <section class="strip">
@@ -1075,6 +1075,12 @@ body{
 .sh{display:flex; align-items:baseline; justify-content:space-between; gap:12px; margin-bottom:14px}
 .sh h2{font-size:15px; font-weight:600; letter-spacing:-.014em; margin:0}
 .sh .n{color:var(--ink-dim); font-size:11.5px}
+/* A qualifier that must not share a line with the caption it qualifies: as an
+   inline tail it wrapped mid-phrase, leaving "· 4" dangling at the end of one
+   line and "dropped/errored turns excluded" orphaned on the next — the count
+   read as part of the caption rather than as its own fact. */
+.sh .n-sub{display:block}
+.sh .n-sub:empty{display:none}
 .two{display:grid; gap:16px; grid-template-columns:repeat(auto-fit,minmax(330px,1fr))}
 #panel-usage .strip{margin-top:0; margin-bottom:16px}
 
@@ -2055,8 +2061,10 @@ const JS = `
     // model — excluded from this list entirely rather than shown as a $0 row
     // (see docs/USAGE-SCORECARD-METRICS.md §10). Surfaced here instead, only
     // when nonzero, so they stay visible rather than silently vanishing.
+    // On its own line (.n-sub), so no leading separator — a "·" would read as a
+    // continuation of the caption above rather than the start of a new fact.
     var exc=fld(t,"exceptions");
-    document.getElementById("u-models-note").textContent=exc?(" · "+fmtNum(exc)+" dropped/errored turn"+(exc===1?"":"s")+" excluded"):"";
+    document.getElementById("u-models-note").textContent=exc?(fmtNum(exc)+" dropped/errored turn"+(exc===1?"":"s")+" excluded"):"";
 
     var projects=entries(d.byProject), pMax=projects.length?projects[0].cost:0;
     var shown=projects.slice(0,8);
