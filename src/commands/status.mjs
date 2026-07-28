@@ -9,6 +9,7 @@ import * as paths from '../lib/paths.mjs';
 import { nativesStatus, rufloRuntimeNatives, dbPathPinStatus, aidefencePresent, securityPresent } from '../lib/natives.mjs';
 import { scanNpxStale } from '../lib/npx.mjs';
 import { registrationStatus, codexMcpStatus, rufloCodexMcpStatus, ruvectorRegistered } from '../lib/mcp.mjs';
+import { opencodeMcpStatus, opencodeConverged, catalogSource, agentsStatus, pluginStatus, skillStatus } from '../lib/opencode.mjs';
 import { listDaemons, staleDaemons } from '../lib/daemons.mjs';
 import { scanRvf } from '../lib/rvf.mjs';
 import { registry, syncBlocks, blocksForTarget, retiredForTarget, guidanceTargets } from '../lib/blocks.mjs';
@@ -324,6 +325,69 @@ export async function collect({ pkgRoot, cwd = process.cwd() }) {
     }
   }
 
+  // opencode host wiring — the third host's counterpart of the codex-mcp rows:
+  // opencode.json (mcp + skills.paths + permissions), the plugins/ lifecycle
+  // bridge, the converted agent set, and the platform skill. Only surfaces when
+  // the opencode host is enabled AND installed (enabled-but-absent is the
+  // hosts row's story); probes are file reads + one bin check (codex-review #4).
+  if (cfg.providers?.hosts?.opencode) {
+    try {
+      if (!(await have('opencode'))) {
+        rows.push(row('opencode', 'warn', 'enabled but opencode CLI not installed', 'sync installs opencode-ai (hosts step)'));
+      } else {
+        const source = catalogSource({ override: cfg.providers?.opencodeCatalogDir });
+        const st = opencodeMcpStatus(cfg);
+        const conv = st.parseError ? null : await opencodeConverged(cfg);
+        if (st.parseError) {
+          rows.push(row('opencode', 'warn',
+            'opencode.json is not plain JSON (JSONC comments?) — ak refuses to touch it',
+            'merge the ak wiring manually'));
+        } else if (!st.exists || !st.claudeFlow) {
+          rows.push(row('opencode', 'warn',
+            `opencode.json wiring incomplete (${[!st.exists ? 'no config file' : null, !st.claudeFlow ? 'claude-flow MCP missing' : null].filter(Boolean).join(', ')})`,
+            'sync writes the opencode wiring'));
+        } else if (!conv?.converged) {
+          rows.push(row('opencode', 'warn',
+            `opencode.json wiring drifted (${(conv?.reasons ?? []).slice(0, 3).join('; ')}${(conv?.reasons?.length ?? 0) > 3 ? '…' : ''})`,
+            'sync re-applies the opencode wiring'));
+        } else {
+          rows.push(row('opencode', 'ok',
+            `opencode.json converged (claude-flow${st.brain ? ' + ruvnet-brain' : ''} MCP, ${st.paths?.length ?? 0} skills path(s))${st.owned ? '' : ' — pre-existing (not ak-managed)'}`));
+        }
+        const plug = pluginStatus({ pkgRoot });
+        if (plug.foreign) {
+          rows.push(row('opencode', 'info', 'lifecycle plugin slot occupied by a user-owned ruflo-hooks.js — ak leaves it alone'));
+        } else if (!plug.present) {
+          rows.push(row('opencode', 'warn', 'lifecycle plugin (ruflo-hooks.js) not deployed', 'sync deploys it'));
+        } else if (!plug.current) {
+          rows.push(row('opencode', 'warn', 'lifecycle plugin out of date', 'sync rewrites it'));
+        }
+        const ag = agentsStatus({ source });
+        if (ag.count === 0 && !source) {
+          rows.push(row('opencode', 'warn', 'no ruflo catalog source (marketplace clone or @claude-flow/cli)', 'install ruflo (or claude marketplace) for the agent catalog'));
+        } else if (ag.count === 0) {
+          rows.push(row('opencode', 'warn', 'no converted ruflo agents', 'sync converts the ruflo agent set'));
+        } else if (ag.stale) {
+          rows.push(row('opencode', 'warn',
+            `${ag.count} agents from ${ag.stampedId ?? 'unknown source'}, current source is ${ag.currentId ?? 'none'}`,
+            'sync re-converts the agent set'));
+        } else {
+          rows.push(row('opencode', 'ok', `${ag.count} converted agents (${ag.currentId})`));
+        }
+        const sk = skillStatus({ source });
+        if (sk.foreign) {
+          rows.push(row('opencode', 'info', 'skills/ruflo/SKILL.md is user-owned — ak leaves it alone'));
+        } else if (source?.hasPlatformSkill && !sk.present) {
+          rows.push(row('opencode', 'warn', 'platform skill (skills/ruflo/SKILL.md) not deployed', 'sync deploys it'));
+        } else if (source?.hasPlatformSkill && !sk.current) {
+          rows.push(row('opencode', 'warn', 'platform skill out of date', 'sync re-deploys it'));
+        }
+      }
+    } catch (e) {
+      rows.push(row('opencode', 'warn', `opencode check unavailable: ${e.message}`));
+    }
+  }
+
   // hosts (install-if-missing) — cheap: file read + `which`, no network.
   // An enabled host that is entirely absent is installable by sync; an external
   // install (mise/native/brew) is reported but never touched.
@@ -368,6 +432,9 @@ export async function collect({ pkgRoot, cwd = process.cwd() }) {
         rows.push(row('providers', 'info', 'codex CLI installed but not enabled (claude-only default)'));
       } else {
         rows.push(row('providers', 'info', 'claude-only (default host)'));
+      }
+      if (!cfg.providers?.hosts?.opencode && await have('opencode')) {
+        rows.push(row('providers', 'info', 'opencode CLI installed but not enabled (`ak setup --opencode` wires it)'));
       }
     } else {
       const desired = managedEnv(cfg);
@@ -551,6 +618,10 @@ export async function collect({ pkgRoot, cwd = process.cwd() }) {
       rows.push(row('codex-statusline', 'ok',
         `managed Codex ${codexLine.preset} native status line is current (rich ruflo/SONA/AQE segments remain Claude-only)`));
     }
+  }
+  if (cfg.providers?.hosts?.opencode) {
+    rows.push(row('statusline', 'info',
+      'opencode has no statusline surface; its ruflo lifecycle ships via the plugins/ bridge + AGENTS.md'));
   }
 
   // qe-court (ADR-124): TEMPORARY, remove once fixed upstream. agentic-qe's own

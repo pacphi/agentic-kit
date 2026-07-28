@@ -19,13 +19,16 @@ const DEFAULTS = {
   // Default = claude-only, codex opt-in — preserves today's behavior exactly:
   // when this stays at defaults, the provider heal is a deliberate no-op.
   providers: {
-    hosts: { claude: true, codex: false }, // which agent CLIs ruflo may run (ADR-034 ENABLE_*)
+    hosts: { claude: true, codex: false, opencode: false }, // which agent CLIs ak wires (ADR-034 ENABLE_*; opencode has no enable-env — wiring is config-file based)
     aqeProvider: null,                      // AQE_LLM_PROVIDER (claude-code|openai|gemini|…); null = aqe default
     aqeFallback: [],                        // [{ provider, models:[...] }] — ordered aqe fallback chain (.agentic-qe/llm-config.json)
     models: [],                             // [{ id:'openai', model:'gpt-5.6' }] — ruflo API-key providers
     maxBudgetUsd: null,                     // → AQE_MAX_BUDGET_USD when set
     dualRouting: {},                        // activity → {host,model,escalate?,source} per-activity routing policy (ADR-0001; seeded on dual-host)
     codexMcp: null,                         // 'ak' when ak registered the codex MCP server (ownership guard for teardown)
+    opencodeMcp: null,                      // 'ak' when ak wrote opencode.json's mcp/skills/permission wiring (ownership guard for teardown)
+    opencodeManaged: null,                  // {mcp[], paths[], permissions[]} — exact opencode.json keys ak wrote (surgical teardown)
+    opencodeCatalogDir: null,               // optional override: ruflo repo checkout used as the agents/skills catalog source (default: marketplace clone → npm package)
   },
   statusline: { codex: null }, // {preset,lastProjection}: explicit ownership of Codex [tui] keys
   customBlocks: [],     // [{slug, templatePath, detector:{type:'command'|'dir'|'file', target}}]

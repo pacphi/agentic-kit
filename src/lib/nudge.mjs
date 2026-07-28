@@ -15,7 +15,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import * as paths from './paths.mjs';
-import { registry, syncBlocks, blocksForTarget } from './blocks.mjs';
+import { registry, syncBlocks, blocksForTarget, retiredForTarget, guidanceTargets } from './blocks.mjs';
 import { loadKitConfig } from './config.mjs';
 import { bothHostsEnabled } from './providers.mjs';
 import { codexMcpStatus, rufloCodexMcpStatus } from './mcp.mjs';
@@ -41,12 +41,14 @@ export async function localDrift({ pkgRoot, cwd = process.cwd(), cfg, targets } 
       ? (r.template.startsWith('~/') ? path.join(paths.home, r.template.slice(2)) : r.template)
       : path.join(pkgRoot, 'claude', r.template));
     const ctx = { flags: { dualMode: bothHostsEnabled(cfg) } };
-    const tgs = targets ?? [
-      { name: 'claude', label: 'CLAUDE.md', file: paths.claudeMdPath() },
-      { name: 'agents', label: 'AGENTS.md', file: path.join(cwd, 'AGENTS.md') },
-    ];
+    // The SHARED target list + retired-strip composition (blocks.mjs) — the
+    // nudge's contract is "never disagrees with ak status", which a hardcoded
+    // subset silently breaks every time a guidance target is added (codex's
+    // agents-user, opencode's agents-opencode).
+    const tgs = targets ?? guidanceTargets({ cwd, cfg });
     for (const t of tgs) {
-      const res = await syncBlocks(t.file, blocksForTarget(rowsReg, t.name), resolve, { dryRun: true, context: ctx });
+      const treg = [...blocksForTarget(rowsReg, t.name), ...retiredForTarget(rowsReg, t.name)];
+      const res = await syncBlocks(t.file, treg, resolve, { dryRun: true, context: ctx });
       const n = res.filter((r) => r.action === 'upserted' || r.action === 'stripped').length;
       if (n) lines.push(`${n} ${t.label} block(s)`);
     }

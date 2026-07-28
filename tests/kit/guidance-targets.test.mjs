@@ -21,8 +21,9 @@ test('codexDir / codexAgentsMdPath resolve under ~/.codex', () => {
 
 test('guidanceTargets always yields claude + project agents, gated codex', () => {
   const cwd = '/tmp/proj-x';
-  // codexRoot points at a NON-existent dir → agents-user omitted (never mkdir'd).
-  const absent = guidanceTargets({ cwd, codexRoot: path.join(os.tmpdir(), 'no-such-codex-xyz') });
+  // codexRoot + opencodeRoot point at NON-existent dirs → agents-user AND
+  // agents-opencode omitted (never mkdir'd).
+  const absent = guidanceTargets({ cwd, codexRoot: path.join(os.tmpdir(), 'no-such-codex-xyz'), opencodeRoot: path.join(os.tmpdir(), 'no-such-opencode-xyz') });
   assert.deepEqual(absent.map((t) => t.name), ['claude', 'agents']);
   assert.equal(absent[0].file, claudeMdPath());
   assert.equal(absent[1].file, path.join(cwd, 'AGENTS.md'));
@@ -31,7 +32,7 @@ test('guidanceTargets always yields claude + project agents, gated codex', () =>
 test('guidanceTargets includes agents-user only when the codex dir exists', () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'kit-codex-'));
   const cwd = '/tmp/proj-y';
-  const targets = guidanceTargets({ cwd, codexRoot: tmp });
+  const targets = guidanceTargets({ cwd, codexRoot: tmp, opencodeRoot: path.join(os.tmpdir(), 'no-such-opencode-xyz') });
   assert.deepEqual(targets.map((t) => t.name), ['claude', 'agents', 'agents-user']);
   const au = targets.find((t) => t.name === 'agents-user');
   assert.equal(au.file, path.join(tmp, 'AGENTS.md'));

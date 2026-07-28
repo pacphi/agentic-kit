@@ -4,9 +4,11 @@
 import path from 'node:path';
 import { collect } from './status.mjs';
 import * as heal from '../lib/heal.mjs';
+import { have } from '../lib/exec.mjs';
 import { fixStatusline, helperStampStale } from '../lib/statusline.mjs';
 import { registry, syncBlocks, blocksForTarget, retiredForTarget, guidanceTargets } from '../lib/blocks.mjs';
 import { register as mcpRegister, applyExclusions } from '../lib/mcp.mjs';
+import { applyOpencode, deployPlugin, syncAgents, deploySkill, catalogSource } from '../lib/opencode.mjs';
 import { listDaemons, staleDaemons, reap } from '../lib/daemons.mjs';
 import { loadKitConfig, saveKitConfig } from '../lib/config.mjs';
 import { commandHosts, applyHosts, applyProviders, hostInstallState, installHost, applyAqeRouter, seedDualRoutingIfDualHost, ensureCodexMcp, ensureRufloMcpInCodex, bothHostsEnabled } from '../lib/providers.mjs';
@@ -184,6 +186,25 @@ export async function run({ flags, pkgRoot }) {
       if (!cfg.providers.hosts[h.id]) continue;
       if ((await hostInstallState(h)).method !== 'absent') continue;
       await step(`install ${h.id}`, () => installHost(h.id));
+    }
+  }
+  // opencode host wiring: config-file MCP + skills + permissions, the plugins/
+  // lifecycle bridge, the converted agent set, the platform skill. Runs AFTER
+  // the hosts install branch so an enable+install converges in one sync, and
+  // only when the CLI is actually present — otherwise the writers would create
+  // the host's config home for a host that isn't there (codex-review #4).
+  if (subsystems.has('opencode') && cfg.providers?.hosts?.opencode) {
+    if (!(await have('opencode'))) {
+      info('opencode: enabled but CLI not installed — wiring skipped (hosts step installs it)');
+    } else {
+      const oc = await applyOpencode(cfg);
+      if (oc.changed) saveKitConfig(cfg); // persist opencodeMcp/opencodeManaged markers
+      if (oc.changed || !oc.ok) report('opencode', oc);
+      report('opencode plugin', deployPlugin({ pkgRoot }));
+      const source = catalogSource({ override: cfg.providers?.opencodeCatalogDir });
+      report('opencode agents', syncAgents({ source }));
+      const sk = deploySkill({ source });
+      if (sk.changed || !sk.ok) report('opencode skill', sk);
     }
   }
   if (subsystems.has('providers') || subsystems.has('routing') || subsystems.has('codex-mcp')) {
