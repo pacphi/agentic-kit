@@ -200,7 +200,11 @@ bounded, and destroyed after their last subscriber.
 
 Run the dashboard only for users who may see local project and model names.
 It binds to `127.0.0.1`, applies Host, Origin, and Fetch Metadata checks, and
-does not support remote binding.
+does not support remote binding. Those checks stop a hostile *browser tab*;
+they do nothing against another *local, non-browser process* that can reach
+the port directly. That gap is closed by the per-session token (ADR-0014):
+every `/api/*` route — including both SSE streams above — requires it, so a
+process without the token gets a `401`, not transcript content.
 
 ## Streaming and recovery
 
@@ -242,6 +246,7 @@ unbounded content snapshot.
 | Node disappeared | Server projection or client visibility bounds evicted/collapsed it |
 | Connection interrupted | `EventSource` retries; a cursor miss or buffer overflow resets from a snapshot |
 | `503 too many live telemetry clients` | The configured concurrent-client bound has been reached |
+| `401` on any `/api/*` request | Missing or wrong per-session token; reopen the dashboard's launch URL, or paste the token printed at startup |
 | Graph moved while streaming | Existing positions should remain stable; **Reset layout** discards manual positions |
 | Transcript unavailable | The selected session cannot be resolved safely beneath its host root |
 | Detail truncated | The source value exceeded a content bound; the UI reports the original/shown size |

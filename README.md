@@ -49,7 +49,8 @@ ak setup        first-time setup — machine and/or the project you're standing 
                 [--codex] [--primary-host claude|codex] [--project] [--minimal] [--yes] [--no-aqe] [--no-security] [--reconfigure]
 ak status       read-only dashboard: what's true, what's drifted   [--json] [--deep]
 ak sync         converge to good: upgrade + heal + verify          [--dry-run] [--no-upgrade]
-ak dashboard    open the local web dashboard (auto-opens your browser)   [--port N] [--no-open]
+ak dashboard    open the local web dashboard (auto-opens your browser)
+                [--port N] [--no-open] [--live-source 'surface=path']
 ak dual         run a Claude+Codex collaboration swarm (dual-host)   run <template> "<task>"  [--dry-run] [--escalate] [--route ...]
 ak uninstall    leave cleanly                [--dry-run] [--this-project] [--remove-ruflo] [--remove-aqe] [--purge] [--yes]
 ```
