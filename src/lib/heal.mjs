@@ -6,12 +6,14 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { run } from './exec.mjs';
-import { rufloRoot, aqeRoot } from './paths.mjs';
+import { rufloRoot, aqeRoot, repoRoot } from './paths.mjs';
 import { agentdbLocations, bsq3IsNative, bsq3Root, deriveBsq3Spec, selfSpecConflicts, rufloMemoryContexts, aidefencePresent } from './natives.mjs';
 import { KIT_PKG } from './versions.mjs';
 import { scanRvf, quarantine } from './rvf.mjs';
 import { INSTALL_SPEC, INSTALL_ARGS, NIGHTLY_LABEL as RB_NIGHTLY_LABEL, nightlyAgentPlist as rbNightlyPlist, present as rbPresent, latestVersion as rbLatest, recordInstalledRelease as rbRecord } from './ruvnet-brain.mjs';
 import { PKG as ADB_PKG, present as adbPresent, coherence as adbCoherence } from './agentdb.mjs';
+import { readQeCourtConfig, qeCourtConfigPath, healJuryVendorCollision, UPSTREAM_JURY_VENDOR_ISSUE } from './qeCourt.mjs';
+import { writeJsonWithBackup } from './settings.mjs';
 
 // Packages whose install scripts must run for natives to build (npm >=11.17
 // blocks them by default). Curated on the live 3.28/3.12.2 upgrade.
@@ -147,6 +149,26 @@ export function healRvf(projectAqeDir) {
   const findings = scanRvf(projectAqeDir);
   const removed = findings.flatMap((f) => quarantine(f));
   return { ok: true, detail: removed.length ? `quarantined: ${removed.join(', ')}` : 'healthy' };
+}
+
+/** TEMPORARY (remove once fixed upstream): agentic-qe's own shipped default
+ *  qe-court config.json violates its own writerIsNeverJuror invariant — see
+ *  UPSTREAM_JURY_VENDOR_ISSUE in qeCourt.mjs. Auto-corrects ONLY the `jury`
+ *  role, ONLY when the current config actually has the vendor collision, by
+ *  reassigning it to an already-configured distinct-vendor provider. Never
+ *  invents a vendor the project hasn't configured, never touches any other
+ *  key. No-op (ok:true) when there's no project root or no config yet — ak
+ *  never creates this file. */
+export function healQeCourtPanel(cwd = process.cwd()) {
+  const root = repoRoot(cwd);
+  if (!root) return { ok: true, detail: 'no project root — skipped' };
+  const qc = readQeCourtConfig(root);
+  if (!qc) return { ok: true, detail: 'no qe-court config present — skipped' };
+  const fix = healJuryVendorCollision(qc.routing);
+  if (!fix) return { ok: true, detail: 'qe-court panel already valid (or unfixable automatically)' };
+  const routing = { ...qc.routing, jury: { ...qc.routing.jury, provider: fix.to } };
+  writeJsonWithBackup(qeCourtConfigPath(root), { ...qc, routing });
+  return { ok: true, detail: `jury ${fix.from} → ${fix.to} (temporary until upstream fix lands: ${UPSTREAM_JURY_VENDOR_ISSUE})` };
 }
 
 /** Upgrade a global package to latest (with allow-scripts). */

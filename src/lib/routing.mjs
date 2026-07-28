@@ -40,14 +40,19 @@ export const SUBSCRIPTION_PROVIDERS = new Set(['claude-code', 'codex', 'ollama',
 // `--help`, and docs/PROVIDERS.md. NOT a hard allow-list: any model your host CLI
 // accepts also works — these are ak's curated picks. Web-verified on the date
 // below; model lines move fast, so re-check and let users override (ADR-0002/0003).
+// Notes must state work-per-task, not only price: a note that compares cost
+// WITHOUT saying "per-token" gets read as cost-per-task, which is the axis users
+// actually pay on (a model needing 2-3x the agentic turns costs more per task at
+// identical per-token price). Measured end-to-end in pacphi/retort versions-blog.
 export const MODEL_CATALOG_VERIFIED = '2026-07-24';
+export const COST_AXIS_NOTE = 'per-token price ≠ per-task cost — a model that needs more agentic turns costs more per task at the same per-token price';
 export const MODEL_CATALOG = {
   claude: [
-    { id: 'claude-opus-5', tier: 'reasoning', note: 'new top Opus — ~2× Opus 4.8 at the same price, near-Fable on coding/agentic; premium reasoning default' },
-    { id: 'claude-sonnet-5', tier: 'balanced', note: 'near-Opus at lower cost — review, spec, release' },
+    { id: 'claude-opus-5', tier: 'reasoning', note: 'new top Opus — same per-token price as 4.8, but ~2–3× the agentic turns on routine work; earns it at the hard end' },
+    { id: 'claude-sonnet-5', tier: 'balanced', note: 'near-Opus capability at a lower per-token price — review, spec, release' },
     { id: 'claude-fable-5', tier: 'flagship', note: 'top capability (Mythos-class, above Opus 5) — hardest problems' },
     { id: 'claude-haiku-4-5-20251001', tier: 'fast', note: 'cheap/fast — high-volume mechanical work' },
-    { id: 'claude-opus-4-8', tier: 'prior', note: 'prior Opus generation — same price as opus-5, kept for pinned configs' },
+    { id: 'claude-opus-4-8', tier: 'prior', note: 'prior Opus generation — same per-token price, roughly half the turns on routine work' },
   ],
   codex: [
     { id: 'gpt-5.4', tier: 'flagship', note: 'coding + reasoning + agentic — recommended execution default' },
@@ -84,7 +89,10 @@ export function providerModelChoices(provider) {
  *  host models (claude/codex) and provider-axis models (openrouter/GLM) reachable
  *  via the aqe fallback chain. */
 export function formatModelHelp() {
-  const lines = [`known-good models (verified ${MODEL_CATALOG_VERIFIED}; any model your host accepts also works):`];
+  const lines = [
+    `known-good models (verified ${MODEL_CATALOG_VERIFIED}; any model your host accepts also works):`,
+    `  ${COST_AXIS_NOTE}`,
+  ];
   for (const host of HOSTS) {
     lines.push(`  ${host}:`);
     for (const m of MODEL_CATALOG[host]) lines.push(`    ${m.id.padEnd(28)} ${m.tier.padEnd(10)} ${m.note}`);
@@ -222,6 +230,95 @@ export function seedDualRouting({ hosts = HOSTS, primary = DEFAULT_PRIMARY_HOST 
     };
   }
   return policy;
+}
+
+/** The catalog note for a model id (its cost-per-task characteristic), or null.
+ *  Searches host + provider catalogs so a refresh diff can explain the trade. */
+export function modelNote(model) {
+  for (const list of [...Object.values(MODEL_CATALOG), ...Object.values(PROVIDER_MODEL_CATALOG)]) {
+    const m = list.find((e) => e.id === model);
+    if (m) return m.note;
+  }
+  return null;
+}
+
+/** What seeding would produce for `act` TODAY, on the host the entry already
+ *  sits on. A codex-primary seed mirrors every default route to the opposite
+ *  host (swapRoute), so comparing against the raw default would read every
+ *  mirrored route as diverged — mirror first when the hosts disagree. Pure. */
+function currentSeedFor(act, entry = {}) {
+  const def = DEFAULT_ROUTES[act];
+  if (!def) return null;
+  return entry.host && entry.host !== def.host ? { ...def, ...swapRoute(def) } : def;
+}
+
+/**
+ * Seeded routes whose model no longer matches what seeding would produce today —
+ * ak chose these values, the defaults have since moved, and nothing re-seeds them.
+ * Pure.
+ *
+ * Only `source === 'seeded'` entries are reported: a 'user' pin is deliberate
+ * intent and is never divergence.
+ *
+ * Which side is better is activity-dependent (a newer default can cost 2-3× the
+ * agentic turns on routine work), so callers must present this neutrally — a
+ * divergence to decide about, not a lag to clear.
+ */
+export function divergedRoutes(policy = {}) {
+  const out = [];
+  for (const act of ACTIVITIES) {
+    const p = policy[act];
+    if (!p || p.source !== 'seeded') continue;
+    const want = currentSeedFor(act, p);
+    if (!want) continue;
+    const modelDiverged = !!(want.model && p.model && p.model !== want.model);
+    // An escalation rung is a routing decision too, and it diverges on its own
+    // schedule: a seed whose primary model never moved can still escalate into a
+    // model the defaults have since replaced.
+    const escalate = (p.escalate ?? []).map((rung, i) => {
+      const wantRung = want.escalate?.[i];
+      return wantRung && rung.model !== wantRung.model
+        ? { host: rung.host, model: rung.model, defaultModel: wantRung.model }
+        : null;
+    }).filter(Boolean);
+    if (!modelDiverged && escalate.length === 0) continue;
+    out.push({
+      activity: act,
+      host: p.host ?? want.host,
+      model: p.model,
+      defaultHost: want.host,
+      defaultModel: want.model,
+      modelDiverged,
+      escalate,
+      defaultNote: modelNote(want.model),
+      currentNote: modelNote(p.model),
+    });
+  }
+  return out;
+}
+
+/**
+ * Re-seed the named activities from the current defaults, returning a NEW policy.
+ * Only `source === 'seeded'` entries are eligible — a user pin survives untouched
+ * even when named. `activities` defaults to every diverged activity. Pure.
+ * @param {Record<string, any>} [policy]
+ * @param {{ activities?: string[] }} [opts]
+ */
+export function refreshSeededRoutes(policy = {}, { activities } = {}) {
+  const eligible = new Set(divergedRoutes(policy).map((d) => d.activity));
+  const want = new Set(activities ?? [...eligible]);
+  const out = { ...policy };
+  for (const act of want) {
+    if (!eligible.has(act)) continue;
+    const seed = currentSeedFor(act, out[act]);
+    out[act] = {
+      host: seed.host,
+      model: seed.model,
+      ...(seed.escalate ? { escalate: seed.escalate } : {}),
+      source: 'seeded',
+    };
+  }
+  return out;
 }
 
 /**

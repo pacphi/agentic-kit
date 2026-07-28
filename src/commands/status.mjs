@@ -8,7 +8,7 @@ import { loadRing, detectRegression } from '../lib/health-history.mjs';
 import * as paths from '../lib/paths.mjs';
 import { nativesStatus, rufloRuntimeNatives, dbPathPinStatus, aidefencePresent, securityPresent } from '../lib/natives.mjs';
 import { scanNpxStale } from '../lib/npx.mjs';
-import { registrationStatus, codexMcpStatus, rufloCodexMcpStatus } from '../lib/mcp.mjs';
+import { registrationStatus, codexMcpStatus, rufloCodexMcpStatus, ruvectorRegistered } from '../lib/mcp.mjs';
 import { listDaemons, staleDaemons } from '../lib/daemons.mjs';
 import { scanRvf } from '../lib/rvf.mjs';
 import { registry, syncBlocks, blocksForTarget, retiredForTarget, guidanceTargets } from '../lib/blocks.mjs';
@@ -19,8 +19,10 @@ import { drift as ruvnetBrainDrift, nightlyAgentPresent as rbNightlyPresent, NIG
 import { coherence as adbCoherence } from '../lib/agentdb.mjs';
 import { readJson } from '../lib/settings.mjs';
 import { have } from '../lib/exec.mjs';
-import { HOSTS, settingsTarget, isDefault, managedEnv, MANAGED_ENV_KEYS, hostInstallState, hostAuthState, bothHostsEnabled, aqeRouterFile, aqeSupportsAgentOverrides } from '../lib/providers.mjs';
-import { policyToAgentOverrides, routingSummary } from '../lib/routing.mjs';
+import { HOSTS, settingsTarget, isDefault, managedEnv, MANAGED_ENV_KEYS, hostInstallState, hostAuthState, bothHostsEnabled, aqeRouterFile, aqeSupportsAgentOverrides, credentialGaps } from '../lib/providers.mjs';
+import { policyToAgentOverrides, routingSummary, divergedRoutes } from '../lib/routing.mjs';
+import { qeCourtShipped, readQeCourtConfig, panelFromRouting, validatePanel, healJuryVendorCollision, UPSTREAM_JURY_VENDOR_ISSUE } from '../lib/qeCourt.mjs';
+import { drift as ruvectorDrift } from '../lib/ruvector.mjs';
 
 export const options = {
   json: { type: 'boolean', default: false },
@@ -94,6 +96,35 @@ export async function collect({ pkgRoot, cwd = process.cwd() }) {
       rows.push(row('ruvnet-brain-nightly', 'warn',
         `ruvnet-brain nightly self-updater active (${RB_NIGHTLY_LABEL}) — bypasses ak-managed updates`,
         'sync disables it (re-enable deliberately: `npx ruvnet-brain --enable-nightly`)'));
+    }
+  }
+
+  // ruvector — a global CLI users register as an MCP server BY HAND. ak manages
+  // its drift, never its presence or its registration. Unregistered → no row at
+  // all (same silence as codex-not-enabled): nudging a tool nobody opted into
+  // would be management by ambush. Registered but kit.json ruvector:false → an
+  // info row with NO fix, so sync never plans an upgrade the user turned off.
+  //
+  // Wording is deliberately "CLI": the registered command is typically
+  // `npx -y ruvector mcp start`, so upgrading the global package does not
+  // necessarily change what the MCP server executes. Claim only what is true.
+  if (ruvectorRegistered()) {
+    if (cfg.ruvector === false) {
+      rows.push(row('ruvector', 'info', 'ruvector MCP registered — CLI updates disabled (kit.json ruvector:false)'));
+    } else {
+      try {
+        const rv = await ruvectorDrift();
+        if (rv.present && rv.outdated) {
+          rows.push(row('ruvector', 'warn',
+            `ruvector CLI ${rv.installed} installed, ${rv.latest} available`, 'sync upgrades the ruvector CLI'));
+        } else if (rv.present) {
+          rows.push(row('ruvector', 'ok', `ruvector CLI ${rv.installed}${rv.latest ? ' (latest)' : ''} (MCP registered, user scope)`));
+        } else {
+          rows.push(row('ruvector', 'info', 'ruvector MCP registered but no global CLI installed (server runs via npx)'));
+        }
+      } catch (e) {
+        rows.push(row('ruvector', 'warn', `ruvector check unavailable: ${e.message}`));
+      }
     }
   }
 
@@ -348,6 +379,20 @@ export async function collect({ pkgRoot, cwd = process.cwd() }) {
       } else {
         rows.push(row('providers', 'ok', `wired: ${on}${chainStr} (${scope})`));
       }
+      // Chain VIABILITY, separate from chain ORDER above: a chain in the right
+      // order whose rungs have no credential fails over into nothing (#54). Warn,
+      // not fail — the primary rung still works — and no `fix`, since only the
+      // user can supply a key.
+      if (chain.length) {
+        const gaps = credentialGaps(chain);
+        if (gaps.length) {
+          rows.push(row('providers', 'warn',
+            `aqe chain: ${chain.length - gaps.length}/${chain.length} rungs have credentials `
+            + `(${gaps.map((g) => `${g.provider}: needs ${g.missing.join(', ')}`).join('; ')})`));
+        } else {
+          rows.push(row('providers', 'ok', `aqe chain: ${chain.length}/${chain.length} rungs have credentials`));
+        }
+      }
     }
   } catch (e) {
     rows.push(row('providers', 'warn', `provider check unavailable: ${e.message}`));
@@ -370,6 +415,20 @@ export async function collect({ pkgRoot, cwd = process.cwd() }) {
         const drift = !disk || JSON.stringify(disk) !== JSON.stringify(want);
         if (drift) rows.push(row('routing', 'warn', `${base} — llm-config.json out of sync`, 'sync re-applies agentOverrides'));
         else rows.push(row('routing', 'ok', base));
+      }
+      // Seeded pins vs today's defaults. Deliberately `info` and deliberately
+      // "diverges from": which side wins is activity-dependent (a newer default
+      // can cost 2-3× the agentic turns on routine work), so a `warn` would push
+      // users to spend turns clearing a lint. No `fix` — sync must never
+      // auto-refresh a pin; `ak x provider refresh` is the opt-in path (#55).
+      const diverged = divergedRoutes(policy);
+      if (diverged.length) {
+        const pairs = [...new Set(diverged.flatMap((d) => [
+          ...(d.modelDiverged ? [`${d.model} vs ${d.defaultModel}`] : []),
+          ...d.escalate.map((e) => `${e.model} vs ${e.defaultModel} (escalation)`),
+        ]))].join(', ');
+        rows.push(row('routing', 'info',
+          `${diverged.length} seeded route(s) diverge from current defaults (${pairs}) — ak x provider refresh`));
       }
     }
   } catch (e) {
@@ -477,6 +536,28 @@ export async function collect({ pkgRoot, cwd = process.cwd() }) {
   if (cfg.providers?.hosts?.codex) {
     rows.push(row('statusline', 'info',
       'statusline is claude-only — codex has no command-backed statusline; its guidance ships via AGENTS.md'));
+  }
+
+  // qe-court (ADR-124): TEMPORARY, remove once fixed upstream. agentic-qe's own
+  // shipped default config.json violates its own writerIsNeverJuror invariant
+  // (proffesor-for-testing/agentic-qe#576) — a brand-new project fails
+  // validation before any user touches the file. No-op unless aqe is new
+  // enough AND the skill has already created its config.json (ak never
+  // creates it) — same gate as `ak x provider status`'s read-only awareness.
+  if (qeCourtShipped()) {
+    const qcRoot = paths.repoRoot(cwd);
+    const qc = qcRoot ? readQeCourtConfig(qcRoot) : null;
+    if (qc) {
+      const violations = validatePanel(panelFromRouting(qc.routing), { minVendors: qc.options?.minDistinctVendors ?? 2 });
+      if (violations.length) {
+        const fix = healJuryVendorCollision(qc.routing);
+        rows.push(row('qe-court', 'warn',
+          `qe-court panel invalid: ${violations.join(', ')}`,
+          fix ? `sync reassigns jury ${fix.from} → ${fix.to} (temporary until upstream fix lands: ${UPSTREAM_JURY_VENDOR_ISSUE})` : null));
+      } else {
+        rows.push(row('qe-court', 'ok', 'qe-court panel valid (vendor-diverse, jury independent of writer)'));
+      }
+    }
   }
 
   return rows;

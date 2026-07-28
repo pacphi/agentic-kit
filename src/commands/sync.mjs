@@ -11,6 +11,7 @@ import { listDaemons, staleDaemons, reap } from '../lib/daemons.mjs';
 import { loadKitConfig, saveKitConfig } from '../lib/config.mjs';
 import { HOSTS, applyHosts, applyProviders, hostInstallState, installHost, applyAqeRouter, seedDualRoutingIfDualHost, ensureCodexMcp, ensureRufloMcpInCodex, bothHostsEnabled } from '../lib/providers.mjs';
 import { driftReport, selfDrift } from '../lib/versions.mjs';
+import { RUVECTOR_PKG, managed as ruvectorManaged } from '../lib/ruvector.mjs';
 import { pruneNpxStale } from '../lib/npx.mjs';
 import { nativesStatus, securityPresent } from '../lib/natives.mjs';
 import { readJson } from '../lib/settings.mjs';
@@ -46,7 +47,7 @@ export async function run({ flags, pkgRoot }) {
   const cwd = process.cwd();
   const rows = await collect({ pkgRoot, cwd });
   const plan = rows.filter((r) => r.fix)
-    .filter((r) => !(flags['no-upgrade'] && (r.subsystem === 'versions' || r.subsystem === 'self' || r.subsystem === 'ruvnet-brain')));
+    .filter((r) => !(flags['no-upgrade'] && ['versions', 'self', 'ruvnet-brain', 'ruvector'].includes(r.subsystem)));
 
   if (plan.length === 0) { ok('nothing to do — all subsystems healthy'); return 0; }
 
@@ -74,6 +75,16 @@ export async function run({ flags, pkgRoot }) {
   // it rides its own branch rather than the driftReport loop above.
   if (subsystems.has('ruvnet-brain') && !flags['no-upgrade']) {
     await step('ruvnet-brain', () => heal.installRuvnetBrain({ force: true }));
+  }
+  // ruvector: an unmanaged global users wire up as an MCP server by hand. Only
+  // ever UPGRADED — status emits no row (and so no plan entry) when it is absent,
+  // so this branch can never install it for someone who didn't opt in.
+  // The status row already gates on registration + opt-in (an unregistered or
+  // opted-out ruvector emits no `fix`, so it cannot reach this plan) — but this
+  // branch installs software globally, so it re-checks rather than trusting the
+  // plan to be the only guard.
+  if (subsystems.has('ruvector') && !flags['no-upgrade'] && ruvectorManaged(cfg)) {
+    await step('ruvector', () => heal.upgradePackage(RUVECTOR_PKG));
   }
   // The brain installer's own nightly self-updater (macOS LaunchAgent) bypasses
   // ak-managed updates — disabling it is a heal, not an upgrade, so it runs even
@@ -108,6 +119,12 @@ export async function run({ flags, pkgRoot }) {
   }
   if (subsystems.has('aqe')) {
     report('rvf', heal.healRvf(paths.projectAqeDir(cwd)));
+  }
+  // qe-court: TEMPORARY, remove once fixed upstream (agentic-qe#576) — see
+  // heal.healQeCourtPanel's doc comment. Only ever fires when status already
+  // found a fixable violation, so this never touches a valid or unfixable panel.
+  if (subsystems.has('qe-court')) {
+    report('qe-court', heal.healQeCourtPanel(cwd));
   }
   // agentdb: install/repin the standalone CLI to ruflo's bundled version so the
   // shared cognitive store stays coherent (harvest's write path depends on it).

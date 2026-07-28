@@ -68,7 +68,8 @@ export const JS = `
   var CAT={
     hosts:"hosts", mcp:"hosts", "codex-mcp":"hosts", routing:"hosts",
     providers:"providers",
-    learning:"intel", "ruvnet-brain":"intel", "ruvnet-brain-nightly":"intel", aqe:"intel", agentdb:"intel"
+    learning:"intel", "ruvnet-brain":"intel", "ruvnet-brain-nightly":"intel", aqe:"intel", agentdb:"intel",
+    ruvector:"intel"
   };
   function catOf(s){return CAT[s]||"runtime";}
 
@@ -143,7 +144,7 @@ export const JS = `
 
   // severity rank for rollups + triage sort; preferred order breaks ties.
   var RANK={fail:3,warn:2,ok:1,info:0,unknown:0};
-  var PREF=["versions","self","natives","security","learning","providers","hosts","routing","mcp","codex-mcp","ruvnet-brain","ruvnet-brain-nightly","aqe","daemons","blocks","statusline","npx"];
+  var PREF=["versions","self","natives","security","learning","providers","hosts","routing","mcp","codex-mcp","ruvnet-brain","ruvnet-brain-nightly","ruvector","aqe","daemons","blocks","statusline","npx"];
 
   // Collapse rows into one group per subsystem (kills repeated labels); the
   // group's level is the worst of its rows. Sort worst-first, then by PREF.

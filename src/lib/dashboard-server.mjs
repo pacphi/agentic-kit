@@ -27,6 +27,7 @@ import { fileURLToPath } from 'node:url';
 import { execFile } from 'node:child_process';
 import { driftReport, selfDrift } from './versions.mjs';
 import { drift as ruvnetBrainDrift } from './ruvnet-brain.mjs';
+import { drift as ruvectorDrift, managed as ruvectorManaged } from './ruvector.mjs';
 import { loadKitConfig } from './config.mjs';
 import { resolveRoutes, routingSummary, ACTIVITIES, HOST_PROVIDER } from './routing.mjs';
 import { renderPage } from './dashboard/page.mjs';
@@ -126,6 +127,9 @@ async function collectData({ cwd, fetchStatus }) {
     try {
       if (loadKitConfig().ruvnetBrain) drift = foldBrainDrift(drift, await ruvnetBrainDrift());
     } catch { /* banner is best-effort — the subsystem card still carries the brain row */ }
+    try {
+      if (ruvectorManaged()) drift = foldRuvectorDrift(drift, await ruvectorDrift());
+    } catch { /* banner is best-effort — the subsystem card still carries the ruvector row */ }
   }
 
   return {
@@ -182,6 +186,20 @@ export function foldBrainDrift(drift, b) {
     installed: b.installedRelease ?? '(unversioned)',
     latest: b.latest,
     outdated: !!b.outdated,
+  }];
+}
+
+/** Fold the ruvector CLI into the npm drift array, same shape renderDrift wants.
+ *  `r` is a src/lib/ruvector.mjs drift() result. Absent ruvector → array
+ *  unchanged: ak reports its drift but never advertises installing it.
+ *  Pure; exported for tests. */
+export function foldRuvectorDrift(drift, r) {
+  if (!r?.present) return drift;
+  return [...(drift ?? []), {
+    pkg: 'ruvector',
+    installed: r.installed,
+    latest: r.latest,
+    outdated: !!r.outdated,
   }];
 }
 

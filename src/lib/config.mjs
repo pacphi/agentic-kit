@@ -9,6 +9,7 @@ const DEFAULTS = {
   aqe: true,            // manage agentic-qe alongside ruflo
   agentdb: true,        // manage the standalone agentdb CLI (harvest's write path), pinned to ruflo's bundled version
   ruvnetBrain: true,    // install/manage the RuvNet Brain (offline KB + search_ruvnet MCP)
+  ruvector: true,       // report drift for a globally-installed ruvector CLI (never installs it)
   security: true,       // run the security verification surface by default
   harvest: false,       // opt-in learning-write (`ak x harvest`); off = never runs writes
   health: { ring: [] }, // persisted stack-health snapshot ring (see health-history.mjs)
