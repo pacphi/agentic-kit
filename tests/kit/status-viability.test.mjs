@@ -39,10 +39,18 @@ const ALL_CREDENTIAL_ENV = [...new Set(
   Object.values(AQE_PROVIDER_CREDENTIALS).flatMap((d) => [...(d.keyEnv ?? []), ...(d.also ?? [])]),
 )];
 
-function withoutEnv(keys, fn) {
+// async + awaited fn(): without the await, `finally` fires the instant fn()
+// returns its (still-pending) promise — before any of fn()'s own awaited work
+// (e.g. `await collect()`, which itself awaits driftReport() etc.) has run —
+// so the restore races ahead and clobbers env vars fn() hasn't read yet. This
+// stayed invisible on any machine that happens to export a REAL credential env
+// var (e.g. a personal OPENROUTER_API_KEY): the premature restore lands on
+// that real value instead of `undefined`, and a real key is just as truthy as
+// the test's injected one, so the assertion passes for the wrong reason.
+async function withoutEnv(keys, fn) {
   const saved = {};
   for (const k of keys) { saved[k] = process.env[k]; delete process.env[k]; }
-  try { return fn(); } finally {
+  try { return await fn(); } finally {
     for (const k of keys) {
       if (saved[k] === undefined) delete process.env[k];
       else process.env[k] = saved[k];
