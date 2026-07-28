@@ -168,7 +168,7 @@ export async function run({ flags, pkgRoot }) {
     // also force-strips blocks that no longer belong in it (retiredForTarget) —
     // the migration path that clears the dual block out of any project AGENTS.md
     // that still carries it after the re-scope (ADR-0008).
-    const ctx = { flags: { dualMode: bothHostsEnabled(cfg) } };
+    const ctx = { flags: { dualMode: bothHostsEnabled(cfg), opencodeEnabled: !!cfg.providers?.hosts?.opencode } };
     for (const t of guidanceTargets({ cwd, cfg })) {
       const treg = [...blocksForTarget(rowsReg, t.name), ...retiredForTarget(rowsReg, t.name)];
       const res = await syncBlocks(t.file, treg, resolve, { context: ctx });

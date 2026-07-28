@@ -156,7 +156,7 @@ function deepEqual(a, b) {
  *  (legacy entries have unknown prior/written → treated conservatively: prior
  *  null, written null → never auto-deleted, only re-recorded on next apply). */
 function normalizeManaged(m) {
-  const out = { mcp: {}, paths: [], permissions: {} };
+  const out = { mcp: {}, paths: [], permissions: {}, permissionScalar: null };
   if (!m || typeof m !== 'object') return out;
   const legacyNames = Array.isArray(m.mcp) ? m.mcp : Object.keys(m.mcp ?? {});
   for (const n of legacyNames) {
@@ -169,6 +169,7 @@ function normalizeManaged(m) {
     const rec = Array.isArray(m.permissions) ? null : m.permissions[k];
     out.permissions[k] = rec && typeof rec === 'object' && 'written' in rec ? rec : { prior: null, written: null };
   }
+  out.permissionScalar = typeof m.permissionScalar === 'string' ? m.permissionScalar : null;
   return out;
 }
 
@@ -210,17 +211,28 @@ export async function applyOpencode(cfg, { dryRun = false, configFile = paths.op
     if (name in entries) continue;
     if (!(name in next.mcp)) continue;
     if (rec.written && deepEqual(next.mcp[name], rec.written)) {
-      delete next.mcp[name];
-      pruned.push(name);
+      // RESTORE the prior when there was one (a user entry that happened to
+      // equal the old desired value is a user value, not ak's to delete);
+      // delete only what ak itself created (codex-review r2).
+      if (rec.prior != null) { next.mcp[name] = rec.prior; pruned.push(`${name} (prior restored)`); }
+      else { delete next.mcp[name]; pruned.push(name); }
     } // else: user edited (or legacy record) → leave it, keep no ownership
   }
-  const managed = { mcp: {}, paths: [], permissions: {} };
+  const managed = { mcp: {}, paths: [], permissions: {}, permissionScalar: null };
   for (const [name, want] of Object.entries(entries)) {
     const cur = next.mcp[name];
     const priorRec = prevManaged.mcp[name];
     if (cur !== undefined && !deepEqual(cur, want) && !(priorRec?.written && deepEqual(cur, priorRec.written))) {
       collisions.push(`mcp.${name}`);
       managed.mcp[name] = { prior: cur, written: null }; // tracked but NOT ak-owned
+      continue;
+    }
+    // A previously-colliding (never ak-authored) value the USER has since
+    // aligned to the desired one stays unmanaged: adopting it with the stale
+    // pre-collision prior would make undo overwrite the user's own later
+    // choice (codex-review r2). Noted, not owned.
+    if (priorRec && priorRec.written == null && cur !== undefined && deepEqual(cur, want)) {
+      managed.mcp[name] = { prior: priorRec.prior, written: null };
       continue;
     }
     // prior is the ORIGINAL pre-ak value (kept across reapplies), never the
@@ -246,6 +258,12 @@ export async function applyOpencode(cfg, { dryRun = false, configFile = paths.op
   }
 
   // ── permission: lift scalar shorthand, prune stale, merge desired ──
+  // Record scalar ORIGIN explicitly (codex-review r2): undo restores the
+  // scalar form only when the file actually started scalar — a pre-existing
+  // {"*":"ask"} object must survive as an object, not be "restored" to "ask".
+  managed.permissionScalar = typeof doc.permission === 'string'
+    ? doc.permission
+    : (prevManaged.permissionScalar ?? null);
   if (typeof next.permission === 'string') next.permission = { '*': next.permission };
   next.permission = { ...(next.permission ?? {}) };
   for (const [k, rec] of Object.entries(prevManaged.permissions)) {
@@ -326,11 +344,13 @@ export function undoOpencode(cfg, { configFile = paths.opencodeConfigPath() } = 
     }
   }
 
-  const hadScalarStar = typeof doc.permission === 'object' && doc.permission?.['*'] != null;
+  const scalarOrigin = managed.permissionScalar ?? null;
   for (const [k, rec] of Object.entries(managed.permissions)) restore(doc.permission, k, rec, `permission.${k}`);
   if (doc.permission && Object.keys(doc.permission).length === 0) delete doc.permission;
-  else if (doc.permission && hadScalarStar && Object.keys(doc.permission).length === 1 && doc.permission['*'] != null) {
-    doc.permission = doc.permission['*']; // restore the scalar shorthand we lifted
+  else if (doc.permission && scalarOrigin != null && Object.keys(doc.permission).length === 1 && doc.permission['*'] != null) {
+    // restore the scalar shorthand we lifted (only when scalar was the ORIGIN;
+    // the current '*' value is what collapses back — '*' is never ak-managed)
+    doc.permission = doc.permission['*'];
     changed = true;
   }
 

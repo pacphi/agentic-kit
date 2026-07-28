@@ -147,7 +147,8 @@ const plugin = async ({ client }) => {
         // it as injected context, not user content.
         const messageID = output?.message?.id ?? input?.messageID
         output.parts.push({
-          id: `part_ruflo_route_${Date.now().toString(36)}`,
+          // opencode PartID schema requires the "prt" prefix (schema.ts)
+          id: `prt_ruflo_route_${Date.now().toString(36)}`,
           messageID,
           sessionID: input?.sessionID ?? output?.message?.sessionID,
           type: "text",

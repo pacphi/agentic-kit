@@ -46,22 +46,25 @@ export const BUILTIN_BLOCKS = [
     // opencode's ruflo surface: MCP tools are `claude-flow_*` (not
     // `mcp__claude-flow__*`), hooks arrive via the plugins/ bridge, and agents
     // are converted subagents — a different enough story to warrant its own
-    // template rather than reusing ruflo-reference. Gated on the opencode CLI
-    // being on PATH (mirrors the codex/aqe command detectors).
+    // template rather than reusing ruflo-reference. Gated on ENABLEMENT (the
+    // opencodeEnabled flag, same mechanism as dualMode) — the template asserts
+    // active wiring, so an installed-but-disabled host must not receive it
+    // (codex-review r2; and `x provider off` → next sync strips it).
     slug: 'ruflo-opencode-reference',
     template: 'ruflo-opencode-reference.md',
     position: 'append',
-    detector: { type: 'command', target: 'opencode' },
+    detector: { type: 'flag', target: 'opencodeEnabled' },
     guidanceFiles: ['agents-opencode'],
   },
   {
     // opencode twin of ruvnet-brain-reference (that slug stays claude-only):
     // same ground-before-assert rule, but the tool name is the opencode-style
     // `ruvnet-brain_search_ruvnet` and updates ride the stable-spine shim.
+    // Likewise enablement-gated: the tool exists in opencode only when wired.
     slug: 'ruvnet-brain-opencode-reference',
     template: 'ruvnet-brain-opencode-reference.md',
     position: 'append',
-    detector: { type: 'dir', target: '~/.cache/ruvnet-brain/kb' },
+    detector: { type: 'flag', target: 'opencodeEnabled' },
     guidanceFiles: ['agents-opencode'],
   },
   {

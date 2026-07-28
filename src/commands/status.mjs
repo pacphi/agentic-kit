@@ -537,7 +537,7 @@ export async function collect({ pkgRoot, cwd = process.cwd() }) {
     const resolve = (r) => (r.custom
       ? (r.template.startsWith('~/') ? path.join(paths.home, r.template.slice(2)) : r.template)
       : path.join(pkgRoot, 'claude', r.template));
-    const ctx = { flags: { dualMode: bothHostsEnabled(cfg) } };
+    const ctx = { flags: { dualMode: bothHostsEnabled(cfg), opencodeEnabled: !!cfg.providers?.hosts?.opencode } };
     for (const t of guidanceTargets({ cwd, cfg })) {
       const treg = [...blocksForTarget(rowsReg, t.name), ...retiredForTarget(rowsReg, t.name)];
       const res = await syncBlocks(t.file, treg, resolve, { dryRun: true, context: ctx });

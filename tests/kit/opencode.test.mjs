@@ -486,3 +486,101 @@ test('opencode blocks are scoped to agents-opencode; preamble is shared claude +
   assert.ok(!(claudeRef.guidanceFiles ?? ['claude']).includes('agents-opencode'));
   assert.ok(!(claudeBrain.guidanceFiles ?? ['claude']).includes('agents-opencode'));
 });
+
+// ── codex-review round 2 ─────────────────────────────────────────────────────
+
+test('collision → user aligns to desired value: stays unmanaged, undo never restores the stale prior', async () => {
+  const d = tmp('ak-oc-align-');
+  const file = path.join(d, 'opencode.json');
+  const shim = path.join(d, 'absent-shim');
+  const userEntry = { type: 'local', command: ['my', 'own'], timeout: 5 };
+  fs.writeFileSync(file, JSON.stringify({ mcp: { 'claude-flow': userEntry } }));
+  const cfg = cfgOn();
+  // 1. collide (user value differs)
+  await applyOpencode(cfg, { configFile: file, brainShim: shim });
+  // 2. user rewrites their entry to ak's exact desired value
+  const want = (await mcpEntriesFor({ brainShim: shim }))['claude-flow'];
+  fs.writeFileSync(file, JSON.stringify({ mcp: { 'claude-flow': want } }));
+  // 3. re-apply: must NOT adopt with the stale pre-collision prior
+  await applyOpencode(cfg, { configFile: file, brainShim: shim });
+  assert.equal(cfg.providers.opencodeManaged.mcp['claude-flow'].written, null, 'never owned (not ak-authored)');
+  // 4. undo: the user's aligned value must survive — no stale-prior restore
+  undoOpencode(cfg, { configFile: file });
+  assert.deepEqual(JSON.parse(fs.readFileSync(file, 'utf8')).mcp['claude-flow'], want);
+  rm(d);
+});
+
+test('desired-set shrink RESTORES a prior (user entry that equaled the old desired value is not deleted)', async () => {
+  const d = tmp('ak-oc-restore-');
+  const file = path.join(d, 'opencode.json');
+  const shim = path.join(d, 'brain.mjs');
+  fs.writeFileSync(shim, '// shim\n');
+  const cfg = cfgOn();
+  // user pre-registers an entry that happens to equal ak's desired brain entry
+  const want = (await mcpEntriesFor({ brainShim: shim }))['ruvnet-brain'];
+  fs.writeFileSync(file, JSON.stringify({ mcp: { 'ruvnet-brain': want } }));
+  await applyOpencode(cfg, { configFile: file, brainShim: shim });
+  fs.rmSync(shim); // brain leaves the desired set
+  await applyOpencode(cfg, { configFile: file, brainShim: shim });
+  const doc = JSON.parse(fs.readFileSync(file, 'utf8'));
+  assert.deepEqual(doc.mcp['ruvnet-brain'], want, 'prior value restored, not deleted');
+  rm(d);
+});
+
+test('a pre-existing {"*":"ask"} permission OBJECT survives undo as an object (no phantom scalar restore)', async () => {
+  const d = tmp('ak-oc-starobj-');
+  const file = path.join(d, 'opencode.json');
+  fs.writeFileSync(file, JSON.stringify({ permission: { '*': 'ask' } }));
+  const cfg = cfgOn();
+  await applyOpencode(cfg, { configFile: file, brainShim: path.join(d, 'absent-shim') });
+  assert.equal(JSON.parse(fs.readFileSync(file, 'utf8')).permission['claude-flow_*'], 'allow');
+  undoOpencode(cfg, { configFile: file });
+  const after = JSON.parse(fs.readFileSync(file, 'utf8'));
+  assert.deepEqual(after.permission, { '*': 'ask' }, 'object form preserved, not collapsed to "ask"');
+  rm(d);
+});
+
+test('opencode guidance blocks are enablement-gated (flag): absent when disabled, stripped on disable', async () => {
+  const { registry, syncBlocks, blocksForTarget, retiredForTarget } = await import('../../src/lib/blocks.mjs');
+  const d = tmp('ak-oc-flag-');
+  const file = path.join(d, 'AGENTS.md');
+  const tplDir = path.join(d, 'tpl');
+  fs.mkdirSync(tplDir);
+  fs.writeFileSync(path.join(tplDir, 'tpl.md'), '<!-- BEGIN SLUG -->\nBLOCK\n<!-- END SLUG -->\n');
+  const rows = registry();
+  const resolve = (row) => {
+    const body = fs.readFileSync(path.join(tplDir, 'tpl.md'), 'utf8').replaceAll('SLUG', row.slug);
+    const p = path.join(tplDir, `${row.slug}.md`);
+    fs.writeFileSync(p, body);
+    return p;
+  };
+  const treg = [...blocksForTarget(rows, 'agents-opencode'), ...retiredForTarget(rows, 'agents-opencode')];
+  // disabled → the enablement-gated blocks do NOT upsert (the host-agnostic
+  // preamble legitimately still can — it asserts no wiring)
+  const off = await syncBlocks(file, treg, resolve, { context: { flags: { opencodeEnabled: false } } });
+  for (const slug of ['ruflo-opencode-reference', 'ruvnet-brain-opencode-reference']) {
+    assert.ok(!off.some((r) => r.slug === slug && r.action === 'upserted'), `${slug} must not upsert while disabled`);
+  }
+  // enabled → upserted
+  const on = await syncBlocks(file, treg, resolve, { context: { flags: { opencodeEnabled: true } } });
+  assert.ok(on.some((r) => r.slug === 'ruflo-opencode-reference' && r.action === 'upserted'));
+  assert.ok(on.some((r) => r.slug === 'ruvnet-brain-opencode-reference' && r.action === 'upserted'));
+  // disabled again → stripped
+  const off2 = await syncBlocks(file, treg, resolve, { context: { flags: { opencodeEnabled: false } } });
+  assert.ok(off2.some((r) => r.slug === 'ruflo-opencode-reference' && r.action === 'stripped'));
+  assert.ok(!fs.readFileSync(file, 'utf8').includes('BEGIN ruflo-opencode-reference'));
+  rm(d);
+});
+
+test('isDefault is false when the opencode host is enabled', async () => {
+  const { isDefault } = await import('../../src/lib/providers.mjs');
+  assert.equal(isDefault(cfgOn()), false);
+  assert.equal(isDefault({ providers: { hosts: { claude: true, codex: false, opencode: false } } }), true);
+});
+
+test('the deployed plugin template uses schema-valid PartIDs (prt prefix) for injected parts', () => {
+  const tpl = fs.readFileSync(new URL('../../src/templates/opencode-ruflo-hooks.js', import.meta.url), 'utf8');
+  const m = tpl.match(/id:\s*`([^`]+)`/);
+  assert.ok(m, 'template constructs a part id');
+  assert.ok(m[1].startsWith('prt'), `part id must start with "prt" (opencode PartID schema), got: ${m[1]}`);
+});

@@ -124,11 +124,12 @@ export async function run({ flags }) {
     }
   }
   {
-    // cfg comes from the top of run() (read before any purge of kit.json)
+    // cfg comes from the top of run() (read before any purge of kit.json).
+    // --purge removes kit.json above; persisting cfg here would recreate it.
     if (cfg.providers?.opencodeMcp === 'ak') {
       act('stripped ak-managed opencode.json wiring (mcp/skills/permissions)', () => {
         undoOpencode(cfg);
-        saveKitConfig(cfg);
+        if (!flags.purge) saveKitConfig(cfg);
       });
     }
     if (fs.existsSync(paths.opencodeDir())) {

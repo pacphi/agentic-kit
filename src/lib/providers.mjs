@@ -326,10 +326,11 @@ function currentEnv(cwd) {
 
 /** True when providers config is untouched (claude host only, aqe left on its own
  *  default). Keeps the heal a deliberate no-op so existing users see zero change
- *  until they opt in. */
+ *  until they opt in. ANY non-claude host (codex OR opencode) breaks the default —
+ *  an enabled opencode host is not "claude-only" (codex-review r2). */
 export function isDefault(cfg) {
   const p = cfg.providers ?? {};
-  return !!p.hosts?.claude && !p.hosts?.codex && p.aqeProvider == null
+  return !!p.hosts?.claude && !p.hosts?.codex && !p.hosts?.opencode && p.aqeProvider == null
     && (!p.models || p.models.length === 0) && (p.maxBudgetUsd == null)
     && (!p.aqeFallback || p.aqeFallback.length === 0);
 }

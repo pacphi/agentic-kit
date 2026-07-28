@@ -40,7 +40,7 @@ export async function localDrift({ pkgRoot, cwd = process.cwd(), cfg, targets } 
     const resolve = (r) => (r.custom
       ? (r.template.startsWith('~/') ? path.join(paths.home, r.template.slice(2)) : r.template)
       : path.join(pkgRoot, 'claude', r.template));
-    const ctx = { flags: { dualMode: bothHostsEnabled(cfg) } };
+    const ctx = { flags: { dualMode: bothHostsEnabled(cfg), opencodeEnabled: !!cfg.providers?.hosts?.opencode } };
     // The SHARED target list + retired-strip composition (blocks.mjs) — the
     // nudge's contract is "never disagrees with ak status", which a hardcoded
     // subset silently breaks every time a guidance target is added (codex's
