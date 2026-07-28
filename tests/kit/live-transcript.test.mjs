@@ -8,6 +8,7 @@ import {
   adaptCodexTranscriptRecord,
   TranscriptStreams,
 } from '../../src/lib/live/index.mjs';
+import { waitUntil } from './helpers/wait-until.mjs';
 
 const line = (value) => `${JSON.stringify(value)}\n`;
 const sandbox = () => {
@@ -140,7 +141,7 @@ test('selected transcript stream masks strings, bounds history and tails appends
     type: 'assistant', sessionId: 's1', timestamp: '2026-07-27T12:00:02Z',
     message: { content: [{ type: 'text', text: 'live update' }] },
   }));
-  await new Promise((resolve) => setTimeout(resolve, 35));
+  await waitUntil(() => received.at(-1)?.text === 'live update', 'the live-tailed append was never observed');
   assert.equal(received.at(-1)?.text, 'live update');
   assert.equal(stream.replay(stream.snapshot().cursor).events.length, 0);
 });
@@ -206,7 +207,11 @@ test('selected stream stops reading when its path becomes an escaping symlink', 
   stream.subscribe((event) => seen.push(event));
   fs.unlinkSync(file);
   fs.symlinkSync(outside, file);
-  await new Promise((resolve) => setTimeout(resolve, 35));
+  // Proving an ABSENCE has no positive event to poll for — waitUntil doesn't
+  // apply. Generous margin (10x the 10ms tailer interval) instead of the
+  // original 3.5x, so this doesn't read as a false pass on a fast run that
+  // just didn't give the (hypothetically buggy) tailer enough ticks to leak.
+  await new Promise((resolve) => setTimeout(resolve, 100));
   assert.equal(JSON.stringify(seen).includes('PRIVATE OUTSIDE'), false);
 });
 
@@ -214,11 +219,17 @@ test('selected stream content is destroyed shortly after its last client release
   const sb = sandbox();
   fs.writeFileSync(path.join(sb.claude, 's1.jsonl'),
     line({ type: 'user', sessionId: 's1', message: { content: 'one' } }));
-  const streams = new TranscriptStreams({ roots: sb.roots, mask: String, idleMs: 10 });
+  // Deliberately a fixed sleep, not waitUntil: polling by calling open()
+  // would itself clear the idle timer under test (see release()'s
+  // `if (prior.timer) clearTimeout(...)`), so any condition-check that calls
+  // open() defeats the very teardown being verified. idleMs=50 with a 150ms
+  // wait (3x margin) replaces the old idleMs=10/wait=25ms pairing, which left
+  // almost no headroom against scheduler jitter on a loaded runner.
+  const streams = new TranscriptStreams({ roots: sb.roots, mask: String, idleMs: 50 });
   t.after(() => streams.close());
   const first = streams.open('claude', 's1');
   streams.release('claude', 's1');
-  await new Promise((resolve) => setTimeout(resolve, 25));
+  await new Promise((resolve) => setTimeout(resolve, 150));
   const second = streams.open('claude', 's1');
   assert.notEqual(second, first);
 });
@@ -237,7 +248,7 @@ test('selected stream carries an existing partial JSONL record into the live tai
   const seen = [];
   stream.subscribe((event) => seen.push(event));
   fs.appendFileSync(file, `${record.slice(-2)}\n`);
-  await new Promise((resolve) => setTimeout(resolve, 35));
+  await waitUntil(() => seen[0]?.text === 'completed later', 'the completed partial JSONL record was never tailed in');
   assert.equal(seen[0]?.text, 'completed later');
 });
 

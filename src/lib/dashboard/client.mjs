@@ -4,6 +4,38 @@ export const JS = `
   var root=document.documentElement;
   var LS="ak-dash-theme", LS_TAB="ak-dash-tab";
 
+  // Dashboard-wide session token (ADR-0014). Bootstrap is idempotent and
+  // duplicated from live-view.mjs's copy (separate <script> scope, no shared
+  // state) — see that file's comment for why re-running it here is safe.
+  var DASH_TOKEN_KEY="ak-dash-token";
+  var DASH_TOKEN=(function(){
+    var m=String(location.hash||"").match(/token=([A-Za-z0-9_-]+)/);
+    if(m){try{localStorage.setItem(DASH_TOKEN_KEY,m[1]);}catch(e){}try{history.replaceState(null,"",location.pathname+location.search);}catch(e){}}
+    try{return localStorage.getItem(DASH_TOKEN_KEY)||"";}catch(e){return"";}
+  })();
+  function authHeaders(){return{"x-dash-token":DASH_TOKEN};}
+  function showGate(msg){
+    document.body.classList.add("gated");
+    var g=document.getElementById("dash-gate"); if(g)g.hidden=false;
+    var e=document.getElementById("gate-err"); if(e)e.textContent=msg||"";
+  }
+  function hideGate(){
+    document.body.classList.remove("gated");
+    var g=document.getElementById("dash-gate"); if(g)g.hidden=true;
+  }
+  (function wireGate(){
+    var go=document.getElementById("gate-go");
+    var input=document.getElementById("gate-token");
+    if(go)go.addEventListener("click",function(){
+      var v=input?input.value.trim():"";
+      if(!v)return;
+      try{localStorage.setItem(DASH_TOKEN_KEY,v);}catch(e){}
+      location.reload();
+    });
+    if(input)input.addEventListener("keydown",function(e){if(e.key==="Enter"&&go)go.click();});
+  })();
+  if(!DASH_TOKEN)showGate("");
+
   // theme: stored choice wins; otherwise follow the OS.
   function sysTheme(){return window.matchMedia&&window.matchMedia("(prefers-color-scheme:light)").matches?"light":"dark";}
   var MOON='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.8A8.5 8.5 0 1 1 11.2 3 6.6 6.6 0 0 0 21 12.8z"/></svg>';
@@ -408,7 +440,11 @@ export const JS = `
   }
 
   function pollStatus(){
-    return fetch("/api/status",{cache:"no-store"}).then(function(r){return r.json();}).then(function(d){
+    return fetch("/api/status",{cache:"no-store",headers:authHeaders()}).then(function(r){
+      if(r.status===401){try{localStorage.removeItem(DASH_TOKEN_KEY);}catch(e){}showGate("Wrong or missing dashboard token.");throw Error("unauthorized");}
+      return r.json();
+    }).then(function(d){
+      hideGate();
       lastUpdated=Date.now(); render(d); tickClock();
     }).catch(function(){
       var t=document.getElementById("verdict-text"); if(t)t.textContent="server unreachable";
@@ -523,7 +559,7 @@ export const JS = `
   function loadUsage(force){
     if(usageBusy)return Promise.resolve();
     usageBusy=true;
-    var jobs=[fetch("/api/usage?days="+usageDays,{cache:"no-store"}).then(function(r){return r.json();})
+    var jobs=[fetch("/api/usage?days="+usageDays,{cache:"no-store",headers:authHeaders()}).then(function(r){return r.json();})
       .then(function(d){USAGE=d; usageLoaded=true;})];
     if(usageView==="transcript"&&usageSession&&(force||!TRANSCRIPT||TRANSCRIPT.id!==usageSession))
       jobs.push(loadTranscript(usageSession));
@@ -533,7 +569,7 @@ export const JS = `
   }
 
   function loadTranscript(id){
-    return fetch("/api/session/"+encodeURIComponent(id),{cache:"no-store"})
+    return fetch("/api/session/"+encodeURIComponent(id),{cache:"no-store",headers:authHeaders()})
       .then(function(r){return r.json();})
       .then(function(d){TRANSCRIPT=d&&!d.error?{id:id,meta:d.meta,turns:d.turns||[]}:{id:id,error:(d&&d.error)||"unreadable"};});
   }
@@ -711,7 +747,7 @@ export const JS = `
   function loadLimits(){
     if(limitsBusy)return;
     limitsBusy=true;
-    fetch("/api/limits?days="+usageDays,{cache:"no-store"})
+    fetch("/api/limits?days="+usageDays,{cache:"no-store",headers:authHeaders()})
       .then(function(r){return r.json();})
       .then(function(d){LIMITS=d&&!d.error?d:{error:(d&&d.error)||"limits unavailable"};})
       .catch(function(){LIMITS={error:"limits unavailable"};})
@@ -1129,7 +1165,7 @@ export const JS = `
   }
 
   function loadProjectSessions(project){
-    fetch("/api/sessions?days="+usageDays+"&project="+encodeURIComponent(project)+"&limit=1000",{cache:"no-store"})
+    fetch("/api/sessions?days="+usageDays+"&project="+encodeURIComponent(project)+"&limit=1000",{cache:"no-store",headers:authHeaders()})
       .then(function(r){return r.json();}).then(function(d){
         var el=document.querySelector('[data-body="'+project.replace(/"/g,"")+'"]');
         if(!el)return;
@@ -1140,7 +1176,7 @@ export const JS = `
 
   function filterByCategory(cat){
     setUsageView("sessions");
-    fetch("/api/sessions?days="+usageDays+"&category="+encodeURIComponent(cat)+"&limit=1000",{cache:"no-store"})
+    fetch("/api/sessions?days="+usageDays+"&category="+encodeURIComponent(cat)+"&limit=1000",{cache:"no-store",headers:authHeaders()})
       .then(function(r){return r.json();}).then(function(d){
         document.getElementById("u-tree").innerHTML=
           '<div class="pgroup" data-open="1"><button class="phead" type="button">'

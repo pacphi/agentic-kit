@@ -20,11 +20,29 @@ const step = (name, ok, detail = '') => {
 };
 
 // 1. Syntax-check every shipped .mjs/.cjs under bin/ and src/.
+//
+// `git ls-files` failing (not a repo, git absent, GIT_DIR confusion) used to
+// resolve to an empty stdout, which the old code silently treated as "zero
+// files to check" — this step could report "✓ syntax-check 0 shipped files"
+// having parsed nothing, and the build gate would still pass. Now: a failed
+// `git ls-files` call THROWS (loud, unrecoverable) rather than degrading to
+// an empty list, and `--others --exclude-standard` is added so a newly
+// written, not-yet-`git add`ed module is still syntax-checked — a file the
+// old tracked-only invocation would silently skip.
 const listFiles = (dir) => {
-  const out = spawnSync('git', ['ls-files', dir], { cwd: root, encoding: 'utf8' });
-  return (out.stdout || '').split('\n').filter((f) => /\.(mjs|cjs|js)$/.test(f));
+  const out = spawnSync('git', ['ls-files', '--cached', '--others', '--exclude-standard', dir], { cwd: root, encoding: 'utf8' });
+  if (out.status !== 0) {
+    throw new Error(`git ls-files ${dir} failed (exit ${out.status}): ${out.stderr || out.error || 'unknown error'}`);
+  }
+  return out.stdout.split('\n').filter((f) => /\.(mjs|cjs|js)$/.test(f));
 };
 const shipped = [...listFiles('bin'), ...listFiles('src')];
+// A gate that can pass having checked nothing is worse than no gate — assert
+// a non-trivial floor so an empty/near-empty list fails loudly instead of
+// silently reading as "all clear".
+if (shipped.length < 20) {
+  throw new Error(`only ${shipped.length} shipped files found under bin/+src/ — expected 20+; refusing to report a false "all clear"`);
+}
 let syntaxOk = true;
 for (const f of shipped) {
   const r = spawnSync(node, ['--check', path.join(root, f)], { encoding: 'utf8' });

@@ -89,12 +89,12 @@ responses = Σ over included sessions of session.responses
 **Source:**
 
 - Filter: a parsed record with zero assistant turns is dropped entirely — "no
-  assistant turn → not a session" (`usage-index.mjs:809`) — and a record whose
+  assistant turn → not a session" (`usage-index.mjs:856`) — and a record whose
   last activity falls outside the requested window is dropped too
-  (`usage-index.mjs:810`).
+  (`usage-index.mjs:857`).
 - `responses` accumulation: Claude increments per assistant message
-  (`usage-index.mjs:457`); Codex increments per `agent_message` event
-  (`usage-index.mjs:595`).
+  (`usage-index.mjs:472`); Codex increments per `agent_message` event
+  (`usage-index.mjs:610`).
 - Totals: `totals.responses += s.responses` per included session
   (`usage-index.mjs:884`).
 - Render: `kpi("sessions", fmtNum(t.sessions), fmtNum(t.responses)+" assistant
@@ -174,7 +174,7 @@ already in effect on the given day, comparing ISO date strings
 lexicographically so no `Date` parsing is involved and the module stays
 clock-free.
 
-`aggregate()` passes each usage row's own `day` (`usage-index.mjs:832`), which
+`aggregate()` passes each usage row's own `day` (`usage-index.mjs:877`), which
 it already has because rows are keyed by `(day, model)`. **This is the whole
 point:** tokens metered in August must still read as August's rate when the
 panel is opened in December. Pricing by *today's* date instead would restate a
@@ -270,9 +270,9 @@ numbers as percentages of `t.tokens` (`dashboard/client.mjs`,
 **What "input" excludes.** For both providers, the `input` counter recorded
 per row is **gross input minus cached input** — Claude's parser reads
 `cache_read_input_tokens` and `cache_creation_input_tokens` as separate fields
-the provider already reports separately (`usage-index.mjs:485-488`); Codex's
+the provider already reports separately (`usage-index.mjs:502-503`); Codex's
 parser subtracts `cached_input_tokens` from `input_tokens` explicitly
-(`usage-index.mjs:610-614`, `input: Math.max(0, gross - cacheRead)`) because
+(`usage-index.mjs:625-629`, `input: Math.max(0, gross - cacheRead)`) because
 Codex's own `input_tokens` field **includes** cached tokens and would
 double-count them against the separately-reported `cacheRead` figure if left
 as-is. This is asserted by test:
@@ -423,10 +423,10 @@ byDay[day].cost = Σ costOf(row) for every usage row whose day == that key
 
 **Source:** the day key is the row's own `row.day`, computed once at parse
 time as **local calendar day**, not UTC
-(`usage-index.mjs:484`/`usage-index.mjs:613` call `localDay(at)`) — so a
+(`usage-index.mjs:496`/`usage-index.mjs:625` call `localDay(at)`) — so a
 session that runs from 23:58 local to 00:05 local is billed to the day its
 *first* row landed on (test:
-`tests/kit/usage-index.test.mjs:608`, "a session that opens before midnight
+`tests/kit/usage-index.test.mjs:634`, "a session that opens before midnight
 is counted on its first billed day"). Accumulation:
 `byDay[row.day].cost += rowCost` (`usage-index.mjs:827`). Bar height:
 `h = maxDay ? max(2, cost/maxDay*100) : 2` (`dashboard/client.mjs`) —
@@ -488,8 +488,8 @@ punchcard[dow + "-" + hour] += 1   per assistant/agent_message response, at its 
 ```
 
 **Source:** incremented once per Claude assistant turn
-(`usage-index.mjs:459-460`, keyed by `punchKey(at)`) and once per Codex
-`agent_message` (`usage-index.mjs:597-598`), merged into the window-level
+(`usage-index.mjs:472-474`, keyed by `punchKey(at)`) and once per Codex
+`agent_message` (`usage-index.mjs:610-612`), merged into the window-level
 `punchcard` object per session (`usage-index.mjs:905`). Cell intensity is
 linear against the single busiest cell in the window:
 `v = pcMax ? n/pcMax : 0` (`dashboard/client.mjs`) — this is a
@@ -846,7 +846,7 @@ both credential-free for ak:
 `windowDurationMins: 10080` (the weekly). Windows are therefore keyed and
 labelled by duration (`windowLabel`, `quota.mjs:44`), never by slot name. The
 same rule applies to the historical snapshots parsed out of rollouts: the
-normalizer at `usage-index.mjs:560` keeps a flat `windows` list keyed by
+normalizer at `usage-index.mjs:574` keeps a flat `windows` list keyed by
 `window_minutes`.
 
 **Freshness is part of the number.** Both sides carry `fetchedAt`; the view
@@ -871,13 +871,13 @@ Codex ≥0.140 maintains its own SQLite thread ledger (`~/.codex/state_N.sqlite`
 — the `N` is a migration generation, so `codexStateDb` (`codex-state.mjs:30`)
 globs and takes the newest). `readCodexState` (`:49`) reads per-thread
 `thread_source` (`user` vs `subagent`) plus `thread_spawn_edges`, and
-`applyCodexLedger` (`usage-index.mjs:1090`) overlays that onto parsed
+`applyCodexLedger` (`usage-index.mjs:1149`) overlays that onto parsed
 sessions: a ledger-identified subagent has its token usage stripped — its
 rollout replays the parent's entire token history (ccusage/ccusage#950
 measured up to 91× inflation) — while the session record stays visible. The
 rollout's own `session_meta.thread_source` sniff remains as the fallback when
 the ledger is absent or migrated beyond recognition. Codex sessions also carry
-`reasoningOutput` (`usage-index.mjs:623`) — reasoning tokens are a **subset**
+`reasoningOutput` (`usage-index.mjs:638`) — reasoning tokens are a **subset**
 of output tokens and are annotation only, never added to any sum.
 
 ## 14. Known limitations, restated as a single checklist

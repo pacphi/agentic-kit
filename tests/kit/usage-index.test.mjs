@@ -214,6 +214,32 @@ test('maskSecrets masks a SCREAMING_CASE secret assignment', () => {
   assert.ok(out.includes('AWS_SECRET_ACCESS_KEY'), 'the name is kept so the leak is identifiable');
 });
 
+// Security review Finding 2: the SCREAMING_CASE-only rule above missed the two
+// most common non-env credential shapes — quoted JSON keys and lowercase
+// YAML/TOML assignments. Both are quote/line-anchored, not case-sensitivity
+// tricks, so they cannot reopen the "tokens used = …" false positive above.
+test('maskSecrets masks a quoted JSON object key whose name says secret', () => {
+  const out = maskSecrets('{"apiKey": "abcdefghijklmnop1234"}');
+  assert.ok(!out.includes('abcdefghijklmnop1234'), 'the value must go');
+  assert.ok(out.includes('"apiKey"'), 'the key name is kept so the leak is identifiable');
+});
+
+test('maskSecrets masks a quoted JSON client_secret regardless of case', () => {
+  const out = maskSecrets('{"client_secret":"sekrit1234567890abcd"}');
+  assert.ok(!out.includes('sekrit1234567890abcd'), 'the value must go');
+});
+
+test('maskSecrets masks an unquoted YAML/ini assignment', () => {
+  const out = maskSecrets('api_key = 9f8a7b6c5d4e3f2a1b0c');
+  assert.ok(!out.includes('9f8a7b6c5d4e3f2a1b0c'), 'the value must go');
+  assert.ok(out.includes('api_key'), 'the key name is kept');
+});
+
+test('maskSecrets masks a lowercase "password:" line', () => {
+  const out = maskSecrets('password: hunter2hunter2hunter2');
+  assert.ok(!out.includes('hunter2hunter2hunter2'), 'the value must go');
+});
+
 // REGRESSION GUARD. The assignment pattern is case-SENSITIVE on purpose. With an
 // /i flag it matches "tokens used = 10028979467" — and these transcripts discuss
 // token counts on almost every line, so a case-insensitive rule would redact
@@ -891,6 +917,22 @@ test('readIndex serves a memoized aggregate and refreshes when stale', async () 
   assert.equal(third.totals.tokens, first.totals.tokens);
 });
 
+// code-quality Finding 7 regression: readIndex's memo key used to omit
+// `force`, so readIndex({ force: true }) issued within maxAgeMs of a normal
+// read silently returned the STALE memoized aggregate and never reached
+// buildIndex — a "refresh now" caller would see the same answer forever, as
+// long as it kept asking inside the TTL window.
+test('readIndex({ force: true }) always re-scans, even within the memo TTL', async () => {
+  _resetForTest();
+  const sb = sandbox();
+  const first = await readIndex(opts(sb));
+  const second = await readIndex(opts(sb));
+  assert.equal(first, second, 'sanity: a plain re-read within the TTL is still memoized');
+
+  const forced = await readIndex(opts(sb, { force: true }));
+  assert.notEqual(forced, first, 'force:true must bypass the memo and re-scan, not return the stale aggregate');
+});
+
 test('readIndex does not reuse an aggregate built for a different window', async () => {
   _resetForTest();
   const sb = sandbox();
@@ -934,6 +976,74 @@ test('readSession works without a prior buildIndex (no cache to consult)', async
   const { meta } = await readSession('dddd4444', opts(sb));
   assert.equal(meta.id, 'dddd4444');
   assert.equal(meta.provider, 'codex');
+});
+
+// code-quality Finding 5 regressions: readCache()/locate() are now memoized
+// on the cache file's own mtime + a companion id→file index, to avoid
+// reparsing the whole index JSON on every /api/session/:id request. The risk
+// a memoization introduces is staleness — these prove invalidation actually
+// fires on a real on-disk change, not just that the happy path still works.
+test('readCache/locate memo is invalidated when the cache file changes on disk (not served stale)', async () => {
+  _resetForTest();
+  const sb = sandbox();
+  await buildIndex(opts(sb));
+  const first = await readSession('dddd4444', opts(sb));
+  assert.equal(first.meta.id, 'dddd4444');
+
+  // Simulate an external mutation of the on-disk cache (e.g. another scan
+  // finishing between two requests) via the same atomic write-tmp-then-
+  // rename shape writeCache() itself uses — a real write always changes
+  // mtime, which is exactly the signal the memo keys on.
+  const raw = JSON.parse(fs.readFileSync(sb.cachePath, 'utf8'));
+  const [cachedFile] = Object.entries(raw.entries).find(([, e]) => e.session.id === 'dddd4444');
+  delete raw.entries[cachedFile]; // pretend this session's cache row is gone
+  const tmp = `${sb.cachePath}.testwrite.tmp`;
+  fs.writeFileSync(tmp, JSON.stringify(raw));
+  fs.renameSync(tmp, sb.cachePath);
+
+  // locate() must fall back to the filename scan (the file itself is
+  // untouched) rather than answering from an index built off the
+  // PRE-mutation cache content still sitting in the module-level memo.
+  const second = await readSession('dddd4444', opts(sb));
+  assert.equal(second.meta.id, 'dddd4444',
+    'must still resolve via filename fallback after the cache entry was externally removed — proves the memo picked up the mtime change');
+});
+
+test('scan prunes cached entries past the 366-day keep window, keeps recent/undated ones', async () => {
+  _resetForTest();
+  const sb = sandbox();
+  await buildIndex(opts(sb));
+
+  const raw = JSON.parse(fs.readFileSync(sb.cachePath, 'utf8'));
+  const [anyFile, anyEntry] = Object.entries(raw.entries)[0];
+  const DAY = 86_400_000;
+
+  // Both synthetic files get an OLD real mtime (fs.utimesSync) so they fall
+  // OUTSIDE scan's `days` window and are excluded from `candidates` — the
+  // only way scan can still know about them is the carry-forward loop this
+  // test targets, not a fresh parse.
+  const staleFile = `${anyFile}.stale-copy.jsonl`;
+  fs.copyFileSync(anyFile, staleFile);
+  fs.utimesSync(staleFile, new Date(NOW - 400 * DAY), new Date(NOW - 400 * DAY));
+  raw.entries[staleFile] = {
+    ...anyEntry,
+    session: { ...anyEntry.session, id: 'stale-old-session', end: NOW - 400 * DAY, start: NOW - 401 * DAY },
+  };
+
+  const undatedFile = `${anyFile}.undated-copy.jsonl`;
+  fs.copyFileSync(anyFile, undatedFile);
+  fs.utimesSync(undatedFile, new Date(NOW - 30 * DAY), new Date(NOW - 30 * DAY));
+  raw.entries[undatedFile] = {
+    ...anyEntry,
+    session: { ...anyEntry.session, id: 'undated-session', end: null, start: null },
+  };
+  fs.writeFileSync(sb.cachePath, JSON.stringify(raw));
+
+  await buildIndex({ ...opts(sb), days: 1, force: false });
+
+  const after = JSON.parse(fs.readFileSync(sb.cachePath, 'utf8'));
+  assert.ok(!(staleFile in after.entries), '366+ day old entry must be pruned — no query (days is capped at 365) can ever reach it');
+  assert.ok(undatedFile in after.entries, 'an entry with no timestamp must be KEPT — never guess an age, never drop on uncertainty');
 });
 
 test('readSession returns codex user/agent messages as turns', async () => {

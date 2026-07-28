@@ -10,7 +10,28 @@ import {
   HOSTS, installHost, applyAqeRouter, undoAqeRouter, aqeRouterFile,
   CODEX_ADAPTER_PKG, codexAdapterAction, ensureCodexAdapter, AQE_PROVIDER_TYPES,
   bothHostsEnabled, suggestedFallbackFor, AQE_FALLBACK_CODEX_SUGGESTION,
+  PROVIDER_TOKEN_RE,
 } from '../../src/lib/providers.mjs';
+
+// security review Finding 2 / code-quality Finding 2: applyProviders() feeds
+// m.id/m.model into a ruflo subprocess argv. exec.mjs's shell:false fix is
+// the real injection defense; this grammar is the defense-in-depth guard
+// that rejects a hostile/malformed kit.json entry before it ever reaches
+// run('ruflo', …) — pinned directly since applyProviders itself needs a real
+// `ruflo` binary on PATH to exercise end-to-end.
+test('PROVIDER_TOKEN_RE accepts real-shaped provider/model ids', () => {
+  for (const ok of ['openai', 'claude-opus-5', 'gpt-5.6', 'azure-openai', 'z-ai/glm-5.2'.split('/')[1]]) {
+    assert.ok(PROVIDER_TOKEN_RE.test(ok), `expected to accept ${JSON.stringify(ok)}`);
+  }
+});
+test('PROVIDER_TOKEN_RE rejects shell metacharacters and whitespace', () => {
+  for (const bad of [
+    'gpt-5.6 & calc.exe', 'openai; rm -rf /', 'model`whoami`', 'a|b', 'a$(b)',
+    'has space', '', 'x'.repeat(129),
+  ]) {
+    assert.ok(!PROVIDER_TOKEN_RE.test(bad), `expected to reject ${JSON.stringify(bad)}`);
+  }
+});
 
 // A tmp dir with a .git marker → settingsTarget() writes the ISOLATED
 // project settings.local.json instead of the real ~/.claude/settings.json.

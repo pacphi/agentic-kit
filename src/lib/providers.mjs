@@ -510,6 +510,18 @@ export function applyHosts(cfg, cwd = process.cwd()) {
   return { ok: true, changed, detail: `hosts=${on} (${scope}${changed ? ', written' : ', in sync'})` };
 }
 
+// id/model reach a real subprocess argv (`ruflo providers configure -p <id>
+// -m <model>`). exec.mjs's shell:false + resolved-argv fix is the real
+// injection defense (no shell ever parses these), but kit.json is user-edited
+// and `--provider` is a CLI flag with no upstream allowlist — this grammar is
+// defense-in-depth so a malformed value fails fast and visibly here rather
+// than reaching ruflo as a mangled/truncated argument. Not restricted to
+// API_PROVIDERS (a narrower, unrelated list — the api-key-only providers this
+// module can check env keys for): ruflo's own provider set is broader
+// (openrouter, azure-openai, bedrock, cognitum, …) and ruflo validates the id
+// itself; this only rejects shapes no real provider/model id has.
+export const PROVIDER_TOKEN_RE = /^[A-Za-z0-9._-]{1,128}$/;
+
 /** Register configured API-key providers with ruflo (keys read from env, never
  *  passed here). Idempotent — ruflo upserts. Returns {ok, detail}. */
 export async function applyProviders(cfg, cwd = process.cwd()) {
@@ -519,12 +531,16 @@ export async function applyProviders(cfg, cwd = process.cwd()) {
   const done = [];
   for (const m of models) {
     if (!m?.id) continue;
+    if (!PROVIDER_TOKEN_RE.test(m.id) || (m.model && !PROVIDER_TOKEN_RE.test(m.model))) {
+      done.push(`${m.id}(invalid)`);
+      continue;
+    }
     const args = ['providers', 'configure', '-p', m.id];
     if (m.model) args.push('-m', m.model);
     const r = await run('ruflo', args, { cwd, timeout: 60_000 });
     done.push(`${m.id}${r.code === 0 ? '' : '(failed)'}`);
   }
-  return { ok: done.every((d) => !d.includes('failed')), changed: true, detail: `configured: ${done.join(', ')}` };
+  return { ok: done.every((d) => !d.includes('failed') && !d.includes('invalid')), changed: true, detail: `configured: ${done.join(', ')}` };
 }
 
 /** Pure decision for the codex dual-mode adapter, factored out for tests:

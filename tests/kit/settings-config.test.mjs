@@ -19,6 +19,32 @@ test('writeJsonWithBackup writes a one-time .bak and never overwrites it', () =>
   fs.rmSync(tmp, { recursive: true, force: true });
 });
 
+// code-quality Finding 3: the previous implementation was truncate-then-write
+// (fs.writeFileSync opens O_TRUNC before writing), so an interrupt landing
+// mid-write (Ctrl-C, OOM kill) could leave `file` zero-length or partial —
+// on ~/.claude/settings.json specifically, that is the file Claude Code
+// reads on every startup. write-tmp-then-rename makes the swap atomic: a
+// reader always sees either the whole old file or the whole new one.
+test('writeJsonWithBackup leaves no temp file behind after a successful write', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'kit-set-atomic-'));
+  const f = tmpFile(tmp, 'settings.json');
+  writeJsonWithBackup(f, { v: 1 });
+  const leftover = fs.readdirSync(tmp).filter((n) => n.endsWith('.tmp'));
+  assert.deepEqual(leftover, [], `no .pid.tmp file should survive a successful write, found: ${leftover}`);
+  fs.rmSync(tmp, { recursive: true, force: true });
+});
+
+test('a failure while serializing never touches the existing file (atomic swap, not in-place truncate)', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'kit-set-atomic-fail-'));
+  const f = tmpFile(tmp, 'settings.json');
+  fs.writeFileSync(f, '{"safe":true}\n');
+  const circular = {};
+  circular.self = circular; // JSON.stringify throws on this — write must never reach fs.renameSync
+  assert.throws(() => writeJsonWithBackup(f, circular), /circular/i);
+  assert.deepEqual(readJson(f), { safe: true }, 'the original file must survive a failed write untouched');
+  fs.rmSync(tmp, { recursive: true, force: true });
+});
+
 test('addDenyRules dedupes, sorts, and reports only net-new rules', () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'kit-deny-'));
   const f = tmpFile(tmp, 'settings.json');

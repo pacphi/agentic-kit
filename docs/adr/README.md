@@ -22,6 +22,7 @@ Consequences**, and cites the grounded source it rests on where relevant.
 | [0011](0011-local-model-provenance-zero-cost-and-transcript-fidelity.md) | Local models: provenance out-of-band, $0 per model, stated transcript fidelity | Proposed |
 | [0012](0012-live-sessions-observability.md) | Live sessions as local, evidence-graded observability | Accepted |
 | [0013](0013-admin-build-security-signals-and-honest-reach.md) | Admin: build/security signals, an honest Reach panel, and a pagination fix | Accepted |
+| [0014](0014-dashboard-auth-and-remediation.md) | Dashboard auth token, plus a security/quality remediation pass | Accepted |
 
 Theme: ADRs **0001–0006** define **dual-host LLM routing and leadership** — how `ak` lets ruflo route
 each development activity (architecture, implementation, testing, review, …) to the right host (Claude
@@ -54,4 +55,11 @@ documented limitations rather than implied capabilities. **0013** extends 0007's
 CI-run and Dependabot-alert signals, fixes a releases-pagination cap that silently dropped older
 releases, replaces two GitHub-release-asset Reach tiles that were permanently dead for this npm-only
 project with real GitHub-native people signals (contributors, watchers), and states the existing
-npm-mirror-inflation exclusion explicitly instead of as a footnote.
+npm-mirror-inflation exclusion explicitly instead of as a footnote. **0014** closes a gap a
+multi-reviewer audit found in the dashboard: `/api/session/:id` served full transcript text behind
+only a browser-oriented guard, so any local non-browser process could read it. The dashboard now
+mints a per-session token the same way 0007's admin already did, plus a cluster of correctness
+fixes from the same audit — an SSE client-cap race, `shell:true` on Windows, non-atomic settings
+writes, a build-gate that could pass having checked nothing, secret-masker gaps, an O(n) session
+lookup, a stale-cache bug, prototype-pollution-shaped CLI dispatch, enforced coverage floors, and
+new test coverage for the previously-untested machine-mutating commands.

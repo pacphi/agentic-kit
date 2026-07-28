@@ -20,13 +20,22 @@ export const help = `ak dashboard — read-only local health dashboard (localhos
 
 Serves a self-contained web panel that visualizes the same subsystem rows
 \`ak status\` reports — versions, natives, security, learning, providers, hosts,
-mcp, ruvnet-brain, aqe — plus version drift and a learning-history sparkline.
-Bound to 127.0.0.1; health polling defaults to 30s and the Live tab streams
-metadata with SSE. Read-only: it never changes state. Nothing leaves your
-machine — the page is fully self-contained (no external fetches, no internet).
-It opens in your default browser automatically.
+mcp, ruvnet-brain, aqe — plus version drift, a learning-history sparkline, and
+(on the Usage tab) full session transcripts. Bound to 127.0.0.1; health
+polling defaults to 30s and the Live tab streams metadata with SSE. Read-only:
+it never changes state. Nothing leaves your machine — the page is fully
+self-contained (no external fetches, no internet).
 
-Runs in the foreground — press Ctrl-C to stop.
+A fresh per-session token is minted at startup and carried into the browser
+in the launch URL's # fragment (never a query param, never logged); the page
+moves it to localStorage and sends it as a request header (or, for the two
+live-stream routes, a query param — EventSource cannot set headers). Any
+other process on this machine that reaches 127.0.0.1 without that token is
+turned away — this page serves full transcript text, so it is gated the same
+way \`ak admin\` already gates GitHub/npm stats.
+
+It opens in your default browser automatically. Runs in the foreground —
+press Ctrl-C to stop.
 
 Usage: ak x dashboard [options]
 
@@ -90,9 +99,11 @@ export async function run({ flags }) {
 
   ok(`dashboard live at ${server.url}`);
   info(dim('read-only · localhost only · Ctrl-C to stop'));
+  info('open this URL (it carries a one-time session token in the # fragment):');
+  info(`  ${server.urlWithToken}`);
 
   if (!flags['no-open']) {
-    openInBrowser(server.url);
+    openInBrowser(server.urlWithToken);
     info(dim('opening your browser… (if it didn\'t, open the URL above; --no-open to disable)'));
   }
 

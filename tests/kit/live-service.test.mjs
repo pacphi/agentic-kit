@@ -4,8 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { LiveSessionsService } from '../../src/lib/live/index.mjs';
-
-const wait = (ms = 35) => new Promise((resolve) => setTimeout(resolve, ms));
+import { waitUntil } from './helpers/wait-until.mjs';
 const sandbox = () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-live-service-'));
   const claude = path.join(dir, 'claude', 'project');
@@ -46,7 +45,7 @@ test('service bootstraps safe metadata then tails existing files from end', asyn
     message: { model: 'claude-x', content: [{ type: 'tool_use', id: 't1', name: 'Read',
       input: { file: '/private/path' } }] },
   }));
-  await wait();
+  await waitUntil(() => received.length >= 3, 'expected 3 events after the append but the tailer never caught up');
   assert.equal(received.length, 3);
   assert.equal(received.filter((event) => event.action === 'session.discovered').length, 1);
   const json = JSON.stringify(service.snapshot());
@@ -114,7 +113,7 @@ test('service reconciles new Codex files from their beginning', async (t) => {
     type: 'session_meta', timestamp: '2026-07-27T12:00:00Z',
     payload: { id: 'x1', model: 'gpt-x', cwd: '/private/project' },
   }));
-  await wait();
+  await waitUntil(() => service.snapshot().sessions.length > 0, 'new Codex file was never reconciled into the snapshot');
   const snapshot = service.snapshot();
   assert.equal(snapshot.sessions[0].id, 'x1');
   assert.equal(snapshot.sessions[0].project, 'project');
@@ -163,7 +162,8 @@ test('service optionally ingests explicit AQE sources with bounded metadata', as
     sessionId: 's1', agentId: 'gate1', kind: 'gate',
     event: 'gate.completed', status: 'completed', output: 'private verdict body',
   }));
-  await wait();
+  await waitUntil(() => JSON.stringify(service.replay(null)).includes('gate.completed'),
+    'the structured AQE source event was never ingested');
   const json = JSON.stringify(service.replay(null));
   assert.ok(json.includes('gate.completed'));
   assert.ok(!json.includes('private verdict body'));
@@ -192,7 +192,8 @@ test('explicit structured sources keep priority when native discovery is saturat
     sessionId: 'explicit-session', agentId: 'qe-worker',
     event: 'quality.verdict.recorded', status: 'completed',
   }));
-  await wait();
+  await waitUntil(() => service.snapshot().sessions.some((session) => session.id === 'explicit-session'),
+    'the explicit-priority structured source session never appeared, despite native discovery saturation');
   assert.equal(service.snapshot().sessions.some((session) => session.id === 'explicit-session'), true);
 });
 
@@ -207,7 +208,8 @@ test('adapter health never exposes filesystem paths from errors', async (t) => {
   t.after(() => service.close());
   service.start();
   fs.appendFileSync(file, 'invalid-json\n');
-  await wait();
+  await waitUntil(() => JSON.stringify(service.snapshot().health).includes('invalid-json'),
+    'the parse error was never surfaced into adapter health');
   const health = JSON.stringify(service.snapshot().health);
   assert.ok(!health.includes(sb.dir));
   assert.ok(health.includes('invalid-json'));

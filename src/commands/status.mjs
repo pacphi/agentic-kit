@@ -150,8 +150,8 @@ export async function collect({ pkgRoot, cwd = process.cwd() }) {
   // DB in-repo). Warn-only — the pin may be deliberate; sync never touches it.
   try {
     const pin = dbPathPinStatus({
-      settingsLocalFile: path.join(process.cwd(), '.claude', 'settings.local.json'),
-      projectRoot: process.cwd(),
+      settingsLocalFile: path.join(cwd, '.claude', 'settings.local.json'),
+      projectRoot: cwd,
     });
     if (pin?.warn) {
       rows.push(row('memory-pin', 'warn',
