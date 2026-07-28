@@ -1,9 +1,10 @@
 # Transcripts & Session Detail — Reference
 
 **Audience.** agentic-kit maintainers and contributors touching the transcript
-pipeline — `src/lib/usage-index.mjs` (parsing, `readSession`) or
-`src/lib/dashboard-server.mjs` (the `/api/session` route, the Sessions and
-Transcript views) — and anyone auditing why a transcript turn is labelled,
+pipeline — `src/lib/usage-index.mjs` (parsing, `readSession`),
+`src/lib/dashboard-server.mjs` (HTTP composition),
+`src/lib/dashboard/session-security.mjs` (request/masking guards), or
+`src/lib/dashboard/client.mjs` (Sessions and Transcript views) — and anyone auditing why a turn is labelled,
 masked, truncated, or attributed the way it is.
 
 **Purpose.** The Transcript view renders raw session content, which makes it
@@ -213,8 +214,8 @@ serialization**, then length-capped at `MAX_TURN_CHARS` (40,000,
 
 The two kinds of withholding keep distinct vocabulary end-to-end: masking
 renders as `…redacted` marks (`markRedactions`,
-`dashboard-server.mjs:2341`), truncation as a `truncated · N of M` badge
-(`truncBadge`, `dashboard-server.mjs:2385`, deriving N from the received
+`dashboard/client.mjs`), truncation as a `truncated · N of M` badge
+(`truncBadge`, `dashboard/client.mjs`, deriving N from the received
 text so a changed constant can't desync the display).
 
 ![Figure: a turn body passes through maskSecrets (leaving redaction marks) and then the 40,000-character cap (leaving a truncated · N of M badge); originalChars is measured after masking](assets/transcript-mask-truncate.svg)
@@ -229,21 +230,20 @@ preamble). Transcript-relevant routes:
 
 | Route | Serves | Notes |
 |---|---|---|
-| `GET /api/usage?days=N` | the aggregate minus `sessions[]` (`dashboard-server.mjs:341`) | Scorecard + Findings + the project tree |
-| `GET /api/sessions` | session rows, filtered/paginated (`dashboard-server.mjs:375`) | the Sessions view's "load all" |
-| `GET /api/session/:id` | one transcript (`dashboard-server.mjs:392-423`) | the Transcript view |
+| `GET /api/usage?days=N` | aggregate minus `sessions[]` | Scorecard + Findings + project tree |
+| `GET /api/sessions` | session rows, filtered and paginated | Sessions view's "load all" |
+| `GET /api/session/:id` | one masked transcript | Transcript view |
 
 `/api/session/:id` order of operations, each step deliberate:
 
-1. `parseSessionId` (`dashboard-server.mjs:174`) + `resolvesInsideRoot`
-   (`dashboard-server.mjs:188`) — **validation before the index is touched**;
+1. `parseSessionId` + `resolvesInsideRoot`
+   (`dashboard/session-security.mjs`) — **validation before the index is touched**;
    a rejected id 400s without any filesystem call.
 2. `readSession` — a well-formed id matching no file is **404, not
    200-with-null** (200 made every nonexistent session look empty and the
    route a mild existence oracle).
-3. **The masking gate covers the whole payload**: `maskMeta`
-   (`dashboard-server.mjs:218`) *and* `maskTurns`
-   (`dashboard-server.mjs:199-208`), both fail-closed — no masker, no
+3. **The masking gate covers the whole payload**: `maskMeta` and `maskTurns`
+   (`dashboard/session-security.mjs`), both fail-closed — no masker, no
    transcript, ever. `maskTurns` rewrites **string fields only**, which is
    what lets the non-string attribution fields (`kind`, `prompt`,
    `truncated`, `originalChars`) survive to the browser; asserted by test
@@ -260,13 +260,13 @@ nothing on the page to reveal.
 
 ### 6.1 Sessions view — the row and its expander
 
-`renderSessions` (`dashboard-server.mjs:2290`) renders the project tree
+`renderSessions` (`dashboard/client.mjs`) renders the project tree
 (collapsed by default; every project starts closed so the cross-project
 comparison stays above the fold). Each session is a `sessionRow`
-(`dashboard-server.mjs:2264-2288`): host chip (claude/codex), title,
+(`sessionRow` in `dashboard/client.mjs`): host chip (claude/codex), title,
 worktree glyph, category chip (dimmed when confidence < 0.6 or
 Unclassified), start, duration, `prompts/responses`, tokens, cost — and an
-expander (`sdetail`, `dashboard-server.mjs:2228-2261`) carrying the
+expander (`sdetail` in `dashboard/client.mjs`) carrying the
 per-session detail fields: classification `basis` + confidence, per-session
 `models`, the token split, top tools, and the
 `skill`/`plugin`/`sidechain`/`worktree` flags. A measured-but-absent value renders as `—`, never disappears — a
@@ -274,15 +274,15 @@ field that vanishes when null teaches the reader it doesn't exist.
 
 ### 6.2 Transcript view — attribution, redaction, truncation
 
-`renderTranscript` (`dashboard-server.mjs:2401`) renders the crumb (title,
+`renderTranscript` (`dashboard/client.mjs`) renders the crumb (title,
 project, duration, `prompts/responses`, tokens, cost — all from masked
 `meta`) and the turn list. **The label comes from `kind`, never from role**
-(`dashboard-server.mjs:2417-2434`):
+(`dashboard/client.mjs`):
 
 | Turn | Label | Styling |
 |---|---|---|
-| user, `kind: 'prompt'` | `you` | accent — reserved for the person (`.t-user .t-who`, `dashboard-server.mjs:1317`) |
-| user, `kind: 'tool-result'` | `tool result` | purple, rhyming with the tool chips (`.t-tool .t-who`, `dashboard-server.mjs:1321`); hover title states the harness — not the person — sent it |
+| user, `kind: 'prompt'` | `you` | accent — reserved for the person |
+| user, `kind: 'tool-result'` | `tool result` | purple; hover says the harness, not the person, sent it |
 | user, `kind: 'context'` | `context` | same purple + hover title |
 | assistant | the model id | dim mono (`exception` placeholder turns label as `exception`) |
 
@@ -299,8 +299,8 @@ blocks (envelope census on the real corpus: task-notification 550,
 local-command-caveat 183, command-name 180, bash-input 85, bash-stdout 85,
 local-command-stdout 60; the stderr variants are the symmetric error-path
 siblings). Rendered literally they read as angle-bracket soup, so
-`fmtHarness` (`dashboard-server.mjs:2354-2373`; CSS
-`dashboard-server.mjs:1322-1334`) reformats them client-side: the command
+`fmtHarness` (`dashboard/client.mjs`; CSS in `dashboard/styles.mjs`) reformats
+them client-side: the command
 triple and `bash-input`
 become chips (`/clear`-style; the bash chip prefixed `!` so it reads as the
 shell invocation it was), and the block wrappers become quiet labelled
@@ -312,8 +312,8 @@ verbatim; only the wrapper tags become styling.** It runs on escaped text
 turn truncation — is left raw rather than half-formatted.
 
 Deep links: `#usage/<sessionId>` opens the Transcript view directly
-(`syncHash`, `dashboard-server.mjs:1450-1451`); the view lazy-fetches via
-`loadTranscript` (`dashboard-server.mjs:1924`).
+(`syncHash` in `dashboard/client.mjs`); the view lazy-fetches via
+`loadTranscript` in the same module.
 
 ---
 

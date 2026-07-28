@@ -24,6 +24,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { codexDir } from './paths.mjs';
 import { withDb } from './sqlite.mjs';
+import { safeProjectLabel } from './live/project-label.mjs';
 
 /** Newest-generation state db file under ~/.codex, or null. Exported for test
  *  via the `dir` override. */
@@ -40,7 +41,9 @@ export function codexStateDb(dir = codexDir()) {
 
 /**
  * Read Codex's thread ledger. Returns
- *   { threads: Map<id, {tokensUsed, threadSource, source, model, gitBranch}>,
+ *   { threads: Map<id, {
+ *       tokensUsed, threadSource, source, model, gitBranch, agentNickname, agentRole
+ *     }>,
  *     parents: Map<childId, parentId> }
  * or null when the db is absent, unreadable, or shaped unexpectedly.
  *
@@ -54,8 +57,13 @@ export function readCodexState(opts = {}) {
     // id + thread_source are what the attribution fix rests on; without them
     // this ledger cannot answer the question and the caller must fall back.
     if (!cols.has('id') || !cols.has('thread_source')) return null;
+    // agent_nickname and agent_role are explicit orchestration metadata. Do not
+    // read `title` or `name`: those may be derived from user task content.
     const pick = ['id', 'thread_source']
-      .concat(['tokens_used', 'source', 'model', 'git_branch'].filter((c) => cols.has(c)));
+      .concat([
+        'tokens_used', 'source', 'model', 'git_branch', 'agent_nickname', 'agent_role',
+        'cwd', 'provider', 'status',
+      ].filter((c) => cols.has(c)));
     const threads = new Map();
     for (const row of db.prepare(`SELECT ${pick.join(', ')} FROM threads`).all()) {
       threads.set(String(row.id), {
@@ -64,6 +72,11 @@ export function readCodexState(opts = {}) {
         source: typeof row.source === 'string' ? row.source : null,
         model: typeof row.model === 'string' ? row.model : null,
         gitBranch: typeof row.git_branch === 'string' ? row.git_branch : null,
+        agentNickname: typeof row.agent_nickname === 'string' ? row.agent_nickname : null,
+        agentRole: typeof row.agent_role === 'string' ? row.agent_role : null,
+        project: typeof row.cwd === 'string' ? safeProjectLabel(row.cwd) : null,
+        provider: typeof row.provider === 'string' ? row.provider : null,
+        status: typeof row.status === 'string' ? row.status : null,
       });
     }
     const parents = new Map();

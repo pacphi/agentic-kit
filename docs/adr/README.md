@@ -20,6 +20,7 @@ Consequences**, and cites the grounded source it rests on where relevant.
 | [0009](0009-usage-scorecard-local-transcript-analytics.md) | Usage scorecard: local transcript analytics with graded evidence | Accepted |
 | [0010](0010-provider-mediated-quota-reads.md) | Provider-mediated quota reads (the only honest denominators) | Accepted |
 | [0011](0011-local-model-provenance-zero-cost-and-transcript-fidelity.md) | Local models: provenance out-of-band, $0 per model, stated transcript fidelity | Proposed |
+| [0012](0012-live-sessions-observability.md) | Live sessions as local, evidence-graded observability | Accepted |
 
 Theme: ADRs **0001–0006** define **dual-host LLM routing and leadership** — how `ak` lets ruflo route
 each development activity (architecture, implementation, testing, review, …) to the right host (Claude
@@ -41,4 +42,11 @@ accounting, approximate token counts, and a model id the vendor documents how to
 provenance is established out-of-band via a loopback catalogue read, local models are priced at an
 exact `$0` **per model** rather than in one bucket, unrecognised models become `unpriced` instead of
 silently fallback-priced, and each local session states what its provider could not report. See also
-`docs/PROVIDERS.md`.
+`docs/PROVIDERS.md`. **0012** adds a read-only Live Sessions workspace: host-specific evidence is
+normalized into a versioned, provenance-bearing event model, reduced into an interactive
+agent/tool canvas, and paired with a rich selected-session transcript rail. Separate SSE planes
+keep content out of broad topology snapshots/replay while preserving masked local evidence and
+keeping chat/control absent. Claude/Codex collection is
+implemented; ruflo, agentic-qe, and dual-run require explicit, repeatable `--live-source`
+registration. Independent plugin/skill/MCP discovery and a measured frame-time budget remain
+documented limitations rather than implied capabilities.

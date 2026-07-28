@@ -20,11 +20,17 @@ function fixtureDb(dir, name = 'state_5.sqlite') {
   const db = new DatabaseSync(file);
   db.exec(`CREATE TABLE threads (
     id TEXT PRIMARY KEY, thread_source TEXT, source TEXT, model TEXT,
-    git_branch TEXT, tokens_used INTEGER);`);
+    git_branch TEXT, tokens_used INTEGER, agent_nickname TEXT, agent_role TEXT,
+    title TEXT, name TEXT, cwd TEXT, provider TEXT, status TEXT);`);
   db.exec(`CREATE TABLE thread_spawn_edges (
     parent_thread_id TEXT, child_thread_id TEXT, status TEXT);`);
-  db.prepare('INSERT INTO threads VALUES (?,?,?,?,?,?)').run('parent-1', 'user', 'cli', 'gpt-5.6', 'main', 21_500_000);
-  db.prepare('INSERT INTO threads VALUES (?,?,?,?,?,?)').run('child-1', 'subagent', 'subagent', 'gpt-5.6', 'main', 1_000_000);
+  db.prepare('INSERT INTO threads VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)')
+    .run('parent-1', 'user', 'cli', 'gpt-5.6', 'main', 21_500_000, null, null,
+      'private parent task', 'private parent name', '/Users/private/agentic-kit', 'openai', 'running');
+  db.prepare('INSERT INTO threads VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)')
+    .run('child-1', 'subagent', 'subagent', 'gpt-5.6', 'main', 1_000_000,
+      'Bohr', 'tester', 'private child task', 'private child name',
+      '/Users/private/agentic-kit', 'openai', 'running');
   db.prepare('INSERT INTO thread_spawn_edges VALUES (?,?,?)').run('parent-1', 'child-1', 'open');
   db.close();
   return file;
@@ -50,6 +56,11 @@ test('readCodexState reads threads and spawn edges', () => {
   assert.equal(ledger.threads.get('parent-1').threadSource, 'user');
   assert.equal(ledger.threads.get('parent-1').tokensUsed, 21_500_000);
   assert.equal(ledger.threads.get('child-1').threadSource, 'subagent');
+  assert.equal(ledger.threads.get('child-1').agentNickname, 'Bohr');
+  assert.equal(ledger.threads.get('child-1').agentRole, 'tester');
+  assert.equal(ledger.threads.get('child-1').project, 'agentic-kit');
+  assert.equal(ledger.threads.get('child-1').provider, 'openai');
+  assert.equal(JSON.stringify([...ledger.threads.values()]).includes('private'), false);
   assert.equal(ledger.parents.get('child-1'), 'parent-1');
 });
 

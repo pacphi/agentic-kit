@@ -39,6 +39,9 @@ ADR-0007 split `admin` from `dashboard` along **network egress**: `dashboard` pr
 It therefore sits squarely inside the dashboard's existing offline-first contract and ships as a
 sixth tab (`#usage`), not a new server.
 
+> **Current implementation note (2026-07-27):** Usage remains the sixth tab; Live Sessions is now a
+> seventh tab. Usage still loads lazily and remains separate from the live transcript tailers.
+
 The tab carries four in-page views — **Scorecard → Findings → Sessions → Transcript** — deep-linked
 as `#usage`, `#usage/findings`, `#usage/sessions`, `#usage/<sessionId>`, reusing the in-page reveal
 idiom ADR-0005 established rather than adding navigation concepts.

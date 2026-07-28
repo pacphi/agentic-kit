@@ -6,9 +6,15 @@
 
 ## Context
 
-`ak dashboard` today is a single-page, poll-every-5s, **read-only diagnostic**: a verdict band, a `#cards`
+At the time of this decision, `ak dashboard` was a single-page, poll-every-5s,
+**read-only diagnostic**: a verdict band, a `#cards`
 grid grouped by subsystem, a `#history` strip — all fed by shelling `ak status --json`
 (`src/lib/dashboard-server.mjs`). It is health/status oriented.
+
+> **Current implementation note (2026-07-27):** the read-only and loopback boundaries remain, but
+> the page now has seven tabs, user-configurable status polling, lazy Usage reads, and an SSE-driven
+> Live view. Page, styles, browser client, Live view, and request/session security now live under
+> `src/lib/dashboard/`; `dashboard-server.mjs` is the HTTP composition root.
 
 The routing policy warrants a richer view than a flat status card (a vendor-coded activity→host/model matrix
 with provenance badges and escalation ladders). The question is how to add it without breaking the existing

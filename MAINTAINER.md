@@ -18,7 +18,7 @@ release this kit. User-facing docs live in [README.md](README.md); this file is 
 | Module system | **ESM only** (`.mjs`); `.cjs` reserved for the statusline template + its test | `"type": "module"` in `package.json` |
 | Runtime deps | **Zero** | Uses `node:` builtins only — `node:sqlite`, `node:test`, `node:util` (`parseArgs`), `node:child_process`, `node:fs`. Keeps installs instant and supply-chain surface tiny |
 | Node | **≥ 22** (`engines.node`) | `node:sqlite` + `node --test` need it. CI matrix covers 22 / 24 / 26 |
-| Package manager (dev) | **pnpm** pinned via `packageManager: pnpm@11.13.0` | CI uses `pnpm/action-setup` which reads that field — don't drift it casually |
+| Package manager (dev) | **pnpm** pinned via `packageManager: pnpm@11.17.0` | CI uses `pnpm/action-setup` which reads that field — don't drift it casually |
 | Package manager (target) | **npm** | The kit heals `npm root -g` trees; `lib/heal.mjs` shells `npm install -g` |
 | Version source of truth | `package.json` `version` **only** | `bin/agentic-kit.mjs --version` reads it at runtime; no version string is duplicated anywhere else in source |
 
@@ -55,6 +55,8 @@ src/
     health-history.mjs   # regression ring appended by sync, read by status
     dashboard-server.mjs # read-only localhost dashboard (shells `ak status --json`)
     admin-server.mjs     # maintainer admin: loopback server, per-session token auth, page assembly (ADR-0007)
+    admin-styles.mjs     # admin presentation: dashboard-aligned dark/light design tokens
+    admin-theme.mjs      # embedded theme controller; shares the dashboard preference key
     admin-collect.mjs    # admin's server-side GitHub/npm fan-out → typed payload (injectable fetchers)
     admin-model.mjs      # PURE admin number model — imports nothing; embedded in the page AND node-tested
     admin-view.mjs       # admin browser controller (embedded into the page; not node-imported)
