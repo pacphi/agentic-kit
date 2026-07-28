@@ -11,11 +11,11 @@ import {
   undoProviders, hostInstallState, hostAuthState, installHost, applyAqeRouter, undoAqeRouter,
   bothHostsEnabled, DUAL_ROLE_TIP, JUDGE_BIAS_TIP, QE_COURT_TIP, suggestedFallbackFor,
   seedDualRoutingIfDualHost, printActivityRoutingTable, ensureCodexMcp, undoCodexMcp,
-  ensureRufloMcpInCodex, undoRufloMcpInCodex,
+  ensureRufloMcpInCodex, undoRufloMcpInCodex, detectAqeProviders, aqeProviderCredential, credentialGaps, fallbackSource,
 } from '../../lib/providers.mjs';
-import { parseRouteSpecs, formatModelHelp, PRIMARY_HOSTS, DEFAULT_PRIMARY_HOST } from '../../lib/routing.mjs';
+import { parseRouteSpecs, formatModelHelp, PRIMARY_HOSTS, DEFAULT_PRIMARY_HOST, divergedRoutes, refreshSeededRoutes, modelNote, ACTIVITIES } from '../../lib/routing.mjs';
 import { loadKitConfig, saveKitConfig } from '../../lib/config.mjs';
-import { ok, warn, fail, info, dim, bold } from '../../lib/output.mjs';
+import { ok, warn, fail, info, dim, bold, yellow } from '../../lib/output.mjs';
 import { installedVersion, cmpVersions } from '../../lib/versions.mjs';
 import { repoRoot } from '../../lib/paths.mjs';
 import { writeJsonWithBackup } from '../../lib/settings.mjs';
@@ -44,6 +44,7 @@ export const options = {
   'aqe-fallback': { type: 'string' }, // 'claude-code:model1,model2;openai:gpt-5.6'  ('none' clears)
   provider: { type: 'string' },      // csv of ruflo API providers, optional id:model (openai:gpt-5.6)
   route: { type: 'string', multiple: true }, // repeatable: 'activity:host[:model]' per-activity routing override
+  activity: { type: 'string' },      // refresh: csv of activities to re-seed (default = prompt)
   yes: { type: 'boolean', default: false },
   json: { type: 'boolean', default: false },
 };
@@ -62,6 +63,9 @@ persist to kit.json → idempotent heal. \`ak sync\` reapplies your choice.
 Subcommands:
   status   (default) detected CLIs, aqe provider, ruflo providers, what's wired
   pick     choose hosts / aqe provider / ruflo providers → persist → apply
+  refresh  re-seed routes whose seeded pin diverges from the current defaults
+             (per-activity, opt-in; user pins are never touched, and \`ak sync\`
+             never does this for you)
   off      reversible teardown (reset to claude-only; strip managed env keys)
 
 Options (pick, all optional — omit for interactive):
@@ -84,6 +88,7 @@ Options (pick, all optional — omit for interactive):
                                  implementation, testing, review, security-scan,
                                  security-analysis, documentation, debugging,
                                  packaging, release
+  --activity <csv>             refresh: which activities to re-seed (default: prompt)
   --yes                        accept defaults without prompting
 
 When both claude and codex hosts are enabled (and aqe ≥ 3.13.1), ak seeds a
@@ -95,7 +100,13 @@ Examples:
   ak x provider                          show what's detected + wired + routing
   ak x provider pick --host claude,codex
   ak x provider pick --route 'testing:claude:claude-sonnet-5'
+  ak x provider refresh --activity architecture,design
   ak x provider off`;
+
+/** Stamp provenance onto chain entries. 'suggested' = ak proposed it and the
+ *  user pressed enter; 'user' = they typed it. Only 'suggested' entries are
+ *  eligible for an offered refresh — a typed pin is intent (#55). */
+const stamp = (source) => (entries) => entries.map((e) => ({ ...e, source }));
 
 /** Parse 'claude-code:m1,m2; openai:gpt-5.6' → [{provider, models:[…]}, …]. */
 const parseFallback = (str) => str.split(';').map((s) => s.trim()).filter(Boolean).map((tok) => {
@@ -110,8 +121,9 @@ export async function run({ flags, positionals }) {
   if (sub === 'status') return status({ flags, cwd });
   if (sub === 'off') return off({ cwd });
   if (sub === 'pick') return pick({ flags, cwd });
+  if (sub === 'refresh') return refresh({ flags, cwd });
 
-  fail(`unknown provider subcommand: ${sub} (status|pick|off)`);
+  fail(`unknown provider subcommand: ${sub} (status|pick|refresh|off)`);
   return 2;
 }
 
@@ -149,10 +161,29 @@ async function status({ flags, cwd }) {
   console.log(`  ${dim(AQE_BILLING_HINT)}`);
   const chain = cfg.providers.aqeFallback ?? [];
   if (chain.length) {
-    const rendered = chain.map((e) => `${e.provider}${e.models?.length ? `(${e.models.join(',')})` : dim('(no models)')}`).join(' → ');
+    const rendered = chain.map((e) => {
+      const cred = aqeProviderCredential(e.provider);
+      const models = e.models?.length ? `(${e.models.join(',')})` : dim('(no models)');
+      return `${e.provider}${models}${cred.present ? '' : yellow(' ⚠ no credential')}`;
+    }).join(' → ');
     console.log(`  ${dim('fallback chain:')} ${rendered} ${dim('· .agentic-qe/llm-config.json')}`);
+    for (const g of credentialGaps(chain)) {
+      warn(`fallback rung '${g.provider}' has no credential — needs ${g.missing.join(', ')} in the env; it will fail over into nothing`);
+    }
   } else {
     console.log(`  ${dim('fallback chain: none (aqe auto-enables keyed providers)')}`);
+  }
+
+  // Credential state for EVERY aqe provider type, so a provider that is
+  // credentialed on this machine (openrouter, say) is never invisible while an
+  // uncredentialed one is displayed as a configured fallback (#54).
+  const creds = detectAqeProviders();
+  console.log(bold('\naqe provider credentials') + dim('  (keys read from env; never persisted)'));
+  for (const p of AQE_PROVIDER_TYPES) {
+    const c = creds[p];
+    const state = c.present ? (c.billing === 'local' ? 'local' : c.billing === 'subscription' ? 'subscription' : 'key present')
+      : `no key ${dim(`(${c.missing.join(', ')})`)}`;
+    console.log(`  ${p.padEnd(14)} ${state}${c.source && c.present && c.billing === 'metered' ? dim(`  · ${c.source}`) : ''}`);
   }
 
   const cm = cfg.providers.models ?? [];
@@ -194,6 +225,60 @@ function printQeCourtStatus(cwd) {
   }
   if (violations.length) warn(`qe-court panel invalid: ${violations.join(', ')}`);
   else ok('qe-court panel valid (vendor-diverse, jury independent of writer)');
+}
+
+/** Opt-in, per-activity re-seed of routes whose seeded pin diverges from the
+ *  current defaults. Deliberately a separate command, never part of `ak sync`:
+ *  sync is documented as idempotent reapplication of persisted choice, and the
+ *  newer default is not uniformly better — on routine work it can cost 2-3× the
+ *  agentic turns for the same result (#55). Only `source: 'seeded'` entries are
+ *  eligible; a user pin survives even when named. */
+async function refresh({ flags, cwd }) {
+  const cfg = loadKitConfig();
+  const policy = cfg.providers?.dualRouting ?? {};
+  const diverged = divergedRoutes(policy);
+  if (!diverged.length) { ok('no seeded routes diverge from the current defaults'); return 0; }
+
+  console.log(bold('seeded routes that diverge from current defaults'));
+  for (const d of diverged) {
+    const head = d.modelDiverged ? `${d.model} → ${d.defaultModel}` : d.model;
+    console.log(`  ${d.activity.padEnd(18)} ${d.host.padEnd(7)} ${head}`);
+    for (const e of d.escalate) console.log(`    ${dim('escalation:')} ${e.model} → ${e.defaultModel}`);
+    // The trade, not just the ids: choosing on a price axis while paying on a
+    // turns axis is the misreading this whole surface exists to prevent.
+    if (d.modelDiverged && d.currentNote) console.log(dim(`    now:     ${d.model} — ${d.currentNote}`));
+    if (d.modelDiverged && d.defaultNote) console.log(dim(`    default: ${d.defaultModel} — ${d.defaultNote}`));
+    for (const e of d.escalate) {
+      const note = modelNote(e.defaultModel);
+      if (note) console.log(dim(`    default: ${e.defaultModel} — ${note}`));
+    }
+  }
+
+  let picked;
+  if (flags.activity !== undefined) {
+    const want = flags.activity.split(',').map((s) => s.trim()).filter(Boolean);
+    for (const a of want.filter((a) => !ACTIVITIES.includes(a))) warn(`unknown activity '${a}' — ignored`);
+    picked = want.filter((a) => diverged.some((d) => d.activity === a));
+  } else if (flags.yes) {
+    picked = diverged.map((d) => d.activity);
+  } else {
+    const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+    const ans = (await rl.question(`refresh which activities? (comma-separated, "all", blank = none) [${diverged.map((d) => d.activity).join(',')}]: `)).trim();
+    rl.close();
+    if (!ans) { info('nothing refreshed — routes left as they are'); return 0; }
+    picked = ans.toLowerCase() === 'all'
+      ? diverged.map((d) => d.activity)
+      : ans.split(',').map((s) => s.trim()).filter((a) => diverged.some((d) => d.activity === a));
+  }
+  if (!picked.length) { info('nothing refreshed — routes left as they are'); return 0; }
+
+  cfg.providers.dualRouting = refreshSeededRoutes(policy, { activities: picked });
+  saveKitConfig(cfg);
+  ok(`refreshed ${picked.length} route(s): ${picked.join(', ')}`);
+  const router = applyAqeRouter(cfg, cwd);
+  (router.ok ? ok : warn)(`aqe router: ${router.detail}`);
+  printActivityRoutingTable(cfg);
+  return 0;
 }
 
 async function off({ cwd }) {
@@ -263,7 +348,9 @@ async function pick({ flags, cwd }) {
   const hosts = await detectHosts(cwd);
   let enabled;
   let aqeProvider = cfg.providers.aqeProvider ?? null;
-  let aqeFallback = cfg.providers.aqeFallback ?? [];
+  // A legacy chain written before provenance existed reads as 'user': we cannot
+  // tell whether it was typed or accepted, so it must never be auto-touched.
+  let aqeFallback = (cfg.providers.aqeFallback ?? []).map((e) => ({ ...e, source: fallbackSource(e) }));
   let models = cfg.providers.models ?? [];
   const prevPrimary = cfg.providers.primaryHost ?? DEFAULT_PRIMARY_HOST;
   const oldPolicy = cfg.providers.dualRouting ?? {};
@@ -281,7 +368,7 @@ async function pick({ flags, cwd }) {
     }
     if (flags['aqe-fallback'] !== undefined) {
       const v = flags['aqe-fallback'].trim().toLowerCase();
-      aqeFallback = (v === 'none' || v === '') ? [] : parseFallback(v);
+      aqeFallback = (v === 'none' || v === '') ? [] : stamp('user')(parseFallback(v));
     }
     if (flags.provider !== undefined) models = parseModels(flags.provider);
   } else {
@@ -298,7 +385,9 @@ async function pick({ flags, cwd }) {
     const fAns = (await rl.question(
       `aqe fallback chain, ordered (e.g. "claude-code:claude-opus-5; openai:gpt-5.6"${suggestion ? `, blank = use suggested [${suggestion}]` : ', blank = none'}): `,
     )).trim().toLowerCase();
-    aqeFallback = fAns ? parseFallback(fAns) : (suggestion ? parseFallback(suggestion.toLowerCase()) : []);
+    aqeFallback = fAns
+      ? stamp('user')(parseFallback(fAns))
+      : (suggestion ? stamp('suggested')(parseFallback(suggestion.toLowerCase())) : []);
     const provAns = (await rl.question('ruflo API-key providers to register (e.g. openai:gpt-5.6, blank to skip): ')).trim();
     if (provAns) models = parseModels(provAns);
     rl.close();
@@ -335,6 +424,17 @@ async function pick({ flags, cwd }) {
       else if (!e.models.length) warn(`fallback entry '${e.provider}' has no models — aqe may skip it; add e.g. ${e.provider}:<model-id>`);
       return okp;
     });
+  // Tell the user AT ENTRY TIME that a rung is inert, and name what it needs —
+  // the failure otherwise surfaces at QE-run time, far from the config (#54).
+  const gaps = credentialGaps(aqeFallback);
+  for (const g of gaps) {
+    warn(`${g.provider}: no ${g.missing.join(' / ')} in env — this rung will fail over into nothing`);
+  }
+  if (gaps.length) {
+    const live = AQE_PROVIDER_TYPES.filter((p) => aqeProviderCredential(p).present
+      && !aqeFallback.some((e) => e.provider === p));
+    if (live.length) info(`credentialed alternatives available now: ${live.join(', ')}`);
+  }
 
   cfg.providers = {
     hosts: { claude: enabled.includes('claude'), codex: enabled.includes('codex') },

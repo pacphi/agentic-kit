@@ -16,7 +16,7 @@ export function installedVersion(pkg) {
   }
 }
 
-async function latestVersion(pkg, tag = 'latest') {
+export async function latestVersion(pkg, tag = 'latest') {
   const r = await run('npm', ['view', `${pkg}@${tag}`, 'version'], { timeout: 20_000 });
   return r.code === 0 ? r.stdout.trim() : null;
 }

@@ -31,7 +31,7 @@ import { readJson, writeJsonWithBackup } from './settings.mjs';
 import { installedVersion, cmpVersions } from './versions.mjs';
 import * as paths from './paths.mjs';
 import { bold, dim, cyan } from './output.mjs';
-import { policyToAgentOverrides, seedDualRouting, resolveRoutes, routingSummary, ACTIVITIES, DEFAULT_PRIMARY_HOST, PRIMARY_HOSTS } from './routing.mjs';
+import { policyToAgentOverrides, seedDualRouting, resolveRoutes, routingSummary, divergedRoutes, ACTIVITIES, DEFAULT_PRIMARY_HOST, PRIMARY_HOSTS } from './routing.mjs';
 import { HOST_ADAPTERS } from './hosts.mjs';
 
 /** Frontier agent-CLI hosts. `pkg` is the npm global package; `enableEnv` is
@@ -64,6 +64,86 @@ export const AQE_PROVIDER_TYPES = [
   'claude-code', 'claude', 'openai', 'gemini', 'openrouter',
   'azure-openai', 'bedrock', 'cognitum', 'ollama', 'onnx',
 ];
+
+/** Credential descriptor per AQE_PROVIDER_TYPES member — the missing half of the
+ *  chain validation: a rung whose provider has no usable credential is inert, and
+ *  a type/shape check can't see that (#54). Env names are GROUNDED in aqe's own
+ *  provider implementations (dist/shared/llm/providers/*.js `getApiKey`), not
+ *  guessed; `also` are the extra vars a provider hard-requires beyond the key.
+ *    host  — credentialed by a frontier host's login rather than an env key
+ *    local — runs locally, no credential ($0)
+ *  Keyed by provider id so AQE_PROVIDER_TYPES and this map cannot diverge silently
+ *  (a test asserts the two cover exactly the same set). */
+export const AQE_PROVIDER_CREDENTIALS = {
+  'claude-code': { host: 'claude', billing: 'subscription' },
+  // `codex` is deliberately absent from AQE_PROVIDER_TYPES (that list also gates
+  // AQE_LLM_PROVIDER validation, so widening it is a separate behavior change) —
+  // but routing's AQE_CONSTRUCTIBLE_PROVIDERS includes it and
+  // policyToAgentOverrides emits `provider: 'codex'`, so it needs a descriptor or
+  // those projected entries would be unverifiable.
+  codex: { host: 'codex', billing: 'subscription' },
+  claude: { keyEnv: ['ANTHROPIC_API_KEY'], billing: 'metered' },
+  openai: { keyEnv: ['OPENAI_API_KEY'], billing: 'metered' },
+  gemini: { keyEnv: ['GOOGLE_AI_API_KEY', 'GEMINI_API_KEY', 'GOOGLE_API_KEY'], billing: 'metered' },
+  openrouter: { keyEnv: ['OPENROUTER_API_KEY'], billing: 'metered' },
+  'azure-openai': { keyEnv: ['AZURE_OPENAI_API_KEY'], also: ['AZURE_OPENAI_ENDPOINT'], billing: 'metered' },
+  bedrock: { keyEnv: ['AWS_ACCESS_KEY_ID'], also: ['AWS_SECRET_ACCESS_KEY'], billing: 'metered' },
+  cognitum: { keyEnv: ['COGNITUM_API_KEY'], billing: 'metered' },
+  ollama: { local: true, billing: 'local' },
+  onnx: { local: true, billing: 'local' },
+};
+
+/** Is this aqe provider actually usable right now? Returns
+ *  {known, present, billing, source, missing[]}. `source` names the env var (or
+ *  host login) that satisfied it; `missing` names what would satisfy it. Pure
+ *  except for the injected env. */
+export function aqeProviderCredential(provider, { env = process.env, hostAuth = hostAuthState } = {}) {
+  const d = AQE_PROVIDER_CREDENTIALS[provider];
+  if (!d) return { known: false, present: false, billing: 'unknown', source: null, missing: [] };
+  if (d.host) {
+    const auth = hostAuth(d.host, { env });
+    return { known: true, present: auth.mode !== 'none', billing: d.billing, source: auth.source, missing: auth.mode === 'none' ? [`${d.host} login`] : [] };
+  }
+  if (d.local) return { known: true, present: true, billing: d.billing, source: 'local', missing: [] };
+  const key = d.keyEnv.find((k) => !!env[k]);
+  const missingAlso = (d.also ?? []).filter((k) => !env[k]);
+  return {
+    known: true,
+    present: !!key && missingAlso.length === 0,
+    billing: d.billing,
+    source: key ?? null,
+    missing: [...(key ? [] : [d.keyEnv.join(' | ')]), ...missingAlso],
+  };
+}
+
+/** Chain rungs that cannot execute — [{provider, missing}] in chain order. The
+ *  shared basis for the write-time warning, the pick-time warning, and the
+ *  `ak status` viability row, so the three can never disagree.
+ *  @param {Array<{provider?: string}>} [chain]
+ *  @param {{ env?: NodeJS.ProcessEnv, hostAuth?: typeof hostAuthState }} [opts]
+ *  @returns {Array<{provider: string, missing: string[]}>} */
+export function credentialGaps(chain = [], { env = process.env, hostAuth } = {}) {
+  return chain
+    .filter((e) => e?.provider)
+    .map((e) => ({ provider: e.provider, ...aqeProviderCredential(e.provider, { env, ...(hostAuth ? { hostAuth } : {}) }) }))
+    // `known === false` is UNVERIFIABLE, not uncredentialed: an unrecognized
+    // provider must never be reported as "no credential" — that would be ak
+    // asserting a fact about a provider it has no descriptor for. The separate
+    // unknown-provider path (applyAqeRouter's type filter) already handles it.
+    .filter((c) => c.known && !c.present)
+    .map((c) => ({ provider: c.provider, missing: c.missing }));
+}
+
+/** Credential state for every aqe provider type — what `ak x provider status`
+ *  renders, so a credentialed provider (e.g. openrouter) is never invisible. */
+export function detectAqeProviders({ env = process.env } = {}) {
+  return Object.fromEntries(AQE_PROVIDER_TYPES.map((p) => [p, aqeProviderCredential(p, { env })]));
+}
+
+/** Provenance for an aqeFallback entry. A legacy entry written before stamping
+ *  is treated as 'user' — never auto-touched, since we cannot tell whether the
+ *  user typed it or accepted a suggestion (#55). */
+export const fallbackSource = (entry) => entry?.source ?? 'user';
 
 /** Every env key this module owns — the reversible surface for `off`/undo. */
 export const MANAGED_ENV_KEYS = [
@@ -297,7 +377,12 @@ export function applyAqeRouter(cfg, cwd = process.cwd()) {
       for (const e of valid) next.providers[e.provider] = { ...(existing.providers?.[e.provider] ?? {}), enabled: true };
       next.fallbackChain = buildChain(valid);
       const emptyModels = valid.filter((e) => !e.models || e.models.length === 0).map((e) => e.provider);
-      details.push(`chain: ${valid.map((e) => e.provider).join(' → ')}${emptyModels.length ? ` (⚠ no models for: ${emptyModels.join(', ')})` : ''}`);
+      // Warn, never refuse: the user may export the key later, and silently
+      // dropping a rung is worse than writing one that is currently inert (#54).
+      const gaps = credentialGaps(valid);
+      details.push(`chain: ${valid.map((e) => e.provider).join(' → ')}`
+        + (emptyModels.length ? ` (⚠ no models for: ${emptyModels.join(', ')})` : '')
+        + (gaps.length ? ` (⚠ no credential for: ${gaps.map((g) => `${g.provider} — needs ${g.missing.join(', ')}`).join('; ')})` : ''));
       wrote = true;
     }
   }
@@ -393,12 +478,23 @@ export function formatRoutingTable(cfg) {
   const s = routingSummary(policy);
   const lines = [bold('\nper-activity routing')
     + dim(`  (${s.byHost.claude ?? 0} claude · ${s.byHost.codex ?? 0} codex · ${s.custom} custom · .agentic-qe/llm-config.json)`)];
+  // "diverges from", never "stale"/"outdated"/"superseded": the pinned model is
+  // sometimes the better choice for an activity, so the wording must present a
+  // decision rather than a lag (#55).
+  const diverged = Object.fromEntries(divergedRoutes(policy).map((d) => [d.activity, d]));
   for (const act of ACTIVITIES) {
     const r = routes[act];
     const src = r.source === 'user' ? cyan('custom') : dim(r.source);
     const esc = r.escalate?.length ? dim(`  ↑ ${r.escalate.map((e) => e.host).join('→')}`) : '';
     const tag = r.akOriginated ? dim(' [ak]') : '';
-    lines.push(`  ${act.padEnd(18)} ${r.host.padEnd(7)} ${(r.model ?? '').padEnd(24)} ${src}${tag}${esc}`);
+    const d = diverged[act];
+    const div = d
+      ? dim(`  diverges from default ${d.modelDiverged ? d.defaultModel : d.escalate.map((e) => `↑${e.defaultModel}`).join(',')}`)
+      : '';
+    lines.push(`  ${act.padEnd(18)} ${r.host.padEnd(7)} ${(r.model ?? '').padEnd(24)} ${src}${tag}${esc}${div}`);
+  }
+  if (Object.keys(diverged).length) {
+    lines.push(dim(`  ${Object.keys(diverged).length} seeded route(s) diverge from current defaults — review with: ak x provider refresh`));
   }
   return lines.join('\n');
 }

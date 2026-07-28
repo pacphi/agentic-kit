@@ -42,6 +42,15 @@ export function registrationStatus() {
   };
 }
 
+/** Is the standalone ruvector MCP server registered at user scope? Spawn-free
+ *  read of ~/.claude.json (same seam as registrationStatus) — `claude mcp list`
+ *  runs a live health check per server and has no stable output schema. ak NEVER
+ *  registers this: user registration IS the opt-in signal that ak may keep the
+ *  global CLI current. */
+export function ruvectorRegistered() {
+  return 'ruvector' in (readJson(claudeUserMcpPath(), {})?.mcpServers ?? {});
+}
+
 /**
  * Project-scoped codex MCP (mcp__codex__codex) registration state. `ensureCodexMcp`
  * registers it via `claude mcp add codex -s project`, which persists to `.mcp.json`
