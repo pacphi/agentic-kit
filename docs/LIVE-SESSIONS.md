@@ -15,6 +15,13 @@ ak dashboard \
   --live-source 'dual-run=.claude-flow/dual-run-events.jsonl'
 ```
 
+> [!NOTE]
+> `--live-source` is opt-in, not required. Without it, Claude and Codex
+> sessions are still fully covered — auto-discovered, no config needed. What
+> you don't get: ruflo, agentic-qe, and dual-run activity, which are never
+> auto-discovered and only appear once you register their event file
+> explicitly (see [Evidence and limitations](#evidence-and-limitations)).
+
 Open `#live`, for example `http://127.0.0.1:7431/#live` — once the dashboard's
 per-session token is already in the browser (auto-opened, or pasted once at
 the token gate; ADR-0014), this deep link works on its own. Collection starts
