@@ -463,9 +463,12 @@ async function main() {
       'source inspector did not close accessibly');
     const sessionIdentity = await visibleText(page, '[data-session="ui-live-session"]');
     check('session row leads with provider and status instead of an opaque id',
-      /Codex/i.test(sessionIdentity) && /LIVE/.test(sessionIdentity)
+      /Codex/i.test(sessionIdentity) && /Working now/.test(sessionIdentity)
         && !/ui-live-session/.test(sessionIdentity),
       `session identity was ${JSON.stringify(sessionIdentity)}`);
+    check('session state uses human evidence language instead of adapter absence',
+      !/Status not reported/.test(await visibleText(page, '#panel-live')),
+      'Live view exposed the missing telemetry field instead of a human session state');
     check('Live navigation is project-first and keeps sessions within the selected project',
       await page.locator('#live-project-list [data-project]').count() === 1
         && /2 sessions/.test(await visibleText(page, '#live-project-list')),

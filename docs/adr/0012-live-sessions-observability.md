@@ -175,6 +175,14 @@ copy. Missing evidence is described precisely, for example `Model not reported`,
 `Waiting for lifecycle evidence`, `Active; completion unobserved`, `Task details unavailable`,
 `Relationship inferred`, or `Source unavailable`.
 
+User-facing state describes work rather than adapter fields. Fresh observed execution is
+`Working now`; quiescent work is `Waiting for activity`; expired open work is
+`No recent activity`; retained evidence without a completion signal is `Last activity`.
+`Blocked`, `Failed`, `Cancelled`, and `Completed` require explicit evidence. Continuous pulse and
+flow animation are reserved for `Working now`; waiting/stale/queued use static amber, and
+blocked/failed use static red. Text and geometry remain authoritative when color or motion is
+unavailable.
+
 Users can drag the empty canvas to pan, zoom around the pointer by wheel/trackpad, and drag
 nodes to temporary pinned positions. Visible controls provide zoom in, zoom out, fit, reset, and
 separate camera/layout resets. View transforms follow the conventional scale-and-translation

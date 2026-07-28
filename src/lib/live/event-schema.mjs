@@ -5,7 +5,8 @@ const SURFACES = new Set(['native', 'ruflo', 'aqe', 'plugin', 'skill', 'dual-run
 const CONFIDENCE = new Set(['observed', 'correlated', 'inferred', 'assumed', 'planned']);
 const EVIDENCE_FIELDS = ['project', 'provider', 'model', 'status', 'hierarchy'];
 const STATUS = new Set([
-  'queued', 'running', 'quiescent', 'expired', 'completed', 'failed', 'cancelled', 'unknown',
+  'queued', 'running', 'quiescent', 'expired', 'blocked',
+  'completed', 'failed', 'cancelled', 'unknown',
 ]);
 const ACTOR_KINDS = new Set([
   'session', 'agent', 'subagent', 'tool', 'skill', 'plugin', 'mcp', 'gate',

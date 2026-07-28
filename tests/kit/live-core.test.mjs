@@ -34,6 +34,10 @@ test('event schema rejects records without stable correlation keys', () => {
   assert.throws(() => createLiveEvent({ action: 'x', actor: { id: 'a' } }), /sessionId/);
 });
 
+test('event schema preserves explicit blocked evidence', () => {
+  assert.equal(createLiveEvent(base({ status: 'blocked' })).status, 'blocked');
+});
+
 test('event schema assigns privacy-safe project and host-qualified session identities', () => {
   const event = createLiveEvent(base({
     sessionId: 'shared:id',

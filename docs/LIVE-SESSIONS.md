@@ -72,6 +72,24 @@ Bare `unknown` is not used as user-facing copy. Missing facts are described
 honestly, such as **Model not reported**, **Waiting for lifecycle evidence**,
 **Active; completion unobserved**, or **Task details unavailable**.
 
+Session state is phrased as evidence a person can act on:
+
+- **Working now** means fresh observed execution is still arriving and is the
+  only state that continuously pulses.
+- **Waiting for activity** means a previously running session is quiet inside
+  the quiescence window.
+- **No recent activity** means that quiet period crossed the expiry threshold;
+  it does not assert failure or completion.
+- **Blocked**, **Failed**, **Cancelled**, and **Completed** require explicit
+  source evidence.
+- **Last activity** identifies retained historical evidence when no trustworthy
+  completion outcome was recorded.
+
+Color and motion are redundant cues: green motion means current work, amber
+means waiting/stale/queued, red means blocked/failed, and completed history
+recedes. Reduced-motion mode keeps the labels and colors while removing pulse
+and flow animation.
+
 Selecting a session explicitly opens only that session's content stream. The
 previous stream closes; other transcripts are not prefetched. Large thinking,
 arguments, results, and patches are collapsed for readability and carry
