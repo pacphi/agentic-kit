@@ -1,8 +1,11 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import {
   createLiveEvent, LiveReplayStream, emptyLiveProjection,
-  reduceLiveEvent, serializeLiveProjection,
+  reduceLiveEvent, resolveProjectLabel, serializeLiveProjection,
   sweepLiveProjection, stableProjectKey,
 } from '../../src/lib/live/index.mjs';
 
@@ -47,6 +50,21 @@ test('event schema assigns privacy-safe project and host-qualified session ident
   assert.equal(event.projectKey, stableProjectKey('Visible Project'));
   assert.equal(event.sessionKey, 'claude:shared:id');
   assert.ok(!JSON.stringify(event).includes('/Users/private'));
+});
+
+test('project identity resolves linked and retained worktrees to their owning repository', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-live-project-'));
+  const repository = path.join(root, 'agentic-kit');
+  const worktree = path.join(root, 'm3-multi-provider-persona-grounding');
+  fs.mkdirSync(worktree, { recursive: true });
+  fs.writeFileSync(path.join(worktree, '.git'),
+    `gitdir: ${path.join(repository, '.git', 'worktrees', 'm3')}\n`);
+
+  assert.equal(resolveProjectLabel(worktree), 'agentic-kit');
+  assert.equal(resolveProjectLabel(
+    '/Development/agentic-kit/.claude/worktrees/m3-multi-provider-persona-grounding',
+  ), 'agentic-kit');
+  assert.equal(resolveProjectLabel('/Development/agentic-kit'), 'agentic-kit');
 });
 
 test('replay stream assigns monotonic ids, bounds history and detects stale cursors', () => {

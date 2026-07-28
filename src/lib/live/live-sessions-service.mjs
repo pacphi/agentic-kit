@@ -10,7 +10,7 @@ import {
 } from './projection.mjs';
 import { LiveReplayStream } from './replay-stream.mjs';
 import { adaptDualRunRecord, adaptStructuredEvent } from './structured-adapter.mjs';
-import { safeProjectLabel } from './project-label.mjs';
+import { resolveProjectLabel } from './project-label.mjs';
 
 const safeEntries = (dir) => {
   try { return fs.readdirSync(dir, { withFileTypes: true }); } catch { return []; }
@@ -214,7 +214,7 @@ export class LiveSessionsService {
   #record(record, context, file) {
     const explicitCwd = record?.cwd
       ?? (['session_meta', 'turn_context'].includes(record?.type) ? record.payload?.cwd : null);
-    if (explicitCwd) context.project = safeProjectLabel(explicitCwd);
+    if (explicitCwd) context.project = resolveProjectLabel(explicitCwd);
     const explicitModel = record?.message?.model
       ?? (['session_meta', 'turn_context'].includes(record?.type) ? record.payload?.model : null);
     if (typeof explicitModel === 'string') context.model = explicitModel;

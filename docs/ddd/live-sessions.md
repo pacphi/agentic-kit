@@ -143,6 +143,12 @@ navigation roots only; `childSessionCount` reports descendant threads without pr
 peer work. Sessions are ordered live first and then by most recent evidence. A project ID is opaque
 and safe for DOM/routing; it never contains the raw working directory.
 
+Project identity means the owning repository, not the current branch or linked-worktree directory.
+For a live local worktree, the `.git` ownership pointer resolves the repository. Known nested
+worktree layouts provide a privacy-safe fallback for retained paths that no longer exist. Only the
+sanitized repository label crosses the event boundary; raw working directories and Git metadata
+paths do not.
+
 ### Session hierarchy projection
 
 The full snapshot retains every session aggregate because child threads can own distinct tools,

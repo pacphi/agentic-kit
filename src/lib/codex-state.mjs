@@ -24,7 +24,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { codexDir } from './paths.mjs';
 import { withDb } from './sqlite.mjs';
-import { safeProjectLabel } from './live/project-label.mjs';
+import { resolveProjectLabel } from './live/project-label.mjs';
 
 /** Newest-generation state db file under ~/.codex, or null. Exported for test
  *  via the `dir` override. */
@@ -74,7 +74,7 @@ export function readCodexState(opts = {}) {
         gitBranch: typeof row.git_branch === 'string' ? row.git_branch : null,
         agentNickname: typeof row.agent_nickname === 'string' ? row.agent_nickname : null,
         agentRole: typeof row.agent_role === 'string' ? row.agent_role : null,
-        project: typeof row.cwd === 'string' ? safeProjectLabel(row.cwd) : null,
+        project: typeof row.cwd === 'string' ? resolveProjectLabel(row.cwd) : null,
         provider: typeof row.provider === 'string' ? row.provider : null,
         status: typeof row.status === 'string' ? row.status : null,
       });

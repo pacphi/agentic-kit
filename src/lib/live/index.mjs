@@ -13,6 +13,6 @@ export { adaptCodexRecord, adaptCodexLedger } from './codex-adapter.mjs';
 export { adaptStructuredEvent, adaptDualRunRecord } from './structured-adapter.mjs';
 export { classifyToolName } from './tool-classify.mjs';
 export {
-  canonicalSessionKey, safeProjectLabel, stableProjectKey,
+  canonicalSessionKey, resolveProjectLabel, safeProjectLabel, stableProjectKey,
 } from './project-label.mjs';
 export { LiveSessionsService } from './live-sessions-service.mjs';

@@ -52,7 +52,10 @@ The overview answers which project/provider is involved, whether the evidence
 is current, who is active, and what operation is happening now. Selecting a
 node highlights adjacent relationships, focuses its work, and synchronizes the
 transcript. Search filters the current stream. Auto-follow yields when the
-reader scrolls away and reports unread activity until following resumes.
+reader scrolls away and reports unread activity until following resumes. The
+transcript is newest-first: fresh evidence appears at the top and older entries
+flow downward. Follow anchors to the top; playback remains chronologically
+ordered internally.
 
 Projects are the durable top-level grouping. Select a project first, then one
 of its provider-qualified root sessions; currently active sessions appear
@@ -61,6 +64,10 @@ threads as an indented hierarchy. Those child threads remain selectable for
 their own map, transcript, and playback, but do not inflate the project's
 top-level session count. The project row reports nested workers separately.
 Claude and Codex sessions with the same native ID remain distinct.
+
+Linked Git worktrees roll up to their owning repository. A branch-named
+worktree is session context, not a separate project, and its filesystem path is
+never sent to the browser.
 
 Hierarchy may arrive after a thread is first discovered. The dashboard
 reconciles later Codex ledger parentage into the existing session instead of

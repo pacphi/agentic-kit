@@ -583,12 +583,20 @@ async function main() {
       /Please inspect/.test(transcript) && /Bohr is checking/.test(transcript)
         && /Show thinking/.test(transcript) && /Show tool/.test(transcript),
       `transcript was ${JSON.stringify(transcript)}`);
+    const transcriptOrder = await page.locator('#live-transcript-list .live-turn')
+      .evaluateAll((turns) => turns.map((turn) => turn.dataset.turn));
+    check('live transcript flows upward with newest evidence first',
+      transcriptOrder[0] === 't-rich-tool'
+        && transcriptOrder[transcriptOrder.length - 1] === 't-user',
+      `transcript order was ${JSON.stringify(transcriptOrder)}`);
     check('transcript content is rendered defensively rather than interpreted as markup',
       await page.locator('#live-transcript-list img').count() === 0
         && await page.evaluate(() => globalThis.__liveXss) !== 1,
       'untrusted transcript markup reached the DOM');
-    await page.locator('#live-transcript-list details').last().click();
-    const richTool = await page.locator('#live-transcript-list details').last().innerText();
+    await page.locator('#live-transcript-list [data-turn="t-rich-tool"] details').click();
+    const richTool = await page.locator(
+      '#live-transcript-list [data-turn="t-rich-tool"] details',
+    ).innerText();
     check('tool transcript preserves masked command, arguments, result, and error data',
       /pnpm test/.test(richTool) && richTool.includes('/masked/project')
         && /136 passed/.test(richTool) && /masked warning/.test(richTool),
