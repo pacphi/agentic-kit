@@ -137,7 +137,12 @@ async function main() {
   const code = await mod.run({ flags: values, positionals, pkgRoot: PKG_ROOT });
 
   // Drift nudge: one line, cached, never blocks (skipped in --json contexts).
-  if (!values.json && cmd !== 'sync') {
+  // Also skipped under --dry-run: driftReport() shells `npm view`, which
+  // writes to npm's own cache (~/.npm/_cacache, ~/.npm/_logs) as a side
+  // effect of the network call — a real disk write that contradicts
+  // "--dry-run: prints the plan, changes nothing" even though it never
+  // touches an ak-managed path.
+  if (!values.json && !values['dry-run'] && cmd !== 'sync') {
     try {
       const { driftReport } = await import('../src/lib/versions.mjs');
       for (const r of await driftReport()) {

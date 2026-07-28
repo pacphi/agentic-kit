@@ -158,6 +158,27 @@ test('an initialized project reports its learned-pattern count', async () => {
   rmrf(paths.projectClaudeFlowDir(PROJECT));
 });
 
+// Regression: dbPathPinStatus() was called with settingsLocalFile/projectRoot
+// built from process.cwd() instead of the `cwd` param collect() received.
+// Harmless when ak status runs from a project's own root (the two coincide),
+// but collect({ cwd }) is called with a NON-cwd path elsewhere (the dashboard
+// does exactly this) — the memory-pin row then described process.cwd()'s
+// pin, not the target project's. This test's own PROJECT sandbox is a
+// different directory from process.cwd() (the real repo checkout running
+// this suite), so it fails under the old code even without a dashboard.
+test('the memory-pin row reads the TARGET project (cwd param), not process.cwd()', async () => {
+  seedHome();
+  const pinned = path.join(PROJECT, 'nonexistent-dir', 'memory.db');
+  fs.mkdirSync(path.join(PROJECT, '.claude'), { recursive: true });
+  fs.writeFileSync(path.join(PROJECT, '.claude', 'settings.local.json'),
+    JSON.stringify({ env: { CLAUDE_FLOW_DB_PATH: pinned } }));
+  const row = one(await collect(), 'memory-pin');
+  assert.equal(row.level, 'warn');
+  assert.ok(row.message.includes(pinned),
+    `memory-pin row must describe PROJECT's own pin (${pinned}), got: ${row.message}`);
+  rmrf(path.join(PROJECT, '.claude', 'settings.local.json'));
+});
+
 test('run() --json emits a parseable report and exits 0 unless something failed', async () => {
   seedHome();
   const cwd = process.cwd();
