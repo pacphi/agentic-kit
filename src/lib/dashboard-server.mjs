@@ -20,6 +20,7 @@
 // startDashboard() NEVER detaches — the caller runs it foreground and calls
 // close() on SIGINT.
 import http from 'node:http';
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -30,6 +31,8 @@ import { loadKitConfig } from './config.mjs';
 import { resolveRoutes, routingSummary, ACTIVITIES, HOST_PROVIDER } from './routing.mjs';
 import { renderPage } from './dashboard/page.mjs';
 import { requestRejection } from './dashboard/request-security.mjs';
+import { tokenMatches } from './admin-server.mjs';
+import { sseChannel, reserveClientSlot, clientGone } from './dashboard/sse.mjs';
 import {
   TRANSCRIPT_ROOTS,
   maskMeta,
@@ -42,6 +45,25 @@ export { maskMeta, maskTurns, parseSessionId, resolvesInsideRoot };
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const PKG_ROOT = path.resolve(HERE, '..', '..');
+
+// Security review Finding 4: admin already carries a CSP (ADR-0007); the
+// dashboard — a larger inline-script surface (page.mjs, live-view.mjs,
+// client.mjs) that also renders transcript text, the one data source here
+// that is genuinely attacker-influenced (agents paste in web pages, repo
+// content) — had none. This is not "we found an XSS" (esc() discipline is
+// consistent across dashboard/client.mjs's ~1,200 lines); it's the layer
+// that turns one future missed esc() into a blocked console error instead
+// of a working exploit.
+const DASH_CSP = [
+  "default-src 'none'",
+  "script-src 'unsafe-inline'",   // the two inline module scripts (live + main)
+  "style-src 'unsafe-inline'",    // the one inline <style>
+  "connect-src 'self'",           // fetch()/EventSource are same-origin only
+  "img-src data:",                // the inline data: favicon; nothing else
+  "base-uri 'none'",
+  "form-action 'none'",
+  "frame-ancestors 'none'",
+].join('; ');
 
 function readJsonSafe(file) {
   try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return null; }
@@ -203,7 +225,7 @@ function clampInt(raw, fallback, min, max) {
 }
 
 function sendJson(res, status, payload) {
-  res.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' });
+  res.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store', 'x-content-type-options': 'nosniff' });
   res.end(JSON.stringify(payload));
 }
 
@@ -285,7 +307,7 @@ function lazyLive(liveOptions = {}) {
  *           liveClientBuffer?: number, liveMaxClients?: number, liveOptions?: any,
  *           liveIdleMs?: number, transcripts?: any, transcriptOptions?: any,
  *           transcriptClientBuffer?: number, transcriptMaxClients?: number }} [opts]
- * @returns {Promise<{ url: string, port: number, close: () => Promise<void> }>}
+ * @returns {Promise<{ url: string, urlWithToken: string, port: number, token: string, close: () => Promise<void> }>}
  */
 export function startDashboard({
   port = 7431, cwd = process.cwd(), fetchStatus, usage, limits, live,
@@ -372,6 +394,15 @@ export function startDashboard({
   };
   const html = renderPage({ name: '@pacphi/agentic-kit', version: kitVersion() });
 
+  // Per-session auth secret (ADR-0014, mirrors admin's ADR-0007 §2): 256-bit,
+  // fresh each start, URL-safe so it rides in the launch URL's # fragment.
+  // Every /api/* route requires it — this page serves full transcript text,
+  // a strictly more sensitive payload than admin's GitHub/npm stats, which
+  // already required one. EventSource cannot send headers, so its two routes
+  // also accept the token as a query param (see client.mjs's dashSseUrl).
+  const token = crypto.randomBytes(32).toString('base64url');
+  const checkToken = (req, query) => tokenMatches(req.headers['x-dash-token'] || query.get('token'), token);
+
   const server = http.createServer(async (req, res) => {
     const raw = req.url || '/';
     const qi = raw.indexOf('?');
@@ -386,16 +417,30 @@ export function startDashboard({
     }
 
     if (url === '/' || url === '/index.html') {
-      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' });
+      res.writeHead(200, {
+        'content-type': 'text/html; charset=utf-8',
+        'cache-control': 'no-store',
+        'content-security-policy': DASH_CSP,
+        'referrer-policy': 'no-referrer',
+        'x-content-type-options': 'nosniff',
+      });
       res.end(html);
       return;
     }
+
+    // Every route below serves data — none of it is safe to hand to any
+    // process that can merely reach this loopback port (Security Finding 1).
+    if (url.startsWith('/api/') && !checkToken(req, query)) {
+      res.writeHead(401, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store', 'x-content-type-options': 'nosniff' });
+      res.end(JSON.stringify({ error: 'Wrong or missing dashboard token.' }));
+      return;
+    }
+
     if (url === '/api/status') {
       let payload;
       try { payload = await collectData({ cwd, fetchStatus: provide }); }
       catch (e) { payload = { generatedAt: new Date().toISOString(), overall: 'unknown', rows: [], drift: null, improvement: null, health: null, error: String(e && e.message || e) }; }
-      res.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' });
-      res.end(JSON.stringify(payload));
+      sendJson(res, 200, payload);
       return;
     }
 
@@ -412,16 +457,39 @@ export function startDashboard({
     }
 
     if (url === '/api/live/events') {
+      // Reserve the client-cap slot BEFORE the first await (getLive() may do a
+      // dynamic import() + service.start()). Concurrent requests arriving
+      // during that gap must not all observe the same pre-reservation size and
+      // all pass the cap — that TOCTOU is what made the cap decorative
+      // (code-quality Finding 1).
       const maxClients = Math.max(1, Math.min(256, Number(liveMaxClients) || 32));
-      if (liveClients.size >= maxClients) {
+      const slot = reserveClientSlot(liveClients, maxClients);
+      if (!slot) {
         sendJson(res, 503, { error: 'too many live telemetry clients' });
         return;
       }
+      // Forwards to the real cleanup once it exists below; if the client goes
+      // away DURING the awaits between here and that point (before
+      // req.once('close', …) can attach to catch it), `earlyClosed` remembers
+      // it so the real cleanup runs immediately once constructed instead of
+      // leaking the reservation and the subscription wired up after it.
+      let earlyClosed = false;
+      let realCleanup = null;
+      const cleanup = (terminate) => {
+        if (realCleanup) { realCleanup(terminate); return; }
+        earlyClosed = true;
+      };
+      req.once('close', cleanup);
+      res.once('close', cleanup);
+
       let service;
       try { service = await getLive(); } catch {
+        liveClients.delete(slot);
         sendJson(res, 503, { error: 'live telemetry unavailable' });
         return;
       }
+      if (earlyClosed || clientGone(req, res)) { liveClients.delete(slot); return; }
+
       res.writeHead(200, {
         'content-type': 'text/event-stream; charset=utf-8',
         'cache-control': 'no-store',
@@ -430,31 +498,12 @@ export function startDashboard({
       });
       res.flushHeaders?.();
 
-      let closed = false;
-      let blocked = false;
-      let overflowed = false;
-      const queue = [];
       const limit = Math.max(1, Math.min(4096, Number(liveClientBuffer) || 256));
-      const write = (frame) => {
-        if (closed) return;
-        if (blocked) {
-          if (queue.length < limit) queue.push(frame);
-          else overflowed = true;
-          return;
-        }
-        blocked = !res.write(frame);
-      };
-      const flush = async () => {
-        if (closed) return;
-        blocked = false;
-        if (overflowed) {
-          overflowed = false;
-          queue.length = 0;
-          try { write(sseFrame('init', { reset: true, snapshot: await service.snapshot() })); } catch {}
-        }
-        while (!blocked && queue.length) write(queue.shift());
-      };
-      res.on('drain', flush);
+      const channel = sseChannel(res, {
+        limit, heartbeatMs: liveHeartbeatMs,
+        onOverflow: async () => sseFrame('init', { reset: true, snapshot: await service.snapshot() }),
+      });
+      const write = channel.write;
 
       const cursorHeader = req.headers['last-event-id'];
       const cursor = typeof cursorHeader === 'string' && cursorHeader.length <= 256
@@ -464,6 +513,7 @@ export function startDashboard({
       else if (cursor != null && cursor !== '') {
         try { replay = await service.replay(String(cursor)); } catch { replay = { reset: true, events: [] }; }
       }
+      if (earlyClosed || clientGone(req, res)) { liveClients.delete(slot); channel.cleanup(); return; }
       // Subscribe before taking the snapshot. Events published while the
       // initial state is assembled are buffered and reconciled below, closing
       // the snapshot→subscribe loss window.
@@ -477,26 +527,24 @@ export function startDashboard({
       };
       let unsubscribe;
       try { unsubscribe = service.subscribe(onEvent); } catch {
+        liveClients.delete(slot);
+        channel.cleanup();
         res.end();
         scheduleLiveIdle();
         return;
       }
-      let heartbeat = null;
-      const cleanup = (terminate = false) => {
-        if (closed) return;
-        closed = true;
-        if (heartbeat != null) clearInterval(heartbeat);
-        queue.length = 0;
-        res.off('drain', flush);
+      realCleanup = (terminate = false) => {
+        if (channel.isClosed()) return;
+        channel.cleanup(terminate);
         if (typeof unsubscribe === 'function') unsubscribe();
         else if (unsubscribe && typeof unsubscribe.unsubscribe === 'function') unsubscribe.unsubscribe();
+        liveClients.delete(slot);
         liveClients.delete(cleanup);
         scheduleLiveIdle();
-        if (terminate && !res.writableEnded) res.end();
       };
+      liveClients.delete(slot);
       liveClients.add(cleanup);
-      req.once('close', cleanup);
-      res.once('close', cleanup);
+      if (earlyClosed) { cleanup(true); return; }
       let snapshot;
       let postSnapshot = { reset: false, events: [] };
       let snapshotPendingCount;
@@ -508,7 +556,7 @@ export function startDashboard({
         cleanup(true);
         return;
       }
-      if (closed) return;
+      if (channel.isClosed()) return;
       // Inspect replay while callbacks still buffer. A custom/async service may
       // publish while materializing this result even though replay() itself has
       // resolved.
@@ -540,8 +588,7 @@ export function startDashboard({
         if (id) emitted.add(id);
         write(sseFrame('delta', event, id));
       }
-      heartbeat = setInterval(() => write(': heartbeat\n\n'), Math.max(100, liveHeartbeatMs));
-      heartbeat.unref?.();
+      channel.startHeartbeat();
       return;
     }
 
@@ -591,21 +638,41 @@ export function startDashboard({
         return;
       }
       const maxClients = Math.max(1, Math.min(64, Number(transcriptMaxClients) || 16));
-      if (transcriptClients.size >= maxClients) {
+      const slot = reserveClientSlot(transcriptClients, maxClients);
+      if (!slot) {
         sendJson(res, 503, { error: 'too many transcript clients' });
         return;
       }
+      // Same forwarding-cleanup pattern as /api/live/events: catches a close
+      // that fires during the awaits below, before the real cleanup (which
+      // needs transcriptService/host/id) can be constructed.
+      let earlyClosed = false;
+      let realCleanup = null;
+      const cleanup = (terminate) => {
+        if (realCleanup) { realCleanup(terminate); return; }
+        earlyClosed = true;
+      };
+      req.once('close', cleanup);
+      res.once('close', cleanup);
+
       let stream;
       let transcriptService;
       try {
         transcriptService = await getTranscripts();
         stream = transcriptService.open(host, id);
       } catch (error) {
+        transcriptClients.delete(slot);
         const message = String(error?.message ?? '');
         const status = /invalid/.test(message) ? 400 : (/not found|outside/.test(message) ? 404 : 503);
         sendJson(res, status, { error: status === 404 ? 'transcript not found' : 'transcript unavailable' });
         return;
       }
+      if (earlyClosed || clientGone(req, res)) {
+        transcriptClients.delete(slot);
+        transcriptService?.release?.(host, id);
+        return;
+      }
+
       res.writeHead(200, {
         'content-type': 'text/event-stream; charset=utf-8',
         'cache-control': 'no-store',
@@ -617,33 +684,13 @@ export function startDashboard({
       });
       res.flushHeaders?.();
 
-      let closed = false;
-      let blocked = false;
-      let overflowed = false;
-      const queue = [];
       const limit = Math.max(1, Math.min(512, Number(transcriptClientBuffer) || 64));
-      const write = (frame) => {
-        if (closed) return;
-        if (blocked) {
-          if (queue.length < limit) queue.push(frame);
-          else overflowed = true;
-          return;
-        }
-        blocked = !res.write(frame);
-      };
-      const flush = () => {
-        if (closed) return;
-        blocked = false;
-        if (overflowed) {
-          overflowed = false;
-          queue.length = 0;
-          write(transcriptSseFrame('gap', {
-            sessionKey: `${host}:${id}`, reason: 'client-overflow',
-          }));
-        }
-        while (!blocked && queue.length) write(queue.shift());
-      };
-      res.on('drain', flush);
+      const channel = sseChannel(res, {
+        limit, heartbeatMs: Math.max(1_000, liveHeartbeatMs),
+        onOverflow: () => transcriptSseFrame('gap', { sessionKey: `${host}:${id}`, reason: 'client-overflow' }),
+      });
+      const write = channel.write;
+
       let initializing = true;
       const pending = [];
       const onEvent = (event) => {
@@ -652,25 +699,23 @@ export function startDashboard({
       };
       let unsubscribe;
       try { unsubscribe = stream.subscribe(onEvent); } catch {
+        transcriptClients.delete(slot);
+        channel.cleanup();
         transcriptService?.release?.(host, id);
         res.end();
         return;
       }
-      let heartbeat = null;
-      const cleanup = (terminate = false) => {
-        if (closed) return;
-        closed = true;
-        if (heartbeat) clearInterval(heartbeat);
-        queue.length = 0;
-        res.off('drain', flush);
+      realCleanup = (terminate = false) => {
+        if (channel.isClosed()) return;
+        channel.cleanup(terminate);
         if (typeof unsubscribe === 'function') unsubscribe();
+        transcriptClients.delete(slot);
         transcriptClients.delete(cleanup);
         transcriptService?.release?.(host, id);
-        if (terminate && !res.writableEnded) res.end();
       };
+      transcriptClients.delete(slot);
       transcriptClients.add(cleanup);
-      req.once('close', cleanup);
-      res.once('close', cleanup);
+      if (earlyClosed) { cleanup(true); return; }
 
       const header = req.headers['last-event-id'];
       const cursor = typeof header === 'string' && header.length <= 256 ? header : null;
@@ -695,8 +740,7 @@ export function startDashboard({
         }
       }
       initializing = false;
-      heartbeat = setInterval(() => write(': heartbeat\n\n'), Math.max(1_000, liveHeartbeatMs));
-      heartbeat.unref?.();
+      channel.startHeartbeat();
       return;
     }
 
@@ -804,7 +848,9 @@ export function startDashboard({
       const actual = addr && typeof addr === 'object' ? addr.port : port;
       resolve({
         url: `http://127.0.0.1:${actual}/`,
+        urlWithToken: `http://127.0.0.1:${actual}/#token=${token}`,
         port: actual,
+        token,
         close: async () => {
           shuttingDown = true;
           cancelLiveIdle();

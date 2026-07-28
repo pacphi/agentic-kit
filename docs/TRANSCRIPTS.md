@@ -41,7 +41,7 @@ rewritten; rule 3 of the module header, `usage-index.mjs:22-29`):
 
 Roots come from `defaultRoots()` (`usage-index.mjs:640`) and are injectable
 for tests. A malformed line is skipped, never fatal (`jsonLines`,
-`usage-index.mjs:280` — one corrupt line must not cost a whole file).
+`usage-index.mjs:292` — one corrupt line must not cost a whole file).
 
 ### 1.1 Claude entry vocabulary
 
@@ -89,7 +89,7 @@ The same parsers serve two very different callers, switched by `withTurns`:
 
 | Path | Entry point | `withTurns` | Message bodies | Cached? |
 |---|---|---|---|---|
-| **Scan** — the aggregate index behind the Scorecard/Findings/Sessions views | `buildIndex` → `parseFile` (`usage-index.mjs:693`) | `false` | never held — holding them would balloon memory across 3,000+ files (`usage-index.mjs:423-426`) | yes: per-file derived records in `~/.config/agentic-kit/usage-index.json`, keyed `(path, mtime, size)`, invalidated wholesale by `SCHEMA_VERSION` (`usage-index.mjs:51`) |
+| **Scan** — the aggregate index behind the Scorecard/Findings/Sessions views | `buildIndex` → `parseFile` (`usage-index.mjs:693`) | `false` | never held — holding them would balloon memory across 3,000+ files (`usage-index.mjs:437-440`) | yes: per-file derived records in `~/.config/agentic-kit/usage-index.json`, keyed `(path, mtime, size)`, invalidated wholesale by `SCHEMA_VERSION` (`usage-index.mjs:51`) |
 | **Reader** — one transcript for the Transcript view | `readSession` (`usage-index.mjs:1173`) | `true` | full turn list built | **never** — every call re-reads and re-parses the one file |
 
 ![Figure: one parser, two read paths — the scan path (withTurns false) caches per-file records keyed by path, mtime and size; the reader path (withTurns true) builds full turns and is never cached](assets/transcript-read-paths.svg)
@@ -176,8 +176,8 @@ transcript content leaves the module, and every step is a gate:
 
 1. **Id grammar before any filesystem access** — `VALID_ID`
    (`/^[A-Za-z0-9._-]{1,128}$/`, `usage-index.mjs:71`) rejects traversal
-   shapes with `ERR_INVALID_SESSION_ID` (`usage-index.mjs:1174`).
-2. **Locate by id** across both roots (`locate`, `usage-index.mjs:1132`),
+   shapes with `ERR_INVALID_SESSION_ID` (`usage-index.mjs:1184`).
+2. **Locate by id** across both roots (`locate`, `usage-index.mjs:1191`),
    consulting the scan cache when present but never requiring it —
    `readSession` works with no prior `buildIndex`.
 3. **Realpath containment** (`usage-index.mjs:1180-1194`) — the resolved file
@@ -192,7 +192,7 @@ transcript content leaves the module, and every step is a gate:
 ### 4.2 Parse and price
 
 The file is parsed with `withTurns: true` by the provider's parser
-(`usage-index.mjs:1205-1211`), and `meta` is assembled
+(`usage-index.mjs:1217-1223`), and `meta` is assembled
 (`usage-index.mjs:1219-1238`) with the same fields the Sessions view rows
 carry — `prompts`, `responses`, `exceptions`, `sidechain`, `threadSource`,
 `models`, `tools`, `skill`/`plugin`, worktree — plus a `cost` priced from the
@@ -201,11 +201,11 @@ hardcoded `$0.00`; the comment at the site records why).
 
 ### 4.3 Mask, then truncate — both marked, differently
 
-Every turn body is passed through `maskSecrets` (`usage-index.mjs:172` — the
-21 secret shapes) **server-side, before
+Every turn body is passed through `maskSecrets` (`usage-index.mjs:184` — the
+23 secret shapes) **server-side, before
 serialization**, then length-capped at `MAX_TURN_CHARS` (40,000,
 `usage-index.mjs:65`) with the marker appended
-(`usage-index.mjs:1239-1255`). Two invariants:
+(`usage-index.mjs:1308-1315`). Two invariants:
 
 - **Presence is the signal.** `truncated`/`originalChars` are emitted only
   when the slice fired, so a complete turn cannot be misread as abridged.

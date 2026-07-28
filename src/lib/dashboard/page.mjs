@@ -23,6 +23,14 @@ export function renderPage({ name, version }) {
 <style>${CSS}${LIVE_CSS}</style>
 </head>
 <body>
+<div class="gate" id="dash-gate" hidden>
+  <div class="gate-card">
+    <p>Every conversation and project you've worked on lives behind this page. Paste the one-time session token printed in your terminal (it also rode in on the launch URL's <code>#</code> fragment) — that proves it's really you, not some other program on this machine.</p>
+    <input type="password" id="gate-token" placeholder="dashboard token" autocomplete="off" spellcheck="false">
+    <button class="primary" id="gate-go" type="button">Open dashboard</button>
+    <p class="err" id="gate-err"></p>
+  </div>
+</div>
 <header class="band">
   <div class="band-lead">
     <div class="mark" aria-hidden="true"></div>

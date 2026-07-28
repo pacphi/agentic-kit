@@ -57,5 +57,12 @@ test('different core (patch) → CORE SKEW (store schema authority is exact base
   eq(c.ok, false); eq(c.skew, 'core');
 });
 
+// Test-quality Finding 5: bump deliberately when adding/removing a test —
+// see admin-model.test.cjs's identical guard for the full rationale.
+const EXPECTED = 7;
+if (passed + failed !== EXPECTED) {
+  console.error(`\nPLAN MISMATCH: expected ${EXPECTED} tests, ran ${passed + failed}`);
+  process.exit(1);
+}
 console.log(`\n${failed === 0 ? '\x1b[32m' : '\x1b[31m'}${passed} passed, ${failed} failed\x1b[0m`);
 process.exit(failed === 0 ? 0 : 1);

@@ -43,10 +43,13 @@ function mkFixture(files) {
   return dir;
 }
 
-// GET helper → { status, headers, body }
-function get(url) {
+// GET helper → { status, headers, body }. `token`, when given, rides as the
+// x-dash-token header every /api/* route now requires (ADR-0014); routes
+// outside /api/ (the page itself, unknown paths) ignore it harmlessly.
+function get(url, token) {
   return new Promise((resolve, reject) => {
-    http.get(url, (res) => {
+    const opts = token ? { headers: { 'x-dash-token': token } } : {};
+    http.get(url, opts, (res) => {
       let body = '';
       res.setEncoding('utf8');
       res.on('data', (c) => { body += c; });
@@ -59,9 +62,10 @@ function get(url) {
 // COLLAPSES `..` segments client-side — so a traversal test written with get()
 // would never put the hostile path on the wire. This puts the bytes through
 // verbatim, which is what a real attacker's client does.
-function getRaw(port, rawPath) {
+function getRaw(port, rawPath, token) {
   return new Promise((resolve, reject) => {
-    http.request({ host: '127.0.0.1', port, path: rawPath, method: 'GET' }, (res) => {
+    const headers = token ? { 'x-dash-token': token } : {};
+    http.request({ host: '127.0.0.1', port, path: rawPath, method: 'GET', headers }, (res) => {
       let body = '';
       res.setEncoding('utf8');
       res.on('data', (c) => { body += c; });
@@ -70,12 +74,13 @@ function getRaw(port, rawPath) {
   });
 }
 
-function openSse(port, { headers = {}, onChunk = () => {}, path: route = '/api/live/events' } = {}) {
+function openSse(port, { headers = {}, onChunk = () => {}, path: route = '/api/live/events', token } = {}) {
   let req;
+  const authHeaders = token ? { 'x-dash-token': token } : {};
   const opened = new Promise((resolve, reject) => {
     req = http.request({
       host: '127.0.0.1', port, path: route, method: 'GET',
-      headers: { accept: 'text/event-stream', ...headers },
+      headers: { accept: 'text/event-stream', ...authHeaders, ...headers },
     }, (res) => {
       res.setEncoding('utf8');
       res.on('data', onChunk);
@@ -121,7 +126,7 @@ async function main() {
     ],
   });
 
-  const { url, close } = await startDashboard({
+  const { url, close, token, urlWithToken } = await startDashboard({
     port: 0,
     cwd: fixture,
     fetchStatus: async () => STUB_STATUS,
@@ -130,13 +135,20 @@ async function main() {
   try {
     assert(/^http:\/\/127\.0\.0\.1:\d+\/$/.test(url), 'url must be a 127.0.0.1 loopback URL, got ' + url);
 
-    await test('GET / → 200 text/html with the header band', async () => {
+    await test('ADR-0014: urlWithToken carries the token ONLY in the fragment', () => {
+      assert(urlWithToken.includes('/#token='), 'token must ride in the # fragment');
+      assert(!/\?token=/.test(urlWithToken), 'token must NOT be a query parameter on the launch URL');
+      assert(urlWithToken.includes(token), 'urlWithToken carries the session token');
+    });
+
+    await test('GET / → 200 text/html with the header band (unauthenticated — the page itself is not gated)', async () => {
       const r = await get(url);
       assert(r.status === 200, 'expected 200, got ' + r.status);
       contains(r.headers['content-type'] || '', 'text/html');
       contains(r.body, 'agentic-kit');          // kit name in the header band
       contains(r.body, 'class="band"');          // the header band itself
       contains(r.body, '/api/status');           // client polls the JSON endpoint
+      contains(r.body, 'id="dash-gate"');        // the token gate markup
     });
 
     await test('GET / is self-contained — no external fetches', async () => {
@@ -147,8 +159,38 @@ async function main() {
       assert(!/<script[^>]+src=/i.test(r.body), 'no external script src');
     });
 
-    await test('GET /api/status → 200 valid JSON with rows + overall', async () => {
+    // Security review Finding 4: the dashboard — a larger inline-script
+    // surface than admin, and the one that renders attacker-influenced
+    // transcript text — had no CSP while admin did. Same header shape as
+    // admin.test.cjs's CSP assertion.
+    await test('GET / carries a CSP header confining the page to same-origin fetches', async () => {
+      const r = await get(url);
+      const csp = r.headers['content-security-policy'] || '';
+      assert(/default-src 'none'/.test(csp), "CSP must be default-src 'none'");
+      assert(/connect-src 'self'/.test(csp), 'CSP must confine fetch/EventSource to same-origin');
+      assert(r.headers['x-content-type-options'] === 'nosniff', 'nosniff on the HTML response');
+      assert(r.headers['referrer-policy'] === 'no-referrer', 'no-referrer on the HTML response');
+    });
+
+    await test('GET /api/status carries nosniff', async () => {
+      const r = await get(url + 'api/status', token);
+      assert(r.headers['x-content-type-options'] === 'nosniff', 'nosniff on every JSON route, not just the transcript ones');
+    });
+
+    await test('GET /api/status with a MISSING token → 401, no data fields', async () => {
       const r = await get(url + 'api/status');
+      assert(r.status === 401, 'expected 401, got ' + r.status);
+      const j = JSON.parse(r.body);
+      assert(typeof j.error === 'string' && !('rows' in j), '401 body must carry no data fields');
+    });
+
+    await test('GET /api/status with a WRONG token → 401', async () => {
+      const r = await get(url + 'api/status', 'not-the-token');
+      assert(r.status === 401, 'expected 401, got ' + r.status);
+    });
+
+    await test('GET /api/status → 200 valid JSON with rows + overall', async () => {
+      const r = await get(url + 'api/status', token);
       assert(r.status === 200, 'expected 200, got ' + r.status);
       contains(r.headers['content-type'] || '', 'application/json');
       const j = JSON.parse(r.body);
@@ -158,19 +200,24 @@ async function main() {
     });
 
     await test('GET /api/status embeds improvement.json read off the fixture', async () => {
-      const r = await get(url + 'api/status');
+      const r = await get(url + 'api/status', token);
       const j = JSON.parse(r.body);
       assert(j.improvement && j.improvement.verdict === 'PASS', 'improvement.json must be embedded');
       assert(j.improvement.deltaPP === 33, 'improvement fields must survive');
     });
 
     await test('GET /api/status embeds the health-history ring', async () => {
-      const r = await get(url + 'api/status');
+      const r = await get(url + 'api/status', token);
       const j = JSON.parse(r.body);
       assert(Array.isArray(j.health) && j.health.length === 3, 'health ring must be embedded as an array');
     });
 
-    await test('unknown route → 404', async () => {
+    await test('GET /api/status via ?token= query param (the EventSource fallback path)', async () => {
+      const r = await get(url + 'api/status?token=' + encodeURIComponent(token));
+      assert(r.status === 200, 'query-param token must also authenticate, got ' + r.status);
+    });
+
+    await test('unknown route → 404 (no token required outside /api/)', async () => {
       const r = await get(url + 'nope');
       assert(r.status === 404, 'expected 404, got ' + r.status);
     });
@@ -189,7 +236,7 @@ async function main() {
   const srv2 = await startDashboard({ port: 0, cwd: bare, fetchStatus: async () => ({ overall: 'ok', rows: [], drift: [] }) });
   try {
     await test('missing improvement.json / health ring → null, no crash', async () => {
-      const r = await get(srv2.url + 'api/status');
+      const r = await get(srv2.url + 'api/status', srv2.token);
       const j = JSON.parse(r.body);
       assert(j.improvement === null, 'improvement must be null when absent');
       assert(j.health === null, 'health must be null when absent');
@@ -351,7 +398,7 @@ async function main() {
   });
   try {
     await test('GET /api/usage?days=N → Aggregate rollups WITHOUT sessions[]', async () => {
-      const r = await get(usageSrv.url + 'api/usage?days=7');
+      const r = await get(usageSrv.url + 'api/usage?days=7', usageSrv.token);
       assert(r.status === 200, 'expected 200, got ' + r.status);
       contains(r.headers['content-type'] || '', 'application/json');
       const j = JSON.parse(r.body);
@@ -363,23 +410,23 @@ async function main() {
     });
 
     await test('GET /api/sessions → { sessions }, filtered by project/category and paginated', async () => {
-      const all = JSON.parse((await get(usageSrv.url + 'api/sessions?days=14')).body);
+      const all = JSON.parse((await get(usageSrv.url + 'api/sessions?days=14', usageSrv.token)).body);
       assert(Array.isArray(all.sessions) && all.sessions.length === 2, 'both sessions with no filter');
       assert(all.total === 2, 'total must report the pre-pagination count, got ' + all.total);
 
-      const byProject = JSON.parse((await get(usageSrv.url + 'api/sessions?project=demo')).body);
+      const byProject = JSON.parse((await get(usageSrv.url + 'api/sessions?project=demo', usageSrv.token)).body);
       assert(byProject.sessions.length === 1 && byProject.sessions[0].id === 'aaa', 'project filter must apply');
 
-      const byCat = JSON.parse((await get(usageSrv.url + 'api/sessions?category=Refactor')).body);
+      const byCat = JSON.parse((await get(usageSrv.url + 'api/sessions?category=Refactor', usageSrv.token)).body);
       assert(byCat.sessions.length === 1 && byCat.sessions[0].id === 'bbb', 'category filter must apply');
 
-      const paged = JSON.parse((await get(usageSrv.url + 'api/sessions?limit=1&offset=1')).body);
+      const paged = JSON.parse((await get(usageSrv.url + 'api/sessions?limit=1&offset=1', usageSrv.token)).body);
       assert(paged.sessions.length === 1 && paged.sessions[0].id === 'bbb', 'limit/offset must page');
       assert(paged.total === 2, 'total stays the unpaged count');
     });
 
     await test('GET /api/session/:id → { meta, turns } with secrets masked SERVER-side', async () => {
-      const r = await get(usageSrv.url + 'api/session/aaa');
+      const r = await get(usageSrv.url + 'api/session/aaa', usageSrv.token);
       assert(r.status === 200, 'expected 200, got ' + r.status);
       const j = JSON.parse(r.body);
       assert(j.meta && j.meta.id === 'aaa', 'meta must carry the session');
@@ -403,7 +450,7 @@ async function main() {
         '/api/session/..',
       ];
       for (const p of hostile) {
-        const r = await getRaw(usageSrv.port, p);
+        const r = await getRaw(usageSrv.port, p, usageSrv.token);
         assert(r.status === 400, 'expected 400 for ' + p + ', got ' + r.status);
         assert(!/root:|passwd/i.test(r.body), 'a rejected request must not echo file content: ' + p);
       }
@@ -432,7 +479,7 @@ async function main() {
   });
   try {
     await test('GET /api/limits → both providers plus server-computed limit insights', async () => {
-      const r = await get(limitsSrv.url + 'api/limits');
+      const r = await get(limitsSrv.url + 'api/limits', limitsSrv.token);
       assert(r.status === 200, 'expected 200, got ' + r.status);
       const j = JSON.parse(r.body);
       assert(j.claude && j.claude.windows[0].usedPercent === 89, 'claude windows must survive');
@@ -449,7 +496,7 @@ async function main() {
         limits: async () => { throw new Error('quota backend down'); },
       });
       try {
-        const r = await get(broken.url + 'api/limits');
+        const r = await get(broken.url + 'api/limits', broken.token);
         assert(r.status === 500, 'expected 500, got ' + r.status);
         contains(r.body, 'quota backend down');
       } finally { await broken.close(); }
@@ -464,7 +511,7 @@ async function main() {
   const srv3 = await startDashboard({ port: 0, cwd: fixture, fetchStatus: async () => STUB_STATUS, usage: noMask.api });
   try {
     await test('/api/session/:id fails CLOSED when the masker is unavailable', async () => {
-      const r = await get(srv3.url + 'api/session/aaa');
+      const r = await get(srv3.url + 'api/session/aaa', srv3.token);
       assert(r.status === 500, 'expected 500, got ' + r.status);
       assert(!r.body.includes('sk-live-DEADBEEF01234'), 'no unmasked transcript may leak on the error path');
     });
@@ -494,7 +541,7 @@ async function main() {
         'id="live-pause"', 'id="live-viewport"', 'id="live-canvas"',
         'id="live-zoom-in"', 'id="live-zoom-out"', 'id="live-fit"',
         'id="live-fit-selection"', 'id="live-reset-layout"',
-        'aria-label="Map controls"', 'new EventSource("/api/live/events")',
+        'aria-label="Map controls"', 'new EventSource(dashSseUrl("/api/live/events"))',
         '"/api/live/transcripts/"',
       ]) contains(r.body, marker);
       for (const behavior of [
@@ -585,13 +632,13 @@ async function main() {
       });
       try {
         for (const id of ['zzz-does-not-exist', '...']) {
-          const r = await getRaw(srv.port, `/api/session/${id}`);
+          const r = await getRaw(srv.port, `/api/session/${id}`, srv.token);
           assert(r.status === 404, `${id} must be 404, got ${r.status}`);
           assert(!r.body.includes('"turns"'), 'a 404 must not carry a turns array');
         }
         // A malformed id stays 400 — "missing" and "malformed" must not collapse
         // into one status, or the guard becomes unobservable.
-        const bad = await getRaw(srv.port, '/api/session/..');
+        const bad = await getRaw(srv.port, '/api/session/..', srv.token);
         assert(bad.status === 400, `a dot-segment id is malformed (400), got ${bad.status}`);
       } finally { await srv.close(); }
     });
@@ -600,7 +647,7 @@ async function main() {
     // objects as sessions[], so dropping only the top-level array left the whole
     // session list in the response.
     await test('/api/usage trims projectTree rows to the preview cap', async () => {
-      const r = await get(`${uiSrv.url}api/usage?days=14`);
+      const r = await get(`${uiSrv.url}api/usage?days=14`, uiSrv.token);
       const j = JSON.parse(r.body);
       assert(j.sessions === undefined, 'top-level sessions[] must be gone');
       const node = j.projectTree[0];
@@ -616,7 +663,7 @@ async function main() {
     await test('a cross-site GET is refused before it can trigger a scan', async () => {
       const hdr = (h) => new Promise((resolve, reject) => {
         require('node:http').request(
-          { host: '127.0.0.1', port: uiSrv.port, path: '/api/usage?days=365', method: 'GET', headers: h },
+          { host: '127.0.0.1', port: uiSrv.port, path: '/api/usage?days=365', method: 'GET', headers: { 'x-dash-token': uiSrv.token, ...h } },
           (r) => { let b = ''; r.on('data', (c) => { b += c; }); r.on('end', () => resolve({ status: r.statusCode, body: b })); },
         ).on('error', reject).end();
       });
@@ -653,7 +700,7 @@ async function main() {
         },
       });
       try {
-        const r = await get(`${srv.url}api/session/abc123`);
+        const r = await get(`${srv.url}api/session/abc123`, srv.token);
         assert(!r.body.includes(leak), 'no meta field may carry an unmasked secret');
         assert(r.body.includes('redacted'), 'the masker must actually have run over meta');
       } finally { await srv.close(); }
@@ -736,7 +783,7 @@ async function main() {
   try {
     await test('GET /api/live returns a no-store materialized snapshot and starts lazily once', async () => {
       assert(liveCalls.start === 0, 'live collector must remain lazy until requested');
-      const r = await get(liveSrv.url + 'api/live');
+      const r = await get(liveSrv.url + 'api/live', liveSrv.token);
       assert(r.status === 200, 'expected 200, got ' + r.status);
       contains(r.headers['content-type'] || '', 'application/json');
       assert(r.headers['cache-control'] === 'no-store', 'live snapshots must never be cached');
@@ -745,13 +792,20 @@ async function main() {
       for (const secret of ['PRIVATE RESPONSE', 'PRIVATE TOOL RESULT']) {
         assert(!r.body.includes(secret), `snapshot must not expose ${secret}`);
       }
-      await get(liveSrv.url + 'api/live');
+      await get(liveSrv.url + 'api/live', liveSrv.token);
       assert(liveCalls.start === 1, 'live collector must start exactly once');
+    });
+
+    await test('GET /api/live/events with no token → 401 before any subscribe', async () => {
+      const before = liveCalls.subscribe;
+      const r = await getRaw(liveSrv.port, '/api/live/events');
+      assert(r.status === 401, 'expected 401, got ' + r.status);
+      assert(liveCalls.subscribe === before, 'unauthenticated SSE must not subscribe');
     });
 
     await test('GET /api/live/events sends init, named/id delta events and heartbeats', async () => {
       let body = '';
-      const stream = openSse(liveSrv.port, { onChunk: (chunk) => { body += chunk; } });
+      const stream = openSse(liveSrv.port, { onChunk: (chunk) => { body += chunk; }, token: liveSrv.token });
       const response = await stream.opened;
       try {
         assert(response.statusCode === 200, 'expected SSE 200');
@@ -785,7 +839,7 @@ async function main() {
     await test('Last-Event-ID resumes retained deltas and stale cursors force reset init', async () => {
       let resumed = '';
       const one = openSse(liveSrv.port, {
-        headers: { 'last-event-id': 'test:1' }, onChunk: (chunk) => { resumed += chunk; },
+        headers: { 'last-event-id': 'test:1' }, onChunk: (chunk) => { resumed += chunk; }, token: liveSrv.token,
       });
       await one.opened;
       try {
@@ -795,7 +849,7 @@ async function main() {
 
       let reset = '';
       const stale = openSse(liveSrv.port, {
-        headers: { 'last-event-id': 'test:0' }, onChunk: (chunk) => { reset += chunk; },
+        headers: { 'last-event-id': 'test:0' }, onChunk: (chunk) => { reset += chunk; }, token: liveSrv.token,
       });
       await stale.opened;
       try {
@@ -823,10 +877,10 @@ async function main() {
     });
 
     await test('an active SSE client is registered for dashboard shutdown cleanup', async () => {
-      activeAtShutdown = openSse(liveSrv.port);
+      activeAtShutdown = openSse(liveSrv.port, { token: liveSrv.token });
       await activeAtShutdown.opened;
       await eventually(() => listeners.size === 1, 'active stream did not subscribe');
-      const excess = await getRaw(liveSrv.port, '/api/live/events');
+      const excess = await getRaw(liveSrv.port, '/api/live/events', liveSrv.token);
       assert(excess.status === 503, `excess SSE client must be rejected, got ${excess.status}`);
       assert(listeners.size === 1, 'rejected client must not create a subscription');
     });
@@ -890,7 +944,7 @@ async function main() {
       live: raceLive, liveHeartbeatMs: 10_000,
     });
     let body = '';
-    const stream = openSse(raceSrv.port, { onChunk: (chunk) => { body += chunk; } });
+    const stream = openSse(raceSrv.port, { onChunk: (chunk) => { body += chunk; }, token: raceSrv.token });
     try {
       await stream.opened;
       await eventually(() => body.includes('id: race:2'), 'post-replay event was lost');
@@ -904,6 +958,95 @@ async function main() {
       await raceSrv.close();
     }
     assert(raceListeners.size === 0, 'race-test subscription must be cleaned up');
+  });
+
+  // code-quality Finding 1 regression: the client-cap check and the client-cap
+  // registration used to be on opposite sides of several awaits (dynamic
+  // import + service.start() inside getLive()). Two concurrent requests could
+  // both observe size===0 before either registered, and both pass a cap of 1.
+  // The fix reserves the slot BEFORE the first await — this proves it holds
+  // under real concurrency, not just sequentially.
+  await test('SSE client cap holds under concurrent requests racing a slow async start (TOCTOU fix)', async () => {
+    let starting = null;
+    let resolveStart;
+    const slowLive = {
+      async start() {
+        starting = new Promise((r) => { resolveStart = r; });
+        await starting;
+      },
+      snapshot() { return { schemaVersion: 1, cursor: 'slow:0', sessions: [] }; },
+      replay() { return { reset: false, events: [] }; },
+      subscribe() { return () => {}; },
+      close() {},
+    };
+    const slowSrv = await startDashboard({
+      port: 0, fetchStatus: async () => STUB_STATUS, usage: spyUsage().api,
+      live: slowLive, liveMaxClients: 1, liveHeartbeatMs: 10_000,
+    });
+    try {
+      // Fire two SSE connections back-to-back, BEFORE either's getLive() (and
+      // therefore start()) has resolved — both requests are mid-await when the
+      // second one's cap check would run under the old (broken) ordering.
+      const first = openSse(slowSrv.port, { token: slowSrv.token });
+      const second = openSse(slowSrv.port, { token: slowSrv.token });
+      await eventually(() => starting !== null, 'slow start() was never invoked');
+      const secondResponse = await second.opened;
+      // The second connection's cap check runs synchronously before any await
+      // in its own request — it must already see the first request's reserved
+      // slot and be rejected, even though the first hasn't finished starting.
+      assert(secondResponse.statusCode === 503, `second concurrent client must be capped, got ${secondResponse.statusCode}`);
+      resolveStart();
+      const firstResponse = await first.opened;
+      assert(firstResponse.statusCode === 200, `first client must succeed once start() resolves, got ${firstResponse.statusCode}`);
+      first.close();
+      second.close();
+    } finally {
+      await slowSrv.close();
+    }
+  });
+
+  // code-quality Finding 1's second half: a client that disconnects DURING the
+  // async setup window (before req.once('close', cleanup) could even attach
+  // under the old ordering) must not leak its reservation forever — a leak
+  // here means stopLive()'s idle-teardown can never fire again.
+  await test('an abort during slow async start releases its slot (no permanent leak)', async () => {
+    let starting = null;
+    let resolveStart;
+    const slowLive = {
+      async start() {
+        starting = new Promise((r) => { resolveStart = r; });
+        await starting;
+      },
+      snapshot() { return { schemaVersion: 1, cursor: 'slow:0', sessions: [] }; },
+      replay() { return { reset: false, events: [] }; },
+      subscribe() { return () => {}; },
+      close() {},
+    };
+    const slowSrv = await startDashboard({
+      port: 0, fetchStatus: async () => STUB_STATUS, usage: spyUsage().api,
+      live: slowLive, liveMaxClients: 1, liveHeartbeatMs: 10_000, liveIdleMs: 20,
+    });
+    try {
+      const aborted = openSse(slowSrv.port, { token: slowSrv.token });
+      aborted.opened.catch(() => {}); // destroying it below rejects this — expected, not a test failure
+      await eventually(() => starting !== null, 'slow start() was never invoked');
+      aborted.close(); // destroy the socket WHILE still inside getLive()'s await
+      resolveStart();  // let the in-flight start() finish after the abort
+      // If the slot leaked, this second connection would see liveClients.size
+      // still at the cap (1) and get 503 forever. A released slot lets it
+      // through as soon as the first request's cleanup has run. `eventually`
+      // takes a synchronous predicate, so this polls with real awaits instead.
+      const deadline = Date.now() + 2000;
+      let ok = false;
+      while (Date.now() < deadline && !ok) {
+        const r = await getRaw(slowSrv.port, '/api/live', slowSrv.token);
+        ok = r.status === 200;
+        if (!ok) await new Promise((resolve) => setTimeout(resolve, 20));
+      }
+      assert(ok, 'a fresh request never got in — the aborted client\'s slot leaked');
+    } finally {
+      await slowSrv.close();
+    }
   });
 
   await test('live collector idles, restarts, cancels idle while connected, and closes once', async () => {
@@ -925,13 +1068,13 @@ async function main() {
     });
     let stream;
     try {
-      assert((await get(idleSrv.url + 'api/live')).status === 200, 'snapshot request failed');
+      assert((await get(idleSrv.url + 'api/live', idleSrv.token)).status === 200, 'snapshot request failed');
       assert(idleCalls.start === 1, 'snapshot must start collector once');
       await eventually(() => idleCalls.close === 1, 'snapshot-only collector did not idle-close');
 
-      assert((await get(idleSrv.url + 'api/live')).status === 200, 'restart snapshot failed');
+      assert((await get(idleSrv.url + 'api/live', idleSrv.token)).status === 200, 'restart snapshot failed');
       assert(idleCalls.start === 2, 'request after idle close must restart collector');
-      stream = openSse(idleSrv.port);
+      stream = openSse(idleSrv.port, { token: idleSrv.token });
       await stream.opened;
       await new Promise((resolve) => setTimeout(resolve, 80));
       assert(idleCalls.close === 1, 'active SSE client must cancel idle close');
@@ -986,6 +1129,7 @@ async function main() {
       path: '/api/live/transcripts/claude/s1/events',
       headers: { 'Last-Event-ID': event.eventId },
       onChunk: (chunk) => { body += chunk; },
+      token: srv.token,
     });
     try {
       const response = await stream.opened;
@@ -1012,9 +1156,9 @@ async function main() {
       transcripts: { open() { opens++; throw new Error('should not open'); }, close() {} },
     });
     try {
-      assert((await getRaw(srv.port, '/api/live/transcripts/other/s1/events')).status === 400,
+      assert((await getRaw(srv.port, '/api/live/transcripts/other/s1/events', srv.token)).status === 400,
         'unknown host must be 400');
-      assert((await getRaw(srv.port, '/api/live/transcripts/claude/..%2Fx/events')).status === 400,
+      assert((await getRaw(srv.port, '/api/live/transcripts/claude/..%2Fx/events', srv.token)).status === 400,
         'traversal id must be 400');
       assert(opens === 0, 'invalid target reached transcript service');
     } finally {
@@ -1055,14 +1199,14 @@ async function main() {
       },
     });
     try {
-      const r = await get(srv.url + 'api/live/playback/codex/s1?at=1500');
+      const r = await get(srv.url + 'api/live/playback/codex/s1?at=1500', srv.token);
       assert(r.status === 200, 'playback request failed');
       assert(r.headers['cache-control'] === 'no-store', 'playback content must not cache');
       assert(JSON.parse(r.body).live.cursor === 'tx-codex-s1:1', 'live handoff cursor missing');
-      assert((await get(srv.url + 'api/live/playback/codex/s1?at=NaN')).status === 400,
+      assert((await get(srv.url + 'api/live/playback/codex/s1?at=NaN', srv.token)).status === 400,
         'invalid seek must be rejected');
       assert((await getRaw(srv.port,
-        '/api/live/playback/codex/..%2Fx')).status === 400,
+        '/api/live/playback/codex/..%2Fx', srv.token)).status === 400,
       'playback traversal target must be rejected');
     } finally {
       await srv.close();
@@ -1070,6 +1214,16 @@ async function main() {
     assert(releases === 1, 'playback reader was not released');
   });
 
+  // Test-quality Finding 5: bump deliberately when adding/removing a test —
+  // see admin-model.test.cjs's identical guard for the full rationale. This
+  // is the suite where it matters most — the traversal-guard and credential-
+  // leak tests live here and were the reviewer's cited example of a block
+  // that could silently vanish with the old harness never noticing.
+  const EXPECTED = 56;
+  if (passed + failed !== EXPECTED) {
+    console.error(`\nPLAN MISMATCH: expected ${EXPECTED} tests, ran ${passed + failed}`);
+    process.exit(1);
+  }
   console.log(`\n${failed === 0 ? '\x1b[32m' : '\x1b[31m'}${passed} passed, ${failed} failed\x1b[0m`);
   process.exit(failed === 0 ? 0 : 1);
 }

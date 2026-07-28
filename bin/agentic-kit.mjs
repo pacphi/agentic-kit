@@ -8,7 +8,14 @@ import { fail, dim } from '../src/lib/output.mjs';
 
 const PKG_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
-const PORCELAIN = {
+// Object.create(null): a plain {} inherits Object.prototype, so `cmd in table`
+// resolves 'toString'/'constructor'/'__proto__' etc. as legitimate commands —
+// `ak toString` reached mod.run on Object.prototype.toString and threw a raw
+// Node stack trace instead of "unknown command" (code-quality Finding 6).
+// process.argv[2] is the most directly user-controlled string in this CLI;
+// null-prototyping the dispatch tables makes `in` correct by construction,
+// no call-site changes needed.
+const PORCELAIN = Object.assign(Object.create(null), {
   status: () => import('../src/commands/status.mjs'),
   sync: () => import('../src/commands/sync.mjs'),
   setup: () => import('../src/commands/setup.mjs'),
@@ -16,9 +23,9 @@ const PORCELAIN = {
   admin: () => import('../src/commands/x/admin.mjs'),
   dual: () => import('../src/commands/dual.mjs'),
   uninstall: () => import('../src/commands/uninstall.mjs'),
-};
+});
 
-const PLUMBING = {
+const PLUMBING = Object.assign(Object.create(null), {
   'admin': () => import('../src/commands/x/admin.mjs'),
   'daemon-gc': () => import('../src/commands/x/daemon-gc.mjs'),
   'dashboard': () => import('../src/commands/x/dashboard.mjs'),
@@ -27,7 +34,7 @@ const PLUMBING = {
   'provider': () => import('../src/commands/x/provider.mjs'),
   'reference': () => import('../src/commands/x/reference.mjs'),
   'verify': () => import('../src/commands/x/verify.mjs'),
-};
+});
 
 const HELP = `agentic-kit — machine-level setup, healing, and verification for ruflo + agentic-qe
 

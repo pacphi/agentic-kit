@@ -231,6 +231,16 @@ async function main() {
     eq(restored, original);                      // byte-for-byte inverse (AC-4)
   });
 
+  // Test-quality Finding 5: the shared hand-rolled harness could never detect
+  // a test block silently going missing (an early return, a mis-scoped brace)
+  // — `passed` would shrink, `failed` would stay 0, and this exits 0 either
+  // way. Bump EXPECTED deliberately when adding/removing a test; the diff is
+  // then the visible signal a deletion isn't.
+  const EXPECTED = 33;
+  if (passed + failed !== EXPECTED) {
+    console.error(`\nPLAN MISMATCH: expected ${EXPECTED} tests, ran ${passed + failed}`);
+    process.exit(1);
+  }
   console.log(`\n${failed === 0 ? '\x1b[32m' : '\x1b[31m'}${passed} passed, ${failed} failed\x1b[0m`);
   process.exit(failed === 0 ? 0 : 1);
 }

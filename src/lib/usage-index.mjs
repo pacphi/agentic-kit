@@ -62,6 +62,9 @@ export const SCHEMA_VERSION = 6;
 export const IDLE_GAP_MS = 15 * 60 * 1000;
 
 const DAY_MS = 86_400_000;
+// One day of slack past dashboard-server.mjs's 365-day clampDays ceiling —
+// see the carry-forward pruning comment in scan() below.
+const KEEP_MS = 366 * DAY_MS;
 export const MAX_TURN_CHARS = 40_000;
 /** Largest single transcript readSession will pull into memory. The corpus's
  *  biggest real file is ~18 MB; JSON expansion runs ~5x, so 64 MB caps the
@@ -158,6 +161,18 @@ const SECRET_PATTERNS = [
   // constantly. Uppercase-only tracks the actual env-var convention instead.
   [/\b([A-Z][A-Z0-9_]*(?:SECRET|TOKEN|PASSWORD|PASSWD|API_?KEY|PRIVATE_KEY)[A-Z0-9_]*)(\s*[:=]\s*)("?)[^\s"']{8,}\3/g,
     '$1$2$3…redacted$3'],
+  // Quoted JSON/JS object key whose name says secret — "apiKey": "…", 'client_secret': '…'.
+  // Case-insensitive is safe here: the quote delimiters are a shape prose never
+  // has, so this cannot widen into "tokens used" the way the assignment rule's
+  // /i would (that rule stays case-sensitive above for exactly that reason).
+  [/(["'][A-Za-z0-9_-]*(?:secret|token|password|passwd|api_?key|private_?key)[A-Za-z0-9_-]*["']\s*:\s*)(["'])[^"']{8,}\2/gi,
+    '$1$2…redacted$2'],
+  // Line-anchored YAML/TOML/ini assignment — api_key = …, password: … — with no
+  // quoting required. Anchored to line-start-through-key-through-:/= so it
+  // cannot match a key phrase floating mid-sentence ("tokens used = 10028979467"
+  // fails: "used" — not a secret-shaped word — sits directly before "=").
+  [/^([ \t]*[A-Za-z0-9_-]*(?:secret|token|password|passwd|api_?key|private_?key)[A-Za-z0-9_-]*[ \t]*[:=][ \t]*)(["']?)[^\s"']{8,}\2/gim,
+    '$1$2…redacted$2'],
 ];
 
 // NOT masked, deliberately: a bare 40-char base64-ish AWS secret with no prefix
@@ -706,12 +721,44 @@ function parseFile(entry) {
 
 function defaultCachePath() { return path.join(configDir(), 'usage-index.json'); }
 
+// code-quality Finding 5: /api/session/:id used to call readCache() (a
+// synchronous JSON.parse of the whole index — several MB on the module's own
+// stated reference corpus) on EVERY request, on the Node event loop, to
+// answer an O(1) "one record" question. Memoized on the cache file's own
+// mtime: a request between writes reuses the parsed object instead of
+// reparsing it; a write (which always renames a fresh file into place, so
+// mtime always changes) is still picked up on the very next read.
+let _cacheMemo = null;
+
 function readCache(file) {
+  const st = statSafe(file);
+  if (_cacheMemo && _cacheMemo.file === file && st && _cacheMemo.mtime === st.mtimeMs) {
+    return _cacheMemo.value;
+  }
+  let value = null;
   try {
     const raw = JSON.parse(fs.readFileSync(file, 'utf8'));
-    if (raw?.schemaVersion !== SCHEMA_VERSION || !raw.entries || typeof raw.entries !== 'object') return null;
-    return raw;
-  } catch { return null; }
+    if (raw?.schemaVersion === SCHEMA_VERSION && raw.entries && typeof raw.entries === 'object') value = raw;
+  } catch { /* corrupt/missing cache → null, same as before */ }
+  if (st) _cacheMemo = { file, mtime: st.mtimeMs, value };
+  else _cacheMemo = null; // file vanished between statSafe and here — don't memo a stale mtime
+  return value;
+}
+
+// Companion id→file index, memoized the same way — locate() used to
+// Object.entries().find() the WHOLE cache for a single id on every call.
+// Rebuilt only when the underlying cache object identity changes (the memo
+// above already guarantees that happens exactly once per file mutation).
+let _idIndexMemo = null; // { forCache, map: Map<id, file> }
+
+function idIndexFor(cache) {
+  if (_idIndexMemo && _idIndexMemo.forCache === cache) return _idIndexMemo.map;
+  const map = new Map();
+  for (const [file, e] of Object.entries(cache?.entries ?? {})) {
+    if (e?.session?.id) map.set(e.session.id, file);
+  }
+  _idIndexMemo = { forCache: cache, map };
+  return map;
 }
 
 function writeCache(file, cache) {
@@ -980,7 +1027,7 @@ function scanKey(o = {}) {
 }
 
 /** Drop process-level state (single-flight promises, read memo, lazy deps). */
-export function _resetForTest() { _inflight.clear(); _memo = null; _deps = null; }
+export function _resetForTest() { _inflight.clear(); _memo = null; _deps = null; _cacheMemo = null; _idIndexMemo = null; }
 
 function notify(onProgress, payload) {
   if (typeof onProgress !== 'function') return;
@@ -1055,10 +1102,17 @@ async function scan(o = {}) {
   }
 
   // Carry forward cached entries outside the window whose file still exists, so
-  // widening the window later does not force a full re-parse.
+  // widening the window later does not force a full re-parse. Bounded at
+  // KEEP_MS: dashboard-server.mjs's clampDays caps every queryable window at
+  // 365 days, so an entry whose last activity is older than that can never be
+  // reached by ANY query — carrying it forever was pure dead weight the cache
+  // (and readCache's now-memoized parse) paid for on every scan.
   if (cache?.entries) {
     for (const [file, e] of Object.entries(cache.entries)) {
       if (entries[file] || !e?.session) continue;
+      const lastActivity = e.session.end ?? e.session.start;
+      // No timestamp at all → can't judge age; keep it rather than guess.
+      if (lastActivity != null && now - lastActivity > KEEP_MS) continue;
       if (statSafe(file)) entries[file] = e;
     }
   }
@@ -1115,7 +1169,14 @@ export function applyCodexLedger(records, ledger) {
  */
 export async function readIndex(o = {}) {
   const { days = 14, maxAgeMs = 15_000, now = Date.now() } = o;
-  const key = JSON.stringify([days, o.roots ?? null, o.cachePath ?? null]);
+  // code-quality Finding 7: this used to hand-roll a SECOND "what counts as
+  // the same question" key that omitted `force` (and `deps`) — the exact
+  // mistake buildIndex's _inflight keying (scanKey, above) was written to
+  // prevent one layer up. readIndex({ force: true }) within maxAgeMs of a
+  // normal read would silently return the stale memoized aggregate and never
+  // reach buildIndex. Reusing scanKey means there is exactly one definition
+  // of "same question" for both the single-flight map and this memo.
+  const key = scanKey({ ...o, days });
   if (_memo && _memo.key === key && now - _memo.at < maxAgeMs) return _memo.agg;
   const agg = await buildIndex({ ...o, days });
   _memo = { key, at: now, agg };
@@ -1136,11 +1197,13 @@ function invalidId(id) {
  *  not going to return. */
 function locate(id, r, cacheFile) {
   const cache = readCache(cacheFile);
-  for (const [file, e] of Object.entries(cache?.entries ?? {})) {
-    if (e?.session?.id !== id) continue;
-    if (!statSafe(file)) continue;
-    const provider = e.session.provider === 'codex' ? 'codex' : 'claude';
-    return { file, provider, id, dirName: provider === 'claude' ? path.basename(path.dirname(file)) : null };
+  const hitFile = idIndexFor(cache).get(id);
+  if (hitFile) {
+    const e = cache.entries[hitFile];
+    if (e?.session?.id === id && statSafe(hitFile)) {
+      const provider = e.session.provider === 'codex' ? 'codex' : 'claude';
+      return { file: hitFile, provider, id, dirName: provider === 'claude' ? path.basename(path.dirname(hitFile)) : null };
+    }
   }
 
   for (const d of readDirSafe(r.claude)) {

@@ -13,6 +13,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import path from 'node:path';
+import { spawnSync } from 'node:child_process';
 
 const BIN = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../bin/agentic-kit.mjs');
 const BIN_DIR = path.dirname(BIN);
@@ -57,5 +58,31 @@ for (const [name, modPath] of dispatchTable()) {
 
     // Assert — an Examples: section (DoD c)
     assert.match(mod.help, /Examples:/, `${name} help must contain an "Examples:" section`);
+  });
+}
+
+// code-quality Finding 6: PORCELAIN/PLUMBING used to be plain object literals,
+// so `cmd in table` resolved Object.prototype members as legitimate commands.
+// `ak toString` called Object.prototype.toString (callable, returns a string)
+// then crashed on `mod.run is not a function`; `ak __proto__` threw outright
+// (table['__proto__'] is Object.prototype, not a function). Both leaked a raw
+// Node stack trace with internal file paths for what should read as a plain
+// "unknown command" — undermining a kit whose whole job is diagnosing other
+// tools' failures. These spawn the REAL CLI (not an in-process import) because
+// the bug lived in bin/agentic-kit.mjs's own dispatch, not in any command module.
+const BIN_ARGV = [BIN];
+for (const hostile of ['toString', '__proto__', 'constructor', 'hasOwnProperty']) {
+  test(`"ak ${hostile}" is an unknown command, not a prototype-chain hit`, () => {
+    const r = spawnSync(process.execPath, [...BIN_ARGV, hostile], { encoding: 'utf8' });
+    assert.equal(r.status, 2, `expected exit 2 (unknown command), got ${r.status}\nstdout: ${r.stdout}\nstderr: ${r.stderr}`);
+    assert.match(r.stdout, /unknown command/, 'must print the normal "unknown command" message');
+    assert.equal(r.stderr, '', `must never leak a stack trace to stderr for a typo'd command name, got: ${r.stderr}`);
+  });
+
+  test(`"ak x ${hostile}" is an unknown plumbing command, not a prototype-chain hit`, () => {
+    const r = spawnSync(process.execPath, [...BIN_ARGV, 'x', hostile], { encoding: 'utf8' });
+    assert.equal(r.status, 2, `expected exit 2 (unknown plumbing command), got ${r.status}\nstdout: ${r.stdout}\nstderr: ${r.stderr}`);
+    assert.match(r.stdout, /unknown plumbing command/, 'must print the normal "unknown plumbing command" message');
+    assert.equal(r.stderr, '', `must never leak a stack trace to stderr for a typo'd plumbing command name, got: ${r.stderr}`);
   });
 }

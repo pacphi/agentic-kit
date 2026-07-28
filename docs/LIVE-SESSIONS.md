@@ -15,7 +15,9 @@ ak dashboard \
   --live-source 'dual-run=.claude-flow/dual-run-events.jsonl'
 ```
 
-Open `#live`, for example `http://127.0.0.1:7431/#live`. Collection starts
+Open `#live`, for example `http://127.0.0.1:7431/#live` — once the dashboard's
+per-session token is already in the browser (auto-opened, or pasted once at
+the token gate; ADR-0014), this deep link works on its own. Collection starts
 lazily when the snapshot or event endpoint is first requested. Leaving the Live
 tab closes that browser's event stream. After the last snapshot/SSE client
 leaves, collectors stop after 30 seconds by default and restart on the next

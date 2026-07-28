@@ -22,6 +22,7 @@ import { fileURLToPath } from 'node:url';
 import { parseRepoSlug, defaultCollect } from './admin-collect.mjs';
 import { ADMIN_CSS } from './admin-styles.mjs';
 import { ADMIN_THEME_JS } from './admin-theme.mjs';
+import { requestRejection } from './dashboard/request-security.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const PKG_ROOT = path.resolve(HERE, '..', '..');
@@ -92,14 +93,19 @@ export function startAdmin({ port = 7432, collect, resolveToken, pkg: injectedPk
   const server = http.createServer(async (req, res) => {
     if (req.method !== 'GET') { res.writeHead(405, { 'content-type': 'text/plain; charset=utf-8' }).end('method not allowed'); return; }
 
-    // DNS-rebinding guard (carried from dashboard-server): the socket binds
-    // loopback, but a hostile page can rebind ITS hostname to 127.0.0.1 and read
-    // our API cross-origin (the SOP keys on the NAME). Only loopback literals are
-    // legitimate Hosts.
-    const host = String(req.headers.host || '').toLowerCase();
-    if (!/^(127\.0\.0\.1|localhost|\[::1\])(:\d+)?$/.test(host)) {
+    // Shared with dashboard-server (security review Finding 3): this used to
+    // reimplement only the Host-header layer inline, under a comment claiming
+    // parity with dashboard-server's guard — it wasn't parity, it was missing
+    // the Sec-Fetch-Site and Origin layers dashboard-server already had. A
+    // page at https://evil.example fetching this server sends a same-origin-
+    // looking Host but a cross-site Sec-Fetch-Site/foreign Origin; the token
+    // check below still holds either way, so this was defense-in-depth
+    // regression, not a live bypass — but the next route added here would
+    // have inherited the weaker guard silently.
+    const rejected = requestRejection(req.headers);
+    if (rejected) {
       res.writeHead(403, { 'content-type': 'text/plain; charset=utf-8' });
-      res.end('forbidden (unexpected Host)');
+      res.end(rejected);
       return;
     }
 

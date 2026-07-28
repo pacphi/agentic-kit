@@ -354,6 +354,24 @@ async function main() {
       eq(r.status, 403);
     });
 
+    // Security review Finding 3: admin's Host guard used to be the ONLY
+    // layer — a comment claimed parity with dashboard-server's guard, but
+    // dashboard-server also checks Sec-Fetch-Site and Origin. Same coverage
+    // as dashboard.test.cjs's "a cross-site GET is refused" test, ported here
+    // now that admin-server shares the same requestRejection() guard.
+    await test('AC-5/NFR-2: Sec-Fetch-Site and Origin are enforced, matching dashboard-server', async () => {
+      const hdr = (h) => req(admin.url + 'api/admin-stats', { headers: { 'x-admin-token': admin.token, ...h } });
+      eq((await hdr({ 'sec-fetch-site': 'cross-site' })).status, 403, 'cross-site must be 403');
+      eq((await hdr({ 'sec-fetch-site': 'same-site' })).status, 403, 'same-site is still another origin');
+      eq((await hdr({ origin: 'https://evil.example' })).status, 403, 'a foreign Origin must be 403');
+      eq((await hdr({ origin: `https://127.0.0.1:${admin.port}` })).status, 403,
+        'the HTTPS origin cannot be the origin of this plain-HTTP server');
+      eq((await hdr({ 'sec-fetch-site': 'same-origin' })).status, 200, 'our own page must pass');
+      eq((await hdr({ origin: `http://127.0.0.1:${admin.port}` })).status, 200, 'the exact admin origin must pass');
+      eq((await hdr({ 'sec-fetch-site': 'none' })).status, 200, 'direct navigation must pass');
+      eq((await hdr({})).status, 200, 'curl sends no fetch-metadata and must keep working');
+    });
+
     await test('unknown route → 404', async () => {
       const r = await req(admin.url + 'nope');
       eq(r.status, 404);
@@ -384,6 +402,13 @@ async function main() {
     assert(threw, 'startAdmin must throw rather than query the wrong repository');
   });
 
+  // Test-quality Finding 5: bump deliberately when adding/removing a test —
+  // see admin-model.test.cjs's identical guard for the full rationale.
+  const EXPECTED = 28;
+  if (passed + failed !== EXPECTED) {
+    console.error(`\nPLAN MISMATCH: expected ${EXPECTED} tests, ran ${passed + failed}`);
+    process.exit(1);
+  }
   console.log(`\n${failed === 0 ? '\x1b[32m' : '\x1b[31m'}${passed} passed, ${failed} failed\x1b[0m`);
   process.exit(failed === 0 ? 0 : 1);
 }

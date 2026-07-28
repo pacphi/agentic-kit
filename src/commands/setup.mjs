@@ -344,7 +344,11 @@ export async function run({ flags, pkgRoot }) {
   }
 
   if (!(await run_machine({ flags, pkgRoot, cfg }))) return 1;
-  saveKitConfig(cfg);
+  // "--dry-run: print the plan; change nothing" — an unconditional save CREATED
+  // ~/.config/agentic-kit/kit.json on a previewed setup. cfg is never mutated
+  // under --dry-run (the flag branch above skips applySetupHostFlags), so
+  // skipping the write is a pure no-op beyond not touching the disk.
+  if (!flags['dry-run']) saveKitConfig(cfg);
 
   const inProject = flags.project
     || (fs.existsSync(path.join(process.cwd(), '.git')) && process.cwd() !== paths.home);
