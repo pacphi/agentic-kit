@@ -23,6 +23,11 @@ security). On this machine it is wired into opencode three ways (all managed by
    opencode subagents under `~/.config/opencode/agents/` (re-converted on
    every `ak sync` after a ruflo upgrade).
 
+**Restart after wiring.** opencode loads config, plugins, MCP servers, and
+agents once at startup. After `ak setup --opencode` (or any `ak sync` that
+updates the plugin), quit and restart opencode — a running session will not
+see new hooks, tools, or agents.
+
 ### Most-used commands
 
 ```bash

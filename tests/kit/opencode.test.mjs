@@ -584,3 +584,14 @@ test('the deployed plugin template uses schema-valid PartIDs (prt prefix) for in
   assert.ok(m, 'template constructs a part id');
   assert.ok(m[1].startsWith('prt'), `part id must start with "prt" (opencode PartID schema), got: ${m[1]}`);
 });
+
+test('mcpCommandFor: bin on PATH → nested mcp-server.js → ruflo mcp start (fresh-machine chain)', async () => {
+  const { mcpCommandFor } = await import('../../src/lib/opencode.mjs');
+  const d = tmp('ak-oc-mcpcmd-');
+  const nested = path.join(d, 'mcp-server.js');
+  fs.writeFileSync(nested, '// server\n');
+  assert.deepEqual(mcpCommandFor({ binPresent: true, nestedPath: nested }), ['claude-flow-mcp'], 'bin wins when present');
+  assert.deepEqual(mcpCommandFor({ binPresent: false, nestedPath: nested }), ['node', nested], 'nested absolute path when no bin (fresh ruflo-only machine)');
+  assert.deepEqual(mcpCommandFor({ binPresent: false, nestedPath: path.join(d, 'absent.js') }), ['ruflo', 'mcp', 'start'], 'last resort matches the claude/codex registration');
+  rm(d);
+});

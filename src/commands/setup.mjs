@@ -198,6 +198,9 @@ export async function run_machine({ flags, pkgRoot, cfg }) {
         const changed = res.filter((r) => r.action !== 'unchanged').map((r) => `${r.slug} ${r.action}`).join(', ');
         ok(`opencode guidance: ${changed || 'in sync'}`);
       }
+      // opencode loads config/plugins/MCP/agents once at startup — say so now,
+      // or the user files "hooks don't work" issues (observed live).
+      info('restart opencode to load the hooks + MCP servers (loaded once at startup)');
     }
   }
 

@@ -55,18 +55,33 @@ export const PERMISSION_KEYS = ['claude-flow_*', 'claude_flow_*', 'ruvnet-brain_
 /** The brain's stable-spine shim (same registration codex carries). */
 export const brainShimPath = () => path.join(paths.home, '.claude', 'ruvnet-brain', 'mcp', 'server.mjs');
 
+/** The dedicated stdio MCP server bundled inside a plain `npm i -g ruflo`
+ *  install (nested dependency — present even when no claude-flow-mcp bin is
+ *  on PATH). */
+export const nestedMcpServerPath = () =>
+  path.join(paths.rufloNodeModules(), '@claude-flow', 'cli', 'bin', 'mcp-server.js');
+
+/** The claude-flow MCP command, best-available-first: the claude-flow-mcp bin
+ *  on PATH → the nested mcp-server.js via absolute node path (no PATH/cwd
+ *  dependence — the fresh ruflo-only machine case) → `ruflo mcp start` (ak's
+ *  claude/codex registration path, always present when ruflo is). Pure. */
+export function mcpCommandFor({ binPresent, nestedPath }) {
+  if (binPresent) return ['claude-flow-mcp'];
+  if (nestedPath && fs.existsSync(nestedPath)) return ['node', nestedPath];
+  return ['ruflo', 'mcp', 'start'];
+}
+
 /** @typedef {{ kind: string, root: string, id: string, hasPlugins: boolean, hasPlatformSkill: boolean }} CatalogSource */
 
-/** The MCP server entries ak writes. `claude-flow` prefers the dedicated
- *  claude-flow-mcp bin (purpose-built stdio server) and falls back to
- *  `ruflo mcp start` (ak's claude/codex registration) when it is absent.
- *  ruvnet-brain is included only when its shim is on disk.
- *  @param {{ brainShim?: string }} [opts] */
-export async function mcpEntriesFor({ brainShim = brainShimPath() } = {}) {
+/** The MCP server entries ak writes. `claude-flow` resolves via mcpCommandFor
+ *  (bin on PATH → nested mcp-server.js → `ruflo mcp start`). ruvnet-brain is
+ *  included only when its shim is on disk.
+ *  @param {{ brainShim?: string, nestedPath?: string }} [opts] */
+export async function mcpEntriesFor({ brainShim = brainShimPath(), nestedPath = nestedMcpServerPath() } = {}) {
   const entries = {
     'claude-flow': {
       type: 'local',
-      command: (await have('claude-flow-mcp')) ? ['claude-flow-mcp'] : ['ruflo', 'mcp', 'start'],
+      command: mcpCommandFor({ binPresent: await have('claude-flow-mcp'), nestedPath }),
       enabled: true,
       timeout: 30000,
       environment: { ...RUFLO_MCP_ENV },
