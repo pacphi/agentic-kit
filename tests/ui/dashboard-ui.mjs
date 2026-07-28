@@ -651,6 +651,21 @@ async function main() {
     check('wheel zoom clamps to safe minimum and maximum scales',
       clamps.max === 2.8 && clamps.min === .25, `clamps were ${JSON.stringify(clamps)}`);
 
+    const panBefore = await page.evaluate(() => ({ ...globalThis.AKLive.state.camera }));
+    await page.mouse.move(canvasBox.x + 18, canvasBox.y + 18);
+    await page.mouse.down();
+    await page.mouse.move(canvasBox.x + 83, canvasBox.y + 61, { steps: 4 });
+    await page.mouse.up();
+    const panAfter = await page.evaluate(() => ({ ...globalThis.AKLive.state.camera }));
+    check('dragging anywhere on empty canvas pans the execution map',
+      Math.abs(panAfter.x - panBefore.x - 65) < 1
+        && Math.abs(panAfter.y - panBefore.y - 43) < 1,
+      `pan ${JSON.stringify(panBefore)} -> ${JSON.stringify(panAfter)}`);
+    check('canvas overlays do not intercept pan gestures',
+      await page.evaluate(() => getComputedStyle(document.getElementById('live-empty')).pointerEvents)
+        === 'none',
+      'empty-state overlay intercepted the draggable canvas');
+
     const nodeBox = await page.locator('[data-node="ui-live-agent"]').boundingBox();
     const dragBefore = await page.evaluate(() => ({
       transform: document.querySelector('[data-node="ui-live-agent"]').getAttribute('transform'),
