@@ -33,6 +33,7 @@ import * as paths from './paths.mjs';
 import { bold, dim, cyan } from './output.mjs';
 import { policyToAgentOverrides, seedDualRouting, resolveRoutes, routingSummary, ACTIVITIES, DEFAULT_PRIMARY_HOST, PRIMARY_HOSTS } from './routing.mjs';
 import { HOST_ADAPTERS } from './hosts.mjs';
+import { opencodeMcpStatus } from './opencode.mjs';
 
 /** Frontier agent-CLI hosts. `pkg` is the npm global package; `enableEnv` is
  *  ruflo's ADR-034 backend flag; `aqe` is the AQE_LLM_PROVIDER value (null when
@@ -46,6 +47,10 @@ export const CODEX_ADAPTER_PKG = '@claude-flow/codex';
 export const HOSTS = [
   { id: 'claude', bin: 'claude', pkg: '@anthropic-ai/claude-code', enableEnv: 'ENABLE_CLAUDE_CODE', aqe: 'claude-code' },
   { id: 'codex', bin: 'codex', pkg: '@openai/codex', enableEnv: 'ENABLE_CODEX', aqe: null, adapterPkg: CODEX_ADAPTER_PKG },
+  // opencode: no ADR-034 backend flag (ruflo has no opencode backend env) and no
+  // aqe provider type — wiring is entirely config-file based (opencode.json) via
+  // opencode.mjs, not env. npm pkg `opencode-ai`; brew/mise installs = external.
+  { id: 'opencode', bin: 'opencode', pkg: 'opencode-ai', enableEnv: null, aqe: null },
 ];
 
 /** API-key LLM providers ruflo's router understands (`ruflo providers`). */
@@ -102,12 +107,13 @@ export async function hostInstallState(host) {
  *     so when the CLI is present with no api key we INFER subscription and say so.
  *   - else → 'none'.
  *  Pure-ish: reads env + one fs.existsSync per host. `present` lets the caller pass
- *  the already-known install state so an absent host reads 'none' without a probe. */
-export function hostAuthState(id, { env = process.env, present = true } = {}) {
+ *  the already-known install state so an absent host reads 'none' without a probe.
+ *  `home` is a test seam (same convention as rufloCodexMcpStatus's opts.home). */
+export function hostAuthState(id, { env = process.env, present = true, home = os.homedir() } = {}) {
   const a = HOST_ADAPTERS[id]?.auth;
   if (!a) return { mode: 'unknown', billing: 'unknown', source: null, note: null };
   const keyEnv = a.apiKeyEnv.find((k) => !!env[k]);
-  const loginPath = a.loginFile ? path.join(os.homedir(), ...a.loginFile) : null;
+  const loginPath = a.loginFile ? path.join(home, ...a.loginFile) : null;
   const loginPresent = !!loginPath && fs.existsSync(loginPath);
   if (keyEnv) {
     return {
@@ -136,8 +142,10 @@ export async function installHost(id) {
 // updateHost/hostDrift pair here. Two earlier ones were dead code (zero
 // production callers) and were removed; don't reintroduce a second drift path.
 
-/** Detect installed hosts + whether they are currently wired on in `cwd`. */
-export async function detectHosts(cwd = process.cwd()) {
+/** Detect installed hosts + whether they are currently wired on in `cwd`.
+ *  `opts.opencodeConfigFile` is a test seam for the config-file wired probe.
+ *  @param {string} [cwd] @param {{ opencodeConfigFile?: string }} [opts] */
+export async function detectHosts(cwd = process.cwd(), { opencodeConfigFile } = {}) {
   const env = currentEnv(cwd);
   const out = {};
   for (const h of HOSTS) {
@@ -145,7 +153,13 @@ export async function detectHosts(cwd = process.cwd()) {
     out[h.id] = {
       present,
       version: present ? await hostVersion(h.bin) : null,
-      wired: env[h.enableEnv] === 'true',
+      // config-file hosts (enableEnv: null) have no env to be "wired" in —
+      // their wired state is the presence of the ak-managed server entry in
+      // the host's own config (opencode.json mcp.claude-flow), read
+      // spawn-free. env[null] would read 'not wired' forever (codex-review).
+      wired: h.enableEnv
+        ? env[h.enableEnv] === 'true'
+        : (h.id === 'opencode' ? opencodeMcpStatus(null, { configFile: opencodeConfigFile ?? paths.opencodeConfigPath() }).claudeFlow : false),
     };
   }
   return out;
@@ -365,7 +379,7 @@ export function seedDualRoutingIfDualHost(cfg) {
  *  {changed, warnings} — pure except for the intended cfg mutation. */
 export function applySetupHostFlags(cfg, flags = {}) {
   const p = cfg.providers ?? (cfg.providers = {});
-  p.hosts ?? (p.hosts = { claude: true, codex: false });
+  p.hosts ?? (p.hosts = { claude: true, codex: false, opencode: false });
   const warnings = [];
   let changed = false;
   const wantPrimary = typeof flags['primary-host'] === 'string' ? flags['primary-host'].trim().toLowerCase() : null;
@@ -373,6 +387,11 @@ export function applySetupHostFlags(cfg, flags = {}) {
   if (flags.codex || wantPrimary === 'codex') {
     if (!p.hosts.codex || !p.hosts.claude) changed = true;
     p.hosts = { ...p.hosts, claude: true, codex: true };
+  }
+  // --opencode opts the opencode host in (config-file wiring, no env flags)
+  if (flags.opencode) {
+    if (!p.hosts.opencode) changed = true;
+    p.hosts = { ...p.hosts, opencode: true };
   }
   if (wantPrimary) {
     if (PRIMARY_HOSTS.includes(wantPrimary)) {

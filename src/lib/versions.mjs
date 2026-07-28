@@ -64,7 +64,7 @@ export async function driftReport({ force = false } = {}) {
   // package.json → installedVersion is null → filtered out here, so ak never
   // claims to manage an update it doesn't own. Pkg names mirror HOSTS in
   // providers.mjs (kept local to avoid an import cycle).
-  const HOST_PKGS = ['@anthropic-ai/claude-code', '@openai/codex'];
+  const HOST_PKGS = ['@anthropic-ai/claude-code', '@openai/codex', 'opencode-ai'];
   const pkgs = ['ruflo', 'agentic-qe', ...HOST_PKGS.filter((p) => installedVersion(p))];
   const report = [];
   let latest = cfg.versionCheck?.seen ?? {};

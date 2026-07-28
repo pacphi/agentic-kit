@@ -1432,7 +1432,7 @@ const JS = `
   var TABS=["overview","hosts","providers","runtime","intel","usage"];
   var VIEWS=["score","limits","findings","sessions","transcript"];
   var CAT={
-    hosts:"hosts", mcp:"hosts", "codex-mcp":"hosts", routing:"hosts",
+    hosts:"hosts", mcp:"hosts", "codex-mcp":"hosts", opencode:"hosts", routing:"hosts",
     providers:"providers",
     learning:"intel", "ruvnet-brain":"intel", "ruvnet-brain-nightly":"intel", aqe:"intel", agentdb:"intel"
   };
@@ -1507,7 +1507,7 @@ const JS = `
 
   // severity rank for rollups + triage sort; preferred order breaks ties.
   var RANK={fail:3,warn:2,ok:1,info:0,unknown:0};
-  var PREF=["versions","self","natives","security","learning","providers","hosts","routing","mcp","codex-mcp","ruvnet-brain","ruvnet-brain-nightly","aqe","daemons","blocks","statusline","npx"];
+  var PREF=["versions","self","natives","security","learning","providers","hosts","routing","mcp","codex-mcp","opencode","ruvnet-brain","ruvnet-brain-nightly","aqe","daemons","blocks","statusline","npx"];
 
   // Collapse rows into one group per subsystem (kills repeated labels); the
   // group's level is the worst of its rows. Sort worst-first, then by PREF.

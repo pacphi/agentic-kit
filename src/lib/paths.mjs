@@ -35,6 +35,16 @@ export const claudeSkillsDir = () => path.join(claudeDir(), 'skills');
 export const codexDir = () => path.join(home, '.codex');
 export const codexAgentsMdPath = () => path.join(codexDir(), 'AGENTS.md');
 
+/** opencode user-level locations (XDG config home, same base as the kit's own
+ *  configDir). `~/.config/opencode` is opencode's global config home; like
+ *  ~/.codex, ak NEVER creates it — existence signals opencode is installed. */
+export const opencodeDir = () => path.join(configBase(), 'opencode');
+export const opencodeConfigPath = () => path.join(opencodeDir(), 'opencode.json');
+export const opencodeAgentsMdPath = () => path.join(opencodeDir(), 'AGENTS.md');
+export const opencodePluginsDir = () => path.join(opencodeDir(), 'plugins');
+export const opencodeAgentsDir = () => path.join(opencodeDir(), 'agents');
+export const opencodeSkillsDir = () => path.join(opencodeDir(), 'skills');
+
 /** Per-project locations, relative to a project root. */
 export const projectSettings = (root) => path.join(root, '.claude', 'settings.json');
 export const projectSettingsLocal = (root) => path.join(root, '.claude', 'settings.local.json');
@@ -106,5 +116,15 @@ export const rufloNodeModules = () => path.join(rufloRoot(), 'node_modules');
 export const rufloCliDist = () =>
   path.join(rufloNodeModules(), '@claude-flow', 'cli', 'dist', 'src');
 export const aqeRoot = () => path.join(globalRoot(), 'agentic-qe');
+
+/** ruflo content sources for host integrations (opencode agents/skills).
+ *  The published @claude-flow/cli package bundles a SUBSET (.claude/agents —
+ *  the ADR-128 substrate set, .claude/skills); the FULL catalog (all agents +
+ *  every plugin's skills + the platform SKILL.md) ships only in the git repo,
+ *  which is mirrored by Claude Code's plugin marketplace clone
+ *  (~/.claude/plugins/marketplaces/ruflo, auto-updated by claude). */
+export const rufloCliPkgRoot = () => path.join(globalRoot(), '@claude-flow', 'cli');
+export const rufloMarketplaceRoot = () =>
+  path.join(home, '.claude', 'plugins', 'marketplaces', 'ruflo');
 
 export { isWindows, home };

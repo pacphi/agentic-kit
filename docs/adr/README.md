@@ -18,6 +18,8 @@ Consequences**, and cites the grounded source it rests on where relevant.
 | [0007](0007-maintainer-admin-local-telemetry.md) | Maintainer admin: a loopback telemetry page with deliberate egress | Accepted |
 | [0008](0008-guidance-target-scope-split.md) | Machine-scoped guidance blocks land in machine files, not a repo's AGENTS.md | Accepted |
 | [0009](0009-usage-scorecard-local-transcript-analytics.md) | Usage scorecard: local transcript analytics with graded evidence | Accepted |
+| [0010](0010-provider-mediated-quota-reads.md) | Provider-mediated quota reads (the Limits view) | Accepted |
+| [0011](0011-opencode-host.md) | opencode as a third host: ruflo/ruvnet-brain wiring through opencode's native surfaces | Accepted |
 
 Theme: ADRs **0001–0006** define **dual-host LLM routing and leadership** — how `ak` lets ruflo route
 each development activity (architecture, implementation, testing, review, …) to the right host (Claude

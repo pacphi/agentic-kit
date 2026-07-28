@@ -15,6 +15,7 @@ import {
 } from '../../lib/providers.mjs';
 import { parseRouteSpecs, formatModelHelp, PRIMARY_HOSTS, DEFAULT_PRIMARY_HOST } from '../../lib/routing.mjs';
 import { loadKitConfig, saveKitConfig } from '../../lib/config.mjs';
+import { undoOpencode, removeArtifacts } from '../../lib/opencode.mjs';
 import { ok, warn, fail, info, dim, bold } from '../../lib/output.mjs';
 import { installedVersion, cmpVersions } from '../../lib/versions.mjs';
 import { repoRoot } from '../../lib/paths.mjs';
@@ -200,13 +201,17 @@ async function off({ cwd }) {
   const cfg = loadKitConfig();
   const codexMcpManaged = cfg.providers?.codexMcp === 'ak';
   const rufloCodexManaged = cfg.providers?.rufloCodexMcp === 'ak';
-  cfg.providers = { hosts: { claude: true, codex: false }, primaryHost: 'claude', aqeProvider: null, aqeFallback: [], models: [], maxBudgetUsd: null, dualRouting: {}, codexMcp: null, rufloCodexMcp: null };
+  // opencode teardown reads the ownership markers from cfg — strip BEFORE the
+  // reset below clears them (mirrors the codex managed-flag captures above).
+  const oc = undoOpencode(cfg);
+  const art = removeArtifacts({});
+  cfg.providers = { hosts: { claude: true, codex: false, opencode: false }, primaryHost: 'claude', aqeProvider: null, aqeFallback: [], models: [], maxBudgetUsd: null, dualRouting: {}, codexMcp: null, rufloCodexMcp: null, opencodeMcp: null, opencodeManaged: null };
   saveKitConfig(cfg);
   const env = undoProviders(cwd);
   const router = undoAqeRouter(cwd);
   const mcp = await undoCodexMcp(cwd, { managed: codexMcpManaged });
   const rmcp = await undoRufloMcpInCodex(cwd, { managed: rufloCodexManaged });
-  ok(`reset to claude-only default — ${env.detail}; ${router.detail}; ${mcp.detail}; ${rmcp.detail}`);
+  ok(`reset to claude-only default — ${env.detail}; ${router.detail}; ${mcp.detail}; ${rmcp.detail}; opencode: ${oc.detail}; ${art.detail}`);
   return 0;
 }
 
@@ -261,6 +266,11 @@ async function maybeWriteQeCourtDefaults({ nonInteractive, cwd, enabled, aqeProv
 async function pick({ flags, cwd }) {
   const cfg = loadKitConfig();
   const hosts = await detectHosts(cwd);
+  // pick is the claude↔codex ROUTING chooser: opencode (config-file wiring,
+  // ADR-0011) is deliberately NOT a choice here — selecting it would have no
+  // effect (routing seeds/projection cover only claude+codex). Its enablement
+  // flag is preserved verbatim in the cfg write below instead.
+  const PICKABLE = new Set(HOSTS.filter((h) => h.id !== 'opencode').map((h) => h.id));
   let enabled;
   let aqeProvider = cfg.providers.aqeProvider ?? null;
   let aqeFallback = cfg.providers.aqeFallback ?? [];
@@ -285,7 +295,7 @@ async function pick({ flags, cwd }) {
     }
     if (flags.provider !== undefined) models = parseModels(flags.provider);
   } else {
-    const installed = HOSTS.filter((h) => hosts[h.id].present).map((h) => h.id);
+    const installed = HOSTS.filter((h) => hosts[h.id].present && PICKABLE.has(h.id)).map((h) => h.id);
     if (installed.length === 0) { fail('no frontier CLI (claude/codex) found on PATH'); return 1; }
     console.log(`Installed hosts: ${installed.join(', ')}`);
     const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
@@ -304,9 +314,13 @@ async function pick({ flags, cwd }) {
     rl.close();
   }
 
-  // validate hosts
+  // validate hosts (opencode is not pickable — see PICKABLE above)
   const known = new Set(HOSTS.map((h) => h.id));
-  enabled = enabled.filter((h) => known.has(h));
+  enabled = enabled.filter((h) => {
+    if (!known.has(h)) return false;
+    if (!PICKABLE.has(h)) { warn(`'${h}' is not a routing host — its kit.json flag is preserved, not changed by pick`); return false; }
+    return true;
+  });
   if (!enabled.includes('claude') && !enabled.includes('codex')) enabled = ['claude'];
   // primary host — which host leads (default claude); must be an enabled host.
   let primaryHost = prevPrimary;
@@ -337,13 +351,24 @@ async function pick({ flags, cwd }) {
     });
 
   cfg.providers = {
-    hosts: { claude: enabled.includes('claude'), codex: enabled.includes('codex') },
+    hosts: {
+      claude: enabled.includes('claude'),
+      codex: enabled.includes('codex'),
+      // pick is the claude↔codex ROUTING tool; the opencode host (config-file
+      // wiring, ADR-0011) is not a routing choice — preserve it verbatim so a
+      // pick never silently unwires it.
+      opencode: cfg.providers?.hosts?.opencode ?? false,
+    },
     aqeProvider,
     aqeFallback,
     models,
     primaryHost,
     maxBudgetUsd: cfg.providers.maxBudgetUsd ?? null,
     dualRouting: reseedForPrimary ? {} : { ...oldPolicy },
+    // opencode ownership markers survive too (teardown contract).
+    opencodeMcp: cfg.providers?.opencodeMcp ?? null,
+    opencodeManaged: cfg.providers?.opencodeManaged ?? null,
+    opencodeCatalogDir: cfg.providers?.opencodeCatalogDir ?? null,
   };
   // dual-host: seed per-activity routing from defaults (only when the policy is
   // empty), then layer any explicit --route overrides on top (marked user, never

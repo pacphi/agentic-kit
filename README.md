@@ -5,12 +5,13 @@
 [![node](https://img.shields.io/node/v/@pacphi/agentic-kit)](https://nodejs.org)
 [![license: MIT](https://img.shields.io/npm/l/@pacphi/agentic-kit)](LICENSE)
 
-**One npm package that installs, heals, and *proves* [ruflo](https://github.com/ruvnet/ruflo) (claude-flow) + [agentic-qe](https://github.com/proffesor-for-testing/agentic-qe) — and wires Claude Code + Codex into one ambidextrous, self-routing setup. macOS · Linux · Windows.**
+**One npm package that installs, heals, and *proves* [ruflo](https://github.com/ruvnet/ruflo) (claude-flow) + [agentic-qe](https://github.com/proffesor-for-testing/agentic-qe) — and wires Claude Code + Codex (+ opencode) into one ambidextrous, self-routing setup. macOS · Linux · Windows.**
 
 ```bash
 npm install -g @pacphi/agentic-kit@next   # alpha channel until 4.0.0 GA
 ak setup            # once per machine; run inside a git repo to set that project up too
 ak setup --codex    # …or bring up Claude + Codex together in one shot
+ak setup --opencode # …and wire ruflo + ruvnet-brain into opencode (third host)
 ```
 
 > [!IMPORTANT]
@@ -46,7 +47,7 @@ in [docs/archive/](docs/archive/).
 ```text
 ak              status + one suggested next action
 ak setup        first-time setup — machine and/or the project you're standing in
-                [--codex] [--primary-host claude|codex] [--project] [--minimal] [--yes] [--no-aqe] [--no-security] [--reconfigure]
+                [--codex] [--opencode] [--primary-host claude|codex] [--project] [--minimal] [--yes] [--no-aqe] [--no-security] [--reconfigure]
 ak status       read-only dashboard: what's true, what's drifted   [--json] [--deep]
 ak sync         converge to good: upgrade + heal + verify          [--dry-run] [--no-upgrade]
 ak dashboard    open the local web dashboard (auto-opens your browser)   [--port N] [--no-open]
@@ -139,6 +140,33 @@ you opt in. Two independent axes:
 applies (reversibly); `ak x provider off` restores the claude-only default. Full guide:
 [docs/PROVIDERS.md](docs/PROVIDERS.md). Already on an older `ak` and adopting a later capability
 (like dual-host)? [docs/UPGRADING.md](docs/UPGRADING.md) covers the `sync` vs `provider pick` motion.
+
+### opencode host (opt-in)
+
+[opencode](https://opencode.ai) is a third host alongside claude/codex — wired through its own
+native surfaces rather than env flags. `ak setup --opencode` (or `providers.hosts.opencode: true`
+in `kit.json`) converges, on every `ak sync`:
+
+- **`~/.config/opencode/opencode.json`** — the `claude-flow` MCP server (ruflo's 300+ tools,
+  via `claude-flow-mcp` with `ruflo mcp start` fallback) and `ruvnet-brain` MCP (the
+  stable-spine shim, hot-swapped on brain updates), plus ruflo's `skills.paths` and
+  pre-approved `permission` patterns — merged backup-first into whatever you already have
+  (a JSONC file ak can't parse is refused, never clobbered).
+- **Lifecycle hooks** — `~/.config/opencode/plugins/ruflo-hooks.js`: session restore/end,
+  bash safety screening, edit/task outcome recording for ruflo's learning substrate
+  (opencode has no settings-hooks surface; its plugin events are the hook spine).
+- **Subagents + skills** — ruflo's agent set converted to opencode subagents
+  (`~/.config/opencode/agents/`, re-converted whenever the catalog source changes) and the
+  platform skill (`~/.config/opencode/skills/ruflo/`). The catalog source resolves
+  automatically: claude marketplace clone (full set, auto-updated) → published
+  `@claude-flow/cli` package (substrate set); override via
+  `providers.opencodeCatalogDir` or `$RUFLO_REPO`.
+- **Guidance** — `~/.config/opencode/AGENTS.md` gets ak's managed blocks with
+  opencode-correct tool names (`claude-flow_*`, `ruvnet-brain_search_ruvnet`).
+
+Everything is ownership-marked (`providers.opencodeMcp`) and stripped surgically by
+`ak x provider off` / `ak uninstall` — your own opencode.json entries are never touched.
+Design record: [docs/adr/0011-opencode-host.md](docs/adr/0011-opencode-host.md).
 
 ## Troubleshooting
 

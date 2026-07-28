@@ -79,6 +79,7 @@ async function main() {
       { subsystem: 'versions', level: 'ok', message: 'ruflo 4.0.0 (latest)', fix: null },
       { subsystem: 'natives', level: 'fail', message: 'WASM fallback', fix: 'sync installs native better-sqlite3' },
       { subsystem: 'learning', level: 'warn', message: 'no patterns yet', fix: null },
+      { subsystem: 'opencode', level: 'warn', message: 'lifecycle plugin out of date', fix: 'sync rewrites it' },
     ],
     drift: [{ pkg: 'ruflo', installed: '4.0.0', latest: '4.0.0', outdated: false }],
   };
@@ -125,7 +126,23 @@ async function main() {
       const j = JSON.parse(r.body);
       assert(Array.isArray(j.rows), 'rows must be an array');
       assert(j.overall === 'warn', 'overall must pass through, got ' + j.overall);
-      assert(j.rows.length === 3, 'expected 3 rows, got ' + j.rows.length);
+      assert(j.rows.length === 4, 'expected 4 rows, got ' + j.rows.length);
+    });
+
+    await test('GET /api/status passes opencode subsystem rows through untouched', async () => {
+      const r = await get(url + 'api/status');
+      const j = JSON.parse(r.body);
+      const oc = (j.rows || []).filter((x) => x.subsystem === 'opencode');
+      assert(oc.length === 1, 'expected the opencode row to pass through, got ' + oc.length);
+      assert(oc[0].level === 'warn' && oc[0].fix === 'sync rewrites it',
+        'opencode row level/fix must survive the payload verbatim');
+    });
+
+    await test('GET / categorizes the opencode subsystem into the Hosts tab (not the runtime fallback)', async () => {
+      const r = await get(url);
+      contains(r.body, 'opencode:"hosts"');
+      // and it must sort with the host MCP subsystems, not at the unknown end
+      contains(r.body, '"codex-mcp","opencode"');
     });
 
     await test('GET /api/status embeds improvement.json read off the fixture', async () => {

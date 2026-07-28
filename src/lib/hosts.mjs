@@ -56,6 +56,24 @@ export const HOST_ADAPTERS = {
       keyOverridesLogin: true, // grounded: OPENAI_API_KEY ⇒ codex ignores login
     },
   },
+  opencode: {
+    id: 'opencode',
+    label: 'opencode',
+    guidanceFile: 'agents-opencode', // logical → ~/.config/opencode/AGENTS.md
+    configFormat: 'json', // ~/.config/opencode/opencode.json
+    statuslineSupported: false, // no statusline surface at all upstream
+    aqeProvider: null, // aqe has no opencode provider type (per-project via MCP only)
+    // opencode sets no documented session env marker; host detection is
+    // install-based (bin on PATH / ~/.config/opencode present), not session-based.
+    envMarkers: [],
+    auth: {
+      // opencode is multi-provider (zen/openrouter/anthropic/…): credentials
+      // live in its own auth store; there is no single api-key env to probe.
+      apiKeyEnv: [],
+      loginFile: ['.local', 'share', 'opencode', 'auth.json'],
+      keyOverridesLogin: false,
+    },
+  },
 };
 
 /** Ordered host ids (claude first = display order, matches routing.HOSTS). */

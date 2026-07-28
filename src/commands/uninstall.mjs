@@ -9,7 +9,8 @@ import readline from 'node:readline/promises';
 import { run as runCmd } from '../lib/exec.mjs';
 import { stripBlock, BEGIN, BUILTIN_BLOCKS } from '../lib/blocks.mjs';
 import { unregister } from '../lib/mcp.mjs';
-import { loadKitConfig } from '../lib/config.mjs';
+import { undoOpencode, removeArtifacts } from '../lib/opencode.mjs';
+import { loadKitConfig, saveKitConfig } from '../lib/config.mjs';
 import { present as rbPresent } from '../lib/ruvnet-brain.mjs';
 import * as paths from '../lib/paths.mjs';
 import { ok, warn, info } from '../lib/output.mjs';
@@ -57,6 +58,10 @@ const confirm = async (q, yes) => {
 export async function run({ flags }) {
   const dry = flags['dry-run'];
   const act = (msg, fn) => { if (dry) info(`[dry-run] ${msg}`); else { fn(); ok(msg); } };
+  // Ownership markers are read ONCE up front: the purge path removes kit.json
+  // below, and teardown decisions (opencode undo) must still see what ak owned
+  // (codex-review — purge ordering must not strand managed opencode.json keys).
+  const cfg = loadKitConfig();
 
   // 1. CLAUDE.md managed blocks: every built-in slug (registry-driven, so
   // non-ruflo blocks like ruvnet-brain-reference are covered), the legacy
@@ -81,6 +86,33 @@ export async function run({ flags }) {
   if (fs.existsSync(skill)) act('removed skill ruflo-token-audit', () => fs.rmSync(skill, { recursive: true }));
   if (flags.purge && fs.existsSync(paths.kitConfigPath())) {
     act('removed kit.json', () => fs.rmSync(paths.kitConfigPath()));
+  }
+
+  // 2b. opencode host footprint (when ak managed it): strip the guidance blocks
+  // from opencode's AGENTS.md, the opencode.json wiring, and deployed artifacts.
+  const ocMd = paths.opencodeAgentsMdPath();
+  if (fs.existsSync(ocMd)) {
+    let content = fs.readFileSync(ocMd, 'utf8');
+    const slugs = new Set([...content.matchAll(/<!-- BEGIN (ruflo-[\w-]+|ruvnet-[\w-]+) -->/g)].map((m) => m[1]));
+    if (slugs.size) {
+      act(`stripped ${slugs.size} managed block(s) from opencode AGENTS.md (backup written)`, () => {
+        fs.copyFileSync(ocMd, `${ocMd}.bak.${Date.now()}`);
+        for (const s of slugs) content = stripBlock(content, s);
+        fs.writeFileSync(ocMd, content);
+      });
+    }
+  }
+  {
+    // cfg comes from the top of run() (read before any purge of kit.json)
+    if (cfg.providers?.opencodeMcp === 'ak') {
+      act('stripped ak-managed opencode.json wiring (mcp/skills/permissions)', () => {
+        undoOpencode(cfg);
+        saveKitConfig(cfg);
+      });
+    }
+    if (fs.existsSync(paths.opencodeDir())) {
+      act('removed ak-deployed opencode artifacts (plugin/agents/skill)', () => removeArtifacts({}));
+    }
   }
 
   // 3. MCP registration + deny rules
