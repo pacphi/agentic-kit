@@ -469,6 +469,11 @@ async function main() {
     check('session state uses human evidence language instead of adapter absence',
       !/Status not reported/.test(await visibleText(page, '#panel-live')),
       'Live view exposed the missing telemetry field instead of a human session state');
+    const workerFreshness = await visibleText(page, '.live-session-child');
+    check('sessions without a start boundary show freshness instead of epoch-sized duration',
+      /Working now · (just now|\d+s ago)/.test(workerFreshness)
+        && !/\d{4,}h/.test(workerFreshness),
+      `worker freshness was ${JSON.stringify(workerFreshness)}`);
     check('Live navigation is project-first and keeps sessions within the selected project',
       await page.locator('#live-project-list [data-project]').count() === 1
         && /2 sessions/.test(await visibleText(page, '#live-project-list')),

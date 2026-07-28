@@ -82,7 +82,7 @@ Session state is phrased as evidence a person can act on:
   it does not assert failure or completion.
 - **Blocked**, **Failed**, **Cancelled**, and **Completed** require explicit
   source evidence.
-- **Last activity** identifies retained historical evidence when no trustworthy
+- **Last active** identifies retained historical evidence when no trustworthy
   completion outcome was recorded.
 
 Color and motion are redundant cues: green motion means current work, amber
