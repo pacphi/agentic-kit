@@ -10,6 +10,7 @@
 // network-free (NFR-6).
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import { isBot } from './admin-model.mjs';
 
 const execFileP = promisify(execFile);
 
@@ -87,9 +88,13 @@ export async function collectAdminStats({ fetchImpl = fetch, ghToken = '', repoS
 
   // Single Promise.all. Auth-gated calls resolve to null when unconfigured so we
   // never issue a doomed request; each fetch is internally try/caught (EC-3).
-  const [repoRaw, releasesRaw, clonesRaw, viewsRaw, referrersRaw, npmRaw, issuesRaw, starsRaw, forksRaw] = await Promise.all([
+  // releases/issues/stargazers/forks/contributors are single-page reads capped at
+  // GitHub's per_page=100 ceiling — the same one-page-best-effort pattern
+  // throughout this file, not a full-pagination guarantee. At 100+ items the
+  // oldest/lowest-ranked entries silently drop; there is no truncation flag.
+  const [repoRaw, releasesRaw, clonesRaw, viewsRaw, referrersRaw, npmRaw, issuesRaw, starsRaw, forksRaw, contributorsRaw, runsRaw, alertsRaw] = await Promise.all([
     gh('/repos/' + repoSlug),
-    gh('/repos/' + repoSlug + '/releases?per_page=20'),
+    gh('/repos/' + repoSlug + '/releases?per_page=100'),
     configured ? gh('/repos/' + repoSlug + '/traffic/clones') : null,
     configured ? gh('/repos/' + repoSlug + '/traffic/views') : null,
     configured ? gh('/repos/' + repoSlug + '/traffic/popular/referrers') : null,
@@ -97,6 +102,12 @@ export async function collectAdminStats({ fetchImpl = fetch, ghToken = '', repoS
     gh('/repos/' + repoSlug + '/issues?state=all&per_page=100&sort=created&direction=desc'),
     gh('/repos/' + repoSlug + '/stargazers?per_page=100'),
     gh('/repos/' + repoSlug + '/forks?per_page=100&sort=newest'),
+    gh('/repos/' + repoSlug + '/contributors?per_page=100'),
+    gh('/repos/' + repoSlug + '/actions/runs?per_page=5'),
+    // Dependabot alerts need a token with `security_events` scope (classic PAT) or
+    // equivalent fine-grained access; an unconfigured/under-scoped token 403s and
+    // ghJson folds that to null — degrades to "unknown", never a fabricated 0.
+    gh('/repos/' + repoSlug + '/dependabot/alerts?state=open&per_page=100'),
   ]);
 
   const releases = mapReleases(releasesRaw);
@@ -120,6 +131,14 @@ export async function collectAdminStats({ fetchImpl = fetch, ghToken = '', repoS
     },
     npm: npmToBlock(npmRaw),
     people: buildPeople(issuesRaw, starsRaw, forksRaw, owner),
+    // Owner + bots excluded, same discipline buildPeople already applies to
+    // contributors/stargazers/forks below — GitHub's raw contributor list
+    // otherwise counts the repo owner and dependabot[bot]/similar as "people".
+    contributorsCount: Array.isArray(contributorsRaw)
+      ? contributorsRaw.filter((c) => c.login && c.login !== owner && !isBot(c.login)).length
+      : null,
+    ci: buildCi(runsRaw),
+    security: { dependabotAlerts: Array.isArray(alertsRaw) ? alertsRaw.length : null },
     feedback: doors(repoSlug),
   };
 }
@@ -138,7 +157,8 @@ export function defaultCollect({ repoSlug, npmPkg, fetchImpl = fetch, resolveTok
       return {
         generatedAt: new Date().toISOString(), repoSlug, repo: null, releases: [], totalAssetDownloads: 0,
         traffic: { configured: false, note: String((e && e.message) || e), clones: null, views: null, referrers: null },
-        npm: null, people: emptyPeople(), feedback: doors(repoSlug), error: String((e && e.message) || e),
+        npm: null, people: emptyPeople(), contributorsCount: null, ci: emptyCi(),
+        security: { dependabotAlerts: null }, feedback: doors(repoSlug), error: String((e && e.message) || e),
       };
     }
   };
@@ -210,6 +230,25 @@ function npmToBlock(npmRaw) {
     lastMonth: daily.reduce((a, d) => a + d.downloads, 0),
     daily, // full month, oldest-first, for the sparkline
   };
+}
+
+/** Latest workflow run + a lightweight failure count over the last page (≤5
+ *  runs). null latest ⇒ no runs found (a brand-new repo, or Actions unused) —
+ *  never fabricated as "passing". */
+function buildCi(runsRaw) {
+  const runs = Array.isArray(runsRaw && runsRaw.workflow_runs) ? runsRaw.workflow_runs : [];
+  if (!runs.length) return emptyCi();
+  const latest = runs[0];
+  return {
+    latest: { name: latest.name, status: latest.status, conclusion: latest.conclusion, at: latest.created_at, url: latest.html_url },
+    recentFailures: runs.filter((r) => r.conclusion && r.conclusion !== 'success').length,
+    recentTotal: runs.length,
+  };
+}
+
+/** An empty CI block, used when the runs fetch fails or returns nothing. */
+function emptyCi() {
+  return { latest: null, recentFailures: null, recentTotal: null };
 }
 
 /** The two "doors" — issues + discussions URLs — built from the slug, never the

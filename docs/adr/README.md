@@ -21,6 +21,7 @@ Consequences**, and cites the grounded source it rests on where relevant.
 | [0010](0010-provider-mediated-quota-reads.md) | Provider-mediated quota reads (the only honest denominators) | Accepted |
 | [0011](0011-local-model-provenance-zero-cost-and-transcript-fidelity.md) | Local models: provenance out-of-band, $0 per model, stated transcript fidelity | Proposed |
 | [0012](0012-live-sessions-observability.md) | Live sessions as local, evidence-graded observability | Accepted |
+| [0013](0013-admin-build-security-signals-and-honest-reach.md) | Admin: build/security signals, an honest Reach panel, and a pagination fix | Accepted |
 
 Theme: ADRs **0001–0006** define **dual-host LLM routing and leadership** — how `ak` lets ruflo route
 each development activity (architecture, implementation, testing, review, …) to the right host (Claude
@@ -49,4 +50,8 @@ keep content out of broad topology snapshots/replay while preserving masked loca
 keeping chat/control absent. Claude/Codex collection is
 implemented; ruflo, agentic-qe, and dual-run require explicit, repeatable `--live-source`
 registration. Independent plugin/skill/MCP discovery and a measured frame-time budget remain
-documented limitations rather than implied capabilities.
+documented limitations rather than implied capabilities. **0013** extends 0007's admin collector with
+CI-run and Dependabot-alert signals, fixes a releases-pagination cap that silently dropped older
+releases, replaces two GitHub-release-asset Reach tiles that were permanently dead for this npm-only
+project with real GitHub-native people signals (contributors, watchers), and states the existing
+npm-mirror-inflation exclusion explicitly instead of as a footnote.

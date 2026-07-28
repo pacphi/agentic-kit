@@ -17,12 +17,13 @@ export const options = {
 export const help = `ak admin — maintainer-only local telemetry admin (localhost only)  [alias: ak x admin]
 
 Serves a self-contained web panel showing how the project is actually doing —
-unique repo visitors, release-asset pulls, npm range, GitHub traffic, and the
-humans who filed issues, opened PRs, or forked. Unlike \`ak dashboard\` (which is
-offline-first and never leaves your machine), admin makes DELIBERATE network
-egress: the server fetches GitHub + npm on your behalf and reads a GitHub
-credential (GITHUB_TOKEN → GH_TOKEN → \`gh auth token\`, best-effort) at runtime.
-That credential is never persisted and never reaches the page.
+unique repo visitors, contributors, npm range, GitHub traffic, latest CI run,
+open Dependabot alerts, and the humans who filed issues, opened PRs, or
+forked. Unlike \`ak dashboard\` (which is offline-first and never leaves your
+machine), admin makes DELIBERATE network egress: the server fetches GitHub +
+npm on your behalf and reads a GitHub credential (GITHUB_TOKEN → GH_TOKEN →
+\`gh auth token\`, best-effort) at runtime. That credential is never persisted
+and never reaches the page.
 
 Bound to 127.0.0.1. A fresh session token is minted at startup and carried into
 the browser in the launch URL's # fragment (never a query param, never logged);
