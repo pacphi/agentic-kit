@@ -16,16 +16,9 @@ import {
 import { parseRouteSpecs, formatModelHelp, PRIMARY_HOSTS, DEFAULT_PRIMARY_HOST, divergedRoutes, refreshSeededRoutes, modelNote, ACTIVITIES } from '../../lib/routing.mjs';
 import { loadKitConfig, saveKitConfig } from '../../lib/config.mjs';
 import { ok, warn, fail, info, dim, bold, yellow } from '../../lib/output.mjs';
-import { installedVersion, cmpVersions } from '../../lib/versions.mjs';
 import { repoRoot } from '../../lib/paths.mjs';
 import { writeJsonWithBackup } from '../../lib/settings.mjs';
-import { panelFromRouting, validatePanel, readQeCourtConfig, qeCourtConfigPath, vendorOf } from '../../lib/qeCourt.mjs';
-
-const QE_COURT_MIN_VERSION = '3.13.0';
-const qeCourtShipped = () => {
-  const v = installedVersion('agentic-qe');
-  return !!v && cmpVersions(v, QE_COURT_MIN_VERSION) >= 0;
-};
+import { panelFromRouting, validatePanel, readQeCourtConfig, qeCourtConfigPath, vendorOf, qeCourtShipped } from '../../lib/qeCourt.mjs';
 
 /** Print the dual-host guidance tips (role delegation, judge-bias, qe-court
  *  cross-sell) once both hosts are enabled — shared by `pick()` and

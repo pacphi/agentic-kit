@@ -21,6 +21,7 @@ import { readJson } from '../lib/settings.mjs';
 import { have } from '../lib/exec.mjs';
 import { HOSTS, settingsTarget, isDefault, managedEnv, MANAGED_ENV_KEYS, hostInstallState, hostAuthState, bothHostsEnabled, aqeRouterFile, aqeSupportsAgentOverrides, credentialGaps } from '../lib/providers.mjs';
 import { policyToAgentOverrides, routingSummary, divergedRoutes } from '../lib/routing.mjs';
+import { qeCourtShipped, readQeCourtConfig, panelFromRouting, validatePanel, healJuryVendorCollision, UPSTREAM_JURY_VENDOR_ISSUE } from '../lib/qeCourt.mjs';
 import { drift as ruvectorDrift } from '../lib/ruvector.mjs';
 
 export const options = {
@@ -535,6 +536,28 @@ export async function collect({ pkgRoot, cwd = process.cwd() }) {
   if (cfg.providers?.hosts?.codex) {
     rows.push(row('statusline', 'info',
       'statusline is claude-only — codex has no command-backed statusline; its guidance ships via AGENTS.md'));
+  }
+
+  // qe-court (ADR-124): TEMPORARY, remove once fixed upstream. agentic-qe's own
+  // shipped default config.json violates its own writerIsNeverJuror invariant
+  // (proffesor-for-testing/agentic-qe#576) — a brand-new project fails
+  // validation before any user touches the file. No-op unless aqe is new
+  // enough AND the skill has already created its config.json (ak never
+  // creates it) — same gate as `ak x provider status`'s read-only awareness.
+  if (qeCourtShipped()) {
+    const qcRoot = paths.repoRoot(cwd);
+    const qc = qcRoot ? readQeCourtConfig(qcRoot) : null;
+    if (qc) {
+      const violations = validatePanel(panelFromRouting(qc.routing), { minVendors: qc.options?.minDistinctVendors ?? 2 });
+      if (violations.length) {
+        const fix = healJuryVendorCollision(qc.routing);
+        rows.push(row('qe-court', 'warn',
+          `qe-court panel invalid: ${violations.join(', ')}`,
+          fix ? `sync reassigns jury ${fix.from} → ${fix.to} (temporary until upstream fix lands: ${UPSTREAM_JURY_VENDOR_ISSUE})` : null));
+      } else {
+        rows.push(row('qe-court', 'ok', 'qe-court panel valid (vendor-diverse, jury independent of writer)'));
+      }
+    }
   }
 
   return rows;
