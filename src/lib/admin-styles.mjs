@@ -108,6 +108,19 @@ button.primary{background:var(--accent);color:var(--on-accent);border:0;border-r
 .mcell svg{display:block;width:100%;height:30px;margin-top:9px}
 .mcell.unknown b{color:var(--faint);font-size:20px}
 
+.health{display:grid;grid-template-columns:repeat(2,1fr);gap:12px;margin-top:12px}
+.hcell{border:1px solid var(--ridge);border-radius:12px;padding:15px 17px;background:var(--surface);min-width:0}
+.hcell .top{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.hcell .pill{font-family:var(--mono);font-size:11px;letter-spacing:.03em;padding:3px 10px;border-radius:999px;border:1px solid var(--ridge);color:var(--muted)}
+.hcell .pill.ok{background:color-mix(in srgb,var(--accent-3) 16%,transparent);border-color:var(--accent-3);color:var(--accent-3)}
+.hcell .pill.bad{background:color-mix(in srgb,var(--bad) 16%,transparent);border-color:var(--bad);color:var(--bad)}
+.hcell .pill.pending{background:color-mix(in srgb,var(--accent) 16%,transparent);border-color:var(--accent);color:var(--accent)}
+.hcell b{display:block;margin-top:9px;font-family:var(--display);font-weight:600;font-size:20px;color:var(--ink)}
+.hcell.unknown b{color:var(--faint);font-size:18px}
+.hcell span{display:block;margin-top:5px;font-family:var(--mono);font-size:11px;letter-spacing:.03em;color:var(--muted);line-height:1.4}
+.hcell a{color:var(--accent-2);text-decoration:none}
+.hcell a:hover{text-decoration:underline}
+
 .since{background:var(--surface);border:1px solid var(--ridge);border-radius:14px;padding:22px 24px}
 .since .headline{font-family:var(--display);font-weight:600;font-size:1.25rem;color:var(--ink);margin:0 0 6px;line-height:1.34}
 .since .headline b{color:var(--accent)}
@@ -182,7 +195,7 @@ table.adm td.num{font-family:var(--mono)}
 .foot{margin-top:26px;padding-top:14px;border-top:1px solid var(--ridge);color:var(--faint);font-size:11.5px}
 
 @media (max-width:880px){
-  .dstrip,.mom,.reach{grid-template-columns:1fr 1fr}
+  .dstrip,.mom,.reach,.health{grid-template-columns:1fr 1fr}
   .ppl{grid-template-columns:1fr}
 }
 @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}

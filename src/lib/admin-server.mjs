@@ -224,6 +224,12 @@ function renderPage({ modelSrc, viewSrc }) {
         <div class="mom" data-momentum></div>
         <p class="note" data-momentum-note></p>
       </section>
+
+      <section class="sec">
+        <h2>Project health <span class="qual mono">is the build green, is anything waiting on a fix</span></h2>
+        <p class="lead">The latest CI run and open Dependabot alerts — read live from GitHub, not cached between visits.</p>
+        <div class="health" data-health></div>
+      </section>
     </section>
 
     <section class="panel" id="panel-review" data-panel="review" role="tabpanel" aria-labelledby="tab-review" hidden>

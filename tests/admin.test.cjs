@@ -75,6 +75,14 @@ function ghFixtures(url) {
   }
   if (/\/repos\/pacphi\/agentic-kit\/stargazers/.test(url)) return { body: [{ login: 'carol' }, { login: 'pacphi' }] };
   if (/\/repos\/pacphi\/agentic-kit\/forks/.test(url)) return { body: [{ owner: { login: 'dave' }, created_at: '2026-04-01T00:00:00Z' }] };
+  if (/\/repos\/pacphi\/agentic-kit\/contributors/.test(url)) return { body: [{ login: 'pacphi' }, { login: 'alice' }, { login: 'bob' }] };
+  if (/\/repos\/pacphi\/agentic-kit\/actions\/runs/.test(url)) {
+    return { body: { workflow_runs: [
+      { name: 'ci', status: 'completed', conclusion: 'success', created_at: '2026-07-27T00:00:00Z', html_url: 'https://github.com/pacphi/agentic-kit/actions/runs/1' },
+      { name: 'ci', status: 'completed', conclusion: 'failure', created_at: '2026-07-26T00:00:00Z', html_url: 'https://github.com/pacphi/agentic-kit/actions/runs/2' },
+    ] } };
+  }
+  if (/\/repos\/pacphi\/agentic-kit\/dependabot\/alerts/.test(url)) return { body: [{ number: 1 }, { number: 2 }] };
   if (/\/repos\/pacphi\/agentic-kit$/.test(url)) return { body: { stargazers_count: 20, forks_count: 4, subscribers_count: 3, open_issues_count: 2 } };
   if (/api\.npmjs\.org/.test(url)) return { body: { downloads: Array.from({ length: 30 }, (_, i) => ({ day: '2026-01-' + String(i + 1).padStart(2, '0'), downloads: i + 1 })) } };
   return { ok: false, status: 404, body: null };
@@ -150,6 +158,23 @@ async function main() {
 
     // feedback doors built from slug, never network
     assert(d.feedback.issues.includes('pacphi/agentic-kit') && d.feedback.discussions.includes('pacphi/agentic-kit'), 'doors from slug');
+
+    // contributors: owner included here (GitHub's own contributor list, unlike people.*)
+    eq(d.contributorsCount, 3);
+
+    // ci: latest run + failure count over the fetched page
+    eq(d.ci.latest.conclusion, 'success');
+    eq(d.ci.latest.name, 'ci');
+    eq(d.ci.recentFailures, 1);
+    eq(d.ci.recentTotal, 2);
+
+    // security: open Dependabot alert count
+    eq(d.security.dependabotAlerts, 2);
+
+    // releases fetch requests the full 100-per-page ceiling, not the old 20 cap
+    // that silently dropped this repo's older releases (verified live: 29 exist)
+    const releasesCall = fetchImpl.calls.find((u) => /\/releases\?/.test(u));
+    assert(releasesCall && releasesCall.includes('per_page=100'), 'releases must be fetched at per_page=100, got: ' + releasesCall);
   });
 
   await test('collectAdminStats URL-encodes a scoped npm package name (AC-3)', async () => {
@@ -201,6 +226,26 @@ async function main() {
     eq(JSON.stringify(d.people.stargazers), '[]');
   });
 
+  await test('dependabot alerts 403 (no security_events scope) degrades to unknown, never a fabricated 0', async () => {
+    const fetchImpl = mkFetch((url) => (/dependabot\/alerts/.test(url) ? { ok: false, status: 403, body: null } : ghFixtures(url)));
+    const d = await C.collectAdminStats({ fetchImpl, ghToken: 'tok', repoSlug: 'pacphi/agentic-kit', npmPkg: 'agentic-kit' });
+    eq(d.security.dependabotAlerts, null);
+  });
+
+  await test('no workflow runs found → ci.latest null, not a fabricated "passing"', async () => {
+    const fetchImpl = mkFetch((url) => (/actions\/runs/.test(url) ? { body: { workflow_runs: [] } } : ghFixtures(url)));
+    const d = await C.collectAdminStats({ fetchImpl, ghToken: 'tok', repoSlug: 'pacphi/agentic-kit', npmPkg: 'agentic-kit' });
+    eq(d.ci.latest, null);
+    eq(d.ci.recentFailures, null);
+  });
+
+  await test('contributors fetch failing nulls contributorsCount, siblings unaffected', async () => {
+    const fetchImpl = mkFetch((url) => (/contributors/.test(url) ? new Error('boom') : ghFixtures(url)));
+    const d = await C.collectAdminStats({ fetchImpl, ghToken: 'tok', repoSlug: 'pacphi/agentic-kit', npmPkg: 'agentic-kit' });
+    eq(d.contributorsCount, null);
+    assert(d.repo && d.repo.stars === 20, 'the repo block is unaffected by a contributors failure');
+  });
+
   // ── NFR-3 — the credential NEVER appears in the payload or any error note ────
   const FAKE_TOKEN = 'ghp_FAKE_SECRET_do_not_leak_0123456789abcdef';
   await test('NFR-3: a real collect with a credential set never echoes it into the payload', async () => {
@@ -223,7 +268,7 @@ async function main() {
   });
 
   // ── admin-server: auth (AC-1), loopback + CSP + self-contained (AC-5) ────────
-  const FIXTURE_PAYLOAD = { generatedAt: '2026-07-24T00:00:00Z', repoSlug: 'pacphi/agentic-kit', repo: { stars: 20, forks: 4, watchers: 3, openIssues: 2 }, releases: [], totalAssetDownloads: 0, traffic: { configured: false, note: 'no token', clones: null, views: null, referrers: null }, npm: null, people: { externalEngagers: 0, totalIssues: 0, totalPRs: 0, contributors: [], stargazers: [], forks: [] }, feedback: { issues: 'x', discussions: 'y' } };
+  const FIXTURE_PAYLOAD = { generatedAt: '2026-07-24T00:00:00Z', repoSlug: 'pacphi/agentic-kit', repo: { stars: 20, forks: 4, watchers: 3, openIssues: 2 }, releases: [], totalAssetDownloads: 0, traffic: { configured: false, note: 'no token', clones: null, views: null, referrers: null }, npm: null, people: { externalEngagers: 0, totalIssues: 0, totalPRs: 0, contributors: [], stargazers: [], forks: [] }, contributorsCount: 3, ci: { latest: null, recentFailures: null, recentTotal: null }, security: { dependabotAlerts: 0 }, feedback: { issues: 'x', discussions: 'y' } };
 
   const admin = await S.startAdmin({ port: 0, collect: async () => FIXTURE_PAYLOAD });
   try {

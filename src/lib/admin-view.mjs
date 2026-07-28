@@ -121,20 +121,17 @@ function rcell(o) {
 function renderReach(d) {
   const t = d.traffic || {};
   const trafficWhy = t.configured ? 'no data in the current 14-day window' : 'no GitHub token — traffic API needs push access';
-  const rels = Array.isArray(d.releases) ? d.releases : [];
-  const newest = rels.filter((r) => r.assets && r.assets.length)[0] || null;
-  const newestDl = newest ? newest.assets.reduce((n, a) => n + (a.downloads || 0), 0) : null;
 
   $('[data-reach]').innerHTML = [
     rcell({ hero: true, label: 'unique repo visitors', window: 'rolling 14 days · github.com',
       value: metric(t.views && t.views.uniques, trafficWhy),
       caveat: 'The only tile here that counts PEOPLE. GitHub de-duplicates by visitor — humans who opened the repo, not machines or CI.' }),
-    rcell({ label: 'bundle downloads', window: 'lifetime, all releases',
-      value: metric(d.totalAssetDownloads, 'no release data returned'),
-      caveat: 'Downloads, NOT people — GitHub exposes no unique-downloader field for assets. One machine can count many times.' }),
-    rcell({ label: newest ? 'pulled ' + newest.tag : 'newest release pulls', window: newest ? 'since ' + String(newest.publishedAt || '').slice(0, 10) : 'no published release found',
-      value: metric(newestDl, 'no assets on the newest release'),
-      caveat: 'The closest read on the ACTIVE installed base: every live machine pulls the current bundle once. An estimate of machines.' }),
+    rcell({ label: 'contributors', window: 'lifetime · merged code',
+      value: metric(d.contributorsCount, 'no contributor data returned'),
+      caveat: 'People with code in the tree, from GitHub\'s own merge history — a smaller, different circle than who filed issues or PRs.' }),
+    rcell({ label: 'watching', window: 'current · github.com subscribers',
+      value: metric(d.repo && d.repo.watchers, 'repo metadata unavailable'),
+      caveat: 'Standing interest: people who opted into notifications for every change, not a one-time visit.' }),
     rcell({ label: 'opted-in installs', window: 'lifetime · consenting machines only',
       value: metric(null, 'ak ships no opt-in counter — an honest gap, not a zero'),
       caveat: 'ak has no telemetry to count this. It renders "—" on purpose; see "Not instrumented yet" below.' }),
@@ -145,7 +142,8 @@ function renderReach(d) {
     ? '★ ' + num(stars) + ' stars · ' + num((d.repo && d.repo.forks) || 0) + ' forks'
     : 'repo metadata unavailable';
   $('[data-reach-note]').textContent = 'No counter here is a headcount, and the gap between them is the point: visitors are people, '
-    + 'bundle pulls are machines. npm downloads are excluded from this row — mirrors dominate them — and appear only in Momentum, as shape.';
+    + 'contributors and watchers are named GitHub accounts, opted-in installs would be machines. npm downloads sit out of this row on '
+    + 'purpose — see the note below the Momentum tiles.';
 }
 
 // ── momentum: 7d vs prior 7d inside each source's own series ───────────────────
@@ -175,7 +173,38 @@ function renderMomentum(d) {
     mcell('npm downloads, last 7d', momentum(npmSeries), 'var(--accent-3)', 'npm range unavailable'),
   ].join('');
   $('[data-momentum-note]').textContent = 'Left to right, each tile sits further from a human. Unique visitors are people; cloners are machines '
-    + '(ak\'s own CI among them); npm downloads are dominated by mirrors and move with release cadence, not adoption — its last day is partial.';
+    + '(ak\'s own CI among them). npm downloads appear ONLY here, as shape, never as a reach number: mirrors, CI runners, and cache warmers '
+    + 're-pull the registry as often as a real install, and npm exposes no way to tell them apart — the trend is directional, the total is not a headcount. Its last day is partial.';
+}
+
+// ── project health: latest CI run + open Dependabot alerts ────────────────────
+function ciPill(latest) {
+  if (!latest) return { cls: '', text: 'no runs found' };
+  if (latest.status !== 'completed') return { cls: 'pending', text: latest.status || 'running' };
+  if (latest.conclusion === 'success') return { cls: 'ok', text: 'passing' };
+  return { cls: 'bad', text: latest.conclusion || 'failing' };
+}
+
+function renderHealth(d) {
+  const ci = d.ci || {};
+  const latest = ci.latest;
+  const ciCell = latest
+    ? (() => {
+        const pill = ciPill(latest);
+        return '<div class="hcell"><div class="top"><span class="pill ' + pill.cls + '">' + esc(pill.text) + '</span>'
+          + '<span>' + esc(latest.name || 'workflow') + '</span></div>'
+          + '<b><a href="' + safeUrl(latest.url) + '" target="_blank" rel="noopener">' + esc(agoLabel(latest.at)) + '</a></b>'
+          + '<span>latest CI run' + (Number.isFinite(ci.recentFailures) ? ' · ' + ci.recentFailures + '/' + ci.recentTotal + ' of the last ' + ci.recentTotal + ' failed' : '') + '</span></div>';
+      })()
+    : '<div class="hcell unknown"><b>—</b><span>latest CI run</span><span>no workflow runs found (Actions unused, or the token can\'t read them)</span></div>';
+
+  const alerts = metric(d.security && d.security.dependabotAlerts, 'no Dependabot permission (needs a token with security_events scope) or Dependabot not enabled');
+  const alertsCell = alerts.known
+    ? '<div class="hcell"><div class="top"><span class="pill ' + (alerts.v > 0 ? 'bad' : 'ok') + '">' + (alerts.v > 0 ? 'open' : 'clear') + '</span>'
+      + '<span>security</span></div><b>' + num(alerts.v) + '</b><span>open Dependabot alert' + (alerts.v === 1 ? '' : 's') + '</span></div>'
+    : '<div class="hcell unknown"><b>—</b><span>open Dependabot alerts</span><span>' + esc(alerts.why) + '</span></div>';
+
+  $('[data-health]').innerHTML = ciCell + alertsCell;
 }
 
 // ── since you last looked: cumulative deltas only (Rule 2) ────────────────────
@@ -310,6 +339,7 @@ function renderGaps(d) {
   const out = [];
   const t = d.traffic || {};
   if (!t.configured) out.push(['config', 'Clones, views, and referrers are dark.', 'No GITHUB_TOKEN / GH_TOKEN / gh auth token with push access resolved. Every traffic panel says so rather than showing 0.']);
+  out.push(['design', 'npm download counts, shown as trend only — never as a reach number.', 'Mirrors, CI runners, and cache warmers hit the npm registry as often as a real install, and api.npmjs.org has no field to tell them apart. The daily series still moves with real release cadence, so Momentum uses it for shape (up/down) — but no absolute npm total appears as "how many people," because that would overstate reach.']);
   if (d.repo && d.repo.stars > 0 && !((d.people && d.people.stargazers) || []).length) out.push(['config', 'The ' + num(d.repo.stars) + ' stargazers are counted but unnamed.', 'GET /stargazers answers 401 without a token — the count is public, the list is not.']);
   out.push(['code', 'Opt-in install / search telemetry.', 'ak ships no phone-home counter, so "opted-in installs" reads "—". Building one is a code change, not a config toggle — hence a gap, never a fabricated zero.']);
   out.push(['code', 'The actual words people wrote.', 'The collector maps each thread to {number,title,state,isPR,url,at} and drops comment bodies, reactions, and sentiment. This page proves a conversation happened and links to it — it does not quote or score it.']);
@@ -340,6 +370,7 @@ function render(d) {
   renderPeople(d, s, base);
   renderFeed(s, since.newIds);
   renderMomentum(d);
+  renderHealth(d);
   renderReferrers(d);
   renderGaps(d);
   renderDoors(d);
