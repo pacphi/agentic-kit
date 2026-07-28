@@ -49,6 +49,7 @@ body{
 /* ── token gate (dashboard requires a per-session token, same contract as
    admin — ADR-0014) — hides the rest of the page via body.gated below ── */
 .gate{position:fixed;inset:0;z-index:50;display:flex;align-items:center;justify-content:center;background:var(--bg);padding:24px}
+.gate[hidden]{display:none}
 .gate-card{max-width:460px;background:var(--panel);border:1px solid var(--line);border-radius:var(--r);padding:26px 28px}
 .gate-card p{font-size:14px;color:var(--ink-2);margin:0 0 14px;line-height:1.5}
 .gate-card code{font-family:var(--mono);color:var(--accent);font-size:12.5px}
