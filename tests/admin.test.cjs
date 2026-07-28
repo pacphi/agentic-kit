@@ -75,7 +75,7 @@ function ghFixtures(url) {
   }
   if (/\/repos\/pacphi\/agentic-kit\/stargazers/.test(url)) return { body: [{ login: 'carol' }, { login: 'pacphi' }] };
   if (/\/repos\/pacphi\/agentic-kit\/forks/.test(url)) return { body: [{ owner: { login: 'dave' }, created_at: '2026-04-01T00:00:00Z' }] };
-  if (/\/repos\/pacphi\/agentic-kit\/contributors/.test(url)) return { body: [{ login: 'pacphi' }, { login: 'alice' }, { login: 'bob' }] };
+  if (/\/repos\/pacphi\/agentic-kit\/contributors/.test(url)) return { body: [{ login: 'pacphi' }, { login: 'alice' }, { login: 'bob' }, { login: 'dependabot[bot]' }] };
   if (/\/repos\/pacphi\/agentic-kit\/actions\/runs/.test(url)) {
     return { body: { workflow_runs: [
       { name: 'ci', status: 'completed', conclusion: 'success', created_at: '2026-07-27T00:00:00Z', html_url: 'https://github.com/pacphi/agentic-kit/actions/runs/1' },
@@ -159,8 +159,9 @@ async function main() {
     // feedback doors built from slug, never network
     assert(d.feedback.issues.includes('pacphi/agentic-kit') && d.feedback.discussions.includes('pacphi/agentic-kit'), 'doors from slug');
 
-    // contributors: owner included here (GitHub's own contributor list, unlike people.*)
-    eq(d.contributorsCount, 3);
+    // contributors: owner AND bots excluded, same discipline as people.contributors below
+    // (fixture carries pacphi + dependabot[bot] alongside alice/bob to prove both filters)
+    eq(d.contributorsCount, 2);
 
     // ci: latest run + failure count over the fetched page
     eq(d.ci.latest.conclusion, 'success');
@@ -295,6 +296,9 @@ async function main() {
       assert(r.body.includes('x-admin-token'), 'the client sends the admin token header');
       // the model import line must have been stripped (no bare module fetch)
       assert(!/from ['"]\.\/admin-model\.mjs['"]/.test(r.body), 'model import must be stripped at serve');
+      // stargazer names render as real profile links, not plain "@login" text
+      // (admin-view.mjs is embedded/not node-tested per ADR-0007 §5 — source presence only)
+      assert(r.body.includes('https://github.com/\' + esc(l)'), 'named stargazers must link to their GitHub profile');
     });
 
     await test('admin uses the dashboard theme contract without adding browser dependencies', async () => {

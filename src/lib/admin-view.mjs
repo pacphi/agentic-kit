@@ -274,14 +274,15 @@ function renderPeople(d, s, base) {
     starNote = num(stars) + ' stars exist, but GitHub returns the stargazer list only to an authenticated caller — set GITHUB_TOKEN to see who. '
       + 'Their absence here is a missing credential, not a missing person.';
   } else if (namedStars.length) {
-    // Built UNESCAPED — the sink esc()'s the whole starNote once (single-escape at
-    // the sink, the house rule; the logins were being double-escaped otherwise).
+    // Built pre-escaped, matching the pcard links below: each login is esc()'d at
+    // the point it's interpolated into an <a>, so the sink inserts starNote raw
+    // rather than escaping it again (that would turn the anchors into literal text).
     starNote = 'Plus ' + namedStars.length + ' stargazer' + (namedStars.length === 1 ? '' : 's') + ' with no dated activity: '
-      + namedStars.slice(0, 20).map((l) => '@' + l).join(', ') + '.';
+      + namedStars.slice(0, 20).map((l) => '<a href="https://github.com/' + esc(l) + '" target="_blank" rel="noopener">@' + esc(l) + '</a>').join(', ') + '.';
   }
   qual.textContent = known + ' named · bots excluded' + (s.botItems ? ' (' + s.botItems + ' bot items hidden)' : '');
   if (!known) {
-    host.innerHTML = '<div class="inbox-zero ridge">No external humans have filed an issue, opened a PR, or forked yet.' + (starNote ? ' ' + esc(starNote) : '') + '</div>';
+    host.innerHTML = '<div class="inbox-zero ridge">No external humans have filed an issue, opened a PR, or forked yet.' + (starNote ? ' ' + starNote : '') + '</div>';
     return;
   }
   host.innerHTML = '<div class="ppl">' + s.people.map((p) => {
@@ -298,7 +299,7 @@ function renderPeople(d, s, base) {
     if (p.forked) counts.push('forked');
     return '<div class="pcard' + (recent ? ' active' : '') + '"><div class="who"><a href="https://github.com/' + esc(p.login) + '" target="_blank" rel="noopener">@' + esc(p.login) + '</a>' + badges + '</div>'
       + '<p class="span">' + esc(counts.join(' · ') || 'engaged') + '<br>last seen ' + esc(agoLabel(p.last)) + ' · first seen ' + esc(agoLabel(p.first)) + '</p></div>';
-  }).join('') + '</div>' + (starNote ? '<p class="note">' + esc(starNote) + '</p>' : '');
+  }).join('') + '</div>' + (starNote ? '<p class="note">' + starNote + '</p>' : '');
 }
 
 function renderFeed(s, newIds) {

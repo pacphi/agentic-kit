@@ -10,6 +10,7 @@
 // network-free (NFR-6).
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import { isBot } from './admin-model.mjs';
 
 const execFileP = promisify(execFile);
 
@@ -130,7 +131,12 @@ export async function collectAdminStats({ fetchImpl = fetch, ghToken = '', repoS
     },
     npm: npmToBlock(npmRaw),
     people: buildPeople(issuesRaw, starsRaw, forksRaw, owner),
-    contributorsCount: Array.isArray(contributorsRaw) ? contributorsRaw.length : null,
+    // Owner + bots excluded, same discipline buildPeople already applies to
+    // contributors/stargazers/forks below — GitHub's raw contributor list
+    // otherwise counts the repo owner and dependabot[bot]/similar as "people".
+    contributorsCount: Array.isArray(contributorsRaw)
+      ? contributorsRaw.filter((c) => c.login && c.login !== owner && !isBot(c.login)).length
+      : null,
     ci: buildCi(runsRaw),
     security: { dependabotAlerts: Array.isArray(alertsRaw) ? alertsRaw.length : null },
     feedback: doors(repoSlug),
