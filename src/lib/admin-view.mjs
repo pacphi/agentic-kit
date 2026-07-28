@@ -49,7 +49,7 @@ function readBaseline() {
   try { return JSON.parse(localStorage.getItem(BASE_STORE) || 'null'); } catch { return null; }
 }
 
-// ── tabs: the dashboard's segmented-control idiom (ADR-0005), amber-keyed ─────
+// ── tabs: the dashboard's themed segmented-control idiom (ADR-0005) ───────────
 // Deep-link (#review) wins over the stored tab; the token fragment never
 // collides because bootToken() strips it before this runs.
 function positionThumb() {
@@ -343,7 +343,7 @@ function render(d) {
   renderReferrers(d);
   renderGaps(d);
   renderDoors(d);
-  // Tab badges: open items are red (waiting on YOU); new-since-baseline is amber.
+  // Tab badges: open items are red (waiting on YOU); new-since-baseline uses the accent.
   const newPeople = base ? s.people.filter((p) => base.people.indexOf(p.login) === -1).length : 0;
   setBadge('review', s.openItems.length || (since.newIds.length + newPeople), s.openItems.length ? 'fail' : 'warn');
   setBadge('humans', newPeople, 'warn');

@@ -7,7 +7,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { run } from './exec.mjs';
 import { rufloRoot, aqeRoot } from './paths.mjs';
-import { agentdbLocations, bsq3IsNative, bsq3Root, deriveBsq3Spec, rufloMemoryContexts, aidefencePresent } from './natives.mjs';
+import { agentdbLocations, bsq3IsNative, bsq3Root, deriveBsq3Spec, selfSpecConflicts, rufloMemoryContexts, aidefencePresent } from './natives.mjs';
 import { KIT_PKG } from './versions.mjs';
 import { scanRvf, quarantine } from './rvf.mjs';
 import { INSTALL_SPEC, INSTALL_ARGS, NIGHTLY_LABEL as RB_NIGHTLY_LABEL, nightlyAgentPlist as rbNightlyPlist, present as rbPresent, latestVersion as rbLatest, recordInstalledRelease as rbRecord } from './ruvnet-brain.mjs';
@@ -62,7 +62,21 @@ export async function ensureNativeBsq3(dir, { runner = run } = {}) {
     // EOVERRIDE-rejected in a tree that pins better-sqlite3 (ruflo root pins
     // 12.9.0, @claude-flow/cli pins ^12.9.0) — verified live. The derived spec
     // also raises stale 12.x pins to Node 26's first supported release.
-    const installed = await npmInstallInto(dir, `better-sqlite3@${deriveBsq3Spec(dir)}`, runner);
+    const spec = deriveBsq3Spec(dir);
+    // The bump above only rewrites the value ak passes to `npm install` — it
+    // doesn't touch package.json. When `dir` declares better-sqlite3 itself
+    // (overrides/optionalDependencies/dependencies), npm requires those
+    // self-declared fields to agree with each other AND with the explicit
+    // install spec, or it's EOVERRIDE — verified live: bumping only the
+    // install spec (leaving `overrides: ^12.9.0` in place) failed with
+    // "conflicts with direct dependency"; bumping `overrides` alone then
+    // failed with "Override ... conflicts with direct dependency" against
+    // the still-stale `optionalDependencies`. All conflicting fields have to
+    // move together before the install runs.
+    for (const field of selfSpecConflicts(dir, spec)) {
+      await runner('npm', ['pkg', 'set', `${field}.better-sqlite3=${spec}`], { cwd: dir, timeout: 30_000 });
+    }
+    const installed = await npmInstallInto(dir, `better-sqlite3@${spec}`, runner);
     if (bsq3IsNative(dir)) return { ok: true, how: 'native installed' };
     pkgRoot = bsq3Root(dir);
     if (!pkgRoot) {

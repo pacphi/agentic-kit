@@ -1,10 +1,11 @@
 // x dashboard — a read-only local web dashboard for the kit's health.
 //
 // Boots a loopback-only HTTP server (127.0.0.1) that serves a single
-// self-contained page plus a /api/status JSON endpoint mirroring
-// `ak status --json` (plus version drift, improvement.json, and the health
-// ring). Runs FOREGROUND and blocks until Ctrl-C; nothing is detached and
-// nothing mutates state.
+// self-contained page plus read-only status, usage, and live-session endpoints.
+// The live view tails metadata from Claude/Codex and optional explicitly
+// registered ruflo/AQE/dual-run JSONL sources. Runs FOREGROUND and blocks until
+// Ctrl-C; nothing is detached and nothing mutates state.
+import path from 'node:path';
 import { startDashboard } from '../../lib/dashboard-server.mjs';
 import { openInBrowser } from '../../lib/browser.mjs';
 import { ok, info, dim, warn } from '../../lib/output.mjs';
@@ -12,6 +13,7 @@ import { ok, info, dim, warn } from '../../lib/output.mjs';
 export const options = {
   port: { type: 'string' },
   'no-open': { type: 'boolean', default: false },
+  'live-source': { type: 'string', multiple: true },
 };
 
 export const help = `ak dashboard — read-only local health dashboard (localhost only)  [alias: ak x dashboard]
@@ -19,9 +21,10 @@ export const help = `ak dashboard — read-only local health dashboard (localhos
 Serves a self-contained web panel that visualizes the same subsystem rows
 \`ak status\` reports — versions, natives, security, learning, providers, hosts,
 mcp, ruvnet-brain, aqe — plus version drift and a learning-history sparkline.
-Bound to 127.0.0.1; auto-refreshes every 5s. Read-only: it never changes state.
-Nothing leaves your machine — the page is fully self-contained (no external
-fetches, no internet). It opens in your default browser automatically.
+Bound to 127.0.0.1; health polling defaults to 30s and the Live tab streams
+metadata with SSE. Read-only: it never changes state. Nothing leaves your
+machine — the page is fully self-contained (no external fetches, no internet).
+It opens in your default browser automatically.
 
 Runs in the foreground — press Ctrl-C to stop.
 
@@ -30,13 +33,38 @@ Usage: ak x dashboard [options]
 Options:
   --port N    port to bind on 127.0.0.1 (default 7431; 0 = ephemeral)
   --no-open   don't auto-open the browser (just print the URL — for headless use)
+  --live-source 'surface=path'
+              observe an explicit structured JSONL source; repeatable.
+              surface is ruflo, aqe, or dual-run
 
 Examples:
   ak x dashboard              serve + open http://127.0.0.1:7431
   ak x dashboard --port 8080  pick a port
-  ak x dashboard --no-open    print the URL only (SSH / headless)`;
+  ak x dashboard --no-open    print the URL only (SSH / headless)
+  ak x dashboard --live-source 'aqe=.agentic-qe/live-events.jsonl'`;
+
+/** Parse explicit structured telemetry sources without guessing upstream stores. */
+export function parseLiveSources(raw, cwd = process.cwd()) {
+  const values = Array.isArray(raw) ? raw : raw ? [raw] : [];
+  const sources = [];
+  for (const value of values) {
+    const match = /^(ruflo|aqe|dual-run)=(.+)$/.exec(String(value));
+    if (!match || !match[2].trim()) {
+      throw new TypeError(`invalid --live-source ${value}; expected ruflo|aqe|dual-run=path`);
+    }
+    sources.push({ surface: match[1], file: path.resolve(cwd, match[2].trim()) });
+  }
+  return sources;
+}
 
 export async function run({ flags }) {
+  let structuredSources;
+  try {
+    structuredSources = parseLiveSources(flags['live-source'], process.cwd());
+  } catch (e) {
+    warn(e.message);
+    return 2;
+  }
   let port = 7431;
   if (flags.port !== undefined) {
     const p = Number(flags.port);
@@ -49,7 +77,11 @@ export async function run({ flags }) {
 
   let server;
   try {
-    server = await startDashboard({ port, cwd: process.cwd() });
+    server = await startDashboard({
+      port,
+      cwd: process.cwd(),
+      liveOptions: { structuredSources },
+    });
   } catch (e) {
     warn(`could not start dashboard: ${e.message}`);
     if (e.code === 'EADDRINUSE') info(`port ${port} is busy — try: ak x dashboard --port 0`);

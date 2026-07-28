@@ -70,6 +70,35 @@ function getRaw(port, rawPath) {
   });
 }
 
+function openSse(port, { headers = {}, onChunk = () => {}, path: route = '/api/live/events' } = {}) {
+  let req;
+  const opened = new Promise((resolve, reject) => {
+    req = http.request({
+      host: '127.0.0.1', port, path: route, method: 'GET',
+      headers: { accept: 'text/event-stream', ...headers },
+    }, (res) => {
+      res.setEncoding('utf8');
+      res.on('data', onChunk);
+      resolve(res);
+    });
+    req.on('error', reject);
+    req.end();
+  });
+  return { opened, close: () => req.destroy() };
+}
+
+function eventually(predicate, message, timeout = 1500) {
+  const started = Date.now();
+  return new Promise((resolve, reject) => {
+    const check = () => {
+      if (predicate()) return resolve();
+      if (Date.now() - started >= timeout) return reject(new Error(message));
+      setTimeout(check, 10);
+    };
+    check();
+  });
+}
+
 async function main() {
   const { startDashboard } = await import('file://' + MOD);
 
@@ -242,6 +271,20 @@ async function main() {
     let threw = false;
     try { maskTurns(turns, null); } catch { threw = true; }
     assert(threw, 'no masker → throw (fail closed); silently skipping masking is the bug this guards');
+  });
+
+  await test('maskTurns recursively masks nested tool arguments and results', async () => {
+    const secret = 'sk-live-NESTED012345';
+    const turns = [{
+      role: 'assistant',
+      tools: [{ name: 'shell', arguments: { command: `deploy --token ${secret}` } }],
+      result: { chunks: [{ text: `result ${secret}` }] },
+    }];
+    const out = maskTurns(turns, (s) => s.replaceAll(secret, '[MASKED]'));
+    const wire = JSON.stringify(out);
+    assert(!wire.includes(secret), 'nested tool data must pass through the server masker');
+    assert(wire.includes('[MASKED]'), 'nested strings should remain present only in masked form');
+    assert(JSON.stringify(turns).includes(secret), 'recursive masking must not mutate the source transcript');
   });
 
   await test('maskTurns preserves the non-string attribution fields (kind, prompt)', async () => {
@@ -443,6 +486,29 @@ async function main() {
       }
     });
 
+    await test('served HTML carries the read-only Live Sessions surface', async () => {
+      const r = await get(uiSrv.url);
+      for (const marker of [
+        'data-tab="live"', 'id="panel-live"', 'id="live-graph"',
+        'id="live-session-list"', 'id="live-transcript-list"', 'id="live-selection"',
+        'id="live-pause"', 'id="live-viewport"', 'id="live-canvas"',
+        'id="live-zoom-in"', 'id="live-zoom-out"', 'id="live-fit"',
+        'id="live-fit-selection"', 'id="live-reset-layout"',
+        'aria-label="Map controls"', 'new EventSource("/api/live/events")',
+        '"/api/live/transcripts/"',
+      ]) contains(r.body, marker);
+      for (const behavior of [
+        'addEventListener("wheel"', 'addEventListener("pointerdown"',
+        'addEventListener("pointermove"', 'setPointerCapture',
+        'Math.max(.25,Math.min(2.8', 'renderTranscript',
+      ]) contains(r.body, behavior);
+      assert(!/live-[^"]*"[^>]*>(?:send|cancel|chat|prompt)</i.test(r.body),
+        'the live surface must expose no write or chat control');
+      contains(r.body, 'window.AKDashboardOpenTranscript=function(id)');
+      contains(r.body, 'setTab("usage")');
+      contains(r.body, 'setUsageView("transcript",id)');
+    });
+
     await test('transcript labels attribute by kind — a tool result never renders as "you"', async () => {
       // The Messages API records tool results under role "user"; the renderer
       // must label from tn.kind, and the page must carry the pieces that do it:
@@ -557,8 +623,14 @@ async function main() {
       assert((await hdr({ 'sec-fetch-site': 'cross-site' })).status === 403, 'cross-site must be 403');
       assert((await hdr({ 'sec-fetch-site': 'same-site' })).status === 403, 'same-site is still another origin');
       assert((await hdr({ origin: 'https://evil.example' })).status === 403, 'a foreign Origin must be 403');
+      assert((await hdr({ origin: 'http://127.0.0.1:1' })).status === 403,
+        'a different loopback port is still a foreign origin');
+      assert((await hdr({ origin: `https://127.0.0.1:${uiSrv.port}` })).status === 403,
+        'the HTTPS origin cannot be the origin of this plain-HTTP server');
       // Our own page and non-browser clients must keep working.
       assert((await hdr({ 'sec-fetch-site': 'same-origin' })).status === 200, 'our own page must pass');
+      assert((await hdr({ origin: `http://127.0.0.1:${uiSrv.port}` })).status === 200,
+        'the exact dashboard origin must pass');
       assert((await hdr({ 'sec-fetch-site': 'none' })).status === 200, 'direct navigation must pass');
       assert((await hdr({})).status === 200, 'curl sends no fetch-metadata and must keep working');
     });
@@ -613,6 +685,390 @@ async function main() {
   } finally {
     await uiSrv.close();
   }
+
+  // ── Live Sessions: read-only snapshot + resumable, bounded SSE transport ──
+  const listeners = new Set();
+  const liveCalls = { start: 0, close: 0, subscribe: 0, unsubscribe: 0, replay: [] };
+  const liveEvents = [
+    { eventId: 'test:1', ingestSeq: 1, action: 'session.started', sessionId: 's1' },
+    {
+      eventId: 'test:2', ingestSeq: 2, action: 'agent.output', sessionId: 's1',
+      source: { artifact: '/Users/private/.codex/sessions/rollout-secret.jsonl' },
+      prompt: 'PRIVATE PROMPT', arguments: { token: 'PRIVATE ARGUMENT' },
+      result: 'PRIVATE RESULT', cwd: '/Users/private/Development/secret-project',
+    },
+  ];
+  const liveSnapshot = {
+    schemaVersion: 1,
+    cursor: 'test:2',
+    sessions: [{
+      id: 's1',
+      nodes: [{
+        id: 'n1',
+        source: { artifact: '/Users/private/.claude/projects/session.jsonl' },
+        response: 'PRIVATE RESPONSE',
+        toolResult: { text: 'PRIVATE TOOL RESULT' },
+        projectRoot: '/Users/private/Development/secret-project',
+      }],
+      edges: [],
+    }],
+  };
+  const live = {
+    start() { liveCalls.start++; },
+    snapshot() { return liveSnapshot; },
+    replay(cursor) {
+      liveCalls.replay.push(cursor);
+      if (cursor === 'test:1') return { reset: false, events: liveEvents.slice(1) };
+      return { reset: true, events: liveEvents };
+    },
+    subscribe(fn) {
+      liveCalls.subscribe++;
+      listeners.add(fn);
+      return () => { liveCalls.unsubscribe++; listeners.delete(fn); };
+    },
+    close() { liveCalls.close++; },
+  };
+  const liveSrv = await startDashboard({
+    port: 0, cwd: fixture, fetchStatus: async () => STUB_STATUS, usage: spyUsage().api,
+    live, liveHeartbeatMs: 100, liveMaxClients: 1,
+  });
+  let activeAtShutdown;
+  try {
+    await test('GET /api/live returns a no-store materialized snapshot and starts lazily once', async () => {
+      assert(liveCalls.start === 0, 'live collector must remain lazy until requested');
+      const r = await get(liveSrv.url + 'api/live');
+      assert(r.status === 200, 'expected 200, got ' + r.status);
+      contains(r.headers['content-type'] || '', 'application/json');
+      assert(r.headers['cache-control'] === 'no-store', 'live snapshots must never be cached');
+      assert(JSON.parse(r.body).cursor === 'test:2', 'snapshot cursor must survive');
+      assert(!r.body.includes('/Users/private'), 'snapshot provenance must not expose absolute paths');
+      for (const secret of ['PRIVATE RESPONSE', 'PRIVATE TOOL RESULT']) {
+        assert(!r.body.includes(secret), `snapshot must not expose ${secret}`);
+      }
+      await get(liveSrv.url + 'api/live');
+      assert(liveCalls.start === 1, 'live collector must start exactly once');
+    });
+
+    await test('GET /api/live/events sends init, named/id delta events and heartbeats', async () => {
+      let body = '';
+      const stream = openSse(liveSrv.port, { onChunk: (chunk) => { body += chunk; } });
+      const response = await stream.opened;
+      try {
+        assert(response.statusCode === 200, 'expected SSE 200');
+        contains(response.headers['content-type'] || '', 'text/event-stream');
+        assert(response.headers['cache-control'] === 'no-store', 'SSE must be no-store');
+        assert(response.headers.connection === 'keep-alive', 'SSE must keep the connection alive');
+        await eventually(() => body.includes('event: init'), 'initial snapshot event was not sent');
+        for (const secret of [
+          '/Users/private', 'PRIVATE PROMPT', 'PRIVATE ARGUMENT', 'PRIVATE RESULT',
+          'PRIVATE RESPONSE', 'PRIVATE TOOL RESULT',
+        ]) assert(!body.includes(secret), `SSE init/replay must not expose ${secret}`);
+        const emitted = {
+          eventId: 'test:3', ingestSeq: 3, action: 'tool.started', sessionId: 's1',
+          prompt: 'PRIVATE DELTA PROMPT',
+          args: { command: 'PRIVATE DELTA ARGUMENT' },
+          result: { text: 'PRIVATE DELTA RESULT' },
+          path: '/Users/private/Development/secret-project/private.txt',
+        };
+        for (const fn of listeners) fn(emitted);
+        await eventually(() => body.includes('id: test:3') && body.includes('event: delta'),
+          'named delta with event id was not sent');
+        for (const secret of [
+          '/Users/private', 'PRIVATE DELTA PROMPT', 'PRIVATE DELTA ARGUMENT', 'PRIVATE DELTA RESULT',
+        ]) assert(!body.includes(secret), `SSE delta must not expose ${secret}`);
+        await eventually(() => body.includes(': heartbeat'), 'heartbeat was not sent');
+        assert(!body.includes('/Users/private'), 'SSE provenance must not expose absolute paths');
+      } finally { stream.close(); }
+      await eventually(() => listeners.size === 0, 'disconnect did not remove SSE listener');
+    });
+
+    await test('Last-Event-ID resumes retained deltas and stale cursors force reset init', async () => {
+      let resumed = '';
+      const one = openSse(liveSrv.port, {
+        headers: { 'last-event-id': 'test:1' }, onChunk: (chunk) => { resumed += chunk; },
+      });
+      await one.opened;
+      try {
+        await eventually(() => resumed.includes('id: test:2'), 'retained delta was not replayed');
+        contains(resumed, '"reset":false');
+      } finally { one.close(); }
+
+      let reset = '';
+      const stale = openSse(liveSrv.port, {
+        headers: { 'last-event-id': 'test:0' }, onChunk: (chunk) => { reset += chunk; },
+      });
+      await stale.opened;
+      try {
+        await eventually(() => reset.includes('"reset":true'), 'stale cursor did not reset');
+        assert(!reset.includes('id: test:1'), 'reset must use its snapshot, not replay stale deltas');
+      } finally { stale.close(); }
+      assert(liveCalls.replay.includes('test:1') && liveCalls.replay.includes('test:0'),
+        'both Last-Event-ID values must reach replay()');
+    });
+
+    await test('cross-site live stream is rejected before subscribe/start work', async () => {
+      const before = liveCalls.subscribe;
+      const r = await new Promise((resolve, reject) => {
+        http.request({
+          host: '127.0.0.1', port: liveSrv.port, path: '/api/live/events', method: 'GET',
+          headers: { 'sec-fetch-site': 'cross-site' },
+        }, (res) => {
+          let body = '';
+          res.on('data', (chunk) => { body += chunk; });
+          res.on('end', () => resolve({ status: res.statusCode, body }));
+        }).on('error', reject).end();
+      });
+      assert(r.status === 403, 'cross-site SSE must be 403');
+      assert(liveCalls.subscribe === before, 'rejected SSE must not subscribe');
+    });
+
+    await test('an active SSE client is registered for dashboard shutdown cleanup', async () => {
+      activeAtShutdown = openSse(liveSrv.port);
+      await activeAtShutdown.opened;
+      await eventually(() => listeners.size === 1, 'active stream did not subscribe');
+      const excess = await getRaw(liveSrv.port, '/api/live/events');
+      assert(excess.status === 503, `excess SSE client must be rejected, got ${excess.status}`);
+      assert(listeners.size === 1, 'rejected client must not create a subscription');
+    });
+  } finally {
+    await liveSrv.close();
+    activeAtShutdown?.close();
+  }
+  await test('dashboard close releases SSE clients and closes the live service once', async () => {
+    assert(listeners.size === 0, 'all live listeners must be released');
+    assert(liveCalls.unsubscribe === liveCalls.subscribe, 'every subscription must be unsubscribed');
+    assert(liveCalls.close === 1, 'live service must close exactly once');
+  });
+
+  await test('SSE initialization loses neither snapshot-time nor post-replay events', async () => {
+    const raceListeners = new Set();
+    const during = {
+      eventId: 'race:1', ingestSeq: 1, sessionId: 'race-session',
+      action: 'agent.started', actor: { id: 'during', kind: 'agent' },
+    };
+    const afterReplay = {
+      eventId: 'race:2', ingestSeq: 2, sessionId: 'race-session',
+      action: 'tool.started', actor: { id: 'after-replay', kind: 'tool' },
+    };
+    let snapshotCalls = 0;
+    const raceLive = {
+      start() {},
+      async snapshot() {
+        snapshotCalls++;
+        // The event occurs while an async snapshot is being assembled and is
+        // represented in the returned materialization.
+        for (const fn of raceListeners) fn(during);
+        await Promise.resolve();
+        return {
+          schemaVersion: 1,
+          cursor: 'race:1',
+          sessions: [{
+            id: 'race-session', nodes: [{ id: 'during', kind: 'agent' }], edges: [],
+          }],
+        };
+      },
+      replay(cursor) {
+        assert(cursor === 'race:1', `unexpected race cursor ${cursor}`);
+        return {
+          reset: false,
+          // Access happens after replay() returns. Publishing from the getter
+          // deterministically exercises the replay-resolution/init handoff.
+          get events() {
+            for (const fn of raceListeners) fn(afterReplay);
+            return [];
+          },
+        };
+      },
+      subscribe(fn) {
+        raceListeners.add(fn);
+        return () => raceListeners.delete(fn);
+      },
+      close() {},
+    };
+    const raceSrv = await startDashboard({
+      port: 0, fetchStatus: async () => STUB_STATUS, usage: spyUsage().api,
+      live: raceLive, liveHeartbeatMs: 10_000,
+    });
+    let body = '';
+    const stream = openSse(raceSrv.port, { onChunk: (chunk) => { body += chunk; } });
+    try {
+      await stream.opened;
+      await eventually(() => body.includes('id: race:2'), 'post-replay event was lost');
+      assert(body.includes('"id":"during"'), 'snapshot-time event must remain in the init snapshot');
+      assert(!body.includes('id: race:1'), 'snapshot-time event must not be duplicated as a delta');
+      assert((body.match(/id: race:2/g) || []).length === 1,
+        'post-replay event must be delivered exactly once');
+      assert(snapshotCalls === 1, 'stream initialization must take one snapshot');
+    } finally {
+      stream.close();
+      await raceSrv.close();
+    }
+    assert(raceListeners.size === 0, 'race-test subscription must be cleaned up');
+  });
+
+  await test('live collector idles, restarts, cancels idle while connected, and closes once', async () => {
+    const idleCalls = { start: 0, close: 0 };
+    const idleListeners = new Set();
+    const idleLive = {
+      start() { idleCalls.start++; },
+      snapshot() { return { schemaVersion: 1, cursor: 'idle:0', sessions: [] }; },
+      replay() { return { reset: false, events: [] }; },
+      subscribe(fn) {
+        idleListeners.add(fn);
+        return () => idleListeners.delete(fn);
+      },
+      close() { idleCalls.close++; },
+    };
+    const idleSrv = await startDashboard({
+      port: 0, fetchStatus: async () => STUB_STATUS, usage: spyUsage().api,
+      live: idleLive, liveIdleMs: 40, liveHeartbeatMs: 10_000,
+    });
+    let stream;
+    try {
+      assert((await get(idleSrv.url + 'api/live')).status === 200, 'snapshot request failed');
+      assert(idleCalls.start === 1, 'snapshot must start collector once');
+      await eventually(() => idleCalls.close === 1, 'snapshot-only collector did not idle-close');
+
+      assert((await get(idleSrv.url + 'api/live')).status === 200, 'restart snapshot failed');
+      assert(idleCalls.start === 2, 'request after idle close must restart collector');
+      stream = openSse(idleSrv.port);
+      await stream.opened;
+      await new Promise((resolve) => setTimeout(resolve, 80));
+      assert(idleCalls.close === 1, 'active SSE client must cancel idle close');
+
+      stream.close();
+      stream = null;
+      await eventually(() => idleCalls.close === 2, 'last SSE disconnect did not idle-close');
+      assert(idleListeners.size === 0, 'idle close must release the SSE subscription');
+    } finally {
+      stream?.close();
+      await idleSrv.close();
+    }
+    assert(idleCalls.close === 2, 'shutdown must not double-close an already-idle collector');
+  });
+
+  await test('selected transcript SSE is separate, resumable and security hardened', async () => {
+    const listeners = new Set();
+    let closed = 0;
+    const event = {
+      schemaVersion: 1, eventId: 'tx-claude-s1:1', sessionKey: 'claude:s1',
+      sessionId: 's1', host: 'claude', kind: 'message',
+      actor: { id: 's1', role: 'assistant', label: null },
+      text: 'masked transcript text', tool: null,
+    };
+    const transcriptStream = {
+      snapshot() {
+        return { schemaVersion: 1, cursor: event.eventId,
+          sessionKey: 'claude:s1', events: [event] };
+      },
+      replay(cursor) {
+        return cursor === event.eventId
+          ? { reset: false, events: [] } : { reset: true, events: [event] };
+      },
+      subscribe(fn) {
+        listeners.add(fn);
+        return () => listeners.delete(fn);
+      },
+    };
+    const transcriptService = {
+      open(host, id) {
+        assert(host === 'claude' && id === 's1', 'route target did not reach service');
+        return transcriptStream;
+      },
+      close() { closed++; },
+    };
+    const srv = await startDashboard({
+      port: 0, fetchStatus: async () => STUB_STATUS, usage: spyUsage().api,
+      transcripts: transcriptService, liveHeartbeatMs: 10_000,
+    });
+    let body = '';
+    const stream = openSse(srv.port, {
+      path: '/api/live/transcripts/claude/s1/events',
+      headers: { 'Last-Event-ID': event.eventId },
+      onChunk: (chunk) => { body += chunk; },
+    });
+    try {
+      const response = await stream.opened;
+      assert(response.statusCode === 200, 'transcript stream must answer 200');
+      assert((response.headers['cache-control'] || '') === 'no-store', 'content must not cache');
+      assert(response.headers['x-content-type-options'] === 'nosniff', 'nosniff missing');
+      assert(response.headers['cross-origin-resource-policy'] === 'same-origin', 'CORP missing');
+      assert(response.headers['referrer-policy'] === 'no-referrer', 'referrer policy missing');
+      await eventually(() => body.includes('event: init'), 'transcript init missing');
+      assert(body.includes('masked transcript text'), 'transcript body was wrongly stripped');
+      assert(!body.includes('event: delta'), 'cursor replay duplicated the current event');
+    } finally {
+      stream.close();
+      await srv.close();
+    }
+    assert(listeners.size === 0, 'transcript subscription leaked');
+    assert(closed === 1, 'transcript service must close once');
+  });
+
+  await test('transcript route rejects malformed targets before opening a stream', async () => {
+    let opens = 0;
+    const srv = await startDashboard({
+      port: 0, fetchStatus: async () => STUB_STATUS, usage: spyUsage().api,
+      transcripts: { open() { opens++; throw new Error('should not open'); }, close() {} },
+    });
+    try {
+      assert((await getRaw(srv.port, '/api/live/transcripts/other/s1/events')).status === 400,
+        'unknown host must be 400');
+      assert((await getRaw(srv.port, '/api/live/transcripts/claude/..%2Fx/events')).status === 400,
+        'traversal id must be 400');
+      assert(opens === 0, 'invalid target reached transcript service');
+    } finally {
+      await srv.close();
+    }
+  });
+
+  await test('session playback route returns a deterministic seek manifest and releases its reader', async () => {
+    let releases = 0;
+    const playback = {
+      schemaVersion: 1, sessionKey: 'codex:s1', host: 'codex', sessionId: 's1',
+      range: { startedAt: '2026-07-27T12:00:00.000Z',
+        endedAt: '2026-07-27T12:00:03.000Z', durationMs: 3000,
+        eventCount: 1, truncated: false },
+      seek: { requestedMs: 1500, atMs: 1500, eventIndex: 0 },
+      live: { cursor: 'tx-codex-s1:1',
+        eventsEndpoint: '/api/live/transcripts/codex/s1/events' },
+      events: [{ eventId: 'tx-codex-s1:1', at: '2026-07-27T12:00:00.000Z',
+        elapsedMs: 0, text: 'masked evidence' }],
+    };
+    const srv = await startDashboard({
+      port: 0, fetchStatus: async () => STUB_STATUS, usage: spyUsage().api,
+      transcripts: {
+        open(host, id) {
+          assert(host === 'codex' && id === 's1', 'wrong playback target');
+          return {
+            playback({ atMs }) {
+              assert(atMs === 1500, 'seek offset was not parsed');
+              return playback;
+            },
+          };
+        },
+        release(host, id) {
+          assert(host === 'codex' && id === 's1', 'wrong release target');
+          releases++;
+        },
+        close() {},
+      },
+    });
+    try {
+      const r = await get(srv.url + 'api/live/playback/codex/s1?at=1500');
+      assert(r.status === 200, 'playback request failed');
+      assert(r.headers['cache-control'] === 'no-store', 'playback content must not cache');
+      assert(JSON.parse(r.body).live.cursor === 'tx-codex-s1:1', 'live handoff cursor missing');
+      assert((await get(srv.url + 'api/live/playback/codex/s1?at=NaN')).status === 400,
+        'invalid seek must be rejected');
+      assert((await getRaw(srv.port,
+        '/api/live/playback/codex/..%2Fx')).status === 400,
+      'playback traversal target must be rejected');
+    } finally {
+      await srv.close();
+    }
+    assert(releases === 1, 'playback reader was not released');
+  });
 
   console.log(`\n${failed === 0 ? '\x1b[32m' : '\x1b[31m'}${passed} passed, ${failed} failed\x1b[0m`);
   process.exit(failed === 0 ? 0 : 1);

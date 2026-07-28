@@ -98,7 +98,7 @@ responses = Σ over included sessions of session.responses
 - Totals: `totals.responses += s.responses` per included session
   (`usage-index.mjs:884`).
 - Render: `kpi("sessions", fmtNum(t.sessions), fmtNum(t.responses)+" assistant
-  turns", "")` (`dashboard-server.mjs:1983`).
+  turns", "")` (`dashboard/client.mjs`).
 
 **Worked example.** A session with 3 user turns and 2 assistant turns
 contributes `sessions += 1, responses += 2` — prompts (user turns) are tracked
@@ -259,13 +259,13 @@ tokens = input + output + cacheRead + cacheWrite   (summed across all rows in wi
 `usage-index.mjs:824` (`rowTokens = row.input + row.output + row.cacheRead +
 row.cacheWrite`) and rolled into `totals.tokens` via `addTo`
 (`usage-index.mjs:779`). Rendered with `fmtTok()`
-(`dashboard-server.mjs:1890-1896`): `≥1e9` → `"X.XB"`, `≥1e6` → `"X.XM"`,
+(`dashboard/client.mjs`): `≥1e9` → `"X.XB"`, `≥1e6` → `"X.XM"`,
 `≥1e3` → `"X.XK"`, else the rounded integer.
 
 The **token composition bar** immediately below the hero row (cache read /
 cache write / output / input, as four coloured segments) is the same four
-numbers as percentages of `t.tokens` (`dashboard-server.mjs:2019-2026`,
-`pct(a,b) = b ? a/b*100 : 0`, `dashboard-server.mjs:1904`).
+numbers as percentages of `t.tokens` (`dashboard/client.mjs`,
+`pct(a,b) = b ? a/b*100 : 0`, `dashboard/client.mjs`).
 
 **What "input" excludes.** For both providers, the `input` counter recorded
 per row is **gross input minus cached input** — Claude's parser reads
@@ -308,8 +308,8 @@ cacheRead + cacheWrite), **not** as a share of input alone. On the reference
 figures (`cacheRead = 1464.3B`, `tokens = 1495.2B`): `1464.3 / 1495.2 × 100 =
 97.93%`, which rounds to the displayed `97.9%` — confirming the denominator.
 
-**Source:** `dashboard-server.mjs:1981` (`cacheShare = pct(t.cacheRead,
-t.tokens)`), rendered `dashboard-server.mjs:1989`.
+**Source:** `dashboard/client.mjs` (`cacheShare = pct(t.cacheRead,
+t.tokens)`), rendered `dashboard/client.mjs`.
 
 **Why this number matters more than it looks like it should.** On the
 reference corpus, 96.3% of tokens were cache reads — pricing them as fresh
@@ -326,7 +326,7 @@ Codex CLI do by default.
 
 **Displayed as:** `ENGAGED TIME` hero tile — `403h`, subtitle `3286h summed`
 plus a `sessions overlap` note. Hovering the tile reveals a tooltip with all
-three tiers (the "ladder," `dashboard-server.mjs:1971-1977`).
+three tiers (the "ladder," `dashboard/client.mjs`).
 
 This is the single most heavily-caveated metric on the tab, because a naive
 version of it is **wrong by roughly 3×** on the reference corpus — worth
@@ -375,9 +375,9 @@ session data, and each needs its own fix:
   mergeIntervals(sessions.map(s => s._span))` (`usage-index.mjs:926`);
   `totals.spanMinutes` is a running sum of `s._span[1] - s._span[0]` across
   the loop (`usage-index.mjs:888`, finalized `usage-index.mjs:925`).
-- Render: `fmtHours()` (`dashboard-server.mjs:1897`, `≥10h` rounds to the
+- Render: `fmtHours()` (`dashboard/client.mjs`, `≥10h` rounds to the
   nearest hour, else one decimal place) and `fmtMins()`
-  (`dashboard-server.mjs:1898`, `≥60min` rounds to hours, else whole
+  (`dashboard/client.mjs`, `≥60min` rounds to hours, else whole
   minutes).
 
 **Worked example**, the reference-corpus measurement (14-day window, 582–584
@@ -429,7 +429,7 @@ session that runs from 23:58 local to 00:05 local is billed to the day its
 `tests/kit/usage-index.test.mjs:608`, "a session that opens before midnight
 is counted on its first billed day"). Accumulation:
 `byDay[row.day].cost += rowCost` (`usage-index.mjs:827`). Bar height:
-`h = maxDay ? max(2, cost/maxDay*100) : 2` (`dashboard-server.mjs:2000`) —
+`h = maxDay ? max(2, cost/maxDay*100) : 2` (`dashboard/client.mjs`) —
 every non-empty day gets a visually nonzero bar (floor of 2%), so a very
 cheap day is never rendered as invisible.
 
@@ -446,7 +446,7 @@ rather than a continuous 30-day series.
 **Displayed as:** two cards, `claude` and `codex`, each showing cost,
 session count, and total tokens; an idle host (`sessions == 0 && cost == 0`)
 renders "no sessions in window" instead of zeroed figures
-(`dashboard-server.mjs:2012-2016`).
+(`dashboard/client.mjs`).
 
 **Formula:** identical aggregation to every other bucket
 (`byProvider[s.provider]`, populated via `addTo()`, `usage-index.mjs:775-784`,
@@ -492,7 +492,7 @@ punchcard[dow + "-" + hour] += 1   per assistant/agent_message response, at its 
 `agent_message` (`usage-index.mjs:597-598`), merged into the window-level
 `punchcard` object per session (`usage-index.mjs:905`). Cell intensity is
 linear against the single busiest cell in the window:
-`v = pcMax ? n/pcMax : 0` (`dashboard-server.mjs:2036`) — this is a
+`v = pcMax ? n/pcMax : 0` (`dashboard/client.mjs`) — this is a
 **relative**, not absolute, scale, so the heatmap's brightest cell is always
 "the busiest hour-of-week in *this* window," not a fixed response-count
 threshold, and comparing brightness across two different date-range views is
@@ -542,9 +542,9 @@ count) once per Codex session, passed at the single point Codex calls
 `addUsage` (`usage-index.mjs:613-624`).
 
 **Render:** `bar(name, fmtUsd(cost), fmtTok(tokens)+" · "+fmtNum(responses)+"
-resp", pct(cost, topModelCost), false)` (`dashboard-server.mjs:2049-2052`),
+resp", pct(cost, topModelCost), false)` (`dashboard/client.mjs`),
 list itself sorted cost-descending by the shared `entries()` helper
-(`dashboard-server.mjs:1905-1910`).
+(`dashboard/client.mjs`).
 
 **Exceptions — a turn that never resolved to a model is excluded here, not
 shown as a $0 row.** A dropped connection, rate limit, or authentication
@@ -565,7 +565,7 @@ create a `byModel` row of any kind. It increments a separate
 (`usage-index.mjs:844`, alongside the existing `sidechain`/`threadSource`
 flags — inspectable in the Sessions tab, never hidden). When
 `totals.exceptions > 0`, the panel header shows a small `"· N
-dropped/errored turns excluded"` note (`dashboard-server.mjs:2053-2058`);
+dropped/errored turns excluded"` note (`dashboard/client.mjs`);
 when it's zero, the note renders empty rather than always claiming a
 count of zero.
 
@@ -591,7 +591,7 @@ N"` when more exist; each row shows `cost`, `N sess · minutes`.
 it masquerade as a sibling project. (The mislabelling this rule corrected is
 recorded in [Appendix A](#appendix-a--fix-history).)
 
-**Source:** ranking and truncation, `dashboard-server.mjs:2060-2069`
+**Source:** ranking and truncation, `dashboard/client.mjs`
 (`shown = projects.slice(0,8)`); accumulation via the same `addTo()`/
 `entries()` machinery as §10, keyed by `s.project` instead of `s.models`.
 
@@ -607,7 +607,7 @@ rather than silently absent from the total.
 **Displayed as:** a ranked bar list of categories, bar width relative to
 the top category's cost; each row shows `cost`, `N sess · $/sess`; a small
 confidence dot on classified rows (opacity `0.5 + confidence×0.5`,
-`dashboard-server.mjs:2076-2077`); `Unclassified` is always shown, never
+`dashboard/client.mjs`); `Unclassified` is always shown, never
 hidden, and carries no confidence dot.
 
 This is the only Scorecard metric that is **not** pure arithmetic over
@@ -678,9 +678,9 @@ coverage was `ai-title` 93%, tool mix 100%,
 cannot classify most sessions and layer 2 (title + tool-mix rules) carries
 the bulk of the load.
 
-**Render:** `dashboard-server.mjs:2072-2083`, sorted cost-descending via the
+**Render:** `dashboard/client.mjs`, sorted cost-descending via the
 shared `entries()` helper, with `$/sess = cost / max(sessions, 1)` guarding
-the zero-session edge case (`dashboard-server.mjs:2074`).
+the zero-session edge case (`dashboard/client.mjs`).
 
 **What this does not model:** the classifier reads only the session's
 *title* (Claude's own `ai-title`, written by the model itself at session
@@ -748,7 +748,7 @@ Anthropic which publishes a fetchable pricing document. OpenAI's rates in
 this table are therefore maintained by hand against OpenAI's own developer
 documentation and are the most drift-prone entries in the file — this is
 explicitly why `PRICES_AS_OF` is surfaced in the UI (`u-asof`,
-`dashboard-server.mjs:1990`) rather than assumed current.
+`dashboard/client.mjs`) rather than assumed current.
 
 | Model (kit key) | Input | Output | Cache read (0.1×, derived) |
 |---|---|---|---|
@@ -851,9 +851,9 @@ normalizer at `usage-index.mjs:560` keeps a flat `windows` list keyed by
 
 **Freshness is part of the number.** Both sides carry `fetchedAt`; the view
 renders "as of Nm ago" and a `stale` badge (Claude's tee is push-only, so it
-ages the moment sessions stop). Served by the `/api/limits` route
-(`dashboard-server.mjs:363`) and rendered by `renderLimits` (`:2128`), with
-`limRow` (`:2119`) coloring each bar by proximity to its cap.
+ages the moment sessions stop). The `/api/limits` route lives in
+`dashboard-server.mjs`; `renderLimits` and `limRow` in `dashboard/client.mjs`
+render and color each bar by proximity to its cap.
 
 **Limit-aware findings.** `detectLimitInsights` (`usage-insights.mjs:625`)
 applies the same evidence rules as every other detector — vendor percentages

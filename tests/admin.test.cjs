@@ -252,6 +252,30 @@ async function main() {
       assert(!/from ['"]\.\/admin-model\.mjs['"]/.test(r.body), 'model import must be stripped at serve');
     });
 
+    await test('admin uses the dashboard theme contract without adding browser dependencies', async () => {
+      const r = await req(admin.url);
+      eq(r.status, 200);
+      assert(/<html[^>]+data-theme=["']dark["']/.test(r.body), 'page has a deterministic theme before client startup');
+      assert(r.body.includes(':root[data-theme="dark"]'), 'dark theme variables are embedded');
+      assert(r.body.includes(':root[data-theme="light"]'), 'light theme variables are embedded');
+      assert(r.body.includes("'ak-dash-theme'"), 'admin and dashboard share the persisted theme preference');
+      assert(/data-theme-toggle[^>]+aria-label=["']switch to light theme["']/.test(r.body),
+        'theme toggle announces its initial action');
+      assert(r.body.includes('prefers-color-scheme: light'), 'system theme is used when no preference is stored');
+    });
+
+    await test('admin navigation exposes an accessible tab relationship', async () => {
+      const r = await req(admin.url);
+      const tabs = [...r.body.matchAll(/<button class="seg-btn"[^>]+>/g)].map((m) => m[0]);
+      const panels = [...r.body.matchAll(/<section class="panel"[^>]+>/g)].map((m) => m[0]);
+      eq(tabs.length, 5, 'all five admin sections are tabs');
+      eq(panels.length, 5, 'all five admin sections have panels');
+      assert(tabs.every((tag) => /role="tab"/.test(tag) && /aria-controls="panel-[^"]+"/.test(tag)),
+        'each tab identifies its controlled panel');
+      assert(panels.every((tag) => /role="tabpanel"/.test(tag) && /aria-labelledby="tab-[^"]+"/.test(tag)),
+        'each panel identifies its tab');
+    });
+
     await test('AC-1: /api/admin-stats with the RIGHT token → 200 full payload', async () => {
       const r = await req(admin.url + 'api/admin-stats', { headers: { 'x-admin-token': admin.token } });
       eq(r.status, 200);

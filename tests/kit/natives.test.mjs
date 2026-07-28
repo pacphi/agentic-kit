@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { bsq3Root, bsq3IsNative } from '../../src/lib/natives.mjs';
+import { bsq3Root, bsq3IsNative, selfSpecConflicts } from '../../src/lib/natives.mjs';
 
 function makeFixture({ withBinding }) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-natives-'));
@@ -76,4 +76,38 @@ test('bsq3Root follows a nested→hoisted move in-process (sync convergence bug)
   fs.rmSync(nested, { recursive: true, force: true }); // simulate npm dedupe mid-sync
   assert.equal(bsq3Root(fromDir), hoisted, 'resolves to the hoisted copy after the move');
   fs.rmSync(root, { recursive: true, force: true });
+});
+
+function writePkgJson(dir, data) {
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify(data));
+}
+
+test('selfSpecConflicts finds a stale optionalDependencies pin against a bumped spec', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-natives-selfconflict-'));
+  writePkgJson(dir, {
+    name: '@claude-flow/cli',
+    overrides: { 'better-sqlite3': '^12.10.0' },
+    optionalDependencies: { 'better-sqlite3': '^12.9.0' },
+  });
+  assert.deepEqual(selfSpecConflicts(dir, '^12.10.0'), ['optionalDependencies']);
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test('selfSpecConflicts is empty when every self-declared field already agrees', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-natives-noconflict-'));
+  writePkgJson(dir, {
+    name: '@claude-flow/cli',
+    overrides: { 'better-sqlite3': '^12.10.0' },
+    optionalDependencies: { 'better-sqlite3': '^12.10.0' },
+  });
+  assert.deepEqual(selfSpecConflicts(dir, '^12.10.0'), []);
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test('selfSpecConflicts ignores non-plain-semver declarations (workspace:/link:/etc.)', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-natives-nonsemver-'));
+  writePkgJson(dir, { name: 'x', dependencies: { 'better-sqlite3': 'link:../better-sqlite3' } });
+  assert.deepEqual(selfSpecConflicts(dir, '^12.10.0'), []);
+  fs.rmSync(dir, { recursive: true, force: true });
 });

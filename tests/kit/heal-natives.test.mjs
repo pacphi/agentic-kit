@@ -189,6 +189,48 @@ test('ensureNativeBsq3 installs the tree-derived override spec, never the hardco
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
+test('ensureNativeBsq3 reconciles a self-declared optionalDependencies pin before installing (EOVERRIDE fix)', async () => {
+  // Live regression: @claude-flow/cli's OWN package.json pinned better-sqlite3
+  // via both `overrides` (already bumped to Node 26's ^12.10.0) and
+  // `optionalDependencies` (still the stale ^12.9.0). npm requires a root
+  // package's self-declared fields for the same dependency to agree, so the
+  // stale optionalDependencies entry alone triggered EOVERRIDE even though the
+  // derived install spec matched `overrides`.
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-heal-selfconflict-'));
+  fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({
+    name: '@claude-flow/cli',
+    overrides: { 'better-sqlite3': '^12.10.0' },
+    optionalDependencies: { 'better-sqlite3': '^12.9.0' },
+  }));
+  const calls = [];
+  const runner = async (cmd, args, opts) => {
+    calls.push({ cmd, args, cwd: opts?.cwd });
+    if (cmd === 'npm' && args[0] === 'pkg') return { code: 0, stdout: '', stderr: '' };
+    if (args[0] === 'install' && String(args[1]).startsWith('better-sqlite3')) {
+      const pkg = path.join(opts.cwd, 'node_modules', 'better-sqlite3');
+      fs.mkdirSync(path.join(pkg, 'build', 'Release'), { recursive: true });
+      fs.writeFileSync(path.join(pkg, 'package.json'), JSON.stringify({ name: 'better-sqlite3', version: '12.10.0' }));
+      fs.writeFileSync(path.join(pkg, BINDING), '');
+      return { code: 0, stdout: '', stderr: '' };
+    }
+    return { code: 0, stdout: '', stderr: '' };
+  };
+
+  const r = await ensureNativeBsq3(dir, { runner });
+
+  assert.equal(r.ok, true, 'heal succeeds once the self-declared fields are reconciled');
+  const pkgSetCalls = calls.filter((c) => c.args[0] === 'pkg' && c.args[1] === 'set');
+  assert.ok(pkgSetCalls.some((c) => c.args[2] === 'optionalDependencies.better-sqlite3=^12.10.0'),
+    `optionalDependencies reconciled to the derived spec before install (saw ${JSON.stringify(calls.map((c) => c.args))})`);
+  assert.ok(!pkgSetCalls.some((c) => c.args[2].startsWith('overrides.')),
+    'overrides already agreed with the derived spec — left untouched');
+  const pkgSetIdx = calls.findIndex((c) => c.args[0] === 'pkg');
+  const installIdx = calls.findIndex((c) => c.args[0] === 'install');
+  assert.ok(pkgSetIdx >= 0 && pkgSetIdx < installIdx, 'reconciliation runs before the install');
+  assert.equal(bsq3IsNative(dir), true);
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
 // ── FR-1: healNatives also heals the ruflo memory runtime contexts ──────────
 
 test('healNatives heals @claude-flow/memory + /cli with each tree\'s derived spec (AC-1)', async () => {

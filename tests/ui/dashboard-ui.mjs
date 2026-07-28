@@ -205,6 +205,7 @@ const TABS = [
   ['runtime', '#panel-runtime'],
   ['intel', '#panel-intel'],
   ['usage', '#panel-usage'],
+  ['live', '#panel-live'],
 ];
 const USAGE_VIEWS = [
   ['score', '#v-score'],
@@ -238,6 +239,75 @@ const LIMITS_STUB = async () => ({
   },
 });
 
+const LIVE_SNAPSHOT = {
+  schemaVersion: 1,
+  cursor: 'live:3',
+  projects: [{
+    id: 'project:agentic-kit', label: 'agentic-kit',
+    sessions: ['codex:ui-live-session', 'claude:ui-review-session'],
+    sessionCount: 2, childSessionCount: 1, liveCount: 1, completedCount: 1,
+    providers: { codex: 1, claude: 1 }, updatedAt: new Date().toISOString(),
+  }],
+  health: {
+    claude: { status: 'ok', files: 2, events: 8, errors: 0, lastError: null },
+    codex: { status: 'error', files: 1, events: 3, errors: 1, lastError: '/Users/private/.codex/secret.jsonl invalid-json' },
+  },
+  sessions: [{
+    id: 'ui-live-session', key: 'codex:ui-live-session', project: 'agentic-kit',
+    projectKey: 'project:agentic-kit', host: 'codex', status: 'running', lifecycle: 'active',
+    updatedAt: new Date().toISOString(),
+    nodes: [
+      { id: 'ui-live-session', kind: 'session', role: 'primary', host: 'codex', surface: 'native', status: 'running', confidence: 'observed' },
+      { id: 'ui-live-agent', kind: 'subagent', label: 'Bohr', role: 'tester', host: 'codex', surface: 'ruflo', status: 'running', confidence: 'observed', lastAction: 'agent.output', observedAt: new Date().toISOString(), sourceAdapter: 'codex-state' },
+      { id: 'ui-live-tool', kind: 'tool', label: 'Read', host: 'codex', surface: 'native', status: 'running', confidence: 'observed', lastAction: 'tool.started', observedAt: new Date().toISOString(), sourceAdapter: 'codex-rollout' },
+      { id: 'ui-live-gate', kind: 'gate', role: 'qe-court', host: 'internal', surface: 'aqe', status: 'queued', confidence: 'planned' },
+    ],
+    edges: [
+      { id: 'spawn', source: 'ui-live-session', target: 'ui-live-agent', action: 'agent.spawned', confidence: 'observed' },
+      { id: 'read', source: 'ui-live-agent', target: 'ui-live-tool', action: 'tool.started', confidence: 'observed' },
+      { id: 'gate', source: 'ui-live-agent', target: 'ui-live-gate', action: 'evaluation.requested', confidence: 'planned' },
+    ],
+  }, {
+    id: 'ui-live-agent', key: 'codex:ui-live-agent', parentSessionId: 'ui-live-session',
+    parentSessionKey: 'codex:ui-live-session', rootSessionKey: 'codex:ui-live-session',
+    hierarchyState: 'child', navigationRoot: false,
+    project: 'agentic-kit', projectKey: 'project:agentic-kit', host: 'codex',
+    status: 'running', lifecycle: 'active', updatedAt: new Date().toISOString(),
+    nodes: [{ id: 'ui-live-agent', kind: 'session', role: 'tester', host: 'codex', status: 'running' }],
+    edges: [],
+  }, {
+    id: 'ui-review-session', key: 'claude:ui-review-session', project: 'agentic-kit',
+    projectKey: 'project:agentic-kit', host: 'claude', status: 'completed',
+    startedAt: new Date(Date.now() - 180_000).toISOString(),
+    updatedAt: new Date(Date.now() - 60_000).toISOString(),
+    nodes: [{ id: 'ui-review-session', kind: 'session', host: 'claude', status: 'completed' }],
+    edges: [],
+  }],
+};
+
+const LIVE_STUB = {
+  start: async () => {},
+  snapshot: async () => LIVE_SNAPSHOT,
+  replay: async () => ({ reset: false, events: [] }),
+  subscribe: () => () => {},
+  close: async () => {},
+};
+const TRANSCRIPT_STUB = {
+  open(host, id) {
+    const event = {
+      eventId: `tx-${host}-${id}:1`, sessionId: id, host, kind: 'message',
+      actor: { id: 'ui-live-session', role: 'assistant', label: 'Codex' },
+      text: 'Connected to the local transcript stream.',
+    };
+    return {
+      snapshot: () => ({ schemaVersion: 1, cursor: event.eventId, events: [event] }),
+      replay: () => ({ reset: false, events: [] }),
+      subscribe: () => () => {},
+    };
+  },
+  close() {},
+};
+
 async function main() {
   // The usage API is injected rather than reaching for the real stores, so the
   // default run is deterministic AND cannot touch the user's live index cache.
@@ -266,6 +336,8 @@ async function main() {
     }),
     usage,
     limits: LIMITS_STUB,
+    live: LIVE_STUB,
+    transcripts: TRANSCRIPT_STUB,
   });
 
   const browser = await chromium.launch({ channel: 'chrome', headless: !HEADED });
@@ -285,7 +357,36 @@ async function main() {
     consoleErrors.push(`${m.text()}${where}`);
   });
   page.on('pageerror', (e) => consoleErrors.push(String(e.message)));
-  page.on('requestfailed', (r) => failedRequests.push(`${r.url()} — ${r.failure()?.errorText}`));
+  page.on('requestfailed', (r) => {
+    // Leaving Live deliberately closes EventSource. Chromium reports that
+    // client-side teardown as ERR_ABORTED even though it is the expected,
+    // leak-preventing lifecycle behavior.
+    if (/\/api\/live\/(?:events|transcripts\/[^/]+\/[^/]+\/events)$/.test(r.url())
+      && r.failure()?.errorText === 'net::ERR_ABORTED') return;
+    failedRequests.push(`${r.url()} — ${r.failure()?.errorText}`);
+  });
+  await page.route(/\/api\/live\/playback\/(?:claude\/ui-review-session|codex\/ui-live-session)/, (route) => route.fulfill({
+    contentType: 'application/json',
+    body: JSON.stringify({
+      schemaVersion: 1, sessionKey: 'claude:ui-review-session',
+      startAt: new Date(Date.now() - 180_000).toISOString(),
+      endAt: new Date(Date.now() - 60_000).toISOString(), durationMs: 120_000,
+      events: [
+        { eventId: 'review:1', at: new Date(Date.now() - 170_000).toISOString(),
+          kind: 'message', actor: { id: 'ui-review-session', role: 'assistant' } },
+        { eventId: 'review:2', at: new Date(Date.now() - 90_000).toISOString(),
+          kind: 'tool', actor: { id: 'ui-review-session', role: 'assistant' },
+          target: { id: 'review-tool', role: 'tool', label: 'Read' },
+          relation: 'tool.started', tool: { callId: 'review-tool', name: 'Read', status: 'completed' } },
+      ],
+      transcript: { items: [
+        { id: 'review-turn-1', role: 'user', text: 'Review this implementation' },
+        { id: 'review-turn-2', role: 'assistant', text: 'Playback evidence loaded' },
+      ] },
+      seek: { requestedMs: null, atMs: 120_000, eventIndex: 0 },
+      live: { cursor: 'review:1', eventsEndpoint: '/api/live/transcripts/claude/ui-review-session/events' },
+    }),
+  }));
 
   try {
     await page.goto(srv.url, { waitUntil: 'networkidle' });
@@ -295,6 +396,7 @@ async function main() {
       await page.click(`[data-tab="${tab}"]`).catch(() => {});
       await page.waitForSelector(`${sel}:not([hidden])`, { timeout: 8000 }).catch(() => {});
       if (tab === 'usage') await page.waitForTimeout(1200); // lazy fetch
+      if (tab === 'live') await page.waitForTimeout(350); // segmented-thumb transition
       const text = await visibleText(page, sel);
       await shoot(page, `tab-${tab}`);
 
@@ -305,6 +407,384 @@ async function main() {
         `found ${arts.join(', ')} in visible text`);
     }
 
+    // ── Live Sessions: execution workspace + synchronized transcript ──
+    await page.click('[data-tab="live"]');
+    await page.waitForSelector('#live-nodes .live-node', { timeout: 8000 });
+    await page.waitForTimeout(80);
+    const liveShape = await page.evaluate(() => ({
+      sessions: document.querySelectorAll('#live-session-list > .live-session-family').length,
+      childSessions: document.querySelectorAll('#live-session-list .live-session-child').length,
+      nodes: document.querySelectorAll('#live-nodes .live-node').length,
+      edges: document.querySelectorAll('#live-edges .live-edge').length,
+      tools: document.querySelectorAll('#live-tools .live-tool').length,
+      anchorCores: document.querySelectorAll('#live-nodes .node-core').length,
+      workBubbles: document.querySelectorAll('#live-nodes .node-work').length,
+      cardNodes: document.querySelectorAll('#live-nodes .node-card').length,
+      graphRole: document.getElementById('live-graph')?.getAttribute('role'),
+      transcriptRole: document.getElementById('live-transcript-list')?.getAttribute('role'),
+      columns: getComputedStyle(document.querySelector('.live-workspace')).gridTemplateColumns,
+      transport: getComputedStyle(document.getElementById('live-playback')).position,
+    }));
+    check('live workspace renders agent anchors and owned tool satellites',
+      liveShape.sessions === 2 && liveShape.childSessions === 1
+        && liveShape.nodes === 3 && liveShape.tools >= 1
+        && liveShape.edges >= 2,
+      `shape was ${JSON.stringify(liveShape)}`);
+    check('execution graph and transcript expose accessible live-region semantics',
+      liveShape.graphRole === 'img' && liveShape.transcriptRole === 'log',
+      `roles were ${JSON.stringify(liveShape)}`);
+    check('cinematic map uses agent anchors and observed-work bubbles instead of card nodes',
+      liveShape.anchorCores === liveShape.nodes && liveShape.workBubbles === liveShape.nodes
+        && liveShape.cardNodes === 0,
+      `cinematic primitives were ${JSON.stringify(liveShape)}`);
+    check('desktop Live view is a persistent three-column workspace',
+      liveShape.columns.split(' ').length === 3,
+      `columns were ${JSON.stringify(liveShape.columns)}`);
+    check('session transport remains docked over the center stage',
+      liveShape.transport === 'absolute',
+      `transport positioning was ${JSON.stringify(liveShape.transport)}`);
+    const healthText = await visibleText(page, '#live-health');
+    check('live adapter health renders only status and aggregate counters',
+      /claude · ok · 2 files · 8 events · 0 errors/.test(healthText)
+        && /codex · error · 1 files · 3 events · 1 errors/.test(healthText)
+        && !/Users|secret|invalid-json/.test(healthText),
+      `health text was ${JSON.stringify(healthText)}`);
+    await page.click('#live-health-toggle');
+    const healthPlacement = await page.locator('#live-health').boundingBox();
+    const sourceTrigger = await page.locator('#live-health-toggle').boundingBox();
+    check('source inspector stays within the viewport and does not cover its trigger',
+      healthPlacement.x >= 0 && healthPlacement.y >= sourceTrigger.y + sourceTrigger.height
+        && healthPlacement.x + healthPlacement.width <= 1440,
+      `inspector ${JSON.stringify(healthPlacement)} trigger ${JSON.stringify(sourceTrigger)}`);
+    await page.keyboard.press('Escape');
+    check('Escape closes the source inspector and returns focus to its trigger',
+      await page.locator('#live-health').isHidden()
+        && await page.evaluate(() => document.activeElement?.id) === 'live-health-toggle',
+      'source inspector did not close accessibly');
+    const sessionIdentity = await visibleText(page, '[data-session="ui-live-session"]');
+    check('session row leads with provider and status instead of an opaque id',
+      /Codex/i.test(sessionIdentity) && /Working now/.test(sessionIdentity)
+        && !/ui-live-session/.test(sessionIdentity),
+      `session identity was ${JSON.stringify(sessionIdentity)}`);
+    check('session state uses human evidence language instead of adapter absence',
+      !/Status not reported/.test(await visibleText(page, '#panel-live')),
+      'Live view exposed the missing telemetry field instead of a human session state');
+    const workerFreshness = await visibleText(page, '.live-session-child');
+    check('sessions without a start boundary show freshness instead of epoch-sized duration',
+      /Working now · (just now|\d+s ago)/.test(workerFreshness)
+        && !/\d{4,}h/.test(workerFreshness),
+      `worker freshness was ${JSON.stringify(workerFreshness)}`);
+    check('Live navigation is project-first and keeps sessions within the selected project',
+      await page.locator('#live-project-list [data-project]').count() === 1
+        && /2 sessions/.test(await visibleText(page, '#live-project-list')),
+      'project catalog did not summarize its sessions');
+    check('Live navigator enters at projects and drills into a project session history',
+      await page.getAttribute('#live-browser', 'data-level') === 'projects',
+      'navigator did not enter at the project level');
+    await page.click('#live-project-list [data-project]');
+    check('project drill-in uses the same navigator with an explicit Back affordance',
+      await page.getAttribute('#live-browser', 'data-level') === 'sessions'
+        && await page.locator('#live-browser-back').isVisible(),
+      'project selection did not reveal the session level');
+    check('running sessions sort before completed review sessions',
+      await page.locator('#live-session-list [data-session]').first().getAttribute('data-session')
+        === 'ui-live-session',
+      'the live session was not first');
+    const boundedTools = await page.evaluate(() => {
+      const session = globalThis.AKLive.state.snapshot.sessions
+        .find((item) => item.key === 'codex:ui-live-session');
+      for (let index = 0; index < 12; index++) {
+        const id = `historical-tool-${index}`;
+        session.nodes.push({
+          id, kind: 'tool', toolName: index % 2 ? 'Read' : 'exec_command',
+          status: 'completed', observedAt: new Date(Date.now() - index * 1000).toISOString(),
+        });
+        session.edges.push({
+          id: `history-edge-${index}`, source: 'ui-live-session', target: id,
+          action: 'tool.completed',
+        });
+      }
+      globalThis.AKLive.render();
+      return {
+        visible: document.querySelectorAll('#live-tools .live-tool').length,
+        history: document.querySelector('.node-history')?.textContent,
+      };
+    });
+    check('completed tool history collapses into an owner-associated recent lane',
+      boundedTools.visible === 7 && /earlier operations/.test(boundedTools.history),
+      `bounded tool rendering was ${JSON.stringify(boundedTools)}`);
+    await page.click('[data-session="ui-review-session"]');
+    await page.waitForSelector('#live-mode[data-mode="review"]');
+    await page.waitForFunction(() => !document.getElementById('live-playback-range').disabled);
+    check('completed sessions enter a clearly distinguished review mode',
+      /REVIEW/.test(await visibleText(page, '#live-mode'))
+        && !(await page.locator('#live-playback-range').isDisabled())
+        && !(await page.locator('#live-resume-live').isVisible()),
+      'review badge or playback controls were unavailable');
+    const reviewToolsAtEnd = await page.locator('#live-tools .live-tool').count();
+    await page.fill('#live-playback-range', '0');
+    const reviewToolsAtStart = await page.locator('#live-tools .live-tool').count();
+    check('seeking deterministically rebuilds the cinematic canvas at the playhead',
+      reviewToolsAtEnd === 1 && reviewToolsAtStart === 0,
+      `review tools changed ${reviewToolsAtEnd} -> ${reviewToolsAtStart}`);
+    await page.click('#live-playback-toggle');
+    check('review controls expose play state, speed, seek, and resume-live',
+      await page.getAttribute('#live-playback-toggle', 'aria-label') === 'Pause session review'
+        && await page.locator('#live-playback-speed').isVisible(),
+      'playback controls did not enter playing state');
+    await page.click('#live-playback-toggle');
+    await page.click('[data-session="ui-live-session"]');
+    await page.waitForSelector('#live-mode[data-mode="live"]');
+    check('an active session offers explicit review while it continues live',
+      await page.locator('#live-enter-review').isVisible()
+        && !(await page.locator('#live-resume-live').isVisible()),
+      'active session did not offer Review session');
+    await page.click('#live-enter-review');
+    await page.waitForSelector('#live-mode[data-mode="review"]');
+    check('active-session review exposes an explicit return to the livestream',
+      await page.locator('#live-resume-live').isVisible(),
+      'Resume live was missing from active review');
+    await page.click('#live-resume-live');
+    await page.waitForSelector('#live-mode[data-mode="live"]');
+    check('Resume live deterministically restores live mode',
+      await page.locator('#live-enter-review').isVisible()
+        && !(await page.locator('#live-resume-live').isVisible()),
+      'mode controls did not return to live');
+    await page.waitForTimeout(120); // let the transcript SSE init/reset settle before local render assertions
+
+    // Transcript rendering uses text-only escaping, folds sensitive high-volume
+    // record kinds, searches locally, and synchronizes selection with the map.
+    const transcriptInit = await page.evaluate(() => {
+      globalThis.AKLive.addTranscript({
+        reset: true,
+        snapshot: { events: [{ eventId: 'nested-init', kind: 'message',
+          text: 'nested snapshot event', actor: { id: 'ui-live-session', role: 'assistant' } }] },
+      }, true);
+      return {
+        content: globalThis.AKLive.state.transcript.turns[0]?.content,
+        session: globalThis.AKLive.state.transcript.session,
+      };
+    });
+    check('transcript init consumes nested snapshot.events and keeps a canonical session key',
+      transcriptInit.content === 'nested snapshot event'
+        && transcriptInit.session === 'codex:ui-live-session',
+      `transcript init state was ${JSON.stringify(transcriptInit)}`);
+    await page.evaluate(() => globalThis.AKLive.addTranscript([
+      { id: 't-user', role: 'user', content: 'Please inspect the parser', agentId: 'ui-live-session' },
+      { id: 't-agent', role: 'assistant', content: 'Bohr is checking the parser', agentId: 'ui-live-agent' },
+      { id: 't-think', role: 'thinking', content: 'private reasoning', agentId: 'ui-live-agent' },
+      { id: 't-tool', role: 'tool', toolName: 'Read', content: '<img src=x onerror="globalThis.__liveXss=1">', agentId: 'ui-live-agent' },
+      { id: 't-rich-tool', type: 'tool', toolName: 'exec_command', command: 'pnpm test',
+        args: { cwd: '/masked/project' }, result: '136 passed', error: 'masked warning',
+        agentId: 'ui-live-agent' },
+    ], true));
+    const transcript = await visibleText(page, '#live-transcript-list');
+    check('persistent transcript distinguishes conversation, thinking, and tools',
+      /Please inspect/.test(transcript) && /Bohr is checking/.test(transcript)
+        && /Show thinking/.test(transcript) && /Show tool/.test(transcript),
+      `transcript was ${JSON.stringify(transcript)}`);
+    const transcriptOrder = await page.locator('#live-transcript-list .live-turn')
+      .evaluateAll((turns) => turns.map((turn) => turn.dataset.turn));
+    check('live transcript flows upward with newest evidence first',
+      transcriptOrder[0] === 't-rich-tool'
+        && transcriptOrder[transcriptOrder.length - 1] === 't-user',
+      `transcript order was ${JSON.stringify(transcriptOrder)}`);
+    check('transcript content is rendered defensively rather than interpreted as markup',
+      await page.locator('#live-transcript-list img').count() === 0
+        && await page.evaluate(() => globalThis.__liveXss) !== 1,
+      'untrusted transcript markup reached the DOM');
+    await page.locator('#live-transcript-list [data-turn="t-rich-tool"] details').click();
+    const richTool = await page.locator(
+      '#live-transcript-list [data-turn="t-rich-tool"] details',
+    ).innerText();
+    check('tool transcript preserves masked command, arguments, result, and error data',
+      /pnpm test/.test(richTool) && richTool.includes('/masked/project')
+        && /136 passed/.test(richTool) && /masked warning/.test(richTool),
+      `rich tool record was ${JSON.stringify(richTool)}`);
+    await page.fill('#live-transcript-search', 'Bohr');
+    check('transcript search filters the current local stream',
+      /Bohr is checking/.test(await visibleText(page, '#live-transcript-list'))
+        && !/Please inspect/.test(await visibleText(page, '#live-transcript-list')),
+      'search did not narrow transcript messages');
+    await page.fill('#live-transcript-search', '');
+    await page.locator('[data-node="ui-live-agent"]').focus();
+    await page.keyboard.press('Enter');
+    check('keyboard graph selection focuses the matching agent transcript',
+      !/Please inspect/.test(await visibleText(page, '#live-transcript-list'))
+        && /Bohr is checking/.test(await visibleText(page, '#live-transcript-list'))
+        && await page.locator('#live-transcript-clear-filter').isVisible(),
+      'agent selection and transcript filter diverged');
+    await page.click('#live-transcript-clear-filter');
+
+    // Camera controls preserve the point under the pointer and stay bounded.
+    const camera0 = await page.evaluate(() => ({ ...globalThis.AKLive.state.camera }));
+    await page.click('#live-zoom-in');
+    const cameraIn = await page.evaluate(() => ({ ...globalThis.AKLive.state.camera }));
+    check('Zoom in changes the map scale and readable percentage',
+      cameraIn.k > camera0.k && /%/.test(await visibleText(page, '#live-zoom')),
+      `camera ${JSON.stringify(camera0)} -> ${JSON.stringify(cameraIn)}`);
+    await page.click('#live-zoom-out');
+    check('Zoom out reverses the scale change',
+      (await page.evaluate(() => globalThis.AKLive.state.camera.k)) < cameraIn.k,
+      'zoom-out did not reduce scale');
+    const canvasBox = await page.locator('#live-canvas').boundingBox();
+    const cursor = { x: canvasBox.x + canvasBox.width * .72, y: canvasBox.y + canvasBox.height * .38 };
+    const wheelInvariant = await page.evaluate(({ x, y }) => {
+      const c = document.getElementById('live-canvas').getBoundingClientRect();
+      const before = { ...globalThis.AKLive.state.camera };
+      const local = { x: x - c.left, y: y - c.top };
+      const world = { x: (local.x - before.x) / before.k, y: (local.y - before.y) / before.k };
+      document.getElementById('live-canvas').dispatchEvent(new globalThis.WheelEvent('wheel', {
+        bubbles: true, cancelable: true, deltaY: -220, clientX: x, clientY: y,
+      }));
+      const after = { ...globalThis.AKLive.state.camera };
+      return {
+        before, after,
+        projected: { x: after.x + world.x * after.k, y: after.y + world.y * after.k },
+        local,
+      };
+    }, cursor);
+    check('wheel zoom is centered on the pointer',
+      wheelInvariant.after.k > wheelInvariant.before.k
+        && Math.abs(wheelInvariant.projected.x - wheelInvariant.local.x) < .5
+        && Math.abs(wheelInvariant.projected.y - wheelInvariant.local.y) < .5,
+      `wheel invariant was ${JSON.stringify(wheelInvariant)}`);
+    const clamps = await page.evaluate(() => {
+      const c = document.getElementById('live-canvas'), r = c.getBoundingClientRect();
+      for (let i = 0; i < 80; i++) c.dispatchEvent(new globalThis.WheelEvent('wheel', { bubbles: true, cancelable: true, deltaY: -1000, clientX: r.left + 10, clientY: r.top + 10 }));
+      const max = globalThis.AKLive.state.camera.k;
+      for (let i = 0; i < 160; i++) c.dispatchEvent(new globalThis.WheelEvent('wheel', { bubbles: true, cancelable: true, deltaY: 1000, clientX: r.left + 10, clientY: r.top + 10 }));
+      return { max, min: globalThis.AKLive.state.camera.k };
+    });
+    check('wheel zoom clamps to safe minimum and maximum scales',
+      clamps.max === 2.8 && clamps.min === .25, `clamps were ${JSON.stringify(clamps)}`);
+
+    const panBefore = await page.evaluate(() => ({ ...globalThis.AKLive.state.camera }));
+    await page.mouse.move(canvasBox.x + 18, canvasBox.y + 18);
+    await page.mouse.down();
+    await page.mouse.move(canvasBox.x + 83, canvasBox.y + 61, { steps: 4 });
+    await page.mouse.up();
+    const panAfter = await page.evaluate(() => ({ ...globalThis.AKLive.state.camera }));
+    check('dragging anywhere on empty canvas pans the execution map',
+      Math.abs(panAfter.x - panBefore.x - 65) < 1
+        && Math.abs(panAfter.y - panBefore.y - 43) < 1,
+      `pan ${JSON.stringify(panBefore)} -> ${JSON.stringify(panAfter)}`);
+    check('canvas overlays do not intercept pan gestures',
+      await page.evaluate(() => getComputedStyle(document.getElementById('live-empty')).pointerEvents)
+        === 'none',
+      'empty-state overlay intercepted the draggable canvas');
+
+    const nodeBox = await page.locator('[data-node="ui-live-agent"]').boundingBox();
+    const dragBefore = await page.evaluate(() => ({
+      transform: document.querySelector('[data-node="ui-live-agent"]').getAttribute('transform'),
+      edge: document.querySelector('[data-target="ui-live-agent"]').getAttribute('d'),
+    }));
+    await page.mouse.move(nodeBox.x + nodeBox.width / 2, nodeBox.y + nodeBox.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(nodeBox.x + nodeBox.width / 2 + 70, nodeBox.y + nodeBox.height / 2 + 45, { steps: 5 });
+    await page.mouse.up();
+    const dragAfter = await page.evaluate(() => ({
+      transform: document.querySelector('[data-node="ui-live-agent"]').getAttribute('transform'),
+      edge: document.querySelector('[data-target="ui-live-agent"]').getAttribute('d'),
+    }));
+    check('dragging a node updates both its position and connected edge',
+      dragAfter.transform !== dragBefore.transform && dragAfter.edge !== dragBefore.edge,
+      `drag ${JSON.stringify(dragBefore)} -> ${JSON.stringify(dragAfter)}`);
+    check('dragging an agent pins it in the visual model',
+      await page.getAttribute('[data-node="ui-live-agent"]', 'data-pinned') === 'true',
+      'dragged node was not pinned');
+    const cameraBeforeDelta = await page.evaluate(() => ({ ...globalThis.AKLive.state.camera }));
+    await page.evaluate(() => globalThis.AKLive.receive('delta', {
+      eventId: 'live:position-persist', sessionId: 'ui-live-session',
+      observedAt: new Date().toISOString(), host: 'codex', surface: 'native',
+      action: 'agent.output', status: 'running',
+      actor: { id: 'ui-live-agent', kind: 'subagent', label: 'Bohr', role: 'tester' },
+      source: { confidence: 'observed' },
+    }));
+    check('manual node position persists across live updates',
+      await page.getAttribute('[data-node="ui-live-agent"]', 'transform') === dragAfter.transform,
+      'node snapped back after a delta');
+    check('live deltas preserve the user camera',
+      await page.evaluate((before) => {
+        const after = globalThis.AKLive.state.camera;
+        return after.x === before.x && after.y === before.y && after.k === before.k;
+      }, cameraBeforeDelta),
+      `camera changed from ${JSON.stringify(cameraBeforeDelta)} to ${
+        JSON.stringify(await page.evaluate(() => globalThis.AKLive.state.camera))}`);
+    await page.evaluate(() => globalThis.AKLive.receive('delta', {
+      eventId: 'claude:same-native-id', sessionId: 'ui-live-session',
+      sessionKey: 'claude:ui-live-session', project: 'agentic-kit',
+      projectKey: 'project:agentic-kit', observedAt: new Date().toISOString(),
+      host: 'claude', action: 'session.started', status: 'running',
+      actor: { id: 'claude-session-node', kind: 'session' },
+      source: { confidence: 'observed' },
+    }));
+    check('provider-qualified keys keep identical native session IDs isolated',
+      await page.evaluate(() => {
+        const sessions = globalThis.AKLive.state.snapshot.sessions;
+        const codex = sessions.find((s) => s.key === 'codex:ui-live-session');
+        const claude = sessions.find((s) => s.key === 'claude:ui-live-session');
+        return !!codex && !!claude
+          && !codex.nodes.some((node) => node.id === 'claude-session-node')
+          && claude.nodes.some((node) => node.id === 'claude-session-node');
+      }),
+      'a Claude delta mutated the Codex session with the same native ID');
+    await page.click('#live-reset-layout');
+    check('Reset layout clears manual pins and restores automatic coordinates',
+      await page.getAttribute('[data-node="ui-live-agent"]', 'data-pinned') === 'false'
+        && await page.getAttribute('[data-node="ui-live-agent"]', 'transform') !== dragAfter.transform,
+      'manual layout survived reset');
+    await page.click('#live-fit');
+    const fitted = await page.evaluate(() => ({ ...globalThis.AKLive.state.camera }));
+    check('Fit computes a finite bounded camera for the current graph',
+      Number.isFinite(fitted.x) && Number.isFinite(fitted.y)
+        && fitted.k >= .25 && fitted.k <= 2.5 && fitted.k !== 1,
+      `fit camera was ${JSON.stringify(fitted)}`);
+
+    await page.setViewportSize({ width: 680, height: 820 });
+    const responsive = await page.evaluate(() => {
+      const workspace = getComputedStyle(document.querySelector('.live-workspace'));
+      return { columns: workspace.gridTemplateColumns, canvasHeight: document.getElementById('live-canvas').clientHeight };
+    });
+    check('mobile layout stacks map and transcript with a usable canvas',
+      responsive.columns.split(' ').length === 1 && responsive.canvasHeight > 300,
+      `responsive styles were ${JSON.stringify(responsive)}`);
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.click('#live-pause');
+    check('Pause Live exposes its pressed state',
+      await page.getAttribute('#live-pause', 'aria-pressed') === 'true',
+      'aria-pressed did not become true');
+    const stableBefore = await page.getAttribute('[data-node="ui-live-session"]', 'transform');
+    await page.evaluate(() => globalThis.AKLive.receive('delta', {
+      schemaVersion: 1, eventId: 'live:4', sessionId: 'ui-live-session',
+      observedAt: new Date().toISOString(), host: 'codex', surface: 'ruflo',
+      action: 'agent.spawned', status: 'running',
+      actor: { id: 'ui-live-new', kind: 'subagent', role: 'reviewer' },
+      target: null, source: { confidence: 'correlated' },
+    }));
+    check('Pause Live freezes queued topology changes',
+      await page.locator('[data-node="ui-live-new"]').count() === 0,
+      'queued node rendered while paused');
+    await page.click('#live-pause');
+    await page.waitForSelector('[data-node="ui-live-new"]');
+    check('resume applies every queued topology change',
+      await page.locator('[data-node="ui-live-new"]').count() === 1,
+      'queued node did not render on resume');
+    check('existing nodes retain stable coordinates when topology grows',
+      await page.getAttribute('[data-node="ui-live-session"]', 'transform') === stableBefore,
+      'existing node position changed');
+
+    await page.click('[data-tab="usage"]');
+    check('leaving Live tears down graph and transcript EventSources',
+      await page.evaluate(() => globalThis.AKLive.state.source === null
+        && globalThis.AKLive.state.transcript.source === null
+        && globalThis.AKLive.state.active === false),
+      'a live source remained active');
+    await page.click('[data-tab="live"]');
+    await page.waitForTimeout(250);
+    check('returning to Live creates exactly one active stream',
+      await page.evaluate(() => !!globalThis.AKLive.state.source && globalThis.AKLive.state.active === true),
+      'live source did not reconnect');
     // ── every Usage sub-view ──
     await page.click('[data-tab="usage"]');
     await page.waitForTimeout(800);

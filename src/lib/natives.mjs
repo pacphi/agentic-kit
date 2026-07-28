@@ -106,6 +106,29 @@ export function deriveBsq3Spec(dir, fallback = '^12', nodeMajor = Number(process
   return nodeCompatibleBsq3Spec(fallback, nodeMajor);
 }
 
+// package.json fields that pin better-sqlite3 to a specific spec WITHIN `dir`
+// itself (as opposed to an ancestor's override). npm's arborist requires a
+// root package's own `overrides`, `optionalDependencies`, and `dependencies`
+// entries for the same package to agree with each other AND with whatever
+// version an explicit `npm install pkg@spec` in that directory requests
+// (EOVERRIDE otherwise) — verified live: bumping only `overrides` to Node
+// 26's ^12.10.0 while `optionalDependencies` still said ^12.9.0 traded an
+// "explicit install conflicts with override" error for an "override conflicts
+// with direct dependency" one. All self-declared fields must move together.
+const SELF_SPEC_FIELDS = ['overrides', 'optionalDependencies', 'dependencies'];
+
+/** Fields in `dir`'s OWN package.json that declare a plain-semver spec for
+ *  better-sqlite3 different from `spec` — installing `spec` there would trip
+ *  npm's EOVERRIDE. Empty array when nothing conflicts (including when the
+ *  package declares no such fields at all). */
+export function selfSpecConflicts(dir, spec) {
+  const pkg = readJson(path.join(path.resolve(dir), 'package.json'), {}) ?? {};
+  return SELF_SPEC_FIELDS.filter((field) => {
+    const declared = pkg[field]?.['better-sqlite3'];
+    return isPlainSemver(declared) && declared !== spec;
+  });
+}
+
 // A truthful load-test of the binding as node resolution finds it FROM `dir`: an
 // ABI-mismatched or absent binding throws on `require` (exactly `ruflo doctor`'s
 // "Could not locate the bindings file"), so requiring it, opening :memory:, and

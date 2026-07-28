@@ -67,7 +67,7 @@ degrade to `configured:false`, never an error). It is **read at runtime, persist
 kit, and never appears in the `/api/admin-stats` payload or the page** (NFR-3). The **page makes
 exactly one network call — a same-origin `fetch('/api/admin-stats')`** — and the server does every
 GitHub/npm fetch on its behalf. A strict CSP (`default-src 'none'`; `connect-src 'self'`;
-`script-src`/`style-src 'unsafe-inline'` for the two inline module scripts and the one inline style;
+`script-src`/`style-src 'unsafe-inline'` for the one inline module script and the one inline style;
 `img-src 'none'` since sparklines are inline SVG) makes "no external fetch" a header the browser
 enforces, not just a convention, and `Cache-Control: no-store` covers every `/api/*` response.
 
@@ -107,6 +107,8 @@ browser-side module fetch, preserving AC-5) while both files stay independently
 ```text
 src/commands/x/admin.mjs     CLI: flags (--port 7432, --no-open), foreground SIGINT loop
 src/lib/admin-server.mjs     node:http server, token mint, Host guard, auth, page assembly
+src/lib/admin-styles.mjs     dashboard-aligned dark/light presentation tokens (embedded)
+src/lib/admin-theme.mjs      theme preference/controller source (embedded)
 src/lib/admin-collect.mjs    server-side Promise.all fan-out → the typed payload (injectable fetchers)
 src/lib/admin-model.mjs      PURE model — imports NOTHING; embedded AND node-imported
 src/lib/admin-view.mjs       browser controller (embedded; not node-tested)
@@ -116,12 +118,17 @@ tests/admin.test.cjs         server tests over real HTTP with injected collect/f
 ```
 
 Dependency direction (acyclic): `admin.mjs → {admin-server, browser}`;
-`admin-server → {admin-collect, admin-model(source), admin-view(source)}`;
+`admin-server → {admin-collect, admin-model(source), admin-view(source), admin-styles,
+admin-theme}`;
 `admin-collect → admin-model`; `admin-model → ∅`. **`admin-model.mjs` is the sink — it imports
 nothing — so no cycle is possible.** `openInBrowser` moves out of `x/dashboard.mjs` into
 `src/lib/browser.mjs` (IP-4) and `dashboard.mjs` imports it from there rather than duplicating it.
 
-No new directories are introduced beyond these files.
+The admin presentation follows the dashboard's system-font, blue-accented Apple dark/light token
+language. `admin-styles.mjs` and `admin-theme.mjs` keep that browser-only concern out of the
+security boundary. Both are embedded into the self-contained document: no stylesheet or module
+fetch is added. The two consoles share the `ak-dash-theme` preference, with the stored choice taking
+precedence over the operating-system color scheme.
 
 ## Consequences
 

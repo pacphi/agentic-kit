@@ -39,6 +39,9 @@ ADR-0007 split `admin` from `dashboard` along **network egress**: `dashboard` pr
 It therefore sits squarely inside the dashboard's existing offline-first contract and ships as a
 sixth tab (`#usage`), not a new server.
 
+> **Current implementation note (2026-07-27):** Usage remains the sixth tab; Live Sessions is now a
+> seventh tab. Usage still loads lazily and remains separate from the live transcript tailers.
+
 The tab carries four in-page views — **Scorecard → Findings → Sessions → Transcript** — deep-linked
 as `#usage`, `#usage/findings`, `#usage/sessions`, `#usage/<sessionId>`, reusing the in-page reveal
 idiom ADR-0005 established rather than adding navigation concepts.
@@ -101,6 +104,15 @@ would make such a percentage honest, and an invented denominator is worse than n
 
 OpenAI publishes no pricing in `~/.codex/models_cache.json` (verified), so Codex rates are a
 maintained table and are **date-stamped** in the UI so staleness is visible rather than silent.
+
+> **Amended by [ADR-0011](0011-local-model-provenance-zero-cost-and-transcript-fidelity.md)
+> (2026-07-27):** this section assumes every transcript came from a metered vendor endpoint. A
+> session served by a **local** model (`ollama launch claude` / `ollama launch codex`) breaks three of
+> its premises at once — no cache accounting exists to apply the 0.1× multiplier to, token counts are
+> the provider's own approximations, and the model id is one the vendor documents how to alias onto a
+> Claude name. ADR-0011 therefore splits cost into `metered` / `local` ($0, exact) / `unpriced`, and
+> **retires `FALLBACK_PRICE` from the cost path**: pricing an unrecognised model at Sonnet-class rates
+> is the invented-denominator error this section rejects, applied to a rate instead of a limit.
 
 ### 4. Engaged time is the union of *active* intervals — three tiers, and the honest one leads
 
@@ -289,6 +301,15 @@ unchanged; `kind` is deliberately broader on the image-only edge, because "not c
 prompt" and "not the human" are different claims. Codex rollouts record only real prompts as
 `user_message` events, so every Codex user turn is `kind: prompt` by construction. Full mechanics:
 [`docs/TRANSCRIPTS.md`](../TRANSCRIPTS.md).
+
+> **Amended by [ADR-0011](0011-local-model-provenance-zero-cost-and-transcript-fidelity.md)
+> (2026-07-27):** this section's principle — *withheld content announces itself* — was scoped to
+> masking and truncation, both things **this panel** does. A **provider** withholds too: a local
+> Ollama-backed session reports no cache accounting and approximate token counts, and its titling and
+> mid-stream errors are served locally, so `cacheRead: 0` on a local session is a fact about the
+> provider and not about the work. ADR-0011 §7 extends the same announcement rule to provider
+> capability, so a reader can tell "this workload had no cache hits" from "this provider cannot
+> report cache hits" — which the panel currently renders identically.
 
 ## Consequences
 
