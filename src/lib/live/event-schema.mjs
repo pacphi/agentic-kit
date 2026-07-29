@@ -2,8 +2,9 @@ export const LIVE_SCHEMA_VERSION = 1;
 
 const HOSTS = new Set(['claude', 'codex', 'internal']);
 const SURFACES = new Set(['native', 'ruflo', 'aqe', 'plugin', 'skill', 'dual-run']);
-const CONFIDENCE = new Set(['observed', 'correlated', 'inferred', 'assumed', 'planned']);
-const EVIDENCE_FIELDS = ['project', 'provider', 'model', 'status', 'hierarchy'];
+const CONFIDENCE = new Set(['observed', 'configured', 'correlated', 'inferred', 'unknown', 'assumed', 'planned']);
+const PROVIDER_PROVENANCE = new Set(['observed', 'configured', 'inferred', 'unknown']);
+const EVIDENCE_FIELDS = ['host', 'project', 'provider', 'model', 'status', 'hierarchy'];
 const STATUS = new Set([
   'queued', 'running', 'quiescent', 'expired', 'blocked',
   'completed', 'failed', 'cancelled', 'unknown',
@@ -35,6 +36,15 @@ export function createLiveEvent(input, { now = () => new Date().toISOString() } 
     throw new TypeError('live event requires sessionId, action and actor.id');
   }
   const host = HOSTS.has(input.host) ? input.host : 'internal';
+  // Preserve the historical actor-level identity accepted from adapters while
+  // exposing the axes at the event level. Provider intentionally has no host
+  // fallback: a transcript proves its host, not which provider served it.
+  const provider = text(input.provider, 96) ?? text(input.actor?.provider, 96);
+  const model = text(input.model, 128) ?? text(input.actor?.model, 128);
+  const providerProvenance = PROVIDER_PROVENANCE.has(input.providerProvenance)
+    ? input.providerProvenance
+    : (PROVIDER_PROVENANCE.has(input.source?.fields?.provider)
+        ? input.source.fields.provider : 'unknown');
   const project = safeProjectLabel(input.project);
   const surface = SURFACES.has(input.surface) ? input.surface : 'native';
   const actorKind = ACTOR_KINDS.has(input.actor?.kind) ? input.actor.kind : 'agent';
@@ -52,6 +62,9 @@ export function createLiveEvent(input, { now = () => new Date().toISOString() } 
     spanId: text(input.spanId, 128),
     parentSpanId: text(input.parentSpanId, 128),
     host,
+    provider,
+    model,
+    providerProvenance,
     surface,
     project,
     projectKey: stableProjectKey(project),
@@ -60,8 +73,8 @@ export function createLiveEvent(input, { now = () => new Date().toISOString() } 
       kind: actorKind,
       label: text(input.actor?.label, 96),
       role: text(input.actor?.role, 96),
-      provider: text(input.actor?.provider, 96),
-      model: text(input.actor?.model, 128),
+      provider,
+      model,
     },
     action,
     target: input.target?.id ? {

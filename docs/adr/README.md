@@ -24,6 +24,7 @@ Consequences**, and cites the grounded source it rests on where relevant.
 | [0013](0013-admin-build-security-signals-and-honest-reach.md) | Admin: build/security signals, an honest Reach panel, and a pagination fix | Accepted |
 | [0014](0014-dashboard-auth-and-remediation.md) | Dashboard auth token, plus a security/quality remediation pass | Accepted |
 | [0015](0015-managed-codex-native-statusline.md) | Manage Codex's native user-wide status line without claiming rich-renderer parity | Accepted |
+| [0016](0016-capability-driven-integration-adapters.md) | Capability-driven host, provider, binding, projection, and observability adapters | Accepted |
 
 Theme: ADRs **0001–0006** define **dual-host LLM routing and leadership** — how `ak` lets ruflo route
 each development activity (architecture, implementation, testing, review, …) to the right host (Claude
@@ -69,3 +70,12 @@ new test coverage for the previously-untested machine-mutating commands.
 Claude's command-backed telemetry renderer. It adds opt-in, user-scoped presets,
 narrowly projects only the owned `[tui]` keys into `~/.codex/config.toml`, and
 keeps unowned or user-modified configuration outside `sync` and uninstall.
+
+**0016** separates execution hosts, inference providers, configuration projections, and
+observability sources into validated capability registries, with provider bindings as versioned
+intent between them. It standardizes detect/plan/apply/verify/undo, value-precise ownership, and
+field-level provenance; preserves legacy Claude/Codex routing; and proves the shape with one Ollama
+provider behind two hosts, OpenRouter behind an existing host, and OpenCode managed without becoming
+routable by accident. Its Ollama bindings are a structural multi-host proof; ADR-0011 remains the
+independent Proposed decision for observed local execution, catalogue-backed identity, usage
+pricing, and transcript fidelity.

@@ -22,6 +22,8 @@ const PORCELAIN = Object.assign(Object.create(null), {
   dashboard: () => import('../src/commands/x/dashboard.mjs'),
   admin: () => import('../src/commands/x/admin.mjs'),
   dual: () => import('../src/commands/dual.mjs'),
+  host: () => import('../src/commands/x/provider.mjs'),
+  provider: () => import('../src/commands/x/provider.mjs'),
   uninstall: () => import('../src/commands/uninstall.mjs'),
 });
 
@@ -31,6 +33,7 @@ const PLUMBING = Object.assign(Object.create(null), {
   'dashboard': () => import('../src/commands/x/dashboard.mjs'),
   'harvest': () => import('../src/commands/x/harvest.mjs'),
   'mcp': () => import('../src/commands/x/mcp.mjs'),
+  'host': () => import('../src/commands/x/provider.mjs'),
   'provider': () => import('../src/commands/x/provider.mjs'),
   'reference': () => import('../src/commands/x/reference.mjs'),
   'statusline': () => import('../src/commands/x/statusline.mjs'),
@@ -47,6 +50,8 @@ Usage (ak = alias of agentic-kit):
   ak dashboard       open the local web dashboard (localhost; auto-opens browser)  [--port N] [--no-open]
   ak admin           maintainer-only telemetry admin (localhost; GitHub/npm egress)  [--port N] [--no-open]
   ak dual            run a Claude+Codex collaboration swarm (dual-host)  [run <template> "task"] [--dry-run]
+  ak host            manage agent hosts, routing, and provider bindings  [status|pick|refresh|off]
+  ak provider        deprecated alias for ak host; removed before the stable release
   ak uninstall       leave cleanly                                      [--this-project] [--purge]
 
   When in doubt: ak sync
@@ -67,7 +72,8 @@ Plumbing (power users) — each takes --help:
   ak x dashboard [--port N]    read-only local health dashboard (localhost only)
   ak x harvest [--dry-run]     opt-in learning-write: replay experiences into the substrate
   ak x mcp [status|pick|off]   MCP registration + tool-family deny rules
-  ak x provider [status|pick|off]   detect claude/codex CLIs; wire ruflo + aqe hosts/providers
+  ak x host [status|pick|refresh|off]   manage hosts, routing, and provider bindings
+  ak x provider [status|pick|refresh|off]   deprecated alias; removed before the stable release
   ak x reference [diff|sync]   CLAUDE.md managed-block inspection/reconcile
   ak x statusline [status|codex native|codex extended|codex off]   manage Codex's native user status line
   ak x verify [learning|security|aqe|providers|harvest|all]   deep proofs (slow, spawns real CLIs)
@@ -80,6 +86,7 @@ async function main() {
   const argv = process.argv.slice(2);
   let cmd = argv[0];
   let rest = argv.slice(1);
+  let deprecatedProvider = cmd === 'provider';
 
   if (cmd === '--help' || cmd === '-h' || cmd === 'help') {
     console.log(argv.includes('--all') ? HELP_ALL : HELP);
@@ -97,6 +104,7 @@ async function main() {
     table = PLUMBING;
     cmd = rest[0];
     rest = rest.slice(1);
+    deprecatedProvider = cmd === 'provider';
     // `ak x`, `ak x --help`, `ak x -h` → the plumbing index.
     if (!cmd || cmd === '--help' || cmd === '-h') { console.log(HELP_ALL); return 0; }
     if (cmd === 'improvement-eval') {
@@ -120,6 +128,11 @@ async function main() {
     return 2;
   }
 
+  if (deprecatedProvider) {
+    const legacy = argv[0] === 'x' ? 'ak x provider' : 'ak provider';
+    const canonical = argv[0] === 'x' ? 'ak x host' : 'ak host';
+    console.error(`${legacy} is deprecated; use \`${canonical}\`. It will be removed before the stable release.`);
+  }
   const mod = await table[cmd]();
 
   // Per-command help — intercepted BEFORE run() so mutating commands

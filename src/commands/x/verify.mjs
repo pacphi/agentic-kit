@@ -9,7 +9,7 @@ import { aidefencePresent, securityPresent } from '../../lib/natives.mjs';
 import { scanRvf } from '../../lib/rvf.mjs';
 import { projectAqeDir } from '../../lib/paths.mjs';
 import { loadKitConfig } from '../../lib/config.mjs';
-import { HOSTS, detectHosts, aqeRouterFile } from '../../lib/providers.mjs';
+import { HOSTS, collectIntegrationFacts, aqeRouterFile } from '../../lib/providers.mjs';
 import { readJson } from '../../lib/settings.mjs';
 import { runHarvest } from '../../lib/harvest.mjs';
 import { ok, warn, fail, heading } from '../../lib/output.mjs';
@@ -85,7 +85,7 @@ async function verifyProviders() {
   const cfg = loadKitConfig();
   let good = true;
   // enabled hosts must actually be installed
-  const hosts = await detectHosts(process.cwd());
+  const hosts = (await collectIntegrationFacts({ cwd: process.cwd(), cfg })).hosts;
   for (const h of HOSTS) {
     if (!cfg.providers?.hosts?.[h.id]) continue;
     if (hosts[h.id].present) ok(`host '${h.id}' enabled and installed${hosts[h.id].version ? ` (v${hosts[h.id].version})` : ''}`);

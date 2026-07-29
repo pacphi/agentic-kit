@@ -26,6 +26,21 @@ ak setup --codex    # …or bring up Claude + Codex together in one shot
 - **Honest by construction:** every guard traces to a filed upstream issue, and `ak x verify` proves the paths end-to-end against real CLIs.
 - Cross-platform, **zero runtime dependencies** (SQLite embedded).
 
+## Hosts, providers, and bindings
+
+A **host** is the agent CLI driving a session (Claude Code, Codex CLI, or OpenCode). A
+**provider** serves inference (Anthropic, OpenAI, OpenRouter, or Ollama). A **projection** is a
+native configuration surface, and an **observability source** supplies transcript, usage, quota,
+or catalogue evidence. A **binding** connects a host to a provider through a supported projection
+and transport.
+
+Those axes do not imply one another. OpenRouter is a provider behind a host, not another host.
+Ollama can have independent bindings through Claude and Codex. OpenCode is a managed host but is
+not currently a primary or activity-routing target. Existing `providers.dualRouting` and
+`ak dual` remain Claude+Codex host-routing interfaces. Provider, model, and billing claims state
+whether they are observed, configured, inferred, or unknown. See
+[ADR-0016](docs/adr/0016-capability-driven-integration-adapters.md).
+
 ## Why this exists
 
 ruflo promises persistent memory, self-learning, security scanning, and background
@@ -51,6 +66,8 @@ ak status       read-only dashboard: what's true, what's drifted   [--json] [--d
 ak sync         converge to good: upgrade + heal + verify          [--dry-run] [--no-upgrade]
 ak dashboard    open the local web dashboard (auto-opens your browser)
                 [--port N] [--no-open] [--live-source 'surface=path']
+ak host         manage execution hosts, routing, and provider bindings
+                status | pick | refresh | off
 ak dual         run a Claude+Codex collaboration swarm (dual-host)   run <template> "<task>"  [--dry-run] [--escalate] [--route ...]
 ak x statusline manage Codex's native user-wide status line          status | codex native|extended|off
 ak uninstall    leave cleanly                [--dry-run] [--this-project] [--remove-ruflo] [--remove-aqe] [--purge] [--yes]
@@ -71,13 +88,14 @@ What the verbs cover:
 | **setup** | Installs/updates ruflo + agentic-qe + the **agentdb** CLI globally (handling npm ≥11.17's `allow-scripts` so natives build; agentdb is pinned to ruflo's bundled version so the shared learning store stays coherent), installs the **RuvNet Brain** (an offline knowledge base over the rUv stack, powering the `search_ruvnet` MCP — a ~2 GB one-time download, prompted; skip with `--no-ruvnet-brain`), deploys the token-audit skill, merges the managed guidance blocks into the machine-wide guidance files (`~/.claude/CLAUDE.md`, plus `~/.codex/AGENTS.md` on codex machines), offers one-time MCP registration (user scope, with a tool-family picker), and — inside a repo — initializes the project: sanitized `ruflo init`, absolute memory-path pin, a **verified** store→disk write, statusline footer, and a background daemon with **local-only ($0) workers** (token-spending AI workers stay opt-in behind upstream's machine-wide budget). Project scope triggers on a `.git` directory in the current folder; without one it's skipped with a note. `--project` forces it anyway (e.g. a not-yet-`git init`-ed folder), `--minimal` skips it, `--yes` accepts all prompts (non-interactive), `--no-aqe` / `--no-ruvnet-brain` / `--no-security` disable those subsystems, and `--reconfigure` re-offers MCP registration. `--codex` enables + installs the Codex host during setup (dual-mode; both hosts then run at once), and `--primary-host claude\|codex` picks which host leads (codex implies `--codex`). |
 | **status** | Per-subsystem ✓/⚠/✗ (versions, the kit's own version, **ruvnet-brain** (present + release drift, or "not installed"), natives (agentdb copies **and** ruflo's own memory runtime — the one `npx ruflo memory` loads — load-tested for a native better-sqlite3, not just the agentdb dirs), **memory-pin** (warns when `CLAUDE_FLOW_DB_PATH` points off the live DB), security, learning, aqe/RVF, **agentdb** (CLI present + coherent with ruflo's bundled version, or a store-skew warning), MCP, **hosts** (claude/codex — version + install method + **auth mode** (subscription $0 vs metered api-key), with the **primary** host marked and a *fail* when the primary host is absent), **providers** (host wiring + aqe fallback chain, or "drifted"/claude-only default), **routing** (per-activity Claude/Codex host+model policy, when dual-host — with drift vs the on-disk `agentOverrides`), daemons, guidance-file blocks (`~/.claude/CLAUDE.md`, project `AGENTS.md`, and `~/.codex/AGENTS.md` on codex machines), statusline), each drift row naming what `sync` would do about it — plus a **health-history** line that flags regressions since the last sync (learning shrank, native slots dropped, drift/security backslid). |
 | **sync** | The one convergence verb: upgrades first when a new release exists, then re-heals everything an upgrade wipes, then re-checks and reports. Included in that heal: it **installs any enabled frontier host** (claude/codex) that's entirely absent — never touching an external (mise/brew/native) install — and **re-applies provider wiring** (the `ENABLE_*` host env, the aqe fallback chain, and ruflo API providers) whenever it has drifted — and, on a dual-host project, **seeds/heals the per-activity routing policy** (materializing it into agentic-qe's `agentOverrides`, e.g. after an aqe upgrade first makes it eligible). It also **installs/repins the standalone `agentdb` CLI** to ruflo's bundled version (keeping the shared cognitive store coherent) and appends a **health-history snapshot** so `status` can flag regressions across syncs. It also **re-runs the RuvNet Brain installer** to pull the latest release when the on-disk KB has drifted (or installs it if absent, when enabled). It also **self-updates the kit**: when a newer `@pacphi/agentic-kit` exists it installs it as the *last* step (the new code applies from the next `ak` run, never mid-sync). Prerelease installs (`4.0.0-alpha.*`) track the `next` npm dist-tag as well as `latest`, so alphas see their successors; stable installs only ever follow `latest`. `--no-upgrade` skips the self-update along with the package upgrades. |
-| **dashboard** | Opens a read-only local web dashboard (`127.0.0.1:7431`, localhost-only, never detaches) with seven tabs: **Overview · Hosts & Routing · Providers · Runtime · Intelligence · Usage · Live**. The first five render `ak status` health and routing; Usage indexes local Claude/Codex transcripts on demand. Live groups work by project, then provider-branded root sessions with nested agent/worker threads, and pairs an interactive agent/tool execution canvas with a rich, server-masked transcript stream. Active sessions can be followed live or reviewed with synchronized play/pause/seek; completed sessions remain available for bounded playback. Live contains no chat or control plane. Ruflo, agentic-qe, and dual-run stores are not auto-discovered; register each trusted structured JSONL file with repeatable `--live-source 'surface=path'` (`surface` is `ruflo`, `aqe`, or `dual-run`). The page is self-contained and offline-first (no internet fetches; local files and loopback subprocesses/endpoints only). A fresh **per-session token** is minted at startup and required by every `/api/*` route (`x-dash-token` header; the launch URL carries it in the `#` fragment, same contract as `ak admin` — ADR-0007, ADR-0014) — this page serves full transcript text, so it is gated the same way admin already gated GitHub/npm stats. See [Live Sessions](docs/LIVE-SESSIONS.md) for coverage, syntax, and privacy limits. **Auto-opens your browser** (`--no-open` for headless/SSH); `--port N` changes the port; tabs deep-link (`#live`) and persist. Stop with Ctrl-C. (Also available as `ak x dashboard`.) |
+| **dashboard** | Opens a read-only local web dashboard (`127.0.0.1:7431`, localhost-only, never detaches) with seven tabs: **Overview · Hosts & Routing · Providers · Runtime · Intelligence · Usage · Live**. The first five render `ak status` health and routing; Usage indexes local Claude/Codex transcripts on demand. Live groups work by project, then host-branded root sessions with nested agent/worker threads and independently evidenced provider/model metadata, and pairs an interactive agent/tool execution canvas with a rich, server-masked transcript stream. Active sessions can be followed live or reviewed with synchronized play/pause/seek; completed sessions remain available for bounded playback. Live contains no chat or control plane. Ruflo, agentic-qe, and dual-run stores are not auto-discovered; register each trusted structured JSONL file with repeatable `--live-source 'surface=path'` (`surface` is `ruflo`, `aqe`, or `dual-run`). The page is self-contained and offline-first (no internet fetches; local files and loopback subprocesses/endpoints only). A fresh **per-session token** is minted at startup and required by every `/api/*` route (`x-dash-token` header; the launch URL carries it in the `#` fragment, same contract as `ak admin` — ADR-0007, ADR-0014) — this page serves full transcript text, so it is gated the same way admin already gated GitHub/npm stats. See [Live Sessions](docs/LIVE-SESSIONS.md) for coverage, syntax, and privacy limits. **Auto-opens your browser** (`--no-open` for headless/SSH); `--port N` changes the port; tabs deep-link (`#live`) and persist. Stop with Ctrl-C. (Also available as `ak x dashboard`.) |
 | **admin** | Opens the **maintainer admin** (`127.0.0.1:7432`, localhost-only, foreground) — the project-telemetry sibling of `dashboard`, with the same dark/light visual theme and persisted theme preference: unique repo visitors and cloners (GitHub traffic API, needs a push-access token via `GITHUB_TOKEN`/`GH_TOKEN`/`gh auth token` — panels degrade honestly without one), contributors and watchers, npm download momentum (last 7d vs prior 7d, sparklines — shown as trend only, never an absolute reach number, since mirrors/CI inflate the raw count), latest CI run status and open Dependabot alerts, a **"since you last looked"** delta strip over a local baseline, open issues/PRs from others (oldest first), and external humans ranked by recency (bots excluded). Access is gated by a **per-session token** carried in the URL fragment and sent header-only; the page makes **zero external fetches** (the server proxies GitHub/npm; your credential never reaches the page or the payload — ADR-0007, ADR-0013). Where `dashboard` is offline-first, `admin` does deliberate GitHub/npm egress — that contract split is why they're siblings, not tabs. `--port N`, `--no-open`; Ctrl-C stops. (Also available as `ak x admin`.) |
-| **dual** | Runs a **Claude + Codex collaboration swarm** using your per-activity routing policy: `ak dual run <template> "<task>"` materializes a dual-run config (each pipeline step assigned to the host + model your policy chose) and drives it via `claude-flow-codex`. Templates: `feature`, `security`, `refactor`, `packaging`, `release`. `--dry-run` prints the plan + config without running; `--route 'activity:host[:model]'` overrides one step for that run; `--escalate` retries once up the cross-vendor ladder on failure. Requires dual-host enabled (`ak setup --codex`, or `ak x provider pick --host claude,codex`). **Pre-flight refusal:** before spawning a worker, `dual run` refuses to start when ruflo's memory runtime lacks a native better-sqlite3 binding **and** the shared DB has an active native WAL (`-wal`/`-shm` sidecars) — the native WAL writer and the WASM `ruflo memory store` cannot share that DB without corrupting it; the fix is `ak sync` (builds the native binding), then retry. |
+| **dual** | Runs a **Claude + Codex collaboration swarm** using your per-activity routing policy: `ak dual run <template> "<task>"` materializes a dual-run config (each pipeline step assigned to the host + model your policy chose) and drives it via `claude-flow-codex`. Templates: `feature`, `security`, `refactor`, `packaging`, `release`. `--dry-run` prints the plan + config without running; `--route 'activity:host[:model]'` overrides one step for that run; `--escalate` retries once up the cross-vendor ladder on failure. Requires dual-host enabled (`ak setup --codex`, or `ak host pick --host claude,codex`). **Pre-flight refusal:** before spawning a worker, `dual run` refuses to start when ruflo's memory runtime lacks a native better-sqlite3 binding **and** the shared DB has an active native WAL (`-wal`/`-shm` sidecars) — the native WAL writer and the WASM `ruflo memory store` cannot share that DB without corrupting it; the fix is `ak sync` (builds the native binding), then retry. |
+| **host** | Canonical alpha namespace for execution-host status, selection, primary-host choice, activity routing, and reversible teardown: `ak host status\|pick\|refresh\|off`. The plumbing spelling is `ak x host`. `ak provider` and `ak x provider` are deprecated compatibility aliases that warn on stderr and will be removed before the stable release. |
 | **uninstall** | Removes the kit's footprint (and any legacy shell-kit install); project data is never touched; `--purge` also offers to remove the global packages. |
 
 Power-user mechanisms live under `ak x …` (`daemon-gc`, `harvest`,
-`mcp pick|off`, `provider status|pick|off`, `reference diff|sync`,
+`mcp pick|off`, `host status|pick|refresh|off`, `reference diff|sync`,
 `statusline status|codex native|extended|off`,
 `verify learning|security|aqe|providers|harvest`, `improvement-eval`) — see `ak --help --all`.
 
@@ -123,7 +141,7 @@ you opt in. Two independent axes:
 - **Hosts** — which agent CLI runs the ruflo loop: `claude` (Claude Code) and/or `codex`
   (OpenAI Codex), **both at once** via dual-mode (enabling codex doesn't disable claude).
   Turn codex on at first-time setup with `ak setup --codex` (add `--primary-host codex` to
-  make it lead), or later with `ak x provider pick`. A host that is *entirely absent* is
+  make it lead), or later with `ak host pick`. A host that is *entirely absent* is
   installed for you (`npm i -g @anthropic-ai/claude-code` / `@openai/codex`); an
   externally-managed install (mise/brew/native) is detected, reused, and never shadowed.
 - **Providers** — which LLM the routers use, independent of the host: agentic-qe's
@@ -140,16 +158,16 @@ you opt in. Two independent axes:
   design, review; Codex for implementation, testing — and materializes it into agentic-qe's
   `agentOverrides` (adopting upstream [#568](https://github.com/proffesor-for-testing/agentic-qe/issues/568)).
   It's seeded automatically (subscription-only, so no metered surprises), shown in `status` and the
-  dashboard matrix, and **tunable per activity** (`ak x provider pick --route 'testing:claude:claude-sonnet-5'`)
+  dashboard matrix, and **tunable per activity** (`ak host pick --route 'testing:claude:claude-sonnet-5'`)
   with your edits preserved across syncs. **`--primary-host claude|codex`** chooses which host leads:
   codex-primary *mirrors* the default table so Codex drives and Claude is the alternate — symmetric
   either way. `ak dual run <template> "<task>"` then drives a Claude+Codex collaboration swarm off that
   policy. Nothing is seeded for claude-only projects.
 
-`ak x provider status` shows what's detected, wired, and routed; `ak x provider pick` chooses and
-applies (reversibly); `ak x provider off` restores the claude-only default. Full guide:
+`ak host status` shows what's detected, wired, and routed; `ak host pick` chooses and
+applies (reversibly); `ak host off` restores the claude-only default. Full guide:
 [docs/PROVIDERS.md](docs/PROVIDERS.md). Already on an older `ak` and adopting a later capability
-(like dual-host)? [docs/UPGRADING.md](docs/UPGRADING.md) covers the `sync` vs `provider pick` motion.
+(like dual-host)? [docs/UPGRADING.md](docs/UPGRADING.md) covers the `sync` vs `host pick` motion.
 
 ## Troubleshooting
 
@@ -161,6 +179,13 @@ applies (reversibly); `ak x provider off` restores the claude-only default. Full
 managed tool follows (release-pinned installs, sync as the single updater,
 disk-first version truth, one drift story across status/statusline/dashboard),
 with the per-tool table and the checklist for adding a new tool.
+
+## Domain design
+
+[docs/ddd/](docs/ddd/) defines the shared language, bounded contexts, and invariants behind hosts,
+inference providers, bindings, routing, orchestration, evidence, usage, and Live Sessions. ADRs
+explain why decisions were made; the domain documents define what those concepts mean across the
+codebase.
 
 ## Credits
 

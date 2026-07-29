@@ -353,7 +353,18 @@ async function main() {
     totals: { sessions: 2, responses: 9, input: 100, output: 200, cacheRead: 900, cacheWrite: 50, tokens: 1250, cost: 12.5, spanMinutes: 90, engagedSeconds: 3600 },
     byDay: { '2026-07-24': { tokens: 1000, cost: 10, sessions: 1 } },
     byModel: { 'claude-opus-5': { cost: 12.5, tokens: 1250, responses: 9 } },
-    byProvider: { claude: { cost: 12.5, sessions: 2 } },
+    byHost: {
+      claude: { cost: 10, sessions: 1, tokens: 1000 },
+      codex: { cost: 2.5, sessions: 1, tokens: 250 },
+    },
+    byProvider: {
+      anthropic: { cost: 10, sessions: 1, tokens: 1000 },
+      unknown: { cost: null, sessions: 1, tokens: 250 },
+    },
+    byTranscriptProvider: {
+      claude: { cost: 10, sessions: 1, tokens: 1000 },
+      codex: { cost: 2.5, sessions: 1, tokens: 250 },
+    },
     byProject: { demo: { cost: 12.5, sessions: 2 } },
     byCategory: { 'Security review': { cost: 12.5, sessions: 2, confidence: 0.8 } },
     punchcard: { '0-13': 4 },
@@ -365,13 +376,17 @@ async function main() {
       project: 'demo', sessions: 40, cost: 12.5, tokens: 1250, minutes: 90,
       categories: [{ category: 'Security review', sessions: 2, cost: 12.5 }],
       rows: Array.from({ length: 40 }, (_, i) => ({
-        id: `row-${i}`, provider: 'claude', title: `session ${i}`, project: 'demo',
+        id: `row-${i}`, host: 'claude', provider: i ? 'anthropic' : null,
+        providerProvenance: i ? 'observed' : 'unknown',
+        transcriptProvider: 'claude', title: `session ${i}`, project: 'demo',
         category: 'Security review', cost: 0.25, minutes: 2, tokens: 100,
       })),
     }],
     sessions: [
-      { id: 'aaa', provider: 'claude', title: 'one', project: 'demo', category: 'Security review', cost: 10 },
-      { id: 'bbb', provider: 'codex', title: 'two', project: 'other', category: 'Refactor', cost: 2.5 },
+      { id: 'aaa', host: 'claude', provider: 'anthropic', providerProvenance: 'observed',
+        transcriptProvider: 'claude', title: 'one', project: 'demo', category: 'Security review', cost: 10 },
+      { id: 'bbb', host: 'codex', provider: null, providerProvenance: 'unknown',
+        transcriptProvider: 'codex', title: 'two', project: 'other', category: 'Refactor', cost: 2.5 },
     ],
     insights: [{ id: 'context-tax', kind: 'coach', severity: 'warn', title: 't', finding: 'f', evidence: 'e', action: 'a', command: null, impact: 3.5 }],
   };
@@ -531,6 +546,25 @@ async function main() {
         contains(r.body, 'id="v-' + v + '"');
         contains(r.body, 'data-view="' + v + '"');
       }
+    });
+
+    await test('Usage rendering treats host and inference provider as independent axes', async () => {
+      const r = await get(uiSrv.url);
+      contains(r.body, 'd.byHost||d.byTranscriptProvider||d.byProvider');
+      contains(r.body, 'var host=sx.host||sx.transcriptProvider');
+      contains(r.body, 'var provider=sx.provider||sx.inferenceProvider||"unknown"');
+      contains(r.body, 'title="host: ');
+      contains(r.body, 'class="s-provider"');
+    });
+
+    await test('Live rendering never derives host identity from inference provider', async () => {
+      const r = await get(uiSrv.url);
+      contains(r.body, 'function hostOf');
+      contains(r.body, 'function inferenceProviderName');
+      contains(r.body, 'Provider not established');
+      assert(!r.body.includes('function providerOf'), 'legacy host/provider branding helper remains');
+      assert(!r.body.includes('v&&v.provider||v&&v.host'),
+        'Live presentation still falls back from provider to host');
     });
 
     await test('served HTML carries the read-only Live Sessions surface', async () => {
@@ -1219,7 +1253,7 @@ async function main() {
   // is the suite where it matters most — the traversal-guard and credential-
   // leak tests live here and were the reviewer's cited example of a block
   // that could silently vanish with the old harness never noticing.
-  const EXPECTED = 56;
+  const EXPECTED = 58;
   if (passed + failed !== EXPECTED) {
     console.error(`\nPLAN MISMATCH: expected ${EXPECTED} tests, ran ${passed + failed}`);
     process.exit(1);

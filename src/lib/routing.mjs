@@ -6,6 +6,7 @@
 // (no I/O) so the projectors and defaults are unit-testable in isolation; the
 // writers/UX that consume it live in providers.mjs / the commands.
 import { vendorOf } from './qeCourt.mjs';
+import { routableHostIds, primaryHostIds } from './adapters/index.mjs';
 
 // ── Vocabulary ───────────────────────────────────────────────────────────────
 // Canonical development activities ak routes (ADR-0002). Array order = display order.
@@ -20,7 +21,7 @@ export const AK_ORIGINATED = new Set(['packaging', 'release']);
 
 // Host → aqe/router provider type. Both are subscription-billed ($0 marginal).
 export const HOST_PROVIDER = { claude: 'claude-code', codex: 'codex' };
-export const HOSTS = Object.keys(HOST_PROVIDER);
+export const HOSTS = routableHostIds();
 
 // Providers aqe's ProviderManager can construct — grounded in agentic-qe 3.13.1
 // RUNTIME_CONSTRUCTIBLE_PROVIDERS ∩ ALL_PROVIDER_TYPES (now includes `codex`,
@@ -109,7 +110,7 @@ export function formatModelHelp() {
 // reasoning roles). When codex is chosen as PRIMARY, we mirror each default route
 // to the opposite host so codex takes the lead and claude becomes the alternate —
 // a defaults/policy change only (DualModeOrchestrator workers are symmetric).
-export const PRIMARY_HOSTS = HOSTS; // both hosts may be primary
+export const PRIMARY_HOSTS = primaryHostIds();
 export const DEFAULT_PRIMARY_HOST = 'claude';
 
 // Model id → tier, so a host swap can pick the counterpart's tier-equivalent.

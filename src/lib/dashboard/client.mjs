@@ -357,8 +357,8 @@ export const JS = `
     document.getElementById("route-matrix").innerHTML=html;
   }
 
-  // Providers tab: the distinct host+model pairs the routing policy puts in
-  // play, with how many activities each covers. Hidden without a dual policy.
+  // Hosts & Routing tab: the distinct host+model pairs the routing policy puts
+  // in play, with how many activities each covers. Hidden without a dual policy.
   function renderModels(rt){
     var strip=document.getElementById("models");
     if(!rt||!rt.routes||!rt.routes.length){strip.hidden=true;return;}
@@ -662,8 +662,9 @@ export const JS = `
         +'<span class="db-lab">'+esc(x.day.slice(8))+"</span></div>";
     }).join(""):'<div class="empty">no days in window.</div>';
 
-    // by host
-    var prov=d.byProvider||{};
+    // Host and inference-provider are independent axes. Fall back to the
+    // historical byProvider host map only for pre-migration cached payloads.
+    var prov=d.byHost||d.byTranscriptProvider||d.byProvider||{};
     var order=["claude","codex"];
     for(k in prov)if(order.indexOf(k)<0)order.push(k);
     document.getElementById("u-hosts").innerHTML=order.map(function(name){
@@ -921,7 +922,8 @@ export const JS = `
   // block-level sibling inside .pbody, not a grid child of .srow, so it spans
   // the full width without joining the column layout.
   function sessionRow(sx){
-    var host=(sx.provider==="codex")?"codex":"claude";
+    var host=sx.host||sx.transcriptProvider||((sx.provider==="codex")?"codex":"claude");
+    var provider=sx.provider||sx.inferenceProvider||"unknown";
     var cat=sx.category||"Unclassified";
     var uncl=(cat==="Unclassified");
     var weak=(typeof sx.confidence==="number"&&sx.confidence<0.6)?"0":"1";
@@ -934,7 +936,8 @@ export const JS = `
     return '<div class="srow" data-id="'+sid+'" title="open transcript">'
       +'<button class="s-exp" type="button" aria-expanded="false" aria-controls="sd-'+sid+'"'
         +' title="show session detail" aria-label="show session detail">&rsaquo;</button>'
-      +'<span class="s-host s-'+host+'">'+esc(host)+"</span>"
+      +'<span class="s-host s-'+esc(host)+'" title="host: '+esc(host)+' · provider: '+esc(provider)+'">'+esc(host)
+        +'<small class="s-provider">'+esc(provider)+"</small></span>"
       +'<span class="s-title">'+esc(sx.title||"(untitled)")+wt+"</span>"
       +'<span class="cat'+(uncl?" uncl":"")+'" data-w="'+weak+'">'+esc(cat)+"</span>"
       +'<span class="s-when mono">'+esc(whenTxt)+"</span>"

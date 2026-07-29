@@ -13,7 +13,7 @@ import { fixStatusline } from '../lib/statusline.mjs';
 import { registry, syncBlocks } from '../lib/blocks.mjs';
 import { register as mcpRegister, applyExclusions } from '../lib/mcp.mjs';
 import { loadKitConfig, saveKitConfig } from '../lib/config.mjs';
-import { HOSTS, applyHosts, applyProviders, ensureDualAgents, hostInstallState, installHost, applyAqeRouter, seedDualRoutingIfDualHost, printActivityRoutingTable, aqeSupportsAgentOverrides, ensureCodexMcp, ensureRufloMcpInCodex, applySetupHostFlags } from '../lib/providers.mjs';
+import { commandHosts, applyHosts, applyProviders, ensureDualAgents, hostInstallState, installHost, applyAqeRouter, seedDualRoutingIfDualHost, printActivityRoutingTable, aqeSupportsAgentOverrides, ensureCodexMcp, ensureRufloMcpInCodex, applySetupHostFlags } from '../lib/providers.mjs';
 import { installedVersion } from '../lib/versions.mjs';
 import * as rb from '../lib/ruvnet-brain.mjs';
 import * as adb from '../lib/agentdb.mjs';
@@ -150,14 +150,14 @@ export async function run_machine({ flags, pkgRoot, cfg }) {
 
   // 6. frontier hosts — install any ENABLED host that is entirely absent (default
   //    enables claude only). External installs (mise/native/brew) are left alone.
-  for (const h of HOSTS) {
+  for (const h of commandHosts()) {
     if (!cfg.providers?.hosts?.[h.id]) continue;
     const st = await hostInstallState(h);
     if (st.method === 'absent') {
       if (await ask(`${h.id} CLI not found — install ${h.pkg} globally?`, true, flags.yes)) {
         const r = await installHost(h.id);
         (r.ok ? ok : warn)(`${h.id}: ${r.detail}`);
-      } else warn(`${h.id} not installed — enable/install later with: ak x provider pick`);
+      } else warn(`${h.id} not installed — enable/install later with: ak host pick`);
     } else {
       ok(`${h.id} ${st.version ?? ''} present (${st.method}${st.method === 'external' ? ' — self-managed' : ''})`);
     }
@@ -165,7 +165,7 @@ export async function run_machine({ flags, pkgRoot, cfg }) {
 
   // 7. frontier host hint — codex detected but not enabled (opt-in via `x provider pick`)
   if (!cfg.providers?.hosts?.codex && await have('codex')) {
-    info('codex CLI detected — run `ak x provider pick` to let ruflo use both claude and codex');
+    info('codex CLI detected — run `ak host pick` to let ruflo use both claude and codex');
   }
   return true;
 }
@@ -292,7 +292,7 @@ export async function run_project({ flags, cfg }) {
     const prov = await applyProviders(cfg, root);
     if (prov.changed) (prov.ok ? ok : warn)(`providers: ${prov.detail}`);
   } else if (await have('codex')) {
-    info('codex CLI detected — enable dual-host with: ak x provider pick');
+    info('codex CLI detected — enable dual-host with: ak host pick');
   }
 
   // 10. statusline footer — LAST, after ruflo + aqe have settled the helper.

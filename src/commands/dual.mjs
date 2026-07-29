@@ -29,7 +29,7 @@ export const options = {
 
 export const help = `ak dual — run a Claude+Codex collaboration swarm
 
-Uses your per-activity routing policy (from \`ak x provider\`) to assign each pipeline
+Uses your per-activity routing policy (from \`ak host\`) to assign each pipeline
 step to the right host + model, then runs it via ${ADAPTER}.
 
 Usage:
@@ -135,7 +135,7 @@ async function doRun({ positionals, flags }) {
 
   const cfg = loadKitConfig();
   if (Object.keys(cfg.providers?.dualRouting ?? {}).length === 0) {
-    fail('no per-activity routing configured — enable dual-host first: ak x provider pick --host claude,codex');
+    fail('no per-activity routing configured — enable dual-host first: ak host pick --host claude,codex');
     return 1;
   }
 
@@ -152,7 +152,7 @@ async function doRun({ positionals, flags }) {
 
   printPlan(template, task, config);
   if (!(await have(ADAPTER))) {
-    fail(`${ADAPTER} not found — enable dual-host to install the adapter: ak x provider pick --host claude,codex`);
+    fail(`${ADAPTER} not found — enable dual-host to install the adapter: ak host pick --host claude,codex`);
     return 1;
   }
 

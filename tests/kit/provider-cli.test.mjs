@@ -30,7 +30,7 @@ function rm(...dirs) {
   for (const d of dirs) fs.rmSync(d, { recursive: true, force: true });
 }
 
-function ak(args, { cwd, home }) {
+function ak(args, { cwd, home, env = {} }) {
   const cfgDir = path.join(home, '.config');
   return spawnSync(process.execPath, [BIN, ...args], {
     encoding: 'utf8',
@@ -42,9 +42,31 @@ function ak(args, { cwd, home }) {
       USERPROFILE: home, // Windows os.homedir() reads USERPROFILE, not HOME
       XDG_CONFIG_HOME: cfgDir,
       APPDATA: cfgDir, // Windows configBase() reads APPDATA, not XDG_CONFIG_HOME
+      ...env,
     },
   });
 }
+
+test('ak host status preserves key presence without exposing the key value', () => {
+  const { home, project } = sandbox({ hosts: { claude: true, codex: false } });
+  const secret = 'openai-secret-must-never-serialize';
+  const human = ak(['host', 'status'], {
+    cwd: project, home, env: { OPENAI_API_KEY: secret },
+  });
+  assert.equal(human.status, 0, human.stderr);
+  assert.match(human.stdout, /openai\s+key present/);
+  assert.equal(human.stdout.includes(secret), false);
+
+  const json = ak(['host', 'status', '--json'], {
+    cwd: project, home, env: { OPENAI_API_KEY: secret },
+  });
+  assert.equal(json.status, 0, json.stderr);
+  const payload = JSON.parse(json.stdout);
+  assert.equal(payload.providers.openai.keyPresent, true);
+  assert.equal(payload.providers.openai.credentialPresent, true);
+  assert.equal(json.stdout.includes(secret), false);
+  rm(home, project);
+});
 
 test('ak x provider status prints the dual-host guidance tips once both hosts are enabled', () => {
   const { home, project } = sandbox({ hosts: { claude: true, codex: true } });

@@ -19,7 +19,7 @@ import { drift as ruvnetBrainDrift, nightlyAgentPresent as rbNightlyPresent, NIG
 import { coherence as adbCoherence } from '../lib/agentdb.mjs';
 import { readJson } from '../lib/settings.mjs';
 import { have } from '../lib/exec.mjs';
-import { HOSTS, settingsTarget, isDefault, managedEnv, MANAGED_ENV_KEYS, hostInstallState, hostAuthState, bothHostsEnabled, aqeRouterFile, aqeSupportsAgentOverrides, credentialGaps } from '../lib/providers.mjs';
+import { HOSTS, settingsTarget, isDefault, managedEnv, MANAGED_ENV_KEYS, hostInstallState, hostAuthState, bothHostsEnabled, aqeRouterFile, aqeSupportsAgentOverrides, credentialGaps, collectIntegrationFacts } from '../lib/providers.mjs';
 import { policyToAgentOverrides, routingSummary, divergedRoutes } from '../lib/routing.mjs';
 import { qeCourtShipped, readQeCourtConfig, panelFromRouting, validatePanel, healJuryVendorCollision, UPSTREAM_JURY_VENDOR_ISSUE } from '../lib/qeCourt.mjs';
 import { drift as ruvectorDrift } from '../lib/ruvector.mjs';
@@ -53,6 +53,7 @@ const row = (subsystem, level, message, fix = null) => ({ subsystem, level, mess
 export async function collect({ pkgRoot, cwd = process.cwd() }) {
   const rows = [];
   const cfg = loadKitConfig();
+  const integrationFacts = await collectIntegrationFacts({ cwd, cfg });
 
   // versions
   try {
@@ -331,6 +332,12 @@ export async function collect({ pkgRoot, cwd = process.cwd() }) {
     const primaryHost = cfg.providers?.primaryHost ?? 'claude';
     for (const h of HOSTS) {
       if (!cfg.providers.hosts[h.id]) continue;
+      const detected = integrationFacts.hosts[h.id];
+      if (detected?.present === false) {
+        rows.push(row('hosts', h.id === primaryHost ? 'fail' : 'warn',
+          `${h.id} enabled but not installed${h.id === primaryHost ? ' (primary)' : ''}`, `sync installs ${h.pkg}`));
+        continue;
+      }
       const st = await hostInstallState(h);
       if (st.method === 'absent') {
         rows.push(row('hosts', h.id === primaryHost ? 'fail' : 'warn',
@@ -429,7 +436,7 @@ export async function collect({ pkgRoot, cwd = process.cwd() }) {
           ...d.escalate.map((e) => `${e.model} vs ${e.defaultModel} (escalation)`),
         ]))].join(', ');
         rows.push(row('routing', 'info',
-          `${diverged.length} seeded route(s) diverge from current defaults (${pairs}) — ak x provider refresh`));
+          `${diverged.length} seeded route(s) diverge from current defaults (${pairs}) — ak host refresh`));
       }
     }
   } catch (e) {

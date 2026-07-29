@@ -1,6 +1,7 @@
 function nodeFrom(actor, event) {
   return {
     id: actor.id, kind: actor.kind, label: actor.label, role: actor.role, provider: actor.provider,
+    providerProvenance: actor.provider ? event.providerProvenance : 'unknown',
     model: actor.model, host: event.host, surface: event.surface,
     status: event.status, lastEventId: event.eventId ?? null,
     observedAt: event.observedAt, confidence: event.source.confidence,
@@ -231,14 +232,15 @@ function projectCatalog(sessions) {
     const project = projects.get(key) ?? {
       id: key, label: session.project, sessions: [], sessionCount: 0,
       childSessionCount: 0, liveCount: 0, completedCount: 0,
-      providers: {}, updatedAt: session.updatedAt,
+      hosts: {}, providers: {}, updatedAt: session.updatedAt,
     };
     project.sessions.push(session.key);
     project.sessionCount++;
     if (TERMINAL.has(session.status)) project.completedCount++;
     else if (session.status === 'running' && session.lifecycle === 'active') project.liveCount++;
+    project.hosts[session.host] = (project.hosts[session.host] ?? 0) + 1;
     const providers = new Set(session.nodes.map((node) => node.provider).filter(Boolean));
-    if (providers.size === 0) providers.add(session.host);
+    if (providers.size === 0) providers.add('unknown');
     for (const provider of providers) {
       project.providers[provider] = (project.providers[provider] ?? 0) + 1;
     }
@@ -262,6 +264,7 @@ function projectCatalog(sessions) {
         || Date.parse(right.updatedAt) - Date.parse(left.updatedAt)
         || a.localeCompare(b);
     });
+    project.hosts = Object.fromEntries(Object.entries(project.hosts).sort());
     project.providers = Object.fromEntries(Object.entries(project.providers).sort());
   }
   return [...projects.values()].sort((a, b) => (

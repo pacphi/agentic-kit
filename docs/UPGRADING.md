@@ -17,17 +17,29 @@ So a feature can be *installed* (the code is on disk) without being *enabled* (y
 that's what you recorded — the same way it won't pick an LLM provider or exclude an MCP
 family on your behalf.
 
-## `sync` vs `setup` vs `provider pick`
+## `sync` vs `setup` vs `host pick`
 
 | Command              | What it's for                                   | Changes your `kit.json` choices? |
 | -------------------- | ----------------------------------------------- | -------------------------------- |
 | `ak sync`            | update the binary + heal to your recorded state | **no** — converges, never decides |
-| `ak x provider pick` | opt into / retune hosts & LLM providers         | **yes** — this is the switch     |
+| `ak host pick` | opt into or retune execution hosts and host routing | **yes** — this is the switch |
 | `ak x statusline codex native\|extended` | opt into a user-wide Codex status-line preset | **yes** — records the preset |
 | `ak setup`           | first-time bootstrap of absent tooling          | only via explicit flags (`--codex`, `--primary-host`) |
 
+A **host** runs the work; a **provider** serves inference. A binding can connect one provider to
+several hosts through separate native configuration **projections**, while **observability**
+sources establish facts with observed, configured, inferred, or unknown provenance. Upgrading does
+not silently create, adopt, or rewrite these bindings, and credentials remain environment-only.
+See [ADR-0016](adr/0016-capability-driven-integration-adapters.md).
+
+`ak provider` and `ak x provider` are deprecated alpha compatibility aliases for the former
+combined command. They warn on stderr and will be removed before stable. Use top-level `ak host`
+for execution-host lifecycle and selection (`ak x host` only when you specifically want the
+plumbing spelling). This namespace correction does not rename inference providers or provider
+bindings into hosts.
+
 If you already have `ak` working, you almost never need `ak setup` again — it's the
-installer. Enabling a shipped-but-opt-in feature is a `provider pick` (or an `x mcp pick`,
+installer. Enabling a shipped-but-opt-in host feature is a `host pick` (or an `x mcp pick`,
 etc.), not a re-`setup`.
 
 Codex status-line management is deliberately not enabled merely because an
@@ -43,8 +55,8 @@ ambidextrous dual-host experience (per-activity routing across Claude + Codex). 
 
 ```bash
 ak sync                              # 1. update the binary (+ heal everything)
-ak x provider pick --host claude,codex   # 2. opt in → wires dual-host
-ak x provider status                 # 3. verify: hosts "enabled, wired" + routing table
+ak host pick --host claude,codex   # 2. opt in → wires dual-host
+ak host status                 # 3. verify: hosts "enabled, wired" + routing table
 ```
 
 Step 1 gets the newer code onto disk. Step 2 is what actually turns dual-host on — it
@@ -55,11 +67,11 @@ Add `--primary-host codex` if you want Codex to lead (Claude becomes the alterna
 
 > [!NOTE]
 > `ak sync` self-updates **last** in its pass, so the newer code applies from your *next*
-> `ak` invocation — which is exactly `ak x provider pick` in the sequence above. Running the
+> `ak` invocation — which is exactly `ak host pick` in the sequence above. Running the
 > two in this order is correct; the pick runs under the freshly-installed version.
 
 From then on, `ak sync` **maintains** the choice — it re-applies your recorded dual-host
-config idempotently on every run. `ak status` flags drift; `ak x provider off` reverts to
+config idempotently on every run. `ak status` flags drift; `ak host off` reverts to
 the claude-only default, reversibly.
 
 The full menu of host/provider levels — QE provider selection, deterministic fallback

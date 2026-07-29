@@ -17,7 +17,7 @@ fallback.
 ### `ak dual run` — Claude+Codex collaboration pipelines
 
 `ak dual run <template> "<task>"` materializes a multi-worker pipeline from your
-per-activity routing policy (set via `ak x provider`) and runs it through the
+per-activity routing policy (set via `ak host`) and runs it through the
 `claude-flow-codex` adapter. Each worker is assigned a host + model by the policy, so a
 single run can span both vendors.
 
@@ -52,12 +52,12 @@ Register (or repair) both directions with `ak sync`; inspect with `ak status`.
 ### Per-activity routing + escalation ladders
 
 Routing is **per activity**, not per session — coder/tester lean Codex, reviewer and
-security-analysis lean Claude, and so on (`ak x provider` shows and edits the table).
+security-analysis lean Claude, and so on (`ak host` shows and edits the table).
 `--escalate` walks a **cross-vendor** ladder: a failed step retries on the other vendor's
 stronger model, so a Codex miss escalates into Claude (and vice-versa) rather than just
 burning retries on the same engine.
 
-**Which host leads.** The two are peers, but `ak x provider pick --primary-host claude|codex`
+**Which host leads.** The two are peers, but `ak host pick --primary-host claude|codex`
 (default `claude`) picks which one leads: codex-primary **mirrors** the default table so Codex
 takes the reasoning/review lead and Claude becomes the alternate/escalation target — the same
 ambidextrous experience with the roles flipped. `ak status` marks the primary and **fails**

@@ -11,6 +11,13 @@ specifications, not observed** — at research time (2026-07-27) the Ollama daem
 indexed transcripts on the reference machine were vendor-metered. This document is the experiment
 that replaces derivation with measurement.
 
+[ADR-0016](adr/0016-capability-driven-integration-adapters.md) names the relationship this
+exercise is intended to prove: `ollama-via-claude` and `ollama-via-codex` are two independent
+**bindings** to one Ollama **provider**, while Claude Code and Codex CLI remain the transcript
+**hosts**. The catalogue/runtime API is a separate **observability source**. Configuring a binding
+establishes configured provenance; it does not upgrade provider, model digest, token, cache, quota,
+or `$0` claims to observed. This document remains that evidence gate.
+
 **Time:** about 15 minutes of interactive work, plus two paste-backs.
 
 ---

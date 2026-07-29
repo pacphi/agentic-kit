@@ -34,14 +34,15 @@ request. Stopping the dashboard closes the live service and all clients.
 
 - Claude and Codex sessions discovered newest-first from their local JSONL
   stores and bootstrapped from bounded, metadata-only records.
-- Project-first session cards with a provider glyph and text, model when
-  reported, lifecycle, freshness, and a concise operational summary.
+- Project-first session cards with a host glyph and name, independently
+  evidenced inference provider/model when reported, lifecycle, freshness, and
+  a concise operational summary.
 - Session, agent, sub-agent, tool, skill, plugin, MCP, and gate entities when a
   supported source record identifies them.
 - Authoritative Codex parent/child edges from the Codex state ledger.
 - Human-readable identity and current work: resolved agent or capability name,
-  host/model, lifecycle, elapsed time, latest safe operation summary, and
-  evidence confidence.
+  host, provider/model, lifecycle, elapsed time, latest safe operation summary,
+  and evidence confidence.
 - Typed relationships whose accessible titles use verbs such as **spawned**,
   **delegated**, **invoked**, **returned**, **evaluated**, and **gated**.
 - A semantic execution canvas with stable agent anchors and bounded tool,
@@ -57,8 +58,9 @@ request. Stopping the dashboard closes the live service and all clients.
   actor-specific geometry, and a **Pause live** control.
 - Sanitized adapter health showing status and aggregate file/event/error counts.
 
-The overview answers which project/provider is involved, whether the evidence
-is current, who is active, and what operation is happening now. Selecting a
+The overview answers which project and host are involved, which inference
+provider is evidenced, whether the evidence is current, who is active, and
+what operation is happening now. Selecting a
 node highlights adjacent relationships, focuses its work, and synchronizes the
 transcript. Search filters the current stream. Auto-follow yields when the
 reader scrolls away and reports unread activity until following resumes. The
@@ -67,7 +69,7 @@ flow downward. Follow anchors to the top; playback remains chronologically
 ordered internally.
 
 Projects are the durable top-level grouping. Select a project first, then one
-of its provider-qualified root sessions; currently active sessions appear
+of its host-qualified root sessions; currently active sessions appear
 before recent completed sessions. Selecting a root reveals its agent/worker
 threads as an indented hierarchy. Those child threads remain selectable for
 their own map, transcript, and playback, but do not inflate the project's
@@ -195,13 +197,13 @@ that the dashboard has inspected an agent's private reasoning.
 
 The topology plane is constructed from an allowlist and contains no transcript
 bodies. The separately selected content plane intentionally carries rich local
-evidence. It parses provider records into a bounded DTO, masks every emitted
+evidence. It parses source records into a bounded DTO, masks every emitted
 string server-side, and never emits Codex `encrypted_content`. Secret masking
 is best effort, not a guarantee; only run the dashboard where its local
 transcripts may be viewed.
 
 Transcript lookup validates both host and session ID, resolves the real file
-beneath the configured provider root, rejects symlink escapes, and rechecks
+beneath the configured host transcript root, rejects symlink escapes, and rechecks
 containment after replacement. Content responses are `no-store`, same-origin,
 bounded, and destroyed after their last subscriber.
 
@@ -246,7 +248,7 @@ unbounded content snapshot.
 | Symptom | Explanation |
 |---------|-------------|
 | No sessions | No supported metadata was found within the bounded newest-first discovery set |
-| Many identical provider session rows | Refresh after the current snapshot reconciles ledger hierarchy; root sessions and nested worker threads are counted separately |
+| Many identical host session rows | Refresh after the current snapshot reconciles ledger hierarchy; root sessions and nested worker threads are counted separately |
 | Worker thread appears at top level | Its declared parent is not currently retained, so it remains navigable as an orphan rather than hiding evidence |
 | Ruflo or AQE absent | Their stores are not auto-discovered; register each JSONL file with `--live-source` |
 | Project name not reported | No supported metadata supplied a working directory; raw paths are never sent to the browser |

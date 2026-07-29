@@ -46,7 +46,7 @@ called first**, e.g. `fleet_init({ topology:"hierarchical", maxAgents:15, memory
   (metered API key), or `ollama`/`onnx` (local). It normalizes `anthropic`→`claude` and ignores
   unknown values. `AQE_MAX_BUDGET_USD` (or `--max-budget-usd`) caps metered spend; `aqe health`
   shows an "LLM Billing" section saying who pays. `aqe init` never writes these — but
-  **`ak x provider pick` now manages `AQE_LLM_PROVIDER` for you** (into
+  **`ak host pick` now manages `AQE_LLM_PROVIDER` for you** (into
   `.claude/settings.local.json` `env`, reversibly), and can write an ordered **fallback chain**
   into `.agentic-qe/llm-config.json` from `kit.json` (`--aqe-fallback 'claude-code:claude-opus-5; openai:gpt-5.6'`) —
   keys stay in the env, never the file. aqe is NOT limited to claude-code: codex the *CLI* isn't a

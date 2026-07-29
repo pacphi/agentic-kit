@@ -5,6 +5,10 @@ This document specifies the domain model behind
 architecture, refinement, and completion stages; implementation pseudocode appears at the relevant
 boundaries.
 
+The shared [ubiquitous language](ubiquitous-language.md) and
+[context map](context-map.md) are normative. Terms defined below refine the Live Sessions context
+without redefining shared integration concepts.
+
 ## Ubiquitous language
 
 | Term | Meaning |
@@ -24,7 +28,7 @@ boundaries.
 | Evidence | A source record supporting a domain fact |
 | Field provenance | Evidence and confidence attached to one fact, not the whole record |
 | Confidence | `observed`, `correlated`, `inferred`, `assumed`, or `planned` |
-| Projection | The current read model derived from canonical events |
+| Read-model projection | The current query/UI state derived from canonical events |
 | Topology | Nodes and typed relationships visible for a session |
 | Execution canvas | Spatial view of agents, owned tools, and causal flow for one session |
 | Evidence rail | Selected-session transcript synchronized with canvas selection |
@@ -47,7 +51,7 @@ Owns source discovery, append-aware reading, schema-specific parsing, and source
 language is transcripts, ledgers, registries, hooks, offsets, rotation, and freshness. It does not
 decide graph layout or emit browser DTOs.
 
-Adapters are anti-corruption layers for:
+Source adapters are anti-corruption layers for:
 
 - Claude session and delegated-agent artifacts;
 - Codex rollouts and state-ledger spawn edges;
@@ -61,7 +65,7 @@ Adapters are anti-corruption layers for:
 Owns canonical events, identity correlation, lifecycle transitions, evidence confidence, aggregates,
 and invariants. Host-specific record shapes do not cross this boundary.
 
-### Projection and replay
+### Read-model projection and replay
 
 Owns materialized session graphs, bounded retention, cursor replay, snapshots, and idempotent
 reduction. It is optimized for current state, not historical cost analytics.
@@ -88,13 +92,14 @@ ak ─────┘
           ↓
 canonical event normalizer
           ↓
-LiveSession aggregate → projection/replay → snapshot + SSE → dashboard
+LiveSession aggregate → read-model projection/replay → snapshot + SSE → dashboard
           │
           └── session-id link ──→ historical usage context
 ```
 
-Evidence acquisition is upstream of the live domain. Projection/replay consumes canonical domain
-events. Dashboard delivery consumes projection DTOs. Historical usage shares identifiers only.
+Evidence acquisition is upstream of the live domain. Read-model projection/replay consumes
+canonical domain events. Dashboard delivery consumes projection DTOs. Historical usage shares
+identifiers only.
 
 Discovery is newest-first. Before following append-only changes, acquisition reads a bounded
 metadata prefix and Codex ledger state so stable identity is available on first paint. Bootstrap
@@ -134,7 +139,7 @@ Project {
   id, label, updatedAt,
   sessionKeys[],
   sessionCount, childSessionCount, liveCount, completedCount,
-  providerCounts
+  hosts, providers
 }
 ```
 
@@ -142,6 +147,10 @@ It is reduced from sanitized session project labels. `sessionKeys` and `sessionC
 navigation roots only; `childSessionCount` reports descendant threads without presenting them as
 peer work. Sessions are ordered live first and then by most recent evidence. A project ID is opaque
 and safe for DOM/routing; it never contains the raw working directory.
+
+`hosts` counts execution hosts independently. `providers` counts evidence-backed inference
+providers and uses an explicit `unknown` bucket when no provider evidence exists; it never
+substitutes the session host.
 
 Project identity means the owning repository, not the current branch or linked-worktree directory.
 For a live local worktree, the `.git` ownership pointer resolves the repository. Known nested
@@ -334,7 +343,7 @@ projection lifecycle: active → quiescent → expired
 19. Content streams are keyed by host and session ID, server-masked, bounded, ephemeral, and
     destroyed after the last subscriber.
 
-## Ports and adapters
+## Ports and source adapters
 
 ### Inbound ports
 
@@ -346,7 +355,7 @@ createLiveEvent(candidate)
 reduceLiveEvent(projection, event, bounds)
 ```
 
-Each adapter owns checkpoint serialization and validates file containment before opening an
+Each source adapter owns checkpoint serialization and validates file containment before opening an
 artifact. Filesystem watch notifications trigger reconciliation; they are not treated as complete
 event delivery.
 
@@ -457,8 +466,8 @@ Direct manipulation follows a slippy-map interaction contract:
 
 The execution canvas and transcript rail share one selection model. Selecting an agent focuses its
 subtree and transcript; selecting a tool shows its safe summary; selecting evidence highlights and
-centers its owner. The initial overview shows project/provider identity, lifecycle, current work,
-and critical failures; metadata and evidence are details on demand
+centers its owner. The initial overview shows project, host, evidence-backed provider identity,
+lifecycle, current work, and critical failures; metadata and evidence are details on demand
 ([Shneiderman][eyes-have-it]).
 
 The right rail is persistent and subscribes only to the selected `{host, sessionId}`. It carries
@@ -507,8 +516,8 @@ Tests are written against ports and fixtures before each adapter or lifecycle tr
 1. **Contract tests:** event schema, action vocabulary, privacy allowlist, confidence ordering.
 2. **Tailer tests:** append, partial record, duplicate notification, rotation, truncation, checkpoint
    restart, and symlink/containment rejection.
-3. **Adapter fixtures:** known Claude, Codex, ruflo, agentic-qe, dual-run, skill, plugin, and MCP
-   records; unknown fields and schema generations.
+3. **Source-adapter fixtures:** known Claude, Codex, ruflo, agentic-qe, dual-run, skill, plugin,
+   and MCP records; unknown fields and schema generations.
 4. **Aggregate tests:** child-before-parent, conflict, terminal-state monotonicity, expiry, and
    idempotency.
 5. **Projection tests:** snapshot-plus-replay equivalence, bounded retention, late parent
@@ -555,9 +564,10 @@ process memory limits.
 
 ### Milestone 2: Operational shell
 
-- Lead with project/provider identity, model, lifecycle, freshness, and a safe summary.
+- Lead with project and host identity, evidence-backed provider/model identity, lifecycle,
+  freshness, and a safe summary.
 - Replace bare unknowns with evidence-specific missing-data language.
-- Provide a project-first browser with live-first, provider-qualified sessions and a
+- Provide a project-first browser with live-first, host-qualified sessions and a
   selected-session execution canvas.
 
 ### Milestone 3: Execution workspace
@@ -575,9 +585,9 @@ process memory limits.
 ### Milestone 5: Ecosystem enrichment
 
 - Add dual-run planned topology and execution updates.
-- Add ruflo swarm/agent/hook/daemon adapters.
-- Add agentic-qe task/evaluation/verdict adapters.
-- Add explicit skill, plugin, MCP, and tool activity adapters.
+- Add ruflo swarm/agent/hook/daemon source adapters.
+- Add agentic-qe task/evaluation/verdict source adapters.
+- Add explicit skill, plugin, MCP, and tool activity source adapters.
 
 ### Milestone 6: Hardening and scale
 
@@ -639,7 +649,7 @@ closing the snapshot-to-subscribe race. A slow-client queue overflow discards qu
 sends a reset snapshot after drain.
 
 The default command discovers Claude/Codex transcripts and reads Codex ledger edges. Ruflo,
-agentic-qe, and dual-run adapters require explicit, repeatable `--live-source 'surface=path'`
+agentic-qe, and dual-run source adapters require explicit, repeatable `--live-source 'surface=path'`
 registration, where `surface` is `ruflo`, `aqe`, or `dual-run`. Explicit sources consume tailer
 capacity before Claude/Codex discovery. Paths resolve against the startup working directory and are
 not confined to the project, so registration is an operator authorization to read that file.

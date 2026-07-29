@@ -23,42 +23,22 @@
 //     ~/.codex/auth.json (key overrides login). claude auth on macOS lives in the
 //     Keychain (no readable file); ANTHROPIC_API_KEY, when used, is not a simple
 //     override of a subscription login, so we label it conservatively.
+import { HOST_REGISTRY } from './adapters/index.mjs';
 
 /** Per-host adapter descriptors. Logical names (`guidanceFile`, `loginFile`
  *  segments) are resolved to real paths by callers so this stays pure. */
-export const HOST_ADAPTERS = {
-  claude: {
-    id: 'claude',
-    label: 'Claude Code',
-    guidanceFile: 'claude', // logical → CLAUDE.md (machine-wide) / project CLAUDE.md
-    configFormat: 'json', // settings.json
-    statusline: { mode: 'command', scope: 'project', customCommand: true, multiline: true },
-    statuslineSupported: true, // compatibility: command-backed renderer support
-    aqeProvider: 'claude-code',
-    // env vars Claude Code sets in a running session — used to detect the driver.
-    envMarkers: ['CLAUDECODE', 'CLAUDE_CODE_ENTRYPOINT', 'CLAUDE_CODE_SESSION_ID'],
-    auth: {
-      apiKeyEnv: ['ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN'],
-      loginFile: ['.claude', '.credentials.json'], // present on Linux; macOS uses Keychain
-      keyOverridesLogin: false, // claude precedence is not a plain key-over-login
-    },
-  },
-  codex: {
-    id: 'codex',
-    label: 'OpenAI Codex',
-    guidanceFile: 'agents', // logical → AGENTS.md (+ .codex/AGENTS.override.md)
-    configFormat: 'toml', // ~/.codex/config.toml, [mcp_servers.*]
-    statusline: { mode: 'builtin', scope: 'user', customCommand: false, multiline: false },
-    statuslineSupported: false, // compatibility: no command-backed renderer
-    aqeProvider: 'codex',
-    envMarkers: ['CODEX_SANDBOX', 'CODEX_HOME', 'CODEX_SESSION_ID'],
-    auth: {
-      apiKeyEnv: ['OPENAI_API_KEY'],
-      loginFile: ['.codex', 'auth.json'], // ChatGPT login
-      keyOverridesLogin: true, // grounded: OPENAI_API_KEY ⇒ codex ignores login
-    },
-  },
-};
+export const HOST_ADAPTERS = Object.fromEntries(HOST_REGISTRY
+  .filter((host) => host.capabilities.canRouteActivities)
+  .map((host) => [host.id, {
+    id: host.id, label: host.label,
+    guidanceFile: host.legacy.guidanceFile,
+    configFormat: host.legacy.configFormat,
+    statusline: host.legacy.statusline,
+    statuslineSupported: host.capabilities.commandStatusline,
+    aqeProvider: host.legacy.aqeProvider,
+    envMarkers: host.legacy.envMarkers,
+    auth: host.auth,
+  }]));
 
 /** Ordered host ids (claude first = display order, matches routing.HOSTS). */
 export const HOST_IDS = Object.keys(HOST_ADAPTERS);
