@@ -43,12 +43,12 @@ export async function executeWorker(worker, adapter, {
     if (!ready?.ready) return workerFailure(worker, {
       exitCategory: ready?.exitCategory ?? 'cli_unavailable', failure: { reason: 'host is not ready' }, startedAt, clock,
     });
-    state = await adapter.prepare({ worker, cwd });
-    state = await adapter.launch(state);
+    state = await adapter.prepare({ worker, cwd, timeoutMs });
+    state = await adapter.launch(state, { timeoutMs });
     const watched = await observeBeforeDeadline(adapter, state, timeoutMs);
     if (watched.timedOut) {
-      await adapter.cancel(state);
-      return adapter.interpret(state, { type: 'timeout' });
+      const cancelled = await adapter.cancel(state);
+      return adapter.interpret(state, { type: cancelled?.orphaned ? 'orphaned' : 'timeout' });
     }
     return validateWorkerResult(adapter.interpret(state, watched.observation));
   } catch (error) {

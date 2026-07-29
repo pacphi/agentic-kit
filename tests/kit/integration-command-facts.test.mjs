@@ -24,10 +24,10 @@ test('commands share one immutable normalized integration snapshot', async () =>
   assert.equal(JSON.stringify(facts).includes('present-only-in-memory'), false);
 });
 
-test('managed but non-routable OpenCode never enters legacy install/routing loops', () => {
+test('routable OpenCode keeps its config lifecycle out of legacy env-backed loops', () => {
   const opencode = HOST_REGISTRY.find(({ id }) => id === 'opencode');
   assert.ok(opencode);
   assert.equal(opencode.capabilities.canDriveSession, true);
-  assert.equal(opencode.capabilities.canRouteActivities, false);
+  assert.equal(opencode.capabilities.canRouteActivities, true);
   assert.equal(commandHosts().some(({ id }) => id === 'opencode'), false);
 });

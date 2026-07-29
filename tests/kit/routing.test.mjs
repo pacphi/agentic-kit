@@ -190,10 +190,13 @@ test('host-neutral run plan preserves every legacy dual worker assignment', () =
   assert.ok(plan.workers.every((worker) => worker.activity && worker.host && !('platform' in worker)));
 });
 
-test('a managed but non-routable host cannot materialize a runnable plan', () => {
-  assert.throws(() => materializeRunPlan({ implementation: {
+test('an explicit OpenCode route materializes for ak run but not the legacy dual adapter', () => {
+  const policy = { implementation: {
     host: 'opencode', model: 'openrouter/example', source: 'user',
-  } }, { template: 'feature', task: 'x' }), /implementation.*opencode.*canRouteActivities/);
+  } };
+  const plan = materializeRunPlan(policy, { template: 'feature', task: 'x' });
+  assert.equal(plan.workers.find((worker) => worker.activity === 'implementation').host, 'opencode');
+  assert.throws(() => policyToDualRunConfig(policy, { template: 'feature', task: 'x' }), /ak dual supports Claude\/Codex/);
 });
 
 test('policyToDualRunConfig throws on an unknown template', () => {

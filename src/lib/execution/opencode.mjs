@@ -29,6 +29,31 @@ function defaultReservePort() {
   });
 }
 
+async function waitForChildClose(child, timeoutMs) {
+  if (!child?.once || child.exitCode != null || child.signalCode != null) return true;
+  let timer;
+  try {
+    return await Promise.race([
+      new Promise((resolve) => child.once('close', () => resolve(true))),
+      new Promise((resolve) => { timer = setTimeout(() => resolve(false), timeoutMs); }),
+    ]);
+  } finally { clearTimeout(timer); }
+}
+
+/** Terminate only the direct server child. A TERM that does not produce a close
+ * event becomes explicit orphan evidence after one bounded KILL fallback. */
+async function stopChild(child, { terminationGraceMs, forceGraceMs }) {
+  if (!child?.kill || child.exitCode != null || child.signalCode != null) return { stopped: true };
+  if (!child.once) {
+    try { child.kill('SIGTERM'); } catch { return { stopped: false }; }
+    return { stopped: true };
+  }
+  try { child.kill('SIGTERM'); } catch { return { stopped: false }; }
+  if (await waitForChildClose(child, terminationGraceMs)) return { stopped: true };
+  try { child.kill('SIGKILL'); } catch { return { stopped: false }; }
+  return { stopped: await waitForChildClose(child, forceGraceMs) };
+}
+
 function templateText(readFileSync = fs.readFileSync) {
   return readFileSync(TEMPLATE_PATH, 'utf8');
 }
@@ -70,13 +95,24 @@ async function requestJson(fetchFn, endpoint, password, pathname,
 }
 
 async function requestNoContent(fetchFn, endpoint, password, pathname,
-  { method = 'POST', body } = /** @type {{method?:string, body?:any}} */ ({})) {
+  { method = 'POST', body, signal } = /** @type {{method?:string, body?:any, signal?:AbortSignal}} */ ({})) {
   const headers = basicHeaders(password);
   if (body !== undefined) headers['content-type'] = 'application/json';
   const response = await fetchFn(`${endpoint}${pathname}`, {
-    method, headers, ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+    method, headers, ...(body === undefined ? {} : { body: JSON.stringify(body) }), ...(signal ? { signal } : {}),
   });
   if (!response?.ok) throw new Error(`${method} ${pathname} failed with HTTP ${response?.status ?? 'unknown'}`);
+}
+
+async function requestWithin(fetchFn, endpoint, password, pathname, options, timeoutMs) {
+  const controller = new AbortController();
+  let timer;
+  try {
+    return await Promise.race([
+      requestNoContent(fetchFn, endpoint, password, pathname, { ...options, signal: controller.signal }),
+      new Promise((_, reject) => { timer = setTimeout(() => { controller.abort(); reject(new Error(`${options.method ?? 'POST'} ${pathname} timed out`)); }, timeoutMs); }),
+    ]);
+  } finally { clearTimeout(timer); }
 }
 
 async function waitForHealth(fetchFn, endpoint, password, { attempts = 40, wait = delay } = {}) {
@@ -99,9 +135,11 @@ function normalizeEvent(value) {
 /** Read only the first terminal session event. The SSE parsing is deliberately
  * tolerant of chunk boundaries but rejects malformed data rather than inventing
  * completion. */
-async function waitForTerminalEvent(response, sessionId) {
+async function waitForTerminalEvent(response, sessionId, { signal } = /** @type {{signal?:AbortSignal}} */ ({})) {
   if (!response?.ok || !response.body?.getReader) throw new Error('GET /global/event did not return an SSE body');
   const reader = response.body.getReader();
+  const abort = () => { void reader.cancel(); };
+  signal?.addEventListener?.('abort', abort, { once: true });
   const decoder = new TextDecoder();
   let buffer = '';
   let data = [];
@@ -119,18 +157,22 @@ async function waitForTerminalEvent(response, sessionId) {
     if (event?.type === 'session.status' && properties.sessionID === sessionId && properties.status?.type === 'idle') return { type: 'idle' };
     return null;
   };
-  for (;;) {
-    const { done, value } = await reader.read();
-    buffer += decoder.decode(value ?? new Uint8Array(), { stream: !done });
-    const lines = buffer.split(/\r?\n/);
-    buffer = lines.pop() ?? '';
-    for (const line of lines) {
-      const terminal = await consume(line);
-      if (terminal) { await reader.cancel(); return terminal; }
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      buffer += decoder.decode(value ?? new Uint8Array(), { stream: !done });
+      const lines = buffer.split(/\r?\n/);
+      buffer = lines.pop() ?? '';
+      for (const line of lines) {
+        const terminal = await consume(line);
+        if (terminal) { await reader.cancel(); return terminal; }
+      }
+      if (done) break;
     }
-    if (done) break;
+    throw new Error(signal?.aborted ? 'OpenCode SSE stream cancelled' : 'OpenCode SSE stream ended before the session became terminal');
+  } finally {
+    signal?.removeEventListener?.('abort', abort);
   }
-  throw new Error('OpenCode SSE stream ended before the session became terminal');
 }
 
 function assistantFrom(messages) {
@@ -144,6 +186,7 @@ function assistantFrom(messages) {
 
 function errorCategory(error) {
   if (error?.name === 'ProviderAuthError') return 'auth_required';
+  if (error?.name === 'ProtocolError') return 'protocol_error';
   return 'worker_error';
 }
 
@@ -161,6 +204,8 @@ function terminalResult(state, observation, clock) {
     status = 'timed_out'; exitCategory = 'timeout'; failure = { reason: 'timeout' };
   } else if (observation.type === 'cancelled') {
     status = 'cancelled'; exitCategory = 'cancelled'; failure = { reason: 'cancelled' };
+  } else if (observation.type === 'orphaned') {
+    status = 'failed'; exitCategory = 'orphaned'; failure = { reason: 'owned OpenCode server did not terminate' };
   } else if (observation.type === 'error' || assistant?.error) {
     const error = observation.error ?? assistant?.error ?? null;
     status = 'failed'; exitCategory = errorCategory(error); failure = error ?? { reason: 'OpenCode session failed' };
@@ -186,9 +231,11 @@ function terminalResult(state, observation, clock) {
  */
 export function createOpenCodeExecutionAdapter({
   fetchFn = globalThis.fetch, spawnFn = nodeSpawn, haveFn = have, reservePort = defaultReservePort,
-  secret = defaultSecret, wait = delay, clock = nowIso,
+  secret = defaultSecret, wait = delay, clock = nowIso, terminationGraceMs = 1_500, forceGraceMs = 1_500,
 } = {}) {
   if (typeof fetchFn !== 'function') throw new TypeError('fetchFn is required');
+  if (!Number.isInteger(terminationGraceMs) || terminationGraceMs < 1) throw new TypeError('terminationGraceMs must be a positive integer');
+  if (!Number.isInteger(forceGraceMs) || forceGraceMs < 1) throw new TypeError('forceGraceMs must be a positive integer');
   const adapter = {
     id: 'opencode-server',
     async readiness() {
@@ -200,7 +247,7 @@ export function createOpenCodeExecutionAdapter({
       if (!path.isAbsolute(cwd)) throw new TypeError('OpenCode worker cwd must be absolute');
       return { worker, cwd, prompt: renderOpenCodeWorkerPrompt(worker), startedAt: clock() };
     },
-    async launch(state) {
+    async launch(state, { timeoutMs = 120_000 } = {}) {
       const port = await reservePort();
       const password = secret();
       const endpoint = `http://${LOOPBACK}:${port}`;
@@ -216,14 +263,15 @@ export function createOpenCodeExecutionAdapter({
         });
         if (typeof session?.id !== 'string' || !session.id) throw new Error('OpenCode created a session without an id');
         const headers = basicHeaders(password);
-        const eventResponse = await fetchFn(`${endpoint}/global/event`, { headers });
-        const terminal = waitForTerminalEvent(eventResponse, session.id);
-        await requestNoContent(fetchFn, endpoint, password, `/session/${encodeURIComponent(session.id)}/prompt_async`, {
+        const eventAbort = new AbortController();
+        const eventResponse = await fetchFn(`${endpoint}/global/event`, { headers, signal: eventAbort.signal });
+        const terminal = waitForTerminalEvent(eventResponse, session.id, { signal: eventAbort.signal });
+        await requestWithin(fetchFn, endpoint, password, `/session/${encodeURIComponent(session.id)}/prompt_async`, {
           body: { agent: 'build', ...(state.worker.configuredModel ? { model: state.worker.configuredModel } : {}), parts: [{ type: 'text', text: state.prompt }] },
-        });
-        return { ...state, endpoint, password, child, sessionId: session.id, terminal };
+        }, timeoutMs);
+        return { ...state, endpoint, password, child, sessionId: session.id, terminal, eventAbort };
       } catch (error) {
-        try { child.kill('SIGTERM'); } catch { /* cleanup is best-effort */ }
+        await stopChild(child, { terminationGraceMs, forceGraceMs });
         throw error;
       }
     },
@@ -242,16 +290,20 @@ export function createOpenCodeExecutionAdapter({
     },
     interpret(state, observation) { return terminalResult(state, observation, clock); },
     async cancel(state) {
+      state?.eventAbort?.abort();
       if (state?.sessionId) {
         try { await requestNoContent(fetchFn, state.endpoint, state.password, `/session/${encodeURIComponent(state.sessionId)}/abort`); } catch { /* cleanup records the final truth */ }
       }
-      try { state?.child?.kill?.('SIGTERM'); return { type: 'cancelled' }; } catch { return { type: 'cancelled', orphaned: true }; }
+      const stopped = await stopChild(state?.child, { terminationGraceMs, forceGraceMs });
+      return stopped.stopped ? { type: 'cancelled' } : { type: 'cancelled', orphaned: true };
     },
     async cleanup(state) {
+      state?.eventAbort?.abort();
       if (state?.endpoint) {
         try { await requestNoContent(fetchFn, state.endpoint, state.password, '/instance/dispose'); } catch { /* child termination remains the fallback */ }
       }
-      try { state?.child?.kill?.('SIGTERM'); return { cleaned: true }; } catch { return { cleaned: false, orphaned: true }; }
+      const stopped = await stopChild(state?.child, { terminationGraceMs, forceGraceMs });
+      return stopped.stopped ? { cleaned: true } : { cleaned: false, orphaned: true };
     },
   };
   return validateExecutionAdapter(adapter);
