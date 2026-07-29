@@ -10,11 +10,11 @@ import readline from 'node:readline/promises';
 import { run as runCmd, have } from '../lib/exec.mjs';
 import * as heal from '../lib/heal.mjs';
 import { fixStatusline } from '../lib/statusline.mjs';
-import { registry, syncBlocks, blocksForTarget, retiredForTarget, guidanceTargets } from '../lib/blocks.mjs';
+import { registry, syncBlocks } from '../lib/blocks.mjs';
 import { register as mcpRegister, applyExclusions } from '../lib/mcp.mjs';
-import { applyOpencode, deployPlugin, syncAgents, deploySkill, catalogSource } from '../lib/opencode.mjs';
+import { opencodeStack, reconcileOpencodeGuidance } from '../lib/opencode.mjs';
 import { loadKitConfig, saveKitConfig } from '../lib/config.mjs';
-import { commandHosts, applyHosts, applyProviders, ensureDualAgents, hostInstallState, installHost, applyAqeRouter, seedDualRoutingIfDualHost, printActivityRoutingTable, aqeSupportsAgentOverrides, ensureCodexMcp, ensureRufloMcpInCodex, applySetupHostFlags, bothHostsEnabled } from '../lib/providers.mjs';
+import { HOSTS, applyHosts, applyProviders, ensureDualAgents, hostInstallState, installHost, applyAqeRouter, seedDualRoutingIfDualHost, printActivityRoutingTable, aqeSupportsAgentOverrides, ensureCodexMcp, ensureRufloMcpInCodex, applySetupHostFlags } from '../lib/providers.mjs';
 import { installedVersion } from '../lib/versions.mjs';
 import * as rb from '../lib/ruvnet-brain.mjs';
 import * as adb from '../lib/agentdb.mjs';
@@ -58,7 +58,8 @@ Options:
   --opencode       enable the opencode host during setup: wires opencode.json
                      (claude-flow + ruvnet-brain MCP, skills paths, permissions),
                      deploys the lifecycle plugin + platform skill, and converts
-                     the ruflo agent set into opencode subagents.
+                     the ruflo agent set into opencode subagents. Already set up?
+                     Use: ak x provider pick --host claude,opencode
   --primary-host <h>  which host leads: claude|codex (default claude). Passing
                      codex implies --codex and mirrors the routing defaults so
                      codex drives with claude as the alternate.
@@ -156,7 +157,7 @@ export async function run_machine({ flags, pkgRoot, cfg }) {
 
   // 6. frontier hosts — install any ENABLED host that is entirely absent (default
   //    enables claude only). External installs (mise/native/brew) are left alone.
-  for (const h of commandHosts()) {
+  for (const h of HOSTS) {
     if (!cfg.providers?.hosts?.[h.id]) continue;
     const st = await hostInstallState(h);
     if (st.method === 'absent') {
@@ -177,27 +178,16 @@ export async function run_machine({ flags, pkgRoot, cfg }) {
     if (!(await have('opencode'))) {
       warn('opencode: enabled but CLI not installed — wiring skipped (re-run `ak sync` after installing opencode-ai)');
     } else {
-      const oc = await applyOpencode(cfg);
-      (oc.ok ? ok : warn)(`opencode: ${oc.detail}`);
-      ok(`opencode plugin: ${deployPlugin({ pkgRoot }).detail}`);
-      const source = catalogSource({ override: cfg.providers?.opencodeCatalogDir });
-      ok(`opencode agents: ${syncAgents({ source }).detail}`);
-      const sk = deploySkill({ source });
-      if (sk.changed) ok(`opencode skill: ${sk.detail}`);
+      const stack = await opencodeStack(cfg, { pkgRoot });
+      (stack.oc.ok ? ok : warn)(`opencode: ${stack.oc.detail}`);
+      ok(`opencode plugin: ${stack.plugin.detail}`);
+      ok(`opencode agents: ${stack.agents.detail}`);
+      if (stack.skill.changed) ok(`opencode skill: ${stack.skill.detail}`);
       // guidance blocks for the opencode AGENTS.md land NOW (codex-review #18)
-      // — not on the next status-driven reconcile.
-      const rows = registry(cfg.customBlocks);
-      const resolve = (r) => (r.custom
-        ? (r.template.startsWith('~/') ? path.join(paths.home, r.template.slice(2)) : r.template)
-        : path.join(pkgRoot, 'claude', r.template));
-      const ctx = { flags: { dualMode: bothHostsEnabled(cfg), opencodeEnabled: !!cfg.providers?.hosts?.opencode } };
-      for (const t of guidanceTargets({ cwd: process.cwd(), cfg })) {
-        if (t.name !== 'agents-opencode') continue;
-        const treg = [...blocksForTarget(rows, t.name), ...retiredForTarget(rows, t.name)];
-        const res = await syncBlocks(t.file, treg, resolve, { context: ctx });
-        const changed = res.filter((r) => r.action !== 'unchanged').map((r) => `${r.slug} ${r.action}`).join(', ');
-        ok(`opencode guidance: ${changed || 'in sync'}`);
-      }
+      // — not on the next status-driven reconcile. Same shared reconcile pick
+      // and off use, so every command converges guidance identically.
+      const guidance = await reconcileOpencodeGuidance({ pkgRoot, cfg, cwd: process.cwd(), enabled: true });
+      ok(`opencode guidance: ${guidance.detail.replace(/^guidance: /, '')}`);
       // opencode loads config/plugins/MCP/agents once at startup — say so now,
       // or the user files "hooks don't work" issues (observed live).
       info('restart opencode to load the hooks + MCP servers (loaded once at startup)');
@@ -208,9 +198,9 @@ export async function run_machine({ flags, pkgRoot, cfg }) {
   if (!cfg.providers?.hosts?.codex && await have('codex')) {
     info('codex CLI detected — run `ak host pick` to let ruflo use both claude and codex');
   }
-  // opencode hint — detected but not enabled (opt-in via `setup --opencode`)
+  // opencode hint — detected but not enabled (post-install opt-in via provider pick)
   if (!cfg.providers?.hosts?.opencode && await have('opencode')) {
-    info('opencode CLI detected — wire ruflo + ruvnet-brain into it with: ak setup --opencode');
+    info('opencode CLI detected — wire ruflo + ruvnet-brain into it with: ak x provider pick --host claude,opencode');
   }
   return true;
 }

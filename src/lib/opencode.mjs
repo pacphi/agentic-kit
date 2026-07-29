@@ -34,6 +34,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { have } from './exec.mjs';
 import { readJson, writeJsonWithBackup } from './settings.mjs';
+import { registry, syncBlocks, blocksForTarget, retiredForTarget, guidanceTargets } from './blocks.mjs';
 import * as paths from './paths.mjs';
 
 // ── config-file wiring (opencode.json) ──────────────────────────────────────
@@ -331,9 +332,24 @@ export function undoOpencode(cfg, { configFile = paths.opencodeConfigPath() } = 
     return { ok: true, changed: false, detail: 'opencode.json left as-is (not ak-managed)' };
   }
   const managed = normalizeManaged(cfg.providers?.opencodeManaged);
-  if (!fs.existsSync(configFile)) return { ok: true, changed: false, detail: 'opencode.json absent — nothing to strip' };
+  if (!fs.existsSync(configFile)) {
+    // Nothing left to strip — but the markers would otherwise survive as a lie
+    // (a later teardown would chase a phantom config). Clear them; the change
+    // is the marker cleanup itself (codex-review r3).
+    if (cfg.providers) { cfg.providers.opencodeMcp = null; cfg.providers.opencodeManaged = null; }
+    return { ok: true, changed: true, detail: 'opencode.json absent — ownership markers cleared (nothing to strip)' };
+  }
   const { ok: parsedOk, doc } = readJsonStrict(configFile);
-  if (!parsedOk) return { ok: true, changed: false, detail: 'opencode.json unparseable — nothing to strip (refusing to touch JSONC)' };
+  if (!parsedOk) {
+    // NOT ok: the ak wiring is still ACTIVE inside a file we refuse to parse,
+    // and the markers are the only teardown proof — keep both, fail honestly,
+    // and name the manual remediation. Never report "disabled" here, and never
+    // null the markers (codex-review r3).
+    return {
+      ok: false, changed: false,
+      detail: 'opencode.json is not plain JSON (JSONC comments?) — ak wiring left ACTIVE and ownership markers retained; remove the file or make it plain JSON, then re-run the teardown',
+    };
+  }
   const kept = [];
   let changed = false;
 
@@ -376,6 +392,75 @@ export function undoOpencode(cfg, { configFile = paths.opencodeConfigPath() } = 
     kept.length ? `left untouched: ${kept.join(', ')}` : null,
   ].filter(Boolean).join(' — ');
   return { ok: true, changed, detail };
+}
+
+// ── shared stack composition (the ONE owner-module operation) ────────────────
+// setup / sync / `x provider pick` all enable opencode the same way; off /
+// uninstall / pick-disable all retire it the same way. The composition itself
+// (which ops, in which order) is part of the ownership contract — three copies
+// would drift (codex-review: the provider-picker rework must not duplicate
+// merge/ownership logic in the command). Persistence of cfg stays with the
+// CALLER (applyOpencode/undoOpencode mutate the ownership markers; the command
+// decides when saveKitConfig runs).
+
+/** Enable path: wire opencode.json, deploy the lifecycle plugin, convert the
+ *  agent set, deploy the platform skill. Callers gate on the CLI being present
+ *  first (have('opencode')) — this never fabricates the config home for an
+ *  absent host. Returns each step's result for the caller's own formatting,
+ *  plus `markersChanged`: applyOpencode re-records the ownership markers on
+ *  EVERY run (a converged file with stale/missing markers in kit.json still
+ *  needs persisting, or the next teardown cannot prove ownership) — callers
+ *  must save cfg when `oc.changed || markersChanged`, not on `oc.changed`
+ *  alone (codex-review r3).
+ *  The destination seams exist for TESTS ONLY — production callers pass none
+ *  and get the real config home; a test that forgets them writes to the
+ *  developer's real machine (codex-review r4).
+ *  @param {any} cfg @param {{ pkgRoot: string, configFile?: string, brainShim?: string, pluginsDir?: string, agentsDir?: string, skillsDir?: string }} opts */
+export async function opencodeStack(cfg, { pkgRoot, configFile, brainShim, pluginsDir, agentsDir, skillsDir }) {
+  const before = JSON.stringify([cfg.providers?.opencodeMcp ?? null, cfg.providers?.opencodeManaged ?? null]);
+  const oc = await applyOpencode(cfg, { ...(configFile ? { configFile } : {}), ...(brainShim ? { brainShim } : {}) });
+  const markersChanged = JSON.stringify([cfg.providers?.opencodeMcp ?? null, cfg.providers?.opencodeManaged ?? null]) !== before;
+  const plugin = deployPlugin({ pkgRoot, ...(pluginsDir ? { pluginsDir } : {}) });
+  const source = catalogSource({ override: cfg.providers?.opencodeCatalogDir });
+  const agents = syncAgents({ source, ...(agentsDir ? { destDir: agentsDir } : {}) });
+  const skill = deploySkill({ source, ...(skillsDir ? { skillsDir } : {}) });
+  return { oc, plugin, agents, skill, source, markersChanged };
+}
+
+/** Retire path: strip the ak-managed opencode.json wiring (user priors
+ *  restored; collisions and user-edited values left), then remove ak-deployed
+ *  artifacts (marker-gated — user-owned files survive). undoOpencode nulls the
+ *  ownership markers in cfg on success and keeps them on failure; the caller
+ *  persists — and MUST honor undo.ok before claiming a disable (codex-review
+ *  r3: a JSONC-refused config leaves active wiring behind).
+ *  @param {any} cfg */
+export function retireOpencode(cfg) {
+  const undo = undoOpencode(cfg);
+  const artifacts = removeArtifacts({});
+  return { undo, artifacts, ok: undo.ok };
+}
+
+/** Reconcile the opencode AGENTS.md guidance blocks for the current enablement
+ *  state — the `agents-opencode` target only, never the claude/project files.
+ *  Enable (`enabled: true`) upserts the enablement-gated blocks as soon as the
+ *  config home exists; disable (`enabled: false`) strips them (the always-on
+ *  preamble stays by design; user content is never touched). Shared by setup,
+ *  `x provider pick` enable/disable, and `x provider off`, so every command
+ *  converges guidance the same way sync's blocks branch does (codex-review r3).
+ *  @param {{ pkgRoot: string, cfg: any, cwd?: string, enabled: boolean }} opts */
+export async function reconcileOpencodeGuidance({ pkgRoot, cfg, cwd = process.cwd(), enabled }) {
+  const target = guidanceTargets({ cwd }).find((t) => t.name === 'agents-opencode');
+  if (!target) return { ok: true, changed: false, detail: 'no opencode config home — guidance skipped' };
+  const rows = registry(cfg.customBlocks);
+  const resolve = (r) => (r.custom
+    ? (r.template.startsWith('~/') ? path.join(paths.home, r.template.slice(2)) : r.template)
+    : path.join(pkgRoot, 'claude', r.template));
+  const ctx = { flags: { dualMode: !!cfg.providers?.hosts?.claude && !!cfg.providers?.hosts?.codex, opencodeEnabled: enabled } };
+  const treg = [...blocksForTarget(rows, 'agents-opencode'), ...retiredForTarget(rows, 'agents-opencode')];
+  const res = await syncBlocks(target.file, treg, resolve, { context: ctx });
+  const changed = res.filter((r) => r.action !== 'unchanged' && r.action !== 'skipped')
+    .map((r) => `${r.slug} ${r.action}`);
+  return { ok: true, changed: changed.length > 0, detail: changed.length ? `guidance: ${changed.join(', ')}` : 'guidance in sync' };
 }
 
 // ── ruflo catalog source (agents + skills) ──────────────────────────────────

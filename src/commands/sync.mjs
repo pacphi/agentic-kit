@@ -8,7 +8,7 @@ import { have } from '../lib/exec.mjs';
 import { fixStatusline, helperStampStale } from '../lib/statusline.mjs';
 import { registry, syncBlocks, blocksForTarget, retiredForTarget, guidanceTargets } from '../lib/blocks.mjs';
 import { register as mcpRegister, applyExclusions } from '../lib/mcp.mjs';
-import { applyOpencode, deployPlugin, syncAgents, deploySkill, catalogSource } from '../lib/opencode.mjs';
+import { opencodeStack } from '../lib/opencode.mjs';
 import { listDaemons, staleDaemons, reap } from '../lib/daemons.mjs';
 import { loadKitConfig, saveKitConfig } from '../lib/config.mjs';
 import { commandHosts, applyHosts, applyProviders, hostInstallState, installHost, applyAqeRouter, seedDualRoutingIfDualHost, ensureCodexMcp, ensureRufloMcpInCodex, bothHostsEnabled } from '../lib/providers.mjs';
@@ -155,30 +155,6 @@ export async function run({ flags, pkgRoot }) {
       (r.killed ? ok : warn)(`daemon pid=${r.pid}: ${r.killed ? 'reaped' : 'could not stop'}`);
     }
   }
-  if (subsystems.has('blocks') || subsystems.has('versions')) {
-    const rowsReg = registry(cfg.customBlocks);
-    const resolve = (r) => (r.custom
-      ? (r.template.startsWith('~/') ? path.join(paths.home, r.template.slice(2)) : r.template)
-      : path.join(pkgRoot, 'claude', r.template));
-    // Three guidance targets (guidanceTargets): machine-wide ~/.claude/CLAUDE.md
-    // (claude), the project's own <cwd>/AGENTS.md (agents), and — only when
-    // ~/.codex exists — machine-wide ~/.codex/AGENTS.md (agents-user). The
-    // dual-mode block's flag detector gates it on both hosts being enabled, so
-    // single-host setups leave the agents files untouched (no .bak). Each target
-    // also force-strips blocks that no longer belong in it (retiredForTarget) —
-    // the migration path that clears the dual block out of any project AGENTS.md
-    // that still carries it after the re-scope (ADR-0008).
-    const ctx = { flags: { dualMode: bothHostsEnabled(cfg), opencodeEnabled: !!cfg.providers?.hosts?.opencode } };
-    for (const t of guidanceTargets({ cwd, cfg })) {
-      const treg = [...blocksForTarget(rowsReg, t.name), ...retiredForTarget(rowsReg, t.name)];
-      const res = await syncBlocks(t.file, treg, resolve, { context: ctx });
-      const changed = res.filter((r) => r.action !== 'unchanged' && r.action !== 'skipped')
-        .map((r) => `${r.slug} ${r.action}`).join(', ');
-      // stay quiet on the agents targets unless they actually changed (single-host
-      // leaves them unmanaged); always report the claude target.
-      if (t.name === 'claude' || changed) ok(`blocks(${t.label}): ${changed || 'in sync'}`);
-    }
-  }
   // hosts: install any ENABLED host that is entirely absent (updates to
   // npm-managed hosts ride the versions branch above via driftReport).
   if (subsystems.has('hosts')) {
@@ -193,18 +169,55 @@ export async function run({ flags, pkgRoot }) {
   // the hosts install branch so an enable+install converges in one sync, and
   // only when the CLI is actually present — otherwise the writers would create
   // the host's config home for a host that isn't there (codex-review #4).
+  // Runs BEFORE the blocks branch: the agents-opencode guidance target is gated
+  // on the config home this branch creates — this order lets a fresh enable
+  // converge guidance in the SAME sync (a second sync is then a true no-op).
   if (subsystems.has('opencode') && cfg.providers?.hosts?.opencode) {
     if (!(await have('opencode'))) {
       info('opencode: enabled but CLI not installed — wiring skipped (hosts step installs it)');
     } else {
-      const oc = await applyOpencode(cfg);
-      if (oc.changed) saveKitConfig(cfg); // persist opencodeMcp/opencodeManaged markers
-      if (oc.changed || !oc.ok) report('opencode', oc);
-      report('opencode plugin', deployPlugin({ pkgRoot }));
-      const source = catalogSource({ override: cfg.providers?.opencodeCatalogDir });
-      report('opencode agents', syncAgents({ source }));
-      const sk = deploySkill({ source });
-      if (sk.changed || !sk.ok) report('opencode skill', sk);
+      const stack = await opencodeStack(cfg, { pkgRoot });
+      // persist the markers on ANY refresh (a converged file whose kit.json
+      // markers are stale/missing still needs the save, or the next teardown
+      // cannot prove ownership — codex-review r3), not only on file changes.
+      if (stack.oc.changed || stack.markersChanged) saveKitConfig(cfg);
+      if (stack.oc.changed || !stack.oc.ok) report('opencode', stack.oc);
+      report('opencode plugin', stack.plugin);
+      report('opencode agents', stack.agents);
+      if (stack.skill.changed || !stack.skill.ok) report('opencode skill', stack.skill);
+    }
+  }
+  // The 'opencode' guard: the opencode branch above can CREATE the config home
+  // that activates the agents-opencode guidance target — a machine whose other
+  // guidance is already converged (no blocks drift rows) would otherwise skip
+  // this branch on a fresh enable and land the guidance one sync late
+  // (codex-review r3). When the CLI is absent the target's own config-home
+  // gate still refuses to fabricate anything.
+  if (subsystems.has('blocks') || subsystems.has('versions') || subsystems.has('opencode')) {
+    const rowsReg = registry(cfg.customBlocks);
+    const resolve = (r) => (r.custom
+      ? (r.template.startsWith('~/') ? path.join(paths.home, r.template.slice(2)) : r.template)
+      : path.join(pkgRoot, 'claude', r.template));
+    // Guidance targets (guidanceTargets): machine-wide ~/.claude/CLAUDE.md
+    // (claude), the project's own <cwd>/AGENTS.md (agents), machine-wide
+    // ~/.codex/AGENTS.md when ~/.codex exists (agents-user), and opencode's
+    // ~/.config/opencode/AGENTS.md when its config home exists
+    // (agents-opencode — created by the opencode branch above on a fresh
+    // enable). The dual-mode block's flag detector gates it on both hosts being
+    // enabled, so single-host setups leave the agents files untouched (no
+    // .bak). Each target also force-strips blocks that no longer belong in it
+    // (retiredForTarget) — the migration path that clears the dual block out of
+    // any project AGENTS.md that still carries it after the re-scope
+    // (ADR-0008).
+    const ctx = { flags: { dualMode: bothHostsEnabled(cfg), opencodeEnabled: !!cfg.providers?.hosts?.opencode } };
+    for (const t of guidanceTargets({ cwd, cfg })) {
+      const treg = [...blocksForTarget(rowsReg, t.name), ...retiredForTarget(rowsReg, t.name)];
+      const res = await syncBlocks(t.file, treg, resolve, { context: ctx });
+      const changed = res.filter((r) => r.action !== 'unchanged' && r.action !== 'skipped')
+        .map((r) => `${r.slug} ${r.action}`).join(', ');
+      // stay quiet on the agents targets unless they actually changed (single-host
+      // leaves them unmanaged); always report the claude target.
+      if (t.name === 'claude' || changed) ok(`blocks(${t.label}): ${changed || 'in sync'}`);
     }
   }
   if (subsystems.has('providers') || subsystems.has('routing') || subsystems.has('codex-mcp')) {

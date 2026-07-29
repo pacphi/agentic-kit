@@ -9,7 +9,7 @@ import readline from 'node:readline/promises';
 import { run as runCmd } from '../lib/exec.mjs';
 import { stripBlock, BEGIN, BUILTIN_BLOCKS } from '../lib/blocks.mjs';
 import { unregister } from '../lib/mcp.mjs';
-import { undoOpencode, removeArtifacts } from '../lib/opencode.mjs';
+import { retireOpencode } from '../lib/opencode.mjs';
 import { loadKitConfig, saveKitConfig } from '../lib/config.mjs';
 import { present as rbPresent } from '../lib/ruvnet-brain.mjs';
 import * as paths from '../lib/paths.mjs';
@@ -127,13 +127,18 @@ export async function run({ flags }) {
     // cfg comes from the top of run() (read before any purge of kit.json).
     // --purge removes kit.json above; persisting cfg here would recreate it.
     if (cfg.providers?.opencodeMcp === 'ak') {
-      act('stripped ak-managed opencode.json wiring (mcp/skills/permissions)', () => {
-        undoOpencode(cfg);
+      if (dry) info('[dry-run] stripped ak-managed opencode wiring + artifacts (opencode.json, plugin, agents, skill)');
+      else {
+        const ret = retireOpencode(cfg);
         if (!flags.purge) saveKitConfig(cfg);
-      });
-    }
-    if (fs.existsSync(paths.opencodeDir())) {
-      act('removed ak-deployed opencode artifacts (plugin/agents/skill)', () => removeArtifacts({}));
+        (ret.ok ? ok : warn)(ret.ok
+          ? 'stripped ak-managed opencode wiring + artifacts (opencode.json, plugin, agents, skill)'
+          : `opencode teardown incomplete — ${ret.undo.detail}`);
+      }
+    } else if (fs.existsSync(paths.opencodeDir())) {
+      // Not ak-managed (or never enabled): artifacts are still marker-gated, so
+      // only ak-deployed files leave — user-owned agents/skills/plugins stay.
+      act('removed ak-deployed opencode artifacts (plugin/agents/skill)', () => { retireOpencode(cfg); });
     }
   }
 

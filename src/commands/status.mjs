@@ -434,7 +434,7 @@ export async function collect({ pkgRoot, cwd = process.cwd() }) {
         rows.push(row('providers', 'info', 'claude-only (default host)'));
       }
       if (!cfg.providers?.hosts?.opencode && await have('opencode')) {
-        rows.push(row('providers', 'info', 'opencode CLI installed but not enabled (`ak setup --opencode` wires it)'));
+        rows.push(row('providers', 'info', 'opencode CLI installed but not enabled (`ak x provider pick --host claude,opencode` wires it)'));
       }
     } else {
       const desired = managedEnv(cfg);
