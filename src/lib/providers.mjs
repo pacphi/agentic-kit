@@ -31,7 +31,7 @@ import { readJson, writeJsonWithBackup } from './settings.mjs';
 import { installedVersion, cmpVersions } from './versions.mjs';
 import * as paths from './paths.mjs';
 import { bold, dim, cyan } from './output.mjs';
-import { policyToAgentOverrides, seedDualRouting, resolveRoutes, routingSummary, divergedRoutes, ACTIVITIES, DEFAULT_PRIMARY_HOST, PRIMARY_HOSTS } from './routing.mjs';
+import { configuredPolicyToAgentOverrides, seedDualRouting, resolveRoutes, routingSummary, divergedRoutes, ACTIVITIES, AGENT_ACTIVITY_MAP, DEFAULT_PRIMARY_HOST, PRIMARY_HOSTS } from './routing.mjs';
 import { HOST_ADAPTERS } from './hosts.mjs';
 import {
   HOST_REGISTRY, PROVIDER_REGISTRY, normalizeIntegrationFacts,
@@ -418,13 +418,20 @@ export function applyAqeRouter(cfg, cwd = process.cwd()) {
   const policy = cfg.providers?.dualRouting ?? {};
   const hasChain = chain.length > 0;
   const hasPolicy = Object.keys(policy).length > 0;
-  if (!hasChain && !hasPolicy) return { ok: true, changed: false, detail: 'no aqe router config to apply' };
   // Same repo-root resolution as settingsTarget — the three scope gates must
   // never disagree about what "in a project" means (see paths.repoRoot).
   const root = paths.repoRoot(cwd);
   if (!root) return { ok: true, changed: false, detail: 'not a project — aqe router unmanaged' };
   const file = aqeRouterFile(root);
   const existing = readJson(file, {}) ?? {};
+  const priorOverrides = existing.agentOverrides ?? {};
+  const projected = configuredPolicyToAgentOverrides(policy);
+  const managedOverrideKeys = new Set(Object.keys(AGENT_ACTIVITY_MAP));
+  const staleOverrides = Object.keys(priorOverrides)
+    .filter((agent) => managedOverrideKeys.has(agent) && !(agent in projected));
+  if (!hasChain && !hasPolicy && staleOverrides.length === 0) {
+    return { ok: true, changed: false, detail: 'no aqe router config to apply' };
+  }
   const next = { ...existing };
   next._managedBy = AQE_MANAGED_TAG;
   const details = [];
@@ -454,14 +461,16 @@ export function applyAqeRouter(cfg, cwd = process.cwd()) {
     }
   }
 
-  if (hasPolicy && aqeSupportsAgentOverrides()) {
+  if ((hasPolicy || staleOverrides.length) && aqeSupportsAgentOverrides()) {
     // MERGE, don't replace: ak owns only the curated agent-types it projects;
     // preserve foreign entries (aqe's own defaults or a hand-added agent). The
     // projector drops non-constructible providers (mirrors sanitizeAgentOverrides)
     // and only ever emits {provider, model} — no apiKey.
-    const projected = policyToAgentOverrides(policy);
-    next.agentOverrides = { ...(existing.agentOverrides ?? {}), ...projected };
-    details.push(`agentOverrides: ${Object.keys(projected).length} agents`);
+    next.agentOverrides = { ...priorOverrides };
+    for (const agent of staleOverrides) delete next.agentOverrides[agent];
+    Object.assign(next.agentOverrides, projected);
+    details.push(`agentOverrides: ${Object.keys(projected).length} agents`
+      + (staleOverrides.length ? ` (${staleOverrides.length} stale ak entries pruned)` : ''));
     wrote = true;
   } else if (hasPolicy) {
     details.push('agentOverrides: skipped (needs agentic-qe ≥ 3.13.1)');

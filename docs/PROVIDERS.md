@@ -234,6 +234,14 @@ Defaults (all overridable; your edits are marked `custom` and never re-seeded):
 `ak host pick --help` prints this list too. Tuning is per-route and reversible: hand-edit
 `kit.json` `providers.dualRouting`, pass `--route`, or `ak host off` to clear it entirely.
 
+**Disabling is complete, not just a flag change.** `ak host pick --host <set>` treats the
+set as authoritative. Excluding a routing host removes it from persisted routes and escalation
+ladders before AQE is reprojected; seeded entries are removed silently, while a user-pinned route
+prints a warning naming the disabled host. It also removes stale agentic-kit-curated AQE overrides
+while preserving foreign override keys. Excluding Codex additionally retires only the two
+marker-owned Codex MCP bridges; user-registered MCP servers are left alone. Re-enabling Codex
+converges those bridges again.
+
 `dualRouting` intentionally names a host and model, not an inference provider. Provider resolution
 is a separate binding lookup; absent grounded evidence remains unknown or explicitly inferred.
 Likewise, `ak dual run` continues to mean the Claude+Codex collaboration substrate. Multiple
