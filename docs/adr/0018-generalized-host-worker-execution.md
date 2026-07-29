@@ -1,16 +1,15 @@
-# ADR-0018 — Generalized host-worker execution, preserving `ak dual`
+# ADR-0018 — Generalized host-worker execution; `ak run` canonical
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-07-29
 - **Deciders:** agentic-kit maintainers
 
 ## Context
 
-`ak` now manages Claude, Codex, and OpenCode, but only Claude and Codex are routing
-hosts. The existing `ak dual run` implementation materializes a Claude/Codex-specific
-configuration and delegates execution to `claude-flow-codex`. It has no execution
-adapter, result normalization, cancellation contract, or permission policy for OpenCode.
-Changing OpenCode's routing capability alone would therefore create an invalid plan.
+`ak` manages Claude, Codex, and OpenCode. The earlier `ak dual run` implementation
+materialized a Claude/Codex-specific configuration and delegated execution to
+`claude-flow-codex`; it could not safely execute an OpenCode worker. A host-neutral command and
+adapter contract are required before OpenCode can become an activity-routing host.
 
 OpenCode does provide a headless HTTP server intended for programmatic use, with an
 OpenAPI endpoint, health/version endpoint, sessions, asynchronous prompts, SSE events,
@@ -41,13 +40,13 @@ permission-response contract required for a routable worker. [OpenCode CLI docum
    facts. A host or its `provider/model` selector never proves inference-provider,
    billing, cost, or QE vendor diversity.
 
-3. Preserve `ak dual` as the Claude/Codex compatibility projection throughout this
-   migration. A later explicit generalized command will own a host-neutral plan; it
-   must not silently reinterpret existing `dual` configuration, templates, primary-host
-   mirroring, or escalation behavior.
+3. Make `ak run` the explicit, host-neutral execution command. Preserve `ak dual` only as a
+   deprecated Claude/Codex compatibility projection: it warns on stderr, retains its existing
+   `claude-flow-codex` escalation behavior for scripts, and must not silently reinterpret
+   existing configuration, templates, primary-host mirroring, or escalation behavior.
 
 4. Select OpenCode's short-lived, loopback-only `opencode serve` HTTP/OpenAPI surface
-   as the candidate execution transport. Each owned server uses an allocated loopback
+   as the execution transport. Each owned server uses an allocated loopback
    port and an ephemeral `OPENCODE_SERVER_PASSWORD`, neither logged nor persisted. The
    adapter uses Node's built-in `fetch`, keeping the package free of runtime dependencies.
    ACP is not selected: it is an editor-oriented JSON-RPC transport and adds a client
@@ -65,14 +64,14 @@ permission-response contract required for a routable worker. [OpenCode CLI docum
    would take precedence over global user policy) and makes the template side-effect
    free, inspectable, and testable.
 
-6. OpenCode remains `canRouteActivities:false` until the adapter has conformance,
-   sandbox-mutation, cancellation, timeout, permission, malformed-event, and cleanup
-   evidence. The capability flip happens in the same change as the runnable adapter.
+6. OpenCode declares `canRouteActivities:true` only with the runnable adapter and its
+   conformance evidence. Its routes are accepted by `ak run`, but are never auto-seeded,
+   AQE-projected, primary-host eligible, or accepted by deprecated `ak dual`.
 
 ## Consequences
 
-- A host-neutral plan and result schema can be added without changing existing command
-  behavior; Claude/Codex parity is proved before OpenCode routing is enabled.
+- `ak run` executes the host-neutral plan and result schema while preserving the legacy
+  Claude/Codex adapter behind the deprecated `ak dual` command.
 - Managed installation is testable independently of execution readiness: a missing CLI
   is installable, but wiring and routing never claim it is runnable until post-install
   detection succeeds.
@@ -83,13 +82,15 @@ permission-response contract required for a routable worker. [OpenCode CLI docum
 - Automatic seeding remains Claude/Codex subscription-only. No OpenCode route is seeded
   from unknown or metered provider/billing facts.
 
-## Acceptance evidence before status becomes Accepted
+## Implementation evidence
 
-- Exact-final-head fixtures and sandbox tests establish OpenCode server readiness,
-  isolated session mutation, structured terminal results, explicit deny, no-prompt-hang,
-  timeout/cancel abort, and owned-server cleanup.
-- Claude/Codex materialization remains behaviorally identical for `ak dual`.
+- Exact-final-head fixtures establish OpenCode server readiness, isolated sessions, structured
+  terminal results, explicit permission denial, malformed-event handling, no-prompt-hang,
+  timeout/cancel abort, TERM/KILL cleanup, and launch-timeout classification.
+- Claude/Codex materialization remains behaviorally identical for the deprecated `ak dual`
+  compatibility wrapper; `ak run` is the supported execution command.
 - OpenCode has parity tests for enabled-absent installation, npm-managed update drift,
   externally managed installs, post-install wiring, and marker-precise teardown.
-- Cross-host escalation, migration, routing-disable behavior, provenance, and cost safety
-  are covered; #73 remains the immediate post-#76 disable-semantics follow-on.
+- Routing-disable behavior, provenance, and cost safety are covered. OpenCode remains excluded
+  from AQE projection and vendor-diversity claims because a host/model selector is not provider
+  evidence.

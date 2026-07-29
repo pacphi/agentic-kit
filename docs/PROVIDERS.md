@@ -23,8 +23,9 @@ The full model has four separate axes:
 
 A **binding** connects a host to a provider through a projection and transport. One Ollama
 provider can therefore have independent `ollama-via-claude` and `ollama-via-codex` bindings.
-OpenRouter is a provider behind a host, never automatically a third host. OpenCode may support
-managed lifecycle surfaces while remaining ineligible as a primary or per-activity routing host.
+OpenRouter is a provider behind a host, never automatically a third host. OpenCode is an opt-in
+activity-routing host through `ak run`, while remaining ineligible as a primary host or AQE
+provider. Its configured selector does not establish provider, billing, or vendor-diversity facts.
 This Proposed capability model is
 [ADR-0016](adr/0016-capability-driven-integration-adapters.md); current controls below remain
 backward compatible while its implementation proceeds.
@@ -169,7 +170,7 @@ tool-use, long-horizon agent work) and `z-ai/glm-5` (value — 205K context, che
 the 5.x line). Both are **metered** — GLM is never an auto-seed target (seeding only ever
 routes to subscription/local providers).
 
-## Level 3.5 — per-activity routing across Claude + Codex
+## Level 3.5 — seeded Claude + Codex defaults, explicit OpenCode routes
 
 When **both** hosts are enabled and `agentic-qe ≥ 3.13.1` is installed, `ak` seeds a
 **per-activity routing policy**: each kind of work (architecture, implementation, testing,
@@ -190,6 +191,22 @@ Codex-primary **mirrors** the default table below — codex takes the reasoning/
 and claude becomes the alternate/escalation target — so the experience is ambidextrous
 regardless of which CLI drives. `ak status` marks the primary and fails (not warns) if the
 primary host is missing.
+
+**OpenCode is explicit, not seeded or AQE-projected.** Enable it, then use `ak run` with either
+a persisted route or a run-local override:
+
+```bash
+ak host pick --host claude,opencode \
+  --route 'security-scan:opencode:provider/model'  # persisted intent
+ak run security "src/auth/"                         # canonical execution command
+ak run security "src/auth/" --route 'security-scan:opencode:provider/model'  # run-local
+```
+
+Each OpenCode worker is an isolated, loopback-only supervised server session. A permission request
+is aborted and reported as `permission_required`; `ak` never auto-approves it. OpenCode routes are
+not written to AQE `agentOverrides`, cannot become `primaryHost`, and do not count as a separate
+AQE vendor. `ak dual` is deprecated and rejects OpenCode routes because it retains a Claude/Codex
+compatibility adapter; use `ak run` instead.
 
 Defaults (all overridable; your edits are marked `custom` and never re-seeded):
 
@@ -244,8 +261,9 @@ converges those bridges again.
 
 `dualRouting` intentionally names a host and model, not an inference provider. Provider resolution
 is a separate binding lookup; absent grounded evidence remains unknown or explicitly inferred.
-Likewise, `ak dual run` continues to mean the Claude+Codex collaboration substrate. Multiple
-providers behind those hosts do not turn it into three-host-or-more orchestration.
+`ak run` is the canonical host-neutral executor. The deprecated `ak dual run` remains a
+Claude+Codex compatibility wrapper only; multiple providers behind those hosts do not turn its
+legacy adapter into three-host-or-more orchestration.
 
 ## Level 4 — drop down to raw ruflo / agentic-qe
 

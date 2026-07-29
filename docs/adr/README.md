@@ -25,8 +25,8 @@ Consequences**, and cites the grounded source it rests on where relevant.
 | [0014](0014-dashboard-auth-and-remediation.md) | Dashboard auth token, plus a security/quality remediation pass | Accepted |
 | [0015](0015-managed-codex-native-statusline.md) | Manage Codex's native user-wide status line without claiming rich-renderer parity | Accepted |
 | [0016](0016-capability-driven-integration-adapters.md) | Capability-driven host, provider, binding, projection, and observability adapters | Accepted |
-| [0017](0017-opencode-host.md) | OpenCode as a managed, observable, non-routable host through native surfaces | Accepted |
-| [0018](0018-generalized-host-worker-execution.md) | Generalized host-worker execution, preserving `ak dual` | Proposed |
+| [0017](0017-opencode-host.md) | OpenCode as a managed, observable host through native surfaces | Accepted |
+| [0018](0018-generalized-host-worker-execution.md) | Generalized host-worker execution; `ak run` canonical | Accepted |
 
 Theme: ADRs **0001–0006** define **dual-host LLM routing and leadership** — how `ak` lets ruflo route
 each development activity (architecture, implementation, testing, review, …) to the right host (Claude
@@ -82,13 +82,13 @@ routable by accident. Its Ollama bindings are a structural multi-host proof; ADR
 independent Proposed decision for observed local execution, catalogue-backed identity, usage
 pricing, and transcript fidelity.
 
-**0017** applies ADR-0016 to OpenCode as a managed, observable, non-routable host. It wires the rUv
+**0017** applies ADR-0016 to OpenCode as a managed, observable host. It wires the rUv
 stack through OpenCode's native JSON configuration, plugin, converted-agent, skill, and
 machine-guidance surfaces; preserves user values through ownership receipts and guarded teardown;
-and keeps primary/activity routing limited to capability-qualified Claude/Codex hosts. Generalized
-multi-host routing, including an OpenCode execution-worker contract, remains follow-on issue #76.
+and preserves primary/AQE routing boundaries. ADR-0018 adds the OpenCode execution-worker
+contract and explicit activity routes through `ak run`.
 
-**0018** defines that follow-on's execution boundary: host-neutral worker lifecycle and normalized
-terminal evidence, a compatibility-preserving `ak dual` migration, and the candidate OpenCode
-loopback HTTP/OpenAPI transport. It remains Proposed until real adapter conformance and sandbox
-evidence prove routing can be enabled safely.
+**0018** defines the host-neutral worker lifecycle and normalized terminal evidence, makes `ak run`
+the canonical execution surface, and preserves `ak dual` only as a deprecated Claude/Codex
+compatibility wrapper. It selects OpenCode's loopback HTTP/OpenAPI transport and documents its
+permission, timeout, cleanup, provenance, and AQE-boundary evidence.

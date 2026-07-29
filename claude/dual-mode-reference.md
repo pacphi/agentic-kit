@@ -14,18 +14,17 @@ and quality gates are available whichever agent is in the driver's seat, and eac
 reach the other. Work flows complementarily — Claude and Codex are peers, not primary and
 fallback.
 
-### `ak dual run` — Claude+Codex collaboration pipelines
+### `ak run` — canonical activity pipelines
 
-`ak dual run <template> "<task>"` materializes a multi-worker pipeline from your
-per-activity routing policy (set via `ak host`) and runs it through the
-`claude-flow-codex` adapter. Each worker is assigned a host + model by the policy, so a
-single run can span both vendors.
+`ak run <template> "<task>"` materializes a multi-worker pipeline from your per-activity routing
+policy (set via `ak host`) and runs it through supervised host adapters. Each worker is assigned a
+host + model by the policy, so a single run can span Claude, Codex, and an explicitly routed
+OpenCode worker.
 
 ```bash
-ak dual run feature  "add token-bucket rate limiting"
-ak dual run security "src/auth/" --escalate
-ak dual run refactor "extract the payment module" --dry-run
-ak dual templates                     # list the pipelines
+ak run feature  "add token-bucket rate limiting"
+ak run security "src/auth/" --route 'security-scan:opencode:provider/model'
+ak run refactor "extract the payment module" --dry-run
 ```
 
 - **Templates** — `feature` (architect → coder → tester → reviewer), `security`
@@ -33,9 +32,11 @@ ak dual templates                     # list the pipelines
   `packaging` (packager → reviewer), `release` (preparer → reviewer). Each step's
   host/model comes from your routing policy, not the template.
 - **`--route 'act:host[:model]'`** — per-run routing override (repeatable, not persisted).
-- **`--parallel`** — run independent workers concurrently instead of sequentially.
-- **`--escalate`** — on failure, retry once **up the escalation ladder** (see below).
-- **`--dry-run` / `--json`** — print the materialized config + command, spawn nothing.
+- **`--max-concurrent <n>` / `--timeout <ms>`** — bound parallel work and each worker.
+- **`--dry-run` / `--json`** — print the materialized plan, spawn nothing.
+
+`ak dual` is a deprecated Claude/Codex `claude-flow-codex` compatibility wrapper. It retains its
+own `--parallel` and `--escalate` behavior for existing scripts, but new work must use `ak run`.
 
 ### The Claude ↔ Codex bridge (bidirectional MCP)
 

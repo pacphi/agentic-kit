@@ -27,10 +27,10 @@ export const options = {
   json: { type: 'boolean', default: false },
 };
 
-export const help = `ak dual — run a Claude+Codex collaboration swarm
+export const help = `ak dual — deprecated Claude+Codex compatibility wrapper
 
-Uses your per-activity routing policy (from \`ak host\`) to assign each pipeline
-step to the right host + model, then runs it via ${ADAPTER}.
+Use \`ak run <template> "<task>"\` for all new execution work. This legacy command
+retains its Claude+Codex ${ADAPTER} adapter and escalation behavior for existing scripts.
 
 Usage:
   ak dual run <template> "<task>"   run a collaboration pipeline
@@ -47,9 +47,9 @@ Options (run):
   --timeout <ms>               per-worker timeout
 
 Examples:
-  ak dual run feature "add token-bucket rate limiting"
-  ak dual run security "src/auth/" --escalate
-  ak dual run refactor "extract the payment module" --dry-run`;
+  ak run feature "add token-bucket rate limiting"
+  ak dual run security "src/auth/" --escalate  # legacy compatibility
+  ak run refactor "extract the payment module" --dry-run`;
 
 /** Build the run-local policy (persisted policy + per-run --route overrides) and
  *  project it to a dual-run config. */

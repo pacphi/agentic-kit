@@ -477,8 +477,8 @@ of exactly that kind, both in `parseCodex`.
 **What this does not model:** the by-host cards do not yet carry a separate
 inference-provider dimension. The legacy session record has exactly one `provider`
 field, currently used as host/parser identity. A
-workflow that hands off between Claude and Codex mid-task (e.g. `ak dual
-run`) produces two separate session records, one per host, each correctly
+workflow that hands off between Claude and Codex mid-task (e.g. `ak run`) produces two separate
+session records, one per host, each correctly
 aggregated under the current transcript-host schedule rather than one blended record. That
 API-equivalent estimate is not proof of the provider that actually served either execution.
 
@@ -990,7 +990,7 @@ describes.
   by synthetic regression tests, but has not yet been validated against a
   genuine `thread_source: "subagent"` file on real hardware.** Any
   maintainer whose machine accumulates such a file (most likely from heavy
-  `ak dual run` / hierarchical-mesh swarm usage routing through Codex) should
+  `ak run` / hierarchical-mesh swarm usage routing through Codex) should
   re-run this verification and update this note.
 
 **Independent, third-party verification.**

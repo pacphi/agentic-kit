@@ -52,14 +52,15 @@ missing price.
 | Routing policy | Persisted activity-to-route intent |
 | Route provenance | Whether a route is a default, seeded by `ak`, or deliberately set by the user |
 | Escalation rung | Alternate host and model tried after failure when escalation is requested |
-| Dual run | Claude-and-Codex collaboration pipeline materialized from the routing policy |
+| `ak run` | Canonical host-neutral execution of a materialized routing plan |
+| Dual run | Deprecated Claude-and-Codex compatibility pipeline materialized from the routing policy |
 | Read-model projection | Derived query or UI state, distinct from a configuration projection |
 | Transcript host | Host whose native artifact supplied a transcript |
 | Inference identity | Provider and model supported by provider-specific or out-of-band evidence |
 
-`Dual` describes the two peer execution hosts in the current collaboration substrate. The number
-of inference providers behind those hosts does not change a dual run into a three-host
-orchestration.
+`Dual` describes the two peer execution hosts in the deprecated compatibility substrate. The
+number of inference providers behind those hosts does not change that legacy pipeline into a
+three-host orchestration. Generalized execution belongs to `ak run`.
 
 ## Usage rules
 

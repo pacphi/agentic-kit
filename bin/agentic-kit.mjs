@@ -51,7 +51,7 @@ Usage (ak = alias of agentic-kit):
   ak dashboard       open the local web dashboard (localhost; auto-opens browser)  [--port N] [--no-open]
   ak admin           maintainer-only telemetry admin (localhost; GitHub/npm egress)  [--port N] [--no-open]
   ak run             execute a host-neutral activity pipeline  [template "task"] [--dry-run]
-  ak dual            run a Claude+Codex collaboration swarm (dual-host)  [run <template> "task"] [--dry-run]
+  ak dual            deprecated compatibility wrapper; use ak run for new work
   ak host            manage agent hosts, routing, and provider bindings  [status|pick|refresh|off]
   ak provider        deprecated alias for ak host; removed before the stable release
   ak uninstall       leave cleanly                                      [--this-project] [--purge]
@@ -89,6 +89,7 @@ async function main() {
   let cmd = argv[0];
   let rest = argv.slice(1);
   let deprecatedProvider = cmd === 'provider';
+  const deprecatedDual = cmd === 'dual';
 
   if (cmd === '--help' || cmd === '-h' || cmd === 'help') {
     console.log(argv.includes('--all') ? HELP_ALL : HELP);
@@ -134,6 +135,9 @@ async function main() {
     const legacy = argv[0] === 'x' ? 'ak x provider' : 'ak provider';
     const canonical = argv[0] === 'x' ? 'ak x host' : 'ak host';
     console.error(`${legacy} is deprecated; use \`${canonical}\`. It will be removed before the stable release.`);
+  }
+  if (deprecatedDual) {
+    console.error('ak dual is deprecated; use `ak run` for new execution work. It will be removed before the stable release.');
   }
   const mod = await table[cmd]();
 

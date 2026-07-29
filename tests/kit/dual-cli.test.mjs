@@ -38,6 +38,8 @@ test('ak dual run --dry-run materializes the feature pipeline from the policy', 
   const r = ak(['dual', 'run', 'feature', 'add auth', '--dry-run'], { cwd: project, home });
   assert.equal(r.status, 0, r.stderr);
   assert.match(r.stdout, /dual run: feature/);
+  assert.match(r.stderr, /ak dual is deprecated/i);
+  assert.match(r.stderr, /use `ak run`/i);
   assert.match(r.stdout, /"platform": "claude"/);
   assert.match(r.stdout, /"platform": "codex"/);
   assert.match(r.stdout, /add auth/);
