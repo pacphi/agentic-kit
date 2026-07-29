@@ -20,8 +20,8 @@ escalation as universally available would be dishonest.
 Escalation lives in the policy but its **availability is stated per projection path**:
 
 - **aqe projection** — honored **natively** by the shipped `auto-escalation-tracker` / `QEModelRoutingAdapter`.
-- **`ak dual run` wrapper** — ak implements **retry-with-next-rung** on a worker's non-zero exit (wrapper
-  logic ak owns, added in Slice 3).
+- **deprecated `ak dual run` wrapper** — ak implements **retry-with-next-rung** on a worker's
+  non-zero exit (wrapper logic ak owns, added in Slice 3).
 - **raw `claude-flow-codex dual run`** — **no escalation** (materialize-only users). Stated plainly in docs
   and `--help`, never implied.
 
@@ -33,7 +33,8 @@ vendor both improves the odds of recovery and preserves the qe-court vendor-dive
 
 - Honest capability boundaries — no hidden magic; each surface's behavior is documented.
 - Cross-vendor ladders double as diversity insurance.
-- The `ak dual run` wrapper carries retry/escalation state; the raw path stays a thin pass-through.
+- The deprecated `ak dual run` wrapper carries retry/escalation state; the raw path stays a thin
+  pass-through. New execution work uses `ak run`.
 - Escalation config validated the same way as primary routes (constructible provider, enabled host).
 
 ## References

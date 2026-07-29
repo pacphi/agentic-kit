@@ -128,8 +128,10 @@ Commands ask the registry what an adapter can do instead of comparing its ID:
 - verification selects host, provider, binding, projection, and observation proof contracts by
   capability.
 
-Consequently, adding OpenCode to the host registry does not make it primary or routable. Adding
-OpenRouter to the provider registry does not make it a host.
+Consequently, adding OpenCode to the host registry alone does not make it primary or routable.
+ADR-0018 subsequently enables explicit `ak run` routes after adding a supervised execution adapter;
+it remains non-primary and outside AQE projection. Adding OpenRouter to the provider registry does
+not make it a host.
 
 ### 3. Use one lifecycle contract for managed projections
 
@@ -363,13 +365,13 @@ model. The two evidence streams describe one execution only when correlation is 
 normalized fact/resolution seam is the integration point for issue #59; this ADR does not absorb
 that issue's full parser, ingestion, pricing, or scorecard delivery.
 
-#### OpenCode as a non-routable host
+#### OpenCode at initial adoption
 
 OpenCode uses the same host lifecycle, normalized facts, projections, and observability contracts
-for its supported surfaces. Its initial adapter declares `primary: false` and
-`activityRouting: false`. Tests prove that it appears in applicable management/status choices but
-not in primary-host or activity-routing choices. A later change may enable those capabilities only
-after a separate grounded routing design.
+for its supported surfaces. Its initial adapter declared `primary: false` and
+`activityRouting: false`. ADR-0018 is the subsequent grounded routing design: it enables explicit
+`ak run` activity routes while retaining `primary: false`, no AQE-provider projection, and no
+provider inference from the configured model selector.
 
 ### 9. Deliver in compatibility-preserving slices
 
@@ -394,10 +396,10 @@ not write real home/global configuration.
 
 ## Compatibility and non-goals
 
-- Existing Claude/Codex behavior, `kit.json`, routing defaults, primary-host mirroring, and
-  `ak dual` projections remain valid.
-- This decision does not rename `ak dual`; provider count does not change the number of routed
-  execution hosts.
+- Existing Claude/Codex behavior, `kit.json`, routing defaults, and primary-host mirroring remain
+  valid. ADR-0018 keeps `ak dual` as a deprecated compatibility projection and makes `ak run` the
+  canonical executor.
+- Provider count does not change host identity or create an inference-provider execution host.
 - It does not implement every provider, a public adapter SDK, or arbitrary third-party code
   loading.
 - It does not persist credentials.

@@ -56,7 +56,9 @@ protocols, and non-loopback plaintext HTTP.
 
 - Primary and activity-routing capabilities require session-driving capability.
 - Commands select adapters by capability rather than recognized ID.
-- Adding OpenCode does not make it primary or routable.
+- Adding OpenCode does not make it primary; an explicit OpenCode route is eligible only after its
+  execution adapter declares activity-routing capability, and runs through `ak run` rather than
+  AQE or `ak dual`.
 - Adding OpenRouter does not make it a host.
 - Provider claims are rendered only when the provider declares and evidence supports them.
 - Compatibility collections are derived from registries.

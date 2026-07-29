@@ -1,4 +1,4 @@
-# ADR-0017 — OpenCode as a managed, observable, non-routable host
+# ADR-0017 — OpenCode as a managed, observable host through native surfaces
 
 - **Status:** Accepted
 - **Date:** 2026-07-28
@@ -7,8 +7,8 @@
 ## Context
 
 ADR-0016 separates execution hosts, inference providers, projections, observability,
-ownership, and lifecycle capabilities. Claude and Codex are routable hosts; OpenCode is
-already registered as a managed, non-primary, non-routable host. This ADR applies that
+ownership, and lifecycle capabilities. At this ADR's adoption, OpenCode was registered as a
+managed, non-primary, non-routable host. This ADR applies that
 architecture to OpenCode's native surfaces — ak's standing rule is "write the host's
 own config, never a parallel config layer." **OpenCode** is a third agent
 CLI in the same class, and its native surfaces are different again:
@@ -37,12 +37,14 @@ the plugin, the config entries, and the guidance file are static artifacts with 
 
 ### 1. A managed host adapter — opt-in, `hosts.opencode: false` by default
 
-The ADR-0016 host registry declares `canDriveSession:true`, `canBePrimary:false`, and
-`canRouteActivities:false`, plus the `opencode-ai` npm package and native OpenCode
+The ADR-0016 host registry declares `canDriveSession:true`, `canBePrimary:false`, and now
+`canRouteActivities:true`, plus the `opencode-ai` npm package and native OpenCode
 projection. Brew/mise/native installs report `external` and are never touched.
 `providers.hosts.opencode` remains the compatibility intent field and `--opencode` opts in.
 No `ENABLE_*` env exists for opencode (ruflo's ADR-034 backend flags don't cover it), so
 wiring is entirely config-file based — the `MANAGED_ENV_KEYS` surface is unchanged.
+ADR-0018 supplies the subsequent execution proof and limits this capability to explicit `ak run`
+routes; it does not make OpenCode primary or an AQE provider.
 
 ### 2. One owner module: `src/lib/opencode.mjs`
 
@@ -128,10 +130,11 @@ reconcile) — while `ruflo-preamble` (host-agnostic operating rules) is shared:
 
 ### 4. Sync/status/setup/pick/teardown wiring — the two-tier host model
 
-`ak` manages **three managed host integrations** (claude, codex, opencode) with **two
-routing hosts** (claude, codex): opencode participates in install/config/guidance/
-status/sync/teardown exactly like the others, and is deliberately never a routing
-target, never `primaryHost`, never an aqe provider. Managed, primary, and routing sets are
+`ak` manages **three managed host integrations** (claude, codex, opencode). All three can be
+explicit activity-routing targets through `ak run`; the Claude/Codex pair remains the only
+primary-host, AQE-projection, and deprecated `ak dual` compatibility set. OpenCode participates
+in install/config/guidance/status/sync/teardown exactly like the others, and is never
+`primaryHost` or an AQE provider. Managed, primary, and routing sets are
 derived from ADR-0016's `canDriveSession`, `canBePrimary`, and `canRouteActivities`
 capabilities rather than parallel descriptor flags or hardcoded id lists.
 
@@ -180,10 +183,10 @@ switches from its hardcoded two-target block list to the shared `guidanceTargets
 `ak status`", which a frozen subset silently breaks whenever a guidance target is added
 (this also closes a pre-existing gap: codex's `agents-user` drift never surfaced there
 either). The `pick` rework in §4 replaces the first revision's behavior (opencode was
-excluded and merely preserved) with full two-tier management — the routing set stays
-claude/codex-only throughout.
-Out of scope (matching Codex's own asymmetry): routing-table integration
-(`routing.mjs` untouched), aqe provider wiring (no opencode provider type exists),
+excluded and merely preserved) with full two-tier management. ADR-0018 subsequently adds
+explicit OpenCode routing through `ak run`.
+Out of scope (matching Codex's own asymmetry): AQE provider wiring (no opencode provider type
+exists),
 statusline (no upstream surface), `drivingHost` session detection (opencode sets no
 session env marker), and usage/cost attribution (`usage-index.mjs` reads claude/codex
 transcripts only — the pricing surface has no opencode input and shows nothing for it,
@@ -230,7 +233,7 @@ which is the honest shape).
 ## References
 
 - ADR-0016 defines the registry, lifecycle, ownership, and normalized-fact contracts
-  implemented here. Generalized routable OpenCode execution is tracked separately in #76.
+  implemented here. ADR-0018 records the generalized execution contract implemented by #82.
 - `src/lib/opencode.mjs` (the owner module: `opencodeStack`, `retireOpencode`,
   `reconcileOpencodeGuidance`), `src/lib/hosts.mjs` (adapter),
   `src/lib/providers.mjs` (registry-derived managed host projection,

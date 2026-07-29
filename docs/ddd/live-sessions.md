@@ -55,7 +55,7 @@ Source adapters are anti-corruption layers for:
 
 - Claude session and delegated-agent artifacts;
 - Codex rollouts and state-ledger spawn edges;
-- ak dual-run workflow/routing metadata;
+- legacy ak dual-run workflow/routing metadata;
 - ruflo swarm, agent, hook, and daemon state;
 - agentic-qe tasks, workers, evaluations, gates, and court verdicts;
 - explicit skill, plugin, MCP, and tool lifecycle records.

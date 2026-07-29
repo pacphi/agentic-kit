@@ -72,7 +72,8 @@ is unchanged until you opt in.
 When **both** hosts are enabled, `ak` also seeds a **per-activity routing policy** and wires a
 **two-way Claude↔Codex MCP bridge** (Claude reaches Codex via `mcp__codex__codex`; Codex reaches
 ruflo via `[mcp_servers.ruflo]`). `--primary-host claude|codex` chooses which host leads. See the
-dual-mode reference block and `docs/PROVIDERS.md` §3.5 for the routing table and `ak dual run`.
+dual-mode reference block and `docs/PROVIDERS.md` §3.5 for the routing table and canonical `ak run`
+execution.
 
 ### Install & update (install-method-aware)
 
