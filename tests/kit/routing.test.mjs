@@ -4,6 +4,7 @@ import {
   ACTIVITIES, AK_ORIGINATED, DEFAULT_ROUTES, HOST_PROVIDER, SUBSCRIPTION_PROVIDERS,
   AQE_CONSTRUCTIBLE_PROVIDERS, MODEL_CATALOG, MODEL_CATALOG_VERIFIED, modelChoices, formatModelHelp,
   resolveRoutes, seedDualRouting, policyToAgentOverrides, routedVendors, routingSummary,
+  materializeRunPlan,
   validateRoute, parseRouteSpecs,
   DUAL_RUN_TEMPLATE_NAMES, policyToDualRunConfig, escalatePolicy,
 } from '../../src/lib/routing.mjs';
@@ -159,6 +160,23 @@ test('every dual-run template projects to platforms of claude|codex only', () =>
     assert.ok(workers.length >= 1, `${name} has workers`);
     assert.ok(workers.every((w) => w.platform === 'claude' || w.platform === 'codex'), `${name} platforms valid`);
   }
+});
+
+test('host-neutral run plan preserves every legacy dual worker assignment', () => {
+  const policy = seedDualRouting();
+  const plan = materializeRunPlan(policy, { template: 'feature', task: 'add auth' });
+  const dual = policyToDualRunConfig(policy, { template: 'feature', task: 'add auth' });
+  assert.equal(plan.template, 'feature');
+  assert.deepEqual(plan.workers.map(({ host, configuredModel, activity: _activity, ...worker }) => ({
+    ...worker, platform: host, model: configuredModel ?? undefined,
+  })), dual.workers);
+  assert.ok(plan.workers.every((worker) => worker.activity && worker.host && !('platform' in worker)));
+});
+
+test('a managed but non-routable host cannot materialize a runnable plan', () => {
+  assert.throws(() => materializeRunPlan({ implementation: {
+    host: 'opencode', model: 'openrouter/example', source: 'user',
+  } }, { template: 'feature', task: 'x' }), /implementation.*opencode.*canRouteActivities/);
 });
 
 test('policyToDualRunConfig throws on an unknown template', () => {
