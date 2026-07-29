@@ -180,6 +180,13 @@ managed tool follows (release-pinned installs, sync as the single updater,
 disk-first version truth, one drift story across status/statusline/dashboard),
 with the per-tool table and the checklist for adding a new tool.
 
+## Domain design
+
+[docs/ddd/](docs/ddd/) defines the shared language, bounded contexts, and invariants behind hosts,
+inference providers, bindings, routing, orchestration, evidence, usage, and Live Sessions. ADRs
+explain why decisions were made; the domain documents define what those concepts mean across the
+codebase.
+
 ## Credits
 
 ruflo/claude-flow by ruvnet · agentic-qe by proffesor-for-testing · prior art:
