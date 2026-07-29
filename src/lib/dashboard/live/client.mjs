@@ -24,7 +24,7 @@ export const LIVE_JS = `
   function esc(s){return String(s==null?"":s).replace(/[&<>"']/g,function(c){return{"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c];});}
   function short(s,n){s=String(s||"");return s.length>n?s.slice(0,n-1)+"…":s;}
   function title(s){return String(s||"activity").replace(/[._-]+/g," ").replace(/\\b\\w/g,function(c){return c.toUpperCase();});}
-  function ago(v){var at=Date.parse(v||""),ms=Date.now()-at;if(!Number.isFinite(ms))return"";var s=Math.max(0,Math.round(ms/1000));if(s<5)return"just now";if(s<60)return s+"s ago";var m=Math.round(s/60);if(m<60)return m+"m ago";var h=Math.round(m/60);if(h<24)return h+"h ago";var d=Math.floor(h/24),rh=h%24;if(d<7)return d+"d "+rh+"h ago";var w=Math.floor(d/7),rd=d%7;if(w<52)return w+"w "+rd+"d ago";var y=Math.floor(w/52),rw=w%52;return y+"y "+rw+"w ago";}
+  function ago(v){var at=Date.parse(v||""),ms=Date.now()-at;if(!Number.isFinite(ms))return"";var s=Math.max(0,Math.round(ms/1000));if(s<5)return"just now";if(s<60)return s+"s ago";var m=Math.round(s/60);return m<60?m+"m ago":Math.round(m/60)+"h ago";}
   function hostOf(v){return String(v&&v.host||"internal").toLowerCase();}
   function hostName(v){var h=hostOf(v);return{claude:"Claude Code",codex:"Codex",internal:"Internal"}[h]||title(h);}
   function hostGlyph(v){return{claude:"✳",codex:"◉",internal:"⌁"}[hostOf(v)]||"⌁";}
