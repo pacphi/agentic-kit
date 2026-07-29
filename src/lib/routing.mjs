@@ -341,6 +341,48 @@ export function policyToAgentOverrides(policy = {}, { agentMap = AGENT_ACTIVITY_
   return overrides;
 }
 
+/** Project only explicitly persisted routes. This intentionally does not fill
+ * holes from dual-host defaults: a host-disable operation may remove an entry,
+ * and projecting a default for that hole would reintroduce the disabled host. */
+export function configuredPolicyToAgentOverrides(policy = {}, { agentMap = AGENT_ACTIVITY_MAP } = {}) {
+  const overrides = {};
+  for (const [agent, act] of Object.entries(agentMap)) {
+    const route = policy[act];
+    if (!route) continue;
+    const provider = HOST_PROVIDER[route.host];
+    if (!AQE_CONSTRUCTIBLE_PROVIDERS.includes(provider)) continue;
+    overrides[agent] = { provider, model: route.model };
+  }
+  return overrides;
+}
+
+/** Remove disabled hosts from persisted routes and escalation ladders. Seeded
+ * entries are ak-owned and silent; user pins return actionable warnings. */
+export function pruneRoutesForHosts(policy = {}, { hosts = HOSTS } = {}) {
+  const enabled = new Set(hosts);
+  const next = {};
+  const warnings = [];
+  const pruned = [];
+  for (const [activity, route] of Object.entries(policy)) {
+    const source = route?.source ?? 'user';
+    if (!enabled.has(route?.host)) {
+      pruned.push({ activity, kind: 'route', host: route?.host ?? null, source });
+      if (source !== 'seeded') warnings.push(`removed user route '${activity}' — host '${route?.host ?? 'unknown'}' is disabled`);
+      continue;
+    }
+    const before = Array.isArray(route.escalate) ? route.escalate : [];
+    const escalate = before.filter((rung) => enabled.has(rung?.host));
+    const removed = before.filter((rung) => !enabled.has(rung?.host));
+    for (const rung of removed) {
+      pruned.push({ activity, kind: 'escalation', host: rung?.host ?? null, source });
+      if (source !== 'seeded') warnings.push(`removed user escalation for '${activity}' — host '${rung?.host ?? 'unknown'}' is disabled`);
+    }
+    next[activity] = { ...route, ...(escalate.length ? { escalate } : {}) };
+    if (removed.length && !escalate.length) delete next[activity].escalate;
+  }
+  return { policy: next, pruned, warnings };
+}
+
 // ── Projection #2: dual-run collaboration config ────────────────────────────
 // A template is an ordered DAG of activities; the policy fills host+model per
 // node. Grounded in rUv's CollaborationTemplates (feature/security/refactor);

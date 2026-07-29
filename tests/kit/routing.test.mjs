@@ -4,7 +4,7 @@ import {
   ACTIVITIES, AK_ORIGINATED, DEFAULT_ROUTES, HOST_PROVIDER, SUBSCRIPTION_PROVIDERS,
   AQE_CONSTRUCTIBLE_PROVIDERS, MODEL_CATALOG, MODEL_CATALOG_VERIFIED, modelChoices, formatModelHelp,
   resolveRoutes, seedDualRouting, policyToAgentOverrides, routedVendors, routingSummary,
-  materializeRunPlan,
+  configuredPolicyToAgentOverrides, pruneRoutesForHosts, materializeRunPlan,
   validateRoute, parseRouteSpecs,
   DUAL_RUN_TEMPLATE_NAMES, policyToDualRunConfig, escalatePolicy,
 } from '../../src/lib/routing.mjs';
@@ -104,6 +104,23 @@ test('overriding an activity flows through to its agent overrides', () => {
   const ov = policyToAgentOverrides({ testing: { host: 'claude', model: 'claude-sonnet-5', source: 'user' } });
   assert.equal(ov['qe-test-architect'].provider, 'claude-code');
   assert.equal(ov['qe-test-architect'].model, 'claude-sonnet-5');
+});
+
+test('configured projection never recreates a missing route from dual-host defaults', () => {
+  const ov = configuredPolicyToAgentOverrides({ review: { host: 'claude', model: 'claude-sonnet-5', source: 'user' } });
+  assert.equal(ov['qe-code-reviewer'].provider, 'claude-code');
+  assert.equal(ov['qe-test-architect'], undefined);
+});
+
+test('pruning disabled hosts drops primary routes and only invalid escalation rungs', () => {
+  const out = pruneRoutesForHosts({
+    implementation: { host: 'codex', model: 'gpt-5.4', source: 'seeded' },
+    testing: { host: 'claude', model: 'claude-sonnet-5', source: 'user', escalate: [{ host: 'codex', model: 'gpt-5.4' }] },
+  }, { hosts: ['claude'] });
+  assert.equal(out.policy.implementation, undefined);
+  assert.deepEqual(out.policy.testing, { host: 'claude', model: 'claude-sonnet-5', source: 'user' });
+  assert.equal(out.pruned.length, 2);
+  assert.deepEqual(out.warnings, ["removed user escalation for 'testing' — host 'codex' is disabled"]);
 });
 
 // ── Diversity + summary ─────────────────────────────────────────────────────

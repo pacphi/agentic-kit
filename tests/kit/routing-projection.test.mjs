@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { applyAqeRouter, aqeRouterFile, undoAqeRouter, ensureCodexMcp, undoCodexMcp } from '../../src/lib/providers.mjs';
+import { applyAqeRouter, aqeRouterFile, undoAqeRouter, ensureCodexMcp, undoCodexMcp, undoRufloMcpInCodex } from '../../src/lib/providers.mjs';
 import { seedDualRouting } from '../../src/lib/routing.mjs';
 import { _setGlobalRootForTest } from '../../src/lib/paths.mjs';
 
@@ -107,6 +107,29 @@ test('agentOverrides MERGES — a foreign entry survives (H1: never clobbered)',
   rm(dir); rm(groot);
 });
 
+test('stale curated overrides are pruned while configured and foreign entries survive', () => {
+  const groot = fakeAqe('3.13.1');
+  const dir = tmpProject();
+  fs.mkdirSync(path.dirname(aqeRouterFile(dir)), { recursive: true });
+  fs.writeFileSync(aqeRouterFile(dir), JSON.stringify({
+    _managedBy: 'agentic-kit',
+    agentOverrides: {
+      'qe-security-scanner': { provider: 'codex', model: 'gpt-5.4' },
+      'qe-code-reviewer': { provider: 'claude-code', model: 'claude-sonnet-5' },
+      'qe-custom-agent': { provider: 'ollama' },
+    },
+  }));
+  const res = applyAqeRouter(cfgWith({ dualRouting: {
+    review: { host: 'claude', model: 'claude-sonnet-5', source: 'user' },
+  } }), dir);
+  const disk = readDisk(dir);
+  assert.match(res.detail, /stale ak entries pruned/);
+  assert.equal(disk.agentOverrides['qe-security-scanner'], undefined);
+  assert.deepEqual(disk.agentOverrides['qe-code-reviewer'], { provider: 'claude-code', model: 'claude-sonnet-5' });
+  assert.deepEqual(disk.agentOverrides['qe-custom-agent'], { provider: 'ollama' });
+  rm(dir); rm(groot);
+});
+
 test('an invalid fallback chain does not block the agentOverrides projection (M3)', () => {
   const groot = fakeAqe('3.13.1');
   const dir = tmpProject();
@@ -127,6 +150,25 @@ test('codex MCP teardown is a no-op unless ak owns it (H2), and never shells whe
   const ensure = await ensureCodexMcp({ providers: { hosts: { claude: true, codex: false } } });
   assert.equal(ensure.changed, false);
   assert.match(ensure.detail, /not enabled/);
+});
+
+test('owned bridge teardown sends the precise safe argv on every platform', async () => {
+  const calls = [];
+  const runner = async (cmd, args, opts) => {
+    calls.push({ cmd, args, opts });
+    return { code: 0, stdout: '', stderr: '' };
+  };
+  const cwd = '/work/project';
+
+  const codex = await undoCodexMcp(cwd, { managed: true, runner });
+  const ruflo = await undoRufloMcpInCodex(cwd, { managed: true, runner, haveFn: async () => true });
+
+  assert.equal(codex.changed, true);
+  assert.equal(ruflo.changed, true);
+  assert.deepEqual(calls, [
+    { cmd: 'claude', args: ['mcp', 'remove', 'codex', '-s', 'project'], opts: { cwd } },
+    { cmd: 'codex', args: ['mcp', 'remove', 'ruflo'], opts: { cwd } },
+  ]);
 });
 
 test('undoAqeRouter removes the ak-created file (agentOverrides included)', () => {

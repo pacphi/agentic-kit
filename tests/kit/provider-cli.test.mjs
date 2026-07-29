@@ -99,8 +99,8 @@ test('ak x provider status omits the dual-host guidance tips with only one host 
 function fakeBins(dir) {
   const bin = path.join(dir, 'bin');
   fs.mkdirSync(bin, { recursive: true });
-  for (const name of ['claude', 'opencode']) {
-    fs.writeFileSync(path.join(bin, name), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+  for (const name of ['claude', 'codex', 'opencode']) {
+    fs.writeFileSync(path.join(bin, name), '#!/bin/sh\nif [ -n "$AK_TEST_ARGV_LOG" ]; then printf "%s\\n" "$0 $*" >> "$AK_TEST_ARGV_LOG"; fi\nexit 0\n', { mode: 0o755 });
     fs.writeFileSync(path.join(bin, `${name}.cmd`), '@echo off\r\nexit /b 0\r\n');
   }
   return bin;
@@ -139,7 +139,7 @@ function pickSandbox({ hosts, providers = {} }) {
   return { home, project, binDir, catalog };
 }
 
-function akPick(args, { cwd, home, binDir, catalog }, { input } = {}) {
+function akPick(args, { cwd, home, binDir, catalog }, { input, env = {} } = {}) {
   return spawnSync(process.execPath, [BIN, ...args], {
     encoding: 'utf8',
     cwd,
@@ -156,6 +156,7 @@ function akPick(args, { cwd, home, binDir, catalog }, { input } = {}) {
       // never leak in and make detection non-deterministic.
       PATH: [binDir, '/usr/bin', '/bin'].join(path.delimiter),
       RUFLO_REPO: catalog,
+      ...env,
     },
   });
 }
@@ -265,6 +266,51 @@ test('a provider retune preserves every ownership marker (codex MCP bridges + op
     assert.equal(p.rufloCodexMcp, 'ak', 'rufloCodexMcp marker survives a rewrite');
     assert.equal(p.opencodeCatalogDir, '/custom/catalog', 'catalog override survives a rewrite');
     assert.equal(p.aqeProvider, 'openai', 'the actual retune landed');
+  } finally {
+    rm(sb.home, sb.project);
+  }
+});
+
+test('excluding codex tears down only owned bridges and removes disabled routes', () => {
+  const sb = pickSandbox({
+    hosts: { claude: true, codex: true, opencode: false },
+    providers: {
+      codexMcp: 'ak', rufloCodexMcp: 'ak',
+      dualRouting: {
+        implementation: { host: 'codex', model: 'gpt-5.4', source: 'seeded' },
+        testing: { host: 'claude', model: 'claude-sonnet-5', source: 'user', escalate: [{ host: 'codex', model: 'gpt-5.4' }] },
+      },
+    },
+  });
+  try {
+    const r = akPick(['x', 'provider', 'pick', '--host', 'claude', '--yes'], sb);
+    assert.equal(r.status, 0, `disable failed\nstdout: ${r.stdout}\nstderr: ${r.stderr}`);
+    assert.match(r.stdout, /removed user escalation.*codex.*disabled/);
+    const p = kitJson(sb.home).providers;
+    assert.equal(p.codexMcp, null);
+    assert.equal(p.rufloCodexMcp, null);
+    assert.equal(p.dualRouting.implementation, undefined);
+    assert.deepEqual(p.dualRouting.testing, { host: 'claude', model: 'claude-sonnet-5', source: 'user' });
+  } finally {
+    rm(sb.home, sb.project);
+  }
+});
+
+test('excluding claude keeps codex-owned bridges while pruning claude routes', () => {
+  const sb = pickSandbox({
+    hosts: { claude: true, codex: true, opencode: false },
+    providers: {
+      codexMcp: 'ak', rufloCodexMcp: 'ak',
+      dualRouting: { review: { host: 'claude', model: 'claude-sonnet-5', source: 'seeded' } },
+    },
+  });
+  try {
+    const r = akPick(['x', 'provider', 'pick', '--host', 'codex', '--yes'], sb);
+    assert.equal(r.status, 0, r.stderr);
+    const p = kitJson(sb.home).providers;
+    assert.equal(p.dualRouting.review, undefined);
+    assert.equal(p.codexMcp, 'ak');
+    assert.equal(p.rufloCodexMcp, 'ak');
   } finally {
     rm(sb.home, sb.project);
   }

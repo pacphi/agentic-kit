@@ -14,7 +14,7 @@ import {
   ensureRufloMcpInCodex, undoRufloMcpInCodex, detectAqeProviders, aqeProviderCredential, credentialGaps, fallbackSource,
   collectIntegrationFacts,
 } from '../../lib/providers.mjs';
-import { parseRouteSpecs, formatModelHelp, PRIMARY_HOSTS, DEFAULT_PRIMARY_HOST, divergedRoutes, refreshSeededRoutes, modelNote, ACTIVITIES } from '../../lib/routing.mjs';
+import { parseRouteSpecs, formatModelHelp, PRIMARY_HOSTS, DEFAULT_PRIMARY_HOST, divergedRoutes, refreshSeededRoutes, pruneRoutesForHosts, modelNote, ACTIVITIES } from '../../lib/routing.mjs';
 import { loadKitConfig, saveKitConfig } from '../../lib/config.mjs';
 import { OPENCODE_LIFECYCLE_ADAPTER, reconcileOpencodeGuidance } from '../../lib/opencode.mjs';
 import { runLifecycle } from '../../lib/adapters/lifecycle.mjs';
@@ -401,6 +401,9 @@ async function pick({ flags, cwd, pkgRoot }) {
   let models = cfg.providers.models ?? [];
   const prevPrimary = cfg.providers.primaryHost ?? DEFAULT_PRIMARY_HOST;
   const oldPolicy = cfg.providers.dualRouting ?? {};
+  const prevCodex = !!cfg.providers?.hosts?.codex;
+  const codexMcpManaged = cfg.providers?.codexMcp === 'ak';
+  const rufloCodexManaged = cfg.providers?.rufloCodexMcp === 'ak';
 
   const nonInteractive = flags.host !== undefined || flags['aqe-provider'] !== undefined
     || flags['aqe-fallback'] !== undefined || flags.provider !== undefined
@@ -543,6 +546,20 @@ async function pick({ flags, cwd, pkgRoot }) {
     for (const w of warnings) warn(w);
     cfg.providers.dualRouting = { ...cfg.providers.dualRouting, ...policy };
   }
+  const prunedRoutes = pruneRoutesForHosts(cfg.providers.dualRouting, { hosts: routing });
+  cfg.providers.dualRouting = prunedRoutes.policy;
+  for (const message of prunedRoutes.warnings) warn(message);
+
+  // Codex owns two directional MCP bridges. Disable only the marker-owned
+  // bridges, matching OpenCode's receipt-based teardown semantics.
+  let codexRetired = null;
+  if (prevCodex && !cfg.providers.hosts.codex) {
+    const mcp = await undoCodexMcp(cwd, { managed: codexMcpManaged });
+    const rmcp = await undoRufloMcpInCodex(cwd, { managed: rufloCodexManaged });
+    cfg.providers.codexMcp = null;
+    cfg.providers.rufloCodexMcp = null;
+    codexRetired = { mcp, rmcp };
+  }
   saveKitConfig(cfg);
 
   // install any enabled host that is entirely absent (external installs untouched)
@@ -604,6 +621,7 @@ async function pick({ flags, cwd, pkgRoot }) {
 
   const h = applyHosts(cfg, cwd);
   (h.ok ? ok : fail)(`hosts: ${h.detail}`);
+  if (codexRetired) ok(`codex disabled: ${codexRetired.mcp.detail}; ${codexRetired.rmcp.detail}`);
   if (primaryHost !== DEFAULT_PRIMARY_HOST) {
     const alt = routing.filter((e) => e !== primaryHost).join(', ') || 'none';
     ok(`primary host: ${primaryHost} (alternate: ${alt})`);
