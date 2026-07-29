@@ -136,6 +136,75 @@ test('a server that ignores TERM receives one bounded KILL fallback and reports 
   assert.equal(result.exitCategory, 'orphaned');
 });
 
+// Regression (#76 smoke): the adapter posted `model` as a bare string, but
+// opencode serve's prompt_async schema expects {providerID, modelID} or null —
+// every configured-model worker 400'd ("Expected object | null, got …").
+test('configured models post as a serve-shaped {providerID, modelID} object (or are omitted)', async () => {
+  const posts = [];
+  const child = { kill: () => true };
+  const fetchFn = async (url, init = {}) => {
+    if (url.endsWith('/global/health')) return response({ healthy: true });
+    if (url.endsWith('/session') && init.method === 'POST') return response({ id: 'ses-m' });
+    if (url.endsWith('/global/event')) return response(null, { body: sse('data: {"payload":{"type":"session.idle","properties":{"sessionID":"ses-m"}}}\n\n') });
+    if (url.endsWith('/prompt_async')) { posts.push(JSON.parse(init.body)); return response(null, { status: 204 }); }
+    if (url.endsWith('/message')) return response([{ info: { role: 'assistant' } }]);
+    if (url.endsWith('/instance/dispose')) return response(null, { status: 204 });
+    throw new Error(`unexpected URL ${url}`);
+  };
+  const adapter = createOpenCodeExecutionAdapter({
+    fetchFn, spawnFn: () => child, reservePort: async () => 43129, secret: () => 'ephemeral', clock: () => '2026-07-29T00:00:00.000Z',
+  });
+  await adapter.cleanup(await adapter.observe(await adapter.launch(await adapter.prepare({ worker, cwd: process.cwd() }))));
+  assert.deepEqual(posts[0].model, { providerID: 'openrouter', modelID: 'example' },
+    'provider/model strings must arrive as the serve schema object');
+  // model ids may themselves contain slashes (openrouter paths): split once.
+  await adapter.cleanup(await adapter.observe(await adapter.launch(await adapter.prepare({
+    worker: { ...worker, configuredModel: 'openrouter/z-ai/glm-5.2' }, cwd: process.cwd(),
+  }))));
+  assert.deepEqual(posts[1].model, { providerID: 'openrouter', modelID: 'z-ai/glm-5.2' }, 'split on the FIRST slash only');
+  // no provider prefix → the server's own configured default (model omitted, never a guessed provider)
+  await adapter.cleanup(await adapter.observe(await adapter.launch(await adapter.prepare({
+    worker: { ...worker, configuredModel: 'kimi-k3' }, cwd: process.cwd(),
+  }))));
+  assert.ok(!('model' in posts[2]), 'a bare model id must not be sent as a mangled object');
+});
+
+// Regression (#76 smoke): a prompt post that threw (e.g. the 400 above) left
+// the terminal SSE promise unconsumed — its socket-close rejection crashed the
+// process as an unhandled rejection AFTER the failure verdict.
+test('a prompt post failure tears down without an unhandled terminal rejection', async () => {
+  const child = { signals: [], kill(signal) { this.signals.push(signal); return true; } };
+  const fetchFn = async (url, init = {}) => {
+    if (url.endsWith('/global/health')) return response({ healthy: true });
+    if (url.endsWith('/session') && init.method === 'POST') return response({ id: 'ses-t' });
+    if (url.endsWith('/global/event')) {
+      return response(null, {
+        body: new ReadableStream({
+          start() {}, // never closes on its own — the teardown closes the socket
+          cancel() { throw Object.assign(new TypeError('terminated'), { code: 'UND_ERR_SOCKET' }); },
+        }),
+      });
+    }
+    if (url.endsWith('/prompt_async')) return response({ name: 'BadRequest' }, { status: 400 });
+    throw new Error(`unexpected URL ${url}`);
+  };
+  const adapter = createOpenCodeExecutionAdapter({
+    fetchFn, spawnFn: () => child, reservePort: async () => 43130, secret: () => 'ephemeral',
+  });
+  let unhandled = null;
+  const onUnhandled = (reason) => { unhandled = reason; };
+  process.on('unhandledRejection', onUnhandled);
+  try {
+    await assert.rejects(adapter.launch(await adapter.prepare({ worker, cwd: process.cwd() })), /HTTP 400/);
+    // Flush several turns so any dangling rejection would surface.
+    for (let i = 0; i < 10; i++) await new Promise((r) => setImmediate(r));
+    assert.equal(unhandled, null, `teardown must not leak an unhandled rejection, got: ${unhandled}`);
+  } finally {
+    process.off('unhandledRejection', onUnhandled);
+  }
+  assert.deepEqual(child.signals, ['SIGTERM'], 'the owned server is still terminated on the failure path');
+});
+
 test('a stalled prompt submission becomes a timeout and tears down its owned server', async () => {
   const child = { signals: [], kill(signal) { this.signals.push(signal); return true; } };
   const fetchFn = async (url, init = {}) => {
