@@ -197,7 +197,9 @@ test('host-neutral run plan preserves every legacy dual worker assignment', () =
   const plan = materializeRunPlan(policy, { template: 'feature', task: 'add auth' });
   const dual = policyToDualRunConfig(policy, { template: 'feature', task: 'add auth' });
   assert.equal(plan.template, 'feature');
-  assert.deepEqual(plan.workers.map(({ host, configuredModel, activity: _activity, ...worker }) => ({
+  // `escalate` is run-only ladder metadata (ADR-0019); the legacy projection
+  // has its own escalatePolicy overlay instead, so it is excluded from parity.
+  assert.deepEqual(plan.workers.map(({ host, configuredModel, activity: _activity, escalate: _ladder, ...worker }) => ({
     ...worker, platform: host, model: configuredModel ?? undefined,
   })), dual.workers);
   assert.ok(plan.workers.every((worker) => worker.activity && worker.host && !('platform' in worker)));

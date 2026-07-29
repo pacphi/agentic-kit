@@ -441,6 +441,19 @@ export function materializeRunPlan(policy = {}, { template = 'feature', task = '
     if (!eligibility.ok) {
       throw new Error(`route for "${n.activity}" cannot materialize: host "${r.host}" requires canRouteActivities`);
     }
+    // The escalation ladder travels with the worker (ADR-0019). Self-equal
+    // rungs are dropped here (escalating to the same host+model would re-run
+    // the identical attempt — the legacy L4 rule), and every rung must be a
+    // routable host or materialization fails the same way the primary does.
+    const ladder = (r.escalate ?? [])
+      .filter((rung) => rung && (rung.host !== r.host || (rung.model ?? null) !== (r.model ?? null)))
+      .map((rung) => {
+        const rungEligibility = validateActivityHost(rung.host);
+        if (!rungEligibility.ok) {
+          throw new Error(`escalation rung for "${n.activity}" cannot materialize: host "${rung.host}" requires canRouteActivities`);
+        }
+        return { host: rung.host, model: rung.model ?? null };
+      });
     return {
       id: n.id,
       activity: n.activity,
@@ -450,6 +463,7 @@ export function materializeRunPlan(policy = {}, { template = 'feature', task = '
       prompt: n.prompt(task),
       ...(n.dependsOn ? { dependsOn: n.dependsOn } : {}),
       ...(n.maxTurns ? { maxTurns: n.maxTurns } : {}),
+      ...(ladder.length ? { escalate: ladder } : {}),
     };
     }),
   };

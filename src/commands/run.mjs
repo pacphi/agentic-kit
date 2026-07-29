@@ -7,6 +7,7 @@ import { DUAL_RUN_TEMPLATE_NAMES, materializeRunPlan, parseRouteSpecs } from '..
 
 export const options = {
   route: { type: 'string', multiple: true },
+  escalate: { type: 'boolean', default: false },
   'dry-run': { type: 'boolean', default: false },
   'max-concurrent': { type: 'string' },
   timeout: { type: 'string' },
@@ -25,14 +26,19 @@ Templates: ${DUAL_RUN_TEMPLATE_NAMES.join(', ')}
 
 Options:
   --route 'act:host[:model]'   per-run routing override (repeatable; not persisted)
+  --escalate                   on failure, advance the worker one rung of its
+                               route's escalation ladder (bounded by the ladder;
+                               permission/consent and uncertain results are
+                               never escalated)
   --dry-run                    print the host-neutral execution plan only
   --max-concurrent <n>         max concurrent workers (default 4)
-  --timeout <ms>               per-worker timeout (default 120000)
+  --timeout <ms>               per-worker timeout, per attempt (default 120000)
   --json                       emit machine-readable plan/results
 
 Examples:
   ak run feature "add token-bucket rate limiting" --dry-run
-  ak run security "src/auth/" --route 'security-scan:opencode'`;
+  ak run security "src/auth/" --route 'security-scan:opencode'
+  ak run feature "fix the flaky parser" --escalate`;
 
 function positiveInt(value, name) {
   if (value === undefined) return undefined;
@@ -54,14 +60,18 @@ function printPlan(plan) {
   console.log(bold(`run: ${plan.template}`));
   for (const worker of plan.workers) {
     const dependency = worker.dependsOn?.length ? `after ${worker.dependsOn.join(', ')}` : 'start';
-    console.log(`  ${worker.id.padEnd(12)} ${worker.host.padEnd(9)} ${(worker.configuredModel ?? '').padEnd(24)} ${dim(dependency)}`);
+    const ladder = worker.escalate?.length ? dim(`  ↑ ${worker.escalate.map((rung) => rung.host).join('→')}`) : '';
+    console.log(`  ${worker.id.padEnd(12)} ${worker.host.padEnd(9)} ${(worker.configuredModel ?? '').padEnd(24)} ${dim(dependency)}${ladder}`);
   }
 }
 
 function printResults(results) {
   for (const result of results) {
     const detail = result.failure?.reason ? ` — ${result.failure.reason}` : '';
-    console.log(`  ${result.workerId.padEnd(12)} ${result.host.padEnd(9)} ${result.status} (${result.exitCategory})${dim(detail)}`);
+    // The escalation trail is visible, not silent: a success after advancing
+    // rungs says where it started (ADR-0019).
+    const trail = result.attempts?.length > 1 ? dim(` (escalated from ${result.attempts[0].host})`) : '';
+    console.log(`  ${result.workerId.padEnd(12)} ${result.host.padEnd(9)} ${result.status} (${result.exitCategory})${trail}${dim(detail)}`);
   }
 }
 
@@ -94,7 +104,7 @@ export async function run({ flags, positionals, executePlan = executeRunPlan, cf
     timeoutMs = positiveInt(flags.timeout, 'timeout');
   } catch (error) { fail(error.message); return 2; }
   if (!flags.json) printPlan(plan);
-  const results = await executePlan(plan, { maxConcurrent, timeoutMs });
+  const results = await executePlan(plan, { maxConcurrent, timeoutMs, escalate: !!flags.escalate });
   if (flags.json) console.log(JSON.stringify({ plan, results }, null, 2));
   else printResults(results);
   // The human status line is gated on !json — a trailing "✓ run complete"

@@ -59,5 +59,20 @@ export function validateWorkerResult(value) {
   if (value.provider === null && value.providerProvenance !== 'unknown') {
     throw new TypeError('workerResult.providerProvenance must be unknown without a provider');
   }
+  // attempts (ADR-0019): the escalation trail — present only when a worker
+  // actually advanced rungs. Each entry is one executed attempt's compact
+  // verdict, never a fabricated one.
+  if (value.attempts !== undefined) {
+    if (!Array.isArray(value.attempts)) throw new TypeError('workerResult.attempts must be an array when present');
+    for (const [i, a] of value.attempts.entries()) {
+      assertRecord(a, `workerResult.attempts[${i}]`);
+      if (typeof a.host !== 'string' || !a.host) throw new TypeError(`workerResult.attempts[${i}].host must be a non-empty string`);
+      if (a.model !== null && typeof a.model !== 'string') throw new TypeError(`workerResult.attempts[${i}].model must be string|null`);
+      assertEnum(a.status, WORKER_STATUSES, `workerResult.attempts[${i}].status`);
+      assertEnum(a.exitCategory, EXIT_CATEGORIES, `workerResult.attempts[${i}].exitCategory`);
+      if (!Number.isFinite(a.durationMs) || a.durationMs < 0) throw new TypeError(`workerResult.attempts[${i}].durationMs must be a non-negative number`);
+      if (a.reason !== undefined && typeof a.reason !== 'string') throw new TypeError(`workerResult.attempts[${i}].reason must be a string when present`);
+    }
+  }
   return immutable(structuredClone(value));
 }
