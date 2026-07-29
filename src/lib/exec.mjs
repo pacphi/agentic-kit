@@ -19,7 +19,7 @@ import { isWindows } from './paths.mjs';
 
 const pexecFile = promisify(execFile);
 
-const CMD_SHIMS = new Set(['npm', 'npx', 'claude', 'ruflo', 'aqe', 'claude-flow']);
+const CMD_SHIMS = new Set(['npm', 'npx', 'claude', 'opencode', 'ruflo', 'aqe', 'claude-flow']);
 
 /** Resolve `cmd` to its real file on PATH, trying Windows' shim extensions in
  *  PATHEXT order. Falls back to the bare name (execFile will ENOENT honestly)
@@ -61,6 +61,11 @@ export async function run(cmd, args = [], opts = {}) {
 
 /** Is `cmd` invokable? (cross-platform `command -v`) */
 export async function have(cmd) {
-  const probe = isWindows ? ['where', [cmd]] : ['which', [cmd]];
-  return (await run(...probe)).code === 0;
+  if (isWindows) {
+    if (path.isAbsolute(cmd)) {
+      try { return fs.statSync(cmd).isFile(); } catch { return false; }
+    }
+    return resolveShim(cmd) !== cmd;
+  }
+  return (await run('which', [cmd])).code === 0;
 }
