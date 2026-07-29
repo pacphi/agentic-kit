@@ -6,10 +6,10 @@ import { executeRunPlan } from '../../src/lib/execution/runner.mjs';
 const worker = (id, host = 'opencode', dependsOn) => ({ id, activity: 'implementation', role: 'coder', host, prompt: id, ...(dependsOn ? { dependsOn } : {}) });
 const clock = () => '2026-07-29T00:00:00.000Z';
 
-test('the built-in registry exposes the supervised OpenCode transport only', () => {
+test('the built-in registry exposes supervised transports for every managed host', () => {
+  assert.equal(EXECUTION_ADAPTERS.get('claude').id, 'claude-print-json');
+  assert.equal(EXECUTION_ADAPTERS.get('codex').id, 'codex-exec-json');
   assert.equal(EXECUTION_ADAPTERS.get('opencode').id, 'opencode-server');
-  assert.equal(EXECUTION_ADAPTERS.has('claude'), false);
-  assert.equal(EXECUTION_ADAPTERS.has('codex'), false);
 });
 
 function adapter({ observation = { type: 'idle' }, events = [] } = {}) {
@@ -49,8 +49,8 @@ test('runner schedules a dependency DAG and blocks only descendants of a failure
   assert.ok(!events.includes('launch:d'));
 });
 
-test('runner reports an unimplemented host without attempting a lifecycle', async () => {
-  const [result] = await executeRunPlan({ workers: [worker('a', 'claude')] }, { clock });
+test('runner reports an unknown host without attempting a lifecycle', async () => {
+  const [result] = await executeRunPlan({ workers: [worker('a', 'unknown')] }, { clock });
   assert.equal(result.exitCategory, 'cli_unavailable');
   assert.match(result.failure.reason, /no execution adapter/);
 });
