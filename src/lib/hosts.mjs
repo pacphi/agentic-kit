@@ -18,7 +18,7 @@
 //     `claude mcp add`.
 //   - codex statusline is a fixed built-in enum (`tui.status_line`); a
 //     command-backed footer like Claude Code's is an unimplemented upstream
-//     request (openai/codex #16921/#17827/#20140/#20244) → statuslineSupported:false.
+//     request (openai/codex #16921/#17827/#20140/#20244).
 //   - codex auth: OPENAI_API_KEY set ⇒ codex ignores the ChatGPT login stored in
 //     ~/.codex/auth.json (key overrides login). claude auth on macOS lives in the
 //     Keychain (no readable file); ANTHROPIC_API_KEY, when used, is not a simple
@@ -32,7 +32,8 @@ export const HOST_ADAPTERS = {
     label: 'Claude Code',
     guidanceFile: 'claude', // logical → CLAUDE.md (machine-wide) / project CLAUDE.md
     configFormat: 'json', // settings.json
-    statuslineSupported: true, // command-backed statusLine hook
+    statusline: { mode: 'command', scope: 'project', customCommand: true, multiline: true },
+    statuslineSupported: true, // compatibility: command-backed renderer support
     aqeProvider: 'claude-code',
     // env vars Claude Code sets in a running session — used to detect the driver.
     envMarkers: ['CLAUDECODE', 'CLAUDE_CODE_ENTRYPOINT', 'CLAUDE_CODE_SESSION_ID'],
@@ -47,7 +48,8 @@ export const HOST_ADAPTERS = {
     label: 'OpenAI Codex',
     guidanceFile: 'agents', // logical → AGENTS.md (+ .codex/AGENTS.override.md)
     configFormat: 'toml', // ~/.codex/config.toml, [mcp_servers.*]
-    statuslineSupported: false, // enum-only; show+explain, delivered via AGENTS.md
+    statusline: { mode: 'builtin', scope: 'user', customCommand: false, multiline: false },
+    statuslineSupported: false, // compatibility: no command-backed renderer
     aqeProvider: 'codex',
     envMarkers: ['CODEX_SANDBOX', 'CODEX_HOME', 'CODEX_SESSION_ID'],
     auth: {

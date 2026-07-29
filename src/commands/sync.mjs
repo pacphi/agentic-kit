@@ -18,6 +18,7 @@ import { readJson } from '../lib/settings.mjs';
 import { appendToConfig } from '../lib/health-history.mjs';
 import * as paths from '../lib/paths.mjs';
 import { ok, warn, fail, info, bold, dim, withProgress } from '../lib/output.mjs';
+import { applyCodexStatusline, projectionFor } from '../lib/codex-statusline.mjs';
 
 export const options = {
   'dry-run': { type: 'boolean', default: false },
@@ -63,6 +64,14 @@ export async function run({ flags, pkgRoot }) {
   // Keeps every slow tool (npm upgrades, brain KB download, native rebuild)
   // visibly alive instead of freezing the prompt; fast/local steps clear in <1s.
   const step = async (name, thunk) => { const r = await withProgress(name, thunk); report(name, r); return r; };
+
+  if (subsystems.has('codex-statusline') && cfg.statusline?.codex?.preset) {
+    const preset = cfg.statusline.codex.preset;
+    const r = applyCodexStatusline(preset);
+    cfg.statusline.codex.lastProjection = projectionFor(preset);
+    saveKitConfig(cfg);
+    ok(`codex statusline: ${r.changed ? `restored ${preset} preset` : 'in sync'}`);
+  }
 
   if (subsystems.has('versions') && !flags['no-upgrade']) {
     report('daemons', await heal.stopAllDaemons());

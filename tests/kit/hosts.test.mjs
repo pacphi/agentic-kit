@@ -21,6 +21,7 @@ test('codex adapter targets AGENTS.md/toml and has NO command-backed statusline'
   assert.equal(a.guidanceFile, 'agents');
   assert.equal(a.configFormat, 'toml');
   assert.equal(a.statuslineSupported, false);
+  assert.deepEqual(a.statusline, { mode: 'builtin', scope: 'user', customCommand: false, multiline: false });
   assert.equal(a.aqeProvider, 'codex');
 });
 

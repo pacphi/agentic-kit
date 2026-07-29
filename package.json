@@ -14,7 +14,9 @@
     "bin/agentic-kit.mjs",
     "src/",
     "claude/",
-    "docs/TROUBLESHOOTING.md"
+    "docs/TROUBLESHOOTING.md",
+    "docs/CODEX-STATUSLINE.md",
+    "docs/adr/0015-managed-codex-native-statusline.md"
   ],
   "scripts": {
     "test": "node --test --experimental-test-coverage --test-coverage-lines=70 --test-coverage-branches=70 --test-coverage-functions=70 \"tests/kit/*.test.mjs\" && node tests/statusline-segments.test.cjs && node tests/statusline-brain.test.cjs && node tests/agentdb.test.cjs && node tests/health-history.test.cjs && node tests/harvest.test.cjs && node tests/dashboard.test.cjs && node tests/admin-model.test.cjs && node tests/admin.test.cjs",

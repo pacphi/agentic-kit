@@ -9,10 +9,11 @@ import readline from 'node:readline/promises';
 import { run as runCmd } from '../lib/exec.mjs';
 import { stripBlock, BEGIN, BUILTIN_BLOCKS } from '../lib/blocks.mjs';
 import { unregister } from '../lib/mcp.mjs';
-import { loadKitConfig } from '../lib/config.mjs';
+import { loadKitConfig, saveKitConfig } from '../lib/config.mjs';
 import { present as rbPresent } from '../lib/ruvnet-brain.mjs';
 import * as paths from '../lib/paths.mjs';
 import { ok, warn, info } from '../lib/output.mjs';
+import { removeCodexStatusline } from '../lib/codex-statusline.mjs';
 
 export const options = {
   'dry-run': { type: 'boolean', default: false },
@@ -58,6 +59,26 @@ export async function run({ flags }) {
   const dry = flags['dry-run'];
   const act = (msg, fn) => { if (dry) info(`[dry-run] ${msg}`); else { fn(); ok(msg); } };
 
+  const kitCfg = loadKitConfig();
+
+  // 0. User-scoped Codex line: only values recorded as ours are candidates.
+  if (kitCfg.statusline?.codex) {
+    if (dry) info('[dry-run] release managed Codex status line (preserving user-modified keys)');
+    else {
+      let r;
+      try { r = removeCodexStatusline(kitCfg.statusline.codex.lastProjection); }
+      catch (error) {
+        warn(`Codex config was not changed; status-line ownership retained: ${error.message}`);
+        r = null;
+      }
+      if (r) {
+        kitCfg.statusline.codex = null;
+        if (!flags.purge) saveKitConfig(kitCfg);
+        ok(`Codex status-line ownership released${r.changed ? ' (unchanged managed keys removed)' : ' (user-modified keys preserved)'}`);
+      }
+    }
+  }
+
   // 1. CLAUDE.md managed blocks: every built-in slug (registry-driven, so
   // non-ruflo blocks like ruvnet-brain-reference are covered), the legacy
   // ruflo-* pattern as a catch-all, plus any custom slugs from kit.json.
@@ -66,7 +87,7 @@ export async function run({ flags }) {
     let content = fs.readFileSync(md, 'utf8');
     const slugs = new Set([...content.matchAll(/<!-- BEGIN (ruflo-[\w-]+) -->/g)].map((m) => m[1]));
     for (const b of BUILTIN_BLOCKS) if (content.includes(BEGIN(b.slug))) slugs.add(b.slug);
-    for (const b of loadKitConfig().customBlocks) if (content.includes(BEGIN(b.slug))) slugs.add(b.slug);
+    for (const b of kitCfg.customBlocks) if (content.includes(BEGIN(b.slug))) slugs.add(b.slug);
     if (slugs.size) {
       act(`stripped ${slugs.size} managed block(s) from ~/.claude/CLAUDE.md (backup written)`, () => {
         fs.copyFileSync(md, `${md}.bak.${Date.now()}`);

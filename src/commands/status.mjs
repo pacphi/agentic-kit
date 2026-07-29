@@ -23,6 +23,7 @@ import { HOSTS, settingsTarget, isDefault, managedEnv, MANAGED_ENV_KEYS, hostIns
 import { policyToAgentOverrides, routingSummary, divergedRoutes } from '../lib/routing.mjs';
 import { qeCourtShipped, readQeCourtConfig, panelFromRouting, validatePanel, healJuryVendorCollision, UPSTREAM_JURY_VENDOR_ISSUE } from '../lib/qeCourt.mjs';
 import { drift as ruvectorDrift } from '../lib/ruvector.mjs';
+import { statuslineDrift } from '../lib/codex-statusline.mjs';
 
 export const options = {
   json: { type: 'boolean', default: false },
@@ -529,13 +530,20 @@ export async function collect({ pkgRoot, cwd = process.cwd() }) {
   } else {
     rows.push(row('statusline', 'info', 'no project statusline here (created by setup)'));
   }
-  // show + explain: the statusline is a Claude Code feature. Codex has no
-  // command-backed statusline (enum-only `tui.status_line`), so when codex is
-  // enabled we surface the asymmetry with its native compensating path rather
-  // than hiding it — the ambidextrous UX convention.
-  if (cfg.providers?.hosts?.codex) {
-    rows.push(row('statusline', 'info',
-      'statusline is claude-only — codex has no command-backed statusline; its guidance ships via AGENTS.md'));
+  // Codex has a native user-scoped line, but no command-backed rich renderer.
+  if (cfg.providers?.hosts?.codex || cfg.statusline?.codex) {
+    const codexLine = statuslineDrift(cfg);
+    if (!codexLine.owned) {
+      rows.push(row('codex-statusline', 'info',
+        'Codex native status line is unmanaged — opt in with `ak x statusline codex native`'));
+    } else if (codexLine.drifted) {
+      rows.push(row('codex-statusline', 'warn',
+        `managed Codex ${codexLine.preset} status line has drifted`,
+        'sync restores the selected native preset'));
+    } else {
+      rows.push(row('codex-statusline', 'ok',
+        `managed Codex ${codexLine.preset} native status line is current (rich ruflo/SONA/AQE segments remain Claude-only)`));
+    }
   }
 
   // qe-court (ADR-124): TEMPORARY, remove once fixed upstream. agentic-qe's own
