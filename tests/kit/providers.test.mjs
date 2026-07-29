@@ -13,6 +13,7 @@ import {
   PROVIDER_TOKEN_RE, seedDualRoutingIfDualHost,
 } from '../../src/lib/providers.mjs';
 import * as paths from '../../src/lib/paths.mjs';
+import { managedHostIds, routableHostIds } from '../../src/lib/adapters/index.mjs';
 
 // security review Finding 2 / code-quality Finding 2: applyProviders() feeds
 // m.id/m.model into a ruflo subprocess argv. exec.mjs's shell:false fix is
@@ -218,13 +219,10 @@ test('every host descriptor carries an npm package name for install/update', () 
   for (const h of HOSTS) assert.equal(typeof h.pkg, 'string', `${h.id} has pkg`);
 });
 
-test('every host descriptor declares its routing capability explicitly (issue #71 seam)', () => {
-  for (const h of HOSTS) assert.equal(typeof h.routing, 'boolean', `${h.id} declares routing: true|false`);
-  // The current routing pair — a new host must opt in DELIBERATELY, and this
-  // test is the tripwire that keeps opencode (and future integration hosts)
-  // from becoming routable by accident.
-  assert.deepEqual(HOSTS.filter((h) => h.routing).map((h) => h.id), ['claude', 'codex']);
-  assert.deepEqual(HOSTS.filter((h) => !h.routing).map((h) => h.id), ['opencode']);
+test('managed and routable host sets come only from registry capabilities', () => {
+  assert.deepEqual(managedHostIds(), ['claude', 'codex', 'opencode']);
+  assert.deepEqual(routableHostIds(), ['claude', 'codex']);
+  assert.deepEqual(HOSTS.map((h) => h.id), managedHostIds());
 });
 
 test('installHost rejects an unknown host id without shelling out', async () => {
@@ -324,7 +322,7 @@ test('suggestedFallbackFor returns null when codex is not among the enabled host
   assert.equal(suggestedFallbackFor([]), null);
 });
 
-// ADR-0015 two-tier model: all three hosts coexist in one enabled set, but the
+// ADR-0017 two-tier model: all three hosts coexist in one enabled set, but the
 // seeded per-activity policy only ever names the ROUTING pair. opencode is
 // additive — never a substitute for either routing host, never a route target.
 test('dual routing seeds claude/codex routes ONLY, even with opencode co-enabled', () => {

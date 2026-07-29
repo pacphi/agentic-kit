@@ -56,5 +56,9 @@ export async function runLifecycle(adapterOrRequest, operation, context = {}) {
     return adapter.apply({ ...request, facts, plan });
   }
   if (action === 'verify') return adapter.verify({ ...request, facts });
+  if (dryRun) {
+    const plan = request.plan ?? await adapter.plan({ ...request, facts });
+    return { dryRun: true, facts, plan };
+  }
   return adapter.undo({ ...request, facts });
 }

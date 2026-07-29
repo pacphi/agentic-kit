@@ -67,6 +67,10 @@ test('drivingHost falls back to the configured primary host', () => {
   assert.equal(drivingHost({}, { providers: { primaryHost: 'codex' } }), 'codex');
 });
 
+test('drivingHost rejects a non-primary-capable host from hand-edited config', () => {
+  assert.equal(drivingHost({}, { providers: { primaryHost: 'opencode' } }), 'claude');
+});
+
 test('drivingHost defaults to claude with no signal', () => {
   assert.equal(drivingHost({}), 'claude');
 });

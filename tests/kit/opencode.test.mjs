@@ -7,8 +7,9 @@ import {
   applyOpencode, undoOpencode, opencodeMcpStatus, opencodeConverged, mcpEntriesFor,
   catalogSource, skillPathsFor, convertAgents, syncAgents, agentsStatus,
   deployPlugin, pluginStatus, deploySkill, skillStatus, removeArtifacts,
-  PERMISSION_KEYS, PLUGIN_NAME,
+  PERMISSION_KEYS, PLUGIN_NAME, createOpencodeLifecycleAdapter,
 } from '../../src/lib/opencode.mjs';
+import { runLifecycle } from '../../src/lib/adapters/lifecycle.mjs';
 import { detectHosts } from '../../src/lib/providers.mjs';
 import { guidanceTargets, BUILTIN_BLOCKS } from '../../src/lib/blocks.mjs';
 
@@ -348,8 +349,6 @@ test('syncAgents writes + stamps, never overwrites user-owned files, is idempote
   const root = makeCatalog(path.join(d, 'catalog'));
   const dest = path.join(d, 'agents');
   fs.mkdirSync(dest, { recursive: true });
-  fs.writeFileSync(path.join(dest, 'coder.md'), '<!-- generated-by: sync-ruflo-agents.mjs -->\nold\n');
-  fs.writeFileSync(path.join(dest, 'stale-thing.md'), '<!-- generated-by: sync-ruflo-agents.mjs -->\nold\n');
   fs.writeFileSync(path.join(dest, 'mine.md'), 'user file — never touched\n');
   fs.writeFileSync(path.join(dest, 'extra-coder.md'), 'MY OWN agent, not ak\'s\n'); // user-owned same-name
 
@@ -357,8 +356,7 @@ test('syncAgents writes + stamps, never overwrites user-owned files, is idempote
   const r1 = syncAgents({ source, destDir: dest });
   assert.equal(r1.ok, true);
   assert.ok(r1.detail.includes('user-owned preserved'), 'user-owned same-name reported');
-  assert.equal(fs.existsSync(path.join(dest, 'stale-thing.md')), false, 'stale legacy file removed');
-  assert.ok(fs.readFileSync(path.join(dest, 'coder.md'), 'utf8').includes('generated-by: agentic-kit'), 'legacy file adopted');
+  assert.ok(fs.readFileSync(path.join(dest, 'coder.md'), 'utf8').includes('generated-by: agentic-kit'));
   assert.equal(fs.readFileSync(path.join(dest, 'mine.md'), 'utf8'), 'user file — never touched\n');
   assert.equal(fs.readFileSync(path.join(dest, 'extra-coder.md'), 'utf8'), 'MY OWN agent, not ak\'s\n', 'user-owned same-name NOT clobbered');
 
@@ -367,7 +365,9 @@ test('syncAgents writes + stamps, never overwrites user-owned files, is idempote
   assert.equal(st1.count, 1, 'only generated agents counted (coder; extra-coder.md is user-owned, notes.md is documentation)');
 
   const stampBefore = fs.readFileSync(path.join(dest, '.ak-agents-stamp.json'), 'utf8');
-  const r2 = syncAgents({ source, destDir: dest });
+  const r2 = syncAgents({
+    source, destDir: dest, receipts: r1.receipts, stampReceipt: r1.stampReceipt,
+  });
   assert.equal(r2.changed, false, 'idempotent second run');
   assert.equal(fs.readFileSync(path.join(dest, '.ak-agents-stamp.json'), 'utf8'), stampBefore, 'stamp not churned on a no-op run');
 
@@ -392,12 +392,17 @@ test('deployPlugin + pluginStatus: deploy, current, rewrite on template change, 
 
   const r1 = deployPlugin({ pkgRoot, pluginsDir });
   assert.equal(r1.changed, true);
-  assert.equal(pluginStatus({ pkgRoot, pluginsDir }).current, true);
-  assert.equal(deployPlugin({ pkgRoot, pluginsDir }).changed, false, 'idempotent');
+  assert.equal(pluginStatus({ pkgRoot, pluginsDir, receipt: r1.receipt }).current, true);
+  assert.equal(deployPlugin({ pkgRoot, pluginsDir, receipt: r1.receipt }).changed, false, 'idempotent');
 
   fs.writeFileSync(tpl, '// ak plugin — see src/templates/opencode-ruflo-hooks.js\n// v2\n');
-  assert.equal(pluginStatus({ pkgRoot, pluginsDir }).current, false);
-  assert.equal(deployPlugin({ pkgRoot, pluginsDir }).changed, true);
+  assert.equal(pluginStatus({ pkgRoot, pluginsDir, receipt: r1.receipt }).current, false);
+  const r2 = deployPlugin({ pkgRoot, pluginsDir, receipt: r1.receipt });
+  assert.equal(r2.changed, true);
+
+  fs.appendFileSync(path.join(pluginsDir, PLUGIN_NAME), '// user edit retaining marker\n');
+  assert.equal(deployPlugin({ pkgRoot, pluginsDir, receipt: r2.receipt }).changed, false,
+    'edited managed plugin is preserved despite retaining the marker');
 
   // user-owned file at the slot (no marker) → foreign, preserved
   fs.writeFileSync(path.join(pluginsDir, PLUGIN_NAME), '// my own plugin\n');
@@ -418,8 +423,8 @@ test('deploySkill + skillStatus + removeArtifacts (marker-gated, precise teardow
 
   const r = deploySkill({ source, skillsDir });
   assert.equal(r.changed, true);
-  assert.equal(skillStatus({ source, skillsDir }).current, true);
-  assert.equal(deploySkill({ source, skillsDir }).changed, false, 'idempotent');
+  assert.equal(skillStatus({ source, skillsDir, receipt: r.receipt }).current, true);
+  assert.equal(deploySkill({ source, skillsDir, receipt: r.receipt }).changed, false, 'idempotent');
 
   // user resource beside the managed file must survive teardown
   fs.writeFileSync(path.join(skillsDir, 'ruflo', 'my-notes.md'), 'user notes\n');
@@ -428,11 +433,17 @@ test('deploySkill + skillStatus + removeArtifacts (marker-gated, precise teardow
   fs.mkdirSync(path.join(pkgRoot, 'src', 'templates'), { recursive: true });
   fs.writeFileSync(path.join(pkgRoot, 'src', 'templates', 'opencode-ruflo-hooks.js'),
     '// deployed by ak — see src/templates/opencode-ruflo-hooks.js\n');
-  deployPlugin({ pkgRoot, pluginsDir });
-  syncAgents({ source, destDir: agentsDir });
+  const plugin = deployPlugin({ pkgRoot, pluginsDir });
+  const agents = syncAgents({ source, destDir: agentsDir });
   fs.writeFileSync(path.join(agentsDir, 'keep.md'), 'user agent\n');
 
-  const gone = removeArtifacts({ pluginsDir, agentsDir, skillsDir });
+  const gone = removeArtifacts({
+    pluginsDir, agentsDir, skillsDir,
+    receipts: {
+      plugin: plugin.receipt, agents: agents.receipts,
+      agentStamp: agents.stampReceipt, skill: r.receipt,
+    },
+  });
   assert.equal(gone.changed, true);
   assert.equal(fs.existsSync(path.join(pluginsDir, PLUGIN_NAME)), false);
   assert.equal(fs.existsSync(path.join(skillsDir, 'ruflo', 'SKILL.md')), false);
@@ -454,6 +465,122 @@ test('deploySkill never overwrites a user-owned SKILL.md (foreign flagged)', () 
   const r = deploySkill({ source, skillsDir });
   assert.equal(r.changed, false);
   assert.ok(fs.readFileSync(path.join(skillsDir, 'ruflo', 'SKILL.md'), 'utf8').includes('my own'));
+  rm(d);
+});
+
+test('edited agent and skill are preserved on receipt-aware redeploy and reported modified', () => {
+  const d = tmp('ak-oc-edited-');
+  const source = catalogSource({ override: makeCatalog(path.join(d, 'catalog')) });
+  const agentsDir = path.join(d, 'agents');
+  const skillsDir = path.join(d, 'skills');
+  const agents = syncAgents({ source, destDir: agentsDir });
+  const skill = deploySkill({ source, skillsDir });
+  const agentPath = path.join(agentsDir, 'coder.md');
+  const skillPath = path.join(skillsDir, 'ruflo', 'SKILL.md');
+  fs.appendFileSync(agentPath, '\nUser edit.\n');
+  fs.appendFileSync(skillPath, '\nUser edit.\n');
+  const editedAgent = fs.readFileSync(agentPath, 'utf8');
+  const editedSkill = fs.readFileSync(skillPath, 'utf8');
+
+  assert.equal(agentsStatus({ source, destDir: agentsDir, receipts: agents.receipts }).modified, true);
+  const agentRetry = syncAgents({
+    source, destDir: agentsDir, receipts: agents.receipts, stampReceipt: agents.stampReceipt,
+  });
+  const skillRetry = deploySkill({ source, skillsDir, receipt: skill.receipt });
+  assert.equal(fs.readFileSync(agentPath, 'utf8'), editedAgent);
+  assert.equal(fs.readFileSync(skillPath, 'utf8'), editedSkill);
+  assert.equal(agentRetry.receipts['coder.md'], undefined, 'edited agent ownership is relinquished');
+  assert.equal(skillRetry.changed, false);
+  rm(d);
+});
+
+test('exact desired bytes without a prior receipt are never adopted for teardown', () => {
+  const d = tmp('ak-oc-unreceipted-');
+  const source = catalogSource({ override: makeCatalog(path.join(d, 'catalog')) });
+  const skillsDir = path.join(d, 'skills');
+  const agentsDir = path.join(d, 'agents');
+  const pluginsDir = path.join(d, 'plugins');
+  const pkgRoot = path.join(d, 'pkg');
+  fs.mkdirSync(path.join(pkgRoot, 'src', 'templates'), { recursive: true });
+  fs.writeFileSync(path.join(pkgRoot, 'src', 'templates', 'opencode-ruflo-hooks.js'),
+    '// src/templates/opencode-ruflo-hooks.js\n');
+  const first = deploySkill({ source, skillsDir });
+  const firstPlugin = deployPlugin({ pkgRoot, pluginsDir });
+  const firstAgents = syncAgents({ source, destDir: agentsDir });
+  const skillPath = path.join(skillsDir, 'ruflo', 'SKILL.md');
+  const pluginPath = path.join(pluginsDir, PLUGIN_NAME);
+  const agentPath = path.join(agentsDir, 'coder.md');
+  const stampPath = path.join(agentsDir, '.ak-agents-stamp.json');
+  const exact = {
+    skill: fs.readFileSync(skillPath, 'utf8'),
+    plugin: fs.readFileSync(pluginPath, 'utf8'),
+    agent: fs.readFileSync(agentPath, 'utf8'),
+    stamp: fs.readFileSync(stampPath, 'utf8'),
+  };
+  fs.rmSync(path.join(skillsDir, 'ruflo'), { recursive: true });
+  fs.rmSync(pluginsDir, { recursive: true });
+  fs.rmSync(agentsDir, { recursive: true });
+  fs.mkdirSync(path.dirname(skillPath), { recursive: true });
+  fs.mkdirSync(pluginsDir, { recursive: true });
+  fs.mkdirSync(agentsDir, { recursive: true });
+  fs.writeFileSync(skillPath, exact.skill);
+  fs.writeFileSync(pluginPath, exact.plugin);
+  fs.writeFileSync(agentPath, exact.agent);
+  fs.writeFileSync(stampPath, exact.stamp);
+  const unownedSkill = deploySkill({ source, skillsDir, receipt: null });
+  const unownedPlugin = deployPlugin({ pkgRoot, pluginsDir, receipt: null });
+  const unownedAgents = syncAgents({
+    source, destDir: agentsDir, receipts: {}, stampReceipt: null,
+  });
+  assert.equal(unownedSkill.receipt, null);
+  assert.equal(unownedPlugin.receipt, null);
+  assert.equal(unownedAgents.receipts['coder.md'], undefined);
+  assert.equal(unownedAgents.stampReceipt, null);
+  removeArtifacts({
+    skillsDir, pluginsDir, agentsDir,
+    receipts: {
+      skill: unownedSkill.receipt, plugin: unownedPlugin.receipt,
+      agents: unownedAgents.receipts, agentStamp: unownedAgents.stampReceipt,
+    },
+  });
+  assert.ok(fs.existsSync(skillPath), 'matching bytes are not proof that ak wrote the file');
+  assert.ok(fs.existsSync(pluginPath));
+  assert.ok(fs.existsSync(agentPath));
+  assert.ok(fs.existsSync(stampPath));
+  assert.ok(first.receipt, 'fixture first deploy produced a real receipt');
+  assert.ok(firstPlugin.receipt);
+  assert.ok(firstAgents.stampReceipt);
+  rm(d);
+});
+
+test('receipt-based teardown preserves marker-bearing artifacts edited by the user', () => {
+  const d = tmp('ak-oc-receipts-');
+  const source = catalogSource({ override: makeCatalog(path.join(d, 'catalog')) });
+  const skillsDir = path.join(d, 'skills');
+  const agentsDir = path.join(d, 'agents');
+  const pluginsDir = path.join(d, 'plugins');
+  const pkgRoot = path.join(d, 'pkg');
+  fs.mkdirSync(path.join(pkgRoot, 'src', 'templates'), { recursive: true });
+  fs.writeFileSync(path.join(pkgRoot, 'src', 'templates', 'opencode-ruflo-hooks.js'),
+    '// src/templates/opencode-ruflo-hooks.js\n');
+  const plugin = deployPlugin({ pkgRoot, pluginsDir });
+  const agents = syncAgents({ source, destDir: agentsDir });
+  const skill = deploySkill({ source, skillsDir });
+  fs.appendFileSync(path.join(pluginsDir, PLUGIN_NAME), '// user edit\n');
+  fs.appendFileSync(path.join(agentsDir, 'coder.md'), '\nUser edit.\n');
+  fs.appendFileSync(path.join(skillsDir, 'ruflo', 'SKILL.md'), '\nUser edit.\n');
+
+  removeArtifacts({
+    pluginsDir, agentsDir, skillsDir,
+    receipts: {
+      plugin: plugin.receipt, agents: agents.receipts,
+      agentStamp: agents.stampReceipt, skill: skill.receipt,
+    },
+  });
+
+  assert.ok(fs.existsSync(path.join(pluginsDir, PLUGIN_NAME)));
+  assert.ok(fs.existsSync(path.join(agentsDir, 'coder.md')));
+  assert.ok(fs.existsSync(path.join(skillsDir, 'ruflo', 'SKILL.md')));
   rm(d);
 });
 
@@ -525,6 +652,23 @@ test('desired-set shrink RESTORES a prior (user entry that equaled the old desir
   const doc = JSON.parse(fs.readFileSync(file, 'utf8'));
   assert.deepEqual(doc.mcp['ruvnet-brain'], want, 'prior value restored, not deleted');
   rm(d);
+});
+
+test('permission desired-set shrink restores a recorded user prior', async () => {
+  const d = tmp('ak-oc-permission-restore-');
+  const file = path.join(d, 'opencode.json');
+  const key = PERMISSION_KEYS.at(-1);
+  fs.writeFileSync(file, JSON.stringify({ permission: { [key]: 'allow' } }));
+  const cfg = cfgOn();
+  try {
+    await applyOpencode(cfg, { configFile: file, brainShim: path.join(d, 'absent-shim') });
+    PERMISSION_KEYS.pop();
+    await applyOpencode(cfg, { configFile: file, brainShim: path.join(d, 'absent-shim') });
+    assert.equal(JSON.parse(fs.readFileSync(file, 'utf8')).permission[key], 'allow');
+  } finally {
+    if (!PERMISSION_KEYS.includes(key)) PERMISSION_KEYS.push(key);
+    rm(d);
+  }
 });
 
 test('a pre-existing {"*":"ask"} permission OBJECT survives undo as an object (no phantom scalar restore)', async () => {
@@ -631,5 +775,84 @@ test('opencodeStack reports markersChanged when a converged file has stale/missi
   // A third run with truthful markers is then fully quiet.
   const third = await opencodeStack(cfg, { pkgRoot, ...seams });
   assert.equal(third.markersChanged, false, 'no kit.json churn once the markers are truthful');
+  rm(d);
+});
+
+test('opencodeStack deploys no executable artifacts when JSONC config is refused', async () => {
+  const { opencodeStack } = await import('../../src/lib/opencode.mjs');
+  const { fileURLToPath } = await import('node:url');
+  const d = tmp('ak-oc-jsonc-stack-');
+  const configFile = path.join(d, 'opencode.json');
+  fs.writeFileSync(configFile, '{\n// legal JSONC\n"mcp": {}\n}\n');
+  const cfg = cfgOn();
+  cfg.providers.opencodeCatalogDir = makeCatalog(path.join(d, 'catalog'));
+  const result = await opencodeStack(cfg, {
+    pkgRoot: path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..'),
+    configFile,
+    pluginsDir: path.join(d, 'plugins'),
+    agentsDir: path.join(d, 'agents'),
+    skillsDir: path.join(d, 'skills'),
+  });
+  assert.equal(result.oc.ok, false);
+  for (const dir of ['plugins', 'agents', 'skills']) {
+    assert.equal(fs.existsSync(path.join(d, dir)), false, `${dir} must not be partially deployed`);
+  }
+  rm(d);
+});
+
+test('opencodeStack preserves a valid config collision while converging independent artifacts', async () => {
+  const { opencodeStack } = await import('../../src/lib/opencode.mjs');
+  const { fileURLToPath } = await import('node:url');
+  const d = tmp('ak-oc-collision-stack-');
+  const configFile = path.join(d, 'opencode.json');
+  const userMcp = { type: 'local', command: ['my', 'server'] };
+  fs.writeFileSync(configFile, JSON.stringify({ mcp: { 'claude-flow': userMcp } }));
+  const cfg = cfgOn();
+  cfg.providers.opencodeCatalogDir = makeCatalog(path.join(d, 'catalog'));
+  const result = await opencodeStack(cfg, {
+    pkgRoot: path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..'),
+    configFile,
+    pluginsDir: path.join(d, 'plugins'),
+    agentsDir: path.join(d, 'agents'),
+    skillsDir: path.join(d, 'skills'),
+  });
+  assert.equal(result.oc.fatal, false);
+  assert.equal(result.oc.ok, false, 'collision remains an explicit warning');
+  assert.deepEqual(JSON.parse(fs.readFileSync(configFile, 'utf8')).mcp['claude-flow'], userMcp);
+  assert.ok(fs.existsSync(path.join(d, 'plugins', PLUGIN_NAME)));
+  assert.ok(fs.existsSync(path.join(d, 'agents', 'coder.md')));
+  assert.ok(fs.existsSync(path.join(d, 'skills', 'ruflo', 'SKILL.md')));
+  rm(d);
+});
+
+test('OpenCode lifecycle detect/plan/dry-run are read-only; apply and undo are idempotent', async () => {
+  const { fileURLToPath } = await import('node:url');
+  const d = tmp('ak-oc-lifecycle-');
+  const srcRoot = makeCatalog(path.join(d, 'catalog'));
+  const options = {
+    pkgRoot: path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..'),
+    configFile: path.join(d, 'opencode.json'),
+    pluginsDir: path.join(d, 'plugins'),
+    agentsDir: path.join(d, 'agents'),
+    skillsDir: path.join(d, 'skills'),
+  };
+  const cfg = cfgOn();
+  cfg.providers.opencodeCatalogDir = srcRoot;
+  const adapter = createOpencodeLifecycleAdapter(options);
+  const before = JSON.stringify(cfg);
+  await runLifecycle({ adapter, action: 'detect', cfg });
+  await runLifecycle({ adapter, action: 'plan', cfg });
+  await runLifecycle({ adapter, action: 'apply', cfg, dryRun: true });
+  assert.equal(JSON.stringify(cfg), before, 'read-only lifecycle phases do not mutate config receipts');
+  assert.equal(fs.existsSync(options.configFile), false, 'dry-run creates no OpenCode surface');
+
+  const first = await runLifecycle({ adapter, action: 'apply', cfg });
+  const second = await runLifecycle({ adapter, action: 'apply', cfg });
+  assert.equal(first.changed, true);
+  assert.equal(second.changed, false);
+  const undone = await runLifecycle({ adapter, action: 'undo', cfg });
+  const repeated = await runLifecycle({ adapter, action: 'undo', cfg });
+  assert.equal(undone.changed, true);
+  assert.equal(repeated.changed, false);
   rm(d);
 });

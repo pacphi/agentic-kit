@@ -138,9 +138,13 @@ const hostEntries = [
   },
   {
     id: 'opencode', label: 'OpenCode',
-    install: { bin: 'opencode', externalInstallPolicy: 'detect-never-overwrite' },
+    install: { bin: 'opencode', npmPackage: 'opencode-ai', externalInstallPolicy: 'detect-never-overwrite' },
     capabilities: { canDriveSession: true, canBePrimary: false, canRouteActivities: false, commandStatusline: false, transcripts: true, usage: false, nativeMcpConfig: true, nativeGuidance: true },
-    auth: { apiKeyEnv: [], keyOverridesLogin: false },
+    auth: { apiKeyEnv: [], loginFile: ['.local', 'share', 'opencode', 'auth.json'], keyOverridesLogin: false },
+    legacy: {
+      guidanceFile: 'agents-opencode', configFormat: 'json',
+      statusline: null, aqeProvider: null, envMarkers: [],
+    },
     configProjection: 'opencode', observability: ['opencode-logs'],
   },
 ];
@@ -178,6 +182,7 @@ export const hostIds = (predicate = () => true) => HOST_REGISTRY.filter(predicat
 export const providerIds = (predicate = () => true) => PROVIDER_REGISTRY.filter(predicate).map(({ id }) => id);
 export const primaryHostIds = () => hostIds((host) => host.capabilities.canBePrimary);
 export const routableHostIds = () => hostIds((host) => host.capabilities.canRouteActivities);
+export const managedHostIds = () => hostIds((host) => host.capabilities.canDriveSession);
 export function hostsWithCapability(entriesOrCapability, maybeCapability) {
   const entries = Array.isArray(entriesOrCapability) ? entriesOrCapability : HOST_REGISTRY;
   const capability = Array.isArray(entriesOrCapability) ? maybeCapability : entriesOrCapability;
@@ -209,7 +214,7 @@ export function deriveCompatibilityExports({
   const custom = hosts !== HOST_REGISTRY || providers !== PROVIDER_REGISTRY;
   return {
     hostIds: hosts.map(({ id }) => id),
-    managedHostIds: hosts.filter((host) => host.capabilities.canRouteActivities).map(({ id }) => id),
+    managedHostIds: hosts.filter((host) => host.capabilities.canDriveSession).map(({ id }) => id),
     primaryHostIds: hosts.filter((host) => host.capabilities.canBePrimary).map(({ id }) => id),
     routableHostIds: hosts.filter((host) => host.capabilities.canRouteActivities).map(({ id }) => id),
     apiProviderIds: providers.filter((provider) => custom || provider.legacy?.apiProvider).map(({ id }) => id),

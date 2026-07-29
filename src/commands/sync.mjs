@@ -8,7 +8,8 @@ import { have } from '../lib/exec.mjs';
 import { fixStatusline, helperStampStale } from '../lib/statusline.mjs';
 import { registry, syncBlocks, blocksForTarget, retiredForTarget, guidanceTargets } from '../lib/blocks.mjs';
 import { register as mcpRegister, applyExclusions } from '../lib/mcp.mjs';
-import { opencodeStack } from '../lib/opencode.mjs';
+import { OPENCODE_LIFECYCLE_ADAPTER } from '../lib/opencode.mjs';
+import { runLifecycle } from '../lib/adapters/lifecycle.mjs';
 import { listDaemons, staleDaemons, reap } from '../lib/daemons.mjs';
 import { loadKitConfig, saveKitConfig } from '../lib/config.mjs';
 import { commandHosts, applyHosts, applyProviders, hostInstallState, installHost, applyAqeRouter, seedDualRoutingIfDualHost, ensureCodexMcp, ensureRufloMcpInCodex, bothHostsEnabled } from '../lib/providers.mjs';
@@ -176,7 +177,10 @@ export async function run({ flags, pkgRoot }) {
     if (!(await have('opencode'))) {
       info('opencode: enabled but CLI not installed — wiring skipped (hosts step installs it)');
     } else {
-      const stack = await opencodeStack(cfg, { pkgRoot });
+      const lifecycle = await runLifecycle({
+        adapter: OPENCODE_LIFECYCLE_ADAPTER, action: 'apply', cfg, options: { pkgRoot },
+      });
+      const stack = lifecycle.result;
       // persist the markers on ANY refresh (a converged file whose kit.json
       // markers are stale/missing still needs the save, or the next teardown
       // cannot prove ownership — codex-review r3), not only on file changes.

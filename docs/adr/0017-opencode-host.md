@@ -1,4 +1,4 @@
-# ADR-0015 — opencode as a third host: ruflo/ruvnet-brain wiring through opencode's native surfaces
+# ADR-0017 — OpenCode as a managed, observable, non-routable host
 
 - **Status:** Accepted
 - **Date:** 2026-07-28
@@ -6,10 +6,11 @@
 
 ## Context
 
-`ak` models two frontier hosts (`claude`, `codex`) behind the host-adapter abstraction in
-`src/lib/hosts.mjs`, each wired to the same rUv stack (ruflo MCP, ruvnet-brain, skills,
-guidance) through that host's *native* surfaces — ak's standing rule is "write the host's
-own config, never a parallel config layer." **opencode** (opencode.ai) is a third agent
+ADR-0016 separates execution hosts, inference providers, projections, observability,
+ownership, and lifecycle capabilities. Claude and Codex are routable hosts; OpenCode is
+already registered as a managed, non-primary, non-routable host. This ADR applies that
+architecture to OpenCode's native surfaces — ak's standing rule is "write the host's
+own config, never a parallel config layer." **OpenCode** is a third agent
 CLI in the same class, and its native surfaces are different again:
 
 - **Config:** `~/.config/opencode/opencode.json` (JSONC-tolerant schema), holding `mcp`
@@ -34,12 +35,12 @@ the plugin, the config entries, and the guidance file are static artifacts with 
 
 ## Decision
 
-### 1. A third host adapter — opt-in, `hosts.opencode: false` by default
+### 1. A managed host adapter — opt-in, `hosts.opencode: false` by default
 
-`HOST_ADAPTERS.opencode` in `hosts.mjs` (`configFormat:'json'`, `statuslineSupported:false`,
-`aqeProvider:null`, no session env markers), a `HOSTS` row (`bin:'opencode'`,
-`pkg:'opencode-ai'` — brew/mise installs report `external` and are never touched), and
-`providers.hosts.opencode` in kit.json's defaults. `--opencode` on `ak setup` opts in.
+The ADR-0016 host registry declares `canDriveSession:true`, `canBePrimary:false`, and
+`canRouteActivities:false`, plus the `opencode-ai` npm package and native OpenCode
+projection. Brew/mise/native installs report `external` and are never touched.
+`providers.hosts.opencode` remains the compatibility intent field and `--opencode` opts in.
 No `ENABLE_*` env exists for opencode (ruflo's ADR-034 backend flags don't cover it), so
 wiring is entirely config-file based — the `MANAGED_ENV_KEYS` surface is unchanged.
 
@@ -67,8 +68,9 @@ Every ak-managed byte on opencode's surfaces lives behind one module, following 
   source changed) are pruned under the same ==-written guard. Scalar `permission`
   shorthand is lifted to its documented object equivalent (`{"*": v}`) before merging
   and restored on undo.
-- **Ownership:** on first write ak records `providers.opencodeMcp='ak'` plus the exact
-  managed key set (`opencodeManaged: {mcp[], paths[], permissions[]}`) in kit.json.
+- **Ownership:** on first write ak records `providers.opencodeMcp='ak'` plus value
+  receipts (`opencodeManaged: {mcp:{}, paths:[], permissions:{}, artifacts:{}}`) in
+  kit.json. Artifact receipts are SHA-256 hashes of the exact last-written content.
   `undoOpencode` strips exactly that set — user MCP servers, user skills paths, and user
   permissions survive teardown (mirrors the `codexMcp`/`rufloCodexMcp` ownership guards,
   made precise for a shared JSON document).
@@ -79,8 +81,10 @@ Every ak-managed byte on opencode's surfaces lives behind one module, following 
   routing context on `chat.message` as a fully-formed `synthetic` text part —
   opencode validates id/messageID/sessionID on persisted parts). Deployed
   content-diffed (`deployPlugin`), refreshed whenever the template changes, and
-  **no-clobber**: a foreign (marker-less) file at any deploy slot is preserved and
-  reported, never overwritten. Failure policy: hooks never break the host.
+  **no-clobber**: only content matching the exact last-written SHA-256 receipt may be
+  refreshed or removed; marker-bearing user edits are preserved and reported. Failure
+  policy: hooks never break the host. Bash screening is explicitly defense-in-depth and
+  fails open when the local handler errors or times out.
 - **Agents converted, not copied:** `convertAgents` rewrites Claude-format frontmatter to
   `{description, mode: subagent}` (dropping the `tools:` string list — opencode uses
   permissions, and subagents inherit the invoker's tools, matching the broad lists these
@@ -91,11 +95,10 @@ Every ak-managed byte on opencode's surfaces lives behind one module, following 
   `claude-flow_`), prefixes basename collisions with the category dir, and skips
   `type: documentation` files. Generated files carry an ak marker; `syncAgents`
   rewrites/removes marked files only and leaves user files untouched (the earlier
-  standalone script's marker is adopted, not orphaned). The stamp
-  (`.ak-agents-stamp.json`) records the source id **and the actually-deployed file
-  list** (user-occupied slots are never in it), written only when the set changes —
-  so status detects structural divergence (deleted/extra generated files), not just
-  version drift.
+  standalone script's marker alone is not treated as proof of ownership). The stamp
+  (`.ak-agents-stamp.json`) records the source id, actually-deployed file list, and
+  content hashes; kit.json retains the authoritative last-written receipts. Status
+  distinguishes user-modified files from repairable structural/version drift.
 - **Catalog source resolution** (`catalogSource`): kit.json `opencodeCatalogDir` override
   → `$RUFLO_REPO` → the claude marketplace clone `~/.claude/plugins/marketplaces/ruflo`
   (full repo mirror — all agents, all plugin skills, platform `SKILL.md` — auto-updated
@@ -117,7 +120,7 @@ registry rows carry opencode-correct content — `ruflo-opencode-reference` (ope
 naming, plugin bridge, converted agents) and `ruvnet-brain-opencode-reference` (the
 `ruvnet-brain_search_ruvnet` tool name) — both **enablement-gated**
 (`flag: opencodeEnabled`: the template asserts active wiring, so an installed-but-disabled
-host must not receive it; `x provider off` / pick-disable strip them on the next
+host must not receive it; `ak host off` / pick-disable strip them on the next
 reconcile) — while `ruflo-preamble` (host-agnostic operating rules) is shared:
 `guidanceFiles: ['claude', 'agents-opencode']`. The claude-only twins
 (`ruflo-reference`, `ruvnet-brain-reference`) deliberately do **not** target
@@ -128,9 +131,9 @@ reconcile) — while `ruflo-preamble` (host-agnostic operating rules) is shared:
 `ak` manages **three managed host integrations** (claude, codex, opencode) with **two
 routing hosts** (claude, codex): opencode participates in install/config/guidance/
 status/sync/teardown exactly like the others, and is deliberately never a routing
-target, never `primaryHost`, never an aqe provider. The split is **derived from a
-capability flag on the host descriptor** (`HOSTS[].routing`), not hardcoded id lists —
-the embryonic form of the capability registry issue #71 generalizes.
+target, never `primaryHost`, never an aqe provider. Managed, primary, and routing sets are
+derived from ADR-0016's `canDriveSession`, `canBePrimary`, and `canRouteActivities`
+capabilities rather than parallel descriptor flags or hardcoded id lists.
 
 `status.collect` gains an `opencode` subsystem (config convergence via
 `opencodeConverged` — deep value comparison, not key presence — plus plugin currency,
@@ -142,7 +145,7 @@ the `agents-opencode` guidance target in one sync (a second sync is then a true 
 `setup --opencode` runs the identical machine-step and deploys the guidance blocks
 immediately.
 
-**`x provider pick` manages opencode like any host** (the post-install adoption path,
+**`ak host pick` manages OpenCode like any managed host** (the post-install adoption path,
 replacing the first revision's "rerun setup" gap): `--host` is the complete desired
 enabled-host set across both tiers; an unknown token is a hard error before any
 mutation (a typo never tears a host down); interactive defaults are currently-enabled
@@ -179,7 +182,7 @@ switches from its hardcoded two-target block list to the shared `guidanceTargets
 either). The `pick` rework in §4 replaces the first revision's behavior (opencode was
 excluded and merely preserved) with full two-tier management — the routing set stays
 claude/codex-only throughout.
-Out of scope (matching codex's own asymmetry): routing-table integration
+Out of scope (matching Codex's own asymmetry): routing-table integration
 (`routing.mjs` untouched), aqe provider wiring (no opencode provider type exists),
 statusline (no upstream surface), `drivingHost` session detection (opencode sets no
 session env marker), and usage/cost attribution (`usage-index.mjs` reads claude/codex
@@ -196,8 +199,8 @@ which is the honest shape).
   covers git-checkout power users.
 - Machines without opencode see zero new writes: the guidance target is gated on the
   config home existing, and every apply path is gated on `hosts.opencode`.
-- Teardown is surgical: `x provider off` / `uninstall` remove only ak-managed keys,
-  marked files, and ak's blocks — user customizations to `opencode.json` persist.
+- Teardown is surgical: `ak host off` / `uninstall` remove only receipt-matching
+  ak-managed keys and files plus ak's blocks. User edits and customizations persist.
 - opencode's config is rewritten as plain JSON: legal JSONC comments in a pre-existing
   `opencode.json` would be lost on merge — so ak **refuses** unparseable files with a
   manual-merge message instead of silently normalizing them.
@@ -226,9 +229,11 @@ which is the honest shape).
 
 ## References
 
+- ADR-0016 defines the registry, lifecycle, ownership, and normalized-fact contracts
+  implemented here. Generalized routable OpenCode execution is tracked separately in #76.
 - `src/lib/opencode.mjs` (the owner module: `opencodeStack`, `retireOpencode`,
   `reconcileOpencodeGuidance`), `src/lib/hosts.mjs` (adapter),
-  `src/lib/providers.mjs` (`HOSTS` row incl. the `routing` capability flag,
+  `src/lib/providers.mjs` (registry-derived managed host projection,
   `--opencode` flag handling, `hostAuthState` home seam),
   `src/lib/blocks.mjs` (`agents-opencode` target, new registry rows),
   `src/commands/{sync,status,setup,uninstall}.mjs`, `src/commands/x/provider.mjs`

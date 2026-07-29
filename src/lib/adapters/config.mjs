@@ -40,11 +40,24 @@ export function migrateIntegrationConfig(config = {}, _options = {}) {
     provenance: defaults[host] ? 'inferred' : 'unknown',
     managedBy: 'unknown',
   }));
+  const legacyOpenCode = out.providers?.opencodeMcp === 'ak'
+    || out.providers?.opencodeManaged != null
+    || out.providers?.opencodeCatalogDir != null;
+  const ownership = {
+    ...(existing.ownership ?? {}),
+    ...(legacyOpenCode && !existing.ownership?.opencode ? { opencode: {
+      source: 'legacy-providers',
+      mcp: out.providers?.opencodeMcp ?? null,
+      managed: structuredClone(out.providers?.opencodeManaged ?? null),
+      catalogDir: out.providers?.opencodeCatalogDir ?? null,
+    } } : {}),
+  };
   out.integrations = {
     ...existing,
     version: CURRENT_INTEGRATIONS_VERSION,
     hosts: { ...(out.providers?.hosts ?? {}), ...(existing.hosts ?? {}) },
     bindings: [...priorBindings, ...inferred],
+    ...(Object.keys(ownership).length ? { ownership } : {}),
   };
   return immutable(out);
 }

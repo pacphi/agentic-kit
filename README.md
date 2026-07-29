@@ -180,9 +180,12 @@ in `kit.json`) converges, on every `ak sync`:
   via `claude-flow-mcp` with `ruflo mcp start` fallback) and `ruvnet-brain` MCP (the
   stable-spine shim, hot-swapped on brain updates), plus ruflo's `skills.paths` and
   pre-approved `permission` patterns — merged backup-first into whatever you already have
-  (a JSONC file ak can't parse is refused, never clobbered).
+  (a JSONC file ak can't parse is refused, never clobbered). Opting in authorizes the
+  `claude-flow_*` and `ruvnet-brain_*` MCP tool families without per-call prompts; use
+  OpenCode's permission configuration if you need narrower approval policy.
 - **Lifecycle hooks** — `~/.config/opencode/plugins/ruflo-hooks.js`: session restore/end,
-  bash safety screening, edit/task outcome recording for ruflo's learning substrate
+  best-effort bash safety screening (defense-in-depth, fail-open if the local handler is
+  unavailable), edit/task outcome recording for ruflo's learning substrate
   (opencode has no settings-hooks surface; its plugin events are the hook spine).
 - **Subagents + skills** — ruflo's agent set converted to opencode subagents
   (`~/.config/opencode/agents/`, re-converted whenever the catalog source changes) and the
@@ -193,9 +196,9 @@ in `kit.json`) converges, on every `ak sync`:
 - **Guidance** — `~/.config/opencode/AGENTS.md` gets ak's managed blocks with
   opencode-correct tool names (`claude-flow_*`, `ruvnet-brain_search_ruvnet`).
 
-Everything is ownership-marked (`providers.opencodeMcp`) and stripped surgically by
-`ak x provider off` / `ak uninstall` — your own opencode.json entries are never touched.
-Design record: [docs/adr/0015-opencode-host.md](docs/adr/0015-opencode-host.md).
+Everything is ownership-recorded (`providers.opencodeMcp`) and stripped surgically by
+`ak host off` / `ak uninstall` — your own opencode.json entries are never touched.
+Design record: [docs/adr/0017-opencode-host.md](docs/adr/0017-opencode-host.md).
 
 ## Troubleshooting
 

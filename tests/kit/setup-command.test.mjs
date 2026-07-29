@@ -227,6 +227,21 @@ test('ak setup --opencode --dry-run writes nothing anywhere (kit.json, opencode 
   assertUnchanged(before, HOME, '`ak setup --opencode --dry-run` must not touch the filesystem');
 });
 
+test('ak setup --opencode fails honestly and deploys nothing when JSONC is refused', async () => {
+  seedHome();
+  paths._setGlobalRootForTest(fakeGlobalRoot(HOME, { ruflo: '9.9.9', 'agentic-qe': '9.9.9' }));
+  fs.mkdirSync(ocHome(), { recursive: true });
+  fs.writeFileSync(path.join(ocHome(), 'opencode.json'), '{\n// legal JSONC\n"mcp": {}\n}\n');
+  const { result, out } = await withOpencodeCli(() => captureLog(() =>
+    setup.run({ flags: FLAGS({ opencode: true, yes: true, minimal: true }), pkgRoot: PKG_ROOT })));
+  assert.equal(result, 1);
+  assert.match(out, /plugin\/agents\/skill\/guidance skipped/);
+  assert.doesNotMatch(out, /restart opencode|setup complete/);
+  for (const surface of ['plugins', 'agents', 'skills', 'AGENTS.md']) {
+    assert.equal(fs.existsSync(path.join(ocHome(), surface)), false, `${surface} must not be deployed`);
+  }
+});
+
 test('ak setup --opencode with an ABSENT CLI never fabricates the config home', async () => {
   seedHome();
   paths._setGlobalRootForTest(fakeGlobalRoot(HOME, { ruflo: '9.9.9', 'agentic-qe': '9.9.9' }));

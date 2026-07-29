@@ -28,7 +28,7 @@ import { HOST_REGISTRY } from './adapters/index.mjs';
 /** Per-host adapter descriptors. Logical names (`guidanceFile`, `loginFile`
  *  segments) are resolved to real paths by callers so this stays pure. */
 export const HOST_ADAPTERS = Object.fromEntries(HOST_REGISTRY
-  .filter((host) => host.capabilities.canRouteActivities)
+  .filter((host) => host.capabilities.canDriveSession)
   .map((host) => [host.id, {
     id: host.id, label: host.label,
     guidanceFile: host.legacy.guidanceFile,
@@ -40,7 +40,7 @@ export const HOST_ADAPTERS = Object.fromEntries(HOST_REGISTRY
     auth: host.auth,
   }]));
 
-/** Ordered host ids (claude first = display order, matches routing.HOSTS). */
+/** Ordered managed host ids (claude first = display order). */
 export const HOST_IDS = Object.keys(HOST_ADAPTERS);
 
 /** The adapter for a host id, or null. */
@@ -62,16 +62,17 @@ export function statuslineSupported(id) {
  *
  * @param {NodeJS.ProcessEnv} [env]
  * @param {any} [cfg] kit.json config (for providers.primaryHost)
- * @returns {'claude'|'codex'}
+ * @returns {'claude'|'codex'|'opencode'}
  */
 export function drivingHost(env = process.env, cfg = null) {
   const override = env.AK_DRIVING_HOST;
-  if (override && HOST_ADAPTERS[override]) return /** @type {'claude'|'codex'} */ (override);
+  if (override && HOST_ADAPTERS[override]) return /** @type {'claude'|'codex'|'opencode'} */ (override);
   if (env.CLAUDECODE === '1' || env.CLAUDE_CODE_ENTRYPOINT) return 'claude';
   // codex sets no single documented session marker; a CODEX_* prefix is a safe
   // heuristic because the fallback below covers the miss.
   if (Object.keys(env).some((k) => k.startsWith('CODEX_'))) return 'codex';
   const primary = cfg?.providers?.primaryHost;
-  if (primary && HOST_ADAPTERS[primary]) return /** @type {'claude'|'codex'} */ (primary);
+  const primaryCapable = HOST_REGISTRY.some((host) => host.id === primary && host.capabilities.canBePrimary);
+  if (primary && primaryCapable) return /** @type {'claude'|'codex'} */ (primary);
   return 'claude';
 }

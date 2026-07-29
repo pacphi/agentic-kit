@@ -8,6 +8,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
+import { createHash } from 'node:crypto';
 import {
   sandboxHome, assertSandboxed, snapshot, assertUnchanged, captureLog, rmrf,
   sandboxProject, writeKitConfig,
@@ -207,6 +208,7 @@ test('a missing ~/.claude/CLAUDE.md is not an error', async () => {
 // because the markers are read BEFORE kit.json is removed.
 
 const ocHome = () => path.join(HOME, '.config', 'opencode');
+const hash = (text) => createHash('sha256').update(text).digest('hex');
 
 /** Seed an ak-managed opencode state (wiring + artifacts + markers), plus a
  *  user-owned agent and user config keys that must survive every teardown. */
@@ -223,14 +225,15 @@ function seedManagedOpencode() {
     },
     permission: { 'claude-flow_*': 'allow', edit: 'ask' },
   }, null, 2));
-  fs.writeFileSync(path.join(cfgDir, 'plugins', 'ruflo-hooks.js'),
-    '// from src/templates/opencode-ruflo-hooks.js — ak-managed\n');
-  fs.writeFileSync(path.join(cfgDir, 'agents', 'coder.md'),
-    '---\ndescription: x\n---\n\n<!-- generated-by: agentic-kit — re-synced by `ak sync`; do not edit -->\nbody\n');
-  fs.writeFileSync(path.join(cfgDir, 'agents', '.ak-agents-stamp.json'), '{"source":"x"}\n');
+  const plugin = '// from src/templates/opencode-ruflo-hooks.js — ak-managed\n';
+  const agent = '---\ndescription: x\n---\n\n<!-- generated-by: agentic-kit — re-synced by `ak sync`; do not edit -->\nbody\n';
+  const stamp = '{"source":"x"}\n';
+  const skill = '# Ruflo\n\n<!-- deployed by agentic-kit --> from fixture@9.9.9\n';
+  fs.writeFileSync(path.join(cfgDir, 'plugins', 'ruflo-hooks.js'), plugin);
+  fs.writeFileSync(path.join(cfgDir, 'agents', 'coder.md'), agent);
+  fs.writeFileSync(path.join(cfgDir, 'agents', '.ak-agents-stamp.json'), stamp);
   fs.writeFileSync(path.join(cfgDir, 'agents', 'my-agent.md'), '---\ndescription: mine\n---\n\nUser agent.\n');
-  fs.writeFileSync(path.join(cfgDir, 'skills', 'ruflo', 'SKILL.md'),
-    '# Ruflo\n\n<!-- deployed by agentic-kit --> from fixture@9.9.9\n');
+  fs.writeFileSync(path.join(cfgDir, 'skills', 'ruflo', 'SKILL.md'), skill);
   fs.writeFileSync(path.join(cfgDir, 'AGENTS.md'),
     '# my notes\n\n<!-- BEGIN ruflo-opencode-reference -->\nguidance\n<!-- END ruflo-opencode-reference -->\n');
   writeKitConfig(HOME, {
@@ -243,6 +246,12 @@ function seedManagedOpencode() {
         paths: [],
         permissions: { 'claude-flow_*': { prior: null, written: 'allow' } },
         permissionScalar: null,
+        artifacts: {
+          plugin: hash(plugin),
+          agents: { 'coder.md': hash(agent) },
+          agentStamp: hash(stamp),
+          skill: hash(skill),
+        },
       },
     },
   });
@@ -301,6 +310,24 @@ test('uninstall --purge removes kit.json AFTER reading ownership — opencode wi
   assert.ok(!doc.mcp?.['claude-flow'], 'wiring stripped even under purge (ownership read first)');
   assert.ok(!fs.existsSync(path.join(ocHome(), 'plugins', 'ruflo-hooks.js')), 'artifacts removed under purge');
   assert.ok(!fs.existsSync(paths.kitConfigPath()), 'purge must not recreate kit.json');
+});
+
+test('uninstall --purge retains kit.json when OpenCode teardown cannot consume JSONC', async () => {
+  seedHome();
+  seedManagedOpencode();
+  fs.writeFileSync(path.join(ocHome(), 'opencode.json'), `{
+    // OpenCode accepts JSONC; ak must not erase the ownership receipt when it cannot rewrite this.
+    "mcp": { "claude-flow": { "type": "local", "command": ["ruflo", "mcp", "start"] } }
+  }\n`);
+
+  const { result, out } = await captureLog(() => uninstall.run({ flags: { yes: true, purge: true } }));
+
+  assert.equal(result, 1, 'incomplete teardown must be machine-detectable');
+  assert.ok(fs.existsSync(paths.kitConfigPath()),
+    'kit.json must retain the ownership receipt after an incomplete teardown');
+  assert.match(out, /kit\.json retained because OpenCode teardown is incomplete/);
+  assert.match(fs.readFileSync(path.join(ocHome(), 'opencode.json'), 'utf8'), /claude-flow/,
+    'unparseable user configuration is preserved byte-for-byte');
 });
 
 test.after(() => rmrf(HOME));

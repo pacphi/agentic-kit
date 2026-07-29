@@ -12,7 +12,8 @@ import * as heal from '../lib/heal.mjs';
 import { fixStatusline } from '../lib/statusline.mjs';
 import { registry, syncBlocks } from '../lib/blocks.mjs';
 import { register as mcpRegister, applyExclusions } from '../lib/mcp.mjs';
-import { opencodeStack, reconcileOpencodeGuidance } from '../lib/opencode.mjs';
+import { OPENCODE_LIFECYCLE_ADAPTER, reconcileOpencodeGuidance } from '../lib/opencode.mjs';
+import { runLifecycle } from '../lib/adapters/lifecycle.mjs';
 import { loadKitConfig, saveKitConfig } from '../lib/config.mjs';
 import { HOSTS, applyHosts, applyProviders, ensureDualAgents, hostInstallState, installHost, applyAqeRouter, seedDualRoutingIfDualHost, printActivityRoutingTable, aqeSupportsAgentOverrides, ensureCodexMcp, ensureRufloMcpInCodex, applySetupHostFlags } from '../lib/providers.mjs';
 import { installedVersion } from '../lib/versions.mjs';
@@ -59,7 +60,7 @@ Options:
                      (claude-flow + ruvnet-brain MCP, skills paths, permissions),
                      deploys the lifecycle plugin + platform skill, and converts
                      the ruflo agent set into opencode subagents. Already set up?
-                     Use: ak x provider pick --host claude,opencode
+                     Use: ak host pick --host claude,opencode
   --primary-host <h>  which host leads: claude|codex (default claude). Passing
                      codex implies --codex and mirrors the routing defaults so
                      codex drives with claude as the alternate.
@@ -178,8 +179,15 @@ export async function run_machine({ flags, pkgRoot, cfg }) {
     if (!(await have('opencode'))) {
       warn('opencode: enabled but CLI not installed — wiring skipped (re-run `ak sync` after installing opencode-ai)');
     } else {
-      const stack = await opencodeStack(cfg, { pkgRoot });
+      const lifecycle = await runLifecycle({
+        adapter: OPENCODE_LIFECYCLE_ADAPTER, action: 'apply', cfg, options: { pkgRoot },
+      });
+      const stack = lifecycle.result;
       (stack.oc.ok ? ok : warn)(`opencode: ${stack.oc.detail}`);
+      if (stack.oc.fatal) {
+        warn(`opencode plugin/agents/skill/guidance skipped — ${stack.oc.detail}`);
+        return false;
+      }
       ok(`opencode plugin: ${stack.plugin.detail}`);
       ok(`opencode agents: ${stack.agents.detail}`);
       if (stack.skill.changed) ok(`opencode skill: ${stack.skill.detail}`);
@@ -194,13 +202,13 @@ export async function run_machine({ flags, pkgRoot, cfg }) {
     }
   }
 
-  // 7. frontier host hint — codex detected but not enabled (opt-in via `x provider pick`)
+  // 7. frontier host hint — codex detected but not enabled (opt-in via `ak host pick`)
   if (!cfg.providers?.hosts?.codex && await have('codex')) {
     info('codex CLI detected — run `ak host pick` to let ruflo use both claude and codex');
   }
   // opencode hint — detected but not enabled (post-install opt-in via provider pick)
   if (!cfg.providers?.hosts?.opencode && await have('opencode')) {
-    info('opencode CLI detected — wire ruflo + ruvnet-brain into it with: ak x provider pick --host claude,opencode');
+    info('opencode CLI detected — wire ruflo + ruvnet-brain into it with: ak host pick --host claude,opencode');
   }
   return true;
 }
@@ -320,7 +328,7 @@ export async function run_project({ flags, cfg }) {
     if (mcp.changed) saveKitConfig(cfg); // persist the codexMcp ownership marker
     if (mcp.changed || !mcp.ok) (mcp.ok ? ok : warn)(`codex MCP: ${mcp.detail}`);
     // reverse bridge: register ruflo MCP into codex (codex→ruflo) so the bridge is
-    // two-way — parity with `ak sync` / `ak x provider pick`.
+    // two-way — parity with `ak sync` / `ak host pick`.
     const rmcp = await ensureRufloMcpInCodex(cfg, root);
     if (rmcp.changed) saveKitConfig(cfg); // persist the rufloCodexMcp ownership marker
     if (rmcp.changed || !rmcp.ok) (rmcp.ok ? ok : warn)(`ruflo→codex MCP: ${rmcp.detail}`);

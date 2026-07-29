@@ -86,7 +86,7 @@ test('ak x provider status omits the dual-host guidance tips with only one host 
   rm(home, project);
 });
 
-// ── pick: the two-tier host model (ADR-0015) ─────────────────────────────────
+// ── pick: the two-tier host model (ADR-0017) ─────────────────────────────────
 // pick manages ALL THREE managed host integrations; claude/codex remain the
 // routing pair. These spawn the real CLI end-to-end: kit.json persistence,
 // opencode.json wiring, artifact deploy/remove, and ownership markers are all
@@ -324,7 +324,7 @@ test('disable against a JSONC config warns honestly and RETAINS the markers (nev
     fs.writeFileSync(ocJsonPath(sb.home), '{\n  // user converted this file to JSONC\n  "mcp": {}\n}\n');
 
     const off = akPick(['x', 'provider', 'pick', '--host', 'claude', '--yes'], sb);
-    assert.equal(off.status, 0, off.stderr);
+    assert.equal(off.status, 1, 'automation must be able to detect incomplete teardown');
     assert.match(off.stdout, /opencode disable incomplete/, 'the incomplete teardown is surfaced, never hidden');
     assert.ok(!/opencode disabled:/.test(off.stdout), '"disabled" is never claimed over active wiring');
     const p = kitJson(sb.home).providers;

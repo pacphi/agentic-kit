@@ -358,7 +358,7 @@ test('disabled + installed: complete opencode-row silence + the pick hint on pro
     'a disabled host claims no active wiring — no opencode rows at all');
   const hint = rowsFor(rows, 'providers').find((r) => /opencode CLI installed but not enabled/.test(r.message));
   assert.ok(hint, 'the providers row carries the adoption hint');
-  assert.match(hint.message, /ak x provider pick --host claude,opencode/);
+  assert.match(hint.message, /ak host pick --host claude,opencode/);
   assert.equal(hint.fix, null, 'advisory only — sync never opts a host in');
 });
 

@@ -32,6 +32,7 @@
 //     a file we cannot parse is REFUSED, never clobbered.
 import fs from 'node:fs';
 import path from 'node:path';
+import { createHash } from 'node:crypto';
 import { have } from './exec.mjs';
 import { readJson, writeJsonWithBackup } from './settings.mjs';
 import { registry, syncBlocks, blocksForTarget, retiredForTarget, guidanceTargets } from './blocks.mjs';
@@ -166,13 +167,15 @@ function deepEqual(a, b) {
   return stable(a) === stable(b);
 }
 
+const contentHash = (text) => createHash('sha256').update(text).digest('hex');
+
 /** Normalize an opencodeManaged record — the current precise shape
  *  { mcp: {name:{prior,written}}, paths: [], permissions: {key:{prior,written}} },
  *  tolerating the legacy names-only shape from the first shipped version
  *  (legacy entries have unknown prior/written → treated conservatively: prior
  *  null, written null → never auto-deleted, only re-recorded on next apply). */
 function normalizeManaged(m) {
-  const out = { mcp: {}, paths: [], permissions: {}, permissionScalar: null };
+  const out = { mcp: {}, paths: [], permissions: {}, permissionScalar: null, artifacts: {} };
   if (!m || typeof m !== 'object') return out;
   const legacyNames = Array.isArray(m.mcp) ? m.mcp : Object.keys(m.mcp ?? {});
   for (const n of legacyNames) {
@@ -186,6 +189,7 @@ function normalizeManaged(m) {
     out.permissions[k] = rec && typeof rec === 'object' && 'written' in rec ? rec : { prior: null, written: null };
   }
   out.permissionScalar = typeof m.permissionScalar === 'string' ? m.permissionScalar : null;
+  if (m.artifacts && typeof m.artifacts === 'object') out.artifacts = structuredClone(m.artifacts);
   return out;
 }
 
@@ -209,7 +213,10 @@ export async function applyOpencode(cfg, { dryRun = false, configFile = paths.op
   const exists = fs.existsSync(configFile);
   const { ok: parsedOk, doc } = exists ? readJsonStrict(configFile) : { ok: true, doc: {} };
   if (!parsedOk) {
-    return { ok: false, changed: false, detail: `${configFile} is not plain JSON (JSONC comments?) — refusing to touch it; merge manually` };
+    return {
+      ok: false, fatal: true, changed: false,
+      detail: `${configFile} is not plain JSON (JSONC comments?) — refusing to touch it; merge manually`,
+    };
   }
   const entries = await mcpEntriesFor({ brainShim });
   const source = catalogSource({ override: cfg.providers?.opencodeCatalogDir });
@@ -234,7 +241,10 @@ export async function applyOpencode(cfg, { dryRun = false, configFile = paths.op
       else { delete next.mcp[name]; pruned.push(name); }
     } // else: user edited (or legacy record) → leave it, keep no ownership
   }
-  const managed = { mcp: {}, paths: [], permissions: {}, permissionScalar: null };
+  const managed = {
+    mcp: {}, paths: [], permissions: {}, permissionScalar: null,
+    artifacts: structuredClone(prevManaged.artifacts),
+  };
   for (const [name, want] of Object.entries(entries)) {
     const cur = next.mcp[name];
     const priorRec = prevManaged.mcp[name];
@@ -286,8 +296,13 @@ export async function applyOpencode(cfg, { dryRun = false, configFile = paths.op
     if (PERMISSION_KEYS.includes(k)) continue;
     if (!(k in next.permission)) continue;
     if (rec.written && deepEqual(next.permission[k], rec.written)) {
-      delete next.permission[k];
-      pruned.push(`permission.${k}`);
+      if (rec.prior != null) {
+        next.permission[k] = rec.prior;
+        pruned.push(`permission.${k} (prior restored)`);
+      } else {
+        delete next.permission[k];
+        pruned.push(`permission.${k}`);
+      }
     }
   }
   for (const k of PERMISSION_KEYS) {
@@ -303,7 +318,7 @@ export async function applyOpencode(cfg, { dryRun = false, configFile = paths.op
   }
 
   const changed = JSON.stringify(next) !== JSON.stringify(doc);
-  if (cfg.providers) {
+  if (!dryRun && cfg.providers) {
     cfg.providers.opencodeMcp = 'ak';
     cfg.providers.opencodeManaged = managed;
   }
@@ -315,7 +330,7 @@ export async function applyOpencode(cfg, { dryRun = false, configFile = paths.op
   ];
   if (pruned.length) notes.push(`pruned: ${pruned.join(', ')}`);
   if (collisions.length) notes.push(`⚠ collisions preserved (user-owned, untouched): ${collisions.join(', ')}`);
-  return { ok: collisions.length === 0, changed, detail: notes.join(' — ') };
+  return { ok: collisions.length === 0, fatal: false, changed, detail: notes.join(' — ') };
 }
 
 /** Surgical teardown of ak's opencode.json wiring — ONLY the recorded managed
@@ -395,7 +410,7 @@ export function undoOpencode(cfg, { configFile = paths.opencodeConfigPath() } = 
 }
 
 // ── shared stack composition (the ONE owner-module operation) ────────────────
-// setup / sync / `x provider pick` all enable opencode the same way; off /
+// setup / sync / `ak host pick` all enable opencode the same way; off /
 // uninstall / pick-disable all retire it the same way. The composition itself
 // (which ops, in which order) is part of the ownership contract — three copies
 // would drift (codex-review: the provider-picker rework must not duplicate
@@ -419,11 +434,29 @@ export function undoOpencode(cfg, { configFile = paths.opencodeConfigPath() } = 
 export async function opencodeStack(cfg, { pkgRoot, configFile, brainShim, pluginsDir, agentsDir, skillsDir }) {
   const before = JSON.stringify([cfg.providers?.opencodeMcp ?? null, cfg.providers?.opencodeManaged ?? null]);
   const oc = await applyOpencode(cfg, { ...(configFile ? { configFile } : {}), ...(brainShim ? { brainShim } : {}) });
-  const markersChanged = JSON.stringify([cfg.providers?.opencodeMcp ?? null, cfg.providers?.opencodeManaged ?? null]) !== before;
-  const plugin = deployPlugin({ pkgRoot, ...(pluginsDir ? { pluginsDir } : {}) });
+  if (oc.fatal) {
+    const skipped = { ok: false, changed: false, detail: 'skipped because opencode.json did not converge' };
+    return { oc, plugin: skipped, agents: skipped, skill: skipped, source: null, markersChanged: false };
+  }
+  const receipts = normalizeManaged(cfg.providers?.opencodeManaged).artifacts;
+  const plugin = deployPlugin({
+    pkgRoot, receipt: receipts.plugin, ...(pluginsDir ? { pluginsDir } : {}),
+  });
   const source = catalogSource({ override: cfg.providers?.opencodeCatalogDir });
-  const agents = syncAgents({ source, ...(agentsDir ? { destDir: agentsDir } : {}) });
-  const skill = deploySkill({ source, ...(skillsDir ? { skillsDir } : {}) });
+  const agents = syncAgents({
+    source, receipts: receipts.agents, stampReceipt: receipts.agentStamp,
+    ...(agentsDir ? { destDir: agentsDir } : {}),
+  });
+  const skill = deploySkill({
+    source, receipt: receipts.skill, ...(skillsDir ? { skillsDir } : {}),
+  });
+  cfg.providers.opencodeManaged.artifacts = {
+    plugin: plugin.receipt ?? receipts.plugin ?? null,
+    agents: agents.receipts ?? receipts.agents ?? {},
+    agentStamp: agents.stampReceipt ?? receipts.agentStamp ?? null,
+    skill: skill.receipt ?? receipts.skill ?? null,
+  };
+  const markersChanged = JSON.stringify([cfg.providers?.opencodeMcp ?? null, cfg.providers?.opencodeManaged ?? null]) !== before;
   return { oc, plugin, agents, skill, source, markersChanged };
 }
 
@@ -434,18 +467,98 @@ export async function opencodeStack(cfg, { pkgRoot, configFile, brainShim, plugi
  *  persists — and MUST honor undo.ok before claiming a disable (codex-review
  *  r3: a JSONC-refused config leaves active wiring behind).
  *  @param {any} cfg */
-export function retireOpencode(cfg) {
-  const undo = undoOpencode(cfg);
-  const artifacts = removeArtifacts({});
+/** @param {any} cfg
+ *  @param {{configFile?:string,pluginsDir?:string,agentsDir?:string,skillsDir?:string}} [opts] */
+export function retireOpencode(cfg, { configFile, pluginsDir, agentsDir, skillsDir } = {}) {
+  const receipts = normalizeManaged(cfg.providers?.opencodeManaged).artifacts;
+  const undo = undoOpencode(cfg, { ...(configFile ? { configFile } : {}) });
+  const artifacts = undo.ok
+    ? removeArtifacts({
+        receipts,
+        ...(pluginsDir ? { pluginsDir } : {}),
+        ...(agentsDir ? { agentsDir } : {}),
+        ...(skillsDir ? { skillsDir } : {}),
+      })
+    : { ok: false, changed: false, detail: 'retained because opencode.json teardown is incomplete' };
   return { undo, artifacts, ok: undo.ok };
 }
+
+/**
+ * ADR-0016 lifecycle adapter for OpenCode's managed native surfaces.
+ * Configuration lifecycle is deliberately separate from activity routing:
+ * this adapter can drive setup/sync/status/teardown while the registry keeps
+ * `canRouteActivities:false`.
+ *
+ * The factory keeps filesystem destinations injectable for hermetic conformance
+ * tests. `detect`, `plan`, and `verify` are read-only. `runLifecycle` owns the
+ * dry-run boundary, so `apply` and `undo` are never called for a dry-run.
+ */
+export function createOpencodeLifecycleAdapter(defaults = {}) {
+  const options = (request) => ({ ...defaults, ...(request.options ?? {}) });
+  const detect = async (request = {}) => {
+    const cfg = request.cfg ?? {};
+    const opts = options(request);
+    const source = catalogSource({ override: cfg.providers?.opencodeCatalogDir });
+    const convergence = await opencodeConverged(cfg, {
+      ...(opts.configFile ? { configFile: opts.configFile } : {}),
+      ...(opts.brainShim ? { brainShim: opts.brainShim } : {}),
+    });
+    const receipts = normalizeManaged(cfg.providers?.opencodeManaged).artifacts;
+    const plugin = opts.pkgRoot
+      ? pluginStatus({
+          pkgRoot: opts.pkgRoot, receipt: receipts.plugin,
+          ...(opts.pluginsDir ? { pluginsDir: opts.pluginsDir } : {}),
+        })
+      : { present: false, current: false, foreign: false };
+    const agents = agentsStatus({
+      source, receipts: receipts.agents, ...(opts.agentsDir ? { destDir: opts.agentsDir } : {}),
+    });
+    const skill = skillStatus({
+      source, receipt: receipts.skill, ...(opts.skillsDir ? { skillsDir: opts.skillsDir } : {}),
+    });
+    return { enabled: !!cfg.providers?.hosts?.opencode, convergence, plugin, agents, skill };
+  };
+  return {
+    id: 'opencode',
+    detect,
+    async plan(request = {}) {
+      const facts = request.facts ?? await detect(request);
+      const changed = facts.enabled && (!facts.convergence.converged
+        || (!facts.plugin.current && !facts.plugin.foreign)
+        || facts.agents.stale
+        || (!facts.skill.current && !facts.skill.foreign));
+      return { changed, facts, operations: changed ? ['config', 'plugin', 'agents', 'skill'] : [] };
+    },
+    async apply(request = {}) {
+      const cfg = request.cfg;
+      const opts = options(request);
+      if (!cfg || !opts.pkgRoot) throw new TypeError('opencode lifecycle apply requires cfg and pkgRoot');
+      const result = await opencodeStack(cfg, opts);
+      return {
+        changed: result.oc.changed || result.plugin.changed || result.agents.changed
+          || result.skill.changed || result.markersChanged,
+        result,
+      };
+    },
+    async verify(request = {}) {
+      return detect(request);
+    },
+    async undo(request = {}) {
+      if (!request.cfg) throw new TypeError('opencode lifecycle undo requires cfg');
+      const result = retireOpencode(request.cfg, options(request));
+      return { changed: result.undo.changed || result.artifacts.changed, result };
+    },
+  };
+}
+
+export const OPENCODE_LIFECYCLE_ADAPTER = createOpencodeLifecycleAdapter();
 
 /** Reconcile the opencode AGENTS.md guidance blocks for the current enablement
  *  state — the `agents-opencode` target only, never the claude/project files.
  *  Enable (`enabled: true`) upserts the enablement-gated blocks as soon as the
  *  config home exists; disable (`enabled: false`) strips them (the always-on
  *  preamble stays by design; user content is never touched). Shared by setup,
- *  `x provider pick` enable/disable, and `x provider off`, so every command
+ *  `ak host pick` enable/disable, and `ak host off`, so every command
  *  converges guidance the same way sync's blocks branch does (codex-review r3).
  *  @param {{ pkgRoot: string, cfg: any, cwd?: string, enabled: boolean }} opts */
 export async function reconcileOpencodeGuidance({ pkgRoot, cfg, cwd = process.cwd(), enabled }) {
@@ -612,8 +725,10 @@ const isGeneratedContent = (text) => AGENT_MARKERS.some((m) => text.includes(m))
  *  is preserved and reported). The stamp records the source id + the exact
  *  generated file list and is only rewritten when the set actually changed
  *  (no per-run timestamp churn — idempotent-write semantics).
- *  @param {{ source: CatalogSource|null, destDir?: string, dryRun?: boolean }} opts */
-export function syncAgents({ source, destDir = paths.opencodeAgentsDir(), dryRun = false }) {
+ *  @param {{ source: CatalogSource|null, destDir?: string, dryRun?: boolean, receipts?:Record<string,string>, stampReceipt?:string|null }} opts */
+export function syncAgents({
+  source, destDir = paths.opencodeAgentsDir(), dryRun = false, receipts = {}, stampReceipt = null,
+}) {
   if (!source) return { ok: false, changed: false, detail: 'no ruflo catalog source (marketplace clone or @claude-flow/cli) found' };
   const { agents, scanned, skipped, renamed } = convertAgents(source.root);
   if (!dryRun) fs.mkdirSync(destDir, { recursive: true });
@@ -621,10 +736,10 @@ export function syncAgents({ source, destDir = paths.opencodeAgentsDir(), dryRun
   if (fs.existsSync(destDir)) {
     for (const f of fs.readdirSync(destDir).filter((f) => f.endsWith('.md'))) {
       const p = path.join(destDir, f);
-      let isGenerated = false;
-      try { isGenerated = isGeneratedContent(fs.readFileSync(p, 'utf8')); } catch { /* leave alone */ }
+      let owned = false;
+      try { owned = receipts[f] && contentHash(fs.readFileSync(p, 'utf8')) === receipts[f]; } catch { /* leave alone */ }
       const wanted = agents.some((a) => `${a.name}.md` === f);
-      if (isGenerated && !wanted) { if (!dryRun) fs.rmSync(p); removed++; }
+      if (owned && !wanted) { if (!dryRun) fs.rmSync(p); removed++; }
     }
   }
   let written = 0;
@@ -632,7 +747,9 @@ export function syncAgents({ source, destDir = paths.opencodeAgentsDir(), dryRun
   for (const a of agents) {
     const p = path.join(destDir, `${a.name}.md`);
     const cur = fs.existsSync(p) ? fs.readFileSync(p, 'utf8') : null;
-    if (cur !== null && cur !== a.content && !isGeneratedContent(cur)) { userOwned++; continue; }
+    const priorOwned = cur !== null && receipts[`${a.name}.md`]
+      && contentHash(cur) === receipts[`${a.name}.md`];
+    if (cur !== null && !priorOwned) { userOwned++; continue; }
     deployed.push(`${a.name}.md`);
     if (cur !== a.content) {
       written++;
@@ -642,28 +759,37 @@ export function syncAgents({ source, destDir = paths.opencodeAgentsDir(), dryRun
   const changed = written > 0 || removed > 0;
   // The stamp records what was ACTUALLY deployed (a user-owned file occupying
   // a slot is never in it) — otherwise status would diverge forever.
-  const stamp = { source: source.id, count: deployed.length, files: deployed.sort() };
-  const priorStamp = readJson(path.join(destDir, STAMP_FILE), null);
-  if (!dryRun && (changed || !priorStamp || JSON.stringify(priorStamp) !== JSON.stringify(stamp))) {
-    fs.writeFileSync(path.join(destDir, STAMP_FILE), JSON.stringify(stamp, null, 2) + '\n');
+  const nextReceipts = Object.fromEntries(deployed.map((f) => {
+    const agent = agents.find((a) => `${a.name}.md` === f);
+    return [f, contentHash(agent.content)];
+  }));
+  const stamp = { source: source.id, count: deployed.length, files: deployed.sort(), hashes: nextReceipts };
+  const stampText = JSON.stringify(stamp, null, 2) + '\n';
+  const stampPath = path.join(destDir, STAMP_FILE);
+  const priorStampText = fs.existsSync(stampPath) ? fs.readFileSync(stampPath, 'utf8') : null;
+  const stampOwned = priorStampText !== null && stampReceipt && contentHash(priorStampText) === stampReceipt;
+  const mayWriteStamp = priorStampText === null || stampOwned;
+  if (!dryRun && mayWriteStamp && priorStampText !== stampText) {
+    fs.writeFileSync(stampPath, stampText);
   }
   return {
     ok: true,
     changed,
+    receipts: nextReceipts,
+    stampReceipt: mayWriteStamp ? contentHash(stampText) : stampReceipt,
     detail: `${agents.length} agents from ${source.id} (${written} written, ${removed} removed, ${skipped} skipped, ${renamed} collision-renamed${userOwned ? `, ${userOwned} user-owned preserved` : ''}; scanned ${scanned})`,
   };
 }
 
 /** Agent-set drift, honestly: stale when the stamp is missing, the catalog
  *  source id diverged (upgrade/marketplace pull), or the on-disk generated
- *  file set differs from the stamp (deleted/extra/edited-then-removed files).
- *  Count reports GENERATED (marker-bearing) agents — user files are not ak's
- *  to count. Content edits to an existing generated file are detected as
- *  'modified' only by name-set comparison's complement, so those surface via
- *  sync's content-diff rewrite rather than here (documented asymmetry: status
- *  catches structural drift; sync fixes content drift when it runs).
- *  @param {{ source?: CatalogSource|null, destDir?: string }} [opts] */
-export function agentsStatus({ source, destDir = paths.opencodeAgentsDir() } = {}) {
+ *  file set differs from the stamp. Count reports marker-bearing agents for
+ *  visibility, while receipt/hash divergence is reported as `modified` so
+ *  callers classify user edits as preserved rather than repairable drift.
+ *  @param {{ source?: CatalogSource|null, destDir?: string, receipts?:Record<string,string>|null }} [opts] */
+export function agentsStatus({
+  source, destDir = paths.opencodeAgentsDir(), receipts = null,
+} = {}) {
   const stamp = readJson(path.join(destDir, STAMP_FILE), null);
   let generatedCount = 0;
   if (fs.existsSync(destDir)) {
@@ -674,15 +800,29 @@ export function agentsStatus({ source, destDir = paths.opencodeAgentsDir() } = {
   const onDisk = fs.existsSync(destDir)
     ? fs.readdirSync(destDir).filter((f) => {
         if (!f.endsWith('.md')) return false;
-        try { return isGeneratedContent(fs.readFileSync(path.join(destDir, f), 'utf8')); } catch { return false; }
+        try {
+          const text = fs.readFileSync(path.join(destDir, f), 'utf8');
+          if (receipts) return !!receipts[f] && contentHash(text) === receipts[f];
+          return isGeneratedContent(text);
+        } catch { return false; }
       }).sort()
     : [];
   const stampFiles = Array.isArray(stamp?.files) ? [...stamp.files].sort() : null;
   const filesDiverged = stampFiles != null && JSON.stringify(stampFiles) !== JSON.stringify(onDisk);
+  const contentDiverged = !!stamp?.hashes && onDisk.some((f) => {
+    try { return contentHash(fs.readFileSync(path.join(destDir, f), 'utf8')) !== stamp.hashes[f]; } catch { return true; }
+  });
   return {
     count: generatedCount,
     stampedId: stamp?.source ?? null,
     currentId: source?.id ?? null,
+    modified: contentDiverged || (!!receipts && fs.existsSync(destDir)
+      && fs.readdirSync(destDir).filter((f) => f.endsWith('.md')).some((f) => {
+        try {
+          return !!receipts[f]
+            && contentHash(fs.readFileSync(path.join(destDir, f), 'utf8')) !== receipts[f];
+        } catch { return true; }
+      })),
     stale: !stamp || stamp.source !== (source?.id ?? null) || filesDiverged,
   };
 }
@@ -699,31 +839,41 @@ const PLUGIN_MARKER = 'src/templates/opencode-ruflo-hooks.js';
  *  (rewrites only when the template changed — hash-stamped by content itself).
  *  A destination file that exists WITHOUT the ak marker is user-owned:
  *  preserved and reported, never overwritten.
- *  @param {{ pkgRoot: string, pluginsDir?: string, dryRun?: boolean }} opts */
-export function deployPlugin({ pkgRoot, pluginsDir = paths.opencodePluginsDir(), dryRun = false }) {
+ *  @param {{ pkgRoot: string, pluginsDir?: string, dryRun?: boolean, receipt?:string|null }} opts */
+export function deployPlugin({
+  pkgRoot, pluginsDir = paths.opencodePluginsDir(), dryRun = false, receipt = null,
+}) {
   const tpl = pluginTemplate(pkgRoot);
   if (!fs.existsSync(tpl)) return { ok: false, changed: false, detail: `template missing: ${tpl}` };
   const want = fs.readFileSync(tpl, 'utf8');
   const dest = path.join(pluginsDir, PLUGIN_NAME);
   const cur = fs.existsSync(dest) ? fs.readFileSync(dest, 'utf8') : null;
-  if (cur === want) return { ok: true, changed: false, detail: 'lifecycle plugin current' };
-  if (cur !== null && !cur.includes(PLUGIN_MARKER)) {
-    return { ok: true, changed: false, detail: `⚠ ${dest} exists without the ak marker (user-owned) — left untouched` };
+  if (cur === want && receipt && contentHash(cur) === receipt) {
+    return { ok: true, changed: false, receipt, detail: 'lifecycle plugin current' };
+  }
+  if (cur !== null && (!receipt || contentHash(cur) !== receipt)) {
+    return { ok: true, changed: false, receipt, detail: `⚠ ${dest} differs from ak's last-written receipt (user-owned/edited) — left untouched` };
   }
   if (!dryRun) {
     fs.mkdirSync(pluginsDir, { recursive: true });
     fs.writeFileSync(dest, want);
   }
-  return { ok: true, changed: true, detail: cur == null ? 'lifecycle plugin deployed (ruflo-hooks.js)' : 'lifecycle plugin updated (ruflo-hooks.js)' };
+  return { ok: true, changed: true, receipt: contentHash(want), detail: cur == null ? 'lifecycle plugin deployed (ruflo-hooks.js)' : 'lifecycle plugin updated (ruflo-hooks.js)' };
 }
 
 /** Plugin presence/currency against the kit template. `foreign` flags a
  *  user-owned file occupying the destination (status must not nag to
  *  overwrite it — deploy will leave it alone). */
-export function pluginStatus({ pkgRoot, pluginsDir = paths.opencodePluginsDir() }) {
+export function pluginStatus({ pkgRoot, pluginsDir = paths.opencodePluginsDir(), receipt = null }) {
   const dest = path.join(pluginsDir, PLUGIN_NAME);
   const present = fs.existsSync(dest);
-  const foreign = present && !fs.readFileSync(dest, 'utf8').includes(PLUGIN_MARKER);
+  const currentText = present ? fs.readFileSync(dest, 'utf8') : null;
+  const foreign = present && (
+    !receipt || !currentText.includes(PLUGIN_MARKER)
+    || (!!receipt && contentHash(currentText) !== receipt
+      && fs.existsSync(pluginTemplate(pkgRoot))
+      && currentText !== fs.readFileSync(pluginTemplate(pkgRoot), 'utf8'))
+  );
   const tpl = pluginTemplate(pkgRoot);
   const current = present && !foreign && fs.existsSync(tpl) && fs.readFileSync(dest, 'utf8') === fs.readFileSync(tpl, 'utf8');
   return { present, current, foreign };
@@ -736,36 +886,49 @@ const SKILL_DEPLOYED_MARKER = '<!-- deployed by agentic-kit -->';
 /** Deploy ruflo's platform SKILL.md (from the catalog source) into opencode's
  *  global skills dir, stamped with the source id for drift detection. A
  *  destination SKILL.md without the ak marker is user-owned: preserved.
- *  @param {{ source: CatalogSource|null, skillsDir?: string, dryRun?: boolean }} opts */
-export function deploySkill({ source, skillsDir = paths.opencodeSkillsDir(), dryRun = false }) {
+ *  @param {{ source: CatalogSource|null, skillsDir?: string, dryRun?: boolean, receipt?:string|null }} opts */
+export function deploySkill({
+  source, skillsDir = paths.opencodeSkillsDir(), dryRun = false, receipt = null,
+}) {
   if (!source?.hasPlatformSkill) return { ok: true, changed: false, detail: `no platform SKILL.md in catalog source${source ? ` (${source.id})` : ''}` };
   const src = path.join(source.root, 'SKILL.md');
   const dest = path.join(skillsDir, 'ruflo', 'SKILL.md');
   const want = `${fs.readFileSync(src, 'utf8').replace(/\s*$/, '')}\n\n${SKILL_DEPLOYED_MARKER} from ${source.id} — re-synced by \`ak sync\`\n`;
   const cur = fs.existsSync(dest) ? fs.readFileSync(dest, 'utf8') : null;
-  if (cur === want) return { ok: true, changed: false, detail: 'platform skill current' };
-  if (cur !== null && !cur.includes(SKILL_DEPLOYED_MARKER)) {
-    return { ok: true, changed: false, detail: `⚠ ${dest} exists without the ak marker (user-owned) — left untouched` };
+  if (cur === want && receipt && contentHash(cur) === receipt) {
+    return { ok: true, changed: false, receipt, detail: 'platform skill current' };
+  }
+  if (cur !== null && (!receipt || contentHash(cur) !== receipt)) {
+    return { ok: true, changed: false, receipt, detail: `⚠ ${dest} differs from ak's last-written receipt (user-owned/edited) — left untouched` };
   }
   if (!dryRun) {
     fs.mkdirSync(path.dirname(dest), { recursive: true });
     fs.writeFileSync(dest, want);
   }
-  return { ok: true, changed: true, detail: `platform skill deployed (skills/ruflo/SKILL.md, ${source.id})` };
+  return { ok: true, changed: true, receipt: contentHash(want), detail: `platform skill deployed (skills/ruflo/SKILL.md, ${source.id})` };
 }
 
 /** Platform skill presence/currency against the catalog source id. `foreign`
  *  flags a user-owned SKILL.md at the destination.
- *  @param {{ source?: CatalogSource|null, skillsDir?: string }} [opts] */
-export function skillStatus({ source, skillsDir = paths.opencodeSkillsDir() } = {}) {
+ *  @param {{ source?: CatalogSource|null, skillsDir?: string, receipt?:string|null }} [opts] */
+export function skillStatus({
+  source, skillsDir = paths.opencodeSkillsDir(), receipt = null,
+} = {}) {
   const dest = path.join(skillsDir, 'ruflo', 'SKILL.md');
   const present = fs.existsSync(dest);
-  const foreign = present && !fs.readFileSync(dest, 'utf8').includes(SKILL_DEPLOYED_MARKER);
+  const text = present ? fs.readFileSync(dest, 'utf8') : null;
+  const sourceFile = source?.hasPlatformSkill ? path.join(source.root, 'SKILL.md') : null;
+  const desired = sourceFile && fs.existsSync(sourceFile)
+    ? `${fs.readFileSync(sourceFile, 'utf8').replace(/\s*$/, '')}\n\n${SKILL_DEPLOYED_MARKER} from ${source.id} — re-synced by \`ak sync\`\n`
+    : null;
+  const foreign = present && (
+    !receipt || !text.includes(SKILL_DEPLOYED_MARKER)
+    || (!!receipt && contentHash(text) !== receipt && text !== desired)
+  );
   return {
     present,
     foreign,
-    current: present && !foreign && !!source?.hasPlatformSkill
-      && fs.readFileSync(dest, 'utf8').includes(`from ${source.id}`),
+    current: present && !foreign && desired != null && text === desired,
   };
 }
 
@@ -773,14 +936,18 @@ export function skillStatus({ source, skillsDir = paths.opencodeSkillsDir() } = 
  *  the lifecycle plugin, generated agents (+ stamp), the platform skill's
  *  SKILL.md. Directories are pruned only when EMPTY after the managed files
  *  are gone — user resources placed beside them survive.
- *  @param {{ pluginsDir?: string, agentsDir?: string, skillsDir?: string }} [opts] */
-export function removeArtifacts({ pluginsDir = paths.opencodePluginsDir(), agentsDir = paths.opencodeAgentsDir(), skillsDir = paths.opencodeSkillsDir() } = {}) {
+ *  @param {{ pluginsDir?: string, agentsDir?: string, skillsDir?: string, receipts?:any }} [opts] */
+export function removeArtifacts({
+  pluginsDir = paths.opencodePluginsDir(), agentsDir = paths.opencodeAgentsDir(),
+  skillsDir = paths.opencodeSkillsDir(), receipts = {},
+} = {}) {
   const removed = [];
   const rmdirIfEmpty = (dir) => {
     try { if (fs.readdirSync(dir).length === 0) fs.rmdirSync(dir); } catch { /* absent or not empty */ }
   };
   const plugin = path.join(pluginsDir, PLUGIN_NAME);
-  if (fs.existsSync(plugin) && fs.readFileSync(plugin, 'utf8').includes(PLUGIN_MARKER)) {
+  if (fs.existsSync(plugin) && receipts.plugin
+      && contentHash(fs.readFileSync(plugin, 'utf8')) === receipts.plugin) {
     fs.rmSync(plugin, { force: true });
     removed.push('plugin ruflo-hooks.js');
   }
@@ -788,8 +955,12 @@ export function removeArtifacts({ pluginsDir = paths.opencodePluginsDir(), agent
     let n = 0;
     for (const f of fs.readdirSync(agentsDir)) {
       const p = path.join(agentsDir, f);
-      if (f === STAMP_FILE) { fs.rmSync(p, { force: true }); continue; }
-      if (f.endsWith('.md') && AGENT_MARKERS.some((m) => fs.readFileSync(p, 'utf8').includes(m))) {
+      if (f === STAMP_FILE && receipts.agentStamp
+          && contentHash(fs.readFileSync(p, 'utf8')) === receipts.agentStamp) {
+        fs.rmSync(p, { force: true }); continue;
+      }
+      if (f.endsWith('.md') && receipts.agents?.[f]
+          && contentHash(fs.readFileSync(p, 'utf8')) === receipts.agents[f]) {
         fs.rmSync(p, { force: true });
         n++;
       }
@@ -798,7 +969,8 @@ export function removeArtifacts({ pluginsDir = paths.opencodePluginsDir(), agent
   }
   const skillDir = path.join(skillsDir, 'ruflo');
   const skill = path.join(skillDir, 'SKILL.md');
-  if (fs.existsSync(skill) && fs.readFileSync(skill, 'utf8').includes(SKILL_DEPLOYED_MARKER)) {
+  if (fs.existsSync(skill) && receipts.skill
+      && contentHash(fs.readFileSync(skill, 'utf8')) === receipts.skill) {
     fs.rmSync(skill, { force: true });
     rmdirIfEmpty(skillDir);
     removed.push('platform skill');

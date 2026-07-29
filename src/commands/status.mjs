@@ -354,7 +354,8 @@ export async function collect({ pkgRoot, cwd = process.cwd() }) {
           rows.push(row('opencode', 'ok',
             `opencode.json converged (claude-flow${st.brain ? ' + ruvnet-brain' : ''} MCP, ${st.paths?.length ?? 0} skills path(s))${st.owned ? '' : ' — pre-existing (not ak-managed)'}`));
         }
-        const plug = pluginStatus({ pkgRoot });
+        const artifactReceipts = cfg.providers?.opencodeManaged?.artifacts ?? {};
+        const plug = pluginStatus({ pkgRoot, receipt: artifactReceipts.plugin });
         if (plug.foreign) {
           rows.push(row('opencode', 'info', 'lifecycle plugin slot occupied by a user-owned ruflo-hooks.js — ak leaves it alone'));
         } else if (!plug.present) {
@@ -362,11 +363,14 @@ export async function collect({ pkgRoot, cwd = process.cwd() }) {
         } else if (!plug.current) {
           rows.push(row('opencode', 'warn', 'lifecycle plugin out of date', 'sync rewrites it'));
         }
-        const ag = agentsStatus({ source });
+        const ag = agentsStatus({ source, receipts: artifactReceipts.agents });
         if (ag.count === 0 && !source) {
           rows.push(row('opencode', 'warn', 'no ruflo catalog source (marketplace clone or @claude-flow/cli)', 'install ruflo (or claude marketplace) for the agent catalog'));
         } else if (ag.count === 0) {
           rows.push(row('opencode', 'warn', 'no converted ruflo agents', 'sync converts the ruflo agent set'));
+        } else if (ag.modified) {
+          rows.push(row('opencode', 'info',
+            `${ag.count} converted agents include user edits — ak leaves those files alone`));
         } else if (ag.stale) {
           rows.push(row('opencode', 'warn',
             `${ag.count} agents from ${ag.stampedId ?? 'unknown source'}, current source is ${ag.currentId ?? 'none'}`,
@@ -374,7 +378,7 @@ export async function collect({ pkgRoot, cwd = process.cwd() }) {
         } else {
           rows.push(row('opencode', 'ok', `${ag.count} converted agents (${ag.currentId})`));
         }
-        const sk = skillStatus({ source });
+        const sk = skillStatus({ source, receipt: artifactReceipts.skill });
         if (sk.foreign) {
           rows.push(row('opencode', 'info', 'skills/ruflo/SKILL.md is user-owned — ak leaves it alone'));
         } else if (source?.hasPlatformSkill && !sk.present) {
@@ -427,14 +431,14 @@ export async function collect({ pkgRoot, cwd = process.cwd() }) {
     const { file, scope } = settingsTarget(cwd);
     const env = readJson(file, {})?.env ?? {};
     if (isDefault(cfg)) {
-      // advisory only (no fix): opting codex in is a deliberate `x provider pick`
+      // advisory only (no fix): opting codex in is a deliberate `ak host pick`
       if (await have('codex')) {
         rows.push(row('providers', 'info', 'codex CLI installed but not enabled (claude-only default)'));
       } else {
         rows.push(row('providers', 'info', 'claude-only (default host)'));
       }
       if (!cfg.providers?.hosts?.opencode && await have('opencode')) {
-        rows.push(row('providers', 'info', 'opencode CLI installed but not enabled (`ak x provider pick --host claude,opencode` wires it)'));
+        rows.push(row('providers', 'info', 'opencode CLI installed but not enabled (`ak host pick --host claude,opencode` wires it)'));
       }
     } else {
       const desired = managedEnv(cfg);

@@ -16,7 +16,9 @@ import {
 } from '../../lib/providers.mjs';
 import { parseRouteSpecs, formatModelHelp, PRIMARY_HOSTS, DEFAULT_PRIMARY_HOST, divergedRoutes, refreshSeededRoutes, modelNote, ACTIVITIES } from '../../lib/routing.mjs';
 import { loadKitConfig, saveKitConfig } from '../../lib/config.mjs';
-import { opencodeStack, retireOpencode, reconcileOpencodeGuidance } from '../../lib/opencode.mjs';
+import { OPENCODE_LIFECYCLE_ADAPTER, reconcileOpencodeGuidance } from '../../lib/opencode.mjs';
+import { runLifecycle } from '../../lib/adapters/lifecycle.mjs';
+import { routableHostIds } from '../../lib/adapters/index.mjs';
 import { have } from '../../lib/exec.mjs';
 import { ok, warn, fail, info, dim, bold, yellow } from '../../lib/output.mjs';
 import { repoRoot } from '../../lib/paths.mjs';
@@ -311,7 +313,8 @@ async function off({ cwd, pkgRoot }) {
   // reset below clears them (mirrors the codex managed-flag captures above).
   // On a FAILED teardown (e.g. JSONC config) the markers are the only remaining
   // proof — preserve them for the retry instead of nulling them into the reset.
-  const ret = retireOpencode(cfg);
+  const retired = await runLifecycle({ adapter: OPENCODE_LIFECYCLE_ADAPTER, action: 'undo', cfg });
+  const ret = retired.result;
   const keptMarkers = ret.ok ? { opencodeMcp: null, opencodeManaged: null }
     : { opencodeMcp: cfg.providers.opencodeMcp, opencodeManaged: cfg.providers.opencodeManaged };
   cfg.providers = { hosts: { claude: true, codex: false, opencode: false }, primaryHost: 'claude', aqeProvider: null, aqeFallback: [], models: [], maxBudgetUsd: null, dualRouting: {}, codexMcp: null, rufloCodexMcp: null, ...keptMarkers };
@@ -325,7 +328,7 @@ async function off({ cwd, pkgRoot }) {
   const ocLine = ret.ok ? `opencode: ${ret.undo.detail}; ${ret.artifacts.detail}`
     : `opencode teardown incomplete — ${ret.undo.detail}`;
   (ret.ok ? ok : warn)(`reset to claude-only default — ${env.detail}; ${router.detail}; ${mcp.detail}; ${rmcp.detail}; ${ocLine}`);
-  return 0;
+  return ret.ok ? 0 : 1;
 }
 
 const parseModels = (csv) => csv.split(',').map((s) => s.trim()).filter(Boolean).map((tok) => {
@@ -379,16 +382,16 @@ async function maybeWriteQeCourtDefaults({ nonInteractive, cwd, enabled, aqeProv
 async function pick({ flags, cwd, pkgRoot }) {
   const cfg = loadKitConfig();
   const hosts = await detectHosts(cwd);
-  // pick manages ALL managed host integrations (ADR-0015 two-tier model):
-  //   routing hosts     — primary + per-activity policy seeds (HOSTS.routing)
+  // pick manages all managed host integrations (ADR-0016/0017):
+  //   routing hosts     — primary + per-activity policy seeds (registry capability)
   //   integration hosts — config-file wiring via opencode.mjs's owner module;
   //                       never primary, never routed, never aqe
   // The split is DERIVED from the host descriptors' capability flag, not a
   // hardcoded id list (the seam issue #71's capability registry lands on).
   // --host is the complete desired enabled-host set on BOTH tiers; excluding an
   // enabled host disables it (ak-managed wiring stripped, user config kept).
-  const ROUTING = new Set(HOSTS.filter((h) => h.routing).map((h) => h.id));
-  const INTEGRATION = new Set(HOSTS.filter((h) => !h.routing).map((h) => h.id));
+  const ROUTING = new Set(routableHostIds());
+  const INTEGRATION = new Set(HOSTS.map((h) => h.id).filter((id) => !ROUTING.has(id)));
   const prevOpencode = !!cfg.providers?.hosts?.opencode || cfg.providers?.opencodeMcp === 'ak';
   let enabled;
   let aqeProvider = cfg.providers.aqeProvider ?? null;
@@ -556,11 +559,15 @@ async function pick({ flags, cwd, pkgRoot }) {
   // then converge the guidance blocks the same way setup/sync do ("wired +
   // guided" is one contract, not two).
   // CLI-gated: an enabled-but-absent CLI never fabricates the config home.
+  let incompleteTeardown = false;
   if (cfg.providers.hosts.opencode) {
     if (!(await have('opencode'))) {
       warn('opencode: enabled but CLI not installed — wiring skipped (re-run `ak sync` after installing opencode-ai)');
     } else {
-      const stack = await opencodeStack(cfg, { pkgRoot });
+      const lifecycle = await runLifecycle({
+        adapter: OPENCODE_LIFECYCLE_ADAPTER, action: 'apply', cfg, options: { pkgRoot },
+      });
+      const stack = lifecycle.result;
       // persist the markers on ANY refresh (converged file + stale markers is
       // exactly the stranded-teardown case), not only on file changes.
       if (stack.oc.changed || stack.markersChanged) saveKitConfig(cfg);
@@ -582,10 +589,14 @@ async function pick({ flags, cwd, pkgRoot }) {
     // never the user's own opencode config. A teardown that cannot complete
     // (e.g. a JSONC config) is reported honestly — markers stay for the retry
     // and "disabled" is never claimed over still-active wiring.
-    const ret = retireOpencode(cfg);
+    const retired = await runLifecycle({ adapter: OPENCODE_LIFECYCLE_ADAPTER, action: 'undo', cfg });
+    const ret = retired.result;
     saveKitConfig(cfg); // persist markers (nulled on success, retained on failure)
     if (ret.ok) ok(`opencode disabled: ${ret.undo.detail}; ${ret.artifacts.detail}`);
-    else warn(`opencode disable incomplete — ${ret.undo.detail} (artifacts: ${ret.artifacts.detail})`);
+    else {
+      incompleteTeardown = true;
+      warn(`opencode disable incomplete — ${ret.undo.detail} (artifacts: ${ret.artifacts.detail})`);
+    }
     // enablement-gated guidance strips regardless (user content preserved).
     const guidance = await reconcileOpencodeGuidance({ pkgRoot, cfg, cwd, enabled: false });
     if (guidance.changed) ok(`opencode ${guidance.detail}`);
@@ -617,5 +628,5 @@ async function pick({ flags, cwd, pkgRoot }) {
   printActivityRoutingTable(cfg);
   await maybeWriteQeCourtDefaults({ nonInteractive, cwd, enabled, aqeProvider });
   printDualHostTips(cfg);
-  return 0;
+  return incompleteTeardown ? 1 : 0;
 }
