@@ -39,10 +39,13 @@ test('ak run materializes an explicit OpenCode route', () => {
 
 // qe-court B8: `--json` must emit exactly one parseable document — the human
 // status line ("✓ run complete" / the failure text) is gated on !json.
+// The cfg seam keeps these fully deterministic (no real kit.json is read).
+const testCfg = () => ({ providers: { dualRouting: seedDualRouting() } });
+
 test('ak run --json emits exactly one parseable JSON document (qe-court B8)', async () => {
   const executePlan = async (plan) => plan.workers.map(succeededResult);
   const { result, out } = await captureLog(() => run({
-    flags: { json: true }, positionals: ['feature', 'probe'], executePlan,
+    flags: { json: true }, positionals: ['feature', 'probe'], executePlan, cfg: testCfg(),
   }));
   assert.equal(result, 0);
   const parsed = JSON.parse(out); // throws if the status line contaminates the document
@@ -54,7 +57,7 @@ test('ak run --json emits exactly one parseable JSON document (qe-court B8)', as
 test('ak run without --json still prints the human status line', async () => {
   const executePlan = async (plan) => plan.workers.map(succeededResult);
   const { result, out } = await captureLog(() => run({
-    flags: {}, positionals: ['feature', 'probe'], executePlan,
+    flags: {}, positionals: ['feature', 'probe'], executePlan, cfg: testCfg(),
   }));
   assert.equal(result, 0);
   assert.match(out, /run complete/);

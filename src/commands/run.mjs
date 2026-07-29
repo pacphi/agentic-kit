@@ -65,7 +65,7 @@ function printResults(results) {
   }
 }
 
-export async function run({ flags, positionals, executePlan = executeRunPlan }) {
+export async function run({ flags, positionals, executePlan = executeRunPlan, cfg = loadKitConfig() }) {
   const template = positionals[0];
   const task = positionals.slice(1).join(' ').trim();
   if (!template || !DUAL_RUN_TEMPLATE_NAMES.includes(template)) {
@@ -76,7 +76,7 @@ export async function run({ flags, positionals, executePlan = executeRunPlan }) 
   let plan;
   let warnings;
   try {
-    ({ plan, warnings } = buildRunPlan(loadKitConfig(), template, task, flags.route ?? []));
+    ({ plan, warnings } = buildRunPlan(cfg, template, task, flags.route ?? []));
   } catch (error) {
     fail(error.message);
     return 2;
