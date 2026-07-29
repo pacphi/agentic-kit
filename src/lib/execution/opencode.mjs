@@ -104,6 +104,19 @@ async function requestNoContent(fetchFn, endpoint, password, pathname,
   if (!response?.ok) throw new Error(`${method} ${pathname} failed with HTTP ${response?.status ?? 'unknown'}`);
 }
 
+/** opencode serve's prompt_async schema takes `model` as an OBJECT
+ *  `{providerID, modelID}` or null — a bare string is a 400 ("Expected object
+ *  | null, got …"). The runner's configured model travels as one
+ *  `provider/model` string (routing.mjs), so split on the FIRST slash here
+ *  (provider ids never contain '/'; model ids may, e.g. openrouter). A model
+ *  with no provider prefix falls back to the server's own configured default
+ *  (model omitted) rather than guessing a provider. */
+function serveModelFor(configuredModel) {
+  if (typeof configuredModel !== 'string' || !configuredModel.includes('/')) return null;
+  const slash = configuredModel.indexOf('/');
+  return { providerID: configuredModel.slice(0, slash), modelID: configuredModel.slice(slash + 1) };
+}
+
 async function requestWithin(fetchFn, endpoint, password, pathname, options, timeoutMs) {
   const controller = new AbortController();
   let timer;
@@ -230,8 +243,9 @@ function terminalResult(state, observation, clock) {
 }
 
 /**
- * Create a fully injectable OpenCode worker adapter. No command invokes this
- * adapter yet; its presence does not change OpenCode's routing capability.
+ * Create a fully injectable OpenCode worker adapter. Invoked by `ak run`
+ * (the canonical executor) for opencode-routed workers; routing capability
+ * itself is gated by the host registry (canRouteActivities, #82).
  */
 export function createOpenCodeExecutionAdapter({
   fetchFn = globalThis.fetch, spawnFn = nodeSpawn, haveFn = have, reservePort = defaultReservePort,
@@ -270,8 +284,15 @@ export function createOpenCodeExecutionAdapter({
         const eventAbort = new AbortController();
         const eventResponse = await fetchFn(`${endpoint}/global/event`, { headers, signal: eventAbort.signal });
         const terminal = waitForTerminalEvent(eventResponse, session.id, { signal: eventAbort.signal });
+        // Every path that abandons this promise without observe() consuming it
+        // (a prompt post that throws, cancel/cleanup teardown) would otherwise
+        // leave its socket-close rejection unhandled — Node's default turns
+        // that into a process crash AFTER the run verdict. A no-op second
+        // consumer keeps teardown honest; observe() still sees the rejection.
+        terminal.catch(() => {});
+        const model = serveModelFor(state.worker.configuredModel);
         await requestWithin(fetchFn, endpoint, password, `/session/${encodeURIComponent(session.id)}/prompt_async`, {
-          body: { agent: 'build', ...(state.worker.configuredModel ? { model: state.worker.configuredModel } : {}), parts: [{ type: 'text', text: state.prompt }] },
+          body: { agent: 'build', ...(model ? { model } : {}), parts: [{ type: 'text', text: state.prompt }] },
         }, timeoutMs);
         return { ...state, endpoint, password, child, sessionId: session.id, terminal, eventAbort };
       } catch (error) {
