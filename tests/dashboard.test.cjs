@@ -216,6 +216,62 @@ async function main() {
       contains(r.body, '"codex-mcp","opencode"');
     });
 
+    // ── RENDERED behavior, not served-source literals ────────────────────────
+    // The grouping/card/notice logic is ./groups.mjs (pure) — the SAME function
+    // sources the served bundle interpolates. These exercise the real render
+    // path renderPanels/renderNotice use, without a browser.
+
+    await test('an opencode status row renders under Hosts, ordered, with its level/message/fix verbatim', async () => {
+      const { catOf, groupRows, gridHtml } = await import('../src/lib/dashboard/groups.mjs');
+      const rows = [
+        { subsystem: 'natives', level: 'fail', message: 'WASM fallback', fix: 'sync installs native better-sqlite3' },
+        { subsystem: 'opencode', level: 'warn', message: 'opencode.json wiring drifted (permission claude-flow_* not allowed)', fix: 'sync re-applies the opencode wiring' },
+        { subsystem: 'codex-mcp', level: 'ok', message: 'codex MCP registered (mcp__codex__codex)', fix: null },
+        { subsystem: 'hosts', level: 'ok', message: 'opencode 1.2.3 (npm)', fix: null },
+      ];
+      // grouped under Hosts & Routing
+      assert(catOf('opencode') === 'hosts', 'opencode must group under Hosts & Routing');
+      const groups = groupRows(rows);
+      // ordered: fail first (natives), then warn (opencode), then oks by PREF (hosts < codex-mcp)
+      assert(JSON.stringify(groups.map((g) => g.subsystem)) === JSON.stringify(['natives', 'opencode', 'hosts', 'codex-mcp']),
+        'worst-first, then the preferred display order, got ' + groups.map((g) => g.subsystem));
+      // rendered: bucketed exactly as renderPanels does, with the original content intact
+      const hostsGroups = groups.filter((g) => catOf(g.subsystem) === 'hosts');
+      assert(hostsGroups.some((g) => g.subsystem === 'opencode' && g.level === 'warn'),
+        'the opencode group lands in the Hosts bucket with its worst level');
+      const html = gridHtml(hostsGroups);
+      contains(html, 'data-level="warn"');
+      contains(html, 'opencode.json wiring drifted (permission claude-flow_* not allowed)');
+      contains(html, 'sync re-applies the opencode wiring');
+      contains(html, '<span class="card-name">opencode</span>');
+    });
+
+    await test('the served bundle parses and carries every interpolated groups.mjs function', async () => {
+      // The bundle is built by interpolating groups.mjs's function sources —
+      // a broken interpolation would serve a page that fails to parse at all.
+      const { JS } = await import('../src/lib/dashboard/client.mjs');
+      new Function(JS); // parse-only (no execution)
+      for (const needle of ['function esc', 'function catOf', 'function groupRows', 'function rowLine', 'function groupCard', 'function gridHtml', 'function noticeHtml']) {
+        contains(JS, needle);
+      }
+    });
+
+    await test('the update banner names an outdated npm-managed opencode-ai, and stays silent otherwise', async () => {
+      const { noticeHtml } = await import('../src/lib/dashboard/groups.mjs');
+      const html = noticeHtml([
+        { pkg: 'ruflo', installed: '9.9.9', latest: '9.9.9', outdated: false },
+        { pkg: 'opencode-ai', installed: '1.2.3', latest: '1.3.0', outdated: true },
+      ]);
+      contains(html, 'opencode-ai');
+      contains(html, '1.2.3');
+      contains(html, '1.3.0');
+      contains(html, 'ak sync');
+      // current installs and absent drift render nothing (no fabricated banner)
+      assert(noticeHtml([{ pkg: 'opencode-ai', installed: '1.2.3', latest: '1.2.3', outdated: false }]) === '',
+        'a current opencode-ai must not fabricate update drift');
+      assert(noticeHtml(null) === '' && noticeHtml([]) === '', 'no drift payload → no banner');
+    });
+
     await test('GET /api/status embeds improvement.json read off the fixture', async () => {
       const r = await get(url + 'api/status', token);
       const j = JSON.parse(r.body);
@@ -1270,7 +1326,7 @@ async function main() {
   // is the suite where it matters most — the traversal-guard and credential-
   // leak tests live here and were the reviewer's cited example of a block
   // that could silently vanish with the old harness never noticing.
-  const EXPECTED = 58;
+  const EXPECTED = 61;
   if (passed + failed !== EXPECTED) {
     console.error(`\nPLAN MISMATCH: expected ${EXPECTED} tests, ran ${passed + failed}`);
     process.exit(1);

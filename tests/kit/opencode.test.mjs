@@ -595,3 +595,41 @@ test('mcpCommandFor: bin on PATH → nested mcp-server.js → ruflo mcp start (f
   assert.deepEqual(mcpCommandFor({ binPresent: false, nestedPath: path.join(d, 'absent.js') }), ['ruflo', 'mcp', 'start'], 'last resort matches the claude/codex registration');
   rm(d);
 });
+
+// codex-review r3: applyOpencode re-records the ownership markers on EVERY
+// run, including a converged one. If kit.json's markers went stale/missing
+// while the file stayed converged (hand-edit, legacy install), opencodeStack
+// must report markersChanged so the caller persists them — otherwise the next
+// teardown cannot prove ownership and strands ak-written keys.
+// codex-review r4: this file is NOT home-sandboxed — the stack runs against
+// EXPLICIT tmp destinations (the seams), never the production defaults.
+test('opencodeStack reports markersChanged when a converged file has stale/missing markers', async () => {
+  const { opencodeStack } = await import('../../src/lib/opencode.mjs');
+  const { fileURLToPath } = await import('node:url');
+  const d = tmp('ak-oc-markers-');
+  const srcRoot = makeCatalog(path.join(d, 'catalog'));
+  const pkgRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
+  // Every destination is inside the tmp dir — nothing escapes to the real home.
+  const seams = {
+    configFile: path.join(d, 'opencode.json'),
+    pluginsDir: path.join(d, 'plugins'),
+    agentsDir: path.join(d, 'agents'),
+    skillsDir: path.join(d, 'skills'),
+  };
+  const cfg = cfgOn();
+  cfg.providers.opencodeCatalogDir = srcRoot;
+  await opencodeStack(cfg, { pkgRoot, ...seams }); // initial wire (markers recorded)
+  assert.ok(fs.existsSync(seams.configFile), 'wiring landed in the tmp config, not the real one');
+  // Simulate staleness: the markers vanish from kit.json while the file stays.
+  cfg.providers.opencodeMcp = null;
+  cfg.providers.opencodeManaged = null;
+  const second = await opencodeStack(cfg, { pkgRoot, ...seams });
+  assert.equal(second.oc.changed, false, 'the file itself is already converged');
+  assert.equal(second.markersChanged, true, 'but the refreshed markers must be persisted by the caller');
+  assert.equal(cfg.providers.opencodeMcp, 'ak');
+  assert.ok(cfg.providers.opencodeManaged?.mcp?.['claude-flow']?.written);
+  // A third run with truthful markers is then fully quiet.
+  const third = await opencodeStack(cfg, { pkgRoot, ...seams });
+  assert.equal(third.markersChanged, false, 'no kit.json churn once the markers are truthful');
+  rm(d);
+});

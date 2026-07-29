@@ -25,7 +25,7 @@ const PROJECT = sandboxProject('ak-sync');
 const FLAGS = (over = {}) => ({ 'dry-run': false, 'no-upgrade': false, json: false, ...over });
 
 function seedHome(cfg = offlineKitConfig(), pkgs = {}) {
-  rmrf(paths.claudeDir(), paths.configDir());
+  rmrf(paths.claudeDir(), paths.configDir(), path.join(HOME, '.config', 'opencode'));
   fs.mkdirSync(paths.claudeDir(), { recursive: true });
   fs.writeFileSync(paths.claudeMdPath(), '# machine notes\n');
   writeKitConfig(HOME, cfg);
@@ -128,6 +128,186 @@ test('every documented flag is declared in the parser options', () => {
     assert.ok(flag in sync.options, `--${flag} is documented in help but not parseable`);
     assert.match(sync.help, new RegExp(`--${flag}\\b`), `--${flag} is parseable but undocumented`);
   }
+});
+
+// ── opencode convergence through a REAL sync ─────────────────────────────────
+// The maintainer's command-level scenarios: enabled+drifted converges after the
+// hosts step and before the final verification; enabled+absent never fabricates
+// the config home; disabled makes no opencode writes; --dry-run mutates no
+// opencode surface; a second sync is a no-op. A real sync.run is exercised here
+// (the suite otherwise stays at the plan layer) — hermetic because the global
+// root is faked (no upgrades planned), MCP/agentdb are opted out, and PATH has
+// no npm.
+
+const ocHome = () => path.join(HOME, '.config', 'opencode');
+
+/** Fake `opencode` + `claude` CLIs on PATH for the duration of `fn` (claude is
+ *  the primary host — its absence is a fail-level row that would mask the
+ *  opencode assertions). /usr/bin:/bin ride along for the `which` probe. */
+async function withOpencodeCli(fn) {
+  const bin = path.join(HOME, 'fake-bin-sync');
+  fs.mkdirSync(bin, { recursive: true });
+  for (const name of ['opencode', 'claude']) {
+    fs.writeFileSync(path.join(bin, name), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+  }
+  const prev = process.env.PATH;
+  process.env.PATH = [bin, '/usr/bin', '/bin'].join(path.delimiter);
+  try { return await fn(); } finally { process.env.PATH = prev; rmrf(bin); }
+}
+
+function seedCatalog() {
+  const root = path.join(HOME, 'catalog');
+  rmrf(root);
+  fs.mkdirSync(path.join(root, '.claude', 'agents'), { recursive: true });
+  fs.mkdirSync(path.join(root, '.claude', 'skills', 'a-skill'), { recursive: true });
+  fs.writeFileSync(path.join(root, 'package.json'), JSON.stringify({ name: 'fixture', version: '9.9.9' }));
+  fs.writeFileSync(path.join(root, '.claude', 'agents', 'coder.md'),
+    '---\nname: coder\ndescription: Implementation specialist\n---\n\nBody.\n');
+  fs.writeFileSync(path.join(root, 'SKILL.md'), '---\nname: ruflo\ndescription: platform\n---\n\n# Ruflo\n');
+  return root;
+}
+
+/** A fake global root where nothing is upgrade-planned and the aqe native
+ *  binding is fabricated (bsq3Root needs the package's package.json; the probe
+ *  itself is an existsSync on the built .node file). */
+function fakeSyncRoot() {
+  const root = path.join(HOME, `fake-sync-root-${Math.random().toString(36).slice(2, 8)}`, 'node_modules');
+  fs.mkdirSync(path.join(root, 'ruflo'), { recursive: true });
+  fs.writeFileSync(path.join(root, 'ruflo', 'package.json'), JSON.stringify({ name: 'ruflo', version: '9.9.9' }));
+  const bsq3RootDir = path.join(root, 'agentic-qe', 'node_modules', 'better-sqlite3');
+  fs.mkdirSync(path.join(bsq3RootDir, 'build', 'Release'), { recursive: true });
+  fs.writeFileSync(path.join(root, 'agentic-qe', 'package.json'), JSON.stringify({ name: 'agentic-qe', version: '9.9.9' }));
+  fs.writeFileSync(path.join(bsq3RootDir, 'package.json'), JSON.stringify({ name: 'better-sqlite3', version: '12.0.0' }));
+  fs.writeFileSync(path.join(bsq3RootDir, 'build', 'Release', 'better_sqlite3.node'), 'fake native binding\n');
+  return root;
+}
+
+/** kit.json with opencode enabled, noisy subsystems opted out, fresh version cache. */
+function syncCfg(catalog) {
+  return offlineKitConfig({
+    agentdb: false,
+    mcp: { register: false, excludeFamilies: [] },
+    providers: { hosts: { claude: true, codex: false, opencode: true }, opencodeCatalogDir: catalog },
+  });
+}
+
+async function realSync() {
+  const cwd = process.cwd();
+  process.chdir(PROJECT);
+  try {
+    return await captureLog(() => sync.run({ flags: FLAGS(), pkgRoot: PKG_ROOT }));
+  } finally { process.chdir(cwd); }
+}
+
+test('enabled + drifted: a real sync converges opencode after hosts, before final verification', async () => {
+  const catalog = seedCatalog();
+  seedHome(syncCfg(catalog), { ruflo: '9.9.9' });
+  paths._setGlobalRootForTest(fakeSyncRoot());
+  const { result, out } = await withOpencodeCli(() => realSync());
+  assert.equal(result, 0, out);
+  // wiring landed on disk
+  const doc = JSON.parse(fs.readFileSync(path.join(ocHome(), 'opencode.json'), 'utf8'));
+  assert.ok(doc.mcp['claude-flow'], 'claude-flow MCP converged by sync');
+  assert.ok(fs.existsSync(path.join(ocHome(), 'plugins', 'ruflo-hooks.js')), 'plugin deployed by sync');
+  assert.ok(fs.existsSync(path.join(ocHome(), 'agents', 'coder.md')), 'agents converted by sync');
+  // ordering: opencode steps ran before the convergence proof
+  const stepIdx = out.search(/opencode (plugin|agents):/);
+  const verdictIdx = out.search(/converged — no failing subsystems/);
+  assert.ok(stepIdx > -1 && verdictIdx > -1 && stepIdx < verdictIdx,
+    `opencode convergence must land before the final verification:\n${out}`);
+});
+
+test('a second sync is a no-op for every opencode surface', async () => {
+  const catalog = seedCatalog();
+  seedHome(syncCfg(catalog), { ruflo: '9.9.9' });
+  paths._setGlobalRootForTest(fakeSyncRoot());
+  await withOpencodeCli(() => realSync());
+  const convergedHome = snapshot(ocHome());
+  const { result, out } = await withOpencodeCli(() => realSync());
+  assert.equal(result, 0, out);
+  assertUnchanged(convergedHome, ocHome(), 'a converged sync must not rewrite any opencode file');
+  assert.ok(!/opencode (plugin|agents|skill):/.test(out),
+    'the opencode branch is not even entered once every row reports converged');
+});
+
+// codex-review r3: the blocks branch must run when the opencode branch ran,
+// because a fresh enable creates the config home that activates the
+// agents-opencode guidance target. The pre-fix scenario: claude guidance
+// ALREADY converged (no blocks drift in the plan) — guidance must still land
+// on the SAME sync that creates the config home.
+test('converged claude guidance + fresh opencode enable: opencode guidance lands on the SAME sync', async () => {
+  const catalog = seedCatalog();
+  // Step 1: converge everything except opencode (opencode disabled here).
+  seedHome(syncCfg(catalog), { ruflo: '9.9.9' });
+  const disabledCfg = syncCfg(catalog);
+  disabledCfg.providers.hosts = { claude: true, codex: false, opencode: false };
+  writeKitConfig(HOME, disabledCfg);
+  paths._setGlobalRootForTest(fakeSyncRoot());
+  await withOpencodeCli(() => realSync()); // CLAUDE.md blocks now converged
+  assert.ok(!fs.existsSync(ocHome()), 'opencode disabled: no config home yet');
+
+  // Step 2: enable opencode in kit.json (as `pick` would persist it), sync again.
+  const enabledCfg = syncCfg(catalog);
+  writeKitConfig(HOME, enabledCfg);
+  const { result, out } = await withOpencodeCli(() => realSync());
+  assert.equal(result, 0, out);
+  const agentsMd = path.join(ocHome(), 'AGENTS.md');
+  assert.ok(fs.existsSync(agentsMd),
+    'guidance must land on the SAME sync that creates the config home, not one sync late');
+  assert.match(fs.readFileSync(agentsMd, 'utf8'), /BEGIN ruflo-preamble/);
+
+  // Step 3: the follow-up sync is then a TRUE no-op on the whole opencode home.
+  const converged = snapshot(ocHome());
+  const third = await withOpencodeCli(() => realSync());
+  assert.equal(third.result, 0, third.out);
+  assertUnchanged(converged, ocHome(), 'once converged, sync rewrites nothing');
+});
+
+test('enabled + absent CLI: the install is attempted by hosts, the wiring is skipped, no config home appears', async () => {
+  const catalog = seedCatalog();
+  seedHome(syncCfg(catalog), { ruflo: '9.9.9' });
+  paths._setGlobalRootForTest(fakeSyncRoot());
+  // No fake bin — opencode is not on PATH, and npm is unresolvable (install fails honestly).
+  const { out } = await realSync();
+  assert.match(out, /opencode: enabled but CLI not installed — wiring skipped/);
+  assert.ok(!fs.existsSync(ocHome()), 'the config home is never fabricated for an absent host');
+});
+
+test('disabled + installed: no wiring writes, and enablement-gated guidance is stripped — user config untouched', async () => {
+  seedHome(offlineKitConfig({
+    agentdb: false,
+    mcp: { register: false, excludeFamilies: [] },
+    providers: { hosts: { claude: true, codex: false, opencode: false } },
+  }), { ruflo: '9.9.9' });
+  paths._setGlobalRootForTest(fakeSyncRoot());
+  // A pre-existing, user-owned opencode home that still carries an
+  // enablement-gated block from a previous enablement.
+  fs.mkdirSync(ocHome(), { recursive: true });
+  const userConfig = JSON.stringify({ model: 'opencode/kimi-k3' }, null, 2) + '\n';
+  fs.writeFileSync(path.join(ocHome(), 'opencode.json'), userConfig);
+  fs.writeFileSync(path.join(ocHome(), 'AGENTS.md'),
+    '# my notes\n\n<!-- BEGIN ruflo-opencode-reference -->\nstale gated guidance\n<!-- END ruflo-opencode-reference -->\n');
+  const { out } = await withOpencodeCli(() => realSync());
+  assert.ok(!/\[opencode\]/.test(out.split('sync plan')[1] ?? ''), 'no opencode work is planned when disabled');
+  assert.equal(fs.readFileSync(path.join(ocHome(), 'opencode.json'), 'utf8'), userConfig,
+    'user opencode.json is byte-identical — no wiring writes when disabled');
+  assert.ok(!fs.existsSync(path.join(ocHome(), 'plugins')), 'no plugin deployed when disabled');
+  assert.ok(!fs.existsSync(path.join(ocHome(), 'agents')), 'no agents deployed when disabled');
+  const md = fs.readFileSync(path.join(ocHome(), 'AGENTS.md'), 'utf8');
+  assert.ok(!md.includes('ruflo-opencode-reference'), 'enablement-gated guidance stripped');
+  assert.ok(md.includes('# my notes'), 'user guidance content preserved');
+});
+
+test('--dry-run reports the opencode repair without mutating any opencode surface', async () => {
+  const catalog = seedCatalog();
+  seedHome(syncCfg(catalog), { ruflo: '9.9.9' });
+  paths._setGlobalRootForTest(fakeSyncRoot());
+  const before = snapshot(HOME);
+  const { result, out } = await withOpencodeCli(() => dryRun());
+  assert.equal(result, 0);
+  assert.ok(/\[opencode\]/.test(out), 'opencode repair appears in the plan');
+  assert.ok(!fs.existsSync(ocHome()), 'no config written on a dry run');
+  assertUnchanged(before, HOME, 'sync --dry-run mutates nothing, opencode included');
 });
 
 test.after(() => rmrf(HOME, PROJECT));

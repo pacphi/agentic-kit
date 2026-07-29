@@ -16,6 +16,7 @@ import {
 const HOME = sandboxHome('ak-status');
 const paths = await import('../../src/lib/paths.mjs');
 const status = await import('../../src/commands/status.mjs');
+const { loadKitConfig } = await import('../../src/lib/config.mjs');
 assertSandboxed(paths, HOME);
 
 const PKG_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
@@ -244,6 +245,139 @@ test('a corrupt kit.json degrades to defaults instead of throwing', async () => 
   fs.writeFileSync(paths.kitConfigPath(), '{ this is not json');
   const rows = await collect();
   assert.ok(rows.length > 0, 'status still reports on an unreadable config');
+});
+
+// ── opencode subsystem rows ──────────────────────────────────────────────────
+// The third host's status surface: one row family covering config wiring, the
+// lifecycle plugin, converted agents, and the platform skill — OK when
+// converged, honest non-OK detail + a specific fix otherwise, silence when
+// disabled. Strictly read-only throughout (proven by the suite-wide snapshot
+// test above, which these scenarios also honor).
+
+const ocHome = () => path.join(HOME, '.config', 'opencode');
+const ocJsonPath = () => path.join(ocHome(), 'opencode.json');
+
+/** Fake `opencode` CLI on PATH for the duration of `fn` (+ /usr/bin for the
+ *  `which` probe itself; npm stays unresolvable so probes remain offline). */
+async function withOpencodeCli(fn) {
+  const bin = path.join(HOME, 'fake-bin-oc');
+  fs.mkdirSync(bin, { recursive: true });
+  fs.writeFileSync(path.join(bin, 'opencode'), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+  const prev = process.env.PATH;
+  process.env.PATH = [bin, '/usr/bin', '/bin'].join(path.delimiter);
+  try { return await fn(); } finally { process.env.PATH = prev; rmrf(bin); }
+}
+
+/** Seed an enabled, CONVERGED opencode state by running the real stack. */
+async function seedConvergedOpencode() {
+  const catalog = path.join(HOME, 'catalog');
+  rmrf(catalog);
+  fs.mkdirSync(path.join(catalog, '.claude', 'agents'), { recursive: true });
+  fs.mkdirSync(path.join(catalog, '.claude', 'skills', 'a-skill'), { recursive: true });
+  fs.writeFileSync(path.join(catalog, 'package.json'), JSON.stringify({ name: 'fixture', version: '9.9.9' }));
+  fs.writeFileSync(path.join(catalog, '.claude', 'agents', 'coder.md'),
+    '---\nname: coder\ndescription: Implementation specialist\n---\n\nBody.\n');
+  fs.writeFileSync(path.join(catalog, 'SKILL.md'), '---\nname: ruflo\ndescription: platform\n---\n\n# Ruflo\n');
+  const { opencodeStack } = await import('../../src/lib/opencode.mjs');
+  const cfg = loadKitConfig();
+  cfg.providers = {
+    ...(cfg.providers ?? {}),
+    hosts: { claude: true, codex: false, opencode: true },
+    opencodeCatalogDir: catalog,
+  };
+  await withOpencodeCli(() => opencodeStack(cfg, { pkgRoot: PKG_ROOT }));
+  writeKitConfig(HOME, cfg); // persist the ownership markers the stack recorded
+  return cfg;
+}
+
+test('enabled + converged: every opencode row is ok with no fix planned', async () => {
+  seedHome();
+  await seedConvergedOpencode();
+  const rows = await withOpencodeCli(() => collect());
+  const oc = rowsFor(rows, 'opencode');
+  assert.ok(oc.length >= 2, `expected opencode rows, got: ${rows.map((r) => r.subsystem)}`);
+  for (const r of oc) {
+    assert.equal(r.level, 'ok', `converged row must be ok: ${r.message}`);
+    assert.equal(r.fix, null, `converged row must never plan a fix: ${r.message}`);
+  }
+  assert.ok(oc.some((r) => /converged/.test(r.message)), 'the wiring row reports convergence');
+});
+
+test('enabled + drifted: a warn row names the sync fix', async () => {
+  seedHome();
+  await seedConvergedOpencode();
+  const doc = JSON.parse(fs.readFileSync(ocJsonPath(), 'utf8'));
+  delete doc.permission['claude-flow_*']; // user/edit drift
+  fs.writeFileSync(ocJsonPath(), JSON.stringify(doc, null, 2));
+  const rows = await withOpencodeCli(() => collect());
+  const oc = rowsFor(rows, 'opencode');
+  const drifted = oc.find((r) => r.level === 'warn');
+  assert.ok(drifted, `a drift row must surface: ${oc.map((r) => r.message)}`);
+  assert.match(drifted.fix, /sync re-applies the opencode wiring/);
+});
+
+test('enabled + JSONC config: refused honestly with a manual-merge fix, never a clobber', async () => {
+  seedHome();
+  await seedConvergedOpencode();
+  fs.writeFileSync(ocJsonPath(), '{\n  // legal JSONC comment\n  "mcp": {}\n}\n');
+  const rows = await withOpencodeCli(() => collect());
+  const oc = rowsFor(rows, 'opencode').find((r) => r.level === 'warn');
+  assert.ok(oc, 'a JSONC-refused row must surface');
+  assert.match(oc.message, /not plain JSON/);
+  assert.match(oc.fix, /merge the ak wiring manually/);
+  // …and status left the file alone (read-only even here).
+  assert.match(fs.readFileSync(ocJsonPath(), 'utf8'), /legal JSONC comment/);
+});
+
+test('a user-owned plugin occupying the slot is an info row, not a nag to overwrite', async () => {
+  seedHome();
+  await seedConvergedOpencode();
+  fs.writeFileSync(path.join(ocHome(), 'plugins', 'ruflo-hooks.js'), '// my own plugin — no ak marker\n');
+  const rows = await withOpencodeCli(() => collect());
+  const oc = rowsFor(rows, 'opencode').find((r) => /user-owned ruflo-hooks\.js/.test(r.message));
+  assert.ok(oc, `foreign-plugin row missing: ${rowsFor(rows, 'opencode').map((r) => r.message)}`);
+  assert.equal(oc.level, 'info');
+  assert.equal(oc.fix, null, 'ak must not plan to overwrite a user-owned file');
+});
+
+test('enabled + CLI absent: the hosts story, and no config-home probing beyond it', async () => {
+  seedHome();
+  await seedConvergedOpencode();
+  // No fake bin here — the sandbox PATH has no opencode.
+  const rows = await collect();
+  const oc = rowsFor(rows, 'opencode').find((r) => r.level === 'warn');
+  assert.ok(oc, 'enabled-but-absent must surface');
+  assert.match(oc.message, /enabled but opencode CLI not installed/);
+  assert.match(oc.fix, /sync installs opencode-ai/);
+});
+
+test('disabled + installed: complete opencode-row silence + the pick hint on providers', async () => {
+  seedHome();
+  const rows = await withOpencodeCli(() => collect());
+  assert.equal(rowsFor(rows, 'opencode').length, 0,
+    'a disabled host claims no active wiring — no opencode rows at all');
+  const hint = rowsFor(rows, 'providers').find((r) => /opencode CLI installed but not enabled/.test(r.message));
+  assert.ok(hint, 'the providers row carries the adoption hint');
+  assert.match(hint.message, /ak x provider pick --host claude,opencode/);
+  assert.equal(hint.fix, null, 'advisory only — sync never opts a host in');
+});
+
+test('--json carries the opencode rows with the same shape the dashboard consumes', async () => {
+  seedHome();
+  await seedConvergedOpencode();
+  const cwd = process.cwd();
+  process.chdir(PROJECT);
+  try {
+    const r = await withOpencodeCli(() => captureLog(() => status.run({ flags: { json: true }, pkgRoot: PKG_ROOT })));
+    const parsed = JSON.parse(r.out);
+    const oc = (parsed.rows ?? []).filter((x) => x.subsystem === 'opencode');
+    assert.ok(oc.length >= 1, 'opencode rows present in --json');
+    for (const x of oc) {
+      assert.equal(typeof x.level, 'string');
+      assert.equal(typeof x.message, 'string');
+      assert.ok(x.fix === null || typeof x.fix === 'string');
+    }
+  } finally { process.chdir(cwd); }
 });
 
 test.after(() => rmrf(HOME, PROJECT));

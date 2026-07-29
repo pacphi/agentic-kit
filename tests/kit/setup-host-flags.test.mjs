@@ -46,3 +46,27 @@ test('--codex is idempotent — a second application reports no change', () => {
   const r = applySetupHostFlags(cfg, { codex: true });
   assert.equal(r.changed, false);
 });
+
+test('--opencode opts the opencode host in without touching claude/codex or primary', () => {
+  const cfg = freshCfg();
+  const r = applySetupHostFlags(cfg, { opencode: true });
+  assert.equal(cfg.providers.hosts.opencode, true);
+  assert.equal(cfg.providers.hosts.claude, true, 'claude is not replaced');
+  assert.equal(cfg.providers.hosts.codex, false, 'codex is not pulled in');
+  assert.equal(cfg.providers.primaryHost, undefined, 'no primary is implied by an integration host');
+  assert.equal(r.changed, true);
+});
+
+test('--opencode is idempotent — a second application reports no change', () => {
+  const cfg = { providers: { hosts: { claude: true, codex: false, opencode: true } } };
+  const r = applySetupHostFlags(cfg, { opencode: true });
+  assert.equal(r.changed, false);
+});
+
+test('--primary-host opencode is ignored with a warning (integration hosts never lead)', () => {
+  const cfg = freshCfg();
+  const r = applySetupHostFlags(cfg, { opencode: true, 'primary-host': 'opencode' });
+  assert.equal(cfg.providers.hosts.opencode, true, 'the enablement itself still lands');
+  assert.notEqual(cfg.providers.primaryHost, 'opencode');
+  assert.equal(r.warnings.length, 1);
+});

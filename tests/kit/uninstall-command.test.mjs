@@ -199,4 +199,108 @@ test('a missing ~/.claude/CLAUDE.md is not an error', async () => {
   assert.equal(result, 0, 'uninstalling from a machine that was never set up still succeeds');
 });
 
+// ── opencode teardown ────────────────────────────────────────────────────────
+// The third host's footprint: opencode.json wiring (value-precise — user priors
+// restored), ak-marked artifacts (plugin/agents/skill), and the AGENTS.md
+// guidance blocks. User-edited and marker-less files always survive; repeated
+// runs are harmless; --dry-run writes nothing; --purge still honors ownership
+// because the markers are read BEFORE kit.json is removed.
+
+const ocHome = () => path.join(HOME, '.config', 'opencode');
+
+/** Seed an ak-managed opencode state (wiring + artifacts + markers), plus a
+ *  user-owned agent and user config keys that must survive every teardown. */
+function seedManagedOpencode() {
+  const cfgDir = ocHome();
+  fs.mkdirSync(path.join(cfgDir, 'agents'), { recursive: true });
+  fs.mkdirSync(path.join(cfgDir, 'plugins'), { recursive: true });
+  fs.mkdirSync(path.join(cfgDir, 'skills', 'ruflo'), { recursive: true });
+  fs.writeFileSync(path.join(cfgDir, 'opencode.json'), JSON.stringify({
+    model: 'opencode/kimi-k3',
+    mcp: {
+      'my-server': { type: 'local', command: ['x'] },
+      'claude-flow': { type: 'local', command: ['ruflo', 'mcp', 'start'], enabled: true },
+    },
+    permission: { 'claude-flow_*': 'allow', edit: 'ask' },
+  }, null, 2));
+  fs.writeFileSync(path.join(cfgDir, 'plugins', 'ruflo-hooks.js'),
+    '// from src/templates/opencode-ruflo-hooks.js — ak-managed\n');
+  fs.writeFileSync(path.join(cfgDir, 'agents', 'coder.md'),
+    '---\ndescription: x\n---\n\n<!-- generated-by: agentic-kit — re-synced by `ak sync`; do not edit -->\nbody\n');
+  fs.writeFileSync(path.join(cfgDir, 'agents', '.ak-agents-stamp.json'), '{"source":"x"}\n');
+  fs.writeFileSync(path.join(cfgDir, 'agents', 'my-agent.md'), '---\ndescription: mine\n---\n\nUser agent.\n');
+  fs.writeFileSync(path.join(cfgDir, 'skills', 'ruflo', 'SKILL.md'),
+    '# Ruflo\n\n<!-- deployed by agentic-kit --> from fixture@9.9.9\n');
+  fs.writeFileSync(path.join(cfgDir, 'AGENTS.md'),
+    '# my notes\n\n<!-- BEGIN ruflo-opencode-reference -->\nguidance\n<!-- END ruflo-opencode-reference -->\n');
+  writeKitConfig(HOME, {
+    aqe: true,
+    providers: {
+      hosts: { claude: true, codex: false, opencode: true },
+      opencodeMcp: 'ak',
+      opencodeManaged: {
+        mcp: { 'claude-flow': { prior: null, written: { type: 'local', command: ['ruflo', 'mcp', 'start'], enabled: true } } },
+        paths: [],
+        permissions: { 'claude-flow_*': { prior: null, written: 'allow' } },
+        permissionScalar: null,
+      },
+    },
+  });
+}
+
+test('default uninstall strips ak opencode wiring + artifacts and restores user config', async () => {
+  seedHome();
+  seedManagedOpencode();
+  const { result } = await captureLog(() => uninstall.run({ flags: { yes: true } }));
+  assert.equal(result, 0);
+  const doc = JSON.parse(fs.readFileSync(path.join(ocHome(), 'opencode.json'), 'utf8'));
+  assert.ok(!doc.mcp?.['claude-flow'], 'ak MCP entry stripped');
+  assert.deepEqual(doc.mcp?.['my-server'], { type: 'local', command: ['x'] }, 'user MCP server survives');
+  assert.equal(doc.model, 'opencode/kimi-k3', 'user model key survives');
+  assert.equal(doc.permission?.edit, 'ask', 'user permission survives');
+  assert.ok(!doc.permission?.['claude-flow_*'], 'ak permission pattern stripped');
+  assert.ok(!fs.existsSync(path.join(ocHome(), 'plugins', 'ruflo-hooks.js')), 'ak plugin removed');
+  assert.ok(!fs.existsSync(path.join(ocHome(), 'agents', 'coder.md')), 'ak agent removed');
+  assert.ok(!fs.existsSync(path.join(ocHome(), 'agents', '.ak-agents-stamp.json')), 'agent stamp removed');
+  assert.ok(fs.existsSync(path.join(ocHome(), 'agents', 'my-agent.md')), 'user-owned agent survives');
+  assert.ok(!fs.existsSync(path.join(ocHome(), 'skills', 'ruflo', 'SKILL.md')), 'ak skill removed');
+  const md = fs.readFileSync(path.join(ocHome(), 'AGENTS.md'), 'utf8');
+  assert.ok(!md.includes('ruflo-opencode-reference'), 'guidance block stripped');
+  assert.ok(md.includes('# my notes'), 'user guidance survives');
+  const cfg = JSON.parse(fs.readFileSync(paths.kitConfigPath(), 'utf8'));
+  assert.equal(cfg.providers.opencodeMcp, null, 'ownership markers nulled (kit.json kept without --purge)');
+});
+
+test('repeated uninstall is harmless for the opencode footprint', async () => {
+  seedHome();
+  seedManagedOpencode();
+  await captureLog(() => uninstall.run({ flags: { yes: true } }));
+  const after = snapshot(ocHome());
+  const { result } = await captureLog(() => uninstall.run({ flags: { yes: true } }));
+  assert.equal(result, 0, 'second uninstall succeeds with nothing left to strip');
+  assertUnchanged(after, ocHome(), 'second uninstall changes nothing');
+});
+
+test('uninstall --dry-run writes and removes nothing on the opencode surfaces', async () => {
+  seedHome();
+  seedManagedOpencode();
+  const before = snapshot(HOME);
+  const { result, out } = await captureLog(() => uninstall.run({ flags: { 'dry-run': true, yes: true } }));
+  assert.equal(result, 0);
+  assert.match(out, /\[dry-run\] stripped ak-managed opencode wiring/, 'dry-run reports the opencode teardown');
+  assertUnchanged(before, HOME, 'dry-run must not touch the filesystem');
+});
+
+test('uninstall --purge removes kit.json AFTER reading ownership — opencode wiring is still stripped', async () => {
+  seedHome();
+  seedManagedOpencode();
+  const { result } = await captureLog(() => uninstall.run({ flags: { yes: true, purge: true } }));
+  assert.equal(result, 0);
+  assert.ok(!fs.existsSync(paths.kitConfigPath()), 'kit.json purged');
+  const doc = JSON.parse(fs.readFileSync(path.join(ocHome(), 'opencode.json'), 'utf8'));
+  assert.ok(!doc.mcp?.['claude-flow'], 'wiring stripped even under purge (ownership read first)');
+  assert.ok(!fs.existsSync(path.join(ocHome(), 'plugins', 'ruflo-hooks.js')), 'artifacts removed under purge');
+  assert.ok(!fs.existsSync(paths.kitConfigPath()), 'purge must not recreate kit.json');
+});
+
 test.after(() => rmrf(HOME));
