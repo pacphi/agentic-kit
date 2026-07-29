@@ -10,8 +10,10 @@ import {
   HOSTS, installHost, applyAqeRouter, undoAqeRouter, aqeRouterFile,
   CODEX_ADAPTER_PKG, codexAdapterAction, ensureCodexAdapter, AQE_PROVIDER_TYPES,
   bothHostsEnabled, suggestedFallbackFor, AQE_FALLBACK_CODEX_SUGGESTION,
-  PROVIDER_TOKEN_RE,
+  PROVIDER_TOKEN_RE, seedDualRoutingIfDualHost,
 } from '../../src/lib/providers.mjs';
+import * as paths from '../../src/lib/paths.mjs';
+import { managedHostIds, routableHostIds } from '../../src/lib/adapters/index.mjs';
 
 // security review Finding 2 / code-quality Finding 2: applyProviders() feeds
 // m.id/m.model into a ruflo subprocess argv. exec.mjs's shell:false fix is
@@ -217,6 +219,12 @@ test('every host descriptor carries an npm package name for install/update', () 
   for (const h of HOSTS) assert.equal(typeof h.pkg, 'string', `${h.id} has pkg`);
 });
 
+test('managed and routable host sets come only from registry capabilities', () => {
+  assert.deepEqual(managedHostIds(), ['claude', 'codex', 'opencode']);
+  assert.deepEqual(routableHostIds(), ['claude', 'codex']);
+  assert.deepEqual(HOSTS.map((h) => h.id), managedHostIds());
+});
+
 test('installHost rejects an unknown host id without shelling out', async () => {
   const r = await installHost('bogus');
   assert.equal(r.ok, false);
@@ -312,6 +320,36 @@ test('suggestedFallbackFor returns the codex-paired suggestion when codex is ena
 test('suggestedFallbackFor returns null when codex is not among the enabled hosts', () => {
   assert.equal(suggestedFallbackFor(['claude']), null);
   assert.equal(suggestedFallbackFor([]), null);
+});
+
+// ADR-0017 two-tier model: all three hosts coexist in one enabled set, but the
+// seeded per-activity policy only ever names the ROUTING pair. opencode is
+// additive — never a substitute for either routing host, never a route target.
+test('dual routing seeds claude/codex routes ONLY, even with opencode co-enabled', () => {
+  const realRoot = paths.globalRoot();
+  const fakeRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'kit-seed-root-'));
+  // aqe ≥ 3.13.1 is the seed gate — fabricate just enough of the install.
+  fs.mkdirSync(path.join(fakeRoot, 'agentic-qe'), { recursive: true });
+  fs.writeFileSync(path.join(fakeRoot, 'agentic-qe', 'package.json'), JSON.stringify({ name: 'agentic-qe', version: '3.13.1' }));
+  paths._setGlobalRootForTest(fakeRoot);
+  try {
+    const cfg = { providers: { hosts: { claude: true, codex: true, opencode: true }, primaryHost: 'claude', dualRouting: {} } };
+    const seed = seedDualRoutingIfDualHost(cfg);
+    assert.equal(seed.seeded, true, 'dual-host seed runs with opencode alongside');
+    const policy = cfg.providers.dualRouting;
+    assert.ok(Object.keys(policy).length > 0);
+    assert.ok(!JSON.stringify(policy).includes('opencode'),
+      'opencode never appears in the routing policy (not a route target, not a model host)');
+    for (const [activity, route] of Object.entries(policy)) {
+      assert.ok(['claude', 'codex'].includes(route.host),
+        `${activity} routes to a routing host, got ${route.host}`);
+    }
+    // …and the enablement flags themselves are untouched by seeding.
+    assert.equal(cfg.providers.hosts.opencode, true, 'opencode stays co-enabled — additive, not a substitute');
+  } finally {
+    paths._setGlobalRootForTest(realRoot);
+    fs.rmSync(fakeRoot, { recursive: true, force: true });
+  }
 });
 
 test('settingsTarget from a repo SUBDIR anchors project scope at the ROOT', async () => {

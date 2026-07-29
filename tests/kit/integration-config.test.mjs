@@ -76,6 +76,34 @@ test('legacy host routes never manufacture observed provider provenance', () => 
   assert.notEqual(route.provenance, 'observed');
 });
 
+test('legacy OpenCode ownership markers migrate additively without inferring a provider', () => {
+  const legacy = {
+    providers: {
+      hosts: { claude: true, codex: false, opencode: true },
+      opencodeMcp: 'ak',
+      opencodeManaged: { mcp: { 'claude-flow': { prior: null, written: { type: 'local' } } } },
+      opencodeCatalogDir: '/catalog',
+    },
+  };
+  const migrated = migrateIntegrationConfig(legacy);
+  assert.equal(migrated.integrations.ownership.opencode.source, 'legacy-providers');
+  assert.deepEqual(migrated.integrations.ownership.opencode.managed, legacy.providers.opencodeManaged);
+  assert.equal(migrated.providers.opencodeMcp, 'ak', 'migration is additive; legacy receipt remains');
+  const binding = migrated.integrations.bindings.find(({ host }) => host === 'opencode');
+  assert.equal(binding.provider, null);
+  assert.equal(binding.provenance, 'unknown');
+});
+
+test('legacy OpenCode ownership merges beside an existing ownership receipt', () => {
+  const legacy = {
+    providers: { opencodeMcp: 'ak', opencodeManaged: { mcp: {} } },
+    integrations: { ownership: { codex: { source: 'existing' } } },
+  };
+  const migrated = migrateIntegrationConfig(legacy);
+  assert.deepEqual(migrated.integrations.ownership.codex, { source: 'existing' });
+  assert.equal(migrated.integrations.ownership.opencode.source, 'legacy-providers');
+});
+
 test('migration never persists API keys found in process environment', () => {
   const migrated = migrateIntegrationConfig(structuredClone(legacyDual), {
     env: {

@@ -1,11 +1,14 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { HOST_IDS, adapterFor, statuslineSupported, drivingHost } from '../../src/lib/hosts.mjs';
 import { hostAuthState } from '../../src/lib/providers.mjs';
 
 // ── HOST_ADAPTERS descriptors ────────────────────────────────────────────────
-test('HOST_ADAPTERS defines both frontier hosts', () => {
-  assert.deepEqual(HOST_IDS, ['claude', 'codex']);
+test('HOST_ADAPTERS defines the three hosts', () => {
+  assert.deepEqual(HOST_IDS, ['claude', 'codex', 'opencode']);
 });
 
 test('claude adapter targets CLAUDE.md/json and supports a statusline', () => {
@@ -23,6 +26,15 @@ test('codex adapter targets AGENTS.md/toml and has NO command-backed statusline'
   assert.equal(a.statuslineSupported, false);
   assert.deepEqual(a.statusline, { mode: 'builtin', scope: 'user', customCommand: false, multiline: false });
   assert.equal(a.aqeProvider, 'codex');
+});
+
+test('opencode adapter targets its own AGENTS.md/json, no statusline, no aqe provider, no session env markers', () => {
+  const a = adapterFor('opencode');
+  assert.equal(a.guidanceFile, 'agents-opencode');
+  assert.equal(a.configFormat, 'json');
+  assert.equal(a.statuslineSupported, false);
+  assert.equal(a.aqeProvider, null);
+  assert.deepEqual(a.envMarkers, []);
 });
 
 test('adapterFor returns null for an unknown host', () => {
@@ -55,6 +67,10 @@ test('drivingHost falls back to the configured primary host', () => {
   assert.equal(drivingHost({}, { providers: { primaryHost: 'codex' } }), 'codex');
 });
 
+test('drivingHost rejects a non-primary-capable host from hand-edited config', () => {
+  assert.equal(drivingHost({}, { providers: { primaryHost: 'opencode' } }), 'claude');
+});
+
 test('drivingHost defaults to claude with no signal', () => {
   assert.equal(drivingHost({}), 'claude');
 });
@@ -80,7 +96,10 @@ test('hostAuthState infers oauth/subscription for a present claude with no key',
 });
 
 test('hostAuthState reports none for an absent claude with no key', () => {
-  const a = hostAuthState('claude', { env: {}, present: false });
+  // home must point at an EMPTY dir: on a real machine with file-based claude
+  // credentials (~/.claude/.credentials.json present, e.g. Linux installs), the
+  // login-file probe legitimately wins and this test flaked 'oauth'.
+  const a = hostAuthState('claude', { env: {}, present: false, home: fs.mkdtempSync(path.join(os.tmpdir(), 'ak-nohome-')) });
   assert.equal(a.mode, 'none');
 });
 

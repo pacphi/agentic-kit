@@ -46,6 +46,21 @@ test('dry-run detects and plans but never calls apply', async () => {
   assertNoWrites(surface, { enabled: false }, 'dry-run must not write');
 });
 
+test('dry-run detects and plans but never calls undo', async () => {
+  const surface = fakeSurface({ enabled: true });
+  const adapter = fakeLifecycleAdapter(surface);
+  let undoCalls = 0;
+  const realUndo = adapter.undo;
+  adapter.undo = (context) => {
+    undoCalls++;
+    return realUndo(context);
+  };
+  const result = await runLifecycle({ adapter, action: 'undo', dryRun: true });
+  assert.equal(result.dryRun, true);
+  assert.equal(undoCalls, 0);
+  assertNoWrites(surface, { enabled: true }, 'dry-run undo must not write');
+});
+
 test('apply is idempotent after the desired state is reached', async () => {
   const surface = fakeSurface({ enabled: false, user: 'keep' });
   const adapter = fakeLifecycleAdapter(surface);

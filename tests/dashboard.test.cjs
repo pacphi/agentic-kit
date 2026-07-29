@@ -113,6 +113,7 @@ async function main() {
       { subsystem: 'versions', level: 'ok', message: 'ruflo 4.0.0 (latest)', fix: null },
       { subsystem: 'natives', level: 'fail', message: 'WASM fallback', fix: 'sync installs native better-sqlite3' },
       { subsystem: 'learning', level: 'warn', message: 'no patterns yet', fix: null },
+      { subsystem: 'opencode', level: 'warn', message: 'lifecycle plugin out of date', fix: 'sync rewrites it' },
     ],
     drift: [{ pkg: 'ruflo', installed: '4.0.0', latest: '4.0.0', outdated: false }],
   };
@@ -196,7 +197,79 @@ async function main() {
       const j = JSON.parse(r.body);
       assert(Array.isArray(j.rows), 'rows must be an array');
       assert(j.overall === 'warn', 'overall must pass through, got ' + j.overall);
-      assert(j.rows.length === 3, 'expected 3 rows, got ' + j.rows.length);
+      assert(j.rows.length === 4, 'expected 4 rows, got ' + j.rows.length);
+    });
+
+    await test('GET /api/status passes opencode subsystem rows through untouched', async () => {
+      const r = await get(url + 'api/status', token);
+      const j = JSON.parse(r.body);
+      const oc = (j.rows || []).filter((x) => x.subsystem === 'opencode');
+      assert(oc.length === 1, 'expected the opencode row to pass through, got ' + oc.length);
+      assert(oc[0].level === 'warn' && oc[0].fix === 'sync rewrites it',
+        'opencode row level/fix must survive the payload verbatim');
+    });
+
+    await test('GET / categorizes the opencode subsystem into the Hosts tab (not the runtime fallback)', async () => {
+      const r = await get(url);
+      contains(r.body, 'opencode:"hosts"');
+      // and it must sort with the host MCP subsystems, not at the unknown end
+      contains(r.body, '"codex-mcp","opencode"');
+    });
+
+    // ── RENDERED behavior, not served-source literals ────────────────────────
+    // The grouping/card/notice logic is ./groups.mjs (pure) — the SAME function
+    // sources the served bundle interpolates. These exercise the real render
+    // path renderPanels/renderNotice use, without a browser.
+
+    await test('an opencode status row renders under Hosts, ordered, with its level/message/fix verbatim', async () => {
+      const { catOf, groupRows, gridHtml } = await import('../src/lib/dashboard/groups.mjs');
+      const rows = [
+        { subsystem: 'natives', level: 'fail', message: 'WASM fallback', fix: 'sync installs native better-sqlite3' },
+        { subsystem: 'opencode', level: 'warn', message: 'opencode.json wiring drifted (permission claude-flow_* not allowed)', fix: 'sync re-applies the opencode wiring' },
+        { subsystem: 'codex-mcp', level: 'ok', message: 'codex MCP registered (mcp__codex__codex)', fix: null },
+        { subsystem: 'hosts', level: 'ok', message: 'opencode 1.2.3 (npm)', fix: null },
+      ];
+      // grouped under Hosts & Routing
+      assert(catOf('opencode') === 'hosts', 'opencode must group under Hosts & Routing');
+      const groups = groupRows(rows);
+      // ordered: fail first (natives), then warn (opencode), then oks by PREF (hosts < codex-mcp)
+      assert(JSON.stringify(groups.map((g) => g.subsystem)) === JSON.stringify(['natives', 'opencode', 'hosts', 'codex-mcp']),
+        'worst-first, then the preferred display order, got ' + groups.map((g) => g.subsystem));
+      // rendered: bucketed exactly as renderPanels does, with the original content intact
+      const hostsGroups = groups.filter((g) => catOf(g.subsystem) === 'hosts');
+      assert(hostsGroups.some((g) => g.subsystem === 'opencode' && g.level === 'warn'),
+        'the opencode group lands in the Hosts bucket with its worst level');
+      const html = gridHtml(hostsGroups);
+      contains(html, 'data-level="warn"');
+      contains(html, 'opencode.json wiring drifted (permission claude-flow_* not allowed)');
+      contains(html, 'sync re-applies the opencode wiring');
+      contains(html, '<span class="card-name">opencode</span>');
+    });
+
+    await test('the served bundle parses and carries every interpolated groups.mjs function', async () => {
+      // The bundle is built by interpolating groups.mjs's function sources —
+      // a broken interpolation would serve a page that fails to parse at all.
+      const { JS } = await import('../src/lib/dashboard/client.mjs');
+      new Function(JS); // parse-only (no execution)
+      for (const needle of ['function esc', 'function catOf', 'function groupRows', 'function rowLine', 'function groupCard', 'function gridHtml', 'function noticeHtml']) {
+        contains(JS, needle);
+      }
+    });
+
+    await test('the update banner names an outdated npm-managed opencode-ai, and stays silent otherwise', async () => {
+      const { noticeHtml } = await import('../src/lib/dashboard/groups.mjs');
+      const html = noticeHtml([
+        { pkg: 'ruflo', installed: '9.9.9', latest: '9.9.9', outdated: false },
+        { pkg: 'opencode-ai', installed: '1.2.3', latest: '1.3.0', outdated: true },
+      ]);
+      contains(html, 'opencode-ai');
+      contains(html, '1.2.3');
+      contains(html, '1.3.0');
+      contains(html, 'ak sync');
+      // current installs and absent drift render nothing (no fabricated banner)
+      assert(noticeHtml([{ pkg: 'opencode-ai', installed: '1.2.3', latest: '1.2.3', outdated: false }]) === '',
+        'a current opencode-ai must not fabricate update drift');
+      assert(noticeHtml(null) === '' && noticeHtml([]) === '', 'no drift payload → no banner');
     });
 
     await test('GET /api/status embeds improvement.json read off the fixture', async () => {
@@ -1253,7 +1326,7 @@ async function main() {
   // is the suite where it matters most — the traversal-guard and credential-
   // leak tests live here and were the reviewer's cited example of a block
   // that could silently vanish with the old harness never noticing.
-  const EXPECTED = 58;
+  const EXPECTED = 63;
   if (passed + failed !== EXPECTED) {
     console.error(`\nPLAN MISMATCH: expected ${EXPECTED} tests, ran ${passed + failed}`);
     process.exit(1);

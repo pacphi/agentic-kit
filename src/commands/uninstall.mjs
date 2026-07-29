@@ -9,6 +9,7 @@ import readline from 'node:readline/promises';
 import { run as runCmd } from '../lib/exec.mjs';
 import { stripBlock, BEGIN, BUILTIN_BLOCKS } from '../lib/blocks.mjs';
 import { unregister } from '../lib/mcp.mjs';
+import { retireOpencode } from '../lib/opencode.mjs';
 import { loadKitConfig, saveKitConfig } from '../lib/config.mjs';
 import { present as rbPresent } from '../lib/ruvnet-brain.mjs';
 import * as paths from '../lib/paths.mjs';
@@ -58,8 +59,12 @@ const confirm = async (q, yes) => {
 export async function run({ flags }) {
   const dry = flags['dry-run'];
   const act = (msg, fn) => { if (dry) info(`[dry-run] ${msg}`); else { fn(); ok(msg); } };
-
-  const kitCfg = loadKitConfig();
+  // Ownership markers are read ONCE up front: the purge path removes kit.json
+  // below, and teardown decisions (opencode undo) must still see what ak owned
+  // (codex-review — purge ordering must not strand managed opencode.json keys).
+  const cfg = loadKitConfig();
+  const kitCfg = cfg;
+  let ownershipTeardownOk = true;
 
   // 0. User-scoped Codex line: only values recorded as ours are candidates.
   if (kitCfg.statusline?.codex) {
@@ -97,11 +102,47 @@ export async function run({ flags }) {
     }
   }
 
-  // 2. deployed skill + kit config
+  // 2. deployed skill. kit.json is purged only after all receipt-dependent
+  // teardown succeeds; otherwise it remains the recovery proof.
   const skill = path.join(paths.claudeSkillsDir(), 'ruflo-token-audit');
   if (fs.existsSync(skill)) act('removed skill ruflo-token-audit', () => fs.rmSync(skill, { recursive: true }));
+
+  // 2b. opencode host footprint (when ak managed it): strip the guidance blocks
+  // from opencode's AGENTS.md, the opencode.json wiring, and deployed artifacts.
+  const ocMd = paths.opencodeAgentsMdPath();
+  if (fs.existsSync(ocMd)) {
+    let content = fs.readFileSync(ocMd, 'utf8');
+    const slugs = new Set([...content.matchAll(/<!-- BEGIN (ruflo-[\w-]+|ruvnet-[\w-]+) -->/g)].map((m) => m[1]));
+    if (slugs.size) {
+      act(`stripped ${slugs.size} managed block(s) from opencode AGENTS.md (backup written)`, () => {
+        fs.copyFileSync(ocMd, `${ocMd}.bak.${Date.now()}`);
+        for (const s of slugs) content = stripBlock(content, s);
+        fs.writeFileSync(ocMd, content);
+      });
+    }
+  }
+  {
+    // cfg comes from the top of run() (read before any purge of kit.json).
+    // --purge removes kit.json above; persisting cfg here would recreate it.
+    if (cfg.providers?.opencodeMcp === 'ak') {
+      if (dry) info('[dry-run] stripped ak-managed opencode wiring + artifacts (opencode.json, plugin, agents, skill)');
+      else {
+        const ret = retireOpencode(cfg);
+        ownershipTeardownOk = ret.ok;
+        if (!flags.purge) saveKitConfig(cfg);
+        (ret.ok ? ok : warn)(ret.ok
+          ? 'stripped ak-managed opencode wiring + artifacts (opencode.json, plugin, agents, skill)'
+          : `opencode teardown incomplete — ${ret.undo.detail}`);
+      }
+    } else if (fs.existsSync(paths.opencodeDir())) {
+      // Not ak-managed (or never enabled): artifacts are still marker-gated, so
+      // only ak-deployed files leave — user-owned agents/skills/plugins stay.
+      act('removed ak-deployed opencode artifacts (plugin/agents/skill)', () => { retireOpencode(cfg); });
+    }
+  }
   if (flags.purge && fs.existsSync(paths.kitConfigPath())) {
-    act('removed kit.json', () => fs.rmSync(paths.kitConfigPath()));
+    if (ownershipTeardownOk) act('removed kit.json', () => fs.rmSync(paths.kitConfigPath()));
+    else warn('kit.json retained because OpenCode teardown is incomplete; it contains the recovery ownership receipt');
   }
 
   // 3. MCP registration + deny rules
@@ -167,5 +208,5 @@ export async function run({ flags }) {
   }
 
   ok('uninstall complete — project data (.swarm/.claude-flow/.agentic-qe) untouched');
-  return 0;
+  return ownershipTeardownOk ? 0 : 1;
 }

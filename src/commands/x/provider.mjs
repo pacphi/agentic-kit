@@ -16,6 +16,10 @@ import {
 } from '../../lib/providers.mjs';
 import { parseRouteSpecs, formatModelHelp, PRIMARY_HOSTS, DEFAULT_PRIMARY_HOST, divergedRoutes, refreshSeededRoutes, modelNote, ACTIVITIES } from '../../lib/routing.mjs';
 import { loadKitConfig, saveKitConfig } from '../../lib/config.mjs';
+import { OPENCODE_LIFECYCLE_ADAPTER, reconcileOpencodeGuidance } from '../../lib/opencode.mjs';
+import { runLifecycle } from '../../lib/adapters/lifecycle.mjs';
+import { routableHostIds } from '../../lib/adapters/index.mjs';
+import { have } from '../../lib/exec.mjs';
 import { ok, warn, fail, info, dim, bold, yellow } from '../../lib/output.mjs';
 import { repoRoot } from '../../lib/paths.mjs';
 import { writeJsonWithBackup } from '../../lib/settings.mjs';
@@ -50,9 +54,18 @@ export const AQE_BILLING_HINT = 'billing: claude-code = your Claude subscription
 
 export const help = `ak host — frontier-host + LLM-provider detection and wiring
 
-Two independent axes: which host CLI runs the ruflo loop (claude/codex, can be
-both), and which LLM the routers use (aqe + ruflo). Mirrors \`ak x mcp\`: detect →
-persist to kit.json → idempotent heal. \`ak sync\` reapplies your choice.
+Two independent axes: which host CLIs run the ruflo loop, and which LLM the
+routers use (aqe + ruflo). Mirrors \`ak x mcp\`: detect → persist to kit.json →
+idempotent heal. \`ak sync\` reapplies your choice.
+
+Host model — three managed host integrations, two routing hosts:
+  claude, codex   routing hosts: env-wired, one is primary, dual-host seeds the
+                  per-activity routing policy (they drive QE work)
+  opencode        managed integration host: config-file wiring (opencode.json
+                  MCP + skills + permissions), lifecycle plugin, converted ruflo
+                  agents, platform skill — never a routing target, never primary,
+                  never an aqe provider
+\`pick\` manages ALL THREE: enable/disable opencode here exactly like claude/codex.
 
 Subcommands:
   status   (default) detected CLIs, aqe provider, ruflo providers, what's wired
@@ -63,10 +76,15 @@ Subcommands:
   off      reversible teardown (reset to claude-only; strip managed env keys)
 
 Options (pick, all optional — omit for interactive):
-  --host claude,codex          enable these ruflo host CLIs
-  --primary-host claude|codex  which host leads (default claude); codex-primary
-                                 mirrors the routing defaults so codex drives and
-                                 claude is the alternate
+  --host <csv>                 the complete desired enabled-host set, e.g.
+                                 claude,codex or claude,opencode (opencode is
+                                 wired + guided, never routed; excluding an
+                                 enabled host here DISABLES it — ak-managed
+                                 wiring is stripped, user config preserved)
+  --primary-host claude|codex  which host leads (default claude; routing hosts
+                                 only); codex-primary mirrors the routing
+                                 defaults so codex drives and claude is the
+                                 alternate
   --aqe-provider <type>        set aqe's primary LLM (or 'none' to unset)
                                  billing: claude-code = Claude sub ($0),
                                  ollama/onnx = local ($0), all others = metered key
@@ -93,6 +111,9 @@ your edits are preserved across syncs. ${formatModelHelp()}
 Examples:
   ak host                          show what's detected + wired + routing
   ak host pick --host claude,codex
+  ak host pick --host claude,opencode
+  ak host pick --host claude,codex,opencode
+  ak host pick --host claude       disable codex + opencode; preserve user config
   ak host pick --route 'testing:claude:claude-sonnet-5'
   ak host refresh --activity architecture,design
   ak host off`;
@@ -108,13 +129,13 @@ const parseFallback = (str) => str.split(';').map((s) => s.trim()).filter(Boolea
   return { provider: provider.trim().toLowerCase(), models: (models ?? '').split(',').map((m) => m.trim()).filter(Boolean) };
 });
 
-export async function run({ flags, positionals }) {
+export async function run({ flags, positionals, pkgRoot }) {
   const sub = positionals[0] ?? 'status';
   const cwd = process.cwd();
 
   if (sub === 'status') return status({ flags, cwd });
-  if (sub === 'off') return off({ cwd });
-  if (sub === 'pick') return pick({ flags, cwd });
+  if (sub === 'off') return off({ cwd, pkgRoot });
+  if (sub === 'pick') return pick({ flags, cwd, pkgRoot });
   if (sub === 'refresh') return refresh({ flags, cwd });
 
   fail(`unknown provider subcommand: ${sub} (status|pick|refresh|off)`);
@@ -143,10 +164,15 @@ async function status({ flags, cwd }) {
       : dflt ? 'enabled (default — ruflo default-on, no env written)'
       : d.wired ? 'enabled, wired'
       : 'enabled, not wired → ak sync';
+    // The two host tiers, visible rather than implicit: claude/codex are the
+    // routing pair (primary + per-activity policy); opencode is a managed
+    // integration host — wired + guided, never a routing target.
+    const tier = h.id === 'opencode' ? dim('  · integration host (never routed)')
+      : dim('  · routing host');
     // auth/billing axis — subscription ($0) vs metered key, per host.
     const auth = d.present ? hostAuthState(h.id, { present: true }) : null;
     const authStr = auth ? dim(`  ${auth.mode}/${auth.billing === 'subscription' ? '$0' : auth.billing}`) : '';
-    console.log(`  ${h.id.padEnd(7)} ${(d.version ? `v${d.version}` : '—').padEnd(12)} ${state}${authStr}`);
+    console.log(`  ${h.id.padEnd(9)} ${(d.version ? `v${d.version}` : '—').padEnd(12)} ${state}${authStr}${tier}`);
   }
 
   // agentic-qe LLM provider (AQE_LLM_PROVIDER) + fallback chain
@@ -195,9 +221,11 @@ async function status({ flags, cwd }) {
   printQeCourtStatus(cwd);
 
   const codexIdle = hosts.codex.present && !cfg.providers.hosts.codex;
+  const ocIdle = hosts.opencode.present && !cfg.providers.hosts.opencode;
   console.log('');
   if (codexIdle) info('codex is installed but disabled — enable it with: ak host pick');
-  else ok('provider config reflects installed CLIs');
+  if (ocIdle) info('opencode is installed but disabled — enable it with: ak host pick --host claude,opencode');
+  if (!codexIdle && !ocIdle) ok('host/provider config reflects installed CLIs');
   printDualHostTips(cfg);
   return 0;
 }
@@ -277,18 +305,30 @@ async function refresh({ flags, cwd }) {
   return 0;
 }
 
-async function off({ cwd }) {
+async function off({ cwd, pkgRoot }) {
   const cfg = loadKitConfig();
   const codexMcpManaged = cfg.providers?.codexMcp === 'ak';
   const rufloCodexManaged = cfg.providers?.rufloCodexMcp === 'ak';
-  cfg.providers = { hosts: { claude: true, codex: false }, primaryHost: 'claude', aqeProvider: null, aqeFallback: [], models: [], maxBudgetUsd: null, dualRouting: {}, codexMcp: null, rufloCodexMcp: null };
+  // opencode teardown reads the ownership markers from cfg — strip BEFORE the
+  // reset below clears them (mirrors the codex managed-flag captures above).
+  // On a FAILED teardown (e.g. JSONC config) the markers are the only remaining
+  // proof — preserve them for the retry instead of nulling them into the reset.
+  const retired = await runLifecycle({ adapter: OPENCODE_LIFECYCLE_ADAPTER, action: 'undo', cfg });
+  const ret = retired.result;
+  const keptMarkers = ret.ok ? { opencodeMcp: null, opencodeManaged: null }
+    : { opencodeMcp: cfg.providers.opencodeMcp, opencodeManaged: cfg.providers.opencodeManaged };
+  cfg.providers = { hosts: { claude: true, codex: false, opencode: false }, primaryHost: 'claude', aqeProvider: null, aqeFallback: [], models: [], maxBudgetUsd: null, dualRouting: {}, codexMcp: null, rufloCodexMcp: null, ...keptMarkers };
   saveKitConfig(cfg);
+  // enablement-gated guidance strips regardless (user content preserved).
+  if (pkgRoot) await reconcileOpencodeGuidance({ pkgRoot, cfg, cwd, enabled: false });
   const env = undoProviders(cwd);
   const router = undoAqeRouter(cwd);
   const mcp = await undoCodexMcp(cwd, { managed: codexMcpManaged });
   const rmcp = await undoRufloMcpInCodex(cwd, { managed: rufloCodexManaged });
-  ok(`reset to claude-only default — ${env.detail}; ${router.detail}; ${mcp.detail}; ${rmcp.detail}`);
-  return 0;
+  const ocLine = ret.ok ? `opencode: ${ret.undo.detail}; ${ret.artifacts.detail}`
+    : `opencode teardown incomplete — ${ret.undo.detail}`;
+  (ret.ok ? ok : warn)(`reset to claude-only default — ${env.detail}; ${router.detail}; ${mcp.detail}; ${rmcp.detail}; ${ocLine}`);
+  return ret.ok ? 0 : 1;
 }
 
 const parseModels = (csv) => csv.split(',').map((s) => s.trim()).filter(Boolean).map((tok) => {
@@ -339,9 +379,20 @@ async function maybeWriteQeCourtDefaults({ nonInteractive, cwd, enabled, aqeProv
   ok(`qe-court routing updated: ${changes.map(([role, p]) => `${role}→${p}`).join(', ')}`);
 }
 
-async function pick({ flags, cwd }) {
+async function pick({ flags, cwd, pkgRoot }) {
   const cfg = loadKitConfig();
   const hosts = await detectHosts(cwd);
+  // pick manages all managed host integrations (ADR-0016/0017):
+  //   routing hosts     — primary + per-activity policy seeds (registry capability)
+  //   integration hosts — config-file wiring via opencode.mjs's owner module;
+  //                       never primary, never routed, never aqe
+  // The split is DERIVED from the host descriptors' capability flag, not a
+  // hardcoded id list (the seam issue #71's capability registry lands on).
+  // --host is the complete desired enabled-host set on BOTH tiers; excluding an
+  // enabled host disables it (ak-managed wiring stripped, user config kept).
+  const ROUTING = new Set(routableHostIds());
+  const INTEGRATION = new Set(HOSTS.map((h) => h.id).filter((id) => !ROUTING.has(id)));
+  const prevOpencode = !!cfg.providers?.hosts?.opencode || cfg.providers?.opencodeMcp === 'ak';
   let enabled;
   let aqeProvider = cfg.providers.aqeProvider ?? null;
   // A legacy chain written before provenance existed reads as 'user': we cannot
@@ -368,12 +419,29 @@ async function pick({ flags, cwd }) {
     }
     if (flags.provider !== undefined) models = parseModels(flags.provider);
   } else {
-    const installed = HOSTS.filter((h) => hosts[h.id].present).map((h) => h.id);
-    if (installed.length === 0) { fail('no frontier CLI (claude/codex) found on PATH'); return 1; }
-    console.log(`Installed hosts: ${installed.join(', ')}`);
+    const installedRouting = HOSTS.filter((h) => hosts[h.id].present && ROUTING.has(h.id)).map((h) => h.id);
+    const installedIntegration = HOSTS.filter((h) => hosts[h.id].present && INTEGRATION.has(h.id)).map((h) => h.id);
+    if (installedRouting.length === 0 && installedIntegration.length === 0) { fail('no frontier CLI (claude/codex/opencode) found on PATH'); return 1; }
+    if (installedIntegration.length) {
+      console.log(`Installed hosts: ${[...installedRouting, ...installedIntegration].join(', ')}`
+        + dim(`  (${installedIntegration.join(', ')} = integration host — wired + guided, never a routing target)`));
+    } else {
+      console.log(`Installed hosts: ${installedRouting.join(', ')}`);
+    }
+    // Default: every currently ENABLED host (even one temporarily absent from
+    // PATH — a bare enter must never tear down an enabled host it simply can't
+    // see right now) ∪ newly detected routing hosts. An installed-but-disabled
+    // integration host is opt-in by typing it — a bare enter must not opt a
+    // third host's config home in sight unseen either (codex-review r3).
+    const enabledHosts = HOSTS.filter((h) => cfg.providers.hosts[h.id]).map((h) => h.id);
+    const dflt = [...new Set([...enabledHosts, ...installedRouting])];
+    const absentEnabled = enabledHosts.filter((h) => !hosts[h].present);
+    if (absentEnabled.length) {
+      console.log(dim(`  enabled but not detected right now: ${absentEnabled.join(', ')} (kept enabled on Enter)`));
+    }
     const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
-    const hAns = (await rl.question(`Enable which ruflo host(s)? (comma-separated) [${installed.join(',')}]: `)).trim();
-    enabled = (hAns || installed.join(',')).split(',').map((s) => s.trim()).filter(Boolean);
+    const hAns = (await rl.question(`Enable which ruflo host(s)? (comma-separated) [${dflt.join(',')}]: `)).trim();
+    enabled = (hAns || dflt.join(',')).split(',').map((s) => s.trim()).filter(Boolean);
     console.log(dim(`  ${AQE_BILLING_HINT}`));
     const aAns = (await rl.question(`agentic-qe primary LLM provider — ${AQE_PROVIDER_TYPES.join('/')} (blank = leave aqe default): `)).trim().toLowerCase();
     aqeProvider = aAns ? aAns : null;
@@ -389,18 +457,30 @@ async function pick({ flags, cwd }) {
     rl.close();
   }
 
-  // validate hosts
+  // validate hosts against the two tiers. An unknown token is a hard error,
+  // never a silent drop: `--host claude,opencdoe` must not "succeed" as
+  // claude-only and destructively tear the opencode host down (codex-review r3).
   const known = new Set(HOSTS.map((h) => h.id));
-  enabled = enabled.filter((h) => known.has(h));
-  if (!enabled.includes('claude') && !enabled.includes('codex')) enabled = ['claude'];
-  // primary host — which host leads (default claude); must be an enabled host.
+  const unknown = enabled.filter((h) => !known.has(h));
+  if (unknown.length) {
+    fail(`unknown host(s): ${unknown.join(', ')} (valid: ${[...known].join(', ')}) — nothing changed`);
+    return 2;
+  }
+  // Split the tiers: routing hosts drive primary/seeds; integration hosts are
+  // wired + guided. The routing pair needs at least one member (primaryHost
+  // must be enabled) — fall back to claude, keeping any integration choice.
+  const routing = enabled.filter((h) => ROUTING.has(h));
+  const integrations = enabled.filter((h) => INTEGRATION.has(h));
+  if (!routing.length) routing.push('claude');
+  enabled = [...routing, ...integrations];
+  // primary host — which host leads (default claude); must be a ROUTING host.
   let primaryHost = prevPrimary;
   if (flags['primary-host'] !== undefined) {
     const v = flags['primary-host'].trim().toLowerCase();
     if (PRIMARY_HOSTS.includes(v)) primaryHost = v;
     else warn(`unknown primary host '${v}' (valid: ${PRIMARY_HOSTS.join('|')}) — keeping ${primaryHost}`);
   }
-  if (!enabled.includes(primaryHost)) primaryHost = enabled[0] ?? DEFAULT_PRIMARY_HOST;
+  if (!routing.includes(primaryHost)) primaryHost = routing[0] ?? DEFAULT_PRIMARY_HOST;
   // re-seed when the primary changed AND the current policy is entirely seeded
   // (no user overrides to preserve) — so mirrored defaults reflect the new primary.
   const policyAllSeeded = Object.keys(oldPolicy).length > 0 && Object.values(oldPolicy).every((r) => r.source === 'seeded');
@@ -433,13 +513,26 @@ async function pick({ flags, cwd }) {
   }
 
   cfg.providers = {
-    hosts: { claude: enabled.includes('claude'), codex: enabled.includes('codex') },
+    hosts: {
+      claude: routing.includes('claude'),
+      codex: routing.includes('codex'),
+      opencode: integrations.includes('opencode'),
+    },
     aqeProvider,
     aqeFallback,
     models,
     primaryHost,
     maxBudgetUsd: cfg.providers.maxBudgetUsd ?? null,
     dualRouting: reseedForPrimary ? {} : { ...oldPolicy },
+    // Every ownership marker survives a retune (teardown contract): the codex
+    // MCP bridges AND the opencode wiring. Dropping these on rewrite would
+    // strand managed servers ak can no longer prove it owns — the data-loss
+    // class the ownership model exists to prevent.
+    codexMcp: cfg.providers?.codexMcp ?? null,
+    rufloCodexMcp: cfg.providers?.rufloCodexMcp ?? null,
+    opencodeMcp: cfg.providers?.opencodeMcp ?? null,
+    opencodeManaged: cfg.providers?.opencodeManaged ?? null,
+    opencodeCatalogDir: cfg.providers?.opencodeCatalogDir ?? null,
   };
   // dual-host: seed per-activity routing from defaults (only when the policy is
   // empty), then layer any explicit --route overrides on top (marked user, never
@@ -461,10 +554,58 @@ async function pick({ flags, cwd }) {
     (r.ok ? ok : warn)(`${h.id}: ${r.detail}`);
   }
 
+  // opencode (integration host): apply the same owner-module stack setup/sync
+  // use — config wiring, lifecycle plugin, converted agents, platform skill —
+  // then converge the guidance blocks the same way setup/sync do ("wired +
+  // guided" is one contract, not two).
+  // CLI-gated: an enabled-but-absent CLI never fabricates the config home.
+  let incompleteTeardown = false;
+  if (cfg.providers.hosts.opencode) {
+    if (!(await have('opencode'))) {
+      warn('opencode: enabled but CLI not installed — wiring skipped (re-run `ak sync` after installing opencode-ai)');
+    } else {
+      const lifecycle = await runLifecycle({
+        adapter: OPENCODE_LIFECYCLE_ADAPTER, action: 'apply', cfg, options: { pkgRoot },
+      });
+      const stack = lifecycle.result;
+      // persist the markers on ANY refresh (converged file + stale markers is
+      // exactly the stranded-teardown case), not only on file changes.
+      if (stack.oc.changed || stack.markersChanged) saveKitConfig(cfg);
+      if (stack.oc.changed || !stack.oc.ok) (stack.oc.ok ? ok : warn)(`opencode: ${stack.oc.detail}`);
+      if (stack.plugin.changed || !stack.plugin.ok) (stack.plugin.ok ? ok : warn)(`opencode plugin: ${stack.plugin.detail}`);
+      if (stack.agents.changed || !stack.agents.ok) (stack.agents.ok ? ok : warn)(`opencode agents: ${stack.agents.detail}`);
+      if (stack.skill.changed || !stack.skill.ok) (stack.skill.ok ? ok : warn)(`opencode skill: ${stack.skill.detail}`);
+      const guidance = await reconcileOpencodeGuidance({ pkgRoot, cfg, cwd, enabled: true });
+      if (guidance.changed) ok(`opencode ${guidance.detail}`);
+      // opencode loads config/plugins/MCP/agents once at startup — say so now,
+      // or the user files "hooks don't work" issues (observed live).
+      if (stack.oc.changed || stack.plugin.changed || stack.agents.changed || stack.skill.changed) {
+        info('restart opencode to load the hooks + MCP servers (loaded once at startup)');
+      }
+    }
+  } else if (prevOpencode) {
+    // Excluded from the desired set while previously enabled/managed → disable:
+    // strip ONLY ak-managed wiring/artifacts (priors restored, marker-gated),
+    // never the user's own opencode config. A teardown that cannot complete
+    // (e.g. a JSONC config) is reported honestly — markers stay for the retry
+    // and "disabled" is never claimed over still-active wiring.
+    const retired = await runLifecycle({ adapter: OPENCODE_LIFECYCLE_ADAPTER, action: 'undo', cfg });
+    const ret = retired.result;
+    saveKitConfig(cfg); // persist markers (nulled on success, retained on failure)
+    if (ret.ok) ok(`opencode disabled: ${ret.undo.detail}; ${ret.artifacts.detail}`);
+    else {
+      incompleteTeardown = true;
+      warn(`opencode disable incomplete — ${ret.undo.detail} (artifacts: ${ret.artifacts.detail})`);
+    }
+    // enablement-gated guidance strips regardless (user content preserved).
+    const guidance = await reconcileOpencodeGuidance({ pkgRoot, cfg, cwd, enabled: false });
+    if (guidance.changed) ok(`opencode ${guidance.detail}`);
+  }
+
   const h = applyHosts(cfg, cwd);
   (h.ok ? ok : fail)(`hosts: ${h.detail}`);
   if (primaryHost !== DEFAULT_PRIMARY_HOST) {
-    const alt = enabled.filter((e) => e !== primaryHost).join(', ') || 'none';
+    const alt = routing.filter((e) => e !== primaryHost).join(', ') || 'none';
     ok(`primary host: ${primaryHost} (alternate: ${alt})`);
   }
   if (aqeProvider) ok(`aqe provider: AQE_LLM_PROVIDER=${aqeProvider}`);
@@ -487,5 +628,5 @@ async function pick({ flags, cwd }) {
   printActivityRoutingTable(cfg);
   await maybeWriteQeCourtDefaults({ nonInteractive, cwd, enabled, aqeProvider });
   printDualHostTips(cfg);
-  return 0;
+  return incompleteTeardown ? 1 : 0;
 }

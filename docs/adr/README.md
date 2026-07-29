@@ -25,6 +25,7 @@ Consequences**, and cites the grounded source it rests on where relevant.
 | [0014](0014-dashboard-auth-and-remediation.md) | Dashboard auth token, plus a security/quality remediation pass | Accepted |
 | [0015](0015-managed-codex-native-statusline.md) | Manage Codex's native user-wide status line without claiming rich-renderer parity | Accepted |
 | [0016](0016-capability-driven-integration-adapters.md) | Capability-driven host, provider, binding, projection, and observability adapters | Accepted |
+| [0017](0017-opencode-host.md) | OpenCode as a managed, observable, non-routable host through native surfaces | Accepted |
 
 Theme: ADRs **0001–0006** define **dual-host LLM routing and leadership** — how `ak` lets ruflo route
 each development activity (architecture, implementation, testing, review, …) to the right host (Claude
@@ -79,3 +80,9 @@ provider behind two hosts, OpenRouter behind an existing host, and OpenCode mana
 routable by accident. Its Ollama bindings are a structural multi-host proof; ADR-0011 remains the
 independent Proposed decision for observed local execution, catalogue-backed identity, usage
 pricing, and transcript fidelity.
+
+**0017** applies ADR-0016 to OpenCode as a managed, observable, non-routable host. It wires the rUv
+stack through OpenCode's native JSON configuration, plugin, converted-agent, skill, and
+machine-guidance surfaces; preserves user values through ownership receipts and guarded teardown;
+and keeps primary/activity routing limited to capability-qualified Claude/Codex hosts. Generalized
+multi-host routing, including an OpenCode execution-worker contract, remains follow-on issue #76.

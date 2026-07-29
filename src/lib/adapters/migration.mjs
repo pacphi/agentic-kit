@@ -20,10 +20,23 @@ export function normalizeIntegrations(config = {}) {
   // the two public migration entry points oscillate between shapes.
   const bindings = structuredClone(existing.bindings ?? source.providers?.bindings ?? []);
   if (!Array.isArray(bindings)) throw new TypeError('integrations.bindings must be an array');
+  const legacyOpenCode = source.providers?.opencodeMcp === 'ak'
+    || source.providers?.opencodeManaged != null
+    || source.providers?.opencodeCatalogDir != null;
+  const ownership = {
+    ...(existing.ownership ?? {}),
+    ...(legacyOpenCode && !existing.ownership?.opencode ? { opencode: {
+      source: 'legacy-providers',
+      mcp: source.providers?.opencodeMcp ?? null,
+      managed: structuredClone(source.providers?.opencodeManaged ?? null),
+      catalogDir: source.providers?.opencodeCatalogDir ?? null,
+    } } : {}),
+  };
   return immutable({
     version: INTEGRATIONS_SCHEMA_VERSION,
     hosts,
     bindings,
+    ...(Object.keys(ownership).length ? { ownership } : {}),
   });
 }
 
@@ -41,9 +54,11 @@ export function migrateConfig(config = {}) {
     || Object.hasOwn(current, 'schemaVersion')
     || JSON.stringify(current.hosts ?? {}) !== JSON.stringify(integrations.hosts)
     || JSON.stringify(current.bindings ?? []) !== JSON.stringify(integrations.bindings);
+  const ownershipChanged = JSON.stringify(current?.ownership ?? null)
+    !== JSON.stringify(integrations.ownership ?? null);
   return immutable({
-    changed,
-    config: changed ? { ...structuredClone(before), integrations } : structuredClone(before),
+    changed: changed || ownershipChanged,
+    config: changed || ownershipChanged ? { ...structuredClone(before), integrations } : structuredClone(before),
   });
 }
 

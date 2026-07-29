@@ -24,7 +24,7 @@ family on your behalf.
 | `ak sync`            | update the binary + heal to your recorded state | **no** — converges, never decides |
 | `ak host pick` | opt into or retune execution hosts and host routing | **yes** — this is the switch |
 | `ak x statusline codex native\|extended` | opt into a user-wide Codex status-line preset | **yes** — records the preset |
-| `ak setup`           | first-time bootstrap of absent tooling          | only via explicit flags (`--codex`, `--primary-host`) |
+| `ak setup`           | first-time bootstrap of absent tooling          | only via explicit flags (`--codex`, `--opencode`, `--primary-host`) |
 
 A **host** runs the work; a **provider** serves inference. A binding can connect one provider to
 several hosts through separate native configuration **projections**, while **observability**

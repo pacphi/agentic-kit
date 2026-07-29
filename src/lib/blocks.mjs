@@ -16,7 +16,7 @@
 // `blocksForTarget(rows, name)`. Logical names only; paths stay a caller concern.
 import fs from 'node:fs';
 import path from 'node:path';
-import { claudeDir, claudeMdPath, codexDir, home } from './paths.mjs';
+import { claudeDir, claudeMdPath, codexDir, opencodeDir, home } from './paths.mjs';
 import { have } from './exec.mjs';
 
 export const BEGIN = (slug) => `<!-- BEGIN ${slug} -->`;
@@ -27,16 +27,45 @@ export const END = (slug) => `<!-- END ${slug} -->`;
  *  where the block lands when it is NOT already present in the file. */
 export const BUILTIN_BLOCKS = [
   {
+    // Host-agnostic operating rules — shared by the claude + opencode machine
+    // guidance files (the opencode file exists BECAUSE opencode prefers it over
+    // falling back to ~/.claude/CLAUDE.md, so it needs its own copy).
     slug: 'ruflo-preamble',
     template: 'ruflo-preamble.md',
     position: 'prepend',
     detector: { type: 'always' },
+    guidanceFiles: ['claude', 'agents-opencode'],
   },
   {
     slug: 'ruflo-reference',
     template: 'ruflo-reference.md',
     position: 'append',
     detector: { type: 'always' },
+  },
+  {
+    // opencode's ruflo surface: MCP tools are `claude-flow_*` (not
+    // `mcp__claude-flow__*`), hooks arrive via the plugins/ bridge, and agents
+    // are converted subagents — a different enough story to warrant its own
+    // template rather than reusing ruflo-reference. Gated on ENABLEMENT (the
+    // opencodeEnabled flag, same mechanism as dualMode) — the template asserts
+    // active wiring, so an installed-but-disabled host must not receive it
+    // (codex-review r2; and `x provider off` → next sync strips it).
+    slug: 'ruflo-opencode-reference',
+    template: 'ruflo-opencode-reference.md',
+    position: 'append',
+    detector: { type: 'flag', target: 'opencodeEnabled' },
+    guidanceFiles: ['agents-opencode'],
+  },
+  {
+    // opencode twin of ruvnet-brain-reference (that slug stays claude-only):
+    // same ground-before-assert rule, but the tool name is the opencode-style
+    // `ruvnet-brain_search_ruvnet` and updates ride the stable-spine shim.
+    // Likewise enablement-gated: the tool exists in opencode only when wired.
+    slug: 'ruvnet-brain-opencode-reference',
+    template: 'ruvnet-brain-opencode-reference.md',
+    position: 'append',
+    detector: { type: 'flag', target: 'opencodeEnabled' },
+    guidanceFiles: ['agents-opencode'],
   },
   {
     slug: 'ruflo-aqe-reference',
@@ -240,16 +269,23 @@ export function retiredForTarget(rows, targetName) {
  *  this discovery (dir-exists gate, no mkdir). That single gate covers both cases:
  *  a codex machine that is momentarily single-host still gets the target (so a
  *  stale block can be stripped), and a codex-less machine never grows a ~/.codex.
- *  `cfg` is accepted for call-site symmetry/forward-compat; the target set is
- *  cfg-independent today. `codexRoot` is a test seam (defaults to the real dir).
- *  @param {{ cwd?: string, cfg?: object, codexRoot?: string }} opts */
-export function guidanceTargets({ cwd = process.cwd(), codexRoot = codexDir() } = {}) {
+ *  `~/.config/opencode/AGENTS.md` (agents-opencode) follows the identical rule
+ *  (opencode's config home is its presence signal; opencode prefers this file
+ *  over ~/.claude/CLAUDE.md, so it needs its own managed copy rather than
+ *  inheriting claude's). `cfg` is accepted for call-site symmetry/forward-compat;
+ *  the target set is cfg-independent today. `codexRoot`/`opencodeRoot` are test
+ *  seams (default to the real dirs).
+ *  @param {{ cwd?: string, cfg?: object, codexRoot?: string, opencodeRoot?: string }} opts */
+export function guidanceTargets({ cwd = process.cwd(), codexRoot = codexDir(), opencodeRoot = opencodeDir() } = {}) {
   const targets = [
     { name: 'claude', label: 'CLAUDE.md', file: claudeMdPath() },
     { name: 'agents', label: 'AGENTS.md', file: path.join(cwd, 'AGENTS.md') },
   ];
   if (fs.existsSync(codexRoot)) {
     targets.push({ name: 'agents-user', label: '~/.codex/AGENTS.md', file: path.join(codexRoot, 'AGENTS.md') });
+  }
+  if (fs.existsSync(opencodeRoot)) {
+    targets.push({ name: 'agents-opencode', label: 'opencode AGENTS.md', file: path.join(opencodeRoot, 'AGENTS.md') });
   }
   return targets;
 }
