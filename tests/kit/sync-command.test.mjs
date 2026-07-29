@@ -149,6 +149,7 @@ async function withOpencodeCli(fn) {
   fs.mkdirSync(bin, { recursive: true });
   for (const name of ['opencode', 'claude']) {
     fs.writeFileSync(path.join(bin, name), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+    fs.writeFileSync(path.join(bin, `${name}.cmd`), '@echo off\r\nexit /b 0\r\n');
   }
   const prev = process.env.PATH;
   process.env.PATH = [bin, '/usr/bin', '/bin'].join(path.delimiter);

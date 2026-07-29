@@ -101,6 +101,7 @@ function fakeBins(dir) {
   fs.mkdirSync(bin, { recursive: true });
   for (const name of ['claude', 'opencode']) {
     fs.writeFileSync(path.join(bin, name), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+    fs.writeFileSync(path.join(bin, `${name}.cmd`), '@echo off\r\nexit /b 0\r\n');
   }
   return bin;
 }
