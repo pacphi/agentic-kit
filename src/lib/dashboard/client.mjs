@@ -1,3 +1,17 @@
+import { CAT, RANK, PREF, esc, catOf, groupRows, rowLine, groupCard, gridHtml, noticeHtml } from './groups.mjs';
+
+// The classification/grouping/card/notice logic lives in ./groups.mjs (pure —
+// unit-testable in node without a DOM). Here those exact function sources and
+// JSON-serialized tables are interpolated into the served <script>, so the
+// tested code and the shipped code can never drift. Tables are emitted with
+// identifier keys unquoted — byte-stable with the pre-extraction bundle (the
+// served-source contract tests pin those literals).
+const ident = (k) => /^[A-Za-z_$][\w$]*$/.test(k);
+const objLiteral = (o) => `{${Object.entries(o).map(([k, v]) => `${ident(k) ? k : JSON.stringify(k)}:${JSON.stringify(v)}`).join(',')}}`;
+const CAT_JS = objLiteral(CAT);
+const RANK_JS = objLiteral(RANK);
+const PREF_JS = JSON.stringify(PREF);
+
 export const JS = `
 (function(){
   "use strict";
@@ -57,21 +71,15 @@ export const JS = `
   var LEVEL_WORD={ok:"all systems nominal",warn:"attention advised",fail:"action required",unknown:"status unknown"};
   var LAST=null, lastUpdated=0;
 
-  function esc(s){return String(s==null?"":s).replace(/[&<>"']/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c];});}
+  ${esc.toString()}
 
   // ── tabs (segmented control) ──
-  // Category map: every subsystem lands in exactly one tab; unknown/future
-  // subsystems fall back to Runtime so nothing is ever dropped. Overview
-  // aggregates all attention cards regardless of category.
+  // Category map (from ./groups.mjs — see that file): every subsystem lands in
+  // exactly one tab; unknown/future subsystems fall back to Runtime.
   var TABS=["overview","hosts","providers","runtime","intel","usage","live"];
   var VIEWS=["score","limits","findings","sessions","transcript"];
-  var CAT={
-    hosts:"hosts", mcp:"hosts", "codex-mcp":"hosts", opencode:"hosts", routing:"hosts",
-    providers:"providers",
-    learning:"intel", "ruvnet-brain":"intel", "ruvnet-brain-nightly":"intel", aqe:"intel", agentdb:"intel",
-    ruvector:"intel"
-  };
-  function catOf(s){return CAT[s]||"runtime";}
+  var CAT=${CAT_JS};
+  ${catOf.toString()}
 
   var activeTab="overview";
   var usageView="score", usageSession=null, usageDays=14;
@@ -142,55 +150,18 @@ export const JS = `
     if(t)setTab(t.getAttribute("data-go"));
   });
 
-  // severity rank for rollups + triage sort; preferred order breaks ties.
-  var RANK={fail:3,warn:2,ok:1,info:0,unknown:0};
-  var PREF=["versions","self","natives","security","learning","providers","hosts","routing","mcp","codex-mcp","opencode","ruvnet-brain","ruvnet-brain-nightly","ruvector","aqe","daemons","blocks","statusline","npx"];
+  // severity rank for rollups + triage sort; preferred order breaks ties
+  // (tables + functions from ./groups.mjs).
+  var RANK=${RANK_JS};
+  var PREF=${PREF_JS};
 
-  // Collapse rows into one group per subsystem (kills repeated labels); the
-  // group's level is the worst of its rows. Sort worst-first, then by PREF.
-  function groupRows(rows){
-    var map={}, seq=[];
-    for(var i=0;i<rows.length;i++){
-      var r=rows[i], k=r.subsystem||"other";
-      if(!map[k]){map[k]={subsystem:k,rows:[],level:"info"};seq.push(k);}
-      map[k].rows.push(r);
-      if((RANK[r.level]||0)>(RANK[map[k].level]||0))map[k].level=r.level;
-    }
-    var groups=seq.map(function(k){return map[k];});
-    groups.sort(function(a,b){
-      var d=(RANK[b.level]||0)-(RANK[a.level]||0); if(d)return d;
-      var ia=PREF.indexOf(a.subsystem), ib=PREF.indexOf(b.subsystem);
-      return (ia<0?99:ia)-(ib<0?99:ib);
-    });
-    return groups;
-  }
+  ${groupRows.toString()}
 
-  function rowLine(r){
-    var lvl=r.level||"info";
-    var fix=r.fix?('<span class="row-fix"><span class="arrow">&rarr;</span><code>'+esc(r.fix)+"</code></span>"):"";
-    return '<li class="row" data-level="'+esc(lvl)+'">'
-      +'<span class="row-dot"></span>'
-      +'<span class="row-msg">'+esc(r.message)+fix+"</span>"
-    +"</li>";
-  }
+  ${rowLine.toString()}
 
-  function groupCard(g){
-    var lvl=g.level||"info", calm=(lvl==="ok"||lvl==="info");
-    var count=g.rows.length>1?('<span class="card-count">'+g.rows.length+"</span>"):"";
-    var badge=calm?"":('<span class="card-level">'+esc(lvl)+"</span>");
-    return '<article class="card" data-level="'+esc(lvl)+'">'
-      +'<div class="card-top">'
-        +'<span class="dot" data-level="'+esc(lvl)+'"></span>'
-        +'<span class="card-name">'+esc(g.subsystem)+"</span>"
-        +count+badge
-      +"</div>"
-      +'<ul class="rows">'+g.rows.map(rowLine).join("")+"</ul>"
-    +"</article>";
-  }
+  ${groupCard.toString()}
 
-  function gridHtml(groups){
-    return '<div class="grid">'+groups.map(groupCard).join("")+"</div>";
-  }
+  ${gridHtml.toString()}
   function stagger(el){
     var cards=el.querySelectorAll(".card");
     for(var i=0;i<cards.length;i++){cards[i].style.animationDelay=(i*40)+"ms";}
@@ -273,14 +244,13 @@ export const JS = `
   }
 
   // Update drift renders as a quiet notice line in Overview — no banner. The
-  // versions cards still carry the per-tool detail.
+  // versions cards still carry the per-tool detail. (noticeHtml: ./groups.mjs.)
+  ${noticeHtml.toString()}
   function renderNotice(drift){
     var b=document.getElementById("update-notice");
-    var out=(drift||[]).filter(function(d){return d&&d.outdated;});
-    if(!out.length){b.hidden=true;b.innerHTML="";return;}
-    var parts=out.map(function(d){return "<b>"+esc(d.pkg)+"</b> "+esc(d.installed)+" &rarr; "+esc(d.latest);});
-    b.innerHTML='<span class="up">&uarr;</span><span>'+out.length+" update"+(out.length>1?"s":"")
-      +" available: "+parts.join(" &nbsp;·&nbsp; ")+" &mdash; run <code>ak sync</code></span>";
+    var html=noticeHtml(drift);
+    if(!html){b.hidden=true;b.innerHTML="";return;}
+    b.innerHTML=html;
     b.hidden=false;
   }
 
