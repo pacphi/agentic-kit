@@ -360,6 +360,7 @@ test('interactive pick: an enabled host absent from PATH right now is kept enabl
   try {
     // Remove the opencode shim: the CLI is "temporarily absent" but enabled.
     fs.rmSync(path.join(sb.binDir, 'opencode'), { force: true });
+    fs.rmSync(path.join(sb.binDir, 'opencode.cmd'), { force: true });
     const r = akPick(['x', 'provider', 'pick'], sb, { input: '\n\n\n\n' });
     assert.equal(r.status, 0, `interactive pick failed\nstdout: ${r.stdout}\nstderr: ${r.stderr}`);
     assert.match(r.stdout, /enabled but not detected right now: opencode \(kept enabled on Enter\)/);
