@@ -58,7 +58,11 @@ function resultFor(state, observation, host, clock) {
   return validateWorkerResult({
     workerId: state.worker.id, activity: state.worker.activity, role: state.worker.role, host,
     status, exitCategory, startedAt: state.startedAt, endedAt, durationMs,
-    provider: host, providerProvenance: 'configured', configuredModel: state.worker.configuredModel ?? null,
+    // ADR-0018's invariant: a host or its provider/model selector NEVER proves
+    // the inference provider. The subprocess adapters observe exit codes, not
+    // billing identity (a claude session may be Anthropic, OpenRouter, or
+    // Ollama-served) — record unknown, not `provider: host` (qe-court B6).
+    provider: null, providerProvenance: 'unknown', configuredModel: state.worker.configuredModel ?? null,
     observedModel: null, sessionId: null, transcriptRefs: [], failure, usage: null,
   });
 }

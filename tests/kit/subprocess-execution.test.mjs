@@ -34,6 +34,22 @@ test('Claude adapter uses print/json mode without a permission bypass', async ()
   assert.ok(!calls[0].args.some((arg) => arg.includes('dangerously') || arg.includes('bypass')));
 });
 
+// qe-court B6: the subprocess adapters observe exit codes, not billing
+// identity — provider must be recorded as unknown, never fabricated from the
+// host id (ADR-0018's invariant).
+test('subprocess results never fabricate provider identity from the host (qe-court B6)', async () => {
+  for (const host of ['claude', 'codex']) {
+    const adapter = (host === 'claude' ? createClaudeExecutionAdapter : createCodexExecutionAdapter)({
+      haveFn: async () => true, clock,
+      spawnFn: () => child(),
+    });
+    const result = await executeWorker(worker(host), adapter, { cwd: process.cwd(), clock });
+    assert.equal(result.status, 'succeeded');
+    assert.equal(result.provider, null, `${host}: provider must not be the host id`);
+    assert.equal(result.providerProvenance, 'unknown', `${host}: provenance must be unknown without observation`);
+  }
+});
+
 test('Codex adapter pins its supplied workspace and normalizes host failures', async () => {
   const calls = [];
   const adapter = createCodexExecutionAdapter({
