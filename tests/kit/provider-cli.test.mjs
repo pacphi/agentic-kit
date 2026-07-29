@@ -101,7 +101,7 @@ function fakeBins(dir) {
   fs.mkdirSync(bin, { recursive: true });
   for (const name of ['claude', 'codex', 'opencode']) {
     fs.writeFileSync(path.join(bin, name), '#!/bin/sh\nif [ -n "$AK_TEST_ARGV_LOG" ]; then printf "%s\\n" "$0 $*" >> "$AK_TEST_ARGV_LOG"; fi\nexit 0\n', { mode: 0o755 });
-    fs.writeFileSync(path.join(bin, `${name}.cmd`), '@echo off\r\nexit /b 0\r\n');
+    fs.writeFileSync(path.join(bin, `${name}.cmd`), `@echo off\r\nif not "%AK_TEST_ARGV_LOG%"=="" echo ${name} %*>> "%AK_TEST_ARGV_LOG%"\r\nexit /b 0\r\n`);
   }
   return bin;
 }
