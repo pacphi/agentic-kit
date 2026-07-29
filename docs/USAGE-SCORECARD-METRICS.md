@@ -97,9 +97,9 @@ responses = Σ over included sessions of session.responses
 **Source:**
 
 - Filter: a parsed record with zero assistant turns is dropped entirely — "no
-  assistant turn → not a session" (`usage-index.mjs:877`) — and a record whose
+  assistant turn → not a session" (`usage-index.mjs:892`) — and a record whose
   last activity falls outside the requested window is dropped too
-  (`usage-index.mjs:878`).
+  (`usage-index.mjs:893`).
 - `responses` accumulation: Claude increments per assistant message
   (`usage-index.mjs:493`); Codex increments per `agent_message` event
   (`usage-index.mjs:631`).
@@ -182,7 +182,7 @@ already in effect on the given day, comparing ISO date strings
 lexicographically so no `Date` parsing is involved and the module stays
 clock-free.
 
-`aggregate()` passes each usage row's own `day` (`usage-index.mjs:877`), which
+`aggregate()` passes each usage row's own `day` (`usage-index.mjs:892`), which
 it already has because rows are keyed by `(day, model)`. **This is the whole
 point:** tokens metered in August must still read as August's rate when the
 panel is opened in December. Pricing by *today's* date instead would restate a
@@ -264,7 +264,7 @@ tokens = input + output + cacheRead + cacheWrite   (summed across all rows in wi
 ```
 
 **Source:** `t.tokens` from `totals`, accumulated per row at
-`usage-index.mjs:824` (`rowTokens = row.input + row.output + row.cacheRead +
+`usage-index.mjs:916` (`rowTokens = row.input + row.output + row.cacheRead +
 row.cacheWrite`) and rolled into `totals.tokens` via `addTo`
 (`usage-index.mjs:843-852`). Rendered with `fmtTok()`
 (`dashboard/client.mjs`): `≥1e9` → `"X.XB"`, `≥1e6` → `"X.XM"`,
@@ -532,7 +532,7 @@ byModel[model].sessions  = count of DISTINCT sessions whose s.models includes th
 ```
 
 **Source:** cost/tokens/responses accumulate inside the usage-row loop
-(`usage-index.mjs:814-831`); the `sessions` count is deliberately computed
+(`usage-index.mjs:896-922`); the `sessions` count is deliberately computed
 **separately**, once per session over its `s.models` array
 (`usage-index.mjs:898-903`) rather than inside the cost loop, precisely
 **so that a model can appear in `byModel` — with a nonzero session count —
@@ -544,7 +544,7 @@ excluded subagent-replay session still shows up as "used," at zero cost,
 rather than vanishing.
 
 `byModel[...].responses` is populated from `row.responses`
-(`usage-index.mjs:829`), which in turn comes from the `responses` field
+(`usage-index.mjs:921`), which in turn comes from the `responses` field
 passed into `addUsage()` at the call site — `1` per Claude assistant turn
 (`usage-index.mjs:484-490`), or `rec.responses` (the session's whole response
 count) once per Codex session, passed at the single point Codex calls
@@ -880,7 +880,7 @@ Codex ≥0.140 maintains its own SQLite thread ledger (`~/.codex/state_N.sqlite`
 — the `N` is a migration generation, so `codexStateDb` (`codex-state.mjs:30`)
 globs and takes the newest). `readCodexState` (`:49`) reads per-thread
 `thread_source` (`user` vs `subagent`) plus `thread_spawn_edges`, and
-`applyCodexLedger` (`usage-index.mjs:1179`) overlays that onto parsed
+`applyCodexLedger` (`usage-index.mjs:1218`) overlays that onto parsed
 sessions: a ledger-identified subagent has its token usage stripped — its
 rollout replays the parent's entire token history (ccusage/ccusage#950
 measured up to 91× inflation) — while the session record stays visible. The
@@ -933,7 +933,7 @@ commit `540be18` on this branch.
 Claude's parser passes `responses: 1` per assistant turn
 (`usage-index.mjs:489`, as it existed before this fix), but Codex's call
 passed no such field at all. Because `byModel[model].responses` is summed
-directly from each usage row's `responses` field (`usage-index.mjs:829`,
+directly from each usage row's `responses` field (`usage-index.mjs:921`,
 `m.responses += row.responses`), **every** Codex model in §10's "Models in
 Play" list displayed `0 resp` regardless of real token/cost volume or actual
 `agent_message` count. **Fix:** `parseCodex` now passes `responses:
