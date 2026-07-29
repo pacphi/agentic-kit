@@ -58,12 +58,12 @@ Two independent axes: which host CLIs run the ruflo loop, and which LLM the
 routers use (aqe + ruflo). Mirrors \`ak x mcp\`: detect → persist to kit.json →
 idempotent heal. \`ak sync\` reapplies your choice.
 
-Host model — three managed host integrations, two routing hosts:
+Host model — three managed hosts, all eligible for explicit activity routing:
   claude, codex   routing hosts: env-wired, one is primary, dual-host seeds the
                   per-activity routing policy (they drive QE work)
-  opencode        managed integration host: config-file wiring (opencode.json
+  opencode        config-file wiring (opencode.json
                   MCP + skills + permissions), lifecycle plugin, converted ruflo
-                  agents, platform skill — never a routing target, never primary,
+                  agents, platform skill — routable through ak run, never primary,
                   never an aqe provider
 \`pick\` manages ALL THREE: enable/disable opencode here exactly like claude/codex.
 
@@ -78,7 +78,7 @@ Subcommands:
 Options (pick, all optional — omit for interactive):
   --host <csv>                 the complete desired enabled-host set, e.g.
                                  claude,codex or claude,opencode (opencode is
-                                 wired + guided, never routed; excluding an
+                                 wired + guided; excluding an
                                  enabled host here DISABLES it — ak-managed
                                  wiring is stripped, user config preserved)
   --primary-host claude|codex  which host leads (default claude; routing hosts
@@ -164,10 +164,7 @@ async function status({ flags, cwd }) {
       : dflt ? 'enabled (default — ruflo default-on, no env written)'
       : d.wired ? 'enabled, wired'
       : 'enabled, not wired → ak sync';
-    // The two host tiers, visible rather than implicit: claude/codex are the
-    // routing pair (primary + per-activity policy); opencode is a managed
-    // integration host — wired + guided, never a routing target.
-    const tier = h.id === 'opencode' ? dim('  · integration host (never routed)')
+    const tier = h.id === 'opencode' ? dim('  · routing host (ak run; never primary/AQE)')
       : dim('  · routing host');
     // auth/billing axis — subscription ($0) vs metered key, per host.
     const auth = d.present ? hostAuthState(h.id, { present: true }) : null;
@@ -382,16 +379,12 @@ async function maybeWriteQeCourtDefaults({ nonInteractive, cwd, enabled, aqeProv
 async function pick({ flags, cwd, pkgRoot }) {
   const cfg = loadKitConfig();
   const hosts = await detectHosts(cwd);
-  // pick manages all managed host integrations (ADR-0016/0017):
-  //   routing hosts     — primary + per-activity policy seeds (registry capability)
-  //   integration hosts — config-file wiring via opencode.mjs's owner module;
-  //                       never primary, never routed, never aqe
-  // The split is DERIVED from the host descriptors' capability flag, not a
-  // hardcoded id list (the seam issue #71's capability registry lands on).
+  // Routing eligibility is capability-derived. OpenCode retains its independent
+  // lifecycle wiring even though it is now an execution host; it is never a
+  // primary/AQE host because those are separate registry capabilities.
   // --host is the complete desired enabled-host set on BOTH tiers; excluding an
   // enabled host disables it (ak-managed wiring stripped, user config kept).
   const ROUTING = new Set(routableHostIds());
-  const INTEGRATION = new Set(HOSTS.map((h) => h.id).filter((id) => !ROUTING.has(id)));
   const prevOpencode = !!cfg.providers?.hosts?.opencode || cfg.providers?.opencodeMcp === 'ak';
   let enabled;
   let aqeProvider = cfg.providers.aqeProvider ?? null;
@@ -422,20 +415,16 @@ async function pick({ flags, cwd, pkgRoot }) {
     }
     if (flags.provider !== undefined) models = parseModels(flags.provider);
   } else {
-    const installedRouting = HOSTS.filter((h) => hosts[h.id].present && ROUTING.has(h.id)).map((h) => h.id);
-    const installedIntegration = HOSTS.filter((h) => hosts[h.id].present && INTEGRATION.has(h.id)).map((h) => h.id);
-    if (installedRouting.length === 0 && installedIntegration.length === 0) { fail('no frontier CLI (claude/codex/opencode) found on PATH'); return 1; }
-    if (installedIntegration.length) {
-      console.log(`Installed hosts: ${[...installedRouting, ...installedIntegration].join(', ')}`
-        + dim(`  (${installedIntegration.join(', ')} = integration host — wired + guided, never a routing target)`));
-    } else {
-      console.log(`Installed hosts: ${installedRouting.join(', ')}`);
-    }
+    const installedRouting = HOSTS.filter((h) => hosts[h.id].present && ROUTING.has(h.id)
+      && (h.id !== 'opencode' || cfg.providers.hosts.opencode)).map((h) => h.id);
+    const installedOpenCode = hosts.opencode?.present && !cfg.providers.hosts.opencode;
+    if (installedRouting.length === 0 && !installedOpenCode) { fail('no frontier CLI (claude/codex/opencode) found on PATH'); return 1; }
+    console.log(`Installed hosts: ${installedRouting.join(', ') || 'none'}${installedOpenCode ? dim('  (opencode is available; type it to opt in)') : ''}`);
     // Default: every currently ENABLED host (even one temporarily absent from
     // PATH — a bare enter must never tear down an enabled host it simply can't
     // see right now) ∪ newly detected routing hosts. An installed-but-disabled
-    // integration host is opt-in by typing it — a bare enter must not opt a
-    // third host's config home in sight unseen either (codex-review r3).
+    // OpenCode host remains opt-in by typing it — a bare enter must not opt a
+    // third host's config home in sight unseen either.
     const enabledHosts = HOSTS.filter((h) => cfg.providers.hosts[h.id]).map((h) => h.id);
     const dflt = [...new Set([...enabledHosts, ...installedRouting])];
     const absentEnabled = enabledHosts.filter((h) => !hosts[h].present);
@@ -469,13 +458,11 @@ async function pick({ flags, cwd, pkgRoot }) {
     fail(`unknown host(s): ${unknown.join(', ')} (valid: ${[...known].join(', ')}) — nothing changed`);
     return 2;
   }
-  // Split the tiers: routing hosts drive primary/seeds; integration hosts are
-  // wired + guided. The routing pair needs at least one member (primaryHost
-  // must be enabled) — fall back to claude, keeping any integration choice.
+  // The routing set needs at least one primary-capable member; OpenCode remains
+  // routable but cannot satisfy that primary-host invariant on its own.
   const routing = enabled.filter((h) => ROUTING.has(h));
-  const integrations = enabled.filter((h) => INTEGRATION.has(h));
-  if (!routing.length) routing.push('claude');
-  enabled = [...routing, ...integrations];
+  if (!routing.some((h) => PRIMARY_HOSTS.includes(h))) routing.unshift('claude');
+  enabled = [...new Set(routing)];
   // primary host — which host leads (default claude); must be a ROUTING host.
   let primaryHost = prevPrimary;
   if (flags['primary-host'] !== undefined) {
@@ -519,7 +506,7 @@ async function pick({ flags, cwd, pkgRoot }) {
     hosts: {
       claude: routing.includes('claude'),
       codex: routing.includes('codex'),
-      opencode: integrations.includes('opencode'),
+      opencode: enabled.includes('opencode'),
     },
     aqeProvider,
     aqeFallback,
@@ -546,7 +533,7 @@ async function pick({ flags, cwd, pkgRoot }) {
     for (const w of warnings) warn(w);
     cfg.providers.dualRouting = { ...cfg.providers.dualRouting, ...policy };
   }
-  const prunedRoutes = pruneRoutesForHosts(cfg.providers.dualRouting, { hosts: routing });
+  const prunedRoutes = pruneRoutesForHosts(cfg.providers.dualRouting, { hosts: enabled });
   cfg.providers.dualRouting = prunedRoutes.policy;
   for (const message of prunedRoutes.warnings) warn(message);
 

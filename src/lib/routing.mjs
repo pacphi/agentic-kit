@@ -19,7 +19,9 @@ export const ACTIVITIES = [
 // Activities ak originated (no upstream rUv template) — flagged wherever surfaced (ADR-0002).
 export const AK_ORIGINATED = new Set(['packaging', 'release']);
 
-// Host → aqe/router provider type. Both are subscription-billed ($0 marginal).
+// Host → aqe/router provider type. OpenCode deliberately has no entry: its
+// execution provider is observed per worker and must never be inferred from the
+// host or silently projected into AQE's separate provider vocabulary.
 export const HOST_PROVIDER = { claude: 'claude-code', codex: 'codex' };
 export const HOSTS = routableHostIds();
 
@@ -96,7 +98,7 @@ export function formatModelHelp() {
   ];
   for (const host of HOSTS) {
     lines.push(`  ${host}:`);
-    for (const m of MODEL_CATALOG[host]) lines.push(`    ${m.id.padEnd(28)} ${m.tier.padEnd(10)} ${m.note}`);
+    for (const m of MODEL_CATALOG[host] ?? []) lines.push(`    ${m.id.padEnd(28)} ${m.tier.padEnd(10)} ${m.note}`);
   }
   for (const [prov, models] of Object.entries(PROVIDER_MODEL_CATALOG)) {
     lines.push(`  ${prov} (aqe-fallback provider — metered):`);
@@ -454,6 +456,10 @@ export function materializeRunPlan(policy = {}, { template = 'feature', task = '
  */
 export function policyToDualRunConfig(policy = {}, opts = {}) {
   const plan = materializeRunPlan(policy, opts);
+  const unsupported = plan.workers.filter((worker) => !['claude', 'codex'].includes(worker.host));
+  if (unsupported.length) {
+    throw new Error(`ak dual supports Claude/Codex workers only; use ak run for ${[...new Set(unsupported.map((worker) => worker.host))].join(', ')}`);
+  }
   return {
     workers: plan.workers.map((worker) => ({
       id: worker.id,
@@ -492,7 +498,11 @@ export function escalatePolicy(policy = {}) {
  */
 export function routedVendors(policy = {}) {
   const routes = resolveRoutes(policy);
-  return new Set(Object.values(routes).map((r) => vendorOf(HOST_PROVIDER[r.host])));
+  return new Set(Object.values(routes)
+    .map((r) => HOST_PROVIDER[r.host])
+    .filter(Boolean)
+    .map((provider) => vendorOf(provider))
+    .filter(Boolean));
 }
 
 /** Compact summary for status rows / dashboard / tables. */
@@ -518,7 +528,7 @@ export function validateRoute(route = {}) {
   const { host, model } = route;
   const errs = [];
   if (!isRoutableHost(host)) errs.push(`unknown host "${host}" (expected: ${HOSTS.join('|')})`);
-  else if (!AQE_CONSTRUCTIBLE_PROVIDERS.includes(HOST_PROVIDER[host])) errs.push(`host "${host}" maps to a non-constructible provider`);
+  else if (HOST_PROVIDER[host] && !AQE_CONSTRUCTIBLE_PROVIDERS.includes(HOST_PROVIDER[host])) errs.push(`host "${host}" maps to a non-constructible provider`);
   if (model != null && (typeof model !== 'string' || model.trim() === '')) errs.push('model must be a non-empty string');
   return errs;
 }

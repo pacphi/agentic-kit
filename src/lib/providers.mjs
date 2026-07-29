@@ -18,8 +18,8 @@
 //     OpenAI models are reached via `openai`).
 //
 // Two independent axes:
-//   host axis     — which agent CLI runs the ruflo loop (claude, codex). ruflo runs
-//                   both at once (dual-mode). This is about the coding-agent CLI.
+//   host axis     — which agent CLI executes a managed worker (claude, codex,
+//                   opencode). Ruvlo's dual mode itself remains Claude/Codex.
 //   provider axis — which LLM the *routers* use: ruflo's API-key providers
 //                   (`ruflo providers configure`) and aqe's `AQE_LLM_PROVIDER`.
 //                   Independent of the host axis; keys live in the env, never kit.json.
@@ -302,8 +302,9 @@ export async function collectIntegrationFacts({
   });
 }
 
-/** Hosts eligible for legacy setup/sync installation and teardown loops. */
-export const commandHosts = () => HOSTS.filter((host) =>
+/** Hosts eligible for legacy env-backed setup/sync loops. OpenCode has its own
+ * owner-module lifecycle because it has no ruflo enable-env projection. */
+export const commandHosts = () => HOSTS.filter((host) => host.enableEnv &&
   HOST_REGISTRY.find((entry) => entry.id === host.id)?.capabilities.canRouteActivities);
 
 /** Where host-enable env lands: project settings.local.json inside a repo (same
@@ -558,7 +559,7 @@ export function formatRoutingTable(cfg) {
   const routes = resolveRoutes(policy);
   const s = routingSummary(policy);
   const lines = [bold('\nper-activity routing')
-    + dim(`  (${s.byHost.claude ?? 0} claude · ${s.byHost.codex ?? 0} codex · ${s.custom} custom · .agentic-qe/llm-config.json)`)];
+    + dim(`  (${s.byHost.claude ?? 0} claude · ${s.byHost.codex ?? 0} codex · ${s.byHost.opencode ?? 0} opencode · ${s.custom} custom · .agentic-qe/llm-config.json)`)];
   // "diverges from", never "stale"/"outdated"/"superseded": the pinned model is
   // sometimes the better choice for an activity, so the wording must present a
   // decision rather than a lag (#55).

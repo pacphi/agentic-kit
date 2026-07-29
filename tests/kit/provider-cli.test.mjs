@@ -316,14 +316,14 @@ test('excluding claude keeps codex-owned bridges while pruning claude routes', (
   }
 });
 
-test('interactive pick: installed opencode is displayed as an integration host but only ENTER-enabled when already on', () => {
+test('interactive pick keeps installed OpenCode opt-in until explicitly selected', () => {
   const sb = pickSandbox({ hosts: { claude: true, codex: false, opencode: false } });
   try {
     // Blank answers to every prompt: accept the defaults.
     const r = akPick(['x', 'provider', 'pick'], sb, { input: '\n\n\n\n' });
     assert.equal(r.status, 0, `interactive pick failed\nstdout: ${r.stdout}\nstderr: ${r.stderr}`);
-    assert.match(r.stdout, /integration host — wired \+ guided, never a routing target/,
-      'opencode is displayed with its non-routing qualifier');
+    assert.match(r.stdout, /opencode is available; type it to opt in/,
+      'OpenCode is displayed but not implicitly enabled');
     assert.equal(kitJson(sb.home).providers.hosts.opencode, false,
       'a bare enter must not opt a third host in sight unseen');
   } finally {

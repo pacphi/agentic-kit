@@ -11,9 +11,12 @@ test('ak run materializes the host-neutral plan and keeps run-local route overri
   assert.equal(cfg.providers.dualRouting.implementation.host, 'codex');
 });
 
-test('ak run rejects an OpenCode route until the capability proof is complete', () => {
+test('ak run materializes an explicit OpenCode route', () => {
   const cfg = { providers: { dualRouting: { ...seedDualRouting(), 'security-scan': {
     host: 'opencode', model: 'openrouter/example', source: 'user',
   } } } };
-  assert.throws(() => buildRunPlan(cfg, 'security', 'src/auth'), /canRouteActivities/);
+  const { plan } = buildRunPlan(cfg, 'security', 'src/auth');
+  const scanner = plan.workers.find((entry) => entry.activity === 'security-scan');
+  assert.equal(scanner.host, 'opencode');
+  assert.equal(scanner.configuredModel, 'openrouter/example');
 });
