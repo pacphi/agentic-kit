@@ -243,8 +243,9 @@ function terminalResult(state, observation, clock) {
 }
 
 /**
- * Create a fully injectable OpenCode worker adapter. No command invokes this
- * adapter yet; its presence does not change OpenCode's routing capability.
+ * Create a fully injectable OpenCode worker adapter. Invoked by `ak run`
+ * (the canonical executor) for opencode-routed workers; routing capability
+ * itself is gated by the host registry (canRouteActivities, #82).
  */
 export function createOpenCodeExecutionAdapter({
   fetchFn = globalThis.fetch, spawnFn = nodeSpawn, haveFn = have, reservePort = defaultReservePort,
