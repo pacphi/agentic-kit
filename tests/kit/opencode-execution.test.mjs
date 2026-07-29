@@ -107,9 +107,9 @@ test('runner timeout aborts the session event stream and terminates the owned se
     throw new Error(`unexpected URL ${url}`);
   };
   const adapter = createOpenCodeExecutionAdapter({
-    fetchFn, spawnFn: () => child, reservePort: async () => 43126, secret: () => 'ephemeral',
+    fetchFn, spawnFn: () => child, haveFn: async () => true, reservePort: async () => 43126, secret: () => 'ephemeral',
   });
-  const result = await executeWorker(worker, adapter, { cwd: process.cwd(), timeoutMs: 1 });
+  const result = await executeWorker(worker, adapter, { cwd: process.cwd(), timeoutMs: 100 });
   assert.equal(result.status, 'timed_out');
   assert.equal(result.exitCategory, 'timeout');
   assert.equal(cancelled, true);
@@ -129,14 +129,14 @@ test('a server that ignores TERM receives one bounded KILL fallback and reports 
     throw new Error(`unexpected URL ${url}`);
   };
   const adapter = createOpenCodeExecutionAdapter({
-    fetchFn, spawnFn: () => child, reservePort: async () => 43127, secret: () => 'ephemeral', terminationGraceMs: 1, forceGraceMs: 1,
+    fetchFn, spawnFn: () => child, haveFn: async () => true, reservePort: async () => 43127, secret: () => 'ephemeral', terminationGraceMs: 1, forceGraceMs: 1,
   });
-  const result = await executeWorker(worker, adapter, { cwd: process.cwd(), timeoutMs: 1 });
+  const result = await executeWorker(worker, adapter, { cwd: process.cwd(), timeoutMs: 100 });
   assert.equal(result.status, 'failed');
   assert.equal(result.exitCategory, 'orphaned');
 });
 
-test('a stalled prompt submission is launch-bounded and tears down its owned server', async () => {
+test('a stalled prompt submission becomes a timeout and tears down its owned server', async () => {
   const child = { signals: [], kill(signal) { this.signals.push(signal); return true; } };
   const fetchFn = async (url, init = {}) => {
     if (url.endsWith('/global/health')) return response({ healthy: true });
@@ -146,9 +146,11 @@ test('a stalled prompt submission is launch-bounded and tears down its owned ser
     throw new Error(`unexpected URL ${url}`);
   };
   const adapter = createOpenCodeExecutionAdapter({
-    fetchFn, spawnFn: () => child, reservePort: async () => 43128, secret: () => 'ephemeral',
+    fetchFn, spawnFn: () => child, haveFn: async () => true, reservePort: async () => 43128, secret: () => 'ephemeral',
   });
-  const state = await adapter.prepare({ worker, cwd: process.cwd() });
-  await assert.rejects(() => adapter.launch(state, { timeoutMs: 1 }), /prompt_async timed out/);
+  const result = await executeWorker(worker, adapter, { cwd: process.cwd(), timeoutMs: 20 });
+  assert.equal(result.status, 'timed_out');
+  assert.equal(result.exitCategory, 'timeout');
+  assert.match(result.failure.reason, /prompt_async timed out/);
   assert.deepEqual(child.signals, ['SIGTERM']);
 });

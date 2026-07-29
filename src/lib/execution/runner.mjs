@@ -52,7 +52,12 @@ export async function executeWorker(worker, adapter, {
     }
     return validateWorkerResult(adapter.interpret(state, watched.observation));
   } catch (error) {
-    return workerFailure(worker, { exitCategory: 'protocol_error', failure: boundedFailure(error), startedAt, clock });
+    const timedOut = error?.code === 'ETIMEDOUT';
+    return workerFailure(worker, {
+      status: timedOut ? 'timed_out' : 'failed',
+      exitCategory: timedOut ? 'timeout' : 'protocol_error',
+      failure: boundedFailure(error), startedAt, clock,
+    });
   } finally {
     if (state) {
       try { await adapter.cleanup(state); } catch { /* terminal result is already authoritative */ }

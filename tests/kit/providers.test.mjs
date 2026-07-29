@@ -221,7 +221,7 @@ test('every host descriptor carries an npm package name for install/update', () 
 
 test('managed and routable host sets come only from registry capabilities', () => {
   assert.deepEqual(managedHostIds(), ['claude', 'codex', 'opencode']);
-  assert.deepEqual(routableHostIds(), ['claude', 'codex']);
+  assert.deepEqual(routableHostIds(), ['claude', 'codex', 'opencode']);
   assert.deepEqual(HOSTS.map((h) => h.id), managedHostIds());
 });
 

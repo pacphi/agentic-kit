@@ -110,7 +110,11 @@ async function requestWithin(fetchFn, endpoint, password, pathname, options, tim
   try {
     return await Promise.race([
       requestNoContent(fetchFn, endpoint, password, pathname, { ...options, signal: controller.signal }),
-      new Promise((_, reject) => { timer = setTimeout(() => { controller.abort(); reject(new Error(`${options.method ?? 'POST'} ${pathname} timed out`)); }, timeoutMs); }),
+      new Promise((_, reject) => { timer = setTimeout(() => {
+        controller.abort();
+        const error = Object.assign(new Error(`${options.method ?? 'POST'} ${pathname} timed out`), { code: 'ETIMEDOUT' });
+        reject(error);
+      }, timeoutMs); }),
     ]);
   } finally { clearTimeout(timer); }
 }
