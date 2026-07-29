@@ -78,7 +78,7 @@ test('cross-host-arbitrage fires when one host is hot and the other idle', () =>
   });
   const f = byId(detectLimitInsights(l, null), 'cross-host-arbitrage-claude');
   assert.ok(f, 'expected an arbitrage finding');
-  assert.equal(f.command, 'ak x provider pick');
+  assert.equal(f.command, 'ak host pick');
   assert.match(f.title, /89%/);
   assert.match(f.title, /3%/);
 });

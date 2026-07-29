@@ -15,7 +15,7 @@ import { AQE_CONSTRUCTIBLE_PROVIDERS } from '../../src/lib/routing.mjs';
 import {
   AQE_PROVIDER_TYPES, AQE_PROVIDER_CREDENTIALS, aqeProviderCredential,
   credentialGaps, detectAqeProviders, fallbackSource,
-  applyAqeRouter, aqeRouterFile,
+  applyAqeRouter, aqeRouterFile, collectIntegrationFacts,
 } from '../../src/lib/providers.mjs';
 
 // An env with NO provider credentials at all — the baseline every "absent" case
@@ -281,6 +281,39 @@ test('detectAqeProviders shows openrouter as present when OPENROUTER_API_KEY is 
   const got = detectAqeProviders({ env: { OPENROUTER_API_KEY: 'sk-test' } });
   assert.equal(got.openrouter.present, true);
   assert.equal(got.openai.present, false, 'and a keyless provider must not read as configured');
+});
+
+test('collectIntegrationFacts bills Anthropic/OpenAI API-key configurations as metered', async () => {
+  const keyedDir = tmpProject();
+  const keylessDir = tmpProject();
+  try {
+    const keyed = await collectIntegrationFacts({
+      cwd: keyedDir,
+      cfg: defaultCfg(),
+      env: {
+        ANTHROPIC_API_KEY: 'anthropic-test-key',
+        OPENAI_API_KEY: 'openai-test-key',
+      },
+    });
+    for (const id of ['anthropic', 'openai']) {
+      assert.equal(keyed.providers[id].configured, true, `${id} key is configured`);
+      assert.equal(keyed.providers[id].billing, 'metered',
+        `${id} API-key inference is metered, regardless of the registry's host-login default`);
+    }
+
+    const keyless = await collectIntegrationFacts({
+      cwd: keylessDir,
+      cfg: defaultCfg(),
+      env: BARE_ENV,
+    });
+    assert.equal(keyless.providers.anthropic.configured, false);
+    assert.equal(keyless.providers.anthropic.billing, 'subscription');
+    assert.equal(keyless.providers.openai.configured, false);
+    assert.equal(keyless.providers.openai.billing, 'subscription');
+  } finally {
+    rm(keyedDir);
+    rm(keylessDir);
+  }
 });
 
 // ── fallbackSource (provenance stamping, #55 item 4) ───────────────────────

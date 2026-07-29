@@ -19,13 +19,19 @@ agentic-qe to use one or both. Two independent axes:
   - **ruflo** — `anthropic` / `openai` / `google` / `ollama` via `ruflo providers configure`.
   - API keys live in the environment; they are never persisted to `kit.json`.
 
+During the alpha, `ak host` is the canonical namespace for execution-host lifecycle and
+selection; `ak x host` is its plumbing spelling. `ak provider` and `ak x provider` are deprecated
+compatibility aliases that warn on stderr and will be removed before stable. This does not rename
+inference providers or bindings into hosts; provider flags remain temporarily co-located on this
+workflow while dedicated capability-driven surfaces mature.
+
 **One or several — you're never forced to pick just one.** All three surfaces run multiple
 providers concurrently:
 - **ruflo hosts** — enable `claude` *and* `codex` together (dual-mode); ruflo runs both.
 - **ruflo LLM providers** — a list, with load-balancing + automatic failover.
 - **agentic-qe** — its `HybridRouter` **auto-enables every provider that has an API key in the
   env** and fails over across an ordered chain. `AQE_LLM_PROVIDER` only pins the *default* (the
-  primary) — the others stay enabled. So `ak x provider` sets aqe's primary; adding
+  primary) — the others stay enabled. So `ak host` sets aqe's primary; adding
   `OPENAI_API_KEY` / `GEMINI_API_KEY` to the env brings those online as fallbacks automatically.
 
 ### aqe fallback chain — managed from `kit.json`
@@ -34,7 +40,7 @@ For **deterministic** ordering (rather than relying on env auto-enable), `ak` wr
 `.agentic-qe/llm-config.json` from `kit.json`:
 
 ```bash
-ak x provider pick --aqe-provider claude-code \
+ak host pick --aqe-provider claude-code \
   --aqe-fallback 'claude-code:claude-opus-5; openai:gpt-5.6; gemini:gemini-3.5-flash'
 ```
 
@@ -43,16 +49,16 @@ priority; model IDs are examples current as of July 2026 — use what your provi
 ak writes a **complete** chain (aqe merges it shallowly, so partial chains would drop
 defaults), sets each provider `enabled`, and tags the file `_managedBy: agentic-kit`. **API keys
 are never written** — they stay in the env (aqe refuses to persist them anyway). `ak sync`
-reapplies the chain; `ak status` flags drift; `ak x provider off` restores the pre-ak file from
+reapplies the chain; `ak status` flags drift; `ak host off` restores the pre-ak file from
 its one-time `.bak` (or removes an ak-created file). Entries need populated models — aqe's router
 skips an entry with none. For lower-level edits, `aqe llm-router config` still works.
 
 ### Managing it (prompts-once, reversible)
 
 ```bash
-ak x provider status   # detected CLIs + versions, what's enabled, what's wired
-ak x provider pick     # choose ruflo hosts / aqe provider / ruflo API providers → persist → apply
-ak x provider off      # reset to claude-only default; strip managed env keys
+ak host status   # detected CLIs + versions, what's enabled, what's wired
+ak host pick     # choose ruflo hosts / aqe provider / ruflo API providers → persist → apply
+ak host off      # reset to claude-only default; strip managed env keys
 ```
 
 `pick` persists your choice to `kit.json` and applies it: it writes the ruflo backend flags
@@ -70,7 +76,7 @@ dual-mode reference block and `docs/PROVIDERS.md` §3.5 for the routing table an
 
 ### Install & update (install-method-aware)
 
-- **First install** — `ak setup` (and `ak x provider pick`) installs any *enabled* host that
+- **First install** — `ak setup` (and `ak host pick`) installs any *enabled* host that
   is entirely **absent**: `npm i -g @anthropic-ai/claude-code` / `@openai/codex`.
 - **Updates** — `ak sync` keeps **npm-managed** hosts current (drift is detected on the same
   cached TTL as ruflo/aqe, and surfaces in the bin nudge + `ak status`).

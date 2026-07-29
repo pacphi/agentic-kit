@@ -41,6 +41,8 @@ test('dispatch table parses and covers the previously-omitted commands', () => {
   assert.ok(table.size >= 6, `expected several commands, parsed ${table.size}`);
   assert.ok(table.has('dual'), 'dual must be in the dispatch table');
   assert.ok(table.has('dashboard'), 'dashboard must be in the dispatch table');
+  assert.ok(table.has('host'), 'canonical host management must be in the dispatch table');
+  assert.ok(table.has('provider'), 'deprecated provider shim must remain in the dispatch table');
 });
 
 // One test per command: loads, and exposes a complete help surface.

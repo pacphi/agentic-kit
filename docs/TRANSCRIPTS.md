@@ -30,18 +30,24 @@ verified against the current source by the test suite
 
 ## 1. The two transcript stores
 
-Both providers write complete session logs to disk as JSONL — one JSON object
+Both supported transcript **hosts** write complete session logs to disk as JSONL — one JSON object
 per line — and the kit reads them **read-only** (transcripts are never
 rewritten; rule 3 of the module header, `usage-index.mjs:22-29`):
 
-| Provider | Store | Discovered by |
+| Host | Store | Discovered by |
 |---|---|---|
-| Claude Code | `~/.claude/projects/<encoded-project-dir>/<sessionId>.jsonl` | `listClaude` (`usage-index.mjs:648`) — exactly one level of project directories |
+| Claude Code | `~/.claude/projects/<encoded-project-dir>/<sessionId>.jsonl` | `listClaude` (`usage-index.mjs:684`) — exactly one level of project directories |
 | Codex CLI | `~/.codex/sessions/<yyyy>/<mm>/<dd>/rollout-<ts>-<uuid>.jsonl` | `listCodex` (`usage-index.mjs:663`) — the `yyyy/mm/dd` tree walk |
 
-Roots come from `defaultRoots()` (`usage-index.mjs:640`) and are injectable
+Roots come from `defaultRoots()` (`usage-index.mjs:676`) and are injectable
 for tests. A malformed line is skipped, never fatal (`jsonLines`,
-`usage-index.mjs:292` — one corrupt line must not cost a whole file).
+`usage-index.mjs:315` — one corrupt line must not cost a whole file).
+
+Host evidence is not inference-provider proof. A Claude transcript may describe Anthropic-,
+OpenRouter-, or Ollama-served inference. ADR-0016 defines separate
+[bindings and field provenance](adr/0016-capability-driven-integration-adapters.md). Until that
+Proposed migration is implemented, the legacy session field named `provider` should be read as the
+transcript host/parser identity unless other evidence grounds the inference provider.
 
 ### 1.1 Claude entry vocabulary
 
@@ -59,7 +65,7 @@ An assistant entry with `isApiErrorMessage: true` is a **local placeholder**
 Claude Code writes when a request dies before a real completion (connection
 drop, rate limit, auth failure — `model: "<synthetic>"`, all-zero usage). It
 is real engaged time but not a model attempt: counted as an *exception*, never
-pushed into `models` or priced (`usage-index.mjs:469-478`; the full story is
+pushed into `models` or priced (`usage-index.mjs:498-517`; the full story is
 [`USAGE-SCORECARD-METRICS.md`](USAGE-SCORECARD-METRICS.md) §10).
 
 ### 1.2 Codex entry vocabulary
@@ -111,7 +117,7 @@ recorded in `USAGE-SCORECARD-METRICS.md` Appendix A).
 |---|---|---|
 | `role` | all | `"user"` or `"assistant"` — the **Messages-API role**, not the author (see below) |
 | `at` | all | ISO timestamp |
-| `text` | all | Flattened display text (`claudeText`, `usage-index.mjs:348` — binary payloads dropped: a pasted screenshot renders as `[image]`, a tool result is prefixed `[tool result]`) |
+| `text` | all | Flattened display text (`claudeText`, `usage-index.mjs:384` — binary payloads dropped: a pasted screenshot renders as `[image]`, a tool result is prefixed `[tool result]`) |
 | `model` | assistant | The model id; the literal string `exception` for an API-error placeholder turn (`usage-index.mjs:473`) |
 | `tools` | assistant | Tool names invoked in the turn |
 | `prompt` | user | `isHumanPrompt`'s verdict (`usage-index.mjs:388-397`) — drives the **prompt counts** |
@@ -135,7 +141,7 @@ story is [Appendix A](#appendix-a--fix-history).)
 
 ### 3.2 `kind` — the attribution field
 
-`userTurnKind` (`usage-index.mjs:415-426`) classifies every user-role turn:
+`userTurnKind` (`usage-index.mjs:451-455`) classifies every user-role turn:
 
 | `kind` | Test | Meaning |
 |---|---|---|
@@ -169,15 +175,15 @@ and image-only pastes get the right kind" (the two edges).
 
 ## 4. The `readSession` pipeline — how one session becomes a payload
 
-`readSession(id, opts)` (`usage-index.mjs:1173-1256`) is the only way
+`readSession(id, opts)` (`usage-index.mjs:1271-1359`) is the only way
 transcript content leaves the module, and every step is a gate:
 
 ### 4.1 Locate, contain, bound
 
 1. **Id grammar before any filesystem access** — `VALID_ID`
    (`/^[A-Za-z0-9._-]{1,128}$/`, `usage-index.mjs:71`) rejects traversal
-   shapes with `ERR_INVALID_SESSION_ID` (`usage-index.mjs:1184`).
-2. **Locate by id** across both roots (`locate`, `usage-index.mjs:1191`),
+   shapes with `ERR_INVALID_SESSION_ID` (`usage-index.mjs:1215`).
+2. **Locate by id** across both roots (`locate`, `usage-index.mjs:1222`),
    consulting the scan cache when present but never requiring it —
    `readSession` works with no prior `buildIndex`.
 3. **Realpath containment** (`usage-index.mjs:1180-1194`) — the resolved file
@@ -192,8 +198,8 @@ transcript content leaves the module, and every step is a gate:
 ### 4.2 Parse and price
 
 The file is parsed with `withTurns: true` by the provider's parser
-(`usage-index.mjs:1217-1223`), and `meta` is assembled
-(`usage-index.mjs:1219-1238`) with the same fields the Sessions view rows
+(`usage-index.mjs:1298-1303`), and `meta` is assembled
+(`usage-index.mjs:1305-1330`) with the same fields the Sessions view rows
 carry — `prompts`, `responses`, `exceptions`, `sidechain`, `threadSource`,
 `models`, `tools`, `skill`/`plugin`, worktree — plus a `cost` priced from the
 same per-model usage rows `aggregate()` uses (the header used to render a
@@ -205,7 +211,7 @@ Every turn body is passed through `maskSecrets` (`usage-index.mjs:184` — the
 23 secret shapes) **server-side, before
 serialization**, then length-capped at `MAX_TURN_CHARS` (40,000,
 `usage-index.mjs:65`) with the marker appended
-(`usage-index.mjs:1308-1315`). Two invariants:
+(`usage-index.mjs:1339-1348`). Two invariants:
 
 - **Presence is the signal.** `truncated`/`originalChars` are emitted only
   when the slice fired, so a complete turn cannot be misread as abridged.
@@ -330,7 +336,7 @@ Deep links: `#usage/<sessionId>` opens the Transcript view directly
 | Delegation markers | `isSidechain` → `sidechain` flag | `thread_source: "subagent"` → excluded from aggregation, session kept visible |
 | Session title | model-written `ai-title`, first-prompt fallback | first prompt clipped |
 
-**Planned third provider:** OpenRouter-served sessions are invisible to the
+**Planned provider attribution:** OpenRouter-served sessions are invisible to the
 scorecard today; ingesting them (discovery → parser → `kind` attribution →
 pricing → by-host UI) is tracked as
 [#59](https://github.com/pacphi/agentic-kit/issues/59).

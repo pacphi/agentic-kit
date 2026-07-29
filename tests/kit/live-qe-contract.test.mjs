@@ -13,7 +13,8 @@ const observedAt = '2026-07-27T12:00:00Z';
 test('canonical event serialization is a closed allowlist under arbitrary extra fields', () => {
   const allowedTop = new Set([
     'schemaVersion', 'observedAt', 'sourceTimestamp', 'sessionId', 'sessionKey',
-    'parentSessionId', 'traceId', 'spanId', 'parentSpanId', 'host', 'surface',
+    'parentSessionId', 'traceId', 'spanId', 'parentSpanId', 'host',
+    'provider', 'model', 'providerProvenance', 'surface',
     'project', 'projectKey', 'actor',
     'action', 'target', 'status', 'source', 'attributes',
   ]);

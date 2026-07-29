@@ -6,12 +6,13 @@
 // Two independent axes: ruflo host CLIs (claude/codex) and the LLM the routers use.
 import readline from 'node:readline/promises';
 import {
-  HOSTS, API_PROVIDERS, AQE_PROVIDER_TYPES, detectHosts, detectProviders,
+  HOSTS, API_PROVIDERS, AQE_PROVIDER_TYPES, detectHosts,
   settingsTarget, isDefault, applyHosts, applyProviders, ensureDualAgents,
   undoProviders, hostInstallState, hostAuthState, installHost, applyAqeRouter, undoAqeRouter,
   bothHostsEnabled, DUAL_ROLE_TIP, JUDGE_BIAS_TIP, QE_COURT_TIP, suggestedFallbackFor,
   seedDualRoutingIfDualHost, printActivityRoutingTable, ensureCodexMcp, undoCodexMcp,
   ensureRufloMcpInCodex, undoRufloMcpInCodex, detectAqeProviders, aqeProviderCredential, credentialGaps, fallbackSource,
+  collectIntegrationFacts,
 } from '../../lib/providers.mjs';
 import { parseRouteSpecs, formatModelHelp, PRIMARY_HOSTS, DEFAULT_PRIMARY_HOST, divergedRoutes, refreshSeededRoutes, modelNote, ACTIVITIES } from '../../lib/routing.mjs';
 import { loadKitConfig, saveKitConfig } from '../../lib/config.mjs';
@@ -47,7 +48,7 @@ export const options = {
  *  key (codex/gemini OAuth live on the host axis, not as aqe provider types). */
 export const AQE_BILLING_HINT = 'billing: claude-code = your Claude subscription ($0), ollama/onnx = local ($0), all others = metered API key';
 
-export const help = `ak x provider — frontier-host + LLM-provider detection and wiring
+export const help = `ak host — frontier-host + LLM-provider detection and wiring
 
 Two independent axes: which host CLI runs the ruflo loop (claude/codex, can be
 both), and which LLM the routers use (aqe + ruflo). Mirrors \`ak x mcp\`: detect →
@@ -90,11 +91,11 @@ per-activity routing policy from sensible defaults and materializes it into
 your edits are preserved across syncs. ${formatModelHelp()}
 
 Examples:
-  ak x provider                          show what's detected + wired + routing
-  ak x provider pick --host claude,codex
-  ak x provider pick --route 'testing:claude:claude-sonnet-5'
-  ak x provider refresh --activity architecture,design
-  ak x provider off`;
+  ak host                          show what's detected + wired + routing
+  ak host pick --host claude,codex
+  ak host pick --route 'testing:claude:claude-sonnet-5'
+  ak host refresh --activity architecture,design
+  ak host off`;
 
 /** Stamp provenance onto chain entries. 'suggested' = ak proposed it and the
  *  user pressed enter; 'user' = they typed it. Only 'suggested' entries are
@@ -122,8 +123,9 @@ export async function run({ flags, positionals }) {
 
 async function status({ flags, cwd }) {
   const cfg = loadKitConfig();
-  const hosts = await detectHosts(cwd);
-  const providers = detectProviders();
+  const facts = await collectIntegrationFacts({ cwd, cfg });
+  const hosts = facts.hosts;
+  const providers = facts.providers;
   const { scope } = settingsTarget(cwd);
 
   if (flags.json) {
@@ -183,7 +185,8 @@ async function status({ flags, cwd }) {
   console.log(bold('\nruflo LLM API providers') + dim('  (ruflo router; keys read from env)'));
   for (const p of API_PROVIDERS) {
     const cfgEntry = cm.find((m) => m.id === p.id);
-    const key = p.keyEnv.length ? (providers[p.id].keyPresent ? 'key present' : 'no key') : 'local';
+    const key = p.keyEnv.length
+      ? (providers[p.id]?.credentialPresent ? 'key present' : 'no key') : 'local';
     const conf = cfgEntry ? `configured${cfgEntry.model ? ` (${cfgEntry.model})` : ''}` : dim('not configured');
     console.log(`  ${p.id.padEnd(10)} ${key.padEnd(12)} ${conf}`);
   }
@@ -193,7 +196,7 @@ async function status({ flags, cwd }) {
 
   const codexIdle = hosts.codex.present && !cfg.providers.hosts.codex;
   console.log('');
-  if (codexIdle) info('codex is installed but disabled — enable it with: ak x provider pick');
+  if (codexIdle) info('codex is installed but disabled — enable it with: ak host pick');
   else ok('provider config reflects installed CLIs');
   printDualHostTips(cfg);
   return 0;
@@ -479,7 +482,7 @@ async function pick({ flags, cwd }) {
   if (rmcp.changed || !rmcp.ok) (rmcp.ok ? ok : warn)(`ruflo→codex MCP: ${rmcp.detail}`);
   const prov = await applyProviders(cfg, cwd);
   (prov.ok ? (prov.changed ? ok : info) : warn)(`ruflo providers: ${prov.detail}`);
-  ok('saved to kit.json — reapplied on every `ak sync`; undo with `ak x provider off`');
+  ok('saved to kit.json — reapplied on every `ak sync`; undo with `ak host off`');
   if (seed.seeded) ok(`per-activity routing seeded — ${seed.count} activities (dual-host defaults; tune with --route or edit kit.json)`);
   printActivityRoutingTable(cfg);
   await maybeWriteQeCourtDefaults({ nonInteractive, cwd, enabled, aqeProvider });

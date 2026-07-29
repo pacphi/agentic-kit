@@ -12,6 +12,32 @@ There are two independent things you can point at a model:
 - **Providers** — which LLM the *routers* use: ruflo's provider router and agentic-qe's
   `HybridRouter`. Independent of the host; API keys always live in your environment.
 
+The full model has four separate axes:
+
+| Axis | Meaning | Examples |
+|---|---|---|
+| **Host** | Agent CLI/environment executing work | Claude Code, Codex CLI, OpenCode |
+| **Provider** | Inference service, gateway, or local runtime | Anthropic, OpenAI, OpenRouter, Ollama |
+| **Projection** | Native configuration surface receiving intent | Claude settings, Codex TOML, OpenCode JSON, ruflo/AQE routers |
+| **Observability** | Evidence source establishing facts | host JSONL, OpenRouter metadata, quota channels, Ollama catalogue |
+
+A **binding** connects a host to a provider through a projection and transport. One Ollama
+provider can therefore have independent `ollama-via-claude` and `ollama-via-codex` bindings.
+OpenRouter is a provider behind a host, never automatically a third host. OpenCode may support
+managed lifecycle surfaces while remaining ineligible as a primary or per-activity routing host.
+This Proposed capability model is
+[ADR-0016](adr/0016-capability-driven-integration-adapters.md); current controls below remain
+backward compatible while its implementation proceeds.
+
+> [!IMPORTANT]
+> During the alpha, `ak host` is the canonical namespace for execution-host lifecycle and
+> selection: `status`, `pick`, `refresh`, and `off`; `ak x host` is its plumbing spelling.
+> `ak provider` and `ak x provider` remain only as deprecated compatibility aliases, warn on
+> stderr, and will be removed before the stable release. This is **not** a wholesale
+> rename of inference-provider management: providers and bindings remain separate axes. Some
+> router-provider flags are temporarily co-located on the host configuration workflow while their
+> dedicated capability-driven surfaces mature.
+
 ---
 
 ## Level 0 — do nothing (the point)
@@ -29,7 +55,7 @@ If you happen to have `codex` installed, `ak` notices and *offers* — it never 
 for you:
 
 ```text
-ℹ codex CLI detected — run `ak x provider pick` to let ruflo use both claude and codex
+ℹ codex CLI detected — run `ak host pick` to let ruflo use both claude and codex
 ```
 
 ## Two configs, one front door
@@ -59,10 +85,10 @@ use). Level 4 below is the full `ak`-way ↔ raw-tool-way map for every knob in 
 > [!NOTE]
 > Already have an older `ak` installed and want a capability that shipped later (like
 > dual-host)? Updating the binary and enabling the feature are two separate motions —
-> see [UPGRADING.md](UPGRADING.md) for the `sync` vs `provider pick` distinction.
+> see [UPGRADING.md](UPGRADING.md) for the `sync` vs `host pick` distinction.
 
 ```bash
-ak x provider pick
+ak host pick
 ```
 
 An interactive picker (or flags for scripts). Enable `codex` and `ak`:
@@ -78,7 +104,7 @@ An interactive picker (or flags for scripts). Enable `codex` and `ak`:
 > machine-wide user settings. Outside any repo, user scope is used and said so.
 
 ```bash
-ak x provider pick --host claude,codex --yes     # non-interactive
+ak host pick --host claude,codex --yes     # non-interactive
 ```
 
 Or enable codex during **first-time setup**, in one shot — same gated/prompted/external-safe
@@ -104,7 +130,7 @@ lives on the **host axis** (Level 1, which CLI runs the loop) — not as an aqe 
 paths are reached by enabling those *hosts*, while the provider list is API-metered.
 
 ```bash
-ak x provider pick --aqe-provider claude-code    # run QE on your subscription, no API bill
+ak host pick --aqe-provider claude-code    # run QE on your subscription, no API bill
 ```
 
 `ak` writes `AQE_LLM_PROVIDER` for you. Add `OPENAI_API_KEY` to your env and agentic-qe's
@@ -116,7 +142,7 @@ When you want explicit ordering rather than env auto-enable, `ak` manages agenti
 `.agentic-qe/llm-config.json` from `kit.json`:
 
 ```bash
-ak x provider pick \
+ak host pick \
   --aqe-provider claude-code \
   --aqe-fallback 'claude-code:claude-opus-5; openai:gpt-5.6; gemini:gemini-3.5-flash'
 ```
@@ -133,7 +159,7 @@ writes your API keys.
 provider — add them to the chain and put `OPENROUTER_API_KEY` in your env:
 
 ```bash
-ak x provider pick \
+ak host pick \
   --aqe-provider claude-code \
   --aqe-fallback 'claude-code:claude-opus-5; openrouter:z-ai/glm-5.2'
 ```
@@ -149,14 +175,14 @@ When **both** hosts are enabled and `agentic-qe ≥ 3.13.1` is installed, `ak` s
 **per-activity routing policy**: each kind of work (architecture, implementation, testing,
 review, …) is routed to the host and model that suits it — Claude for reasoning/review,
 Codex for execution — and materialized into `.agentic-qe/llm-config.json` (`agentOverrides`).
-It's seeded automatically on `ak x provider pick` / `ak setup`; nothing happens for
+It's seeded automatically on `ak host pick` / `ak setup`; nothing happens for
 claude-only projects.
 
 ```bash
-ak x provider pick --host claude,codex        # enables both → seeds routing → prints the table
+ak host pick --host claude,codex        # enables both → seeds routing → prints the table
 ak status                                     # a "routing" row; the dashboard shows the matrix
-ak x provider pick --route 'testing:claude:claude-sonnet-5'   # override one activity (persisted)
-ak x provider pick --primary-host codex       # make codex the lead; claude becomes the alternate
+ak host pick --route 'testing:claude:claude-sonnet-5'   # override one activity (persisted)
+ak host pick --primary-host codex       # make codex the lead; claude becomes the alternate
 ```
 
 **Which host leads.** `--primary-host claude|codex` (default `claude`) chooses the primary.
@@ -205,8 +231,13 @@ Defaults (all overridable; your edits are marked `custom` and never re-seeded):
 > frontier domains. Rule of thumb: `claude-opus-5` is the premium default;
 > `claude-fable-5` is the escalation ceiling.
 
-`ak x provider pick --help` prints this list too. Tuning is per-route and reversible: hand-edit
-`kit.json` `providers.dualRouting`, pass `--route`, or `ak x provider off` to clear it entirely.
+`ak host pick --help` prints this list too. Tuning is per-route and reversible: hand-edit
+`kit.json` `providers.dualRouting`, pass `--route`, or `ak host off` to clear it entirely.
+
+`dualRouting` intentionally names a host and model, not an inference provider. Provider resolution
+is a separate binding lookup; absent grounded evidence remains unknown or explicitly inferred.
+Likewise, `ak dual run` continues to mean the Claude+Codex collaboration substrate. Multiple
+providers behind those hosts do not turn it into three-host-or-more orchestration.
 
 ## Level 4 — drop down to raw ruflo / agentic-qe
 
@@ -220,7 +251,7 @@ The two config stores each knob below lives in — and their precedence — are 
 
 | You want to…                         | `ak` way                          | The raw ruflo/aqe way it maps to                    |
 | ------------------------------------ | --------------------------------- | --------------------------------------------------- |
-| Enable claude/codex hosts            | `ak x provider pick`              | `ENABLE_CLAUDE_CODE` / `ENABLE_CODEX` env + `ruflo init --dual` |
+| Enable claude/codex hosts            | `ak host pick`              | `ENABLE_CLAUDE_CODE` / `ENABLE_CODEX` env + `ruflo init --dual` |
 | Register a ruflo LLM provider        | `--provider openai:gpt-5.6`       | `ruflo providers configure -p openai -m gpt-5.6`    |
 | Set which LLM runs QE                | `--aqe-provider gemini`           | `AQE_LLM_PROVIDER=gemini` (env)                     |
 | Order QE's fallback chain            | `--aqe-fallback '…'`              | edit `.agentic-qe/llm-config.json` / `aqe llm-router config` |
@@ -233,7 +264,7 @@ If you hand-edit `.agentic-qe/llm-config.json` yourself and *don't* use `ak`'s
 ## Undo, always
 
 ```bash
-ak x provider off     # reset to the claude-only default, reversibly
+ak host off     # reset to the claude-only default, reversibly
 ```
 
 Strips the managed env keys (leaving your other settings), and restores your pre-`ak`
@@ -252,5 +283,7 @@ just makes the good default automatic and the customization reversible.
   grounded in ruflo's own dual-mode templates.
 - Primary-host selection and ambidextrous mirroring:
   [ADR-0006](adr/0006-primary-host-and-ambidextrous-mirroring.md).
+- Capability-driven integration axes, bindings, and provenance:
+  [ADR-0016](adr/0016-capability-driven-integration-adapters.md).
 - Host env flags (`ENABLE_CLAUDE_CODE` / `ENABLE_CODEX`): upstream ruflo
   ADR-034, "Optional MCP Backends".

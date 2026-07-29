@@ -289,6 +289,26 @@ function applyProject(rec, res) {
   if (res.worktree) rec.worktree = res.worktree;
 }
 
+/**
+ * Split the historical transcript-source `provider` field into an explicit host
+ * and independently evidenced inference provider. The legacy field used
+ * `claude`/`codex` to mean transcript host; those values therefore cannot prove
+ * Anthropic/OpenAI provider identity.
+ */
+export function normalizeSessionIdentity(record = {}) {
+  const legacyHost = !record.host && ['claude', 'codex'].includes(record.provider)
+    ? record.provider : null;
+  const host = record.host ?? legacyHost ?? null;
+  const provider = legacyHost ? null : (record.provider ?? null);
+  return {
+    ...record,
+    host,
+    provider,
+    model: record.model ?? null,
+    providerProvenance: provider ? (record.providerProvenance ?? 'unknown') : 'unknown',
+  };
+}
+
 // ── transcript parsing ──────────────────────────────────────────────────────
 
 /** Split JSONL into parsed objects, skipping anything that will not parse. */
@@ -305,7 +325,8 @@ function* jsonLines(raw) {
  *  and byModel can both be derived without re-reading the transcript. */
 function blankSession(id, provider) {
   return {
-    id, provider, title: '', project: 'unknown', start: null, end: null,
+    id, provider, host: provider, inferenceProvider: null, providerProvenance: 'unknown',
+    title: '', project: 'unknown', start: null, end: null,
     prompts: 0, responses: 0, exceptions: 0, sidechain: false, threadSource: null, models: [], tools: {},
     skill: null, plugin: null, worktree: null, usage: [], punchcard: {}, active: [], stamps: [],
     // Codex-only detail (v6): reasoning tokens inside output, and the last
@@ -889,7 +910,12 @@ function aggregate(records, { days, now, cutoff, deps }) {
     }) ?? {};
 
     sessions.push({
-      id: rec.id, provider: rec.provider, title: rec.title, project: rec.project,
+      id: rec.id, host: rec.host ?? rec.provider,
+      provider: rec.inferenceProvider ?? null,
+      transcriptProvider: rec.provider,
+      inferenceProvider: rec.inferenceProvider ?? null, // compatibility alias
+      providerProvenance: rec.providerProvenance ?? 'unknown',
+      title: rec.title, project: rec.project,
       worktree: rec.worktree ?? null,
       start: new Date(rec.start ?? rec.end).toISOString(),
       minutes: Math.round(((rec.end - (rec.start ?? rec.end)) / 60_000) * 10) / 10,
@@ -927,7 +953,8 @@ function aggregate(records, { days, now, cutoff, deps }) {
     cacheRead: 0, cacheWrite: 0, tokens: 0, cost: 0,
     spanMinutes: 0, spanUnionSeconds: 0, engagedSeconds: 0,
   };
-  const byProvider = Object.create(null), byProject = Object.create(null);
+  const byHost = Object.create(null), byProvider = Object.create(null);
+  const byProject = Object.create(null);
   const byCategory = Object.create(null), punchcard = Object.create(null);
   const tree = new Map();
   let spanMs = 0;
@@ -939,7 +966,8 @@ function aggregate(records, { days, now, cutoff, deps }) {
     totals.tokens += s.tokens; totals.cost += s.cost;
     spanMs += s._span[1] - s._span[0];
 
-    addTo(bucket(byProvider, s.provider), s);
+    addTo(bucket(byHost, s.host ?? 'unknown'), s);
+    addTo(bucket(byProvider, s.provider ?? 'unknown'), s);
     addTo(bucket(byProject, s.project), s);
     addTo(bucket(byCategory, s.category), s);
     // A session that used two models counts once under EACH — the token and
@@ -972,7 +1000,7 @@ function aggregate(records, { days, now, cutoff, deps }) {
   //   spanUnionSeconds — union of whole spans: wall-clock with a session open
   //   spanMinutes      — sum of spans: the double-counting figure, kept as the
   //                      clearly-labelled secondary the ADR asks the UI to show
-  sealBuckets(byProvider, byProject, byCategory, byModel);
+  sealBuckets(byHost, byProvider, byProject, byCategory, byModel);
 
   totals.spanMinutes = Math.round((spanMs / 60_000) * 10) / 10;
   totals.spanUnionSeconds = mergeIntervals(sessions.map((s) => s._span));
@@ -994,7 +1022,7 @@ function aggregate(records, { days, now, cutoff, deps }) {
   // snapshot), oldest first. Claude has no local analogue (its quota arrives
   // via the statusline push — see quota.mjs), hence codex-prefixed.
   const codexRateLimits = sessions
-    .filter((s) => s.provider === 'codex' && s.rateLimits && Number.isFinite(s.rateLimits.at))
+    .filter((s) => s.host === 'codex' && s.rateLimits && Number.isFinite(s.rateLimits.at))
     .map((s) => s.rateLimits)
     .sort((x, y) => x.at - y.at);
 
@@ -1002,7 +1030,9 @@ function aggregate(records, { days, now, cutoff, deps }) {
     generatedAt: new Date(now).toISOString(),
     windowDays: days,
     pricesAsOf: deps.pricesAsOf ?? null,
-    totals, byDay, byModel, byProvider, byProject, byCategory,
+    totals, byDay, byModel, byHost, byProvider,
+    byTranscriptProvider: byHost, // compatibility alias for the historical map
+    byProject, byCategory,
     punchcard, projectTree, sessions, codexRateLimits, insights: [],
   };
   agg.insights = deps.detectInsights(agg) ?? [];
@@ -1286,7 +1316,12 @@ export async function readSession(id, o = {}) {
 
   return {
     meta: {
-      id: rec.id, provider: rec.provider, title: rec.title, project: rec.project,
+      id: rec.id, host: rec.host ?? rec.provider,
+      provider: rec.inferenceProvider ?? null,
+      transcriptProvider: rec.provider,
+      inferenceProvider: rec.inferenceProvider ?? null, // compatibility alias
+      providerProvenance: rec.providerProvenance ?? 'unknown',
+      title: rec.title, project: rec.project,
       worktree: rec.worktree ?? null,
       start: rec.start === null ? null : new Date(rec.start).toISOString(),
       end: rec.end === null ? null : new Date(rec.end).toISOString(),

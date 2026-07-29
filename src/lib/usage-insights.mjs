@@ -283,7 +283,7 @@ export function detectInsights(agg) {
           + `${TIER_SAVING_RATIO}.`,
         action: 'Route quick and mechanical activities to the balanced tier in your per-activity '
           + 'policy. Reasoning-heavy activities stay where they are.',
-        command: 'ak x provider pick',
+        command: 'ak host pick',
         impact: round2(saving),
       });
     }
@@ -449,7 +449,7 @@ export function detectInsights(agg) {
         action: 'Route by task complexity: keep routine activities on the cheaper tier and reserve '
           + 'the newest model for genuinely hard work. Confirm against your own workload before '
           + 'changing anything.',
-        command: 'ak x provider pick',
+        command: 'ak host pick',
         sources: MODEL_ROUTING_SOURCES,
       });
     }
@@ -534,7 +534,7 @@ export function detectInsights(agg) {
           + 'consumes the same allowance faster; queueing spreads it more evenly.',
         action: 'Keep parallelism for genuinely independent work; queue the rest, or route some '
           + 'lanes to the other host so the two pools share the load.',
-        command: 'ak x provider pick',
+        command: 'ak host pick',
       });
     }
   }
@@ -654,7 +654,7 @@ export function detectLimitInsights(limits, agg) { // eslint-disable-line no-unu
         + `${Math.round(r.usedPercent)}% consumed vs ${pct(elapsedShare)} elapsed.`,
       action: 'Front-load what matters before the cap, shift routine work to the other host or a '
         + 'cheaper lane, and let non-urgent automation wait for the reset.',
-      command: 'ak x provider pick',
+      command: 'ak host pick',
     });
   }
 
@@ -675,7 +675,7 @@ export function detectLimitInsights(limits, agg) { // eslint-disable-line no-unu
         + 'work routed to the idle pool costs nothing against the strained one.',
       action: 'Shift routine and mechanical activities to the host with headroom in the '
         + 'per-activity routing policy; reasoning-critical work can stay put.',
-      command: 'ak x provider pick',
+      command: 'ak host pick',
     });
     break; // one arbitrage finding is guidance; one per hot window is nagging
   }

@@ -9,7 +9,7 @@ import { registry, syncBlocks, blocksForTarget, retiredForTarget, guidanceTarget
 import { register as mcpRegister, applyExclusions } from '../lib/mcp.mjs';
 import { listDaemons, staleDaemons, reap } from '../lib/daemons.mjs';
 import { loadKitConfig, saveKitConfig } from '../lib/config.mjs';
-import { HOSTS, applyHosts, applyProviders, hostInstallState, installHost, applyAqeRouter, seedDualRoutingIfDualHost, ensureCodexMcp, ensureRufloMcpInCodex, bothHostsEnabled } from '../lib/providers.mjs';
+import { commandHosts, applyHosts, applyProviders, hostInstallState, installHost, applyAqeRouter, seedDualRoutingIfDualHost, ensureCodexMcp, ensureRufloMcpInCodex, bothHostsEnabled } from '../lib/providers.mjs';
 import { driftReport, selfDrift } from '../lib/versions.mjs';
 import { RUVECTOR_PKG, managed as ruvectorManaged } from '../lib/ruvector.mjs';
 import { pruneNpxStale } from '../lib/npx.mjs';
@@ -180,7 +180,7 @@ export async function run({ flags, pkgRoot }) {
   // hosts: install any ENABLED host that is entirely absent (updates to
   // npm-managed hosts ride the versions branch above via driftReport).
   if (subsystems.has('hosts')) {
-    for (const h of HOSTS) {
+    for (const h of commandHosts()) {
       if (!cfg.providers.hosts[h.id]) continue;
       if ((await hostInstallState(h)).method !== 'absent') continue;
       await step(`install ${h.id}`, () => installHost(h.id));

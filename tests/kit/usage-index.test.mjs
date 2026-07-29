@@ -280,7 +280,9 @@ test('buildIndex parses a Claude session into the Session contract', async () =>
   const s = byId(agg, 'aaaa1111');
 
   assert.ok(s, 'session present');
-  assert.equal(s.provider, 'claude');
+  assert.equal(s.host, 'claude');
+  assert.equal(s.provider, null);
+  assert.equal(s.transcriptProvider, 'claude');
   assert.equal(s.title, 'Add rate limiting to the API');
   assert.equal(s.project, 'proj');
   assert.equal(s.start, '2026-07-24T10:00:00.000Z');
@@ -360,7 +362,9 @@ test('Codex tokens come from the LAST token_count event, never the sum', async (
   const s = byId(agg, 'dddd4444');
 
   assert.ok(s, 'codex session present');
-  assert.equal(s.provider, 'codex');
+  assert.equal(s.host, 'codex');
+  assert.equal(s.provider, null);
+  assert.equal(s.transcriptProvider, 'codex');
   // Last event: input_tokens 3000, cached_input_tokens 1200, output 300.
   // Summing the two events would give 4000/1600/400 — that is the bug this guards.
   assert.equal(s.input, 1800, 'input excludes cached_input_tokens');
@@ -446,7 +450,8 @@ test('buildIndex emits the documented Aggregate shape', async () => {
   const agg = await buildIndex(opts(sb));
 
   for (const k of ['generatedAt', 'windowDays', 'pricesAsOf', 'totals', 'byDay', 'byModel',
-    'byProvider', 'byProject', 'byCategory', 'punchcard', 'projectTree', 'sessions', 'insights']) {
+    'byHost', 'byProvider', 'byTranscriptProvider', 'byProject', 'byCategory',
+    'punchcard', 'projectTree', 'sessions', 'insights']) {
     assert.ok(k in agg, `missing ${k}`);
   }
   assert.equal(agg.windowDays, 14);
@@ -587,7 +592,7 @@ test('engaged time unions across sessions, not just within one', async () => {
   assert.equal(agg.totals.spanMinutes, 20, 'the summed figure still double-counts, by design');
 });
 
-test('byDay, byModel, byProvider, byProject and byCategory partition the same spend', async () => {
+test('byDay, byModel, byHost, byProvider, byProject and byCategory partition the same spend', async () => {
   _resetForTest();
   const sb = sandbox();
   const agg = await buildIndex(opts(sb));
@@ -595,10 +600,13 @@ test('byDay, byModel, byProvider, byProject and byCategory partition the same sp
 
   assert.equal(sum(agg.byDay), agg.totals.tokens);
   assert.equal(sum(agg.byModel), agg.totals.tokens);
+  assert.equal(sum(agg.byHost), agg.totals.tokens);
   assert.equal(sum(agg.byProvider), agg.totals.tokens);
   assert.equal(sum(agg.byProject), agg.totals.tokens);
   assert.equal(sum(agg.byCategory), agg.totals.tokens);
-  assert.deepEqual(Object.keys(agg.byProvider).sort(), ['claude', 'codex']);
+  assert.deepEqual(Object.keys(agg.byHost).sort(), ['claude', 'codex']);
+  assert.deepEqual(Object.keys(agg.byProvider), ['unknown']);
+  assert.deepEqual(agg.byTranscriptProvider, agg.byHost);
   // byDay keys are LOCAL calendar days, so a far-eastern tz may split the
   // fixtures' 09:00–12:00Z across two adjacent days. Both are in-window.
   for (const day of Object.keys(agg.byDay)) {
@@ -613,6 +621,7 @@ test('session counts are attributable in every keyed map', async () => {
   const agg = await buildIndex(opts(sb));
   const count = (m) => Object.values(m).reduce((a, v) => a + v.sessions, 0);
 
+  assert.equal(count(agg.byHost), agg.totals.sessions);
   assert.equal(count(agg.byProvider), agg.totals.sessions);
   assert.equal(count(agg.byProject), agg.totals.sessions);
   assert.equal(count(agg.byCategory), agg.totals.sessions);
@@ -951,7 +960,9 @@ test('readSession returns meta + turns for a Claude session', async () => {
   const { meta, turns } = await readSession('aaaa1111', opts(sb));
 
   assert.equal(meta.id, 'aaaa1111');
-  assert.equal(meta.provider, 'claude');
+  assert.equal(meta.host, 'claude');
+  assert.equal(meta.provider, null);
+  assert.equal(meta.transcriptProvider, 'claude');
   assert.equal(meta.title, 'Add rate limiting to the API');
   assert.ok(turns.length >= 5);
   assert.equal(turns[0].role, 'user');
@@ -975,7 +986,9 @@ test('readSession works without a prior buildIndex (no cache to consult)', async
   const sb = sandbox();
   const { meta } = await readSession('dddd4444', opts(sb));
   assert.equal(meta.id, 'dddd4444');
-  assert.equal(meta.provider, 'codex');
+  assert.equal(meta.host, 'codex');
+  assert.equal(meta.provider, null);
+  assert.equal(meta.transcriptProvider, 'codex');
 });
 
 // code-quality Finding 5 regressions: readCache()/locate() are now memoized

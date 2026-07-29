@@ -4,6 +4,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { kitConfigPath, legacyKitConfigPath } from './paths.mjs';
+import { migrateIntegrationConfig } from './adapters/config.mjs';
 
 const DEFAULTS = {
   aqe: true,            // manage agentic-qe alongside ruflo
@@ -37,7 +38,7 @@ export function loadKitConfig(file = kitConfigPath()) {
   for (const cand of file === kitConfigPath() ? [file, legacyKitConfigPath()] : [file]) {
     try {
       const parsed = JSON.parse(fs.readFileSync(cand, 'utf8'));
-      return {
+      const merged = {
         ...structuredClone(DEFAULTS),
         ...parsed,
         health: { ...DEFAULTS.health, ...parsed.health },
@@ -49,12 +50,15 @@ export function loadKitConfig(file = kitConfigPath()) {
         },
         statusline: { ...DEFAULTS.statusline, ...parsed.statusline },
       };
+      // Normalize additively in memory. Loading never writes; the next explicit
+      // save persists the versioned integration view alongside legacy fields.
+      return structuredClone(migrateIntegrationConfig(merged));
     } catch { /* try next */ }
   }
-  return structuredClone(DEFAULTS);
+  return structuredClone(migrateIntegrationConfig(structuredClone(DEFAULTS)));
 }
 
 export function saveKitConfig(cfg, file = kitConfigPath()) {
   fs.mkdirSync(path.dirname(file), { recursive: true });
-  fs.writeFileSync(file, JSON.stringify(cfg, null, 2) + '\n');
+  fs.writeFileSync(file, JSON.stringify(migrateIntegrationConfig(cfg), null, 2) + '\n');
 }

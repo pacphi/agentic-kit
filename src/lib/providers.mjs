@@ -33,6 +33,9 @@ import * as paths from './paths.mjs';
 import { bold, dim, cyan } from './output.mjs';
 import { policyToAgentOverrides, seedDualRouting, resolveRoutes, routingSummary, divergedRoutes, ACTIVITIES, DEFAULT_PRIMARY_HOST, PRIMARY_HOSTS } from './routing.mjs';
 import { HOST_ADAPTERS } from './hosts.mjs';
+import {
+  HOST_REGISTRY, PROVIDER_REGISTRY, normalizeIntegrationFacts,
+} from './adapters/index.mjs';
 
 /** Frontier agent-CLI hosts. `pkg` is the npm global package; `enableEnv` is
  *  ruflo's ADR-034 backend flag; `aqe` is the AQE_LLM_PROVIDER value (null when
@@ -43,17 +46,25 @@ import { HOST_ADAPTERS } from './hosts.mjs';
  *  only when codex is opted-in AND the codex CLI is detected). */
 export const CODEX_ADAPTER_PKG = '@claude-flow/codex';
 
-export const HOSTS = [
-  { id: 'claude', bin: 'claude', pkg: '@anthropic-ai/claude-code', enableEnv: 'ENABLE_CLAUDE_CODE', aqe: 'claude-code' },
-  { id: 'codex', bin: 'codex', pkg: '@openai/codex', enableEnv: 'ENABLE_CODEX', aqe: null, adapterPkg: CODEX_ADAPTER_PKG },
-];
+export const HOSTS = HOST_REGISTRY
+  .filter((host) => host.capabilities.canRouteActivities)
+  .map((host) => ({
+    id: host.id, bin: host.install.bin, pkg: host.install.npmPackage,
+    enableEnv: host.legacy.enableEnv,
+    aqe: host.id === 'claude' ? host.legacy.aqeProvider : null,
+    ...(host.id === 'codex' ? { adapterPkg: CODEX_ADAPTER_PKG } : {}),
+  }));
 
 /** API-key LLM providers ruflo's router understands (`ruflo providers`). */
+const apiProvider = (id, keyEnv) => {
+  const provider = PROVIDER_REGISTRY.find((entry) => entry.id === id);
+  return { id: provider?.id ?? id, keyEnv };
+};
 export const API_PROVIDERS = [
-  { id: 'anthropic', keyEnv: ['ANTHROPIC_API_KEY'] },
-  { id: 'openai', keyEnv: ['OPENAI_API_KEY'] },
+  apiProvider('anthropic', ['ANTHROPIC_API_KEY']),
+  apiProvider('openai', ['OPENAI_API_KEY']),
   { id: 'google', keyEnv: ['GOOGLE_API_KEY', 'GEMINI_API_KEY'] },
-  { id: 'ollama', keyEnv: [] }, // local; presence = reachable daemon (not checked here)
+  apiProvider('ollama', []), // local; presence = reachable daemon (not checked here)
 ];
 
 /** Valid `AQE_LLM_PROVIDER` values (grounded: aqe ALL_PROVIDER_TYPES in
@@ -74,6 +85,14 @@ export const AQE_PROVIDER_TYPES = [
  *    local — runs locally, no credential ($0)
  *  Keyed by provider id so AQE_PROVIDER_TYPES and this map cannot diverge silently
  *  (a test asserts the two cover exactly the same set). */
+const registryCredential = (id) => {
+  const provider = PROVIDER_REGISTRY.find((entry) => entry.id === id);
+  if (provider?.billing === 'local') return { local: true, billing: 'local' };
+  if (provider?.credentials.kind === 'environment') {
+    return { keyEnv: [...provider.credentials.env], billing: provider.billing };
+  }
+  return null;
+};
 export const AQE_PROVIDER_CREDENTIALS = {
   'claude-code': { host: 'claude', billing: 'subscription' },
   // `codex` is deliberately absent from AQE_PROVIDER_TYPES (that list also gates
@@ -85,11 +104,11 @@ export const AQE_PROVIDER_CREDENTIALS = {
   claude: { keyEnv: ['ANTHROPIC_API_KEY'], billing: 'metered' },
   openai: { keyEnv: ['OPENAI_API_KEY'], billing: 'metered' },
   gemini: { keyEnv: ['GOOGLE_AI_API_KEY', 'GEMINI_API_KEY', 'GOOGLE_API_KEY'], billing: 'metered' },
-  openrouter: { keyEnv: ['OPENROUTER_API_KEY'], billing: 'metered' },
+  openrouter: registryCredential('openrouter'),
   'azure-openai': { keyEnv: ['AZURE_OPENAI_API_KEY'], also: ['AZURE_OPENAI_ENDPOINT'], billing: 'metered' },
   bedrock: { keyEnv: ['AWS_ACCESS_KEY_ID'], also: ['AWS_SECRET_ACCESS_KEY'], billing: 'metered' },
   cognitum: { keyEnv: ['COGNITUM_API_KEY'], billing: 'metered' },
-  ollama: { local: true, billing: 'local' },
+  ollama: registryCredential('ollama'),
   onnx: { local: true, billing: 'local' },
 };
 
@@ -232,13 +251,50 @@ export async function detectHosts(cwd = process.cwd()) {
 }
 
 /** Detect which API providers have credentials available. */
-export function detectProviders() {
+export function detectProviders({ env = process.env } = {}) {
   const out = {};
   for (const p of API_PROVIDERS) {
-    out[p.id] = { keyPresent: p.keyEnv.some((k) => !!process.env[k]) };
+    out[p.id] = { keyPresent: p.keyEnv.some((k) => !!env[k]) };
   }
   return out;
 }
+
+/** One immutable command-facing snapshot of host, provider and binding truth. */
+export async function collectIntegrationFacts({
+  cwd = process.cwd(), cfg = null, env = process.env,
+} = {}) {
+  const detectedHosts = await detectHosts(cwd);
+  const detectedProviders = detectProviders({ env });
+  for (const adapter of PROVIDER_REGISTRY) {
+    if (detectedProviders[adapter.id]) continue;
+    const names = adapter.credentials?.kind === 'environment' ? adapter.credentials.env : [];
+    detectedProviders[adapter.id] = { keyPresent: names.some((name) => !!env[name]) };
+  }
+  const hosts = Object.fromEntries(Object.entries(detectedHosts).map(([id, fact]) => [id, {
+    ...fact,
+    enabled: cfg?.providers?.hosts?.[id] ?? null,
+  }]));
+  const providers = Object.fromEntries(Object.entries(detectedProviders).map(([id, fact]) => {
+    const adapter = PROVIDER_REGISTRY.find((entry) => entry.id === id);
+    return [id, {
+      ...fact,
+      configured: fact.keyPresent || adapter?.billing === 'local',
+      reachable: null,
+      // An API key is metered even when the same vendor also offers a
+      // subscription-backed host login.
+      billing: fact.keyPresent ? 'metered' : (adapter?.billing ?? 'unknown'),
+    }];
+  }));
+  return normalizeIntegrationFacts({
+    hosts,
+    providers,
+    bindings: cfg?.integrations?.bindings ?? cfg?.providers?.bindings ?? [],
+  });
+}
+
+/** Hosts eligible for legacy setup/sync installation and teardown loops. */
+export const commandHosts = () => HOSTS.filter((host) =>
+  HOST_REGISTRY.find((entry) => entry.id === host.id)?.capabilities.canRouteActivities);
 
 /** Where host-enable env lands: project settings.local.json inside a repo (same
  *  seam as CLAUDE_FLOW_DB_PATH), else the user settings.json. Repo membership
@@ -494,7 +550,7 @@ export function formatRoutingTable(cfg) {
     lines.push(`  ${act.padEnd(18)} ${r.host.padEnd(7)} ${(r.model ?? '').padEnd(24)} ${src}${tag}${esc}${div}`);
   }
   if (Object.keys(diverged).length) {
-    lines.push(dim(`  ${Object.keys(diverged).length} seeded route(s) diverge from current defaults — review with: ak x provider refresh`));
+    lines.push(dim(`  ${Object.keys(diverged).length} seeded route(s) diverge from current defaults — review with: ak host refresh`));
   }
   return lines.join('\n');
 }
