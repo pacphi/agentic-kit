@@ -21,6 +21,7 @@ const PORCELAIN = Object.assign(Object.create(null), {
   setup: () => import('../src/commands/setup.mjs'),
   dashboard: () => import('../src/commands/x/dashboard.mjs'),
   admin: () => import('../src/commands/x/admin.mjs'),
+  run: () => import('../src/commands/run.mjs'),
   dual: () => import('../src/commands/dual.mjs'),
   host: () => import('../src/commands/x/provider.mjs'),
   provider: () => import('../src/commands/x/provider.mjs'),
@@ -49,6 +50,7 @@ Usage (ak = alias of agentic-kit):
   ak sync            converge to good: upgrade + heal + verify          [--dry-run] [--no-upgrade]
   ak dashboard       open the local web dashboard (localhost; auto-opens browser)  [--port N] [--no-open]
   ak admin           maintainer-only telemetry admin (localhost; GitHub/npm egress)  [--port N] [--no-open]
+  ak run             execute a host-neutral activity pipeline  [template "task"] [--dry-run]
   ak dual            run a Claude+Codex collaboration swarm (dual-host)  [run <template> "task"] [--dry-run]
   ak host            manage agent hosts, routing, and provider bindings  [status|pick|refresh|off]
   ak provider        deprecated alias for ak host; removed before the stable release
