@@ -32,6 +32,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { configDir, claudeDir, codexDir } from './paths.mjs';
 import { readCodexState } from './codex-state.mjs';
+import { defaultOpencodeDbPath, listSessions as listOpencodeSessions, parseSession as parseOpencodeSession, sessionExists as opencodeSessionExists } from './usage-opencode.mjs';
 
 /** Bump to invalidate every cached entry wholesale.
  *  v2: cached records carry `active` sub-intervals for the idle-gap split.
@@ -52,8 +53,12 @@ import { readCodexState } from './codex-state.mjs';
  *      and `rateLimits` (the LAST rate-limit snapshot embedded in the
  *      rollout's token_count events). A v5-cached Codex session carries
  *      neither and must be re-derived, or the Limits history reads as empty
- *      for exactly the sessions that have data. */
-export const SCHEMA_VERSION = 6;
+ *      for exactly the sessions that have data.
+ *  v7: the opencode transcript source (usage-opencode.mjs) joins the index —
+ *      SQLite-backed session/message/part rows mapped to the same record
+ *      shape, with opencode's OWN metered cost carried as observed truth
+ *      (`costObserved` on usage rows, preferred over the pricing table). */
+export const SCHEMA_VERSION = 7;
 
 /** Silence longer than this ends a stretch of engagement. A session is split
  *  into active sub-intervals at gaps ABOVE this bound (exactly this much is not
@@ -271,14 +276,15 @@ export function projectLabel(cwd, dirName) {
   return { project: parts.length ? parts[parts.length - 1] : 'unknown', worktree: null };
 }
 
-/** Sum a record's per-model usage rows into one API-equivalent cost. */
+/** Sum a record's per-model usage rows into one API-equivalent cost. Rows with
+ *  an observed transcript cost (opencode) use it — same preference as aggregate. */
 function sessionCost(rec, deps) {
   let cost = 0;
   for (const row of rec.usage ?? []) {
-    cost += deps.costOf({
+    cost += row.costObserved != null ? row.costObserved : (deps.costOf({
       model: row.model, provider: rec.provider,
       input: row.input, output: row.output, cacheRead: row.cacheRead, cacheWrite: row.cacheWrite,
-    }) || 0;
+    }) || 0);
   }
   return round(cost);
 }
@@ -727,6 +733,15 @@ function codexIdFromName(name) {
 }
 
 function parseFile(entry) {
+  if (entry.provider === 'opencode') {
+    try {
+      const parsed = parseOpencodeSession({ dbFile: entry.dbFile, id: entry.id });
+      // Title hygiene matches the JSONL parsers: the cached index lands on
+      // disk, so the same secrets mask applies here.
+      if (parsed?.session) parsed.session.title = maskSecrets(parsed.session.title);
+      return parsed;
+    } catch { return null; } // a parser bug must not cost the user their whole index
+  }
   let raw;
   try { raw = fs.readFileSync(entry.file, 'utf8'); } catch { return null; }
   try {
@@ -886,10 +901,14 @@ function aggregate(records, { days, now, cutoff, deps }) {
       // period ending 2026-09-01) must not retroactively restate a finished
       // window — August's spend was metered at August's rate and has to keep
       // reading that way. Rows are already keyed by day, so this costs nothing.
-      const rowCost = deps.costOf({
+      // costObserved (opencode): the transcript's OWN metered figure for the
+      // row, when present, outranks the pricing table — observed truth beats a
+      // rate ak must guess (kimi/openrouter/local). null means no observation
+      // and the table applies, never a fabricated $0.
+      const rowCost = row.costObserved != null ? row.costObserved : (deps.costOf({
         model: row.model, provider: rec.provider, day: row.day,
         input: row.input, output: row.output, cacheRead: row.cacheRead, cacheWrite: row.cacheWrite,
-      }) || 0;
+      }) || 0);
       input += row.input; output += row.output;
       cacheRead += row.cacheRead; cacheWrite += row.cacheWrite;
       cost += rowCost;
@@ -1069,7 +1088,7 @@ function notify(onProgress, payload) {
  * @property {number} [days]        window size in days (default 14)
  * @property {boolean} [force]      ignore cached per-file entries
  * @property {Function} [onProgress] called with { scanned, total, phase }
- * @property {{claude?: string, codex?: string}} [roots] override transcript roots (tests)
+ * @property {{claude?: string, codex?: string, opencode?: string}} [roots] override transcript roots (tests; opencode = the SQLite store path)
  * @property {string} [cachePath]   override the index cache location (tests)
  * @property {number} [now]         override "now" (tests)
  * @property {number} [maxAgeMs]    readIndex only: memo TTL
@@ -1108,6 +1127,20 @@ async function scan(o = {}) {
     .map((e) => ({ ...e, stat: statSafe(e.file) }))
     .filter((e) => e.stat && e.stat.mtimeMs >= cutoff);
 
+  // opencode transcript source (one SQLite store, per-session cache keys).
+  // Same hermeticity rule as the codex ledger below: overridden roots imply
+  // the REAL store is the wrong one — only default-root scans (or an explicit
+  // roots.opencode path) read it.
+  const ocDb = o.roots === undefined ? defaultOpencodeDbPath() : (roots?.opencode ?? null);
+  if (ocDb && fs.existsSync(ocDb)) {
+    for (const e of listOpencodeSessions({ dbFile: ocDb, cutoffMs: cutoff })) {
+      candidates.push({
+        file: `opencode://${e.id}`, provider: 'opencode', id: e.id, dbFile: ocDb,
+        stat: { mtimeMs: e.mtimeMs, size: e.size },
+      });
+    }
+  }
+
   const cache = force ? null : readCache(cacheFile);
   const entries = {};
   const records = [];
@@ -1124,7 +1157,7 @@ async function scan(o = {}) {
       session = parsed ? parsed.session : null;
     }
     if (session) {
-      entries[c.file] = { ...key, session };
+      entries[c.file] = { ...key, session, ...(c.dbFile ? { dbFile: c.dbFile } : {}) };
       records.push(session);
     }
     scanned++;
@@ -1143,7 +1176,13 @@ async function scan(o = {}) {
       const lastActivity = e.session.end ?? e.session.start;
       // No timestamp at all → can't judge age; keep it rather than guess.
       if (lastActivity != null && now - lastActivity > KEEP_MS) continue;
-      if (statSafe(file)) entries[file] = e;
+      // opencode pseudo-keys are not files: existence means "row still in the store".
+      if (file.startsWith('opencode://')) {
+        const dbFile = e.dbFile ?? ocDb;
+        if (dbFile && opencodeSessionExists({ dbFile, id: file.slice('opencode://'.length) })) {
+          entries[file] = { ...e, dbFile };
+        }
+      } else if (statSafe(file)) entries[file] = e;
     }
   }
   writeCache(cacheFile, { schemaVersion: SCHEMA_VERSION, updatedAt: new Date(now).toISOString(), entries });
@@ -1271,6 +1310,19 @@ function locate(id, r, cacheFile) {
 export async function readSession(id, o = {}) {
   if (typeof id !== 'string' || !VALID_ID.test(id)) throw invalidId(id);
   const r = { ...defaultRoots(), ...(o.roots ?? {}) };
+
+  // opencode sessions live in the SQLite store, not a JSONL file — resolve
+  // them before the file-locating path (pseudo-key opencode://<id>).
+  const ocDb = o.roots === undefined ? defaultOpencodeDbPath() : (o.roots?.opencode ?? null);
+  if (ocDb && fs.existsSync(ocDb) && opencodeSessionExists({ dbFile: ocDb, id })) {
+    const parsed = parseOpencodeSession({ dbFile: ocDb, id, withTurns: true });
+    if (parsed) {
+      const rec = parsed.session;
+      rec.title = maskSecrets(rec.title);
+      return sessionPayload(rec, parsed.turns);
+    }
+  }
+
   const found = locate(id, r, o.cachePath ?? defaultCachePath());
   if (!found) return null;
 
@@ -1308,8 +1360,13 @@ export async function readSession(id, o = {}) {
       : parseClaude(raw, { id, dirName: found.dirName, withTurns: true });
   } catch { return null; }
 
-  const rec = parsed.session;
-  const usage = rec.usage.reduce((a, row) => ({
+  return sessionPayload(parsed.session, parsed.turns, await loadDeps(o.deps));
+}
+
+/** The /api/session payload for any parsed record (claude, codex, opencode):
+ *  meta with pricer-backed cost, and secret-masked, truncation-signalled turns. */
+function sessionPayload(rec, turns, deps) {
+  const usage = (rec.usage ?? []).reduce((a, row) => ({
     input: a.input + row.input, output: a.output + row.output,
     cacheRead: a.cacheRead + row.cacheRead, cacheWrite: a.cacheWrite + row.cacheWrite,
   }), { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 });
@@ -1334,7 +1391,7 @@ export async function readSession(id, o = {}) {
       // left undefined: the transcript header rendered a hardcoded "$0.00" on a
       // panel whose whole subject is cost. `.filter(Boolean)` could not drop it
       // because fmtUsd(undefined) is the truthy string "$0.00".
-      cost: sessionCost(rec, await loadDeps(o.deps)),
+      cost: sessionCost(rec, deps),
       ...usage, tokens: usage.input + usage.output + usage.cacheRead + usage.cacheWrite,
     },
     // ADR-0009 §8: truncation is the other way content is withheld, and it used
@@ -1344,7 +1401,7 @@ export async function readSession(id, o = {}) {
     // turn cannot be misread as an abridged one. `originalChars` is measured
     // after `maskSecrets`, so it describes loss due to truncation alone — it is
     // not a raw-file length, and must not be rendered as one.
-    turns: parsed.turns.map((t) => {
+    turns: (turns ?? []).map((t) => {
       const text = maskSecrets(t.text);
       const originalChars = text.length;
       if (originalChars <= MAX_TURN_CHARS) return { ...t, text };
