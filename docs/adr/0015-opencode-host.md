@@ -114,28 +114,59 @@ Every ak-managed byte on opencode's surfaces lives behind one module, following 
 `guidanceTargets` gains `agents-opencode` → `~/.config/opencode/AGENTS.md` under the same
 dir-exists gate as `~/.codex` (never `mkdir`'d; existence = install signal). Two new
 registry rows carry opencode-correct content — `ruflo-opencode-reference` (opencode tool
-naming, plugin bridge, converted agents) gated on `command: opencode`, and
-`ruvnet-brain-opencode-reference` (the `ruvnet-brain_search_ruvnet` tool name) gated on
-the KB dir — while `ruflo-preamble` (host-agnostic operating rules) is shared:
+naming, plugin bridge, converted agents) and `ruvnet-brain-opencode-reference` (the
+`ruvnet-brain_search_ruvnet` tool name) — both **enablement-gated**
+(`flag: opencodeEnabled`: the template asserts active wiring, so an installed-but-disabled
+host must not receive it; `x provider off` / pick-disable strip them on the next
+reconcile) — while `ruflo-preamble` (host-agnostic operating rules) is shared:
 `guidanceFiles: ['claude', 'agents-opencode']`. The claude-only twins
 (`ruflo-reference`, `ruvnet-brain-reference`) deliberately do **not** target
 `agents-opencode`, and `retiredForTarget` force-strips them if they ever land there.
 
-### 4. Sync/status/setup/teardown wiring
+### 4. Sync/status/setup/pick/teardown wiring — the two-tier host model
+
+`ak` manages **three managed host integrations** (claude, codex, opencode) with **two
+routing hosts** (claude, codex): opencode participates in install/config/guidance/
+status/sync/teardown exactly like the others, and is deliberately never a routing
+target, never `primaryHost`, never an aqe provider. The split is **derived from a
+capability flag on the host descriptor** (`HOSTS[].routing`), not hardcoded id lists —
+the embryonic form of the capability registry issue #71 generalizes.
 
 `status.collect` gains an `opencode` subsystem (config convergence via
 `opencodeConverged` — deep value comparison, not key presence — plus plugin currency,
-agent-set drift, platform skill; gated on the CLI being present); `sync` applies via
+agent-set drift, platform skill; gated on the CLI being present). `sync` applies via
 the same rows, AFTER the hosts install branch and likewise CLI-gated (enabled-but-absent
-never creates the config home); `setup --opencode` runs the identical machine-step and
-deploys the guidance blocks immediately. `ak x provider off` and `ak uninstall` strip
-the config wiring (ownership-gated, priors restored), the deployed artifacts
-(marker-gated, precise to ak's files), and the guidance blocks — with `uninstall`'s
-cfg read hoisted above any kit.json purge so ownership is known at teardown time.
-`x provider pick` (the claude↔codex routing chooser) deliberately excludes opencode and
-preserves its flag + ownership markers verbatim. `detectHosts` reads the config-file
-host's wired state from its own config (no `env[null]`). `versions.mjs` tracks
-`opencode-ai` when npm-managed.
+never creates the config home), and its **blocks branch runs after the opencode branch
+with an `opencode` guard**, so a fresh enable creates the config home *and* converges
+the `agents-opencode` guidance target in one sync (a second sync is then a true no-op).
+`setup --opencode` runs the identical machine-step and deploys the guidance blocks
+immediately.
+
+**`x provider pick` manages opencode like any host** (the post-install adoption path,
+replacing the first revision's "rerun setup" gap): `--host` is the complete desired
+enabled-host set across both tiers; an unknown token is a hard error before any
+mutation (a typo never tears a host down); interactive defaults are currently-enabled
+hosts ∪ newly-detected routing hosts (an enabled-but-absent host is never dropped by a
+bare enter, and an installed-but-disabled integration host is never opted in by one).
+Excluding opencode **disables** it through the same marker-gated teardown as
+`off`/`uninstall` — ak wiring stripped, user priors restored, user-owned config
+preserved — and `--primary-host` stays validated against the routing pair. Every pick
+rewrite preserves **all** ownership markers (`codexMcp`, `rufloCodexMcp`,
+`opencodeMcp`, `opencodeManaged`, `opencodeCatalogDir`) — a retune never strands the
+teardown proof for either host.
+
+All five mutating commands share **one owner-module composition** (`opencodeStack` for
+enable, `retireOpencode` for teardown, `reconcileOpencodeGuidance` for guidance) — no
+merge/ownership logic lives in any command. Two honesty rules hardened the teardown
+itself: a **converged file with stale/missing markers** still re-persists them
+(`markersChanged` — otherwise the next teardown can't prove ownership), and a
+**JSONC-refused config fails the teardown honestly** (markers retained, wiring reported
+as still active, manual remediation named) while an **absent config clears the
+now-stale markers** instead of chasing a phantom.
+
+`detectHosts` reads the config-file host's wired state from its own config (no
+`env[null]`). `versions.mjs` tracks `opencode-ai` only when npm-managed (external
+installs are visible as host state but never claimed as ak-owned update drift).
 
 The **dashboard** categorizes the subsystem into the Hosts tab alongside
 `mcp`/`codex-mcp` (its designed fallback is Runtime, so nothing was ever dropped — this
@@ -145,9 +176,9 @@ switches from its hardcoded two-target block list to the shared `guidanceTargets
 `retiredForTarget` composition — its stated contract is "never disagrees with
 `ak status`", which a frozen subset silently breaks whenever a guidance target is added
 (this also closes a pre-existing gap: codex's `agents-user` drift never surfaced there
-either). **`x provider pick`** is the claude↔codex *routing* tool; it now preserves
-`hosts.opencode` and the opencode ownership markers verbatim instead of rebuilding the
-`providers` object without them (previously a pick would have silently unwired the host).
+either). The `pick` rework in §4 replaces the first revision's behavior (opencode was
+excluded and merely preserved) with full two-tier management — the routing set stays
+claude/codex-only throughout.
 Out of scope (matching codex's own asymmetry): routing-table integration
 (`routing.mjs` untouched), aqe provider wiring (no opencode provider type exists),
 statusline (no upstream surface), `drivingHost` session detection (opencode sets no
@@ -195,17 +226,23 @@ which is the honest shape).
 
 ## References
 
-- `src/lib/opencode.mjs` (the owner module), `src/lib/hosts.mjs` (adapter),
-  `src/lib/providers.mjs` (`HOSTS` row, `--opencode` flag handling, `hostAuthState`
-  home seam), `src/lib/blocks.mjs` (`agents-opencode` target, new registry rows),
+- `src/lib/opencode.mjs` (the owner module: `opencodeStack`, `retireOpencode`,
+  `reconcileOpencodeGuidance`), `src/lib/hosts.mjs` (adapter),
+  `src/lib/providers.mjs` (`HOSTS` row incl. the `routing` capability flag,
+  `--opencode` flag handling, `hostAuthState` home seam),
+  `src/lib/blocks.mjs` (`agents-opencode` target, new registry rows),
   `src/commands/{sync,status,setup,uninstall}.mjs`, `src/commands/x/provider.mjs`
-  (`off` teardown + `pick` preservation), `src/lib/nudge.mjs` (shared targets),
-  `src/lib/dashboard-server.mjs` (Hosts-tab categorization),
+  (`pick` two-tier management + `off` teardown), `src/lib/nudge.mjs` (shared targets),
+  `src/lib/dashboard/client.mjs` (Hosts-tab categorization),
   `src/lib/versions.mjs` (drift), `src/templates/opencode-ruflo-hooks.js`,
   `claude/ruflo-opencode-reference.md`, `claude/ruvnet-brain-opencode-reference.md`.
 - opencode config schema: `https://opencode.ai/config.json`; opencode plugin/docs:
   `https://opencode.ai/docs/{plugins,agents,skills,rules,mcp-servers}`.
 - ruflo env parity: `v3/@claude-flow/cli/src/init/mcp-generator.ts`; hook verbs:
   `.claude/helpers/hook-handler.cjs` (in the ruflo repo / marketplace clone).
-- Tests: `tests/kit/opencode.test.mjs`, `tests/dashboard.test.cjs` (opencode rows +
-  categorization), `tests/kit/{hosts,guidance-targets}.test.mjs` (extended).
+- Tests: `tests/kit/opencode.test.mjs` (owner module), `tests/dashboard.test.cjs`
+  (opencode rows, rendered grouping, update banner), the command-level suites
+  `tests/kit/{setup-command,setup-host-flags,status-command,sync-command,uninstall-command,provider-cli,providers}.test.mjs`
+  (enable/disable/dry-run/teardown orchestration, sandboxed),
+  `tests/kit/opencode-version-drift.test.mjs` (npm-managed vs external update
+  ownership), `tests/kit/{hosts,guidance-targets}.test.mjs` (extended).
