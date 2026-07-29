@@ -357,8 +357,8 @@ export const JS = `
     document.getElementById("route-matrix").innerHTML=html;
   }
 
-  // Providers tab: the distinct host+model pairs the routing policy puts in
-  // play, with how many activities each covers. Hidden without a dual policy.
+  // Hosts & Routing tab: the distinct host+model pairs the routing policy puts
+  // in play, with how many activities each covers. Hidden without a dual policy.
   function renderModels(rt){
     var strip=document.getElementById("models");
     if(!rt||!rt.routes||!rt.routes.length){strip.hidden=true;return;}

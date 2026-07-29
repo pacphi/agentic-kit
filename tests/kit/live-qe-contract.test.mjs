@@ -88,3 +88,14 @@ test('browser delta reducer carries the server resource-completion invariants', 
   assert.match(LIVE_JS, /targetTerminal\?ev\.status:["']running["']/);
   assert.match(LIVE_JS, /TERMINAL/);
 });
+
+test('browser presentation keeps execution host and inference provider independent', () => {
+  assert.match(LIVE_JS, /function hostOf/);
+  assert.match(LIVE_JS, /function hostName/);
+  assert.match(LIVE_JS, /function inferenceProviderName/);
+  assert.doesNotMatch(LIVE_JS, /function providerOf/);
+  assert.doesNotMatch(LIVE_JS, /v&&v\.provider\|\|v&&v\.host/);
+  assert.match(LIVE_JS, /providerProvenance/);
+  assert.match(LIVE_JS, /Provider not established/);
+  assert.match(LIVE_JS, /s\.host/);
+});

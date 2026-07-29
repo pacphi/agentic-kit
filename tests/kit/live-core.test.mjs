@@ -112,7 +112,10 @@ test('projection preserves safe display metadata and event provenance on resourc
     })), eventId: 'ak:2',
   };
   const projection = reduceLiveEvent(reduceLiveEvent(emptyLiveProjection(), started), completed);
+  const actor = projection.sessions.get('claude:s1').nodes.get('s1');
   const node = projection.sessions.get('claude:s1').nodes.get('call-1');
+  assert.equal(actor.provider, 'anthropic');
+  assert.equal(actor.providerProvenance, 'unknown');
   assert.equal(node.label, 'Read');
   assert.equal(node.status, 'completed');
   assert.equal(node.lastAction, 'tool.completed');
@@ -357,9 +360,25 @@ test('projection keeps identical provider session IDs distinct and catalogs them
     childSessionCount: 0,
     liveCount: 1,
     completedCount: 1,
+    hosts: { claude: 1, codex: 1 },
     providers: { anthropic: 1, openai: 1 },
     updatedAt: '2026-07-27T12:01:00.000Z',
   });
+});
+
+test('project catalog keeps unknown inference providers separate from observed hosts', () => {
+  const event = {
+    ...createLiveEvent(base({
+      sessionId: 'unknown-provider', host: 'claude',
+      provider: null, providerProvenance: 'unknown',
+      actor: { id: 'unknown-provider', kind: 'session', provider: null },
+    })), eventId: 'ak:unknown-provider',
+  };
+  const snapshot = serializeLiveProjection(reduceLiveEvent(emptyLiveProjection(), event));
+  assert.deepEqual(snapshot.projects[0].hosts, { claude: 1 });
+  assert.deepEqual(snapshot.projects[0].providers, { unknown: 1 });
+  assert.equal(snapshot.sessions[0].nodes[0].provider, null);
+  assert.equal(snapshot.sessions[0].nodes[0].providerProvenance, 'unknown');
 });
 
 test('projection reconciles late parentage and catalogs only root sessions', () => {

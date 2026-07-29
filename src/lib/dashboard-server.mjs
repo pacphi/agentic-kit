@@ -29,7 +29,7 @@ import { driftReport, selfDrift } from './versions.mjs';
 import { drift as ruvnetBrainDrift } from './ruvnet-brain.mjs';
 import { drift as ruvectorDrift, managed as ruvectorManaged } from './ruvector.mjs';
 import { loadKitConfig } from './config.mjs';
-import { resolveRoutes, routingSummary, ACTIVITIES, HOST_PROVIDER } from './routing.mjs';
+import { resolveRoutes, routingSummary, ACTIVITIES } from './routing.mjs';
 import { renderPage } from './dashboard/page.mjs';
 import { requestRejection } from './dashboard/request-security.mjs';
 import { tokenMatches } from './admin-server.mjs';
@@ -147,9 +147,8 @@ async function collectData({ cwd, fetchStatus }) {
 
 /** The per-activity routing matrix for the dashboard (ADR-0005). Null unless a
  *  dualRouting policy is set, so single-host projects render nothing new. */
-function routingPayload() {
+export function routingPayload(cfg = loadKitConfig()) {
   try {
-    const cfg = loadKitConfig();
     const policy = cfg.providers?.dualRouting ?? {};
     if (!Object.keys(policy).length) return null;
     const routes = resolveRoutes(policy);
@@ -159,7 +158,7 @@ function routingPayload() {
       routes: ACTIVITIES.map((activity) => {
         const r = routes[activity];
         return {
-          activity, host: r.host, provider: HOST_PROVIDER[r.host], model: r.model ?? '',
+          activity, host: r.host, model: r.model ?? '',
           source: r.source, akOriginated: !!r.akOriginated,
           escalate: (r.escalate ?? []).map((e) => e.host),
         };

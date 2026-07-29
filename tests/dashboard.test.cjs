@@ -557,6 +557,16 @@ async function main() {
       contains(r.body, 'class="s-provider"');
     });
 
+    await test('Live rendering never derives host identity from inference provider', async () => {
+      const r = await get(uiSrv.url);
+      contains(r.body, 'function hostOf');
+      contains(r.body, 'function inferenceProviderName');
+      contains(r.body, 'Provider not established');
+      assert(!r.body.includes('function providerOf'), 'legacy host/provider branding helper remains');
+      assert(!r.body.includes('v&&v.provider||v&&v.host'),
+        'Live presentation still falls back from provider to host');
+    });
+
     await test('served HTML carries the read-only Live Sessions surface', async () => {
       const r = await get(uiSrv.url);
       for (const marker of [
@@ -1243,7 +1253,7 @@ async function main() {
   // is the suite where it matters most — the traversal-guard and credential-
   // leak tests live here and were the reviewer's cited example of a block
   // that could silently vanish with the old harness never noticing.
-  const EXPECTED = 57;
+  const EXPECTED = 58;
   if (passed + failed !== EXPECTED) {
     console.error(`\nPLAN MISMATCH: expected ${EXPECTED} tests, ran ${passed + failed}`);
     process.exit(1);

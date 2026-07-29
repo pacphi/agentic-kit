@@ -139,7 +139,7 @@ Project {
   id, label, updatedAt,
   sessionKeys[],
   sessionCount, childSessionCount, liveCount, completedCount,
-  providers
+  hosts, providers
 }
 ```
 
@@ -148,10 +148,9 @@ navigation roots only; `childSessionCount` reports descendant threads without pr
 peer work. Sessions are ordered live first and then by most recent evidence. A project ID is opaque
 and safe for DOM/routing; it never contains the raw working directory.
 
-`providers` is a transitional presentation field. It counts node-level provider identities when
-available, but the current reducer falls back to the session host when none are present. Consumers
-must not treat a fallback label as observed inference-provider evidence. A future schema should
-separate host counts from evidence-backed provider counts rather than preserve that fallback.
+`hosts` counts execution hosts independently. `providers` counts evidence-backed inference
+providers and uses an explicit `unknown` bucket when no provider evidence exists; it never
+substitutes the session host.
 
 Project identity means the owning repository, not the current branch or linked-worktree directory.
 For a live local worktree, the `.git` ownership pointer resolves the repository. Known nested
@@ -467,8 +466,8 @@ Direct manipulation follows a slippy-map interaction contract:
 
 The execution canvas and transcript rail share one selection model. Selecting an agent focuses its
 subtree and transcript; selecting a tool shows its safe summary; selecting evidence highlights and
-centers its owner. The initial overview shows project/provider identity, lifecycle, current work,
-and critical failures; metadata and evidence are details on demand
+centers its owner. The initial overview shows project, host, evidence-backed provider identity,
+lifecycle, current work, and critical failures; metadata and evidence are details on demand
 ([Shneiderman][eyes-have-it]).
 
 The right rail is persistent and subscribes only to the selected `{host, sessionId}`. It carries
@@ -565,9 +564,10 @@ process memory limits.
 
 ### Milestone 2: Operational shell
 
-- Lead with project/provider identity, model, lifecycle, freshness, and a safe summary.
+- Lead with project and host identity, evidence-backed provider/model identity, lifecycle,
+  freshness, and a safe summary.
 - Replace bare unknowns with evidence-specific missing-data language.
-- Provide a project-first browser with live-first, provider-qualified sessions and a
+- Provide a project-first browser with live-first, host-qualified sessions and a
   selected-session execution canvas.
 
 ### Milestone 3: Execution workspace

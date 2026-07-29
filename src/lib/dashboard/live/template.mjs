@@ -65,7 +65,7 @@ export const LIVE_HTML = `
           </div>
         </div>
         <div class="live-session-context" id="live-session-context">
-          <span class="live-session-context-provider" id="live-session-context-provider">—</span>
+          <span class="live-session-context-identity" id="live-session-context-identity">—</span>
           <span id="live-session-context-project">Choose a session</span>
           <span id="live-session-context-status">Waiting for local evidence</span>
         </div>
