@@ -33,6 +33,31 @@ function adapter({ observation = { type: 'idle' }, events = [] } = {}) {
   };
 }
 
+// qe-court A2: the timeout branch must schema-validate interpret() too — a
+// malformed timeout result becomes a bounded protocol_error, never garbage
+// shipped raw into `ak run --json`.
+test('a malformed interpret() on the timeout path is bounded, not shipped raw (qe-court A2)', async () => {
+  const malformed = {
+    id: 'mal',
+    async readiness() { return { ready: true }; },
+    async prepare({ worker: w }) { return { worker: w }; },
+    async launch(state) { return state; },
+    async observe() { return new Promise(() => {}); }, // never settles → the deadline hits
+    interpret() { return { bogus: true }; },            // garbage a strict validator must reject
+    async cancel() {},
+    async cleanup() {},
+  };
+  const results = await executeRunPlan({ workers: [worker('a', 'opencode')] }, {
+    adapters: { opencode: malformed }, timeoutMs: 5, clock,
+  });
+  assert.equal(results.length, 1);
+  assert.equal(results[0].workerId, 'a');
+  assert.equal(results[0].status, 'failed');
+  assert.equal(results[0].exitCategory, 'protocol_error',
+    'a malformed timeout interpret() is converted to a bounded protocol error, not shipped as-is');
+  assert.ok(results[0].failure && typeof results[0].failure.reason === 'string');
+});
+
 test('runner schedules a dependency DAG and blocks only descendants of a failure', async () => {
   const events = [];
   const ok = adapter({ events });

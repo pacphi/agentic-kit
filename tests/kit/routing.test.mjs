@@ -69,9 +69,22 @@ test('a persisted user route overlays defaults and keeps source=user', () => {
 });
 
 test('a persisted entry with no explicit source is treated as a user edit', () => {
-  const routes = resolveRoutes({ testing: { host: 'claude' } });
+  const routes = resolveRoutes({ testing: { host: DEFAULT_ROUTES.testing.host } });
   assert.equal(routes.testing.source, 'user');
-  assert.equal(routes.testing.model, DEFAULT_ROUTES.testing.model, 'unset field falls back to default');
+  assert.equal(routes.testing.model, DEFAULT_ROUTES.testing.model, 'same-host: unset field falls back to default');
+});
+
+test('a host-only override never inherits the previous host default model (qe-court B1)', () => {
+  const foreign = Object.entries(DEFAULT_ROUTES).find(([, d]) => d.host !== 'claude');
+  assert.ok(foreign, 'fixture needs a non-claude default route');
+  const [activity] = foreign;
+  const routes = resolveRoutes({ [activity]: { host: 'claude' } });
+  assert.equal(routes[activity].host, 'claude');
+  assert.equal(routes[activity].model, null,
+    'cross-host override leaves the model to the adapter default, not the other host\'s default');
+  // an explicit model on a cross-host override is still honored verbatim
+  const pinned = resolveRoutes({ [activity]: { host: 'claude', model: 'claude-sonnet-5' } });
+  assert.equal(pinned[activity].model, 'claude-sonnet-5');
 });
 
 // ── seedDualRouting (cost-safety gate) ──────────────────────────────────────

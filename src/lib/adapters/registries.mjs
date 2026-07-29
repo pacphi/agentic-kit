@@ -176,6 +176,22 @@ export const OBSERVABILITY_REGISTRY = immutable(Object.values(OBSERVABILITY_MAP)
 export const HOST_REGISTRY = immutable(Object.values(HOST_MAP));
 export const PROVIDER_REGISTRY = immutable(Object.values(PROVIDER_MAP));
 
+// Cross-axis invariants — duplicate ids, unknown projection/observability
+// references, the canDriveSession → canBePrimary/canRouteActivities
+// relationship, billing/credential consistency — are enforced AT CONSTRUCTION,
+// not only in tests. Previously validateRegistries ran nowhere in production
+// (qe-court charge A3): a host flipped to canRouteActivities without
+// canDriveSession would have loaded silently and been accepted by `ak run`.
+const registryErrors = validateRegistries({
+  hosts: Object.values(HOST_MAP),
+  providers: Object.values(PROVIDER_MAP),
+  projections: Object.values(PROJECTION_MAP),
+  observability: Object.values(OBSERVABILITY_MAP),
+});
+if (registryErrors.length) {
+  throw new Error(`adapter registries invalid: ${registryErrors.map((e) => `${e.path} (${e.code})`).join('; ')}`);
+}
+
 /** @param {(entry: any) => boolean} [predicate] */
 export const hostIds = (predicate = () => true) => HOST_REGISTRY.filter(predicate).map(({ id }) => id);
 /** @param {(entry: any) => boolean} [predicate] */

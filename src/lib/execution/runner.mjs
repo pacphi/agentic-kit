@@ -48,7 +48,10 @@ export async function executeWorker(worker, adapter, {
     const watched = await observeBeforeDeadline(adapter, state, timeoutMs);
     if (watched.timedOut) {
       const cancelled = await adapter.cancel(state);
-      return adapter.interpret(state, { type: cancelled?.orphaned ? 'orphaned' : 'timeout' });
+      // Schema validation applies to EVERY terminal interpret(), not only the
+      // success path — the timeout branch is exactly where a malformed result
+      // would otherwise ship unbounded into `ak run --json` (qe-court A2).
+      return validateWorkerResult(adapter.interpret(state, { type: cancelled?.orphaned ? 'orphaned' : 'timeout' }));
     }
     return validateWorkerResult(adapter.interpret(state, watched.observation));
   } catch (error) {

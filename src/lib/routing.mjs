@@ -200,7 +200,12 @@ export function resolveRoutes(policy = {}) {
     if (!p) { out[act] = { ...def, source: 'default', akOriginated: AK_ORIGINATED.has(act) }; continue; }
     out[act] = {
       host: p.host ?? def.host,
-      model: p.model ?? def.model,
+      // A host-only override must NOT inherit the previous host's default
+      // model: `--route implementation:claude` handing codex's default model
+      // to the claude CLI is a live model/protocol error (qe-court B1). The
+      // default only falls forward for the SAME host; a cross-host override
+      // leaves the model to the adapter's own default (null).
+      model: p.model ?? (p.host && p.host !== def.host ? null : def.model),
       ...((p.escalate ?? def.escalate) ? { escalate: p.escalate ?? def.escalate } : {}),
       source: p.source ?? 'user',
       akOriginated: AK_ORIGINATED.has(act),

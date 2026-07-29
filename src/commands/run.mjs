@@ -65,7 +65,7 @@ function printResults(results) {
   }
 }
 
-export async function run({ flags, positionals }) {
+export async function run({ flags, positionals, executePlan = executeRunPlan, cfg = loadKitConfig() }) {
   const template = positionals[0];
   const task = positionals.slice(1).join(' ').trim();
   if (!template || !DUAL_RUN_TEMPLATE_NAMES.includes(template)) {
@@ -76,7 +76,7 @@ export async function run({ flags, positionals }) {
   let plan;
   let warnings;
   try {
-    ({ plan, warnings } = buildRunPlan(loadKitConfig(), template, task, flags.route ?? []));
+    ({ plan, warnings } = buildRunPlan(cfg, template, task, flags.route ?? []));
   } catch (error) {
     fail(error.message);
     return 2;
@@ -94,10 +94,12 @@ export async function run({ flags, positionals }) {
     timeoutMs = positiveInt(flags.timeout, 'timeout');
   } catch (error) { fail(error.message); return 2; }
   if (!flags.json) printPlan(plan);
-  const results = await executeRunPlan(plan, { maxConcurrent, timeoutMs });
+  const results = await executePlan(plan, { maxConcurrent, timeoutMs });
   if (flags.json) console.log(JSON.stringify({ plan, results }, null, 2));
   else printResults(results);
-  if (results.every((result) => result.status === 'succeeded')) { ok('run complete'); return 0; }
-  fail('run finished with one or more non-successful workers');
-  return 1;
+  // The human status line is gated on !json — a trailing "✓ run complete"
+  // after the document makes `ak run --json` unparseable (qe-court B8).
+  const succeeded = results.every((result) => result.status === 'succeeded');
+  if (!flags.json) (succeeded ? ok : fail)(succeeded ? 'run complete' : 'run finished with one or more non-successful workers');
+  return succeeded ? 0 : 1;
 }

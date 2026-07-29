@@ -10,6 +10,11 @@ import {
 import {
   validHost, validProvider, validRegistries,
 } from './helpers/integration-builders.mjs';
+import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
+import path from 'node:path';
+
+const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 
 test('the built-in registries satisfy their own contract', () => {
   assert.deepEqual(validateRegistries({
@@ -18,6 +23,18 @@ test('the built-in registries satisfy their own contract', () => {
     projections: PROJECTION_REGISTRY,
     observability: OBSERVABILITY_REGISTRY,
   }), []);
+});
+
+// qe-court A3: the cross-axis invariants now run AT module construction — a
+// host edit that violates canDriveSession → canBePrimary/canRouteActivities
+// (or any other cross-axis rule) makes the import itself throw instead of
+// loading silently. Pin it with a real import in a fresh process.
+test('the shipped registries cannot fail construction-time validation (import cannot throw)', () => {
+  const r = spawnSync(process.execPath, ['-e',
+    "import('./src/lib/adapters/registries.mjs').then(() => console.log('construction-valid'))",
+  ], { encoding: 'utf8', cwd: REPO });
+  assert.equal(r.status, 0, `registries module must import cleanly:\n${r.stderr}`);
+  assert.match(r.stdout, /construction-valid/);
 });
 
 test('built-in ids are unique within each registry and host/provider axes stay distinct', () => {
