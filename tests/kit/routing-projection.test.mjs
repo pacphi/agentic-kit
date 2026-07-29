@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { applyAqeRouter, aqeRouterFile, undoAqeRouter, ensureCodexMcp, undoCodexMcp } from '../../src/lib/providers.mjs';
+import { applyAqeRouter, aqeRouterFile, undoAqeRouter, ensureCodexMcp, undoCodexMcp, undoRufloMcpInCodex } from '../../src/lib/providers.mjs';
 import { seedDualRouting } from '../../src/lib/routing.mjs';
 import { _setGlobalRootForTest } from '../../src/lib/paths.mjs';
 
@@ -150,6 +150,25 @@ test('codex MCP teardown is a no-op unless ak owns it (H2), and never shells whe
   const ensure = await ensureCodexMcp({ providers: { hosts: { claude: true, codex: false } } });
   assert.equal(ensure.changed, false);
   assert.match(ensure.detail, /not enabled/);
+});
+
+test('owned bridge teardown sends the precise safe argv on every platform', async () => {
+  const calls = [];
+  const runner = async (cmd, args, opts) => {
+    calls.push({ cmd, args, opts });
+    return { code: 0, stdout: '', stderr: '' };
+  };
+  const cwd = '/work/project';
+
+  const codex = await undoCodexMcp(cwd, { managed: true, runner });
+  const ruflo = await undoRufloMcpInCodex(cwd, { managed: true, runner, haveFn: async () => true });
+
+  assert.equal(codex.changed, true);
+  assert.equal(ruflo.changed, true);
+  assert.deepEqual(calls, [
+    { cmd: 'claude', args: ['mcp', 'remove', 'codex', '-s', 'project'], opts: { cwd } },
+    { cmd: 'codex', args: ['mcp', 'remove', 'ruflo'], opts: { cwd } },
+  ]);
 });
 
 test('undoAqeRouter removes the ak-created file (agentOverrides included)', () => {

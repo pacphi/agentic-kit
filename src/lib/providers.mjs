@@ -612,9 +612,9 @@ export async function ensureCodexMcp(cfg, cwd = process.cwd()) {
 
 /** Remove the project-scoped codex MCP server — ONLY when ak registered it
  *  (managed === true). Never tears down a server the user added themselves. */
-export async function undoCodexMcp(cwd = process.cwd(), { managed = false } = {}) {
+export async function undoCodexMcp(cwd = process.cwd(), { managed = false, runner = run } = {}) {
   if (!managed) return { ok: true, changed: false, detail: 'codex MCP left as-is (not ak-registered)' };
-  const r = await run('claude', ['mcp', 'remove', 'codex', '-s', 'project'], { cwd });
+  const r = await runner('claude', ['mcp', 'remove', 'codex', '-s', 'project'], { cwd });
   return { ok: true, changed: r.code === 0, detail: r.code === 0 ? 'codex MCP removed' : 'codex MCP not registered' };
 }
 
@@ -645,10 +645,10 @@ export async function ensureRufloMcpInCodex(cfg, cwd = process.cwd()) {
 
 /** Remove the ruflo MCP server from Codex — ONLY when ak registered it
  *  (managed === true). Never tears down a server the user added themselves. */
-export async function undoRufloMcpInCodex(cwd = process.cwd(), { managed = false } = {}) {
+export async function undoRufloMcpInCodex(cwd = process.cwd(), { managed = false, runner = run, haveFn = have } = {}) {
   if (!managed) return { ok: true, changed: false, detail: 'ruflo→codex MCP left as-is (not ak-registered)' };
-  if (!(await have('codex'))) return { ok: true, changed: false, detail: 'codex CLI not installed' };
-  const r = await run('codex', ['mcp', 'remove', 'ruflo'], { cwd });
+  if (!(await haveFn('codex'))) return { ok: true, changed: false, detail: 'codex CLI not installed' };
+  const r = await runner('codex', ['mcp', 'remove', 'ruflo'], { cwd });
   return { ok: true, changed: r.code === 0, detail: r.code === 0 ? 'ruflo MCP removed from codex' : 'ruflo→codex MCP not registered' };
 }
 
