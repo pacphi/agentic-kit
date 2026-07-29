@@ -6,7 +6,7 @@
 // (no I/O) so the projectors and defaults are unit-testable in isolation; the
 // writers/UX that consume it live in providers.mjs / the commands.
 import { vendorOf } from './qeCourt.mjs';
-import { routableHostIds, primaryHostIds } from './adapters/index.mjs';
+import { routableHostIds, primaryHostIds, validateActivityHost } from './adapters/index.mjs';
 
 // ── Vocabulary ───────────────────────────────────────────────────────────────
 // Canonical development activities ak routes (ADR-0002). Array order = display order.
@@ -380,23 +380,49 @@ export const DUAL_RUN_TEMPLATE_NAMES = Object.keys(DUAL_RUN_TEMPLATES);
  * becomes a worker whose platform + model come from the policy's effective route
  * for that node's activity. Throws on an unknown template.
  */
-export function policyToDualRunConfig(policy = {}, { template = 'feature', task = '' } = {}) {
+export function materializeRunPlan(policy = {}, { template = 'feature', task = '' } = {}) {
   const nodes = DUAL_RUN_TEMPLATES[template];
   if (!nodes) throw new Error(`unknown template "${template}" (expected: ${DUAL_RUN_TEMPLATE_NAMES.join(', ')})`);
   const routes = resolveRoutes(policy);
-  const workers = nodes.map((n) => {
+  return {
+    template,
+    workers: nodes.map((n) => {
     const r = routes[n.activity];
+    const eligibility = validateActivityHost(r.host);
+    if (!eligibility.ok) {
+      throw new Error(`route for "${n.activity}" cannot materialize: host "${r.host}" requires canRouteActivities`);
+    }
     return {
       id: n.id,
-      platform: r.host, // 'claude' | 'codex' — matches DualModeOrchestrator's worker.platform
+      activity: n.activity,
+      host: r.host,
       role: n.role,
-      model: r.model,
+      configuredModel: r.model ?? null,
       prompt: n.prompt(task),
       ...(n.dependsOn ? { dependsOn: n.dependsOn } : {}),
       ...(n.maxTurns ? { maxTurns: n.maxTurns } : {}),
     };
-  });
-  return { workers };
+    }),
+  };
+}
+
+/**
+ * Compatibility projection to `claude-flow-codex dual run --config`. It deliberately
+ * remains Claude/Codex-specific while the generalized runner is introduced.
+ */
+export function policyToDualRunConfig(policy = {}, opts = {}) {
+  const plan = materializeRunPlan(policy, opts);
+  return {
+    workers: plan.workers.map((worker) => ({
+      id: worker.id,
+      platform: worker.host,
+      role: worker.role,
+      model: worker.configuredModel ?? undefined,
+      prompt: worker.prompt,
+      ...(worker.dependsOn ? { dependsOn: worker.dependsOn } : {}),
+      ...(worker.maxTurns ? { maxTurns: worker.maxTurns } : {}),
+    })),
+  };
 }
 
 /**

@@ -26,6 +26,7 @@ Consequences**, and cites the grounded source it rests on where relevant.
 | [0015](0015-managed-codex-native-statusline.md) | Manage Codex's native user-wide status line without claiming rich-renderer parity | Accepted |
 | [0016](0016-capability-driven-integration-adapters.md) | Capability-driven host, provider, binding, projection, and observability adapters | Accepted |
 | [0017](0017-opencode-host.md) | OpenCode as a managed, observable, non-routable host through native surfaces | Accepted |
+| [0018](0018-generalized-host-worker-execution.md) | Generalized host-worker execution, preserving `ak dual` | Proposed |
 
 Theme: ADRs **0001–0006** define **dual-host LLM routing and leadership** — how `ak` lets ruflo route
 each development activity (architecture, implementation, testing, review, …) to the right host (Claude
@@ -86,3 +87,8 @@ stack through OpenCode's native JSON configuration, plugin, converted-agent, ski
 machine-guidance surfaces; preserves user values through ownership receipts and guarded teardown;
 and keeps primary/activity routing limited to capability-qualified Claude/Codex hosts. Generalized
 multi-host routing, including an OpenCode execution-worker contract, remains follow-on issue #76.
+
+**0018** defines that follow-on's execution boundary: host-neutral worker lifecycle and normalized
+terminal evidence, a compatibility-preserving `ak dual` migration, and the candidate OpenCode
+loopback HTTP/OpenAPI transport. It remains Proposed until real adapter conformance and sandbox
+evidence prove routing can be enabled safely.
