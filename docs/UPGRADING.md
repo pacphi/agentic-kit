@@ -26,6 +26,10 @@ family on your behalf.
 | `ak x statusline codex native\|extended` | opt into a user-wide Codex status-line preset | **yes** — records the preset |
 | `ak setup`           | first-time bootstrap of absent tooling          | only via explicit flags (`--codex`, `--opencode`, `--primary-host`) |
 
+| Migration surface   | What to know                                    |
+| ------------------- | ----------------------------------------------- |
+| `ak dual` → `ak run` | `ak dual` is a deprecated compatibility wrapper — existing scripts keep working (it warns on stderr and will be removed before the stable release); use `ak run` for new execution work. OpenCode routes require the current release — remove them before downgrading. |
+
 A **host** runs the work; a **provider** serves inference. A binding can connect one provider to
 several hosts through separate native configuration **projections**, while **observability**
 sources establish facts with observed, configured, inferred, or unknown provenance. Upgrading does

@@ -26,9 +26,9 @@ provider can therefore have independent `ollama-via-claude` and `ollama-via-code
 OpenRouter is a provider behind a host, never automatically a third host. OpenCode is an opt-in
 activity-routing host through `ak run`, while remaining ineligible as a primary host or AQE
 provider. Its configured selector does not establish provider, billing, or vendor-diversity facts.
-This Proposed capability model is
-[ADR-0016](adr/0016-capability-driven-integration-adapters.md); current controls below remain
-backward compatible while its implementation proceeds.
+This capability model is
+[ADR-0016](adr/0016-capability-driven-integration-adapters.md) (Accepted); the controls below
+implement it and remain backward compatible.
 
 > [!IMPORTANT]
 > During the alpha, `ak host` is the canonical namespace for execution-host lifecycle and

@@ -70,7 +70,7 @@ ak dashboard    open the local web dashboard (auto-opens your browser)
 ak host         manage execution hosts, routing, and provider bindings
                 status | pick | refresh | off
 ak run          execute a host-neutral activity pipeline (including explicit OpenCode routes)
-                <template> "<task>"  [--dry-run] [--route ...] [--max-concurrent N] [--timeout ms]
+                <template> "<task>"  [--dry-run] [--route ...] [--max-concurrent N] [--timeout ms] [--json]
 ak dual         deprecated Claude+Codex compatibility wrapper; use ak run for new work
 ak x statusline manage Codex's native user-wide status line          status | codex native|extended|off
 ak uninstall    leave cleanly                [--dry-run] [--this-project] [--remove-ruflo] [--remove-aqe] [--purge] [--yes]
