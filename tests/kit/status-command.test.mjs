@@ -146,6 +146,29 @@ test('project-scope rows degrade to info in a project that was never set up', as
   assert.equal(one(rows, 'statusline').level, 'info');
 });
 
+test('owned Codex statusline reports independently without enabling Codex MCP routing', async () => {
+  const preset = [
+    'model-with-reasoning', 'project-name', 'git-branch', 'run-state',
+    'context-remaining', 'five-hour-limit', 'weekly-limit', 'task-progress',
+  ];
+  seedHome(offlineKitConfig({
+    providers: { hosts: { claude: true, codex: false } },
+    statusline: {
+      codex: {
+        preset: 'native',
+        lastProjection: { status_line_use_colors: true, status_line: preset },
+      },
+    },
+  }));
+  fs.mkdirSync(paths.codexDir(), { recursive: true });
+  fs.writeFileSync(paths.codexConfigPath(),
+    `[tui]\nstatus_line_use_colors = true\nstatus_line = ${JSON.stringify(preset)}\n`);
+  const rows = await collect();
+  assert.equal(one(rows, 'codex-statusline').level, 'ok');
+  assert.equal(rowsFor(rows, 'codex-mcp').length, 0,
+    'statusline ownership must not imply Codex is enabled as a routed host');
+});
+
 test('an initialized project reports its learned-pattern count', async () => {
   seedHome();
   const neural = path.join(paths.projectClaudeFlowDir(PROJECT), 'neural');

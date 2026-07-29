@@ -34,6 +34,7 @@ export const claudeSkillsDir = () => path.join(claudeDir(), 'skills');
  *  codex is installed on the machine (see blocks.guidanceTargets). */
 export const codexDir = () => path.join(home, '.codex');
 export const codexAgentsMdPath = () => path.join(codexDir(), 'AGENTS.md');
+export const codexConfigPath = () => path.join(codexDir(), 'config.toml');
 
 /** Per-project locations, relative to a project root. */
 export const projectSettings = (root) => path.join(root, '.claude', 'settings.json');

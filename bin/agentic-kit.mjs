@@ -33,6 +33,7 @@ const PLUMBING = Object.assign(Object.create(null), {
   'mcp': () => import('../src/commands/x/mcp.mjs'),
   'provider': () => import('../src/commands/x/provider.mjs'),
   'reference': () => import('../src/commands/x/reference.mjs'),
+  'statusline': () => import('../src/commands/x/statusline.mjs'),
   'verify': () => import('../src/commands/x/verify.mjs'),
 });
 
@@ -68,6 +69,7 @@ Plumbing (power users) — each takes --help:
   ak x mcp [status|pick|off]   MCP registration + tool-family deny rules
   ak x provider [status|pick|off]   detect claude/codex CLIs; wire ruflo + aqe hosts/providers
   ak x reference [diff|sync]   CLAUDE.md managed-block inspection/reconcile
+  ak x statusline [status|codex native|codex extended|codex off]   manage Codex's native user status line
   ak x verify [learning|security|aqe|providers|harvest|all]   deep proofs (slow, spawns real CLIs)
   ak x improvement-eval [...]  causal self-improvement eval (route Q-learner)`;
 

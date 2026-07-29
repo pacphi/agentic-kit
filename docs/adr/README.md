@@ -23,6 +23,7 @@ Consequences**, and cites the grounded source it rests on where relevant.
 | [0012](0012-live-sessions-observability.md) | Live sessions as local, evidence-graded observability | Accepted |
 | [0013](0013-admin-build-security-signals-and-honest-reach.md) | Admin: build/security signals, an honest Reach panel, and a pagination fix | Accepted |
 | [0014](0014-dashboard-auth-and-remediation.md) | Dashboard auth token, plus a security/quality remediation pass | Accepted |
+| [0015](0015-managed-codex-native-statusline.md) | Manage Codex's native user-wide status line without claiming rich-renderer parity | Accepted |
 
 Theme: ADRs **0001–0006** define **dual-host LLM routing and leadership** — how `ak` lets ruflo route
 each development activity (architecture, implementation, testing, review, …) to the right host (Claude
@@ -63,3 +64,8 @@ fixes from the same audit — an SSE client-cap race, `shell:true` on Windows, n
 writes, a build-gate that could pass having checked nothing, secret-masker gaps, an O(n) session
 lookup, a stale-cache bug, prototype-pollution-shaped CLI dispatch, enforced coverage floors, and
 new test coverage for the previously-untested machine-mutating commands.
+
+**0015** recognizes Codex's native status line without pretending it can host
+Claude's command-backed telemetry renderer. It adds opt-in, user-scoped presets,
+narrowly projects only the owned `[tui]` keys into `~/.codex/config.toml`, and
+keeps unowned or user-modified configuration outside `sync` and uninstall.

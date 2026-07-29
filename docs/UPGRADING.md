@@ -23,11 +23,18 @@ family on your behalf.
 | -------------------- | ----------------------------------------------- | -------------------------------- |
 | `ak sync`            | update the binary + heal to your recorded state | **no** — converges, never decides |
 | `ak x provider pick` | opt into / retune hosts & LLM providers         | **yes** — this is the switch     |
+| `ak x statusline codex native\|extended` | opt into a user-wide Codex status-line preset | **yes** — records the preset |
 | `ak setup`           | first-time bootstrap of absent tooling          | only via explicit flags (`--codex`, `--primary-host`) |
 
 If you already have `ak` working, you almost never need `ak setup` again — it's the
 installer. Enabling a shipped-but-opt-in feature is a `provider pick` (or an `x mcp pick`,
 etc.), not a re-`setup`.
+
+Codex status-line management is deliberately not enabled merely because an
+upgrade adds support for it. Run `ak x statusline codex native` once to opt in;
+later `ak sync` runs converge that recorded choice. Use
+`ak x statusline codex off` to relinquish ownership. See
+[Managed Codex status line](CODEX-STATUSLINE.md).
 
 ## Worked example: adopting ambidextrous dual-host
 

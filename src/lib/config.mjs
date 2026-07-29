@@ -26,6 +26,7 @@ const DEFAULTS = {
     dualRouting: {},                        // activity → {host,model,escalate?,source} per-activity routing policy (ADR-0001; seeded on dual-host)
     codexMcp: null,                         // 'ak' when ak registered the codex MCP server (ownership guard for teardown)
   },
+  statusline: { codex: null }, // {preset,lastProjection}: explicit ownership of Codex [tui] keys
   customBlocks: [],     // [{slug, templatePath, detector:{type:'command'|'dir'|'file', target}}]
   versionCheck: { ttlHours: 24, last: null, seen: {} },
 };
@@ -46,6 +47,7 @@ export function loadKitConfig(file = kitConfigPath()) {
           ...parsed.providers,
           hosts: { ...DEFAULTS.providers.hosts, ...parsed.providers?.hosts },
         },
+        statusline: { ...DEFAULTS.statusline, ...parsed.statusline },
       };
     } catch { /* try next */ }
   }

@@ -25,7 +25,7 @@ release this kit. User-facing docs live in [README.md](README.md); this file is 
 ### CLI shape (`bin/agentic-kit.mjs`)
 
 - **Porcelain** (daily): `setup`, `status`, `sync`, `dashboard`, `admin`, `dual`, `uninstall`. Bare `ak` → `status --hint`. (`dashboard` and `admin` are also reachable as `ak x dashboard` / `ak x admin`.)
-- **Plumbing** (power users): `ak x daemon-gc | mcp | reference | verify | improvement-eval`.
+- **Plumbing** (power users): `ak x daemon-gc | mcp | reference | statusline | verify | improvement-eval`.
 - Each command module exports `options` (a `parseArgs` config) and `run({ flags, positionals, pkgRoot })`.
 - A best-effort drift nudge runs after non-`sync`, non-`--json` commands.
 
@@ -39,7 +39,7 @@ src/
   commands/              # porcelain verbs
     setup.mjs  status.mjs  sync.mjs  dual.mjs  uninstall.mjs
     x/                   # plumbing verbs
-      admin.mjs  daemon-gc.mjs  dashboard.mjs  harvest.mjs  mcp.mjs  provider.mjs  reference.mjs  verify.mjs
+      admin.mjs  daemon-gc.mjs  dashboard.mjs  harvest.mjs  mcp.mjs  provider.mjs  reference.mjs  statusline.mjs  verify.mjs
   lib/                   # the engine — each file is one concern
     heal.mjs             # the mutations sync/setup apply (idempotent, {ok,detail})
     natives.mjs          # better-sqlite3 / agentdb native detection
@@ -48,6 +48,7 @@ src/
     ruvnet-brain.mjs     # RuvNet Brain: on-disk detection + GitHub-release drift (NOT an npm pkg)
     blocks.mjs           # managed-block registry + syncBlocks + guidanceTargets (3 targets: ~/.claude/CLAUDE.md, project AGENTS.md, ~/.codex/AGENTS.md)
     hosts.mjs            # host-adapter core: drivingHost() + HOST_ADAPTERS (guidance file, auth, statusline)
+    codex-statusline.mjs # owned presets + narrow ~/.codex/config.toml projection
     providers.mjs        # frontier-host + LLM-provider detect/wire (hosts, auth, MCP bridges, aqe router)
     routing.mjs          # pure dual-host routing policy: defaults, projections, primary-host swap
     qeCourt.mjs          # qe-court vendor-diversity panel helpers
@@ -91,6 +92,17 @@ per-activity host+model map). `routing.mjs` is pure (defaults, `seedDualRouting`
 wiring, both MCP-bridge directions, aqe router file). Seeded/healed by `setup` +
 `sync` + `x provider pick`, surfaced by `status` + `dashboard`. Design records:
 ADRs [0001–0006](docs/adr/); user guide: `docs/PROVIDERS.md`.
+
+**Status-line capability is host-specific.** Claude owns a project-scoped,
+command-backed renderer; Codex offers a user-scoped, built-in field list.
+`ak x statusline codex native|extended` explicitly opts the user into management
+of only `tui.status_line` and `tui.status_line_use_colors`; `sync` must not touch
+those keys without that ownership record. The textual TOML merge is
+backup-first and must preserve unknown keys, comments, ordering, and newline
+style. `off` and uninstall remove each key only if its managed value is
+unchanged. See
+[the Codex status-line guide](docs/CODEX-STATUSLINE.md) and
+[ADR-0015](docs/adr/0015-managed-codex-native-statusline.md).
 
 > The consistency contract all managed tools share — install/update/version/display
 > invariants, the per-tool table, and the add-a-tool checklist — lives in

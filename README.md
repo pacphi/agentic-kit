@@ -52,6 +52,7 @@ ak sync         converge to good: upgrade + heal + verify          [--dry-run] [
 ak dashboard    open the local web dashboard (auto-opens your browser)
                 [--port N] [--no-open] [--live-source 'surface=path']
 ak dual         run a Claude+Codex collaboration swarm (dual-host)   run <template> "<task>"  [--dry-run] [--escalate] [--route ...]
+ak x statusline manage Codex's native user-wide status line          status | codex native|extended|off
 ak uninstall    leave cleanly                [--dry-run] [--this-project] [--remove-ruflo] [--remove-aqe] [--purge] [--yes]
 ```
 
@@ -77,6 +78,7 @@ What the verbs cover:
 
 Power-user mechanisms live under `ak x …` (`daemon-gc`, `harvest`,
 `mcp pick|off`, `provider status|pick|off`, `reference diff|sync`,
+`statusline status|codex native|extended|off`,
 `verify learning|security|aqe|providers|harvest`, `improvement-eval`) — see `ak --help --all`.
 
 One of those is worth calling out:
@@ -93,6 +95,14 @@ Projects set up by the kit get an append-only footer under ruflo's own status li
 each segment shown **only when genuinely active**: 🧠 SONA patterns/trajectories (+
 live micro-LoRA Δ‖W‖), 📈 route-RL metrics, 🛡 aidefence, 🧿 RuvNet Brain KB,
 ⚙ machine-wide daemon count, and 🎓 Agentic-QE stats.
+
+That rich, command-backed footer is a Claude Code surface. Codex supports a
+single native line made from built-in fields instead. Opt into a compact
+machine-wide preset with `ak x statusline codex native` (or use `extended` on
+a wide terminal); `ak sync` then keeps the selected preset converged without
+rewriting unrelated `~/.codex/config.toml` settings. See
+[Managed Codex status line](docs/CODEX-STATUSLINE.md) for fields, ownership,
+rollback, and the current parity boundary.
 
 ## Requirements
 
