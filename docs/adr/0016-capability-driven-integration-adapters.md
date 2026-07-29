@@ -1,6 +1,6 @@
 # ADR-0016 — Capability-driven host, provider, binding, projection, and observability adapters
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-07-28
 - **Deciders:** agentic-kit maintainers
 - **Related:** [ADR-0001](0001-one-routing-policy-many-projections.md),
@@ -330,6 +330,28 @@ does. Exact model digest and local `$0` claims remain gated by ADR-0011 and
 does not claim that compatibility-layer behavior has been observed. Each binding has independent
 ownership and teardown.
 
+This is a **structural proof**, not a runtime-local-model proof. It establishes that one provider
+can be represented behind two hosts without collapsing their identities, configuration,
+ownership, or teardown. It does not establish that an Ollama-backed session ran, that its
+transcript semantics match a compatibility specification, or that usage may be classified and
+priced as local.
+
+#### Dependency boundary with ADR-0011
+
+ADR-0016 owns the general integration architecture: adapter axes, capabilities, bindings,
+lifecycle, migration, ownership, normalized facts, and provenance. Its acceptance depends on
+those contracts being implemented and tested.
+
+ADR-0011 independently owns evidence-backed local-model usage behavior: Ollama catalogue reads,
+digest identity, index-time local provenance, alias ambiguity, local/unpriced cost states,
+metered/local token splits, and transcript-fidelity notes. ADR-0011 remains Proposed until its
+validation sessions and implementation are complete.
+
+Therefore ADR-0011 does **not** block acceptance of ADR-0016. It blocks only claims that an actual
+Ollama-backed execution has been observed, identified, priced, or characterized. The Ollama
+catalogue/runtime descriptors and bindings introduced here are extension seams for ADR-0011, not
+evidence that ADR-0011 has been implemented.
+
 #### OpenRouter behind a host
 
 OpenRouter is a metered provider/gateway with environment-only credentials and compatible
@@ -385,7 +407,8 @@ not write real home/global configuration.
 - It does not claim provider provenance from host evidence alone.
 - It does not add dashboard writes or controls.
 - It does not silently adopt or overwrite externally managed configuration.
-- It does not make unverified Ollama compatibility claims; ADR-0011's validation gate remains.
+- It does not implement or make unverified Ollama execution, usage-pricing, catalogue-metadata, or
+  transcript-fidelity claims; those remain gated independently by ADR-0011.
 
 ## Consequences
 
@@ -409,7 +432,7 @@ but less truthful.
 | Lifecycle commands derive behavior from capabilities | Sections 2, 3, and 9 |
 | Primary/activity routing is capability-limited | Section 2; OpenCode negative test |
 | One provider binds to multiple hosts | Section 8; two Ollama bindings |
-| Ollama through Claude and Codex is represented | Section 8, subject to ADR-0011 evidence |
+| Ollama through Claude and Codex is represented | Section 8 structural binding proof; runtime and usage claims remain ADR-0011 scope |
 | OpenRouter is a provider behind a host | Section 8; typed registry rejection as host |
 | Status/dashboard separate host, provider, model, billing, provenance | Section 5 |
 | npm-managed vs external ownership is truthful | Section 4 |
@@ -418,6 +441,7 @@ but less truthful.
 | Issue #59 can consume the abstraction without being subsumed | Sections 5 and 8 |
 | Documentation uses one vocabulary | Section 9 |
 
-This ADR remains **Proposed** until the registries, lifecycle conformance suite, compatibility
-fixtures, consumer migration, and proving integrations are implemented, and until Ollama claims
-requiring runtime evidence satisfy ADR-0011's validation requirements.
+The registries, lifecycle conformance suite, compatibility fixtures, consumer migration, and
+structural proving integrations are implemented and tested, so this ADR is **Accepted**. That
+status does not advance ADR-0011: local-model runtime evidence and usage behavior remain Proposed
+work under ADR-0011's own validation requirements.
