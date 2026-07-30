@@ -4,11 +4,11 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import {
-  vendorOf, panelFromRouting, validatePanel, qeCourtConfigPath, readQeCourtConfig,
-  healJuryVendorCollision, UPSTREAM_JURY_VENDOR_ISSUE,
+  vendorOf, panelFromRouting, validatePanel, validateCourtConfig,
+  qeCourtConfigPath, readQeCourtConfig,
 } from '../../src/lib/qeCourt.mjs';
 
-// vendorOf — ported from qe-court's referee.js
+// vendorOf — ported from qe-court's referee.ts
 
 test('vendorOf classifies claude-family provider ids', () => {
   assert.equal(vendorOf('claude-code'), 'claude');
@@ -43,12 +43,17 @@ test('panelFromRouting flattens the routing map into {role, provider} pairs', ()
   ]);
 });
 
-test('panelFromRouting ignores the _note key', () => {
-  const panel = panelFromRouting({ _note: 'provider ids: ...', defense: { provider: 'claude-code' } });
-  assert.equal(panel.some((p) => p.role === '_note'), false);
+test('panelFromRouting ignores metadata and provider-less seats', () => {
+  const panel = panelFromRouting({
+    _note: 'provider ids: ...',
+    _description: { provider: 'not-a-seat' },
+    defense: { provider: 'claude-code' },
+    jury: {},
+  });
+  assert.deepEqual(panel, [{ role: 'defense', provider: 'claude-code' }]);
 });
 
-// validatePanel — ported from qe-court's referee.js
+// validatePanel / validateCourtConfig — ported from qe-court's referee.ts
 
 test('validatePanel passes a 2-vendor panel with an independent jury', () => {
   const panel = [
@@ -86,6 +91,48 @@ test('validatePanel respects a custom minVendors policy', () => {
   assert.deepEqual(validatePanel(panel, { minVendors: 4 }), ['vendor-diversity']);
 });
 
+test('validatePanel binds the shipped option names and requires a jury', () => {
+  const panel = [
+    { role: 'defense', provider: 'claude-code' },
+    { role: 'prosecutor.codex-review', provider: 'codex' },
+  ];
+  assert.deepEqual(
+    validatePanel(panel, { minDistinctVendors: 3 }),
+    ['vendor-diversity', 'missing-jury'],
+  );
+});
+
+test('validatePanel honors an explicit writerIsNeverJuror:false policy', () => {
+  const panel = [
+    { role: 'defense', provider: 'claude-code' },
+    { role: 'prosecutor.codex-review', provider: 'codex' },
+    { role: 'jury', provider: 'claude' },
+  ];
+  assert.deepEqual(validatePanel(panel, { writerIsNeverJuror: false }), []);
+});
+
+test('agentic-qe 3.13.3 shipped config passes its declared policy', () => {
+  const config = {
+    routing: {
+      _note: 'provider ids',
+      defense: { provider: 'claude-code' },
+      'prosecutor.devils-advocate': { provider: 'cognitum-mid' },
+      'prosecutor.brutal-honesty': { provider: 'claude-code', model: 'sonnet' },
+      'prosecutor.sherlock': { provider: 'cognitum-high' },
+      'prosecutor.security-scanner': { provider: 'cognitum-mid' },
+      'prosecutor.mutation': { provider: 'ollama' },
+      'prosecutor.codex-review': { provider: 'codex' },
+      jury: { provider: 'cognitum-high' },
+      deeperReviewer: { provider: 'codex' },
+    },
+    options: {
+      writerIsNeverJuror: true,
+      minDistinctVendors: 2,
+    },
+  };
+  assert.deepEqual(validateCourtConfig(config), []);
+});
+
 // qeCourtConfigPath / readQeCourtConfig
 
 test('qeCourtConfigPath points at .claude/skills/qe-court/config.json under root', () => {
@@ -106,72 +153,4 @@ test('readQeCourtConfig reads an existing config.json', () => {
   const cfg = readQeCourtConfig(dir);
   assert.equal(cfg.routing.jury.provider, 'cognitum-high');
   fs.rmSync(dir, { recursive: true, force: true });
-});
-
-// healJuryVendorCollision — temporary heal for agentic-qe's own shipped
-// default (proffesor-for-testing/agentic-qe#576); remove once fixed upstream.
-
-test('healJuryVendorCollision reassigns jury to deeperReviewer\'s vendor when it collides with the writer', () => {
-  const routing = {
-    defense: { provider: 'cognitum-low' },
-    'prosecutor.codex-review': { provider: 'codex' },
-    jury: { provider: 'cognitum-high' },
-    deeperReviewer: { provider: 'codex' },
-  };
-  const fix = healJuryVendorCollision(routing);
-  assert.deepEqual(fix, { role: 'jury', from: 'cognitum-high', to: 'codex' });
-});
-
-test('healJuryVendorCollision matches agentic-qe\'s actual shipped default', () => {
-  // exact routing block agentic-qe@3.13.2 ships in assets/skills/qe-court/config.json
-  const routing = {
-    defense: { provider: 'cognitum-low' },
-    'prosecutor.devils-advocate': { provider: 'cognitum-mid' },
-    'prosecutor.brutal-honesty': { provider: 'claude-code', model: 'sonnet' },
-    'prosecutor.sherlock': { provider: 'cognitum-high' },
-    'prosecutor.security-scanner': { provider: 'cognitum-mid' },
-    'prosecutor.mutation': { provider: 'ollama' },
-    'prosecutor.codex-review': { provider: 'codex' },
-    jury: { provider: 'cognitum-high' },
-    deeperReviewer: { provider: 'codex' },
-  };
-  assert.deepEqual(validatePanel(panelFromRouting(routing)), ['writerIsNeverJuror']);
-  assert.deepEqual(healJuryVendorCollision(routing), { role: 'jury', from: 'cognitum-high', to: 'codex' });
-});
-
-test('healJuryVendorCollision falls back to any other distinct-vendor seat when deeperReviewer is absent', () => {
-  const routing = {
-    defense: { provider: 'cognitum-low' },
-    'prosecutor.brutal-honesty': { provider: 'claude-code' },
-    jury: { provider: 'cognitum-high' },
-  };
-  const fix = healJuryVendorCollision(routing);
-  assert.deepEqual(fix, { role: 'jury', from: 'cognitum-high', to: 'claude-code' });
-});
-
-test('healJuryVendorCollision returns null when the panel is already valid', () => {
-  const routing = {
-    defense: { provider: 'cognitum-low' },
-    'prosecutor.codex-review': { provider: 'codex' },
-    jury: { provider: 'claude-code' },
-  };
-  assert.equal(healJuryVendorCollision(routing), null);
-});
-
-test('healJuryVendorCollision returns null when there is no distinct-vendor seat to borrow from', () => {
-  const routing = {
-    defense: { provider: 'cognitum-low' },
-    'prosecutor.sherlock': { provider: 'cognitum-high' },
-    jury: { provider: 'cognitum-mid' },
-  };
-  assert.equal(healJuryVendorCollision(routing), null);
-});
-
-test('healJuryVendorCollision returns null when there is no jury seat at all', () => {
-  const routing = { defense: { provider: 'cognitum-low' }, 'prosecutor.mutation': { provider: 'ollama' } };
-  assert.equal(healJuryVendorCollision(routing), null);
-});
-
-test('UPSTREAM_JURY_VENDOR_ISSUE points at the filed agentic-qe issue', () => {
-  assert.equal(UPSTREAM_JURY_VENDOR_ISSUE, 'https://github.com/proffesor-for-testing/agentic-qe/issues/576');
 });

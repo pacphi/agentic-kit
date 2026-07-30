@@ -357,7 +357,7 @@ export const JUDGE_BIAS_TIP = 'tip: for LLM-judged scoring, use a different vend
  *  requires >= 2 distinct vendors seated, which a dual-host setup already
  *  satisfies. Only meaningful once both hosts are enabled AND aqe is new
  *  enough to ship the skill — callers gate on both. */
-export const QE_COURT_TIP = 'agentic-qe ≥ 3.13.0 ships qe-court (adversarial review) — its jury requires ≥ 2 distinct vendors, which your dual-host setup already satisfies';
+export const QE_COURT_TIP = 'agentic-qe ships qe-court (adversarial review; upgrade to ≥ 3.13.3 for enforced config validation) — its jury requires ≥ 2 distinct vendors, which your dual-host setup already satisfies';
 
 /** Suggested aqe-fallback chain when codex is among the enabled hosts: codex's
  *  models are reached via the `openai` provider type (not as an aqe provider

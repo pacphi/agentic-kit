@@ -132,12 +132,6 @@ export async function run({ flags, pkgRoot }) {
   if (subsystems.has('aqe')) {
     report('rvf', heal.healRvf(paths.projectAqeDir(cwd)));
   }
-  // qe-court: TEMPORARY, remove once fixed upstream (agentic-qe#576) — see
-  // heal.healQeCourtPanel's doc comment. Only ever fires when status already
-  // found a fixable violation, so this never touches a valid or unfixable panel.
-  if (subsystems.has('qe-court')) {
-    report('qe-court', heal.healQeCourtPanel(cwd));
-  }
   // agentdb: install/repin the standalone CLI to ruflo's bundled version so the
   // shared cognitive store stays coherent (harvest's write path depends on it).
   if (subsystems.has('agentdb') && cfg.agentdb !== false) {

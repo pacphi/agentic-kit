@@ -36,6 +36,11 @@ function seedHome(cfg = offlineKitConfig()) {
 
 const collect = () => status.collect({ pkgRoot: PKG_ROOT, cwd: PROJECT });
 const rowsFor = (rows, subsystem) => rows.filter((r) => r.subsystem === subsystem);
+const qeCourtFile = path.join(PROJECT, '.claude', 'skills', 'qe-court', 'config.json');
+const writeQeCourtConfig = (config) => {
+  fs.mkdirSync(path.dirname(qeCourtFile), { recursive: true });
+  fs.writeFileSync(qeCourtFile, `${JSON.stringify(config, null, 2)}\n`);
+};
 const one = (rows, subsystem) => {
   const hit = rowsFor(rows, subsystem);
   assert.ok(hit.length >= 1, `expected at least one '${subsystem}' row, got ${rows.map((r) => r.subsystem)}`);
@@ -85,6 +90,54 @@ test('a missing agentic-qe is only a WARN (it is optional)', async () => {
   const aqe = rowsFor(rows, 'versions').find((r) => r.message.includes('agentic-qe'));
   assert.equal(aqe.level, 'warn');
   paths._setGlobalRootForTest(fakeGlobalRoot(HOME, { ruflo: '9.9.9', 'agentic-qe': '9.9.9' }));
+});
+
+test('agentic-qe 3.13.3 qe-court config is valid and offers no heal', async () => {
+  seedHome();
+  writeQeCourtConfig({
+    routing: {
+      _note: 'provider ids',
+      defense: { provider: 'claude-code' },
+      'prosecutor.sherlock': { provider: 'cognitum-high' },
+      'prosecutor.codex-review': { provider: 'codex' },
+      jury: { provider: 'cognitum-high' },
+      deeperReviewer: { provider: 'codex' },
+    },
+    options: { writerIsNeverJuror: true, minDistinctVendors: 2 },
+  });
+  try {
+    const before = snapshot(path.dirname(qeCourtFile));
+    const qc = one(await collect(), 'qe-court');
+    assert.equal(qc.level, 'ok');
+    assert.equal(qc.fix, null);
+    assertUnchanged(before, path.dirname(qeCourtFile), 'status must not rewrite a valid upstream config');
+  } finally {
+    fs.rmSync(path.dirname(qeCourtFile), { recursive: true, force: true });
+  }
+});
+
+test('legacy invalid qe-court config is reported read-only and sync is not offered', async () => {
+  seedHome();
+  writeQeCourtConfig({
+    routing: {
+      defense: { provider: 'cognitum-low' },
+      jury: { provider: 'cognitum-high' },
+      deeperReviewer: { provider: 'codex' },
+    },
+    options: { writerIsNeverJuror: true, minDistinctVendors: 2 },
+  });
+  try {
+    const before = snapshot(path.dirname(qeCourtFile));
+    const qc = one(await collect(), 'qe-court');
+    assert.equal(qc.level, 'warn');
+    assert.match(qc.message, /writerIsNeverJuror/);
+    assert.match(qc.message, /agentic-qe >=3\.13\.3/);
+    assert.equal(qc.fix, null, 'ak sync no longer mutates upstream-owned qe-court routing');
+    assertUnchanged(before, path.dirname(qeCourtFile), 'status must leave legacy config untouched');
+    assert.equal(fs.existsSync(`${qeCourtFile}.bak`), false);
+  } finally {
+    fs.rmSync(path.dirname(qeCourtFile), { recursive: true, force: true });
+  }
 });
 
 // kit.json's opt-outs were once write-only: documented, persisted, read by

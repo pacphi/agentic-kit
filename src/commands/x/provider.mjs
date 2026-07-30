@@ -23,7 +23,7 @@ import { have } from '../../lib/exec.mjs';
 import { ok, warn, fail, info, dim, bold, yellow } from '../../lib/output.mjs';
 import { repoRoot } from '../../lib/paths.mjs';
 import { writeJsonWithBackup } from '../../lib/settings.mjs';
-import { panelFromRouting, validatePanel, readQeCourtConfig, qeCourtConfigPath, vendorOf, qeCourtShipped } from '../../lib/qeCourt.mjs';
+import { panelFromRouting, validateCourtConfig, readQeCourtConfig, qeCourtConfigPath, vendorOf, qeCourtShipped } from '../../lib/qeCourt.mjs';
 
 /** Print the dual-host guidance tips (role delegation, judge-bias, qe-court
  *  cross-sell) once both hosts are enabled — shared by `pick()` and
@@ -238,8 +238,7 @@ function printQeCourtStatus(cwd) {
   const qc = readQeCourtConfig(root);
   if (!qc) return;
   const panel = panelFromRouting(qc.routing);
-  const minVendors = qc.options?.minDistinctVendors ?? 2;
-  const violations = validatePanel(panel, { minVendors });
+  const violations = validateCourtConfig(qc);
   console.log(bold('\nqe-court routing') + dim('  (.claude/skills/qe-court/config.json)'));
   for (const { role, provider } of panel) {
     console.log(`  ${role.padEnd(28)} ${provider ?? dim('(unset)')}`);
@@ -369,7 +368,7 @@ async function maybeWriteQeCourtDefaults({ nonInteractive, cwd, enabled, aqeProv
   if (ans !== 'y' && ans !== 'yes') { info('qe-court routing left unchanged'); return; }
 
   for (const [role, provider] of changes) routing[role] = { ...(routing[role] ?? {}), provider };
-  const violations = validatePanel(panelFromRouting(routing), { minVendors: qc.options?.minDistinctVendors ?? 2 });
+  const violations = validateCourtConfig({ ...qc, routing });
   if (violations.length) { warn(`qe-court routing defaults would be invalid (${violations.join(', ')}) — not written`); return; }
 
   writeJsonWithBackup(qeCourtConfigPath(root), { ...qc, routing });

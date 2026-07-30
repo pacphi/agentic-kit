@@ -22,7 +22,7 @@ import { readJson } from '../lib/settings.mjs';
 import { have } from '../lib/exec.mjs';
 import { HOSTS, settingsTarget, isDefault, managedEnv, MANAGED_ENV_KEYS, hostInstallState, hostAuthState, bothHostsEnabled, aqeRouterFile, aqeSupportsAgentOverrides, credentialGaps, collectIntegrationFacts } from '../lib/providers.mjs';
 import { policyToAgentOverrides, routingSummary, divergedRoutes } from '../lib/routing.mjs';
-import { qeCourtShipped, readQeCourtConfig, panelFromRouting, validatePanel, healJuryVendorCollision, UPSTREAM_JURY_VENDOR_ISSUE } from '../lib/qeCourt.mjs';
+import { qeCourtShipped, readQeCourtConfig, validateCourtConfig } from '../lib/qeCourt.mjs';
 import { drift as ruvectorDrift } from '../lib/ruvector.mjs';
 import { statuslineDrift } from '../lib/codex-statusline.mjs';
 
@@ -628,22 +628,17 @@ export async function collect({ pkgRoot, cwd = process.cwd() }) {
       'opencode has no statusline surface; its ruflo lifecycle ships via the plugins/ bridge + AGENTS.md'));
   }
 
-  // qe-court (ADR-124): TEMPORARY, remove once fixed upstream. agentic-qe's own
-  // shipped default config.json violates its own writerIsNeverJuror invariant
-  // (proffesor-for-testing/agentic-qe#576) — a brand-new project fails
-  // validation before any user touches the file. No-op unless aqe is new
-  // enough AND the skill has already created its config.json (ak never
-  // creates it) — same gate as `ak x provider status`'s read-only awareness.
+  // qe-court (ADR-124): read-only awareness. agentic-qe >=3.13.3 owns config
+  // validation and ships a valid default; ak reports existing project state
+  // but never rewrites the skill's config.
   if (qeCourtShipped()) {
     const qcRoot = paths.repoRoot(cwd);
     const qc = qcRoot ? readQeCourtConfig(qcRoot) : null;
     if (qc) {
-      const violations = validatePanel(panelFromRouting(qc.routing), { minVendors: qc.options?.minDistinctVendors ?? 2 });
+      const violations = validateCourtConfig(qc);
       if (violations.length) {
-        const fix = healJuryVendorCollision(qc.routing);
         rows.push(row('qe-court', 'warn',
-          `qe-court panel invalid: ${violations.join(', ')}`,
-          fix ? `sync reassigns jury ${fix.from} → ${fix.to} (temporary until upstream fix lands: ${UPSTREAM_JURY_VENDOR_ISSUE})` : null));
+          `qe-court panel invalid: ${violations.join(', ')} — regenerate with agentic-qe >=3.13.3 or choose different defense/jury vendors`));
       } else {
         rows.push(row('qe-court', 'ok', 'qe-court panel valid (vendor-diverse, jury independent of writer)'));
       }
