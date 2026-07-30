@@ -212,8 +212,10 @@ async function main() {
     await test('GET / categorizes the opencode subsystem into the Hosts tab (not the runtime fallback)', async () => {
       const r = await get(url);
       contains(r.body, 'opencode:"hosts"');
+      contains(r.body, '"codex-plugins":"hosts"');
+      contains(r.body, 'memory:"intel"');
       // and it must sort with the host MCP subsystems, not at the unknown end
-      contains(r.body, '"codex-mcp","opencode"');
+      contains(r.body, '"codex-mcp","codex-plugins","opencode"');
     });
 
     // ── RENDERED behavior, not served-source literals ────────────────────────

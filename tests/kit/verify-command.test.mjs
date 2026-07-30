@@ -39,7 +39,7 @@ test('an unknown suite exits 2 and names the valid suites', async () => {
   seedHome();
   const { result, out } = await runVerify(['bogus']);
   assert.equal(result, 2, 'a usage error is exit 2, distinct from a failed proof (1)');
-  assert.match(out, /unknown suite: bogus \(learning\|security\|aqe\|providers\|harvest\|all\)/);
+  assert.match(out, /unknown suite: bogus \(learning\|memory\|security\|aqe\|providers\|harvest\|all\)/);
   assert.ok(!/all selected proofs passed/.test(out), 'a usage error must not claim success');
 });
 
@@ -91,6 +91,23 @@ test('the learning suite leaves no temp directory behind', async () => {
     'the isolated training dir must be cleaned up even on failure');
 });
 
+test('the memory suite fails honestly when ruflo cannot be run', async () => {
+  seedHome();
+  const { result, out } = await runVerify(['memory']);
+  assert.equal(result, 1);
+  assert.match(out, /ruflo CLI not installed — cannot prove project memory/);
+});
+
+test('the memory suite leaves no temp directory behind', async () => {
+  seedHome();
+  const os = await import('node:os');
+  const before = new Set(fs.readdirSync(os.tmpdir()).filter((n) => n.startsWith('agentic-kit-memory-')));
+  await runVerify(['memory']);
+  const after = fs.readdirSync(os.tmpdir()).filter((n) => n.startsWith('agentic-kit-memory-'));
+  assert.deepEqual(after.filter((n) => !before.has(n)), [],
+    'the isolated memory proof dir must be cleaned up even on failure');
+});
+
 test('the aqe suite fails on an oversized RVF store rather than probing further', async () => {
   seedHome();
   const aqeDir = paths.projectAqeDir(PROJECT);
@@ -140,7 +157,7 @@ test('`all` runs every suite and fails if any single proof failed', async () => 
   seedHome();
   const { result, out } = await runVerify([]);
   assert.equal(result, 1);
-  for (const heading of ['learning —', 'security —', 'aqe —', 'providers —', 'harvest —']) {
+  for (const heading of ['learning —', 'memory —', 'security —', 'aqe —', 'providers —', 'harvest —']) {
     assert.ok(out.includes(heading), `the default run must include the ${heading} suite`);
   }
   assert.match(out, /verification failed — see above/);

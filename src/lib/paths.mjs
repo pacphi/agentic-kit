@@ -35,6 +35,7 @@ export const claudeSkillsDir = () => path.join(claudeDir(), 'skills');
 export const codexDir = () => path.join(home, '.codex');
 export const codexAgentsMdPath = () => path.join(codexDir(), 'AGENTS.md');
 export const codexConfigPath = () => path.join(codexDir(), 'config.toml');
+export const codexPluginCacheDir = () => path.join(codexDir(), 'plugins', 'cache');
 
 /** opencode user-level locations (XDG config home, same base as the kit's own
  *  configDir). `~/.config/opencode` is opencode's global config home; like
@@ -51,6 +52,7 @@ export const projectSettings = (root) => path.join(root, '.claude', 'settings.js
 export const projectSettingsLocal = (root) => path.join(root, '.claude', 'settings.local.json');
 export const projectStatusline = (root) => path.join(root, '.claude', 'helpers', 'statusline.cjs');
 export const projectMemoryDb = (root) => path.join(root, '.swarm', 'memory.db');
+export const projectAgentDbMemoryDb = (root) => path.join(root, '.swarm', 'agentdb-memory.db');
 export const projectClaudeFlowDir = (root) => path.join(root, '.claude-flow');
 export const projectAqeDir = (root) => path.join(root, '.agentic-qe');
 

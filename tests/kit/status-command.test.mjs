@@ -8,6 +8,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { DatabaseSync } from 'node:sqlite';
 import {
   sandboxHome, assertSandboxed, snapshot, assertUnchanged, captureLog, rmrf,
   sandboxProject, writeKitConfig, offlineKitConfig, fakeGlobalRoot,
@@ -28,7 +29,7 @@ const PROJECT = sandboxProject('ak-status');
 paths._setGlobalRootForTest(fakeGlobalRoot(HOME, { ruflo: '9.9.9', 'agentic-qe': '9.9.9' }));
 
 function seedHome(cfg = offlineKitConfig()) {
-  rmrf(paths.claudeDir(), paths.configDir());
+  rmrf(paths.claudeDir(), paths.codexDir(), paths.configDir());
   fs.mkdirSync(paths.claudeDir(), { recursive: true });
   fs.writeFileSync(paths.claudeMdPath(), '# machine notes\n');
   writeKitConfig(HOME, cfg);
@@ -198,6 +199,45 @@ test('project-scope rows degrade to info in a project that was never set up', as
   assert.equal(one(rows, 'learning').level, 'info');
   assert.equal(one(rows, 'aqe').level, 'info');
   assert.equal(one(rows, 'statusline').level, 'info');
+});
+
+test('an incompatible enabled Codex plugin warns without offering a sync mutation', async () => {
+  seedHome();
+  fs.mkdirSync(paths.codexDir(), { recursive: true });
+  fs.writeFileSync(paths.codexConfigPath(),
+    '[plugins."core@market"]\nenabled = true\n');
+  const root = path.join(paths.codexPluginCacheDir(), 'market', 'core', '1.0.0');
+  fs.mkdirSync(path.join(root, '.codex-plugin'), { recursive: true });
+  fs.mkdirSync(path.join(root, 'hooks'), { recursive: true });
+  fs.writeFileSync(path.join(root, '.codex-plugin', 'plugin.json'),
+    JSON.stringify({ name: 'core', version: '1.0.0' }));
+  fs.writeFileSync(path.join(root, 'hooks', 'hooks.json'),
+    JSON.stringify({ _note: 'unsupported by Codex', hooks: { Stop: [] } }));
+  const plugin = one(await collect(), 'codex-plugins');
+  assert.equal(plugin.level, 'warn');
+  assert.match(plugin.message, /unsupported top-level field\(s\): _note/);
+  assert.match(plugin.message, /Codex \/plugins/);
+  assert.equal(plugin.fix, null, 'sync must never rewrite Codex-owned plugin cache');
+});
+
+test('status identifies the native project-memory writer when both stores exist', async () => {
+  seedHome();
+  const swarm = path.join(PROJECT, '.swarm');
+  fs.mkdirSync(swarm, { recursive: true });
+  for (const [file, key] of [
+    [paths.projectMemoryDb(PROJECT), 'compat'],
+    [paths.projectAgentDbMemoryDb(PROJECT), 'native'],
+  ]) {
+    const db = new DatabaseSync(file);
+    db.exec('CREATE TABLE memory_entries (key TEXT, namespace TEXT, status TEXT)');
+    db.prepare('INSERT INTO memory_entries VALUES (?, ?, ?)').run(key, 'test', 'active');
+    db.close();
+  }
+  const memory = one(await collect(), 'memory');
+  assert.equal(memory.level, 'ok');
+  assert.match(memory.message, /native-agentdb active writer: 1 active entry/);
+  assert.match(memory.message, /sqljs compatibility store also present/);
+  rmrf(swarm);
 });
 
 test('owned Codex statusline reports independently without enabling Codex MCP routing', async () => {
