@@ -20,7 +20,12 @@ function sandbox({ hosts }) {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'kit-prov-cli-home-'));
   const cfgDir = path.join(home, '.config', 'agentic-kit');
   fs.mkdirSync(cfgDir, { recursive: true });
-  fs.writeFileSync(path.join(cfgDir, 'kit.json'), JSON.stringify({ providers: { hosts } }));
+  const last = Date.now();
+  fs.writeFileSync(path.join(cfgDir, 'kit.json'), JSON.stringify({
+    providers: { hosts },
+    // Real CLI spawns must not turn an isolated unit test into an npm network probe.
+    versionCheck: { last, seen: {}, self: { last, best: null } },
+  }));
   const project = fs.mkdtempSync(path.join(os.tmpdir(), 'kit-prov-cli-proj-'));
   fs.mkdirSync(path.join(project, '.git'));
   return { home, project };

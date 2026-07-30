@@ -15,8 +15,13 @@ function sandbox({ dualRouting }) {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'kit-dual-home-'));
   const cfgDir = path.join(home, '.config', 'agentic-kit');
   fs.mkdirSync(cfgDir, { recursive: true });
+  const last = Date.now();
   fs.writeFileSync(path.join(cfgDir, 'kit.json'),
-    JSON.stringify({ providers: { hosts: { claude: true, codex: true }, dualRouting } }));
+    JSON.stringify({
+      providers: { hosts: { claude: true, codex: true }, dualRouting },
+      // Real CLI spawns must not turn an isolated unit test into an npm network probe.
+      versionCheck: { last, seen: {}, self: { last, best: null } },
+    }));
   const project = fs.mkdtempSync(path.join(os.tmpdir(), 'kit-dual-proj-'));
   fs.mkdirSync(path.join(project, '.git'));
   return { home, project };
