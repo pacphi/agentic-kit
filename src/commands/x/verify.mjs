@@ -1,4 +1,4 @@
-// x verify [learning|security|aqe|all] — the deep proofs (slow, spawn real
+// x verify [learning|memory|security|aqe|all] — the deep proofs (slow, spawn real
 // CLIs). Ports of ruflo-learning-verify, ruflo-security-verify's defend
 // exercise, and ruflo-verify-aqe's live checks.
 import fs from 'node:fs';
@@ -7,7 +7,8 @@ import path from 'node:path';
 import { run as runCmd, have } from '../../lib/exec.mjs';
 import { aidefencePresent, securityPresent } from '../../lib/natives.mjs';
 import { scanRvf } from '../../lib/rvf.mjs';
-import { projectAqeDir } from '../../lib/paths.mjs';
+import { projectAqeDir, projectMemoryDb } from '../../lib/paths.mjs';
+import { findMemoryEntry } from '../../lib/project-memory.mjs';
 import { loadKitConfig } from '../../lib/config.mjs';
 import { HOSTS, collectIntegrationFacts, aqeRouterFile } from '../../lib/providers.mjs';
 import { readJson } from '../../lib/settings.mjs';
@@ -25,6 +26,7 @@ Usage: ak x verify [suite]
 
 Suites:
   learning    train a cycle in a temp dir; assert patterns persist
+  memory      store/retrieve/purge in a temp dir; confirm the actual DB writer
   security    packages load; defend flags injection / passes clean
   aqe         RVF store healthy; aqe status has no FsyncFailed
   providers   kit config matches installed CLIs; ruflo/aqe see the wiring
@@ -50,6 +52,60 @@ async function verifyLearning() {
     fail(`learning artifacts missing: ${e.message}`);
     return false;
   } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+}
+
+async function verifyMemory() {
+  heading('memory — store, retrieve, inspect the actual writer, and purge in an isolated dir');
+  if (!(await have('ruflo'))) { fail('ruflo CLI not installed — cannot prove project memory'); return false; }
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'agentic-kit-memory-'));
+  const namespace = `agentic-kit-verify-${process.pid}-${Date.now()}`;
+  const key = 'roundtrip';
+  const value = `memory-proof-${process.pid}-${Date.now()}`;
+  const env = {
+    CLAUDE_FLOW_DB_PATH: projectMemoryDb(tmp),
+    RUFLO_DAEMON_AUTOSTART: '0',
+  };
+  let stored = false;
+  let purged = false;
+  try {
+    const init = await runCmd('ruflo', ['memory', 'init'], { cwd: tmp, env, timeout: 120_000 });
+    if (init.code !== 0) { fail('ruflo memory init failed'); return false; }
+    const put = await runCmd('ruflo',
+      ['memory', 'store', '-k', key, '--value', value, '-n', namespace],
+      { cwd: tmp, env, timeout: 120_000 });
+    if (put.code !== 0) { fail(`ruflo memory store failed: ${(put.stderr || '').slice(0, 160)}`); return false; }
+    stored = true;
+
+    const get = await runCmd('ruflo',
+      ['memory', 'retrieve', '-k', key, '-n', namespace, '--value-only'],
+      { cwd: tmp, env, timeout: 120_000 });
+    if (get.code !== 0 || !get.stdout.includes(value)) {
+      fail('ruflo memory retrieve did not return the exact stored value');
+      return false;
+    }
+    ok('CLI store → retrieve returned the exact value');
+
+    const landed = findMemoryEntry(tmp, namespace, key);
+    if (!landed) { fail('stored value was not observable in either supported project DB'); return false; }
+    ok(`on-disk row confirmed in ${path.basename(landed.file)} (${landed.kind})`);
+
+    const purge = await runCmd('ruflo',
+      ['memory', 'purge', '--namespace', namespace, '--force'],
+      { cwd: tmp, env, timeout: 120_000 });
+    purged = purge.code === 0 && !findMemoryEntry(tmp, namespace, key);
+    if (!purged) { fail('isolated namespace purge did not remove the proof row'); return false; }
+    ok('isolated proof namespace purged');
+    return true;
+  } catch (e) {
+    fail(`memory verify error: ${e.message}`);
+    return false;
+  } finally {
+    if (stored && !purged) {
+      await runCmd('ruflo', ['memory', 'purge', '--namespace', namespace, '--force'],
+        { cwd: tmp, env, timeout: 120_000 });
+    }
     fs.rmSync(tmp, { recursive: true, force: true });
   }
 }
@@ -153,9 +209,9 @@ async function verifyHarvest() {
 
 export async function run({ positionals }) {
   const which = positionals[0] ?? 'all';
-  const suites = { learning: verifyLearning, security: verifySecurity, aqe: verifyAqe, providers: verifyProviders, harvest: verifyHarvest };
+  const suites = { learning: verifyLearning, memory: verifyMemory, security: verifySecurity, aqe: verifyAqe, providers: verifyProviders, harvest: verifyHarvest };
   const selected = which === 'all' ? Object.entries(suites) : [[which, suites[which]]];
-  if (!selected.every(([, fn]) => fn)) { fail(`unknown suite: ${which} (learning|security|aqe|providers|harvest|all)`); return 2; }
+  if (!selected.every(([, fn]) => fn)) { fail(`unknown suite: ${which} (learning|memory|security|aqe|providers|harvest|all)`); return 2; }
   let allGood = true;
   for (const [, fn] of selected) allGood = (await fn()) && allGood;
   console.log('');

@@ -2,6 +2,9 @@
 
 - **Status:** Accepted
 - **Date:** 2026-07-28
+- **Updated:** 2026-07-30
+- **Update note:** Added read-only Codex plugin-hook compatibility facts and
+  runtime-selected Ruflo project-memory store proofs.
 - **Deciders:** agentic-kit maintainers
 - **Related:** [ADR-0001](0001-one-routing-policy-many-projections.md),
   [ADR-0003](0003-auto-seed-dual-host-provenance.md),
@@ -190,6 +193,24 @@ removed under its install receipt. A Homebrew, system, vendor-installer, or othe
 installation remains detectable and usable but unmanaged. This extends PR #67 and ADR-0015's
 no-clobber behavior across JSON, TOML, environment projections, and CLI-managed surfaces without
 weakening it.
+
+#### Externally-owned plugin cache and runtime-selected memory
+
+Codex plugin configuration and `~/.codex/plugins/cache` are externally owned. Agentic-kit reads
+every explicitly enabled plugin's newest cached manifest, follows its declared hook paths (or the
+default `hooks/hooks.json`), and validates the Codex hook-file contract. It does not refresh,
+rewrite, delete, or adopt any plugin cache entry. An invalid newest cached bundle is a diagnostic fact
+with native remediation: open Codex `/plugins` to refresh or disable the plugin, then start a new
+session. The row has no `sync` fix.
+
+Project memory is also detected at fact level rather than inferred from package presence or a
+single historical filename. Current native Ruflo bridges can preserve a compatibility/sql.js (or
+encrypted) `.swarm/memory.db` while writing native plaintext rows to the sibling
+`.swarm/agentdb-memory.db`. When the native sibling exists it is the active writer; the
+compatibility store may coexist without representing drift. Read-only status identifies the active
+writer and counts observable entries. Setup and `ak x verify memory` prove persistence by storing
+a disposable row, locating it in the runtime-selected store, retrieving it through the real CLI,
+and removing it. File or package presence alone is never reported as a persistence proof.
 
 ### 5. Normalize field-level facts before rendering conclusions
 
@@ -409,6 +430,8 @@ not write real home/global configuration.
 - It does not claim provider provenance from host evidence alone.
 - It does not add dashboard writes or controls.
 - It does not silently adopt or overwrite externally managed configuration.
+- It does not mutate Codex's plugin cache; plugin refresh and disable remain Codex-native actions.
+- It does not collapse Ruflo's compatibility and native project-memory stores into one database.
 - It does not implement or make unverified Ollama execution, usage-pricing, catalogue-metadata, or
   transcript-fidelity claims; those remain gated independently by ADR-0011.
 
@@ -440,6 +463,7 @@ but less truthful.
 | npm-managed vs external ownership is truthful | Section 4 |
 | API keys are never persisted | Section 7 and serialization tests |
 | Dry-run/idempotence/undo/no-clobber are shared and tested | Sections 3 and 4; conformance suite |
+| External plugin hooks and runtime-selected memory are truthful | Section 4; read-only plugin diagnostics and isolated memory round-trip |
 | Issue #59 can consume the abstraction without being subsumed | Sections 5 and 8 |
 | Documentation uses one vocabulary | Section 9 |
 

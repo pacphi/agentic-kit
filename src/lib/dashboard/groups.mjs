@@ -16,9 +16,9 @@ export function esc(s) {
  *  subsystems fall back to Runtime so nothing is ever dropped. Overview
  *  aggregates all attention cards regardless of category. */
 export const CAT = {
-  hosts: 'hosts', mcp: 'hosts', 'codex-mcp': 'hosts', opencode: 'hosts', routing: 'hosts',
+  hosts: 'hosts', mcp: 'hosts', 'codex-mcp': 'hosts', 'codex-plugins': 'hosts', opencode: 'hosts', routing: 'hosts',
   providers: 'providers',
-  learning: 'intel', 'ruvnet-brain': 'intel', 'ruvnet-brain-nightly': 'intel', aqe: 'intel', agentdb: 'intel',
+  learning: 'intel', memory: 'intel', 'ruvnet-brain': 'intel', 'ruvnet-brain-nightly': 'intel', aqe: 'intel', agentdb: 'intel',
   ruvector: 'intel',
 };
 
@@ -27,7 +27,7 @@ export function catOf(s) { return CAT[s] || 'runtime'; }
 
 /** Severity rank for rollups + triage sort; PREF breaks ties (display order). */
 export const RANK = { fail: 3, warn: 2, ok: 1, info: 0, unknown: 0 };
-export const PREF = ['versions', 'self', 'natives', 'security', 'learning', 'providers', 'hosts', 'routing', 'mcp', 'codex-mcp', 'opencode', 'ruvnet-brain', 'ruvnet-brain-nightly', 'ruvector', 'aqe', 'daemons', 'blocks', 'statusline', 'npx'];
+export const PREF = ['versions', 'self', 'natives', 'security', 'learning', 'memory', 'providers', 'hosts', 'routing', 'mcp', 'codex-mcp', 'codex-plugins', 'opencode', 'ruvnet-brain', 'ruvnet-brain-nightly', 'ruvector', 'aqe', 'daemons', 'blocks', 'statusline', 'npx'];
 
 /** Collapse rows into one group per subsystem (kills repeated labels); the
  *  group's level is the worst of its rows. Sort worst-first, then by PREF. */

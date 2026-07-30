@@ -25,6 +25,8 @@ import { policyToAgentOverrides, routingSummary, divergedRoutes } from '../lib/r
 import { qeCourtShipped, readQeCourtConfig, validateCourtConfig } from '../lib/qeCourt.mjs';
 import { drift as ruvectorDrift } from '../lib/ruvector.mjs';
 import { statuslineDrift } from '../lib/codex-statusline.mjs';
+import { inspectCodexPlugins } from '../lib/codex-plugins.mjs';
+import { projectMemoryStatus } from '../lib/project-memory.mjs';
 
 export const options = {
   json: { type: 'boolean', default: false },
@@ -194,6 +196,28 @@ export async function collect({ pkgRoot, cwd = process.cwd() }) {
     }
   } catch { /* pin check is best-effort — never blocks status */ }
 
+  // Project memory may legitimately have two stores: the compatibility/sql.js
+  // memory.db and the native bridge's plaintext agentdb-memory.db sibling.
+  // Presence is a quick signal only; `ak x verify memory` performs the write
+  // round-trip proof.
+  try {
+    const memory = projectMemoryStatus(cwd);
+    if (!memory.active) {
+      rows.push(row('memory', 'info', 'no project memory store yet (run setup here to initialize)'));
+    } else if (!memory.active.readable) {
+      rows.push(row('memory', 'warn',
+        `active ${memory.active.kind} store is unreadable (${memory.active.file}) — run: ak x verify memory`));
+    } else {
+      const sibling = memory.secondary
+        ? `; ${memory.secondary.kind} compatibility store also present`
+        : '';
+      rows.push(row('memory', 'ok',
+        `${memory.active.kind} active writer: ${memory.active.entries} active entr${memory.active.entries === 1 ? 'y' : 'ies'}${sibling}`));
+    }
+  } catch (e) {
+    rows.push(row('memory', 'warn', `project memory check unavailable: ${e.message}`));
+  }
+
   // npx (stale ruflo-family cache envs — `npx --prefer-offline` fallbacks in the
   // statusline/hooks execute these verbatim, keeping retired defects alive)
   try {
@@ -323,6 +347,24 @@ export async function collect({ pkgRoot, cwd = process.cwd() }) {
     } catch (e) {
       rows.push(row('codex-mcp', 'warn', `ruflo→codex MCP check unavailable: ${e.message}`));
     }
+  }
+
+  // Codex owns plugin installation and refresh. Inspect every explicitly
+  // enabled cached plugin, but never attach a sync fix: the supported repair
+  // surface is Codex's /plugins UI followed by a fresh session.
+  try {
+    const plugins = inspectCodexPlugins();
+    if (plugins.enabled.length && plugins.issues.length) {
+      rows.push(row('codex-plugins', 'warn',
+        `${plugins.issues.length} Codex plugin compatibility issue(s): ${plugins.issues[0]}; `
+        + 'open Codex /plugins to refresh or disable it, then start a new session'));
+    } else if (plugins.enabled.length) {
+      const versions = plugins.plugins.map((plugin) => `${plugin.ref} (${plugin.version})`).join(', ');
+      rows.push(row('codex-plugins', 'ok',
+        `${plugins.enabled.length} enabled Codex plugin(s); newest cached hook configs compatible (${versions})`));
+    }
+  } catch (e) {
+    rows.push(row('codex-plugins', 'warn', `Codex plugin check unavailable: ${e.message}`));
   }
 
   // opencode host wiring — the third host's counterpart of the codex-mcp rows:

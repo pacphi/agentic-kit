@@ -20,7 +20,8 @@ import { installedVersion } from '../lib/versions.mjs';
 import * as rb from '../lib/ruvnet-brain.mjs';
 import * as adb from '../lib/agentdb.mjs';
 import { readJson, writeJsonWithBackup } from '../lib/settings.mjs';
-import { checkpoint, withDb } from '../lib/sqlite.mjs';
+import { withDb } from '../lib/sqlite.mjs';
+import { findMemoryEntry } from '../lib/project-memory.mjs';
 import * as paths from '../lib/paths.mjs';
 import { ok, warn, fail, info, heading, bold, dim } from '../lib/output.mjs';
 
@@ -271,20 +272,19 @@ export async function run_project({ flags, cfg }) {
     ok('claudeFlow.daemon.autoStart → false (explicit start only)');
   }
 
-  // 7. WAL checkpoint + write-verification (store → on-disk row, then clean up)
-  checkpoint(dbPath);
-  const probeKey = `_setup/verify-${process.pid}`;
+  // 7. Write-verification (store → actual on-disk row, then clean up). Native
+  // bridges may select agentdb-memory.db beside the pinned compatibility DB.
+  const probeKey = `_setup/verify-${process.pid}-${Date.now()}`;
   const stored = (await runCmd('ruflo', ['memory', 'store', '-k', probeKey, '--value', 'setup-verify', '-n', '_setup'], { cwd: root, env })).code === 0;
-  // Bound parameters, not string interpolation — probeKey is pid-derived and
-  // safe today, but interpolated SQL is a habit this codebase doesn't keep.
-  const onDisk = stored && withDb(dbPath,
-    (db) => db.prepare('SELECT COUNT(*) AS n FROM memory_entries WHERE key = ?').get(probeKey)?.n) === 1;
-  if (onDisk) {
-    withDb(dbPath, (db) => {
-      db.prepare('DELETE FROM memory_entries WHERE key = ?').run(probeKey);
+  const landed = stored ? findMemoryEntry(root, '_setup', probeKey) : null;
+  if (landed) {
+    // Bound parameters, not interpolation. Delete only this disposable probe
+    // from the store that actually received it.
+    withDb(landed.file, (db) => {
+      db.prepare('DELETE FROM memory_entries WHERE namespace = ? AND key = ?').run('_setup', probeKey);
       db.exec('PRAGMA wal_checkpoint(TRUNCATE);');
     }, null, { readonly: false });
-    ok('memory write VERIFIED (store → on-disk row confirmed)');
+    ok(`memory write VERIFIED (store → ${path.basename(landed.file)} row confirmed)`);
   } else {
     fail('memory write verification FAILED — run: ak status / ruflo doctor -c memory');
   }
