@@ -102,6 +102,7 @@ function fakeBins(dir) {
   for (const name of ['claude', 'codex', 'opencode']) {
     fs.writeFileSync(path.join(bin, name), '#!/bin/sh\nif [ -n "$AK_TEST_ARGV_LOG" ]; then printf "%s\\n" "$0 $*" >> "$AK_TEST_ARGV_LOG"; fi\nexit 0\n', { mode: 0o755 });
     fs.writeFileSync(path.join(bin, `${name}.cmd`), '@echo off\r\nexit /b 0\r\n');
+    fs.writeFileSync(path.join(bin, `${name}.ps1`), 'exit 0\r\n');
   }
   return bin;
 }
@@ -407,6 +408,7 @@ test('interactive pick: an enabled host absent from PATH right now is kept enabl
     // Remove the opencode shim: the CLI is "temporarily absent" but enabled.
     fs.rmSync(path.join(sb.binDir, 'opencode'), { force: true });
     fs.rmSync(path.join(sb.binDir, 'opencode.cmd'), { force: true });
+    fs.rmSync(path.join(sb.binDir, 'opencode.ps1'), { force: true });
     const r = akPick(['x', 'provider', 'pick'], sb, { input: '\n\n\n\n' });
     assert.equal(r.status, 0, `interactive pick failed\nstdout: ${r.stdout}\nstderr: ${r.stderr}`);
     assert.match(r.stdout, /enabled but not detected right now: opencode \(kept enabled on Enter\)/);

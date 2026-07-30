@@ -1,9 +1,19 @@
 import { EventEmitter } from 'node:events';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { createClaudeExecutionAdapter } from '../../src/lib/execution/claude.mjs';
-import { createCodexExecutionAdapter } from '../../src/lib/execution/codex.mjs';
+import { createClaudeExecutionAdapter as createRealClaudeExecutionAdapter } from '../../src/lib/execution/claude.mjs';
+import { createCodexExecutionAdapter as createRealCodexExecutionAdapter } from '../../src/lib/execution/codex.mjs';
 import { executeWorker } from '../../src/lib/execution/runner.mjs';
+
+const passthroughResolve = (command, args) => ({ command, args, resolved: true });
+const createClaudeExecutionAdapter = (options = {}) => createRealClaudeExecutionAdapter({
+  resolveFn: passthroughResolve,
+  ...options,
+});
+const createCodexExecutionAdapter = (options = {}) => createRealCodexExecutionAdapter({
+  resolveFn: passthroughResolve,
+  ...options,
+});
 
 const worker = (host, model = 'model-1') => ({
   id: `${host}-1`, activity: 'implementation', role: 'coder', host, configuredModel: model, prompt: 'Do the work.',

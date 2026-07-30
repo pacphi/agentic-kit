@@ -164,6 +164,7 @@ async function withOpencodeCli(fn) {
   fs.mkdirSync(bin, { recursive: true });
   fs.writeFileSync(path.join(bin, 'opencode'), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
   fs.writeFileSync(path.join(bin, 'opencode.cmd'), '@echo off\r\nexit /b 0\r\n');
+  fs.writeFileSync(path.join(bin, 'opencode.ps1'), 'exit 0\r\n');
   const prev = process.env.PATH;
   process.env.PATH = [bin, '/usr/bin', '/bin'].join(path.delimiter);
   try { return await fn(); } finally { process.env.PATH = prev; rmrf(bin); }

@@ -1,7 +1,16 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { createOpenCodeExecutionAdapter, renderOpenCodeWorkerPrompt } from '../../src/lib/execution/opencode.mjs';
+import {
+  createOpenCodeExecutionAdapter as createRealOpenCodeExecutionAdapter,
+  renderOpenCodeWorkerPrompt,
+} from '../../src/lib/execution/opencode.mjs';
 import { executeWorker } from '../../src/lib/execution/runner.mjs';
+
+const passthroughResolve = (command, args) => ({ command, args, resolved: true });
+const createOpenCodeExecutionAdapter = (options = {}) => createRealOpenCodeExecutionAdapter({
+  resolveFn: passthroughResolve,
+  ...options,
+});
 
 const worker = {
   id: 'worker-1', activity: 'implementation', role: 'coder', host: 'opencode',
