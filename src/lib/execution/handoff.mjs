@@ -109,6 +109,17 @@ export function extractHandoff(raw) {
   return normalizeHandoff(value);
 }
 
+/** Remove the private protocol payload before host diagnostics reach a public
+ * WorkerResult. Once either delimiter appears, the remainder is withheld:
+ * malformed/truncated blocks must not create a disclosure bypass. */
+export function redactHandoffData(raw) {
+  const value = String(raw ?? '');
+  const starts = [value.indexOf(HANDOFF_START), value.indexOf(HANDOFF_END)]
+    .filter((index) => index >= 0);
+  if (starts.length === 0) return value;
+  return `${value.slice(0, Math.min(...starts))}[private handoff withheld]`;
+}
+
 function safeJson(value) {
   return JSON.stringify(value)
     .replaceAll('<', '\\u003c')

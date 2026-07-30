@@ -40,7 +40,7 @@ const tagged = (outcome) => `${HANDOFF_START}${JSON.stringify({
   outcome, artifacts: [], decisions: [], risks: [],
 })}${HANDOFF_END}`;
 
-test('Claude adapter uses print/json mode without a permission bypass', async () => {
+test('Claude adapter uses bounded print/stream-json mode without a permission bypass', async () => {
   const calls = [];
   const adapter = createClaudeExecutionAdapter({
     haveFn: async () => true, clock,
@@ -48,7 +48,10 @@ test('Claude adapter uses print/json mode without a permission bypass', async ()
   });
   const result = await executeWorker(worker('claude'), adapter, { cwd: process.cwd(), clock });
   assert.equal(result.status, 'succeeded');
-  assert.deepEqual(calls[0].args, ['--print', '--output-format', 'json', '--model', 'model-1', 'Do the work.']);
+  assert.deepEqual(calls[0].args, [
+    '--print', '--output-format', 'stream-json', '--verbose',
+    '--model', 'model-1', 'Do the work.',
+  ]);
   assert.ok(!calls[0].args.some((arg) => arg.includes('dangerously') || arg.includes('bypass')));
 });
 
@@ -56,7 +59,11 @@ test('Claude and Codex extract only tagged final-message handoffs from structure
   const claude = createClaudeExecutionAdapter({
     haveFn: async () => true,
     clock,
-    spawnFn: () => child({ stdout: JSON.stringify({ result: `final prose\n${tagged('claude-final')}` }) }),
+    spawnFn: () => child({
+      stdout: JSON.stringify({
+        type: 'result', subtype: 'success', result: `final prose\n${tagged('claude-final')}`,
+      }),
+    }),
   });
   const claudeState = await claude.launch(await claude.prepare({ worker: worker('claude'), cwd: process.cwd() }));
   assert.equal(claude.summarize(claudeState, await claude.observe(claudeState)).outcome, 'claude-final');
@@ -82,7 +89,7 @@ test('subprocess summarizers never treat raw stdout or non-message JSONL as a ha
   });
   const cs = await claude.launch(await claude.prepare({ worker: worker('claude'), cwd: process.cwd() }));
   const co = await claude.observe(cs);
-  assert.throws(() => claude.summarize(cs, co), /Claude JSON output was malformed/);
+  assert.throws(() => claude.summarize(cs, co), /Claude JSONL output was malformed/);
 
   const codex = createCodexExecutionAdapter({
     haveFn: async () => true,
@@ -92,6 +99,44 @@ test('subprocess summarizers never treat raw stdout or non-message JSONL as a ha
   });
   const xs = await codex.launch(await codex.prepare({ worker: worker('codex'), cwd: process.cwd() }));
   assert.equal(codex.summarize(xs, await codex.observe(xs)), null);
+});
+
+test('structured handoffs survive oversized unrelated JSONL without unbounded capture', async () => {
+  const oversized = JSON.stringify({ type: 'noise', text: 'x'.repeat(300 * 1024) });
+  const cases = [
+    ['claude', createClaudeExecutionAdapter, JSON.stringify({
+      type: 'result', subtype: 'success', result: tagged('claude-after-noise'),
+    })],
+    ['codex', createCodexExecutionAdapter, JSON.stringify({
+      type: 'item.completed', item: { type: 'agent_message', text: tagged('codex-after-noise') },
+    })],
+  ];
+  for (const [host, factory, terminal] of cases) {
+    const adapter = factory({
+      haveFn: async () => true,
+      spawnFn: () => child({ stdout: `${oversized}\n${terminal}\n` }),
+    });
+    const state = await adapter.launch(await adapter.prepare({ worker: worker(host), cwd: process.cwd() }));
+    const observation = await adapter.observe(state);
+    assert.ok(Buffer.byteLength(observation.stdout, 'utf8') <= 256 * 1024);
+    assert.equal(adapter.summarize(state, observation).outcome, `${host}-after-noise`);
+  }
+});
+
+test('failed subprocess diagnostics redact complete and truncated private handoffs', async () => {
+  for (const output of [
+    `hook failed after ${tagged('private decision')} trailing diagnostics`,
+    `hook failed after ${HANDOFF_START}secret without a closing delimiter`,
+  ]) {
+    const adapter = createCodexExecutionAdapter({
+      haveFn: async () => true,
+      spawnFn: () => child({ code: 1, stdout: output }),
+    });
+    const result = await executeWorker(worker('codex'), adapter, { cwd: process.cwd(), clock });
+    assert.equal(result.status, 'failed');
+    assert.match(result.failure.reason, /private handoff withheld/);
+    assert.doesNotMatch(result.failure.reason, /private decision|secret|AK_HANDOFF/);
+  }
 });
 
 // #88: per-node turn caps reach the claude CLI (--max-turns); codex has no

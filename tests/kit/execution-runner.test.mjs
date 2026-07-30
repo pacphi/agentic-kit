@@ -391,8 +391,8 @@ test('the attempt budget is shared rather than renewed for every lifecycle phase
   if (events.includes('launch')) {
     assert.ok(events.includes('cancel:true'), 'an acquired launch resource is cancelled');
   } else {
-    assert.equal(events.some((event) => event.startsWith('cancel:')), false,
-      'scheduler delay may exhaust the shared budget before any resource exists');
+    assert.equal(events.includes('cancel:true'), false,
+      'scheduler delay may exhaust the shared budget before launch acquires a resource');
   }
 });
 
