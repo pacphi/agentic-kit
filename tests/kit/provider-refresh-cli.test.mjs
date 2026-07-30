@@ -27,7 +27,16 @@ function sandbox(providers) {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'kit-refresh-home-'));
   const cfgDir = path.join(home, '.config', 'agentic-kit');
   fs.mkdirSync(cfgDir, { recursive: true });
-  fs.writeFileSync(path.join(cfgDir, 'kit.json'), JSON.stringify({ providers }));
+  // These tests exercise provider output and persistence, not version egress.
+  // A fresh sandbox otherwise makes every real CLI spawn run two sequential
+  // `npm view` probes; an unreachable Windows runner pays both 20s timeouts
+  // for every test in this file. Seed the same honest "checked, no answer"
+  // cache shape a completed drift probe would persist.
+  const last = Date.now();
+  fs.writeFileSync(path.join(cfgDir, 'kit.json'), JSON.stringify({
+    providers,
+    versionCheck: { last, seen: {}, self: { last, best: null } },
+  }));
   const project = fs.mkdtempSync(path.join(os.tmpdir(), 'kit-refresh-proj-'));
   fs.mkdirSync(path.join(project, '.git'));
   return { home, project };
