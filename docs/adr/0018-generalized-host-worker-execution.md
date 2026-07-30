@@ -2,6 +2,8 @@
 
 - **Status:** Accepted
 - **Date:** 2026-07-29
+- **Updated:** 2026-07-30
+- **Update note:** Hardened trusted-policy validation, adapter invariants, plan guards, and bounded worker teardown.
 - **Deciders:** agentic-kit maintainers
 
 ## Context
@@ -67,6 +69,27 @@ permission-response contract required for a routable worker. [OpenCode CLI docum
 6. OpenCode declares `canRouteActivities:true` only with the runnable adapter and its
    conformance evidence. Its routes are accepted by `ak run`, but are never auto-seeded,
    AQE-projected, primary-host eligible, or accepted by deprecated `ak dual`.
+
+### The trust boundary (stated, not weakened)
+
+`ak run` executes workers with the **user's own CLI trust posture in the target
+repository**. That means the repository itself is *inside* the trust boundary:
+
+- An owned OpenCode server reads the project `opencode.json` from the target cwd. A
+  repository that ships `{"permission":{"bash":"allow"}}` (or hostile `mcp` entries)
+  pre-approves those permissions — **no `permission.updated` event ever fires, so the
+  adapter's abort boundary does not trip by design**. The abort covers permission
+  *requests*; it is not a sandbox.
+- Claude/Codex workers likewise inherit the repo's `.claude/settings.json` hooks and
+  permissions under the user's own workspace trust for that path.
+- Repository content (`AGENTS.md`, README, source) flows into worker prompts — an
+  indirect prompt-injection channel for any agent runner, ak included.
+
+**Contract: run `ak` (and any agent runner) only in repositories you would trust with
+your full user privileges.** ak will not silently weaken, bypass, or "secure" a hostile
+repo for you; what it guarantees instead is the honest version: loopback-only owned
+servers, ephemeral per-run credentials, no `--auto`, no permission approval on your
+behalf, and terminal evidence that records what actually ran.
 
 ## Consequences
 

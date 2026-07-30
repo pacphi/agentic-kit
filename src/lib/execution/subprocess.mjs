@@ -2,7 +2,7 @@
 // non-interactive structured output. The runner owns timeout policy; this module
 // owns only one direct child process and never invokes a shell or bypass mode.
 import { spawn as nodeSpawn } from 'node:child_process';
-import { have } from '../exec.mjs';
+import { have, resolveShim } from '../exec.mjs';
 import { validateExecutionAdapter, validateWorkerResult } from './schema.mjs';
 
 const nowIso = () => new Date().toISOString();
@@ -67,23 +67,46 @@ function resultFor(state, observation, host, clock) {
   });
 }
 
-async function terminate(state) {
+async function waitForFinished(state, timeoutMs) {
+  if (state.finished) return true;
+  let timer;
+  try {
+    return await Promise.race([
+      state.completion.then(() => true),
+      new Promise((resolve) => { timer = setTimeout(() => resolve(false), timeoutMs); }),
+    ]);
+  } finally { clearTimeout(timer); }
+}
+
+/** Stop the direct child and prove it actually exited. A successful `kill()`
+ * call means only that the signal was sent, not that the process terminated
+ * (qe-court B5). TERM therefore gets one bounded grace period, followed by one
+ * bounded KILL fallback; a survivor is explicit orphan evidence. */
+async function terminate(state, { terminationGraceMs, forceGraceMs }) {
   if (state.finished) return { type: 'cancelled' };
   try {
-    if (!state.child?.kill?.('SIGTERM')) return { type: 'orphaned' };
-    return { type: 'cancelled' };
-  } catch { return { type: 'orphaned' }; }
+    if (!state.child?.kill?.('SIGTERM')) return { type: 'cancelled', orphaned: true };
+    if (await waitForFinished(state, terminationGraceMs)) return { type: 'cancelled' };
+    if (!state.child.kill('SIGKILL')) return { type: 'cancelled', orphaned: true };
+    return await waitForFinished(state, forceGraceMs)
+      ? { type: 'cancelled' }
+      : { type: 'cancelled', orphaned: true };
+  } catch { return { type: 'cancelled', orphaned: true }; }
 }
 
 /** Build a lifecycle adapter for one host's structured non-interactive CLI.
  * `argumentsFor` must return a fixed argv vector; prompts never pass through a
  * shell. Permission modes are deliberately absent from this generic layer.
  * @param {{id:string, host:string, command:string, argumentsFor:(worker:any, cwd:string)=>string[],
- *   spawnFn?:typeof nodeSpawn, haveFn?:typeof have, clock?:()=>string}} options */
+ *   spawnFn?:typeof nodeSpawn, haveFn?:typeof have, resolveFn?:typeof resolveShim,
+ *   clock?:()=>string, terminationGraceMs?:number, forceGraceMs?:number}} options */
 export function createSubprocessExecutionAdapter({
-  id, host, command, argumentsFor, spawnFn = nodeSpawn, haveFn = have, clock = nowIso,
+  id, host, command, argumentsFor, spawnFn = nodeSpawn, haveFn = have,
+  resolveFn = resolveShim, clock = nowIso, terminationGraceMs = 1_500, forceGraceMs = 1_500,
 } = /** @type {any} */ ({})) {
   if (!id || !host || !command || typeof argumentsFor !== 'function') throw new TypeError('subprocess adapter requires id, host, command, and argumentsFor');
+  if (!Number.isInteger(terminationGraceMs) || terminationGraceMs < 1) throw new TypeError('terminationGraceMs must be a positive integer');
+  if (!Number.isInteger(forceGraceMs) || forceGraceMs < 1) throw new TypeError('forceGraceMs must be a positive integer');
   const adapter = {
     id,
     async readiness() {
@@ -96,7 +119,16 @@ export function createSubprocessExecutionAdapter({
       return { worker, cwd, args: argumentsFor(worker, cwd), startedAt: clock() };
     },
     async launch(state) {
-      const child = spawnFn(command, state.args, { cwd: state.cwd, env: process.env, stdio: ['ignore', 'pipe', 'pipe'] });
+      // Native Windows executables run directly. Package-manager .cmd shims
+      // are represented by a shell-free PowerShell -File invocation instead.
+      const invocation = resolveFn(command, state.args);
+      if (typeof invocation?.command !== 'string' || !Array.isArray(invocation.args)) {
+        throw new TypeError(`${host} command resolver returned an invalid invocation`);
+      }
+      if (invocation.resolved === false) {
+        throw new Error(`${host} command has no safe Windows invocation`);
+      }
+      const child = spawnFn(invocation.command, invocation.args, { cwd: state.cwd, env: process.env, stdio: ['ignore', 'pipe', 'pipe'] });
       if (!child?.once) throw new Error(`${host} process did not expose child lifecycle events`);
       const stdout = capture(child.stdout);
       const stderr = capture(child.stderr);
@@ -107,8 +139,8 @@ export function createSubprocessExecutionAdapter({
     },
     async observe(state) { return state.completion; },
     interpret(state, observation) { return resultFor(state, observation, host, clock); },
-    async cancel(state) { return terminate(state); },
-    async cleanup(state) { return terminate(state); },
+    async cancel(state) { return terminate(state, { terminationGraceMs, forceGraceMs }); },
+    async cleanup(state) { return terminate(state, { terminationGraceMs, forceGraceMs }); },
   };
   return validateExecutionAdapter(adapter);
 }

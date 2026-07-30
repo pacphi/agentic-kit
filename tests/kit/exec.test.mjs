@@ -1,6 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { run, have } from '../../src/lib/exec.mjs';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { run, have, resolveShim } from '../../src/lib/exec.mjs';
 
 // code-quality Finding 2: exec.mjs used to set shell:true for a fixed set of
 // Windows .cmd shims (npm/npx/claude/ruflo/aqe/claude-flow), which handed
@@ -43,4 +46,66 @@ test('have() reports true for a command that is definitely on PATH', async () =>
 
 test('have() reports false for a command that does not exist', async () => {
   assert.equal(await have('this-command-does-not-exist-anywhere'), false);
+});
+
+test('resolveShim builds safe native and PowerShell invocations in PATHEXT order', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-shim-'));
+  const bin = path.join(root, 'bin');
+  const powershell = path.join(root, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
+  const hostile = ['hello & whoami', '$(echo pwned)', 'a|b', 'quoted " value'];
+  fs.mkdirSync(path.dirname(powershell), { recursive: true });
+  fs.mkdirSync(bin);
+  try {
+    fs.writeFileSync(powershell, 'x');
+    fs.writeFileSync(path.join(bin, 'codex.cmd'), '@echo off\r\n');
+    fs.writeFileSync(path.join(bin, 'codex.ps1'), '# shim');
+    fs.writeFileSync(path.join(bin, 'codex.exe'), 'x');
+    const env = { PATH: bin, PATHEXT: '.COM;.EXE;.CMD', SystemRoot: root };
+
+    assert.deepEqual(resolveShim('codex', hostile, { windows: true, env }), {
+      command: path.join(bin, 'codex.exe'), args: hostile, resolved: true,
+    }, 'native .exe wins according to PATHEXT and receives the original argv');
+
+    assert.deepEqual(resolveShim('codex', hostile, {
+      windows: true, env: { ...env, PATHEXT: '.CMD' },
+    }), {
+      command: powershell,
+      args: [
+        '-NoLogo', '-NoProfile', '-NonInteractive',
+        '-ExecutionPolicy', 'Bypass', '-File', path.join(bin, 'codex.ps1'),
+        ...hostile,
+      ],
+      resolved: true,
+    }, 'a .cmd shim is represented by its sibling .ps1 without joining argv');
+
+    fs.rmSync(path.join(bin, 'codex.ps1'));
+    assert.deepEqual(resolveShim('codex', hostile, {
+      windows: true, env: { ...env, PATHEXT: '.CMD' },
+    }), { command: 'codex', args: hostile, resolved: false },
+    'a .cmd shim without its sibling .ps1 is not considered executable');
+    assert.deepEqual(resolveShim('codex', hostile, { windows: false, env }), {
+      command: 'codex', args: hostile, resolved: true,
+    }, 'non-Windows commands and argv pass through unchanged');
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('Windows PowerShell shim execution preserves hostile arguments literally', {
+  skip: process.platform !== 'win32',
+}, async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-shim-live-'));
+  const hostile = ['hello & whoami', '$(echo pwned)', 'a|b', 'quoted " value'];
+  try {
+    fs.writeFileSync(path.join(dir, 'codex.cmd'), '@echo off\r\n');
+    fs.writeFileSync(
+      path.join(dir, 'codex.ps1'),
+      '[Console]::Out.Write(($args | ConvertTo-Json -Compress))\n',
+    );
+    const result = await run('codex', hostile, { env: { PATH: dir, PATHEXT: '.CMD' } });
+    assert.equal(result.code, 0, result.stderr);
+    assert.deepEqual(JSON.parse(result.stdout), hostile);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 });

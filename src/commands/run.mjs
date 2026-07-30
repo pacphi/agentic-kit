@@ -19,6 +19,10 @@ export const help = `ak run — execute a host-neutral activity pipeline
 Materializes the managed per-activity routing policy and runs each worker through
 its host adapter. OpenCode is accepted only after its routing capability is enabled.
 
+Trust boundary: workers run with YOUR CLI trust posture in the target repo —
+its opencode.json / .claude settings / AGENTS.md apply. Run this only in
+repositories you would trust with your full user privileges (ADR-0018).
+
 Usage:
   ak run <template> "<task>"
 
@@ -40,10 +44,38 @@ Examples:
   ak run security "src/auth/" --route 'security-scan:opencode'
   ak run feature "fix the flaky parser" --escalate`;
 
-function positiveInt(value, name) {
+/** @param {string|undefined} value @param {string} name @param {{ ceiling?: number }} [opts] */
+function positiveInt(value, name, { ceiling } = {}) {
   if (value === undefined) return undefined;
   if (!/^\d+$/.test(value) || Number(value) < 1) throw new TypeError(`${name} must be a positive integer`);
-  return Number(value);
+  const n = Number(value);
+  // Node clamps setTimeout delays above 2^31-1 ms to ~1 ms — an uncapped
+  // --timeout would turn a huge value into an instant timeout for every
+  // worker (#88). Reject above the ceiling rather than silently mis-timing.
+  if (ceiling && n > ceiling) throw new TypeError(`${name} must not exceed ${ceiling} (a larger value is clamped to ~1ms by Node's timer)`);
+  return n;
+}
+
+/** A persisted dualRouting entry (kit.json is hand-editable — CLI routes are
+ *  validated, file entries were not, and a bad one crashed plan *printing*
+ *  far from the cause, #88). Returns an error string, or null when valid. */
+function routeEntryError(activity, entry) {
+  if (!entry || typeof entry !== 'object') return `route "${activity}" must be an object`;
+  if (typeof entry.host !== 'string' || !entry.host) return `route "${activity}" requires a non-empty host string`;
+  if (entry.model != null && typeof entry.model !== 'string') return `route "${activity}".model must be a string when present`;
+  if (entry.escalate != null) {
+    if (!Array.isArray(entry.escalate)) return `route "${activity}".escalate must be an array when present`;
+    for (const [i, rung] of entry.escalate.entries()) {
+      if (!rung || typeof rung.host !== 'string' || !rung.host) return `route "${activity}".escalate[${i}] requires a non-empty host string`;
+      if (rung.model != null && typeof rung.model !== 'string') return `route "${activity}".escalate[${i}].model must be a string when present`;
+    }
+  }
+  return null;
+}
+
+function validatePolicy(policy) {
+  const errors = Object.entries(policy).map(([a, e]) => routeEntryError(a, e)).filter(Boolean);
+  if (errors.length) throw new Error(`invalid routing policy: ${errors.join('; ')}`);
 }
 
 export function buildRunPlan(cfg, template, task, routeFlags = []) {
@@ -51,8 +83,10 @@ export function buildRunPlan(cfg, template, task, routeFlags = []) {
   if (routeFlags.length) {
     const { policy: overrides, warnings } = parseRouteSpecs(routeFlags);
     policy = { ...policy, ...overrides };
+    validatePolicy(policy);
     return { plan: materializeRunPlan(policy, { template, task }), warnings };
   }
+  validatePolicy(policy);
   return { plan: materializeRunPlan(policy, { template, task }), warnings: [] };
 }
 
@@ -101,7 +135,7 @@ export async function run({ flags, positionals, executePlan = executeRunPlan, cf
   let timeoutMs;
   try {
     maxConcurrent = positiveInt(flags['max-concurrent'], 'max-concurrent');
-    timeoutMs = positiveInt(flags.timeout, 'timeout');
+    timeoutMs = positiveInt(flags.timeout, 'timeout', { ceiling: 2_147_483_647 });
   } catch (error) { fail(error.message); return 2; }
   if (!flags.json) printPlan(plan);
   const results = await executePlan(plan, { maxConcurrent, timeoutMs, escalate: !!flags.escalate });

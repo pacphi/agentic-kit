@@ -7,12 +7,14 @@ import fs from 'node:fs';
 import net from 'node:net';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { have } from '../exec.mjs';
+import { have, resolveShim } from '../exec.mjs';
 import { validateExecutionAdapter, validateWorkerResult } from './schema.mjs';
 
 const TEMPLATE_PATH = fileURLToPath(new URL('../../templates/opencode-worker-prompt.md', import.meta.url));
 const LOOPBACK = '127.0.0.1';
 const USERNAME = 'opencode';
+/** S3: cap on the SSE per-line accumulator (mirrors the subprocess 256 KB cap). */
+const MAX_SSE_BUFFER = 256 * 1024;
 
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const nowIso = () => new Date().toISOString();
@@ -69,7 +71,10 @@ export function renderOpenCodeWorkerPrompt(worker, { template = templateText() }
     `role: ${worker.role ?? 'unknown'}`,
     `configured model: ${worker.configuredModel ?? 'default'}`,
   ].join('\n');
-  return template.replace('{{task}}', worker.prompt).replace('{{metadata}}', metadata);
+  // Replacer functions, not string replacement: a prompt/model containing
+  // `$&`, `` $` ``, or `$'` would otherwise be interpreted as replacement
+  // metachars and silently corrupt the rendered prompt (#88).
+  return template.replace('{{task}}', () => worker.prompt).replace('{{metadata}}', () => metadata);
 }
 
 function basicHeaders(password) {
@@ -94,14 +99,24 @@ async function requestJson(fetchFn, endpoint, password, pathname,
   return responseJson(response, `${method} ${pathname}`);
 }
 
+/** Bounded POST for teardown calls (/abort, /instance/dispose): a wedged
+ *  server must not hang the runner's cancel/cleanup path (#88). 10 s is far
+ *  above any loopback round-trip; the caller's own try/catch records the
+ *  final truth either way. */
 async function requestNoContent(fetchFn, endpoint, password, pathname,
-  { method = 'POST', body, signal } = /** @type {{method?:string, body?:any, signal?:AbortSignal}} */ ({})) {
+  { method = 'POST', body, signal, timeoutMs = 10_000 } = /** @type {{method?:string, body?:any, signal?:AbortSignal, timeoutMs?:number}} */ ({})) {
   const headers = basicHeaders(password);
   if (body !== undefined) headers['content-type'] = 'application/json';
-  const response = await fetchFn(`${endpoint}${pathname}`, {
-    method, headers, ...(body === undefined ? {} : { body: JSON.stringify(body) }), ...(signal ? { signal } : {}),
-  });
-  if (!response?.ok) throw new Error(`${method} ${pathname} failed with HTTP ${response?.status ?? 'unknown'}`);
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetchFn(`${endpoint}${pathname}`, {
+      method, headers,
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+      signal: signal ? AbortSignal.any([signal, controller.signal]) : controller.signal,
+    });
+    if (!response?.ok) throw new Error(`${method} ${pathname} failed with HTTP ${response?.status ?? 'unknown'}`);
+  } finally { clearTimeout(timer); }
 }
 
 /** opencode serve's prompt_async schema takes `model` as an OBJECT
@@ -132,9 +147,51 @@ async function requestWithin(fetchFn, endpoint, password, pathname, options, tim
   } finally { clearTimeout(timer); }
 }
 
-async function waitForHealth(fetchFn, endpoint, password, { attempts = 40, wait = delay } = {}) {
+/** Parse the OS-assigned port from the child's stdout ("listening on
+ *  http://127.0.0.1:<port>"). Bounded wait; stdout is consumed (never left
+ *  buffering) and a child that dies before reporting fails honestly. */
+async function boundPortFromStdout(child, { attempts = 100 } = {}) {
+  return new Promise((resolve, reject) => {
+    let buf = '';
+    let n = 0;
+    const onData = (chunk) => {
+      buf += String(chunk);
+      const m = buf.match(/listening on http:\/\/127\.0\.0\.1:(\d+)/);
+      if (m) { cleanup(); resolve(Number(m[1])); }
+    };
+    const onExit = () => { cleanup(); reject(new Error(`OpenCode server exited before reporting its port (code ${child.exitCode ?? 'unknown'})`)); };
+    const onError = (error) => {
+      cleanup();
+      reject(new Error(`OpenCode server failed before reporting its port: ${error?.message ?? error}`));
+    };
+    const tick = () => {
+      if (++n >= attempts) { cleanup(); reject(new Error('OpenCode server did not report its port in time')); }
+      else timer = setTimeout(tick, 50);
+    };
+    let timer = setTimeout(tick, 50);
+    const cleanup = () => {
+      clearTimeout(timer);
+      child.stdout?.off?.('data', onData);
+      child.stderr?.off?.('data', onData);
+      child.off?.('exit', onExit);
+      child.off?.('error', onError);
+    };
+    child.stdout.on('data', onData);
+    child.stderr?.on?.('data', onData);
+    child.once?.('exit', onExit);
+    child.once?.('error', onError);
+  });
+}
+
+/** @param {any} fetchFn @param {string} endpoint @param {string} password @param {{ attempts?: number, wait?: (ms: any) => Promise<any>, child?: any }} [opts] */
+async function waitForHealth(fetchFn, endpoint, password, { attempts = 40, wait = delay, child } = {}) {
   let lastError = null;
   for (let attempt = 0; attempt < attempts; attempt++) {
+    // A dead child (EADDRINUSE, crash, missing binary) fails fast with the
+    // exit code instead of polling into the timeout (S2 defense-in-depth).
+    if (child && child.exitCode != null) {
+      throw new Error(`OpenCode server exited during health check (code ${child.exitCode})`);
+    }
     try {
       const health = await requestJson(fetchFn, endpoint, password, '/global/health');
       if (health?.healthy === true) return health;
@@ -178,6 +235,12 @@ async function waitForTerminalEvent(response, sessionId, { signal } = /** @type 
     for (;;) {
       const { done, value } = await reader.read();
       buffer += decoder.decode(value ?? new Uint8Array(), { stream: !done });
+      // S3: the per-line accumulator is capped like the 256 KB subprocess cap —
+      // a line that never terminates cannot grow memory without bound.
+      if (buffer.length > MAX_SSE_BUFFER) {
+        await reader.cancel();
+        throw new Error(`OpenCode SSE line exceeded the ${MAX_SSE_BUFFER}-byte cap — protocol error, not a hang`);
+      }
       const lines = buffer.split(/\r?\n/);
       buffer = lines.pop() ?? '';
       for (const line of lines) {
@@ -249,11 +312,13 @@ function terminalResult(state, observation, clock) {
  */
 export function createOpenCodeExecutionAdapter({
   fetchFn = globalThis.fetch, spawnFn = nodeSpawn, haveFn = have, reservePort = defaultReservePort,
-  secret = defaultSecret, wait = delay, clock = nowIso, terminationGraceMs = 1_500, forceGraceMs = 1_500,
+  resolveFn = resolveShim, secret = defaultSecret, wait = delay, clock = nowIso,
+  terminationGraceMs = 1_500, forceGraceMs = 1_500, teardownTimeoutMs = 10_000,
 } = {}) {
   if (typeof fetchFn !== 'function') throw new TypeError('fetchFn is required');
   if (!Number.isInteger(terminationGraceMs) || terminationGraceMs < 1) throw new TypeError('terminationGraceMs must be a positive integer');
   if (!Number.isInteger(forceGraceMs) || forceGraceMs < 1) throw new TypeError('forceGraceMs must be a positive integer');
+  if (!Number.isInteger(teardownTimeoutMs) || teardownTimeoutMs < 1) throw new TypeError('teardownTimeoutMs must be a positive integer');
   const adapter = {
     id: 'opencode-server',
     async readiness() {
@@ -266,16 +331,37 @@ export function createOpenCodeExecutionAdapter({
       return { worker, cwd, prompt: renderOpenCodeWorkerPrompt(worker), startedAt: clock() };
     },
     async launch(state, { timeoutMs = 120_000 } = {}) {
-      const port = await reservePort();
       const password = secret();
-      const endpoint = `http://${LOOPBACK}:${port}`;
-      const child = spawnFn('opencode', ['serve', '--hostname', LOOPBACK, '--port', String(port)], {
+      // Port assignment WITHOUT the probe-bind-release race (S2): the child
+      // binds :0 itself and reports the OS-assigned port on stdout, so a
+      // squatter can never win a freed port against us (a rogue server would
+      // not know the ephemeral password anyway — but prompts/credentials must
+      // never reach a server we did not spawn). reservePort remains the
+      // fallback for injected children with no readable stdout (tests).
+      const invocation = resolveFn('opencode', ['serve', '--hostname', LOOPBACK, '--port', '0']);
+      if (typeof invocation?.command !== 'string' || !Array.isArray(invocation.args)) {
+        throw new TypeError('OpenCode command resolver returned an invalid invocation');
+      }
+      if (invocation.resolved === false) {
+        throw new Error('OpenCode command has no safe Windows invocation');
+      }
+      const child = spawnFn(invocation.command, invocation.args, {
         cwd: state.cwd,
         env: { ...process.env, OPENCODE_SERVER_USERNAME: USERNAME, OPENCODE_SERVER_PASSWORD: password },
-        stdio: 'ignore',
+        stdio: ['ignore', 'pipe', 'pipe'],
       });
+      let port;
       try {
-        await waitForHealth(fetchFn, endpoint, password, { wait });
+        port = child?.stdout && typeof child.stdout.on === 'function'
+          ? await boundPortFromStdout(child)
+          : await reservePort();
+      } catch (error) {
+        await stopChild(child, { terminationGraceMs, forceGraceMs });
+        throw error;
+      }
+      const endpoint = `http://${LOOPBACK}:${port}`;
+      try {
+        await waitForHealth(fetchFn, endpoint, password, { wait, child });
         const session = await requestJson(fetchFn, endpoint, password, '/session', {
           method: 'POST', body: { title: `agentic-kit ${state.worker.id}` },
         });
@@ -304,7 +390,7 @@ export function createOpenCodeExecutionAdapter({
       try {
         const observation = await state.terminal;
         if (observation.type === 'permission') {
-          await requestNoContent(fetchFn, state.endpoint, state.password, `/session/${encodeURIComponent(state.sessionId)}/abort`);
+          await requestNoContent(fetchFn, state.endpoint, state.password, `/session/${encodeURIComponent(state.sessionId)}/abort`, { timeoutMs: teardownTimeoutMs });
         }
         if (observation.type !== 'idle') return observation;
         const messages = await requestJson(fetchFn, state.endpoint, state.password, `/session/${encodeURIComponent(state.sessionId)}/message`);
@@ -317,7 +403,7 @@ export function createOpenCodeExecutionAdapter({
     async cancel(state) {
       state?.eventAbort?.abort();
       if (state?.sessionId) {
-        try { await requestNoContent(fetchFn, state.endpoint, state.password, `/session/${encodeURIComponent(state.sessionId)}/abort`); } catch { /* cleanup records the final truth */ }
+        try { await requestNoContent(fetchFn, state.endpoint, state.password, `/session/${encodeURIComponent(state.sessionId)}/abort`, { timeoutMs: teardownTimeoutMs }); } catch { /* cleanup records the final truth */ }
       }
       const stopped = await stopChild(state?.child, { terminationGraceMs, forceGraceMs });
       return stopped.stopped ? { type: 'cancelled' } : { type: 'cancelled', orphaned: true };
@@ -325,7 +411,7 @@ export function createOpenCodeExecutionAdapter({
     async cleanup(state) {
       state?.eventAbort?.abort();
       if (state?.endpoint) {
-        try { await requestNoContent(fetchFn, state.endpoint, state.password, '/instance/dispose'); } catch { /* child termination remains the fallback */ }
+        try { await requestNoContent(fetchFn, state.endpoint, state.password, '/instance/dispose', { timeoutMs: teardownTimeoutMs }); } catch { /* child termination remains the fallback */ }
       }
       const stopped = await stopChild(state?.child, { terminationGraceMs, forceGraceMs });
       return stopped.stopped ? { cleaned: true } : { cleaned: false, orphaned: true };
