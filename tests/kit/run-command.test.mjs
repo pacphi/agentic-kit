@@ -62,3 +62,59 @@ test('ak run without --json still prints the human status line', async () => {
   assert.equal(result, 0);
   assert.match(out, /run complete/);
 });
+
+// ── bounded escalation: plan materialization + CLI surface (ADR-0019) ────────
+
+test('materializeRunPlan attaches the route ladder, dropping self-equal rungs', () => {
+  const cfg = { providers: { dualRouting: { implementation: {
+    host: 'opencode', model: 'opencode/kimi-k3', source: 'user',
+    escalate: [
+      { host: 'opencode', model: 'opencode/kimi-k3' }, // self-equal: re-running this changes nothing
+      { host: 'claude', model: 'claude-sonnet-5' },
+    ],
+  } } } };
+  const { plan } = buildRunPlan(cfg, 'feature', 'probe');
+  const coder = plan.workers.find((w) => w.activity === 'implementation');
+  assert.deepEqual(coder.escalate, [{ host: 'claude', model: 'claude-sonnet-5' }],
+    'only the non-self rung survives, with its model');
+});
+
+test('materializeRunPlan rejects an escalation rung to a non-routable host', () => {
+  const cfg = { providers: { dualRouting: { implementation: {
+    host: 'claude', source: 'user', escalate: [{ host: 'not-a-host' }],
+  } } } };
+  assert.throws(() => buildRunPlan(cfg, 'feature', 'probe'),
+    /escalation rung for "implementation" cannot materialize: host "not-a-host" requires canRouteActivities/);
+});
+
+test('--dry-run shows the escalation ladder on ladder-carrying workers', async () => {
+  const cfg = { providers: { dualRouting: { implementation: {
+    host: 'opencode', model: 'opencode/kimi-k3', source: 'user',
+    escalate: [{ host: 'claude', model: 'claude-sonnet-5' }],
+  } } } };
+  const { out } = await captureLog(() => run({
+    flags: { 'dry-run': true }, positionals: ['feature', 'probe'], cfg,
+  }));
+  assert.match(out, /coder\s+opencode\s+opencode\/kimi-k3\s+after architect\s+↑ claude/, 'ladder visible in the plan');
+});
+
+test('--escalate flows into the executor opts; results print the escalation trail', async () => {
+  let seen;
+  const executePlan = async (plan, opts) => {
+    seen = opts;
+    return plan.workers.map((w) => ({
+      ...succeededResult(w),
+      attempts: [
+        { host: 'opencode', model: 'opencode/kimi-k3', status: 'failed', exitCategory: 'worker_error', durationMs: 1, reason: 'serve 400' },
+        { host: 'claude', model: 'claude-sonnet-5', status: 'succeeded', exitCategory: 'success', durationMs: 2 },
+      ],
+    }));
+  };
+  const { result, out } = await captureLog(() => run({
+    flags: { escalate: true }, positionals: ['feature', 'probe'], executePlan, cfg: testCfg(),
+  }));
+  assert.equal(result, 0);
+  assert.equal(seen.escalate, true, 'the flag reaches executeRunPlan');
+  assert.ok(out.includes('succeeded (success)') && out.includes('escalated from opencode'),
+    `the trail is visible, not silent:\n${out}`);
+});

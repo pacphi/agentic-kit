@@ -92,11 +92,63 @@ function adapterFor(adapters, host) {
   return adapter ? validateExecutionAdapter(adapter) : null;
 }
 
+// ── bounded escalation (ADR-0019) ───────────────────────────────────────────
+// A non-success worker result may advance ONE rung of the route's ladder
+// (host+model), bounded by the ladder's length — never the whole-pipeline
+// retry the legacy dual wrapper did. What may NOT advance, ever:
+//   - blocked/cancelled results (dependency state, not a worker failure);
+//   - permission_required (a consent boundary — escalating around it would be
+//     a safety violation, exactly the opencode abort contract);
+//   - orphaned (execution state is uncertain; a retry risks a double run).
+const ESCALATABLE_STATUSES = new Set(['failed', 'timed_out']);
+const BLOCKING_CATEGORIES = new Set(['permission_required', 'cancelled', 'orphaned']);
+
+const escalatable = (result) => ESCALATABLE_STATUSES.has(result.status) && !BLOCKING_CATEGORIES.has(result.exitCategory);
+
+/** Compact one attempt for the result's trail: which rung, what verdict, how
+ *  long, and (on failure) why — bounded like every other failure surface. */
+function compactAttempt(worker, result) {
+  const attempt = {
+    host: worker.host, model: worker.configuredModel ?? null,
+    status: result.status, exitCategory: result.exitCategory,
+    durationMs: result.durationMs,
+  };
+  const reason = result.failure?.reason;
+  if (result.status !== 'succeeded' && typeof reason === 'string') attempt.reason = reason;
+  return attempt;
+}
+
+/** Execute a worker, advancing one ladder rung per escalatable failure when
+ *  `escalate` is on. The final result carries an `attempts` trail ONLY when
+ *  more than one attempt ran — a single attempt is indistinguishable from a
+ *  run with escalation off, and emitting one would fabricate an event that
+ *  did not happen. */
+async function executeWorkerWithEscalation(worker, adapters, { cwd, timeoutMs, clock, escalate = false }) {
+  const ladder = escalate ? [...(worker.escalate ?? [])] : [];
+  const attempts = [];
+  let current = worker;
+  let result;
+  for (;;) {
+    const adapter = adapterFor(adapters, current.host);
+    result = adapter
+      ? await executeWorker(current, adapter, { cwd, timeoutMs, clock })
+      : workerFailure(current, { exitCategory: 'cli_unavailable', failure: { reason: `no execution adapter for host "${current.host}"` }, clock });
+    attempts.push(compactAttempt(current, result));
+    if (!escalatable(result)) break;
+    const rung = ladder.shift();
+    if (!rung) break;
+    current = { ...current, host: rung.host, configuredModel: rung.model ?? null };
+  }
+  if (attempts.length <= 1) return result;
+  return validateWorkerResult({ ...result, attempts });
+}
+
 /** Run a materialized routing plan as a bounded-concurrency dependency DAG.
- * A failed dependency blocks descendants; independent branches keep running. */
+ * A failed dependency blocks descendants; independent branches keep running.
+ * `escalate: true` enables bounded per-worker ladder retries (ADR-0019). */
 export async function executeRunPlan(plan, {
-  adapters = EXECUTION_ADAPTERS, cwd = process.cwd(), maxConcurrent = 4, timeoutMs, clock = nowIso,
-} = /** @type {{adapters?:Record<string, any>|Map<string, any>, cwd?:string, maxConcurrent?:number, timeoutMs?:number, clock?:()=>string}} */ ({})) {
+  adapters = EXECUTION_ADAPTERS, cwd = process.cwd(), maxConcurrent = 4, timeoutMs, clock = nowIso, escalate = false,
+} = /** @type {{adapters?:Record<string, any>|Map<string, any>, cwd?:string, maxConcurrent?:number, timeoutMs?:number, clock?:()=>string, escalate?:boolean}} */ ({})) {
   validatePlan(plan);
   if (!Number.isInteger(maxConcurrent) || maxConcurrent < 1) throw new TypeError('maxConcurrent must be a positive integer');
   const pending = new Map(plan.workers.map((worker) => [worker.id, worker]));
@@ -104,10 +156,7 @@ export async function executeRunPlan(plan, {
   const running = new Map();
 
   const start = (worker) => {
-    const adapter = adapterFor(adapters, worker.host);
-    const promise = adapter
-      ? executeWorker(worker, adapter, { cwd, timeoutMs, clock })
-      : Promise.resolve(workerFailure(worker, { exitCategory: 'cli_unavailable', failure: { reason: `no execution adapter for host "${worker.host}"` }, clock }));
+    const promise = executeWorkerWithEscalation(worker, adapters, { cwd, timeoutMs, clock, escalate });
     running.set(worker.id, promise.then((result) => ({ id: worker.id, result })));
     pending.delete(worker.id);
   };

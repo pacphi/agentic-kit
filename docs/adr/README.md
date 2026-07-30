@@ -27,6 +27,7 @@ Consequences**, and cites the grounded source it rests on where relevant.
 | [0016](0016-capability-driven-integration-adapters.md) | Capability-driven host, provider, binding, projection, and observability adapters | Accepted |
 | [0017](0017-opencode-host.md) | OpenCode as a managed, observable host through native surfaces | Accepted |
 | [0018](0018-generalized-host-worker-execution.md) | Generalized host-worker execution; `ak run` canonical | Accepted |
+| [0019](0019-escalation-in-ak-run.md) | Bounded per-worker escalation in `ak run` | Accepted |
 
 Theme: ADRs **0001–0006** define **dual-host LLM routing and leadership** — how `ak` lets ruflo route
 each development activity (architecture, implementation, testing, review, …) to the right host (Claude

@@ -33,6 +33,132 @@ function adapter({ observation = { type: 'idle' }, events = [] } = {}) {
   };
 }
 
+// ── bounded escalation (ADR-0019) ───────────────────────────────────────────
+
+/** An adapter that fails (or succeeds) per host with a canned script. */
+function scriptedAdapter(events, script) {
+  return {
+    id: 'scripted',
+    async readiness() { return { ready: true }; },
+    async prepare({ worker: w }) { return { worker: w }; },
+    async launch(state) { return state; },
+    async observe(state) { events.push(`observe:${state.worker.host}`); return script.observe?.() ?? { type: 'idle' }; },
+    interpret(state, _observed) {
+      const fail = script.fail;
+      return {
+        workerId: state.worker.id, activity: state.worker.activity, role: state.worker.role, host: state.worker.host,
+        status: fail ? (script.status ?? 'failed') : 'succeeded',
+        exitCategory: fail ? (script.exitCategory ?? 'worker_error') : 'success',
+        startedAt: clock(), endedAt: clock(), durationMs: 1,
+        provider: null, providerProvenance: 'unknown', configuredModel: state.worker.configuredModel ?? null,
+        observedModel: null, sessionId: null, transcriptRefs: [],
+        failure: fail ? { reason: script.reason ?? 'scripted failure' } : null, usage: null,
+      };
+    },
+    async cancel() {},
+    async cleanup() {},
+  };
+}
+
+const escalatableWorker = (id, host, ladder) => ({
+  id, activity: 'implementation', role: 'coder', host, configuredModel: `${host}-model`,
+  prompt: id, ...(ladder ? { escalate: ladder } : {}),
+});
+
+test('escalation advances one rung on failure and records the full trail (OpenCode-qualified route)', async () => {
+  const events = [];
+  const adapters = {
+    opencode: scriptedAdapter(events, { fail: true, reason: 'serve 400' }),
+    claude: scriptedAdapter(events, { fail: false }),
+  };
+  const plan = { workers: [
+    escalatableWorker('coder', 'opencode', [{ host: 'claude', model: 'claude-opus-5' }]),
+    { ...escalatableWorker('reviewer', 'claude'), dependsOn: ['coder'], role: 'reviewer', activity: 'review' },
+  ] };
+  const results = await executeRunPlan(plan, { adapters, escalate: true, clock });
+  const coder = results.find((r) => r.workerId === 'coder');
+  assert.equal(coder.status, 'succeeded', 'the claude rung carried the worker');
+  assert.equal(coder.host, 'claude', 'the final result reports the rung that actually ran');
+  assert.equal(coder.attempts.length, 2);
+  assert.deepEqual(
+    coder.attempts.map((a) => [a.host, a.status]),
+    [['opencode', 'failed'], ['claude', 'succeeded']],
+    'ordered, bounded trail — opencode first, then the claude rung',
+  );
+  assert.match(coder.attempts[0].reason, /serve 400/);
+  assert.equal(results.find((r) => r.workerId === 'reviewer').status, 'succeeded',
+    'an escalated success unblocks dependents');
+});
+
+test('escalation is bounded by the ladder and records every attempt when it exhausts', async () => {
+  const events = [];
+  const adapters = {
+    opencode: scriptedAdapter(events, { fail: true, reason: 'first' }),
+    claude: scriptedAdapter(events, { fail: true, reason: 'second' }),
+    codex: scriptedAdapter(events, { fail: true, reason: 'third' }),
+  };
+  const plan = { workers: [escalatableWorker('coder', 'opencode', [{ host: 'claude' }, { host: 'codex' }])] };
+  const [result] = await executeRunPlan(plan, { adapters, escalate: true, clock });
+  assert.equal(result.status, 'failed');
+  assert.equal(result.attempts.length, 3, 'three attempts, then it stops — no unbounded retry');
+  assert.deepEqual(result.attempts.map((a) => a.host), ['opencode', 'claude', 'codex']);
+  assert.equal(result.host, 'codex', 'the final result is the last rung actually executed');
+});
+
+test('consent and uncertain states are never escalated (permission, orphaned, blocked)', async () => {
+  for (const [exitCategory, status] of [['permission_required', 'failed'], ['orphaned', 'failed'], ['worker_error', 'blocked']]) {
+    const adapters = {
+      opencode: scriptedAdapter([], { fail: true, exitCategory, status }),
+      claude: scriptedAdapter([], { fail: false }),
+    };
+    const plan = { workers: [escalatableWorker('coder', 'opencode', [{ host: 'claude' }])] };
+    const [result] = await executeRunPlan(plan, { adapters, escalate: true, clock });
+    assert.equal(result.attempts ?? undefined, undefined,
+      `${exitCategory}/${status} must not escalate (attempts absent — single attempt, no trail fabricated)`);
+    assert.equal(result.host, 'opencode', 'no rung was attempted past the boundary');
+  }
+});
+
+test('without --escalate a ladder-carrying worker makes exactly one attempt', async () => {
+  const events = [];
+  const adapters = { opencode: scriptedAdapter(events, { fail: true }), claude: scriptedAdapter(events, { fail: false }) };
+  const plan = { workers: [escalatableWorker('coder', 'opencode', [{ host: 'claude' }])] };
+  const [result] = await executeRunPlan(plan, { adapters, escalate: false, clock });
+  assert.equal(result.status, 'failed');
+  assert.equal(result.attempts ?? undefined, undefined);
+  assert.deepEqual(events.filter((e) => e.startsWith('observe:')), ['observe:opencode'], 'no rung attempted');
+});
+
+test('a successful first attempt leaves no escalation trail (nothing fabricated)', async () => {
+  const adapters = { opencode: scriptedAdapter([], { fail: false }) };
+  const plan = { workers: [escalatableWorker('coder', 'opencode', [{ host: 'claude' }])] };
+  const [result] = await executeRunPlan(plan, { adapters, escalate: true, clock });
+  assert.equal(result.status, 'succeeded');
+  assert.equal(result.attempts ?? undefined, undefined, 'one attempt is indistinguishable from escalation off');
+});
+
+test('a rung with no execution adapter records cli_unavailable and advances to the next rung', async () => {
+  const adapters = { codex: scriptedAdapter([], { fail: false }) };
+  const plan = { workers: [escalatableWorker('coder', 'opencode', [{ host: 'claude' }, { host: 'codex' }])] };
+  const [result] = await executeRunPlan(plan, { adapters, escalate: true, clock });
+  assert.equal(result.status, 'succeeded');
+  assert.equal(result.attempts.length, 3);
+  assert.deepEqual(result.attempts.map((a) => [a.host, a.exitCategory]),
+    [['opencode', 'cli_unavailable'], ['claude', 'cli_unavailable'], ['codex', 'success']]);
+});
+
+test('the attempts trail is schema-validated end to end', async () => {
+  const adapters = {
+    opencode: scriptedAdapter([], { fail: true }),
+    claude: scriptedAdapter([], { fail: false }),
+  };
+  const plan = { workers: [escalatableWorker('coder', 'opencode', [{ host: 'claude', model: 'claude-opus-5' }])] };
+  const [result] = await executeRunPlan(plan, { adapters, escalate: true, clock });
+  const { validateWorkerResult } = await import('../../src/lib/execution/schema.mjs');
+  assert.doesNotThrow(() => validateWorkerResult(result), 'the escalated result passes the same schema');
+  assert.equal(result.attempts[1].model, 'claude-opus-5', 'the rung model is recorded');
+});
+
 // qe-court A2: the timeout branch must schema-validate interpret() too — a
 // malformed timeout result becomes a bounded protocol_error, never garbage
 // shipped raw into `ak run --json`.

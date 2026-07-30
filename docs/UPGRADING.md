@@ -28,7 +28,7 @@ family on your behalf.
 
 | Migration surface   | What to know                                    |
 | ------------------- | ----------------------------------------------- |
-| `ak dual` → `ak run` | `ak dual` is a deprecated compatibility wrapper — existing scripts keep working (it warns on stderr and will be removed before the stable release); use `ak run` for new execution work. OpenCode routes require the current release — remove them before downgrading. |
+| `ak dual` → `ak run` | `ak dual` is a deprecated compatibility wrapper — existing scripts keep working (it warns on stderr and will be removed before the stable release); use `ak run` for new execution work. OpenCode routes require the current release — remove them before downgrading. `--escalate` exists on both, with deliberately different semantics: the wrapper retries the *whole pipeline* once on any failure; `ak run` advances only the *failed worker* one rung of its route's ladder per attempt (ADR-0019) and records the attempt trail in the result. |
 
 A **host** runs the work; a **provider** serves inference. A binding can connect one provider to
 several hosts through separate native configuration **projections**, while **observability**
