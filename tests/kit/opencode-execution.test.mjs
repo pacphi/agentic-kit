@@ -20,6 +20,14 @@ test('worker prompt is invocation-only and preserves the user permission boundar
   assert.doesNotMatch(prompt, /--auto/);
 });
 
+// #88: `$`-metachars in the prompt/model are data, never replacement syntax.
+test('a prompt carrying $& $` $\' survives rendering byte-for-byte (no $-pattern corruption)', () => {
+  const w = { ...worker, prompt: 'cost is $& today, see $` and $\'', configuredModel: 'openrouter/$&' };
+  const prompt = renderOpenCodeWorkerPrompt(w, { template: 'Task={{task}}\nMeta={{metadata}}' });
+  assert.ok(prompt.includes('cost is $& today, see $` and $\''), `prompt must arrive verbatim:\n${prompt}`);
+  assert.ok(prompt.includes('configured model: openrouter/$&'), 'metadata model id is verbatim too');
+});
+
 test('server adapter launches loopback-only with ephemeral basic auth and normalizes observed facts', async () => {
   const calls = [];
   const child = { signals: [], kill(signal) { this.signals.push(signal); return true; } };
@@ -34,7 +42,7 @@ test('server adapter launches loopback-only with ephemeral basic auth and normal
     throw new Error(`unexpected URL ${url}`);
   };
   const adapter = createOpenCodeExecutionAdapter({
-    fetchFn, spawnFn: (_cmd, args, opts) => { assert.deepEqual(args, ['serve', '--hostname', '127.0.0.1', '--port', '43123']); assert.equal(opts.stdio, 'ignore'); assert.equal(opts.env.OPENCODE_SERVER_PASSWORD, 'ephemeral'); return child; },
+    fetchFn, spawnFn: (_cmd, args, opts) => { assert.deepEqual(args, ['serve', '--hostname', '127.0.0.1', '--port', '0']); assert.deepEqual(opts.stdio, ['ignore', 'pipe', 'pipe']); assert.equal(opts.env.OPENCODE_SERVER_PASSWORD, 'ephemeral'); return child; },
     reservePort: async () => 43123, secret: () => 'ephemeral', clock: () => '2026-07-29T00:00:00.000Z',
   });
   const state = await adapter.prepare({ worker, cwd: process.cwd() });
@@ -203,6 +211,249 @@ test('a prompt post failure tears down without an unhandled terminal rejection',
     process.off('unhandledRejection', onUnhandled);
   }
   assert.deepEqual(child.signals, ['SIGTERM'], 'the owned server is still terminated on the failure path');
+});
+
+// S2: the port comes from the child's own stdout ("listening on :<port>") —
+// no probe-bind-release race, and reservePort is never consulted when stdout
+// is readable.
+test('the bound port is read from the child stdout (S2 — no probe-bind-release race)', async () => {
+  const { EventEmitter } = await import('node:events');
+  const child = new EventEmitter();
+  child.stdout = new EventEmitter();
+  child.stderr = new EventEmitter();
+  child.kill = () => true;
+  let reserved = null;
+  const fetchFn = async (url, init = {}) => {
+    if (url.includes(':43210/global/health')) return response({ healthy: true });
+    if (url.endsWith('/session') && init.method === 'POST') return response({ id: 'ses-p' });
+    if (url.includes(':43210/global/event')) return response(null, { body: sse('data: {"payload":{"type":"session.idle","properties":{"sessionID":"ses-p"}}}\n\n') });
+    if (url.endsWith('/prompt_async')) return response(null, { status: 204 });
+    if (url.endsWith('/message')) return response([{ info: { role: 'assistant' } }]);
+    if (url.endsWith('/instance/dispose')) return response(null, { status: 204 });
+    throw new Error(`unexpected URL ${url}`);
+  };
+  const adapter = createOpenCodeExecutionAdapter({
+    fetchFn,
+    spawnFn: () => {
+      queueMicrotask(() => {
+        child.stdout.emit('data', 'opencode server listening on http://127.0.');
+        child.stdout.emit('data', '0.1:43210\n');
+      });
+      return child;
+    },
+    reservePort: async () => { reserved = true; return 43123; },
+    secret: () => 'ephemeral', clock: () => '2026-07-29T00:00:00.000Z',
+  });
+  await adapter.cleanup(await adapter.observe(await adapter.launch(await adapter.prepare({ worker, cwd: process.cwd() }))));
+  assert.equal(reserved, null, 'reservePort is only the fallback for stdout-less children');
+});
+
+test('a child that dies before reporting its port fails honestly, never hangs', async () => {
+  const { EventEmitter } = await import('node:events');
+  const child = new EventEmitter();
+  child.stdout = new EventEmitter();
+  child.stderr = new EventEmitter();
+  child.exitCode = 1;
+  child.kill = () => true;
+  const adapter = createOpenCodeExecutionAdapter({
+    fetchFn: async () => { throw new Error('fetch must not run'); },
+    spawnFn: () => { queueMicrotask(() => child.emit('exit')); return child; },
+    secret: () => 'ephemeral',
+  });
+  await assert.rejects(
+    adapter.launch(await adapter.prepare({ worker, cwd: process.cwd() })),
+    /exited before reporting its port/,
+  );
+});
+
+test('a child spawn error before the port report rejects without an unhandled error event', async () => {
+  const { EventEmitter } = await import('node:events');
+  const child = new EventEmitter();
+  child.stdout = new EventEmitter();
+  child.stderr = new EventEmitter();
+  child.exitCode = null;
+  child.kill = () => true;
+  const adapter = createOpenCodeExecutionAdapter({
+    fetchFn: async () => { throw new Error('fetch must not run'); },
+    spawnFn: () => {
+      queueMicrotask(() => {
+        child.exitCode = -2;
+        child.emit('error', new Error('spawn opencode ENOENT'));
+      });
+      return child;
+    },
+    secret: () => 'ephemeral',
+  });
+  await assert.rejects(
+    adapter.launch(await adapter.prepare({ worker, cwd: process.cwd() })),
+    /failed before reporting its port: spawn opencode ENOENT/,
+  );
+});
+
+test('OpenCode launch consumes the resolved invocation and rejects an unsafe shim before spawn', async () => {
+  const calls = [];
+  const child = { kill: () => true };
+  const powershell = 'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe';
+  const prefix = ['-NoProfile', '-File', 'C:\\tools\\opencode.ps1'];
+  const adapter = createOpenCodeExecutionAdapter({
+    fetchFn: async (url, init = {}) => {
+      if (url.endsWith('/global/health')) return response({ healthy: true });
+      if (url.endsWith('/session') && init.method === 'POST') return response({ id: 'ses-r' });
+      if (url.endsWith('/global/event')) return response(null, { body: sse('data: {"payload":{"type":"session.idle","properties":{"sessionID":"ses-r"}}}\n\n') });
+      if (url.endsWith('/prompt_async')) return response(null, { status: 204 });
+      throw new Error(`unexpected URL ${url}`);
+    },
+    resolveFn: (command, args) => {
+      assert.equal(command, 'opencode');
+      return { command: powershell, args: [...prefix, ...args], resolved: true };
+    },
+    spawnFn: (command, args) => {
+      calls.push({ command, args });
+      return child;
+    },
+    reservePort: async () => 43123,
+    secret: () => 'ephemeral',
+  });
+  await adapter.launch(await adapter.prepare({ worker, cwd: process.cwd() }));
+  assert.equal(calls[0].command, powershell);
+  assert.deepEqual(calls[0].args, [
+    ...prefix, 'serve', '--hostname', '127.0.0.1', '--port', '0',
+  ]);
+
+  let spawned = false;
+  const unsafe = createOpenCodeExecutionAdapter({
+    resolveFn: (command, args) => ({ command, args, resolved: false }),
+    spawnFn: () => { spawned = true; return child; },
+  });
+  await assert.rejects(
+    unsafe.launch(await unsafe.prepare({ worker, cwd: process.cwd() })),
+    /no safe Windows invocation/,
+  );
+  assert.equal(spawned, false);
+});
+
+test('teardownTimeoutMs bounds both session abort and instance disposal', async () => {
+  const abortedPaths = [];
+  const fetchFn = (url, { signal } = {}) => new Promise((resolve, reject) => {
+    const pathname = new URL(url).pathname;
+    const onAbort = () => {
+      abortedPaths.push(pathname);
+      reject(Object.assign(new Error(`${pathname} aborted`), { name: 'AbortError' }));
+    };
+    if (signal?.aborted) onAbort();
+    else signal?.addEventListener('abort', onAbort, { once: true });
+  });
+  const cancelChild = { signals: [], kill(signal) { this.signals.push(signal); return true; } };
+  const cleanupChild = { signals: [], kill(signal) { this.signals.push(signal); return true; } };
+  const adapter = createOpenCodeExecutionAdapter({
+    fetchFn,
+    teardownTimeoutMs: 10,
+    secret: () => 'ephemeral',
+  });
+  const baseState = {
+    endpoint: 'http://127.0.0.1:43123',
+    password: 'ephemeral',
+    sessionId: 'ses-timeout',
+  };
+  let guard;
+  let cancelled;
+  let cleaned;
+  try {
+    [cancelled, cleaned] = await Promise.race([
+      Promise.all([
+        adapter.cancel({ ...baseState, child: cancelChild, eventAbort: new AbortController() }),
+        adapter.cleanup({ ...baseState, child: cleanupChild, eventAbort: new AbortController() }),
+      ]),
+      new Promise((resolve, reject) => {
+        guard = setTimeout(() => reject(new Error('teardown requests exceeded the test deadline')), 500);
+      }),
+    ]);
+  } finally {
+    clearTimeout(guard);
+  }
+  assert.deepEqual(cancelled, { type: 'cancelled' });
+  assert.deepEqual(cleaned, { cleaned: true });
+  assert.deepEqual(
+    new Set(abortedPaths),
+    new Set(['/session/ses-timeout/abort', '/instance/dispose']),
+    'both hanging teardown requests observe the configured abort deadline',
+  );
+  assert.deepEqual(cancelChild.signals, ['SIGTERM']);
+  assert.deepEqual(cleanupChild.signals, ['SIGTERM']);
+});
+
+// S3: the SSE per-line accumulator is capped — a never-terminating line is a
+// bounded protocol error, not unbounded memory growth.
+test('an SSE line that never terminates is capped (S3 — bounded protocol error)', async () => {
+  const child = { kill: () => true };
+  const hugeLine = `data: {"payload":{"type":"session.idle","properties":{"sessionID":"ses-x","pad":"${'x'.repeat(300 * 1024)}"}}`;
+  const fetchFn = async (url, init = {}) => {
+    if (url.endsWith('/global/health')) return response({ healthy: true });
+    if (url.endsWith('/session') && init.method === 'POST') return response({ id: 'ses-x' });
+    if (url.endsWith('/global/event')) {
+      return response(null, {
+        body: new ReadableStream({
+          start(controller) { controller.enqueue(new TextEncoder().encode(hugeLine)); },
+        }),
+      });
+    }
+    if (url.endsWith('/prompt_async')) return response(null, { status: 204 });
+    if (url.endsWith('/message')) return response([]);
+    if (url.endsWith('/instance/dispose')) return response(null, { status: 204 });
+    throw new Error(`unexpected URL ${url}`);
+  };
+  const adapter = createOpenCodeExecutionAdapter({
+    fetchFn, spawnFn: () => child, reservePort: async () => 43123, secret: () => 'ephemeral', clock: () => '2026-07-29T00:00:00.000Z',
+  });
+  const launched = await adapter.launch(await adapter.prepare({ worker, cwd: process.cwd() }));
+  const observation = await adapter.observe(launched);
+  assert.equal(observation.type, 'error');
+  assert.match(observation.error?.data?.message ?? '', /exceeded the \d+-byte cap/, 'the cap fires as a protocol error');
+});
+
+// #88 test-gap: SSE events from a FOREIGN session must be ignored — deleting
+// the sessionID filter would terminate on any session's idle.
+test('events from a foreign session are ignored until our own session goes idle', async () => {
+  const child = { kill: () => true };
+  const events = 'data: {"payload":{"type":"session.idle","properties":{"sessionID":"ses-OTHER"}}}\n\n'
+    + 'data: {"payload":{"type":"session.idle","properties":{"sessionID":"ses-own"}}}\n\n';
+  const fetchFn = async (url, init = {}) => {
+    if (url.endsWith('/global/health')) return response({ healthy: true });
+    if (url.endsWith('/session') && init.method === 'POST') return response({ id: 'ses-own' });
+    if (url.endsWith('/global/event')) return response(null, { body: sse(events) });
+    if (url.endsWith('/prompt_async')) return response(null, { status: 204 });
+    if (url.endsWith('/message')) return response([{ info: { role: 'assistant', providerID: 'opencode', modelID: 'm1' } }]);
+    if (url.endsWith('/instance/dispose')) return response(null, { status: 204 });
+    throw new Error(`unexpected URL ${url}`);
+  };
+  const adapter = createOpenCodeExecutionAdapter({
+    fetchFn, spawnFn: () => child, reservePort: async () => 43123, secret: () => 'ephemeral', clock: () => '2026-07-29T00:00:00.000Z',
+  });
+  const observation = await adapter.observe(await adapter.launch(await adapter.prepare({ worker, cwd: process.cwd() })));
+  assert.equal(observation.type, 'idle', 'our own idle event terminates — the foreign one did not end the wait early');
+});
+
+// #88 test-gap: the TERM-then-KILL sequence is asserted, not just the verdict.
+test('a TERM-ignoring server receives SIGTERM then SIGKILL in order', async () => {
+  // A child WITH lifecycle events that never closes: the grace wait must time
+  // out (not short-circuit), so the bounded KILL fallback actually fires.
+  const child = { signals: [], exitCode: null, signalCode: null, once() { return this; }, kill(signal) { this.signals.push(signal); return true; } };
+  const fetchFn = async (url, init = {}) => {
+    if (url.endsWith('/global/health')) return response({ healthy: true });
+    if (url.endsWith('/session') && init.method === 'POST') return response({ id: 'ses-k' });
+    if (url.endsWith('/global/event')) return response(null, { body: new ReadableStream({ start() {} }) });
+    if (url.endsWith('/prompt_async')) return new Promise(() => {});
+    throw new Error(`unexpected URL ${url}`);
+  };
+  const adapter = createOpenCodeExecutionAdapter({
+    fetchFn, spawnFn: () => child, haveFn: async () => true, reservePort: async () => 43123, secret: () => 'ephemeral',
+    terminationGraceMs: 5, forceGraceMs: 5,
+  });
+  const result = await executeWorker(worker, adapter, { cwd: process.cwd(), timeoutMs: 20 });
+  assert.equal(result.status, 'timed_out');
+  assert.equal(result.exitCategory, 'timeout');
+  assert.match(result.failure.reason, /prompt_async timed out/);
+  assert.deepEqual(child.signals, ['SIGTERM', 'SIGKILL'], 'TERM first, KILL as the bounded fallback');
 });
 
 test('a stalled prompt submission becomes a timeout and tears down its owned server', async () => {

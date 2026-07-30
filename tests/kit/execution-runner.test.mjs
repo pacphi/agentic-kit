@@ -205,3 +205,61 @@ test('runner reports an unknown host without attempting a lifecycle', async () =
   assert.equal(result.exitCategory, 'cli_unavailable');
   assert.match(result.failure.reason, /no execution adapter/);
 });
+
+// #88: the construction invariant — every routable host has an execution
+// adapter and vice versa, enforced at import. A fresh process import must
+// never throw; a violating edit fails here (and at import) instead of at
+// runtime with cli_unavailable on every worker.
+test('routable hosts and execution adapters cannot drift apart (construction invariant)', async () => {
+  const { spawnSync } = await import('node:child_process');
+  const { fileURLToPath } = await import('node:url');
+  const path = await import('node:path');
+  const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
+  const r = spawnSync(process.execPath, ['-e',
+    "import('./src/lib/execution/adapters.mjs').then(() => console.log('in-sync'))",
+  ], { encoding: 'utf8', cwd: repo });
+  assert.equal(r.status, 0, `execution adapters module must import cleanly:\n${r.stderr}`);
+  assert.match(r.stdout, /in-sync/);
+});
+
+// #88 test-gap: plan-validation guards — removing any of these converts a
+// throw into a silent hang or a late crash.
+test('plan validation rejects duplicate ids, unknown deps, self-deps, and bad concurrency', async () => {
+  await assert.rejects(executeRunPlan({ workers: [worker('a'), worker('a')] }, { clock }),
+    /duplicate worker id "a"/);
+  await assert.rejects(executeRunPlan({ workers: [worker('a', 'opencode', ['ghost'])] }, { clock }),
+    /depends on unknown worker "ghost"/);
+  await assert.rejects(executeRunPlan({ workers: [worker('a', 'opencode', ['a'])] }, { clock }),
+    /cannot depend on itself/);
+  await assert.rejects(executeRunPlan({ workers: [worker('a')] }, { maxConcurrent: 0, clock }),
+    /maxConcurrent must be a positive integer/);
+});
+
+// #88 test-gap: a dependency cycle must throw, not hang forever.
+test('a dependency cycle is detected and thrown, never silently hung', async () => {
+  const plan = { workers: [worker('a', 'opencode', ['b']), worker('b', 'opencode', ['a'])] };
+  await assert.rejects(executeRunPlan(plan, { adapters: { opencode: adapter({}) }, clock }),
+    /dependency cycle/);
+});
+
+// #88 test-gap: readiness-false short-circuits as cli_unavailable with the reason.
+test('an unready host reports cli_unavailable without attempting a lifecycle', async () => {
+  const events = [];
+  const unready = {
+    id: 'unready',
+    async readiness() { events.push('readiness'); return { ready: false, exitCategory: 'cli_unavailable' }; },
+    async prepare() { events.push('prepare'); return {}; },
+    async launch() { events.push('launch'); return {}; },
+    async observe() { return { type: 'idle' }; },
+    interpret() { events.push('interpret'); return {}; },
+    async cancel() {},
+    async cleanup() {},
+  };
+  const [result] = await executeRunPlan({ workers: [worker('a', 'opencode')] }, {
+    adapters: { opencode: unready }, clock,
+  });
+  assert.equal(result.status, 'failed');
+  assert.equal(result.exitCategory, 'cli_unavailable');
+  assert.match(result.failure.reason, /host is not ready/);
+  assert.deepEqual(events, ['readiness'], 'prepare/launch/interpret never run for an unready host');
+});

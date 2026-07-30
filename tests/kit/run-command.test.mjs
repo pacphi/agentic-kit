@@ -118,3 +118,29 @@ test('--escalate flows into the executor opts; results print the escalation trai
   assert.ok(out.includes('succeeded (success)') && out.includes('escalated from opencode'),
     `the trail is visible, not silent:\n${out}`);
 });
+
+// #88: --timeout above Node's 2^31-1 ms timer ceiling is rejected, never
+// silently clamped to ~1 ms for every worker.
+test('--timeout above the Node timer ceiling fails with a clear error', async () => {
+  const executePlan = async () => { throw new Error('must not run'); };
+  const { result, out } = await captureLog(() => run({
+    flags: { timeout: '3000000000' }, positionals: ['feature', 'probe'], executePlan, cfg: testCfg(),
+  }));
+  assert.equal(result, 2);
+  assert.match(out, /timeout must not exceed 2147483647/);
+});
+
+// #88: a hand-edited dualRouting is schema-checked at load — a bad entry
+// fails with the entry named, not a padEnd crash at print time.
+test('a malformed persisted route fails at build with the entry named', () => {
+  for (const [policy, needle] of [
+    [{ implementation: { host: 'claude', model: 123 } }, /route "implementation"\.model must be a string/],
+    [{ implementation: { host: '' } }, /route "implementation" requires a non-empty host/],
+    [{ implementation: { host: 'claude', escalate: [{ host: '' }] } }, /route "implementation"\.escalate\[0\] requires a non-empty host/],
+    [{ implementation: 'codex' }, /route "implementation" must be an object/],
+  ]) {
+    assert.throws(() => buildRunPlan({ providers: { dualRouting: policy } }, 'feature', 'probe'),
+      (error) => error.message.startsWith('invalid routing policy:') && needle.test(error.message),
+      `expected a named policy error for ${needle}`);
+  }
+});

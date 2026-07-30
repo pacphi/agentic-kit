@@ -8,6 +8,9 @@ export function createClaudeExecutionAdapter(options = {}) {
     argumentsFor: (worker) => [
       '--print', '--output-format', 'json',
       ...(worker.configuredModel ? ['--model', worker.configuredModel] : []),
+      // Templates carry per-node turn caps (#88) — honored where the CLI has a
+      // surface; codex exec and opencode serve have none (documented there).
+      ...(Number.isInteger(worker.maxTurns) && worker.maxTurns > 0 ? ['--max-turns', String(worker.maxTurns)] : []),
       worker.prompt,
     ],
     ...options,

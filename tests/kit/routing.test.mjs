@@ -214,6 +214,14 @@ test('an explicit OpenCode route materializes for ak run but not the legacy dual
   assert.throws(() => policyToDualRunConfig(policy, { template: 'feature', task: 'x' }), /ak dual supports Claude\/Codex/);
 });
 
+test('host-neutral run plan rejects a host without activity-routing capability', () => {
+  const policy = { implementation: { host: 'gemini', source: 'user' } };
+  assert.throws(
+    () => materializeRunPlan(policy, { template: 'feature', task: 'x' }),
+    /route for "implementation" cannot materialize: host "gemini" requires canRouteActivities/,
+  );
+});
+
 test('policyToDualRunConfig throws on an unknown template', () => {
   assert.throws(() => policyToDualRunConfig({}, { template: 'nope' }), /unknown template/);
 });
