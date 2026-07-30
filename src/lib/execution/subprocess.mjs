@@ -4,6 +4,7 @@
 import { spawn as nodeSpawn } from 'node:child_process';
 import { have, resolveShim } from '../exec.mjs';
 import { validateExecutionAdapter, validateWorkerResult } from './schema.mjs';
+import { signalProcessTree } from './process-tree.mjs';
 
 const nowIso = () => new Date().toISOString();
 const OUTPUT_LIMIT = 256 * 1024;
@@ -47,7 +48,7 @@ function resultFor(state, observation, host, clock) {
   let exitCategory = 'success';
   let failure = null;
   if (terminal === 'timeout') {
-    status = 'timed_out'; exitCategory = 'timeout'; failure = { reason: 'timeout' };
+    status = 'timed_out'; exitCategory = 'timeout'; failure = { reason: observation?.reason ?? 'timeout' };
   } else if (terminal === 'cancelled') {
     status = 'cancelled'; exitCategory = 'cancelled'; failure = { reason: 'cancelled' };
   } else if (terminal === 'orphaned') {
@@ -82,12 +83,12 @@ async function waitForFinished(state, timeoutMs) {
  * call means only that the signal was sent, not that the process terminated
  * (qe-court B5). TERM therefore gets one bounded grace period, followed by one
  * bounded KILL fallback; a survivor is explicit orphan evidence. */
-async function terminate(state, { terminationGraceMs, forceGraceMs }) {
+async function terminate(state, { terminationGraceMs, forceGraceMs, signalFn }) {
   if (state.finished) return { type: 'cancelled' };
   try {
-    if (!state.child?.kill?.('SIGTERM')) return { type: 'cancelled', orphaned: true };
+    if (!await signalFn(state.child, 'SIGTERM')) return { type: 'cancelled', orphaned: true };
     if (await waitForFinished(state, terminationGraceMs)) return { type: 'cancelled' };
-    if (!state.child.kill('SIGKILL')) return { type: 'cancelled', orphaned: true };
+    if (!await signalFn(state.child, 'SIGKILL')) return { type: 'cancelled', orphaned: true };
     return await waitForFinished(state, forceGraceMs)
       ? { type: 'cancelled' }
       : { type: 'cancelled', orphaned: true };
@@ -98,19 +99,26 @@ async function terminate(state, { terminationGraceMs, forceGraceMs }) {
  * `argumentsFor` must return a fixed argv vector; prompts never pass through a
  * shell. Permission modes are deliberately absent from this generic layer.
  * @param {{id:string, host:string, command:string, argumentsFor:(worker:any, cwd:string)=>string[],
+ *   summaryFor:(observation:any)=>any,
  *   spawnFn?:typeof nodeSpawn, haveFn?:typeof have, resolveFn?:typeof resolveShim,
+ *   signalFn?:typeof signalProcessTree,
  *   clock?:()=>string, terminationGraceMs?:number, forceGraceMs?:number}} options */
 export function createSubprocessExecutionAdapter({
-  id, host, command, argumentsFor, spawnFn = nodeSpawn, haveFn = have,
-  resolveFn = resolveShim, clock = nowIso, terminationGraceMs = 1_500, forceGraceMs = 1_500,
+  id, host, command, argumentsFor, summaryFor, spawnFn = nodeSpawn, haveFn = have,
+  resolveFn = resolveShim, signalFn = signalProcessTree,
+  clock = nowIso, terminationGraceMs = 1_500, forceGraceMs = 1_500,
 } = /** @type {any} */ ({})) {
-  if (!id || !host || !command || typeof argumentsFor !== 'function') throw new TypeError('subprocess adapter requires id, host, command, and argumentsFor');
+  if (!id || !host || !command || typeof argumentsFor !== 'function' || typeof summaryFor !== 'function') {
+    throw new TypeError('subprocess adapter requires id, host, command, argumentsFor, and summaryFor');
+  }
   if (!Number.isInteger(terminationGraceMs) || terminationGraceMs < 1) throw new TypeError('terminationGraceMs must be a positive integer');
   if (!Number.isInteger(forceGraceMs) || forceGraceMs < 1) throw new TypeError('forceGraceMs must be a positive integer');
   const adapter = {
     id,
-    async readiness() {
-      const installed = await haveFn(command);
+    async readiness({ signal, timeoutMs } = /** @type {{signal?:AbortSignal,timeoutMs?:number}} */ ({})) {
+      signal?.throwIfAborted?.();
+      const installed = await haveFn(command, { signal, timeout: timeoutMs });
+      signal?.throwIfAborted?.();
       return installed ? { ready: true } : { ready: false, exitCategory: 'cli_unavailable' };
     },
     async prepare({ worker, cwd = process.cwd() } = /** @type {{worker?:any, cwd?:string}} */ ({})) {
@@ -118,7 +126,8 @@ export function createSubprocessExecutionAdapter({
       if (typeof worker?.prompt !== 'string' || !worker.prompt.trim()) throw new TypeError(`${host} worker.prompt is required`);
       return { worker, cwd, args: argumentsFor(worker, cwd), startedAt: clock() };
     },
-    async launch(state) {
+    async launch(state, { signal } = /** @type {{signal?:AbortSignal}} */ ({})) {
+      signal?.throwIfAborted?.();
       // Native Windows executables run directly. Package-manager .cmd shims
       // are represented by a shell-free PowerShell -File invocation instead.
       const invocation = resolveFn(command, state.args);
@@ -130,17 +139,25 @@ export function createSubprocessExecutionAdapter({
       }
       const child = spawnFn(invocation.command, invocation.args, { cwd: state.cwd, env: process.env, stdio: ['ignore', 'pipe', 'pipe'] });
       if (!child?.once) throw new Error(`${host} process did not expose child lifecycle events`);
+      // Register the acquired child on runner-owned state before any future
+      // await so a launch deadline can still cancel and clean it up.
+      state.child = child;
       const stdout = capture(child.stdout);
       const stderr = capture(child.stderr);
       const completion = waitForChild(child, stdout, stderr);
-      const next = { ...state, child, completion, finished: false };
-      completion.then(() => { next.finished = true; });
-      return next;
+      state.completion = completion;
+      state.finished = false;
+      completion.then(() => { state.finished = true; });
+      return state;
     },
-    async observe(state) { return state.completion; },
+    async observe(state, { signal } = /** @type {{signal?:AbortSignal}} */ ({})) {
+      signal?.throwIfAborted?.();
+      return state.completion;
+    },
     interpret(state, observation) { return resultFor(state, observation, host, clock); },
-    async cancel(state) { return terminate(state, { terminationGraceMs, forceGraceMs }); },
-    async cleanup(state) { return terminate(state, { terminationGraceMs, forceGraceMs }); },
+    summarize(_state, observation) { return summaryFor(observation); },
+    async cancel(state) { return terminate(state, { terminationGraceMs, forceGraceMs, signalFn }); },
+    async cleanup(state) { return terminate(state, { terminationGraceMs, forceGraceMs, signalFn }); },
   };
   return validateExecutionAdapter(adapter);
 }

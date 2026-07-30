@@ -4,14 +4,17 @@ import assert from 'node:assert/strict';
 import { createClaudeExecutionAdapter as createRealClaudeExecutionAdapter } from '../../src/lib/execution/claude.mjs';
 import { createCodexExecutionAdapter as createRealCodexExecutionAdapter } from '../../src/lib/execution/codex.mjs';
 import { executeWorker } from '../../src/lib/execution/runner.mjs';
+import { HANDOFF_END, HANDOFF_START } from '../../src/lib/execution/handoff.mjs';
 
 const passthroughResolve = (command, args) => ({ command, args, resolved: true });
 const createClaudeExecutionAdapter = (options = {}) => createRealClaudeExecutionAdapter({
   resolveFn: passthroughResolve,
+  signalFn: async (child, signal) => !!child?.kill?.(signal),
   ...options,
 });
 const createCodexExecutionAdapter = (options = {}) => createRealCodexExecutionAdapter({
   resolveFn: passthroughResolve,
+  signalFn: async (child, signal) => !!child?.kill?.(signal),
   ...options,
 });
 
@@ -20,17 +23,22 @@ const worker = (host, model = 'model-1') => ({
 });
 const clock = () => '2026-07-29T00:00:00.000Z';
 
-function child({ code = 0, stderr = '' } = {}) {
+function child({ code = 0, stdout = '', stderr = '' } = {}) {
   const result = new EventEmitter();
   result.stdout = new EventEmitter();
   result.stderr = new EventEmitter();
   result.kill = () => { queueMicrotask(() => result.emit('close', null, 'SIGTERM')); return true; };
   queueMicrotask(() => {
+    if (stdout) result.stdout.emit('data', stdout);
     if (stderr) result.stderr.emit('data', stderr);
     result.emit('close', code, null);
   });
   return result;
 }
+
+const tagged = (outcome) => `${HANDOFF_START}${JSON.stringify({
+  outcome, artifacts: [], decisions: [], risks: [],
+})}${HANDOFF_END}`;
 
 test('Claude adapter uses print/json mode without a permission bypass', async () => {
   const calls = [];
@@ -42,6 +50,48 @@ test('Claude adapter uses print/json mode without a permission bypass', async ()
   assert.equal(result.status, 'succeeded');
   assert.deepEqual(calls[0].args, ['--print', '--output-format', 'json', '--model', 'model-1', 'Do the work.']);
   assert.ok(!calls[0].args.some((arg) => arg.includes('dangerously') || arg.includes('bypass')));
+});
+
+test('Claude and Codex extract only tagged final-message handoffs from structured output', async () => {
+  const claude = createClaudeExecutionAdapter({
+    haveFn: async () => true,
+    clock,
+    spawnFn: () => child({ stdout: JSON.stringify({ result: `final prose\n${tagged('claude-final')}` }) }),
+  });
+  const claudeState = await claude.launch(await claude.prepare({ worker: worker('claude'), cwd: process.cwd() }));
+  assert.equal(claude.summarize(claudeState, await claude.observe(claudeState)).outcome, 'claude-final');
+
+  const codex = createCodexExecutionAdapter({
+    haveFn: async () => true,
+    clock,
+    spawnFn: () => child({
+      stdout: [
+        JSON.stringify({ type: 'item.completed', item: { type: 'command_execution', text: tagged('wrong-item') } }),
+        JSON.stringify({ type: 'item.completed', item: { type: 'agent_message', text: tagged('codex-final') } }),
+      ].join('\n'),
+    }),
+  });
+  const codexState = await codex.launch(await codex.prepare({ worker: worker('codex'), cwd: process.cwd() }));
+  assert.equal(codex.summarize(codexState, await codex.observe(codexState)).outcome, 'codex-final');
+});
+
+test('subprocess summarizers never treat raw stdout or non-message JSONL as a handoff', async () => {
+  const claude = createClaudeExecutionAdapter({
+    haveFn: async () => true,
+    spawnFn: () => child({ stdout: tagged('raw-stdout') }),
+  });
+  const cs = await claude.launch(await claude.prepare({ worker: worker('claude'), cwd: process.cwd() }));
+  const co = await claude.observe(cs);
+  assert.throws(() => claude.summarize(cs, co), /Claude JSON output was malformed/);
+
+  const codex = createCodexExecutionAdapter({
+    haveFn: async () => true,
+    spawnFn: () => child({
+      stdout: JSON.stringify({ type: 'item.completed', item: { type: 'command_execution', text: tagged('tool-output') } }),
+    }),
+  });
+  const xs = await codex.launch(await codex.prepare({ worker: worker('codex'), cwd: process.cwd() }));
+  assert.equal(codex.summarize(xs, await codex.observe(xs)), null);
 });
 
 // #88: per-node turn caps reach the claude CLI (--max-turns); codex has no

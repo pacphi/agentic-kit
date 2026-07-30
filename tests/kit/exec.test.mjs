@@ -48,6 +48,29 @@ test('have() reports false for a command that does not exist', async () => {
   assert.equal(await have('this-command-does-not-exist-anywhere'), false);
 });
 
+test('run()/have() accept the execution deadline AbortSignal', async () => {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 10);
+  const started = Date.now();
+  try {
+    const result = await run(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], {
+      signal: controller.signal,
+      timeout: 10_000,
+    });
+    assert.notEqual(result.code, 0);
+    assert.ok(Date.now() - started < 500, 'abort stops the subprocess before its independent timeout');
+  } finally {
+    clearTimeout(timer);
+  }
+
+  const alreadyAborted = new AbortController();
+  alreadyAborted.abort();
+  await assert.rejects(
+    have(process.platform === 'win32' ? 'cmd' : 'sh', { signal: alreadyAborted.signal }),
+    (error) => error?.name === 'AbortError',
+  );
+});
+
 test('resolveShim builds safe native and PowerShell invocations in PATHEXT order', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-shim-'));
   const bin = path.join(root, 'bin');

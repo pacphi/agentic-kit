@@ -203,6 +203,8 @@ test('host-neutral run plan preserves every legacy dual worker assignment', () =
     ...worker, platform: host, model: configuredModel ?? undefined,
   })), dual.workers);
   assert.ok(plan.workers.every((worker) => worker.activity && worker.host && !('platform' in worker)));
+  assert.ok(plan.workers.every((worker) => !/AK_HANDOFF|AK_DEPENDENCY_DATA/.test(worker.prompt)),
+    'handoff protocol is appended only by the runtime runner; dry-run/materialization stays static');
 });
 
 test('an explicit OpenCode route materializes for ak run but not the legacy dual adapter', () => {

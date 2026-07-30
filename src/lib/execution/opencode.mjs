@@ -9,24 +9,53 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { have, resolveShim } from '../exec.mjs';
 import { validateExecutionAdapter, validateWorkerResult } from './schema.mjs';
+import { extractHandoff } from './handoff.mjs';
+import { signalProcessTree } from './process-tree.mjs';
 
 const TEMPLATE_PATH = fileURLToPath(new URL('../../templates/opencode-worker-prompt.md', import.meta.url));
 const LOOPBACK = '127.0.0.1';
 const USERNAME = 'opencode';
 /** S3: cap on the SSE per-line accumulator (mirrors the subprocess 256 KB cap). */
 const MAX_SSE_BUFFER = 256 * 1024;
+const MAX_MESSAGE_RESPONSE = 256 * 1024;
+const MAX_ASSISTANT_TEXT = 64 * 1024;
 
-const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+/** @param {number} ms @param {{signal?:AbortSignal}} [options] */
+const delay = (ms, { signal } = {}) => new Promise((resolve, reject) => {
+  const timer = setTimeout(() => {
+    signal?.removeEventListener?.('abort', abort);
+    resolve(undefined);
+  }, ms);
+  const abort = () => {
+    clearTimeout(timer);
+    reject(Object.assign(new Error('OpenCode launch aborted'), { name: 'AbortError' }));
+  };
+  if (signal?.aborted) return abort();
+  signal?.addEventListener?.('abort', abort, { once: true });
+});
 const nowIso = () => new Date().toISOString();
 const defaultSecret = () => randomBytes(24).toString('base64url');
 
-function defaultReservePort() {
+/** @param {{signal?:AbortSignal}} [options] */
+function defaultReservePort({ signal } = {}) {
   return new Promise((resolve, reject) => {
     const server = net.createServer();
-    server.once('error', reject);
+    const abort = () => {
+      try { server.close(); } catch { /* not listening yet */ }
+      reject(Object.assign(new Error('OpenCode port reservation aborted'), { name: 'AbortError' }));
+    };
+    if (signal?.aborted) return abort();
+    signal?.addEventListener?.('abort', abort, { once: true });
+    server.once('error', (error) => {
+      signal?.removeEventListener?.('abort', abort);
+      reject(error);
+    });
     server.listen(0, LOOPBACK, () => {
       const { port } = /** @type {{port:number}} */ (server.address());
-      server.close((error) => error ? reject(error) : resolve(port));
+      server.close((error) => {
+        signal?.removeEventListener?.('abort', abort);
+        error ? reject(error) : resolve(port);
+      });
     });
   });
 }
@@ -44,15 +73,21 @@ async function waitForChildClose(child, timeoutMs) {
 
 /** Terminate only the direct server child. A TERM that does not produce a close
  * event becomes explicit orphan evidence after one bounded KILL fallback. */
-async function stopChild(child, { terminationGraceMs, forceGraceMs }) {
+async function stopChild(child, { terminationGraceMs, forceGraceMs, signalFn }) {
   if (!child?.kill || child.exitCode != null || child.signalCode != null) return { stopped: true };
   if (!child.once) {
-    try { child.kill('SIGTERM'); } catch { return { stopped: false }; }
+    try {
+      if (!await signalFn(child, 'SIGTERM')) return { stopped: false };
+    } catch { return { stopped: false }; }
     return { stopped: true };
   }
-  try { child.kill('SIGTERM'); } catch { return { stopped: false }; }
+  try {
+    if (!await signalFn(child, 'SIGTERM')) return { stopped: false };
+  } catch { return { stopped: false }; }
   if (await waitForChildClose(child, terminationGraceMs)) return { stopped: true };
-  try { child.kill('SIGKILL'); } catch { return { stopped: false }; }
+  try {
+    if (!await signalFn(child, 'SIGKILL')) return { stopped: false };
+  } catch { return { stopped: false }; }
   return { stopped: await waitForChildClose(child, forceGraceMs) };
 }
 
@@ -84,19 +119,50 @@ function basicHeaders(password) {
   };
 }
 
-async function responseJson(response, operation) {
+/** @param {any} response @param {string} operation @param {{maxBytes?:number}} [options] */
+async function responseJson(response, operation, { maxBytes } = {}) {
   if (!response?.ok) throw new Error(`${operation} failed with HTTP ${response?.status ?? 'unknown'}`);
+  if (maxBytes) {
+    const declared = Number(response.headers?.get?.('content-length'));
+    if (Number.isFinite(declared) && declared > maxBytes) {
+      throw new Error(`${operation} response exceeded ${maxBytes} bytes`);
+    }
+    if (!response.body?.getReader) throw new Error(`${operation} did not expose a bounded response stream`);
+    const reader = response.body.getReader();
+    const chunks = [];
+    let total = 0;
+    try {
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        const chunk = value instanceof Uint8Array ? value : new Uint8Array(value);
+        total += chunk.byteLength;
+        if (total > maxBytes) {
+          await reader.cancel().catch(() => {});
+          throw new Error(`${operation} response exceeded ${maxBytes} bytes`);
+        }
+        chunks.push(chunk);
+      }
+    } finally {
+      reader.releaseLock?.();
+    }
+    const combined = new Uint8Array(total);
+    let offset = 0;
+    for (const chunk of chunks) { combined.set(chunk, offset); offset += chunk.byteLength; }
+    const text = new TextDecoder().decode(combined);
+    try { return JSON.parse(text); } catch { throw new Error(`${operation} returned invalid JSON`); }
+  }
   try { return await response.json(); } catch { throw new Error(`${operation} returned invalid JSON`); }
 }
 
 async function requestJson(fetchFn, endpoint, password, pathname,
-  { method = 'GET', body } = /** @type {{method?:string, body?:any}} */ ({})) {
+  { method = 'GET', body, signal, maxBytes } = /** @type {{method?:string, body?:any,signal?:AbortSignal,maxBytes?:number}} */ ({})) {
   const headers = basicHeaders(password);
   if (body !== undefined) headers['content-type'] = 'application/json';
   const response = await fetchFn(`${endpoint}${pathname}`, {
-    method, headers, ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+    method, headers, signal, ...(body === undefined ? {} : { body: JSON.stringify(body) }),
   });
-  return responseJson(response, `${method} ${pathname}`);
+  return responseJson(response, `${method} ${pathname}`, { maxBytes });
 }
 
 /** Bounded POST for teardown calls (/abort, /instance/dispose): a wedged
@@ -132,12 +198,16 @@ function serveModelFor(configuredModel) {
   return { providerID: configuredModel.slice(0, slash), modelID: configuredModel.slice(slash + 1) };
 }
 
-async function requestWithin(fetchFn, endpoint, password, pathname, options, timeoutMs) {
+async function requestWithin(fetchFn, endpoint, password, pathname, options, timeoutMs, signal) {
   const controller = new AbortController();
   let timer;
   try {
     return await Promise.race([
-      requestNoContent(fetchFn, endpoint, password, pathname, { ...options, signal: controller.signal }),
+      requestNoContent(fetchFn, endpoint, password, pathname, {
+        ...options,
+        signal: signal ? AbortSignal.any([signal, controller.signal]) : controller.signal,
+        timeoutMs,
+      }),
       new Promise((_, reject) => { timer = setTimeout(() => {
         controller.abort();
         const error = Object.assign(new Error(`${options.method ?? 'POST'} ${pathname} timed out`), { code: 'ETIMEDOUT' });
@@ -150,7 +220,8 @@ async function requestWithin(fetchFn, endpoint, password, pathname, options, tim
 /** Parse the OS-assigned port from the child's stdout ("listening on
  *  http://127.0.0.1:<port>"). Bounded wait; stdout is consumed (never left
  *  buffering) and a child that dies before reporting fails honestly. */
-async function boundPortFromStdout(child, { attempts = 100 } = {}) {
+/** @param {any} child @param {{attempts?:number,signal?:AbortSignal}} [options] */
+async function boundPortFromStdout(child, { attempts = 100, signal } = {}) {
   return new Promise((resolve, reject) => {
     let buf = '';
     let n = 0;
@@ -164,6 +235,10 @@ async function boundPortFromStdout(child, { attempts = 100 } = {}) {
       cleanup();
       reject(new Error(`OpenCode server failed before reporting its port: ${error?.message ?? error}`));
     };
+    const onAbort = () => {
+      cleanup();
+      reject(Object.assign(new Error('OpenCode port discovery aborted'), { name: 'AbortError' }));
+    };
     const tick = () => {
       if (++n >= attempts) { cleanup(); reject(new Error('OpenCode server did not report its port in time')); }
       else timer = setTimeout(tick, 50);
@@ -175,16 +250,21 @@ async function boundPortFromStdout(child, { attempts = 100 } = {}) {
       child.stderr?.off?.('data', onData);
       child.off?.('exit', onExit);
       child.off?.('error', onError);
+      signal?.removeEventListener?.('abort', onAbort);
     };
+    if (signal?.aborted) return onAbort();
     child.stdout.on('data', onData);
     child.stderr?.on?.('data', onData);
     child.once?.('exit', onExit);
     child.once?.('error', onError);
+    signal?.addEventListener?.('abort', onAbort, { once: true });
   });
 }
 
-/** @param {any} fetchFn @param {string} endpoint @param {string} password @param {{ attempts?: number, wait?: (ms: any) => Promise<any>, child?: any }} [opts] */
-async function waitForHealth(fetchFn, endpoint, password, { attempts = 40, wait = delay, child } = {}) {
+/** @param {any} fetchFn @param {string} endpoint @param {string} password @param {{ attempts?: number, wait?: (ms: any, opts?:any) => Promise<any>, child?: any, signal?:AbortSignal }} [opts] */
+async function waitForHealth(fetchFn, endpoint, password, {
+  attempts = 40, wait = delay, child, signal,
+} = {}) {
   let lastError = null;
   for (let attempt = 0; attempt < attempts; attempt++) {
     // A dead child (EADDRINUSE, crash, missing binary) fails fast with the
@@ -193,11 +273,12 @@ async function waitForHealth(fetchFn, endpoint, password, { attempts = 40, wait 
       throw new Error(`OpenCode server exited during health check (code ${child.exitCode})`);
     }
     try {
-      const health = await requestJson(fetchFn, endpoint, password, '/global/health');
+      signal?.throwIfAborted?.();
+      const health = await requestJson(fetchFn, endpoint, password, '/global/health', { signal });
       if (health?.healthy === true) return health;
       lastError = new Error('health response was not healthy');
     } catch (error) { lastError = error; }
-    await wait(50);
+    await wait(50, { signal });
   }
   throw new Error(`OpenCode server did not become healthy: ${lastError?.message ?? 'unknown error'}`);
 }
@@ -212,7 +293,7 @@ function normalizeEvent(value) {
 async function waitForTerminalEvent(response, sessionId, { signal } = /** @type {{signal?:AbortSignal}} */ ({})) {
   if (!response?.ok || !response.body?.getReader) throw new Error('GET /global/event did not return an SSE body');
   const reader = response.body.getReader();
-  const abort = () => { void reader.cancel(); };
+  const abort = () => { Promise.resolve(reader.cancel()).catch(() => {}); };
   signal?.addEventListener?.('abort', abort, { once: true });
   const decoder = new TextDecoder();
   let buffer = '';
@@ -259,7 +340,21 @@ function assistantFrom(messages) {
   const candidates = Array.isArray(messages) ? messages : [];
   for (let i = candidates.length - 1; i >= 0; i--) {
     const info = candidates[i]?.info;
-    if (info?.role === 'assistant') return info;
+    if (info?.role === 'assistant') {
+      const text = Array.isArray(candidates[i]?.parts)
+        ? candidates[i].parts
+          .filter((part) => part?.type === 'text' && typeof part.text === 'string')
+          .map((part) => part.text)
+          .join('\n')
+        : '';
+      if (Buffer.byteLength(text, 'utf8') > MAX_ASSISTANT_TEXT) {
+        throw new Error(`OpenCode assistant text exceeded ${MAX_ASSISTANT_TEXT} bytes`);
+      }
+      return {
+        info,
+        text,
+      };
+    }
   }
   return null;
 }
@@ -274,14 +369,14 @@ function terminalResult(state, observation, clock) {
   const endedAt = clock();
   const startedAt = state.startedAt;
   const durationMs = Math.max(0, Date.parse(endedAt) - Date.parse(startedAt));
-  const assistant = observation.assistant ?? null;
+  const assistant = observation.assistant?.info ?? null;
   let status = 'succeeded';
   let exitCategory = 'success';
   let failure = null;
   if (observation.type === 'permission') {
     status = 'blocked'; exitCategory = 'permission_required'; failure = { permission: observation.permission?.id ?? null };
   } else if (observation.type === 'timeout') {
-    status = 'timed_out'; exitCategory = 'timeout'; failure = { reason: 'timeout' };
+    status = 'timed_out'; exitCategory = 'timeout'; failure = { reason: observation.reason ?? 'timeout' };
   } else if (observation.type === 'cancelled') {
     status = 'cancelled'; exitCategory = 'cancelled'; failure = { reason: 'cancelled' };
   } else if (observation.type === 'orphaned') {
@@ -312,7 +407,8 @@ function terminalResult(state, observation, clock) {
  */
 export function createOpenCodeExecutionAdapter({
   fetchFn = globalThis.fetch, spawnFn = nodeSpawn, haveFn = have, reservePort = defaultReservePort,
-  resolveFn = resolveShim, secret = defaultSecret, wait = delay, clock = nowIso,
+  resolveFn = resolveShim, signalFn = signalProcessTree,
+  secret = defaultSecret, wait = delay, clock = nowIso,
   terminationGraceMs = 1_500, forceGraceMs = 1_500, teardownTimeoutMs = 10_000,
 } = {}) {
   if (typeof fetchFn !== 'function') throw new TypeError('fetchFn is required');
@@ -321,8 +417,10 @@ export function createOpenCodeExecutionAdapter({
   if (!Number.isInteger(teardownTimeoutMs) || teardownTimeoutMs < 1) throw new TypeError('teardownTimeoutMs must be a positive integer');
   const adapter = {
     id: 'opencode-server',
-    async readiness() {
-      const installed = await haveFn('opencode');
+    async readiness({ signal, timeoutMs } = /** @type {{signal?:AbortSignal,timeoutMs?:number}} */ ({})) {
+      signal?.throwIfAborted?.();
+      const installed = await haveFn('opencode', { signal, timeout: timeoutMs });
+      signal?.throwIfAborted?.();
       return installed ? { ready: true } : { ready: false, exitCategory: 'cli_unavailable' };
     },
     async prepare({ worker, cwd = process.cwd() } = /** @type {{worker?:any,cwd?:string}} */ ({})) {
@@ -330,8 +428,12 @@ export function createOpenCodeExecutionAdapter({
       if (!path.isAbsolute(cwd)) throw new TypeError('OpenCode worker cwd must be absolute');
       return { worker, cwd, prompt: renderOpenCodeWorkerPrompt(worker), startedAt: clock() };
     },
-    async launch(state, { timeoutMs = 120_000 } = {}) {
+    async launch(state, {
+      timeoutMs = 120_000, signal,
+    } = /** @type {{timeoutMs?:number,signal?:AbortSignal}} */ ({})) {
+      signal?.throwIfAborted?.();
       const password = secret();
+      state.password = password;
       // Port assignment WITHOUT the probe-bind-release race (S2): the child
       // binds :0 itself and reports the OS-assigned port on stdout, so a
       // squatter can never win a freed port against us (a rogue server would
@@ -350,26 +452,41 @@ export function createOpenCodeExecutionAdapter({
         env: { ...process.env, OPENCODE_SERVER_USERNAME: USERNAME, OPENCODE_SERVER_PASSWORD: password },
         stdio: ['ignore', 'pipe', 'pipe'],
       });
+      // Progressive registration: the runner owns this state and can cancel
+      // every resource acquired before any later launch await.
+      state.child = child;
       let port;
       try {
         port = child?.stdout && typeof child.stdout.on === 'function'
-          ? await boundPortFromStdout(child)
-          : await reservePort();
+          ? await boundPortFromStdout(child, { signal })
+          : await reservePort({ signal });
       } catch (error) {
-        await stopChild(child, { terminationGraceMs, forceGraceMs });
+        if (!signal?.aborted) {
+          const stopped = await stopChild(child, { terminationGraceMs, forceGraceMs, signalFn });
+          if (stopped.stopped) state.child = null;
+        }
         throw error;
       }
+      signal?.throwIfAborted?.();
       const endpoint = `http://${LOOPBACK}:${port}`;
+      state.endpoint = endpoint;
       try {
-        await waitForHealth(fetchFn, endpoint, password, { wait, child });
+        await waitForHealth(fetchFn, endpoint, password, { wait, child, signal });
+        signal?.throwIfAborted?.();
         const session = await requestJson(fetchFn, endpoint, password, '/session', {
-          method: 'POST', body: { title: `agentic-kit ${state.worker.id}` },
+          method: 'POST', body: { title: `agentic-kit ${state.worker.id}` }, signal,
         });
         if (typeof session?.id !== 'string' || !session.id) throw new Error('OpenCode created a session without an id');
+        state.sessionId = session.id;
+        signal?.throwIfAborted?.();
         const headers = basicHeaders(password);
         const eventAbort = new AbortController();
-        const eventResponse = await fetchFn(`${endpoint}/global/event`, { headers, signal: eventAbort.signal });
-        const terminal = waitForTerminalEvent(eventResponse, session.id, { signal: eventAbort.signal });
+        state.eventAbort = eventAbort;
+        const eventSignal = signal ? AbortSignal.any([signal, eventAbort.signal]) : eventAbort.signal;
+        const eventResponse = await fetchFn(`${endpoint}/global/event`, { headers, signal: eventSignal });
+        signal?.throwIfAborted?.();
+        const terminal = waitForTerminalEvent(eventResponse, session.id, { signal: eventSignal });
+        state.terminal = terminal;
         // Every path that abandons this promise without observe() consuming it
         // (a prompt post that throws, cancel/cleanup teardown) would otherwise
         // leave its socket-close rejection unhandled — Node's default turns
@@ -379,33 +496,48 @@ export function createOpenCodeExecutionAdapter({
         const model = serveModelFor(state.worker.configuredModel);
         await requestWithin(fetchFn, endpoint, password, `/session/${encodeURIComponent(session.id)}/prompt_async`, {
           body: { agent: 'build', ...(model ? { model } : {}), parts: [{ type: 'text', text: state.prompt }] },
-        }, timeoutMs);
-        return { ...state, endpoint, password, child, sessionId: session.id, terminal, eventAbort };
+        }, timeoutMs, signal);
+        signal?.throwIfAborted?.();
+        return state;
       } catch (error) {
-        await stopChild(child, { terminationGraceMs, forceGraceMs });
+        if (!signal?.aborted) {
+          state.eventAbort?.abort();
+          const stopped = await stopChild(child, { terminationGraceMs, forceGraceMs, signalFn });
+          if (stopped.stopped) state.child = null;
+        }
         throw error;
       }
     },
-    async observe(state) {
+    async observe(state, { signal } = /** @type {{signal?:AbortSignal}} */ ({})) {
       try {
+        signal?.throwIfAborted?.();
         const observation = await state.terminal;
         if (observation.type === 'permission') {
           await requestNoContent(fetchFn, state.endpoint, state.password, `/session/${encodeURIComponent(state.sessionId)}/abort`, { timeoutMs: teardownTimeoutMs });
         }
         if (observation.type !== 'idle') return observation;
-        const messages = await requestJson(fetchFn, state.endpoint, state.password, `/session/${encodeURIComponent(state.sessionId)}/message`);
+        const messages = await requestJson(
+          fetchFn,
+          state.endpoint,
+          state.password,
+          `/session/${encodeURIComponent(state.sessionId)}/message`,
+          { signal, maxBytes: MAX_MESSAGE_RESPONSE },
+        );
         return { ...observation, assistant: assistantFrom(messages) };
       } catch (error) {
         return { type: 'error', error: { name: 'ProtocolError', data: { message: error.message } } };
       }
     },
     interpret(state, observation) { return terminalResult(state, observation, clock); },
+    summarize(_state, observation) {
+      return extractHandoff(observation?.assistant?.text);
+    },
     async cancel(state) {
       state?.eventAbort?.abort();
       if (state?.sessionId) {
         try { await requestNoContent(fetchFn, state.endpoint, state.password, `/session/${encodeURIComponent(state.sessionId)}/abort`, { timeoutMs: teardownTimeoutMs }); } catch { /* cleanup records the final truth */ }
       }
-      const stopped = await stopChild(state?.child, { terminationGraceMs, forceGraceMs });
+      const stopped = await stopChild(state?.child, { terminationGraceMs, forceGraceMs, signalFn });
       return stopped.stopped ? { type: 'cancelled' } : { type: 'cancelled', orphaned: true };
     },
     async cleanup(state) {
@@ -413,7 +545,7 @@ export function createOpenCodeExecutionAdapter({
       if (state?.endpoint) {
         try { await requestNoContent(fetchFn, state.endpoint, state.password, '/instance/dispose', { timeoutMs: teardownTimeoutMs }); } catch { /* child termination remains the fallback */ }
       }
-      const stopped = await stopChild(state?.child, { terminationGraceMs, forceGraceMs });
+      const stopped = await stopChild(state?.child, { terminationGraceMs, forceGraceMs, signalFn });
       return stopped.stopped ? { cleaned: true } : { cleaned: false, orphaned: true };
     },
   };

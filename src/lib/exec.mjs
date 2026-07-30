@@ -87,6 +87,7 @@ export async function run(cmd, args = [], opts = {}) {
     const { stdout, stderr } = await pexecFile(invocation.command, invocation.args, {
       encoding: 'utf8',
       timeout: opts.timeout ?? 120_000,
+      signal: opts.signal,
       maxBuffer: 16 * 1024 * 1024,
       cwd: opts.cwd,
       env,
@@ -103,9 +104,12 @@ export async function run(cmd, args = [], opts = {}) {
 }
 
 /** Is `cmd` invokable? (cross-platform `command -v`) */
-export async function have(cmd) {
+export async function have(cmd, opts = {}) {
+  opts.signal?.throwIfAborted?.();
   if (isWindows) {
     return resolveShim(cmd).resolved;
   }
-  return (await run('which', [cmd])).code === 0;
+  const present = (await run('which', [cmd], opts)).code === 0;
+  opts.signal?.throwIfAborted?.();
+  return present;
 }

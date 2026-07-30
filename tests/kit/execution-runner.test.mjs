@@ -5,6 +5,9 @@ import { executeRunPlan } from '../../src/lib/execution/runner.mjs';
 
 const worker = (id, host = 'opencode', dependsOn) => ({ id, activity: 'implementation', role: 'coder', host, prompt: id, ...(dependsOn ? { dependsOn } : {}) });
 const clock = () => '2026-07-29T00:00:00.000Z';
+const handoff = (outcome = 'done') => ({
+  outcome, artifacts: [], decisions: [], risks: [],
+});
 
 test('the built-in registry exposes supervised transports for every managed host', () => {
   assert.equal(EXECUTION_ADAPTERS.get('claude').id, 'claude-print-json');
@@ -28,6 +31,7 @@ function adapter({ observation = { type: 'idle' }, events = [] } = {}) {
         configuredModel: null, observedModel: null, sessionId: null, transcriptRefs: [], failure: null, usage: null,
       };
     },
+    summarize(state) { return handoff(`completed ${state.worker.id}`); },
     async cancel(state) { events.push(`cancel:${state.worker.id}`); },
     async cleanup(state) { events.push(`cleanup:${state.worker.id}`); },
   };
@@ -55,6 +59,7 @@ function scriptedAdapter(events, script) {
         failure: fail ? { reason: script.reason ?? 'scripted failure' } : null, usage: null,
       };
     },
+    summarize(state) { return script.handoff ?? handoff(`completed on ${state.worker.host}`); },
     async cancel() {},
     async cleanup() {},
   };
@@ -170,6 +175,7 @@ test('a malformed interpret() on the timeout path is bounded, not shipped raw (q
     async launch(state) { return state; },
     async observe() { return new Promise(() => {}); }, // never settles → the deadline hits
     interpret() { return { bogus: true }; },            // garbage a strict validator must reject
+    summarize() { return handoff(); },
     async cancel() {},
     async cleanup() {},
   };
@@ -198,6 +204,246 @@ test('runner schedules a dependency DAG and blocks only descendants of a failure
   assert.deepEqual(results.map((result) => result.status), ['succeeded', 'failed', 'succeeded', 'blocked']);
   assert.ok(events.includes('launch:c'));
   assert.ok(!events.includes('launch:d'));
+});
+
+test('runtime handoffs reach only declared dependents in declaration order and stay private', async () => {
+  const prompts = new Map();
+  const contextAdapter = {
+    id: 'context',
+    async readiness() { return { ready: true }; },
+    async prepare({ worker: w }) { prompts.set(w.id, w.prompt); return { worker: w }; },
+    async launch(state) { return state; },
+    async observe(state) {
+      if (state.worker.id === 'a') await new Promise((resolve) => setTimeout(resolve, 15));
+      return { type: 'idle' };
+    },
+    interpret(state) {
+      return {
+        workerId: state.worker.id, activity: state.worker.activity, role: state.worker.role, host: state.worker.host,
+        status: 'succeeded', exitCategory: 'success', startedAt: clock(), endedAt: clock(), durationMs: 0,
+        provider: null, providerProvenance: 'unknown', configuredModel: null, observedModel: null,
+        sessionId: null, transcriptRefs: [], failure: null, usage: null,
+      };
+    },
+    summarize(state) {
+      return handoff(`summary-${state.worker.id}`);
+    },
+    async cancel() {},
+    async cleanup() {},
+  };
+  const plan = { workers: [
+    worker('a'),
+    worker('b'),
+    worker('independent'),
+    worker('fan-in', 'opencode', ['a', 'b']),
+  ] };
+  const results = await executeRunPlan(plan, {
+    adapters: { opencode: contextAdapter }, maxConcurrent: 3, clock,
+  });
+  const fanIn = prompts.get('fan-in');
+  assert.ok(fanIn.indexOf('summary-a') < fanIn.indexOf('summary-b'),
+    'dependsOn declaration order wins even when b finishes first');
+  assert.doesNotMatch(prompts.get('independent'), /AK_DEPENDENCY_DATA/);
+  assert.match(prompts.get('a'), /AK_HANDOFF_V1/, 'a producer is asked for a handoff only at runtime');
+  assert.doesNotMatch(prompts.get('fan-in'), /Internal dependency handoff required/,
+    'a leaf receives dependency data but is not asked to produce another handoff');
+  const wire = JSON.stringify(results);
+  assert.doesNotMatch(wire, /summary-a|AK_HANDOFF|handoff/i,
+    'internal summaries and protocol markers never enter public WorkerResult JSON');
+});
+
+test('a missing required handoff is a protocol error and blocks its dependent', async () => {
+  const missing = adapter();
+  missing.summarize = () => null;
+  const results = await executeRunPlan({
+    workers: [worker('producer'), worker('consumer', 'opencode', ['producer'])],
+  }, { adapters: { opencode: missing }, clock });
+  assert.equal(results[0].status, 'blocked');
+  assert.equal(results[0].exitCategory, 'protocol_error');
+  assert.match(results[0].failure.reason, /handoff was missing/);
+  assert.equal(results[1].status, 'blocked');
+  assert.deepEqual(results[1].failure.dependencies, ['producer']);
+});
+
+test('a malformed handoff cannot escalate and duplicate a successful producer side effect', async () => {
+  const events = [];
+  const malformed = scriptedAdapter(events, { fail: false, handoff: { outcome: 'missing arrays' } });
+  const fallback = scriptedAdapter(events, { fail: false });
+  const plan = { workers: [
+    escalatableWorker('producer', 'opencode', [{ host: 'claude' }]),
+    worker('consumer', 'opencode', ['producer']),
+  ] };
+  const results = await executeRunPlan(plan, {
+    adapters: { opencode: malformed, claude: fallback },
+    escalate: true,
+    clock,
+  });
+  assert.equal(results[0].status, 'blocked');
+  assert.equal(results[0].exitCategory, 'protocol_error');
+  assert.equal(results[0].attempts, undefined, 'a protocol-only failure is never retried');
+  assert.deepEqual(events.filter((event) => event.startsWith('observe:')), ['observe:opencode']);
+  assert.equal(results[1].status, 'blocked');
+});
+
+test('escalation forwards only the final successful rung handoff', async () => {
+  const prompts = [];
+  const failing = scriptedAdapter([], {
+    fail: true,
+    handoff: handoff('must-not-forward'),
+  });
+  const successful = scriptedAdapter([], {
+    fail: false,
+    handoff: handoff('final-success'),
+  });
+  const consumer = {
+    ...scriptedAdapter([], { fail: false }),
+    async prepare({ worker: w }) { prompts.push(w.prompt); return { worker: w }; },
+  };
+  const plan = { workers: [
+    escalatableWorker('producer', 'opencode', [{ host: 'claude' }]),
+    { ...worker('consumer', 'codex', ['producer']), activity: 'review', role: 'reviewer' },
+  ] };
+  const results = await executeRunPlan(plan, {
+    adapters: { opencode: failing, claude: successful, codex: consumer },
+    escalate: true,
+    clock,
+  });
+  assert.equal(results[0].status, 'succeeded');
+  assert.match(prompts[0], /final-success/);
+  assert.doesNotMatch(prompts[0], /must-not-forward/);
+});
+
+function phaseAdapter(stall, events) {
+  const pending = () => new Promise(() => {});
+  return {
+    id: `stall-${stall}`,
+    async readiness() {
+      events.push('readiness');
+      return stall === 'readiness' ? pending() : { ready: true };
+    },
+    async prepare({ worker: w }) {
+      events.push('prepare');
+      return stall === 'prepare' ? pending() : { worker: w, resource: false };
+    },
+    async launch(state) {
+      events.push('launch');
+      state.resource = true;
+      return stall === 'launch' ? pending() : state;
+    },
+    async observe() {
+      events.push('observe');
+      return stall === 'observe' ? pending() : { type: 'idle' };
+    },
+    interpret(state, observation) {
+      const orphaned = observation.type === 'orphaned';
+      const timedOut = observation.type === 'timeout';
+      return {
+        workerId: state.worker.id, activity: state.worker.activity, role: state.worker.role, host: state.worker.host,
+        status: orphaned ? 'failed' : (timedOut ? 'timed_out' : 'succeeded'),
+        exitCategory: orphaned ? 'orphaned' : (timedOut ? 'timeout' : 'success'),
+        startedAt: clock(), endedAt: clock(), durationMs: 0,
+        provider: null, providerProvenance: 'unknown', configuredModel: null, observedModel: null,
+        sessionId: null, transcriptRefs: [], failure: timedOut || orphaned ? { reason: observation.reason ?? observation.type } : null,
+        usage: null,
+      };
+    },
+    summarize() { return handoff(); },
+    async cancel(state) { events.push(`cancel:${state.resource}`); return { type: 'cancelled' }; },
+    async cleanup(state) { events.push(`cleanup:${state.resource}`); return { cleaned: true }; },
+  };
+}
+
+test('one deadline bounds readiness, prepare, launch, and observe with phase-correct cleanup', async () => {
+  for (const phase of ['readiness', 'prepare', 'launch', 'observe']) {
+    const events = [];
+    const [result] = await executeRunPlan({ workers: [worker('deadline')] }, {
+      adapters: { opencode: phaseAdapter(phase, events) },
+      timeoutMs: 8,
+      clock,
+    });
+    assert.equal(result.status, 'timed_out', phase);
+    assert.equal(result.exitCategory, 'timeout', phase);
+    if (phase === 'readiness' || phase === 'prepare') {
+      assert.equal(events.some((event) => event.startsWith('cancel:')), false, `${phase}: no resource state`);
+      assert.equal(events.some((event) => event.startsWith('cleanup:')), false, `${phase}: no resource state`);
+    } else {
+      assert.ok(events.includes('cancel:true'), `${phase}: acquired resource is cancelled`);
+      assert.ok(events.includes('cleanup:true'), `${phase}: acquired resource is cleaned`);
+    }
+  }
+});
+
+test('the attempt budget is shared rather than renewed for every lifecycle phase', async () => {
+  const wait = () => new Promise((resolve) => setTimeout(resolve, 10));
+  const events = [];
+  const slow = phaseAdapter('none', events);
+  slow.readiness = async () => { events.push('readiness'); await wait(); return { ready: true }; };
+  slow.prepare = async ({ worker: w }) => { events.push('prepare'); await wait(); return { worker: w, resource: false }; };
+  slow.launch = async (state) => { events.push('launch'); state.resource = true; await wait(); return state; };
+  const started = Date.now();
+  const [result] = await executeRunPlan({ workers: [worker('shared')] }, {
+    adapters: { opencode: slow },
+    timeoutMs: 24,
+    clock,
+  });
+  assert.equal(result.status, 'timed_out');
+  assert.ok(Date.now() - started < 60, 'three phases do not each receive a fresh 24 ms budget');
+  if (events.includes('launch')) {
+    assert.ok(events.includes('cancel:true'), 'an acquired launch resource is cancelled');
+  } else {
+    assert.equal(events.some((event) => event.startsWith('cancel:')), false,
+      'scheduler delay may exhaust the shared budget before any resource exists');
+  }
+});
+
+test('every lifecycle phase receives the same signal and a non-increasing remaining budget', async () => {
+  const seen = [];
+  const record = (phase, options) => {
+    seen.push({ phase, signal: options.signal, timeoutMs: options.timeoutMs });
+  };
+  const measured = {
+    ...phaseAdapter('none', []),
+    async readiness(options) { record('readiness', options); return { ready: true }; },
+    async prepare({ worker: w, ...options }) {
+      record('prepare', options);
+      return { worker: w, resource: false };
+    },
+    async launch(state, options) { record('launch', options); state.resource = true; return state; },
+    async observe(_state, options) { record('observe', options); return { type: 'idle' }; },
+  };
+  const [result] = await executeRunPlan({ workers: [worker('measured')] }, {
+    adapters: { opencode: measured },
+    timeoutMs: 100,
+    clock,
+  });
+  assert.equal(result.status, 'succeeded');
+  assert.equal(new Set(seen.map(({ signal }) => signal)).size, 1, 'one AbortSignal spans the attempt');
+  for (let i = 1; i < seen.length; i++) {
+    assert.ok(seen[i].timeoutMs <= seen[i - 1].timeoutMs,
+      `${seen[i].phase} cannot receive a renewed timeout`);
+  }
+});
+
+test('cleanup orphan evidence upgrades an apparent success', async () => {
+  const survivor = phaseAdapter('none', []);
+  survivor.cleanup = async () => ({ cleaned: false, orphaned: true });
+  const [result] = await executeRunPlan({ workers: [worker('survivor')] }, {
+    adapters: { opencode: survivor },
+    clock,
+  });
+  assert.equal(result.status, 'failed');
+  assert.equal(result.exitCategory, 'orphaned');
+});
+
+test('a cleanup exception is uncertain resource state and upgrades apparent success to orphaned', async () => {
+  const uncertain = phaseAdapter('none', []);
+  uncertain.cleanup = async () => { throw new Error('cleanup transport broke'); };
+  const [result] = await executeRunPlan({ workers: [worker('uncertain')] }, {
+    adapters: { opencode: uncertain },
+    clock,
+  });
+  assert.equal(result.status, 'failed');
+  assert.equal(result.exitCategory, 'orphaned');
 });
 
 test('runner reports an unknown host without attempting a lifecycle', async () => {
@@ -252,6 +498,7 @@ test('an unready host reports cli_unavailable without attempting a lifecycle', a
     async launch() { events.push('launch'); return {}; },
     async observe() { return { type: 'idle' }; },
     interpret() { events.push('interpret'); return {}; },
+    summarize() { return handoff(); },
     async cancel() {},
     async cleanup() {},
   };

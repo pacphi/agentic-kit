@@ -3,7 +3,7 @@
 - **Status:** Accepted
 - **Date:** 2026-07-29
 - **Updated:** 2026-07-30
-- **Update note:** Hardened trusted-policy validation, adapter invariants, plan guards, and bounded worker teardown.
+- **Update note:** Added private bounded dependency handoffs and one absolute lifecycle deadline per attempt.
 - **Deciders:** agentic-kit maintainers
 
 ## Context
@@ -34,7 +34,7 @@ permission-response contract required for a routable worker. [OpenCode CLI docum
 2. Introduce an agentic-kit-owned, host-neutral execution contract:
 
    ```text
-   readiness → prepare → launch → observe → interpret → cancel → cleanup
+   readiness → prepare → launch → observe → interpret → summarize → cancel → cleanup
    ```
 
    Every terminal result contains host, activity, configured selector, correlation,
@@ -70,6 +70,46 @@ permission-response contract required for a routable worker. [OpenCode CLI docum
    conformance evidence. Its routes are accepted by `ak run`, but are never auto-seeded,
    AQE-projected, primary-host eligible, or accepted by deprecated `ak dual`.
 
+7. Dependency continuity uses a **runtime-only handoff protocol**. A worker with
+   dependents must end its final response with one tagged JSON object containing exactly
+   `outcome`, `artifacts`, `decisions`, and `risks`. Host adapters extract that object only
+   from the host's structured final assistant surface—Claude's JSON `result`, Codex's final
+   JSONL `agent_message`, or OpenCode's final assistant text parts. Raw stdout, tool output,
+   and whole protocol streams are never fallback handoffs.
+
+   Each handoff is sanitized and capped at 2 KiB; fan-in is capped at 8 KiB and preserves
+   the dependent's declared `dependsOn` order rather than completion order. The runner
+   appends summaries only at runtime inside an explicit untrusted-data/not-instructions
+   boundary. Materialized/dry-run prompts remain unchanged, and handoffs never enter
+   `WorkerResult` or `ak run --json`. A handoff may cross host and inference-vendor
+   boundaries, so its request explicitly forbids secrets, credentials, raw logs, and
+   transcript excerpts. A missing, duplicate, or malformed required handoff is a bounded,
+   non-escalatable `protocol_error` and prevents both duplicate side effects and silent
+   downstream execution. Escalation
+   retains only the final successful rung's handoff.
+
+8. `timeoutMs` is **one absolute budget per escalation attempt**, created before readiness
+   and shared through:
+
+   ```text
+   readiness → prepare → launch → observe
+   ```
+
+   Every phase receives the same `AbortSignal` and only the remaining time; no phase
+   renews the budget. `readiness` and `prepare` are resource-free. During `launch`, an
+   adapter progressively registers each acquired resource on runner-owned prepared state
+   before its next await. A deadline before prepared state exists returns `timed_out`
+   without fabricated cleanup. A deadline after state exists aborts the operation, calls
+   `cancel`, and returns `timed_out` only when termination is confirmed; surviving or
+   uncertain resources are `orphaned`.
+
+   Final cleanup remains separately bounded and may extend wall time past the worker
+   deadline because termination proof is part of the safety contract. Explicit
+   `orphaned:true` cleanup evidence, or a cleanup exception that leaves termination
+   unproved, upgrades any apparent success or timeout and is never ignored or downgraded.
+   On Windows, termination targets the full wrapper/CLI process tree rather than treating
+   an exited npm PowerShell shim as proof that its descendant stopped.
+
 ### The trust boundary (stated, not weakened)
 
 `ak run` executes workers with the **user's own CLI trust posture in the target
@@ -104,6 +144,11 @@ behalf, and terminal evidence that records what actually ran.
   grounded provider evidence is diagnosed, never projected as an invented provider.
 - Automatic seeding remains Claude/Codex subscription-only. No OpenCode route is seeded
   from unknown or metered provider/billing facts.
+- Dependency summaries improve cross-worker continuity without exposing raw host output or
+  creating a second public result schema. Disk mutations remain shared evidence, not the
+  only communication channel.
+- One attempt cannot consume `timeoutMs` independently in each lifecycle phase. Cleanup can
+  exceed that budget only to establish whether owned resources actually terminated.
 
 ## Implementation evidence
 
@@ -117,3 +162,9 @@ behalf, and terminal evidence that records what actually ran.
 - Routing-disable behavior, provenance, and cost safety are covered. OpenCode remains excluded
   from AQE projection and vendor-diversity claims because a host/model selector is not provider
   evidence.
+- Handoff fixtures prove strict tag/schema extraction, control sanitization, UTF-8 bounds,
+  fan-in ordering, injection delimiters, no raw-output fallback, final-success-only escalation,
+  missing-summary blocking, and public-result privacy.
+- Runner fixtures independently stall readiness, prepare, launch, and observe; prove one
+  shared attempt budget; verify progressive cancellation/cleanup; and upgrade cleanup survivors
+  to an orphaned terminal result.

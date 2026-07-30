@@ -1,7 +1,8 @@
 import { createSubprocessExecutionAdapter } from './subprocess.mjs';
+import { extractHandoff } from './handoff.mjs';
 
 /** Claude Code's documented print/json mode. No permission bypass is passed. */
-/** @param {Omit<Parameters<typeof createSubprocessExecutionAdapter>[0], 'id'|'host'|'command'|'argumentsFor'>} [options] */
+/** @param {Omit<Parameters<typeof createSubprocessExecutionAdapter>[0], 'id'|'host'|'command'|'argumentsFor'|'summaryFor'>} [options] */
 export function createClaudeExecutionAdapter(options = {}) {
   return createSubprocessExecutionAdapter({
     id: 'claude-print-json', host: 'claude', command: 'claude',
@@ -13,6 +14,13 @@ export function createClaudeExecutionAdapter(options = {}) {
       ...(Number.isInteger(worker.maxTurns) && worker.maxTurns > 0 ? ['--max-turns', String(worker.maxTurns)] : []),
       worker.prompt,
     ],
+    summaryFor: (observation) => {
+      let payload;
+      try { payload = JSON.parse(observation?.stdout ?? ''); } catch {
+        throw new TypeError('Claude JSON output was malformed');
+      }
+      return extractHandoff(payload?.result);
+    },
     ...options,
   });
 }
