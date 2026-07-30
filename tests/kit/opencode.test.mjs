@@ -489,12 +489,13 @@ test('edited agent and skill are preserved on receipt-aware redeploy and reporte
   const skillRetry = deploySkill({ source, skillsDir, receipt: skill.receipt });
   assert.equal(fs.readFileSync(agentPath, 'utf8'), editedAgent);
   assert.equal(fs.readFileSync(skillPath, 'utf8'), editedSkill);
-  assert.equal(agentRetry.receipts['coder.md'], undefined, 'edited agent ownership is relinquished');
+  assert.equal(agentRetry.receipts['coder.md'], agents.receipts['coder.md'],
+    'edited agent keeps its mismatched receipt so a later pass cannot launder it as unreceipted');
   assert.equal(skillRetry.changed, false);
   rm(d);
 });
 
-test('exact desired bytes without a prior receipt are never adopted for teardown', () => {
+test('exact marker-bearing desired bytes without prior receipts are adopted once for safe teardown', () => {
   const d = tmp('ak-oc-unreceipted-');
   const source = catalogSource({ override: makeCatalog(path.join(d, 'catalog')) });
   const skillsDir = path.join(d, 'skills');
@@ -509,12 +510,13 @@ test('exact desired bytes without a prior receipt are never adopted for teardown
   const firstAgents = syncAgents({ source, destDir: agentsDir });
   const skillPath = path.join(skillsDir, 'ruflo', 'SKILL.md');
   const pluginPath = path.join(pluginsDir, PLUGIN_NAME);
-  const agentPath = path.join(agentsDir, 'coder.md');
   const stampPath = path.join(agentsDir, '.ak-agents-stamp.json');
   const exact = {
     skill: fs.readFileSync(skillPath, 'utf8'),
     plugin: fs.readFileSync(pluginPath, 'utf8'),
-    agent: fs.readFileSync(agentPath, 'utf8'),
+    agents: Object.fromEntries(Object.keys(firstAgents.receipts).map((file) => [
+      file, fs.readFileSync(path.join(agentsDir, file), 'utf8'),
+    ])),
     stamp: fs.readFileSync(stampPath, 'utf8'),
   };
   fs.rmSync(path.join(skillsDir, 'ruflo'), { recursive: true });
@@ -525,17 +527,30 @@ test('exact desired bytes without a prior receipt are never adopted for teardown
   fs.mkdirSync(agentsDir, { recursive: true });
   fs.writeFileSync(skillPath, exact.skill);
   fs.writeFileSync(pluginPath, exact.plugin);
-  fs.writeFileSync(agentPath, exact.agent);
+  for (const [file, text] of Object.entries(exact.agents)) {
+    fs.writeFileSync(path.join(agentsDir, file), text);
+  }
   fs.writeFileSync(stampPath, exact.stamp);
+  assert.equal(skillStatus({ source, skillsDir, receipt: null }).adoptable, true);
+  assert.equal(pluginStatus({ pkgRoot, pluginsDir, receipt: null }).adoptable, true);
+  assert.equal(agentsStatus({
+    source, destDir: agentsDir, receipts: {}, stampReceipt: null,
+  }).adoptable, true);
   const unownedSkill = deploySkill({ source, skillsDir, receipt: null });
   const unownedPlugin = deployPlugin({ pkgRoot, pluginsDir, receipt: null });
   const unownedAgents = syncAgents({
     source, destDir: agentsDir, receipts: {}, stampReceipt: null,
   });
-  assert.equal(unownedSkill.receipt, null);
-  assert.equal(unownedPlugin.receipt, null);
-  assert.equal(unownedAgents.receipts['coder.md'], undefined);
-  assert.equal(unownedAgents.stampReceipt, null);
+  assert.equal(unownedSkill.changed, false);
+  assert.equal(unownedPlugin.changed, false);
+  assert.equal(unownedAgents.changed, false, unownedAgents.detail);
+  assert.equal(unownedSkill.adopted, true);
+  assert.equal(unownedPlugin.adopted, true);
+  assert.equal(unownedAgents.adopted, Object.keys(exact.agents).length);
+  assert.ok(unownedSkill.receipt);
+  assert.ok(unownedPlugin.receipt);
+  assert.ok(unownedAgents.receipts['coder.md']);
+  assert.ok(unownedAgents.stampReceipt);
   removeArtifacts({
     skillsDir, pluginsDir, agentsDir,
     receipts: {
@@ -543,10 +558,12 @@ test('exact desired bytes without a prior receipt are never adopted for teardown
       agents: unownedAgents.receipts, agentStamp: unownedAgents.stampReceipt,
     },
   });
-  assert.ok(fs.existsSync(skillPath), 'matching bytes are not proof that ak wrote the file');
-  assert.ok(fs.existsSync(pluginPath));
-  assert.ok(fs.existsSync(agentPath));
-  assert.ok(fs.existsSync(stampPath));
+  assert.equal(fs.existsSync(skillPath), false);
+  assert.equal(fs.existsSync(pluginPath), false);
+  for (const file of Object.keys(exact.agents)) {
+    assert.equal(fs.existsSync(path.join(agentsDir, file)), false);
+  }
+  assert.equal(fs.existsSync(stampPath), false);
   assert.ok(first.receipt, 'fixture first deploy produced a real receipt');
   assert.ok(firstPlugin.receipt);
   assert.ok(firstAgents.stampReceipt);
@@ -581,6 +598,37 @@ test('receipt-based teardown preserves marker-bearing artifacts edited by the us
   assert.ok(fs.existsSync(path.join(pluginsDir, PLUGIN_NAME)));
   assert.ok(fs.existsSync(path.join(agentsDir, 'coder.md')));
   assert.ok(fs.existsSync(path.join(skillsDir, 'ruflo', 'SKILL.md')));
+  rm(d);
+});
+
+test('a mismatched agent receipt survives two passes and cannot become an adoption gap', () => {
+  const d = tmp('ak-oc-agent-launder-');
+  const root = makeCatalog(path.join(d, 'catalog'));
+  const source = catalogSource({ override: root });
+  const agentsDir = path.join(d, 'agents');
+  const first = syncAgents({ source, destDir: agentsDir });
+  const agentPath = path.join(agentsDir, 'coder.md');
+  fs.appendFileSync(agentPath, '\nUser edit.\n');
+
+  const sourceAgent = path.join(root, '.claude', 'agents', 'core', 'coder.md');
+  fs.appendFileSync(sourceAgent, '\nCatalog v2.\n');
+  const upgraded = catalogSource({ override: root });
+  const second = syncAgents({
+    source: upgraded, destDir: agentsDir,
+    receipts: first.receipts, stampReceipt: first.stampReceipt,
+  });
+  assert.equal(second.receipts['coder.md'], first.receipts['coder.md'],
+    'the mismatched receipt remains as negative ownership evidence');
+
+  const desiredV2 = convertAgents(root).agents.find((a) => a.name === 'coder').content;
+  fs.writeFileSync(agentPath, desiredV2);
+  const third = syncAgents({
+    source: upgraded, destDir: agentsDir,
+    receipts: second.receipts, stampReceipt: second.stampReceipt,
+  });
+  assert.equal(third.adopted, 0, 'a non-null mismatched receipt blocks absence-based adoption');
+  assert.equal(third.receipts['coder.md'], first.receipts['coder.md']);
+  assert.match(third.detail, /user-owned preserved/);
   rm(d);
 });
 
@@ -770,11 +818,146 @@ test('opencodeStack reports markersChanged when a converged file has stale/missi
   const second = await opencodeStack(cfg, { pkgRoot, ...seams });
   assert.equal(second.oc.changed, false, 'the file itself is already converged');
   assert.equal(second.markersChanged, true, 'but the refreshed markers must be persisted by the caller');
+  assert.equal(second.plugin.adopted, true);
+  assert.ok(second.agents.adopted > 0);
+  assert.equal(second.skill.adopted, true);
   assert.equal(cfg.providers.opencodeMcp, 'ak');
   assert.ok(cfg.providers.opencodeManaged?.mcp?.['claude-flow']?.written);
+  assert.ok(cfg.providers.opencodeManaged?.artifacts?.plugin);
+  assert.ok(cfg.providers.opencodeManaged?.artifacts?.agents?.['coder.md']);
+  assert.ok(cfg.providers.opencodeManaged?.artifacts?.agentStamp);
+  assert.ok(cfg.providers.opencodeManaged?.artifacts?.skill);
   // A third run with truthful markers is then fully quiet.
   const third = await opencodeStack(cfg, { pkgRoot, ...seams });
   assert.equal(third.markersChanged, false, 'no kit.json churn once the markers are truthful');
+  rm(d);
+});
+
+test('opencodeStack normalizes poisoned null artifact maps before adopting exact legacy files', async () => {
+  const { opencodeStack } = await import('../../src/lib/opencode.mjs');
+  const { fileURLToPath } = await import('node:url');
+  const d = tmp('ak-oc-null-receipts-');
+  const seams = {
+    configFile: path.join(d, 'opencode.json'),
+    pluginsDir: path.join(d, 'plugins'),
+    agentsDir: path.join(d, 'agents'),
+    skillsDir: path.join(d, 'skills'),
+  };
+  const cfg = cfgOn();
+  cfg.providers.opencodeCatalogDir = makeCatalog(path.join(d, 'catalog'));
+  const pkgRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
+  await opencodeStack(cfg, { pkgRoot, ...seams });
+  cfg.providers.opencodeManaged.artifacts = {
+    plugin: null, agents: null, agentStamp: null, skill: null,
+  };
+  const adopted = await opencodeStack(cfg, { pkgRoot, ...seams });
+  assert.equal(adopted.plugin.adopted, true);
+  assert.ok(adopted.agents.adopted > 0);
+  assert.equal(adopted.skill.adopted, true);
+  assert.ok(cfg.providers.opencodeManaged.artifacts.agents['coder.md']);
+  rm(d);
+});
+
+test('non-null poisoned receipts are preserved and never treated as an adoption gap', async () => {
+  const { opencodeStack } = await import('../../src/lib/opencode.mjs');
+  const { fileURLToPath } = await import('node:url');
+  const d = tmp('ak-oc-poisoned-receipts-');
+  const seams = {
+    configFile: path.join(d, 'opencode.json'),
+    pluginsDir: path.join(d, 'plugins'),
+    agentsDir: path.join(d, 'agents'),
+    skillsDir: path.join(d, 'skills'),
+  };
+  const cfg = cfgOn();
+  cfg.providers.opencodeCatalogDir = makeCatalog(path.join(d, 'catalog'));
+  const pkgRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
+  await opencodeStack(cfg, { pkgRoot, ...seams });
+  const agentNames = Object.keys(cfg.providers.opencodeManaged.artifacts.agents);
+  cfg.providers.opencodeManaged.artifacts = {
+    plugin: '',
+    agents: Object.fromEntries(agentNames.map((name) => [name, ''])),
+    agentStamp: '',
+    skill: '',
+  };
+  const refused = await opencodeStack(cfg, { pkgRoot, ...seams });
+  assert.notEqual(refused.plugin.adopted, true);
+  assert.equal(refused.agents.adopted, 0);
+  assert.notEqual(refused.skill.adopted, true);
+  assert.equal(cfg.providers.opencodeManaged.artifacts.plugin, '');
+  assert.deepEqual(cfg.providers.opencodeManaged.artifacts.agents,
+    Object.fromEntries(agentNames.map((name) => [name, ''])));
+  assert.equal(cfg.providers.opencodeManaged.artifacts.agentStamp, '');
+  assert.equal(cfg.providers.opencodeManaged.artifacts.skill, '');
+  rm(d);
+});
+
+test('malformed non-null receipt containers fail closed without adopting or rewriting the ledger', async () => {
+  const { opencodeStack } = await import('../../src/lib/opencode.mjs');
+  const { fileURLToPath } = await import('node:url');
+  const d = tmp('ak-oc-malformed-receipts-');
+  const seams = {
+    configFile: path.join(d, 'opencode.json'),
+    pluginsDir: path.join(d, 'plugins'),
+    agentsDir: path.join(d, 'agents'),
+    skillsDir: path.join(d, 'skills'),
+  };
+  const cfg = cfgOn();
+  cfg.providers.opencodeCatalogDir = makeCatalog(path.join(d, 'catalog'));
+  const pkgRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
+  await opencodeStack(cfg, { pkgRoot, ...seams });
+  const artifactFiles = [
+    path.join(seams.pluginsDir, PLUGIN_NAME),
+    ...Object.keys(cfg.providers.opencodeManaged.artifacts.agents)
+      .map((file) => path.join(seams.agentsDir, file)),
+    path.join(seams.agentsDir, '.ak-agents-stamp.json'),
+    path.join(seams.skillsDir, 'ruflo', 'SKILL.md'),
+  ];
+  const exactBytes = artifactFiles.map((file) => fs.readFileSync(file, 'utf8'));
+
+  for (const malformed of ['corrupt', [], { agents: 'corrupt' }]) {
+    cfg.providers.opencodeManaged.artifacts = structuredClone(malformed);
+    const result = await opencodeStack(cfg, { pkgRoot, ...seams });
+    assert.notEqual(result.plugin.adopted, true);
+    assert.equal(result.agents.adopted, 0);
+    assert.notEqual(result.skill.adopted, true);
+    assert.deepEqual(cfg.providers.opencodeManaged.artifacts, malformed,
+      'a non-null malformed container is preserved byte-for-byte as repair evidence');
+    assert.deepEqual(artifactFiles.map((file) => fs.readFileSync(file, 'utf8')), exactBytes,
+      'fail-closed reconciliation never rewrites artifact files');
+  }
+  rm(d);
+});
+
+test('a malformed receipt ledger cannot create absent artifacts across repeated reconciliation', async () => {
+  const { opencodeStack } = await import('../../src/lib/opencode.mjs');
+  const { fileURLToPath } = await import('node:url');
+  const d = tmp('ak-oc-malformed-empty-');
+  const seams = {
+    configFile: path.join(d, 'opencode.json'),
+    pluginsDir: path.join(d, 'plugins'),
+    agentsDir: path.join(d, 'agents'),
+    skillsDir: path.join(d, 'skills'),
+  };
+  const cfg = cfgOn();
+  cfg.providers.opencodeCatalogDir = makeCatalog(path.join(d, 'catalog'));
+  cfg.providers.opencodeManaged = { artifacts: 'corrupt' };
+  const pkgRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
+
+  for (let pass = 1; pass <= 2; pass++) {
+    const result = await opencodeStack(cfg, { pkgRoot, ...seams });
+    assert.equal(result.plugin.adoptionBlocked, true);
+    assert.equal(result.agents.adoptionBlocked, true);
+    assert.equal(result.skill.adoptionBlocked, true);
+    assert.equal(result.plugin.changed, false);
+    assert.equal(result.agents.changed, false);
+    assert.equal(result.skill.changed, false);
+    assert.equal(result.markersChanged, pass === 1,
+      'only the independently managed opencode.json receipt may converge');
+    assert.equal(cfg.providers.opencodeManaged.artifacts, 'corrupt');
+    for (const dir of [seams.pluginsDir, seams.agentsDir, seams.skillsDir]) {
+      assert.equal(fs.existsSync(dir), false, `${path.basename(dir)} must remain absent`);
+    }
+  }
   rm(d);
 });
 
@@ -847,8 +1030,24 @@ test('OpenCode lifecycle detect/plan/dry-run are read-only; apply and undo are i
   assert.equal(fs.existsSync(options.configFile), false, 'dry-run creates no OpenCode surface');
 
   const first = await runLifecycle({ adapter, action: 'apply', cfg });
+  cfg.providers.opencodeManaged.artifacts = {
+    plugin: null, agents: {}, agentStamp: null, skill: null,
+  };
+  const adoptionPlan = await runLifecycle({ adapter, action: 'plan', cfg });
+  assert.equal(adoptionPlan.changed, true, 'read-only detection exposes receipt adoption as planned work');
+  assert.equal(adoptionPlan.facts.plugin.adoptable, true);
+  assert.equal(adoptionPlan.facts.agents.adoptable, true);
+  assert.equal(adoptionPlan.facts.skill.adoptable, true);
+  const migrated = await runLifecycle({ adapter, action: 'apply', cfg });
+  cfg.providers.opencodeManaged.artifacts.agentStamp = null;
+  const stampPlan = await runLifecycle({ adapter, action: 'plan', cfg });
+  assert.equal(stampPlan.facts.agents.adoptable, true,
+    'an exact stamp with independently receipted agents is itself adoptable');
+  const stampMigrated = await runLifecycle({ adapter, action: 'apply', cfg });
   const second = await runLifecycle({ adapter, action: 'apply', cfg });
   assert.equal(first.changed, true);
+  assert.equal(migrated.changed, true, 'receipt-only adoption persists markers without rewriting artifacts');
+  assert.equal(stampMigrated.changed, true);
   assert.equal(second.changed, false);
   const undone = await runLifecycle({ adapter, action: 'undo', cfg });
   const repeated = await runLifecycle({ adapter, action: 'undo', cfg });

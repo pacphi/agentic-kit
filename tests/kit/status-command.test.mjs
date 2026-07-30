@@ -398,6 +398,46 @@ test('enabled + converged: every opencode row is ok with no fix planned', async 
   assert.ok(oc.some((r) => /converged/.test(r.message)), 'the wiring row reports convergence');
 });
 
+test('exact legacy artifacts without receipts surface as read-only adoption work', async () => {
+  seedHome();
+  const cfg = await seedConvergedOpencode();
+  cfg.providers.opencodeManaged.artifacts = {
+    plugin: null, agents: {}, agentStamp: null, skill: null,
+  };
+  writeKitConfig(HOME, cfg);
+  const before = snapshot(HOME);
+
+  const rows = await withOpencodeCli(() => collect());
+  const adoption = rowsFor(rows, 'opencode')
+    .filter((r) => /lacks? (?:an |ownership )?ownership receipt|lack ownership receipts/.test(r.message));
+  assert.equal(adoption.length, 3,
+    `plugin, agents/stamp, and skill must each expose adoption: ${rowsFor(rows, 'opencode').map((r) => r.message)}`);
+  for (const row of adoption) {
+    assert.equal(row.level, 'warn');
+    assert.match(row.fix, /sync adopts .*receipt ledger without rewriting/i);
+  }
+  assertUnchanged(before, HOME, 'status must report receipt adoption without persisting it');
+});
+
+test('a malformed artifact receipt ledger blocks adoption and remains read-only', async () => {
+  seedHome();
+  const cfg = await seedConvergedOpencode();
+  cfg.providers.opencodeManaged.artifacts = 'corrupt';
+  writeKitConfig(HOME, cfg);
+  const before = snapshot(HOME);
+
+  const rows = await withOpencodeCli(() => collect());
+  const oc = rowsFor(rows, 'opencode');
+  const blocked = oc.filter((r) => /artifact receipt ledger is malformed/.test(r.message));
+  assert.equal(blocked.length, 1, `one actionable malformed-ledger row expected: ${oc.map((r) => r.message)}`);
+  assert.equal(blocked[0].level, 'warn');
+  assert.match(blocked[0].message, /ownership adoption blocked; artifacts left untouched/);
+  assert.match(blocked[0].fix, /repair providers\.opencodeManaged\.artifacts/);
+  assert.equal(oc.some((r) => /ownership receipt|user-owned ruflo-hooks|converted agents/.test(r.message)), false,
+    'blocked ownership evidence must not be reinterpreted as adoption, foreign files, or healthy agents');
+  assertUnchanged(before, HOME, 'status must preserve malformed recovery evidence byte-for-byte');
+});
+
 test('enabled + drifted: a warn row names the sync fix', async () => {
   seedHome();
   await seedConvergedOpencode();

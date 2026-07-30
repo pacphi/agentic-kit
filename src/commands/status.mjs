@@ -9,7 +9,10 @@ import * as paths from '../lib/paths.mjs';
 import { nativesStatus, rufloRuntimeNatives, dbPathPinStatus, aidefencePresent, securityPresent } from '../lib/natives.mjs';
 import { scanNpxStale } from '../lib/npx.mjs';
 import { registrationStatus, codexMcpStatus, rufloCodexMcpStatus, ruvectorRegistered } from '../lib/mcp.mjs';
-import { opencodeMcpStatus, opencodeConverged, catalogSource, agentsStatus, pluginStatus, skillStatus } from '../lib/opencode.mjs';
+import {
+  opencodeMcpStatus, opencodeConverged, catalogSource, agentsStatus,
+  pluginStatus, skillStatus, opencodeArtifactReceiptState,
+} from '../lib/opencode.mjs';
 import { listDaemons, staleDaemons } from '../lib/daemons.mjs';
 import { scanRvf } from '../lib/rvf.mjs';
 import { registry, syncBlocks, blocksForTarget, retiredForTarget, guidanceTargets } from '../lib/blocks.mjs';
@@ -396,36 +399,64 @@ export async function collect({ pkgRoot, cwd = process.cwd() }) {
           rows.push(row('opencode', 'ok',
             `opencode.json converged (claude-flow${st.brain ? ' + ruvnet-brain' : ''} MCP, ${st.paths?.length ?? 0} skills path(s))${st.owned ? '' : ' — pre-existing (not ak-managed)'}`));
         }
-        const artifactReceipts = cfg.providers?.opencodeManaged?.artifacts ?? {};
-        const plug = pluginStatus({ pkgRoot, receipt: artifactReceipts.plugin });
-        if (plug.foreign) {
+        const receiptState = opencodeArtifactReceiptState(cfg.providers?.opencodeManaged);
+        const artifactReceipts = receiptState.receipts;
+        if (receiptState.adoptionBlocked) {
+          rows.push(row('opencode', 'warn',
+            'artifact receipt ledger is malformed — ownership adoption blocked; artifacts left untouched',
+            'repair providers.opencodeManaged.artifacts in kit.json or restore it from backup'));
+        }
+        const plug = pluginStatus({
+          pkgRoot, receipt: artifactReceipts.plugin,
+          adoptionBlocked: receiptState.adoptionBlocked,
+        });
+        if (!receiptState.adoptionBlocked && plug.adoptable) {
+          rows.push(row('opencode', 'warn',
+            'lifecycle plugin is exact and marker-bearing but lacks an ownership receipt',
+            'sync adopts it into the receipt ledger without rewriting it'));
+        } else if (!receiptState.adoptionBlocked && plug.foreign) {
           rows.push(row('opencode', 'info', 'lifecycle plugin slot occupied by a user-owned ruflo-hooks.js — ak leaves it alone'));
-        } else if (!plug.present) {
+        } else if (!receiptState.adoptionBlocked && !plug.present) {
           rows.push(row('opencode', 'warn', 'lifecycle plugin (ruflo-hooks.js) not deployed', 'sync deploys it'));
-        } else if (!plug.current) {
+        } else if (!receiptState.adoptionBlocked && !plug.current) {
           rows.push(row('opencode', 'warn', 'lifecycle plugin out of date', 'sync rewrites it'));
         }
-        const ag = agentsStatus({ source, receipts: artifactReceipts.agents });
-        if (ag.count === 0 && !source) {
+        const ag = agentsStatus({
+          source, receipts: artifactReceipts.agents,
+          stampReceipt: artifactReceipts.agentStamp,
+          adoptionBlocked: receiptState.agentsAdoptionBlocked,
+        });
+        if (!receiptState.adoptionBlocked && ag.adoptable) {
+          rows.push(row('opencode', 'warn',
+            `${ag.count} exact marker-bearing agents or stamp lack ownership receipts`,
+            'sync adopts them into the receipt ledger without rewriting them'));
+        } else if (!receiptState.adoptionBlocked && ag.count === 0 && !source) {
           rows.push(row('opencode', 'warn', 'no ruflo catalog source (marketplace clone or @claude-flow/cli)', 'install ruflo (or claude marketplace) for the agent catalog'));
-        } else if (ag.count === 0) {
+        } else if (!receiptState.adoptionBlocked && ag.count === 0) {
           rows.push(row('opencode', 'warn', 'no converted ruflo agents', 'sync converts the ruflo agent set'));
-        } else if (ag.modified) {
+        } else if (!receiptState.adoptionBlocked && ag.modified) {
           rows.push(row('opencode', 'info',
             `${ag.count} converted agents include user edits — ak leaves those files alone`));
-        } else if (ag.stale) {
+        } else if (!receiptState.adoptionBlocked && ag.stale) {
           rows.push(row('opencode', 'warn',
             `${ag.count} agents from ${ag.stampedId ?? 'unknown source'}, current source is ${ag.currentId ?? 'none'}`,
             'sync re-converts the agent set'));
-        } else {
+        } else if (!receiptState.adoptionBlocked) {
           rows.push(row('opencode', 'ok', `${ag.count} converted agents (${ag.currentId})`));
         }
-        const sk = skillStatus({ source, receipt: artifactReceipts.skill });
-        if (sk.foreign) {
+        const sk = skillStatus({
+          source, receipt: artifactReceipts.skill,
+          adoptionBlocked: receiptState.adoptionBlocked,
+        });
+        if (!receiptState.adoptionBlocked && sk.adoptable) {
+          rows.push(row('opencode', 'warn',
+            'platform skill is exact and marker-bearing but lacks an ownership receipt',
+            'sync adopts it into the receipt ledger without rewriting it'));
+        } else if (!receiptState.adoptionBlocked && sk.foreign) {
           rows.push(row('opencode', 'info', 'skills/ruflo/SKILL.md is user-owned — ak leaves it alone'));
-        } else if (source?.hasPlatformSkill && !sk.present) {
+        } else if (!receiptState.adoptionBlocked && source?.hasPlatformSkill && !sk.present) {
           rows.push(row('opencode', 'warn', 'platform skill (skills/ruflo/SKILL.md) not deployed', 'sync deploys it'));
-        } else if (source?.hasPlatformSkill && !sk.current) {
+        } else if (!receiptState.adoptionBlocked && source?.hasPlatformSkill && !sk.current) {
           rows.push(row('opencode', 'warn', 'platform skill out of date', 'sync re-deploys it'));
         }
       }
