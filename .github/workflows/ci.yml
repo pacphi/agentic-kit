@@ -37,9 +37,14 @@ jobs:
           # Isolate every home-relative write (kit.json, CLAUDE.md, settings).
           HOME: ${{ runner.temp }}/kit-home
           USERPROFILE: ${{ runner.temp }}\kit-home
+          XDG_CONFIG_HOME: ${{ runner.temp }}/kit-home/.config
           APPDATA: ${{ runner.temp }}\kit-home\AppData\Roaming
         run: |
           mkdir -p "$HOME"
+          # The smoke test proves local CLI behavior, not npm reachability.
+          # Seed a fresh empty drift cache so an offline Windows runner does
+          # not pay four sequential 20s `npm view` timeouts inside status.
+          node -e 'const fs=require("node:fs"),p=require("node:path"),base=process.platform==="win32"?process.env.APPDATA:process.env.XDG_CONFIG_HOME,dir=p.join(base,"agentic-kit"),last=Date.now();fs.mkdirSync(dir,{recursive:true});fs.writeFileSync(p.join(dir,"kit.json"),JSON.stringify({versionCheck:{last,seen:{},self:{last,best:null}}}))'
           node bin/agentic-kit.mjs --version
           node bin/agentic-kit.mjs --help --all > /dev/null
           # status must emit valid JSON and exit deterministically even on a
