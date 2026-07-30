@@ -465,6 +465,26 @@ async function main() {
     ],
     insights: [{ id: 'context-tax', kind: 'coach', severity: 'warn', title: 't', finding: 'f', evidence: 'e', action: 'a', command: null, impact: 3.5 }],
   };
+  const PROVIDER_ANALYTICS = {
+    openrouter: {
+      schemaVersion: 1,
+      provider: 'openrouter',
+      source: 'management-api/activity',
+      fetchedAt: '2026-07-30T00:00:00.000Z',
+      coverage: { completedUtcDays: 30, from: '2026-07-01', through: '2026-07-29' },
+      totals: {
+        requests: 3, promptTokens: 100, completionTokens: 50,
+        reasoningTokens: 10, usage: 0.25, byokUsageInference: 0.05,
+      },
+      byModel: [{
+        model: 'z-ai/glm-5.2', modelPermaslug: 'z-ai/glm-5.2',
+        requests: 3, promptTokens: 100, completionTokens: 50,
+        reasoningTokens: 10, usage: 0.25, byokUsageInference: 0.05,
+      }],
+      byProvider: [],
+      rows: [],
+    },
+  };
 
   function spyUsage(over = {}) {
     const calls = { readIndex: [], readSession: [] };
@@ -472,6 +492,7 @@ async function main() {
       calls,
       api: {
         readIndex: async (opts) => { calls.readIndex.push(opts); return JSON.parse(JSON.stringify(AGG)); },
+        readProviderAnalytics: async () => JSON.parse(JSON.stringify(PROVIDER_ANALYTICS)),
         readSession: async (id) => {
           calls.readSession.push(id);
           return { meta: { id, title: 'one', project: 'demo' }, turns: [{ role: 'user', text: 'token sk-live-DEADBEEF01234 pasted' }] };
@@ -494,6 +515,10 @@ async function main() {
       const j = JSON.parse(r.body);
       assert(!('sessions' in j), 'sessions[] must be stripped — that is what /api/sessions is for');
       assert(j.totals && j.totals.cost === 12.5, 'totals must survive');
+      assert(j.providerAnalytics.openrouter.totals.requests === 3,
+        'provider analytics must travel in its own top-level block');
+      assert(j.totals.sessions === 2 && j.totals.tokens === 1250,
+        'provider analytics must not alter transcript totals');
       assert(j.projectTree && j.projectTree.length === 1, 'projectTree must survive');
       assert(Array.isArray(j.insights) && j.insights.length === 1, 'insights must survive');
       assert(spy.calls.readIndex.some((o) => o && o.days === 7), 'days must reach readIndex, got ' + JSON.stringify(spy.calls.readIndex));
@@ -621,6 +646,13 @@ async function main() {
         contains(r.body, 'id="v-' + v + '"');
         contains(r.body, 'data-view="' + v + '"');
       }
+      contains(r.body, 'id="u-openrouter"');
+      contains(r.body, 'provider account analytics');
+      contains(r.body, 'never merged into transcript totals');
+      contains(r.body, 'OpenRouter credits');
+      contains(r.body, 'BYOK estimate');
+      assert(!r.body.includes('fld(x,"usage")+fld(x,"byokUsageInference")'),
+        'OpenRouter-credit usage and BYOK external cost must not be silently combined');
     });
 
     await test('Usage rendering treats host and inference provider as independent axes', async () => {

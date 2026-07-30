@@ -193,6 +193,11 @@ export function renderPage({ name, version }) {
         </section>
       </div>
       <section class="strip">
+        <div class="sh"><h2>provider account analytics</h2>
+          <span class="n mono" id="u-openrouter-note">offline cache &middot; separate from transcript totals</span></div>
+        <div id="u-openrouter"></div>
+      </section>
+      <section class="strip">
         <div class="sh"><h2>what you worked on</h2>
           <span class="n mono">classified from titles, skills &amp; tool mix &middot; click to filter</span></div>
         <div id="u-cats"></div>

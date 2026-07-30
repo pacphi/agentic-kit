@@ -222,6 +222,11 @@ function lazyUsage() {
     readIndex: async (opts) => (await load()).readIndex(opts),
     readSession: async (id) => (await load()).readSession(id),
     maskSecrets: async (s) => (await load()).maskSecrets(s),
+    // Provider-account analytics is an independent offline cache read. It is
+    // deliberately not part of usage-index's transcript aggregation.
+    readProviderAnalytics: async () => ({
+      openrouter: (await import('./usage-openrouter.mjs')).readOpenRouterActivity(),
+    }),
     // resolved at call time so a module that ships masking later still fails
     // closed rather than silently serving raw text.
     masker: async () => (await load()).maskSecrets,
@@ -771,10 +776,19 @@ export function startDashboard({
     // all" control still knows the true count and calls /api/sessions for the rest.
     if (url === '/api/usage') {
       try {
-        const agg = await usageApi.readIndex({ days: clampDays(query.get('days')) });
+        const [agg, providerAnalytics] = await Promise.all([
+          usageApi.readIndex({ days: clampDays(query.get('days')) }),
+          typeof usageApi.readProviderAnalytics === 'function'
+            ? Promise.resolve(usageApi.readProviderAnalytics())
+              .catch(() => ({ openrouter: null }))
+            : Promise.resolve({ openrouter: null }),
+        ]);
         const { sessions: _sessions, projectTree, ...rollups } = agg || {};
         sendJson(res, 200, {
           ...rollups,
+          // Account-level metadata has no session/host correlation key. Keep
+          // it visibly separate instead of laundering it into local totals.
+          providerAnalytics,
           projectTree: (projectTree || []).map((n) => ({
             ...n,
             rowsTotal: Array.isArray(n.rows) ? n.rows.length : 0,

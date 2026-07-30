@@ -2,6 +2,8 @@
 
 - **Status:** Accepted
 - **Date:** 2026-07-25
+- **Updated:** 2026-07-30
+- **Update note:** Added the explicit OpenRouter account-analytics cache boundary for issue #59.
 - **Deciders:** agentic-kit maintainers
 
 ## Context
@@ -311,6 +313,41 @@ prompt" and "not the human" are different claims. Codex rollouts record only rea
 > capability, so a reader can tell "this workload had no cache hits" from "this provider cannot
 > report cache hits" — which the panel currently renders identically.
 
+### 9. OpenRouter account analytics is explicit, cached, and never session-shaped
+
+**Amendment (2026-07-30; issue #59).** OpenRouter's supported management endpoint,
+`GET /api/v1/activity`, returns account activity grouped by endpoint for the last 30 completed UTC
+days. It reports date, model, upstream provider, requests, tokens, OpenRouter usage, and an estimated
+BYOK inference amount. It does **not** report a host, local session, project, task, transcript, or
+grounded correlation key.
+
+Treating those rows as a third transcript store would therefore fabricate precisely the relationship
+ADR-0016 forbids. The adopted boundary is:
+
+- `ak usage refresh openrouter` is the only network path. It requires
+  `OPENROUTER_MANAGEMENT_KEY`; `OPENROUTER_API_KEY` is intentionally not accepted as a substitute.
+- Refresh normalizes the response into
+  `~/.config/agentic-kit/openrouter-activity.json`, written atomically with mode `0600`. Unknown
+  fields, endpoint IDs, credentials, API-key hashes, user IDs, filters, prompts, and content are not
+  persisted. Endpoint-grouped rows are aggregated into date/model/upstream-provider buckets.
+- `ak usage status` and the dashboard read only that local cache. Dashboard startup, polling, and
+  Usage-tab scans perform no OpenRouter request.
+- The cache records the endpoint's objective 30-completed-UTC-day window separately from the first
+  and last dates that actually contain activity. Quiet days do not shorten the stated coverage.
+- The `/api/usage` response carries the cache only under
+  `providerAnalytics.openrouter`. The UI labels it **provider account analytics**. It never changes
+  transcript-derived `totals`, `byHost`, `byProvider`, `byModel`, project/category rows, findings,
+  session counts, or pricing.
+- A missing or malformed cache is an honest empty state with the explicit refresh command. A failed
+  refresh preserves the last good cache. Every documented ActivityItem field is required and
+  type-checked; malformed rows fail the whole refresh instead of silently understating totals.
+- OpenRouter-credit usage and BYOK external inference estimates remain distinct metrics. They are
+  never silently added into one spend figure.
+
+This closes the observable part of issue #59 without pretending the API supplies per-session logs.
+If OpenRouter later publishes a stable correlation identifier that a host also records, joining the
+two evidence streams requires a new decision and fixtures from both sides.
+
 ## Consequences
 
 ### Good
@@ -338,6 +375,9 @@ prompt" and "not the human" are different claims. Codex rollouts record only rea
 - **Codex coverage is thin in practice** (5 sessions on the reference machine, none in-window). The
   panel reports Codex as present-but-idle rather than inventing data, and the split UI is built now
   so dual-host users are not a later retrofit.
+- **OpenRouter account coverage is bounded to 30 completed UTC days.** That is the supported
+  endpoint's contract, not a user-selectable transcript window. Account rows cannot explain which
+  host or task generated them.
 
 ## References
 
@@ -350,6 +390,10 @@ prompt" and "not the human" are different claims. Codex rollouts record only rea
   ADR-0008 (machine vs repo scope).
 - Spec (archived on completion, per `docs/archive/README.md`): [`docs/archive/2026-07-25-superpowers-spec-usage-scorecard.md`](../archive/2026-07-25-superpowers-spec-usage-scorecard.md).
 - Existing reporter: `claude/skills/ruflo-token-audit/scripts/ruflo-token-audit.py`.
+- [OpenRouter — Get user activity grouped by endpoint](https://openrouter.ai/docs/api/api-reference/analytics/get-user-activity)
+  (30 completed UTC days; management key required).
+- [OpenRouter — Management API keys](https://openrouter.ai/docs/guides/overview/auth/management-api-keys)
+  (administrative keys are distinct from completion/inference keys).
 - Grounding for §6: [Anthropic — Introducing Claude Opus 5](https://www.anthropic.com/news/claude-opus-5);
   [`pacphi/retort` versions-blog](https://github.com/pacphi/retort/blob/main/versions-blog.md);
   [OckBench (arXiv 2511.05722)](https://arxiv.org/html/2511.05722);

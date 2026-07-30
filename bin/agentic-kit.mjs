@@ -21,6 +21,7 @@ const PORCELAIN = Object.assign(Object.create(null), {
   setup: () => import('../src/commands/setup.mjs'),
   dashboard: () => import('../src/commands/x/dashboard.mjs'),
   admin: () => import('../src/commands/x/admin.mjs'),
+  usage: () => import('../src/commands/usage.mjs'),
   run: () => import('../src/commands/run.mjs'),
   dual: () => import('../src/commands/dual.mjs'),
   host: () => import('../src/commands/x/provider.mjs'),
@@ -50,6 +51,7 @@ Usage (ak = alias of agentic-kit):
   ak sync            converge to good: upgrade + heal + verify          [--dry-run] [--no-upgrade]
   ak dashboard       open the local web dashboard (localhost; auto-opens browser)  [--port N] [--no-open]
   ak admin           maintainer-only telemetry admin (localhost; GitHub/npm egress)  [--port N] [--no-open]
+  ak usage           inspect/refresh offline provider analytics  [status|refresh openrouter]
   ak run             execute a host-neutral activity pipeline  [template "task"] [--dry-run]
   ak dual            deprecated compatibility wrapper; use ak run for new work
   ak host            manage agent hosts, routing, and provider bindings  [status|pick|refresh|off]
@@ -163,7 +165,10 @@ async function main() {
   // effect of the network call — a real disk write that contradicts
   // "--dry-run: prints the plan, changes nothing" even though it never
   // touches an ak-managed path.
-  if (!values.json && !values['dry-run'] && cmd !== 'sync') {
+  // `ak usage status` promises a pure offline cache read. The explicit
+  // `refresh` subcommand owns its one named network request; neither form may
+  // silently add unrelated npm probes through the generic drift nudge.
+  if (!values.json && !values['dry-run'] && !['sync', 'usage'].includes(cmd)) {
     try {
       const { driftReport } = await import('../src/lib/versions.mjs');
       for (const r of await driftReport()) {

@@ -26,6 +26,14 @@ provider can therefore have independent `ollama-via-claude` and `ollama-via-code
 OpenRouter is a provider behind a host, never automatically a third host. OpenCode is an opt-in
 activity-routing host through `ak run`, while remaining ineligible as a primary host or AQE
 provider. Its configured selector does not establish provider, billing, or vendor-diversity facts.
+
+**Account analytics is separate from routing evidence.** `ak usage refresh openrouter` explicitly
+fetches OpenRouter's supported 30-completed-UTC-day activity view with
+`OPENROUTER_MANAGEMENT_KEY` and writes a private local cache. `ak usage status` and the dashboard
+read only that cache. Because the management response has no local host/session/project/task
+correlation key, its rows appear only as provider account analytics and never alter transcript
+totals or prove which host executed a request.
+
 This capability model is
 [ADR-0016](adr/0016-capability-driven-integration-adapters.md) (Accepted); the controls below
 implement it and remain backward compatible.
