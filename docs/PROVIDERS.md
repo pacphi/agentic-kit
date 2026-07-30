@@ -208,6 +208,13 @@ not written to AQE `agentOverrides`, cannot become `primaryHost`, and do not cou
 AQE vendor. `ak dual` is deprecated and rejects OpenCode routes because it retains a Claude/Codex
 compatibility adapter; use `ak run` instead.
 
+**QE-Court validation stays upstream-owned.** `agentic-qe` 3.13.3 corrected its shipped
+QE-Court panel and now enforces the configured anti-collusion policy before convening.
+`ak status` and `ak host status` surface that result read-only; `ak sync` never rewrites
+`.claude/skills/qe-court/config.json`. If a config created by 3.13.2 or earlier still
+seats both `defense` and `jury` on Cognitum tiers, regenerate it with 3.13.3+ or change
+`defense` to `claude-code` so the jury and defense use distinct vendors.
+
 Defaults (all overridable; your edits are marked `custom` and never re-seeded):
 
 | Activity | Host | Default model |

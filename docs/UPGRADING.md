@@ -42,6 +42,17 @@ for execution-host lifecycle and selection (`ak x host` only when you specifical
 plumbing spelling). This namespace correction does not rename inference providers or provider
 bindings into hosts.
 
+## QE-Court configs created before agentic-qe 3.13.3
+
+`agentic-qe` 3.13.3 fixed its shipped QE-Court default and made configuration validation
+mandatory before a court convenes. New configs seat `defense` on `claude-code`, `jury` on
+`cognitum-high`, and `deeperReviewer` on `codex`, preserving three distinct vendors.
+
+An existing `.claude/skills/qe-court/config.json` is project-owned and is not overwritten by
+an agentic-qe or `ak` upgrade. If `ak status` reports `writerIsNeverJuror`, regenerate the
+config with agentic-qe 3.13.3+ or change `routing.defense.provider` from `cognitum-low` to
+`claude-code`. `ak` reports this state read-only; `ak sync` no longer changes QE-Court roles.
+
 If you already have `ak` working, you almost never need `ak setup` again — it's the
 installer. Enabling a shipped-but-opt-in host feature is a `host pick` (or an `x mcp pick`,
 etc.), not a re-`setup`.
