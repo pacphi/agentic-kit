@@ -31,11 +31,21 @@ test('Windows tree signaling terminates a wrapper and its live descendant', {
   const descendantPid = Number(String(chunk).trim());
   assert.ok(Number.isInteger(descendantPid) && descendantPid > 0);
   try {
+    // Register before awaiting taskkill: older Node releases can emit `close`
+    // while signalProcessTree is still awaiting taskkill.exe.
+    const wrapperClosed = once(wrapper, 'close');
     assert.equal(await signalProcessTree(wrapper, 'SIGTERM'), true);
-    await Promise.race([
-      once(wrapper, 'close'),
-      new Promise((_, reject) => setTimeout(() => reject(new Error('wrapper did not close')), 10_000)),
-    ]);
+    let closeTimer;
+    try {
+      await Promise.race([
+        wrapperClosed,
+        new Promise((_, reject) => {
+          closeTimer = setTimeout(() => reject(new Error('wrapper did not close')), 10_000);
+        }),
+      ]);
+    } finally {
+      clearTimeout(closeTimer);
+    }
     assert.throws(() => process.kill(descendantPid, 0), /ESRCH|no such process/i);
   } finally {
     if (wrapper.exitCode == null) wrapper.kill('SIGKILL');
