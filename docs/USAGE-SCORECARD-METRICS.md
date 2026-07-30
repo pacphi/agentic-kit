@@ -68,17 +68,25 @@ The parsers are `parseClaude` (`usage-index.mjs:427-510`) and `parseCodex`
 (`usage-index.mjs:527-628`). Both are pure functions over the raw file bytes —
 no network, no clock dependency beyond the transcript's own timestamps — so
 every downstream number traces back to bytes already on the user's disk.
-Nothing in this pipeline calls a provider API or a billing endpoint; **no
-metric on this tab is ever a copy of an actual invoice.** That is the whole
-reason every dollar figure is labelled "API-equivalent."
+Nothing in this transcript pipeline calls a provider API or a billing endpoint; **no transcript
+metric is ever a copy of an actual invoice.** That is the whole reason every transcript-derived
+dollar figure is labelled "API-equivalent."
 
 The current persisted field named `provider` identifies which host transcript parser produced a
 session row; it is not sufficient evidence of the inference provider. The Proposed model in
 [ADR-0016](adr/0016-capability-driven-integration-adapters.md) separates host, provider,
-projection, observability source, and binding, with provenance attached per field. Until that
-migration and issue #59's OpenRouter ingestion land, the Scorecard must not invent an OpenRouter
-host, infer provider identity from a Claude/Codex transcript alone, or turn unknown billing into
-subscription, metered, local, or `$0`.
+projection, observability source, and binding, with provenance attached per field. The migration is
+now implemented. The Scorecard must not invent an OpenRouter host, infer provider identity from a
+Claude/Codex transcript alone, or turn unknown billing into subscription, metered, local, or `$0`.
+
+OpenRouter account analytics is a separate evidence class. An explicit
+`ak usage refresh openrouter` fetches the supported 30-completed-UTC-day management view into a
+mode-`0600` local cache; normal dashboard reads remain offline. `/api/usage` exposes that cache only
+as `providerAnalytics.openrouter`, never by adding it to `totals`, `byHost`, `byProvider`,
+`byModel`, projects, categories, findings, or sessions. The upstream response has no host/session/
+project/task correlation key, so no join is attempted. OpenRouter-credit usage and BYOK external
+inference estimates also remain separate rather than being presented as one spend number. See
+ADR-0009 §9.
 
 ---
 

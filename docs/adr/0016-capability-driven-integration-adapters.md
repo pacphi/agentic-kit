@@ -3,8 +3,9 @@
 - **Status:** Accepted
 - **Date:** 2026-07-28
 - **Updated:** 2026-07-30
-- **Update note:** Added read-only Codex plugin-hook compatibility facts and
-  runtime-selected Ruflo project-memory store proofs.
+- **Update note:** Added read-only Codex plugin-hook compatibility facts,
+  runtime-selected Ruflo project-memory store proofs, and the non-correlatable
+  OpenRouter account-analytics boundary.
 - **Deciders:** agentic-kit maintainers
 - **Related:** [ADR-0001](0001-one-routing-policy-many-projections.md),
   [ADR-0003](0003-auto-seed-dual-host-provenance.md),
@@ -383,8 +384,10 @@ supports it. It never enters the host registry.
 
 A host transcript proves the host. OpenRouter response metadata can prove the provider and exact
 model. The two evidence streams describe one execution only when correlation is grounded. The
-normalized fact/resolution seam is the integration point for issue #59; this ADR does not absorb
-that issue's full parser, ingestion, pricing, or scorecard delivery.
+normalized fact/resolution seam remains the future integration point for correlated execution
+evidence. Issue #59 found that OpenRouter's supported activity endpoint exposes no such correlation
+key, so ADR-0009 §9 keeps its explicitly refreshed account analytics separate from transcript and
+host totals instead of manufacturing a join.
 
 #### OpenCode at initial adoption
 
@@ -426,7 +429,7 @@ not write real home/global configuration.
 - It does not persist credentials.
 - It does not make every managed host primary or routable.
 - It does not make OpenCode routable.
-- It does not implement issue #59's full transcript, usage, or pricing work.
+- It does not claim that OpenRouter account analytics is a transcript or per-session evidence source.
 - It does not claim provider provenance from host evidence alone.
 - It does not add dashboard writes or controls.
 - It does not silently adopt or overwrite externally managed configuration.

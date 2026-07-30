@@ -689,6 +689,35 @@ export const JS = `
     var exc=fld(t,"exceptions");
     document.getElementById("u-models-note").textContent=exc?(fmtNum(exc)+" dropped/errored turn"+(exc===1?"":"s")+" excluded"):"";
 
+    // Account analytics is explicitly fetched and cached by ak usage.
+    // OpenRouter does not provide session/host/project correlation here, so
+    // these numbers remain a separate block and never alter t/byHost/byModel.
+    var ora=d.providerAnalytics&&d.providerAnalytics.openrouter;
+    if(!ora){
+      document.getElementById("u-openrouter-note").textContent="not refreshed · offline";
+      document.getElementById("u-openrouter").innerHTML=
+        '<div class="empty">No OpenRouter account cache. Run <b>ak usage refresh openrouter</b> explicitly.</div>';
+    }else{
+      var ot=ora.totals||{}, cov=ora.coverage||{}, oms=ora.byModel||[];
+      document.getElementById("u-openrouter-note").textContent=
+        "cached "+ago(Math.max(0,Math.round((Date.now()-Date.parse(ora.fetchedAt))/1000)))+" · "
+        +(cov.from||"no activity")+" → "+(cov.through||"no activity")
+        +" · never merged into transcript totals";
+      var oMax=oms.reduce(function(m,x){return Math.max(m,fld(x,"requests"));},0);
+      var cards='<div class="psplit">'
+        +'<div class="pcard"><div class="ph">OpenRouter requests</div><div class="pv mono">'+esc(fmtNum(ot.requests))+'</div>'
+        +'<div class="pl">'+esc(fmtTok(fld(ot,"promptTokens")+fld(ot,"completionTokens")))+" tokens · 30 completed UTC days</div></div>"
+        +'<div class="pcard"><div class="ph">OpenRouter credits spent</div><div class="pv mono">'+esc(fmtUsd(ot.usage))+'</div>'
+        +'<div class="pl">'+esc(fmtUsd(ot.byokUsageInference))+" BYOK inference estimate · account-level</div></div></div>";
+      var modelRows=oms.length?oms.map(function(m){
+        var req=fld(m,"requests");
+        return bar(esc(m.model),fmtNum(req)+" req",fmtTok(fld(m,"promptTokens")+fld(m,"completionTokens"))
+          +" tok · "+fmtUsd(fld(m,"usage"))+" OpenRouter credits · "
+          +fmtUsd(fld(m,"byokUsageInference"))+" BYOK estimate",pct(req,oMax),false);
+      }).join(""):'<div class="empty">The cache contains no completed activity.</div>';
+      document.getElementById("u-openrouter").innerHTML=cards+'<div class="provider-analytics-models">'+modelRows+"</div>";
+    }
+
     var projects=entries(d.byProject), pMax=projects.length?projects[0].cost:0;
     var shown=projects.slice(0,8);
     document.getElementById("u-projects-note").textContent=

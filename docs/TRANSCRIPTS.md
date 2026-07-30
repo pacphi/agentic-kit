@@ -336,10 +336,12 @@ Deep links: `#usage/<sessionId>` opens the Transcript view directly
 | Delegation markers | `isSidechain` → `sidechain` flag | `thread_source: "subagent"` → excluded from aggregation, session kept visible |
 | Session title | model-written `ai-title`, first-prompt fallback | first prompt clipped |
 
-**Planned provider attribution:** OpenRouter-served sessions are invisible to the
-scorecard today; ingesting them (discovery → parser → `kind` attribution →
-pricing → by-host UI) is tracked as
-[#59](https://github.com/pacphi/agentic-kit/issues/59).
+**OpenRouter boundary:** the supported activity API has account-level date/model/provider/token/
+request/spend rows, but no transcript or local-session correlation key. `ak usage refresh openrouter`
+caches that account view explicitly; the dashboard renders it under separate provider analytics and
+never treats it as a third transcript host. OpenRouter-served inference can still be attributed on a
+real OpenCode transcript when OpenCode itself records provider/model/cost evidence. See ADR-0009 §9
+and [#59](https://github.com/pacphi/agentic-kit/issues/59).
 
 ---
 

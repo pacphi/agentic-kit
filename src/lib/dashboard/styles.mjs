@@ -450,6 +450,7 @@ body.gated .band,body.gated .tabbar,body.gated main{display:none}
 .pcard .pv{font-size:21px; font-weight:700; letter-spacing:-.02em}
 .pcard .pl{font-size:11.5px; color:var(--ink-dim); margin-top:4px}
 .pcard.idle{opacity:.55}
+.provider-analytics-models{margin-top:14px}
 .tokbar{display:flex; height:9px; border-radius:5px; overflow:hidden; margin-top:11px}
 .tokbar i{display:block; height:100%}
 .legend{display:flex; gap:14px; flex-wrap:wrap; margin-top:9px; font-size:11px; color:var(--ink-dim)}
