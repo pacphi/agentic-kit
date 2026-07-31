@@ -99,7 +99,6 @@ command always works.)
 | **host** | Execution-host status, selection, primary-host choice, activity routing, and reversible teardown: `ak host status\|pick\|refresh\|off`. The plumbing spelling is `ak x host`. Inference providers and bindings remain separate concepts even though their controls share this workflow. |
 | **uninstall** | Removes the kit's footprint (and any legacy shell-kit install); project data is never touched; `--purge` also offers to remove the global packages. |
 
-</details>
 
 Power-user mechanisms live under `ak x …` (`daemon-gc`, `harvest`,
 `mcp pick|off`, `host status|pick|refresh|off`, `reference diff|sync`,
@@ -113,6 +112,8 @@ One of those is worth calling out:
   the real `ruflo hooks post-task` / `agentdb skill consolidate` verbs, reporting the actual
   skills created/updated. Off and `--dry-run`-safe by default; no daemon, ever.
   `ak x verify harvest` proves the whole path end-to-end against real CLIs.
+
+</details>
 
 ## The status line
 
@@ -143,7 +144,10 @@ those packages are installed on target machines. (pnpm-managed globals: tracked 
 
 `ak` detects the frontier-agent CLIs on your machine and can wire ruflo + agentic-qe to
 one or both — **claude-default, codex opt-in**, so existing repos see zero change until
-you opt in. Two independent axes:
+you opt in.
+
+<details>
+<summary>Two independent axes: hosts, providers, and per-activity routing</summary>
 
 - **Hosts** — which agent CLI runs the ruflo loop: `claude` (Claude Code) and/or `codex`
   (OpenAI Codex), **both at once** in ambidextrous dual-host mode (enabling codex doesn't disable claude).
@@ -183,10 +187,17 @@ applies (reversibly); `ak host off` restores the claude-only default. Full guide
 [docs/PROVIDERS.md](docs/PROVIDERS.md). Already on an older `ak` and adopting a later capability
 (like dual-host)? [docs/UPGRADING.md](docs/UPGRADING.md) covers the `sync` vs `host pick` motion.
 
+</details>
+
 ### opencode host (opt-in)
 
 [opencode](https://opencode.ai) is a third host alongside claude/codex — wired through its own
-native surfaces rather than env flags. `ak setup --opencode` (or `integrations.hosts.opencode: true`
+native surfaces rather than env flags.
+
+<details>
+<summary>What <code>ak setup --opencode</code> / <code>ak sync</code> converge</summary>
+
+`ak setup --opencode` (or `integrations.hosts.opencode: true`
 in `kit.json`) converges, on every `ak sync`:
 
 - **`~/.config/opencode/opencode.json`** — the `claude-flow` MCP server (ruflo's 300+ tools,
@@ -220,6 +231,8 @@ reported as blocked and aborted — `ak` never supplies `--auto` or changes your
 policy. The configured `provider/model` selector is not provider or billing evidence; those facts
 remain unknown unless OpenCode reports them in the terminal session data.
 Design record: [docs/adr/0017-opencode-host.md](docs/adr/0017-opencode-host.md).
+
+</details>
 
 ## Troubleshooting
 
