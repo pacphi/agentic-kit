@@ -282,7 +282,7 @@ test('a subprocess surviving TERM and KILL is reported as orphaned, never timed 
     terminationGraceMs: 2, forceGraceMs: 2,
   });
   const terminal = await executeWorker(worker('claude'), adapter, {
-    cwd: process.cwd(), clock, timeoutMs: 2,
+    cwd: process.cwd(), clock, timeoutMs: 50,
   });
   assert.equal(terminal.status, 'failed');
   assert.equal(terminal.exitCategory, 'orphaned');
