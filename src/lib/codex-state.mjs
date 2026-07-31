@@ -62,7 +62,7 @@ export function readCodexState(opts = {}) {
     const pick = ['id', 'thread_source']
       .concat([
         'tokens_used', 'source', 'model', 'git_branch', 'agent_nickname', 'agent_role',
-        'cwd', 'provider', 'status',
+        'cwd', 'model_provider', 'provider', 'status',
       ].filter((c) => cols.has(c)));
     const threads = new Map();
     for (const row of db.prepare(`SELECT ${pick.join(', ')} FROM threads`).all()) {
@@ -75,7 +75,10 @@ export function readCodexState(opts = {}) {
         agentNickname: typeof row.agent_nickname === 'string' ? row.agent_nickname : null,
         agentRole: typeof row.agent_role === 'string' ? row.agent_role : null,
         project: typeof row.cwd === 'string' ? resolveProjectLabel(row.cwd) : null,
-        provider: typeof row.provider === 'string' ? row.provider : null,
+        // codex's threads schema names this model_provider; the bare provider
+        // spelling is kept for tolerance of older/forked ledgers.
+        provider: typeof row.model_provider === 'string' ? row.model_provider
+          : (typeof row.provider === 'string' ? row.provider : null),
         status: typeof row.status === 'string' ? row.status : null,
       });
     }

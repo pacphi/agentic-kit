@@ -3,6 +3,7 @@ import path from 'node:path';
 import { claudeDir, codexDir } from '../paths.mjs';
 import { readCodexState as defaultReadCodexState } from '../codex-state.mjs';
 import { adaptClaudeRecord } from './claude-adapter.mjs';
+import { resolveClaudeProvider as defaultResolveClaudeProvider } from './claude-provider.mjs';
 import { adaptCodexLedger, adaptCodexRecord } from './codex-adapter.mjs';
 import { JsonlTailer } from './jsonl-tailer.mjs';
 import {
@@ -84,6 +85,7 @@ export class LiveSessionsService {
   #started = false;
   #edgeKeys = new Set();
   #health = new Map();
+  #claudeProviders = new Map();
 
   constructor(options = {}) {
     const roots = options.roots ?? {};
@@ -97,6 +99,7 @@ export class LiveSessionsService {
       maxFiles: options.maxFiles ?? 256,
       replayCapacity: options.replayCapacity ?? 2000,
       readCodexState: options.readCodexState ?? defaultReadCodexState,
+      resolveClaudeProvider: options.resolveClaudeProvider ?? defaultResolveClaudeProvider,
       setInterval: options.setInterval ?? globalThis.setInterval,
       clearInterval: options.clearInterval ?? globalThis.clearInterval,
       now: options.now ?? (() => new Date().toISOString()),
@@ -203,9 +206,14 @@ export class LiveSessionsService {
   #add(file, context, initial) {
     if (this.#tailers.has(file) || this.#tailers.size >= this.#options.maxFiles) return;
     if (initial && ['claude', 'codex'].includes(context.adapter)) {
+      // One shared bootstrap context so metadata learned early (codex
+      // session_meta id/meta, project, model, provider) persists across the
+      // replayed records and into live tailing below.
+      const bootstrap = { ...context, bootstrap: true };
       for (const record of bootstrapRecords(file, context.adapter)) {
-        this.#record(record, { ...context, bootstrap: true }, file);
+        this.#record(record, bootstrap, file);
       }
+      Object.assign(context, bootstrap, { bootstrap: false });
     }
     const onRecord = (record) => this.#record(record, context, file);
     const onError = (error) => this.#error(context.adapter, error);
@@ -219,6 +227,13 @@ export class LiveSessionsService {
     const explicitCwd = record?.cwd
       ?? (['session_meta', 'turn_context'].includes(record?.type) ? record.payload?.cwd : null);
     if (explicitCwd) context.project = resolveProjectLabel(explicitCwd);
+    if (context.adapter === 'claude' && explicitCwd && !context.provider) {
+      const resolved = this.#claudeProvider(explicitCwd);
+      if (resolved?.provider) {
+        context.provider = resolved.provider;
+        context.providerProvenance = resolved.provenance;
+      }
+    }
     const explicitModel = record?.message?.model
       ?? (['session_meta', 'turn_context'].includes(record?.type) ? record.payload?.model : null);
     if (typeof explicitModel === 'string') context.model = explicitModel;
@@ -241,6 +256,16 @@ export class LiveSessionsService {
       });
     }
     for (const event of events) this.#publish(event, context.adapter);
+  }
+
+  /** Configuration reads are per-project, so memoize by session cwd. */
+  #claudeProvider(cwd) {
+    if (!this.#claudeProviders.has(cwd)) {
+      let resolved = null;
+      try { resolved = this.#options.resolveClaudeProvider({ cwd }); } catch { /* stays unresolved */ }
+      this.#claudeProviders.set(cwd, resolved);
+    }
+    return this.#claudeProviders.get(cwd);
   }
 
   #publish(event, adapter) {

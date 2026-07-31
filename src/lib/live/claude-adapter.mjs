@@ -26,7 +26,11 @@ export function adaptClaudeRecord(record, context = {}) {
       confidence: isSidechain && !record.agentId ? 'inferred' : 'observed',
       fields: {
         project: context.project ? 'observed' : null,
-        provider: record.provider || context.provider ? 'observed' : null,
+        // A provider on the record itself is observed evidence; one resolved
+        // from the host's configuration surface carries that resolution's own
+        // provenance (configured/inferred) and must not be upgraded.
+        provider: record.provider ? 'observed'
+          : (context.provider ? context.providerProvenance ?? 'configured' : null),
         model: record.message?.model || context.model ? 'observed' : null,
         status: 'observed',
         hierarchy: isSidechain ? (record.agentId ? 'observed' : 'inferred') : 'observed',

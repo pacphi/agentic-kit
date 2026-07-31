@@ -29,6 +29,7 @@ Consequences**, and cites the grounded source it rests on where relevant.
 | [0018](0018-generalized-host-worker-execution.md) | Generalized host-worker execution; `ak run` canonical | Accepted; compatibility amended |
 | [0019](0019-escalation-in-ak-run.md) | Bounded per-worker escalation in `ak run` | Accepted; historical context closed |
 | [0020](0020-ga-stable-surfaces.md) | One stable GA surface per capability | Implemented |
+| [0021](0021-inference-provider-provenance.md) | Inference-provider provenance for live sessions | Accepted |
 
 Theme: ADRs **0001–0006** define **dual-host LLM routing and leadership** — how `ak` lets ruflo route
 each development activity (architecture, implementation, testing, review, …) to the right host (Claude
@@ -99,3 +100,9 @@ clauses are superseded by ADR-0020.
 host-management namespace, and the versioned top-level routing envelope; removes dynamic
 adapter-specific execution bootstrap; limits old vocabulary to marked decision history and one
 upgrade section; and preserves OpenCode's opt-in, supervised, non-primary, non-AQE boundary.
+
+**0021** makes the Live view answer who serves each session's models without overclaiming. Codex's
+in-artifact `model_provider` (rollouts + state ledger) is read as observed evidence; Claude Code's
+provider is resolved from its documented configuration surface (Bedrock/Vertex/Foundry flags,
+`ANTHROPIC_BASE_URL` gateways) with configured/inferred provenance, since its transcripts never
+record the serving endpoint.

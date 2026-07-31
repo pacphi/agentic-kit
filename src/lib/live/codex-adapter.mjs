@@ -8,6 +8,9 @@ export function adaptCodexRecord(record, context = {}) {
   if (!record || typeof record !== 'object') return [];
   const payload = record.payload && typeof record.payload === 'object' ? record.payload : {};
   const meta = record.type === 'session_meta' ? payload : context.meta ?? {};
+  // codex spells this model_provider in rollout session_meta; bare provider is
+  // legacy tolerance only.
+  const metaProvider = meta.model_provider ?? meta.provider;
   const sessionId = meta.id ?? context.sessionId;
   if (typeof sessionId !== 'string' || !sessionId) return [];
   const subagent = meta.thread_source === 'subagent' || context.threadSource === 'subagent';
@@ -19,7 +22,7 @@ export function adaptCodexRecord(record, context = {}) {
         id: sessionId, kind: subagent ? 'subagent' : 'session',
       label: meta.agent_nickname ?? context.agentNickname,
       role: meta.agent_role ?? context.agentRole ?? (subagent ? 'worker' : 'primary'),
-      provider: meta.provider ?? context.provider,
+      provider: metaProvider ?? context.provider,
       model: record.type === 'turn_context'
         ? payload.model ?? context.model : meta.model ?? context.model,
     },
@@ -28,7 +31,7 @@ export function adaptCodexRecord(record, context = {}) {
       confidence: subagent && meta.thread_source !== 'subagent' ? 'correlated' : 'observed',
       fields: {
         project: context.project ? 'observed' : null,
-        provider: meta.provider || context.provider ? 'observed' : null,
+        provider: metaProvider || context.provider ? 'observed' : null,
         model: (record.type === 'turn_context' ? payload.model : meta.model) || context.model
           ? 'observed' : null,
         status: 'observed',
