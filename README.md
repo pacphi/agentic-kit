@@ -237,14 +237,19 @@ codebase.
 
 ## Credits
 
-ruflo/claude-flow by ruvnet · agentic-qe by proffesor-for-testing · prior art:
-Ciprian Melian's repair gist · upstream issues filed from this kit's verification
-work: [#2219](https://github.com/ruvnet/ruflo/issues/2219),
-[#2222](https://github.com/ruvnet/ruflo/issues/2222),
-[#2239](https://github.com/ruvnet/ruflo/issues/2239),
-[#2360](https://github.com/ruvnet/ruflo/issues/2360),
-[#2549](https://github.com/ruvnet/ruflo/issues/2549),
-[#2670](https://github.com/ruvnet/ruflo/issues/2670).
+### Upstream & prior art
+
+- [rUv](https://github.com/ruvnet) — [ruflo/claude-flow](https://github.com/ruvnet/ruflo); upstream issues filed from this kit's verification work: [#2219](https://github.com/ruvnet/ruflo/issues/2219), [#2222](https://github.com/ruvnet/ruflo/issues/2222), [#2239](https://github.com/ruvnet/ruflo/issues/2239), [#2360](https://github.com/ruvnet/ruflo/issues/2360), [#2549](https://github.com/ruvnet/ruflo/issues/2549), [#2670](https://github.com/ruvnet/ruflo/issues/2670)
+- [Dragan Spiridonov](https://github.com/proffesor-for-testing) — [agentic-qe](https://github.com/proffesor-for-testing/agentic-qe)
+- [Ciprian Melian](https://github.com/ciprianmelian) — prior art: [repair gist](https://gist.github.com/ciprianmelian/eb7e8ff7d24018141ca34bb8a7e216a6)
+
+### Contributors
+
+Thanks to everyone who opened PRs against this kit (v4.0.0-alpha.15 through the
+current release):
+
+- [@robertelee78](https://github.com/robertelee78) — [#67](https://github.com/pacphi/agentic-kit/pull/67), [#85](https://github.com/pacphi/agentic-kit/pull/85), [#86](https://github.com/pacphi/agentic-kit/pull/86), [#87](https://github.com/pacphi/agentic-kit/pull/87), [#89](https://github.com/pacphi/agentic-kit/pull/89), [#90](https://github.com/pacphi/agentic-kit/pull/90), [#91](https://github.com/pacphi/agentic-kit/pull/91)
+- [Anupam Mediratta](https://github.com/anupamme) — [#78](https://github.com/pacphi/agentic-kit/pull/78)
 
 > v4 (npm, cross-platform). The shell-based v3 kit is archived in
 > [docs/archive/](docs/archive/) — `ak setup` migrates an existing shell-kit
