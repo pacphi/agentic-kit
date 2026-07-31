@@ -6,7 +6,8 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { bsq3Root, bsq3IsNative, selfSpecConflicts } from '../../src/lib/natives.mjs';
+import { bsq3Root, bsq3IsNative, selfSpecConflicts, aidefencePresent, securityPresent } from '../../src/lib/natives.mjs';
+import { _setGlobalRootForTest } from '../../src/lib/paths.mjs';
 
 function makeFixture({ withBinding }) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-natives-'));
@@ -110,4 +111,63 @@ test('selfSpecConflicts ignores non-plain-semver declarations (workspace:/link:/
   writePkgJson(dir, { name: 'x', dependencies: { 'better-sqlite3': 'link:../better-sqlite3' } });
   assert.deepEqual(selfSpecConflicts(dir, '^12.10.0'), []);
   fs.rmSync(dir, { recursive: true, force: true });
+});
+
+function makeGlobalRootFixture() {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-natives-cfpkg-'));
+  fs.mkdirSync(path.join(root, 'ruflo', 'node_modules'), { recursive: true });
+  return root;
+}
+
+test('securityPresent is true when the package is hoisted to the top of ruflo/node_modules', () => {
+  const root = makeGlobalRootFixture();
+  writePkgJson(path.join(root, 'ruflo', 'node_modules', '@claude-flow', 'security'), { name: '@claude-flow/security' });
+  _setGlobalRootForTest(root);
+  try {
+    assert.equal(securityPresent(), true);
+  } finally {
+    _setGlobalRootForTest(null);
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('securityPresent is true when npm nests the package under @claude-flow/cli instead of hoisting it (regression: false WARN when a version conflict prevents hoisting)', () => {
+  const root = makeGlobalRootFixture();
+  writePkgJson(
+    path.join(root, 'ruflo', 'node_modules', '@claude-flow', 'cli', 'node_modules', '@claude-flow', 'security'),
+    { name: '@claude-flow/security' },
+  );
+  _setGlobalRootForTest(root);
+  try {
+    assert.equal(securityPresent(), true);
+  } finally {
+    _setGlobalRootForTest(null);
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('securityPresent is false when the package is genuinely absent from both locations', () => {
+  const root = makeGlobalRootFixture();
+  _setGlobalRootForTest(root);
+  try {
+    assert.equal(securityPresent(), false);
+  } finally {
+    _setGlobalRootForTest(null);
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('aidefencePresent follows the same top-level-or-nested-under-cli resolution', () => {
+  const root = makeGlobalRootFixture();
+  writePkgJson(
+    path.join(root, 'ruflo', 'node_modules', '@claude-flow', 'cli', 'node_modules', '@claude-flow', 'aidefence'),
+    { name: '@claude-flow/aidefence' },
+  );
+  _setGlobalRootForTest(root);
+  try {
+    assert.equal(aidefencePresent(), true);
+  } finally {
+    _setGlobalRootForTest(null);
+    fs.rmSync(root, { recursive: true, force: true });
+  }
 });

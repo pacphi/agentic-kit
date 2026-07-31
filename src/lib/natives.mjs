@@ -177,8 +177,19 @@ export function dbPathPinStatus({ settingsLocalFile, projectRoot }) {
   return { warn: false, pinned };
 }
 
-export const aidefencePresent = () =>
-  fs.existsSync(path.join(rufloNodeModules(), '@claude-flow', 'aidefence', 'package.json'));
+// npm only hoists a @claude-flow/* package to the top of ruflo's node_modules when
+// every dependent can share one version; a conflicting sibling (e.g. @claude-flow/cli
+// pinning a different range) leaves it nested under that dependent instead. A
+// top-level-only check then false-negatives on a package that IS installed — seen
+// with @claude-flow/security landing under cli/node_modules instead of hoisting.
+// Check the top level plus the known @claude-flow/* dependents (mirrors
+// rufloMemoryContexts' consumer list) rather than a full recursive search.
+function claudeFlowPackagePresent(name) {
+  const nm = rufloNodeModules();
+  const roots = [nm, path.join(nm, '@claude-flow', 'cli', 'node_modules')];
+  return roots.some((root) => fs.existsSync(path.join(root, '@claude-flow', name, 'package.json')));
+}
 
-export const securityPresent = () =>
-  fs.existsSync(path.join(rufloNodeModules(), '@claude-flow', 'security', 'package.json'));
+export const aidefencePresent = () => claudeFlowPackagePresent('aidefence');
+
+export const securityPresent = () => claudeFlowPackagePresent('security');
