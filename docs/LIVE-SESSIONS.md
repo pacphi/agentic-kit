@@ -35,7 +35,11 @@ request. Stopping the dashboard closes the live service and all clients.
   stores and bootstrapped from bounded, metadata-only records.
 - Project-first session cards with a host glyph and name, independently
   evidenced inference provider/model when reported, lifecycle, freshness, and
-  a concise operational summary.
+  a concise operational summary. Provider identity is graded (ADR-0021):
+  observed from Codex artifacts (`model_provider`), configured/inferred from
+  Claude Code's documented selection surface (Bedrock, Vertex, Foundry,
+  `ANTHROPIC_BASE_URL` gateways such as OpenRouter), and "Provider not
+  established" only when no evidence of any grade exists.
 - Session, agent, sub-agent, tool, skill, plugin, MCP, and gate entities when a
   supported source record identifies them.
 - Authoritative Codex parent/child edges from the Codex state ledger.

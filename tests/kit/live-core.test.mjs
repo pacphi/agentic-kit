@@ -149,6 +149,26 @@ test('projection preserves safe display metadata and event provenance on resourc
   assert.equal(node.durationMs, 125);
 });
 
+test('projection retains provider, provenance and model when later evidence lacks them', () => {
+  const identified = {
+    ...createLiveEvent(base({
+      actor: { id: 's1', kind: 'session', provider: 'openai', model: 'gpt-x' },
+      source: { adapter: 'fixture', confidence: 'observed', fields: { provider: 'observed' } },
+    })), eventId: 'ak:1',
+  };
+  const anonymous = {
+    ...createLiveEvent(base({
+      actor: { id: 's1', kind: 'session' }, action: 'agent.output',
+    })), eventId: 'ak:2',
+  };
+  const projection = reduceLiveEvent(reduceLiveEvent(emptyLiveProjection(), identified), anonymous);
+  const node = projection.sessions.get('claude:s1').nodes.get('s1');
+  assert.equal(node.provider, 'openai');
+  assert.equal(node.providerProvenance, 'observed');
+  assert.equal(node.model, 'gpt-x');
+  assert.equal(node.lastAction, 'agent.output');
+});
+
 test('projection is idempotent by eventId and preserves terminal state', () => {
   const started = {
     ...createLiveEvent(base()), eventId: 'ak:1', ingestSeq: 1,

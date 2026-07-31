@@ -56,6 +56,59 @@ test('service bootstraps safe metadata then tails existing files from end', asyn
   assert.equal(service.snapshot().health.claude.status, 'ok');
 });
 
+test('service resolves the Claude inference provider from configuration, keyed by raw cwd', (t) => {
+  const sb = sandbox();
+  fs.writeFileSync(path.join(sb.claude, 'c1.jsonl'), line({
+    type: 'user', sessionId: 'c1', timestamp: '2026-07-27T10:00:00Z',
+    cwd: '/Users/private-user/work/visible-project',
+    message: { model: 'claude-x', content: 'private' },
+  }));
+  const asked = [];
+  const service = new LiveSessionsService({
+    roots: sb.roots, intervalMs: 10, readCodexState: () => null,
+    resolveClaudeProvider: ({ cwd }) => {
+      asked.push(cwd);
+      return { provider: 'vertex', provenance: 'configured' };
+    },
+    now: () => '2026-07-27T12:00:00Z',
+  });
+  t.after(() => service.close());
+  service.start();
+  assert.deepEqual(asked, ['/Users/private-user/work/visible-project']);
+  const node = service.snapshot().sessions[0].nodes.find((n) => n.kind === 'session');
+  assert.equal(node.provider, 'vertex');
+  assert.equal(node.providerProvenance, 'configured');
+});
+
+test('codex metadata learned during bootstrap persists into live tailing', async (t) => {
+  const sb = sandbox();
+  const file = path.join(sb.codex, 'rollout-2026-07-27T10-00-00-x1.jsonl');
+  fs.writeFileSync(file,
+    line({ type: 'session_meta', timestamp: '2026-07-27T10:00:00Z',
+      payload: { id: 'x1', model: 'gpt-x', model_provider: 'openai', cwd: '/Users/private/repo' } })
+    + line({ type: 'turn_context', timestamp: '2026-07-27T10:00:01Z',
+      payload: { model: 'gpt-x', cwd: '/Users/private/repo' } }));
+  const service = new LiveSessionsService({
+    roots: sb.roots, intervalMs: 10, readCodexState: () => null,
+    now: () => '2026-07-27T12:00:00Z',
+  });
+  t.after(() => service.close());
+  const live = [];
+  service.subscribe((event) => live.push(event));
+  service.start();
+  fs.appendFileSync(file, line({ type: 'event_msg', timestamp: '2026-07-27T12:00:01Z',
+    payload: { type: 'agent_message', message: 'private' } }));
+  await waitUntil(() => live.some((event) => event.action === 'agent.output'),
+    'expected the appended agent_message to surface');
+  const output = live.find((event) => event.action === 'agent.output');
+  assert.equal(output.sessionId, 'x1');
+  assert.equal(output.provider, 'openai');
+  assert.equal(output.providerProvenance, 'observed');
+  const node = service.snapshot().sessions[0].nodes.find((n) => n.kind === 'session');
+  assert.equal(node.provider, 'openai');
+  assert.equal(node.providerProvenance, 'observed');
+});
+
 test('service discovers nested subagent transcripts and files them under the parent session', async (t) => {
   const sb = sandbox();
   const nested = path.join(sb.claude, 'c1', 'subagents');

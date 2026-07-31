@@ -219,6 +219,14 @@ multiple relationship types.
 Project, provider, model, role, lifecycle, and hierarchy each retain their own provenance. A host
 may suggest a provider, but that assumption cannot be displayed as an observed provider fact.
 
+Provider evidence is graded by where it came from (ADR-0021). Codex artifacts name their serving
+provider (`model_provider` in rollout `session_meta` and the state ledger), so Codex claims are
+**observed**. Claude transcripts never name one; the domain resolves it from the host's documented
+configuration surface — Bedrock/Vertex/Foundry selection flags and `ANTHROPIC_BASE_URL` gateway
+classification across settings layers — yielding a **configured** claim, or an **inferred** one for
+the first-party default. An unrecognized gateway stays `gateway` rather than a guessed vendor, and
+a claim's grade is never upgraded downstream.
+
 ### `Activity`
 
 An activity represents a bounded invocation or evaluation. It has source-scoped identity, actor,

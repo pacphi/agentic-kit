@@ -57,6 +57,43 @@ test('Codex adapter handles session, tool call and tool result fixture shapes', 
   assert.ok(!JSON.stringify(done).includes('private'));
 });
 
+test('Codex session_meta model_provider becomes an observed provider claim', () => {
+  const [started] = adaptCodexRecord({
+    type: 'session_meta', timestamp: now,
+    payload: { id: 'x1', model: 'gpt-x', model_provider: 'openrouter' },
+  }, { observedAt: now });
+  assert.equal(started.provider, 'openrouter');
+  assert.equal(started.actor.provider, 'openrouter');
+  assert.equal(started.providerProvenance, 'observed');
+});
+
+test('Claude provider resolved from configuration keeps configured provenance', () => {
+  const [event] = adaptClaudeRecord({
+    type: 'assistant', sessionId: 'c1', timestamp: now,
+    message: { model: 'claude-x', content: [] },
+  }, { observedAt: now, provider: 'bedrock', providerProvenance: 'configured' });
+  assert.equal(event.provider, 'bedrock');
+  assert.equal(event.providerProvenance, 'configured');
+});
+
+test('Claude first-party default stays an inferred claim, never observed', () => {
+  const [event] = adaptClaudeRecord({
+    type: 'assistant', sessionId: 'c1', timestamp: now,
+    message: { model: 'claude-x', content: [] },
+  }, { observedAt: now, provider: 'anthropic', providerProvenance: 'inferred' });
+  assert.equal(event.provider, 'anthropic');
+  assert.equal(event.providerProvenance, 'inferred');
+});
+
+test('Claude without any provider evidence reports unknown provenance', () => {
+  const [event] = adaptClaudeRecord({
+    type: 'assistant', sessionId: 'c1', timestamp: now,
+    message: { model: 'claude-x', content: [] },
+  }, { observedAt: now });
+  assert.equal(event.provider, null);
+  assert.equal(event.providerProvenance, 'unknown');
+});
+
 test('Codex ledger creates authoritative spawn edges', () => {
   const ledger = {
     parents: new Map([['child', 'parent']]),

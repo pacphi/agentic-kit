@@ -13,15 +13,16 @@ import { applyCodexLedger } from '../../src/lib/usage-index.mjs';
 const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'ak-codex-state-'));
 
 /** Build a fixture ledger shaped like the real state_5.sqlite (verified live
- *  2026-07-27: threads has id/thread_source/source/model/git_branch/tokens_used
- *  among 32 columns; thread_spawn_edges has parent/child/status). */
+ *  2026-07-31: threads has id/thread_source/source/model/git_branch/tokens_used
+ *  and model_provider — NOT a bare `provider` column — among 33 columns;
+ *  thread_spawn_edges has parent/child/status). */
 function fixtureDb(dir, name = 'state_5.sqlite') {
   const file = path.join(dir, name);
   const db = new DatabaseSync(file);
   db.exec(`CREATE TABLE threads (
     id TEXT PRIMARY KEY, thread_source TEXT, source TEXT, model TEXT,
     git_branch TEXT, tokens_used INTEGER, agent_nickname TEXT, agent_role TEXT,
-    title TEXT, name TEXT, cwd TEXT, provider TEXT, status TEXT);`);
+    title TEXT, name TEXT, cwd TEXT, model_provider TEXT, status TEXT);`);
   db.exec(`CREATE TABLE thread_spawn_edges (
     parent_thread_id TEXT, child_thread_id TEXT, status TEXT);`);
   db.prepare('INSERT INTO threads VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)')
@@ -62,6 +63,17 @@ test('readCodexState reads threads and spawn edges', () => {
   assert.equal(ledger.threads.get('child-1').provider, 'openai');
   assert.equal(JSON.stringify([...ledger.threads.values()]).includes('private'), false);
   assert.equal(ledger.parents.get('child-1'), 'parent-1');
+});
+
+test('readCodexState tolerates a legacy ledger with a bare provider column', () => {
+  const dir = tmp();
+  const file = path.join(dir, 'state_5.sqlite');
+  const db = new DatabaseSync(file);
+  db.exec('CREATE TABLE threads (id TEXT PRIMARY KEY, thread_source TEXT, provider TEXT);');
+  db.prepare('INSERT INTO threads VALUES (?,?,?)').run('t-1', 'user', 'azure');
+  db.close();
+  const ledger = readCodexState({ dir });
+  assert.equal(ledger.threads.get('t-1').provider, 'azure');
 });
 
 test('readCodexState degrades to null when the load-bearing columns are missing', () => {

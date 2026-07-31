@@ -46,6 +46,13 @@ export function reduceLiveEvent(projection, event, {
     if (!actorNode.role || (actorNode.role === 'worker' && priorNode.role !== 'worker')) {
       actorNode.role = priorNode.role;
     }
+    // Identity evidence is retained: an event that carries no provider/model
+    // claim is absence of evidence, not evidence the earlier claim is gone.
+    if (!actorNode.provider && priorNode.provider) {
+      actorNode.provider = priorNode.provider;
+      actorNode.providerProvenance = priorNode.providerProvenance;
+    }
+    actorNode.model ??= priorNode.model;
   }
   if (event.target && event.action.endsWith('.completed')) {
     actorNode.status = priorNode?.status ?? 'running';
