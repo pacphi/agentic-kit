@@ -29,11 +29,28 @@ export function resolveProjectLabel(cwd) {
       return safeProjectLabel(segments[index - 1]);
     }
   }
-  try {
-    const pointer = fs.readFileSync(path.join(cwd, '.git'), 'utf8').trim();
-    const match = /^gitdir:\s*(.+?)[\\/]\.git[\\/]worktrees[\\/][^\\/]+$/i.exec(pointer);
-    if (match) return safeProjectLabel(match[1]);
-  } catch { /* normal repositories use a .git directory; retained paths may be gone */ }
+  // Sessions frequently run from a subdirectory of their repository, so walk
+  // toward the root for the nearest .git marker: "repo/scripts" belongs to
+  // "repo", not to a phantom "scripts" project. Only one basename is ever
+  // exposed, and retained paths that no longer exist keep the cwd fallback.
+  let current = cwd;
+  for (let depth = 0; depth < 32; depth++) {
+    let marker = null;
+    try { marker = fs.statSync(path.join(current, '.git')).isDirectory() ? 'dir' : 'file'; }
+    catch { /* not a repository boundary; retained paths may be gone entirely */ }
+    if (marker === 'file') {
+      try {
+        const pointer = fs.readFileSync(path.join(current, '.git'), 'utf8').trim();
+        const match = /^gitdir:\s*(.+?)[\\/]\.git[\\/]worktrees[\\/][^\\/]+$/i.exec(pointer);
+        if (match) return safeProjectLabel(match[1]);
+      } catch { /* unreadable pointer: the marker directory is still the root */ }
+      return safeProjectLabel(current);
+    }
+    if (marker === 'dir') return safeProjectLabel(current);
+    const parent = path.dirname(current);
+    if (parent === current) break;
+    current = parent;
+  }
   return safeProjectLabel(cwd);
 }
 

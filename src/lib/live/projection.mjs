@@ -151,9 +151,18 @@ function boundSessions(sessions, limit, currentId) {
   }
 }
 
+/** A started-but-unfinished resource means work is executing right now. */
+function hasPendingResource(session) {
+  for (const node of session.nodes.values()) {
+    if (RESOURCE_KINDS.has(node.kind) && node.lastAction === 'tool.started'
+      && !TERMINAL.has(node.status)) return true;
+  }
+  return false;
+}
+
 /** Mark inactivity without claiming that work completed. */
 export function sweepLiveProjection(projection, {
-  now = Date.now(), quiescentMs = 30_000, expiryMs = 300_000,
+  now = Date.now(), quiescentMs = 30_000, expiryMs = 300_000, pendingExpiryMs = 1_800_000,
 } = {}) {
   const current = typeof now === 'number' ? now : Date.parse(now);
   if (!Number.isFinite(current)) return projection;
@@ -162,8 +171,12 @@ export function sweepLiveProjection(projection, {
   for (const [id, prior] of sessions) {
     if (TERMINAL.has(prior.status) || prior.lifecycle === 'historical') continue;
     const age = Math.max(0, current - Date.parse(prior.updatedAt));
-    const lifecycle = age >= expiryMs ? 'expired'
-      : (age >= quiescentMs ? 'quiescent' : 'active');
+    // Transcripts only append when a tool call finishes, so a long-running
+    // tool produces no events while it is the strongest liveness evidence
+    // available. Hold such sessions active for a bounded pending window.
+    const lifecycle = age < pendingExpiryMs && hasPendingResource(prior) ? 'active'
+      : age >= expiryMs ? 'expired'
+        : (age >= quiescentMs ? 'quiescent' : 'active');
     if (prior.lifecycle !== lifecycle) {
       sessions.set(id, { ...prior, lifecycle });
       changed = true;

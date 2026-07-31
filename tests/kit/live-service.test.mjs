@@ -56,6 +56,37 @@ test('service bootstraps safe metadata then tails existing files from end', asyn
   assert.equal(service.snapshot().health.claude.status, 'ok');
 });
 
+test('service discovers nested subagent transcripts and files them under the parent session', async (t) => {
+  const sb = sandbox();
+  const nested = path.join(sb.claude, 'c1', 'subagents');
+  fs.mkdirSync(nested, { recursive: true });
+  const file = path.join(nested, 'agent-w1.jsonl');
+  fs.writeFileSync(file, line({
+    type: 'user', sessionId: 'c1', agentId: 'w1', isSidechain: true,
+    timestamp: '2026-07-27T11:59:00Z', cwd: '/Users/private-user/work/visible-project',
+    message: { content: 'private worker prompt' },
+  }));
+  const service = new LiveSessionsService({
+    roots: sb.roots, intervalMs: 10, readCodexState: () => null,
+    now: () => '2026-07-27T12:00:00Z',
+  });
+  t.after(() => service.close());
+  service.start();
+  assert.equal(service.snapshot().sessions.length, 1);
+  assert.equal(service.snapshot().sessions[0].id, 'c1');
+  assert.ok(service.snapshot().sessions[0].nodes.some(
+    (node) => node.id === 'w1' && node.kind === 'subagent',
+  ));
+  fs.appendFileSync(file, line({
+    type: 'assistant', sessionId: 'c1', agentId: 'w1', isSidechain: true,
+    timestamp: '2026-07-27T12:00:01Z', cwd: '/Users/private-user/work/visible-project',
+    message: { content: [] },
+  }));
+  await waitUntil(() => service.snapshot().sessions[0].lifecycle === 'active',
+    'subagent transcript activity never marked the parent session live');
+  assert.ok(!JSON.stringify(service.snapshot()).includes('private worker prompt'));
+});
+
 test('native discovery chooses newest files when the tailer budget is bounded', () => {
   const sb = sandbox();
   const old = path.join(sb.claude, 'old.jsonl');
