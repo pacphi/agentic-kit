@@ -455,7 +455,7 @@ Acceptance does not imply automatic knowledge of every upstream store:
 [albert-license]: https://github.com/Sdraugel/albert/blob/96db73d06f64300bb4869fffede4541a9d0eb6e7/LICENSE.md
 [albert-graph]: https://github.com/Sdraugel/albert/blob/96db73d06f64300bb4869fffede4541a9d0eb6e7/console/public/app.js#L1977-L2234
 [agent-flow]: https://github.com/patoles/agent-flow
-[agent-flow-source]: https://github.com/patoles/agent-flow/tree/84cd2fb8c1cf5bbc1bc89cc33621685010ec8d13
+[agent-flow-source]: https://github.com/patoles/agent-flow/tree/84cd2fb8c704cefe52e6dd41a375c4069442e206
 [d3-zoom]: https://d3js.org/d3-zoom
 [dynamic-graphs]: https://doi.org/10.1111/cgf.12791
 [eyes-have-it]: https://www.cs.umd.edu/~ben/papers/Shneiderman1996eyes.pdf

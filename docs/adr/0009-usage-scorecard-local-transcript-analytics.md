@@ -390,7 +390,7 @@ two evidence streams requires a new decision and fixtures from both sides.
   ADR-0008 (machine vs repo scope).
 - Spec (archived on completion, per `docs/archive/README.md`): [`docs/archive/2026-07-25-superpowers-spec-usage-scorecard.md`](../archive/2026-07-25-superpowers-spec-usage-scorecard.md).
 - Existing reporter: `claude/skills/ruflo-token-audit/scripts/ruflo-token-audit.py`.
-- [OpenRouter — Get user activity grouped by endpoint](https://openrouter.ai/docs/api/api-reference/analytics/get-user-activity)
+- [OpenRouter — Get user activity grouped by endpoint](https://openrouter.ai/docs/api/api-reference/analytics/get-user-activity-grouped-by-endpoint)
   (30 completed UTC days; management key required).
 - [OpenRouter — Management API keys](https://openrouter.ai/docs/guides/overview/auth/management-api-keys)
   (administrative keys are distinct from completion/inference keys).

@@ -42,7 +42,11 @@ async function verifyLearning() {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'agentic-kit-learn-'));
   try {
     const r = await runCmd('ruflo', ['neural', 'train', '-p', 'coordination', '-e', '50'], { cwd: tmp, timeout: 300_000 });
-    if (r.code !== 0) { fail('ruflo neural train failed'); return false; }
+    if (r.code !== 0) {
+      const tail = (r.stderr || r.stdout || '').trim().slice(-500);
+      fail(`ruflo neural train failed (exit ${r.code})${tail ? `: ${tail}` : ''}`);
+      return false;
+    }
     const stats = JSON.parse(fs.readFileSync(path.join(tmp, '.claude-flow', 'neural', 'stats.json'), 'utf8'));
     const patterns = JSON.parse(fs.readFileSync(path.join(tmp, '.claude-flow', 'neural', 'patterns.json'), 'utf8'));
     const good = (stats.patternsLearned ?? 0) > 0 && Array.isArray(patterns) && patterns.length > 0;

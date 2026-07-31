@@ -26,4 +26,5 @@ exclude_path = [
 exclude = [
   "^https://img\\.shields\\.io",
   "^https://www\\.npmjs\\.com",  # npm package pages 403 bots/CI
+  "^https://doi\\.org",  # Crossref DOI proxy 403s bot UAs; resolves fine for browsers
 ]
