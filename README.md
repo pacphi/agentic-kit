@@ -241,6 +241,7 @@ codebase.
 
 - [rUv](https://github.com/ruvnet) — [ruflo/claude-flow](https://github.com/ruvnet/ruflo); upstream issues filed from this kit's verification work: [#2219](https://github.com/ruvnet/ruflo/issues/2219), [#2222](https://github.com/ruvnet/ruflo/issues/2222), [#2239](https://github.com/ruvnet/ruflo/issues/2239), [#2360](https://github.com/ruvnet/ruflo/issues/2360), [#2549](https://github.com/ruvnet/ruflo/issues/2549), [#2670](https://github.com/ruvnet/ruflo/issues/2670)
 - [Dragan Spiridonov](https://github.com/proffesor-for-testing) — [agentic-qe](https://github.com/proffesor-for-testing/agentic-qe)
+- [Stuart Kerr](https://github.com/stuinfla) — [RuvNet Brain](https://github.com/stuinfla/ruvnet-brain), the source-grounded knowledge base over the rUv stack that `ak setup` installs and `ak sync` keeps current
 - [Ciprian Melian](https://github.com/ciprianmelian) — prior art: [repair gist](https://gist.github.com/ciprianmelian/eb7e8ff7d24018141ca34bb8a7e216a6)
 
 ### Contributors

@@ -1,7 +1,7 @@
 {
   "name": "@pacphi/agentic-kit",
   "version": "4.0.0-alpha.30",
-  "description": "Setup, healing, verification, and multi-host execution routing (Claude, Codex, OpenCode) for your AI agent stack (ruflo/claude-flow, agentic-qe) — cross-platform, zero-dependency",
+  "description": "Setup, healing, verification, and multi-host execution routing (Claude, Codex, OpenCode) for your AI agent stack (ruflo/claude-flow, agentic-qe, RuvNet Brain) — cross-platform, zero-dependency",
   "type": "module",
   "bin": {
     "agentic-kit": "bin/agentic-kit.mjs",
