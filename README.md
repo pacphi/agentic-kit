@@ -5,7 +5,7 @@
 [![node](https://img.shields.io/node/v/@pacphi/agentic-kit)](https://nodejs.org)
 [![license: MIT](https://img.shields.io/npm/l/@pacphi/agentic-kit)](LICENSE)
 
-**One npm package that installs, heals, and *proves* [ruflo](https://github.com/ruvnet/ruflo) (claude-flow) + [agentic-qe](https://github.com/proffesor-for-testing/agentic-qe) — and wires Claude Code + Codex (+ opencode) into one ambidextrous, self-routing setup. macOS · Linux · Windows.**
+**One npm package that installs, heals, and *proves* [ruflo](https://github.com/ruvnet/ruflo) (claude-flow) + [agentic-qe](https://github.com/proffesor-for-testing/agentic-qe), grounds them in *RuvNet Brain* — an offline, source-cited knowledge base over the rUv stack — and wires Claude Code + Codex (+ opencode) into one ambidextrous, self-routing setup. macOS · Linux · Windows.**
 
 ```bash
 npm install -g @pacphi/agentic-kit@next   # alpha channel until 4.0.0 GA
@@ -22,6 +22,7 @@ ak setup --opencode # …and wire ruflo + ruvnet-brain into opencode (third host
 **What you get:**
 
 - **One command** installs + heals + *proves* ruflo & agentic-qe — native SQLite, memory, security, statusline (past npm's `allow-scripts` gate).
+- **Source-grounded knowledge:** *RuvNet Brain* — an offline knowledge base over the rUv stack — powers the `search_ruvnet` MCP tool, so answers about ruflo/AgentDB/RVF/SPARC cite real source instead of stale training priors.
 - **Multi-host execution (optional):** Claude, Codex, and opt-in OpenCode can share one activity policy; `ak run` is the canonical executor, while `ak setup --codex` enables the subscription-backed Claude/Codex defaults.
 - **Self-healing:** `ak sync` re-converges after every upgrade; `ak status` and a local dashboard show what's *actually* on — never assumed.
 - **Honest by construction:** every guard traces to a filed upstream issue, and `ak x verify` proves the paths end-to-end against real CLIs.
@@ -99,6 +100,7 @@ command always works.)
 | **host** | Execution-host status, selection, primary-host choice, activity routing, and reversible teardown: `ak host status\|pick\|refresh\|off`. The plumbing spelling is `ak x host`. Inference providers and bindings remain separate concepts even though their controls share this workflow. |
 | **uninstall** | Removes the kit's footprint (and any legacy shell-kit install); project data is never touched; `--purge` also offers to remove the global packages. |
 
+</details>
 
 Power-user mechanisms live under `ak x …` (`daemon-gc`, `harvest`,
 `mcp pick|off`, `host status|pick|refresh|off`, `reference diff|sync`,
@@ -112,8 +114,6 @@ One of those is worth calling out:
   the real `ruflo hooks post-task` / `agentdb skill consolidate` verbs, reporting the actual
   skills created/updated. Off and `--dry-run`-safe by default; no daemon, ever.
   `ak x verify harvest` proves the whole path end-to-end against real CLIs.
-
-</details>
 
 ## The status line
 
