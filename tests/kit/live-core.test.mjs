@@ -71,6 +71,28 @@ test('project identity resolves linked and retained worktrees to their owning re
   assert.equal(resolveProjectLabel('/Development/agentic-kit'), 'agentic-kit');
 });
 
+test('project identity resolves repository subdirectories to the repository root', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-live-project-'));
+  const repository = path.join(root, 'tub-vault');
+  fs.mkdirSync(path.join(repository, '.git'), { recursive: true });
+  fs.mkdirSync(path.join(repository, 'scripts', 'lib'), { recursive: true });
+
+  assert.equal(resolveProjectLabel(repository), 'tub-vault');
+  assert.equal(resolveProjectLabel(path.join(repository, 'scripts')), 'tub-vault');
+  assert.equal(resolveProjectLabel(path.join(repository, 'scripts', 'lib')), 'tub-vault');
+});
+
+test('project identity resolves subdirectories of a linked worktree to the owning repository', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-live-project-'));
+  const repository = path.join(root, 'agentic-kit');
+  const worktree = path.join(root, 'm3-persona-grounding');
+  fs.mkdirSync(path.join(worktree, 'scripts'), { recursive: true });
+  fs.writeFileSync(path.join(worktree, '.git'),
+    `gitdir: ${path.join(repository, '.git', 'worktrees', 'm3')}\n`);
+
+  assert.equal(resolveProjectLabel(path.join(worktree, 'scripts')), 'agentic-kit');
+});
+
 test('replay stream assigns monotonic ids, bounds history and detects stale cursors', () => {
   const stream = new LiveReplayStream({ capacity: 2, prefix: 'live' });
   const one = stream.publish(createLiveEvent(base()));
@@ -229,6 +251,50 @@ test('lifecycle sweep marks quiescent and expired but never completed', () => {
   });
   assert.equal(expired.sessions.get('claude:s1').lifecycle, 'expired');
   assert.equal(expired.sessions.get('claude:s1').status, 'running');
+});
+
+test('lifecycle sweep holds sessions with executing tools active until the pending window closes', () => {
+  const running = { ...createLiveEvent(base()), eventId: 'ak:1' };
+  const started = {
+    ...createLiveEvent(base({
+      action: 'tool.started',
+      target: { id: 'call-1', kind: 'tool', label: 'Write' },
+      attributes: { toolCategory: 'Write' },
+    })), eventId: 'ak:2',
+  };
+  const active = reduceLiveEvent(reduceLiveEvent(emptyLiveProjection(), running), started);
+  // Transcripts only append when a tool finishes; a 14-minute execution must
+  // not demote the session even though expiryMs elapsed with no events.
+  const midExecution = sweepLiveProjection(active, {
+    now: '2026-07-27T12:14:00Z', quiescentMs: 10_000, expiryMs: 120_000,
+  });
+  assert.equal(midExecution.sessions.get('claude:s1').lifecycle, 'active');
+  const abandoned = sweepLiveProjection(active, {
+    now: '2026-07-27T13:00:00Z', quiescentMs: 10_000, expiryMs: 120_000,
+    pendingExpiryMs: 1_800_000,
+  });
+  assert.equal(abandoned.sessions.get('claude:s1').lifecycle, 'expired');
+});
+
+test('lifecycle sweep resumes normal demotion once the pending tool completes', () => {
+  const running = { ...createLiveEvent(base()), eventId: 'ak:1' };
+  const started = {
+    ...createLiveEvent(base({
+      action: 'tool.started', target: { id: 'call-1', kind: 'tool' },
+    })), eventId: 'ak:2',
+  };
+  const completed = {
+    ...createLiveEvent(base({
+      action: 'tool.completed', status: 'completed',
+      target: { id: 'call-1', kind: 'tool' },
+    })), eventId: 'ak:3',
+  };
+  const projection = [running, started, completed]
+    .reduce((state, event) => reduceLiveEvent(state, event), emptyLiveProjection());
+  const swept = sweepLiveProjection(projection, {
+    now: '2026-07-27T12:14:00Z', quiescentMs: 10_000, expiryMs: 120_000,
+  });
+  assert.equal(swept.sessions.get('claude:s1').lifecycle, 'expired');
 });
 
 test('only fresh running execution evidence is active; ledger and unknown evidence are historical', () => {

@@ -102,6 +102,7 @@ export class LiveSessionsService {
       now: options.now ?? (() => new Date().toISOString()),
       quiescentMs: options.quiescentMs ?? 30_000,
       expiryMs: options.expiryMs ?? 300_000,
+      pendingExpiryMs: options.pendingExpiryMs ?? 1_800_000,
       maxSessions: options.maxSessions ?? 100,
       maxNodesPerSession: options.maxNodesPerSession ?? 1000,
     };
@@ -162,6 +163,7 @@ export class LiveSessionsService {
       now: this.#options.now(),
       quiescentMs: this.#options.quiescentMs,
       expiryMs: this.#options.expiryMs,
+      pendingExpiryMs: this.#options.pendingExpiryMs,
     });
   }
 
@@ -179,8 +181,10 @@ export class LiveSessionsService {
     const remaining = Math.max(0, this.#options.maxFiles - this.#tailers.size);
     const claudeLimit = Math.ceil(remaining / 2);
     const codexLimit = remaining - claudeLimit;
+    // Depth 3 reaches `<project>/<session>/subagents/agent-*.jsonl`; a session
+    // delegating to workers stays observable while its own transcript is idle.
     const claude = discoverJsonl(this.#options.roots.claude, {
-      maxDepth: 2, maxFiles: claudeLimit, accept: () => true,
+      maxDepth: 3, maxFiles: claudeLimit, accept: () => true,
     });
     const codex = discoverJsonl(this.#options.roots.codex, {
       maxDepth: 4, maxFiles: codexLimit, accept: (name) => name.startsWith('rollout-'),
