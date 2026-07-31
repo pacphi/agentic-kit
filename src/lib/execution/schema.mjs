@@ -14,7 +14,7 @@ export const EXIT_CATEGORIES = Object.freeze([
 ]);
 
 const REQUIRED_METHODS = Object.freeze([
-  'readiness', 'prepare', 'launch', 'observe', 'interpret', 'cancel', 'cleanup',
+  'readiness', 'prepare', 'launch', 'observe', 'interpret', 'summarize', 'cancel', 'cleanup',
 ]);
 
 /** Validate the host-neutral execution-adapter shape without invoking it. */

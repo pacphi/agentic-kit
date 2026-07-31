@@ -18,6 +18,8 @@ export const help = `ak run — execute a host-neutral activity pipeline
 
 Materializes the managed per-activity routing policy and runs each worker through
 its host adapter. OpenCode is accepted only after its routing capability is enabled.
+Successful dependency outputs are threaded through runtime-only bounded handoffs at
+runtime; dry-run prompts and public JSON results never contain those summaries.
 
 Trust boundary: workers run with YOUR CLI trust posture in the target repo —
 its opencode.json / .claude settings / AGENTS.md apply. Run this only in
@@ -36,7 +38,8 @@ Options:
                                never escalated)
   --dry-run                    print the host-neutral execution plan only
   --max-concurrent <n>         max concurrent workers (default 4)
-  --timeout <ms>               per-worker timeout, per attempt (default 120000)
+  --timeout <ms>               one absolute readiness→observe budget per attempt
+                               (default 120000; teardown is separately bounded)
   --json                       emit machine-readable plan/results
 
 Examples:

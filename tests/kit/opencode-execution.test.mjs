@@ -5,10 +5,12 @@ import {
   renderOpenCodeWorkerPrompt,
 } from '../../src/lib/execution/opencode.mjs';
 import { executeWorker } from '../../src/lib/execution/runner.mjs';
+import { HANDOFF_END, HANDOFF_START } from '../../src/lib/execution/handoff.mjs';
 
 const passthroughResolve = (command, args) => ({ command, args, resolved: true });
 const createOpenCodeExecutionAdapter = (options = {}) => createRealOpenCodeExecutionAdapter({
   resolveFn: passthroughResolve,
+  signalFn: async (child, signal) => !!child?.kill?.(signal),
   ...options,
 });
 
@@ -17,10 +19,25 @@ const worker = {
   configuredModel: 'openrouter/example', prompt: 'Add a safe server adapter.',
 };
 
-const response = (json, { status = 200, body = null } = {}) => ({ ok: status >= 200 && status < 300, status, json: async () => json, body });
+const response = (json, { status = 200, body, headers = {} } = {}) => {
+  const encoded = new TextEncoder().encode(JSON.stringify(json));
+  return {
+    ok: status >= 200 && status < 300,
+    status,
+    json: async () => json,
+    text: async () => JSON.stringify(json),
+    headers: { get: (name) => headers[name.toLowerCase()] ?? null },
+    body: body ?? new ReadableStream({
+      start(controller) { controller.enqueue(encoded); controller.close(); },
+    }),
+  };
+};
 const sse = (events) => new ReadableStream({
   start(controller) { controller.enqueue(new TextEncoder().encode(events)); controller.close(); },
 });
+const tagged = (outcome) => `${HANDOFF_START}${JSON.stringify({
+  outcome, artifacts: [], decisions: [], risks: [],
+})}${HANDOFF_END}`;
 
 test('worker prompt is invocation-only and preserves the user permission boundary', () => {
   const prompt = renderOpenCodeWorkerPrompt(worker, { template: 'Task={{task}}\nMeta={{metadata}}\nNo bypass.' });
@@ -67,6 +84,78 @@ test('server adapter launches loopback-only with ephemeral basic auth and normal
   await adapter.cleanup(launched);
   assert.deepEqual(child.signals, ['SIGTERM']);
 });
+
+test('OpenCode extracts a handoff only from the final assistant text parts', async () => {
+  const fetchFn = async (url, init = {}) => {
+    if (url.endsWith('/global/health')) return response({ healthy: true });
+    if (url.endsWith('/session') && init.method === 'POST') return response({ id: 'ses-summary' });
+    if (url.endsWith('/global/event')) {
+      return response(null, {
+        body: sse('data: {"payload":{"type":"session.idle","properties":{"sessionID":"ses-summary"}}}\n\n'),
+      });
+    }
+    if (url.endsWith('/prompt_async')) return response(null, { status: 204 });
+    if (url.endsWith('/message')) {
+      return response([
+        {
+          info: { role: 'assistant', providerID: 'openrouter', modelID: 'example' },
+          parts: [
+            { type: 'tool', text: tagged('tool-output-must-not-win') },
+            { type: 'text', text: `done\n${tagged('assistant-final')}` },
+          ],
+        },
+      ]);
+    }
+    if (url.endsWith('/instance/dispose')) return response(null, { status: 204 });
+    throw new Error(`unexpected URL ${url}`);
+  };
+  const adapter = createOpenCodeExecutionAdapter({
+    fetchFn,
+    spawnFn: () => ({ kill: () => true }),
+    reservePort: async () => 43140,
+    secret: () => 'ephemeral',
+  });
+  const state = await adapter.launch(await adapter.prepare({ worker, cwd: process.cwd() }));
+  const observation = await adapter.observe(state);
+  assert.equal(adapter.summarize(state, observation).outcome, 'assistant-final');
+  await adapter.cleanup(state);
+});
+
+for (const [name, messageResponse] of [
+  ['declared oversized message response', response([], { headers: { 'content-length': String(300 * 1024) } })],
+  ['oversized assistant text parts', response([{
+    info: { role: 'assistant' },
+    parts: [{ type: 'text', text: 'x'.repeat(70 * 1024) }],
+  }])],
+]) {
+  test(`OpenCode rejects ${name} before handoff extraction`, async () => {
+    const fetchFn = async (url, init = {}) => {
+      if (url.endsWith('/global/health')) return response({ healthy: true });
+      if (url.endsWith('/session') && init.method === 'POST') return response({ id: 'ses-bounded' });
+      if (url.endsWith('/global/event')) {
+        return response(null, {
+          body: sse('data: {"payload":{"type":"session.idle","properties":{"sessionID":"ses-bounded"}}}\n\n'),
+        });
+      }
+      if (url.endsWith('/prompt_async')) return response(null, { status: 204 });
+      if (url.endsWith('/message')) return messageResponse;
+      if (url.endsWith('/instance/dispose')) return response(null, { status: 204 });
+      throw new Error(`unexpected URL ${url}`);
+    };
+    const adapter = createOpenCodeExecutionAdapter({
+      fetchFn,
+      spawnFn: () => ({ kill: () => true }),
+      reservePort: async () => 43141,
+      secret: () => 'ephemeral',
+    });
+    const state = await adapter.launch(await adapter.prepare({ worker, cwd: process.cwd() }));
+    const result = adapter.interpret(state, await adapter.observe(state));
+    assert.equal(result.status, 'failed');
+    assert.equal(result.exitCategory, 'protocol_error');
+    assert.match(JSON.stringify(result.failure), /exceeded/);
+    await adapter.cleanup(state);
+  });
+}
 
 test('permission events are deterministically aborted and never converted into implicit approval', async () => {
   const paths = [];
@@ -443,7 +532,7 @@ test('events from a foreign session are ignored until our own session goes idle'
 });
 
 // #88 test-gap: the TERM-then-KILL sequence is asserted, not just the verdict.
-test('a TERM-ignoring server receives SIGTERM then SIGKILL in order', async () => {
+test('a TERM/KILL-surviving server remains orphaned after cancellation and cleanup', async () => {
   // A child WITH lifecycle events that never closes: the grace wait must time
   // out (not short-circuit), so the bounded KILL fallback actually fires.
   const child = { signals: [], exitCode: null, signalCode: null, once() { return this; }, kill(signal) { this.signals.push(signal); return true; } };
@@ -459,10 +548,13 @@ test('a TERM-ignoring server receives SIGTERM then SIGKILL in order', async () =
     terminationGraceMs: 5, forceGraceMs: 5,
   });
   const result = await executeWorker(worker, adapter, { cwd: process.cwd(), timeoutMs: 20 });
-  assert.equal(result.status, 'timed_out');
-  assert.equal(result.exitCategory, 'timeout');
-  assert.match(result.failure.reason, /prompt_async timed out/);
-  assert.deepEqual(child.signals, ['SIGTERM', 'SIGKILL'], 'TERM first, KILL as the bounded fallback');
+  assert.equal(result.status, 'failed');
+  assert.equal(result.exitCategory, 'orphaned');
+  assert.deepEqual(
+    child.signals,
+    ['SIGTERM', 'SIGKILL', 'SIGTERM', 'SIGKILL'],
+    'both cancel and final cleanup prove the survivor with TERM then KILL',
+  );
 });
 
 test('a stalled prompt submission becomes a timeout and tears down its owned server', async () => {
@@ -480,6 +572,75 @@ test('a stalled prompt submission becomes a timeout and tears down its owned ser
   const result = await executeWorker(worker, adapter, { cwd: process.cwd(), timeoutMs: 20 });
   assert.equal(result.status, 'timed_out');
   assert.equal(result.exitCategory, 'timeout');
-  assert.match(result.failure.reason, /prompt_async timed out/);
-  assert.deepEqual(child.signals, ['SIGTERM']);
+  assert.match(result.failure.reason, /launch exceeded|prompt_async timed out/);
+  assert.deepEqual(child.signals, ['SIGTERM', 'SIGTERM']);
+});
+
+test('the shared deadline aborts every OpenCode launch await and cleans progressive state', async () => {
+  const { EventEmitter } = await import('node:events');
+  const pendingFetch = (signal) => new Promise((_, reject) => {
+    const abort = () => reject(Object.assign(new Error('aborted by attempt deadline'), { name: 'AbortError' }));
+    if (signal?.aborted) abort();
+    else signal?.addEventListener('abort', abort, { once: true });
+  });
+
+  for (const stage of ['port', 'health', 'session', 'event', 'prompt']) {
+    const child = new EventEmitter();
+    child.exitCode = null;
+    child.signalCode = null;
+    child.signals = [];
+    if (stage === 'port') {
+      child.stdout = new EventEmitter();
+      child.stderr = new EventEmitter();
+    }
+    child.kill = (signal) => {
+      child.signals.push(signal);
+      child.signalCode = signal;
+      queueMicrotask(() => child.emit('close', null, signal));
+      return true;
+    };
+    const fetchFn = async (url, init = {}) => {
+      if (url.endsWith('/instance/dispose') || url.endsWith('/abort')) return response(null, { status: 204 });
+      if (url.endsWith('/global/health')) {
+        if (stage === 'health') return pendingFetch(init.signal);
+        return response({ healthy: true });
+      }
+      if (url.endsWith('/session') && init.method === 'POST') {
+        if (stage === 'session') return pendingFetch(init.signal);
+        return response({ id: `ses-${stage}` });
+      }
+      if (url.endsWith('/global/event')) {
+        if (stage === 'event') return pendingFetch(init.signal);
+        return response(null, {
+          body: sse(`data: {"payload":{"type":"session.idle","properties":{"sessionID":"ses-${stage}"}}}\n\n`),
+        });
+      }
+      if (url.endsWith('/prompt_async')) {
+        if (stage === 'prompt') return pendingFetch(init.signal);
+        return response(null, { status: 204 });
+      }
+      throw new Error(`unexpected URL ${url}`);
+    };
+    const adapter = createOpenCodeExecutionAdapter({
+      fetchFn,
+      spawnFn: () => child,
+      haveFn: async () => true,
+      reservePort: async ({ signal } = {}) => (
+        stage === 'port'
+          ? pendingFetch(signal)
+          : 43200
+      ),
+      secret: () => 'ephemeral',
+      terminationGraceMs: 2,
+      forceGraceMs: 2,
+      teardownTimeoutMs: 10,
+    });
+    const result = await executeWorker(worker, adapter, {
+      cwd: process.cwd(),
+      timeoutMs: 12,
+    });
+    assert.equal(result.status, 'timed_out', stage);
+    assert.equal(result.exitCategory, 'timeout', stage);
+    assert.deepEqual(child.signals, ['SIGTERM'], `${stage}: acquired child was terminated exactly once`);
+  }
 });

@@ -4,7 +4,7 @@ import { validateExecutionAdapter, validateWorkerResult } from '../../src/lib/ex
 
 const adapter = () => ({
   id: 'test-host',
-  readiness() {}, prepare() {}, launch() {}, observe() {}, interpret() {}, cancel() {}, cleanup() {},
+  readiness() {}, prepare() {}, launch() {}, observe() {}, interpret() {}, summarize() {}, cancel() {}, cleanup() {},
 });
 
 const result = () => ({
@@ -18,8 +18,8 @@ const result = () => ({
 test('execution adapters must implement the complete host-neutral lifecycle', () => {
   assert.equal(validateExecutionAdapter(adapter()).id, 'test-host');
   const incomplete = adapter();
-  delete incomplete.cancel;
-  assert.throws(() => validateExecutionAdapter(incomplete), /executionAdapter.cancel/);
+  delete incomplete.summarize;
+  assert.throws(() => validateExecutionAdapter(incomplete), /executionAdapter.summarize/);
 });
 
 test('worker results preserve unknown provider facts instead of inferring from the host', () => {

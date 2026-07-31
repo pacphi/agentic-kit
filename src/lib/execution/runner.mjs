@@ -2,6 +2,11 @@
 // lifecycle cleanup; adapters own each host's transport and protocol details.
 import { validateExecutionAdapter, validateWorkerResult } from './schema.mjs';
 import { EXECUTION_ADAPTERS } from './adapters.mjs';
+import {
+  HANDOFF_REQUEST,
+  normalizeHandoff,
+  renderDependencyHandoffs,
+} from './handoff.mjs';
 
 const nowIso = () => new Date().toISOString();
 
@@ -21,51 +26,150 @@ function boundedFailure(error) {
   return { reason: String(error?.message ?? error ?? 'execution failed').slice(0, 240) };
 }
 
-async function observeBeforeDeadline(adapter, state, timeoutMs) {
-  if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) return { timedOut: false, observation: await adapter.observe(state) };
+function timeoutError(phase) {
+  return Object.assign(new Error(`${phase} exceeded the worker deadline`), {
+    code: 'ETIMEDOUT',
+    phase,
+  });
+}
+
+function handoffProtocolError(message) {
+  return Object.assign(new TypeError(message), { code: 'HANDOFF_PROTOCOL' });
+}
+
+async function beforeDeadline(phase, deadline, controller, operation) {
+  const remaining = deadline - Date.now();
+  if (remaining <= 0) {
+    controller.abort();
+    throw timeoutError(phase);
+  }
   let timer;
   try {
     return await Promise.race([
-      adapter.observe(state).then((observation) => ({ timedOut: false, observation })),
-      new Promise((resolve) => { timer = setTimeout(() => resolve({ timedOut: true }), timeoutMs); }),
+      Promise.resolve().then(() => operation(Math.max(1, Math.ceil(remaining)))),
+      new Promise((_, reject) => {
+        timer = setTimeout(() => {
+          controller.abort();
+          reject(timeoutError(phase));
+        }, remaining);
+      }),
     ]);
   } finally { clearTimeout(timer); }
 }
 
-/** Execute one worker and guarantee cleanup after every prepared state. */
-export async function executeWorker(worker, adapter, {
+async function executeWorkerAttempt(worker, adapter, {
   cwd = process.cwd(), timeoutMs = 120_000, clock = nowIso,
-} = /** @type {{cwd?:string, timeoutMs?:number, clock?:()=>string}} */ ({})) {
+  requireHandoff = false,
+} = /** @type {{cwd?:string, timeoutMs?:number, clock?:()=>string,requireHandoff?:boolean}} */ ({})) {
   const startedAt = clock();
+  const budget = Number.isFinite(timeoutMs) && timeoutMs > 0 ? timeoutMs : 120_000;
+  const deadline = Date.now() + budget;
+  const controller = new AbortController();
   let state = null;
+  let result;
+  let summary = null;
   try {
-    const ready = await adapter.readiness({ worker, cwd });
-    if (!ready?.ready) return workerFailure(worker, {
-      exitCategory: ready?.exitCategory ?? 'cli_unavailable', failure: { reason: 'host is not ready' }, startedAt, clock,
-    });
-    state = await adapter.prepare({ worker, cwd, timeoutMs });
-    state = await adapter.launch(state, { timeoutMs });
-    const watched = await observeBeforeDeadline(adapter, state, timeoutMs);
-    if (watched.timedOut) {
-      const cancelled = await adapter.cancel(state);
-      // Schema validation applies to EVERY terminal interpret(), not only the
-      // success path — the timeout branch is exactly where a malformed result
-      // would otherwise ship unbounded into `ak run --json` (qe-court A2).
-      return validateWorkerResult(adapter.interpret(state, { type: cancelled?.orphaned ? 'orphaned' : 'timeout' }));
+    const ready = await beforeDeadline('readiness', deadline, controller, (remaining) => (
+      adapter.readiness({ worker, cwd, signal: controller.signal, timeoutMs: remaining })
+    ));
+    if (!ready?.ready) {
+      result = workerFailure(worker, {
+        exitCategory: ready?.exitCategory ?? 'cli_unavailable',
+        failure: { reason: 'host is not ready' },
+        startedAt,
+        clock,
+      });
+    } else {
+      state = await beforeDeadline('prepare', deadline, controller, (remaining) => (
+        adapter.prepare({
+          worker, cwd, signal: controller.signal, timeoutMs: remaining,
+        })
+      ));
+      const launched = await beforeDeadline('launch', deadline, controller, (remaining) => (
+        adapter.launch(state, { signal: controller.signal, timeoutMs: remaining })
+      ));
+      if (launched !== undefined && launched !== null) state = launched;
+      const observation = await beforeDeadline('observe', deadline, controller, (remaining) => (
+        adapter.observe(state, { signal: controller.signal, timeoutMs: remaining })
+      ));
+      result = validateWorkerResult(adapter.interpret(state, observation));
+      if (requireHandoff && result.status === 'succeeded') {
+        const handoff = adapter.summarize(state, observation);
+        if (handoff && typeof handoff.then === 'function') {
+          throw handoffProtocolError('executionAdapter.summarize must return synchronously');
+        }
+        if (!handoff) throw handoffProtocolError('required worker handoff was missing');
+        try { summary = normalizeHandoff(handoff); } catch (error) {
+          throw handoffProtocolError(error?.message ?? 'required worker handoff was malformed');
+        }
+      }
     }
-    return validateWorkerResult(adapter.interpret(state, watched.observation));
   } catch (error) {
-    const timedOut = error?.code === 'ETIMEDOUT';
-    return workerFailure(worker, {
-      status: timedOut ? 'timed_out' : 'failed',
-      exitCategory: timedOut ? 'timeout' : 'protocol_error',
-      failure: boundedFailure(error), startedAt, clock,
-    });
+    const timedOut = error?.code === 'ETIMEDOUT' || controller.signal.aborted;
+    if (timedOut && state) {
+      const timeoutReason = boundedFailure(error).reason;
+      let terminal = /** @type {{type:string,reason?:string}} */ ({
+        type: 'timeout',
+        reason: timeoutReason,
+      });
+      try {
+        const cancelled = await adapter.cancel(state);
+        if (cancelled?.orphaned) terminal = { type: 'orphaned' };
+      } catch {
+        terminal = { type: 'orphaned' };
+      }
+      try { result = validateWorkerResult(adapter.interpret(state, terminal)); } catch (interpretError) {
+        result = workerFailure(worker, {
+          status: 'failed',
+          exitCategory: 'protocol_error',
+          failure: boundedFailure(interpretError),
+          startedAt,
+          clock,
+        });
+      }
+    } else {
+      result = workerFailure(worker, {
+        status: timedOut ? 'timed_out' : error?.code === 'HANDOFF_PROTOCOL' ? 'blocked' : 'failed',
+        exitCategory: timedOut ? 'timeout' : 'protocol_error',
+        failure: boundedFailure(error), startedAt, clock,
+      });
+    }
   } finally {
     if (state) {
-      try { await adapter.cleanup(state); } catch { /* terminal result is already authoritative */ }
+      try {
+        const cleaned = await adapter.cleanup(state);
+        if (cleaned?.orphaned) {
+          try { result = validateWorkerResult(adapter.interpret(state, { type: 'orphaned' })); } catch {
+            result = workerFailure(worker, {
+              status: 'failed',
+              exitCategory: 'orphaned',
+              failure: { reason: 'worker cleanup could not prove resource termination' },
+              startedAt,
+              clock,
+            });
+          }
+          summary = null;
+        }
+      } catch {
+        try { result = validateWorkerResult(adapter.interpret(state, { type: 'orphaned' })); } catch {
+          result = workerFailure(worker, {
+            status: 'failed',
+            exitCategory: 'orphaned',
+            failure: { reason: 'worker cleanup could not prove resource termination' },
+            startedAt,
+            clock,
+          });
+        }
+        summary = null;
+      }
     }
   }
+  return { result, summary };
+}
+
+/** Execute one worker and guarantee cleanup after every prepared state. */
+export async function executeWorker(worker, adapter, options = {}) {
+  return (await executeWorkerAttempt(worker, adapter, options)).result;
 }
 
 function validatePlan(plan) {
@@ -123,24 +227,38 @@ function compactAttempt(worker, result) {
  *  more than one attempt ran — a single attempt is indistinguishable from a
  *  run with escalation off, and emitting one would fabricate an event that
  *  did not happen. */
-async function executeWorkerWithEscalation(worker, adapters, { cwd, timeoutMs, clock, escalate = false }) {
+async function executeWorkerWithEscalation(worker, adapters, {
+  cwd, timeoutMs, clock, escalate = false, requireHandoff = false,
+}) {
   const ladder = escalate ? [...(worker.escalate ?? [])] : [];
   const attempts = [];
   let current = worker;
   let result;
+  let summary;
   for (;;) {
     const adapter = adapterFor(adapters, current.host);
-    result = adapter
-      ? await executeWorker(current, adapter, { cwd, timeoutMs, clock })
-      : workerFailure(current, { exitCategory: 'cli_unavailable', failure: { reason: `no execution adapter for host "${current.host}"` }, clock });
+    if (adapter) {
+      const attempt = await executeWorkerAttempt(current, adapter, {
+        cwd, timeoutMs, clock, requireHandoff,
+      });
+      result = attempt.result;
+      summary = attempt.summary;
+    } else {
+      result = workerFailure(current, {
+        exitCategory: 'cli_unavailable',
+        failure: { reason: `no execution adapter for host "${current.host}"` },
+        clock,
+      });
+      summary = null;
+    }
     attempts.push(compactAttempt(current, result));
     if (!escalatable(result)) break;
     const rung = ladder.shift();
     if (!rung) break;
     current = { ...current, host: rung.host, configuredModel: rung.model ?? null };
   }
-  if (attempts.length <= 1) return result;
-  return validateWorkerResult({ ...result, attempts });
+  if (attempts.length > 1) result = validateWorkerResult({ ...result, attempts });
+  return { result, summary: result.status === 'succeeded' ? summary : null };
 }
 
 /** Run a materialized routing plan as a bounded-concurrency dependency DAG.
@@ -153,11 +271,35 @@ export async function executeRunPlan(plan, {
   if (!Number.isInteger(maxConcurrent) || maxConcurrent < 1) throw new TypeError('maxConcurrent must be a positive integer');
   const pending = new Map(plan.workers.map((worker) => [worker.id, worker]));
   const results = new Map();
+  const summaries = new Map();
   const running = new Map();
+  const mustSummarize = new Set(plan.workers.flatMap((worker) => worker.dependsOn ?? []));
 
   const start = (worker) => {
-    const promise = executeWorkerWithEscalation(worker, adapters, { cwd, timeoutMs, clock, escalate });
-    running.set(worker.id, promise.then((result) => ({ id: worker.id, result })));
+    const dependencies = (worker.dependsOn ?? []).map((id) => ({ id, handoff: summaries.get(id) }));
+    let runtimePrompt = worker.prompt;
+    try {
+      runtimePrompt += renderDependencyHandoffs(dependencies);
+      if (mustSummarize.has(worker.id)) runtimePrompt += HANDOFF_REQUEST;
+    } catch (error) {
+      results.set(worker.id, workerFailure(worker, {
+        status: 'blocked',
+        exitCategory: 'protocol_error',
+        failure: boundedFailure(error),
+        clock,
+      }));
+      pending.delete(worker.id);
+      return;
+    }
+    const runtimeWorker = { ...worker, prompt: runtimePrompt };
+    const promise = executeWorkerWithEscalation(runtimeWorker, adapters, {
+      cwd,
+      timeoutMs,
+      clock,
+      escalate,
+      requireHandoff: mustSummarize.has(worker.id),
+    });
+    running.set(worker.id, promise.then((outcome) => ({ id: worker.id, ...outcome })));
     pending.delete(worker.id);
   };
 
@@ -172,15 +314,27 @@ export async function executeRunPlan(plan, {
           status: 'blocked', exitCategory: 'worker_error', failure: { reason: 'dependency_failed', dependencies: failed }, clock,
         }));
         pending.delete(worker.id);
-      } else start(worker);
+      } else {
+        const missing = deps.filter((id) => !summaries.has(id));
+        if (missing.length) {
+          results.set(worker.id, workerFailure(worker, {
+            status: 'blocked',
+            exitCategory: 'protocol_error',
+            failure: { reason: 'dependency_handoff_missing', dependencies: missing },
+            clock,
+          }));
+          pending.delete(worker.id);
+        } else start(worker);
+      }
     }
     if (!running.size) {
       if (pending.size) throw new Error('execution plan contains a dependency cycle');
       break;
     }
-    const { id, result } = await Promise.race(running.values());
+    const { id, result, summary } = await Promise.race(running.values());
     running.delete(id);
     results.set(id, result);
+    if (summary) summaries.set(id, summary);
   }
   return plan.workers.map((worker) => results.get(worker.id));
 }
