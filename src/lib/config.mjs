@@ -4,7 +4,15 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { kitConfigPath, legacyKitConfigPath } from './paths.mjs';
-import { migrateIntegrationConfig } from './adapters/config.mjs';
+import {
+  CURRENT_INTEGRATIONS_VERSION,
+  migrateIntegrationConfig,
+} from './adapters/config.mjs';
+import {
+  DEFAULT_PRIMARY_HOST,
+  ROUTING_SCHEMA_VERSION,
+  migrateRoutingConfig,
+} from './routing-config.mjs';
 
 const DEFAULTS = {
   aqe: true,            // manage agentic-qe alongside ruflo
@@ -15,53 +23,139 @@ const DEFAULTS = {
   harvest: false,       // opt-in learning-write (`ak x harvest`); off = never runs writes
   health: { ring: [] }, // persisted stack-health snapshot ring (see health-history.mjs)
   mcp: { register: true, excludeFamilies: [] },
-  // Frontier hosts + LLM providers (prompts-once via `ak x provider pick`).
+  integrations: {
+    version: CURRENT_INTEGRATIONS_VERSION,
+    hosts: { claude: true, codex: false, opencode: false },
+    bindings: [],
+  },
+  routing: {
+    version: ROUTING_SCHEMA_VERSION,
+    primaryHost: DEFAULT_PRIMARY_HOST,
+    routes: {},
+  },
+  // Frontier hosts + LLM providers (prompts-once via `ak host pick`).
   // Default = claude-only, codex opt-in — preserves today's behavior exactly:
   // when this stays at defaults, the provider heal is a deliberate no-op.
   providers: {
-    hosts: { claude: true, codex: false, opencode: false }, // which agent CLIs ak wires (ADR-034 ENABLE_*; opencode has no enable-env — wiring is config-file based)
     aqeProvider: null,                      // AQE_LLM_PROVIDER (claude-code|openai|gemini|…); null = aqe default
     aqeFallback: [],                        // [{ provider, models:[...] }] — ordered aqe fallback chain (.agentic-qe/llm-config.json)
     models: [],                             // [{ id:'openai', model:'gpt-5.6' }] — ruflo API-key providers
     maxBudgetUsd: null,                     // → AQE_MAX_BUDGET_USD when set
-    dualRouting: {},                        // activity → {host,model,escalate?,source} per-activity routing policy (ADR-0001; seeded on dual-host)
-    codexMcp: null,                         // 'ak' when ak registered the codex MCP server (ownership guard for teardown)
-    opencodeMcp: null,                      // 'ak' when ak wrote opencode.json's mcp/skills/permission wiring (ownership guard for teardown)
-    opencodeManaged: null,                  // {mcp[], paths[], permissions[]} — exact opencode.json keys ak wrote (surgical teardown)
-    opencodeCatalogDir: null,               // optional override: ruflo repo checkout used as the agents/skills catalog source (default: marketplace clone → npm package)
   },
   statusline: { codex: null }, // {preset,lastProjection}: explicit ownership of Codex [tui] keys
   customBlocks: [],     // [{slug, templatePath, detector:{type:'command'|'dir'|'file', target}}]
   versionCheck: { ttlHours: 24, last: null, seen: {} },
 };
 
+const plain = (value) => value !== null && typeof value === 'object' && !Array.isArray(value);
+
+function assertLoadableEnvelopes(config) {
+  if (!plain(config.integrations)) {
+    throw new TypeError(
+      'integrations must be an object; repair kit.json or rerun `ak setup --reconfigure`',
+    );
+  }
+  if (config.integrations.version !== CURRENT_INTEGRATIONS_VERSION) {
+    throw new TypeError(
+      `unsupported integrations.version ${String(config.integrations.version)}; update agentic-kit before using this config`,
+    );
+  }
+  if (!plain(config.integrations.hosts)) {
+    throw new TypeError('integrations.hosts must be an object');
+  }
+  if (!Array.isArray(config.integrations.bindings)) {
+    throw new TypeError('integrations.bindings must be an array');
+  }
+  if (config.integrations.ownership !== undefined && !plain(config.integrations.ownership)) {
+    throw new TypeError('integrations.ownership must be an object');
+  }
+  if (!plain(config.routing)) {
+    throw new TypeError(
+      'routing must be an object; repair kit.json or rerun `ak setup --reconfigure`',
+    );
+  }
+  if (config.routing.version !== ROUTING_SCHEMA_VERSION) {
+    throw new TypeError(
+      `unsupported routing.version ${String(config.routing.version)}; update agentic-kit before using this config`,
+    );
+  }
+}
+
+export class KitConfigError extends Error {
+  constructor(configPath, reason, options = {}) {
+    super(`invalid kit config ${configPath}: ${reason}`, options);
+    this.name = 'KitConfigError';
+    this.configPath = configPath;
+    this.reason = reason;
+  }
+}
+
+export function migrateKitConfig(config = {}) {
+  // Integration migration must consume legacy hosts and ownership first; routing
+  // then consumes primaryHost/dualRouting from the same still-raw providers map.
+  return migrateRoutingConfig(migrateIntegrationConfig(config));
+}
+
+function withDefaults(config) {
+  assertLoadableEnvelopes(config);
+  const integrations = config.integrations?.version === CURRENT_INTEGRATIONS_VERSION
+    ? {
+      ...structuredClone(DEFAULTS.integrations),
+      ...config.integrations,
+      hosts: { ...DEFAULTS.integrations.hosts, ...config.integrations.hosts },
+    }
+    : config.integrations;
+  const routing = config.routing?.version === ROUTING_SCHEMA_VERSION
+    ? {
+      ...structuredClone(DEFAULTS.routing),
+      ...config.routing,
+      routes: { ...DEFAULTS.routing.routes, ...config.routing.routes },
+    }
+    : config.routing;
+  const merged = {
+    ...structuredClone(DEFAULTS),
+    ...config,
+    health: { ...DEFAULTS.health, ...config.health },
+    mcp: { ...DEFAULTS.mcp, ...config.mcp },
+    integrations,
+    routing,
+    providers: { ...DEFAULTS.providers, ...config.providers },
+    statusline: { ...DEFAULTS.statusline, ...config.statusline },
+  };
+  // Defaults can enable a host omitted by a partial legacy file. Normalize once
+  // more so inferred bindings and the saved representation already converge.
+  return migrateKitConfig(merged);
+}
+
 export function loadKitConfig(file = kitConfigPath()) {
   // Migration: fall back to the ruflo-era location; the next save lands at the
   // new path (saves always write `file`, i.e. ~/.config/agentic-kit/kit.json).
   for (const cand of file === kitConfigPath() ? [file, legacyKitConfigPath()] : [file]) {
+    let raw;
     try {
-      const parsed = JSON.parse(fs.readFileSync(cand, 'utf8'));
-      const merged = {
-        ...structuredClone(DEFAULTS),
-        ...parsed,
-        health: { ...DEFAULTS.health, ...parsed.health },
-        mcp: { ...DEFAULTS.mcp, ...parsed.mcp },
-        providers: {
-          ...DEFAULTS.providers,
-          ...parsed.providers,
-          hosts: { ...DEFAULTS.providers.hosts, ...parsed.providers?.hosts },
-        },
-        statusline: { ...DEFAULTS.statusline, ...parsed.statusline },
-      };
-      // Normalize additively in memory. Loading never writes; the next explicit
-      // save persists the versioned integration view alongside legacy fields.
-      return structuredClone(migrateIntegrationConfig(merged));
-    } catch { /* try next */ }
+      raw = fs.readFileSync(cand, 'utf8');
+    } catch (error) {
+      if (error?.code === 'ENOENT') continue;
+      throw error;
+    }
+    let parsed;
+    try {
+      parsed = JSON.parse(raw);
+    } catch (error) {
+      throw new KitConfigError(cand, error.message, { cause: error });
+    }
+    // Migrate raw presence before defaults can masquerade as legacy user intent.
+    try {
+      return structuredClone(withDefaults(migrateKitConfig(parsed)));
+    } catch (error) {
+      if (error instanceof KitConfigError) throw error;
+      throw new KitConfigError(cand, error?.message ?? String(error), { cause: error });
+    }
   }
-  return structuredClone(migrateIntegrationConfig(structuredClone(DEFAULTS)));
+  return structuredClone(withDefaults(migrateKitConfig({})));
 }
 
 export function saveKitConfig(cfg, file = kitConfigPath()) {
   fs.mkdirSync(path.dirname(file), { recursive: true });
-  fs.writeFileSync(file, JSON.stringify(migrateIntegrationConfig(cfg), null, 2) + '\n');
+  fs.writeFileSync(file, JSON.stringify(migrateKitConfig(cfg), null, 2) + '\n');
 }

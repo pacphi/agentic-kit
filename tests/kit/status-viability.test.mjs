@@ -25,7 +25,7 @@ const paths = await import('../../src/lib/paths.mjs');
 const status = await import('../../src/commands/status.mjs');
 const sync = await import('../../src/commands/sync.mjs');
 const { AQE_PROVIDER_CREDENTIALS, aqeProviderCredential, credentialGaps } = await import('../../src/lib/providers.mjs');
-const { DEFAULT_ROUTES, ACTIVITIES, seedDualRouting, divergedRoutes } = await import('../../src/lib/routing.mjs');
+const { DEFAULT_ROUTES, ACTIVITIES, seedActivityRoutes, divergedRoutes } = await import('../../src/lib/routing.mjs');
 assertSandboxed(paths, HOME);
 
 const PKG_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
@@ -71,27 +71,36 @@ const rowsFor = (rows, subsystem) => rows.filter((r) => r.subsystem === subsyste
 
 /** A non-default provider config (isDefault() must be false or the providers
  *  branch short-circuits to its advisory row) carrying the given chain. */
+const routeConfig = (routes = {}) => ({
+  integrations: {
+    version: 2,
+    hosts: { claude: true, codex: true, opencode: false },
+    bindings: [],
+  },
+  routing: { version: 1, primaryHost: 'claude', routes },
+});
 const cfgWithChain = (aqeFallback) => ({
-  providers: { hosts: { claude: true, codex: true }, aqeFallback },
+  ...routeConfig(),
+  providers: { aqeFallback },
 });
 
 /** A dual-routing policy pinned to the PRIOR Opus generation — the exact #55
  *  reproduction, a machine seeded before the alpha.22 catalog bump. Built from
- *  seedDualRouting so the escalation ladders are present exactly as a real seed
+ *  seedActivityRoutes so the escalation ladders are present exactly as a real seed
  *  writes them: two of the six diverge ONLY on their escalation rung, and a
- *  hand-built fixture that dropped `escalate` would silently under-report. */
+ *  hand-built fixture that dropped `escalation` would silently under-report. */
 function divergedPolicy() {
   const rewind = (m) => (m === 'claude-opus-5' ? 'claude-opus-4-8' : m);
-  const seed = seedDualRouting({ hosts: ['claude', 'codex'] });
-  const dualRouting = {};
+  const seed = seedActivityRoutes({ hosts: ['claude', 'codex'] });
+  const activityRoutes = {};
   for (const [act, r] of Object.entries(seed)) {
-    dualRouting[act] = {
+    activityRoutes[act] = {
       ...r,
       model: rewind(r.model),
-      ...(r.escalate ? { escalate: r.escalate.map((e) => ({ ...e, model: rewind(e.model) })) } : {}),
+      ...(r.escalation ? { escalation: r.escalation.map((e) => ({ ...e, model: rewind(e.model) })) } : {}),
     };
   }
-  return dualRouting;
+  return activityRoutes;
 }
 
 /** The six the issue reported, named rather than recomputed — if a catalog bump
@@ -197,7 +206,7 @@ test('credentialGaps reports a dead codex rung through the real env path', () =>
 const FORBIDDEN_FRAMING = /\b(stale|outdated|superseded)\b/i;
 
 test('diverged seeded routes are reported as INFO, not WARN', async () => {
-  seedHome({ providers: { hosts: { claude: true, codex: true }, dualRouting: divergedPolicy() } });
+  seedHome(routeConfig(divergedPolicy()));
   const row = rowsFor(await collect(), 'routing').find((r) => /diverge/i.test(r.message));
   assert.ok(row, 'divergence must surface somewhere — invisibility is the defect');
   assert.equal(row.level, 'info',
@@ -205,13 +214,13 @@ test('diverged seeded routes are reported as INFO, not WARN', async () => {
 });
 
 test('the divergence row never calls a diverged route stale, outdated, or superseded', async () => {
-  seedHome({ providers: { hosts: { claude: true, codex: true }, dualRouting: divergedPolicy() } });
+  seedHome(routeConfig(divergedPolicy()));
   const row = rowsFor(await collect(), 'routing').find((r) => /diverge/i.test(r.message));
   assert.ok(!FORBIDDEN_FRAMING.test(row.message), `row must stay neutral, got: ${row.message}`);
 });
 
 test('the divergence row shows both models so the trade is visible', async () => {
-  seedHome({ providers: { hosts: { claude: true, codex: true }, dualRouting: divergedPolicy() } });
+  seedHome(routeConfig(divergedPolicy()));
   const row = rowsFor(await collect(), 'routing').find((r) => /diverge/i.test(r.message));
   assert.match(row.message, /claude-opus-4-8/, 'the pin the machine is on');
   assert.match(row.message, /claude-opus-5/, 'and the default it diverges from');
@@ -221,7 +230,7 @@ test('the divergence row counts all SIX activities of the reported reproduction'
   // Four diverge on their primary model; implementation/testing diverge only on
   // their escalation rung. A row that counted four would under-report the very
   // state the issue documented.
-  seedHome({ providers: { hosts: { claude: true, codex: true }, dualRouting: divergedPolicy() } });
+  seedHome(routeConfig(divergedPolicy()));
   const row = rowsFor(await collect(), 'routing').find((r) => /diverge/i.test(r.message));
   assert.match(row.message, new RegExp(`\\b${REPRODUCTION_ACTIVITIES.length}\\b`));
 });
@@ -234,17 +243,17 @@ test('divergedRoutes and the status row agree on exactly which six diverge', asy
 });
 
 test('a policy seeded from CURRENT defaults produces no divergence row at all', async () => {
-  const dualRouting = {};
+  const activityRoutes = {};
   for (const act of ACTIVITIES) {
-    dualRouting[act] = { host: DEFAULT_ROUTES[act].host, model: DEFAULT_ROUTES[act].model, source: 'seeded' };
+    activityRoutes[act] = { host: DEFAULT_ROUTES[act].host, model: DEFAULT_ROUTES[act].model, provenance: 'seeded' };
   }
-  seedHome({ providers: { hosts: { claude: true, codex: true }, dualRouting } });
+  seedHome(routeConfig(activityRoutes));
   assert.equal(rowsFor(await collect(), 'routing').filter((r) => /diverge/i.test(r.message)).length, 0);
 });
 
 test('user-pinned routes are never reported as divergence, however old the model', async () => {
-  const dualRouting = { architecture: { host: 'claude', model: 'claude-opus-4-8', source: 'user' } };
-  seedHome({ providers: { hosts: { claude: true, codex: true }, dualRouting } });
+  const activityRoutes = { architecture: { host: 'claude', model: 'claude-opus-4-8', provenance: 'user' } };
+  seedHome(routeConfig(activityRoutes));
   assert.equal(rowsFor(await collect(), 'routing').filter((r) => /diverge/i.test(r.message)).length, 0);
 });
 
@@ -253,13 +262,13 @@ test('user-pinned routes are never reported as divergence, however old the model
 test('the divergence row carries no fix — the mechanism that keeps it out of syncs plan', async () => {
   // sync's plan is *defined* as the rows carrying a `fix`. A null fix is
   // therefore not cosmetic: it is what structurally prevents an auto-refresh.
-  seedHome({ providers: { hosts: { claude: true, codex: true }, dualRouting: divergedPolicy() } });
+  seedHome(routeConfig(divergedPolicy()));
   const row = rowsFor(await collect(), 'routing').find((r) => /diverge/i.test(r.message));
   assert.equal(row.fix, null);
 });
 
 test('ak sync never plans a routing refresh for a diverged policy', async () => {
-  seedHome({ providers: { hosts: { claude: true, codex: true }, dualRouting: divergedPolicy() } });
+  seedHome(routeConfig(divergedPolicy()));
   const cwd = process.cwd();
   process.chdir(PROJECT);
   let out;
@@ -274,7 +283,7 @@ test('ak sync never plans a routing refresh for a diverged policy', async () => 
 });
 
 test('a dry-run sync leaves the diverged policy byte-identical on disk', async () => {
-  seedHome({ providers: { hosts: { claude: true, codex: true }, dualRouting: divergedPolicy() } });
+  seedHome(routeConfig(divergedPolicy()));
   const before = fs.readFileSync(paths.kitConfigPath(), 'utf8');
   const cwd = process.cwd();
   process.chdir(PROJECT);
@@ -300,7 +309,7 @@ test('sync.mjs does not reference the seeded-route refresh path at all', async (
 // ── neutral framing is a whole-surface property, not one row ───────────────
 
 test('no status row anywhere frames a diverged route as stale/outdated/superseded', async () => {
-  seedHome({ providers: { hosts: { claude: true, codex: true }, dualRouting: divergedPolicy() } });
+  seedHome(routeConfig(divergedPolicy()));
   for (const r of await collect()) {
     if (!/diverge|seeded route/i.test(r.message)) continue;
     assert.ok(!FORBIDDEN_FRAMING.test(r.message), `neutral framing violated: ${r.message}`);

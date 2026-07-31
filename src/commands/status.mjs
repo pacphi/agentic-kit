@@ -174,7 +174,7 @@ export async function collect({ pkgRoot, cwd = process.cwd() }) {
       const wasm = rt.contexts.filter((c) => !c.ok);
       if (wasm.length) {
         rows.push(row('natives', 'fail',
-          `ruflo memory runtime on WASM fallback (${wasm.map((c) => `@claude-flow/${c.context}`).join(', ')}) — memory store/dual run degrade`,
+          `ruflo memory runtime on WASM fallback (${wasm.map((c) => `@claude-flow/${c.context}`).join(', ')}) — memory and orchestration may degrade`,
           'sync builds the native binding'));
       } else {
         rows.push(row('natives', 'ok', `ruflo memory runtime native (${rt.contexts.map((c) => c.context).join(', ')})`));
@@ -320,7 +320,7 @@ export async function collect({ pkgRoot, cwd = process.cwd() }) {
   // path (ADR-0001 projection #3). Only surfaces when the codex host is enabled;
   // setup/sync register it project-scoped via ensureCodexMcp. Spawn-free: reads the
   // project .mcp.json (== `claude mcp get codex`) plus the kit.json ownership marker.
-  if (cfg.providers?.hosts?.codex) {
+  if (cfg.integrations?.hosts?.codex) {
     try {
       const { registered, owned } = codexMcpStatus(cfg, cwd);
       if (registered) {
@@ -375,12 +375,12 @@ export async function collect({ pkgRoot, cwd = process.cwd() }) {
   // bridge, the converted agent set, and the platform skill. Only surfaces when
   // the opencode host is enabled AND installed (enabled-but-absent is the
   // hosts row's story); probes are file reads + one bin check (codex-review #4).
-  if (cfg.providers?.hosts?.opencode) {
+  if (cfg.integrations?.hosts?.opencode) {
     try {
       if (!(await have('opencode'))) {
         rows.push(row('opencode', 'warn', 'enabled but opencode CLI not installed', 'sync installs opencode-ai (hosts step)'));
       } else {
-        const source = catalogSource({ override: cfg.providers?.opencodeCatalogDir });
+        const source = catalogSource({ override: cfg.integrations?.ownership?.opencode?.catalogDir });
         const st = opencodeMcpStatus(cfg);
         const conv = st.parseError ? null : await opencodeConverged(cfg);
         if (st.parseError) {
@@ -399,12 +399,12 @@ export async function collect({ pkgRoot, cwd = process.cwd() }) {
           rows.push(row('opencode', 'ok',
             `opencode.json converged (claude-flow${st.brain ? ' + ruvnet-brain' : ''} MCP, ${st.paths?.length ?? 0} skills path(s))${st.owned ? '' : ' — pre-existing (not ak-managed)'}`));
         }
-        const receiptState = opencodeArtifactReceiptState(cfg.providers?.opencodeManaged);
+        const receiptState = opencodeArtifactReceiptState(cfg.integrations?.ownership?.opencode?.managed);
         const artifactReceipts = receiptState.receipts;
         if (receiptState.adoptionBlocked) {
           rows.push(row('opencode', 'warn',
             'artifact receipt ledger is malformed — ownership adoption blocked; artifacts left untouched',
-            'repair providers.opencodeManaged.artifacts in kit.json or restore it from backup'));
+            'repair integrations.ownership.opencode.managed.artifacts in kit.json or restore it from backup'));
         }
         const plug = pluginStatus({
           pkgRoot, receipt: artifactReceipts.plugin,
@@ -470,9 +470,9 @@ export async function collect({ pkgRoot, cwd = process.cwd() }) {
   // install (mise/native/brew) is reported but never touched.
   try {
     // primary host absent = fail (nothing can drive); alternate absent = warn.
-    const primaryHost = cfg.providers?.primaryHost ?? 'claude';
+    const primaryHost = cfg.routing?.primaryHost ?? 'claude';
     for (const h of HOSTS) {
-      if (!cfg.providers.hosts[h.id]) continue;
+      if (!cfg.integrations.hosts[h.id]) continue;
       const detected = integrationFacts.hosts[h.id];
       if (detected?.present === false) {
         rows.push(row('hosts', h.id === primaryHost ? 'fail' : 'warn',
@@ -510,7 +510,7 @@ export async function collect({ pkgRoot, cwd = process.cwd() }) {
       } else {
         rows.push(row('providers', 'info', 'claude-only (default host)'));
       }
-      if (!cfg.providers?.hosts?.opencode && await have('opencode')) {
+      if (!cfg.integrations?.hosts?.opencode && await have('opencode')) {
         rows.push(row('providers', 'info', 'opencode CLI installed but not enabled (`ak host pick --host claude,opencode` wires it)'));
       }
     } else {
@@ -524,7 +524,7 @@ export async function collect({ pkgRoot, cwd = process.cwd() }) {
         const diskOrder = (disk?.fallbackChain?.entries ?? []).map((e) => e.provider).join('→');
         routerDrift = disk?._managedBy !== 'agentic-kit' || diskOrder !== chain.map((e) => e.provider).join('→');
       }
-      const on = HOSTS.filter((h) => cfg.providers.hosts[h.id]).map((h) => h.id).join('+') || 'none';
+      const on = HOSTS.filter((h) => cfg.integrations.hosts[h.id]).map((h) => h.id).join('+') || 'none';
       const chainStr = chain.length ? `; aqe chain ${chain.map((e) => e.provider).join('→')}` : '';
       if (envDrift || routerDrift) {
         rows.push(row('providers', 'warn', `provider config drifted (want ${on}${chainStr}, ${scope})`, 'sync re-applies provider env + aqe router'));
@@ -550,10 +550,10 @@ export async function collect({ pkgRoot, cwd = process.cwd() }) {
     rows.push(row('providers', 'warn', `provider check unavailable: ${e.message}`));
   }
 
-  // per-activity routing (dualRouting → agentOverrides projection). Only surfaces
+  // Per-activity routing (canonical routes → agentOverrides projection). Only surfaces
   // once a policy is set; the dashboard renders this row like any other subsystem.
   try {
-    const policy = cfg.providers?.dualRouting ?? {};
+    const policy = cfg.routing?.routes ?? {};
     if (Object.keys(policy).length) {
       const s = routingSummary(policy);
       const want = policyToAgentOverrides(policy);
@@ -572,12 +572,12 @@ export async function collect({ pkgRoot, cwd = process.cwd() }) {
       // "diverges from": which side wins is activity-dependent (a newer default
       // can cost 2-3× the agentic turns on routine work), so a `warn` would push
       // users to spend turns clearing a lint. No `fix` — sync must never
-      // auto-refresh a pin; `ak x provider refresh` is the opt-in path (#55).
+      // auto-refresh a pin; `ak host refresh` is the opt-in path (#55).
       const diverged = divergedRoutes(policy);
       if (diverged.length) {
         const pairs = [...new Set(diverged.flatMap((d) => [
           ...(d.modelDiverged ? [`${d.model} vs ${d.defaultModel}`] : []),
-          ...d.escalate.map((e) => `${e.model} vs ${e.defaultModel} (escalation)`),
+          ...d.escalation.map((e) => `${e.model} vs ${e.defaultModel} (escalation)`),
         ]))].join(', ');
         rows.push(row('routing', 'info',
           `${diverged.length} seeded route(s) diverge from current defaults (${pairs}) — ak host refresh`));
@@ -614,7 +614,7 @@ export async function collect({ pkgRoot, cwd = process.cwd() }) {
     const resolve = (r) => (r.custom
       ? (r.template.startsWith('~/') ? path.join(paths.home, r.template.slice(2)) : r.template)
       : path.join(pkgRoot, 'claude', r.template));
-    const ctx = { flags: { dualMode: bothHostsEnabled(cfg), opencodeEnabled: !!cfg.providers?.hosts?.opencode } };
+    const ctx = { flags: { dualMode: bothHostsEnabled(cfg), opencodeEnabled: !!cfg.integrations?.hosts?.opencode } };
     for (const t of guidanceTargets({ cwd, cfg })) {
       const treg = [...blocksForTarget(rowsReg, t.name), ...retiredForTarget(rowsReg, t.name)];
       const res = await syncBlocks(t.file, treg, resolve, { dryRun: true, context: ctx });
@@ -682,7 +682,7 @@ export async function collect({ pkgRoot, cwd = process.cwd() }) {
     rows.push(row('statusline', 'info', 'no project statusline here (created by setup)'));
   }
   // Codex has a native user-scoped line, but no command-backed rich renderer.
-  if (cfg.providers?.hosts?.codex || cfg.statusline?.codex) {
+  if (cfg.integrations?.hosts?.codex || cfg.statusline?.codex) {
     const codexLine = statuslineDrift(cfg);
     if (!codexLine.owned) {
       rows.push(row('codex-statusline', 'info',
@@ -696,7 +696,7 @@ export async function collect({ pkgRoot, cwd = process.cwd() }) {
         `managed Codex ${codexLine.preset} native status line is current (rich ruflo/SONA/AQE segments remain Claude-only)`));
     }
   }
-  if (cfg.providers?.hosts?.opencode) {
+  if (cfg.integrations?.hosts?.opencode) {
     rows.push(row('statusline', 'info',
       'opencode has no statusline surface; its ruflo lifecycle ships via the plugins/ bridge + AGENTS.md'));
   }

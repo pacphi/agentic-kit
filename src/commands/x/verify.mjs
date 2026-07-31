@@ -143,7 +143,7 @@ async function verifyProviders() {
   // enabled hosts must actually be installed
   const hosts = (await collectIntegrationFacts({ cwd: process.cwd(), cfg })).hosts;
   for (const h of HOSTS) {
-    if (!cfg.providers?.hosts?.[h.id]) continue;
+    if (!cfg.integrations?.hosts?.[h.id]) continue;
     if (hosts[h.id].present) ok(`host '${h.id}' enabled and installed${hosts[h.id].version ? ` (v${hosts[h.id].version})` : ''}`);
     else { fail(`host '${h.id}' enabled in kit.json but not on PATH`); good = false; }
   }

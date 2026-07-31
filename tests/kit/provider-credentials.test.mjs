@@ -268,7 +268,7 @@ test('credentialGaps propagates an injected host-auth failure across the whole c
   assert.deepEqual(gaps.map((g) => g.provider), ['claude-code', 'openai']);
 });
 
-// ── detectAqeProviders (what `ak x provider status` renders) ────────────────
+// ── detectAqeProviders (what `ak x host status` renders) ───────────────────
 
 test('detectAqeProviders covers every aqe provider type', () => {
   const got = detectAqeProviders({ env: BARE_ENV });

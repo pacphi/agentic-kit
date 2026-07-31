@@ -26,21 +26,40 @@ family on your behalf.
 | `ak x statusline codex native\|extended` | opt into a user-wide Codex status-line preset | **yes** — records the preset |
 | `ak setup`           | first-time bootstrap of absent tooling          | only via explicit flags (`--codex`, `--opencode`, `--primary-host`) |
 
-| Migration surface   | What to know                                    |
-| ------------------- | ----------------------------------------------- |
-| `ak dual` → `ak run` | `ak dual` is a deprecated compatibility wrapper — existing scripts keep working (it warns on stderr and will be removed before the stable release); use `ak run` for new execution work. OpenCode routes require the current release — remove them before downgrading. `--escalate` exists on both, with deliberately different semantics: the wrapper retries the *whole pipeline* once on any failure; `ak run` advances only the *failed worker* one rung of its route's ladder per attempt (ADR-0019) and records the attempt trail in the result. |
+## 4.0 GA surface migration
+
+Version 4.0 removes the pre-GA compatibility surfaces in one direction:
+
+- Replace `ak dual` with `ak run`. The stable executor applies `--escalate` per failed worker and
+  records the attempt trail. The removed `--parallel` switch has no direct replacement because
+  `ak run` is concurrent by default; use `--max-concurrent 1` for sequential execution.
+  Templates, repeatable `--route` overrides, `--timeout`, and `--json` continue on `ak run`.
+- Replace `ak provider` with `ak host`, and replace `ak x provider` with `ak x host`. Removed
+  commands fail as unknown commands; provider bindings remain a separate domain concept.
+- On first load, host enablement moves from `providers.hosts` to `integrations.hosts`,
+  `providers.primaryHost` moves to `routing.primaryHost`, and `providers.dualRouting` moves to
+  `routing.routes`. Within each route, `source` becomes `provenance` and `escalate` becomes
+  `escalation`. `providers.bindings` merges without loss into `integrations.bindings`;
+  conflicting binding ids stop with a readable configuration error.
+- Adapter ownership markers such as Codex and OpenCode MCP/catalog fields move from `providers`
+  to `integrations.ownership`. A successful write records versioned `routing` and `integrations`
+  envelopes and removes the old fields; later loads use only the canonical shape.
+- Older alphas could install the global `@claude-flow/codex` package and run
+  `ruflo init --dual --force`. Those releases stored no ownership receipt, so GA cannot safely
+  uninstall the package or delete generated project agents automatically. If you installed the
+  package only for the removed executor, run `npm uninstall -g @claude-flow/codex`; review any
+  generated project agent files before removing them.
+
+The migration preserves user-pinned hosts, models, escalation order, and provenance. Review the
+result with `ak host status`, then use `ak run --dry-run` to inspect the materialized plan.
+`--json` emits machine-readable output while executing; combine it with `--dry-run` when
+execution must not start.
 
 A **host** runs the work; a **provider** serves inference. A binding can connect one provider to
 several hosts through separate native configuration **projections**, while **observability**
 sources establish facts with observed, configured, inferred, or unknown provenance. Upgrading does
 not silently create, adopt, or rewrite these bindings, and credentials remain environment-only.
 See [ADR-0016](adr/0016-capability-driven-integration-adapters.md).
-
-`ak provider` and `ak x provider` are deprecated alpha compatibility aliases for the former
-combined command. They warn on stderr and will be removed before stable. Use top-level `ak host`
-for execution-host lifecycle and selection (`ak x host` only when you specifically want the
-plumbing spelling). This namespace correction does not rename inference providers or provider
-bindings into hosts.
 
 ## QE-Court configs created before agentic-qe 3.13.3
 
@@ -76,8 +95,8 @@ ak host status                 # 3. verify: hosts "enabled, wired" + routing tab
 
 Step 1 gets the newer code onto disk. Step 2 is what actually turns dual-host on — it
 records `codex` in `kit.json` and does the wiring: writes `ENABLE_CODEX` into
-`.claude/settings.local.json`, runs `ruflo init --dual`, seeds the per-activity routing
-policy, registers the Codex↔ruflo MCP bridge both ways, and generates the dual-mode agents.
+`.claude/settings.local.json`, seeds the per-activity routing policy, registers the
+Codex↔ruflo MCP bridge both ways, and generates the dual-host guidance.
 Add `--primary-host codex` if you want Codex to lead (Claude becomes the alternate).
 
 > [!NOTE]

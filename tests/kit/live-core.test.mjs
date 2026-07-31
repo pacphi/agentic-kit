@@ -41,6 +41,10 @@ test('event schema preserves explicit blocked evidence', () => {
   assert.equal(createLiveEvent(base({ status: 'blocked' })).status, 'blocked');
 });
 
+test('event schema preserves retired compatibility provenance as internal', () => {
+  assert.equal(createLiveEvent(base({ surface: 'dual-run' })).surface, 'internal');
+});
+
 test('event schema assigns privacy-safe project and host-qualified session identities', () => {
   const event = createLiveEvent(base({
     sessionId: 'shared:id',

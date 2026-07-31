@@ -53,14 +53,12 @@ missing price.
 | Route provenance | Whether a route is a default, seeded by `ak`, or deliberately set by the user |
 | Escalation rung | Alternate host and model tried after failure when escalation is requested |
 | `ak run` | Canonical host-neutral execution of a materialized routing plan |
-| Dual run | Deprecated Claude-and-Codex compatibility pipeline materialized from the routing policy |
 | Read-model projection | Derived query or UI state, distinct from a configuration projection |
 | Transcript host | Host whose native artifact supplied a transcript |
 | Inference identity | Provider and model supported by provider-specific or out-of-band evidence |
 
-`Dual` describes the two peer execution hosts in the deprecated compatibility substrate. The
-number of inference providers behind those hosts does not change that legacy pipeline into a
-three-host orchestration. Generalized execution belongs to `ak run`.
+`Dual-host` describes two enabled peer hosts, not an execution command and not evidence that two
+inference vendors served a workflow. Generalized execution belongs to `ak run`.
 
 ## Usage rules
 
@@ -74,11 +72,11 @@ three-host orchestration. Generalized execution belongs to `ak run`.
 - Do not infer an inference provider from a transcript host alone.
 - Do not replace an unknown fact with a convenient default.
 
-## Transitional names
+## Persisted names
 
-- `ak host` and `ak x host` are canonical. `ak provider` and `ak x provider` are deprecated alpha
-  aliases scheduled for removal before stable.
-- `kit.json.providers.hosts`, `providers.primaryHost`, and `providers.dualRouting` are historical
-  persisted paths. They remain compatibility surfaces, not permission to call hosts providers.
-- Compatibility exports in `hosts.mjs`, `providers.mjs`, and `routing.mjs` are derived views, not
-  independent domain registries.
+- `ak host` and `ak x host` manage execution hosts and routing; they do not redefine inference
+  providers.
+- `kit.json.integrations.hosts` records enabled hosts. Top-level `routing` records `version`,
+  `primaryHost`, and per-activity `routes`; route entries use `provenance` and `escalation`.
+- Derived exports in `hosts.mjs`, `providers.mjs`, and `routing.mjs` are views, not independent
+  domain registries.

@@ -91,7 +91,7 @@ test('--dry-run reports what --codex/--primary-host WOULD do without enabling th
     setup.run({ flags: FLAGS({ 'dry-run': true, minimal: true, codex: true }), pkgRoot: PKG_ROOT }));
   assert.equal(result, 0);
   assert.match(out, /dry-run: --codex\/--primary-host would enable \+ install the codex host/);
-  assert.equal(loadKitConfig().providers.hosts.codex, false,
+  assert.equal(loadKitConfig().integrations.hosts.codex, false,
     'a previewed --codex must not persist the host opt-in');
   assertUnchanged(before, HOME, '`ak setup --codex --dry-run` must not touch the filesystem');
 });
@@ -200,8 +200,8 @@ test('ak setup --opencode --yes persists the host and wires it via the shared st
       assert.match(out, /restart opencode to load the hooks/, 'restart guidance after successful wiring');
     });
     const cfg = loadKitConfig();
-    assert.equal(cfg.providers.hosts.opencode, true, 'enabled host persisted to kit.json');
-    assert.equal(cfg.providers.opencodeMcp, 'ak', 'ownership marker persisted');
+    assert.equal(cfg.integrations.hosts.opencode, true, 'enabled host persisted to kit.json');
+    assert.equal(cfg.integrations.ownership.opencode.mcp, 'ak', 'ownership marker persisted');
     const doc = JSON.parse(fs.readFileSync(path.join(ocHome(), 'opencode.json'), 'utf8'));
     assert.ok(doc.mcp['claude-flow'], 'claude-flow MCP wired');
     assert.ok(fs.existsSync(path.join(ocHome(), 'plugins', 'ruflo-hooks.js')), 'lifecycle plugin deployed');
@@ -224,7 +224,7 @@ test('ak setup --opencode --dry-run writes nothing anywhere (kit.json, opencode 
     setup.run({ flags: FLAGS({ 'dry-run': true, minimal: true, opencode: true }), pkgRoot: PKG_ROOT }));
   assert.equal(result, 0);
   assert.match(out, /dry-run: --opencode would enable the opencode host/);
-  assert.equal(loadKitConfig().providers.hosts.opencode, false, 'a previewed --opencode must not persist');
+  assert.equal(loadKitConfig().integrations.hosts.opencode, false, 'a previewed --opencode must not persist');
   assert.ok(!fs.existsSync(ocHome()), 'no opencode config home fabricated by a dry run');
   assertUnchanged(before, HOME, '`ak setup --opencode --dry-run` must not touch the filesystem');
 });
@@ -252,7 +252,7 @@ test('ak setup --opencode with an ABSENT CLI never fabricates the config home', 
     setup.run({ flags: FLAGS({ opencode: true, yes: true, minimal: true }), pkgRoot: PKG_ROOT }));
   assert.equal(result, 0, out);
   assert.match(out, /opencode: enabled but CLI not installed — wiring skipped/);
-  assert.equal(loadKitConfig().providers.hosts.opencode, true,
+  assert.equal(loadKitConfig().integrations.hosts.opencode, true,
     'the enablement intent is still persisted (sync completes it once installed)');
   assert.ok(!fs.existsSync(ocHome()), 'no config home created for a host that is not there');
 });

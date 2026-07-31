@@ -932,7 +932,6 @@ function aggregate(records, { days, now, cutoff, deps }) {
       id: rec.id, host: rec.host ?? rec.provider,
       provider: rec.inferenceProvider ?? null,
       transcriptProvider: rec.provider,
-      inferenceProvider: rec.inferenceProvider ?? null, // compatibility alias
       providerProvenance: rec.providerProvenance ?? 'unknown',
       title: rec.title, project: rec.project,
       worktree: rec.worktree ?? null,
@@ -1050,7 +1049,6 @@ function aggregate(records, { days, now, cutoff, deps }) {
     windowDays: days,
     pricesAsOf: deps.pricesAsOf ?? null,
     totals, byDay, byModel, byHost, byProvider,
-    byTranscriptProvider: byHost, // compatibility alias for the historical map
     byProject, byCategory,
     punchcard, projectTree, sessions, codexRateLimits, insights: [],
   };
@@ -1376,7 +1374,6 @@ function sessionPayload(rec, turns, deps) {
       id: rec.id, host: rec.host ?? rec.provider,
       provider: rec.inferenceProvider ?? null,
       transcriptProvider: rec.provider,
-      inferenceProvider: rec.inferenceProvider ?? null, // compatibility alias
       providerProvenance: rec.providerProvenance ?? 'unknown',
       title: rec.title, project: rec.project,
       worktree: rec.worktree ?? null,

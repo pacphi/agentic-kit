@@ -55,7 +55,6 @@ Source adapters are anti-corruption layers for:
 
 - Claude session and delegated-agent artifacts;
 - Codex rollouts and state-ledger spawn edges;
-- legacy ak dual-run workflow/routing metadata;
 - ruflo swarm, agent, hook, and daemon state;
 - agentic-qe tasks, workers, evaluations, gates, and court verdicts;
 - explicit skill, plugin, MCP, and tool lifecycle records.
@@ -516,7 +515,7 @@ Tests are written against ports and fixtures before each adapter or lifecycle tr
 1. **Contract tests:** event schema, action vocabulary, privacy allowlist, confidence ordering.
 2. **Tailer tests:** append, partial record, duplicate notification, rotation, truncation, checkpoint
    restart, and symlink/containment rejection.
-3. **Source-adapter fixtures:** known Claude, Codex, ruflo, agentic-qe, dual-run, skill, plugin,
+3. **Source-adapter fixtures:** known Claude, Codex, ruflo, agentic-qe, skill, plugin,
    and MCP records; unknown fields and schema generations.
 4. **Aggregate tests:** child-before-parent, conflict, terminal-state monotonicity, expiry, and
    idempotency.
@@ -584,7 +583,6 @@ process memory limits.
 
 ### Milestone 5: Ecosystem enrichment
 
-- Add dual-run planned topology and execution updates.
 - Add ruflo swarm/agent/hook/daemon source adapters.
 - Add agentic-qe task/evaluation/verdict source adapters.
 - Add explicit skill, plugin, MCP, and tool activity source adapters.
@@ -648,9 +646,9 @@ The server subscribes before taking the initial snapshot and reconciles buffered
 closing the snapshot-to-subscribe race. A slow-client queue overflow discards queued frames and
 sends a reset snapshot after drain.
 
-The default command discovers Claude/Codex transcripts and reads Codex ledger edges. Ruflo,
-agentic-qe, and dual-run source adapters require explicit, repeatable `--live-source 'surface=path'`
-registration, where `surface` is `ruflo`, `aqe`, or `dual-run`. Explicit sources consume tailer
+The default command discovers Claude/Codex transcripts and reads Codex ledger edges. Ruflo and
+agentic-qe source adapters require explicit, repeatable `--live-source 'surface=path'`
+registration, where `surface` is `ruflo` or `aqe`. Explicit sources consume tailer
 capacity before Claude/Codex discovery. Paths resolve against the startup working directory and are
 not confined to the project, so registration is an operator authorization to read that file.
 Independent plugin, skill, MCP, and gate registries are not implemented. This is an explicit source

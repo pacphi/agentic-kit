@@ -1,11 +1,13 @@
 # ADR-0016 — Capability-driven host, provider, binding, projection, and observability adapters
 
-- **Status:** Accepted
+- **Status:** Accepted; compatibility clauses superseded by
+  [ADR-0020](0020-ga-stable-surfaces.md)
 - **Date:** 2026-07-28
 - **Updated:** 2026-07-30
 - **Update note:** Added read-only Codex plugin-hook compatibility facts,
   runtime-selected Ruflo project-memory store proofs, and the non-correlatable
-  OpenRouter account-analytics boundary.
+  OpenRouter account-analytics boundary; removed the pre-GA compatibility command,
+  persisted fields, and adapter bootstrap.
 - **Deciders:** agentic-kit maintainers
 - **Related:** [ADR-0001](0001-one-routing-policy-many-projections.md),
   [ADR-0003](0003-auto-seed-dual-host-provenance.md),
@@ -18,6 +20,9 @@
   [ADR-0015](0015-managed-codex-native-statusline.md),
   [issue #59](https://github.com/pacphi/agentic-kit/issues/59),
   [issue #71](https://github.com/pacphi/agentic-kit/issues/71)
+
+> **GA amendment:** the capability axes and lifecycle contracts remain authoritative. Sections
+> that preserve compatibility exports, commands, or persisted fields are historical after 4.0.
 
 ## Context
 

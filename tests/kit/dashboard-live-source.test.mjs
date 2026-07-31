@@ -8,16 +8,14 @@ test('dashboard parses repeatable explicit structured live sources', () => {
   assert.deepEqual(parseLiveSources([
     'ruflo=.claude-flow/live.jsonl',
     'aqe=/tmp/aqe.jsonl',
-    'dual-run=plans/run.jsonl',
   ], cwd), [
     { surface: 'ruflo', file: path.resolve(cwd, '.claude-flow/live.jsonl') },
     { surface: 'aqe', file: path.resolve('/tmp/aqe.jsonl') },
-    { surface: 'dual-run', file: path.resolve(cwd, 'plans/run.jsonl') },
   ]);
 });
 
 test('dashboard rejects ambiguous or unsupported live-source specifications', () => {
-  for (const value of ['ruflo', 'plugin=events.jsonl', 'aqe=', '=events.jsonl']) {
+  for (const value of ['ruflo', 'plugin=events.jsonl', 'dual-run=plans.jsonl', 'aqe=', '=events.jsonl']) {
     assert.throws(() => parseLiveSources(value, '/tmp'), /invalid --live-source/);
   }
 });

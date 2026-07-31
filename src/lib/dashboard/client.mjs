@@ -315,13 +315,13 @@ export const JS = `
     for(var i=0;i<rt.routes.length;i++){
       var r=rt.routes[i];
       var tag=r.akOriginated?' <span class="r-tag">ak</span>':'';
-      var escHtml=(r.escalate&&r.escalate.length)?'<span class="r-esc mono">↑ '+esc(r.escalate.join("→"))+"</span>":"";
+      var escHtml=(r.escalation&&r.escalation.length)?'<span class="r-esc mono">↑ '+esc(r.escalation.join("→"))+"</span>":"";
       var primAttr=(r.host===primary)?' data-primary="1"':'';
       html+='<div class="r-row">'
         +'<span class="r-act mono">'+esc(r.activity)+tag+"</span>"
         +'<span class="r-host r-host-'+esc(r.host)+'"'+primAttr+' title="'+(r.host===primary?"primary host":"alternate host")+'">'+esc(r.host)+"</span>"
         +'<span class="r-model mono">'+esc(r.model)+"</span>"
-        +'<span class="r-meta">'+escHtml+'<span class="r-src r-src-'+esc(r.source)+'">'+esc(r.source)+"</span></span>"
+        +'<span class="r-meta">'+escHtml+'<span class="r-src r-src-'+esc(r.provenance)+'">'+esc(r.provenance)+"</span></span>"
       +"</div>";
     }
     document.getElementById("route-matrix").innerHTML=html;
@@ -632,9 +632,8 @@ export const JS = `
         +'<span class="db-lab">'+esc(x.day.slice(8))+"</span></div>";
     }).join(""):'<div class="empty">no days in window.</div>';
 
-    // Host and inference-provider are independent axes. Fall back to the
-    // historical byProvider host map only for pre-migration cached payloads.
-    var prov=d.byHost||d.byTranscriptProvider||d.byProvider||{};
+    // Host and inference-provider are independent canonical axes.
+    var prov=d.byHost||{};
     var order=["claude","codex"];
     for(k in prov)if(order.indexOf(k)<0)order.push(k);
     document.getElementById("u-hosts").innerHTML=order.map(function(name){
@@ -921,8 +920,8 @@ export const JS = `
   // block-level sibling inside .pbody, not a grid child of .srow, so it spans
   // the full width without joining the column layout.
   function sessionRow(sx){
-    var host=sx.host||sx.transcriptProvider||((sx.provider==="codex")?"codex":"claude");
-    var provider=sx.provider||sx.inferenceProvider||"unknown";
+    var host=sx.host||"unknown";
+    var provider=sx.provider||"unknown";
     var cat=sx.category||"Unclassified";
     var uncl=(cat==="Unclassified");
     var weak=(typeof sx.confidence==="number"&&sx.confidence<0.6)?"0":"1";

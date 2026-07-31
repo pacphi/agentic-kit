@@ -1,8 +1,14 @@
 # ADR-0002 — Activity vocabulary & defaults seeded from rUv's shipped templates
 
-- **Status:** Accepted
+- **Status:** Amended by [ADR-0020](0020-ga-stable-surfaces.md)
 - **Date:** 2026-07-23
+- **Updated:** 2026-07-30
+- **Update note:** Preserved the activity vocabulary and moved its runtime ownership to the
+  in-repository host-neutral runner.
 - **Deciders:** agentic-kit maintainers
+
+> **Historical source note:** the activity vocabulary remains, but 4.0 no longer installs or
+> executes through the dynamic adapter used to ground the original defaults.
 
 ## Context
 

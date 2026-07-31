@@ -30,8 +30,8 @@ test('mutating commands intercept both --help and -h before running', () => {
 });
 
 test('every command exposes an Examples section in its help', () => {
-  for (const cmd of [['setup'], ['status'], ['sync'], ['usage'], ['run'], ['dual'], ['dashboard'], ['uninstall'],
-    ['host'], ['provider'], ['x', 'mcp'], ['x', 'host'], ['x', 'provider'],
+  for (const cmd of [['setup'], ['status'], ['sync'], ['usage'], ['run'], ['dashboard'], ['uninstall'],
+    ['host'], ['x', 'mcp'], ['x', 'host'],
     ['x', 'verify'], ['x', 'reference'], ['x', 'daemon-gc']]) {
     const r = ak(...cmd, '--help');
     assert.equal(r.status, 0, `${cmd.join(' ')} exit`);
@@ -63,4 +63,16 @@ test('unknown plumbing command exits 2 and prints the plumbing index', () => {
   const r = ak('x', 'bogus');
   assert.equal(r.status, 2);
   assert.match(r.stdout, /unknown plumbing command: bogus/);
+});
+
+test('removed dual/provider commands exit 2 and are omitted from help', () => {
+  for (const args of [['dual'], ['provider'], ['x', 'provider']]) {
+    const r = ak(...args);
+    assert.equal(r.status, 2, `${args.join(' ')} exit`);
+    assert.match(r.stdout, args[0] === 'x' ? /unknown plumbing command: provider/ : /unknown command:/);
+  }
+  const top = ak('--help');
+  assert.doesNotMatch(top.stdout, /^\s+ak (?:dual|provider)\s+/m);
+  const all = ak('--help', '--all');
+  assert.doesNotMatch(all.stdout, /^\s+ak x provider\s+/m);
 });

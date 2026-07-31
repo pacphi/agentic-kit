@@ -1,9 +1,8 @@
-// ak run — host-neutral execution of the managed activity routing plan. `ak dual`
-// remains the compatibility adapter for claude-flow-codex collaboration pipelines.
+// ak run — host-neutral execution of the managed activity routing plan.
 import { loadKitConfig } from '../lib/config.mjs';
 import { fail, ok, dim, bold } from '../lib/output.mjs';
 import { executeRunPlan } from '../lib/execution/runner.mjs';
-import { DUAL_RUN_TEMPLATE_NAMES, materializeRunPlan, parseRouteSpecs } from '../lib/routing.mjs';
+import { RUN_TEMPLATE_NAMES, materializeRunPlan, parseRouteSpecs } from '../lib/routing.mjs';
 
 export const options = {
   route: { type: 'string', multiple: true },
@@ -28,7 +27,7 @@ repositories you would trust with your full user privileges (ADR-0018).
 Usage:
   ak run <template> "<task>"
 
-Templates: ${DUAL_RUN_TEMPLATE_NAMES.join(', ')}
+Templates: ${RUN_TEMPLATE_NAMES.join(', ')}
 
 Options:
   --route 'act:host[:model]'   per-run routing override (repeatable; not persisted)
@@ -59,18 +58,18 @@ function positiveInt(value, name, { ceiling } = {}) {
   return n;
 }
 
-/** A persisted dualRouting entry (kit.json is hand-editable — CLI routes are
+/** A persisted routing.routes entry (kit.json is hand-editable — CLI routes are
  *  validated, file entries were not, and a bad one crashed plan *printing*
  *  far from the cause, #88). Returns an error string, or null when valid. */
 function routeEntryError(activity, entry) {
   if (!entry || typeof entry !== 'object') return `route "${activity}" must be an object`;
   if (typeof entry.host !== 'string' || !entry.host) return `route "${activity}" requires a non-empty host string`;
   if (entry.model != null && typeof entry.model !== 'string') return `route "${activity}".model must be a string when present`;
-  if (entry.escalate != null) {
-    if (!Array.isArray(entry.escalate)) return `route "${activity}".escalate must be an array when present`;
-    for (const [i, rung] of entry.escalate.entries()) {
-      if (!rung || typeof rung.host !== 'string' || !rung.host) return `route "${activity}".escalate[${i}] requires a non-empty host string`;
-      if (rung.model != null && typeof rung.model !== 'string') return `route "${activity}".escalate[${i}].model must be a string when present`;
+  if (entry.escalation != null) {
+    if (!Array.isArray(entry.escalation)) return `route "${activity}".escalation must be an array when present`;
+    for (const [i, rung] of entry.escalation.entries()) {
+      if (!rung || typeof rung.host !== 'string' || !rung.host) return `route "${activity}".escalation[${i}] requires a non-empty host string`;
+      if (rung.model != null && typeof rung.model !== 'string') return `route "${activity}".escalation[${i}].model must be a string when present`;
     }
   }
   return null;
@@ -82,7 +81,7 @@ function validatePolicy(policy) {
 }
 
 export function buildRunPlan(cfg, template, task, routeFlags = []) {
-  let policy = { ...(cfg.providers?.dualRouting ?? {}) };
+  let policy = { ...(cfg.routing?.routes ?? {}) };
   if (routeFlags.length) {
     const { policy: overrides, warnings } = parseRouteSpecs(routeFlags);
     policy = { ...policy, ...overrides };
@@ -115,8 +114,8 @@ function printResults(results) {
 export async function run({ flags, positionals, executePlan = executeRunPlan, cfg = loadKitConfig() }) {
   const template = positionals[0];
   const task = positionals.slice(1).join(' ').trim();
-  if (!template || !DUAL_RUN_TEMPLATE_NAMES.includes(template)) {
-    fail(`unknown template "${template ?? ''}" — expected: ${DUAL_RUN_TEMPLATE_NAMES.join(', ')}`);
+  if (!template || !RUN_TEMPLATE_NAMES.includes(template)) {
+    fail(`unknown template "${template ?? ''}" — expected: ${RUN_TEMPLATE_NAMES.join(', ')}`);
     return 2;
   }
   if (!task) { fail('a task description is required: ak run <template> "<task>"'); return 2; }

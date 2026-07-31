@@ -9,7 +9,7 @@ import {
   emptyLiveProjection, reduceLiveEvent, serializeLiveProjection, sweepLiveProjection,
 } from './projection.mjs';
 import { LiveReplayStream } from './replay-stream.mjs';
-import { adaptDualRunRecord, adaptStructuredEvent } from './structured-adapter.mjs';
+import { adaptStructuredEvent } from './structured-adapter.mjs';
 import { resolveProjectLabel } from './project-label.mjs';
 
 const safeEntries = (dir) => {
@@ -170,7 +170,7 @@ export class LiveSessionsService {
     // discovery. Otherwise saturated Claude + Codex stores can consume every
     // tailer slot before a --live-source file is considered.
     for (const source of this.#options.structuredSources.slice(0, this.#options.maxFiles)) {
-      if (!source?.file || !['ruflo', 'aqe', 'dual-run'].includes(source.surface)) continue;
+      if (!source?.file || !['ruflo', 'aqe'].includes(source.surface)) continue;
       this.#add(source.file, {
         adapter: source.surface, surface: source.surface,
         sessionId: source.sessionId,
@@ -230,10 +230,6 @@ export class LiveSessionsService {
         context.meta = record.payload;
       }
       events = adaptCodexRecord(record, common);
-    } else if (context.surface === 'dual-run') {
-      events = adaptDualRunRecord(record, {
-        observedAt: common.observedAt, artifact: path.basename(file),
-      });
     } else {
       events = adaptStructuredEvent(record, {
         ...common, artifact: path.basename(file),

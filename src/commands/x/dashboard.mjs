@@ -3,7 +3,7 @@
 // Boots a loopback-only HTTP server (127.0.0.1) that serves a single
 // self-contained page plus read-only status, usage, and live-session endpoints.
 // The live view tails metadata from Claude/Codex and optional explicitly
-// registered ruflo/AQE/dual-run JSONL sources. Runs FOREGROUND and blocks until
+// registered ruflo/AQE JSONL sources. Runs FOREGROUND and blocks until
 // Ctrl-C; nothing is detached and nothing mutates state.
 import path from 'node:path';
 import { startDashboard } from '../../lib/dashboard-server.mjs';
@@ -44,7 +44,7 @@ Options:
   --no-open   don't auto-open the browser (just print the URL — for headless use)
   --live-source 'surface=path'
               observe an explicit structured JSONL source; repeatable.
-              surface is ruflo, aqe, or dual-run
+              surface is ruflo or aqe
 
 Examples:
   ak x dashboard              serve + open http://127.0.0.1:7431
@@ -57,9 +57,9 @@ export function parseLiveSources(raw, cwd = process.cwd()) {
   const values = Array.isArray(raw) ? raw : raw ? [raw] : [];
   const sources = [];
   for (const value of values) {
-    const match = /^(ruflo|aqe|dual-run)=(.+)$/.exec(String(value));
+    const match = /^(ruflo|aqe)=(.+)$/.exec(String(value));
     if (!match || !match[2].trim()) {
-      throw new TypeError(`invalid --live-source ${value}; expected ruflo|aqe|dual-run=path`);
+      throw new TypeError(`invalid --live-source ${value}; expected ruflo|aqe=path`);
     }
     sources.push({ surface: match[1], file: path.resolve(cwd, match[2].trim()) });
   }

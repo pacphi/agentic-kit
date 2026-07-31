@@ -333,11 +333,10 @@ test('run() without --hint suggests nothing (bare rows only)', async () => {
   } finally { process.chdir(cwd); }
 });
 
-test('a corrupt kit.json degrades to defaults instead of throwing', async () => {
+test('a corrupt kit.json is reported instead of silently replaced with defaults', async () => {
   seedHome();
   fs.writeFileSync(paths.kitConfigPath(), '{ this is not json');
-  const rows = await collect();
-  assert.ok(rows.length > 0, 'status still reports on an unreadable config');
+  await assert.rejects(collect(), /invalid kit config/);
 });
 
 // ── opencode subsystem rows ──────────────────────────────────────────────────
@@ -375,10 +374,11 @@ async function seedConvergedOpencode() {
   fs.writeFileSync(path.join(catalog, 'SKILL.md'), '---\nname: ruflo\ndescription: platform\n---\n\n# Ruflo\n');
   const { opencodeStack } = await import('../../src/lib/opencode.mjs');
   const cfg = loadKitConfig();
-  cfg.providers = {
-    ...(cfg.providers ?? {}),
-    hosts: { claude: true, codex: false, opencode: true },
-    opencodeCatalogDir: catalog,
+  cfg.integrations.hosts = { claude: true, codex: false, opencode: true };
+  cfg.integrations.ownership ??= {};
+  cfg.integrations.ownership.opencode = {
+    ...(cfg.integrations.ownership.opencode ?? {}),
+    catalogDir: catalog,
   };
   await withOpencodeCli(() => opencodeStack(cfg, { pkgRoot: PKG_ROOT }));
   writeKitConfig(HOME, cfg); // persist the ownership markers the stack recorded
@@ -401,7 +401,7 @@ test('enabled + converged: every opencode row is ok with no fix planned', async 
 test('exact legacy artifacts without receipts surface as read-only adoption work', async () => {
   seedHome();
   const cfg = await seedConvergedOpencode();
-  cfg.providers.opencodeManaged.artifacts = {
+  cfg.integrations.ownership.opencode.managed.artifacts = {
     plugin: null, agents: {}, agentStamp: null, skill: null,
   };
   writeKitConfig(HOME, cfg);
@@ -422,7 +422,7 @@ test('exact legacy artifacts without receipts surface as read-only adoption work
 test('a malformed artifact receipt ledger blocks adoption and remains read-only', async () => {
   seedHome();
   const cfg = await seedConvergedOpencode();
-  cfg.providers.opencodeManaged.artifacts = 'corrupt';
+  cfg.integrations.ownership.opencode.managed.artifacts = 'corrupt';
   writeKitConfig(HOME, cfg);
   const before = snapshot(HOME);
 
@@ -432,7 +432,7 @@ test('a malformed artifact receipt ledger blocks adoption and remains read-only'
   assert.equal(blocked.length, 1, `one actionable malformed-ledger row expected: ${oc.map((r) => r.message)}`);
   assert.equal(blocked[0].level, 'warn');
   assert.match(blocked[0].message, /ownership adoption blocked; artifacts left untouched/);
-  assert.match(blocked[0].fix, /repair providers\.opencodeManaged\.artifacts/);
+  assert.match(blocked[0].fix, /repair integrations\.ownership\.opencode\.managed\.artifacts/);
   assert.equal(oc.some((r) => /ownership receipt|user-owned ruflo-hooks|converted agents/.test(r.message)), false,
     'blocked ownership evidence must not be reinterpreted as adoption, foreign files, or healthy agents');
   assertUnchanged(before, HOME, 'status must preserve malformed recovery evidence byte-for-byte');

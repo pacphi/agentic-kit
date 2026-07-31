@@ -1,6 +1,6 @@
 <!-- BEGIN ruflo-opencode-reference -->
 <!-- ruflo-opencode-reference: merged into ~/.config/opencode/AGENTS.md ONLY when the
-     opencode host is enabled (kit.json providers.hosts.opencode). Managed by ak.
+     opencode host is enabled (kit.json integrations.hosts.opencode). Managed by ak.
      Source of truth: claude/ruflo-opencode-reference.md in the agentic-kit kit. -->
 
 ## Ruflo for opencode
@@ -86,7 +86,6 @@ hooks, swarm state):
 
 ```bash
 ruflo init --codex   # AGENTS.md + .agents/ layout — the closest fit for opencode
-ruflo init --dual    # both Claude Code (.claude/, CLAUDE.md) and AGENTS.md
 ```
 
 opencode reads project `AGENTS.md` natively (and `CLAUDE.md` as a fallback

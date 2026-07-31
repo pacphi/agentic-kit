@@ -1,8 +1,14 @@
 # ADR-0003 — Auto-seed on dual-host, subscription-only, per-route provenance
 
-- **Status:** Accepted
+- **Status:** Amended by [ADR-0020](0020-ga-stable-surfaces.md)
 - **Date:** 2026-07-23
+- **Updated:** 2026-07-30
+- **Update note:** Preserved subscription-safe seeding and provenance while moving intent to the
+  canonical routing envelope.
 - **Deciders:** agentic-kit maintainers
+
+> **GA amendment:** subscription-safe seeding and user-intent preservation remain. The persisted
+> paths and command spellings below are historical; ADR-0020 defines the GA schema and commands.
 
 ## Context
 

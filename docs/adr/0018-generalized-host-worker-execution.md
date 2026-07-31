@@ -1,10 +1,15 @@
 # ADR-0018 — Generalized host-worker execution; `ak run` canonical
 
-- **Status:** Accepted
+- **Status:** Accepted; compatibility retention superseded by
+  [ADR-0020](0020-ga-stable-surfaces.md)
 - **Date:** 2026-07-29
 - **Updated:** 2026-07-30
-- **Update note:** Added private bounded dependency handoffs and one absolute lifecycle deadline per attempt.
+- **Update note:** Added private bounded dependency handoffs and one absolute lifecycle deadline
+  per attempt; removed the temporary command, adapter, and persisted-schema compatibility clauses.
 - **Deciders:** agentic-kit maintainers
+
+> **GA amendment:** the host-neutral lifecycle, `ak run`, and OpenCode safety decisions remain.
+> The temporary command, adapter, and persisted-schema compatibility clauses were removed for GA.
 
 ## Context
 

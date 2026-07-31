@@ -1,7 +1,9 @@
 export const LIVE_SCHEMA_VERSION = 1;
 
 const HOSTS = new Set(['claude', 'codex', 'internal']);
-const SURFACES = new Set(['native', 'ruflo', 'aqe', 'plugin', 'skill', 'dual-run']);
+// `internal` is read-only historical vocabulary. Live-source registration still
+// admits only ruflo/aqe, and no current writer emits the retired dual-run label.
+const SURFACES = new Set(['native', 'ruflo', 'aqe', 'plugin', 'skill', 'internal']);
 const CONFIDENCE = new Set(['observed', 'configured', 'correlated', 'inferred', 'unknown', 'assumed', 'planned']);
 const PROVIDER_PROVENANCE = new Set(['observed', 'configured', 'inferred', 'unknown']);
 const EVIDENCE_FIELDS = ['host', 'project', 'provider', 'model', 'status', 'hierarchy'];
@@ -46,7 +48,11 @@ export function createLiveEvent(input, { now = () => new Date().toISOString() } 
     : (PROVIDER_PROVENANCE.has(input.source?.fields?.provider)
         ? input.source.fields.provider : 'unknown');
   const project = safeProjectLabel(input.project);
-  const surface = SURFACES.has(input.surface) ? input.surface : 'native';
+  // Preserve the fact that a pre-GA compatibility record was internally
+  // synthesized; relabeling it "native" would overstate its provenance.
+  const surface = input.surface === 'dual-run'
+    ? 'internal'
+    : (SURFACES.has(input.surface) ? input.surface : 'native');
   const actorKind = ACTOR_KINDS.has(input.actor?.kind) ? input.actor.kind : 'agent';
   const observedAt = timestamp(input.observedAt) ?? timestamp(now());
   if (!observedAt) throw new TypeError('live event requires a valid observedAt');

@@ -36,16 +36,9 @@ totals or prove which host executed a request.
 
 This capability model is
 [ADR-0016](adr/0016-capability-driven-integration-adapters.md) (Accepted); the controls below
-implement it and remain backward compatible.
-
-> [!IMPORTANT]
-> During the alpha, `ak host` is the canonical namespace for execution-host lifecycle and
-> selection: `status`, `pick`, `refresh`, and `off`; `ak x host` is its plumbing spelling.
-> `ak provider` and `ak x provider` remain only as deprecated compatibility aliases, warn on
-> stderr, and will be removed before the stable release. This is **not** a wholesale
-> rename of inference-provider management: providers and bindings remain separate axes. Some
-> router-provider flags are temporarily co-located on the host configuration workflow while their
-> dedicated capability-driven surfaces mature.
+implement it. `ak host` owns execution-host lifecycle and selection (`status`, `pick`, `refresh`,
+and `off`), with `ak x host` as its plumbing spelling. Inference providers and bindings remain
+separate axes even though some provider controls share that workflow.
 
 ---
 
@@ -104,7 +97,7 @@ An interactive picker (or flags for scripts). Enable `codex` and `ak`:
 
 - installs it if it's missing (`npm i -g @openai/codex`) — but leaves an existing
   mise/brew/native install alone,
-- runs `ruflo init --dual` (ruflo's "Claude Code + Codex hybrid" mode),
+- maintains the Claude↔Codex bridge and generated host guidance,
 - writes `ENABLE_CLAUDE_CODE` / `ENABLE_CODEX` into `.claude/settings.local.json`.
 
 > [!NOTE]
@@ -213,8 +206,7 @@ ak run security "src/auth/" --route 'security-scan:opencode:provider/model'  # r
 Each OpenCode worker is an isolated, loopback-only supervised server session. A permission request
 is aborted and reported as `permission_required`; `ak` never auto-approves it. OpenCode routes are
 not written to AQE `agentOverrides`, cannot become `primaryHost`, and do not count as a separate
-AQE vendor. `ak dual` is deprecated and rejects OpenCode routes because it retains a Claude/Codex
-compatibility adapter; use `ak run` instead.
+AQE vendor. `ak run` is the only execution surface for an OpenCode route.
 
 **QE-Court validation stays upstream-owned.** `agentic-qe` 3.13.3 corrected its shipped
 QE-Court panel and now enforces the configured anti-collusion policy before convening.
@@ -264,7 +256,7 @@ Defaults (all overridable; your edits are marked `custom` and never re-seeded):
 > `claude-fable-5` is the escalation ceiling.
 
 `ak host pick --help` prints this list too. Tuning is per-route and reversible: hand-edit
-`kit.json` `providers.dualRouting`, pass `--route`, or `ak host off` to clear it entirely.
+`kit.json` `routing.routes`, pass `--route`, or use `ak host off` to clear it entirely.
 
 **Disabling is complete, not just a flag change.** `ak host pick --host <set>` treats the
 set as authoritative. Excluding a routing host removes it from persisted routes and escalation
@@ -274,11 +266,9 @@ while preserving foreign override keys. Excluding Codex additionally retires onl
 marker-owned Codex MCP bridges; user-registered MCP servers are left alone. Re-enabling Codex
 converges those bridges again.
 
-`dualRouting` intentionally names a host and model, not an inference provider. Provider resolution
+`routing.routes` intentionally names a host and model, not an inference provider. Provider resolution
 is a separate binding lookup; absent grounded evidence remains unknown or explicitly inferred.
-`ak run` is the canonical host-neutral executor. The deprecated `ak dual run` remains a
-Claude+Codex compatibility wrapper only; multiple providers behind those hosts do not turn its
-legacy adapter into three-host-or-more orchestration.
+`ak run` is the canonical host-neutral executor for Claude, Codex, and explicit OpenCode routes.
 
 ## Level 4 — drop down to raw ruflo / agentic-qe
 
@@ -292,7 +282,7 @@ The two config stores each knob below lives in — and their precedence — are 
 
 | You want to…                         | `ak` way                          | The raw ruflo/aqe way it maps to                    |
 | ------------------------------------ | --------------------------------- | --------------------------------------------------- |
-| Enable claude/codex hosts            | `ak host pick`              | `ENABLE_CLAUDE_CODE` / `ENABLE_CODEX` env + `ruflo init --dual` |
+| Enable claude/codex hosts            | `ak host pick`              | `ENABLE_CLAUDE_CODE` / `ENABLE_CODEX` env + managed bridge/guidance |
 | Register a ruflo LLM provider        | `--provider openai:gpt-5.6`       | `ruflo providers configure -p openai -m gpt-5.6`    |
 | Set which LLM runs QE                | `--aqe-provider gemini`           | `AQE_LLM_PROVIDER=gemini` (env)                     |
 | Order QE's fallback chain            | `--aqe-fallback '…'`              | edit `.agentic-qe/llm-config.json` / `aqe llm-router config` |

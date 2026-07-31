@@ -35,8 +35,10 @@ test('rufloCodexMcpStatus reports not-registered when config.toml is missing', (
 
 test('rufloCodexMcpStatus reflects ak ownership from the kit.json marker', () => {
   const home = tempHome('[mcp_servers.ruflo]\n');
-  const owned = rufloCodexMcpStatus({ providers: { rufloCodexMcp: 'ak' } }, { home });
-  const unowned = rufloCodexMcpStatus({ providers: {} }, { home });
+  const owned = rufloCodexMcpStatus({
+    integrations: { ownership: { codex: { reverseMcp: 'ak' } } },
+  }, { home });
+  const unowned = rufloCodexMcpStatus({ integrations: {} }, { home });
   assert.equal(owned.owned, true);
   assert.equal(unowned.owned, false);
 });

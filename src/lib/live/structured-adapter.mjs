@@ -33,31 +33,3 @@ export function adaptStructuredEvent(record, {
     attributes: { durationMs: record.durationMs },
   })];
 }
-
-/** Planned nodes exist only when emitted by an explicit materialized dual run. */
-/**
- * @param {Record<string, any>} record
- * @param {{ observedAt?: string, artifact?: string }} [options]
- */
-export function adaptDualRunRecord(record, { observedAt, artifact } = {}) {
-  if (record?.type !== 'dual-run.plan' || typeof record.runId !== 'string'
-    || !Array.isArray(record.steps)) return [];
-  const out = [];
-  for (const step of record.steps) {
-    if (typeof step?.id !== 'string') continue;
-    out.push(createLiveEvent({
-      sessionId: record.runId, host: ['claude', 'codex'].includes(step.host)
-        ? step.host : 'internal',
-      surface: 'dual-run', project: record.project, observedAt,
-      sourceTimestamp: record.timestamp,
-      actor: {
-        id: record.runId, kind: 'session', role: 'orchestrator',
-        provider: null, model: null,
-      },
-      action: 'agent.planned', target: { id: step.id, kind: 'agent' },
-      status: 'queued',
-      source: { adapter: 'dual-run-plan', artifact, confidence: 'planned' },
-    }));
-  }
-  return out;
-}

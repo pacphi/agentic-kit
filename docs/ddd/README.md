@@ -10,7 +10,7 @@ describe the current system unless a section is explicitly marked as future work
 | [Ubiquitous language](ubiquitous-language.md) | Canonical meanings used across code, CLI, ADRs, and documentation |
 | [Context map](context-map.md) | Bounded contexts, ownership, and relationships |
 | [Integration management](integration-management.md) | Hosts, inference providers, bindings, capabilities, lifecycle, facts, and ownership |
-| [Routing and orchestration](routing-and-orchestration.md) | Activities, routes, leadership, escalation, projections, canonical `ak run`, and legacy dual compatibility |
+| [Routing and orchestration](routing-and-orchestration.md) | Activities, routes, leadership, escalation, projections, and canonical `ak run` execution |
 | [Live Sessions](live-sessions.md) | Evidence acquisition, live-session aggregates, replay, and dashboard delivery |
 
 ## Relationship to other documentation
@@ -31,7 +31,6 @@ A change that introduces or changes a domain concept should:
 4. add executable coverage for new invariants; and
 5. update operational documentation when user-visible behavior changes.
 
-Transitional implementation names remain documented until migration completes. In particular,
-`kit.json.providers` still contains both historical host settings and provider settings, and the
-deprecated `ak provider` aliases remain available during alpha. These names do not change the
-canonical distinction between a host and an inference provider.
+The GA model keeps host enablement under `integrations.hosts`, integration ownership under
+`integrations`, and activity intent under top-level `routing`. These persisted locations do not
+change the canonical distinction between a host and an inference provider.

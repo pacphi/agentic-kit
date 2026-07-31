@@ -1,6 +1,14 @@
-# 0006 — Primary host & ambidextrous mirroring
+# ADR-0006 — Primary host & ambidextrous mirroring
 
-Status: Accepted
+- **Status:** Amended by [ADR-0020](0020-ga-stable-surfaces.md)
+- **Date:** 2026-07-23
+- **Updated:** 2026-07-30
+- **Update note:** Preserved primary-host mirroring while removing the compatibility executor and
+  moving persisted intent to `routing.primaryHost`.
+- **Deciders:** agentic-kit maintainers
+
+> **GA amendment:** primary-host mirroring remains. The old command spelling, adapter dependency,
+> and persisted locations below are retained only as historical context.
 
 ## Context
 

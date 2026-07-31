@@ -34,15 +34,15 @@ function dispatchTable() {
   return cmds;
 }
 
-test('dispatch table parses and covers the previously-omitted commands', () => {
+test('dispatch table exposes canonical commands and omits removed aliases', () => {
   // Arrange
   const table = dispatchTable();
   // Act / Assert
   assert.ok(table.size >= 6, `expected several commands, parsed ${table.size}`);
-  assert.ok(table.has('dual'), 'dual must be in the dispatch table');
   assert.ok(table.has('dashboard'), 'dashboard must be in the dispatch table');
   assert.ok(table.has('host'), 'canonical host management must be in the dispatch table');
-  assert.ok(table.has('provider'), 'deprecated provider shim must remain in the dispatch table');
+  assert.equal(table.has('dual'), false, 'removed dual command must stay absent');
+  assert.equal(table.has('provider'), false, 'removed provider aliases must stay absent');
 });
 
 // One test per command: loads, and exposes a complete help surface.

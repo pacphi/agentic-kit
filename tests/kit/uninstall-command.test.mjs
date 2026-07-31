@@ -238,22 +238,30 @@ function seedManagedOpencode() {
     '# my notes\n\n<!-- BEGIN ruflo-opencode-reference -->\nguidance\n<!-- END ruflo-opencode-reference -->\n');
   writeKitConfig(HOME, {
     aqe: true,
-    providers: {
+    integrations: {
+      version: 2,
       hosts: { claude: true, codex: false, opencode: true },
-      opencodeMcp: 'ak',
-      opencodeManaged: {
-        mcp: { 'claude-flow': { prior: null, written: { type: 'local', command: ['ruflo', 'mcp', 'start'], enabled: true } } },
-        paths: [],
-        permissions: { 'claude-flow_*': { prior: null, written: 'allow' } },
-        permissionScalar: null,
-        artifacts: {
-          plugin: hash(plugin),
-          agents: { 'coder.md': hash(agent) },
-          agentStamp: hash(stamp),
-          skill: hash(skill),
+      bindings: [],
+      ownership: {
+        opencode: {
+          mcp: 'ak',
+          managed: {
+            mcp: { 'claude-flow': { prior: null, written: { type: 'local', command: ['ruflo', 'mcp', 'start'], enabled: true } } },
+            paths: [],
+            permissions: { 'claude-flow_*': { prior: null, written: 'allow' } },
+            permissionScalar: null,
+            artifacts: {
+              plugin: hash(plugin),
+              agents: { 'coder.md': hash(agent) },
+              agentStamp: hash(stamp),
+              skill: hash(skill),
+            },
+          },
         },
       },
     },
+    routing: { version: 1, primaryHost: 'claude', routes: {} },
+    providers: {},
   });
 }
 
@@ -277,7 +285,7 @@ test('default uninstall strips ak opencode wiring + artifacts and restores user 
   assert.ok(!md.includes('ruflo-opencode-reference'), 'guidance block stripped');
   assert.ok(md.includes('# my notes'), 'user guidance survives');
   const cfg = JSON.parse(fs.readFileSync(paths.kitConfigPath(), 'utf8'));
-  assert.equal(cfg.providers.opencodeMcp, null, 'ownership markers nulled (kit.json kept without --purge)');
+  assert.equal(cfg.integrations.ownership.opencode.mcp, null, 'ownership markers nulled (kit.json kept without --purge)');
 });
 
 test('repeated uninstall is harmless for the opencode footprint', async () => {

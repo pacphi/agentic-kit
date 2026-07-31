@@ -1,12 +1,12 @@
 // Slice 1 — the agentOverrides projection: applyAqeRouter materializes the
-// dualRouting policy into .agentic-qe/llm-config.json, version-gated on aqe ≥ 3.13.1.
+// routes policy into .agentic-qe/llm-config.json, version-gated on aqe ≥ 3.13.1.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { applyAqeRouter, aqeRouterFile, undoAqeRouter, ensureCodexMcp, undoCodexMcp, undoRufloMcpInCodex } from '../../src/lib/providers.mjs';
-import { seedDualRouting } from '../../src/lib/routing.mjs';
+import { seedActivityRoutes } from '../../src/lib/routing.mjs';
 import { _setGlobalRootForTest } from '../../src/lib/paths.mjs';
 
 function tmpProject() {
@@ -28,13 +28,16 @@ function fakeAqe(version) {
   return groot;
 }
 
-const cfgWith = (extra) => ({ providers: { aqeProvider: null, aqeFallback: [], dualRouting: {}, ...extra } });
+const cfgWith = ({ routes = {}, ...providers } = {}) => ({
+  routing: { version: 1, primaryHost: 'claude', routes },
+  providers: { aqeProvider: null, aqeFallback: [], ...providers },
+});
 const readDisk = (dir) => JSON.parse(fs.readFileSync(aqeRouterFile(dir), 'utf8'));
 
 test('writes agentOverrides from a seeded policy when aqe ≥ 3.13.1', () => {
   const groot = fakeAqe('3.13.1');
   const dir = tmpProject();
-  const res = applyAqeRouter(cfgWith({ dualRouting: seedDualRouting() }), dir);
+  const res = applyAqeRouter(cfgWith({ routes: seedActivityRoutes() }), dir);
 
   assert.equal(res.changed, true);
   const disk = readDisk(dir);
@@ -50,7 +53,7 @@ test('writes agentOverrides from a seeded policy when aqe ≥ 3.13.1', () => {
 test('skips agentOverrides on aqe < 3.13.1 and says so', () => {
   const groot = fakeAqe('3.13.0');
   const dir = tmpProject();
-  const res = applyAqeRouter(cfgWith({ dualRouting: seedDualRouting() }), dir);
+  const res = applyAqeRouter(cfgWith({ routes: seedActivityRoutes() }), dir);
 
   assert.match(res.detail, /skipped/);
   assert.equal(res.changed, false, 'nothing written when only a gated-out policy exists');
@@ -61,7 +64,7 @@ test('skips agentOverrides on aqe < 3.13.1 and says so', () => {
 test('a policy-only project (no fallback chain) still materializes the file', () => {
   const groot = fakeAqe('3.13.1');
   const dir = tmpProject();
-  const res = applyAqeRouter(cfgWith({ dualRouting: seedDualRouting() }), dir);
+  const res = applyAqeRouter(cfgWith({ routes: seedActivityRoutes() }), dir);
 
   assert.equal(res.changed, true);
   const disk = readDisk(dir);
@@ -77,7 +80,7 @@ test('chain and agentOverrides are written together and never persist apiKey', (
   const cfg = cfgWith({
     aqeProvider: 'claude-code',
     aqeFallback: [{ provider: 'claude-code', models: ['claude-opus-4-8'] }],
-    dualRouting: seedDualRouting(),
+    routes: seedActivityRoutes(),
   });
   const res = applyAqeRouter(cfg, dir);
 
@@ -99,7 +102,7 @@ test('agentOverrides MERGES — a foreign entry survives (H1: never clobbered)',
     _managedBy: 'agentic-kit',
     agentOverrides: { 'qe-custom-agent': { provider: 'ollama' } }, // outside ak's curated map
   }));
-  applyAqeRouter(cfgWith({ dualRouting: seedDualRouting() }), dir);
+  applyAqeRouter(cfgWith({ routes: seedActivityRoutes() }), dir);
 
   const disk = readDisk(dir);
   assert.deepEqual(disk.agentOverrides['qe-custom-agent'], { provider: 'ollama' }, 'foreign entry preserved');
@@ -119,8 +122,8 @@ test('stale curated overrides are pruned while configured and foreign entries su
       'qe-custom-agent': { provider: 'ollama' },
     },
   }));
-  const res = applyAqeRouter(cfgWith({ dualRouting: {
-    review: { host: 'claude', model: 'claude-sonnet-5', source: 'user' },
+  const res = applyAqeRouter(cfgWith({ routes: {
+    review: { host: 'claude', model: 'claude-sonnet-5', provenance: 'user' },
   } }), dir);
   const disk = readDisk(dir);
   assert.match(res.detail, /stale ak entries pruned/);
@@ -133,7 +136,7 @@ test('stale curated overrides are pruned while configured and foreign entries su
 test('an invalid fallback chain does not block the agentOverrides projection (M3)', () => {
   const groot = fakeAqe('3.13.1');
   const dir = tmpProject();
-  const res = applyAqeRouter(cfgWith({ aqeFallback: [{ provider: 'not-a-provider', models: [] }], dualRouting: seedDualRouting() }), dir);
+  const res = applyAqeRouter(cfgWith({ aqeFallback: [{ provider: 'not-a-provider', models: [] }], routes: seedActivityRoutes() }), dir);
 
   assert.equal(res.changed, true, 'still wrote agentOverrides');
   assert.equal(res.ok, false, 'but surfaces the chain error');
@@ -147,7 +150,9 @@ test('codex MCP teardown is a no-op unless ak owns it (H2), and never shells whe
   const off = await undoCodexMcp(process.cwd(), { managed: false });
   assert.equal(off.changed, false);
   assert.match(off.detail, /left as-is/);
-  const ensure = await ensureCodexMcp({ providers: { hosts: { claude: true, codex: false } } });
+  const ensure = await ensureCodexMcp({
+    integrations: { hosts: { claude: true, codex: false } },
+  });
   assert.equal(ensure.changed, false);
   assert.match(ensure.detail, /not enabled/);
 });
@@ -174,7 +179,7 @@ test('owned bridge teardown sends the precise safe argv on every platform', asyn
 test('undoAqeRouter removes the ak-created file (agentOverrides included)', () => {
   const groot = fakeAqe('3.13.1');
   const dir = tmpProject();
-  applyAqeRouter(cfgWith({ dualRouting: seedDualRouting() }), dir);
+  applyAqeRouter(cfgWith({ routes: seedActivityRoutes() }), dir);
   assert.equal(fs.existsSync(aqeRouterFile(dir)), true);
 
   const undo = undoAqeRouter(dir);

@@ -36,7 +36,20 @@ import { createHash } from 'node:crypto';
 import { have } from './exec.mjs';
 import { readJson, writeJsonWithBackup } from './settings.mjs';
 import { registry, syncBlocks, blocksForTarget, retiredForTarget, guidanceTargets } from './blocks.mjs';
+import { CURRENT_INTEGRATIONS_VERSION } from './adapters/config.mjs';
 import * as paths from './paths.mjs';
+
+const opencodeOwnership = (cfg) => cfg?.integrations?.ownership?.opencode ?? {};
+function mutableOpencodeOwnership(cfg) {
+  cfg.integrations ??= {
+    version: CURRENT_INTEGRATIONS_VERSION,
+    hosts: {},
+    bindings: [],
+  };
+  cfg.integrations.ownership ??= {};
+  cfg.integrations.ownership.opencode ??= {};
+  return cfg.integrations.ownership.opencode;
+}
 
 // ── config-file wiring (opencode.json) ──────────────────────────────────────
 
@@ -116,7 +129,7 @@ export function opencodeMcpStatus(cfg, { configFile = paths.opencodeConfigPath()
   const exists = fs.existsSync(configFile);
   const { ok, doc } = exists ? readJsonStrict(configFile) : { ok: true, doc: {} };
   if (!ok) {
-    return { exists, parseError: true, claudeFlow: false, brain: false, owned: cfg?.providers?.opencodeMcp === 'ak' };
+    return { exists, parseError: true, claudeFlow: false, brain: false, owned: opencodeOwnership(cfg).mcp === 'ak' };
   }
   return {
     exists,
@@ -124,7 +137,7 @@ export function opencodeMcpStatus(cfg, { configFile = paths.opencodeConfigPath()
     claudeFlow: !!doc?.mcp?.['claude-flow'],
     brain: !!doc?.mcp?.['ruvnet-brain'],
     paths: doc?.skills?.paths ?? [],
-    owned: cfg?.providers?.opencodeMcp === 'ak',
+    owned: opencodeOwnership(cfg).mcp === 'ak',
   };
 }
 
@@ -147,7 +160,7 @@ export async function opencodeConverged(cfg, { configFile = paths.opencodeConfig
     else if (!deepEqual(doc.mcp[name], want)) reasons.push(`${name} drifted`);
   }
   if (doc.mcp?.['ruvnet-brain'] && !entries['ruvnet-brain']) reasons.push('ruvnet-brain stale (brain shim gone)');
-  const source = catalogSource({ override: cfg.providers?.opencodeCatalogDir });
+  const source = catalogSource({ override: opencodeOwnership(cfg).catalogDir });
   for (const p of skillPathsFor(source)) {
     if (!(doc.skills?.paths ?? []).includes(p)) reasons.push(`skills path missing: ${p}`);
   }
@@ -252,7 +265,7 @@ export function opencodeArtifactReceiptState(managed) {
  *  spread character-by-character. Backup-first, idempotent, JSONC-refusing.
  *  @param {any} cfg @param {{ dryRun?: boolean, configFile?: string, brainShim?: string }} [opts] */
 export async function applyOpencode(cfg, { dryRun = false, configFile = paths.opencodeConfigPath(), brainShim } = {}) {
-  if (!cfg.providers?.hosts?.opencode) return { ok: true, changed: false, detail: 'opencode not enabled — unmanaged' };
+  if (!cfg.integrations?.hosts?.opencode) return { ok: true, changed: false, detail: 'opencode not enabled — unmanaged' };
   const exists = fs.existsSync(configFile);
   const { ok: parsedOk, doc } = exists ? readJsonStrict(configFile) : { ok: true, doc: {} };
   if (!parsedOk) {
@@ -262,9 +275,9 @@ export async function applyOpencode(cfg, { dryRun = false, configFile = paths.op
     };
   }
   const entries = await mcpEntriesFor({ brainShim });
-  const source = catalogSource({ override: cfg.providers?.opencodeCatalogDir });
+  const source = catalogSource({ override: opencodeOwnership(cfg).catalogDir });
   const skillPaths = skillPathsFor(source);
-  const prevManaged = normalizeManaged(cfg.providers?.opencodeManaged);
+  const prevManaged = normalizeManaged(opencodeOwnership(cfg).managed);
   const collisions = [];
   const pruned = [];
 
@@ -364,9 +377,10 @@ export async function applyOpencode(cfg, { dryRun = false, configFile = paths.op
   }
 
   const changed = JSON.stringify(next) !== JSON.stringify(doc);
-  if (!dryRun && cfg.providers) {
-    cfg.providers.opencodeMcp = 'ak';
-    cfg.providers.opencodeManaged = managed;
+  if (!dryRun) {
+    const ownership = mutableOpencodeOwnership(cfg);
+    ownership.mcp = 'ak';
+    ownership.managed = managed;
   }
   if (changed && !dryRun) writeJsonWithBackup(configFile, next);
   const brain = entries['ruvnet-brain'] ? ' + ruvnet-brain' : ' (brain shim absent — ruflo only)';
@@ -380,7 +394,8 @@ export async function applyOpencode(cfg, { dryRun = false, configFile = paths.op
 }
 
 /** Surgical teardown of ak's opencode.json wiring — ONLY the recorded managed
- *  keys, and ONLY when ak wrote them (providers.opencodeMcp === 'ak'). For each
+ *  keys, and ONLY when ak wrote them
+ *  (`integrations.ownership.opencode.mcp === 'ak'`). For each
  *  managed key: when the current value still equals what ak wrote, the user's
  *  PRIOR value is restored (or the key removed if there was none); a value the
  *  user edited since is left and reported, never silently deleted. Scalar
@@ -389,15 +404,17 @@ export async function applyOpencode(cfg, { dryRun = false, configFile = paths.op
  *  (removeArtifacts).
  *  @param {any} cfg @param {{ configFile?: string }} [opts] */
 export function undoOpencode(cfg, { configFile = paths.opencodeConfigPath() } = {}) {
-  if (cfg?.providers?.opencodeMcp !== 'ak') {
+  if (opencodeOwnership(cfg).mcp !== 'ak') {
     return { ok: true, changed: false, detail: 'opencode.json left as-is (not ak-managed)' };
   }
-  const managed = normalizeManaged(cfg.providers?.opencodeManaged);
+  const managed = normalizeManaged(opencodeOwnership(cfg).managed);
   if (!fs.existsSync(configFile)) {
     // Nothing left to strip — but the markers would otherwise survive as a lie
     // (a later teardown would chase a phantom config). Clear them; the change
     // is the marker cleanup itself (codex-review r3).
-    if (cfg.providers) { cfg.providers.opencodeMcp = null; cfg.providers.opencodeManaged = null; }
+    const ownership = mutableOpencodeOwnership(cfg);
+    ownership.mcp = null;
+    ownership.managed = null;
     return { ok: true, changed: true, detail: 'opencode.json absent — ownership markers cleared (nothing to strip)' };
   }
   const { ok: parsedOk, doc } = readJsonStrict(configFile);
@@ -447,7 +464,9 @@ export function undoOpencode(cfg, { configFile = paths.opencodeConfigPath() } = 
   }
 
   if (changed) writeJsonWithBackup(configFile, doc);
-  if (cfg.providers) { cfg.providers.opencodeMcp = null; cfg.providers.opencodeManaged = null; }
+  const ownership = mutableOpencodeOwnership(cfg);
+  ownership.mcp = null;
+  ownership.managed = null;
   const detail = [
     changed ? 'ak-managed opencode.json wiring stripped (user priors restored)' : 'nothing managed found in opencode.json',
     kept.length ? `left untouched: ${kept.join(', ')}` : null,
@@ -478,15 +497,18 @@ export function undoOpencode(cfg, { configFile = paths.opencodeConfigPath() } = 
  *  developer's real machine (codex-review r4).
  *  @param {any} cfg @param {{ pkgRoot: string, configFile?: string, brainShim?: string, pluginsDir?: string, agentsDir?: string, skillsDir?: string }} opts */
 export async function opencodeStack(cfg, { pkgRoot, configFile, brainShim, pluginsDir, agentsDir, skillsDir }) {
-  const before = JSON.stringify([cfg.providers?.opencodeMcp ?? null, cfg.providers?.opencodeManaged ?? null]);
+  const before = JSON.stringify([
+    opencodeOwnership(cfg).mcp ?? null,
+    opencodeOwnership(cfg).managed ?? null,
+  ]);
   const oc = await applyOpencode(cfg, { ...(configFile ? { configFile } : {}), ...(brainShim ? { brainShim } : {}) });
   if (oc.fatal) {
     const skipped = { ok: false, changed: false, detail: 'skipped because opencode.json did not converge' };
     return { oc, plugin: skipped, agents: skipped, skill: skipped, source: null, markersChanged: false };
   }
-  const receiptState = opencodeArtifactReceiptState(cfg.providers?.opencodeManaged);
+  const receiptState = opencodeArtifactReceiptState(opencodeOwnership(cfg).managed);
   const { receipts, adoptionBlocked } = receiptState;
-  const source = catalogSource({ override: cfg.providers?.opencodeCatalogDir });
+  const source = catalogSource({ override: opencodeOwnership(cfg).catalogDir });
   if (adoptionBlocked) {
     const detail = 'skipped because the artifact receipt ledger is malformed';
     const plugin = { ok: false, changed: false, receipt: receipts.plugin, adoptionBlocked: true, detail };
@@ -496,8 +518,8 @@ export async function opencodeStack(cfg, { pkgRoot, configFile, brainShim, plugi
     };
     const skill = { ok: false, changed: false, receipt: receipts.skill, adoptionBlocked: true, detail };
     const markersChanged = JSON.stringify([
-      cfg.providers?.opencodeMcp ?? null,
-      cfg.providers?.opencodeManaged ?? null,
+      opencodeOwnership(cfg).mcp ?? null,
+      opencodeOwnership(cfg).managed ?? null,
     ]) !== before;
     return { oc, plugin, agents, skill, source, markersChanged };
   }
@@ -515,14 +537,17 @@ export async function opencodeStack(cfg, { pkgRoot, configFile, brainShim, plugi
     ...(skillsDir ? { skillsDir } : {}),
   });
   if (!adoptionBlocked) {
-    cfg.providers.opencodeManaged.artifacts = {
+    mutableOpencodeOwnership(cfg).managed.artifacts = {
       plugin: plugin.receipt ?? receipts.plugin ?? null,
       agents: agents.receipts ?? receipts.agents ?? {},
       agentStamp: agents.stampReceipt ?? receipts.agentStamp ?? null,
       skill: skill.receipt ?? receipts.skill ?? null,
     };
   }
-  const markersChanged = JSON.stringify([cfg.providers?.opencodeMcp ?? null, cfg.providers?.opencodeManaged ?? null]) !== before;
+  const markersChanged = JSON.stringify([
+    opencodeOwnership(cfg).mcp ?? null,
+    opencodeOwnership(cfg).managed ?? null,
+  ]) !== before;
   return { oc, plugin, agents, skill, source, markersChanged };
 }
 
@@ -536,7 +561,7 @@ export async function opencodeStack(cfg, { pkgRoot, configFile, brainShim, plugi
 /** @param {any} cfg
  *  @param {{configFile?:string,pluginsDir?:string,agentsDir?:string,skillsDir?:string}} [opts] */
 export function retireOpencode(cfg, { configFile, pluginsDir, agentsDir, skillsDir } = {}) {
-  const receipts = normalizeManaged(cfg.providers?.opencodeManaged).artifacts;
+  const receipts = normalizeManaged(opencodeOwnership(cfg).managed).artifacts;
   const undo = undoOpencode(cfg, { ...(configFile ? { configFile } : {}) });
   const artifacts = undo.ok
     ? removeArtifacts({
@@ -552,8 +577,8 @@ export function retireOpencode(cfg, { configFile, pluginsDir, agentsDir, skillsD
 /**
  * ADR-0016 lifecycle adapter for OpenCode's managed native surfaces.
  * Configuration lifecycle is deliberately separate from activity routing:
- * this adapter can drive setup/sync/status/teardown while the registry keeps
- * `canRouteActivities:false`.
+ * this adapter drives setup/sync/status/teardown while the host-neutral runner
+ * separately honors the registry's explicit `canRouteActivities:true`.
  *
  * The factory keeps filesystem destinations injectable for hermetic conformance
  * tests. `detect`, `plan`, and `verify` are read-only. `runLifecycle` owns the
@@ -564,12 +589,12 @@ export function createOpencodeLifecycleAdapter(defaults = {}) {
   const detect = async (request = {}) => {
     const cfg = request.cfg ?? {};
     const opts = options(request);
-    const source = catalogSource({ override: cfg.providers?.opencodeCatalogDir });
+    const source = catalogSource({ override: opencodeOwnership(cfg).catalogDir });
     const convergence = await opencodeConverged(cfg, {
       ...(opts.configFile ? { configFile: opts.configFile } : {}),
       ...(opts.brainShim ? { brainShim: opts.brainShim } : {}),
     });
-    const receiptState = opencodeArtifactReceiptState(cfg.providers?.opencodeManaged);
+    const receiptState = opencodeArtifactReceiptState(opencodeOwnership(cfg).managed);
     const { receipts, adoptionBlocked } = receiptState;
     const plugin = opts.pkgRoot
       ? pluginStatus({
@@ -586,7 +611,7 @@ export function createOpencodeLifecycleAdapter(defaults = {}) {
       source, receipt: receipts.skill, adoptionBlocked,
       ...(opts.skillsDir ? { skillsDir: opts.skillsDir } : {}),
     });
-    return { enabled: !!cfg.providers?.hosts?.opencode, convergence, plugin, agents, skill };
+    return { enabled: !!cfg.integrations?.hosts?.opencode, convergence, plugin, agents, skill };
   };
   return {
     id: 'opencode',
@@ -638,7 +663,12 @@ export async function reconcileOpencodeGuidance({ pkgRoot, cfg, cwd = process.cw
   const resolve = (r) => (r.custom
     ? (r.template.startsWith('~/') ? path.join(paths.home, r.template.slice(2)) : r.template)
     : path.join(pkgRoot, 'claude', r.template));
-  const ctx = { flags: { dualMode: !!cfg.providers?.hosts?.claude && !!cfg.providers?.hosts?.codex, opencodeEnabled: enabled } };
+  const ctx = {
+    flags: {
+      dualMode: !!cfg.integrations?.hosts?.claude && !!cfg.integrations?.hosts?.codex,
+      opencodeEnabled: enabled,
+    },
+  };
   const treg = [...blocksForTarget(rows, 'agents-opencode'), ...retiredForTarget(rows, 'agents-opencode')];
   const res = await syncBlocks(target.file, treg, resolve, { context: ctx });
   const changed = res.filter((r) => r.action !== 'unchanged' && r.action !== 'skipped')
@@ -649,7 +679,8 @@ export async function reconcileOpencodeGuidance({ pkgRoot, cfg, cwd = process.cw
 // ── ruflo catalog source (agents + skills) ──────────────────────────────────
 
 /** Resolve where ruflo's agent/skill catalog comes from. Order: explicit
- *  override (kit.json providers.opencodeCatalogDir) → $RUFLO_REPO → the claude
+ *  override (kit.json integrations.ownership.opencode.catalogDir) →
+ *  $RUFLO_REPO → the claude
  *  marketplace clone (full repo mirror, auto-updated by claude) → the
  *  published @claude-flow/cli package (subset: ADR-128 agents + core skills)
  *  → the nested copy under global ruflo/node_modules (the layout a plain

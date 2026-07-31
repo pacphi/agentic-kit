@@ -224,19 +224,6 @@ export function validateActivityHost(id, hosts = HOST_REGISTRY) {
     ? { ok: true } : { ok: false, reason: 'capability-canRouteActivities-required' };
 }
 
-export function deriveCompatibilityExports({
-  hosts = HOST_REGISTRY, providers = PROVIDER_REGISTRY,
-} = {}) {
-  const custom = hosts !== HOST_REGISTRY || providers !== PROVIDER_REGISTRY;
-  return {
-    hostIds: hosts.map(({ id }) => id),
-    managedHostIds: hosts.filter((host) => host.capabilities.canDriveSession).map(({ id }) => id),
-    primaryHostIds: hosts.filter((host) => host.capabilities.canBePrimary).map(({ id }) => id),
-    routableHostIds: hosts.filter((host) => host.capabilities.canRouteActivities).map(({ id }) => id),
-    apiProviderIds: providers.filter((provider) => custom || provider.legacy?.apiProvider).map(({ id }) => id),
-  };
-}
-
 export function validateRegistries(registries) {
   const errors = [];
   const axes = ['hosts', 'providers', 'projections', 'observability'];

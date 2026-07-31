@@ -43,8 +43,8 @@ test('owned reflects the kit.json ak-ownership marker', () => {
   const dir = tmpProject();
   try {
     writeMcp(dir, { codex: {} });
-    assert.equal(codexMcpStatus({ providers: { codexMcp: 'ak' } }, dir).owned, true);
-    assert.equal(codexMcpStatus({ providers: { codexMcp: null } }, dir).owned, false);
+    assert.equal(codexMcpStatus({ integrations: { ownership: { codex: { mcp: 'ak' } } } }, dir).owned, true);
+    assert.equal(codexMcpStatus({ integrations: { ownership: { codex: { mcp: null } } } }, dir).owned, false);
     assert.equal(codexMcpStatus({}, dir).owned, false);
   } finally { rm(dir); }
 });
@@ -53,7 +53,7 @@ test('a pre-existing (unowned) codex server is registered but not owned', () => 
   const dir = tmpProject();
   try {
     writeMcp(dir, { codex: {} });
-    assert.deepEqual(codexMcpStatus({ providers: { codexMcp: null } }, dir),
+    assert.deepEqual(codexMcpStatus({ integrations: { ownership: { codex: { mcp: null } } } }, dir),
       { registered: true, owned: false });
   } finally { rm(dir); }
 });

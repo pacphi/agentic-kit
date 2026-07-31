@@ -1,8 +1,15 @@
 # ADR-0019 — Bounded per-worker escalation in `ak run`
 
-- **Status:** Accepted
+- **Status:** Accepted; historical wrapper context closed by
+  [ADR-0020](0020-ga-stable-surfaces.md)
 - **Date:** 2026-07-29
+- **Updated:** 2026-07-30
+- **Update note:** Implemented bounded per-worker escalation in `ak run` and removed the
+  whole-pipeline compatibility wrapper.
 - **Deciders:** agentic-kit maintainers
+
+> **GA amendment:** the per-worker escalation decision remains current. The wrapper discussed in
+> the context section was removed before 4.0 and is not an available execution path.
 
 ## Context
 

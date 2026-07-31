@@ -8,9 +8,9 @@ import { loadKitConfig } from '../../src/lib/config.mjs';
 import {
   isDefault, managedEnv, applyHosts, undoProviders, MANAGED_ENV_KEYS,
   HOSTS, installHost, applyAqeRouter, undoAqeRouter, aqeRouterFile,
-  CODEX_ADAPTER_PKG, codexAdapterAction, ensureCodexAdapter, AQE_PROVIDER_TYPES,
-  bothHostsEnabled, suggestedFallbackFor, AQE_FALLBACK_CODEX_SUGGESTION,
-  PROVIDER_TOKEN_RE, seedDualRoutingIfDualHost,
+  AQE_PROVIDER_TYPES,
+  bothHostsEnabled, DUAL_ROLE_TIP, suggestedFallbackFor, AQE_FALLBACK_CODEX_SUGGESTION,
+  PROVIDER_TOKEN_RE, seedActivityRoutesIfMultiHost,
 } from '../../src/lib/providers.mjs';
 import * as paths from '../../src/lib/paths.mjs';
 import { managedHostIds, routableHostIds } from '../../src/lib/adapters/index.mjs';
@@ -58,13 +58,13 @@ test('isDefault is true for the claude-only default config', () => {
 
 test('isDefault is false once codex is enabled', () => {
   const cfg = defaultCfg();
-  cfg.providers.hosts.codex = true;
+  cfg.integrations.hosts.codex = true;
   assert.equal(isDefault(cfg), false);
 });
 
 test('managedEnv leaves AQE_LLM_PROVIDER unset when no aqe provider is pinned', () => {
   const cfg = defaultCfg();
-  cfg.providers.hosts.codex = true; // host axis is independent of the aqe provider
+  cfg.integrations.hosts.codex = true; // host axis is independent of the aqe provider
   const env = managedEnv(cfg);
   assert.equal(env.ENABLE_CLAUDE_CODE, 'true');
   assert.equal(env.ENABLE_CODEX, 'true');
@@ -87,7 +87,7 @@ test('managedEnv ignores an unknown aqe provider value', () => {
 
 test('managedEnv adds AQE_MAX_BUDGET_USD only when a budget is set', () => {
   const cfg = defaultCfg();
-  cfg.providers.hosts.codex = true;
+  cfg.integrations.hosts.codex = true;
   cfg.providers.maxBudgetUsd = 5;
   assert.equal(managedEnv(cfg).AQE_MAX_BUDGET_USD, '5');
 });
@@ -106,7 +106,7 @@ test('applyHosts writes managed env into project settings.local.json when codex 
   fs.mkdirSync(path.dirname(localFile(dir)), { recursive: true });
   fs.writeFileSync(localFile(dir), JSON.stringify({ env: { FOO: 'bar' } }));
   const cfg = defaultCfg();
-  cfg.providers.hosts.codex = true;
+  cfg.integrations.hosts.codex = true;
   // Act
   const res = applyHosts(cfg, dir);
   // Assert
@@ -121,7 +121,7 @@ test('applyHosts writes managed env into project settings.local.json when codex 
 test('applyHosts is idempotent — second run reports no change', () => {
   const dir = tmpProject();
   const cfg = defaultCfg();
-  cfg.providers.hosts.codex = true;
+  cfg.integrations.hosts.codex = true;
   applyHosts(cfg, dir);
   const second = applyHosts(cfg, dir);
   assert.equal(second.changed, false);
@@ -131,7 +131,7 @@ test('applyHosts is idempotent — second run reports no change', () => {
 test('undoProviders strips every managed key and leaves others intact', () => {
   const dir = tmpProject();
   const cfg = defaultCfg();
-  cfg.providers.hosts.codex = true;
+  cfg.integrations.hosts.codex = true;
   applyHosts(cfg, dir);
   // seed an unrelated key alongside the managed ones
   const seeded = readJson(localFile(dir));
@@ -231,13 +231,13 @@ test('installHost rejects an unknown host id without shelling out', async () => 
   assert.match(r.detail, /unknown host/);
 });
 
-test('config merge: providers partial merges over defaults (hosts deep-merged)', () => {
+test('config migration moves legacy provider hosts into canonical integrations', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'kit-merge-'));
   const f = path.join(dir, 'kit.json');
   fs.writeFileSync(f, JSON.stringify({ providers: { hosts: { codex: true } } }));
   const cfg = loadKitConfig(f);
-  assert.equal(cfg.providers.hosts.codex, true, 'user value applied');
-  assert.equal(cfg.providers.hosts.claude, true, 'unspecified host keeps default');
+  assert.equal(cfg.integrations.hosts.codex, true, 'legacy user value applied');
+  assert.equal(cfg.integrations.hosts.claude, true, 'unspecified host keeps default');
   assert.equal(cfg.providers.aqeProvider, null, 'unspecified field keeps default');
   rm(dir);
 });
@@ -259,38 +259,9 @@ test('AQE_PROVIDER_TYPES mirrors aqe ALL_PROVIDER_TYPES (incl. local onnx)', () 
   assert.equal(AQE_PROVIDER_TYPES.includes('onnx'), true, 'onnx (local) is a valid aqe provider');
 });
 
-test('the codex host descriptor carries the dual-mode adapter package name', () => {
-  const codex = HOSTS.find((h) => h.id === 'codex');
-  assert.equal(codex.adapterPkg, CODEX_ADAPTER_PKG);
-  assert.equal(CODEX_ADAPTER_PKG, '@claude-flow/codex');
-});
-
-test('codexAdapterAction skips when codex host is not opted in', () => {
-  const action = codexAdapterAction({ opted: false, cliPresent: true, adapterInstalled: false });
-  assert.equal(action, 'skip-not-opted');
-});
-
-test('codexAdapterAction skips when opted in but the codex CLI is not detected', () => {
-  const action = codexAdapterAction({ opted: true, cliPresent: false, adapterInstalled: false });
-  assert.equal(action, 'skip-no-cli');
-});
-
-test('codexAdapterAction is a no-op when the adapter is already installed', () => {
-  const action = codexAdapterAction({ opted: true, cliPresent: true, adapterInstalled: true });
-  assert.equal(action, 'already-installed');
-});
-
-test('codexAdapterAction installs only when opted in, CLI present, adapter absent', () => {
-  const action = codexAdapterAction({ opted: true, cliPresent: true, adapterInstalled: false });
-  assert.equal(action, 'install');
-});
-
-test('ensureCodexAdapter is a no-op without shelling out when codex is disabled', async () => {
-  const cfg = defaultCfg(); // claude-only default → hosts.codex false
-  const res = await ensureCodexAdapter(cfg);
-  assert.equal(res.ok, true);
-  assert.equal(res.changed, false);
-  assert.match(res.detail, /codex disabled/);
+test('dual-host guidance points to the canonical ak run executor', () => {
+  assert.match(DUAL_ROLE_TIP, /ak run/);
+  assert.doesNotMatch(DUAL_ROLE_TIP, /claude-flow-codex|ruflo init --dual/);
 });
 
 // ── settingsTarget repo-root walk (scope-leak regression pin) ───────────────
@@ -303,13 +274,13 @@ test('bothHostsEnabled is false at the claude-only default', () => {
 
 test('bothHostsEnabled is false with only codex enabled', () => {
   const cfg = defaultCfg();
-  cfg.providers.hosts = { claude: false, codex: true };
+  cfg.integrations.hosts = { claude: false, codex: true };
   assert.equal(bothHostsEnabled(cfg), false);
 });
 
 test('bothHostsEnabled is true once both hosts are enabled', () => {
   const cfg = defaultCfg();
-  cfg.providers.hosts.codex = true;
+  cfg.integrations.hosts.codex = true;
   assert.equal(bothHostsEnabled(cfg), true);
 });
 
@@ -325,7 +296,7 @@ test('suggestedFallbackFor returns null when codex is not among the enabled host
 // ADR-0017 two-tier model: all three hosts coexist in one enabled set, but the
 // seeded per-activity policy only ever names the ROUTING pair. opencode is
 // additive — never a substitute for either routing host, never a route target.
-test('dual routing seeds claude/codex routes ONLY, even with opencode co-enabled', () => {
+test('activity routing seeds claude/codex routes only, even with opencode co-enabled', () => {
   const realRoot = paths.globalRoot();
   const fakeRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'kit-seed-root-'));
   // aqe ≥ 3.13.1 is the seed gate — fabricate just enough of the install.
@@ -333,10 +304,18 @@ test('dual routing seeds claude/codex routes ONLY, even with opencode co-enabled
   fs.writeFileSync(path.join(fakeRoot, 'agentic-qe', 'package.json'), JSON.stringify({ name: 'agentic-qe', version: '3.13.1' }));
   paths._setGlobalRootForTest(fakeRoot);
   try {
-    const cfg = { providers: { hosts: { claude: true, codex: true, opencode: true }, primaryHost: 'claude', dualRouting: {} } };
-    const seed = seedDualRoutingIfDualHost(cfg);
+    const cfg = {
+      integrations: {
+        version: 2,
+        hosts: { claude: true, codex: true, opencode: true },
+        bindings: [],
+      },
+      routing: { version: 1, primaryHost: 'claude', routes: {} },
+      providers: {},
+    };
+    const seed = seedActivityRoutesIfMultiHost(cfg);
     assert.equal(seed.seeded, true, 'dual-host seed runs with opencode alongside');
-    const policy = cfg.providers.dualRouting;
+    const policy = cfg.routing.routes;
     assert.ok(Object.keys(policy).length > 0);
     assert.ok(!JSON.stringify(policy).includes('opencode'),
       'opencode never appears in the routing policy (not a route target, not a model host)');
@@ -345,7 +324,7 @@ test('dual routing seeds claude/codex routes ONLY, even with opencode co-enabled
         `${activity} routes to a routing host, got ${route.host}`);
     }
     // …and the enablement flags themselves are untouched by seeding.
-    assert.equal(cfg.providers.hosts.opencode, true, 'opencode stays co-enabled — additive, not a substitute');
+    assert.equal(cfg.integrations.hosts.opencode, true, 'opencode stays co-enabled — additive, not a substitute');
   } finally {
     paths._setGlobalRootForTest(realRoot);
     fs.rmSync(fakeRoot, { recursive: true, force: true });

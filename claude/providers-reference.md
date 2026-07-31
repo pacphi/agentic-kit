@@ -19,14 +19,13 @@ agentic-qe to use one or both. Two independent axes:
   - **ruflo** — `anthropic` / `openai` / `google` / `ollama` via `ruflo providers configure`.
   - API keys live in the environment; they are never persisted to `kit.json`.
 
-During the alpha, `ak host` is the canonical namespace for execution-host lifecycle and
-selection; `ak x host` is its plumbing spelling. `ak provider` and `ak x provider` are deprecated
-compatibility aliases that warn on stderr and will be removed before stable. This does not rename
-inference providers or bindings into hosts; provider flags remain temporarily co-located on this
-workflow while dedicated capability-driven surfaces mature.
+`ak host` is the namespace for execution-host lifecycle and selection; `ak x host` is its
+plumbing spelling. This does not rename inference providers or bindings into hosts; provider
+controls remain co-located on this workflow while the axes stay distinct.
 
 **One or several — you're never forced to pick just one.** All three surfaces run multiple
 providers concurrently:
+
 - **ruflo hosts** — enable `claude` *and* `codex` together (dual-mode); ruflo runs both.
 - **ruflo LLM providers** — a list, with load-balancing + automatic failover.
 - **agentic-qe** — its `HybridRouter` **auto-enables every provider that has an API key in the
@@ -63,8 +62,8 @@ ak host off      # reset to claude-only default; strip managed env keys
 
 `pick` persists your choice to `kit.json` and applies it: it writes the ruflo backend flags
 (`ENABLE_CLAUDE_CODE` / `ENABLE_CODEX`) and `AQE_LLM_PROVIDER` into
-`.claude/settings.local.json` `env` (merge-not-clobber, backup-first), runs
-`ruflo init --dual` when codex is enabled, and registers any API-key providers with ruflo.
+`.claude/settings.local.json` `env` (merge-not-clobber, backup-first), maintains the
+Claude↔Codex bridge when both hosts are enabled, and registers any API-key providers with ruflo.
 `ak sync` reapplies the same choice idempotently; `ak status` shows **hosts** and
 **providers** rows and flags drift. At the claude-only default nothing is written — behavior
 is unchanged until you opt in.
@@ -89,8 +88,7 @@ execution.
 
 - ruflo **ADR-034 Optional MCP Backends** (accepted): Claude Code / Gemini / OpenAI Codex
   backends enabled via `ENABLE_CLAUDE_CODE` / `ENABLE_GEMINI_MCP` / `ENABLE_CODEX`.
-- `@claude-flow/codex` adapter + `ruflo init --dual` ("Initialize for both Claude Code and
-  OpenAI Codex").
+- Ruflo's supported Claude Code and OpenAI Codex host backends.
 - `ruflo providers list|configure|test` — the API-key provider matrix.
 
 <!-- END ruflo-providers-reference -->
