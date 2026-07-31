@@ -110,7 +110,7 @@ ak host pick --host claude,codex --yes     # non-interactive
 ```
 
 Or enable codex during **first-time setup**, in one shot — same gated/prompted/external-safe
-install, plus the full dual-mode wiring:
+install, plus the full ambidextrous dual-host wiring:
 
 ```bash
 ak setup --codex --yes                # install everything incl. codex

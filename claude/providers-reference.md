@@ -9,7 +9,7 @@ This machine has **both** frontier-agent CLIs installed. `ak` detects them and w
 agentic-qe to use one or both. Two independent axes:
 
 - **Host axis** — which agent CLI runs the *ruflo* loop: `claude` (Claude Code) and/or `codex`
-  (OpenAI Codex). ruflo can run **both at once** (dual-mode).
+  (OpenAI Codex). ruflo can run **both at once** in ambidextrous dual-host mode.
 - **Provider axis** — which LLM the *routers* use, independent of the host:
   - **agentic-qe** — `AQE_LLM_PROVIDER=<type>` selects any of `claude-code` (subscription),
     `claude` / `openai` / `gemini` / `openrouter` / `azure-openai` / `bedrock` / `cognitum`
@@ -26,7 +26,7 @@ controls remain co-located on this workflow while the axes stay distinct.
 **One or several — you're never forced to pick just one.** All three surfaces run multiple
 providers concurrently:
 
-- **ruflo hosts** — enable `claude` *and* `codex` together (dual-mode); ruflo runs both.
+- **ruflo hosts** — enable `claude` *and* `codex` together (ambidextrous dual-host mode); ruflo runs both.
 - **ruflo LLM providers** — a list, with load-balancing + automatic failover.
 - **agentic-qe** — its `HybridRouter` **auto-enables every provider that has an API key in the
   env** and fails over across an ordered chain. `AQE_LLM_PROVIDER` only pins the *default* (the
@@ -71,8 +71,8 @@ is unchanged until you opt in.
 When **both** hosts are enabled, `ak` also seeds a **per-activity routing policy** and wires a
 **two-way Claude↔Codex MCP bridge** (Claude reaches Codex via `mcp__codex__codex`; Codex reaches
 ruflo via `[mcp_servers.ruflo]`). `--primary-host claude|codex` chooses which host leads. See the
-dual-mode reference block and `docs/PROVIDERS.md` §3.5 for the routing table and canonical `ak run`
-execution.
+ambidextrous dual-host reference block and `docs/PROVIDERS.md` §3.5 for the routing table and
+canonical `ak run` execution.
 
 ### Install & update (install-method-aware)
 
