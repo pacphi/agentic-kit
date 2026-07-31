@@ -13,7 +13,13 @@
   "files": [
     "bin/agentic-kit.mjs",
     "src/",
+    "!src/**/.claude/**",
+    "!src/**/.agentic-qe/**",
+    "!src/**/.claude-flow/**",
     "claude/",
+    "!claude/**/.claude/**",
+    "!claude/**/.agentic-qe/**",
+    "!claude/**/.claude-flow/**",
     "docs/TROUBLESHOOTING.md",
     "docs/CODEX-STATUSLINE.md",
     "docs/adr/0015-managed-codex-native-statusline.md"

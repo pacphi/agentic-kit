@@ -11,14 +11,13 @@ ak dashboard
 # Optional structured telemetry; repeat the option for multiple files.
 ak dashboard \
   --live-source 'ruflo=.claude-flow/live-events.jsonl' \
-  --live-source 'aqe=.agentic-qe/live-events.jsonl' \
-  --live-source 'dual-run=.claude-flow/dual-run-events.jsonl'
+  --live-source 'aqe=.agentic-qe/live-events.jsonl'
 ```
 
 > [!NOTE]
 > `--live-source` is opt-in, not required. Without it, Claude and Codex
 > sessions are still fully covered — auto-discovered, no config needed. What
-> you don't get: ruflo, agentic-qe, and dual-run activity, which are never
+> you don't get: ruflo and agentic-qe activity, which are never
 > auto-discovered and only appear once you register their event file
 > explicitly (see [Evidence and limitations](#evidence-and-limitations)).
 
@@ -164,13 +163,12 @@ capacity.
 | Codex rollout | Session, response/tool lifecycle, model, and explicit rollout metadata | Observed |
 | Codex state ledger | Parent-to-child spawn edges | Observed |
 | Ruflo / agentic-qe | Conservative adapter for an explicitly supplied structured JSONL source | Observed as reported by that source |
-| Dual run | Planned steps from explicit `dual-run.plan` JSONL records | Planned |
 
 The default dashboard automatically discovers only Claude and Codex transcript
 files and reads the Codex state ledger. It does **not** search arbitrary ruflo,
-agentic-qe, plugin, skill, or dual-run stores. Register a structured source
+agentic-qe, plugin, or skill stores. Register a structured source
 explicitly with repeatable `--live-source 'surface=path'`, where `surface` is
-exactly `ruflo`, `aqe`, or `dual-run`.
+exactly `ruflo` or `aqe`.
 
 Relative paths resolve from the directory where `ak dashboard` starts; absolute
 paths remain absolute. The parser rejects an unsupported/missing surface or an
@@ -180,6 +178,10 @@ Unreadable/malformed sources degrade their adapter rather than crashing the
 dashboard. Only register a local file you trust the dashboard process to read.
 The structured adapter still constructs allowlisted events, so arbitrary JSON
 fields do not pass through to the browser.
+
+Historical persisted events from the pre-GA executor normalize to the read-only
+`internal` surface so retained evidence is not mislabeled as native. No current
+writer or `--live-source` parser accepts the retired label.
 
 The diagram is a bounded current-state projection, not a durable audit log.
 Silence changes a session's projection lifecycle to quiescent after 30 seconds

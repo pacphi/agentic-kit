@@ -57,13 +57,13 @@ export function ruvectorRegistered() {
  * at the repo root — so reading that file is the spawn-free equivalent of
  * `claude mcp get codex` (deterministic + testable, matching `registrationStatus`'s
  * file-read approach). `owned` reflects kit.json's ak-ownership marker
- * (`providers.codexMcp === 'ak'`), which gates teardown.
+ * (`integrations.ownership.codex.mcp === 'ak'`), which gates teardown.
  * @returns {{ registered: boolean, owned: boolean }}
  */
 export function codexMcpStatus(cfg, cwd = process.cwd()) {
   const root = repoRoot(cwd) ?? cwd;
   const servers = readJson(path.join(root, '.mcp.json'), {})?.mcpServers ?? {};
-  return { registered: 'codex' in servers, owned: cfg?.providers?.codexMcp === 'ak' };
+  return { registered: 'codex' in servers, owned: cfg?.integrations?.ownership?.codex?.mcp === 'ak' };
 }
 
 /**
@@ -71,7 +71,8 @@ export function codexMcpStatus(cfg, cwd = process.cwd()) {
  * runs `codex mcp add ruflo …`, which writes a `[mcp_servers.ruflo]` table into
  * ~/.codex/config.toml — so a spawn-free presence check reads that file (mirrors
  * codexMcpStatus's file-read approach; no TOML parser needed for a header check).
- * `owned` reflects kit.json's ak-ownership marker (`providers.rufloCodexMcp === 'ak'`).
+ * `owned` reflects kit.json's ak-ownership marker
+ * (`integrations.ownership.codex.reverseMcp === 'ak'`).
  * @returns {{ registered: boolean, owned: boolean }}
  */
 export function rufloCodexMcpStatus(cfg, { home = os.homedir() } = {}) {
@@ -79,7 +80,7 @@ export function rufloCodexMcpStatus(cfg, { home = os.homedir() } = {}) {
   try {
     registered = /^\s*\[mcp_servers\.ruflo\]/m.test(fs.readFileSync(path.join(home, '.codex', 'config.toml'), 'utf8'));
   } catch { /* config absent → not registered */ }
-  return { registered, owned: cfg?.providers?.rufloCodexMcp === 'ak' };
+  return { registered, owned: cfg?.integrations?.ownership?.codex?.reverseMcp === 'ak' };
 }
 
 export async function register() {

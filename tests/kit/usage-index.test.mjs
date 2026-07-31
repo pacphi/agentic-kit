@@ -450,7 +450,7 @@ test('buildIndex emits the documented Aggregate shape', async () => {
   const agg = await buildIndex(opts(sb));
 
   for (const k of ['generatedAt', 'windowDays', 'pricesAsOf', 'totals', 'byDay', 'byModel',
-    'byHost', 'byProvider', 'byTranscriptProvider', 'byProject', 'byCategory',
+    'byHost', 'byProvider', 'byProject', 'byCategory',
     'punchcard', 'projectTree', 'sessions', 'insights']) {
     assert.ok(k in agg, `missing ${k}`);
   }
@@ -606,7 +606,6 @@ test('byDay, byModel, byHost, byProvider, byProject and byCategory partition the
   assert.equal(sum(agg.byCategory), agg.totals.tokens);
   assert.deepEqual(Object.keys(agg.byHost).sort(), ['claude', 'codex']);
   assert.deepEqual(Object.keys(agg.byProvider), ['unknown']);
-  assert.deepEqual(agg.byTranscriptProvider, agg.byHost);
   // byDay keys are LOCAL calendar days, so a far-eastern tz may split the
   // fixtures' 09:00–12:00Z across two adjacent days. Both are in-window.
   for (const day of Object.keys(agg.byDay)) {

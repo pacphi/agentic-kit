@@ -1,8 +1,15 @@
 # ADR-0017 — OpenCode as a managed, observable host through native surfaces
 
-- **Status:** Accepted
+- **Status:** Accepted; compatibility references amended by
+  [ADR-0020](0020-ga-stable-surfaces.md)
 - **Date:** 2026-07-28
+- **Updated:** 2026-07-30
+- **Update note:** Made OpenCode explicitly routable only through `ak run` while retaining its
+  opt-in, non-primary, non-AQE safety boundary.
 - **Deciders:** agentic-kit maintainers
+
+> **GA amendment:** OpenCode remains opt-in, non-primary, and outside AQE. Historical references
+> to the removed compatibility executor do not describe a supported 4.0 surface.
 
 ## Context
 
@@ -40,7 +47,7 @@ the plugin, the config entries, and the guidance file are static artifacts with 
 The ADR-0016 host registry declares `canDriveSession:true`, `canBePrimary:false`, and now
 `canRouteActivities:true`, plus the `opencode-ai` npm package and native OpenCode
 projection. Brew/mise/native installs report `external` and are never touched.
-`providers.hosts.opencode` remains the compatibility intent field and `--opencode` opts in.
+`integrations.hosts.opencode` is the canonical intent field and `--opencode` opts in.
 No `ENABLE_*` env exists for opencode (ruflo's ADR-034 backend flags don't cover it), so
 wiring is entirely config-file based — the `MANAGED_ENV_KEYS` surface is unchanged.
 ADR-0018 supplies the subsequent execution proof and limits this capability to explicit `ak run`
@@ -70,9 +77,10 @@ Every ak-managed byte on opencode's surfaces lives behind one module, following 
   source changed) are pruned under the same ==-written guard. Scalar `permission`
   shorthand is lifted to its documented object equivalent (`{"*": v}`) before merging
   and restored on undo.
-- **Ownership:** on first write ak records `providers.opencodeMcp='ak'` plus value
-  receipts (`opencodeManaged: {mcp:{}, paths:[], permissions:{}, artifacts:{}}`) in
-  kit.json. Artifact receipts are SHA-256 hashes of the exact last-written content.
+- **Ownership:** on first write ak records `integrations.ownership.opencode.mcp='ak'` plus
+  value receipts under `integrations.ownership.opencode.managed`
+  (`{mcp:{}, paths:[], permissions:{}, artifacts:{}}`) in kit.json. Artifact receipts are
+  SHA-256 hashes of the exact last-written content.
   `undoOpencode` strips exactly that set — user MCP servers, user skills paths, and user
   permissions survive teardown (mirrors the `codexMcp`/`rufloCodexMcp` ownership guards,
   made precise for a shared JSON document).
@@ -239,7 +247,7 @@ which is the honest shape).
   `src/lib/providers.mjs` (registry-derived managed host projection,
   `--opencode` flag handling, `hostAuthState` home seam),
   `src/lib/blocks.mjs` (`agents-opencode` target, new registry rows),
-  `src/commands/{sync,status,setup,uninstall}.mjs`, `src/commands/x/provider.mjs`
+  `src/commands/{sync,status,setup,uninstall}.mjs`, `src/commands/x/host.mjs`
   (`pick` two-tier management + `off` teardown), `src/lib/nudge.mjs` (shared targets),
   `src/lib/dashboard/client.mjs` (Hosts-tab categorization),
   `src/lib/versions.mjs` (drift), `src/templates/opencode-ruflo-hooks.js`,

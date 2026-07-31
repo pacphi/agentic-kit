@@ -1,11 +1,18 @@
 # ADR-0012 — Live sessions as local, evidence-graded observability
 
-- **Status:** Accepted
+- **Status:** Accepted; compatibility-source references amended by
+  [ADR-0020](0020-ga-stable-surfaces.md)
 - **Date:** 2026-07-27
+- **Updated:** 2026-07-30
+- **Update note:** Retained local evidence-graded observability, removed the compatibility source,
+  and mapped its historical records to internal provenance.
 - **Deciders:** agentic-kit maintainers
 - **Related:** [ADR-0005](0005-dashboard-in-page-routing-reveal.md),
   [ADR-0007](0007-maintainer-admin-local-telemetry.md),
   [ADR-0009](0009-usage-scorecard-local-transcript-analytics.md)
+
+> **GA amendment:** the local, read-only observability contract remains. References below to the
+> retired compatibility execution source describe the evidence model at adoption time only.
 
 ## Context
 

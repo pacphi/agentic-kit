@@ -1,8 +1,8 @@
-// Dual-host per-activity LLM routing — the pure policy core (ADR-0001..0005).
+// Host-neutral per-activity LLM routing — the pure policy core (ADR-0001..0006).
 //
-// One policy (kit.json `providers.dualRouting`) is the single source of truth for
+// One policy (kit.json `routing.routes`) is the single source of truth for
 // "which host + model runs which activity", and is PROJECTED into downstream
-// artifacts (aqe agentOverrides, dual-run config, codex MCP). This module is pure
+// artifacts (aqe agentOverrides, host-neutral run plans, codex MCP). This module is pure
 // (no I/O) so the projectors and defaults are unit-testable in isolation; the
 // writers/UX that consume it live in providers.mjs / the commands.
 import { vendorOf } from './qeCourt.mjs';
@@ -39,7 +39,7 @@ export const AQE_CONSTRUCTIBLE_PROVIDERS = [
 export const SUBSCRIPTION_PROVIDERS = new Set(['claude-code', 'codex', 'ollama', 'onnx']);
 
 // ── Model catalog ────────────────────────────────────────────────────────────
-// Known-good model choices per host, surfaced as help in `ak x provider pick`,
+// Known-good model choices per host, surfaced as help in `ak x host pick`,
 // `--help`, and docs/PROVIDERS.md. NOT a hard allow-list: any model your host CLI
 // accepts also works — these are ak's curated picks. Web-verified on the date
 // below; model lines move fast, so re-check and let users override (ADR-0002/0003).
@@ -133,12 +133,12 @@ export function swapHostModel(host, model) {
 }
 
 /** Mirror a route to the opposite host (host + model + escalation ladder). Pure.
- *  @param {{host: string, model?: string, escalate?: Array<{host: string, model?: string}>}} route */
+ *  @param {{host: string, model?: string, escalation?: Array<{host: string, model?: string}>}} route */
 export function swapRoute(route) {
   const { host, model } = swapHostModel(route.host, route.model);
-  /** @type {{host: string, model?: string, escalate?: Array<{host: string, model?: string}>}} */
+  /** @type {{host: string, model?: string, escalation?: Array<{host: string, model?: string}>}} */
   const out = { host, ...(model ? { model } : {}) };
-  if (route.escalate?.length) out.escalate = route.escalate.map((e) => swapHostModel(e.host, e.model));
+  if (route.escalation?.length) out.escalation = route.escalation.map((e) => swapHostModel(e.host, e.model));
   return out;
 }
 
@@ -147,7 +147,7 @@ export function swapRoute(route) {
 // coder/tester→codex, reviewer→claude, securityAudit scanner/fixer→codex,
 // analyzer→claude. packaging/release are ak-originated gap-fills. Model IDs are
 // soft defaults, web-verified (see MODEL_CATALOG_VERIFIED); users override freely.
-const R = (host, model, escalate) => ({ host, model, ...(escalate ? { escalate } : {}) });
+const R = (host, model, escalation) => ({ host, model, ...(escalation ? { escalation } : {}) });
 export const DEFAULT_ROUTES = {
   specification:       R('claude', 'claude-sonnet-5'),
   architecture:        R('claude', 'claude-opus-5'),
@@ -164,7 +164,7 @@ export const DEFAULT_ROUTES = {
 };
 
 // Curated aqe agent-type → activity map for the agentOverrides projection.
-// Only the QE-relevant activities have aqe agents; the rest are dual-run roles.
+// Only the QE-relevant activities have aqe agents; the rest are pipeline roles.
 export const AGENT_ACTIVITY_MAP = {
   'qe-security-scanner': 'security-scan',
   'qe-security-auditor': 'security-scan',
@@ -189,15 +189,16 @@ export function isRoutableHost(host) {
 
 /**
  * Effective routes = DEFAULT_ROUTES overlaid with the persisted policy, each
- * carrying provenance. A persisted entry defaults its `source` to 'user' (a hand
- * edit is intent); `seedDualRouting` stamps 'seeded'; an unset activity is 'default'.
+ * carrying provenance. A persisted entry defaults its `provenance` to 'user' (a
+ * hand edit is intent); `seedActivityRoutes` stamps 'seeded'; an unset activity
+ * is 'default'.
  */
 export function resolveRoutes(policy = {}) {
   const out = {};
   for (const act of ACTIVITIES) {
     const def = DEFAULT_ROUTES[act];
     const p = policy[act];
-    if (!p) { out[act] = { ...def, source: 'default', akOriginated: AK_ORIGINATED.has(act) }; continue; }
+    if (!p) { out[act] = { ...def, provenance: 'default', akOriginated: AK_ORIGINATED.has(act) }; continue; }
     out[act] = {
       host: p.host ?? def.host,
       // A host-only override must NOT inherit the previous host's default
@@ -206,8 +207,10 @@ export function resolveRoutes(policy = {}) {
       // default only falls forward for the SAME host; a cross-host override
       // leaves the model to the adapter's own default (null).
       model: p.model ?? (p.host && p.host !== def.host ? null : def.model),
-      ...((p.escalate ?? def.escalate) ? { escalate: p.escalate ?? def.escalate } : {}),
-      source: p.source ?? 'user',
+      ...((p.escalation ?? def.escalation)
+        ? { escalation: p.escalation ?? def.escalation }
+        : {}),
+      provenance: p.provenance ?? 'user',
       akOriginated: AK_ORIGINATED.has(act),
     };
   }
@@ -220,10 +223,10 @@ export function resolveRoutes(policy = {}) {
  * only for the hosts the caller passes as usable. When `primary` is 'codex', each
  * default route is mirrored to the opposite host (swapRoute) so codex leads and
  * claude is the alternate. Gating on enablement + aqe version is the caller's job
- * (seedDualRoutingIfDualHost); this does NOT verify the host CLI is installed.
- * Returns entries stamped `source: 'seeded'`.
+ * (seedActivityRoutesIfMultiHost); this does NOT verify the host CLI is installed.
+ * Returns entries stamped `provenance: 'seeded'`.
  */
-export function seedDualRouting({ hosts = HOSTS, primary = DEFAULT_PRIMARY_HOST } = {}) {
+export function seedActivityRoutes({ hosts = HOSTS, primary = DEFAULT_PRIMARY_HOST } = {}) {
   const usable = new Set(hosts);
   const swap = primary === 'codex';
   const policy = {};
@@ -233,8 +236,8 @@ export function seedDualRouting({ hosts = HOSTS, primary = DEFAULT_PRIMARY_HOST 
     if (!SUBSCRIPTION_PROVIDERS.has(HOST_PROVIDER[def.host])) continue;
     policy[act] = {
       host: def.host, model: def.model,
-      ...(def.escalate ? { escalate: def.escalate } : {}),
-      source: 'seeded',
+      ...(def.escalation ? { escalation: def.escalation } : {}),
+      provenance: 'seeded',
     };
   }
   return policy;
@@ -265,7 +268,7 @@ function currentSeedFor(act, entry = {}) {
  * ak chose these values, the defaults have since moved, and nothing re-seeds them.
  * Pure.
  *
- * Only `source === 'seeded'` entries are reported: a 'user' pin is deliberate
+ * Only `provenance === 'seeded'` entries are reported: a 'user' pin is deliberate
  * intent and is never divergence.
  *
  * Which side is better is activity-dependent (a newer default can cost 2-3× the
@@ -276,20 +279,20 @@ export function divergedRoutes(policy = {}) {
   const out = [];
   for (const act of ACTIVITIES) {
     const p = policy[act];
-    if (!p || p.source !== 'seeded') continue;
+    if (!p || p.provenance !== 'seeded') continue;
     const want = currentSeedFor(act, p);
     if (!want) continue;
     const modelDiverged = !!(want.model && p.model && p.model !== want.model);
     // An escalation rung is a routing decision too, and it diverges on its own
     // schedule: a seed whose primary model never moved can still escalate into a
     // model the defaults have since replaced.
-    const escalate = (p.escalate ?? []).map((rung, i) => {
-      const wantRung = want.escalate?.[i];
+    const escalation = (p.escalation ?? []).map((rung, i) => {
+      const wantRung = want.escalation?.[i];
       return wantRung && rung.model !== wantRung.model
         ? { host: rung.host, model: rung.model, defaultModel: wantRung.model }
         : null;
     }).filter(Boolean);
-    if (!modelDiverged && escalate.length === 0) continue;
+    if (!modelDiverged && escalation.length === 0) continue;
     out.push({
       activity: act,
       host: p.host ?? want.host,
@@ -297,7 +300,7 @@ export function divergedRoutes(policy = {}) {
       defaultHost: want.host,
       defaultModel: want.model,
       modelDiverged,
-      escalate,
+      escalation,
       defaultNote: modelNote(want.model),
       currentNote: modelNote(p.model),
     });
@@ -307,7 +310,7 @@ export function divergedRoutes(policy = {}) {
 
 /**
  * Re-seed the named activities from the current defaults, returning a NEW policy.
- * Only `source === 'seeded'` entries are eligible — a user pin survives untouched
+ * Only `provenance === 'seeded'` entries are eligible — a user pin survives untouched
  * even when named. `activities` defaults to every diverged activity. Pure.
  * @param {Record<string, any>} [policy]
  * @param {{ activities?: string[] }} [opts]
@@ -322,8 +325,8 @@ export function refreshSeededRoutes(policy = {}, { activities } = {}) {
     out[act] = {
       host: seed.host,
       model: seed.model,
-      ...(seed.escalate ? { escalate: seed.escalate } : {}),
-      source: 'seeded',
+      ...(seed.escalation ? { escalation: seed.escalation } : {}),
+      provenance: 'seeded',
     };
   }
   return out;
@@ -371,31 +374,30 @@ export function pruneRoutesForHosts(policy = {}, { hosts = HOSTS } = {}) {
   const warnings = [];
   const pruned = [];
   for (const [activity, route] of Object.entries(policy)) {
-    const source = route?.source ?? 'user';
+    const provenance = route?.provenance ?? 'user';
     if (!enabled.has(route?.host)) {
-      pruned.push({ activity, kind: 'route', host: route?.host ?? null, source });
-      if (source !== 'seeded') warnings.push(`removed user route '${activity}' — host '${route?.host ?? 'unknown'}' is disabled`);
+      pruned.push({ activity, kind: 'route', host: route?.host ?? null, provenance });
+      if (provenance !== 'seeded') warnings.push(`removed user route '${activity}' — host '${route?.host ?? 'unknown'}' is disabled`);
       continue;
     }
-    const before = Array.isArray(route.escalate) ? route.escalate : [];
-    const escalate = before.filter((rung) => enabled.has(rung?.host));
+    const before = Array.isArray(route.escalation) ? route.escalation : [];
+    const escalation = before.filter((rung) => enabled.has(rung?.host));
     const removed = before.filter((rung) => !enabled.has(rung?.host));
     for (const rung of removed) {
-      pruned.push({ activity, kind: 'escalation', host: rung?.host ?? null, source });
-      if (source !== 'seeded') warnings.push(`removed user escalation for '${activity}' — host '${rung?.host ?? 'unknown'}' is disabled`);
+      pruned.push({ activity, kind: 'escalation', host: rung?.host ?? null, provenance });
+      if (provenance !== 'seeded') warnings.push(`removed user escalation for '${activity}' — host '${rung?.host ?? 'unknown'}' is disabled`);
     }
-    next[activity] = { ...route, ...(escalate.length ? { escalate } : {}) };
-    if (removed.length && !escalate.length) delete next[activity].escalate;
+    next[activity] = { ...route, ...(escalation.length ? { escalation } : {}) };
+    if (removed.length && !escalation.length) delete next[activity].escalation;
   }
   return { policy: next, pruned, warnings };
 }
 
-// ── Projection #2: dual-run collaboration config ────────────────────────────
+// ── Host-neutral run templates ──────────────────────────────────────────────
 // A template is an ordered DAG of activities; the policy fills host+model per
 // node. Grounded in rUv's CollaborationTemplates (feature/security/refactor);
-// packaging/release are ak-added (ADR-0002). Consumed by `claude-flow-codex dual
-// run --config` (each node → a worker {id, platform, role, model, prompt, dependsOn}).
-export const DUAL_RUN_TEMPLATES = {
+// packaging/release are ak-added (ADR-0002).
+export const RUN_TEMPLATES = {
   feature: [
     { id: 'architect', role: 'architect', activity: 'architecture', maxTurns: 10, prompt: (t) => `Design the architecture for: ${t}. Define components, interfaces, and data flow.` },
     { id: 'coder', role: 'coder', activity: 'implementation', dependsOn: ['architect'], maxTurns: 15, prompt: (t) => `Implement "${t}" from the architecture. Write clean, typed code.` },
@@ -422,16 +424,16 @@ export const DUAL_RUN_TEMPLATES = {
     { id: 'reviewer', role: 'reviewer', activity: 'review', dependsOn: ['preparer'], maxTurns: 6, prompt: () => 'Review the release plan for correctness and completeness.' },
   ],
 };
-export const DUAL_RUN_TEMPLATE_NAMES = Object.keys(DUAL_RUN_TEMPLATES);
+export const RUN_TEMPLATE_NAMES = Object.keys(RUN_TEMPLATES);
 
 /**
- * Projection #2 → `claude-flow-codex dual run --config` JSON. Each template node
- * becomes a worker whose platform + model come from the policy's effective route
- * for that node's activity. Throws on an unknown template.
+ * Build a host-neutral execution plan. Each template node becomes a worker whose
+ * host + model come from the policy's effective route for that node's activity.
+ * Throws on an unknown template.
  */
 export function materializeRunPlan(policy = {}, { template = 'feature', task = '' } = {}) {
-  const nodes = DUAL_RUN_TEMPLATES[template];
-  if (!nodes) throw new Error(`unknown template "${template}" (expected: ${DUAL_RUN_TEMPLATE_NAMES.join(', ')})`);
+  const nodes = RUN_TEMPLATES[template];
+  if (!nodes) throw new Error(`unknown template "${template}" (expected: ${RUN_TEMPLATE_NAMES.join(', ')})`);
   const routes = resolveRoutes(policy);
   return {
     template,
@@ -445,7 +447,7 @@ export function materializeRunPlan(policy = {}, { template = 'feature', task = '
     // rungs are dropped here (escalating to the same host+model would re-run
     // the identical attempt — the legacy L4 rule), and every rung must be a
     // routable host or materialization fails the same way the primary does.
-    const ladder = (r.escalate ?? [])
+    const ladder = (r.escalation ?? [])
       .filter((rung) => rung && (rung.host !== r.host || (rung.model ?? null) !== (r.model ?? null)))
       .map((rung) => {
         const rungEligibility = validateActivityHost(rung.host);
@@ -470,48 +472,6 @@ export function materializeRunPlan(policy = {}, { template = 'feature', task = '
 }
 
 /**
- * Compatibility projection to `claude-flow-codex dual run --config`. It deliberately
- * remains Claude/Codex-specific while the generalized runner is introduced.
- */
-export function policyToDualRunConfig(policy = {}, opts = {}) {
-  const plan = materializeRunPlan(policy, opts);
-  const unsupported = plan.workers.filter((worker) => !['claude', 'codex'].includes(worker.host));
-  if (unsupported.length) {
-    throw new Error(`ak dual supports Claude/Codex workers only; use ak run for ${[...new Set(unsupported.map((worker) => worker.host))].join(', ')}`);
-  }
-  return {
-    workers: plan.workers.map((worker) => ({
-      id: worker.id,
-      platform: worker.host,
-      role: worker.role,
-      model: worker.configuredModel ?? undefined,
-      prompt: worker.prompt,
-      ...(worker.dependsOn ? { dependsOn: worker.dependsOn } : {}),
-      ...(worker.maxTurns ? { maxTurns: worker.maxTurns } : {}),
-    })),
-  };
-}
-
-/**
- * One escalation step (ADR-0004): a partial policy that bumps every activity with
- * an escalation ladder to its next rung (host+model). Overlay it onto the policy
- * and re-project to retry a failed dual-run on a different (cross-vendor) rung.
- */
-export function escalatePolicy(policy = {}) {
-  const routes = resolveRoutes(policy);
-  const next = {};
-  for (const [act, r] of Object.entries(routes)) {
-    const rung = r.escalate?.[0];
-    // skip a rung that equals the current host+model — a user override can retain
-    // the default ladder, so escalating there would just re-run the same thing (L4).
-    if (rung && (rung.host !== r.host || rung.model !== r.model)) {
-      next[act] = { host: rung.host, model: rung.model, source: 'user' };
-    }
-  }
-  return next;
-}
-
-/**
  * Distinct vendors across the routed activities, via qe-court's classifier.
  * ≥2 = cross-vendor coverage (the qe-court diversity property; ADR-0004).
  */
@@ -531,8 +491,8 @@ export function routingSummary(policy = {}) {
   for (const r of routes) byHost[r.host] = (byHost[r.host] ?? 0) + 1;
   return {
     total: routes.length,
-    seeded: routes.filter((r) => r.source === 'seeded').length,
-    custom: routes.filter((r) => r.source === 'user').length,
+    seeded: routes.filter((r) => r.provenance === 'seeded').length,
+    custom: routes.filter((r) => r.provenance === 'user').length,
     byHost,
     vendors: routedVendors(policy).size,
   };
@@ -554,7 +514,7 @@ export function validateRoute(route = {}) {
 
 /**
  * Parse a repeatable `--route "activity:host[:model]"` CLI spec into a partial
- * policy (source:'user'). Sibling to provider.mjs's parseFallback. Unknown
+ * policy (`provenance:'user'`). Sibling to provider.mjs's parseFallback. Unknown
  * activities/hosts are collected as warnings, not thrown.
  */
 export function parseRouteSpecs(specs = []) {
@@ -568,7 +528,7 @@ export function parseRouteSpecs(specs = []) {
     if (!ACTIVITIES.includes(activity)) { warnings.push(`unknown activity "${activity}" — ignored`); continue; }
     const errs = validateRoute({ host, model });
     if (errs.length) { warnings.push(`route "${spec}": ${errs.join('; ')} — ignored`); continue; }
-    policy[activity] = { host, ...(model ? { model } : {}), source: 'user' };
+    policy[activity] = { host, ...(model ? { model } : {}), provenance: 'user' };
   }
   return { policy, warnings };
 }

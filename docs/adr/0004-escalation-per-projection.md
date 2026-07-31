@@ -1,8 +1,15 @@
 # ADR-0004 — Escalation is per-projection, availability stated per path
 
-- **Status:** Accepted
+- **Status:** Superseded by [ADR-0019](0019-escalation-in-ak-run.md) and
+  [ADR-0020](0020-ga-stable-surfaces.md)
 - **Date:** 2026-07-23
+- **Updated:** 2026-07-30
+- **Update note:** Replaced projection-specific compatibility behavior with bounded per-worker
+  escalation in `ak run`.
 - **Deciders:** agentic-kit maintainers
+
+> **Historical record:** this comparison explains the pre-GA projections. Current escalation is
+> the bounded per-worker behavior of `ak run`; the compatibility projections were removed.
 
 ## Context
 

@@ -4,13 +4,13 @@ import { routingPayload } from '../../src/lib/dashboard-server.mjs';
 
 test('dashboard routing describes host assignment without manufacturing a provider', () => {
   const payload = routingPayload({
-    providers: {
+    routing: {
       primaryHost: 'claude',
-      dualRouting: {
+      routes: {
         implementation: {
           host: 'codex',
           model: 'gpt-5.4',
-          source: 'user',
+          provenance: 'user',
         },
       },
     },
@@ -20,9 +20,9 @@ test('dashboard routing describes host assignment without manufacturing a provid
     activity: 'implementation',
     host: 'codex',
     model: 'gpt-5.4',
-    source: 'user',
+    provenance: 'user',
     akOriginated: false,
-    escalate: ['claude'],
+    escalation: ['claude'],
   });
   assert.equal(Object.hasOwn(route, 'provider'), false);
 });

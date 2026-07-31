@@ -15,7 +15,16 @@ import { guidanceTargets, BUILTIN_BLOCKS } from '../../src/lib/blocks.mjs';
 
 const tmp = (prefix) => fs.mkdtempSync(path.join(os.tmpdir(), prefix));
 const rm = (d) => fs.rmSync(d, { recursive: true, force: true });
-const cfgOn = () => ({ providers: { hosts: { opencode: true }, opencodeMcp: null, opencodeManaged: null } });
+const cfgOn = () => ({
+  integrations: {
+    version: 2,
+    hosts: { claude: true, codex: false, opencode: true },
+    bindings: [],
+    ownership: { opencode: { mcp: null, managed: null, catalogDir: null } },
+  },
+  routing: { version: 1, primaryHost: 'claude', routes: {} },
+  providers: {},
+});
 
 /** Fixture ruflo catalog source: .claude/agents (+ frontmatter variants),
  *  .claude/skills, plugins, SKILL.md, package.json. */
@@ -113,7 +122,7 @@ test('applyOpencode merges wiring, preserves user keys, records value-precise ow
   }, null, 2));
 
   const cfg = cfgOn();
-  cfg.providers.opencodeCatalogDir = srcRoot;
+  cfg.integrations.ownership.opencode.catalogDir = srcRoot;
   const r = await applyOpencode(cfg, { configFile: file, brainShim: shim });
   assert.equal(r.ok, true);
   assert.equal(r.changed, true);
@@ -127,9 +136,9 @@ test('applyOpencode merges wiring, preserves user keys, records value-precise ow
   assert.ok(doc.skills.paths.includes(path.join(srcRoot, 'plugins')), 'catalog plugins path added');
   assert.equal(doc.permission.edit, 'ask', 'user permission preserved');
   for (const k of PERMISSION_KEYS) assert.equal(doc.permission[k], 'allow');
-  assert.equal(cfg.providers.opencodeMcp, 'ak');
+  assert.equal(cfg.integrations.ownership.opencode.mcp, 'ak');
   // value-precise ownership: claude-flow had no prior → prior null, written recorded
-  const rec = cfg.providers.opencodeManaged.mcp['claude-flow'];
+  const rec = cfg.integrations.ownership.opencode.managed.mcp['claude-flow'];
   assert.equal(rec.prior, null);
   assert.deepEqual(rec.written, doc.mcp['claude-flow']);
 
@@ -147,7 +156,7 @@ test('applyOpencode merges wiring, preserves user keys, records value-precise ow
   assert.deepEqual(after.skills.paths, ['/user/path']);
   assert.equal(after.permission.edit, 'ask');
   for (const k of PERMISSION_KEYS) assert.equal(after.permission[k], undefined);
-  assert.equal(cfg.providers.opencodeMcp, null);
+  assert.equal(cfg.integrations.ownership.opencode.mcp, null);
   rm(d);
 });
 
@@ -166,7 +175,9 @@ test('applyOpencode refuses an unparseable config file (never clobbers JSONC)', 
 test('applyOpencode is a no-op when the host is not enabled', async () => {
   const d = tmp('ak-oc-off-');
   const file = path.join(d, 'opencode.json');
-  const r = await applyOpencode({ providers: { hosts: { opencode: false } } }, { configFile: file });
+  const r = await applyOpencode({
+    integrations: { hosts: { opencode: false } },
+  }, { configFile: file });
   assert.equal(r.changed, false);
   assert.equal(fs.existsSync(file), false);
   rm(d);
@@ -678,7 +689,7 @@ test('collision → user aligns to desired value: stays unmanaged, undo never re
   fs.writeFileSync(file, JSON.stringify({ mcp: { 'claude-flow': want } }));
   // 3. re-apply: must NOT adopt with the stale pre-collision prior
   await applyOpencode(cfg, { configFile: file, brainShim: shim });
-  assert.equal(cfg.providers.opencodeManaged.mcp['claude-flow'].written, null, 'never owned (not ak-authored)');
+  assert.equal(cfg.integrations.ownership.opencode.managed.mcp['claude-flow'].written, null, 'never owned (not ak-authored)');
   // 4. undo: the user's aligned value must survive — no stale-prior restore
   undoOpencode(cfg, { configFile: file });
   assert.deepEqual(JSON.parse(fs.readFileSync(file, 'utf8')).mcp['claude-flow'], want);
@@ -767,7 +778,10 @@ test('opencode guidance blocks are enablement-gated (flag): absent when disabled
 test('isDefault is false when the opencode host is enabled', async () => {
   const { isDefault } = await import('../../src/lib/providers.mjs');
   assert.equal(isDefault(cfgOn()), false);
-  assert.equal(isDefault({ providers: { hosts: { claude: true, codex: false, opencode: false } } }), true);
+  assert.equal(isDefault({
+    integrations: { hosts: { claude: true, codex: false, opencode: false } },
+    providers: {},
+  }), true);
 });
 
 test('the deployed plugin template uses schema-valid PartIDs (prt prefix) for injected parts', () => {
@@ -809,24 +823,24 @@ test('opencodeStack reports markersChanged when a converged file has stale/missi
     skillsDir: path.join(d, 'skills'),
   };
   const cfg = cfgOn();
-  cfg.providers.opencodeCatalogDir = srcRoot;
+  cfg.integrations.ownership.opencode.catalogDir = srcRoot;
   await opencodeStack(cfg, { pkgRoot, ...seams }); // initial wire (markers recorded)
   assert.ok(fs.existsSync(seams.configFile), 'wiring landed in the tmp config, not the real one');
   // Simulate staleness: the markers vanish from kit.json while the file stays.
-  cfg.providers.opencodeMcp = null;
-  cfg.providers.opencodeManaged = null;
+  cfg.integrations.ownership.opencode.mcp = null;
+  cfg.integrations.ownership.opencode.managed = null;
   const second = await opencodeStack(cfg, { pkgRoot, ...seams });
   assert.equal(second.oc.changed, false, 'the file itself is already converged');
   assert.equal(second.markersChanged, true, 'but the refreshed markers must be persisted by the caller');
   assert.equal(second.plugin.adopted, true);
   assert.ok(second.agents.adopted > 0);
   assert.equal(second.skill.adopted, true);
-  assert.equal(cfg.providers.opencodeMcp, 'ak');
-  assert.ok(cfg.providers.opencodeManaged?.mcp?.['claude-flow']?.written);
-  assert.ok(cfg.providers.opencodeManaged?.artifacts?.plugin);
-  assert.ok(cfg.providers.opencodeManaged?.artifacts?.agents?.['coder.md']);
-  assert.ok(cfg.providers.opencodeManaged?.artifacts?.agentStamp);
-  assert.ok(cfg.providers.opencodeManaged?.artifacts?.skill);
+  assert.equal(cfg.integrations.ownership.opencode.mcp, 'ak');
+  assert.ok(cfg.integrations.ownership.opencode.managed?.mcp?.['claude-flow']?.written);
+  assert.ok(cfg.integrations.ownership.opencode.managed?.artifacts?.plugin);
+  assert.ok(cfg.integrations.ownership.opencode.managed?.artifacts?.agents?.['coder.md']);
+  assert.ok(cfg.integrations.ownership.opencode.managed?.artifacts?.agentStamp);
+  assert.ok(cfg.integrations.ownership.opencode.managed?.artifacts?.skill);
   // A third run with truthful markers is then fully quiet.
   const third = await opencodeStack(cfg, { pkgRoot, ...seams });
   assert.equal(third.markersChanged, false, 'no kit.json churn once the markers are truthful');
@@ -844,17 +858,17 @@ test('opencodeStack normalizes poisoned null artifact maps before adopting exact
     skillsDir: path.join(d, 'skills'),
   };
   const cfg = cfgOn();
-  cfg.providers.opencodeCatalogDir = makeCatalog(path.join(d, 'catalog'));
+  cfg.integrations.ownership.opencode.catalogDir = makeCatalog(path.join(d, 'catalog'));
   const pkgRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
   await opencodeStack(cfg, { pkgRoot, ...seams });
-  cfg.providers.opencodeManaged.artifacts = {
+  cfg.integrations.ownership.opencode.managed.artifacts = {
     plugin: null, agents: null, agentStamp: null, skill: null,
   };
   const adopted = await opencodeStack(cfg, { pkgRoot, ...seams });
   assert.equal(adopted.plugin.adopted, true);
   assert.ok(adopted.agents.adopted > 0);
   assert.equal(adopted.skill.adopted, true);
-  assert.ok(cfg.providers.opencodeManaged.artifacts.agents['coder.md']);
+  assert.ok(cfg.integrations.ownership.opencode.managed.artifacts.agents['coder.md']);
   rm(d);
 });
 
@@ -869,11 +883,11 @@ test('non-null poisoned receipts are preserved and never treated as an adoption 
     skillsDir: path.join(d, 'skills'),
   };
   const cfg = cfgOn();
-  cfg.providers.opencodeCatalogDir = makeCatalog(path.join(d, 'catalog'));
+  cfg.integrations.ownership.opencode.catalogDir = makeCatalog(path.join(d, 'catalog'));
   const pkgRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
   await opencodeStack(cfg, { pkgRoot, ...seams });
-  const agentNames = Object.keys(cfg.providers.opencodeManaged.artifacts.agents);
-  cfg.providers.opencodeManaged.artifacts = {
+  const agentNames = Object.keys(cfg.integrations.ownership.opencode.managed.artifacts.agents);
+  cfg.integrations.ownership.opencode.managed.artifacts = {
     plugin: '',
     agents: Object.fromEntries(agentNames.map((name) => [name, ''])),
     agentStamp: '',
@@ -883,11 +897,11 @@ test('non-null poisoned receipts are preserved and never treated as an adoption 
   assert.notEqual(refused.plugin.adopted, true);
   assert.equal(refused.agents.adopted, 0);
   assert.notEqual(refused.skill.adopted, true);
-  assert.equal(cfg.providers.opencodeManaged.artifacts.plugin, '');
-  assert.deepEqual(cfg.providers.opencodeManaged.artifacts.agents,
+  assert.equal(cfg.integrations.ownership.opencode.managed.artifacts.plugin, '');
+  assert.deepEqual(cfg.integrations.ownership.opencode.managed.artifacts.agents,
     Object.fromEntries(agentNames.map((name) => [name, ''])));
-  assert.equal(cfg.providers.opencodeManaged.artifacts.agentStamp, '');
-  assert.equal(cfg.providers.opencodeManaged.artifacts.skill, '');
+  assert.equal(cfg.integrations.ownership.opencode.managed.artifacts.agentStamp, '');
+  assert.equal(cfg.integrations.ownership.opencode.managed.artifacts.skill, '');
   rm(d);
 });
 
@@ -902,12 +916,12 @@ test('malformed non-null receipt containers fail closed without adopting or rewr
     skillsDir: path.join(d, 'skills'),
   };
   const cfg = cfgOn();
-  cfg.providers.opencodeCatalogDir = makeCatalog(path.join(d, 'catalog'));
+  cfg.integrations.ownership.opencode.catalogDir = makeCatalog(path.join(d, 'catalog'));
   const pkgRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
   await opencodeStack(cfg, { pkgRoot, ...seams });
   const artifactFiles = [
     path.join(seams.pluginsDir, PLUGIN_NAME),
-    ...Object.keys(cfg.providers.opencodeManaged.artifacts.agents)
+    ...Object.keys(cfg.integrations.ownership.opencode.managed.artifacts.agents)
       .map((file) => path.join(seams.agentsDir, file)),
     path.join(seams.agentsDir, '.ak-agents-stamp.json'),
     path.join(seams.skillsDir, 'ruflo', 'SKILL.md'),
@@ -915,12 +929,12 @@ test('malformed non-null receipt containers fail closed without adopting or rewr
   const exactBytes = artifactFiles.map((file) => fs.readFileSync(file, 'utf8'));
 
   for (const malformed of ['corrupt', [], { agents: 'corrupt' }]) {
-    cfg.providers.opencodeManaged.artifacts = structuredClone(malformed);
+    cfg.integrations.ownership.opencode.managed.artifacts = structuredClone(malformed);
     const result = await opencodeStack(cfg, { pkgRoot, ...seams });
     assert.notEqual(result.plugin.adopted, true);
     assert.equal(result.agents.adopted, 0);
     assert.notEqual(result.skill.adopted, true);
-    assert.deepEqual(cfg.providers.opencodeManaged.artifacts, malformed,
+    assert.deepEqual(cfg.integrations.ownership.opencode.managed.artifacts, malformed,
       'a non-null malformed container is preserved byte-for-byte as repair evidence');
     assert.deepEqual(artifactFiles.map((file) => fs.readFileSync(file, 'utf8')), exactBytes,
       'fail-closed reconciliation never rewrites artifact files');
@@ -939,8 +953,8 @@ test('a malformed receipt ledger cannot create absent artifacts across repeated 
     skillsDir: path.join(d, 'skills'),
   };
   const cfg = cfgOn();
-  cfg.providers.opencodeCatalogDir = makeCatalog(path.join(d, 'catalog'));
-  cfg.providers.opencodeManaged = { artifacts: 'corrupt' };
+  cfg.integrations.ownership.opencode.catalogDir = makeCatalog(path.join(d, 'catalog'));
+  cfg.integrations.ownership.opencode.managed = { artifacts: 'corrupt' };
   const pkgRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 
   for (let pass = 1; pass <= 2; pass++) {
@@ -953,7 +967,7 @@ test('a malformed receipt ledger cannot create absent artifacts across repeated 
     assert.equal(result.skill.changed, false);
     assert.equal(result.markersChanged, pass === 1,
       'only the independently managed opencode.json receipt may converge');
-    assert.equal(cfg.providers.opencodeManaged.artifacts, 'corrupt');
+    assert.equal(cfg.integrations.ownership.opencode.managed.artifacts, 'corrupt');
     for (const dir of [seams.pluginsDir, seams.agentsDir, seams.skillsDir]) {
       assert.equal(fs.existsSync(dir), false, `${path.basename(dir)} must remain absent`);
     }
@@ -968,7 +982,7 @@ test('opencodeStack deploys no executable artifacts when JSONC config is refused
   const configFile = path.join(d, 'opencode.json');
   fs.writeFileSync(configFile, '{\n// legal JSONC\n"mcp": {}\n}\n');
   const cfg = cfgOn();
-  cfg.providers.opencodeCatalogDir = makeCatalog(path.join(d, 'catalog'));
+  cfg.integrations.ownership.opencode.catalogDir = makeCatalog(path.join(d, 'catalog'));
   const result = await opencodeStack(cfg, {
     pkgRoot: path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..'),
     configFile,
@@ -991,7 +1005,7 @@ test('opencodeStack preserves a valid config collision while converging independ
   const userMcp = { type: 'local', command: ['my', 'server'] };
   fs.writeFileSync(configFile, JSON.stringify({ mcp: { 'claude-flow': userMcp } }));
   const cfg = cfgOn();
-  cfg.providers.opencodeCatalogDir = makeCatalog(path.join(d, 'catalog'));
+  cfg.integrations.ownership.opencode.catalogDir = makeCatalog(path.join(d, 'catalog'));
   const result = await opencodeStack(cfg, {
     pkgRoot: path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..'),
     configFile,
@@ -1020,7 +1034,7 @@ test('OpenCode lifecycle detect/plan/dry-run are read-only; apply and undo are i
     skillsDir: path.join(d, 'skills'),
   };
   const cfg = cfgOn();
-  cfg.providers.opencodeCatalogDir = srcRoot;
+  cfg.integrations.ownership.opencode.catalogDir = srcRoot;
   const adapter = createOpencodeLifecycleAdapter(options);
   const before = JSON.stringify(cfg);
   await runLifecycle({ adapter, action: 'detect', cfg });
@@ -1030,7 +1044,7 @@ test('OpenCode lifecycle detect/plan/dry-run are read-only; apply and undo are i
   assert.equal(fs.existsSync(options.configFile), false, 'dry-run creates no OpenCode surface');
 
   const first = await runLifecycle({ adapter, action: 'apply', cfg });
-  cfg.providers.opencodeManaged.artifacts = {
+  cfg.integrations.ownership.opencode.managed.artifacts = {
     plugin: null, agents: {}, agentStamp: null, skill: null,
   };
   const adoptionPlan = await runLifecycle({ adapter, action: 'plan', cfg });
@@ -1039,7 +1053,7 @@ test('OpenCode lifecycle detect/plan/dry-run are read-only; apply and undo are i
   assert.equal(adoptionPlan.facts.agents.adoptable, true);
   assert.equal(adoptionPlan.facts.skill.adoptable, true);
   const migrated = await runLifecycle({ adapter, action: 'apply', cfg });
-  cfg.providers.opencodeManaged.artifacts.agentStamp = null;
+  cfg.integrations.ownership.opencode.managed.artifacts.agentStamp = null;
   const stampPlan = await runLifecycle({ adapter, action: 'plan', cfg });
   assert.equal(stampPlan.facts.agents.adoptable, true,
     'an exact stamp with independently receipted agents is itself adoptable');

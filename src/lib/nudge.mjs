@@ -24,7 +24,7 @@ import { fixStatusline, helperStampStale } from './statusline.mjs';
 /**
  * Probe the locally-rendered artifacts for drift.
  * @param {{ pkgRoot?: string, cwd?: string,
- *           cfg?: { customBlocks?: any[], providers?: any },
+ *           cfg?: { customBlocks?: any[], providers?: any, integrations?: { hosts?: Record<string, boolean> } },
  *           targets?: Array<{name: string, label: string, file: string}> }} [opts]
  *   `cfg` and `targets` are injectable for tests; defaults read the real
  *   kit.json and the real CLAUDE.md/AGENTS.md targets.
@@ -40,7 +40,7 @@ export async function localDrift({ pkgRoot, cwd = process.cwd(), cfg, targets } 
     const resolve = (r) => (r.custom
       ? (r.template.startsWith('~/') ? path.join(paths.home, r.template.slice(2)) : r.template)
       : path.join(pkgRoot, 'claude', r.template));
-    const ctx = { flags: { dualMode: bothHostsEnabled(cfg), opencodeEnabled: !!cfg.providers?.hosts?.opencode } };
+    const ctx = { flags: { dualMode: bothHostsEnabled(cfg), opencodeEnabled: !!cfg.integrations?.hosts?.opencode } };
     // The SHARED target list + retired-strip composition (blocks.mjs) — the
     // nudge's contract is "never disagrees with ak status", which a hardcoded
     // subset silently breaks every time a guidance target is added (codex's
@@ -56,7 +56,7 @@ export async function localDrift({ pkgRoot, cwd = process.cwd(), cfg, targets } 
 
   // Claude↔Codex MCP bridge (both directions; spawn-free file reads)
   try {
-    if (cfg.providers?.hosts?.codex) {
+    if (cfg.integrations?.hosts?.codex) {
       if (!codexMcpStatus(cfg, cwd).registered) lines.push('codex MCP unregistered');
       if (!rufloCodexMcpStatus(cfg).registered) lines.push('ruflo→codex MCP unregistered');
     }

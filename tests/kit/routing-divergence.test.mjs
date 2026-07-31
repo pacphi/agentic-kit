@@ -15,7 +15,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   MODEL_CATALOG, PROVIDER_MODEL_CATALOG, formatModelHelp,
-  DEFAULT_ROUTES, ACTIVITIES, seedDualRouting, divergedRoutes, refreshSeededRoutes,
+  DEFAULT_ROUTES, ACTIVITIES, seedActivityRoutes, divergedRoutes, refreshSeededRoutes,
   resolveRoutes, COST_AXIS_NOTE,
 } from '../../src/lib/routing.mjs';
 
@@ -60,7 +60,7 @@ test('formatModelHelp headers that per-token price is not per-task cost', () => 
 // ── divergedRoutes: pure detection ──────────────────────────────────────────
 
 test('divergedRoutes returns [] for a policy seeded from the CURRENT defaults', () => {
-  assert.deepEqual(divergedRoutes(seedDualRouting({ hosts: ['claude', 'codex'] })), []);
+  assert.deepEqual(divergedRoutes(seedActivityRoutes({ hosts: ['claude', 'codex'] })), []);
 });
 
 test('divergedRoutes returns [] for an empty policy (nothing persisted, nothing to diverge)', () => {
@@ -71,7 +71,7 @@ test('divergedRoutes returns [] for an empty policy (nothing persisted, nothing 
 test('divergedRoutes reports a seeded entry whose model no longer matches the default', () => {
   // The exact #55 reproduction: a machine seeded pre-alpha.22 still pinned to
   // the prior Opus generation while DEFAULT_ROUTES moved to claude-opus-5.
-  const policy = { architecture: { host: 'claude', model: 'claude-opus-4-8', source: 'seeded' } };
+  const policy = { architecture: { host: 'claude', model: 'claude-opus-4-8', provenance: 'seeded' } };
   const out = divergedRoutes(policy);
   assert.equal(out.length, 1);
   assert.equal(out[0].activity, 'architecture');
@@ -79,15 +79,15 @@ test('divergedRoutes reports a seeded entry whose model no longer matches the de
   assert.equal(out[0].defaultModel, DEFAULT_ROUTES.architecture.model, 'and the default it diverges from');
 });
 
-test('divergedRoutes NEVER reports a source:user entry, even pinned to an older model', () => {
+test('divergedRoutes NEVER reports a provenance:user entry, even pinned to an older model', () => {
   // A deliberate pin is intent, not drift. Reporting it would nag the user
   // about a choice they made on purpose.
-  const policy = { architecture: { host: 'claude', model: 'claude-opus-4-8', source: 'user' } };
+  const policy = { architecture: { host: 'claude', model: 'claude-opus-4-8', provenance: 'user' } };
   assert.deepEqual(divergedRoutes(policy), []);
 });
 
 test('divergedRoutes treats an unstamped persisted entry as a user pin (never reported)', () => {
-  // resolveRoutes already defaults a source-less entry to 'user' (a hand edit is
+  // resolveRoutes already defaults a provenance-less entry to 'user' (a hand edit is
   // intent). Divergence detection must inherit that, or a legacy hand-edited
   // kit.json gets flagged as machine drift.
   assert.deepEqual(divergedRoutes({ architecture: { host: 'claude', model: 'claude-opus-4-8' } }), []);
@@ -95,27 +95,27 @@ test('divergedRoutes treats an unstamped persisted entry as a user pin (never re
 
 test('the unstamped→user rule is pinned on BOTH mechanisms that implement it', () => {
   // "unstamped is never reported" is enforced twice, independently: resolveRoutes
-  // defaults `source` to 'user' (routing.mjs), and divergedRoutes reads
-  // policy[act].source directly and skips anything !== 'seeded'. Asserting only
+  // defaults `provenance` to 'user' (routing.mjs), and divergedRoutes reads
+  // policy[act].provenance directly and skips anything !== 'seeded'. Asserting only
   // the divergedRoutes half would let a future change to resolveRoutes' defaulting
   // silently split the two — this pins the equivalence itself.
-  const legacy = { architecture: { host: 'claude', model: 'claude-opus-4-8' } }; // no `source`
-  assert.equal(resolveRoutes(legacy).architecture.source, 'user');
+  const legacy = { architecture: { host: 'claude', model: 'claude-opus-4-8' } }; // no `provenance`
+  assert.equal(resolveRoutes(legacy).architecture.provenance, 'user');
   assert.deepEqual(divergedRoutes(legacy), []);
 });
 
 test('the codex-primary clean-seed assertion actually covers a LADDER-bearing activity', () => {
   // Guards a bug one level down from the top-level mirroring one: if the default
-  // were mirrored via a top-level host/model swap while `def.escalate` were left
+  // were mirrored via a top-level host/model swap while `def.escalation` were left
   // unmirrored, a codex-primary seed would pass the top-level check and then
   // false-positive on every rung. `[]` over a ladder-less sample would not catch
   // that — so first prove ladders are present, THEN prove they are clean.
-  const seed = seedDualRouting({ primary: 'codex' });
-  const withLadders = Object.entries(seed).filter(([, r]) => r.escalate?.length);
+  const seed = seedActivityRoutes({ primary: 'codex' });
+  const withLadders = Object.entries(seed).filter(([, r]) => r.escalation?.length);
   assert.ok(withLadders.length > 0,
     'anti-vacuity: a codex-primary seed must carry ladders, else this proves nothing');
   for (const [, r] of withLadders) {
-    for (const rung of r.escalate) {
+    for (const rung of r.escalation) {
       assert.equal(rung.host, 'codex', 'the LADDER must be mirrored too, not just the top-level route');
     }
   }
@@ -123,39 +123,39 @@ test('the codex-primary clean-seed assertion actually covers a LADDER-bearing ac
 });
 
 test('a corrupted rung on a MIRRORED activity is still reported (mirroring is not amnesty)', () => {
-  const seed = seedDualRouting({ primary: 'codex' });
-  const [act] = Object.entries(seed).find(([, r]) => r.escalate?.length);
-  seed[act].escalate[0].model = 'gpt-5-codex-mini';
+  const seed = seedActivityRoutes({ primary: 'codex' });
+  const [act] = Object.entries(seed).find(([, r]) => r.escalation?.length);
+  seed[act].escalation[0].model = 'gpt-5-codex-mini';
   const [d] = divergedRoutes(seed);
   assert.equal(d.activity, act);
   assert.equal(d.modelDiverged, false, 'only the rung moved — the primary model is untouched');
-  assert.equal(d.escalate[0].model, 'gpt-5-codex-mini');
-  assert.equal(d.escalate[0].defaultModel, 'gpt-5.4', 'compared against the MIRRORED default rung');
+  assert.equal(d.escalation[0].model, 'gpt-5-codex-mini');
+  assert.equal(d.escalation[0].defaultModel, 'gpt-5.4', 'compared against the MIRRORED default rung');
 });
 
 test('divergedRoutes ignores a seeded entry that still matches the default', () => {
   const policy = {
-    architecture: { host: 'claude', model: DEFAULT_ROUTES.architecture.model, source: 'seeded' },
-    design: { host: 'claude', model: 'claude-opus-4-8', source: 'seeded' },
+    architecture: { host: 'claude', model: DEFAULT_ROUTES.architecture.model, provenance: 'seeded' },
+    design: { host: 'claude', model: 'claude-opus-4-8', provenance: 'seeded' },
   };
   assert.deepEqual(divergedRoutes(policy).map((d) => d.activity), ['design']);
 });
 
 /** The pre-alpha.22 seed: a REAL seeded policy (escalation ladders included,
- *  exactly as seedDualRouting writes them) with every claude-opus-5 pin rewound
+ *  exactly as seedActivityRoutes writes them) with every claude-opus-5 pin rewound
  *  to claude-opus-4-8 — primary models and escalation rungs alike. Building this
- *  from seedDualRouting rather than by hand matters: a fixture that silently
- *  dropped `escalate` would under-report divergence and hide the escalate-only
+ *  from seedActivityRoutes rather than by hand matters: a fixture that silently
+ *  dropped `escalation` would under-report divergence and hide the escalation-only
  *  case entirely. */
 function priorCatalogSeed({ primary = 'claude' } = {}) {
   const rewind = (m) => (m === 'claude-opus-5' ? 'claude-opus-4-8' : m);
-  const policy = seedDualRouting({ hosts: ['claude', 'codex'], primary });
+  const policy = seedActivityRoutes({ hosts: ['claude', 'codex'], primary });
   const out = {};
   for (const [act, r] of Object.entries(policy)) {
     out[act] = {
       ...r,
       model: rewind(r.model),
-      ...(r.escalate ? { escalate: r.escalate.map((e) => ({ ...e, model: rewind(e.model) })) } : {}),
+      ...(r.escalation ? { escalation: r.escalation.map((e) => ({ ...e, model: rewind(e.model) })) } : {}),
     };
   }
   return out;
@@ -164,7 +164,7 @@ function priorCatalogSeed({ primary = 'claude' } = {}) {
 test('divergedRoutes reports the full #55 reproduction: SIX routes, escalation rungs included', () => {
   // The issue observed exactly six on a machine tracking main. Four diverge on
   // their primary model; implementation/testing still pin gpt-5.4 (unchanged)
-  // but escalate into the prior Opus — a routing decision that diverged on its
+  // but escalation into the prior Opus — a routing decision that diverged on its
   // own schedule and would be missed by a primary-model-only comparison.
   const diverged = divergedRoutes(priorCatalogSeed());
   assert.deepEqual(diverged.map((d) => d.activity).sort(),
@@ -172,21 +172,21 @@ test('divergedRoutes reports the full #55 reproduction: SIX routes, escalation r
   assert.equal(diverged.length, 6);
 });
 
-test('an escalate-only divergence is flagged as such, never as a bogus same-model diff', () => {
+test('an escalation-only divergence is flagged as such, never as a bogus same-model diff', () => {
   // implementation's primary model did not move, so rendering it as
   // "gpt-5.4 vs gpt-5.4" would be nonsense. `modelDiverged` lets callers branch.
   const d = divergedRoutes(priorCatalogSeed()).find((x) => x.activity === 'implementation');
   assert.equal(d.modelDiverged, false, 'the primary model is unchanged');
   assert.equal(d.model, d.defaultModel, 'and both sides agree on it');
-  assert.ok(d.escalate.length > 0, 'the divergence lives entirely in the escalation ladder');
-  assert.equal(d.escalate[0].model, 'claude-opus-4-8');
-  assert.equal(d.escalate[0].defaultModel, DEFAULT_ROUTES.implementation.escalate[0].model);
+  assert.ok(d.escalation.length > 0, 'the divergence lives entirely in the escalation ladder');
+  assert.equal(d.escalation[0].model, 'claude-opus-4-8');
+  assert.equal(d.escalation[0].defaultModel, DEFAULT_ROUTES.implementation.escalation[0].model);
 });
 
 test('a primary-model divergence carries modelDiverged and an empty escalation delta', () => {
   const d = divergedRoutes(priorCatalogSeed()).find((x) => x.activity === 'architecture');
   assert.equal(d.modelDiverged, true);
-  assert.deepEqual(d.escalate, [], 'architecture has no ladder to diverge');
+  assert.deepEqual(d.escalation, [], 'architecture has no ladder to diverge');
 });
 
 // ── swapRoute mirroring, attacked directly ─────────────────────────────────
@@ -197,15 +197,15 @@ test('a primary-model divergence carries modelDiverged and an empty escalation d
 // blanket amnesty that hides real drift. Both directions are attacked here.
 
 test('divergedRoutes returns [] for a CODEX-PRIMARY seed (mirrored routes are not drift)', () => {
-  assert.deepEqual(divergedRoutes(seedDualRouting({ hosts: ['claude', 'codex'], primary: 'codex' })), []);
+  assert.deepEqual(divergedRoutes(seedActivityRoutes({ hosts: ['claude', 'codex'], primary: 'codex' })), []);
 });
 
 test('a codex-primary seed really is host-mirrored — the fixture is not vacuous', () => {
   // Guards the test above from passing for the wrong reason. If swapRoute ever
   // became a no-op, the codex-primary seed would equal the claude-primary one
   // and "[] means mirroring works" would prove nothing at all.
-  const claudePrimary = seedDualRouting({ hosts: ['claude', 'codex'], primary: 'claude' });
-  const codexPrimary = seedDualRouting({ hosts: ['claude', 'codex'], primary: 'codex' });
+  const claudePrimary = seedActivityRoutes({ hosts: ['claude', 'codex'], primary: 'claude' });
+  const codexPrimary = seedActivityRoutes({ hosts: ['claude', 'codex'], primary: 'codex' });
   const flipped = ACTIVITIES.filter((a) => claudePrimary[a] && codexPrimary[a]
     && claudePrimary[a].host !== codexPrimary[a].host);
   assert.ok(flipped.length > 0, 'a codex-primary seed must actually mirror hosts, or this suite is vacuous');
@@ -215,7 +215,7 @@ test('mirroring is scoped to the host swap — it does not excuse a wrong model 
   // The dangerous failure: treating "host differs from default" as licence to
   // skip the model comparison entirely. Here the host legitimately differs
   // (codex-primary mirror) AND the model is wrong; it must still be reported.
-  const seed = seedDualRouting({ hosts: ['claude', 'codex'], primary: 'codex' });
+  const seed = seedActivityRoutes({ hosts: ['claude', 'codex'], primary: 'codex' });
   const act = ACTIVITIES.find((a) => seed[a] && seed[a].host !== DEFAULT_ROUTES[a].host);
   assert.ok(act, 'need at least one mirrored activity to attack');
   const policy = { ...seed, [act]: { ...seed[act], model: 'definitely-not-the-seeded-model' } };
@@ -228,7 +228,7 @@ test('mirroring is scoped to the host swap — it does not excuse a wrong model 
 test('a claude-primary seed is not silently excused by the mirroring branch either', () => {
   // Same attack from the unmirrored side: hosts match the default, so the
   // mirroring branch must not engage at all.
-  const seed = seedDualRouting({ hosts: ['claude', 'codex'], primary: 'claude' });
+  const seed = seedActivityRoutes({ hosts: ['claude', 'codex'], primary: 'claude' });
   const policy = { ...seed, architecture: { ...seed.architecture, model: 'definitely-not-the-seeded-model' } };
   const hit = divergedRoutes(policy).find((d) => d.activity === 'architecture');
   assert.ok(hit);
@@ -238,7 +238,7 @@ test('a claude-primary seed is not silently excused by the mirroring branch eith
 test('a hand-moved host with a current model is not reported as divergence', () => {
   // A user (or a primary swap) can put an activity on the other host while its
   // model is exactly what seeding would produce there. That is not drift.
-  const mirrored = seedDualRouting({ hosts: ['claude', 'codex'], primary: 'codex' });
+  const mirrored = seedActivityRoutes({ hosts: ['claude', 'codex'], primary: 'codex' });
   const act = ACTIVITIES.find((a) => mirrored[a] && mirrored[a].host !== DEFAULT_ROUTES[a].host);
   assert.deepEqual(divergedRoutes({ [act]: { ...mirrored[act] } }), []);
 });
@@ -248,17 +248,17 @@ test('a codex-primary seed on the PRIOR catalog still reports real divergence', 
   const diverged = divergedRoutes(priorCatalogSeed({ primary: 'codex' }));
   assert.ok(diverged.length > 0, 'a mirrored seed pinned to the prior catalog still diverges');
   for (const d of diverged) {
-    assert.ok(d.modelDiverged || d.escalate.length > 0, `${d.activity} reported with no actual delta`);
+    assert.ok(d.modelDiverged || d.escalation.length > 0, `${d.activity} reported with no actual delta`);
   }
 });
 
-test('refreshSeededRoutes clears an escalate-only divergence too', () => {
+test('refreshSeededRoutes clears an escalation-only divergence too', () => {
   const policy = priorCatalogSeed();
   const out = refreshSeededRoutes(policy, { activities: ['implementation'] });
   assert.deepEqual(divergedRoutes(out).map((d) => d.activity).sort(),
     ['architecture', 'debugging', 'design', 'security-analysis', 'testing'],
     'implementation converged, including its ladder');
-  assert.equal(out.implementation.escalate[0].model, DEFAULT_ROUTES.implementation.escalate[0].model);
+  assert.equal(out.implementation.escalation[0].model, DEFAULT_ROUTES.implementation.escalation[0].model);
 });
 
 test('refreshing the full prior-catalog seed converges every one of the six', () => {
@@ -266,7 +266,7 @@ test('refreshing the full prior-catalog seed converges every one of the six', ()
 });
 
 test('divergedRoutes is pure — it does not mutate the policy it is given', () => {
-  const policy = { architecture: { host: 'claude', model: 'claude-opus-4-8', source: 'seeded' } };
+  const policy = { architecture: { host: 'claude', model: 'claude-opus-4-8', provenance: 'seeded' } };
   const before = JSON.stringify(policy);
   divergedRoutes(policy);
   assert.equal(JSON.stringify(policy), before);
@@ -276,7 +276,7 @@ test('each diverged entry carries BOTH models cost-per-task characteristics, not
   // The refresh diff has to let the user decide, and the decision genuinely goes
   // both ways — so the note (the work-per-task vehicle) must ride along for the
   // current pin AND the default it would move to.
-  const [d] = divergedRoutes({ architecture: { host: 'claude', model: 'claude-opus-4-8', source: 'seeded' } });
+  const [d] = divergedRoutes({ architecture: { host: 'claude', model: 'claude-opus-4-8', provenance: 'seeded' } });
   for (const key of ['currentNote', 'defaultNote']) {
     assert.equal(typeof d[key], 'string', `${key} present`);
     assert.ok(d[key].trim().length > 0, `${key} non-empty`);
@@ -288,8 +288,8 @@ test('each diverged entry carries BOTH models cost-per-task characteristics, not
 
 test('refreshSeededRoutes re-seeds every diverged activity when none are named', () => {
   const policy = {
-    architecture: { host: 'claude', model: 'claude-opus-4-8', source: 'seeded' },
-    design: { host: 'claude', model: 'claude-opus-4-8', source: 'seeded' },
+    architecture: { host: 'claude', model: 'claude-opus-4-8', provenance: 'seeded' },
+    design: { host: 'claude', model: 'claude-opus-4-8', provenance: 'seeded' },
   };
   const out = refreshSeededRoutes(policy);
   assert.equal(out.architecture.model, DEFAULT_ROUTES.architecture.model);
@@ -297,20 +297,20 @@ test('refreshSeededRoutes re-seeds every diverged activity when none are named',
   assert.deepEqual(divergedRoutes(out), [], 'refreshing converges — nothing diverges afterwards');
 });
 
-test('refreshSeededRoutes leaves a source:user pin untouched even when explicitly named', () => {
+test('refreshSeededRoutes leaves a provenance:user pin untouched even when explicitly named', () => {
   // The acceptance criterion that matters most: a deliberate pin must survive a
   // refresh the user aimed straight at it.
-  const policy = { architecture: { host: 'claude', model: 'claude-opus-4-8', source: 'user' } };
+  const policy = { architecture: { host: 'claude', model: 'claude-opus-4-8', provenance: 'user' } };
   const out = refreshSeededRoutes(policy, { activities: ['architecture'] });
   assert.deepEqual(out.architecture, policy.architecture);
-  assert.equal(out.architecture.source, 'user');
+  assert.equal(out.architecture.provenance, 'user');
 });
 
 test('refreshSeededRoutes is per-activity selectable — unnamed diverged routes stay put', () => {
   // The right answer differs across the six, so refresh must not be all-or-nothing.
   const policy = {
-    architecture: { host: 'claude', model: 'claude-opus-4-8', source: 'seeded' },
-    design: { host: 'claude', model: 'claude-opus-4-8', source: 'seeded' },
+    architecture: { host: 'claude', model: 'claude-opus-4-8', provenance: 'seeded' },
+    design: { host: 'claude', model: 'claude-opus-4-8', provenance: 'seeded' },
   };
   const out = refreshSeededRoutes(policy, { activities: ['architecture'] });
   assert.equal(out.architecture.model, DEFAULT_ROUTES.architecture.model, 'named route refreshed');
@@ -318,12 +318,12 @@ test('refreshSeededRoutes is per-activity selectable — unnamed diverged routes
 });
 
 test('refreshSeededRoutes keeps the refreshed entry stamped seeded (so it stays refreshable)', () => {
-  const out = refreshSeededRoutes({ architecture: { host: 'claude', model: 'claude-opus-4-8', source: 'seeded' } });
-  assert.equal(out.architecture.source, 'seeded');
+  const out = refreshSeededRoutes({ architecture: { host: 'claude', model: 'claude-opus-4-8', provenance: 'seeded' } });
+  assert.equal(out.architecture.provenance, 'seeded');
 });
 
 test('refreshSeededRoutes is pure — the input policy is not mutated', () => {
-  const policy = { architecture: { host: 'claude', model: 'claude-opus-4-8', source: 'seeded' } };
+  const policy = { architecture: { host: 'claude', model: 'claude-opus-4-8', provenance: 'seeded' } };
   const before = JSON.stringify(policy);
   const out = refreshSeededRoutes(policy);
   assert.equal(JSON.stringify(policy), before, 'input untouched');
@@ -331,7 +331,7 @@ test('refreshSeededRoutes is pure — the input policy is not mutated', () => {
 });
 
 test('refreshSeededRoutes is a no-op on a policy seeded from current defaults', () => {
-  const policy = seedDualRouting({ hosts: ['claude', 'codex'] });
+  const policy = seedActivityRoutes({ hosts: ['claude', 'codex'] });
   assert.deepEqual(refreshSeededRoutes(policy), policy);
 });
 

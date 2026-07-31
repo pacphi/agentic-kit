@@ -58,7 +58,7 @@ protocols, and non-loopback plaintext HTTP.
 - Commands select adapters by capability rather than recognized ID.
 - Adding OpenCode does not make it primary; an explicit OpenCode route is eligible only after its
   execution adapter declares activity-routing capability, and runs through `ak run` rather than
-  AQE or `ak dual`.
+  AQE.
 - Adding OpenRouter does not make it a host.
 - Provider claims are rendered only when the provider declares and evidence supports them.
 - Compatibility collections are derived from registries.
@@ -121,17 +121,19 @@ normalizes legacy state in memory without writing. An explicit save persists the
 Migration is additive, preserves existing bindings, and infers legacy default bindings with
 `inferred` provenance.
 
-Future schema versions and malformed binding collections are preserved opaquely rather than
-downgraded or rewritten.
+Migration helpers preserve future schema versions opaquely rather than downgrading them. The CLI
+refuses to operate on an unsupported or malformed envelope with a readable configuration error,
+so ordinary consumers never crash on an unusable shape.
 
-Historical paths under `kit.json.providers` remain compatibility surfaces during alpha. Their name
-does not collapse the host and provider domains.
+Pre-GA paths under `kit.json.providers` are accepted only by the one-way 4.0 migration boundary.
+Ordinary runtime code consumes the versioned `integrations`, `routing`, and provider-axis
+envelopes and never reads the retired paths.
 
 ## Proving integrations
 
 | Case | What it proves |
 |------|----------------|
-| OpenCode host | A host can be managed and observed without becoming primary or routable |
+| OpenCode host | A non-primary host can run an explicitly routed `ak run` worker without AQE projection or inferred provider identity |
 | OpenRouter provider | A provider can serve existing hosts without becoming a host |
 | Ollama via Claude and Codex | One provider can have independent bindings to multiple hosts |
 

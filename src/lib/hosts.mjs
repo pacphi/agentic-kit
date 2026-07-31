@@ -57,11 +57,11 @@ export function statuslineSupported(id) {
 /**
  * Which host is driving the current session, as a first-class detected axis.
  * Precedence: explicit override → confirmed claude markers → any CODEX_* marker
- * (heuristic) → configured primary (kit.json providers.primaryHost) → 'claude'.
+ * (heuristic) → configured primary (kit.json routing.primaryHost) → 'claude'.
  * Pure: reads only env + the passed cfg; never spawns.
  *
  * @param {NodeJS.ProcessEnv} [env]
- * @param {any} [cfg] kit.json config (for providers.primaryHost)
+ * @param {any} [cfg] kit.json config (for routing.primaryHost)
  * @returns {'claude'|'codex'|'opencode'}
  */
 export function drivingHost(env = process.env, cfg = null) {
@@ -71,7 +71,7 @@ export function drivingHost(env = process.env, cfg = null) {
   // codex sets no single documented session marker; a CODEX_* prefix is a safe
   // heuristic because the fallback below covers the miss.
   if (Object.keys(env).some((k) => k.startsWith('CODEX_'))) return 'codex';
-  const primary = cfg?.providers?.primaryHost;
+  const primary = cfg?.routing?.primaryHost;
   const primaryCapable = HOST_REGISTRY.some((host) => host.id === primary && host.capabilities.canBePrimary);
   if (primary && primaryCapable) return /** @type {'claude'|'codex'} */ (primary);
   return 'claude';

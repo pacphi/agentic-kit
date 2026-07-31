@@ -146,21 +146,21 @@ async function collectData({ cwd, fetchStatus }) {
 }
 
 /** The per-activity routing matrix for the dashboard (ADR-0005). Null unless a
- *  dualRouting policy is set, so single-host projects render nothing new. */
+ *  routing policy is set, so single-host projects render nothing new. */
 export function routingPayload(cfg = loadKitConfig()) {
   try {
-    const policy = cfg.providers?.dualRouting ?? {};
+    const policy = cfg.routing?.routes ?? {};
     if (!Object.keys(policy).length) return null;
     const routes = resolveRoutes(policy);
     return {
-      primaryHost: cfg.providers?.primaryHost ?? 'claude',
+      primaryHost: cfg.routing?.primaryHost ?? 'claude',
       summary: routingSummary(policy),
       routes: ACTIVITIES.map((activity) => {
         const r = routes[activity];
         return {
           activity, host: r.host, model: r.model ?? '',
-          source: r.source, akOriginated: !!r.akOriginated,
-          escalate: (r.escalate ?? []).map((e) => e.host),
+          provenance: r.provenance, akOriginated: !!r.akOriginated,
+          escalation: (r.escalation ?? []).map((e) => e.host),
         };
       }),
     };

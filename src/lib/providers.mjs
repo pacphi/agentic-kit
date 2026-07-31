@@ -5,8 +5,6 @@
 //   - ruflo ADR-034 "Optional MCP Backends" (ACCEPTED): Claude Code / Gemini / OpenAI
 //     Codex backends are enabled via env vars ENABLE_CLAUDE_CODE / ENABLE_CODEX /
 //     ENABLE_GEMINI_MCP.
-//   - @claude-flow/codex adapter (bin claude-flow-codex); `ruflo init --dual` =
-//     "Initialize for both Claude Code and OpenAI Codex".
 //   - `ruflo providers configure -p <id> -m <model>` persists API-key providers
 //     (anthropic/openai/google/ollama) to ruflo's config.
 //   - agentic-qe LLM selector `AQE_LLM_PROVIDER=<type>` (ADR-123,
@@ -19,7 +17,7 @@
 //
 // Two independent axes:
 //   host axis     — which agent CLI executes a managed worker (claude, codex,
-//                   opencode). Ruvlo's dual mode itself remains Claude/Codex.
+//                   opencode).
 //   provider axis — which LLM the *routers* use: ruflo's API-key providers
 //                   (`ruflo providers configure`) and aqe's `AQE_LLM_PROVIDER`.
 //                   Independent of the host axis; keys live in the env, never kit.json.
@@ -31,29 +29,27 @@ import { readJson, writeJsonWithBackup } from './settings.mjs';
 import { installedVersion, cmpVersions } from './versions.mjs';
 import * as paths from './paths.mjs';
 import { bold, dim, cyan } from './output.mjs';
-import { configuredPolicyToAgentOverrides, seedDualRouting, resolveRoutes, routingSummary, divergedRoutes, ACTIVITIES, AGENT_ACTIVITY_MAP, DEFAULT_PRIMARY_HOST, PRIMARY_HOSTS } from './routing.mjs';
+import { configuredPolicyToAgentOverrides, seedActivityRoutes, resolveRoutes, routingSummary, divergedRoutes, ACTIVITIES, AGENT_ACTIVITY_MAP, PRIMARY_HOSTS } from './routing.mjs';
 import { HOST_ADAPTERS } from './hosts.mjs';
 import {
   HOST_REGISTRY, PROVIDER_REGISTRY, normalizeIntegrationFacts,
 } from './adapters/index.mjs';
+import { CURRENT_INTEGRATIONS_VERSION } from './adapters/config.mjs';
 import { opencodeMcpStatus } from './opencode.mjs';
+import {
+  DEFAULT_PRIMARY_HOST,
+  ROUTING_SCHEMA_VERSION,
+} from './routing-config.mjs';
 
 /** Frontier agent-CLI hosts. `pkg` is the npm global package; `enableEnv` is
  *  ruflo's ADR-034 backend flag; `aqe` is the AQE_LLM_PROVIDER value (null when
  *  aqe can't host it). */
-/** ruflo's dual-mode adapter — a SEPARATE npm global from the codex CLI. Without
- *  it, `ruflo init --dual` aborts with "The @claude-flow/codex package is not
- *  installed". ak treats it as a managed prerequisite of dual-mode (installed
- *  only when codex is opted-in AND the codex CLI is detected). */
-export const CODEX_ADAPTER_PKG = '@claude-flow/codex';
-
 export const HOSTS = HOST_REGISTRY
   .filter((host) => host.capabilities.canDriveSession)
   .map((host) => ({
     id: host.id, bin: host.install.bin, pkg: host.install.npmPackage,
     enableEnv: host.legacy?.enableEnv ?? null,
     aqe: host.id === 'claude' ? host.legacy?.aqeProvider : null,
-    ...(host.id === 'codex' ? { adapterPkg: CODEX_ADAPTER_PKG } : {}),
   }));
 
 /** API-key LLM providers ruflo's router understands (`ruflo providers`). */
@@ -154,7 +150,7 @@ export function credentialGaps(chain = [], { env = process.env, hostAuth } = {})
     .map((c) => ({ provider: c.provider, missing: c.missing }));
 }
 
-/** Credential state for every aqe provider type — what `ak x provider status`
+/** Credential state for every aqe provider type — what `ak x host status`
  *  renders, so a credentialed provider (e.g. openrouter) is never invisible. */
 export function detectAqeProviders({ env = process.env } = {}) {
   return Object.fromEntries(AQE_PROVIDER_TYPES.map((p) => [p, aqeProviderCredential(p, { env })]));
@@ -282,7 +278,7 @@ export async function collectIntegrationFacts({
   }
   const hosts = Object.fromEntries(Object.entries(detectedHosts).map(([id, fact]) => [id, {
     ...fact,
-    enabled: cfg?.providers?.hosts?.[id] ?? null,
+    enabled: cfg?.integrations?.hosts?.[id] ?? null,
   }]));
   const providers = Object.fromEntries(Object.entries(detectedProviders).map(([id, fact]) => {
     const adapter = PROVIDER_REGISTRY.find((entry) => entry.id === id);
@@ -298,7 +294,7 @@ export async function collectIntegrationFacts({
   return normalizeIntegrationFacts({
     hosts,
     providers,
-    bindings: cfg?.integrations?.bindings ?? cfg?.providers?.bindings ?? [],
+    bindings: cfg?.integrations?.bindings ?? [],
   });
 }
 
@@ -331,7 +327,8 @@ function currentEnv(cwd) {
  *  an enabled opencode host is not "claude-only" (codex-review r2). */
 export function isDefault(cfg) {
   const p = cfg.providers ?? {};
-  return !!p.hosts?.claude && !p.hosts?.codex && !p.hosts?.opencode && p.aqeProvider == null
+  const hosts = cfg.integrations?.hosts ?? {};
+  return !!hosts.claude && !hosts.codex && !hosts.opencode && p.aqeProvider == null
     && (!p.models || p.models.length === 0) && (p.maxBudgetUsd == null)
     && (!p.aqeFallback || p.aqeFallback.length === 0);
 }
@@ -340,24 +337,20 @@ export function isDefault(cfg) {
  *  regardless of whether the env is wired yet — this is the same source
  *  `status()` already keys "enabled" off of. Guards the dual-mode/judge-bias
  *  guidance below: only relevant once both are actually opted in. */
-export const bothHostsEnabled = (cfg) => !!cfg.providers?.hosts?.claude && !!cfg.providers?.hosts?.codex;
+export const bothHostsEnabled = (cfg) => !!cfg.integrations?.hosts?.claude && !!cfg.integrations?.hosts?.codex;
 
-/** Guidance printed once both hosts are enabled — pointers to capability that
- *  already exists one layer up from ak's own wiring (see issue #36):
- *   - role-based dual-mode delegation lives in the separate @claude-flow/codex
- *     npm package's `dual` CLI, which ak installs as a prerequisite but never
- *     surfaces itself.
+/** Guidance printed once both hosts are enabled:
+ *   - ak run executes role-based activity pipelines through the configured hosts.
  *   - judge-vendor-bias: a same-vendor LLM judge scores ~8-10pp inflated versus
  *     a cross-vendor judge (still ordinally correct, not calibrated) — measured
  *     in openrouter-alts.json's judge_bias_check_2026_06_15. */
-export const DUAL_ROLE_TIP = 'both hosts enabled — try role delegation: claude-flow-codex dual run --template feature|security|refactor (or custom --worker specs)';
+export const DUAL_ROLE_TIP = 'both hosts enabled — run a role-based pipeline with: ak run feature|security|refactor "<task>"';
 export const JUDGE_BIAS_TIP = 'tip: for LLM-judged scoring, use a different vendor than the writer as judge — same-vendor judges run ~8-10pp inflated (still ordinally correct, but not calibrated)';
 
 /** Cross-sell for agentic-qe's qe-court (ADR-124, shipped 3.13.0): its jury
- *  requires >= 2 distinct vendors seated, which a dual-host setup already
- *  satisfies. Only meaningful once both hosts are enabled AND aqe is new
- *  enough to ship the skill — callers gate on both. */
-export const QE_COURT_TIP = 'agentic-qe ships qe-court (adversarial review; upgrade to ≥ 3.13.3 for enforced config validation) — its jury requires ≥ 2 distinct vendors, which your dual-host setup already satisfies';
+ *  requires >= 2 distinct vendors seated. Host count is not sufficient
+ *  evidence because a host can route to a provider from the same vendor. */
+export const QE_COURT_TIP = 'agentic-qe ships qe-court (adversarial review; upgrade to ≥ 3.13.3 for enforced config validation) — its jury requires evidence from ≥ 2 distinct vendors; host count alone is not provider evidence';
 
 /** Suggested aqe-fallback chain when codex is among the enabled hosts: codex's
  *  models are reached via the `openai` provider type (not as an aqe provider
@@ -410,13 +403,13 @@ function buildChain(entries) {
  *  into any existing file (backup-first, never persisting apiKey):
  *    - the ordered fallback chain + enabled set + default provider (from
  *      `aqeFallback`), and
- *    - the per-activity `agentOverrides` map projected from `dualRouting`
+ *    - the per-activity `agentOverrides` map projected from `routing.routes`
  *      (issue #568; only when installed aqe ≥ 3.13.1).
  *  No-op unless at least one of those is configured and we are in a project.
  *  Returns {ok, changed, detail}. */
 export function applyAqeRouter(cfg, cwd = process.cwd()) {
   const chain = cfg.providers?.aqeFallback ?? [];
-  const policy = cfg.providers?.dualRouting ?? {};
+  const policy = cfg.routing?.routes ?? {};
   const hasChain = chain.length > 0;
   const hasPolicy = Object.keys(policy).length > 0;
   // Same repo-root resolution as settingsTarget — the three scope gates must
@@ -443,7 +436,7 @@ export function applyAqeRouter(cfg, cwd = process.cwd()) {
     const valid = chain.filter((e) => e?.provider && AQE_PROVIDER_TYPES.includes(e.provider));
     if (valid.length === 0) {
       // A bad chain must NOT block the independent agentOverrides projection — the
-      // dualRouting policy is validated separately. Record it and carry on.
+      // Activity routing is validated separately. Record it and carry on.
       chainError = 'no valid providers in fallback chain';
       details.push(`chain: ⚠ ${chainError}`);
     } else {
@@ -501,23 +494,30 @@ export function undoAqeRouter(cwd = process.cwd()) {
   return { ok: true, changed: true, detail: 'removed ak-created llm-config.json' };
 }
 
-// ── per-activity dual-host routing (kit.json providers.dualRouting) ──────────
-// Seed/format helpers shared by `ak x provider` and `ak setup`. The pure policy
+// ── per-activity host routing (kit.json routing.routes) ─────────────────────
+// Seed/format helpers shared by `ak x host` and `ak setup`. The pure policy
 // core + projectors live in routing.mjs; these bridge it to kit.json + the CLI.
 
 /** Seed the per-activity routing policy from defaults when BOTH hosts are enabled
  *  and aqe supports agentOverrides — but only if the user has no policy yet (empty
- *  map). Subscription-only targeting + `seeded` provenance come from seedDualRouting
- *  (ADR-0003). Mutates cfg.providers.dualRouting. Returns {seeded, count}. */
-export function seedDualRoutingIfDualHost(cfg) {
-  const p = cfg.providers ?? (cfg.providers = {});
-  const existing = p.dualRouting ?? {};
+ *  map). Subscription-only targeting + `seeded` provenance come from
+ *  seedActivityRoutes (ADR-0003). Mutates cfg.routing.routes. */
+export function seedActivityRoutesIfMultiHost(cfg) {
+  const routing = cfg.routing ?? (cfg.routing = {
+    version: ROUTING_SCHEMA_VERSION,
+    primaryHost: DEFAULT_PRIMARY_HOST,
+    routes: {},
+  });
+  const existing = routing.routes ?? {};
   if (Object.keys(existing).length > 0) return { seeded: false, count: Object.keys(existing).length };
   if (!bothHostsEnabled(cfg) || !aqeSupportsAgentOverrides()) return { seeded: false, count: 0 };
   // primary host (default claude) biases the seed: codex-primary mirrors the
   // default routes so codex leads and claude is the alternate (ADR-0004 escalation).
-  p.dualRouting = seedDualRouting({ hosts: ['claude', 'codex'], primary: p.primaryHost ?? DEFAULT_PRIMARY_HOST });
-  return { seeded: true, count: Object.keys(p.dualRouting).length };
+  routing.routes = seedActivityRoutes({
+    hosts: ['claude', 'codex'],
+    primary: routing.primaryHost ?? DEFAULT_PRIMARY_HOST,
+  });
+  return { seeded: true, count: Object.keys(routing.routes).length };
 }
 
 /** Apply `ak setup` host flags to a kit.json cfg IN PLACE (before setup's
@@ -526,24 +526,32 @@ export function seedDualRoutingIfDualHost(cfg) {
  *  default claude-only behavior untouched when neither flag is passed. Returns
  *  {changed, warnings} — pure except for the intended cfg mutation. */
 export function applySetupHostFlags(cfg, flags = {}) {
-  const p = cfg.providers ?? (cfg.providers = {});
-  p.hosts ?? (p.hosts = { claude: true, codex: false, opencode: false });
+  const integrations = cfg.integrations ?? (cfg.integrations = {
+    version: CURRENT_INTEGRATIONS_VERSION,
+    bindings: [],
+  });
+  integrations.hosts ?? (integrations.hosts = { claude: true, codex: false, opencode: false });
+  const routing = cfg.routing ?? (cfg.routing = {
+    version: ROUTING_SCHEMA_VERSION,
+    primaryHost: DEFAULT_PRIMARY_HOST,
+    routes: {},
+  });
   const warnings = [];
   let changed = false;
   const wantPrimary = typeof flags['primary-host'] === 'string' ? flags['primary-host'].trim().toLowerCase() : null;
   // choosing codex as primary implies wanting codex enabled
   if (flags.codex || wantPrimary === 'codex') {
-    if (!p.hosts.codex || !p.hosts.claude) changed = true;
-    p.hosts = { ...p.hosts, claude: true, codex: true };
+    if (!integrations.hosts.codex || !integrations.hosts.claude) changed = true;
+    integrations.hosts = { ...integrations.hosts, claude: true, codex: true };
   }
   // --opencode opts the opencode host in (config-file wiring, no env flags)
   if (flags.opencode) {
-    if (!p.hosts.opencode) changed = true;
-    p.hosts = { ...p.hosts, opencode: true };
+    if (!integrations.hosts.opencode) changed = true;
+    integrations.hosts = { ...integrations.hosts, opencode: true };
   }
   if (wantPrimary) {
     if (PRIMARY_HOSTS.includes(wantPrimary)) {
-      if (p.primaryHost !== wantPrimary) { p.primaryHost = wantPrimary; changed = true; }
+      if (routing.primaryHost !== wantPrimary) { routing.primaryHost = wantPrimary; changed = true; }
     } else {
       warnings.push(`unknown --primary-host '${wantPrimary}' (valid: ${PRIMARY_HOSTS.join('|')}) — ignored`);
     }
@@ -554,7 +562,7 @@ export function applySetupHostFlags(cfg, flags = {}) {
 /** Render the effective per-activity routing as a colorized table, or null when
  *  no policy is set. Shared by `pick`/`status`/`setup` so the view never drifts. */
 export function formatRoutingTable(cfg) {
-  const policy = cfg.providers?.dualRouting ?? {};
+  const policy = cfg.routing?.routes ?? {};
   if (Object.keys(policy).length === 0) return null;
   const routes = resolveRoutes(policy);
   const s = routingSummary(policy);
@@ -566,12 +574,12 @@ export function formatRoutingTable(cfg) {
   const diverged = Object.fromEntries(divergedRoutes(policy).map((d) => [d.activity, d]));
   for (const act of ACTIVITIES) {
     const r = routes[act];
-    const src = r.source === 'user' ? cyan('custom') : dim(r.source);
-    const esc = r.escalate?.length ? dim(`  ↑ ${r.escalate.map((e) => e.host).join('→')}`) : '';
+    const src = r.provenance === 'user' ? cyan('custom') : dim(r.provenance);
+    const esc = r.escalation?.length ? dim(`  ↑ ${r.escalation.map((e) => e.host).join('→')}`) : '';
     const tag = r.akOriginated ? dim(' [ak]') : '';
     const d = diverged[act];
     const div = d
-      ? dim(`  diverges from default ${d.modelDiverged ? d.defaultModel : d.escalate.map((e) => `↑${e.defaultModel}`).join(',')}`)
+      ? dim(`  diverges from default ${d.modelDiverged ? d.defaultModel : d.escalation.map((e) => `↑${e.defaultModel}`).join(',')}`)
       : '';
     lines.push(`  ${act.padEnd(18)} ${r.host.padEnd(7)} ${(r.model ?? '').padEnd(24)} ${src}${tag}${esc}${div}`);
   }
@@ -594,14 +602,17 @@ export function printActivityRoutingTable(cfg) {
 // undoCodexMcp. Best-effort: a failure here never fails the caller.
 // Ownership: a `codex` MCP server that PRE-EXISTS ak's registration is the user's
 // and must never be torn down (there's no `_managedBy` on an MCP entry). ak only
-// removes a server it actually added, tracked by `providers.codexMcp === 'ak'` in
+// removes a server it actually added, tracked by
+// `integrations.ownership.codex.mcp === 'ak'` in
 // kit.json. On mutation ak sets the marker; the caller persists cfg.
 export async function ensureCodexMcp(cfg, cwd = process.cwd()) {
-  if (!cfg.providers?.hosts?.codex) return { ok: true, changed: false, detail: 'codex not enabled — codex MCP unmanaged' };
+  if (!cfg.integrations?.hosts?.codex) return { ok: true, changed: false, detail: 'codex not enabled — codex MCP unmanaged' };
   if (!(await have('codex'))) return { ok: true, changed: false, detail: 'codex CLI not installed' };
   const r = await run('claude', ['mcp', 'add', 'codex', '-s', 'project', '--', 'codex', 'mcp-server'], { cwd });
   if (r.code === 0) {
-    if (cfg.providers) cfg.providers.codexMcp = 'ak'; // ak owns it → safe to remove later
+    cfg.integrations.ownership ??= {};
+    cfg.integrations.ownership.codex ??= {};
+    cfg.integrations.ownership.codex.mcp = 'ak';
     return { ok: true, changed: true, detail: 'codex MCP registered (mcp__codex__codex)' };
   }
   if (/already exists|already configured/i.test(`${r.stderr}${r.stdout}`)) {
@@ -623,19 +634,21 @@ export async function undoCodexMcp(cwd = process.cwd(), { managed = false, runne
 // ensureCodexMcp above wires claude→codex (Claude calls Codex via mcp__codex__codex).
 // This is the MIRROR: register the ruflo MCP server INTO Codex so a Codex-driven
 // session can reach ruflo's tools — the codex→ruflo half that makes the bridge
-// bidirectional (ambidextrous parity). Grounded in @claude-flow/codex mcp-config.ts:
+// bidirectional (ambidextrous parity). The reverse bridge intentionally uses:
 // `codex mcp add ruflo -- <cmd> mcp start` writes a [mcp_servers.ruflo] table into
 // ~/.codex/config.toml. aqe's own codex MCP is handled by `aqe init --with-codex`
 // (setup runs it), and Claude Code is not itself an MCP server, so those two legs
 // live elsewhere; this owns the ruflo leg. Best-effort; a failure never fails the
-// caller. Ownership marker: providers.rufloCodexMcp === 'ak'.
+// caller. Ownership marker: integrations.ownership.codex.reverseMcp === 'ak'.
 export async function ensureRufloMcpInCodex(cfg, cwd = process.cwd()) {
-  if (!cfg.providers?.hosts?.codex) return { ok: true, changed: false, detail: 'codex not enabled — ruflo→codex MCP unmanaged' };
+  if (!cfg.integrations?.hosts?.codex) return { ok: true, changed: false, detail: 'codex not enabled — ruflo→codex MCP unmanaged' };
   if (!(await have('codex'))) return { ok: true, changed: false, detail: 'codex CLI not installed' };
   if (!(await have('ruflo'))) return { ok: true, changed: false, detail: 'ruflo not on PATH — ruflo→codex MCP skipped' };
   const r = await run('codex', ['mcp', 'add', 'ruflo', '--', 'ruflo', 'mcp', 'start'], { cwd });
   if (r.code === 0) {
-    if (cfg.providers) cfg.providers.rufloCodexMcp = 'ak'; // ak owns it → safe to remove later
+    cfg.integrations.ownership ??= {};
+    cfg.integrations.ownership.codex ??= {};
+    cfg.integrations.ownership.codex.reverseMcp = 'ak';
     return { ok: true, changed: true, detail: 'ruflo MCP registered into codex ([mcp_servers.ruflo])' };
   }
   if (/already exists|already configured/i.test(`${r.stderr}${r.stdout}`)) {
@@ -658,9 +671,10 @@ export async function undoRufloMcpInCodex(cwd = process.cwd(), { managed = false
  *  default/env detection. Omitting a key means "remove if present". */
 export function managedEnv(cfg) {
   const p = cfg.providers ?? {};
+  const hosts = cfg.integrations?.hosts ?? {};
   const e = {
-    ENABLE_CLAUDE_CODE: String(!!p.hosts?.claude),
-    ENABLE_CODEX: String(!!p.hosts?.codex),
+    ENABLE_CLAUDE_CODE: String(!!hosts.claude),
+    ENABLE_CODEX: String(!!hosts.codex),
   };
   if (cfg.aqe !== false && p.aqeProvider && AQE_PROVIDER_TYPES.includes(p.aqeProvider)) {
     e.AQE_LLM_PROVIDER = p.aqeProvider;
@@ -684,7 +698,7 @@ export function applyHosts(cfg, cwd = process.cwd()) {
     } else if (k in s.env) { delete s.env[k]; changed = true; }
   }
   if (changed) writeJsonWithBackup(file, s);
-  const on = HOSTS.filter((h) => cfg.providers.hosts[h.id]).map((h) => h.id).join('+') || 'none';
+  const on = HOSTS.filter((h) => cfg.integrations?.hosts?.[h.id]).map((h) => h.id).join('+') || 'none';
   return { ok: true, changed, detail: `hosts=${on} (${scope}${changed ? ', written' : ', in sync'})` };
 }
 
@@ -719,47 +733,6 @@ export async function applyProviders(cfg, cwd = process.cwd()) {
     done.push(`${m.id}${r.code === 0 ? '' : '(failed)'}`);
   }
   return { ok: done.every((d) => !d.includes('failed') && !d.includes('invalid')), changed: true, detail: `configured: ${done.join(', ')}` };
-}
-
-/** Pure decision for the codex dual-mode adapter, factored out for tests:
- *  install ONLY when codex is opted-in, the codex CLI is present, and the adapter
- *  is not already installed. Never install the adapter for an absent CLI. */
-export function codexAdapterAction({ opted, cliPresent, adapterInstalled }) {
-  if (!opted) return 'skip-not-opted';
-  if (!cliPresent) return 'skip-no-cli';
-  if (adapterInstalled) return 'already-installed';
-  return 'install';
-}
-
-/** Ensure ruflo's dual-mode adapter (@claude-flow/codex) is installed before we
- *  run `ruflo init --dual`. Guarded: opted-in codex host + detected codex CLI. */
-export async function ensureCodexAdapter(cfg, cwd = process.cwd()) {
-  const opted = !!cfg.providers?.hosts?.codex;
-  if (!opted) return { ok: true, changed: false, detail: 'codex disabled — adapter not needed' };
-  const cliPresent = await have('codex');
-  const adapterInstalled = !!installedVersion(CODEX_ADAPTER_PKG);
-  const action = codexAdapterAction({ opted, cliPresent, adapterInstalled });
-  if (action === 'skip-no-cli') return { ok: true, changed: false, detail: 'codex CLI not detected — adapter install skipped' };
-  if (action === 'already-installed') return { ok: true, changed: false, detail: `${CODEX_ADAPTER_PKG} already installed` };
-  const r = await run('npm', ['install', '-g', `${CODEX_ADAPTER_PKG}@latest`], { cwd, timeout: 600_000 });
-  return { ok: r.code === 0, changed: r.code === 0, detail: r.code === 0 ? `installed ${CODEX_ADAPTER_PKG}` : r.stderr.split('\n').slice(-2).join(' ').slice(0, 200) };
-}
-
-/** Heavy, pick/setup-time only: regenerate dual-mode agents when codex is on.
- *  Kept OUT of the sync hot path (it force-regenerates project files). */
-export async function ensureDualAgents(cfg, cwd = process.cwd()) {
-  if (!cfg.providers?.hosts?.codex) return { ok: true, changed: false, detail: 'codex disabled — no dual agents' };
-  // Repo-root walk, matching settingsTarget/applyAqeRouter — and init runs at
-  // the ROOT, so a subdir invocation can't scatter project files mid-tree.
-  const root = paths.repoRoot(cwd);
-  if (!root) return { ok: true, changed: false, detail: 'not a project — skipped `ruflo init --dual`' };
-  if (!(await have('ruflo'))) return { ok: false, detail: 'ruflo not on PATH' };
-  // Prerequisite: dual-init aborts unless @claude-flow/codex is present. Install
-  // it first (guarded on opted-in codex + detected CLI) so a fresh machine just works.
-  const adapter = await ensureCodexAdapter(cfg, root);
-  if (!adapter.ok) return { ok: false, changed: adapter.changed, detail: `adapter prerequisite failed: ${adapter.detail}` };
-  const r = await run('ruflo', ['init', '--dual', '--force'], { cwd: root, timeout: 300_000 });
-  return { ok: r.code === 0, changed: r.code === 0, detail: r.code === 0 ? 'ruflo init --dual applied' : 'ruflo init --dual failed' };
 }
 
 /** Reversible teardown: strip every managed env key from the target file. */

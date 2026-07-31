@@ -6,6 +6,7 @@ import {
   validateEndpoint,
 } from '../../src/lib/adapters/config.mjs';
 import { migrateConfig } from '../../src/lib/adapters/migration.mjs';
+import { migrateKitConfig } from '../../src/lib/config.mjs';
 
 const legacyDual = {
   providers: {
@@ -22,17 +23,51 @@ const legacyDual = {
   unrelated: 'keep-me',
 };
 
-test('legacy migration is additive, versioned, deterministic, and idempotent', () => {
+test('integration migration is versioned, deterministic, and idempotent', () => {
   const input = structuredClone(legacyDual);
   const first = migrateIntegrationConfig(input);
   const second = migrateIntegrationConfig(structuredClone(first));
+  assert.equal(CURRENT_INTEGRATIONS_VERSION, 2,
+    'v2 distinguishes completed GA cutover from additive v1 snapshots');
   assert.equal(first.integrations.version, CURRENT_INTEGRATIONS_VERSION);
   assert.deepEqual(second, first);
   assert.deepEqual(input, legacyDual, 'migration must not mutate its input');
   assert.equal(first.unrelated, 'keep-me');
   assert.deepEqual(first.providers.customUserField, { preserve: true });
+  assert.equal(Object.hasOwn(first.providers, 'hosts'), false);
   assert.deepEqual(first.providers.dualRouting, legacyDual.providers.dualRouting,
-    'legacy routing intent must survive byte-for-byte structurally');
+    'the independent routing migration still owns this field');
+});
+
+test('top-level migration retires routing compatibility fields but keeps provider-axis state', () => {
+  const migrated = migrateKitConfig({
+    ...structuredClone(legacyDual),
+    providers: {
+      ...structuredClone(legacyDual.providers),
+      primaryHost: 'codex',
+      aqeFallback: [{ provider: 'openrouter', models: ['z-ai/glm-5'], source: 'user' }],
+      maxBudgetUsd: 7,
+    },
+  });
+  assert.deepEqual(migrated.routing, {
+    version: 1,
+    primaryHost: 'codex',
+    routes: {
+      implementation: {
+        host: 'codex',
+        model: 'gpt-5.4',
+        provenance: 'user',
+        escalation: [{ host: 'claude', model: 'claude-opus-5' }],
+      },
+    },
+  });
+  for (const key of ['hosts', 'primaryHost', 'dualRouting']) {
+    assert.equal(Object.hasOwn(migrated.providers, key), false);
+  }
+  assert.deepEqual(migrated.providers.aqeFallback,
+    [{ provider: 'openrouter', models: ['z-ai/glm-5'], source: 'user' }]);
+  assert.equal(migrated.providers.maxBudgetUsd, 7);
+  assert.deepEqual(migrateKitConfig(structuredClone(migrated)), migrated);
 });
 
 test('public migration helpers converge on one canonical integrations.version field', () => {
@@ -76,7 +111,7 @@ test('legacy host routes never manufacture observed provider provenance', () => 
   assert.notEqual(route.provenance, 'observed');
 });
 
-test('legacy OpenCode ownership markers migrate additively without inferring a provider', () => {
+test('legacy OpenCode ownership markers migrate canonically without inferring a provider', () => {
   const legacy = {
     providers: {
       hosts: { claude: true, codex: false, opencode: true },
@@ -88,20 +123,111 @@ test('legacy OpenCode ownership markers migrate additively without inferring a p
   const migrated = migrateIntegrationConfig(legacy);
   assert.equal(migrated.integrations.ownership.opencode.source, 'legacy-providers');
   assert.deepEqual(migrated.integrations.ownership.opencode.managed, legacy.providers.opencodeManaged);
-  assert.equal(migrated.providers.opencodeMcp, 'ak', 'migration is additive; legacy receipt remains');
+  for (const key of ['opencodeMcp', 'opencodeManaged', 'opencodeCatalogDir']) {
+    assert.equal(Object.hasOwn(migrated.providers, key), false);
+  }
   const binding = migrated.integrations.bindings.find(({ host }) => host === 'opencode');
   assert.equal(binding.provider, null);
   assert.equal(binding.provenance, 'unknown');
 });
 
+test('legacy Codex ownership markers migrate together and are retired', () => {
+  const reverseMarker = 'rufloCodexMcp';
+  const migrated = migrateIntegrationConfig({
+    providers: { codexMcp: 'ak', [reverseMarker]: 'ak', aqeProvider: 'openai' },
+  });
+  assert.deepEqual(migrated.integrations.ownership.codex, {
+    source: 'legacy-providers',
+    mcp: 'ak',
+    reverseMcp: 'ak',
+  });
+  assert.equal(Object.hasOwn(migrated.providers, 'codexMcp'), false);
+  assert.equal(Object.hasOwn(migrated.providers, reverseMarker), false);
+  assert.equal(migrated.providers.aqeProvider, 'openai');
+});
+
+test('null legacy markers are retired without manufacturing ownership', () => {
+  const reverseMarker = 'rufloCodexMcp';
+  const migrated = migrateIntegrationConfig({
+    providers: {
+      codexMcp: null,
+      [reverseMarker]: null,
+      opencodeMcp: null,
+      opencodeManaged: null,
+      opencodeCatalogDir: null,
+    },
+    integrations: { schemaVersion: 1 },
+  });
+  assert.equal(Object.hasOwn(migrated.integrations, 'ownership'), false);
+  assert.equal(Object.hasOwn(migrated.integrations, 'schemaVersion'), false);
+  assert.deepEqual(migrated.providers, {});
+});
+
+test('active legacy hosts win once over a stale additive integration snapshot', () => {
+  const migrated = migrateIntegrationConfig({
+    providers: { hosts: { claude: false, codex: true, opencode: true } },
+    integrations: {
+      version: 1,
+      hosts: { claude: true, codex: false, opencode: false },
+      bindings: [],
+    },
+  });
+  assert.equal(migrated.integrations.version, CURRENT_INTEGRATIONS_VERSION);
+  assert.deepEqual(migrated.integrations.hosts,
+    { claude: false, codex: true, opencode: true });
+  assert.equal(Object.hasOwn(migrated.providers, 'hosts'), false);
+});
+
+test('legacy bindings survive a stale additive integration snapshot without duplication', () => {
+  const legacyBinding = {
+    id: 'openrouter-via-codex',
+    host: 'codex',
+    provider: 'openrouter',
+    model: 'openai/gpt-5.4',
+    transport: 'native',
+    endpoint: null,
+    provenance: 'user',
+    managedBy: 'user',
+  };
+  const migrated = migrateIntegrationConfig({
+    providers: { bindings: [legacyBinding] },
+    integrations: { version: 1, hosts: {}, bindings: [] },
+  });
+  assert.deepEqual(migrated.integrations.bindings, [legacyBinding]);
+  assert.equal(Object.hasOwn(migrated.providers, 'bindings'), false);
+  assert.deepEqual(migrateIntegrationConfig(structuredClone(migrated)), migrated);
+});
+
+test('conflicting canonical and legacy binding ids fail closed', () => {
+  const canonical = {
+    id: 'shared', host: 'codex', provider: 'openai', model: null,
+    transport: 'native', endpoint: null, provenance: 'user', managedBy: 'user',
+  };
+  assert.throws(() => migrateIntegrationConfig({
+    providers: { bindings: [{ ...canonical, provider: 'openrouter' }] },
+    integrations: { version: 1, hosts: {}, bindings: [canonical] },
+  }), /integrations binding conflict/);
+});
+
 test('legacy OpenCode ownership merges beside an existing ownership receipt', () => {
   const legacy = {
     providers: { opencodeMcp: 'ak', opencodeManaged: { mcp: {} } },
-    integrations: { ownership: { codex: { source: 'existing' } } },
+    integrations: {
+      version: 1,
+      ownership: {
+        codex: { source: 'existing' },
+        opencode: { source: 'v1-snapshot', mcp: null, keep: true },
+      },
+    },
   };
   const migrated = migrateIntegrationConfig(legacy);
   assert.deepEqual(migrated.integrations.ownership.codex, { source: 'existing' });
-  assert.equal(migrated.integrations.ownership.opencode.source, 'legacy-providers');
+  assert.deepEqual(migrated.integrations.ownership.opencode, {
+    source: 'v1-snapshot',
+    mcp: 'ak',
+    keep: true,
+    managed: { mcp: {} },
+  }, 'active legacy values override a stale v1 snapshot without dropping canonical fields');
 });
 
 test('migration never persists API keys found in process environment', () => {

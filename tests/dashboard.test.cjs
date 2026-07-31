@@ -436,10 +436,6 @@ async function main() {
       anthropic: { cost: 10, sessions: 1, tokens: 1000 },
       unknown: { cost: null, sessions: 1, tokens: 250 },
     },
-    byTranscriptProvider: {
-      claude: { cost: 10, sessions: 1, tokens: 1000 },
-      codex: { cost: 2.5, sessions: 1, tokens: 250 },
-    },
     byProject: { demo: { cost: 12.5, sessions: 2 } },
     byCategory: { 'Security review': { cost: 12.5, sessions: 2, confidence: 0.8 } },
     punchcard: { '0-13': 4 },
@@ -657,9 +653,9 @@ async function main() {
 
     await test('Usage rendering treats host and inference provider as independent axes', async () => {
       const r = await get(uiSrv.url);
-      contains(r.body, 'd.byHost||d.byTranscriptProvider||d.byProvider');
-      contains(r.body, 'var host=sx.host||sx.transcriptProvider');
-      contains(r.body, 'var provider=sx.provider||sx.inferenceProvider||"unknown"');
+      contains(r.body, 'var prov=d.byHost||{}');
+      contains(r.body, 'var host=sx.host||"unknown"');
+      contains(r.body, 'var provider=sx.provider||"unknown"');
       contains(r.body, 'title="host: ');
       contains(r.body, 'class="s-provider"');
     });

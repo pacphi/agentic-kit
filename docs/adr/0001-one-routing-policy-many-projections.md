@@ -1,8 +1,14 @@
 # ADR-0001 — One dual-host routing policy, many projections
 
-- **Status:** Accepted
+- **Status:** Superseded in part by [ADR-0020](0020-ga-stable-surfaces.md)
 - **Date:** 2026-07-23
+- **Updated:** 2026-07-30
+- **Update note:** Retained the one-policy decision while retiring the compatibility projection,
+  command, and persisted names for GA.
 - **Deciders:** agentic-kit maintainers
+
+> **Historical scope:** the one-policy principle remains, but the compatibility command,
+> adapter projection, and persisted field names recorded below were removed for 4.0 GA.
 
 ## Context
 

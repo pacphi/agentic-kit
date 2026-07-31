@@ -24,8 +24,11 @@ release this kit. User-facing docs live in [README.md](README.md); this file is 
 
 ### CLI shape (`bin/agentic-kit.mjs`)
 
-- **Porcelain** (daily): `setup`, `status`, `sync`, `dashboard`, `admin`, `dual`, `uninstall`. Bare `ak` → `status --hint`. (`dashboard` and `admin` are also reachable as `ak x dashboard` / `ak x admin`.)
-- **Plumbing** (power users): `ak x daemon-gc | mcp | reference | statusline | verify | improvement-eval`.
+- **Porcelain** (daily): `setup`, `status`, `sync`, `dashboard`, `admin`, `usage`, `run`,
+  `host`, `uninstall`. Bare `ak` → `status --hint`. (`dashboard`, `admin`, and `host`
+  are also reachable under `ak x`.)
+- **Plumbing** (power users): `ak x admin | daemon-gc | dashboard | harvest | host | mcp |
+  reference | statusline | verify | improvement-eval`.
 - Each command module exports `options` (a `parseArgs` config) and `run({ flags, positionals, pkgRoot })`.
 - A best-effort drift nudge runs after non-`sync`, non-`--json` commands.
 
@@ -37,9 +40,9 @@ release this kit. User-facing docs live in [README.md](README.md); this file is 
 bin/agentic-kit.mjs      # single entrypoint — arg parse + command dispatch (PORCELAIN/PLUMBING maps)
 src/
   commands/              # porcelain verbs
-    setup.mjs  status.mjs  sync.mjs  dual.mjs  uninstall.mjs
+    setup.mjs  status.mjs  sync.mjs  run.mjs  uninstall.mjs
     x/                   # plumbing verbs
-      admin.mjs  daemon-gc.mjs  dashboard.mjs  harvest.mjs  mcp.mjs  provider.mjs  reference.mjs  statusline.mjs  verify.mjs
+      admin.mjs  daemon-gc.mjs  dashboard.mjs  harvest.mjs  host.mjs  mcp.mjs  reference.mjs  statusline.mjs  verify.mjs
   lib/                   # the engine — each file is one concern
     heal.mjs             # the mutations sync/setup apply (idempotent, {ok,detail})
     natives.mjs          # better-sqlite3 / agentdb native detection
@@ -62,6 +65,7 @@ src/
     admin-model.mjs      # PURE admin number model — imports nothing; embedded in the page AND node-tested
     admin-view.mjs       # admin browser controller (embedded into the page; not node-imported)
     browser.mjs          # openInBrowser — shared by dashboard + admin
+    usage-index.mjs      # canonical usage aggregation by host, provider, model, project, and category
     npx.mjs              # stale npx-cache detection/prune
     mcp.mjs  settings.mjs  config.mjs  paths.mjs  statusline.mjs
     rvf.mjs  daemons.mjs  exec.mjs  output.mjs
@@ -80,17 +84,19 @@ docs/
 ```
 
 **Published tarball** = the `files` whitelist in `package.json`:
-`bin/agentic-kit.mjs`, `src/`, `claude/`, `docs/TROUBLESHOOTING.md`. Nothing else
-ships — verify with `npm pack --dry-run` before a release if you touch `files`.
+`bin/agentic-kit.mjs`, `src/`, `claude/`, `docs/TROUBLESHOOTING.md`,
+`docs/CODEX-STATUSLINE.md`, and
+`docs/adr/0015-managed-codex-native-statusline.md`. Generated workspace state under
+the shipped source trees is explicitly excluded. Nothing else ships — verify with
+`npm pack --dry-run` before a release if you touch `files`.
 
-**Dual-host subsystem** (the `providers`/`routing`/`dual` cluster): one policy in
-`kit.json` `providers` is the source of truth — `hosts {claude,codex}` (which are
-enabled), `primaryHost` (which leads; default `claude`), and `dualRouting` (the
-per-activity host+model map). `routing.mjs` is pure (defaults, `seedDualRouting`,
-`swapRoute` for codex-primary mirroring, and the projections to aqe `agentOverrides`
-+ the dual-run config); `providers.mjs` does the I/O (host/auth detection, env
-wiring, both MCP-bridge directions, aqe router file). Seeded/healed by `setup` +
-`sync` + `x provider pick`, surfaced by `status` + `dashboard`. Design records:
+**Multi-host routing subsystem** (the `providers`/`routing` cluster): durable intent is
+split between `integrations.hosts` (which hosts are enabled) and top-level `routing`
+(`version`, `primaryHost`, and the per-activity `routes`). `routing.mjs` is pure
+(defaults, primary-host mirroring, validation, and projections to AQE
+`agentOverrides` and `ak run`); `providers.mjs` does the I/O (host/auth detection,
+environment wiring, both MCP-bridge directions, AQE router file). Seeded/healed by
+`setup` + `sync` + `x host pick`, surfaced by `status` + `dashboard`. Design records:
 ADRs [0001–0006](docs/adr/); user guide: `docs/PROVIDERS.md`.
 
 **Status-line capability is host-specific.** Claude owns a project-scoped,
@@ -190,18 +196,16 @@ Edit a file under `src/`, re-run the CLI, done.
 ## 4. Testing
 
 ```bash
-pnpm test        # the full gate — exactly what CI runs
+pnpm test        # coverage-enforced unit + renderer/server suites
+pnpm run check   # release gate: typecheck, lint, markdown, build/package, tests
 ```
 
-That expands to:
-
-```bash
-node --test "tests/kit/*.test.mjs" && node tests/statusline-segments.test.cjs
-```
-
-- `tests/kit/*.test.mjs` — `node:test` unit suites (blocks, natives, settings-config, versions). **32 tests.**
-- `tests/statusline-segments.test.cjs` — statusline footer renderer. **20 tests.**
-- **52 total, 0 failures = release-ready.**
+- `tests/kit/*.test.mjs` — the broad `node:test` suite, run with 70% line, branch, and
+  function coverage floors.
+- Eight `.cjs` suites exercise statusline rendering, Brain display, AgentDB,
+  health history, harvest, dashboard, and admin behavior.
+- `pnpm run build` validates the CLI load and dry-run package manifest, including
+  forbidden generated/private paths.
 
 Run one suite while iterating: `node --test tests/kit/versions.test.mjs`.
 

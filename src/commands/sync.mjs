@@ -12,7 +12,7 @@ import { OPENCODE_LIFECYCLE_ADAPTER } from '../lib/opencode.mjs';
 import { runLifecycle } from '../lib/adapters/lifecycle.mjs';
 import { listDaemons, staleDaemons, reap } from '../lib/daemons.mjs';
 import { loadKitConfig, saveKitConfig } from '../lib/config.mjs';
-import { commandHosts, applyHosts, applyProviders, hostInstallState, installHost, applyAqeRouter, seedDualRoutingIfDualHost, ensureCodexMcp, ensureRufloMcpInCodex, bothHostsEnabled } from '../lib/providers.mjs';
+import { commandHosts, applyHosts, applyProviders, hostInstallState, installHost, applyAqeRouter, seedActivityRoutesIfMultiHost, ensureCodexMcp, ensureRufloMcpInCodex, bothHostsEnabled } from '../lib/providers.mjs';
 import { driftReport, selfDrift } from '../lib/versions.mjs';
 import { RUVECTOR_PKG, managed as ruvectorManaged } from '../lib/ruvector.mjs';
 import { pruneNpxStale } from '../lib/npx.mjs';
@@ -154,7 +154,7 @@ export async function run({ flags, pkgRoot }) {
   // npm-managed hosts ride the versions branch above via driftReport).
   if (subsystems.has('hosts')) {
     for (const h of commandHosts()) {
-      if (!cfg.providers.hosts[h.id]) continue;
+      if (!cfg.integrations.hosts[h.id]) continue;
       if ((await hostInstallState(h)).method !== 'absent') continue;
       await step(`install ${h.id}`, () => installHost(h.id));
     }
@@ -167,7 +167,7 @@ export async function run({ flags, pkgRoot }) {
   // Runs BEFORE the blocks branch: the agents-opencode guidance target is gated
   // on the config home this branch creates — this order lets a fresh enable
   // converge guidance in the SAME sync (a second sync is then a true no-op).
-  if (subsystems.has('opencode') && cfg.providers?.hosts?.opencode) {
+  if (subsystems.has('opencode') && cfg.integrations?.hosts?.opencode) {
     if (!(await have('opencode'))) {
       info('opencode: enabled but CLI not installed — wiring skipped (hosts step installs it)');
     } else {
@@ -207,7 +207,7 @@ export async function run({ flags, pkgRoot }) {
     // (retiredForTarget) — the migration path that clears the dual block out of
     // any project AGENTS.md that still carries it after the re-scope
     // (ADR-0008).
-    const ctx = { flags: { dualMode: bothHostsEnabled(cfg), opencodeEnabled: !!cfg.providers?.hosts?.opencode } };
+    const ctx = { flags: { dualMode: bothHostsEnabled(cfg), opencodeEnabled: !!cfg.integrations?.hosts?.opencode } };
     for (const t of guidanceTargets({ cwd, cfg })) {
       const treg = [...blocksForTarget(rowsReg, t.name), ...retiredForTarget(rowsReg, t.name)];
       const res = await syncBlocks(t.file, treg, resolve, { context: ctx });
@@ -222,7 +222,7 @@ export async function run({ flags, pkgRoot }) {
     report('providers', applyHosts(cfg, cwd));
     // heal per-activity routing: seed from defaults if dual-host only just became
     // eligible (e.g. aqe upgraded ≥3.13.1 since enablement), before materializing.
-    const seed = seedDualRoutingIfDualHost(cfg);
+    const seed = seedActivityRoutesIfMultiHost(cfg);
     if (seed.seeded) { saveKitConfig(cfg); report('routing', { ok: true, changed: true, detail: `seeded ${seed.count} activities` }); }
     const router = applyAqeRouter(cfg, cwd);
     if (router.changed || !router.ok) report('aqe router', router);

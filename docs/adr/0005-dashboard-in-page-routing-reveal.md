@@ -1,8 +1,14 @@
 # ADR-0005 — Dashboard surfaces routing via in-page reveal
 
-- **Status:** Accepted
+- **Status:** Amended by [ADR-0020](0020-ga-stable-surfaces.md)
 - **Date:** 2026-07-23
+- **Updated:** 2026-07-30
+- **Update note:** Kept the read-only routing reveal and changed it to display only canonical GA
+  configuration.
 - **Deciders:** agentic-kit maintainers
+
+> **GA amendment:** the read-only dashboard decision remains. References below to compatibility
+> configuration names and projections describe the implementation at adoption time only.
 
 ## Context
 

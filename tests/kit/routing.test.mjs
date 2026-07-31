@@ -3,10 +3,10 @@ import assert from 'node:assert/strict';
 import {
   ACTIVITIES, AK_ORIGINATED, DEFAULT_ROUTES, HOST_PROVIDER, SUBSCRIPTION_PROVIDERS,
   AQE_CONSTRUCTIBLE_PROVIDERS, MODEL_CATALOG, MODEL_CATALOG_VERIFIED, modelChoices, formatModelHelp,
-  resolveRoutes, seedDualRouting, policyToAgentOverrides, routedVendors, routingSummary,
+  resolveRoutes, seedActivityRoutes, policyToAgentOverrides, routedVendors, routingSummary,
   configuredPolicyToAgentOverrides, pruneRoutesForHosts, materializeRunPlan,
   validateRoute, parseRouteSpecs,
-  DUAL_RUN_TEMPLATE_NAMES, policyToDualRunConfig, escalatePolicy,
+  RUN_TEMPLATE_NAMES,
 } from '../../src/lib/routing.mjs';
 
 // ── Vocabulary + defaults ────────────────────────────────────────────────────
@@ -53,24 +53,24 @@ test('formatModelHelp names both hosts and cites a verified date', () => {
 
 // ── resolveRoutes / provenance ──────────────────────────────────────────────
 
-test('empty policy resolves every activity to source=default', () => {
+test('empty policy resolves every activity to provenance=default', () => {
   const routes = resolveRoutes({});
   assert.equal(Object.keys(routes).length, ACTIVITIES.length);
-  assert.ok(Object.values(routes).every((r) => r.source === 'default'));
+  assert.ok(Object.values(routes).every((r) => r.provenance === 'default'));
   assert.equal(routes.packaging.akOriginated, true);
   assert.equal(routes.architecture.akOriginated, false);
 });
 
-test('a persisted user route overlays defaults and keeps source=user', () => {
-  const routes = resolveRoutes({ implementation: { host: 'claude', model: 'claude-opus-4-8', source: 'user' } });
+test('a persisted user route overlays defaults and keeps provenance=user', () => {
+  const routes = resolveRoutes({ implementation: { host: 'claude', model: 'claude-opus-4-8', provenance: 'user' } });
   assert.equal(routes.implementation.host, 'claude');
   assert.equal(routes.implementation.model, 'claude-opus-4-8');
-  assert.equal(routes.implementation.source, 'user');
+  assert.equal(routes.implementation.provenance, 'user');
 });
 
-test('a persisted entry with no explicit source is treated as a user edit', () => {
+test('a persisted entry with no explicit provenance is treated as a user edit', () => {
   const routes = resolveRoutes({ testing: { host: DEFAULT_ROUTES.testing.host } });
-  assert.equal(routes.testing.source, 'user');
+  assert.equal(routes.testing.provenance, 'user');
   assert.equal(routes.testing.model, DEFAULT_ROUTES.testing.model, 'same-host: unset field falls back to default');
 });
 
@@ -87,19 +87,19 @@ test('a host-only override never inherits the previous host default model (qe-co
   assert.equal(pinned[activity].model, 'claude-sonnet-5');
 });
 
-// ── seedDualRouting (cost-safety gate) ──────────────────────────────────────
+// ── seedActivityRoutes (cost-safety gate) ──────────────────────────────────────
 
 test('seeding both hosts stamps every route seeded and only subscription providers', () => {
-  const policy = seedDualRouting({ hosts: ['claude', 'codex'] });
+  const policy = seedActivityRoutes({ hosts: ['claude', 'codex'] });
   assert.equal(Object.keys(policy).length, ACTIVITIES.length);
   for (const r of Object.values(policy)) {
-    assert.equal(r.source, 'seeded');
+    assert.equal(r.provenance, 'seeded');
     assert.ok(SUBSCRIPTION_PROVIDERS.has(HOST_PROVIDER[r.host]), 'never seeds a metered provider');
   }
 });
 
 test('seeding a single host omits the other host’s activities', () => {
-  const policy = seedDualRouting({ hosts: ['claude'] });
+  const policy = seedActivityRoutes({ hosts: ['claude'] });
   assert.ok(Object.values(policy).every((r) => r.host === 'claude'));
   assert.ok(!('implementation' in policy), 'codex activity not seeded when codex absent');
 });
@@ -114,24 +114,24 @@ test('policyToAgentOverrides maps QE agents to their activity host+model', () =>
 });
 
 test('overriding an activity flows through to its agent overrides', () => {
-  const ov = policyToAgentOverrides({ testing: { host: 'claude', model: 'claude-sonnet-5', source: 'user' } });
+  const ov = policyToAgentOverrides({ testing: { host: 'claude', model: 'claude-sonnet-5', provenance: 'user' } });
   assert.equal(ov['qe-test-architect'].provider, 'claude-code');
   assert.equal(ov['qe-test-architect'].model, 'claude-sonnet-5');
 });
 
 test('configured projection never recreates a missing route from dual-host defaults', () => {
-  const ov = configuredPolicyToAgentOverrides({ review: { host: 'claude', model: 'claude-sonnet-5', source: 'user' } });
+  const ov = configuredPolicyToAgentOverrides({ review: { host: 'claude', model: 'claude-sonnet-5', provenance: 'user' } });
   assert.equal(ov['qe-code-reviewer'].provider, 'claude-code');
   assert.equal(ov['qe-test-architect'], undefined);
 });
 
 test('pruning disabled hosts drops primary routes and only invalid escalation rungs', () => {
   const out = pruneRoutesForHosts({
-    implementation: { host: 'codex', model: 'gpt-5.4', source: 'seeded' },
-    testing: { host: 'claude', model: 'claude-sonnet-5', source: 'user', escalate: [{ host: 'codex', model: 'gpt-5.4' }] },
+    implementation: { host: 'codex', model: 'gpt-5.4', provenance: 'seeded' },
+    testing: { host: 'claude', model: 'claude-sonnet-5', provenance: 'user', escalation: [{ host: 'codex', model: 'gpt-5.4' }] },
   }, { hosts: ['claude'] });
   assert.equal(out.policy.implementation, undefined);
-  assert.deepEqual(out.policy.testing, { host: 'claude', model: 'claude-sonnet-5', source: 'user' });
+  assert.deepEqual(out.policy.testing, { host: 'claude', model: 'claude-sonnet-5', provenance: 'user' });
   assert.equal(out.pruned.length, 2);
   assert.deepEqual(out.warnings, ["removed user escalation for 'testing' — host 'codex' is disabled"]);
 });
@@ -143,7 +143,7 @@ test('default routing spans at least two vendors (qe-court diversity)', () => {
 });
 
 test('routingSummary counts totals, provenance, and per-host tallies', () => {
-  const s = routingSummary({ testing: { host: 'claude', source: 'user' } });
+  const s = routingSummary({ testing: { host: 'claude', provenance: 'user' } });
   assert.equal(s.total, ACTIVITIES.length);
   assert.equal(s.custom, 1);
   assert.ok(s.byHost.claude > 0 && s.byHost.codex > 0);
@@ -165,83 +165,60 @@ test('parseRouteSpecs parses valid specs and warns on bad ones', () => {
     'nonsense:claude',       // unknown activity
     'review:gemini',         // unknown host
   ]);
-  assert.deepEqual(policy.implementation, { host: 'claude', model: 'claude-opus-4-8', source: 'user' });
-  assert.deepEqual(policy.testing, { host: 'codex', source: 'user' });
+  assert.deepEqual(policy.implementation, { host: 'claude', model: 'claude-opus-4-8', provenance: 'user' });
+  assert.deepEqual(policy.testing, { host: 'codex', provenance: 'user' });
   assert.equal(warnings.length, 2);
   assert.ok(!('nonsense' in policy) && !('review' in policy));
 });
 
-// ── Projection #2: dual-run config ──────────────────────────────────────────
+// ── Host-neutral run plans ──────────────────────────────────────────────────
 
-test('policyToDualRunConfig(feature) builds the grounded worker DAG with policy host+model', () => {
-  const { workers } = policyToDualRunConfig(seedDualRouting(), { template: 'feature', task: 'add auth' });
+test('materializeRunPlan(feature) builds the grounded worker DAG with policy host+model', () => {
+  const { workers } = materializeRunPlan(seedActivityRoutes(), { template: 'feature', task: 'add auth' });
   assert.equal(workers.length, 4);
   const byId = Object.fromEntries(workers.map((w) => [w.id, w]));
-  assert.equal(byId.architect.platform, 'claude');
-  assert.equal(byId.coder.platform, 'codex');
+  assert.equal(byId.architect.host, 'claude');
+  assert.equal(byId.coder.host, 'codex');
   assert.deepEqual(byId.reviewer.dependsOn, ['coder', 'tester']);
-  assert.ok(byId.coder.model, 'model comes from the route');
+  assert.ok(byId.coder.configuredModel, 'model comes from the route');
   assert.match(byId.architect.prompt, /add auth/, 'task is interpolated');
 });
 
-test('every dual-run template projects to platforms of claude|codex only', () => {
-  for (const name of DUAL_RUN_TEMPLATE_NAMES) {
-    const { workers } = policyToDualRunConfig(seedDualRouting(), { template: name, task: 'x' });
+test('every run template materializes a host-neutral worker plan', () => {
+  for (const name of RUN_TEMPLATE_NAMES) {
+    const { workers } = materializeRunPlan(seedActivityRoutes(), { template: name, task: 'x' });
     assert.ok(workers.length >= 1, `${name} has workers`);
-    assert.ok(workers.every((w) => w.platform === 'claude' || w.platform === 'codex'), `${name} platforms valid`);
+    assert.ok(workers.every((w) => w.activity && w.host && !('platform' in w)), `${name} workers are host-neutral`);
   }
 });
 
-test('host-neutral run plan preserves every legacy dual worker assignment', () => {
-  const policy = seedDualRouting();
-  const plan = materializeRunPlan(policy, { template: 'feature', task: 'add auth' });
-  const dual = policyToDualRunConfig(policy, { template: 'feature', task: 'add auth' });
+test('host-neutral run plan preserves dependencies, routes, and static prompts', () => {
+  const plan = materializeRunPlan(seedActivityRoutes(), { template: 'feature', task: 'add auth' });
   assert.equal(plan.template, 'feature');
-  // `escalate` is run-only ladder metadata (ADR-0019); the legacy projection
-  // has its own escalatePolicy overlay instead, so it is excluded from parity.
-  assert.deepEqual(plan.workers.map(({ host, configuredModel, activity: _activity, escalate: _ladder, ...worker }) => ({
-    ...worker, platform: host, model: configuredModel ?? undefined,
-  })), dual.workers);
   assert.ok(plan.workers.every((worker) => worker.activity && worker.host && !('platform' in worker)));
+  assert.deepEqual(plan.workers.find((worker) => worker.id === 'reviewer').dependsOn, ['coder', 'tester']);
   assert.ok(plan.workers.every((worker) => !/AK_HANDOFF|AK_DEPENDENCY_DATA/.test(worker.prompt)),
     'handoff protocol is appended only by the runtime runner; dry-run/materialization stays static');
 });
 
-test('an explicit OpenCode route materializes for ak run but not the legacy dual adapter', () => {
+test('an explicit OpenCode route materializes for ak run', () => {
   const policy = { implementation: {
-    host: 'opencode', model: 'openrouter/example', source: 'user',
+    host: 'opencode', model: 'openrouter/example', provenance: 'user',
   } };
   const plan = materializeRunPlan(policy, { template: 'feature', task: 'x' });
   assert.equal(plan.workers.find((worker) => worker.activity === 'implementation').host, 'opencode');
-  assert.throws(() => policyToDualRunConfig(policy, { template: 'feature', task: 'x' }), /ak dual supports Claude\/Codex/);
 });
 
 test('host-neutral run plan rejects a host without activity-routing capability', () => {
-  const policy = { implementation: { host: 'gemini', source: 'user' } };
+  const policy = { implementation: { host: 'gemini', provenance: 'user' } };
   assert.throws(
     () => materializeRunPlan(policy, { template: 'feature', task: 'x' }),
     /route for "implementation" cannot materialize: host "gemini" requires canRouteActivities/,
   );
 });
 
-test('policyToDualRunConfig throws on an unknown template', () => {
-  assert.throws(() => policyToDualRunConfig({}, { template: 'nope' }), /unknown template/);
-});
-
-test('escalatePolicy bumps ladder activities to their next (cross-vendor) rung', () => {
-  const esc = escalatePolicy(seedDualRouting());
-  // implementation & testing carry a codex→claude ladder in the defaults
-  assert.equal(esc.implementation.host, 'claude');
-  assert.equal(esc.testing.host, 'claude');
-  // activities without a ladder are not escalated
-  assert.ok(!('review' in esc));
-});
-
-test('escalatePolicy skips a rung that equals the current route (no same-model retry)', () => {
-  // a user override to the ladder rung itself must not "escalate" to the same thing
-  const rung = DEFAULT_ROUTES.implementation.escalate[0];
-  const policy = { implementation: { host: rung.host, model: rung.model, source: 'user' } };
-  assert.ok(!('implementation' in escalatePolicy(policy)));
+test('materializeRunPlan throws on an unknown template', () => {
+  assert.throws(() => materializeRunPlan({}, { template: 'nope' }), /unknown template/);
 });
 
 test('parseRouteSpecs preserves a model id containing a colon', () => {

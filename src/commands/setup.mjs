@@ -15,7 +15,7 @@ import { register as mcpRegister, applyExclusions } from '../lib/mcp.mjs';
 import { OPENCODE_LIFECYCLE_ADAPTER, reconcileOpencodeGuidance } from '../lib/opencode.mjs';
 import { runLifecycle } from '../lib/adapters/lifecycle.mjs';
 import { loadKitConfig, saveKitConfig } from '../lib/config.mjs';
-import { HOSTS, applyHosts, applyProviders, ensureDualAgents, hostInstallState, installHost, applyAqeRouter, seedDualRoutingIfDualHost, printActivityRoutingTable, aqeSupportsAgentOverrides, ensureCodexMcp, ensureRufloMcpInCodex, applySetupHostFlags } from '../lib/providers.mjs';
+import { HOSTS, applyHosts, applyProviders, hostInstallState, installHost, applyAqeRouter, seedActivityRoutesIfMultiHost, printActivityRoutingTable, aqeSupportsAgentOverrides, ensureCodexMcp, ensureRufloMcpInCodex, applySetupHostFlags } from '../lib/providers.mjs';
 import { installedVersion } from '../lib/versions.mjs';
 import * as rb from '../lib/ruvnet-brain.mjs';
 import * as adb from '../lib/agentdb.mjs';
@@ -160,7 +160,7 @@ export async function run_machine({ flags, pkgRoot, cfg }) {
   // 6. frontier hosts — install any ENABLED host that is entirely absent (default
   //    enables claude only). External installs (mise/native/brew) are left alone.
   for (const h of HOSTS) {
-    if (!cfg.providers?.hosts?.[h.id]) continue;
+    if (!cfg.integrations?.hosts?.[h.id]) continue;
     const st = await hostInstallState(h);
     if (st.method === 'absent') {
       if (await ask(`${h.id} CLI not found — install ${h.pkg} globally?`, true, flags.yes)) {
@@ -176,7 +176,7 @@ export async function run_machine({ flags, pkgRoot, cfg }) {
   //     converted agents, platform skill (opencode.mjs owns all of it). Only
   //     when the CLI is actually present: a declined/failed install must not
   //     leave a freshly-created config home behind (codex-review #4).
-  if (cfg.providers?.hosts?.opencode) {
+  if (cfg.integrations?.hosts?.opencode) {
     if (!(await have('opencode'))) {
       warn('opencode: enabled but CLI not installed — wiring skipped (re-run `ak sync` after installing opencode-ai)');
     } else {
@@ -204,11 +204,11 @@ export async function run_machine({ flags, pkgRoot, cfg }) {
   }
 
   // 7. frontier host hint — codex detected but not enabled (opt-in via `ak host pick`)
-  if (!cfg.providers?.hosts?.codex && await have('codex')) {
+  if (!cfg.integrations?.hosts?.codex && await have('codex')) {
     info('codex CLI detected — run `ak host pick` to let ruflo use both claude and codex');
   }
   // opencode hint — detected but not enabled (post-install opt-in via provider pick)
-  if (!cfg.providers?.hosts?.opencode && await have('opencode')) {
+  if (!cfg.integrations?.hosts?.opencode && await have('opencode')) {
     info('opencode CLI detected — wire ruflo + ruvnet-brain into it with: ak host pick --host claude,opencode');
   }
   return true;
@@ -304,33 +304,31 @@ export async function run_project({ flags, cfg }) {
     }
     heal.healRvf(paths.projectAqeDir(root));
     // aqe ≥ 3.13.1 with codex enabled → install the Codex-native QE skills too.
-    const withCodex = !!cfg.providers?.hosts?.codex && aqeSupportsAgentOverrides();
+    const withCodex = !!cfg.integrations?.hosts?.codex && aqeSupportsAgentOverrides();
     const aqe = await runCmd('aqe', ['init', '--auto', ...(withCodex ? ['--with-codex'] : [])], { cwd: root, timeout: 300_000 });
     (aqe.code === 0 ? ok : warn)(`agentic-qe initialized${withCodex ? ' (+ codex skills)' : ''}`);
   }
 
   // 9.5 frontier host/provider wiring — reapply kit.json prefs (no-op at the
   //     claude-only default, so existing repos see zero change). When codex is
-  //     enabled: write ENABLE_* env, regenerate dual-mode agents, register providers.
+  //     enabled: write ENABLE_* env and register providers.
   const ph = applyHosts(cfg, root);
   if (ph.changed) ok(`providers: ${ph.detail}`);
   // dual-host: seed the per-activity routing policy from defaults (persist first
   // so the router materialization below writes agentOverrides). No-op single-host.
-  const seed = seedDualRoutingIfDualHost(cfg);
+  const seed = seedActivityRoutesIfMultiHost(cfg);
   if (seed.seeded) { saveKitConfig(cfg); ok(`per-activity routing seeded — ${seed.count} activities (dual-host defaults)`); }
   const rt = applyAqeRouter(cfg, root);
   if (rt.changed) (rt.ok ? ok : warn)(`aqe router: ${rt.detail}`);
-  if (Object.keys(cfg.providers?.dualRouting ?? {}).length) printActivityRoutingTable(cfg);
-  if (cfg.providers?.hosts?.codex) {
-    const dual = await ensureDualAgents(cfg, root);
-    (dual.ok ? ok : warn)(`dual agents: ${dual.detail}`);
+  if (Object.keys(cfg.routing?.routes ?? {}).length) printActivityRoutingTable(cfg);
+  if (cfg.integrations?.hosts?.codex) {
     const mcp = await ensureCodexMcp(cfg, root);
     if (mcp.changed) saveKitConfig(cfg); // persist the codexMcp ownership marker
     if (mcp.changed || !mcp.ok) (mcp.ok ? ok : warn)(`codex MCP: ${mcp.detail}`);
     // reverse bridge: register ruflo MCP into codex (codex→ruflo) so the bridge is
     // two-way — parity with `ak sync` / `ak host pick`.
     const rmcp = await ensureRufloMcpInCodex(cfg, root);
-    if (rmcp.changed) saveKitConfig(cfg); // persist the rufloCodexMcp ownership marker
+    if (rmcp.changed) saveKitConfig(cfg); // persist reverse MCP ownership
     if (rmcp.changed || !rmcp.ok) (rmcp.ok ? ok : warn)(`ruflo→codex MCP: ${rmcp.detail}`);
     const prov = await applyProviders(cfg, root);
     if (prov.changed) (prov.ok ? ok : warn)(`providers: ${prov.detail}`);
@@ -382,8 +380,8 @@ export async function run({ flags, pkgRoot }) {
     for (const w of hostFlags.warnings) warn(w);
     if (hostFlags.changed) {
       if (flags.codex || flags['primary-host'] === 'codex') {
-        const primary = cfg.providers.primaryHost && cfg.providers.primaryHost !== 'claude'
-          ? ` (primary: ${cfg.providers.primaryHost})` : '';
+        const primary = cfg.routing?.primaryHost && cfg.routing.primaryHost !== 'claude'
+          ? ` (primary: ${cfg.routing.primaryHost})` : '';
         info(`codex host enabled${primary} — will install + wire dual-mode`);
       }
       if (flags.opencode) info('opencode host enabled — will wire opencode.json and deploy plugin/agents/skills');

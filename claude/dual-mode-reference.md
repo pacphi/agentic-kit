@@ -33,10 +33,9 @@ ak run refactor "extract the payment module" --dry-run
   host/model comes from your routing policy, not the template.
 - **`--route 'act:host[:model]'`** — per-run routing override (repeatable, not persisted).
 - **`--max-concurrent <n>` / `--timeout <ms>`** — bound parallel work and each worker.
-- **`--dry-run` / `--json`** — print the materialized plan, spawn nothing.
-
-`ak dual` is a deprecated Claude/Codex `claude-flow-codex` compatibility wrapper. It retains its
-own `--parallel` and `--escalate` behavior for existing scripts, but new work must use `ak run`.
+- **`--dry-run`** — print the materialized plan and spawn nothing.
+- **`--json`** — emit machine-readable output while executing; combine it with
+  `--dry-run` for a machine-readable preview.
 
 ### The Claude ↔ Codex bridge (bidirectional MCP)
 
@@ -54,9 +53,9 @@ Register (or repair) both directions with `ak sync`; inspect with `ak status`.
 
 Routing is **per activity**, not per session — coder/tester lean Codex, reviewer and
 security-analysis lean Claude, and so on (`ak host` shows and edits the table).
-`--escalate` walks a **cross-vendor** ladder: a failed step retries on the other vendor's
-stronger model, so a Codex miss escalates into Claude (and vice-versa) rather than just
-burning retries on the same engine.
+`--escalate` walks the configured **cross-host** ladder. A failed step can retry on another
+host/model, but host diversity is not vendor proof; provider evidence determines whether a
+particular ladder is also cross-vendor.
 
 **Which host leads.** The two are peers, but `ak host pick --primary-host claude|codex`
 (default `claude`) picks which one leads: codex-primary **mirrors** the default table so Codex
@@ -64,11 +63,11 @@ takes the reasoning/review lead and Claude becomes the alternate/escalation targ
 ambidextrous experience with the roles flipped. `ak status` marks the primary and **fails**
 (not warns) if the primary host is missing.
 
-### qe-court: ≥2-vendor cross-check
+### qe-court: evidence-backed vendor cross-check
 
-Because dual mode routes activities across **two vendors**, the qe-court diversity property
-is satisfiable — a quality verdict backed by ≥2 distinct vendors is far harder to fool than
-a single-model self-review. Prefer cross-vendor routing for review/security activities so
-the court sees genuinely independent opinions.
+Two enabled hosts do not by themselves prove two inference vendors. qe-court diversity must be
+grounded in the providers that actually serve the selected roles. Prefer independently evidenced
+providers for review/security activities and treat configured host/model routes as intent, not
+vendor proof.
 
 <!-- END ruflo-dual-mode-reference -->

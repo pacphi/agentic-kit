@@ -5,8 +5,8 @@ import { HOST_REGISTRY } from '../../src/lib/adapters/index.mjs';
 
 test('commands share one immutable normalized integration snapshot', async () => {
   const cfg = {
-    providers: { hosts: { claude: true, codex: false } },
     integrations: {
+      hosts: { claude: true, codex: false },
       bindings: [{
         host: 'claude', provider: 'ollama', model: 'qwen3.6:latest',
         provenance: 'configured',

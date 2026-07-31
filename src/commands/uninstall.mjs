@@ -124,7 +124,7 @@ export async function run({ flags }) {
   {
     // cfg comes from the top of run() (read before any purge of kit.json).
     // --purge removes kit.json above; persisting cfg here would recreate it.
-    if (cfg.providers?.opencodeMcp === 'ak') {
+    if (cfg.integrations?.ownership?.opencode?.mcp === 'ak') {
       if (dry) info('[dry-run] stripped ak-managed opencode wiring + artifacts (opencode.json, plugin, agents, skill)');
       else {
         const ret = retireOpencode(cfg);

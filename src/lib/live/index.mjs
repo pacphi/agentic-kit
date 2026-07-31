@@ -10,7 +10,7 @@ export {
 export { TranscriptStreams } from './transcript-streams.mjs';
 export { adaptClaudeRecord } from './claude-adapter.mjs';
 export { adaptCodexRecord, adaptCodexLedger } from './codex-adapter.mjs';
-export { adaptStructuredEvent, adaptDualRunRecord } from './structured-adapter.mjs';
+export { adaptStructuredEvent } from './structured-adapter.mjs';
 export { classifyToolName } from './tool-classify.mjs';
 export {
   canonicalSessionKey, resolveProjectLabel, safeProjectLabel, stableProjectKey,

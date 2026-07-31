@@ -20,7 +20,7 @@ RoutingPolicy
                 provenance
                 escalation rungs[]
 
-RoutingPolicy -> eligible configuration projections -> AQE / legacy dual-run / MCP surfaces
+RoutingPolicy -> eligible configuration projections -> AQE / MCP surfaces
 RoutingPolicy + template + task -> materialized workers -> ak run
 ```
 
@@ -61,38 +61,27 @@ change the persisted base route.
 
 ## One policy, several configuration projections
 
-`kit.json.providers.dualRouting` is the current persisted compatibility path for routing intent.
-Pure projectors materialize that policy into:
+`kit.json.routing` is the persisted routing envelope: `version`, `primaryHost`, and per-activity
+`routes`. Each route carries host/model intent plus `provenance` and an optional `escalation`
+ladder. Pure projectors materialize that policy into:
 
 - AQE `agentOverrides` for AQE-eligible Claude/Codex routes;
 - `ak run`'s host-neutral worker plan;
-- deprecated dual-run worker configuration for Claude/Codex-only compatibility; and
 - Codex MCP availability/configuration.
 
 These are configuration projections, not independent routing policies. Native surfaces must not
 be edited back into domain truth without an explicit import or reconciliation design.
 
-## Canonical execution and deprecated dual compatibility
+## Canonical execution
 
 `ak run` is the canonical executor for materialized activity plans. It can select every host whose
 adapter declares `canRouteActivities`, including an explicit OpenCode route. It does not infer a
 provider from a host/model selector, make OpenCode primary, or project OpenCode into AQE.
 
-`ak dual run` is deprecated. It remains a Claude-and-Codex compatibility wrapper for existing
-`claude-flow-codex` workflows, including its legacy escalation semantics. Workers in that adapter
-may reach different inference providers through their bindings, but provider cardinality does not
-change the number of execution hosts.
-
-Therefore:
-
-- two hosts with three or more providers remain a dual run;
-- OpenRouter does not create a third orchestration host;
-- two Ollama bindings do not create two Ollama providers; and
-- OpenCode runs through `ak run` once its host adapter explicitly gains the required capability;
-  the deprecated `ak dual` rejects it rather than changing its compatibility contract.
-
-Generalized multi-host execution does not redefine the legacy word `dual`: only `ak run` owns that
-surface. `ak dual` remains a removable compatibility path rather than a second orchestration model.
+Host and provider cardinality remain separate: OpenRouter does not create another execution host,
+two Ollama bindings do not create two Ollama providers, and configured host/model routes do not
+prove which inference vendor served a session. OpenCode runs only through `ak run` after its host
+adapter declares the required capability.
 
 ## Cost safety
 
@@ -108,9 +97,9 @@ must distinguish per-token price from measured or expected per-task cost.
 1. Only capability-qualified hosts receive activity routes.
 2. Routing host and inference provider are separate axes.
 3. One canonical policy feeds all eligible downstream projections; ineligible OpenCode routes are
-   never fabricated into AQE or the deprecated dual adapter.
+   never fabricated into AQE.
 4. User-pinned routes are not overwritten by default refresh.
 5. Primary-host selection changes leadership defaults, not host enablement symmetry.
 6. Escalation is explicit, ordered, and per route.
 7. Automatic seeding cannot introduce a metered provider path.
-8. `ak run` is the canonical executor; `dual` remains a deprecated two-host compatibility wrapper.
+8. `ak run` is the sole executor for materialized activity plans.

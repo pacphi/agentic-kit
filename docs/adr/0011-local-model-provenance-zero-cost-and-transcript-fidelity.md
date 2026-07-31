@@ -1,7 +1,11 @@
 # ADR-0011 — Local models: provenance out-of-band, $0 per model, and stated transcript fidelity
 
-- **Status:** Proposed — see *Validation required* before this may be marked Accepted
+- **Status:** Proposed; current command references amended by
+  [ADR-0020](0020-ga-stable-surfaces.md) — see *Validation required* before acceptance
 - **Date:** 2026-07-27
+- **Updated:** 2026-07-30
+- **Update note:** Repointed the provider-binding reference to the canonical host-management
+  module; the unmeasured local-model proposal remains unimplemented.
 - **Deciders:** agentic-kit maintainers
 - **Amends:** [ADR-0009](0009-usage-scorecard-local-transcript-analytics.md) §3 (cost) and §8 (transcripts)
 
@@ -10,7 +14,7 @@
 `ak` already treats `ollama` as a first-class provider on the *routing* axis: it is in
 `PROVIDERS` (`src/lib/routing.mjs:30`), in `SUBSCRIPTION_PROVIDERS` as a $0 local backend
 (`:36`), in the aqe provider matrix (`src/lib/providers.mjs:56`), and in the billing hint the
-provider picker prints — *"ollama/onnx = local ($0)"* (`src/commands/x/provider.mjs:54`).
+host-management picker prints — *"ollama/onnx = local ($0)"* (`src/commands/x/host.mjs`).
 
 The **usage** axis knows nothing about it. Grepping `ollama|OLLAMA|ANTHROPIC_BASE_URL|OPENAI_BASE_URL`
 across `src/` returns hits in exactly those three routing/provider files and none in

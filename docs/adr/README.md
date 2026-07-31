@@ -9,25 +9,26 @@ Consequences**, and cites the grounded source it rests on where relevant.
 
 | ADR | Title | Status |
 |-----|-------|--------|
-| [0001](0001-one-routing-policy-many-projections.md) | One dual-host routing policy, many projections | Accepted |
-| [0002](0002-activity-vocabulary-defaults-from-ruv-templates.md) | Activity vocabulary & defaults seeded from rUv's shipped templates | Accepted |
-| [0003](0003-auto-seed-dual-host-provenance.md) | Auto-seed on dual-host, subscription-only, per-route provenance | Accepted |
-| [0004](0004-escalation-per-projection.md) | Escalation is per-projection, availability stated per path | Accepted |
-| [0005](0005-dashboard-in-page-routing-reveal.md) | Dashboard surfaces routing via in-page reveal | Accepted |
-| [0006](0006-primary-host-and-ambidextrous-mirroring.md) | Primary host & ambidextrous mirroring (which host leads) | Accepted |
+| [0001](0001-one-routing-policy-many-projections.md) | One dual-host routing policy, many projections | Superseded in part by 0020 |
+| [0002](0002-activity-vocabulary-defaults-from-ruv-templates.md) | Activity vocabulary & defaults seeded from rUv's shipped templates | Amended by 0020 |
+| [0003](0003-auto-seed-dual-host-provenance.md) | Auto-seed on dual-host, subscription-only, per-route provenance | Amended by 0020 |
+| [0004](0004-escalation-per-projection.md) | Escalation is per-projection, availability stated per path | Superseded by 0019/0020 |
+| [0005](0005-dashboard-in-page-routing-reveal.md) | Dashboard surfaces routing via in-page reveal | Amended by 0020 |
+| [0006](0006-primary-host-and-ambidextrous-mirroring.md) | Primary host & ambidextrous mirroring (which host leads) | Amended by 0020 |
 | [0007](0007-maintainer-admin-local-telemetry.md) | Maintainer admin: a loopback telemetry page with deliberate egress | Accepted |
 | [0008](0008-guidance-target-scope-split.md) | Machine-scoped guidance blocks land in machine files, not a repo's AGENTS.md | Accepted |
 | [0009](0009-usage-scorecard-local-transcript-analytics.md) | Usage scorecard: local transcript analytics with graded evidence | Accepted |
 | [0010](0010-provider-mediated-quota-reads.md) | Provider-mediated quota reads (the only honest denominators) | Accepted |
 | [0011](0011-local-model-provenance-zero-cost-and-transcript-fidelity.md) | Local models: provenance out-of-band, $0 per model, stated transcript fidelity | Proposed |
-| [0012](0012-live-sessions-observability.md) | Live sessions as local, evidence-graded observability | Accepted |
+| [0012](0012-live-sessions-observability.md) | Live sessions as local, evidence-graded observability | Accepted; compatibility source amended |
 | [0013](0013-admin-build-security-signals-and-honest-reach.md) | Admin: build/security signals, an honest Reach panel, and a pagination fix | Accepted |
 | [0014](0014-dashboard-auth-and-remediation.md) | Dashboard auth token, plus a security/quality remediation pass | Accepted |
 | [0015](0015-managed-codex-native-statusline.md) | Manage Codex's native user-wide status line without claiming rich-renderer parity | Accepted |
-| [0016](0016-capability-driven-integration-adapters.md) | Capability-driven host, provider, binding, projection, and observability adapters | Accepted |
-| [0017](0017-opencode-host.md) | OpenCode as a managed, observable host through native surfaces | Accepted |
-| [0018](0018-generalized-host-worker-execution.md) | Generalized host-worker execution; `ak run` canonical | Accepted |
-| [0019](0019-escalation-in-ak-run.md) | Bounded per-worker escalation in `ak run` | Accepted |
+| [0016](0016-capability-driven-integration-adapters.md) | Capability-driven host, provider, binding, projection, and observability adapters | Accepted; compatibility amended |
+| [0017](0017-opencode-host.md) | OpenCode as a managed, observable host through native surfaces | Accepted; compatibility amended |
+| [0018](0018-generalized-host-worker-execution.md) | Generalized host-worker execution; `ak run` canonical | Accepted; compatibility amended |
+| [0019](0019-escalation-in-ak-run.md) | Bounded per-worker escalation in `ak run` | Accepted; historical context closed |
+| [0020](0020-ga-stable-surfaces.md) | One stable GA surface per capability | Implemented |
 
 Theme: ADRs **0001–0006** define **dual-host LLM routing and leadership** — how `ak` lets ruflo route
 each development activity (architecture, implementation, testing, review, …) to the right host (Claude
@@ -54,8 +55,8 @@ normalized into a versioned, provenance-bearing event model, reduced into an int
 agent/tool canvas, and paired with a rich selected-session transcript rail. Separate SSE planes
 keep content out of broad topology snapshots/replay while preserving masked local evidence and
 keeping chat/control absent. Claude/Codex collection is
-implemented; ruflo, agentic-qe, and dual-run require explicit, repeatable `--live-source`
-registration. Independent plugin/skill/MCP discovery and a measured frame-time budget remain
+implemented; ruflo and agentic-qe require explicit, repeatable `--live-source` registration.
+Independent plugin/skill/MCP discovery and a measured frame-time budget remain
 documented limitations rather than implied capabilities. **0013** extends 0007's admin collector with
 CI-run and Dependabot-alert signals, fixes a releases-pagination cap that silently dropped older
 releases, replaces two GitHub-release-asset Reach tiles that were permanently dead for this npm-only
@@ -89,7 +90,12 @@ machine-guidance surfaces; preserves user values through ownership receipts and 
 and preserves primary/AQE routing boundaries. ADR-0018 adds the OpenCode execution-worker
 contract and explicit activity routes through `ak run`.
 
-**0018** defines the host-neutral worker lifecycle and normalized terminal evidence, makes `ak run`
-the canonical execution surface, and preserves `ak dual` only as a deprecated Claude/Codex
-compatibility wrapper. It selects OpenCode's loopback HTTP/OpenAPI transport and documents its
-permission, timeout, cleanup, provenance, and AQE-boundary evidence.
+**0018** defines the host-neutral worker lifecycle and normalized terminal evidence and makes
+`ak run` canonical. It selects OpenCode's loopback HTTP/OpenAPI transport and documents its
+permission, timeout, cleanup, provenance, and AQE-boundary evidence. Its temporary compatibility
+clauses are superseded by ADR-0020.
+
+**0020** closes the 4.0 alpha compatibility window. It establishes one execution command, one
+host-management namespace, and the versioned top-level routing envelope; removes dynamic
+adapter-specific execution bootstrap; limits old vocabulary to marked decision history and one
+upgrade section; and preserves OpenCode's opt-in, supervised, non-primary, non-AQE boundary.

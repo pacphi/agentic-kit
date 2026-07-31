@@ -189,7 +189,14 @@ function syncCfg(catalog) {
   return offlineKitConfig({
     agentdb: false,
     mcp: { register: false, excludeFamilies: [] },
-    providers: { hosts: { claude: true, codex: false, opencode: true }, opencodeCatalogDir: catalog },
+    integrations: {
+      version: 2,
+      hosts: { claude: true, codex: false, opencode: true },
+      bindings: [],
+      ownership: { opencode: { catalogDir: catalog } },
+    },
+    routing: { version: 1, primaryHost: 'claude', routes: {} },
+    providers: {},
   });
 }
 
@@ -242,7 +249,7 @@ test('converged claude guidance + fresh opencode enable: opencode guidance lands
   // Step 1: converge everything except opencode (opencode disabled here).
   seedHome(syncCfg(catalog), { ruflo: '9.9.9' });
   const disabledCfg = syncCfg(catalog);
-  disabledCfg.providers.hosts = { claude: true, codex: false, opencode: false };
+  disabledCfg.integrations.hosts = { claude: true, codex: false, opencode: false };
   writeKitConfig(HOME, disabledCfg);
   paths._setGlobalRootForTest(fakeSyncRoot());
   await withOpencodeCli(() => realSync()); // CLAUDE.md blocks now converged

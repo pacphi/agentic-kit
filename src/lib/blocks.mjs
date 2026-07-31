@@ -82,7 +82,7 @@ export const BUILTIN_BLOCKS = [
   },
   {
     // Only surfaces once the codex CLI is on PATH — mirrors the aqe block gated on
-    // `command: aqe`. Documents the claude/codex host axis + `ak x provider`.
+    // `command: aqe`. Documents the claude/codex host axis + `ak x host`.
     slug: 'ruflo-providers-reference',
     template: 'providers-reference.md',
     position: 'append',
@@ -95,7 +95,7 @@ export const BUILTIN_BLOCKS = [
     // so it lands in the two MACHINE-scoped guidance files — ~/.claude/CLAUDE.md
     // (claude) and ~/.codex/AGENTS.md (agents-user) — never a repo's checked-in
     // AGENTS.md, which would leak machine truths into shared git history (ADR-0008).
-    // Documents `ak dual`, the Claude↔Codex bridge, and per-activity routing.
+    // Documents `ak run`, the Claude↔Codex bridge, and per-activity routing.
     slug: 'ruflo-dual-mode-reference',
     template: 'dual-mode-reference.md',
     position: 'append',

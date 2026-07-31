@@ -6,7 +6,7 @@
 // Catches the failure modes a transpile step would otherwise surface: a syntax
 // error in a shipped file, a broken bin, or a `files` glob that drops a module.
 import { spawnSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 
@@ -34,7 +34,14 @@ const listFiles = (dir) => {
   if (out.status !== 0) {
     throw new Error(`git ls-files ${dir} failed (exit ${out.status}): ${out.stderr || out.error || 'unknown error'}`);
   }
-  return out.stdout.split('\n').filter((f) => /\.(mjs|cjs|js)$/.test(f));
+  const candidates = out.stdout
+    .split('\n')
+    .filter((f) => /\.(mjs|cjs|js)$/.test(f));
+  const missing = candidates.filter((f) => !existsSync(path.join(root, f)));
+  if (missing.length) {
+    console.log(`  omitted ${missing.length} tracked deletion(s): ${missing.join(', ')}`);
+  }
+  return candidates.filter((f) => existsSync(path.join(root, f)));
 };
 const shipped = [...listFiles('bin'), ...listFiles('src')];
 // A gate that can pass having checked nothing is worse than no gate — assert
@@ -59,12 +66,24 @@ step('CLI loads + --version', v.status === 0 && /\d+\.\d+\.\d+/.test(v.stdout), 
 const pack = spawnSync('npm', ['pack', '--dry-run', '--json'], { cwd: root, encoding: 'utf8' });
 let packOk = pack.status === 0;
 let fileCount = 0;
+let forbidden = [];
 try {
   const meta = JSON.parse(pack.stdout);
-  fileCount = meta[0]?.files?.length ?? 0;
-  const bundlesBin = meta[0]?.files?.some((f) => f.path.includes('agentic-kit.mjs'));
-  packOk = packOk && fileCount > 0 && !!bundlesBin;
+  const packedPaths = meta[0]?.files?.map((f) => f.path) ?? [];
+  fileCount = packedPaths.length;
+  const bundlesBin = packedPaths.includes('bin/agentic-kit.mjs');
+  const forbiddenPatterns = [
+    /(?:^|\/)\.(?:agentic-qe|claude-flow|swarm)(?:\/|$)/,
+    /(?:^|\/)\.claude(?:\/|$)/,
+    /(?:^|\/)\.env(?:\.|$)/,
+    /(?:^|\/)[^/]*\.key\.pem$/,
+  ];
+  forbidden = packedPaths.filter((file) => forbiddenPatterns.some((pattern) => pattern.test(file)));
+  packOk = packOk && fileCount > 0 && bundlesBin && forbidden.length === 0;
 } catch { packOk = false; }
+if (forbidden.length) {
+  console.error(`  refused generated/private package artifacts:\n  ${forbidden.join('\n  ')}`);
+}
 step('npm pack --dry-run resolves files', packOk, `${fileCount} files`);
 
 // Sanity: published version is readable.

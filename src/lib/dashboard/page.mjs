@@ -108,7 +108,7 @@ export function renderPage({ name, version }) {
       </div>
       <div class="note"><span class="i">&#8505;</span><span>This is your <b>per-activity routing policy</b> &mdash;
         which host and model ak <i>assigns</i> to each kind of work. It is projected into
-        <b>agentic-qe</b> agent overrides and <b>ak dual run</b> pipelines; agentic-qe also has its own
+        <b>agentic-qe</b> agent overrides and <b>ak run</b> pipelines; agentic-qe also has its own
         model router, so a route here is the assignment, not a guarantee.
         It does <b>not</b> establish which inference provider served a session.
         For the models and providers that <b>actually ran</b>, see <b>Usage &rarr; Scorecard</b>.</span></div>

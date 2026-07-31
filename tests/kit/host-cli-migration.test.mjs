@@ -70,48 +70,101 @@ test('ak host preserves pick option parsing without performing an interactive ru
   assert.match(result.stdout, /--provider <csv>/);
 });
 
-test('legacy top-level ak provider remains a functional deprecation shim', () => {
+for (const [name, body, detail] of [
+  ['malformed JSON', '{ invalid json', /Unexpected token|Expected property name/],
+  ['non-object integrations envelope', JSON.stringify({ integrations: [] }),
+    /integrations must be an object/],
+  ['future integrations envelope', JSON.stringify({ integrations: { version: 99 } }),
+    /unsupported integrations\.version 99/],
+  ['future routing envelope', JSON.stringify({ routing: { version: 99, future: true } }),
+    /unsupported routing\.version 99/],
+  ['conflicting routing state', JSON.stringify({
+    routing: { version: 1, primaryHost: 'claude', routes: {} },
+    providers: { primaryHost: 'codex' },
+  }), /providers\.primaryHost differs from routing\.primaryHost/],
+]) {
+  test(`a ${name} config reports a path, cause, and non-destructive recovery without a stack`, () => {
+    const sb = sandbox();
+    const file = path.join(sb.env.XDG_CONFIG_HOME, 'agentic-kit', 'kit.json');
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, body);
+    const result = ak(sb, 'status');
+    const text = output(result);
+    assert.equal(result.status, 1, text);
+    assert.match(text, /invalid kit config/);
+    assert.ok(text.includes(file), `must name the exact file\n${text}`);
+    assert.match(text, detail);
+    assert.match(text, /Recovery \(the original is preserved\)/);
+    assert.match(text, /\.invalid/);
+    assert.match(text, /ak status/);
+    assert.doesNotMatch(text, /\n\s+at\s/, `must not leak a stack trace\n${text}`);
+    assert.equal(fs.readFileSync(file, 'utf8'), body, 'diagnosis must not alter the invalid file');
+  });
+}
+
+test('removed top-level provider alias exits as an unknown command', () => {
   const sb = sandbox();
   const result = ak(sb, 'provider', '--help');
-  assert.equal(result.status, 0, output(result));
-  assert.match(result.stdout, /status\s+\(default\)/);
-  assert.match(output(result), /ak provider is deprecated/i);
-  assert.match(output(result), /use `?ak host`?/i);
-  assert.match(output(result), /removed before (?:the )?stable release/i);
+  assert.equal(result.status, 2, output(result));
+  assert.match(result.stdout, /unknown command: provider/);
 });
 
-test('legacy provider shim delegates status and warns exactly once', () => {
+test('removed plumbing provider alias exits as an unknown plumbing command', () => {
   const sb = sandbox();
-  const result = ak(sb, 'provider', 'status', '--json');
-  assert.equal(result.status, 0, output(result));
-  assert.doesNotThrow(() => JSON.parse(result.stdout));
-  const warnings = output(result).match(/ak provider is deprecated/gi) ?? [];
-  assert.equal(warnings.length, 1);
+  const result = ak(sb, 'x', 'provider', '--help');
+  assert.equal(result.status, 2, output(result));
+  assert.match(result.stdout, /unknown plumbing command: provider/);
 });
 
-test('plumbing host and provider aliases remain available during migration', () => {
-  const sb = sandbox();
-  for (const name of ['host', 'provider']) {
-    const result = ak(sb, 'x', name, '--help');
-    assert.equal(result.status, 0, `${name}\n${output(result)}`);
-    assert.match(result.stdout, /status\s+\(default\)/);
-  }
-});
-
-test('top-level help advertises host canonically and labels provider deprecated', () => {
+test('top-level help advertises only the canonical host command', () => {
   const sb = sandbox();
   const result = ak(sb, '--help');
   assert.equal(result.status, 0, output(result));
   assert.match(result.stdout, /^\s+ak host\s+/m);
-  assert.match(result.stdout, /^\s+ak provider\s+.*deprecated/im);
-  assert.ok(result.stdout.indexOf('ak host') < result.stdout.indexOf('ak provider'),
-    'canonical host command should be listed before its legacy shim');
+  assert.doesNotMatch(result.stdout, /^\s+ak provider\s+/m);
 });
 
-test('plumbing index advertises x host canonically and marks x provider deprecated', () => {
+test('plumbing index advertises only x host', () => {
   const sb = sandbox();
   const result = ak(sb, '--help', '--all');
   assert.equal(result.status, 0, output(result));
   assert.match(result.stdout, /^\s+ak x host\s+/m);
-  assert.match(result.stdout, /^\s+ak x provider\s+.*deprecated/im);
+  assert.doesNotMatch(result.stdout, /^\s+ak x provider\s+/m);
+});
+
+test('ak host off retains the OpenCode teardown receipt when config parsing fails', () => {
+  const sb = sandbox();
+  const kitFile = path.join(sb.env.XDG_CONFIG_HOME, 'agentic-kit', 'kit.json');
+  const opencodeFile = path.join(sb.env.XDG_CONFIG_HOME, 'opencode', 'opencode.json');
+  fs.mkdirSync(path.dirname(kitFile), { recursive: true });
+  fs.mkdirSync(path.dirname(opencodeFile), { recursive: true });
+  fs.writeFileSync(opencodeFile, '{ /* JSONC prevents safe teardown */ "mcp": {} }\n');
+  fs.writeFileSync(kitFile, `${JSON.stringify({
+    integrations: {
+      version: 2,
+      hosts: { claude: true, codex: false, opencode: true },
+      bindings: [],
+      ownership: {
+        opencode: {
+          mcp: 'ak',
+          managed: { mcp: {}, paths: [], permissions: {}, artifacts: {} },
+          catalogDir: '/retained/catalog',
+        },
+      },
+    },
+    routing: { version: 1, primaryHost: 'claude', routes: {} },
+    providers: {
+      aqeProvider: null, aqeFallback: [], models: [], maxBudgetUsd: null,
+    },
+  }, null, 2)}\n`);
+
+  const result = ak(sb, 'host', 'off');
+  assert.equal(result.status, 1, output(result));
+  assert.match(output(result), /opencode teardown incomplete/);
+  const saved = JSON.parse(fs.readFileSync(kitFile, 'utf8'));
+  assert.equal(saved.integrations.hosts.opencode, false);
+  assert.equal(saved.integrations.ownership.opencode.mcp, 'ak');
+  assert.equal(saved.integrations.ownership.opencode.catalogDir, '/retained/catalog');
+  assert.ok(saved.integrations.ownership.opencode.managed,
+    'the retry proof must survive a failed direct off');
 });

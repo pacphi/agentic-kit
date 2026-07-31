@@ -2,7 +2,6 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   adaptClaudeRecord, adaptCodexRecord, adaptCodexLedger, adaptStructuredEvent,
-  adaptDualRunRecord,
 } from '../../src/lib/live/index.mjs';
 
 const now = '2026-07-27T12:00:00Z';
@@ -126,14 +125,4 @@ test('tool identity has a dedicated allowlisted field without carrying arguments
   });
   assert.equal(events[0].attributes.toolName, 'exec_command');
   assert.equal(JSON.stringify(events).includes('sk-private-never-serialize'), false);
-});
-
-test('dual-run planned topology requires an explicit plan record', () => {
-  const events = adaptDualRunRecord({
-    type: 'dual-run.plan', runId: 'run-1',
-    steps: [{ id: 'architect', host: 'claude' }, { id: 'coder', host: 'codex' }],
-  }, { observedAt: now, artifact: 'run.jsonl' });
-  assert.equal(events.length, 2);
-  assert.ok(events.every((event) => event.source.confidence === 'planned'));
-  assert.deepEqual(adaptDualRunRecord({ type: 'routing.config', runId: 'x', steps: [] }), []);
 });

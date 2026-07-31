@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { buildRunPlan, run } from '../../src/commands/run.mjs';
-import { seedDualRouting } from '../../src/lib/routing.mjs';
+import { seedActivityRoutes } from '../../src/lib/routing.mjs';
 
 /** Run `fn` with console.log captured; returns { result, out }. */
 async function captureLog(fn) {
@@ -20,16 +20,16 @@ const succeededResult = (worker) => ({
 });
 
 test('ak run materializes the host-neutral plan and keeps run-local route overrides ephemeral', () => {
-  const cfg = { providers: { dualRouting: seedDualRouting() } };
+  const cfg = { routing: { routes: seedActivityRoutes() } };
   const { plan } = buildRunPlan(cfg, 'feature', 'add a queue', ['implementation:claude:claude-sonnet-5']);
   assert.equal(plan.template, 'feature');
   assert.equal(plan.workers.find((entry) => entry.id === 'coder').host, 'claude');
-  assert.equal(cfg.providers.dualRouting.implementation.host, 'codex');
+  assert.equal(cfg.routing.routes.implementation.host, 'codex');
 });
 
 test('ak run materializes an explicit OpenCode route', () => {
-  const cfg = { providers: { dualRouting: { ...seedDualRouting(), 'security-scan': {
-    host: 'opencode', model: 'openrouter/example', source: 'user',
+  const cfg = { routing: { routes: { ...seedActivityRoutes(), 'security-scan': {
+    host: 'opencode', model: 'openrouter/example', provenance: 'user',
   } } } };
   const { plan } = buildRunPlan(cfg, 'security', 'src/auth');
   const scanner = plan.workers.find((entry) => entry.activity === 'security-scan');
@@ -40,7 +40,7 @@ test('ak run materializes an explicit OpenCode route', () => {
 // qe-court B8: `--json` must emit exactly one parseable document — the human
 // status line ("✓ run complete" / the failure text) is gated on !json.
 // The cfg seam keeps these fully deterministic (no real kit.json is read).
-const testCfg = () => ({ providers: { dualRouting: seedDualRouting() } });
+const testCfg = () => ({ routing: { routes: seedActivityRoutes() } });
 
 test('ak run --json emits exactly one parseable JSON document (qe-court B8)', async () => {
   const executePlan = async (plan) => plan.workers.map(succeededResult);
@@ -66,9 +66,9 @@ test('ak run without --json still prints the human status line', async () => {
 // ── bounded escalation: plan materialization + CLI surface (ADR-0019) ────────
 
 test('materializeRunPlan attaches the route ladder, dropping self-equal rungs', () => {
-  const cfg = { providers: { dualRouting: { implementation: {
-    host: 'opencode', model: 'opencode/kimi-k3', source: 'user',
-    escalate: [
+  const cfg = { routing: { routes: { implementation: {
+    host: 'opencode', model: 'opencode/kimi-k3', provenance: 'user',
+    escalation: [
       { host: 'opencode', model: 'opencode/kimi-k3' }, // self-equal: re-running this changes nothing
       { host: 'claude', model: 'claude-sonnet-5' },
     ],
@@ -80,17 +80,17 @@ test('materializeRunPlan attaches the route ladder, dropping self-equal rungs', 
 });
 
 test('materializeRunPlan rejects an escalation rung to a non-routable host', () => {
-  const cfg = { providers: { dualRouting: { implementation: {
-    host: 'claude', source: 'user', escalate: [{ host: 'not-a-host' }],
+  const cfg = { routing: { routes: { implementation: {
+    host: 'claude', provenance: 'user', escalation: [{ host: 'not-a-host' }],
   } } } };
   assert.throws(() => buildRunPlan(cfg, 'feature', 'probe'),
     /escalation rung for "implementation" cannot materialize: host "not-a-host" requires canRouteActivities/);
 });
 
 test('--dry-run shows the escalation ladder on ladder-carrying workers', async () => {
-  const cfg = { providers: { dualRouting: { implementation: {
-    host: 'opencode', model: 'opencode/kimi-k3', source: 'user',
-    escalate: [{ host: 'claude', model: 'claude-sonnet-5' }],
+  const cfg = { routing: { routes: { implementation: {
+    host: 'opencode', model: 'opencode/kimi-k3', provenance: 'user',
+    escalation: [{ host: 'claude', model: 'claude-sonnet-5' }],
   } } } };
   const { out } = await captureLog(() => run({
     flags: { 'dry-run': true }, positionals: ['feature', 'probe'], cfg,
@@ -130,16 +130,16 @@ test('--timeout above the Node timer ceiling fails with a clear error', async ()
   assert.match(out, /timeout must not exceed 2147483647/);
 });
 
-// #88: a hand-edited dualRouting is schema-checked at load — a bad entry
+// #88: a hand-edited routing.routes map is schema-checked at load — a bad entry
 // fails with the entry named, not a padEnd crash at print time.
 test('a malformed persisted route fails at build with the entry named', () => {
   for (const [policy, needle] of [
     [{ implementation: { host: 'claude', model: 123 } }, /route "implementation"\.model must be a string/],
     [{ implementation: { host: '' } }, /route "implementation" requires a non-empty host/],
-    [{ implementation: { host: 'claude', escalate: [{ host: '' }] } }, /route "implementation"\.escalate\[0\] requires a non-empty host/],
+    [{ implementation: { host: 'claude', escalation: [{ host: '' }] } }, /route "implementation"\.escalation\[0\] requires a non-empty host/],
     [{ implementation: 'codex' }, /route "implementation" must be an object/],
   ]) {
-    assert.throws(() => buildRunPlan({ providers: { dualRouting: policy } }, 'feature', 'probe'),
+    assert.throws(() => buildRunPlan({ routing: { routes: policy } }, 'feature', 'probe'),
       (error) => error.message.startsWith('invalid routing policy:') && needle.test(error.message),
       `expected a named policy error for ${needle}`);
   }
