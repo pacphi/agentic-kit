@@ -26,6 +26,58 @@ family on your behalf.
 | `ak x statusline codex native\|extended` | opt into a user-wide Codex status-line preset | **yes** — records the preset |
 | `ak setup`           | first-time bootstrap of absent tooling          | only via explicit flags (`--codex`, `--opencode`, `--primary-host`) |
 
+## Running `ak sync` while sessions are live
+
+`ak sync` is plan-based: on a converged machine it prints "nothing to do" and touches
+nothing. The blast radius comes entirely from what's in the plan — and the widest heals are
+the ones a **`versions`** row triggers. If you have Claude Code, Codex, or OpenCode sessions
+open in other terminals, here is what can actually reach them, worst first:
+
+1. **All ruflo daemons stop, machine-wide.** Before any package upgrade, sync runs
+   `ruflo daemon stop --all` (upgrades wipe native modules, so daemons must not hold them) —
+   and upstream defines that as *every* workspace and worktree
+   ([ruflo #2661](https://github.com/ruvnet/ruflo/issues/2661)), not just the current
+   project. In-flight background work in other sessions is lost; daemons restart lazily on
+   the next ruflo command in each project, so the damage is interrupted work, not lasting
+   state.
+2. **The npm swap window.** While `npm install -g` replaces `ruflo` / `agentic-qe` (and
+   npm-managed `claude` / `codex` / `opencode` CLIs), the global tree is mid-replacement for
+   up to ~30s+. Live sessions touch that tree constantly — hooks on every edit, statusline
+   ticks every few seconds, MCP tool spawns — and an invocation landing in the window can
+   fail once. Statusline failures degrade gracefully (the command chains fallbacks); hook
+   failures surface as one-off errors. A live session's `claude-flow` MCP server keeps
+   running its already-loaded code but sees a mixed-version tree for anything loaded
+   lazily afterward — if its tools start misbehaving, restart that session.
+3. **Footer wipes get armed in your *other* projects.** A ruflo upgrade makes every
+   project's `.claude/helpers/.helpers-version` stamp lag. Sync heals the **current**
+   project (refresh-then-inject); in other open projects the first ruflo command — in
+   practice a hook — pristine-copies `statusline.cjs` and wipes the kit footer there.
+   Cosmetic; `ak sync` in that project restores it, and `ak status` flags the armed state
+   before it fires.
+4. **A narrow race on `~/.claude.json`.** MCP registration shells out to
+   `claude mcp add -s user`, which rewrites the same file live Claude sessions persist
+   state into — last writer wins. Rare, but real; re-run `ak sync` if the registration
+   doesn't stick.
+5. **A stale npx-cache env can vanish mid-use.** The prune only removes envs strictly
+   older than the installed baseline; a statusline/hook fallback executing from one at that
+   moment fails once, then npx re-fetches.
+
+What does **not** break, by design: running binaries keep executing their old code
+(replaced files don't affect a running process's open inodes), and every JSON/TOML config
+writer is atomic and backup-first. Settings env keys, `~/.codex/config.toml` edits (MCP
+bridge, `[tui]` status line), OpenCode wiring, `.agentic-qe/llm-config.json`, and the
+managed guidance blocks are all **read at session start** — a live session simply doesn't
+see them until its next launch. The kit's own self-update runs last and applies from the
+next `ak` invocation.
+
+> [!TIP]
+> If other sessions are mid-task: `ak sync --dry-run` first. No `versions` row → the plan
+> is local heals and config convergence; run it freely. A `versions` row → either let the
+> other sessions reach a stopping point, or run `ak sync --no-upgrade` now (heals only —
+> skips the daemon stop and the npm swaps entirely) and do the full sync later. The armed
+> footer wipe in other open projects follows from the upgrade itself, not from sync — expect
+> it after any ruflo upgrade regardless of how you apply it.
+
 ## 4.0 GA surface migration
 
 Version 4.0 removes the pre-GA compatibility surfaces in one direction:
