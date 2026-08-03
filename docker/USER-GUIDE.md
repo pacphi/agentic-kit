@@ -24,7 +24,9 @@ cd docker
 docker compose up --build ak
 ```
 
-What happens, in order (10–15 minutes on first run, network-dependent):
+What happens, in order — expect **10–15 minutes, network-dependent, on
+*every* run of this service**: a true first-use re-downloads and re-installs
+everything by design (only the image build itself is cached):
 
 1. Ubuntu 26.04 + Node image builds (cached on later runs).
 2. The container installs `@pacphi/agentic-kit@next` — the real first-install
@@ -61,8 +63,10 @@ docker compose --profile persistent up ak-persistent
 
 Same environment, but `/home/tester` lives in a named volume, so the
 converged install (and the ~2 GB RuvNet Brain KB, if you enable it) survives
-restarts. Reset to factory: `docker compose down --volumes`. Don't run both
-services at once — they share the host port.
+restarts. Only the volume's first run pays the 10–15 minute install + setup;
+converged restarts come up in seconds. Reset to factory:
+`docker compose down --volumes`. Don't run both services at once — they
+share the host port.
 
 ## Signing in to the AI CLIs (optional)
 
