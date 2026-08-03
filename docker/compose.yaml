@@ -1,0 +1,47 @@
+# Isolated first-use environments for @pacphi/agentic-kit.
+#
+# Isolation contract: NOTHING from the host's own agentic-kit install is ever
+# mounted or touched — no ~/.claude, ~/.codex, ~/.npmrc, no host binaries, no
+# host npm prefix. The only bind mount is the repo-local ./artifacts dir; all
+# persistent state lives in Docker-managed named volumes (namespaced
+# agentic-kit-firstuse_*), so a host with any agentic-kit version installed
+# cannot conflict with these containers, and vice versa.
+name: agentic-kit-firstuse
+
+services:
+  # True first-use: nothing persists. Every `up`/`run` starts from a bare
+  # Ubuntu + Node image, installs @next, runs setup, serves the dashboard.
+  ak:
+    build: .
+    image: agentic-kit-firstuse
+    init: true # reap daemon zombies; ak setup starts background workers
+    ports:
+      # HOST-loopback only — preserves the dashboard's localhost-only posture.
+      # Host 7431 → container 7432 (socat bridge) → container-loopback 7431,
+      # so the printed #token URL works verbatim in the host browser.
+      - "127.0.0.1:7431:7432"
+    environment:
+      AK_DIST_TAG: ${AK_DIST_TAG:-next}
+      AK_SETUP_FLAGS: ${AK_SETUP_FLAGS:---codex --opencode --yes}
+    volumes:
+      - ./artifacts:/artifacts
+    healthcheck:
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/7431"]
+      interval: 15s
+      retries: 3
+      start_period: 600s # install + setup runs before the dashboard comes up
+
+  # Converged install that survives restarts — for iterating on a completed
+  # setup and for UPGRADE-path testing (install alpha.N, restart with
+  # AK_DIST_TAG pinned higher, run `ak sync` inside). Same port mapping, so
+  # don't run both profiles at once.
+  ak-persistent:
+    profiles: ["persistent"]
+    extends:
+      service: ak
+    volumes:
+      - home:/home/tester # named volume: seeds from the image on first run
+      - ./artifacts:/artifacts
+
+volumes:
+  home:

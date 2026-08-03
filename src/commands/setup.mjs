@@ -10,12 +10,12 @@ import readline from 'node:readline/promises';
 import { run as runCmd, have } from '../lib/exec.mjs';
 import * as heal from '../lib/heal.mjs';
 import { fixStatusline } from '../lib/statusline.mjs';
-import { registry, syncBlocks } from '../lib/blocks.mjs';
+import { reconcileGuidance } from '../lib/blocks.mjs';
 import { register as mcpRegister, applyExclusions } from '../lib/mcp.mjs';
 import { OPENCODE_LIFECYCLE_ADAPTER, reconcileOpencodeGuidance } from '../lib/opencode.mjs';
 import { runLifecycle } from '../lib/adapters/lifecycle.mjs';
 import { loadKitConfig, saveKitConfig } from '../lib/config.mjs';
-import { HOSTS, applyHosts, applyProviders, hostInstallState, installHost, applyAqeRouter, seedActivityRoutesIfMultiHost, printActivityRoutingTable, aqeSupportsAgentOverrides, ensureCodexMcp, ensureRufloMcpInCodex, applySetupHostFlags } from '../lib/providers.mjs';
+import { HOSTS, applyHosts, applyProviders, hostInstallState, installHost, applyAqeRouter, seedActivityRoutesIfMultiHost, printActivityRoutingTable, aqeSupportsAgentOverrides, ensureCodexMcp, ensureRufloMcpInCodex, applySetupHostFlags, bothHostsEnabled } from '../lib/providers.mjs';
 import { installedVersion } from '../lib/versions.mjs';
 import * as rb from '../lib/ruvnet-brain.mjs';
 import * as adb from '../lib/agentdb.mjs';
@@ -86,7 +86,7 @@ const ask = async (q, dflt, yes) => {
 
 export async function run_machine({ flags, pkgRoot, cfg }) {
   heading('machine setup');
-  if (flags['dry-run']) { info('dry-run: would ensure packages (incl. ruvnet-brain), deploy skill, merge blocks, offer MCP'); return true; }
+  if (flags['dry-run']) { info('dry-run: would ensure packages (incl. ruvnet-brain), deploy skill (blocks + MCP land in the final pass)'); return true; }
 
   // 1. global packages
   if (!installedVersion('ruflo')) {
@@ -140,22 +140,11 @@ export async function run_machine({ flags, pkgRoot, cfg }) {
     ok('skill deployed: ruflo-token-audit');
   }
 
-  // 4. CLAUDE.md managed blocks
-  const rows = registry(cfg.customBlocks);
-  const resolve = (r) => (r.custom
-    ? (r.template.startsWith('~/') ? path.join(paths.home, r.template.slice(2)) : r.template)
-    : path.join(pkgRoot, 'claude', r.template));
-  const res = await syncBlocks(paths.claudeMdPath(), rows, resolve);
-  ok(`CLAUDE.md blocks: ${res.filter((r) => r.action !== 'unchanged').length || 'no'} change(s)`);
-
-  // 5. MCP (once; --reconfigure or `x mcp pick` to revisit)
-  const wantMcp = cfg.mcp.register && (flags.reconfigure || !(readJson(paths.claudeUserMcpPath(), {})?.mcpServers?.['claude-flow']));
-  if (wantMcp && await ask('Register the ruflo MCP server at user scope (schemas load on demand)?', true, flags.yes)) {
-    if (await mcpRegister()) {
-      const { denied } = applyExclusions(cfg.mcp.excludeFamilies ?? []);
-      ok(`MCP registered${denied ? ` (${denied} tool(s) denied per kit.json)` : ''} — exclude families anytime: ak x mcp pick`);
-    } else warn('claude mcp add failed — run: ak x mcp pick');
-  }
+  // 4+5. CLAUDE.md guidance blocks + user-scope MCP registration moved to the
+  //      FINAL pass in run(): both depend on host CLIs that step 6 below is
+  //      about to install (mcp needs `claude` on disk; several block detectors
+  //      key on `codex` being on PATH / dual-mode enablement). Running them
+  //      here warned + drifted on genuinely bare machines.
 
   // 6. frontier hosts — install any ENABLED host that is entirely absent (default
   //    enables claude only). External installs (mise/native/brew) are left alone.
@@ -402,6 +391,26 @@ export async function run({ flags, pkgRoot }) {
   } else if (!flags.minimal) {
     info('not inside a project (no .git here) — run `ak setup` from a repo to set one up');
   }
+  // Final reconcile pass — deliberately AFTER the hosts branch (which installs
+  // the claude/codex/opencode CLIs) and the project phase (whose codex bridge
+  // creates ~/.codex): the user-scope MCP registration needs the claude CLI on
+  // disk, and several guidance blocks gate on freshly-installed hosts
+  // (command:codex, flag:dualMode). Shares blocks.mjs reconcileGuidance with
+  // `ak sync` so setup and sync converge guidance identically.
+  if (!flags['dry-run']) {
+    const ctx = { flags: { dualMode: bothHostsEnabled(cfg), opencodeEnabled: !!cfg.integrations?.hosts?.opencode } };
+    for (const t of await reconcileGuidance({ cwd: process.cwd(), cfg, pkgRoot, context: ctx })) {
+      if (t.name === 'claude' || t.changed) ok(`blocks(${t.label}): ${t.changed || 'in sync'}`);
+    }
+    const wantMcp = cfg.mcp.register && (flags.reconfigure || !(readJson(paths.claudeUserMcpPath(), {})?.mcpServers?.['claude-flow']));
+    if (wantMcp && await ask('Register the ruflo MCP server at user scope (schemas load on demand)?', true, flags.yes)) {
+      if (await mcpRegister()) {
+        const { denied } = applyExclusions(cfg.mcp.excludeFamilies ?? []);
+        ok(`MCP registered${denied ? ` (${denied} tool(s) denied per kit.json)` : ''} — exclude families anytime: ak x mcp pick`);
+      } else warn('claude mcp add failed — run: ak x mcp pick');
+    }
+  }
+
   console.log('');
   ok(bold('setup complete — `agentic-kit` anytime for status, `ak sync` after upgrades'));
   info(dim('📊 dashboard: run `ak dashboard` → opens http://127.0.0.1:7431 (local, read-only)'));
