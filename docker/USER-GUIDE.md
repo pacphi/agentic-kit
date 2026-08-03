@@ -85,12 +85,6 @@ a login, `docker cp` the specific file in, deliberately.
 
 ## Common issues
 
-- **`⚠ claude mcp add failed` during first setup** — an ordering artifact on
-  truly bare machines, not an auth problem: machine-level MCP registration
-  runs before setup's own hosts step has installed the `claude` CLI. The next
-  `ak sync` (or `ak x mcp pick`) registers it cleanly, still without any
-  login. The same ordering can leave a couple of guidance blocks "drifted" on
-  first status; the same sync heals those too.
 - **Dashboard URL doesn't load** — use the exact printed URL (with `#token=`)
   and confirm the container is still up. Plain `docker run -p` without this
   compose file will *never* work: the dashboard binds loopback inside the

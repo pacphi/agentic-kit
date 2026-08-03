@@ -41,6 +41,7 @@ see [USER-GUIDE.md](USER-GUIDE.md); this page is the *why* and the knobs.
 | Knob | Default | Purpose |
 | --- | --- | --- |
 | `AK_DIST_TAG` (env) | `next` | Which dist-tag/version the entrypoint installs — pin an exact alpha to bisect a regression |
+| `AK_INSTALL_SPEC` (env) | `@pacphi/agentic-kit@$AK_DIST_TAG` | Full npm spec override — test an unpublished build: `npm pack` the checkout, drop the tarball in `./artifacts`, set `AK_INSTALL_SPEC=/artifacts/<name>.tgz` |
 | `AK_SETUP_FLAGS` (env) | `--codex --opencode --yes` | Full setup surface; add `--no-ruvnet-brain` to skip the ~2 GB KB, `--minimal` for the smallest footprint |
 | `AK_SKIP_SETUP` (env) | `0` | `1` = install the kit but stop before setup (bare-kit debugging) |
 | `AK_DASHBOARD_PORT` / `AK_BRIDGE_PORT` (env) | `7431` / `7432` | Only needed if you change the compose port mapping too |
@@ -75,25 +76,6 @@ exactly the class of bug maintainers' converged machines can't see). This is
 the seam for a future nightly job: GitHub Actions runs this same compose file
 natively on Linux; compare the JSON against the previous run and alert on new
 `fail` rows.
-
-## Known bare-machine ordering warts (found by this environment)
-
-Two machine-setup steps depend on host CLIs but run **before** setup's
-hosts-install branch (`src/commands/setup.mjs`: MCP registration ~line 152
-and the machine-level blocks sync ~line 148, versus `installHost` ~line 167).
-On a converged maintainer machine the CLIs always pre-exist, so this only
-surfaces on a genuinely bare first run:
-
-- `claude mcp add claude-flow -s user` warns (`claude` not yet on disk) —
-  **not** an auth failure; the same command succeeds unauthenticated once the
-  CLI exists.
-- The `ruflo-providers-reference` / `ruflo-dual-mode-reference` blocks report
-  drift immediately after setup, because their `codex`-on-PATH detector flips
-  only after the hosts step.
-
-Both self-heal on the next `ak sync`, with no credentials. The structural fix
-would be moving those two steps after the hosts branch (or a second
-reconcile pass at the end of machine setup).
 
 ## Maintenance duties
 

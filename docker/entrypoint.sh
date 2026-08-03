@@ -6,6 +6,10 @@
 set -euo pipefail
 
 AK_DIST_TAG="${AK_DIST_TAG:-next}"
+# Full install spec override — lets maintainers test an UNPUBLISHED build:
+# npm pack the checkout, drop the tarball into ./artifacts, and set
+# AK_INSTALL_SPEC=/artifacts/<name>.tgz (mounted read-write by compose).
+AK_INSTALL_SPEC="${AK_INSTALL_SPEC:-@pacphi/agentic-kit@${AK_DIST_TAG}}"
 AK_SETUP_FLAGS="${AK_SETUP_FLAGS:---codex --opencode --yes}"
 AK_SKIP_SETUP="${AK_SKIP_SETUP:-0}"
 AK_DASHBOARD_PORT="${AK_DASHBOARD_PORT:-7431}" # container-loopback (ak's default)
@@ -24,8 +28,8 @@ if [ ! -d .git ]; then
 fi
 
 if ! command -v ak >/dev/null 2>&1; then
-  echo "▶ installing @pacphi/agentic-kit@${AK_DIST_TAG} (the real first-install path)"
-  npm install -g "@pacphi/agentic-kit@${AK_DIST_TAG}"
+  echo "▶ installing ${AK_INSTALL_SPEC} (the real first-install path)"
+  npm install -g "${AK_INSTALL_SPEC}"
 fi
 echo "▶ agentic-kit $(ak --version 2>/dev/null || echo '(version probe failed)')"
 
