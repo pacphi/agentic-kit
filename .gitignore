@@ -55,3 +55,14 @@ node_modules/
 
 # Claude Code local config
 CLAUDE.local.md
+
+# Ruflo local secrets and runtime data
+.env.local
+.env.*.local
+.claude-flow/data/
+.claude-flow/logs/
+.claude-flow/sessions/
+
+# Codex local configuration
+# Claude Flow runtime data
+# Environment variables
