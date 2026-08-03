@@ -6,7 +6,7 @@ import { collect } from './status.mjs';
 import * as heal from '../lib/heal.mjs';
 import { have } from '../lib/exec.mjs';
 import { fixStatusline, helperStampStale } from '../lib/statusline.mjs';
-import { registry, syncBlocks, blocksForTarget, retiredForTarget, guidanceTargets } from '../lib/blocks.mjs';
+import { reconcileGuidance } from '../lib/blocks.mjs';
 import { register as mcpRegister, applyExclusions } from '../lib/mcp.mjs';
 import { OPENCODE_LIFECYCLE_ADAPTER } from '../lib/opencode.mjs';
 import { runLifecycle } from '../lib/adapters/lifecycle.mjs';
@@ -192,30 +192,15 @@ export async function run({ flags, pkgRoot }) {
   // (codex-review r3). When the CLI is absent the target's own config-home
   // gate still refuses to fabricate anything.
   if (subsystems.has('blocks') || subsystems.has('versions') || subsystems.has('opencode')) {
-    const rowsReg = registry(cfg.customBlocks);
-    const resolve = (r) => (r.custom
-      ? (r.template.startsWith('~/') ? path.join(paths.home, r.template.slice(2)) : r.template)
-      : path.join(pkgRoot, 'claude', r.template));
-    // Guidance targets (guidanceTargets): machine-wide ~/.claude/CLAUDE.md
-    // (claude), the project's own <cwd>/AGENTS.md (agents), machine-wide
-    // ~/.codex/AGENTS.md when ~/.codex exists (agents-user), and opencode's
-    // ~/.config/opencode/AGENTS.md when its config home exists
-    // (agents-opencode — created by the opencode branch above on a fresh
-    // enable). The dual-mode block's flag detector gates it on both hosts being
-    // enabled, so single-host setups leave the agents files untouched (no
-    // .bak). Each target also force-strips blocks that no longer belong in it
-    // (retiredForTarget) — the migration path that clears the dual block out of
-    // any project AGENTS.md that still carries it after the re-scope
-    // (ADR-0008).
+    // The reconcile loop itself (targets, retired-row strips, dual-mode/
+    // opencode flag gating) lives in blocks.mjs reconcileGuidance — shared
+    // with setup's final pass so the two commands cannot drift (ADR-0008 on
+    // target scoping).
     const ctx = { flags: { dualMode: bothHostsEnabled(cfg), opencodeEnabled: !!cfg.integrations?.hosts?.opencode } };
-    for (const t of guidanceTargets({ cwd, cfg })) {
-      const treg = [...blocksForTarget(rowsReg, t.name), ...retiredForTarget(rowsReg, t.name)];
-      const res = await syncBlocks(t.file, treg, resolve, { context: ctx });
-      const changed = res.filter((r) => r.action !== 'unchanged' && r.action !== 'skipped')
-        .map((r) => `${r.slug} ${r.action}`).join(', ');
+    for (const t of await reconcileGuidance({ cwd, cfg, pkgRoot, context: ctx })) {
       // stay quiet on the agents targets unless they actually changed (single-host
       // leaves them unmanaged); always report the claude target.
-      if (t.name === 'claude' || changed) ok(`blocks(${t.label}): ${changed || 'in sync'}`);
+      if (t.name === 'claude' || t.changed) ok(`blocks(${t.label}): ${t.changed || 'in sync'}`);
     }
   }
   if (subsystems.has('providers') || subsystems.has('routing') || subsystems.has('codex-mcp')) {

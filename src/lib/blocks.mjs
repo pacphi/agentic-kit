@@ -290,6 +290,36 @@ export function guidanceTargets({ cwd = process.cwd(), codexRoot = codexDir(), o
   return targets;
 }
 
+/** Package-relative template resolution shared by setup and sync: custom rows
+ *  are absolute or ~-expanded paths; built-ins resolve against the kit's own
+ *  claude/ dir. */
+export function templateResolver(pkgRoot) {
+  return (r) => (r.custom
+    ? (r.template.startsWith('~/') ? path.join(home, r.template.slice(2)) : r.template)
+    : path.join(pkgRoot, 'claude', r.template));
+}
+
+/** Reconcile EVERY guidance target against the registry — the one loop
+ *  `sync` (apply) and `setup`'s final pass both run, so the two commands can
+ *  never drift. Per target: active rows upsert/strip per detector, and
+ *  re-scoped rows are force-stripped (retiredForTarget). `context` carries the
+ *  caller's flag signals for `flag` detectors (dualMode, opencodeEnabled).
+ *  Returns [{name, label, changed}] where `changed` is a human-readable action
+ *  summary ('' when the target was already in sync). */
+export async function reconcileGuidance({ cwd, cfg, pkgRoot, context = {}, dryRun = false }) {
+  const rows = registry(cfg.customBlocks);
+  const resolve = templateResolver(pkgRoot);
+  const out = [];
+  for (const t of guidanceTargets({ cwd, cfg })) {
+    const treg = [...blocksForTarget(rows, t.name), ...retiredForTarget(rows, t.name)];
+    const res = await syncBlocks(t.file, treg, resolve, { context, dryRun });
+    const changed = res.filter((r) => r.action !== 'unchanged' && r.action !== 'skipped')
+      .map((r) => `${r.slug} ${r.action}`).join(', ');
+    out.push({ name: t.name, label: t.label, changed });
+  }
+  return out;
+}
+
 /** Reconcile every registry row against its detector on a file.
  *  resolveTemplate(row) → absolute template path (built-ins resolve against the
  *  package's claude/ dir; custom rows are absolute or ~-expanded already).
