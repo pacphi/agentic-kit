@@ -1,12 +1,12 @@
-# Live Sessions Domain Design
+# Observability Domain Design
 
 This document specifies the domain model behind
-[ADR-0012](../adr/0012-live-sessions-observability.md). It follows SPARC's specification,
+[ADR-0012](../adr/0012-observability.md). It follows SPARC's specification,
 architecture, refinement, and completion stages; implementation pseudocode appears at the relevant
 boundaries.
 
 The shared [ubiquitous language](ubiquitous-language.md) and
-[context map](context-map.md) are normative. Terms defined below refine the Live Sessions context
+[context map](context-map.md) are normative. Terms defined below refine the Observability context
 without redefining shared integration concepts.
 
 ## Ubiquitous language
@@ -15,6 +15,8 @@ without redefining shared integration concepts.
 |------|---------|
 | Session | One host thread or orchestrated run whose live state is observed |
 | Project | Sanitized repository identity grouping sessions across hosts and time |
+| Session workspace | Temporal, privacy-bounded checkout context owned by one observed session |
+| Working tree at capture | Tracked checkout counts versus `HEAD`; context, never agent attribution |
 | Session key | Host-qualified identity (`host:sessionId`) preventing cross-host collisions |
 | Root session | Top-level host thread or orchestrated run used as one navigation unit |
 | Child session | Independently addressable agent/worker thread with an observed parent |
@@ -23,6 +25,12 @@ without redefining shared integration concepts.
 | Entity | A session, agent, tool, skill, plugin, MCP server, gate, or other observed capability |
 | Actor | An entity that initiates or owns an activity |
 | Activity | A bounded operation performed by an actor |
+| Presence lease | Observed proof that a host controller process exists; never proof of work |
+| Meaningful activity | Semantic input, output, operation, or evaluation evidence attributable to an actor |
+| In-flight flow | A started and unfinished operation/relationship eligible for moving edge treatment |
+| Actor lens | Selectable view of an embedded actor inside its parent session; not a fabricated child session |
+| Capability coverage | Per-session declaration of which evidence dimensions the source can support |
+| Court membership | Agentic-QE leader/seat relationship; orthogonal to native session parentage |
 | Display identity | Evidence-graded human label and role; never the source ID alone |
 | Current work | The latest open, allowlisted operation summary for an entity |
 | Evidence | A source record supporting a domain fact |
@@ -32,13 +40,19 @@ without redefining shared integration concepts.
 | Topology | Nodes and typed relationships visible for a session |
 | Execution canvas | Spatial view of agents, owned tools, and causal flow for one session |
 | Evidence rail | Selected-session transcript synchronized with canvas selection |
+| Primary area | One stable dashboard domain workspace: Overview, Usage, or Observability |
+| Secondary navigation rail | One fixed-position tab row whose choices belong to the active primary area |
+| Live scope | Navigation roots with current presence or fresh meaningful activity |
+| History scope | Retained navigation roots that do not satisfy the Live predicate |
+| Scope predicate | One canonical classifier assigning every retained root to exactly one scope |
 | Follow Live | Playhead follows the newest retained event and advances on append |
 | Review | Deterministic reconstruction of one session at a selected evidence time |
+| Review-time state | Past state at the playhead; never current presence or work |
 | Playhead | Current playback offset within retained session evidence |
 | Cursor | Monotonic ingest position used for delivery and replay |
 | Adapter health | Freshness and failure state of one evidence source |
 | Quiescent | No recent activity, but no authoritative completion was observed |
-| Terminal | Completed, failed, cancelled, or expired according to lifecycle rules |
+| Terminal | Completed, failed, or cancelled according to explicit lifecycle evidence |
 
 “Live” describes the freshness of local observation, not distributed consensus. A planned workflow
 step is not an active agent. A correlated edge is not an observed spawn.
@@ -59,7 +73,7 @@ Source adapters are anti-corruption layers for:
 - agentic-qe tasks, workers, evaluations, gates, and court verdicts;
 - explicit skill, plugin, MCP, and tool lifecycle records.
 
-### Live session domain
+### Observability domain
 
 Owns canonical events, identity correlation, lifecycle transitions, evidence confidence, aggregates,
 and invariants. Host-specific record shapes do not cross this boundary.
@@ -72,7 +86,9 @@ reduction. It is optimized for current state, not historical cost analytics.
 ### Dashboard delivery
 
 Owns HTTP/SSE representation, connection lifecycle, filters, stable SVG presentation, the
-synchronized evidence rail, and textual equivalents. It cannot manufacture domain facts.
+synchronized evidence rail, shared dashboard navigation, canonical hashes, local presentation
+preferences, and textual equivalents. It cannot manufacture domain facts or collapse distinct host,
+provider, provenance, and model facts into one identity.
 
 ### Historical usage
 
@@ -85,13 +101,14 @@ aggregate is not the live event store.
 ```text
 Claude ─┐
 Codex ──┤
+OpenCode┤
 ruflo ──┤  source adapters / anti-corruption layer
 AQE ────┤
 ak ─────┘
           ↓
 canonical event normalizer
           ↓
-LiveSession aggregate → read-model projection/replay → snapshot + SSE → dashboard
+ObservedSession aggregate → read-model projection/replay → snapshot + SSE → dashboard
           │
           └── session-id link ──→ historical usage context
 ```
@@ -105,18 +122,34 @@ metadata prefix and Codex ledger state so stable identity is available on first 
 records establish discovery and identity; they do not fabricate current liveness for an old
 session.
 
+Codex ledger reads retain the thread's source creation, update, and recency timestamps. Collector
+observation time records when the dashboard saw the row; it is never substituted for thread
+freshness. A runtime process can attach presence to a retained session only when that session was
+updated during the current process generation. Otherwise it remains a separate synthetic presence
+session until stronger identity evidence arrives.
+
 ## Aggregates and entities
 
-### `LiveSession` aggregate root
+### `ObservedSession` aggregate root
 
 Identity is `(host, sessionId)`, with an optional cross-host `runId`. It owns:
 
-- lifecycle status and last-observed time;
+- lifecycle status, an independent presence lease, and last meaningful-activity time;
 - actor identities and typed relationships;
 - active and terminal activities;
 - evidence references and confidence;
 - adapter freshness relevant to this session;
-- safe aggregate usage/duration counters when explicitly reported.
+- safe aggregate usage/duration counters when explicitly reported;
+- its latest safe `SessionWorkspace` snapshot and the capture evidence supporting it.
+
+Presence and activity are independent axes. A runtime heartbeat may update `presence` and the
+session freshness cursor, but cannot replace the last semantic actor action, change a quiet actor
+to working, or animate a structural edge. An operation becomes in-flight only from an explicit
+started phase that has not reached a terminal phase.
+
+The scope predicate is total and exclusive: every retained navigation root is either Live or
+History, never both. Observation time cannot promote History into Live. An expired unfinished
+operation retains its unknown outcome but clears current activity and current-operation identity.
 
 The public `sessionKey` is host-qualified. The raw native ID remains available for provider lookup,
 but UI state, project membership, selection, and playback use `sessionKey`.
@@ -137,25 +170,69 @@ Only the aggregate may:
 Project {
   id, label, updatedAt,
   sessionKeys[],
-  sessionCount, childSessionCount, liveCount, completedCount,
+  sessionCount, liveCount, historicalCount,
+  liveChildCount, historicalChildCount, presentCount, workingCount, completedCount,
   hosts, providers
 }
 ```
 
-It is reduced from sanitized session project labels. `sessionKeys` and `sessionCount` contain
-navigation roots only; `childSessionCount` reports descendant threads without presenting them as
-peer work. Sessions are ordered live first and then by most recent evidence. A project ID is opaque
-and safe for DOM/routing; it never contains the raw working directory.
+It is reduced from sanitized session project labels. Navigation roots are classified once by the
+canonical scope predicate. Live orders current roots by current evidence; History orders retained
+roots by last meaningful source time. There is no cross-scope ordering. Project and child counts
+are computed per scope, so a live-only project cannot appear as an empty History project and an
+empty Live scope remains empty. A project ID is opaque and safe for DOM/routing; it never contains
+the raw working directory.
 
 `hosts` counts execution hosts independently. `providers` counts evidence-backed inference
 providers and uses an explicit `unknown` bucket when no provider evidence exists; it never
 substitutes the session host.
 
+`presentCount` and `workingCount` are separate. `liveCount` is their navigation-oriented union, not
+a synonym for working. This makes a quiet but present controller visible without overstating work.
+Collector observation time and retained `status: running` are not scope evidence. Only a valid
+presence lease, fresh meaningful activity, or a genuinely in-flight operation can classify a root
+as Live.
+
 Project identity means the owning repository, not the current branch or linked-worktree directory.
 For a live local worktree, the `.git` ownership pointer resolves the repository. Known nested
-worktree layouts provide a privacy-safe fallback for retained paths that no longer exist. Only the
-sanitized repository label crosses the event boundary; raw working directories and Git metadata
-paths do not.
+worktree layouts provide a privacy-safe fallback for retained paths that no longer exist. Raw
+working directories and Git metadata paths do not cross the boundary. A separate temporal
+`SessionWorkspace` may carry sanitized repository-relative context; it does not change project
+identity.
+
+### `SessionWorkspace` value object
+
+`SessionWorkspace` belongs to `ObservedSession`, not `Project`, because two sessions in one project
+may use different linked worktrees or capture the same checkout at different times:
+
+```text
+SessionWorkspace {
+  opaqueKey,
+  repositoryLabel,
+  directoryLabel,
+  branchLabel, branchState,
+  changes { additions, deletions, files, binaryFiles, basis, completeness },
+  capturedAt, source, confidence
+}
+```
+
+Acquisition computes tracked counts against `HEAD` with Git invoked directly, no shell, a bounded
+timeout/buffer, disabled terminal prompting, and optional locks disabled. Untracked contents and
+binary line counts are excluded. A missing repository, unborn `HEAD`, timeout, or failed Git read
+produces absent evidence—not fabricated zeroes.
+
+The value object never contains an absolute working directory, filename, patch, raw Git output,
+prompt, command, tool input, or tool result. Branch and relative-directory labels are bounded,
+control-stripped, path-checked, and secret-masked at the event and persistence boundaries. Its
+numeric delta is titled **Working tree at capture** because multiple live sessions can share a
+checkout; it is never represented as “changes made by this agent.”
+
+The projection merges snapshots by source confidence and capture time. A weaker metadata record
+may fill a missing label but cannot erase stronger Git counts. The owner-only
+`WorkspaceSnapshotStore` retains at most one last safe value per host-qualified session. On restart
+it restores metadata-only History evidence using the original capture time. Restoration cannot
+create presence, meaningful activity, green state, or animation, and it never re-queries the
+current checkout to reconstruct past state.
 
 ### Session hierarchy projection
 
@@ -177,6 +254,18 @@ the thread as an `orphan` navigation root so evidence stays reachable. Parent cy
 deterministic navigation root and never recurse indefinitely. Selecting a root exposes descendant
 threads as a nested Miller-style tier; selecting a child changes the map/transcript context without
 promoting that child into the project root count.
+
+Claude sidechain evidence does not currently establish a separate session aggregate or content
+endpoint. It therefore creates a `contains` relationship and a nested actor lens under the real
+parent session. Codex ledger children remain full `LiveSession` aggregates. Actor lenses may filter
+the parent transcript but never acquire invented IDs, timestamps, transcripts, playback, or
+completion state.
+
+Agentic-QE court membership is another hierarchy projection, not native session parentage. A court
+leader and seat may report different execution hosts inside one AQE session. This permits
+Claude-led/Codex-seat and Codex-led/Claude-seat views when explicit structured evidence supplies the
+relationship. OpenCode remains absent from court membership until Agentic-QE supports and reports
+OpenCode court routing; runtime presence alone cannot imply a court seat.
 
 ### `Entity` and `Actor`
 
@@ -224,14 +313,28 @@ provider (`model_provider` in rollout `session_meta` and the state ledger), so C
 **observed**. Claude transcripts never name one; the domain resolves it from the host's documented
 configuration surface — Bedrock/Vertex/Foundry selection flags and `ANTHROPIC_BASE_URL` gateway
 classification across settings layers — yielding a **configured** claim, or an **inferred** one for
-the first-party default. An unrecognized gateway stays `gateway` rather than a guessed vendor, and
-a claim's grade is never upgraded downstream.
+the first-party default. Resolution occurs whenever canonical Claude evidence supplies a working
+directory, including transcript discovery and runtime leases. An unrecognized gateway stays
+`gateway` rather than a guessed vendor, and a claim's grade is never upgraded downstream.
 
 ### `Activity`
 
 An activity represents a bounded invocation or evaluation. It has source-scoped identity, actor,
 action, target, timestamps, status, optional safe counters, and evidence. Repeated updates mutate
 the aggregate state through idempotent events; they do not create duplicate visible activities.
+
+### `CapabilityCoverage` value object
+
+Every serialized session declares evidence coverage for `presence`, `activity`, `actors`,
+`resources`, `hierarchy`, `transcript`, `playback`, `providerIdentity`, `workspaceIdentity`,
+`gitBranch`, and `gitChanges`. Values describe the
+strongest supported evidence such as `observed`, `events`, `child-sessions`, `embedded-actors`,
+`lifecycle`, `session`, `presence-only`, or `unavailable`. UI affordances derive from this object;
+they do not hardcode host names as capability proxies.
+
+The same component shell is used across Claude Code, Codex, and OpenCode. An unavailable value
+disables the unsupported action and supplies a specific explanation. It never causes the renderer
+to invent a child session, transcript, operation, provider, court seat, or animated edge.
 
 ### `Source` value object
 
@@ -248,7 +351,7 @@ category, checkpoint age, and retry state.
 
 ```js
 {
-  schemaVersion: 1,
+  schemaVersion: 2,
   eventId: "ak:1842",
   ingestSeq: 1842,
   observedAt: "2026-07-27T18:42:01.125Z",
@@ -262,17 +365,33 @@ category, checkpoint age, and retry state.
   host: "codex",
   surface: "ruflo",
   project: "agentic-kit",
+  workspace: {
+    key: "workspace:opaque-hash",
+    repositoryLabel: "agentic-kit",
+    directoryLabel: "repo root",
+    branchLabel: "feature/observability",
+    changes: { additions: 12, deletions: 3, files: 2, basis: "tracked-vs-head" },
+    capturedAt: "2026-07-27T18:42:00.991Z",
+    source: "git",
+    confidence: "observed"
+  },
   actor: {
     id: "source-scoped-id",
     kind: "subagent",
     label: "test runner",
     role: "tester",
+    host: "codex",
     provider: "openai",
     model: "gpt-5.6-sol"
   },
   action: "agent.spawned",
   target: { id: "child-id", kind: "subagent" },
   status: "running",
+  signal: {
+    kind: "relationship",
+    phase: "observed",
+    correlationId: null
+  },
   source: {
     adapter: "codex-state",
     artifact: "opaque-ref",
@@ -443,18 +562,52 @@ on dashboard close:
 The UI receives only projection DTOs:
 
 - `sessions`: identity, sanitized project label, host/provider/model, status, freshness, safe
-  counters, and field provenance;
+  counters, independent presence/activity, capability coverage, and field provenance;
 - `nodes`: identity, session, kind, label, role, host/model, status, last action, confidence, and
-  safe metadata;
+  safe metadata and actor execution host;
 - `edges`: source, target, relationship type, human verb, confidence, and status;
 - `health`: sanitized adapter status and aggregate counters;
 - `cursor` and `schemaVersion`.
 
+The dashboard shell has exactly three primary areas: `Overview`, `Usage`, and `Observability`. One
+fixed, left-aligned secondary navigation rail remains in the same location while its contents change:
+
+```text
+Overview      → Summary | Hosts & Routing | Providers | Runtime | Intelligence
+Usage         → Scorecard | Limits | Findings | Sessions | Transcript
+Observability → Live | History
+```
+
+Navigation state has canonical hierarchical hashes:
+
+```text
+#overview/{summary,hosts,providers,runtime,intelligence}
+#usage/{score,limits,findings,sessions,transcript}
+#usage/{sessionId}
+#observability/{live,history}
+```
+
+Each destination owns a visible heading and concise description. The primary and secondary controls
+are ARIA tab lists with roving focus: Left/Right selects and focuses the adjacent tab with wrapping,
+Home selects the first tab, and End selects the last. This navigation state is dashboard
+presentation, not Observability evidence, and changing a hash cannot strengthen or mutate a domain
+fact.
+
+Usage session rows preserve four independent identity axes. The compact badge names only the
+execution host; an independently expandable strip names inference provider, provider provenance,
+and reported models. Codex `model_provider` carried by `session_meta` or `turn_context` is observed
+provider evidence. Native Claude transcript history has no equivalent serving-provider field, so
+`Not recorded` is a valid value. Dashboard delivery never infers provider from the execution host or
+model string.
+
 The renderer separates domain projection from presentation state. A world transform `{x, y, k}`
 controls the viewport, while a position cache and optional pin offset are keyed by entity identity.
 Status-only updates cannot trigger global layout or reset the world transform. Agents are stable
-anchors; bounded current/recent tool operations occupy deterministic satellite positions around
-their owner. Animated particles distinguish dispatch, invocation, return, and message flow.
+anchors. Each actor, work bubble, history summary, and owned operation lane forms a measured bundle;
+the next bundle begins after the first bundle's full vertical footprint. Tool cards occupy a lane
+outside the actor/work-label bounds, so deterministic automatic placement cannot overlap them.
+Only explicitly started, unfinished flow animates. Structural relationships are static; observed
+presence breathes slowly; meaningful work pulses independently.
 
 The presentation grammar treats an agent as an iconic hex/ring anchor, not a workflow card.
 Observed current work is a nearby transient bubble, and tool activity is a small tethered
@@ -466,10 +619,17 @@ Direct manipulation follows a slippy-map interaction contract:
 
 - drag empty space to pan;
 - wheel or trackpad scrolling zooms about the pointer within bounded scale;
-- drag a node beyond a click threshold to move and pin it;
+- drag an actor or individual operation card beyond a click threshold to move and pin it;
 - visible controls zoom, fit, reset the camera, and reset the layout;
 - fit changes only the viewport; reset layout discards manual layout offsets;
 - stream updates preserve viewport, selection, and manually positioned nodes.
+
+Positions and pins are keyed by `sessionKey|entityId`, not raw native ID. Hover and focus show an
+ephemeral evidence-aware description. Click, Enter, or Space selects the component and opens
+persistent detail. A **Legend / Help** dialog explains shapes, statuses, confidence, motion, and
+interactions; a polite guidance region announces selection and next action. Pause stops CSS and SVG
+movement as well as visual delta application, while `prefers-reduced-motion` removes nonessential
+motion without hiding state.
 
 The execution canvas and transcript rail share one selection model. Selecting an agent focuses its
 subtree and transcript; selecting a tool shows its safe summary; selecting evidence highlights and
@@ -477,17 +637,32 @@ centers its owner. The initial overview shows project, host, evidence-backed pro
 lifecycle, current work, and critical failures; metadata and evidence are details on demand
 ([Shneiderman][eyes-have-it]).
 
-The right rail is persistent and subscribes only to the selected `{host, sessionId}`. It carries
+The right Session Stream rail subscribes only to the selected `{host, sessionId}`. It carries
 the rich masked conversation, plaintext reasoning, tool inputs/results/errors, patches, MCP/web
 activity, and subagent messages available from that host. It supports search, type/actor filtering,
 collapsed large details, auto-follow, and unread state. It renders transcript text as text, never
 markup, and labels masking as best effort.
 
-Project selection precedes session selection. Session selection chooses Follow Live for active
-work and Review for retained work. Both modes use the same event reducer and canvas/transcript
-renderers. Review owns `{playhead, playing, speed}`; appends extend duration without moving a
-reviewer's playhead. Seeking resets presentation state and reapplies ordered evidence through the
-selected offset. Resume Live applies the retained tail and restores automatic following.
+The rail's body is collapsible presentation state, locally persisted independently of session
+evidence. Collapsing it does not close its selected-session subscription or stop ingestion; it gives
+the execution canvas more horizontal room and leaves a compact restore rail with a real chevron
+button. The button exposes `aria-expanded`, an action-specific label, and a polite state
+announcement. At narrower breakpoints the rail stacks below the browser/canvas and its collapsed
+form becomes a compact full-width restore bar. Leaving Observability still closes the connection;
+collapsing the rail does not. Pause remains a separate state that freezes visual delta application.
+
+Project selection precedes session selection. Navigation scope and playback state are separate
+state machines: `Live | History` chooses eligible roots, while `Follow Live | Review` chooses how
+one selected root is presented. Switching scopes clears incompatible selection and chooses only
+within the destination scope. Review owns `{playhead, playing, speed}`; appends extend duration
+without moving a reviewer's playhead. Seeking resets presentation state and reapplies ordered
+evidence through the selected offset. Resume Live is available only when the selected root still
+satisfies the Live predicate.
+
+Green is current-state vocabulary, never a historical outcome color. History and Review suppress
+presence breathing, work pulse, flow particles, moving dashes, live following, and unread updates.
+Completed history is neutral; an explicit historical failure may remain static red. A playback
+event that was running is described as in progress at that playhead, not `Working now`.
 
 The graph has a textual inventory of recent events, nodes, and relationships with action and
 confidence. Pause freezes visual application while the client queues at most 256 deltas; overflow
@@ -537,7 +712,8 @@ Tests are written against ports and fixtures before each adapter or lifecycle tr
 8. **UI tests:** stable coordinates, pointer-centred zoom, pan, drag-versus-click, pin persistence,
    camera/layout reset, stream-stable viewport and selection, coordinated graph/transcript,
    pause/resume, search, auto-follow/unread,
-   reduced motion, keyboard navigation, textual equivalence, filters, and dark/light themes.
+   reduced motion, keyboard navigation, textual equivalence, filters, dark/light themes, measured
+   actor/tool non-intersection, independent actor/tool drag, legend/tooltips, and truthful flow.
 9. **Load tests:** synthetic concurrent sessions and high-cardinality tools establish aggregation
    and frame-time budgets.
 
@@ -624,15 +800,33 @@ process memory limits.
 - Rotation, truncation, partial writes, missing parents/completions, and clock skew do not crash.
 - No excluded content appears in snapshot, SSE, logs, or adapter error responses.
 - Pause and reduced-motion behavior work; all essential data is keyboard-accessible without SVG.
+- Presence, meaningful activity, and in-flight flow are independent; a heartbeat never overwrites
+  semantic activity or animates structural relationships.
+- Every retained root belongs to exactly one scope; scope-local project/session/worker counts match
+  visible rows, and empty Live renders zero projects rather than recent History.
+- History and Review contain no green current-work cues, breathing presence, moving flow, live
+  follow state, or unread-live announcements.
 - Pan, bounded pointer-centred zoom, node drag/pin, fit, and reset have keyboard-accessible
   controls and do not interrupt ingestion.
+- Automatic actor bundles and operation cards do not intersect at the reference viewport; both are
+  independently draggable and pinnable.
+- Hover/focus descriptions, persistent selection detail, and Legend / Help explain every unit and
+  the available next interaction.
+- Exactly three primary areas share one fixed, left-aligned secondary rail; canonical hashes,
+  headings, descriptions, roving Left/Right focus, and Home/End behavior match each destination.
+- Collapsing Session Stream preserves its connection and local choice, expands Agent activity,
+  leaves a keyboard-accessible restore rail, and remains compact when the layout stacks.
+- Usage session rows present host, provider, provider provenance, and model as independent facts;
+  Codex `model_provider` is observed and absent Claude provider evidence reads `Not recorded`.
 - Streaming preserves the user's viewport, selection, and manually positioned nodes.
 - The overview uses evidence-backed semantic labels and current-work summaries; a generic or
   inferred identity is visibly identified as such.
 - Graph and transcript selection remain coordinated; auto-follow yields to manual reading.
 - No client connection remains after disconnect; bounded idle or dashboard close releases
   collectors.
-- Historical dashboard routes and usage results remain regression-compatible.
+- The canonical dashboard routes are `#observability/live` and `#observability/history`;
+  Historical Usage remains a separate bounded
+  context and its results remain regression-compatible.
 - Clean-room provenance is documented; no Albert or Agent Flow branding/assets are copied.
 
 ## Implementation conformance
@@ -654,18 +848,29 @@ The server subscribes before taking the initial snapshot and reconciles buffered
 closing the snapshot-to-subscribe race. A slow-client queue overflow discards queued frames and
 sends a reset snapshot after drain.
 
-The default command discovers Claude/Codex transcripts and reads Codex ledger edges. Ruflo and
+The implemented dashboard shell exposes three primary areas and one shared secondary rail. It emits
+the canonical Overview, Usage, and Observability hashes above, gives every view a heading and
+description, and implements Left/Right/Home/End tab semantics. Observability's locally persisted
+Session Stream chevron changes layout without changing subscription ownership. Usage session rows
+show a host-only badge and reveal provider/provenance/model facts in their own detail strip.
+
+The default command discovers Claude/Codex transcripts, observes Claude/Codex/OpenCode controller
+presence and inspectable workspace context, and reads Codex ledger edges. Claude sidechains are
+embedded actor lenses; Codex ledger children are independent sessions. OpenCode detailed activity,
+transcript, playback, hierarchy, and Agentic-QE
+court membership remain unavailable until their respective sources report those capabilities.
+Ruflo and
 agentic-qe source adapters require explicit, repeatable `--live-source 'surface=path'`
 registration, where `surface` is `ruflo` or `aqe`. Explicit sources consume tailer
 capacity before Claude/Codex discovery. Paths resolve against the startup working directory and are
 not confined to the project, so registration is an operator authorization to read that file.
 Independent plugin, skill, MCP, and gate registries are not implemented. This is an explicit source
-coverage limitation; ADR-0012 is Accepted because the supported adapter contract does not claim
+coverage limitation; ADR-0012 is Implemented because the supported adapter contract does not claim
 automatic upstream discovery.
 
 ## References
 
-- [ADR-0012](../adr/0012-live-sessions-observability.md)
+- [ADR-0012](../adr/0012-observability.md)
 - [Albert license][albert-license]
 - [Reviewed Albert graph source][albert-graph]
 - [OpenTelemetry GenAI semantic conventions][otel-genai]

@@ -630,10 +630,10 @@ async function main() {
     await srv3.close();
   }
 
-  // ── the served page: sixth segment, four views, poll control ──
+  // ── the served page: three primary areas, hierarchical views, poll control ──
   const uiSrv = await startDashboard({ port: 0, cwd: fixture, fetchStatus: async () => STUB_STATUS, usage: spyUsage().api });
   try {
-    await test('served HTML carries the sixth "Usage" segment and its five sub-views', async () => {
+    await test('served HTML carries the Usage primary area and its five sub-views', async () => {
       const r = await get(uiSrv.url);
       contains(r.body, 'data-tab="usage"');
       contains(r.body, '>Usage<');
@@ -654,10 +654,14 @@ async function main() {
     await test('Usage rendering treats host and inference provider as independent axes', async () => {
       const r = await get(uiSrv.url);
       contains(r.body, 'var prov=d.byHost||{}');
-      contains(r.body, 'var host=sx.host||"unknown"');
-      contains(r.body, 'var provider=sx.provider||"unknown"');
-      contains(r.body, 'title="host: ');
-      contains(r.body, 'class="s-provider"');
+      contains(r.body, 'var host=reportedIdentity(sx.host)||"unknown"');
+      contains(r.body, 'var provider=reportedIdentity(sx.provider)');
+      contains(r.body, 'Execution host: ');
+      contains(r.body, 'Inference provider: ');
+      contains(r.body, '"inference provider"');
+      contains(r.body, '"models"');
+      assert(!r.body.includes("<small class=\"s-provider\">"),
+        'host and provider must not be concatenated into one ambiguous pill');
     });
 
     await test('Live rendering never derives host identity from inference provider', async () => {
@@ -670,14 +674,16 @@ async function main() {
         'Live presentation still falls back from provider to host');
     });
 
-    await test('served HTML carries the read-only Live Sessions surface', async () => {
+    await test('served HTML carries the read-only Observability surface', async () => {
       const r = await get(uiSrv.url);
       for (const marker of [
-        'data-tab="live"', 'id="panel-live"', 'id="live-graph"',
+        'data-tab="observability"', '>Observability</button>', 'id="panel-observability"', 'id="live-graph"',
         'id="live-session-list"', 'id="live-transcript-list"', 'id="live-selection"',
         'id="live-pause"', 'id="live-viewport"', 'id="live-canvas"',
         'id="live-zoom-in"', 'id="live-zoom-out"', 'id="live-fit"',
         'id="live-fit-selection"', 'id="live-reset-layout"',
+        'id="live-transcript-toggle"', 'id="live-transcript-body"',
+        'data-transcript-collapsed="false"', 'aria-controls="live-transcript-body"',
         'aria-label="Map controls"', 'new EventSource(dashSseUrl("/api/live/events"))',
         '"/api/live/transcripts/"',
       ]) contains(r.body, marker);
@@ -685,6 +691,7 @@ async function main() {
         'addEventListener("wheel"', 'addEventListener("pointerdown"',
         'addEventListener("pointermove"', 'setPointerCapture',
         'Math.max(.25,Math.min(2.8', 'renderTranscript',
+        'setTranscriptCollapsed', 'ak-dash-transcript-collapsed',
       ]) contains(r.body, behavior);
       assert(!/live-[^"]*"[^>]*>(?:send|cancel|chat|prompt)</i.test(r.body),
         'the live surface must expose no write or chat control');
@@ -870,7 +877,7 @@ async function main() {
     await uiSrv.close();
   }
 
-  // ── Live Sessions: read-only snapshot + resumable, bounded SSE transport ──
+  // ── Observability: read-only snapshot + resumable, bounded SSE transport ──
   const listeners = new Set();
   const liveCalls = { start: 0, close: 0, subscribe: 0, unsubscribe: 0, replay: [] };
   const liveEvents = [

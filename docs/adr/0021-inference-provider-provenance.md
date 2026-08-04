@@ -1,15 +1,21 @@
-# ADR-0021 — Inference-provider provenance for live sessions
+# ADR-0021 — Inference-provider provenance for observed sessions
 
 - **Status:** Accepted
 - **Date:** 2026-07-31
+- **Updated:** 2026-08-03
+- **Update note:** Claude provider resolution now covers runtime leases as well as transcript
+  discovery, while stronger observed identity remains authoritative; OpenCode runtime presence is
+  acknowledged without manufacturing provider identity. The user-facing surface is now named
+  Observability; Live remains one navigation scope within it.
 - **Deciders:** agentic-kit maintainers
-- **Related:** [ADR-0012](0012-live-sessions-observability.md)
+- **Related:** [ADR-0012](0012-observability.md)
 
 ## Context
 
 ADR-0012 keeps the execution-host and inference-provider axes independent and forbids promoting
 a host-based assumption to an observed provider claim. In practice every Claude Code session in
-the Live view rendered "Provider not established", and — unnoticed — every Codex session did too.
+the Observability view rendered "Provider not established", and — unnoticed — every Codex session
+did too.
 Investigation against current upstream sources found two distinct causes:
 
 1. **Codex records the provider; ak read the wrong field.** Codex rollout `session_meta`
@@ -35,8 +41,9 @@ configured | inferred | unknown`, populated from field-level evidence. Only emit
 - **Codex: read `model_provider`** in the rollout adapter and the state-ledger reader, keeping
   the bare `provider` spelling only as legacy tolerance. The claim remains **observed** — it is
   in the artifact. Custom provider ids pass through untranslated.
-- **Claude: resolve the provider from the host's configuration surface** at transcript-discovery
-  time (`src/lib/live/claude-provider.mjs`), mirroring the documented selection order:
+- **Claude: resolve the provider from the host's configuration surface** whenever session evidence
+  supplies a canonical working directory, including transcript discovery and runtime leases
+  (`src/lib/live/claude-provider.mjs`), mirroring the documented selection order:
   Bedrock flag → Vertex flag → Foundry flag → `ANTHROPIC_BASE_URL` (classified to `anthropic`,
   `openrouter`, or generic `gateway` by hostname) → first-party default `anthropic`. Explicit
   selections are **configured**; the first-party default is **inferred**; an unknown gateway stays
@@ -61,7 +68,8 @@ configured | inferred | unknown`, populated from field-level evidence. Only emit
 - Claude Code sessions show who serves Claude models — Anthropic, Bedrock, Vertex, Foundry,
   OpenRouter, or an unnamed gateway — labeled configured or inferred, answering the operator
   question without overclaiming.
-- OpenCode is unaffected: it is not a live host (ADR-0017/0018 scope it to managed execution),
-  and its usage-side records already carry an observed `providerID`.
+- OpenCode runtime leases can establish host presence, but provider identity remains unavailable
+  until OpenCode supplies direct evidence; its usage-side records already carry an observed
+  `providerID` on that separate historical analytics path.
 - If codex renames or Claude Code starts recording the serving endpoint, the adapters prefer the
   in-artifact (observed) value automatically.

@@ -199,13 +199,16 @@ function extendedCorpus() {
 
 // ── views under test ─────────────────────────────────────────────────────────
 const TABS = [
-  ['overview', '#panel-overview'],
+  ['overview', '#area-overview'],
+  ['usage', '#panel-usage'],
+  ['observability', '#panel-observability'],
+];
+const OVERVIEW_VIEWS = [
+  ['summary', '#panel-overview'],
   ['hosts', '#panel-hosts'],
   ['providers', '#panel-providers'],
   ['runtime', '#panel-runtime'],
   ['intel', '#panel-intel'],
-  ['usage', '#panel-usage'],
-  ['live', '#panel-live'],
 ];
 const USAGE_VIEWS = [
   ['score', '#v-score'],
@@ -244,10 +247,11 @@ const LIVE_SNAPSHOT = {
   cursor: 'live:3',
   projects: [{
     id: 'project:agentic-kit', label: 'agentic-kit',
-    sessions: ['codex:ui-live-session', 'claude:ui-review-session'],
-    sessionCount: 2, childSessionCount: 1, liveCount: 1, completedCount: 1,
-    hosts: { codex: 1, claude: 1 },
-    providers: { openai: 1, anthropic: 1 }, updatedAt: new Date().toISOString(),
+    sessions: ['codex:ui-live-session', 'claude:ui-review-session', 'opencode:ui-opencode-session'],
+    sessionCount: 3, childSessionCount: 1, liveCount: 1, presentCount: 1,
+    workingCount: 1, completedCount: 1,
+    hosts: { codex: 1, claude: 1, opencode: 1 },
+    providers: { openai: 1, anthropic: 1, unknown: 1 }, updatedAt: new Date().toISOString(),
   }],
   health: {
     claude: { status: 'ok', files: 2, events: 8, errors: 0, lastError: null },
@@ -256,19 +260,30 @@ const LIVE_SNAPSHOT = {
   sessions: [{
     id: 'ui-live-session', key: 'codex:ui-live-session', project: 'agentic-kit',
     projectKey: 'project:agentic-kit', host: 'codex', status: 'running', lifecycle: 'active',
+    presence: { state: 'present', lastObservedAt: new Date().toISOString(), evidence: 'observed' },
+    activity: { state: 'working', lastActivityAt: new Date().toISOString(), currentOperationId: 'ui-live-tool', evidence: 'observed' },
+    coverage: { presence: 'observed', activity: 'events', actors: 'child-sessions', resources: 'lifecycle', hierarchy: 'observed', transcript: 'session', playback: 'session', providerIdentity: 'observed' },
+    workspace: {
+      key: 'workspace:0123456789abcdef', repositoryLabel: 'agentic-kit',
+      directoryLabel: 'repo root', branchLabel: 'feature/observability', branchState: 'attached',
+      changes: { additions: 42, deletions: 7, files: 3, binaryFiles: 0,
+        basis: 'tracked-vs-head', completeness: 'untracked-and-binary-lines-excluded',
+        capturedAt: new Date().toISOString() },
+      capturedAt: new Date().toISOString(), source: 'git', confidence: 'observed',
+    },
     updatedAt: new Date().toISOString(),
     nodes: [
       { id: 'ui-live-session', kind: 'session', role: 'primary', host: 'codex',
         provider: 'openai', providerProvenance: 'observed',
         surface: 'native', status: 'running', confidence: 'observed' },
-      { id: 'ui-live-agent', kind: 'subagent', label: 'Bohr', role: 'tester', host: 'codex', surface: 'ruflo', status: 'running', confidence: 'observed', lastAction: 'agent.output', observedAt: new Date().toISOString(), sourceAdapter: 'codex-state' },
+      { id: 'ui-live-agent', kind: 'subagent', label: 'Bohr', role: 'tester', host: 'codex', surface: 'ruflo', status: 'running', confidence: 'observed', lastAction: 'agent.output', model: '<synthetic>', observedAt: new Date().toISOString(), sourceAdapter: 'codex-rollout' },
       { id: 'ui-live-tool', kind: 'tool', label: 'Read', host: 'codex', surface: 'native', status: 'running', confidence: 'observed', lastAction: 'tool.started', observedAt: new Date().toISOString(), sourceAdapter: 'codex-rollout' },
       { id: 'ui-live-gate', kind: 'gate', role: 'qe-court', host: 'internal', surface: 'aqe', status: 'queued', confidence: 'planned' },
     ],
     edges: [
-      { id: 'spawn', source: 'ui-live-session', target: 'ui-live-agent', action: 'agent.spawned', confidence: 'observed' },
-      { id: 'read', source: 'ui-live-agent', target: 'ui-live-tool', action: 'tool.started', confidence: 'observed' },
-      { id: 'gate', source: 'ui-live-agent', target: 'ui-live-gate', action: 'evaluation.requested', confidence: 'planned' },
+      { id: 'spawn', source: 'ui-live-session', target: 'ui-live-agent', action: 'agent.spawned', confidence: 'observed', signal: { kind: 'relationship', phase: 'observed' }, status: 'running' },
+      { id: 'read', source: 'ui-live-agent', target: 'ui-live-tool', action: 'tool.started', confidence: 'observed', signal: { kind: 'operation', phase: 'started' }, status: 'running' },
+      { id: 'gate', source: 'ui-live-agent', target: 'ui-live-gate', action: 'evaluation.requested', confidence: 'planned', signal: { kind: 'relationship', phase: 'planned' }, status: 'queued' },
     ],
   }, {
     id: 'ui-live-agent', key: 'codex:ui-live-agent', parentSessionId: 'ui-live-session',
@@ -276,16 +291,56 @@ const LIVE_SNAPSHOT = {
     hierarchyState: 'child', navigationRoot: false,
     project: 'agentic-kit', projectKey: 'project:agentic-kit', host: 'codex',
     status: 'running', lifecycle: 'active', updatedAt: new Date().toISOString(),
+    presence: { state: 'unknown', lastObservedAt: null, evidence: 'unknown' },
+    activity: { state: 'working', lastActivityAt: new Date().toISOString(), currentOperationId: null, evidence: 'observed' },
+    coverage: { presence: 'unavailable', activity: 'events', actors: 'child-sessions', resources: 'lifecycle', hierarchy: 'observed', transcript: 'session', playback: 'session', providerIdentity: 'observed' },
     nodes: [{ id: 'ui-live-agent', kind: 'session', role: 'tester', host: 'codex',
       provider: 'openai', providerProvenance: 'observed', status: 'running' }],
     edges: [],
   }, {
     id: 'ui-review-session', key: 'claude:ui-review-session', project: 'agentic-kit',
     projectKey: 'project:agentic-kit', host: 'claude', status: 'completed',
+    presence: { state: 'unknown', lastObservedAt: null, evidence: 'unknown' },
+    activity: { state: 'idle', lastActivityAt: new Date(Date.now() - 60_000).toISOString(), currentOperationId: null, evidence: 'observed' },
+    coverage: { presence: 'unavailable', activity: 'events', actors: 'embedded-actors', resources: 'lifecycle', hierarchy: 'correlated', transcript: 'session', playback: 'session', providerIdentity: 'observed' },
+    workspace: {
+      key: 'workspace:fedcba9876543210', repositoryLabel: 'agentic-kit',
+      directoryLabel: 'repo root', branchLabel: 'main', branchState: 'attached',
+      changes: { additions: 8, deletions: 2, files: 2, binaryFiles: 0,
+        basis: 'tracked-vs-head', completeness: 'untracked-and-binary-lines-excluded',
+        capturedAt: new Date(Date.now() - 60_000).toISOString() },
+      capturedAt: new Date(Date.now() - 60_000).toISOString(), source: 'git', confidence: 'observed',
+    },
     startedAt: new Date(Date.now() - 180_000).toISOString(),
     updatedAt: new Date(Date.now() - 60_000).toISOString(),
-    nodes: [{ id: 'ui-review-session', kind: 'session', host: 'claude',
-      provider: 'anthropic', providerProvenance: 'observed', status: 'completed' }],
+    nodes: [
+      { id: 'ui-review-session', kind: 'session', host: 'claude',
+        provider: 'anthropic', providerProvenance: 'observed', status: 'completed',
+        sourceAdapter: 'claude-transcript' },
+      { id: 'claude-reviewer', kind: 'subagent', label: 'Reviewer', role: 'reviewer',
+        host: 'claude', status: 'completed', confidence: 'correlated',
+        sourceAdapter: 'claude-transcript' },
+    ],
+    edges: [{ id: 'claude-contains', source: 'ui-review-session', target: 'claude-reviewer',
+      action: 'contains', confidence: 'correlated',
+      signal: { kind: 'relationship', phase: 'observed' }, status: 'completed' }],
+  }, {
+    id: 'ui-opencode-session', key: 'opencode:ui-opencode-session', project: 'agentic-kit',
+    projectKey: 'project:agentic-kit', host: 'opencode', status: 'expired', lifecycle: 'historical',
+    presence: { state: 'unknown', lastObservedAt: null, evidence: 'unknown' },
+    activity: { state: 'idle', lastActivityAt: new Date(Date.now() - 120_000).toISOString(), currentOperationId: null, evidence: 'unknown' },
+    coverage: { presence: 'observed', activity: 'presence-only', actors: 'unavailable', resources: 'unavailable', hierarchy: 'unavailable', transcript: 'unavailable', playback: 'unavailable', providerIdentity: 'unknown', workspaceIdentity: 'observed', gitBranch: 'observed', gitChanges: 'observed' },
+    updatedAt: new Date(Date.now() - 120_000).toISOString(),
+    workspace: {
+      key: 'workspace:0011223344556677', repositoryLabel: 'agentic-kit',
+      directoryLabel: 'repo root', branchLabel: 'feature/opencode', branchState: 'attached',
+      changes: { additions: 5, deletions: 1, files: 1, binaryFiles: 0,
+        basis: 'tracked-vs-head', completeness: 'untracked-and-binary-lines-excluded',
+        capturedAt: new Date(Date.now() - 120_000).toISOString() },
+      capturedAt: new Date(Date.now() - 120_000).toISOString(), source: 'git', confidence: 'observed',
+    },
+    nodes: [{ id: 'ui-opencode-session', kind: 'session', role: 'primary', host: 'opencode',
+      provider: null, providerProvenance: 'unknown', status: 'expired' }],
     edges: [],
   }],
 };
@@ -366,7 +421,7 @@ async function main() {
     // Leaving Live deliberately closes EventSource. Chromium reports that
     // client-side teardown as ERR_ABORTED even though it is the expected,
     // leak-preventing lifecycle behavior.
-    if (/\/api\/live\/(?:events|transcripts\/[^/]+\/[^/]+\/events)$/.test(r.url())
+    if (/\/api\/live\/(?:events|transcripts\/[^/]+\/[^/]+\/events)(?:\?.*)?$/.test(r.url())
       && r.failure()?.errorText === 'net::ERR_ABORTED') return;
     failedRequests.push(`${r.url()} — ${r.failure()?.errorText}`);
   });
@@ -394,9 +449,13 @@ async function main() {
   }));
 
   try {
-    await page.goto(srv.url, { waitUntil: 'networkidle' });
+    // The dashboard intentionally owns long-lived polling and EventSource
+    // connections. DOM readiness plus the application shell is the stable
+    // navigation contract; network-idle can never be guaranteed by a Live UI.
+    await page.goto(srv.urlWithToken, { waitUntil: 'domcontentloaded' });
+    await page.waitForSelector('#panel-overview', { state: 'attached' });
 
-    // ── every top-level tab renders, is non-empty, and is artifact-free ──
+    // ── every primary area renders, is non-empty, and is artifact-free ──
     for (const [tab, sel] of TABS) {
       await page.click(`[data-tab="${tab}"]`).catch(() => {});
       await page.waitForSelector(`${sel}:not([hidden])`, { timeout: 8000 }).catch(() => {});
@@ -411,9 +470,49 @@ async function main() {
       check(`tab "${tab}" is free of rendering artifacts`, arts.length === 0,
         `found ${arts.join(', ')} in visible text`);
     }
+    const primaryNavigation = await page.evaluate(() => ({
+      labels: [...document.querySelectorAll('#seg > [data-tab]')].map((item) => item.childNodes[0]?.textContent.trim()),
+      count: document.querySelectorAll('#seg > [data-tab]').length,
+    }));
+    check('dashboard exposes exactly three stable primary areas',
+      primaryNavigation.count === 3
+        && ['Overview', 'Usage', 'Observability'].every((label) => primaryNavigation.labels.includes(label)),
+      `primary navigation was ${JSON.stringify(primaryNavigation)}`);
 
-    // ── Live Sessions: execution workspace + synchronized transcript ──
-    await page.click('[data-tab="live"]');
+    await page.click('[data-tab="overview"]');
+    for (const [view, sel] of OVERVIEW_VIEWS) {
+      await page.click(`[data-overview-view="${view}"]`);
+      await page.waitForSelector(`${sel}:not([hidden])`);
+      const presentation = await page.evaluate((selector) => {
+        const panel = document.querySelector(selector);
+        return {
+          text: panel?.textContent,
+          heading: panel?.querySelector('.view-heading h2')?.textContent,
+          description: panel?.querySelector('.view-heading p')?.textContent,
+        };
+      }, sel);
+      check(`Overview view "${view}" has a heading, description, and content`,
+        presentation.heading?.trim().length > 3
+          && presentation.description?.trim().length > 12
+          && presentation.text?.trim().length > 20,
+        `Overview presentation was ${JSON.stringify(presentation)}`);
+    }
+    const secondaryPositions = [];
+    for (const [tab] of TABS) {
+      await page.click(`[data-tab="${tab}"]`);
+      secondaryPositions.push(await page.evaluate(() => {
+        const group = document.querySelector('.secondary-group:not([hidden])');
+        const rect = group?.getBoundingClientRect();
+        return { tab: document.querySelector('#seg [aria-selected="true"]')?.dataset.tab, left: rect?.left, top: rect?.top };
+      }));
+    }
+    check('secondary tabs stay left-aligned at one fixed location across primary areas',
+      secondaryPositions.every((position) => Math.abs(position.left - secondaryPositions[0].left) <= 1
+        && Math.abs(position.top - secondaryPositions[0].top) <= 1),
+      `secondary positions were ${JSON.stringify(secondaryPositions)}`);
+
+    // ── Observability: execution workspace + synchronized evidence ──
+    await page.click('[data-tab="observability"]');
     await page.waitForSelector('#live-nodes .live-node', { timeout: 8000 });
     await page.waitForTimeout(80);
     const liveShape = await page.evaluate(() => ({
@@ -429,14 +528,15 @@ async function main() {
       transcriptRole: document.getElementById('live-transcript-list')?.getAttribute('role'),
       columns: getComputedStyle(document.querySelector('.live-workspace')).gridTemplateColumns,
       transport: getComputedStyle(document.getElementById('live-playback')).position,
+      transportParent: document.getElementById('live-playback')?.parentElement?.className,
     }));
     check('live workspace renders agent anchors and owned tool satellites',
-      liveShape.sessions === 2 && liveShape.childSessions === 1
+      liveShape.sessions === 1 && liveShape.childSessions === 1
         && liveShape.nodes === 3 && liveShape.tools >= 1
         && liveShape.edges >= 2,
       `shape was ${JSON.stringify(liveShape)}`);
     check('execution graph and transcript expose accessible live-region semantics',
-      liveShape.graphRole === 'img' && liveShape.transcriptRole === 'log',
+      liveShape.graphRole === 'group' && liveShape.transcriptRole === 'log',
       `roles were ${JSON.stringify(liveShape)}`);
     check('cinematic map uses agent anchors and observed-work bubbles instead of card nodes',
       liveShape.anchorCores === liveShape.nodes && liveShape.workBubbles === liveShape.nodes
@@ -445,9 +545,127 @@ async function main() {
     check('desktop Live view is a persistent three-column workspace',
       liveShape.columns.split(' ').length === 3,
       `columns were ${JSON.stringify(liveShape.columns)}`);
-    check('session transport remains docked over the center stage',
-      liveShape.transport === 'absolute',
-      `transport positioning was ${JSON.stringify(liveShape.transport)}`);
+    check('session transport is docked inside the center stage without overlay positioning',
+      liveShape.transport === 'static' && /live-canvas-card/.test(liveShape.transportParent),
+      `transport positioning was ${JSON.stringify(liveShape)}`);
+    const streamExpanded = await page.evaluate(() => {
+      globalThis.__akLiveSource = globalThis.AKLive.state.source;
+      globalThis.__akStreamSource = globalThis.AKLive.state.transcript.source;
+      const activity = document.querySelector('.live-canvas-card').getBoundingClientRect();
+      const stream = document.getElementById('live-transcript-panel').getBoundingClientRect();
+      return {
+        activityWidth: activity.width,
+        streamWidth: stream.width,
+        bodyHidden: document.getElementById('live-transcript-body').hidden,
+        expanded: document.getElementById('live-transcript-toggle').getAttribute('aria-expanded'),
+        camera: { ...globalThis.AKLive.state.camera },
+      };
+    });
+    await page.click('#live-transcript-toggle');
+    await page.waitForTimeout(260);
+    const streamCollapsed = await page.evaluate(() => {
+      const activity = document.querySelector('.live-canvas-card').getBoundingClientRect();
+      const stream = document.getElementById('live-transcript-panel').getBoundingClientRect();
+      return {
+        activityWidth: activity.width,
+        streamWidth: stream.width,
+        bodyHidden: document.getElementById('live-transcript-body').hidden,
+        expanded: document.getElementById('live-transcript-toggle').getAttribute('aria-expanded'),
+        workspaceState: document.getElementById('live-workspace').dataset.transcriptCollapsed,
+        panelState: document.getElementById('live-transcript-panel').dataset.collapsed,
+        persisted: localStorage.getItem('ak-dash-transcript-collapsed'),
+        liveSourceActive: !!globalThis.AKLive.state.source,
+        sameLiveSource: globalThis.__akLiveSource === globalThis.AKLive.state.source,
+        sameTranscriptSource: globalThis.__akStreamSource === globalThis.AKLive.state.transcript.source,
+        camera: { ...globalThis.AKLive.state.camera },
+      };
+    });
+    await shoot(page, 'observability-stream-collapsed');
+    check('Session Stream collapses to a persistent restore rail and Agent Activity reclaims its width',
+      streamExpanded.expanded === 'true' && !streamExpanded.bodyHidden
+        && streamCollapsed.expanded === 'false' && streamCollapsed.bodyHidden
+        && streamCollapsed.workspaceState === 'true' && streamCollapsed.panelState === 'true'
+        && streamCollapsed.streamWidth <= 46
+        && streamCollapsed.activityWidth > streamExpanded.activityWidth + 150,
+      `expanded=${JSON.stringify(streamExpanded)} collapsed=${JSON.stringify(streamCollapsed)}`);
+    check('collapsing Session Stream preserves stream connections, map camera, and local preference',
+      streamCollapsed.liveSourceActive && streamCollapsed.sameLiveSource
+        && streamCollapsed.sameTranscriptSource && streamCollapsed.persisted === 'true'
+        && JSON.stringify(streamCollapsed.camera) === JSON.stringify(streamExpanded.camera),
+      `collapse state was ${JSON.stringify(streamCollapsed)}`);
+    await page.click('#live-transcript-toggle');
+    await page.waitForTimeout(260);
+    const streamRestored = await page.evaluate(() => ({
+      expanded: document.getElementById('live-transcript-toggle').getAttribute('aria-expanded'),
+      bodyHidden: document.getElementById('live-transcript-body').hidden,
+      persisted: localStorage.getItem('ak-dash-transcript-collapsed'),
+      streamWidth: document.getElementById('live-transcript-panel').getBoundingClientRect().width,
+      activityWidth: document.querySelector('.live-canvas-card').getBoundingClientRect().width,
+    }));
+    check('Session Stream expands in place and restores its prior panel allocation',
+      streamRestored.expanded === 'true' && !streamRestored.bodyHidden
+        && streamRestored.persisted === 'false'
+        && Math.abs(streamRestored.streamWidth - streamExpanded.streamWidth) <= 2
+        && Math.abs(streamRestored.activityWidth - streamExpanded.activityWidth) <= 2,
+      `restored state was ${JSON.stringify(streamRestored)}`);
+    const mapControls = await page.evaluate(() => {
+      const buttons = [...document.querySelectorAll('.live-view-tools button')];
+      return {
+        groups: document.querySelectorAll('.live-view-tools .live-control-group').length,
+        labels: buttons.map((button) => button.textContent.trim()),
+        heights: buttons.map((button) => Math.round(button.getBoundingClientRect().height)),
+        wrapping: buttons.map((button) => getComputedStyle(button).whiteSpace),
+      };
+    });
+    check('map controls use compact non-wrapping segmented groups',
+      mapControls.groups === 2
+        && mapControls.heights.every((height) => height === mapControls.heights[0])
+        && mapControls.wrapping.every((value) => value === 'nowrap')
+        && ['Fit', 'Focus', 'Reset', 'Help'].every((label) => mapControls.labels.includes(label)),
+      `map controls were ${JSON.stringify(mapControls)}`);
+    const motionGrammar = await page.evaluate(() => ({
+      flowing: document.querySelectorAll('#live-edges .live-edge[data-active="true"]').length,
+      structural: document.querySelectorAll('#live-edges .live-edge[data-active="false"]').length,
+      presenceAnimation: getComputedStyle(document.querySelector('[data-node="ui-live-session"] .node-aura')).animationName,
+      workAnimation: getComputedStyle(document.querySelector('[data-node="ui-live-agent"] .node-status')).animationName,
+      operationAnimation: getComputedStyle(document.querySelector('[data-node="ui-live-tool"] .live-tool-halo')).animationName,
+    }));
+    check('motion distinguishes one in-flight operation from static relationships',
+      motionGrammar.flowing === 1 && motionGrammar.structural >= 2,
+      `motion grammar was ${JSON.stringify(motionGrammar)}`);
+    check('observed process presence uses a slow breathing halo',
+      /live-breathe/.test(motionGrammar.presenceAnimation),
+      `presence animation was ${JSON.stringify(motionGrammar.presenceAnimation)}`);
+    check('meaningful actor and operation work retain their own pulse',
+      /live-pulse/.test(motionGrammar.workAnimation)
+        && /live-pulse/.test(motionGrammar.operationAnimation),
+      `work animations were ${JSON.stringify(motionGrammar)}`);
+    const overlapFree = await page.evaluate(() => {
+      const actor = document.querySelector('[data-node="ui-live-agent"] .node-work')?.getBoundingClientRect();
+      const tool = document.querySelector('[data-node="ui-live-tool"]')?.getBoundingClientRect();
+      return actor && tool && (actor.right <= tool.left || tool.right <= actor.left
+        || actor.bottom <= tool.top || tool.bottom <= actor.top);
+    });
+    check('automatic actor bundles keep work labels clear of tool cards',
+      overlapFree, 'an actor work label intersected its owned tool card');
+    await page.click('#live-legend-toggle');
+    check('Legend / Help explains the visual and interaction grammar on demand',
+      await page.locator('#live-legend').isVisible()
+        && /Presence halo/.test(await visibleText(page, '#live-legend'))
+        && /Drag actors or operations/.test(await visibleText(page, '#live-legend')),
+      'legend did not expose status, motion, and drag help');
+    await page.locator('#live-legend-close').click();
+    await page.waitForFunction(() => document.getElementById('live-legend').hidden);
+    check('Legend Close dismisses the dialog and returns focus to Help',
+      await page.locator('#live-legend').isHidden()
+        && await page.evaluate(() => document.activeElement?.id) === 'live-legend-toggle',
+      'Legend Close did not dismiss the dialog accessibly');
+    await page.locator('[data-node="ui-live-tool"]').hover();
+    check('hovering a component exposes an evidence-aware description',
+      await page.locator('#live-tooltip').isVisible()
+        && /Tool/.test(await visibleText(page, '#live-tooltip')),
+      'tool tooltip was missing or did not identify the component');
+    await page.mouse.move(2, 2);
     const healthText = await visibleText(page, '#live-health');
     check('live adapter health renders only status and aggregate counters',
       /claude · ok · 2 files · 8 events · 0 errors/.test(healthText)
@@ -472,17 +690,42 @@ async function main() {
         && !/ui-live-session/.test(sessionIdentity),
       `session identity was ${JSON.stringify(sessionIdentity)}`);
     check('session state uses human evidence language instead of adapter absence',
-      !/Status not reported/.test(await visibleText(page, '#panel-live')),
+      !/Status not reported/.test(await visibleText(page, '#panel-observability')),
       'Live view exposed the missing telemetry field instead of a human session state');
+    check('internal model placeholders never leak into activity callouts',
+      !/<synthetic>/.test(await visibleText(page, '#live-canvas'))
+        && /Response produced/.test(await visibleText(page, '#live-canvas')),
+      'activity callout exposed an internal placeholder or lost its semantic label');
     const workerFreshness = await visibleText(page, '.live-session-child');
     check('sessions without a start boundary show freshness instead of epoch-sized duration',
-      /Working now · (just now|\d+s ago)/.test(workerFreshness)
+      /(Working now|Last active) · (just now|\d+s ago)/.test(workerFreshness)
         && !/\d{4,}h/.test(workerFreshness),
       `worker freshness was ${JSON.stringify(workerFreshness)}`);
     check('Live navigation is project-first and keeps sessions within the selected project',
       await page.locator('#live-project-list [data-project]').count() === 1
-        && /2 sessions/.test(await visibleText(page, '#live-project-list')),
+        && /1 session/.test(await visibleText(page, '#live-project-list')),
       'project catalog did not summarize its sessions');
+    check('Live is the default and excludes historical root sessions',
+      await page.getAttribute('[data-live-scope="live"]', 'aria-selected') === 'true'
+        && await page.locator('[data-session="ui-review-session"]').count() === 0,
+      'historical sessions leaked into the default Live scope');
+    const observabilityTabs = await page.evaluate(() => ({
+      parentClasses: document.getElementById('live-scope-tabs')?.className,
+      roles: [...document.querySelectorAll('[data-live-scope]')].map((item) => item.getAttribute('role')),
+    }));
+    check('Observability uses the shared secondary segmented-tab presentation',
+      /seg/.test(observabilityTabs.parentClasses)
+        && /subseg/.test(observabilityTabs.parentClasses)
+        && observabilityTabs.roles.every((role) => role === 'tab'),
+      `Observability tabs were ${JSON.stringify(observabilityTabs)}`);
+    await page.focus('[data-live-scope="live"]');
+    await page.keyboard.press('ArrowRight');
+    const keyboardHistory = await page.getAttribute('[data-live-scope="history"]', 'aria-selected');
+    await page.keyboard.press('ArrowLeft');
+    check('Observability secondary tabs support arrow-key navigation',
+      keyboardHistory === 'true'
+        && await page.getAttribute('[data-live-scope="live"]', 'aria-selected') === 'true',
+      'Live/History tabs did not follow keyboard focus');
     check('Live navigator enters at projects and drills into a project session history',
       await page.getAttribute('#live-browser', 'data-level') === 'projects',
       'navigator did not enter at the project level');
@@ -491,10 +734,54 @@ async function main() {
       await page.getAttribute('#live-browser', 'data-level') === 'sessions'
         && await page.locator('#live-browser-back').isVisible(),
       'project selection did not reveal the session level');
-    check('running sessions sort before completed review sessions',
+    check('Live project drill-in contains only the active root session',
       await page.locator('#live-session-list [data-session]').first().getAttribute('data-session')
-        === 'ui-live-session',
-      'the live session was not first');
+        === 'ui-live-session'
+        && await page.locator('#live-session-list > .live-session-family').count() === 1,
+      'the Live scope mixed in a historical root session');
+    const liveSessionPresentation = await page.evaluate(() => {
+      const row = document.querySelector('[data-session="ui-live-session"]');
+      const icon = row?.querySelector('.live-host-icon');
+      return {
+        text: row?.textContent,
+        label: row?.getAttribute('aria-label'),
+        iconHost: icon?.dataset.host,
+        iconViewBox: icon?.getAttribute('viewBox'),
+        iconPaths: icon?.querySelectorAll('path').length,
+        iconCircles: icon?.querySelectorAll('circle').length,
+        branchIcon: row?.querySelector('.live-branch-icon') != null,
+        role: row?.getAttribute('role'),
+      };
+    });
+    check('Codex uses the official OpenAI mark and concise branch metadata',
+      liveSessionPresentation.iconHost === 'codex'
+        && liveSessionPresentation.iconViewBox === '146 227 268 267'
+        && liveSessionPresentation.iconPaths === 1
+        && liveSessionPresentation.iconCircles === 0
+        && liveSessionPresentation.branchIcon
+        && !/agentic-kit|Directory:|repo root|Branch:/.test(liveSessionPresentation.text)
+        && /feature\/observability/.test(liveSessionPresentation.text)
+        && /Branch: feature\/observability/.test(liveSessionPresentation.label)
+        && /not attributed to this session/.test(liveSessionPresentation.label),
+      `Codex session presentation was ${JSON.stringify(liveSessionPresentation)}`);
+    check('session rows preserve native button semantics',
+      liveSessionPresentation.role == null,
+      `session role was ${JSON.stringify(liveSessionPresentation.role)}`);
+    await page.click('[data-session="ui-live-session"]');
+    const selectionWorkspace = await page.evaluate(() => {
+      const details = document.getElementById('live-selection-body');
+      return {
+        text: details?.textContent,
+        branchIcon: details?.querySelector('.live-detail-branch .live-branch-icon') != null,
+      };
+    });
+    check('selecting a session exposes persistent workspace capture details',
+      /Working tree at capture/.test(selectionWorkspace.text)
+        && /\+42 \/ −7 lines/.test(selectionWorkspace.text)
+        && /feature\/observability/.test(selectionWorkspace.text)
+        && !/agentic-kit|repo root|Workspace/.test(selectionWorkspace.text)
+        && selectionWorkspace.branchIcon,
+      `session selection details were ${JSON.stringify(selectionWorkspace)}`);
     const boundedTools = await page.evaluate(() => {
       const session = globalThis.AKLive.state.snapshot.sessions
         .find((item) => item.key === 'codex:ui-live-session');
@@ -518,26 +805,103 @@ async function main() {
     check('completed tool history collapses into an owner-associated recent lane',
       boundedTools.visible === 7 && /earlier operations/.test(boundedTools.history),
       `bounded tool rendering was ${JSON.stringify(boundedTools)}`);
+    await page.click('[data-live-scope="history"]');
+    check('History shows retained projects without live root sessions',
+      await page.getAttribute('[data-live-scope="history"]', 'aria-selected') === 'true'
+        && await page.locator('#live-project-list [data-project]').count() === 1,
+      'History did not expose the retained project catalog');
+    await page.click('#live-project-list [data-project]');
+    const historyRows = await page.locator('#live-session-list > .live-session-family > [data-session]')
+      .evaluateAll((rows) => rows.map((row) => row.getAttribute('data-session')));
+    check('History excludes the currently live root session',
+      historyRows.filter((id) => id === 'ui-review-session').length === 1
+        && historyRows.filter((id) => id === 'ui-opencode-session').length === 1
+        && !historyRows.includes('ui-live-session'),
+      `History rows were ${JSON.stringify(historyRows)}`);
+    const openCodePresentation = await page.evaluate(() => {
+      const row = document.querySelector('[data-session="ui-opencode-session"]');
+      const icon = row?.querySelector('.live-host-icon');
+      return {
+        text: row?.textContent,
+        iconHost: icon?.dataset.host,
+        iconViewBox: icon?.getAttribute('viewBox'),
+        paths: icon?.querySelectorAll('path').length,
+        branchIcon: row?.querySelector('.live-branch-icon') != null,
+      };
+    });
+    check('OpenCode uses its official square O asset with the shared session shell',
+      openCodePresentation.iconHost === 'opencode'
+        && openCodePresentation.iconViewBox === '0 0 300 300'
+        && openCodePresentation.paths === 2
+        && openCodePresentation.branchIcon
+        && !/agentic-kit|Directory:|repo root|Branch:/.test(openCodePresentation.text)
+        && /feature\/opencode/.test(openCodePresentation.text),
+      `OpenCode presentation was ${JSON.stringify(openCodePresentation)}`);
     await page.click('[data-session="ui-review-session"]');
-    await page.waitForSelector('#live-mode[data-mode="review"]');
+    await page.waitForSelector('#live-mode[data-mode="history"]');
     await page.waitForFunction(() => !document.getElementById('live-playback-range').disabled);
-    check('completed sessions enter a clearly distinguished review mode',
-      /REVIEW/.test(await visibleText(page, '#live-mode'))
+    check('Claude sidechain actors appear as nested worker views without fabricating sessions',
+      await page.locator('[data-actor="claude-reviewer"]').count() === 1
+        && /Worker view/.test(await visibleText(page, '[data-actor="claude-reviewer"]')),
+      'Claude embedded actor was not exposed as a nested actor lens');
+    check('completed sessions enter clearly distinguished historical playback',
+      /HISTORY/.test(await visibleText(page, '#live-mode'))
         && !(await page.locator('#live-playback-range').isDisabled())
         && !(await page.locator('#live-resume-live').isVisible()),
-      'review badge or playback controls were unavailable');
+      'History badge or playback controls were unavailable');
+    const playbackLayout = await page.evaluate(() => {
+      const canvas = document.getElementById('live-canvas')?.getBoundingClientRect();
+      const playback = document.getElementById('live-playback')?.getBoundingClientRect();
+      const guidance = document.getElementById('live-map-guidance')?.getBoundingClientRect();
+      return {
+        canvasBottom: canvas?.bottom,
+        playbackTop: playback?.top,
+        guidanceBottom: guidance?.bottom,
+      };
+    });
+    check('History playback is reserved below the map and cannot cover map guidance',
+      playbackLayout.canvasBottom <= playbackLayout.playbackTop + 1
+        && playbackLayout.guidanceBottom < playbackLayout.playbackTop,
+      `playback layout overlapped the map ${JSON.stringify(playbackLayout)}`);
+    const historyMotion = await page.evaluate(() => ({
+      working: document.querySelectorAll('#live-canvas [data-status="working"]').length,
+      present: document.querySelectorAll('#live-canvas [data-presence="present"]').length,
+      activeEdges: document.querySelectorAll('#live-canvas .live-edge[data-active="true"]').length,
+      particles: document.querySelectorAll('#live-canvas .live-flow-dot, #live-canvas animateMotion').length,
+      projectLive: document.querySelectorAll('#live-project-list [data-live="true"]').length,
+      auraAnimation: getComputedStyle(document.querySelector('#live-canvas .node-aura')).animationName,
+      followHidden: document.getElementById('live-transcript-follow').hidden,
+      heading: document.getElementById('observability-title').textContent,
+      connection: document.getElementById('live-state-text').textContent,
+    }));
+    check('History is neutral and inert even when retained records once said running',
+      historyMotion.working === 0 && historyMotion.present === 0
+        && historyMotion.activeEdges === 0 && historyMotion.particles === 0
+        && historyMotion.projectLive === 0 && historyMotion.auraAnimation === 'none'
+        && historyMotion.followHidden && /history/i.test(historyMotion.heading)
+        && !/following agent activity/i.test(historyMotion.connection),
+      `History leaked live presentation ${JSON.stringify(historyMotion)}`);
     const reviewToolsAtEnd = await page.locator('#live-tools .live-tool').count();
     await page.fill('#live-playback-range', '0');
     const reviewToolsAtStart = await page.locator('#live-tools .live-tool').count();
     check('seeking deterministically rebuilds the cinematic canvas at the playhead',
       reviewToolsAtEnd === 1 && reviewToolsAtStart === 0,
       `review tools changed ${reviewToolsAtEnd} -> ${reviewToolsAtStart}`);
+    const playbackSpeeds = await page.locator('#live-playback-speed option')
+      .evaluateAll((options) => options.map((option) => option.value));
+    await page.selectOption('#live-playback-speed', '10');
+    check('Historical playback offers and applies 5× and 10× review speeds',
+      playbackSpeeds.includes('5') && playbackSpeeds.includes('10')
+        && await page.evaluate(() => globalThis.AKLive.state.playback.speed) === 10,
+      `playback speeds were ${JSON.stringify(playbackSpeeds)}`);
     await page.click('#live-playback-toggle');
     check('review controls expose play state, speed, seek, and resume-live',
       await page.getAttribute('#live-playback-toggle', 'aria-label') === 'Pause session review'
         && await page.locator('#live-playback-speed').isVisible(),
       'playback controls did not enter playing state');
     await page.click('#live-playback-toggle');
+    await page.click('[data-live-scope="live"]');
+    await page.click('#live-project-list [data-project]');
     await page.click('[data-session="ui-live-session"]');
     await page.waitForSelector('#live-mode[data-mode="live"]');
     check('an active session offers explicit review while it continues live',
@@ -698,6 +1062,17 @@ async function main() {
     check('dragging an agent pins it in the visual model',
       await page.getAttribute('[data-node="ui-live-agent"]', 'data-pinned') === 'true',
       'dragged node was not pinned');
+    const toolBox = await page.locator('[data-node="ui-live-tool"]').boundingBox();
+    const toolBefore = await page.getAttribute('[data-node="ui-live-tool"]', 'transform');
+    await page.mouse.move(toolBox.x + toolBox.width / 2, toolBox.y + toolBox.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(toolBox.x + toolBox.width / 2 + 44, toolBox.y + toolBox.height / 2 + 30,
+      { steps: 4 });
+    await page.mouse.up();
+    check('individual tool cards are draggable and pinned like actors',
+      await page.getAttribute('[data-node="ui-live-tool"]', 'transform') !== toolBefore
+        && await page.getAttribute('[data-node="ui-live-tool"]', 'data-pinned') === 'true',
+      'tool card did not move into a pinned position');
     const cameraBeforeDelta = await page.evaluate(() => ({ ...globalThis.AKLive.state.camera }));
     await page.evaluate(() => globalThis.AKLive.receive('delta', {
       eventId: 'live:position-persist', sessionId: 'ui-live-session',
@@ -779,13 +1154,54 @@ async function main() {
       await page.getAttribute('[data-node="ui-live-session"]', 'transform') === stableBefore,
       'existing node position changed');
 
+    const emptyLive = await page.evaluate(() => {
+      globalThis.__akSnapshotBeforeEmptyLive = structuredClone(globalThis.AKLive.state.snapshot);
+      globalThis.AKLive.state.snapshot.sessions = globalThis.AKLive.state.snapshot.sessions.map((session) => ({
+        ...session,
+        status: session.status === 'failed' ? 'failed' : 'completed',
+        lifecycle: 'historical',
+        presence: { ...(session.presence || {}), state: 'absent' },
+        activity: { ...(session.activity || {}), state: 'idle', currentOperationId: null },
+      }));
+      globalThis.AKLive.state.scope = 'live';
+      globalThis.AKLive.state.project = null;
+      globalThis.AKLive.state.selected = null;
+      globalThis.AKLive.state.browserLevel = 'projects';
+      globalThis.AKLive.render();
+      return {
+        projects: document.querySelectorAll('#live-project-list [data-project]').length,
+        sessions: document.querySelectorAll('#live-session-list [data-session]').length,
+        count: document.getElementById('live-project-count').textContent,
+        summary: document.getElementById('live-view-summary').textContent,
+      };
+    });
+    check('empty Live remains empty instead of borrowing recent History',
+      emptyLive.projects === 0 && emptyLive.sessions === 0 && emptyLive.count === '0'
+        && /No live sessions across 0 projects/.test(emptyLive.summary),
+      `empty Live rendered ${JSON.stringify(emptyLive)}`);
+    await page.click('[data-live-scope="history"]');
+    check('the same retained sessions remain available only through History',
+      await page.locator('#live-project-list [data-project]').count() > 0,
+      'History did not reveal retained projects after empty Live');
+    await page.evaluate(() => {
+      globalThis.AKLive.state.snapshot = globalThis.__akSnapshotBeforeEmptyLive;
+      delete globalThis.__akSnapshotBeforeEmptyLive;
+      globalThis.AKLive.state.scope = 'live';
+      globalThis.AKLive.state.project = null;
+      globalThis.AKLive.state.selected = null;
+      document.querySelectorAll('[data-live-scope]').forEach((item) => {
+        item.setAttribute('aria-selected', String(item.dataset.liveScope === 'live'));
+      });
+      globalThis.AKLive.render();
+    });
+
     await page.click('[data-tab="usage"]');
     check('leaving Live tears down graph and transcript EventSources',
       await page.evaluate(() => globalThis.AKLive.state.source === null
         && globalThis.AKLive.state.transcript.source === null
         && globalThis.AKLive.state.active === false),
       'a live source remained active');
-    await page.click('[data-tab="live"]');
+    await page.click('[data-tab="observability"]');
     await page.waitForTimeout(250);
     check('returning to Live creates exactly one active stream',
       await page.evaluate(() => !!globalThis.AKLive.state.source && globalThis.AKLive.state.active === true),
@@ -801,6 +1217,13 @@ async function main() {
       await shoot(page, `usage-${view}`);
 
       check(`usage/${view} renders`, text.trim().length > 10, 'view was effectively empty');
+      const heading = await page.evaluate(() => ({
+        title: document.getElementById('usage-view-title')?.textContent?.trim(),
+        description: document.getElementById('usage-view-description')?.textContent?.trim(),
+      }));
+      check(`usage/${view} has a stable heading and light description`,
+        heading.title?.length > 3 && heading.description?.length > 12,
+        `heading was ${JSON.stringify(heading)}`);
       const arts = artifactsIn(text);
       check(`usage/${view} is free of rendering artifacts`, arts.length === 0,
         `found ${arts.join(', ')} — this is the class of bug unit tests cannot see`);
@@ -892,7 +1315,9 @@ async function main() {
     // inspectable from the running panel (tooltip) WITHOUT being promoted into
     // the visible sub-line — so both halves are asserted.
     await openHash('#usage');
-    const totals = await fetch(`${BASE}/api/usage?days=14`)
+    const totals = await fetch(`${BASE}/api/usage?days=14`, {
+      headers: { 'x-dash-token': srv.token },
+    })
       .then((r) => r.json()).then((d) => d.totals || {}).catch(() => ({}));
     check('the usage aggregate is reachable for computing expectations',
       Number.isFinite(Number(totals.engagedSeconds)),
@@ -1227,7 +1652,7 @@ async function main() {
     check('clicking the caret again collapses the row', afterClick2.aria === 'false' && !afterClick2.open,
       `aria-expanded=${afterClick2.aria}, strip visible=${afterClick2.open}`);
 
-    // the strip contents — five labelled lines, all rendered from data already
+    // the strip contents — identity plus five usage/classification lines, all rendered from data already
     // on the wire (ADR-0009 §5). `basis` is a STRING contract; an object there
     // renders "[object Object]", which the artifact net below is aimed at.
     const openStrip = (id) => page.evaluate((sid) => {
@@ -1248,11 +1673,11 @@ async function main() {
       check(`the ${WT_ID} detail strip renders`, !wtStrip.missing && (wtStrip.lines || []).length > 0,
         `missing: ${wtStrip.missing || 'strip was empty'}`);
       if (!wtStrip.missing) {
-        for (const label of ['basis', 'models', 'tokens', 'tools', 'flags']) {
+        for (const label of ['execution host', 'inference provider', 'models', 'basis', 'tokens', 'tools', 'flags']) {
           check(`detail strip shows the "${label}" line`, new RegExp(`\\b${label}\\b`, 'i').test(wtStrip.text),
             `strip text was ${JSON.stringify(wtStrip.text.slice(0, 240))}`);
         }
-        check('detail strip has all five lines', wtStrip.lines.length >= 5,
+        check('detail strip has all seven identity and usage lines', wtStrip.lines.length >= 7,
           `strip rendered ${wtStrip.lines.length} non-empty line(s): ${JSON.stringify(wtStrip.lines)}`);
         check('the basis line carries the confidence alongside it', /conf\s*0?\.\d+/i.test(wtStrip.text),
           `no "(conf 0.xx)" in ${JSON.stringify(wtStrip.text.slice(0, 240))}`);

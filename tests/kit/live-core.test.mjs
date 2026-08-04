@@ -1,12 +1,14 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import {
   createLiveEvent, LiveReplayStream, emptyLiveProjection,
+  inspectGitWorkspace, parseGitNumstat,
   reduceLiveEvent, resolveProjectIdentity, resolveProjectLabel, serializeLiveProjection,
-  sweepLiveProjection, stableProjectKey,
+  sweepLiveProjection, stableProjectKey, WorkspaceSnapshotStore,
 } from '../../src/lib/live/index.mjs';
 
 const base = (over = {}) => ({
@@ -24,7 +26,7 @@ test('event schema constructs an allowlisted DTO and cannot leak transcript cont
     source: { adapter: 'fixture', confidence: 'observed', raw: 'secret' },
     attributes: { durationMs: -5, toolCategory: 'Read', arguments: '/private/file' },
   });
-  assert.equal(event.schemaVersion, 1);
+  assert.equal(event.schemaVersion, 2);
   assert.equal(event.attributes.durationMs, 0);
   assert.equal(event.attributes.toolCategory, 'Read');
   const json = JSON.stringify(event);
@@ -41,6 +43,18 @@ test('event schema preserves explicit blocked evidence', () => {
   assert.equal(createLiveEvent(base({ status: 'blocked' })).status, 'blocked');
 });
 
+test('event schema gives presence, operation and relationship evidence distinct signals', () => {
+  assert.deepEqual(createLiveEvent(base({
+    action: 'session.heartbeat', status: 'running',
+  })).signal, { kind: 'presence', phase: 'observed', correlationId: null });
+  assert.deepEqual(createLiveEvent(base({
+    action: 'tool.started', target: { id: 'call', kind: 'tool' },
+  })).signal, { kind: 'operation', phase: 'started', correlationId: null });
+  assert.deepEqual(createLiveEvent(base({
+    action: 'agent.spawned', target: { id: 'worker', kind: 'subagent' },
+  })).signal, { kind: 'relationship', phase: 'observed', correlationId: null });
+});
+
 test('event schema preserves retired compatibility provenance as internal', () => {
   assert.equal(createLiveEvent(base({ surface: 'dual-run' })).surface, 'internal');
 });
@@ -54,6 +68,129 @@ test('event schema assigns privacy-safe project and host-qualified session ident
   assert.equal(event.projectKey, stableProjectKey('Visible Project'));
   assert.equal(event.sessionKey, 'claude:shared:id');
   assert.ok(!JSON.stringify(event).includes('/Users/private'));
+});
+
+test('workspace telemetry rejects absolute paths and masks secret-shaped branch text', () => {
+  const event = createLiveEvent(base({
+    workspace: {
+      key: 'workspace:0123456789abcdef', repositoryLabel: '/Users/private/repo',
+      directoryLabel: '/Users/private/repo/backend',
+      branchLabel: 'feature/token=abcdefghijklmnop', branchState: 'attached',
+      changes: { additions: 4, deletions: 2, files: 1, binaryFiles: 0,
+        basis: 'tracked-vs-head' },
+      capturedAt: '2026-07-27T12:00:00Z', source: 'git', confidence: 'observed',
+    },
+  }));
+  assert.equal(event.workspace.repositoryLabel, null);
+  assert.equal(event.workspace.directoryLabel, null);
+  assert.equal(event.workspace.branchLabel, 'feature/…redacted');
+  assert.deepEqual(event.workspace.changes, {
+    additions: 4, deletions: 2, files: 1, binaryFiles: 0,
+    basis: 'tracked-vs-head', completeness: null,
+    capturedAt: '2026-07-27T12:00:00.000Z',
+  });
+  assert.ok(!JSON.stringify(event).includes('/Users/private'));
+  assert.ok(!JSON.stringify(event).includes('abcdefghijklmnop'));
+});
+
+test('Git workspace inspection reports tracked state without filenames or attribution', async () => {
+  assert.deepEqual(parseGitNumstat('4\t2\tsrc/private.mjs\n-\t-\tasset.bin\n'), {
+    additions: 4, deletions: 2, files: 2, binaryFiles: 1,
+  });
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-live-workspace-'));
+  fs.mkdirSync(path.join(root, 'backend'), { recursive: true });
+  // Exercise the real Git boundary in a disposable repository.
+  execFileSync('git', ['init', '-q', '-b', 'feature/workspace', root]);
+  execFileSync('git', ['-C', root, 'config', 'user.email', 'test@example.invalid']);
+  execFileSync('git', ['-C', root, 'config', 'user.name', 'Test']);
+  fs.writeFileSync(path.join(root, 'tracked.txt'), 'one\ntwo\n');
+  execFileSync('git', ['-C', root, 'add', 'tracked.txt']);
+  execFileSync('git', ['-C', root, 'commit', '-qm', 'fixture']);
+  fs.writeFileSync(path.join(root, 'tracked.txt'), 'one\nthree\nfour\n');
+  fs.writeFileSync(path.join(root, 'untracked-secret.txt'), 'not counted\n');
+  const workspace = await inspectGitWorkspace(path.join(root, 'backend'), {
+    cache: new Map(), now: () => '2026-07-27T12:00:00Z',
+  });
+  assert.equal(workspace.repositoryLabel, path.basename(root));
+  assert.equal(workspace.directoryLabel, 'backend');
+  assert.equal(workspace.branchLabel, 'feature/workspace');
+  assert.deepEqual(workspace.changes, {
+    additions: 2, deletions: 1, files: 1, binaryFiles: 0,
+    basis: 'tracked-vs-head', completeness: 'untracked-and-binary-lines-excluded',
+    capturedAt: '2026-07-27T12:00:00Z',
+  });
+  const json = JSON.stringify(workspace);
+  assert.ok(!json.includes(root));
+  assert.ok(!json.includes('tracked.txt'));
+  assert.ok(!json.includes('untracked-secret.txt'));
+});
+
+test('workspace snapshot store retains only safe last-recorded metadata', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-live-store-'));
+  const file = path.join(dir, 'observability-workspaces.json');
+  const store = new WorkspaceSnapshotStore(file);
+  assert.equal(store.remember({
+    sessionKey: 'opencode:session-1', sessionId: 'session-1', host: 'opencode',
+    project: 'repo', projectKey: 'project:abc',
+    workspace: {
+      key: 'workspace:0123456789abcdef', repositoryLabel: 'repo',
+      directoryLabel: '/Users/private/repo', branchLabel: 'main', branchState: 'attached',
+      changes: { additions: 2, deletions: 1, files: 1, binaryFiles: 0,
+        basis: 'tracked-vs-head' },
+      capturedAt: '2026-07-27T12:00:00Z', source: 'git', confidence: 'observed',
+    },
+  }), true);
+  const saved = fs.readFileSync(file, 'utf8');
+  assert.ok(!saved.includes('/Users/private'));
+  assert.equal(fs.statSync(file).mode & 0o777, 0o600);
+  assert.equal(new WorkspaceSnapshotStore(file).records()[0].host, 'opencode');
+  assert.equal(new WorkspaceSnapshotStore(file).records()[0].workspace.directoryLabel, null);
+});
+
+test('workspace store re-sanitizes records and does not expose mutable internals', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-live-store-mutation-'));
+  const file = path.join(dir, 'observability-workspaces.json');
+  const store = new WorkspaceSnapshotStore(file);
+  const baseRecord = {
+    sessionKey: 'claude:session-1', sessionId: 'session-1', host: 'claude',
+    project: '/Users/private/repo', projectKey: '/Users/private/repo',
+    workspace: {
+      key: 'workspace:0123456789abcdef', repositoryLabel: 'repo', directoryLabel: 'repo root',
+      branchLabel: 'main', branchState: 'attached', changes: null,
+      capturedAt: '2026-07-27T12:00:00Z', source: 'git', confidence: 'observed',
+    },
+  };
+  store.remember(baseRecord);
+  const exposed = store.records();
+  exposed[0].workspace.branchLabel = 'token=abcdefghijklmnop';
+  store.remember({ ...baseRecord, workspace: { ...baseRecord.workspace, branchLabel: 'next',
+    capturedAt: '2026-07-27T12:01:00Z' } });
+  const saved = fs.readFileSync(file, 'utf8');
+  assert.ok(!saved.includes('/Users/private'));
+  assert.ok(!saved.includes('abcdefghijklmnop'));
+  assert.equal(new WorkspaceSnapshotStore(file).records()[0].workspace.branchLabel, 'next');
+});
+
+test('Git workspace inspection ignores inherited repository-routing variables', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-live-git-env-'));
+  const expected = path.join(root, 'expected');
+  const redirected = path.join(root, 'redirected');
+  for (const repository of [expected, redirected]) {
+    fs.mkdirSync(repository);
+    execFileSync('git', ['init', '-q', '-b', path.basename(repository), repository]);
+  }
+  const priorDir = process.env.GIT_DIR;
+  const priorTree = process.env.GIT_WORK_TREE;
+  process.env.GIT_DIR = path.join(redirected, '.git');
+  process.env.GIT_WORK_TREE = redirected;
+  try {
+    const workspace = await inspectGitWorkspace(expected, { cache: new Map() });
+    assert.equal(workspace.repositoryLabel, 'expected');
+    assert.equal(workspace.branchLabel, 'expected');
+  } finally {
+    if (priorDir == null) delete process.env.GIT_DIR; else process.env.GIT_DIR = priorDir;
+    if (priorTree == null) delete process.env.GIT_WORK_TREE; else process.env.GIT_WORK_TREE = priorTree;
+  }
 });
 
 test('project identity resolves linked and retained worktrees to their owning repository', () => {
@@ -157,6 +294,65 @@ test('projection adds typed nodes and stable relationship edges immutably', () =
   assert.equal(json.sessions[0].edges[0].confidence, 'observed');
 });
 
+test('started operations remain visibly in flight in a fresh snapshot', () => {
+  const event = {
+    ...createLiveEvent(base({
+      action: 'tool.started', target: { id: 'call-1', kind: 'tool' },
+      attributes: { toolName: 'Read' },
+    })), eventId: 'ak:tool-started',
+  };
+  const session = serializeLiveProjection(reduceLiveEvent(emptyLiveProjection(), event)).sessions[0];
+  const tool = session.nodes.find((node) => node.id === 'call-1');
+  assert.equal(tool.status, 'running');
+  assert.equal(tool.lastSignal.kind, 'operation');
+  assert.equal(tool.lastSignal.phase, 'started');
+  assert.equal(session.activity.currentOperationId, 'call-1');
+});
+
+test('presence evidence never overwrites the last meaningful activity', () => {
+  const activity = {
+    ...createLiveEvent(base({
+      actor: { id: 'worker', kind: 'subagent' }, action: 'agent.output',
+      observedAt: '2026-07-27T12:00:01Z',
+    })), eventId: 'ak:activity',
+  };
+  const heartbeat = {
+    ...createLiveEvent(base({
+      actor: { id: 'worker', kind: 'subagent' }, action: 'session.heartbeat',
+      observedAt: '2026-07-27T12:00:02Z', source: {
+        adapter: 'runtime-process', confidence: 'observed',
+      },
+    })), eventId: 'ak:heartbeat',
+  };
+  const snapshot = serializeLiveProjection(reduceLiveEvent(
+    reduceLiveEvent(emptyLiveProjection(), activity), heartbeat,
+  ));
+  const session = snapshot.sessions[0];
+  const worker = session.nodes.find((node) => node.id === 'worker');
+  assert.equal(session.presence.state, 'present');
+  assert.equal(session.activity.state, 'working');
+  assert.equal(worker.lastAction, 'agent.output');
+  assert.equal(worker.lastSignal.kind, 'activity');
+});
+
+test('OpenCode runtime presence discloses capability limits without inventing work', () => {
+  const event = {
+    ...createLiveEvent(base({
+      sessionId: 'oc1', host: 'opencode', action: 'session.heartbeat',
+      actor: { id: 'oc1', kind: 'session' }, source: {
+        adapter: 'runtime-process', confidence: 'observed',
+      },
+    })), eventId: 'ak:opencode-presence',
+  };
+  const session = serializeLiveProjection(reduceLiveEvent(emptyLiveProjection(), event)).sessions[0];
+  assert.equal(session.presence.state, 'present');
+  assert.equal(session.activity.state, 'unknown');
+  assert.equal(session.coverage.activity, 'presence-only');
+  assert.equal(session.coverage.hierarchy, 'unavailable');
+  assert.equal(session.coverage.transcript, 'unavailable');
+  assert.ok(session.limitations.includes('detailed-activity-not-reported'));
+});
+
 test('projection preserves safe display metadata and event provenance on resource nodes', () => {
   const started = {
     ...createLiveEvent(base({
@@ -202,6 +398,26 @@ test('projection retains provider, provenance and model when later evidence lack
   assert.equal(node.providerProvenance, 'observed');
   assert.equal(node.model, 'gpt-x');
   assert.equal(node.lastAction, 'agent.output');
+});
+
+test('runtime presence cannot downgrade observed provider identity', () => {
+  let projection = reduceLiveEvent(emptyLiveProjection(), createLiveEvent({
+    sessionId: 's1', host: 'claude', project: 'kit', observedAt: '2026-08-03T16:00:00Z',
+    actor: { id: 's1', kind: 'session', provider: 'openrouter' },
+    action: 'session.input', status: 'running',
+    source: { adapter: 'claude-transcript', confidence: 'observed',
+      fields: { provider: 'observed' } },
+  }));
+  projection = reduceLiveEvent(projection, createLiveEvent({
+    sessionId: 's1', host: 'claude', project: 'kit', observedAt: '2026-08-03T16:00:02Z',
+    actor: { id: 's1', kind: 'session', provider: 'anthropic' },
+    action: 'session.heartbeat', status: 'running',
+    source: { adapter: 'runtime-process', confidence: 'observed',
+      fields: { provider: 'inferred' } },
+  }));
+  const actor = projection.sessions.get('claude:s1').nodes.get('s1');
+  assert.equal(actor.provider, 'openrouter');
+  assert.equal(actor.providerProvenance, 'observed');
 });
 
 test('projection is idempotent by eventId and preserves terminal state', () => {
@@ -328,7 +544,12 @@ test('lifecycle sweep holds sessions with executing tools active until the pendi
     now: '2026-07-27T13:00:00Z', quiescentMs: 10_000, expiryMs: 120_000,
     pendingExpiryMs: 1_800_000,
   });
-  assert.equal(abandoned.sessions.get('claude:s1').lifecycle, 'expired');
+  const abandonedSession = abandoned.sessions.get('claude:s1');
+  assert.equal(abandonedSession.lifecycle, 'expired');
+  assert.equal(abandonedSession.activity.state, 'idle');
+  assert.equal(abandonedSession.activity.currentOperationId, null);
+  assert.equal(abandonedSession.nodes.get('call-1').status, 'running');
+  assert.equal(serializeLiveProjection(abandoned).projects[0].liveCount, 0);
 });
 
 test('lifecycle sweep resumes normal demotion once the pending tool completes', () => {
@@ -379,7 +600,7 @@ test('only fresh running execution evidence is active; ledger and unknown eviden
   assert.equal(active.sessions.get('claude:s1').lifecycle, 'active');
 });
 
-test('project live counts require both running status and active lifecycle', () => {
+test('project live counts require canonical current evidence, not retained running status', () => {
   let projection = emptyLiveProjection();
   for (const [id, status, adapter] of [
     ['unknown', 'unknown', 'codex-state'],
@@ -484,6 +705,8 @@ test('projection keeps identical provider session IDs distinct and catalogs them
     sessionCount: 2,
     childSessionCount: 0,
     liveCount: 1,
+    presentCount: 0,
+    workingCount: 1,
     completedCount: 1,
     hosts: { claude: 1, codex: 1 },
     providers: { anthropic: 1, openai: 1 },
@@ -513,6 +736,7 @@ test('projection reconciles late parentage and catalogs only root sessions', () 
       actor: { id: 'child', kind: 'session', provider: 'openai' },
       action: 'session.discovered', status: 'unknown',
       observedAt: '2026-07-27T12:05:00Z',
+      sourceTimestamp: '2026-07-27T12:05:00Z',
     })), eventId: 'ak:1',
   };
   const authoritativeParentage = {

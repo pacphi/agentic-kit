@@ -19,4 +19,8 @@ export {
 export {
   hostFromCommand, listActiveHostSessions, parseLsofCwds, parseProcessList,
 } from './process-sessions.mjs';
+export {
+  inspectGitWorkspace, parseGitNumstat, workspaceFromSource,
+} from './git-workspace.mjs';
+export { WorkspaceSnapshotStore } from './workspace-store.mjs';
 export { LiveSessionsService } from './live-sessions-service.mjs';

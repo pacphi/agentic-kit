@@ -181,7 +181,7 @@ transcript content leaves the module, and every step is a gate:
 ### 4.1 Locate, contain, bound
 
 1. **Id grammar before any filesystem access** — `VALID_ID`
-   (`/^[A-Za-z0-9._-]{1,128}$/`, `usage-index.mjs:71`) rejects traversal
+   (`/^[A-Za-z0-9._-]{1,128}$/`, `usage-index.mjs:83`) rejects traversal
    shapes with `ERR_INVALID_SESSION_ID` (`usage-index.mjs:1260`).
 2. **Locate by id** across both roots (`locate`, `usage-index.mjs:1267`),
    consulting the scan cache when present but never requiring it —
@@ -207,10 +207,10 @@ hardcoded `$0.00`; the comment at the site records why).
 
 ### 4.3 Mask, then truncate — both marked, differently
 
-Every turn body is passed through `maskSecrets` (`usage-index.mjs:184` — the
+Every turn body is passed through `maskSecrets` (`usage-index.mjs:196` — the
 23 secret shapes) **server-side, before
 serialization**, then length-capped at `MAX_TURN_CHARS` (40,000,
-`usage-index.mjs:65`) with the marker appended
+`usage-index.mjs:77`) with the marker appended
 (`usage-index.mjs:1404-1414`). Two invariants:
 
 - **Presence is the signal.** `truncated`/`originalChars` are emitted only
@@ -356,10 +356,10 @@ was wrong before, for the curious.
   context injections — ~93% of its "you" turns (§3.1's measured split). The
   turn-`kind` machinery in §3 is the fix.
 - **Prompt counts included harness output (SCHEMA_VERSION 5).**
-  `isHumanPrompt` once counted harness-output envelopes as human prompts —
+  `isHumanPrompt` once counted `harness-output` envelopes as human prompts —
   32 claimed vs 20 real on the reference session. Cached session records
   carried the inflated counts, hence the wholesale `SCHEMA_VERSION` 5 cache
-  invalidation (`usage-index.mjs:47-51`).
+  invalidation (`usage-index.mjs:48-51`).
 - **Session expander fields shipped but unrendered.** The per-session fields
   §6.1's expander now renders (classification `basis` + confidence, the
   token split, flags) once travelled on the wire and rendered nowhere.

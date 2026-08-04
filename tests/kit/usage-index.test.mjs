@@ -363,7 +363,8 @@ test('Codex tokens come from the LAST token_count event, never the sum', async (
 
   assert.ok(s, 'codex session present');
   assert.equal(s.host, 'codex');
-  assert.equal(s.provider, null);
+  assert.equal(s.provider, 'openai');
+  assert.equal(s.providerProvenance, 'observed');
   assert.equal(s.transcriptProvider, 'codex');
   // Last event: input_tokens 3000, cached_input_tokens 1200, output 300.
   // Summing the two events would give 4000/1600/400 — that is the bug this guards.
@@ -605,7 +606,7 @@ test('byDay, byModel, byHost, byProvider, byProject and byCategory partition the
   assert.equal(sum(agg.byProject), agg.totals.tokens);
   assert.equal(sum(agg.byCategory), agg.totals.tokens);
   assert.deepEqual(Object.keys(agg.byHost).sort(), ['claude', 'codex']);
-  assert.deepEqual(Object.keys(agg.byProvider), ['unknown']);
+  assert.deepEqual(Object.keys(agg.byProvider).sort(), ['openai', 'unknown']);
   // byDay keys are LOCAL calendar days, so a far-eastern tz may split the
   // fixtures' 09:00–12:00Z across two adjacent days. Both are in-window.
   for (const day of Object.keys(agg.byDay)) {
@@ -986,7 +987,8 @@ test('readSession works without a prior buildIndex (no cache to consult)', async
   const { meta } = await readSession('dddd4444', opts(sb));
   assert.equal(meta.id, 'dddd4444');
   assert.equal(meta.host, 'codex');
-  assert.equal(meta.provider, null);
+  assert.equal(meta.provider, 'openai');
+  assert.equal(meta.providerProvenance, 'observed');
   assert.equal(meta.transcriptProvider, 'codex');
 });
 

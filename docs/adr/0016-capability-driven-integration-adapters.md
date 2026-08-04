@@ -16,7 +16,7 @@
   [ADR-0009](0009-usage-scorecard-local-transcript-analytics.md),
   [ADR-0010](0010-provider-mediated-quota-reads.md),
   [ADR-0011](0011-local-model-provenance-zero-cost-and-transcript-fidelity.md),
-  [ADR-0012](0012-live-sessions-observability.md),
+  [ADR-0012](0012-observability.md),
   [ADR-0015](0015-managed-codex-native-statusline.md),
   [issue #59](https://github.com/pacphi/agentic-kit/issues/59),
   [issue #71](https://github.com/pacphi/agentic-kit/issues/71)

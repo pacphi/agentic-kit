@@ -2,6 +2,7 @@ import { execFile } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { promisify } from 'node:util';
+import { inspectGitWorkspace } from './git-workspace.mjs';
 
 const execFileAsync = promisify(execFile);
 const HOST_NAMES = new Map([
@@ -112,6 +113,7 @@ async function darwinCwds(pids, run) {
  *     pid:number, ppid:number, startedAt:string, executable:string, command:string
  *   }>,
  *   cwdByPid?: Map<number, string>
+ *   inspectWorkspace?: typeof inspectGitWorkspace
  * }} [options]
  */
 export async function listActiveHostSessions({
@@ -119,6 +121,7 @@ export async function listActiveHostSessions({
   execFileImpl = execFileAsync,
   processRows,
   cwdByPid,
+  inspectWorkspace = (cwd) => inspectGitWorkspace(cwd, { execFileImpl }),
 } = {}) {
   if (platform === 'win32') {
     throw Object.assign(new Error('runtime process survey is unsupported on Windows'), {
@@ -130,8 +133,15 @@ export async function listActiveHostSessions({
     try {
       const result = await execFileImpl('ps', [
         '-axo', 'pid=,ppid=,lstart=,comm=,args=',
-      ], { encoding: 'utf8', timeout: 3000, maxBuffer: 4 * 1024 * 1024 });
-      rows = parseProcessList(typeof result === 'string' ? result : result.stdout);
+      ], { encoding: 'utf8', timeout: 3000, maxBuffer: 4 * 1024 * 1024,
+        env: { ...process.env, LC_ALL: 'C' } });
+      const output = typeof result === 'string' ? result : result.stdout;
+      rows = parseProcessList(output);
+      if (String(output ?? '').trim() && !rows.length) {
+        throw Object.assign(new Error('runtime process output was not understood'), {
+          code: 'ERR_RUNTIME_PROCESS_FORMAT',
+        });
+      }
     } catch {
       throw Object.assign(new Error('runtime process survey failed'), {
         code: 'ERR_RUNTIME_PROCESS_SURVEY',
@@ -142,9 +152,17 @@ export async function listActiveHostSessions({
   const pids = controllers.map((row) => row.pid);
   const cwds = cwdByPid ?? (platform === 'linux'
     ? await linuxCwds(pids) : await darwinCwds(pids, execFileImpl));
+  const workspaceByCwd = new Map();
+  await Promise.all([...new Set(cwds.values())].map(async (cwd) => {
+    try { workspaceByCwd.set(cwd, await inspectWorkspace(cwd)); }
+    catch { workspaceByCwd.set(cwd, null); }
+  }));
   return controllers.flatMap((row) => {
     const cwd = cwds.get(row.pid);
-    return typeof cwd === 'string' && path.isAbsolute(cwd)
-      ? [{ pid: row.pid, startedAt: row.startedAt, host: row.host, cwd }] : [];
+    if (typeof cwd !== 'string' || !path.isAbsolute(cwd)) return [];
+    const workspace = workspaceByCwd.get(cwd);
+    return workspace
+      ? [{ pid: row.pid, startedAt: row.startedAt, host: row.host, cwd, workspace }]
+      : [{ pid: row.pid, startedAt: row.startedAt, host: row.host, cwd }];
   }).sort((left, right) => left.pid - right.pid);
 }

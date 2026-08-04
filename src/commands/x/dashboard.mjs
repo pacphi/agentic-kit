@@ -22,7 +22,7 @@ Serves a self-contained web panel that visualizes the same subsystem rows
 \`ak status\` reports — versions, natives, security, learning, providers, hosts,
 mcp, ruvnet-brain, aqe — plus version drift, a learning-history sparkline, and
 (on the Usage tab) full session transcripts. Bound to 127.0.0.1; health
-polling defaults to 30s and the Live tab streams metadata with SSE. Read-only:
+polling defaults to 30s and the Observability tab streams metadata with SSE. Read-only:
 it never changes state. Nothing leaves your machine — the page is fully
 self-contained (no external fetches, no internet).
 

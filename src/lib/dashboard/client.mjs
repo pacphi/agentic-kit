@@ -16,7 +16,7 @@ export const JS = `
 (function(){
   "use strict";
   var root=document.documentElement;
-  var LS="ak-dash-theme", LS_TAB="ak-dash-tab";
+  var LS="ak-dash-theme", LS_TAB="ak-dash-tab", LS_OVERVIEW="ak-dash-overview-view";
 
   // Dashboard-wide session token (ADR-0014). Bootstrap is idempotent and
   // duplicated from live-view.mjs's copy (separate <script> scope, no shared
@@ -76,32 +76,41 @@ export const JS = `
   // ── tabs (segmented control) ──
   // Category map (from ./groups.mjs — see that file): every subsystem lands in
   // exactly one tab; unknown/future subsystems fall back to Runtime.
-  var TABS=["overview","hosts","providers","runtime","intel","usage","live"];
+  var TABS=["overview","usage","observability"];
+  var OVERVIEW_VIEWS=["summary","hosts","providers","runtime","intel"];
   var VIEWS=["score","limits","findings","sessions","transcript"];
   var CAT=${CAT_JS};
   ${catOf.toString()}
 
-  var activeTab="overview";
+  var activeTab="overview", overviewView="summary", initialLiveScope="live";
   var usageView="score", usageSession=null, usageDays=14;
   try{var st=localStorage.getItem(LS_TAB); if(st&&TABS.indexOf(st)>=0)activeTab=st;}catch(e){}
-  // deep-link: #providers etc. wins over the stored tab. Usage carries a second
-  // segment: #usage/findings, #usage/sessions, or #usage/<sessionId> — anything
-  // that is not a known view name is read as a session id.
+  try{var ov=localStorage.getItem(LS_OVERVIEW);if(ov&&OVERVIEW_VIEWS.indexOf(ov)>=0)overviewView=ov;}catch(e){}
+  // Canonical hierarchical deep links: #overview/runtime, #usage/sessions,
+  // and #observability/history. A Usage segment that is not a known view is a
+  // session id and opens the masked transcript reader.
   try{
     var parts=location.hash.slice(1).split("/");
     if(parts[0]&&TABS.indexOf(parts[0])>=0)activeTab=parts[0];
+    if(parts[0]==="overview"&&parts[1]){
+      var requestedOverview=parts[1]==="intelligence"?"intel":parts[1];
+      if(OVERVIEW_VIEWS.indexOf(requestedOverview)>=0)overviewView=requestedOverview;
+    }
     if(parts[0]==="usage"&&parts[1]){
       if(VIEWS.indexOf(parts[1])>=0){usageView=parts[1];}
       else{usageView="transcript"; usageSession=decodeURIComponent(parts[1]);}
     }
+    if(parts[0]==="observability"&&parts[1]==="history")initialLiveScope="history";
   }catch(e){}
 
+  function overviewHash(){return"#overview/"+(overviewView==="intel"?"intelligence":overviewView);}
   function usageHash(){
     if(usageView==="transcript")return "#usage/"+(usageSession?encodeURIComponent(usageSession):"transcript");
-    return usageView==="score"?"#usage":"#usage/"+usageView;
+    return "#usage/"+usageView;
   }
   function syncHash(){
-    try{if(history.replaceState)history.replaceState(null,"",activeTab==="usage"?usageHash():"#"+activeTab);}catch(e){}
+    var hash=activeTab==="overview"?overviewHash():activeTab==="usage"?usageHash():"#observability/"+(window.AKLive&&window.AKLive.state.scope||initialLiveScope);
+    try{if(history.replaceState)history.replaceState(null,"",hash);}catch(e){}
   }
 
   function positionThumb(){
@@ -112,22 +121,37 @@ export const JS = `
     thumb.style.left=btn.offsetLeft+"px";
     thumb.style.width=btn.offsetWidth+"px";
   }
-  function setTab(id,focus){
-    if(activeTab==="live"&&id!=="live"&&window.AKLive)window.AKLive.deactivate();
+  function setOverviewView(id,focus,skipHash){
+    if(OVERVIEW_VIEWS.indexOf(id)<0)return;
+    overviewView=id;
+    try{localStorage.setItem(LS_OVERVIEW,id);}catch(e){}
+    for(var i=0;i<OVERVIEW_VIEWS.length;i++){
+      var view=OVERVIEW_VIEWS[i],on=view===id,button=document.querySelector('[data-overview-view="'+view+'"]'),panel=document.getElementById("panel-"+(view==="summary"?"overview":view));
+      if(button){button.setAttribute("aria-selected",on?"true":"false");button.tabIndex=on?0:-1;if(on&&focus)button.focus();}
+      if(panel)panel.hidden=!on;
+    }
+    if(!skipHash&&activeTab==="overview")syncHash();
+  }
+  function setTab(id,focus,skipHash){
+    if(TABS.indexOf(id)<0)return;
+    if(activeTab==="observability"&&id!=="observability"&&window.AKLive)window.AKLive.deactivate();
     activeTab=id;
     try{localStorage.setItem(LS_TAB,id);}catch(e){}
-    syncHash();
+    if(!skipHash)syncHash();
     // Usage is LAZY (ADR-0009 §2): the index is only read once the tab is
     // actually opened, never on the shared status poll.
     if(id==="usage"&&!usageLoaded)loadUsage();
-    if(id==="live"&&window.AKLive)window.AKLive.activate();
+    if(id==="observability"&&window.AKLive)window.AKLive.activate();
     for(var i=0;i<TABS.length;i++){
       var t=TABS[i], on=(t===id);
       var btn=document.querySelector('[data-tab="'+t+'"]');
-      var panel=document.getElementById("panel-"+t);
       if(btn){btn.setAttribute("aria-selected",on?"true":"false"); btn.tabIndex=on?0:-1; if(on&&focus)btn.focus();}
-      if(panel)panel.hidden=!on;
     }
+    document.getElementById("area-overview").hidden=id!=="overview";
+    document.getElementById("panel-usage").hidden=id!=="usage";
+    document.getElementById("panel-observability").hidden=id!=="observability";
+    for(var j=0;j<TABS.length;j++)document.getElementById("secondary-"+TABS[j]).hidden=TABS[j]!==id;
+    if(id==="overview")setOverviewView(overviewView,false,true);
     positionThumb();
   }
   var seg=document.getElementById("seg");
@@ -137,17 +161,22 @@ export const JS = `
       if(b)setTab(b.getAttribute("data-tab"));
     });
     seg.addEventListener("keydown",function(e){
-      if(e.key!=="ArrowLeft"&&e.key!=="ArrowRight")return;
+      if(!/^(ArrowLeft|ArrowRight|Home|End)$/.test(e.key))return;
       var i=TABS.indexOf(activeTab);
-      i=(i+(e.key==="ArrowRight"?1:TABS.length-1))%TABS.length;
+      i=e.key==="Home"?0:e.key==="End"?TABS.length-1:(i+(e.key==="ArrowRight"?1:TABS.length-1))%TABS.length;
       setTab(TABS[i],true); e.preventDefault();
     });
+  }
+  var overviewSeg=document.getElementById("overview-seg");
+  if(overviewSeg){
+    overviewSeg.addEventListener("click",function(e){var b=e.target.closest?e.target.closest("[data-overview-view]"):null;if(b)setOverviewView(b.getAttribute("data-overview-view"));});
+    overviewSeg.addEventListener("keydown",function(e){if(!/^(ArrowLeft|ArrowRight|Home|End)$/.test(e.key))return;var i=OVERVIEW_VIEWS.indexOf(overviewView);i=e.key==="Home"?0:e.key==="End"?OVERVIEW_VIEWS.length-1:(i+(e.key==="ArrowRight"?1:OVERVIEW_VIEWS.length-1))%OVERVIEW_VIEWS.length;setOverviewView(OVERVIEW_VIEWS[i],true);e.preventDefault();});
   }
   window.addEventListener("resize",positionThumb);
   var mapEl=document.getElementById("statusmap");
   if(mapEl)mapEl.addEventListener("click",function(e){
     var t=e.target.closest?e.target.closest("[data-go]"):null;
-    if(t)setTab(t.getAttribute("data-go"));
+    if(t){setTab("overview");setOverviewView(t.getAttribute("data-go"));}
   });
 
   // severity rank for rollups + triage sort; preferred order breaks ties
@@ -181,6 +210,7 @@ export const JS = `
   }
 
   function renderBadges(cats){
+    var affected=0,aggregateFail=false;
     for(var c in cats){
       var el=document.getElementById("badge-"+c);
       if(!el)continue;
@@ -190,9 +220,12 @@ export const JS = `
         if(L==="fail")f++; else if(L==="warn")w++;
       }
       var n=f+w;
+      if(n){affected++;if(f)aggregateFail=true;}
       if(!n){el.hidden=true;el.textContent="";el.removeAttribute("data-tone");}
       else{el.hidden=false;el.textContent=String(n);el.setAttribute("data-tone",f?"fail":"warn");}
     }
+    var aggregate=document.getElementById("badge-overview");
+    if(aggregate){aggregate.hidden=!affected;aggregate.textContent=affected?String(affected):"";aggregate.title=affected?affected+" Overview section"+(affected===1?"":"s")+" need attention":"";aggregate.setAttribute("aria-label",aggregate.title);if(affected)aggregate.setAttribute("data-tone",aggregateFail?"fail":"warn");else aggregate.removeAttribute("data-tone");}
   }
 
   function tile(g){
@@ -548,6 +581,8 @@ export const JS = `
   function setUsageView(v,session){
     usageView=v;
     if(session!==undefined)usageSession=session;
+    var headings={score:["Usage scorecard","Token consumption, API-equivalent cost, efficiency, and trends."],limits:["Provider limits","Current provider windows, reset timing, and available capacity."],findings:["Usage findings","Actionable anomalies, efficiency opportunities, and evidence-backed recommendations."],sessions:["Session usage","Browse retained sessions by project, category, duration, tokens, and cost."],transcript:["Transcript detail","Inspect the selected session's locally retained, server-masked evidence."]},heading=headings[v]||headings.score;
+    document.getElementById("usage-view-title").textContent=heading[0];document.getElementById("usage-view-description").textContent=heading[1];
     var btns=document.querySelectorAll("#usage-seg [data-view]");
     for(var i=0;i<btns.length;i++)btns[i].setAttribute("aria-selected",btns[i].getAttribute("data-view")===v?"true":"false");
     for(var j=0;j<VIEWS.length;j++){
@@ -563,7 +598,7 @@ export const JS = `
     if(v==="limits"&&!LIMITS)loadLimits();
   }
 
-  // Explicit bridge from metadata-only Live Sessions to the separately fetched,
+  // Explicit bridge from Observability metadata to the separately fetched,
   // server-masked historical transcript. Returning false lets a caller keep its
   // current selection when an untrusted/malformed identifier is supplied.
   window.AKDashboardOpenTranscript=function(id){
@@ -880,6 +915,8 @@ export const JS = `
   // disappears when the value is null teaches the reader that the field does
   // not exist, when in fact it was measured and found absent (ADR-0009 §5).
   function dash(v){return (v==null||v==="")?"—":String(v);}
+  function reportedIdentity(v){v=String(v==null?"":v).trim();return v&&!/^unknown$/i.test(v)?v:null;}
+  function identityName(v){var raw=reportedIdentity(v);if(!raw)return"Not recorded";return{claude:"Claude Code",codex:"Codex",opencode:"OpenCode",anthropic:"Anthropic",openai:"OpenAI",openrouter:"OpenRouter",bedrock:"AWS Bedrock",vertex:"Google Vertex AI",foundry:"Microsoft Foundry",gateway:"Custom gateway",ollama:"Ollama",lmstudio:"LM Studio"}[raw.toLowerCase()]||raw;}
 
   /* The ten fields that shipped on the wire and rendered nowhere. Everything
      here comes from the row the browser already holds — no route, no fetch. */
@@ -890,7 +927,9 @@ export const JS = `
     var basis=(sx.basis==null||sx.basis==="")?"no signal":sx.basis;
     var conf=(typeof sx.confidence==="number")
       ? ' <span class="sd-conf">(conf '+esc(sx.confidence.toFixed(2))+")</span>" : "";
-    var models=(Array.isArray(sx.models)&&sx.models.length)?sx.models.join(", "):"—";
+    var modelList=(Array.isArray(sx.models)?sx.models:[]).filter(function(model){return reportedIdentity(model);});
+    var models=modelList.length?modelList.join(", "):"Not recorded";
+    var providerRaw=reportedIdentity(sx.provider),provider=identityName(providerRaw),provenance=reportedIdentity(sx.providerProvenance)||"unknown",providerContext=providerRaw?provenance+" evidence":"not established by source";
     var toks="in "+fmtTok(sx.input)+" · out "+fmtTok(sx.output)
       +" · cache r "+fmtTok(sx.cacheRead)+" / w "+fmtTok(sx.cacheWrite)
       // Codex-only detail: reasoning tokens are a SUBSET of output (they bill
@@ -904,7 +943,7 @@ export const JS = `
     var flags="skill "+dash(sx.skill)+" · plugin "+dash(sx.plugin)
       +" · sidechain "+(sx.sidechain==null?"—":(sx.sidechain?"yes":"no"))
       +" · worktree "+dash(sx.worktree);
-    var rows=[["basis",esc(basis)+conf],["models",esc(models)],["tokens",esc(toks)],
+    var rows=[["execution host",esc(identityName(sx.host))],["inference provider",esc(provider)+" <span class='sd-conf'>("+esc(providerContext)+")</span>"],["models",esc(models)],["basis",esc(basis)+conf],["tokens",esc(toks)],
       ["tools",esc(tools)],["flags",esc(flags)]];
     return '<div class="sdetail" id="sd-'+esc(sx.id)+'" hidden>'
       +rows.map(function(r){
@@ -920,8 +959,10 @@ export const JS = `
   // block-level sibling inside .pbody, not a grid child of .srow, so it spans
   // the full width without joining the column layout.
   function sessionRow(sx){
-    var host=sx.host||"unknown";
-    var provider=sx.provider||"unknown";
+    var host=reportedIdentity(sx.host)||"unknown";
+    var provider=reportedIdentity(sx.provider);
+    var modelList=(Array.isArray(sx.models)?sx.models:[]).filter(function(model){return reportedIdentity(model);});
+    var identityTip="Execution host: "+identityName(host)+" · Inference provider: "+identityName(provider)+" · Model: "+(modelList.length?modelList.join(", "):"Not recorded");
     var cat=sx.category||"Unclassified";
     var uncl=(cat==="Unclassified");
     var weak=(typeof sx.confidence==="number"&&sx.confidence<0.6)?"0":"1";
@@ -933,9 +974,8 @@ export const JS = `
     var wt=sx.worktree!=null?'<span class="s-wt" title="git worktree — the repo is the project">⑂'+esc(sx.worktree)+"</span>":"";
     return '<div class="srow" data-id="'+sid+'" title="open transcript">'
       +'<button class="s-exp" type="button" aria-expanded="false" aria-controls="sd-'+sid+'"'
-        +' title="show session detail" aria-label="show session detail">&rsaquo;</button>'
-      +'<span class="s-host s-'+esc(host)+'" title="host: '+esc(host)+' · provider: '+esc(provider)+'">'+esc(host)
-        +'<small class="s-provider">'+esc(provider)+"</small></span>"
+        +' title="show identity, model, usage, and classification details" aria-label="show identity, model, usage, and classification details">&rsaquo;</button>'
+      +'<span class="s-host s-'+esc(host)+'" title="'+esc(identityTip)+'" aria-label="Execution host: '+esc(identityName(host))+'">'+esc(identityName(host))+"</span>"
       +'<span class="s-title">'+esc(sx.title||"(untitled)")+wt+"</span>"
       +'<span class="cat'+(uncl?" uncl":"")+'" data-w="'+weak+'">'+esc(cat)+"</span>"
       +'<span class="s-when mono">'+esc(whenTxt)+"</span>"
@@ -1117,6 +1157,7 @@ export const JS = `
       var b=e.target.closest?e.target.closest("[data-view]"):null;
       if(b)setUsageView(b.getAttribute("data-view"));
     });
+    if(seg)seg.addEventListener("keydown",function(e){if(!/^(ArrowLeft|ArrowRight|Home|End)$/.test(e.key))return;var i=VIEWS.indexOf(usageView);i=e.key==="Home"?0:e.key==="End"?VIEWS.length-1:(i+(e.key==="ArrowRight"?1:VIEWS.length-1))%VIEWS.length;setUsageView(VIEWS[i]);var b=seg.querySelector('[data-view="'+VIEWS[i]+'"]');if(b)b.focus();e.preventDefault();});
     var chips=document.getElementById("usage-days");
     if(chips)chips.addEventListener("click",function(e){
       var b=e.target.closest?e.target.closest("[data-days]"):null;
@@ -1191,6 +1232,8 @@ export const JS = `
       }).catch(function(){});
   }
 
+  window.AKDashboardSyncHash=syncHash;
+  if(window.AKLive&&window.AKLive.setScope)window.AKLive.setScope(initialLiveScope,false);
   setTab(activeTab);
   setUsageView(usageView);
   wirePoll();

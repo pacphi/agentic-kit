@@ -6,10 +6,10 @@ import { LIVE_CSS, LIVE_HTML, LIVE_JS } from './live-view.mjs';
 // The page. One document, everything inline. Only `name` and `version` are
 // interpolated server-side; the client fetches /api/status and renders live.
 //
-// Layout: a sticky segmented control (Apple's tab idiom) splits the panel into
-// five views — Overview, Hosts & Routing, Providers, Runtime, Intelligence.
-// Problems never hide behind a tab: Overview aggregates every attention card,
-// and each tab carries a count badge when something in it is failing/warning.
+// Layout: three stable primary areas — Overview, Usage, and Observability —
+// share one left-aligned secondary-navigation rail. Overview owns Summary,
+// Hosts & Routing, Providers, Runtime, and Intelligence. Problems never hide:
+// Summary aggregates attention and child tabs retain their scoped badges.
 // ─────────────────────────────────────────────────────────────────────────────
 export function renderPage({ name, version }) {
   return `<!doctype html>
@@ -73,18 +73,54 @@ export function renderPage({ name, version }) {
 <nav class="tabbar">
   <div class="seg" role="tablist" aria-label="dashboard sections" id="seg">
     <span class="seg-thumb" id="seg-thumb" aria-hidden="true"></span>
-    <button class="seg-btn" role="tab" id="tab-overview" data-tab="overview" aria-selected="true" aria-controls="panel-overview" type="button">Overview<span class="badge" id="badge-overview" hidden></span></button>
-    <button class="seg-btn" role="tab" id="tab-hosts" data-tab="hosts" aria-selected="false" aria-controls="panel-hosts" type="button">Hosts &amp; Routing<span class="badge" id="badge-hosts" hidden></span></button>
-    <button class="seg-btn" role="tab" id="tab-providers" data-tab="providers" aria-selected="false" aria-controls="panel-providers" type="button">Providers<span class="badge" id="badge-providers" hidden></span></button>
-    <button class="seg-btn" role="tab" id="tab-runtime" data-tab="runtime" aria-selected="false" aria-controls="panel-runtime" type="button">Runtime<span class="badge" id="badge-runtime" hidden></span></button>
-    <button class="seg-btn" role="tab" id="tab-intel" data-tab="intel" aria-selected="false" aria-controls="panel-intel" type="button">Intelligence<span class="badge" id="badge-intel" hidden></span></button>
+    <button class="seg-btn" role="tab" id="tab-overview" data-tab="overview" aria-selected="true" aria-controls="area-overview" type="button">Overview<span class="badge" id="badge-overview" hidden></span></button>
     <button class="seg-btn" role="tab" id="tab-usage" data-tab="usage" aria-selected="false" aria-controls="panel-usage" type="button">Usage</button>
-    <button class="seg-btn" role="tab" id="tab-live" data-tab="live" aria-selected="false" aria-controls="panel-live" type="button">Live</button>
+    <button class="seg-btn" role="tab" id="tab-observability" data-tab="observability" aria-selected="false" aria-controls="panel-observability" type="button">Observability</button>
   </div>
 </nav>
 
+<div class="secondary-shell">
+  <div class="secondary-rail">
+    <div class="secondary-group" id="secondary-overview">
+      <div class="seg subseg" role="tablist" aria-label="Overview views" id="overview-seg">
+        <button class="seg-btn" role="tab" id="overview-tab-summary" data-overview-view="summary" aria-selected="true" aria-controls="panel-overview" type="button">Summary</button>
+        <button class="seg-btn" role="tab" id="overview-tab-hosts" data-overview-view="hosts" aria-selected="false" aria-controls="panel-hosts" type="button">Hosts &amp; Routing<span class="badge" id="badge-hosts" hidden></span></button>
+        <button class="seg-btn" role="tab" id="overview-tab-providers" data-overview-view="providers" aria-selected="false" aria-controls="panel-providers" type="button">Providers<span class="badge" id="badge-providers" hidden></span></button>
+        <button class="seg-btn" role="tab" id="overview-tab-runtime" data-overview-view="runtime" aria-selected="false" aria-controls="panel-runtime" type="button">Runtime<span class="badge" id="badge-runtime" hidden></span></button>
+        <button class="seg-btn" role="tab" id="overview-tab-intel" data-overview-view="intel" aria-selected="false" aria-controls="panel-intel" type="button">Intelligence<span class="badge" id="badge-intel" hidden></span></button>
+      </div>
+    </div>
+    <div class="secondary-group" id="secondary-usage" hidden>
+      <div class="seg subseg" role="tablist" aria-label="Usage views" id="usage-seg">
+        <button class="seg-btn" role="tab" data-view="score" aria-selected="true" type="button">Scorecard</button>
+        <button class="seg-btn" role="tab" data-view="limits" aria-selected="false" type="button">Limits</button>
+        <button class="seg-btn" role="tab" data-view="findings" aria-selected="false" type="button">Findings<span class="segbadge" id="u-findings-n" hidden></span></button>
+        <button class="seg-btn" role="tab" data-view="sessions" aria-selected="false" type="button">Sessions<span class="mono seg-n" id="u-sessions-n"></span></button>
+        <button class="seg-btn" role="tab" data-view="transcript" aria-selected="false" type="button">Transcript</button>
+      </div>
+      <div class="filters secondary-actions" id="usage-days" role="group" aria-label="Usage window">
+        <button class="chipf" type="button" data-days="7">7d</button>
+        <button class="chipf on" type="button" data-days="14">14d</button>
+        <button class="chipf" type="button" data-days="30">30d</button>
+      </div>
+    </div>
+    <div class="secondary-group" id="secondary-observability" hidden>
+      <div class="seg subseg" role="tablist" aria-label="Observability views" id="live-scope-tabs">
+        <button class="seg-btn" type="button" role="tab" data-live-scope="live" aria-selected="true">Live</button>
+        <button class="seg-btn" type="button" role="tab" data-live-scope="history" aria-selected="false">History</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <main class="wrap">
-  <section class="panel" id="panel-overview" role="tabpanel" aria-labelledby="tab-overview">
+  <section class="primary-area" id="area-overview" role="tabpanel" aria-labelledby="tab-overview">
+  <section class="panel" id="panel-overview" role="tabpanel" aria-labelledby="overview-tab-summary">
+    <header class="view-heading">
+      <span class="view-eyebrow">OVERVIEW</span>
+      <h2>System overview</h2>
+      <p>Overall readiness, configuration health, and the items that need attention.</p>
+    </header>
     <div class="summary" id="summary" hidden></div>
     <div class="notice" id="update-notice" hidden></div>
     <div id="attention" aria-live="polite"></div>
@@ -92,7 +128,12 @@ export function renderPage({ name, version }) {
     <div class="statusmap" id="statusmap"></div>
   </section>
 
-  <section class="panel" id="panel-hosts" role="tabpanel" aria-labelledby="tab-hosts" hidden>
+  <section class="panel" id="panel-hosts" role="tabpanel" aria-labelledby="overview-tab-hosts" hidden>
+    <header class="view-heading">
+      <span class="view-eyebrow">OVERVIEW</span>
+      <h2>Hosts &amp; routing</h2>
+      <p>Enabled execution hosts, activity assignments, primary-host policy, and escalation paths.</p>
+    </header>
     <div id="cards-hosts"></div>
     <section class="strip" id="routing" hidden>
       <div class="strip-head">
@@ -116,15 +157,30 @@ export function renderPage({ name, version }) {
     </section>
   </section>
 
-  <section class="panel" id="panel-providers" role="tabpanel" aria-labelledby="tab-providers" hidden>
+  <section class="panel" id="panel-providers" role="tabpanel" aria-labelledby="overview-tab-providers" hidden>
+    <header class="view-heading">
+      <span class="view-eyebrow">OVERVIEW</span>
+      <h2>Inference providers</h2>
+      <p>Provider bindings, availability, provenance, and configuration health.</p>
+    </header>
     <div id="cards-providers"></div>
   </section>
 
-  <section class="panel" id="panel-runtime" role="tabpanel" aria-labelledby="tab-runtime" hidden>
+  <section class="panel" id="panel-runtime" role="tabpanel" aria-labelledby="overview-tab-runtime" hidden>
+    <header class="view-heading">
+      <span class="view-eyebrow">OVERVIEW</span>
+      <h2>Runtime health</h2>
+      <p>Local services, MCP connections, processes, and operational readiness.</p>
+    </header>
     <div id="cards-runtime"></div>
   </section>
 
-  <section class="panel" id="panel-intel" role="tabpanel" aria-labelledby="tab-intel" hidden>
+  <section class="panel" id="panel-intel" role="tabpanel" aria-labelledby="overview-tab-intel" hidden>
+    <header class="view-heading">
+      <span class="view-eyebrow">OVERVIEW</span>
+      <h2>Intelligence &amp; learning</h2>
+      <p>Memory, learned patterns, quality feedback, and improvement signals.</p>
+    </header>
     <div id="cards-intel"></div>
     <section class="strip" id="history" hidden>
       <div class="strip-head">
@@ -143,22 +199,14 @@ export function renderPage({ name, version }) {
       </div>
     </section>
   </section>
+  </section>
 
   <section class="panel" id="panel-usage" role="tabpanel" aria-labelledby="tab-usage" hidden>
-    <div class="usage-bar">
-      <div class="seg subseg" role="tablist" aria-label="usage views" id="usage-seg">
-        <button class="seg-btn" role="tab" data-view="score" aria-selected="true" type="button">Scorecard</button>
-        <button class="seg-btn" role="tab" data-view="limits" aria-selected="false" type="button">Limits</button>
-        <button class="seg-btn" role="tab" data-view="findings" aria-selected="false" type="button">Findings<span class="segbadge" id="u-findings-n" hidden></span></button>
-        <button class="seg-btn" role="tab" data-view="sessions" aria-selected="false" type="button">Sessions<span class="mono seg-n" id="u-sessions-n"></span></button>
-        <button class="seg-btn" role="tab" data-view="transcript" aria-selected="false" type="button">Transcript</button>
-      </div>
-      <div class="filters" id="usage-days" role="group" aria-label="window">
-        <button class="chipf" type="button" data-days="7">7d</button>
-        <button class="chipf on" type="button" data-days="14">14d</button>
-        <button class="chipf" type="button" data-days="30">30d</button>
-      </div>
-    </div>
+    <header class="view-heading" id="usage-view-heading">
+      <span class="view-eyebrow">USAGE</span>
+      <h2 id="usage-view-title">Usage scorecard</h2>
+      <p id="usage-view-description">Token consumption, API-equivalent cost, efficiency, and trends.</p>
+    </header>
 
     <section class="view" id="v-score">
       <div class="hero" id="u-hero"></div>
@@ -237,7 +285,7 @@ export function renderPage({ name, version }) {
 
     <section class="view" id="v-sessions" hidden>
       <div class="note"><span class="i">&#8505;</span><span>Grouped by project, aggregate first.
-        Expand a project to see its sessions; click <b>&#9707;</b> on any session to read its transcript.</span></div>
+        Expand a project to see its sessions. Open a row&rsquo;s chevron for execution host, independently evidenced provider, model, and usage details; click <b>&#9707;</b> to read its transcript. &ldquo;Not recorded&rdquo; means the source did not establish that fact.</span></div>
       <div class="ptree" id="u-tree"></div>
       <div class="foot">durations are session span (first&rarr;last event), not exclusive wall-clock</div>
     </section>

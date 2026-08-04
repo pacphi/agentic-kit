@@ -1,9 +1,11 @@
 # ADR-0009 — Usage scorecard: local transcript analytics with graded evidence
 
-- **Status:** Accepted
+- **Status:** Implemented
 - **Date:** 2026-07-25
-- **Updated:** 2026-07-30
-- **Update note:** Added the explicit OpenRouter account-analytics cache boundary for issue #59.
+- **Updated:** 2026-08-04
+- **Update note:** Added the explicit OpenRouter account-analytics cache boundary for issue #59,
+  aligned Usage with the dashboard's shared three-area navigation, and documented independent
+  host, inference-provider, provenance, and model facts in session rows.
 - **Deciders:** agentic-kit maintainers
 
 ## Context
@@ -34,19 +36,34 @@ Three properties of the data force most of the design:
 
 ## Decision
 
-### 1. A tab on `dashboard`, not a third command — the split is egress, and this has none
+### 1. A dashboard area, not a third command — the split is egress, and this has none
 
 ADR-0007 split `admin` from `dashboard` along **network egress**: `dashboard` promises silence,
 `admin` promises reach. Usage analytics reads **local files only** and makes **zero network calls**.
-It therefore sits squarely inside the dashboard's existing offline-first contract and ships as a
-sixth tab (`#usage`), not a new server.
+It therefore sits squarely inside the dashboard's existing offline-first contract and ships as one
+of the dashboard's three primary areas, not a new server.
 
-> **Current implementation note (2026-07-27):** Usage remains the sixth tab; Live Sessions is now a
-> seventh tab. Usage still loads lazily and remains separate from the live transcript tailers.
+> **Current implementation note (2026-08-04):** The dashboard exposes exactly three primary areas:
+> Overview, Usage, and Observability. One fixed, left-aligned secondary rail provides the current
+> area's destinations. Usage still loads lazily and remains separate from the live transcript
+> tailers.
 
-The tab carries four in-page views — **Scorecard → Findings → Sessions → Transcript** — deep-linked
-as `#usage`, `#usage/findings`, `#usage/sessions`, `#usage/<sessionId>`, reusing the in-page reveal
-idiom ADR-0005 established rather than adding navigation concepts.
+Usage carries five in-page views — **Scorecard**, **Limits**, **Findings**, **Sessions**, and
+**Transcript** — deep-linked as `#usage/score`, `#usage/limits`, `#usage/findings`,
+`#usage/sessions`, and `#usage/transcript`. A selected retained session uses
+`#usage/<sessionId>` and opens Transcript detail. Each destination publishes a visible heading and
+plain-language description. The primary and secondary tab sets use a roving selected state:
+Left/Right Arrow activates the adjacent destination with wrapping, while Home and End activate the
+first and last destination. This reuses ADR-0005's in-page reveal idiom without adding navigation
+concepts.
+
+**2026-08-04 session-identity amendment:** the compact session badge identifies the execution host
+only. Its adjacent disclosure control expands evidence without navigating away from the session
+list. The details report execution host, inference provider, provider evidence/provenance, and
+model as independent facts. Codex `model_provider` recorded in `session_meta` or `turn_context` is
+observed provider evidence. Claude's native transcript history may contain no corresponding provider
+fact; in that case the interface says `Not recorded`. Host names and model identifiers are never
+used to infer the provider.
 
 `ruflo-token-audit` **stays** as an independent standalone reporter. It is the offline second opinion
 and the fallback when the kit is not installed; the panel does not replace it and does not shell it.

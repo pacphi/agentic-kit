@@ -19,6 +19,7 @@ export function adaptCodexRecord(record, context = {}) {
     host: 'codex', surface: 'native', project: context.project,
     projectKey: context.projectKey,
     observedAt: context.observedAt, sourceTimestamp: record.timestamp,
+    workspace: context.workspace,
       actor: {
         id: sessionId, kind: subagent ? 'subagent' : 'session',
       label: meta.agent_nickname ?? context.agentNickname,
@@ -37,6 +38,7 @@ export function adaptCodexRecord(record, context = {}) {
           ? 'observed' : null,
         status: 'observed',
         hierarchy: subagent ? (meta.thread_source === 'subagent' ? 'observed' : 'correlated') : 'observed',
+        workspace: context.workspace ? context.workspace.confidence ?? 'observed' : null,
       },
     },
   };
@@ -98,6 +100,8 @@ export function adaptCodexLedger(ledger, context = {}) {
       host: 'codex', surface: 'native', project: thread?.project,
       projectKey: thread?.projectKey,
       observedAt: context.observedAt,
+      sourceTimestamp: thread?.updatedAt ?? thread?.recencyAt ?? thread?.createdAt,
+      workspace: thread?.workspace,
       actor: {
         id, kind: subagent ? 'subagent' : 'session',
         label: thread?.agentNickname,
@@ -115,6 +119,7 @@ export function adaptCodexLedger(ledger, context = {}) {
           model: thread?.model ? 'observed' : null,
           status: thread?.status ? 'observed' : null,
           hierarchy: subagent ? 'observed' : null,
+          workspace: thread?.workspace ? 'observed' : null,
         },
       },
       attributes: { tokenUsage: thread?.tokensUsed },
@@ -129,6 +134,7 @@ export function adaptCodexLedger(ledger, context = {}) {
     out.push(createLiveEvent({
       sessionId: parentId, host: 'codex', surface: 'native',
       project, projectKey, observedAt: context.observedAt,
+      sourceTimestamp: parent?.updatedAt ?? parent?.recencyAt ?? parent?.createdAt,
       actor: {
         id: parentId, kind: 'session', label: parent?.agentNickname,
         role: parent?.agentRole ?? 'primary',
