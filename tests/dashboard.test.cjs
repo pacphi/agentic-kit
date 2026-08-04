@@ -874,9 +874,11 @@ async function main() {
   const listeners = new Set();
   const liveCalls = { start: 0, close: 0, subscribe: 0, unsubscribe: 0, replay: [] };
   const liveEvents = [
-    { eventId: 'test:1', ingestSeq: 1, action: 'session.started', sessionId: 's1' },
+    { eventId: 'test:1', ingestSeq: 1, action: 'session.started', sessionId: 's1',
+      project: 'agentic-kit', projectKey: 'project:test' },
     {
       eventId: 'test:2', ingestSeq: 2, action: 'agent.output', sessionId: 's1',
+      project: 'agentic-kit', projectKey: 'project:test',
       source: { artifact: '/Users/private/.codex/sessions/rollout-secret.jsonl' },
       prompt: 'PRIVATE PROMPT', arguments: { token: 'PRIVATE ARGUMENT' },
       result: 'PRIVATE RESULT', cwd: '/Users/private/Development/secret-project',
@@ -886,7 +888,7 @@ async function main() {
     schemaVersion: 1,
     cursor: 'test:2',
     sessions: [{
-      id: 's1',
+      id: 's1', project: 'agentic-kit', projectKey: 'project:test',
       nodes: [{
         id: 'n1',
         source: { artifact: '/Users/private/.claude/projects/session.jsonl' },
@@ -895,7 +897,14 @@ async function main() {
         projectRoot: '/Users/private/Development/secret-project',
       }],
       edges: [],
+    }, {
+      id: 'unresolved', project: 'unknown', projectKey: 'project:unknown',
+      nodes: [], edges: [],
     }],
+    projects: [
+      { id: 'project:test', label: 'agentic-kit' },
+      { id: 'project:unknown', label: 'unknown' },
+    ],
   };
   const live = {
     start() { liveCalls.start++; },
@@ -925,6 +934,7 @@ async function main() {
       contains(r.headers['content-type'] || '', 'application/json');
       assert(r.headers['cache-control'] === 'no-store', 'live snapshots must never be cached');
       assert(JSON.parse(r.body).cursor === 'test:2', 'snapshot cursor must survive');
+      assert(!r.body.includes('project:unknown'), 'unresolved sessions must not create a Live project');
       assert(!r.body.includes('/Users/private'), 'snapshot provenance must not expose absolute paths');
       for (const secret of ['PRIVATE RESPONSE', 'PRIVATE TOOL RESULT']) {
         assert(!r.body.includes(secret), `snapshot must not expose ${secret}`);
@@ -1035,10 +1045,12 @@ async function main() {
     const raceListeners = new Set();
     const during = {
       eventId: 'race:1', ingestSeq: 1, sessionId: 'race-session',
+      project: 'agentic-kit', projectKey: 'project:race',
       action: 'agent.started', actor: { id: 'during', kind: 'agent' },
     };
     const afterReplay = {
       eventId: 'race:2', ingestSeq: 2, sessionId: 'race-session',
+      project: 'agentic-kit', projectKey: 'project:race',
       action: 'tool.started', actor: { id: 'after-replay', kind: 'tool' },
     };
     let snapshotCalls = 0;
@@ -1054,7 +1066,8 @@ async function main() {
           schemaVersion: 1,
           cursor: 'race:1',
           sessions: [{
-            id: 'race-session', nodes: [{ id: 'during', kind: 'agent' }], edges: [],
+            id: 'race-session', project: 'agentic-kit', projectKey: 'project:race',
+            nodes: [{ id: 'during', kind: 'agent' }], edges: [],
           }],
         };
       },

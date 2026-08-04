@@ -89,6 +89,17 @@ test('browser delta reducer carries the server resource-completion invariants', 
   assert.match(LIVE_JS, /TERMINAL/);
 });
 
+test('browser resynchronizes unseen and rebound sessions instead of constructing partial topology', () => {
+  assert.match(LIVE_JS, /i<0\|\|ev\.action===["']session\.rebound["']/);
+  assert.match(LIVE_JS, /if\(!state\.resyncing\)connect\(\);return/);
+  assert.match(LIVE_JS, /function connect\(\)\{if\(state\.resyncing\)return/);
+});
+
+test('browser reports unsupported OpenCode transcript topology without opening a stream', () => {
+  assert.match(LIVE_JS, /s\.host!==["']opencode["']/);
+  assert.match(LIVE_JS, /OpenCode transcript topology unavailable/);
+});
+
 test('browser presentation keeps execution host and inference provider independent', () => {
   assert.match(LIVE_JS, /function hostOf/);
   assert.match(LIVE_JS, /function hostName/);

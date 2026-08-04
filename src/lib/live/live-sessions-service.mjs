@@ -5,13 +5,15 @@ import { readCodexState as defaultReadCodexState } from '../codex-state.mjs';
 import { adaptClaudeRecord } from './claude-adapter.mjs';
 import { resolveClaudeProvider as defaultResolveClaudeProvider } from './claude-provider.mjs';
 import { adaptCodexLedger, adaptCodexRecord } from './codex-adapter.mjs';
+import { createLiveEvent } from './event-schema.mjs';
 import { JsonlTailer } from './jsonl-tailer.mjs';
+import { listActiveHostSessions } from './process-sessions.mjs';
 import {
   emptyLiveProjection, reduceLiveEvent, serializeLiveProjection, sweepLiveProjection,
 } from './projection.mjs';
 import { LiveReplayStream } from './replay-stream.mjs';
 import { adaptStructuredEvent } from './structured-adapter.mjs';
-import { resolveProjectLabel } from './project-label.mjs';
+import { canonicalSessionKey, resolveProjectIdentity } from './project-label.mjs';
 
 const safeEntries = (dir) => {
   try { return fs.readdirSync(dir, { withFileTypes: true }); } catch { return []; }
@@ -86,6 +88,9 @@ export class LiveSessionsService {
   #edgeKeys = new Set();
   #health = new Map();
   #claudeProviders = new Map();
+  #runtimeBindings = new Map();
+  #lastRuntimeScan = 0;
+  #runtimeSurvey = null;
 
   constructor(options = {}) {
     const roots = options.roots ?? {};
@@ -95,10 +100,13 @@ export class LiveSessionsService {
         codex: roots.codex ?? path.join(codexDir(), 'sessions'),
       },
       structuredSources: Array.isArray(options.structuredSources) ? options.structuredSources : [],
+      structuredProject: resolveProjectIdentity(options.cwd ?? process.cwd()),
       intervalMs: options.intervalMs ?? 750,
       maxFiles: options.maxFiles ?? 256,
       replayCapacity: options.replayCapacity ?? 2000,
       readCodexState: options.readCodexState ?? defaultReadCodexState,
+      readActiveSessions: options.readActiveSessions
+        ?? (options.roots ? (() => []) : listActiveHostSessions),
       resolveClaudeProvider: options.resolveClaudeProvider ?? defaultResolveClaudeProvider,
       setInterval: options.setInterval ?? globalThis.setInterval,
       clearInterval: options.clearInterval ?? globalThis.clearInterval,
@@ -106,11 +114,16 @@ export class LiveSessionsService {
       quiescentMs: options.quiescentMs ?? 30_000,
       expiryMs: options.expiryMs ?? 300_000,
       pendingExpiryMs: options.pendingExpiryMs ?? 1_800_000,
+      runtimeScanMs: options.runtimeScanMs ?? 2_000,
+      runtimeMisses: options.runtimeMisses ?? 3,
       maxSessions: options.maxSessions ?? 100,
       maxNodesPerSession: options.maxNodesPerSession ?? 1000,
     };
     this.#stream = new LiveReplayStream({ capacity: this.#options.replayCapacity });
     for (const name of ['claude', 'codex', 'ruflo', 'aqe', 'codex-state']) {
+      this.#health.set(name, { status: 'idle', files: 0, events: 0, errors: 0, lastError: null });
+    }
+    for (const name of ['opencode', 'runtime']) {
       this.#health.set(name, { status: 'idle', files: 0, events: 0, errors: 0, lastError: null });
     }
   }
@@ -130,6 +143,7 @@ export class LiveSessionsService {
     for (const tailer of this.#tailers.values()) tailer.close();
     this.#tailers.clear();
     this.#contexts.clear();
+    this.#runtimeBindings.clear();
     this.#started = false;
   }
 
@@ -162,6 +176,7 @@ export class LiveSessionsService {
       }
     }
     this.#ingestLedger();
+    this.#scheduleRuntimeSessions();
     this.#projection = sweepLiveProjection(this.#projection, {
       now: this.#options.now(),
       quiescentMs: this.#options.quiescentMs,
@@ -179,6 +194,8 @@ export class LiveSessionsService {
       this.#add(source.file, {
         adapter: source.surface, surface: source.surface,
         sessionId: source.sessionId,
+        project: this.#options.structuredProject.label,
+        projectKey: this.#options.structuredProject.key,
       }, initial);
     }
     const remaining = Math.max(0, this.#options.maxFiles - this.#tailers.size);
@@ -226,7 +243,11 @@ export class LiveSessionsService {
   #record(record, context, file) {
     const explicitCwd = record?.cwd
       ?? (['session_meta', 'turn_context'].includes(record?.type) ? record.payload?.cwd : null);
-    if (explicitCwd) context.project = resolveProjectLabel(explicitCwd);
+    if (explicitCwd) {
+      const identity = resolveProjectIdentity(explicitCwd);
+      context.project = identity.label;
+      context.projectKey = identity.key;
+    }
     if (context.adapter === 'claude' && explicitCwd && !context.provider) {
       const resolved = this.#claudeProvider(explicitCwd);
       if (resolved?.provider) {
@@ -291,6 +312,121 @@ export class LiveSessionsService {
       this.#publish(event, 'codex-state');
     }
     this.#mark('codex-state', { status: ledger ? 'ok' : 'unavailable' });
+  }
+
+  #scheduleRuntimeSessions() {
+    const observedAt = this.#options.now();
+    const observedMs = Date.parse(observedAt);
+    if (this.#lastRuntimeScan
+      && observedMs - this.#lastRuntimeScan < this.#options.runtimeScanMs) return;
+    if (this.#runtimeSurvey) return;
+    this.#lastRuntimeScan = observedMs;
+    let result;
+    try { result = this.#options.readActiveSessions(); } catch (error) {
+      this.#error('runtime', error);
+      return;
+    }
+    if (Array.isArray(result)) {
+      this.#ingestRuntimeObservation(result, observedAt);
+      return;
+    }
+    this.#runtimeSurvey = Promise.resolve(result)
+      .then((active) => {
+        if (this.#started) this.#ingestRuntimeObservation(active, observedAt);
+      })
+      .catch((error) => this.#error('runtime', error))
+      .finally(() => { this.#runtimeSurvey = null; });
+  }
+
+  #ingestRuntimeObservation(active, observedAt) {
+    if (!Array.isArray(active)) active = [];
+    const seen = new Set();
+    const claimed = new Set([...this.#runtimeBindings.values()]
+      .map((binding) => binding.sessionKey));
+    const terminal = new Set(['completed', 'failed', 'cancelled']);
+    for (const item of active) {
+      if (!item || !Number.isInteger(item.pid)
+        || !['claude', 'codex', 'opencode'].includes(item.host)) continue;
+      const identity = resolveProjectIdentity(item.cwd);
+      if (!identity.canonical || identity.label === 'unknown') continue;
+      const runtimeKey = `${item.host}:${item.pid}:${item.startedAt ?? 'unreported'}`;
+      seen.add(runtimeKey);
+      const priorBinding = this.#runtimeBindings.get(runtimeKey);
+      let sessionKey = priorBinding?.sessionKey;
+      let session = sessionKey ? this.#projection.sessions.get(sessionKey) : null;
+      const synthetic = session?.id?.startsWith('runtime-');
+      let rebound = false;
+      if (!session || session.host !== item.host || session.projectKey !== identity.key
+        || terminal.has(session.status) || synthetic) {
+        const candidates = [...this.#projection.sessions.values()]
+          .filter((candidate) => candidate.host === item.host
+            && candidate.projectKey === identity.key
+            && !candidate.parentSessionId
+            && !candidate.id.startsWith('runtime-')
+            && !terminal.has(candidate.status)
+            && (!claimed.has(candidate.key) || candidate.key === sessionKey))
+          .sort((left, right) => Date.parse(right.updatedAt) - Date.parse(left.updatedAt));
+        const candidate = candidates[0] ?? null;
+        if (candidate) {
+          if (synthetic && sessionKey !== candidate.key) this.#dropRuntimeSynthetic(sessionKey);
+          claimed.delete(sessionKey);
+          session = candidate;
+          sessionKey = candidate.key;
+          rebound = synthetic;
+        } else if (!session || terminal.has(session.status) || !synthetic) {
+          session = null;
+          const started = Date.parse(item.startedAt ?? '');
+          const generation = Number.isFinite(started) ? started.toString(36) : 'unreported';
+          sessionKey = canonicalSessionKey(item.host, `runtime-${item.pid}-${generation}`);
+        }
+      }
+      this.#runtimeBindings.set(runtimeKey, {
+        sessionKey, misses: 0, host: item.host, pid: item.pid, identity,
+      });
+      claimed.add(sessionKey);
+      const sessionId = session?.id ?? sessionKey.slice(item.host.length + 1);
+      this.#publish(createLiveEvent({
+        sessionId, host: item.host, surface: 'native',
+        project: identity.label, projectKey: identity.key, observedAt,
+        actor: { id: sessionId, kind: 'session', role: 'primary' },
+        action: rebound ? 'session.rebound' : 'session.heartbeat',
+        status: 'running',
+        source: {
+          adapter: 'runtime-process', confidence: 'observed',
+          fields: { host: 'observed', project: 'observed', status: 'observed' },
+        },
+      }), 'runtime');
+    }
+    for (const [key, prior] of this.#runtimeBindings) {
+      if (seen.has(key)) continue;
+      const misses = prior.misses + 1;
+      if (misses < Math.max(1, this.#options.runtimeMisses)) {
+        this.#runtimeBindings.set(key, { ...prior, misses });
+        continue;
+      }
+      const session = this.#projection.sessions.get(prior.sessionKey);
+      if (session && !terminal.has(session.status)) {
+        this.#publish(createLiveEvent({
+          sessionId: session.id, host: prior.host, surface: 'native',
+          project: prior.identity.label, projectKey: prior.identity.key, observedAt,
+          actor: { id: session.id, kind: 'session', role: 'primary' },
+          action: 'session.heartbeat', status: 'quiescent',
+          source: {
+            adapter: 'runtime-process', confidence: 'observed',
+            fields: { host: 'observed', project: 'observed', status: 'observed' },
+          },
+        }), 'runtime');
+      }
+      this.#runtimeBindings.delete(key);
+    }
+    this.#mark('runtime', { status: 'ok', files: active.length });
+  }
+
+  #dropRuntimeSynthetic(sessionKey) {
+    if (!sessionKey || !this.#projection.sessions.has(sessionKey)) return;
+    const sessions = new Map(this.#projection.sessions);
+    sessions.delete(sessionKey);
+    this.#projection = { ...this.#projection, sessions };
   }
 
   #mark(adapter, update) {

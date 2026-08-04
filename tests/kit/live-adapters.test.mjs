@@ -109,6 +109,8 @@ test('Codex ledger creates authoritative spawn edges', () => {
   assert.equal(event.target.label, 'Bohr');
   assert.equal(event.target.role, 'tester');
   assert.equal(event.source.confidence, 'observed');
+  assert.equal(event.project, 'agentic-kit');
+  assert.equal(event.source.fields.project, 'observed');
   assert.equal(event.source.fields.hierarchy, 'observed');
   assert.ok(!JSON.stringify(events).includes('/Users/'));
 });
@@ -129,9 +131,14 @@ test('turn_context contributes safe model metadata without content or cwd', () =
 test('structured adapter accepts bounded ruflo and AQE events only', () => {
   const [event] = adaptStructuredEvent({
     sessionId: 's', agentId: 'a', event: 'gate.completed', status: 'completed',
-    output: 'must not leak',
-  }, { surface: 'aqe', adapter: 'aqe-hook', observedAt: now });
+    project: 'forged', projectKey: 'project:ffffffffffffffff', output: 'must not leak',
+  }, {
+    surface: 'aqe', adapter: 'aqe-hook', observedAt: now,
+    project: 'agentic-kit', projectKey: 'project:aaaaaaaaaaaaaaaa',
+  });
   assert.equal(event.surface, 'aqe');
+  assert.equal(event.project, 'agentic-kit');
+  assert.equal(event.projectKey, 'project:aaaaaaaaaaaaaaaa');
   assert.ok(!JSON.stringify(event).includes('must not leak'));
   assert.deepEqual(adaptStructuredEvent({}, { surface: 'aqe' }), []);
 });

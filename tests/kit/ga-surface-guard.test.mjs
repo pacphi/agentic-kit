@@ -217,7 +217,7 @@ test('GA-amended ADRs carry living-plan metadata', () => {
     if (file.endsWith(`${path.sep}README.md`)) continue;
     const text = fs.readFileSync(file, 'utf8');
     if (!/ADR-0020|0020-ga-stable-surfaces/.test(text.slice(0, 1_200))) continue;
-    assert.match(text.slice(0, 1_200), /- \*\*Updated:\*\* 2026-07-30/,
+    assert.match(text.slice(0, 1_200), /- \*\*Updated:\*\* \d{4}-\d{2}-\d{2}/,
       `${path.relative(ROOT, file)} needs an Updated date`);
     assert.match(text.slice(0, 1_200), /- \*\*Update note:\*\*/,
       `${path.relative(ROOT, file)} needs an update note`);

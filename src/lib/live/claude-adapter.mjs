@@ -13,7 +13,7 @@ export function adaptClaudeRecord(record, context = {}) {
   const isSidechain = record.isSidechain === true || actorId !== sessionId;
   const base = {
     sessionId, host: 'claude', surface: 'native',
-    project: context.project, observedAt: context.observedAt,
+    project: context.project, projectKey: context.projectKey, observedAt: context.observedAt,
     sourceTimestamp: record.timestamp,
     actor: {
       id: actorId, kind: isSidechain ? 'subagent' : 'session',

@@ -3,9 +3,10 @@
 - **Status:** Accepted; compatibility-source references amended by
   [ADR-0020](0020-ga-stable-surfaces.md)
 - **Date:** 2026-07-27
-- **Updated:** 2026-07-30
+- **Updated:** 2026-08-03
 - **Update note:** Retained local evidence-graded observability, removed the compatibility source,
-  and mapped its historical records to internal provenance.
+  mapped its historical records to internal provenance, and added canonical repository identity
+  plus runtime leases for concurrent Claude Code, Codex, and OpenCode controllers.
 - **Deciders:** agentic-kit maintainers
 - **Related:** [ADR-0005](0005-dashboard-in-page-routing-reveal.md),
   [ADR-0007](0007-maintainer-admin-local-telemetry.md),
@@ -13,6 +14,16 @@
 
 > **GA amendment:** the local, read-only observability contract remains. References below to the
 > retired compatibility execution source describe the evidence model at adoption time only.
+
+**2026-08-03 runtime identity amendment:** transcript and ledger evidence remains the topology
+source, while an asynchronous two-second local process survey supplies observed liveness leases
+for top-level Claude Code, Codex, and OpenCode controllers on macOS and Linux. Nested host CLIs
+remain workers of their nearest controller. A runtime lease requires a canonical Git repository;
+three consecutive successful surveys without the controller quiesce it. Retained transcript
+evidence may use a privacy-safe repository-label fallback when its former path no longer exists.
+Unresolved internal evidence is retained for later reconciliation but is never presented as an
+`unknown` workspace. Public project keys hash the canonical repository root when proven and never
+expose the path.
 
 ## Context
 
@@ -427,8 +438,10 @@ Acceptance requires:
 
 Acceptance does not imply automatic knowledge of every upstream store:
 
-- normal `ak dashboard` runs auto-discover Claude/Codex sources only; ruflo, agentic-qe, and
-  dual-run require explicit, repeatable `--live-source 'surface=path'` registration;
+- normal `ak dashboard` auto-discovers Claude/Codex transcripts and observes top-level Claude Code,
+  Codex, and OpenCode controller liveness; OpenCode transcript topology remains unavailable until a
+  native adapter is added; ruflo and agentic-qe require explicit, repeatable
+  `--live-source 'surface=path'` registration;
 - plugin, skill, MCP, and gate nodes appear only when a supported transcript or structured record
   emits them; there is no independent registry adapter for those surfaces;
 - cardinality and UI behavior have regression coverage, but no formal measured frame-time budget

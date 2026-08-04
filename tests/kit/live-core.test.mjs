@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import {
   createLiveEvent, LiveReplayStream, emptyLiveProjection,
-  reduceLiveEvent, resolveProjectLabel, serializeLiveProjection,
+  reduceLiveEvent, resolveProjectIdentity, resolveProjectLabel, serializeLiveProjection,
   sweepLiveProjection, stableProjectKey,
 } from '../../src/lib/live/index.mjs';
 
@@ -80,6 +80,41 @@ test('project identity resolves repository subdirectories to the repository root
   assert.equal(resolveProjectLabel(repository), 'tub-vault');
   assert.equal(resolveProjectLabel(path.join(repository, 'scripts')), 'tub-vault');
   assert.equal(resolveProjectLabel(path.join(repository, 'scripts', 'lib')), 'tub-vault');
+});
+
+test('canonical project keys distinguish unrelated same-named repositories', () => {
+  const left = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-live-left-'));
+  const right = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-live-right-'));
+  const leftRepo = path.join(left, 'api');
+  const rightRepo = path.join(right, 'api');
+  fs.mkdirSync(path.join(leftRepo, '.git'), { recursive: true });
+  fs.mkdirSync(path.join(rightRepo, '.git'), { recursive: true });
+  const one = resolveProjectIdentity(leftRepo);
+  const two = resolveProjectIdentity(rightRepo);
+  assert.equal(one.label, 'api');
+  assert.equal(two.label, 'api');
+  assert.notEqual(one.key, two.key);
+});
+
+test('project identity prefers a real nested repository over worktree path heuristics', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-live-project-'));
+  const outer = path.join(root, 'outer');
+  const nested = path.join(outer, '.claude', 'worktrees', 'nested');
+  fs.mkdirSync(path.join(outer, '.git'), { recursive: true });
+  fs.mkdirSync(path.join(nested, '.git'), { recursive: true });
+  const identity = resolveProjectIdentity(nested);
+  assert.equal(identity.label, 'nested');
+  assert.equal(identity.canonical, true);
+});
+
+test('project identity distinguishes unresolved paths and a repository literally named unknown', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-live-project-'));
+  const repository = path.join(root, 'unknown');
+  fs.mkdirSync(path.join(repository, '.git'), { recursive: true });
+  assert.deepEqual(resolveProjectIdentity(path.join(root, 'scratch')).canonical, false);
+  const identity = resolveProjectIdentity(repository);
+  assert.equal(identity.canonical, true);
+  assert.equal(identity.label, 'unknown repository');
 });
 
 test('project identity resolves subdirectories of a linked worktree to the owning repository', () => {
