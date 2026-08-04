@@ -19,6 +19,8 @@ export const configDir = () => path.join(configBase(), 'agentic-kit');
 export const legacyConfigDir = () => path.join(configBase(), 'ruflo');
 
 export const kitConfigPath = () => path.join(configDir(), 'kit.json');
+export const observabilityWorkspacePath = () =>
+  path.join(configDir(), 'observability-workspaces.json');
 export const legacyKitConfigPath = () => path.join(legacyConfigDir(), 'kit.json');
 
 /** Claude Code user-level locations (same shape on all platforms). */

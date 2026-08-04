@@ -57,7 +57,7 @@ Every metric section below follows the same shape:
 
 Two transcript stores, read-only, parsed at most once per file (cache keyed by
 `(path, mtime, size)`; `SCHEMA_VERSION` invalidates the whole cache on a
-schema change — `src/lib/usage-index.mjs:51`):
+schema change — `src/lib/usage-index.mjs:65`):
 
 | Transcript host | Store | Format |
 |---|---|---|
@@ -105,12 +105,12 @@ responses = Σ over included sessions of session.responses
 **Source:**
 
 - Filter: a parsed record with zero assistant turns is dropped entirely — "no
-  assistant turn → not a session" (`usage-index.mjs:892`) — and a record whose
+  assistant turn → not a session" (`usage-index.mjs:904`) — and a record whose
   last activity falls outside the requested window is dropped too
-  (`usage-index.mjs:893`).
+  (`usage-index.mjs:905`).
 - `responses` accumulation: Claude increments per assistant message
   (`usage-index.mjs:493`); Codex increments per `agent_message` event
-  (`usage-index.mjs:631`).
+  (`usage-index.mjs:649`).
 - Totals: `totals.responses += s.responses` per included session
   (`usage-index.mjs:884`).
 - Render: `kpi("sessions", fmtNum(t.sessions), fmtNum(t.responses)+" assistant
@@ -439,7 +439,7 @@ byDay[day].cost = Σ costOf(row) for every usage row whose day == that key
 
 **Source:** the day key is the row's own `row.day`, computed once at parse
 time as **local calendar day**, not UTC
-(`usage-index.mjs:520`/`usage-index.mjs:649` call `localDay(at)`) — so a
+(`usage-index.mjs:530`/`usage-index.mjs:667` call `localDay(at)`) — so a
 session that runs from 23:58 local to 00:05 local is billed to the day its
 *first* row landed on (test:
 `tests/kit/usage-index.test.mjs:634`, "a session that opens before midnight
@@ -465,8 +465,8 @@ renders "no sessions in window" instead of zeroed figures
 (`dashboard/client.mjs`).
 
 **Formula:** identical aggregation to every other bucket
-(`byProvider[s.provider]`, populated via `addTo()`, `usage-index.mjs:843-852`,
-  called once per session at `usage-index.mjs:966`), keyed by the literal string
+(`byProvider[s.provider]`, populated via `addTo()`, `usage-index.mjs:870-879`,
+  called once per session at `usage-index.mjs:1000`), keyed by the literal string
 `"claude"` or `"codex"` assigned at parse time
 (`blankSession(id, 'claude')` / `blankSession(id, 'codex')`,
 `usage-index.mjs:291-301`, `parseClaude`/`parseCodex` entry points).
@@ -506,7 +506,7 @@ punchcard[dow + "-" + hour] += 1   per assistant/agent_message response, at its 
 
 **Source:** incremented once per Claude assistant turn
 (`usage-index.mjs:493-496`, keyed by `punchKey(at)`) and once per Codex
-`agent_message` (`usage-index.mjs:630-634`), merged into the window-level
+`agent_message` (`usage-index.mjs:649-652`), merged into the window-level
 `punchcard` object per session (`usage-index.mjs:981`). Cell intensity is
 linear against the single busiest cell in the window:
 `v = pcMax ? n/pcMax : 0` (`dashboard/client.mjs`) — this is a
@@ -894,7 +894,7 @@ rollout replays the parent's entire token history (ccusage/ccusage#950
 measured up to 91× inflation) — while the session record stays visible. The
 rollout's own `session_meta.thread_source` sniff remains as the fallback when
 the ledger is absent or migrated beyond recognition. Codex sessions also carry
-`reasoningOutput` (`usage-index.mjs:656-659`) — reasoning tokens are a **subset**
+`reasoningOutput` (`usage-index.mjs:677-678`) — reasoning tokens are a **subset**
 of output tokens and are annotation only, never added to any sum.
 
 ## 14. Known limitations, restated as a single checklist
@@ -939,7 +939,7 @@ commit `540be18` on this branch.
 
 `parseCodex`'s single `addUsage()` call never included a `responses` field —
 Claude's parser passes `responses: 1` per assistant turn
-(`usage-index.mjs:489`, as it existed before this fix), but Codex's call
+(`usage-index.mjs:503`, the current equivalent), but Codex's call
 passed no such field at all. Because `byModel[model].responses` is summed
 directly from each usage row's `responses` field (`usage-index.mjs:921`,
 `m.responses += row.responses`), **every** Codex model in §10's "Models in

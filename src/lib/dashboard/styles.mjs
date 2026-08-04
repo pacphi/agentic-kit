@@ -184,6 +184,20 @@ body.gated .band,body.gated .tabbar,body.gated main{display:none}
   box-shadow:0 1px 4px rgba(0,0,0,.18),0 0 0 .5px rgba(0,0,0,.04);
   transition:left .25s cubic-bezier(.3,.7,.3,1), width .25s cubic-bezier(.3,.7,.3,1);
 }
+.secondary-shell{
+  min-height:54px; padding:12px clamp(16px,4vw,40px) 0;
+  background:var(--bg);
+}
+.secondary-rail{max-width:1180px; min-height:42px; margin:0 auto}
+.secondary-group{display:flex; align-items:center; gap:12px; min-height:42px; width:100%}
+.secondary-group[hidden]{display:none}
+.secondary-group .subseg{justify-content:flex-start}
+.secondary-actions{margin-left:auto; flex:0 0 auto}
+.primary-area[hidden]{display:none}
+.view-heading{min-height:76px; margin:0 0 18px}
+.view-heading h2{margin:4px 0 5px; color:var(--ink); font-size:20px; letter-spacing:-.025em}
+.view-heading p{margin:0; max-width:720px; color:var(--ink-2); font-size:12px; line-height:1.5}
+.view-eyebrow{color:var(--accent); font:700 9px/1 ui-monospace,monospace; letter-spacing:.14em}
 .badge{
   min-width:16px; height:16px; padding:0 4px; border-radius:8px;
   background:var(--fail); color:#fff; font-size:10.5px; font-weight:600;
@@ -193,7 +207,7 @@ body.gated .band,body.gated .tabbar,body.gated main{display:none}
 .badge[hidden]{display:none}
 
 /* ── layout ── */
-.wrap{padding:clamp(16px,4vw,40px); max-width:1180px; margin:0 auto}
+.wrap{padding:16px clamp(16px,4vw,40px) clamp(16px,4vw,40px); max-width:1180px; margin:0 auto}
 .panel{animation:fade .25s ease}
 .panel[hidden]{display:none}
 @keyframes fade{from{opacity:0; transform:translateY(4px)}to{opacity:1; transform:none}}
@@ -359,6 +373,13 @@ body.gated .band,body.gated .tabbar,body.gated main{display:none}
   align-items:center; justify-content:center;
 }
 .segbadge[hidden]{display:none}
+@media(max-width:720px){
+  .secondary-shell{padding-top:9px}
+  .secondary-group{align-items:flex-start; overflow-x:auto; scrollbar-width:none}
+  .secondary-group::-webkit-scrollbar{display:none}
+  .secondary-actions{position:sticky; right:0; background:var(--bg); padding-left:8px}
+  .view-heading{min-height:70px}
+}
 .filters{display:flex; gap:8px; flex-wrap:wrap; margin-left:auto}
 .chipf{
   font-size:12px; padding:4px 11px; border-radius:100px; border:1px solid var(--line);
@@ -558,11 +579,11 @@ body.gated .band,body.gated .tabbar,body.gated main{display:none}
    which is silent: the row still renders, it just renders the wrong data under
    each heading. */
 .srow{
-  display:grid; grid-template-columns:18px 58px minmax(150px,2.1fr) minmax(90px,1fr) 106px 46px 60px 62px 68px 20px;
+  display:grid; grid-template-columns:18px 82px minmax(150px,2.1fr) minmax(90px,1fr) 106px 46px 60px 62px 68px 20px;
   gap:10px; align-items:center; padding:9px 13px; background:var(--panel); font-size:12.5px; cursor:pointer;
 }
 .srow:hover{background:var(--panel-2)}
-.s-host{font-size:10px; font-weight:600; text-align:center; padding:2px 0; border-radius:100px; border:1px solid var(--line-2)}
+.s-host{font-size:10px; font-weight:600; text-align:center; padding:2px 6px; border-radius:100px; border:1px solid var(--line-2); white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
 .s-claude{color:var(--warn); background:color-mix(in srgb,var(--warn) 12%,transparent); border-color:color-mix(in srgb,var(--warn) 30%,transparent)}
 .s-codex{color:var(--accent); background:var(--accent-soft); border-color:color-mix(in srgb,var(--accent) 35%,transparent)}
 .s-title{overflow:hidden; text-overflow:ellipsis; white-space:nowrap}

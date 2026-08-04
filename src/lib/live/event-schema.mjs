@@ -1,4 +1,4 @@
-export const LIVE_SCHEMA_VERSION = 1;
+export const LIVE_SCHEMA_VERSION = 2;
 
 const HOSTS = new Set(['claude', 'codex', 'opencode', 'internal']);
 // `internal` is read-only historical vocabulary. Live-source registration still
@@ -6,22 +6,89 @@ const HOSTS = new Set(['claude', 'codex', 'opencode', 'internal']);
 const SURFACES = new Set(['native', 'ruflo', 'aqe', 'plugin', 'skill', 'internal']);
 const CONFIDENCE = new Set(['observed', 'configured', 'correlated', 'inferred', 'unknown', 'assumed', 'planned']);
 const PROVIDER_PROVENANCE = new Set(['observed', 'configured', 'inferred', 'unknown']);
-const EVIDENCE_FIELDS = ['host', 'project', 'provider', 'model', 'status', 'hierarchy'];
+const EVIDENCE_FIELDS = ['host', 'project', 'provider', 'model', 'status', 'hierarchy', 'workspace'];
 const STATUS = new Set([
   'queued', 'running', 'quiescent', 'expired', 'blocked',
   'completed', 'failed', 'cancelled', 'unknown',
 ]);
+const SIGNAL_KINDS = new Set([
+  'presence', 'activity', 'operation', 'relationship', 'metadata',
+]);
+const SIGNAL_PHASES = new Set([
+  'observed', 'started', 'updated', 'quiescent',
+  'completed', 'failed', 'cancelled', 'planned',
+]);
 const ACTOR_KINDS = new Set([
   'session', 'agent', 'subagent', 'tool', 'skill', 'plugin', 'mcp', 'gate',
 ]);
+const SECRET_SHAPE = /(?:sk-[A-Za-z0-9_-]{12,}|gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|(?:secret|token|password|api[_-]?key)[=:][^/\s]{8,})/gi;
 
 function text(value, max = 256) {
   return typeof value === 'string' && value.length > 0 ? value.slice(0, max) : null;
 }
 
+function workspaceText(value, max, { pathLike = false, leaf = false } = {}) {
+  if (typeof value !== 'string') return null;
+  const clean = [...value].filter((character) => {
+    const code = character.codePointAt(0);
+    return code != null && code > 31 && code !== 127;
+  }).join('').replace(SECRET_SHAPE, '…redacted').trim();
+  if (!clean) return null;
+  if (leaf && /[/\\]/.test(clean)) return null;
+  if (pathLike && (/^(?:[/\\]|[A-Za-z]:[/\\])/.test(clean)
+    || clean.split(/[/\\]/).includes('..'))) return null;
+  return clean.slice(0, max);
+}
+
 function timestamp(value) {
   const ms = Date.parse(value);
   return Number.isFinite(ms) ? new Date(ms).toISOString() : null;
+}
+
+function count(value) {
+  return Number.isFinite(value) ? Math.max(0, Math.trunc(value)) : null;
+}
+
+function safeWorkspace(value) {
+  if (!value || typeof value !== 'object') return null;
+  const capturedAt = timestamp(value.capturedAt);
+  if (!capturedAt) return null;
+  const changes = value.changes && typeof value.changes === 'object' ? {
+    additions: count(value.changes.additions), deletions: count(value.changes.deletions),
+    files: count(value.changes.files), binaryFiles: count(value.changes.binaryFiles),
+    basis: value.changes.basis === 'tracked-vs-head' ? value.changes.basis : null,
+    completeness: text(value.changes.completeness, 80),
+    capturedAt: timestamp(value.changes.capturedAt) ?? capturedAt,
+  } : null;
+  return {
+    key: /^workspace:[a-f0-9]{16}$/.test(value.key ?? '') ? value.key : null,
+    repositoryLabel: workspaceText(value.repositoryLabel, 96, { leaf: true }),
+    directoryLabel: workspaceText(value.directoryLabel, 180, { pathLike: true }),
+    branchLabel: workspaceText(value.branchLabel, 160, { pathLike: true }),
+    branchState: ['attached', 'detached', 'unborn', 'unknown'].includes(value.branchState)
+      ? value.branchState : 'unknown',
+    changes, capturedAt,
+    source: text(value.source, 48),
+    confidence: CONFIDENCE.has(value.confidence) ? value.confidence : 'unknown',
+  };
+}
+
+function inferredSignal(action, status) {
+  if (action === 'session.heartbeat' || action === 'session.rebound') {
+    return { kind: 'presence', phase: status === 'quiescent' ? 'quiescent' : 'observed' };
+  }
+  if (action.startsWith('tool.')) {
+    const phase = action.endsWith('.started') ? 'started'
+      : (status === 'failed' ? 'failed' : status === 'cancelled' ? 'cancelled' : 'completed');
+    return { kind: 'operation', phase };
+  }
+  if (action === 'agent.spawned' || action === 'agent.planned') {
+    return { kind: 'relationship', phase: action === 'agent.planned' ? 'planned' : 'observed' };
+  }
+  if (['session.input', 'agent.output', 'session.started'].includes(action)) {
+    return { kind: 'activity', phase: action === 'session.started' ? 'started' : 'updated' };
+  }
+  return { kind: 'metadata', phase: 'observed' };
 }
 
 /**
@@ -56,6 +123,9 @@ export function createLiveEvent(input, { now = () => new Date().toISOString() } 
   const actorKind = ACTOR_KINDS.has(input.actor?.kind) ? input.actor.kind : 'agent';
   const observedAt = timestamp(input.observedAt) ?? timestamp(now());
   if (!observedAt) throw new TypeError('live event requires a valid observedAt');
+  const inferred = inferredSignal(action, STATUS.has(input.status) ? input.status : 'unknown');
+  const signalKind = SIGNAL_KINDS.has(input.signal?.kind) ? input.signal.kind : inferred.kind;
+  const signalPhase = SIGNAL_PHASES.has(input.signal?.phase) ? input.signal.phase : inferred.phase;
 
   const out = {
     schemaVersion: LIVE_SCHEMA_VERSION,
@@ -74,11 +144,13 @@ export function createLiveEvent(input, { now = () => new Date().toISOString() } 
     surface,
     project,
     projectKey: safeProjectKey(input.projectKey, project),
+    workspace: safeWorkspace(input.workspace),
     actor: {
       id: actorId,
       kind: actorKind,
       label: text(input.actor?.label, 96),
       role: text(input.actor?.role, 96),
+      host: HOSTS.has(input.actor?.host) ? input.actor.host : host,
       provider,
       model,
     },
@@ -88,8 +160,14 @@ export function createLiveEvent(input, { now = () => new Date().toISOString() } 
       kind: ACTOR_KINDS.has(input.target.kind) ? input.target.kind : 'agent',
       label: text(input.target.label, 96),
       role: text(input.target.role, 96),
+      host: HOSTS.has(input.target.host) ? input.target.host : host,
     } : null,
     status: STATUS.has(input.status) ? input.status : 'unknown',
+    signal: {
+      kind: signalKind,
+      phase: signalPhase,
+      correlationId: text(input.signal?.correlationId, 128),
+    },
     source: {
       adapter: text(input.source?.adapter, 96) ?? 'unknown',
       artifact: text(input.source?.artifact),

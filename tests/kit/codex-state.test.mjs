@@ -22,16 +22,19 @@ function fixtureDb(dir, name = 'state_5.sqlite') {
   db.exec(`CREATE TABLE threads (
     id TEXT PRIMARY KEY, thread_source TEXT, source TEXT, model TEXT,
     git_branch TEXT, tokens_used INTEGER, agent_nickname TEXT, agent_role TEXT,
-    title TEXT, name TEXT, cwd TEXT, model_provider TEXT, status TEXT);`);
+    title TEXT, name TEXT, cwd TEXT, model_provider TEXT, status TEXT,
+    created_at_ms INTEGER, updated_at_ms INTEGER);`);
   db.exec(`CREATE TABLE thread_spawn_edges (
     parent_thread_id TEXT, child_thread_id TEXT, status TEXT);`);
-  db.prepare('INSERT INTO threads VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)')
+  db.prepare('INSERT INTO threads VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)')
     .run('parent-1', 'user', 'cli', 'gpt-5.6', 'main', 21_500_000, null, null,
-      'private parent task', 'private parent name', '/Users/private/agentic-kit', 'openai', 'running');
-  db.prepare('INSERT INTO threads VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)')
+      'private parent task', 'private parent name', '/Users/private/agentic-kit', 'openai', 'running',
+      1_785_788_212_549, 1_785_788_531_650);
+  db.prepare('INSERT INTO threads VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)')
     .run('child-1', 'subagent', 'subagent', 'gpt-5.6', 'main', 1_000_000,
       'Bohr', 'tester', 'private child task', 'private child name',
-      '/Users/private/agentic-kit', 'openai', 'running');
+      '/Users/private/agentic-kit', 'openai', 'running',
+      1_785_788_220_000, 1_785_788_500_000);
   db.prepare('INSERT INTO thread_spawn_edges VALUES (?,?,?)').run('parent-1', 'child-1', 'open');
   db.close();
   return file;
@@ -61,6 +64,8 @@ test('readCodexState reads threads and spawn edges', () => {
   assert.equal(ledger.threads.get('child-1').agentRole, 'tester');
   assert.equal(ledger.threads.get('child-1').project, 'agentic-kit');
   assert.equal(ledger.threads.get('child-1').provider, 'openai');
+  assert.equal(ledger.threads.get('parent-1').createdAt, '2026-08-03T20:16:52.549Z');
+  assert.equal(ledger.threads.get('parent-1').updatedAt, '2026-08-03T20:22:11.650Z');
   assert.equal(JSON.stringify([...ledger.threads.values()]).includes('private'), false);
   assert.equal(ledger.parents.get('child-1'), 'parent-1');
 });

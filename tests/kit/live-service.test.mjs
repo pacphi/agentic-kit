@@ -158,6 +158,33 @@ test('native discovery chooses newest files when the tailer budget is bounded', 
   service.close();
 });
 
+test('bounded native discovery rotates to a newer transcript created after startup', () => {
+  const sb = sandbox();
+  const old = path.join(sb.claude, 'old.jsonl');
+  fs.writeFileSync(old, line({
+    type: 'user', sessionId: 'old', cwd: '/work/old-project',
+    timestamp: '2026-07-27T11:00:00Z',
+  }));
+  fs.utimesSync(old, new Date(1_000), new Date(1_000));
+  let tick;
+  const service = new LiveSessionsService({
+    roots: sb.roots, maxFiles: 1, readCodexState: () => null,
+    setInterval: (fn) => { tick = fn; return { unref() {} }; }, clearInterval: () => {},
+    now: () => '2026-07-27T12:00:00Z',
+  });
+  service.start();
+  const recent = path.join(sb.claude, 'recent.jsonl');
+  fs.writeFileSync(recent, line({
+    type: 'user', sessionId: 'recent', cwd: '/work/recent-project',
+    timestamp: '2026-07-27T12:00:00Z',
+  }));
+  fs.utimesSync(recent, new Date(2_000), new Date(2_000));
+  tick();
+  assert.ok(service.snapshot().sessions.some((session) => session.id === 'recent'));
+  assert.equal(service.snapshot().health.claude.files, 1);
+  service.close();
+});
+
 test('metadata bootstrap is adversarially privacy bounded', () => {
   const sb = sandbox();
   fs.writeFileSync(path.join(sb.codex, 'rollout-2026-07-27T12-00-00-x1.jsonl'), [
@@ -322,6 +349,34 @@ test('runtime observation keeps concurrent Claude and Codex repositories live wi
   assert.ok(snapshot.sessions.every((session) => session.project !== 'unknown'));
 });
 
+test('runtime provider resolution is Claude-only across all live hosts', (t) => {
+  const sb = sandbox();
+  const hosts = ['claude', 'codex', 'opencode'];
+  const projects = hosts.map((host) => path.join(sb.dir, host));
+  for (const project of projects) fs.mkdirSync(path.join(project, '.git'), { recursive: true });
+  const asked = [];
+  const service = new LiveSessionsService({
+    roots: sb.roots, readCodexState: () => null, runtimeScanMs: 0,
+    readActiveSessions: () => hosts.map((host, index) => ({
+      pid: index + 1, host, cwd: projects[index],
+    })),
+    resolveClaudeProvider: ({ cwd }) => {
+      asked.push(cwd);
+      return { provider: 'anthropic', provenance: 'inferred' };
+    },
+    now: () => '2026-08-03T22:45:00Z',
+  });
+  t.after(() => service.close());
+  service.start();
+  const snapshot = service.snapshot();
+  const providerFor = (host) => snapshot.sessions.find((session) => session.host === host)
+    .nodes.find((node) => node.kind === 'session').provider;
+  assert.deepEqual(asked, [projects[0]]);
+  assert.equal(providerFor('claude'), 'anthropic');
+  assert.equal(providerFor('codex'), null);
+  assert.equal(providerFor('opencode'), null);
+});
+
 test('runtime leases require canonical Git repositories and expire after three missed surveys', (t) => {
   const sb = sandbox();
   const repository = path.join(sb.dir, 'keel');
@@ -407,7 +462,84 @@ test('runtime synthetic sessions rebind to transcript identity when evidence arr
   assert.equal(service.snapshot().projects[0].liveCount, 1);
 });
 
-test('runtime survey failures degrade health without expiring prior leases', async (t) => {
+test('runtime presence does not bind to a session older than the process generation', (t) => {
+  const sb = sandbox();
+  const repository = path.join(sb.dir, 'agentic-kit');
+  fs.mkdirSync(path.join(repository, '.git'), { recursive: true });
+  fs.writeFileSync(path.join(sb.codex, 'rollout-2026-08-02T10-00-00-old.jsonl'), line({
+    type: 'session_meta', timestamp: '2026-08-02T10:00:00Z',
+    payload: { id: 'old', model: 'gpt-x', cwd: repository },
+  }));
+  const service = new LiveSessionsService({
+    roots: sb.roots, readCodexState: () => null, runtimeScanMs: 0,
+    readActiveSessions: () => [{
+      pid: 33, startedAt: '2026-08-03T16:00:00Z', host: 'codex', cwd: repository,
+    }],
+    now: () => '2026-08-03T16:01:00Z',
+  });
+  t.after(() => service.close());
+  service.start();
+  const sessions = service.snapshot().sessions;
+  assert.ok(sessions.some((session) => session.id === 'old'
+    && session.presence.state !== 'present'));
+  assert.ok(sessions.some((session) => session.id.startsWith('runtime-')
+    && session.presence.state === 'present'));
+});
+
+test('runtime presence stays synthetic when same-repository transcript identity is ambiguous', (t) => {
+  const sb = sandbox();
+  const repository = path.join(sb.dir, 'keel');
+  fs.mkdirSync(path.join(repository, '.git'), { recursive: true });
+  for (const id of ['candidate-a', 'candidate-b']) {
+    fs.writeFileSync(path.join(sb.claude, `${id}.jsonl`), line({
+      type: 'user', sessionId: id, timestamp: '2026-08-03T16:00:30Z',
+      cwd: repository, message: { model: 'claude-x', content: 'private' },
+    }));
+  }
+  const service = new LiveSessionsService({
+    roots: sb.roots, readCodexState: () => null, runtimeScanMs: 0,
+    readActiveSessions: () => [{
+      pid: 34, startedAt: '2026-08-03T16:00:00Z', host: 'claude', cwd: repository,
+    }],
+    now: () => '2026-08-03T16:01:00Z',
+  });
+  t.after(() => service.close());
+  service.start();
+  const sessions = service.snapshot().sessions;
+  assert.equal(sessions.filter((session) => session.presence.state === 'present').length, 1);
+  assert.ok(sessions.find((session) => session.presence.state === 'present')
+    .id.startsWith('runtime-'));
+  assert.ok(sessions.filter((session) => session.id.startsWith('candidate-'))
+    .every((session) => session.presence.state !== 'present'));
+});
+
+test('runtime-only Claude sessions resolve provider identity without host inference', (t) => {
+  const sb = sandbox();
+  const repository = path.join(sb.dir, 'emailibrium');
+  fs.mkdirSync(path.join(repository, '.git'), { recursive: true });
+  const asked = [];
+  const service = new LiveSessionsService({
+    roots: sb.roots, readCodexState: () => null, runtimeScanMs: 0,
+    readActiveSessions: () => [{
+      pid: 31, startedAt: '2026-08-03T16:00:00Z', host: 'claude', cwd: repository,
+    }],
+    resolveClaudeProvider: ({ cwd }) => {
+      asked.push(cwd);
+      return { provider: 'bedrock', provenance: 'configured' };
+    },
+    now: () => '2026-08-03T16:00:00Z',
+  });
+  t.after(() => service.close());
+  service.start();
+  const session = service.snapshot().sessions[0];
+  const actor = session.nodes.find((node) => node.kind === 'session');
+  assert.deepEqual(asked, [repository]);
+  assert.equal(actor.provider, 'bedrock');
+  assert.equal(actor.providerProvenance, 'configured');
+  assert.equal(session.coverage.providerIdentity, 'configured');
+});
+
+test('runtime survey failures preserve a bounded grace then expire prior leases', async (t) => {
   const sb = sandbox();
   const repository = path.join(sb.dir, 'keel');
   fs.mkdirSync(path.join(repository, '.git'), { recursive: true });
@@ -424,10 +556,58 @@ test('runtime survey failures degrade health without expiring prior leases', asy
   t.after(() => service.close());
   service.start();
   fail = true;
-  tick();
-  await waitUntil(() => service.snapshot().health.runtime.status === 'degraded');
-  assert.equal(service.snapshot().projects[0].liveCount, 1);
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    tick();
+    await waitUntil(() => service.snapshot().health.runtime.errors === attempt);
+    assert.equal(service.snapshot().projects[0].liveCount, attempt < 3 ? 1 : 0);
+  }
+  assert.equal(service.snapshot().sessions[0].lifecycle, 'quiescent');
+  assert.equal(service.snapshot().sessions[0].presence.evidence, 'unknown');
   assert.equal(service.snapshot().health.runtime.lastError, 'ERR_RUNTIME_TEST');
+  fail = false;
+  tick();
+  await waitUntil(() => service.snapshot().projects[0].liveCount === 1);
+  assert.equal(service.snapshot().sessions[0].presence.evidence, 'observed');
+  assert.equal(service.snapshot().health.runtime.status, 'ok');
+});
+
+test('OpenCode workspace metadata persists as historical evidence across restarts', (t) => {
+  const sb = sandbox();
+  const repository = path.join(sb.dir, 'opencode-repo');
+  const workspaceFile = path.join(sb.dir, 'observability-workspaces.json');
+  fs.mkdirSync(path.join(repository, '.git'), { recursive: true });
+  const workspace = {
+    key: 'workspace:0123456789abcdef', repositoryLabel: 'opencode-repo',
+    directoryLabel: 'repo root', branchLabel: 'feature/opencode', branchState: 'attached',
+    changes: { additions: 12, deletions: 3, files: 2, binaryFiles: 0,
+      basis: 'tracked-vs-head', completeness: 'untracked-and-binary-lines-excluded',
+      capturedAt: '2026-08-03T16:00:00Z' },
+    capturedAt: '2026-08-03T16:00:00Z', source: 'git', confidence: 'observed',
+  };
+  const live = new LiveSessionsService({
+    roots: sb.roots, workspaceFile, readCodexState: () => null, runtimeScanMs: 0,
+    readActiveSessions: () => [{
+      pid: 40, startedAt: '2026-08-03T16:00:00Z', host: 'opencode',
+      cwd: repository, workspace,
+    }],
+    now: () => '2026-08-03T16:00:00Z',
+  });
+  live.start();
+  assert.equal(live.snapshot().projects[0].liveCount, 1);
+  assert.equal(live.snapshot().sessions[0].workspace.branchLabel, 'feature/opencode');
+  live.close();
+
+  const history = new LiveSessionsService({
+    roots: sb.roots, workspaceFile, readCodexState: () => null,
+    readActiveSessions: () => [], now: () => '2026-08-03T17:00:00Z',
+  });
+  t.after(() => history.close());
+  history.start();
+  const restored = history.snapshot().sessions.find((session) => session.host === 'opencode');
+  assert.equal(restored.workspace.branchLabel, 'feature/opencode');
+  assert.equal(restored.workspace.changes.additions, 12);
+  assert.equal(restored.presence.state, 'unknown');
+  assert.equal(history.snapshot().projects[0].liveCount, 0);
 });
 
 test('ledger edges retain their repository after bounded projection eviction', (t) => {

@@ -1,6 +1,5 @@
-import fs from 'node:fs';
 import path from 'node:path';
-import { claudeDir, codexDir } from '../paths.mjs';
+import { claudeDir, codexDir, observabilityWorkspacePath } from '../paths.mjs';
 import { readCodexState as defaultReadCodexState } from '../codex-state.mjs';
 import { adaptClaudeRecord } from './claude-adapter.mjs';
 import { resolveClaudeProvider as defaultResolveClaudeProvider } from './claude-provider.mjs';
@@ -14,64 +13,11 @@ import {
 import { LiveReplayStream } from './replay-stream.mjs';
 import { adaptStructuredEvent } from './structured-adapter.mjs';
 import { canonicalSessionKey, resolveProjectIdentity } from './project-label.mjs';
-
-const safeEntries = (dir) => {
-  try { return fs.readdirSync(dir, { withFileTypes: true }); } catch { return []; }
-};
-
-function discoverJsonl(root, { maxDepth, maxFiles, accept }) {
-  const found = [];
-  const visit = (dir, depth) => {
-    if (depth > maxDepth || found.length >= 4096) return;
-    for (const entry of safeEntries(dir)) {
-      if (found.length >= 4096) break;
-      const file = path.join(dir, entry.name);
-      if (entry.isDirectory()) visit(file, depth + 1);
-      else if (entry.isFile() && entry.name.endsWith('.jsonl') && accept(entry.name)) {
-        let mtimeMs = 0;
-        try { mtimeMs = fs.statSync(file).mtimeMs; } catch { /* skip ordering evidence */ }
-        found.push({ file, mtimeMs });
-      }
-    }
-  };
-  visit(root, 0);
-  return found.sort((a, b) => b.mtimeMs - a.mtimeMs)
-    .slice(0, maxFiles).map((entry) => entry.file);
-}
-
-/** Read only a small prefix and retain only records with safe runtime metadata. */
-function bootstrapRecords(file, adapter) {
-  let text;
-  try {
-    const fd = fs.openSync(file, 'r');
-    try {
-      const size = Math.min(fs.fstatSync(fd).size, 128 * 1024);
-      const bytes = Buffer.alloc(size);
-      fs.readSync(fd, bytes, 0, size, 0);
-      text = bytes.toString('utf8');
-    } finally { fs.closeSync(fd); }
-  } catch { return []; }
-  const records = [];
-  for (const line of text.split('\n').slice(0, 256)) {
-    if (!line.trim()) continue;
-    let record;
-    try { record = JSON.parse(line); } catch { continue; }
-    if (adapter === 'codex' && ['session_meta', 'turn_context'].includes(record?.type)) {
-      records.push(record);
-    } else if (adapter === 'claude'
-      && ['user', 'assistant'].includes(record?.type)
-      && (record.sessionId || record.cwd || record.message?.model)) {
-      records.push(record);
-      if (record.cwd && record.message?.model) break;
-    }
-  }
-  return records;
-}
-
-function codexId(file) {
-  return path.basename(file, '.jsonl')
-    .replace(/^rollout-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-/, '');
-}
+import { workspaceFromSource } from './git-workspace.mjs';
+import { WorkspaceSnapshotStore } from './workspace-store.mjs';
+import {
+  bootstrapRecords, codexTranscriptId, discoverJsonl,
+} from './native-transcript-discovery.mjs';
 
 /**
  * Coordinates bounded transcript tailers into one privacy-safe live projection.
@@ -91,6 +37,7 @@ export class LiveSessionsService {
   #runtimeBindings = new Map();
   #lastRuntimeScan = 0;
   #runtimeSurvey = null;
+  #workspaceStore = null;
 
   constructor(options = {}) {
     const roots = options.roots ?? {};
@@ -120,6 +67,13 @@ export class LiveSessionsService {
       maxNodesPerSession: options.maxNodesPerSession ?? 1000,
     };
     this.#stream = new LiveReplayStream({ capacity: this.#options.replayCapacity });
+    if (Object.hasOwn(options, 'workspaceStore')) {
+      this.#workspaceStore = options.workspaceStore;
+    } else if (options.workspaceFile || !options.roots) {
+      this.#workspaceStore = new WorkspaceSnapshotStore(
+        options.workspaceFile ?? observabilityWorkspacePath(),
+      );
+    }
     for (const name of ['claude', 'codex', 'ruflo', 'aqe', 'codex-state']) {
       this.#health.set(name, { status: 'idle', files: 0, events: 0, errors: 0, lastError: null });
     }
@@ -131,6 +85,7 @@ export class LiveSessionsService {
   start() {
     if (this.#started) return this;
     this.#started = true;
+    this.#restoreWorkspaceHistory();
     this.#reconcile(true);
     this.#timer = this.#options.setInterval(() => this.#reconcile(false), this.#options.intervalMs);
     this.#timer?.unref?.();
@@ -198,9 +153,11 @@ export class LiveSessionsService {
         projectKey: this.#options.structuredProject.key,
       }, initial);
     }
-    const remaining = Math.max(0, this.#options.maxFiles - this.#tailers.size);
-    const claudeLimit = Math.ceil(remaining / 2);
-    const codexLimit = remaining - claudeLimit;
+    const structuredCount = [...this.#contexts.values()]
+      .filter((context) => ['ruflo', 'aqe'].includes(context.adapter)).length;
+    const nativeCapacity = Math.max(0, this.#options.maxFiles - structuredCount);
+    const claudeLimit = Math.ceil(nativeCapacity / 2);
+    const codexLimit = nativeCapacity - claudeLimit;
     // Depth 3 reaches `<project>/<session>/subagents/agent-*.jsonl`; a session
     // delegating to workers stays observable while its own transcript is idle.
     const claude = discoverJsonl(this.#options.roots.claude, {
@@ -209,6 +166,18 @@ export class LiveSessionsService {
     const codex = discoverJsonl(this.#options.roots.codex, {
       maxDepth: 4, maxFiles: codexLimit, accept: (name) => name.startsWith('rollout-'),
     });
+    // The bounded set is a moving window, not a startup-only choice. Replace
+    // native tailers that fell out of the newest-file budget so an active
+    // session created after the dashboard started can become observable.
+    const desiredNative = new Set([...claude, ...codex]);
+    for (const [file, context] of this.#contexts) {
+      if (!['claude', 'codex'].includes(context.adapter) || desiredNative.has(file)) continue;
+      this.#tailers.get(file)?.close();
+      this.#tailers.delete(file);
+      this.#contexts.delete(file);
+      const current = this.#health.get(context.adapter);
+      this.#mark(context.adapter, { files: Math.max(0, (current?.files ?? 1) - 1) });
+    }
     for (const file of claude) {
       this.#add(file, {
         adapter: 'claude', sessionId: path.basename(file, '.jsonl'),
@@ -216,7 +185,9 @@ export class LiveSessionsService {
       }, initial);
     }
     for (const file of codex) {
-      this.#add(file, { adapter: 'codex', sessionId: codexId(file), meta: {} }, initial);
+      this.#add(file, {
+        adapter: 'codex', sessionId: codexTranscriptId(file), meta: {},
+      }, initial);
     }
   }
 
@@ -247,6 +218,13 @@ export class LiveSessionsService {
       const identity = resolveProjectIdentity(explicitCwd);
       context.project = identity.label;
       context.projectKey = identity.key;
+      context.workspace = workspaceFromSource({
+        cwd: explicitCwd,
+        branch: record?.gitBranch ?? record?.payload?.git_branch ?? context.workspace?.branchLabel,
+        project: identity.label,
+        capturedAt: record?.timestamp ?? this.#options.now(),
+        source: `${context.adapter}-source`,
+      });
     }
     if (context.adapter === 'claude' && explicitCwd && !context.provider) {
       const resolved = this.#claudeProvider(explicitCwd);
@@ -295,6 +273,14 @@ export class LiveSessionsService {
       maxSessions: this.#options.maxSessions,
       maxNodesPerSession: this.#options.maxNodesPerSession,
     });
+    if (published.workspace && this.#workspaceStore) {
+      this.#workspaceStore.remember({
+        sessionKey: published.sessionKey, sessionId: published.sessionId,
+        parentSessionId: published.parentSessionId, host: published.host,
+        project: published.project, projectKey: published.projectKey,
+        workspace: published.workspace,
+      });
+    }
     const current = this.#health.get(adapter);
     this.#mark(adapter, { status: 'ok', events: (current?.events ?? 0) + 1 });
   }
@@ -324,6 +310,7 @@ export class LiveSessionsService {
     let result;
     try { result = this.#options.readActiveSessions(); } catch (error) {
       this.#error('runtime', error);
+      this.#ingestRuntimeObservation([], observedAt, false);
       return;
     }
     if (Array.isArray(result)) {
@@ -334,12 +321,16 @@ export class LiveSessionsService {
       .then((active) => {
         if (this.#started) this.#ingestRuntimeObservation(active, observedAt);
       })
-      .catch((error) => this.#error('runtime', error))
+      .catch((error) => {
+        this.#error('runtime', error);
+        if (this.#started) this.#ingestRuntimeObservation([], observedAt, false);
+      })
       .finally(() => { this.#runtimeSurvey = null; });
   }
 
-  #ingestRuntimeObservation(active, observedAt) {
+  #ingestRuntimeObservation(active, observedAt, surveyHealthy = true) {
     if (!Array.isArray(active)) active = [];
+    const observedMs = Date.parse(observedAt);
     const seen = new Set();
     const claimed = new Set([...this.#runtimeBindings.values()]
       .map((binding) => binding.sessionKey));
@@ -358,15 +349,24 @@ export class LiveSessionsService {
       let rebound = false;
       if (!session || session.host !== item.host || session.projectKey !== identity.key
         || terminal.has(session.status) || synthetic) {
+        const processStarted = Date.parse(item.startedAt ?? '');
+        const candidateCutoff = Number.isFinite(processStarted)
+          ? processStarted - 30_000
+          : observedMs - this.#options.expiryMs;
         const candidates = [...this.#projection.sessions.values()]
           .filter((candidate) => candidate.host === item.host
             && candidate.projectKey === identity.key
             && !candidate.parentSessionId
             && !candidate.id.startsWith('runtime-')
             && !terminal.has(candidate.status)
+            && Number.isFinite(Date.parse(candidate.updatedAt ?? ''))
+            && Date.parse(candidate.updatedAt) >= candidateCutoff
             && (!claimed.has(candidate.key) || candidate.key === sessionKey))
           .sort((left, right) => Date.parse(right.updatedAt) - Date.parse(left.updatedAt));
-        const candidate = candidates[0] ?? null;
+        // A process and transcript share no native correlation ID. Bind only
+        // when one candidate is uniquely plausible; ambiguity stays as an
+        // honest runtime-only session rather than a convincing false join.
+        const candidate = candidates.length === 1 ? candidates[0] : null;
         if (candidate) {
           if (synthetic && sessionKey !== candidate.key) this.#dropRuntimeSynthetic(sessionKey);
           claimed.delete(sessionKey);
@@ -385,15 +385,32 @@ export class LiveSessionsService {
       });
       claimed.add(sessionKey);
       const sessionId = session?.id ?? sessionKey.slice(item.host.length + 1);
+      // A process lease proves the execution host. Claude additionally has a
+      // documented, locally inspectable provider-selection surface, so carry
+      // that configured/inferred identity even before a transcript appears.
+      // Codex and OpenCode remain unknown until their own evidence reports a
+      // provider; host identity must never be used as a provider fallback.
+      const resolvedProvider = item.host === 'claude'
+        ? this.#claudeProvider(item.cwd) : null;
       this.#publish(createLiveEvent({
         sessionId, host: item.host, surface: 'native',
         project: identity.label, projectKey: identity.key, observedAt,
-        actor: { id: sessionId, kind: 'session', role: 'primary' },
+        workspace: item.workspace ? {
+          ...item.workspace,
+          confidence: session ? 'correlated' : item.workspace.confidence,
+        } : null,
+        actor: {
+          id: sessionId, kind: 'session', role: 'primary',
+          provider: resolvedProvider?.provider,
+        },
         action: rebound ? 'session.rebound' : 'session.heartbeat',
         status: 'running',
         source: {
           adapter: 'runtime-process', confidence: 'observed',
-          fields: { host: 'observed', project: 'observed', status: 'observed' },
+          fields: {
+            host: 'observed', project: 'observed', status: 'observed',
+            provider: resolvedProvider?.provenance,
+          },
         },
       }), 'runtime');
     }
@@ -412,14 +429,17 @@ export class LiveSessionsService {
           actor: { id: session.id, kind: 'session', role: 'primary' },
           action: 'session.heartbeat', status: 'quiescent',
           source: {
-            adapter: 'runtime-process', confidence: 'observed',
-            fields: { host: 'observed', project: 'observed', status: 'observed' },
+            adapter: 'runtime-process', confidence: surveyHealthy ? 'observed' : 'unknown',
+            fields: {
+              host: 'observed', project: 'observed',
+              status: surveyHealthy ? 'observed' : 'unknown',
+            },
           },
         }), 'runtime');
       }
       this.#runtimeBindings.delete(key);
     }
-    this.#mark('runtime', { status: 'ok', files: active.length });
+    this.#mark('runtime', { status: surveyHealthy ? 'ok' : 'degraded', files: active.length });
   }
 
   #dropRuntimeSynthetic(sessionKey) {
@@ -427,6 +447,29 @@ export class LiveSessionsService {
     const sessions = new Map(this.#projection.sessions);
     sessions.delete(sessionKey);
     this.#projection = { ...this.#projection, sessions };
+    this.#workspaceStore?.forget?.(sessionKey);
+  }
+
+  #restoreWorkspaceHistory() {
+    for (const record of this.#workspaceStore?.records?.() ?? []) {
+      if (!record?.host || !record.sessionId || !record.workspace) continue;
+      const event = createLiveEvent({
+        sessionId: record.sessionId, parentSessionId: record.parentSessionId,
+        host: record.host, surface: 'native', project: record.project,
+        projectKey: record.projectKey, observedAt: this.#options.now(),
+        sourceTimestamp: record.workspace.capturedAt, workspace: record.workspace,
+        actor: { id: record.sessionId, kind: 'session', role: 'primary' },
+        action: 'session.metadata', status: 'unknown',
+        source: {
+          adapter: 'workspace-history', confidence: 'observed',
+          fields: { workspace: 'observed', project: record.project ? 'observed' : null },
+        },
+      });
+      this.#projection = reduceLiveEvent(this.#projection, event, {
+        maxSessions: this.#options.maxSessions,
+        maxNodesPerSession: this.#options.maxNodesPerSession,
+      });
+    }
   }
 
   #mark(adapter, update) {

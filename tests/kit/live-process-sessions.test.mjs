@@ -52,3 +52,35 @@ test('runtime survey keeps top-level sessions and folds nested host workers into
     { pid: 300, startedAt, host: 'opencode', cwd: '/repos/emailibrium' },
   ]);
 });
+
+test('workspace inspection is shared consistently across Claude, Codex, and OpenCode', async () => {
+  const startedAt = 'Mon Aug  3 12:00:00 2026';
+  const processRows = parseProcessList([
+    `100 1 ${startedAt} claude claude`,
+    `200 1 ${startedAt} codex codex`,
+    `300 1 ${startedAt} opencode opencode`,
+  ].join('\n'));
+  const cwdByPid = new Map([[100, '/repos/shared'], [200, '/repos/shared'], [300, '/repos/shared']]);
+  const workspace = {
+    key: 'workspace:0123456789abcdef', repositoryLabel: 'shared',
+    directoryLabel: 'repo root', branchLabel: 'main', branchState: 'attached',
+    changes: { additions: 4, deletions: 1, files: 1, binaryFiles: 0,
+      basis: 'tracked-vs-head' }, capturedAt: '2026-08-03T12:00:00Z',
+    source: 'git', confidence: 'observed',
+  };
+  let inspections = 0;
+  const sessions = await listActiveHostSessions({
+    platform: 'darwin', processRows, cwdByPid,
+    inspectWorkspace: async () => { inspections++; return workspace; },
+  });
+  assert.equal(inspections, 1);
+  assert.deepEqual(sessions.map((session) => session.host), ['claude', 'codex', 'opencode']);
+  assert.ok(sessions.every((session) => session.workspace === workspace));
+});
+
+test('nonempty unparseable process output degrades instead of becoming a healthy empty survey', async () => {
+  await assert.rejects(listActiveHostSessions({
+    platform: 'darwin',
+    execFileImpl: async () => ({ stdout: 'localized or malformed process output' }),
+  }), (error) => error.code === 'ERR_RUNTIME_PROCESS_SURVEY');
+});

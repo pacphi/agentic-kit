@@ -34,6 +34,21 @@ test('Claude sidechain without agent id is explicitly inferred', () => {
   assert.equal(event.source.confidence, 'inferred');
 });
 
+test('Claude sidechain actor is nested under its real parent without a fabricated session', () => {
+  const events = adaptClaudeRecord({
+    type: 'assistant', sessionId: 'c1', agentId: 'reviewer-1', isSidechain: true,
+    timestamp: now, message: { content: [] },
+  }, { observedAt: now });
+  assert.equal(events.length, 2);
+  assert.equal(events[0].actor.id, 'reviewer-1');
+  assert.deepEqual(events[1].signal, {
+    kind: 'relationship', phase: 'observed', correlationId: null,
+  });
+  assert.equal(events[1].action, 'contains');
+  assert.equal(events[1].actor.id, 'c1');
+  assert.equal(events[1].target.id, 'reviewer-1');
+});
+
 test('Codex adapter handles session, tool call and tool result fixture shapes', () => {
   const meta = { type: 'session_meta', timestamp: now, payload: {
     id: 'x1', model: 'gpt-x', thread_source: 'subagent', cwd: '/secret/project',
@@ -98,7 +113,8 @@ test('Codex ledger creates authoritative spawn edges', () => {
   const ledger = {
     parents: new Map([['child', 'parent']]),
     threads: new Map([
-      ['parent', { model: 'gpt-x', project: 'agentic-kit', provider: 'openai' }],
+      ['parent', { model: 'gpt-x', project: 'agentic-kit', provider: 'openai',
+        updatedAt: '2026-08-03T20:22:11.650Z' }],
       ['child', { tokensUsed: 42, agentNickname: 'Bohr', agentRole: 'tester' }],
     ]),
   };
@@ -112,6 +128,7 @@ test('Codex ledger creates authoritative spawn edges', () => {
   assert.equal(event.project, 'agentic-kit');
   assert.equal(event.source.fields.project, 'observed');
   assert.equal(event.source.fields.hierarchy, 'observed');
+  assert.equal(event.sourceTimestamp, '2026-08-03T20:22:11.650Z');
   assert.ok(!JSON.stringify(events).includes('/Users/'));
 });
 
@@ -141,6 +158,19 @@ test('structured adapter accepts bounded ruflo and AQE events only', () => {
   assert.equal(event.projectKey, 'project:aaaaaaaaaaaaaaaa');
   assert.ok(!JSON.stringify(event).includes('must not leak'));
   assert.deepEqual(adaptStructuredEvent({}, { surface: 'aqe' }), []);
+});
+
+test('AQE court evidence preserves leader and member execution hosts independently', () => {
+  const [event] = adaptStructuredEvent({
+    sessionId: 'court-1', sessionHost: 'claude', agentId: 'court-lead',
+    actorHost: 'claude', kind: 'agent', role: 'court-lead',
+    action: 'court.member.seated', targetId: 'jury-codex', targetKind: 'subagent',
+    targetRole: 'jury', targetHost: 'codex', status: 'running',
+  }, { surface: 'aqe', adapter: 'aqe-fixture', observedAt: now });
+  assert.equal(event.host, 'claude');
+  assert.equal(event.actor.host, 'claude');
+  assert.equal(event.target.host, 'codex');
+  assert.equal(event.signal.kind, 'relationship');
 });
 
 test('explicit tool names classify skill, plugin and MCP nodes without inspecting input', () => {

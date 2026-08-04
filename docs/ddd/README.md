@@ -11,7 +11,7 @@ describe the current system unless a section is explicitly marked as future work
 | [Context map](context-map.md) | Bounded contexts, ownership, and relationships |
 | [Integration management](integration-management.md) | Hosts, inference providers, bindings, capabilities, lifecycle, facts, and ownership |
 | [Routing and orchestration](routing-and-orchestration.md) | Activities, routes, leadership, escalation, projections, and canonical `ak run` execution |
-| [Live Sessions](live-sessions.md) | Evidence acquisition, live-session aggregates, replay, and dashboard delivery |
+| [Observability](observability.md) | Evidence acquisition, observed-session aggregates, replay, and dashboard delivery |
 
 ## Relationship to other documentation
 

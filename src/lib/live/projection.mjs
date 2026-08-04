@@ -2,21 +2,71 @@ function nodeFrom(actor, event) {
   return {
     id: actor.id, kind: actor.kind, label: actor.label, role: actor.role, provider: actor.provider,
     providerProvenance: actor.provider ? event.providerProvenance : 'unknown',
-    model: actor.model, host: event.host, surface: event.surface,
+    model: actor.model, host: actor.host ?? event.host, surface: event.surface,
     status: event.status, lastEventId: event.eventId ?? null,
     observedAt: event.observedAt, confidence: event.source.confidence,
     sourceAdapter: event.source.adapter, lastAction: event.action,
     durationMs: event.attributes.durationMs, toolName: event.attributes.toolName,
-    evidence: event.source.fields,
+    evidence: event.source.fields, lastSignal: event.signal ?? null,
   };
 }
 
 const TERMINAL = new Set(['completed', 'failed', 'cancelled']);
+const PROVIDER_EVIDENCE_RANK = new Map([
+  ['unknown', 0], ['inferred', 1], ['configured', 2], ['observed', 3],
+]);
 const MAX_SEEN_EVENT_IDS = 10_000;
 const RESOURCE_KINDS = new Set(['tool', 'skill', 'plugin', 'mcp']);
 
+const signalKind = (event) => event.signal?.kind
+  ?? (event.action === 'session.heartbeat' || event.action === 'session.rebound'
+    ? 'presence' : event.action?.startsWith('tool.') ? 'operation' : 'metadata');
+
+function presenceFrom(event) {
+  if (signalKind(event) !== 'presence') return null;
+  return {
+    state: event.status === 'quiescent' ? 'absent' : 'present',
+    lastObservedAt: event.observedAt,
+    evidence: event.source?.confidence ?? 'unknown',
+  };
+}
+
+function activityFrom(event) {
+  if (!['activity', 'operation'].includes(signalKind(event))) return null;
+  const phase = event.signal?.phase;
+  const working = event.status === 'running'
+    && !['completed', 'failed', 'cancelled'].includes(phase);
+  return {
+    state: working ? 'working' : 'idle',
+    lastActivityAt: event.observedAt,
+    currentOperationId: working && signalKind(event) === 'operation'
+      ? event.target?.id ?? null : null,
+    evidence: event.source?.confidence ?? 'unknown',
+  };
+}
+
+function mergeWorkspace(prior, incoming) {
+  if (!incoming) return prior ?? null;
+  if (!prior) return incoming;
+  const priorRank = PROVIDER_EVIDENCE_RANK.get(prior.confidence) ?? 0;
+  const incomingRank = PROVIDER_EVIDENCE_RANK.get(incoming.confidence) ?? 0;
+  const priorAt = Date.parse(prior.capturedAt ?? '');
+  const incomingAt = Date.parse(incoming.capturedAt ?? '');
+  const preferred = incomingRank > priorRank
+    || (incomingRank === priorRank && incomingAt >= priorAt);
+  const next = { ...prior };
+  for (const field of [
+    'key', 'repositoryLabel', 'directoryLabel', 'branchLabel', 'branchState',
+    'changes', 'source', 'confidence',
+  ]) {
+    if (incoming[field] != null && (preferred || next[field] == null)) next[field] = incoming[field];
+  }
+  if (!Number.isFinite(priorAt) || incomingAt >= priorAt) next.capturedAt = incoming.capturedAt;
+  return next;
+}
+
 export function emptyLiveProjection() {
-  return { schemaVersion: 1, cursor: null, sessions: new Map(), seenEventIds: new Set() };
+  return { schemaVersion: 2, cursor: null, sessions: new Map(), seenEventIds: new Set() };
 }
 
 /** Immutable reducer so snapshot readers never observe a half-applied event. */
@@ -27,13 +77,21 @@ export function reduceLiveEvent(projection, event, {
   const sessions = new Map(projection.sessions);
   const sessionKey = event.sessionKey ?? canonicalSessionKey(event.host, event.sessionId);
   const prior = sessions.get(sessionKey);
+  const metadataOnly = ['session.discovered', 'session.metadata'].includes(event.action);
+  const initialUpdatedAt = metadataOnly
+    ? event.sourceTimestamp ?? '1970-01-01T00:00:00.000Z' : event.observedAt;
   const session = prior
     ? { ...prior, nodes: new Map(prior.nodes), edges: new Map(prior.edges) }
     : {
         id: event.sessionId, key: sessionKey, parentSessionId: event.parentSessionId,
         project: event.project, projectKey: event.projectKey ?? stableProjectKey(event.project),
         host: event.host, status: 'unknown',
-        nodes: new Map(), edges: new Map(), updatedAt: event.observedAt,
+        presence: { state: 'unknown', lastObservedAt: null, evidence: 'unknown' },
+        activity: {
+          state: 'unknown', lastActivityAt: null, currentOperationId: null, evidence: 'unknown',
+        },
+        workspace: null,
+        nodes: new Map(), edges: new Map(), updatedAt: initialUpdatedAt,
       };
   // Discovery sources can observe a thread before the authoritative state
   // ledger exposes its parent. Reconcile that later evidence instead of
@@ -51,9 +109,32 @@ export function reduceLiveEvent(projection, event, {
     if (!actorNode.provider && priorNode.provider) {
       actorNode.provider = priorNode.provider;
       actorNode.providerProvenance = priorNode.providerProvenance;
+    } else if (actorNode.provider && priorNode.provider
+      && (PROVIDER_EVIDENCE_RANK.get(priorNode.providerProvenance) ?? 0)
+        > (PROVIDER_EVIDENCE_RANK.get(actorNode.providerProvenance) ?? 0)) {
+      // Presence polling may add configured/inferred identity, but it must not
+      // overwrite a stronger provider claim already observed in source data.
+      actorNode.provider = priorNode.provider;
+      actorNode.providerProvenance = priorNode.providerProvenance;
     }
     actorNode.model ??= priorNode.model;
+    if (signalKind(event) === 'presence') {
+      // A controller lease proves existence, not semantic work. Preserve the
+      // actor's last real activity so a heartbeat cannot masquerade as work.
+      actorNode.status = priorNode.status;
+      actorNode.lastAction = priorNode.lastAction;
+      actorNode.observedAt = priorNode.observedAt;
+      actorNode.lastEventId = priorNode.lastEventId;
+      actorNode.sourceAdapter = priorNode.sourceAdapter;
+      actorNode.confidence = priorNode.confidence;
+      actorNode.lastSignal = priorNode.lastSignal;
+    }
   }
+  const presence = presenceFrom(event);
+  if (presence) session.presence = presence;
+  const activity = activityFrom(event);
+  if (activity && event.source.adapter !== 'codex-state') session.activity = activity;
+  session.workspace = mergeWorkspace(session.workspace, event.workspace);
   if (event.target && event.action.endsWith('.completed')) {
     actorNode.status = priorNode?.status ?? 'running';
   }
@@ -70,7 +151,8 @@ export function reduceLiveEvent(projection, event, {
     ...(session.evidence ?? {}),
     ...Object.fromEntries(Object.entries(event.source.fields ?? {}).filter(([, value]) => value)),
   };
-  if (event.actor.kind === 'session' && event.action.startsWith('session.')
+  if (signalKind(event) !== 'presence' && event.actor.kind === 'session'
+    && event.action.startsWith('session.')
     && !(TERMINAL.has(session.status) && !TERMINAL.has(event.status))) {
     session.status = event.status;
   }
@@ -80,8 +162,13 @@ export function reduceLiveEvent(projection, event, {
       session.nodes.set(event.target.id, nodeFrom({
         id: event.target.id, kind: event.target.kind,
         label: event.target.label ?? event.attributes.toolCategory,
-        role: event.target.role, provider: null, model: null,
-      }, { ...event, status: event.action.endsWith('.completed') ? event.status : 'unknown' }));
+        role: event.target.role, host: event.target.host, provider: null, model: null,
+      }, {
+        ...event,
+        status: event.action.endsWith('.completed') ? event.status
+          : (event.signal?.kind === 'operation' && event.signal.phase === 'started'
+              ? 'running' : 'unknown'),
+      }));
     } else if (event.action.endsWith('.completed')) {
       session.nodes.set(event.target.id, {
         ...targetPrior,
@@ -93,6 +180,7 @@ export function reduceLiveEvent(projection, event, {
         lastAction: event.action,
         sourceAdapter: event.source.adapter,
         confidence: event.source.confidence,
+        lastSignal: event.signal ?? targetPrior.lastSignal,
         durationMs: event.attributes.durationMs ?? targetPrior.durationMs,
         toolName: event.attributes.toolName ?? targetPrior.toolName,
       });
@@ -101,12 +189,18 @@ export function reduceLiveEvent(projection, event, {
     session.edges.set(edgeId, {
       id: edgeId, source: event.actor.id, target: event.target.id,
       action: event.action, confidence: event.source.confidence,
-      lastEventId: event.eventId ?? null,
+      lastEventId: event.eventId ?? null, observedAt: event.observedAt,
+      signal: event.signal ?? null, status: event.status,
     });
   }
-  session.updatedAt = ['session.discovered', 'session.metadata'].includes(event.action)
-    ? event.sourceTimestamp ?? prior?.updatedAt ?? event.observedAt
+  const sourceTimed = event.source.adapter === 'codex-state'
+    || ['metadata', 'relationship'].includes(signalKind(event))
+    || ['session.discovered', 'session.metadata'].includes(event.action);
+  const candidateUpdatedAt = sourceTimed
+    ? event.sourceTimestamp ?? prior?.updatedAt ?? session.updatedAt
     : event.observedAt;
+  session.updatedAt = prior && Date.parse(prior.updatedAt) > Date.parse(candidateUpdatedAt)
+    ? prior.updatedAt : candidateUpdatedAt;
   // A state ledger proves identity/topology, but not that a process is live
   // now. Only fresh execution evidence with an explicit running status may
   // activate a session. Unknown/bootstrap evidence remains reviewable history.
@@ -151,9 +245,13 @@ function boundNodes(session, limit) {
 
 function boundSessions(sessions, limit, currentId) {
   while (sessions.size > limit) {
-    const entries = [...sessions.entries()].filter(([id]) => id !== currentId);
+    const entries = [...sessions.entries()].filter(([id]) => id !== currentId)
+      .sort((left, right) => Date.parse(left[1].updatedAt ?? 0)
+        - Date.parse(right[1].updatedAt ?? 0));
     const removable = entries.find(([, session]) => TERMINAL.has(session.status))
       ?? entries.find(([, session]) => session.lifecycle === 'expired')
+      ?? entries.find(([, session]) => session.presence?.state !== 'present'
+        && session.activity?.state !== 'working')
       ?? entries[0];
     if (!removable) break;
     sessions.delete(removable[0]);
@@ -183,12 +281,26 @@ export function sweepLiveProjection(projection, {
     // Transcripts only append when a tool call finishes, so a long-running
     // tool produces no events while it is the strongest liveness evidence
     // available. Hold such sessions active for a bounded pending window.
-    const lifecycle = prior.status === 'quiescent' ? 'quiescent'
+    const lifecycle = prior.presence?.state === 'absent' || prior.status === 'quiescent'
+      ? 'quiescent'
       : age < pendingExpiryMs && hasPendingResource(prior) ? 'active'
         : age >= expiryMs ? 'expired'
           : (age >= quiescentMs ? 'quiescent' : 'active');
-    if (prior.lifecycle !== lifecycle) {
-      sessions.set(id, { ...prior, lifecycle });
+    const lastActivity = Date.parse(prior.activity?.lastActivityAt ?? '');
+    const activityState = lifecycle === 'active' && (hasPendingResource(prior)
+      || (Number.isFinite(lastActivity) && current - lastActivity < quiescentMs))
+      ? 'working' : (prior.activity?.state === 'unknown' ? 'unknown' : 'idle');
+    if (prior.lifecycle !== lifecycle || prior.activity?.state !== activityState) {
+      sessions.set(id, {
+        ...prior,
+        lifecycle,
+        activity: {
+          ...(prior.activity ?? {}),
+          state: activityState,
+          currentOperationId: activityState === 'working'
+            ? prior.activity?.currentOperationId ?? null : null,
+        },
+      });
       changed = true;
     }
   }
@@ -196,14 +308,53 @@ export function sweepLiveProjection(projection, {
 }
 
 export function serializeLiveProjection(projection) {
-  const sessions = withSessionHierarchy([...projection.sessions.values()].map((session) => ({
+  const hierarchy = withSessionHierarchy([...projection.sessions.values()].map((session) => ({
     ...session, nodes: [...session.nodes.values()], edges: [...session.edges.values()],
   })));
+  const childParents = new Set(hierarchy.filter((session) => session.parentSessionKey)
+    .map((session) => session.parentSessionKey));
+  const sessions = hierarchy.map((session) => withCoverage(session, childParents));
   return {
     schemaVersion: projection.schemaVersion,
     cursor: projection.cursor,
     sessions,
     projects: projectCatalog(sessions),
+  };
+}
+
+function withCoverage(session, childParents) {
+  const adapters = new Set(session.nodes.map((node) => node.sourceAdapter).filter(Boolean));
+  const detailed = adapters.has('claude-transcript') || adapters.has('codex-rollout');
+  const embeddedActors = session.nodes.some((node) => ['agent', 'subagent'].includes(node.kind)
+    && node.id !== session.id);
+  const childSessions = childParents.has(session.key) || Boolean(session.parentSessionId);
+  const hierarchyConfidence = session.edges
+    .filter((edge) => ['agent.spawned', 'agent.delegated', 'contains'].includes(edge.action))
+    .map((edge) => edge.confidence).find(Boolean);
+  const providerNode = session.nodes.find((node) => node.provider);
+  const limitations = [];
+  if (!detailed) limitations.push('detailed-activity-not-reported');
+  if (!childSessions && !embeddedActors) limitations.push('worker-hierarchy-not-reported');
+  if (embeddedActors && !childSessions) limitations.push('workers-embedded-in-parent-session');
+  return {
+    ...session,
+    coverage: {
+      presence: session.presence?.state !== 'unknown' ? 'observed' : 'unavailable',
+      activity: detailed ? 'events' : (session.presence?.state !== 'unknown'
+        ? 'presence-only' : 'unavailable'),
+      actors: childSessions ? 'child-sessions'
+        : (embeddedActors ? 'embedded-actors' : 'unavailable'),
+      resources: detailed ? 'lifecycle' : 'unavailable',
+      hierarchy: childSessions ? (hierarchyConfidence ?? 'observed')
+        : (embeddedActors ? (hierarchyConfidence ?? 'correlated') : 'unavailable'),
+      transcript: detailed ? 'session' : 'unavailable',
+      playback: detailed ? 'session' : 'unavailable',
+      providerIdentity: providerNode?.providerProvenance ?? 'unavailable',
+      workspaceIdentity: session.workspace?.directoryLabel ? 'available' : 'unavailable',
+      gitBranch: session.workspace?.branchLabel ? 'available' : 'unavailable',
+      gitChanges: session.workspace?.changes ? 'available' : 'unavailable',
+    },
+    limitations,
   };
 }
 
@@ -254,13 +405,18 @@ function projectCatalog(sessions) {
     const key = session.projectKey ?? stableProjectKey(session.project);
     const project = projects.get(key) ?? {
       id: key, label: session.project, sessions: [], sessionCount: 0,
-      childSessionCount: 0, liveCount: 0, completedCount: 0,
+      childSessionCount: 0, liveCount: 0, presentCount: 0, workingCount: 0,
+      completedCount: 0,
       hosts: {}, providers: {}, updatedAt: session.updatedAt,
     };
     project.sessions.push(session.key);
     project.sessionCount++;
+    const present = session.presence?.state === 'present';
+    const working = session.activity?.state === 'working';
     if (TERMINAL.has(session.status)) project.completedCount++;
-    else if (session.status === 'running' && session.lifecycle === 'active') project.liveCount++;
+    else if (present || working) project.liveCount++;
+    if (present) project.presentCount++;
+    if (working) project.workingCount++;
     project.hosts[session.host] = (project.hosts[session.host] ?? 0) + 1;
     const providers = new Set(session.nodes.map((node) => node.provider).filter(Boolean));
     if (providers.size === 0) providers.add('unknown');
@@ -281,8 +437,8 @@ function projectCatalog(sessions) {
     project.sessions.sort((a, b) => {
       const left = sessionByKey.get(a);
       const right = sessionByKey.get(b);
-      const leftLive = left.status === 'running' && left.lifecycle === 'active';
-      const rightLive = right.status === 'running' && right.lifecycle === 'active';
+      const leftLive = left.presence?.state === 'present' || left.activity?.state === 'working';
+      const rightLive = right.presence?.state === 'present' || right.activity?.state === 'working';
       return Number(rightLive) - Number(leftLive)
         || Date.parse(right.updatedAt) - Date.parse(left.updatedAt)
         || a.localeCompare(b);

@@ -15,6 +15,7 @@ export function adaptClaudeRecord(record, context = {}) {
     sessionId, host: 'claude', surface: 'native',
     project: context.project, projectKey: context.projectKey, observedAt: context.observedAt,
     sourceTimestamp: record.timestamp,
+    workspace: context.workspace,
     actor: {
       id: actorId, kind: isSidechain ? 'subagent' : 'session',
       role: isSidechain ? 'worker' : 'primary',
@@ -34,12 +35,37 @@ export function adaptClaudeRecord(record, context = {}) {
         model: record.message?.model || context.model ? 'observed' : null,
         status: 'observed',
         hierarchy: isSidechain ? (record.agentId ? 'observed' : 'inferred') : 'observed',
+        workspace: context.workspace ? context.workspace.confidence ?? 'observed' : null,
       },
     },
   };
   const out = [];
+  const containedActors = context.containedActors instanceof Set
+    ? context.containedActors : (context.containedActors = new Set());
+  let containment = null;
+  if (isSidechain && actorId !== sessionId && !containedActors.has(actorId)) {
+    containedActors.add(actorId);
+    containment = createLiveEvent({
+      ...base,
+      actor: {
+        id: sessionId, kind: 'session', role: 'primary',
+        provider: record.provider ?? context.provider,
+        model: record.message?.model ?? context.model,
+      },
+      action: 'contains', status: 'unknown',
+      signal: { kind: 'relationship', phase: 'observed' },
+      target: { id: actorId, kind: 'subagent', role: 'worker' },
+      source: {
+        ...base.source,
+        confidence: record.agentId ? 'observed' : 'inferred',
+        fields: { ...base.source.fields,
+          hierarchy: record.agentId ? 'observed' : 'inferred' },
+      },
+    });
+  }
   if (context.bootstrap && (record.type === 'user' || record.type === 'assistant')) {
     out.push(createLiveEvent({ ...base, action: 'session.discovered', status: 'unknown' }));
+    if (containment) out.push(containment);
     return out;
   } else if (record.type === 'user' || record.type === 'assistant') {
     out.push(createLiveEvent({
@@ -65,5 +91,6 @@ export function adaptClaudeRecord(record, context = {}) {
       target: { id: block.tool_use_id, kind: 'tool' },
     }));
   }
+  if (containment) out.push(containment);
   return out;
 }

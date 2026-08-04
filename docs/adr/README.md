@@ -13,14 +13,14 @@ Consequences**, and cites the grounded source it rests on where relevant.
 | [0002](0002-activity-vocabulary-defaults-from-ruv-templates.md) | Activity vocabulary & defaults seeded from rUv's shipped templates | Amended by 0020 |
 | [0003](0003-auto-seed-dual-host-provenance.md) | Auto-seed on dual-host, subscription-only, per-route provenance | Amended by 0020 |
 | [0004](0004-escalation-per-projection.md) | Escalation is per-projection, availability stated per path | Superseded by 0019/0020 |
-| [0005](0005-dashboard-in-page-routing-reveal.md) | Dashboard surfaces routing via in-page reveal | Amended by 0020 |
+| [0005](0005-dashboard-in-page-routing-reveal.md) | Dashboard surfaces routing via in-page reveal | Implemented |
 | [0006](0006-primary-host-and-ambidextrous-mirroring.md) | Primary host & ambidextrous mirroring (which host leads) | Amended by 0020 |
 | [0007](0007-maintainer-admin-local-telemetry.md) | Maintainer admin: a loopback telemetry page with deliberate egress | Accepted |
 | [0008](0008-guidance-target-scope-split.md) | Machine-scoped guidance blocks land in machine files, not a repo's AGENTS.md | Accepted |
-| [0009](0009-usage-scorecard-local-transcript-analytics.md) | Usage scorecard: local transcript analytics with graded evidence | Accepted |
+| [0009](0009-usage-scorecard-local-transcript-analytics.md) | Usage scorecard: local transcript analytics with graded evidence | Implemented |
 | [0010](0010-provider-mediated-quota-reads.md) | Provider-mediated quota reads (the only honest denominators) | Accepted |
 | [0011](0011-local-model-provenance-zero-cost-and-transcript-fidelity.md) | Local models: provenance out-of-band, $0 per model, stated transcript fidelity | Proposed |
-| [0012](0012-live-sessions-observability.md) | Live sessions as local, evidence-graded observability | Accepted; compatibility source amended |
+| [0012](0012-observability.md) | Evidence-graded session observability | Implemented |
 | [0013](0013-admin-build-security-signals-and-honest-reach.md) | Admin: build/security signals, an honest Reach panel, and a pagination fix | Accepted |
 | [0014](0014-dashboard-auth-and-remediation.md) | Dashboard auth token, plus a security/quality remediation pass | Accepted |
 | [0015](0015-managed-codex-native-statusline.md) | Manage Codex's native user-wide status line without claiming rich-renderer parity | Accepted |
@@ -51,7 +51,7 @@ accounting, approximate token counts, and a model id the vendor documents how to
 provenance is established out-of-band via a loopback catalogue read, local models are priced at an
 exact `$0` **per model** rather than in one bucket, unrecognised models become `unpriced` instead of
 silently fallback-priced, and each local session states what its provider could not report. See also
-`docs/PROVIDERS.md`. **0012** adds a read-only Live Sessions workspace: host-specific evidence is
+`docs/PROVIDERS.md`. **0012** adds a read-only Observability workspace: host-specific evidence is
 normalized into a versioned, provenance-bearing event model, reduced into an interactive
 agent/tool canvas, and paired with a rich selected-session transcript rail. Separate SSE planes
 keep content out of broad topology snapshots/replay while preserving masked local evidence and
@@ -101,7 +101,7 @@ host-management namespace, and the versioned top-level routing envelope; removes
 adapter-specific execution bootstrap; limits old vocabulary to marked decision history and one
 upgrade section; and preserves OpenCode's opt-in, supervised, non-primary, non-AQE boundary.
 
-**0021** makes the Live view answer who serves each session's models without overclaiming. Codex's
+**0021** makes Observability answer who serves each session's models without overclaiming. Codex's
 in-artifact `model_provider` (rollouts + state ledger) is read as observed evidence; Claude Code's
 provider is resolved from its documented configuration surface (Bedrock/Vertex/Foundry flags,
 `ANTHROPIC_BASE_URL` gateways) with configured/inferred provenance, since its transcripts never

@@ -25,6 +25,16 @@ import path from 'node:path';
 import { codexDir } from './paths.mjs';
 import { withDb } from './sqlite.mjs';
 import { resolveProjectIdentity } from './live/project-label.mjs';
+import { workspaceFromSource } from './live/git-workspace.mjs';
+
+function ledgerTimestamp(row, milliseconds, seconds) {
+  const millis = Number(row[milliseconds]);
+  const value = Number.isFinite(millis) && millis > 0
+    ? millis : Number(row[seconds]) * 1000;
+  if (!Number.isFinite(value) || value <= 0) return null;
+  const date = new Date(value);
+  return Number.isFinite(date.getTime()) ? date.toISOString() : null;
+}
 
 /** Newest-generation state db file under ~/.codex, or null. Exported for test
  *  via the `dir` override. */
@@ -63,10 +73,16 @@ export function readCodexState(opts = {}) {
       .concat([
         'tokens_used', 'source', 'model', 'git_branch', 'agent_nickname', 'agent_role',
         'cwd', 'model_provider', 'provider', 'status',
+        'created_at', 'updated_at', 'recency_at',
+        'created_at_ms', 'updated_at_ms', 'recency_at_ms',
       ].filter((c) => cols.has(c)));
     const threads = new Map();
     for (const row of db.prepare(`SELECT ${pick.join(', ')} FROM threads`).all()) {
       const project = typeof row.cwd === 'string' ? resolveProjectIdentity(row.cwd) : null;
+      const createdAt = ledgerTimestamp(row, 'created_at_ms', 'created_at');
+      const updatedAt = ledgerTimestamp(row, 'updated_at_ms', 'updated_at');
+      const recencyAt = ledgerTimestamp(row, 'recency_at_ms', 'recency_at');
+      const sourceAt = updatedAt ?? recencyAt ?? createdAt;
       threads.set(String(row.id), {
         tokensUsed: Number(row.tokens_used) || 0,
         threadSource: typeof row.thread_source === 'string' ? row.thread_source : null,
@@ -82,6 +98,13 @@ export function readCodexState(opts = {}) {
         provider: typeof row.model_provider === 'string' ? row.model_provider
           : (typeof row.provider === 'string' ? row.provider : null),
         status: typeof row.status === 'string' ? row.status : null,
+        createdAt,
+        updatedAt: sourceAt,
+        recencyAt,
+        workspace: sourceAt ? workspaceFromSource({
+          cwd: row.cwd, branch: row.git_branch, project: project?.label,
+          capturedAt: sourceAt, source: 'codex-state',
+        }) : null,
       });
     }
     const parents = new Map();

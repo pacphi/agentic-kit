@@ -6,17 +6,19 @@ import path from 'node:path';
 import {
   createLiveEvent, JsonlTailer, emptyLiveProjection, reduceLiveEvent,
 } from '../../src/lib/live/index.mjs';
-import { LIVE_JS } from '../../src/lib/dashboard/live-view.mjs';
+import { LIVE_CSS, LIVE_HTML, LIVE_JS } from '../../src/lib/dashboard/live-view.mjs';
+import { renderPage } from '../../src/lib/dashboard/page.mjs';
 
 const observedAt = '2026-07-27T12:00:00Z';
+const PAGE_HTML = renderPage({ name: 'agentic-kit', version: 'test' });
 
 test('canonical event serialization is a closed allowlist under arbitrary extra fields', () => {
   const allowedTop = new Set([
     'schemaVersion', 'observedAt', 'sourceTimestamp', 'sessionId', 'sessionKey',
     'parentSessionId', 'traceId', 'spanId', 'parentSpanId', 'host',
     'provider', 'model', 'providerProvenance', 'surface',
-    'project', 'projectKey', 'actor',
-    'action', 'target', 'status', 'source', 'attributes',
+    'project', 'projectKey', 'workspace', 'actor',
+    'action', 'target', 'status', 'signal', 'source', 'attributes',
   ]);
   for (let i = 0; i < 100; i++) {
     const secret = `never-on-wire-${i}`;
@@ -89,15 +91,19 @@ test('browser delta reducer carries the server resource-completion invariants', 
   assert.match(LIVE_JS, /TERMINAL/);
 });
 
-test('browser resynchronizes unseen and rebound sessions instead of constructing partial topology', () => {
-  assert.match(LIVE_JS, /i<0\|\|ev\.action===["']session\.rebound["']/);
+test('browser isolates unseen sessions by host key and resynchronizes rebound identity', () => {
+  assert.match(LIVE_JS, /evKey=String\(ev\.sessionKey\|\|ev\.host\+["']:["']\+ev\.sessionId\)/);
+  assert.match(LIVE_JS, /s=i>=0\?Object\.assign\(\{\},sessions\[i\]\):\{id:ev\.sessionId,key:evKey/);
+  assert.match(LIVE_JS, /ev\.action===["']session\.rebound["']/);
   assert.match(LIVE_JS, /if\(!state\.resyncing\)connect\(\);return/);
   assert.match(LIVE_JS, /function connect\(\)\{if\(state\.resyncing\)return/);
 });
 
-test('browser reports unsupported OpenCode transcript topology without opening a stream', () => {
-  assert.match(LIVE_JS, /s\.host!==["']opencode["']/);
-  assert.match(LIVE_JS, /OpenCode transcript topology unavailable/);
+test('browser reports unsupported transcripts from capability evidence rather than host names', () => {
+  assert.match(LIVE_JS, /function coverageOf/);
+  assert.match(LIVE_JS, /coverageOf\(s\)\.transcript!==["']unavailable["']/);
+  assert.match(LIVE_JS, /Transcript not reported by this source/);
+  assert.doesNotMatch(LIVE_JS, /s\.host!==["']opencode["']/);
 });
 
 test('browser presentation keeps execution host and inference provider independent', () => {
@@ -107,6 +113,34 @@ test('browser presentation keeps execution host and inference provider independe
   assert.doesNotMatch(LIVE_JS, /function providerOf/);
   assert.doesNotMatch(LIVE_JS, /v&&v\.provider\|\|v&&v\.host/);
   assert.match(LIVE_JS, /providerProvenance/);
+  assert.match(LIVE_JS, /function providerRank/);
+  assert.match(LIVE_JS, /incomingProvider&&\(!old\.provider\|\|providerRank\(incomingEvidence\)>=providerRank\(old\.providerProvenance\)\)/);
   assert.match(LIVE_JS, /Provider not established/);
   assert.match(LIVE_JS, /s\.host/);
+});
+
+test('browser activity callouts hide internal placeholders and translate relationships', () => {
+  assert.match(LIVE_JS, /function activityContext/);
+  assert.match(LIVE_JS, /!\/\^<\[\^>\]\+>\$\//);
+  assert.match(LIVE_JS, /contains:["']Worker linked["']/);
+});
+
+test('Observability is canonical and exposes mutually exclusive Live and History scopes', () => {
+  assert.match(LIVE_HTML, /id="panel-observability"/);
+  assert.match(LIVE_HTML, /id="observability-title">Live agent activity/);
+  assert.match(PAGE_HTML, /data-live-scope="live"/);
+  assert.match(PAGE_HTML, /data-live-scope="history"/);
+  assert.doesNotMatch(LIVE_HTML, /id="panel-live"/);
+  assert.match(LIVE_JS, /scope:"live"/);
+  assert.match(LIVE_JS, /p\.liveCount:p\.historicalCount/);
+});
+
+test('History presentation fails closed without current-state motion or follow affordances', () => {
+  assert.match(LIVE_JS, /function historicalView/);
+  assert.match(LIVE_JS, /active=!historyMode/);
+  assert.match(LIVE_JS, /present=!historyMode/);
+  assert.match(LIVE_JS, /dataset\.scope=historyMode/);
+  assert.match(LIVE_CSS, /data-scope=history[^}]*animation:none!important/);
+  assert.match(LIVE_CSS, /data-scope=history[^}]*\.live-flow-dot\{display:none\}/);
+  assert.match(LIVE_CSS, /data-scope=history[^}]*#live-transcript-follow/);
 });

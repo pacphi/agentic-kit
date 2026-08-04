@@ -57,8 +57,12 @@ import { defaultOpencodeDbPath, listSessions as listOpencodeSessions, parseSessi
  *  v7: the opencode transcript source (usage-opencode.mjs) joins the index —
  *      SQLite-backed session/message/part rows mapped to the same record
  *      shape, with opencode's OWN metered cost carried as observed truth
- *      (`costObserved` on usage rows, preferred over the pricing table). */
-export const SCHEMA_VERSION = 7;
+ *      (`costObserved` on usage rows, preferred over the pricing table).
+ *  v8: Codex `session_meta.model_provider` is retained as observed inference
+ *      provider evidence. v7 caches discarded that field, so every Codex
+ *      record must be re-derived rather than continuing to display an
+ *      avoidable "provider not recorded". */
+export const SCHEMA_VERSION = 8;
 
 /** Silence longer than this ends a stretch of engagement. A session is split
  *  into active sub-intervals at gaps ABOVE this bound (exactly this much is not
@@ -582,10 +586,18 @@ function parseCodex(raw, { id, withTurns = false }) {
       if (typeof p.id === 'string' && p.id) rec.id = p.id;
       if (typeof p.cwd === 'string') applyProject(rec, projectLabel(p.cwd, null));
       if (typeof p.thread_source === 'string') rec.threadSource = p.thread_source;
+      if (typeof p.model_provider === 'string' && p.model_provider) {
+        rec.inferenceProvider = p.model_provider;
+        rec.providerProvenance = 'observed';
+      }
       continue;
     }
     if (e.type === 'turn_context') {
       if (typeof p.model === 'string' && !rec.models.includes(p.model)) rec.models.push(p.model);
+      if (typeof p.model_provider === 'string' && p.model_provider) {
+        rec.inferenceProvider = p.model_provider;
+        rec.providerProvenance = 'observed';
+      }
       if (rec.project === 'unknown' && typeof p.cwd === 'string') applyProject(rec, projectLabel(p.cwd, null));
       continue;
     }
