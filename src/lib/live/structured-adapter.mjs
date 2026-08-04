@@ -5,11 +5,11 @@ import { createLiveEvent } from './event-schema.mjs';
  * @param {Record<string, any>} record
  * @param {{
  *   surface?: string, adapter?: string, sessionId?: string,
- *   observedAt?: string, artifact?: string
+ *   observedAt?: string, artifact?: string, project?: string, projectKey?: string
  * }} [options]
  */
 export function adaptStructuredEvent(record, {
-  surface, adapter, sessionId, observedAt, artifact,
+  surface, adapter, sessionId, observedAt, artifact, project, projectKey,
 } = {}) {
   if (!['ruflo', 'aqe'].includes(surface) || !record || typeof record !== 'object') return [];
   const sid = record.sessionId ?? record.session_id ?? sessionId;
@@ -19,7 +19,10 @@ export function adaptStructuredEvent(record, {
   return [createLiveEvent({
     sessionId: sid, host: record.host === 'claude' || record.host === 'codex'
       ? record.host : 'internal',
-    surface, project: record.project, observedAt,
+    surface, project: project ?? record.project,
+    // The configured source owns repository attribution. A structured record
+    // cannot supply an arbitrary opaque key that collides with another repo.
+    projectKey, observedAt,
     sourceTimestamp: record.timestamp ?? record.at,
     actor: {
       id: actorId,

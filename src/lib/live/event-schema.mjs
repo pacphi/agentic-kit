@@ -1,6 +1,6 @@
 export const LIVE_SCHEMA_VERSION = 1;
 
-const HOSTS = new Set(['claude', 'codex', 'internal']);
+const HOSTS = new Set(['claude', 'codex', 'opencode', 'internal']);
 // `internal` is read-only historical vocabulary. Live-source registration still
 // admits only ruflo/aqe, and no current writer emits the retired dual-run label.
 const SURFACES = new Set(['native', 'ruflo', 'aqe', 'plugin', 'skill', 'internal']);
@@ -73,7 +73,7 @@ export function createLiveEvent(input, { now = () => new Date().toISOString() } 
     providerProvenance,
     surface,
     project,
-    projectKey: stableProjectKey(project),
+    projectKey: safeProjectKey(input.projectKey, project),
     actor: {
       id: actorId,
       kind: actorKind,
@@ -112,5 +112,5 @@ export function createLiveEvent(input, { now = () => new Date().toISOString() } 
   return out;
 }
 import {
-  canonicalSessionKey, safeProjectLabel, stableProjectKey,
+  canonicalSessionKey, safeProjectKey, safeProjectLabel,
 } from './project-label.mjs';

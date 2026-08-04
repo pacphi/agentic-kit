@@ -24,7 +24,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { codexDir } from './paths.mjs';
 import { withDb } from './sqlite.mjs';
-import { resolveProjectLabel } from './live/project-label.mjs';
+import { resolveProjectIdentity } from './live/project-label.mjs';
 
 /** Newest-generation state db file under ~/.codex, or null. Exported for test
  *  via the `dir` override. */
@@ -66,6 +66,7 @@ export function readCodexState(opts = {}) {
       ].filter((c) => cols.has(c)));
     const threads = new Map();
     for (const row of db.prepare(`SELECT ${pick.join(', ')} FROM threads`).all()) {
+      const project = typeof row.cwd === 'string' ? resolveProjectIdentity(row.cwd) : null;
       threads.set(String(row.id), {
         tokensUsed: Number(row.tokens_used) || 0,
         threadSource: typeof row.thread_source === 'string' ? row.thread_source : null,
@@ -74,7 +75,8 @@ export function readCodexState(opts = {}) {
         gitBranch: typeof row.git_branch === 'string' ? row.git_branch : null,
         agentNickname: typeof row.agent_nickname === 'string' ? row.agent_nickname : null,
         agentRole: typeof row.agent_role === 'string' ? row.agent_role : null,
-        project: typeof row.cwd === 'string' ? resolveProjectLabel(row.cwd) : null,
+        project: project?.label ?? null,
+        projectKey: project?.key ?? null,
         // codex's threads schema names this model_provider; the bare provider
         // spelling is kept for tolerance of older/forked ledgers.
         provider: typeof row.model_provider === 'string' ? row.model_provider

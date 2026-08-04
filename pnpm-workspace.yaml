@@ -1,13 +1,13 @@
 minimumReleaseAgeExclude:
   - js-yaml@5.2.2
+  - brace-expansion@5.0.9
 # pnpm settings (pnpm ≥11 reads overrides from here, not package.json).
 # js-yaml: markdownlint-cli2@0.23.1 pins 5.2.1 exactly, which carries
 # GHSA-pm4m-ph32-ghv5 (flow-collection DoS, patched in 5.2.2). Drop this
 # override once markdownlint-cli2 ships a bumped js-yaml.
 overrides:
   'js-yaml@<5.2.2': 5.2.2
-  # Pre-existing on main, not introduced by the usage-scorecard branch:
-  # brace-expansion <=5.0.7 (GHSA-mh99-v99m-4gvg, DoS via unbounded expansion)
-  # reaches us only via eslint -> minimatch. Nothing in the kit calls it
-  # directly. Drop once eslint ships a bumped minimatch.
-  'brace-expansion@<5.0.8': '>=5.0.8'
+  # brace-expansion <5.0.9 carries GHSA-rgw5-rvv9-x895 (DoS through
+  # unbounded intermediate arrays). It reaches us only via eslint ->
+  # minimatch. Drop once eslint ships a bumped minimatch.
+  'brace-expansion@>=4.0.0 <5.0.9': '>=5.0.9'

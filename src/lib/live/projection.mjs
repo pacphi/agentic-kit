@@ -112,6 +112,8 @@ export function reduceLiveEvent(projection, event, {
   // activate a session. Unknown/bootstrap evidence remains reviewable history.
   if (event.status === 'running' && event.source.adapter !== 'codex-state') {
     session.lifecycle = 'active';
+  } else if (event.status === 'quiescent') {
+    session.lifecycle = 'quiescent';
   } else {
     session.lifecycle ??= 'historical';
   }
@@ -181,9 +183,10 @@ export function sweepLiveProjection(projection, {
     // Transcripts only append when a tool call finishes, so a long-running
     // tool produces no events while it is the strongest liveness evidence
     // available. Hold such sessions active for a bounded pending window.
-    const lifecycle = age < pendingExpiryMs && hasPendingResource(prior) ? 'active'
-      : age >= expiryMs ? 'expired'
-        : (age >= quiescentMs ? 'quiescent' : 'active');
+    const lifecycle = prior.status === 'quiescent' ? 'quiescent'
+      : age < pendingExpiryMs && hasPendingResource(prior) ? 'active'
+        : age >= expiryMs ? 'expired'
+          : (age >= quiescentMs ? 'quiescent' : 'active');
     if (prior.lifecycle !== lifecycle) {
       sessions.set(id, { ...prior, lifecycle });
       changed = true;

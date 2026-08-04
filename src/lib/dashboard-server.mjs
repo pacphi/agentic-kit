@@ -262,6 +262,18 @@ const PATH_LIVE_FIELDS = new Set([
 function publicLivePayload(value) {
   if (Array.isArray(value)) return value.map(publicLivePayload);
   if (!value || typeof value !== 'object') return value;
+  if (value.sessionId && (!value.project || value.project === 'unknown')) return null;
+  if (Array.isArray(value.sessions)) {
+    value = {
+      ...value,
+      sessions: value.sessions.filter((session) => session?.project
+        && session.project !== 'unknown'),
+      ...(Array.isArray(value.projects) ? { projects: value.projects.filter((project) => {
+        const label = project?.label ?? project?.name ?? project?.project;
+        return label && label !== 'unknown';
+      }) } : {}),
+    };
+  }
   const out = {};
   for (const [key, item] of Object.entries(value)) {
     const normalized = key.toLowerCase();

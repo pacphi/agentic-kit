@@ -13,6 +13,10 @@ export { adaptCodexRecord, adaptCodexLedger } from './codex-adapter.mjs';
 export { adaptStructuredEvent } from './structured-adapter.mjs';
 export { classifyToolName } from './tool-classify.mjs';
 export {
-  canonicalSessionKey, resolveProjectLabel, safeProjectLabel, stableProjectKey,
+  canonicalSessionKey, resolveProjectIdentity, resolveProjectLabel,
+  safeProjectKey, safeProjectLabel, stableProjectKey,
 } from './project-label.mjs';
+export {
+  hostFromCommand, listActiveHostSessions, parseLsofCwds, parseProcessList,
+} from './process-sessions.mjs';
 export { LiveSessionsService } from './live-sessions-service.mjs';

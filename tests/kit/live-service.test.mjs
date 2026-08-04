@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { LiveSessionsService } from '../../src/lib/live/index.mjs';
+import { LiveSessionsService, stableProjectKey } from '../../src/lib/live/index.mjs';
 import { waitUntil } from './helpers/wait-until.mjs';
 const sandbox = () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-live-service-'));
@@ -297,4 +297,156 @@ test('adapter health never exposes filesystem paths from errors', async (t) => {
   const health = JSON.stringify(service.snapshot().health);
   assert.ok(!health.includes(sb.dir));
   assert.ok(health.includes('invalid-json'));
+});
+
+test('runtime observation keeps concurrent Claude and Codex repositories live without transcript appends', (t) => {
+  const sb = sandbox();
+  const projects = ['agentic-kit', 'keel', 'emailibrium'].map((name) => path.join(sb.dir, name));
+  for (const project of projects) fs.mkdirSync(path.join(project, '.git'), { recursive: true });
+  const service = new LiveSessionsService({
+    roots: sb.roots, readCodexState: () => null, runtimeScanMs: 0,
+    readActiveSessions: () => [
+      { pid: 10, host: 'codex', cwd: projects[0] },
+      { pid: 20, host: 'claude', cwd: projects[1] },
+      { pid: 30, host: 'claude', cwd: projects[2] },
+    ],
+    now: () => '2026-08-03T22:45:00Z',
+  });
+  t.after(() => service.close());
+  service.start();
+  const snapshot = service.snapshot();
+  assert.deepEqual(snapshot.projects.map((project) => project.label).sort(),
+    ['agentic-kit', 'emailibrium', 'keel']);
+  assert.equal(snapshot.sessions.filter((session) => session.lifecycle === 'active').length, 3);
+  assert.ok(snapshot.projects.every((project) => project.liveCount === 1));
+  assert.ok(snapshot.sessions.every((session) => session.project !== 'unknown'));
+});
+
+test('runtime leases require canonical Git repositories and expire after three missed surveys', (t) => {
+  const sb = sandbox();
+  const repository = path.join(sb.dir, 'keel');
+  const nonRepository = path.join(sb.dir, 'scratch');
+  fs.mkdirSync(path.join(repository, '.git'), { recursive: true });
+  fs.mkdirSync(nonRepository);
+  let active = [
+    { pid: 20, startedAt: '2026-08-03T16:00:00Z', host: 'claude', cwd: repository },
+    { pid: 21, startedAt: '2026-08-03T16:00:00Z', host: 'claude', cwd: nonRepository },
+  ];
+  let nowMs = Date.parse('2026-08-03T16:00:00Z');
+  let tick;
+  const service = new LiveSessionsService({
+    roots: sb.roots, readCodexState: () => null, runtimeScanMs: 0, runtimeMisses: 3,
+    readActiveSessions: () => active,
+    setInterval: (fn) => { tick = fn; return { unref() {} }; },
+    clearInterval: () => {}, now: () => new Date(nowMs).toISOString(),
+  });
+  t.after(() => service.close());
+  service.start();
+  assert.deepEqual(service.snapshot().projects.map((project) => project.label), ['keel']);
+  active = [];
+  for (let count = 0; count < 2; count++) {
+    nowMs += 2_001;
+    tick();
+  }
+  assert.equal(service.snapshot().projects[0].liveCount, 1);
+  nowMs += 2_001;
+  tick();
+  assert.equal(service.snapshot().projects[0].liveCount, 0);
+  assert.equal(service.snapshot().sessions[0].lifecycle, 'quiescent');
+});
+
+test('runtime PID generations do not let an expired process quiesce its replacement', (t) => {
+  const sb = sandbox();
+  const repository = path.join(sb.dir, 'agentic-kit');
+  fs.mkdirSync(path.join(repository, '.git'), { recursive: true });
+  let startedAt = '2026-08-03T16:00:00Z';
+  let nowMs = Date.parse(startedAt);
+  let tick;
+  const service = new LiveSessionsService({
+    roots: sb.roots, readCodexState: () => null, runtimeScanMs: 0, runtimeMisses: 3,
+    readActiveSessions: () => [{ pid: 10, startedAt, host: 'codex', cwd: repository }],
+    setInterval: (fn) => { tick = fn; return { unref() {} }; },
+    clearInterval: () => {}, now: () => new Date(nowMs).toISOString(),
+  });
+  t.after(() => service.close());
+  service.start();
+  const firstId = service.snapshot().sessions[0].id;
+  startedAt = '2026-08-03T16:05:00Z';
+  for (let count = 0; count < 3; count++) {
+    nowMs += 2_001;
+    tick();
+  }
+  const sessions = service.snapshot().sessions;
+  assert.equal(sessions.find((session) => session.id === firstId).lifecycle, 'quiescent');
+  assert.equal(sessions.find((session) => session.id !== firstId).lifecycle, 'active');
+  assert.equal(service.snapshot().projects[0].liveCount, 1);
+});
+
+test('runtime synthetic sessions rebind to transcript identity when evidence arrives', (t) => {
+  const sb = sandbox();
+  const repository = path.join(sb.dir, 'emailibrium');
+  fs.mkdirSync(path.join(repository, '.git'), { recursive: true });
+  let tick;
+  const service = new LiveSessionsService({
+    roots: sb.roots, readCodexState: () => null, runtimeScanMs: 0,
+    readActiveSessions: () => [{
+      pid: 30, startedAt: '2026-08-03T16:00:00Z', host: 'claude', cwd: repository,
+    }],
+    setInterval: (fn) => { tick = fn; return { unref() {} }; },
+    clearInterval: () => {}, now: () => '2026-08-03T16:00:00Z',
+  });
+  t.after(() => service.close());
+  service.start();
+  assert.match(service.snapshot().sessions[0].id, /^runtime-/);
+  fs.writeFileSync(path.join(sb.claude, 'real-session.jsonl'), line({
+    type: 'user', sessionId: 'real-session', timestamp: '2026-08-03T16:00:00Z',
+    cwd: repository, message: { model: 'claude-x', content: 'private' },
+  }));
+  tick();
+  assert.deepEqual(service.snapshot().sessions.map((session) => session.id), ['real-session']);
+  assert.equal(service.snapshot().projects[0].liveCount, 1);
+});
+
+test('runtime survey failures degrade health without expiring prior leases', async (t) => {
+  const sb = sandbox();
+  const repository = path.join(sb.dir, 'keel');
+  fs.mkdirSync(path.join(repository, '.git'), { recursive: true });
+  let fail = false;
+  let tick;
+  const service = new LiveSessionsService({
+    roots: sb.roots, readCodexState: () => null, runtimeScanMs: 0,
+    readActiveSessions: () => fail
+      ? Promise.reject(Object.assign(new Error('private path'), { code: 'ERR_RUNTIME_TEST' }))
+      : [{ pid: 20, startedAt: '2026-08-03T16:00:00Z', host: 'claude', cwd: repository }],
+    setInterval: (fn) => { tick = fn; return { unref() {} }; },
+    clearInterval: () => {}, now: () => '2026-08-03T16:00:00Z',
+  });
+  t.after(() => service.close());
+  service.start();
+  fail = true;
+  tick();
+  await waitUntil(() => service.snapshot().health.runtime.status === 'degraded');
+  assert.equal(service.snapshot().projects[0].liveCount, 1);
+  assert.equal(service.snapshot().health.runtime.lastError, 'ERR_RUNTIME_TEST');
+});
+
+test('ledger edges retain their repository after bounded projection eviction', (t) => {
+  const sb = sandbox();
+  const ledger = {
+    threads: new Map([
+      ['parent', { project: 'agentic-kit', projectKey: stableProjectKey('agentic-kit') }],
+      ['child-a', { project: 'keel' }],
+      ['child-b', { project: 'emailibrium' }],
+    ]),
+    parents: new Map([['child-a', 'parent'], ['child-b', 'parent']]),
+  };
+  const service = new LiveSessionsService({
+    roots: sb.roots, maxSessions: 2, readCodexState: () => ledger,
+    readActiveSessions: () => [], now: () => '2026-08-03T22:45:00Z',
+  });
+  t.after(() => service.close());
+  service.start();
+  const parent = service.snapshot().sessions.find((session) => session.id === 'parent');
+  assert.equal(parent.project, 'agentic-kit');
+  assert.ok(!service.snapshot().projects.some((project) => project.label === 'unknown'));
 });

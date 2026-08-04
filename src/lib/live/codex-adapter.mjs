@@ -17,6 +17,7 @@ export function adaptCodexRecord(record, context = {}) {
   const base = {
     sessionId, parentSessionId: context.parentSessionId,
     host: 'codex', surface: 'native', project: context.project,
+    projectKey: context.projectKey,
     observedAt: context.observedAt, sourceTimestamp: record.timestamp,
       actor: {
         id: sessionId, kind: subagent ? 'subagent' : 'session',
@@ -95,6 +96,7 @@ export function adaptCodexLedger(ledger, context = {}) {
     out.push(createLiveEvent({
       sessionId: id, parentSessionId: ledger.parents?.get(id),
       host: 'codex', surface: 'native', project: thread?.project,
+      projectKey: thread?.projectKey,
       observedAt: context.observedAt,
       actor: {
         id, kind: subagent ? 'subagent' : 'session',
@@ -122,9 +124,11 @@ export function adaptCodexLedger(ledger, context = {}) {
   for (const [childId, parentId] of ledger.parents) {
     const child = ledger.threads instanceof Map ? ledger.threads.get(childId) : null;
     const parent = ledger.threads instanceof Map ? ledger.threads.get(parentId) : null;
+    const project = parent?.project ?? context.project;
+    const projectKey = parent?.projectKey ?? context.projectKey;
     out.push(createLiveEvent({
       sessionId: parentId, host: 'codex', surface: 'native',
-      project: context.project, observedAt: context.observedAt,
+      project, projectKey, observedAt: context.observedAt,
       actor: {
         id: parentId, kind: 'session', label: parent?.agentNickname,
         role: parent?.agentRole ?? 'primary',
@@ -141,7 +145,7 @@ export function adaptCodexLedger(ledger, context = {}) {
         adapter: 'codex-state', artifact: artifact(context.artifact),
         confidence: 'observed',
         fields: {
-          project: parent?.project ? 'observed' : null,
+          project: project && project !== 'unknown' ? 'observed' : null,
           provider: parent?.provider ? 'observed' : null,
           model: parent?.model ? 'observed' : null,
           status: 'observed', hierarchy: 'observed',
