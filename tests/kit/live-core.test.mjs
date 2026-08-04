@@ -142,7 +142,9 @@ test('workspace snapshot store retains only safe last-recorded metadata', () => 
   }), true);
   const saved = fs.readFileSync(file, 'utf8');
   assert.ok(!saved.includes('/Users/private'));
-  assert.equal(fs.statSync(file).mode & 0o777, 0o600);
+  // Windows does not expose POSIX permission bits through stat(); chmod is
+  // best-effort there, matching the other private-cache contracts.
+  if (process.platform !== 'win32') assert.equal(fs.statSync(file).mode & 0o777, 0o600);
   assert.equal(new WorkspaceSnapshotStore(file).records()[0].host, 'opencode');
   assert.equal(new WorkspaceSnapshotStore(file).records()[0].workspace.directoryLabel, null);
 });
