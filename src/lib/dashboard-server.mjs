@@ -5,9 +5,15 @@
 //                      no external fetches — offline-first, matches the kit ethos)
 //   GET /api/status  → JSON: the same subsystem rows `ak status --json` emits,
 //                      PLUS version drift, the project's .claude-flow/improvement.json
-//                      (if present), and the health-history ring (if present).
+//                      (if present), the health-history ring, and the intel-history
+//                      (pattern store / graph / global stats) series — see
+//                      dashboard/intel-history.mjs and collectData()'s own field
+//                      comments for the exact, frozen shape of each.
 //   GET /api/live    → bounded, privacy-safe live session projection
 //   GET /api/live/events → resumable Server-Sent Events stream
+//   GET /api/live/intelligence → SSE stream of intel-history.mjs's combined
+//                      read; one initial frame on connect, then a fresh frame
+//                      whenever IntelligenceWatch detects a real change
 //   GET /api/usage    → the usage Aggregate MINUS sessions[] (ADR-0009)
 //   GET /api/sessions → the session list, filtered + paginated
 //   GET /api/session/:id → one transcript, secrets masked SERVER-side
@@ -34,6 +40,11 @@ import { renderPage } from './dashboard/page.mjs';
 import { requestRejection } from './dashboard/request-security.mjs';
 import { tokenMatches } from './admin-server.mjs';
 import { sseChannel, reserveClientSlot, clientGone } from './dashboard/sse.mjs';
+// readHealthRing itself was moved (not duplicated) into intel-history.mjs —
+// dashboard-server.mjs no longer defines it locally. It isn't called directly
+// here because readIntelHistory() already composes it (as `.healthRing`,
+// forwarded verbatim below); a bare `readHealthRing` import would be unused.
+import { readIntelHistory } from './dashboard/intel-history.mjs';
 import {
   TRANSCRIPT_ROOTS,
   maskMeta,
@@ -68,15 +79,6 @@ const DASH_CSP = [
 
 function readJsonSafe(file) {
   try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return null; }
-}
-
-/** The health-history ring: an array of point samples over time. Accepts either
- *  a bare array or `{ samples: [...] }`. Returns null when absent/unreadable. */
-function readHealthRing(cwd) {
-  const raw = readJsonSafe(path.join(cwd, '.claude-flow', 'health-history.json'));
-  if (!raw) return null;
-  const arr = Array.isArray(raw) ? raw : Array.isArray(raw.samples) ? raw.samples : null;
-  return arr && arr.length ? arr : null;
 }
 
 /** Default status provider: shell out to the installed CLI and parse its JSON.
@@ -132,6 +134,13 @@ async function collectData({ cwd, fetchStatus }) {
     } catch { /* banner is best-effort — the subsystem card still carries the ruvector row */ }
   }
 
+  // Learning/intelligence history (src/lib/dashboard/intel-history.mjs) — one
+  // combined read powering the four DISTINCT series exposed below. See that
+  // module's header for the authoritative statement of why patternStore and
+  // globalStats.patternsLearned must never be conflated; the payload shape
+  // here preserves that separation instead of collapsing it.
+  const intel = readIntelHistory(cwd);
+
   return {
     generatedAt: new Date().toISOString(),
     kit: { name: '@pacphi/agentic-kit', version: kitVersion() },
@@ -140,7 +149,37 @@ async function collectData({ cwd, fetchStatus }) {
     rows,
     drift,
     improvement: readJsonSafe(path.join(cwd, '.claude-flow', 'improvement.json')),
-    health: readHealthRing(cwd),
+    // health — UNCHANGED contract: the machine-health snapshot RING from
+    // .claude-flow/health-history.json (an array of point samples, each
+    // typically carrying a `patternsLearned` counter value and/or an
+    // `improvement`/`deltaPP` field — see appendHealthSnapshot's callers), or
+    // null if that file is absent. This is intel.healthRing forwarded
+    // verbatim; client.mjs's renderHistory() keeps reading it exactly as
+    // before this integration.
+    health: intel.healthRing,
+    // globalStats — the CURRENT (not historical) cumulative counters read
+    // straight from .claude-flow/neural/stats.json right now:
+    // { patternsLearned, trajectoriesRecorded, signalsProcessed,
+    // lastAdaptation }, or null if that file is absent. patternsLearned here
+    // is a LIFETIME counter and can legitimately be higher than
+    // patternStore.length below — the store gets pruned/compacted over time
+    // while this counter only ever climbs. Do not treat the two as
+    // interchangeable displays of "how many patterns exist".
+    globalStats: intel.globalStats,
+    // patternStore — every entry CURRENTLY PRESENT in the neural pattern
+    // store (.claude-flow/neural/patterns.json), as `{ createdAt, type }`
+    // pairs, NOT pre-bucketed by day (the client buckets). A point-in-time
+    // inventory of the store's live contents — distinct from
+    // globalStats.patternsLearned (a lifetime counter, see above) and
+    // distinct from health[] (machine-health samples, not pattern-store
+    // entries).
+    patternStore: intel.patternStore,
+    // graph — point-in-time samples of the reasoning graph's size over time
+    // (.claude-flow/data/intelligence-snapshot.json), as
+    // `{ timestamp, nodes, edges, pageRankSum }`, or null if that file is
+    // absent. A structural-growth series, independent of the three
+    // learning/pattern-count metrics above.
+    graph: intel.graph,
     routing: routingPayload(),
   };
 }
@@ -334,13 +373,29 @@ function lazyLive(liveOptions = {}) {
   };
 }
 
+/** Load the intelligence watcher only when /api/live/intelligence is first
+ * requested — same "pay only when used" rationale as lazyLive. Unlike
+ * LiveSessionsService's subscribe/replay pub-sub, IntelligenceWatch wires its
+ * `onUpdate` once, at construction; the route below fans that single callback
+ * out to every currently-connected client itself (see `broadcastIntel`). */
+function lazyIntelWatch(cwd, onUpdate) {
+  let instancePromise;
+  return async () => {
+    instancePromise ||= import('./live/intelligence-watch.mjs').then(({ IntelligenceWatch }) => (
+      new IntelligenceWatch({ cwd, onUpdate })
+    ));
+    return instancePromise;
+  };
+}
+
 /**
  * Start the dashboard HTTP server, bound to loopback only.
  * @param {{ port?: number, cwd?: string, fetchStatus?: () => Promise<any>, usage?: any,
  *           limits?: () => Promise<any>, live?: any, liveHeartbeatMs?: number,
  *           liveClientBuffer?: number, liveMaxClients?: number, liveOptions?: any,
  *           liveIdleMs?: number, transcripts?: any, transcriptOptions?: any,
- *           transcriptClientBuffer?: number, transcriptMaxClients?: number }} [opts]
+ *           transcriptClientBuffer?: number, transcriptMaxClients?: number,
+ *           intelWatch?: any, intelClientBuffer?: number, intelMaxClients?: number }} [opts]
  * @returns {Promise<{ url: string, urlWithToken: string, port: number, token: string, close: () => Promise<void> }>}
  */
 export function startDashboard({
@@ -348,6 +403,7 @@ export function startDashboard({
   liveHeartbeatMs = 15_000, liveClientBuffer = 256, liveMaxClients = 32,
   liveOptions = {}, liveIdleMs = 30_000, transcripts, transcriptOptions = {},
   transcriptClientBuffer = 64, transcriptMaxClients = 16,
+  intelWatch, intelClientBuffer = 256, intelMaxClients = 32,
 } = {}) {
   const provide = fetchStatus || shellOutStatus(cwd);
   const usageApi = usage || lazyUsage();
@@ -426,6 +482,40 @@ export function startDashboard({
       .catch((error) => { liveStartPromise = null; throw error; }));
     return service;
   };
+
+  // ── /api/live/intelligence singleton plumbing ────────────────────────────
+  // `intelClients` mirrors `liveClients`/`transcriptClients`: cap-tracking
+  // AND the set force-closed on shutdown. `intelWriters` is separate — the
+  // subset of those clients' raw `write` functions the watcher's single
+  // `onUpdate` callback broadcasts to, since (unlike LiveSessionsService)
+  // IntelligenceWatch has no built-in per-subscriber pub-sub of its own.
+  const intelClients = new Set();
+  const intelWriters = new Set();
+  const broadcastIntel = (combined) => {
+    const frame = transcriptSseFrame('update', combined);
+    for (const write of intelWriters) {
+      try { write(frame); } catch { /* a dead writer is reaped by its own cleanup */ }
+    }
+  };
+  const provideIntelWatch = typeof intelWatch === 'function'
+    ? intelWatch : intelWatch ? async () => intelWatch : lazyIntelWatch(cwd, broadcastIntel);
+  let intelWatchPromise;
+  let intelWatchStartPromise;
+  let intelWatchStarted = false;
+  const getIntelWatch = async () => {
+    if (shuttingDown) throw new Error('dashboard is closing');
+    const watch = await (intelWatchPromise ||= Promise.resolve().then(provideIntelWatch));
+    if (shuttingDown) throw new Error('dashboard is closing');
+    if (!watch || typeof watch.start !== 'function' || typeof watch.stop !== 'function') {
+      throw new TypeError('intelligence watch must implement start and stop');
+    }
+    if (!intelWatchStarted) await (intelWatchStartPromise ||= Promise.resolve()
+      .then(() => watch.start())
+      .then(() => { intelWatchStarted = true; })
+      .catch((error) => { intelWatchStartPromise = null; throw error; }));
+    return watch;
+  };
+
   const html = renderPage({ name: '@pacphi/agentic-kit', version: kitVersion() });
 
   // Per-session auth secret (ADR-0014, mirrors admin's ADR-0007 §2): 256-bit,
@@ -473,7 +563,7 @@ export function startDashboard({
     if (url === '/api/status') {
       let payload;
       try { payload = await collectData({ cwd, fetchStatus: provide }); }
-      catch (e) { payload = { generatedAt: new Date().toISOString(), overall: 'unknown', rows: [], drift: null, improvement: null, health: null, error: String(e && e.message || e) }; }
+      catch (e) { payload = { generatedAt: new Date().toISOString(), overall: 'unknown', rows: [], drift: null, improvement: null, health: null, globalStats: null, patternStore: [], graph: null, error: String(e && e.message || e) }; }
       sendJson(res, 200, payload);
       return;
     }
@@ -622,6 +712,76 @@ export function startDashboard({
         if (id) emitted.add(id);
         write(sseFrame('delta', event, id));
       }
+      channel.startHeartbeat();
+      return;
+    }
+
+    if (url === '/api/live/intelligence') {
+      // Same reservation-before-await discipline as /api/live/events above
+      // (sse.mjs's reserveClientSlot doc comment): getIntelWatch() may await a
+      // dynamic import() + watch.start() on the very first connection, and
+      // concurrent requests arriving during that gap must not all observe the
+      // same pre-reservation size and all pass the cap.
+      const maxClients = Math.max(1, Math.min(256, Number(intelMaxClients) || 32));
+      const slot = reserveClientSlot(intelClients, maxClients);
+      if (!slot) {
+        sendJson(res, 503, { error: 'too many intelligence clients' });
+        return;
+      }
+      // Same forwarding-cleanup pattern as /api/live/events and the transcript
+      // route: catches a close that fires during the awaits below, before the
+      // real cleanup (which needs the channel/write) can be constructed.
+      let earlyClosed = false;
+      let realCleanup = null;
+      const cleanup = (terminate) => {
+        if (realCleanup) { realCleanup(terminate); return; }
+        earlyClosed = true;
+      };
+      req.once('close', cleanup);
+      res.once('close', cleanup);
+
+      try { await getIntelWatch(); } catch {
+        intelClients.delete(slot);
+        sendJson(res, 503, { error: 'intelligence telemetry unavailable' });
+        return;
+      }
+      if (earlyClosed || clientGone(req, res)) { intelClients.delete(slot); return; }
+
+      res.writeHead(200, {
+        'content-type': 'text/event-stream; charset=utf-8',
+        'cache-control': 'no-store',
+        connection: 'keep-alive',
+        'x-accel-buffering': 'no',
+      });
+      res.flushHeaders?.();
+
+      const limit = Math.max(1, Math.min(4096, Number(intelClientBuffer) || 256));
+      // Reuses transcriptSseFrame (plain id/event/data lines, no publicLivePayload
+      // redaction) rather than sseFrame — this payload is aggregate learning
+      // metrics, not live session/transcript content, so the session-privacy
+      // scrubbing sseFrame applies is not the right tool here.
+      const channel = sseChannel(res, {
+        limit, heartbeatMs: liveHeartbeatMs,
+        onOverflow: () => transcriptSseFrame('init', readIntelHistory(cwd)),
+      });
+      const write = channel.write;
+
+      realCleanup = (terminate = false) => {
+        if (channel.isClosed()) return;
+        channel.cleanup(terminate);
+        intelWriters.delete(write);
+        intelClients.delete(cleanup);
+      };
+      intelClients.delete(slot);
+      intelClients.add(cleanup);
+      intelWriters.add(write);
+      if (earlyClosed) { cleanup(true); return; }
+
+      // One initial frame with the current combined read so a fresh page load
+      // doesn't have to wait out the watcher's own debounce window; every
+      // frame after this is pushed by IntelligenceWatch's onUpdate via
+      // broadcastIntel.
+      write(transcriptSseFrame('init', readIntelHistory(cwd)));
       channel.startHeartbeat();
       return;
     }
@@ -899,9 +1059,11 @@ export function startDashboard({
           cancelLiveIdle();
           for (const cleanup of [...liveClients]) cleanup(true);
           for (const cleanup of [...transcriptClients]) cleanup(true);
+          for (const cleanup of [...intelClients]) cleanup(true);
           await new Promise((res) => server.close(() => res(undefined)));
           await stopLive({ force: true });
           try { await (await transcriptServicePromise)?.close?.(); } catch {}
+          try { (await intelWatchPromise)?.stop?.(); } catch {}
         },
       });
     });

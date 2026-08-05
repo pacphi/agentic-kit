@@ -20,6 +20,8 @@ Native Evidence ----> Evidence Acquisition ----> Canonical Evidence
                     |         +----> Workspace Snapshot Cache             |
                     |                       |                              |
                     +-----------------------+----> Dashboard Delivery <----+
+                                                          ^
+Project State (.claude-flow/*) ----> Project Intelligence ┘
 
 Maintainer Administration is a separate, deliberately-egressing context.
 ```
@@ -74,11 +76,22 @@ an advisory read-model cache, not the append-only Evidence Archive and not a sou
 Restoration supplies inert History context using the original capture time; it cannot query a
 current checkout and present that state as historical.
 
+### Project intelligence
+
+Owns read-only trend projections over ruflo/agentic-qe's own project-level learning state: the
+neural pattern store, its lifetime learned-pattern counter, reasoning-graph size samples, and the
+machine-health sample ring. It reads `.claude-flow/*` files directly — there is only ever one
+shape, ak's own, so no anti-corruption adapter is required — and is independent of Evidence
+Acquisition and Observability's canonical event model. It carries no session, actor, host,
+provider, or lifecycle identity and grades no per-field evidence confidence.
+
+See [Project intelligence](project-intelligence.md).
+
 ### Dashboard delivery
 
 Owns protected HTTP/SSE delivery, browser DTOs, filters, presentation, and interaction state. It
-may combine read models from Observability, Historical Usage, routing, and integration facts. It
-cannot manufacture or strengthen domain facts.
+may combine read models from Observability, Historical Usage, Project Intelligence, routing, and
+integration facts. It cannot manufacture or strengthen domain facts.
 
 ### Maintainer administration
 
@@ -99,6 +112,8 @@ and credential policy is distinct from the offline-first dashboard and integrati
 | Observability | Workspace snapshot cache | Last safe metadata-only session workspace capture |
 | Workspace snapshot cache | Dashboard delivery | Inert last-recorded History context after restart |
 | Historical usage | Dashboard delivery | Historical aggregates and findings |
+| Project state (`.claude-flow/*`) | Project intelligence | Direct local file reads; no anti-corruption adapter needed |
+| Project intelligence | Dashboard delivery | Read-model projection, delivered by poll (`/api/status`) and SSE push (`/api/live/intelligence`) |
 
 ## Boundary rules
 
@@ -108,3 +123,6 @@ and credential policy is distinct from the offline-first dashboard and integrati
 - Dashboard presentation cannot upgrade provenance.
 - Historical usage and live topology share identifiers, not aggregate ownership.
 - Network egress occurs only in commands and contexts whose contract explicitly permits it.
+- Project intelligence reads local project state directly; it never enters Evidence Acquisition's
+  anti-corruption layer or Observability's canonical event model, and it establishes no session,
+  actor, host, provider, or lifecycle identity.

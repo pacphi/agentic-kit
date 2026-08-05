@@ -32,6 +32,7 @@ Consequences**, and cites the grounded source it rests on where relevant.
 | [0021](0021-inference-provider-provenance.md) | Inference-provider provenance for live sessions | Accepted |
 | [0022](0022-metaharness-as-optional-assurance-companion.md) | MetaHarness as an optional assurance companion | Proposed |
 | [0023](0023-fail-closed-operations-and-explicit-degradation.md) | Fail-closed mutations and explicit degraded operation evidence | Implemented |
+| [0024](0024-project-intelligence-telemetry.md) | Project intelligence: live learning telemetry from ruflo/agentic-qe's own state | Implemented |
 
 Theme: ADRs **0001–0006** define **dual-host LLM routing and leadership** — how `ak` lets ruflo route
 each development activity (architecture, implementation, testing, review, …) to the right host (Claude
@@ -121,3 +122,12 @@ managed fallbacks report degradation, SQLite retains classified failure evidence
 usage, promised backups fail closed before atomic replacement, status-line failures gain redacted
 opt-in diagnostics, process discovery is current-user and argv-minimized, setup discloses and
 verifies its project auto-approve manifest, and clean-machine tests isolate every mutable path.
+
+**0024** gives Overview's Intelligence view real trend data instead of a permanently-empty strip:
+a new `intel-history.mjs` module reads the neural pattern store, its lifetime learned-pattern
+counter, and reasoning-graph size samples that ruflo/agentic-qe already write under
+`.claude-flow/`, while a debounced `IntelligenceWatch` pushes near-instant updates over a new
+`GET /api/live/intelligence` SSE route additive to the existing status poll. It establishes Project
+intelligence as its own bounded context rather than an Observability extension — this telemetry
+carries no session, actor, host, provider, or lifecycle identity and needs no per-field evidence
+confidence, and the panel it feeds lives under Overview, not Observability's Live/History scope.
