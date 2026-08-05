@@ -60,6 +60,20 @@ missing price.
 `Dual-host` describes two enabled peer hosts, not an execution command and not evidence that two
 inference vendors served a workflow. Generalized execution belongs to `ak run`.
 
+## Project intelligence language
+
+| Term | Meaning |
+|------|---------|
+| Pattern store | The neural pattern store's current on-disk inventory (`.claude-flow/neural/patterns.json`); shrinks under pruning or compaction |
+| Patterns-learned counter | A cumulative lifetime total (`.claude-flow/neural/stats.json`'s `patternsLearned`); only ever climbs |
+| Reasoning graph sample | A point-in-time structural-size measurement (`nodes`, `edges`, `pageRankSum`) of the reasoning/knowledge graph |
+| Health-history ring | The capped, deduplicated sample ring recording learning-stat snapshots over time |
+| Project intelligence | Read-only trend telemetry over ruflo/agentic-qe's own local learning state, distinct from Observability evidence |
+
+Pattern-store size and the patterns-learned counter are never interchangeable displays of "how many
+patterns exist" — the store can be pruned while the counter keeps climbing. See
+[Project intelligence](project-intelligence.md).
+
 ## Usage rules
 
 - Say **host** when referring to Claude Code, Codex, OpenCode, session drivers, leadership, or

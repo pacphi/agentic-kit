@@ -131,6 +131,7 @@ export const JS = `
       if(panel)panel.hidden=!on;
     }
     if(!skipHash&&activeTab==="overview")syncHash();
+    syncIntelStream();
   }
   function setTab(id,focus,skipHash){
     if(TABS.indexOf(id)<0)return;
@@ -153,6 +154,7 @@ export const JS = `
     for(var j=0;j<TABS.length;j++)document.getElementById("secondary-"+TABS[j]).hidden=TABS[j]!==id;
     if(id==="overview")setOverviewView(overviewView,false,true);
     positionThumb();
+    syncIntelStream();
   }
   var seg=document.getElementById("seg");
   if(seg){
@@ -330,11 +332,67 @@ export const JS = `
     // fall back to a single improvement snapshot for the Δpp spark
     if(!deltas.length&&data.improvement&&typeof data.improvement.deltaPP==="number"){deltas=[data.improvement.deltaPP];}
 
-    if(!pats.length&&!deltas.length){strip.hidden=true;return;}
+    // ── neural pattern store: entries CURRENTLY on disk
+    // (.claude-flow/neural/patterns.json), shipped un-bucketed — bucketed and
+    // summed by day-of-creation here. A point-in-time inventory of the
+    // store's live contents, NOT the same figure as the patternsLearned
+    // lifetime counter charted above (that counter only ever climbs; this
+    // store can be pruned/compacted). See intel-history.mjs's header comment.
+    var byDay={},storeEntries=Array.isArray(data.patternStore)?data.patternStore:[];
+    for(var j=0;j<storeEntries.length;j++){
+      var entry=storeEntries[j];
+      var day=entry&&typeof entry.createdAt==="string"?entry.createdAt.slice(0,10):null;
+      if(!day)continue;
+      byDay[day]=(byDay[day]||0)+1;
+    }
+    var days=Object.keys(byDay).sort();
+    var storeSeries=[],storeTotal=0;
+    for(var d=0;d<days.length;d++){storeTotal+=byDay[days[d]];storeSeries.push(storeTotal);}
+
+    // ── reasoning graph: point-in-time size samples
+    // (.claude-flow/data/intelligence-snapshot.json) — a structural-growth
+    // series independent of the pattern-count metrics above.
+    var graphArr=Array.isArray(data.graph)?data.graph:[];
+    var nodesSeries=graphArr.map(function(g){return Number(g&&g.nodes)||0;});
+    var lastGraph=graphArr.length?graphArr[graphArr.length-1]:null;
+
+    // ── improvement eval: within-run learning curve (cold→warm accuracy at
+    // each k-step checkpoint) — a different view of the SAME eval run the
+    // Δpp scalar below summarizes; this is the trajectory that produced it.
+    var imp=data.improvement||null;
+    var curveArr=(imp&&Array.isArray(imp.curve))?imp.curve:[];
+    var curveVals=curveArr.map(function(c){return Number(c&&c.acc)||0;});
+
+    if(!pats.length&&!deltas.length&&!storeSeries.length&&!nodesSeries.length&&!curveVals.length){strip.hidden=true;return;}
     strip.hidden=false;
-    note.textContent=(series.length?series.length+" samples":"snapshot");
+    note.textContent=(series.length?series.length+" samples":"snapshot")+(intelSource?" · live":"");
+
     document.getElementById("spark-patterns").innerHTML=pats.length>1?sparkline(pats):flat(pats.length?String(pats[0])+" (one sample)":"no data");
+
+    document.getElementById("spark-pattern-store").innerHTML=storeSeries.length>1?sparkline(storeSeries):flat(storeSeries.length?String(storeTotal)+" entries (one day)":"no data");
+
+    document.getElementById("spark-graph").innerHTML=nodesSeries.length>1?sparkline(nodesSeries):flat(nodesSeries.length?String(nodesSeries[0])+" nodes (one sample)":"no data");
+    var graphMeta=document.getElementById("graph-meta");
+    if(graphMeta)graphMeta.textContent=lastGraph?("latest: "+fmtNum(lastGraph.nodes)+" nodes · "+fmtNum(lastGraph.edges)+" edges"):"";
+
     document.getElementById("spark-delta").innerHTML=deltas.length>1?sparkline(deltas):flat(deltas.length?(deltas[0]>=0?"+":"")+deltas[0]+"pp (one sample)":"no data");
+    var deltaMeta=document.getElementById("delta-meta");
+    if(deltaMeta){
+      var verdict=imp&&typeof imp.verdict==="string"?imp.verdict:null;
+      var pVal=imp&&typeof imp.pValue==="number"?imp.pValue:null;
+      var dVal=imp&&typeof imp.cohensD==="number"?imp.cohensD:null;
+      if(!verdict&&pVal==null&&dVal==null){deltaMeta.hidden=true;deltaMeta.innerHTML="";}
+      else{
+        var lvl=verdict==="PASS"?"ok":"warn";
+        var pTxt=pVal==null?"—":(pVal<0.001?"<.001":"="+pVal);
+        var dTxt=dVal==null?"—":dVal.toFixed(2);
+        deltaMeta.hidden=false;
+        deltaMeta.innerHTML=(verdict?'<span class="pill" data-level="'+lvl+'"><span class="dot" data-level="'+lvl+'"></span><b>'+esc(verdict)+"</b></span>":"")
+          +'<span class="mono" style="margin-left:8px;color:var(--ink-dim)">p'+esc(pTxt)+" · d="+esc(dTxt)+"</span>";
+      }
+    }
+
+    document.getElementById("spark-curve").innerHTML=curveVals.length>1?sparkline(curveVals):flat(curveVals.length?(curveVals[0]*100).toFixed(0)+"% (one sample)":"no data");
   }
 
   function renderRouting(rt){
@@ -386,6 +444,46 @@ export const JS = `
       +"</div>";
     }
     document.getElementById("model-list").innerHTML=html;
+  }
+
+  // ── /api/live/intelligence (SSE) ── pushes fresh intel-history frames so the
+  // Intelligence panel repaints immediately instead of waiting out the ~30s
+  // poll tick. Mirrors live/client.mjs's openStream() for /api/live/events:
+  // same dashSseUrl token-in-query-param bridge (EventSource cannot set
+  // headers), same named-event addEventListener wiring, and no manual
+  // reconnect loop — EventSource retries natively on error, same as there.
+  function dashSseUrl(u){return DASH_TOKEN?u+(u.indexOf("?")<0?"?":"&")+"token="+encodeURIComponent(DASH_TOKEN):u;}
+  var intelSource=null;
+  function closeIntelStream(){
+    if(intelSource){intelSource.close();intelSource=null;}
+  }
+  function receiveIntel(d){
+    // readIntelHistory()'s own field names (healthRing) differ from
+    // collectData()'s renamed "health" on /api/status — reshape here, then
+    // funnel through the SAME renderHistory() the poll path uses, so there is
+    // exactly one code path for drawing the panel, not two. "improvement" isn't
+    // part of this stream's payload, so whatever the last poll saw stays put.
+    if(!d||typeof d!=="object"||!LAST)return;
+    LAST.health=d.healthRing;
+    LAST.globalStats=d.globalStats;
+    LAST.patternStore=d.patternStore;
+    LAST.graph=d.graph;
+    renderHistory(LAST);
+  }
+  function openIntelStream(){
+    if(intelSource||!window.EventSource)return;
+    var src=new EventSource(dashSseUrl("/api/live/intelligence"));
+    intelSource=src;
+    src.addEventListener("init",function(e){try{receiveIntel(JSON.parse(e.data));}catch(e){}});
+    src.addEventListener("update",function(e){try{receiveIntel(JSON.parse(e.data));}catch(e){}});
+    src.onerror=function(){}; // native retry — nothing else to do here, same as openStream()
+  }
+  // Connected only while the Intelligence view is actually visible, closed the
+  // moment it isn't — the same "activate while shown, deactivate on hide"
+  // discipline AKLive.activate()/deactivate() applies to the Observability tab.
+  function syncIntelStream(){
+    if(activeTab==="overview"&&overviewView==="intel")openIntelStream();
+    else closeIntelStream();
   }
 
   function render(data){

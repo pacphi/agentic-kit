@@ -12,6 +12,7 @@ describe the current system unless a section is explicitly marked as future work
 | [Integration management](integration-management.md) | Hosts, inference providers, bindings, capabilities, lifecycle, facts, and ownership |
 | [Routing and orchestration](routing-and-orchestration.md) | Activities, routes, leadership, escalation, projections, and canonical `ak run` execution |
 | [Observability](observability.md) | Evidence acquisition, observed-session aggregates, replay, and dashboard delivery |
+| [Project intelligence](project-intelligence.md) | Pattern store, learning counters, reasoning-graph size, and live delivery for Overview's Intelligence view |
 
 ## Relationship to other documentation
 

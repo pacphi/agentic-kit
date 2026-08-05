@@ -191,10 +191,27 @@ export function renderPage({ name, version }) {
         <figure class="spark">
           <figcaption class="mono">patterns learned</figcaption>
           <div class="spark-svg" id="spark-patterns"></div>
+          <div class="strip-note" style="margin-top:6px">lifetime counter (neural/stats.json) &mdash; only ever climbs, even as the store below is pruned</div>
         </figure>
         <figure class="spark">
-          <figcaption class="mono">improvement Δpp</figcaption>
+          <figcaption class="mono">pattern store size</figcaption>
+          <div class="spark-svg" id="spark-pattern-store"></div>
+          <div class="strip-note" style="margin-top:6px">entries currently on disk (neural/patterns.json), by day created &mdash; a different number from the lifetime counter</div>
+        </figure>
+        <figure class="spark">
+          <figcaption class="mono">reasoning graph size</figcaption>
+          <div class="spark-svg" id="spark-graph"></div>
+          <div class="strip-note" id="graph-meta" style="margin-top:6px"></div>
+        </figure>
+        <figure class="spark">
+          <figcaption class="mono">improvement &Delta;pp</figcaption>
+          <div id="delta-meta" style="margin-bottom:6px" hidden></div>
           <div class="spark-svg" id="spark-delta"></div>
+        </figure>
+        <figure class="spark">
+          <figcaption class="mono">learning curve (cold&rarr;warm)</figcaption>
+          <div class="spark-svg" id="spark-curve"></div>
+          <div class="strip-note" style="margin-top:6px">held-out accuracy within this eval run, at each k-step checkpoint</div>
         </figure>
       </div>
     </section>
