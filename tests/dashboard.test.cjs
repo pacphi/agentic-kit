@@ -131,6 +131,14 @@ async function main() {
     port: 0,
     cwd: fixture,
     fetchStatus: async () => STUB_STATUS,
+    // Machine-wide Intelligence (this round's redesign) is keyed off a
+    // discovered-project catalog, not the server's launching cwd — inject
+    // `fixture` itself as the sole discovered project so intel.health below
+    // reads deterministically off this fixture's own health-history.json,
+    // rather than depending on this machine's real (and untested-against)
+    // ~/.claude-flow/*.json registry state. Mirrors
+    // tests/kit/dashboard-intel-integration.test.mjs's own convention.
+    discoverProjects: () => [{ path: fixture, label: 'fixture', source: 'registry' }],
   });
 
   try {
@@ -284,7 +292,11 @@ async function main() {
     await test('GET /api/status embeds the health-history ring', async () => {
       const r = await get(url + 'api/status', token);
       const j = JSON.parse(r.body);
-      assert(Array.isArray(j.health) && j.health.length === 3, 'health ring must be embedded as an array');
+      // Moved under intel.* in this round's machine-wide Intelligence
+      // redesign (dashboard-server.mjs's own header comment) — see
+      // tests/kit/dashboard-intel-integration.test.mjs for the dedicated
+      // coverage of that redesign's selection/aggregate behavior.
+      assert(Array.isArray(j.intel.health) && j.intel.health.length === 3, 'health ring must be embedded as an array');
     });
 
     await test('GET /api/status via ?token= query param (the EventSource fallback path)', async () => {
@@ -308,13 +320,20 @@ async function main() {
   // `!(handle->flags & UV_HANDLE_CLOSING)` assert (win/async.c:94) at process
   // exit on Windows CI — every test passed, then the exit code was 1.
   const bare = mkFixture({});
-  const srv2 = await startDashboard({ port: 0, cwd: bare, fetchStatus: async () => ({ overall: 'ok', rows: [], drift: [] }) });
+  const srv2 = await startDashboard({
+    port: 0, cwd: bare, fetchStatus: async () => ({ overall: 'ok', rows: [], drift: [] }),
+    // Same reasoning as the fixture above: discover `bare` itself so
+    // intel.health's null-ness below is proven by this fixture's own absent
+    // health-history.json, not by an incidental absence of real machine-wide
+    // registry state.
+    discoverProjects: () => [{ path: bare, label: 'bare', source: 'registry' }],
+  });
   try {
     await test('missing improvement.json / health ring → null, no crash', async () => {
       const r = await get(srv2.url + 'api/status', srv2.token);
       const j = JSON.parse(r.body);
       assert(j.improvement === null, 'improvement must be null when absent');
-      assert(j.health === null, 'health must be null when absent');
+      assert(j.intel.health === null, 'health must be null when absent');
     });
   } finally {
     await srv2.close();

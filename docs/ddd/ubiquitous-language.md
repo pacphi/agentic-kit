@@ -69,10 +69,17 @@ inference vendors served a workflow. Generalized execution belongs to `ak run`.
 | Reasoning graph sample | A point-in-time structural-size measurement (`nodes`, `edges`, `pageRankSum`) of the reasoning/knowledge graph |
 | Health-history ring | The capped, deduplicated sample ring recording learning-stat snapshots over time |
 | Project intelligence | Read-only trend telemetry over ruflo/agentic-qe's own local learning state, distinct from Observability evidence |
+| Discovered project | A project on this machine ruflo has genuinely initialized (`.claude-flow/neural/` present); found by project discovery and eligible for Intelligence selection |
+| Project discovery | The registry-plus-Observability-cross-reference scan (`discoverRuvfloProjects()`) that produces the machine-wide, deduplicated, most-recently-active-first catalog of discovered projects |
+| Selected project | The one discovered project whose detail the Intelligence panel currently shows; defaults to the most-recently-active discovered project, never an implicit cwd default |
+| Machine-wide rollup | The `{ totals, perProject }` aggregate (`readMachineWideIntel()`) folded across every discovered project; always shown regardless of which project is selected |
+| Intelligence watcher pool | The per-discovered-project pool of `IntelligenceWatch` instances backing `GET /api/live/intelligence`; a project's watcher is created on its first SSE subscriber and torn down on its last disconnect |
 
 Pattern-store size and the patterns-learned counter are never interchangeable displays of "how many
-patterns exist" — the store can be pruned while the counter keeps climbing. See
-[Project intelligence](project-intelligence.md).
+patterns exist" — the store can be pruned while the counter keeps climbing — at single-project
+scope and at machine-wide-rollup scope alike. There is no unlabeled "this project" default in
+Intelligence: the panel always shows an explicitly selected, explicitly labeled project alongside
+the always-visible machine-wide rollup. See [Project intelligence](project-intelligence.md).
 
 ## Usage rules
 

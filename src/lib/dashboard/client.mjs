@@ -71,6 +71,15 @@ export const JS = `
   var LEVEL_WORD={ok:"all systems nominal",warn:"attention advised",fail:"action required",unknown:"status unknown"};
   var LAST=null, lastUpdated=0;
 
+  // Intelligence project selection (machine-wide redesign, see server-side
+  // dashboard-server.mjs's collectData()). selectedProjectKey starts null so
+  // the very first /api/status and /api/live/intelligence requests omit
+  // ?project= entirely and let the server apply ITS OWN default (the
+  // most-recently-active discovered project) rather than the client guessing
+  // at one — there is no "current project"/cwd concept on this side anymore.
+  // Every later request carries the current selection explicitly.
+  var intelProjects=[], selectedProjectKey=null, selectedProjectLabel=null, intelRequestSeq=0;
+
   ${esc.toString()}
 
   // ── tabs (segmented control) ──
@@ -395,6 +404,111 @@ export const JS = `
     document.getElementById("spark-curve").innerHTML=curveVals.length>1?sparkline(curveVals):flat(curveVals.length?(curveVals[0]*100).toFixed(0)+"% (one sample)":"no data");
   }
 
+  // ── machine-wide Intelligence (ALWAYS visible) + project selection ──
+  // intel.machineWide (from /api/status) is the full machine-wide rollup,
+  // independent of whichever project is selected in the picker below it —
+  // see render()'s wiring. Reuses the shared kpi()/esc()/fmtNum()/ago()
+  // helpers (defined further down, but function declarations hoist) rather
+  // than inventing a second vocabulary for stat tiles.
+  function buildHistoryView(data){
+    var intel=(data&&data.intel)||{};
+    return {
+      health:intel.health, globalStats:intel.globalStats,
+      patternStore:intel.patternStore, graph:intel.graph,
+      // "improvement" is a DIFFERENT, unchanged contract (the dashboard's own
+      // launching-project .claude-flow/improvement.json — see
+      // dashboard-server.mjs's own comment on this) — never project-selectable,
+      // so it rides along unchanged rather than being pulled from intel.*.
+      improvement:data&&data.improvement,
+    };
+  }
+
+  function renderMachineWide(mw){
+    var totals=(mw&&mw.totals)||{};
+    var perProject=Array.isArray(mw&&mw.perProject)?mw.perProject.slice():[];
+    var note=document.getElementById("mw-note");
+    if(note)note.textContent=totals.projectCount
+      ?(fmtNum(totals.projectCount)+" project"+(totals.projectCount===1?"":"s")+" tracked on this machine")
+      :"no ruflo-initialized projects discovered on this machine";
+    var hero=document.getElementById("mw-hero");
+    if(hero)hero.innerHTML=
+      kpi("patterns learned",fmtNum(totals.patternsLearnedLifetime),"lifetime &middot; every tracked project","")
+      +kpi("projects tracked",fmtNum(totals.projectCount),"ruflo-initialized on this machine","")
+      +kpi("most active project",totals.mostActiveProject||"—","by most recent learning adaptation","accent");
+    perProject.sort(function(a,b){return (Number(b&&b.patternsLearned)||0)-(Number(a&&a.patternsLearned)||0);});
+    var table=document.getElementById("mw-table");
+    if(!table)return;
+    if(!perProject.length){table.innerHTML='<div class="empty">no projects discovered on this machine.</div>';return;}
+    var html='<div class="mw-row mw-head"><span>project</span><span class="mw-val">patterns learned</span>'
+      +'<span class="mw-val">pattern store</span><span class="mw-val">last active</span></div>';
+    for(var i=0;i<perProject.length;i++){
+      var p=perProject[i]||{};
+      var lastMs=Number(p.lastAdaptation)||0;
+      var lastTxt=lastMs?ago(Math.max(0,Math.round((Date.now()-lastMs)/1000))):"—";
+      html+='<div class="mw-row">'
+        +'<span class="mw-name">'+esc(p.label||"(unlabeled)")+"</span>"
+        +'<span class="mw-val mono">'+esc(fmtNum(p.patternsLearned))+"</span>"
+        +'<span class="mw-val mono">'+esc(fmtNum(p.patternStoreCount))+"</span>"
+        +'<span class="mw-val mono">'+esc(lastTxt)+"</span>"
+      +"</div>";
+    }
+    table.innerHTML=html;
+  }
+
+  // The picker's option list AND its default selection come from the SAME
+  // /api/status response as the machine-wide rollup above — no separate
+  // fetch for the option list. selectedProjectKey/Label are only ADOPTED
+  // from a response's own intel.selectedProjectKey/Label when they differ
+  // from the current selection — a manual pick (wireIntelPicker) updates
+  // both synchronously and intelRequestSeq (pollStatus) keeps a slow,
+  // now-stale response from a previously selected project clobbering it.
+  function renderProjectPicker(intel){
+    intelProjects=Array.isArray(intel.projects)?intel.projects:[];
+    if(intel.selectedProjectKey!==selectedProjectKey){
+      selectedProjectKey=intel.selectedProjectKey;
+      selectedProjectLabel=intel.selectedProjectLabel;
+    }
+    var note=document.getElementById("intel-picker-note");
+    if(note)note.textContent=intelProjects.length
+      ?(intelProjects.length+" project"+(intelProjects.length===1?"":"s")+" available")
+      :"no projects discovered";
+    var nameEl=document.getElementById("history-project-name");
+    if(nameEl)nameEl.textContent=selectedProjectLabel||"—";
+    var sel=document.getElementById("intel-project-select");
+    if(!sel)return;
+    if(!intelProjects.length){
+      sel.innerHTML='<option value="">no projects discovered</option>';
+      sel.disabled=true;
+      return;
+    }
+    sel.disabled=false;
+    sel.innerHTML=intelProjects.map(function(p){
+      return '<option value="'+esc(p.key)+'"'+(p.key===selectedProjectKey?" selected":"")+'>'+esc(p.label)+"</option>";
+    }).join("");
+  }
+
+  function wireIntelPicker(){
+    var sel=document.getElementById("intel-project-select");
+    if(!sel)return;
+    sel.addEventListener("change",function(){
+      var key=sel.value;
+      if(!key||key===selectedProjectKey)return;
+      var proj=null;
+      for(var i=0;i<intelProjects.length;i++){if(intelProjects[i].key===key){proj=intelProjects[i];break;}}
+      selectedProjectKey=key;
+      selectedProjectLabel=proj?proj.label:null;
+      var nameEl=document.getElementById("history-project-name");
+      if(nameEl)nameEl.textContent=selectedProjectLabel||"—";
+      // Same connect/reconnect/cleanup discipline as a tab switch
+      // (syncIntelStream): tear down the stream watching the OLD project
+      // before opening one for the newly selected project, so a client is
+      // never subscribed to two projects' frames at once.
+      closeIntelStream();
+      syncIntelStream();
+      pollStatus();
+    });
+  }
+
   function renderRouting(rt){
     var strip=document.getElementById("routing");
     if(!rt||!rt.routes||!rt.routes.length){strip.hidden=true;return;}
@@ -459,20 +573,28 @@ export const JS = `
   }
   function receiveIntel(d){
     // readIntelHistory()'s own field names (healthRing) differ from
-    // collectData()'s renamed "health" on /api/status — reshape here, then
-    // funnel through the SAME renderHistory() the poll path uses, so there is
-    // exactly one code path for drawing the panel, not two. "improvement" isn't
-    // part of this stream's payload, so whatever the last poll saw stays put.
-    if(!d||typeof d!=="object"||!LAST)return;
-    LAST.health=d.healthRing;
-    LAST.globalStats=d.globalStats;
-    LAST.patternStore=d.patternStore;
-    LAST.graph=d.graph;
-    renderHistory(LAST);
+    // collectData()'s renamed "health" on /api/status's nested intel object —
+    // reshape here, then funnel through the SAME renderHistory() (via
+    // buildHistoryView) the poll path uses, so there is exactly one code path
+    // for drawing the panel, not two. "improvement" isn't part of this
+    // stream's payload, so whatever the last poll saw stays put. No project
+    // check is needed here: the stream itself is already scoped to the
+    // selected project via its own ?project=<key> URL (openIntelStream).
+    if(!d||typeof d!=="object"||!LAST||!LAST.intel)return;
+    LAST.intel.health=d.healthRing;
+    LAST.intel.globalStats=d.globalStats;
+    LAST.intel.patternStore=d.patternStore;
+    LAST.intel.graph=d.graph;
+    renderHistory(buildHistoryView(LAST));
   }
   function openIntelStream(){
     if(intelSource||!window.EventSource)return;
-    var src=new EventSource(dashSseUrl("/api/live/intelligence"));
+    // Same ?project=<key> contract as /api/status, resolved identically
+    // server-side (resolveSelectedProject) — omitted entirely when no
+    // selection is known yet, which defers to the server's own default
+    // rather than the client guessing at one.
+    var url="/api/live/intelligence"+(selectedProjectKey?"?project="+encodeURIComponent(selectedProjectKey):"");
+    var src=new EventSource(dashSseUrl(url));
     intelSource=src;
     src.addEventListener("init",function(e){try{receiveIntel(JSON.parse(e.data));}catch(e){}});
     src.addEventListener("update",function(e){try{receiveIntel(JSON.parse(e.data));}catch(e){}});
@@ -492,7 +614,9 @@ export const JS = `
     renderVerdict(data.overall);
     renderNotice(data.drift);
     renderPanels(data.rows);
-    renderHistory(data);
+    renderMachineWide(data.intel&&data.intel.machineWide);
+    renderProjectPicker(data.intel||{});
+    renderHistory(buildHistoryView(data));
     renderRouting(data.routing);
     renderModels(data.routing);
     positionThumb(); // badges can change segment widths
@@ -542,12 +666,21 @@ export const JS = `
   }
 
   function pollStatus(){
-    return fetch("/api/status",{cache:"no-store",headers:authHeaders()}).then(function(r){
+    // Carries the CURRENT project selection on every request (omitted only
+    // before the very first response has told us the server's own default —
+    // see the intelProjects/selectedProjectKey block above). intelRequestSeq
+    // guards against a slow response for a project the picker has since
+    // moved away from (wireIntelPicker) clobbering a newer one's render.
+    var seq=++intelRequestSeq;
+    var url="/api/status"+(selectedProjectKey?"?project="+encodeURIComponent(selectedProjectKey):"");
+    return fetch(url,{cache:"no-store",headers:authHeaders()}).then(function(r){
       if(r.status===401){try{localStorage.removeItem(DASH_TOKEN_KEY);}catch(e){}showGate("Wrong or missing dashboard token.");throw Error("unauthorized");}
       return r.json();
     }).then(function(d){
       hideGate();
-      lastUpdated=Date.now(); render(d); tickClock();
+      lastUpdated=Date.now();
+      if(seq===intelRequestSeq)render(d);
+      tickClock();
     }).catch(function(){
       var t=document.getElementById("verdict-text"); if(t)t.textContent="server unreachable";
     });
@@ -1352,6 +1485,7 @@ export const JS = `
   setUsageView(usageView);
   wirePoll();
   wireUsage();
+  wireIntelPicker();
   schedulePoll();
   lastAttempt=Date.now(); inflight=true;
   Promise.all([pollStatus()].concat(activeTab==="usage"?[loadUsage()]:[]))

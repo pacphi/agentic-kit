@@ -154,3 +154,133 @@ export function readIntelHistory(cwd) {
     globalStats: readGlobalStats(cwd),
   };
 }
+
+/**
+ * Machine-wide rollup — folds readIntelHistory() across every ruflo-
+ * initialized project on this machine into one totals/perProject view.
+ * `projects` is the frozen output shape of discoverRuvfloProjects()
+ * (src/lib/dashboard/project-discovery.mjs, built against this exact
+ * contract in parallel with this function): Array<{ path: string, label:
+ * string, source?: 'registry'|'observability'|'both' }>. Only `path` and
+ * `label` are read here; `source` is accepted but ignored.
+ *
+ * Investigative note on how that array is expected to be assembled (recorded
+ * here because this function is the actual consumer of its output): the
+ * PRIMARY source is daemons.mjs's (unexported) registryWorkspaces(), which
+ * walks ~/.claude-flow/{ai-jobs.json,workspace-leases.json,repo-supervisors.json}
+ * for real absolute workspace paths. A SECONDARY source was investigated —
+ * Observability's WorkspaceSnapshotStore (src/lib/live/workspace-store.mjs),
+ * persisted at ~/.config/agentic-kit/observability-workspaces.json — and
+ * checked against the real file on this machine. Its records never carry an
+ * absolute filesystem path: `directoryLabel` is validated with
+ * `workspaceText(..., { pathLike: true })`, which rejects anything shaped
+ * like an absolute path (leading `/`, a drive letter, or a `..` segment) on
+ * both write AND read; `repositoryLabel` is validated with `{ leaf: true }`,
+ * which rejects any value containing a path separator at all; and
+ * `project`/`projectKey` are a sanitized basename and an irreversible
+ * SHA-256 hash, respectively — never a path. So by that store's own privacy
+ * design, the secondary source can never contribute a resolvable absolute
+ * path for any entry; on this machine's real observability-workspaces.json
+ * (multiple sessions across two projects at inspection time), zero entries
+ * yielded one. discoverRuvfloProjects() is expected to skip every such entry
+ * rather than fabricate a path from a label, so in practice it is source 1
+ * (the registry scan) that supplies the projects array, today.
+ *
+ * Like readIntelHistory()'s own patternsLearned-vs-patternStore distinction,
+ * this rollup keeps two DIFFERENT sums distinct at machine scope:
+ *   - totals.patternsLearnedLifetime sums each project's globalStats
+ *     .patternsLearned — a cumulative counter, includes patterns since
+ *     pruned/compacted/replaced.
+ *   - totals.patternStoreEntries sums each project's patternStore.length —
+ *     entries actually present on disk right now, a smaller number for the
+ *     exact same reason. Do not conflate the two.
+ *
+ * A project whose readIntelHistory() call turns up missing/malformed data
+ * degrades that project's row to nulls/zeros (matching readIntelHistory's
+ * own null-on-absent conventions) rather than throwing — one bad project
+ * never aborts the whole machine-wide scan. mostActiveProject is the label
+ * of whichever project has the highest globalStats.lastAdaptation among
+ * projects that actually have one (a positive timestamp; 0/absent is
+ * "never adapted", matching readGlobalStats' own `?? 0` default), or null
+ * when no project has adaptation data. This is a plain on-demand scan with
+ * no caching/TTL of its own — a later caller adds that at the server layer.
+ * @param {Array<{ path: string, label: string }>} projects
+ * @returns {{
+ *   totals: { patternsLearnedLifetime: number, patternStoreEntries: number,
+ *     trajectoriesRecorded: number, projectCount: number,
+ *     mostActiveProject: string|null },
+ *   perProject: Array<{ path: string, label: string,
+ *     patternsLearned: number|null, patternStoreCount: number,
+ *     trajectoriesRecorded: number|null,
+ *     graphLatest: { nodes: number, edges: number }|null,
+ *     lastAdaptation: number|null }>
+ * }}
+ */
+export function readMachineWideIntel(projects) {
+  const list = Array.isArray(projects) ? projects : [];
+  const perProject = [];
+  let patternsLearnedLifetime = 0;
+  let patternStoreEntries = 0;
+  let trajectoriesRecorded = 0;
+  let mostActiveProject = null;
+  let mostActiveAdaptation = 0;
+
+  for (const entry of list) {
+    const cwd = typeof entry?.path === 'string' && entry.path ? entry.path : null;
+    const label = typeof entry?.label === 'string' && entry.label.trim()
+      ? entry.label
+      : cwd
+        ? path.basename(cwd)
+        : 'unknown';
+
+    let history = null;
+    if (cwd) {
+      try {
+        history = readIntelHistory(cwd);
+      } catch {
+        history = null;
+      }
+    }
+
+    const globalStats = history?.globalStats ?? null;
+    const patternStore = Array.isArray(history?.patternStore) ? history.patternStore : [];
+    const graph = Array.isArray(history?.graph) ? history.graph : null;
+
+    const patternsLearned = globalStats ? globalStats.patternsLearned : null;
+    const trajectories = globalStats ? globalStats.trajectoriesRecorded : null;
+    const lastAdaptation = globalStats ? globalStats.lastAdaptation : null;
+    const graphLatest = graph && graph.length
+      ? { nodes: graph[graph.length - 1].nodes, edges: graph[graph.length - 1].edges }
+      : null;
+
+    patternsLearnedLifetime += patternsLearned ?? 0;
+    patternStoreEntries += patternStore.length;
+    trajectoriesRecorded += trajectories ?? 0;
+
+    if (lastAdaptation != null && lastAdaptation > mostActiveAdaptation) {
+      mostActiveAdaptation = lastAdaptation;
+      mostActiveProject = label;
+    }
+
+    perProject.push({
+      path: cwd,
+      label,
+      patternsLearned,
+      patternStoreCount: patternStore.length,
+      trajectoriesRecorded: trajectories,
+      graphLatest,
+      lastAdaptation,
+    });
+  }
+
+  return {
+    totals: {
+      patternsLearnedLifetime,
+      patternStoreEntries,
+      trajectoriesRecorded,
+      projectCount: list.length,
+      mostActiveProject,
+    },
+    perProject,
+  };
+}
