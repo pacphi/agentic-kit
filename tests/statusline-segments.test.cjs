@@ -40,7 +40,7 @@ try {
 
 // The security overlay ships in the same block (it must: the strip regex in
 // statusline.mjs is non-global, so a second ruflo-seg block would leak on re-injection).
-let rufloLocalSecurity, rufloHonestInsight, rufloAidefenceState;
+let rufloLocalSecurity, rufloHonestInsight, rufloAidefenceState, rufloStatuslineDebug;
 try {
   // eslint-disable-next-line no-eval
   rufloLocalSecurity = eval('(function(){' + block + '\nreturn rufloLocalSecurity;})()');
@@ -48,6 +48,8 @@ try {
   rufloHonestInsight = eval('(function(){' + block + '\nreturn rufloHonestInsight;})()');
   // eslint-disable-next-line no-eval
   rufloAidefenceState = eval('(function(){' + block + '\nreturn rufloAidefenceState;})()');
+  // eslint-disable-next-line no-eval
+  rufloStatuslineDebug = eval('(function(){' + block + '\nreturn rufloStatuslineDebug;})()');
 } catch (e) {
   console.error('FATAL: could not extract security overlay fns:', e.message);
   process.exit(2);
@@ -172,6 +174,46 @@ test('proof segment absent on malformed improvement.json (no crash)', () => {
     '.claude-flow/improvement.json': '{ this is not json',
   })));
   absent(out, 'proof');
+});
+
+test('statusline debug is opt-in, redacted, bounded to a stable stage, and mode 0600', () => {
+  const dir = mkFixture({
+    '.claude-flow/improvement.json': '{ this contains SECRET_VALUE and is not json',
+  });
+  const log = path.join(dir, 'statusline-debug.log');
+  const before = process.env.AK_STATUSLINE_DEBUG;
+  const beforeFile = process.env.AK_STATUSLINE_DEBUG_FILE;
+  try {
+    delete process.env.AK_STATUSLINE_DEBUG;
+    process.env.AK_STATUSLINE_DEBUG_FILE = log;
+    rufloActivationSegments(dir);
+    assert(!fs.existsSync(log), 'debug-off must not write a diagnostic log');
+
+    process.env.AK_STATUSLINE_DEBUG = '1';
+    rufloActivationSegments(dir);
+    const diagnostic = fs.readFileSync(log, 'utf8');
+    contains(diagnostic, 'stage=proof-verdict');
+    contains(diagnostic, 'name=SyntaxError');
+    absent(diagnostic, 'SECRET_VALUE');
+    if (process.platform !== 'win32') assert((fs.statSync(log).mode & 0o777) === 0o600, 'debug log must be owner-only');
+  } finally {
+    if (before === undefined) delete process.env.AK_STATUSLINE_DEBUG; else process.env.AK_STATUSLINE_DEBUG = before;
+    if (beforeFile === undefined) delete process.env.AK_STATUSLINE_DEBUG_FILE; else process.env.AK_STATUSLINE_DEBUG_FILE = beforeFile;
+  }
+});
+
+test('an unwritable statusline debug sink never changes fail-to-blank rendering', () => {
+  const dir = mkFixture({});
+  const before = process.env.AK_STATUSLINE_DEBUG;
+  const beforeFile = process.env.AK_STATUSLINE_DEBUG_FILE;
+  try {
+    process.env.AK_STATUSLINE_DEBUG = '1';
+    process.env.AK_STATUSLINE_DEBUG_FILE = dir; // appendFileSync on a directory fails
+    rufloStatuslineDebug('fixture', new Error('private payload'));
+  } finally {
+    if (before === undefined) delete process.env.AK_STATUSLINE_DEBUG; else process.env.AK_STATUSLINE_DEBUG = before;
+    if (beforeFile === undefined) delete process.env.AK_STATUSLINE_DEBUG_FILE; else process.env.AK_STATUSLINE_DEBUG_FILE = beforeFile;
+  }
 });
 
 test('proof segment absent on invalid verdict value', () => {
@@ -479,7 +521,7 @@ test('unresolvable ruflo → silent (a probe miss must never fail loud and wrong
 
 // Test-quality Finding 5: bump deliberately when adding/removing a test —
 // see admin-model.test.cjs's identical guard for the full rationale.
-const EXPECTED = 43;
+const EXPECTED = 45;
 if (passed + failed !== EXPECTED) {
   console.error(`\nPLAN MISMATCH: expected ${EXPECTED} tests, ran ${passed + failed}`);
   process.exit(1);

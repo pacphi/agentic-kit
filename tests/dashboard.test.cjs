@@ -425,6 +425,10 @@ async function main() {
   // ── the routes, over real HTTP, with a spying usage module ──
   const AGG = {
     generatedAt: '2026-07-25T00:00:00.000Z', windowDays: 14, pricesAsOf: '2026-07-01',
+    sourceHealth: {
+      opencode: { status: 'degraded', reason: 'busy' },
+      codexLedger: { status: 'ok', reason: null },
+    },
     totals: { sessions: 2, responses: 9, input: 100, output: 200, cacheRead: 900, cacheWrite: 50, tokens: 1250, cost: 12.5, spanMinutes: 90, engagedSeconds: 3600 },
     byDay: { '2026-07-24': { tokens: 1000, cost: 10, sessions: 1 } },
     byModel: { 'claude-opus-5': { cost: 12.5, tokens: 1250, responses: 9 } },
@@ -517,6 +521,8 @@ async function main() {
         'provider analytics must not alter transcript totals');
       assert(j.projectTree && j.projectTree.length === 1, 'projectTree must survive');
       assert(Array.isArray(j.insights) && j.insights.length === 1, 'insights must survive');
+      assert(j.sourceHealth.opencode.status === 'degraded' && j.sourceHealth.opencode.reason === 'busy',
+        'source-health evidence must survive the dashboard route');
       assert(spy.calls.readIndex.some((o) => o && o.days === 7), 'days must reach readIndex, got ' + JSON.stringify(spy.calls.readIndex));
     });
 
@@ -643,6 +649,11 @@ async function main() {
         contains(r.body, 'data-view="' + v + '"');
       }
       contains(r.body, 'id="u-openrouter"');
+      contains(r.body, 'id="u-source-health"');
+      contains(r.body, 'function renderSourceHealth');
+      contains(r.body, 'data-status="');
+      contains(r.body, 'OpenCode');
+      contains(r.body, 'Codex ledger');
       contains(r.body, 'provider account analytics');
       contains(r.body, 'never merged into transcript totals');
       contains(r.body, 'OpenRouter credits');

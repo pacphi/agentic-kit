@@ -560,6 +560,20 @@ export const JS = `
     return out;
   }
 
+  function renderSourceHealth(health){
+    var el=document.getElementById("u-source-health");
+    if(!el)return;
+    var labels={opencode:"OpenCode",codexLedger:"Codex ledger"},chips=[];
+    for(var key in (health||{})){
+      var item=health[key]||{},status=String(item.status||"not-read");
+      var detail=status+(item.reason?" · "+item.reason:"");
+      chips.push('<span class="source-chip" data-status="'+esc(status)+'" title="local usage source health">'
+        +esc(labels[key]||key)+": "+esc(detail)+"</span>");
+    }
+    el.hidden=chips.length===0;
+    el.innerHTML=chips.length?'<span class="source-label">local sources</span>'+chips.join(""):"";
+  }
+
   function loadUsage(force){
     if(usageBusy)return Promise.resolve();
     usageBusy=true;
@@ -1142,9 +1156,11 @@ export const JS = `
   function renderUsage(){
     if(!USAGE)return;
     if(USAGE.error){
+      renderSourceHealth(null);
       document.getElementById("u-hero").innerHTML='<div class="empty">'+esc(USAGE.error)+"</div>";
       return;
     }
+    renderSourceHealth(USAGE.sourceHealth);
     renderScore(USAGE);
     renderFindings(USAGE);
     renderSessions(USAGE);

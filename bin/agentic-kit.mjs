@@ -151,7 +151,10 @@ async function main() {
   // `ak usage status` promises a pure offline cache read. The explicit
   // `refresh` subcommand owns its one named network request; neither form may
   // silently add unrelated npm probes through the generic drift nudge.
-  if (!values.json && !values['dry-run'] && !['sync', 'usage'].includes(cmd)) {
+  // setup and host own complete mutation/reporting flows. Running the generic
+  // nudge after a declined trust preflight could write version-cache state and
+  // violate their "before any changes" boundary.
+  if (!values.json && !values['dry-run'] && !['sync', 'usage', 'setup', 'host'].includes(cmd)) {
     try {
       const { driftReport } = await import('../src/lib/versions.mjs');
       for (const r of await driftReport()) {

@@ -19,6 +19,9 @@ import { loadKitConfig, saveKitConfig } from '../../lib/config.mjs';
 import { OPENCODE_LIFECYCLE_ADAPTER, reconcileOpencodeGuidance } from '../../lib/opencode.mjs';
 import { runLifecycle } from '../../lib/adapters/lifecycle.mjs';
 import { routableHostIds } from '../../lib/adapters/index.mjs';
+import {
+  newlyEnabledHostTrustManifest, trustManifestLines,
+} from '../../lib/trust-manifest.mjs';
 import { have } from '../../lib/exec.mjs';
 import { ok, warn, fail, info, dim, bold, yellow } from '../../lib/output.mjs';
 import { repoRoot } from '../../lib/paths.mjs';
@@ -102,6 +105,10 @@ Options (pick, all optional — omit for interactive):
                                  packaging, release
   --activity <csv>             refresh: which activities to re-seed (default: prompt)
   --yes                        accept defaults without prompting
+
+Enabling a host prints its host trust manifest before kit.json or host config
+is changed. --yes accepts that manifest non-interactively; without --yes, a
+non-interactive invocation stops before mutation.
 
 When both claude and codex hosts are enabled (and aqe ≥ 3.13.1), ak seeds a
 per-activity routing policy from sensible defaults and materializes it into
@@ -399,6 +406,7 @@ async function maybeWriteQeCourtDefaults({ nonInteractive, cwd, enabled, aqeProv
 
 async function pick({ flags, cwd, pkgRoot }) {
   const cfg = loadKitConfig();
+  const trustBaseline = structuredClone(cfg);
   const hosts = await detectHosts(cwd);
   // Routing eligibility is capability-derived. OpenCode retains its independent
   // lifecycle wiring even though it is now an execution host; it is never a
@@ -550,6 +558,26 @@ async function pick({ flags, cwd, pkgRoot }) {
   const prunedRoutes = pruneRoutesForHosts(cfg.routing.routes, { hosts: enabled });
   cfg.routing.routes = prunedRoutes.policy;
   for (const message of prunedRoutes.warnings) warn(message);
+
+  const trustManifest = newlyEnabledHostTrustManifest(trustBaseline, enabled);
+  if (trustManifest.length) {
+    info('host trust manifest (evaluated before user or project changes):');
+    for (const line of trustManifestLines(trustManifest)) console.log(`  ${line}`);
+    if (!flags.yes) {
+      if (!process.stdin.isTTY) {
+        fail('host enablement needs trust confirmation; re-run with --yes after reviewing the manifest');
+        return 2;
+      }
+      const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+      const answer = (await rl.question('Enable these hosts and apply these trust changes? [y/N] '))
+        .trim().toLowerCase();
+      rl.close();
+      if (!answer.startsWith('y')) {
+        info('host selection cancelled before user or project changes');
+        return 0;
+      }
+    }
+  }
 
   // Codex owns two directional MCP bridges. Disable only the marker-owned
   // bridges, matching OpenCode's receipt-based teardown semantics.

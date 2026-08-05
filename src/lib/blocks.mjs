@@ -18,6 +18,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { claudeDir, claudeMdPath, codexDir, opencodeDir, home } from './paths.mjs';
 import { have } from './exec.mjs';
+import { writeFileWithBackup } from './file-write.mjs';
 
 export const BEGIN = (slug) => `<!-- BEGIN ${slug} -->`;
 export const END = (slug) => `<!-- END ${slug} -->`;
@@ -326,8 +327,15 @@ export async function reconcileGuidance({ cwd, cfg, pkgRoot, context = {}, dryRu
  *  Returns [{slug, action: 'upserted'|'stripped'|'unchanged'|'missing-template', present}] —
  *  dryRun skips writes but reports the same actions. `context` is forwarded to
  *  every detector (see detect) so `flag`-gated rows can read caller signals such
- *  as `{ flags: { dualMode: <bool> } }`; omitting it preserves prior behavior. */
-export async function syncBlocks(file, rows, resolveTemplate, { dryRun = false, context = {} } = {}) {
+ *  as `{ flags: { dualMode: <bool> } }`; omitting it preserves prior behavior.
+ * @param {string} file
+ * @param {Array<any>} rows
+ * @param {(row: any) => string} resolveTemplate
+ * @param {{dryRun?: boolean, context?: object, fileWriteOptions?: {fsImpl?: typeof fs}}} [options]
+ */
+export async function syncBlocks(file, rows, resolveTemplate, {
+  dryRun = false, context = {}, fileWriteOptions,
+} = {}) {
   const results = [];
   let content = fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : '';
   let changed = false;
@@ -354,16 +362,7 @@ export async function syncBlocks(file, rows, resolveTemplate, { dryRun = false, 
     }
   }
   if (changed && !dryRun) {
-    fs.mkdirSync(path.dirname(file), { recursive: true });
-    // One-time backup before the first rewrite of the user's CLAUDE.md —
-    // same contract as settings.mjs writeJsonWithBackup (never overwrite an
-    // existing .bak): this file is the user's global instructions, and every
-    // other writer in the kit is backup-first.
-    const bak = `${file}.bak`;
-    if (fs.existsSync(file) && !fs.existsSync(bak)) {
-      try { fs.copyFileSync(file, bak); } catch { /* best-effort */ }
-    }
-    fs.writeFileSync(file, content);
+    writeFileWithBackup(file, content, fileWriteOptions);
   }
   return results;
 }

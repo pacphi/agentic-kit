@@ -31,8 +31,11 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { configDir, claudeDir, codexDir } from './paths.mjs';
-import { readCodexState } from './codex-state.mjs';
-import { defaultOpencodeDbPath, listSessions as listOpencodeSessions, parseSession as parseOpencodeSession, sessionExists as opencodeSessionExists } from './usage-opencode.mjs';
+import { readCodexStateResult } from './codex-state.mjs';
+import {
+  defaultOpencodeDbPath, listSessionsResult as listOpencodeSessionsResult,
+  parseSession as parseOpencodeSession, sessionExistsResult as opencodeSessionExistsResult,
+} from './usage-opencode.mjs';
 
 /** Bump to invalidate every cached entry wholesale.
  *  v2: cached records carry `active` sub-intervals for the idle-gap split.
@@ -1082,7 +1085,7 @@ let _memo = null;
 /** Identity of a scan: two calls sharing it must produce the same aggregate. */
 function scanKey(o = {}) {
   const r = o.roots || {};
-  return JSON.stringify([Number(o.days) || 14, !!o.force, r.claude || '', r.codex || '', o.cachePath || '']);
+  return JSON.stringify([Number(o.days) || 14, !!o.force, r.claude || '', r.codex || '', r.opencode || '', o.cachePath || '']);
 }
 
 /** Drop process-level state (single-flight promises, read memo, lazy deps). */
@@ -1142,12 +1145,21 @@ async function scan(o = {}) {
   // the REAL store is the wrong one — only default-root scans (or an explicit
   // roots.opencode path) read it.
   const ocDb = o.roots === undefined ? defaultOpencodeDbPath() : (roots?.opencode ?? null);
+  let opencodeHealth = { status: 'absent', reason: null };
   if (ocDb && fs.existsSync(ocDb)) {
-    for (const e of listOpencodeSessions({ dbFile: ocDb, cutoffMs: cutoff })) {
-      candidates.push({
-        file: `opencode://${e.id}`, provider: 'opencode', id: e.id, dbFile: ocDb,
-        stat: { mtimeMs: e.mtimeMs, size: e.size },
-      });
+    const listed = listOpencodeSessionsResult({ dbFile: ocDb, cutoffMs: cutoff });
+    if (listed.ok) {
+      opencodeHealth = { status: 'ok', reason: null };
+      for (const e of listed.value) {
+        candidates.push({
+          file: `opencode://${e.id}`, provider: 'opencode', id: e.id, dbFile: ocDb,
+          stat: { mtimeMs: e.mtimeMs, size: e.size },
+        });
+      }
+    } else {
+      opencodeHealth = listed.error.kind === 'absent'
+        ? { status: 'absent', reason: 'absent' }
+        : { status: 'degraded', reason: listed.error.kind };
     }
   }
 
@@ -1189,8 +1201,16 @@ async function scan(o = {}) {
       // opencode pseudo-keys are not files: existence means "row still in the store".
       if (file.startsWith('opencode://')) {
         const dbFile = e.dbFile ?? ocDb;
-        if (dbFile && opencodeSessionExists({ dbFile, id: file.slice('opencode://'.length) })) {
+        const exists = opencodeHealth.status === 'degraded'
+          ? null
+          : (dbFile ? opencodeSessionExistsResult({ dbFile, id: file.slice('opencode://'.length) }) : null);
+        if (opencodeHealth.status === 'degraded' || (exists?.ok && exists.value)) {
           entries[file] = { ...e, dbFile };
+          if (lastActivity == null || lastActivity >= cutoff) records.push(e.session);
+        } else if (exists && !exists.ok && exists.error.kind !== 'absent') {
+          opencodeHealth = { status: 'degraded', reason: exists.error.kind };
+          entries[file] = { ...e, dbFile };
+          if (lastActivity == null || lastActivity >= cutoff) records.push(e.session);
         }
       } else if (statSafe(file)) entries[file] = e;
     }
@@ -1206,10 +1226,26 @@ async function scan(o = {}) {
   // Overridden roots (tests, sandboxes) imply the REAL ~/.codex ledger is the
   // wrong ledger for these records — reading it would break test hermeticity
   // and mis-attribute fixture sessions. Only default roots read the real db.
-  const ledger = o.codexState !== undefined
-    ? o.codexState
-    : (roots?.codex ? null : readCodexState());
-  return aggregate(applyCodexLedger(records, ledger), { days, now, cutoff, deps });
+  let ledger;
+  let codexLedgerHealth;
+  if (o.codexState !== undefined) {
+    ledger = o.codexState;
+    codexLedgerHealth = { status: ledger ? 'ok' : 'absent', reason: null };
+  } else if (roots?.codex) {
+    ledger = null;
+    codexLedgerHealth = { status: 'not-read', reason: 'sandboxed-roots' };
+  } else {
+    const observed = readCodexStateResult();
+    ledger = observed.ok ? observed.value : null;
+    codexLedgerHealth = observed.ok
+      ? (observed.value
+        ? { status: 'ok', reason: null }
+        : { status: 'degraded', reason: 'schema' })
+      : { status: observed.error.kind === 'absent' ? 'absent' : 'degraded', reason: observed.error.kind };
+  }
+  const result = aggregate(applyCodexLedger(records, ledger), { days, now, cutoff, deps });
+  result.sourceHealth = { opencode: opencodeHealth, codexLedger: codexLedgerHealth };
+  return result;
 }
 
 /**
@@ -1324,7 +1360,9 @@ export async function readSession(id, o = {}) {
   // opencode sessions live in the SQLite store, not a JSONL file — resolve
   // them before the file-locating path (pseudo-key opencode://<id>).
   const ocDb = o.roots === undefined ? defaultOpencodeDbPath() : (o.roots?.opencode ?? null);
-  if (ocDb && fs.existsSync(ocDb) && opencodeSessionExists({ dbFile: ocDb, id })) {
+  const ocExists = ocDb && fs.existsSync(ocDb)
+    ? opencodeSessionExistsResult({ dbFile: ocDb, id }) : null;
+  if (ocExists?.ok && ocExists.value) {
     const parsed = parseOpencodeSession({ dbFile: ocDb, id, withTurns: true });
     if (parsed) {
       const rec = parsed.session;

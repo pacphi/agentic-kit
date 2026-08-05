@@ -46,6 +46,30 @@ export function parseProcessList(output) {
   return rows;
 }
 
+/** Parse the privacy-minimized first survey, which deliberately omits argv. */
+export function parseProcessHeaders(output) {
+  const rows = [];
+  const pattern = /^\s*(\d+)\s+(\d+)\s+([A-Z][a-z]{2}\s+[A-Z][a-z]{2}\s+\d{1,2}\s+\d{2}:\d{2}:\d{2}\s+\d{4})\s+(\S+)\s*$/;
+  for (const line of String(output ?? '').split('\n')) {
+    const match = pattern.exec(line);
+    if (!match) continue;
+    rows.push({
+      pid: Number(match[1]), ppid: Number(match[2]), startedAt: match[3],
+      executable: match[4], command: '',
+    });
+  }
+  return rows;
+}
+
+function parseArgsByPid(output) {
+  const commands = new Map();
+  for (const line of String(output ?? '').split('\n')) {
+    const match = /^\s*(\d+)\s+(.+?)\s*$/.exec(line);
+    if (match) commands.set(Number(match[1]), match[2]);
+  }
+  return commands;
+}
+
 function rootControllers(rows) {
   const byPid = new Map(rows.map((row) => [row.pid, row]));
   const candidates = new Map();
@@ -114,6 +138,7 @@ async function darwinCwds(pids, run) {
  *   }>,
  *   cwdByPid?: Map<number, string>
  *   inspectWorkspace?: typeof inspectGitWorkspace
+ *   uid?: number
  * }} [options]
  */
 export async function listActiveHostSessions({
@@ -122,6 +147,7 @@ export async function listActiveHostSessions({
   processRows,
   cwdByPid,
   inspectWorkspace = (cwd) => inspectGitWorkspace(cwd, { execFileImpl }),
+  uid = process.getuid?.(),
 } = {}) {
   if (platform === 'win32') {
     throw Object.assign(new Error('runtime process survey is unsupported on Windows'), {
@@ -130,17 +156,37 @@ export async function listActiveHostSessions({
   }
   let rows = processRows;
   if (!rows) {
+    if (!Number.isInteger(uid) || uid < 0) {
+      throw Object.assign(new Error('runtime process survey cannot determine the current user'), {
+        code: 'ERR_RUNTIME_PROCESS_SURVEY',
+      });
+    }
     try {
       const result = await execFileImpl('ps', [
-        '-axo', 'pid=,ppid=,lstart=,comm=,args=',
+        '-U', String(uid), '-x', '-o', 'pid=,ppid=,lstart=,comm=',
       ], { encoding: 'utf8', timeout: 3000, maxBuffer: 4 * 1024 * 1024,
         env: { ...process.env, LC_ALL: 'C' } });
       const output = typeof result === 'string' ? result : result.stdout;
-      rows = parseProcessList(output);
+      rows = parseProcessHeaders(output);
       if (String(output ?? '').trim() && !rows.length) {
         throw Object.assign(new Error('runtime process output was not understood'), {
           code: 'ERR_RUNTIME_PROCESS_FORMAT',
         });
+      }
+      // argv can contain sensitive prompts/tokens. Fetch it only for executables
+      // that can actually be a supported controller or Node launcher.
+      const possible = rows.filter((row) => {
+        const name = executableName(row.executable);
+        return HOST_NAMES.has(name) || name === 'node' || name === 'nodejs';
+      });
+      if (possible.length) {
+        const argsResult = await execFileImpl('ps', [
+          '-p', possible.map((row) => row.pid).join(','), '-o', 'pid=,args=',
+        ], { encoding: 'utf8', timeout: 3000, maxBuffer: 1024 * 1024,
+          env: { ...process.env, LC_ALL: 'C' } });
+        const commands = parseArgsByPid(typeof argsResult === 'string' ? argsResult : argsResult.stdout);
+        rows = rows.map((row) => commands.has(row.pid)
+          ? { ...row, command: commands.get(row.pid) } : row);
       }
     } catch {
       throw Object.assign(new Error('runtime process survey failed'), {

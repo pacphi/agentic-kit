@@ -225,7 +225,10 @@ against Node and npm. They are not the supported machine-management contract.
 
 The RuvNet Brain is user-level and shared by every project for that user. Ruflo and
 AQE project memory remains repository-local. Installing the package globally does
-not copy project memory into the npm prefix.
+not copy project memory into the npm prefix. Dashboard runtime discovery is
+user-scoped rather than project-scoped, so supported host controllers running as
+the same UID in other repositories may appear and are grouped by their observed
+workspace when that identity can be established.
 
 ## Multi-user and CI guidance
 
@@ -234,6 +237,11 @@ not copy project memory into the npm prefix.
 - Prefer one user-writable npm prefix per OS account.
 - Each user runs `ak setup` under their own account so guidance, credentials, MCP
   registration, Brain data, and `kit.json` do not land under another user's home.
+- Runtime process discovery is scoped to the numeric UID running `ak dashboard`.
+  Separate OS accounts are outside the normal survey; people sharing one login
+  also share one UID and are therefore inside the same discovery boundary. This
+  is least-privilege selection, not an OS sandbox. Never run the dashboard with
+  `sudo`: it would survey root-owned sessions instead of the invoking user's.
 - Do not assume one user's global install is available to another user.
 - Coordinate `ak sync` when several live sessions share the same prefix, because
   package replacement and daemon stops are prefix/machine-wide for those sessions.
@@ -246,6 +254,16 @@ not copy project memory into the npm prefix.
 - Cache npm and the Brain only when the cache's size and trust model are acceptable.
 - Avoid `ak sync` self-update in a lockfile-controlled job; use `--no-upgrade`.
 - Never persist provider credentials in the repository or image layer.
+- HOME, XDG, and npm-prefix isolation protects files but does not isolate the
+  process table. Prefer a private PID namespace. A container using the host PID
+  namespace can observe same-numeric-UID processes that the container permits it
+  to inspect.
+
+The current-UID rule is independent of how `ak` was acquired: local dependency,
+global prefix, `npm exec`, tarball, Git checkout, and direct Node execution all
+use the UID of the process running the dashboard. A service sees only the
+service account's sessions. Windows does not currently provide runtime process
+discovery; retained transcript/history sources remain available there.
 
 ### Repository onboarding
 

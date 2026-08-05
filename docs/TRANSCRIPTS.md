@@ -39,9 +39,9 @@ rewritten; rule 3 of the module header, `usage-index.mjs:22-29`):
 | Claude Code | `~/.claude/projects/<encoded-project-dir>/<sessionId>.jsonl` | `listClaude` (`usage-index.mjs:684`) — exactly one level of project directories |
 | Codex CLI | `~/.codex/sessions/<yyyy>/<mm>/<dd>/rollout-<ts>-<uuid>.jsonl` | `listCodex` (`usage-index.mjs:705`) — the `yyyy/mm/dd` tree walk |
 
-Roots come from `defaultRoots()` (`usage-index.mjs:676`) and are injectable
+Roots come from `defaultRoots()` (`usage-index.mjs:697-701`) and are injectable
 for tests. A malformed line is skipped, never fatal (`jsonLines`,
-`usage-index.mjs:315` — one corrupt line must not cost a whole file).
+`usage-index.mjs:328-334` — one corrupt line must not cost a whole file).
 
 Host evidence is not inference-provider proof. A Claude transcript may describe Anthropic-,
 OpenRouter-, or Ollama-served inference. ADR-0016 defines separate
@@ -77,7 +77,7 @@ Codex rollout lines carry `type` + `payload`. The parser (`parseCodex`,
 |---|---|
 | `session_meta` | Authoritative session id, `cwd`, and `thread_source` (`usage-index.mjs:539-544`) — `"subagent"` marks a thread_spawn replay whose tokens are excluded from aggregation (`usage-index.mjs:609`; `USAGE-SCORECARD-METRICS.md` Appendix A, Bug B) |
 | `turn_context` | The model id in effect from this point on (`usage-index.mjs:545`) |
-| `event_msg` → `token_count` | A **cumulative** usage snapshot; only the last one is kept (`usage-index.mjs:552`) |
+| `event_msg` → `token_count` | A **cumulative** usage snapshot; only the last one is kept (`usage-index.mjs:609-611`) |
 | `event_msg` → `user_message` | A real human prompt — Codex does not route tool output through this event (`usage-index.mjs:584-592`) |
 | `event_msg` → `agent_message` | A model response (`usage-index.mjs:594-605`) |
 
@@ -182,8 +182,8 @@ transcript content leaves the module, and every step is a gate:
 
 1. **Id grammar before any filesystem access** — `VALID_ID`
    (`/^[A-Za-z0-9._-]{1,128}$/`, `usage-index.mjs:83`) rejects traversal
-   shapes with `ERR_INVALID_SESSION_ID` (`usage-index.mjs:1260`).
-2. **Locate by id** across both roots (`locate`, `usage-index.mjs:1267`),
+   shapes with `ERR_INVALID_SESSION_ID` (`usage-index.mjs:1303-1307`).
+2. **Locate by id** across both roots (`locate`, `usage-index.mjs:1313`),
    consulting the scan cache when present but never requiring it —
    `readSession` works with no prior `buildIndex`.
 3. **Realpath containment** (`usage-index.mjs:1335-1349`) — the resolved file
@@ -198,8 +198,8 @@ transcript content leaves the module, and every step is a gate:
 ### 4.2 Parse and price
 
 The file is parsed with `withTurns: true` by the provider's parser
-(`usage-index.mjs:1298-1303`), and `meta` is assembled
-(`usage-index.mjs:1305-1330`) with the same fields the Sessions view rows
+(`usage-index.mjs:1404-1411`), and `meta` is assembled
+(`usage-index.mjs:1414-1442`) with the same fields the Sessions view rows
 carry — `prompts`, `responses`, `exceptions`, `sidechain`, `threadSource`,
 `models`, `tools`, `skill`/`plugin`, worktree — plus a `cost` priced from the
 same per-model usage rows `aggregate()` uses (the header used to render a
@@ -211,7 +211,7 @@ Every turn body is passed through `maskSecrets` (`usage-index.mjs:196` — the
 23 secret shapes) **server-side, before
 serialization**, then length-capped at `MAX_TURN_CHARS` (40,000,
 `usage-index.mjs:77`) with the marker appended
-(`usage-index.mjs:1404-1414`). Two invariants:
+(`usage-index.mjs:1451-1461`). Two invariants:
 
 - **Presence is the signal.** `truncated`/`originalChars` are emitted only
   when the slice fired, so a complete turn cannot be misread as abridged.

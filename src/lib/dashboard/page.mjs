@@ -207,6 +207,7 @@ export function renderPage({ name, version }) {
       <h2 id="usage-view-title">Usage scorecard</h2>
       <p id="usage-view-description">Token consumption, API-equivalent cost, efficiency, and trends.</p>
     </header>
+    <div class="source-health" id="u-source-health" role="status" aria-live="polite" hidden></div>
 
     <section class="view" id="v-score">
       <div class="hero" id="u-hero"></div>

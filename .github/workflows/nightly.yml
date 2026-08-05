@@ -23,6 +23,13 @@ jobs:
         with:
           node-version: 22
 
+      - name: Isolate npm globals from the runner image
+        shell: bash
+        run: |
+          echo "npm_config_prefix=$RUNNER_TEMP/npm-prefix" >> "$GITHUB_ENV"
+          echo "$RUNNER_TEMP/npm-prefix/bin" >> "$GITHUB_PATH"
+          mkdir -p "$RUNNER_TEMP/npm-prefix"
+
       # Deliberately npm, not pnpm: this simulates the kit's TARGET environment —
       # ruflo/agentic-qe installed via `npm i -g`, whose trees the kit heals with
       # npm (lib/heal.mjs). pnpm-managed globals are a separate follow-up.
@@ -32,6 +39,9 @@ jobs:
       - name: Kit heals a fresh install (sync --no-upgrade)
         env:
           HOME: ${{ runner.temp }}/kit-home
+          USERPROFILE: ${{ runner.temp }}/kit-home
+          XDG_CONFIG_HOME: ${{ runner.temp }}/kit-home/.config
+          APPDATA: ${{ runner.temp }}/kit-home/AppData/Roaming
         run: |
           mkdir -p "$HOME"
           node bin/agentic-kit.mjs sync --no-upgrade || true
@@ -47,9 +57,72 @@ jobs:
       - name: Deep proofs against the live packages
         env:
           HOME: ${{ runner.temp }}/kit-home
+          USERPROFILE: ${{ runner.temp }}/kit-home
+          XDG_CONFIG_HOME: ${{ runner.temp }}/kit-home/.config
+          APPDATA: ${{ runner.temp }}/kit-home/AppData/Roaming
         run: |
           node bin/agentic-kit.mjs x verify security
           node bin/agentic-kit.mjs x verify learning
+
+  clean-mac-setup:
+    name: clean macOS setup (packed artifact)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - name: Install the packed kit into a disposable prefix
+        shell: bash
+        run: |
+          echo "npm_config_prefix=$RUNNER_TEMP/npm-prefix" >> "$GITHUB_ENV"
+          echo "$RUNNER_TEMP/npm-prefix/bin" >> "$GITHUB_PATH"
+          mkdir -p "$RUNNER_TEMP/npm-prefix" "$RUNNER_TEMP/package"
+          npm pack --pack-destination "$RUNNER_TEMP/package"
+          npm install -g "$RUNNER_TEMP"/package/pacphi-agentic-kit-*.tgz
+      - name: Run real setup in a disposable HOME and project
+        shell: bash
+        env:
+          HOME: ${{ runner.temp }}/clean-home
+          USERPROFILE: ${{ runner.temp }}/clean-home
+          XDG_CONFIG_HOME: ${{ runner.temp }}/clean-home/.config
+          XDG_STATE_HOME: ${{ runner.temp }}/clean-home/.local/state
+          APPDATA: ${{ runner.temp }}/clean-home/AppData/Roaming
+          npm_config_cache: ${{ runner.temp }}/npm-cache
+          RUVNET_BRAIN_KB: ${{ runner.temp }}/brain-kb
+          AK_PROJECT: ${{ runner.temp }}/clean-project
+        run: |
+          mkdir -p "$HOME" "$AK_PROJECT"
+          git -C "$AK_PROJECT" init
+          (cd "$AK_PROJECT" && ak setup --yes --no-ruvnet-brain) | tee "$RUNNER_TEMP/setup.log"
+          node --input-type=module -e '
+            import fs from "node:fs";
+            import path from "node:path";
+            const log = fs.readFileSync(process.env.RUNNER_TEMP + "/setup.log", "utf8");
+            const settings = JSON.parse(fs.readFileSync(path.join(process.env.AK_PROJECT, ".claude", "settings.json"), "utf8"));
+            const expected = ["Bash(npx @claude-flow*)","Bash(npx claude-flow*)","Bash(node .claude/*)","mcp__claude-flow__*","Bash(npx agentic-qe:*)","Bash(npx @anthropics/agentic-qe:*)","mcp__agentic-qe__*"];
+            for (const rule of expected) if (!log.includes(rule)) throw new Error(`permission was not disclosed: ${rule}`);
+            const actual = new Set(settings.permissions?.allow ?? []);
+            for (const rule of expected) if (!actual.has(rule)) throw new Error(`permission missing after setup: ${rule}`);
+            if (log.indexOf(expected[0]) > log.indexOf("ruflo init --full")) throw new Error("permission disclosure happened after project mutation");
+          '
+      - name: Stop disposable daemons
+        if: always()
+        shell: bash
+        env:
+          HOME: ${{ runner.temp }}/clean-home
+          USERPROFILE: ${{ runner.temp }}/clean-home
+          XDG_CONFIG_HOME: ${{ runner.temp }}/clean-home/.config
+          APPDATA: ${{ runner.temp }}/clean-home/AppData/Roaming
+        run: ruflo daemon stop --all || true
+      - name: Upload disposable-run setup evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: clean-mac-setup-evidence
+          path: |
+            ${{ runner.temp }}/setup.log
+            ${{ runner.temp }}/clean-project/.claude/settings.json
 
   links-external:
     name: links (external)

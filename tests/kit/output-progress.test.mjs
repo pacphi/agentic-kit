@@ -7,7 +7,7 @@
 // never touches the real stdout, so results don't depend on how tests are run.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { withProgress } from '../../src/lib/output.mjs';
+import { reportOutcome, withProgress } from '../../src/lib/output.mjs';
 
 const sink = () => {
   const writes = [];
@@ -83,4 +83,17 @@ test('labels are interpolated verbatim — including real callers with metachars
   const out = sink();
   await withProgress('providers (api)', async () => 'v', { tty: true, out });
   assert.ok(out.writes[0].includes('providers (api)'));
+});
+
+test('managed outcomes render degraded and failed states without green success', () => {
+  const lines = [];
+  const original = console.log;
+  console.log = (line) => lines.push(String(line));
+  try {
+    assert.equal(reportOutcome('solver', { ok: true, status: 'degraded', detail: 'fallback' }), 'degraded');
+    assert.equal(reportOutcome('brain', { ok: false, status: 'failed', detail: 'exit 1' }), 'failed');
+  } finally { console.log = original; }
+  assert.match(lines[0], /⚠.*solver: fallback/);
+  assert.match(lines[1], /✗.*brain: exit 1/);
+  assert.doesNotMatch(lines.join('\n'), /✓/);
 });

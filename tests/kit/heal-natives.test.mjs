@@ -13,7 +13,9 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { ensureNativeBsq3, healNatives } from '../../src/lib/heal.mjs';
+import {
+  ensureNativeBsq3, healAqeSolver, healNatives, installRuvnetBrain,
+} from '../../src/lib/heal.mjs';
 import { bsq3IsNative } from '../../src/lib/natives.mjs';
 import { _setGlobalRootForTest } from '../../src/lib/paths.mjs';
 
@@ -309,4 +311,48 @@ test('ladder succeeds on npm-12 (run install blocked, approve-scripts then rebui
   assert.equal(r.ok, true);
   assert.match(r.how, /rebuilt/);
   cleanup();
+});
+
+test('brain installer exit failure is failed even when an old or partial KB is present', async () => {
+  let stamped = false;
+  const r = await installRuvnetBrain({
+    runner: async () => ({ code: 1, stdout: '', stderr: 'installer failed after partial copy\n' }),
+    latestVersion: async () => '4.0.12',
+    present: () => true,
+    recordRelease: () => { stamped = true; },
+  });
+
+  assert.equal(r.ok, false);
+  assert.equal(r.status, 'failed');
+  assert.equal(r.usable, true, 'old presence is retained as usability evidence only');
+  assert.equal(stamped, false, 'failed installers never stamp a release');
+});
+
+test('brain installer stamps only a zero-exit installation', async () => {
+  let stamped = null;
+  const r = await installRuvnetBrain({
+    runner: async () => ({ code: 0, stdout: '', stderr: '' }),
+    latestVersion: async () => '4.0.12',
+    present: () => false,
+    recordRelease: (version) => { stamped = version; },
+  });
+  assert.equal(r.status, 'ok');
+  assert.equal(stamped, '4.0.12');
+});
+
+test('AQE native solver failure is an explicit degraded fallback', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-solver-'));
+  fs.mkdirSync(path.join(root, 'agentic-qe'), { recursive: true });
+  _setGlobalRootForTest(root);
+  try {
+    const r = await healAqeSolver({
+      runner: async () => ({ code: 1, stdout: '', stderr: 'native package unavailable\n' }),
+    });
+    assert.equal(r.ok, true, 'the TypeScript fallback remains usable');
+    assert.equal(r.status, 'degraded');
+    assert.equal(r.usable, true);
+  } finally {
+    _setGlobalRootForTest(null);
+    fs.rmSync(root, { recursive: true, force: true });
+  }
 });

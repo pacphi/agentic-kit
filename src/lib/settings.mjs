@@ -2,7 +2,7 @@
 // (one .bak per calling site, never overwritten within a run), always
 // merge-not-clobber, trailing newline preserved.
 import fs from 'node:fs';
-import path from 'node:path';
+import { writeFileWithBackup } from './file-write.mjs';
 
 export function readJson(file, fallback = null) {
   try {
@@ -12,19 +12,11 @@ export function readJson(file, fallback = null) {
   }
 }
 
-export function writeJsonWithBackup(file, data) {
-  fs.mkdirSync(path.dirname(file), { recursive: true });
-  if (fs.existsSync(file)) {
-    const bak = `${file}.bak`;
-    try { if (!fs.existsSync(bak)) fs.copyFileSync(file, bak); } catch { /* best-effort */ }
-  }
-  // write-tmp-then-rename: rename(2) is atomic within a filesystem, so a
-  // reader (including Claude Code itself, on every startup) always sees
-  // either the complete old file or the complete new one — never a
-  // truncated one from an interrupt (Ctrl-C, OOM kill) landing mid-write.
-  const tmp = `${file}.${process.pid}.tmp`;
-  fs.writeFileSync(tmp, JSON.stringify(data, null, 2) + '\n');
-  fs.renameSync(tmp, file);
+export function writeJsonWithBackup(file, data, options) {
+  // Serialize before touching the filesystem: circular/unsupported values fail
+  // without even creating a backup or temporary file.
+  const content = JSON.stringify(data, null, 2) + '\n';
+  writeFileWithBackup(file, content, options);
 }
 
 /** Add deny rules (deduped, sorted); returns count actually added. */

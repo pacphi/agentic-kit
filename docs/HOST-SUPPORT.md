@@ -66,8 +66,13 @@ Ruflo, AQE, or Brain parity merely because it can call their MCP tools.
 OpenCode supervision is a safety boundary around resources, not a sandbox around
 the repository. An `opencode.json` that pre-approves a tool is inside the user's
 workspace trust decision; no permission-request event exists for agentic-kit to
-deny. Claude and Codex likewise inherit repository-owned hooks, instructions, and
-permissions.
+deny. Claude and Codex likewise inherit repository-owned hooks, instructions,
+and permissions. `ak setup` and new enablements through `ak host pick` disclose
+the applicable host-neutral trust manifest
+before machine, user, or project mutation: Claude auto-approvals, OpenCode
+wildcard approvals and managed extensions, and Codex registrations while its
+sandbox/approval policy remains unchanged. See
+[Setup trust manifest](SETUP.md#setup-trust-manifest).
 
 Official extension references: [Claude hooks](https://code.claude.com/docs/en/hooks),
 [Claude MCP](https://code.claude.com/docs/en/mcp),

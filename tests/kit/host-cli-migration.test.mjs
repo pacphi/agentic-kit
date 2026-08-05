@@ -70,6 +70,22 @@ test('ak host preserves pick option parsing without performing an interactive ru
   assert.match(result.stdout, /--provider <csv>/);
 });
 
+test('non-interactive host enablement requires --yes after printing trust and mutates nothing', () => {
+  const sb = sandbox();
+  const configFile = path.join(sb.env.XDG_CONFIG_HOME, 'agentic-kit', 'kit.json');
+  const result = ak(sb, 'host', 'pick', '--host', 'claude,opencode');
+  const text = output(result);
+  assert.equal(result.status, 2, text);
+  assert.match(text, /host trust manifest/);
+  assert.match(text, /OpenCode — approval policy receives the listed grants/);
+  assert.match(text, /\[user\] auto-approve: claude-flow_\*/);
+  assert.match(text, /re-run with --yes after reviewing the manifest/);
+  assert.equal(fs.existsSync(configFile), false,
+    'declined non-interactive trust must not create kit.json');
+  assert.equal(fs.existsSync(path.join(sb.env.XDG_CONFIG_HOME, 'opencode')), false,
+    'declined non-interactive trust must not create OpenCode config');
+});
+
 for (const [name, body, detail] of [
   ['malformed JSON', '{ invalid json', /Unexpected token|Expected property name/],
   ['non-object integrations envelope', JSON.stringify({ integrations: [] }),

@@ -81,12 +81,13 @@ open in other terminals, here is what can actually reach them, worst first:
    moment fails once, then npx re-fetches.
 
 What does **not** break, by design: running binaries keep executing their old code
-(replaced files don't affect a running process's open inodes), and every JSON/TOML config
-writer is atomic and backup-first. Settings env keys, `~/.codex/config.toml` edits (MCP
-bridge, `[tui]` status line), OpenCode wiring, `.agentic-qe/llm-config.json`, and the
-managed guidance blocks are all **read at session start** — a live session simply doesn't
-see them until its next launch. The kit's own self-update runs last and applies from the
-next `ak` invocation.
+(replaced files don't affect a running process's open inodes). Agentic-kit's managed
+settings and guidance writers are atomic and fail closed when the one-time backup cannot
+be created or validated. Settings env keys, `~/.codex/config.toml` edits (MCP bridge,
+`[tui]` status line), OpenCode wiring, `.agentic-qe/llm-config.json`, and the managed
+guidance blocks are all **read at session start** — a live session simply doesn't see
+them until its next launch. The kit's own self-update runs last and applies from the next
+`ak` invocation.
 
 > [!TIP]
 > If other sessions are mid-task: `ak sync --dry-run` first. No `versions` row → the plan

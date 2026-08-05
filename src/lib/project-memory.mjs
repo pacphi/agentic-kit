@@ -17,13 +17,16 @@ function inspectStore(file, kind) {
   if (!fs.existsSync(file)) {
     return { kind, file, present: false, readable: false, entries: null, activityAt: null };
   }
-  const observed = withDb(file, (db) => {
+  const result = withDb(file, (db) => {
     const columns = db.prepare('PRAGMA table_info(memory_entries)').all().map((column) => column.name);
     if (!columns.length) return { readable: false, entries: null };
     const where = columns.includes('status') ? " WHERE status = 'active' OR status IS NULL" : '';
     const entries = db.prepare(`SELECT COUNT(*) AS n FROM memory_entries${where}`).get()?.n ?? 0;
     return { readable: true, entries: Number(entries) };
-  }, { readable: false, entries: null });
+  });
+  const observed = result.ok
+    ? result.value
+    : { readable: false, entries: null, reason: result.error.kind };
   return { kind, file, present: true, ...observed, activityAt: activityAt(file) };
 }
 
@@ -37,12 +40,13 @@ export function projectMemoryStatus(root) {
 }
 
 export function memoryEntryExists(file, namespace, key) {
-  return withDb(file, (db) => {
+  const result = withDb(file, (db) => {
     const row = db.prepare(
       'SELECT 1 AS found FROM memory_entries WHERE namespace = ? AND key = ? LIMIT 1',
     ).get(namespace, key);
     return row?.found === 1;
-  }, false);
+  });
+  return result.ok ? result.value : false;
 }
 
 export function findMemoryEntry(root, namespace, key) {

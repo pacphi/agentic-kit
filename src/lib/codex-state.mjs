@@ -11,9 +11,9 @@
 // are subagents is what keeps the totals honest.
 //
 // Deliberate limits:
-//   - READ-ONLY, always. `withDb` opens readonly and swallows every error —
-//     a locked or half-migrated db yields null, never a crash and never a lock
-//     held against the codex CLI itself.
+//   - READ-ONLY, always. `withDb` opens readonly and classifies every error —
+//     a locked or half-migrated db yields a structured degraded result, never
+//     a crash and never a lock held against the codex CLI itself.
 //   - The filename suffix (`state_5`) is a MIGRATION GENERATION, not a stable
 //     name. We glob `state_*.sqlite` and take the highest generation rather
 //     than hardcoding today's.
@@ -60,8 +60,15 @@ export function codexStateDb(dir = codexDir()) {
  * @param {{ dir?: string, file?: string }} [opts] test seams
  */
 export function readCodexState(opts = {}) {
+  const result = readCodexStateResult(opts);
+  return result.ok ? result.value : null;
+}
+
+/** Structured variant for callers that must distinguish absence, lock,
+ * corruption, and schema/query failures. */
+export function readCodexStateResult(opts = {}) {
   const file = opts.file ?? codexStateDb(opts.dir);
-  if (!file) return null;
+  if (!file) return { ok: false, error: { kind: 'absent', stage: 'open', code: 'ENOENT', errcode: null, message: 'Codex state database is absent' } };
   return withDb(file, (db) => {
     const cols = new Set(db.prepare('PRAGMA table_info(threads)').all().map((c) => c.name));
     // id + thread_source are what the attribution fix rests on; without them
@@ -116,5 +123,5 @@ export function readCodexState(opts = {}) {
       }
     } catch { /* the edges table is additive detail — attribution works without it */ }
     return { threads, parents };
-  }, null);
+  });
 }

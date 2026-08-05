@@ -77,6 +77,11 @@ const parseJson = (raw) => { try { return JSON.parse(raw); } catch { return null
  *  cache key — a warm refresh re-parses only sessions that gained messages.
  *  @param {{ dbFile: string, cutoffMs?: number }} opts */
 export function listSessions({ dbFile, cutoffMs = 0 }) {
+  const result = listSessionsResult({ dbFile, cutoffMs });
+  return result.ok ? result.value : [];
+}
+
+export function listSessionsResult({ dbFile, cutoffMs = 0 }) {
   return withDb(dbFile, (db) => db.prepare(`
     SELECT s.id AS id, COALESCE(MAX(m.time_created), s.time_created) AS mtime,
            COUNT(m.id) AS messages
@@ -84,12 +89,17 @@ export function listSessions({ dbFile, cutoffMs = 0 }) {
     GROUP BY s.id
     HAVING mtime >= ?
     ORDER BY mtime DESC
-  `).all(cutoffMs).map((r) => ({ id: r.id, mtimeMs: num(r.mtime), size: num(r.messages) })), []);
+  `).all(cutoffMs).map((r) => ({ id: r.id, mtimeMs: num(r.mtime), size: num(r.messages) })));
 }
 
 /** Carry-forward existence probe (a session can be deleted between scans). */
 export function sessionExists({ dbFile, id }) {
-  return withDb(dbFile, (db) => !!db.prepare('SELECT 1 FROM session WHERE id = ?').get(id), false);
+  const result = sessionExistsResult({ dbFile, id });
+  return result.ok ? result.value : false;
+}
+
+export function sessionExistsResult({ dbFile, id }) {
+  return withDb(dbFile, (db) => !!db.prepare('SELECT 1 FROM session WHERE id = ?').get(id));
 }
 
 /** Project label from the session's working directory: basename, with the
@@ -111,7 +121,7 @@ function projectFromDirectory(directory) {
  *  transcript-view turn rows alongside the record.
  *  @param {{ dbFile: string, id: string, withTurns?: boolean }} opts */
 export function parseSession({ dbFile, id, withTurns = false }) {
-  return withDb(dbFile, (db) => {
+  const result = withDb(dbFile, (db) => {
     const srow = db.prepare('SELECT * FROM session WHERE id = ?').get(id);
     if (!srow) return null;
     const msgRows = db.prepare('SELECT id, time_created, data FROM message WHERE session_id = ? ORDER BY time_created ASC, id ASC').all(id);
@@ -218,5 +228,6 @@ export function parseSession({ dbFile, id, withTurns = false }) {
     rec.active = activeIntervals(rec.stamps);
     delete rec.stamps;
     return { session: rec, turns };
-  }, null);
+  });
+  return result.ok ? result.value : null;
 }

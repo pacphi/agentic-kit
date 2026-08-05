@@ -20,7 +20,7 @@ import { nativesStatus, securityPresent } from '../lib/natives.mjs';
 import { readJson } from '../lib/settings.mjs';
 import { appendToConfig } from '../lib/health-history.mjs';
 import * as paths from '../lib/paths.mjs';
-import { ok, warn, fail, info, bold, dim, withProgress } from '../lib/output.mjs';
+import { ok, warn, fail, info, bold, dim, withProgress, reportOutcome } from '../lib/output.mjs';
 import { applyCodexStatusline, projectionFor } from '../lib/codex-statusline.mjs';
 
 export const options = {
@@ -62,7 +62,7 @@ export async function run({ flags, pkgRoot }) {
 
   const cfg = loadKitConfig();
   const subsystems = new Set(plan.map((p) => p.subsystem));
-  const report = (name, r) => (r.ok ? ok(`${name}: ${r.detail}`) : fail(`${name}: ${r.detail}`));
+  const report = reportOutcome;
   // Run a managed heal under a live elapsed-time ticker, then print its result.
   // Keeps every slow tool (npm upgrades, brain KB download, native rebuild)
   // visibly alive instead of freezing the prompt; fast/local steps clear in <1s.

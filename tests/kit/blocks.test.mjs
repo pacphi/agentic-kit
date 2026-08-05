@@ -155,3 +155,17 @@ test('syncBlocks takes a one-time .bak before first rewriting the file', async (
   assert.equal(fs.readFileSync(`${file}.bak`, 'utf8'), 'original\n', 'pre-rewrite content preserved');
   fs.rmSync(tmp, { recursive: true, force: true });
 });
+
+test('syncBlocks fails closed when its promised backup is unusable', async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'kit-bak-fail-'));
+  const file = path.join(tmp, 'CLAUDE.md');
+  fs.writeFileSync(file, 'original\n');
+  fs.writeFileSync(path.join(tmp, 't.md'), 'body\n');
+  fs.mkdirSync(`${file}.bak`);
+  const rows = [{ slug: 'b1', template: 't.md', position: 'append', detector: { type: 'always' } }];
+
+  await assert.rejects(syncBlocks(file, rows, () => path.join(tmp, 't.md')), /unusable backup path/);
+  assert.equal(fs.readFileSync(file, 'utf8'), 'original\n');
+  assert.deepEqual(fs.readdirSync(tmp).filter((name) => name.endsWith('.tmp')), []);
+  fs.rmSync(tmp, { recursive: true, force: true });
+});

@@ -10,6 +10,12 @@ const HOST_CAPABILITIES = Object.freeze([
 const PROVIDER_CAPABILITIES = Object.freeze([
   'modelDiscovery', 'runtimeDiscovery', 'quota', 'pricing', 'cacheAccounting',
 ]);
+const TRUST_CHANGE_KINDS = Object.freeze([
+  'auto-approve', 'mcp-registration', 'lifecycle-extension', 'host-integration',
+]);
+const TRUST_SCOPES = Object.freeze(['project', 'user']);
+const TRUST_FEATURES = Object.freeze(['project', 'aqe', 'brain']);
+const TRUST_OPERATIONS = Object.freeze(['setup', 'host-pick', 'sync']);
 
 function validateCapabilities(value, names, field) {
   assertRecord(value, field);
@@ -19,6 +25,41 @@ function validateCapabilities(value, names, field) {
       if (typeof value[name] !== 'string') throw new TypeError(`${field}.${name} must be a string`);
     } else if (typeof value[name] !== 'boolean') {
       throw new TypeError(`${field}.${name} must be boolean`);
+    }
+  }
+  return value;
+}
+
+function validateHostTrust(value) {
+  assertRecord(value, 'host.trust');
+  assertEnum(value.approvalPolicy, ['managed', 'unchanged'], 'host.trust.approvalPolicy');
+  if (!Array.isArray(value.changes)) throw new TypeError('host.trust.changes must be an array');
+  const ids = new Set();
+  for (const [index, change] of value.changes.entries()) {
+    const field = `host.trust.changes[${index}]`;
+    assertRecord(change, field);
+    assertId(change.id, `${field}.id`);
+    if (ids.has(change.id)) throw new TypeError('host.trust.changes contains duplicate ids');
+    ids.add(change.id);
+    assertEnum(change.kind, TRUST_CHANGE_KINDS, `${field}.kind`);
+    assertEnum(change.scope, TRUST_SCOPES, `${field}.scope`);
+    for (const name of ['owner', 'value', 'effect']) {
+      if (typeof change[name] !== 'string' || !change[name]) {
+        throw new TypeError(`${field}.${name} is required`);
+      }
+    }
+    assertStringArray(change.operations, `${field}.operations`, { allowEmpty: false });
+    for (const operation of change.operations) {
+      assertEnum(operation, TRUST_OPERATIONS, `${field}.operations`);
+    }
+    if (change.features !== undefined) {
+      assertStringArray(change.features, `${field}.features`);
+      for (const feature of change.features) {
+        assertEnum(feature, TRUST_FEATURES, `${field}.features`);
+      }
+    }
+    if (change.requiresHostEnabled !== undefined && typeof change.requiresHostEnabled !== 'boolean') {
+      throw new TypeError(`${field}.requiresHostEnabled must be boolean`);
     }
   }
   return value;
@@ -51,6 +92,7 @@ export function validateHostAdapter(value, {
   assertEnum(value.install.externalInstallPolicy,
     ['detect-never-overwrite', 'managed', 'unmanaged'], 'host.install.externalInstallPolicy');
   validateCapabilities(value.capabilities, HOST_CAPABILITIES, 'host.capabilities');
+  validateHostTrust(value.trust);
   assertId(value.configProjection, 'host.configProjection');
   assertStringArray(value.observability, 'host.observability');
   if (projections && !projections[value.configProjection]) {
@@ -121,6 +163,18 @@ const hostEntries = [
       aqeProvider: 'claude-code', envMarkers: ['CLAUDECODE', 'CLAUDE_CODE_ENTRYPOINT', 'CLAUDE_CODE_SESSION_ID'],
       enableEnv: 'ENABLE_CLAUDE_CODE',
     },
+    trust: {
+      approvalPolicy: 'managed',
+      changes: [
+        { id: 'ruflo-npx-package', kind: 'auto-approve', scope: 'project', owner: 'ruflo', value: 'Bash(npx @claude-flow*)', effect: 'run scoped @claude-flow npx commands', operations: ['setup'], features: ['project'], requiresHostEnabled: false },
+        { id: 'ruflo-npx-cli', kind: 'auto-approve', scope: 'project', owner: 'ruflo', value: 'Bash(npx claude-flow*)', effect: 'run scoped claude-flow npx commands', operations: ['setup'], features: ['project'], requiresHostEnabled: false },
+        { id: 'ruflo-local-helper', kind: 'auto-approve', scope: 'project', owner: 'ruflo', value: 'Bash(node .claude/*)', effect: 'run repository-local .claude Node helpers', operations: ['setup'], features: ['project'], requiresHostEnabled: false },
+        { id: 'ruflo-mcp-family', kind: 'auto-approve', scope: 'project', owner: 'ruflo', value: 'mcp__claude-flow__*', effect: 'call the project Ruflo MCP tool family', operations: ['setup'], features: ['project'], requiresHostEnabled: false },
+        { id: 'aqe-npx-cli', kind: 'auto-approve', scope: 'project', owner: 'agentic-qe', value: 'Bash(npx agentic-qe:*)', effect: 'run scoped agentic-qe npx commands', operations: ['setup'], features: ['project', 'aqe'], requiresHostEnabled: false },
+        { id: 'aqe-npx-package', kind: 'auto-approve', scope: 'project', owner: 'agentic-qe', value: 'Bash(npx @anthropics/agentic-qe:*)', effect: 'run scoped @anthropics/agentic-qe npx commands', operations: ['setup'], features: ['project', 'aqe'], requiresHostEnabled: false },
+        { id: 'aqe-mcp-family', kind: 'auto-approve', scope: 'project', owner: 'agentic-qe', value: 'mcp__agentic-qe__*', effect: 'call the project agentic-qe MCP tool family', operations: ['setup'], features: ['project', 'aqe'], requiresHostEnabled: false },
+      ],
+    },
     configProjection: 'claude', observability: ['claude-transcripts', 'claude-statusline'],
   },
   {
@@ -134,6 +188,14 @@ const hostEntries = [
       aqeProvider: 'codex', envMarkers: ['CODEX_SANDBOX', 'CODEX_HOME', 'CODEX_SESSION_ID'],
       enableEnv: 'ENABLE_CODEX',
     },
+    trust: {
+      approvalPolicy: 'unchanged',
+      changes: [
+        { id: 'claude-to-codex-mcp', kind: 'mcp-registration', scope: 'project', owner: 'agentic-kit', value: 'codex mcp-server', effect: 'expose Codex to Claude Code as mcp__codex__codex in this project', operations: ['setup', 'host-pick', 'sync'], features: ['project'] },
+        { id: 'codex-to-ruflo-mcp', kind: 'mcp-registration', scope: 'user', owner: 'agentic-kit', value: 'ruflo mcp start', effect: 'register the Ruflo MCP server in Codex configuration', operations: ['setup', 'host-pick', 'sync'], features: ['project'] },
+        { id: 'aqe-codex-integration', kind: 'host-integration', scope: 'project', owner: 'agentic-qe', value: 'aqe init --with-codex', effect: 'project Agentic-QE Codex skills and configuration', operations: ['setup'], features: ['project', 'aqe'] },
+      ],
+    },
     configProjection: 'codex', observability: ['codex-transcripts', 'codex-app-server'],
   },
   {
@@ -144,6 +206,19 @@ const hostEntries = [
     legacy: {
       guidanceFile: 'agents-opencode', configFormat: 'json',
       statusline: null, aqeProvider: null, envMarkers: [],
+    },
+    trust: {
+      approvalPolicy: 'managed',
+      changes: [
+        { id: 'ruflo-mcp-dash', kind: 'auto-approve', scope: 'user', owner: 'agentic-kit', value: 'claude-flow_*', effect: 'allow Ruflo MCP tools using dash-separated names', operations: ['setup', 'host-pick', 'sync'] },
+        { id: 'ruflo-mcp-underscore', kind: 'auto-approve', scope: 'user', owner: 'agentic-kit', value: 'claude_flow_*', effect: 'allow Ruflo MCP tools using underscore-separated names', operations: ['setup', 'host-pick', 'sync'] },
+        { id: 'brain-mcp-dash', kind: 'auto-approve', scope: 'user', owner: 'agentic-kit', value: 'ruvnet-brain_*', effect: 'allow RuvNet Brain MCP tools using dash-separated names', operations: ['setup', 'host-pick', 'sync'] },
+        { id: 'brain-mcp-underscore', kind: 'auto-approve', scope: 'user', owner: 'agentic-kit', value: 'ruvnet_brain_*', effect: 'allow RuvNet Brain MCP tools using underscore-separated names', operations: ['setup', 'host-pick', 'sync'] },
+        { id: 'ruflo-mcp-registration', kind: 'mcp-registration', scope: 'user', owner: 'agentic-kit', value: 'mcp.claude-flow', effect: 'register the Ruflo MCP server in OpenCode configuration', operations: ['setup', 'host-pick', 'sync'] },
+        { id: 'brain-mcp-registration', kind: 'mcp-registration', scope: 'user', owner: 'agentic-kit', value: 'mcp.ruvnet-brain', effect: 'register the RuvNet Brain MCP server in OpenCode configuration', operations: ['setup', 'host-pick', 'sync'], features: ['brain'] },
+        { id: 'ruflo-lifecycle-plugin', kind: 'lifecycle-extension', scope: 'user', owner: 'agentic-kit', value: 'plugins/ruflo-hooks.js', effect: 'connect OpenCode lifecycle and tool events to Ruflo hooks', operations: ['setup', 'host-pick', 'sync'] },
+        { id: 'ruflo-host-assets', kind: 'host-integration', scope: 'user', owner: 'agentic-kit', value: 'agents, skills, and AGENTS.md', effect: 'install the managed Ruflo agent, skill, and guidance projections for OpenCode', operations: ['setup', 'host-pick', 'sync'] },
+      ],
     },
     configProjection: 'opencode', observability: ['opencode-logs'],
   },

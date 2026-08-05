@@ -1,7 +1,10 @@
 # ADR-0014 — Dashboard auth token, plus a security/quality remediation pass
 
-- **Status:** Accepted
+- **Status:** Implemented
 - **Date:** 2026-07-28
+- **Updated:** 2026-08-04
+- **Update note:** ADR-0023 completed the settings-writer contract: a promised `.bak` is now
+  fail-closed, validated as a regular non-symlink file, and required before atomic replacement.
 - **Deciders:** agentic-kit maintainers
 
 ## Context

@@ -1,7 +1,7 @@
 # Managed tools — the consistency contract
 
 Every tool ak manages follows one contract for how it is installed, updated,
-version-detected, and displayed. This doc states the contract's four
+version-detected, and displayed. This doc states the contract's five
 invariants, maps every managed tool onto them, and gives the checklist for
 adding a new tool without breaking them.
 
@@ -14,7 +14,7 @@ design is Proposed in [ADR-0016](adr/0016-capability-driven-integration-adapters
 Each invariant traces to a live failure it prevents — the appendix records
 them.
 
-## The four invariants
+## The five invariants
 
 1. **Disk-first installed versions.** The "installed" side of every drift
    check is read from what is actually on disk — never from a cached claim or
@@ -45,6 +45,13 @@ them.
    `{pkg, installed, latest, outdated}` array explicitly
    (`foldBrainDrift()` / the `selfDrift` fold in
    `src/lib/dashboard-server.mjs`).
+
+5. **Exit status outranks artifact presence.** Every managed operation reports
+   both an outcome (`ok`, `degraded`, `failed`, or `skipped`) and whether a
+   usable artifact remains. A failed repair can therefore say that an older
+   install is still usable, but it cannot render green or advance a release
+   stamp. A fallback is `degraded`, never an implied native repair. Version
+   stamps advance only after the installer exits successfully.
 
 ## The tools
 

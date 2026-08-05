@@ -3,11 +3,12 @@
 - **Status:** Accepted; compatibility clauses superseded by
   [ADR-0020](0020-ga-stable-surfaces.md)
 - **Date:** 2026-07-28
-- **Updated:** 2026-07-30
+- **Updated:** 2026-08-04
 - **Update note:** Added read-only Codex plugin-hook compatibility facts,
   runtime-selected Ruflo project-memory store proofs, and the non-correlatable
   OpenRouter account-analytics boundary; removed the pre-GA compatibility command,
-  persisted fields, and adapter bootstrap.
+  persisted fields, and adapter bootstrap. ADR-0023 now requires each host adapter
+  to declare its setup trust posture and changes for host-neutral preflight.
 - **Deciders:** agentic-kit maintainers
 - **Related:** [ADR-0001](0001-one-routing-policy-many-projections.md),
   [ADR-0003](0003-auto-seed-dual-host-provenance.md),
@@ -90,6 +91,7 @@ The conceptual descriptors are:
     mcp, guidance, statusline, transcripts, usage
   },
   auth: { kind, keyEnv, loginProbe },
+  trust: { approvalPolicy, changes: [] },
   projections: [],
   observability: [],
   defaultProvider
@@ -115,7 +117,9 @@ The conceptual descriptors are:
 Projection and observability descriptors contain metadata plus references to built-in lifecycle or
 normalizer functions. Registry validation rejects duplicate IDs, unknown capabilities or enum
 values, unresolved projection/observability references, invalid billing/credential combinations,
-and invalid capability implications. In particular, `primary` and `activityRouting` require
+and invalid capability implications. A host must explicitly declare whether agentic-kit manages
+approval grants or leaves host policy unchanged, plus every setup-time approval, registration,
+lifecycle extension, and host integration it can apply. In particular, `primary` and `activityRouting` require
 `driveSession`; a provider with `pricing: 'zero'` must be local; and a required credential is
 described by environment-variable name, never by its value.
 
@@ -446,7 +450,9 @@ not write real home/global configuration.
 ## Consequences
 
 New built-in hosts and providers become additive registry entries plus their own adapters and
-contract tests. Commands and UI use a common vocabulary and cannot accidentally expose a provider
+contract tests. A new host cannot validate without a setup trust declaration, and setup/host-pick
+preflight derives its disclosure from that registry rather than adding a host-specific branch.
+Commands and UI use a common vocabulary and cannot accidentally expose a provider
 as a routing host. One provider can be represented behind several hosts, while ownership and
 teardown remain binding-specific.
 
