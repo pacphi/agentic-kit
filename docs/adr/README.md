@@ -30,6 +30,7 @@ Consequences**, and cites the grounded source it rests on where relevant.
 | [0019](0019-escalation-in-ak-run.md) | Bounded per-worker escalation in `ak run` | Accepted; historical context closed |
 | [0020](0020-ga-stable-surfaces.md) | One stable GA surface per capability | Implemented |
 | [0021](0021-inference-provider-provenance.md) | Inference-provider provenance for live sessions | Accepted |
+| [0022](0022-metaharness-as-optional-assurance-companion.md) | MetaHarness as an optional assurance companion | Proposed |
 
 Theme: ADRs **0001–0006** define **dual-host LLM routing and leadership** — how `ak` lets ruflo route
 each development activity (architecture, implementation, testing, review, …) to the right host (Claude
@@ -106,3 +107,10 @@ in-artifact `model_provider` (rollouts + state ledger) is read as observed evide
 provider is resolved from its documented configuration surface (Bedrock/Vertex/Foundry flags,
 `ANTHROPIC_BASE_URL` gateways) with configured/inferred provenance, since its transcripts never
 record the serving endpoint.
+
+**0022** places MetaHarness primarily around agentic-kit as optional assurance tooling. It may
+score, audit, red/blue, compare, and evolve its own harness policies while `ak` retains lifecycle,
+routing, and supervised-execution authority. A future internal integration is limited to a
+capability-probed, read-only projection unless another decision authorizes mutation. The ADR also
+requires a versioned, sanitized companion result contract before treating `ak run --json` as an
+interop API.
