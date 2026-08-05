@@ -26,6 +26,24 @@ family on your behalf.
 | `ak x statusline codex native\|extended` | opt into a user-wide Codex status-line preset | **yes** — records the preset |
 | `ak setup`           | first-time bootstrap of absent tooling          | only via explicit flags (`--codex`, `--opencode`, `--primary-host`) |
 
+## Installation method and self-update scope
+
+The package installation method and the command's operational scope are
+independent. A project-local or `npm exec` copy of `ak` can still upgrade global
+Ruflo/AQE/host packages, write current-user configuration, and heal the current
+project. Conversely, globally installing the runner does not initialize any
+repository until a project-scoped command is run there.
+
+`ak sync` always evaluates the version of the running package. If that version is
+outdated, its final self-update step runs `npm install -g` for the exact version it
+just resolved. Consequently, a sync launched from a local dependency, Git checkout,
+or one-shot npm cache can create or replace a global agentic-kit installation. Use
+`ak sync --no-upgrade` when a lockfile, tarball, or checkout must remain the only
+version authority.
+
+See [Installation and scope](INSTALLATION.md) for global, local, one-shot,
+tarball, Git, source-link, multi-user, and CI guidance.
+
 ## Running `ak sync` while sessions are live
 
 `ak sync` is plan-based: on a converged machine it prints "nothing to do" and touches
@@ -126,7 +144,9 @@ config with agentic-qe 3.13.3+ or change `routing.defense.provider` from `cognit
 
 If you already have `ak` working, you almost never need `ak setup` again — it's the
 installer. Enabling a shipped-but-opt-in host feature is a `host pick` (or an `x mcp pick`,
-etc.), not a re-`setup`.
+etc.), not a re-`setup`. Project setup calls `ruflo init --full --force`, so review the
+[setup scope and project mutation contract](SETUP.md) before deliberately rerunning it in
+an existing project.
 
 Codex status-line management is deliberately not enabled merely because an
 upgrade adds support for it. Run `ak x statusline codex native` once to opt in;
@@ -162,7 +182,8 @@ the claude-only default, reversibly.
 
 The full menu of host/provider levels — QE provider selection, deterministic fallback
 chains, per-activity routing defaults, undo — lives in [PROVIDERS.md](PROVIDERS.md). This
-page is only about the *upgrade motion*.
+page is only about the *upgrade motion*. The cross-host support and limitations
+matrix lives in [HOST-SUPPORT.md](HOST-SUPPORT.md).
 
 ## How drift surfaces (you don't have to go looking)
 

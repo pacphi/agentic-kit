@@ -76,7 +76,12 @@ tests/
   kit/*.test.mjs         # node:test unit suites
   statusline-segments.test.cjs      # statusline renderer suite
 docs/
-  TROUBLESHOOTING.md     # shipped in the npm tarball
+  HOST-SUPPORT.md        # canonical host/Ruflo/AQE/Brain compatibility matrix (shipped)
+  INSTALLATION.md        # package scope versus machine/user/project effects (shipped)
+  PROVIDERS.md           # provider and routing guide (shipped)
+  SETUP.md               # setup mutation contract (shipped)
+  TROUBLESHOOTING.md     # symptom-to-fix runbook (shipped)
+  UPGRADING.md           # upgrade and capability-adoption motion (shipped)
   archive/               # investigative history behind each guard (not shipped)
 .github/
   workflows/{ci,release,nightly}.yml
@@ -84,8 +89,9 @@ docs/
 ```
 
 **Published tarball** = the `files` whitelist in `package.json`:
-`bin/agentic-kit.mjs`, `src/`, `claude/`, `docs/TROUBLESHOOTING.md`,
-`docs/CODEX-STATUSLINE.md`, and
+`bin/agentic-kit.mjs`, `src/`, `claude/`, `docs/HOST-SUPPORT.md`,
+`docs/INSTALLATION.md`, `docs/PROVIDERS.md`, `docs/SETUP.md`,
+`docs/TROUBLESHOOTING.md`, `docs/UPGRADING.md`, `docs/CODEX-STATUSLINE.md`, and
 `docs/adr/0015-managed-codex-native-statusline.md`. Generated workspace state under
 the shipped source trees is explicitly excluded. Nothing else ships — verify with
 `npm pack --dry-run` before a release if you touch `files`.

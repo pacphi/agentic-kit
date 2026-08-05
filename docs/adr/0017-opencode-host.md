@@ -3,13 +3,16 @@
 - **Status:** Accepted; compatibility references amended by
   [ADR-0020](0020-ga-stable-surfaces.md)
 - **Date:** 2026-07-28
-- **Updated:** 2026-07-30
-- **Update note:** Made OpenCode explicitly routable only through `ak run` while retaining its
-  opt-in, non-primary, non-AQE safety boundary.
+- **Updated:** 2026-08-04
+- **Update note:** Clarified that the AQE boundary applies to inference-provider routing, not
+  AQE's upstream OpenCode platform assets, and recorded the implemented OpenCode transcript,
+  token, observed-cost, and provider-id analytics path.
 - **Deciders:** agentic-kit maintainers
 
-> **GA amendment:** OpenCode remains opt-in, non-primary, and outside AQE. Historical references
-> to the removed compatibility executor do not describe a supported 4.0 surface.
+> **GA amendment:** OpenCode remains opt-in, non-primary, and outside AQE inference-provider
+> routing. AQE may still provision OpenCode platform agents, skills, permissions, and MCP
+> configuration. Historical references to the removed compatibility executor do not describe a
+> supported 4.0 surface.
 
 ## Context
 
@@ -193,12 +196,18 @@ switches from its hardcoded two-target block list to the shared `guidanceTargets
 either). The `pick` rework in §4 replaces the first revision's behavior (opencode was
 excluded and merely preserved) with full two-tier management. ADR-0018 subsequently adds
 explicit OpenCode routing through `ak run`.
-Out of scope (matching Codex's own asymmetry): AQE provider wiring (no opencode provider type
-exists),
-statusline (no upstream surface), `drivingHost` session detection (opencode sets no
-session env marker), and usage/cost attribution (`usage-index.mjs` reads claude/codex
-transcripts only — the pricing surface has no opencode input and shows nothing for it,
-which is the honest shape).
+Out of scope (matching Codex's own asymmetry): AQE **provider routing** (no OpenCode provider
+type exists), AQE `agentOverrides` projection, statusline (no upstream surface), and
+`drivingHost` session detection (OpenCode sets no session env marker). AQE itself can provision
+OpenCode platform agents, skills, permissions, and MCP configuration; agentic-kit does not
+currently request or own that platform initialization.
+
+OpenCode historical analytics are now implemented: `usage-opencode.mjs` reads its SQLite store
+read-only, and `usage-index.mjs` carries transcripts, tokens, observed cost, and provider id into
+the shared dashboard/session shape. This does not manufacture provider identity for live worker
+leases and does not create account-quota or subscription evidence. The registry's `usage:false`
+capability is stale relative to this implemented analytics path and remains an explicit contract
+discrepancy until reconciled.
 
 ## Consequences
 

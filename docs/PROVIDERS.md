@@ -1,5 +1,9 @@
 # Model providers & hosts — the simple path, and how to go deeper
 
+This guide explains provider selection and routing. For the full Claude/Codex/OpenCode
+compatibility matrix across Ruflo, agentic-qe, and RuvNet Brain, see
+[Host support](HOST-SUPPORT.md).
+
 `ak`'s job is to make **the best default the simplest thing** — and then get out of your
 way when you want to customize, exactly as you would if you drove `ruflo` and `agentic-qe`
 by hand. Everything `ak` writes is *their* standard config; `ak` just converges to it,
@@ -119,17 +123,23 @@ ak setup --primary-host codex --yes   # …and make codex the leading host
 
 ## Level 2 — choose which LLM runs QE
 
-agentic-qe can run its analysis on any of: `claude-code` (your Claude subscription),
-`claude` / `openai` / `gemini` / `openrouter` / `azure-openai` / `bedrock` / `cognitum`
-(metered API key), or `ollama` / `onnx` (local).
+agentic-qe can run its analysis on subscription-backed host providers
+(`claude-code`, and current AQE also ships `codex`), metered API providers
+(`claude`, `openai`, `gemini`, `openrouter`, `azure-openai`, `bedrock`, or
+`cognitum`), or local providers (`ollama` and `onnx`).
 
 **Billing is the axis that isn't obvious from the names** — three categories:
-`claude-code` runs on your Claude plan ($0 metered), `ollama` and `onnx` are local ($0),
-and **everything else bills a metered API key**. `claude-code` is the *only* subscription
-option here: the codex and gemini CLIs also support OAuth/subscription login, but that
-lives on the **host axis** (Level 1, which CLI runs the loop) — not as an aqe provider
-*type*. So there's no `openai`-subscription or `gemini`-subscription entry; their OAuth
-paths are reached by enabling those *hosts*, while the provider list is API-metered.
+`claude-code` and AQE's `codex` provider use their host subscriptions, `ollama`
+and `onnx` are local, and the API-provider spellings bill their corresponding
+credentials. There is no `openai`-subscription or `gemini`-subscription alias:
+`openai` and `gemini` remain API-metered provider types.
+
+> [!IMPORTANT]
+> agentic-kit does not yet expose AQE's direct `codex` provider through
+> `--aqe-provider`; that allow-list currently rejects it. Codex activity routes
+> can still project into AQE `agentOverrides`, so per-activity Claude/Codex
+> routing works. This is a documented agentic-kit integration gap, not evidence
+> that AQE itself lacks a Codex subscription provider.
 
 ```bash
 ak host pick --aqe-provider claude-code    # run QE on your subscription, no API bill

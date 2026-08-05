@@ -17,6 +17,11 @@ ak sync             # apply it
 
 | Symptom | What's happening | Fix |
 | --- | --- | --- |
+| `npm install @pacphi/agentic-kit` succeeded but `ak` is not found | A local install links the binary into the package root's `node_modules/.bin`, not the general shell `PATH` | run `npm exec -- ak status`, add an npm script, or use the recommended global install; see [Installation](INSTALLATION.md) |
+| A global install exists but this shell cannot find it | The active Node/npm prefix changed, or its binary directory is not on `PATH` | compare `npm prefix -g`, `npm root -g`, and `command -v ak` (`where ak` on Windows); activate the intended Node toolchain before reinstalling |
+| A one-shot/local `ak setup` changed global tools or project files | npm package scope does not constrain an `ak` command's operational scope | review [Installation scope](INSTALLATION.md#the-two-independent-scope-decisions) and [Setup scope](SETUP.md); use `--dry-run` before setup/sync/uninstall |
+| `ak sync` launched from a checkout/local dependency created a global `ak` | The self-update step deliberately installs the resolved replacement globally and runs last | use `ak sync --no-upgrade` when the checkout or lockfile must remain authoritative |
+| Different users or Node versions see different global stacks | npm `-g` means the active prefix, which can be per-user and per-Node-version | standardize the Node manager/prefix per user; do not repair this with `sudo ak setup` |
 | Just upgraded ruflo/agentic-qe (`npm i -g …`) and things feel off | Upgrades re-resolve dependencies: native SQLite bindings and the aidefence package get dropped, and ruflo's helper auto-refresh regenerates the statusline without the footer | `ak sync` (this is its main job) |
 | `status` shows `natives … WASM fallback` | agentdb resolved a non-native better-sqlite3 — on this path **memory writes can silently vanish**. Common causes are npm ≥11.17 blocking install scripts during upgrades, or a stale better-sqlite3 ≤12.9 pin on Node 26 | `ak sync` selects a Node-compatible release and installs the native binding |
 | `status` shows `aidefence missing` | ruflo ≥3.28 stopped shipping `@claude-flow/aidefence` but `ruflo security defend` still imports it — injection defense is silently non-functional ([ruvnet/ruflo#2670](https://github.com/ruvnet/ruflo/issues/2670)) | `ak sync` reinstalls it; `ak x verify security` proves defend works (exit 1=threat / 0=clean) |
@@ -57,6 +62,9 @@ ak x verify all
 ```
 
 ## Known upstream gaps (not fixable by sync)
+
+The host-by-host issue snapshot and limitations are maintained in
+[Host support](HOST-SUPPORT.md). The items below are stack-wide operational gaps.
 
 - `ruflo security cve --list` has no CVE database — use `npm audit` for dependency CVEs.
 - ruflo's generated CLI examples say `npx @claude-flow/cli@latest …`; prefer the

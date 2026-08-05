@@ -20,7 +20,12 @@
     "!claude/**/.claude/**",
     "!claude/**/.agentic-qe/**",
     "!claude/**/.claude-flow/**",
+    "docs/HOST-SUPPORT.md",
+    "docs/INSTALLATION.md",
+    "docs/PROVIDERS.md",
+    "docs/SETUP.md",
     "docs/TROUBLESHOOTING.md",
+    "docs/UPGRADING.md",
     "docs/CODEX-STATUSLINE.md",
     "docs/adr/0015-managed-codex-native-statusline.md"
   ],

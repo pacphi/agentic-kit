@@ -43,12 +43,14 @@ export const help = `ak setup — first-time setup (machine and/or this project)
 
 Machine scope always runs: installs ruflo + agentic-qe globally, deploys the
 token-audit skill, merges the CLAUDE.md managed blocks, and offers MCP. Project
-scope auto-runs when a .git directory is present.
+scope auto-runs when .git exists in the current directory. Project setup runs
+ruflo init --full --force and may replace existing agent configuration; commit
+or back up first. Details: docs/SETUP.md
 
 Usage: ak setup [options]
 
 Options:
-  --project        force project-scope setup even outside a git repo
+  --project        force project setup in cwd even without .git; same mutations
   --minimal        machine scope only; skip project setup
   --no-aqe         skip agentic-qe install + configuration
   --no-ruvnet-brain  skip the RuvNet Brain (~2 GB offline KB) setup step

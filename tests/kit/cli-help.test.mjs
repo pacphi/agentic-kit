@@ -15,6 +15,8 @@ test('setup --help shows help and does NOT run setup', () => {
   assert.equal(r.status, 0);
   assert.match(r.stdout, /^ak setup — /);
   assert.match(r.stdout, /Options:/);
+  assert.match(r.stdout, /ruflo init --full --force/);
+  assert.match(r.stdout, /docs\/SETUP\.md/);
   // A real setup run would emit ✓/⚠ progress lines, never the help header.
   assert.doesNotMatch(r.stdout, /installing|✓ /);
 });

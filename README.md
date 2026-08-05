@@ -19,6 +19,13 @@ ak setup --opencode # …and wire ruflo + ruvnet-brain into opencode (third host
 > agentic-qe yourself.** `ak setup` installs them globally for you (building natives past
 > npm ≥11.17's `allow-scripts` gate), then heals and proves them.
 
+`npm install -g` is the recommended interactive install, but it is not the only
+way to run the package. Local dependencies, `npm exec`/`npx`, verified tarballs,
+Git revisions, and contributor links have different package footprints while
+`ak setup` retains the same machine/user/project effects. See
+[Installation and scope](docs/INSTALLATION.md) before choosing a non-global method
+or deploying on a shared machine.
+
 **What you get:**
 
 - **One command** installs + heals + *proves* ruflo & agentic-qe — native SQLite, memory, security, statusline (past npm's `allow-scripts` gate).
@@ -41,6 +48,10 @@ Ollama can have independent bindings through Claude and Codex. OpenCode is an op
 routable host through `ak run`, but it is never a primary host or AQE provider. Provider, model,
 and billing claims state whether they are observed, configured, inferred, or unknown. Design
 record: [docs/adr/0016-capability-driven-integration-adapters.md](docs/adr/0016-capability-driven-integration-adapters.md).
+
+For a capability-by-capability comparison of Claude, Codex, and OpenCode across
+Ruflo, agentic-qe, and RuvNet Brain—including current limitations and upstream
+issues—see [Host support](docs/HOST-SUPPORT.md).
 
 ## Why this exists
 
@@ -90,7 +101,7 @@ command always works.)
 
 | Verb | What it does |
 | ------ | -------------- |
-| **setup** | Installs/updates ruflo + agentic-qe + the **agentdb** CLI globally (handling npm ≥11.17's `allow-scripts` so natives build; agentdb is pinned to ruflo's bundled version so the shared learning store stays coherent), installs the **RuvNet Brain** (an offline knowledge base over the rUv stack, powering the `search_ruvnet` MCP — a ~2 GB one-time download, prompted; skip with `--no-ruvnet-brain`), deploys the token-audit skill, merges the managed guidance blocks into the machine-wide guidance files (`~/.claude/CLAUDE.md`, plus `~/.codex/AGENTS.md` on codex machines), offers one-time MCP registration (user scope, with a tool-family picker), and — inside a repo — initializes the project: sanitized `ruflo init`, absolute memory-path pin, a **verified** store→disk write, statusline footer, and a background daemon with **local-only ($0) workers** (token-spending AI workers stay opt-in behind upstream's machine-wide budget). Project scope triggers on a `.git` directory in the current folder; without one it's skipped with a note. `--project` forces it anyway (e.g. a not-yet-`git init`-ed folder), `--minimal` skips it, `--yes` accepts all prompts (non-interactive), `--no-aqe` / `--no-ruvnet-brain` / `--no-security` disable those subsystems, and `--reconfigure` re-offers MCP registration. `--codex` enables + installs the Codex host during setup (ambidextrous dual-host mode; both hosts then run at once), and `--primary-host claude\|codex` picks which host leads (codex implies `--codex`). |
+| **setup** | Installs/updates ruflo + agentic-qe + the **agentdb** CLI globally (handling npm ≥11.17's `allow-scripts` so natives build; agentdb is pinned to ruflo's bundled version so the shared learning store stays coherent), installs the **RuvNet Brain** (an offline knowledge base over the rUv stack, powering the `search_ruvnet` MCP — a ~2 GB one-time download, prompted; skip with `--no-ruvnet-brain`), deploys the token-audit skill, merges the managed guidance blocks into the machine-wide guidance files (`~/.claude/CLAUDE.md`, plus `~/.codex/AGENTS.md` on codex machines), offers one-time MCP registration (user scope, with a tool-family picker), and — inside a repo — initializes the project: sanitized `ruflo init`, absolute memory-path pin, a **verified** store→disk write, statusline footer, and a background daemon with **local-only ($0) workers** (token-spending AI workers stay opt-in behind upstream's machine-wide budget). Project scope triggers on a `.git` entry in the current folder; without one it's skipped with a note. `--project` forces the same project setup in the current directory (e.g. a not-yet-`git init`-ed folder); it does not locate an ancestor repository. Project initialization runs `ruflo init --full --force` and can replace existing agent configuration, so read the [setup scope and project mutation contract](docs/SETUP.md) before using it on an existing project. `--minimal` skips it, `--yes` accepts all prompts (non-interactive), `--no-aqe` / `--no-ruvnet-brain` / `--no-security` disable those subsystems, and `--reconfigure` re-offers MCP registration. `--codex` enables + installs the Codex host during setup (ambidextrous dual-host mode; both hosts then run at once), and `--primary-host claude\|codex` picks which host leads (codex implies `--codex`). |
 | **status** | Per-subsystem ✓/⚠/✗ (versions, the kit's own version, **ruvnet-brain** (present + release drift, or "not installed"), natives (agentdb copies **and** ruflo's own memory runtime — the one `npx ruflo memory` loads — load-tested for a native better-sqlite3, not just the agentdb dirs), **memory-pin** (warns when `CLAUDE_FLOW_DB_PATH` points off the live DB), security, learning, aqe/RVF, **agentdb** (CLI present + coherent with ruflo's bundled version, or a store-skew warning), MCP, **hosts** (claude/codex/opencode version + install method; the Claude/Codex **primary** marked and failed when absent), **providers** (host wiring + aqe fallback chain, or "drifted"/claude-only default), **routing** (the persisted activity host+model policy; only Claude/Codex routes project into AQE), daemons, guidance-file blocks (`~/.claude/CLAUDE.md`, project `AGENTS.md`, and `~/.codex/AGENTS.md` on codex machines), statusline), each drift row naming what `sync` would do about it — plus a **health-history** line that flags regressions since the last sync (learning shrank, native slots dropped, drift/security backslid). |
 | **sync** | The one convergence verb: upgrades first when a new release exists, then re-heals everything an upgrade wipes, then re-checks and reports. Included in that heal: it **installs any enabled frontier host** (claude/codex/opencode) that's entirely absent — never touching an external (mise/brew/native) install — and **re-applies provider wiring** (the `ENABLE_*` host env, OpenCode's native configuration, the aqe fallback chain, and ruflo API providers) whenever it has drifted — and, on a dual-host project, **seeds/heals the Claude/Codex default routing policy** (materializing eligible routes into agentic-qe's `agentOverrides`, e.g. after an aqe upgrade first makes it eligible). It also **installs/repins the standalone `agentdb` CLI** to ruflo's bundled version (keeping the shared cognitive store coherent) and appends a **health-history snapshot** so `status` can flag regressions across syncs. It also **re-runs the RuvNet Brain installer** to pull the latest release when the on-disk KB has drifted (or installs it if absent, when enabled). It also **self-updates the kit**: when a newer `@pacphi/agentic-kit` exists it installs it as the *last* step (the new code applies from the next `ak` run, never mid-sync). Prerelease installs (`4.0.0-alpha.*`) track the `next` npm dist-tag as well as `latest`, so alphas see their successors; stable installs only ever follow `latest`. `--no-upgrade` skips the self-update along with the package upgrades. |
 | **dashboard** | Opens an observation-only local web dashboard (`127.0.0.1:7431`, localhost-only, never detaches) with three primary areas: **Overview · Usage · Observability**. One fixed, left-aligned secondary rail exposes Overview's Summary/Hosts & Routing/Providers/Runtime/Intelligence views, Usage's Scorecard/Limits/Findings/Sessions/Transcript views, and Observability's Live/History scopes. Canonical deep links are hierarchical (`#overview/summary`, `#usage/sessions`, `#usage/<session-id>`, `#observability/live`); arrow keys plus Home/End operate focused tab rows. Usage indexes local Claude/Codex/OpenCode transcripts on demand. Observability groups eligible sessions by project and pairs an interactive agent/tool execution canvas with masked transcript or review evidence; its Session Stream can collapse without disconnecting so Agent activity gets more room. Live shows only current roots; History shows only retained non-live roots. A bounded owner-only cache retains safe last-recorded workspace context; no dashboard action mutates agents or repositories. Ruflo and agentic-qe stores are opt-in through repeatable `--live-source 'surface=path'`. The page is self-contained, offline-first, localhost-only, and protected by a per-session token. See the [Dashboard guide](docs/DASHBOARD.md) and [Observability guide](docs/OBSERVABILITY.md). **Auto-opens your browser** (`--no-open` for headless/SSH); `--port N` changes the port. Stop with Ctrl-C. (Also available as `ak x dashboard`.) |
@@ -186,6 +197,7 @@ you opt in.
 applies (reversibly); `ak host off` restores the claude-only default. Full guide:
 [docs/PROVIDERS.md](docs/PROVIDERS.md). Already on an older `ak` and adopting a later capability
 (like dual-host)? [docs/UPGRADING.md](docs/UPGRADING.md) covers the `sync` vs `host pick` motion.
+The detailed compatibility matrix is in [docs/HOST-SUPPORT.md](docs/HOST-SUPPORT.md).
 
 </details>
 
@@ -237,6 +249,12 @@ Design record: [docs/adr/0017-opencode-host.md](docs/adr/0017-opencode-host.md).
 ## Troubleshooting
 
 [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) — symptom → `agentic-kit` command.
+
+[docs/INSTALLATION.md](docs/INSTALLATION.md) — global versus local, one-shot,
+tarball, Git, and source-checkout installs, including user/machine/project impact.
+
+[docs/HOST-SUPPORT.md](docs/HOST-SUPPORT.md) — Claude, Codex, and OpenCode support
+across Ruflo, AQE, and RuvNet Brain, with limitations and current upstream risks.
 
 [docs/DASHBOARD.md](docs/DASHBOARD.md) — dashboard navigation, deep links, keyboard behavior, and
 the meaning of each primary and secondary view.
