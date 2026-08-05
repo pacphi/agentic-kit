@@ -2,6 +2,31 @@ import { CSS } from './styles.mjs';
 import { JS } from './client.mjs';
 import { LIVE_CSS, LIVE_HTML, LIVE_JS } from './live-view.mjs';
 
+// ── Intelligence: machine-wide rollup + project picker ──────────────────────
+// Scoped to this file (not styles.mjs) since page.mjs is the only owner of
+// this markup. Reuses styles.mjs's existing design tokens (--panel, --line,
+// --ink*, --r-sm, --accent) so the new rows/picker match the Apple system
+// motif everywhere else, without duplicating any of styles.mjs's own rules.
+const INTEL_CSS = `
+.mw-table{display:flex; flex-direction:column; gap:1px; background:var(--line); border:1px solid var(--line); border-radius:var(--r-sm); overflow:hidden; margin-top:14px}
+.mw-row{display:grid; grid-template-columns:minmax(140px,1.6fr) repeat(3,minmax(96px,1fr)); gap:10px; align-items:center; padding:8px 14px; background:var(--panel); font-size:12.5px}
+.mw-row.mw-head{background:var(--panel-2); color:var(--ink-dim); font-size:10.5px; font-weight:600; text-transform:uppercase; letter-spacing:.06em}
+.mw-row:not(.mw-head):hover{background:var(--panel-2)}
+.mw-name{color:var(--ink); overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+.mw-val{color:var(--ink-2); text-align:right}
+.mw-row.mw-head .mw-val{color:var(--ink-dim)}
+@media(max-width:560px){.mw-row{grid-template-columns:1fr repeat(3,minmax(60px,1fr)); gap:6px}}
+.mw-picker{display:flex; align-items:center; gap:9px; flex-wrap:wrap}
+.mw-picker label{color:var(--ink-dim); font-size:11.5px}
+.mw-picker select{
+  background:var(--panel-2); border:1px solid var(--line); color:var(--ink);
+  font-family:inherit; font-size:12.5px; padding:6px 12px; border-radius:100px;
+  cursor:pointer; max-width:100%;
+}
+.mw-picker select:focus-visible{outline:2px solid var(--accent); outline-offset:1px}
+.mw-picker select:disabled{opacity:.5; cursor:not-allowed}
+`;
+
 // ─────────────────────────────────────────────────────────────────────────────
 // The page. One document, everything inline. Only `name` and `version` are
 // interpolated server-side; the client fetches /api/status and renders live.
@@ -20,7 +45,7 @@ export function renderPage({ name, version }) {
 <meta name="color-scheme" content="dark light">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230a84ff'/%3E%3Ccircle cx='16' cy='16' r='7' fill='none' stroke='white' stroke-width='3'/%3E%3C/svg%3E">
 <title>agentic-kit · dashboard</title>
-<style>${CSS}${LIVE_CSS}</style>
+<style>${CSS}${LIVE_CSS}${INTEL_CSS}</style>
 </head>
 <body>
 <div class="gate" id="dash-gate" hidden>
@@ -179,12 +204,33 @@ export function renderPage({ name, version }) {
     <header class="view-heading">
       <span class="view-eyebrow">OVERVIEW</span>
       <h2>Intelligence &amp; learning</h2>
-      <p>Memory, learned patterns, quality feedback, and improvement signals.</p>
+      <p>Memory, learned patterns, quality feedback, and improvement signals &mdash; machine-wide, plus detail for one project you pick below.</p>
     </header>
     <div id="cards-intel"></div>
+
+    <section class="strip" id="mw-intel">
+      <div class="strip-head">
+        <h2 class="strip-title">machine-wide intelligence</h2>
+        <span class="mono strip-note" id="mw-note"></span>
+      </div>
+      <div class="hero" id="mw-hero"></div>
+      <div class="mw-table" id="mw-table"></div>
+    </section>
+
+    <section class="strip" id="intel-picker">
+      <div class="strip-head">
+        <h2 class="strip-title">project detail</h2>
+        <span class="mono strip-note" id="intel-picker-note"></span>
+      </div>
+      <div class="mw-picker">
+        <label for="intel-project-select">select project</label>
+        <select id="intel-project-select"></select>
+      </div>
+    </section>
+
     <section class="strip" id="history" hidden>
       <div class="strip-head">
-        <h2 class="strip-title">learning over time</h2>
+        <h2 class="strip-title">learning over time &mdash; <span id="history-project-name"></span></h2>
         <span class="mono strip-note" id="strip-note"></span>
       </div>
       <div class="spark-row">

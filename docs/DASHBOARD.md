@@ -23,7 +23,7 @@ Its position does not move when the primary area changes; only the choices insid
 | Overview | Hosts & Routing | `#overview/hosts` | Hosts & routing | Enabled execution hosts, activity assignments, primary-host policy, and escalation paths |
 | Overview | Providers | `#overview/providers` | Inference providers | Provider bindings, availability, provenance, and configuration health |
 | Overview | Runtime | `#overview/runtime` | Runtime health | Local services, MCP connections, processes, and operational readiness |
-| Overview | Intelligence | `#overview/intelligence` | Intelligence & learning | Memory, learned patterns, reasoning-graph growth, and improvement signals, updated near-live while the view is open |
+| Overview | Intelligence | `#overview/intelligence` | Intelligence & learning | Machine-wide learning rollup across every ruflo-initialized project, plus near-live detail for one explicitly selected project |
 | Usage | Scorecard | `#usage/score` | Usage scorecard | Token consumption, API-equivalent cost, efficiency, and trends |
 | Usage | Limits | `#usage/limits` | Provider limits | Current provider windows, reset timing, and available capacity |
 | Usage | Findings | `#usage/findings` | Usage findings | Actionable anomalies, efficiency opportunities, and evidence-backed recommendations |
@@ -61,13 +61,18 @@ Overview keeps status and routing in one health-first area:
   of which inference provider served a particular session.
 - **Providers** presents inference-provider bindings and their configuration provenance.
 - **Runtime** presents operational services, processes, and MCP readiness.
-- **Intelligence** presents memory, learning, and quality-improvement signals: the neural pattern
-  store's current size, its separate lifetime patterns-learned counter, reasoning-graph growth, and
-  the route-learner's improvement delta. It reads files ruflo/agentic-qe already write under
-  `.claude-flow/` and updates near-live over its own SSE stream while the view is open, falling back
-  to the general status poll otherwise. See [Project intelligence](ddd/project-intelligence.md) and
-  [ADR-0024](adr/0024-project-intelligence-telemetry.md) for the full model and the two learning
-  metrics' load-bearing distinction.
+- **Intelligence** presents memory, learning, and quality-improvement signals machine-wide: an
+  always-visible rollup folded across every ruflo-initialized project on this machine, plus detail
+  for one explicitly selected, explicitly labeled project — the neural pattern store's current
+  size, its separate lifetime patterns-learned counter, and reasoning-graph growth. Project
+  selection defaults to whichever discovered project was most recently active; there is no implicit
+  current-working-directory default. The route-learner's improvement delta remains scoped to the
+  dashboard's own launching project and is not part of project selection. Detail data reads files
+  ruflo/agentic-qe already write under `.claude-flow/` and updates near-live over a per-project SSE
+  stream while the view is open, falling back to the general status poll otherwise. See
+  [Project intelligence](ddd/project-intelligence.md) and
+  [ADR-0024](adr/0024-project-intelligence-telemetry.md) for the full model, the project-discovery
+  mechanism, and the two learning metrics' load-bearing distinction, now also at machine scope.
 
 ## Usage
 

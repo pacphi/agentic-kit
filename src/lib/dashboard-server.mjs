@@ -4,16 +4,30 @@
 //   GET /            → one self-contained HTML document (all CSS + JS inline,
 //                      no external fetches — offline-first, matches the kit ethos)
 //   GET /api/status  → JSON: the same subsystem rows `ak status --json` emits,
-//                      PLUS version drift, the project's .claude-flow/improvement.json
-//                      (if present), the health-history ring, and the intel-history
-//                      (pattern store / graph / global stats) series — see
-//                      dashboard/intel-history.mjs and collectData()'s own field
-//                      comments for the exact, frozen shape of each.
+//                      PLUS version drift, the LAUNCHING project's own
+//                      .claude-flow/improvement.json (if present), and an
+//                      `intel` object covering the machine-wide Intelligence
+//                      feature — see collectData()'s own field comments for
+//                      the exact shape. `intel` is keyed off a machine-wide
+//                      project catalog (dashboard/project-discovery.mjs),
+//                      NOT the server's launching cwd: pass ?project=<key>
+//                      (a key from intel.projects[].key, e.g. the previous
+//                      response's own intel.selectedProjectKey) to pick which
+//                      discovered project's detail is shown; omit it (or pass
+//                      an unresolvable key) to default to the most-recently-
+//                      active discovered project. intel.machineWide is always
+//                      the full machine-wide rollup, independent of ?project.
 //   GET /api/live    → bounded, privacy-safe live session projection
 //   GET /api/live/events → resumable Server-Sent Events stream
-//   GET /api/live/intelligence → SSE stream of intel-history.mjs's combined
-//                      read; one initial frame on connect, then a fresh frame
-//                      whenever IntelligenceWatch detects a real change
+//   GET /api/live/intelligence → SSE stream of one discovered project's
+//                      intel-history.mjs combined read; one initial frame on
+//                      connect, then a fresh frame whenever that project's
+//                      IntelligenceWatch detects a real change. Accepts the
+//                      SAME optional ?project=<key> param as /api/status,
+//                      resolved identically (so both endpoints agree on what
+//                      an absent/unresolvable key defaults to); a small pool
+//                      keyed by resolved project path keeps at most one
+//                      watcher per distinct project actually being watched.
 //   GET /api/usage    → the usage Aggregate MINUS sessions[] (ADR-0009)
 //   GET /api/sessions → the session list, filtered + paginated
 //   GET /api/session/:id → one transcript, secrets masked SERVER-side
@@ -44,7 +58,9 @@ import { sseChannel, reserveClientSlot, clientGone } from './dashboard/sse.mjs';
 // dashboard-server.mjs no longer defines it locally. It isn't called directly
 // here because readIntelHistory() already composes it (as `.healthRing`,
 // forwarded verbatim below); a bare `readHealthRing` import would be unused.
-import { readIntelHistory } from './dashboard/intel-history.mjs';
+import { readIntelHistory, readMachineWideIntel } from './dashboard/intel-history.mjs';
+import { discoverRuvfloProjects } from './dashboard/project-discovery.mjs';
+import { resolveProjectIdentity, safeProjectKey } from './live/project-label.mjs';
 import {
   TRANSCRIPT_ROOTS,
   maskMeta,
@@ -103,8 +119,104 @@ function shellOutStatus(cwd) {
   });
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Machine-wide Intelligence: project catalog + selection (ADR pending).
+//
+// The dashboard used to hardcode Intelligence data to the server's own
+// launching cwd. This is a deliberate clean break: Intelligence is now
+// machine-wide, backed by dashboard/project-discovery.mjs's catalog of every
+// ruflo-initialized project on this machine, with one of them "selected" for
+// detail display. Both /api/status and /api/live/intelligence resolve that
+// selection identically (resolveSelectedProject below) so they can never
+// disagree about what an absent/unresolvable ?project= defaults to.
+// ─────────────────────────────────────────────────────────────────────────────
+
+const PROJECT_SNAPSHOT_TTL_MS = 60_000;
+
+/** intel-history.mjs's readIntelHistory() shape, for a selection of "no
+ *  project" (discovery found zero ruflo-initialized projects on this
+ *  machine) — same null/[]-on-absent conventions readIntelHistory itself
+ *  uses for a single missing file, applied here for "no project at all". */
+const EMPTY_SELECTED_HISTORY = { patternStore: [], graph: null, healthRing: null, globalStats: null };
+
+/** A stable, opaque key for a discovered project, derived from its resolved
+ *  absolute path — NOT from its display label, which two different projects
+ *  can share (e.g. two repos both named "backend"). resolveProjectIdentity
+ *  (src/lib/live/project-label.mjs, already used machine-wide for live-
+ *  session project identity) hashes the project's own canonical git root
+ *  path when one is found — a distinct, collision-resistant key per real
+ *  project on disk. stableProjectKey alone was checked and does NOT fit
+ *  here: it reduces its input to a bare directory-name label before hashing,
+ *  so keying on it directly would collapse two same-named-but-different
+ *  projects onto one key — exactly the ambiguity a *selection* key (unlike a
+ *  *display* label, where that collision is merely cosmetic) cannot afford.
+ *  resolveProjectIdentity falls back to that same label-hash only for a
+ *  genuinely non-git directory, which is an acceptable degraded case. */
+function keyForProject(project) {
+  return resolveProjectIdentity(project.path).key;
+}
+
+/** Accept an incoming ?project= value only if it is ALREADY shaped like a
+ *  genuine opaque project key (the exact `project:<16-hex>` form
+ *  safeProjectKey emits) — reusing safeProjectKey's own shape check rather
+ *  than duplicating its regex. Passing the raw value as both arguments means
+ *  a well-formed key round-trips unchanged, while anything else (garbage,
+ *  a raw path, empty) resolves to some OTHER key that will simply fail to
+ *  match any discovered project below — never a fabricated key that could be
+ *  echoed back as if it were valid. */
+function validProjectKeyParam(raw) {
+  if (typeof raw !== 'string' || !raw) return null;
+  const sanitized = safeProjectKey(raw, raw);
+  return sanitized === raw ? raw : null;
+}
+
+/** Resolve which discovered (and key-tagged) project a request means: an
+ *  explicit ?project=<key> match if present and valid, else the first entry
+ *  — discoverRuvfloProjects() itself already sorts most-recently-active
+ *  first, so "no explicit selection" naturally means "whatever this machine
+ *  used most recently", never the server's launching cwd. Returns null only
+ *  when discovery found zero ruflo-initialized projects on this machine.
+ *  Shared verbatim by /api/status and /api/live/intelligence. */
+function resolveSelectedProject(projects, rawParam) {
+  const requested = validProjectKeyParam(rawParam);
+  if (requested) {
+    const match = projects.find((p) => p.key === requested);
+    if (match) return match;
+  }
+  return projects[0] ?? null;
+}
+
+/** Machine-wide discovery + the machine-wide intel rollup are the SAME data
+ *  for every client polling /api/status or connecting to
+ *  /api/live/intelligence — nothing about either is per-client — and
+ *  discovery walks the registry files plus every discovered project's own
+ *  .claude-flow tree, so it is not free. Cached in-memory with a short
+ *  (~60s) TTL, keyed by nothing (one snapshot per dashboard instance is
+ *  correct for machine-wide data), so a burst of polls/connections within
+ *  the window reuses one scan instead of re-walking the machine on every
+ *  request. `discoverProjectsFn`/`machineWideIntelFn` are injected by
+ *  startDashboard (defaulting to the real imports) purely for testability —
+ *  discovery reads real machine-global state (~/.claude-flow/*.json,
+ *  ~/.config/agentic-kit/observability-workspaces.json) that a test must
+ *  never depend on. */
+function buildProjectSnapshotCache(discoverProjectsFn, machineWideIntelFn) {
+  let snapshot = null;
+  let fetchedAt = 0;
+  return () => {
+    const now = Date.now();
+    if (!snapshot || now - fetchedAt > PROJECT_SNAPSHOT_TTL_MS) {
+      const projects = discoverProjectsFn().map((project) => (
+        { ...project, key: keyForProject(project) }
+      ));
+      snapshot = { projects, machineWide: machineWideIntelFn(projects) };
+      fetchedAt = now;
+    }
+    return snapshot;
+  };
+}
+
 /** Assemble the full /api/status payload. */
-async function collectData({ cwd, fetchStatus }) {
+async function collectData({ cwd, fetchStatus, projectParam, getProjectSnapshot }) {
   let status;
   try { status = await fetchStatus(); } catch (e) { status = { overall: 'unknown', rows: [], error: String(e && e.message || e) }; }
   const rows = Array.isArray(status?.rows) ? status.rows : [];
@@ -134,12 +246,14 @@ async function collectData({ cwd, fetchStatus }) {
     } catch { /* banner is best-effort — the subsystem card still carries the ruvector row */ }
   }
 
-  // Learning/intelligence history (src/lib/dashboard/intel-history.mjs) — one
-  // combined read powering the four DISTINCT series exposed below. See that
-  // module's header for the authoritative statement of why patternStore and
-  // globalStats.patternsLearned must never be conflated; the payload shape
-  // here preserves that separation instead of collapsing it.
-  const intel = readIntelHistory(cwd);
+  // Machine-wide Intelligence (clean break from the old cwd-hardcoded,
+  // single-project shape — see the block comment above buildProjectSnapshotCache).
+  // `getProjectSnapshot()` is the shared, TTL-cached {projects, machineWide}
+  // read; `projectParam` is the raw ?project= query value, resolved the exact
+  // same way /api/live/intelligence resolves it (resolveSelectedProject).
+  const { projects, machineWide } = getProjectSnapshot();
+  const selected = resolveSelectedProject(projects, projectParam);
+  const selectedHistory = selected ? readIntelHistory(selected.path) : EMPTY_SELECTED_HISTORY;
 
   return {
     generatedAt: new Date().toISOString(),
@@ -148,38 +262,51 @@ async function collectData({ cwd, fetchStatus }) {
     error: status?.error ?? null,
     rows,
     drift,
+    // improvement — UNCHANGED contract: still the LAUNCHING project's own
+    // .claude-flow/improvement.json (server cwd), independent of Intelligence
+    // project selection below. Not part of the Intelligence redesign — this
+    // is a different subsystem ("is this project's own status stale") that
+    // never had a "which project" ambiguity to begin with.
     improvement: readJsonSafe(path.join(cwd, '.claude-flow', 'improvement.json')),
-    // health — UNCHANGED contract: the machine-health snapshot RING from
-    // .claude-flow/health-history.json (an array of point samples, each
-    // typically carrying a `patternsLearned` counter value and/or an
-    // `improvement`/`deltaPP` field — see appendHealthSnapshot's callers), or
-    // null if that file is absent. This is intel.healthRing forwarded
-    // verbatim; client.mjs's renderHistory() keeps reading it exactly as
-    // before this integration.
-    health: intel.healthRing,
-    // globalStats — the CURRENT (not historical) cumulative counters read
-    // straight from .claude-flow/neural/stats.json right now:
-    // { patternsLearned, trajectoriesRecorded, signalsProcessed,
-    // lastAdaptation }, or null if that file is absent. patternsLearned here
-    // is a LIFETIME counter and can legitimately be higher than
-    // patternStore.length below — the store gets pruned/compacted over time
-    // while this counter only ever climbs. Do not treat the two as
-    // interchangeable displays of "how many patterns exist".
-    globalStats: intel.globalStats,
-    // patternStore — every entry CURRENTLY PRESENT in the neural pattern
-    // store (.claude-flow/neural/patterns.json), as `{ createdAt, type }`
-    // pairs, NOT pre-bucketed by day (the client buckets). A point-in-time
-    // inventory of the store's live contents — distinct from
-    // globalStats.patternsLearned (a lifetime counter, see above) and
-    // distinct from health[] (machine-health samples, not pattern-store
-    // entries).
-    patternStore: intel.patternStore,
-    // graph — point-in-time samples of the reasoning graph's size over time
-    // (.claude-flow/data/intelligence-snapshot.json), as
-    // `{ timestamp, nodes, edges, pageRankSum }`, or null if that file is
-    // absent. A structural-growth series, independent of the three
-    // learning/pattern-count metrics above.
-    graph: intel.graph,
+    // intel — the machine-wide Intelligence feature's ENTIRE payload, newly
+    // designed from scratch (no relation to the prior alpha's flat
+    // health/globalStats/patternStore/graph top-level fields, which this
+    // supersedes and removes). Shape:
+    //   selectedProjectKey/selectedProjectLabel — which discovered project's
+    //     detail the four fields below describe; both null only when
+    //     discovery found zero ruflo-initialized projects on this machine.
+    //     Always present so the client can label the detail strip correctly
+    //     regardless of whether ?project was supplied.
+    //   projects — the full machine-wide catalog (most-recently-active
+    //     first, matching discoverRuvfloProjects()'s own sort), each row
+    //     `{ key, label, path, source }` — the key a client echoes back as
+    //     ?project=<key> to select a different project's detail. Without
+    //     this catalog, ?project= would be undiscoverable from the API
+    //     alone.
+    //   health/globalStats/patternStore/graph — readIntelHistory(selected
+    //     project's path)'s four series, UNCHANGED individual shapes from
+    //     the prior alpha (see intel-history.mjs's own header for why
+    //     patternStore and globalStats.patternsLearned must never be
+    //     conflated) — only their home moved, from top-level to nested here,
+    //     and their source moved, from the server's launching cwd to
+    //     whichever project is selected.
+    //   machineWide — intel-history.mjs's readMachineWideIntel() rollup
+    //     across EVERY discovered project, `{ totals, perProject }`. ALWAYS
+    //     the full machine-wide figure, independent of selectedProjectKey —
+    //     switching the selected project changes the four detail series
+    //     above, never this.
+    intel: {
+      selectedProjectKey: selected?.key ?? null,
+      selectedProjectLabel: selected?.label ?? null,
+      projects: projects.map(({ key, label, path: projectPath, source }) => (
+        { key, label, path: projectPath, source }
+      )),
+      health: selectedHistory.healthRing,
+      globalStats: selectedHistory.globalStats,
+      patternStore: selectedHistory.patternStore,
+      graph: selectedHistory.graph,
+      machineWide,
+    },
     routing: routingPayload(),
   };
 }
@@ -373,21 +500,6 @@ function lazyLive(liveOptions = {}) {
   };
 }
 
-/** Load the intelligence watcher only when /api/live/intelligence is first
- * requested — same "pay only when used" rationale as lazyLive. Unlike
- * LiveSessionsService's subscribe/replay pub-sub, IntelligenceWatch wires its
- * `onUpdate` once, at construction; the route below fans that single callback
- * out to every currently-connected client itself (see `broadcastIntel`). */
-function lazyIntelWatch(cwd, onUpdate) {
-  let instancePromise;
-  return async () => {
-    instancePromise ||= import('./live/intelligence-watch.mjs').then(({ IntelligenceWatch }) => (
-      new IntelligenceWatch({ cwd, onUpdate })
-    ));
-    return instancePromise;
-  };
-}
-
 /**
  * Start the dashboard HTTP server, bound to loopback only.
  * @param {{ port?: number, cwd?: string, fetchStatus?: () => Promise<any>, usage?: any,
@@ -395,7 +507,11 @@ function lazyIntelWatch(cwd, onUpdate) {
  *           liveClientBuffer?: number, liveMaxClients?: number, liveOptions?: any,
  *           liveIdleMs?: number, transcripts?: any, transcriptOptions?: any,
  *           transcriptClientBuffer?: number, transcriptMaxClients?: number,
- *           intelWatch?: any, intelClientBuffer?: number, intelMaxClients?: number }} [opts]
+ *           intelWatch?: ((projectPath: string, onUpdate: (combined: any) => void) =>
+ *             any|Promise<any>)|any,
+ *           intelClientBuffer?: number, intelMaxClients?: number,
+ *           discoverProjects?: () => Array<{ path: string, label: string, source?: string }>,
+ *           machineWideIntel?: (projects: Array<any>) => any }} [opts]
  * @returns {Promise<{ url: string, urlWithToken: string, port: number, token: string, close: () => Promise<void> }>}
  */
 export function startDashboard({
@@ -404,6 +520,7 @@ export function startDashboard({
   liveOptions = {}, liveIdleMs = 30_000, transcripts, transcriptOptions = {},
   transcriptClientBuffer = 64, transcriptMaxClients = 16,
   intelWatch, intelClientBuffer = 256, intelMaxClients = 32,
+  discoverProjects, machineWideIntel,
 } = {}) {
   const provide = fetchStatus || shellOutStatus(cwd);
   const usageApi = usage || lazyUsage();
@@ -483,38 +600,86 @@ export function startDashboard({
     return service;
   };
 
-  // ── /api/live/intelligence singleton plumbing ────────────────────────────
-  // `intelClients` mirrors `liveClients`/`transcriptClients`: cap-tracking
-  // AND the set force-closed on shutdown. `intelWriters` is separate — the
-  // subset of those clients' raw `write` functions the watcher's single
-  // `onUpdate` callback broadcasts to, since (unlike LiveSessionsService)
-  // IntelligenceWatch has no built-in per-subscriber pub-sub of its own.
+  // Shared, TTL-cached machine-wide project catalog + rollup — see the block
+  // comment above buildProjectSnapshotCache. One instance per dashboard
+  // server, used by BOTH /api/status and /api/live/intelligence so they can
+  // never scan the machine independently or disagree on results within the
+  // same TTL window.
+  const getProjectSnapshot = buildProjectSnapshotCache(
+    typeof discoverProjects === 'function' ? discoverProjects : discoverRuvfloProjects,
+    typeof machineWideIntel === 'function' ? machineWideIntel : readMachineWideIntel,
+  );
+
+  // ── /api/live/intelligence pool plumbing ──────────────────────────────────
+  // Was a single server-wide IntelligenceWatch hardcoded to the server's own
+  // cwd; now Intelligence is machine-wide and project-selectable, so this is
+  // a small POOL keyed by resolved project path instead — at most one
+  // watcher per DISTINCT project actually being watched by at least one SSE
+  // client, however many clients (on the same or different projects) are
+  // connected. `intelClients` mirrors `liveClients`/`transcriptClients`:
+  // cap-tracking AND the set force-closed on shutdown, across every project.
+  // `intelPool` is the per-project state: each entry owns its own `writers`
+  // set (only THIS project's SSE clients) and its own lazily-started,
+  // memoized IntelligenceWatch, since — unlike LiveSessionsService — that
+  // class has no built-in per-subscriber pub-sub of its own; each entry's
+  // `broadcast` fans its watch's single `onUpdate` out to only its own
+  // writers, so two clients watching two different projects never cross-talk.
   const intelClients = new Set();
-  const intelWriters = new Set();
-  const broadcastIntel = (combined) => {
-    const frame = transcriptSseFrame('update', combined);
-    for (const write of intelWriters) {
-      try { write(frame); } catch { /* a dead writer is reaped by its own cleanup */ }
+  const intelPool = new Map(); // resolved project path -> pool entry
+
+  // intelWatch injection contract for tests/embedders: a FUNCTION is called
+  // as (projectPath, onUpdate) -> watch|Promise<watch>, mirroring the pool's
+  // real per-path shape (a deliberate signature change from the old
+  // singleton's `() => watch`, part of this clean break). A non-function
+  // value is reused verbatim for EVERY project path — a single-project test
+  // convenience; the pool never re-wires that instance's own onUpdate, so a
+  // test using this form should only ever have one project selected.
+  const provideIntelWatchFor = typeof intelWatch === 'function'
+    ? intelWatch
+    : intelWatch
+      ? () => intelWatch
+      : (projectPath, onUpdate) => import('./live/intelligence-watch.mjs').then(
+        ({ IntelligenceWatch }) => new IntelligenceWatch({ cwd: projectPath, onUpdate }),
+      );
+
+  /** One pool entry per resolved project path. */
+  function createIntelPoolEntry(projectPath) {
+    const writers = new Set();
+    const broadcast = (combined) => {
+      const frame = transcriptSseFrame('update', combined);
+      for (const write of writers) {
+        try { write(frame); } catch { /* a dead writer is reaped by its own cleanup */ }
+      }
+    };
+    let watchPromise;
+    let startPromise;
+    let started = false;
+    const getWatch = async () => {
+      if (shuttingDown) throw new Error('dashboard is closing');
+      const watch = await (watchPromise ||= Promise.resolve()
+        .then(() => provideIntelWatchFor(projectPath, broadcast)));
+      if (shuttingDown) throw new Error('dashboard is closing');
+      if (!watch || typeof watch.start !== 'function' || typeof watch.stop !== 'function') {
+        throw new TypeError('intelligence watch must implement start and stop');
+      }
+      if (!started) await (startPromise ||= Promise.resolve()
+        .then(() => watch.start())
+        .then(() => { started = true; })
+        .catch((error) => { startPromise = null; throw error; }));
+      return watch;
+    };
+    const stop = async () => { try { (await watchPromise)?.stop?.(); } catch { /* best-effort */ } };
+    return { writers, getWatch, stop };
+  }
+
+  function getOrCreateIntelPoolEntry(projectPath) {
+    let entry = intelPool.get(projectPath);
+    if (!entry) {
+      entry = createIntelPoolEntry(projectPath);
+      intelPool.set(projectPath, entry);
     }
-  };
-  const provideIntelWatch = typeof intelWatch === 'function'
-    ? intelWatch : intelWatch ? async () => intelWatch : lazyIntelWatch(cwd, broadcastIntel);
-  let intelWatchPromise;
-  let intelWatchStartPromise;
-  let intelWatchStarted = false;
-  const getIntelWatch = async () => {
-    if (shuttingDown) throw new Error('dashboard is closing');
-    const watch = await (intelWatchPromise ||= Promise.resolve().then(provideIntelWatch));
-    if (shuttingDown) throw new Error('dashboard is closing');
-    if (!watch || typeof watch.start !== 'function' || typeof watch.stop !== 'function') {
-      throw new TypeError('intelligence watch must implement start and stop');
-    }
-    if (!intelWatchStarted) await (intelWatchStartPromise ||= Promise.resolve()
-      .then(() => watch.start())
-      .then(() => { intelWatchStarted = true; })
-      .catch((error) => { intelWatchStartPromise = null; throw error; }));
-    return watch;
-  };
+    return entry;
+  }
 
   const html = renderPage({ name: '@pacphi/agentic-kit', version: kitVersion() });
 
@@ -562,8 +727,28 @@ export function startDashboard({
 
     if (url === '/api/status') {
       let payload;
-      try { payload = await collectData({ cwd, fetchStatus: provide }); }
-      catch (e) { payload = { generatedAt: new Date().toISOString(), overall: 'unknown', rows: [], drift: null, improvement: null, health: null, globalStats: null, patternStore: [], graph: null, error: String(e && e.message || e) }; }
+      try {
+        payload = await collectData({
+          cwd, fetchStatus: provide, projectParam: query.get('project'), getProjectSnapshot,
+        });
+      } catch (e) {
+        payload = {
+          generatedAt: new Date().toISOString(), overall: 'unknown', rows: [], drift: null, improvement: null,
+          intel: {
+            selectedProjectKey: null, selectedProjectLabel: null, projects: [],
+            health: null, globalStats: null, patternStore: [], graph: null,
+            machineWide: {
+              totals: {
+                patternsLearnedLifetime: 0, patternStoreEntries: 0, trajectoriesRecorded: 0,
+                projectCount: 0, mostActiveProject: null,
+              },
+              perProject: [],
+            },
+          },
+          routing: null,
+          error: String(e && e.message || e),
+        };
+      }
       sendJson(res, 200, payload);
       return;
     }
@@ -718,10 +903,11 @@ export function startDashboard({
 
     if (url === '/api/live/intelligence') {
       // Same reservation-before-await discipline as /api/live/events above
-      // (sse.mjs's reserveClientSlot doc comment): getIntelWatch() may await a
-      // dynamic import() + watch.start() on the very first connection, and
-      // concurrent requests arriving during that gap must not all observe the
-      // same pre-reservation size and all pass the cap.
+      // (sse.mjs's reserveClientSlot doc comment): resolving + starting a
+      // project's pool entry may await a dynamic import() + watch.start() on
+      // that project's very first connection, and concurrent requests
+      // arriving during that gap must not all observe the same
+      // pre-reservation size and all pass the cap.
       const maxClients = Math.max(1, Math.min(256, Number(intelMaxClients) || 32));
       const slot = reserveClientSlot(intelClients, maxClients);
       if (!slot) {
@@ -740,12 +926,31 @@ export function startDashboard({
       req.once('close', cleanup);
       res.once('close', cleanup);
 
-      try { await getIntelWatch(); } catch {
+      // Same ?project=<key> resolution as /api/status, off the SAME cached
+      // discovery snapshot — the two endpoints can never disagree about
+      // which project an absent/unresolvable key defaults to.
+      const { projects } = getProjectSnapshot();
+      const selected = resolveSelectedProject(projects, query.get('project'));
+      if (!selected) {
         intelClients.delete(slot);
+        sendJson(res, 503, { error: 'no ruflo-initialized project found on this machine' });
+        return;
+      }
+      const poolEntry = getOrCreateIntelPoolEntry(selected.path);
+
+      try { await poolEntry.getWatch(); } catch {
+        intelClients.delete(slot);
+        // Nobody else is (yet) watching this path — don't leave a dead entry
+        // behind for the next request to trip over.
+        if (poolEntry.writers.size === 0) intelPool.delete(selected.path);
         sendJson(res, 503, { error: 'intelligence telemetry unavailable' });
         return;
       }
-      if (earlyClosed || clientGone(req, res)) { intelClients.delete(slot); return; }
+      if (earlyClosed || clientGone(req, res)) {
+        intelClients.delete(slot);
+        if (poolEntry.writers.size === 0) intelPool.delete(selected.path);
+        return;
+      }
 
       res.writeHead(200, {
         'content-type': 'text/event-stream; charset=utf-8',
@@ -762,26 +967,35 @@ export function startDashboard({
       // scrubbing sseFrame applies is not the right tool here.
       const channel = sseChannel(res, {
         limit, heartbeatMs: liveHeartbeatMs,
-        onOverflow: () => transcriptSseFrame('init', readIntelHistory(cwd)),
+        onOverflow: () => transcriptSseFrame('init', readIntelHistory(selected.path)),
       });
       const write = channel.write;
 
       realCleanup = (terminate = false) => {
         if (channel.isClosed()) return;
         channel.cleanup(terminate);
-        intelWriters.delete(write);
+        poolEntry.writers.delete(write);
         intelClients.delete(cleanup);
+        // Last writer for this project gone — stop its watcher and forget
+        // the pool entry entirely, so an unwatched project's watcher does
+        // not run forever (the exact leak this pool replaces the old
+        // singleton to avoid).
+        if (poolEntry.writers.size === 0) {
+          intelPool.delete(selected.path);
+          void poolEntry.stop();
+        }
       };
       intelClients.delete(slot);
       intelClients.add(cleanup);
-      intelWriters.add(write);
+      poolEntry.writers.add(write);
       if (earlyClosed) { cleanup(true); return; }
 
-      // One initial frame with the current combined read so a fresh page load
-      // doesn't have to wait out the watcher's own debounce window; every
-      // frame after this is pushed by IntelligenceWatch's onUpdate via
-      // broadcastIntel.
-      write(transcriptSseFrame('init', readIntelHistory(cwd)));
+      // One initial frame with the current combined read for the SELECTED
+      // project so a fresh page load doesn't have to wait out the watcher's
+      // own debounce window; every frame after this is pushed by that
+      // project's IntelligenceWatch onUpdate, fanned out to every writer
+      // currently watching this same path (and only this path).
+      write(transcriptSseFrame('init', readIntelHistory(selected.path)));
       channel.startHeartbeat();
       return;
     }
@@ -1063,7 +1277,14 @@ export function startDashboard({
           await new Promise((res) => server.close(() => res(undefined)));
           await stopLive({ force: true });
           try { await (await transcriptServicePromise)?.close?.(); } catch {}
-          try { (await intelWatchPromise)?.stop?.(); } catch {}
+          // Backstop: each intel client's own cleanup above already stops +
+          // deletes its pool entry the instant its last writer disconnects,
+          // so this is normally a no-op — but stop every REMAINING entry
+          // (e.g. one still mid-start with zero writers) rather than assume
+          // that cascade always wins the race, so every pool watcher is
+          // stopped on shutdown, not just one.
+          for (const entry of [...intelPool.values()]) { try { await entry.stop(); } catch {} }
+          intelPool.clear();
         },
       });
     });

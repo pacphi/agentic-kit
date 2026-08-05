@@ -2,10 +2,90 @@
 
 - **Status:** Implemented
 - **Date:** 2026-08-05
+- **Updated:** 2026-08-05
+- **Update note:** Extended Intelligence from one project's telemetry, implicitly tied to the
+  dashboard server's own launching cwd, to a machine-wide catalog of every ruflo-initialized
+  project plus an explicitly selected, explicitly labeled detail project (defaulting to
+  most-recently-active). This is a deliberate clean-break redesign of `/api/status`'s `intel`
+  payload shape, made because the project is still on the pre-release `4.0.0-alpha` line with no
+  external compatibility guarantee — not a shape preserved for, or falling back to, the prior
+  single-project form.
 - **Deciders:** agentic-kit maintainers
 - **Related:** [ADR-0005](0005-dashboard-in-page-routing-reveal.md),
   [ADR-0009](0009-usage-scorecard-local-transcript-analytics.md),
   [ADR-0012](0012-observability.md)
+
+**2026-08-05 machine-wide discovery amendment:** `src/lib/dashboard/project-discovery.mjs` adds
+`discoverRuvfloProjects()`, unioning three sources into one deduplicated, most-recently-active-first
+catalog of every project on this machine ruflo has genuinely initialized — a `.claude-flow/neural/`
+subdirectory present, not merely a bare `.claude-flow/`. Source 1 reuses `registryWorkspaces()` from
+`daemons.mjs` verbatim (imported, not reimplemented; given a bare `export` so it could be imported
+at all — the one change made outside this new module) to walk
+`~/.claude-flow/{ai-jobs.json,workspace-leases.json,repo-supervisors.json}`. Source 2
+cross-references Observability's own `WorkspaceSnapshotStore`
+(`~/.config/agentic-kit/observability-workspaces.json`, [ADR-0012](0012-observability.md)) for any
+record carrying a resolvable absolute path. That store's own privacy sanitizers reject one on
+write and on read — `repositoryLabel` rejects any path separator, `directoryLabel` rejects anything
+absolute-looking — so source 2 is structurally empty by that store's own design, not a gap; the
+defensive per-record check nonetheless stays in place rather than being removed, so it starts
+contributing automatically if that schema ever grows a real path field. This cross-reference is
+discovery-only: it never supplies evidence, confidence, or any value this domain renders, only a
+candidate project path, preserving the reasoning in
+["Why this is a separate context, not Observability"](../ddd/project-intelligence.md#why-this-is-a-separate-context-not-observability).
+`intel-history.mjs` adds `readMachineWideIntel(projects)`, folding `readIntelHistory()` across
+every discovered project into one `{ totals, perProject }` rollup. At machine scope, exactly as at
+single-project scope, the lifetime patterns-learned counter and the pattern-store's current size
+remain two distinct, never-conflated sums: `totals.patternsLearnedLifetime` sums each project's
+cumulative `globalStats.patternsLearned`; `totals.patternStoreEntries` sums each project's current
+`patternStore.length`. A project whose read turns up missing or malformed data degrades that
+project's row to nulls/zeros rather than aborting the whole machine-wide scan.
+
+**2026-08-05 discovery correction — real transcript content is source 3, and is the source that
+actually matters in practice:** `daemons.mjs`'s own header comment assumes ruflo 3.28+ reliably
+writes the central `~/.claude-flow/{ai-jobs,workspace-leases,repo-supervisors}.json` registry
+files source 1 depends on. Verified against a real, actively-used development machine (ruflo
+3.34.0): none of those three files exist, even though that machine has multiple real,
+ruflo-initialized projects with populated `.claude-flow/neural/` trees, including a per-project
+`.claude-flow/daemon.pid`/`daemon-state.json` proving a daemon genuinely ran there — so source 1
+returned an empty set, and with source 2 structurally empty by design (above),
+`discoverRuvfloProjects()` returned `[]` on a machine where the feature had real, correct data to
+find. Source 3 fixes this: it reads real absolute `cwd` values directly out of Claude and Codex
+transcript content under `~/.claude/projects/**/*.jsonl` and `~/.codex/sessions/**/*.jsonl`, via
+the exact `discoverJsonl()`/`bootstrapRecords()` functions `live-sessions-service.mjs` already
+trusts for Observability — flat `record.cwd` for Claude, `record.payload.cwd` for Codex's
+`session_meta`/`turn_context` records. Unlike source 2's persisted, privacy-sanitized registry,
+raw transcripts are not sanitized and do carry a resolvable path — legitimately readable at this
+trust boundary since it is the same user, same machine, and same files Observability itself
+already parses. Bounded to the 150 most-recently-modified transcripts per host (`discoverJsonl`'s
+own recency sort) so cost stays flat regardless of how many sessions a project has accumulated;
+overlap with sources 1/2 dedups for free through the existing resolved-path merge. Verified on the
+same real machine: `discoverRuvfloProjects()` now returns all 4 real ruflo-initialized projects in
+under a second.
+
+**2026-08-05 selectable delivery amendment:** This is a deliberate clean-break redesign of
+`/api/status`'s `intel` payload, not a shape preserved for, or falling back to, the prior
+single-project form — warranted because the project is still on the pre-release `4.0.0-alpha` line
+with no external compatibility guarantee yet. The former flat top-level `health`/`globalStats`/
+`patternStore`/`graph` fields are replaced by one nested `intel` object: `{ selectedProjectKey,
+selectedProjectLabel, projects, health, globalStats, patternStore, graph, machineWide }`.
+`projects` is the full machine-wide catalog (`{ key, label, path, source }` rows,
+most-recently-active first); `machineWide` is always the full `readMachineWideIntel()` rollup,
+independent of selection. Both `GET /api/status` and `GET /api/live/intelligence` accept the same
+optional `?project=<key>` query parameter — `<key>` is the opaque `project:<16-hex>` form
+`resolveProjectIdentity(path).key` emits, deliberately not `stableProjectKey`, which reduces its
+input to a bare directory-name label before hashing and would collapse two same-named-but-different
+projects onto one selection key — and resolve it through the identical shared
+`resolveSelectedProject(projects, rawParam)` helper, so the two routes can never disagree about
+what an absent or unresolvable key defaults to: `discoverRuvfloProjects()`'s own
+most-recently-active-first sort, never the server's launching cwd. `GET /api/live/intelligence`
+answers `503` if machine-wide discovery finds zero ruflo-initialized projects at all, rather than
+picking anything. The prior server-wide singleton `IntelligenceWatch` is replaced by a small pool
+keyed by resolved project path: a project's watcher is created lazily on its first SSE subscriber
+and stopped and forgotten the moment its last subscriber for that project disconnects, so two
+clients watching different projects never cross-talk and an unwatched project's watcher never runs
+unbounded. **"This project" as an implicit, unlabeled, cwd-bound default no longer exists anywhere
+in this contract** — the detail strip is always an explicitly selected, explicitly labeled project,
+defaulting to whichever discovered project was most recently active.
 
 ## Context
 
@@ -155,10 +235,14 @@ path.
 
 ## References
 
-- `src/lib/dashboard/intel-history.mjs`, `tests/kit/intel-history.test.mjs`
+- `src/lib/dashboard/intel-history.mjs` (`readIntelHistory`, `readMachineWideIntel`),
+  `tests/kit/intel-history.test.mjs`
+- `src/lib/dashboard/project-discovery.mjs` (`discoverRuvfloProjects`),
+  `tests/kit/project-discovery.test.mjs`
 - `src/lib/live/intelligence-watch.mjs`, `tests/kit/intelligence-watch.test.mjs`
-- `src/lib/dashboard-server.mjs` (`collectData`, `GET /api/live/intelligence`, `lazyIntelWatch`)
-- `src/lib/dashboard/client.mjs`, `src/lib/dashboard/page.mjs` (Intelligence panel rendering, SSE
-  subscription)
+- `src/lib/dashboard-server.mjs` (`collectData`, `buildProjectSnapshotCache`,
+  `resolveSelectedProject`, `GET /api/live/intelligence`'s `intelPool`)
+- `src/lib/dashboard/client.mjs`, `src/lib/dashboard/page.mjs` (Intelligence panel rendering,
+  machine-wide rollup, project picker, SSE subscription)
 - [Project intelligence domain](../ddd/project-intelligence.md)
 - [Dashboard guide](../DASHBOARD.md)

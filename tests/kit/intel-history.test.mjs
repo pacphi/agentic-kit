@@ -15,6 +15,7 @@ import {
   readHealthRing,
   appendHealthSnapshot,
   readIntelHistory,
+  readMachineWideIntel,
 } from '../../src/lib/dashboard/intel-history.mjs';
 
 const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'ak-intel-history-'));
@@ -245,5 +246,157 @@ test('readIntelHistory tolerates every source being absent', () => {
     graph: null,
     healthRing: null,
     globalStats: null,
+  });
+});
+
+// ── readMachineWideIntel ─────────────────────────────────────────────────
+
+test('readMachineWideIntel aggregates totals and perProject rows across multiple fixture projects', () => {
+  const cwdAlpha = tmp();
+  writeFixture(cwdAlpha, '.claude-flow/neural/patterns.json', [
+    { id: 'a1', type: 'action', createdAt: 1 },
+    { id: 'a2', type: 'action', createdAt: 2 },
+  ]);
+  writeFixture(cwdAlpha, '.claude-flow/neural/stats.json', {
+    patternsLearned: 10, trajectoriesRecorded: 4, signalsProcessed: 0, lastAdaptation: 1000,
+  });
+  writeFixture(cwdAlpha, '.claude-flow/data/intelligence-snapshot.json', [
+    { timestamp: 1, nodes: 3, edges: 2, pageRankSum: 0.1 },
+    { timestamp: 2, nodes: 5, edges: 8, pageRankSum: 0.2 },
+  ]);
+
+  const cwdBeta = tmp();
+  writeFixture(cwdBeta, '.claude-flow/neural/patterns.json', [
+    { id: 'b1', type: 'result', createdAt: 1 },
+    { id: 'b2', type: 'result', createdAt: 2 },
+    { id: 'b3', type: 'result', createdAt: 3 },
+  ]);
+  writeFixture(cwdBeta, '.claude-flow/neural/stats.json', {
+    patternsLearned: 20, trajectoriesRecorded: 6, signalsProcessed: 0, lastAdaptation: 2000,
+  });
+
+  const result = readMachineWideIntel([
+    { path: cwdAlpha, label: 'Alpha' },
+    { path: cwdBeta, label: 'Beta' },
+  ]);
+
+  assert.deepEqual(result.totals, {
+    patternsLearnedLifetime: 30,
+    patternStoreEntries: 5,
+    trajectoriesRecorded: 10,
+    projectCount: 2,
+    mostActiveProject: 'Beta',
+  });
+  assert.deepEqual(result.perProject, [
+    {
+      path: cwdAlpha, label: 'Alpha', patternsLearned: 10, patternStoreCount: 2,
+      trajectoriesRecorded: 4, graphLatest: { nodes: 5, edges: 8 }, lastAdaptation: 1000,
+    },
+    {
+      path: cwdBeta, label: 'Beta', patternsLearned: 20, patternStoreCount: 3,
+      trajectoriesRecorded: 6, graphLatest: null, lastAdaptation: 2000,
+    },
+  ]);
+});
+
+test('readMachineWideIntel keeps patternsLearnedLifetime and patternStoreEntries as visibly different sums', () => {
+  const cwdAlpha = tmp();
+  writeFixture(cwdAlpha, '.claude-flow/neural/patterns.json', [
+    { id: 'a1', type: 'action', createdAt: 1 },
+    { id: 'a2', type: 'action', createdAt: 2 },
+  ]);
+  writeFixture(cwdAlpha, '.claude-flow/neural/stats.json', { patternsLearned: 500 });
+
+  const cwdBeta = tmp();
+  writeFixture(cwdBeta, '.claude-flow/neural/patterns.json', [
+    { id: 'b1', type: 'result', createdAt: 1 },
+  ]);
+  writeFixture(cwdBeta, '.claude-flow/neural/stats.json', { patternsLearned: 300 });
+
+  const { totals } = readMachineWideIntel([
+    { path: cwdAlpha, label: 'Alpha' },
+    { path: cwdBeta, label: 'Beta' },
+  ]);
+
+  assert.equal(totals.patternsLearnedLifetime, 800); // lifetime counters: 500 + 300
+  assert.equal(totals.patternStoreEntries, 3); // entries on disk right now: 2 + 1
+  assert.notEqual(totals.patternsLearnedLifetime, totals.patternStoreEntries);
+});
+
+test('readMachineWideIntel degrades a project with missing/malformed data to nulls/zeros without aborting the whole call', () => {
+  const cwdGood = tmp();
+  writeFixture(cwdGood, '.claude-flow/neural/patterns.json', [
+    { id: 'g1', type: 'action', createdAt: 1 },
+    { id: 'g2', type: 'action', createdAt: 2 },
+  ]);
+  writeFixture(cwdGood, '.claude-flow/neural/stats.json', {
+    patternsLearned: 10, trajectoriesRecorded: 4, signalsProcessed: 0, lastAdaptation: 999,
+  });
+
+  const cwdEmpty = tmp(); // no .claude-flow tree at all
+
+  const cwdMalformed = tmp();
+  writeFixture(cwdMalformed, '.claude-flow/neural/patterns.json', '{not valid json');
+  writeFixture(cwdMalformed, '.claude-flow/neural/stats.json', '{ broken');
+
+  const result = readMachineWideIntel([
+    { path: cwdGood, label: 'Good' },
+    { path: cwdEmpty, label: 'Empty' },
+    { path: cwdMalformed, label: 'Malformed' },
+  ]);
+
+  assert.deepEqual(result.totals, {
+    patternsLearnedLifetime: 10,
+    patternStoreEntries: 2,
+    trajectoriesRecorded: 4,
+    projectCount: 3,
+    mostActiveProject: 'Good',
+  });
+  assert.deepEqual(result.perProject[1], {
+    path: cwdEmpty, label: 'Empty', patternsLearned: null, patternStoreCount: 0,
+    trajectoriesRecorded: null, graphLatest: null, lastAdaptation: null,
+  });
+  assert.deepEqual(result.perProject[2], {
+    path: cwdMalformed, label: 'Malformed', patternsLearned: null, patternStoreCount: 0,
+    trajectoriesRecorded: null, graphLatest: null, lastAdaptation: null,
+  });
+});
+
+test('readMachineWideIntel picks mostActiveProject by the highest lastAdaptation, and null when none have adaptation data', () => {
+  const cwdOld = tmp();
+  writeFixture(cwdOld, '.claude-flow/neural/stats.json', { patternsLearned: 1, lastAdaptation: 500 });
+  const cwdNewer = tmp();
+  writeFixture(cwdNewer, '.claude-flow/neural/stats.json', { patternsLearned: 1, lastAdaptation: 1500 });
+  const cwdNewest = tmp();
+  writeFixture(cwdNewest, '.claude-flow/neural/stats.json', { patternsLearned: 1, lastAdaptation: 999999 });
+
+  const withAdaptation = readMachineWideIntel([
+    { path: cwdOld, label: 'Old' },
+    { path: cwdNewest, label: 'Newest' },
+    { path: cwdNewer, label: 'Newer' },
+  ]);
+  assert.equal(withAdaptation.totals.mostActiveProject, 'Newest');
+
+  const cwdNoStats = tmp(); // no stats.json → globalStats null
+  const cwdZeroAdaptation = tmp();
+  writeFixture(cwdZeroAdaptation, '.claude-flow/neural/stats.json', { patternsLearned: 1 }); // lastAdaptation defaults to 0
+
+  const withoutAdaptation = readMachineWideIntel([
+    { path: cwdNoStats, label: 'NoStats' },
+    { path: cwdZeroAdaptation, label: 'ZeroAdaptation' },
+  ]);
+  assert.equal(withoutAdaptation.totals.mostActiveProject, null);
+});
+
+test('readMachineWideIntel returns zeroed totals and an empty perProject for an empty projects array', () => {
+  assert.deepEqual(readMachineWideIntel([]), {
+    totals: {
+      patternsLearnedLifetime: 0,
+      patternStoreEntries: 0,
+      trajectoriesRecorded: 0,
+      projectCount: 0,
+      mostActiveProject: null,
+    },
+    perProject: [],
   });
 });
