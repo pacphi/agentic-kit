@@ -291,8 +291,18 @@ Agentic-QE cannot currently configure OpenCode-routed court models. The dashboar
 seat from an OpenCode process heartbeat.
 
 The default dashboard automatically discovers Claude and Codex transcript files, observes
-supported controller processes, and reads the Codex state ledger. It does **not** search arbitrary ruflo,
-agentic-qe, plugin, or skill stores. Register a structured source
+supported controller processes, and reads the Codex state ledger. On macOS and Linux,
+process discovery is selected by the real numeric UID running the dashboard. It first reads
+only PID/parent/start/command columns, then requests full argv only for Node or known
+host-controller candidates from that selection. Separate OS accounts are outside the
+intended survey; people sharing one login, a service running under that account, and a
+container sharing the host PID namespace remain inside the same numeric-UID boundary.
+Do not run the dashboard with `sudo`. Windows runtime process discovery is unsupported,
+and missing/restricted `ps`, `lsof`, or `/proc` degrades runtime presence without removing
+retained transcript/history evidence. The argv lookup is a second process-table query; a PID
+could theoretically be reused between selection and lookup, so current-UID selection is a
+least-privilege reduction rather than a hard isolation boundary. It does **not** search arbitrary
+ruflo, agentic-qe, plugin, or skill stores. Register a structured source
 explicitly with repeatable `--live-source 'surface=path'`, where `surface` is
 exactly `ruflo` or `aqe`.
 

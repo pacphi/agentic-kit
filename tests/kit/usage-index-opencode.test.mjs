@@ -152,6 +152,26 @@ test('the incremental cache: a warm scan reuses unchanged sessions and picks up 
   rm(sb.dir);
 });
 
+test('a corrupt OpenCode store preserves last-good usage and surfaces degraded source health', async () => {
+  const at = NOW - DAY;
+  const sb = sandbox({
+    sessions: [{ id: 'ses_last_good', directory: '/x', title: 'last good', timeCreated: at }],
+    messages: [userMsg('u1', 'ses_last_good', at), assistantMsg('a1', 'ses_last_good', at + 1000, { cost: 0.4 })],
+  });
+  const first = await buildIndex(opts(sb));
+  assert.equal(first.sourceHealth.opencode.status, 'ok');
+  assert.equal(first.sessions.find((x) => x.id === 'ses_last_good').cost, 0.4);
+
+  fs.rmSync(sb.dbFile);
+  fs.writeFileSync(sb.dbFile, 'not a sqlite database');
+  _resetForTest();
+  const degraded = await buildIndex(opts(sb));
+  assert.deepEqual(degraded.sourceHealth.opencode, { status: 'degraded', reason: 'corrupt' });
+  assert.equal(degraded.sessions.find((x) => x.id === 'ses_last_good').cost, 0.4,
+    'a transient source failure must not become an observed zero');
+  rm(sb.dir);
+});
+
 test('overridden roots WITHOUT an opencode key never read any opencode store (hermeticity)', async () => {
   const at = NOW - DAY;
   const sb = sandbox({

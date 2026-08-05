@@ -1,7 +1,10 @@
 # ADR-0008 — Machine-scoped guidance blocks land in machine files, not a repo's AGENTS.md
 
-- **Status:** Accepted
+- **Status:** Implemented
 - **Date:** 2026-07-24
+- **Updated:** 2026-08-04
+- **Update note:** ADR-0023 made the promised guidance backup fail-closed and the replacement atomic;
+  an unusable `.bak` now aborts before the machine guidance file changes.
 - **Deciders:** agentic-kit maintainers
 
 ## Context
@@ -65,10 +68,11 @@ mechanism that removes the leaked block (from `371da30`) on the next `ak sync` i
 
 ### 4. Backup parity and no spurious writes
 
-`~/.codex/AGENTS.md` gets the same one-time `.bak`-before-first-rewrite contract as
+`~/.codex/AGENTS.md` gets the same fail-closed one-time `.bak`-before-first-rewrite contract as
 `~/.claude/CLAUDE.md`. `syncBlocks` writes only when content actually changes, so a
 single-host codex machine (dual block not wanted, nothing present) yields **no file and no
-backup** — the target is discovered but nothing is written.
+backup** — the target is discovered but nothing is written. Replacements use a same-directory
+temporary file plus atomic rename; a missing backup must be created successfully before replacement.
 
 ## Consequences
 

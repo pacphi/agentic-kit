@@ -22,8 +22,11 @@ import * as adb from '../lib/agentdb.mjs';
 import { readJson, writeJsonWithBackup } from '../lib/settings.mjs';
 import { withDb } from '../lib/sqlite.mjs';
 import { findMemoryEntry } from '../lib/project-memory.mjs';
+import {
+  setupTrustManifest, trustChangesForHost, trustManifestLines,
+} from '../lib/trust-manifest.mjs';
 import * as paths from '../lib/paths.mjs';
-import { ok, warn, fail, info, heading, bold, dim } from '../lib/output.mjs';
+import { ok, warn, fail, info, heading, bold, dim, reportOutcome } from '../lib/output.mjs';
 
 export const options = {
   'dry-run': { type: 'boolean', default: false },
@@ -68,7 +71,8 @@ Options:
                      codex implies --codex and mirrors the routing defaults so
                      codex drives with claude as the alternate.
   --reconfigure    re-run interactive choices, ignoring saved kit.json
-  --yes            accept all prompts (non-interactive)
+  --yes            accept prompts non-interactively; still prints the host-neutral
+                     setup trust manifest before any machine/user/project changes
   --dry-run        print the plan; change nothing
 
 Examples:
@@ -79,12 +83,49 @@ Examples:
   ak setup --project --yes    force project setup, no prompts`;
 
 const ask = async (q, dflt, yes) => {
-  if (yes || !process.stdin.isTTY) return dflt;
+  if (yes) return true;
+  if (!process.stdin.isTTY) return dflt;
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
   const a = (await rl.question(`${q} [${dflt ? 'Y/n' : 'y/N'}] `)).trim().toLowerCase();
   rl.close();
   return a === '' ? dflt : a.startsWith('y');
 };
+
+export const PROJECT_PERMISSION_MANIFEST = Object.freeze(
+  trustChangesForHost('claude', { kind: 'auto-approve' }).map((entry) => ({
+    owner: entry.owner, rule: entry.value, effect: entry.effect,
+  })),
+);
+
+export function projectPermissionManifest(cfg) {
+  const claude = setupTrustManifest(cfg, { project: true })
+    .find((group) => group.hostId === 'claude');
+  return (claude?.changes ?? []).filter((entry) => entry.kind === 'auto-approve')
+    .map((entry) => ({ owner: entry.owner, rule: entry.value, effect: entry.effect }));
+}
+
+export function discloseSetupTrust(cfg, { project = false } = {}) {
+  const manifest = setupTrustManifest(cfg, { project });
+  if (!manifest.length) return manifest;
+  info('setup trust manifest (evaluated before any machine, user, or project changes):');
+  for (const line of trustManifestLines(manifest)) console.log(`  ${line}`);
+  return manifest;
+}
+
+const allowRules = (file) => {
+  const allow = readJson(file, {})?.permissions?.allow;
+  return Array.isArray(allow) ? allow.filter((rule) => typeof rule === 'string') : [];
+};
+
+export function removeUndisclosedPermissions(file, before, authorized) {
+  const doc = readJson(file, {}) ?? {};
+  const allow = Array.isArray(doc.permissions?.allow) ? doc.permissions.allow : [];
+  const unexpected = allow.filter((rule) => !before.has(rule) && !authorized.has(rule));
+  if (!unexpected.length) return [];
+  doc.permissions.allow = allow.filter((rule) => !unexpected.includes(rule));
+  writeJsonWithBackup(file, doc);
+  return unexpected;
+}
 
 export async function run_machine({ flags, pkgRoot, cfg }) {
   heading('machine setup');
@@ -120,7 +161,7 @@ export async function run_machine({ flags, pkgRoot, cfg }) {
       if (await ask('Install the RuvNet Brain (~2 GB offline KB, powers the search_ruvnet MCP)?', true, flags.yes)) {
         info('installing ruvnet-brain via npx (downloads the KB — may take a while)…');
         const r = await heal.installRuvnetBrain();
-        (r.ok ? ok : warn)(`ruvnet-brain: ${r.detail}`);
+        reportOutcome('ruvnet-brain', r);
       } else warn('ruvnet-brain skipped — install later with `ak sync` (or `ak setup --no-ruvnet-brain` to stop asking)');
     } else ok('ruvnet-brain present (refresh to the latest release with `ak sync`)');
   }
@@ -128,10 +169,10 @@ export async function run_machine({ flags, pkgRoot, cfg }) {
   // 2. heal natives + the #2670 aidefence gap up front. The aidefence heal is
   // the security surface — it honors `--no-security` (cfg.security=false),
   // which was previously write-only: documented, persisted, read by nothing.
-  ok(`natives: ${(await heal.healNatives()).detail}`);
-  if (cfg.security !== false) ok(`aidefence: ${(await heal.healAidefence()).detail}`);
+  reportOutcome('natives', await heal.healNatives());
+  if (cfg.security !== false) reportOutcome('aidefence', await heal.healAidefence());
   else info('security surface skipped (kit.json security:false — re-enable by removing the key)');
-  if (cfg.aqe) info(`aqe solver: ${(await heal.healAqeSolver()).detail}`);
+  if (cfg.aqe) reportOutcome('aqe solver', await heal.healAqeSolver());
 
   // 3. token-audit skill → ~/.claude/skills
   const skillSrc = path.join(pkgRoot, 'claude', 'skills', 'ruflo-token-audit');
@@ -205,15 +246,25 @@ export async function run_machine({ flags, pkgRoot, cfg }) {
   return true;
 }
 
-export async function run_project({ flags, cfg }) {
+export async function run_project({ flags, cfg, trustDisclosed = false }) {
   const root = process.cwd();
   heading(`project setup — ${root}`);
+  if (!trustDisclosed) discloseSetupTrust(cfg, { project: true });
   if (flags['dry-run']) { info('dry-run: would init, sanitize, pin DB path, activate memory/swarm/daemon, verify'); return true; }
+
+  const permissionsFile = paths.projectSettings(root);
+  const permissionsBefore = new Set(allowRules(permissionsFile));
+  const authorizedPermissions = new Set(projectPermissionManifest(cfg).map((entry) => entry.rule));
 
   // 1. ruflo init (--force regenerates; CLAUDE.md backed up upstream, #2208)
   const init = await runCmd('ruflo', ['init', '--full', '--force'], { cwd: root, timeout: 300_000 });
   (init.code === 0 ? ok : fail)('ruflo init --full');
   if (init.code !== 0) return false;
+  const rufloUnexpected = removeUndisclosedPermissions(permissionsFile, permissionsBefore, authorizedPermissions);
+  if (rufloUnexpected.length) {
+    fail(`ruflo init introduced undisclosed auto-approve rules; removed: ${rufloUnexpected.join(', ')}`);
+    return false;
+  }
 
   // 2. statusline heal is DEFERRED to the end of project setup (see step 10):
   //    fixStatusline is a no-op until ruflo/aqe have finished writing
@@ -271,11 +322,13 @@ export async function run_project({ flags, cfg }) {
   if (landed) {
     // Bound parameters, not interpolation. Delete only this disposable probe
     // from the store that actually received it.
-    withDb(landed.file, (db) => {
+    const cleanup = withDb(landed.file, (db) => {
       db.prepare('DELETE FROM memory_entries WHERE namespace = ? AND key = ?').run('_setup', probeKey);
       db.exec('PRAGMA wal_checkpoint(TRUNCATE);');
-    }, null, { readonly: false });
-    ok(`memory write VERIFIED (store → ${path.basename(landed.file)} row confirmed)`);
+      return true;
+    }, { readonly: false });
+    if (cleanup.ok) ok(`memory write VERIFIED (store → ${path.basename(landed.file)} row confirmed)`);
+    else warn(`memory write verified, but probe cleanup ${cleanup.error.kind} — remove ${probeKey} from _setup manually`);
   } else {
     fail('memory write verification FAILED — run: ak status / ruflo doctor -c memory');
   }
@@ -298,6 +351,11 @@ export async function run_project({ flags, cfg }) {
     const withCodex = !!cfg.integrations?.hosts?.codex && aqeSupportsAgentOverrides();
     const aqe = await runCmd('aqe', ['init', '--auto', ...(withCodex ? ['--with-codex'] : [])], { cwd: root, timeout: 300_000 });
     (aqe.code === 0 ? ok : warn)(`agentic-qe initialized${withCodex ? ' (+ codex skills)' : ''}`);
+    const aqeUnexpected = removeUndisclosedPermissions(permissionsFile, permissionsBefore, authorizedPermissions);
+    if (aqeUnexpected.length) {
+      fail(`agentic-qe init introduced undisclosed auto-approve rules; removed: ${aqeUnexpected.join(', ')}`);
+      return false;
+    }
   }
 
   // 9.5 frontier host/provider wiring — reapply kit.json prefs (no-op at the
@@ -352,22 +410,38 @@ ruflo swarm init --topology hierarchical --max-agents 15 --strategy specialized
 \`\`\`
 `;
 
-export async function run({ flags, pkgRoot }) {
+export async function run({ flags, pkgRoot, confirm = ask }) {
   const cfg = loadKitConfig();
   if (flags['no-aqe']) cfg.aqe = false;
   if (flags['no-ruvnet-brain']) cfg.ruvnetBrain = false;
   if (flags['no-security']) cfg.security = false;
 
+  const inProject = flags.project
+    || (fs.existsSync(path.join(process.cwd(), '.git')) && process.cwd() !== paths.home);
+  const willConfigureProject = inProject && !flags.minimal;
+
+  // Apply host flags to the in-memory config before preflight so the manifest
+  // describes this invocation, including a newly requested host. Dry-run never
+  // persists this object; a declined confirmation returns before saveKitConfig.
+  const hostFlags = applySetupHostFlags(cfg, flags);
+  const trustManifest = discloseSetupTrust(cfg, { project: willConfigureProject });
+  if (trustManifest.length) {
+    if (!flags['dry-run'] && !(await confirm(
+      'Proceed with setup and these trust changes?', false, flags.yes))) {
+      info('setup cancelled before machine, user, or project changes');
+      return 0;
+    }
+  }
+
   // --codex / --primary-host: opt codex in BEFORE run_machine's host-install loop
   // and run_project's dual wiring, so the existing gated/prompted/external-safe
   // paths install + wire codex. No-op (claude-only) when neither flag is passed.
-  // Skipped on --dry-run: saveKitConfig below runs unconditionally, so mutating
-  // cfg here would persist during a dry-run — "change nothing" must hold.
+  // Dry-run applies these choices in memory for an accurate plan, but never
+  // persists the resulting config.
   if (flags['dry-run']) {
     if (flags.codex || flags['primary-host']) info('dry-run: --codex/--primary-host would enable + install the codex host and wire dual-mode (no changes made)');
     if (flags.opencode) info('dry-run: --opencode would enable the opencode host and wire it (no changes made)');
   } else {
-    const hostFlags = applySetupHostFlags(cfg, flags);
     for (const w of hostFlags.warnings) warn(w);
     if (hostFlags.changed) {
       if (flags.codex || flags['primary-host'] === 'codex') {
@@ -380,16 +454,14 @@ export async function run({ flags, pkgRoot }) {
   }
 
   if (!(await run_machine({ flags, pkgRoot, cfg }))) return 1;
-  // "--dry-run: print the plan; change nothing" — an unconditional save CREATED
-  // ~/.config/agentic-kit/kit.json on a previewed setup. cfg is never mutated
-  // under --dry-run (the flag branch above skips applySetupHostFlags), so
-  // skipping the write is a pure no-op beyond not touching the disk.
+  // "--dry-run: print the plan; change nothing" — an unconditional save once
+  // CREATED ~/.config/agentic-kit/kit.json on a previewed setup. The effective
+  // config may be changed in memory above so the plan is truthful; never write
+  // that preview state.
   if (!flags['dry-run']) saveKitConfig(cfg);
 
-  const inProject = flags.project
-    || (fs.existsSync(path.join(process.cwd(), '.git')) && process.cwd() !== paths.home);
   if (inProject && !flags.minimal) {
-    if (!(await run_project({ flags, cfg }))) return 1;
+    if (!(await run_project({ flags, cfg, trustDisclosed: true }))) return 1;
   } else if (!flags.minimal) {
     info('not inside a project (no .git here) — run `ak setup` from a repo to set one up');
   }

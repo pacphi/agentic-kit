@@ -1,5 +1,7 @@
 // Heal actions — the mutations `sync` applies. Each returns
-// {ok, detail} and is idempotent. Ports of: ruflo-patch-native,
+// {ok, status, usable, detail} and is idempotent. `status` is one of
+// ok|degraded|failed|skipped; callers must not infer subsystem health from
+// mere on-disk presence after a failed operation. Ports of: ruflo-patch-native,
 // _ruflo_ensure_aidefence, _ruflo_aqe_ensure_native, _ruflo_aqe_ensure_ruvector_native,
 // the package-upgrade step (with the npm >=11.17 allow-scripts handling verified
 // on the 2026-07-14 upgrade), and the RVF quarantine.
@@ -132,12 +134,18 @@ export async function healAidefence() {
 }
 
 /** Optional native sublinear solver for agentic-qe (best-effort). */
-export async function healAqeSolver() {
-  if (!fs.existsSync(aqeRoot())) return { ok: true, detail: 'agentic-qe not installed' };
+export async function healAqeSolver({ runner = run } = {}) {
+  if (!fs.existsSync(aqeRoot())) {
+    return { ok: true, status: 'skipped', usable: false, detail: 'agentic-qe not installed' };
+  }
   const probe = path.join(aqeRoot(), 'node_modules', '@ruvector', 'solver-node', 'package.json');
-  if (fs.existsSync(probe)) return { ok: true, detail: 'already present' };
-  const r = await npmInstallInto(aqeRoot(), '@ruvector/solver-node');
-  return { ok: true, detail: r.code === 0 ? 'installed' : 'unavailable (TS fallback is fine <50K nodes)' };
+  if (fs.existsSync(probe)) return { ok: true, status: 'ok', usable: true, detail: 'already present' };
+  const r = await npmInstallInto(aqeRoot(), '@ruvector/solver-node', runner);
+  if (r.code === 0) return { ok: true, status: 'ok', usable: true, detail: 'installed' };
+  return {
+    ok: true, status: 'degraded', usable: true,
+    detail: `native solver unavailable; TypeScript fallback active (<50K nodes) (${failTail(r)})`,
+  };
 }
 
 /** Quarantine oversized (runaway-append) RVF stores in a project — the one RVF
@@ -175,27 +183,36 @@ export async function selfUpdate(version) {
  *  already present — pass force:true to bypass that skip (used when a drift
  *  check saw a newer release). Runs `--no-stack --no-enhance`: ak already
  *  manages ruflo/RuVector and owns the CLAUDE.md grounding block. */
-export async function installRuvnetBrain({ force = false } = {}) {
+export async function installRuvnetBrain({
+  force = false, runner = run, latestVersion = rbLatest,
+  present = rbPresent, recordRelease = rbRecord,
+} = {}) {
   // Resolve the release tag FIRST and pin the installer to it (--version v<tag>),
   // so the bundle that lands on disk is exactly the release ak stamps — the old
   // install-then-stamp order left a window where a release published mid-install
   // made the stamp disagree with disk. Offline (tag null): the installer's own
   // latest logic applies and the stamp is best-effort afterwards, as before.
-  const tag = await rbLatest();
+  const tag = await latestVersion();
   const args = ['-y', INSTALL_SPEC, ...INSTALL_ARGS,
     ...(tag ? ['--version', `v${tag}`] : []),
     ...(force ? ['--force'] : [])];
-  const r = await run('npx', args, { timeout: 900_000 });
+  const r = await runner('npx', args, { timeout: 900_000 });
   if (r.code === 0) {
     // Stamp the release-tag namespace so drift converges — the plugin's own
     // semver never tracks the KB release, so we can't use it.
-    const stamped = tag ?? await rbLatest();
-    if (stamped) rbRecord(stamped);
-    return { ok: true, detail: stamped ? `installed release v${stamped}` : 'installed (release tag unknown)' };
+    const stamped = tag ?? await latestVersion();
+    if (stamped) recordRelease(stamped);
+    return {
+      ok: true, status: 'ok', usable: true,
+      detail: stamped ? `installed release v${stamped}` : 'installed (release tag unknown)',
+    };
   }
-  // A non-zero exit can still leave a usable install (post-verify smoke test may
-  // fail offline); report the tail but reflect actual presence.
-  return { ok: rbPresent(), detail: (r.stderr || `exit ${r.code}`).trim().split('\n').slice(-2).join(' ').slice(0, 200) };
+  // Presence after a non-zero exit can be a stale or partial prior install. It
+  // is useful evidence for `usable`, never proof that this install succeeded.
+  return {
+    ok: false, status: 'failed', usable: present(),
+    detail: (r.stderr || `exit ${r.code}`).trim().split('\n').slice(-2).join(' ').slice(0, 200),
+  };
 }
 
 /** Disable the brain installer's nightly self-update LaunchAgent (macOS-only —
@@ -226,20 +243,25 @@ export async function disableRuvnetBrainNightly({ runner = run } = {}) {
  *  the shared cognitive store never skews on the core version — a core skew is
  *  the corruption risk this heal exists to prevent. Idempotent: a no-op when
  *  already present and coherent. */
-export async function healAgentdb() {
-  const c = adbCoherence();
+export async function healAgentdb({
+  runner = run, coherence = adbCoherence, present = adbPresent,
+} = {}) {
+  const c = coherence();
   // Already present and coherent (identical or prerelease-only diff) → nothing.
   if (c.present && c.ok && c.skew !== 'core') {
     return { ok: true, detail: `present ${c.global}${c.skew === 'prerelease' ? ` (bundled ${c.bundled}; prerelease diff ok)` : ' (coherent with ruflo)'}` };
   }
   // Pin to ruflo's bundled version; fall back to latest only when unknown.
   const spec = c.target ? `${ADB_PKG}@${c.target}` : `${ADB_PKG}@latest`;
-  const r = await run('npm', ['install', '-g', `--allow-scripts=${ALLOW_SCRIPTS}`, spec], { timeout: 600_000 });
+  const r = await runner('npm', ['install', '-g', `--allow-scripts=${ALLOW_SCRIPTS}`, spec], { timeout: 600_000 });
   if (r.code !== 0) {
-    return { ok: adbPresent(), detail: (r.stderr || `exit ${r.code}`).trim().split('\n').slice(-2).join(' ').slice(0, 200) };
+    return {
+      ok: false, status: 'failed', usable: present(),
+      detail: (r.stderr || `exit ${r.code}`).trim().split('\n').slice(-2).join(' ').slice(0, 200),
+    };
   }
   const verb = !c.present ? 'installed' : 'repaired coherence →';
-  return { ok: true, detail: `${verb} ${c.target ?? 'latest'} (matches ruflo's bundled agentdb)` };
+  return { ok: true, status: 'ok', usable: true, detail: `${verb} ${c.target ?? 'latest'} (matches ruflo's bundled agentdb)` };
 }
 
 /** Stop all ruflo daemons before an upgrade (3.27+; best-effort). */

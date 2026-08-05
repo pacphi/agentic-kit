@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  hostFromCommand, listActiveHostSessions, parseLsofCwds, parseProcessList,
+  hostFromCommand, listActiveHostSessions, parseLsofCwds, parseProcessHeaders, parseProcessList,
 } from '../../src/lib/live/index.mjs';
 
 test('host process detection recognizes controllers and rejects helpers', () => {
@@ -83,4 +83,35 @@ test('nonempty unparseable process output degrades instead of becoming a healthy
     platform: 'darwin',
     execFileImpl: async () => ({ stdout: 'localized or malformed process output' }),
   }), (error) => error.code === 'ERR_RUNTIME_PROCESS_SURVEY');
+});
+
+test('runtime discovery scopes ps to the current UID and reads argv only for host candidates', async () => {
+  const calls = [];
+  const startedAt = 'Mon Aug  3 12:00:00 2026';
+  const execFileImpl = async (command, args) => {
+    calls.push({ command, args });
+    if (args.includes('pid=,ppid=,lstart=,comm=')) {
+      return { stdout: [
+        `100 1 ${startedAt} node`,
+        `101 1 ${startedAt} ssh`,
+        `102 1 ${startedAt} claude`,
+      ].join('\n') };
+    }
+    if (args.includes('pid=,args=')) {
+      return { stdout: '100 node /opt/bin/codex\n102 claude\n' };
+    }
+    throw new Error(`unexpected command: ${command} ${args.join(' ')}`);
+  };
+  const rows = parseProcessHeaders(`100 1 ${startedAt} node\n`);
+  assert.equal(rows[0].command, '', 'the first-stage parser retains no argv');
+
+  const sessions = await listActiveHostSessions({
+    platform: 'linux', uid: 501, execFileImpl,
+    cwdByPid: new Map([[100, '/repos/a'], [102, '/repos/b']]),
+    inspectWorkspace: async () => null,
+  });
+  assert.deepEqual(sessions.map((row) => row.host), ['codex', 'claude']);
+  assert.deepEqual(calls[0].args.slice(0, 4), ['-U', '501', '-x', '-o']);
+  assert.equal(calls[0].args.includes('-a'), false, 'never surveys all users');
+  assert.equal(calls[1].args[1], '100,102', 'ssh/non-host PID never reaches the argv survey');
 });

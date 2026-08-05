@@ -77,6 +77,60 @@ Project setup also reapplies enabled host/provider wiring and seeds the default
 per-activity routing policy in dual-host mode. With Codex enabled, it repairs
 both directions of the Claude/Codex–Ruflo bridge.
 
+## Setup trust manifest
+
+Before making any machine, user, or project change, setup derives one manifest
+from the enabled host adapters and prints every applicable approval, registration,
+and host-integration change. Interactive setup asks for one confirmation after
+this preflight. `--yes` suppresses the question but still prints the manifest, so
+automation retains an auditable record; `--dry-run` is the non-mutating way to
+inspect the effective manifest for the current flags. A non-interactive setup
+with applicable trust changes must pass `--yes`; otherwise it prints the
+manifest and exits before mutation.
+
+The host registry requires every present or future host adapter to declare an
+approval posture and its setup-time trust changes. A future host cannot pass
+registry validation without that declaration, and setup consumes it without a
+host-specific disclosure branch. Enabling a host later with `ak host pick`
+uses the same registry-derived preflight for changes that command applies;
+already-enabled hosts are not prompted again.
+
+### Claude Code project auto-approvals
+
+Project setup discloses the exact Claude Code rules that Ruflo and agentic-qe may
+ensure or retain in `.claude/settings.json`:
+
+| Owner | Auto-approved rule | Effect |
+| --- | --- | --- |
+| Ruflo | `Bash(npx @claude-flow*)` | Run scoped `@claude-flow` npx commands |
+| Ruflo | `Bash(npx claude-flow*)` | Run scoped `claude-flow` npx commands |
+| Ruflo | `Bash(node .claude/*)` | Run repository-local `.claude` Node helpers |
+| Ruflo | `mcp__claude-flow__*` | Call the project Ruflo MCP tool family |
+| agentic-qe | `Bash(npx agentic-qe:*)` | Run scoped agentic-qe npx commands |
+| agentic-qe | `Bash(npx @anthropics/agentic-qe:*)` | Run scoped `@anthropics/agentic-qe` npx commands |
+| agentic-qe | `mcp__agentic-qe__*` | Call the project agentic-qe MCP tool family |
+
+The last three rules are omitted with `--no-aqe`. Rules that existed before
+setup remain user-owned. After each upstream initializer, agentic-kit compares
+the resulting allow-list with the manifest: any newly added, undisclosed rule
+is removed and setup fails instead of silently expanding project trust.
+
+### Codex and OpenCode
+
+Codex does not need an agentic-kit auto-approve list. The manifest instead names
+the project Claude-to-Codex MCP bridge, the user-scope Codex-to-Ruflo MCP
+registration, and the AQE Codex integration that project setup will create.
+Agentic-kit does not alter Codex's sandbox or approval policy.
+
+OpenCode's user-scope manifest names all four wildcard tool approvals, the
+Ruflo and optional Brain MCP registrations, the lifecycle plugin, and the
+managed agent/skill/guidance projection. These are workspace-trust grants, not
+an agentic-kit sandbox.
+
+The separately offered Claude user-scope Ruflo MCP registration retains its own
+dedicated prompt because it is optional rather than a deterministic setup
+change. `--yes` accepts that prompt as documented.
+
 ## Existing projects
 
 For an existing project:
@@ -113,8 +167,15 @@ For an empty or newly created directory:
   as disabled in agentic-kit's machine configuration.
 - `--codex`, `--opencode`, and `--primary-host` enable and wire the selected
   hosts before the project phase.
-- `--yes` accepts prompts; it does not change the project mutation contract.
+- `--yes` accepts prompts; it does not hide the setup trust manifest or change
+  the project mutation contract.
 - `--dry-run` prints a high-level plan and changes nothing.
+
+The clean-machine regression runs from the packed release artifact on GitHub's
+`macos-latest` runner with disposable `HOME`, XDG directories, npm global
+prefix/cache, Brain KB, and project directory. Local regression coverage uses
+the same isolation model in a child process. Neither test runs setup against
+the developer's existing home or global npm prefix.
 
 See [Upgrading](UPGRADING.md) for the `setup` versus `sync` lifecycle and
 [Troubleshooting](TROUBLESHOOTING.md) for setup and health-check failures. See

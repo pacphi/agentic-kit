@@ -72,6 +72,15 @@ Nothing in this transcript pipeline calls a provider API or a billing endpoint; 
 metric is ever a copy of an actual invoice.** That is the whole reason every transcript-derived
 dollar figure is labelled "API-equivalent."
 
+The built index also exposes `sourceHealth` for the OpenCode SQLite store and
+Codex thread ledger. Each source is `ok`, `absent`, `degraded`, or `not-read`,
+with a bounded reason such as `busy`, `corrupt`, `query`, or `schema`. A
+degraded OpenCode read retains in-window last-good cached sessions rather than
+turning an unreadable database into an observed zero. Source health is
+diagnostic evidence; it is not added to token or cost totals. The dashboard
+renders these states as local-source chips above every Usage view so a degraded,
+absent, or deliberately unread source cannot be mistaken for healthy empty data.
+
 The current persisted field named `provider` identifies which host transcript parser produced a
 session row; it is not sufficient evidence of the inference provider. The Proposed model in
 [ADR-0016](adr/0016-capability-driven-integration-adapters.md) separates host, provider,
@@ -109,8 +118,8 @@ responses = Σ over included sessions of session.responses
   last activity falls outside the requested window is dropped too
   (`usage-index.mjs:905`).
 - `responses` accumulation: Claude increments per assistant message
-  (`usage-index.mjs:493`); Codex increments per `agent_message` event
-  (`usage-index.mjs:649`).
+  (`usage-index.mjs:504-509`); Codex increments per `agent_message` event
+  (`usage-index.mjs:651-655`).
 - Totals: `totals.responses += s.responses` per included session
   (`usage-index.mjs:884`).
 - Render: `kpi("sessions", fmtNum(t.sessions), fmtNum(t.responses)+" assistant
@@ -288,7 +297,7 @@ per row is **gross input minus cached input** — Claude's parser reads
 `cache_read_input_tokens` and `cache_creation_input_tokens` as separate fields
 the provider already reports separately (`usage-index.mjs:523-524`); Codex's
 parser subtracts `cached_input_tokens` from `input_tokens` explicitly
-(`usage-index.mjs:645-655`, `input: Math.max(0, gross - cacheRead)`) because
+(`usage-index.mjs:666-675`, `input: Math.max(0, gross - cacheRead)`) because
 Codex's own `input_tokens` field **includes** cached tokens and would
 double-count them against the separately-reported `cacheRead` figure if left
 as-is. This is asserted by test:
@@ -505,8 +514,8 @@ punchcard[dow + "-" + hour] += 1   per assistant/agent_message response, at its 
 ```
 
 **Source:** incremented once per Claude assistant turn
-(`usage-index.mjs:493-496`, keyed by `punchKey(at)`) and once per Codex
-`agent_message` (`usage-index.mjs:649-652`), merged into the window-level
+(`usage-index.mjs:504-509`, keyed by `punchKey(at)`) and once per Codex
+`agent_message` (`usage-index.mjs:651-655`), merged into the window-level
 `punchcard` object per session (`usage-index.mjs:981`). Cell intensity is
 linear against the single busiest cell in the window:
 `v = pcMax ? n/pcMax : 0` (`dashboard/client.mjs`) — this is a
@@ -578,7 +587,7 @@ time, someone was genuinely waiting on it — but it is never pushed into
 `rec.models` and `addUsage()` is never called for it, so it can no longer
 create a `byModel` row of any kind. It increments a separate
 `rec.exceptions` counter instead (`usage-index.mjs:470`), rolled up into
-`totals.exceptions` (`usage-index.mjs:873-884`) and surfaced per-session
+`totals.exceptions` (`usage-index.mjs:995-999`) and surfaced per-session
 (`usage-index.mjs:920-934`, alongside the existing `sidechain`/`threadSource`
 flags — inspectable in the Sessions tab, never hidden). When
 `totals.exceptions > 0`, the panel header shows a small `"· N
@@ -888,7 +897,7 @@ Codex ≥0.140 maintains its own SQLite thread ledger (`~/.codex/state_N.sqlite`
 — the `N` is a migration generation, so `codexStateDb` (`codex-state.mjs:30`)
 globs and takes the newest). `readCodexState` (`:49`) reads per-thread
 `thread_source` (`user` vs `subagent`) plus `thread_spawn_edges`, and
-`applyCodexLedger` (`usage-index.mjs:1218`) overlays that onto parsed
+`applyCodexLedger` (`usage-index.mjs:1264-1275`) overlays that onto parsed
 sessions: a ledger-identified subagent has its token usage stripped — its
 rollout replays the parent's entire token history (ccusage/ccusage#950
 measured up to 91× inflation) — while the session record stays visible. The

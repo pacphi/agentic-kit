@@ -6,7 +6,10 @@
 - **Updated:** 2026-08-04
 - **Update note:** Clarified that the AQE boundary applies to inference-provider routing, not
   AQE's upstream OpenCode platform assets, and recorded the implemented OpenCode transcript,
-  token, observed-cost, and provider-id analytics path.
+  token, observed-cost, and provider-id analytics path. ADR-0023 adds classified SQLite source
+  health, preserves last-good OpenCode usage when a present store is temporarily unreadable,
+  and requires pre-mutation disclosure of OpenCode's wildcard approvals, MCP registrations,
+  lifecycle plugin, and managed host assets.
 - **Deciders:** agentic-kit maintainers
 
 > **GA amendment:** OpenCode remains opt-in, non-primary, and outside AQE inference-provider

@@ -37,6 +37,7 @@ import { have } from './exec.mjs';
 import { readJson, writeJsonWithBackup } from './settings.mjs';
 import { registry, syncBlocks, blocksForTarget, retiredForTarget, guidanceTargets } from './blocks.mjs';
 import { CURRENT_INTEGRATIONS_VERSION } from './adapters/config.mjs';
+import { autoApproveValues } from './trust-manifest.mjs';
 import * as paths from './paths.mjs';
 
 const opencodeOwnership = (cfg) => cfg?.integrations?.ownership?.opencode ?? {};
@@ -65,7 +66,7 @@ export const RUFLO_MCP_ENV = {
 
 /** Permission patterns ak pre-approves (opencode surfaces MCP tools as
  *  `<server>_<tool>`; cover both separator spellings defensively). */
-export const PERMISSION_KEYS = ['claude-flow_*', 'claude_flow_*', 'ruvnet-brain_*', 'ruvnet_brain_*'];
+export const PERMISSION_KEYS = autoApproveValues('opencode');
 
 /** The brain's stable-spine shim (same registration codex carries). */
 export const brainShimPath = () => path.join(paths.home, '.claude', 'ruvnet-brain', 'mcp', 'server.mjs');

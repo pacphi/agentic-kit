@@ -31,6 +31,7 @@ Consequences**, and cites the grounded source it rests on where relevant.
 | [0020](0020-ga-stable-surfaces.md) | One stable GA surface per capability | Implemented |
 | [0021](0021-inference-provider-provenance.md) | Inference-provider provenance for live sessions | Accepted |
 | [0022](0022-metaharness-as-optional-assurance-companion.md) | MetaHarness as an optional assurance companion | Proposed |
+| [0023](0023-fail-closed-operations-and-explicit-degradation.md) | Fail-closed mutations and explicit degraded operation evidence | Implemented |
 
 Theme: ADRs **0001–0006** define **dual-host LLM routing and leadership** — how `ak` lets ruflo route
 each development activity (architecture, implementation, testing, review, …) to the right host (Claude
@@ -114,3 +115,9 @@ routing, and supervised-execution authority. A future internal integration is li
 capability-probed, read-only projection unless another decision authorizes mutation. The ADR also
 requires a versioned, sanitized companion result contract before treating `ak run --json` as an
 interop API.
+
+**0023** reconciles seven independent clean-machine findings under one operational-truth contract:
+managed fallbacks report degradation, SQLite retains classified failure evidence and last-good
+usage, promised backups fail closed before atomic replacement, status-line failures gain redacted
+opt-in diagnostics, process discovery is current-user and argv-minimized, setup discloses and
+verifies its project auto-approve manifest, and clean-machine tests isolate every mutable path.

@@ -407,6 +407,19 @@ body.gated .band,body.gated .tabbar,body.gated main{display:none}
 }
 .note b{color:var(--ink)}
 .note .i{color:var(--accent); font-weight:700}
+.source-health{
+  display:flex; flex-wrap:wrap; align-items:center; gap:7px; margin:-2px 0 16px;
+  color:var(--ink-2); font-size:11.5px;
+}
+.source-health[hidden]{display:none}
+.source-health .source-label{font-weight:600; color:var(--ink-dim); margin-right:2px}
+.source-chip{
+  border:1px solid var(--line); border-radius:999px; padding:4px 9px;
+  background:var(--panel); color:var(--ink-2);
+}
+.source-chip[data-status="ok"]{border-color:var(--ok); color:var(--ok)}
+.source-chip[data-status="degraded"]{border-color:var(--warn); color:var(--warn); background:color-mix(in srgb,var(--warn) 10%,transparent)}
+.source-chip[data-status="absent"],.source-chip[data-status="not-read"]{color:var(--ink-dim)}
 .sh{display:flex; align-items:baseline; justify-content:space-between; gap:12px; margin-bottom:14px}
 .sh h2{font-size:15px; font-weight:600; letter-spacing:-.014em; margin:0}
 .sh .n{color:var(--ink-dim); font-size:11.5px}

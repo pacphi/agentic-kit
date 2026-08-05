@@ -56,9 +56,51 @@ test('run_project --dry-run announces the plan and touches neither home nor proj
       setup.run_project({ flags: FLAGS({ 'dry-run': true }), cfg: loadKitConfig() }));
     assert.equal(result, true);
     assert.match(out, /dry-run: would init, sanitize, pin DB path/);
+    for (const entry of setup.PROJECT_PERMISSION_MANIFEST) assert.ok(out.includes(entry.rule));
   } finally { process.chdir(cwd); }
   assertUnchanged(beforeHome, HOME, 'run_project --dry-run must not touch HOME');
   assertUnchanged(beforeProject, project, 'run_project --dry-run must not touch the project');
+  rmrf(project);
+});
+
+test('project permission manifest omits AQE grants when AQE is disabled', () => {
+  assert.equal(setup.projectPermissionManifest({ aqe: true }).length, 7);
+  assert.deepEqual(setup.projectPermissionManifest({ aqe: false }).map((entry) => entry.owner),
+    ['ruflo', 'ruflo', 'ruflo', 'ruflo']);
+});
+
+test('permission verification removes only newly introduced undisclosed grants', () => {
+  const project = sandboxProject('ak-setup-permissions');
+  const file = path.join(project, '.claude', 'settings.json');
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, JSON.stringify({ permissions: { allow: [
+    'Bash(user-owned:*)', 'mcp__claude-flow__*', 'Bash(unexpected:*)',
+  ] } }, null, 2));
+  const removed = setup.removeUndisclosedPermissions(
+    file, new Set(['Bash(user-owned:*)']), new Set(['mcp__claude-flow__*']),
+  );
+  assert.deepEqual(removed, ['Bash(unexpected:*)']);
+  const allow = JSON.parse(fs.readFileSync(file, 'utf8')).permissions.allow;
+  assert.deepEqual(allow, ['Bash(user-owned:*)', 'mcp__claude-flow__*']);
+  rmrf(project);
+});
+
+test('declining the permission preflight stops before machine or project mutation', async () => {
+  seedHome();
+  const project = sandboxProject('ak-setup-decline');
+  const beforeHome = snapshot(HOME);
+  const beforeProject = snapshot(project);
+  const cwd = process.cwd();
+  process.chdir(project);
+  try {
+    const { result, out } = await captureLog(() => setup.run({
+      flags: FLAGS(), pkgRoot: PKG_ROOT, confirm: async () => false,
+    }));
+    assert.equal(result, 0);
+    assert.match(out, /setup cancelled before machine, user, or project changes/);
+  } finally { process.chdir(cwd); }
+  assertUnchanged(beforeHome, HOME, 'declined permission preflight must not touch HOME');
+  assertUnchanged(beforeProject, project, 'declined permission preflight must not touch the project');
   rmrf(project);
 });
 
@@ -94,6 +136,21 @@ test('--dry-run reports what --codex/--primary-host WOULD do without enabling th
   assert.equal(loadKitConfig().integrations.hosts.codex, false,
     'a previewed --codex must not persist the host opt-in');
   assertUnchanged(before, HOME, '`ak setup --codex --dry-run` must not touch the filesystem');
+});
+
+test('--codex project dry-run discloses registrations while preserving Codex policy', async () => {
+  seedHome();
+  const project = sandboxProject('ak-setup-codex-trust');
+  const cwd = process.cwd();
+  process.chdir(project);
+  try {
+    const { result, out } = await captureLog(() =>
+      setup.run({ flags: FLAGS({ 'dry-run': true, codex: true }), pkgRoot: PKG_ROOT }));
+    assert.equal(result, 0);
+    assert.match(out, /OpenAI Codex — approval\/sandbox policy unchanged/);
+    assert.match(out, /\[project\] mcp-registration: codex mcp-server/);
+    assert.match(out, /\[user\] mcp-registration: ruflo mcp start/);
+  } finally { process.chdir(cwd); rmrf(project); }
 });
 
 test('--minimal skips project setup even inside a git repo', async () => {
@@ -223,10 +280,26 @@ test('ak setup --opencode --dry-run writes nothing anywhere (kit.json, opencode 
   const { result, out } = await captureLog(() =>
     setup.run({ flags: FLAGS({ 'dry-run': true, minimal: true, opencode: true }), pkgRoot: PKG_ROOT }));
   assert.equal(result, 0);
+  assert.match(out, /OpenCode — approval policy receives the listed grants/);
+  for (const pattern of ['claude-flow_*', 'claude_flow_*', 'ruvnet-brain_*', 'ruvnet_brain_*']) {
+    assert.ok(out.includes(`[user] auto-approve: ${pattern}`), `missing disclosure for ${pattern}`);
+  }
   assert.match(out, /dry-run: --opencode would enable the opencode host/);
   assert.equal(loadKitConfig().integrations.hosts.opencode, false, 'a previewed --opencode must not persist');
   assert.ok(!fs.existsSync(ocHome()), 'no opencode config home fabricated by a dry run');
   assertUnchanged(before, HOME, '`ak setup --opencode --dry-run` must not touch the filesystem');
+});
+
+test('declining OpenCode trust stops a minimal setup before user-scope mutation', async () => {
+  seedHome();
+  const before = snapshot(HOME);
+  const { result, out } = await captureLog(() => setup.run({
+    flags: FLAGS({ minimal: true, opencode: true }), pkgRoot: PKG_ROOT,
+    confirm: async () => false,
+  }));
+  assert.equal(result, 0);
+  assert.match(out, /setup cancelled before machine, user, or project changes/);
+  assertUnchanged(before, HOME, 'declined OpenCode trust must not touch HOME');
 });
 
 test('ak setup --opencode fails honestly and deploys nothing when JSONC is refused', async () => {

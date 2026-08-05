@@ -17,7 +17,7 @@ export {
   safeProjectKey, safeProjectLabel, stableProjectKey,
 } from './project-label.mjs';
 export {
-  hostFromCommand, listActiveHostSessions, parseLsofCwds, parseProcessList,
+  hostFromCommand, listActiveHostSessions, parseLsofCwds, parseProcessHeaders, parseProcessList,
 } from './process-sessions.mjs';
 export {
   inspectGitWorkspace, parseGitNumstat, workspaceFromSource,

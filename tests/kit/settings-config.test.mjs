@@ -45,6 +45,18 @@ test('a failure while serializing never touches the existing file (atomic swap, 
   fs.rmSync(tmp, { recursive: true, force: true });
 });
 
+test('an unusable backup path fails closed before settings are replaced', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'kit-set-bak-fail-'));
+  const f = tmpFile(tmp, 'settings.json');
+  fs.writeFileSync(f, '{"safe":true}\n');
+  fs.mkdirSync(`${f}.bak`);
+
+  assert.throws(() => writeJsonWithBackup(f, { safe: false }), /unusable backup path/);
+  assert.equal(fs.readFileSync(f, 'utf8'), '{"safe":true}\n');
+  assert.deepEqual(fs.readdirSync(tmp).filter((name) => name.endsWith('.tmp')), []);
+  fs.rmSync(tmp, { recursive: true, force: true });
+});
+
 test('addDenyRules dedupes, sorts, and reports only net-new rules', () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'kit-deny-'));
   const f = tmpFile(tmp, 'settings.json');

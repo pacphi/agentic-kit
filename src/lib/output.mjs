@@ -17,6 +17,18 @@ export const fail = (msg) => console.log(`${red('✗')} ${msg}`);
 export const info = (msg) => console.log(`${dim('ℹ')}  ${msg}`);
 export const heading = (msg) => console.log(`\n${bold(msg)}`);
 
+/** Render a managed-operation result without collapsing degraded/skipped work
+ * into a green success. Legacy `{ok, detail}` results remain supported. */
+export function reportOutcome(name, result) {
+  const status = result?.status ?? (result?.ok ? 'ok' : 'failed');
+  const message = `${name}: ${result?.detail ?? 'no detail'}`;
+  if (status === 'ok') ok(message);
+  else if (status === 'degraded') warn(message);
+  else if (status === 'skipped') info(message);
+  else fail(message);
+  return status;
+}
+
 /** Status glyph for dashboard rows. */
 export const glyph = (level) =>
   level === 'ok' ? green('✓') : level === 'warn' ? yellow('⚠') : level === 'fail' ? red('✗') : dim('·');

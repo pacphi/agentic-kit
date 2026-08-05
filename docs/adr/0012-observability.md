@@ -27,6 +27,8 @@
   stored locally and a compact, keyboard-accessible restore rail remains visible across responsive
   layouts.
   Historical and active-session Review playback exposes 0.5× through 10× speeds.
+  ADR-0023 restricts runtime discovery to the current UID and reads argv only for selected current-user
+  host/Node candidates, before the existing path-redacted event boundary.
 - **Deciders:** agentic-kit maintainers
 - **Related:** [ADR-0005](0005-dashboard-in-page-routing-reveal.md),
   [ADR-0007](0007-maintainer-admin-local-telemetry.md),

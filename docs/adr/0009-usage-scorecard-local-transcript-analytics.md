@@ -5,7 +5,10 @@
 - **Updated:** 2026-08-04
 - **Update note:** Added the explicit OpenRouter account-analytics cache boundary for issue #59,
   aligned Usage with the dashboard's shared three-area navigation, and documented independent
-  host, inference-provider, provenance, and model facts in session rows.
+  host, inference-provider, provenance, and model facts in session rows. ADR-0023 subsequently
+  classified SQLite source failures and made transient OpenCode failures preserve last-good records
+  with explicit degraded source health instead of becoming observed zero usage; the Usage UI now
+  renders each local source state rather than leaving that evidence API-only.
 - **Deciders:** agentic-kit maintainers
 
 ## Context
