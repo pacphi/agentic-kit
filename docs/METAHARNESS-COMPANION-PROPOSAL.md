@@ -2,6 +2,9 @@
 
 - **Status:** Proposed
 - **Date:** 2026-08-04
+- **Updated:** 2026-08-04
+- **Documentation merge:** [PR #112](https://github.com/pacphi/agentic-kit/pull/112),
+  commit [`fafd705`](https://github.com/pacphi/agentic-kit/commit/fafd7051393b151018c5cd602eebad2a428b4572)
 - **Decision record:**
   [ADR-0022](adr/0022-metaharness-as-optional-assurance-companion.md)
 - **Replaces:** branch-only MetaHarness retrieval proposal in commit
@@ -221,44 +224,44 @@ needs correction.
 | Treat generated harness policy as repository policy | Generate in a sibling, temporary, or dedicated companion workspace and never overwrite user/project configuration |
 
 The branch-only ADR used number 0016, which now belongs to the accepted capability-adapter ADR on
-`main`. It must not be merged under that number. ADR-0022 records the revised decision.
+`main`. It was not merged under that number. ADR-0022 records the revised decision.
 
-### Branch asset disposition
+### Deleted branch asset disposition
 
-The old branch must not be merged or rebased as a unit. Its unique MetaHarness commit
-(`8dcad80`) has the following disposition:
+The old branch was not merged or rebased as a unit. Its unique MetaHarness commit (`8dcad80`)
+received the following disposition:
 
 | Branch asset | Disposition on `main` | Reason |
 | --- | --- | --- |
-| `docs/METAHARNESS-INTEGRATION-PROPOSAL.md` | Replace with this proposal | The old document makes a full internal retrieval workflow the product center; this proposal makes the external assurance companion primary |
-| `docs/adr/0016-curated-retrieval-improvement-workflow.md` | Replace with ADR-0022; do not copy or renumber mechanically | Number 0016 is already assigned on `main`, and the decision boundary changed materially |
-| `docs/ddd/retrieval-improvement.md` | Retire; do not port | Its aggregates and commands assume agentic-kit owns `ak improve`, signing identity, preferences, review, and promotion UX—responsibilities ADR-0022 does not authorize |
-| Branch `docs/adr/README.md` edit | Discard; use the current `main` index entry for ADR-0022 | The branch index predates ADRs 0017–0021 and would regress living-plan history |
+| `docs/METAHARNESS-INTEGRATION-PROPOSAL.md` | Replaced by this proposal | The old document makes a full internal retrieval workflow the product center; this proposal makes the external assurance companion primary |
+| `docs/adr/0016-curated-retrieval-improvement-workflow.md` | Replaced by ADR-0022; not copied or mechanically renumbered | Number 0016 is already assigned on `main`, and the decision boundary changed materially |
+| `docs/ddd/retrieval-improvement.md` | Retired; not ported | Its aggregates and commands assume agentic-kit owns `ak improve`, signing identity, preferences, review, and promotion UX—responsibilities ADR-0022 does not authorize |
+| Branch `docs/adr/README.md` edit | Discarded in favor of the current `main` index entry for ADR-0022 | The branch index predates ADRs 0017–0021 and would regress living-plan history |
 
-The branch also contains an earlier Codex-statusline commit, but `git cherry` identifies it as
-patch-equivalent to work already on `main`. It is not part of the MetaHarness migration.
+The branch also contained an earlier Codex-statusline commit, but `git cherry` identified it as
+patch-equivalent to work already on `main`. It was not part of the MetaHarness migration.
 
-### Documentation-only path to `main`
+### Documentation-only merge record
 
-1. Create a fresh documentation branch from current `main`; do not build on or merge the old
-   proposal branch.
-2. Commit only this proposal, ADR-0022, and the current ADR index update.
-3. Open a pull request that links commit `8dcad80` as replaced history and includes the asset
-   disposition table above.
-4. Review the PR as a **Proposed architecture decision**, not as implemented functionality. The PR
-   must not claim that a companion adapter, result schema, status projection, or `ak improve`
-   command exists.
-5. Run Markdown lint and internal/external link checks. No runtime, package, configuration, or test
-   implementation change is expected from this documentation PR.
-6. Merge the documentation PR into `main` after maintainers accept the boundary.
-7. After merge, and after confirming no pull request or worktree depends on it, delete the
-   unprotected remote and local `docs/metaharness-integration-proposal` branch. The merged proposal
-   preserves the old decision's material rationale and exact commit identifier.
+The documentation-only transition completed on 2026-08-04:
 
-Until step 6, keep the old branch as reviewable source history. Deleting it earlier creates no
-technical advantage and makes the replacement harder to audit. Branch deletion makes the old
-commit unreachable from normal Git refs; if exact long-term patch recovery matters, retain an
-explicit archival tag instead of assuming a hosting provider will preserve an unreachable object.
+1. A fresh `docs/metaharness-companion-proposal` branch was created from `main`; the old proposal
+   branch was neither merged nor used as its base.
+2. [PR #112](https://github.com/pacphi/agentic-kit/pull/112) changed only this proposal, ADR-0022,
+   and the current ADR index.
+3. The PR linked commit `8dcad80` as replaced history and recorded the asset disposition above.
+4. The PR and merge commit retained ADR-0022 as a **Proposed architecture decision** and explicitly
+   claimed no companion adapter, result schema, status projection, or `ak improve` implementation.
+5. The quality, Markdown, and internal/external link checks passed; no runtime, package,
+   configuration, or test implementation was included.
+6. The PR merged into `main` as commit
+   [`fafd705`](https://github.com/pacphi/agentic-kit/commit/fafd7051393b151018c5cd602eebad2a428b4572).
+7. The local and remote `docs/metaharness-integration-proposal` and
+   `docs/metaharness-companion-proposal` branches were deleted after merge; only `main` remains.
+
+The merged proposal preserves the old decision's material rationale and exact commit identifier.
+No branch or archival tag now retains `8dcad80`, so exact long-term patch recovery depends on Git
+object or hosting-provider retention unless maintainers deliberately add an archival tag.
 
 ## Integration contract
 
@@ -339,7 +342,7 @@ or promotion flow requires a separate ADR or an explicit amendment to ADR-0022.
 - Score output is labeled as fit/recommendation evidence, not a live security verdict.
 - Learned route advice remains shadow-only until a user applies it through the canonical surface.
 - Darwin variants cannot write outside the dedicated companion policy workspace.
-- Agentic-qe and repository tests remain the release authority for deterministic product behavior.
+- Agentic-QE and repository tests remain the release authority for deterministic product behavior.
 - No new runtime dependency is added to the zero-dependency agentic-kit package.
 
 ## Open questions that require evidence

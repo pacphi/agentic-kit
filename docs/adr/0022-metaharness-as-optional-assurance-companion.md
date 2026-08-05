@@ -3,8 +3,8 @@
 - **Status:** Proposed
 - **Date:** 2026-08-04
 - **Updated:** 2026-08-04
-- **Update note:** Clarified the branch-asset disposition and the documentation-only path to
-  `main`; no implementation is authorized or claimed.
+- **Update note:** Recorded the documentation-only PR #112 merge and topic-branch removal; no
+  implementation is authorized or claimed.
 - **Deciders:** agentic-kit maintainers
 - **Related:** [ADR-0016](0016-capability-driven-integration-adapters.md),
   [ADR-0018](0018-generalized-host-worker-execution.md),
@@ -205,9 +205,9 @@ No gate implies the next. Mutating integration requires a later explicit decisio
 
 ## Documentation disposition
 
-This Proposed ADR and its product proposal are the documentation replacement for the unique
-MetaHarness commit `8dcad80` on `docs/metaharness-integration-proposal`. That branch is not a merge
-base for implementation and must not be merged or rebased into `main`:
+This Proposed ADR and its product proposal replaced the unique MetaHarness commit `8dcad80` from
+`docs/metaharness-integration-proposal`. That branch was not used as an implementation merge base
+and was neither merged nor rebased into `main`:
 
 - the branch proposal is replaced by the companion proposal;
 - the branch ADR is replaced by ADR-0022 rather than copied into the occupied 0016 slot;
@@ -215,9 +215,11 @@ base for implementation and must not be merged or rebased into `main`:
   not authorize;
 - the branch ADR-index edit is discarded in favor of the current `main` index.
 
-After the documentation replacement is accepted and merged, maintainers may delete the old remote
-and local branch after confirming no open pull request or worktree depends on it. Branch deletion
-does not change this ADR's status: it remains Proposed until separately accepted.
+[PR #112](https://github.com/pacphi/agentic-kit/pull/112) merged the three documentation changes as
+commit [`fafd705`](https://github.com/pacphi/agentic-kit/commit/fafd7051393b151018c5cd602eebad2a428b4572)
+on 2026-08-04. The old proposal branch and the replacement PR branch were then deleted locally and
+remotely. That completed documentation housekeeping does not change this ADR's status: it remains
+Proposed until separately accepted.
 
 ## Verification requirements
 
