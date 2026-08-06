@@ -10,6 +10,10 @@
   store, Codex's thread ledger) and never the primary Claude/Codex transcript roots, so a missing
   or unreadable `~/.claude/projects` or `~/.codex/sessions` still silently read as zero — the exact
   failure class this ADR exists to close, just left open on the two sources most people depend on.
+  Relocated the resulting indicator out of the Usage panel into the dashboard's persistent tabbar
+  (right-aligned, visible on every view) and replaced its host text labels with the same branded
+  icons the Observability Live view already uses, after the original chip design proved illegible
+  and was redesigned through several rounds against live screenshots.
 - **Deciders:** agentic-kit maintainers
 - **Related:** [issue #111](https://github.com/pacphi/agentic-kit/issues/111),
   [ADR-0008](0008-guidance-target-scope-split.md),
@@ -114,10 +118,11 @@ its sandbox and approval policy.
 
 ### 7. Usage source degradation is visible in the dashboard, for all four local sources
 
-The Usage API's `sourceHealth` field is rendered as persistent local-source chips across Usage
-views. `ok`, `absent`, `degraded`, and `not-read` remain distinct, and bounded reasons such as
-`busy`, `corrupt`, `query`, `schema`, `sandboxed-roots`, or an fs error code (`ENOENT`, `EACCES`,
-`ENOTDIR`) are visible without entering raw JSON.
+The Usage API's `sourceHealth` field is rendered as persistent local-source pills in the
+dashboard's sticky tabbar (right-aligned, visible on every view once Usage data has loaded once —
+not confined to the Usage panel). `ok`, `absent`, `degraded`, and `not-read` remain distinct, and
+bounded reasons such as `busy`, `corrupt`, `query`, `schema`, `sandboxed-roots`, or an fs error code
+(`ENOENT`, `EACCES`, `ENOTDIR`) are visible without entering raw JSON.
 
 `sourceHealth` originally covered only the two sources with a *secondary, corrective* read layered
 on top of a primary parse — OpenCode's SQLite store and Codex's own thread ledger — because those
@@ -141,12 +146,25 @@ fabricated; `rootHealth()` performs a real `readdirSync` against a real path exa
 existing checks, just one level up the trust stack from the two sources already wired.
 
 `sourceHealth` now reports `claude`, `codex`, `opencode`, and `codexLedger`. The dashboard renders
-this by HOST, not by field: three chips for the three supported hosts (Claude, Codex, OpenCode), not
-four. `codex` and `codexLedger` are both Codex-only evidence, so they fold into one "Codex" chip —
-its status is the worse of the two, and both sub-statuses stay visible in the chip's detail text
-(e.g. `Codex: degraded — transcripts: ok · ledger: corrupt`). No evidence is dropped; the API keeps
-four independently-diagnosable fields, the UI just groups by the thing the operator actually cares
-about (which host needs attention), matching how Claude and OpenCode already render as one chip each.
+this by HOST, not by field: three pills for the three supported hosts (Claude, Codex, OpenCode), not
+four. `codex` and `codexLedger` are both Codex-only evidence, so they fold into one Codex pill — its
+status is the worse of the two, and both sub-statuses stay reachable via the status side's tooltip
+(e.g. hovering "degraded" shows `Codex: transcripts: ok · ledger: corrupt`). No evidence is dropped;
+the API keeps four independently-diagnosable fields, the UI just groups by the thing the operator
+actually cares about (which host needs attention), matching how Claude and OpenCode already render
+as one pill each.
+
+Each pill leads with a branded host icon rather than a text label — the same mark
+`live/client.mjs`'s `hostIcon()` uses in the Observability Live view's session list (Anthropic's
+asterisk, OpenAI's Blossom, OpenCode's square), reused verbatim so a host reads as the same glyph
+everywhere in the dashboard. The icon sits in a circular badge (`var(--bg)` fill, 1px border) at
+32px/20px glyph — matching the Live view's own proven scale — after two smaller, badge-less passes
+proved illegible against live screenshots: a floating icon with nothing to contrast against, and
+Codex's multi-lobed Blossom geometry specifically, both need real size and a defined edge to resolve.
+Hovering the icon shows what it monitors (its transcript path or store); hovering the status word
+shows the full per-field detail. The pill itself uses a solid `var(--panel-2)` background matching
+the segmented tab control's own look — no border, state shown via status-text color/weight — rather
+than the colored-outline chip style originally shipped.
 
 ### 8. Clean-machine proof is isolated at every mutable boundary
 
@@ -168,7 +186,7 @@ setup on `macos-latest` with all global packages and user/project files under `r
 - Some formerly best-effort writes now fail. This is deliberate: when ak promises a backup, mutation
   without one is a correctness failure.
 - An unreadable `~/.claude/projects` or `~/.codex/sessions` (permissions, a corrupt filesystem entry,
-  the path replaced by a non-directory) now renders as a degraded local-source chip instead of a
+  the path replaced by a non-directory) now renders as a degraded local-source pill instead of a
   quietly empty Usage scorecard; all four local sources share one status vocabulary.
 
 ## References
