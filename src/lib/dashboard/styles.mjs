@@ -476,11 +476,12 @@ body.gated .band,body.gated .tabbar,body.gated main{display:none}
 
 /* provider split */
 .psplit{display:flex; gap:10px; flex-wrap:wrap}
-.pcard{flex:1; min-width:190px; border:1px solid var(--line); border-radius:var(--r-sm); padding:13px 15px; background:var(--panel-2)}
+.pcard{flex:1; min-width:130px; border:1px solid var(--line); border-radius:var(--r-sm); padding:13px 15px; background:var(--panel-2)}
 .pcard .ph{display:flex; align-items:center; gap:8px; font-size:13px; font-weight:600; margin-bottom:9px}
 .pdot{width:9px; height:9px; border-radius:50%}
 .pdot.c{background:var(--warn)}
 .pdot.x{background:var(--accent)}
+.pdot.o{background:var(--purple)}
 .pcard .pv{font-size:21px; font-weight:700; letter-spacing:-.02em}
 .pcard .pl{font-size:11.5px; color:var(--ink-dim); margin-top:4px}
 .pcard.idle{opacity:.55}

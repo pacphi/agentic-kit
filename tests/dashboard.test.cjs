@@ -445,6 +445,8 @@ async function main() {
   const AGG = {
     generatedAt: '2026-07-25T00:00:00.000Z', windowDays: 14, pricesAsOf: '2026-07-01',
     sourceHealth: {
+      claude: { status: 'ok', reason: null },
+      codex: { status: 'ok', reason: null },
       opencode: { status: 'degraded', reason: 'busy' },
       codexLedger: { status: 'ok', reason: null },
     },
@@ -672,7 +674,7 @@ async function main() {
       contains(r.body, 'function renderSourceHealth');
       contains(r.body, 'data-status="');
       contains(r.body, 'OpenCode');
-      contains(r.body, 'Codex ledger');
+      contains(r.body, 'SOURCE_HEALTH_GROUPS'); // Codex + its thread ledger render as one grouped chip
       contains(r.body, 'provider account analytics');
       contains(r.body, 'never merged into transcript totals');
       contains(r.body, 'OpenRouter credits');

@@ -2,10 +2,14 @@
 
 - **Status:** Implemented
 - **Date:** 2026-08-04
-- **Updated:** 2026-08-04
+- **Updated:** 2026-08-06
 - **Update note:** Generalized setup preflight into a required host-adapter trust contract, added
   Codex registration/OpenCode approval disclosure, documented current-UID installation-mode
-  boundaries, and surfaced usage-source health in the dashboard UI.
+  boundaries, and surfaced usage-source health in the dashboard UI. Closed a parity gap §7 left
+  behind: `sourceHealth` covered only the two secondary/corrective sources (OpenCode's SQLite
+  store, Codex's thread ledger) and never the primary Claude/Codex transcript roots, so a missing
+  or unreadable `~/.claude/projects` or `~/.codex/sessions` still silently read as zero — the exact
+  failure class this ADR exists to close, just left open on the two sources most people depend on.
 - **Deciders:** agentic-kit maintainers
 - **Related:** [issue #111](https://github.com/pacphi/agentic-kit/issues/111),
   [ADR-0008](0008-guidance-target-scope-split.md),
@@ -82,6 +86,15 @@ survey omits argv. A second query reads argv only for current-user executables t
 host controller or Node launcher. CWD lookup then receives only filtered controller PIDs. The public
 event boundary remains path-redacted as defined by ADR-0012.
 
+`AK_RUNTIME_DEBUG=1` traces this pipeline stage-by-stage (survey row count, which PIDs were classified
+as a host, which were dropped as a nested child of another candidate, and per-controller cwd
+resolution) to `$XDG_STATE_HOME/agentic-kit/runtime-debug.log`, mirroring the statusline diagnostic's
+opt-in/bounded-at-64-KiB/owner-only-0600 contract (`AK_RUNTIME_DEBUG_FILE` overrides the path). It is a
+narrower redaction than the statusline diagnostic: raw argv/command strings are still never logged
+(a pasted prompt or token could be sitting in one), but cwd paths ARE — resolving "why didn't project
+X's controller show up" is the flag's entire purpose, the operator turned it on deliberately, and a
+local directory path is not a secret the way a command line can be.
+
 ### 6. Every host setup has a pre-mutation trust boundary
 
 Each host adapter must declare whether agentic-kit manages approval grants or leaves the host's
@@ -99,11 +112,41 @@ rules survive. OpenCode discloses its user-scope wildcard approvals, MCP registr
 plugin, and managed host assets. Codex discloses MCP/AQE registrations while explicitly retaining
 its sandbox and approval policy.
 
-### 7. Usage source degradation is visible in the dashboard
+### 7. Usage source degradation is visible in the dashboard, for all four local sources
 
 The Usage API's `sourceHealth` field is rendered as persistent local-source chips across Usage
 views. `ok`, `absent`, `degraded`, and `not-read` remain distinct, and bounded reasons such as
-`busy`, `corrupt`, `query`, `schema`, or `sandboxed-roots` are visible without entering raw JSON.
+`busy`, `corrupt`, `query`, `schema`, `sandboxed-roots`, or an fs error code (`ENOENT`, `EACCES`,
+`ENOTDIR`) are visible without entering raw JSON.
+
+`sourceHealth` originally covered only the two sources with a *secondary, corrective* read layered
+on top of a primary parse — OpenCode's SQLite store and Codex's own thread ledger — because those
+are exactly where item 2 above found silent collapse in practice. It did not cover the primary
+Claude and Codex transcript roots (`~/.claude/projects`, `~/.codex/sessions`) themselves: `listClaude`
+and `listCodex` walk those directories through a `readdirSync` wrapped in a bare `catch { return [] }`,
+so a missing root, a permissions error, or any other I/O failure was indistinguishable from "no
+sessions in this window" — the same silent-zero failure class item 2 closed for OpenCode/Codex, just
+left open on the two sources every installation actually depends on.
+
+Closing it required checking what's real to check against, not inventing a status: Anthropic
+documents `~/.claude/projects/<encoded-cwd>/*.jsonl` and its 30-day default retention directly (Claude
+Code's Data usage page; the `transcript_path` every hook receives). Codex's `~/.codex/sessions/**/rollout-*.jsonl`
+is real and load-bearing for Codex's own `codex resume`, though OpenAI does not publish it as a
+formal contract the way Anthropic does. Both are markedly more stable ground than the two sources
+already tracked — the Codex thread ledger (`state_N.sqlite`) and OpenCode's `opencode.db` are
+undocumented internal storage, confirmed real only by their own upstream bug trackers (e.g.
+openai/codex#21750, a corrupt `state_5.sqlite` wedging Codex's own startup) and defensive code
+already treating the ledger's generation suffix as "not a stable name." None of the four are
+fabricated; `rootHealth()` performs a real `readdirSync` against a real path exactly like the
+existing checks, just one level up the trust stack from the two sources already wired.
+
+`sourceHealth` now reports `claude`, `codex`, `opencode`, and `codexLedger`. The dashboard renders
+this by HOST, not by field: three chips for the three supported hosts (Claude, Codex, OpenCode), not
+four. `codex` and `codexLedger` are both Codex-only evidence, so they fold into one "Codex" chip —
+its status is the worse of the two, and both sub-statuses stay visible in the chip's detail text
+(e.g. `Codex: degraded — transcripts: ok · ledger: corrupt`). No evidence is dropped; the API keeps
+four independently-diagnosable fields, the UI just groups by the thing the operator actually cares
+about (which host needs attention), matching how Claude and OpenCode already render as one chip each.
 
 ### 8. Clean-machine proof is isolated at every mutable boundary
 
@@ -124,6 +167,9 @@ setup on `macos-latest` with all global packages and user/project files under `r
   undisclosed Claude project grants introduced by upstream initializers.
 - Some formerly best-effort writes now fail. This is deliberate: when ak promises a backup, mutation
   without one is a correctness failure.
+- An unreadable `~/.claude/projects` or `~/.codex/sessions` (permissions, a corrupt filesystem entry,
+  the path replaced by a non-directory) now renders as a degraded local-source chip instead of a
+  quietly empty Usage scorecard; all four local sources share one status vocabulary.
 
 ## References
 
@@ -132,6 +178,6 @@ setup on `macos-latest` with all global packages and user/project files under `r
   `src/lib/dashboard/{page,client,styles}.mjs`,
   `src/commands/{setup,sync}.mjs`, and `src/templates/statusline-footer.cjs`.
 - Tests: `tests/kit/{clean-machine-setup,heal-natives,sqlite,settings-config,blocks,
-  live-process-sessions,setup-command,trust-manifest,usage-index-opencode}.test.mjs`,
+  live-process-sessions,setup-command,trust-manifest,usage-index,usage-index-opencode}.test.mjs`,
   `tests/dashboard.test.cjs`, and `tests/statusline-segments.test.cjs`.
 - Clean-machine workflow: `.github/workflows/nightly.yml`.

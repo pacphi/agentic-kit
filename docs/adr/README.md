@@ -121,7 +121,11 @@ interop API.
 managed fallbacks report degradation, SQLite retains classified failure evidence and last-good
 usage, promised backups fail closed before atomic replacement, status-line failures gain redacted
 opt-in diagnostics, process discovery is current-user and argv-minimized, setup discloses and
-verifies its project auto-approve manifest, and clean-machine tests isolate every mutable path.
+verifies its project auto-approve manifest, and clean-machine tests isolate every mutable path. A
+follow-up closed a parity gap in the last item: `sourceHealth` originally covered only the two
+secondary/corrective sources (OpenCode's store, Codex's thread ledger), not the primary Claude/Codex
+transcript roots — an unreadable `~/.claude/projects` or `~/.codex/sessions` still read as silent
+zero. It now reports all four.
 
 **0024** gives Overview's Intelligence view real trend data instead of a permanently-empty strip:
 a new `intel-history.mjs` module reads the neural pattern store, its lifetime learned-pattern
