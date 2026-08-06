@@ -157,7 +157,7 @@ body.gated .band,body.gated .tabbar,body.gated main{display:none}
 /* ── sticky frosted segmented control ── */
 .tabbar{
   position:sticky; top:0; z-index:20;
-  display:flex; padding:8px clamp(16px,4vw,40px) 10px;
+  display:flex; align-items:center; gap:12px; padding:8px clamp(16px,4vw,40px) 10px;
   background:var(--material);
   -webkit-backdrop-filter:saturate(180%) blur(20px);
   backdrop-filter:saturate(180%) blur(20px);
@@ -407,19 +407,30 @@ body.gated .band,body.gated .tabbar,body.gated main{display:none}
 }
 .note b{color:var(--ink)}
 .note .i{color:var(--accent); font-weight:700}
-.source-health{
-  display:flex; flex-wrap:wrap; align-items:center; gap:7px; margin:-2px 0 16px;
+/* local-source pills — sit right-aligned in the sticky tabbar, one per host */
+.tabbar .source-health{
+  display:flex; align-items:stretch; gap:6px; margin-left:auto;
   color:var(--ink-2); font-size:11.5px;
 }
 .source-health[hidden]{display:none}
-.source-health .source-label{font-weight:600; color:var(--ink-dim); margin-right:2px}
-.source-chip{
-  border:1px solid var(--line); border-radius:999px; padding:4px 9px;
-  background:var(--panel); color:var(--ink-2);
+.source-pill{
+  display:inline-flex; align-items:stretch; border-radius:999px;
+  background:var(--panel-2); overflow:hidden;
 }
-.source-chip[data-status="ok"]{border-color:var(--ok); color:var(--ok)}
-.source-chip[data-status="degraded"]{border-color:var(--warn); color:var(--warn); background:color-mix(in srgb,var(--warn) 10%,transparent)}
-.source-chip[data-status="absent"],.source-chip[data-status="not-read"]{color:var(--ink-dim)}
+.source-pill .sp-icon{display:flex; align-items:center; padding:4px 10px 4px 5px}
+.tabbar .source-pill .live-host{
+  width:32px; height:32px; display:grid; place-items:center;
+  border-radius:50%; background:var(--bg); border:1px solid var(--line);
+}
+.tabbar .source-pill .live-host-icon{width:20px; height:20px; stroke-width:1.8}
+.source-pill .sp-status{
+  display:flex; align-items:center; padding:5px 14px 5px 10px; font-size:13px;
+  font-weight:600; letter-spacing:-.006em; text-transform:lowercase; color:var(--ink-2);
+}
+.source-pill[data-status="ok"] .sp-status{color:var(--ok)}
+.source-pill[data-status="degraded"]{background:color-mix(in srgb,var(--warn) 16%,var(--panel-2))}
+.source-pill[data-status="degraded"] .sp-status{color:var(--warn)}
+.source-pill[data-status="absent"] .sp-status,.source-pill[data-status="not-read"] .sp-status{color:var(--ink-dim)}
 .sh{display:flex; align-items:baseline; justify-content:space-between; gap:12px; margin-bottom:14px}
 .sh h2{font-size:15px; font-weight:600; letter-spacing:-.014em; margin:0}
 .sh .n{color:var(--ink-dim); font-size:11.5px}
