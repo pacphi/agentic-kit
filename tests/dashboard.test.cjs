@@ -33,6 +33,32 @@ function contains(hay, needle) {
   assert(String(hay).includes(needle), `expected output to contain ${JSON.stringify(needle)}`);
 }
 
+// "Self-contained" means the page FETCHES nothing off-origin. It does not mean
+// no https string may appear: the About directory ships curated GitHub/npm/docs
+// anchors the user clicks in their own browser, which is a stated design point
+// (docs/ddd/component-directory.md §6 — "Links are outbound and user-initiated;
+// the kit stays offline"). So the invariant is pinned to the directory itself —
+// every external URL baked into the page must be one the directory declares.
+// A CDN script, webfont, tracking beacon, or any other new external host still
+// fails here, because its URL is not in that set.
+let directoryUrls = null;
+async function assertSelfContained(body) {
+  if (!directoryUrls) {
+    const { directoryEntries } = await import('../src/lib/dashboard/about-directory.mjs');
+    directoryUrls = new Set();
+    for (const e of directoryEntries()) for (const l of e.links || []) directoryUrls.add(l.url);
+  }
+  const unexpected = (body.match(/https?:\/\/[^"'`\s\\)]+/g) || [])
+    .filter((u) => !/^https?:\/\/127\.0\.0\.1/.test(u) && !/w3\.org/.test(u))
+    .filter((u) => !directoryUrls.has(u));
+  assert(unexpected.length === 0,
+    'page must not reference external hosts beyond the About directory anchors; found: '
+    + unexpected.slice(0, 5).join(', '));
+  assert(!/<link[^>]+stylesheet/i.test(body), 'no external stylesheet links');
+  assert(!/<script[^>]+src=/i.test(body), 'no external script src');
+  assert(!/<img[^>]+src=["']https?:/i.test(body), 'no external image src');
+}
+
 function mkFixture(files) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dash-test-'));
   for (const [rel, data] of Object.entries(files)) {
@@ -162,10 +188,7 @@ async function main() {
 
     await test('GET / is self-contained — no external fetches', async () => {
       const r = await get(url);
-      assert(!/https?:\/\/(?!127\.0\.0\.1)/.test(r.body.replace(/https?:\/\/[^"'\s]*w3\.org/g, '')),
-        'page must not reference external http(s) hosts');
-      assert(!/<link[^>]+stylesheet/i.test(r.body), 'no external stylesheet links');
-      assert(!/<script[^>]+src=/i.test(r.body), 'no external script src');
+      await assertSelfContained(r.body);
     });
 
     // Security review Finding 4: the dashboard — a larger inline-script
@@ -643,6 +666,328 @@ async function main() {
     await limitsSrv.close();
   }
 
+  // ── /api/system (ADR-0025): the machine-footprint payload ────────────────
+  //
+  // Driven through the REAL composed collector with every collaborator
+  // injected: the fs impl refuses every call, the persisted snapshot is handed
+  // over as a value, and no deep collector walks anything. A hand-rolled fake
+  // collector would only prove the fake — the two-tier merge and the
+  // single-flight slot the route depends on live in the composition, not in
+  // the route, so the route must be exercised against the real one.
+  const { createSystemCollector } = await import(
+    'file://' + path.join(ROOT, 'src', 'lib', 'footprint', 'index.mjs'));
+  const { measured, unknown } = await import(
+    'file://' + path.join(ROOT, 'src', 'lib', 'footprint', 'walk.mjs'));
+
+  const SCAN_ASOF = 1785000000000;          // when the persisted deep scan ran
+  const SYS_NOW = SCAN_ASOF + 3_600_000;    // an hour later: fresh, nowhere near the 7d nudge
+  const SYS_HOME = path.resolve(path.sep, 'home', 'tester');
+  const SNAPSHOT_FILE = path.join(SYS_HOME, '.config', 'agentic-kit', 'footprint-snapshot.json');
+
+  // Every fs entry point the collector can reach, refused. A test that stats a
+  // real home directory measures the developer's laptop, not the code.
+  const sysEnoent = () => { const e = new Error('ENOENT'); e.code = 'ENOENT'; throw e; };
+  const NO_FS = {
+    lstatSync: sysEnoent, statSync: sysEnoent, readdirSync: sysEnoent,
+    readFileSync: sysEnoent, writeFileSync: sysEnoent, mkdirSync: sysEnoent,
+    renameSync: sysEnoent, copyFileSync: sysEnoent, unlinkSync: sysEnoent,
+    existsSync: () => false,
+  };
+
+  // What a previous deep scan left behind. Absolute paths are the POINT of
+  // this payload (ADR-0025 §7), so the fixture carries them everywhere.
+  const deepSections = () => ({
+    install: {
+      asOf: SCAN_ASOF, complete: true,
+      nodes: [{
+        id: 'ak-config', path: path.join(SYS_HOME, '.config', 'agentic-kit'),
+        bytes: measured(4096, { asOf: SCAN_ASOF }),
+      }],
+    },
+    storage: {
+      asOf: SCAN_ASOF, complete: true,
+      total: measured(123456, { asOf: SCAN_ASOF }),
+      roots: [{
+        id: 'claude', path: path.join(SYS_HOME, '.claude'),
+        bytes: measured(123456, { asOf: SCAN_ASOF }),
+      }],
+    },
+    catalog: { asOf: SCAN_ASOF, complete: true, agents: [], skills: [], commands: [] },
+    projects: {
+      asOf: SCAN_ASOF, complete: true,
+      rows: [{
+        path: path.join(SYS_HOME, 'src', 'demo'), label: 'demo',
+        loc: measured(900, { asOf: SCAN_ASOF }),
+      }],
+    },
+  });
+
+  const scannedSnapshot = () => ({
+    present: true, asOf: SCAN_ASOF, writtenAt: new Date(SCAN_ASOF).toISOString(),
+    schemaVersion: 1, completeness: { complete: true, sections: {}, missing: [] },
+    sections: deepSections(), reason: null, file: SNAPSHOT_FILE,
+  });
+
+  // The one honest shape for "nothing has ever been deep-scanned here".
+  const neverScanned = () => ({
+    present: false, asOf: null, writtenAt: null, schemaVersion: null,
+    completeness: null, sections: null, file: SNAPSHOT_FILE,
+    reason: 'no deep scan has been run on this machine',
+  });
+
+  const runtimeCensus = () => ({
+    observedAt: new Date(SYS_NOW).toISOString(),
+    platform: 'darwin',
+    ephemeral: true,
+    processes: measured([{
+      host: 'claude', pid: 4242, startedAt: new Date(SCAN_ASOF).toISOString(), cwdReason: null,
+      uptimeMs: measured(3_600_000), cpuPercent: measured(1.5), rssBytes: measured(512_000),
+      project: measured({ path: path.join(SYS_HOME, 'src', 'demo'), label: 'demo', key: 'demo' }),
+    }]),
+    childProcessCount: measured(1),
+    totals: {
+      processCount: measured(1), rssBytes: measured(512_000), cpuPercent: measured(1.5),
+    },
+    daemons: {
+      count: measured(0), staleCount: measured(0), ttlSecs: 43200,
+      oldestAgeSecs: unknown('no daemons are running'),
+      budget: unknown('ruflo exposes no local budget state this collector can read'),
+      entries: [],
+    },
+    machine: {
+      physicalMemoryBytes: measured(16_000_000_000),
+      freeMemoryBytes: measured(8_000_000_000),
+      cpuCount: measured(10),
+    },
+  });
+
+  // `calls` counts every collector invocation, so single-flight is asserted by
+  // COUNT rather than by timing — the only assertion that cannot pass by luck.
+  function systemFixture({ snapshot = scannedSnapshot(), collectors = {} } = {}) {
+    const calls = { runtime: 0, install: 0, storage: 0, catalog: 0, projects: 0, persist: 0 };
+    const tally = (key, fn) => (...args) => { calls[key]++; return fn(...args); };
+    const sections = deepSections();
+    const collector = createSystemCollector({
+      now: () => SYS_NOW,
+      fsImpl: NO_FS,
+      cwd: fixture,
+      loadConfig: () => ({}),
+      discoverProjects: () => [{ path: path.join(SYS_HOME, 'src', 'demo'), label: 'demo' }],
+      readSnapshotImpl: () => snapshot,
+      writeSnapshotImpl: () => {
+        calls.persist++;
+        return { ok: true, file: SNAPSHOT_FILE, asOf: SCAN_ASOF, error: null };
+      },
+      collectors: {
+        runtime: tally('runtime', collectors.runtime || (async () => runtimeCensus())),
+        install: tally('install', collectors.install || (() => sections.install)),
+        storage: tally('storage', collectors.storage || (() => sections.storage)),
+        catalog: tally('catalog', collectors.catalog || (() => sections.catalog)),
+        projects: tally('projects', collectors.projects || (() => sections.projects)),
+      },
+    });
+    return { calls, collector };
+  }
+
+  const sysFx = systemFixture();
+  const sysSrv = await startDashboard({
+    port: 0, cwd: fixture, fetchStatus: async () => STUB_STATUS, usage: spyUsage().api,
+    system: sysFx.collector,
+  });
+  try {
+    await test('GET /api/system with a MISSING or WRONG token → 401, and no collector runs', async () => {
+      const refused = [
+        await get(sysSrv.url + 'api/system'),
+        await get(sysSrv.url + 'api/system', 'not-the-token'),
+      ];
+      for (const r of refused) {
+        assert(r.status === 401, 'expected 401, got ' + r.status);
+        const j = JSON.parse(r.body);
+        assert(typeof j.error === 'string', '401 must still be JSON with a reason');
+        for (const key of ['runtime', 'knownFiles', 'storage', 'projects', 'snapshot', 'scan']) {
+          assert(!(key in j), '401 body must carry no data field, found ' + key);
+        }
+      }
+      // Auth is refused BEFORE the collector is touched — an unauthenticated
+      // caller must not be able to make this machine do work.
+      assert(sysFx.calls.runtime === 0,
+        'the collector ran for an unauthenticated request (' + sysFx.calls.runtime + ' census call(s))');
+    });
+
+    await test('GET /api/system → 200 no-store: the cheap tier merged with the persisted snapshot', async () => {
+      const r = await get(sysSrv.url + 'api/system', sysSrv.token);
+      assert(r.status === 200, 'expected 200, got ' + r.status);
+      assert(r.headers['cache-control'] === 'no-store', 'a machine census must never be cached');
+      assert(r.headers['x-content-type-options'] === 'nosniff', 'nosniff on this route too');
+      contains(r.headers['content-type'] || '', 'application/json');
+      const j = JSON.parse(r.body);
+      assert(j.generatedAt === new Date(SYS_NOW).toISOString(), 'generatedAt must be this request');
+      assert(j.cheapTier.asOf === SYS_NOW, 'the cheap tier is stamped now, got ' + j.cheapTier.asOf);
+      assert(j.runtime.totals.processCount.value === 1, 'the census rides on every read');
+      assert(Array.isArray(j.knownFiles.nodes) && j.knownFiles.nodes.length > 0,
+        'the known-file stats are part of the cheap tier');
+      for (const key of ['install', 'storage', 'catalog', 'projects']) {
+        assert(j[key], 'the persisted section ' + key + ' must merge into the payload');
+      }
+      // Invariant 3: a figure measured an hour ago arrives carrying THAT asOf,
+      // re-stamped carried-forward so no renderer can read it as current.
+      assert(j.storage.total.status === 'carried-forward' && j.storage.total.asOf === SCAN_ASOF,
+        'deep figures must be carried forward with the scan asOf, got ' + JSON.stringify(j.storage.total));
+      assert(j.snapshot.present === true && j.snapshot.asOf === SCAN_ASOF, 'snapshot asOf must survive');
+      assert(j.snapshot.ageMs === 3_600_000 && j.snapshot.stale === false,
+        'an hour-old scan is fresh — the nudge is a 7-day rule');
+      assert(j.scan.running === false && j.scan.phase === 'idle',
+        'reading must never start a scan (manual-rescan-only)');
+      assert(sysFx.calls.install === 0, 'a plain read must not run a deep collector');
+    });
+
+    await test('the System payload deliberately carries absolute paths — and no transcript content', async () => {
+      const r = await get(sysSrv.url + 'api/system', sysSrv.token);
+      const j = JSON.parse(r.body);
+      // DELIBERATE DIVERGENCE from /api/live's leaf-only reduction (ADR-0025
+      // §7): a storage breakdown that hides where the bytes live answers
+      // nothing, so here the absolute path IS the answer and must survive.
+      contains(r.body, path.join(SYS_HOME, '.claude'));
+      contains(r.body, path.join(SYS_HOME, 'src', 'demo'));
+      assert(j.storage.roots[0].path === path.join(SYS_HOME, '.claude'),
+        'a storage root must keep its absolute path');
+      assert(j.runtime.processes.value[0].project.value.path === path.join(SYS_HOME, 'src', 'demo'),
+        'a process must keep the absolute cwd it was attributed to');
+      assert(j.knownFiles.nodes.every((n) => path.isAbsolute(n.path)),
+        'every known file is named by absolute path');
+      // The exposure is bounded by what the collectors structurally cannot do:
+      // they stat, they never read file contents. Nothing message-shaped may
+      // appear anywhere in this payload, at any depth.
+      const keys = new Set();
+      (function walkKeys(v) {
+        if (Array.isArray(v)) { v.forEach(walkKeys); return; }
+        if (!v || typeof v !== 'object') return;
+        for (const [k, item] of Object.entries(v)) { keys.add(k); walkKeys(item); }
+      })(j);
+      for (const banned of ['turns', 'messages', 'message', 'content', 'text', 'prompt', 'transcript']) {
+        assert(!keys.has(banned), 'the System payload must carry no transcript field, found ' + banned);
+      }
+    });
+  } finally {
+    await sysSrv.close();
+  }
+
+  await test('?refresh=deep is single-flight — two concurrent refreshes share one scan', async () => {
+    let release;
+    const gate = new Promise((resolve) => { release = resolve; });
+    // Gate the CHEAP tier, not the deep one. Both requests then resume from the
+    // same promise in one microtask drain, and runDeep's first act is a
+    // setImmediate — so the second request PROVABLY reaches refreshDeep() while
+    // the first still holds the slot. Racing two bare HTTP requests would be
+    // testing the scheduler, not the single-flight rule.
+    const fx = systemFixture({ collectors: { runtime: async () => { await gate; return runtimeCensus(); } } });
+    const srv = await startDashboard({
+      port: 0, cwd: fixture, fetchStatus: async () => STUB_STATUS, usage: spyUsage().api,
+      system: fx.collector,
+    });
+    try {
+      const both = Promise.all([
+        get(srv.url + 'api/system?refresh=deep', srv.token),
+        get(srv.url + 'api/system?refresh=deep', srv.token),
+      ]);
+      await eventually(() => fx.calls.runtime === 2, 'both refreshes must reach the collector');
+      release();
+      const [a, b] = await both;
+      assert(a.status === 200 && b.status === 200, 'both refreshes must answer 200');
+      const scanA = JSON.parse(a.body).scan;
+      assert(scanA.running === true && scanA.phase !== 'idle',
+        'a refresh must report the scan it started, got ' + JSON.stringify(scanA));
+      await eventually(() => fx.calls.persist === 1, 'the shared scan must run to completion');
+      assert(fx.calls.install === 1 && fx.calls.storage === 1
+        && fx.calls.catalog === 1 && fx.calls.projects === 1,
+      'the deep collectors ran twice — the single-flight slot did not hold: ' + JSON.stringify(fx.calls));
+      assert(fx.calls.persist === 1, 'a shared scan must write exactly one snapshot');
+    } finally {
+      await srv.close();
+    }
+  });
+
+  await test('a never-scanned machine reports "never measured", never zeros', async () => {
+    const fx = systemFixture({ snapshot: neverScanned() });
+    const srv = await startDashboard({
+      port: 0, cwd: fixture, fetchStatus: async () => STUB_STATUS, usage: spyUsage().api,
+      system: fx.collector,
+    });
+    try {
+      const r = await get(srv.url + 'api/system', srv.token);
+      assert(r.status === 200, 'expected 200, got ' + r.status);
+      const j = JSON.parse(r.body);
+      // ADR-0023 / invariant 2: null with a reason, never an object of zeros —
+      // there must be no numeric field for a renderer to misread as "0 bytes".
+      for (const key of ['install', 'storage', 'catalog', 'projects']) {
+        assert(j[key] === null, key + ' must be null, not zeros: ' + JSON.stringify(j[key]));
+      }
+      assert(j.snapshot.present === false && j.snapshot.measured === false, 'snapshot must read unmeasured');
+      assert(j.snapshot.asOf === null && j.snapshot.ageMs === null, 'unmeasured has no age');
+      assert(j.snapshot.stale === false, 'a machine that never scanned is unmeasured, not stale');
+      contains(j.snapshot.reason, 'no deep scan');
+      // The other half of the rule: a MEASURED zero stays a real zero. Under
+      // the refusing fs every known file is genuinely absent, and an absent
+      // file genuinely holds no bytes.
+      const absent = j.knownFiles.nodes.find((n) => n.presence === 'absent');
+      assert(absent && absent.bytes.status === 'measured' && absent.bytes.value === 0,
+        'an absent file is a measured zero, got ' + JSON.stringify(absent && absent.bytes));
+      assert(fx.calls.install === 0, 'an unmeasured machine must not auto-scan on open');
+    } finally {
+      await srv.close();
+    }
+  });
+
+  await test('a throwing collector degrades its own section — the route still answers 200', async () => {
+    const fx = systemFixture({
+      collectors: { runtime: async () => { throw new Error('ps: permission denied'); } },
+    });
+    const srv = await startDashboard({
+      port: 0, cwd: fixture, fetchStatus: async () => STUB_STATUS, usage: spyUsage().api,
+      system: fx.collector,
+    });
+    try {
+      const r = await get(srv.url + 'api/system', srv.token);
+      assert(r.status === 200, 'one blown section must not take the whole route down, got ' + r.status);
+      const j = JSON.parse(r.body);
+      assert(j.runtime.processes === null, 'a failed census must not fabricate an empty process list');
+      contains(j.runtime.error, 'permission denied');
+      assert(j.storage.total.value === 123456, 'the sections that DID measure must still render');
+      assert(j.knownFiles.nodes.length > 0, 'the rest of the cheap tier survives a failed census');
+    } finally {
+      await srv.close();
+    }
+  });
+
+  await test('a collector that cannot be built at all degrades to 503 with a reason', async () => {
+    const srv = await startDashboard({
+      port: 0, cwd: fixture, fetchStatus: async () => STUB_STATUS, usage: spyUsage().api,
+      system: async () => { throw new Error('footprint module unavailable'); },
+    });
+    try {
+      const r = await get(srv.url + 'api/system', srv.token);
+      assert(r.status === 503, 'expected 503, got ' + r.status);
+      const j = JSON.parse(r.body);
+      contains(j.reason, 'footprint module unavailable');
+      for (const key of ['runtime', 'knownFiles', 'storage', 'snapshot']) {
+        assert(!(key in j), 'a failed route must fabricate no data, found ' + key);
+      }
+      // A collector missing the contract is the same class of failure, and must
+      // land the same way rather than throwing past the handler.
+      const bad = await startDashboard({
+        port: 0, cwd: fixture, fetchStatus: async () => STUB_STATUS, usage: spyUsage().api,
+        system: { read: async () => ({}) },
+      });
+      try {
+        const r2 = await get(bad.url + 'api/system', bad.token);
+        assert(r2.status === 503, 'a collector without refreshDeep must be 503, got ' + r2.status);
+        contains(r2.body, 'refreshDeep');
+      } finally { await bad.close(); }
+    } finally {
+      await srv.close();
+    }
+  });
+
   // Masking is not optional: a usage module that cannot mask must fail the
   // request, never serve an unmasked transcript.
   const noMask = spyUsage({ maskSecrets: undefined });
@@ -901,9 +1246,7 @@ async function main() {
 
     await test('served page is still self-contained after the Usage tab lands', async () => {
       const r = await get(uiSrv.url);
-      assert(!/https?:\/\/(?!127\.0\.0\.1)/.test(r.body.replace(/https?:\/\/[^"'\s]*w3\.org/g, '')),
-        'page must not reference external http(s) hosts');
-      assert(!/<script[^>]+src=/i.test(r.body), 'no external script src');
+      await assertSelfContained(r.body);
     });
   } finally {
     await uiSrv.close();
@@ -1447,7 +1790,7 @@ async function main() {
   // is the suite where it matters most — the traversal-guard and credential-
   // leak tests live here and were the reviewer's cited example of a block
   // that could silently vanish with the old harness never noticing.
-  const EXPECTED = 65;
+  const EXPECTED = 72;
   if (passed + failed !== EXPECTED) {
     console.error(`\nPLAN MISMATCH: expected ${EXPECTED} tests, ran ${passed + failed}`);
     process.exit(1);

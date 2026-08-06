@@ -31,6 +31,12 @@
 //   GET /api/usage    → the usage Aggregate MINUS sessions[] (ADR-0009)
 //   GET /api/sessions → the session list, filtered + paginated
 //   GET /api/session/:id → one transcript, secrets masked SERVER-side
+//   GET /api/system   → the machine-footprint payload (ADR-0025): the cheap
+//                      tier (runtime census + known-file stats, TTL-cached
+//                      ~60s) merged with the last persisted deep snapshot,
+//                      carried forward with ITS asOf. `?refresh=deep` starts
+//                      or attaches to the single-flight deep scan and returns
+//                      immediately with progress state.
 //
 // The status rows are gathered by SHELLING OUT to the installed CLI
 // (`node bin/agentic-kit.mjs status --json`) so we never duplicate status.mjs's
@@ -501,6 +507,21 @@ function sendTranscriptJson(res, status, payload) {
   res.end(JSON.stringify(payload));
 }
 
+/** Lazily bind the machine-footprint collector (ADR-0025), for the same reason
+ *  lazyUsage is lazy: the System area pulls in five walkers plus the runtime
+ *  survey, and a panel that never opens that tab must not pay for them. One
+ *  instance per dashboard server — it owns the cheap tier's TTL cache and the
+ *  deep scan's single-flight slot, and a second instance would defeat both. */
+function lazySystem(systemOptions = {}) {
+  let instancePromise;
+  return async () => {
+    instancePromise ||= import('./footprint/index.mjs').then(({ createSystemCollector }) => (
+      createSystemCollector(systemOptions)
+    ));
+    return instancePromise;
+  };
+}
+
 /** Load the collector only when Live is requested. This keeps dashboard startup
  * cheap and permits tests/embedders to inject a source without touching real
  * transcript stores. */
@@ -525,7 +546,8 @@ function lazyLive(liveOptions = {}) {
  *             any|Promise<any>)|any,
  *           intelClientBuffer?: number, intelMaxClients?: number,
  *           discoverProjects?: () => Array<{ path: string, label: string, source?: string }>,
- *           machineWideIntel?: (projects: Array<any>) => any }} [opts]
+ *           machineWideIntel?: (projects: Array<any>) => any,
+ *           system?: any, systemOptions?: any }} [opts]
  * @returns {Promise<{ url: string, urlWithToken: string, port: number, token: string, close: () => Promise<void> }>}
  */
 export function startDashboard({
@@ -534,7 +556,7 @@ export function startDashboard({
   liveOptions = {}, liveIdleMs = 30_000, transcripts, transcriptOptions = {},
   transcriptClientBuffer = 64, transcriptMaxClients = 16,
   intelWatch, intelClientBuffer = 256, intelMaxClients = 32,
-  discoverProjects, machineWideIntel,
+  discoverProjects, machineWideIntel, system, systemOptions = {},
 } = {}) {
   const provide = fetchStatus || shellOutStatus(cwd);
   const usageApi = usage || lazyUsage();
@@ -542,6 +564,22 @@ export function startDashboard({
   // real ~/.config through this route. Lazy for the same reason lazyUsage is.
   const provideLimits = limits || (async () => (await import('./quota.mjs')).readLimits());
   const provideLive = typeof live === 'function' ? live : live ? async () => live : lazyLive(liveOptions);
+  // Same injection contract as `live`: a function is called to produce the
+  // collector, a value is reused verbatim (tests hand over a fake so the route
+  // never walks the real machine), and the default is the lazy real one. The
+  // collector must expose read/refreshDeep — checked at use, not here, so an
+  // unopened System tab still costs nothing.
+  const provideSystem = typeof system === 'function'
+    ? system : system ? async () => system : lazySystem({ cwd, ...systemOptions });
+  let systemPromise;
+  const getSystem = async () => {
+    const collector = await (systemPromise ||= Promise.resolve().then(provideSystem));
+    if (!collector || typeof collector.read !== 'function'
+      || typeof collector.refreshDeep !== 'function') {
+      throw new TypeError('system collector must implement read and refreshDeep');
+    }
+    return collector;
+  };
   let transcriptServicePromise;
   const provideTranscripts = typeof transcripts === 'function'
     ? transcripts : transcripts ? async () => transcripts : async () => {
@@ -1232,6 +1270,47 @@ export function startDashboard({
         sendJson(res, 200, { ...payload, insights: detectLimitInsights(payload, agg) ?? [] });
       } catch (e) {
         sendJson(res, 500, { error: String(e && e.message || e) });
+      }
+      return;
+    }
+
+    // ── System / machine footprint (ADR-0025). Lazy, like Usage above. ──────
+    //
+    // DELIBERATE DIVERGENCE from publicLivePayload, documented in ADR-0025 §7
+    // and the machine-footprint DDD's delivery section: this payload carries
+    // ABSOLUTE PATHS and is NOT run through publicLivePayload's leaf-only
+    // reduction. That reduction exists because a path is incidental provenance
+    // on a *session* payload; here the path IS the answer — a storage
+    // breakdown that hides where the bytes live answers nothing. The exposure
+    // is bounded by what the collectors structurally cannot do: file CONTENTS
+    // are never read (stat metadata, directory entries, and manifest names
+    // only), so no transcript, prompt, or tool payload can reach this route to
+    // leak. Delivery protections are otherwise identical to every route above
+    // — loopback bind, per-session token auth, no-store, nosniff, zero egress.
+    if (url === '/api/system') {
+      try {
+        const collector = await getSystem();
+        // ORDER IS LOAD-BEARING: assemble the payload BEFORE starting a scan.
+        // The deep collectors are synchronous, so the first phase occupies the
+        // event loop the moment it gets a turn — and `read()` awaits, which
+        // hands it that turn. Starting first therefore made the *initiating*
+        // request wait out the phase it had just kicked off (measured: 9s),
+        // which is precisely the hang the progress state exists to avoid.
+        const payload = await collector.read();
+        if (query.get('refresh') === 'deep') {
+          // Start-or-attach and answer NOW. The collector's single flight means
+          // a second refresh joins the running scan rather than racing it, and
+          // it never rejects — the catch guards an injected collector that does
+          // not honour that contract, so a bad one cannot take the process down
+          // with an unhandled rejection.
+          Promise.resolve(collector.refreshDeep()).catch(() => {});
+          // The payload predates the start by microseconds; re-stamp the live
+          // scan block so this response reads "running", not "idle".
+          if (typeof collector.scanState === 'function') payload.scan = collector.scanState();
+        }
+        sendJson(res, 200, payload);
+      } catch (e) {
+        sendJson(res, 503, { error: 'system footprint unavailable', reason: String(e && e.message || e) });
       }
       return;
     }

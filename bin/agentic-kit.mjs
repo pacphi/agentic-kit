@@ -22,6 +22,8 @@ const PORCELAIN = Object.assign(Object.create(null), {
   dashboard: () => import('../src/commands/x/dashboard.mjs'),
   admin: () => import('../src/commands/x/admin.mjs'),
   usage: () => import('../src/commands/usage.mjs'),
+  system: () => import('../src/commands/system.mjs'),
+  about: () => import('../src/commands/about.mjs'),
   run: () => import('../src/commands/run.mjs'),
   host: () => import('../src/commands/x/host.mjs'),
   uninstall: () => import('../src/commands/uninstall.mjs'),
@@ -49,6 +51,8 @@ Usage (ak = alias of agentic-kit):
   ak dashboard       open the local web dashboard (localhost; auto-opens browser)  [--port N] [--no-open]
   ak admin           maintainer-only telemetry admin (localhost; GitHub/npm egress)  [--port N] [--no-open]
   ak usage           inspect/refresh offline provider analytics  [status|refresh openrouter]
+  ak system          what this stack occupies on your machine   [--deep] [--json]
+  ak about           what agentic-kit installs and configures, and why  [--category N]
   ak run             execute a host-neutral activity pipeline  [template "task"] [--dry-run]
   ak host            manage agent hosts, routing, and provider bindings  [status|pick|refresh|off]
   ak uninstall       leave cleanly                                      [--this-project] [--purge]
