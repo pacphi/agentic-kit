@@ -64,8 +64,14 @@ import {
  *  v8: Codex `session_meta.model_provider` is retained as observed inference
  *      provider evidence. v7 caches discarded that field, so every Codex
  *      record must be re-derived rather than continuing to display an
- *      avoidable "provider not recorded". */
-export const SCHEMA_VERSION = 8;
+ *      avoidable "provider not recorded".
+ *  v9: the dropped-connection/API-error placeholder turn is now recognized by
+ *      its literal `model: "<synthetic>"` marker as well as
+ *      `isApiErrorMessage: true` — some builds emit the placeholder without
+ *      that flag set. A v8-cached session parsed from such a transcript still
+ *      carries `"<synthetic>"` in `models` and a $0 usage row, so it must be
+ *      re-derived or the placeholder keeps showing as a real "model in play". */
+export const SCHEMA_VERSION = 9;
 
 /** Silence longer than this ends a stretch of engagement. A session is split
  *  into active sub-intervals at gaps ABOVE this bound (exactly this much is not
@@ -514,8 +520,11 @@ function parseClaude(raw, { id, dirName, withTurns = false }) {
     // always zero. It IS real engaged time (counted above), but it is not a
     // model attempt: excluded from `models`/cost attribution so it can never
     // appear as a $0 "model in play," and counted instead as an EXCEPTION so
-    // it stays visible rather than silently vanishing.
-    if (e.isApiErrorMessage === true) {
+    // it stays visible rather than silently vanishing. isApiErrorMessage isn't
+    // reliably set on every build that emits this placeholder, so the literal
+    // model marker is checked directly too — it's the one part of the shape
+    // that's never varied in observed transcripts.
+    if (e.isApiErrorMessage === true || e.message.model === '<synthetic>') {
       rec.exceptions++;
       if (withTurns) {
         turns.push({

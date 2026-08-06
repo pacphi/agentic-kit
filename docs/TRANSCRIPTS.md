@@ -36,7 +36,7 @@ rewritten; rule 3 of the module header, `usage-index.mjs:22-29`):
 
 | Host | Store | Discovered by |
 |---|---|---|
-| Claude Code | `~/.claude/projects/<encoded-project-dir>/<sessionId>.jsonl` | `listClaude` (`usage-index.mjs:684`) — exactly one level of project directories |
+| Claude Code | `~/.claude/projects/<encoded-project-dir>/<sessionId>.jsonl` | `listClaude` (`usage-index.mjs:733`) — exactly one level of project directories |
 | Codex CLI | `~/.codex/sessions/<yyyy>/<mm>/<dd>/rollout-<ts>-<uuid>.jsonl` | `listCodex` (`usage-index.mjs:705`) — the `yyyy/mm/dd` tree walk |
 
 Roots come from `defaultRoots()` (`usage-index.mjs:697-701`) and are injectable
@@ -141,7 +141,7 @@ story is [Appendix A](#appendix-a--fix-history).)
 
 ### 3.2 `kind` — the attribution field
 
-`userTurnKind` (`usage-index.mjs:451-455`) classifies every user-role turn:
+`userTurnKind` (`usage-index.mjs:470-475`) classifies every user-role turn:
 
 | `kind` | Test | Meaning |
 |---|---|---|
@@ -164,7 +164,7 @@ Two deliberate subtleties:
 - **`tool-result` outranks `context`**: a `tool_result` block on an `isMeta`
   entry is still tool feedback.
 
-Codex user turns are `kind: 'prompt'` by construction (`usage-index.mjs:584-592`)
+Codex user turns are `kind: 'prompt'` by construction (`usage-index.mjs:657`)
 — rollouts only record real prompts as `user_message` events (§1.2).
 
 Coverage: `tests/kit/usage-index.test.mjs` — "user-role turns carry a kind"

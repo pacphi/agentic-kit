@@ -128,9 +128,9 @@ responses = Σ over included sessions of session.responses
 **Source:**
 
 - Filter: a parsed record with zero assistant turns is dropped entirely — "no
-  assistant turn → not a session" (`usage-index.mjs:923`) — and a record whose
+  assistant turn → not a session" (`usage-index.mjs:935`) — and a record whose
   last activity falls outside the requested window is dropped too
-  (`usage-index.mjs:924`).
+  (`usage-index.mjs:936`).
 - `responses` accumulation: Claude increments per assistant message
   (`usage-index.mjs:504-509`); Codex increments per `agent_message` event
   (`usage-index.mjs:651-655`).
@@ -213,7 +213,7 @@ already in effect on the given day, comparing ISO date strings
 lexicographically so no `Date` parsing is involved and the module stays
 clock-free.
 
-`aggregate()` passes each usage row's own `day` (`usage-index.mjs:911`), which
+`aggregate()` passes each usage row's own `day` (`usage-index.mjs:926`), which
 it already has because rows are keyed by `(day, model)`. **This is the whole
 point:** tokens metered in August must still read as August's rate when the
 panel is opened in December. Pricing by *today's* date instead would restate a
@@ -297,7 +297,7 @@ tokens = input + output + cacheRead + cacheWrite   (summed across all rows in wi
 **Source:** `t.tokens` from `totals`, accumulated per row at
 `usage-index.mjs:935` (`rowTokens = row.input + row.output + row.cacheRead +
 row.cacheWrite`) and rolled into `totals.tokens` via `addTo`
-(`usage-index.mjs:843-852`). Rendered with `fmtTok()`
+(`usage-index.mjs:1027-1033`). Rendered with `fmtTok()`
 (`dashboard/client.mjs`): `≥1e9` → `"X.XB"`, `≥1e6` → `"X.XM"`,
 `≥1e3` → `"X.XK"`, else the rounded integer.
 
@@ -309,7 +309,7 @@ numbers as percentages of `t.tokens` (`dashboard/client.mjs`,
 **What "input" excludes.** For both providers, the `input` counter recorded
 per row is **gross input minus cached input** — Claude's parser reads
 `cache_read_input_tokens` and `cache_creation_input_tokens` as separate fields
-the provider already reports separately (`usage-index.mjs:523-524`); Codex's
+the provider already reports separately (`usage-index.mjs:545-546`); Codex's
 parser subtracts `cached_input_tokens` from `input_tokens` explicitly
 (`usage-index.mjs:666-675`, `input: Math.max(0, gross - cacheRead)`) because
 Codex's own `input_tokens` field **includes** cached tokens and would
@@ -396,7 +396,7 @@ session data, and each needs its own fix:
    human, or genuinely idle) donates its *entire* idle stretch to the span,
    even though no work happened during it. Fix: split each session into
    active sub-intervals wherever the gap between two consecutive timestamps
-   exceeds `IDLE_GAP_MS` (15 minutes, `usage-index.mjs:62`), then union
+   exceeds `IDLE_GAP_MS` (15 minutes, `usage-index.mjs:80`), then union
    *those* sub-intervals — this is `engagedSeconds`.
 
 **Source:**
@@ -462,7 +462,7 @@ byDay[day].cost = Σ costOf(row) for every usage row whose day == that key
 
 **Source:** the day key is the row's own `row.day`, computed once at parse
 time as **local calendar day**, not UTC
-(`usage-index.mjs:530`/`usage-index.mjs:667` call `localDay(at)`) — so a
+(`usage-index.mjs:542`/`usage-index.mjs:679` call `localDay(at)`) — so a
 session that runs from 23:58 local to 00:05 local is billed to the day its
 *first* row landed on (test:
 `tests/kit/usage-index.test.mjs:634`, "a session that opens before midnight
@@ -489,10 +489,10 @@ renders "no sessions in window" instead of zeroed figures
 
 **Formula:** identical aggregation to every other bucket
 (`byProvider[s.provider]`, populated via `addTo()`, `usage-index.mjs:889-898`,
-  called once per session at `usage-index.mjs:1000`), keyed by the literal string
+  called once per session at `usage-index.mjs:1031`), keyed by the literal string
 `"claude"` or `"codex"` assigned at parse time
 (`blankSession(id, 'claude')` / `blankSession(id, 'codex')`,
-`usage-index.mjs:291-301`, `parseClaude`/`parseCodex` entry points).
+`usage-index.mjs:345-355`, `parseClaude`/`parseCodex` entry points).
 
 **Why this pairing is the one under the most scrutiny.** Both providers'
 tokens are summed into the *same* `tokens`/`cost` fields using the *same*
@@ -575,7 +575,7 @@ excluded subagent-replay session still shows up as "used," at zero cost,
 rather than vanishing.
 
 `byModel[...].responses` is populated from `row.responses`
-(`usage-index.mjs:921`), which in turn comes from the `responses` field
+(`usage-index.mjs:964`), which in turn comes from the `responses` field
 passed into `addUsage()` at the call site — `1` per Claude assistant turn
 (`usage-index.mjs:484-490`), or `rec.responses` (the session's whole response
 count) once per Codex session, passed at the single point Codex calls
@@ -917,7 +917,7 @@ rollout replays the parent's entire token history (ccusage/ccusage#950
 measured up to 91× inflation) — while the session record stays visible. The
 rollout's own `session_meta.thread_source` sniff remains as the fallback when
 the ledger is absent or migrated beyond recognition. Codex sessions also carry
-`reasoningOutput` (`usage-index.mjs:677-678`) — reasoning tokens are a **subset**
+`reasoningOutput` (`usage-index.mjs:686-687`) — reasoning tokens are a **subset**
 of output tokens and are annotation only, never added to any sum.
 
 ## 14. Known limitations, restated as a single checklist
