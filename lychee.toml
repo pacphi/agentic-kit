@@ -27,4 +27,5 @@ exclude = [
   "^https://img\\.shields\\.io",
   "^https://www\\.npmjs\\.com",  # npm package pages 403 bots/CI
   "^https://doi\\.org",  # Crossref DOI proxy 403s bot UAs; resolves fine for browsers
+  "^https://openai\\.com",  # OpenAI marketing/brand pages 403 bot UAs (Cloudflare); resolves fine for browsers
 ]
