@@ -102,6 +102,7 @@ export function renderPage({ name, version }) {
     <button class="seg-btn" role="tab" id="tab-usage" data-tab="usage" aria-selected="false" aria-controls="panel-usage" type="button">Usage</button>
     <button class="seg-btn" role="tab" id="tab-observability" data-tab="observability" aria-selected="false" aria-controls="panel-observability" type="button">Observability</button>
   </div>
+  <div class="source-health" id="u-source-health" role="status" aria-live="polite" hidden></div>
 </nav>
 
 <div class="secondary-shell">
@@ -270,7 +271,6 @@ export function renderPage({ name, version }) {
       <h2 id="usage-view-title">Usage scorecard</h2>
       <p id="usage-view-description">Token consumption, API-equivalent cost, efficiency, and trends.</p>
     </header>
-    <div class="source-health" id="u-source-health" role="status" aria-live="polite" hidden></div>
 
     <section class="view" id="v-score">
       <div class="hero" id="u-hero"></div>
