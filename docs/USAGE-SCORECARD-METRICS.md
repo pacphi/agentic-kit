@@ -81,10 +81,17 @@ secondary/corrective reads layered on top of them (`opencode`'s SQLite store,
 degraded OpenCode read retains in-window last-good cached sessions rather than
 turning an unreadable database into an observed zero. Source health is
 diagnostic evidence; it is not added to token or cost totals. The dashboard
-renders these states as local-source chips above every Usage view, one per
-HOST rather than one per field — `codex` and `codexLedger` are both Codex-only
-evidence, so they fold into a single "Codex" chip carrying both sub-statuses —
-so a degraded, absent, or deliberately unread source cannot be mistaken for
+renders these states as branded host-icon pills in the sticky tabbar —
+right-aligned, one per HOST rather than one per field. `codex` and
+`codexLedger` are both Codex-only evidence, so they fold into a single Codex
+pill (worse status leads; both sub-statuses live in the status side's
+tooltip) rather than reading as a fourth, confusingly duplicate entry. Each
+pill's icon reuses the same brand mark as the Observability Live view's
+session list, so a host reads as the same glyph everywhere in the dashboard;
+hovering the icon shows what it monitors, hovering the status word shows the
+full detail. This placement — outside the Usage panel, in the persistent
+tabbar — means a degraded, absent, or deliberately unread source stays
+visible regardless of which tab is active, and cannot be mistaken for
 healthy empty data. See [ADR-0023 §7](adr/0023-fail-closed-operations-and-explicit-degradation.md)
 for why the four fields are tracked to different degrees of external documentation.
 
