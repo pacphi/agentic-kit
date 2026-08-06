@@ -769,6 +769,33 @@ test('an empty corpus yields a zeroed Aggregate rather than throwing', async () 
   assert.equal(agg.totals.engagedSeconds, 0);
   assert.deepEqual(agg.sessions, []);
   assert.deepEqual(agg.projectTree, []);
+  // A never-used host (root simply doesn't exist yet) reads as absent, not ok —
+  // "zero sessions" and "we never found the directory" must stay distinguishable.
+  assert.deepEqual(agg.sourceHealth.claude, { status: 'absent', reason: null });
+  assert.deepEqual(agg.sourceHealth.codex, { status: 'absent', reason: null });
+});
+
+test('buildIndex reports ok claude/codex root health when the transcript roots exist', async () => {
+  _resetForTest();
+  const sb = sandbox();
+  const agg = await buildIndex(opts(sb));
+  assert.deepEqual(agg.sourceHealth.claude, { status: 'ok', reason: null });
+  assert.deepEqual(agg.sourceHealth.codex, { status: 'ok', reason: null });
+});
+
+test('an unreadable Claude root degrades rather than silently reading as zero sessions', async () => {
+  _resetForTest();
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-usage-unreadable-'));
+  const claudeRoot = path.join(dir, 'claude-is-a-file');
+  fs.writeFileSync(claudeRoot, 'not a directory'); // readdirSync on this throws ENOTDIR, not ENOENT
+  const agg = await buildIndex({
+    days: 14, now: NOW, deps: deps(),
+    roots: { claude: claudeRoot, codex: path.join(dir, 'codex-nope') },
+    cachePath: path.join(dir, 'cache.json'),
+  });
+  assert.equal(agg.sourceHealth.claude.status, 'degraded');
+  assert.ok(agg.sourceHealth.claude.reason, 'a degraded root must carry a bounded reason, e.g. ENOTDIR');
+  assert.equal(agg.totals.sessions, 0, 'degraded still yields zero sessions here (nothing to preserve) — the point is the status, not the count');
 });
 
 // ── cache ───────────────────────────────────────────────────────────────────

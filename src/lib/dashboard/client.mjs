@@ -791,15 +791,43 @@ export const JS = `
     return out;
   }
 
+  // One chip per HOST, not per sourceHealth field: Codex carries two fields
+  // (its transcript root, plus the thread ledger that corrects subagent-replay
+  // token inflation) but is still one host, so the worse of the two drives the
+  // chip's status and both are visible in its detail text.
+  var SOURCE_HEALTH_GROUPS=[
+    {label:"Claude",title:"~/.claude/projects/**/*.jsonl",parts:[{key:"claude"}]},
+    {label:"Codex",title:"~/.codex/sessions/**/rollout-*.jsonl, plus Codex's own thread ledger",
+      parts:[{key:"codex",sub:"transcripts"},{key:"codexLedger",sub:"ledger"}]},
+    {label:"OpenCode",title:"OpenCode's SQLite session store",parts:[{key:"opencode"}]}
+  ];
+  var SOURCE_HEALTH_RANK={degraded:0,"not-read":1,absent:2,ok:3}; // lower sorts first = worse
+  function sourceHealthRank(status){
+    var r=SOURCE_HEALTH_RANK[status];
+    return r===undefined?1:r;
+  }
+
   function renderSourceHealth(health){
     var el=document.getElementById("u-source-health");
     if(!el)return;
-    var labels={opencode:"OpenCode",codexLedger:"Codex ledger"},chips=[];
-    for(var key in (health||{})){
-      var item=health[key]||{},status=String(item.status||"not-read");
-      var detail=status+(item.reason?" · "+item.reason:"");
-      chips.push('<span class="source-chip" data-status="'+esc(status)+'" title="local usage source health">'
-        +esc(labels[key]||key)+": "+esc(detail)+"</span>");
+    health=health||{};
+    var chips=[];
+    for(var g=0; g<SOURCE_HEALTH_GROUPS.length; g++){
+      var grp=SOURCE_HEALTH_GROUPS[g],present=[];
+      for(var p=0; p<grp.parts.length; p++){
+        var part=grp.parts[p],item=health[part.key];
+        if(item) present.push({status:String(item.status||"not-read"),reason:item.reason,sub:part.sub});
+      }
+      if(!present.length)continue;
+      var lead=present.slice().sort(function(a,b){
+        return sourceHealthRank(a.status)-sourceHealthRank(b.status);
+      })[0];
+      var detail=present.map(function(pt){
+        var d=pt.status+(pt.reason?" · "+pt.reason:"");
+        return pt.sub?pt.sub+": "+d:d;
+      }).join(" · ");
+      chips.push('<span class="source-chip" data-status="'+esc(lead.status)+'" title="'+esc(grp.title)+'">'
+        +esc(grp.label)+": "+esc(detail)+"</span>");
     }
     el.hidden=chips.length===0;
     el.innerHTML=chips.length?'<span class="source-label">local sources</span>'+chips.join(""):"";
@@ -912,18 +940,27 @@ export const JS = `
         +'<span class="db-lab">'+esc(x.day.slice(8))+"</span></div>";
     }).join(""):'<div class="empty">no days in window.</div>';
 
-    // Host and inference-provider are independent canonical axes.
+    // Host and inference-provider are independent canonical axes. All three
+    // supported hosts always render (idle/grayed-out when a host has no
+    // sessions in this window) rather than appearing/disappearing based on
+    // setup state — the scorecard reflects observed transcript evidence, not
+    // which ak setup --host flags were ever run.
     var prov=d.byHost||{};
-    var order=["claude","codex"];
+    var order=["claude","codex","opencode"];
     for(k in prov)if(order.indexOf(k)<0)order.push(k);
+    var PDOT_CLASS={claude:"c",codex:"x",opencode:"o"};
+    var activeHosts=0;
     document.getElementById("u-hosts").innerHTML=order.map(function(name){
       var v=prov[name], cost=fld(v,"cost"), sess=fld(v,"sessions"), tok=fld(v,"tokens");
       var idle=!sess&&!cost;
+      if(!idle)activeHosts++;
       return '<div class="pcard'+(idle?" idle":"")+'"><div class="ph"><span class="pdot '
-        +(name==="codex"?"x":"c")+'"></span>'+esc(name)+"</div>"
+        +(PDOT_CLASS[name]||"c")+'"></span>'+esc(name)+"</div>"
         +'<div class="pv mono">'+esc(fmtUsd(cost))+"</div>"
         +'<div class="pl">'+(idle?"no sessions in window":esc(fmtNum(sess))+" sessions &middot; "+esc(fmtTok(tok))+" tokens")+"</div></div>";
     }).join("");
+    var hostsNoteEl=document.getElementById("u-hosts-note");
+    if(hostsNoteEl)hostsNoteEl.textContent=activeHosts+" active of "+order.length;
 
     var segs=[["cache read",t.cacheRead,"var(--warn)"],["cache write",t.cacheWrite,"var(--purple)"],
       ["output",t.output,"var(--accent)"],["input",t.input,"var(--ok)"]];

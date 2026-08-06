@@ -284,7 +284,7 @@ export function renderPage({ name, version }) {
       </section>
       <div class="two">
         <section class="strip">
-          <div class="sh"><h2>by host</h2><span class="n mono">claude vs codex</span></div>
+          <div class="sh"><h2>by host</h2><span class="n mono" id="u-hosts-note"></span></div>
           <div class="psplit" id="u-hosts"></div>
           <div class="tokbar" id="u-tokbar"></div>
           <div class="legend" id="u-toklegend"></div>

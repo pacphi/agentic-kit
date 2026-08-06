@@ -694,6 +694,25 @@ function statSafe(file) {
   try { return fs.statSync(file); } catch { return null; }
 }
 
+/** ok/absent/degraded for a primary transcript root (Claude/Codex): distinguishes
+ *  a directory that simply doesn't exist yet (host never used on this machine)
+ *  from one that exists but can't be read (permissions, not-a-directory, I/O) —
+ *  the same vocabulary sourceHealth already uses for the opencode/codexLedger
+ *  sources, so an unreadable root cannot be mistaken for "zero sessions in
+ *  this window". listClaude/listCodex still swallow readdir errors per
+ *  subdirectory (a bad nested entry must not abort the whole scan); this is
+ *  the one root-level check that turns that silence into visible evidence. */
+function rootHealth(dir) {
+  try {
+    fs.readdirSync(dir);
+    return { status: 'ok', reason: null };
+  } catch (err) {
+    return err?.code === 'ENOENT'
+      ? { status: 'absent', reason: null }
+      : { status: 'degraded', reason: err?.code || 'io' };
+  }
+}
+
 function defaultRoots() {
   return {
     claude: path.join(claudeDir(), 'projects'),
@@ -1136,6 +1155,11 @@ async function scan(o = {}) {
   const cacheFile = cachePath ?? defaultCachePath();
   const cutoff = now - days * DAY_MS;
 
+  // Primary transcript roots: read once at root level (cheap — not the
+  // recursive per-file walk listClaude/listCodex still do below).
+  const claudeHealth = rootHealth(r.claude);
+  const codexHealth = rootHealth(r.codex);
+
   const candidates = [...listClaude(r.claude), ...listCodex(r.codex)]
     .map((e) => ({ ...e, stat: statSafe(e.file) }))
     .filter((e) => e.stat && e.stat.mtimeMs >= cutoff);
@@ -1244,7 +1268,9 @@ async function scan(o = {}) {
       : { status: observed.error.kind === 'absent' ? 'absent' : 'degraded', reason: observed.error.kind };
   }
   const result = aggregate(applyCodexLedger(records, ledger), { days, now, cutoff, deps });
-  result.sourceHealth = { opencode: opencodeHealth, codexLedger: codexLedgerHealth };
+  result.sourceHealth = {
+    claude: claudeHealth, codex: codexHealth, opencode: opencodeHealth, codexLedger: codexLedgerHealth,
+  };
   return result;
 }
 
