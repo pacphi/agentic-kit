@@ -982,6 +982,45 @@ async function main() {
       assert(liveCalls.start === 1, 'live collector must start exactly once');
     });
 
+    await test('GET /api/live/history against a live service without historySnapshot → 501', async () => {
+      const r = await get(liveSrv.url + 'api/live/history', liveSrv.token);
+      assert(r.status === 501, 'expected 501, got ' + r.status);
+    });
+
+    await test('GET /api/live/history resolves window→sinceMs and scrubs the same as /api/live', async () => {
+      const historyCalls = [];
+      live.historySnapshot = (opts) => {
+        historyCalls.push(opts);
+        return {
+          schemaVersion: 1, cursor: null,
+          sessions: [{
+            id: 'h1', project: 'agentic-kit', projectKey: 'project:test',
+            nodes: [{
+              id: 'hn1', source: { artifact: '/Users/private/.claude/projects/history-session.jsonl' },
+              response: 'PRIVATE HISTORICAL RESPONSE',
+            }],
+            edges: [],
+          }],
+          projects: [{ id: 'project:test', label: 'agentic-kit' }],
+        };
+      };
+      const noWindow = await get(liveSrv.url + 'api/live/history', liveSrv.token);
+      assert(noWindow.status === 200, 'expected 200, got ' + noWindow.status);
+      assert(!noWindow.body.includes('PRIVATE HISTORICAL RESPONSE'), 'history snapshot must be scrubbed too');
+      assert(!noWindow.body.includes('/Users/private'), 'artifact paths must be reduced to a leaf, not the absolute path');
+      assert(noWindow.body.includes('history-session.jsonl'), 'the artifact leaf name itself is allowed through');
+      const fourteenDayMs = 14 * 24 * 60 * 60 * 1000;
+      assert(Math.abs(Date.now() - historyCalls[0].sinceMs - fourteenDayMs) < 5000,
+        'missing ?window must default to a 14-day cutoff, same as clampDays');
+
+      await get(liveSrv.url + 'api/live/history?window=1d', liveSrv.token);
+      const oneDayMs = 24 * 60 * 60 * 1000;
+      assert(Math.abs(Date.now() - historyCalls[1].sinceMs - oneDayMs) < 5000, '?window=1d must resolve to a 1-day cutoff');
+
+      await get(liveSrv.url + 'api/live/history?window=all', liveSrv.token);
+      assert(historyCalls[2].sinceMs === null, '?window=all must scan without a cutoff');
+    });
+
     await test('GET /api/live/events with no token → 401 before any subscribe', async () => {
       const before = liveCalls.subscribe;
       const r = await getRaw(liveSrv.port, '/api/live/events');
@@ -1408,7 +1447,7 @@ async function main() {
   // is the suite where it matters most — the traversal-guard and credential-
   // leak tests live here and were the reviewer's cited example of a block
   // that could silently vanish with the old harness never noticing.
-  const EXPECTED = 63;
+  const EXPECTED = 65;
   if (passed + failed !== EXPECTED) {
     console.error(`\nPLAN MISMATCH: expected ${EXPECTED} tests, ran ${passed + failed}`);
     process.exit(1);

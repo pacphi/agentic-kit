@@ -348,6 +348,11 @@ const LIVE_SNAPSHOT = {
 const LIVE_STUB = {
   start: async () => {},
   snapshot: async () => LIVE_SNAPSHOT,
+  // The fixture is static, so History's ?window= is a no-op here — the real
+  // LiveSessionsService.historySnapshot() date-windowing is covered by
+  // tests/kit/live-service.test.mjs; this stub only needs to exist so the
+  // Observability → History tab has something to render end-to-end.
+  historySnapshot: async () => LIVE_SNAPSHOT,
   replay: async () => ({ reset: false, events: [] }),
   subscribe: () => () => {},
   close: async () => {},
@@ -418,10 +423,10 @@ async function main() {
   });
   page.on('pageerror', (e) => consoleErrors.push(String(e.message)));
   page.on('requestfailed', (r) => {
-    // Leaving Live deliberately closes EventSource. Chromium reports that
-    // client-side teardown as ERR_ABORTED even though it is the expected,
-    // leak-preventing lifecycle behavior.
-    if (/\/api\/live\/(?:events|transcripts\/[^/]+\/[^/]+\/events)(?:\?.*)?$/.test(r.url())
+    // Leaving Live (or the Intelligence view) deliberately closes its
+    // EventSource. Chromium reports that client-side teardown as ERR_ABORTED
+    // even though it is the expected, leak-preventing lifecycle behavior.
+    if (/\/api\/live\/(?:events|intelligence|transcripts\/[^/]+\/[^/]+\/events)(?:\?.*)?$/.test(r.url())
       && r.failure()?.errorText === 'net::ERR_ABORTED') return;
     failedRequests.push(`${r.url()} — ${r.failure()?.errorText}`);
   });

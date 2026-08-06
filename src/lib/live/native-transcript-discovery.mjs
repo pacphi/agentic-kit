@@ -5,7 +5,15 @@ const safeEntries = (dir) => {
   try { return fs.readdirSync(dir, { withFileTypes: true }); } catch { return []; }
 };
 
-export function discoverJsonl(root, { maxDepth, maxFiles, accept }) {
+/**
+ * @param {string} root
+ * @param {{ maxDepth: number, maxFiles: number, accept: (name: string) => boolean,
+ *           sinceMs?: number|null }} options sinceMs, when given, drops any file whose
+ *   mtime is older than that epoch-ms cutoff — used for date-windowed history scans.
+ *   Omit/null (the default) preserves the unfiltered recency-only behavior every
+ *   existing caller (the live tailer, project-discovery) relies on.
+ */
+export function discoverJsonl(root, { maxDepth, maxFiles, accept, sinceMs = null }) {
   const found = [];
   const visit = (dir, depth) => {
     if (depth > maxDepth || found.length >= 4096) return;
@@ -16,6 +24,7 @@ export function discoverJsonl(root, { maxDepth, maxFiles, accept }) {
       else if (entry.isFile() && entry.name.endsWith('.jsonl') && accept(entry.name)) {
         let mtimeMs = 0;
         try { mtimeMs = fs.statSync(file).mtimeMs; } catch { /* no ordering evidence */ }
+        if (sinceMs != null && mtimeMs < sinceMs) continue;
         found.push({ file, mtimeMs });
       }
     }

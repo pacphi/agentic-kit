@@ -135,6 +135,16 @@ export function renderPage({ name, version }) {
         <button class="seg-btn" type="button" role="tab" data-live-scope="live" aria-selected="true">Live</button>
         <button class="seg-btn" type="button" role="tab" data-live-scope="history" aria-selected="false">History</button>
       </div>
+      <div class="filters secondary-actions" id="observability-window" role="group" aria-label="History window" hidden>
+        <button class="chipf" type="button" data-history-window="1d">1d</button>
+        <button class="chipf" type="button" data-history-window="7d">7d</button>
+        <button class="chipf on" type="button" data-history-window="14d">14d</button>
+        <button class="chipf" type="button" data-history-window="1mo">1mo</button>
+        <button class="chipf" type="button" data-history-window="3mo">3mo</button>
+        <button class="chipf" type="button" data-history-window="6mo">6mo</button>
+        <button class="chipf" type="button" data-history-window="1y">1y</button>
+        <button class="chipf" type="button" data-history-window="all">all</button>
+      </div>
     </div>
   </div>
 </div>

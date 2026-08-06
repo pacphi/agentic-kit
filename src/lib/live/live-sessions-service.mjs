@@ -19,6 +19,14 @@ import {
   bootstrapRecords, codexTranscriptId, discoverJsonl,
 } from './native-transcript-discovery.mjs';
 
+// historySnapshot() is a one-shot on-demand scan, not a continuously-tailed
+// live feed, so it can afford limits well above the live path's maxFiles(256)
+// /maxSessions(100) defaults — those stay small purely to keep the always-on
+// tailer set cheap. discoverJsonl's own hard 4096-file safety cap is the real
+// backstop for the "all time" window on a machine with a large corpus.
+const HISTORY_MAX_FILES = 2048;
+const HISTORY_MAX_SESSIONS = 1000;
+
 /**
  * Coordinates bounded transcript tailers into one privacy-safe live projection.
  * Transcript contents exist only for the duration of adapter calls.
@@ -211,7 +219,11 @@ export class LiveSessionsService {
     this.#mark(context.adapter, { files: (this.#health.get(context.adapter)?.files ?? 0) + 1 });
   }
 
-  #record(record, context, file) {
+  /** Pure record → LiveEvent[] transformation, shared by the live tailer
+   *  (#record, below) and historySnapshot()'s one-shot scan. Mutates `context`
+   *  in place (identity/provider/model learned as records stream by) but
+   *  touches no instance state beyond the read-only #claudeProvider cache. */
+  #buildEvents(record, context, file) {
     const explicitCwd = record?.cwd
       ?? (['session_meta', 'turn_context'].includes(record?.type) ? record.payload?.cwd : null);
     if (explicitCwd) {
@@ -239,22 +251,72 @@ export class LiveSessionsService {
     const common = {
       ...context, artifact: file, observedAt: this.#options.now(),
     };
-    let events;
-    if (context.adapter === 'claude') {
-      events = adaptClaudeRecord(record, common);
-    } else if (context.adapter === 'codex') {
+    if (context.adapter === 'claude') return adaptClaudeRecord(record, common);
+    if (context.adapter === 'codex') {
       if (record?.type === 'session_meta' && record.payload?.id) {
         context.sessionId = record.payload.id;
         context.meta = record.payload;
       }
-      events = adaptCodexRecord(record, common);
-    } else {
-      events = adaptStructuredEvent(record, {
-        ...common, artifact: path.basename(file),
-        surface: context.surface, adapter: `${context.surface}-jsonl`,
-      });
+      return adaptCodexRecord(record, common);
     }
+    return adaptStructuredEvent(record, {
+      ...common, artifact: path.basename(file),
+      surface: context.surface, adapter: `${context.surface}-jsonl`,
+    });
+  }
+
+  #record(record, context, file) {
+    const events = this.#buildEvents(record, context, file);
     for (const event of events) this.#publish(event, context.adapter);
+  }
+
+  /**
+   * On-demand, date-windowed scan for the Observability "History" browser.
+   * Independent of the live tailer: builds and discards its own projection,
+   * so it never touches #projection/#workspaceStore/#health and can never
+   * evict or otherwise disturb the live in-memory state. Reuses the exact
+   * same discovery/bootstrap/adapter pipeline as the live path so a session
+   * renders identically whichever scope produced it.
+   * @param {{ sinceMs?: number|null }} [options] sinceMs is an epoch-ms
+   *   cutoff on file mtime; omit/null scans "all time".
+   * @returns {ReturnType<typeof serializeLiveProjection>}
+   */
+  historySnapshot({ sinceMs = null } = {}) {
+    const claude = discoverJsonl(this.#options.roots.claude, {
+      maxDepth: 3, maxFiles: HISTORY_MAX_FILES, sinceMs, accept: () => true,
+    });
+    const codex = discoverJsonl(this.#options.roots.codex, {
+      maxDepth: 4, maxFiles: HISTORY_MAX_FILES, sinceMs, accept: (name) => name.startsWith('rollout-'),
+    });
+    let projection = emptyLiveProjection();
+    const ingest = (file, adapter, context) => {
+      for (const record of bootstrapRecords(file, adapter)) {
+        for (const event of this.#buildEvents(record, context, file)) {
+          projection = reduceLiveEvent(projection, event, {
+            maxSessions: HISTORY_MAX_SESSIONS, maxNodesPerSession: this.#options.maxNodesPerSession,
+          });
+        }
+      }
+    };
+    for (const file of claude) {
+      ingest(file, 'claude', { adapter: 'claude', sessionId: path.basename(file, '.jsonl'), project: 'unknown' });
+    }
+    for (const file of codex) {
+      ingest(file, 'codex', { adapter: 'codex', sessionId: codexTranscriptId(file), meta: {} });
+    }
+    // A one-shot scan never observes the process ending, so the reducer's
+    // last-known state for an unterminated session defaults to lifecycle
+    // 'active'/status 'running' — correct for the live tailer (which sweeps
+    // continuously as time passes) but wrong here: it would read as a LIVE
+    // session and get excluded from the History browser's session list
+    // (which explicitly filters OUT anything isLiveSession() still calls
+    // live). All-zero windows force every non-terminal session to read as
+    // stale immediately, which is the only honest answer for retained
+    // evidence being browsed well after the fact.
+    projection = sweepLiveProjection(projection, {
+      now: this.#options.now(), quiescentMs: 0, expiryMs: 0, pendingExpiryMs: 0,
+    });
+    return serializeLiveProjection(projection);
   }
 
   /** Configuration reads are per-project, so memoize by session cwd. */

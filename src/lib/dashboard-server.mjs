@@ -412,6 +412,20 @@ function clampInt(raw, fallback, min, max) {
   return Math.min(max, Math.max(min, n));
 }
 
+// Observability History's window control — day-count approximations (a
+// calendar "month" is treated as 30 days, matching clampDays' own plain-day
+// semantics rather than adding calendar-aware month math for a browse filter).
+const HISTORY_WINDOW_DAYS = {
+  '1d': 1, '7d': 7, '14d': 14, '1mo': 30, '3mo': 90, '6mo': 180, '1y': 365,
+};
+/** ?window=<token> → an epoch-ms cutoff, or null for "all time". Unknown/
+ *  missing tokens fall back to 14d, the same default clampDays uses. */
+function windowToSinceMs(raw, now = Date.now()) {
+  if (raw === 'all') return null;
+  const days = Object.hasOwn(HISTORY_WINDOW_DAYS, raw) ? HISTORY_WINDOW_DAYS[raw] : HISTORY_WINDOW_DAYS['14d'];
+  return now - days * 86_400_000;
+}
+
 function sendJson(res, status, payload) {
   res.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store', 'x-content-type-options': 'nosniff' });
   res.end(JSON.stringify(payload));
@@ -757,6 +771,25 @@ export function startDashboard({
       try {
         const service = await getLive();
         sendJson(res, 200, publicLivePayload(await service.snapshot()));
+      } catch {
+        sendJson(res, 503, { error: 'live telemetry unavailable' });
+      } finally {
+        scheduleLiveIdle();
+      }
+      return;
+    }
+
+    if (url === '/api/live/history') {
+      // On-demand, not part of the SSE stream: a fresh scan per request, same
+      // privacy scrubbing (publicLivePayload) as every other live surface.
+      try {
+        const service = await getLive();
+        if (typeof service.historySnapshot !== 'function') {
+          sendJson(res, 501, { error: 'history browsing not supported by this live service' });
+          return;
+        }
+        const sinceMs = windowToSinceMs(query.get('window'));
+        sendJson(res, 200, publicLivePayload(await service.historySnapshot({ sinceMs })));
       } catch {
         sendJson(res, 503, { error: 'live telemetry unavailable' });
       } finally {
