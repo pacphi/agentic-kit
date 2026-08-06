@@ -31,10 +31,17 @@ const INTEL_CSS = `
 // The page. One document, everything inline. Only `name` and `version` are
 // interpolated server-side; the client fetches /api/status and renders live.
 //
-// Layout: three stable primary areas — Overview, Usage, and Observability —
-// share one left-aligned secondary-navigation rail. Overview owns Summary,
-// Hosts & Routing, Providers, Runtime, and Intelligence. Problems never hide:
-// Summary aggregates attention and child tabs retain their scoped badges.
+// Layout: five primary areas — About, Overview, Usage, Observability, and
+// System — share one left-aligned secondary-navigation rail. Overview owns
+// Summary, Hosts & Routing, Providers, Runtime, and Intelligence; System owns
+// Summary, Storage, Runtime, Catalog, and Projects. Problems never hide:
+// Overview's Summary aggregates attention and child tabs retain their scoped
+// badges.
+//
+// About leads the bar because it is the orientation surface (ADR-0026) — but
+// OVERVIEW REMAINS THE LANDING VIEW. A first-run nudge on Overview points at
+// About once and is dismissible; hijacking the default view would make every
+// returning user pay for a first-run explanation.
 // ─────────────────────────────────────────────────────────────────────────────
 export function renderPage({ name, version }) {
   return `<!doctype html>
@@ -98,15 +105,26 @@ export function renderPage({ name, version }) {
 <nav class="tabbar">
   <div class="seg" role="tablist" aria-label="dashboard sections" id="seg">
     <span class="seg-thumb" id="seg-thumb" aria-hidden="true"></span>
+    <button class="seg-btn" role="tab" id="tab-about" data-tab="about" aria-selected="false" aria-controls="panel-about" type="button">About</button>
     <button class="seg-btn" role="tab" id="tab-overview" data-tab="overview" aria-selected="true" aria-controls="area-overview" type="button">Overview<span class="badge" id="badge-overview" hidden></span></button>
     <button class="seg-btn" role="tab" id="tab-usage" data-tab="usage" aria-selected="false" aria-controls="panel-usage" type="button">Usage</button>
     <button class="seg-btn" role="tab" id="tab-observability" data-tab="observability" aria-selected="false" aria-controls="panel-observability" type="button">Observability</button>
+    <button class="seg-btn" role="tab" id="tab-system" data-tab="system" aria-selected="false" aria-controls="area-system" type="button">System</button>
   </div>
   <div class="source-health" id="u-source-health" role="status" aria-live="polite" hidden></div>
 </nav>
 
 <div class="secondary-shell">
   <div class="secondary-rail">
+    <div class="secondary-group" id="secondary-about" hidden>
+      <div class="filters" id="about-anchors" role="group" aria-label="About sections" style="margin-left:0">
+        <a class="chipf" href="#about/hosts">Hosts</a>
+        <a class="chipf" href="#about/engine">Engine &amp; memory</a>
+        <a class="chipf" href="#about/quality">Quality &middot; Safety &middot; Knowledge</a>
+        <a class="chipf" href="#about/kit">The kit</a>
+        <a class="chipf" href="#about/configured">Configured for you</a>
+      </div>
+    </div>
     <div class="secondary-group" id="secondary-overview">
       <div class="seg subseg" role="tablist" aria-label="Overview views" id="overview-seg">
         <button class="seg-btn" role="tab" id="overview-tab-summary" data-overview-view="summary" aria-selected="true" aria-controls="panel-overview" type="button">Summary</button>
@@ -130,6 +148,19 @@ export function renderPage({ name, version }) {
         <button class="chipf" type="button" data-days="30">30d</button>
       </div>
     </div>
+    <div class="secondary-group" id="secondary-system" hidden>
+      <div class="seg subseg" role="tablist" aria-label="System views" id="system-seg">
+        <button class="seg-btn" role="tab" data-system-view="summary" aria-selected="true" aria-controls="panel-sys-summary" type="button">Summary</button>
+        <button class="seg-btn" role="tab" data-system-view="storage" aria-selected="false" aria-controls="panel-sys-storage" type="button">Storage</button>
+        <button class="seg-btn" role="tab" data-system-view="runtime" aria-selected="false" aria-controls="panel-sys-runtime" type="button">Runtime</button>
+        <button class="seg-btn" role="tab" data-system-view="catalog" aria-selected="false" aria-controls="panel-sys-catalog" type="button">Catalog</button>
+        <button class="seg-btn" role="tab" data-system-view="projects" aria-selected="false" aria-controls="panel-sys-projects" type="button">Projects</button>
+      </div>
+      <div class="secondary-actions sy-freshness" id="system-freshness">
+        <span class="sy-asof" id="sys-asof">deep scan &mdash; not run yet</span>
+        <button class="chipf" type="button" id="sys-rescan" title="re-measure the deep tier now">&#8635; Rescan</button>
+      </div>
+    </div>
     <div class="secondary-group" id="secondary-observability" hidden>
       <div class="seg subseg" role="tablist" aria-label="Observability views" id="live-scope-tabs">
         <button class="seg-btn" type="button" role="tab" data-live-scope="live" aria-selected="true">Live</button>
@@ -150,6 +181,86 @@ export function renderPage({ name, version }) {
 </div>
 
 <main class="wrap">
+  <!-- ABOUT (ADR-0026). Section headings, intros, the how-it-fits map, and the
+       design notes are EDITORIAL PAGE COPY and live here; the cards themselves
+       are rendered by the client from about-directory.mjs joined with the
+       /api/status payload the dashboard already polls. Quality, Safety and
+       Knowledge share one section: three one-card categories read as one
+       cluster, not three sparse sections. -->
+  <section class="panel" id="panel-about" role="tabpanel" aria-labelledby="tab-about" hidden>
+    <div class="ab-wrap">
+      <div class="ab-hero" id="ab-hero-anchor">
+        <header class="view-heading">
+          <span class="view-eyebrow">ABOUT</span>
+          <h2>Meet your toolkit</h2>
+          <p id="ab-hero-lede"></p>
+        </header>
+        <div class="ab-relwrap">
+          <span class="ab-lbl">How it fits</span>
+          <div class="ab-relmap">
+            <div class="ab-relbox"><b>Coding agents</b>Claude Code &middot; Codex &middot; OpenCode</div>
+            <span class="ab-relarrow">&#8646;</span>
+            <div class="ab-relbox"><b>Engine + memory</b>ruflo &middot; agentdb</div>
+            <span class="ab-relarrow">&#8646;</span>
+            <div class="ab-relbox"><b>Quality &middot; Safety &middot; Knowledge</b>agentic-qe &middot; aidefence &middot; Brain</div>
+            <span class="ab-relarrow">&#10554;</span>
+            <div class="ab-relbox"><b>agentic-kit</b>installs &amp; heals it all</div>
+          </div>
+        </div>
+      </div>
+
+      <section class="ab-sec" id="ab-hosts">
+        <h3>Hosts &mdash; the agents you talk to</h3>
+        <p class="ab-intro">The coding agents themselves. Everything further down exists to make
+          these smarter, safer, and easier to watch.</p>
+        <div class="ab-cards" id="ab-cards-hosts"></div>
+        <div class="ab-secnote"><b>Design note:</b> hosts lead because they are what a new user
+          already recognizes &mdash; familiar things first, infrastructure after. The three
+          official marks are reused byte-identically from Observability&rsquo;s session rows.
+          A host that is enabled but absent says so; absence is information, not an empty slot.</div>
+      </section>
+
+      <section class="ab-sec" id="ab-engine">
+        <h3>Engine &amp; memory &mdash; what makes sessions smarter</h3>
+        <div class="ab-cards" id="ab-cards-engine"></div>
+        <div class="ab-secnote"><b>Design note:</b> monogram tiles (letters on a category hue) are
+          the honest icon for tools without an official mark &mdash; consistent, self-contained
+          under the page&rsquo;s content policy, and never a fabricated logo.</div>
+      </section>
+
+      <section class="ab-sec" id="ab-quality">
+        <h3>Quality &middot; Safety &middot; Knowledge &mdash; evidence, defense, grounding</h3>
+        <p class="ab-intro">Three specialists with one theme: making agent work trustworthy &mdash;
+          tested, protected from smuggled instructions, and answered from real source.</p>
+        <div class="ab-cards" id="ab-cards-quality"></div>
+        <div class="ab-secnote"><b>Design note:</b> three one-tool categories share a row instead of
+          three sparse sections &mdash; the map above already groups them as one cluster. Every term
+          of art is defined in the same breath it is used.</div>
+      </section>
+
+      <section class="ab-sec" id="ab-kit">
+        <h3>The kit &mdash; who takes care of all this</h3>
+        <div class="ab-cards" id="ab-cards-kit"></div>
+      </section>
+
+      <section class="ab-sec" id="ab-configured">
+        <h3>Configured for you</h3>
+        <p class="ab-intro">Not packages &mdash; settings and wiring ak set up on your behalf. Each
+          names the command that manages it: yours to change, never a black box.</p>
+        <div class="ab-cards" id="ab-cards-configured"></div>
+        <div class="ab-secnote"><b>Design note:</b> configured surfaces get the same card shape as
+          packages &mdash; one grammar to learn &mdash; but a distinct <i>configured</i> chip, no
+          version, and a <span class="mono">manage:</span> line instead of source links, because
+          &ldquo;where do I change this&rdquo; is their equivalent of &ldquo;where do I read
+          more&rdquo;.</div>
+      </section>
+
+      <div class="foot">every state chip is measured by the same detection Overview reports;
+        the prose is authored and never claims a component is present &middot;
+        run <span class="mono">ak about</span> for the same directory in a terminal</div>
+    </div>
+  </section>
+
   <section class="primary-area" id="area-overview" role="tabpanel" aria-labelledby="tab-overview">
   <section class="panel" id="panel-overview" role="tabpanel" aria-labelledby="overview-tab-summary">
     <header class="view-heading">
@@ -157,7 +268,17 @@ export function renderPage({ name, version }) {
       <h2>System overview</h2>
       <p>Overall readiness, configuration health, and the items that need attention.</p>
     </header>
+    <!-- First-run nudge (ADR-0026): Overview stays the landing view; this
+         points at About once and remembers being dismissed, like the poll and
+         theme preferences. It renders BELOW the triage summary so a failing
+         subsystem is never displaced by an introduction. -->
     <div class="summary" id="summary" hidden></div>
+    <div class="ab-nudge" id="about-nudge" hidden>
+      <span class="i" aria-hidden="true">&#9432;</span>
+      <span>New here? <b>About</b> explains every tool agentic-kit installed on this machine, in
+        plain words. <button class="ab-nudge-go" type="button" id="about-nudge-go">Open About</button></span>
+      <button class="ab-nudge-x" type="button" id="about-nudge-x" aria-label="dismiss this tip" title="dismiss">&times;</button>
+    </div>
     <div class="notice" id="update-notice" hidden></div>
     <div id="attention" aria-live="polite"></div>
     <h2 class="subhead" id="map-head" hidden>all subsystems</h2>
@@ -372,6 +493,164 @@ export function renderPage({ name, version }) {
   </section>
 
 ${LIVE_HTML}
+
+  <!-- SYSTEM (ADR-0025). Five sub-views on the shared secondary rail; every
+       card's body is rendered by the client from GET /api/system. The deep tier
+       is NEVER scanned on open — the rail's Rescan button is the only trigger,
+       and the freshness label states how old the figures are. -->
+  <section class="primary-area" id="area-system" role="tabpanel" aria-labelledby="tab-system" hidden>
+    <section class="panel" id="panel-sys-summary" role="tabpanel" hidden>
+      <header class="view-heading">
+        <span class="view-eyebrow">SYSTEM</span>
+        <h2>Summary</h2>
+        <p>The four families in one glance: install size, retained data, live resource use, and
+          deployed inventory &mdash; every deep-tier figure stamped with when it was measured.</p>
+      </header>
+      <div class="sy-grid">
+        <div class="sy-kpis" id="sys-kpis"></div>
+        <div class="sy-card sy-4">
+          <div class="sy-head"><h3>Disk denominator</h3><span class="sy-form">radial gauge</span></div>
+          <div id="sys-gauge"></div>
+          <div class="sy-note"><b>Why a gauge:</b> one ratio against a limit. The denominator is what
+            keeps an install figure honest &mdash; big enough to see, small enough not to panic
+            about. Accent is the toolchain; everything else stays de-emphasis gray so the accent
+            keeps one meaning.</div>
+        </div>
+        <div class="sy-card sy-8">
+          <div class="sy-head"><h3>Largest consumers &mdash; all categories</h3><span class="sy-form">ranked bars</span></div>
+          <div id="sys-consumers"></div>
+          <div class="sy-note"><b>Why ranked bars:</b> &ldquo;what is eating the disk&rdquo; is a
+            magnitude comparison, and the top few across <i>every</i> category beat one chart per
+            category for a summary. Host hue carries identity where a row belongs to one host;
+            install and shared rows stay neutral.</div>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel" id="panel-sys-storage" role="tabpanel" hidden>
+      <header class="view-heading">
+        <span class="view-eyebrow">SYSTEM</span>
+        <h2>Storage</h2>
+        <p>Retained data by category, then by host &mdash; plus growth, the giants, and advisory
+          reclaimables. Paths are the answer here, so rows carry them.</p>
+      </header>
+      <div class="sy-grid">
+        <div class="sy-card sy-5">
+          <div class="sy-head"><h3>Retained data by category</h3><span class="sy-form">donut</span></div>
+          <div id="sys-donut"></div>
+          <div class="sy-note"><b>Why a donut:</b> part-to-whole with four slices and a center
+            total &mdash; inside honest-pie territory. Values ride the legend rather than the
+            wedges, so nothing depends on telling two hues apart.</div>
+        </div>
+        <div class="sy-card sy-7">
+          <div class="sy-head"><h3>Per-host split by category</h3><span class="sy-form">stacked bars</span></div>
+          <div id="sys-hostsplit"></div>
+          <div class="sy-note"><b>Why horizontal stacks:</b> the same four category hues as the
+            donut &mdash; colour follows the entity across the whole view, so the mapping is
+            learned once. Rows share one scale.</div>
+        </div>
+        <div class="sy-card sy-7">
+          <div class="sy-head"><h3>Growth &mdash; bytes added per day</h3><span class="sy-form">small-multiple areas</span></div>
+          <div id="sys-growth"></div>
+          <div class="sy-note"><b>Why small multiples, not one chart:</b> the quiet host would be
+            invisible against the loud one on a shared axis. Each panel keeps its own endpoint.
+            Derived from file mtime and size only &mdash; no content is read, so a rewritten file
+            counts its whole size on the day it was rewritten.</div>
+        </div>
+        <div class="sy-card sy-5">
+          <div class="sy-head"><h3>Reclaimable &mdash; advisory only</h3><span class="sy-form">annotated list</span></div>
+          <div id="sys-reclaim"></div>
+          <div class="sy-note"><b>Why a list, not a chart:</b> each row is a decision, not a
+            magnitude &mdash; the rationale and the path are the content. There is no delete button
+            by invariant; the row names the command that owns cleanup.</div>
+        </div>
+        <div class="sy-card">
+          <div class="sy-head"><h3>Largest sessions</h3><span class="sy-form">table + inline bars</span></div>
+          <div id="sys-topsessions"></div>
+          <div class="sy-note"><b>Why a table:</b> a session id, host, project, and path are lookup
+            facts &mdash; the bar is a garnish for scanning, the row is the unit. It doubles as the
+            readable table view for this section&rsquo;s charts.</div>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel" id="panel-sys-runtime" role="tabpanel" hidden>
+      <header class="view-heading">
+        <span class="view-eyebrow">SYSTEM</span>
+        <h2>Runtime</h2>
+        <p>A point-in-time census &mdash; computed on request, never persisted. CPU and memory of
+          live host processes, daemons against their TTL, and combined totals.</p>
+      </header>
+      <div class="sy-grid">
+        <div class="sy-card sy-8">
+          <div class="sy-head"><h3>Live host processes</h3><span class="sy-form">table + inline bars</span></div>
+          <div id="sys-procs"></div>
+          <div class="sy-note"><b>Why a table with bars, not a gauge per process:</b> the census is
+            a scan-and-compare surface, so the bars share one memory scale and the comparison is
+            visible without reading the numbers. A row is a resource consumer, not a session actor.</div>
+        </div>
+        <div class="sy-card sy-4">
+          <div class="sy-head"><h3>Combined memory</h3><span class="sy-form">meter</span></div>
+          <div id="sys-mem"></div>
+          <div class="sy-head" style="margin-top:6px"><h3>Daemons</h3><span class="sy-form">stat tiles</span></div>
+          <div id="sys-daemons"></div>
+          <div class="sy-note"><b>Why a meter, not a radial:</b> one ratio against a hard limit
+            (physical memory) reads fastest as a straight track. The daemon tiles are single
+            current values &mdash; stat tiles, not a one-bar chart.</div>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel" id="panel-sys-catalog" role="tabpanel" hidden>
+      <header class="view-heading">
+        <span class="view-eyebrow">SYSTEM</span>
+        <h2>Catalog</h2>
+        <p>What is actually deployed, deduplicated across hosts &mdash; and which host carries what.</p>
+      </header>
+      <div class="sy-grid">
+        <div class="sy-card sy-5">
+          <div class="sy-head"><h3>Host inventory profile</h3><span class="sy-form">radar &middot; axis-normalized</span></div>
+          <div id="sys-radar"></div>
+          <div class="sy-note"><b>Why a radar (and its caveat):</b> the question is <i>shape</i> —
+            &ldquo;is this a commands-heavy host?&rdquo; — not precise magnitude. Each axis is
+            normalized to its own maximum and the real counts ride the legend and the tooltips,
+            because radar area is not a quantity.</div>
+        </div>
+        <div class="sy-card sy-7">
+          <div class="sy-head"><h3>Unique across hosts</h3><span class="sy-form">stat row + presence matrix</span></div>
+          <div id="sys-catcounts"></div>
+          <div id="sys-matrix"></div>
+          <div class="sy-note"><b>Why a matrix, not more charts:</b> &ldquo;which hosts carry
+            it&rdquo; is boolean identity &mdash; a dot grid answers per-item questions the
+            radar&rsquo;s aggregate cannot. Observed inventory only; never desired state.</div>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel" id="panel-sys-projects" role="tabpanel" hidden>
+      <header class="view-heading">
+        <span class="view-eyebrow">SYSTEM</span>
+        <h2>Projects</h2>
+        <p>Every project the machine knows, sized two ways &mdash; code and disk &mdash; with the
+          overhead (<span class="mono">.git</span>, <span class="mono">node_modules</span>) kept
+          separate so it cannot masquerade as &ldquo;your project got big&rdquo;.</p>
+      </header>
+      <div class="sy-grid">
+        <div class="sy-card">
+          <div class="sy-head"><h3>Project footprints</h3><span class="sy-form">table + composed bars</span></div>
+          <div id="sys-projects"></div>
+          <div class="sy-note"><b>Two bars, two colour jobs:</b> lines of code are <i>identity</i>
+            (languages are categorical slots, and everything past the top three folds to gray).
+            Disk composition is <i>one entity&rsquo;s ranked parts</i> &mdash; shades of a single
+            hue, darkest for the part you wrote, faintest for reinstallable overhead. Line counts
+            are approximate by invariant: extension-bucketed, with stated exclusions.
+            <b>Remote links:</b> the project name is the link, the host and slug subline carries
+            provenance, and a project with no remote says so rather than offering a dead link.
+            The kit never fetches the URL &mdash; navigation is you clicking it.</div>
+        </div>
+      </div>
+    </section>
+  </section>
 
   <footer class="foot mono">
     <span id="foot-note">read-only · 127.0.0.1 · nothing here mutates state</span>
