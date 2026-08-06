@@ -1,10 +1,9 @@
 # Machine Footprint Domain
 
-> **Draft for review.** This document specifies the domain proposed by
-> [ADR-0025](../adr/0025-machine-footprint-metrics.md). Nothing described here is implemented
-> yet; module paths named below are the intended homes, not existing files. On acceptance, the
-> new terms merge into [Ubiquitous language](ubiquitous-language.md) and the context joins the
-> [context map](context-map.md).
+This document specifies the domain decided by
+[ADR-0025](../adr/0025-machine-footprint-metrics.md) and implemented in `src/lib/footprint/`.
+Its terms are merged into [Ubiquitous language](ubiquitous-language.md) and the context is on the
+[context map](context-map.md).
 
 ## Purpose
 
@@ -16,12 +15,15 @@ deduplicated inventory of skills, agents, commands, plugins, and MCP servers acr
 every known project's size in lines of code and disk.
 
 It is a read-only measurement domain over local state the kit already has trust-boundary access
-to. It renders in the dashboard's proposed **System** primary area and through a CLI twin
-(`ak footprint`), and it mutates nothing — including the reclaimable-space candidates it
-computes, which are advisory rows with rationale, never delete actions.
+to. It renders in the dashboard's **System** primary area and through a CLI twin (`ak system`),
+and it mutates nothing — including the reclaimable-space candidates it computes, which are
+advisory rows with rationale, never delete actions.
+
+**Footprint** is the name of this context, not of a user-facing surface: every surface a user
+touches — the tab, the command, the route — is called *System*.
 
 The shared terms in [Ubiquitous language](ubiquitous-language.md) are normative; the
-[terms table](#ubiquitous-language-additions) below is this draft's proposed addition to it.
+[terms table](#ubiquitous-language-additions) below restates this context's contributions to it.
 
 ## Why this is a separate context
 
@@ -63,10 +65,12 @@ Sources (all local, all metadata-only)
   project catalog (discovery reuse)              host catalog surfaces (agents/skills/commands/MCP)
         |
         v
-Collectors (bounded walkers; two tiers)
-  cheap tier: process census + known-file stats + carry-forward of last deep scan   (TTL ~60s)
-  deep tier:  full storage walk + LOC count + catalog dedup                        (explicit,
-                                                                                    single-flight)
+Collectors (bounded walkers; two tiers — src/lib/footprint/)
+  walk.mjs      the one bounded walker + the Measurement vocabulary every collector shares
+  cheap tier:   runtime.mjs census + known-file stats + carry-forward of last deep scan (TTL 60s)
+  deep tier:    install.mjs + storage.mjs + catalog.mjs + projects.mjs      (explicit,
+                                                                            single-flight)
+  snapshot.mjs  persists the four deep sections; index.mjs is the two-tier collector façade
         |
         v
 FootprintSnapshot  { asOf, completeness, install, runtime, storage, catalog, projects }
@@ -84,7 +88,7 @@ FootprintSnapshot  { asOf, completeness, install, runtime, storage, catalog, pro
 Delivery
   GET /api/system            → cheap tier + persisted snapshot (token auth, loopback, no egress)
   GET /api/system?refresh=deep → start-or-attach the single-flight deep scan
-  ak footprint [--deep] [--json] → the same collector, CLI-rendered
+  ak system [--deep] [--json]  → the same collector, CLI-rendered
         |
         v
   System primary area: Summary | Storage | Runtime | Catalog | Projects
@@ -104,6 +108,11 @@ A measured zero is a real zero and renders as one. This is the same zero-vs-unkn
 the dashboard's `metric()` helper and [ADR-0023](../adr/0023-fail-closed-operations-and-explicit-degradation.md)
 already enforce elsewhere.
 
+A measurement additionally carries `partial`. A total whose inputs included an unreadable or
+capped subtree is a **lower bound**, not a total: unknown inputs never contribute a zero, they set
+`partial` on the sum. Every surface renders a partial figure as "≥ N" — a partial total presented
+as a total would be the honest-degradation contract broken at the last mile.
+
 ### Install footprint
 
 One `HostInstallation` per managed tool (ruflo, agentic-qe, Claude Code, Codex, OpenCode,
@@ -122,8 +131,25 @@ survey and extending its `ps` read with `pcpu`/`rss` — plus the daemon census 
 against the 12h TTL, budget state) and a child/MCP-server process count. The census is
 **ephemeral**: computed per request, never persisted into the snapshot file, because a process
 table is a moment, not a fact worth retaining, and persisting it would create a stale-liveness
-trap. On Windows the census degrades to an honest "unsupported," matching the survey it reuses;
-every other section still works.
+trap. `snapshot.mjs` enforces this structurally — it serializes only the four deep-tier keys, so a
+census handed to it is dropped rather than written.
+
+On **Windows** the census is real, not unsupported. `src/lib/live/win-process-survey.ps1` — a plain
+text script invoked the way the POSIX path already invokes `ps` and `lsof`, with no npm dependency
+and no compiled artifact — returns a guaranteed census (host, pid, ppid, start time, CPU, working
+set) from `Get-CimInstance Win32_Process`, and command lines only for processes `GetOwner` proves
+belong to the current user. The bound project comes from a **best-effort** P/Invoke read of the
+process's own `CurrentDirectory` (`NtQueryInformationProcess` → PEB →
+`RTL_USER_PROCESS_PARAMETERS`). When that probe fails — antivirus block, execution policy,
+insufficient rights, WOW64 bitness mismatch — every other field still returns and the project
+column degrades to an explicit "not attributable on Windows" carrying the reason. A row is never
+dropped for being unattributable: a process we can measure but not attribute still consumes RAM,
+and hiding it would understate the totals this whole area is denominated in. An empty census on
+Windows is treated as a broken survey, never as an idle machine.
+
+One field is honestly absent everywhere: the daemon **budget** state. `ruflo daemon budget` is a
+CLI with no local file this collector can read, so budget reports `unknown` with that reason
+rather than a figure inferred from absence of evidence.
 
 ### Storage breakdown
 
@@ -133,6 +159,13 @@ same walk: trailing-30d growth per host (from mtime + size — no content reads)
 sessions and files, and advisory `ReclaimableCandidate` rows (stale npx envs, transcripts beyond
 a stated age, orphaned worktrees), each carrying its rationale and its path. Candidates are
 information, not actions — this context has no delete verb.
+
+Two honest limits belong with the numbers. **Growth is approximate and says so**: a file
+contributes its whole size on its mtime day, which is exact for append-only transcripts and
+over-counts rewritten SQLite ledgers, so the figure carries its own `basis` string. And **Codex
+transcripts carry no project attribution**: rollout paths are dated, not project-scoped, and the
+project name lives inside the file, which this domain may not open. Those nodes are marked
+`attribution: 'none'` and render as "unattributable" — never blank, never zero.
 
 ### Catalog inventory
 
@@ -172,24 +205,39 @@ usage index's coalesced builds); progress is surfaced so a long scan reads as wo
 The server stays GET-only: a rescan re-measures local state and writes only this domain's own
 snapshot file — it mutates no user data.
 
+**A deep scan never runs on its own.** Opening the System area issues a plain `GET /api/system`;
+only the Rescan control adds `?refresh=deep`. A deep scan costs tens of seconds of I/O on a large
+corpus, and making the act of *looking* cost that is a worse trade than a stale figure that states
+how stale it is. Staleness is therefore surfaced rather than pre-empted: every deep-tier figure
+renders with its snapshot's `asOf`, and past `SNAPSHOT_STALE_AFTER_MS` (7 days) the freshness
+label turns amber and reads "stale, rescan". The client polls only while a user-started scan is
+running, and stops when it finishes.
+
 One deliberate divergence from Observability's delivery: absolute paths are **part of this
 payload**. `publicLivePayload`'s leaf-only rule exists to keep incidental provenance out of
 session payloads; here the path is the answer ("where are the bytes"), and the same token-gated
 loopback delivery protects it. Transcript/message content remains structurally absent — the
 collectors never read it, so delivery cannot leak it.
 
-The CLI twin (`ak footprint`) renders the same collector output, `--json` emitting the snapshot
-shape verbatim, following the one-collector-two-surfaces precedent of the usage scorecard.
+The CLI twin (`ak system`) renders the same collector output, `--json` emitting the collector's
+payload verbatim, following the one-collector-two-surfaces precedent of the usage scorecard.
+`ak system --deep` is the terminal spelling of the Rescan control and writes the same snapshot.
 
 ## Invariants
 
 1. **Metadata only, ever.** Collectors read directory entries, `stat` results, manifest names,
-   and `.git/config`'s remote URL. No transcript, prompt, message, or tool-payload content
-   enters this domain, in any tier, on any path.
+   `.git/config`'s remote URL, and — for the orphaned-worktree candidate, which no `stat` can
+   identify — `.git/worktrees/<name>/gitdir`, bounded to 4 KB and validated as an absolute path.
+   Both git reads are pointer metadata of the same class, enumerated here rather than left
+   implicit. No transcript, prompt, message, or tool-payload content enters this domain, in any
+   tier, on any path.
 2. **Unknown is never zero.** An unmeasured or failed measurement renders as unknown with a
-   reason; a measured zero renders as zero. No fabricated figures.
+   reason; a measured zero renders as zero. A total built over an unknown or capped input is
+   `partial` and renders as a lower bound. No fabricated figures.
 3. **Freshness is part of the value.** Every deep-tier figure carries the snapshot `asOf` it came
-   from; carried-forward data is never presented as current.
+   from; carried-forward data is never presented as current. A deep scan runs only when a user
+   asks for one — opening the area never triggers it — and staleness past the stated threshold is
+   surfaced as a nudge, not silently repaired.
 4. **This context mutates nothing.** No delete, prune, or cleanup verb exists here; reclaimable
    candidates are advisory rows with rationale. (The snapshot file it owns is the sole write.)
 5. **The runtime census is ephemeral.** It is computed per request and never persisted; a stale
@@ -209,28 +257,36 @@ shape verbatim, following the one-collector-two-surfaces precedent of the usage 
     no rendering presents them as authoritative.
 12. **Same delivery protections as the rest of the dashboard.** Loopback, token auth, GET-only,
     zero egress; the absolute-path exception is deliberate, documented, and content-free.
+13. **Every platform reports what it can, and names what it cannot.** No section is switched off
+    for a platform. Where a per-platform probe fails, that field alone degrades with its reason
+    and the row keeps every other measurement; a row is never dropped for being unattributable.
 
 ## Ubiquitous language additions
 
+These terms are merged into [Ubiquitous language](ubiquitous-language.md); that glossary is
+normative and this table restates it for readers of this document.
+
 | Term | Meaning |
 |------|---------|
-| Footprint | The machine-resource cost of the toolchain: install bytes, runtime CPU/RSS, retained-data bytes, deployed inventory |
-| FootprintSnapshot | The persisted result of a deep scan: `asOf`, completeness, and the four section models |
+| Footprint | The machine-resource cost of the toolchain: install bytes, runtime CPU/RSS, retained-data bytes, deployed inventory. The context's name; the surface is **System** |
+| FootprintSnapshot | The persisted result of a deep scan: `asOf`, completeness, and the four deep-tier section models |
 | Measurement | A value plus provenance: measured (with `asOf`), carried forward, or unknown-with-reason — unknown is never zero |
+| Partial measurement | A measured value known to be a lower bound because a contributing subtree was unreadable or capped; rendered as "≥ N" |
 | HostInstallation | One managed tool's install facts: version, install method, root, tree bytes, native addons |
-| RuntimeCensus | The ephemeral point-in-time table of live host processes, daemons, and totals |
+| RuntimeCensus | The ephemeral point-in-time table of live host processes, daemons, and machine denominators |
 | StorageNode | One node in the category → host → project → session breakdown: bytes + file count |
 | ReclaimableCandidate | An advisory row naming reclaimable space, its path, and its rationale — never an action |
 | CatalogItem | A deduplicated deployed artifact (skill, agent, command, plugin, MCP server) with a per-host presence matrix |
 | ProjectFootprint | One project's size facts: approximate LOC by language, tree/`.git`/`node_modules` bytes, last activity, and an optional git-remote web link ("local only" when absent) |
-| Deep scan | The explicit, single-flight full measurement pass that produces a FootprintSnapshot |
+| Deep scan | The explicit, user-triggered, single-flight full measurement pass that produces a FootprintSnapshot |
 | Cheap tier | The per-request census + known-file stats + snapshot carry-forward served on every read |
 
 ## References
 
-- [ADR-0025](../adr/0025-machine-footprint-metrics.md) — the decision record this draft
-  accompanies
-- [Context map](context-map.md) — joined on acceptance
+- [ADR-0025](../adr/0025-machine-footprint-metrics.md) — the decision record this domain implements
+- [Context map](context-map.md) — where this context sits
 - [Historical usage / Observability / Project intelligence](context-map.md) — the neighboring
   contexts this domain is deliberately distinct from
 - [Dashboard guide](../DASHBOARD.md)
+- `src/lib/footprint/` — the collectors; `src/commands/system.mjs` — the CLI twin;
+  `src/lib/live/win-process-survey.ps1` — the Windows process survey

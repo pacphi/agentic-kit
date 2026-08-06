@@ -1,16 +1,16 @@
 # Component Directory Domain
 
-> **Draft for review.** This document specifies the domain proposed by
-> [ADR-0026](../adr/0026-about-component-directory.md). Nothing described here is implemented
-> yet; module paths named below are the intended homes, not existing files. On acceptance, the
-> new terms merge into [Ubiquitous language](ubiquitous-language.md) and the context joins the
-> [context map](context-map.md).
+This document specifies the domain decided by
+[ADR-0026](../adr/0026-about-component-directory.md) and implemented in
+`src/lib/dashboard/about-directory.mjs`. Its terms are merged into
+[Ubiquitous language](ubiquitous-language.md) and the context is on the
+[context map](context-map.md).
 
 ## Purpose
 
 Component directory answers a new user's first question — **"what did agentic-kit put on my
-machine, and why is each thing worth having?"** — inside the dashboard's proposed **About**
-primary area, placed first in the tab order. It owns the curated editorial identity of every
+machine, and why is each thing worth having?"** — inside the dashboard's **About** primary area,
+placed first in the tab order. It owns the curated editorial identity of every
 component the kit installs or configures: a plain-language tagline, one friendly paragraph of
 value proposition, outbound links to the source (GitHub), package (npm), and public docs, an
 icon, a category, and a deliberate reading order. It joins that editorial content, at render
@@ -18,7 +18,7 @@ time, with detection facts the dashboard already has — installed or not, versi
 method — and never collects anything of its own.
 
 The shared terms in [Ubiquitous language](ubiquitous-language.md) are normative; the
-[terms table](#ubiquitous-language-additions) below is this draft's proposed addition to it.
+[terms table](#ubiquitous-language-additions) below restates this context's contributions to it.
 
 ## Why this is a separate context
 
@@ -48,7 +48,7 @@ absent (with the chip honestly reading `not installed — ak setup adds it`).
 ## Model
 
 ```text
-src/lib/dashboard/about-directory.mjs (intended home; pure data + tiny accessors)
+src/lib/dashboard/about-directory.mjs (pure data + tiny accessors; frozen, no I/O)
 
 DirectoryEntry {
   id,                    // stable key; the managed-tools registry key where one exists
@@ -56,23 +56,37 @@ DirectoryEntry {
                          //   | 'kit' | 'configured'
   name, tagline,         // tagline: plain-language, ≤ 10 words
   paragraph,             // one paragraph, ~50 words, new-user register (see contract below)
-  links: [ { kind: 'github'|'npm'|'docs', label, url } ],   // https only
-  icon: { kind: 'official'|'monogram', ref },  // official = the already-shipped host marks
-  detectionKey?          // join key into existing status/managed-tools facts; absent for
-                         //   configured surfaces, which join on their subsystem row instead
+  links: [ { kind: 'github'|'npm'|'docs', label, url } ],   // https only; [] for configured
+  icon: { kind: 'official', ref }              // ref = 'claude' | 'codex' | 'opencode'
+      | { kind: 'monogram', ref, hue },        // ref = letterform, hue = a CSS token name
+
+  // packaged entries only:
+  detectionKey,          // join key into existing status/managed-tools facts
+  npmPackage,            // package identity; the version chip's join key into the drift report
+
+  // configured entries only:
+  subsystem,             // the `ak status` subsystem row whose verdict feeds the chip
+  manage                 // the command that manages this surface ("yours to change")
 }
 
-directoryEntries() -> DirectoryEntry[]        (curated order: hosts → engine & memory →
-                                               quality → safety → knowledge → kit → configured)
+CATEGORY_ORDER                    // frozen curated order, hosts first, configured last
+directoryEntries()                // -> frozen DirectoryEntry[] in curated order
+entryById(id) / entriesByCategory(category)
 
         + joined at render with existing facts (no new collection):
-/api/status rows + managed-tools detection -> { installed, version, installMethod }
+/api/status rows + managed-tools detection -> { state, version }
 
         |
         v
 About primary area (leftmost tab): hero orientation strip + category sections of cards
   Card = icon tile · name + state chip · tagline · paragraph · link pills
+         (configured surfaces swap the link pills for a `manage:` line)
 ```
+
+Two fields exist because the render would otherwise have to guess. `npmPackage` names the package
+a version chip reports on, so the client joins the drift report by package identity instead of
+hardcoding an id→package map or parsing an npm URL. `manage` makes the "yours to change" line
+data rather than prose the client parses back out.
 
 ### The editorial register contract
 
@@ -124,6 +138,21 @@ Outbound links open the user's browser; the kit performs no egress. The director
 swept by the same nightly external link check that covers `docs/**` — a rotted link is CI red,
 not a permanent dead end.
 
+About is leftmost in the tab order but is **not** the landing view: Overview stays the default on
+every open, including the first, and a one-time dismissible nudge on Overview points newcomers
+left. Making the landing view depend on invisible browser state would give two machines two
+different first screens with no way to tell why.
+
+`ak about` renders the same directory in a terminal from the same module, joined against one
+`ak status` collection — the rows `/api/status` serves. Each detection source is guarded
+independently, so one dead collector degrades one chip rather than the page.
+
+Two join limits are stated rather than papered over. A surface whose verdict `ak status` does not
+emit — today, the permission allowlist — renders `state unknown` with that reason, because
+claiming `configured` from the absence of a row would invent the one fact nobody supplied. And a
+surface backed by more than one status row — statuslines, which span Claude's and Codex's —
+takes the worst of the pair, so the quieter one's health cannot hide behind the other's.
+
 ## Invariants
 
 1. **Editorial content is authored and versioned with the release** — checked in, reviewed,
@@ -146,8 +175,14 @@ not a permanent dead end.
    surfaces last — never derived from popularity, size, or health.
 10. **One icon per component, everywhere.** The directory's icon spec is the single source for
     that component's mark across the dashboard.
+11. **A chip states only what detection said.** An informational row carries a fact without a
+    verdict, and a missing row carries nothing at all; neither is upgraded to "installed". Absent
+    evidence renders `unknown` with its reason.
 
 ## Ubiquitous language additions
+
+These terms are merged into [Ubiquitous language](ubiquitous-language.md); that glossary is
+normative and this table restates it for readers of this document.
 
 | Term | Meaning |
 |------|---------|
@@ -159,11 +194,15 @@ not a permanent dead end.
 | Monogram tile | The honest icon for a component with no official mark: initials on a category-hued tile |
 | Register contract | The editorial writing rules (one ~50-word paragraph, plain language, no runtime claims, no superlatives) |
 | Parity gate | The test asserting managed-tools registry ↔ directory completeness in both directions |
+| Configured surface | A non-package thing ak sets up, carrying a managing command instead of package links |
 
 ## References
 
-- [ADR-0026](../adr/0026-about-component-directory.md)
+- [ADR-0026](../adr/0026-about-component-directory.md) — the decision record this domain implements
 - [Integration management](integration-management.md) — the registry this stays in parity with
 - [Machine footprint](machine-footprint.md) — the measurement context this deliberately isn't
-- [Context map](context-map.md) — joined on acceptance
+- [Context map](context-map.md) — where this context sits
 - [Dashboard guide](../DASHBOARD.md)
+- `src/lib/dashboard/about-directory.mjs` — the directory module;
+  `src/commands/about.mjs` — the CLI twin;
+  `tests/kit/about-directory.test.mjs` — the parity gate and register-contract checks

@@ -1,7 +1,8 @@
 # ADR-0025 — Machine footprint: infrastructure metrics for install, runtime, storage, and catalog
 
-- **Status:** Proposed (draft for review — no implementation exists yet)
+- **Status:** Implemented
 - **Date:** 2026-08-06
+- **Updated:** 2026-08-06 — accepted and implemented; the open points below are resolved decisions
 - **Deciders:** agentic-kit maintainers
 - **Related:** [ADR-0005](0005-dashboard-in-page-routing-reveal.md),
   [ADR-0007](0007-maintainer-admin-local-telemetry.md),
@@ -56,6 +57,10 @@ Everything needed is already locally readable at trust boundaries the kit alread
 
 The gap is a **domain and a UX**, not access.
 
+This record was written as a proposal and is retained in that voice; the decision has since been
+accepted and shipped. Where the draft left a choice open, the [resolved
+decisions](#resolved-decisions) section states what was decided and why.
+
 ## Decision
 
 ### 1. A new bounded context: Machine footprint
@@ -80,7 +85,8 @@ Machine-scoped resource facts are a peer question family, not a subsection of co
 health; folding them under Overview would bury a whole domain under a tab whose contract is
 "readiness and attention," and Overview's secondary rail is already five views deep.
 
-Proposed information architecture:
+Information architecture ([ADR-0026](0026-about-component-directory.md) later added **About**
+left of Overview; the System area itself is unaffected):
 
 ```text
 [ Overview | Usage | Observability | System ]
@@ -163,14 +169,14 @@ stated as approximate, which is what the question needs.
 - `GET /api/system?refresh=deep` — starts or attaches to the single-flight deep scan. The
   dashboard server is deliberately GET-only; a refresh is a re-*measurement* of local state, not
   a mutation of user data, so it stays within that contract.
-- `ak footprint [--deep] [--json]` — CLI parity sharing the same collector, following the
+- `ak system [--deep] [--json]` — CLI parity sharing the same collector, following the
   usage-scorecard precedent of one collector behind both surfaces.
 
 ### 6. Read-only; reclaimables are advisory
 
 v1 computes reclaimable-space *candidates* and renders them with their rationale; it deletes
 nothing. Cleanup remains CLI-owned where it already lives (`ak x daemon-gc`, npx cache tooling).
-A future `ak footprint clean` would be its own decision with its own safety contract.
+A future `ak system clean` would be its own decision with its own safety contract.
 
 ### 7. A deliberate path-visibility exception
 
@@ -213,32 +219,66 @@ contract: the kit never fetches it; navigation is the user clicking a link in th
 | Scope creep into cleanup/mutation | v1 invariant: this context mutates nothing; reclaimables are advisory rows with rationale |
 | Boundary erosion into Usage/Observability | DDD invariants forbid tokens/cost, session evidence, and content reads; cross-links replace duplication |
 
-## Open points for review
+## Resolved decisions
 
-1. **Naming** — primary tab **System** with CLI `ak footprint` is proposed; the alternative is
-   aligning both on one word (`ak system`, or a **Footprint** tab).
-2. **Projects view** — kept separate from Storage because LOC is not a storage fact; could merge
-   if five sub-views feels heavy.
-3. **Deep-scan freshness policy** — manual-only rescan is proposed; an alternative is
-   auto-refresh on dashboard open when the snapshot is older than N days.
-4. **Windows** — the runtime census inherits the existing survey's unsupported-on-win32 honesty;
-   all other sections work everywhere. Acceptable for v1?
+The draft left four points open. All four are decided; this section is the record.
+
+1. **Naming — the tab and the CLI are both "System" (`ak system`).** One word for one area is
+   what a user can guess and what documentation can state without a translation table; a name the
+   UI and the terminal disagree about is a support burden with no upside. **Footprint** survives
+   only as the *domain* name inside the DDD documents ([Machine footprint](../ddd/machine-footprint.md))
+   and the module directory (`src/lib/footprint/`), where it names a bounded context rather than a
+   user-facing surface. The command is `src/commands/system.mjs`; no user-facing string says
+   "footprint".
+2. **Projects stays its own sub-view — five sub-views, not four.** LOC, git-remote identity, and
+   `node_modules` bloat answer "what have I built here", not "where are my bytes"; merging them
+   into Storage would put two different questions behind one heading and force the Storage tree to
+   grow a column vocabulary it does not otherwise need.
+3. **Deep scans re-run on an explicit click only, with a visible staleness nudge past ~7 days.**
+   Auto-scanning on open would make simply *looking* at the tab cost tens of seconds of I/O on a
+   large corpus — the surprise cost is worse than a stale figure that says how stale it is. The
+   snapshot's `asOf` is always rendered, and beyond `SNAPSHOT_STALE_AFTER_MS` (7 days) the
+   freshness label turns amber and reads "stale, rescan". Opening the System tab issues a plain
+   `GET /api/system`; only the Rescan control adds `?refresh=deep`.
+4. **Windows ships a guaranteed census plus a best-effort true `cwd`, degrading honestly, with no
+   dependency added.** The draft's "unsupported on win32" answer would have blanked the whole
+   Runtime view on a supported platform. Instead `src/lib/live/win-process-survey.ps1` — a plain text
+   script invoked the same way the POSIX path already invokes `ps` and `lsof`, no npm package and
+   no compiled artifact — provides two layers:
+   - a **guaranteed** census (host, pid, ppid, start time, CPU, working set) from
+     `Get-CimInstance Win32_Process`, plus current-user-only command lines proven via `GetOwner`;
+   - a **best-effort** true per-process working directory via inline `Add-Type` P/Invoke
+     (`NtQueryInformationProcess` → PEB → `RTL_USER_PROCESS_PARAMETERS` → `CurrentDirectory`).
+
+   If the P/Invoke path fails for any reason — antivirus block, execution policy, insufficient
+   rights, WOW64 bitness mismatch — every other field still returns and the Project column
+   degrades to an explicit "not attributable on Windows" carrying the failure reason. An empty
+   census is treated as a broken survey, not an idle machine. This is genuinely verified rather
+   than asserted: `windows-latest` is already in the CI matrix (`.github/workflows/ci.yml`), so
+   the Windows path runs on every push alongside Linux and macOS.
 
 ## Follow-ups on acceptance
 
-- Add the context to [context map](../ddd/context-map.md) (new context row + Dashboard delivery
-  relationship) and merge the new terms into
+All complete:
+
+- The context is on the [context map](../ddd/context-map.md) (context description, ASCII map, and
+  relationships table) and its terms are merged into
   [ubiquitous language](../ddd/ubiquitous-language.md).
-- Add this ADR to the [ADR index](README.md) and the theme narrative.
+- This ADR is in the [ADR index](README.md) and the theme narrative.
 
 ## References
 
-- [Machine footprint domain](../ddd/machine-footprint.md) (drafted alongside this ADR)
+- [Machine footprint domain](../ddd/machine-footprint.md) — the domain model and invariants
 - [Design mock-up](../assets/system-tab-mock.html) — a self-contained, both-theme HTML mock of
   the System area with illustrative data: per-metric chart forms (odometer KPIs, radial disk
   gauge, donut, stacked bars, small-multiple growth areas, radar, presence matrix, composed
   project bars), each card annotated with its form choice and rationale
 - [Dashboard guide](../DASHBOARD.md)
 - [Managed tools](../MANAGED-TOOLS.md)
+- `src/lib/footprint/` — the collectors: `walk.mjs` (the bounded walker and the `Measurement`
+  vocabulary), `install.mjs`, `storage.mjs`, `runtime.mjs`, `catalog.mjs`, `projects.mjs`,
+  `snapshot.mjs` (the persisted deep-tier snapshot), `index.mjs` (the two-tier collector)
+- `src/commands/system.mjs` (the CLI twin)
+- `src/lib/live/win-process-survey.ps1` (the Windows stand-in for `ps` + `lsof`)
 - `src/lib/live/process-sessions.mjs` (the runtime survey this reuses)
 - `src/lib/dashboard/project-discovery.mjs` (the project catalog this reuses)

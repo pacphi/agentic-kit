@@ -1,7 +1,8 @@
 # ADR-0026 — About: a component directory that explains everything ak installs
 
-- **Status:** Proposed (draft for review — no implementation exists yet)
+- **Status:** Implemented
 - **Date:** 2026-08-06
+- **Updated:** 2026-08-06 — accepted and implemented; the open points below are resolved decisions
 - **Deciders:** agentic-kit maintainers
 - **Related:** [ADR-0005](0005-dashboard-in-page-routing-reveal.md),
   [ADR-0007](0007-maintainer-admin-local-telemetry.md),
@@ -17,8 +18,8 @@ base, MCP registrations, guidance blocks, statuslines, a routing policy, backgro
 Every existing dashboard area assumes the user already knows what these things *are*:
 
 - **Overview** grades their health, **Usage** their spend, **Observability** their activity, and
-  the proposed **System** ([ADR-0025](0025-machine-footprint-metrics.md)) their machine cost —
-  all operational views of components the user is presumed to recognize.
+  **System** ([ADR-0025](0025-machine-footprint-metrics.md)) their machine cost — all operational
+  views of components the user is presumed to recognize.
 - The only place that *introduces* the components is prose documentation
   ([MANAGED-TOOLS.md](../MANAGED-TOOLS.md), [SETUP.md](../SETUP.md)) — maintainer-register
   reference material, not a new user's first five minutes.
@@ -27,6 +28,10 @@ A new user's first honest question is prior to all of that: **"what did this thi
 my machine, and why should I be glad it's there?"** Nothing answers it today. The result is a
 trust gap exactly where trust matters most — at first contact, right after `ak setup` printed a
 long list of installs.
+
+This record was written as a proposal and is retained in that voice; the decision has since been
+accepted and shipped. Where the draft left a choice open, the [resolved
+decisions](#resolved-decisions) section states what was decided and why.
 
 ## Decision
 
@@ -57,6 +62,11 @@ About (no secondary rail — one scrolling page with category anchors):
             statuslines, dual-host routing & bridge, background daemon, permission
             allowlists — each with "configured by setup/sync · yours to change".
 ```
+
+Quality, Safety, and Knowledge are three separate categories in the data and one section on the
+page — three one-card categories read as one cluster rather than three sparse sections. The page
+therefore carries five anchors (`hosts`, `engine`, `quality`, `kit`, `configured`) over seven
+categories.
 
 ### 2. A new bounded context: Component directory
 
@@ -132,28 +142,48 @@ check covers them like every other doc link.
 | Brand misrepresentation via invented logos | Official marks only where already shipped as official; everything else is an explicit monogram tile |
 | The page drifts into a second status/metrics view | DDD invariant: no numbers beyond version strings — health belongs to Overview, cost to Usage, footprint to System |
 
-## Open points for review
+## Resolved decisions
 
-1. **First-run behavior** — Overview stays the default; should the very first dashboard open
-   (no prior localStorage) land on About once, or show a dismissible "new here? start with
-   About" nudge instead?
-2. **CLI twin** — `ak about` printing the same directory (with state chips) is cheap and
-   symmetric with the usage/footprint precedent; worth having in v1?
-3. **Configured-surfaces depth** — one card per surface as proposed, or one "Configured for
-   you" card with an expandable list?
+The draft left three points open. All three are decided; this section is the record.
+
+1. **First run shows a dismissible nudge on Overview; it never hijacks the landing view.**
+   Overview stays the default on every open, including the first. A one-time "new here? start
+   with About" nudge sits on Overview and is dismissed for good (`ak-dash-about-nudge` in
+   browser-local storage). Redirecting the first open would make the landing view depend on
+   invisible browser state — two users, or one user on two machines, would see different first
+   screens with no way to tell why — and it would put a page between an operator and the health
+   verdict they opened the dashboard to read.
+2. **`ak about` ships in v1.** The directory is data with no I/O of its own, and the state chips
+   join the same `ak status` collection the dashboard uses, so the terminal twin costs one
+   renderer (`src/commands/about.mjs`) and keeps the one-collector-two-surfaces symmetry the
+   usage scorecard and `ak system` already follow. It also answers the question in the place the
+   question is usually asked — right after `ak setup` finishes printing.
+3. **Six separate "Configured for you" cards, not one card with a list.** Each configured
+   surface — MCP registrations, guidance blocks, statuslines, dual-host routing and bridge, the
+   background daemon, permission allowlists — has its own state chip and its own managing
+   command. Collapsing them into one card would force a single chip to summarize six independent
+   health facts, which is exactly the kind of averaging the honest-degradation contract forbids,
+   and would hide the `manage:` line that makes "yours to change" actionable.
 
 ## Follow-ups on acceptance
 
-- Add the context to the [context map](../ddd/context-map.md) and merge terms into
-  [ubiquitous language](../ddd/ubiquitous-language.md); add this ADR to the
-  [index](README.md) and theme narrative.
-- Wire the registry↔directory parity test alongside the managed-tools tests.
+All complete:
+
+- The context is on the [context map](../ddd/context-map.md) and its terms are merged into
+  [ubiquitous language](../ddd/ubiquitous-language.md); this ADR is in the [index](README.md)
+  and the theme narrative.
+- The registry↔directory parity test ships in `tests/kit/about-directory.test.mjs`, checked in
+  both directions against the managed-tools registry, the heal/detection paths, and
+  [MANAGED-TOOLS.md](../MANAGED-TOOLS.md).
 
 ## References
 
-- [Component directory domain](../ddd/component-directory.md) (drafted alongside this ADR)
+- [Component directory domain](../ddd/component-directory.md) — the domain model and invariants
 - [Design mock-up](../assets/about-tab-mock.html) — self-contained both-theme HTML mock with
   the full card grid, category sections, per-section design rationale, and an annotated card
   anatomy
 - [Managed tools](../MANAGED-TOOLS.md) — the registry this directory must stay in parity with
 - [Dashboard guide](../DASHBOARD.md)
+- `src/lib/dashboard/about-directory.mjs` — the directory module (pure data plus accessors)
+- `src/commands/about.mjs` — the CLI twin
+- `tests/kit/about-directory.test.mjs` — the parity gate and the register-contract checks

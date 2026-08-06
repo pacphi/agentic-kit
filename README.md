@@ -78,6 +78,9 @@ ak status       read-only dashboard: what's true, what's drifted   [--json] [--d
 ak sync         converge to good: upgrade + heal + verify          [--dry-run] [--no-upgrade]
 ak dashboard    open the local web dashboard (auto-opens your browser)
                 [--port N] [--no-open] [--live-source 'surface=path']
+ak about        what each installed component is and why it's there
+ak system       machine footprint: install size, runtime, storage, catalog, projects
+                [--deep] [--json]
 ak usage        inspect/refresh offline provider account analytics
                 status | refresh openrouter
 ak host         manage execution hosts, routing, and provider bindings
