@@ -51,7 +51,9 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execFile } from 'node:child_process';
-import { driftReport, selfDrift } from './versions.mjs';
+import { driftReport, selfDrift, installedVersion } from './versions.mjs';
+import { HOSTS, collectIntegrationFacts } from './providers.mjs';
+import { globalRoot } from './paths.mjs';
 import { drift as ruvnetBrainDrift } from './ruvnet-brain.mjs';
 import { drift as ruvectorDrift, managed as ruvectorManaged } from './ruvector.mjs';
 import { loadKitConfig } from './config.mjs';
@@ -250,6 +252,7 @@ async function collectData({ cwd, fetchStatus, projectParam, getProjectSnapshot 
     try {
       if (ruvectorManaged()) drift = foldRuvectorDrift(drift, await ruvectorDrift());
     } catch { /* banner is best-effort — the subsystem card still carries the ruvector row */ }
+    try { drift = await foldKnownVersions(drift); } catch { /* version chips degrade, nothing else */ }
   }
 
   // Machine-wide Intelligence (clean break from the old cwd-hardcoded,
@@ -372,6 +375,70 @@ export function foldRuvectorDrift(drift, r) {
     latest: r.latest,
     outdated: !!r.outdated,
   }];
+}
+
+// `collectIntegrationFacts` probes each host's binary for its version, which
+// costs ~300ms and must never ride the dashboard's ~30s poll. Host versions
+// change only when someone installs or upgrades a CLI, so an in-process window
+// this long is generous and still catches an upgrade within one coffee break.
+const HOST_FACTS_TTL_MS = 5 * 60_000;
+let hostFactsCache = null;
+
+async function cachedHostFacts(now) {
+  if (hostFactsCache && now - hostFactsCache.at < HOST_FACTS_TTL_MS) return hostFactsCache.hosts;
+  const facts = await collectIntegrationFacts({ cwd: process.cwd(), cfg: loadKitConfig() });
+  hostFactsCache = { at: now, hosts: facts?.hosts ?? {} };
+  return hostFactsCache.hosts;
+}
+
+/**
+ * Fold in the installed versions `driftReport()` structurally cannot report, so
+ * every About card states a version rather than some silently omitting one.
+ *
+ * driftReport only walks npm-managed globals. Two managed components are
+ * knowable but sit outside it: a host installed by mise/brew/the native
+ * installer (present and versioned, just not an npm global), and agentdb (a
+ * real npm global, but deliberately pinned to ruflo's bundled version rather
+ * than latest, so MANAGED-TOOLS.md excludes it from the update banner).
+ *
+ * Both fold in with `outdated: false` and no `latest`, which is inert for the
+ * banner — `noticeHtml` renders only entries where `outdated` is true — while
+ * giving the version chip the structured fact it needs. Nothing here parses a
+ * version out of a status row's prose; every value is a structured probe.
+ * Existing entries always win, so this can only ever add.
+ * @param {Array<{pkg:string}>|null} drift
+ * @param {{ now?: number, hostFacts?: Record<string, {version?: string|null}> }} [deps] test seam
+ */
+export async function foldKnownVersions(drift, { now = Date.now(), hostFacts } = {}) {
+  const out = [...(drift ?? [])];
+  const seen = new Set(out.map((d) => d?.pkg).filter(Boolean));
+  const add = (pkg, installed) => {
+    if (!pkg || !installed || seen.has(pkg)) return;
+    seen.add(pkg);
+    out.push({ pkg, installed, latest: null, outdated: false });
+  };
+  const hosts = hostFacts ?? await cachedHostFacts(now);
+  for (const host of HOSTS) add(host.pkg, hosts?.[host.id]?.version);
+  add('agentdb', installedVersion('agentdb'));
+  add('@claude-flow/aidefence', bundledVersion('ruflo', '@claude-flow/aidefence'));
+  return out;
+}
+
+/** The version of a package that ships INSIDE another rather than as its own
+ *  global — aidefence lives in ruflo's dependency tree, so `installedVersion`
+ *  cannot see it and its card was the last one silently missing a version.
+ *  Both npm layouts are checked directly (hoisted beside the host, then nested
+ *  under it) because Node's resolver refuses `<pkg>/package.json` whenever the
+ *  package publishes an `exports` map, which aidefence does. */
+function bundledVersion(hostPkg, pkg) {
+  const root = globalRoot();
+  for (const file of [
+    path.join(root, pkg, 'package.json'),
+    path.join(root, hostPkg, 'node_modules', pkg, 'package.json'),
+  ]) {
+    try { return JSON.parse(fs.readFileSync(file, 'utf8')).version ?? null; } catch { /* try next */ }
+  }
+  return null;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

@@ -214,18 +214,11 @@ export function renderPage({ name, version }) {
         <p class="ab-intro">The coding agents themselves. Everything further down exists to make
           these smarter, safer, and easier to watch.</p>
         <div class="ab-cards" id="ab-cards-hosts"></div>
-        <div class="ab-secnote"><b>Design note:</b> hosts lead because they are what a new user
-          already recognizes &mdash; familiar things first, infrastructure after. The three
-          official marks are reused byte-identically from Observability&rsquo;s session rows.
-          A host that is enabled but absent says so; absence is information, not an empty slot.</div>
       </section>
 
       <section class="ab-sec" id="ab-engine">
         <h3>Engine &amp; memory &mdash; what makes sessions smarter</h3>
         <div class="ab-cards" id="ab-cards-engine"></div>
-        <div class="ab-secnote"><b>Design note:</b> monogram tiles (letters on a category hue) are
-          the honest icon for tools without an official mark &mdash; consistent, self-contained
-          under the page&rsquo;s content policy, and never a fabricated logo.</div>
       </section>
 
       <section class="ab-sec" id="ab-quality">
@@ -233,9 +226,6 @@ export function renderPage({ name, version }) {
         <p class="ab-intro">Three specialists with one theme: making agent work trustworthy &mdash;
           tested, protected from smuggled instructions, and answered from real source.</p>
         <div class="ab-cards" id="ab-cards-quality"></div>
-        <div class="ab-secnote"><b>Design note:</b> three one-tool categories share a row instead of
-          three sparse sections &mdash; the map above already groups them as one cluster. Every term
-          of art is defined in the same breath it is used.</div>
       </section>
 
       <section class="ab-sec" id="ab-kit">
@@ -248,16 +238,8 @@ export function renderPage({ name, version }) {
         <p class="ab-intro">Not packages &mdash; settings and wiring ak set up on your behalf. Each
           names the command that manages it: yours to change, never a black box.</p>
         <div class="ab-cards" id="ab-cards-configured"></div>
-        <div class="ab-secnote"><b>Design note:</b> configured surfaces get the same card shape as
-          packages &mdash; one grammar to learn &mdash; but a distinct <i>configured</i> chip, no
-          version, and a <span class="mono">manage:</span> line instead of source links, because
-          &ldquo;where do I change this&rdquo; is their equivalent of &ldquo;where do I read
-          more&rdquo;.</div>
       </section>
 
-      <div class="foot">every state chip is measured by the same detection Overview reports;
-        the prose is authored and never claims a component is present &middot;
-        run <span class="mono">ak about</span> for the same directory in a terminal</div>
     </div>
   </section>
 
@@ -509,20 +491,12 @@ ${LIVE_HTML}
       <div class="sy-grid">
         <div class="sy-kpis" id="sys-kpis"></div>
         <div class="sy-card sy-4">
-          <div class="sy-head"><h3>Disk denominator</h3><span class="sy-form">radial gauge</span></div>
+          <div class="sy-head"><h3>Disk denominator</h3></div>
           <div id="sys-gauge"></div>
-          <div class="sy-note"><b>Why a gauge:</b> one ratio against a limit. The denominator is what
-            keeps an install figure honest &mdash; big enough to see, small enough not to panic
-            about. Accent is the toolchain; everything else stays de-emphasis gray so the accent
-            keeps one meaning.</div>
         </div>
         <div class="sy-card sy-8">
-          <div class="sy-head"><h3>Largest consumers &mdash; all categories</h3><span class="sy-form">ranked bars</span></div>
+          <div class="sy-head"><h3>Largest consumers &mdash; all categories</h3></div>
           <div id="sys-consumers"></div>
-          <div class="sy-note"><b>Why ranked bars:</b> &ldquo;what is eating the disk&rdquo; is a
-            magnitude comparison, and the top few across <i>every</i> category beat one chart per
-            category for a summary. Host hue carries identity where a row belongs to one host;
-            install and shared rows stay neutral.</div>
         </div>
       </div>
     </section>
@@ -536,40 +510,24 @@ ${LIVE_HTML}
       </header>
       <div class="sy-grid">
         <div class="sy-card sy-5">
-          <div class="sy-head"><h3>Retained data by category</h3><span class="sy-form">donut</span></div>
+          <div class="sy-head"><h3>Retained data by category</h3></div>
           <div id="sys-donut"></div>
-          <div class="sy-note"><b>Why a donut:</b> part-to-whole with four slices and a center
-            total &mdash; inside honest-pie territory. Values ride the legend rather than the
-            wedges, so nothing depends on telling two hues apart.</div>
         </div>
         <div class="sy-card sy-7">
-          <div class="sy-head"><h3>Per-host split by category</h3><span class="sy-form">stacked bars</span></div>
+          <div class="sy-head"><h3>Per-host split by category</h3></div>
           <div id="sys-hostsplit"></div>
-          <div class="sy-note"><b>Why horizontal stacks:</b> the same four category hues as the
-            donut &mdash; colour follows the entity across the whole view, so the mapping is
-            learned once. Rows share one scale.</div>
         </div>
         <div class="sy-card sy-7">
-          <div class="sy-head"><h3>Growth &mdash; bytes added per day</h3><span class="sy-form">small-multiple areas</span></div>
+          <div class="sy-head"><h3>Growth &mdash; bytes added per day</h3></div>
           <div id="sys-growth"></div>
-          <div class="sy-note"><b>Why small multiples, not one chart:</b> the quiet host would be
-            invisible against the loud one on a shared axis. Each panel keeps its own endpoint.
-            Derived from file mtime and size only &mdash; no content is read, so a rewritten file
-            counts its whole size on the day it was rewritten.</div>
         </div>
         <div class="sy-card sy-5">
-          <div class="sy-head"><h3>Reclaimable &mdash; advisory only</h3><span class="sy-form">annotated list</span></div>
+          <div class="sy-head"><h3>Reclaimable &mdash; advisory only</h3></div>
           <div id="sys-reclaim"></div>
-          <div class="sy-note"><b>Why a list, not a chart:</b> each row is a decision, not a
-            magnitude &mdash; the rationale and the path are the content. There is no delete button
-            by invariant; the row names the command that owns cleanup.</div>
         </div>
         <div class="sy-card">
-          <div class="sy-head"><h3>Largest sessions</h3><span class="sy-form">table + inline bars</span></div>
+          <div class="sy-head"><h3>Largest sessions</h3></div>
           <div id="sys-topsessions"></div>
-          <div class="sy-note"><b>Why a table:</b> a session id, host, project, and path are lookup
-            facts &mdash; the bar is a garnish for scanning, the row is the unit. It doubles as the
-            readable table view for this section&rsquo;s charts.</div>
         </div>
       </div>
     </section>
@@ -583,20 +541,14 @@ ${LIVE_HTML}
       </header>
       <div class="sy-grid">
         <div class="sy-card sy-8">
-          <div class="sy-head"><h3>Live host processes</h3><span class="sy-form">table + inline bars</span></div>
+          <div class="sy-head"><h3>Live host processes</h3></div>
           <div id="sys-procs"></div>
-          <div class="sy-note"><b>Why a table with bars, not a gauge per process:</b> the census is
-            a scan-and-compare surface, so the bars share one memory scale and the comparison is
-            visible without reading the numbers. A row is a resource consumer, not a session actor.</div>
         </div>
         <div class="sy-card sy-4">
-          <div class="sy-head"><h3>Combined memory</h3><span class="sy-form">meter</span></div>
+          <div class="sy-head"><h3>Combined memory</h3></div>
           <div id="sys-mem"></div>
-          <div class="sy-head" style="margin-top:6px"><h3>Daemons</h3><span class="sy-form">stat tiles</span></div>
+          <div class="sy-head" style="margin-top:6px"><h3>Daemons</h3></div>
           <div id="sys-daemons"></div>
-          <div class="sy-note"><b>Why a meter, not a radial:</b> one ratio against a hard limit
-            (physical memory) reads fastest as a straight track. The daemon tiles are single
-            current values &mdash; stat tiles, not a one-bar chart.</div>
         </div>
       </div>
     </section>
@@ -609,20 +561,13 @@ ${LIVE_HTML}
       </header>
       <div class="sy-grid">
         <div class="sy-card sy-5">
-          <div class="sy-head"><h3>Host inventory profile</h3><span class="sy-form">radar &middot; axis-normalized</span></div>
+          <div class="sy-head"><h3>Host inventory profile</h3></div>
           <div id="sys-radar"></div>
-          <div class="sy-note"><b>Why a radar (and its caveat):</b> the question is <i>shape</i> —
-            &ldquo;is this a commands-heavy host?&rdquo; — not precise magnitude. Each axis is
-            normalized to its own maximum and the real counts ride the legend and the tooltips,
-            because radar area is not a quantity.</div>
         </div>
         <div class="sy-card sy-7">
-          <div class="sy-head"><h3>Unique across hosts</h3><span class="sy-form">stat row + presence matrix</span></div>
+          <div class="sy-head"><h3>Unique across hosts</h3></div>
           <div id="sys-catcounts"></div>
           <div id="sys-matrix"></div>
-          <div class="sy-note"><b>Why a matrix, not more charts:</b> &ldquo;which hosts carry
-            it&rdquo; is boolean identity &mdash; a dot grid answers per-item questions the
-            radar&rsquo;s aggregate cannot. Observed inventory only; never desired state.</div>
         </div>
       </div>
     </section>
@@ -637,24 +582,13 @@ ${LIVE_HTML}
       </header>
       <div class="sy-grid">
         <div class="sy-card">
-          <div class="sy-head"><h3>Project footprints</h3><span class="sy-form">table + composed bars</span></div>
+          <div class="sy-head"><h3>Project footprints</h3></div>
           <div id="sys-projects"></div>
-          <div class="sy-note"><b>Two bars, two colour jobs:</b> lines of code are <i>identity</i>
-            (languages are categorical slots, and everything past the top three folds to gray).
-            Disk composition is <i>one entity&rsquo;s ranked parts</i> &mdash; shades of a single
-            hue, darkest for the part you wrote, faintest for reinstallable overhead. Line counts
-            are approximate by invariant: extension-bucketed, with stated exclusions.
-            <b>Remote links:</b> the project name is the link, the host and slug subline carries
-            provenance, and a project with no remote says so rather than offering a dead link.
-            The kit never fetches the URL &mdash; navigation is you clicking it.</div>
         </div>
       </div>
     </section>
   </section>
 
-  <footer class="foot mono">
-    <span id="foot-note">read-only · 127.0.0.1 · nothing here mutates state</span>
-  </footer>
 </main>
 
 <script>${LIVE_JS}</script>

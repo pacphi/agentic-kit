@@ -885,15 +885,6 @@ a.chipf{text-decoration:none; display:inline-flex; align-items:center}
 @media(max-width:600px){.sy-3,.sy-4,.sy-5{grid-column:span 12}}
 .sy-head{display:flex; align-items:baseline; justify-content:space-between; gap:8px}
 .sy-head h3{margin:0; font-size:13px; font-weight:650; letter-spacing:-.008em}
-.sy-form{
-  flex:none; font-family:var(--mono); font-size:10px; color:var(--ink-dim); white-space:nowrap;
-  border:1px solid var(--line); border-radius:100px; padding:1px 8px;
-}
-.sy-note{
-  margin-top:auto; padding-top:8px; border-top:1px dashed var(--line-2);
-  font-size:11.5px; color:var(--ink-2); line-height:1.45;
-}
-.sy-note b{color:var(--ink); font-weight:600}
 .sy-legend{display:flex; gap:12px; flex-wrap:wrap; font-size:11.5px; color:var(--ink-2)}
 .sy-legend i{display:inline-block; width:9px; height:9px; border-radius:3px; margin-right:5px; vertical-align:-1px}
 .sy-legend b{color:var(--ink); font-weight:600}

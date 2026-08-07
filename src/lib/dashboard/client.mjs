@@ -1798,14 +1798,12 @@ export const JS = `
     var lede=document.getElementById("ab-hero-lede");
     if(lede){
       // Counts describe the DIRECTORY (what ak manages), which is a release
-      // fact and true on any machine. The detection sentence is appended only
-      // when the status join actually produced something to count.
+      // fact and true on any machine. Per-component state lives on each card's
+      // own chip; an aggregate tally here would just restate it less precisely.
       lede.innerHTML="agentic-kit manages <b>"+packaged+" components</b> and <b>"+configured
         +" configurations</b>. This page says what each one is, in plain words \\u2014 and where to "
         +"read more. Health lives in Overview, spend in Usage, activity in Observability; here, "
-        +"everything just introduces itself."
-        +(joined?(" <b>"+detected+" of "+packaged+"</b> report as installed right now.")
-          :" Component states are unknown until the status check answers.");
+        +"everything just introduces itself.";
     }
     if(aboutScrollPending&&activeTab==="about"){aboutScrollPending=false;scrollToAboutSection();}
   }

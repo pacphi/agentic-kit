@@ -847,8 +847,12 @@ async function main() {
       // DELIBERATE DIVERGENCE from /api/live's leaf-only reduction (ADR-0025
       // §7): a storage breakdown that hides where the bytes live answers
       // nothing, so here the absolute path IS the answer and must survive.
-      contains(r.body, path.join(SYS_HOME, '.claude'));
-      contains(r.body, path.join(SYS_HOME, 'src', 'demo'));
+      // Compare against the JSON-ENCODED form. A Windows absolute path carries
+      // backslashes, which JSON escapes on the wire, so a raw substring check
+      // passes on POSIX and fails on Windows for a payload that is correct.
+      const onWire = (p) => JSON.stringify(p).slice(1, -1);
+      contains(r.body, onWire(path.join(SYS_HOME, '.claude')));
+      contains(r.body, onWire(path.join(SYS_HOME, 'src', 'demo')));
       assert(j.storage.roots[0].path === path.join(SYS_HOME, '.claude'),
         'a storage root must keep its absolute path');
       assert(j.runtime.processes.value[0].project.value.path === path.join(SYS_HOME, 'src', 'demo'),
