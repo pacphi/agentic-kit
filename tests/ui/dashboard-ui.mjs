@@ -200,7 +200,44 @@ function extendedCorpus() {
     asst(WT_ID, wtCwd, '2026-07-24T11:40:00.000Z', 'Rebased.'),
   ));
 
+  slideCorpusIntoWindow([claude, codex]);
   return { claude, codex };
+}
+
+/** The fixtures and the sessions written above are all pinned to FIXTURE_EPOCH.
+ *  The kit suites cope with that by pinning `now` (see usage-index.test.mjs's
+ *  header), but this harness drives a REAL server against the real clock and
+ *  the panel requests a 14-day window, so a fixed date is a dated bomb: the
+ *  corpus passed every run until it turned 14 days old, then every
+ *  session-dependent assertion went blind at once against unchanged code.
+ *
+ *  Shifting the copied corpus keeps it permanently inside the window. The shift
+ *  is a WHOLE NUMBER OF DAYS so every relative fact the assertions actually
+ *  test survives it — the 85-minute idle gap that separates the three time
+ *  tiers, the worktree session nested inside another's span, and each turn's
+ *  local time-of-day, which the punchcard buckets by hour. */
+const FIXTURE_EPOCH = '2026-07-24';
+function slideCorpusIntoWindow(roots) {
+  const DAY = 86_400_000;
+  // Land the corpus a few days back: comfortably inside the 14-day default,
+  // and never in the future, which would read as an unfinished session.
+  const target = Date.now() - 3 * DAY;
+  const shiftDays = Math.round((target - Date.parse(`${FIXTURE_EPOCH}T00:00:00.000Z`)) / DAY);
+  if (shiftDays <= 0) return; // fixtures are already recent enough
+  const shiftMs = shiftDays * DAY;
+  const ISO = /\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z/g;
+  const walk = (dir) => {
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      const p = path.join(dir, entry.name);
+      if (entry.isDirectory()) { walk(p); continue; }
+      if (!entry.isFile() || !entry.name.endsWith('.jsonl')) continue;
+      fs.writeFileSync(p, fs.readFileSync(p, 'utf8').replace(ISO, (stamp) => {
+        const at = Date.parse(stamp);
+        return Number.isFinite(at) ? new Date(at + shiftMs).toISOString() : stamp;
+      }));
+    }
+  };
+  for (const root of roots) walk(root);
 }
 
 // ── views under test ─────────────────────────────────────────────────────────
@@ -2461,8 +2498,16 @@ async function main() {
         && degraded.entries.every((entry) => entry.state === 'unknown'
           && /unknown/i.test(entry.chip) && entry.reason.length > 0),
       `states were ${JSON.stringify([...new Set(degraded.entries.map((e) => e.state))])}`);
-    check('the hero says component states are unknown instead of counting detections',
-      /unknown/i.test(degraded.lede) && !/report as installed/i.test(degraded.lede),
+    // The hero states only what ak MANAGES — a release fact, true on any machine
+    // and unaffected by a failed join. It deliberately makes no detection claim
+    // in either direction: no "N of N installed" tally, and no aggregate
+    // "states are unknown" either, because the chip on every card already says
+    // so per-component (asserted directly above) and an aggregate could only
+    // restate that less precisely.
+    check('the hero makes no detection claim, so a lost join cannot make it lie',
+      !/report as installed/i.test(degraded.lede)
+        && !/\bof \d+\b/.test(degraded.lede)
+        && /manages/i.test(degraded.lede),
       `the lede read ${JSON.stringify(degraded.lede.slice(0, 200))}`);
     const degradedArts = artifactsIn(await visibleText(page, '#panel-about'));
     check('the degraded About area is free of rendering artifacts', degradedArts.length === 0,
