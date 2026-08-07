@@ -406,8 +406,14 @@ async function cachedHostFacts(now) {
  * giving the version chip the structured fact it needs. Nothing here parses a
  * version out of a status row's prose; every value is a structured probe.
  * Existing entries always win, so this can only ever add.
- * @param {Array<{pkg:string}>|null} drift
+ * @param {Array<{pkg:string, installed?:string|null, latest?:string|null,
+ *   outdated?:boolean}>|null} drift the drift array, in the shape driftReport()
+ *   and the selfDrift/brain/ruvector folds all already emit
  * @param {{ now?: number, hostFacts?: Record<string, {version?: string|null}> }} [deps] test seam
+ * @returns {Promise<Array<{pkg:string, installed?:string|null, latest?:string|null,
+ *   outdated?:boolean}>>} the input array plus the folded entries; incoming
+ *   entries are passed through untouched, so their fields stay as optional as
+ *   whichever fold produced them
  */
 export async function foldKnownVersions(drift, { now = Date.now(), hostFacts } = {}) {
   const out = [...(drift ?? [])];
