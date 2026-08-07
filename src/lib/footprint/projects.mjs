@@ -1,84 +1,73 @@
-// Project footprints — one row per project in the shared discovery catalog:
+// Project footprints — one row per project this machine has had a session with:
 // approximate LOC by language, working-tree bytes, `.git` bytes, `node_modules`
 // bytes, last activity, and the origin remote's web page when one exists.
+//
+// TWO POPULATIONS, deliberately not the same number. The TABLE covers projects
+// that still exist on disk, because those are the only ones a byte or LOC figure
+// can be taken of at all. The KPI counts, carried alongside it, cover every
+// project ever seen — including the ones that have since been deleted, which is
+// exactly the fact a "how many projects has this machine touched" question is
+// asking about. `project-sources.mjs` produces both; a consumer that renders
+// only one of them must say which (`method` travels with the payload for that).
 //
 // The three byte figures stay SEPARATE on purpose (ADR-0025): `node_modules`
 // dominates and `.git` distorts, so folding either into the tree would let
 // reinstallable overhead masquerade as "your project got big".
 //
+// WHAT A PROJECT IS MADE OF comes from the stack registry (`stack-detect.mjs`),
+// not from a map kept here. Two kinds of fact come back and they are kept apart:
+//
+//   languages  carry LINES — an extension is what a line belongs to, so these are
+//              what the stacked bar renders;
+//   stack      (frameworks / SDKs / tools) carries PRESENCE ONLY and is never
+//              given a line count. React does not own lines, the .tsx files do,
+//              and putting both on one proportional bar would count the same bytes
+//              twice. The field is structurally absent from the payload, so no
+//              surface can make that mistake by accident.
+//
 // LOC is APPROXIMATE by invariant 11 and says so in the payload: it is an
 // extension-bucketed newline count with a stated exclusion list, produced by the
-// kit's own bounded walker (zero runtime dependencies — no cloc, no tokei). Files
-// are scanned through a fixed 64 KB buffer that is counted and discarded; no file
-// content is ever retained or emitted.
+// kit's own bounded walker (zero runtime dependencies — no cloc, no tokei). An
+// extension the registry does not map is NEVER counted — the top unmapped
+// extensions on a real machine are .jsonl/.png/.jar/.dll, i.e. data and binaries,
+// and counting them would corrupt the figure. They are carried through BY NAME
+// instead, as the unrecognized tail, so "Other" renders as a named to-do rather
+// than a shrug.
 //
 // Discovery supplies PATHS ONLY (invariant 9). Every figure below is measured here.
 import fs from 'node:fs';
 import path from 'node:path';
 import { parseRepoSlug } from '../admin-collect.mjs';
-import { discoverRuvfloProjects } from '../dashboard/project-discovery.mjs';
-import { walkTree, rootMeasurements, measured, unknown, sumMeasurements } from './walk.mjs';
+import { discoverProjectSources } from './project-sources.mjs';
+import { detectStack, STACK_EXCLUSIONS } from './stack-detect.mjs';
+import { STACK_REGISTRY_VERSION } from './stack-registry.mjs';
+import {
+  walkTree, rootMeasurements, measured, statNode, UNKNOWN, unknown, sumMeasurements,
+} from './walk.mjs';
 
 /** Directories that are never code and never the user's work. Excluded from the
  *  tree walk, from LOC, and from the nested-`node_modules` search alike, so the
  *  three byte figures partition the project rather than overlapping it. */
 const OVERHEAD_DIRS = new Set(['.git', 'node_modules']);
 
-/** Vendored / generated / virtual-env trees. Excluded from LOC only: they are
- *  real bytes on disk (so they stay in treeBytes) but they are not lines the user
- *  wrote, and counting them would make the LOC figure meaningless. */
-const LOC_EXCLUDED_DIRS = new Set([
-  'node_modules', '.git', 'vendor', 'third_party', 'thirdparty', 'bower_components',
-  'dist', 'build', 'out', 'target', '.next', '.nuxt', '.svelte-kit', 'coverage',
-  '.venv', 'venv', '__pycache__', '.tox', '.mypy_cache', '.pytest_cache',
-  '.gradle', '.idea', '.vscode', 'Pods', '.terraform', '.cache', '.turbo',
-]);
-
-/** Machine-generated manifests: text, enormous, and nobody's line count. */
-const LOC_EXCLUDED_FILES = new Set([
-  'package-lock.json', 'pnpm-lock.yaml', 'yarn.lock', 'npm-shrinkwrap.json',
-  'Cargo.lock', 'poetry.lock', 'Gemfile.lock', 'composer.lock', 'go.sum', 'flake.lock',
-]);
-
-/** Extension → language bucket. An extension absent from this map is NOT counted
- *  — an unknown extension may be a binary, and guessing would inflate the total. */
-const LANGUAGES = new Map(Object.entries({
-  '.js': 'javascript', '.mjs': 'javascript', '.cjs': 'javascript', '.jsx': 'javascript',
-  '.ts': 'typescript', '.tsx': 'typescript', '.mts': 'typescript', '.cts': 'typescript',
-  '.rs': 'rust', '.go': 'go', '.py': 'python', '.rb': 'ruby', '.php': 'php',
-  '.java': 'java', '.kt': 'kotlin', '.kts': 'kotlin', '.scala': 'scala', '.groovy': 'groovy',
-  '.cs': 'csharp', '.fs': 'fsharp', '.swift': 'swift', '.m': 'objective-c', '.mm': 'objective-c',
-  '.c': 'c', '.h': 'c', '.cc': 'cpp', '.cpp': 'cpp', '.cxx': 'cpp', '.hpp': 'cpp', '.hh': 'cpp',
-  '.ex': 'elixir', '.exs': 'elixir', '.erl': 'erlang', '.hs': 'haskell', '.clj': 'clojure',
-  '.lua': 'lua', '.dart': 'dart', '.zig': 'zig', '.nim': 'nim', '.pl': 'perl', '.r': 'r',
-  '.sh': 'shell', '.bash': 'shell', '.zsh': 'shell', '.fish': 'shell', '.ps1': 'powershell',
-  '.sql': 'sql', '.vue': 'vue', '.svelte': 'svelte',
-  '.html': 'html', '.htm': 'html', '.css': 'css', '.scss': 'css', '.sass': 'css', '.less': 'css',
-  '.md': 'markdown', '.mdx': 'markdown',
-  '.json': 'config', '.yml': 'config', '.yaml': 'config', '.toml': 'config',
-  '.ini': 'config', '.xml': 'config', '.proto': 'config', '.tf': 'config',
-}));
-
-/** Source trees nest far shallower than dependency trees; 12 covers a monorepo
- *  package's deepest source dir without letting a pathological tree run away. */
-const LOC_MAX_DEPTH = 12;
-/** Files above this are minified bundles, fixtures, or data dumps far more often
- *  than they are hand-written source. Skipped and reported, not counted. */
-const LOC_MAX_FILE_BYTES = 2 * 1024 * 1024;
-const READ_CHUNK = 64 * 1024;
 /** Depth at which a workspace's nested `node_modules` still gets attributed. */
 const NODE_MODULES_MAX_DEPTH = 6;
 
 /** The exclusion list every consumer must be able to state alongside the figure
  *  (invariant 11). Deliberate exclusions are why LOC is approximate; they are NOT
- *  a failed measurement, so they never mark the count partial. */
-export const LOC_EXCLUSIONS = Object.freeze([
-  ...[...LOC_EXCLUDED_DIRS].sort().map((dir) => `${dir}/`),
-  ...[...LOC_EXCLUDED_FILES].sort(),
-  'files without a recognized source extension',
-  'files containing NUL bytes (binary)',
-  `files larger than ${LOC_MAX_FILE_BYTES} bytes`,
-]);
+ *  a failed measurement, so they never mark the count partial.
+ *
+ *  Retained under its original name for existing consumers: the list is now
+ *  STATED BY THE REGISTRY-BACKED DETECTOR rather than assembled here, so the
+ *  exclusions a project row prints and the ones the scan actually applied cannot
+ *  drift apart. */
+export const LOC_EXCLUSIONS = STACK_EXCLUSIONS;
+
+/** Aggregate tail caps, matching stack-detect's per-project ones: a machine-wide
+ *  to-do list longer than this is not read, and the totals beside it state what
+ *  the slice left out. */
+const SECTION_TAIL_EXTENSIONS = 40;
+const SECTION_TAIL_DEPENDENCIES = 50;
 
 // ── git remote ────────────────────────────────────────────────────────────────
 
@@ -169,6 +158,16 @@ export function describeRemote(rawUrl, name = 'origin') {
 export function projectRemote(projectPath, { fsImpl = fs } = {}) {
   const configFile = path.join(projectPath, '.git', 'config');
   let source;
+  // Stat before read: a cloud provider's evicted placeholder (real size, zero
+  // allocated blocks) stats instantly but blocks forever on open, waiting for a
+  // provider that may be signed out. `unknown` with a stated reason is the
+  // honest answer — inventing `local-only` would claim this repo has no remote.
+  try {
+    const st = fsImpl.lstatSync(configFile);
+    if (st.blocks === 0 && st.size > 0) {
+      return { status: 'unknown', name: null, raw: null, hostname: null, host: null, slug: null, webUrl: null, reason: 'cloud placeholder (not materialized)' };
+    }
+  } catch { /* the read below reports the errno; one stat failure decides nothing */ }
   try { source = fsImpl.readFileSync(configFile, 'utf8'); } catch (error) {
     if (error.code === 'ENOENT' || error.code === 'ENOTDIR') {
       return { status: 'local-only', name: null, raw: null, hostname: null, host: null, slug: null, webUrl: null, reason: null };
@@ -182,92 +181,140 @@ export function projectRemote(projectPath, { fsImpl = fs } = {}) {
   return { ...describeRemote(remote.url, remote.name), reason: null };
 }
 
-// ── lines of code ─────────────────────────────────────────────────────────────
+// ── lines of code, and what the lines are written in ──────────────────────────
+//
+// Both sections below are PROJECTIONS of one `detectStack()` pass. The pass is
+// run once per project and split here rather than measured twice: a second walk
+// would double the I/O of the most expensive part of the scan to re-derive facts
+// the first walk already held.
 
-/** Count newlines in one file through a fixed buffer. Returns null when the file
- *  is binary (a NUL byte in the first chunk) or unreadable — never 0, which would
- *  claim an empty file. Each chunk is counted and immediately overwritten; no file
- *  content is retained past this function or emitted anywhere. */
-function countFileLines(file, size, fsImpl = fs) {
-  let fd;
-  try { fd = fsImpl.openSync(file, 'r'); } catch { return null; }
-  try {
-    const buffer = Buffer.allocUnsafe(READ_CHUNK);
-    let lines = 0;
-    let read = 0;
-    let lastByte = 0;
-    let offset = 0;
-    let first = true;
-    while ((read = fsImpl.readSync(fd, buffer, 0, READ_CHUNK, offset)) > 0) {
-      // One NUL in the first chunk is the cheap, conventional binary test.
-      if (first) { const nul = buffer.indexOf(0); if (nul >= 0 && nul < read) return null; }
-      first = false;
-      for (let i = 0; i < read; i++) if (buffer[i] === 0x0a) lines++;
-      lastByte = buffer[read - 1];
-      offset += read;
-    }
-    // A final line with no trailing newline still counts as a line.
-    if (size > 0 && lastByte !== 0x0a) lines++;
-    return lines;
-  } catch { return null; }
-  finally { try { fsImpl.closeSync(fd); } catch { /* fd already gone */ } }
+/** Was there a measurement at all? `detectStack` reports an unwalkable root with
+ *  an unknown `totalLines` and empty lists — and an empty list of languages is
+ *  indistinguishable from "this project has none" unless the caller checks. */
+const stackMeasured = (detected) => Boolean(detected?.totalLines)
+  && detected.totalLines.status !== UNKNOWN;
+
+/**
+ * The LOC projection: lines and only lines.
+ *
+ * `byLanguage` (bucket id → lines) is kept for the surfaces that already read it;
+ * `languages` is the ranked, registry-described form the stacked bar renders,
+ * each row carrying the palette SLOT the registry assigned rather than a colour.
+ * Both come from the same detection, so they cannot disagree.
+ *
+ * `total` is `partial` only when a cap fired or a subtree was unreadable — the
+ * exclusion list is a deliberate scope, not a failure, which is precisely why the
+ * figure ships with `approximate` and `exclusions` attached (invariant 11).
+ */
+function locFromStack(detected) {
+  const base = {
+    approximate: true,
+    exclusions: [...STACK_EXCLUSIONS],
+    registryVersion: detected?.registryVersion ?? STACK_REGISTRY_VERSION,
+  };
+  if (!stackMeasured(detected)) {
+    return {
+      ...base,
+      total: detected?.totalLines ?? unknown('not measured'),
+      byLanguage: null,
+      languages: null,
+      files: null,
+      skipped: 0,
+      complete: false,
+      degraded: detected?.degraded ?? [],
+    };
+  }
+  const languages = detected.languages ?? [];
+  const byLanguage = {};
+  for (const row of languages) byLanguage[row.id] = row.lines;
+  return {
+    ...base,
+    total: detected.totalLines,
+    byLanguage,
+    // Ranked by lines already; copied so a consumer cannot mutate the detection.
+    languages: languages.map((row) => ({ ...row })),
+    files: detected.files,
+    skipped: detected.skipped ?? 0,
+    // The WALK's completeness, read off the measurement the walk stamped. A
+    // manifest that would not parse is a stack fact, not a line-count fact:
+    // `detected.complete` folds both in, so it is the wrong signal here.
+    complete: detected.totalLines?.partial !== true,
+    degraded: detected.degraded ?? [],
+  };
 }
 
 /**
- * Approximate lines of code under `root`, bucketed by language, via the shared
- * bounded walker — so LOC inherits the same never-follow-symlinks rule, entry
- * caps, and degrade-this-node-only failure mode as every other figure here.
+ * The stack projection: PRESENCE, never lines.
  *
- * `total` is `partial` only when a cap fired or a subtree was unreadable. The
- * exclusion list is a deliberate scope, not a failure, and never marks it partial
- * — which is precisely why the figure ships with `approximate` and `exclusions`
- * attached, so no consumer can render it as authoritative (invariant 11).
+ * `items` are frameworks / SDKs / tools, each with the `kind` it was registered
+ * under and the `via` that matched it. None of them carries a line count and none
+ * ever may — see this file's header.
  *
- * @param {string} root
- * @param {{ walk?: Function, limits?: object, maxDepth?: number, asOf?: number|null,
- *           fsImpl?: typeof fs }} [options]
- * @returns {object} LocCount
+ * `unrecognized` is the tail the registry could not name: extensions ranked by
+ * file count, and declared dependencies that matched no entry. It is the whole
+ * reason an unmapped extension can be excluded from LOC without vanishing.
  */
-export function countLines(root, {
-  walk = walkTree, limits = {}, maxDepth = LOC_MAX_DEPTH, asOf = null, fsImpl = fs,
-} = {}) {
-  const byLanguage = {};
-  let total = 0;
-  let files = 0;
-  let skipped = 0;
-  const languageOf = (name) => LANGUAGES.get(path.extname(name).toLowerCase());
-
-  const result = walk(root, {
-    maxDepth, ...limits, fsImpl,
-    skipDir: (dir, name) => LOC_EXCLUDED_DIRS.has(name),
-    acceptFile: (name) => !LOC_EXCLUDED_FILES.has(name) && Boolean(languageOf(name)),
-    onFile: ({ file, name, bytes }) => {
-      if (bytes > LOC_MAX_FILE_BYTES) { skipped++; return; }
-      const lines = countFileLines(file, bytes, fsImpl);
-      if (lines === null) { skipped++; return; }
-      const language = languageOf(name);
-      byLanguage[language] = (byLanguage[language] ?? 0) + lines;
-      total += lines;
-      files++;
-    },
-  });
-
-  const base = { approximate: true, exclusions: [...LOC_EXCLUSIONS] };
-  if (result.status === 'unknown') {
+function stackFromDetection(detected) {
+  const base = { registryVersion: detected?.registryVersion ?? STACK_REGISTRY_VERSION };
+  if (!stackMeasured(detected)) {
     return {
-      ...base, total: unknown(result.reason), byLanguage: {}, files: null, skipped: 0,
-      complete: false, degraded: result.degraded ?? [],
+      ...base,
+      status: 'unknown',
+      reason: detected?.totalLines?.reason ?? 'not measured',
+      // Null, not `[]`: an empty list would state that this project declares no
+      // frameworks, which is a measurement nobody took (invariant 2).
+      items: null,
+      manifests: null,
+      nonSource: null,
+      unrecognized: null,
+      complete: false,
+      degraded: detected?.degraded ?? [],
     };
   }
   return {
     ...base,
-    total: measured(total, { asOf, partial: result.complete === false }),
-    byLanguage,
-    files,
-    skipped,
-    complete: result.complete !== false,
-    degraded: result.degraded ?? [],
+    status: 'measured',
+    reason: null,
+    items: (detected.stack ?? []).map((row) => ({ ...row })),
+    manifests: (detected.manifests ?? []).map((row) => ({ ...row })),
+    nonSource: { ...(detected.nonSource ?? { files: null, bytes: null }) },
+    unrecognized: {
+      extensions: (detected.unrecognized?.extensions ?? []).map((row) => ({ ...row })),
+      extensionsTotal: detected.unrecognized?.extensionsTotal ?? null,
+      dependencies: (detected.unrecognized?.dependencies ?? []).map((row) => ({ ...row })),
+      dependenciesTotal: detected.unrecognized?.dependenciesTotal ?? null,
+    },
+    complete: detected.complete !== false,
+    degraded: detected.degraded ?? [],
   };
+}
+
+/** The not-measured LOC shape. `loc: false` skips the walk entirely, so every
+ *  figure is unknown-with-reason — never a zero, which would claim an empty
+ *  project (invariant 2). */
+const locNotMeasured = (reason) => locFromStack({ totalLines: unknown(reason) });
+
+/** The not-measured stack shape, for the same reason. */
+const stackNotMeasured = (reason) => stackFromDetection({ totalLines: unknown(reason) });
+
+/**
+ * Approximate lines of code under `root`, bucketed by language.
+ *
+ * A LOC-only projection of one `detectStack()` pass with the manifest reads
+ * switched off, for a caller that wants the count without the stack. Everything
+ * it inherits — never-follow-symlinks, depth and entry caps, the
+ * degrade-this-node-only failure mode, and which extensions are counted at all —
+ * comes from the shared walker and the registry, not from this module.
+ *
+ * @param {string} root
+ * @param {{ walk?: Function, limits?: object, asOf?: number|null,
+ *           detect?: Function, fsImpl?: typeof fs }} [options]
+ * @returns {object} LocCount
+ */
+export function countLines(root, {
+  walk = walkTree, limits = {}, asOf = null, detect = detectStack, fsImpl = fs,
+} = {}) {
+  return locFromStack(detect(root, { walk, limits, asOf, fsImpl, manifests: false }));
 }
 
 // ── bytes ─────────────────────────────────────────────────────────────────────
@@ -317,9 +364,10 @@ function missingProject(project, reason, presence = 'absent') {
     path: project.path,
     label: project.label,
     source: project.source ?? null,
+    hosts: Array.isArray(project.hosts) ? [...project.hosts] : null,
     remote: { status: 'unknown', name: null, raw: null, hostname: null, host: null, slug: null, webUrl: null, reason },
-    loc: { approximate: true, exclusions: [...LOC_EXCLUSIONS], total: unknown(reason),
-      byLanguage: {}, files: null, skipped: 0, complete: false, degraded: [] },
+    loc: locNotMeasured(reason),
+    stack: stackNotMeasured(reason),
     presence,
     treeBytes: unknown(reason),
     treeFiles: unknown(reason),
@@ -342,15 +390,18 @@ function notify(onProgress, payload) {
 
 /**
  * Measure one project. `walk` is the shared bounded walker; the project's path is
- * the only thing discovery contributes (invariant 9).
+ * the only thing discovery contributes (invariant 9) — `hosts` rides along as
+ * attribution (which hosts saw this project), never as a measurement.
  *
- * @param {{ path: string, label: string, source?: string }} project
- * @param {{ walk?: Function, limits?: object, countLines?: Function, loc?: boolean,
+ * @param {{ path: string, label: string, source?: string, hosts?: string[] }} project
+ * @param {{ walk?: Function, limits?: object, detect?: Function, loc?: boolean,
  *           asOf?: number|null, fsImpl?: typeof fs }} [options]
+ *   `loc: false` skips the stack pass entirely — the expensive part of a project
+ *   row — and both `loc` and `stack` then report unknown rather than empty.
  * @returns {object} ProjectFootprint
  */
 export function measureProject(project, {
-  walk = walkTree, limits = {}, countLines: countLinesImpl = countLines,
+  walk = walkTree, limits = {}, detect = detectStack,
   loc = true, asOf = null, fsImpl = fs,
 } = {}) {
   const root = project.path;
@@ -380,15 +431,19 @@ export function measureProject(project, {
     ? measured(0, { asOf })
     : sumMeasurements(moduleRoots.map((dir) => walkNode(walk, dir, common).bytes), { asOf });
 
+  // ONE detection pass, split into its two projections below: lines belong to
+  // languages, presence belongs to frameworks/SDKs/tools, and the tail names what
+  // neither could claim.
+  const detected = loc ? detect(root, { walk, limits, asOf, fsImpl }) : null;
+
   return {
     path: root,
     label: project.label,
     source: project.source ?? null,
+    hosts: Array.isArray(project.hosts) ? [...project.hosts] : null,
     remote: projectRemote(root, { fsImpl }),
-    loc: loc
-      ? countLinesImpl(root, { walk, limits, asOf, fsImpl })
-      : { approximate: true, exclusions: [...LOC_EXCLUSIONS], total: unknown('not measured'),
-          byLanguage: {}, files: null, skipped: 0, complete: false, degraded: [] },
+    loc: detected ? locFromStack(detected) : locNotMeasured('not measured'),
+    stack: detected ? stackFromDetection(detected) : stackNotMeasured('not measured'),
     presence: tree.presence,
     treeBytes: tree.bytes,
     treeFiles: tree.files,
@@ -407,20 +462,122 @@ export function measureProject(project, {
   };
 }
 
+/** everSeen / onDisk / gitRepos for an EXPLICITLY supplied catalog, which carries
+ *  no existence facts of its own. Two lstats per row — negligible next to the
+ *  tree walk that follows, and the alternative is a KPI that cannot be stated. */
+function summarizeCatalog(rows, fsImpl) {
+  let onDisk = 0;
+  let gitRepos = 0;
+  for (const row of rows) {
+    if (!row?.path) continue;
+    const node = statNode(row.path, { fsImpl });
+    if (node.status === UNKNOWN || node.kind !== 'dir') continue;
+    onDisk += 1;
+    // A linked worktree's `.git` is a FILE, not a directory; checking only for a
+    // directory would undercount every worktree on the machine.
+    const git = statNode(path.join(row.path, '.git'), { fsImpl });
+    if (git.status !== UNKNOWN && (git.kind === 'dir' || git.kind === 'file')) gitRepos += 1;
+  }
+  return { everSeen: rows.length, onDisk, gitRepos, unresolved: 0, complete: true };
+}
+
+/** A `discoverProjectSources()` PAYLOAD rather than a plain catalog array.
+ *  Accepted wherever a catalog is, so a caller holding the payload — which is the
+ *  only thing that carries everSeen/onDisk/gitRepos and the per-row `exists` flag
+ *  — does not have to take it apart and lose them on the way in. */
+function isSourcesPayload(value) {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
+    && Array.isArray(value.projects);
+}
+
 /**
- * ProjectFootprint rows for every project in the shared discovery catalog.
+ * The machine-wide unrecognized tail: every extension and declared dependency the
+ * registry could not name, merged across projects and ranked.
  *
- * @param {{ discover?: Function, walk?: Function, limits?: object, countLines?: Function,
- *           projects?: Array<{path: string, label: string}>|null, loc?: boolean,
- *           limit?: number|null, onProgress?: Function, now?: () => number,
- *           fsImpl?: typeof fs }} [options]
+ * Per project the tail is a curiosity; merged it is the to-do list a release
+ * closes, which is the whole reason an unmapped extension is excluded from LOC
+ * rather than guessed at. A total is stated only when it is a true distinct count
+ * — if any project's own list was capped, the merged count is a floor and says so
+ * with `null` rather than a smaller number presented as complete.
+ */
+function aggregateUnrecognized(rows) {
+  const extensions = new Map();
+  const dependencies = new Map();
+  let extensionsPartial = false;
+  let dependenciesPartial = false;
+  let measuredRows = 0;
+
+  for (const row of rows) {
+    const tail = row?.stack?.unrecognized;
+    if (!tail) continue;
+    measuredRows += 1;
+    if (tail.extensionsTotal === null || tail.extensionsTotal > tail.extensions.length) {
+      extensionsPartial = true;
+    }
+    if (tail.dependenciesTotal === null || tail.dependenciesTotal > tail.dependencies.length) {
+      dependenciesPartial = true;
+    }
+    for (const entry of tail.extensions) {
+      const held = extensions.get(entry.ext);
+      if (held) {
+        held.files += entry.files;
+        held.bytes += entry.bytes;
+        held.projects += 1;
+      } else {
+        extensions.set(entry.ext, { ext: entry.ext, files: entry.files, bytes: entry.bytes, projects: 1 });
+      }
+    }
+    for (const entry of tail.dependencies) {
+      const key = `${entry.manifest} ${entry.name.toLowerCase()}`;
+      const held = dependencies.get(key);
+      if (held) held.projects += 1;
+      else dependencies.set(key, { name: entry.name, manifest: entry.manifest, projects: 1 });
+    }
+  }
+
+  const rankedExtensions = [...extensions.values()]
+    .sort((a, b) => b.files - a.files || a.ext.localeCompare(b.ext));
+  const rankedDependencies = [...dependencies.values()]
+    .sort((a, b) => b.projects - a.projects
+      || a.manifest.localeCompare(b.manifest) || a.name.localeCompare(b.name));
+
+  return {
+    projectsMeasured: measuredRows,
+    extensions: rankedExtensions.slice(0, SECTION_TAIL_EXTENSIONS),
+    extensionsTotal: extensionsPartial ? null : rankedExtensions.length,
+    dependencies: rankedDependencies.slice(0, SECTION_TAIL_DEPENDENCIES),
+    dependenciesTotal: dependenciesPartial ? null : rankedDependencies.length,
+  };
+}
+
+/**
+ * ProjectFootprint rows for every project that still exists on disk, plus the
+ * ever-seen / on-disk / git-repo counts the Summary KPI states together.
+ *
+ * The TABLE is the on-disk subset by necessity — a deleted project has no bytes
+ * and no lines to count — while `everSeen` keeps the deleted ones, because the
+ * count of projects this machine has touched is a different question from the
+ * count it can still measure. Rendering either number alone without saying which
+ * one it is would misreport both, which is why `method` ships with them.
+ *
+ * @param {{ discover?: Function, sources?: object|null, walk?: Function, limits?: object,
+ *           detect?: Function, projects?: Array<{path: string, label: string}>|object|null,
+ *           loc?: boolean, limit?: number|null, onProgress?: Function,
+ *           now?: () => number, fsImpl?: typeof fs }} [options]
+ *   `sources` is an already-resolved `discoverProjectSources()` payload, so a
+ *   caller that shares discovery with another collector pays for the transcript
+ *   sweep once. `projects` takes EITHER shape: an explicit catalog ARRAY, whose
+ *   rows are measured exactly as given because the caller — not discovery — chose
+ *   them and the on-disk filter therefore does not apply; or a discovery PAYLOAD,
+ *   which is read exactly as `sources` is, on-disk filter and KPI counts included.
  * @returns {object} the ProjectFootprint section of a FootprintSnapshot
  */
 export function collectProjects({
-  discover = discoverRuvfloProjects,
+  discover = discoverProjectSources,
+  sources = null,
   walk = walkTree,
   limits = {},
-  countLines: countLinesImpl = countLines,
+  detect = detectStack,
   projects = null,
   loc = true,
   limit = null,
@@ -429,11 +586,34 @@ export function collectProjects({
   fsImpl = fs,
 } = {}) {
   const asOf = now();
-  let catalog;
   // Discovery is a candidate-path source; if it cannot run, this section reports
   // nothing rather than taking the rest of the snapshot down with it.
   let discoveryReason = null;
-  try { catalog = projects ?? discover(); } catch (error) { catalog = []; discoveryReason = error?.code ?? 'discovery failed'; }
+  let catalog;
+  let counts;
+  if (Array.isArray(projects)) {
+    catalog = projects;
+    counts = summarizeCatalog(projects, fsImpl);
+  } else {
+    try {
+      const payload = (isSourcesPayload(projects) ? projects : sources) ?? discover({ fsImpl });
+      // Only projects that still exist can be walked, so only they become rows —
+      // the vanished ones survive in `everSeen`, not as unmeasurable table rows.
+      catalog = (payload?.projects ?? []).filter((project) => project?.exists);
+      counts = {
+        everSeen: payload?.everSeen ?? 0,
+        onDisk: payload?.onDisk ?? 0,
+        gitRepos: payload?.gitRepos ?? 0,
+        unresolved: payload?.unresolved ?? 0,
+        complete: payload?.complete !== false,
+        method: payload?.method ?? null,
+        sources: payload?.sources ?? null,
+      };
+    } catch (error) {
+      catalog = [];
+      discoveryReason = error?.code ?? 'discovery failed';
+    }
+  }
   const rows = Array.isArray(catalog) ? catalog : [];
   const selected = typeof limit === 'number' && limit >= 0 ? rows.slice(0, limit) : rows;
 
@@ -441,17 +621,40 @@ export function collectProjects({
   for (const project of selected) {
     if (!project?.path) continue;
     notify(onProgress, { scanned: out.length, total: selected.length, phase: 'project', path: project.path });
-    out.push(measureProject(project, { walk, limits, countLines: countLinesImpl, loc, asOf, fsImpl }));
+    out.push(measureProject(project, { walk, limits, detect, loc, asOf, fsImpl }));
   }
   notify(onProgress, { scanned: out.length, total: selected.length, phase: 'done', path: null });
+
+  // A count whose sweep hit an unreadable transcript or an unrecoverable project
+  // directory is a FLOOR, not a total — `partial` is what makes a surface render
+  // it as "≥ N" instead of quietly overstating certainty.
+  const partial = counts ? counts.complete === false : false;
+  const kpi = (value) => (discoveryReason ? unknown(discoveryReason) : measured(value, { asOf, partial }));
 
   return {
     asOf,
     projects: out,
-    count: discoveryReason ? unknown(discoveryReason) : measured(rows.length, { asOf }),
+    // Retained under its original name for existing consumers; it has always
+    // meant "how many projects discovery found", which is now everSeen.
+    count: kpi(counts?.everSeen ?? 0),
+    everSeen: kpi(counts?.everSeen ?? 0),
+    onDisk: kpi(counts?.onDisk ?? 0),
+    gitRepos: kpi(counts?.gitRepos ?? 0),
+    unresolved: counts?.unresolved ?? 0,
+    method: counts?.method ?? null,
+    sources: counts?.sources ?? null,
     scanned: out.length,
     truncated: selected.length < rows.length,
     locMeasured: loc,
-    complete: !discoveryReason && selected.length === rows.length && out.every((row) => row.complete),
+    // Which catalog produced the language and stack facts in every row above. A
+    // figure that moves between releases can then be explained by the registry
+    // that changed rather than by the machine that did not.
+    registryVersion: STACK_REGISTRY_VERSION,
+    // The machine-wide to-do list: what the registry saw and could not name.
+    // Stated as `null` when nothing was scanned, because an empty tail from an
+    // unmeasured scan would read as "the registry knows everything here".
+    unrecognized: loc ? aggregateUnrecognized(out) : null,
+    complete: !discoveryReason && !partial && selected.length === rows.length
+      && out.every((row) => row.complete),
   };
 }

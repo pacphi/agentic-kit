@@ -31,6 +31,7 @@ import { kbDir, present as brainPresent, installedVersion as brainVersion } from
 import { readJson } from '../settings.mjs';
 import {
   walkTree, walkMeasurements, rootMeasurements, measured, unknown, sumMeasurements, statNode,
+  hasValue,
 } from './walk.mjs';
 
 /** Install-method vocabulary. 'external' is the fail-closed value: the tool is
@@ -60,6 +61,40 @@ const METHOD_RULES = Object.freeze([
  *  payload still needs a ceiling. The COUNT stays exact past the cap. */
 export const MAX_NATIVE_ADDONS_PER_TOOL = 512;
 const NATIVE_EXT = '.node';
+
+/** The brain's install root is the PARENT of its KB dir. Measuring `kbDir()`
+ *  alone under-reported this machine's brain by 85%: 1.9 GB of active KB inside
+ *  a 13.2 GB cache root whose bulk is dated `kb.bak-*` copies the installer left
+ *  behind on previous updates, plus the embedding models and its jsonl ledgers.
+ *
+ *  Only the installer's own `…/ruvnet-brain/kb` layout is walked upward, and
+ *  both segments must match. `RUVNET_BRAIN_KB` can relocate the KB anywhere —
+ *  `/mnt/data/kb` would make the parent a directory the brain does not own, and
+ *  billing a shared volume to the brain is a worse error than under-reporting
+ *  it. An unrecognized layout stays measured at the KB dir, as before. */
+export function brainRoot() {
+  const kb = kbDir();
+  const parent = path.dirname(kb);
+  const owned = path.basename(kb) === 'kb' && path.basename(parent) === 'ruvnet-brain';
+  return owned ? parent : kb;
+}
+
+/** Sub-rows for the brain's cache root, because the 85% that was invisible is
+ *  not one number and must not become one: a user watching the figure jump from
+ *  1.9 GB to 13.2 GB is owed the reason. Order matters — `kb.bak-…` is tested
+ *  before nothing, but `kb` is matched by exact equality so a backup can never
+ *  fall into the active-KB bucket. */
+export const BRAIN_COMPONENTS = Object.freeze([
+  { id: 'kb', label: 'Active knowledge base', match: (seg) => seg === 'kb' },
+  { id: 'kb-backups', label: 'Superseded KB copies', match: (seg) => /^kb\.bak/i.test(seg) },
+  { id: 'models', label: 'Embedding models', match: (seg) => seg === 'models' },
+]);
+
+/** Whatever no spec claimed. A breakdown whose parts do not add up to the whole
+ *  is worse than no breakdown, so the remainder is always a row. */
+const COMPONENT_REMAINDER = Object.freeze({
+  id: 'other', label: 'Ledgers and loose files', match: () => true,
+});
 
 /** Attribute an install from a binary's REAL path. `globalRootDir`, when known,
  *  wins over every manager rule: a package under npm's global node_modules is
@@ -147,11 +182,13 @@ export function managedTools({ pkgRoot = null, globalRootDir = null } = {}) {
     kind: 'self', root: pkgRoot || npmRoot(KIT_PKG),
   });
   tools.push({
-    // Not an npm global: `npx ruvnet-brain` downloads a ~2 GB offline KB to a
-    // cache dir and wires a user-scope Claude Code plugin. Its bytes are the
-    // KB's, and its version comes from the plugin manifest, not npm.
-    id: 'ruvnet-brain', label: 'RuvNet Brain KB', pkg: null, bin: null,
-    kind: 'kb', root: kbDir(),
+    // Not an npm global: `npx ruvnet-brain` downloads an offline KB to a cache
+    // dir and wires a user-scope Claude Code plugin, so its version comes from
+    // the plugin manifest rather than npm. Its bytes are the WHOLE cache root's,
+    // not the active KB's — see brainRoot() for what that cost the figure — and
+    // the components say which part of the root they are.
+    id: 'ruvnet-brain', label: 'RuvNet Brain', pkg: null, bin: null,
+    kind: 'kb', root: brainRoot(), components: BRAIN_COMPONENTS,
   });
   return tools;
 }
@@ -195,10 +232,56 @@ function toolPresence(desc, fsImpl) {
   return dir.status === 'measured' && dir.kind === 'dir';
 }
 
+/** Bucket a tool tree's files by the top-level entry they live under, so a row
+ *  can say WHY it is big instead of only how big. Buckets ride the SAME walk as
+ *  the tree total — a second pass would double the I/O to answer one question,
+ *  and two passes over a tree the installer rewrites nightly could disagree.
+ *  Every component therefore inherits the walk's own provenance: a truncated or
+ *  partly-degraded walk makes every component partial, and an unreadable root
+ *  makes them unknown-with-reason rather than a set of tidy zeros. */
+function componentBuckets(specs, root) {
+  if (!specs?.length) return null;
+  const state = [...specs, COMPONENT_REMAINDER].map((spec) => ({
+    spec, bytes: 0, files: 0, newestMtimeMs: null, names: new Set(),
+  }));
+  const identity = (s) => ({
+    id: s.spec.id,
+    label: s.spec.label,
+    // One matched entry has a path worth printing; a family (five dated backups)
+    // or an empty bucket does not, and inventing one would name a directory that
+    // holds only part of the figure.
+    path: s.names.size === 1 ? path.join(root, [...s.names][0]) : null,
+    entries: s.names.size,
+  });
+  return {
+    add({ file, bytes, mtimeMs }) {
+      const segment = path.relative(root, file).split(/[\\/]+/)[0] || '';
+      const hit = state.find((s) => s.spec.match(segment));
+      hit.bytes += bytes;
+      hit.files += 1;
+      hit.names.add(segment);
+      if (hit.newestMtimeMs === null || mtimeMs > hit.newestMtimeMs) hit.newestMtimeMs = mtimeMs;
+    },
+    finalize({ asOf, partial }) {
+      return state.map((s) => ({
+        ...identity(s),
+        bytes: measured(s.bytes, { asOf, partial }),
+        files: measured(s.files, { asOf, partial }),
+        newestMtimeMs: s.newestMtimeMs,
+      }));
+    },
+    unmeasured(reason) {
+      return state.map((s) => ({
+        ...identity(s), bytes: unknown(reason), files: unknown(reason), newestMtimeMs: null,
+      }));
+    },
+  };
+}
+
 /**
  * One HostInstallation. Shape:
  *   { tool, label, package, present, version, installMethod, root, linkedFrom,
- *     rootReason, bytes, files, newestMtimeMs, nativeAddons[],
+ *     rootReason, bytes, files, newestMtimeMs, components[], nativeAddons[],
  *     nativeAddonCount, nativeAddonsTruncated, degraded[], complete }
  *
  * A tool that is genuinely not installed reports `measured(0)` bytes — zero is
@@ -222,6 +305,7 @@ function collectTool(desc, ctx) {
     root: realRoot,
     linkedFrom,
     rootReason: null,
+    components: [],
     nativeAddons: [],
     nativeAddonCount: 0,
     nativeAddonsTruncated: false,
@@ -263,10 +347,13 @@ function collectTool(desc, ctx) {
 
   const addons = [];
   let addonCount = 0;
+  const buckets = componentBuckets(desc.components, realRoot);
   const result = walk(realRoot, {
     ...limits,
     fsImpl,
-    onFile: ({ file, name, bytes, mtimeMs }) => {
+    onFile: (entry) => {
+      if (buckets) buckets.add(entry);
+      const { file, name, bytes, mtimeMs } = entry;
       if (!name.endsWith(NATIVE_EXT)) return;
       addonCount += 1;
       if (addons.length < maxNativeAddons) {
@@ -281,6 +368,9 @@ function collectTool(desc, ctx) {
     bytes,
     files,
     newestMtimeMs: result.newestMtimeMs,
+    components: !buckets ? []
+      : hasValue(bytes) ? buckets.finalize({ asOf, partial: bytes.partial })
+        : buckets.unmeasured(bytes.reason),
     nativeAddons: addons,
     nativeAddonCount: addonCount,
     nativeAddonsTruncated: addonCount > addons.length,
@@ -356,22 +446,98 @@ export function npxEnvNodes({
   return { root, presence: 'present', reason: null, envs };
 }
 
+/** Playwright's browser cache has three platform locations and they are ONE
+ *  cache, not three. Only two were listed, and the missing one was macOS's:
+ *  `playwright install` writes to ~/Library/Caches/ms-playwright there, so a mac
+ *  holding 1.86 GB of browser builds reported a measured zero — honest for the
+ *  XDG path that genuinely does not exist, wrong for the question the row asks.
+ *
+ *  All three are probed and they collapse into a single row, because two of them
+ *  can be real at once: a cache migrated between layouts leaves both, and on
+ *  macOS ~/.cache is sometimes a symlink into ~/Library/Caches, which is the same
+ *  directory reachable by two names. Candidates are realpath-collapsed first —
+ *  resolving a root the collector named itself, exactly as resolveRootPath does
+ *  for a linked tool root — so an aliased target is measured once, and the
+ *  survivors sum into one figure instead of near-identical rows that a total
+ *  would add together. When none exists the platform-canonical path is the one
+ *  named, so the measured zero says where it looked. */
+function playwrightCacheRoot({ env, platform, fsImpl }) {
+  const mac = path.join(home, 'Library', 'Caches', 'ms-playwright');
+  const xdg = path.join(home, '.cache', 'ms-playwright');
+  const win = path.join(env.LOCALAPPDATA || path.join(home, 'AppData', 'Local'), 'ms-playwright');
+  const candidates = platform === 'darwin' ? [mac, xdg, win]
+    : platform === 'win32' ? [win, xdg, mac]
+      : [xdg, mac, win];
+
+  const seen = new Set();
+  const found = [];
+  for (const candidate of candidates) {
+    let real;
+    // realpath throws for a path that is not there; absence is what makes a
+    // candidate not a location, so it is the probe as well as the resolution.
+    try { real = fsImpl.realpathSync(candidate); } catch { continue; }
+    if (seen.has(real)) continue;
+    seen.add(real);
+    found.push(real);
+  }
+  return {
+    id: 'playwright',
+    label: 'Playwright browsers',
+    path: found[0] ?? candidates[0],
+    paths: found.length ? found : [candidates[0]],
+  };
+}
+
 /** Install-adjacent shared caches. Deliberately their OWN rows rather than
  *  smeared into a tool's tree: npx envs and browser binaries belong to no
  *  single tool, and hiding them inside one would misattribute the bytes. The
  *  brain KB is absent here on purpose — it is a managed tool with its own row.
- *  Windows browser caches live under LOCALAPPDATA; both candidates are listed
- *  and the platform's absent one reads as a measured zero. */
-export function sharedCacheRoots({ env = process.env } = {}) {
-  const localAppData = env.LOCALAPPDATA || path.join(home, 'AppData', 'Local');
+ *
+ *  `paths` is the measured set and `path` is the one to print; they differ only
+ *  where a cache legitimately lives in more than one place (see
+ *  playwrightCacheRoot). */
+export function sharedCacheRoots({
+  env = process.env, platform = process.platform, fsImpl = fs,
+} = {}) {
+  const single = (id, label, dir) => ({ id, label, path: dir, paths: [dir] });
   return [
-    { id: 'npx-envs', label: 'npx cache envs', path: npxCacheDir() },
-    { id: 'claude-plugins', label: 'Claude Code plugins', path: path.join(claudeDir(), 'plugins') },
-    { id: 'codex-plugins', label: 'Codex plugin cache', path: codexPluginCacheDir() },
-    { id: 'playwright', label: 'Playwright browsers', path: path.join(home, '.cache', 'ms-playwright') },
-    { id: 'playwright-win', label: 'Playwright browsers', path: path.join(localAppData, 'ms-playwright') },
-    { id: 'puppeteer', label: 'Puppeteer browsers', path: path.join(home, '.cache', 'puppeteer') },
+    single('npx-envs', 'npx cache envs', npxCacheDir()),
+    single('claude-plugins', 'Claude Code plugins', path.join(claudeDir(), 'plugins')),
+    single('codex-plugins', 'Codex plugin cache', codexPluginCacheDir()),
+    playwrightCacheRoot({ env, platform, fsImpl }),
+    single('puppeteer', 'Puppeteer browsers', path.join(home, '.cache', 'puppeteer')),
   ];
+}
+
+/** One shared-cache row's figures. The single-location case is the exact
+ *  rootMeasurements result, untouched: an errno on a lone root must reach the UI
+ *  as that errno, and folding it through a sum would flatten it to "every input
+ *  unmeasured". Only a genuinely multi-location cache merges, and it merges
+ *  conservatively — present beats degraded beats absent, and an unreadable
+ *  location makes the sum partial rather than silently dropping its bytes. */
+function measureCacheRoot(cache, { walk, limits, fsImpl, asOf }) {
+  const locations = cache.paths?.length ? cache.paths : [cache.path];
+  const parts = locations.map((dir) => {
+    const result = walk(dir, { ...limits, fsImpl });
+    return { result, ...rootMeasurements(result, { asOf }) };
+  });
+  if (parts.length === 1) {
+    const [only] = parts;
+    return {
+      presence: only.presence, bytes: only.bytes, files: only.files,
+      newestMtimeMs: only.result.newestMtimeMs, complete: only.result.complete,
+    };
+  }
+  const presence = parts.some((p) => p.presence === 'present') ? 'present'
+    : parts.some((p) => p.presence === 'degraded') ? 'degraded' : 'absent';
+  const mtimes = parts.map((p) => p.result.newestMtimeMs).filter((m) => m !== null);
+  return {
+    presence,
+    bytes: sumMeasurements(parts.map((p) => p.bytes), { asOf }),
+    files: sumMeasurements(parts.map((p) => p.files), { asOf }),
+    newestMtimeMs: mtimes.length ? Math.max(...mtimes) : null,
+    complete: parts.every((p) => p.result.complete !== false),
+  };
 }
 
 /** The section's denominator: "the install is X GB" is meaningless without an
@@ -425,13 +591,8 @@ export function collectInstall({
   const sharedCaches = [];
   let npxEnvs = { root: npxCacheDir(), presence: 'unknown', reason: 'not collected', envs: [] };
   if (includeCaches) {
-    for (const cache of sharedCacheRoots()) {
-      const result = walk(cache.path, { ...limits, fsImpl });
-      const { presence, bytes, files } = rootMeasurements(result, { asOf });
-      sharedCaches.push({
-        ...cache, presence, bytes, files, newestMtimeMs: result.newestMtimeMs,
-        complete: result.complete,
-      });
+    for (const cache of sharedCacheRoots({ fsImpl })) {
+      sharedCaches.push({ ...cache, ...measureCacheRoot(cache, { walk, limits, fsImpl, asOf }) });
     }
     npxEnvs = npxEnvNodes({ walk, limits, asOf, fsImpl });
   }

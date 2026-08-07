@@ -485,18 +485,30 @@ ${LIVE_HTML}
       <header class="view-heading">
         <span class="view-eyebrow">SYSTEM</span>
         <h2>Summary</h2>
-        <p>The four families in one glance: install size, retained data, live resource use, and
-          deployed inventory &mdash; every deep-tier figure stamped with when it was measured.</p>
+        <p>Install size, retained data, live resource use and deployed inventory &mdash; each
+          deep-tier figure stamped with when it was measured.</p>
       </header>
       <div class="sy-grid">
         <div class="sy-kpis" id="sys-kpis"></div>
-        <div class="sy-card sy-4">
-          <div class="sy-head"><h3>Disk denominator</h3></div>
+        <div class="sy-liner" id="sys-kpis-note"></div>
+        <div class="sy-card sy-band">
           <div id="sys-gauge"></div>
         </div>
-        <div class="sy-card sy-8">
-          <div class="sy-head"><h3>Largest consumers &mdash; all categories</h3></div>
-          <div id="sys-consumers"></div>
+        <div class="sy-card">
+          <div class="sy-head">
+            <h3>Largest consumers</h3>
+            <!-- Two controls, both about WHAT IS COUNTED. The grouping chips
+                 re-shape the same measurement client-side; the project-trees
+                 chip changes the measurement itself, so it starts a rescan and
+                 says so in its tooltip. -->
+            <div class="sy-ctl" id="sys-cons-ctl">
+              <button class="chipf on" type="button" data-cons-mode="ranked">Ranked</button>
+              <button class="chipf" type="button" data-cons-mode="ecosystem">By ecosystem</button>
+              <button class="chipf" type="button" id="sys-cons-trees" aria-pressed="false">Project trees</button>
+            </div>
+          </div>
+          <div class="sy-liner" id="sys-consumers-note"></div>
+          <div class="sy-scroll" id="sys-consumers"></div>
         </div>
       </div>
     </section>
@@ -517,12 +529,19 @@ ${LIVE_HTML}
           <div class="sy-head"><h3>Per-host split by category</h3></div>
           <div id="sys-hostsplit"></div>
         </div>
-        <div class="sy-card sy-7">
+        <div class="sy-card">
           <div class="sy-head"><h3>Growth &mdash; bytes added per day</h3></div>
           <div id="sys-growth"></div>
         </div>
-        <div class="sy-card sy-5">
+        <!-- Advisory rows only, in two safety tiers that do NOT sum. The liner
+             carries that accounting; there is no delete control here and none
+             may be added (ADR-0025 §6).
+             Full width, not a 5-column column: each row carries a rationale
+             paragraph and a path, and in a narrow column nine of them tower over
+             whatever shares their row. -->
+        <div class="sy-card">
           <div class="sy-head"><h3>Reclaimable &mdash; advisory only</h3></div>
+          <div class="sy-liner" id="sys-reclaim-note"></div>
           <div id="sys-reclaim"></div>
         </div>
         <div class="sy-card">
@@ -584,6 +603,13 @@ ${LIVE_HTML}
         <div class="sy-card">
           <div class="sy-head"><h3>Project footprints</h3></div>
           <div id="sys-projects"></div>
+        </div>
+        <!-- The tail the language registry could not name, listed BY NAME so
+             "Other" on the bar above reads as a to-do list rather than a
+             rounding bucket. -->
+        <div class="sy-card">
+          <div class="sy-head"><h3>Unrecognized &mdash; what &ldquo;other&rdquo; is made of</h3></div>
+          <div id="sys-unrecognized"></div>
         </div>
       </div>
     </section>

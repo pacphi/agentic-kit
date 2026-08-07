@@ -3,6 +3,10 @@
 - **Status:** Implemented
 - **Date:** 2026-08-06
 - **Updated:** 2026-08-06 — accepted and implemented; the open points below are resolved decisions
+- **Updated:** 2026-08-07 — §7 replaced by an enumerated read surface (the collectors now read a
+  transcript head's `cwd` field and project manifests' dependency keys); §6 gains reclaimable
+  safety tiers; §8 and §9 added for the widened scan surface, the corrected brain/Playwright
+  figures, and project accounting
 - **Deciders:** agentic-kit maintainers
 - **Related:** [ADR-0005](0005-dashboard-in-page-routing-reveal.md),
   [ADR-0007](0007-maintainer-admin-local-telemetry.md),
@@ -53,7 +57,10 @@ Everything needed is already locally readable at trust boundaries the kit alread
 - the catalog surfaces Integration management already projects into (`.claude/agents`,
   `.claude/commands`, skills listings, OpenCode's converted agents, MCP registrations);
 - the project catalog machine-wide discovery already assembles
-  ([ADR-0024](0024-project-intelligence-telemetry.md)'s transcript-cwd source).
+  ([ADR-0024](0024-project-intelligence-telemetry.md)'s transcript-cwd source);
+- the third-party cache roots any developer machine accumulates — model weights, package caches,
+  toolchain installs — which are plain directories under `$HOME` and need naming, not access
+  (§8).
 
 The gap is a **domain and a UX**, not access.
 
@@ -72,9 +79,11 @@ deliberately **not** part of:
 - **Historical usage** — no tokens, no cost, no model identity here; a byte of transcript on disk
   is a storage fact, not a spend fact;
 - **Observability** — no session lifecycle, no evidence confidence, no transcript content; this
-  domain reads `stat` metadata and manifest names, never message bodies;
-- **Project intelligence** — no learning counters; the shared piece is only project *discovery*,
-  reused as a candidate-path source exactly as ADR-0024 reuses Observability's workspace store.
+  domain reads `stat` metadata, paths, and declared names, never message bodies (§7 enumerates
+  every read);
+- **Project intelligence** — no learning counters; the shared piece is project *discovery* as a
+  candidate-path source, on the same boundary ADR-0024 draws when it reuses Observability's
+  workspace store, though this domain runs its own discovery (§9).
 
 ### 2. A fourth primary area: System
 
@@ -94,19 +103,21 @@ left of Overview; the System area itself is unaffected):
 System secondary rail:
   [ Summary | Storage | Runtime | Catalog | Projects ]        [ as of 2h ago · ⟳ rescan ]
 
-Summary   KPI band: install size · data size · live processes (combined RSS) · projects ·
-          skills/agents/commands counts · machine free-space denominator.
-          "Largest consumers" strip (top-N across all categories). Freshness label.
+Summary   KPI band: install size · data size · live processes (combined RSS) · projects
+          ("N ever · M on disk") · skills/agents/commands counts · machine free-space
+          denominator. "Largest consumers" strip (top-20 roots, ranked or grouped by
+          ecosystem, project trees opt-in). Freshness label.
 Storage   Breakdown tree: category → host → project → session. Transcripts vs ledgers/logs vs
           learning stores vs kit caches. Trailing-30d growth sparkline per host. Top-N largest
-          sessions/files. Advisory reclaimable candidates.
+          sessions/files. Advisory reclaimable candidates in two safety tiers, never one total.
 Runtime   Live process table (host, pid, CPU%, RSS, uptime, bound project) + combined totals.
           Daemon census (count, age vs TTL, budget state). Child/MCP server process count.
 Catalog   Deduplicated skills / agents / commands / plugins / MCP servers, each with a per-host
           presence matrix (which hosts carry it).
 Projects  Table: project (name links to its git remote's web page when one exists — derived
-          from .git/config, "local only" otherwise), lines of code (by language), working-tree
-          bytes, .git bytes, node_modules bytes, last activity.
+          from .git/config, "local only" otherwise), lines of code (by language), detected
+          frameworks/SDKs/tools (presence only), working-tree bytes, .git bytes,
+          node_modules bytes, last activity. Rows are the on-disk subset; ever-seen is a count.
 ```
 
 The window/refresh control sits in the secondary-actions slot, the same pattern as Usage's
@@ -149,16 +160,22 @@ Metrics marked ✚ are additions beyond the requesting examples; the taxonomy is
 | Storage | ak's own caches: usage-index.json, observability-workspaces.json, footprint snapshot itself ✚ | known paths |
 | Storage | Top-N largest sessions / files ✚ | walk |
 | Storage | Trailing-30d growth per host (from mtime + size) ✚ | walk metadata |
-| Storage | Advisory reclaimable candidates (stale npx envs, old transcripts, orphaned worktrees) ✚ | walk + heuristics |
+| Storage | Advisory reclaimable candidates (stale npx envs, aged transcripts, superseded cache snapshots, regenerable package caches, redundant browser revisions, extra runtime versions, orphaned worktrees), each with a `safety` tier ✚ | walk + heuristics |
+| Storage | Ranked largest consumers across ~50 curated third-party cache roots, grouped by ecosystem, with containment/residual accounting ✚ | consumer registry + walk |
 | Catalog | Unique skills / agents / commands across hosts, per-host presence matrix | host catalog surfaces |
 | Catalog | Plugins and registered MCP servers ✚ | settings surfaces |
 | Catalog | Config surface: managed CLAUDE.md/AGENTS.md block count, settings file sizes ✚ | managed-blocks registry |
-| Projects | Project count; per project: LOC by language, working-tree bytes, `.git` bytes ✚, `node_modules` bytes ✚, last activity | project catalog + walk |
+| Projects | Projects **ever seen** across hosts and the **on-disk** subset ✚; per on-disk project: LOC by language, detected frameworks/SDKs/tools by presence ✚, the unrecognized extension/dependency tail ✚, working-tree bytes, `.git` bytes ✚, `node_modules` bytes ✚, last activity | own cross-host discovery + walk |
 | Projects | Git remote web link per project (origin URL → GitHub/GitLab/etc. page; "local only" when absent) ✚ | `.git/config` remote parse — the admin collector's `parseRepoSlug` shapes, reused |
 
 LOC counting is a zero-dependency extension-bucketed line count by the kit's own bounded walker
 (no `cloc`/`tokei` dependency), excluding `node_modules`, vendored trees, and binary extensions —
-stated as approximate, which is what the question needs.
+stated as approximate, which is what the question needs. **Lines belong to languages only.**
+Frameworks, SDKs and tools are detected by presence and carry no line count in the payload at
+all: React does not own lines, the `.tsx` files do, and putting both on one proportional bar
+would count the same bytes twice. What the registry cannot name is published as an
+**unrecognized tail** — extensions by name, dependency keys by name — which turns the usual
+silent "Other" slice into a to-do list a release can close.
 
 ### 5. Delivery
 
@@ -168,26 +185,157 @@ stated as approximate, which is what the question needs.
   other dashboard route.
 - `GET /api/system?refresh=deep` — starts or attaches to the single-flight deep scan. The
   dashboard server is deliberately GET-only; a refresh is a re-*measurement* of local state, not
-  a mutation of user data, so it stays within that contract.
+  a mutation of user data, so it stays within that contract. `&trees=1|0` sets whether that scan
+  walks project working trees; it is a **measurement** parameter, not a view filter, because
+  trees that were never walked cannot be un-hidden client-side.
 - `ak system [--deep] [--json]` — CLI parity sharing the same collector, following the
   usage-scorecard precedent of one collector behind both surfaces.
 
-### 6. Read-only; reclaimables are advisory
+### 6. Read-only; reclaimables are advisory, in two safety tiers
 
 v1 computes reclaimable-space *candidates* and renders them with their rationale; it deletes
 nothing. Cleanup remains CLI-owned where it already lives (`ak x daemon-gc`, npx cache tooling).
 A future `ak system clean` would be its own decision with its own safety contract.
 
-### 7. A deliberate path-visibility exception
+Advisory is not enough on its own, because "advisory" is a tone of voice and users act on
+numbers. Safety is therefore a **field**. Every candidate carries `safety`:
+
+- **`regenerable`** — the owning tool refetches it on demand: the npm content cache, the Homebrew
+  download cache, the brain's superseded `kb.bak-*` copies, stale npx envs.
+- **`review`** — plausible but not safe to *state* as removable: aged transcripts (a transcript is
+  the only copy of the session it records, and Historical usage is denominated in them), extra
+  runtime versions (mise holds eight Node entries on this machine and some are aliases a live
+  toolchain resolves through), a browser revision that may still be pinned by an installed
+  package.
+
+**The two tiers are totalled separately and never added.** `combined` is `null` by design: a
+single "you could free N" that mixed a regenerable cache with a possibly-live runtime tree would
+be the one number a reader would act on and the one number this domain cannot stand behind. Two
+supporting rules keep the per-tier totals honest — only rows whose `bytesMeaning` is `candidate`
+are summable (an `installed` figure is context on a review row, not a claim about removable
+space), and a tier whose rows describe overlapping paths reports its total as
+unknown-with-reason rather than counting the same bytes twice. The `review` block is rendered
+without a leading total at all, so it cannot read as available space.
+
+### 7. A deliberate path-visibility exception, and an enumerated read surface
 
 Observability's `publicLivePayload` reduces absolute paths to leaf names because its payloads
 describe *sessions* and a path is incidental provenance. In this domain the paths **are the
 subject matter** — a storage breakdown that hides where the bytes live answers nothing. The
 System payload therefore carries absolute paths, protected by the same token-gated loopback
-delivery as everything else. File *contents* are never read: `stat` metadata, directory names,
-catalog manifest names, and one narrow config read — `.git/config`'s remote URL, so a project
-can link to its hosted repository page. Rendering that link stays inside the zero-egress
-contract: the kit never fetches it; navigation is the user clicking a link in their own browser.
+delivery as everything else.
+
+The content boundary is stated as an **enumeration**, not as "file contents are never read" —
+that phrasing was true of the first collectors and became false the moment project discovery
+needed a real path and the Projects table needed a language breakdown. What is read, and what is
+taken from it:
+
+| Read | What is taken | What is never taken |
+|------|---------------|---------------------|
+| Directory entries, `lstat` | name, kind, size, mtime, blocks | anything inside a file |
+| `.git/config` | the origin remote URL | every other key |
+| `.git/worktrees/<name>/gitdir` | one path, bounded to 4 KB | — |
+| A transcript's head (≤256 KB, ≤40 parsed lines) | the session's `cwd` **field** | every message, prompt, tool call, tool result and model output |
+| OpenCode's session store (read-only) | the `directory` column | every other column and every message row |
+| A project's own manifests (≤3 deep, ≤64 files, ≤512 KB each) | dependency **keys** | values, scripts, anything executable — nothing is evaluated or resolved |
+| A project's own source files | the count of `\n` bytes | the text: each 64 KB chunk is counted and overwritten |
+
+Each of those yields a path, a name, or an integer. **No message body, prompt, tool call, tool
+result, model output, or manifest value enters this domain, in any tier, on any path.**
+
+Three of the rows are justifications rather than mere disclosures. The transcript `cwd` read is
+the *only* honest way to know which project a session belonged to — the alternative is decoding
+Claude's transcript-directory name, which is a lossy encoding that a naive decode gets wrong for
+85% of directories on a real corpus (§9). It is also the same read
+`native-transcript-discovery.mjs` already performs for Observability at the same trust boundary,
+and it is *discovery*, which supplies a candidate path and never a measurement. The manifest read
+is the same class of datum as `.git/config`'s remote: a bounded read of a declaration file, for
+names. And the source-file read is what "count lines of code" always meant — §4 sanctioned an
+extension-bucketed line count from the first draft, and a line count is a byte scan; what is new
+here is saying so.
+
+Rendering the git-remote link stays inside the zero-egress contract: the kit never fetches it;
+navigation is the user clicking a link in their own browser.
+
+[Machine footprint § The read surface](../ddd/machine-footprint.md#the-read-surface) holds the
+normative list; a read not on it is a defect, and adding one amends both documents.
+
+### 8. The scan surface is wider than the kit's own trees, and three figures were wrong
+
+The first implementation answered "where are *the kit's* bytes" and presented it as "what is
+eating this disk". Those are different questions, and the gap was not a rounding error. Measured
+on the authoring machine, the top consumers were **entirely invisible** to the panel:
+`~/.ollama` 141.31 GB, `~/.lmstudio` 48.78 GB, `~/.cache/huggingface` 35.92 GB, `~/.npm/_cacache`
+22.26 GB, mise installs 16.30 GB, Docker 15.47 GB, rustup 14.62 GB, the pnpm store 13.40 GB, the
+brain 13.18 GB. The panel reported the npx cache at 6.64 GB as the machine's number one; it is
+number eleven.
+
+The Summary strip's ranking is therefore its own collector over a curated registry of ~50
+third-party cache roots grouped by ecosystem, not a client-side sort over whatever other sections
+happened to walk. A ranking whose breadth is an accident of what other sections needed is a
+ranking that reads as an answer and is not one. Because these roots nest — `~/.npm` ⊃ `_cacache`
+and `_npx`; `~/.cache` ⊃ huggingface, ruvnet-brain, puppeteer, pnpm, uv; `~/.local/share` ⊃ mise,
+pnpm, claude, opencode; mise installs ⊃ node ⊃ the npm global root the Install section already
+walks — the accounting rules are structural rather than editorial: **containment** (bytes counted
+once, at the outermost row; enclosed rows are breakdowns, excluded from the ranking and the group
+totals), **residuals** (a synthesized "everything else" row so a breakdown always sums to its
+parent), and **project trees opt-in** (one repository here is 175 GB and would flatten the chart,
+so `includeProjectTrees` defaults off and the exclusion is stated in the payload, never silent).
+Absent roots are reported as absent, not ranked at zero; Docker's sparse VM image is measured in
+allocated blocks because its apparent size (~4 TB) is larger than the disk.
+
+Two individual figures were wrong at the source, and both changed a headline:
+
+- **The brain was measured at its KB, not at its install root.** `kbDir()` alone under-reported
+  it by 85%: 1.9 GB of active KB inside a 13.18 GB cache root. The remainder is chiefly five
+  dated `kb.bak-*` copies the installer leaves behind on every update — ~11 GB that nothing
+  reads, and the single largest reclaimable on this machine — plus ~234 MB of embedding models.
+  The root is now measured whole *and* broken into components with a remainder row, because a
+  user watching a figure move from 1.9 GB to 13.18 GB is owed the reason. The upward resolution
+  is conservative: both `…/ruvnet-brain/kb` segments must match, so a relocated
+  `RUVNET_BRAIN_KB` cannot bill a shared volume to the brain.
+- **Playwright's macOS location was not probed.** `playwright install` writes to
+  `~/Library/Caches/ms-playwright` on macOS; only the XDG and Windows paths were checked, so a
+  mac holding 1.86 GB of browser builds reported a *measured zero* — honest about the XDG path
+  that genuinely does not exist, wrong about the question the row asks. All three locations are
+  now probed, realpath-collapsed (two can be real at once), and summed into one row.
+
+The consumer walk carries raised caps of its own (depth 24, 2,000,000 entries) because the
+walker's defaults were sized for install trees: rustup exhausted the default entry cap at 9.4 of
+its 14.62 GB, and the pnpm store, LM Studio and `~/.claude` all bottomed out at depth 16. A
+ranking whose deepest trees are systematically floors does not merely under-report them, it
+**mis-orders** the answer. The caps are raised, not removed — a root that exhausts even these
+still reports `≥`.
+
+### 9. Projects are counted twice, on purpose, and never given a fabricated path
+
+The Projects section publishes **`everSeen`** (every distinct project any host ever recorded a
+session in, deletions included — the deletions are the point) and **`onDisk`** (the subset that
+still resolves to a directory, the only projects a byte or line measurement can be taken of).
+Here: 50 ever seen, 25 on disk, 21 of those git repositories. Only on-disk projects become table
+rows; the vanished ones survive in `everSeen` rather than as unmeasurable rows.
+
+Discovery is this domain's own (`project-sources.mjs`), not `discoverRuvfloProjects()`. That
+function answers "which projects carry ruflo learning state" by requiring `.claude-flow/neural/`
+and reading only the 150 newest transcripts per host; both narrowings are right there and wrong
+here — on this machine they collapse ~50 projects to 5. Sightings are de-duplicated by
+**resolved real path**, so one project touched by Claude, Codex and OpenCode is one project and a
+symlinked route is not a second one; a deleted path that cannot be resolved falls back to
+`path.resolve` so it is still counted.
+
+**Claude's transcript-directory encoding is lossy and is not safely decodable.**
+`~/.claude/projects/<encoded>/` maps `/`, `.` and a literal `-` all to `-`, so
+`-Users-me-ai-agentic-kit` reads equally as `/Users/me/ai/agentic/kit` and
+`/Users/me/ai/agentic-kit`. Measured on this corpus, naive `-`→`/` substitution resolves **8 of
+52** directories — wrong for 85% of them. The path therefore comes from the transcript's declared
+`cwd` (2,538 of 2,585 Claude transcripts here, all 175 Codex rollouts, and OpenCode's per-session
+`directory` column). The encoded name is consulted only as a fallback for a directory where no
+transcript declares a `cwd`, and even then only through a decoder that walks candidate segments
+against the real filesystem and returns a path only when the filesystem confirms it — which can
+name just 18 of the 52 on its own. When neither route resolves, the group is reported as
+**`unresolved`**, contributes no row, and makes `everSeen` an explicit lower bound
+(`complete: false`). It is never given a guessed path. Every row carries `origins` naming which
+route produced it, so a fallback-derived path can never be read as a declared one.
 
 ## Consequences
 
@@ -197,6 +345,10 @@ contract: the kit never fetches it; navigation is the user clicking a link in th
   already has trust-boundary access to — no new privileges, no egress.
 - Sprawl becomes visible and actionable: duplicate native builds, giant sessions, stale caches,
   and per-project bloat all surface with their locations.
+- The consumer ranking answers the question a user actually asks — "what is eating this disk" —
+  rather than the narrower one the kit could answer without leaving its own trees. On the
+  authoring machine that moved nine roots totalling >320 GB from invisible to ranked, and
+  demoted the previously-reported number one to eleventh (§8).
 - The four-family dashboard (health / spend / activity / footprint) completes a coherent mental
   model, each family in its own context with clean boundaries.
 
@@ -205,7 +357,11 @@ contract: the kit never fetches it; navigation is the user clicking a link in th
 - A fourth primary area is a permanent navigation-surface expansion and an explicit amendment of
   ADR-0005's three-area layout.
 - Deep scans on large corpora (multi-GB transcript trees, many projects) take real time and I/O;
-  the tiered model contains but does not eliminate that cost.
+  the tiered model contains but does not eliminate that cost, and widening the scan surface to
+  ~50 third-party cache roots (§8) widened that cost with it — tens of seconds on this machine.
+- A curated registry of third-party cache locations is a maintenance surface: a tool that moves
+  its cache goes unmeasured until the registry learns the new path. It fails visibly (the row
+  reads absent with the path it looked at) rather than silently, which is the trade taken.
 - A persisted snapshot is a new on-disk artifact with its own staleness to manage honestly.
 
 ### Risks and mitigations
@@ -216,8 +372,10 @@ contract: the kit never fetches it; navigation is the user clicking a link in th
 | Stale snapshot presented as current | Every deep-tier figure carries `asOf`; the freshness label and rescan control are part of the Summary view's contract, not an afterthought |
 | LOC figures treated as precise | Labeled approximate, extension-bucketed; the DDD doc forbids presenting them as authoritative |
 | Walker follows a symlink cycle or escapes a root | Symlinks never followed; depth and entry caps; one bad subtree degrades to unknown for that node only |
-| Scope creep into cleanup/mutation | v1 invariant: this context mutates nothing; reclaimables are advisory rows with rationale |
-| Boundary erosion into Usage/Observability | DDD invariants forbid tokens/cost, session evidence, and content reads; cross-links replace duplication |
+| Scope creep into cleanup/mutation | v1 invariant: this context mutates nothing; reclaimables are advisory rows with rationale and a safety tier, and the tiers are never summed into one actionable number |
+| Boundary erosion into Usage/Observability | DDD invariants forbid tokens/cost and session evidence; the read surface is enumerated (§7) and admits paths, names and counts only, never message content; cross-links replace duplication |
+| A ranking that reads as an answer and is not one | Breadth is a curated registry, not an accident of what other sections walked; containment/residual accounting so nested roots cannot double-count; raised walk caps because a floored deep tree mis-*orders* the list; excluded categories stated in the payload |
+| A size figure measured at the wrong root | Both known cases (brain KB vs cache root, Playwright's macOS location) are recorded in §8 with what they cost; new roots carry a component breakdown with a remainder row so a corrected figure arrives with its explanation |
 
 ## Resolved decisions
 
@@ -277,7 +435,11 @@ All complete:
 - [Managed tools](../MANAGED-TOOLS.md)
 - `src/lib/footprint/` — the collectors: `walk.mjs` (the bounded walker and the `Measurement`
   vocabulary), `install.mjs`, `storage.mjs`, `runtime.mjs`, `catalog.mjs`, `projects.mjs`,
-  `snapshot.mjs` (the persisted deep-tier snapshot), `index.mjs` (the two-tier collector)
+  `consumers.mjs` (the ranked largest-consumers view and its containment/residual accounting),
+  `project-sources.mjs` (cross-host project discovery: ever-seen vs on-disk),
+  `stack-registry.mjs` + `stack-detect.mjs` (languages carry lines; frameworks/SDKs/tools are
+  presence-only; the unrecognized tail), `snapshot.mjs` (the persisted deep-tier snapshot),
+  `index.mjs` (the two-tier collector)
 - `src/commands/system.mjs` (the CLI twin)
 - `src/lib/live/win-process-survey.ps1` (the Windows stand-in for `ps` + `lsof`)
 - `src/lib/live/process-sessions.mjs` (the runtime survey this reuses)

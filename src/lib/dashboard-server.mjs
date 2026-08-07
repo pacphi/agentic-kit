@@ -36,7 +36,8 @@
 //                      ~60s) merged with the last persisted deep snapshot,
 //                      carried forward with ITS asOf. `?refresh=deep` starts
 //                      or attaches to the single-flight deep scan and returns
-//                      immediately with progress state.
+//                      immediately with progress state; `&trees=1|0` sets
+//                      whether that scan walks project working trees.
 //
 // The status rows are gathered by SHELLING OUT to the installed CLI
 // (`node bin/agentic-kit.mjs status --json`) so we never duplicate status.mjs's
@@ -1376,7 +1377,15 @@ export function startDashboard({
           // it never rejects — the catch guards an injected collector that does
           // not honour that contract, so a bad one cannot take the process down
           // with an unhandled rejection.
-          Promise.resolve(collector.refreshDeep()).catch(() => {});
+          // `trees` is a MEASUREMENT parameter, not a view filter: project
+          // working trees are only walked when it is set, and one large
+          // repository outweighs every shared cache combined — so the ranking
+          // has to be re-measured, not re-sorted. Absent means "keep whatever
+          // the collector already defaults to".
+          const trees = query.get('trees');
+          Promise.resolve(collector.refreshDeep(
+            trees == null ? undefined : { includeProjectTrees: trees === '1' },
+          )).catch(() => {});
           // The payload predates the start by microseconds; re-stamp the live
           // scan block so this response reads "running", not "idle".
           if (typeof collector.scanState === 'function') payload.scan = collector.scanState();

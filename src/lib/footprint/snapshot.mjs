@@ -12,10 +12,11 @@
 //     this module, because a failed read carries `sections: null` — there is
 //     no numeric field to misread.
 //   * The runtime census is never persisted (invariant 5). It is structurally
-//     impossible to write one here: `writeSnapshot` serializes only the four
-//     section keys in SNAPSHOT_SECTIONS, so a caller that hands over a census
-//     by mistake silently drops it rather than replaying a stale process table
-//     as liveness.
+//     impossible to write one here: `writeSnapshot` serializes only the section
+//     keys in SNAPSHOT_SECTIONS, so a caller that hands over a census by
+//     mistake silently drops it rather than replaying a stale process table as
+//     liveness. That allow-list is the enforcement — adding a deep section
+//     means adding it below, and `runtime` may never be one of them.
 import fs from 'node:fs';
 import path from 'node:path';
 import { configDir } from '../paths.mjs';
@@ -28,9 +29,13 @@ import { CARRIED_FORWARD, MEASURED } from './walk.mjs';
  *  replaces it. */
 export const SNAPSHOT_SCHEMA_VERSION = 1;
 
-/** The four deep-tier sections, in render order. This list is also the write
- *  filter — see the header note on the runtime census. */
-export const SNAPSHOT_SECTIONS = Object.freeze(['install', 'storage', 'catalog', 'projects']);
+/** The deep-tier sections, in collection order. This list is also the write
+ *  filter — see the header note on the runtime census. A section absent from a
+ *  previously written snapshot reads as never-measured rather than empty, so
+ *  extending this list does not invalidate snapshots taken before it. */
+export const SNAPSHOT_SECTIONS = Object.freeze([
+  'install', 'storage', 'catalog', 'projects', 'consumers',
+]);
 
 /** How old a deep scan gets before the UI nudges for a rescan. Deliberately a
  *  nudge and not a trigger: ADR-0025's freshness policy is manual-rescan-only,
@@ -166,7 +171,8 @@ export function summarizeCompleteness(sections = {}) {
  * returns an outcome instead of throwing, and the caller keeps the in-memory
  * result it just measured.
  *
- * @param {object} sections the four deep sections; anything else is dropped
+ * @param {object} sections the deep sections named by SNAPSHOT_SECTIONS;
+ *   anything else — the runtime census above all — is dropped
  * @param {{ file?: string, fsImpl?: typeof fs, now?: number, asOf?: number }} [options]
  * @returns {{ ok: boolean, file: string, asOf: number, error: string|null }}
  */

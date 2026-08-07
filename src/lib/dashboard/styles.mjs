@@ -406,6 +406,7 @@ body.gated .band,body.gated .tabbar,body.gated main{display:none}
 }
 .chipf.on{border-color:var(--accent); color:var(--accent); background:var(--accent-soft)}
 .chipf:focus-visible{outline:2px solid var(--accent); outline-offset:1px}
+.chipf:disabled{opacity:.5; cursor:not-allowed}
 .view[hidden]{display:none}
 
 /* hero KPIs */
@@ -873,11 +874,14 @@ a.chipf{text-decoration:none; display:inline-flex; align-items:center}
    sy-prefixed for the same collision reason. A 12-column grid so each card can
    declare the width its chart form actually needs; charts are inline SVG built
    from the payload, never an image and never a remote asset. */
-.sy-grid{display:grid; grid-template-columns:repeat(12,1fr); gap:14px}
+.sy-grid{display:grid; grid-template-columns:repeat(12,1fr); gap:10px}
+/* Card chrome is deliberately tight. A System view is a dense band of facts —
+   padding and inter-row gap that would flatter one hero chart is, across five
+   stacked cards, most of a screen spent on framing rather than measurement. */
 .sy-card{
-  grid-column:span 12; display:flex; flex-direction:column; gap:10px; min-width:0;
+  grid-column:span 12; display:flex; flex-direction:column; gap:8px; min-width:0;
   background:var(--panel); border:1px solid var(--line); border-radius:var(--r);
-  padding:15px 17px; box-shadow:var(--shadow);
+  padding:13px 15px; box-shadow:var(--shadow);
 }
 .sy-3{grid-column:span 3}.sy-4{grid-column:span 4}.sy-5{grid-column:span 5}
 .sy-6{grid-column:span 6}.sy-7{grid-column:span 7}.sy-8{grid-column:span 8}
@@ -896,18 +900,78 @@ a.chipf{text-decoration:none; display:inline-flex; align-items:center}
 .sy-asof{font-family:var(--mono); font-size:11.5px}
 .sy-asof[data-stale="1"]{color:var(--warn)}
 .sy-scan{color:var(--accent)}
-/* KPI band + odometer readout */
-.sy-kpis{grid-column:span 12; display:grid; gap:14px; grid-template-columns:repeat(auto-fit,minmax(178px,1fr))}
-.sy-kpi{background:var(--panel); border:1px solid var(--line); border-radius:var(--r); padding:14px 16px; box-shadow:var(--shadow)}
-.sy-kpi .lbl{font-size:10.5px; font-weight:650; letter-spacing:.09em; text-transform:uppercase; color:var(--ink-dim)}
-.sy-kpi .val{display:flex; align-items:baseline; gap:5px; margin-top:6px; min-height:34px}
-.sy-kpi .unit{font-size:13px; color:var(--ink-2)}
-.sy-kpi .sub{font-size:11.5px; color:var(--ink-2); margin-top:4px}
-.od{display:inline-flex; overflow:hidden; height:34px; font-family:var(--mono); font-variant-numeric:tabular-nums}
-.od .dcol{display:inline-block; height:34px; overflow:hidden}
+/* KPI band + odometer readout. Dimensions are Usage's .kpi rhythm EXACTLY —
+   15px 16px of padding and a 27px value — not a second scale: the two bands are
+   one click apart, and a System tile that towers over a Scorecard tile reads as
+   a different, more important kind of fact than it is. OD_H in client.mjs must
+   equal the odometer height below — the digit stack is translated by whole rows,
+   so a mismatch shows two half digits. */
+.sy-kpis{grid-column:span 12; display:grid; gap:12px; grid-template-columns:repeat(auto-fit,minmax(168px,1fr))}
+.sy-kpi{background:var(--panel); border:1px solid var(--line); border-radius:var(--r); padding:15px 16px; box-shadow:var(--shadow)}
+.sy-kpi .lbl{font-size:10.5px; font-weight:600; letter-spacing:.09em; text-transform:uppercase; color:var(--ink-dim)}
+.sy-kpi .val{display:flex; align-items:baseline; gap:5px; margin-top:5px; min-height:30px; flex-wrap:wrap}
+.sy-kpi .unit{font-size:12px; color:var(--ink-2)}
+.sy-kpi .sub{font-size:11.5px; color:var(--ink-2); margin-top:5px}
+.od{display:inline-flex; overflow:hidden; height:30px; font-family:var(--mono); font-variant-numeric:tabular-nums}
+.od .dcol{display:inline-block; height:30px; overflow:hidden}
 .od .dstack{display:flex; flex-direction:column; transition:transform 1.1s cubic-bezier(.2,.7,.2,1)}
-.od .dstack span{height:34px; line-height:34px; font-size:27px; font-weight:700; text-align:center; min-width:.62em}
-.od .lit{font-size:27px; font-weight:700; line-height:34px}
+.od .dstack span{height:30px; line-height:30px; font-size:27px; font-weight:700; letter-spacing:-.028em; text-align:center; min-width:.62em}
+.od .lit{font-size:27px; font-weight:700; line-height:30px; letter-spacing:-.028em}
+/* Liner note: what a panel counted and how, in the muted voice the genuine
+   caveats already use. It qualifies the DATA — a figure whose accounting
+   changed cannot be read correctly without it, which is why it renders next to
+   the number rather than in a doc. */
+.sy-liner{font-size:11.5px; color:var(--ink-dim); line-height:1.45}
+.sy-liner b{color:var(--ink-2); font-weight:600}
+.sy-grid > .sy-liner{grid-column:span 12; margin-top:-5px}
+/* Disk denominator as a horizontal meter. The radial spent a full card's height
+   stating one ratio; the band states the same ratio plus its parts in one line.
+   It also drops the card chrome entirely — a panel, a border and a shadow around
+   a single line of text is 20px of container spent framing 18px of content, and
+   the Summary is meant to read as a dense band of facts rather than a stack of
+   tall cards. It keeps its own hairline rules so it still reads as a strip. */
+.sy-band{
+  background:none; border:0; border-radius:0; box-shadow:none;
+  border-top:1px solid var(--line); border-bottom:1px solid var(--line);
+  padding:5px 2px; gap:0;
+}
+.sy-diskband{display:flex; align-items:center; gap:13px; flex-wrap:wrap}
+.sy-diskband .dk-lbl{
+  flex:none; font-size:10.5px; font-weight:600; letter-spacing:.09em;
+  text-transform:uppercase; color:var(--ink-dim);
+}
+.sy-diskband .dk-meter{
+  flex:1 1 200px; min-width:140px; height:12px; border-radius:100px;
+  background:var(--panel-2); overflow:hidden; display:flex;
+}
+.sy-diskband .dk-meter i{height:100%; min-width:2px}
+/* Wraps to its own line rather than forcing the band wider than the viewport:
+   a facts string that cannot shrink is how a panel makes the whole page scroll
+   sideways on a phone. */
+.sy-diskband .dk-facts{flex:1 1 auto; min-width:0; font-size:12px; color:var(--ink-2)}
+.sy-diskband .dk-facts b{color:var(--ink); font-family:var(--mono); font-weight:700}
+/* Consumers: twenty ranked rows in a fixed-height scroller, about five visible.
+   The scroll belongs to this container — the page body must never scroll
+   sideways or grow a screen-tall list to state a ranking. */
+.sy-ctl{display:flex; gap:6px; flex-wrap:wrap}
+.sy-scroll{
+  max-height:110px; overflow-y:auto; overflow-x:hidden;
+  overscroll-behavior:contain; padding-right:4px;
+}
+.sy-crow{
+  display:grid; grid-template-columns:minmax(110px,200px) 1fr 96px; gap:10px;
+  align-items:center; font-size:12.5px; padding:3px 0;
+}
+.sy-crow .n{color:var(--ink-2); overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+.sy-crow .g{color:var(--ink-dim); font-size:10.5px; margin-left:6px}
+.sy-crow .sy-track{height:11px}
+.sy-crow .v{text-align:right; font-family:var(--mono); font-size:11.5px; color:var(--ink)}
+.sy-cnote{font-size:11px; color:var(--ink-dim); line-height:1.4; margin:0 0 5px 96px}
+@media(max-width:600px){
+  .sy-crow{grid-template-columns:1fr 84px}
+  .sy-crow .n{grid-column:1/-1}
+  .sy-cnote{margin-left:0}
+}
 /* Horizontal magnitude bars (ranked + stacked) */
 .sy-bars{display:flex; flex-direction:column; gap:8px}
 .sy-bar{display:grid; grid-template-columns:minmax(96px,150px) 1fr 78px; gap:10px; align-items:center; font-size:12.5px}
@@ -930,6 +994,31 @@ a.chipf{text-decoration:none; display:inline-flex; align-items:center}
 .sy-table a{color:var(--accent); text-decoration:none; font-weight:600}
 .sy-table a:hover,.sy-table a:focus-visible{text-decoration:underline}
 .sy-sub{font-family:var(--mono); font-size:10.5px; color:var(--ink-dim); margin-top:2px}
+/* Stack chips: frameworks, SDKs and tools are PRESENCE facts, so they get a
+   shape with no length to misread as a quantity. The kinds differ by weight of
+   outline, not by hue — three more hues here would compete with the four-step
+   data series next to them for no gain in meaning. */
+.sy-chips{display:flex; flex-wrap:wrap; gap:4px; margin-top:5px}
+.sy-chip{
+  font-size:10.5px; line-height:1.5; border-radius:100px; padding:1px 7px;
+  border:1px solid var(--line-2); color:var(--ink-2); background:var(--panel-2);
+  white-space:nowrap; cursor:help;
+}
+/* A weight ladder, not three hues: framework reads strongest, tool faintest.
+   Accent is this page's ACTION colour — six accent chips per project row would
+   read as six buttons, and they would out-shout the data bars beside them. */
+.sy-chip[data-kind="framework"]{border-color:var(--line-2); color:var(--ink); background:var(--panel-2)}
+.sy-chip[data-kind="sdk"]{border-color:var(--line-2); color:var(--ink-2); background:transparent}
+.sy-chip[data-kind="tool"]{border-style:dashed; background:transparent; color:var(--ink-dim)}
+/* The unrecognized tail: a named to-do list, so each chip carries its count. */
+.sy-chip[data-kind="ext"]{font-family:var(--mono); background:transparent}
+.sy-chip[data-kind="dep"]{font-family:var(--mono); background:transparent; border-style:dashed}
+.sy-chip b{color:var(--ink-dim); font-weight:600; margin-left:5px}
+.sy-chip.more{border-style:dashed; color:var(--ink-dim)}
+.sy-subhead{font-size:10.5px; font-weight:600; letter-spacing:.06em; text-transform:uppercase; color:var(--ink-dim); margin-top:10px}
+/* Language names under the stacked bar — identity in text, magnitude in the bar. */
+.sy-langs{font-size:10.5px; color:var(--ink-dim); margin-top:3px; max-width:210px;
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap; cursor:help}
 .sy-inbar{height:9px; border-radius:3px; background:var(--panel-2); min-width:80px; display:flex; gap:2px; overflow:hidden}
 .sy-rss{display:flex; gap:8px; align-items:center}
 .sy-dot{display:inline-block; width:8px; height:8px; border-radius:50%; margin-right:6px}
@@ -940,12 +1029,40 @@ a.chipf{text-decoration:none; display:inline-flex; align-items:center}
 .sy-tile{flex:1; min-width:92px; background:var(--panel-2); border-radius:var(--r-sm); padding:10px 12px}
 .sy-tile .t-v{font-family:var(--mono); font-size:20px; font-weight:700; color:var(--ink)}
 .sy-tile .t-l{font-size:11px; color:var(--ink-2); margin-top:2px}
+/* Reclaimables — two safety tiers, deliberately NOT one list.
+   'regenerable' is space the owning tool rebuilds by itself, so its rows lead
+   with the byte count in a pill. 'review' is a pointer at something to look at:
+   its rows lead with the WORD, and their bytes render as muted context text.
+   That difference is the whole point — the pill is the visual grammar of "this
+   much is yours to take back", and putting it on a row that may be in use would
+   claim something the measurement does not support. Neither tier has, or may
+   ever have, a delete affordance (ADR-0025 §6). */
+/* Rows flow into columns at width rather than stacking: a rationale paragraph
+   set across a full 1100px card is an unreadable measure, and nine of them
+   stacked is a screen of scrolling to state an advisory. */
+.sy-tier{margin-bottom:14px}
+.sy-tier:last-child{margin-bottom:0}
+.sy-tier-rows{display:grid; gap:0 22px; grid-template-columns:repeat(auto-fill,minmax(330px,1fr))}
+.sy-tier-head{display:flex; align-items:baseline; gap:8px; flex-wrap:wrap; font-size:12.5px; color:var(--ink-2)}
+.sy-tier-head b{color:var(--ink); font-family:var(--mono); font-weight:700}
+.sy-tier-head .g{color:var(--ink-dim); font-size:11px}
+.tier-pill{
+  font-size:10px; font-weight:700; letter-spacing:.06em; text-transform:uppercase;
+  border-radius:100px; padding:2px 8px;
+}
+.tier-pill[data-safety="regenerable"]{color:var(--ok); background:var(--ok-soft)}
+.tier-pill[data-safety="review"]{color:var(--ink-2); background:var(--panel-2); border:1px solid var(--line-2)}
+.sy-tier-note{font-size:11.5px; color:var(--ink-dim); line-height:1.45; margin:3px 0 4px}
 .sy-adv{display:flex; align-items:flex-start; gap:10px; padding:8px 0; border-bottom:1px solid var(--line); font-size:12.5px}
 .sy-adv:last-child{border-bottom:0}
-.sy-adv .tag{
-  flex:none; font-size:10.5px; font-weight:700; border-radius:100px; padding:2px 9px;
-  color:var(--warn); background:color-mix(in srgb,var(--warn) 14%,transparent);
+.sy-adv .tag{flex:none; font-size:10.5px; font-weight:700; border-radius:100px; padding:2px 9px}
+.sy-adv .tag.regen{color:var(--ok); background:var(--ok-soft); font-family:var(--mono)}
+.sy-adv .tag.review{
+  color:var(--ink-2); background:transparent; border:1px dashed var(--line-2);
+  text-transform:uppercase; letter-spacing:.06em; font-size:9.5px;
 }
+/* A review row's size, in the muted voice of a footnote rather than a figure. */
+.sy-meas{font-size:11.5px; color:var(--ink-dim); font-family:var(--mono)}
 .sy-adv .why{color:var(--ink-2)}
 .sy-path{font-family:var(--mono); font-size:11px; color:var(--ink-dim); word-break:break-all; margin-top:2px}
 .sy-matrix{display:grid; gap:4px 6px; font-size:12px; align-items:center}

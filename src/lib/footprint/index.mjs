@@ -8,7 +8,8 @@
 //          TTL-cached ~60s in memory following buildProjectSnapshotCache's
 //          pattern in dashboard-server.mjs — machine-wide data, one entry per
 //          collector instance, no per-caller key.
-//   DEEP   the full storage walk + per-project LOC + cross-host catalog dedup.
+//   DEEP   the full storage walk + per-project LOC and stack detection +
+//          cross-host catalog dedup + the ranked largest-consumers view.
 //          Explicit, user-triggered, SINGLE-FLIGHT: a second request attaches
 //          to the running scan instead of racing it (invariant 7). usage-index
 //          keys its coalescing map by the options that change the RESULT; a
@@ -32,7 +33,6 @@ import {
   claudeDir, claudeSettingsPath, claudeUserMcpPath, codexConfigPath, codexDir, configDir, home,
 } from '../paths.mjs';
 import { loadKitConfig } from '../config.mjs';
-import { discoverRuvfloProjects } from '../dashboard/project-discovery.mjs';
 import { defaultOpencodeDbPath } from '../usage-opencode.mjs';
 import { UNKNOWN, measured, statNode, unknown } from './walk.mjs';
 import { collectRuntimeCensus } from './runtime.mjs';
@@ -40,6 +40,8 @@ import { collectInstall } from './install.mjs';
 import { collectStorage } from './storage.mjs';
 import { collectCatalog } from './catalog.mjs';
 import { collectProjects } from './projects.mjs';
+import { collectConsumers } from './consumers.mjs';
+import { discoverProjectSources } from './project-sources.mjs';
 import {
   SNAPSHOT_SECTIONS, SNAPSHOT_STALE_AFTER_MS, carryForward, readSnapshot, snapshotFreshness,
   snapshotPath, summarizeCompleteness, writeSnapshot,
@@ -52,8 +54,15 @@ export const CHEAP_TTL_MS = 60_000;
 /** Deep-scan progress phases, in order. `idle` is the state before any scan
  *  has run in this process; `done`/`failed` are terminal. */
 export const SCAN_PHASES = Object.freeze([
-  'idle', 'install', 'storage', 'catalog', 'projects', 'persist', 'done', 'failed',
+  'idle', 'install', 'storage', 'catalog', 'projects', 'consumers', 'persist', 'done', 'failed',
 ]);
+
+/** Whether the ranked-consumers view walks project working trees. Off by
+ *  default and deliberately: one repository on this machine is 175 GB, which is
+ *  larger than every shared cache combined, so a ranking containing it is a
+ *  ranking of that one repository. The exclusion is stated in the payload
+ *  (`consumers.projectTrees.reason`), never silent. */
+export const INCLUDE_PROJECT_TREES_DEFAULT = false;
 
 /** Individually-known files the cheap tier can stat without a walk. Each is one
  *  lstat, so the whole list is affordable on every request — which is the
@@ -142,6 +151,37 @@ function freshScanState() {
     durationMs: null,
     error: null,
     asOf: null,
+    // What the RUNNING scan is measuring, not what the next one would: `null`
+    // until a scan starts, so "no scan has run" cannot read as "trees off".
+    includeProjectTrees: null,
+  };
+}
+
+/**
+ * Read a discovery result without deciding what it means for the caller.
+ *
+ * Two shapes are legitimate. `discoverProjectSources()` returns a payload whose
+ * `projects` include projects that have since been DELETED — that is the point
+ * of `everSeen` — so only the surviving subset can be measured, and the payload
+ * itself is forwarded so the Projects section can publish everSeen/onDisk/
+ * gitRepos/method rather than recomputing them from the rows it kept. A bare
+ * array is an explicit catalog and is passed straight through as one.
+ *
+ * @param {any} result a discoverProjectSources() payload, an explicit catalog
+ *   array, or whatever an injected discovery returned — including nothing
+ * @returns {{ sources: object|null, catalog: Array|null, onDisk: Array }}
+ */
+function readDiscovery(result) {
+  if (Array.isArray(result)) {
+    return { sources: null, catalog: result, onDisk: result.filter((p) => p?.path) };
+  }
+  if (!result || typeof result !== 'object' || !Array.isArray(result.projects)) {
+    return { sources: null, catalog: null, onDisk: [] };
+  }
+  return {
+    sources: result,
+    catalog: null,
+    onDisk: result.projects.filter((project) => project?.path && project.exists !== false),
   };
 }
 
@@ -154,11 +194,18 @@ function freshScanState() {
  * without touching the real machine — the same discipline the individual
  * collectors already follow.
  *
+ * `discoverProjects` supplies candidate paths only (invariant 9). It returns a
+ * discoverProjectSources() payload — every project ANY host has ever recorded a
+ * session in, which is what the Projects KPI means; an array is still accepted
+ * and taken as an explicit catalog, the shape the older ruflo-state discovery
+ * returned.
+ *
  * @param {{
  *   now?: () => number, ttlMs?: number, staleAfterMs?: number,
  *   snapshotFile?: string, fsImpl?: typeof fs, cwd?: string,
  *   loadConfig?: () => object,
- *   discoverProjects?: () => Array<{ path: string, label: string }>,
+ *   discoverProjects?: (options?: object) => object|Array<{ path: string, label: string }>,
+ *   includeProjectTrees?: boolean,
  *   collectors?: Record<string, Function>, collectorOptions?: Record<string, object>,
  *   readSnapshotImpl?: typeof readSnapshot, writeSnapshotImpl?: typeof writeSnapshot,
  * }} [options]
@@ -171,7 +218,8 @@ export function createSystemCollector({
   fsImpl = fs,
   cwd = process.cwd(),
   loadConfig = loadKitConfig,
-  discoverProjects = discoverRuvfloProjects,
+  discoverProjects = discoverProjectSources,
+  includeProjectTrees: includeProjectTreesDefault = INCLUDE_PROJECT_TREES_DEFAULT,
   collectors = {},
   collectorOptions = {},
   readSnapshotImpl = readSnapshot,
@@ -183,6 +231,7 @@ export function createSystemCollector({
     storage: collectStorage,
     catalog: collectCatalog,
     projects: collectProjects,
+    consumers: collectConsumers,
     ...collectors,
   };
   const snapshotOpts = { ...(snapshotFile ? { file: snapshotFile } : {}), fsImpl };
@@ -194,6 +243,10 @@ export function createSystemCollector({
   /** @type {Promise<object>|null} — the single-flight slot (invariant 7). */
   let inFlight = null;
   let scan = freshScanState();
+  /** Sticky across scans, because the chip that sets it reads its own state
+   *  back off the LAST scan's payload: a plain rescan that silently reverted to
+   *  the default would flip a control the user did not touch. */
+  let includeProjectTrees = includeProjectTreesDefault === true;
 
   const markPhase = (phase, extra = {}) => {
     scan = { ...scan, phase, ...extra };
@@ -262,14 +315,23 @@ export function createSystemCollector({
     };
   }
 
-  /** Run the four deep collectors in order, persist, invalidate the cheap
+  /** Run the five deep collectors in order, persist, invalidate the cheap
    *  cache. Never rejects: a scan that blows up records the reason in `scan`
    *  and resolves with `ok: false`, so a fire-and-forget caller (the HTTP
    *  route) cannot produce an unhandled rejection and a waiting caller (the
    *  CLI) still gets an answer. */
   async function runDeep() {
     const startedAt = now();
-    scan = { ...freshScanState(), running: true, phase: 'install', startedAt, asOf: startedAt };
+    const withTrees = includeProjectTrees;
+    scan = {
+      ...freshScanState(),
+      running: true,
+      phase: 'install',
+      startedAt,
+      asOf: startedAt,
+      includeProjectTrees: withTrees,
+    };
+    /** @type {Record<string, any>} */
     const sections = {};
     try {
       // Yield BEFORE the first synchronous collector. `refreshDeep()` runs this
@@ -278,12 +340,18 @@ export function createSystemCollector({
       // start-or-attach route must return while the scan runs, not after it.
       await breathe();
 
-      // Discovery is a candidate-path source shared by two collectors
-      // (invariant 9). Resolve it ONCE so storage's learning-store nodes and
-      // the Projects table describe the same set of projects.
-      let catalog = null;
-      try { catalog = discoverProjects(); } catch { catalog = null; }
-      const projectPaths = Array.isArray(catalog) ? catalog.map((p) => p.path) : null;
+      // Discovery is a candidate-path source shared by three collectors
+      // (invariant 9). Resolve it ONCE — a ~3,200-transcript sweep — so
+      // storage's learning-store nodes, the Projects table and the consumers
+      // ranking describe the same set of projects.
+      let discovered = null;
+      try { discovered = discoverProjects({ fsImpl }); } catch { discovered = null; }
+      const { sources, catalog, onDisk } = readDiscovery(discovered);
+      // Only projects that still exist can be walked; the vanished ones survive
+      // in the Projects section's everSeen, not as unmeasurable paths handed to
+      // a collector. `null` (discovery failed) stays null — storage reports that
+      // as unknown, which a zero-length array would not.
+      const projectPaths = discovered ? onDisk.map((project) => project.path) : null;
 
       let cfg = {};
       try { cfg = loadConfig() ?? {}; } catch { cfg = {}; }
@@ -303,8 +371,14 @@ export function createSystemCollector({
       sections.catalog = collect.catalog({ cwd, cfg, now: () => startedAt, fsImpl, ...(collectorOptions.catalog ?? {}) });
       await breathe();
 
-      markPhase('projects', { scanned: 0, total: Array.isArray(catalog) ? catalog.length : 0 });
+      markPhase('projects', { scanned: 0, total: onDisk.length });
       sections.projects = collect.projects({
+        // Whichever shape discovery produced: a sources payload carries
+        // everSeen/onDisk/gitRepos/method through to the KPIs, an explicit
+        // array is measured verbatim. Both slots are null when discovery
+        // failed, which makes the section report the failure rather than an
+        // empty machine.
+        sources,
         projects: catalog,
         now: () => startedAt,
         fsImpl,
@@ -312,6 +386,28 @@ export function createSystemCollector({
           scan = { ...scan, scanned, total, path: at ?? null };
         },
         ...(collectorOptions.projects ?? {}),
+      });
+      await breathe();
+
+      // Consumers runs LAST because it is the only collector that can adopt
+      // another section's figures instead of re-walking: install's tool trees
+      // and — when project trees are in scope — every ProjectFootprint's
+      // totalBytes, which is what keeps the toggle from walking a 175 GB
+      // repository a second time in the same scan.
+      markPhase('consumers');
+      const measuredProjects = sections.projects?.projects;
+      sections.consumers = collect.consumers({
+        now: () => startedAt,
+        fsImpl,
+        install: sections.install ?? null,
+        // Adopted footprints when the Projects phase measured any, the bare
+        // discovered paths otherwise (a truncated or LOC-less projects scan
+        // still leaves the ranking able to walk what it names).
+        projects: Array.isArray(measuredProjects) && measuredProjects.length
+          ? measuredProjects
+          : projectPaths,
+        includeProjectTrees: withTrees,
+        ...(collectorOptions.consumers ?? {}),
       });
       await breathe();
 
@@ -366,10 +462,25 @@ export function createSystemCollector({
   return {
     read,
 
-    /** Start the deep scan, or attach to the one already running. Both callers
-     *  get the SAME promise, so two concurrent refreshes can never race each
-     *  other or double-write the snapshot (invariant 7). */
-    refreshDeep() {
+    /**
+     * Start the deep scan, or attach to the one already running. Both callers
+     * get the SAME promise, so two concurrent refreshes can never race each
+     * other or double-write the snapshot (invariant 7).
+     *
+     * `includeProjectTrees` is a MEASUREMENT parameter, not a view filter:
+     * project working trees are walked or they are not, so changing it requires
+     * a rescan. Omitting it keeps the last value used — the chip that sets it
+     * reads its own state back off the last scan's payload. A caller that
+     * ATTACHES to a running scan gets that scan's parameter, not its own; the
+     * result says which was used (`consumers.includeProjectTrees` and
+     * `scan.includeProjectTrees`), so the answer is never mislabelled.
+     *
+     * @param {{ includeProjectTrees?: boolean }} [options]
+     */
+    refreshDeep(options = {}) {
+      if (typeof options?.includeProjectTrees === 'boolean') {
+        includeProjectTrees = options.includeProjectTrees;
+      }
       if (inFlight) return inFlight;
       inFlight = runDeep().finally(() => { inFlight = null; });
       return inFlight;

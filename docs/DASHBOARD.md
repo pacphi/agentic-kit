@@ -44,11 +44,11 @@ permanent.
 | Usage | Transcript | `#usage/transcript` | Transcript detail | The selected session's locally retained, server-masked evidence |
 | Observability | Live | `#observability/live` | Observability · Live | Projects and roots with current presence or fresh meaningful activity |
 | Observability | History | `#observability/history` | Observability · History | Retained roots that are not currently Live |
-| System | Summary | `#system/summary` | Summary | Install size, retained data, live resource use, and deployed inventory in one glance |
-| System | Storage | `#system/storage` | Storage | Where the retained bytes are, by category, host, project, and session — plus growth and advisory reclaimables |
+| System | Summary | `#system/summary` | Summary | Install size, retained data, live resource use, deployed inventory, and the machine's largest storage consumers in one glance |
+| System | Storage | `#system/storage` | Storage | Where the retained bytes are, by category, host, project, and session — plus growth and advisory reclaimables in two safety tiers |
 | System | Runtime | `#system/runtime` | Runtime | Live host processes, their CPU and memory, background daemons, and machine denominators |
 | System | Catalog | `#system/catalog` | Catalog | Deduplicated skills, agents, commands, plugins, and MCP servers, with a per-host presence matrix |
-| System | Projects | `#system/projects` | Projects | Every known project's approximate lines of code, working-tree, `.git`, and `node_modules` size |
+| System | Projects | `#system/projects` | Projects | Projects ever seen across hosts vs still on disk; per on-disk project its approximate lines of code, detected stack, working-tree, `.git`, and `node_modules` size |
 
 About is one scrolling page, so its hashes scroll to a section rather than swapping panels; `#about`
 alone opens the page at the top.
@@ -200,6 +200,48 @@ measured, and once a snapshot passes seven days the freshness label turns amber 
 rows are advisory, with their rationale and their path, and there is no delete button anywhere in
 this area.
 
+### Largest consumers, and the project-trees toggle
+
+The Summary strip ranks the biggest storage roots on the machine — not just the kit's own. On a
+working machine the top of that list is usually local model weights, package caches and toolchain
+installs, so the strip covers around fifty known cache roots (Ollama, LM Studio, Hugging Face,
+npm/pnpm/yarn/bun, rustup and Cargo, Go, uv and pip, Maven and Gradle, Playwright and Puppeteer,
+mise, Homebrew, Docker) alongside the kit's own. **Ranked** and **By ecosystem** re-shape the
+same measurement; the ecosystem view is usually the more actionable one, because four Node caches
+at 5 GB each is a Node answer, not four unrelated rows.
+
+Nested roots are counted **once**, at the outermost row. `~/.npm/_cacache` sits inside `~/.npm`,
+`~/.cache/huggingface` inside `~/.cache`, the npm global root inside mise's Node install — so a
+row inside another row is shown as a *breakdown* of its parent and is left out of the ranking and
+the totals. Every parent with breakdowns also gets an "everything else" row, so a breakdown always
+adds up to its parent. Roots that do not exist on this machine are listed as absent rather than
+ranked at 0 B, and roots that could not be read say so with their reason.
+
+**Project trees** are excluded by default, and the chip that includes them is a *scan* control,
+not a filter. One large repository can outweigh every shared cache combined, and a chart
+containing it is a chart of one repository — so the ranking says, in the panel, that they were
+left out. Turning the chip on starts a new deep scan that walks them (and turning it off starts
+one that does not); it is disabled while a scan is running. `ak system --deep` scans without
+project trees.
+
+### Two reclaimable tiers, never one total
+
+Reclaimable rows come in two tiers, rendered as two separate blocks because they are two
+different promises:
+
+- **regenerable** — the owning tool refetches it on demand (package caches, superseded knowledge-
+  base copies, stale npx envs). This block states a total.
+- **review** — plausible, but not safe to call removable: aged transcripts are the only copy of
+  the sessions they record, an extra runtime version may be the one a live toolchain resolves
+  through, a browser build may still be pinned. This block deliberately has **no total**. Its
+  bytes appear per row as context, and some rows show what is installed at that path rather than
+  a measured removable subset, labeled as such.
+
+The two are never added together. A combined "you could free N" would be the one number you would
+act on and the one number the measurement cannot stand behind. Where a tier's own rows overlap on
+disk, its total reads unknown-with-reason instead of counting the same bytes twice. Nothing here
+removes anything; where a CLI already owns the cleanup, the row names it.
+
 ### Reading the numbers honestly
 
 - **A section that has never been scanned says so.** It reads "not measured yet — press Rescan",
@@ -209,7 +251,20 @@ this area.
 - **A failed measurement names its reason.** An unreadable directory degrades that node alone; its
   siblings and the rest of the scan are unaffected.
 - **Lines of code are approximate and say so**, counted by extension with `node_modules`, vendored
-  trees, and binary files excluded.
+  trees, and binary files excluded. Only *languages* carry lines. Frameworks, SDKs and tools are
+  shown as present or not — React does not own lines, the `.tsx` files do — and what the registry
+  could not name is listed by name rather than swept into an "Other" slice.
+- **Projects are counted twice, and the two numbers differ.** The KPI reads
+  `N ever · M on disk`: *ever* is every project any host has ever recorded a session in, including
+  ones you have since deleted or moved; *on disk* is the subset that still exists, and only those
+  become rows in the Projects table — a deleted project has no bytes and no lines to measure.
+  A large gap is a fact about your history, not an error.
+- **A project whose path cannot be recovered is counted, not invented.** Claude stores transcripts
+  in a directory name that encodes the project path lossily (`/`, `.` and `-` all become `-`), so
+  it cannot simply be decoded back. The path is read from the session record instead; where no
+  session recorded one and the encoded name cannot be confirmed against your filesystem, the
+  project is reported as unresolved and the *ever seen* count is shown as a floor. You will never
+  see a guessed path here.
 - **Growth per day is approximate too** — a file counts its whole size on the day it was last
   written, which is exact for append-only transcripts and over-counts rewritten databases.
 - **Some things cannot be attributed, and say that instead of guessing.** Codex transcripts are
@@ -242,4 +297,15 @@ API requests. The dashboard remains localhost-only and offline-first. Usage, Obs
 System may show sensitive local project, transcript, or filesystem-path information; use them only
 where that local information may be viewed. System deliberately shows absolute paths — a storage
 breakdown that hides where the bytes live answers nothing — behind the same token-gated loopback
-delivery as every other route. It reads file *metadata* only, never file contents.
+delivery as every other route.
+
+What System reads is a short, fixed list: directory entries and file `stat` results; your
+`.git/config` origin remote (so a project can link to its repository page — the kit never fetches
+it, you click it); a linked worktree's `gitdir` pointer; the `cwd` **field** recorded at the top
+of a session transcript, and OpenCode's per-session `directory` column, so a session can be
+attributed to the right project; your projects' manifest **dependency names**, which are neither
+evaluated nor resolved; and your source files' bytes, streamed through a fixed buffer purely to
+count newlines. Each of those yields a path, a name, or a number. **No message, prompt, tool call,
+tool result, or model output is ever read** — those stay in Usage and Observability, which have
+their own contracts for them. The full enumeration is
+[Machine footprint § The read surface](ddd/machine-footprint.md#the-read-surface).

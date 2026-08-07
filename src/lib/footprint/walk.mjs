@@ -132,7 +132,8 @@ export function statNode(target, { fsImpl = fs } = {}) {
  *   skipDir?: ((dir: string, name: string, depth: number) => boolean) | null,
  *   acceptFile?: ((name: string, file: string, depth: number) => boolean) | null,
  *   onFile?: ((entry: { file: string, name: string, bytes: number,
- *                       mtimeMs: number, depth: number }) => void) | null,
+ *                       blocks: number, mtimeMs: number,
+ *                       depth: number }) => void) | null,
  *   fsImpl?: typeof fs,
  * }} [options] `skipDir` prunes a subtree deliberately (it does NOT mark the
  *   walk truncated — an intentional scope is not a failed measurement).
@@ -183,7 +184,16 @@ export function walkTree(root, options = {}) {
     if (result.newestMtimeMs === null || st.mtimeMs > result.newestMtimeMs) {
       result.newestMtimeMs = st.mtimeMs;
     }
-    if (onFile) onFile({ file, name, bytes: st.size, mtimeMs: st.mtimeMs, depth });
+    // `blocks` rides along from the stat the walk has already paid for. A
+    // consumer that wants to READ a file needs it: a cloud provider's evicted
+    // placeholder (Dropbox/iCloud/OneDrive) stats as a normal file with a real
+    // size but zero allocated blocks, and opening it blocks in the kernel until
+    // the provider materializes it — which never returns when the provider is
+    // signed out or offline. Undefined on a stat shim that omits it; callers
+    // treat only an explicit 0 as the placeholder signal.
+    if (onFile) {
+      onFile({ file, name, bytes: st.size, blocks: st.blocks, mtimeMs: st.mtimeMs, depth });
+    }
   };
 
   // A root that is itself a file is a legitimate node (opencode's single store,
