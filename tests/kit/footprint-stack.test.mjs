@@ -34,6 +34,7 @@ import {
 import {
   EXCLUDED_DIRS, EXCLUDED_FILES, MANIFEST_MAX_DEPTH, STACK_EXCLUSIONS,
   detectStack, parseManifestDependencies, stackProvenance,
+  isCloudPlaceholder,
 } from '../../src/lib/footprint/stack-detect.mjs';
 
 function fixture(t, name) {
@@ -391,4 +392,68 @@ test('the exclusions and the provenance travel with the figure', (t) => {
   assert.equal(none.languages, 0);
   assert.equal(none.unrecognizedExtensions, null);
   assert.equal(none.nonSourceFiles, null);
+});
+
+// ── cloud placeholders, and the platform that cannot detect them ────────────
+// A dataless file (real size, zero allocated blocks) must never be opened: the
+// read blocks in the kernel until the provider faults the bytes back, which
+// with the provider offline is forever. But `blocks` is a POSIX field, and on
+// win32 Node reports 0 for EVERY file — so the same rule there condemns the
+// whole scan. This is the regression that took Windows CI down: 8 failures,
+// all of them "measured nothing".
+
+test('a dataless file is a placeholder on POSIX and is never opened', () => {
+  assert.equal(isCloudPlaceholder(4096, 0, 'darwin'), true);
+  assert.equal(isCloudPlaceholder(4096, 0, 'linux'), true);
+});
+
+test('on win32 a zero block count is NOT evidence of a placeholder', () => {
+  // fs.Stats.blocks is POSIX-only; win32 reports 0 for every file. Reading the
+  // rule literally there skipped every source file and queued no manifest, so a
+  // scan returned no lines, no dependencies and no stack.
+  assert.equal(isCloudPlaceholder(4096, 0, 'win32'), false);
+  assert.equal(isCloudPlaceholder(1, 0, 'win32'), false);
+});
+
+test('a real file, an empty file and a missing blocks field are never placeholders', () => {
+  assert.equal(isCloudPlaceholder(4096, 8, 'darwin'), false, 'allocated blocks means real content');
+  assert.equal(isCloudPlaceholder(0, 0, 'darwin'), false, 'an empty file legitimately has no blocks');
+  assert.equal(isCloudPlaceholder(4096, undefined, 'darwin'), false,
+    'a stat that did not carry blocks is unknown, and guessing would skip real files');
+});
+
+/** A stat shim that reports zero allocated blocks for every file — what win32
+ *  actually does, reproduced so the guard is testable from any machine. Without
+ *  this the platform argument changes nothing on POSIX (real files have blocks)
+ *  and the test below would pass with or without the fix. */
+function zeroBlocksFs() {
+  // The walk stats with lstatSync, so that is the call to shim. The returned
+  // object must keep its prototype: the walk asks it isDirectory()/isFile().
+  const zero = (st) => Object.assign(Object.create(Object.getPrototypeOf(st)), st, { blocks: 0 });
+  return { ...fs, lstatSync: (target, opts) => zero(fs.lstatSync(target, opts)) };
+}
+
+test('with zero blocks reported, POSIX skips everything — the behaviour being guarded against', (t) => {
+  const root = fixture(t, 'zero-blocks-posix');
+  write(root, 'real.js', 'a\nb\n');
+  write(root, 'package.json', JSON.stringify({ dependencies: { 'totally-unknown-lib': '1.0.0' } }));
+  const out = detectStack(root, { asOf: 1, platform: 'darwin', fsImpl: zeroBlocksFs() });
+  // Anti-vacuity: this is the exact damage seen on Windows CI. If this ever
+  // stops holding, the test below proves nothing.
+  assert.equal(out.manifests.length, 0, 'every file read as a placeholder — no manifest queued');
+  assert.ok((out.languages.find((r) => r.id === 'javascript')?.lines ?? 0) === 0, 'and no lines counted');
+});
+
+test('a win32 scan still counts lines, reads manifests and skips only the binary', (t) => {
+  const root = fixture(t, 'win32-blocks');
+  write(root, 'real.js', 'a\nb\n');
+  write(root, 'package.json', JSON.stringify({ dependencies: { 'totally-unknown-lib': '1.0.0' } }));
+  fs.writeFileSync(path.join(root, 'blob.js'), Buffer.from([0x61, 0x00, 0x62, 0x0a]));
+
+  const out = detectStack(root, { asOf: 1, platform: 'win32', fsImpl: zeroBlocksFs() });
+  assert.equal(out.skipped, 1, 'only the binary is skipped — not every file');
+  assert.equal(out.languages.find((row) => row.id === 'javascript').lines, 2);
+  assert.equal(out.manifests.length, 1, 'the manifest was queued and read');
+  assert.ok(out.unrecognized.dependencies.some((r) => r.name === 'totally-unknown-lib'),
+    'and its declarations reached the unrecognized tail');
 });

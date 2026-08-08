@@ -131,10 +131,30 @@ function tailKey(lowerName) {
  *  which is invariant 3's "unknown, never 0" rather than a fabricated zero.
  *
  *  Only an explicit 0 counts. `undefined` means the stat did not carry blocks (a
- *  test shim, a platform that omits it), and guessing from a missing field would
- *  skip real files. Sparse files also report fewer blocks than their size implies
- *  but never zero-with-content, so they are unaffected. */
-const isCloudPlaceholder = (bytes, blocks) => blocks === 0 && bytes > 0;
+ *  test shim), and guessing from a missing field would skip real files. Sparse
+ *  files also report fewer blocks than their size implies but never
+ *  zero-with-content, so they are unaffected.
+ *
+ *  WINDOWS IS EXCLUDED, and not as a nicety. `fs.Stats.blocks` is a POSIX field;
+ *  on win32 Node reports it as 0 for every file, content or not. The rule then
+ *  reads EVERY file as evicted — manifests are never queued and every source
+ *  file is skipped, so a scan returns no lines, no dependencies and no stack at
+ *  all. Two independent CI symptoms pinned it: `manifestsRead` 0 where 2 were
+ *  present, and a skip count one higher than the fixture's only binary file.
+ *
+ *  The cost of the exclusion is real and worth stating: Windows is where OneDrive
+ *  Files On-Demand actually lives, so it is the platform that most needs this
+ *  check and the one platform that cannot have it. Detecting a placeholder there
+ *  means reading FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS, which `fs.Stats` does not
+ *  surface — so a Windows placeholder is opened and may block, exactly as it did
+ *  before this heuristic existed. Reading one file slowly is recoverable;
+ *  measuring nothing at all is not.
+ *
+ *  `platform` is a parameter rather than a direct `process.platform` read so the
+ *  win32 branch is testable from any machine. Pure.
+ *  @param {number} bytes @param {number|undefined} blocks @param {string} platform */
+export const isCloudPlaceholder = (bytes, blocks, platform = process.platform) =>
+  platform !== 'win32' && blocks === 0 && bytes > 0;
 
 /** Count newlines in one file through a fixed buffer. Returns null when the file
  *  is binary (a NUL byte in the first chunk) or unreadable — never 0, which would
@@ -388,6 +408,7 @@ function unmeasured(reason, asOf) {
  * @param {string} root the project's directory
  * @param {{ walk?: Function, limits?: object, maxDepth?: number,
  *           manifestDepth?: number, signatureDepth?: number, manifests?: boolean,
+ *           platform?: string,
  *           asOf?: number|null, fsImpl?: typeof fs }} [options]
  * @returns {object} `{ registryVersion, languages[{id,name,ecosystem,colorSlot,lines,
  *   files}], totalLines: Measurement, stack[{id,kind,name,ecosystem,via}],
@@ -401,6 +422,7 @@ export function detectStack(root, {
   manifestDepth = MANIFEST_MAX_DEPTH,
   signatureDepth = SIGNATURE_MAX_DEPTH,
   manifests: readManifests = true,
+  platform = process.platform,
   asOf = null,
   fsImpl = fs,
 } = {}) {
@@ -431,7 +453,7 @@ export function detectStack(root, {
     acceptFile: (name) => !EXCLUDED_FILES.has(name),
     onFile: ({ file, name, bytes, blocks, depth }) => {
       const lower = name.toLowerCase();
-      const placeholder = isCloudPlaceholder(bytes, blocks);
+      const placeholder = isCloudPlaceholder(bytes, blocks, platform);
       if (depth <= signatureDepth) { note(seenFiles, lower); note(seenPaths, rel(root, file)); }
       // A placeholder manifest is still evidence the project HAS that manifest —
       // its name was noted above. Only its contents are out of reach, so it is
