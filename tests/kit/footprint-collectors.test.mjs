@@ -29,9 +29,16 @@ import { collectCatalog, tomlTableNames } from '../../src/lib/footprint/catalog.
 
 const DAY = 86_400_000;
 
-/** A fixture root that is removed when the test ends, whatever the outcome. */
+/** A fixture root that is removed when the test ends, whatever the outcome.
+ *
+ *  Canonicalised with realpathSync.NATIVE, matching what the collectors resolve
+ *  paths with. The JS realpath leaves a Windows 8.3 short name alone
+ *  (C:\Users\RUNNER~1\...) while the native one resolves it to the long form the
+ *  code under test produces (C:\Users\runneradmin\...) — the same directory in
+ *  two spellings, which made every path assertion here fail on Windows only. */
 function fixture(t, name) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), `ak-footprint-${name}-`));
+  const real = fs.realpathSync.native ?? fs.realpathSync;
+  const dir = real(fs.mkdtempSync(path.join(os.tmpdir(), `ak-footprint-${name}-`)));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   return dir;
 }
@@ -1012,6 +1019,7 @@ test('an undecodable project is FLAGGED, never guessed at', () => {
   // decodeClaudeProjectDir returns null for a directory that no longer exists.
   const encoded = '-repos-gone-for-ever';
   const [row] = labelSessions([{ session: 'a.jsonl', project: encoded }], { decodeDir: () => null });
+  assert.equal(row.projectReason, 'gone', 'a POSIX-rooted name that will not resolve IS a deleted project');
   assert.equal(row.projectResolved, false, 'a deleted project cannot be decoded and must say so');
   assert.equal(row.projectLabel, encoded, 'falling back to the encoded name beats inventing one');
 });
@@ -1051,4 +1059,13 @@ test('collectStorage labels the sessions it returns', (t) => {
     assert.equal(s.projectLabel, 'keel', 'the wiring must reach topSessions, not just exist');
     assert.equal(s.projectResolved, true);
   }
+});
+
+test('an undecodable name says WHICH reason — deleted, or never encodable', () => {
+  // On Windows every transcript directory carries a drive prefix, which the
+  // decoder refuses by design. Reporting those as "deleted" would be a false
+  // claim about every row on that platform.
+  const [win] = labelSessions([{ session: 'a', project: 'C:-Users-me-proj' }], { decodeDir: () => null });
+  assert.equal(win.projectResolved, false);
+  assert.equal(win.projectReason, 'encoding', 'nothing was deleted — the name was never decodable');
 });

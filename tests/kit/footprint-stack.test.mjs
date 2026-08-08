@@ -37,7 +37,13 @@ import {
 } from '../../src/lib/footprint/stack-detect.mjs';
 
 function fixture(t, name) {
-  const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), `ak-fp-stack-${name}-`)));
+  // realpathSync.NATIVE, matching what the collectors canonicalise with. The JS
+  // realpath leaves a Windows 8.3 short name alone (C:\Users\RUNNER~1\...) while the
+  // native one resolves it to the long form the code under test produces
+  // (C:\Users\runneradmin\...). Same directory, two spellings — and every path
+  // assertion in this file compared one against the other on Windows only.
+  const real = fs.realpathSync.native ?? fs.realpathSync;
+  const dir = real(fs.mkdtempSync(path.join(os.tmpdir(), `ak-fp-stack-${name}-`)));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   return dir;
 }

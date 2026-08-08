@@ -28,8 +28,20 @@ import { collectProjects } from '../../src/lib/footprint/projects.mjs';
  *  Realpath'd up front: macOS /tmp is a symlink to /private/tmp, and the
  *  de-duplication under test resolves real paths, so a raw mkdtemp path would
  *  make every assertion compare two spellings of the same directory. */
+// The encoding this module decodes is `/`-rooted — every separator became `-`,
+// so the name begins with one. Windows paths carry a drive prefix instead, which
+// the decoder refuses by design, so a test that builds a `/`-rooted encoding is
+// only meaningful on POSIX.
+const POSIX_ONLY = process.platform === 'win32';
+
 function fixture(t, name) {
-  const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), `ak-fp-projects-${name}-`)));
+  // realpathSync.NATIVE, matching what the collectors canonicalise with. The JS
+  // realpath leaves a Windows 8.3 short name alone (C:\Users\RUNNER~1\...) while the
+  // native one resolves it to the long form the code under test produces
+  // (C:\Users\runneradmin\...). Same directory, two spellings — and every path
+  // assertion in this file compared one against the other on Windows only.
+  const real = fs.realpathSync.native ?? fs.realpathSync;
+  const dir = real(fs.mkdtempSync(path.join(os.tmpdir(), `ak-fp-projects-${name}-`)));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   return dir;
 }
@@ -71,7 +83,7 @@ test('a cwd is read from either host shape, and only from the head', () => {
   assert.equal(firstCwd([JSON.stringify({ cwd: '' })], 'claude'), null);
 });
 
-test('the encoded Claude directory decodes only against the real filesystem', (t) => {
+test('the encoded Claude directory decodes only against the real filesystem', { skip: POSIX_ONLY }, (t) => {
   const root = fixture(t, 'decode');
   // `agentic-kit` and `agentic/kit` encode IDENTICALLY, so the decode is only
   // safe because the filesystem decides which one exists.
@@ -87,8 +99,18 @@ test('the encoded Claude directory decodes only against the real filesystem', (t
   // A project whose directory is GONE cannot be recovered — stated as null, not
   // guessed at, which is what makes `everSeen` a floor rather than a fiction.
   assert.equal(decodeClaudeProjectDir(`${root.split(path.sep).join('-')}-vanished`), null);
+});
+
+// The decoder's refusal contract, asserted on EVERY platform. On Windows this is
+// the whole of its observable behaviour: the encoding it decodes is `/`-rooted,
+// a Windows path carries a drive prefix instead, and the decoder documents that
+// as undecodable. The test above builds a `/`-rooted encoding Windows never
+// produces, so running it there tested the platform rather than the decoder.
+test('a name that is not a POSIX-absolute encoding is refused, on every platform', () => {
   assert.equal(decodeClaudeProjectDir('not-absolute'), null);
   assert.equal(decodeClaudeProjectDir(''), null);
+  assert.equal(decodeClaudeProjectDir(null), null);
+  assert.equal(decodeClaudeProjectDir('C:-Users-me-proj'), null, 'a Windows drive prefix is not decodable');
 });
 
 test('one project touched by two hosts is ONE project, resolved through symlinks', (t) => {
@@ -209,7 +231,10 @@ test('an unreadable transcript makes the counts a floor, never a smaller total',
   assert.equal(section.complete, false);
 });
 
-test('a group with no cwd anywhere is recovered from its encoded directory name', (t) => {
+// POSIX-only for the same reason as the decode test: the encoded directory
+// name is built with path.sep, which on Windows yields a drive-prefixed form
+// the decoder refuses by design, so the recovery it asserts cannot happen there.
+test('a group with no cwd anywhere is recovered from its encoded directory name', { skip: POSIX_ONLY }, (t) => {
   const root = fixture(t, 'recover');
   const project = path.join(root, 'quiet-project');
   fs.mkdirSync(project, { recursive: true });

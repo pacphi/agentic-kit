@@ -570,9 +570,20 @@ export function labelSessions(rows, { decodeDir = decodeClaudeProjectDir, fsImpl
       // the project directory is gone — the encoding is only reversible by
       // walking real directories — and a consumer that cannot tell a decoded
       // name from an undecodable one would present a guess as a fact.
+      // Two different reasons a decode fails, and they mean opposite things to a
+      // reader. `gone`: the name is a POSIX-rooted encoding but no such
+      // directory exists any more — the project really was deleted. `encoding`:
+      // the name was never a POSIX-rooted encoding at all, which on Windows is
+      // every name (a drive prefix, which decodeClaudeProjectDir refuses by
+      // design). Collapsing the two would report every Windows session as a
+      // deleted project.
       cache.set(key, decoded
         ? { projectLabel: path.basename(decoded), projectResolved: true }
-        : { projectLabel: key, projectResolved: false });
+        : {
+          projectLabel: key,
+          projectResolved: false,
+          projectReason: String(key).startsWith('-') ? 'gone' : 'encoding',
+        });
     }
     return cache.get(key);
   };

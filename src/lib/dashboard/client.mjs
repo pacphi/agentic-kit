@@ -2839,12 +2839,15 @@ export const JS = `
             +(sid?'<button class="sy-link" type="button" data-transcript="'+esc(sid)+'" title="open transcript">'+cell+"</button>":cell)
             +"</td>"
             +'<td><span class="sy-dot" style="background:'+hostColor(x.host)+'"></span>'+esc(x.host||"\\u2014")+"</td>"
-            // A project whose directory is gone cannot have its name decoded
-            // out of the transcript directory (the encoding is lossy and is
-            // only reversed by walking real directories). Say that, rather than
-            // printing a 60-character encoded path or guessing a name from it.
+            // An undecoded name says WHICH reason. "deleted project" is a
+            // claim, and on Windows it would be a false one for every row: the
+            // encoding there carries a drive prefix that the decoder refuses by
+            // design, so nothing is decodable and nothing has been deleted.
             +"<td>"+(x.projectResolved===false
-              ?'<span class="sy-unk" title="'+esc("this project directory no longer exists, so its name cannot be decoded from "+String(x.project||""))+'">deleted project</span>'
+              ?'<span class="sy-unk" title="'+esc(x.projectReason==="encoding"
+                ? "this name is not a POSIX-rooted transcript directory, so it cannot be decoded to a project path: "+String(x.project||"")
+                : "this project directory no longer exists, so its name cannot be decoded from "+String(x.project||""))
+                +'">'+(x.projectReason==="encoding"?"name not decodable":"deleted project")+"</span>"
               :esc(x.projectLabel||x.project))+"</td>"
             +'<td class="num">'+esc(fmtBytes(x.bytes))+"</td>"
             +"<td>"+(share==null
