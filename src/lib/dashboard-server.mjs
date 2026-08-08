@@ -31,6 +31,13 @@
 //   GET /api/usage    → the usage Aggregate MINUS sessions[] (ADR-0009)
 //   GET /api/sessions → the session list, filtered + paginated
 //   GET /api/session/:id → one transcript, secrets masked SERVER-side
+//   GET /api/system   → the machine-footprint payload (ADR-0025): the cheap
+//                      tier (runtime census + known-file stats, TTL-cached
+//                      ~60s) merged with the last persisted deep snapshot,
+//                      carried forward with ITS asOf. `?refresh=deep` starts
+//                      or attaches to the single-flight deep scan and returns
+//                      immediately with progress state; `&trees=1|0` sets
+//                      whether that scan walks project working trees.
 //
 // The status rows are gathered by SHELLING OUT to the installed CLI
 // (`node bin/agentic-kit.mjs status --json`) so we never duplicate status.mjs's
@@ -45,11 +52,13 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execFile } from 'node:child_process';
-import { driftReport, selfDrift } from './versions.mjs';
+import { driftReport, selfDrift, installedVersion } from './versions.mjs';
+import { HOSTS, collectIntegrationFacts } from './providers.mjs';
+import { globalRoot } from './paths.mjs';
 import { drift as ruvnetBrainDrift } from './ruvnet-brain.mjs';
 import { drift as ruvectorDrift, managed as ruvectorManaged } from './ruvector.mjs';
 import { loadKitConfig } from './config.mjs';
-import { resolveRoutes, routingSummary, ACTIVITIES } from './routing.mjs';
+import { resolveRoutes, routingSummary, divergedRoutes, retirementOf, ACTIVITIES } from './routing.mjs';
 import { renderPage } from './dashboard/page.mjs';
 import { requestRejection } from './dashboard/request-security.mjs';
 import { tokenMatches } from './admin-server.mjs';
@@ -59,7 +68,7 @@ import { sseChannel, reserveClientSlot, clientGone } from './dashboard/sse.mjs';
 // here because readIntelHistory() already composes it (as `.healthRing`,
 // forwarded verbatim below); a bare `readHealthRing` import would be unused.
 import { readIntelHistory, readMachineWideIntel } from './dashboard/intel-history.mjs';
-import { discoverRuvfloProjects } from './dashboard/project-discovery.mjs';
+import { projectCensus, projectsInScope, describeScope } from './project-census.mjs';
 import { resolveProjectIdentity, safeProjectKey } from './live/project-label.mjs';
 import {
   TRANSCRIPT_ROOTS,
@@ -199,7 +208,7 @@ function resolveSelectedProject(projects, rawParam) {
  *  discovery reads real machine-global state (~/.claude-flow/*.json,
  *  ~/.config/agentic-kit/observability-workspaces.json) that a test must
  *  never depend on. */
-function buildProjectSnapshotCache(discoverProjectsFn, machineWideIntelFn) {
+function buildProjectSnapshotCache(discoverProjectsFn, machineWideIntelFn, readCensusFn) {
   let snapshot = null;
   let fetchedAt = 0;
   return () => {
@@ -208,10 +217,36 @@ function buildProjectSnapshotCache(discoverProjectsFn, machineWideIntelFn) {
       const projects = discoverProjectsFn().map((project) => (
         { ...project, key: keyForProject(project) }
       ));
-      snapshot = { projects, machineWide: machineWideIntelFn(projects) };
+      // The scope counts that let the panel say what it counted (ADR-0027).
+      // Null when a caller injected its own discoverProjects: that seam yields
+      // a project list with no census behind it, and reporting a machine-wide
+      // total derived from a fixture would be a fabricated number. Absent is
+      // the honest reading, and the renderer omits the line rather than
+      // printing a zero (ADR-0023).
+      const census = typeof readCensusFn === 'function' ? readCensusFn() : null;
+      snapshot = { projects, machineWide: machineWideIntelFn(projects), census };
       fetchedAt = now;
     }
     return snapshot;
+  };
+}
+
+/** The default discovery seam: one census walk, exposed two ways — the
+ *  learning-scoped project rows the Intelligence panel aggregates, and the
+ *  scope counts that explain how that number relates to what the other tabs
+ *  show. Paired so the corpus is walked ONCE per snapshot rather than twice. */
+function censusBackedDiscovery() {
+  let last = null;
+  return {
+    discover: () => {
+      last = projectCensus();
+      return projectsInScope(last, 'learning');
+    },
+    readCensus: () => (last ? {
+      everSeen: last.everSeen, onDisk: last.onDisk,
+      gitRepos: last.gitRepos, learning: last.learning,
+      complete: last.complete,
+    } : null),
   };
 }
 
@@ -244,6 +279,7 @@ async function collectData({ cwd, fetchStatus, projectParam, getProjectSnapshot 
     try {
       if (ruvectorManaged()) drift = foldRuvectorDrift(drift, await ruvectorDrift());
     } catch { /* banner is best-effort — the subsystem card still carries the ruvector row */ }
+    try { drift = await foldKnownVersions(drift); } catch { /* version chips degrade, nothing else */ }
   }
 
   // Machine-wide Intelligence (clean break from the old cwd-hardcoded,
@@ -251,7 +287,7 @@ async function collectData({ cwd, fetchStatus, projectParam, getProjectSnapshot 
   // `getProjectSnapshot()` is the shared, TTL-cached {projects, machineWide}
   // read; `projectParam` is the raw ?project= query value, resolved the exact
   // same way /api/live/intelligence resolves it (resolveSelectedProject).
-  const { projects, machineWide } = getProjectSnapshot();
+  const { projects, machineWide, census } = getProjectSnapshot();
   const selected = resolveSelectedProject(projects, projectParam);
   const selectedHistory = selected ? readIntelHistory(selected.path) : EMPTY_SELECTED_HISTORY;
 
@@ -306,6 +342,18 @@ async function collectData({ cwd, fetchStatus, projectParam, getProjectSnapshot 
       patternStore: selectedHistory.patternStore,
       graph: selectedHistory.graph,
       machineWide,
+      //   census — how this panel's project count relates to the counts the
+      //     other tabs show (ADR-0027). `scope` names the filter Intelligence
+      //     applies; `counts` are the same machine census under every scope, so
+      //     a user can see that 14 and 48 and this number are three questions
+      //     rather than three answers. Null when discovery was injected — there
+      //     is no census behind a fixture, and inventing one would be worse
+      //     than saying nothing.
+      census: census ? {
+        scope: 'learning',
+        note: describeScope('learning'),
+        counts: census,
+      } : null,
     },
     routing: routingPayload(),
   };
@@ -318,15 +366,28 @@ export function routingPayload(cfg = loadKitConfig()) {
     const policy = cfg.routing?.routes ?? {};
     if (!Object.keys(policy).length) return null;
     const routes = resolveRoutes(policy);
+    // Two DIFFERENT signals, deliberately kept apart on the wire so the panel can
+    // say different things about them (see RETIRED_MODELS in routing.mjs):
+    //   retiredFrom — the host withdrew this model; ak already substituted it, so
+    //                 the row shows what will actually run. Actionable but not a
+    //                 choice.
+    //   diverged    — a seeded route the defaults moved past. A trade to weigh,
+    //                 cleared only by an explicit `ak x host refresh`.
+    const diverged = new Map(divergedRoutes(policy).map((d) => [d.activity, d]));
     return {
       primaryHost: cfg.routing?.primaryHost ?? 'claude',
       summary: routingSummary(policy),
       routes: ACTIVITIES.map((activity) => {
         const r = routes[activity];
+        const d = diverged.get(activity);
         return {
           activity, host: r.host, model: r.model ?? '',
           provenance: r.provenance, akOriginated: !!r.akOriginated,
           escalation: (r.escalation ?? []).map((e) => e.host),
+          ...(r.retiredFrom
+            ? { retiredFrom: r.retiredFrom, retiresOn: retirementOf(r.retiredFrom)?.retiresOn ?? null }
+            : {}),
+          ...(d ? { diverged: { defaultModel: d.defaultModel, defaultNote: d.defaultNote, currentNote: d.currentNote } } : {}),
         };
       }),
     };
@@ -366,6 +427,76 @@ export function foldRuvectorDrift(drift, r) {
     latest: r.latest,
     outdated: !!r.outdated,
   }];
+}
+
+// `collectIntegrationFacts` probes each host's binary for its version, which
+// costs ~300ms and must never ride the dashboard's ~30s poll. Host versions
+// change only when someone installs or upgrades a CLI, so an in-process window
+// this long is generous and still catches an upgrade within one coffee break.
+const HOST_FACTS_TTL_MS = 5 * 60_000;
+let hostFactsCache = null;
+
+async function cachedHostFacts(now) {
+  if (hostFactsCache && now - hostFactsCache.at < HOST_FACTS_TTL_MS) return hostFactsCache.hosts;
+  const facts = await collectIntegrationFacts({ cwd: process.cwd(), cfg: loadKitConfig() });
+  hostFactsCache = { at: now, hosts: facts?.hosts ?? {} };
+  return hostFactsCache.hosts;
+}
+
+/**
+ * Fold in the installed versions `driftReport()` structurally cannot report, so
+ * every About card states a version rather than some silently omitting one.
+ *
+ * driftReport only walks npm-managed globals. Two managed components are
+ * knowable but sit outside it: a host installed by mise/brew/the native
+ * installer (present and versioned, just not an npm global), and agentdb (a
+ * real npm global, but deliberately pinned to ruflo's bundled version rather
+ * than latest, so MANAGED-TOOLS.md excludes it from the update banner).
+ *
+ * Both fold in with `outdated: false` and no `latest`, which is inert for the
+ * banner — `noticeHtml` renders only entries where `outdated` is true — while
+ * giving the version chip the structured fact it needs. Nothing here parses a
+ * version out of a status row's prose; every value is a structured probe.
+ * Existing entries always win, so this can only ever add.
+ * @param {Array<{pkg:string, installed?:string|null, latest?:string|null,
+ *   outdated?:boolean}>|null} drift the drift array, in the shape driftReport()
+ *   and the selfDrift/brain/ruvector folds all already emit
+ * @param {{ now?: number, hostFacts?: Record<string, {version?: string|null}> }} [deps] test seam
+ * @returns {Promise<Array<{pkg:string, installed?:string|null, latest?:string|null,
+ *   outdated?:boolean}>>} the input array plus the folded entries; incoming
+ *   entries are passed through untouched, so their fields stay as optional as
+ *   whichever fold produced them
+ */
+export async function foldKnownVersions(drift, { now = Date.now(), hostFacts } = {}) {
+  const out = [...(drift ?? [])];
+  const seen = new Set(out.map((d) => d?.pkg).filter(Boolean));
+  const add = (pkg, installed) => {
+    if (!pkg || !installed || seen.has(pkg)) return;
+    seen.add(pkg);
+    out.push({ pkg, installed, latest: null, outdated: false });
+  };
+  const hosts = hostFacts ?? await cachedHostFacts(now);
+  for (const host of HOSTS) add(host.pkg, hosts?.[host.id]?.version);
+  add('agentdb', installedVersion('agentdb'));
+  add('@claude-flow/aidefence', bundledVersion('ruflo', '@claude-flow/aidefence'));
+  return out;
+}
+
+/** The version of a package that ships INSIDE another rather than as its own
+ *  global — aidefence lives in ruflo's dependency tree, so `installedVersion`
+ *  cannot see it and its card was the last one silently missing a version.
+ *  Both npm layouts are checked directly (hoisted beside the host, then nested
+ *  under it) because Node's resolver refuses `<pkg>/package.json` whenever the
+ *  package publishes an `exports` map, which aidefence does. */
+function bundledVersion(hostPkg, pkg) {
+  const root = globalRoot();
+  for (const file of [
+    path.join(root, pkg, 'package.json'),
+    path.join(root, hostPkg, 'node_modules', pkg, 'package.json'),
+  ]) {
+    try { return JSON.parse(fs.readFileSync(file, 'utf8')).version ?? null; } catch { /* try next */ }
+  }
+  return null;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -410,6 +541,20 @@ function clampInt(raw, fallback, min, max) {
   const n = Number.parseInt(String(raw ?? ''), 10);
   if (!Number.isFinite(n)) return fallback;
   return Math.min(max, Math.max(min, n));
+}
+
+// Observability History's window control — day-count approximations (a
+// calendar "month" is treated as 30 days, matching clampDays' own plain-day
+// semantics rather than adding calendar-aware month math for a browse filter).
+const HISTORY_WINDOW_DAYS = {
+  '1d': 1, '7d': 7, '14d': 14, '1mo': 30, '3mo': 90, '6mo': 180, '1y': 365,
+};
+/** ?window=<token> → an epoch-ms cutoff, or null for "all time". Unknown/
+ *  missing tokens fall back to 14d, the same default clampDays uses. */
+function windowToSinceMs(raw, now = Date.now()) {
+  if (raw === 'all') return null;
+  const days = Object.hasOwn(HISTORY_WINDOW_DAYS, raw) ? HISTORY_WINDOW_DAYS[raw] : HISTORY_WINDOW_DAYS['14d'];
+  return now - days * 86_400_000;
 }
 
 function sendJson(res, status, payload) {
@@ -487,6 +632,21 @@ function sendTranscriptJson(res, status, payload) {
   res.end(JSON.stringify(payload));
 }
 
+/** Lazily bind the machine-footprint collector (ADR-0025), for the same reason
+ *  lazyUsage is lazy: the System area pulls in five walkers plus the runtime
+ *  survey, and a panel that never opens that tab must not pay for them. One
+ *  instance per dashboard server — it owns the cheap tier's TTL cache and the
+ *  deep scan's single-flight slot, and a second instance would defeat both. */
+function lazySystem(systemOptions = {}) {
+  let instancePromise;
+  return async () => {
+    instancePromise ||= import('./footprint/index.mjs').then(({ createSystemCollector }) => (
+      createSystemCollector(systemOptions)
+    ));
+    return instancePromise;
+  };
+}
+
 /** Load the collector only when Live is requested. This keeps dashboard startup
  * cheap and permits tests/embedders to inject a source without touching real
  * transcript stores. */
@@ -511,7 +671,8 @@ function lazyLive(liveOptions = {}) {
  *             any|Promise<any>)|any,
  *           intelClientBuffer?: number, intelMaxClients?: number,
  *           discoverProjects?: () => Array<{ path: string, label: string, source?: string }>,
- *           machineWideIntel?: (projects: Array<any>) => any }} [opts]
+ *           machineWideIntel?: (projects: Array<any>) => any,
+ *           system?: any, systemOptions?: any }} [opts]
  * @returns {Promise<{ url: string, urlWithToken: string, port: number, token: string, close: () => Promise<void> }>}
  */
 export function startDashboard({
@@ -520,7 +681,7 @@ export function startDashboard({
   liveOptions = {}, liveIdleMs = 30_000, transcripts, transcriptOptions = {},
   transcriptClientBuffer = 64, transcriptMaxClients = 16,
   intelWatch, intelClientBuffer = 256, intelMaxClients = 32,
-  discoverProjects, machineWideIntel,
+  discoverProjects, machineWideIntel, system, systemOptions = {},
 } = {}) {
   const provide = fetchStatus || shellOutStatus(cwd);
   const usageApi = usage || lazyUsage();
@@ -528,6 +689,22 @@ export function startDashboard({
   // real ~/.config through this route. Lazy for the same reason lazyUsage is.
   const provideLimits = limits || (async () => (await import('./quota.mjs')).readLimits());
   const provideLive = typeof live === 'function' ? live : live ? async () => live : lazyLive(liveOptions);
+  // Same injection contract as `live`: a function is called to produce the
+  // collector, a value is reused verbatim (tests hand over a fake so the route
+  // never walks the real machine), and the default is the lazy real one. The
+  // collector must expose read/refreshDeep — checked at use, not here, so an
+  // unopened System tab still costs nothing.
+  const provideSystem = typeof system === 'function'
+    ? system : system ? async () => system : lazySystem({ cwd, ...systemOptions });
+  let systemPromise;
+  const getSystem = async () => {
+    const collector = await (systemPromise ||= Promise.resolve().then(provideSystem));
+    if (!collector || typeof collector.read !== 'function'
+      || typeof collector.refreshDeep !== 'function') {
+      throw new TypeError('system collector must implement read and refreshDeep');
+    }
+    return collector;
+  };
   let transcriptServicePromise;
   const provideTranscripts = typeof transcripts === 'function'
     ? transcripts : transcripts ? async () => transcripts : async () => {
@@ -605,9 +782,12 @@ export function startDashboard({
   // server, used by BOTH /api/status and /api/live/intelligence so they can
   // never scan the machine independently or disagree on results within the
   // same TTL window.
+  const censusBacked = censusBackedDiscovery();
+  const injectedDiscovery = typeof discoverProjects === 'function';
   const getProjectSnapshot = buildProjectSnapshotCache(
-    typeof discoverProjects === 'function' ? discoverProjects : discoverRuvfloProjects,
+    injectedDiscovery ? discoverProjects : censusBacked.discover,
     typeof machineWideIntel === 'function' ? machineWideIntel : readMachineWideIntel,
+    injectedDiscovery ? null : censusBacked.readCensus,
   );
 
   // ── /api/live/intelligence pool plumbing ──────────────────────────────────
@@ -757,6 +937,25 @@ export function startDashboard({
       try {
         const service = await getLive();
         sendJson(res, 200, publicLivePayload(await service.snapshot()));
+      } catch {
+        sendJson(res, 503, { error: 'live telemetry unavailable' });
+      } finally {
+        scheduleLiveIdle();
+      }
+      return;
+    }
+
+    if (url === '/api/live/history') {
+      // On-demand, not part of the SSE stream: a fresh scan per request, same
+      // privacy scrubbing (publicLivePayload) as every other live surface.
+      try {
+        const service = await getLive();
+        if (typeof service.historySnapshot !== 'function') {
+          sendJson(res, 501, { error: 'history browsing not supported by this live service' });
+          return;
+        }
+        const sinceMs = windowToSinceMs(query.get('window'));
+        sendJson(res, 200, publicLivePayload(await service.historySnapshot({ sinceMs })));
       } catch {
         sendJson(res, 503, { error: 'live telemetry unavailable' });
       } finally {
@@ -1199,6 +1398,55 @@ export function startDashboard({
         sendJson(res, 200, { ...payload, insights: detectLimitInsights(payload, agg) ?? [] });
       } catch (e) {
         sendJson(res, 500, { error: String(e && e.message || e) });
+      }
+      return;
+    }
+
+    // ── System / machine footprint (ADR-0025). Lazy, like Usage above. ──────
+    //
+    // DELIBERATE DIVERGENCE from publicLivePayload, documented in ADR-0025 §7
+    // and the machine-footprint DDD's delivery section: this payload carries
+    // ABSOLUTE PATHS and is NOT run through publicLivePayload's leaf-only
+    // reduction. That reduction exists because a path is incidental provenance
+    // on a *session* payload; here the path IS the answer — a storage
+    // breakdown that hides where the bytes live answers nothing. The exposure
+    // is bounded by what the collectors structurally cannot do: file CONTENTS
+    // are never read (stat metadata, directory entries, and manifest names
+    // only), so no transcript, prompt, or tool payload can reach this route to
+    // leak. Delivery protections are otherwise identical to every route above
+    // — loopback bind, per-session token auth, no-store, nosniff, zero egress.
+    if (url === '/api/system') {
+      try {
+        const collector = await getSystem();
+        // ORDER IS LOAD-BEARING: assemble the payload BEFORE starting a scan.
+        // The deep collectors are synchronous, so the first phase occupies the
+        // event loop the moment it gets a turn — and `read()` awaits, which
+        // hands it that turn. Starting first therefore made the *initiating*
+        // request wait out the phase it had just kicked off (measured: 9s),
+        // which is precisely the hang the progress state exists to avoid.
+        const payload = await collector.read();
+        if (query.get('refresh') === 'deep') {
+          // Start-or-attach and answer NOW. The collector's single flight means
+          // a second refresh joins the running scan rather than racing it, and
+          // it never rejects — the catch guards an injected collector that does
+          // not honour that contract, so a bad one cannot take the process down
+          // with an unhandled rejection.
+          // `trees` is a MEASUREMENT parameter, not a view filter: project
+          // working trees are only walked when it is set, and one large
+          // repository outweighs every shared cache combined — so the ranking
+          // has to be re-measured, not re-sorted. Absent means "keep whatever
+          // the collector already defaults to".
+          const trees = query.get('trees');
+          Promise.resolve(collector.refreshDeep(
+            trees == null ? undefined : { includeProjectTrees: trees === '1' },
+          )).catch(() => {});
+          // The payload predates the start by microseconds; re-stamp the live
+          // scan block so this response reads "running", not "idle".
+          if (typeof collector.scanState === 'function') payload.scan = collector.scanState();
+        }
+        sendJson(res, 200, payload);
+      } catch (e) {
+        sendJson(res, 503, { error: 'system footprint unavailable', reason: String(e && e.message || e) });
       }
       return;
     }

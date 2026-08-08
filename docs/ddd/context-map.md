@@ -21,7 +21,9 @@ Native Evidence ----> Evidence Acquisition ----> Canonical Evidence
                     |                       |                              |
                     +-----------------------+----> Dashboard Delivery <----+
                                                           ^
-Project State (.claude-flow/*) ----> Project Intelligence ┘
+Project State (.claude-flow/*) ----> Project Intelligence-+
+Local filesystem + process table ---> Machine Footprint --+
+Curated editorial content ----------> Component Directory-+
 
 Maintainer Administration is a separate, deliberately-egressing context.
 ```
@@ -87,11 +89,40 @@ provider, or lifecycle identity and grades no per-field evidence confidence.
 
 See [Project intelligence](project-intelligence.md).
 
+### Machine footprint
+
+Owns read-only measurement of what the toolchain costs this machine: install bytes and install
+method per managed tool, the ephemeral runtime census of host processes and daemons, the retained
+data breakdown (category → host → project → session) with growth and advisory reclaimable
+candidates, the deduplicated cross-host catalog inventory, and per-project approximate lines of
+code and disk. Its sources are the local filesystem and the current-user process table — the same
+trust boundary `ak status` and the runtime survey already cross — so no anti-corruption adapter is
+required. It is structurally metadata-only: collectors read directory entries, `stat` results,
+manifest names, and `.git/config`'s remote URL, so transcript, prompt, and tool-payload content
+cannot enter the model. It owns no spend, activity, or learning facts, and it mutates nothing
+beyond its own snapshot file.
+
+See [Machine footprint](machine-footprint.md).
+
+### Component directory
+
+Owns the curated editorial identity of every component agentic-kit installs or configures: a
+tagline, one plain-language paragraph, outbound source/package/docs links, an icon spec, a
+category, and a stable curated order. That content is authored, checked in, and versioned with the
+release — never generated, fetched, or derived at runtime. It performs no detection of its own: the
+installed/version/configured chips are joined at render time from facts existing collectors already
+produce, and a failed join degrades chips to unknown while the editorial content still renders in
+full. It renders no numbers beyond version strings; health, cost, activity, and measurement belong
+to their own contexts.
+
+See [Component directory](component-directory.md).
+
 ### Dashboard delivery
 
 Owns protected HTTP/SSE delivery, browser DTOs, filters, presentation, and interaction state. It
-may combine read models from Observability, Historical Usage, Project Intelligence, routing, and
-integration facts. It cannot manufacture or strengthen domain facts.
+may combine read models from Observability, Historical Usage, Project Intelligence, Machine
+Footprint, Component Directory, routing, and integration facts. It cannot manufacture or strengthen
+domain facts.
 
 ### Maintainer administration
 
@@ -114,6 +145,29 @@ and credential policy is distinct from the offline-first dashboard and integrati
 | Historical usage | Dashboard delivery | Historical aggregates and findings |
 | Project state (`.claude-flow/*`) | Project intelligence | Direct local file reads; no anti-corruption adapter needed |
 | Project intelligence | Dashboard delivery | Read-model projection, delivered by poll (`/api/status`) and SSE push (`/api/live/intelligence`) |
+| Local filesystem and process table | Machine footprint | Direct metadata-only reads; no anti-corruption adapter needed |
+| Project census | Machine footprint | Candidate paths only, at directory granularity; every rendered figure is measured by this context's own collectors |
+| Project census | Project intelligence | The `learning` scope, folded onto project identity — the project list and the selectable key |
+| Project census | Historical usage | Repository roots, so a session in a sub-directory labels as its repository rather than as a peer project |
+| Machine footprint | Dashboard delivery | Two-tier measurement read model over `GET /api/system`, and the same collector behind `ak system` |
+| Integration management | Component directory | Registry consumed only as a parity gate; no editorial content flows either way |
+| Detection facts (`/api/status`, managed-tools) | Component directory | Read-only join at render; a failed join degrades chips to unknown, never hides cards |
+| Component directory | Dashboard delivery | Versioned editorial entries imported by the page; no endpoint, no probe, no cache |
+
+### Project census (shared kernel)
+
+`src/lib/project-census.mjs` is the one enumeration of this machine's projects
+([ADR-0027](../adr/0027-shared-project-census.md)). It is a **shared kernel**, not a context: it
+owns no domain logic, produces no rendered figure, and every consumer applies its own named scope
+and takes its own measurements. Four contexts derive their project list from it, and the identity
+it keys on (`resolveProjectIdentity`) is Observability's, reused rather than reinvented — which is
+what makes a project mean the same thing in all four.
+
+The kernel deliberately serves **two granularities**. Machine footprint consumes directories,
+because directories are what have bytes and lines in them. Project intelligence consumes projects,
+folded onto identity, because a project is what a user selects. Collapsing those would either
+destroy the System area's per-directory figures or break the Intelligence picker; both were
+observed before the split was made explicit.
 
 ## Boundary rules
 
@@ -123,6 +177,14 @@ and credential policy is distinct from the offline-first dashboard and integrati
 - Dashboard presentation cannot upgrade provenance.
 - Historical usage and live topology share identifiers, not aggregate ownership.
 - Network egress occurs only in commands and contexts whose contract explicitly permits it.
+- Every project count is rendered with the scope that produced it; two contexts may report
+  different totals, but neither may report an unexplained one.
 - Project intelligence reads local project state directly; it never enters Evidence Acquisition's
   anti-corruption layer or Observability's canonical event model, and it establishes no session,
   actor, host, provider, or lifecycle identity.
+- Machine footprint measures metadata only. It never opens transcript, prompt, or tool-payload
+  content, never publishes spend, session, or learning facts, and never renders an unmeasured
+  value as zero.
+- Component directory authors identity, it does not observe it. Editorial prose never asserts
+  runtime state; installed, version, and configured render exclusively as chips fed by detection
+  facts borrowed from existing collectors.

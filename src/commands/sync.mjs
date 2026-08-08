@@ -12,7 +12,7 @@ import { OPENCODE_LIFECYCLE_ADAPTER } from '../lib/opencode.mjs';
 import { runLifecycle } from '../lib/adapters/lifecycle.mjs';
 import { listDaemons, staleDaemons, reap } from '../lib/daemons.mjs';
 import { loadKitConfig, saveKitConfig } from '../lib/config.mjs';
-import { commandHosts, applyHosts, applyProviders, hostInstallState, installHost, applyAqeRouter, seedActivityRoutesIfMultiHost, ensureCodexMcp, ensureRufloMcpInCodex, bothHostsEnabled } from '../lib/providers.mjs';
+import { commandHosts, applyHosts, applyProviders, hostInstallState, installHost, applyAqeRouter, seedActivityRoutesIfMultiHost, migrateRetiredRoutesInConfig, ensureCodexMcp, ensureRufloMcpInCodex, bothHostsEnabled } from '../lib/providers.mjs';
 import { driftReport, selfDrift } from '../lib/versions.mjs';
 import { RUVECTOR_PKG, managed as ruvectorManaged } from '../lib/ruvector.mjs';
 import { pruneNpxStale } from '../lib/npx.mjs';
@@ -209,6 +209,20 @@ export async function run({ flags, pkgRoot }) {
     // eligible (e.g. aqe upgraded ≥3.13.1 since enablement), before materializing.
     const seed = seedActivityRoutesIfMultiHost(cfg);
     if (seed.seeded) { saveKitConfig(cfg); report('routing', { ok: true, changed: true, detail: `seeded ${seed.count} activities` }); }
+    // Retire withdrawn models from the persisted policy. Distinct from divergence
+    // (which stays an explicit `ak x host refresh` decision): a retired model
+    // stops answering, so leaving it named on disk is a scheduled failure. Only
+    // seeded entries are rewritten; a user pin is reported and left alone.
+    const retired = migrateRetiredRoutesInConfig(cfg);
+    if (retired.changes.length > 0) {
+      if (retired.changed) saveKitConfig(cfg);
+      for (const c of retired.changes) {
+        const when = c.retiresOn ? `retires ${c.retiresOn}` : 'already withdrawn';
+        report('routing', c.rewritten
+          ? { ok: true, changed: true, detail: `${c.activity} ${c.field}: ${c.from} → ${c.to} (${when})` }
+          : { ok: true, changed: false, detail: `${c.activity} ${c.field} pins ${c.from} (${when}) — user pin kept; ak runs ${c.to}` });
+      }
+    }
     const router = applyAqeRouter(cfg, cwd);
     if (router.changed || !router.ok) report('aqe router', router);
     const mcp = await ensureCodexMcp(cfg, cwd);

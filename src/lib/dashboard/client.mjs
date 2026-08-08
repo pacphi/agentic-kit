@@ -1,4 +1,5 @@
 import { CAT, RANK, PREF, esc, catOf, groupRows, rowLine, groupCard, gridHtml, noticeHtml } from './groups.mjs';
+import { directoryEntries } from './about-directory.mjs';
 
 // The classification/grouping/card/notice logic lives in ./groups.mjs (pure —
 // unit-testable in node without a DOM). Here those exact function sources and
@@ -11,12 +12,19 @@ const objLiteral = (o) => `{${Object.entries(o).map(([k, v]) => `${ident(k) ? k 
 const CAT_JS = objLiteral(CAT);
 const RANK_JS = objLiteral(RANK);
 const PREF_JS = JSON.stringify(PREF);
+// The About area's authored directory, serialized into the bundle rather than
+// fetched: it is release-versioned editorial content, not machine state, so it
+// ships with the page and needs no endpoint of its own (ADR-0026). Runtime
+// facts arrive from the /api/status payload the dashboard already polls and are
+// joined in the browser.
+const ABOUT_JS = JSON.stringify(directoryEntries());
 
 export const JS = `
 (function(){
   "use strict";
   var root=document.documentElement;
   var LS="ak-dash-theme", LS_TAB="ak-dash-tab", LS_OVERVIEW="ak-dash-overview-view";
+  var LS_SYSTEM="ak-dash-system-view", LS_ABOUT_NUDGE="ak-dash-about-nudge";
 
   // Dashboard-wide session token (ADR-0014). Bootstrap is idempotent and
   // duplicated from live-view.mjs's copy (separate <script> scope, no shared
@@ -85,19 +93,30 @@ export const JS = `
   // ── tabs (segmented control) ──
   // Category map (from ./groups.mjs — see that file): every subsystem lands in
   // exactly one tab; unknown/future subsystems fall back to Runtime.
-  var TABS=["overview","usage","observability"];
+  // Tab ORDER is the array order: About leads (orientation first), System
+  // trails (the machine-resource family). Overview stays the LANDING view —
+  // activeTab's initial value below is deliberately not TABS[0].
+  var TABS=["about","overview","usage","observability","system"];
+  var AREAS={about:"panel-about",overview:"area-overview",usage:"panel-usage",
+    observability:"panel-observability",system:"area-system"};
   var OVERVIEW_VIEWS=["summary","hosts","providers","runtime","intel"];
+  var SYSTEM_VIEWS=["summary","advisory","sessions","storage","runtime","catalog","projects"];
+  var ABOUT_SECTIONS=["hosts","engine","quality","kit","configured"];
   var VIEWS=["score","limits","findings","sessions","transcript"];
   var CAT=${CAT_JS};
   ${catOf.toString()}
 
   var activeTab="overview", overviewView="summary", initialLiveScope="live";
   var usageView="score", usageSession=null, usageDays=14;
+  var systemView="summary", aboutSection=null;
   try{var st=localStorage.getItem(LS_TAB); if(st&&TABS.indexOf(st)>=0)activeTab=st;}catch(e){}
   try{var ov=localStorage.getItem(LS_OVERVIEW);if(ov&&OVERVIEW_VIEWS.indexOf(ov)>=0)overviewView=ov;}catch(e){}
+  try{var sv=localStorage.getItem(LS_SYSTEM);if(sv&&SYSTEM_VIEWS.indexOf(sv)>=0)systemView=sv;}catch(e){}
   // Canonical hierarchical deep links: #overview/runtime, #usage/sessions,
-  // and #observability/history. A Usage segment that is not a known view is a
-  // session id and opens the masked transcript reader.
+  // #observability/history, #system/storage, and #about/configured. A Usage
+  // segment that is not a known view is a session id and opens the masked
+  // transcript reader; an About segment is a section to scroll to, since About
+  // is one continuous page rather than a set of sub-views.
   try{
     var parts=location.hash.slice(1).split("/");
     if(parts[0]&&TABS.indexOf(parts[0])>=0)activeTab=parts[0];
@@ -110,6 +129,8 @@ export const JS = `
       else{usageView="transcript"; usageSession=decodeURIComponent(parts[1]);}
     }
     if(parts[0]==="observability"&&parts[1]==="history")initialLiveScope="history";
+    if(parts[0]==="system"&&parts[1]&&SYSTEM_VIEWS.indexOf(parts[1])>=0)systemView=parts[1];
+    if(parts[0]==="about"&&parts[1]&&ABOUT_SECTIONS.indexOf(parts[1])>=0)aboutSection=parts[1];
   }catch(e){}
 
   function overviewHash(){return"#overview/"+(overviewView==="intel"?"intelligence":overviewView);}
@@ -118,7 +139,12 @@ export const JS = `
     return "#usage/"+usageView;
   }
   function syncHash(){
-    var hash=activeTab==="overview"?overviewHash():activeTab==="usage"?usageHash():"#observability/"+(window.AKLive&&window.AKLive.state.scope||initialLiveScope);
+    var hash="#"+activeTab;
+    if(activeTab==="about")hash=aboutSection?"#about/"+aboutSection:"#about";
+    else if(activeTab==="overview")hash=overviewHash();
+    else if(activeTab==="usage")hash=usageHash();
+    else if(activeTab==="system")hash="#system/"+systemView;
+    else hash="#observability/"+(window.AKLive&&window.AKLive.state.scope||initialLiveScope);
     try{if(history.replaceState)history.replaceState(null,"",hash);}catch(e){}
   }
 
@@ -142,6 +168,23 @@ export const JS = `
     if(!skipHash&&activeTab==="overview")syncHash();
     syncIntelStream();
   }
+  // System's five sub-views ride the same secondary rail as Overview's, with
+  // the same persistence and the same aria wiring. Switching a view NEVER
+  // fetches: the whole payload is one document, so a sub-view is a filter on
+  // data already in hand, and a deep scan is only ever the Rescan button.
+  function setSystemView(id,focus,skipHash){
+    if(SYSTEM_VIEWS.indexOf(id)<0)return;
+    systemView=id;
+    try{localStorage.setItem(LS_SYSTEM,id);}catch(e){}
+    for(var i=0;i<SYSTEM_VIEWS.length;i++){
+      var view=SYSTEM_VIEWS[i],on=view===id;
+      var button=document.querySelector('[data-system-view="'+view+'"]');
+      var panel=document.getElementById("panel-sys-"+view);
+      if(button){button.setAttribute("aria-selected",on?"true":"false");button.tabIndex=on?0:-1;if(on&&focus)button.focus();}
+      if(panel)panel.hidden=!on;
+    }
+    if(!skipHash&&activeTab==="system")syncHash();
+  }
   function setTab(id,focus,skipHash){
     if(TABS.indexOf(id)<0)return;
     if(activeTab==="observability"&&id!=="observability"&&window.AKLive)window.AKLive.deactivate();
@@ -152,16 +195,25 @@ export const JS = `
     // actually opened, never on the shared status poll.
     if(id==="usage"&&!usageLoaded)loadUsage();
     if(id==="observability"&&window.AKLive)window.AKLive.activate();
+    // System is lazy the same way, and lazier still: opening it reads the CHEAP
+    // tier only (ADR-0025 §3). It never triggers a deep scan — a multi-second
+    // walk on tab-open is exactly the hang the tiering exists to prevent.
+    if(id==="system"&&!SYSTEM&&!systemBusy)loadSystem();
     for(var i=0;i<TABS.length;i++){
       var t=TABS[i], on=(t===id);
       var btn=document.querySelector('[data-tab="'+t+'"]');
       if(btn){btn.setAttribute("aria-selected",on?"true":"false"); btn.tabIndex=on?0:-1; if(on&&focus)btn.focus();}
+      var area=document.getElementById(AREAS[t]);
+      if(area)area.hidden=!on;
+      var secondary=document.getElementById("secondary-"+t);
+      if(secondary)secondary.hidden=!on;
     }
-    document.getElementById("area-overview").hidden=id!=="overview";
-    document.getElementById("panel-usage").hidden=id!=="usage";
-    document.getElementById("panel-observability").hidden=id!=="observability";
-    for(var j=0;j<TABS.length;j++)document.getElementById("secondary-"+TABS[j]).hidden=TABS[j]!==id;
     if(id==="overview")setOverviewView(overviewView,false,true);
+    if(id==="system")setSystemView(systemView,false,true);
+    // Deliberately NOT scrolling here: at boot this runs before the directory
+    // has rendered, so the section positions it would measure are the ones an
+    // empty page has. renderAbout owns the one-shot scroll (aboutScrollPending).
+    if(id==="about"&&aboutSection)aboutScrollPending=true;
     positionThumb();
     syncIntelStream();
   }
@@ -183,6 +235,44 @@ export const JS = `
     overviewSeg.addEventListener("click",function(e){var b=e.target.closest?e.target.closest("[data-overview-view]"):null;if(b)setOverviewView(b.getAttribute("data-overview-view"));});
     overviewSeg.addEventListener("keydown",function(e){if(!/^(ArrowLeft|ArrowRight|Home|End)$/.test(e.key))return;var i=OVERVIEW_VIEWS.indexOf(overviewView);i=e.key==="Home"?0:e.key==="End"?OVERVIEW_VIEWS.length-1:(i+(e.key==="ArrowRight"?1:OVERVIEW_VIEWS.length-1))%OVERVIEW_VIEWS.length;setOverviewView(OVERVIEW_VIEWS[i],true);e.preventDefault();});
   }
+  var systemSeg=document.getElementById("system-seg");
+  if(systemSeg){
+    systemSeg.addEventListener("click",function(e){var b=e.target.closest?e.target.closest("[data-system-view]"):null;if(b)setSystemView(b.getAttribute("data-system-view"));});
+    systemSeg.addEventListener("keydown",function(e){if(!/^(ArrowLeft|ArrowRight|Home|End)$/.test(e.key))return;var i=SYSTEM_VIEWS.indexOf(systemView);i=e.key==="Home"?0:e.key==="End"?SYSTEM_VIEWS.length-1:(i+(e.key==="ArrowRight"?1:SYSTEM_VIEWS.length-1))%SYSTEM_VIEWS.length;setSystemView(SYSTEM_VIEWS[i],true);e.preventDefault();});
+  }
+  // About sections are anchors, not sub-views: one continuous page, so the rail
+  // scrolls rather than swapping panels. The click is intercepted so the hash
+  // stays in the dashboard's own #tab/segment grammar instead of the browser
+  // writing a bare fragment the router does not recognize.
+  // The sticky tabbar and rail would otherwise cover the heading being scrolled
+  // to; .ab-sec carries the scroll-margin-top that keeps it clear.
+  function scrollToAboutSection(){
+    if(!aboutSection)return;
+    var target=document.getElementById("ab-"+aboutSection);
+    if(target&&target.scrollIntoView)target.scrollIntoView({block:"start",behavior:"auto"});
+  }
+  // A deep link into a section is a ONE-SHOT scroll that has to wait for the
+  // cards to exist: the section headings are static markup, so before the
+  // directory renders they are all stacked near the top and a scroll there
+  // lands nowhere. renderAbout consumes this flag once — which is also what
+  // stops the 30s status poll from yanking a reader back to the linked section.
+  var aboutScrollPending=!!aboutSection;
+  var aboutAnchors=document.getElementById("about-anchors");
+  if(aboutAnchors)aboutAnchors.addEventListener("click",function(e){
+    var a=e.target.closest?e.target.closest("a[href]"):null;
+    if(!a)return;
+    e.preventDefault();
+    var seg=String(a.getAttribute("href")||"").split("/")[1]||null;
+    if(ABOUT_SECTIONS.indexOf(seg)<0)return;
+    aboutSection=seg;
+    if(activeTab!=="about")setTab("about");
+    else syncHash();
+    // The cards already exist by the time any anchor is clickable (renderAbout
+    // runs at boot), so this scroll needs no deferral — unlike the deep-link
+    // path, which fires while the page is still assembling itself.
+    aboutScrollPending=false;
+    scrollToAboutSection();
+  });
   window.addEventListener("resize",positionThumb);
   var mapEl=document.getElementById("statusmap");
   if(mapEl)mapEl.addEventListener("click",function(e){
@@ -372,8 +462,20 @@ export const JS = `
     var curveArr=(imp&&Array.isArray(imp.curve))?imp.curve:[];
     var curveVals=curveArr.map(function(c){return Number(c&&c.acc)||0;});
 
-    if(!pats.length&&!deltas.length&&!storeSeries.length&&!nodesSeries.length&&!curveVals.length){strip.hidden=true;return;}
+    // The project PICKER lives in this strip's head, so the strip itself must
+    // stay visible even when the selected project has nothing to chart —
+    // hiding it would strand the user on an empty project with no control to
+    // pick a different one. Only the charts collapse.
+    var sparkRow=document.getElementById("spark-row");
+    var emptyEl=document.getElementById("history-empty");
+    var nothing=!pats.length&&!deltas.length&&!storeSeries.length&&!nodesSeries.length&&!curveVals.length;
     strip.hidden=false;
+    if(sparkRow)sparkRow.hidden=nothing;
+    if(emptyEl){
+      emptyEl.hidden=!nothing;
+      if(nothing)emptyEl.textContent="no learning history recorded for "+(selectedProjectLabel||"this project")+" yet.";
+    }
+    if(nothing){note.textContent="";return;}
     note.textContent=(series.length?series.length+" samples":"snapshot")+(intelSource?" · live":"");
 
     document.getElementById("spark-patterns").innerHTML=pats.length>1?sparkline(pats):flat(pats.length?String(pats[0])+" (one sample)":"no data");
@@ -423,17 +525,43 @@ export const JS = `
     };
   }
 
+  // The census explainer (ADR-0027). Two counts on two tabs are allowed to
+  // differ — they answer different questions — but the user must be able to
+  // find out WHICH question each answered. This is that affordance; it is the
+  // reason the redundant "N projects tracked on this machine" caption could be
+  // dropped rather than merely reworded.
+  function renderCensus(census){
+    var box=document.getElementById("mw-census");
+    var body=document.getElementById("mw-census-body");
+    if(!box||!body)return;
+    // No census means discovery was injected — say nothing rather than invent a
+    // machine-wide figure from a fixture.
+    if(!census||!census.counts){box.hidden=true;body.innerHTML="";box.open=false;return;}
+    var c=census.counts;
+    var html='<p class="mw-census-line">This panel counts <b>'+fmtNum(c.learning)+'</b> project'
+      +(c.learning===1?"":"s")+" &mdash; "+esc(census.note||"")+".</p>";
+    html+='<p class="mw-census-line">Measured from <b>'+fmtNum(c.everSeen)+'</b> project'
+      +(c.everSeen===1?"":"s")+" any host has ever recorded a session in. Of those, <b>"
+      +fmtNum(c.onDisk)+"</b> still exist on disk and <b>"+fmtNum(c.gitRepos)
+      +"</b> are git repositories. Other tabs count over their own time window, "
+      +"so a smaller number there is a shorter window, not a missing project.</p>";
+    html+='<p class="mw-census-line">Directories that belong to one repository &mdash; a sub-folder a '
+      +"session ran in, or a throwaway agent worktree &mdash; are folded into that one project here.</p>";
+    if(c.complete===false){
+      html+='<p class="mw-census-caveat">At least one transcript could not be read, '
+        +"so every figure above is a lower bound.</p>";
+    }
+    body.innerHTML=html;
+    box.hidden=false;
+  }
+
   function renderMachineWide(mw){
     var totals=(mw&&mw.totals)||{};
     var perProject=Array.isArray(mw&&mw.perProject)?mw.perProject.slice():[];
-    var note=document.getElementById("mw-note");
-    if(note)note.textContent=totals.projectCount
-      ?(fmtNum(totals.projectCount)+" project"+(totals.projectCount===1?"":"s")+" tracked on this machine")
-      :"no ruflo-initialized projects discovered on this machine";
     var hero=document.getElementById("mw-hero");
     if(hero)hero.innerHTML=
       kpi("patterns learned",fmtNum(totals.patternsLearnedLifetime),"lifetime &middot; every tracked project","")
-      +kpi("projects tracked",fmtNum(totals.projectCount),"ruflo-initialized on this machine","")
+      +kpi("projects tracked",fmtNum(totals.projectCount),"with memory or intelligence state","")
       +kpi("most active project",totals.mostActiveProject||"—","by most recent learning adaptation","accent");
     perProject.sort(function(a,b){return (Number(b&&b.patternsLearned)||0)-(Number(a&&a.patternsLearned)||0);});
     var table=document.getElementById("mw-table");
@@ -445,8 +573,19 @@ export const JS = `
       var p=perProject[i]||{};
       var lastMs=Number(p.lastAdaptation)||0;
       var lastTxt=lastMs?ago(Math.max(0,Math.round((Date.now()-lastMs)/1000))):"—";
+      // Name the stores this project actually has. Without it a 0/0/— row is
+      // ambiguous between "intelligence is active here but ruflo never trained"
+      // and "something failed to read" — and the first is the common case now
+      // that the panel counts agentic-qe and swarm state too.
+      var stores=Array.isArray(p.learningState)?p.learningState:[];
+      var storeTip=stores.length?stores.join(" · "):"no learning stores found";
+      var storeHtml=stores.length
+        ? '<span class="mw-stores" title="'+esc(storeTip)+'">'
+          +stores.map(function(s){return '<i class="mw-store" data-store="'+esc(String(s).replace(/^[.]/,""))+'"></i>';}).join("")
+          +"</span>"
+        : "";
       html+='<div class="mw-row">'
-        +'<span class="mw-name">'+esc(p.label||"(unlabeled)")+"</span>"
+        +'<span class="mw-name">'+esc(p.label||"(unlabeled)")+storeHtml+"</span>"
         +'<span class="mw-val mono">'+esc(fmtNum(p.patternsLearned))+"</span>"
         +'<span class="mw-val mono">'+esc(fmtNum(p.patternStoreCount))+"</span>"
         +'<span class="mw-val mono">'+esc(lastTxt)+"</span>"
@@ -468,10 +607,6 @@ export const JS = `
       selectedProjectKey=intel.selectedProjectKey;
       selectedProjectLabel=intel.selectedProjectLabel;
     }
-    var note=document.getElementById("intel-picker-note");
-    if(note)note.textContent=intelProjects.length
-      ?(intelProjects.length+" project"+(intelProjects.length===1?"":"s")+" available")
-      :"no projects discovered";
     var nameEl=document.getElementById("history-project-name");
     if(nameEl)nameEl.textContent=selectedProjectLabel||"—";
     var sel=document.getElementById("intel-project-select");
@@ -522,10 +657,30 @@ export const JS = `
       var tag=r.akOriginated?' <span class="r-tag">ak</span>':'';
       var escHtml=(r.escalation&&r.escalation.length)?'<span class="r-esc mono">↑ '+esc(r.escalation.join("→"))+"</span>":"";
       var primAttr=(r.host===primary)?' data-primary="1"':'';
+      // Two different things can be worth saying about a model, and conflating
+      // them would be wrong in both directions (see RETIRED_MODELS in
+      // routing.mjs). A retirement is not a choice — the id in kit.json no
+      // longer answers and ak already substituted it, so the row shows what
+      // will RUN and flags what it replaced. A divergence IS a choice, so it is
+      // stated neutrally, with both models' cost-per-task notes on the tooltip.
+      var flag="";
+      if(r.retiredFrom){
+        flag='<span class="r-flag" data-kind="retired" title="'
+          +esc(r.retiredFrom+" "+(r.retiresOn?"retires "+r.retiresOn:"is withdrawn")
+            +" — ak runs "+r.model+" instead. Run: ak sync — to rewrite it in kit.json.")
+          +'">was '+esc(r.retiredFrom)+"</span>";
+      }else if(r.diverged){
+        var dNote=r.diverged.defaultNote?(" — default: "+r.diverged.defaultNote):"";
+        var cNote=r.diverged.currentNote?(" | current: "+r.diverged.currentNote):"";
+        flag='<span class="r-flag" data-kind="diverged" title="'
+          +esc("the default has moved to "+r.diverged.defaultModel+dNote+cNote
+            +". Neither is automatically better. Run: ak x host refresh — to adopt the default.")
+          +'">default: '+esc(r.diverged.defaultModel)+"</span>";
+      }
       html+='<div class="r-row">'
         +'<span class="r-act mono">'+esc(r.activity)+tag+"</span>"
         +'<span class="r-host r-host-'+esc(r.host)+'"'+primAttr+' title="'+(r.host===primary?"primary host":"alternate host")+'">'+esc(r.host)+"</span>"
-        +'<span class="r-model mono">'+esc(r.model)+"</span>"
+        +'<span class="r-model mono">'+esc(r.model)+flag+"</span>"
         +'<span class="r-meta">'+escHtml+'<span class="r-src r-src-'+esc(r.provenance)+'">'+esc(r.provenance)+"</span></span>"
       +"</div>";
     }
@@ -613,8 +768,10 @@ export const JS = `
     LAST=data;
     renderVerdict(data.overall);
     renderNotice(data.drift);
+    renderAbout(data);
     renderPanels(data.rows);
     renderMachineWide(data.intel&&data.intel.machineWide);
+    renderCensus(data.intel&&data.intel.census);
     renderProjectPicker(data.intel||{});
     renderHistory(buildHistoryView(data));
     renderRouting(data.routing);
@@ -665,6 +822,72 @@ export const JS = `
     try{localStorage.setItem(LS_POLL,JSON.stringify({on:pollOn,intervalMs:pollMs}));}catch(e){}
   }
 
+  // ── Panel collapse (.strip-toggle) ──────────────────────────────────────────
+  // Persisted, unlike the ephemeral row expanders: these panels are re-rendered
+  // by every poll, so an unpersisted collapse would reopen itself within 30 s.
+  // Only DEPARTURES from each panel's markup default are stored, so the default
+  // stays the single source of truth (provider account analytics ships
+  // aria-expanded="false"; the routing panels ship "true") and changing one in
+  // page.mjs does not need a matching change here or a localStorage migration.
+  var LS_COLLAPSE="ak-dash-collapse";
+  var collapseState={};
+  try{
+    var savedCollapse=JSON.parse(localStorage.getItem(LS_COLLAPSE)||"null");
+    if(savedCollapse&&typeof savedCollapse==="object")collapseState=savedCollapse;
+  }catch(e){}
+
+  function saveCollapse(){
+    try{localStorage.setItem(LS_COLLAPSE,JSON.stringify(collapseState));}catch(e){}
+  }
+
+  function setStripCollapsed(btn,collapsed){
+    var id=btn.getAttribute("aria-controls");
+    var body=id?document.getElementById(id):null;
+    btn.setAttribute("aria-expanded",collapsed?"false":"true");
+    if(body)body.hidden=collapsed;
+    if(id){collapseState[id]=collapsed;saveCollapse();}
+  }
+
+  // Collapsible panels live in more than one tab (Overview's routing pair, the
+  // Usage scorecard's provider analytics), so the listener is DOCUMENT-level
+  // rather than hung off any one panel — the per-panel listeners each only fire
+  // inside their own subtree, which would silently leave the others inert.
+  // Then apply saved state once: panels whose id was never toggled keep
+  // whatever page.mjs declared.
+  function wireStripCollapse(){
+    document.addEventListener("click",function(e){
+      var btn=e.target&&e.target.closest?e.target.closest(".strip-toggle"):null;
+      if(!btn)return;
+      setStripCollapsed(btn,btn.getAttribute("aria-expanded")==="true");
+    });
+    // Projects table sorting. Same column toggles direction; a different column
+    // adopts ITS natural direction and takes over as the only active sort.
+    document.addEventListener("click",function(e){
+      var btn=e.target&&e.target.closest?e.target.closest("[data-proj-sort]"):null;
+      if(!btn)return;
+      var key=btn.getAttribute("data-proj-sort");
+      if(!PROJ_SORT[key])return;
+      projSort=projSort.key===key
+        ? {key:key,dir:projSort.dir==="asc"?"desc":"asc"}
+        : {key:key,dir:PROJ_SORT[key].dir};
+      if(SYSTEM)renderSysProjects(SYSTEM);
+    });
+    // Storage's session rows open the same transcript view Usage does, through
+    // the public bridge rather than a second navigation path. It validates the
+    // id itself and returns false on a bad one, so a stale row cannot strand
+    // the user on an empty view.
+    document.addEventListener("click",function(e){
+      var link=e.target&&e.target.closest?e.target.closest("[data-transcript]"):null;
+      if(!link)return;
+      window.AKDashboardOpenTranscript(link.getAttribute("data-transcript"));
+    });
+    var btns=document.querySelectorAll(".strip-toggle");
+    for(var i=0;i<btns.length;i++){
+      var id=btns[i].getAttribute("aria-controls");
+      if(id&&typeof collapseState[id]==="boolean")setStripCollapsed(btns[i],collapseState[id]);
+    }
+  }
+
   function pollStatus(){
     // Carries the CURRENT project selection on every request (omitted only
     // before the very first response has told us the server's own default —
@@ -683,6 +906,10 @@ export const JS = `
       tickClock();
     }).catch(function(){
       var t=document.getElementById("verdict-text"); if(t)t.textContent="server unreachable";
+      // About is editorial content plus a runtime join. Losing the join must
+      // cost the chips, never the page: every card still renders, each one
+      // saying its state is unknown and why (ADR-0026, ADR-0023).
+      renderAbout(null);
     });
   }
 
@@ -696,6 +923,17 @@ export const JS = `
     if(btn)btn.classList.add("spin");
     var jobs=[pollStatus()];
     if(activeTab==="usage")jobs.push(loadUsage(true));
+    // The Runtime view is a live census — processes, CPU, RSS, daemon ages —
+    // and it used to load ONCE when the System tab was first opened, so its
+    // "live" figures could sit unchanged for an entire session while the
+    // header cheerfully reported "updated 4s ago". It now refreshes on the
+    // same clock as everything else the header speaks for.
+    //
+    // Only the cheap tier: this is the plain /api/system read, which is
+    // memoized server-side and never walks the filesystem. The deep scan stays
+    // behind Rescan (?refresh=deep) — putting a multi-minute walk on a 30s
+    // timer would be a different feature and a much worse one.
+    if(activeTab==="system"&&systemView==="runtime"&&!systemBusy)jobs.push(loadSystem());
     Promise.all(jobs).catch(function(){}).then(function(){
       inflight=false;
       if(btn)btn.classList.remove("spin");
@@ -1533,13 +1771,1694 @@ export const JS = `
       }).catch(function(){});
   }
 
+  // ══ About area (ADR-0026) ══════════════════════════════════════════════════
+  // Editorial content comes from the versioned directory below; runtime facts
+  // come from the /api/status payload this file already polls. No endpoint, no
+  // second fetch — the join happens here, and its absence is rendered, not
+  // hidden.
+  var ABOUT=${ABOUT_JS};
+
+  // Directory category -> the page section that carries it. Quality, Safety and
+  // Knowledge are three one-card categories that read as one cluster, so they
+  // share a section; the directory keeps them distinct because they are
+  // distinct concerns, and the page groups them because they scan better that way.
+  var ABOUT_SECTION_OF={hosts:"hosts","engine-memory":"engine",quality:"quality",
+    safety:"quality",knowledge:"quality",kit:"kit",configured:"configured"};
+
+  // Which \`ak status\` rows are unambiguously ABOUT a given component.
+  //   host      one host id inside the shared "hosts" subsystem, matched on the
+  //             row's leading word (those rows are "<host> …" by construction).
+  //   versions  one package inside the shared "versions" subsystem, matched the
+  //             same way, because that subsystem carries every managed package.
+  //   subs      whole subsystems that belong to this component alone.
+  // A component with NO entry here — or one whose rows are simply absent from
+  // this payload — degrades to "state unknown". That is the honest reading: an
+  // unjoined key is an unmeasured fact, never a satisfied one. The permission
+  // allowlist is the standing example: ak emits no permissions row today.
+  var ABOUT_JOIN={
+    "hosts.claude":{host:"claude"},
+    "hosts.codex":{host:"codex"},
+    "hosts.opencode":{host:"opencode"},
+    "ruflo":{versions:"ruflo"},
+    "agentdb":{subs:["agentdb"]},
+    "agentic-qe":{subs:["aqe"],versions:"agentic-qe"},
+    "security":{subs:["security"]},
+    "ruvnet-brain":{subs:["ruvnet-brain"]},
+    "self":{subs:["self"]},
+    "mcp":{subs:["mcp","codex-mcp"]},
+    "blocks":{subs:["blocks"]},
+    // Two statusline surfaces, one card: the worst of the pair drives the chip,
+    // or Codex's line could be broken while the card reads green.
+    "statusline":{subs:["statusline","codex-statusline"]},
+    "routing":{subs:["routing"]},
+    "daemons":{subs:["daemons"]}
+  };
+  var ABOUT_WORD={ok:"installed",warn:"needs attention",fail:"not working"};
+  var ABOUT_WORD_CONF={ok:"configured",warn:"needs attention",fail:"not working"};
+
+  function aboutLead(msg,word){
+    return String(msg||"").toLowerCase().indexOf(String(word).toLowerCase()+" ")===0;
+  }
+  function aboutRows(rows,join){
+    var out=[];
+    for(var i=0;i<rows.length;i++){
+      var r=rows[i]||{},sub=r.subsystem;
+      if(join.host&&sub==="hosts"&&aboutLead(r.message,join.host))out.push(r);
+      else if(join.versions&&sub==="versions"&&aboutLead(r.message,join.versions))out.push(r);
+      else if(join.subs&&join.subs.indexOf(sub)>=0)out.push(r);
+    }
+    return out;
+  }
+  function aboutState(entry,data){
+    var configured=entry.category==="configured";
+    if(!data||!Array.isArray(data.rows))
+      return {state:"unknown",word:"state unknown",title:"the dashboard could not read /api/status",detail:null};
+    var join=ABOUT_JOIN[entry.detectionKey||entry.subsystem||""];
+    if(!join)
+      return {state:"unknown",word:"state unknown",title:"ak status reports no row for this surface yet",detail:null};
+    var rows=aboutRows(data.rows,join);
+    if(!rows.length)
+      return {state:"unknown",word:"state unknown",title:"no ak status row reported this on this machine",detail:null};
+    var level="info",worst=null,titles=rows.map(function(r){return r.level+": "+r.message;}).join(" \\u00b7 ");
+    for(var i=0;i<rows.length;i++){
+      if((RANK[rows[i].level]||0)>=(RANK[level]||0)&&rows[i].level!=="info"){level=rows[i].level;worst=rows[i];}
+    }
+    // Only info rows means the subsystem stated a fact without a verdict — it
+    // told us something, but not that this component is working. Claiming
+    // "installed" from that would be inventing the one thing we were not told.
+    if(level==="info")return {state:"unknown",word:"state unknown",title:titles,detail:null};
+    var state=(level==="warn"||level==="fail")?level:(configured?"configured":"ok");
+    var word=(configured?ABOUT_WORD_CONF:ABOUT_WORD)[level==="warn"||level==="fail"?level:"ok"];
+    return {
+      state:state,word:word,title:titles,
+      // Only a problem earns a line of its own on the card; a healthy component
+      // says so in four words and gets out of the way.
+      detail:(worst&&(level==="warn"||level==="fail"))?worst:null
+    };
+  }
+  // The version chip's fact source is the drift array /api/status already
+  // carries, keyed by package name. A component with no drift entry (Claude
+  // Code is externally installed; aidefence ships inside ruflo) shows its state
+  // WITHOUT a version rather than a version scraped out of prose.
+  function aboutVersion(entry,data){
+    if(!entry.npmPackage||!data||!Array.isArray(data.drift))return null;
+    for(var i=0;i<data.drift.length;i++){
+      var d=data.drift[i];
+      if(d&&d.pkg===entry.npmPackage&&d.installed)return d;
+    }
+    return null;
+  }
+  function aboutVerLabel(v){
+    v=String(v==null?"":v);
+    return /^v/i.test(v)?v:"v"+v;
+  }
+  function aboutTile(icon){
+    if(icon&&icon.kind==="official")
+      return '<span class="ab-tile" data-mark="'+esc(icon.ref)+'" aria-hidden="true">'+sourceHostIcon(icon.ref)+"</span>";
+    // The hue is a token NAME chosen by the directory, never a colour value —
+    // the pattern test is what keeps it that way if the directory ever grows.
+    var hue=(icon&&/^--[a-z-]+$/.test(String(icon.hue||"")))?icon.hue:"--info";
+    return '<span class="ab-tile ab-mg" style="background:var('+hue+')" aria-hidden="true">'
+      +esc((icon&&icon.ref)||"?")+"</span>";
+  }
+  function aboutCard(entry,data){
+    var st=aboutState(entry,data),ver=aboutVersion(entry,data);
+    // Release-tagged tools (the Brain) already record their leading "v"; npm
+    // packages do not. Prefixing unconditionally produced "vv4.0.7".
+    var chipText=st.word+(ver?" \\u00b7 "+aboutVerLabel(ver.installed):"");
+    var detail="";
+    if(st.detail){
+      detail='<p class="ab-detail" data-level="'+esc(st.detail.level)+'">'+esc(st.detail.message)
+        +(st.detail.fix?' <code>'+esc(st.detail.fix)+"</code>":"")+"</p>";
+    }else if(ver&&ver.outdated&&ver.latest){
+      detail='<p class="ab-detail">update available \\u2014 '+esc(aboutVerLabel(ver.latest))+' <code>ak sync</code></p>';
+    }
+    var tail="";
+    if(entry.links&&entry.links.length){
+      tail='<div class="ab-links">'+entry.links.map(function(l){
+        // https only, and outbound only: these are plain anchors the reader
+        // clicks. Nothing on this page ever fetches them (ADR-0025/0026's
+        // zero-egress line), which is why there is no preview, no favicon,
+        // and no link check in the browser.
+        if(!l||!/^https:\\/\\//.test(String(l.url||"")))return "";
+        return '<a class="ab-pill" href="'+esc(l.url)+'" target="_blank" rel="noreferrer noopener">'
+          +esc(l.label)+" &#8599;</a>";
+      }).join("")+"</div>";
+    }else if(entry.manage){
+      tail='<div class="ab-manage">manage: '+esc(entry.manage)+"</div>";
+    }
+    return '<article class="ab-card'+(entry.category==="kit"?" ab-wide":"")+'">'
+      +'<div class="ab-head">'+aboutTile(entry.icon)
+      +'<span class="ab-name"><b>'+esc(entry.name)+"</b>"
+      +'<span class="ab-state" data-state="'+esc(st.state)+'" title="'+esc(st.title)+'">'+esc(chipText)+"</span>"
+      +"</span></div>"
+      +'<span class="ab-tagline">'+esc(entry.tagline)+"</span>"
+      +'<p class="ab-body">'+esc(entry.paragraph)+"</p>"
+      +detail+tail
+    +"</article>";
+  }
+  function renderAbout(data){
+    var buckets={},i,entry,section;
+    for(i=0;i<ABOUT_SECTIONS.length;i++)buckets[ABOUT_SECTIONS[i]]=[];
+    var packaged=0,configured=0,detected=0,joined=false;
+    for(i=0;i<ABOUT.length;i++){
+      entry=ABOUT[i];
+      section=ABOUT_SECTION_OF[entry.category];
+      if(!buckets[section])continue;
+      buckets[section].push(aboutCard(entry,data));
+      if(entry.category==="configured")configured++;
+      else{
+        packaged++;
+        var st=aboutState(entry,data);
+        if(st.state!=="unknown")joined=true;
+        if(st.state==="ok")detected++;
+      }
+    }
+    for(i=0;i<ABOUT_SECTIONS.length;i++){
+      var el=document.getElementById("ab-cards-"+ABOUT_SECTIONS[i]);
+      if(el)el.innerHTML=buckets[ABOUT_SECTIONS[i]].join("");
+    }
+    var lede=document.getElementById("ab-hero-lede");
+    if(lede){
+      // Counts describe the DIRECTORY (what ak manages), which is a release
+      // fact and true on any machine. Per-component state lives on each card's
+      // own chip; an aggregate tally here would just restate it less precisely.
+      lede.innerHTML="agentic-kit manages <b>"+packaged+" components</b> and <b>"+configured
+        +" configurations</b>. This page says what each one is, in plain words \\u2014 and where to "
+        +"read more. Health lives in Overview, spend in Usage, activity in Observability; here, "
+        +"everything just introduces itself.";
+    }
+    if(aboutScrollPending&&activeTab==="about"){aboutScrollPending=false;scrollToAboutSection();}
+  }
+
+  // The first-run nudge. Overview stays the landing view; this points at About
+  // once and remembers being dismissed, in the same localStorage the poll and
+  // theme preferences use. Opening About counts as dismissing it: the tip has
+  // done its job and should not greet a returning reader.
+  function aboutNudgeDismissed(){
+    try{return localStorage.getItem(LS_ABOUT_NUDGE)==="1";}catch(e){return false;}
+  }
+  function dismissAboutNudge(){
+    try{localStorage.setItem(LS_ABOUT_NUDGE,"1");}catch(e){}
+    var el=document.getElementById("about-nudge");
+    if(el)el.hidden=true;
+  }
+  function wireAboutNudge(){
+    var el=document.getElementById("about-nudge");
+    if(el&&!aboutNudgeDismissed()&&activeTab!=="about")el.hidden=false;
+    var go=document.getElementById("about-nudge-go");
+    if(go)go.addEventListener("click",function(){dismissAboutNudge();setTab("about");});
+    var x=document.getElementById("about-nudge-x");
+    if(x)x.addEventListener("click",dismissAboutNudge);
+  }
+
+  // ══ System area (ADR-0025) ════════════════════════════════════════════════
+  // One payload (GET /api/system), five sub-views. The cheap tier arrives on
+  // open; the deep tier is whatever the last user-triggered scan measured,
+  // carried forward with ITS timestamp. Nothing here ever renders an unmeasured
+  // quantity as 0 — mhtml() has no code path that can.
+  var SYSTEM=null, systemBusy=false, systemPollTimer=null;
+  // Consumers view state. consMode re-shapes rows the payload already carries;
+  // whether project trees were MEASURED is the server's fact, read back off the
+  // payload rather than mirrored here, so the chip can never claim a scope the
+  // numbers below it were not measured with.
+  var consMode="ranked";
+
+  // ── Measurement vocabulary (walk.mjs's, read-side) ──
+  function mval(m){return m&&typeof m.value==="number"&&isFinite(m.value)?m.value:null;}
+  function unkHtml(reason,never){
+    return '<span class="sy-unk" title="'+esc(reason||"not measured")+'">'
+      +(never?"not measured yet":"unavailable")+"</span>";
+  }
+  // The ONLY renderer for a Measurement. A missing field is "not measured yet"
+  // (the deep tier has never run); a failed one is "unavailable" with its
+  // reason on hover; a capped or partially-degraded one is prefixed with a
+  // "at least" sign, because those figures are floors and a bare total would
+  // read as a ceiling.
+  function mhtml(m,fmt){
+    if(!m||typeof m!=="object")return unkHtml("this section has not been deep-scanned yet",true);
+    if(m.status==="unknown"||m.value==null)return unkHtml(m.reason,false);
+    return (m.partial?"&#8805;&#8239;":"")+esc((fmt||fmtNum)(m.value));
+  }
+  function fmtBytes(n){
+    n=Number(n)||0;
+    var abs=Math.abs(n);
+    if(abs>=1e12)return (n/1e12).toFixed(2)+" TB";
+    if(abs>=1e9)return (n/1e9).toFixed(2)+" GB";
+    if(abs>=1e6)return (n/1e6).toFixed(1)+" MB";
+    if(abs>=1e3)return (n/1e3).toFixed(0)+" KB";
+    return Math.round(n)+" B";
+  }
+  function bytesPair(n){
+    n=Number(n)||0;
+    var abs=Math.abs(n);
+    if(abs>=1e12)return {n:(n/1e12).toFixed(2),u:"TB"};
+    if(abs>=1e9)return {n:(n/1e9).toFixed(2),u:"GB"};
+    if(abs>=1e6)return {n:(n/1e6).toFixed(1),u:"MB"};
+    if(abs>=1e3)return {n:(n/1e3).toFixed(0),u:"KB"};
+    return {n:String(Math.round(n)),u:"B"};
+  }
+  function fmtDur(ms){
+    ms=Number(ms)||0;
+    var m=Math.floor(ms/60000),h=Math.floor(m/60);
+    if(h>=24)return Math.floor(h/24)+"d "+(h%24)+"h";
+    return h?(h+"h "+(m%60)+"m"):(m+"m");
+  }
+  // Series tokens are chosen from a fixed set — never interpolated from data —
+  // so nothing in a payload can reach a style attribute as a colour.
+  var SERIES=["var(--s1)","var(--s2)","var(--s3)","var(--s4)"];
+  // The project and agentic-kit keys are storage-root owners, not hosts, but they DO
+  // get growth series — and without entries here both rendered in the same
+  // undifferentiated grey, so two of the five panels were unreadable.
+  var HOST_SERIES={claude:"var(--s1)",codex:"var(--s2)",opencode:"var(--s3)",
+    project:"var(--s4)","agentic-kit":"var(--purple)"};
+  /** A YYYY-MM-DD day key as a compact axis tick (MM-DD). Null-safe.
+   *  No regex: this whole file is a template literal, so a backslash class
+   *  would be eaten before it ever reached the browser. */
+  function dayTick(day){
+    var d=String(day||"");
+    return (d.length===10&&d.charAt(4)==="-"&&d.charAt(7)==="-")?d.slice(5):d;
+  }
+  var CAT_SERIES={transcripts:"var(--s1)","ledgers-and-logs":"var(--s2)",
+    "learning-stores":"var(--s3)","kit-caches":"var(--s4)"};
+  // The catalog's kind ids are wire identifiers; these are what a reader sees.
+  // An unknown future kind falls through as its own id rather than vanishing.
+  var KIND_LABEL={skill:"skills",agent:"agents",command:"commands",plugin:"plugins",mcpServer:"MCP"};
+  var KIND_PLURAL={skill:"skills",agent:"agents",command:"commands",plugin:"plugins",mcpServer:"MCP servers"};
+  function hostColor(h){return HOST_SERIES[h]||"var(--dim)";}
+  function catColor(k){return CAT_SERIES[k]||"var(--dim)";}
+  function sysEmpty(msg){return '<div class="empty">'+esc(msg)+"</div>";}
+  var NOT_SCANNED="not measured yet \\u2014 press Rescan to run a deep scan.";
+
+  // ── odometer readout ──
+  // Each digit rolls from 0 to its target. Under prefers-reduced-motion the
+  // page-wide transition kill makes the same code paint the final value at once.
+  // Row height of one digit, in px. MUST equal .od's height in styles.mjs: the
+  // stack is scrolled by whole rows, so a mismatch shows two half digits. 30
+  // because the digits are the Scorecard KPI's 27px — one type scale for both
+  // KPI bands, since they are one click apart.
+  var OD_H=30;
+  function mountOdometers(root){
+    var els=(root||document).querySelectorAll(".od[data-od]");
+    for(var i=0;i<els.length;i++){
+      var el=els[i];
+      if(el.getAttribute("data-mounted")==="1")continue;
+      el.setAttribute("data-mounted","1");
+      var s=String(el.getAttribute("data-od")||""),html="",c,d;
+      for(c=0;c<s.length;c++){
+        var ch=s.charAt(c);
+        if(ch>="0"&&ch<="9"){
+          html+='<span class="dcol"><span class="dstack" data-d="'+ch+'">';
+          for(d=0;d<=9;d++)html+="<span>"+d+"</span>";
+          html+="</span></span>";
+        }else html+='<span class="lit">'+esc(ch)+"</span>";
+      }
+      el.innerHTML=html;
+      (function(node){
+        var stacks=node.querySelectorAll(".dstack");
+        var apply=function(){
+          for(var k=0;k<stacks.length;k++)
+            stacks[k].style.transform="translateY("+(-OD_H*Number(stacks[k].getAttribute("data-d")))+"px)";
+        };
+        if(window.requestAnimationFrame)requestAnimationFrame(function(){requestAnimationFrame(apply);});
+        else apply();
+      })(el);
+    }
+  }
+  /** A KPI tile. The subs argument is an ARRAY of facts, one per line — not a
+   *  dot-joined string. The old single line claimed to be one line of facts but had no
+   *  way to enforce it: three figures in a 250px tile wrapped wherever the text
+   *  ran out, so the separators ended up mid-line and a fact could break across
+   *  two rows. Stacking makes the wrap deliberate and each fact scannable. */
+  function kpiCard(label,valueHtml,subs){
+    var list=[].concat(subs||[]),html="",i;
+    for(i=0;i<list.length;i++)html+='<span class="sub-l">'+list[i]+"</span>";
+    return '<div class="sy-kpi"><span class="lbl">'+esc(label)+"</span>"
+      +'<div class="val">'+valueHtml+"</div>"
+      +'<div class="sub">'+html+"</div></div>";
+  }
+  function odBytes(m){
+    if(!m||m.status==="unknown"||m.value==null)return mhtml(m,fmtBytes);
+    var p=bytesPair(m.value);
+    return (m.partial?'<span class="unit">&#8805;</span>':"")
+      +'<span class="od" data-od="'+esc(p.n)+'"></span><span class="unit">'+p.u+"</span>";
+  }
+  function odCount(m){
+    if(!m||m.status==="unknown"||m.value==null)return mhtml(m);
+    return (m.partial?'<span class="unit">&#8805;</span>':"")
+      +'<span class="od" data-od="'+esc(String(Math.round(m.value)))+'"></span>';
+  }
+
+  // ── charts (inline SVG, built from the payload; no image, no remote asset) ──
+  // The disk denominator is a horizontal meter, not a radial: the question is
+  // "how much of this disk is the toolchain", one ratio, and a ratio does not
+  // need a card's worth of height. A segment thinner than 0.4% of the bar is not
+  // drawn — but its share is always STATED, because padding a sliver up to a
+  // visible width would draw a picture that disagrees with its own caption.
+  function diskSeg(bytes,total,color,label,opacity){
+    var f=total>0?Math.max(0,Math.min(1,bytes/total)):0;
+    if(f<=0.004)return "";
+    return '<i style="width:'+(f*100).toFixed(2)+"%;background:"+color
+      +(opacity?";opacity:"+opacity:"")+'" title="'+esc(label)+'"></i>';
+  }
+  function diskBand(installBytes,dataBytes,totalBytes,freeBytes){
+    var used=installBytes+dataBytes;
+    var share=totalBytes>0?(used/totalBytes)*100:null;
+    var otherUsed=(freeBytes==null||totalBytes<=0)?null:Math.max(0,totalBytes-freeBytes-used);
+    var bar=diskSeg(installBytes,totalBytes,"var(--accent)",
+        "install \\u00b7 "+fmtBytes(installBytes))
+      +diskSeg(dataBytes,totalBytes,"var(--accent)","retained data \\u00b7 "+fmtBytes(dataBytes),".5")
+      +(otherUsed==null?"":diskSeg(otherUsed,totalBytes,"var(--dim)",
+        "everything else on this disk \\u00b7 "+fmtBytes(otherUsed),".55"));
+    var facts='<b>'+esc(fmtBytes(used))+"</b> toolchain ("
+      +esc(fmtBytes(installBytes))+" install + "+esc(fmtBytes(dataBytes))+" retained)"
+      +(share==null?" \\u00b7 disk size unmeasured"
+        :" \\u00b7 "+esc(share<0.1?"<0.1%":share.toFixed(share<10?1:0)+"%")
+          +" of "+esc(fmtBytes(totalBytes)))
+      +" \\u00b7 "+(freeBytes==null?'<span class="sy-unk">free space unmeasured</span>'
+        :"<b>"+esc(fmtBytes(freeBytes))+"</b> free");
+    // No separate legend row: the facts line already names install, retained and
+    // free, and each segment carries its own tooltip. A legend restating them
+    // would be a second line of height buying nothing.
+    return '<div class="sy-diskband"><span class="dk-lbl">disk</span>'
+      +'<span class="dk-meter" role="img" aria-label="'+esc(fmtBytes(used)+" of "
+        +(totalBytes>0?fmtBytes(totalBytes):"an unmeasured disk")+" used by the toolchain")+'">'
+      +bar+"</span>"
+      +'<span class="dk-facts">'+facts+"</span></div>";
+  }
+  function svgDonut(slices,total,unit){
+    var C=2*Math.PI*56,off=0,arcs="";
+    for(var i=0;i<slices.length;i++){
+      var frac=total>0?(slices[i].value/total):0,len=C*frac;
+      arcs+='<circle r="56" fill="none" stroke="'+slices[i].color+'" stroke-width="20" '
+        +'stroke-dasharray="'+len.toFixed(2)+" "+(C-len).toFixed(2)+'" stroke-dashoffset="'+(-off).toFixed(2)+'">'
+        +"<title>"+esc(slices[i].label+" \\u00b7 "+fmtBytes(slices[i].value))+"</title></circle>";
+      off+=len;
+    }
+    var p=bytesPair(total);
+    return '<svg viewBox="0 0 150 150" width="150" role="img" aria-label="'+esc(unit)+'">'
+      +'<g transform="translate(75 75) rotate(-90)">'+arcs+"</g>"
+      +'<text class="big" text-anchor="middle" x="75" y="72">'+esc(p.n)+"</text>"
+      +'<text text-anchor="middle" x="75" y="88">'+esc(p.u+" retained")+"</text>"
+    +"</svg>";
+  }
+  // A sparkline with SCALED AXES. The bare version drew a shape with no
+  // magnitude on it, so five of them side by side looked comparable when one
+  // could be a thousand times the others — the eye reads the silhouette, and
+  // every silhouette is normalised to its own max. The axes option adds the y peak and
+  // the x endpoints, which is the minimum that makes two panels comparable.
+  // Gutters are reserved in the viewBox rather than overlaid, so a long byte
+  // label can never sit on top of the plot.
+  function svgArea(values,color,label,axes){
+    if(!values.length)return sysEmpty("no days measured");
+    var PAD_L=axes?34:0,PAD_B=axes?12:1,W=180,H=54;
+    var plotW=W-PAD_L,plotH=H-PAD_B-4;
+    var max=Math.max.apply(null,values)||1,pts=[],i;
+    for(i=0;i<values.length;i++){
+      var x=PAD_L+(values.length===1?plotW:(i/(values.length-1))*plotW);
+      var y=4+plotH-(values[i]/max)*plotH;
+      pts.push(x.toFixed(1)+","+y.toFixed(1));
+    }
+    var line=pts.join(" "),last=pts[pts.length-1].split(","),base=(4+plotH).toFixed(1);
+    var axisHtml="";
+    if(axes){
+      var xFirst=(axes.firstDay||""),xLast=(axes.lastDay||"");
+      axisHtml=
+        // y axis: peak and zero. Two ticks, not a scale — a five-tick axis in a
+        // 54px band is unreadable and the peak is the number that matters.
+        '<text class="ax" x="'+(PAD_L-4)+'" y="9" text-anchor="end">'+esc(axes.peakLabel||"")+"</text>"
+        +'<text class="ax" x="'+(PAD_L-4)+'" y="'+base+'" text-anchor="end">0</text>'
+        +'<polyline class="gridline" points="'+PAD_L+',4 '+PAD_L+","+base+'"/>'
+        +'<text class="ax" x="'+PAD_L+'" y="'+(H-2)+'">'+esc(xFirst)+"</text>"
+        +'<text class="ax" x="'+W+'" y="'+(H-2)+'" text-anchor="end">'+esc(xLast)+"</text>";
+    }
+    return '<svg viewBox="0 0 '+W+" "+H+'" role="img" aria-label="'+esc(label)+'">'
+      +'<polyline class="gridline" points="'+PAD_L+","+base+" "+W+","+base+'"/>'
+      +'<polygon fill="'+color+'" opacity=".18" points="'+line+" "+W+","+base+" "+PAD_L+","+base+'"/>'
+      +'<polyline fill="none" stroke="'+color+'" stroke-width="2" points="'+line+'"/>'
+      +'<circle cx="'+last[0]+'" cy="'+last[1]+'" r="3" fill="'+color+'"/>'
+      +axisHtml
+      +"<title>"+esc(label)+"</title>"
+    +"</svg>";
+  }
+  // Geometry constants, not magic numbers: the plot radius is what the data
+  // occupies and the label radius is outside it, both chosen so the widest
+  // label ("commands") still fits inside the viewBox at either flank.
+  var RADAR={cx:150,cy:142,r:90,label:112};
+  function radarPoint(axis,axes,r){
+    var a=-Math.PI/2+(2*Math.PI*axis)/axes;
+    return [(RADAR.cx+r*Math.cos(a)).toFixed(1),(RADAR.cy+r*Math.sin(a)).toFixed(1)];
+  }
+  function radarRing(axes,r){
+    var pts=[];
+    for(var i=0;i<axes;i++)pts.push(radarPoint(i,axes,r).join(","));
+    return pts.join(" ");
+  }
+  function svgRadar(axes,series){
+    if(!axes.length||!series.length)return sysEmpty("nothing measured to compare");
+    var n=axes.length,g="",i,j;
+    for(i=1;i<=4;i++)g+='<polygon class="gridline" points="'+radarRing(n,(RADAR.r/4)*i)+'"/>';
+    for(i=0;i<n;i++){
+      var tip=radarPoint(i,n,RADAR.r);
+      g+='<line class="gridline" x1="'+RADAR.cx+'" y1="'+RADAR.cy+'" x2="'+tip[0]+'" y2="'+tip[1]+'"/>';
+    }
+    for(i=0;i<series.length;i++){
+      var pts=[];
+      for(j=0;j<n;j++){
+        var mx=axes[j].max||0,v=series[i].values[j];
+        pts.push(radarPoint(j,n,mx>0&&v!=null?(v/mx)*RADAR.r:0).join(","));
+      }
+      g+='<polygon fill="'+series[i].color+'" opacity=".14" stroke="'+series[i].color
+        +'" stroke-width="2" points="'+pts.join(" ")+'"><title>'+esc(series[i].tip)+"</title></polygon>";
+    }
+    for(i=0;i<n;i++){
+      var lp=radarPoint(i,n,RADAR.label);
+      var dx=Number(lp[0])-RADAR.cx;
+      var anchor=dx>6?"start":(dx<-6?"end":"middle");
+      g+='<text x="'+lp[0]+'" y="'+lp[1]+'" text-anchor="'+anchor+'" dominant-baseline="middle">'
+        +esc(axes[i].label)+"</text>";
+    }
+    return '<svg viewBox="0 0 300 274" role="img" aria-label="per-host inventory profile, each axis normalized to its own maximum">'+g+"</svg>";
+  }
+
+  // ── data shaping ──
+  function storageHostTotals(storage){
+    var totals={},cats=(storage&&storage.categories)||[],i,j;
+    for(i=0;i<cats.length;i++){
+      var kids=cats[i].children||[];
+      for(j=0;j<kids.length;j++){
+        var v=mval(kids[j].bytes);
+        if(v==null)continue;
+        totals[kids[j].key]=(totals[kids[j].key]||0)+v;
+      }
+    }
+    return totals;
+  }
+  function topConsumers(d,limit){
+    var rows=[],i,j;
+    var cats=(d.storage&&d.storage.categories)||[];
+    for(i=0;i<cats.length;i++){
+      var kids=cats[i].children||[];
+      for(j=0;j<kids.length;j++){
+        var v=mval(kids[j].bytes);
+        if(v==null||v<=0)continue;
+        rows.push({label:kids[j].key+" "+cats[i].key,bytes:v,color:hostColor(kids[j].host||kids[j].key)});
+      }
+    }
+    var tools=(d.install&&d.install.tools)||[];
+    for(i=0;i<tools.length;i++){
+      var tb=mval(tools[i].bytes);
+      if(tb!=null&&tb>0)rows.push({label:tools[i].label+" install tree",bytes:tb,color:"var(--dim)"});
+    }
+    var caches=(d.install&&d.install.sharedCaches)||[];
+    for(i=0;i<caches.length;i++){
+      var cb=mval(caches[i].bytes);
+      if(cb!=null&&cb>0)rows.push({label:caches[i].label,bytes:cb,color:"var(--dim)"});
+    }
+    rows.sort(function(a,b){return b.bytes-a.bytes;});
+    return rows.slice(0,limit||6);
+  }
+  // Lines of code across the catalog. Projects whose count is unmeasured are
+  // EXCLUDED from the sum and named in the caption, so the total is an honest
+  // floor over the projects that were counted rather than a figure that
+  // silently treats an unreadable project as containing no code.
+  /** The projects tile's sub-lines, one fact per entry — led by the on-disk
+   *  count, which the headline no longer carries. */
+  function locSummary(projects){
+    var onDisk=projects&&projects.onDisk?[mhtml(projects.onDisk)+" on disk"]:[];
+    if(!projects)return [unkHtml("projects have not been deep-scanned yet",true)+" lines"];
+    var list=projects.projects||[],total=0,counted=0,i;
+    for(i=0;i<list.length;i++){
+      var v=mval(list[i].loc&&list[i].loc.total);
+      if(v==null)continue;
+      total+=v; counted++;
+    }
+    if(!counted)return onDisk.concat([unkHtml("no project reported a line count",false)+" lines"]);
+    return onDisk.concat(["&#8776;"+esc(fmtTok(total))+" lines",
+      esc(counted+"/"+list.length)+" counted"]);
+  }
+  function rankedBars(rows){
+    if(!rows.length)return sysEmpty(NOT_SCANNED);
+    var max=rows[0].bytes||1,html="",i;
+    for(i=0;i<rows.length;i++){
+      html+='<div class="sy-bar"><span class="n" title="'+esc(rows[i].label)+'">'+esc(rows[i].label)+"</span>"
+        +'<div class="sy-track"><i class="sy-fill" style="width:'+Math.max(1,(rows[i].bytes/max)*100).toFixed(1)
+        +"%;background:"+rows[i].color+'"></i></div>'
+        +'<span class="v">'+esc(fmtBytes(rows[i].bytes))+"</span></div>";
+    }
+    return '<div class="sy-bars">'+html+"</div>";
+  }
+
+  // ── views ──
+  // The projects KPI states BOTH counts, because they answer different
+  // questions: everSeen is how many projects this machine has touched, onDisk is
+  // how many still exist to be measured. Rendering either alone under the word
+  // "projects" misreports the other.
+  //
+  // The older "count" field is NOT a stand-in for either. It is the number of
+  // rows the scan measured, and labelling it "ever seen" is how this panel
+  // reported 4 on a machine that has touched 50 — the wrong question answered
+  // under the right word. A snapshot that predates the cross-host census renders
+  // that field as exactly what it is, and the liner says why the others are gone.
+  /** The projects tile's headline. ONE figure only: "ever" is the value, and
+   *  "on disk" moved to a sub-line. Two figures separated by a dot inside a
+   *  30px odometer row wrapped the second one under the first, which read as a
+   *  broken value rather than as a second fact. */
+  function projectsValue(p){
+    if(!p)return odCount(null);
+    if(!p.everSeen)return odCount(p.count)+'<span class="unit">measured</span>';
+    return odCount(p.everSeen)+'<span class="unit">ever</span>';
+  }
+  // Liner note (data, never design): the two counts come from different
+  // populations and the de-duplication across hosts is the part a reader cannot
+  // infer from the number.
+  function projectsLiner(p){
+    if(!p)return "";
+    if(!p.everSeen){
+      return "<b>Projects</b> \\u2014 this snapshot predates the cross-host project census, so "
+        +"it carries only the projects it measured, not how many this machine has ever "
+        +"touched. A rescan states both.";
+    }
+    var note='<span title="'+esc(p.method||"")+'"><b>Projects</b> \\u2014 <b>ever</b>: every '
+      +"working directory any host recorded, de-duped across Claude, Codex and OpenCode by "
+      +"resolved real path, so one project used from two hosts counts once. <b>on disk</b>: the "
+      +"subset that still exists to measure.</span>";
+    var g=mval(p.gitRepos);
+    if(g!=null)note+=" "+esc(fmtNum(g))+" are git repos.";
+    if(p.unresolved>0){
+      note+=" "+esc(fmtNum(p.unresolved))+" path"+(p.unresolved===1?"":"s")
+        +" could not be decoded, so both counts are floors.";
+    }
+    if(p.truncated)note+=" The measured list is capped, so fewer rows than on-disk projects.";
+    return note;
+  }
+  function renderSysSummary(d){
+    var install=d.install,storage=d.storage,catalog=d.catalog,projects=d.projects;
+    var rt=d.runtime||{},totals=rt.totals||{};
+    var kpis=document.getElementById("sys-kpis");
+    if(kpis){
+      // One fact per line. A KPI band is read by scanning down the values, and a
+      // caption that wraps mid-separator is harder to scan than three short
+      // stacked lines — the tiles are a grid, so they share a height regardless.
+      var counts=(catalog&&catalog.counts)||{};
+      kpis.innerHTML=
+        kpiCard("install footprint",odBytes(install&&install.totals&&install.totals.installBytes),[
+          mhtml(install&&install.totals&&install.totals.toolsPresent)+" tools",
+          mhtml(install&&install.totals&&install.totals.nativeAddons)+" native addons",
+        ])
+        +kpiCard("data retained",odBytes(storage&&storage.totals&&storage.totals.bytes),
+          ["transcripts","ledgers","caches"])
+        +kpiCard("live processes",odCount(totals.processCount),[
+          mhtml(totals.rssBytes,fmtBytes)+" RSS",
+          mhtml(totals.cpuPercent,function(v){return v.toFixed(1)+"%";})+" CPU",
+        ])
+        +kpiCard("projects",projectsValue(projects),locSummary(projects))
+        +kpiCard("catalog",odCount(counts.skill)+'<span class="unit">skills</span>',[
+          mhtml(counts.agent)+" agents",
+          mhtml(counts.command)+" commands",
+        ]);
+      mountOdometers(kpis);
+    }
+    var kpiNote=document.getElementById("sys-kpis-note");
+    if(kpiNote)kpiNote.innerHTML=projectsLiner(projects);
+
+    var band=document.getElementById("sys-gauge");
+    if(band){
+      var disk=(install&&install.disk)||null;
+      var total=mval(disk&&disk.totalBytes),free=mval(disk&&disk.freeBytes);
+      var used=mval(install&&install.totals&&install.totals.installBytes);
+      var data=mval(storage&&storage.totals&&storage.totals.bytes);
+      if(used==null||data==null){
+        band.innerHTML=sysEmpty(install?"the disk band needs the install and storage totals; at least one is unmeasured.":NOT_SCANNED);
+      }else{
+        band.innerHTML=diskBand(used,data,total==null?0:total,free);
+      }
+    }
+    renderSysConsumers(d);
+  }
+
+  // ── largest consumers ──
+  // Every row the strip ranks comes from the consumers collector, which walks
+  // shared caches, model stores and toolchains the install and storage sections
+  // never see. When that section is absent the panel falls back to what those
+  // two sections DO carry and says so — a ranking whose scope is narrower than
+  // its title is exactly the misreading a liner note exists to prevent.
+  // The named parts of a row whose figure covers more than its label suggests.
+  // This is the whole liner note for the brain row: that row is the WHOLE
+  // ~/.cache/ruvnet-brain root, so it is many times the active-KB figure the
+  // install section reported on its own, and naming the parts says where the
+  // difference actually sits (superseded copies, embedding models) instead of
+  // leaving a number that looks like it grew overnight.
+  function consBreakdown(kids){
+    if(!kids||!kids.length)return "";
+    var list=kids.slice().sort(function(a,b){return (mval(b.bytes)||0)-(mval(a.bytes)||0);});
+    var parts=[],unknowns=0,i;
+    for(i=0;i<list.length&&i<3;i++){
+      var v=mval(list[i].bytes);
+      if(v==null)unknowns++;
+      else parts.push(list[i].label+" "+fmtBytes(v));
+    }
+    if(!parts.length)return "";
+    // An unmeasured part is named as missing rather than dropped, or the parts
+    // would silently fail to account for the whole.
+    return " Of it: "+parts.join(", ")
+      +(unknowns?", plus "+unknowns+" part(s) that could not be measured":"")+".";
+  }
+  function consRows(c){
+    var top=(c&&c.top)||[],rows=(c&&c.rows)||[],out=[],i;
+    var kids={};
+    for(i=0;i<rows.length;i++){
+      var owner=rows[i].containedBy;
+      if(owner)(kids[owner]||(kids[owner]=[])).push(rows[i]);
+    }
+    for(i=0;i<top.length;i++){
+      var r=top[i],v=mval(r.bytes);
+      var app=mval(r.apparentBytes);
+      var tail="";
+      if(app!=null&&v!=null&&app>v*1.05)tail=fmtBytes(app)+" apparent";
+      out.push({
+        label:r.label,group:r.group,bytes:v,measure:r.bytes,tail:tail,
+        title:(r.path||r.pathPattern||"")+(r.accountingNote?" \\u2014 "+r.accountingNote:""),
+        // Only a row with breakdowns gets a visible note: those are the rows
+        // whose figure covers more than its name suggests, so the note is what
+        // makes the number readable rather than surprising.
+        note:kids[r.id]?(r.accountingNote||"")+consBreakdown(kids[r.id]):"",
+        color:r.group==="project-trees"?"var(--s2)":"var(--accent)"
+      });
+    }
+    return out;
+  }
+  function consGroupRows(c){
+    var gs=(c&&c.groups)||[],out=[],i;
+    for(i=0;i<gs.length;i++){
+      var v=mval(gs[i].bytes);
+      // A group with nothing in it is dropped — EXCEPT project trees, whose
+      // emptiness is the toggle's own answer: hiding it would make an excluded
+      // category invisible instead of stated.
+      if(v==null&&!gs[i].rowCount&&gs[i].id!=="project-trees")continue;
+      out.push({
+        label:gs[i].label,group:gs[i].id,bytes:v,measure:gs[i].bytes,tail:"",
+        title:gs[i].note||"",
+        note:fmtNum(gs[i].rowCount)+" root"+(gs[i].rowCount===1?"":"s")
+          +(gs[i].note?" \\u00b7 "+gs[i].note:""),
+        color:gs[i].id==="project-trees"?"var(--s2)":"var(--accent)"
+      });
+    }
+    return out;
+  }
+  function consumerRows(rows){
+    if(!rows.length)return sysEmpty("nothing was ranked \\u2014 every candidate root was absent or unmeasured.");
+    var max=0,html="",i;
+    for(i=0;i<rows.length;i++)if(rows[i].bytes!=null&&rows[i].bytes>max)max=rows[i].bytes;
+    for(i=0;i<rows.length;i++){
+      var r=rows[i],w=(max>0&&r.bytes!=null)?Math.max(1,(r.bytes/max)*100):0;
+      html+='<div class="sy-crow"><span class="n" title="'+esc(r.title||r.label)+'">'+esc(r.label)
+        +(r.tail?'<span class="g">'+esc(r.tail)+"</span>":"")+"</span>"
+        +'<div class="sy-track">'+(w>0?'<i class="sy-fill" style="width:'+w.toFixed(1)
+          +"%;background:"+r.color+'"></i>':"")+"</div>"
+        +'<span class="v">'+mhtml(r.measure,fmtBytes)+"</span></div>"
+        +(r.note?'<div class="sy-cnote">'+esc(r.note)+"</div>":"");
+    }
+    return html;
+  }
+  function consumerLiner(c,fallbackRows){
+    if(!c){
+      return "<b>Ranked from the install and storage sections only</b> \\u2014 this snapshot "
+        +"carries no consumers scan, so shared caches outside those two sections (npm's "
+        +"_cacache, model stores, language toolchains) are not counted here at all. "
+        +esc(fmtNum(fallbackRows))+" rows ranked.";
+    }
+    var ranked=mval(c.totals&&c.totals.rankedCount);
+    var a=c.accounting||{},t=c.projectTrees||{};
+    // One line on the page, the collector's full accounting prose on hover: the
+    // reader needs the scope to read the ranking, not a paragraph to read the
+    // scope.
+    var full=[a.basis,a.containment,a.residuals,a.absent,t.included?null:t.reason]
+      .filter(Boolean).join(" ");
+    var lead=consMode==="ecosystem"
+      ? "Grouped by ecosystem, ranked roots only. "
+      : "Top "+esc(fmtNum(c.topN||20))+" of "+(ranked==null?"the":esc(fmtNum(ranked)))
+        +" measured roots. ";
+    return '<span title="'+esc(full)+'">'+lead
+      +"Counted: model stores, package and browser caches, language toolchains and the kit's "
+      +"own trees \\u2014 each at ONE level, so nesting never adds twice; absent roots are not "
+      +"ranked. "
+      +(t.included?"Project working trees are included in this measurement."
+        :"Project trees are NOT measured unless the chip is on \\u2014 one repo would flatten "
+          +"the ranking.")
+      +(c.unmeasured&&c.unmeasured.length
+        ? " "+esc(fmtNum(c.unmeasured.length))+" unmeasurable."
+        :"")+"</span>";
+  }
+  function renderSysConsumers(d){
+    var el=document.getElementById("sys-consumers");
+    var note=document.getElementById("sys-consumers-note");
+    var trees=document.getElementById("sys-cons-trees");
+    var c=d.consumers||null;
+    if(trees){
+      var on=!!(c&&c.includeProjectTrees);
+      trees.classList.toggle("on",on);
+      trees.setAttribute("aria-pressed",on?"true":"false");
+      // Not a filter: whether trees were walked is decided at scan time, so the
+      // chip advertises the rescan it will start rather than pretending the
+      // answer is already on the client.
+      trees.title=on
+        ?"project working trees are in this ranking \\u2014 click to rescan without them"
+        :"project working trees are excluded \\u2014 click to rescan with them (a deep scan takes a while)";
+      trees.disabled=!!(d.scan&&d.scan.running);
+    }
+    if(!el)return;
+    if(!c&&!d.storage&&!d.install){
+      el.innerHTML=sysEmpty(NOT_SCANNED);
+      if(note)note.innerHTML="";
+      return;
+    }
+    var rows=c?(consMode==="ecosystem"?consGroupRows(c):consRows(c)):topConsumers(d,20);
+    el.innerHTML=c?consumerRows(rows):rankedBars(rows);
+    if(note)note.innerHTML=consumerLiner(c,rows.length);
+  }
+
+  // ── reclaimables (advisory, two tiers) ──
+  // ADR-0025 §6 and the storage collector's own header: this context has no
+  // delete verb, so nothing below is an action. The two safety tiers are
+  // rendered as SEPARATE blocks because they are separate promises —
+  // 'regenerable' is space the owning tool refetches by itself, 'review' is a
+  // pointer at something to look at. A review row therefore never gets the
+  // bytes-in-a-pill treatment: that pill is the visual grammar of "this much is
+  // yours to take back", and on a row that may be in use it would be a claim
+  // the measurement does not support.
+  var TIER_ORDER=["regenerable","review"];
+  // One scrollable table rather than two stacked card grids. The rows are an
+  // advisory list of "here is a thing, here is where it lives" — nine of them
+  // as paragraph-bearing cards towered over the rest of the tab, and the
+  // reading task (scan, find a path, go run something elsewhere) is a table's.
+  // The pills stay: they are the visual grammar that separates the two
+  // promises, and only the regenerable one carries bytes.
+  function reclaimRow(r){
+    var review=r.safety!=="regenerable";
+    var meas=mhtml(r.bytes,fmtBytes);
+    return '<tr data-safety="'+esc(review?"review":"regenerable")+'">'
+      +"<td>"+(review?'<span class="tag review">review</span>'
+        :'<span class="tag regen">regenerable</span>')+"</td>"
+      +'<td class="sy-adv-t"><b>'+esc(r.label)+"</b>"
+      +(r.rationale?'<span class="why"> \\u2014 '+esc(r.rationale)+"</span>":"")
+      // Documentation, not an affordance: the CLI that already owns removal.
+      // The remediation is a DIFFERENT kind of sentence from the finding above
+      // it — what you could do, rather than what was found — and ran on from
+      // the rationale as if it were the next clause of it. Its own class, so
+      // the gap is part of the row's grammar rather than a stray margin.
+      +(r.cleanupHint?'<div class="sy-adv-fix">removal lives in <span class="mono">'
+        +esc(r.cleanupHint)+"</span></div>":"")
+      +"</td>"
+      +'<td class="sy-path mono">'+esc(r.path||"")+"</td>"
+      // On a review row the figure is CONTEXT, never a claim of free space —
+      // the title says which kind so the column stays one word wide.
+      +'<td class="num"'+(review?' title="'+esc(r.bytesMeaning==="installed"
+        ? "installed at this path — context, not a figure to reclaim"
+        : "across the matching files — context, not a figure to reclaim")+'"':"")
+      +">"+meas+(review?'<span class="g"> ctx</span>':"")+"</td>"
+    +"</tr>";
+  }
+  function renderSysReclaim(s){
+    var rec=document.getElementById("sys-reclaim");
+    var note=document.getElementById("sys-reclaim-note");
+    if(note)note.innerHTML="";
+    if(!rec)return;
+    if(!s){rec.innerHTML=sysEmpty(NOT_SCANNED);return;}
+    var list=s.reclaimables||[];
+    if(!list.length){
+      rec.innerHTML=sysEmpty("nothing crossed a reclaimable threshold \\u2014 a real, measured nothing.");
+      return;
+    }
+    var summary=s.reclaimSummary||null,tiers={},i;
+    for(i=0;i<((summary&&summary.tiers)||[]).length;i++)tiers[summary.tiers[i].safety]=summary.tiers[i];
+    // Regenerable first, then review — the sort is the tiering now that the two
+    // no longer occupy separate blocks.
+    var ordered=[],placed=0;
+    for(i=0;i<TIER_ORDER.length;i++){
+      var members=list.filter((function(t){
+        // A row from a snapshot older than the safety field lands in 'review',
+        // the tier that promises less — never in the one that reads as free space.
+        return function(r){return (r.safety==="regenerable"?"regenerable":"review")===t;};
+      })(TIER_ORDER[i]));
+      placed+=members.length;
+      ordered=ordered.concat(members);
+    }
+    var body="";
+    for(i=0;i<ordered.length;i++)body+=reclaimRow(ordered[i]);
+    rec.innerHTML='<div class="sy-tblwrap sy-reclaim-scroll"><table class="sy-table">'
+      +"<thead><tr><th>Status</th><th>What it is</th><th>Path</th>"
+      +'<th style="text-align:right">Size</th></tr></thead><tbody>'+body+"</tbody></table></div>"
+      +(placed<list.length
+        ?'<div class="sy-liner">'+esc(fmtNum(list.length-placed))+" row(s) carried no safety tier "
+          +"and are not shown.</div>":"");
+    if(note){
+      // Totals by status, still never added together — that is the one thing
+      // this panel's accounting must not do.
+      var regen=tiers.regenerable,rev=tiers.review;
+      var regenN=(regen&&regen.rowCount)||0,revN=(rev&&rev.rowCount)||0;
+      note.innerHTML='<span class="tag regen">regenerable</span> <b>'
+        +(regen?mhtml(regen.bytes,fmtBytes):unkHtml("no tier total in this snapshot",false))
+        +"</b> across "+esc(fmtNum(regenN))+" row"+(regenN===1?"":"s")
+        +' <span class="g">\\u00b7</span> <span class="tag review">review</span> '
+        +esc(fmtNum(revN))+" row"+(revN===1?"":"s")+" to check"
+        // The missing review total is the load-bearing part, so it is explained
+        // rather than labelled: "no total — pointers, not a sum" told a reader
+        // what was absent without ever saying why they should be glad it is.
+        +'<div class="why">No combined total, on purpose \\u2014 only the regenerable figure is '
+        +"safe to count on. Review rows are a to-do list, not a number.</div>";
+    }
+  }
+
+  // Categories that dominate every other series by orders of magnitude and are
+  // therefore reported on their own, not mixed into a shared chart. Presentation
+  // only — the collector measures all four and the CLI still emits all four.
+  var CHART_EXCLUDED_CATEGORIES={"learning-stores":true};
+
+  /** The id /api/session/<id> answers to, derived from a storage row, or null
+   *  when the row cannot be addressed.
+   *
+   *  Storage identifies a session by its FILE BASENAME; Usage identifies it by
+   *  a stripped id. Claude: "<uuid>.jsonl" -> "<uuid>". Codex:
+   *  "rollout-<iso-ts>-<uuid>.jsonl" -> "<uuid>", mirroring usage-index's
+   *  codexIdFromName. OpenCode has no transcript route at all — its whole
+   *  store is one database file, not a session per file — so it returns null
+   *  and the row renders unlinked rather than as a link that 404s. */
+  function transcriptIdOf(row){
+    if(!row||row.host==="opencode")return null;
+    var name=String(row.session||"");
+    if(name.slice(-6)===".jsonl")name=name.slice(0,-6);
+    if(name.indexOf("rollout-")===0){
+      name=name.slice(8);
+      // strip a leading YYYY-MM-DDTHH-MM-SS- timestamp (19 chars + separator)
+      if(name.length>20&&name.charAt(10)==="T")name=name.slice(20);
+    }
+    // The same shape AKDashboardOpenTranscript validates; checking here keeps a
+    // malformed id from ever reaching the DOM as a control.
+    if(!name||name.length>128)return null;
+    for(var i=0;i<name.length;i++){
+      var c=name.charAt(i);
+      if(!((c>="A"&&c<="Z")||(c>="a"&&c<="z")||(c>="0"&&c<="9")||c==="."||c==="_"||c==="-"))return null;
+    }
+    return name;
+  }
+  // The per-host split answers "which HOST is holding this". The project and
+  // agentic-kit keys are not hosts: project is the learning-stores pseudo-host
+  // (now its own card) and agentic-kit is ak's own state. Both are accounted
+  // for in the panel's footnote rather than dropped silently.
+  var REAL_HOSTS={claude:true,codex:true,opencode:true};
+
+  function renderSysStorage(d){
+    var s=d.storage,i,j;
+
+    // ── learning stores, lifted out of the shared charts ──
+    var learn=document.getElementById("sys-learning");
+    if(learn){
+      if(!s){learn.innerHTML=sysEmpty(NOT_SCANNED);}
+      else{
+        var lcat=null,lcats=s.categories||[];
+        for(i=0;i<lcats.length;i++)if(lcats[i].key==="learning-stores")lcat=lcats[i];
+        var lv=lcat?mval(lcat.bytes):null;
+        if(lv==null){learn.innerHTML=sysEmpty(lcat?"learning-store bytes were not measured.":"no learning store was measured.");}
+        else{
+          // The category's direct children are HOSTS (a single pseudo-host
+          // named project); the projects are a level below that. Counting the
+          // children would report "1 project store" on a machine with dozens.
+          var lkids=0,lh=lcat.children||[];
+          for(var li=0;li<lh.length;li++)lkids+=((lh[li]&&lh[li].children)||[]).length;
+          learn.innerHTML='<div class="sy-solo"><div class="sy-solo-v">'+esc(fmtBytes(lv))+"</div>"
+            +'<div class="sy-solo-l">'+(lkids?"across "+esc(fmtNum(lkids))+" project store"+(lkids===1?"":"s"):"in your projects")+"</div>"
+            +'<p class="sy-liner">ruflo, agentic-qe and swarm state written into your projects '
+            +"(.claude-flow, .agentic-qe, .swarm). Reported on its own because it dwarfs every "
+            +"other category &mdash; mixed in, it flattens them to nothing.</p></div>";
+        }
+      }
+    }
+
+    var donut=document.getElementById("sys-donut");
+    if(donut){
+      if(!s){donut.innerHTML=sysEmpty(NOT_SCANNED);}
+      else{
+        var slices=[],legend="",total=0;
+        for(i=0;i<(s.categories||[]).length;i++){
+          if(CHART_EXCLUDED_CATEGORIES[s.categories[i].key])continue;
+          var v=mval(s.categories[i].bytes);
+          if(v==null)continue;
+          slices.push({label:s.categories[i].label,value:v,color:catColor(s.categories[i].key)});
+          total+=v;
+        }
+        for(i=0;i<slices.length;i++){
+          legend+='<span><i style="background:'+slices[i].color+'"></i>'+esc(slices[i].label)+" <b>"
+            +esc(fmtBytes(slices[i].value))+" \\u00b7 "+(total>0?pct(slices[i].value,total).toFixed(0):"0")+"%</b></span>";
+        }
+        donut.innerHTML=slices.length
+          ?('<div class="sy-donut">'+svgDonut(slices,total,fmtBytes(total)+" excluding learning stores")
+            +'<div class="sy-legend" style="flex-direction:column;gap:7px">'+legend+"</div></div>"
+            +'<p class="sy-liner">Learning stores are counted on their own card, not here.</p>')
+          :sysEmpty("no storage category could be measured.");
+      }
+    }
+    var split=document.getElementById("sys-hostsplit");
+    if(split){
+      if(!s){split.innerHTML=sysEmpty(NOT_SCANNED);}
+      else{
+        var byHost={},order=[],cats=s.categories||[],otherBytes=0,otherKeys={};
+        for(i=0;i<cats.length;i++){
+          var kids=cats[i].children||[];
+          for(j=0;j<kids.length;j++){
+            var b=mval(kids[j].bytes);
+            if(b==null)continue;
+            // Everything not a real host is summed into the footnote instead of
+            // being dropped: the panel must still account for the whole donut.
+            if(!REAL_HOSTS[kids[j].key]){
+              if(!CHART_EXCLUDED_CATEGORIES[cats[i].key]){otherBytes+=b;otherKeys[kids[j].key]=true;}
+              continue;
+            }
+            if(CHART_EXCLUDED_CATEGORIES[cats[i].key])continue;
+            if(!byHost[kids[j].key]){byHost[kids[j].key]={key:kids[j].key,parts:[],total:0};order.push(kids[j].key);}
+            byHost[kids[j].key].parts.push({color:catColor(cats[i].key),bytes:b,
+              label:kids[j].key+" \\u00b7 "+cats[i].label+" "+fmtBytes(b)});
+            byHost[kids[j].key].total+=b;
+          }
+        }
+        order.sort(function(a,b2){return byHost[b2].total-byHost[a].total;});
+        var scale=order.length?byHost[order[0]].total:0,rowsHtml="";
+        for(i=0;i<order.length;i++){
+          var row=byHost[order[i]],seg="";
+          for(j=0;j<row.parts.length;j++){
+            seg+='<i class="sy-fill" style="width:'+(scale>0?(row.parts[j].bytes/scale)*100:0).toFixed(2)
+              +"%;background:"+row.parts[j].color+'" title="'+esc(row.parts[j].label)+'"></i>';
+          }
+          rowsHtml+='<div class="sy-bar"><span class="n">'+esc(row.key)+"</span>"
+            +'<div class="sy-track tall">'+seg+"</div>"
+            +'<span class="v">'+esc(fmtBytes(row.total))+"</span></div>";
+        }
+        var catLegend="";
+        for(i=0;i<cats.length;i++){
+          if(CHART_EXCLUDED_CATEGORIES[cats[i].key])continue;
+          catLegend+='<span><i style="background:'+catColor(cats[i].key)+'"></i>'+esc(cats[i].label)+"</span>";
+        }
+        // Name what is NOT in the rows, with its figure. Dropping the non-host
+        // rows silently would leave the bars failing to add up to the donut
+        // beside them, with nothing on screen explaining the gap.
+        var otherNames=[];
+        for(var ok in otherKeys)if(Object.prototype.hasOwnProperty.call(otherKeys,ok))otherNames.push(ok);
+        otherNames.sort();
+        var footnote=otherNames.length
+          ?'<p class="sy-liner">Hosts only. A further <b>'+esc(fmtBytes(otherBytes))+"</b> belongs to "
+            +esc(otherNames.join(" and "))+" &mdash; ak's own state, not a host's. Learning stores are on their own card.</p>"
+          :'<p class="sy-liner">Learning stores are on their own card, not counted here.</p>';
+        split.innerHTML=order.length
+          ?('<div class="sy-bars">'+rowsHtml+'</div><div class="sy-legend" style="margin-top:10px">'+catLegend+"</div>"+footnote)
+          :sysEmpty("no per-host storage node could be measured.");
+      }
+    }
+    var growth=document.getElementById("sys-growth");
+    if(growth){
+      var g=s&&s.growth;
+      if(!g||!g.hosts||!g.hosts.length){growth.innerHTML=sysEmpty(s?"no growth series was measured.":NOT_SCANNED);}
+      else{
+        var panels="";
+        // No cap: the series are the storage roots' own hosts, a fixed small
+        // set. The old i<6 guard silently dropped whichever came last.
+        for(i=0;i<g.hosts.length;i++){
+          var h=g.hosts[i],days=h.days||[];
+          var vals=days.map(function(x){return Number(x&&x.bytes)||0;});
+          var avg=mval(h.perDayAvgBytes),tot=mval(h.totalBytes);
+          var peak=vals.length?Math.max.apply(null,vals):0;
+          panels+='<div><div class="sy-legend" style="margin-bottom:4px"><span><i style="background:'
+            +hostColor(h.host)+'"></i>'+esc(h.host)+"</span></div>"
+            +svgArea(vals,hostColor(h.host),h.host+" \\u00b7 "+(tot==null?"total unmeasured":fmtBytes(tot)+" over "+g.windowDays+"d")
+              +(avg==null?"":" \\u00b7 "+fmtBytes(avg)+"/day avg"),
+              {peakLabel:fmtBytes(peak),
+               firstDay:dayTick(days.length?days[0].day:null),
+               lastDay:dayTick(days.length?days[days.length-1].day:null)})
+            +'<div class="sy-liner">'+(tot==null?"total unmeasured":esc(fmtBytes(tot))+" over "+esc(String(g.windowDays))+"d")
+            +(avg==null?"":" \\u00b7 "+esc(fmtBytes(avg))+"/day")+"</div>"
+            +"</div>";
+        }
+        growth.innerHTML='<div class="sy-spark">'+panels+"</div>"
+          +'<div class="sy-legend" style="margin-top:8px"><span class="sy-approx">approximate \\u00b7 '
+          +esc(String(g.basis||"file mtime and size only"))+"</span></div>";
+      }
+    }
+    renderSysReclaim(s);
+    var top=document.getElementById("sys-topsessions");
+    if(top){
+      var sess=(s&&s.topSessions)||null;
+      if(!s){top.innerHTML=sysEmpty(NOT_SCANNED);}
+      else if(!sess||!sess.length){top.innerHTML=sysEmpty("no session files were measured.");}
+      else{
+        // Attributable rows only. A row whose project cannot be named is not a
+        // useful entry in a list whose whole job is "which project is holding
+        // these bytes" — the unattributable ones are counted in the liner
+        // instead, so they are excluded rather than hidden.
+        var attributable=[],unattributable=0;
+        for(i=0;i<sess.length;i++){
+          if(sess[i]&&sess[i].project)attributable.push(sess[i]);else unattributable++;
+        }
+        if(!attributable.length){
+          top.innerHTML=sysEmpty("no session file could be attributed to a project.");
+        }else{
+        var hostTotals=storageHostTotals(s),body="";
+        for(i=0;i<attributable.length;i++){
+          var x=attributable[i],ht=hostTotals[x.host],share=ht>0?(x.bytes/ht)*100:null;
+          // Link to the transcript the same way Usage does, through the public
+          // bridge it already exposes. The id has to be normalised first:
+          // Storage's session is the FILE BASENAME, while /api/session wants
+          // Usage's form. A row we cannot address renders as plain text — a
+          // dead link is worse than no link.
+          var sid=transcriptIdOf(x);
+          // Strip the extension rather than truncating mid-id: a uuid cut at 34
+          // characters reads as a corrupted value.
+          var sname=String(x.session||"");
+          if(sname.slice(-6)===".jsonl")sname=sname.slice(0,-6);
+          var cell=esc(sname);
+          body+="<tr>"
+            +'<td class="mono" title="'+esc(x.path||"")+'">'
+            +(sid?'<button class="sy-link" type="button" data-transcript="'+esc(sid)+'" title="open transcript">'+cell+"</button>":cell)
+            +"</td>"
+            +'<td><span class="sy-dot" style="background:'+hostColor(x.host)+'"></span>'+esc(x.host||"\\u2014")+"</td>"
+            // An undecoded name says WHICH reason. "deleted project" is a
+            // claim, and on Windows it would be a false one for every row: the
+            // encoding there carries a drive prefix that the decoder refuses by
+            // design, so nothing is decodable and nothing has been deleted.
+            +"<td>"+(x.projectResolved===false
+              ?'<span class="sy-unk" title="'+esc(x.projectReason==="encoding"
+                ? "this name is not a POSIX-rooted transcript directory, so it cannot be decoded to a project path: "+String(x.project||"")
+                : "this project directory no longer exists, so its name cannot be decoded from "+String(x.project||""))
+                +'">'+(x.projectReason==="encoding"?"name not decodable":"deleted project")+"</span>"
+              :esc(x.projectLabel||x.project))+"</td>"
+            +'<td class="num">'+esc(fmtBytes(x.bytes))+"</td>"
+            +"<td>"+(share==null
+              ?unkHtml("this host's retained total was not measured",false)
+              :('<div class="sy-inbar" title="'+share.toFixed(1)+'% of '+esc(x.host)+' retained bytes"><i class="sy-fill" style="width:'
+                +Math.max(1,Math.min(100,share)).toFixed(1)+"%;background:"+hostColor(x.host)+'"></i></div>'))
+            +"</td></tr>";
+        }
+        top.innerHTML='<div class="sy-tblwrap"><table class="sy-table"><thead><tr><th>Session</th><th>Host</th>'
+          +'<th>Project</th><th style="text-align:right">Size</th><th>Share of host</th></tr></thead><tbody>'
+          +body+"</tbody></table></div>"
+          +(unattributable?'<div class="sy-liner">'+esc(fmtNum(unattributable))
+            +" larger session file"+(unattributable===1?"":"s")+" could not be attributed to a project "
+            +"and "+(unattributable===1?"is":"are")+" not listed.</div>":"");
+        }
+      }
+    }
+  }
+
+  function renderSysRuntime(d){
+    var rt=d.runtime||{},i;
+    var procs=document.getElementById("sys-procs");
+    if(procs){
+      var pm=rt.processes;
+      if(!pm||pm.status==="unknown"||!Array.isArray(pm.value)){
+        procs.innerHTML=sysEmpty((pm&&pm.reason)||"the process census is unavailable.");
+      }else if(!pm.value.length){
+        procs.innerHTML=sysEmpty("no host process is running right now \\u2014 a measured zero.");
+      }else{
+        var rows=pm.value,maxRss=0,body="";
+        for(i=0;i<rows.length;i++){var rv=mval(rows[i].rssBytes);if(rv!=null&&rv>maxRss)maxRss=rv;}
+        for(i=0;i<rows.length;i++){
+          var p=rows[i],rss=mval(p.rssBytes);
+          // The project cell is the honest-degradation surface: the census
+          // states WHY a process could not be attributed (including the Windows
+          // reasons), and that sentence is what renders. Never blank, never a guess.
+          var proj=p.project&&p.project.status!=="unknown"&&p.project.value
+            ? esc(p.project.value.label||p.project.value.path)
+            : '<span class="sy-unk" title="'+esc((p.project&&p.project.reason)||"not attributable")+'">'
+              +esc(String((p.project&&p.project.reason)||"not attributable").split("\\u2014")[0].trim())+"</span>";
+          body+='<tr><td><span class="sy-dot" style="background:'+hostColor(p.host)+'"></span>'+esc(p.host)+"</td>"
+            +'<td class="num">'+esc(String(p.pid))+"</td>"
+            +"<td>"+proj+"</td>"
+            +'<td class="num">'+mhtml(p.uptimeMs,fmtDur)+"</td>"
+            +'<td class="num">'+mhtml(p.cpuPercent,function(v){return v.toFixed(1)+"%";})+"</td>"
+            +'<td><div class="sy-rss"><div class="sy-inbar" style="min-width:110px"><i class="sy-fill" style="width:'
+              +(rss!=null&&maxRss>0?Math.max(2,(rss/maxRss)*100):0).toFixed(1)+"%;background:"+hostColor(p.host)+'"></i></div>'
+            +'<span class="mono" style="font-size:11.5px">'+mhtml(p.rssBytes,fmtBytes)+"</span></div></td></tr>";
+        }
+        // pid is right-aligned in the body, so its header is too — a numeric
+        // column whose header hangs off the far side reads as a different column.
+        procs.innerHTML='<div class="sy-tblwrap"><table class="sy-table"><thead><tr><th>Host</th>'
+          +'<th style="text-align:right">pid</th>'
+          +'<th>Project</th><th style="text-align:right">Uptime</th><th style="text-align:right">CPU</th>'
+          +"<th>RSS</th></tr></thead><tbody>"+body+"</tbody></table></div>";
+      }
+    }
+    var mem=document.getElementById("sys-mem");
+    if(mem){
+      var tot=rt.totals||{},mach=rt.machine||{};
+      var rssV=mval(tot.rssBytes),physV=mval(mach.physicalMemoryBytes);
+      var pair=rssV==null?null:bytesPair(rssV);
+      mem.innerHTML='<div class="val" style="display:flex;align-items:baseline;gap:5px">'
+        +(pair?('<span class="od lit" style="font-size:26px">'+esc(pair.n)+'</span><span class="unit">'+pair.u+" resident combined</span>")
+          :mhtml(tot.rssBytes,fmtBytes))+"</div>"
+        +(rssV!=null&&physV>0
+          ?('<div class="sy-meter" title="'+esc(fmtBytes(rssV)+" of "+fmtBytes(physV)+" physical memory")+'"><i style="width:'
+            +Math.min(100,(rssV/physV)*100).toFixed(1)+'%"></i></div>'
+            +'<div style="font-size:11.5px;color:var(--ink-2)">of '+esc(fmtBytes(physV))+" physical \\u00b7 "
+            +mhtml(tot.cpuPercent,function(v){return v.toFixed(1)+"%";})+" CPU across "+mhtml(mach.cpuCount)+" cores</div>")
+          :'<div style="font-size:11.5px;color:var(--ink-2)">'+unkHtml("the physical-memory denominator was not reported",false)
+            +" \\u2014 no share of memory can be stated</div>");
+    }
+    var dae=document.getElementById("sys-daemons");
+    if(dae){
+      var dm=rt.daemons||{},ttl=Number(dm.ttlSecs)||0,oldest=mval(dm.oldestAgeSecs);
+      // Two tiles, both explained. The third — an AI-worker budget — was removed
+      // rather than left degraded: no code path could ever populate it, so it
+      // was a permanent "unavailable" teaching the reader to ignore unknowns
+      // (ADR-0023 SS9).
+      var ttlH=ttl?(ttl/3600).toFixed(0):null;
+      dae.innerHTML='<div class="sy-tiles">'
+        +'<div class="sy-tile"><div class="t-v">'+mhtml(dm.count)+'</div><div class="t-l">running \\u00b7 oldest '
+          +(oldest==null?unkHtml((dm.oldestAgeSecs&&dm.oldestAgeSecs.reason)||"no start time recorded",false)
+            :esc((oldest/3600).toFixed(1)+"h"))
+          +(ttlH?" of "+esc(ttlH)+"h TTL":"")+"</div></div>"
+        +'<div class="sy-tile"><div class="t-v">'+mhtml(dm.staleCount)+'</div><div class="t-l">past TTL</div></div>'
+      +"</div>"
+      +'<p class="sy-liner">Daemons are ruflo background workers, one per active project. '
+      +"Each carries a time-to-live"+(ttlH?" of "+esc(ttlH)+" hours":"")
+      +'; one past it has outlived its lease and is what <span class="mono">ak x daemon-gc</span> reaps. '
+      +"Several running at once is normal \\u2014 a growing count of stale ones is not.</p>";
+    }
+  }
+
+  function renderSysCatalog(d){
+    var c=d.catalog,i,j;
+    var radar=document.getElementById("sys-radar");
+    var countsEl=document.getElementById("sys-catcounts");
+    var matrix=document.getElementById("sys-matrix");
+    if(!c){
+      if(radar)radar.innerHTML=sysEmpty(NOT_SCANNED);
+      if(countsEl)countsEl.innerHTML="";
+      if(matrix)matrix.innerHTML="";
+      return;
+    }
+    var kinds=c.kinds||[],hosts=c.hosts||[];
+    if(radar){
+      var axes=[],series=[];
+      for(j=0;j<kinds.length;j++){
+        var max=0;
+        for(i=0;i<hosts.length;i++){
+          var v=mval(c.perHost&&c.perHost[hosts[i]]&&c.perHost[hosts[i]][kinds[j]]);
+          if(v!=null&&v>max)max=v;
+        }
+        axes.push({label:KIND_LABEL[kinds[j]]||kinds[j],max:max});
+      }
+      for(i=0;i<hosts.length&&i<3;i++){
+        var vals=[],tip=hosts[i];
+        for(j=0;j<kinds.length;j++){
+          var pv=mval(c.perHost&&c.perHost[hosts[i]]&&c.perHost[hosts[i]][kinds[j]]);
+          vals.push(pv);
+          tip+=" \\u00b7 "+(pv==null?"unmeasured":pv)+" "+(KIND_PLURAL[kinds[j]]||kinds[j]);
+        }
+        series.push({color:SERIES[i]||"var(--dim)",values:vals,tip:tip});
+      }
+      var legend="";
+      for(i=0;i<series.length;i++)legend+='<span><i style="background:'+series[i].color+'"></i>'+esc(hosts[i])+"</span>";
+      radar.innerHTML=svgRadar(axes,series)+'<div class="sy-legend">'+legend+"</div>";
+    }
+    if(countsEl){
+      var tiles="";
+      for(j=0;j<kinds.length;j++){
+        tiles+='<div class="sy-tile"><div class="t-v">'+mhtml(c.counts&&c.counts[kinds[j]])+"</div>"
+          +'<div class="t-l">unique '+esc(KIND_PLURAL[kinds[j]]||kinds[j])+"</div></div>";
+      }
+      countsEl.innerHTML='<div class="sy-tiles">'+tiles+"</div>";
+    }
+    if(matrix){
+      // The kind heading rows are gone: they told you what you were looking at
+      // but gave you no way to look at less of it, and on a 318-row inventory
+      // the thing you want is a subset, not a signpost. Two pick lists do that
+      // job instead — and unlike headings they compose, so "commands carried by
+      // codex" is one click each rather than a scroll.
+      renderCatalogFilters(c);
+      paintCatalogMatrix(c);
+    }
+  }
+
+  // Selected kinds/hosts, or null for "everything". Null rather than a full set
+  // so the default survives a payload that grows a new kind or host: an unknown
+  // option is INCLUDED until the user has expressed an opinion, never silently
+  // filtered out.
+  var catKinds=null,catHosts=null;
+
+  function catalogChip(group,value,label,on){
+    return '<button class="chipf'+(on?" on":"")+'" type="button" data-cat-'+group+'="'+esc(value)
+      +'" aria-pressed="'+(on?"true":"false")+'">'+esc(label)+"</button>";
+  }
+
+  function renderCatalogFilters(c){
+    var kinds=c.kinds||[],hosts=c.hosts||[],i,html;
+    var kindsEl=document.getElementById("sys-cat-kinds");
+    if(kindsEl){
+      html="";
+      for(i=0;i<kinds.length;i++){
+        html+=catalogChip("kind",kinds[i],KIND_PLURAL[kinds[i]]||kinds[i],
+          !catKinds||catKinds.indexOf(kinds[i])>=0);
+      }
+      kindsEl.innerHTML=html;
+    }
+    var hostsEl=document.getElementById("sys-cat-hosts");
+    if(hostsEl){
+      html="";
+      for(i=0;i<hosts.length;i++){
+        html+=catalogChip("host",hosts[i],hosts[i],!catHosts||catHosts.indexOf(hosts[i])>=0);
+      }
+      hostsEl.innerHTML=html;
+    }
+  }
+
+  function paintCatalogMatrix(c){
+    var matrix=document.getElementById("sys-matrix");
+    if(!matrix)return;
+    var all=c.items||[],hosts=c.hosts||[],i,j;
+    // The host filter asks "carried by", so a row survives if ANY selected host
+    // carries it — intersecting instead would answer a different question
+    // ("carried by all of these") and read as a bug the moment two are on.
+    var items=[],anyHostFilter=!!catHosts;
+    for(i=0;i<all.length;i++){
+      var it=all[i];
+      if(catKinds&&catKinds.indexOf(it.kind)<0)continue;
+      if(anyHostFilter){
+        var carried=false,ih=it.hosts||[];
+        for(j=0;j<ih.length&&!carried;j++)if(catHosts.indexOf(ih[j])>=0)carried=true;
+        if(!carried)continue;
+      }
+      items.push(it);
+    }
+    var head="",body="";
+    for(i=0;i<hosts.length;i++)head+='<th class="cell">'+esc(hosts[i])+"</th>";
+    for(i=0;i<items.length;i++){
+      // The kind rides on the row now that the heading rows are gone, so a
+      // filtered view never leaves a name unexplained.
+      body+='<tr><td class="nm" title="'+esc(items[i].kind+" \\u00b7 "+items[i].name)+'">'
+        +esc(items[i].name)+'<span class="sy-kindtag">'+esc(KIND_LABEL[items[i].kind]||items[i].kind)+"</span></td>";
+      for(j=0;j<hosts.length;j++){
+        var on=(items[i].hosts||[]).indexOf(hosts[j])>=0;
+        body+='<td class="cell"><i class="'+(on?"on":"off")+'" title="'
+          +esc(hosts[j]+(on?" carries":" does not carry")+" "+items[i].name)+'"></i></td>';
+      }
+      body+="</tr>";
+    }
+    if(!all.length){matrix.innerHTML=sysEmpty("no catalog item was measured.");return;}
+    if(!items.length){
+      matrix.innerHTML=sysEmpty("no item matches the current filters \\u2014 "
+        +fmtNum(all.length)+" measured.");
+      return;
+    }
+    var filtered=items.length!==all.length;
+    matrix.innerHTML='<div class="sy-tblwrap sy-catalog-scroll"><table class="sy-table sy-matrix-t">'
+      +"<thead><tr><th>Name</th>"+head+"</tr></thead><tbody>"+body+"</tbody></table></div>"
+      +'<div class="sy-liner">'
+      +(filtered
+        ?esc(fmtNum(items.length))+" of "+esc(fmtNum(all.length))+" deduplicated items shown"
+        :esc(fmtNum(all.length))+" deduplicated item"+(all.length===1?"":"s")
+          +" across user scope and every project on disk")
+      +". A dot means that host carries the name.</div>";
+  }
+
+  function wireCatalogFilters(){
+    document.addEventListener("click",function(e){
+      var t=e.target;
+      if(!t||!t.closest)return;
+      var btn=t.closest("[data-cat-kind],[data-cat-host]");
+      if(!btn)return;
+      var isKind=btn.hasAttribute("data-cat-kind");
+      var group=isKind?"kind":"host";
+      var value=btn.getAttribute("data-cat-"+group);
+      var all=(SYSTEM&&SYSTEM.catalog&&(isKind?SYSTEM.catalog.kinds:SYSTEM.catalog.hosts))||[];
+      var cur=(isKind?catKinds:catHosts)||all.slice();
+      var at=cur.indexOf(value);
+      if(at>=0)cur=cur.slice(0,at).concat(cur.slice(at+1));else cur=cur.concat([value]);
+      // Turning the last one back on is "no filter", not "a filter that happens
+      // to match everything" — so a later payload with a new option still
+      // includes it.
+      var next=cur.length===all.length?null:cur;
+      if(isKind)catKinds=next;else catHosts=next;
+      if(SYSTEM&&SYSTEM.catalog){renderCatalogFilters(SYSTEM.catalog);paintCatalogMatrix(SYSTEM.catalog);}
+    });
+  }
+
+  // ── project stack ──
+  // LANGUAGES carry lines and go on the bar. Framework/SDK/tool detection still
+  // runs in the collector and still ships on ak system --json; it is no longer
+  // RENDERED here, because presence-only chips answered neither question this
+  // table asks (how big, and in what) while owning half of every row.
+  var LANG_STEPS=[1,.8,.63,.49,.37];
+  var LANG_TOP=5;
+  /** Ranked languages, from the registry projection when present and from the
+   *  older byLanguage map when the snapshot predates it. */
+  function locLanguages(loc){
+    if(!loc)return [];
+    if(loc.languages&&loc.languages.length){
+      return loc.languages.map(function(r){
+        return {name:r.name||r.id,lines:Number(r.lines)||0};
+      });
+    }
+    var out=[],k;
+    for(k in loc.byLanguage||{})out.push({name:k,lines:Number(loc.byLanguage[k])||0});
+    return out.sort(function(a,b){return b.lines-a.lines;});
+  }
+  function langCell(loc){
+    var list=locLanguages(loc),total=mval(loc&&loc.total);
+    // An unmeasured line count is NOT an empty bar: an empty bar reads as a
+    // project with no code, which is a claim nobody made (invariant 2).
+    if(total==null)return unkHtml((loc&&loc.total&&loc.total.reason)||"lines were not counted",!loc);
+    if(!list.length||total<=0)
+      return '<div class="sy-inbar" style="min-width:130px"></div>';
+    var bar="",names=[],shown=0,i;
+    for(i=0;i<list.length&&i<LANG_TOP;i++){
+      bar+='<i class="sy-fill" style="width:'+pct(list[i].lines,total).toFixed(1)
+        +"%;background:var(--s1);opacity:"+LANG_STEPS[i]+'" title="'
+        +esc(list[i].name+" \\u00b7 "+fmtNum(list[i].lines)+" lines")+'"></i>';
+      names.push(list[i].name);
+      shown+=list[i].lines;
+    }
+    var rest=list.slice(LANG_TOP),restNames=[];
+    for(i=0;i<rest.length;i++)restNames.push(rest[i].name+" "+fmtNum(rest[i].lines));
+    if(total>shown)bar+='<i class="sy-fill" style="width:'+pct(total-shown,total).toFixed(1)
+      // The remainder is named on hover, so "other" is a list of languages
+      // rather than an anonymous slice.
+      +'%;background:var(--dim)" title="'+esc(restNames.length
+        ?restNames.join(", "):"other \\u00b7 "+fmtNum(total-shown)+" lines")+'"></i>';
+    return '<div class="sy-inbar" style="min-width:130px">'+bar+"</div>"
+      +'<div class="sy-langs" title="'+esc(names.concat(restNames).join(", "))+'">'
+      +esc(names.join(" \\u00b7 "))+(rest.length?esc(" +"+fmtNum(rest.length)):"")+"</div>";
+  }
+  /** Frameworks / SDKs / tools as chips. Capped, with the remainder named on
+   *  hover rather than dropped. */
+  // ── Projects table sorting ──────────────────────────────────────────────
+  // One active column at a time, which is what a single aria-sort per table
+  // means and what a reader can actually hold in their head. Kept in a module
+  // var rather than localStorage: a sort is a question you are asking right
+  // now, not a preference — but it does survive the re-renders a rescan or a
+  // runtime poll triggers, which an in-function local would not.
+  //
+  // First click on a column uses that column's NATURAL direction rather than
+  // always ascending: nobody opens a size column wanting the smallest project
+  // first, or a recency column wanting the stalest.
+  var PROJ_SORT={
+    project:   { label:"project",     dir:"asc"  },
+    lines:     { label:"lines",       dir:"desc" },
+    language:  { label:"by language", dir:"asc"  },
+    disk:      { label:"disk",        dir:"desc" },
+    active:    { label:"last active", dir:"desc" },
+  };
+  var projSort={key:"project",dir:"asc"};
+
+  /** The value a row sorts by, or null when it was never measured. Null is not
+   *  zero and not "oldest" — an unmeasured row sorts to the BOTTOM in either
+   *  direction, because letting it rank would present an absent figure as a
+   *  small one. */
+  function projSortValue(pr,key){
+    if(key==="project")return String(pr.label||"").toLowerCase();
+    if(key==="lines")return mval(pr.loc&&pr.loc.total);
+    if(key==="disk")return mval(pr.totalBytes);
+    if(key==="active")return mval(pr.lastActivity);
+    if(key==="language"){
+      var langs=locLanguages(pr.loc);
+      return langs.length?String(langs[0].name||"").toLowerCase():null;
+    }
+    return null;
+  }
+
+  function sortProjects(rows,key,dir){
+    var mul=dir==="desc"?-1:1;
+    return rows.slice().sort(function(a,b){
+      var av=projSortValue(a,key),bv=projSortValue(b,key);
+      var an=av==null||av==="",bn=bv==null||bv==="";
+      // Unmeasured always last, whichever way the column points.
+      if(an&&bn)return String(a.label||"").localeCompare(String(b.label||""));
+      if(an)return 1;
+      if(bn)return -1;
+      if(typeof av==="number"&&typeof bv==="number"){
+        if(av!==bv)return (av-bv)*mul;
+      }else{
+        var c=String(av).localeCompare(String(bv));
+        if(c!==0)return c*mul;
+      }
+      // Stable, readable tiebreak so equal figures do not shuffle between renders.
+      return String(a.label||"").localeCompare(String(b.label||""));
+    });
+  }
+
+  function projSortHeader(key,label,numeric){
+    var on=projSort.key===key;
+    var dir=on?projSort.dir:PROJ_SORT[key].dir;
+    var aria=on?(projSort.dir==="asc"?"ascending":"descending"):"none";
+    var next=on?(projSort.dir==="asc"?"descending":"ascending"):(PROJ_SORT[key].dir==="asc"?"ascending":"descending");
+    return '<th aria-sort="'+aria+'"'+(numeric?' style="text-align:right"':"")+'>'
+      +'<button class="sy-sort'+(on?" on":"")+'" type="button" data-proj-sort="'+esc(key)+'"'
+      +' title="'+esc("sort by "+PROJ_SORT[key].label+", "+next)+'">'
+      +esc(label)+'<span class="sy-arrow" aria-hidden="true">'
+      +(on?(projSort.dir==="asc"?"\u2191":"\u2193"):(dir==="asc"?"\u2191":"\u2193"))
+      +"</span></button></th>";
+  }
+
+  function renderSysProjects(d){
+    var el=document.getElementById("sys-projects");
+    if(!el)return;
+    var p=d.projects;
+    if(!p){el.innerHTML=sysEmpty(NOT_SCANNED);return;}
+    var all=p.projects||[];
+    if(!all.length){el.innerHTML=sysEmpty("no project was discovered on this machine.");return;}
+    // Repositories, not directories. Two conditions, both required:
+    //
+    //   a remote — a row with no https remote is, in practice, never a project
+    //     you would recognise: it is an ephemeral .claude/worktrees/agent-*
+    //     checkout, a sub-directory a session happened to run in
+    //     (myrepo/backend), or a home directory someone once launched a session
+    //     from. Those sat beside their own parent repo as if they were peers of
+    //     it, each with its own multi-gigabyte disk figure.
+    //   a session — this table is about projects you have actually worked in
+    //     with a host. Discovery is session-derived today, so this holds by
+    //     construction; asserting it anyway keeps that true if a future
+    //     discovery source is not.
+    //
+    // The session test excludes only an EMPTY host list, never a missing one. A
+    // snapshot written before rows carried a hosts field cannot answer the question,
+    // and reading "absent" as "no sessions" would blank the whole table for
+    // anyone holding one — treating unmeasured as zero, which is the one thing
+    // this area may not do.
+    //
+    // A genuine local-only repository is excluded too. That is the cost of the
+    // rule, and it is why the count is stated below rather than left implied.
+    var list=[],excluded=0;
+    for(var f=0;f<all.length;f++){
+      var cand=all[f],crem=cand.remote||null;
+      var linked=!!(crem&&crem.webUrl&&/^https:/.test(String(crem.webUrl)));
+      var hosted=!Array.isArray(cand.hosts)||cand.hosts.length>0;
+      if(linked&&hosted)list.push(cand);else excluded++;
+    }
+    if(!list.length){
+      el.innerHTML=sysEmpty("no project with a remote and a recorded session was measured \\u2014 "
+        +fmtNum(excluded)+" measured director"+(excluded===1?"y was":"ies were")+" excluded.");
+      return;
+    }
+    list=sortProjects(list,projSort.key,projSort.dir);
+    var body="",i;
+    for(i=0;i<list.length;i++){
+      var pr=list[i];
+      var tree=mval(pr.treeBytes),git=mval(pr.gitBytes),nm=mval(pr.nodeModulesBytes);
+      var diskTotal=mval(pr.totalBytes),diskBar="";
+      if(diskTotal>0){
+        // One entity's ranked parts — shades of ONE hue, darkest for the part
+        // the user wrote, faintest for the reinstallable overhead.
+        if(tree!=null)diskBar+='<i class="sy-fill" style="width:'+pct(tree,diskTotal).toFixed(1)
+          +'%;background:var(--s1)" title="'+esc("working tree \\u00b7 "+fmtBytes(tree))+'"></i>';
+        if(git!=null)diskBar+='<i class="sy-fill" style="width:'+pct(git,diskTotal).toFixed(1)
+          +'%;background:var(--s1);opacity:.55" title="'+esc(".git \\u00b7 "+fmtBytes(git))+'"></i>';
+        if(nm!=null)diskBar+='<i class="sy-fill" style="width:'+pct(nm,diskTotal).toFixed(1)
+          +'%;background:var(--s1);opacity:.28" title="'+esc("node_modules \\u00b7 "+fmtBytes(nm))+'"></i>';
+      }
+      // The remote sub-line and the stack chips are gone: this table answers
+      // "how big is each project and what is it written in". A forge slug and a
+      // row of presence-only chips answered neither, and between them they owned
+      // half the row's height. The project still LINKS to its remote when it has
+      // an https one — the affordance was worth keeping, the metadata was not.
+      var rem=pr.remote||null,name;
+      if(rem&&rem.status==="linked"&&/^https:/.test(String(rem.webUrl||""))){
+        name='<a href="'+esc(rem.webUrl)+'" target="_blank" rel="noreferrer noopener" title="'+esc(rem.raw||"")+'">'
+          +esc(pr.label)+"&#8239;&#8599;</a>";
+      }else{
+        name=esc(pr.label);
+      }
+      var last=mval(pr.lastActivity);
+      body+="<tr><td>"+name+"</td>"
+        +'<td class="num">'+mhtml(pr.loc&&pr.loc.total,function(v){return "~"+fmtTok(v);})+"</td>"
+        +"<td>"+langCell(pr.loc)+"</td>"
+        +'<td class="num">'+mhtml(pr.totalBytes,fmtBytes)+"</td>"
+        +'<td class="num">'+(last==null?unkHtml((pr.lastActivity&&pr.lastActivity.reason)||"no readable entry",false)
+          :esc(ago(Math.max(0,Math.round((Date.now()-last)/1000)))))+"</td></tr>";
+    }
+    // Legend covers only what still renders: the language ramp. The disk column
+    // is a single figure now, and there are no chips left to explain.
+    el.innerHTML='<div class="sy-legend" style="margin-bottom:4px">'
+      +'<span>lines: top '+LANG_TOP+' languages, darkest first'
+      +'<i style="background:var(--s1);margin-left:8px"></i>'
+      +'<i style="background:var(--s1);opacity:.63"></i>'
+      +'<i style="background:var(--s1);opacity:.27"></i>'
+      +'<i style="background:var(--dim)"></i> the rest</span></div>'
+      +'<div class="sy-tblwrap"><table class="sy-table sy-sortable"><thead><tr>'
+      +projSortHeader("project","Project",false)
+      +projSortHeader("lines","Lines \u2248",true)
+      +projSortHeader("language","By language",false)
+      +projSortHeader("disk","Disk",true)
+      +projSortHeader("active","Last active",true)
+      +"</tr></thead><tbody>"+body+"</tbody></table></div>"
+      // Three numbers now, and the gap between the last two is a filter rather
+      // than a fact about the machine — so it is named. Leaving the reader to
+      // subtract 25 from 16 and guess is the silent exclusion ADR-0023 forbids.
+      +'<div class="sy-liner">'
+      +(p.everSeen
+        ?mhtml(p.everSeen)+" projects ever seen across all hosts, "
+          +(p.onDisk?mhtml(p.onDisk):"some")+" still on disk"
+        :mhtml(p.count)+" projects measured (this snapshot predates the ever-seen count)")
+      +", "+esc(fmtNum(list.length))+" listed here."
+      +(excluded
+        ? " Excluded "+esc(fmtNum(excluded))+" measured director"+(excluded===1?"y":"ies")
+          +" with no remote or no recorded session \\u2014 agent worktrees, sub-folders of a "
+          +"repository already listed, and repositories with no remote."
+        : "")
+      +" Line counts are approximate: extension-bucketed, with node_modules and vendored "
+      +"trees excluded. Disk is the whole project directory, .git and node_modules included.</div>";
+  }
+
+  // Freshness is a contract, not a caption (ADR-0025 §3): every deep figure on
+  // this page was measured at ONE moment, and the label says which. Past the
+  // staleness horizon it nudges — but it still never scans on its own.
+  function renderSystemFreshness(){
+    var el=document.getElementById("sys-asof"),btn=document.getElementById("sys-rescan");
+    if(!el)return;
+    var scan=(SYSTEM&&SYSTEM.scan)||null,snap=(SYSTEM&&SYSTEM.snapshot)||null;
+    el.removeAttribute("data-stale");
+    if(scan&&scan.running){
+      el.innerHTML='<span class="sy-scan">scanning\\u2026 '+esc(scan.phase||"")
+        +(scan.total?" ("+fmtNum(scan.scanned)+"/"+fmtNum(scan.total)+")":"")+"</span>";
+      if(btn){btn.disabled=true;btn.title="a deep scan is already running";}
+      return;
+    }
+    if(btn){btn.disabled=false;btn.title="re-measure the deep tier now";}
+    if(!SYSTEM){el.textContent="deep scan \\u2014 not loaded";return;}
+    if(!snap||!snap.measured||snap.asOf==null){
+      el.textContent="deep scan \\u2014 never run on this machine";
+      el.title=(snap&&snap.reason)||"no snapshot has been written yet";
+      el.setAttribute("data-stale","1");
+      return;
+    }
+    // limAge, not ago(): a snapshot is a DAYS-scale artifact and the staleness
+    // horizon is a week, so "240h ago" is the wrong unit for the one label that
+    // has to make "older than seven days" obvious. Reusing the Limits view's
+    // formatter keeps one vocabulary for "how old is this figure".
+    var age=limAge(Date.now()-Math.max(0,Number(snap.ageMs)||0));
+    el.textContent="deep scan \\u00b7 "+age+(snap.stale?" \\u00b7 stale, rescan":"")
+      +(scan&&scan.error?" \\u00b7 last scan reported a problem":"");
+    el.title=(scan&&scan.error?scan.error+" \\u2014 ":"")
+      +"deep-tier figures were measured "+age+"; nothing rescans on its own";
+    if(snap.stale)el.setAttribute("data-stale","1");
+  }
+
+  function renderSystem(){
+    if(!SYSTEM)return;
+    if(SYSTEM.error){
+      var ids=["sys-kpis","sys-gauge","sys-consumers","sys-donut","sys-hostsplit","sys-growth",
+        "sys-learning","sys-reclaim","sys-topsessions","sys-procs","sys-mem","sys-daemons","sys-radar",
+        "sys-catcounts","sys-matrix","sys-projects"];
+      var msg=sysEmpty(SYSTEM.error+(SYSTEM.reason?" \\u2014 "+SYSTEM.reason:""));
+      for(var i=0;i<ids.length;i++){
+        var el=document.getElementById(ids[i]);
+        if(el)el.innerHTML=msg;
+      }
+      // Liner notes qualify figures; with no figures they would qualify nothing.
+      var notes=["sys-kpis-note","sys-consumers-note","sys-reclaim-note"];
+      for(i=0;i<notes.length;i++){
+        var n=document.getElementById(notes[i]);
+        if(n)n.innerHTML="";
+      }
+      renderSystemFreshness();
+      return;
+    }
+    renderSysSummary(SYSTEM);
+    renderSysStorage(SYSTEM);
+    renderSysRuntime(SYSTEM);
+    renderSysCatalog(SYSTEM);
+    renderSysProjects(SYSTEM);
+    renderSystemFreshness();
+  }
+
+  // A deep refresh is a re-MEASUREMENT of local state, which is why it rides a
+  // GET (ADR-0025 §5). The server answers immediately with the running scan
+  // state; the poll below tracks it to completion and stops the moment it
+  // settles. Nothing here starts a scan that the user did not ask for.
+  // The trees flag is a SCAN parameter, not a view filter: project trees are
+  // only walked when it is set, so changing it means re-measuring. Undefined
+  // keeps whatever the running configuration already had.
+  function loadSystem(deep,trees){
+    if(systemBusy)return Promise.resolve();
+    systemBusy=true;
+    if(deep&&SYSTEM&&SYSTEM.scan)SYSTEM.scan.running=true;
+    renderSystemFreshness();
+    var q=deep?("?refresh=deep"+(trees==null?"":"&trees="+(trees?"1":"0"))):"";
+    return fetch("/api/system"+q,{cache:"no-store",headers:authHeaders()})
+      .then(function(r){return r.json();})
+      .then(function(d){SYSTEM=d;})
+      .catch(function(){SYSTEM={error:"the system footprint could not be read",scan:null,snapshot:null};})
+      .then(function(){
+        systemBusy=false;
+        renderSystem();
+        scheduleSystemPoll();
+      });
+  }
+  function scheduleSystemPoll(){
+    if(systemPollTimer){clearTimeout(systemPollTimer);systemPollTimer=null;}
+    if(!SYSTEM||!SYSTEM.scan||!SYSTEM.scan.running)return;
+    // Bounded by the scan itself: the timer is only ever re-armed while the
+    // server still reports it running, so a finished scan stops the polling
+    // without any client-side deadline to get wrong.
+    systemPollTimer=setTimeout(function(){loadSystem();},3000);
+  }
+  function wireSystem(){
+    var btn=document.getElementById("sys-rescan");
+    if(btn)btn.addEventListener("click",function(){
+      if(btn.disabled)return;
+      loadSystem(true);
+    });
+    var ctl=document.getElementById("sys-cons-ctl");
+    if(ctl)ctl.addEventListener("click",function(e){
+      var m=e.target.closest?e.target.closest("[data-cons-mode]"):null;
+      if(m){
+        consMode=m.getAttribute("data-cons-mode");
+        var chips=ctl.querySelectorAll("[data-cons-mode]");
+        for(var i=0;i<chips.length;i++)
+          chips[i].classList.toggle("on",chips[i].getAttribute("data-cons-mode")===consMode);
+        if(SYSTEM)renderSysConsumers(SYSTEM);
+        return;
+      }
+      var t=e.target.closest?e.target.closest("#sys-cons-trees"):null;
+      if(!t||t.disabled)return;
+      // Flipping the scope re-measures; the panel keeps showing the previous
+      // scan's figures, correctly labelled, until the new one lands.
+      loadSystem(true,t.getAttribute("aria-pressed")!=="true");
+    });
+  }
+
   window.AKDashboardSyncHash=syncHash;
   if(window.AKLive&&window.AKLive.setScope)window.AKLive.setScope(initialLiveScope,false);
   setTab(activeTab);
   setUsageView(usageView);
+  setSystemView(systemView,false,true);
+  // About paints its editorial content immediately, with every chip reading
+  // "state unknown" until the first /api/status response supplies the join.
+  renderAbout(null);
+  renderSystemFreshness();
   wirePoll();
   wireUsage();
   wireIntelPicker();
+  wireAboutNudge();
+  wireSystem();
+  wireStripCollapse();
+  wireCatalogFilters();
   schedulePoll();
   lastAttempt=Date.now(); inflight=true;
   Promise.all([pollStatus()].concat(activeTab==="usage"?[loadUsage()]:[]))

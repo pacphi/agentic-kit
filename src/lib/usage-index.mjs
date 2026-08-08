@@ -30,7 +30,7 @@
 // arithmetic without importing anyone's pricing table or classification policy.
 import fs from 'node:fs';
 import path from 'node:path';
-import { configDir, claudeDir, codexDir } from './paths.mjs';
+import { configDir, claudeDir, codexDir, repoRoot } from './paths.mjs';
 import { readCodexStateResult } from './codex-state.mjs';
 import {
   defaultOpencodeDbPath, listSessionsResult as listOpencodeSessionsResult,
@@ -64,8 +64,14 @@ import {
  *  v8: Codex `session_meta.model_provider` is retained as observed inference
  *      provider evidence. v7 caches discarded that field, so every Codex
  *      record must be re-derived rather than continuing to display an
- *      avoidable "provider not recorded". */
-export const SCHEMA_VERSION = 8;
+ *      avoidable "provider not recorded".
+ *  v9: the dropped-connection/API-error placeholder turn is now recognized by
+ *      its literal `model: "<synthetic>"` marker as well as
+ *      `isApiErrorMessage: true` — some builds emit the placeholder without
+ *      that flag set. A v8-cached session parsed from such a transcript still
+ *      carries `"<synthetic>"` in `models` and a $0 usage row, so it must be
+ *      re-derived or the placeholder keeps showing as a real "model in play". */
+export const SCHEMA_VERSION = 9;
 
 /** Silence longer than this ends a stretch of engagement. A session is split
  *  into active sub-intervals at gaps ABOVE this bound (exactly this much is not
@@ -239,12 +245,26 @@ const WORKTREE_MARKERS = ['.autopilot', '.claude', '.git'];
  * it" are different questions, and collapsing the second into the first would
  * trade one wrong answer for a lossy one. Pure — exported for test.
  *
+ * A session run in a SUB-DIRECTORY of a repo is the same problem the worktree
+ * markers above solve, reached by a different path shape: `emailibrium/backend`
+ * reports a project called `backend`, which then sits beside `emailibrium` as
+ * if it were a peer repository. The markers cannot catch it because there is no
+ * marker segment to match — only the repository boundary distinguishes them. So
+ * the caller may supply `repoRoot`, and when it does, the repo becomes the
+ * project and the sub-path takes the worktree slot ("which branch/part of it"),
+ * exactly as a real worktree does.
+ *
+ * `repoRoot` is a PARAMETER rather than a lookup because resolving it is a
+ * filesystem walk and this function is pure and called once per session; the
+ * index resolves it once per distinct cwd and passes it in.
+ *
  * @param {string|null} cwd Absolute path the session ran in.
  * @param {string|null} [dirName] Encoded ~/.claude/projects dir, used only as a
  *   fallback when the transcript carried no cwd.
+ * @param {string|null} [repoRoot] The repository root containing `cwd`, when known.
  * @returns {{ project: string, worktree: string|null }}
  */
-export function projectLabel(cwd, dirName) {
+export function projectLabel(cwd, dirName, repoRoot) {
   if (cwd && typeof cwd === 'string') {
     // Split on BOTH separators, not path.sep. On Windows path.sep is '\\', but a
     // transcript's recorded cwd may be POSIX-style (WSL, a synced dotfile, a
@@ -275,6 +295,18 @@ export function projectLabel(cwd, dirName) {
       return { project: 'scratchpad', worktree: base || null };
     }
 
+    // A sub-directory of a known repo is that repo, not a peer of it. Compared
+    // on split segments rather than string prefixes so `/a/repo-two` is never
+    // read as living inside `/a/repo`.
+    if (repoRoot && typeof repoRoot === 'string') {
+      const rootSegs = repoRoot.split(/[\\/]+/).filter(Boolean);
+      const inside = rootSegs.length < segs.length
+        && rootSegs.every((seg, i) => segs[i] === seg);
+      if (inside) {
+        return { project: rootSegs[rootSegs.length - 1], worktree: segs.slice(rootSegs.length).join('/') || null };
+      }
+    }
+
     if (base && base !== '.') return { project: base, worktree: null };
   }
 
@@ -282,6 +314,33 @@ export function projectLabel(cwd, dirName) {
   const parts = String(dirName).replace(/^-+/, '').split('-').filter(Boolean);
   return { project: parts.length ? parts[parts.length - 1] : 'unknown', worktree: null };
 }
+
+/** Repo root for a cwd, memoized for the life of one index build.
+ *
+ *  Indexing walks thousands of sessions but only tens of distinct working
+ *  directories, so the filesystem walk is paid once per directory rather than
+ *  once per session. A cwd outside any repo memoizes `null` — a miss is as
+ *  worth caching as a hit, and `null` then leaves projectLabel on its existing
+ *  basename path. */
+function repoRootMemo(resolve = repoRoot) {
+  const cache = new Map();
+  return (cwd) => {
+    if (typeof cwd !== 'string' || !cwd) return null;
+    if (!cache.has(cwd)) {
+      let root;
+      try { root = resolve(cwd); } catch { root = null; }
+      cache.set(cwd, root ?? null);
+    }
+    return cache.get(cwd);
+  };
+}
+
+/** Module-scoped because the parse functions are called per session from
+ *  several entry points and threading a cache through all of them would add a
+ *  parameter to each for no behavioural gain. Safe to share: a repository root
+ *  does not move while a process runs, and the key space is the machine's
+ *  distinct working directories (tens), not its sessions (thousands). */
+const repoRootOf = repoRootMemo();
 
 /** Sum a record's per-model usage rows into one API-equivalent cost. Rows with
  *  an observed transcript cost (opencode) use it — same preference as aggregate. */
@@ -485,7 +544,7 @@ function parseClaude(raw, { id, dirName, withTurns = false }) {
     if (typeof e.attributionSkill === 'string' && !rec.skill) rec.skill = e.attributionSkill;
     if (typeof e.attributionPlugin === 'string' && !rec.plugin) rec.plugin = e.attributionPlugin;
     if (e.isSidechain === true) rec.sidechain = true;
-    if (rec.project === 'unknown' && typeof e.cwd === 'string') applyProject(rec, projectLabel(e.cwd, dirName));
+    if (rec.project === 'unknown' && typeof e.cwd === 'string') applyProject(rec, projectLabel(e.cwd, dirName, repoRootOf(e.cwd)));
 
     if (e.type === 'user') {
       noteSpan(rec, ms);
@@ -514,8 +573,11 @@ function parseClaude(raw, { id, dirName, withTurns = false }) {
     // always zero. It IS real engaged time (counted above), but it is not a
     // model attempt: excluded from `models`/cost attribution so it can never
     // appear as a $0 "model in play," and counted instead as an EXCEPTION so
-    // it stays visible rather than silently vanishing.
-    if (e.isApiErrorMessage === true) {
+    // it stays visible rather than silently vanishing. isApiErrorMessage isn't
+    // reliably set on every build that emits this placeholder, so the literal
+    // model marker is checked directly too — it's the one part of the shape
+    // that's never varied in observed transcripts.
+    if (e.isApiErrorMessage === true || e.message.model === '<synthetic>') {
       rec.exceptions++;
       if (withTurns) {
         turns.push({
@@ -587,7 +649,7 @@ function parseCodex(raw, { id, withTurns = false }) {
 
     if (e.type === 'session_meta') {
       if (typeof p.id === 'string' && p.id) rec.id = p.id;
-      if (typeof p.cwd === 'string') applyProject(rec, projectLabel(p.cwd, null));
+      if (typeof p.cwd === 'string') applyProject(rec, projectLabel(p.cwd, null, repoRootOf(p.cwd)));
       if (typeof p.thread_source === 'string') rec.threadSource = p.thread_source;
       if (typeof p.model_provider === 'string' && p.model_provider) {
         rec.inferenceProvider = p.model_provider;
@@ -601,7 +663,7 @@ function parseCodex(raw, { id, withTurns = false }) {
         rec.inferenceProvider = p.model_provider;
         rec.providerProvenance = 'observed';
       }
-      if (rec.project === 'unknown' && typeof p.cwd === 'string') applyProject(rec, projectLabel(p.cwd, null));
+      if (rec.project === 'unknown' && typeof p.cwd === 'string') applyProject(rec, projectLabel(p.cwd, null, repoRootOf(p.cwd)));
       continue;
     }
     if (e.type !== 'event_msg') continue;

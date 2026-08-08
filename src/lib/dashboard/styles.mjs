@@ -17,8 +17,21 @@ export const CSS = `
   --line:rgba(255,255,255,.09); --line-2:rgba(255,255,255,.17);
   --accent:#0a84ff; --accent-soft:rgba(10,132,255,.16);
   --ok:#30d158; --warn:#ff9f0a; --fail:#ff453a; --info:#98989d; --purple:#bf5af2;
+  --ok-soft:rgba(48,209,88,.16);
   --material:rgba(16,16,18,.72);
   --shadow:0 1px 2px rgba(0,0,0,.4),0 12px 32px -20px rgba(0,0,0,.9);
+  /* About: category hues for monogram tiles. IDENTITY, not a data series —
+     they say "this card belongs to that family", never "this value is larger".
+     Named by the directory module (about-directory.mjs's icon.hue), defined
+     here, so the data never picks a colour. */
+  --hue-engine:#7d7aff; --hue-quality:#30d158; --hue-safety:#ff9f0a;
+  --hue-knowledge:#bf5af2; --hue-kit:#0a84ff;
+  /* System: the four-step categorical series. Four is the cap — past that the
+     steps stop being separable at 3:1 against this panel, which is why the
+     Storage donut is capped at four slices and every chart carries labels
+     rather than relying on colour alone. --dim is de-emphasis (free space,
+     "other", reinstallable overhead), never a category. */
+  --s1:#3987e5; --s2:#d95926; --s3:#199e70; --s4:#c98500; --dim:#48484a;
 }
 :root[data-theme="light"]{
   --bg:#f5f5f7; --panel:#ffffff; --panel-2:#f2f2f7; --raised:#ffffff; --thumb:#ffffff;
@@ -26,8 +39,14 @@ export const CSS = `
   --line:rgba(60,60,67,.12); --line-2:rgba(60,60,67,.22);
   --accent:#007aff; --accent-soft:rgba(0,122,255,.12);
   --ok:#34c759; --warn:#ff9500; --fail:#ff3b30; --info:#8e8e93; --purple:#af52de;
+  --ok-soft:rgba(52,199,89,.14);
   --material:rgba(249,249,251,.78);
   --shadow:0 1px 2px rgba(0,0,0,.05),0 12px 30px -22px rgba(0,0,0,.22);
+  /* Light-theme steps of the same two families — darkened where the dark-theme
+     value would not clear 3:1 against a #ffffff panel. */
+  --hue-engine:#5e5ce6; --hue-quality:#1baf7a; --hue-safety:#eb6834;
+  --hue-knowledge:#af52de; --hue-kit:#007aff;
+  --s1:#2a78d6; --s2:#eb6834; --s3:#1baf7a; --s4:#eda100; --dim:#c7c7cc;
 }
 @media (prefers-color-scheme:light){
   :root:not([data-theme]){ color-scheme:light; }
@@ -330,6 +349,27 @@ body.gated .band,body.gated .tabbar,body.gated main{display:none}
 }
 .strip-head{display:flex; align-items:baseline; justify-content:space-between; gap:12px; margin-bottom:14px}
 .strip-title{font-size:16px; font-weight:600; letter-spacing:-.014em; margin:0}
+
+/* Panel-level collapse. A real <button> wrapping the heading, so the whole
+   title is the target and screen readers announce the state — the .s-exp
+   lesson, applied at panel scale. The chevron is a child span rather than the
+   button itself (unlike .s-exp) because the button also has to carry the
+   heading; the rotation selector is the only thing that differs, so this still
+   reuses the .chev vocabulary rather than inventing a second one.
+   Unlike the row expanders, this state IS persisted (LS_COLLAPSE in
+   client.mjs): a 30 s poll re-render would otherwise reopen a panel the user
+   just closed, which reads as the page fighting you. */
+.strip-toggle{
+  display:flex; align-items:baseline; gap:8px; margin:0; padding:0;
+  background:transparent; border:0; color:inherit; font:inherit; text-align:left; cursor:pointer;
+}
+.strip-toggle:focus-visible{outline:2px solid var(--accent); outline-offset:3px; border-radius:4px}
+.strip-toggle:hover .chev{color:var(--accent)}
+.strip-toggle[aria-expanded="true"] .chev{transform:rotate(90deg); color:var(--accent)}
+/* A collapsed head carries the panel's whole bottom margin — the body that
+   normally provides the spacing is gone. */
+.strip-head:has(.strip-toggle[aria-expanded="false"]){margin-bottom:0}
+.strip-body[hidden]{display:none}
 .strip-note{color:var(--ink-dim); font-size:12px}
 .route-matrix{display:flex; flex-direction:column; gap:1px; background:var(--line); border:1px solid var(--line); border-radius:var(--r-sm); overflow:hidden}
 .r-row{display:grid; grid-template-columns:minmax(140px,1.4fr) 84px minmax(120px,1.4fr) minmax(90px,1fr); gap:10px; align-items:center; padding:8px 14px; background:var(--panel)}
@@ -340,6 +380,21 @@ body.gated .band,body.gated .tabbar,body.gated main{display:none}
 .r-host-codex{color:var(--accent); background:var(--accent-soft); border-color:color-mix(in srgb,var(--accent) 35%,transparent)}
 .r-host[data-primary]{box-shadow:inset 0 0 0 1.5px var(--accent); font-weight:700}
 .r-model{color:var(--ink-2); font-size:11.5px}
+/* Two distinct signals, deliberately coloured apart: the warn tone for a
+   retirement (a dated hard failure ak has already worked around) and the
+   neutral dim for a divergence (a trade for the user to weigh — colouring it as
+   a problem would editorialise a choice the code is careful not to make). */
+.r-flag{
+  margin-left:7px; font-family:var(--sans); font-size:9.5px; letter-spacing:.01em;
+  border-radius:100px; padding:1px 6px; white-space:nowrap; cursor:help;
+}
+.r-flag[data-kind="retired"]{
+  color:var(--warn); border:1px solid color-mix(in srgb,var(--warn) 32%,transparent);
+  background:color-mix(in srgb,var(--warn) 11%,transparent);
+}
+.r-flag[data-kind="diverged"]{
+  color:var(--ink-dim); border:1px solid var(--line); background:transparent;
+}
 .r-meta{display:flex; align-items:center; gap:8px; justify-content:flex-end; font-size:10.5px}
 .r-esc{color:var(--ink-dim)}
 .r-src{text-transform:uppercase; letter-spacing:.04em; color:var(--ink-dim); font-size:9.5px}
@@ -387,6 +442,7 @@ body.gated .band,body.gated .tabbar,body.gated main{display:none}
 }
 .chipf.on{border-color:var(--accent); color:var(--accent); background:var(--accent-soft)}
 .chipf:focus-visible{outline:2px solid var(--accent); outline-offset:1px}
+.chipf:disabled{opacity:.5; cursor:not-allowed}
 .view[hidden]{display:none}
 
 /* hero KPIs */
@@ -747,6 +803,400 @@ body.gated .band,body.gated .tabbar,body.gated main{display:none}
   .band{gap:12px}
   .band-verdict{margin-left:0; order:3; width:100%; justify-content:center}
 }
+/* ── About area (ADR-0026) ───────────────────────────────────────────────────
+   Every class here is ab-prefixed. The mock's generic names (.card, .tile,
+   .note, .grid, .legend) all collide with shipped dashboard classes, so the
+   prefix is load-bearing rather than tidiness: an unprefixed .card here would
+   restyle every Overview status card. Tokens are the page's own. */
+.ab-nudge{
+  display:flex; align-items:baseline; gap:10px; padding:11px 14px; margin-bottom:14px;
+  border-radius:var(--r-sm); background:var(--accent-soft); color:var(--ink-2); font-size:13px;
+}
+.ab-nudge .i{color:var(--accent); font-weight:700}
+.ab-nudge b{color:var(--ink); font-weight:600}
+.ab-nudge-go,.ab-nudge-x{
+  background:transparent; border:0; color:var(--accent); font-family:inherit; font-size:13px;
+  cursor:pointer; padding:0 2px; border-radius:5px;
+}
+.ab-nudge-x{color:var(--ink-dim); margin-left:auto; font-size:15px; line-height:1}
+.ab-nudge-go:hover,.ab-nudge-x:hover{text-decoration:underline}
+.ab-nudge-go:focus-visible,.ab-nudge-x:focus-visible{outline:2px solid var(--accent); outline-offset:2px}
+a.chipf{text-decoration:none; display:inline-flex; align-items:center}
+.ab-wrap{display:flex; flex-direction:column; gap:34px}
+.ab-hero{display:flex; flex-direction:column; gap:12px}
+.ab-hero h2{margin:0; font-size:23px; font-weight:700; letter-spacing:-.02em}
+.ab-hero p{margin:0; max-width:62ch; color:var(--ink-2); font-size:14px}
+.ab-hero p b{color:var(--ink); font-weight:600}
+.ab-relwrap{
+  display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-top:2px;
+  border:1px dashed var(--line-2); border-radius:var(--r); padding:11px 14px;
+}
+.ab-relwrap .ab-lbl{
+  font-size:10.5px; color:var(--ink-dim); text-transform:uppercase; letter-spacing:.11em; font-weight:700;
+}
+.ab-relmap{display:flex; align-items:stretch; gap:10px; flex-wrap:wrap}
+.ab-relbox{
+  display:flex; flex-direction:column; justify-content:center; text-align:center;
+  border:1px solid var(--line-2); border-radius:var(--r-sm); padding:8px 13px;
+  background:var(--panel); font-size:11.5px; color:var(--ink-2);
+}
+.ab-relbox b{display:block; color:var(--ink); font-size:12.5px}
+.ab-relarrow{align-self:center; color:var(--ink-dim); font-size:15px}
+.ab-sec{display:flex; flex-direction:column; gap:12px; scroll-margin-top:120px}
+.ab-sec h3{margin:0; font-size:17px; font-weight:700; letter-spacing:-.016em}
+.ab-sec p.ab-intro{margin:0; max-width:66ch; color:var(--ink-2); font-size:13px}
+.ab-cards{display:grid; gap:14px; grid-template-columns:repeat(3,1fr)}
+@media(max-width:900px){.ab-cards{grid-template-columns:repeat(2,1fr)}}
+@media(max-width:620px){.ab-cards{grid-template-columns:1fr}}
+.ab-card{
+  display:flex; flex-direction:column; gap:10px; min-width:0;
+  background:var(--panel); border:1px solid var(--line); border-radius:var(--r);
+  padding:16px 17px; box-shadow:var(--shadow);
+}
+.ab-card.ab-wide{grid-column:span 2}
+@media(max-width:620px){.ab-card.ab-wide{grid-column:span 1}}
+.ab-head{display:flex; align-items:center; gap:11px; min-width:0}
+.ab-tile{
+  width:38px; height:38px; flex:none; border-radius:10px; display:flex;
+  align-items:center; justify-content:center; overflow:hidden;
+  background:var(--panel-2); border:1px solid var(--line);
+}
+/* The three official marks are the SAME sourceHostIcon() SVGs the Observability
+   source pills use, reused byte-identically. One of them (opencode) paints a
+   literal near-white fill, which would vanish on a light-theme tile — so that
+   tile gets a fixed dark backdrop rather than the mark getting a second,
+   subtly different copy. */
+.ab-tile .live-host-icon{width:20px; height:20px; stroke-width:1.6}
+.ab-tile[data-mark="opencode"]{background:#1c1c1e; border-color:rgba(255,255,255,.14)}
+.ab-tile.ab-mg{border:0; color:#fff; font-weight:700; font-size:15px; letter-spacing:-.01em}
+.ab-name{min-width:0}
+.ab-name b{
+  display:block; font-size:14px; font-weight:650; letter-spacing:-.012em; color:var(--ink);
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+}
+.ab-state{
+  display:inline-flex; align-items:center; gap:5px; margin-top:3px; padding:1.5px 9px;
+  border-radius:100px; font-size:10.5px; font-weight:650;
+}
+.ab-state::before{content:""; width:5px; height:5px; border-radius:50%; background:currentColor}
+.ab-state[data-state="ok"]{color:var(--ok); background:var(--ok-soft)}
+.ab-state[data-state="configured"]{color:var(--accent); background:var(--accent-soft)}
+.ab-state[data-state="warn"]{color:var(--warn); background:color-mix(in srgb,var(--warn) 15%,transparent)}
+.ab-state[data-state="fail"]{color:var(--fail); background:color-mix(in srgb,var(--fail) 15%,transparent)}
+.ab-state[data-state="unknown"]{color:var(--ink-2); background:var(--panel-2); border:1px dashed var(--line-2)}
+.ab-tagline{font-size:13.5px; font-weight:640; letter-spacing:-.006em; color:var(--ink)}
+.ab-body{margin:0; font-size:12.8px; color:var(--ink-2); line-height:1.5}
+.ab-detail{
+  margin:0; font-size:11.5px; color:var(--ink-2); border-left:2px solid var(--lvl,var(--warn));
+  padding:2px 0 2px 9px;
+}
+.ab-detail[data-level="fail"]{--lvl:var(--fail)}
+.ab-detail code{font-family:var(--mono); font-size:11px; color:var(--ink)}
+.ab-links{display:flex; gap:6px; flex-wrap:wrap; margin-top:auto; padding-top:2px}
+.ab-pill{
+  font-size:11px; font-weight:600; text-decoration:none; color:var(--accent);
+  border:1px solid var(--line-2); border-radius:100px; padding:3px 10px; background:var(--panel-2);
+}
+.ab-pill:hover{border-color:var(--accent)}
+.ab-pill:focus-visible{outline:2px solid var(--accent); outline-offset:1px}
+.ab-manage{font-family:var(--mono); font-size:11px; color:var(--ink-dim); margin-top:auto; padding-top:2px}
+.ab-secnote{
+  border-top:1px dashed var(--line-2); padding-top:8px; max-width:80ch;
+  font-size:11.5px; color:var(--ink-2);
+}
+.ab-secnote b{color:var(--ink); font-weight:600}
+
+/* ── System area (ADR-0025) ──────────────────────────────────────────────────
+   sy-prefixed for the same collision reason. A 12-column grid so each card can
+   declare the width its chart form actually needs; charts are inline SVG built
+   from the payload, never an image and never a remote asset. */
+.sy-grid{display:grid; grid-template-columns:repeat(12,1fr); gap:10px}
+/* Card chrome is deliberately tight. A System view is a dense band of facts —
+   padding and inter-row gap that would flatter one hero chart is, across five
+   stacked cards, most of a screen spent on framing rather than measurement. */
+.sy-card{
+  grid-column:span 12; display:flex; flex-direction:column; gap:8px; min-width:0;
+  background:var(--panel); border:1px solid var(--line); border-radius:var(--r);
+  padding:13px 15px; box-shadow:var(--shadow);
+}
+.sy-3{grid-column:span 3}.sy-4{grid-column:span 4}.sy-5{grid-column:span 5}
+.sy-6{grid-column:span 6}.sy-7{grid-column:span 7}.sy-8{grid-column:span 8}
+@media(max-width:900px){.sy-3,.sy-4,.sy-5{grid-column:span 6}.sy-6,.sy-7,.sy-8{grid-column:span 12}}
+@media(max-width:600px){.sy-3,.sy-4,.sy-5{grid-column:span 12}}
+.sy-head{display:flex; align-items:baseline; justify-content:space-between; gap:8px}
+.sy-head h3{margin:0; font-size:13px; font-weight:650; letter-spacing:-.008em}
+.sy-legend{display:flex; gap:12px; flex-wrap:wrap; font-size:11.5px; color:var(--ink-2)}
+.sy-legend i{display:inline-block; width:9px; height:9px; border-radius:3px; margin-right:5px; vertical-align:-1px}
+.sy-legend b{color:var(--ink); font-weight:600}
+/* Unknown is a first-class rendering, not an empty cell: it says so, and the
+   reason rides the title so a reader can find out why without leaving. */
+.sy-unk{color:var(--ink-dim); font-style:italic; cursor:help}
+.sy-approx{color:var(--ink-dim)}
+.sy-freshness{display:flex; align-items:center; gap:9px; font-size:12px; color:var(--ink-2)}
+.sy-asof{font-family:var(--mono); font-size:11.5px}
+.sy-asof[data-stale="1"]{color:var(--warn)}
+.sy-scan{color:var(--accent)}
+/* KPI band + odometer readout. Dimensions are Usage's .kpi rhythm EXACTLY —
+   15px 16px of padding and a 27px value — not a second scale: the two bands are
+   one click apart, and a System tile that towers over a Scorecard tile reads as
+   a different, more important kind of fact than it is. OD_H in client.mjs must
+   equal the odometer height below — the digit stack is translated by whole rows,
+   so a mismatch shows two half digits. */
+.sy-kpis{grid-column:span 12; display:grid; gap:12px; grid-template-columns:repeat(auto-fit,minmax(168px,1fr))}
+.sy-kpi{background:var(--panel); border:1px solid var(--line); border-radius:var(--r); padding:15px 16px; box-shadow:var(--shadow)}
+.sy-kpi .lbl{font-size:10.5px; font-weight:600; letter-spacing:.09em; text-transform:uppercase; color:var(--ink-dim)}
+.sy-kpi .val{display:flex; align-items:baseline; gap:5px; margin-top:5px; min-height:30px; flex-wrap:wrap}
+.sy-kpi .unit{font-size:12px; color:var(--ink-2)}
+/* One fact per line, so a caption never wraps mid-separator. The tiles are grid
+   items and already share a height, so stacking costs nothing a dot-joined line
+   that wrapped was not already costing. */
+.sy-kpi .sub{display:flex; flex-direction:column; gap:1px; font-size:11.5px; color:var(--ink-2); margin-top:6px}
+.sy-kpi .sub-l{white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
+.od{display:inline-flex; overflow:hidden; height:30px; font-family:var(--mono); font-variant-numeric:tabular-nums}
+.od .dcol{display:inline-block; height:30px; overflow:hidden}
+.od .dstack{display:flex; flex-direction:column; transition:transform 1.1s cubic-bezier(.2,.7,.2,1)}
+.od .dstack span{height:30px; line-height:30px; font-size:27px; font-weight:700; letter-spacing:-.028em; text-align:center; min-width:.62em}
+.od .lit{font-size:27px; font-weight:700; line-height:30px; letter-spacing:-.028em}
+/* Liner note: what a panel counted and how, in the muted voice the genuine
+   caveats already use. It qualifies the DATA — a figure whose accounting
+   changed cannot be read correctly without it, which is why it renders next to
+   the number rather than in a doc. */
+.sy-liner{font-size:11.5px; color:var(--ink-dim); line-height:1.55}
+.sy-liner b{color:var(--ink-2); font-weight:600}
+/* A grid-level liner is two lines of dense accounting prose sitting between the
+   KPI band above and the disk strip below. It was pulled UP by a negative
+   margin, which left 5px between it and the cards it qualifies and made the
+   whole region read as one undifferentiated block. Give it room on both sides:
+   at this density the separation is what makes it legible as a footnote rather
+   than as more numbers. */
+.sy-grid > .sy-liner{grid-column:span 12; margin:6px 0 8px; max-width:120ch}
+/* Disk denominator as a horizontal meter. The radial spent a full card's height
+   stating one ratio; the band states the same ratio plus its parts in one line.
+   It also drops the card chrome entirely — a panel, a border and a shadow around
+   a single line of text is 20px of container spent framing 18px of content, and
+   the Summary is meant to read as a dense band of facts rather than a stack of
+   tall cards. It keeps its own hairline rules so it still reads as a strip. */
+.sy-band{
+  background:none; border:0; border-radius:0; box-shadow:none;
+  border-top:1px solid var(--line); border-bottom:1px solid var(--line);
+  padding:13px 2px; gap:0;
+}
+.sy-diskband{display:flex; align-items:center; gap:13px; flex-wrap:wrap}
+.sy-diskband .dk-lbl{
+  flex:none; font-size:10.5px; font-weight:600; letter-spacing:.09em;
+  text-transform:uppercase; color:var(--ink-dim);
+}
+.sy-diskband .dk-meter{
+  flex:1 1 200px; min-width:140px; height:12px; border-radius:100px;
+  background:var(--panel-2); overflow:hidden; display:flex;
+}
+.sy-diskband .dk-meter i{height:100%; min-width:2px}
+/* Wraps to its own line rather than forcing the band wider than the viewport:
+   a facts string that cannot shrink is how a panel makes the whole page scroll
+   sideways on a phone. */
+.sy-diskband .dk-facts{flex:1 1 auto; min-width:0; font-size:12px; color:var(--ink-2)}
+.sy-diskband .dk-facts b{color:var(--ink); font-family:var(--mono); font-weight:700}
+/* Consumers: twenty ranked rows in a scroller. About four were visible, which
+   is too few to read as a ranking — you compared the top of the list against
+   nothing. Sized for 8-10 rows in the denser "by ecosystem" mode, where every
+   row also carries a note (~40px a pair against ~25px for a bare ranked row).
+   Still bounded, and the scroll still belongs to this container: the page body
+   must never scroll sideways or grow a screen-tall list to state a ranking. */
+.sy-ctl{display:flex; gap:6px; flex-wrap:wrap}
+.sy-scroll{
+  max-height:min(46vh,400px); overflow-y:auto; overflow-x:hidden;
+  overscroll-behavior:contain; padding-right:4px;
+}
+.sy-crow{
+  display:grid; grid-template-columns:minmax(110px,200px) 1fr 96px; gap:10px;
+  align-items:center; font-size:12.5px; padding:3px 0;
+}
+.sy-crow .n{color:var(--ink-2); overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+.sy-crow .g{color:var(--ink-dim); font-size:10.5px; margin-left:6px}
+.sy-crow .sy-track{height:11px}
+.sy-crow .v{text-align:right; font-family:var(--mono); font-size:11.5px; color:var(--ink)}
+.sy-cnote{font-size:11px; color:var(--ink-dim); line-height:1.4; margin:0 0 5px 96px}
+@media(max-width:600px){
+  .sy-crow{grid-template-columns:1fr 84px}
+  .sy-crow .n{grid-column:1/-1}
+  .sy-cnote{margin-left:0}
+}
+/* Horizontal magnitude bars (ranked + stacked) */
+.sy-bars{display:flex; flex-direction:column; gap:8px}
+.sy-bar{display:grid; grid-template-columns:minmax(96px,150px) 1fr 78px; gap:10px; align-items:center; font-size:12.5px}
+.sy-bar .n{color:var(--ink-2); overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+.sy-track{height:14px; border-radius:4px; background:var(--panel-2); overflow:hidden; display:flex; gap:2px}
+.sy-track.tall{height:18px}
+.sy-fill{height:100%; border-radius:4px; min-width:3px}
+.sy-bar .v{text-align:right; font-family:var(--mono); font-size:11.5px; color:var(--ink)}
+@media(max-width:600px){.sy-bar{grid-template-columns:1fr 64px} .sy-bar .n{grid-column:1/-1}}
+/* Tables */
+.sy-tblwrap{overflow-x:auto}
+/* Sortable headers. The whole header is the button, so the target is the width
+   of the column rather than the glyph. The arrow is always present — a control
+   that only appears on hover is invisible to anyone who never hovers, and a
+   column that shifts width when you point at it is worse than no affordance.
+   Inactive arrows sit at low opacity; the active one takes the accent, which is
+   how "only one column at a time" reads without a legend. */
+.sy-sortable th{padding:0}
+.sy-sort{
+  display:flex; align-items:center; gap:5px; width:100%;
+  background:none; border:0; padding:6px 8px; cursor:pointer;
+  font:inherit; color:var(--ink-dim); font-weight:600; text-align:inherit;
+  letter-spacing:inherit; text-transform:inherit; white-space:nowrap;
+}
+.sy-sortable th[style*="right"] .sy-sort{justify-content:flex-end}
+.sy-sort:hover{color:var(--ink-2)}
+.sy-sort:focus-visible{outline:2px solid var(--accent); outline-offset:-2px; border-radius:4px}
+.sy-sort .sy-arrow{font-size:9px; opacity:.28; line-height:1}
+.sy-sort:hover .sy-arrow{opacity:.6}
+.sy-sort.on{color:var(--accent)}
+.sy-sort.on .sy-arrow{opacity:1; color:var(--accent)}
+/* A liner directly after a table needs real separation, and a SCROLLING table
+   needs more of it: its last row is clipped mid-glyph by design, so a caption
+   sitting flush underneath reads as another clipped row rather than as the
+   footnote it is. */
+.sy-tblwrap + .sy-liner{margin-top:10px}
+.sy-catalog-scroll + .sy-liner,
+.sy-reclaim-scroll + .sy-liner{margin-top:14px; padding-top:2px}
+.sy-table{border-collapse:collapse; width:100%; font-size:12.5px}
+.sy-table th{
+  color:var(--ink-dim); font-weight:600; text-align:left; padding:6px 8px; white-space:nowrap;
+  border-bottom:1px solid var(--line-2); font-size:10.5px; text-transform:uppercase; letter-spacing:.06em;
+}
+.sy-table td{padding:7px 8px; border-bottom:1px solid var(--line); vertical-align:middle; color:var(--ink-2)}
+.sy-table tr:last-child td{border-bottom:0}
+.sy-table td.num{text-align:right; white-space:nowrap; font-family:var(--mono); color:var(--ink)}
+.sy-table a{color:var(--accent); text-decoration:none; font-weight:600}
+.sy-table a:hover,.sy-table a:focus-visible{text-decoration:underline}
+.sy-sub{font-family:var(--mono); font-size:10.5px; color:var(--ink-dim); margin-top:2px}
+/* Stack chips: frameworks, SDKs and tools are PRESENCE facts, so they get a
+   shape with no length to misread as a quantity. The kinds differ by weight of
+   outline, not by hue — three more hues here would compete with the four-step
+   data series next to them for no gain in meaning. */
+.sy-chips{display:flex; flex-wrap:wrap; gap:4px; margin-top:5px}
+.sy-chip{
+  font-size:10.5px; line-height:1.5; border-radius:100px; padding:1px 7px;
+  border:1px solid var(--line-2); color:var(--ink-2); background:var(--panel-2);
+  white-space:nowrap; cursor:help;
+}
+/* A weight ladder, not three hues: framework reads strongest, tool faintest.
+   Accent is this page's ACTION colour — six accent chips per project row would
+   read as six buttons, and they would out-shout the data bars beside them. */
+.sy-chip[data-kind="framework"]{border-color:var(--line-2); color:var(--ink); background:var(--panel-2)}
+.sy-chip[data-kind="sdk"]{border-color:var(--line-2); color:var(--ink-2); background:transparent}
+.sy-chip[data-kind="tool"]{border-style:dashed; background:transparent; color:var(--ink-dim)}
+/* The unrecognized tail: a named to-do list, so each chip carries its count. */
+.sy-chip[data-kind="ext"]{font-family:var(--mono); background:transparent}
+.sy-chip[data-kind="dep"]{font-family:var(--mono); background:transparent; border-style:dashed}
+.sy-chip b{color:var(--ink-dim); font-weight:600; margin-left:5px}
+.sy-chip.more{border-style:dashed; color:var(--ink-dim)}
+.sy-subhead{font-size:10.5px; font-weight:600; letter-spacing:.06em; text-transform:uppercase; color:var(--ink-dim); margin-top:10px}
+/* Language names under the stacked bar — identity in text, magnitude in the bar. */
+.sy-langs{font-size:10.5px; color:var(--ink-dim); margin-top:3px; max-width:210px;
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap; cursor:help}
+.sy-inbar{height:9px; border-radius:3px; background:var(--panel-2); min-width:80px; display:flex; gap:2px; overflow:hidden}
+.sy-rss{display:flex; gap:8px; align-items:center}
+.sy-dot{display:inline-block; width:8px; height:8px; border-radius:50%; margin-right:6px}
+/* Meter, stat tiles, advisory rows, presence matrix */
+/* The meter sits between the figure it measures and the denominator that
+   explains it, and had zero margin on both — 10px of bar wedged flush against
+   two lines of type. Slightly more room above than below, so it stays visually
+   attached to the caption that gives it its scale. */
+.sy-meter{height:10px; border-radius:100px; background:var(--panel-2); overflow:hidden; margin:10px 0 7px}
+.sy-meter > i{display:block; height:100%; border-radius:100px; background:var(--accent)}
+.sy-tiles{display:flex; gap:10px; flex-wrap:wrap}
+.sy-tile{flex:1; min-width:92px; background:var(--panel-2); border-radius:var(--r-sm); padding:10px 12px}
+.sy-tile .t-v{font-family:var(--mono); font-size:20px; font-weight:700; color:var(--ink)}
+.sy-tile .t-l{font-size:11px; color:var(--ink-2); margin-top:2px}
+/* Reclaimables — two safety tiers, deliberately NOT one list.
+   'regenerable' is space the owning tool rebuilds by itself, so its rows lead
+   with the byte count in a pill. 'review' is a pointer at something to look at:
+   its rows lead with the WORD, and their bytes render as muted context text.
+   That difference is the whole point — the pill is the visual grammar of "this
+   much is yours to take back", and putting it on a row that may be in use would
+   claim something the measurement does not support. Neither tier has, or may
+   ever have, a delete affordance (ADR-0025 §6). */
+/* Scrollable, but generous: the ~2-row cap was right when this sat under the
+   byte charts and the cost of it was scrolling PAST the advisory to reach the
+   next panel. On its own tab there is nothing to scroll past, and a two-row
+   window on a nine-row advisory is just a smaller advisory. */
+.sy-reclaim-scroll{max-height:min(62vh,620px); overflow-y:auto}
+.sy-table .tag{
+  display:inline-block; white-space:nowrap;
+  font-size:9.5px; font-weight:700; letter-spacing:.06em; text-transform:uppercase;
+  border-radius:100px; padding:2px 8px;
+}
+.sy-table .tag.regen{color:var(--ok); background:var(--ok-soft)}
+.sy-table .tag.review{color:var(--ink-2); background:transparent; border:1px dashed var(--line-2)}
+.sy-adv-t{max-width:46ch}
+.sy-adv-t b{color:var(--ink); font-weight:600}
+.sy-adv-t .why{color:var(--ink-dim); font-size:11.5px; line-height:1.45}
+/* The remediation line. Separated from the rationale above it because it
+   answers a different question — not "what is this" but "what would you run" —
+   and read as one more clause of the description when it sat flush against it. */
+.sy-adv-fix{margin-top:9px; font-size:11.5px; line-height:1.45; color:var(--ink-2)}
+.sy-adv-fix .mono{color:var(--ink)}
+/* The status totals line above the table. */
+#sys-reclaim-note b{color:var(--ink); font-family:var(--mono); font-weight:700}
+#sys-reclaim-note .g{color:var(--ink-dim); font-size:11px}
+#sys-reclaim-note .why{color:var(--ink-dim); font-size:11.5px; line-height:1.45; margin-top:3px}
+.sy-path{font-family:var(--mono); font-size:11px; color:var(--ink-dim); word-break:break-all; margin-top:2px}
+/* A session id that opens its transcript. A real <button>, because it performs
+   an in-page action rather than navigating — but styled as the link it reads
+   as, so the affordance is visible without a second visual vocabulary. */
+.sy-link{
+  background:none; border:0; padding:0; font:inherit; color:var(--accent);
+  cursor:pointer; text-align:left; border-radius:3px;
+}
+.sy-link:hover{text-decoration:underline}
+.sy-link:focus-visible{outline:2px solid var(--accent); outline-offset:2px}
+/* The presence matrix is a real table now, and scrolls: it lists EVERY
+   deduplicated item rather than the first fourteen, and a full inventory is
+   several hundred rows on a working machine. The sticky header keeps the host
+   columns meaningful once you are 200 rows down. */
+.sy-catalog-scroll{max-height:420px; overflow-y:auto}
+.sy-catalog-scroll thead th{position:sticky; top:0; background:var(--panel); z-index:1}
+.sy-matrix-t .nm{font-family:var(--mono); font-size:11.5px; color:var(--ink); word-break:break-all}
+.sy-matrix-t .cell{text-align:center; width:74px}
+.sy-matrix-t th.cell{text-transform:uppercase; letter-spacing:.04em}
+.sy-matrix-t .on{display:inline-block; width:9px; height:9px; border-radius:50%; background:var(--accent)}
+.sy-matrix-t .off{display:inline-block; width:9px; height:9px; border-radius:50%; border:1.5px solid var(--line-2)}
+/* Two stacked pick lists above the table. A label per row rather than a legend,
+   because "show" and "carried by" are different questions and an unlabelled
+   second row of chips reads as more of the first. */
+.sy-filters{display:flex; flex-direction:column; gap:6px; margin:10px 0 12px}
+.sy-filter-row{display:flex; align-items:center; gap:9px; flex-wrap:wrap}
+.sy-filter-l{
+  color:var(--ink-dim); font-size:10.5px; text-transform:uppercase; letter-spacing:.06em;
+  min-width:66px; flex:none;
+}
+/* The kind now rides on its row, since the heading rows that used to carry it
+   are gone and a filtered list must never leave a name unexplained. */
+.sy-kindtag{
+  margin-left:8px; font-family:var(--sans); font-size:9.5px; color:var(--ink-dim);
+  text-transform:uppercase; letter-spacing:.05em;
+}
+/* Inline SVG charts share one type treatment with the rest of the page. */
+.sy-card svg{display:block; max-width:100%}
+.sy-card svg text{font-family:var(--sans); fill:var(--ink-2); font-size:11px}
+.sy-card svg .gridline{stroke:var(--line); fill:none}
+.sy-card svg .big{font-family:var(--mono); font-weight:700; font-size:20px; fill:var(--ink)}
+.sy-donut{display:flex; gap:18px; align-items:center; flex-wrap:wrap}
+/* One row of five: the growth series are a fixed small set (three hosts plus
+   ak's own state and per-project learning stores), and side by side is the
+   only arrangement in which they can be compared at a glance. */
+.sy-spark{display:grid; grid-template-columns:repeat(5,1fr); gap:12px}
+@media(max-width:1100px){.sy-spark{grid-template-columns:repeat(3,1fr)}}
+@media(max-width:600px){.sy-spark{grid-template-columns:1fr}}
+/* Axis ticks. Smaller than body type and dimmer than the plot, so they read as
+   scale rather than as data. */
+.sy-card svg text.ax{font-family:var(--mono); font-size:7px; fill:var(--ink-dim)}
+/* The single-figure card (learning stores): one number that needs no chart. */
+.sy-solo{padding:2px 0}
+.sy-solo-v{font-family:var(--mono); font-weight:700; font-size:26px; letter-spacing:-.02em; color:var(--ink)}
+.sy-solo-l{color:var(--ink-dim); font-size:11.5px; margin-top:2px}
+
 @media (prefers-reduced-motion:reduce){
   *{animation:none !important; transition:none !important}
   .card{opacity:1; transform:none}

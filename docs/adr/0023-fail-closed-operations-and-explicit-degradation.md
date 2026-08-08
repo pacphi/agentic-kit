@@ -1,6 +1,7 @@
 # ADR-0023 — Fail-closed mutations and explicit degraded operation evidence
 
 - **Status:** Implemented
+- **Updated:** 2026-08-07 — §9 permanently unmeasurable quantities, §10 stated exclusions
 - **Date:** 2026-08-04
 - **Updated:** 2026-08-06
 - **Update note:** Generalized setup preflight into a required host-adapter trust contract, added
@@ -173,9 +174,34 @@ PATH before loading or launching the CLI. The ordinary matrix runs these tests o
 Windows. The scheduled/manual nightly additionally packs the current artifact and performs real
 setup on `macos-latest` with all global packages and user/project files under `runner.temp`.
 
+### 9. A permanently unmeasurable quantity is deleted, not degraded (2026-08-07)
+
+The rules above cover a quantity that *could* be measured and was not: it renders as unknown with a
+reason. They did not cover a quantity that no code path can *ever* produce. The System area shipped
+one — an "AI-worker budget" tile hardcoded to unknown with the reason "ruflo exposes no local budget
+state this collector can read". It could never render anything else.
+
+An always-unknown tile is not honest degradation, it is a promise the product cannot keep, occupying
+space and teaching the reader to ignore unknowns. So: a field whose reason is *structural* rather
+than circumstantial is **removed from the collector, the payload and the panel**, not rendered as
+degraded. The distinction is whether a plausible future state of the machine would populate it. If
+one would, it stays and degrades; if none would, it was never a measurement.
+
+### 10. An excluded figure is still stated (2026-08-07)
+
+Storage lifts learning stores out of its shared charts because at ~99% of retained bytes they flatten
+every other series. Exclusion for legibility is allowed; *silent* exclusion is not. The excluded
+category is reported on its own card, the charts say what they leave out, and the per-host split
+names the non-host bytes it drops with their figure — so the bars still account for the whole of the
+donut beside them. A reader must never have to reconcile two panels and find the difference
+unexplained.
+
 ## Consequences
 
 - A fallback can keep work available without being mislabeled healthy.
+- An unknown carries information, because nothing that is permanently unknowable is rendered as one.
+- A chart may exclude a category for legibility, but the panel says so and the excluded figure is
+  still reachable.
 - Temporary SQLite locks and corrupt stores no longer become measured zero usage.
 - Backup-path problems stop setup/sync instead of destroying the only recoverable pre-write state.
 - Status-line failures stay silent for ordinary users and become diagnosable without logging content.

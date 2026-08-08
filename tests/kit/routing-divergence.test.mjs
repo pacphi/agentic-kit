@@ -125,12 +125,12 @@ test('the codex-primary clean-seed assertion actually covers a LADDER-bearing ac
 test('a corrupted rung on a MIRRORED activity is still reported (mirroring is not amnesty)', () => {
   const seed = seedActivityRoutes({ primary: 'codex' });
   const [act] = Object.entries(seed).find(([, r]) => r.escalation?.length);
-  seed[act].escalation[0].model = 'gpt-5-codex-mini';
+  seed[act].escalation[0].model = 'gpt-5.6-luna';
   const [d] = divergedRoutes(seed);
   assert.equal(d.activity, act);
   assert.equal(d.modelDiverged, false, 'only the rung moved — the primary model is untouched');
-  assert.equal(d.escalation[0].model, 'gpt-5-codex-mini');
-  assert.equal(d.escalation[0].defaultModel, 'gpt-5.4', 'compared against the MIRRORED default rung');
+  assert.equal(d.escalation[0].model, 'gpt-5.6-luna');
+  assert.equal(d.escalation[0].defaultModel, 'gpt-5.6-sol', 'compared against the MIRRORED default rung');
 });
 
 test('divergedRoutes ignores a seeded entry that still matches the default', () => {
@@ -148,7 +148,16 @@ test('divergedRoutes ignores a seeded entry that still matches the default', () 
  *  dropped `escalation` would under-report divergence and hide the escalation-only
  *  case entirely. */
 function priorCatalogSeed({ primary = 'claude' } = {}) {
-  const rewind = (m) => (m === 'claude-opus-5' ? 'claude-opus-4-8' : m);
+  // Two rewind rules, one per primary. A claude-primary seed carries
+  // claude-opus-5; a codex-primary seed mirrors every claude model away, so it
+  // carries none — rewinding only that id would make the mirrored fixture
+  // silently vacuous (it tested nothing at all once the catalog's tier pairing
+  // became complete). gpt-5.6-sol appears ONLY in the mirrored seed, so the
+  // second rule bites exactly where the first cannot. Both targets are current,
+  // non-retired models: this fixture is about divergence, and letting a RETIRED
+  // id in would conflate it with the substitution mechanism.
+  const PRIOR = { 'claude-opus-5': 'claude-opus-4-8', 'gpt-5.6-sol': 'gpt-5.6-terra' };
+  const rewind = (m) => PRIOR[m] ?? m;
   const policy = seedActivityRoutes({ hosts: ['claude', 'codex'], primary });
   const out = {};
   for (const [act, r] of Object.entries(policy)) {
@@ -245,7 +254,13 @@ test('a hand-moved host with a current model is not reported as divergence', () 
 
 test('a codex-primary seed on the PRIOR catalog still reports real divergence', () => {
   // The mirroring must not suppress genuine drift — only false positives.
-  const diverged = divergedRoutes(priorCatalogSeed({ primary: 'codex' }));
+  const fixture = priorCatalogSeed({ primary: 'codex' });
+  // Anti-vacuity: prove the rewind actually changed the mirrored seed. Without
+  // this the test passes trivially the moment PRIOR stops matching anything the
+  // mirror produces — which is exactly how it silently died once before.
+  assert.notDeepEqual(fixture, seedActivityRoutes({ hosts: ['claude', 'codex'], primary: 'codex' }),
+    'the prior-catalog rewind must actually rewind something in a MIRRORED seed');
+  const diverged = divergedRoutes(fixture);
   assert.ok(diverged.length > 0, 'a mirrored seed pinned to the prior catalog still diverges');
   for (const d of diverged) {
     assert.ok(d.modelDiverged || d.escalation.length > 0, `${d.activity} reported with no actual delta`);

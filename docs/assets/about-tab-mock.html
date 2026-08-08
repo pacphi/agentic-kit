@@ -1,0 +1,469 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ak · About — design mock (ADR-0026)</title>
+<style>
+:root{
+  --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  --mono:ui-monospace,"SF Mono","Menlo","Cascadia Code",monospace;
+  --r:14px; --r-sm:10px;
+  --bg:#f5f5f7; --panel:#ffffff; --panel-2:#f2f2f7; --raised:#ffffff;
+  --ink:#1d1d1f; --ink-2:#6e6e73; --ink-3:#aeaeb2;
+  --line:rgba(60,60,67,.12); --line-2:rgba(60,60,67,.22);
+  --accent:#007aff; --accent-soft:rgba(0,122,255,.12);
+  --ok:#34c759; --ok-soft:rgba(52,199,89,.14);
+  --info:#8e8e93;
+  /* category hues for monogram tiles (identity, decorative — not data series) */
+  --hue-engine:#5e5ce6; --hue-quality:#1baf7a; --hue-safety:#eb6834;
+  --hue-knowledge:#af52de; --hue-kit:#007aff;
+  color-scheme:light;
+}
+@media (prefers-color-scheme: dark){
+  :root:where(:not([data-theme="light"])){
+    --bg:#000000; --panel:#1c1c1e; --panel-2:#2c2c2e; --raised:#3a3a3c;
+    --ink:#f5f5f7; --ink-2:#98989d; --ink-3:#636366;
+    --line:rgba(255,255,255,.09); --line-2:rgba(255,255,255,.17);
+    --accent:#0a84ff; --accent-soft:rgba(10,132,255,.16);
+    --ok:#30d158; --ok-soft:rgba(48,209,88,.16);
+    --info:#98989d;
+    --hue-engine:#7d7aff; --hue-quality:#30d158; --hue-safety:#ff9f0a;
+    --hue-knowledge:#bf5af2; --hue-kit:#0a84ff;
+    color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#000000; --panel:#1c1c1e; --panel-2:#2c2c2e; --raised:#3a3a3c;
+  --ink:#f5f5f7; --ink-2:#98989d; --ink-3:#636366;
+  --line:rgba(255,255,255,.09); --line-2:rgba(255,255,255,.17);
+  --accent:#0a84ff; --accent-soft:rgba(10,132,255,.16);
+  --ok:#30d158; --ok-soft:rgba(48,209,88,.16);
+  --info:#98989d;
+  --hue-engine:#7d7aff; --hue-quality:#30d158; --hue-safety:#ff9f0a;
+  --hue-knowledge:#bf5af2; --hue-kit:#0a84ff;
+  color-scheme:dark;
+}
+:root[data-theme="light"]{
+  --bg:#f5f5f7; --panel:#ffffff; --panel-2:#f2f2f7; --raised:#ffffff;
+  --ink:#1d1d1f; --ink-2:#6e6e73; --ink-3:#aeaeb2;
+  --line:rgba(60,60,67,.12); --line-2:rgba(60,60,67,.22);
+  --accent:#007aff; --accent-soft:rgba(0,122,255,.12);
+  --ok:#34c759; --ok-soft:rgba(52,199,89,.14);
+  --info:#8e8e93;
+  --hue-engine:#5e5ce6; --hue-quality:#1baf7a; --hue-safety:#eb6834;
+  --hue-knowledge:#af52de; --hue-kit:#007aff;
+  color-scheme:light;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans);font-size:14px;
+  line-height:1.5;-webkit-font-smoothing:antialiased}
+.mono{font-family:var(--mono);font-variant-numeric:tabular-nums}
+a{color:var(--accent);text-decoration:none}
+
+.mockbar{display:flex;gap:10px;align-items:center;justify-content:center;flex-wrap:wrap;
+  padding:8px 16px;font-size:12px;color:var(--ink-2);border-bottom:1px solid var(--line);background:var(--panel-2)}
+.mockbar b{color:var(--ink)}
+.mockbar .chip{border:1px solid var(--line-2);border-radius:100px;padding:1px 9px;font-family:var(--mono);font-size:11px}
+
+.band{display:flex;align-items:center;gap:14px;padding:14px 22px;border-bottom:1px solid var(--line)}
+.brandmark{width:26px;height:26px;border-radius:7px;background:var(--accent);position:relative;flex:none}
+.brandmark::after{content:"";position:absolute;inset:7px;border:2.5px solid #fff;border-radius:50%}
+.band h1{font-size:15px;margin:0;font-weight:700}
+.band .sub{font-size:12px;color:var(--ink-2)}
+.tabbar{display:flex;align-items:center;gap:8px;padding:10px 22px;border-bottom:1px solid var(--line);
+  position:sticky;top:0;background:var(--bg);z-index:20}
+.seg{display:inline-flex;background:var(--panel-2);border:1px solid var(--line);border-radius:100px;padding:3px;gap:2px}
+.seg button,.seg a{appearance:none;border:0;background:none;color:var(--ink-2);font-family:inherit;font-size:13px;
+  font-weight:500;padding:5px 14px;border-radius:100px;cursor:pointer;display:inline-block}
+.seg [aria-selected="true"],.seg [aria-current="true"]{background:var(--panel);color:var(--ink);font-weight:600;
+  box-shadow:0 1px 3px rgba(0,0,0,.14)}
+.seg button:focus-visible,.seg a:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+.anchors{display:flex;gap:8px;padding:9px 22px;border-bottom:1px solid var(--line);position:sticky;top:49px;
+  background:var(--bg);z-index:19;overflow-x:auto;scrollbar-width:none}
+.anchors::-webkit-scrollbar{display:none}
+.anchors a{flex:none;font-size:12px;color:var(--ink-2);border:1px solid var(--line);border-radius:100px;
+  padding:4px 12px;background:var(--panel)}
+.anchors a:hover{color:var(--accent);border-color:var(--line-2)}
+
+.wrap{max-width:1080px;margin:0 auto;padding:30px 22px 70px;display:flex;flex-direction:column;gap:40px}
+
+/* hero */
+.hero{display:flex;flex-direction:column;gap:14px}
+.hero h2{margin:0;font-size:24px;font-weight:750;letter-spacing:-.01em;text-wrap:balance}
+.hero p{margin:0;color:var(--ink-2);font-size:14.5px;max-width:62ch}
+.hero p b{color:var(--ink)}
+.relmap{display:flex;align-items:stretch;gap:10px;flex-wrap:wrap;margin-top:4px}
+.relbox{border:1px solid var(--line-2);border-radius:var(--r-sm);padding:9px 14px;background:var(--panel);
+  font-size:12px;color:var(--ink-2);text-align:center;display:flex;flex-direction:column;justify-content:center}
+.relbox b{color:var(--ink);font-size:12.5px}
+.relarrow{align-self:center;color:var(--ink-3);font-size:15px}
+.relwrap{border:1px dashed var(--line-2);border-radius:var(--r);padding:10px 14px;display:flex;gap:10px;
+  align-items:center;flex-wrap:wrap}
+.relwrap>.lbl{font-size:11px;color:var(--ink-2);text-transform:uppercase;letter-spacing:.1em;font-weight:700}
+
+/* sections */
+section.cat{scroll-margin-top:104px;display:flex;flex-direction:column;gap:12px}
+.eyebrow{font-size:10.5px;font-weight:700;letter-spacing:.14em;color:var(--accent);text-transform:uppercase}
+.cat h3{margin:0;font-size:17px;font-weight:700}
+.cat>p.intro{margin:0;color:var(--ink-2);font-size:13px;max-width:66ch}
+.cards{display:grid;grid-template-columns:repeat(3,1fr);gap:14px}
+@media (max-width:900px){.cards{grid-template-columns:repeat(2,1fr)}}
+@media (max-width:620px){.cards{grid-template-columns:1fr}}
+.ccard{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);padding:16px;
+  display:flex;flex-direction:column;gap:10px;min-width:0}
+.chead{display:flex;align-items:center;gap:11px}
+.tile{width:38px;height:38px;border-radius:10px;flex:none;display:flex;align-items:center;justify-content:center;
+  background:var(--panel-2);border:1px solid var(--line)}
+.tile svg{width:20px;height:20px;stroke:var(--ink);fill:none;stroke-width:1.6}
+.tile svg.filled{fill:var(--ink);stroke:none}
+.tile.mg{border:0;color:#fff;font-weight:750;font-size:15px;font-family:var(--sans)}
+.cname{min-width:0}
+.cname b{display:block;font-size:14px;font-weight:680;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.state{display:inline-flex;align-items:center;gap:5px;font-size:10.5px;font-weight:650;border-radius:100px;
+  padding:1.5px 8px;margin-top:3px}
+.state.inst{color:var(--ok);background:var(--ok-soft)}
+.state.inst::before{content:"";width:5px;height:5px;border-radius:50%;background:var(--ok)}
+.state.abs{color:var(--ink-2);background:var(--panel-2);border:1px dashed var(--line-2)}
+.state.conf{color:var(--accent);background:var(--accent-soft)}
+.tagline{font-size:13.5px;font-weight:640;letter-spacing:-.005em}
+.ccard p.body{margin:0;font-size:12.8px;color:var(--ink-2)}
+.linkrow{display:flex;gap:6px;flex-wrap:wrap;margin-top:auto;padding-top:2px}
+.lpill{font-size:11px;font-weight:600;border:1px solid var(--line-2);border-radius:100px;padding:3px 10px;
+  background:var(--panel-2)}
+.lpill:hover{border-color:var(--accent)}
+.manage{font-size:11px;color:var(--ink-3);font-family:var(--mono)}
+
+.secnote{font-size:11.5px;color:var(--ink-2);border-top:1px dashed var(--line-2);padding-top:8px;max-width:80ch}
+.secnote b{color:var(--ink);font-weight:600}
+
+/* anatomy */
+.anatomy{display:grid;grid-template-columns:minmax(260px,340px) 1fr;gap:22px;align-items:start;
+  background:var(--panel);border:1px solid var(--line);border-radius:var(--r);padding:18px}
+@media (max-width:760px){.anatomy{grid-template-columns:1fr}}
+.callouts{display:flex;flex-direction:column;gap:9px;font-size:12.5px;color:var(--ink-2)}
+.callouts .co{display:grid;grid-template-columns:22px 1fr;gap:8px}
+.callouts .n{width:18px;height:18px;border-radius:50%;background:var(--accent);color:#fff;font-size:11px;
+  font-weight:700;display:flex;align-items:center;justify-content:center;font-family:var(--mono)}
+.callouts b{color:var(--ink)}
+.spec{position:relative}
+.spec .n{position:absolute;width:18px;height:18px;border-radius:50%;background:var(--accent);color:#fff;
+  font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center;font-family:var(--mono);z-index:2}
+footer{color:var(--ink-3);font-size:11.5px;text-align:center;padding-bottom:28px}
+</style>
+</head>
+<body>
+
+<div class="mockbar">
+  <b>Design mock</b> · illustrative copy, versions, and links — final content lives in the versioned directory module
+  <span class="chip">accompanies ADR-0026</span>
+  <span class="chip">About primary area</span>
+</div>
+
+<header class="band">
+  <div class="brandmark" aria-hidden="true"></div>
+  <div><h1>agentic-kit</h1><div class="sub"><span class="mono">v4.0.0-alpha.40</span> · local diagnostic panel</div></div>
+</header>
+
+<nav class="tabbar" aria-label="primary areas (mock)">
+  <div class="seg" role="tablist">
+    <button role="tab" aria-selected="true">About</button>
+    <button role="tab" aria-selected="false" tabindex="-1">Overview</button>
+    <button role="tab" aria-selected="false" tabindex="-1">Usage</button>
+    <button role="tab" aria-selected="false" tabindex="-1">Observability</button>
+    <button role="tab" aria-selected="false" tabindex="-1">System</button>
+  </div>
+</nav>
+
+<nav class="anchors" aria-label="About categories">
+  <a href="#hosts">Hosts</a><a href="#engine">Engine &amp; memory</a>
+  <a href="#quality">Quality · Safety · Knowledge</a><a href="#kit">The kit</a>
+  <a href="#configured">Configured for you</a><a href="#anatomy">Card anatomy</a>
+</nav>
+
+<main class="wrap">
+
+<div class="hero">
+  <span class="eyebrow">About</span>
+  <h2>Meet your toolkit</h2>
+  <p>agentic-kit set up <b>9 components</b> and <b>6 configurations</b> on this machine.
+     This page says what each one is, in plain words — and where to read more. Health lives in
+     Overview, spend in Usage, activity in Observability; here, everything just introduces itself.</p>
+  <div class="relwrap">
+    <span class="lbl">How it fits</span>
+    <div class="relmap">
+      <div class="relbox"><b>Coding agents</b>Claude Code · Codex · OpenCode</div>
+      <span class="relarrow">&#8646;</span>
+      <div class="relbox"><b>Engine + memory</b>ruflo · agentdb</div>
+      <span class="relarrow">&#8646;</span>
+      <div class="relbox"><b>Quality · Safety · Knowledge</b>agentic-qe · aidefence · Brain</div>
+      <span class="relarrow">&#10554;</span>
+      <div class="relbox"><b>agentic-kit</b>installs &amp; heals it all</div>
+    </div>
+  </div>
+</div>
+
+<!-- ── HOSTS ── -->
+<section class="cat" id="hosts">
+  <span class="eyebrow">About</span>
+  <h3>Hosts — the agents you talk to</h3>
+  <p class="intro">The coding agents themselves. Everything further down exists to make these
+     smarter, safer, and easier to watch.</p>
+  <div class="cards">
+    <div class="ccard">
+      <div class="chead">
+        <span class="tile" aria-hidden="true"><svg viewBox="0 0 16 16"><path d="M8 1.5v13M1.5 8h13M3.4 3.4l9.2 9.2M12.6 3.4l-9.2 9.2"/></svg></span>
+        <span class="cname"><b>Claude Code</b><span class="state inst">installed · v2.1.223</span></span>
+      </div>
+      <span class="tagline">Anthropic's coding agent, in your terminal.</span>
+      <p class="body">Point it at a repository and talk — it reads your code, writes changes, runs
+        the tests, and explains what it did as it goes. Most of what agentic-kit sets up exists to
+        make this tool and its peers below work better together.</p>
+      <div class="linkrow"><a class="lpill" href="https://github.com/anthropics/claude-code">GitHub &#8599;</a>
+        <a class="lpill" href="https://www.npmjs.com/package/@anthropic-ai/claude-code">npm &#8599;</a>
+        <a class="lpill" href="https://claude.com/claude-code">Docs &#8599;</a></div>
+    </div>
+    <div class="ccard">
+      <div class="chead">
+        <span class="tile" aria-hidden="true"><svg class="filled" viewBox="146 227 268 267"><path d="M249.176 323.434V298.276C249.176 296.158 249.971 294.569 251.825 293.509L302.406 264.381C309.29 260.409 317.5 258.555 325.973 258.555C357.75 258.555 377.877 283.185 377.877 309.399C377.877 311.253 377.877 313.371 377.611 315.49L325.178 284.771C322.001 282.919 318.822 282.919 315.645 284.771L249.176 323.434ZM367.283 421.415V361.301C367.283 357.592 365.694 354.945 362.516 353.092L296.048 314.43L317.763 301.982C319.617 300.925 321.206 300.925 323.058 301.982L373.639 331.112C388.205 339.586 398.003 357.592 398.003 375.069C398.003 395.195 386.087 413.733 367.283 421.412V421.415ZM233.553 368.452L211.838 355.742C209.986 354.684 209.19 353.095 209.19 350.975V292.718C209.19 264.383 230.905 242.932 260.301 242.932C271.423 242.932 281.748 246.641 290.49 253.26L238.321 283.449C235.146 285.303 233.555 287.951 233.555 291.659V368.455L233.553 368.452ZM280.292 395.462L249.176 377.985V340.913L280.292 323.436L311.407 340.913V377.985L280.292 395.462ZM300.286 475.968C289.163 475.968 278.837 472.259 270.097 465.64L322.264 435.449C325.441 433.597 327.03 430.949 327.03 427.239V350.445L349.011 363.155C350.865 364.213 351.66 365.802 351.66 367.922V426.179C351.66 454.514 329.679 475.965 300.286 475.965V475.968ZM237.525 416.915L186.944 387.785C172.378 379.31 162.582 361.305 162.582 343.827C162.582 323.436 174.763 305.164 193.563 297.485V357.861C193.563 361.571 195.154 364.217 198.33 366.071L264.535 404.467L242.82 416.915C240.967 417.972 239.377 417.972 237.525 416.915ZM234.614 460.343C204.689 460.343 182.71 437.833 182.71 410.028C182.71 407.91 182.976 405.792 183.238 403.672L235.405 433.863C238.582 435.715 241.763 435.715 244.938 433.863L311.407 395.466V420.622C311.407 422.742 310.612 424.331 308.758 425.389L258.179 454.519C251.293 458.491 243.083 460.343 234.611 460.343H234.614ZM300.286 491.854C332.329 491.854 359.073 469.082 365.167 438.892C394.825 431.211 413.892 403.406 413.892 375.073C413.892 356.535 405.948 338.529 391.648 325.552C392.972 319.991 393.766 314.43 393.766 308.87C393.766 271.003 363.048 242.666 327.562 242.666C320.413 242.666 313.528 243.723 306.644 246.109C294.725 234.457 278.307 227.042 260.301 227.042C228.258 227.042 201.513 249.815 195.42 280.004C165.761 287.685 146.694 315.49 146.694 343.824C146.694 362.362 154.638 380.368 168.938 393.344C167.613 398.906 166.819 404.467 166.819 410.027C166.819 447.894 197.538 476.231 233.024 476.231C240.172 476.231 247.058 475.173 253.943 472.788C265.859 484.441 282.278 491.854 300.286 491.854Z"/></svg></span>
+        <span class="cname"><b>Codex</b><span class="state inst">installed · v0.29.0</span></span>
+      </div>
+      <span class="tagline">OpenAI's coding agent — a second pair of eyes.</span>
+      <p class="body">The same idea from OpenAI: an agent that codes with you in the terminal. With
+        both installed, agentic-kit runs them as peers — each can lead, review the other's work, or
+        pick up when one gets stuck.</p>
+      <div class="linkrow"><a class="lpill" href="https://github.com/openai/codex">GitHub &#8599;</a>
+        <a class="lpill" href="https://www.npmjs.com/package/@openai/codex">npm &#8599;</a>
+        <a class="lpill" href="https://developers.openai.com/codex">Docs &#8599;</a></div>
+    </div>
+    <div class="ccard">
+      <div class="chead">
+        <span class="tile" aria-hidden="true"><svg viewBox="0 0 300 300" class="filled"><g transform="translate(30 0)"><path d="M180 240H60V120H180V240Z" fill="#4B4646"/><path d="M180 60H60V240H180V60ZM240 300H0V0H240V300Z" fill="currentColor" fill-rule="evenodd"/></g></svg></span>
+        <span class="cname"><b>OpenCode</b><span class="state abs">not installed — ak setup adds it</span></span>
+      </div>
+      <span class="tagline">An open-source coding agent, supervised.</span>
+      <p class="body">A community-built agent CLI that agentic-kit can manage as an opt-in worker:
+        explicitly routed for specific jobs, observable like the others, and never handed the lead
+        by accident.</p>
+      <div class="linkrow"><a class="lpill" href="https://github.com/sst/opencode">GitHub &#8599;</a>
+        <a class="lpill" href="https://www.npmjs.com/package/opencode-ai">npm &#8599;</a>
+        <a class="lpill" href="https://opencode.ai">Docs &#8599;</a></div>
+    </div>
+  </div>
+  <div class="secnote"><b>Design note:</b> hosts lead because they're what a new user already
+    recognizes — familiar things first, infrastructure after. Official marks are reused
+    byte-identically from Observability's session rows. The OpenCode card deliberately shows the
+    honest not-installed state: absence is information, not an empty slot.</div>
+</section>
+
+<!-- ── ENGINE & MEMORY ── -->
+<section class="cat" id="engine">
+  <span class="eyebrow">About</span>
+  <h3>Engine &amp; memory — what makes sessions smarter</h3>
+  <div class="cards">
+    <div class="ccard">
+      <div class="chead">
+        <span class="tile mg" style="background:var(--hue-engine)">rf</span>
+        <span class="cname"><b>ruflo</b><span class="state inst">installed · v3.34.0</span></span>
+      </div>
+      <span class="tagline">The orchestration engine underneath.</span>
+      <p class="body">Gives your agents what a single session can't: memory that survives restarts,
+        teams of specialists working in parallel, hooks that learn your patterns, and security
+        scanning along the way. agentic-kit keeps it current and healthy.</p>
+      <div class="linkrow"><a class="lpill" href="https://github.com/ruvnet/claude-flow">GitHub &#8599;</a>
+        <a class="lpill" href="https://www.npmjs.com/package/ruflo">npm &#8599;</a></div>
+    </div>
+    <div class="ccard">
+      <div class="chead">
+        <span class="tile mg" style="background:var(--hue-engine)">db</span>
+        <span class="cname"><b>agentdb</b><span class="state inst">installed · 3.0.0-alpha.20 · pinned to ruflo</span></span>
+      </div>
+      <span class="tagline">Where agent memory actually lives.</span>
+      <p class="body">A fast, local database for what your agents learn and remember — no server, no
+        cloud. It's version-matched to ruflo on purpose, so the engine and its memory can never
+        drift apart.</p>
+      <div class="linkrow"><a class="lpill" href="https://github.com/ruvnet/agentdb">GitHub &#8599;</a>
+        <a class="lpill" href="https://www.npmjs.com/package/agentdb">npm &#8599;</a></div>
+    </div>
+  </div>
+  <div class="secnote"><b>Design note:</b> monogram tiles (letters on a category hue) are the honest
+    icon for tools without an official mark — consistent, self-contained under the CSP, and never a
+    fabricated logo. The pinned-version chip explains itself inline rather than hiding a deliberate
+    choice behind "outdated".</div>
+</section>
+
+<!-- ── QUALITY ── -->
+<section class="cat" id="quality">
+  <span class="eyebrow">About</span>
+  <h3>Quality · Safety · Knowledge — evidence, defense, grounding</h3>
+  <p class="intro">Three specialists with one theme: making agent work trustworthy — tested,
+     protected from smuggled instructions, and answered from real source.</p>
+  <div class="cards">
+    <div class="ccard">
+      <div class="chead">
+        <span class="tile mg" style="background:var(--hue-quality)">qe</span>
+        <span class="cname"><b>agentic-qe</b><span class="state inst">installed · v3.13.9</span></span>
+      </div>
+      <span class="tagline">A quality-engineering fleet on call.</span>
+      <p class="body">Specialist agents for the unglamorous parts: generating tests, finding
+        coverage gaps, and gating changes on real quality signals — so "the agent says it works"
+        turns into evidence you can check.</p>
+      <div class="linkrow"><a class="lpill" href="https://github.com/proffesor-for-testing/agentic-qe">GitHub &#8599;</a>
+        <a class="lpill" href="https://www.npmjs.com/package/agentic-qe">npm &#8599;</a></div>
+    </div>
+    <div class="ccard">
+      <div class="chead">
+        <span class="tile" aria-hidden="true"><svg viewBox="0 0 16 16"><path d="M8 1.5l5.5 2.5v3.6c0 3.6-2.3 6-5.5 7-3.2-1-5.5-3.4-5.5-7V4z"/><path d="M5.6 8l1.7 1.7L10.6 6.4"/></svg></span>
+        <span class="cname"><b>aidefence + security</b><span class="state inst">installed · bundled with ruflo</span></span>
+      </div>
+      <span class="tagline">Checks text before your agents trust it.</span>
+      <p class="body">A pasted issue, a web page, a stranger's README — any of them can carry
+        instructions smuggled into content ("prompt injection"). These scanners check untrusted
+        text before it reaches your agents. ak reinstalls them if an upgrade ever drops them.</p>
+      <div class="linkrow"><a class="lpill" href="https://github.com/ruvnet/claude-flow">GitHub &#8599;</a>
+        <a class="lpill" href="https://www.npmjs.com/package/@claude-flow/aidefence">npm &#8599;</a></div>
+    </div>
+    <div class="ccard">
+      <div class="chead">
+        <span class="tile mg" style="background:var(--hue-knowledge)">B</span>
+        <span class="cname"><b>RuvNet Brain</b><span class="state inst">installed · v0.9.4</span></span>
+      </div>
+      <span class="tagline">Answers about these tools, from their real source.</span>
+      <p class="body">The tools on this page evolve faster than any AI model's training data. The
+        Brain is a local, offline knowledge base built from their actual source code — so when you
+        ask your agent about this stack, it answers from evidence, not stale memory.</p>
+      <div class="linkrow"><a class="lpill" href="https://github.com/stuinfla/ruvnet-brain">GitHub &#8599;</a></div>
+    </div>
+  </div>
+  <div class="secnote"><b>Design note:</b> three one-tool categories share a row instead of three
+    sparse sections — the hero map already groups them as one cluster. The shield is the page's one
+    hand-drawn glyph ("safety" is where a monogram would undersell the job), and the aidefence
+    paragraph defines "prompt injection" in the same breath it uses it: the register contract in
+    action.</div>
+</section>
+
+<!-- ── THE KIT ── -->
+<section class="cat" id="kit">
+  <span class="eyebrow">About</span>
+  <h3>The kit — who takes care of all this</h3>
+  <div class="cards">
+    <div class="ccard" style="grid-column:span 2">
+      <div class="chead">
+        <span class="tile" style="background:var(--hue-kit);border:0" aria-hidden="true"><svg viewBox="0 0 16 16" style="stroke:#fff;stroke-width:2"><circle cx="8" cy="8" r="4"/></svg></span>
+        <span class="cname"><b>agentic-kit</b><span class="state inst">installed · v4.0.0-alpha.40</span></span>
+      </div>
+      <span class="tagline">The caretaker for everything above.</span>
+      <p class="body">One command installs the set; one command heals it after upgrades; this
+        dashboard shows what it's all doing. If a tool on this page breaks, drifts, or goes
+        missing, ak notices and says so — that is its whole job.</p>
+      <div class="linkrow"><a class="lpill" href="https://github.com/pacphi/agentic-kit">GitHub &#8599;</a>
+        <a class="lpill" href="https://www.npmjs.com/package/@pacphi/agentic-kit">npm &#8599;</a></div>
+    </div>
+  </div>
+</section>
+
+<!-- ── CONFIGURED FOR YOU ── -->
+<section class="cat" id="configured">
+  <span class="eyebrow">About</span>
+  <h3>Configured for you</h3>
+  <p class="intro">Not packages — settings and wiring ak set up on your behalf. Each names the
+     command that manages it: yours to change, never a black box.</p>
+  <div class="cards">
+    <div class="ccard">
+      <div class="chead"><span class="tile mg" style="background:var(--info)">&#9096;</span>
+        <span class="cname"><b>MCP registrations</b><span class="state conf">configured</span></span></div>
+      <p class="body">Agents reach tools through MCP — the plug-in protocol for AI tooling. ak
+        registers this stack's tools once, at user scope, so every project gets them without
+        per-repo setup.</p>
+      <div class="linkrow"><span class="manage">manage: ak x mcp pick</span></div>
+    </div>
+    <div class="ccard">
+      <div class="chead"><span class="tile mg" style="background:var(--info)">&#182;</span>
+        <span class="cname"><b>Guidance blocks</b><span class="state conf">configured</span></span></div>
+      <p class="body">Short managed sections in CLAUDE.md and AGENTS.md that teach each agent the
+        house rules for this stack. ak keeps them current — and never touches text you wrote
+        yourself.</p>
+      <div class="linkrow"><span class="manage">manage: ak sync</span></div>
+    </div>
+    <div class="ccard">
+      <div class="chead"><span class="tile mg" style="background:var(--info)">&#9199;</span>
+        <span class="cname"><b>Statuslines</b><span class="state conf">configured</span></span></div>
+      <p class="body">A live footer inside Claude Code and Codex showing the model in use, session
+        usage, and remaining limits at a glance — so you never wonder what a session is costing.</p>
+      <div class="linkrow"><span class="manage">manage: ak setup</span></div>
+    </div>
+    <div class="ccard">
+      <div class="chead"><span class="tile mg" style="background:var(--info)">&#8646;</span>
+        <span class="cname"><b>Dual-host routing &amp; bridge</b><span class="state conf">configured</span></span></div>
+      <p class="body">With both Claude and Codex enabled, each kind of work is routed to the host
+        that's best at it — and each host can hand a subtask to the other mid-flight.</p>
+      <div class="linkrow"><span class="manage">manage: ak host pick</span></div>
+    </div>
+    <div class="ccard">
+      <div class="chead"><span class="tile mg" style="background:var(--info)">&#9881;</span>
+        <span class="cname"><b>Background daemon</b><span class="state conf">configured</span></span></div>
+      <p class="body">Local-only workers that keep learning and maintenance ticking between
+        sessions. Free by default — anything that would spend AI tokens stays strictly opt-in.</p>
+      <div class="linkrow"><span class="manage">manage: ruflo daemon</span></div>
+    </div>
+    <div class="ccard">
+      <div class="chead"><span class="tile mg" style="background:var(--info)">&#10003;</span>
+        <span class="cname"><b>Permission allowlist</b><span class="state conf">configured</span></span></div>
+      <p class="body">Pre-approved command patterns for the stack's own tools, so they don't
+        interrupt you with permission prompts. Every rule is disclosed at setup, none added
+        silently.</p>
+      <div class="linkrow"><span class="manage">manage: ak setup</span></div>
+    </div>
+  </div>
+  <div class="secnote"><b>Design note:</b> configured surfaces get the same card shape as packages —
+    one grammar to learn — but a distinct <i>configured</i> chip, no version, and a
+    <span class="mono">manage:</span> line instead of source links, because "where do I change
+    this" is their equivalent of "where do I read more".</div>
+</section>
+
+<!-- ── ANATOMY ── -->
+<section class="cat" id="anatomy">
+  <span class="eyebrow">Design</span>
+  <h3>Anatomy of a card</h3>
+  <div class="anatomy">
+    <div class="spec">
+      <span class="n" style="top:10px;left:-9px">1</span>
+      <span class="n" style="top:10px;right:-9px">2</span>
+      <span class="n" style="top:84px;left:-9px">3</span>
+      <span class="n" style="top:128px;left:-9px">4</span>
+      <span class="n" style="bottom:10px;left:-9px">5</span>
+      <div class="ccard" style="border-color:var(--line-2)">
+        <div class="chead">
+          <span class="tile mg" style="background:var(--hue-engine)">rf</span>
+          <span class="cname"><b>ruflo</b><span class="state inst">installed · v3.34.0</span></span>
+        </div>
+        <span class="tagline">The orchestration engine underneath.</span>
+        <p class="body">Gives your agents what a single session can't: memory that survives
+          restarts, teams of specialists working in parallel…</p>
+        <div class="linkrow"><a class="lpill" href="https://github.com/ruvnet/claude-flow">GitHub &#8599;</a>
+          <a class="lpill" href="https://www.npmjs.com/package/ruflo">npm &#8599;</a></div>
+      </div>
+    </div>
+    <div class="callouts">
+      <div class="co"><span class="n">1</span><span><b>Icon tile.</b> Official mark where one
+        genuinely exists (the three hosts); otherwise a monogram on the category hue. Never an
+        invented logo.</span></div>
+      <div class="co"><span class="n">2</span><span><b>Name + state chip.</b> The only place
+        runtime facts appear — fed by detection the dashboard already does, never by the prose.
+        Absent reads "not installed — ak setup adds it"; a failed status fetch reads "state
+        unknown" while the card still renders.</span></div>
+      <div class="co"><span class="n">3</span><span><b>Tagline.</b> Ten plain words or fewer —
+        the card's thesis, scannable on its own.</span></div>
+      <div class="co"><span class="n">4</span><span><b>One paragraph, ~50 words.</b> What it does
+        <i>for you</i>, active voice, every term of art explained where it's used. Depth lives
+        behind the Docs link, not here.</span></div>
+      <div class="co"><span class="n">5</span><span><b>Link pills.</b> GitHub / npm / Docs — the
+        receipts. Plain outbound anchors the user clicks; the kit itself never fetches them.</span></div>
+    </div>
+  </div>
+</section>
+
+<footer>ak · About — design mock for ADR-0026 · illustrative content · both themes via the dashboard's own tokens</footer>
+</main>
+</body>
+</html>

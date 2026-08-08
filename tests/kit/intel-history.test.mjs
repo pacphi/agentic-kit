@@ -291,10 +291,12 @@ test('readMachineWideIntel aggregates totals and perProject rows across multiple
     {
       path: cwdAlpha, label: 'Alpha', patternsLearned: 10, patternStoreCount: 2,
       trajectoriesRecorded: 4, graphLatest: { nodes: 5, edges: 8 }, lastAdaptation: 1000,
+      learningState: [],
     },
     {
       path: cwdBeta, label: 'Beta', patternsLearned: 20, patternStoreCount: 3,
       trajectoriesRecorded: 6, graphLatest: null, lastAdaptation: 2000,
+      learningState: [],
     },
   ]);
 });
@@ -354,11 +356,11 @@ test('readMachineWideIntel degrades a project with missing/malformed data to nul
   });
   assert.deepEqual(result.perProject[1], {
     path: cwdEmpty, label: 'Empty', patternsLearned: null, patternStoreCount: 0,
-    trajectoriesRecorded: null, graphLatest: null, lastAdaptation: null,
+    trajectoriesRecorded: null, graphLatest: null, lastAdaptation: null, learningState: [],
   });
   assert.deepEqual(result.perProject[2], {
     path: cwdMalformed, label: 'Malformed', patternsLearned: null, patternStoreCount: 0,
-    trajectoriesRecorded: null, graphLatest: null, lastAdaptation: null,
+    trajectoriesRecorded: null, graphLatest: null, lastAdaptation: null, learningState: [],
   });
 });
 
@@ -399,4 +401,25 @@ test('readMachineWideIntel returns zeroed totals and an empty perProject for an 
     },
     perProject: [],
   });
+});
+
+test('a census row\'s learningState rides through onto its perProject row', () => {
+  // Why it must: a project with .agentic-qe but no ruflo stats reports 0
+  // patterns, and without this field that row is indistinguishable from one
+  // whose read failed. The rollup does not probe the filesystem itself — the
+  // census already did, so the value is carried, never recomputed.
+  const cwd = tmp();
+  writeFixture(cwd, '.claude-flow/neural/stats.json', { patternsLearned: 3 });
+  const result = readMachineWideIntel([
+    { path: cwd, label: 'Carried', learningState: ['.agentic-qe', '.swarm'] },
+  ]);
+  assert.deepEqual(result.perProject[0].learningState, ['.agentic-qe', '.swarm']);
+});
+
+test('a project row with no learningState degrades to [] rather than undefined', () => {
+  const cwd = tmp();
+  writeFixture(cwd, '.claude-flow/neural/stats.json', { patternsLearned: 1 });
+  for (const row of [{ path: cwd, label: 'X' }, { path: cwd, label: 'X', learningState: 'nope' }]) {
+    assert.deepEqual(readMachineWideIntel([row]).perProject[0].learningState, []);
+  }
 });

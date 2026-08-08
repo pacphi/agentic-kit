@@ -136,6 +136,22 @@ test('ordinary runtime source cannot revive retired GA surfaces', () => {
       pattern: /\b(?:CODEX_ADAPTER_PKG|codexAdapterAction|ensureCodexAdapter|ensureDualAgents)\b/g,
     },
     {
+      // ADR-0027: project discovery collapsed onto one shared census. The old
+      // module answered a narrower question (".claude-flow/neural exists") from
+      // a narrower corpus (150 recent transcripts) and reported 4 projects on a
+      // machine with 17. Reviving any of it would resurrect that undercount.
+      label: 'removed project-discovery module or helper',
+      pattern: /\b(?:discoverRuvfloProjects|hasNeuralState|transcriptCwdCandidates|lastAdaptationOf)\b|dashboard\/project-discovery\.mjs/g,
+    },
+    {
+      // ADR-0023 §9/§10 and ADR-0025: surfaces the System area stopped
+      // reporting. The AI-worker budget could never be populated by any code
+      // path, so reviving the field would revive a permanent "unavailable";
+      // the others were removed from rendering and must not creep back.
+      label: 'removed System surface',
+      pattern: /\b(?:renderSysUnrecognized|stackChips|STACK_KIND_LABEL|noBudgetSource|TIER_FALLBACK_MEANING)\b/g,
+    },
+    {
       label: 'removed compatibility writer or guard',
       pattern: /\b(?:writeConfigModule|nativeWalConflict|legacyRouteProvider|deriveCompatibilityExports|byTranscriptProvider)\b/g,
     },

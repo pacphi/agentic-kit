@@ -106,6 +106,12 @@ export const PRICES = {
   //
   // Slugs come from the Codex model cache itself, so an id seen in a real
   // rollout resolves rather than silently hitting FALLBACK_PRICE.
+  //
+  // RETIRED IDS STAY. `gpt-5.4*` and `gpt-5.3-codex` are in routing.mjs's
+  // RETIRED_MODELS — ak no longer ROUTES to them, but transcripts that already
+  // spent tokens on them are read forever, and deleting their keys would
+  // silently re-cost that history at FALLBACK_PRICE. Retirement is a routing
+  // decision; this table is a historical record. Never prune one from the other.
   'gpt-5.6-sol': openai(5, 30),
   'gpt-5.6-terra': openai(2.5, 15),
   'gpt-5.6-luna': openai(1, 6),

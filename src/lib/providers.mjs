@@ -29,7 +29,7 @@ import { readJson, writeJsonWithBackup } from './settings.mjs';
 import { installedVersion, cmpVersions } from './versions.mjs';
 import * as paths from './paths.mjs';
 import { bold, dim, cyan } from './output.mjs';
-import { configuredPolicyToAgentOverrides, seedActivityRoutes, resolveRoutes, routingSummary, divergedRoutes, ACTIVITIES, AGENT_ACTIVITY_MAP, PRIMARY_HOSTS } from './routing.mjs';
+import { configuredPolicyToAgentOverrides, seedActivityRoutes, resolveRoutes, routingSummary, divergedRoutes, migrateRetiredRoutes, ACTIVITIES, AGENT_ACTIVITY_MAP, PRIMARY_HOSTS } from './routing.mjs';
 import { HOST_ADAPTERS } from './hosts.mjs';
 import {
   HOST_REGISTRY, PROVIDER_REGISTRY, normalizeIntegrationFacts,
@@ -518,6 +518,20 @@ export function seedActivityRoutesIfMultiHost(cfg) {
     primary: routing.primaryHost ?? DEFAULT_PRIMARY_HOST,
   });
   return { seeded: true, count: Object.keys(routing.routes).length };
+}
+
+/** Rewrite seeded routes that still point at a model the host has withdrawn, so
+ *  the persisted policy stops naming a model that will not answer. Mutates
+ *  cfg.routing.routes; the rewrite itself is migrateRetiredRoutes (pure). A
+ *  `user` pin is reported but never rewritten — resolveRoutes substitutes it at
+ *  read time so the run stays safe without overwriting deliberate intent. */
+export function migrateRetiredRoutesInConfig(cfg) {
+  const routes = cfg.routing?.routes;
+  if (!routes || Object.keys(routes).length === 0) return { changed: false, changes: [] };
+  const { routes: next, changes } = migrateRetiredRoutes(routes);
+  const rewritten = changes.filter((c) => c.rewritten);
+  if (rewritten.length > 0) cfg.routing.routes = next;
+  return { changed: rewritten.length > 0, changes };
 }
 
 /** Apply `ak setup` host flags to a kit.json cfg IN PLACE (before setup's

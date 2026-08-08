@@ -38,6 +38,13 @@ as such** wherever surfaced (an `ak` tag in the UI, a comment in the defaults ta
 Default *models* map to the host's appropriate tier (Opus for deep reasoning, Sonnet for review, a Codex
 model for execution) and are treated as **soft defaults** — see the "open question" on pinning live model IDs.
 
+Tier is the pairing key, not the model id: `MODEL_CATALOG` spells `flagship`/`balanced`/`fast`
+identically on both hosts so primary-host mirroring can map a route to its counterpart's equivalent.
+As of 2026-08-07 execution routes to `gpt-5.6-terra` (balanced) and mechanical work to `gpt-5.6-luna`
+(fast), following OpenAI's own migration off `gpt-5.4`/`gpt-5.4-mini` before their 2026-08-31 Codex
+retirement; deep reasoning routes to `claude-opus-5`. Withdrawn ids are handled by the retirement
+mechanism in [ADR-0003](0003-auto-seed-dual-host-provenance.md), not by editing this table alone.
+
 ## Consequences
 
 - Defaults are **provably grounded** and explainable ("architect→claude because `featureDevelopment` does").

@@ -4,9 +4,14 @@ This document describes the domain implemented by [ADR-0024](../adr/0024-project
 `src/lib/dashboard/intel-history.mjs`, `src/lib/dashboard/project-discovery.mjs`, and
 `src/lib/live/intelligence-watch.mjs`.
 
+> **2026-08-07 amendment:** project discovery moved to the shared census
+> ([ADR-0027](../adr/0027-shared-project-census.md)). "Every ruflo-initialized project" below now
+> reads "every project with memory or intelligence state, whichever host created it" — see
+> [Project discovery](#project-discovery).
+>
 > **2026-08-05 amendment:** extended from one project's telemetry, implicit and bound to the
 > dashboard server's own launching working directory, to a machine-wide catalog of every
-> ruflo-initialized project on this machine, a machine-wide aggregate that is always shown, and an
+> project on this machine, a machine-wide aggregate that is always shown, and an
 > explicitly selected, explicitly labeled detail project (defaulting to most-recently-active). See
 > [ADR-0024](../adr/0024-project-intelligence-telemetry.md)'s update note for the full amendment
 > record, including why the `/api/status` payload shape is a clean break rather than a preserved
@@ -66,50 +71,42 @@ never a remote or unregistered one.
 
 ## Project discovery
 
-`discoverRuvfloProjects()` (`src/lib/dashboard/project-discovery.mjs`) returns every project on
-this machine ruflo has genuinely initialized — a `.claude-flow/neural/` subdirectory present, not
-merely a bare `.claude-flow/` (a project that only ever ran, say, `ruflo daemon start` without ever
-training or learning anything is correctly excluded) — deduplicated by resolved absolute path and
-sorted most-recently-active first by `.claude-flow/neural/stats.json`'s `lastAdaptation`.
+Intelligence does not discover projects. It consumes the **learning scope** of the shared project
+census ([ADR-0027](../adr/0027-shared-project-census.md), `src/lib/project-census.mjs`), which is
+the same census the System area measures directories from and the same identity Observability keys
+sessions by. A project therefore means the same thing here as it does there.
 
-Three sources are unioned:
+The learning scope is every project still on disk that carries **learning state** — a
+`.claude-flow`, `.agentic-qe` or `.swarm` directory — regardless of which host created it.
 
-1. **Registry.** `registryWorkspaces()`, reused verbatim from `daemons.mjs` (imported, not
-   reimplemented), walks `~/.claude-flow/{ai-jobs.json,workspace-leases.json,repo-supervisors.json}`
-   for every workspace path recorded there that carries a `.claude-flow` directory. `daemons.mjs`'s
-   own header comment assumes ruflo 3.28+ reliably writes these; verified false on a real ruflo
-   3.34.0 machine with real, populated ruflo projects — none of the three files existed. Kept as a
-   source (cheap, and correct wherever those files do exist), but no longer described as the
-   guaranteed-correct primary.
-2. **Observability cross-reference.** `WorkspaceSnapshotStore` (`src/lib/live/workspace-store.mjs`,
-   [Observability](observability.md)) is checked for any record whose workspace carries a
-   genuinely resolvable absolute path. That store's own privacy sanitizers — `repositoryLabel`
-   rejects any path separator, `directoryLabel` rejects anything absolute-looking — mean a real
-   record never carries one, so this source is structurally empty by that store's own design, not
-   a gap. The check remains a real, defensive one rather than being skipped outright, so it starts
-   contributing automatically if that schema ever grows a genuine path field.
-3. **Transcript content (the source that matters in practice).** Real absolute `cwd` values read
-   directly out of Claude and Codex transcript content under `~/.claude/projects/**/*.jsonl` and
-   `~/.codex/sessions/**/*.jsonl`, via the same `discoverJsonl()`/`bootstrapRecords()` functions
-   `live-sessions-service.mjs` already trusts for Observability's own live session tracking — flat
-   `record.cwd` for Claude, `record.payload.cwd` for Codex's `session_meta`/`turn_context` records.
-   Unlike source 2's sanitized, persisted registry, raw transcripts are not sanitized and do carry
-   a resolvable path — legitimately readable at this trust boundary since it's the same user, same
-   machine, same files Observability already parses. Bounded to the 150 most-recently-modified
-   transcripts per host so cost stays flat regardless of session count. On the real machine where
-   source 1 returned nothing, this source alone found all 4 real ruflo-initialized projects.
+Two properties of that definition are deliberate and both were once wrong:
 
-Each discovered row is `{ path, label, source }`, where `label` reuses Observability's own
-`resolveProjectLabel` for the same path (falling back to the bare directory name) so a project
-reads identically wherever it is named, and `source` is `'registry'`, `'observability'`,
-`'transcript'`, or `'both'` when a project was found by two or more sources (not necessarily
-exactly two).
+- **Activation, not training.** The predicate this replaced required `.claude-flow/neural/`, which
+  answers "has ruflo trained here". That excluded every project whose memory came from agentic-qe
+  or swarm storage, and every project driven by Codex or OpenCode. On a real machine it reported 4
+  projects where 17 had learning state. The markers above are exactly the ones the Storage context
+  already treats as a project's learning stores, so the two contexts cannot disagree about what a
+  learning store is.
+- **One row per project identity, not per directory.** Sessions get recorded in a repository's
+  sub-directories and in ephemeral `.claude/worktrees/agent-*` checkouts. The census lists those as
+  the distinct directories they are — the System context measures bytes per directory — and the
+  learning scope folds them onto the repository root via `resolveProjectIdentity()`. Without the
+  fold, a picker keyed by identity silently loses every folded row.
+
+A merged row is anchored on the path that actually carries the learning state (the repository root
+in the ordinary case), because that is the path `readIntelHistory()` reads. It keeps `paths`, every
+directory that contributed, and `learningState`, which markers were found — so a project reporting
+zero patterns can say *why* it reports zero rather than being indistinguishable from a failed read.
+
+`label` reuses Observability's own `resolveProjectLabel` so a project reads identically wherever it
+is named, and the key a client echoes back as `?project=<key>` is `resolveProjectIdentity(path).key`.
 
 ## Model
 
 ```text
-discoverRuvfloProjects() -> ProjectRow[] { path, label, source }   (every ruflo-initialized
-                                                                     project on this machine)
+projectsInScope(census, 'learning')                                (every project on this machine
+  -> ProjectRow[] { path, label, paths, learningState, hosts }       with memory or intelligence
+                                                                     state, any host — ADR-0027)
 
 .claude-flow/neural/patterns.json             -> PatternStoreEntry[]   { createdAt, type }
 .claude-flow/neural/stats.json                -> GlobalLearningStats   { patternsLearned, trajectoriesRecorded,

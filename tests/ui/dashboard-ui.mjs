@@ -34,6 +34,12 @@ import os from 'node:os';
 import { chromium } from 'playwright';
 import { startDashboard } from '../../src/lib/dashboard-server.mjs';
 import { readIndex, readSession, maskSecrets } from '../../src/lib/usage-index.mjs';
+// The About area's directory is authored DATA, not a renderer — importing it
+// here asserts the real contract ("one card per directory entry") instead of a
+// hardcoded 15 that rots the day an entry is added. This is not the thing the
+// formatter restatements below refuse to do: those would compute an expectation
+// with the code under test; this names the input the code under test consumes.
+import { directoryEntries } from '../../src/lib/dashboard/about-directory.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(HERE, '..', '..');
@@ -194,15 +200,60 @@ function extendedCorpus() {
     asst(WT_ID, wtCwd, '2026-07-24T11:40:00.000Z', 'Rebased.'),
   ));
 
+  slideCorpusIntoWindow([claude, codex]);
   return { claude, codex };
 }
 
+/** The fixtures and the sessions written above are all pinned to FIXTURE_EPOCH.
+ *  The kit suites cope with that by pinning `now` (see usage-index.test.mjs's
+ *  header), but this harness drives a REAL server against the real clock and
+ *  the panel requests a 14-day window, so a fixed date is a dated bomb: the
+ *  corpus passed every run until it turned 14 days old, then every
+ *  session-dependent assertion went blind at once against unchanged code.
+ *
+ *  Shifting the copied corpus keeps it permanently inside the window. The shift
+ *  is a WHOLE NUMBER OF DAYS so every relative fact the assertions actually
+ *  test survives it — the 85-minute idle gap that separates the three time
+ *  tiers, the worktree session nested inside another's span, and each turn's
+ *  local time-of-day, which the punchcard buckets by hour. */
+const FIXTURE_EPOCH = '2026-07-24';
+function slideCorpusIntoWindow(roots) {
+  const DAY = 86_400_000;
+  // Land the corpus a few days back: comfortably inside the 14-day default,
+  // and never in the future, which would read as an unfinished session.
+  const target = Date.now() - 3 * DAY;
+  const shiftDays = Math.round((target - Date.parse(`${FIXTURE_EPOCH}T00:00:00.000Z`)) / DAY);
+  if (shiftDays <= 0) return; // fixtures are already recent enough
+  const shiftMs = shiftDays * DAY;
+  const ISO = /\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z/g;
+  const walk = (dir) => {
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      const p = path.join(dir, entry.name);
+      if (entry.isDirectory()) { walk(p); continue; }
+      if (!entry.isFile() || !entry.name.endsWith('.jsonl')) continue;
+      fs.writeFileSync(p, fs.readFileSync(p, 'utf8').replace(ISO, (stamp) => {
+        const at = Date.parse(stamp);
+        return Number.isFinite(at) ? new Date(at + shiftMs).toISOString() : stamp;
+      }));
+    }
+  };
+  for (const root of roots) walk(root);
+}
+
 // ── views under test ─────────────────────────────────────────────────────────
+// ORDER IS THE CONTRACT, not an implementation detail: About leads because it
+// is the orientation surface (ADR-0026) and System trails because it is the
+// machine-resource family (ADR-0025). The array below is also what the
+// primary-navigation assertion compares against, so a reordered tab bar fails
+// here rather than being silently absorbed.
 const TABS = [
+  ['about', '#panel-about'],
   ['overview', '#area-overview'],
   ['usage', '#panel-usage'],
   ['observability', '#panel-observability'],
+  ['system', '#area-system'],
 ];
+const PRIMARY_LABELS = ['About', 'Overview', 'Usage', 'Observability', 'System'];
 const OVERVIEW_VIEWS = [
   ['summary', '#panel-overview'],
   ['hosts', '#panel-hosts'],
@@ -216,6 +267,20 @@ const USAGE_VIEWS = [
   ['findings', '#v-findings'],
   ['sessions', '#v-sessions'],
   ['transcript', '#v-transcript'],
+];
+// Seven sub-views, in order. Asserting the list here means a merge would fail
+// loudly instead of quietly reducing the area. Advisory is deliberately its own
+// area rather than a card: it is the only part of System that suggests an
+// action, and everything else reports what is. Sessions owns the session-level
+// detail Storage used to carry underneath its byte breakdown.
+const SYSTEM_VIEWS = [
+  ['summary', '#panel-sys-summary'],
+  ['advisory', '#panel-sys-advisory'],
+  ['sessions', '#panel-sys-sessions'],
+  ['storage', '#panel-sys-storage'],
+  ['runtime', '#panel-sys-runtime'],
+  ['catalog', '#panel-sys-catalog'],
+  ['projects', '#panel-sys-projects'],
 ];
 
 // /api/limits stub (ADR-0010): injected so the harness never spawns a real
@@ -241,6 +306,253 @@ const LIMITS_STUB = async () => ({
     resetCredits: { availableCount: 2, credits: [{ status: 'available', title: 'Full reset', expiresAt: null }] },
   },
 });
+
+// /api/status stub. Status is stubbed so the panel never shells out or hits the
+// network; the point of this harness is the RENDERING, not the status collector.
+//
+// The rows carry MORE than Overview needs, because About's state chips are a
+// JOIN over exactly these rows (ADR-0026) and a three-row payload would leave
+// every chip reading "state unknown" — which is a real state, but then the
+// installed/needs-attention/not-working states would go untested. The shapes
+// that matter are deliberate:
+//   · `codex` is enabled but ABSENT — the honest not-installed case, which must
+//     render a full card with a "not working" chip, never an empty slot.
+//   · `statusline` is ok while `codex-statusline` warns — one card joins both,
+//     so the WORST of the pair has to drive the chip.
+//   · nothing emits a `permissions` row, so that card must degrade to unknown:
+//     an unjoined key is an unmeasured fact, never a satisfied one.
+const STATUS_STUB = async () => ({
+  overall: 'warn',
+  rows: [
+    { subsystem: 'versions', level: 'ok', message: 'ruflo 4.0.0 (latest)', fix: null },
+    { subsystem: 'natives', level: 'fail', message: 'WASM fallback', fix: 'ak sync' },
+    { subsystem: 'learning', level: 'warn', message: 'no patterns yet', fix: null },
+    { subsystem: 'hosts', level: 'ok', message: 'claude enabled and installed', fix: null },
+    { subsystem: 'hosts', level: 'fail', message: 'codex enabled but not installed', fix: 'ak setup' },
+    { subsystem: 'hosts', level: 'ok', message: 'opencode enabled and installed', fix: null },
+    { subsystem: 'agentdb', level: 'ok', message: 'store reachable', fix: null },
+    { subsystem: 'aqe', level: 'warn', message: 'fleet has never been initialized', fix: 'aqe init' },
+    { subsystem: 'security', level: 'ok', message: 'scan clean', fix: null },
+    { subsystem: 'ruvnet-brain', level: 'ok', message: 'knowledge base present', fix: null },
+    { subsystem: 'self', level: 'ok', message: 'agentic-kit up to date', fix: null },
+    { subsystem: 'mcp', level: 'ok', message: '3 servers registered at user scope', fix: null },
+    { subsystem: 'blocks', level: 'ok', message: 'guidance blocks in sync', fix: null },
+    { subsystem: 'statusline', level: 'ok', message: 'claude statusline installed', fix: null },
+    { subsystem: 'codex-statusline', level: 'warn', message: 'codex statusline missing', fix: 'ak sync' },
+    { subsystem: 'routing', level: 'ok', message: 'per-activity policy applied', fix: null },
+    { subsystem: 'daemons', level: 'ok', message: '1 daemon running', fix: null },
+  ],
+  drift: [{ pkg: 'ruflo', installed: '4.0.0', latest: '4.0.1', outdated: true }],
+});
+
+// ── /api/system stub (ADR-0025) ──────────────────────────────────────────────
+// Injected exactly the way `live` and `usage` are, and for a stronger reason:
+// the real collector walks five trees and surveys every host process on the
+// machine, so a UI harness that let it run would be slow, non-deterministic,
+// and different on every developer's laptop. This stub answers the same wire
+// shape the collector produces (walk.mjs's Measurement vocabulary) and counts
+// the deep scans it is asked for, which is how "never auto-scan on open" below
+// is proved rather than assumed.
+const SYS_NOW = Date.now();
+// Nine days back: past the ~7-day staleness horizon, so the freshness label's
+// nudge is exercised. It is a MEASURED figure carried forward with ITS own asOf
+// — the whole point of the deep tier — not a re-stamped current one.
+const SYS_DEEP_ASOF = SYS_NOW - 9 * 24 * 3600 * 1000;
+const meas = (value, partial = false) => ({
+  value, status: 'measured', reason: null, asOf: SYS_DEEP_ASOF, partial,
+});
+const unmeasured = (reason) => ({ value: null, status: 'unknown', reason, asOf: null, partial: false });
+// Deterministic day series — a generator, not a literal, so the window length
+// is stated once and the growth panels have a visible shape to draw.
+const growthDays = (base, n = 14) => Array.from({ length: n }, (_, i) => ({
+  bytes: base + (i % 5) * Math.round(base / 4),
+}));
+
+const SYSTEM_PAYLOAD = {
+  generatedAt: new Date(SYS_NOW).toISOString(),
+  platform: 'darwin',
+  runtime: {
+    observedAt: new Date(SYS_NOW).toISOString(),
+    // One attributable process and one that is not: the census must state WHY a
+    // process could not be tied to a project (this is the shape the Windows
+    // P/Invoke fallback degrades to) rather than blanking the cell or guessing.
+    processes: meas([
+      {
+        host: 'claude', pid: 4242,
+        project: { value: { label: 'agentic-kit', path: '/Users/me/proj' }, status: 'measured', reason: null, asOf: SYS_NOW, partial: false },
+        uptimeMs: meas(5_400_000), cpuPercent: meas(3.5), rssBytes: meas(412_000_000),
+      },
+      {
+        host: 'codex', pid: 4711,
+        project: unmeasured('not attributable on this platform — the working directory is not readable'),
+        uptimeMs: meas(900_000), cpuPercent: meas(0.8), rssBytes: meas(180_000_000),
+      },
+    ]),
+    childProcessCount: meas(3),
+    totals: { processCount: meas(2), rssBytes: meas(592_000_000), cpuPercent: meas(4.3) },
+    machine: { physicalMemoryBytes: meas(34_359_738_368), cpuCount: meas(12) },
+    daemons: {
+      count: meas(1),
+      // A MEASURED zero, and it must render as "0" — the fail-closed rule bans
+      // fabricating a zero for something unmeasured, not reporting a real one.
+      staleCount: meas(0),
+      ttlSecs: 43_200, oldestAgeSecs: meas(7200),
+      budget: unmeasured('no readable budget state'),
+    },
+  },
+  install: {
+    totals: {
+      installBytes: meas(1_284_000_000),
+      toolsPresent: meas(6),
+      // DELIBERATELY ABSENT: this figure was never measured. A renderer that
+      // prints 0 for a missing Measurement fails the "no fabricated zero"
+      // assertion below; the honest render is "not measured yet".
+    },
+    disk: { totalBytes: meas(994_662_584_320), freeBytes: meas(211_000_000_000) },
+    tools: [
+      { label: 'ruflo', bytes: meas(612_000_000) },
+      { label: 'agentic-qe', bytes: meas(318_000_000) },
+      { label: 'agentic-kit', bytes: meas(96_000_000) },
+    ],
+    sharedCaches: [{ label: 'shared npm cache', bytes: meas(258_000_000) }],
+  },
+  storage: {
+    totals: { bytes: meas(4_812_000_000) },
+    categories: [
+      {
+        key: 'transcripts', label: 'transcripts', bytes: meas(3_100_000_000),
+        children: [
+          { key: 'claude', host: 'claude', bytes: meas(2_100_000_000) },
+          { key: 'codex', host: 'codex', bytes: meas(820_000_000) },
+          { key: 'opencode', host: 'opencode', bytes: meas(180_000_000) },
+        ],
+      },
+      {
+        key: 'ledgers-and-logs', label: 'ledgers and logs', bytes: meas(640_000_000),
+        children: [
+          { key: 'claude', host: 'claude', bytes: meas(420_000_000) },
+          { key: 'codex', host: 'codex', bytes: meas(220_000_000) },
+        ],
+      },
+      {
+        key: 'learning-stores', label: 'learning stores', bytes: meas(812_000_000),
+        children: [{ key: 'agentic-kit', host: 'agentic-kit', bytes: meas(812_000_000) }],
+      },
+      {
+        key: 'kit-caches', label: 'kit caches', bytes: meas(260_000_000),
+        children: [{ key: 'agentic-kit', host: 'agentic-kit', bytes: meas(260_000_000) }],
+      },
+    ],
+    growth: {
+      windowDays: 14, basis: 'file mtime and size only',
+      hosts: [
+        { host: 'claude', days: growthDays(21_000_000), perDayAvgBytes: meas(31_500_000), totalBytes: meas(441_000_000) },
+        { host: 'codex', days: growthDays(6_000_000), perDayAvgBytes: meas(9_000_000), totalBytes: meas(126_000_000) },
+      ],
+    },
+    reclaimables: [{
+      label: 'transcripts older than the retention window',
+      bytes: meas(410_000_000),
+      rationale: 'past the 30 days the usage index reads, so nothing on this dashboard needs them',
+      path: '/Users/me/.claude/projects',
+      cleanupHint: 'ak system --help',
+    }],
+    topSessions: [
+      { session: 'uitrunc01', host: 'claude', project: 'proj', bytes: 84_000_000, path: '/Users/me/.claude/projects/-Users-me-proj/uitrunc01.jsonl', attribution: 'cwd' },
+      { session: 'orphan0001', host: 'codex', project: null, bytes: 51_000_000, path: '/Users/me/.codex/sessions/orphan0001.jsonl', attribution: 'none' },
+    ],
+  },
+  // Never deep-scanned on this machine. The whole section is `null` rather than
+  // an object of zeros — there is no numeric field for a renderer to misread.
+  catalog: null,
+  projects: {
+    count: meas(2), truncated: false,
+    projects: [
+      {
+        label: 'agentic-kit',
+        loc: { total: meas(48_210), byLanguage: { JavaScript: 31_000, Markdown: 12_000, CSS: 3100, JSON: 2110 } },
+        treeBytes: meas(42_000_000), gitBytes: meas(120_000_000), nodeModulesBytes: meas(310_000_000),
+        totalBytes: meas(472_000_000), lastActivity: meas(SYS_NOW - 3_600_000),
+        hosts: ['claude', 'codex'],
+        remote: {
+          status: 'linked', webUrl: 'https://github.com/example/agentic-kit',
+          host: 'github.com', slug: 'example/agentic-kit', raw: 'git@github.com:example/agentic-kit.git',
+        },
+      },
+      {
+        // A linked repo on a snapshot too old to carry `hosts`. It must still be
+        // listed: absent is not zero, and blanking it would be the fail-closed
+        // rule inverted.
+        label: 'legacy-snapshot-row',
+        loc: { total: meas(1200), byLanguage: { Rust: 1200 } },
+        treeBytes: meas(1_000), gitBytes: meas(1_000), nodeModulesBytes: meas(0),
+        totalBytes: meas(2_000), lastActivity: meas(SYS_NOW - 7_200_000),
+        remote: {
+          status: 'linked', webUrl: 'https://github.com/example/legacy',
+          host: 'github.com', slug: 'example/legacy', raw: 'git@github.com:example/legacy.git',
+        },
+      },
+      {
+        // Linked and worked in, but its figures were never measured. It must
+        // still LIST, and must sort to the bottom in BOTH directions — an
+        // absent figure is not a small one.
+        label: 'zz-unmeasured',
+        loc: { total: unmeasured('the working tree could not be read'), byLanguage: {} },
+        treeBytes: meas(1), gitBytes: meas(1), nodeModulesBytes: meas(0),
+        totalBytes: unmeasured('the working tree could not be read'),
+        lastActivity: unmeasured('no readable entry'),
+        hosts: ['claude'],
+        remote: {
+          status: 'linked', webUrl: 'https://github.com/example/unmeasured',
+          host: 'github.com', slug: 'example/unmeasured', raw: 'git@github.com:example/unmeasured.git',
+        },
+      },
+      {
+        // Linked, but no host ever recorded a session here.
+        label: 'never-worked-in',
+        loc: { total: meas(10), byLanguage: { Rust: 10 } },
+        treeBytes: meas(10), gitBytes: meas(10), nodeModulesBytes: meas(0),
+        totalBytes: meas(20), lastActivity: meas(SYS_NOW - 9_200_000),
+        hosts: [],
+        remote: {
+          status: 'linked', webUrl: 'https://github.com/example/untouched',
+          host: 'github.com', slug: 'example/untouched', raw: 'git@github.com:example/untouched.git',
+        },
+      },
+      {
+        label: 'scratch',
+        loc: { total: unmeasured('the working tree could not be read'), byLanguage: {} },
+        treeBytes: meas(4_000_000), gitBytes: meas(1_000_000), nodeModulesBytes: meas(0),
+        totalBytes: meas(5_000_000), lastActivity: unmeasured('no readable entry'),
+        hosts: ['claude'],
+        remote: { status: 'none', reason: 'local only, no git remote' },
+      },
+    ],
+  },
+  snapshot: {
+    present: true,
+    file: '/Users/me/.config/agentic-kit/footprint-snapshot.json',
+    reason: null,
+    completeness: { measured: 3, total: 4, missing: ['catalog'] },
+    measured: true, asOf: SYS_DEEP_ASOF, ageMs: SYS_NOW - SYS_DEEP_ASOF,
+    stale: true, staleAfterMs: 7 * 24 * 3600 * 1000,
+  },
+  cheapTier: { asOf: SYS_NOW, ttlMs: 60_000 },
+  scan: {
+    running: false, phase: 'idle', scanned: 0, total: 0, path: null,
+    startedAt: null, finishedAt: null, durationMs: null, error: null, asOf: null,
+  },
+};
+
+let systemDeepScans = 0;
+const SYSTEM_STUB = {
+  // Cloned per read for the same reason the real collector re-assembles: a
+  // renderer that mutated the payload in place would silently corrupt every
+  // later assertion, and a shared object would hide that.
+  read: async () => JSON.parse(JSON.stringify(SYSTEM_PAYLOAD)),
+  refreshDeep: async () => { systemDeepScans += 1; return { ok: true }; },
+  scanState: () => ({ ...SYSTEM_PAYLOAD.scan }),
+};
 
 const LIVE_SNAPSHOT = {
   schemaVersion: 1,
@@ -348,6 +660,11 @@ const LIVE_SNAPSHOT = {
 const LIVE_STUB = {
   start: async () => {},
   snapshot: async () => LIVE_SNAPSHOT,
+  // The fixture is static, so History's ?window= is a no-op here — the real
+  // LiveSessionsService.historySnapshot() date-windowing is covered by
+  // tests/kit/live-service.test.mjs; this stub only needs to exist so the
+  // Observability → History tab has something to render end-to-end.
+  historySnapshot: async () => LIVE_SNAPSHOT,
   replay: async () => ({ reset: false, events: [] }),
   subscribe: () => () => {},
   close: async () => {},
@@ -383,22 +700,14 @@ async function main() {
 
   const srv = await startDashboard({
     port: 0,
-    // Status is stubbed so the panel never shells out or hits the network; the
-    // point of this harness is the RENDERING, not the status collector.
-    fetchStatus: async () => ({
-      overall: 'warn',
-      rows: [
-        { subsystem: 'versions', level: 'ok', message: 'ruflo 4.0.0 (latest)', fix: null },
-        { subsystem: 'natives', level: 'fail', message: 'WASM fallback', fix: 'ak sync' },
-        { subsystem: 'learning', level: 'warn', message: 'no patterns yet', fix: null },
-      ],
-      drift: [],
-    }),
+    fetchStatus: STATUS_STUB,
     usage,
     limits: LIMITS_STUB,
     live: LIVE_STUB,
     transcripts: TRANSCRIPT_STUB,
+    system: SYSTEM_STUB,
   });
+  const ORIGIN = new URL(srv.url).origin;
 
   const browser = await chromium.launch({ channel: 'chrome', headless: !HEADED });
   const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
@@ -417,11 +726,21 @@ async function main() {
     consoleErrors.push(`${m.text()}${where}`);
   });
   page.on('pageerror', (e) => consoleErrors.push(String(e.message)));
+  // The dashboard is a self-contained local page: every byte it loads comes
+  // from the loopback server it was served by. A CDN font, a remote logo, or an
+  // analytics beacon would be an egress the whole design forbids — and unlike a
+  // DOM scan, this catches one added at RUNTIME by a script.
+  const offOriginRequests = [];
+  page.on('request', (r) => {
+    const u = r.url();
+    if (u.startsWith(ORIGIN) || /^(data|blob|about|chrome-extension):/.test(u)) return;
+    offOriginRequests.push(`${r.resourceType()} ${u}`);
+  });
   page.on('requestfailed', (r) => {
-    // Leaving Live deliberately closes EventSource. Chromium reports that
-    // client-side teardown as ERR_ABORTED even though it is the expected,
-    // leak-preventing lifecycle behavior.
-    if (/\/api\/live\/(?:events|transcripts\/[^/]+\/[^/]+\/events)(?:\?.*)?$/.test(r.url())
+    // Leaving Live (or the Intelligence view) deliberately closes its
+    // EventSource. Chromium reports that client-side teardown as ERR_ABORTED
+    // even though it is the expected, leak-preventing lifecycle behavior.
+    if (/\/api\/live\/(?:events|intelligence|transcripts\/[^/]+\/[^/]+\/events)(?:\?.*)?$/.test(r.url())
       && r.failure()?.errorText === 'net::ERR_ABORTED') return;
     failedRequests.push(`${r.url()} — ${r.failure()?.errorText}`);
   });
@@ -455,12 +774,81 @@ async function main() {
     await page.goto(srv.urlWithToken, { waitUntil: 'domcontentloaded' });
     await page.waitForSelector('#panel-overview', { state: 'attached' });
 
+    // ── ADR-0026 · About leads the bar but must NOT hijack the landing view ──
+    // This runs FIRST, on a browser context that has never seen the dashboard,
+    // because both facts under test are first-run facts: which panel a new user
+    // lands on, and whether the one-shot nudge is showing. Any later assertion
+    // would be reading a localStorage-remembered state instead.
+    await page.waitForTimeout(400);
+    const firstRun = await page.evaluate(() => ({
+      selected: document.querySelector('#seg [aria-selected="true"]')?.dataset.tab,
+      overviewVisible: !document.getElementById('area-overview')?.hidden
+        && !document.getElementById('panel-overview')?.hidden,
+      aboutVisible: !document.getElementById('panel-about')?.hidden,
+      nudgeVisible: !document.getElementById('about-nudge')?.hidden,
+      stored: localStorage.getItem('ak-dash-about-nudge'),
+      // The nudge sits BELOW the triage summary by design: an introduction must
+      // never displace a failing subsystem.
+      belowSummary: (() => {
+        const summary = document.getElementById('summary');
+        const nudge = document.getElementById('about-nudge');
+        if (!summary || !nudge || summary.hidden || nudge.hidden) return null;
+        return nudge.getBoundingClientRect().top >= summary.getBoundingClientRect().bottom - 1;
+      })(),
+    }));
+    check('Overview is still the default landing view, not About',
+      firstRun.selected === 'overview' && firstRun.overviewVisible && !firstRun.aboutVisible,
+      `first paint selected "${firstRun.selected}" with ${JSON.stringify(firstRun)}`);
+    check('a first-run reader is pointed at About by a nudge, not by a hijacked default',
+      firstRun.nudgeVisible && firstRun.stored === null,
+      `nudge state was ${JSON.stringify(firstRun)}`);
+    check('the nudge renders below the triage summary, never displacing it',
+      firstRun.belowSummary !== false,
+      'the About nudge was laid out above #summary — a failing subsystem must lead');
+
+    await page.click('#about-nudge-x');
+    const nudgeDismissed = await page.evaluate(() => ({
+      hidden: document.getElementById('about-nudge')?.hidden,
+      stored: localStorage.getItem('ak-dash-about-nudge'),
+      tab: document.querySelector('#seg [aria-selected="true"]')?.dataset.tab,
+    }));
+    check('dismissing the nudge hides it without navigating anywhere',
+      nudgeDismissed.hidden === true && nudgeDismissed.stored === '1'
+        && nudgeDismissed.tab === 'overview',
+      `after dismissal: ${JSON.stringify(nudgeDismissed)}`);
+
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await page.waitForSelector('#panel-overview', { state: 'attached' });
+    await page.waitForTimeout(400);
+    check('a dismissed nudge stays dismissed across a reload',
+      await page.evaluate(() => document.getElementById('about-nudge')?.hidden) === true,
+      'the nudge greeted a returning reader again — dismissal must persist like the poll and theme preferences');
+
+    // Clearing the key and reloading proves the persistence is CAUSAL: without
+    // it, a nudge that never rendered at all would pass the check above.
+    await page.evaluate(() => localStorage.removeItem('ak-dash-about-nudge'));
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await page.waitForSelector('#about-nudge', { state: 'attached' });
+    await page.waitForTimeout(400);
+    check('the nudge returns once the remembered dismissal is cleared',
+      await page.evaluate(() => document.getElementById('about-nudge')?.hidden) === false,
+      'the nudge never came back — the reload check above would have been vacuous');
+    await page.click('#about-nudge-go');
+    await page.waitForSelector('#panel-about:not([hidden])');
+    check('"Open About" opens the About area and counts as dismissing the tip',
+      await page.evaluate(() => document.getElementById('about-nudge')?.hidden) === true
+        && await page.evaluate(() => localStorage.getItem('ak-dash-about-nudge')) === '1',
+      'Open About did not both navigate and retire the first-run tip');
+
     // ── every primary area renders, is non-empty, and is artifact-free ──
     for (const [tab, sel] of TABS) {
       await page.click(`[data-tab="${tab}"]`).catch(() => {});
       await page.waitForSelector(`${sel}:not([hidden])`, { timeout: 8000 }).catch(() => {});
       if (tab === 'usage') await page.waitForTimeout(1200); // lazy fetch
       if (tab === 'live') await page.waitForTimeout(350); // segmented-thumb transition
+      // System fetches /api/system on first open. Waiting on a rendered KPI (not
+      // a timeout) means this cannot pass by screenshotting an empty grid.
+      if (tab === 'system') await page.waitForSelector('#sys-kpis .sy-kpi', { timeout: 8000 }).catch(() => {});
       const text = await visibleText(page, sel);
       await shoot(page, `tab-${tab}`);
 
@@ -470,14 +858,23 @@ async function main() {
       check(`tab "${tab}" is free of rendering artifacts`, arts.length === 0,
         `found ${arts.join(', ')} in visible text`);
     }
+    // AMENDS ADR-0005's three-area contract. The stable primary areas are now
+    // FIVE, in this exact order: About · Overview · Usage · Observability ·
+    // System. Order is asserted, not just membership — About leads because it
+    // is the orientation surface and System trails because it is the
+    // machine-resource family; a bar that carried the same five in a different
+    // order would be a different information architecture.
     const primaryNavigation = await page.evaluate(() => ({
       labels: [...document.querySelectorAll('#seg > [data-tab]')].map((item) => item.childNodes[0]?.textContent.trim()),
+      tabs: [...document.querySelectorAll('#seg > [data-tab]')].map((item) => item.dataset.tab),
       count: document.querySelectorAll('#seg > [data-tab]').length,
     }));
-    check('dashboard exposes exactly three stable primary areas',
-      primaryNavigation.count === 3
-        && ['Overview', 'Usage', 'Observability'].every((label) => primaryNavigation.labels.includes(label)),
-      `primary navigation was ${JSON.stringify(primaryNavigation)}`);
+    check('dashboard exposes exactly five stable primary areas, in order',
+      primaryNavigation.count === PRIMARY_LABELS.length
+        && JSON.stringify(primaryNavigation.labels) === JSON.stringify(PRIMARY_LABELS)
+        && JSON.stringify(primaryNavigation.tabs) === JSON.stringify(TABS.map(([tab]) => tab)),
+      `primary navigation was ${JSON.stringify(primaryNavigation)}; the contract is `
+      + `${JSON.stringify(PRIMARY_LABELS)}`);
 
     await page.click('[data-tab="overview"]');
     for (const [view, sel] of OVERVIEW_VIEWS) {
@@ -497,6 +894,39 @@ async function main() {
           && presentation.text?.trim().length > 20,
         `Overview presentation was ${JSON.stringify(presentation)}`);
     }
+
+    // ── Intelligence: the project picker is a CONTROL, not a panel (ADR-0027) ──
+    // Structural assertions only, so they hold on any machine: the panel's data
+    // comes from a real census walk and its counts are whatever this machine
+    // has. What must not vary is the shape.
+    await page.click('[data-overview-view="intel"]');
+    await page.waitForSelector('#panel-intel:not([hidden])');
+    const intelShape = await page.evaluate(() => {
+      const select = document.getElementById('intel-project-select');
+      return {
+        pickerStripGone: !document.getElementById('intel-picker'),
+        redundantCaptionsGone: !document.getElementById('mw-note') && !document.getElementById('intel-picker-note'),
+        pickerInHistoryHead: !!select?.closest('#history .strip-head'),
+        labelled: !!document.querySelector('label[for="intel-project-select"]'),
+        censusIsDisclosure: document.getElementById('mw-census')?.tagName === 'DETAILS',
+      };
+    });
+    check('the standalone "project detail" strip is gone — the picker moved into learning over time',
+      intelShape.pickerStripGone && intelShape.pickerInHistoryHead, JSON.stringify(intelShape));
+    check('the captions that restated a count without explaining it are gone',
+      intelShape.redundantCaptionsGone, JSON.stringify(intelShape));
+    check('the picker keeps its label after moving',
+      intelShape.labelled, 'a bare select in a heading row is unlabelled for a screen reader');
+    check('the census explainer costs no vertical space until asked for',
+      intelShape.censusIsDisclosure, JSON.stringify(intelShape));
+
+    // The strip owning the picker must never hide itself: a project with no
+    // history would otherwise take the only control for choosing another one
+    // away with it.
+    const historyVisible = await page.$eval('#history', (el) => !el.hidden);
+    check('the strip that owns the picker stays visible even with nothing to chart',
+      historyVisible, '#history was hidden, stranding the picker');
+
     const secondaryPositions = [];
     for (const [tab] of TABS) {
       await page.click(`[data-tab="${tab}"]`);
@@ -510,6 +940,396 @@ async function main() {
       secondaryPositions.every((position) => Math.abs(position.left - secondaryPositions[0].left) <= 1
         && Math.abs(position.top - secondaryPositions[0].top) <= 1),
       `secondary positions were ${JSON.stringify(secondaryPositions)}`);
+
+    // ═════════════════════════════════════════════════════════════════════════
+    // ABOUT (ADR-0026 / docs/ddd/component-directory.md)
+    //
+    // The area is an authored directory joined with measured detection. Both
+    // halves are load-bearing and fail differently: the editorial half must
+    // render on any machine, and the detection half must never let an absent
+    // component read as a present one. The assertions below pin that seam.
+    // ═════════════════════════════════════════════════════════════════════════
+    await page.click('[data-tab="about"]');
+    await page.waitForSelector('#panel-about:not([hidden])');
+    await page.waitForTimeout(200);
+    await shoot(page, 'about');
+
+    const DIRECTORY = directoryEntries();
+    const readAbout = () => page.evaluate(() => {
+      const cards = [...document.querySelectorAll('#panel-about .ab-card')];
+      return {
+        count: cards.length,
+        sections: [...document.querySelectorAll('#panel-about .ab-cards')]
+          .map((el) => ({ id: el.id, cards: el.children.length })),
+        lede: document.getElementById('ab-hero-lede')?.textContent.trim() || '',
+        entries: cards.map((card) => {
+          const chip = card.querySelector('.ab-state');
+          return {
+            name: card.querySelector('.ab-name b')?.textContent.trim() || '',
+            chip: chip?.textContent.trim() || '',
+            state: chip?.dataset.state || '',
+            reason: chip?.getAttribute('title') || '',
+            tile: !!card.querySelector('.ab-tile'),
+            tagline: card.querySelector('.ab-tagline')?.textContent.trim() || '',
+            body: card.querySelector('.ab-body')?.textContent.trim() || '',
+            detail: card.querySelector('.ab-detail')?.textContent.trim() || null,
+            tail: card.querySelector('.ab-links, .ab-manage')?.textContent.trim() || null,
+          };
+        }),
+      };
+    });
+    const about = await readAbout();
+    const aboutBy = (name) => about.entries.find((entry) => entry.name === name);
+
+    check('About renders exactly one card per directory entry, none missing',
+      about.count === DIRECTORY.length
+        && DIRECTORY.every((entry) => about.entries.some((card) => card.name === entry.name)),
+      `${about.count} cards for ${DIRECTORY.length} directory entries; missing `
+      + JSON.stringify(DIRECTORY.filter((e) => !about.entries.some((c) => c.name === e.name)).map((e) => e.name)));
+    check('every About section carries at least one card',
+      about.sections.length === 5 && about.sections.every((section) => section.cards > 0),
+      `section fill was ${JSON.stringify(about.sections)}`);
+    // A card with prose but no chip is the failure this area exists to prevent:
+    // authored copy that reads as a claim about the machine. Every card states
+    // a state, and every state states WHY (the chip's title).
+    const chipless = about.entries.filter((entry) => !entry.chip || !entry.state || !entry.reason);
+    check('every About card carries a state chip with a stated reason',
+      chipless.length === 0,
+      `${chipless.length} card(s) rendered without a chip/state/reason: `
+      + JSON.stringify(chipless.map((entry) => entry.name)));
+    const thin = about.entries.filter((entry) => entry.tagline.length < 12
+      || entry.body.length < 60 || !entry.tile);
+    check('every About card carries its icon, tagline, and paragraph',
+      thin.length === 0,
+      `${thin.length} card(s) were editorially thin: ${JSON.stringify(thin.map((e) => e.name))}`);
+
+    // The honest not-installed state. `codex` is enabled in the status stub and
+    // ABSENT on the machine; the card must still be a whole card — icon,
+    // tagline, paragraph — with a chip that says it is not working and a detail
+    // line naming the fix. An empty slot, or a green chip, is the defect.
+    const codexCard = aboutBy('Codex');
+    check('an absent component renders the honest not-installed state, not an empty slot',
+      !!codexCard && codexCard.state === 'fail' && /not working/i.test(codexCard.chip)
+        && codexCard.body.length > 60 && codexCard.tagline.length > 12
+        && /not installed/i.test(String(codexCard.detail))
+        && /ak setup/.test(String(codexCard.detail)),
+      `the Codex card read ${JSON.stringify(codexCard)}`);
+    const claudeCard = aboutBy('Claude Code');
+    check('a detected component reads installed rather than merely "known"',
+      !!claudeCard && claudeCard.state === 'ok' && /installed/i.test(claudeCard.chip)
+        && claudeCard.detail === null,
+      `the Claude Code card read ${JSON.stringify(claudeCard)}`);
+    check('a component whose version is known carries it on the chip',
+      /v4\.0\.0/.test(String(aboutBy('ruflo')?.chip)),
+      `the ruflo chip read ${JSON.stringify(aboutBy('ruflo')?.chip)}`);
+    // One card, two status rows: the worst of the pair drives the chip, or
+    // Codex's broken statusline would sit behind a green card.
+    check('a card joining two subsystems takes the worse of the two',
+      aboutBy('Statuslines')?.state === 'warn'
+        && /codex statusline missing/i.test(String(aboutBy('Statuslines')?.detail)),
+      `the Statuslines card read ${JSON.stringify(aboutBy('Statuslines'))}`);
+    // The standing example from the directory itself: `ak status` emits no
+    // permissions row, so this chip must degrade rather than assume.
+    check('an unjoined surface degrades to unknown instead of assuming configured',
+      aboutBy('Permission allowlist')?.state === 'unknown'
+        && /unknown/i.test(String(aboutBy('Permission allowlist')?.chip)),
+      `the Permission allowlist card read ${JSON.stringify(aboutBy('Permission allowlist'))}`);
+    check('configured surfaces name the command that manages them',
+      DIRECTORY.filter((entry) => entry.category === 'configured')
+        .every((entry) => /^manage:/.test(String(aboutBy(entry.name)?.tail))),
+      `configured tails were ${JSON.stringify(DIRECTORY.filter((e) => e.category === 'configured')
+        .map((e) => aboutBy(e.name)?.tail))}`);
+
+    // ═════════════════════════════════════════════════════════════════════════
+    // SYSTEM (ADR-0025 / docs/ddd/machine-footprint.md)
+    // ═════════════════════════════════════════════════════════════════════════
+    await page.click('[data-tab="system"]');
+    await page.waitForSelector('#area-system:not([hidden])');
+    await page.waitForSelector('#sys-kpis .sy-kpi', { timeout: 8000 });
+    for (const [view, sel] of SYSTEM_VIEWS) {
+      await page.click(`[data-system-view="${view}"]`);
+      await page.waitForSelector(`${sel}:not([hidden])`);
+      await page.waitForTimeout(120);
+      const presentation = await page.evaluate((selector) => {
+        const panel = document.querySelector(selector);
+        return {
+          heading: panel?.querySelector('.view-heading h2')?.textContent?.trim(),
+          description: panel?.querySelector('.view-heading p')?.textContent?.trim(),
+          // Body text EXCLUDING the heading: a view whose only content is its
+          // own title would otherwise pass on the heading alone.
+          body: [...(panel?.querySelectorAll('.sy-card') || [])]
+            .map((card) => card.innerText.trim()).join('\n'),
+          cards: panel?.querySelectorAll('.sy-card').length || 0,
+        };
+      }, sel);
+      await shoot(page, `system-${view}`);
+      check(`System view "${view}" has a heading, description, and rendered cards`,
+        presentation.heading?.length > 3 && presentation.description?.length > 12
+          && presentation.cards > 0 && presentation.body.length > 40,
+        `System presentation was ${JSON.stringify({ ...presentation, body: presentation.body.slice(0, 160) })}`);
+      const arts = artifactsIn(await visibleText(page, sel));
+      check(`System view "${view}" is free of rendering artifacts`, arts.length === 0,
+        `found ${arts.join(', ')} in visible text`);
+    }
+
+    // ── the fail-closed rule, where it is easiest to break (ADR-0023) ─────────
+    // The catalog section has never been deep-scanned and one install figure was
+    // never recorded. Neither may surface as a 0: an unmeasured quantity says so
+    // and says why. A MEASURED zero (0 daemons past TTL) is a real answer and
+    // must still read as 0 — the two are asserted together so a renderer cannot
+    // satisfy one by breaking the other.
+    await page.click('[data-system-view="summary"]');
+    await page.waitForSelector('#panel-sys-summary:not([hidden])');
+    const honesty = await page.evaluate(() => {
+      const kpi = (label) => [...document.querySelectorAll('#sys-kpis .sy-kpi')]
+        .find((card) => card.querySelector('.lbl')?.textContent.trim() === label);
+      const readKpi = (label) => {
+        const el = kpi(label);
+        if (!el) return null;
+        const unk = el.querySelector('.val .sy-unk');
+        return {
+          // The odometer's digit stacks put 0-9 in the DOM for every column, so
+          // the CLAIMED value is data-od — reading innerText here would compare
+          // against "0123456789" and prove nothing.
+          odometer: el.querySelector('.val .od')?.getAttribute('data-od') ?? null,
+          unknown: unk ? unk.textContent.trim() : null,
+          unknownReason: unk ? unk.getAttribute('title') : null,
+          sub: el.querySelector('.sub')?.innerText.trim() || '',
+        };
+      };
+      const unknowns = [...document.querySelectorAll('#area-system .sy-unk')];
+      return {
+        catalog: readKpi('catalog'),
+        install: readKpi('install footprint'),
+        reasonless: unknowns.filter((el) => !el.getAttribute('title')).length,
+        unknownCount: unknowns.length,
+      };
+    });
+    check('an unmeasured section reports "not measured yet" instead of a fabricated 0',
+      honesty.catalog && honesty.catalog.odometer === null
+        && /not measured yet/i.test(String(honesty.catalog.unknown)),
+      `the catalog KPI read ${JSON.stringify(honesty.catalog)} — a 0 here would invent an empty catalog`);
+    check('an unmeasured figure beside measured ones degrades alone, not as a zero',
+      honesty.install && honesty.install.odometer !== null
+        && /not measured yet/i.test(honesty.install.sub)
+        && !/\b0 native addons\b/.test(honesty.install.sub),
+      `the install KPI read ${JSON.stringify(honesty.install)}`);
+    check('every unmeasured figure states why it is unmeasured',
+      honesty.unknownCount > 0 && honesty.reasonless === 0,
+      `${honesty.reasonless} of ${honesty.unknownCount} unknown markers carried no reason`);
+
+    await page.click('[data-system-view="catalog"]');
+    await page.waitForSelector('#panel-sys-catalog:not([hidden])');
+    const neverScanned = await visibleText(page, '#sys-radar');
+    check('a never-scanned section says so and points at Rescan',
+      /not measured yet/i.test(neverScanned) && /rescan/i.test(neverScanned)
+        && !/\b0\b/.test(neverScanned),
+      `the unscanned catalog card read ${JSON.stringify(neverScanned)}`);
+
+    await page.click('[data-system-view="runtime"]');
+    await page.waitForSelector('#panel-sys-runtime:not([hidden])');
+    const runtimeHonesty = await page.evaluate(() => ({
+      tiles: [...document.querySelectorAll('#sys-daemons .sy-tile')].map((tile) => ({
+        value: tile.querySelector('.t-v')?.innerText.trim() || '',
+        label: tile.querySelector('.t-l')?.innerText.trim() || '',
+      })),
+      procs: document.getElementById('sys-procs')?.innerText.trim() || '',
+    }));
+    const pastTtl = runtimeHonesty.tiles.find((tile) => /past TTL/i.test(tile.label));
+    check('a measured zero is still rendered as 0',
+      !!pastTtl && pastTtl.value === '0',
+      `the "past TTL" tile read ${JSON.stringify(pastTtl)} — the fail-closed rule bans a `
+      + 'fabricated zero, not a measured one');
+    check('a process the census cannot attribute says so instead of blanking the cell',
+      /not attributable/i.test(runtimeHonesty.procs),
+      `the process census read ${JSON.stringify(runtimeHonesty.procs.slice(0, 240))}`);
+
+    check('the daemon panel no longer carries an AI-worker budget tile',
+      !runtimeHonesty.tiles.some((tile) => /budget/i.test(tile.label)),
+      'no code path can populate it, so a permanent "unavailable" was removed rather than degraded');
+    check('the pid column header is right-aligned with its numbers', await page.$eval(
+      '#sys-procs thead th:nth-child(2)',
+      (th) => th.textContent.trim() === 'pid' && getComputedStyle(th).textAlign === 'right',
+    ), 'a numeric column whose header hangs off the far side reads as a different column');
+    check('the never-persisted child-process footer is gone',
+      !/child & MCP/i.test(runtimeHonesty.procs), 'a bare count with no denominator and no action');
+
+    // ── Catalog filters + Projects filtering, on a payload that HAS them ──
+    // The default SYSTEM_STUB deliberately ships `catalog: null` to prove the
+    // never-scanned path, so the filters need their own payload rather than a
+    // weakened fixture.
+    const FILTER_SYSTEM = JSON.parse(JSON.stringify(SYSTEM_PAYLOAD));
+    FILTER_SYSTEM.catalog = {
+      asOf: SYS_DEEP_ASOF,
+      hosts: ['claude', 'codex', 'opencode'],
+      kinds: ['skill', 'agent', 'command'],
+      counts: { skill: meas(2), agent: meas(1), command: meas(1) },
+      perHost: {},
+      items: [
+        { kind: 'skill', name: 'alpha-skill', hosts: ['claude'] },
+        { kind: 'skill', name: 'beta-skill', hosts: ['claude', 'codex'] },
+        { kind: 'agent', name: 'gamma-agent', hosts: ['opencode'] },
+        { kind: 'command', name: 'delta-command', hosts: ['codex'] },
+      ],
+      complete: true,
+    };
+    await page.route(/\/api\/system(\?|$)/, (route) => route.fulfill({
+      status: 200, contentType: 'application/json', body: JSON.stringify(FILTER_SYSTEM),
+    }));
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await page.click('#tab-system');
+    await page.click('[data-system-view="catalog"]');
+    await page.waitForSelector('#sys-matrix tbody tr');
+
+    const chipStates = () => page.$$eval('#sys-cat-kinds .chipf, #sys-cat-hosts .chipf',
+      (els) => els.map((e) => e.getAttribute('aria-pressed')));
+    const rowCount = () => page.$$eval('#sys-matrix tbody tr', (els) => els.length);
+
+    check('every kind and host option starts selected, so the default view is the whole inventory',
+      (await chipStates()).every((s) => s === 'true') && (await chipStates()).length === 6,
+      `chips were ${JSON.stringify(await chipStates())}`);
+    check('the filters are toggle buttons, announced as pressed', await page.$eval(
+      '#sys-cat-kinds .chipf', (b) => b.tagName === 'BUTTON' && b.hasAttribute('aria-pressed')),
+      'a filter a screen reader cannot read the state of is not a filter');
+    check('no in-table kind heading rows remain — the pick list replaced them',
+      (await page.$$('#sys-matrix .sy-kindrow')).length === 0, 'headings signposted but did not filter');
+    check('every row still names its kind now the headings are gone',
+      await page.$$eval('#sys-matrix tbody tr', (els) => els.every((e) => !!e.querySelector('.sy-kindtag'))),
+      'a filtered list must never leave a name unexplained');
+    check('unfiltered shows every item', await rowCount() === 4, `saw ${await rowCount()} of 4`);
+
+    await page.click('#sys-cat-kinds .chipf:nth-child(2)'); // drop agents
+    await page.click('#sys-cat-kinds .chipf:nth-child(3)'); // drop commands
+    check('deselecting kinds narrows the table', await rowCount() === 2, `saw ${await rowCount()} of 2`);
+    check('a narrowed table says how much it is hiding',
+      /2 of 4/.test(await page.$eval('#sys-matrix .sy-liner', (e) => e.innerText)),
+      'a filtered count that does not name the total reads as a shrinking machine');
+
+    // host filter is OR, not AND: "carried by codex" keeps a codex+claude item.
+    await page.click('#sys-cat-hosts .chipf:nth-child(1)'); // drop claude
+    await page.click('#sys-cat-hosts .chipf:nth-child(3)'); // drop opencode
+    check('the host filter matches ANY selected host, not all of them',
+      await rowCount() === 1, `saw ${await rowCount()}; beta-skill is on claude AND codex, so codex alone keeps it`);
+
+    await page.click('#sys-cat-kinds .chipf:nth-child(2)');
+    await page.click('#sys-cat-kinds .chipf:nth-child(3)');
+    await page.click('#sys-cat-hosts .chipf:nth-child(1)');
+    await page.click('#sys-cat-hosts .chipf:nth-child(3)');
+    check('re-selecting everything restores the full inventory',
+      await rowCount() === 4 && (await chipStates()).every((s) => s === 'true'),
+      `saw ${await rowCount()} rows and ${JSON.stringify(await chipStates())}`);
+
+    await page.click('[data-system-view="projects"]');
+    await page.waitForSelector('#sys-projects table');
+    const projectRows = await page.$$eval('#sys-projects tbody tr', (els) => els.map((e) => ({
+      linked: !!e.querySelector('a[href^="https:"]'), text: e.innerText,
+    })));
+    check('the Projects table lists only repositories with a remote',
+      projectRows.length > 0 && projectRows.every((r) => r.linked),
+      `${projectRows.filter((r) => !r.linked).length} unlinked row(s) survived the filter`);
+    const projectNames = projectRows.map((r) => r.text.split('\n')[0]).join(' ');
+    check('a linked repo no host ever worked in is excluded',
+      !/never-worked-in/.test(projectNames), `rows were ${JSON.stringify(projectNames)}`);
+    check('a linked repo from a snapshot with no hosts field is KEPT — absent is not zero',
+      /legacy-snapshot-row/.test(projectNames),
+      `an older snapshot cannot answer "was this worked in", and guessing no blanks the table`);
+    const projectLiner = await page.$eval('#sys-projects .sy-liner', (e) => e.innerText);
+    check('and states what it excluded rather than leaving the reader to subtract',
+      /listed here/.test(projectLiner)
+        && (projectRows.length === (SYSTEM_PAYLOAD.projects?.projects ?? []).length
+          || /Excluded \d+ measured director/.test(projectLiner)),
+      `the liner read ${JSON.stringify(projectLiner)}`);
+    check('the language legend matches the ramp it describes',
+      /top 5 languages/.test(await page.$eval('#sys-projects .sy-legend', (e) => e.innerText)),
+      'the legend and LANG_TOP drifted apart');
+
+    // ── sortable headers ──
+    const projCol = (n) => page.$$eval(`#sys-projects tbody tr td:nth-child(${n})`,
+      (els) => els.map((e) => e.innerText.split('\n')[0].trim()));
+    const sortState = () => page.evaluate(() => ({
+      aria: [...document.querySelectorAll('#sys-projects thead th')].map((t) => t.getAttribute('aria-sort')),
+      active: [...document.querySelectorAll('#sys-projects .sy-sort.on')].length,
+    }));
+
+    const s0 = await sortState();
+    const names0 = await projCol(1);
+    check('the table opens sorted by project name, ascending',
+      s0.aria[0] === 'ascending'
+        && JSON.stringify(names0) === JSON.stringify([...names0].sort((a, b) => a.toLowerCase().localeCompare(b.toLowerCase()))),
+      `aria was ${JSON.stringify(s0.aria)} and the order ${JSON.stringify(names0)}`);
+    check('every header is a sort control', await page.$$eval('#sys-projects thead th',
+      (ths) => ths.every((t) => !!t.querySelector('button[data-proj-sort]'))),
+      'a header without a control is a column the user cannot order by');
+
+    await page.click('[data-proj-sort="project"]');
+    const s1 = await sortState();
+    check('clicking the active column reverses it',
+      s1.aria[0] === 'descending'
+        && JSON.stringify(await projCol(1)) === JSON.stringify([...names0].reverse()),
+      `aria was ${JSON.stringify(s1.aria)}`);
+
+    await page.click('[data-proj-sort="disk"]');
+    const s2 = await sortState();
+    check('only one column may be the active sort at a time',
+      s2.active === 1 && s2.aria.filter((a) => a && a !== 'none').length === 1,
+      `${s2.active} active control(s), aria ${JSON.stringify(s2.aria)}`);
+    check('a size column opens largest-first, not ascending',
+      s2.aria[3] === 'descending',
+      'nobody opens a size column wanting the smallest row first');
+
+    // The rule that matters: an unmeasured figure is not a small one.
+    const diskDesc = await projCol(1);
+    await page.click('[data-proj-sort="disk"]');
+    const diskAsc = await projCol(1);
+    // startsWith, not equality: a linked project's cell carries a trailing ↗.
+    const endsWithUnmeasured = (rows) => rows[rows.length - 1].startsWith('zz-unmeasured');
+    check('an unmeasured row sorts LAST in both directions',
+      endsWithUnmeasured(diskDesc) && endsWithUnmeasured(diskAsc),
+      `desc ended ${JSON.stringify(diskDesc.slice(-1))}, asc ended ${JSON.stringify(diskAsc.slice(-1))} `
+      + '— ranking an absent figure presents it as a measured one');
+    // Hand the page back exactly as the checks below expect to find it: the real
+    // SYSTEM_STUB served again, the System area open, and its freshness label
+    // populated. A bare reload would leave /api/system unfetched and the
+    // staleness assertions reading an empty element.
+    await page.unroute(/\/api\/system(\?|$)/);
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await page.click('#tab-system');
+    await page.waitForFunction(
+      () => (document.getElementById('sys-asof')?.textContent ?? '').trim().length > 0,
+      null, { timeout: 30_000 },
+    );
+
+    // ── the deep tier is user-triggered, and its age is stated ───────────────
+    const freshness = await page.evaluate(() => {
+      const el = document.getElementById('sys-asof');
+      return {
+        text: el?.textContent.trim(),
+        stale: el?.getAttribute('data-stale'),
+        title: el?.getAttribute('title'),
+        rescanDisabled: document.getElementById('sys-rescan')?.disabled,
+      };
+    });
+    check('deep-tier figures are stamped with their own age, not presented as current',
+      /9d ago/.test(String(freshness.text)),
+      `the freshness label read ${JSON.stringify(freshness)} — the snapshot is nine days old`);
+    check('past the staleness horizon the label nudges without scanning',
+      freshness.stale === '1' && /stale/i.test(String(freshness.text))
+        && freshness.rescanDisabled === false,
+      `staleness presentation was ${JSON.stringify(freshness)}`);
+    check('opening System never starts a deep scan',
+      systemDeepScans === 0,
+      `${systemDeepScans} deep scan(s) had already run after opening the area and all five views`);
+
+    const deepResponse = page.waitForResponse(
+      (r) => r.url().includes('/api/system') && r.url().includes('refresh=deep'),
+      { timeout: 8000 },
+    ).catch(() => null);
+    await page.click('#sys-rescan');
+    await deepResponse;
+    await page.waitForTimeout(200);
+    check('Rescan is the only thing that starts a deep scan, and it starts exactly one',
+      systemDeepScans === 1,
+      `the collector saw ${systemDeepScans} deep scan(s) after one Rescan click`);
 
     // ── Observability: execution workspace + synchronized evidence ──
     await page.click('[data-tab="observability"]');
@@ -1286,6 +2106,52 @@ async function main() {
     await shoot(page, 'theme-light');
     await page.click('#theme-toggle').catch(() => {});
 
+    // ── the page is self-contained ──────────────────────────────────────────
+    // Run HERE, not earlier: every area — About's directory cards, System's
+    // charts and project rows, Usage, Observability — has now rendered into the
+    // same document, so one scan covers all five. A remote font, CDN script, or
+    // hotlinked logo would be an egress this design forbids outright.
+    //
+    // OUTBOUND ANCHORS ARE NOT A VIOLATION and are deliberately exempt: About's
+    // documentation pills and a project's remote link are things the reader
+    // CLICKS. Nothing on the page ever fetches them — which is why they are
+    // checked for https and rel-hardening instead, and why the request-level
+    // assertion at the end of the run is what proves nothing was fetched.
+    const selfContained = await page.evaluate(() => {
+      const loaders = [['script', 'src'], ['link', 'href'], ['img', 'src'], ['img', 'srcset'],
+        ['iframe', 'src'], ['object', 'data'], ['embed', 'src'], ['source', 'src'],
+        ['source', 'srcset'], ['video', 'src'], ['video', 'poster'], ['audio', 'src'],
+        ['track', 'src'], ['use', 'href'], ['image', 'href']];
+      const external = [];
+      for (const [tag, attr] of loaders) {
+        for (const el of document.querySelectorAll(`${tag}[${attr}]`)) {
+          const value = el.getAttribute(attr) || '';
+          if (/^(https?:)?\/\//i.test(value)) external.push(`${tag}[${attr}]=${value}`);
+        }
+      }
+      const remoteUrl = /url\(\s*['"]?(?:https?:)?\/\//i;
+      for (const el of document.querySelectorAll('[style]')) {
+        if (remoteUrl.test(el.getAttribute('style') || '')) external.push(`style="${el.getAttribute('style')}"`);
+      }
+      for (const el of document.querySelectorAll('style')) {
+        if (remoteUrl.test(el.textContent || '')) external.push('<style> block with a remote url()');
+      }
+      const anchors = [...document.querySelectorAll('a[href]')]
+        .map((a) => ({ href: a.getAttribute('href') || '', rel: a.getAttribute('rel') || '' }))
+        .filter((a) => /^[a-z]+:/i.test(a.href) || a.href.startsWith('//'));
+      return { external, scriptSrc: document.querySelectorAll('script[src]').length, anchors };
+    });
+    check('the page loads nothing from an external host',
+      selfContained.external.length === 0 && selfContained.scriptSrc === 0,
+      `${selfContained.scriptSrc} external <script src>; offending references: `
+      + JSON.stringify(selfContained.external.slice(0, 5)));
+    check('outbound links are https-only and cannot leak the page to what they open',
+      selfContained.anchors.length > 0
+        && selfContained.anchors.every((a) => /^https:\/\//.test(a.href)
+          && /noopener/.test(a.rel) && /noreferrer/.test(a.rel)),
+      `absolute anchors were ${JSON.stringify(selfContained.anchors.slice(0, 5))} — `
+      + 'zero of them would also mean About and Projects rendered no links at all');
+
     // ═════════════════════════════════════════════════════════════════════════
     // ADR-0009 follow-ups — spec archived at
     //   docs/archive/2026-07-25-superpowers-spec-usage-scorecard-followups.md
@@ -1840,6 +2706,89 @@ async function main() {
       `transcript visible=${navigated.onTranscript}, hash=${navigated.hash} — `
       + 'the expander must not swallow the row click-through');
 
+    // ── ADR-0026 · losing the status join costs the chips, never the page ────
+    // About is editorial content PLUS a runtime join, and the two fail
+    // independently. Serving a well-formed status payload that simply reports
+    // nothing drives the join to empty without breaking any other panel — so
+    // what is measured here is precisely the degradation, not a broken page.
+    // Every card must still render its icon, tagline, and paragraph while every
+    // chip reads unknown; a card that vanished, or one that stayed green off a
+    // stale render, is the defect.
+    await page.route(/\/api\/status(\?|$)/, (route) => route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ overall: 'ok', rows: [], drift: [] }),
+    }));
+    await openHash('#about');
+    const degraded = await readAbout();
+    await shoot(page, 'about-join-lost');
+    check('About renders every card even when the status join reports nothing',
+      degraded.count === DIRECTORY.length
+        && degraded.entries.every((entry) => entry.tile && entry.tagline.length > 12
+          && entry.body.length > 60),
+      `${degraded.count} of ${DIRECTORY.length} cards survived the lost join`);
+    check('with no join, every chip reads unknown rather than assuming installed',
+      degraded.entries.length > 0
+        && degraded.entries.every((entry) => entry.state === 'unknown'
+          && /unknown/i.test(entry.chip) && entry.reason.length > 0),
+      `states were ${JSON.stringify([...new Set(degraded.entries.map((e) => e.state))])}`);
+    // The hero states only what ak MANAGES — a release fact, true on any machine
+    // and unaffected by a failed join. It deliberately makes no detection claim
+    // in either direction: no "N of N installed" tally, and no aggregate
+    // "states are unknown" either, because the chip on every card already says
+    // so per-component (asserted directly above) and an aggregate could only
+    // restate that less precisely.
+    check('the hero makes no detection claim, so a lost join cannot make it lie',
+      !/report as installed/i.test(degraded.lede)
+        && !/\bof \d+\b/.test(degraded.lede)
+        && /manages/i.test(degraded.lede),
+      `the lede read ${JSON.stringify(degraded.lede.slice(0, 200))}`);
+    const degradedArts = artifactsIn(await visibleText(page, '#panel-about'));
+    check('the degraded About area is free of rendering artifacts', degradedArts.length === 0,
+      `found ${degradedArts.join(', ')}`);
+    await page.unroute(/\/api\/status(\?|$)/);
+
+    // ── panel collapse (.strip-toggle) ──
+    // The provider-analytics panel is the deterministic one to drive: it exists
+    // on every machine, unlike the routing panels, which render from the
+    // developer's own kit.json. Its markup ships COLLAPSED, which is itself part
+    // of the contract — the panel is empty for anyone without an OpenRouter
+    // cache, so opening by default spent vertical space on a blank box.
+    await page.evaluate(() => localStorage.removeItem('ak-dash-collapse'));
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await page.click('#tab-usage');
+    await page.waitForSelector('.strip-toggle[aria-controls="u-openrouter-body"]');
+    const collapseSel = '.strip-toggle[aria-controls="u-openrouter-body"]';
+    const readCollapse = () => page.$eval(collapseSel, (b) => ({
+      expanded: b.getAttribute('aria-expanded'),
+      hidden: document.getElementById('u-openrouter-body').hidden,
+      labelled: !!b.querySelector('h2'),
+    }));
+
+    const c0 = await readCollapse();
+    check('provider account analytics ships collapsed',
+      c0.expanded === 'false' && c0.hidden === true, JSON.stringify(c0));
+    check('the collapse control is a labelled button, not a bare chevron',
+      c0.labelled, 'the heading must live inside the button so the whole title is the target');
+
+    await page.click(collapseSel);
+    const c1 = await readCollapse();
+    check('clicking expands it and updates aria-expanded',
+      c1.expanded === 'true' && c1.hidden === false, JSON.stringify(c1));
+
+    // The panels re-render on every poll, so an unpersisted collapse would snap
+    // back within one tick. Only DEPARTURES from the markup default are stored.
+    const saved = await page.evaluate(() => localStorage.getItem('ak-dash-collapse'));
+    check('the departure from the markup default is persisted',
+      !!saved && JSON.parse(saved)['u-openrouter-body'] === false, `stored ${saved}`);
+
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await page.click('#tab-usage');
+    await page.waitForSelector(collapseSel);
+    const c2 = await readCollapse();
+    check('and survives a reload rather than snapping back to the default',
+      c2.expanded === 'true' && c2.hidden === false, JSON.stringify(c2));
+
     // ── nothing errored anywhere along the way ──
     // A 404 from /api/session/<id> is CORRECT behaviour for a session that does
     // not exist — the route was changed to stop answering 200-with-a-null-body.
@@ -1852,6 +2801,11 @@ async function main() {
     }
     check('no failed network requests', failedRequests.length === 0,
       failedRequests.slice(0, 3).join(' | '));
+    // The runtime half of the self-containment contract: not one byte was
+    // requested from anywhere but the loopback server that served the page.
+    check('the whole run requested nothing off the loopback origin',
+      offOriginRequests.length === 0,
+      `${offOriginRequests.length} off-origin request(s): ${offOriginRequests.slice(0, 3).join(' | ')}`);
   } finally {
     await browser.close();
     await srv.close();

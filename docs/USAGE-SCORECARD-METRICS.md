@@ -64,8 +64,8 @@ schema change — `src/lib/usage-index.mjs:65`):
 | Claude Code | `~/.claude/projects/<project>/<sessionId>.jsonl` | one JSON object per line: `user`/`assistant` turns, each assistant turn carrying its own `usage` object |
 | Codex CLI | `~/.codex/sessions/<yyyy>/<mm>/<dd>/rollout-<ts>-<sessionId>.jsonl` | one JSON object per line: `session_meta`, `turn_context`, and `event_msg` records, the latter carrying **cumulative** `token_count` snapshots, not per-turn deltas |
 
-The parsers are `parseClaude` (`usage-index.mjs:427-510`) and `parseCodex`
-(`usage-index.mjs:527-628`). Both are pure functions over the raw file bytes —
+The parsers are `parseClaude` (`usage-index.mjs:480-563`) and `parseCodex`
+(`usage-index.mjs:580-681`). Both are pure functions over the raw file bytes —
 no network, no clock dependency beyond the transcript's own timestamps — so
 every downstream number traces back to bytes already on the user's disk.
 Nothing in this transcript pipeline calls a provider API or a billing endpoint; **no transcript
@@ -128,14 +128,14 @@ responses = Σ over included sessions of session.responses
 **Source:**
 
 - Filter: a parsed record with zero assistant turns is dropped entirely — "no
-  assistant turn → not a session" (`usage-index.mjs:923`) — and a record whose
+  assistant turn → not a session" (`usage-index.mjs:988`) — and a record whose
   last activity falls outside the requested window is dropped too
-  (`usage-index.mjs:924`).
+  (`usage-index.mjs:989`).
 - `responses` accumulation: Claude increments per assistant message
-  (`usage-index.mjs:504-509`); Codex increments per `agent_message` event
-  (`usage-index.mjs:651-655`).
+  (`usage-index.mjs:557-562`); Codex increments per `agent_message` event
+  (`usage-index.mjs:704-708`).
 - Totals: `totals.responses += s.responses` per included session
-  (`usage-index.mjs:884`).
+  (`usage-index.mjs:937`).
 - Render: `kpi("sessions", fmtNum(t.sessions), fmtNum(t.responses)+" assistant
   turns", "")` (`dashboard/client.mjs`).
 
@@ -174,7 +174,7 @@ cost = (inputUnits × rate_in + output × rate_out) / 1,000,000
 
 summed across every row in the window.
 
-**Source:** `costOf()`, `src/lib/pricing.mjs:247-253`, reproduced verbatim:
+**Source:** `costOf()`, `src/lib/pricing.mjs:253-259`, reproduced verbatim:
 
 ```js
 export function costOf(usage) {
@@ -188,17 +188,17 @@ export function costOf(usage) {
 ```
 
 `CACHE_READ_MULTIPLIER = 0.1`, `CACHE_WRITE_MULTIPLIER = 1.25`
-(`pricing.mjs:154-155`) — see §13 for why these two numbers are correct for
+(`pricing.mjs:160-161`) — see §13 for why these two numbers are correct for
 **both** Anthropic and OpenAI, which is why `costOf` needs no per-provider
 branch on the multiplier (only on the base `rate_in`/`rate_out`, resolved by
-`priceFor`, `pricing.mjs:214-227`).
+`priceFor`, `pricing.mjs:220-233`).
 
 Rate resolution is **longest-prefix match** on a normalized model id
-(`pricing.mjs:163-172`), so a dated release (`claude-haiku-4-5-20251001`)
+(`pricing.mjs:169-178`), so a dated release (`claude-haiku-4-5-20251001`)
 resolves to the same entry as its bare alias, and a more specific entry
 (`gpt-5.6-sol`) is never shadowed by a shorter one (`gpt-5.6`). An id matching
 nothing gets `FALLBACK_PRICE` — Sonnet-class rate, `$3`/`$15`
-(`pricing.mjs:151`) — rather than `$0`, so an unrecognized model can never be
+(`pricing.mjs:157`) — rather than `$0`, so an unrecognized model can never be
 silently free; `matched: false` travels with the result so a maintainer can
 find fallback-priced rows if the table needs a new entry.
 
@@ -208,12 +208,12 @@ Each table entry is a **schedule** — an ordered list of periods, each with the
 day it takes effect. Nearly every entry has exactly one period that has always
 applied (`anthropic(5, 25)` builds that shape); an entry whose rate the vendor
 has *published* a change to carries more than one (`schedule`,
-`pricing.mjs:41-55`). `periodOn` (`pricing.mjs:187`) picks the last period
+`pricing.mjs:41-55`). `periodOn` (`pricing.mjs:193`) picks the last period
 already in effect on the given day, comparing ISO date strings
 lexicographically so no `Date` parsing is involved and the module stays
 clock-free.
 
-`aggregate()` passes each usage row's own `day` (`usage-index.mjs:911`), which
+`aggregate()` passes each usage row's own `day` (`usage-index.mjs:979`), which
 it already has because rows are keyed by `(day, model)`. **This is the whole
 point:** tokens metered in August must still read as August's rate when the
 panel is opened in December. Pricing by *today's* date instead would restate a
@@ -235,7 +235,7 @@ Two rules bound the mechanism:
   Codex promo would be a one-line edit rather than new machinery. Rates that
   vary by *how* a request was served — regional uplift, large-prompt surcharge,
   service tiers — are a different axis, are deliberately **not** expressible
-  here, and remain in `UNMODELLED_PRICING_FACTORS` (`pricing.mjs:142-144`)
+  here, and remain in `UNMODELLED_PRICING_FACTORS` (`pricing.mjs:148-150`)
   because a transcript does not record the endpoint or tier.
 
 A `priceFor` call with no day prices as of `PRICES_AS_OF`, the table's
@@ -295,9 +295,9 @@ tokens = input + output + cacheRead + cacheWrite   (summed across all rows in wi
 ```
 
 **Source:** `t.tokens` from `totals`, accumulated per row at
-`usage-index.mjs:935` (`rowTokens = row.input + row.output + row.cacheRead +
+`usage-index.mjs:988` (`rowTokens = row.input + row.output + row.cacheRead +
 row.cacheWrite`) and rolled into `totals.tokens` via `addTo`
-(`usage-index.mjs:843-852`). Rendered with `fmtTok()`
+(`usage-index.mjs:1080-1086`). Rendered with `fmtTok()`
 (`dashboard/client.mjs`): `≥1e9` → `"X.XB"`, `≥1e6` → `"X.XM"`,
 `≥1e3` → `"X.XK"`, else the rounded integer.
 
@@ -309,9 +309,9 @@ numbers as percentages of `t.tokens` (`dashboard/client.mjs`,
 **What "input" excludes.** For both providers, the `input` counter recorded
 per row is **gross input minus cached input** — Claude's parser reads
 `cache_read_input_tokens` and `cache_creation_input_tokens` as separate fields
-the provider already reports separately (`usage-index.mjs:523-524`); Codex's
+the provider already reports separately (`usage-index.mjs:598-599`); Codex's
 parser subtracts `cached_input_tokens` from `input_tokens` explicitly
-(`usage-index.mjs:666-675`, `input: Math.max(0, gross - cacheRead)`) because
+(`usage-index.mjs:719-728`, `input: Math.max(0, gross - cacheRead)`) because
 Codex's own `input_tokens` field **includes** cached tokens and would
 double-count them against the separately-reported `cacheRead` figure if left
 as-is. This is asserted by test:
@@ -396,7 +396,7 @@ session data, and each needs its own fix:
    human, or genuinely idle) donates its *entire* idle stretch to the span,
    even though no work happened during it. Fix: split each session into
    active sub-intervals wherever the gap between two consecutive timestamps
-   exceeds `IDLE_GAP_MS` (15 minutes, `usage-index.mjs:62`), then union
+   exceeds `IDLE_GAP_MS` (15 minutes, `usage-index.mjs:80`), then union
    *those* sub-intervals — this is `engagedSeconds`.
 
 **Source:**
@@ -405,15 +405,15 @@ session data, and each needs its own fix:
   sorts intervals and merges any two that overlap **or exactly touch**
   (`s <= curEnd`, `usage-index.mjs:105`), returning total covered seconds
   rounded to the nearest second.
-- `activeIntervals()` (`usage-index.mjs:352-363`) — splits one session's
+- `activeIntervals()` (`usage-index.mjs:405-416`) — splits one session's
   sorted timestamp list into sub-intervals wherever a gap exceeds
   `IDLE_GAP_MS`; "a run of one timestamp yields a zero-length interval and so
-  contributes nothing" (comment, `usage-index.mjs:346-350`).
+  contributes nothing" (comment, `usage-index.mjs:399-403`).
 - Aggregation: `totals.engagedSeconds = mergeIntervals(sessions.flatMap(s =>
-  s._active))` (`usage-index.mjs:927`); `totals.spanUnionSeconds =
-  mergeIntervals(sessions.map(s => s._span))` (`usage-index.mjs:926`);
+  s._active))` (`usage-index.mjs:980`); `totals.spanUnionSeconds =
+  mergeIntervals(sessions.map(s => s._span))` (`usage-index.mjs:979`);
   `totals.spanMinutes` is a running sum of `s._span[1] - s._span[0]` across
-  the loop (`usage-index.mjs:888`, finalized `usage-index.mjs:925`).
+  the loop (`usage-index.mjs:941`, finalized `usage-index.mjs:978`).
 - Render: `fmtHours()` (`dashboard/client.mjs`, `≥10h` rounds to the
   nearest hour, else one decimal place) and `fmtMins()`
   (`dashboard/client.mjs`, `≥60min` rounds to hours, else whole
@@ -462,12 +462,12 @@ byDay[day].cost = Σ costOf(row) for every usage row whose day == that key
 
 **Source:** the day key is the row's own `row.day`, computed once at parse
 time as **local calendar day**, not UTC
-(`usage-index.mjs:530`/`usage-index.mjs:667` call `localDay(at)`) — so a
+(`usage-index.mjs:595`/`usage-index.mjs:732` call `localDay(at)`) — so a
 session that runs from 23:58 local to 00:05 local is billed to the day its
 *first* row landed on (test:
 `tests/kit/usage-index.test.mjs:634`, "a session that opens before midnight
 is counted on its first billed day"). Accumulation:
-`byDay[row.day].cost += rowCost` (`usage-index.mjs:846`). Bar height:
+`byDay[row.day].cost += rowCost` (`usage-index.mjs:899`). Bar height:
 `h = maxDay ? max(2, cost/maxDay*100) : 2` (`dashboard/client.mjs`) —
 every non-empty day gets a visually nonzero bar (floor of 2%), so a very
 cheap day is never rendered as invisible.
@@ -488,11 +488,11 @@ renders "no sessions in window" instead of zeroed figures
 (`dashboard/client.mjs`).
 
 **Formula:** identical aggregation to every other bucket
-(`byProvider[s.provider]`, populated via `addTo()`, `usage-index.mjs:889-898`,
-  called once per session at `usage-index.mjs:1000`), keyed by the literal string
+(`byProvider[s.provider]`, populated via `addTo()`, `usage-index.mjs:942-951`,
+  called once per session at `usage-index.mjs:1084`), keyed by the literal string
 `"claude"` or `"codex"` assigned at parse time
 (`blankSession(id, 'claude')` / `blankSession(id, 'codex')`,
-`usage-index.mjs:291-301`, `parseClaude`/`parseCodex` entry points).
+`usage-index.mjs:398-408`, `parseClaude`/`parseCodex` entry points).
 
 **Why this pairing is the one under the most scrutiny.** Both providers'
 tokens are summed into the *same* `tokens`/`cost` fields using the *same*
@@ -528,9 +528,9 @@ punchcard[dow + "-" + hour] += 1   per assistant/agent_message response, at its 
 ```
 
 **Source:** incremented once per Claude assistant turn
-(`usage-index.mjs:504-509`, keyed by `punchKey(at)`) and once per Codex
-`agent_message` (`usage-index.mjs:651-655`), merged into the window-level
-`punchcard` object per session (`usage-index.mjs:1000`). Cell intensity is
+(`usage-index.mjs:557-562`, keyed by `punchKey(at)`) and once per Codex
+`agent_message` (`usage-index.mjs:704-708`), merged into the window-level
+`punchcard` object per session (`usage-index.mjs:1053`). Cell intensity is
 linear against the single busiest cell in the window:
 `v = pcMax ? n/pcMax : 0` (`dashboard/client.mjs`) — this is a
 **relative**, not absolute, scale, so the heatmap's brightest cell is always
@@ -563,9 +563,9 @@ byModel[model].sessions  = count of DISTINCT sessions whose s.models includes th
 ```
 
 **Source:** cost/tokens/responses accumulate inside the usage-row loop
-(`usage-index.mjs:896-922`); the `sessions` count is deliberately computed
+(`usage-index.mjs:949-975`); the `sessions` count is deliberately computed
 **separately**, once per session over its `s.models` array
-(`usage-index.mjs:898-903`) rather than inside the cost loop, precisely
+(`usage-index.mjs:951-956`) rather than inside the cost loop, precisely
 **so that a model can appear in `byModel` — with a nonzero session count —
 even in a session that contributed zero cost/tokens/responses for that
 model.** This is not an edge case invented for this document: it is the
@@ -575,11 +575,11 @@ excluded subagent-replay session still shows up as "used," at zero cost,
 rather than vanishing.
 
 `byModel[...].responses` is populated from `row.responses`
-(`usage-index.mjs:921`), which in turn comes from the `responses` field
+(`usage-index.mjs:1017`), which in turn comes from the `responses` field
 passed into `addUsage()` at the call site — `1` per Claude assistant turn
-(`usage-index.mjs:484-490`), or `rec.responses` (the session's whole response
+(`usage-index.mjs:537-543`), or `rec.responses` (the session's whole response
 count) once per Codex session, passed at the single point Codex calls
-`addUsage` (`usage-index.mjs:613-624`).
+`addUsage` (`usage-index.mjs:732-738`).
 
 **Render:** `bar(name, fmtUsd(cost), fmtTok(tokens)+" · "+fmtNum(responses)+"
 resp", pct(cost, topModelCost), false)` (`dashboard/client.mjs`),
@@ -595,14 +595,14 @@ split `server_error` 27, `authentication_failed` 3, `rate_limit` 3 — three
 distinct underlying causes, one placeholder shape).
 
 The parser branches on `isApiErrorMessage === true`
-(`usage-index.mjs:469-478`): the turn still increments `rec.responses`
-and the punchcard (`usage-index.mjs:457-460`) — it *is* real engaged
+(`usage-index.mjs:522-531`): the turn still increments `rec.responses`
+and the punchcard (`usage-index.mjs:510-513`) — it *is* real engaged
 time, someone was genuinely waiting on it — but it is never pushed into
 `rec.models` and `addUsage()` is never called for it, so it can no longer
 create a `byModel` row of any kind. It increments a separate
-`rec.exceptions` counter instead (`usage-index.mjs:470`), rolled up into
-`totals.exceptions` (`usage-index.mjs:995-999`) and surfaced per-session
-(`usage-index.mjs:920-934`, alongside the existing `sidechain`/`threadSource`
+`rec.exceptions` counter instead (`usage-index.mjs:523`), rolled up into
+`totals.exceptions` (`usage-index.mjs:1048-1052`) and surfaced per-session
+(`usage-index.mjs:973-987`, alongside the existing `sidechain`/`threadSource`
 flags — inspectable in the Sessions tab, never hidden). When
 `totals.exceptions > 0`, the panel header shows a small `"· N
 dropped/errored turns excluded"` note (`dashboard/client.mjs`);
@@ -756,7 +756,7 @@ own published table, not a transcription from a secondary source:
 | Claude Sonnet 4.6 / 4.5 | $3/MTok | $3.75/MTok | $6/MTok | $0.30/MTok | $15/MTok |
 | Claude Haiku 4.5 | $1/MTok | $1.25/MTok | $2/MTok | $0.10/MTok | $5/MTok |
 
-Every value in `pricing.mjs`'s Anthropic entries (`pricing.mjs:74-108`) matches
+Every value in `pricing.mjs`'s Anthropic entries (`pricing.mjs:74-114`) matches
 this table's "Base input" and "Output" columns exactly. Note that the two Sonnet
 5 rows above are not a documentation convenience — they are exactly what the
 code encodes, as the two periods of that entry's schedule (§3a), so the table
@@ -777,7 +777,7 @@ Anthropic's own prompt-caching documentation **[C2]** states the multipliers
 in prose, independent of the pricing table: *"5-minute cache write tokens are
 1.25 times the base input tokens price... Cache read tokens are 0.1 times the
 base input tokens price."* This is the second, independent confirmation of
-`CACHE_READ_MULTIPLIER`/`CACHE_WRITE_MULTIPLIER` (`pricing.mjs:154-155`).
+`CACHE_READ_MULTIPLIER`/`CACHE_WRITE_MULTIPLIER` (`pricing.mjs:160-161`).
 
 ### 13.2 OpenAI (Codex) — hand-maintained, no canonical machine-readable source
 
@@ -826,8 +826,8 @@ hand-maintained and drift-prone, not vendor-confirmed via automated fetch.
 
 ### 13.3 What the pricing table deliberately does not model
 
-Recorded verbatim from `pricing.mjs:125-141` (`UNMODELLED_PRICING_FACTORS`,
-`pricing.mjs:142-144`) because listing known gaps is what makes the
+Recorded verbatim from `pricing.mjs:131-147` (`UNMODELLED_PRICING_FACTORS`,
+`pricing.mjs:148-150`) because listing known gaps is what makes the
 *modelled* factors credible:
 
 - **Regional-processing uplift.** OpenAI charges +10% on data-residency
@@ -886,7 +886,7 @@ both credential-free for ak:
 `windowDurationMins: 10080` (the weekly). Windows are therefore keyed and
 labelled by duration (`windowLabel`, `quota.mjs:44`), never by slot name. The
 same rule applies to the historical snapshots parsed out of rollouts: the
-normalizer at `usage-index.mjs:591-615` keeps a flat `windows` list keyed by
+normalizer at `usage-index.mjs:644-668` keeps a flat `windows` list keyed by
 `window_minutes`.
 
 **Freshness is part of the number.** Both sides carry `fetchedAt`; the view
@@ -911,13 +911,13 @@ Codex ≥0.140 maintains its own SQLite thread ledger (`~/.codex/state_N.sqlite`
 — the `N` is a migration generation, so `codexStateDb` (`codex-state.mjs:30`)
 globs and takes the newest). `readCodexState` (`:49`) reads per-thread
 `thread_source` (`user` vs `subagent`) plus `thread_spawn_edges`, and
-`applyCodexLedger` (`usage-index.mjs:1264-1275`) overlays that onto parsed
+`applyCodexLedger` (`usage-index.mjs:1317-1328`) overlays that onto parsed
 sessions: a ledger-identified subagent has its token usage stripped — its
 rollout replays the parent's entire token history (ccusage/ccusage#950
 measured up to 91× inflation) — while the session record stays visible. The
 rollout's own `session_meta.thread_source` sniff remains as the fallback when
 the ledger is absent or migrated beyond recognition. Codex sessions also carry
-`reasoningOutput` (`usage-index.mjs:677-678`) — reasoning tokens are a **subset**
+`reasoningOutput` (`usage-index.mjs:739-740`) — reasoning tokens are a **subset**
 of output tokens and are annotation only, never added to any sum.
 
 ## 14. Known limitations, restated as a single checklist
@@ -962,14 +962,14 @@ commit `540be18` on this branch.
 
 `parseCodex`'s single `addUsage()` call never included a `responses` field —
 Claude's parser passes `responses: 1` per assistant turn
-(`usage-index.mjs:503`, the current equivalent), but Codex's call
+(`usage-index.mjs:556`, the current equivalent), but Codex's call
 passed no such field at all. Because `byModel[model].responses` is summed
-directly from each usage row's `responses` field (`usage-index.mjs:921`,
+directly from each usage row's `responses` field (`usage-index.mjs:974`,
 `m.responses += row.responses`), **every** Codex model in §10's "Models in
 Play" list displayed `0 resp` regardless of real token/cost volume or actual
 `agent_message` count. **Fix:** `parseCodex` now passes `responses:
 rec.responses` (the session's own tallied response count,
-`usage-index.mjs:654`) on its `addUsage()` call.
+`usage-index.mjs:707`) on its `addUsage()` call.
 
 #### Bug B — subagent thread-replay could double-bill tokens
 
@@ -989,13 +989,13 @@ at face value (correctly avoiding the separate naive-summing bug **[C5]**
 documents, since it already used last-event-only logic — see §4's worked
 example) but performed **no de-duplication** against a parent session a
 subagent file might be replaying. **Fix:** the parser now reads
-`session_meta.thread_source` (`usage-index.mjs:575-579`, confirmed as a real
+`session_meta.thread_source` (`usage-index.mjs:628-632`, confirmed as a real
 Codex rollout field by **[C7]**) and skips the `addUsage()` call entirely
-when its value is `'subagent'` (`usage-index.mjs:609`, guard condition
+when its value is `'subagent'` (`usage-index.mjs:662`, guard condition
 `rec.threadSource !== 'subagent'`). The session record itself is **not**
 dropped — it remains visible in the Sessions tab with `threadSource`
 surfaced (mirroring the existing `sidechain` flag Claude sessions already
-carry, `usage-index.mjs:294`), so a maintainer auditing the raw data can
+carry, `usage-index.mjs:347`), so a maintainer auditing the raw data can
 still see it; it simply contributes zero tokens/cost, exactly as intended by
 the "models still shows up in §10's list, with zero cost" mechanism §10
 describes.

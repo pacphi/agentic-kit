@@ -714,6 +714,44 @@ test('a dropped-connection turn (isApiErrorMessage) counts as an exception, neve
   assert.equal(agg.byModel['claude-opus-5'].tokens, 150);
 });
 
+test('a "<synthetic>" placeholder without isApiErrorMessage still counts as an exception, never a $0 model', async () => {
+  // Some builds emit the same dropped-connection placeholder without setting
+  // isApiErrorMessage — the literal model marker is the one part of the shape
+  // that never varies, so it must be caught on its own too.
+  _resetForTest();
+  const sb = soloSandbox();
+  const base = Date.parse('2026-08-06T10:00:00.000Z');
+  const iso = (offMs) => new Date(base + offMs).toISOString();
+  const lines = [
+    { type: 'user', sessionId: 'jjjj0000', cwd: '/Users/me/proj', timestamp: iso(0),
+      message: { role: 'user', content: [{ type: 'text', text: 'turn 1' }] } },
+    { type: 'assistant', sessionId: 'jjjj0000', cwd: '/Users/me/proj', timestamp: iso(1000),
+      message: { role: 'assistant', model: 'claude-sonnet-5', usage: { input_tokens: 100, output_tokens: 50 }, content: [] } },
+    { type: 'user', sessionId: 'jjjj0000', cwd: '/Users/me/proj', timestamp: iso(2000),
+      message: { role: 'user', content: [{ type: 'text', text: 'turn 2' }] } },
+    // Same placeholder shape as above, but isApiErrorMessage is absent.
+    { type: 'assistant', sessionId: 'jjjj0000', cwd: '/Users/me/proj', timestamp: iso(3000),
+      message: {
+        role: 'assistant', model: '<synthetic>', stop_reason: 'stop_sequence',
+        usage: { input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 },
+        content: [{ type: 'text', text: 'API Error: Connection closed mid-response.' }],
+      } },
+  ];
+  fs.writeFileSync(path.join(sb.claude, 'jjjj0000.jsonl'), `${lines.map((l) => JSON.stringify(l)).join('\n')}\n`);
+
+  const agg = await buildIndex(opts(sb));
+  const s = byId(agg, 'jjjj0000');
+
+  assert.ok(s, 'session indexed');
+  assert.equal(s.responses, 2, 'the error placeholder still counts as a real turn');
+  assert.equal(s.exceptions, 1);
+  assert.deepEqual(s.models, ['claude-sonnet-5'], '"<synthetic>" never enters the models list');
+  assert.equal(s.tokens, 150, 'only the real turn contributes tokens');
+
+  assert.equal(agg.totals.exceptions, 1);
+  assert.equal(agg.byModel['<synthetic>'], undefined, 'no $0 "<synthetic>" row is ever created');
+});
+
 test('punchcard buckets responses by dow-hour with Monday as 0', async () => {
   _resetForTest();
   const sb = sandbox();

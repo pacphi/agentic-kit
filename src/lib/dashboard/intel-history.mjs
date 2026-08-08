@@ -156,35 +156,23 @@ export function readIntelHistory(cwd) {
 }
 
 /**
- * Machine-wide rollup — folds readIntelHistory() across every ruflo-
- * initialized project on this machine into one totals/perProject view.
- * `projects` is the frozen output shape of discoverRuvfloProjects()
- * (src/lib/dashboard/project-discovery.mjs, built against this exact
- * contract in parallel with this function): Array<{ path: string, label:
- * string, source?: 'registry'|'observability'|'both' }>. Only `path` and
- * `label` are read here; `source` is accepted but ignored.
+ * Machine-wide rollup — folds readIntelHistory() across every project on this
+ * machine that carries learning state into one totals/perProject view.
  *
- * Investigative note on how that array is expected to be assembled (recorded
- * here because this function is the actual consumer of its output): the
- * PRIMARY source is daemons.mjs's (unexported) registryWorkspaces(), which
- * walks ~/.claude-flow/{ai-jobs.json,workspace-leases.json,repo-supervisors.json}
- * for real absolute workspace paths. A SECONDARY source was investigated —
- * Observability's WorkspaceSnapshotStore (src/lib/live/workspace-store.mjs),
- * persisted at ~/.config/agentic-kit/observability-workspaces.json — and
- * checked against the real file on this machine. Its records never carry an
- * absolute filesystem path: `directoryLabel` is validated with
- * `workspaceText(..., { pathLike: true })`, which rejects anything shaped
- * like an absolute path (leading `/`, a drive letter, or a `..` segment) on
- * both write AND read; `repositoryLabel` is validated with `{ leaf: true }`,
- * which rejects any value containing a path separator at all; and
- * `project`/`projectKey` are a sanitized basename and an irreversible
- * SHA-256 hash, respectively — never a path. So by that store's own privacy
- * design, the secondary source can never contribute a resolvable absolute
- * path for any entry; on this machine's real observability-workspaces.json
- * (multiple sessions across two projects at inspection time), zero entries
- * yielded one. discoverRuvfloProjects() is expected to skip every such entry
- * rather than fabricate a path from a label, so in practice it is source 1
- * (the registry scan) that supplies the projects array, today.
+ * `projects` is the learning scope of the shared census (ADR-0027,
+ * src/lib/project-census.mjs): Array<{ path: string, label: string, ... }>.
+ * Only `path` and `label` are read here; the census's other fields ride along
+ * unread. One row per project IDENTITY, not per directory — the census folds a
+ * repo's sub-directories and its ephemeral agent worktrees onto the repo root,
+ * so a project is summed once here rather than two or three times.
+ *
+ * `path` is the directory whose .claude-flow/ tree is read, and the census
+ * anchors a merged row on the path that actually carries the learning state
+ * (the repo root in the ordinary case) precisely so this read lands on it.
+ *
+ * A project with no readable history degrades to nulls/zeros rather than
+ * throwing, so widening the census can never make this scan fail — it can only
+ * add rows that report nothing.
  *
  * Like readIntelHistory()'s own patternsLearned-vs-patternStore distinction,
  * this rollup keeps two DIFFERENT sums distinct at machine scope:
@@ -204,7 +192,7 @@ export function readIntelHistory(cwd) {
  * "never adapted", matching readGlobalStats' own `?? 0` default), or null
  * when no project has adaptation data. This is a plain on-demand scan with
  * no caching/TTL of its own — a later caller adds that at the server layer.
- * @param {Array<{ path: string, label: string }>} projects
+ * @param {Array<{ path: string, label: string, learningState?: string[] }>} projects
  * @returns {{
  *   totals: { patternsLearnedLifetime: number, patternStoreEntries: number,
  *     trajectoriesRecorded: number, projectCount: number,
@@ -270,6 +258,12 @@ export function readMachineWideIntel(projects) {
       trajectoriesRecorded: trajectories,
       graphLatest,
       lastAdaptation,
+      // Which learning stores the census found, carried through unread so a row
+      // reading 0/0/— can say WHY: a project with .agentic-qe but no
+      // .claude-flow has genuinely activated intelligence and genuinely has no
+      // ruflo pattern counters, and without this the two are indistinguishable
+      // from a project where the read simply failed.
+      learningState: Array.isArray(entry?.learningState) ? entry.learningState : [],
     });
   }
 

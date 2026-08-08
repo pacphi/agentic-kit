@@ -33,6 +33,9 @@ Consequences**, and cites the grounded source it rests on where relevant.
 | [0022](0022-metaharness-as-optional-assurance-companion.md) | MetaHarness as an optional assurance companion | Proposed |
 | [0023](0023-fail-closed-operations-and-explicit-degradation.md) | Fail-closed mutations and explicit degraded operation evidence | Implemented |
 | [0024](0024-project-intelligence-telemetry.md) | Project intelligence: live learning telemetry from ruflo/agentic-qe's own state | Implemented |
+| [0025](0025-machine-footprint-metrics.md) | Machine footprint: infrastructure metrics for install, runtime, storage, and catalog | Implemented |
+| [0026](0026-about-component-directory.md) | About: a component directory that explains everything ak installs | Implemented |
+| [0027](0027-shared-project-census.md) | One project census, four scopes, every count explains itself | Implemented |
 
 Theme: ADRs **0001–0006** define **dual-host LLM routing and leadership** — how `ak` lets ruflo route
 each development activity (architecture, implementation, testing, review, …) to the right host (Claude
@@ -135,3 +138,52 @@ counter, and reasoning-graph size samples that ruflo/agentic-qe already write un
 intelligence as its own bounded context rather than an Observability extension — this telemetry
 carries no session, actor, host, provider, or lifecycle identity and needs no per-field evidence
 confidence, and the panel it feeds lives under Overview, not Observability's Live/History scope.
+
+**0025** answers the fourth question family the dashboard had no owner for — not health, spend, or
+activity, but **what this toolchain costs the machine itself**: install bytes per managed tool with
+their install methods and duplicate native builds, live CPU/RSS per host process and daemon,
+retained data broken down category → host → project → session with growth and advisory reclaimable
+candidates, the deduplicated cross-host inventory of skills/agents/commands/plugins/MCP servers,
+and per-project approximate LOC alongside working-tree, `.git`, and `node_modules` bytes. It
+establishes Machine footprint as its own bounded context — metadata-only by construction, so
+transcript content cannot enter it — and adds a fourth primary area, **System**, deliberately
+amending 0005's three-area layout. Collection is tiered because the costs differ by orders of
+magnitude: a cheap TTL-cached tier on every read, and an explicit single-flight deep scan persisted
+to a snapshot so the panel paints instantly and always states how old its figures are. 0023's
+honesty contract is load-bearing throughout — a never-scanned section reads "not measured yet",
+never `0`; a partial total renders as a lower bound; an unreadable subtree degrades that node
+alone. The tab and the CLI share one name (`ak system`); "footprint" survives only as the domain
+name. Windows gets a guaranteed `Get-CimInstance` process census plus a best-effort P/Invoke
+working-directory probe that degrades to an explicit "not attributable" rather than blanking the
+view — no dependency added, and `windows-latest` is already in the CI matrix.
+
+**0026** closes the trust gap the other four areas assume away: every existing view is an
+*operational* view of components the user is presumed to already recognize, and nothing answered
+"what did this thing just put on my machine, and why should I be glad it's there?" It adds
+**About** as a fifth primary area, leftmost in reading order but never the landing view — Overview
+stays the default and a dismissible first-run nudge points newcomers left. Its bounded context,
+Component directory, owns the one kind of fact no neighboring context can supply: editorial
+identity — a tagline, one ~50-word plain-language paragraph, outbound source/package/docs links, an
+icon spec, and a curated order — authored and versioned with the release. The editorial/detection
+split is the decision: prose never claims runtime state, chips render only detection facts already
+produced by `/api/status`, and About adds no endpoint, no probe, and no cache. Completeness is a
+test rather than a review hope — every managed tool must have exactly one entry, and no entry may
+exist for something ak neither installs nor configures. Official marks appear only where the
+dashboard already ships them as official; everything else gets an explicit monogram tile rather
+than a fabricated logo. `ak about` prints the same directory in a terminal.
+
+**0027** ends a four-way disagreement about what a project *is*. Overview, Usage, Observability and
+System each discovered projects their own way, from their own source, with their own naming rule,
+and reported four different numbers for the same machine — 4, 14, another 14, and ~48. None was
+wrong; nothing said which question each answered, so four honest answers read as one broken
+feature. It makes `discoverProjectSources()` the single census and names four **scopes** over it
+(`everSeen`, `onDisk`, `gitRepos`, `learning`), with the rule that no surface may render a project
+count without the sentence explaining what that count counted. Two decisions carry the weight. The
+*learning* scope asks whether memory or intelligence has been **activated** — `.claude-flow`,
+`.agentic-qe` or `.swarm`, whichever host created it — rather than whether ruflo has *trained*,
+which is why Intelligence went from 4 projects to 17 on the deciding machine. And directory scopes
+stay separate from project scopes: System measures directories because that is what has bytes in
+it, while Intelligence folds a repo's sub-directories and throwaway agent worktrees onto one
+identity because that is what a user picks — a distinction that was also a live bug, since keying
+the picker off identity while listing directories made 7 of 24 rows unreachable. Counts that remain
+different stay different, and say why.

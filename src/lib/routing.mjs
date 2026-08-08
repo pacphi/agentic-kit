@@ -47,23 +47,75 @@ export const SUBSCRIPTION_PROVIDERS = new Set(['claude-code', 'codex', 'ollama',
 // WITHOUT saying "per-token" gets read as cost-per-task, which is the axis users
 // actually pay on (a model needing 2-3x the agentic turns costs more per task at
 // identical per-token price). Measured end-to-end in pacphi/retort versions-blog.
-export const MODEL_CATALOG_VERIFIED = '2026-07-24';
+export const MODEL_CATALOG_VERIFIED = '2026-08-07';
 export const COST_AXIS_NOTE = 'per-token price ≠ per-task cost — a model that needs more agentic turns costs more per task at the same per-token price';
+// Tier names are the pairing key for swapHostModel(): a codex tier only mirrors
+// to a claude model (and back) when BOTH catalogs use the same tier string.
+// Keep `flagship`/`balanced`/`fast` spelled identically on both hosts —
+// renaming one side silently degrades every mirrored route to cat[0].
 export const MODEL_CATALOG = {
   claude: [
-    { id: 'claude-opus-5', tier: 'reasoning', note: 'new top Opus — same per-token price as 4.8, but ~2–3× the agentic turns on routine work; earns it at the hard end' },
+    { id: 'claude-opus-5', tier: 'reasoning', note: 'top Opus — the deepest reasoning, at ~2–3× the agentic turns of a balanced model on routine work; earns it at the hard end' },
     { id: 'claude-sonnet-5', tier: 'balanced', note: 'near-Opus capability at a lower per-token price — review, spec, release' },
     { id: 'claude-fable-5', tier: 'flagship', note: 'top capability (Mythos-class, above Opus 5) — hardest problems' },
     { id: 'claude-haiku-4-5-20251001', tier: 'fast', note: 'cheap/fast — high-volume mechanical work' },
-    { id: 'claude-opus-4-8', tier: 'prior', note: 'prior Opus generation — same per-token price, roughly half the turns on routine work' },
+    // Still current (no deprecation notice) and still pinnable — it is simply no
+    // longer what ak routes to by default. Kept listed so divergedRoutes can name
+    // its cost-per-task trade when a policy is still pointing at it.
+    { id: 'claude-opus-4-8', tier: 'prior', note: 'prior Opus generation — same per-token price as Opus 5, roughly half the agentic turns on routine work' },
   ],
   codex: [
-    { id: 'gpt-5.4', tier: 'flagship', note: 'coding + reasoning + agentic — recommended execution default' },
-    { id: 'gpt-5.6-sol', tier: 'newest', note: 'newest line; first-class max reasoning effort' },
-    { id: 'gpt-5.3-codex', tier: 'coding', note: 'pure coding-tuned — mechanical implementation & docs' },
-    { id: 'gpt-5-codex-mini', tier: 'cheap', note: 'smallest/cheapest — escalation floor, high volume' },
+    { id: 'gpt-5.6-sol', tier: 'flagship', note: 'flagship 5.6 — strongest on complex coding, computer use and security work; first-class max reasoning effort' },
+    { id: 'gpt-5.6-terra', tier: 'balanced', note: 'balanced 5.6 — everyday implementation and testing at a materially lower per-token price than sol; the gpt-5.4 replacement' },
+    { id: 'gpt-5.6-luna', tier: 'fast', note: 'fastest/cheapest 5.6 — mechanical implementation, docs and packaging; the gpt-5.4-mini replacement' },
   ],
 };
+
+// ── Retired models ───────────────────────────────────────────────────────────
+// Models a host has withdrawn (or announced a withdrawal date for), and what ak
+// substitutes. This is NOT the same thing as divergence:
+//
+//   divergedRoutes()  — the defaults moved and a seeded route did not. Which
+//                       side is better is activity-dependent, so it is reported
+//                       neutrally and only ever changed by an explicit
+//                       `ak x host refresh`.
+//   RETIRED_MODELS    — the model stops answering. There is no trade to weigh
+//                       and nothing for a user to decide; a route left pointing
+//                       here is a future hard failure, so ak substitutes at read
+//                       time (resolveRoutes) and rewrites seeded entries on sync.
+//
+// A `provenance: 'user'` pin is still never rewritten on disk — but it IS
+// substituted at read time, because dispatching a user's pin to a model that no
+// longer exists fails the run rather than honoring the pin.
+//
+// ONLY models the host has publicly announced a withdrawal for belong here.
+// This map overrides a user's explicit pin at read time, so a wrong entry
+// silently ignores deliberate intent — "we'd rather they used the newer one" is
+// never sufficient grounds. Dropping a model from MODEL_CATALOG stops OFFERING
+// it; adding it here asserts it no longer ANSWERS. Those are different claims
+// and only the second one needs a citation.
+//
+// Verified against the hosts' own deprecation notices on MODEL_CATALOG_VERIFIED:
+//   developers.openai.com/codex/models — gpt-5.4 and gpt-5.4-mini retire
+//     2026-08-31 (migrate to gpt-5.6-terra / gpt-5.6-luna); gpt-5.3-codex is
+//     already withdrawn for ChatGPT sign-in.
+//   platform.claude.com/docs/en/about-claude/model-deprecations — claude-opus-4-8
+//     carries NO deprecation notice; it is the migration TARGET for opus-4-1
+//     (which retires 2026-08-05). So it is deliberately absent here even though
+//     the defaults have moved past it: that is divergence, not retirement, and
+//     divergedRoutes() already reports it for the user to decide.
+//
+// `retiresOn` is null when the withdrawal has already taken effect.
+export const RETIRED_MODELS = Object.freeze({
+  'gpt-5.4': { replacement: 'gpt-5.6-terra', retiresOn: '2026-08-31' },
+  'gpt-5.4-mini': { replacement: 'gpt-5.6-luna', retiresOn: '2026-08-31' },
+  'gpt-5.3-codex': { replacement: 'gpt-5.6-luna', retiresOn: null },
+});
+
+/** The retirement record for a model id, or null when it is still current. Pure. */
+export function retirementOf(model) {
+  return (typeof model === 'string' && RETIRED_MODELS[model]) || null;
+}
 
 // Provider-axis model catalog — LLMs reached through the aqe fallback chain
 // (`--aqe-fallback`) or ruflo's routers, NOT hosts (they don't drive the ruflo
@@ -152,14 +204,14 @@ export const DEFAULT_ROUTES = {
   specification:       R('claude', 'claude-sonnet-5'),
   architecture:        R('claude', 'claude-opus-5'),
   design:              R('claude', 'claude-opus-5'),
-  implementation:      R('codex',  'gpt-5.4', [{ host: 'claude', model: 'claude-opus-5' }]),
-  testing:             R('codex',  'gpt-5.4', [{ host: 'claude', model: 'claude-opus-5' }]),
+  implementation:      R('codex',  'gpt-5.6-terra', [{ host: 'claude', model: 'claude-opus-5' }]),
+  testing:             R('codex',  'gpt-5.6-terra', [{ host: 'claude', model: 'claude-opus-5' }]),
   review:              R('claude', 'claude-sonnet-5'),
-  'security-scan':     R('codex',  'gpt-5.4'),
+  'security-scan':     R('codex',  'gpt-5.6-terra'),
   'security-analysis': R('claude', 'claude-opus-5'),
-  documentation:       R('codex',  'gpt-5.3-codex'),
+  documentation:       R('codex',  'gpt-5.6-luna'),
   debugging:           R('claude', 'claude-opus-5'),
-  packaging:           R('codex',  'gpt-5.3-codex'),
+  packaging:           R('codex',  'gpt-5.6-luna'),
   release:             R('claude', 'claude-sonnet-5'),
 };
 
@@ -187,11 +239,37 @@ export function isRoutableHost(host) {
   return HOSTS.includes(host);
 }
 
+/** Substitute a retired model for its replacement, recording what was swapped.
+ *  Returns the model unchanged (and `null` retirement) when it is still current.
+ *  A null/absent model stays null — that means "let the adapter decide", which
+ *  is already safe. Pure. */
+function substituteRetired(model) {
+  const r = retirementOf(model);
+  return r ? { model: r.replacement, retiredFrom: model } : { model, retiredFrom: null };
+}
+
+/** Apply substituteRetired down an escalation ladder, preserving rung order and
+ *  host. Returns null when there is nothing to escalate to. Pure. */
+function substituteRetiredLadder(escalation) {
+  if (!escalation?.length) return null;
+  return escalation.map((rung) => {
+    const { model, retiredFrom } = substituteRetired(rung.model);
+    return { ...rung, ...(model ? { model } : {}), ...(retiredFrom ? { retiredFrom } : {}) };
+  });
+}
+
 /**
  * Effective routes = DEFAULT_ROUTES overlaid with the persisted policy, each
  * carrying provenance. A persisted entry defaults its `provenance` to 'user' (a
  * hand edit is intent); `seedActivityRoutes` stamps 'seeded'; an unset activity
  * is 'default'.
+ *
+ * Retired models are substituted here, at the READ boundary, so nothing ak
+ * dispatches can target a model the host has withdrawn — including a `user` pin,
+ * which is honored everywhere else but cannot be honored into a model that no
+ * longer answers. A substituted route carries `retiredFrom` (the id that was
+ * replaced) so surfaces can say what happened instead of silently differing from
+ * the file on disk. See RETIRED_MODELS for why this is not divergence.
  */
 export function resolveRoutes(policy = {}) {
   const out = {};
@@ -199,22 +277,67 @@ export function resolveRoutes(policy = {}) {
     const def = DEFAULT_ROUTES[act];
     const p = policy[act];
     if (!p) { out[act] = { ...def, provenance: 'default', akOriginated: AK_ORIGINATED.has(act) }; continue; }
+    // A host-only override must NOT inherit the previous host's default
+    // model: `--route implementation:claude` handing codex's default model
+    // to the claude CLI is a live model/protocol error (qe-court B1). The
+    // default only falls forward for the SAME host; a cross-host override
+    // leaves the model to the adapter's own default (null).
+    const raw = p.model ?? (p.host && p.host !== def.host ? null : def.model);
+    const { model, retiredFrom } = substituteRetired(raw);
+    const ladder = substituteRetiredLadder(p.escalation ?? def.escalation);
     out[act] = {
       host: p.host ?? def.host,
-      // A host-only override must NOT inherit the previous host's default
-      // model: `--route implementation:claude` handing codex's default model
-      // to the claude CLI is a live model/protocol error (qe-court B1). The
-      // default only falls forward for the SAME host; a cross-host override
-      // leaves the model to the adapter's own default (null).
-      model: p.model ?? (p.host && p.host !== def.host ? null : def.model),
-      ...((p.escalation ?? def.escalation)
-        ? { escalation: p.escalation ?? def.escalation }
-        : {}),
+      model,
+      ...(ladder ? { escalation: ladder } : {}),
       provenance: p.provenance ?? 'user',
       akOriginated: AK_ORIGINATED.has(act),
+      ...(retiredFrom ? { retiredFrom } : {}),
     };
   }
   return out;
+}
+
+/**
+ * Seeded routes still pointing at a retired model on disk, and the rewrite that
+ * would fix them. Pure — the caller persists.
+ *
+ * Only `provenance === 'seeded'` entries are rewritten: ak wrote those values,
+ * so ak may correct them. A `user` pin is reported (so the user learns their
+ * pin is dead) but never rewritten — resolveRoutes already keeps the run safe.
+ *
+ * Escalation rungs are migrated independently of the primary model: a route
+ * whose own model is current can still escalate into a retired one.
+ *
+ * @param {Record<string, any>} [policy]
+ * @returns {{ routes: Record<string, any>, changes: Array<{
+ *   activity: string, field: string, from: string, to: string,
+ *   retiresOn: string|null, provenance: string, rewritten: boolean }> }}
+ */
+export function migrateRetiredRoutes(policy = {}) {
+  const routes = structuredClone(policy);
+  const changes = [];
+  for (const [activity, entry] of Object.entries(routes)) {
+    if (!entry || typeof entry !== 'object') continue;
+    const provenance = entry.provenance ?? 'user';
+    const rewritten = provenance === 'seeded';
+    const note = (field, from, retirement) => changes.push({
+      activity, field, from, to: retirement.replacement,
+      retiresOn: retirement.retiresOn, provenance, rewritten,
+    });
+
+    const primary = retirementOf(entry.model);
+    if (primary) {
+      note('model', entry.model, primary);
+      if (rewritten) entry.model = primary.replacement;
+    }
+    for (const [i, rung] of (entry.escalation ?? []).entries()) {
+      const r = retirementOf(rung?.model);
+      if (!r) continue;
+      note(`escalation[${i}].model`, rung.model, r);
+      if (rewritten) rung.model = r.replacement;
+    }
+  }
+  return { routes, changes };
 }
 
 /**

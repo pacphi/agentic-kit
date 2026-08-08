@@ -14,11 +14,15 @@ const alive = (pid) => {
 
 /** Known-workspace discovery from ruflo's machine-level registries
  *  (~/.claude-flow/*.json record workspaces; each workspace has
- *  .claude-flow/daemon.pid + daemon-state.json with startedAt). Exported
- *  (visibility-only change, behavior unchanged) so project-discovery.mjs can
- *  reuse it verbatim as its guaranteed-correct primary source instead of
- *  reimplementing the same registry walk. */
-export function registryWorkspaces() {
+ *  .claude-flow/daemon.pid + daemon-state.json with startedAt).
+ *
+ *  Module-private again: it was exported so the (now retired)
+ *  project-discovery.mjs could reuse it verbatim as a project-discovery
+ *  source. Project discovery moved to the shared census (ADR-0027), which
+ *  reads session transcripts rather than these registries — the registries do
+ *  not exist on every machine, which is precisely why they made a poor
+ *  discovery source. Only daemon accounting reads them now. */
+function registryWorkspaces() {
   const out = new Set();
   const reg = path.join(home, '.claude-flow');
   for (const f of ['ai-jobs.json', 'workspace-leases.json', 'repo-supervisors.json']) {

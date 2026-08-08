@@ -630,3 +630,46 @@ test('ledger edges retain their repository after bounded projection eviction', (
   assert.equal(parent.project, 'agentic-kit');
   assert.ok(!service.snapshot().projects.some((project) => project.label === 'unknown'));
 });
+
+test('historySnapshot() date-windows a one-shot scan without disturbing the live tailer', (t) => {
+  const sb = sandbox();
+  const now = Date.parse('2026-08-06T12:00:00Z');
+  const recent = path.join(sb.claude, 'recent.jsonl');
+  const old = path.join(sb.claude, 'old.jsonl');
+  fs.writeFileSync(recent, line({
+    type: 'user', sessionId: 'recent', timestamp: '2026-08-06T11:00:00Z',
+    cwd: '/Users/private-user/work/visible-project',
+    message: { role: 'user', content: [{ type: 'text', text: 'hi' }] },
+  }));
+  fs.writeFileSync(old, line({
+    type: 'user', sessionId: 'old', timestamp: '2026-01-01T11:00:00Z',
+    cwd: '/Users/private-user/work/other-project',
+    message: { role: 'user', content: [{ type: 'text', text: 'hi' }] },
+  }));
+  // discoverJsonl sorts/filters by mtime, not the record's own timestamp —
+  // stamp the file itself so the sinceMs cutoff below has something real to bite on.
+  const oldMs = Date.parse('2026-01-01T11:00:00Z') / 1000;
+  fs.utimesSync(old, oldMs, oldMs);
+
+  const service = new LiveSessionsService({
+    roots: sb.roots, intervalMs: 10, readCodexState: () => null, now: () => new Date(now).toISOString(),
+  });
+  t.after(() => service.close());
+
+  // A 1-day window sees only the recent file.
+  const windowed = service.historySnapshot({ sinceMs: now - 86_400_000 });
+  assert.deepEqual(windowed.sessions.map((s) => s.id), ['recent']);
+  // "all time" (sinceMs omitted) sees both.
+  const all = service.historySnapshot();
+  assert.deepEqual(all.sessions.map((s) => s.id).sort(), ['old', 'recent']);
+
+  // A one-shot scan of an unterminated session must never read as "live" —
+  // it would otherwise vanish from the History browser's session list, which
+  // explicitly filters OUT anything still reading as live.
+  assert.equal(windowed.projects[0].liveCount, 0);
+  assert.equal(windowed.sessions[0].activity.state, 'idle');
+
+  // The live tailer's own state is untouched: it was never start()ed, so its
+  // projection is still empty — historySnapshot() must not have populated it.
+  assert.deepEqual(service.snapshot().sessions, []);
+});
