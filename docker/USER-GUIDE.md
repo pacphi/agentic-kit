@@ -12,6 +12,12 @@ containers, and the containers cannot alter your host install. Persistent
 state lives only in Docker-managed named volumes; the single bind mount is
 `./artifacts` inside this directory.
 
+Prefer an editor-attached environment (Codespaces, VS Code Dev Containers) over
+a bare `docker compose` shell? The consumer dev container in
+[`.devcontainer/consumer/`](../.devcontainer/consumer/devcontainer.json) builds
+this same Dockerfile and installs the same published package — see
+[docs/DEVCONTAINERS.md](../docs/DEVCONTAINERS.md) for the tradeoffs.
+
 ## Prerequisites
 
 - Docker Desktop (macOS/Windows) or Docker Engine + Compose v2 (Linux).
