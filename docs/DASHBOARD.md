@@ -206,9 +206,9 @@ History/Review semantics, privacy limits, and troubleshooting.
 ## System
 
 System answers what this toolchain costs the machine itself — a different question from health
-(Overview), spend (Usage), or activity (Observability). Its five views are Summary, Storage,
-Runtime, Catalog, and Projects. Projects stays separate from Storage on purpose: lines of code and
-a git remote answer "what have I built here", not "where are my bytes".
+(Overview), spend (Usage), or activity (Observability). Its seven views are Summary, Advisory,
+Sessions, Storage, Runtime, Catalog, and Projects. Projects stays separate from Storage on purpose:
+lines of code and a git remote answer "what have I built here", not "where are my bytes".
 
 ### Two tiers, and why nothing scans on open
 
@@ -300,7 +300,7 @@ removes anything; where a CLI already owns the cleanup, the row names it.
 
 ### Platforms
 
-All five views work on macOS, Linux, and Windows. On Windows the process census (host, pid, CPU,
+All seven views work on macOS, Linux, and Windows. On Windows the process census (host, pid, CPU,
 memory, uptime) is always available; the bound project is a best-effort read that can be blocked by
 antivirus, execution policy, or permissions, in which case that one column reads
 "not attributable on Windows" with the reason and every other figure in the row still renders.
