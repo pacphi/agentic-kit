@@ -860,6 +860,18 @@ export const JS = `
       if(!btn)return;
       setStripCollapsed(btn,btn.getAttribute("aria-expanded")==="true");
     });
+    // Projects table sorting. Same column toggles direction; a different column
+    // adopts ITS natural direction and takes over as the only active sort.
+    document.addEventListener("click",function(e){
+      var btn=e.target&&e.target.closest?e.target.closest("[data-proj-sort]"):null;
+      if(!btn)return;
+      var key=btn.getAttribute("data-proj-sort");
+      if(!PROJ_SORT[key])return;
+      projSort=projSort.key===key
+        ? {key:key,dir:projSort.dir==="asc"?"desc":"asc"}
+        : {key:key,dir:PROJ_SORT[key].dir};
+      if(SYSTEM)renderSysProjects(SYSTEM);
+    });
     // Storage's session rows open the same transcript view Usage does, through
     // the public bridge rather than a second navigation path. It validates the
     // id itself and returns false on a bad one, so a stale row cannot strand
@@ -3133,6 +3145,74 @@ export const JS = `
   }
   /** Frameworks / SDKs / tools as chips. Capped, with the remainder named on
    *  hover rather than dropped. */
+  // ── Projects table sorting ──────────────────────────────────────────────
+  // One active column at a time, which is what a single aria-sort per table
+  // means and what a reader can actually hold in their head. Kept in a module
+  // var rather than localStorage: a sort is a question you are asking right
+  // now, not a preference — but it does survive the re-renders a rescan or a
+  // runtime poll triggers, which an in-function local would not.
+  //
+  // First click on a column uses that column's NATURAL direction rather than
+  // always ascending: nobody opens a size column wanting the smallest project
+  // first, or a recency column wanting the stalest.
+  var PROJ_SORT={
+    project:   { label:"project",     dir:"asc"  },
+    lines:     { label:"lines",       dir:"desc" },
+    language:  { label:"by language", dir:"asc"  },
+    disk:      { label:"disk",        dir:"desc" },
+    active:    { label:"last active", dir:"desc" },
+  };
+  var projSort={key:"project",dir:"asc"};
+
+  /** The value a row sorts by, or null when it was never measured. Null is not
+   *  zero and not "oldest" — an unmeasured row sorts to the BOTTOM in either
+   *  direction, because letting it rank would present an absent figure as a
+   *  small one. */
+  function projSortValue(pr,key){
+    if(key==="project")return String(pr.label||"").toLowerCase();
+    if(key==="lines")return mval(pr.loc&&pr.loc.total);
+    if(key==="disk")return mval(pr.totalBytes);
+    if(key==="active")return mval(pr.lastActivity);
+    if(key==="language"){
+      var langs=locLanguages(pr.loc);
+      return langs.length?String(langs[0].name||"").toLowerCase():null;
+    }
+    return null;
+  }
+
+  function sortProjects(rows,key,dir){
+    var mul=dir==="desc"?-1:1;
+    return rows.slice().sort(function(a,b){
+      var av=projSortValue(a,key),bv=projSortValue(b,key);
+      var an=av==null||av==="",bn=bv==null||bv==="";
+      // Unmeasured always last, whichever way the column points.
+      if(an&&bn)return String(a.label||"").localeCompare(String(b.label||""));
+      if(an)return 1;
+      if(bn)return -1;
+      if(typeof av==="number"&&typeof bv==="number"){
+        if(av!==bv)return (av-bv)*mul;
+      }else{
+        var c=String(av).localeCompare(String(bv));
+        if(c!==0)return c*mul;
+      }
+      // Stable, readable tiebreak so equal figures do not shuffle between renders.
+      return String(a.label||"").localeCompare(String(b.label||""));
+    });
+  }
+
+  function projSortHeader(key,label,numeric){
+    var on=projSort.key===key;
+    var dir=on?projSort.dir:PROJ_SORT[key].dir;
+    var aria=on?(projSort.dir==="asc"?"ascending":"descending"):"none";
+    var next=on?(projSort.dir==="asc"?"descending":"ascending"):(PROJ_SORT[key].dir==="asc"?"ascending":"descending");
+    return '<th aria-sort="'+aria+'"'+(numeric?' style="text-align:right"':"")+'>'
+      +'<button class="sy-sort'+(on?" on":"")+'" type="button" data-proj-sort="'+esc(key)+'"'
+      +' title="'+esc("sort by "+PROJ_SORT[key].label+", "+next)+'">'
+      +esc(label)+'<span class="sy-arrow" aria-hidden="true">'
+      +(on?(projSort.dir==="asc"?"\u2191":"\u2193"):(dir==="asc"?"\u2191":"\u2193"))
+      +"</span></button></th>";
+  }
+
   function renderSysProjects(d){
     var el=document.getElementById("sys-projects");
     if(!el)return;
@@ -3173,6 +3253,7 @@ export const JS = `
         +fmtNum(excluded)+" measured director"+(excluded===1?"y was":"ies were")+" excluded.");
       return;
     }
+    list=sortProjects(list,projSort.key,projSort.dir);
     var body="",i;
     for(i=0;i<list.length;i++){
       var pr=list[i];
@@ -3216,11 +3297,13 @@ export const JS = `
       +'<i style="background:var(--s1);opacity:.63"></i>'
       +'<i style="background:var(--s1);opacity:.27"></i>'
       +'<i style="background:var(--dim)"></i> the rest</span></div>'
-      +'<div class="sy-tblwrap"><table class="sy-table"><thead>'
-      +'<tr><th style="min-width:200px">Project</th>'
-      +'<th style="text-align:right">Lines &#8776;</th><th>By language</th>'
-      +'<th style="text-align:right">Disk</th>'
-      +'<th style="text-align:right">Last active</th></tr></thead><tbody>'+body+"</tbody></table></div>"
+      +'<div class="sy-tblwrap"><table class="sy-table sy-sortable"><thead><tr>'
+      +projSortHeader("project","Project",false)
+      +projSortHeader("lines","Lines \u2248",true)
+      +projSortHeader("language","By language",false)
+      +projSortHeader("disk","Disk",true)
+      +projSortHeader("active","Last active",true)
+      +"</tr></thead><tbody>"+body+"</tbody></table></div>"
       // Three numbers now, and the gap between the last two is a filter rather
       // than a fact about the machine — so it is named. Leaving the reader to
       // subtract 25 from 16 and guess is the silent exclusion ADR-0023 forbids.

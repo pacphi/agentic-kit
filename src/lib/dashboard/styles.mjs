@@ -1032,6 +1032,26 @@ a.chipf{text-decoration:none; display:inline-flex; align-items:center}
 @media(max-width:600px){.sy-bar{grid-template-columns:1fr 64px} .sy-bar .n{grid-column:1/-1}}
 /* Tables */
 .sy-tblwrap{overflow-x:auto}
+/* Sortable headers. The whole header is the button, so the target is the width
+   of the column rather than the glyph. The arrow is always present — a control
+   that only appears on hover is invisible to anyone who never hovers, and a
+   column that shifts width when you point at it is worse than no affordance.
+   Inactive arrows sit at low opacity; the active one takes the accent, which is
+   how "only one column at a time" reads without a legend. */
+.sy-sortable th{padding:0}
+.sy-sort{
+  display:flex; align-items:center; gap:5px; width:100%;
+  background:none; border:0; padding:6px 8px; cursor:pointer;
+  font:inherit; color:var(--ink-dim); font-weight:600; text-align:inherit;
+  letter-spacing:inherit; text-transform:inherit; white-space:nowrap;
+}
+.sy-sortable th[style*="right"] .sy-sort{justify-content:flex-end}
+.sy-sort:hover{color:var(--ink-2)}
+.sy-sort:focus-visible{outline:2px solid var(--accent); outline-offset:-2px; border-radius:4px}
+.sy-sort .sy-arrow{font-size:9px; opacity:.28; line-height:1}
+.sy-sort:hover .sy-arrow{opacity:.6}
+.sy-sort.on{color:var(--accent)}
+.sy-sort.on .sy-arrow{opacity:1; color:var(--accent)}
 /* A liner directly after a table needs real separation, and a SCROLLING table
    needs more of it: its last row is clipped mid-glyph by design, so a caption
    sitting flush underneath reads as another clipped row rather than as the

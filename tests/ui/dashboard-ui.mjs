@@ -493,6 +493,21 @@ const SYSTEM_PAYLOAD = {
         },
       },
       {
+        // Linked and worked in, but its figures were never measured. It must
+        // still LIST, and must sort to the bottom in BOTH directions — an
+        // absent figure is not a small one.
+        label: 'zz-unmeasured',
+        loc: { total: unmeasured('the working tree could not be read'), byLanguage: {} },
+        treeBytes: meas(1), gitBytes: meas(1), nodeModulesBytes: meas(0),
+        totalBytes: unmeasured('the working tree could not be read'),
+        lastActivity: unmeasured('no readable entry'),
+        hosts: ['claude'],
+        remote: {
+          status: 'linked', webUrl: 'https://github.com/example/unmeasured',
+          host: 'github.com', slug: 'example/unmeasured', raw: 'git@github.com:example/unmeasured.git',
+        },
+      },
+      {
         // Linked, but no host ever recorded a session here.
         label: 'never-worked-in',
         loc: { total: meas(10), byLanguage: { Rust: 10 } },
@@ -1227,6 +1242,51 @@ async function main() {
     check('the language legend matches the ramp it describes',
       /top 5 languages/.test(await page.$eval('#sys-projects .sy-legend', (e) => e.innerText)),
       'the legend and LANG_TOP drifted apart');
+
+    // ── sortable headers ──
+    const projCol = (n) => page.$$eval(`#sys-projects tbody tr td:nth-child(${n})`,
+      (els) => els.map((e) => e.innerText.split('\n')[0].trim()));
+    const sortState = () => page.evaluate(() => ({
+      aria: [...document.querySelectorAll('#sys-projects thead th')].map((t) => t.getAttribute('aria-sort')),
+      active: [...document.querySelectorAll('#sys-projects .sy-sort.on')].length,
+    }));
+
+    const s0 = await sortState();
+    const names0 = await projCol(1);
+    check('the table opens sorted by project name, ascending',
+      s0.aria[0] === 'ascending'
+        && JSON.stringify(names0) === JSON.stringify([...names0].sort((a, b) => a.toLowerCase().localeCompare(b.toLowerCase()))),
+      `aria was ${JSON.stringify(s0.aria)} and the order ${JSON.stringify(names0)}`);
+    check('every header is a sort control', await page.$$eval('#sys-projects thead th',
+      (ths) => ths.every((t) => !!t.querySelector('button[data-proj-sort]'))),
+      'a header without a control is a column the user cannot order by');
+
+    await page.click('[data-proj-sort="project"]');
+    const s1 = await sortState();
+    check('clicking the active column reverses it',
+      s1.aria[0] === 'descending'
+        && JSON.stringify(await projCol(1)) === JSON.stringify([...names0].reverse()),
+      `aria was ${JSON.stringify(s1.aria)}`);
+
+    await page.click('[data-proj-sort="disk"]');
+    const s2 = await sortState();
+    check('only one column may be the active sort at a time',
+      s2.active === 1 && s2.aria.filter((a) => a && a !== 'none').length === 1,
+      `${s2.active} active control(s), aria ${JSON.stringify(s2.aria)}`);
+    check('a size column opens largest-first, not ascending',
+      s2.aria[3] === 'descending',
+      'nobody opens a size column wanting the smallest row first');
+
+    // The rule that matters: an unmeasured figure is not a small one.
+    const diskDesc = await projCol(1);
+    await page.click('[data-proj-sort="disk"]');
+    const diskAsc = await projCol(1);
+    // startsWith, not equality: a linked project's cell carries a trailing ↗.
+    const endsWithUnmeasured = (rows) => rows[rows.length - 1].startsWith('zz-unmeasured');
+    check('an unmeasured row sorts LAST in both directions',
+      endsWithUnmeasured(diskDesc) && endsWithUnmeasured(diskAsc),
+      `desc ended ${JSON.stringify(diskDesc.slice(-1))}, asc ended ${JSON.stringify(diskAsc.slice(-1))} `
+      + '— ranking an absent figure presents it as a measured one');
     // Hand the page back exactly as the checks below expect to find it: the real
     // SYSTEM_STUB served again, the System area open, and its freshness label
     // populated. A bare reload would leave /api/system unfetched and the
