@@ -26,6 +26,7 @@ import {
   parseGitRemote, projectRemote, LOC_EXCLUSIONS,
 } from '../../src/lib/footprint/projects.mjs';
 import { collectCatalog, tomlTableNames } from '../../src/lib/footprint/catalog.mjs';
+import { collectConsumers } from '../../src/lib/footprint/consumers.mjs';
 
 const DAY = 86_400_000;
 
@@ -1068,4 +1069,56 @@ test('an undecodable name says WHICH reason — deleted, or never encodable', ()
   const [win] = labelSessions([{ session: 'a', project: 'C:-Users-me-proj' }], { decodeDir: () => null });
   assert.equal(win.projectResolved, false);
   assert.equal(win.projectReason, 'encoding', 'nothing was deleted — the name was never decodable');
+});
+
+// ── the POSIX `blocks` field, and the platform that does not have it ────────
+// `fs.Stats.blocks` is POSIX. On win32 Node reports 0 for every file, and two
+// separate places read a zero as meaning something it does not. Both took
+// Windows CI down or would have silently under-reported it, so both are pinned
+// here rather than only at their shared predicate.
+
+/** lstat that reports zero allocated blocks for every file — what win32 does. */
+function zeroBlocksFs(root) {
+  const base = fixtureFs(root);
+  const zero = (st) => Object.assign(Object.create(Object.getPrototypeOf(st)), st, { blocks: 0 });
+  return { ...base, lstatSync: (target) => zero(base.lstatSync(target)) };
+}
+
+test('a git config reporting zero blocks is still read, not called a placeholder', (t) => {
+  const root = fixture(t, 'remote-zero-blocks');
+  const repo = path.join(root, 'repo');
+  write(path.join(repo, '.git', 'config'),
+    '[remote "origin"]\n\turl = https://github.com/pacphi/agentic-kit.git\n');
+
+  // The bug: every .git/config on Windows stated as an unmaterialized cloud
+  // placeholder, so every project reported status 'unknown' and no remote.
+  const out = projectRemote(repo, { fsImpl: zeroBlocksFs(root), platform: 'win32' });
+  assert.equal(out.status, 'linked', `zero blocks is not evidence of eviction; got ${out.reason}`);
+  assert.equal(out.webUrl, 'https://github.com/pacphi/agentic-kit');
+
+  // Anti-vacuity: the identical input on POSIX IS an evicted placeholder, so the
+  // platform argument is doing the work rather than the shim being ignored.
+  const posix = projectRemote(repo, { fsImpl: zeroBlocksFs(root), platform: 'darwin' });
+  assert.equal(posix.status, 'unknown');
+  assert.match(posix.reason, /placeholder/);
+});
+
+test('allocated size falls back to apparent size where blocks are unusable', (t) => {
+  const root = fixture(t, 'alloc-zero-blocks');
+  const dir = path.join(root, 'store');
+  const bytes = write(path.join(dir, 'a.bin'), 'x'.repeat(4096));
+
+  const desc = { id: 'store', label: 'store', path: dir, allocation: 'blocks' };
+  const run = (platform) => collectConsumers({
+    roots: [desc], now: () => 1, fsImpl: zeroBlocksFs(root), platform,
+  }).rows.find((r) => r.id === 'store');
+
+  // Without the fallback this is 0 bytes for an entire machine, sitting next to
+  // a correct apparent total — a measured zero that is not true.
+  const win = run('win32');
+  assert.ok(win.bytes.value >= bytes, `allocated collapsed to ${win.bytes.value}`);
+
+  // Anti-vacuity: on POSIX a genuine zero-block file really does allocate
+  // nothing, so the platform argument is what changed the answer.
+  assert.equal(run('darwin').bytes.value, 0);
 });

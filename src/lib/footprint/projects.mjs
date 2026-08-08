@@ -39,7 +39,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { parseRepoSlug } from '../admin-collect.mjs';
 import { discoverProjectSources } from './project-sources.mjs';
-import { detectStack, STACK_EXCLUSIONS } from './stack-detect.mjs';
+import { detectStack, isCloudPlaceholder, STACK_EXCLUSIONS } from './stack-detect.mjs';
 import { STACK_REGISTRY_VERSION } from './stack-registry.mjs';
 import {
   walkTree, rootMeasurements, measured, statNode, UNKNOWN, unknown, sumMeasurements,
@@ -155,7 +155,7 @@ export function describeRemote(rawUrl, name = 'origin') {
  * no configured remote is an explicit `local-only`; an unreadable `.git/config`
  * is `unknown` with its errno, not a silent local-only.
  */
-export function projectRemote(projectPath, { fsImpl = fs } = {}) {
+export function projectRemote(projectPath, { fsImpl = fs, platform = process.platform } = {}) {
   const configFile = path.join(projectPath, '.git', 'config');
   let source;
   // Stat before read: a cloud provider's evicted placeholder (real size, zero
@@ -164,7 +164,13 @@ export function projectRemote(projectPath, { fsImpl = fs } = {}) {
   // honest answer — inventing `local-only` would claim this repo has no remote.
   try {
     const st = fsImpl.lstatSync(configFile);
-    if (st.blocks === 0 && st.size > 0) {
+    // The SHARED predicate, not a second copy of the rule. This was a hand-rolled
+    // duplicate of stack-detect's `blocks === 0 && size > 0`, and when that one
+    // was corrected for Windows — where `fs.Stats.blocks` is a POSIX field Node
+    // reports as 0 for every file — this copy was missed and went on reporting
+    // every .git/config as an unmaterialized placeholder, so every project on
+    // Windows had status 'unknown' and no remote URL.
+    if (isCloudPlaceholder(st.size, st.blocks, platform)) {
       return { status: 'unknown', name: null, raw: null, hostname: null, host: null, slug: null, webUrl: null, reason: 'cloud placeholder (not materialized)' };
     }
   } catch { /* the read below reports the errno; one stat failure decides nothing */ }

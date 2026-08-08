@@ -536,11 +536,14 @@ function measureFamily(desc, { walk, limits, asOf, fsImpl }) {
  * figure larger than the disk at the top of it.
  *
  * The walker still owns the traversal; the extra lstat per file is what buys
- * `blocks`, which `onFile` does not carry. A platform that reports no block
- * count (Windows) falls back to that file's apparent size, so the row degrades
- * to the ordinary basis rather than to zero.
+ * `blocks`, which `onFile` does not carry. A platform that reports no usable
+ * block count (Windows) falls back to that file's apparent size, so the row
+ * degrades to the ordinary basis rather than to zero.
+ *
+ * `platform` is a parameter, not a `process.platform` read, so the win32 branch
+ * is exercisable from any machine.
  */
-function measureAllocated(desc, { walk, limits, asOf, fsImpl }) {
+function measureAllocated(desc, { walk, limits, asOf, fsImpl, platform = process.platform }) {
   let allocated = 0;
   let apparent = 0;
   let files = 0;
@@ -559,7 +562,14 @@ function measureAllocated(desc, { walk, limits, asOf, fsImpl }) {
       // an inode); only a platform that reports no block count at all falls
       // back to apparent size, and that fallback is counted so the row can say
       // its basis is mixed.
-      if (Number.isFinite(blocks) && blocks >= 0) allocated += blocks * 512;
+      //
+      // win32 is exactly that platform. `blocks` is POSIX; Node reports 0 for
+      // every file there, which is finite and non-negative — so without this
+      // the allocated total came out as 0 bytes for an entire machine while the
+      // apparent total was right beside it. Estimating from apparent size is
+      // the honest degradation, and `estimated` is what makes the row say so.
+      const usable = Number.isFinite(blocks) && blocks >= 0 && platform !== 'win32';
+      if (usable) allocated += blocks * 512;
       else { allocated += bytes; estimated += 1; }
     },
   });
@@ -781,7 +791,7 @@ const rankValue = (row) => (hasValue(row.bytes) ? row.bytes.value : -1);
  *   install?: object|null, projects?: Array<ProjectTreeInput>|null,
  *   includeProjectTrees?: boolean, topN?: number,
  *   extraRoots?: Array<ConsumerDescriptor>,
- *   fsImpl?: typeof fs,
+ *   fsImpl?: typeof fs, platform?: string,
  * }} [options] `roots` replaces the registry outright (tests, narrowed scans);
  *   `extraRoots` adds to it. `install` and `projects` are already-collected
  *   sections whose figures are adopted rather than re-walked.
@@ -804,9 +814,10 @@ export function collectConsumers({
   topN = CONSUMER_TOP_N,
   extraRoots = [],
   fsImpl = fs,
+  platform = process.platform,
 } = {}) {
   const asOf = now();
-  const ctx = { walk, limits: { ...CONSUMER_WALK_LIMITS, ...limits }, asOf, fsImpl };
+  const ctx = { walk, limits: { ...CONSUMER_WALK_LIMITS, ...limits }, asOf, fsImpl, platform };
   const candidates = Array.isArray(projects) ? projects : [];
 
   const descriptors = assignContainment(mergeDescriptors([
