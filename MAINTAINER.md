@@ -84,7 +84,7 @@ docs/
   UPGRADING.md           # upgrade and capability-adoption motion (shipped)
   archive/               # investigative history behind each guard (not shipped)
 .github/
-  workflows/{ci,release,nightly}.yml
+  workflows/{ci,release,nightly,devcontainers,pages}.yml
   dependabot.yml
 ```
 
@@ -219,6 +219,19 @@ CI additionally runs a **CLI smoke** against a sandboxed `HOME` (see `ci.yml`):
 `--version`, `--help --all`, `status --json` (asserts valid JSON + `overall`),
 `x reference sync` (asserts managed blocks present), `uninstall --dry-run`. If you
 change CLI output shape, expect the smoke to catch it.
+
+Two further workflows cover surfaces `ci.yml` doesn't:
+
+- **`devcontainers.yml`** builds and smoke-tests both dev container configs with
+  the reference `devcontainer` CLI — on PRs touching what each config depends on
+  (a `dorny/paths-filter` job scopes the maintainer and consumer jobs
+  independently) and monthly, to catch base-image or published-package drift with
+  no repo change. Guide: [docs/DEVCONTAINERS.md](docs/DEVCONTAINERS.md).
+- **`pages.yml`** publishes `explainer.html` as the GitHub Pages site
+  (<https://pacphi.github.io/agentic-kit/>): on any push to `main` touching that
+  file, it stages it as `index.html` and deploys. Pages source is "GitHub
+  Actions" (`build_type: workflow`) — there is no `gh-pages` branch, and the
+  file on `main` is the single source of truth.
 
 ---
 
