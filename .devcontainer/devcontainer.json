@@ -8,7 +8,11 @@
   // pnpm is pinned via package.json's "packageManager" field; corepack reads
   // that automatically. `npm link` exposes `ak`/`agentic-kit` globally,
   // pointing at THIS checkout — edits are live, no reinstall needed.
-  "postCreateCommand": "corepack enable && pnpm install && npm link && ak --version",
+  // corepack/npm link write into the image's root-owned global bin dir
+  // (/usr/local/bin), so those two steps need sudo; `node` has passwordless
+  // sudo in this base image. `pnpm install` targets the (UID-synced,
+  // node-writable) mounted repo and stays unprivileged.
+  "postCreateCommand": "sudo corepack enable && pnpm install && sudo npm link && ak --version",
   "forwardPorts": [7431],
   "portsAttributes": {
     "7431": {
