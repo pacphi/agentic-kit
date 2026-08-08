@@ -58,17 +58,19 @@ function machineFacts(osImpl) {
 }
 
 /**
- * The daemon census: how many ruflo daemons are alive, how old the oldest is
- * against its TTL, and what the launch budget is doing.
+ * The daemon census: how many ruflo daemons are alive and how old the oldest is
+ * against its TTL.
  *
- * The budget is deliberately `unknown`. `ruflo daemon budget` exists as a CLI
- * but the kit has no local file or API to read it from, and synthesizing
- * "$0 / idle" from the absence of evidence is precisely the fabrication
- * invariant #2 forbids. When a readable source exists, this is the one field
- * that changes.
+ * There is deliberately NO launch-budget field. `ruflo daemon budget` exists as
+ * a CLI, but the kit has no local file or API to read it from — not
+ * circumstantially, structurally — so the field could only ever have rendered
+ * as "unavailable". A permanently unknowable quantity is removed rather than
+ * reported as degraded: an unknown that can never resolve is not honest
+ * degradation, it is a promise the product cannot keep, and it teaches the
+ * reader to ignore the unknowns that DO mean something (ADR-0023 §9). If ruflo
+ * ever exposes a readable local source, this is where the field comes back.
  */
 async function daemonCensus({ listDaemonsImpl, cwd, ttlSecs }) {
-  const noBudgetSource = 'ruflo exposes no local budget state this collector can read';
   try {
     const daemons = await listDaemonsImpl({ cwd });
     const ages = daemons.map((entry) => entry.ageSecs).filter((age) => Number.isFinite(age));
@@ -79,7 +81,6 @@ async function daemonCensus({ listDaemonsImpl, cwd, ttlSecs }) {
       oldestAgeSecs: ages.length ? measured(Math.max(...ages)) : unknown(daemons.length
         ? 'no running daemon recorded a start time'
         : 'no daemons are running'),
-      budget: unknown(noBudgetSource),
       entries: daemons.map((entry) => ({
         pid: entry.pid,
         workspace: entry.workspace,
@@ -96,7 +97,6 @@ async function daemonCensus({ listDaemonsImpl, cwd, ttlSecs }) {
       staleCount: unknown(reason),
       ttlSecs,
       oldestAgeSecs: unknown(reason),
-      budget: unknown(noBudgetSource),
       entries: [],
     };
   }
@@ -150,7 +150,6 @@ export async function collectRuntimeCensus({
       platform,
       ephemeral: true,
       processes: unknown(reason),
-      childProcessCount: unknown(reason),
       totals: {
         processCount: unknown(reason),
         rssBytes: unknown(reason),
@@ -187,9 +186,10 @@ export async function collectRuntimeCensus({
     // `processes.value` is the row array, not a number — the Measurement
     // wrapper is what states "the survey ran" as distinct from "no processes".
     processes: measured(rows),
-    childProcessCount: Number.isFinite(survey.childProcessCount)
-      ? measured(survey.childProcessCount)
-      : unknown('the survey returned no process tree'),
+    // NOTE: the survey still counts child and MCP-server processes — that count
+    // is what makes the per-host rows correct — but it is no longer republished
+    // here. As a rendered figure it was a bare number with no denominator, no
+    // history and no action attached to it; as an input it is unchanged.
     totals: {
       processCount: measured(rows.length),
       // sumMeasurements marks a total `partial` when a row could not report,

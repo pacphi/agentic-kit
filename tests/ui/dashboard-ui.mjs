@@ -268,11 +268,15 @@ const USAGE_VIEWS = [
   ['sessions', '#v-sessions'],
   ['transcript', '#v-transcript'],
 ];
-// Five sub-views, Projects kept separate from Summary — the maintainer decision
-// the System area shipped with. Asserting the list here means a merge would
-// fail loudly instead of quietly reducing the area.
+// Seven sub-views, in order. Asserting the list here means a merge would fail
+// loudly instead of quietly reducing the area. Advisory is deliberately its own
+// area rather than a card: it is the only part of System that suggests an
+// action, and everything else reports what is. Sessions owns the session-level
+// detail Storage used to carry underneath its byte breakdown.
 const SYSTEM_VIEWS = [
   ['summary', '#panel-sys-summary'],
+  ['advisory', '#panel-sys-advisory'],
+  ['sessions', '#panel-sys-sessions'],
   ['storage', '#panel-sys-storage'],
   ['runtime', '#panel-sys-runtime'],
   ['catalog', '#panel-sys-catalog'],
@@ -469,9 +473,35 @@ const SYSTEM_PAYLOAD = {
         loc: { total: meas(48_210), byLanguage: { JavaScript: 31_000, Markdown: 12_000, CSS: 3100, JSON: 2110 } },
         treeBytes: meas(42_000_000), gitBytes: meas(120_000_000), nodeModulesBytes: meas(310_000_000),
         totalBytes: meas(472_000_000), lastActivity: meas(SYS_NOW - 3_600_000),
+        hosts: ['claude', 'codex'],
         remote: {
           status: 'linked', webUrl: 'https://github.com/example/agentic-kit',
           host: 'github.com', slug: 'example/agentic-kit', raw: 'git@github.com:example/agentic-kit.git',
+        },
+      },
+      {
+        // A linked repo on a snapshot too old to carry `hosts`. It must still be
+        // listed: absent is not zero, and blanking it would be the fail-closed
+        // rule inverted.
+        label: 'legacy-snapshot-row',
+        loc: { total: meas(1200), byLanguage: { Rust: 1200 } },
+        treeBytes: meas(1_000), gitBytes: meas(1_000), nodeModulesBytes: meas(0),
+        totalBytes: meas(2_000), lastActivity: meas(SYS_NOW - 7_200_000),
+        remote: {
+          status: 'linked', webUrl: 'https://github.com/example/legacy',
+          host: 'github.com', slug: 'example/legacy', raw: 'git@github.com:example/legacy.git',
+        },
+      },
+      {
+        // Linked, but no host ever recorded a session here.
+        label: 'never-worked-in',
+        loc: { total: meas(10), byLanguage: { Rust: 10 } },
+        treeBytes: meas(10), gitBytes: meas(10), nodeModulesBytes: meas(0),
+        totalBytes: meas(20), lastActivity: meas(SYS_NOW - 9_200_000),
+        hosts: [],
+        remote: {
+          status: 'linked', webUrl: 'https://github.com/example/untouched',
+          host: 'github.com', slug: 'example/untouched', raw: 'git@github.com:example/untouched.git',
         },
       },
       {
@@ -479,6 +509,7 @@ const SYSTEM_PAYLOAD = {
         loc: { total: unmeasured('the working tree could not be read'), byLanguage: {} },
         treeBytes: meas(4_000_000), gitBytes: meas(1_000_000), nodeModulesBytes: meas(0),
         totalBytes: meas(5_000_000), lastActivity: unmeasured('no readable entry'),
+        hosts: ['claude'],
         remote: { status: 'none', reason: 'local only, no git remote' },
       },
     ],
@@ -848,6 +879,39 @@ async function main() {
           && presentation.text?.trim().length > 20,
         `Overview presentation was ${JSON.stringify(presentation)}`);
     }
+
+    // ── Intelligence: the project picker is a CONTROL, not a panel (ADR-0027) ──
+    // Structural assertions only, so they hold on any machine: the panel's data
+    // comes from a real census walk and its counts are whatever this machine
+    // has. What must not vary is the shape.
+    await page.click('[data-overview-view="intel"]');
+    await page.waitForSelector('#panel-intel:not([hidden])');
+    const intelShape = await page.evaluate(() => {
+      const select = document.getElementById('intel-project-select');
+      return {
+        pickerStripGone: !document.getElementById('intel-picker'),
+        redundantCaptionsGone: !document.getElementById('mw-note') && !document.getElementById('intel-picker-note'),
+        pickerInHistoryHead: !!select?.closest('#history .strip-head'),
+        labelled: !!document.querySelector('label[for="intel-project-select"]'),
+        censusIsDisclosure: document.getElementById('mw-census')?.tagName === 'DETAILS',
+      };
+    });
+    check('the standalone "project detail" strip is gone — the picker moved into learning over time',
+      intelShape.pickerStripGone && intelShape.pickerInHistoryHead, JSON.stringify(intelShape));
+    check('the captions that restated a count without explaining it are gone',
+      intelShape.redundantCaptionsGone, JSON.stringify(intelShape));
+    check('the picker keeps its label after moving',
+      intelShape.labelled, 'a bare select in a heading row is unlabelled for a screen reader');
+    check('the census explainer costs no vertical space until asked for',
+      intelShape.censusIsDisclosure, JSON.stringify(intelShape));
+
+    // The strip owning the picker must never hide itself: a project with no
+    // history would otherwise take the only control for choosing another one
+    // away with it.
+    const historyVisible = await page.$eval('#history', (el) => !el.hidden);
+    check('the strip that owns the picker stays visible even with nothing to chart',
+      historyVisible, '#history was hidden, stranding the picker');
+
     const secondaryPositions = [];
     for (const [tab] of TABS) {
       await page.click(`[data-tab="${tab}"]`);
@@ -1064,6 +1128,116 @@ async function main() {
     check('a process the census cannot attribute says so instead of blanking the cell',
       /not attributable/i.test(runtimeHonesty.procs),
       `the process census read ${JSON.stringify(runtimeHonesty.procs.slice(0, 240))}`);
+
+    check('the daemon panel no longer carries an AI-worker budget tile',
+      !runtimeHonesty.tiles.some((tile) => /budget/i.test(tile.label)),
+      'no code path can populate it, so a permanent "unavailable" was removed rather than degraded');
+    check('the pid column header is right-aligned with its numbers', await page.$eval(
+      '#sys-procs thead th:nth-child(2)',
+      (th) => th.textContent.trim() === 'pid' && getComputedStyle(th).textAlign === 'right',
+    ), 'a numeric column whose header hangs off the far side reads as a different column');
+    check('the never-persisted child-process footer is gone',
+      !/child & MCP/i.test(runtimeHonesty.procs), 'a bare count with no denominator and no action');
+
+    // ── Catalog filters + Projects filtering, on a payload that HAS them ──
+    // The default SYSTEM_STUB deliberately ships `catalog: null` to prove the
+    // never-scanned path, so the filters need their own payload rather than a
+    // weakened fixture.
+    const FILTER_SYSTEM = JSON.parse(JSON.stringify(SYSTEM_PAYLOAD));
+    FILTER_SYSTEM.catalog = {
+      asOf: SYS_DEEP_ASOF,
+      hosts: ['claude', 'codex', 'opencode'],
+      kinds: ['skill', 'agent', 'command'],
+      counts: { skill: meas(2), agent: meas(1), command: meas(1) },
+      perHost: {},
+      items: [
+        { kind: 'skill', name: 'alpha-skill', hosts: ['claude'] },
+        { kind: 'skill', name: 'beta-skill', hosts: ['claude', 'codex'] },
+        { kind: 'agent', name: 'gamma-agent', hosts: ['opencode'] },
+        { kind: 'command', name: 'delta-command', hosts: ['codex'] },
+      ],
+      complete: true,
+    };
+    await page.route(/\/api\/system(\?|$)/, (route) => route.fulfill({
+      status: 200, contentType: 'application/json', body: JSON.stringify(FILTER_SYSTEM),
+    }));
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await page.click('#tab-system');
+    await page.click('[data-system-view="catalog"]');
+    await page.waitForSelector('#sys-matrix tbody tr');
+
+    const chipStates = () => page.$$eval('#sys-cat-kinds .chipf, #sys-cat-hosts .chipf',
+      (els) => els.map((e) => e.getAttribute('aria-pressed')));
+    const rowCount = () => page.$$eval('#sys-matrix tbody tr', (els) => els.length);
+
+    check('every kind and host option starts selected, so the default view is the whole inventory',
+      (await chipStates()).every((s) => s === 'true') && (await chipStates()).length === 6,
+      `chips were ${JSON.stringify(await chipStates())}`);
+    check('the filters are toggle buttons, announced as pressed', await page.$eval(
+      '#sys-cat-kinds .chipf', (b) => b.tagName === 'BUTTON' && b.hasAttribute('aria-pressed')),
+      'a filter a screen reader cannot read the state of is not a filter');
+    check('no in-table kind heading rows remain — the pick list replaced them',
+      (await page.$$('#sys-matrix .sy-kindrow')).length === 0, 'headings signposted but did not filter');
+    check('every row still names its kind now the headings are gone',
+      await page.$$eval('#sys-matrix tbody tr', (els) => els.every((e) => !!e.querySelector('.sy-kindtag'))),
+      'a filtered list must never leave a name unexplained');
+    check('unfiltered shows every item', await rowCount() === 4, `saw ${await rowCount()} of 4`);
+
+    await page.click('#sys-cat-kinds .chipf:nth-child(2)'); // drop agents
+    await page.click('#sys-cat-kinds .chipf:nth-child(3)'); // drop commands
+    check('deselecting kinds narrows the table', await rowCount() === 2, `saw ${await rowCount()} of 2`);
+    check('a narrowed table says how much it is hiding',
+      /2 of 4/.test(await page.$eval('#sys-matrix .sy-liner', (e) => e.innerText)),
+      'a filtered count that does not name the total reads as a shrinking machine');
+
+    // host filter is OR, not AND: "carried by codex" keeps a codex+claude item.
+    await page.click('#sys-cat-hosts .chipf:nth-child(1)'); // drop claude
+    await page.click('#sys-cat-hosts .chipf:nth-child(3)'); // drop opencode
+    check('the host filter matches ANY selected host, not all of them',
+      await rowCount() === 1, `saw ${await rowCount()}; beta-skill is on claude AND codex, so codex alone keeps it`);
+
+    await page.click('#sys-cat-kinds .chipf:nth-child(2)');
+    await page.click('#sys-cat-kinds .chipf:nth-child(3)');
+    await page.click('#sys-cat-hosts .chipf:nth-child(1)');
+    await page.click('#sys-cat-hosts .chipf:nth-child(3)');
+    check('re-selecting everything restores the full inventory',
+      await rowCount() === 4 && (await chipStates()).every((s) => s === 'true'),
+      `saw ${await rowCount()} rows and ${JSON.stringify(await chipStates())}`);
+
+    await page.click('[data-system-view="projects"]');
+    await page.waitForSelector('#sys-projects table');
+    const projectRows = await page.$$eval('#sys-projects tbody tr', (els) => els.map((e) => ({
+      linked: !!e.querySelector('a[href^="https:"]'), text: e.innerText,
+    })));
+    check('the Projects table lists only repositories with a remote',
+      projectRows.length > 0 && projectRows.every((r) => r.linked),
+      `${projectRows.filter((r) => !r.linked).length} unlinked row(s) survived the filter`);
+    const projectNames = projectRows.map((r) => r.text.split('\n')[0]).join(' ');
+    check('a linked repo no host ever worked in is excluded',
+      !/never-worked-in/.test(projectNames), `rows were ${JSON.stringify(projectNames)}`);
+    check('a linked repo from a snapshot with no hosts field is KEPT — absent is not zero',
+      /legacy-snapshot-row/.test(projectNames),
+      `an older snapshot cannot answer "was this worked in", and guessing no blanks the table`);
+    const projectLiner = await page.$eval('#sys-projects .sy-liner', (e) => e.innerText);
+    check('and states what it excluded rather than leaving the reader to subtract',
+      /listed here/.test(projectLiner)
+        && (projectRows.length === (SYSTEM_PAYLOAD.projects?.projects ?? []).length
+          || /Excluded \d+ measured director/.test(projectLiner)),
+      `the liner read ${JSON.stringify(projectLiner)}`);
+    check('the language legend matches the ramp it describes',
+      /top 5 languages/.test(await page.$eval('#sys-projects .sy-legend', (e) => e.innerText)),
+      'the legend and LANG_TOP drifted apart');
+    // Hand the page back exactly as the checks below expect to find it: the real
+    // SYSTEM_STUB served again, the System area open, and its freshness label
+    // populated. A bare reload would leave /api/system unfetched and the
+    // staleness assertions reading an empty element.
+    await page.unroute(/\/api\/system(\?|$)/);
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await page.click('#tab-system');
+    await page.waitForFunction(
+      () => (document.getElementById('sys-asof')?.textContent ?? '').trim().length > 0,
+      null, { timeout: 30_000 },
+    );
 
     // ── the deep tier is user-triggered, and its age is stated ───────────────
     const freshness = await page.evaluate(() => {
@@ -2513,6 +2687,47 @@ async function main() {
     check('the degraded About area is free of rendering artifacts', degradedArts.length === 0,
       `found ${degradedArts.join(', ')}`);
     await page.unroute(/\/api\/status(\?|$)/);
+
+    // ── panel collapse (.strip-toggle) ──
+    // The provider-analytics panel is the deterministic one to drive: it exists
+    // on every machine, unlike the routing panels, which render from the
+    // developer's own kit.json. Its markup ships COLLAPSED, which is itself part
+    // of the contract — the panel is empty for anyone without an OpenRouter
+    // cache, so opening by default spent vertical space on a blank box.
+    await page.evaluate(() => localStorage.removeItem('ak-dash-collapse'));
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await page.click('#tab-usage');
+    await page.waitForSelector('.strip-toggle[aria-controls="u-openrouter-body"]');
+    const collapseSel = '.strip-toggle[aria-controls="u-openrouter-body"]';
+    const readCollapse = () => page.$eval(collapseSel, (b) => ({
+      expanded: b.getAttribute('aria-expanded'),
+      hidden: document.getElementById('u-openrouter-body').hidden,
+      labelled: !!b.querySelector('h2'),
+    }));
+
+    const c0 = await readCollapse();
+    check('provider account analytics ships collapsed',
+      c0.expanded === 'false' && c0.hidden === true, JSON.stringify(c0));
+    check('the collapse control is a labelled button, not a bare chevron',
+      c0.labelled, 'the heading must live inside the button so the whole title is the target');
+
+    await page.click(collapseSel);
+    const c1 = await readCollapse();
+    check('clicking expands it and updates aria-expanded',
+      c1.expanded === 'true' && c1.hidden === false, JSON.stringify(c1));
+
+    // The panels re-render on every poll, so an unpersisted collapse would snap
+    // back within one tick. Only DEPARTURES from the markup default are stored.
+    const saved = await page.evaluate(() => localStorage.getItem('ak-dash-collapse'));
+    check('the departure from the markup default is persisted',
+      !!saved && JSON.parse(saved)['u-openrouter-body'] === false, `stored ${saved}`);
+
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await page.click('#tab-usage');
+    await page.waitForSelector(collapseSel);
+    const c2 = await readCollapse();
+    check('and survives a reload rather than snapping back to the default',
+      c2.expanded === 'true' && c2.hidden === false, JSON.stringify(c2));
 
     // ── nothing errored anywhere along the way ──
     // A 404 from /api/session/<id> is CORRECT behaviour for a session that does

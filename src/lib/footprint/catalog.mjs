@@ -191,7 +191,8 @@ function readClaudePlugins(file, { fsImpl = fs } = {}) {
  * list: it costs one stat and can never fabricate an entry.
  */
 function surfaceSpecs(roots, io) {
-  const { claudeRoot, claudeMcpFile, codexRoot, codexConfigFile, opencodeRoot, opencodeConfigFile, cwd } = roots;
+  const { claudeRoot, claudeMcpFile, codexRoot, codexConfigFile, opencodeRoot, opencodeConfigFile,
+    cwd, projects } = roots;
   const at = (base, ...rest) => path.join(base, ...rest);
   const specs = [];
 
@@ -214,6 +215,28 @@ function surfaceSpecs(roots, io) {
   if (projectRoot) {
     specs.push({ id: 'claude-project-mcp', host: 'claude', kind: 'mcpServer',
       path: at(projectRoot, '.mcp.json'), read: (p) => readManifestKeys(p, (d) => d?.mcpServers, io) });
+  }
+
+  // Project-scoped skills, agents and commands, across EVERY project on this
+  // machine — not only the one the dashboard happens to be launched from.
+  //
+  // A catalog that reads user scope plus one repo answers "what can I use right
+  // here", which is not the question this panel asks: it is the machine's
+  // deployed inventory, and a skill defined in one repo is as installed as one
+  // in ~/.claude. Deduplication by (kind, name) means a name defined in five
+  // projects is still one row, so the list grows with distinct NAMES rather
+  // than with project count.
+  //
+  // Costs three stats per project against an already-bounded project list; a
+  // project directory that is gone simply reads absent.
+  for (const project of projects ?? []) {
+    const root = at(project, '.claude');
+    specs.push({ id: `claude-project-skills:${project}`, host: 'claude', kind: 'skill',
+      path: at(root, 'skills'), read: (p) => readMarkerDirs(p, 'SKILL.md', io) });
+    specs.push({ id: `claude-project-agents:${project}`, host: 'claude', kind: 'agent',
+      path: at(root, 'agents'), read: (p) => readMarkdownNames(p, io) });
+    specs.push({ id: `claude-project-commands:${project}`, host: 'claude', kind: 'command',
+      path: at(root, 'commands'), read: (p) => readMarkdownNames(p, io) });
   }
 
   // codex
@@ -369,7 +392,7 @@ const itemKey = (kind, name) => `${kind}::${name.trim().toLowerCase()}`;
  *
  * @param {{ claudeRoot?: string, claudeMcpFile?: string, codexRoot?: string,
  *           codexConfigFile?: string, opencodeRoot?: string, opencodeConfigFile?: string,
- *           cwd?: string, cfg?: object, now?: () => number, walk?: Function,
+ *           cwd?: string, projects?: string[], cfg?: object, now?: () => number, walk?: Function,
  *           limits?: object, fsImpl?: typeof fs,
  *           inspectCodexPlugins?: Function, includePluginSurfaces?: boolean }} [options]
  * @returns {object} CatalogInventory
@@ -382,6 +405,9 @@ export function collectCatalog({
   opencodeRoot = opencodeDir(),
   opencodeConfigFile = opencodeConfigPath(),
   cwd = process.cwd(),
+  // On-disk project paths from the shared census (ADR-0027). Absent → user
+  // scope plus the launching repo only, exactly as before.
+  projects = [],
   cfg = {},
   now = Date.now,
   walk = walkTree,
@@ -392,7 +418,8 @@ export function collectCatalog({
 } = {}) {
   const asOf = now();
   const io = { walk, limits, fsImpl };
-  const roots = { claudeRoot, claudeMcpFile, codexRoot, codexConfigFile, opencodeRoot, opencodeConfigFile, cwd };
+  const roots = { claudeRoot, claudeMcpFile, codexRoot, codexConfigFile, opencodeRoot, opencodeConfigFile,
+    cwd, projects };
   const specs = surfaceSpecs(roots, io);
 
   // Plugin sub-surfaces are discovered from the plugin manifests themselves, so

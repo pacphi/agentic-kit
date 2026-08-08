@@ -404,7 +404,12 @@ test('a blocked Windows cwd probe renders as an honest not-attributable project'
   assert.equal(census.totals.rssBytes.value, 536870912 + 268435456 + 157286400);
   assert.equal(census.totals.rssBytes.partial, false);
   assert.equal(census.totals.processCount.value, 3);
-  assert.equal(census.childProcessCount.value, 3);
+  // The runtime census no longer republishes childProcessCount: as a rendered
+  // figure it was a bare number with no denominator and no action attached. The
+  // SURVEY still counts child and MCP-server processes — that count is what
+  // makes these three host rows correct — and is asserted directly against
+  // surveyHostProcesses above.
+  assert.equal(Object.hasOwn(census, 'childProcessCount'), false);
   assert.equal(census.machine.physicalMemoryBytes.value, 34359738368);
 });
 

@@ -132,6 +132,21 @@ sources establish facts with observed, configured, inferred, or unknown provenan
 not silently create, adopt, or rewrite these bindings, and credentials remain environment-only.
 See [ADR-0016](adr/0016-capability-driven-integration-adapters.md).
 
+## `ak system --json` fields removed in 4.0.0-alpha.41
+
+Two fields left the runtime census. If you parse `ak system --json` (or `GET /api/system`), read
+them defensively or drop them:
+
+| Removed | Where | Why |
+|---|---|---|
+| `runtime.daemons.budget` | daemon census | No local source exists for ruflo's launch budget — not circumstantially, structurally — so the field could only ever read `unknown`. A permanently unknowable quantity is removed rather than reported as degraded ([ADR-0023](adr/0023-fail-closed-operations-and-explicit-degradation.md) §9). `ruflo daemon budget` remains the way to ask. |
+| `runtime.childProcessCount` | runtime census | Still counted by the process survey — it is what makes the per-host rows correct — but no longer republished. As a rendered figure it was a bare number with no denominator, no history and no action attached. |
+
+Nothing else was removed. `storage.topSessions` rows **gained** `projectLabel` and
+`projectResolved`; the raw `project` key is unchanged. `catalog.items` now also covers
+project-scoped `.claude/skills|agents|commands` across every project on disk, so the list is
+longer — the shape is identical and deduplication by `(kind, name)` is unchanged.
+
 ## QE-Court configs created before agentic-qe 3.13.3
 
 `agentic-qe` 3.13.3 fixed its shipped QE-Court default and made configuration validation

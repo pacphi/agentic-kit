@@ -13,6 +13,11 @@ export default [
       '.agents/**',
       'docs/archive/**',
       'coverage/**',
+      // Gitignored tool output, same category as coverage/: tests/ui writes
+      // screenshots here and debugging sessions leave browser-context scratch
+      // scripts behind. Linting them fails `check` for anyone who has run
+      // `pnpm test:ui`, over globals (document, location) that are correct there.
+      '.ui-artifacts/**',
     ],
   },
   js.configs.recommended,

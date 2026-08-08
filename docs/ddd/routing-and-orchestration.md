@@ -43,6 +43,24 @@ Route provenance is:
 
 Refresh may update diverged seeded routes. It does not overwrite user routes.
 
+### Divergence and retirement
+
+Two different things can be wrong with a route's model, and they are separate concepts.
+
+A route is **diverged** when the defaults have moved past its seeded model. Which side is better is
+activity-dependent, so divergence is a trade to weigh, never a lag to clear: it is reported with both
+models' cost-per-task characteristics and is only ever resolved by an explicit refresh.
+
+A model is **retired** when its host has published a withdrawal notice for it. There is no trade —
+the model stops answering — so a retired model is substituted for its replacement at the point every
+dispatch path reads the policy, and seeded routes naming one are rewritten on the next sync. A route
+that was substituted reports the id it replaced, so a surface never silently disagrees with the file
+on disk.
+
+Retirement is the single case in which a `user` route is overridden, and only for the run: honoring
+a pin into a withdrawn model fails the work rather than respecting the intent. The persisted value is
+left exactly as the user wrote it. A model that is merely superseded is diverged, not retired.
+
 ### Primary host
 
 The primary host determines which peer leads the default table and how missing-host status is

@@ -35,6 +35,7 @@ Consequences**, and cites the grounded source it rests on where relevant.
 | [0024](0024-project-intelligence-telemetry.md) | Project intelligence: live learning telemetry from ruflo/agentic-qe's own state | Implemented |
 | [0025](0025-machine-footprint-metrics.md) | Machine footprint: infrastructure metrics for install, runtime, storage, and catalog | Implemented |
 | [0026](0026-about-component-directory.md) | About: a component directory that explains everything ak installs | Implemented |
+| [0027](0027-shared-project-census.md) | One project census, four scopes, every count explains itself | Implemented |
 
 Theme: ADRs **0001–0006** define **dual-host LLM routing and leadership** — how `ak` lets ruflo route
 each development activity (architecture, implementation, testing, review, …) to the right host (Claude
@@ -170,3 +171,19 @@ test rather than a review hope — every managed tool must have exactly one entr
 exist for something ak neither installs nor configures. Official marks appear only where the
 dashboard already ships them as official; everything else gets an explicit monogram tile rather
 than a fabricated logo. `ak about` prints the same directory in a terminal.
+
+**0027** ends a four-way disagreement about what a project *is*. Overview, Usage, Observability and
+System each discovered projects their own way, from their own source, with their own naming rule,
+and reported four different numbers for the same machine — 4, 14, another 14, and ~48. None was
+wrong; nothing said which question each answered, so four honest answers read as one broken
+feature. It makes `discoverProjectSources()` the single census and names four **scopes** over it
+(`everSeen`, `onDisk`, `gitRepos`, `learning`), with the rule that no surface may render a project
+count without the sentence explaining what that count counted. Two decisions carry the weight. The
+*learning* scope asks whether memory or intelligence has been **activated** — `.claude-flow`,
+`.agentic-qe` or `.swarm`, whichever host created it — rather than whether ruflo has *trained*,
+which is why Intelligence went from 4 projects to 17 on the deciding machine. And directory scopes
+stay separate from project scopes: System measures directories because that is what has bytes in
+it, while Intelligence folds a repo's sub-directories and throwaway agent worktrees onto one
+identity because that is what a user picks — a distinction that was also a live bug, since keying
+the picker off identity while listing directories made 7 of 24 rows unreachable. Counts that remain
+different stay different, and say why.

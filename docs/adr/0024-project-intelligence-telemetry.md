@@ -1,8 +1,8 @@
 # ADR-0024 — Project intelligence: live learning telemetry from ruflo/agentic-qe's own state
 
-- **Status:** Implemented
+- **Status:** Implemented; discovery amended by [ADR-0027](0027-shared-project-census.md)
 - **Date:** 2026-08-05
-- **Updated:** 2026-08-05
+- **Updated:** 2026-08-07
 - **Update note:** Extended Intelligence from one project's telemetry, implicitly tied to the
   dashboard server's own launching cwd, to a machine-wide catalog of every ruflo-initialized
   project plus an explicitly selected, explicitly labeled detail project (defaulting to
@@ -13,9 +13,22 @@
 - **Deciders:** agentic-kit maintainers
 - **Related:** [ADR-0005](0005-dashboard-in-page-routing-reveal.md),
   [ADR-0009](0009-usage-scorecard-local-transcript-analytics.md),
-  [ADR-0012](0012-observability.md)
+  [ADR-0012](0012-observability.md),
+  [ADR-0027](0027-shared-project-census.md)
 
-**2026-08-05 machine-wide discovery amendment:** `src/lib/dashboard/project-discovery.mjs` adds
+> **Superseded 2026-08-07 by [ADR-0027](0027-shared-project-census.md).** The machine-wide
+> discovery amendment below is retained as the record of how discovery worked from 2026-08-05; its
+> mechanism is gone. `discoverRuvfloProjects()` and `project-discovery.mjs` are retired, and
+> `registryWorkspaces()` is module-private again. Two things it got wrong, both visible only at
+> scale: requiring `.claude-flow/neural/` answered "has ruflo *trained* here" rather than "is
+> memory or intelligence active here", excluding agentic-qe and swarm state and every non-Claude
+> host; and the 150-transcript bound made discovery a function of recency. On the machine this
+> amendment was verified against, it found 4 projects where 17 had learning state. Project
+> discovery now comes from the shared census, which lists directories and folds them onto project
+> identity. Everything else in this ADR — the intel payload, the SSE pool, the panel itself —
+> stands unchanged.
+
+**2026-08-05 machine-wide discovery amendment (superseded):** `src/lib/dashboard/project-discovery.mjs` adds
 `discoverRuvfloProjects()`, unioning three sources into one deduplicated, most-recently-active-first
 catalog of every project on this machine ruflo has genuinely initialized — a `.claude-flow/neural/`
 subdirectory present, not merely a bare `.claude-flow/`. Source 1 reuses `registryWorkspaces()` from
@@ -237,7 +250,7 @@ path.
 
 - `src/lib/dashboard/intel-history.mjs` (`readIntelHistory`, `readMachineWideIntel`),
   `tests/kit/intel-history.test.mjs`
-- `src/lib/dashboard/project-discovery.mjs` (`discoverRuvfloProjects`),
+- `src/lib/project-census.mjs` (`projectCensus`, `projectsInScope`) — replaced `src/lib/dashboard/project-discovery.mjs` (`discoverRuvfloProjects`) per ADR-0027,
   `tests/kit/project-discovery.test.mjs`
 - `src/lib/live/intelligence-watch.mjs`, `tests/kit/intelligence-watch.test.mjs`
 - `src/lib/dashboard-server.mjs` (`collectData`, `buildProjectSnapshotCache`,

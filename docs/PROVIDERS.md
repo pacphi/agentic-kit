@@ -231,12 +231,24 @@ Defaults (all overridable; your edits are marked `custom` and never re-seeded):
 |---|---|---|
 | specification, review, release | claude | `claude-sonnet-5` |
 | architecture, design, debugging, security-analysis | claude | `claude-opus-5` |
-| implementation, testing, security-scan | codex | `gpt-5.4` |
-| documentation, packaging | codex | `gpt-5.3-codex` |
+| implementation, testing, security-scan | codex | `gpt-5.6-terra` |
+| documentation, packaging | codex | `gpt-5.6-luna` |
 
 *(packaging & release are `ak`-added — ruflo ships templates for feature/security/refactor only.)*
 
-**Known-good model choices** (verified 2026-07; any model your host CLI accepts also works):
+**Retired codex models.** `gpt-5.4` and `gpt-5.4-mini` retire from Codex on **2026-08-31**, and
+`gpt-5.3-codex` is already withdrawn for ChatGPT sign-in
+([Codex models](https://developers.openai.com/codex/models)) — which is why the execution defaults
+above moved to the 5.6 line. `ak` substitutes a retired model at read time, so no run dispatches to
+one even if your `kit.json` still names it, and `ak sync` rewrites `seeded` routes that do. A `user`
+pin is reported but never rewritten on disk (see
+[ADR-0003](adr/0003-auto-seed-dual-host-provenance.md)).
+
+`claude-opus-4-8` is **not** retired — it carries no deprecation notice and stays pinnable. It is
+merely no longer the default, which `ak status` reports as routing *divergence*: a trade for you to
+weigh, cleared with `ak x host refresh` if you want the newer default.
+
+**Known-good model choices** (verified 2026-08; any model your host CLI accepts also works):
 
 > **Per-token price ≠ per-task cost.** A model that needs more agentic turns costs more
 > per task at the same per-token price. On subscription (`claude-code` oauth) billing the
@@ -245,15 +257,14 @@ Defaults (all overridable; your edits are marked `custom` and never re-seeded):
 
 | Host | Model | When to use |
 |---|---|---|
-| claude | `claude-opus-5` | new top Opus — same per-token price as 4.8, but ~2–3× the agentic turns on routine work; earns it at the hard end |
+| claude | `claude-opus-5` | top Opus — the deepest reasoning, at ~2–3× the agentic turns of a balanced model on routine work; earns it at the hard end |
 | claude | `claude-sonnet-5` | near-Opus capability at a lower per-token price — review, spec, release |
 | claude | `claude-fable-5` | top capability (Mythos-class, above Opus 5) — hardest problems |
 | claude | `claude-haiku-4-5-20251001` | cheap/fast — high-volume mechanical work |
-| claude | `claude-opus-4-8` | prior Opus generation — same per-token price, roughly half the turns on routine work |
-| codex | `gpt-5.4` | coding + reasoning + agentic — recommended execution default |
-| codex | `gpt-5.6-sol` | newest line; first-class max reasoning effort |
-| codex | `gpt-5.3-codex` | pure coding-tuned — mechanical implementation & docs |
-| codex | `gpt-5-codex-mini` | smallest/cheapest — escalation floor, high volume |
+| claude | `claude-opus-4-8` | prior Opus generation — same per-token price as Opus 5, roughly half the agentic turns on routine work |
+| codex | `gpt-5.6-sol` | flagship 5.6 — strongest on complex coding, computer use and security work; first-class max reasoning effort |
+| codex | `gpt-5.6-terra` | balanced 5.6 — everyday implementation and testing at a materially lower per-token price than sol; the gpt-5.4 replacement |
+| codex | `gpt-5.6-luna` | fastest/cheapest 5.6 — mechanical implementation, docs and packaging; the gpt-5.4-mini replacement |
 
 > **Where Opus 5 sits** ([announcement](https://www.anthropic.com/news/claude-opus-5), July 2026):
 > same $5/$25 per-Mtok pricing as Opus 4.8 with roughly double the Frontier-Bench

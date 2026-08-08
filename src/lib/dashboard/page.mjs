@@ -13,6 +13,14 @@ const INTEL_CSS = `
 .mw-row.mw-head{background:var(--panel-2); color:var(--ink-dim); font-size:10.5px; font-weight:600; text-transform:uppercase; letter-spacing:.06em}
 .mw-row:not(.mw-head):hover{background:var(--panel-2)}
 .mw-name{color:var(--ink); overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+/* Which learning stores a project carries — three tiny dots, one per store,
+   so a row reporting 0 patterns still says what IS active there. Colour, not
+   text, because the column is already tight and the title carries the names. */
+.mw-stores{display:inline-flex; gap:3px; margin-left:7px; vertical-align:middle; cursor:help}
+.mw-store{width:5px; height:5px; border-radius:50%; display:inline-block; background:var(--dim)}
+.mw-store[data-store="claude-flow"]{background:var(--s1)}
+.mw-store[data-store="agentic-qe"]{background:var(--s3)}
+.mw-store[data-store="swarm"]{background:var(--purple)}
 .mw-val{color:var(--ink-2); text-align:right}
 .mw-row.mw-head .mw-val{color:var(--ink-dim)}
 @media(max-width:560px){.mw-row{grid-template-columns:1fr repeat(3,minmax(60px,1fr)); gap:6px}}
@@ -25,6 +33,18 @@ const INTEL_CSS = `
 }
 .mw-picker select:focus-visible{outline:2px solid var(--accent); outline-offset:1px}
 .mw-picker select:disabled{opacity:.5; cursor:not-allowed}
+/* The picker moved INTO this strip's head (it is a control on "learning over
+   time", not a panel of its own), so the head's baseline alignment has to give
+   way to centre alignment or the select sits low against the heading. */
+#history .strip-head{align-items:center}
+#history #strip-note{margin:0 0 14px}
+/* The census explainer: how this panel's project count relates to the counts
+   the other tabs show. Sits under the hero because it explains the number in
+   it. Reuses the .i-src disclosure so it costs no vertical space until asked. */
+#mw-census{margin-top:12px}
+.mw-census-line{color:var(--ink-2); font-size:12px; line-height:1.55; margin:0 0 6px}
+.mw-census-line b{color:var(--ink); font-weight:600}
+.mw-census-caveat{color:var(--warn); font-size:11.5px; margin:6px 0 0}
 `;
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -34,7 +54,7 @@ const INTEL_CSS = `
 // Layout: five primary areas — About, Overview, Usage, Observability, and
 // System — share one left-aligned secondary-navigation rail. Overview owns
 // Summary, Hosts & Routing, Providers, Runtime, and Intelligence; System owns
-// Summary, Storage, Runtime, Catalog, and Projects. Problems never hide:
+// Summary, Advisory, Sessions, Storage, Runtime, Catalog, and Projects. Problems never hide:
 // Overview's Summary aggregates attention and child tabs retain their scoped
 // badges.
 //
@@ -151,6 +171,8 @@ export function renderPage({ name, version }) {
     <div class="secondary-group" id="secondary-system" hidden>
       <div class="seg subseg" role="tablist" aria-label="System views" id="system-seg">
         <button class="seg-btn" role="tab" data-system-view="summary" aria-selected="true" aria-controls="panel-sys-summary" type="button">Summary</button>
+        <button class="seg-btn" role="tab" data-system-view="advisory" aria-selected="false" aria-controls="panel-sys-advisory" type="button">Advisory</button>
+        <button class="seg-btn" role="tab" data-system-view="sessions" aria-selected="false" aria-controls="panel-sys-sessions" type="button">Sessions</button>
         <button class="seg-btn" role="tab" data-system-view="storage" aria-selected="false" aria-controls="panel-sys-storage" type="button">Storage</button>
         <button class="seg-btn" role="tab" data-system-view="runtime" aria-selected="false" aria-controls="panel-sys-runtime" type="button">Runtime</button>
         <button class="seg-btn" role="tab" data-system-view="catalog" aria-selected="false" aria-controls="panel-sys-catalog" type="button">Catalog</button>
@@ -276,16 +298,25 @@ export function renderPage({ name, version }) {
     <div id="cards-hosts"></div>
     <section class="strip" id="routing" hidden>
       <div class="strip-head">
-        <h2 class="strip-title">per-activity routing</h2>
+        <button class="strip-toggle" type="button" aria-expanded="true" aria-controls="routing-body">
+          <span class="chev" aria-hidden="true">&rsaquo;</span>
+          <h2 class="strip-title">per-activity routing</h2>
+        </button>
         <span class="mono strip-note" id="routing-note"></span>
       </div>
-      <div class="route-matrix" id="route-matrix"></div>
+      <div class="strip-body" id="routing-body">
+        <div class="route-matrix" id="route-matrix"></div>
+      </div>
     </section>
     <section class="strip" id="models" hidden>
       <div class="strip-head">
-        <h2 class="strip-title">routed host models</h2>
+        <button class="strip-toggle" type="button" aria-expanded="true" aria-controls="models-body">
+          <span class="chev" aria-hidden="true">&rsaquo;</span>
+          <h2 class="strip-title">routed host models</h2>
+        </button>
         <span class="mono strip-note" id="models-note"></span>
       </div>
+      <div class="strip-body" id="models-body">
       <div class="note"><span class="i">&#8505;</span><span>This is your <b>per-activity routing policy</b> &mdash;
         which host and model ak <i>assigns</i> to each kind of work. It is projected into
         <b>agentic-qe</b> agent overrides and <b>ak run</b> pipelines; agentic-qe also has its own
@@ -293,6 +324,7 @@ export function renderPage({ name, version }) {
         It does <b>not</b> establish which inference provider served a session.
         For the models and providers that <b>actually ran</b>, see <b>Usage &rarr; Scorecard</b>.</span></div>
       <div class="model-list" id="model-list"></div>
+      </div>
     </section>
   </section>
 
@@ -325,29 +357,26 @@ export function renderPage({ name, version }) {
     <section class="strip" id="mw-intel">
       <div class="strip-head">
         <h2 class="strip-title">machine-wide intelligence</h2>
-        <span class="mono strip-note" id="mw-note"></span>
       </div>
       <div class="hero" id="mw-hero"></div>
+      <details class="i-src" id="mw-census" hidden>
+        <summary>how these projects were counted</summary>
+        <div id="mw-census-body"></div>
+      </details>
       <div class="mw-table" id="mw-table"></div>
     </section>
 
-    <section class="strip" id="intel-picker">
-      <div class="strip-head">
-        <h2 class="strip-title">project detail</h2>
-        <span class="mono strip-note" id="intel-picker-note"></span>
-      </div>
-      <div class="mw-picker">
-        <label for="intel-project-select">select project</label>
-        <select id="intel-project-select"></select>
-      </div>
-    </section>
-
-    <section class="strip" id="history" hidden>
+    <section class="strip" id="history">
       <div class="strip-head">
         <h2 class="strip-title">learning over time &mdash; <span id="history-project-name"></span></h2>
-        <span class="mono strip-note" id="strip-note"></span>
+        <div class="mw-picker">
+          <label for="intel-project-select">select project</label>
+          <select id="intel-project-select"></select>
+        </div>
       </div>
-      <div class="spark-row">
+      <p class="mono strip-note" id="strip-note"></p>
+      <div class="empty" id="history-empty" hidden></div>
+      <div class="spark-row" id="spark-row">
         <figure class="spark">
           <figcaption class="mono">patterns learned</figcaption>
           <div class="spark-svg" id="spark-patterns"></div>
@@ -418,9 +447,15 @@ export function renderPage({ name, version }) {
         </section>
       </div>
       <section class="strip">
-        <div class="sh"><h2>provider account analytics</h2>
+        <div class="sh">
+          <button class="strip-toggle" type="button" aria-expanded="false" aria-controls="u-openrouter-body">
+            <span class="chev" aria-hidden="true">&rsaquo;</span>
+            <h2>provider account analytics</h2>
+          </button>
           <span class="n mono" id="u-openrouter-note">offline cache &middot; separate from transcript totals</span></div>
-        <div id="u-openrouter"></div>
+        <div class="strip-body" id="u-openrouter-body" hidden>
+          <div id="u-openrouter"></div>
+        </div>
       </section>
       <section class="strip">
         <div class="sh"><h2>what you worked on</h2>
@@ -517,15 +552,26 @@ ${LIVE_HTML}
       <header class="view-heading">
         <span class="view-eyebrow">SYSTEM</span>
         <h2>Storage</h2>
-        <p>Retained data by category, then by host &mdash; plus growth, the giants, and advisory
-          reclaimables. Paths are the answer here, so rows carry them.</p>
+        <p>Retained data by category, then by host, plus growth over time. Learning stores are
+          counted on their own because they dwarf everything else. Session-level detail lives in
+          Sessions.</p>
       </header>
       <div class="sy-grid">
-        <div class="sy-card sy-5">
+        <!-- Learning stores get their OWN card and are excluded from the two
+             charts below. On a real machine they are 99% of retained bytes, so
+             leaving them in renders the donut as a solid ring and flattens
+             every other series to nothing. Splitting them out is presentation
+             only: the collector still measures all four categories and
+             ak system --json still emits them. -->
+        <div class="sy-card sy-4">
+          <div class="sy-head"><h3>Learning stores</h3></div>
+          <div id="sys-learning"></div>
+        </div>
+        <div class="sy-card sy-4">
           <div class="sy-head"><h3>Retained data by category</h3></div>
           <div id="sys-donut"></div>
         </div>
-        <div class="sy-card sy-7">
+        <div class="sy-card sy-4">
           <div class="sy-head"><h3>Per-host split by category</h3></div>
           <div id="sys-hostsplit"></div>
         </div>
@@ -533,17 +579,39 @@ ${LIVE_HTML}
           <div class="sy-head"><h3>Growth &mdash; bytes added per day</h3></div>
           <div id="sys-growth"></div>
         </div>
-        <!-- Advisory rows only, in two safety tiers that do NOT sum. The liner
-             carries that accounting; there is no delete control here and none
-             may be added (ADR-0025 §6).
-             Full width, not a 5-column column: each row carries a rationale
-             paragraph and a path, and in a narrow column nine of them tower over
-             whatever shares their row. -->
+      </div>
+    </section>
+
+    <!-- Advisory is its own area, not a card under a measurement. Everything
+         else in System reports what IS; this is the only place that suggests
+         what you might DO, and it still has no delete control and may never
+         gain one (ADR-0025 §6). Giving it a tab is what keeps that distinction
+         legible instead of burying it under a byte chart. -->
+    <section class="panel" id="panel-sys-advisory" role="tabpanel" hidden>
+      <header class="view-heading">
+        <span class="view-eyebrow">SYSTEM</span>
+        <h2>Advisory</h2>
+        <p>What you could reclaim, in two safety tiers that are reported separately and never
+          added. Nothing here removes anything &mdash; each row names the path and the command
+          that already owns removal, for you to run yourself.</p>
+      </header>
+      <div class="sy-grid">
         <div class="sy-card">
-          <div class="sy-head"><h3>Reclaimable &mdash; advisory only</h3></div>
+          <div class="sy-head"><h3>Reclaimable</h3></div>
           <div class="sy-liner" id="sys-reclaim-note"></div>
           <div id="sys-reclaim"></div>
         </div>
+      </div>
+    </section>
+
+    <section class="panel" id="panel-sys-sessions" role="tabpanel" hidden>
+      <header class="view-heading">
+        <span class="view-eyebrow">SYSTEM</span>
+        <h2>Sessions</h2>
+        <p>The individual session files behind the retained bytes &mdash; which projects hold the
+          largest of them, and how much of a host's retained data each one accounts for.</p>
+      </header>
+      <div class="sy-grid">
         <div class="sy-card">
           <div class="sy-head"><h3>Largest sessions</h3></div>
           <div id="sys-topsessions"></div>
@@ -586,6 +654,20 @@ ${LIVE_HTML}
         <div class="sy-card sy-7">
           <div class="sy-head"><h3>Unique across hosts</h3></div>
           <div id="sys-catcounts"></div>
+          <!-- Two independent multi-selects, every option on at first paint, so
+               the default view is still the whole inventory. Populated from the
+               payload's own kinds/hosts rather than hardcoded, so a host or a
+               kind added to the collector appears here without an edit. -->
+          <div class="sy-filters">
+            <div class="sy-filter-row">
+              <span class="sy-filter-l" id="sys-cat-kind-l">show</span>
+              <div class="sy-ctl" id="sys-cat-kinds" role="group" aria-labelledby="sys-cat-kind-l"></div>
+            </div>
+            <div class="sy-filter-row">
+              <span class="sy-filter-l" id="sys-cat-host-l">carried by</span>
+              <div class="sy-ctl" id="sys-cat-hosts" role="group" aria-labelledby="sys-cat-host-l"></div>
+            </div>
+          </div>
           <div id="sys-matrix"></div>
         </div>
       </div>
@@ -595,21 +677,14 @@ ${LIVE_HTML}
       <header class="view-heading">
         <span class="view-eyebrow">SYSTEM</span>
         <h2>Projects</h2>
-        <p>Every project the machine knows, sized two ways &mdash; code and disk &mdash; with the
-          overhead (<span class="mono">.git</span>, <span class="mono">node_modules</span>) kept
-          separate so it cannot masquerade as &ldquo;your project got big&rdquo;.</p>
+        <p>Every repository you have worked in with a host: how much code it holds, which
+          languages that code is in, what the whole project directory occupies on disk, and when
+          you last touched it. What is left out, and why, is accounted for beneath the table.</p>
       </header>
       <div class="sy-grid">
         <div class="sy-card">
           <div class="sy-head"><h3>Project footprints</h3></div>
           <div id="sys-projects"></div>
-        </div>
-        <!-- The tail the language registry could not name, listed BY NAME so
-             "Other" on the bar above reads as a to-do list rather than a
-             rounding bucket. -->
-        <div class="sy-card">
-          <div class="sy-head"><h3>Unrecognized &mdash; what &ldquo;other&rdquo; is made of</h3></div>
-          <div id="sys-unrecognized"></div>
         </div>
       </div>
     </section>

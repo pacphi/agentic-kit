@@ -16,6 +16,24 @@
   [ADR-0023](0023-fail-closed-operations-and-explicit-degradation.md),
   [ADR-0024](0024-project-intelligence-telemetry.md)
 
+> **2026-08-07 amendment.** Four changes, each recorded where it belongs:
+> project discovery moved to the shared census ([ADR-0027](0027-shared-project-census.md));
+> Storage reports learning stores on their own card and its per-host split covers real hosts only,
+> naming the excluded figures rather than dropping them ([ADR-0023](0023-fail-closed-operations-and-explicit-degradation.md) §10);
+> the Runtime census dropped its launch-budget and child-process fields, the first because no code
+> path could ever populate it ([ADR-0023](0023-fail-closed-operations-and-explicit-degradation.md) §9);
+> and the Catalog now covers project scope across every project on disk, not just the launching repo.
+> The Projects table dropped its forge sub-line, its presence-only stack chips and its
+> tree/.git/node_modules breakdown from the RENDERING — all three are still measured and still ship
+> on `ak system --json` — and now lists only repositories with a remote that a host has recorded a
+> session in, counting the excluded directories beneath it.
+>
+> The area also grew from five sub-views to seven: **Advisory** and **Sessions** split out of
+> Storage. Advisory earns its own tab because it is the only part of System that suggests an
+> action while every other part reports what is; that distinction was invisible while it sat as a
+> card under a byte chart. Neither split changes a measurement, and Advisory still has no delete
+> verb (§6 stands).
+
 ## Context
 
 The dashboard currently answers three families of questions, each owned by its own context:
@@ -111,7 +129,7 @@ Storage   Breakdown tree: category → host → project → session. Transcripts
           learning stores vs kit caches. Trailing-30d growth sparkline per host. Top-N largest
           sessions/files. Advisory reclaimable candidates in two safety tiers, never one total.
 Runtime   Live process table (host, pid, CPU%, RSS, uptime, bound project) + combined totals.
-          Daemon census (count, age vs TTL, budget state). Child/MCP server process count.
+          Daemon census (count, age vs TTL).
 Catalog   Deduplicated skills / agents / commands / plugins / MCP servers, each with a per-host
           presence matrix (which hosts carry it).
 Projects  Table: project (name links to its git remote's web page when one exists — derived
@@ -152,7 +170,7 @@ Metrics marked ✚ are additions beyond the requesting examples; the taxonomy is
 | Install | Shared caches: npx cache envs, brain KB, browser binaries ✚ | known roots |
 | Install | Total install bytes + machine free-space denominator ✚ | walk + `statfs` |
 | Runtime | Per live host process: pid, host, CPU%, RSS, uptime, bound project | existing runtime survey + `ps -o pcpu,rss` |
-| Runtime | Daemon census: count, age vs 12h TTL, budget state ✚ | existing daemon registry |
+| Runtime | Daemon census: count, age vs 12h TTL ✚ | existing daemon registry |
 | Runtime | Child / MCP-server process count ✚ | survey process tree |
 | Storage | Transcript bytes + file counts: host → project → session | transcript-root walk |
 | Storage | Host ledgers/logs: Codex `state_N.sqlite`, statusline tee, runtime-debug log, OpenCode store | known paths |

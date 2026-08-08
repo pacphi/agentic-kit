@@ -81,6 +81,24 @@ scope and at machine-wide-rollup scope alike. There is no unlabeled "this projec
 Intelligence: the panel always shows an explicitly selected, explicitly labeled project alongside
 the always-visible machine-wide rollup. See [Project intelligence](project-intelligence.md).
 
+**Project census** — the one enumeration of this machine's projects, read from the session `cwd`
+recorded in every Claude and Codex transcript plus the OpenCode session store. Every area derives
+its project list from it; none discovers projects independently ([ADR-0027](../adr/0027-shared-project-census.md)).
+
+**Scope** — the named filter an area applies to the census, and the reason two areas can report
+different totals without either being wrong. `everSeen` (all, deletions included), `onDisk` (still
+resolvable), `gitRepos` (under version control) and `learning` (carries learning state). A count is
+never rendered without the sentence naming its scope.
+
+**Learning state** — a `.claude-flow`, `.agentic-qe` or `.swarm` directory in a project: memory or
+intelligence has been *activated* there, by any host. Distinct from having been *trained*, which is
+what ruflo pattern counters measure and what the retired `.claude-flow/neural/` predicate required.
+
+**Directory scope vs project scope** — `everSeen`/`onDisk`/`gitRepos` count directories, because
+directories are what have bytes and lines in them. `learning` counts projects, folding a
+repository's sub-directories and its ephemeral agent worktrees onto one identity, because a project
+is what a user selects.
+
 ## Machine footprint language
 
 | Term | Meaning |

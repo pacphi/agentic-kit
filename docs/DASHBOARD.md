@@ -36,7 +36,7 @@ permanent.
 | Overview | Hosts & Routing | `#overview/hosts` | Hosts & routing | Enabled execution hosts, activity assignments, primary-host policy, and escalation paths |
 | Overview | Providers | `#overview/providers` | Inference providers | Provider bindings, availability, provenance, and configuration health |
 | Overview | Runtime | `#overview/runtime` | Runtime health | Local services, MCP connections, processes, and operational readiness |
-| Overview | Intelligence | `#overview/intelligence` | Intelligence & learning | Machine-wide learning rollup across every ruflo-initialized project, plus near-live detail for one explicitly selected project |
+| Overview | Intelligence | `#overview/intelligence` | Intelligence & learning | Machine-wide learning rollup across every project with memory or intelligence state, plus near-live detail for one explicitly selected project |
 | Usage | Scorecard | `#usage/score` | Usage scorecard | Token consumption, API-equivalent cost, efficiency, and trends |
 | Usage | Limits | `#usage/limits` | Provider limits | Current provider windows, reset timing, and available capacity |
 | Usage | Findings | `#usage/findings` | Usage findings | Actionable anomalies, efficiency opportunities, and evidence-backed recommendations |
@@ -45,10 +45,12 @@ permanent.
 | Observability | Live | `#observability/live` | Observability · Live | Projects and roots with current presence or fresh meaningful activity |
 | Observability | History | `#observability/history` | Observability · History | Retained roots that are not currently Live |
 | System | Summary | `#system/summary` | Summary | Install size, retained data, live resource use, deployed inventory, and the machine's largest storage consumers in one glance |
-| System | Storage | `#system/storage` | Storage | Where the retained bytes are, by category, host, project, and session — plus growth and advisory reclaimables in two safety tiers |
-| System | Runtime | `#system/runtime` | Runtime | Live host processes, their CPU and memory, background daemons, and machine denominators |
-| System | Catalog | `#system/catalog` | Catalog | Deduplicated skills, agents, commands, plugins, and MCP servers, with a per-host presence matrix |
-| System | Projects | `#system/projects` | Projects | Projects ever seen across hosts vs still on disk; per on-disk project its approximate lines of code, detected stack, working-tree, `.git`, and `node_modules` size |
+| System | Advisory | `#system/advisory` | Advisory | What could be reclaimed, in two safety tiers reported separately and never added — the only System area that suggests an action, and it still has no delete control |
+| System | Sessions | `#system/sessions` | Sessions | The largest individual session files, the project each belongs to, and its share of that host's retained bytes |
+| System | Storage | `#system/storage` | Storage | Where the retained bytes are, by category and host — learning stores counted separately because they dwarf everything else — plus per-series growth |
+| System | Runtime | `#system/runtime` | Runtime | Live host processes, their CPU and memory, background daemons, and machine denominators — refreshed on the header's poll clock while open |
+| System | Catalog | `#system/catalog` | Catalog | Every deduplicated skill, agent, command, plugin and MCP server across user scope and all projects on disk, with a per-host presence matrix and kind/host filters |
+| System | Projects | `#system/projects` | Projects | Every repository with a remote that a host has recorded a session in — its approximate lines of code, language mix, total disk size and last activity. Worktrees, sub-folders and remote-less repositories are counted below the table, not listed |
 
 About is one scrolling page, so its hashes scroll to a section rather than swapping panels; `#about`
 alone opens the page at the top.
@@ -111,7 +113,9 @@ Overview keeps status and routing in one health-first area:
 - **Providers** presents inference-provider bindings and their configuration provenance.
 - **Runtime** presents operational services, processes, and MCP readiness.
 - **Intelligence** presents memory, learning, and quality-improvement signals machine-wide: an
-  always-visible rollup folded across every ruflo-initialized project on this machine, plus detail
+  always-visible rollup folded across every project on this machine where memory or intelligence has
+  been activated — a `.claude-flow`, `.agentic-qe` or `.swarm` directory, whichever host created it
+  — plus detail
   for one explicitly selected, explicitly labeled project — the neural pattern store's current
   size, its separate lifetime patterns-learned counter, and reasoning-graph growth. Project
   selection defaults to whichever discovered project was most recently active; there is no implicit
@@ -120,8 +124,32 @@ Overview keeps status and routing in one health-first area:
   ruflo/agentic-qe already write under `.claude-flow/` and updates near-live over a per-project SSE
   stream while the view is open, falling back to the general status poll otherwise. See
   [Project intelligence](ddd/project-intelligence.md) and
-  [ADR-0024](adr/0024-project-intelligence-telemetry.md) for the full model, the project-discovery
-  mechanism, and the two learning metrics' load-bearing distinction, now also at machine scope.
+  [ADR-0024](adr/0024-project-intelligence-telemetry.md) for the full model and the two learning
+  metrics' load-bearing distinction, and [ADR-0027](adr/0027-shared-project-census.md) for project
+  discovery.
+
+### Why project counts differ between tabs
+
+Every area derives its project list from one census, so a project means the same thing everywhere —
+a session run in `myrepo/backend` belongs to `myrepo`, not to a project called `backend`, and an
+agent worktree is not a peer of the repository it was cut from.
+
+The totals still differ, because the tabs ask different questions:
+
+| Tab | Counts | Over |
+|---|---|---|
+| Overview → Intelligence | projects with learning state | all time |
+| Observability → History | projects with retained sessions | the selected history window |
+| Usage → Scorecard | projects with recorded usage | the selected day window |
+| System → Projects | **directories** ever seen, and the subset still on disk | all time |
+
+Two of those differences are structural rather than temporal. System counts **directories**, because
+only a directory has bytes and lines to measure; the other tabs count **projects**. And a windowed
+count is smaller than a lifetime one by exactly the projects you have not touched lately — a shorter
+window, not a missing project.
+
+Each count carries the sentence explaining what it counted; on Intelligence it is behind
+**how these projects were counted**, next to the rollup.
 
 ## Usage
 

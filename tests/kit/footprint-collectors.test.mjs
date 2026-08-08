@@ -19,7 +19,7 @@ import {
 } from '../../src/lib/footprint/walk.mjs';
 import * as storageModule from '../../src/lib/footprint/storage.mjs';
 import {
-  collectStorage, worktreeReclaimables, buildGrowth, localDay, STORAGE_DEFAULTS,
+  collectStorage, worktreeReclaimables, buildGrowth, localDay, labelSessions, STORAGE_DEFAULTS,
 } from '../../src/lib/footprint/storage.mjs';
 import {
   collectProjects, countLines, describeRemote, measureProject, nodeModulesRoots,
@@ -986,4 +986,69 @@ test('codex MCP table names are read from config.toml without parsing values', (
   ].join('\n');
   assert.deepEqual(tomlTableNames(source, 'mcp_servers'), ['ruflo', 'with.dot', 'single']);
   assert.deepEqual(tomlTableNames('', 'mcp_servers'), []);
+});
+
+// ── session project labels ───────────────────────────────────────────────────
+// A claude transcript directory encodes the project path with EVERY separator
+// flattened to '-', so `-a-b-tub-vault` could be .../tub-vault or .../tub/vault
+// and only the filesystem can say which. A consumer that split on the last
+// hyphen would render `tub-vault` as `vault`, which is why the decode happens
+// here rather than in a renderer.
+
+test('a decoded project is reported by its basename, hyphens in the name intact', () => {
+  // The case a string split gets wrong: the decoded path's LAST segment is
+  // `tub-vault`, and splitting the encoded name on '-' would yield `vault`.
+  // (decodeClaudeProjectDir itself is covered in footprint-projects; its stat
+  // budget makes it unusable against a deep mkdtemp path, so the decode is
+  // injected here and this test owns only what labelSessions does with it.)
+  const decodeDir = () => '/repos/tub-vault';
+  const [row] = labelSessions([{ session: 'a.jsonl', project: '-repos-tub-vault' }], { decodeDir });
+  assert.equal(row.projectLabel, 'tub-vault');
+  assert.equal(row.projectResolved, true);
+  assert.equal(row.project, '-repos-tub-vault', 'the raw key is the tree join key and must survive untouched');
+});
+
+test('an undecodable project is FLAGGED, never guessed at', () => {
+  // decodeClaudeProjectDir returns null for a directory that no longer exists.
+  const encoded = '-repos-gone-for-ever';
+  const [row] = labelSessions([{ session: 'a.jsonl', project: encoded }], { decodeDir: () => null });
+  assert.equal(row.projectResolved, false, 'a deleted project cannot be decoded and must say so');
+  assert.equal(row.projectLabel, encoded, 'falling back to the encoded name beats inventing one');
+});
+
+test('labelSessions leaves an unattributed row alone', () => {
+  const [row] = labelSessions([{ session: 'rollout.jsonl', project: null }]);
+  assert.equal(Object.hasOwn(row, 'projectLabel'), false);
+  assert.equal(Object.hasOwn(row, 'projectResolved'), false);
+});
+
+test('labelSessions decodes each distinct project once', () => {
+  let calls = 0;
+  const decodeDir = (name) => { calls += 1; return `/x/${name}`; };
+  const rows = [
+    { session: 'a', project: '-p1' }, { session: 'b', project: '-p1' },
+    { session: 'c', project: '-p2' }, { session: 'd', project: '-p1' },
+  ];
+  labelSessions(rows, { decodeDir });
+  assert.equal(calls, 2, 'the decode is a filesystem walk; two projects means two walks');
+});
+
+test('a decoder that throws degrades that row rather than the whole panel', () => {
+  const decodeDir = () => { throw new Error('permission denied'); };
+  const [row] = labelSessions([{ session: 'a', project: '-p' }], { decodeDir });
+  assert.equal(row.projectResolved, false);
+});
+
+test('collectStorage labels the sessions it returns', (t) => {
+  const { root, now, roots } = storageFixture(t);
+  const result = collectStorage({
+    roots, projects: [], now: () => now, detectWorktrees: false, fsImpl: fixtureFs(root),
+    decodeDir: (name) => (name === '-repos-keel' ? '/repos/keel' : null),
+  });
+  const attributed = result.topSessions.filter((s) => s.project);
+  assert.ok(attributed.length > 0, 'anti-vacuity: the fixture must produce an attributed session');
+  for (const s of attributed) {
+    assert.equal(s.projectLabel, 'keel', 'the wiring must reach topSessions, not just exist');
+    assert.equal(s.projectResolved, true);
+  }
 });

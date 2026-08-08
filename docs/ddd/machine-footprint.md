@@ -222,13 +222,26 @@ measured zero still says where it looked.
 ### Runtime census
 
 A point-in-time table of live host processes — reusing the existing current-user, argv-minimized
-survey and extending its `ps` read with `pcpu`/`rss` — plus the daemon census (count, age
-against the 12h TTL, budget state) and a child/MCP-server process count. The census is
+survey and extending its `ps` read with `pcpu`/`rss` — plus the daemon census (count, and the
+oldest daemon's age against the 12h TTL). The census is
 **ephemeral**: computed per request, never persisted into the snapshot file, because a process
 table is a moment, not a fact worth retaining, and persisting it would create a stale-liveness
 trap. `snapshot.mjs` enforces this structurally — it serializes only the deep-tier keys (`install`,
 `storage`, `catalog`, `projects`, `consumers`), so a census handed to it is dropped rather than
 written.
+
+Two figures this census once carried are deliberately gone. A **launch-budget** field could never
+be populated: ruflo exposes no local state to read it from, so it was a permanent "unavailable"
+rather than an honest degradation, and a permanently unknowable quantity is removed rather than
+rendered (see [ADR-0023](../adr/0023-fail-closed-operations-and-explicit-degradation.md) §9). A
+**child/MCP-server process count** is still computed by the survey — it is what makes the per-host
+rows correct — but is no longer republished: as a rendered figure it was a bare number with no
+denominator, no history, and no action attached to it.
+
+The census is also the one deep-tier neighbour that refreshes on the dashboard's ordinary poll
+clock while its view is open. It measures liveness, so a figure loaded once when the tab was first
+opened is the one kind of staleness this area cannot tolerate — but only the cheap tier polls; the
+filesystem walk stays behind an explicit rescan.
 
 On **Windows** the census is real, not unsupported. `src/lib/live/win-process-survey.ps1` — a plain
 text script invoked the way the POSIX path already invokes `ps` and `lsof`, with no npm dependency
@@ -256,6 +269,16 @@ sessions and files, and advisory `ReclaimableCandidate` rows (stale npx envs, tr
 a stated age, superseded cache snapshots, regenerable package caches, redundant browser
 revisions, extra runtime versions, orphaned worktrees), each carrying its rationale and its path.
 Candidates are information, not actions — this context has no delete verb.
+
+**Learning stores are reported on their own, not mixed into the shared charts.** On a real
+machine they are ~99% of retained bytes, so a donut that includes them renders as a solid ring
+and a per-host bar chart flattens every other series to a sliver — the chart stops being a
+measurement and becomes a picture of one category. They get a single-figure card; the donut and
+the per-host split cover the remaining three categories and **state the exclusion on the panel**.
+This is presentation only: the collector measures all four categories and `ak system --json`
+emits all four, unchanged. The per-host split likewise shows only real hosts (claude, codex,
+opencode) and names the remaining bytes — ak's own state — in a footnote with its figure, so the
+bars still account for the whole of the donut beside them rather than silently disagreeing with it.
 
 Two honest limits belong with the numbers. **Growth is approximate and says so**: a file
 contributes its whole size on its mtime day, which is exact for append-only transcripts and
@@ -354,6 +377,17 @@ rows describe overlapping paths (an aged transcript can also sit under a project
 exists) reports its total as unknown-with-reason rather than counting the same bytes twice — the
 row count still stands, and every row still carries its own measured figure.
 
+Reclaimables are their own area rather than a card under a measurement. Everything else in this
+context reports what **is**; this is the only surface that suggests what a user might **do**, and
+that difference is worth a tab of its own — buried under a byte chart it read as another statistic.
+It still has no delete verb and may never gain one.
+
+The rows render as one scrollable table ordered regenerable-first, not as two stacked blocks of
+paragraph-bearing cards. The tier pill survives that change because it is what distinguishes the
+two promises at a glance, and only the regenerable pill carries bytes: on a row that may be in
+use, a figure in the pill would read as "this much is yours to take back", which is a claim the
+measurement does not support. A review row's bytes stay in the size column, marked as context.
+
 The surfaces honour the split structurally: the `review` tier is rendered without a leading total
 at all, and its bytes ride each row as context, so the block cannot be read as "N GB available
 here". A row from a snapshot predating the `safety` field lands in `review` — the tier that
@@ -365,10 +399,29 @@ Deduplicated `CatalogItem`s across hosts — skills, agents, commands, plugins, 
 keyed by normalized name, each with a per-host presence matrix (which hosts carry it, from which
 surface it was observed). Counting is by manifest/directory-entry **names** on the host catalog
 surfaces Integration management already projects into; item file contents are not parsed beyond
-what naming requires. The config-surface row (managed CLAUDE.md/AGENTS.md block count, settings
+what naming requires. Scope is **user plus every project on disk**, not user plus the launching
+repo: a skill defined in a repository is as deployed as one in `~/.claude`, and the question this
+inventory answers is what the machine carries. Deduplication by `(kind, name)` means a name
+defined in five projects is still one row, so the inventory grows with distinct names rather than
+with project count.
+
+The presence matrix carries two independent multi-select filters — by kind and by host — with every
+option selected at first paint, so the default remains the whole inventory. The host filter matches
+**any** selected host rather than all of them: "carried by codex" is the question a reader is
+asking, and intersecting would answer a different one. A filtered view states how much it is
+hiding, and each row carries its own kind, because a filtered list must never leave a name
+unexplained. The config-surface row (managed CLAUDE.md/AGENTS.md block count, settings
 file sizes) lives here because it answers the same "what is deployed" question.
 
 ### Project accounting
+
+**The Projects table lists repositories, not directories.** A row is rendered only when it has a
+remote and a host has recorded a session in it. Without that rule the table listed ephemeral
+`.claude/worktrees/agent-*` checkouts, sub-folders a session happened to run in, and home
+directories, each beside its own parent repository as though it were a peer with its own
+multi-gigabyte figure. The session test excludes an empty host list, never a missing one — a
+snapshot predating that field cannot answer the question, and reading absent as zero would blank
+the table. Excluded directories are counted and characterised beneath the table.
 
 **Two numbers, not one.** `discoverProjectSources()` publishes `everSeen` and `onDisk`, and they
 are different questions:

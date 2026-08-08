@@ -529,12 +529,56 @@ export function collectStorage({
       files: sumMeasurements(tree.map((c) => c.files), { asOf }),
     },
     growth: buildGrowth(growth, { asOf, growthDays }),
-    topSessions: sessionLeaves.slice(0, topN),
+    // Decode only the rows that survive the top-N cut. `project` on a
+    // claude-projects row is the ENCODED directory name, in which every `/`,
+    // `.` and `-` became `-` — so it cannot be split back into a path by
+    // string manipulation, and a client that guesses at the last hyphenated
+    // segment turns `tub-vault` into `vault`. decodeClaudeProjectDir resolves
+    // the ambiguity the only way it can be resolved: by walking the candidates
+    // against the real filesystem. Doing it here, after the slice, bounds the
+    // cost to topN rather than to every session file measured.
+    topSessions: labelSessions(sessionLeaves.slice(0, topN), { decodeDir, fsImpl }),
     topFiles: files.slice(0, topN),
     reclaimables,
     reclaimSummary: summarizeReclaimables(reclaimables, { asOf }),
     complete: !anyDegraded,
   };
+}
+
+/**
+ * Give each session row a human `projectLabel` beside its raw `project` key.
+ *
+ * The raw key stays untouched — it is the tree key everything else joins on.
+ * The label is the decoded directory's basename when the decode succeeds, and
+ * falls back to the encoded name when it does not: a project directory that no
+ * longer exists cannot be decoded, and showing its encoded form is honest
+ * where inventing a plausible name would not be.
+ *
+ * Memoized per distinct project key: the top-N rows commonly share a handful of
+ * projects, and each decode is a bounded filesystem walk.
+ *
+ * @param {Array<Record<string, any>>} rows
+ * @param {{ decodeDir?: typeof decodeClaudeProjectDir, fsImpl?: typeof fs }} [opts]
+ */
+export function labelSessions(rows, { decodeDir = decodeClaudeProjectDir, fsImpl = fs } = {}) {
+  const cache = new Map();
+  const label = (key) => {
+    if (!cache.has(key)) {
+      let decoded;
+      try { decoded = decodeDir(key, { fsImpl }); } catch { decoded = null; }
+      // `projectResolved: false` is the load-bearing half. A decode fails when
+      // the project directory is gone — the encoding is only reversible by
+      // walking real directories — and a consumer that cannot tell a decoded
+      // name from an undecodable one would present a guess as a fact.
+      cache.set(key, decoded
+        ? { projectLabel: path.basename(decoded), projectResolved: true }
+        : { projectLabel: key, projectResolved: false });
+    }
+    return cache.get(key);
+  };
+  return rows.map((row) => (
+    row.project ? { ...row, ...label(row.project) } : row
+  ));
 }
 
 /** Trailing-window growth per host, from mtime + size only — no content read

@@ -368,7 +368,15 @@ export function createSystemCollector({
       await breathe();
 
       markPhase('catalog');
-      sections.catalog = collect.catalog({ cwd, cfg, now: () => startedAt, fsImpl, ...(collectorOptions.catalog ?? {}) });
+      // The same on-disk project list storage measures. A skill defined in a
+      // repo is as deployed as one in ~/.claude, so the inventory covers every
+      // project rather than only the one the dashboard was launched from —
+      // `?? []` keeps "discovery failed" as user scope, never as a claim that
+      // no project defines anything.
+      sections.catalog = collect.catalog({
+        cwd, cfg, projects: projectPaths ?? [], now: () => startedAt, fsImpl,
+        ...(collectorOptions.catalog ?? {}),
+      });
       await breathe();
 
       markPhase('projects', { scanned: 0, total: onDisk.length });
