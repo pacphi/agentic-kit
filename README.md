@@ -4,6 +4,7 @@
 [![npm version](https://img.shields.io/npm/v/@pacphi/agentic-kit/next?label=npm%40next)](https://www.npmjs.com/package/@pacphi/agentic-kit)
 [![node](https://img.shields.io/node/v/@pacphi/agentic-kit)](https://nodejs.org)
 [![license: MIT](https://img.shields.io/npm/l/@pacphi/agentic-kit)](LICENSE)
+[![explainer](https://img.shields.io/badge/explainer-read_the_field_manual-C9581D)](https://pacphi.github.io/agentic-kit/)
 
 **One npm package that installs, heals, and *proves* [ruflo](https://github.com/ruvnet/ruflo) (claude-flow) + [agentic-qe](https://github.com/proffesor-for-testing/agentic-qe), grounds them in *RuvNet Brain* — an offline, source-cited knowledge base over the rUv stack — and wires Claude Code + Codex (+ opencode) into one ambidextrous, self-routing setup. macOS · Linux · Windows.**
 

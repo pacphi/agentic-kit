@@ -468,6 +468,26 @@
   details .a strong{color:var(--ink)}
   details .a p + p{margin-top:9px}
 
+  /* ---------------- fork-me corner ribbon ---------------- */
+  .forkme{position:fixed;top:0;right:0;width:172px;height:172px;overflow:hidden;z-index:60;pointer-events:none}
+  .forkme a{
+    position:absolute;display:block;width:270px;top:46px;right:-66px;transform:rotate(45deg);
+    background:linear-gradient(180deg,var(--tool),var(--tool-deep));
+    color:#FFF7EC;text-decoration:none;text-align:center;
+    font-family:var(--mono);font-size:11.5px;font-weight:600;letter-spacing:.14em;text-transform:uppercase;
+    padding:9px 0;pointer-events:auto;
+    border-top:1.5px dashed rgba(255,247,236,.6);border-bottom:1.5px dashed rgba(255,247,236,.6);
+    box-shadow:0 3px 12px rgba(34,56,44,.35);
+  }
+  .forkme a:hover{background:var(--tool-deep)}
+  .forkme a:focus-visible{outline:2.5px solid var(--pine);outline-offset:2px}
+  @media(max-width:640px){
+    .forkme{width:134px;height:134px}
+    .forkme a{width:216px;top:34px;right:-56px;font-size:9.5px;letter-spacing:.1em;padding:7px 0}
+    header .eyebrow{padding-right:76px}
+  }
+  @media print{.forkme{display:none}}
+
   footer{margin-top:64px;padding:36px 0 80px;border-top:3px double var(--ink)}
   footer .stamp-line{
     display:inline-block;border:2px solid var(--stamp);border-radius:6px;color:var(--stamp);
@@ -479,6 +499,8 @@
 </style>
 </head>
 <body>
+
+<div class="forkme"><a href="https://github.com/pacphi/agentic-kit" aria-label="Fork me on GitHub — pacphi/agentic-kit repository">Fork me on GitHub</a></div>
 
 <div class="wrap">
 
