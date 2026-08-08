@@ -26,6 +26,11 @@ Git revisions, and contributor links have different package footprints while
 [Installation and scope](docs/INSTALLATION.md) before choosing a non-global method
 or deploying on a shared machine.
 
+Want to try it before installing anything locally? Open this repo in GitHub
+Codespaces (or any [dev container](https://containers.dev)-compatible tool) —
+a "try the published release" configuration installs `ak` into a disposable
+container for you. See [docs/DEVCONTAINERS.md](docs/DEVCONTAINERS.md).
+
 **What you get:**
 
 - **One command** installs + heals + *proves* ruflo & agentic-qe — native SQLite, memory, security, statusline (past npm's `allow-scripts` gate).
@@ -258,6 +263,9 @@ tarball, Git, and source-checkout installs, including user/machine/project impac
 
 [docs/HOST-SUPPORT.md](docs/HOST-SUPPORT.md) — Claude, Codex, and OpenCode support
 across Ruflo, AQE, and RuvNet Brain, with limitations and current upstream risks.
+
+[docs/DEVCONTAINERS.md](docs/DEVCONTAINERS.md) — Codespaces/dev container setup,
+both for contributing to this repo and for trying the published release.
 
 [docs/DASHBOARD.md](docs/DASHBOARD.md) — dashboard navigation, deep links, keyboard behavior, and
 the meaning of each primary and secondary view.

@@ -1,0 +1,24 @@
+{
+  // Reuses docker/Dockerfile — the same image the "first-use" docker-compose
+  // environment (see docker/USER-GUIDE.md) builds — so both paths install the
+  // published package the same way, on the same base. This config does NOT
+  // build agentic-kit from this checkout; use the top-level
+  // .devcontainer/devcontainer.json for that.
+  "name": "agentic-kit (try the published release)",
+  "build": {
+    "dockerfile": "../../docker/Dockerfile",
+    "context": "../../docker"
+  },
+  "remoteUser": "tester",
+  "remoteEnv": {
+    "AK_DIST_TAG": "next"
+  },
+  "postCreateCommand": "bash ${containerWorkspaceFolder}/.devcontainer/consumer/postCreate.sh",
+  "forwardPorts": [7431],
+  "portsAttributes": {
+    "7431": {
+      "label": "ak dashboard",
+      "onAutoForward": "notify"
+    }
+  }
+}

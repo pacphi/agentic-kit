@@ -1,0 +1,110 @@
+name: devcontainers
+
+# Builds and smoke-tests both dev container configs with the reference
+# devcontainer CLI — the same tool Codespaces/VS Code use — so a config
+# change is proven before merge (PR trigger) and upstream drift (base image
+# tags, the published npm package's install path) is caught even when
+# nothing in this repo changed (monthly schedule). See docs/DEVCONTAINERS.md.
+
+on:
+  pull_request:
+    paths: &all-paths
+      - '.devcontainer/**'
+      - 'docker/Dockerfile'
+      - 'package.json'
+      - 'pnpm-lock.yaml'
+      - 'pnpm-workspace.yaml'
+      - 'bin/**'
+      - 'src/**'
+      - '.github/workflows/devcontainers.yml'
+  push:
+    branches: [main]
+    paths: *all-paths
+  schedule:
+    # Monthly: dev container definitions change rarely, but the base image
+    # tag and the published package they install can drift independently.
+    - cron: '23 6 1 * *'
+  workflow_dispatch:
+
+jobs:
+  # Narrows the two jobs below to only what each one actually depends on, so
+  # a docker/Dockerfile-only change (consumer) doesn't rebuild the maintainer
+  # config and vice versa. Scheduled/manual runs always exercise both — that
+  # is the point of the monthly drift check, there is no diff to filter on.
+  changes:
+    name: detect relevant changes
+    runs-on: ubuntu-latest
+    outputs:
+      maintainer: ${{ steps.filter.outputs.maintainer || 'true' }}
+      consumer: ${{ steps.filter.outputs.consumer || 'true' }}
+    steps:
+      - uses: actions/checkout@v7
+        if: github.event_name == 'pull_request' || github.event_name == 'push'
+      - uses: dorny/paths-filter@v3
+        id: filter
+        if: github.event_name == 'pull_request' || github.event_name == 'push'
+        with:
+          filters: |
+            maintainer:
+              - '.devcontainer/devcontainer.json'
+              - 'package.json'
+              - 'pnpm-lock.yaml'
+              - 'pnpm-workspace.yaml'
+              - 'bin/**'
+              - 'src/**'
+              - '.github/workflows/devcontainers.yml'
+            consumer:
+              - '.devcontainer/consumer/**'
+              - 'docker/Dockerfile'
+              - '.github/workflows/devcontainers.yml'
+
+  maintainer:
+    name: maintainer devcontainer (build from this checkout)
+    needs: changes
+    if: needs.changes.outputs.maintainer == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      # `up` runs postCreateCommand (corepack enable && pnpm install && npm
+      # link), then runCmd proves `ak` actually resolved to THIS checkout —
+      # not a stale global — before running the fast surface test.
+      - name: Build + smoke test
+        uses: devcontainers/ci@v0.3
+        with:
+          configFile: .devcontainer/devcontainer.json
+          push: never
+          runCmd: |
+            set -euo pipefail
+            linked=$(ak --version)
+            pkg=$(node -p "require('./package.json').version")
+            echo "ak --version: ${linked}"
+            echo "package.json: ${pkg}"
+            case "${linked}" in
+              *"${pkg}"*) ;;
+              *) echo "npm link did not resolve to this checkout" >&2; exit 1 ;;
+            esac
+            pnpm run test:surface
+
+  consumer:
+    name: consumer devcontainer (published release)
+    needs: changes
+    if: needs.changes.outputs.consumer == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      # `up` runs postCreate.sh (npm install -g the published package, seeds
+      # ~/sandbox); runCmd checks the CLI is reachable and the sandbox exists.
+      - name: Build + smoke test
+        uses: devcontainers/ci@v0.3
+        with:
+          configFile: .devcontainer/consumer/devcontainer.json
+          push: never
+          runCmd: |
+            set -euo pipefail
+            which ak
+            ak --version
+            ak --help --all > /dev/null
+            test -d "$HOME/sandbox/.git"
+            echo "sandbox present at $HOME/sandbox"
