@@ -591,9 +591,9 @@ ${LIVE_HTML}
       <header class="view-heading">
         <span class="view-eyebrow">SYSTEM</span>
         <h2>Advisory</h2>
-        <p>What you could reclaim, in two safety tiers that are reported separately and never
-          added. Nothing here removes anything &mdash; each row names the path and the command
-          that already owns removal, for you to run yourself.</p>
+        <p>Space you could get back. <b>Regenerable</b> rebuilds itself on demand;
+          <b>review</b> might still be in use. Nothing here deletes &mdash; each row gives you
+          the path and the command that does.</p>
       </header>
       <div class="sy-grid">
         <div class="sy-card">

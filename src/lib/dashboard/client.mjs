@@ -2361,8 +2361,7 @@ export const JS = `
           mhtml(totals.cpuPercent,function(v){return v.toFixed(1)+"%";})+" CPU",
         ])
         +kpiCard("projects",projectsValue(projects),locSummary(projects))
-        +kpiCard("catalog",odCount(counts.skill),[
-          "skills",
+        +kpiCard("catalog",odCount(counts.skill)+'<span class="unit">skills</span>',[
           mhtml(counts.agent)+" agents",
           mhtml(counts.command)+" commands",
         ]);
@@ -2552,7 +2551,11 @@ export const JS = `
       +'<td class="sy-adv-t"><b>'+esc(r.label)+"</b>"
       +(r.rationale?'<span class="why"> \\u2014 '+esc(r.rationale)+"</span>":"")
       // Documentation, not an affordance: the CLI that already owns removal.
-      +(r.cleanupHint?'<div class="why">removal lives in <span class="mono">'
+      // The remediation is a DIFFERENT kind of sentence from the finding above
+      // it — what you could do, rather than what was found — and ran on from
+      // the rationale as if it were the next clause of it. Its own class, so
+      // the gap is part of the row's grammar rather than a stray margin.
+      +(r.cleanupHint?'<div class="sy-adv-fix">removal lives in <span class="mono">'
         +esc(r.cleanupHint)+"</span></div>":"")
       +"</td>"
       +'<td class="sy-path mono">'+esc(r.path||"")+"</td>"
@@ -2606,10 +2609,12 @@ export const JS = `
         +(regen?mhtml(regen.bytes,fmtBytes):unkHtml("no tier total in this snapshot",false))
         +"</b> across "+esc(fmtNum(regenN))+" row"+(regenN===1?"":"s")
         +' <span class="g">\\u00b7</span> <span class="tag review">review</span> '
-        +esc(fmtNum(revN))+" row"+(revN===1?"":"s")
-        +' <span class="g">no total \\u2014 pointers, not a sum</span>'
-        +'<div class="why">Never added together: only the regenerable figure is space a tool '
-        +"rebuilds by itself. Advisory only \\u2014 nothing here removes anything.</div>";
+        +esc(fmtNum(revN))+" row"+(revN===1?"":"s")+" to check"
+        // The missing review total is the load-bearing part, so it is explained
+        // rather than labelled: "no total — pointers, not a sum" told a reader
+        // what was absent without ever saying why they should be glad it is.
+        +'<div class="why">No combined total, on purpose \\u2014 only the regenerable figure is '
+        +"safe to count on. Review rows are a to-do list, not a number.</div>";
     }
   }
 

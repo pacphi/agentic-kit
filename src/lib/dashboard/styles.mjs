@@ -961,9 +961,15 @@ a.chipf{text-decoration:none; display:inline-flex; align-items:center}
    caveats already use. It qualifies the DATA — a figure whose accounting
    changed cannot be read correctly without it, which is why it renders next to
    the number rather than in a doc. */
-.sy-liner{font-size:11.5px; color:var(--ink-dim); line-height:1.45}
+.sy-liner{font-size:11.5px; color:var(--ink-dim); line-height:1.55}
 .sy-liner b{color:var(--ink-2); font-weight:600}
-.sy-grid > .sy-liner{grid-column:span 12; margin-top:-5px}
+/* A grid-level liner is two lines of dense accounting prose sitting between the
+   KPI band above and the disk strip below. It was pulled UP by a negative
+   margin, which left 5px between it and the cards it qualifies and made the
+   whole region read as one undifferentiated block. Give it room on both sides:
+   at this density the separation is what makes it legible as a footnote rather
+   than as more numbers. */
+.sy-grid > .sy-liner{grid-column:span 12; margin:6px 0 8px; max-width:120ch}
 /* Disk denominator as a horizontal meter. The radial spent a full card's height
    stating one ratio; the band states the same ratio plus its parts in one line.
    It also drops the card chrome entirely — a panel, a border and a shadow around
@@ -973,7 +979,7 @@ a.chipf{text-decoration:none; display:inline-flex; align-items:center}
 .sy-band{
   background:none; border:0; border-radius:0; box-shadow:none;
   border-top:1px solid var(--line); border-bottom:1px solid var(--line);
-  padding:5px 2px; gap:0;
+  padding:13px 2px; gap:0;
 }
 .sy-diskband{display:flex; align-items:center; gap:13px; flex-wrap:wrap}
 .sy-diskband .dk-lbl{
@@ -990,12 +996,15 @@ a.chipf{text-decoration:none; display:inline-flex; align-items:center}
    sideways on a phone. */
 .sy-diskband .dk-facts{flex:1 1 auto; min-width:0; font-size:12px; color:var(--ink-2)}
 .sy-diskband .dk-facts b{color:var(--ink); font-family:var(--mono); font-weight:700}
-/* Consumers: twenty ranked rows in a fixed-height scroller, about five visible.
-   The scroll belongs to this container — the page body must never scroll
-   sideways or grow a screen-tall list to state a ranking. */
+/* Consumers: twenty ranked rows in a scroller. About four were visible, which
+   is too few to read as a ranking — you compared the top of the list against
+   nothing. Sized for 8-10 rows in the denser "by ecosystem" mode, where every
+   row also carries a note (~40px a pair against ~25px for a bare ranked row).
+   Still bounded, and the scroll still belongs to this container: the page body
+   must never scroll sideways or grow a screen-tall list to state a ranking. */
 .sy-ctl{display:flex; gap:6px; flex-wrap:wrap}
 .sy-scroll{
-  max-height:110px; overflow-y:auto; overflow-x:hidden;
+  max-height:min(46vh,400px); overflow-y:auto; overflow-x:hidden;
   overscroll-behavior:contain; padding-right:4px;
 }
 .sy-crow{
@@ -1103,6 +1112,11 @@ a.chipf{text-decoration:none; display:inline-flex; align-items:center}
 .sy-adv-t{max-width:46ch}
 .sy-adv-t b{color:var(--ink); font-weight:600}
 .sy-adv-t .why{color:var(--ink-dim); font-size:11.5px; line-height:1.45}
+/* The remediation line. Separated from the rationale above it because it
+   answers a different question — not "what is this" but "what would you run" —
+   and read as one more clause of the description when it sat flush against it. */
+.sy-adv-fix{margin-top:9px; font-size:11.5px; line-height:1.45; color:var(--ink-2)}
+.sy-adv-fix .mono{color:var(--ink)}
 /* The status totals line above the table. */
 #sys-reclaim-note b{color:var(--ink); font-family:var(--mono); font-weight:700}
 #sys-reclaim-note .g{color:var(--ink-dim); font-size:11px}
