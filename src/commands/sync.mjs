@@ -16,6 +16,7 @@ import { commandHosts, applyHosts, applyProviders, hostInstallState, installHost
 import { driftReport, selfDrift } from '../lib/versions.mjs';
 import { RUVECTOR_PKG, managed as ruvectorManaged } from '../lib/ruvector.mjs';
 import { pruneNpxStale } from '../lib/npx.mjs';
+import { runScaffoldAgentsFix } from '../lib/scaffold.mjs';
 import { nativesStatus, securityPresent } from '../lib/natives.mjs';
 import { readJson } from '../lib/settings.mjs';
 import { appendToConfig } from '../lib/health-history.mjs';
@@ -128,6 +129,15 @@ export async function run({ flags, pkgRoot }) {
   // previously-current cache stale.
   if (subsystems.has('npx') || subsystems.has('versions')) {
     report('npx', pruneNpxStale());
+  }
+  // Scaffold agents: the row only carries a fix (and so only enters the plan)
+  // when the installed CLI already ships `migrate fix --agents` (ruflo#2986) —
+  // delegation, never a kit-side restore. If THIS sync's upgrade step is what
+  // delivered the capability, the pre-upgrade plan won't include it; the next
+  // `ak status`/`ak sync` picks it up (same one-pass-behind rule as any
+  // upgrade-delivered fix).
+  if (subsystems.has('scaffold-agents')) {
+    await step('scaffold agents', () => runScaffoldAgentsFix(cwd));
   }
   if (subsystems.has('aqe')) {
     report('rvf', heal.healRvf(paths.projectAqeDir(cwd)));
