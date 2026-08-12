@@ -58,10 +58,53 @@ export const projectAgentDbMemoryDb = (root) => path.join(root, '.swarm', 'agent
 export const projectClaudeFlowDir = (root) => path.join(root, '.claude-flow');
 export const projectAqeDir = (root) => path.join(root, '.agentic-qe');
 
+/** How many ancestors of the executable's bin/ dir may host a global tree.
+ *  Homebrew's kegged layout needs four (`<prefix>/Cellar/node/<version>/bin`
+ *  → `<prefix>`); the bound keeps the walk away from the filesystem root. */
+const GLOBAL_ROOT_MAX_ASCENT = 5;
+
+/** Spawn-free candidates for npm's global node_modules, nearest-first.
+ *  Exported for tests: the layouts this must cover are host-specific, so they
+ *  are asserted as data rather than reproduced by installing node five ways.
+ *
+ *  `npm_config_prefix` is npm's own documented override and wins when set.
+ *  Otherwise the executable's location is the only evidence available. A plain
+ *  POSIX install keeps the tree one level above `bin/`, but a *versioned*
+ *  layout does not: Homebrew resolves `<prefix>/bin/node` to
+ *  `<prefix>/Cellar/node/<version>/bin/node`, and mise/asdf/nvm place their
+ *  shims similarly deep. `process.execPath` is already symlink-resolved by
+ *  node, so the `<prefix>/bin/node` view is not observable here — walking the
+ *  ancestors is how the linked prefix is recovered. */
+export function globalRootCandidates(execPath = process.execPath, env = process.env) {
+  const out = [];
+  const prefix = env.npm_config_prefix;
+  if (prefix) out.push(path.join(prefix, 'lib', 'node_modules'), path.join(prefix, 'node_modules'));
+  const binDir = path.dirname(execPath);
+  let dir = binDir;
+  for (let ascent = 0; ascent < GLOBAL_ROOT_MAX_ASCENT; ascent += 1) {
+    const parent = path.dirname(dir);
+    if (parent === dir) break; // filesystem root: `/lib/node_modules` is not a prefix
+    out.push(path.join(parent, 'lib', 'node_modules'));
+    dir = parent;
+  }
+  out.push(path.join(binDir, 'node_modules')); // Windows / some managers
+  return out;
+}
+
+/** First existing candidate, or null. Split out so the walk is testable
+ *  against a fixture tree without touching the process-wide cache. */
+export function resolveGlobalRoot(execPath = process.execPath, env = process.env, exists = fs.existsSync) {
+  for (const cand of globalRootCandidates(execPath, env)) {
+    if (exists(cand)) return path.resolve(cand);
+  }
+  return null;
+}
+
 let _globalRoot = null;
 /** npm's global node_modules. Cached per process. Derivation order mirrors
  *  upstream #2221: `npm root -g` is authoritative; execPath-derived candidates
- *  cover environments where npm itself is missing from PATH (rare). */
+ *  cover environments where npm itself is missing from PATH — which is not as
+ *  rare as it reads, since every sandboxed test and hook runs that way. */
 export function globalRoot() {
   if (_globalRoot) return _globalRoot;
   try {
@@ -71,13 +114,7 @@ export function globalRoot() {
       shell: isWindows, // npm is npm.cmd on Windows
     }).trim();
   } catch {
-    const binDir = path.dirname(process.execPath);
-    for (const cand of [
-      path.join(binDir, '..', 'lib', 'node_modules'), // POSIX layout
-      path.join(binDir, 'node_modules'),              // Windows / some managers
-    ]) {
-      if (fs.existsSync(cand)) { _globalRoot = path.resolve(cand); break; }
-    }
+    _globalRoot = resolveGlobalRoot();
   }
   if (!_globalRoot) throw new Error('cannot determine npm global root (is npm installed?)');
   return _globalRoot;
