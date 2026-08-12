@@ -134,17 +134,20 @@ export async function healAidefence() {
 }
 
 /** Optional native sublinear solver for agentic-qe (best-effort). */
-export async function healAqeSolver({ runner = run } = {}) {
+export async function healAqeSolver() {
   if (!fs.existsSync(aqeRoot())) {
     return { ok: true, status: 'skipped', usable: false, detail: 'agentic-qe not installed' };
   }
   const probe = path.join(aqeRoot(), 'node_modules', '@ruvector', 'solver-node', 'package.json');
   if (fs.existsSync(probe)) return { ok: true, status: 'ok', usable: true, detail: 'already present' };
-  const r = await npmInstallInto(aqeRoot(), '@ruvector/solver-node', runner);
-  if (r.code === 0) return { ok: true, status: 'ok', usable: true, detail: 'installed' };
+  // The native accelerator was never published to npm, and upstream resolved
+  // its own half by documenting the TypeScript solver as the implementation
+  // (agentic-qe#617 → #620, shipped in aqe 3.13.10). Attempting the install
+  // would only manufacture a 404 warning for a by-design state (#135). The
+  // probe above still detects a native that arrives by any other route.
   return {
-    ok: true, status: 'degraded', usable: true,
-    detail: `native solver unavailable; TypeScript fallback active (<50K nodes) (${failTail(r)})`,
+    ok: true, status: 'ok', usable: true,
+    detail: 'native solver unpublished upstream (agentic-qe#617) — TypeScript fallback is the implementation (<50K nodes)',
   };
 }
 

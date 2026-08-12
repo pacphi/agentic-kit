@@ -340,17 +340,39 @@ test('brain installer stamps only a zero-exit installation', async () => {
   assert.equal(stamped, '4.0.12');
 });
 
-test('AQE native solver failure is an explicit degraded fallback', async () => {
+test('AQE solver: the unpublished native is never install-attempted and the TS fallback is reported as the implementation (#135)', async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-solver-'));
   fs.mkdirSync(path.join(root, 'agentic-qe'), { recursive: true });
   _setGlobalRootForTest(root);
   try {
+    // upstream declared the package not-installable (agentic-qe#617/#620) —
+    // any npm invocation here is a regression to the pre-#620 behavior.
     const r = await healAqeSolver({
-      runner: async () => ({ code: 1, stdout: '', stderr: 'native package unavailable\n' }),
+      runner: async () => { throw new Error('must not shell out for @ruvector/solver-node'); },
     });
-    assert.equal(r.ok, true, 'the TypeScript fallback remains usable');
-    assert.equal(r.status, 'degraded');
-    assert.equal(r.usable, true);
+    assert.equal(r.ok, true);
+    assert.equal(r.status, 'ok', 'expected state, not a warning');
+    assert.equal(r.usable, true, 'the TypeScript fallback is the implementation');
+    assert.match(r.detail, /unpublished upstream/);
+    assert.doesNotMatch(r.detail, /FAILED|npm error/, 'no error tail for a by-design state');
+  } finally {
+    _setGlobalRootForTest(null);
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('AQE solver: a native already present on disk is still detected and reported', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-solver-present-'));
+  const probe = path.join(root, 'agentic-qe', 'node_modules', '@ruvector', 'solver-node');
+  fs.mkdirSync(probe, { recursive: true });
+  fs.writeFileSync(path.join(probe, 'package.json'), '{"name":"@ruvector/solver-node"}');
+  _setGlobalRootForTest(root);
+  try {
+    const r = await healAqeSolver({
+      runner: async () => { throw new Error('must not shell out'); },
+    });
+    assert.equal(r.status, 'ok');
+    assert.equal(r.detail, 'already present');
   } finally {
     _setGlobalRootForTest(null);
     fs.rmSync(root, { recursive: true, force: true });

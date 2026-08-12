@@ -48,8 +48,17 @@ Examples:
   ak sync --dry-run       preview the plan
   ak sync --no-upgrade    re-heal without touching versions`;
 
-export async function run({ flags, pkgRoot }) {
+export async function run({ flags, pkgRoot, fetchLatest }) {
   const cwd = process.cwd();
+  // #134: draw the plan from CURRENT drift, not the TTL cache — a cache
+  // stamped before an upstream release claims "all current" and the upgrade
+  // never reaches the plan (the old force at apply time sat behind the very
+  // versions gate it needed to open). Dry-runs skip the refresh: it writes
+  // kit.json, and --dry-run is pinned to touch nothing — so a dry-run
+  // preview may be cache-stale by up to one TTL window.
+  if (!flags['dry-run'] && !flags['no-upgrade']) {
+    await driftReport({ force: true, ...(fetchLatest ? { fetchLatest } : {}) });
+  }
   const rows = await collect({ pkgRoot, cwd });
   const plan = rows.filter((r) => r.fix)
     .filter((r) => !(flags['no-upgrade'] && ['versions', 'self', 'ruvnet-brain', 'ruvector'].includes(r.subsystem)));
@@ -79,7 +88,9 @@ export async function run({ flags, pkgRoot }) {
 
   if (subsystems.has('versions') && !flags['no-upgrade']) {
     report('daemons', await heal.stopAllDaemons());
-    for (const d of await driftReport({ force: true })) {
+    // No force here: the pre-plan refresh above already ran for every
+    // non-dry-run, non-no-upgrade sync, so this read hits that fresh cache.
+    for (const d of await driftReport()) {
       if (d.outdated || !d.installed) await step(`upgrade ${d.pkg}`, () => heal.upgradePackage(d.pkg));
     }
   }
