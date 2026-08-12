@@ -489,6 +489,24 @@ export function configuredPolicyToAgentOverrides(policy = {}, { agentMap = AGENT
   return overrides;
 }
 
+/** Drift predicate for the status↔sync contract (#129): does the on-disk
+ * `agentOverrides` object diverge from what applyAqeRouter would write for this
+ * policy? Judged by the WRITER's projection (configured routes only) and only
+ * over ak-managed keys, key-wise — foreign entries and JSON key order belong to
+ * the writer's merge domain and must never read as drift. */
+export function agentOverridesDrift(diskOverrides, policy = {}, { agentMap = AGENT_ACTIVITY_MAP } = {}) {
+  const disk = diskOverrides ?? {};
+  const want = configuredPolicyToAgentOverrides(policy, { agentMap });
+  for (const agent of Object.keys(agentMap)) {
+    const a = disk[agent];
+    const b = want[agent];
+    if (!a && !b) continue;
+    if (!a || !b) return true;
+    if (a.provider !== b.provider || (a.model ?? null) !== (b.model ?? null)) return true;
+  }
+  return false;
+}
+
 /** Remove disabled hosts from persisted routes and escalation ladders. Seeded
  * entries are ak-owned and silent; user pins return actionable warnings. */
 export function pruneRoutesForHosts(policy = {}, { hosts = HOSTS } = {}) {
