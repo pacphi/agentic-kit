@@ -36,6 +36,9 @@ Consequences**, and cites the grounded source it rests on where relevant.
 | [0025](0025-machine-footprint-metrics.md) | Machine footprint: infrastructure metrics for install, runtime, storage, and catalog | Implemented |
 | [0026](0026-about-component-directory.md) | About: a component directory that explains everything ak installs | Implemented |
 | [0027](0027-shared-project-census.md) | One project census, four scopes, every count explains itself | Implemented |
+| [0028](0028-local-openai-compatible-providers.md) | One generic local OpenAI-compatible provider, not a vendor enumeration | Proposed |
+| [0029](0029-host-adapter-extension-point.md) | Host adapters as a published extension point | Proposed |
+| [0030](0030-hermes-reference-adapter.md) | Hermes Agent as the first out-of-tree host adapter | Proposed |
 
 Theme: ADRs **0001–0006** define **dual-host LLM routing and leadership** — how `ak` lets ruflo route
 each development activity (architecture, implementation, testing, review, …) to the right host (Claude
@@ -187,3 +190,39 @@ it, while Intelligence folds a repo's sub-directories and throwaway agent worktr
 identity because that is what a user picks — a distinction that was also a live bug, since keying
 the picker off identity while listing directories made 7 of 24 rows unreachable. Counts that remain
 different stay different, and say why.
+
+**0028–0030** answer the fourth-host question, and answer it once rather than per host. **0028** is
+independent of the other two: the registry knows exactly one local provider, `ollama`, while a local
+model is normally served as an OpenAI-compatible endpoint on loopback — MLX, LM Studio, `llama.cpp`,
+vLLM — and frequently under a name the *user* chose, which no vendor enumeration can cover. It adds
+one generic `local-openai` provider that deliberately claims less than `ollama` (no catalogue, no
+runtime probe, no digest), puts the runtime's identity in the binding's endpoint rather than in the
+provider id, and refuses to assert discovery facts this repository has not measured.
+
+**0029** observes that 0016 already specified every contract a host adapter needs, 0017 proved them
+by using them, and 0018 generalized execution behind them — `sync` and `host pick` already drive
+OpenCode through the generic `runLifecycle`. What is left is a last mile: adapter *selection* is a
+named import, and `status` hand-rolls a per-host block importing eight functions from
+`lib/opencode.mjs`. So it publishes the seam instead of absorbing hosts one at a time. Registration
+is explicit in kit.json — never a naming convention, which would let an unrelated `npm install` get
+third-party code executed inside ak. In-process adapters cannot be sandboxed, so the trust manifest
+**discloses** the package, resolved path, and version before any mutation rather than claiming a
+guarantee ak cannot make. External adapters are capped out of `canBePrimary`, `aqeProvider`, and
+`commandStatusline` — the three surfaces with first-party obligations — which is exactly the shape
+OpenCode already occupies. Admission is fail-closed *per adapter*: a broken third-party adapter is
+reported and skipped, never allowed to brick `ak status`, while built-ins keep throwing at
+construction because a broken built-in is a build error. Both in-tree refactors delete host-specific
+code rather than adding it.
+
+**0030** is the conformance evidence, because a contract never satisfied by code its authors did not
+write is a guess. Hermes Agent breaks five assumptions the built-in hosts share — YAML config, no
+npm package, plain-text output, no interceptable permission event, no ruflo backend flag — and
+carrying it needed exactly one widening (a plain-text summary capture) and one guard (an absent
+`npmPackage`). Two host findings are recorded because they would otherwise resurface as bugs: ak
+**never writes hermes's YAML**, driving `hermes config path` / `mcp add` / `mcp remove` instead, and
+`mcp add` turns out not to be safely idempotent — its overwrite prompt defaults to No on EOF and
+*exits zero*, so a bare re-add is a silent no-op that reads as convergence. And the **approval
+posture is disclosed rather than claimed**: `hermes -z` sets `HERMES_YOLO_MODE=1` by its own
+headless contract, so unlike an OpenCode worker there is no permission event to intercept and no
+`permission_required` result to return — a hermes worker is not presented as carrying a guarantee it
+does not have.
