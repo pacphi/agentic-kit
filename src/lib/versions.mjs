@@ -54,8 +54,11 @@ export function cmpVersions(a, b) {
 const newer = (a, b) => cmpVersions(a, b) > 0;
 
 /** Drift report for the managed packages. Network hit at most once per TTL
- *  window (cached in kit.json); force=true bypasses the cache. */
-export async function driftReport({ force = false } = {}) {
+ *  window (cached in kit.json); force=true bypasses the cache. A failed probe
+ *  falls back to the cached value per package, and a run where EVERY probe
+ *  failed neither overwrites `seen` nor stamps `last` — clobbering good data
+ *  with nulls would suppress upgrade detection for a whole TTL window (#134). */
+export async function driftReport({ force = false, fetchLatest = latestVersion } = {}) {
   const cfg = loadKitConfig();
   const ttlMs = (cfg.versionCheck?.ttlHours ?? 24) * 3600_000;
   const fresh = !force && cfg.versionCheck?.last && Date.now() - cfg.versionCheck.last < ttlMs;
@@ -67,12 +70,20 @@ export async function driftReport({ force = false } = {}) {
   const HOST_PKGS = ['@anthropic-ai/claude-code', '@openai/codex', 'opencode-ai'];
   const pkgs = ['ruflo', 'agentic-qe', ...HOST_PKGS.filter((p) => installedVersion(p))];
   const report = [];
-  let latest = cfg.versionCheck?.seen ?? {};
+  const cached = cfg.versionCheck?.seen ?? {};
+  let latest = cached;
   if (!fresh) {
     latest = {};
-    for (const p of pkgs) latest[p] = await latestVersion(p);
-    cfg.versionCheck = { ...cfg.versionCheck, last: Date.now(), seen: latest };
-    try { saveKitConfig(cfg); } catch { /* read-only envs: nudge just re-fetches */ }
+    let succeeded = 0;
+    for (const p of pkgs) {
+      const v = await fetchLatest(p);
+      if (v) succeeded += 1;
+      latest[p] = v ?? cached[p] ?? null;
+    }
+    if (succeeded > 0) {
+      cfg.versionCheck = { ...cfg.versionCheck, last: Date.now(), seen: latest };
+      try { saveKitConfig(cfg); } catch { /* read-only envs: nudge just re-fetches */ }
+    }
   }
   for (const p of pkgs) {
     const installed = installedVersion(p);
