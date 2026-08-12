@@ -75,19 +75,23 @@ const GLOBAL_ROOT_MAX_ASCENT = 5;
  *  shims similarly deep. `process.execPath` is already symlink-resolved by
  *  node, so the `<prefix>/bin/node` view is not observable here — walking the
  *  ancestors is how the linked prefix is recovered. */
-export function globalRootCandidates(execPath = process.execPath, env = process.env) {
+export function globalRootCandidates(execPath = process.execPath, env = process.env, p = path) {
+  const isRoot = (dir) => p.dirname(dir) === dir;
   const out = [];
   const prefix = env.npm_config_prefix;
-  if (prefix) out.push(path.join(prefix, 'lib', 'node_modules'), path.join(prefix, 'node_modules'));
-  const binDir = path.dirname(execPath);
+  if (prefix) out.push(p.join(prefix, 'lib', 'node_modules'), p.join(prefix, 'node_modules'));
+  const binDir = p.dirname(execPath);
   let dir = binDir;
   for (let ascent = 0; ascent < GLOBAL_ROOT_MAX_ASCENT; ascent += 1) {
-    const parent = path.dirname(dir);
-    if (parent === dir) break; // filesystem root: `/lib/node_modules` is not a prefix
-    out.push(path.join(parent, 'lib', 'node_modules'));
+    const parent = p.dirname(dir);
+    if (parent === dir) break;
+    // The filesystem root is not a prefix: `/lib/node_modules` (or `C:\lib\…`)
+    // belongs to no install, so it is skipped rather than probed. The walk
+    // still ascends past it in case an intermediate level qualifies.
+    if (!isRoot(parent)) out.push(p.join(parent, 'lib', 'node_modules'));
     dir = parent;
   }
-  out.push(path.join(binDir, 'node_modules')); // Windows / some managers
+  out.push(p.join(binDir, 'node_modules')); // Windows / some managers
   return out;
 }
 
