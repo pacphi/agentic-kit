@@ -24,7 +24,7 @@ import { coherence as adbCoherence } from '../lib/agentdb.mjs';
 import { readJson } from '../lib/settings.mjs';
 import { have } from '../lib/exec.mjs';
 import { HOSTS, settingsTarget, isDefault, managedEnv, MANAGED_ENV_KEYS, hostInstallState, hostAuthState, bothHostsEnabled, aqeRouterFile, aqeSupportsAgentOverrides, credentialGaps, collectIntegrationFacts } from '../lib/providers.mjs';
-import { policyToAgentOverrides, routingSummary, divergedRoutes } from '../lib/routing.mjs';
+import { configuredPolicyToAgentOverrides, agentOverridesDrift, routingSummary, divergedRoutes } from '../lib/routing.mjs';
 import { qeCourtShipped, readQeCourtConfig, validateCourtConfig } from '../lib/qeCourt.mjs';
 import { drift as ruvectorDrift } from '../lib/ruvector.mjs';
 import { statuslineDrift } from '../lib/codex-statusline.mjs';
@@ -545,11 +545,16 @@ export async function collect({ pkgRoot, cwd = process.cwd() }) {
     } else {
       const desired = managedEnv(cfg);
       const envDrift = MANAGED_ENV_KEYS.some((k) => (k in desired ? env[k] !== desired[k] : k in env));
-      // aqe fallback chain: on-disk llm-config.json must match kit.json order
+      // aqe fallback chain: on-disk llm-config.json must match kit.json order.
+      // Same scope gate as the writer (#129): applyAqeRouter anchors the file at
+      // repoRoot and declines outside a project, so the check must read the root
+      // and stay silent where sync would decline — a warn here would recommend a
+      // sync that cannot repair it.
       const chain = cfg.providers.aqeFallback ?? [];
+      const chainRoot = paths.repoRoot(cwd);
       let routerDrift = false;
-      if (chain.length) {
-        const disk = readJson(aqeRouterFile(cwd));
+      if (chain.length && chainRoot) {
+        const disk = readJson(aqeRouterFile(chainRoot));
         const diskOrder = (disk?.fallbackChain?.entries ?? []).map((e) => e.provider).join('→');
         routerDrift = disk?._managedBy !== 'agentic-kit' || diskOrder !== chain.map((e) => e.provider).join('→');
       }
@@ -585,17 +590,27 @@ export async function collect({ pkgRoot, cwd = process.cwd() }) {
     const policy = cfg.routing?.routes ?? {};
     if (Object.keys(policy).length) {
       const s = routingSummary(policy);
-      const want = policyToAgentOverrides(policy);
+      // The WRITER's projection (#129): applyAqeRouter materializes only
+      // explicitly persisted routes, so status must count and compare the same
+      // set — the resolved projection would demand entries sync never writes.
+      const want = configuredPolicyToAgentOverrides(policy);
       const base = `dual-host · ${s.total} activities (${s.custom} custom) → ${Object.keys(want).length} agent overrides`;
       if (!aqeSupportsAgentOverrides()) {
         rows.push(row('routing', 'info', `${base} · needs agentic-qe ≥ 3.13.1 to materialize`));
       } else {
-        // resolve the repo root — applyAqeRouter writes at repoRoot(cwd), so a
-        // raw-cwd read from a subdir would false-warn "out of sync" (M2).
-        const disk = readJson(aqeRouterFile(paths.repoRoot(cwd) ?? cwd))?.agentOverrides ?? null;
-        const drift = !disk || JSON.stringify(disk) !== JSON.stringify(want);
-        if (drift) rows.push(row('routing', 'warn', `${base} — llm-config.json out of sync`, 'sync re-applies agentOverrides'));
-        else rows.push(row('routing', 'ok', base));
+        // Same scope gate as the writer: applyAqeRouter anchors at repoRoot(cwd)
+        // and declines outside a project — a raw-cwd read from a subdir would
+        // false-warn "out of sync" (M2), and outside a project a warn would
+        // recommend a sync that cannot repair it (#129).
+        const root = paths.repoRoot(cwd);
+        if (!root) {
+          rows.push(row('routing', 'info', `${base} · not in a project — aqe router unmanaged here`));
+        } else {
+          const overrides = readJson(aqeRouterFile(root))?.agentOverrides;
+          const drift = overrides == null || agentOverridesDrift(overrides, policy);
+          if (drift) rows.push(row('routing', 'warn', `${base} — llm-config.json out of sync`, 'sync re-applies agentOverrides'));
+          else rows.push(row('routing', 'ok', base));
+        }
       }
       // Seeded pins vs today's defaults. Deliberately `info` and deliberately
       // "diverges from": which side wins is activity-dependent (a newer default
