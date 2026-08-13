@@ -69,7 +69,12 @@ function rufloActivationSegments(cwd){
         if (pn > 0 || tj > 0) {
           if (pn > 0) parts.push(pn + " patterns");
           if (tj > 0) parts.push(tj + " traj");
-          if (fs.existsSync(path.join(cwd, ".swarm", "hnsw.index"))) parts.push(G + "⚡ HNSW" + R);
+          // "HNSW idx" claims the ARTIFACT (an index was built), never the algorithm:
+          // upstream's default search path is brute-force cosine even when this file
+          // exists (ruflo#2922 renamed its own APIs over that exact overclaim). Revisit
+          // if upstream wires HNSW into the default path or persists an algorithm
+          // signal the footer can read (#140).
+          if (fs.existsSync(path.join(cwd, ".swarm", "hnsw.index"))) parts.push(G + "HNSW idx" + R);
           var dots = Math.max(0, Math.min(5, Math.round(pn / 10)));   // volume gauge: ~10 patterns per dot
           learn = C + "🧠 SONA" + R + "  " + DIM + bar(dots, 5) + R + "  " + parts.join(DIM + " · " + R);
         }

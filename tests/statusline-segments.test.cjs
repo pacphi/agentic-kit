@@ -107,6 +107,26 @@ test('SONA segment absent when counts are zero', () => {
   absent(out, '🧠 SONA');
 });
 
+// #140 / upstream ruflo#2922: the index FILE existing proves an HNSW index was
+// BUILT — not that the search path uses it (upstream's default is brute-force
+// cosine; they renamed their own APIs over exactly this overclaim). The badge
+// may claim the artifact, never the algorithm.
+test('a built hnsw.index shows the artifact badge, not an algorithm claim (#140)', () => {
+  const out = strip(rufloActivationSegments(mkFixture({
+    '.claude-flow/neural/stats.json': { patternsLearned: 50, trajectoriesRecorded: 110 },
+    '.swarm/hnsw.index': 'binary-ish',
+  })));
+  contains(out, 'HNSW idx');
+  absent(out, '⚡ HNSW');
+});
+
+test('no hnsw.index → no HNSW mention at all', () => {
+  const out = strip(rufloActivationSegments(mkFixture({
+    '.claude-flow/neural/stats.json': { patternsLearned: 50, trajectoriesRecorded: 110 },
+  })));
+  absent(out, 'HNSW');
+});
+
 // ── route Q-learner segment ───────────────────────────────────────────────
 test('route 📈 RL renders ε/δ̄/|Q|/upd when updateCount > 0', () => {
   const out = strip(rufloActivationSegments(mkFixture({
@@ -521,7 +541,7 @@ test('unresolvable ruflo → silent (a probe miss must never fail loud and wrong
 
 // Test-quality Finding 5: bump deliberately when adding/removing a test —
 // see admin-model.test.cjs's identical guard for the full rationale.
-const EXPECTED = 45;
+const EXPECTED = 47;
 if (passed + failed !== EXPECTED) {
   console.error(`\nPLAN MISMATCH: expected ${EXPECTED} tests, ran ${passed + failed}`);
   process.exit(1);

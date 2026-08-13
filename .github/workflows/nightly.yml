@@ -62,9 +62,12 @@ jobs:
           APPDATA: ${{ runner.temp }}/kit-home/AppData/Roaming
         run: node bin/agentic-kit.mjs x verify security
 
-      # Non-blocking: ruflo neural train crashes on macos-latest with a native
-      # libc++abi mutex abort, tracked upstream at ruvnet/ruflo#2885 (open as of
-      # 2026-08-06). Remove continue-on-error once that issue closes.
+      # Non-blocking: a native libc++abi mutex abort on macos-latest poisons ruflo
+      # exit codes, tracked upstream at ruvnet/ruflo#2885 (open as of 2026-08-13).
+      # Scope is NOT neural-train-specific: upstream evidence (2026-08-12) shows the
+      # same teardown abort on store-touching commands (`memory search` → correct
+      # output, rc 134), so an `x verify memory` step added here would need the same
+      # guard. Remove continue-on-error once that issue closes.
       - name: Deep proof against the live packages (learning)
         continue-on-error: true
         env:
