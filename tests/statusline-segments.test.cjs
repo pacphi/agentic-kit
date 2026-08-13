@@ -107,6 +107,17 @@ test('SONA segment absent when counts are zero', () => {
   absent(out, '🧠 SONA');
 });
 
+// #140: index-file existence proves nothing about the active search path
+// (upstream default is brute-force cosine, ruflo#2922) — the footer shows only
+// genuinely active features, so no HNSW claim at all.
+test('hnsw.index on disk produces no HNSW claim (#140)', () => {
+  const out = strip(rufloActivationSegments(mkFixture({
+    '.claude-flow/neural/stats.json': { patternsLearned: 50, trajectoriesRecorded: 110 },
+    '.swarm/hnsw.index': 'binary-ish',
+  })));
+  absent(out, 'HNSW');
+});
+
 // ── route Q-learner segment ───────────────────────────────────────────────
 test('route 📈 RL renders ε/δ̄/|Q|/upd when updateCount > 0', () => {
   const out = strip(rufloActivationSegments(mkFixture({
@@ -521,7 +532,7 @@ test('unresolvable ruflo → silent (a probe miss must never fail loud and wrong
 
 // Test-quality Finding 5: bump deliberately when adding/removing a test —
 // see admin-model.test.cjs's identical guard for the full rationale.
-const EXPECTED = 45;
+const EXPECTED = 46;
 if (passed + failed !== EXPECTED) {
   console.error(`\nPLAN MISMATCH: expected ${EXPECTED} tests, ran ${passed + failed}`);
   process.exit(1);

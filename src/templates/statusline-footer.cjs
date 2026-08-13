@@ -56,7 +56,7 @@ function rufloActivationSegments(cwd){
       }
     } catch(e){ rufloStatuslineDebug("quota-tee", e); }
     function bar(n, max){ n = Math.max(0, Math.min(max, n)); return "[" + "●".repeat(n) + "○".repeat(max - n) + "]"; }
-    // ── self-learning (SONA): own line with a volume bar (patterns/traj/HNSW) plus a
+    // ── self-learning (SONA): own line with a volume bar (patterns/traj) plus a
     // LIVE micro-LoRA adaptation field (Δ‖W‖, appended further below). The Δ‖W‖ tracker
     // is maintained inline in this same function — see the "micro-LoRA LIVE adaptation"
     // block after the route-Q segment.
@@ -69,7 +69,6 @@ function rufloActivationSegments(cwd){
         if (pn > 0 || tj > 0) {
           if (pn > 0) parts.push(pn + " patterns");
           if (tj > 0) parts.push(tj + " traj");
-          if (fs.existsSync(path.join(cwd, ".swarm", "hnsw.index"))) parts.push(G + "⚡ HNSW" + R);
           var dots = Math.max(0, Math.min(5, Math.round(pn / 10)));   // volume gauge: ~10 patterns per dot
           learn = C + "🧠 SONA" + R + "  " + DIM + bar(dots, 5) + R + "  " + parts.join(DIM + " · " + R);
         }
