@@ -47,7 +47,7 @@ test('--primary-host claude does not enable codex', () => {
 
 test('an unknown --primary-host is ignored with a warning, codex untouched', () => {
   const cfg = freshCfg();
-  const r = applySetupHostFlags(cfg, { 'primary-host': 'gemini' });
+  const r = applySetupHostFlags(cfg, { 'primary-host': 'zz-not-a-registered-host' });
   assert.equal(cfg.routing.primaryHost, 'claude');
   assert.equal(cfg.integrations.hosts.codex, false);
   assert.equal(r.warnings.length, 1);

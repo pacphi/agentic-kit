@@ -155,7 +155,7 @@ test('routingSummary counts totals, provenance, and per-host tallies', () => {
 test('validateRoute accepts claude/codex and rejects an unknown host', () => {
   assert.deepEqual(validateRoute({ host: 'claude', model: 'claude-opus-4-8' }), []);
   assert.deepEqual(validateRoute({ host: 'codex' }), []);
-  assert.ok(validateRoute({ host: 'gemini' }).length > 0);
+  assert.ok(validateRoute({ host: 'zz-not-a-registered-host' }).length > 0);
 });
 
 test('parseRouteSpecs parses valid specs and warns on bad ones', () => {
@@ -163,7 +163,7 @@ test('parseRouteSpecs parses valid specs and warns on bad ones', () => {
     'implementation:claude:claude-opus-4-8',
     'testing:codex',
     'nonsense:claude',       // unknown activity
-    'review:gemini',         // unknown host
+    'review:zz-not-a-registered-host',         // unknown host
   ]);
   assert.deepEqual(policy.implementation, { host: 'claude', model: 'claude-opus-4-8', provenance: 'user' });
   assert.deepEqual(policy.testing, { host: 'codex', provenance: 'user' });
@@ -210,10 +210,10 @@ test('an explicit OpenCode route materializes for ak run', () => {
 });
 
 test('host-neutral run plan rejects a host without activity-routing capability', () => {
-  const policy = { implementation: { host: 'gemini', provenance: 'user' } };
+  const policy = { implementation: { host: 'zz-not-a-registered-host', provenance: 'user' } };
   assert.throws(
     () => materializeRunPlan(policy, { template: 'feature', task: 'x' }),
-    /route for "implementation" cannot materialize: host "gemini" requires canRouteActivities/,
+    /route for "implementation" cannot materialize: host "zz-not-a-registered-host" requires canRouteActivities/,
   );
 });
 

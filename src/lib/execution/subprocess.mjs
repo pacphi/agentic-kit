@@ -81,6 +81,62 @@ export function createJsonlSummaryCapture(select, label) {
   };
 }
 
+/** Retain only the final non-empty plain-text line, bounded the same way as
+ * the JSONL capture above. For hosts whose oneshot mode emits plain text on
+ * stdout instead of JSONL (Hermes-class hosts): there is no structured event
+ * to select a field from, so the summary is simply the last non-empty line
+ * seen — an oversized line is discarded without poisoning a later one. */
+export function createPlainTextSummaryCapture(label) {
+  if (typeof label !== 'string' || !label) throw new TypeError('plain-text summary capture requires a label');
+  let line = '';
+  let discarding = false;
+  let selected = null;
+  let selectedTooLarge = false;
+
+  const consume = (value) => {
+    if (!value.trim()) return;
+    if (Buffer.byteLength(value, 'utf8') > SUMMARY_LINE_LIMIT) {
+      selectedTooLarge = true;
+      selected = null;
+      return;
+    }
+    selected = value;
+  };
+
+  return {
+    write(chunk) {
+      let remaining = String(chunk);
+      while (remaining) {
+        const newline = remaining.indexOf('\n');
+        const fragment = newline === -1 ? remaining : remaining.slice(0, newline);
+        remaining = newline === -1 ? '' : remaining.slice(newline + 1);
+        if (!discarding) {
+          const next = `${line}${fragment}`;
+          if (Buffer.byteLength(next, 'utf8') > SUMMARY_LINE_LIMIT) {
+            line = '';
+            discarding = true;
+          } else {
+            line = next;
+          }
+        }
+        if (newline !== -1) {
+          if (!discarding) consume(line.replace(/\r$/, ''));
+          line = '';
+          discarding = false;
+        }
+      }
+    },
+    read() {
+      if (!discarding && line) {
+        consume(line.replace(/\r$/, ''));
+        line = '';
+      }
+      if (selectedTooLarge) throw new TypeError(`${label} final output exceeded the ${SUMMARY_LINE_LIMIT}-byte cap`);
+      return selected;
+    },
+  };
+}
+
 function waitForChild(child, stdout, stderr) {
   return new Promise((resolve) => {
     let settled = false;

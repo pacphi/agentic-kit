@@ -34,7 +34,6 @@ export const HOST_ADAPTERS = Object.fromEntries(HOST_REGISTRY
     guidanceFile: host.legacy.guidanceFile,
     configFormat: host.legacy.configFormat,
     statusline: host.legacy.statusline,
-    statuslineSupported: host.capabilities.commandStatusline,
     aqeProvider: host.legacy.aqeProvider,
     envMarkers: host.legacy.envMarkers,
     auth: host.auth,
@@ -46,12 +45,6 @@ export const HOST_IDS = Object.keys(HOST_ADAPTERS);
 /** The adapter for a host id, or null. */
 export function adapterFor(id) {
   return HOST_ADAPTERS[id] ?? null;
-}
-
-/** Whether a host supports a command-backed statusline (claude yes, codex no).
- *  Callers use this for the "show + explain" UX around claude-only features. */
-export function statuslineSupported(id) {
-  return !!HOST_ADAPTERS[id]?.statuslineSupported;
 }
 
 /**

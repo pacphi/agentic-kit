@@ -155,11 +155,20 @@ function safeGlobalRoot() {
   }
 }
 
+/** The npm-global root for a package, or null when either the global root is
+ *  unknown or there is no package to look up. `pkg` is absent for a host the
+ *  registry permits to skip npmPackage (host.install.npmPackage is optional
+ *  in the schema); path.join(dir, undefined) throws, so both operands must be
+ *  present before a root is even attempted. */
+export function npmPackageRoot(globalRootDir, pkg) {
+  return globalRootDir && pkg ? path.join(globalRootDir, pkg) : null;
+}
+
 /** The managed-tool descriptors this collector measures, composed from the
  *  registry plus the modules that own the non-npm tools. `kind` says how the
  *  root is found, not how it was installed. */
 export function managedTools({ pkgRoot = null, globalRootDir = null } = {}) {
-  const npmRoot = (pkg) => (globalRootDir ? path.join(globalRootDir, pkg) : null);
+  const npmRoot = (pkg) => npmPackageRoot(globalRootDir, pkg);
   const tools = [
     { id: 'ruflo', label: 'ruflo', pkg: 'ruflo', bin: 'ruflo', kind: 'npm', root: npmRoot('ruflo') },
     {

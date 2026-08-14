@@ -5,6 +5,7 @@ import { createClaudeExecutionAdapter as createRealClaudeExecutionAdapter } from
 import { createCodexExecutionAdapter as createRealCodexExecutionAdapter } from '../../src/lib/execution/codex.mjs';
 import { executeWorker } from '../../src/lib/execution/runner.mjs';
 import { HANDOFF_END, HANDOFF_START } from '../../src/lib/execution/handoff.mjs';
+import { createPlainTextSummaryCapture } from '../../src/lib/execution/subprocess.mjs';
 
 const passthroughResolve = (command, args) => ({ command, args, resolved: true });
 const createClaudeExecutionAdapter = (options = {}) => createRealClaudeExecutionAdapter({
@@ -288,4 +289,44 @@ test('a subprocess surviving TERM and KILL is reported as orphaned, never timed 
   assert.equal(terminal.exitCategory, 'orphaned');
   assert.match(terminal.failure.reason, /did not terminate/);
   assert.deepEqual(result.signals.slice(0, 2), ['SIGTERM', 'SIGKILL']);
+});
+
+// ── plain-text summary capture (Hermes-class hosts) ──────────────────────────
+// De-risks Phase 3: some oneshot hosts emit plain text on stdout rather than
+// JSONL. createPlainTextSummaryCapture mirrors createJsonlSummaryCapture's
+// write/read contract without the JSON parsing step — the summary is simply
+// the last non-empty line seen, bounded the same way.
+
+test('plain-text capture reads null for empty output', () => {
+  const capture = createPlainTextSummaryCapture('Hermes');
+  assert.equal(capture.read(), null);
+});
+
+test('plain-text capture selects the final non-empty line across multiple writes', () => {
+  const capture = createPlainTextSummaryCapture('Hermes');
+  capture.write('first line\nsecond line\n');
+  capture.write('final line');
+  assert.equal(capture.read(), 'final line');
+});
+
+test('plain-text capture ignores whitespace-only output', () => {
+  const capture = createPlainTextSummaryCapture('Hermes');
+  capture.write('   \n\t\n   ');
+  assert.equal(capture.read(), null);
+});
+
+test('plain-text capture keeps a real line even when trailing whitespace-only lines follow', () => {
+  const capture = createPlainTextSummaryCapture('Hermes');
+  capture.write('real summary\n   \n');
+  assert.equal(capture.read(), 'real summary');
+});
+
+test('plain-text capture discards an oversized line without poisoning a later one', () => {
+  const capture = createPlainTextSummaryCapture('Hermes');
+  capture.write(`${'x'.repeat(300 * 1024)}\nfinal line\n`);
+  assert.equal(capture.read(), 'final line');
+});
+
+test('plain-text capture requires a label', () => {
+  assert.throws(() => createPlainTextSummaryCapture(), TypeError);
 });
