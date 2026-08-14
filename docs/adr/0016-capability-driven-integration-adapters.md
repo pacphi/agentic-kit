@@ -3,12 +3,21 @@
 - **Status:** Accepted; compatibility clauses superseded by
   [ADR-0020](0020-ga-stable-surfaces.md)
 - **Date:** 2026-07-28
-- **Updated:** 2026-08-04
+- **Updated:** 2026-08-14
 - **Update note:** Added read-only Codex plugin-hook compatibility facts,
   runtime-selected Ruflo project-memory store proofs, and the non-correlatable
   OpenRouter account-analytics boundary; removed the pre-GA compatibility command,
   persisted fields, and adapter bootstrap. ADR-0023 now requires each host adapter
   to declare its setup trust posture and changes for host-neutral preflight.
+  Phase 0 consistency pass (2026-08-14): host adapters gained a required
+  `enabledByDefault` boolean and the three enabled-host default literals now
+  derive from it via `defaultHostMap()` (F-15); the `observability` axis is
+  recorded as terminal — validation metadata with referential integrity only,
+  deliberately not a dispatch surface, no collector loop exists (F-12); the
+  non-throwing `validateBinding` is wired into `ak host status` as per-entry
+  warnings (F-16); and the integrations migrator derives each host's native
+  default provider from the provider registry's host-login entries instead of a
+  literal map, inferring no binding at all for hosts without one (F-13).
 - **Deciders:** agentic-kit maintainers
 - **Related:** [ADR-0001](0001-one-routing-policy-many-projections.md),
   [ADR-0003](0003-auto-seed-dual-host-provenance.md),

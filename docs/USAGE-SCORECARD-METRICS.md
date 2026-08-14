@@ -467,7 +467,7 @@ session that runs from 23:58 local to 00:05 local is billed to the day its
 *first* row landed on (test:
 `tests/kit/usage-index.test.mjs:634`, "a session that opens before midnight
 is counted on its first billed day"). Accumulation:
-`byDay[row.day].cost += rowCost` (`usage-index.mjs:899`). Bar height:
+`byDay[row.day].cost += rowCost` (`usage-index.mjs:1020`). Bar height:
 `h = maxDay ? max(2, cost/maxDay*100) : 2` (`dashboard/client.mjs`) —
 every non-empty day gets a visually nonzero bar (floor of 2%), so a very
 cheap day is never rendered as invisible.
@@ -964,7 +964,7 @@ commit `540be18` on this branch.
 Claude's parser passes `responses: 1` per assistant turn
 (`usage-index.mjs:556`, the current equivalent), but Codex's call
 passed no such field at all. Because `byModel[model].responses` is summed
-directly from each usage row's `responses` field (`usage-index.mjs:974`,
+directly from each usage row's `responses` field (`usage-index.mjs:1022`,
 `m.responses += row.responses`), **every** Codex model in §10's "Models in
 Play" list displayed `0 resp` regardless of real token/cost volume or actual
 `agent_message` count. **Fix:** `parseCodex` now passes `responses:

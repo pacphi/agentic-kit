@@ -42,7 +42,10 @@ This capability model is
 [ADR-0016](adr/0016-capability-driven-integration-adapters.md) (Accepted); the controls below
 implement it. `ak host` owns execution-host lifecycle and selection (`status`, `pick`, `refresh`,
 and `off`), with `ak x host` as its plumbing spelling. Inference providers and bindings remain
-separate axes even though some provider controls share that workflow.
+separate axes even though some provider controls share that workflow. `ak host status` also
+checks every binding declared in `kit.json` and prints a warning naming any entry with an
+unknown host, unknown provider, or unsupported transport — warnings only; nothing is changed
+or removed on your behalf.
 
 ---
 
