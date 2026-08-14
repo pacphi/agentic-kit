@@ -7,8 +7,8 @@ import path from 'node:path';
 import {
   createLiveEvent, LiveReplayStream, emptyLiveProjection,
   inspectGitWorkspace, parseGitNumstat,
-  reduceLiveEvent, resolveProjectIdentity, resolveProjectLabel, serializeLiveProjection,
-  sweepLiveProjection, stableProjectKey, WorkspaceSnapshotStore,
+  reduceLiveEvent, resolveHost, resolveProjectIdentity, resolveProjectLabel,
+  serializeLiveProjection, sweepLiveProjection, stableProjectKey, WorkspaceSnapshotStore,
 } from '../../src/lib/live/index.mjs';
 
 const base = (over = {}) => ({
@@ -57,6 +57,55 @@ test('event schema gives presence, operation and relationship evidence distinct 
 
 test('event schema preserves retired compatibility provenance as internal', () => {
   assert.equal(createLiveEvent(base({ surface: 'dual-run' })).surface, 'internal');
+});
+
+test('event schema passes a novel but safely-shaped host id through verbatim', () => {
+  assert.equal(createLiveEvent(base({ host: 'hermes' })).host, 'hermes');
+});
+
+test('event schema buckets an unsafe-shaped host id as unknown-host, never internal', () => {
+  assert.equal(createLiveEvent(base({ host: 'Hermes!' })).host, 'unknown-host');
+  assert.equal(createLiveEvent(base({ host: 'my host' })).host, 'unknown-host');
+  assert.equal(createLiveEvent(base({ host: 'a'.repeat(33) })).host, 'unknown-host');
+});
+
+test('event schema buckets a missing or malformed host as unknown-host, never internal', () => {
+  assert.equal(createLiveEvent(base({ host: undefined })).host, 'unknown-host');
+  assert.equal(createLiveEvent(base({ host: null })).host, 'unknown-host');
+  assert.equal(createLiveEvent(base({ host: 123 })).host, 'unknown-host');
+});
+
+test('event schema keeps known hosts and the historical internal input unchanged', () => {
+  assert.equal(createLiveEvent(base({ host: 'claude' })).host, 'claude');
+  assert.equal(createLiveEvent(base({ host: 'codex' })).host, 'codex');
+  assert.equal(createLiveEvent(base({ host: 'opencode' })).host, 'opencode');
+  assert.equal(createLiveEvent(base({ host: 'internal' })).host, 'internal');
+});
+
+// The bucket is itself SAFE_HOST_ID-shaped by construction (see event-schema.mjs);
+// this pins the accepted ambiguity between a declared host literally named
+// 'unknown-host' and a value that was bucketed into it.
+test('resolveHost is idempotent on its own unknown-host bucket', () => {
+  assert.equal(resolveHost('unknown-host'), 'unknown-host');
+});
+
+test('event schema resolves a declared actor/target host instead of inheriting the session host, but still inherits when one is absent', () => {
+  assert.equal(createLiveEvent(base({
+    actor: { id: 's1', kind: 'session', host: 'hermes' },
+  })).actor.host, 'hermes');
+  assert.equal(createLiveEvent(base({
+    actor: { id: 's1', kind: 'session', host: 'Hermes!' },
+  })).actor.host, 'unknown-host');
+  assert.equal(createLiveEvent(base({
+    actor: { id: 's1', kind: 'session' },
+  })).actor.host, 'claude');
+
+  const target = (host) => createLiveEvent(base({
+    action: 'tool.started', target: { id: 'call', kind: 'tool', host },
+  })).target.host;
+  assert.equal(target('hermes'), 'hermes');
+  assert.equal(target('Hermes!'), 'unknown-host');
+  assert.equal(target(undefined), 'claude');
 });
 
 test('event schema assigns privacy-safe project and host-qualified session identities', () => {

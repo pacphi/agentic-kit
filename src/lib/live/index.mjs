@@ -1,4 +1,4 @@
-export { LIVE_SCHEMA_VERSION, createLiveEvent } from './event-schema.mjs';
+export { LIVE_SCHEMA_VERSION, createLiveEvent, resolveHost } from './event-schema.mjs';
 export { LiveReplayStream } from './replay-stream.mjs';
 export {
   emptyLiveProjection, reduceLiveEvent, serializeLiveProjection, sweepLiveProjection,

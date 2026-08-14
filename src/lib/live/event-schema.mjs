@@ -3,6 +3,12 @@ export const LIVE_SCHEMA_VERSION = 2;
 const HOSTS = new Set(['claude', 'codex', 'opencode', 'internal']);
 // `internal` is read-only historical vocabulary. Live-source registration still
 // admits only ruflo/aqe, and no current writer emits the retired dual-run label.
+// A host id outside this closed set is not folded into `internal` — that would
+// misrecord a real, novel assistant as ak-internal activity. A safely-shaped
+// unknown id (see SAFE_HOST_ID) passes through verbatim so per-id truth is
+// preserved; anything unsafe or non-string becomes the explicit 'unknown-host'
+// bucket, which can never collide with 'internal' or a real host.
+const SAFE_HOST_ID = /^[a-z][a-z0-9-]{0,31}$/;
 const SURFACES = new Set(['native', 'ruflo', 'aqe', 'plugin', 'skill', 'internal']);
 const CONFIDENCE = new Set(['observed', 'configured', 'correlated', 'inferred', 'unknown', 'assumed', 'planned']);
 const PROVIDER_PROVENANCE = new Set(['observed', 'configured', 'inferred', 'unknown']);
@@ -47,6 +53,15 @@ function timestamp(value) {
 
 function count(value) {
   return Number.isFinite(value) ? Math.max(0, Math.trunc(value)) : null;
+}
+
+// 'unknown-host' is itself SAFE_HOST_ID-shaped, so a host literally named
+// 'unknown-host' is indistinguishable from the bucket. Accepted: no consumer
+// branches on bucketed-vs-declared, and inventing an out-of-grammar sentinel
+// risks its own key-syntax interactions downstream.
+export function resolveHost(value) {
+  if (HOSTS.has(value)) return value;
+  return typeof value === 'string' && SAFE_HOST_ID.test(value) ? value : 'unknown-host';
 }
 
 function safeWorkspace(value) {
@@ -104,7 +119,7 @@ export function createLiveEvent(input, { now = () => new Date().toISOString() } 
   if (!sessionId || !action || !actorId) {
     throw new TypeError('live event requires sessionId, action and actor.id');
   }
-  const host = HOSTS.has(input.host) ? input.host : 'internal';
+  const host = resolveHost(input.host);
   // Preserve the historical actor-level identity accepted from adapters while
   // exposing the axes at the event level. Provider intentionally has no host
   // fallback: a transcript proves its host, not which provider served it.
@@ -150,7 +165,12 @@ export function createLiveEvent(input, { now = () => new Date().toISOString() } 
       kind: actorKind,
       label: text(input.actor?.label, 96),
       role: text(input.actor?.role, 96),
-      host: HOSTS.has(input.actor?.host) ? input.actor.host : host,
+      // No declared host is a legitimate inference (the actor ran in the
+      // session's host); a declared-but-unrecognized host is not the same
+      // thing and must run through the same resolution as the event-level
+      // host, or it would silently misattribute a novel actor to whichever
+      // host the session happened to be.
+      host: input.actor?.host == null ? host : resolveHost(input.actor.host),
       provider,
       model,
     },
@@ -160,7 +180,7 @@ export function createLiveEvent(input, { now = () => new Date().toISOString() } 
       kind: ACTOR_KINDS.has(input.target.kind) ? input.target.kind : 'agent',
       label: text(input.target.label, 96),
       role: text(input.target.role, 96),
-      host: HOSTS.has(input.target.host) ? input.target.host : host,
+      host: input.target.host == null ? host : resolveHost(input.target.host),
     } : null,
     status: STATUS.has(input.status) ? input.status : 'unknown',
     signal: {
