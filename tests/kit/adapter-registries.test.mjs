@@ -6,6 +6,8 @@ import {
   PROJECTION_REGISTRY,
   OBSERVABILITY_REGISTRY,
   validateRegistries,
+  validateHostAdapter,
+  defaultHostMap,
 } from '../../src/lib/adapters/index.mjs';
 import {
   validHost, validProvider, validRegistries,
@@ -117,4 +119,35 @@ test('credential descriptors contain environment variable names, never credentia
   assert.deepEqual(validateRegistries(validRegistries({ providers: [provider] })), [
     { path: 'providers[0].credentials.names[0]', code: 'invalid-env-name', value: 'sk-secret-value' },
   ]);
+});
+
+// F-15: the {claude:true, codex:false, opencode:false} enablement literal used
+// to be triplicated across config.mjs, providers.mjs and x/host.mjs. It is now
+// derived from HOST_REGISTRY.enabledByDefault via defaultHostMap().
+test('defaultHostMap mirrors the historical host-enablement default', () => {
+  assert.deepEqual(defaultHostMap(), { claude: true, codex: false, opencode: false });
+});
+
+test('defaultHostMap returns a fresh, independently mutable object every call', () => {
+  const first = defaultHostMap();
+  first.codex = true;
+  assert.notEqual(first, defaultHostMap());
+  assert.deepEqual(defaultHostMap(), { claude: true, codex: false, opencode: false });
+});
+
+test('every built-in host declares a boolean enabledByDefault', () => {
+  for (const host of HOST_REGISTRY) {
+    assert.equal(typeof host.enabledByDefault, 'boolean', `${host.id}.enabledByDefault must be boolean`);
+  }
+});
+
+test('validateHostAdapter rejects a host with a missing or non-boolean enabledByDefault', () => {
+  assert.throws(() => validateHostAdapter(validHost()), /host\.enabledByDefault must be boolean/);
+  assert.throws(() => validateHostAdapter(validHost({ enabledByDefault: 'yes' })),
+    /host\.enabledByDefault must be boolean/);
+});
+
+test('validateHostAdapter accepts a host with an explicit boolean enabledByDefault', () => {
+  assert.doesNotThrow(() => validateHostAdapter(validHost({ enabledByDefault: true })));
+  assert.doesNotThrow(() => validateHostAdapter(validHost({ enabledByDefault: false })));
 });

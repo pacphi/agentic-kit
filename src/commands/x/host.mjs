@@ -18,7 +18,9 @@ import { parseRouteSpecs, formatModelHelp, PRIMARY_HOSTS, DEFAULT_PRIMARY_HOST, 
 import { loadKitConfig, saveKitConfig } from '../../lib/config.mjs';
 import { OPENCODE_LIFECYCLE_ADAPTER, reconcileOpencodeGuidance } from '../../lib/opencode.mjs';
 import { runLifecycle } from '../../lib/adapters/lifecycle.mjs';
-import { routableHostIds } from '../../lib/adapters/index.mjs';
+import {
+  routableHostIds, defaultHostMap, validateBinding, HOST_REGISTRY, PROVIDER_REGISTRY,
+} from '../../lib/adapters/index.mjs';
 import {
   newlyEnabledHostTrustManifest, trustManifestLines,
 } from '../../lib/trust-manifest.mjs';
@@ -149,6 +151,16 @@ export async function run({ flags, positionals, pkgRoot }) {
   return 2;
 }
 
+/** Structured, friendly warnings for invalid user-declared bindings in kit.json
+ *  integrations.bindings (F-16: validateBinding had zero call sites — wired
+ *  here so a bad entry surfaces as a warning instead of silent garbage or an
+ *  uncaught TypeError reaching the user). A valid binding list yields []. */
+export function bindingWarnings(cfg) {
+  return (cfg.integrations?.bindings ?? []).flatMap((binding, index) =>
+    validateBinding(binding, { hosts: HOST_REGISTRY, providers: PROVIDER_REGISTRY }).map((error) =>
+      `kit.json integrations.bindings[${index}].${error.path.replace(/^binding\./, '')}: ${error.code} (${JSON.stringify(error.value)})`));
+}
+
 async function status({ flags, cwd }) {
   const cfg = loadKitConfig();
   const facts = await collectIntegrationFacts({ cwd, cfg });
@@ -169,6 +181,8 @@ async function status({ flags, cwd }) {
     }, null, 2));
     return 0;
   }
+
+  for (const message of bindingWarnings(cfg)) warn(message);
 
   const dflt = isDefault(cfg);
   console.log(bold('ruflo agent hosts') + dim(`  (wiring scope: ${scope})`));
@@ -331,7 +345,7 @@ async function off({ cwd, pkgRoot }) {
     models: [],
     maxBudgetUsd: null,
   };
-  cfg.integrations.hosts = { claude: true, codex: false, opencode: false };
+  cfg.integrations.hosts = defaultHostMap();
   cfg.routing.primaryHost = DEFAULT_PRIMARY_HOST;
   cfg.routing.routes = {};
   cfg.integrations.ownership ??= {};

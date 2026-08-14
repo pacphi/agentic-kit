@@ -8,6 +8,7 @@ import {
   CURRENT_INTEGRATIONS_VERSION,
   migrateIntegrationConfig,
 } from './adapters/config.mjs';
+import { defaultHostMap } from './adapters/registries.mjs';
 import {
   DEFAULT_PRIMARY_HOST,
   ROUTING_SCHEMA_VERSION,
@@ -25,7 +26,7 @@ const DEFAULTS = {
   mcp: { register: true, excludeFamilies: [] },
   integrations: {
     version: CURRENT_INTEGRATIONS_VERSION,
-    hosts: { claude: true, codex: false, opencode: false },
+    hosts: defaultHostMap(),
     bindings: [],
   },
   routing: {

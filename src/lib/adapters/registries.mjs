@@ -93,6 +93,7 @@ export function validateHostAdapter(value, {
     ['detect-never-overwrite', 'managed', 'unmanaged'], 'host.install.externalInstallPolicy');
   validateCapabilities(value.capabilities, HOST_CAPABILITIES, 'host.capabilities');
   validateHostTrust(value.trust);
+  if (typeof value.enabledByDefault !== 'boolean') throw new TypeError('host.enabledByDefault must be boolean');
   assertId(value.configProjection, 'host.configProjection');
   assertStringArray(value.observability, 'host.observability');
   if (projections && !projections[value.configProjection]) {
@@ -153,7 +154,7 @@ const OBSERVABILITY_MAP = registryFrom([
 
 const hostEntries = [
   {
-    id: 'claude', label: 'Claude Code',
+    id: 'claude', label: 'Claude Code', enabledByDefault: true,
     install: { bin: 'claude', npmPackage: '@anthropic-ai/claude-code', externalInstallPolicy: 'detect-never-overwrite' },
     capabilities: { canDriveSession: true, canBePrimary: true, canRouteActivities: true, commandStatusline: true, transcripts: true, usage: true, nativeMcpConfig: true, nativeGuidance: true },
     auth: { apiKeyEnv: ['ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN'], loginFile: ['.claude', '.credentials.json'], keyOverridesLogin: false },
@@ -178,7 +179,7 @@ const hostEntries = [
     configProjection: 'claude', observability: ['claude-transcripts', 'claude-statusline'],
   },
   {
-    id: 'codex', label: 'OpenAI Codex',
+    id: 'codex', label: 'OpenAI Codex', enabledByDefault: false,
     install: { bin: 'codex', npmPackage: '@openai/codex', externalInstallPolicy: 'detect-never-overwrite' },
     capabilities: { canDriveSession: true, canBePrimary: true, canRouteActivities: true, commandStatusline: false, transcripts: true, usage: true, nativeMcpConfig: true, nativeGuidance: true },
     auth: { apiKeyEnv: ['OPENAI_API_KEY'], loginFile: ['.codex', 'auth.json'], keyOverridesLogin: true },
@@ -199,7 +200,7 @@ const hostEntries = [
     configProjection: 'codex', observability: ['codex-transcripts', 'codex-app-server'],
   },
   {
-    id: 'opencode', label: 'OpenCode',
+    id: 'opencode', label: 'OpenCode', enabledByDefault: false,
     install: { bin: 'opencode', npmPackage: 'opencode-ai', externalInstallPolicy: 'detect-never-overwrite' },
     capabilities: { canDriveSession: true, canBePrimary: false, canRouteActivities: true, commandStatusline: false, transcripts: true, usage: false, nativeMcpConfig: true, nativeGuidance: true },
     auth: { apiKeyEnv: [], loginFile: ['.local', 'share', 'opencode', 'auth.json'], keyOverridesLogin: false },
@@ -247,6 +248,9 @@ const PROVIDER_MAP = registryFrom(providerEntries,
   (entry) => validateProviderAdapter(entry, { projections: PROJECTION_MAP, observability: OBSERVABILITY_MAP }), 'provider');
 
 export const PROJECTION_REGISTRY = immutable(Object.values(PROJECTION_MAP));
+// Validation metadata + referential integrity only (host.observability entries
+// are cross-checked against this set) — deliberately NOT a dispatch surface;
+// no collector loop maps an observability id to a live collector (F-12).
 export const OBSERVABILITY_REGISTRY = immutable(Object.values(OBSERVABILITY_MAP));
 export const HOST_REGISTRY = immutable(Object.values(HOST_MAP));
 export const PROVIDER_REGISTRY = immutable(Object.values(PROVIDER_MAP));
@@ -274,6 +278,13 @@ export const providerIds = (predicate = () => true) => PROVIDER_REGISTRY.filter(
 export const primaryHostIds = () => hostIds((host) => host.capabilities.canBePrimary);
 export const routableHostIds = () => hostIds((host) => host.capabilities.canRouteActivities);
 export const managedHostIds = () => hostIds((host) => host.capabilities.canDriveSession);
+/** Fresh {hostId: enabledByDefault} for every session-driving host — the single
+ *  source for the `{claude:true, codex:false, opencode:false}` literal that used
+ *  to be triplicated across config.mjs, providers.mjs and x/host.mjs (F-15).
+ *  Returns a new object per call since every call site mutates its copy. */
+export const defaultHostMap = () => Object.fromEntries(
+  HOST_REGISTRY.filter((host) => host.capabilities.canDriveSession).map((host) => [host.id, host.enabledByDefault]),
+);
 export function hostsWithCapability(entriesOrCapability, maybeCapability) {
   const entries = Array.isArray(entriesOrCapability) ? entriesOrCapability : HOST_REGISTRY;
   const capability = Array.isArray(entriesOrCapability) ? maybeCapability : entriesOrCapability;
