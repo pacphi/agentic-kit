@@ -8,6 +8,21 @@
 // protocol itself here — this module only reads/defaults the `routing` block
 // of an EXISTING .claude/skills/qe-court/config.json; it never creates the
 // file and never touches any other key in it.
+//
+// Deliberate fail-closed divergence from upstream referee.ts (F-11):
+// unregistered provider ids are never collapsed into one shared 'unknown'
+// vendor — each keeps a distinct `unregistered:<id>` tag so two different
+// unrecognized providers never spuriously "share" a vendor for the purpose
+// of *counting* distinct vendors. validatePanel applies the same "can't
+// prove independence" epistemics symmetrically to both checks it runs:
+//   - vendor-diversity: unregistered vendors are excluded from the count
+//     entirely, so they can never help satisfy minVendors.
+//   - writerIsNeverJuror: an unregistered writer and an unregistered jury
+//     are treated as COULD-BE-colluding (flagged) even when their tags
+//     differ, because ak can't prove two ids it doesn't recognize are
+//     actually different vendors.
+// Net effect: ak is never looser than a model where every unrecognized id
+// shared one 'unknown' vendor — it may flag stricter, but never the reverse.
 import path from 'node:path';
 import { readJson } from './settings.mjs';
 import { installedVersion, cmpVersions } from './versions.mjs';
@@ -20,7 +35,10 @@ export function qeCourtShipped() {
   return !!v && cmpVersions(v, QE_COURT_MIN_VERSION) >= 0;
 }
 
-/** Map a provider id to its coarse vendor — ported from qe-court's referee.js. */
+/** Map a provider id to its coarse vendor — ported from qe-court's referee.js.
+ *  Known prefixes are byte-identical to upstream; an unrecognized id gets its
+ *  own `unregistered:<id>` tag instead of collapsing into one 'unknown'
+ *  bucket (F-11 — see module comment). */
 export function vendorOf(providerId) {
   const p = String(providerId).toLowerCase();
   if (p.startsWith('claude')) return 'claude';
@@ -28,7 +46,7 @@ export function vendorOf(providerId) {
   if (p === 'codex' || p === 'openai' || p.startsWith('gpt') || p.startsWith('o3') || p.startsWith('o4')) return 'gpt';
   if (p.startsWith('openrouter')) return 'openrouter';
   if (p === 'ollama' || p === 'local') return 'local';
-  return 'unknown';
+  return `unregistered:${p}`;
 }
 
 /** Flatten config.json's `routing` map (role -> {provider, model?}) into the
@@ -46,7 +64,11 @@ export function panelFromRouting(routing) {
 export function validatePanel(panel, policy = {}) {
   const minVendors = policy.minVendors ?? policy.minDistinctVendors ?? 2;
   const violations = [];
-  const vendorsSeated = new Set(panel.map((s) => vendorOf(s.provider)));
+  // unregistered vendors can never help satisfy minVendors — ak can't prove
+  // two unrecognized ids are independent vendors (F-11 fail-closed divergence).
+  const vendorsSeated = new Set(
+    panel.map((s) => vendorOf(s.provider)).filter((v) => !v.startsWith('unregistered:')),
+  );
   if (vendorsSeated.size < minVendors) violations.push('vendor-diversity');
   const jury = panel.find((s) => s.role === 'jury');
   const writerLike = panel.filter((s) => s.role === 'defense' || s.role === 'writer');
@@ -54,7 +76,17 @@ export function validatePanel(panel, policy = {}) {
     violations.push('missing-jury');
   } else if (policy.writerIsNeverJuror !== false) {
     const juryVendor = vendorOf(jury.provider);
-    if (writerLike.some((w) => vendorOf(w.provider) === juryVendor)) violations.push('writerIsNeverJuror');
+    const juryUnregistered = juryVendor.startsWith('unregistered:');
+    // Same vendor tag always collides. Two DIFFERENT unregistered tags also
+    // collide (fail closed) — ak can't prove an unrecognized writer id and
+    // an unrecognized jury id are actually different vendors, so it must
+    // assume they could be the same one rather than silently trust they
+    // aren't (mirrors the vendor-diversity exclusion above).
+    const collides = writerLike.some((w) => {
+      const writerVendor = vendorOf(w.provider);
+      return writerVendor === juryVendor || (juryUnregistered && writerVendor.startsWith('unregistered:'));
+    });
+    if (collides) violations.push('writerIsNeverJuror');
   }
   return violations;
 }

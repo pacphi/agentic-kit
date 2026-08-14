@@ -1,7 +1,34 @@
 import { isDeepStrictEqual } from 'node:util';
 import { immutable } from './schema.mjs';
+import { PROVIDER_REGISTRY } from './registries.mjs';
 
 export const CURRENT_INTEGRATIONS_VERSION = 2;
+
+// A host's native provider = the registry provider with host-login
+// credentials whose projections include that host (anthropic -> claude,
+// openai -> codex). Derived from the registry instead of a literal map so
+// it can't drift from the adapters it describes, and so a host with no such
+// provider (e.g. opencode) simply has none — never a synthetic stand-in
+// (F-13). Two host-login providers claiming the same host would silently
+// last-write-wins in a plain Map build, defeating the whole point of
+// deriving this from the registry — fail loudly at load time instead.
+function buildNativeProviderByHost(providers) {
+  const byHost = new Map();
+  for (const provider of providers) {
+    if (provider.credentials?.kind !== 'host-login') continue;
+    for (const host of provider.projections) {
+      const existing = byHost.get(host);
+      if (existing && existing !== provider.id) {
+        throw new Error(
+          `adapter registry ambiguity: both '${existing}' and '${provider.id}' claim host-login for host '${host}'`,
+        );
+      }
+      byHost.set(host, provider.id);
+    }
+  }
+  return byHost;
+}
+const NATIVE_PROVIDER_BY_HOST = buildNativeProviderByHost(PROVIDER_REGISTRY);
 
 const plain = (value) => value !== null && typeof value === 'object' && !Array.isArray(value);
 const own = (value, key) => plain(value) && Object.hasOwn(value, key);
@@ -61,22 +88,30 @@ export function migrateIntegrationConfig(config = {}, _options = {}) {
     ? structuredClone(providers.hosts)
     : structuredClone(existing.hosts ?? {});
   const enabled = Object.entries(hosts).filter(([, on]) => on).map(([host]) => host);
-  const defaults = { claude: 'anthropic', codex: 'openai' };
   const priorBindings = mergeBindings(
     Array.isArray(existing.bindings) ? existing.bindings : [],
     Array.isArray(providers.bindings) ? providers.bindings : [],
   );
   const seenHosts = new Set(priorBindings.map((binding) => binding.host));
-  const inferred = enabled.filter((host) => !seenHosts.has(host)).map((host) => ({
-    id: `${defaults[host] ?? 'unknown'}-via-${host}`,
-    host,
-    provider: defaults[host] ?? null,
-    model: null,
-    transport: 'native',
-    endpoint: null,
-    provenance: defaults[host] ? 'inferred' : 'unknown',
-    managedBy: 'unknown',
-  }));
+  // A host with no registered native provider (F-13) gets no inferred
+  // binding at all — nothing is restamped on any load, and it stays that
+  // way until a real binding is declared for it.
+  const inferred = enabled
+    .filter((host) => !seenHosts.has(host))
+    .map((host) => {
+      const provider = NATIVE_PROVIDER_BY_HOST.get(host);
+      return provider ? {
+        id: `${provider}-via-${host}`,
+        host,
+        provider,
+        model: null,
+        transport: 'native',
+        endpoint: null,
+        provenance: 'inferred',
+        managedBy: 'unknown',
+      } : null;
+    })
+    .filter((binding) => binding !== null);
   const ownership = structuredClone(existing.ownership ?? {});
   const reverseMarker = 'rufloCodexMcp';
   const hasLegacyCodex = (own(providers, 'codexMcp') && providers.codexMcp != null)

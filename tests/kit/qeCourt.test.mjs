@@ -26,8 +26,9 @@ test('vendorOf classifies codex/openai/gpt/o3/o4 as the gpt vendor', () => {
   }
 });
 
-test('vendorOf classifies unknown providers as unknown', () => {
-  assert.equal(vendorOf('some-new-thing'), 'unknown');
+test('vendorOf tags an unregistered provider with its own id instead of a shared "unknown" bucket', () => {
+  assert.equal(vendorOf('some-new-thing'), 'unregistered:some-new-thing');
+  assert.equal(vendorOf('hermes-something'), 'unregistered:hermes-something');
 });
 
 // panelFromRouting
@@ -100,6 +101,76 @@ test('validatePanel binds the shipped option names and requires a jury', () => {
     validatePanel(panel, { minDistinctVendors: 3 }),
     ['vendor-diversity', 'missing-jury'],
   );
+});
+
+test('validatePanel never lets two distinct unregistered providers satisfy minVendors, and treats them as possibly-colluding', () => {
+  const panel = [
+    { role: 'defense', provider: 'hermes-a' },
+    { role: 'jury', provider: 'zeta-b' },
+  ];
+  // distinct unregistered ids never count toward vendor-diversity, AND ak
+  // can't prove they're different vendors either — so writerIsNeverJuror
+  // fails closed too (this is the reviewer's minimal repro for F-11 round 2).
+  assert.deepEqual(validatePanel(panel), ['vendor-diversity', 'writerIsNeverJuror']);
+});
+
+test('validatePanel does NOT trip writerIsNeverJuror when only the jury is unregistered and all writers are registered', () => {
+  const panel = [
+    { role: 'defense', provider: 'claude-code' },
+    { role: 'jury', provider: 'hermes-a' },
+  ];
+  // matches old shared-'unknown'-vendor behavior: a registered writer vendor
+  // can never equal an unregistered jury tag, so no collusion is assumed.
+  assert.deepEqual(validatePanel(panel), ['vendor-diversity']);
+});
+
+test('direction of divergence: ak is never looser than the old shared-"unknown"-vendor model', () => {
+  // Reviewer's minimal repro: under the OLD code, every unrecognized id
+  // mapped to the single literal 'unknown' vendor, so vendorOf(jury) ===
+  // vendorOf(defense) always held here and tripped writerIsNeverJuror. The
+  // per-id `unregistered:<id>` tagging must not silently drop that
+  // violation — new violations must be a superset of what old code found.
+  const panel = [
+    { role: 'defense', provider: 'hermes-a' },
+    { role: 'jury', provider: 'zeta-b' },
+  ];
+  const oldViolations = ['vendor-diversity', 'writerIsNeverJuror'];
+  const newViolations = validatePanel(panel);
+  for (const violation of oldViolations) {
+    assert.ok(newViolations.includes(violation), `expected new violations to retain '${violation}'`);
+  }
+});
+
+test('validatePanel: minVendors 0 never flags vendor-diversity, even for an all-unregistered panel', () => {
+  const panel = [
+    { role: 'defense', provider: 'hermes-a' },
+    { role: 'jury', provider: 'zeta-b' },
+  ];
+  assert.deepEqual(validatePanel(panel, { minVendors: 0, writerIsNeverJuror: false }), []);
+});
+
+test('validatePanel: minVendors 1 flags vendor-diversity when only unregistered vendors are seated', () => {
+  const panel = [
+    { role: 'defense', provider: 'hermes-a' },
+    { role: 'jury', provider: 'zeta-b' },
+  ];
+  assert.deepEqual(validatePanel(panel, { minVendors: 1, writerIsNeverJuror: false }), ['vendor-diversity']);
+});
+
+test('validatePanel handles an empty panel: vendor-diversity and missing-jury both flagged', () => {
+  assert.deepEqual(validatePanel([]), ['vendor-diversity', 'missing-jury']);
+});
+
+test('validatePanel still trips writerIsNeverJuror when writer and jury share the same unregistered id', () => {
+  const panel = [
+    { role: 'defense', provider: 'hermes-x' },
+    { role: 'prosecutor.a', provider: 'codex' },
+    { role: 'prosecutor.b', provider: 'claude-code' },
+    { role: 'jury', provider: 'hermes-x' },
+  ];
+  // registered gpt + claude vendors satisfy minVendors on their own, so this
+  // isolates writerIsNeverJuror: same unregistered id seated as writer and juror.
+  assert.deepEqual(validatePanel(panel), ['writerIsNeverJuror']);
 });
 
 test('validatePanel honors an explicit writerIsNeverJuror:false policy', () => {
