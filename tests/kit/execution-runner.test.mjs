@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { EXECUTION_ADAPTERS } from '../../src/lib/execution/adapters.mjs';
+import { EXECUTION_ADAPTERS, assertBuiltinAdaptersRoutable, executionAdapterFor } from '../../src/lib/execution/adapters.mjs';
 import { executeRunPlan } from '../../src/lib/execution/runner.mjs';
 
 const worker = (id, host = 'opencode', dependsOn) => ({ id, activity: 'implementation', role: 'coder', host, prompt: id, ...(dependsOn ? { dependsOn } : {}) });
@@ -452,11 +452,12 @@ test('runner reports an unknown host without attempting a lifecycle', async () =
   assert.match(result.failure.reason, /no execution adapter/);
 });
 
-// #88: the construction invariant — every routable host has an execution
-// adapter and vice versa, enforced at import. A fresh process import must
-// never throw; a violating edit fails here (and at import) instead of at
-// runtime with cli_unavailable on every worker.
-test('routable hosts and execution adapters cannot drift apart (construction invariant)', async () => {
+// #88 (amended W1-B): the construction invariant now only enforces the
+// built-in -> registry direction. A fresh process import must never throw
+// against the real registry; a violating in-tree edit (a built-in adapter
+// wired for a host the registry doesn't mark routable) still fails at
+// import, never silently at runtime.
+test('a fresh process imports the real execution adapters registry cleanly (construction invariant)', async () => {
   const { spawnSync } = await import('node:child_process');
   const { fileURLToPath } = await import('node:url');
   const path = await import('node:path');
@@ -466,6 +467,43 @@ test('routable hosts and execution adapters cannot drift apart (construction inv
   ], { encoding: 'utf8', cwd: repo });
   assert.equal(r.status, 0, `execution adapters module must import cleanly:\n${r.stderr}`);
   assert.match(r.stdout, /in-sync/);
+});
+
+// #88 (amended W1-B): a built-in adapter for a host the registry no longer
+// marks routable is still an in-tree wiring mistake — this direction keeps
+// throwing loudly, naming the offending host(s).
+test('a built-in adapter for a non-routable host still throws (in-tree wiring mistake)', () => {
+  assert.throws(() => assertBuiltinAdaptersRoutable(['codex', 'opencode']),
+    /adapter\(s\) for non-routable host\(s\): claude/);
+});
+
+// #88 (amended W1-B): the reverse direction — a registry host marked
+// routable with NO built-in adapter — is now a legitimate merge-seam gap,
+// not a construction error. This is exactly the scenario a future registry
+// entry (canRouteActivities:true, adapter landing in a later wave) creates.
+test('a routable registry host with no built-in adapter does NOT throw at import (merge seam)', () => {
+  assert.doesNotThrow(() => assertBuiltinAdaptersRoutable(['claude', 'codex', 'opencode', 'future-host']));
+});
+
+test('executionAdapterFor resolves built-ins identically to the old map, and null for an unwired host', () => {
+  assert.equal(executionAdapterFor('claude'), EXECUTION_ADAPTERS.get('claude'));
+  assert.equal(executionAdapterFor('codex'), EXECUTION_ADAPTERS.get('codex'));
+  assert.equal(executionAdapterFor('opencode'), EXECUTION_ADAPTERS.get('opencode'));
+  assert.equal(executionAdapterFor('future-host'), null);
+});
+
+// #88 (amended W1-B): a routed plan naming a host with no built-in adapter
+// degrades that one worker instead of crashing the run. This is the SAME
+// code path as "runner reports an unknown host without attempting a
+// lifecycle" above — adapterFor() only cares whether an adapter is wired,
+// never whether the registry calls the host routable — so a
+// routable-but-unadapted host (this wave's actual failure mode) degrades
+// identically to a wholly unknown one.
+test('a routed plan naming a routable-but-unadapted host degrades that worker (cli_unavailable), never crashes', async () => {
+  const [result] = await executeRunPlan({ workers: [worker('a', 'future-host')] }, { clock });
+  assert.equal(result.status, 'failed');
+  assert.equal(result.exitCategory, 'cli_unavailable');
+  assert.match(result.failure.reason, /no execution adapter/);
 });
 
 // #88 test-gap: plan-validation guards — removing any of these converts a

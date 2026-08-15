@@ -1,7 +1,7 @@
 // Host-neutral execution coordinator. It owns scheduling, deadlines, and
 // lifecycle cleanup; adapters own each host's transport and protocol details.
 import { validateExecutionAdapter, validateWorkerResult } from './schema.mjs';
-import { EXECUTION_ADAPTERS } from './adapters.mjs';
+import { executionAdapterFor } from './adapters.mjs';
 import {
   HANDOFF_REQUEST,
   normalizeHandoff,
@@ -191,8 +191,18 @@ function validatePlan(plan) {
   }
 }
 
+// W1-B: an omitted `adapters` option resolves through the built-in merge
+// seam (executionAdapterFor) instead of a raw Map reference, so a future
+// externally-admitted adapter joins this same lookup without callers here
+// changing. Explicit injection (tests, callers with their own registry)
+// still takes a Map or plain object, unchanged. Only `undefined` selects the
+// built-in seam: an explicit `null` disables ALL adapters (every worker
+// degrades cli_unavailable) rather than meaning "use defaults" — fail-safe,
+// but don't pass null expecting the built-ins.
 function adapterFor(adapters, host) {
-  const adapter = adapters instanceof Map ? adapters.get(host) : adapters?.[host];
+  const adapter = adapters === undefined
+    ? executionAdapterFor(host)
+    : adapters instanceof Map ? adapters.get(host) : adapters?.[host];
   return adapter ? validateExecutionAdapter(adapter) : null;
 }
 
@@ -265,7 +275,7 @@ async function executeWorkerWithEscalation(worker, adapters, {
  * A failed dependency blocks descendants; independent branches keep running.
  * `escalate: true` enables bounded per-worker ladder retries (ADR-0019). */
 export async function executeRunPlan(plan, {
-  adapters = EXECUTION_ADAPTERS, cwd = process.cwd(), maxConcurrent = 4, timeoutMs, clock = nowIso, escalate = false,
+  adapters, cwd = process.cwd(), maxConcurrent = 4, timeoutMs, clock = nowIso, escalate = false,
 } = /** @type {{adapters?:Record<string, any>|Map<string, any>, cwd?:string, maxConcurrent?:number, timeoutMs?:number, clock?:()=>string, escalate?:boolean}} */ ({})) {
   validatePlan(plan);
   if (!Number.isInteger(maxConcurrent) || maxConcurrent < 1) throw new TypeError('maxConcurrent must be a positive integer');
