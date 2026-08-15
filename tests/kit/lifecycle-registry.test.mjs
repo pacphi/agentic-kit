@@ -11,11 +11,14 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
-  registerBuiltinLifecycle, lifecycleAdapterFor, hostsWithLifecycle,
+  registerBuiltinLifecycle, registerAdmittedLifecycle, lifecycleAdapterFor,
+  hostsWithLifecycle, builtinHostsWithLifecycle,
 } from '../../src/lib/adapters/lifecycle-registry.mjs';
 import { OPENCODE_LIFECYCLE_ADAPTER } from '../../src/lib/opencode.mjs';
 import { validateLifecycleAdapter } from '../../src/lib/adapters/lifecycle.mjs';
 import { HOST_REGISTRY } from '../../src/lib/adapters/index.mjs';
+import { validateAdapterManifest } from '../../src/lib/adapters/manifest.mjs';
+import { applyAdmitted, resetAdmitted } from '../../src/lib/adapters/admitted.mjs';
 import { fakeLifecycleAdapter, fakeSurface } from './helpers/lifecycle-harness.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
@@ -84,3 +87,75 @@ for (const rel of [
       `${rel} must reach opencode's lifecycle adapter via lifecycleAdapterFor(...), not a named import`);
   });
 }
+
+for (const rel of ['commands/sync.mjs', 'commands/setup.mjs', 'commands/uninstall.mjs']) {
+  test(`${rel} loops builtinHostsWithLifecycle(), not hostsWithLifecycle() (Wave 4 P1: armed opencode-shaped-loop crash)`, () => {
+    const text = src(rel);
+    assert.ok(text.includes('builtinHostsWithLifecycle'),
+      `${rel}'s lifecycle loop must use builtinHostsWithLifecycle() — its loop body destructures an opencode-shaped result and would crash on a non-opencode admitted host`);
+  });
+}
+
+// ── P1: the armed opencode-shaped-loop crash ────────────────────────────────
+// setup.mjs/sync.mjs/uninstall.mjs's lifecycle loops destructure an
+// opencode-shaped result (stack.oc / ret.undo / ret.artifacts). Today only
+// opencode is registered, so that's unreachable — but registerAdmittedLifecycle
+// exists precisely to admit a non-opencode-shaped host's lifecycle adapter,
+// and hostsWithLifecycle() (a pure effectiveHostRegistry() query) would then
+// include it too, handing that host straight into the shape-dependent loops.
+// builtinHostsWithLifecycle() must stay built-ins-only regardless.
+test('builtinHostsWithLifecycle() excludes an admitted external host even after its lifecycle is registered', () => {
+  const hostId = 'hermes-lifecycle-probe';
+  const host = {
+    id: hostId,
+    label: 'Hermes',
+    install: { bin: hostId, externalInstallPolicy: 'detect-never-overwrite' },
+    capabilities: {
+      canDriveSession: true, canBePrimary: false, canRouteActivities: true,
+      commandStatusline: false, transcripts: true, usage: false,
+      nativeMcpConfig: false, nativeGuidance: false,
+    },
+    trust: { approvalPolicy: 'unchanged', changes: [] },
+    enabledByDefault: false,
+    configProjection: 'ruflo',
+    observability: [],
+  };
+  const manifest = validateAdapterManifest({
+    name: hostId,
+    version: '1.0.0',
+    contract: 1,
+    host,
+    detection: { bin: hostId },
+    driving: { surfaces: ['acp'] },
+    lifecycle: { detect: { hook: { command: [hostId, 'detect'] } } },
+    trust: {
+      changes: [{
+        id: 'hermes-subprocess-hooks', kind: 'third-party-adapter', scope: 'project',
+        owner: 'hermes', value: 'subprocess hooks', effect: 'run consented lifecycle hooks for hermes',
+      }],
+    },
+  });
+
+  // Baseline BEFORE admitting anything — not a literal ['opencode'], because
+  // an earlier test in this same file (registerBuiltinLifecycle('claude', ...))
+  // mutates the real, process-shared LIFECYCLE_ADAPTERS map too. The
+  // invariant under test is "unaffected by registering an external", so
+  // compare against a live before/after snapshot instead of a hardcoded list.
+  const before = builtinHostsWithLifecycle();
+
+  applyAdmitted([{ entry: host }]);
+  try {
+    registerAdmittedLifecycle(manifest, { runHook: async () => ({ ok: true, stdout: '{}', exitCode: 0 }) });
+
+    assert.ok(hostsWithLifecycle().includes(hostId),
+      'sanity: the pure registry query DOES see the admitted, lifecycle-registered host');
+    assert.ok(
+      !builtinHostsWithLifecycle().includes(hostId),
+      'the setup/sync/uninstall-facing function must never include an admitted external, even once its lifecycle is registered',
+    );
+    assert.deepEqual(builtinHostsWithLifecycle(), before,
+      'builtinHostsWithLifecycle() must be unaffected by registering an external lifecycle adapter');
+  } finally {
+    resetAdmitted();
+  }
+});

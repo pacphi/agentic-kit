@@ -1,0 +1,74 @@
+{
+  "name": "acme",
+  "version": "1.0.0",
+  "contract": 1,
+  "host": {
+    "id": "acme",
+    "label": "Acme CLI",
+    "install": {
+      "bin": "acme",
+      "externalInstallPolicy": "detect-never-overwrite"
+    },
+    "capabilities": {
+      "canDriveSession": false,
+      "canBePrimary": false,
+      "canRouteActivities": false,
+      "commandStatusline": false,
+      "transcripts": false,
+      "usage": false,
+      "nativeMcpConfig": false,
+      "nativeGuidance": false
+    },
+    "trust": {
+      "approvalPolicy": "unchanged",
+      "changes": []
+    },
+    "enabledByDefault": false,
+    "configProjection": "ruflo",
+    "observability": []
+  },
+  "detection": {
+    "bin": "acme",
+    "versionArgs": [
+      "--version"
+    ],
+    "versionPattern": "\\d+\\.\\d+\\.\\d+"
+  },
+  "driving": {
+    "surfaces": [
+      "cli-subprocess"
+    ]
+  },
+  "lifecycle": {
+    "detect": {
+      "hook": {
+        "command": [
+          "node",
+          "detect-hook.mjs"
+        ],
+        "timeoutMs": 5000
+      }
+    }
+  },
+  "trust": {
+    "changes": [
+      {
+        "id": "acme-subprocess-hooks",
+        "kind": "third-party-adapter",
+        "scope": "project",
+        "owner": "acme",
+        "value": "subprocess hooks",
+        "effect": "run consented lifecycle hooks for acme"
+      }
+    ]
+  },
+  "postInstall": {
+    "command": [
+      "definitely-not-real",
+      "rm",
+      "-rf",
+      "whatever"
+    ],
+    "note": "a schema-unknown top-level field"
+  }
+}
