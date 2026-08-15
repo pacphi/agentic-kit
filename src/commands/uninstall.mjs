@@ -9,8 +9,9 @@ import readline from 'node:readline/promises';
 import { run as runCmd } from '../lib/exec.mjs';
 import { stripBlock, BEGIN, BUILTIN_BLOCKS } from '../lib/blocks.mjs';
 import { unregister } from '../lib/mcp.mjs';
-import { retireOpencode } from '../lib/opencode.mjs';
 import { loadKitConfig, saveKitConfig } from '../lib/config.mjs';
+import { runLifecycle } from '../lib/adapters/lifecycle.mjs';
+import { hostsWithLifecycle, lifecycleAdapterFor } from '../lib/adapters/lifecycle-registry.mjs';
 import { present as rbPresent } from '../lib/ruvnet-brain.mjs';
 import * as paths from '../lib/paths.mjs';
 import { ok, warn, info } from '../lib/output.mjs';
@@ -121,23 +122,36 @@ export async function run({ flags }) {
       });
     }
   }
-  {
-    // cfg comes from the top of run() (read before any purge of kit.json).
-    // --purge removes kit.json above; persisting cfg here would recreate it.
-    if (cfg.integrations?.ownership?.opencode?.mcp === 'ak') {
-      if (dry) info('[dry-run] stripped ak-managed opencode wiring + artifacts (opencode.json, plugin, agents, skill)');
-      else {
-        const ret = retireOpencode(cfg);
-        ownershipTeardownOk = ret.ok;
-        if (!flags.purge) saveKitConfig(cfg);
-        (ret.ok ? ok : warn)(ret.ok
-          ? 'stripped ak-managed opencode wiring + artifacts (opencode.json, plugin, agents, skill)'
-          : `opencode teardown incomplete — ${ret.undo.detail}`);
-      }
-    } else if (fs.existsSync(paths.opencodeDir())) {
-      // Not ak-managed (or never enabled): artifacts are still marker-gated, so
-      // only ak-deployed files leave — user-owned agents/skills/plugins stay.
-      act('removed ak-deployed opencode artifacts (plugin/agents/skill)', () => { retireOpencode(cfg); });
+  // Registry-driven host lifecycle teardown — reached by id, never by name
+  // (mirrors x/host.mjs's off(), which does its undo the same way). cfg comes
+  // from the top of run() (read before any purge of kit.json); --purge
+  // removes kit.json below, so persisting cfg here would recreate it. Each
+  // adapter's own undo() already honors ownership/receipts (opencode's
+  // undoOpencode no-ops when it never held mcp:'ak', and marker-gates
+  // artifact removal independent of that), so this call is unconditional per
+  // host — the only kit-side gate is "did anything actually happen", to
+  // avoid a no-op teardown line (and a needless kit.json rewrite) on a host
+  // that was never enabled.
+  for (const hostId of hostsWithLifecycle()) {
+    const adapter = lifecycleAdapterFor(hostId);
+    if (dry) {
+      info(`[dry-run] stripped ak-managed ${hostId} wiring + artifacts (opencode.json, plugin, agents, skill)`);
+      continue;
+    }
+    const retired = await runLifecycle({ adapter, action: 'undo', cfg });
+    const ret = retired.result;
+    ownershipTeardownOk = ownershipTeardownOk && ret.ok;
+    // Persist markers unconditionally, exactly like x/host.mjs's off()/pick():
+    // undo() mutates cfg's ownership markers in memory even when it rewrote
+    // no file (`undo.changed` measures the FILE, not cfg), so gating the save
+    // on `changed` would strand a stale mcp:'ak' receipt forever on the
+    // quiet-success path. Only the human-facing line stays gated on "did
+    // anything observable happen".
+    if (!flags.purge) saveKitConfig(cfg);
+    if (ret.undo.changed || ret.artifacts.changed || !ret.ok) {
+      (ret.ok ? ok : warn)(ret.ok
+        ? `stripped ak-managed ${hostId} wiring + artifacts (opencode.json, plugin, agents, skill)`
+        : `${hostId} teardown incomplete — ${ret.undo.detail}`);
     }
   }
   if (flags.purge && fs.existsSync(paths.kitConfigPath())) {

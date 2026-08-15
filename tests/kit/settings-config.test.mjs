@@ -102,3 +102,81 @@ test('loadKitConfig merges partial files over defaults (user file wins)', () => 
   assert.deepEqual(cfg.mcp.excludeFamilies, ['browser']);
   fs.rmSync(tmp, { recursive: true, force: true });
 });
+
+// F-14: an unrecognized top-level key (e.g. a future ak's `hostAdapters`)
+// must never silently round-trip as a no-op — loadKitConfig warns once,
+// naming the key, without dropping or throwing on it.
+
+/** Runs `fn` with console.error/console.log captured; returns { errLines, outLines }. */
+function captureConsole(fn) {
+  const errLines = [];
+  const outLines = [];
+  const realError = console.error;
+  const realLog = console.log;
+  console.error = (...a) => errLines.push(a.map(String).join(' '));
+  console.log = (...a) => outLines.push(a.map(String).join(' '));
+  try {
+    fn();
+  } finally {
+    console.error = realError;
+    console.log = realLog;
+  }
+  return { errLines, outLines };
+}
+
+test('loadKitConfig warns once on an unrecognized top-level key, naming it', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'kit-cfg-unknown-'));
+  const f = tmpFile(tmp, 'kit.json');
+  fs.writeFileSync(f, JSON.stringify({ hostAdapters: { foo: true } }));
+  const { errLines } = captureConsole(() => loadKitConfig(f));
+  assert.equal(errLines.length, 1);
+  assert.match(errLines[0], /hostAdapters/);
+  assert.match(errLines[0], /not recognized/);
+  fs.rmSync(tmp, { recursive: true, force: true });
+});
+
+test('loadKitConfig warns nothing for a config with only recognized keys', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'kit-cfg-clean-'));
+  const f = tmpFile(tmp, 'kit.json');
+  fs.writeFileSync(f, JSON.stringify({ security: false, mcp: { excludeFamilies: ['browser'] } }));
+  const { errLines } = captureConsole(() => loadKitConfig(f));
+  assert.deepEqual(errLines, []);
+  fs.rmSync(tmp, { recursive: true, force: true });
+});
+
+test('loadKitConfig warns only once per process for the same unknown key set across repeated loads', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'kit-cfg-repeat-'));
+  const f = tmpFile(tmp, 'kit.json');
+  fs.writeFileSync(f, JSON.stringify({ futureFeatureFlag: true }));
+  const { errLines } = captureConsole(() => {
+    loadKitConfig(f);
+    loadKitConfig(f);
+  });
+  assert.equal(errLines.length, 1, 'a second load with the same unknown key set must not warn again');
+  fs.rmSync(tmp, { recursive: true, force: true });
+});
+
+test('loadKitConfig round-trips an unrecognized top-level key through save unchanged', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'kit-cfg-roundtrip-'));
+  const f = tmpFile(tmp, 'kit.json');
+  fs.writeFileSync(f, JSON.stringify({ legacyPluginConfig: { retained: true } }));
+  const { errLines } = captureConsole(() => {
+    const cfg = loadKitConfig(f);
+    assert.deepEqual(cfg.legacyPluginConfig, { retained: true });
+    saveKitConfig(cfg, f);
+  });
+  assert.equal(errLines.length, 1, 'the unrecognized key still warns on the initial load');
+  const raw = JSON.parse(fs.readFileSync(f, 'utf8'));
+  assert.deepEqual(raw.legacyPluginConfig, { retained: true }, 'unknown key must round-trip through save exactly');
+  fs.rmSync(tmp, { recursive: true, force: true });
+});
+
+test('the unknown-key warning goes to stderr only, never stdout (so --json consumers are unaffected)', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'kit-cfg-stderr-'));
+  const f = tmpFile(tmp, 'kit.json');
+  fs.writeFileSync(f, JSON.stringify({ experimentalWidget: true }));
+  const { errLines, outLines } = captureConsole(() => loadKitConfig(f));
+  assert.equal(errLines.length, 1);
+  assert.deepEqual(outLines, [], 'the unknown-key warning must never write to stdout');
+  fs.rmSync(tmp, { recursive: true, force: true });
+});

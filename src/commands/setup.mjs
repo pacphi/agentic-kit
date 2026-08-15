@@ -12,8 +12,9 @@ import * as heal from '../lib/heal.mjs';
 import { fixStatusline } from '../lib/statusline.mjs';
 import { reconcileGuidance } from '../lib/blocks.mjs';
 import { register as mcpRegister, applyExclusions } from '../lib/mcp.mjs';
-import { OPENCODE_LIFECYCLE_ADAPTER, reconcileOpencodeGuidance } from '../lib/opencode.mjs';
+import { reconcileOpencodeGuidance } from '../lib/opencode.mjs';
 import { runLifecycle } from '../lib/adapters/lifecycle.mjs';
+import { hostsWithLifecycle, lifecycleAdapterFor } from '../lib/adapters/lifecycle-registry.mjs';
 import { loadKitConfig, saveKitConfig } from '../lib/config.mjs';
 import { HOSTS, applyHosts, applyProviders, hostInstallState, installHost, applyAqeRouter, seedActivityRoutesIfMultiHost, printActivityRoutingTable, aqeSupportsAgentOverrides, ensureCodexMcp, ensureRufloMcpInCodex, applySetupHostFlags, bothHostsEnabled } from '../lib/providers.mjs';
 import { installedVersion } from '../lib/versions.mjs';
@@ -23,7 +24,7 @@ import { readJson, writeJsonWithBackup } from '../lib/settings.mjs';
 import { withDb } from '../lib/sqlite.mjs';
 import { findMemoryEntry } from '../lib/project-memory.mjs';
 import {
-  setupTrustManifest, trustChangesForHost, trustManifestLines,
+  setupTrustManifest, trustManifestLines,
 } from '../lib/trust-manifest.mjs';
 import * as paths from '../lib/paths.mjs';
 import { ok, warn, fail, info, heading, bold, dim, reportOutcome } from '../lib/output.mjs';
@@ -91,18 +92,26 @@ const ask = async (q, dflt, yes) => {
   return a === '' ? dflt : a.startsWith('y');
 };
 
-export const PROJECT_PERMISSION_MANIFEST = Object.freeze(
-  trustChangesForHost('claude', { kind: 'auto-approve' }).map((entry) => ({
-    owner: entry.owner, rule: entry.value, effect: entry.effect,
-  })),
-);
-
-export function projectPermissionManifest(cfg) {
-  const claude = setupTrustManifest(cfg, { project: true })
-    .find((group) => group.hostId === 'claude');
-  return (claude?.changes ?? []).filter((entry) => entry.kind === 'auto-approve')
+// The authorized/disclosed auto-approve set is the UNION across every
+// enabled host's trust manifest, not claude's alone (F-04) — a host whose
+// auto-approve rules don't gate on enablement (requiresHostEnabled: false,
+// claude's posture today) always contributes; an opt-in host (opencode,
+// codex, or a future one) only contributes once cfg actually enables it.
+// `hosts` is injectable so tests can prove a second host's rule survives
+// removeUndisclosedPermissions through the same seam trust-manifest.test.mjs
+// uses for host-registry-construction tests.
+export function projectPermissionManifest(cfg, /** @type {{hosts?: any[]}} */ { hosts } = {}) {
+  const manifest = setupTrustManifest(cfg, { project: true, ...(hosts ? { hosts } : {}) });
+  return manifest.flatMap((group) => group.changes)
+    .filter((entry) => entry.kind === 'auto-approve')
     .map((entry) => ({ owner: entry.owner, rule: entry.value, effect: entry.effect }));
 }
+
+// The baseline (no non-default host enabled) authorized set — identical to
+// "claude's rules" today because every claude auto-approve change sets
+// requiresHostEnabled: false, but now derived through the same registry-
+// driven path as projectPermissionManifest rather than hardcoded to claude.
+export const PROJECT_PERMISSION_MANIFEST = Object.freeze(projectPermissionManifest({}));
 
 export function discloseSetupTrust(cfg, { project = false } = {}) {
   const manifest = setupTrustManifest(cfg, { project });
@@ -204,35 +213,43 @@ export async function run_machine({ flags, pkgRoot, cfg }) {
     }
   }
 
-  // 6b. opencode host wiring — config-file MCP + skills, lifecycle plugin,
-  //     converted agents, platform skill (opencode.mjs owns all of it). Only
-  //     when the CLI is actually present: a declined/failed install must not
-  //     leave a freshly-created config home behind (codex-review #4).
-  if (cfg.integrations?.hosts?.opencode) {
-    if (!(await have('opencode'))) {
-      warn('opencode: enabled but CLI not installed — wiring skipped (re-run `ak sync` after installing opencode-ai)');
-    } else {
-      const lifecycle = await runLifecycle({
-        adapter: OPENCODE_LIFECYCLE_ADAPTER, action: 'apply', cfg, options: { pkgRoot },
-      });
-      const stack = lifecycle.result;
-      (stack.oc.ok ? ok : warn)(`opencode: ${stack.oc.detail}`);
-      if (stack.oc.fatal) {
-        warn(`opencode plugin/agents/skill/guidance skipped — ${stack.oc.detail}`);
-        return false;
-      }
-      ok(`opencode plugin: ${stack.plugin.detail}`);
-      ok(`opencode agents: ${stack.agents.detail}`);
-      if (stack.skill.changed) ok(`opencode skill: ${stack.skill.detail}`);
-      // guidance blocks for the opencode AGENTS.md land NOW (codex-review #18)
-      // — not on the next status-driven reconcile. Same shared reconcile pick
-      // and off use, so every command converges guidance identically.
-      const guidance = await reconcileOpencodeGuidance({ pkgRoot, cfg, cwd: process.cwd(), enabled: true });
-      ok(`opencode guidance: ${guidance.detail.replace(/^guidance: /, '')}`);
-      // opencode loads config/plugins/MCP/agents once at startup — say so now,
-      // or the user files "hooks don't work" issues (observed live).
-      info('restart opencode to load the hooks + MCP servers (loaded once at startup)');
+  // 6b. host lifecycle wiring — config-file MCP + skills, lifecycle plugin,
+  //     converted agents, platform skill (each adapter owns its own surfaces
+  //     — opencode.mjs for opencode). Registry-driven: loops
+  //     hostsWithLifecycle() rather than naming opencode, so a second
+  //     lifecycle host needs no new branch here. Only when the CLI is
+  //     actually present: a declined/failed install must not leave a
+  //     freshly-created config home behind (codex-review #4). The result
+  //     SHAPE consumed below (stack.oc/plugin/agents/skill) is still
+  //     opencode's own — the lifecycle contract doesn't mandate a common
+  //     `apply()` result shape across hosts.
+  for (const hostId of hostsWithLifecycle()) {
+    if (!cfg.integrations?.hosts?.[hostId]) continue;
+    if (!(await have(hostId))) {
+      const pkg = HOSTS.find((h) => h.id === hostId)?.pkg ?? hostId;
+      warn(`${hostId}: enabled but CLI not installed — wiring skipped (re-run \`ak sync\` after installing ${pkg})`);
+      continue;
     }
+    const lifecycle = await runLifecycle({
+      adapter: lifecycleAdapterFor(hostId), action: 'apply', cfg, options: { pkgRoot },
+    });
+    const stack = lifecycle.result;
+    (stack.oc.ok ? ok : warn)(`opencode: ${stack.oc.detail}`);
+    if (stack.oc.fatal) {
+      warn(`opencode plugin/agents/skill/guidance skipped — ${stack.oc.detail}`);
+      return false;
+    }
+    ok(`opencode plugin: ${stack.plugin.detail}`);
+    ok(`opencode agents: ${stack.agents.detail}`);
+    if (stack.skill.changed) ok(`opencode skill: ${stack.skill.detail}`);
+    // guidance blocks for the opencode AGENTS.md land NOW (codex-review #18)
+    // — not on the next status-driven reconcile. Same shared reconcile pick
+    // and off use, so every command converges guidance identically.
+    const guidance = await reconcileOpencodeGuidance({ pkgRoot, cfg, cwd: process.cwd(), enabled: true });
+    ok(`opencode guidance: ${guidance.detail.replace(/^guidance: /, '')}`);
+    // opencode loads config/plugins/MCP/agents once at startup — say so now,
+    // or the user files "hooks don't work" issues (observed live).
+    info('restart opencode to load the hooks + MCP servers (loaded once at startup)');
   }
 
   // 7. frontier host hint — codex detected but not enabled (opt-in via `ak host pick`)

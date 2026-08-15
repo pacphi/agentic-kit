@@ -19,6 +19,7 @@ import path from 'node:path';
 import { claudeDir, claudeMdPath, codexDir, opencodeDir, home } from './paths.mjs';
 import { have } from './exec.mjs';
 import { writeFileWithBackup } from './file-write.mjs';
+import { HOST_REGISTRY } from './adapters/index.mjs';
 
 export const BEGIN = (slug) => `<!-- BEGIN ${slug} -->`;
 export const END = (slug) => `<!-- END ${slug} -->`;
@@ -255,38 +256,104 @@ export function blocksForTarget(rows, targetName) {
  *  carries a detector that never fires (`{type:'retired'}` → detect() falls to
  *  its default false), so a present block is stripped and an absent one is a
  *  no-op — the original detector (e.g. a live `flag`) can never re-upsert it into
- *  a file it must stay out of. Absent from the file → nothing happens (no write). */
-export function retiredForTarget(rows, targetName) {
+ *  a file it must stay out of. Absent from the file → nothing happens (no write).
+ *
+ *  `knownTargets` (optional) is the full universe of REAL target names — e.g.
+ *  `guidanceTargets().map(t => t.name)`. When supplied, a row is only force-
+ *  stripped when it names at least one target from that universe: it was
+ *  legitimately re-scoped AWAY from `targetName` to some other real target
+ *  (F-17's original migration case — see the dual-mode-reference tests). A row
+ *  whose `guidanceFiles` name NOTHING in `knownTargets` (a typo, or a target no
+ *  currently-registered host produces) is left alone instead of being force-
+ *  stripped from every real file — this module has no basis for treating an
+ *  unrecognized target as "retired from here." Omitting `knownTargets`
+ *  preserves the original unconditional behavior for every existing 2-arg call
+ *  site (status.mjs, nudge.mjs, opencode.mjs — this refactor's edit boundary
+ *  doesn't cover them; only `reconcileGuidance` below opts into the 3-arg
+ *  form). For the registry as it ships today every row's `guidanceFiles` are
+ *  already within the known-target universe, so this is a no-observable-change
+ *  refinement, not a behavior change. */
+export function retiredForTarget(rows, targetName, knownTargets) {
   return rows
-    .filter((r) => !(r.guidanceFiles ?? ['claude']).includes(targetName))
+    .filter((r) => {
+      const files = r.guidanceFiles ?? ['claude'];
+      if (files.includes(targetName)) return false;
+      if (!knownTargets) return true;
+      return files.some((f) => knownTargets.includes(f));
+    })
     .map((r) => ({ ...r, detector: { type: 'retired' } }));
 }
 
-/** The logical guidance targets `sync` (apply) and `status` (dry-run) both loop.
- *  ONE source of truth so the two commands can never drift. Always: machine-wide
- *  `~/.claude/CLAUDE.md` (claude) + the project's own `<cwd>/AGENTS.md` (agents).
- *  The machine-scoped `~/.codex/AGENTS.md` (agents-user) is included ONLY when
- *  `~/.codex` already exists — codex's presence signal — and is NEVER created by
- *  this discovery (dir-exists gate, no mkdir). That single gate covers both cases:
- *  a codex machine that is momentarily single-host still gets the target (so a
- *  stale block can be stripped), and a codex-less machine never grows a ~/.codex.
- *  `~/.config/opencode/AGENTS.md` (agents-opencode) follows the identical rule
- *  (opencode's config home is its presence signal; opencode prefers this file
- *  over ~/.claude/CLAUDE.md, so it needs its own managed copy rather than
- *  inheriting claude's). `cfg` is accepted for call-site symmetry/forward-compat;
- *  the target set is cfg-independent today. `codexRoot`/`opencodeRoot` are test
- *  seams (default to the real dirs).
- *  @param {{ cwd?: string, cfg?: object, codexRoot?: string, opencodeRoot?: string }} opts */
-export function guidanceTargets({ cwd = process.cwd(), codexRoot = codexDir(), opencodeRoot = opencodeDir() } = {}) {
-  const targets = [
-    { name: 'claude', label: 'CLAUDE.md', file: claudeMdPath() },
-    { name: 'agents', label: 'AGENTS.md', file: path.join(cwd, 'AGENTS.md') },
-  ];
-  if (fs.existsSync(codexRoot)) {
-    targets.push({ name: 'agents-user', label: '~/.codex/AGENTS.md', file: path.join(codexRoot, 'AGENTS.md') });
-  }
-  if (fs.existsSync(opencodeRoot)) {
-    targets.push({ name: 'agents-opencode', label: 'opencode AGENTS.md', file: path.join(opencodeRoot, 'AGENTS.md') });
+/** Per-host guidance-target construction (F-17). Every host in `hosts` that
+ *  declares `capabilities.nativeGuidance` contributes a target named after its
+ *  `legacy.guidanceFile` — the logical name HOST_REGISTRY already carries but
+ *  which nothing consumed before this. Paths/labels/presence-gating stay a
+ *  caller concern (see the module header comment: "Logical names only; paths
+ *  stay a caller concern"), so this module still owns the bespoke mapping for
+ *  the three hosts it knows about:
+ *    - claude → 'claude': machine-wide `~/.claude/CLAUDE.md`, always included.
+ *    - codex  → 'agents': the project's own `<cwd>/AGENTS.md`, always included
+ *      (the AGENTS.md convention is host-neutral, not gated on codex being
+ *      installed). codex ALSO contributes a companion machine-scoped target,
+ *      'agents-user' (`~/.codex/AGENTS.md`) — included only when `~/.codex`
+ *      already exists (codex's presence signal) and NEVER created by this
+ *      discovery (dir-exists gate, no mkdir: a momentarily single-host codex
+ *      machine still gets the target so a stale block can be stripped; a
+ *      codex-less machine never grows a ~/.codex). This companion has no
+ *      `guidanceFile` entry of its own in HOST_REGISTRY — the registry models
+ *      one logical guidance file per host today, and adding a second field is
+ *      outside blocks.mjs's edit boundary — so it stays keyed off the codex
+ *      host id rather than being independently derived.
+ *    - opencode → 'agents-opencode': `~/.config/opencode/AGENTS.md`, included
+ *      only when opencode's config home already exists (identical presence
+ *      rule to agents-user; opencode prefers this file over
+ *      ~/.claude/CLAUDE.md, so it needs its own managed copy).
+ *  A host id this module has no bespoke mapping for still joins the loop (it is
+ *  not silently dropped the way the old hardcoded array would drop it): it gets
+ *  a generic, always-on target named after its own `guidanceFile`. This is what
+ *  makes the list "derived" rather than closed — see the synthetic-host test in
+ *  tests/kit/guidance-targets.test.mjs.
+ *  `cfg` is accepted for call-site symmetry/forward-compat; the target set is
+ *  cfg-independent today. `codexRoot`/`opencodeRoot`/`hosts` are test seams
+ *  (default to the real dirs / the real registry).
+ *  @param {{ cwd?: string, cfg?: object, codexRoot?: string, opencodeRoot?: string, hosts?: Array<any> }} opts */
+export function guidanceTargets({
+  cwd = process.cwd(), codexRoot = codexDir(), opencodeRoot = opencodeDir(), hosts = HOST_REGISTRY,
+} = {}) {
+  const targets = [];
+  for (const host of hosts) {
+    if (!host?.capabilities?.nativeGuidance) continue;
+    const name = host.legacy?.guidanceFile;
+    if (!name) continue;
+    switch (host.id) {
+      case 'claude':
+        targets.push({ name, label: 'CLAUDE.md', file: claudeMdPath() });
+        break;
+      case 'codex':
+        targets.push({ name, label: 'AGENTS.md', file: path.join(cwd, 'AGENTS.md') });
+        if (fs.existsSync(codexRoot)) {
+          targets.push({ name: 'agents-user', label: '~/.codex/AGENTS.md', file: path.join(codexRoot, 'AGENTS.md') });
+        }
+        break;
+      case 'opencode':
+        if (fs.existsSync(opencodeRoot)) {
+          targets.push({ name, label: 'opencode AGENTS.md', file: path.join(opencodeRoot, 'AGENTS.md') });
+        }
+        break;
+      default:
+        // Generic fallback so an unrecognized-but-nativeGuidance host still
+        // joins the reconciliation loop instead of being silently unlooped.
+        // Id-shaped names only: path.join normalizes '..' so a hostile
+        // guidanceFile could escape cwd into a real write primitive
+        // (reconcileGuidance → syncBlocks). A non-conforming name is skipped
+        // entirely — excluded-and-safe beats sanitized-and-surprising.
+        // Schema-level validation of legacy.guidanceFile is the wave-4
+        // admission gate's job, deliberately not duplicated here.
+        if (/^[a-z][a-z0-9-]{0,63}$/.test(name)) {
+          targets.push({ name, label: name, file: path.join(cwd, `${name}.md`) });
+        }
+        break;
+    }
   }
   return targets;
 }
@@ -311,8 +378,10 @@ export async function reconcileGuidance({ cwd, cfg, pkgRoot, context = {}, dryRu
   const rows = registry(cfg.customBlocks);
   const resolve = templateResolver(pkgRoot);
   const out = [];
-  for (const t of guidanceTargets({ cwd, cfg })) {
-    const treg = [...blocksForTarget(rows, t.name), ...retiredForTarget(rows, t.name)];
+  const targets = guidanceTargets({ cwd, cfg });
+  const knownTargets = targets.map((t) => t.name);
+  for (const t of targets) {
+    const treg = [...blocksForTarget(rows, t.name), ...retiredForTarget(rows, t.name, knownTargets)];
     const res = await syncBlocks(t.file, treg, resolve, { context, dryRun });
     const changed = res.filter((r) => r.action !== 'unchanged' && r.action !== 'skipped')
       .map((r) => `${r.slug} ${r.action}`).join(', ');

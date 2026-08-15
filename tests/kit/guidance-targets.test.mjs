@@ -7,6 +7,7 @@ import {
   guidanceTargets, retiredForTarget, blocksForTarget, syncBlocks, registry, BUILTIN_BLOCKS,
 } from '../../src/lib/blocks.mjs';
 import { codexDir, codexAgentsMdPath, home, claudeMdPath } from '../../src/lib/paths.mjs';
+import { HOST_REGISTRY } from '../../src/lib/adapters/index.mjs';
 
 const block = (slug, body) => `<!-- BEGIN ${slug} -->\n${body}\n<!-- END ${slug} -->\n`;
 
@@ -52,6 +53,121 @@ test('guidanceTargets defaults codexRoot to the real ~/.codex path', () => {
   assert.equal(targets.some((t) => t.name === 'agents-user'), hasCodex);
 });
 
+// ── F-17: guidanceTargets is derived from HOST_REGISTRY, not a closed literal
+// list. These four cases pin EXACTLY today's shape (name/label/file, in order)
+// for every host-enablement combination, so the registry-derived rewrite below
+// cannot silently change what ships. ────────────────────────────────────────
+
+test('F-17 pin: claude-only (neither codex nor opencode present)', () => {
+  const cwd = '/tmp/proj-pin-claude-only';
+  const missingCodex = path.join(os.tmpdir(), 'no-such-codex-pin');
+  const missingOpencode = path.join(os.tmpdir(), 'no-such-opencode-pin');
+  const targets = guidanceTargets({ cwd, codexRoot: missingCodex, opencodeRoot: missingOpencode });
+  assert.deepEqual(targets, [
+    { name: 'claude', label: 'CLAUDE.md', file: claudeMdPath() },
+    { name: 'agents', label: 'AGENTS.md', file: path.join(cwd, 'AGENTS.md') },
+  ]);
+});
+
+test('F-17 pin: +codex (codex dir present, opencode absent)', () => {
+  const cwd = '/tmp/proj-pin-codex';
+  const codexRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'kit-pin-codex-'));
+  const missingOpencode = path.join(os.tmpdir(), 'no-such-opencode-pin-2');
+  const targets = guidanceTargets({ cwd, codexRoot, opencodeRoot: missingOpencode });
+  assert.deepEqual(targets, [
+    { name: 'claude', label: 'CLAUDE.md', file: claudeMdPath() },
+    { name: 'agents', label: 'AGENTS.md', file: path.join(cwd, 'AGENTS.md') },
+    { name: 'agents-user', label: '~/.codex/AGENTS.md', file: path.join(codexRoot, 'AGENTS.md') },
+  ]);
+  fs.rmSync(codexRoot, { recursive: true, force: true });
+});
+
+test('F-17 pin: +opencode (opencode dir present, codex absent)', () => {
+  const cwd = '/tmp/proj-pin-opencode';
+  const missingCodex = path.join(os.tmpdir(), 'no-such-codex-pin-3');
+  const opencodeRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'kit-pin-opencode-'));
+  const targets = guidanceTargets({ cwd, codexRoot: missingCodex, opencodeRoot });
+  assert.deepEqual(targets, [
+    { name: 'claude', label: 'CLAUDE.md', file: claudeMdPath() },
+    { name: 'agents', label: 'AGENTS.md', file: path.join(cwd, 'AGENTS.md') },
+    { name: 'agents-opencode', label: 'opencode AGENTS.md', file: path.join(opencodeRoot, 'AGENTS.md') },
+  ]);
+  fs.rmSync(opencodeRoot, { recursive: true, force: true });
+});
+
+test('F-17 pin: all hosts present (codex + opencode)', () => {
+  const cwd = '/tmp/proj-pin-all';
+  const codexRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'kit-pin-codex-all-'));
+  const opencodeRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'kit-pin-opencode-all-'));
+  const targets = guidanceTargets({ cwd, codexRoot, opencodeRoot });
+  assert.deepEqual(targets, [
+    { name: 'claude', label: 'CLAUDE.md', file: claudeMdPath() },
+    { name: 'agents', label: 'AGENTS.md', file: path.join(cwd, 'AGENTS.md') },
+    { name: 'agents-user', label: '~/.codex/AGENTS.md', file: path.join(codexRoot, 'AGENTS.md') },
+    { name: 'agents-opencode', label: 'opencode AGENTS.md', file: path.join(opencodeRoot, 'AGENTS.md') },
+  ]);
+  fs.rmSync(codexRoot, { recursive: true, force: true });
+  fs.rmSync(opencodeRoot, { recursive: true, force: true });
+});
+
+// ── F-17: synthetic-host derivation — proves the loop is genuinely driven by
+// the `hosts` registry (default HOST_REGISTRY), not a hardcoded literal array.
+// A registry entry this module has no bespoke path/label mapping for still
+// joins the loop via the generic fallback, named after its own guidanceFile. ─
+
+test('F-17: a synthetic nativeGuidance host with a guidanceFile joins the loop', () => {
+  const cwd = '/tmp/proj-synthetic';
+  const syntheticHost = {
+    id: 'acme-cli',
+    label: 'Acme CLI',
+    capabilities: { nativeGuidance: true },
+    legacy: { guidanceFile: 'agents-acme' },
+  };
+  const hosts = [...HOST_REGISTRY, syntheticHost];
+  const targets = guidanceTargets({ cwd, hosts, codexRoot: '/no/such/codex', opencodeRoot: '/no/such/opencode' });
+  const acme = targets.find((t) => t.name === 'agents-acme');
+  assert.ok(acme, 'synthetic host contributes a target named after its guidanceFile');
+  assert.equal(acme.file, path.join(cwd, 'agents-acme.md'));
+  // Real hosts' output is unaffected by the addition.
+  assert.deepEqual(targets.map((t) => t.name), ['claude', 'agents', 'agents-acme']);
+});
+
+test('F-17: a non-id-shaped guidanceFile contributes NO target (path-traversal hardening)', () => {
+  const cwd = '/tmp/proj-hardened';
+  const hostile = (guidanceFile) => ({
+    id: 'evil-cli', label: 'Evil CLI',
+    capabilities: { nativeGuidance: true },
+    legacy: { guidanceFile },
+  });
+  for (const name of ['../../../../etc/cron.d/evil', '/etc/passwd', 'a/b', 'a\\b', 'UPPER', 'dot.dot', '']) {
+    const targets = guidanceTargets({
+      cwd, hosts: [...HOST_REGISTRY, hostile(name)],
+      codexRoot: '/no/such/codex', opencodeRoot: '/no/such/opencode',
+    });
+    // The hostile host is skipped entirely (no target at all — so no file
+    // path is ever derived from the hostile name); built-ins are untouched.
+    assert.deepEqual(targets.map((t) => t.name), ['claude', 'agents'], `skipped for ${JSON.stringify(name)}`);
+  }
+});
+
+test('F-17: a host WITHOUT nativeGuidance never contributes a target, even with a guidanceFile', () => {
+  const cwd = '/tmp/proj-no-native-guidance';
+  const syntheticHost = {
+    id: 'silent-cli',
+    label: 'Silent CLI',
+    capabilities: { nativeGuidance: false },
+    legacy: { guidanceFile: 'agents-silent' },
+  };
+  const targets = guidanceTargets({ cwd, hosts: [syntheticHost] });
+  assert.deepEqual(targets, []);
+});
+
+test('F-17: HOST_REGISTRY is the real default — passing it explicitly matches the implicit default', () => {
+  const explicit = guidanceTargets({ cwd: '/tmp/z', hosts: HOST_REGISTRY });
+  const implicit = guidanceTargets({ cwd: '/tmp/z' });
+  assert.deepEqual(explicit, implicit);
+});
+
 // ── retiredForTarget ─────────────────────────────────────────────────────────
 
 test('retiredForTarget returns rows NOT listing the target, with a false detector', async () => {
@@ -70,6 +186,43 @@ test('retiredForTarget returns rows NOT listing the target, with a false detecto
   // Retired rows carry a detector that never fires (forced strip, not upsert).
   for (const r of retiredUser) {
     assert.notEqual(r.detector?.type, 'flag', 'retired detector must not re-fire the original');
+  }
+});
+
+// ── F-17: retiredForTarget's optional `knownTargets` universe ───────────────
+
+test('retiredForTarget without knownTargets is unchanged (2-arg call sites keep todays behavior)', () => {
+  // status.mjs / nudge.mjs / opencode.mjs all call retiredForTarget with 2 args
+  // and are outside this refactor's edit boundary — the 3rd param must default
+  // to exactly today's unconditional-strip behavior, even for a row naming a
+  // target unknown to any host.
+  const rows = [
+    { slug: 'typo-target', guidanceFiles: ['not-a-real-target'], detector: { type: 'always' } },
+  ];
+  const retired = retiredForTarget(rows, 'claude');
+  assert.deepEqual(retired.map((r) => r.slug), ['typo-target']);
+});
+
+test('retiredForTarget with knownTargets leaves an unrecognized-target row untouched', () => {
+  const knownTargets = ['claude', 'agents', 'agents-user', 'agents-opencode'];
+  const rows = [
+    { slug: 'typo-target', guidanceFiles: ['not-a-real-target'], detector: { type: 'always' } },
+    { slug: 'moved-away', guidanceFiles: ['agents-opencode'], detector: { type: 'always' } },
+  ];
+  const retired = retiredForTarget(rows, 'claude', knownTargets);
+  // 'typo-target' names nothing in the known universe → left alone, not force-stripped.
+  // 'moved-away' names a REAL known target (just not claude) → still force-stripped,
+  // preserving the original re-scoping/migration behavior.
+  assert.deepEqual(retired.map((r) => r.slug), ['moved-away']);
+});
+
+test('reconcileGuidance-style knownTargets derived from guidanceTargets() matches the real universe', () => {
+  const derived = guidanceTargets({ cwd: '/tmp/z', codexRoot: home ? codexDir() : '/no/codex' }).map((t) => t.name);
+  // Whatever the real machine's derived universe is, a row naming something
+  // entirely outside it is never force-stripped once knownTargets is passed.
+  const rows = [{ slug: 'outsider', guidanceFiles: ['definitely-not-a-real-target-xyz'], detector: { type: 'always' } }];
+  for (const name of derived) {
+    assert.deepEqual(retiredForTarget(rows, name, derived), [], `outsider row must not be force-stripped for ${name}`);
   }
 });
 
