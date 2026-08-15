@@ -36,6 +36,7 @@ Consequences**, and cites the grounded source it rests on where relevant.
 | [0025](0025-machine-footprint-metrics.md) | Machine footprint: infrastructure metrics for install, runtime, storage, and catalog | Implemented |
 | [0026](0026-about-component-directory.md) | About: a component directory that explains everything ak installs | Implemented |
 | [0027](0027-shared-project-census.md) | One project census, four scopes, every count explains itself | Implemented |
+| [0028](0028-local-openai-compatible-providers.md) | One generic local OpenAI-compatible provider, not a vendor enumeration | Accepted |
 
 Theme: ADRs **0001–0006** define **dual-host LLM routing and leadership** — how `ak` lets ruflo route
 each development activity (architecture, implementation, testing, review, …) to the right host (Claude
@@ -187,3 +188,14 @@ it, while Intelligence folds a repo's sub-directories and throwaway agent worktr
 identity because that is what a user picks — a distinction that was also a live bug, since keying
 the picker off identity while listing directories made 7 of 24 rows unreachable. Counts that remain
 different stay different, and say why.
+
+**0028** adds a second local provider, `local-openai`, because a local model is normally served as
+an OpenAI-compatible endpoint on loopback — MLX, LM Studio, `llama.cpp`, vLLM — and frequently under
+a name the *user* chose, which no vendor enumeration can cover; the registry previously knew only
+`ollama`. It deliberately claims less than `ollama` (no catalogue, no runtime probe, no digest),
+puts the runtime's identity in the binding's endpoint rather than in the provider id, and projects
+to `['ruflo', 'codex', 'opencode']` only — no `claude` (the row claims only the OpenAI-compatible
+transport) and no `aqe` (AQE's provider set is upstream's own enumeration; `ollama` is in it,
+`local-openai` deliberately is not). Proposed by community contributor adrianco in PR #131, accepted
+with a correction to the PR's quoted Hermes reference config, whose `api_mode: openai` is not a
+valid Hermes value.
