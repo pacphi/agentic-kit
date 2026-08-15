@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { HOST_IDS, adapterFor, statuslineSupported, drivingHost } from '../../src/lib/hosts.mjs';
+import { HOST_IDS, adapterFor, drivingHost } from '../../src/lib/hosts.mjs';
 import { hostAuthState } from '../../src/lib/providers.mjs';
 
 // ── HOST_ADAPTERS descriptors ────────────────────────────────────────────────
@@ -15,7 +15,6 @@ test('claude adapter targets CLAUDE.md/json and supports a statusline', () => {
   const a = adapterFor('claude');
   assert.equal(a.guidanceFile, 'claude');
   assert.equal(a.configFormat, 'json');
-  assert.equal(a.statuslineSupported, true);
   assert.equal(a.aqeProvider, 'claude-code');
 });
 
@@ -23,7 +22,6 @@ test('codex adapter targets AGENTS.md/toml and has NO command-backed statusline'
   const a = adapterFor('codex');
   assert.equal(a.guidanceFile, 'agents');
   assert.equal(a.configFormat, 'toml');
-  assert.equal(a.statuslineSupported, false);
   assert.deepEqual(a.statusline, { mode: 'builtin', scope: 'user', customCommand: false, multiline: false });
   assert.equal(a.aqeProvider, 'codex');
 });
@@ -32,18 +30,12 @@ test('opencode adapter targets its own AGENTS.md/json, no statusline, no aqe pro
   const a = adapterFor('opencode');
   assert.equal(a.guidanceFile, 'agents-opencode');
   assert.equal(a.configFormat, 'json');
-  assert.equal(a.statuslineSupported, false);
   assert.equal(a.aqeProvider, null);
   assert.deepEqual(a.envMarkers, []);
 });
 
 test('adapterFor returns null for an unknown host', () => {
-  assert.equal(adapterFor('gemini'), null);
-});
-
-test('statuslineSupported is true for claude and false for codex', () => {
-  assert.equal(statuslineSupported('claude'), true);
-  assert.equal(statuslineSupported('codex'), false);
+  assert.equal(adapterFor('zz-not-a-registered-host'), null);
 });
 
 // ── drivingHost detection (env-only, deterministic) ──────────────────────────
@@ -104,6 +96,6 @@ test('hostAuthState reports none for an absent claude with no key', () => {
 });
 
 test('hostAuthState returns unknown for an unrecognized host', () => {
-  const a = hostAuthState('gemini', { env: {}, present: true });
+  const a = hostAuthState('zz-not-a-registered-host', { env: {}, present: true });
   assert.equal(a.mode, 'unknown');
 });

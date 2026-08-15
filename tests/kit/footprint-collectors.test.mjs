@@ -27,6 +27,7 @@ import {
 } from '../../src/lib/footprint/projects.mjs';
 import { collectCatalog, tomlTableNames } from '../../src/lib/footprint/catalog.mjs';
 import { collectConsumers } from '../../src/lib/footprint/consumers.mjs';
+import { npmPackageRoot, managedTools } from '../../src/lib/footprint/install.mjs';
 
 const DAY = 86_400_000;
 
@@ -1121,4 +1122,36 @@ test('allocated size falls back to apparent size where blocks are unusable', (t)
   // Anti-vacuity: on POSIX a genuine zero-block file really does allocate
   // nothing, so the platform argument is what changed the answer.
   assert.equal(run('darwin').bytes.value, 0);
+});
+
+// ── install: managed-tool npm root resolution ───────────────────────────────
+// The registry schema permits host.install.npmPackage to be absent (only
+// `bin` and `externalInstallPolicy` are required — see validateHostAdapter).
+// managedTools() cannot inject a synthetic host into HOST_REGISTRY, so this
+// exercises the exact guard it relies on: npmPackageRoot(globalRootDir, pkg)
+// must return null instead of throwing when either operand is missing.
+
+test('npmPackageRoot returns null, not a throw, for a host-like entry with no npmPackage', () => {
+  assert.equal(npmPackageRoot('/opt/npm/global/node_modules', undefined), null);
+  assert.equal(npmPackageRoot('/opt/npm/global/node_modules', null), null);
+});
+
+test('npmPackageRoot returns null when the global root itself is unknown', () => {
+  assert.equal(npmPackageRoot(null, 'ruflo'), null);
+});
+
+test('npmPackageRoot joins the global root and package when both are known', () => {
+  assert.equal(
+    npmPackageRoot('/opt/npm/global/node_modules', 'ruflo'),
+    path.join('/opt/npm/global/node_modules', 'ruflo'),
+  );
+});
+
+test('managedTools resolves every real registry entry without throwing when a global root is known', () => {
+  const tools = managedTools({ globalRootDir: '/opt/npm/global/node_modules' });
+  assert.ok(tools.length > 0);
+  // Anti-vacuity: real hosts DO carry npmPackage today, so this also proves
+  // the guard did not regress the populated-pkg path.
+  const ruflo = tools.find((tool) => tool.id === 'ruflo');
+  assert.equal(ruflo.root, path.join('/opt/npm/global/node_modules', 'ruflo'));
 });

@@ -32,7 +32,7 @@ import { bold, dim, cyan } from './output.mjs';
 import { configuredPolicyToAgentOverrides, seedActivityRoutes, resolveRoutes, routingSummary, divergedRoutes, migrateRetiredRoutes, ACTIVITIES, AGENT_ACTIVITY_MAP, PRIMARY_HOSTS } from './routing.mjs';
 import { HOST_ADAPTERS } from './hosts.mjs';
 import {
-  HOST_REGISTRY, PROVIDER_REGISTRY, normalizeIntegrationFacts,
+  HOST_REGISTRY, PROVIDER_REGISTRY, normalizeIntegrationFacts, defaultHostMap,
 } from './adapters/index.mjs';
 import { CURRENT_INTEGRATIONS_VERSION } from './adapters/config.mjs';
 import { opencodeMcpStatus } from './opencode.mjs';
@@ -544,7 +544,7 @@ export function applySetupHostFlags(cfg, flags = {}) {
     version: CURRENT_INTEGRATIONS_VERSION,
     bindings: [],
   });
-  integrations.hosts ?? (integrations.hosts = { claude: true, codex: false, opencode: false });
+  integrations.hosts ?? (integrations.hosts = defaultHostMap());
   const routing = cfg.routing ?? (cfg.routing = {
     version: ROUTING_SCHEMA_VERSION,
     primaryHost: DEFAULT_PRIMARY_HOST,

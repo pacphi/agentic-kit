@@ -69,6 +69,10 @@ export function resolveBinding(bindings, {
   return candidates.length === 1 ? candidates[0] : null;
 }
 
+// Non-throwing counterpart to assertValidBinding — wired into `ak host status`
+// (src/commands/x/host.mjs bindingWarnings) so an invalid user-declared
+// kit.json binding surfaces as a friendly warning list instead of an uncaught
+// TypeError (F-16).
 export function validateBinding(binding, registries, constraints = {}) {
   const errors = [];
   const hostIds = new Set(constraints.hosts ?? (registries?.hosts ?? []).map((entry) => entry.id));

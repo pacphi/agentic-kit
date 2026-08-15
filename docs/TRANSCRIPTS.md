@@ -175,15 +175,15 @@ and image-only pastes get the right kind" (the two edges).
 
 ## 4. The `readSession` pipeline — how one session becomes a payload
 
-`readSession(id, opts)` (`usage-index.mjs:1350-1438`) is the only way
+`readSession(id, opts)` (`usage-index.mjs:1457-1513`) is the only way
 transcript content leaves the module, and every step is a gate:
 
 ### 4.1 Locate, contain, bound
 
 1. **Id grammar before any filesystem access** — `VALID_ID`
    (`/^[A-Za-z0-9._-]{1,128}$/`, `usage-index.mjs:83`) rejects traversal
-   shapes with `ERR_INVALID_SESSION_ID` (`usage-index.mjs:1382-1386`).
-2. **Locate by id** across both roots (`locate`, `usage-index.mjs:1392`),
+   shapes with `ERR_INVALID_SESSION_ID` (`usage-index.mjs:1399-1406`).
+2. **Locate by id** across both roots (`locate`, `usage-index.mjs:1409`),
    consulting the scan cache when present but never requiring it —
    `readSession` works with no prior `buildIndex`.
 3. **Realpath containment** (`usage-index.mjs:1388-1402`) — the resolved file
@@ -198,8 +198,8 @@ transcript content leaves the module, and every step is a gate:
 ### 4.2 Parse and price
 
 The file is parsed with `withTurns: true` by the provider's parser
-(`usage-index.mjs:1483-1490`), and `meta` is assembled
-(`usage-index.mjs:1467-1495`) with the same fields the Sessions view rows
+(`usage-index.mjs:1502-1509`), and `meta` is assembled
+(`usage-index.mjs:1518-1545`) with the same fields the Sessions view rows
 carry — `prompts`, `responses`, `exceptions`, `sidechain`, `threadSource`,
 `models`, `tools`, `skill`/`plugin`, worktree — plus a `cost` priced from the
 same per-model usage rows `aggregate()` uses (the header used to render a
@@ -211,7 +211,7 @@ Every turn body is passed through `maskSecrets` (`usage-index.mjs:196` — the
 23 secret shapes) **server-side, before
 serialization**, then length-capped at `MAX_TURN_CHARS` (40,000,
 `usage-index.mjs:77`) with the marker appended
-(`usage-index.mjs:1530-1540`). Two invariants:
+(`usage-index.mjs:1552-1561`). Two invariants:
 
 - **Presence is the signal.** `truncated`/`originalChars` are emitted only
   when the slice fired, so a complete turn cannot be misread as abridged.

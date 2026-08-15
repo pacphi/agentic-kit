@@ -1088,6 +1088,61 @@ test('readCache/locate memo is invalidated when the cache file changes on disk (
     'must still resolve via filename fallback after the cache entry was externally removed — proves the memo picked up the mtime change');
 });
 
+// F-08 (major): the scorecard used to collapse any provider that was neither
+// 'codex' nor 'claude' into 'claude' (locate()'s 2-way ternary), and parseFile
+// had the same 2-way shape for the JSONL path. Policy: explicit per-id, or
+// excluded-and-labeled — NEVER mis-filed as claude.
+test('locate() excludes a cached entry with an unrecognized provider instead of mis-filing it as claude (F-08)', async () => {
+  _resetForTest();
+  const sb = sandbox();
+  await buildIndex(opts(sb));
+
+  const raw = JSON.parse(fs.readFileSync(sb.cachePath, 'utf8'));
+  const [claudeFile, claudeEntry] = Object.entries(raw.entries).find(([, e]) => e.session.provider === 'claude');
+  // Doctor the on-disk cache the way an external write (or a forward-
+  // incompatible future provider) would: same real file, unrecognized
+  // provider string, a fresh id so the id→file index resolves through it.
+  const fakeId = 'ffff9999';
+  raw.entries[claudeFile] = { ...claudeEntry, session: { ...claudeEntry.session, id: fakeId, provider: 'someother' } };
+  fs.writeFileSync(sb.cachePath, JSON.stringify(raw));
+
+  const result = await readSession(fakeId, opts(sb));
+  assert.equal(result, null,
+    'an unrecognized provider must never be silently parsed via parseClaude / reported as claude — it must be excluded');
+});
+
+test('locate() still resolves known claude/codex cache hits after the truthfulness fix (F-08 regression guard)', async () => {
+  _resetForTest();
+  const sb = sandbox();
+  await buildIndex(opts(sb)); // populates the id→file cache both reads below hit
+
+  const claudeHit = await readSession('aaaa1111', opts(sb));
+  assert.equal(claudeHit.meta.host, 'claude');
+  assert.equal(claudeHit.meta.transcriptProvider, 'claude');
+
+  const codexHit = await readSession('dddd4444', opts(sb));
+  assert.equal(codexHit.meta.host, 'codex');
+  assert.equal(codexHit.meta.transcriptProvider, 'codex');
+});
+
+// F-08's third bug: scanKey hardcoded the roots portion to a claude/codex/
+// opencode triple, so two scans differing only by a 4th root key (unused by
+// scan() today, but a future root) hashed identically and could join the same
+// in-flight promise — serving one scan's aggregate to a caller who asked a
+// different question. buildIndex's single-flight coalescing is the direct
+// consumer of scanKey, so it is the most direct place to observe the fix:
+// concurrent calls that differ only by an extra root key must NOT collapse
+// into the same in-flight promise (and therefore not the same result object).
+test('scanKey distinguishes root sets that differ only by a root key the module does not otherwise use (F-08)', async () => {
+  _resetForTest();
+  const sb = sandbox();
+  const a = buildIndex(opts(sb, { roots: { ...sb.roots } }));
+  const b = buildIndex(opts(sb, { roots: { ...sb.roots, somethingElse: '/nonexistent/for-test' } }));
+  const [aggA, aggB] = await Promise.all([a, b]);
+  assert.notEqual(aggA, aggB,
+    'a distinct 4th root must not collide with a scan lacking it — they must not share the in-flight promise / result object');
+});
+
 test('scan prunes cached entries past the 366-day keep window, keeps recent/undated ones', async () => {
   _resetForTest();
   const sb = sandbox();

@@ -173,6 +173,60 @@ test('AQE court evidence preserves leader and member execution hosts independent
   assert.equal(event.signal.kind, 'relationship');
 });
 
+test('AQE court evidence resolves a novel safe actor/target host instead of inheriting the session host', () => {
+  const [event] = adaptStructuredEvent({
+    sessionId: 'court-2', sessionHost: 'claude', agentId: 'court-lead-2',
+    actorHost: 'hermes', kind: 'agent', role: 'court-lead',
+    action: 'court.member.seated', targetId: 'jury-hermes', targetKind: 'subagent',
+    targetRole: 'jury', targetHost: 'hermes', status: 'running',
+  }, { surface: 'aqe', adapter: 'aqe-fixture', observedAt: now });
+  assert.equal(event.host, 'claude');
+  assert.equal(event.actor.host, 'hermes');
+  assert.equal(event.target.host, 'hermes');
+});
+
+test('AQE court evidence buckets an unsafe actor/target host as unknown-host, not the session host', () => {
+  const [event] = adaptStructuredEvent({
+    sessionId: 'court-3', sessionHost: 'claude', agentId: 'court-lead-3',
+    actorHost: 'Hermes!', kind: 'agent', role: 'court-lead',
+    action: 'court.member.seated', targetId: 'jury-unsafe', targetKind: 'subagent',
+    targetRole: 'jury', targetHost: 'Hermes!', status: 'running',
+  }, { surface: 'aqe', adapter: 'aqe-fixture', observedAt: now });
+  assert.equal(event.host, 'claude');
+  assert.equal(event.actor.host, 'unknown-host');
+  assert.equal(event.target.host, 'unknown-host');
+});
+
+test('AQE court evidence lets an actor/target with no declared host inherit the session host', () => {
+  const [event] = adaptStructuredEvent({
+    sessionId: 'court-4', sessionHost: 'claude', agentId: 'court-lead-4',
+    kind: 'agent', role: 'court-lead',
+    action: 'court.member.seated', targetId: 'jury-absent', targetKind: 'subagent',
+    targetRole: 'jury', status: 'running',
+  }, { surface: 'aqe', adapter: 'aqe-fixture', observedAt: now });
+  assert.equal(event.host, 'claude');
+  assert.equal(event.actor.host, 'claude');
+  assert.equal(event.target.host, 'claude');
+});
+
+test('structured adapter passes a novel safely-shaped host id through, never internal', () => {
+  const [event] = adaptStructuredEvent({
+    sessionId: 'hermes-1', sessionHost: 'hermes', agentId: 'hermes-agent',
+    actorHost: 'hermes', action: 'session.started', status: 'running',
+  }, { surface: 'ruflo', adapter: 'ruflo-hook', observedAt: now });
+  assert.equal(event.host, 'hermes');
+  assert.equal(event.actor.host, 'hermes');
+});
+
+test('structured adapter buckets an unsafe-shaped host id as unknown-host, never internal', () => {
+  const [event] = adaptStructuredEvent({
+    sessionId: 'bad-1', sessionHost: 'Hermes!', agentId: 'bad-agent',
+    actorHost: 'Hermes!', action: 'session.started', status: 'running',
+  }, { surface: 'ruflo', adapter: 'ruflo-hook', observedAt: now });
+  assert.equal(event.host, 'unknown-host');
+  assert.equal(event.actor.host, 'unknown-host');
+});
+
 test('explicit tool names classify skill, plugin and MCP nodes without inspecting input', () => {
   for (const [name, kind] of [
     ['Skill', 'skill'], ['plugin:review', 'plugin'], ['mcp__ruflo__swarm_status', 'mcp'],

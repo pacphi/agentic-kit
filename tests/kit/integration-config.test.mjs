@@ -107,7 +107,10 @@ test('legacy host routes never manufacture observed provider provenance', () => 
   const migrated = migrateIntegrationConfig(structuredClone(legacyDual));
   const route = migrated.integrations.bindings.find((binding) => binding.host === 'codex');
   assert.ok(route, 'migration should expose a normalized binding for an enabled legacy host');
-  assert.ok(['inferred', 'unknown'].includes(route.provenance));
+  // the 'unknown' provenance path no longer exists post-F-13: a host with no
+  // registered native provider gets no binding at all, so any binding that
+  // IS produced is always 'inferred'.
+  assert.equal(route.provenance, 'inferred');
   assert.notEqual(route.provenance, 'observed');
 });
 
@@ -127,8 +130,8 @@ test('legacy OpenCode ownership markers migrate canonically without inferring a 
     assert.equal(Object.hasOwn(migrated.providers, key), false);
   }
   const binding = migrated.integrations.bindings.find(({ host }) => host === 'opencode');
-  assert.equal(binding.provider, null);
-  assert.equal(binding.provenance, 'unknown');
+  assert.equal(binding, undefined,
+    'opencode has no host-login native provider in the registry, so migration infers no binding for it (F-13)');
 });
 
 test('legacy Codex ownership markers migrate together and are retired', () => {
@@ -242,6 +245,54 @@ test('migration never persists API keys found in process environment', () => {
   for (const secret of ['anthropic-secret', 'openai-secret', 'openrouter-secret']) {
     assert.equal(serialized.includes(secret), false);
   }
+});
+
+test('migrating claude+codex+opencode infers registry-native bindings and nothing for opencode', () => {
+  const migrated = migrateIntegrationConfig({
+    providers: { hosts: { claude: true, codex: true, opencode: true } },
+  });
+  const byHost = Object.fromEntries(migrated.integrations.bindings.map((b) => [b.host, b]));
+  assert.equal(byHost.claude.id, 'anthropic-via-claude');
+  assert.equal(byHost.claude.provider, 'anthropic');
+  assert.equal(byHost.claude.provenance, 'inferred');
+  assert.equal(byHost.codex.id, 'openai-via-codex');
+  assert.equal(byHost.codex.provider, 'openai');
+  assert.equal(byHost.codex.provenance, 'inferred');
+  assert.equal(Object.hasOwn(byHost, 'opencode'), false,
+    'opencode has no host-login native provider registered, so it gets no inferred binding');
+});
+
+test('inferring native bindings is idempotent — a second migration pass never restamps', () => {
+  const first = migrateIntegrationConfig({
+    providers: { hosts: { claude: true, codex: true, opencode: true } },
+  });
+  const second = migrateIntegrationConfig(structuredClone(first));
+  assert.deepEqual(second, first);
+});
+
+test('a prior user binding for a host wins over the registry-derived default', () => {
+  const priorBinding = {
+    id: 'openrouter-via-codex',
+    host: 'codex',
+    provider: 'openrouter',
+    model: 'openai/gpt-5.4',
+    transport: 'native',
+    endpoint: null,
+    provenance: 'user',
+    managedBy: 'user',
+  };
+  const migrated = migrateIntegrationConfig({
+    providers: { hosts: { claude: true, codex: true }, bindings: [priorBinding] },
+  });
+  const codexBindings = migrated.integrations.bindings.filter((b) => b.host === 'codex');
+  assert.equal(codexBindings.length, 1);
+  assert.deepEqual(codexBindings[0], priorBinding);
+});
+
+test('migrateIntegrationConfig handles an empty hosts map without inferring anything', () => {
+  const migrated = migrateIntegrationConfig({ providers: { hosts: {} } });
+  assert.deepEqual(migrated.integrations.bindings, []);
+  assert.deepEqual(migrated.integrations.hosts, {});
 });
 
 test('endpoint validation accepts loopback HTTP and remote HTTPS', () => {

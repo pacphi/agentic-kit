@@ -828,6 +828,10 @@ function codexIdFromName(name) {
   return stem.replace(/^\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-/, '');
 }
 
+// Truthfulness policy: dispatch explicitly on the three known providers. A
+// codex/claude 2-way ternary silently mis-files anything unrecognized as
+// claude; an entry this module doesn't know how to parse must be declined
+// (same contract as a parse failure), never mis-labeled.
 function parseFile(entry) {
   if (entry.provider === 'opencode') {
     try {
@@ -838,6 +842,7 @@ function parseFile(entry) {
       return parsed;
     } catch { return null; } // a parser bug must not cost the user their whole index
   }
+  if (entry.provider !== 'codex' && entry.provider !== 'claude') return null;
   let raw;
   try { raw = fs.readFileSync(entry.file, 'utf8'); } catch { return null; }
   try {
@@ -1163,10 +1168,13 @@ function aggregate(records, { days, now, cutoff, deps }) {
 const _inflight = new Map();
 let _memo = null;
 
-/** Identity of a scan: two calls sharing it must produce the same aggregate. */
+/** Identity of a scan: two calls sharing it must produce the same aggregate.
+ *  Roots are folded in as sorted [key, value] pairs rather than a hardcoded
+ *  claude/codex/opencode triple, so a root this module doesn't (yet) special-
+ *  case still changes the key instead of colliding with every other scan. */
 function scanKey(o = {}) {
-  const r = o.roots || {};
-  return JSON.stringify([Number(o.days) || 14, !!o.force, r.claude || '', r.codex || '', r.opencode || '', o.cachePath || '']);
+  const roots = Object.entries(o.roots || {}).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+  return JSON.stringify([Number(o.days) || 14, !!o.force, roots, o.cachePath || '']);
 }
 
 /** Drop process-level state (single-flight promises, read memo, lazy deps). */
@@ -1403,8 +1411,13 @@ function locate(id, r, cacheFile) {
   const hitFile = idIndexFor(cache).get(id);
   if (hitFile) {
     const e = cache.entries[hitFile];
-    if (e?.session?.id === id && statSafe(hitFile)) {
-      const provider = e.session.provider === 'codex' ? 'codex' : 'claude';
+    // locate() only ever resolves a claude or codex FILE — opencode sessions
+    // are resolved upstream via the SQLite store before locate is called. A
+    // cache entry whose provider is neither is not this function's to answer;
+    // falling through to the scan loops below reports "not found here"
+    // instead of silently rewriting the provider to claude.
+    const provider = e?.session?.provider;
+    if ((provider === 'claude' || provider === 'codex') && e.session.id === id && statSafe(hitFile)) {
       return { file: hitFile, provider, id, dirName: provider === 'claude' ? path.basename(path.dirname(hitFile)) : null };
     }
   }

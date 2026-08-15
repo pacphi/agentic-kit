@@ -2,6 +2,11 @@
 
 - **Status:** Accepted
 - **Date:** 2026-07-28
+- **Updated:** 2026-08-14
+- **Update note:** The boolean `statuslineSupported` consumer this ADR's context
+  describes was removed as dead code in the Phase 0 consistency pass (finding
+  F-07): it had zero call sites. The registry capability `commandStatusline` is
+  the surviving vocabulary for this distinction.
 - **Deciders:** agentic-kit maintainers
 - **Related:** [ADR-0001](0001-one-routing-policy-many-projections.md),
   [ADR-0006](0006-primary-host-and-ambidextrous-mirroring.md),
