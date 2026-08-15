@@ -29,9 +29,9 @@ const LIFECYCLE_ADAPTERS = new Map();
  * is unit-testable directly (a synthetic registry) without needing a
  * fresh-module import trick.
  * @param {string} hostId
- * @param {import('./lifecycle.mjs').LifecycleAdapter} adapter
+ * @param {any} adapter — shape enforced by validateLifecycleAdapter, not the type system
  * @param {{ hostRegistry?: ReadonlyArray<{id: string}> }} [opts]
- * @returns {import('./lifecycle.mjs').LifecycleAdapter}
+ * @returns {any}
  */
 export function registerBuiltinLifecycle(hostId, adapter, { hostRegistry = HOST_REGISTRY } = {}) {
   if (!hostRegistry.some((host) => host.id === hostId)) {
@@ -46,7 +46,7 @@ registerBuiltinLifecycle('opencode', OPENCODE_LIFECYCLE_ADAPTER);
 
 /**
  * @param {string} hostId
- * @returns {import('./lifecycle.mjs').LifecycleAdapter|null}
+ * @returns {any|null}|null}
  */
 export function lifecycleAdapterFor(hostId) {
   return LIFECYCLE_ADAPTERS.get(hostId) ?? null;

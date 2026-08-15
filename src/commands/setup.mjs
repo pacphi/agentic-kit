@@ -100,7 +100,7 @@ const ask = async (q, dflt, yes) => {
 // `hosts` is injectable so tests can prove a second host's rule survives
 // removeUndisclosedPermissions through the same seam trust-manifest.test.mjs
 // uses for host-registry-construction tests.
-export function projectPermissionManifest(cfg, { hosts } = {}) {
+export function projectPermissionManifest(cfg, /** @type {{hosts?: any[]}} */ { hosts } = {}) {
   const manifest = setupTrustManifest(cfg, { project: true, ...(hosts ? { hosts } : {}) });
   return manifest.flatMap((group) => group.changes)
     .filter((entry) => entry.kind === 'auto-approve')
