@@ -13,6 +13,7 @@ import {
   sandboxHome, assertSandboxed, snapshot, assertUnchanged, captureLog, rmrf,
   sandboxProject, writeKitConfig, offlineKitConfig, fakeGlobalRoot,
 } from './helpers/home-sandbox.mjs';
+import { HOST_REGISTRY } from '../../src/lib/adapters/index.mjs';
 
 const HOME = sandboxHome('ak-setup');
 const paths = await import('../../src/lib/paths.mjs');
@@ -67,6 +68,49 @@ test('project permission manifest omits AQE grants when AQE is disabled', () => 
   assert.equal(setup.projectPermissionManifest({ aqe: true }).length, 7);
   assert.deepEqual(setup.projectPermissionManifest({ aqe: false }).map((entry) => entry.owner),
     ['ruflo', 'ruflo', 'ruflo', 'ruflo']);
+});
+
+// F-04: the authorized/disclosed set is the UNION across every enabled
+// host's trust manifest, not claude's alone — otherwise a second host's own
+// project-scope auto-approve rule reads as "undisclosed" and
+// removeUndisclosedPermissions would strip it (and fail setup). Driven
+// through the same synthetic-host `hosts` seam trust-manifest.test.mjs uses
+// for host-registry-construction tests, so no change to registries.mjs is
+// needed to prove it.
+test('projectPermissionManifest unions a second enabled host\'s auto-approve rules', () => {
+  const future = {
+    id: 'grok', label: 'Grok CLI',
+    trust: {
+      approvalPolicy: 'managed',
+      changes: [{
+        id: 'grok-auto-approve', kind: 'auto-approve', scope: 'project',
+        owner: 'agentic-kit', value: 'Bash(grok *)', effect: 'allow the Grok CLI',
+        operations: ['setup'], features: ['project'],
+      }],
+    },
+  };
+  const cfg = { aqe: true, ruvnetBrain: true, integrations: { hosts: { claude: true, grok: true } } };
+  const manifest = setup.projectPermissionManifest(cfg, { hosts: [...HOST_REGISTRY, future] });
+  const rules = manifest.map((entry) => entry.rule);
+  assert.ok(rules.includes('Bash(grok *)'), 'the second host\'s auto-approve rule must be disclosed, not dropped');
+  assert.ok(rules.includes('mcp__claude-flow__*'), 'claude\'s own rules must still be present alongside it (a union, not a swap)');
+
+  // and the union must survive removeUndisclosedPermissions as authorized —
+  // a second host's disclosed rule must never be stripped as an intruder.
+  const project = sandboxProject('ak-setup-second-host-permission');
+  const file = path.join(project, '.claude', 'settings.json');
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, JSON.stringify({ permissions: { allow: ['Bash(grok *)'] } }, null, 2));
+  const removed = setup.removeUndisclosedPermissions(file, new Set(), new Set(rules));
+  assert.deepEqual(removed, [], 'a disclosed second-host rule must never be stripped as undisclosed');
+  rmrf(project);
+});
+
+test('projectPermissionManifest at only claude enabled is unchanged from the pre-F-04 claude-only manifest', () => {
+  // byte-identical for the default (claude-only) machine: the union with an
+  // empty "other hosts" set is exactly what trustChangesForHost('claude',
+  // {kind:'auto-approve'}) produced before this rework.
+  assert.deepEqual(setup.projectPermissionManifest({ aqe: true }), setup.PROJECT_PERMISSION_MANIFEST);
 });
 
 test('permission verification removes only newly introduced undisclosed grants', () => {

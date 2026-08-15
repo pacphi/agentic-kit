@@ -16,8 +16,9 @@ import {
 } from '../../lib/providers.mjs';
 import { parseRouteSpecs, formatModelHelp, PRIMARY_HOSTS, DEFAULT_PRIMARY_HOST, divergedRoutes, refreshSeededRoutes, pruneRoutesForHosts, modelNote, ACTIVITIES } from '../../lib/routing.mjs';
 import { loadKitConfig, saveKitConfig } from '../../lib/config.mjs';
-import { OPENCODE_LIFECYCLE_ADAPTER, reconcileOpencodeGuidance } from '../../lib/opencode.mjs';
+import { reconcileOpencodeGuidance } from '../../lib/opencode.mjs';
 import { runLifecycle } from '../../lib/adapters/lifecycle.mjs';
+import { lifecycleAdapterFor } from '../../lib/adapters/lifecycle-registry.mjs';
 import {
   routableHostIds, defaultHostMap, validateBinding, HOST_REGISTRY, PROVIDER_REGISTRY,
 } from '../../lib/adapters/index.mjs';
@@ -337,7 +338,7 @@ async function off({ cwd, pkgRoot }) {
   const rufloCodexManaged = cfg.integrations?.ownership?.codex?.reverseMcp === 'ak';
   // OpenCode teardown reads its ownership receipt before the host/routing reset.
   // A failed teardown retains that receipt (including catalogDir) for a retry.
-  const retired = await runLifecycle({ adapter: OPENCODE_LIFECYCLE_ADAPTER, action: 'undo', cfg });
+  const retired = await runLifecycle({ adapter: lifecycleAdapterFor('opencode'), action: 'undo', cfg });
   const ret = retired.result;
   cfg.providers = {
     aqeProvider: null,
@@ -629,7 +630,7 @@ async function pick({ flags, cwd, pkgRoot }) {
       warn('opencode: enabled but CLI not installed — wiring skipped (re-run `ak sync` after installing opencode-ai)');
     } else {
       const lifecycle = await runLifecycle({
-        adapter: OPENCODE_LIFECYCLE_ADAPTER, action: 'apply', cfg, options: { pkgRoot },
+        adapter: lifecycleAdapterFor('opencode'), action: 'apply', cfg, options: { pkgRoot },
       });
       const stack = lifecycle.result;
       // persist the markers on ANY refresh (converged file + stale markers is
@@ -653,7 +654,7 @@ async function pick({ flags, cwd, pkgRoot }) {
     // never the user's own opencode config. A teardown that cannot complete
     // (e.g. a JSONC config) is reported honestly — markers stay for the retry
     // and "disabled" is never claimed over still-active wiring.
-    const retired = await runLifecycle({ adapter: OPENCODE_LIFECYCLE_ADAPTER, action: 'undo', cfg });
+    const retired = await runLifecycle({ adapter: lifecycleAdapterFor('opencode'), action: 'undo', cfg });
     const ret = retired.result;
     saveKitConfig(cfg); // persist markers (nulled on success, retained on failure)
     if (ret.ok) ok(`opencode disabled: ${ret.undo.detail}; ${ret.artifacts.detail}`);
