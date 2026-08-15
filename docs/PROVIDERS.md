@@ -47,6 +47,33 @@ checks every binding declared in `kit.json` and prints a warning naming any entr
 unknown host, unknown provider, or unsupported transport — warnings only; nothing is changed
 or removed on your behalf.
 
+## Local OpenAI-compatible servers
+
+Running a local model behind an OpenAI-compatible endpoint — MLX, LM Studio, `llama.cpp`, vLLM —
+rather than Ollama? Declare it as a `local-openai` binding in `kit.json`:
+
+```json
+{
+  "integrations": {
+    "bindings": [
+      {
+        "id": "mlx-via-codex",
+        "host": "codex",
+        "provider": "local-openai",
+        "transport": "openai-compatible",
+        "endpoint": "http://127.0.0.1:8080/v1"
+      }
+    ]
+  }
+}
+```
+
+This gets you a named local inference target with `$0` billing and configured-grade provenance,
+however the endpoint is served. `local-openai` is not an AQE provider type — `ollama` is. Loopback
+`http://` is allowed; a remote endpoint requires `https://`; and the endpoint may never embed
+credentials, fragments, or secret-bearing query parameters. See
+[ADR-0028](adr/0028-local-openai-compatible-providers.md).
+
 ---
 
 ## Level 0 — do nothing (the point)
@@ -340,5 +367,6 @@ just makes the good default automatic and the customization reversible.
   [ADR-0006](adr/0006-primary-host-and-ambidextrous-mirroring.md).
 - Capability-driven integration axes, bindings, and provenance:
   [ADR-0016](adr/0016-capability-driven-integration-adapters.md).
+- The generic local OpenAI-compatible provider: [ADR-0028](adr/0028-local-openai-compatible-providers.md).
 - Host env flags (`ENABLE_CLAUDE_CODE` / `ENABLE_CODEX`): upstream ruflo
   ADR-034, "Optional MCP Backends".

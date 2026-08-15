@@ -24,6 +24,7 @@ import { coherence as adbCoherence } from '../lib/agentdb.mjs';
 import { readJson } from '../lib/settings.mjs';
 import { have } from '../lib/exec.mjs';
 import { HOSTS, settingsTarget, isDefault, managedEnv, MANAGED_ENV_KEYS, hostInstallState, hostAuthState, bothHostsEnabled, aqeRouterFile, aqeSupportsAgentOverrides, credentialGaps, collectIntegrationFacts } from '../lib/providers.mjs';
+import { PROVIDER_REGISTRY } from '../lib/adapters/index.mjs';
 import { configuredPolicyToAgentOverrides, agentOverridesDrift, routingSummary, divergedRoutes } from '../lib/routing.mjs';
 import { qeCourtShipped, readQeCourtConfig, validateCourtConfig } from '../lib/qeCourt.mjs';
 import { drift as ruvectorDrift } from '../lib/ruvector.mjs';
@@ -579,6 +580,19 @@ export async function collect({ pkgRoot, cwd = process.cwd() }) {
           rows.push(row('providers', 'ok', `aqe chain: ${chain.length}/${chain.length} rungs have credentials`));
         }
       }
+    }
+    // ADR-0028 F-29: local-openai is a local ($0) provider deliberately NOT
+    // projected to 'aqe' (unlike ollama, which is) — surface that asymmetry
+    // plainly so it reads as a fact, not a bug. Registry-driven (billing +
+    // projections), not an id check, so any future provider of the same
+    // shape gets the same treatment for free.
+    const providerById = Object.fromEntries(PROVIDER_REGISTRY.map((p) => [p.id, p]));
+    for (const binding of cfg.integrations?.bindings ?? []) {
+      const provider = providerById[binding.provider];
+      if (!provider || provider.billing !== 'local' || provider.projections.includes('aqe')) continue;
+      const endpoint = binding.endpoint ? ` @ ${binding.endpoint}` : '';
+      rows.push(row('providers', 'info',
+        `local binding: ${binding.provider} via ${binding.host}${endpoint} (${provider.billing} $0; not an AQE provider type)`));
     }
   } catch (e) {
     rows.push(row('providers', 'warn', `provider check unavailable: ${e.message}`));
