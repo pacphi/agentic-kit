@@ -159,7 +159,11 @@ test('revokeConsent removes trust', () => {
   fs.rmSync(path.dirname(path.dirname(file)), { recursive: true, force: true });
 });
 
-test('the consent file is written with mode 0600', () => {
+// POSIX-only: NTFS does not carry Unix permission bits, so `mode & 0o777`
+// never reflects the 0600 the store requests on Windows. The 0600 write is
+// still made (fs.writeFileSync mode option); this asserts the observable bits
+// where the platform has them.
+test('the consent file is written with mode 0600', { skip: process.platform === 'win32' }, () => {
   const file = sandboxFile();
   recordConsent('my-adapter', 'sha256:abc123', { file });
   const mode = fs.statSync(file).mode & 0o777;
