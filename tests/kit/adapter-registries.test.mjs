@@ -8,6 +8,7 @@ import {
   validateRegistries,
   validateHostAdapter,
   defaultHostMap,
+  assertValidBinding,
 } from '../../src/lib/adapters/index.mjs';
 import {
   validHost, validProvider, validRegistries,
@@ -150,4 +151,150 @@ test('validateHostAdapter rejects a host with a missing or non-boolean enabledBy
 test('validateHostAdapter accepts a host with an explicit boolean enabledByDefault', () => {
   assert.doesNotThrow(() => validateHostAdapter(validHost({ enabledByDefault: true })));
   assert.doesNotThrow(() => validateHostAdapter(validHost({ enabledByDefault: false })));
+});
+
+// ── F-28: providerEntries moved from a tuple-array `.map` (capabilities derived
+// by identity comparison, e.g. `modelDiscovery: id === 'ollama'`) to explicit
+// per-entry object records — the same style hostEntries already uses. That
+// construction could not express a second local provider needing pricing
+// 'zero' WITHOUT modelDiscovery (ADR-0028's local-openai). This test hardcodes
+// the five pre-existing rows' expected shape (not re-derived from the source)
+// so the refactor cannot silently change what ships. See also ADR-0028.
+test('F-28: the five pre-existing providers are unchanged by the per-entry rewrite', () => {
+  const byId = Object.fromEntries(PROVIDER_REGISTRY.map((entry) => [entry.id, entry]));
+  assert.deepEqual(byId.anthropic, {
+    id: 'anthropic', label: 'Anthropic', billing: 'subscription',
+    credentials: { kind: 'host-login' }, transports: ['native'], projections: ['claude'], observability: [],
+    legacy: { apiProvider: true },
+    capabilities: {
+      modelDiscovery: false, runtimeDiscovery: false, pricing: 'provider-specific',
+      quota: true, cacheAccounting: 'provider-dependent',
+    },
+  });
+  assert.deepEqual(byId.openai, {
+    id: 'openai', label: 'OpenAI', billing: 'subscription',
+    credentials: { kind: 'host-login' }, transports: ['native', 'openai-compatible'], projections: ['codex'], observability: [],
+    legacy: { apiProvider: true },
+    capabilities: {
+      modelDiscovery: false, runtimeDiscovery: false, pricing: 'provider-specific',
+      quota: true, cacheAccounting: 'provider-dependent',
+    },
+  });
+  assert.deepEqual(byId.google, {
+    id: 'google', label: 'Google Gemini', billing: 'metered',
+    credentials: { kind: 'environment', env: ['GOOGLE_API_KEY', 'GEMINI_API_KEY'] },
+    transports: ['native'], projections: ['ruflo', 'aqe'], observability: [],
+    legacy: { apiProvider: true },
+    capabilities: {
+      modelDiscovery: false, runtimeDiscovery: false, pricing: 'provider-specific',
+      quota: false, cacheAccounting: 'provider-dependent',
+    },
+  });
+  assert.deepEqual(byId.openrouter, {
+    id: 'openrouter', label: 'OpenRouter', billing: 'metered',
+    credentials: { kind: 'environment', env: ['OPENROUTER_API_KEY'] },
+    transports: ['openai-compatible'], projections: ['ruflo', 'aqe', 'claude', 'codex', 'opencode'],
+    observability: ['openrouter-metadata'],
+    legacy: { apiProvider: false },
+    capabilities: {
+      modelDiscovery: false, runtimeDiscovery: false, pricing: 'dated-offline',
+      quota: false, cacheAccounting: 'provider-dependent',
+    },
+  });
+  assert.deepEqual(byId.ollama, {
+    id: 'ollama', label: 'Ollama', billing: 'local',
+    credentials: { kind: 'none' },
+    transports: ['native', 'openai-compatible', 'anthropic-compatible'],
+    projections: ['ruflo', 'aqe', 'claude', 'codex', 'opencode'],
+    observability: ['ollama-catalog', 'ollama-runtime'],
+    legacy: { apiProvider: true },
+    capabilities: {
+      modelDiscovery: true, runtimeDiscovery: true, pricing: 'zero',
+      quota: false, cacheAccounting: 'unknown',
+    },
+  });
+});
+
+// ADR-0028: one generic local provider for any OpenAI-compatible model server
+// on loopback (MLX, LM Studio, llama.cpp, vLLM, user-named endpoints), instead
+// of enumerating vendors.
+test('ADR-0028: local-openai is registered with the accepted shape', () => {
+  const localOpenai = PROVIDER_REGISTRY.find((entry) => entry.id === 'local-openai');
+  assert.ok(localOpenai, 'local-openai must be registered');
+  assert.equal(localOpenai.billing, 'local');
+  assert.deepEqual(localOpenai.credentials, { kind: 'none' });
+  assert.deepEqual(localOpenai.transports, ['openai-compatible']);
+  // Deliberate asymmetry vs ollama: no 'aqe' (ollama is an AQE provider type,
+  // local-openai is not) and no 'claude' (claude's projection expects an
+  // anthropic-compatible surface; local-openai claims only openai-compatible).
+  assert.deepEqual(localOpenai.projections, ['ruflo', 'codex', 'opencode']);
+  assert.deepEqual(localOpenai.observability, []);
+  assert.deepEqual(localOpenai.capabilities, {
+    modelDiscovery: false, runtimeDiscovery: false, pricing: 'zero',
+    quota: false, cacheAccounting: 'unknown',
+  });
+});
+
+test('PROVIDER_REGISTRY has exactly six entries after the local-openai addition', () => {
+  assert.deepEqual(PROVIDER_REGISTRY.map((entry) => entry.id).sort(), [
+    'anthropic', 'google', 'local-openai', 'ollama', 'openai', 'openrouter',
+  ]);
+});
+
+// assertValidBinding gating: local-openai's projections/transports are
+// exercised end-to-end through a user-declared binding, both the accepted
+// shape and the rejections the accepted ADR design implies.
+test('assertValidBinding accepts a user-declared local-openai binding on codex', () => {
+  const binding = assertValidBinding({
+    id: 'local-openai-via-codex', host: 'codex', provider: 'local-openai',
+    transport: 'openai-compatible', endpoint: 'http://127.0.0.1:8080/v1',
+    provenance: 'configured',
+  });
+  assert.equal(binding.provider, 'local-openai');
+  assert.equal(binding.projection, 'codex');
+});
+
+test('assertValidBinding rejects a local-openai binding on the native transport', () => {
+  assert.throws(() => assertValidBinding({
+    id: 'local-openai-native', host: 'codex', provider: 'local-openai',
+    transport: 'native', endpoint: 'http://127.0.0.1:8080/v1', provenance: 'configured',
+  }), /unsupported transport/);
+});
+
+test('assertValidBinding rejects local-openai for the aqe projection', () => {
+  assert.throws(() => assertValidBinding({
+    id: 'local-openai-aqe', host: 'codex', provider: 'local-openai',
+    transport: 'openai-compatible', endpoint: 'http://127.0.0.1:8080/v1',
+    projection: 'aqe', provenance: 'configured',
+  }), /does not support projection aqe/);
+});
+
+test('assertValidBinding rejects local-openai on claude host default projection', () => {
+  assert.throws(() => assertValidBinding({
+    id: 'local-openai-claude', host: 'claude', provider: 'local-openai',
+    transport: 'openai-compatible', endpoint: 'http://127.0.0.1:8080/v1',
+    provenance: 'configured',
+  }), /does not support projection claude/);
+});
+
+// Endpoint topology pin (review nit): "local" is a BILLING claim (user-run,
+// $0 — ADR-0011), not a loopback constraint. A user-run server on another
+// machine is legal over https; plain http stays loopback-only
+// (validateEndpoint's remote-http rule). Pinned so a future "tighten local
+// to loopback" change is a deliberate decision, not drift.
+test('assertValidBinding accepts a remote https endpoint for local-openai (billing, not topology)', () => {
+  const binding = assertValidBinding({
+    id: 'local-openai-lan', host: 'codex', provider: 'local-openai',
+    transport: 'openai-compatible', endpoint: 'https://models.lan.example/v1',
+    provenance: 'configured',
+  });
+  assert.equal(binding.endpoint, 'https://models.lan.example/v1');
+});
+
+test('assertValidBinding rejects a remote plain-http endpoint for local-openai', () => {
+  assert.throws(() => assertValidBinding({
+    id: 'local-openai-remote-http', host: 'codex', provider: 'local-openai',
+    transport: 'openai-compatible', endpoint: 'http://models.lan.example/v1',
+    provenance: 'configured',
+  }), /remote-http/);
 });
