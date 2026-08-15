@@ -18,6 +18,12 @@
 // server-enforced), no Keychain/credentials reads, no chatgpt.com backend
 // endpoints (private; requires bearer-token handling ak must not do).
 //
+// Labeling policy (F-10): any OTHER registry-managed host (adapters/
+// registries.mjs) that the caller reports enabled gets an explicit
+// `{ supported: false }` entry instead of being silently absent — this adds
+// no channel and performs no probe, it only says "no quota surface exists
+// for this host" so a user can tell that apart from "broken".
+//
 // Field-name trap, load-bearing: Codex's `primary`/`secondary` window fields do
 // NOT reliably mean "5-hour"/"weekly" — a live prolite account answered with
 // `primary.windowDurationMins = 10080` (the weekly) and `secondary = null`.
@@ -26,6 +32,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { configDir } from './paths.mjs';
+import { managedHostIds } from './adapters/registries.mjs';
 
 export const claudeLimitsFile = () => path.join(configDir(), 'claude-rate-limits.json');
 export const codexLimitsFile = () => path.join(configDir(), 'codex-rate-limits.json');
@@ -239,20 +246,45 @@ export async function collectCodexLimits({
   return fresh;
 }
 
+// ── Unsupported hosts (F-10 labeling policy) ────────────────────────────────
+
+/**
+ * Every OTHER registry-managed host (session-driving, per adapters/
+ * registries.mjs `managedHostIds()`) beyond the two ADR-0010-sanctioned
+ * channels, labeled `{ supported: false }` instead of left absent — IF the
+ * caller reports it enabled. A host the caller does not report as enabled is
+ * omitted entirely: a user who never turned it on should see nothing, not a
+ * label. Adds no channel; performs no probe. Pure.
+ *
+ * @param {{ enabledHosts?: Record<string, boolean> }} [o]
+ */
+export function unsupportedQuotaHosts({ enabledHosts = {} } = {}) {
+  return managedHostIds()
+    .filter((id) => id !== 'claude' && id !== 'codex' && enabledHosts[id] === true)
+    .map((provider) => ({ provider, supported: false, reason: 'no quota surface for this host' }));
+}
+
 // ── Combined read (the /api/limits payload) ─────────────────────────────────
 
 /**
  * Both providers, plus the freshness contract the UI renders: `fetchedAt` on
  * each side and `generatedAt` overall. Claude is a pure file read (push
- * model); Codex may spawn one vendor subprocess, TTL-bounded.
+ * model); Codex may spawn one vendor subprocess, TTL-bounded. `others` lists
+ * any additional enabled host with no sanctioned quota channel (F-10);
+ * omitting `enabledHosts` (the default) leaves it empty, so claude/codex
+ * output is unchanged unless a caller opts in.
  *
  * @param {{ now?: number, claudeFile?: string, codexCacheFile?: string, ttlMs?: number,
- *           timeoutMs?: number, spawnImpl?: any, bin?: string }} [o]
+ *           timeoutMs?: number, spawnImpl?: any, bin?: string,
+ *           enabledHosts?: Record<string, boolean> }} [o]
  */
-export async function readLimits({ now = Date.now(), claudeFile, codexCacheFile, ttlMs, timeoutMs, spawnImpl, bin } = {}) {
+export async function readLimits({
+  now = Date.now(), claudeFile, codexCacheFile, ttlMs, timeoutMs, spawnImpl, bin, enabledHosts,
+} = {}) {
   const claude = readClaudeLimits({ file: claudeFile ?? claudeLimitsFile() });
   const codex = await collectCodexLimits({
     ttlMs, cacheFile: codexCacheFile ?? codexLimitsFile(), now, timeoutMs, spawnImpl, bin,
   });
-  return { generatedAt: new Date(now).toISOString(), claude, codex };
+  const others = unsupportedQuotaHosts({ enabledHosts });
+  return { generatedAt: new Date(now).toISOString(), claude, codex, others };
 }
