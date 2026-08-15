@@ -66,7 +66,10 @@ const row = (subsystem, level, message, fix = null) => ({ subsystem, level, mess
 // lib/opencode.mjs, never in the dispatch loop itself. Adding a fourth host
 // means adding (or not adding) a table entry here — the loop that walks this
 // table never changes.
-async function opencodeDetailRows({ cfg, pkgRoot, facts }) {
+// The loop also passes `hostId`; this renderer doesn't need it (it IS the
+// opencode renderer) but the signature admits it so the dispatch call site
+// typechecks for every renderer uniformly.
+async function opencodeDetailRows({ cfg, pkgRoot, facts, hostId: _hostId = 'opencode' } = /** @type {any} */ ({})) {
   const rows = [];
   try {
     if (!facts.hosts?.opencode?.present) {
