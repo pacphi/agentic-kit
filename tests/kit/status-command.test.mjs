@@ -515,4 +515,47 @@ test('--json carries the opencode rows with the same shape the dashboard consume
   } finally { process.chdir(cwd); }
 });
 
+// ADR-0028 F-29: local-openai is a local ($0) provider deliberately NOT
+// projected to 'aqe' (unlike ollama, which is) — status must surface that
+// asymmetry plainly instead of letting it read as a bug.
+test('a local-openai binding surfaces an info row naming provider, host, endpoint, and the non-AQE fact', async () => {
+  seedHome();
+  const cfg = loadKitConfig();
+  cfg.integrations.bindings = [{
+    id: 'local-openai-via-codex', host: 'codex', provider: 'local-openai',
+    transport: 'openai-compatible', endpoint: 'http://127.0.0.1:8080/v1',
+    provenance: 'configured',
+  }];
+  writeKitConfig(HOME, cfg);
+  const rows = await collect();
+  const hit = rowsFor(rows, 'providers').find((r) => /local-openai/.test(r.message));
+  assert.ok(hit, `expected a local-openai row: ${rowsFor(rows, 'providers').map((r) => r.message)}`);
+  assert.equal(hit.level, 'info');
+  assert.equal(hit.fix, null, 'advisory only — nothing for sync to fix');
+  assert.match(hit.message, /codex/);
+  assert.match(hit.message, /http:\/\/127\.0\.0\.1:8080\/v1/);
+  assert.match(hit.message, /not an AQE provider/i);
+});
+
+test('an ollama-only binding (local AND aqe-projected) triggers no local-non-AQE row', async () => {
+  seedHome();
+  const cfg = loadKitConfig();
+  cfg.integrations.bindings = [{
+    id: 'ollama-via-claude', host: 'claude', provider: 'ollama',
+    transport: 'anthropic-compatible', endpoint: 'http://127.0.0.1:11434',
+    provenance: 'configured',
+  }];
+  writeKitConfig(HOME, cfg);
+  const rows = await collect();
+  const stray = rowsFor(rows, 'providers').find((r) => /not an AQE provider/i.test(r.message));
+  assert.equal(stray, undefined, `ollama is AQE-projected and must not trigger the note: ${JSON.stringify(stray)}`);
+});
+
+test('no bindings declared: no local-non-AQE row (status stays unchanged for existing users)', async () => {
+  seedHome();
+  const rows = await collect();
+  const stray = rowsFor(rows, 'providers').find((r) => /not an AQE provider/i.test(r.message));
+  assert.equal(stray, undefined, `expected zero local-non-AQE rows with no bindings: ${JSON.stringify(stray)}`);
+});
+
 test.after(() => rmrf(HOME, PROJECT));
