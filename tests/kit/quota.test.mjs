@@ -9,7 +9,7 @@ import path from 'node:path';
 import { EventEmitter } from 'node:events';
 import {
   windowLabel, normalizeClaudeLimits, normalizeCodexLimits, readClaudeLimits,
-  collectCodexLimits, CODEX_TTL_MS,
+  collectCodexLimits, CODEX_TTL_MS, unsupportedQuotaHosts, readLimits,
 } from '../../src/lib/quota.mjs';
 
 const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'ak-quota-'));
@@ -191,4 +191,60 @@ test('collectCodexLimits falls back to the STALE cache when the spawn fails', as
 test('collectCodexLimits returns null when there has never been an answer', async () => {
   const out = await collectCodexLimits({ cacheFile: path.join(tmp(), 'none.json'), spawnImpl: failSpawn });
   assert.equal(out, null);
+});
+
+// ── unsupportedQuotaHosts — F-10: label absence instead of leaving it silent ─
+//
+// ADR-0010 sanctions exactly two channels (claude's statusline tee, codex's
+// app-server). This does not add a third — it never probes anything — it only
+// says so, for any OTHER registry-managed host the caller reports enabled.
+
+test('unsupportedQuotaHosts labels an enabled managed host with no channel', () => {
+  const out = unsupportedQuotaHosts({ enabledHosts: { opencode: true } });
+  assert.deepEqual(out, [
+    { provider: 'opencode', supported: false, reason: 'no quota surface for this host' },
+  ]);
+});
+
+test('unsupportedQuotaHosts omits a host the caller has not enabled', () => {
+  assert.deepEqual(unsupportedQuotaHosts(), []);
+  assert.deepEqual(unsupportedQuotaHosts({ enabledHosts: {} }), []);
+  assert.deepEqual(unsupportedQuotaHosts({ enabledHosts: { opencode: false } }), []);
+});
+
+test('unsupportedQuotaHosts never labels the two sanctioned channels', () => {
+  const out = unsupportedQuotaHosts({ enabledHosts: { claude: true, codex: true, opencode: true } });
+  assert.deepEqual(out.map((h) => h.provider), ['opencode']);
+});
+
+// ── readLimits — the combined /api/limits payload ───────────────────────────
+
+test('readLimits: claude/codex outputs are byte-identical whether or not others are reported', async () => {
+  const dir = tmp();
+  const claudeFile = path.join(dir, 'claude-rate-limits.json');
+  fs.writeFileSync(claudeFile, JSON.stringify(CLAUDE_TEE));
+  const codexCacheFile = path.join(dir, 'codex-rate-limits.json');
+
+  const withoutOthers = await readLimits({
+    now: 1000, claudeFile, codexCacheFile, spawnImpl: fakeSpawn(CODEX_RESP),
+  });
+  const withOthers = await readLimits({
+    now: 1000, claudeFile, codexCacheFile: path.join(dir, 'codex-rate-limits-2.json'),
+    spawnImpl: fakeSpawn(CODEX_RESP), enabledHosts: { claude: true, codex: true, opencode: true },
+  });
+
+  assert.deepEqual(withOthers.claude, withoutOthers.claude);
+  assert.deepEqual(withOthers.codex, withoutOthers.codex);
+  assert.deepEqual(withoutOthers.others, []);
+  assert.deepEqual(withOthers.others, [
+    { provider: 'opencode', supported: false, reason: 'no quota surface for this host' },
+  ]);
+});
+
+test('readLimits defaults to no unsupported-host labels when enabledHosts is not passed', async () => {
+  const out = await readLimits({
+    now: 1000, claudeFile: path.join(tmp(), 'absent.json'),
+    codexCacheFile: path.join(tmp(), 'codex.json'), spawnImpl: failSpawn,
+  });
+  assert.deepEqual(out.others, []);
 });
