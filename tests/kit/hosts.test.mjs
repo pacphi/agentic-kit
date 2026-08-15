@@ -5,10 +5,15 @@ import os from 'node:os';
 import path from 'node:path';
 import { HOST_IDS, adapterFor, drivingHost } from '../../src/lib/hosts.mjs';
 import { hostAuthState } from '../../src/lib/providers.mjs';
+import { managedHostIds } from '../../src/lib/adapters/registries.mjs';
 
 // ── HOST_ADAPTERS descriptors ────────────────────────────────────────────────
-test('HOST_ADAPTERS defines the three hosts', () => {
-  assert.deepEqual(HOST_IDS, ['claude', 'codex', 'opencode']);
+// HOST_IDS is HOST_ADAPTERS' key order (hosts.mjs filters HOST_REGISTRY by
+// canDriveSession and preserves registry order) — this proves that mirror,
+// not the exact built-in set (adapter-registries.test.mjs pins the full
+// HOST_REGISTRY contents deep-equal; that's where the shipped-set literal lives).
+test('HOST_ADAPTERS keys mirror the registry-derived managed host ids, in order', () => {
+  assert.deepEqual(HOST_IDS, managedHostIds());
 });
 
 test('claude adapter targets CLAUDE.md/json and supports a statusline', () => {
