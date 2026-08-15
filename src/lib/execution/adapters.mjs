@@ -42,5 +42,12 @@ assertBuiltinAdaptersRoutable();
  *  host with no adapter wired yet — never throws, so callers can degrade a
  *  single worker instead of failing an entire run. */
 export function executionAdapterFor(hostId) {
-  return EXECUTION_ADAPTERS.get(hostId) ?? null;
+  if (EXECUTION_ADAPTERS.has(hostId)) return EXECUTION_ADAPTERS.get(hostId);
+  // Wave 4 (adapter door): an admitted external host whose manifest declares
+  // driving.surfaces including 'cli-subprocess' MAY, in a later wave, get a
+  // constructed execution adapter here. This wave builds none: admitted
+  // hosts have no execution adapter yet, full stop, so they fall through to
+  // the same null return (and the runner's existing cli_unavailable
+  // degradation) as any other routable-but-unadapted host.
+  return null;
 }

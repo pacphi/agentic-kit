@@ -9,7 +9,7 @@ import { fixStatusline, helperStampStale } from '../lib/statusline.mjs';
 import { reconcileGuidance } from '../lib/blocks.mjs';
 import { register as mcpRegister, applyExclusions } from '../lib/mcp.mjs';
 import { runLifecycle } from '../lib/adapters/lifecycle.mjs';
-import { hostsWithLifecycle, lifecycleAdapterFor } from '../lib/adapters/lifecycle-registry.mjs';
+import { builtinHostsWithLifecycle, lifecycleAdapterFor } from '../lib/adapters/lifecycle-registry.mjs';
 import { listDaemons, staleDaemons, reap } from '../lib/daemons.mjs';
 import { loadKitConfig, saveKitConfig } from '../lib/config.mjs';
 import { commandHosts, applyHosts, applyProviders, hostInstallState, installHost, applyAqeRouter, seedActivityRoutesIfMultiHost, migrateRetiredRoutesInConfig, ensureCodexMcp, ensureRufloMcpInCodex, bothHostsEnabled } from '../lib/providers.mjs';
@@ -188,13 +188,15 @@ export async function run({ flags, pkgRoot, fetchLatest }) {
   // Runs BEFORE the blocks branch: the agents-opencode guidance target is gated
   // on the config home this branch creates — this order lets a fresh enable
   // converge guidance in the SAME sync (a second sync is then a true no-op).
-  // Registry-driven: loops hostsWithLifecycle() rather than naming opencode,
-  // so a second lifecycle host needs no new branch here. Only opencode is
-  // registered today, so this loop runs exactly once — byte-identical to the
-  // single-host branch it replaces. The result SHAPE consumed below
-  // (stack.oc/plugin/agents/skill) is still opencode's own — the lifecycle
-  // contract doesn't mandate a common `apply()` result shape across hosts.
-  for (const hostId of hostsWithLifecycle()) {
+  // Registry-driven: loops builtinHostsWithLifecycle() rather than naming
+  // opencode, so a second BUILT-IN lifecycle host needs no new branch here.
+  // Only opencode is registered today, so this loop runs exactly once —
+  // byte-identical to the single-host branch it replaces. The result SHAPE
+  // consumed below (stack.oc/plugin/agents/skill) is still opencode's own —
+  // the lifecycle contract doesn't mandate a common `apply()` result shape
+  // across hosts. builtinHostsWithLifecycle() (not hostsWithLifecycle())
+  // deliberately excludes admitted external hosts — see lifecycle-registry.mjs.
+  for (const hostId of builtinHostsWithLifecycle()) {
     if (!subsystems.has(hostId) || !cfg.integrations?.hosts?.[hostId]) continue;
     if (!(await have(hostId))) {
       info(`${hostId}: enabled but CLI not installed — wiring skipped (hosts step installs it)`);

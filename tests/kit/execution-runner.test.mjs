@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { EXECUTION_ADAPTERS, assertBuiltinAdaptersRoutable, executionAdapterFor } from '../../src/lib/execution/adapters.mjs';
+import { applyAdmitted, resetAdmitted } from '../../src/lib/adapters/admitted.mjs';
 import { executeRunPlan } from '../../src/lib/execution/runner.mjs';
 
 const worker = (id, host = 'opencode', dependsOn) => ({ id, activity: 'implementation', role: 'coder', host, prompt: id, ...(dependsOn ? { dependsOn } : {}) });
@@ -490,6 +491,30 @@ test('executionAdapterFor resolves built-ins identically to the old map, and nul
   assert.equal(executionAdapterFor('codex'), EXECUTION_ADAPTERS.get('codex'));
   assert.equal(executionAdapterFor('opencode'), EXECUTION_ADAPTERS.get('opencode'));
   assert.equal(executionAdapterFor('future-host'), null);
+});
+
+// P2 finding 10: executionAdapterFor used to have a dead branch
+// (`if (admittedHostIds().includes(hostId)) return null;`) that returned
+// null either way — same as the fallthrough below it. Pinning that removing
+// it changed no observable behavior: an admitted host still resolves to
+// null (admitted hosts have no execution adapter this wave, full stop).
+test('executionAdapterFor returns null for an admitted host id too (no execution adapter this wave)', () => {
+  applyAdmitted([{
+    entry: {
+      id: 'admitted-probe', label: 'Probe', install: { bin: 'admitted-probe', externalInstallPolicy: 'detect-never-overwrite' },
+      capabilities: {
+        canDriveSession: true, canBePrimary: false, canRouteActivities: false,
+        commandStatusline: false, transcripts: false, usage: false, nativeMcpConfig: false, nativeGuidance: false,
+      },
+      trust: { approvalPolicy: 'unchanged', changes: [] },
+      enabledByDefault: false, configProjection: 'ruflo', observability: [],
+    },
+  }]);
+  try {
+    assert.equal(executionAdapterFor('admitted-probe'), null);
+  } finally {
+    resetAdmitted();
+  }
 });
 
 // #88 (amended W1-B): a routed plan naming a host with no built-in adapter

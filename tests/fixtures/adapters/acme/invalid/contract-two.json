@@ -1,0 +1,27 @@
+{
+  "name": "acme-v2",
+  "version": "1.0.0",
+  "contract": 2,
+  "host": {
+    "id": "acme-v2",
+    "label": "Acme CLI (future contract)",
+    "install": { "bin": "acme", "externalInstallPolicy": "detect-never-overwrite" },
+    "capabilities": {
+      "canDriveSession": false,
+      "canBePrimary": false,
+      "canRouteActivities": false,
+      "commandStatusline": false,
+      "transcripts": false,
+      "usage": false,
+      "nativeMcpConfig": false,
+      "nativeGuidance": false
+    },
+    "trust": { "approvalPolicy": "unchanged", "changes": [] },
+    "enabledByDefault": false,
+    "configProjection": "ruflo",
+    "observability": []
+  },
+  "detection": { "bin": "acme" },
+  "driving": { "surfaces": ["cli-subprocess"] },
+  "trust": { "changes": [] }
+}

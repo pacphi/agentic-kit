@@ -1,9 +1,10 @@
 # ADR-0016 — Capability-driven host, provider, binding, projection, and observability adapters
 
 - **Status:** Accepted; compatibility clauses superseded by
-  [ADR-0020](0020-ga-stable-surfaces.md)
+  [ADR-0020](0020-ga-stable-surfaces.md); closed-registry clause superseded by
+  [ADR-0029](0029-host-adapter-extension-point.md)
 - **Date:** 2026-07-28
-- **Updated:** 2026-08-14
+- **Updated:** 2026-08-15
 - **Update note:** Added read-only Codex plugin-hook compatibility facts,
   runtime-selected Ruflo project-memory store proofs, and the non-correlatable
   OpenRouter account-analytics boundary; removed the pre-GA compatibility command,
@@ -18,6 +19,12 @@
   warnings (F-16); and the integrations migrator derives each host's native
   default provider from the provider registry's host-login entries instead of a
   literal map, inferring no binding at all for hosts without one (F-13).
+  2026-08-15: [ADR-0029](0029-host-adapter-extension-point.md) supersedes §1's
+  closed-registry requirement — the registry admits an explicitly registered,
+  hash-pinned, subprocess-only external host adapter behind an experimental
+  flag; every other property that clause protected (zero-runtime-dependency,
+  offline-first normal operation, no in-process third-party code) remains
+  intact.
 - **Deciders:** agentic-kit maintainers
 - **Related:** [ADR-0001](0001-one-routing-policy-many-projections.md),
   [ADR-0003](0003-auto-seed-dual-host-provenance.md),

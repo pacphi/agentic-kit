@@ -127,10 +127,13 @@ function captureConsole(fn) {
 test('loadKitConfig warns once on an unrecognized top-level key, naming it', () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'kit-cfg-unknown-'));
   const f = tmpFile(tmp, 'kit.json');
-  fs.writeFileSync(f, JSON.stringify({ hostAdapters: { foo: true } }));
+  // NOT `hostAdapters` — Wave 4 (adapter door) recognizes that key now
+  // (src/lib/config.mjs DEFAULTS.hostAdapters), so it's a poor example of an
+  // unrecognized one. Any still-genuinely-unknown key exercises the same path.
+  fs.writeFileSync(f, JSON.stringify({ someUnknownFutureKey: { foo: true } }));
   const { errLines } = captureConsole(() => loadKitConfig(f));
   assert.equal(errLines.length, 1);
-  assert.match(errLines[0], /hostAdapters/);
+  assert.match(errLines[0], /someUnknownFutureKey/);
   assert.match(errLines[0], /not recognized/);
   fs.rmSync(tmp, { recursive: true, force: true });
 });

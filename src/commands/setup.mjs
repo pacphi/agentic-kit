@@ -14,7 +14,7 @@ import { reconcileGuidance } from '../lib/blocks.mjs';
 import { register as mcpRegister, applyExclusions } from '../lib/mcp.mjs';
 import { reconcileOpencodeGuidance } from '../lib/opencode.mjs';
 import { runLifecycle } from '../lib/adapters/lifecycle.mjs';
-import { hostsWithLifecycle, lifecycleAdapterFor } from '../lib/adapters/lifecycle-registry.mjs';
+import { builtinHostsWithLifecycle, lifecycleAdapterFor } from '../lib/adapters/lifecycle-registry.mjs';
 import { loadKitConfig, saveKitConfig } from '../lib/config.mjs';
 import { HOSTS, applyHosts, applyProviders, hostInstallState, installHost, applyAqeRouter, seedActivityRoutesIfMultiHost, printActivityRoutingTable, aqeSupportsAgentOverrides, ensureCodexMcp, ensureRufloMcpInCodex, applySetupHostFlags, bothHostsEnabled } from '../lib/providers.mjs';
 import { installedVersion } from '../lib/versions.mjs';
@@ -216,14 +216,18 @@ export async function run_machine({ flags, pkgRoot, cfg }) {
   // 6b. host lifecycle wiring — config-file MCP + skills, lifecycle plugin,
   //     converted agents, platform skill (each adapter owns its own surfaces
   //     — opencode.mjs for opencode). Registry-driven: loops
-  //     hostsWithLifecycle() rather than naming opencode, so a second
-  //     lifecycle host needs no new branch here. Only when the CLI is
-  //     actually present: a declined/failed install must not leave a
+  //     builtinHostsWithLifecycle() rather than naming opencode, so a second
+  //     BUILT-IN lifecycle host needs no new branch here. Only when the CLI
+  //     is actually present: a declined/failed install must not leave a
   //     freshly-created config home behind (codex-review #4). The result
   //     SHAPE consumed below (stack.oc/plugin/agents/skill) is still
   //     opencode's own — the lifecycle contract doesn't mandate a common
-  //     `apply()` result shape across hosts.
-  for (const hostId of hostsWithLifecycle()) {
+  //     `apply()` result shape across hosts. builtinHostsWithLifecycle()
+  //     (not hostsWithLifecycle()) deliberately excludes admitted external
+  //     hosts: this loop body is opencode-shaped, and external lifecycle
+  //     execution graduates in a later wave alongside a shape-agnostic body
+  //     (see lifecycle-registry.mjs's registerAdmittedLifecycle comment).
+  for (const hostId of builtinHostsWithLifecycle()) {
     if (!cfg.integrations?.hosts?.[hostId]) continue;
     if (!(await have(hostId))) {
       const pkg = HOSTS.find((h) => h.id === hostId)?.pkg ?? hostId;
