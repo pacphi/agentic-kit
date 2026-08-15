@@ -10,6 +10,7 @@ import {
   routingIntent,
 } from '../../src/lib/routing-config.mjs';
 import { loadKitConfig, saveKitConfig } from '../../src/lib/config.mjs';
+import { defaultHostMap } from '../../src/lib/adapters/index.mjs';
 
 test('legacy routes migrate without resolving absence and preserve an explicit empty ladder', () => {
   const legacy = {
@@ -159,8 +160,7 @@ test('load migrates raw legacy presence without writing; save persists only cano
   const before = fs.readFileSync(file, 'utf8');
   const loaded = loadKitConfig(file);
   assert.equal(fs.readFileSync(file, 'utf8'), before, 'load is read-only');
-  assert.deepEqual(loaded.integrations.hosts,
-    { claude: true, codex: true, opencode: false });
+  assert.deepEqual(loaded.integrations.hosts, { ...defaultHostMap(), codex: true });
   assert.equal(loaded.routing.primaryHost, 'codex');
   assert.deepEqual(loaded.routing.routes.implementation.escalation, []);
   assert.equal(loaded.providers.aqeProvider, 'openai');

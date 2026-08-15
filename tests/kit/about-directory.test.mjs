@@ -106,6 +106,14 @@ function shippedCommands() {
 
 // ---------------------------------------------------------------------------------------
 // The parity gate (ADR-0026 §3, component-directory invariant 4)
+//
+// Scope: every assertion below walks HOST_REGISTRY / managedTools(), i.e. the BUILT-IN
+// adapter set — there is no dynamic or third-party host concept yet (see
+// src/lib/adapters/lifecycle-registry.mjs), so "built-in" and "the registry" are the same
+// set today. That makes this gate built-in-scoped by construction: an externally-admitted
+// adapter (wave-4 adapter-extension contract) is exempt from directory-card parity until
+// that contract graduates it into a card-carrying citizen — it will not appear in
+// HOST_REGISTRY / managedTools() until it does, so it cannot trip these assertions.
 // ---------------------------------------------------------------------------------------
 
 test('every managed tool has exactly one directory entry (registry → directory)', () => {

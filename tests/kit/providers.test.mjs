@@ -13,7 +13,7 @@ import {
   PROVIDER_TOKEN_RE, seedActivityRoutesIfMultiHost,
 } from '../../src/lib/providers.mjs';
 import * as paths from '../../src/lib/paths.mjs';
-import { managedHostIds, routableHostIds } from '../../src/lib/adapters/index.mjs';
+import { managedHostIds, routableHostIds, HOST_REGISTRY } from '../../src/lib/adapters/index.mjs';
 
 // security review Finding 2 / code-quality Finding 2: applyProviders() feeds
 // m.id/m.model into a ruflo subprocess argv. exec.mjs's shell:false fix is
@@ -220,8 +220,15 @@ test('every host descriptor carries an npm package name for install/update', () 
 });
 
 test('managed and routable host sets come only from registry capabilities', () => {
-  assert.deepEqual(managedHostIds(), ['claude', 'codex', 'opencode']);
-  assert.deepEqual(routableHostIds(), ['claude', 'codex', 'opencode']);
+  // Derive expectations straight from HOST_REGISTRY.capabilities (not a hand-typed
+  // id list) so the assertion actually proves the claim in the test name; the
+  // shipped built-in set itself is pinned deep-equal in adapter-registries.test.mjs.
+  const expectedManaged = HOST_REGISTRY.filter((h) => h.capabilities.canDriveSession).map((h) => h.id);
+  const expectedRoutable = HOST_REGISTRY.filter((h) => h.capabilities.canRouteActivities).map((h) => h.id);
+  assert.deepEqual(managedHostIds(), expectedManaged);
+  assert.deepEqual(routableHostIds(), expectedRoutable);
+  // HOSTS (providers.mjs) filters HOST_REGISTRY independently of managedHostIds() —
+  // pin that the two derivations agree.
   assert.deepEqual(HOSTS.map((h) => h.id), managedHostIds());
 });
 

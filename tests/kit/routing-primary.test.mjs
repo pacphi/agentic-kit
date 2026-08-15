@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { swapHostModel, swapRoute, seedActivityRoutes, DEFAULT_ROUTES, DEFAULT_PRIMARY_HOST, PRIMARY_HOSTS } from '../../src/lib/routing.mjs';
+import { primaryHostIds } from '../../src/lib/adapters/index.mjs';
 
 // ── swapHostModel ────────────────────────────────────────────────────────────
 test('swapHostModel maps a claude model to the codex host', () => {
@@ -42,7 +43,10 @@ test('seedActivityRoutes stamps every seeded entry with provenance:seeded', () =
 });
 
 // ── constants ────────────────────────────────────────────────────────────────
-test('DEFAULT_PRIMARY_HOST is claude and both hosts are valid primaries', () => {
-  assert.equal(DEFAULT_PRIMARY_HOST, 'claude');
-  assert.deepEqual([...PRIMARY_HOSTS].sort(), ['claude', 'codex']);
+test('DEFAULT_PRIMARY_HOST is claude and PRIMARY_HOSTS mirrors the registry\'s canBePrimary set', () => {
+  assert.equal(DEFAULT_PRIMARY_HOST, 'claude'); // a policy choice, not derived from the registry
+  // PRIMARY_HOSTS must stay green under capability caps — a host gaining canBePrimary:true
+  // should extend this automatically, so derive the expectation from primaryHostIds()
+  // instead of a hand-typed host list.
+  assert.deepEqual([...PRIMARY_HOSTS].sort(), [...primaryHostIds()].sort());
 });
