@@ -60,6 +60,24 @@ test('ak host status dispatches the existing read-only status semantics', () => 
     'host management retains the existing host/provider fact payload during migration');
 });
 
+// D-2/F-25/F-26: the tier text and asymmetry sub-notes are capability-derived
+// (src/lib/hosts.mjs's hostTierLabel/hostAsymmetryNote), not an
+// `h.id === 'opencode'` special case in x/host.mjs — this pins the actual
+// rendered CLI text so a regression back to a hardcoded id check would fail
+// here even though nothing depends on the exact strings elsewhere.
+test('ak host status renders capability-derived tier text and asymmetry notes for every built-in host', () => {
+  const sb = sandbox();
+  const result = ak(sb, 'host', 'status');
+  assert.equal(result.status, 0, output(result));
+  const text = result.stdout;
+  assert.match(text, /^ {2}claude {4}.*· drives sessions · can lead$/m);
+  assert.match(text, /^ {2}codex {5}.*· drives sessions · can lead$/m);
+  assert.match(text, /^ {4}expose Codex to Claude Code as mcp__codex__codex in this project$/m);
+  assert.match(text, /^ {2}opencode {2}.*· routing only · supervised · not AQE$/m);
+  assert.match(text, /^ {4}consent boundary — a run can block on a permission event \(never auto-approved\); no ruflo backend env flag$/m);
+  assert.doesNotMatch(text, /routing host/, 'old hardcoded tier text must be fully replaced');
+});
+
 test('ak host preserves pick option parsing without performing an interactive run', () => {
   const sb = sandbox();
   const result = ak(sb, 'host', 'pick', '--help');
