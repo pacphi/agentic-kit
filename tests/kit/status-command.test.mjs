@@ -515,6 +515,57 @@ test('--json carries the opencode rows with the same shape the dashboard consume
   } finally { process.chdir(cwd); }
 });
 
+// F-05: the per-host detail dispatch (renderHostDetailRows) is host-neutral —
+// a fourth host renders through the EXACT SAME loop opencode does, with zero
+// host-id branching added anywhere. Proven by injecting a synthetic host id
+// that exists in neither the host registry nor collectIntegrationFacts: only
+// a `renderers` table entry and an enabled flag in cfg are required.
+test('a synthetic fourth host renders through the same host-neutral dispatch loop as opencode', async () => {
+  const synthFacts = {
+    hosts: { gizmo: { present: true, version: '4.2.0', enabled: true, wired: true } },
+  };
+  const synthRenderers = {
+    gizmo: async ({ facts, hostId }) => {
+      const f = facts.hosts[hostId];
+      return [{
+        subsystem: hostId,
+        level: f.wired ? 'ok' : 'warn',
+        message: `${hostId} ${f.version} present, wired=${f.wired}`,
+        fix: f.wired ? null : `sync wires ${hostId}`,
+      }];
+    },
+  };
+  const rows = await status.renderHostDetailRows({
+    cfg: { integrations: { hosts: { gizmo: true } } },
+    pkgRoot: PKG_ROOT,
+    facts: synthFacts,
+    renderers: synthRenderers,
+  });
+  assert.deepEqual(rows, [{
+    subsystem: 'gizmo', level: 'ok', message: 'gizmo 4.2.0 present, wired=true', fix: null,
+  }]);
+
+  // A registered-but-disabled host produces nothing — same gate opencode uses.
+  const disabledRows = await status.renderHostDetailRows({
+    cfg: { integrations: { hosts: { gizmo: false } } },
+    pkgRoot: PKG_ROOT,
+    facts: synthFacts,
+    renderers: synthRenderers,
+  });
+  assert.deepEqual(disabledRows, []);
+
+  // An enabled host with NO registered renderer produces nothing here either
+  // — it still gets install/auth rows from the separate `hosts` loop, but no
+  // detail rows, exactly like a real host nobody wrote a renderer for.
+  const noRendererRows = await status.renderHostDetailRows({
+    cfg: { integrations: { hosts: { gizmo: true } } },
+    pkgRoot: PKG_ROOT,
+    facts: synthFacts,
+    renderers: {},
+  });
+  assert.deepEqual(noRendererRows, []);
+});
+
 // ADR-0028 F-29: local-openai is a local ($0) provider deliberately NOT
 // projected to 'aqe' (unlike ollama, which is) — status must surface that
 // asymmetry plainly instead of letting it read as a bug.
