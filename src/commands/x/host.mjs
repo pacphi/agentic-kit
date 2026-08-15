@@ -19,6 +19,7 @@ import { loadKitConfig, saveKitConfig } from '../../lib/config.mjs';
 import { reconcileOpencodeGuidance } from '../../lib/opencode.mjs';
 import { runLifecycle } from '../../lib/adapters/lifecycle.mjs';
 import { lifecycleAdapterFor } from '../../lib/adapters/lifecycle-registry.mjs';
+import { hostTierLabel, hostAsymmetryNote } from '../../lib/hosts.mjs';
 import {
   routableHostIds, defaultHostMap, validateBinding, HOST_REGISTRY, PROVIDER_REGISTRY,
 } from '../../lib/adapters/index.mjs';
@@ -195,12 +196,13 @@ async function status({ flags, cwd }) {
       : dflt ? 'enabled (default — ruflo default-on, no env written)'
       : d.wired ? 'enabled, wired'
       : 'enabled, not wired → ak sync';
-    const tier = h.id === 'opencode' ? dim('  · routing host (ak run; never primary/AQE)')
-      : dim('  · routing host');
+    const tier = dim(`  · ${hostTierLabel(h.id)}`);
     // auth/billing axis — subscription ($0) vs metered key, per host.
     const auth = d.present ? hostAuthState(h.id, { present: true }) : null;
     const authStr = auth ? dim(`  ${auth.mode}/${auth.billing === 'subscription' ? '$0' : auth.billing}`) : '';
     console.log(`  ${h.id.padEnd(9)} ${(d.version ? `v${d.version}` : '—').padEnd(12)} ${state}${authStr}${tier}`);
+    const note = hostAsymmetryNote(h.id);
+    if (note) console.log(`    ${dim(note)}`);
   }
 
   // agentic-qe LLM provider (AQE_LLM_PROVIDER) + fallback chain
