@@ -144,6 +144,24 @@ async function main() {
     allowPositionals: true,
     strict: false,
   });
+
+  // Experimental host-adapter bootstrap (Wave 4, adapter door) — the single
+  // place every command passes through. Gated on the env var BEFORE anything
+  // else runs so the default (flag unset) is truly zero calls, zero output,
+  // zero behavior change: no dynamic import, no config read, nothing.
+  // Refusals are warnings on stderr, never fatal — a bad external adapter
+  // must never block a command that doesn't use it.
+  if (process.env.AK_EXPERIMENTAL_HOST_ADAPTERS === '1') {
+    try {
+      const { loadKitConfig } = await import('../src/lib/config.mjs');
+      const { bootstrapHostAdapters } = await import('../src/lib/adapters/admission.mjs');
+      const { warnings } = await bootstrapHostAdapters({ cfg: loadKitConfig(), env: process.env });
+      for (const w of warnings) {
+        console.error(dim(`⚠ host adapter '${w.name}' not admitted (${w.reason}): ${w.detail ?? ''}`.trimEnd()));
+      }
+    } catch { /* experimental surface — never blocks a command */ }
+  }
+
   const code = await mod.run({ flags: values, positionals, pkgRoot: PKG_ROOT });
 
   // Drift nudge: one line, cached, never blocks (skipped in --json contexts).

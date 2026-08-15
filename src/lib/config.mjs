@@ -46,6 +46,10 @@ const DEFAULTS = {
   statusline: { codex: null }, // {preset,lastProjection}: explicit ownership of Codex [tui] keys
   customBlocks: [],     // [{slug, templatePath, detector:{type:'command'|'dir'|'file', target}}]
   versionCheck: { ttlHours: 24, last: null, seen: {} },
+  // Experimental adapter door (staged behind AK_EXPERIMENTAL_HOST_ADAPTERS=1):
+  // [{name, source, contract}] entries admitted by admission.mjs's
+  // admitAdapters/bootstrapHostAdapters. Empty by default = zero effect.
+  hostAdapters: [],
 };
 
 const plain = (value) => value !== null && typeof value === 'object' && !Array.isArray(value);

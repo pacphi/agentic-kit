@@ -11,7 +11,7 @@ import { stripBlock, BEGIN, BUILTIN_BLOCKS } from '../lib/blocks.mjs';
 import { unregister } from '../lib/mcp.mjs';
 import { loadKitConfig, saveKitConfig } from '../lib/config.mjs';
 import { runLifecycle } from '../lib/adapters/lifecycle.mjs';
-import { hostsWithLifecycle, lifecycleAdapterFor } from '../lib/adapters/lifecycle-registry.mjs';
+import { builtinHostsWithLifecycle, lifecycleAdapterFor } from '../lib/adapters/lifecycle-registry.mjs';
 import { present as rbPresent } from '../lib/ruvnet-brain.mjs';
 import * as paths from '../lib/paths.mjs';
 import { ok, warn, info } from '../lib/output.mjs';
@@ -131,8 +131,12 @@ export async function run({ flags }) {
   // artifact removal independent of that), so this call is unconditional per
   // host — the only kit-side gate is "did anything actually happen", to
   // avoid a no-op teardown line (and a needless kit.json rewrite) on a host
-  // that was never enabled.
-  for (const hostId of hostsWithLifecycle()) {
+  // that was never enabled. builtinHostsWithLifecycle() (not
+  // hostsWithLifecycle()) deliberately excludes admitted external hosts:
+  // this loop body destructures an opencode-shaped result (ret.undo,
+  // ret.artifacts) — see lifecycle-registry.mjs's registerAdmittedLifecycle
+  // comment for why external lifecycle execution isn't wired through here yet.
+  for (const hostId of builtinHostsWithLifecycle()) {
     const adapter = lifecycleAdapterFor(hostId);
     if (dry) {
       info(`[dry-run] stripped ak-managed ${hostId} wiring + artifacts (opencode.json, plugin, agents, skill)`);
