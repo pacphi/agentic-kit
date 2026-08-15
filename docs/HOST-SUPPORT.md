@@ -1,8 +1,16 @@
 # Host support: Claude Code, Codex, and OpenCode
 
-This is the canonical compatibility reference for the three execution hosts that
-agentic-kit can manage. It compares the host itself, Ruflo, agentic-qe (AQE), and
+This is the canonical compatibility reference for agentic-kit's three **built-in**
+execution hosts. It compares the host itself, Ruflo, agentic-qe (AQE), and
 RuvNet Brain without treating those independent layers as interchangeable.
+
+Behind an experimental flag, agentic-kit can also admit **external host adapters**
+that extend this set with a host not shipped in-tree — see
+[External host adapters](PROVIDERS.md#external-host-adapters-experimental) and
+[ADR-0029](adr/0029-host-adapter-extension-point.md). An admitted external host
+picks up the same capability-driven treatment described here, but it is not one
+of the three built-ins this reference compares, and it can never claim
+primary-host, AQE-provider, or status-line status.
 
 Evidence cutoff: **2026-08-04**. The comparison was checked against agentic-kit
 `4.0.0-alpha.36`, Ruflo `3.34.0`, agentic-qe `3.13.x`, RuvNet Brain `4.0.7`,

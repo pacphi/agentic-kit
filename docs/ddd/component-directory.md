@@ -108,7 +108,7 @@ lintable where mechanical):
 ### Iconography
 
 Official marks are used only where the dashboard already ships them as official — the three
-host SVGs Observability renders on session rows — and are reused byte-identically so a
+built-in host SVGs Observability renders on session rows — and are reused byte-identically so a
 component looks the same everywhere. Every other component gets a **monogram tile**: its
 initial(s) on a rounded tile in its category hue. A monogram is an honest "no official mark"
 statement, not a stand-in logo; if an upstream later publishes a usable mark, swapping it in is
