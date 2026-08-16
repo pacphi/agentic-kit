@@ -383,4 +383,21 @@ test('uninstall --purge retains kit.json when OpenCode teardown cannot consume J
     'unparseable user configuration is preserved byte-for-byte');
 });
 
+// ── N-2 (Wave C security review follow-up): printReportLine level mapping ──
+// setup.mjs/sync.mjs got a printReportLine helper that routes a 'fail'-level
+// lifecycle-render.mjs line to fail(), not a silent downgrade to warn().
+// uninstall.mjs's own copy must map identically — renderUndoReport only ever
+// emits 'ok'/'warn' today (this is latent), but the mapping itself must
+// already be correct for the day an undo renderer adopts F5's levelForResult.
+test('printReportLine routes each level to its own output function (ok/warn/fail/info)', async () => {
+  const { out: okOut } = await captureLog(() => uninstall.printReportLine({ level: 'ok', text: 'all good' }));
+  assert.match(okOut, /✓.*all good/);
+  const { out: warnOut } = await captureLog(() => uninstall.printReportLine({ level: 'warn', text: 'careful' }));
+  assert.match(warnOut, /⚠.*careful/);
+  const { out: failOut } = await captureLog(() => uninstall.printReportLine({ level: 'fail', text: 'broken' }));
+  assert.match(failOut, /✗.*broken/, 'a fail-level line must reach fail(), not be downgraded to warn()');
+  const { out: infoOut } = await captureLog(() => uninstall.printReportLine({ level: 'info', text: 'fyi' }));
+  assert.match(infoOut, /ℹ.*fyi/);
+});
+
 test.after(() => rmrf(HOME));

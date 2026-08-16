@@ -371,6 +371,20 @@ export function providersWithCapability(entriesOrCapability, maybeCapability) {
   return entries.filter((provider) => provider.capabilities?.[capability] === true);
 }
 
+// Built-in-only BY DESIGN, not by oversight (F-4, D2 keystone security
+// review): this defaults `hosts` to HOST_REGISTRY, so a caller invoking it
+// with no second argument will refuse an admitted-and-granted external host
+// even though it has earned canBePrimary. registries.mjs has no knowledge of
+// the admitted-overlay/grant machinery (admitted.mjs imports FROM this file,
+// not the reverse — see admitted.mjs's effectivePrimaryHostIds() comment),
+// so it cannot default to the grant-aware set itself. There is no production
+// caller of this function today (fail-closed by omission, not a leak) — but
+// if one is ever wired up for an admitted host's eligibility, it MUST pass
+// `hosts: effectiveHostRegistry()` explicitly (mirroring how
+// materializeRunPlan calls the routing sibling, validateActivityHost, in
+// routing.mjs), or use admitted.mjs's effectivePrimaryHostIds() ids-only
+// check instead. Do NOT wire this function into a granted-host path using
+// its bare default.
 export function validatePrimaryHost(id, hosts = HOST_REGISTRY) {
   const host = hosts.find((entry) => entry.id === id);
   if (!host) return { ok: false, reason: 'unknown-host' };

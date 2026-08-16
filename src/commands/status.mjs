@@ -24,6 +24,7 @@ import { coherence as adbCoherence } from '../lib/agentdb.mjs';
 import { readJson } from '../lib/settings.mjs';
 import { have } from '../lib/exec.mjs';
 import { HOSTS, settingsTarget, isDefault, managedEnv, MANAGED_ENV_KEYS, hostInstallState, hostAuthState, bothHostsEnabled, aqeRouterFile, aqeSupportsAgentOverrides, credentialGaps, collectIntegrationFacts } from '../lib/providers.mjs';
+import { hostsWithLifecycle, isBuiltinHost, lifecycleExecutionEnabled } from '../lib/adapters/lifecycle-registry.mjs';
 import { PROVIDER_REGISTRY } from '../lib/adapters/index.mjs';
 import { configuredPolicyToAgentOverrides, agentOverridesDrift, routingSummary, divergedRoutes } from '../lib/routing.mjs';
 import { qeCourtShipped, readQeCourtConfig, validateCourtConfig } from '../lib/qeCourt.mjs';
@@ -181,6 +182,51 @@ export async function renderHostDetailRows({ cfg, pkgRoot, facts, renderers = HO
   for (const [hostId, renderer] of Object.entries(renderers)) {
     if (!cfg.integrations?.hosts?.[hostId]) continue;
     rows.push(...(await renderer({ cfg, pkgRoot, facts, hostId })));
+  }
+  return rows;
+}
+
+/** Sync reachability gap (ADR-0031 P3 known limitation): setup.mjs and
+ *  uninstall.mjs's admitted-host lifecycle loops (ADR-0031 P3) already iterate
+ *  hostsWithLifecycle() and run for real; sync.mjs's twin loop is gated on
+ *  BOTH lifecycleExecutionEnabled(hostId, cfg) AND `subsystems.has(hostId)`,
+ *  where subsystems is `new Set(plan.map(p => p.subsystem))` derived straight
+ *  from THIS collector's rows (sync.mjs). An admitted host with no
+ *  HOST_DETAIL_RENDERERS entry (only opencode has one) produced no row at
+ *  all, so its subsystem could never appear in the plan and sync's branch was
+ *  unreachable for a real admitted host — even fully enabled, flag on, CLI
+ *  present. This closes that gap: any admitted (never built-in) lifecycle
+ *  host that lifecycleExecutionEnabled() actually gates IN for this run gets
+ *  exactly one subsystem-tagged row, `subsystem === hostId` — deliberately
+ *  the same identity opencode's own renderer uses (subsystem 'opencode' ===
+ *  HOST_DETAIL_RENDERERS key 'opencode'), so sync's `subsystems.has(hostId)`
+ *  finds it.
+ *
+ *  Deliberately lean, not a per-surface renderer like opencodeDetailRows: an
+ *  arbitrary admitted host's only introspection surface is its own declared
+ *  detect/verify hooks (a subprocess spawn), which this read-only, cheap
+ *  collector does not invoke — so the row cannot report real drift and always
+ *  carries a `fix` while the gate holds. Convergence is left to the adapter's
+ *  own apply, which lifecycle.mjs's contract requires to be idempotent.
+ *  Excludes built-in hosts (opencode already has a bespoke renderer above;
+ *  a future built-in lifecycle host with no renderer is a gap for its own
+ *  renderer to close, not this fallback) and any host already present in
+ *  `renderers` (never double-reports one host under two mechanisms). Isolated
+ *  per host, mirroring the per-renderer try/catch contract above — one
+ *  admitted host's failure must not take down collect() or any other host's
+ *  row. */
+function admittedLifecycleFallbackRows(cfg, renderers = HOST_DETAIL_RENDERERS) {
+  const rows = [];
+  for (const hostId of hostsWithLifecycle()) {
+    if (isBuiltinHost(hostId) || hostId in renderers) continue;
+    try {
+      if (!lifecycleExecutionEnabled(hostId, cfg)) continue;
+      rows.push(row(hostId, 'warn',
+        `${hostId}: external lifecycle host, enabled — sync will converge its hooks`,
+        `sync applies the ${hostId} lifecycle adapter`));
+    } catch (e) {
+      rows.push(row(hostId, 'warn', `${hostId} lifecycle status unavailable: ${e.message}`));
+    }
   }
   return rows;
 }
@@ -534,6 +580,7 @@ export async function collect({ pkgRoot, cwd = process.cwd() }) {
   // absent is the CLI-presence branch inside its own renderer, sourced from
   // the shared facts snapshot — no extra probing here or in the loop).
   rows.push(...(await renderHostDetailRows({ cfg, pkgRoot, facts: integrationFacts })));
+  rows.push(...admittedLifecycleFallbackRows(cfg));
 
   // hosts (install-if-missing) — cheap: file read + `which`, no network.
   // An enabled host that is entirely absent is installable by sync; an external

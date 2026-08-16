@@ -9,6 +9,7 @@ import { fileURLToPath } from 'node:url';
 import {
   validateAdapterManifest, DRIVING_SURFACES, MANIFEST_TRUST_KINDS, ManifestRejected,
 } from '../../src/lib/adapters/manifest.mjs';
+import { hashManifest } from '../../src/lib/adapters/admission.mjs';
 
 function validHost(overrides = {}) {
   return {
@@ -280,4 +281,71 @@ test('unknown-field: an extraneous trust-change key is refused', () => {
 test('unknown-field: an extra or miscased capability key cannot ride along inert', () => {
   rejects(validManifest({ host: validHost({ capabilities: { ...validHost().capabilities, CanBePrimary: true } }) }), 'unknown-field');
   rejects(validManifest({ host: validHost({ capabilities: { ...validHost().capabilities, ADMIN: true } }) }), 'unknown-field');
+});
+
+// ── execution block (P2, ADR-0031) ──────────────────────────────────────────
+// validHost()'s default capabilities already declare canRouteActivities:true,
+// so an execution block is legal by default; the coupling tests below flip
+// that flag explicitly to exercise both directions.
+
+function withExecution(overrides = {}) {
+  return {
+    run: { hook: { command: ['acme', 'run'], timeoutMs: 5000 } },
+    ...overrides,
+  };
+}
+
+test('execution block round-trips into the validated output', () => {
+  const manifest = validateAdapterManifest(validManifest({ execution: withExecution() }));
+  assert.deepEqual(manifest.execution.run.hook.command, ['acme', 'run']);
+  assert.equal(manifest.execution.run.hook.timeoutMs, 5000);
+  assert.ok(Object.isFrozen(manifest.execution));
+});
+
+test('a manifest with no execution block omits the key entirely', () => {
+  const manifest = validateAdapterManifest(validManifest());
+  assert.equal('execution' in manifest, false);
+});
+
+test('an execution block changes hashManifest\'s value vs. the same manifest without it', () => {
+  const withoutExecution = validateAdapterManifest(validManifest());
+  const withExecutionBlock = validateAdapterManifest(validManifest({ execution: withExecution() }));
+  assert.notEqual(hashManifest(withoutExecution), hashManifest(withExecutionBlock));
+});
+
+test('execution-not-routable: an execution block requires host.capabilities.canRouteActivities:true', () => {
+  rejects(validManifest({
+    host: validHost({ capabilities: { ...validHost().capabilities, canRouteActivities: false } }),
+    execution: withExecution(),
+  }), 'execution-not-routable');
+});
+
+test('canRouteActivities:true without an execution block still validates (legal degrade-at-runtime)', () => {
+  const manifest = validateAdapterManifest(validManifest({
+    host: validHost({ capabilities: { ...validHost().capabilities, canRouteActivities: true } }),
+  }));
+  assert.equal(manifest.host.capabilities.canRouteActivities, true);
+  assert.equal('execution' in manifest, false);
+});
+
+test('unknown-field: an extraneous execution key is refused', () => {
+  rejects(validManifest({ execution: { run: withExecution().run, escalate: true } }), 'unknown-field');
+});
+
+test('unknown-field: an extraneous execution.run key is refused', () => {
+  rejects(validManifest({ execution: { run: { hook: withExecution().run.hook, cwd: '/tmp' } } }), 'unknown-field');
+});
+
+test('unknown-field: an extraneous execution.run.hook key is refused', () => {
+  rejects(validManifest({
+    execution: { run: { hook: { command: ['acme', 'run'], cwd: '/tmp' } } },
+  }), 'unknown-field');
+});
+
+test('invalid-execution: an empty command array is rejected', () => {
+  rejects(validManifest({ execution: withExecution({ run: { hook: { command: [] } } }) }), 'invalid-execution');
+});
+
+test('invalid-execution: a non-positive timeoutMs is rejected', () => {
+  rejects(validManifest({ execution: withExecution({ run: { hook: { command: ['acme', 'run'], timeoutMs: 0 } } }) }), 'invalid-execution');
 });

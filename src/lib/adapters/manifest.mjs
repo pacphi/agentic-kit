@@ -52,7 +52,7 @@ export class ManifestRejected extends TypeError {
 // validateHostAdapter, src/lib/hosts.mjs, src/lib/providers.mjs) consume —
 // widen them only alongside a new legitimate consumer, never speculatively.
 const MANIFEST_ALLOWED_KEYS = Object.freeze([
-  'name', 'version', 'contract', 'host', 'detection', 'driving', 'lifecycle', 'trust',
+  'name', 'version', 'contract', 'host', 'detection', 'driving', 'lifecycle', 'trust', 'execution',
 ]);
 // Everything validateHostAdapter itself reads (id, label, install,
 // capabilities, trust, enabledByDefault, configProjection, observability)
@@ -172,6 +172,30 @@ function validateManifestLifecycle(value) {
   return structuredClone(value);
 }
 
+// execution.run.hook is the single subprocess `ak run` spawns to drive an
+// admitted host as a worker (P2, ADR-0031). Same hook shape and validation
+// discipline as a lifecycle verb's hook, but there is exactly one verb
+// ('run'), never a caller-named one, so the allowlists are inlined rather
+// than looped like validateManifestLifecycle's verb map.
+function validateExecution(value) {
+  assertRecord(value, 'execution');
+  assertNoUnknownKeys(value, ['run'], 'execution');
+  assertRecord(value.run, 'execution.run');
+  assertNoUnknownKeys(value.run, ['hook'], 'execution.run');
+  assertRecord(value.run.hook, 'execution.run.hook');
+  assertNoUnknownKeys(value.run.hook, ['command', 'timeoutMs'], 'execution.run.hook');
+  try {
+    assertStringArray(value.run.hook.command, 'execution.run.hook.command', { allowEmpty: false });
+  } catch (error) {
+    throw new ManifestRejected('invalid-execution', error.message);
+  }
+  if (value.run.hook.timeoutMs !== undefined
+    && (!Number.isInteger(value.run.hook.timeoutMs) || value.run.hook.timeoutMs <= 0)) {
+    throw new ManifestRejected('invalid-execution', 'execution.run.hook.timeoutMs must be a positive integer');
+  }
+  return structuredClone(value);
+}
+
 function validateManifestTrust(value) {
   assertRecord(value, 'trust');
   assertNoUnknownKeys(value, ['changes'], 'trust');
@@ -283,11 +307,19 @@ export function validateAdapterManifest(value, { projections = projectionMap, ob
       throw new ManifestRejected('invalid-guidance-file', error.message);
     }
   }
+  // P2 structural coupling (ADR-0031): an execution hook on a host that
+  // cannot route activities is a contradiction the schema refuses outright,
+  // never silently ignores. The converse — routable, no execution block — is
+  // legal and degrades honestly at run time (cli_unavailable).
+  if (value.execution !== undefined && host.capabilities.canRouteActivities !== true) {
+    throw new ManifestRejected('execution-not-routable', 'manifest.execution requires host.capabilities.canRouteActivities: true');
+  }
 
   const detection = validateDetection(value.detection);
   const driving = validateDriving(value.driving);
   const lifecycle = value.lifecycle === undefined ? undefined : validateManifestLifecycle(value.lifecycle);
   const trust = validateManifestTrust(value.trust);
+  const execution = value.execution === undefined ? undefined : validateExecution(value.execution);
 
   return immutable({
     name: value.name,
@@ -297,6 +329,11 @@ export function validateAdapterManifest(value, { projections = projectionMap, ob
     detection,
     driving,
     ...(lifecycle === undefined ? {} : { lifecycle }),
+    // execution rides in the same validated-output object hashManifest
+    // (admission.mjs) canonicalizes and hashes, so declaring/editing an
+    // execution block changes consent's covered hash automatically — no
+    // separate hashing path to keep in sync.
+    ...(execution === undefined ? {} : { execution }),
     trust,
   });
 }
