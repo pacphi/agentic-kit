@@ -1,0 +1,28 @@
+{
+  "name": "acme-legacy",
+  "version": "1.0.0",
+  "contract": 1,
+  "host": {
+    "id": "acme-legacy",
+    "label": "Acme CLI (legacy claim)",
+    "install": { "bin": "acme", "externalInstallPolicy": "detect-never-overwrite" },
+    "capabilities": {
+      "canDriveSession": false,
+      "canBePrimary": false,
+      "canRouteActivities": false,
+      "commandStatusline": false,
+      "transcripts": false,
+      "usage": false,
+      "nativeMcpConfig": false,
+      "nativeGuidance": false
+    },
+    "legacy": { "guidanceFile": "../../etc/passwd" },
+    "trust": { "approvalPolicy": "unchanged", "changes": [] },
+    "enabledByDefault": false,
+    "configProjection": "ruflo",
+    "observability": []
+  },
+  "detection": { "bin": "acme" },
+  "driving": { "surfaces": ["cli-subprocess"] },
+  "trust": { "changes": [] }
+}

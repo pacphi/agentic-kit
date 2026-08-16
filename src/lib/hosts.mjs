@@ -23,7 +23,7 @@
 //     ~/.codex/auth.json (key overrides login). claude auth on macOS lives in the
 //     Keychain (no readable file); ANTHROPIC_API_KEY, when used, is not a simple
 //     override of a subscription login, so we label it conservatively.
-import { HOST_REGISTRY } from './adapters/index.mjs';
+import { HOST_REGISTRY, effectiveHostRegistry } from './adapters/index.mjs';
 
 /** Per-host adapter descriptors. Logical names (`guidanceFile`, `loginFile`
  *  segments) are resolved to real paths by callers so this stays pure. */
@@ -68,4 +68,76 @@ export function drivingHost(env = process.env, cfg = null) {
   const primaryCapable = HOST_REGISTRY.some((host) => host.id === primary && host.capabilities.canBePrimary);
   if (primary && primaryCapable) return /** @type {'claude'|'codex'} */ (primary);
   return 'claude';
+}
+
+/**
+ * Human phrase for a host's tier, derived purely from its capabilities — never
+ * from `host.id` (the anti-pattern this replaces: x/host.mjs's status() used
+ * to special-case `h.id === 'opencode'` for its tier text; D-2/F-25/F-26).
+ * Accepts a host id (resolved against `registry`, default
+ * effectiveHostRegistry() so an admitted external host resolves too) or a raw
+ * host-entry object directly (for a synthetic host not registered anywhere).
+ * TRUE by construction for any capability combination validateHostAdapter
+ * accepts, including a future built-in or admitted external adapter — the
+ * label follows the flags, not a name.
+ *
+ * @param {string|object} hostIdOrEntry
+ * @param {{ registry?: ReadonlyArray<any>, builtins?: ReadonlyArray<any> }} [opts]
+ * @returns {string} '' when the host isn't found or can't drive a session.
+ */
+export function hostTierLabel(hostIdOrEntry, { registry = effectiveHostRegistry(), builtins = HOST_REGISTRY } = {}) {
+  const host = typeof hostIdOrEntry === 'string'
+    ? registry.find((entry) => entry.id === hostIdOrEntry)
+    : hostIdOrEntry;
+  if (!host?.capabilities?.canDriveSession) return '';
+  const { canBePrimary, canRouteActivities } = host.capabilities;
+
+  if (canBePrimary) return 'drives sessions · can lead';
+  if (!canRouteActivities) return 'drives sessions';
+
+  const isBuiltin = builtins.some((entry) => entry.id === host.id);
+  const base = isBuiltin ? 'routing only · supervised' : 'routing only · external adapter';
+  return host.legacy?.aqeProvider ? base : `${base} · not AQE`;
+}
+
+/**
+ * A one-line, capability/trust-derived note about a host's asymmetric
+ * behavior versus the other managed hosts — cross-host MCP delegation (F-25)
+ * and the ruflo backend env flag / permission consent boundary (F-26) —
+ * assembled only from facts that are true FOR THIS HOST's own registry
+ * entry, never from an id check. '' when nothing asymmetric applies.
+ *
+ * @param {string|object} hostIdOrEntry
+ * @param {{ registry?: ReadonlyArray<any> }} [opts]
+ * @returns {string}
+ */
+export function hostAsymmetryNote(hostIdOrEntry, { registry = effectiveHostRegistry() } = {}) {
+  const host = typeof hostIdOrEntry === 'string'
+    ? registry.find((entry) => entry.id === hostIdOrEntry)
+    : hostIdOrEntry;
+  if (!host?.capabilities?.canDriveSession) return '';
+  const notes = [];
+
+  // F-25: this host is registered as callable FROM another host via MCP — a
+  // real bridge capability, read off the trust manifest rather than an id
+  // check ('expose <label> to <other> as mcp__x__x' is the manifest's own
+  // wording for that grant, e.g. codex's claude-to-codex-mcp change).
+  const bridge = host.trust?.changes?.find((change) =>
+    change.kind === 'mcp-registration' && /^expose /i.test(change.effect));
+  if (bridge) notes.push(bridge.effect);
+
+  // ADR-0019's "supervised-host contract": a host that drives sessions and
+  // routes activities but can never be primary is exactly the shape that
+  // implements a permission consent boundary today (OpenCode's
+  // permission_required abort) — never auto-approved.
+  if (!host.capabilities.canBePrimary && host.capabilities.canRouteActivities) {
+    notes.push('consent boundary — a run can block on a permission event (never auto-approved)');
+  }
+
+  // F-26: ak's ruflo backend env flag (ENABLE_CLAUDE_CODE/ENABLE_CODEX) is
+  // only wired for hosts whose registry entry declares one; silence used to
+  // read as "nothing to say" rather than "no flag exists for this host".
+  if (!host.legacy?.enableEnv) notes.push('no ruflo backend env flag');
+
+  return notes.join('; ');
 }

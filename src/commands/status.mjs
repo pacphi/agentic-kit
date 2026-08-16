@@ -24,6 +24,7 @@ import { coherence as adbCoherence } from '../lib/agentdb.mjs';
 import { readJson } from '../lib/settings.mjs';
 import { have } from '../lib/exec.mjs';
 import { HOSTS, settingsTarget, isDefault, managedEnv, MANAGED_ENV_KEYS, hostInstallState, hostAuthState, bothHostsEnabled, aqeRouterFile, aqeSupportsAgentOverrides, credentialGaps, collectIntegrationFacts } from '../lib/providers.mjs';
+import { PROVIDER_REGISTRY } from '../lib/adapters/index.mjs';
 import { configuredPolicyToAgentOverrides, agentOverridesDrift, routingSummary, divergedRoutes } from '../lib/routing.mjs';
 import { qeCourtShipped, readQeCourtConfig, validateCourtConfig } from '../lib/qeCourt.mjs';
 import { drift as ruvectorDrift } from '../lib/ruvector.mjs';
@@ -56,6 +57,133 @@ Examples:
   ak status --json    machine-readable rows`;
 
 const row = (subsystem, level, message, fix = null) => ({ subsystem, level, message, fix });
+
+// Per-host status DETAIL rows — beyond the generic install/auth rows the
+// `hosts` loop in collect() already renders from facts for every host alike.
+// A detail renderer owns everything specific to how ONE host proves itself
+// wired (config files, lifecycle bridges, converted artifacts, …); the
+// opencode-specific PROBES/MESSAGES live in the renderer below and in
+// lib/opencode.mjs, never in the dispatch loop itself. Adding a fourth host
+// means adding (or not adding) a table entry here — the loop that walks this
+// table never changes.
+// The loop also passes `hostId`; this renderer doesn't need it (it IS the
+// opencode renderer) but the signature admits it so the dispatch call site
+// typechecks for every renderer uniformly.
+async function opencodeDetailRows({ cfg, pkgRoot, facts, hostId: _hostId = 'opencode' } = /** @type {any} */ ({})) {
+  const rows = [];
+  try {
+    if (!facts.hosts?.opencode?.present) {
+      rows.push(row('opencode', 'warn', 'enabled but opencode CLI not installed', 'sync installs opencode-ai (hosts step)'));
+    } else {
+      const source = catalogSource({ override: cfg.integrations?.ownership?.opencode?.catalogDir });
+      const st = opencodeMcpStatus(cfg);
+      const conv = st.parseError ? null : await opencodeConverged(cfg);
+      if (st.parseError) {
+        rows.push(row('opencode', 'warn',
+          'opencode.json is not plain JSON (JSONC comments?) — ak refuses to touch it',
+          'merge the ak wiring manually'));
+      } else if (!st.exists || !st.claudeFlow) {
+        rows.push(row('opencode', 'warn',
+          `opencode.json wiring incomplete (${[!st.exists ? 'no config file' : null, !st.claudeFlow ? 'claude-flow MCP missing' : null].filter(Boolean).join(', ')})`,
+          'sync writes the opencode wiring'));
+      } else if (!conv?.converged) {
+        rows.push(row('opencode', 'warn',
+          `opencode.json wiring drifted (${(conv?.reasons ?? []).slice(0, 3).join('; ')}${(conv?.reasons?.length ?? 0) > 3 ? '…' : ''})`,
+          'sync re-applies the opencode wiring'));
+      } else {
+        rows.push(row('opencode', 'ok',
+          `opencode.json converged (claude-flow${st.brain ? ' + ruvnet-brain' : ''} MCP, ${st.paths?.length ?? 0} skills path(s))${st.owned ? '' : ' — pre-existing (not ak-managed)'}`));
+      }
+      const receiptState = opencodeArtifactReceiptState(cfg.integrations?.ownership?.opencode?.managed);
+      const artifactReceipts = receiptState.receipts;
+      if (receiptState.adoptionBlocked) {
+        rows.push(row('opencode', 'warn',
+          'artifact receipt ledger is malformed — ownership adoption blocked; artifacts left untouched',
+          'repair integrations.ownership.opencode.managed.artifacts in kit.json or restore it from backup'));
+      }
+      const plug = pluginStatus({
+        pkgRoot, receipt: artifactReceipts.plugin,
+        adoptionBlocked: receiptState.adoptionBlocked,
+      });
+      if (!receiptState.adoptionBlocked && plug.adoptable) {
+        rows.push(row('opencode', 'warn',
+          'lifecycle plugin is exact and marker-bearing but lacks an ownership receipt',
+          'sync adopts it into the receipt ledger without rewriting it'));
+      } else if (!receiptState.adoptionBlocked && plug.foreign) {
+        rows.push(row('opencode', 'info', 'lifecycle plugin slot occupied by a user-owned ruflo-hooks.js — ak leaves it alone'));
+      } else if (!receiptState.adoptionBlocked && !plug.present) {
+        rows.push(row('opencode', 'warn', 'lifecycle plugin (ruflo-hooks.js) not deployed', 'sync deploys it'));
+      } else if (!receiptState.adoptionBlocked && !plug.current) {
+        rows.push(row('opencode', 'warn', 'lifecycle plugin out of date', 'sync rewrites it'));
+      }
+      const ag = agentsStatus({
+        source, receipts: artifactReceipts.agents,
+        stampReceipt: artifactReceipts.agentStamp,
+        adoptionBlocked: receiptState.agentsAdoptionBlocked,
+      });
+      if (!receiptState.adoptionBlocked && ag.adoptable) {
+        rows.push(row('opencode', 'warn',
+          `${ag.count} exact marker-bearing agents or stamp lack ownership receipts`,
+          'sync adopts them into the receipt ledger without rewriting them'));
+      } else if (!receiptState.adoptionBlocked && ag.count === 0 && !source) {
+        rows.push(row('opencode', 'warn', 'no ruflo catalog source (marketplace clone or @claude-flow/cli)', 'install ruflo (or claude marketplace) for the agent catalog'));
+      } else if (!receiptState.adoptionBlocked && ag.count === 0) {
+        rows.push(row('opencode', 'warn', 'no converted ruflo agents', 'sync converts the ruflo agent set'));
+      } else if (!receiptState.adoptionBlocked && ag.modified) {
+        rows.push(row('opencode', 'info',
+          `${ag.count} converted agents include user edits — ak leaves those files alone`));
+      } else if (!receiptState.adoptionBlocked && ag.stale) {
+        rows.push(row('opencode', 'warn',
+          `${ag.count} agents from ${ag.stampedId ?? 'unknown source'}, current source is ${ag.currentId ?? 'none'}`,
+          'sync re-converts the agent set'));
+      } else if (!receiptState.adoptionBlocked) {
+        rows.push(row('opencode', 'ok', `${ag.count} converted agents (${ag.currentId})`));
+      }
+      const sk = skillStatus({
+        source, receipt: artifactReceipts.skill,
+        adoptionBlocked: receiptState.adoptionBlocked,
+      });
+      if (!receiptState.adoptionBlocked && sk.adoptable) {
+        rows.push(row('opencode', 'warn',
+          'platform skill is exact and marker-bearing but lacks an ownership receipt',
+          'sync adopts it into the receipt ledger without rewriting it'));
+      } else if (!receiptState.adoptionBlocked && sk.foreign) {
+        rows.push(row('opencode', 'info', 'skills/ruflo/SKILL.md is user-owned — ak leaves it alone'));
+      } else if (!receiptState.adoptionBlocked && source?.hasPlatformSkill && !sk.present) {
+        rows.push(row('opencode', 'warn', 'platform skill (skills/ruflo/SKILL.md) not deployed', 'sync deploys it'));
+      } else if (!receiptState.adoptionBlocked && source?.hasPlatformSkill && !sk.current) {
+        rows.push(row('opencode', 'warn', 'platform skill out of date', 'sync re-deploys it'));
+      }
+    }
+  } catch (e) {
+    rows.push(row('opencode', 'warn', `opencode check unavailable: ${e.message}`));
+  }
+  return rows;
+}
+
+// Dispatch table: host id → detail renderer. CONTRACT: a renderer must catch
+// its own errors and degrade to a warn row — the dispatch loop deliberately
+// has no catch, so an uncaught throw would take down ALL of collect(), not
+// just this host. A host absent from this table
+// gets no detail rows here (its install/auth state still comes from the
+// `hosts` loop, which is already host-neutral). This is the ONLY place a new
+// host's status detail wiring gets registered.
+const HOST_DETAIL_RENDERERS = { opencode: opencodeDetailRows };
+
+/** Host-neutral dispatch loop: walks `renderers` (defaults to the table
+ *  above) and, for each host enabled in cfg, calls its renderer with the
+ *  shared facts snapshot. Exported (not just used internally) so a test can
+ *  prove a synthetic host renders through this exact loop — with no host-id
+ *  branching anywhere in the loop body — by injecting its own renderers map
+ *  instead of reaching into module internals. */
+export async function renderHostDetailRows({ cfg, pkgRoot, facts, renderers = HOST_DETAIL_RENDERERS }) {
+  const rows = [];
+  for (const [hostId, renderer] of Object.entries(renderers)) {
+    if (!cfg.integrations?.hosts?.[hostId]) continue;
+    rows.push(...(await renderer({ cfg, pkgRoot, facts, hostId })));
+  }
+  return rows;
+}
 
 export async function collect({ pkgRoot, cwd = process.cwd() }) {
   const rows = [];
@@ -399,100 +527,13 @@ export async function collect({ pkgRoot, cwd = process.cwd() }) {
     rows.push(row('codex-plugins', 'warn', `Codex plugin check unavailable: ${e.message}`));
   }
 
-  // opencode host wiring — the third host's counterpart of the codex-mcp rows:
-  // opencode.json (mcp + skills.paths + permissions), the plugins/ lifecycle
-  // bridge, the converted agent set, and the platform skill. Only surfaces when
-  // the opencode host is enabled AND installed (enabled-but-absent is the
-  // hosts row's story); probes are file reads + one bin check (codex-review #4).
-  if (cfg.integrations?.hosts?.opencode) {
-    try {
-      if (!(await have('opencode'))) {
-        rows.push(row('opencode', 'warn', 'enabled but opencode CLI not installed', 'sync installs opencode-ai (hosts step)'));
-      } else {
-        const source = catalogSource({ override: cfg.integrations?.ownership?.opencode?.catalogDir });
-        const st = opencodeMcpStatus(cfg);
-        const conv = st.parseError ? null : await opencodeConverged(cfg);
-        if (st.parseError) {
-          rows.push(row('opencode', 'warn',
-            'opencode.json is not plain JSON (JSONC comments?) — ak refuses to touch it',
-            'merge the ak wiring manually'));
-        } else if (!st.exists || !st.claudeFlow) {
-          rows.push(row('opencode', 'warn',
-            `opencode.json wiring incomplete (${[!st.exists ? 'no config file' : null, !st.claudeFlow ? 'claude-flow MCP missing' : null].filter(Boolean).join(', ')})`,
-            'sync writes the opencode wiring'));
-        } else if (!conv?.converged) {
-          rows.push(row('opencode', 'warn',
-            `opencode.json wiring drifted (${(conv?.reasons ?? []).slice(0, 3).join('; ')}${(conv?.reasons?.length ?? 0) > 3 ? '…' : ''})`,
-            'sync re-applies the opencode wiring'));
-        } else {
-          rows.push(row('opencode', 'ok',
-            `opencode.json converged (claude-flow${st.brain ? ' + ruvnet-brain' : ''} MCP, ${st.paths?.length ?? 0} skills path(s))${st.owned ? '' : ' — pre-existing (not ak-managed)'}`));
-        }
-        const receiptState = opencodeArtifactReceiptState(cfg.integrations?.ownership?.opencode?.managed);
-        const artifactReceipts = receiptState.receipts;
-        if (receiptState.adoptionBlocked) {
-          rows.push(row('opencode', 'warn',
-            'artifact receipt ledger is malformed — ownership adoption blocked; artifacts left untouched',
-            'repair integrations.ownership.opencode.managed.artifacts in kit.json or restore it from backup'));
-        }
-        const plug = pluginStatus({
-          pkgRoot, receipt: artifactReceipts.plugin,
-          adoptionBlocked: receiptState.adoptionBlocked,
-        });
-        if (!receiptState.adoptionBlocked && plug.adoptable) {
-          rows.push(row('opencode', 'warn',
-            'lifecycle plugin is exact and marker-bearing but lacks an ownership receipt',
-            'sync adopts it into the receipt ledger without rewriting it'));
-        } else if (!receiptState.adoptionBlocked && plug.foreign) {
-          rows.push(row('opencode', 'info', 'lifecycle plugin slot occupied by a user-owned ruflo-hooks.js — ak leaves it alone'));
-        } else if (!receiptState.adoptionBlocked && !plug.present) {
-          rows.push(row('opencode', 'warn', 'lifecycle plugin (ruflo-hooks.js) not deployed', 'sync deploys it'));
-        } else if (!receiptState.adoptionBlocked && !plug.current) {
-          rows.push(row('opencode', 'warn', 'lifecycle plugin out of date', 'sync rewrites it'));
-        }
-        const ag = agentsStatus({
-          source, receipts: artifactReceipts.agents,
-          stampReceipt: artifactReceipts.agentStamp,
-          adoptionBlocked: receiptState.agentsAdoptionBlocked,
-        });
-        if (!receiptState.adoptionBlocked && ag.adoptable) {
-          rows.push(row('opencode', 'warn',
-            `${ag.count} exact marker-bearing agents or stamp lack ownership receipts`,
-            'sync adopts them into the receipt ledger without rewriting them'));
-        } else if (!receiptState.adoptionBlocked && ag.count === 0 && !source) {
-          rows.push(row('opencode', 'warn', 'no ruflo catalog source (marketplace clone or @claude-flow/cli)', 'install ruflo (or claude marketplace) for the agent catalog'));
-        } else if (!receiptState.adoptionBlocked && ag.count === 0) {
-          rows.push(row('opencode', 'warn', 'no converted ruflo agents', 'sync converts the ruflo agent set'));
-        } else if (!receiptState.adoptionBlocked && ag.modified) {
-          rows.push(row('opencode', 'info',
-            `${ag.count} converted agents include user edits — ak leaves those files alone`));
-        } else if (!receiptState.adoptionBlocked && ag.stale) {
-          rows.push(row('opencode', 'warn',
-            `${ag.count} agents from ${ag.stampedId ?? 'unknown source'}, current source is ${ag.currentId ?? 'none'}`,
-            'sync re-converts the agent set'));
-        } else if (!receiptState.adoptionBlocked) {
-          rows.push(row('opencode', 'ok', `${ag.count} converted agents (${ag.currentId})`));
-        }
-        const sk = skillStatus({
-          source, receipt: artifactReceipts.skill,
-          adoptionBlocked: receiptState.adoptionBlocked,
-        });
-        if (!receiptState.adoptionBlocked && sk.adoptable) {
-          rows.push(row('opencode', 'warn',
-            'platform skill is exact and marker-bearing but lacks an ownership receipt',
-            'sync adopts it into the receipt ledger without rewriting it'));
-        } else if (!receiptState.adoptionBlocked && sk.foreign) {
-          rows.push(row('opencode', 'info', 'skills/ruflo/SKILL.md is user-owned — ak leaves it alone'));
-        } else if (!receiptState.adoptionBlocked && source?.hasPlatformSkill && !sk.present) {
-          rows.push(row('opencode', 'warn', 'platform skill (skills/ruflo/SKILL.md) not deployed', 'sync deploys it'));
-        } else if (!receiptState.adoptionBlocked && source?.hasPlatformSkill && !sk.current) {
-          rows.push(row('opencode', 'warn', 'platform skill out of date', 'sync re-deploys it'));
-        }
-      }
-    } catch (e) {
-      rows.push(row('opencode', 'warn', `opencode check unavailable: ${e.message}`));
-    }
-  }
+  // Per-host status DETAIL rows (opencode.json wiring, lifecycle bridge,
+  // converted agents, platform skill, …) — the host-neutral counterpart of
+  // the codex-mcp rows above. Dispatches through HOST_DETAIL_RENDERERS; only
+  // a host both enabled AND registered there produces rows (enabled-but-
+  // absent is the CLI-presence branch inside its own renderer, sourced from
+  // the shared facts snapshot — no extra probing here or in the loop).
+  rows.push(...(await renderHostDetailRows({ cfg, pkgRoot, facts: integrationFacts })));
 
   // hosts (install-if-missing) — cheap: file read + `which`, no network.
   // An enabled host that is entirely absent is installable by sync; an external
@@ -579,6 +620,19 @@ export async function collect({ pkgRoot, cwd = process.cwd() }) {
           rows.push(row('providers', 'ok', `aqe chain: ${chain.length}/${chain.length} rungs have credentials`));
         }
       }
+    }
+    // ADR-0028 F-29: local-openai is a local ($0) provider deliberately NOT
+    // projected to 'aqe' (unlike ollama, which is) — surface that asymmetry
+    // plainly so it reads as a fact, not a bug. Registry-driven (billing +
+    // projections), not an id check, so any future provider of the same
+    // shape gets the same treatment for free.
+    const providerById = Object.fromEntries(PROVIDER_REGISTRY.map((p) => [p.id, p]));
+    for (const binding of cfg.integrations?.bindings ?? []) {
+      const provider = providerById[binding.provider];
+      if (!provider || provider.billing !== 'local' || provider.projections.includes('aqe')) continue;
+      const endpoint = binding.endpoint ? ` @ ${binding.endpoint}` : '';
+      rows.push(row('providers', 'info',
+        `local binding: ${binding.provider} via ${binding.host}${endpoint} (${provider.billing} $0; not an AQE provider type)`));
     }
   } catch (e) {
     rows.push(row('providers', 'warn', `provider check unavailable: ${e.message}`));

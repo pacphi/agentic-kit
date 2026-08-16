@@ -140,8 +140,9 @@ runtime state is a chip word, never a prose word. See
 
 ## Usage rules
 
-- Say **host** when referring to Claude Code, Codex, OpenCode, session drivers, leadership, or
-  activity routing.
+- Say **host** for any session driver or activity-routing target the registry recognizes —
+  Claude Code, Codex, and OpenCode are the built-in examples, not the exhaustive list — and for
+  leadership.
 - Say **inference provider** when referring to Anthropic, OpenAI, OpenRouter, Ollama, billing,
   provider credentials, or inference endpoints.
 - Qualify **projection** as configuration projection or read-model projection when ambiguity is

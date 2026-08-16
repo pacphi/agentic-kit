@@ -202,8 +202,7 @@ The file is parsed with `withTurns: true` by the provider's parser
 (`usage-index.mjs:1518-1545`) with the same fields the Sessions view rows
 carry — `prompts`, `responses`, `exceptions`, `sidechain`, `threadSource`,
 `models`, `tools`, `skill`/`plugin`, worktree — plus a `cost` priced from the
-same per-model usage rows `aggregate()` uses (the header used to render a
-hardcoded `$0.00`; the comment at the site records why).
+same per-model usage rows `aggregate()` uses.
 
 ### 4.3 Mask, then truncate — both marked, differently
 
@@ -363,6 +362,11 @@ was wrong before, for the curious.
 - **Session expander fields shipped but unrendered.** The per-session fields
   §6.1's expander now renders (classification `basis` + confidence, the
   token split, flags) once travelled on the wire and rendered nowhere.
+- **Transcript header once showed a hardcoded `$0.00`.** `readSession`'s
+  assembled `meta` left `cost` undefined, and `fmtUsd(undefined)` renders the
+  truthy string `"$0.00"` — a fixed-looking zero on a panel whose whole
+  subject is cost. `meta.cost` is now priced via `sessionCost()` from the
+  same per-model usage rows `aggregate()` uses (`usage-index.mjs:1538-1542`).
 - **Aggregate-side incidents** (the v4/v5 cache bumps, the Codex parsing
   defects) are recorded in `USAGE-SCORECARD-METRICS.md` Appendix A.
 

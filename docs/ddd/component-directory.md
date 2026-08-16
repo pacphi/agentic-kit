@@ -108,7 +108,7 @@ lintable where mechanical):
 ### Iconography
 
 Official marks are used only where the dashboard already ships them as official — the three
-host SVGs Observability renders on session rows — and are reused byte-identically so a
+built-in host SVGs Observability renders on session rows — and are reused byte-identically so a
 component looks the same everywhere. Every other component gets a **monogram tile**: its
 initial(s) on a rounded tile in its category hue. A monogram is an honest "no official mark"
 statement, not a stand-in logo; if an upstream later publishes a usable mark, swapping it in is
@@ -161,8 +161,12 @@ takes the worst of the pair, so the quieter one's health cannot hide behind the 
    no endpoint, and a failed status join degrades chips to `unknown` without hiding cards.
 3. **Prose never claims runtime state.** Installed/version/configured render exclusively as
    chips fed by detection; the paragraph reads true on any machine.
-4. **Registry↔directory parity is a test.** Every managed tool has exactly one entry; no entry
-   exists for something ak neither installs nor configures.
+4. **Registry↔directory parity is a test, scoped to built-in adapters.** Every managed tool
+   shipped in the built-in registry has exactly one entry; no entry exists for something ak
+   neither installs nor configures. There is no dynamic or third-party host concept yet, so
+   today "built-in" and "the registry" are the same set; an externally-admitted adapter is
+   exempt from this parity gate until the wave-4 adapter-extension contract graduates it to a
+   card-carrying citizen.
 5. **Links are `https`, named-host, user-initiated**; the kit fetches none of them; all are
    covered by the nightly external link sweep.
 6. **Official marks only where genuinely official and already shipped**; everything else is an

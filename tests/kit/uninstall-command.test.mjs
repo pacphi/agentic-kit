@@ -288,6 +288,51 @@ test('default uninstall strips ak opencode wiring + artifacts and restores user 
   assert.equal(cfg.integrations.ownership.opencode.mcp, null, 'ownership markers nulled (kit.json kept without --purge)');
 });
 
+test('a quiet-success undo still persists the nulled ownership markers (save is not gated on file changes)', async () => {
+  // The stale-marker case the save-gate bug stranded forever: ownership says
+  // mcp:'ak' but the tracked entries are ALREADY absent from opencode.json and
+  // no ak artifacts exist on disk — undo rewrites nothing (changed:false,
+  // ok:true) yet nulls cfg's markers in memory. Those nulls must reach
+  // kit.json anyway, exactly as x/host.mjs's off()/pick() persist them.
+  seedHome();
+  const cfgDir = ocHome();
+  fs.mkdirSync(cfgDir, { recursive: true });
+  fs.writeFileSync(path.join(cfgDir, 'opencode.json'), JSON.stringify({
+    model: 'opencode/kimi-k3',
+    mcp: { 'my-server': { type: 'local', command: ['x'] } },
+    permission: { edit: 'ask' },
+  }, null, 2));
+  writeKitConfig(HOME, {
+    aqe: true,
+    integrations: {
+      version: 2,
+      hosts: { claude: true, codex: false, opencode: true },
+      bindings: [],
+      ownership: {
+        opencode: {
+          mcp: 'ak',
+          managed: {
+            mcp: { 'claude-flow': { prior: null, written: { type: 'local', command: ['ruflo', 'mcp', 'start'], enabled: true } } },
+            paths: [],
+            permissions: { 'claude-flow_*': { prior: null, written: 'allow' } },
+            permissionScalar: null,
+            artifacts: { plugin: hash('never-on-disk'), agents: {}, agentStamp: null, skill: hash('never-on-disk') },
+          },
+        },
+      },
+    },
+    routing: { version: 1, primaryHost: 'claude', routes: {} },
+    providers: {},
+  });
+  const { result } = await captureLog(() => uninstall.run({ flags: { yes: true } }));
+  assert.equal(result, 0);
+  const cfg = JSON.parse(fs.readFileSync(paths.kitConfigPath(), 'utf8'));
+  assert.equal(cfg.integrations.ownership.opencode.mcp, null,
+    'stale mcp:ak marker is nulled in kit.json even when undo rewrote no file');
+  const doc = JSON.parse(fs.readFileSync(path.join(cfgDir, 'opencode.json'), 'utf8'));
+  assert.deepEqual(doc.mcp, { 'my-server': { type: 'local', command: ['x'] } }, 'user config untouched');
+});
+
 test('repeated uninstall is harmless for the opencode footprint', async () => {
   seedHome();
   seedManagedOpencode();

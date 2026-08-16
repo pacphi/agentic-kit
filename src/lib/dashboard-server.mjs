@@ -687,7 +687,13 @@ export function startDashboard({
   const usageApi = usage || lazyUsage();
   // Injectable like `usage`: tests must never spawn a real codex or read the
   // real ~/.config through this route. Lazy for the same reason lazyUsage is.
-  const provideLimits = limits || (async () => (await import('./quota.mjs')).readLimits());
+  // enabledHosts drives quota.mjs's F-10 labeling (any OTHER enabled host with
+  // no sanctioned quota channel) from the same kit.json read used elsewhere in
+  // this file (see loadKitConfig() below) — never a second, ad hoc source.
+  const provideLimits = limits || (async () => {
+    const { readLimits } = await import('./quota.mjs');
+    return readLimits({ enabledHosts: loadKitConfig().integrations.hosts });
+  });
   const provideLive = typeof live === 'function' ? live : live ? async () => live : lazyLive(liveOptions);
   // Same injection contract as `live`: a function is called to produce the
   // collector, a value is reused verbatim (tests hand over a fake so the route

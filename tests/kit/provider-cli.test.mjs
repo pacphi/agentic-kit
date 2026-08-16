@@ -13,6 +13,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { DUAL_ROLE_TIP, JUDGE_BIAS_TIP } from '../../src/lib/providers.mjs';
+import { defaultHostMap } from '../../src/lib/adapters/index.mjs';
 
 // Tripwire (#137): a spawned `ak x host pick` whose cwd falls back to the test
 // process's cwd writes PROJECT-scoped config (.claude/settings.local.json,
@@ -239,7 +240,7 @@ test('pick --host claude,opencode enables + wires opencode (config, plugin, agen
       'enablement-gated guidance converges on enable — "wired + guided" is one contract');
 
     const cfg = kitJson(sb.home);
-    assert.deepEqual(cfg.integrations.hosts, { claude: true, codex: false, opencode: true });
+    assert.deepEqual(cfg.integrations.hosts, { ...defaultHostMap(), opencode: true });
     assert.equal(cfg.integrations.ownership.opencode.mcp, 'ak', 'ownership marker persisted');
     assert.ok(cfg.integrations.ownership.opencode.managed?.mcp?.['claude-flow']?.written, 'value-precise ownership recorded');
   } finally {
@@ -276,7 +277,7 @@ test('pick --host claude on an opencode-enabled machine disables it: ak wiring s
       'ak plugin removed');
 
     const cfg = kitJson(sb.home);
-    assert.deepEqual(cfg.integrations.hosts, { claude: true, codex: false, opencode: false });
+    assert.deepEqual(cfg.integrations.hosts, defaultHostMap());
     assert.equal(cfg.integrations.ownership.opencode.mcp, null, 'ownership markers nulled on disable');
     assert.equal(cfg.integrations.ownership.opencode.managed, null);
   } finally {

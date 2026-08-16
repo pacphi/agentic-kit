@@ -7,6 +7,7 @@ import {
 } from '../../src/lib/adapters/config.mjs';
 import { migrateConfig } from '../../src/lib/adapters/migration.mjs';
 import { migrateKitConfig } from '../../src/lib/config.mjs';
+import { defaultHostMap } from '../../src/lib/adapters/index.mjs';
 
 const legacyDual = {
   providers: {
@@ -171,7 +172,11 @@ test('active legacy hosts win once over a stale additive integration snapshot', 
     providers: { hosts: { claude: false, codex: true, opencode: true } },
     integrations: {
       version: 1,
-      hosts: { claude: true, codex: false, opencode: false },
+      // The stale snapshot is deliberately the fresh-install defaults, contrasted with the
+      // active providers.hosts above (its exact inverse) — the point is precedence, not
+      // this literal shape, so derive it rather than hand-typing a value that would silently
+      // stop being "a plausible stale default" if the registry's defaults ever changed.
+      hosts: defaultHostMap(),
       bindings: [],
     },
   });

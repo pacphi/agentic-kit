@@ -1,0 +1,698 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Adapter Contract Dossier</title>
+<style>
+  :root {
+    --bg: #faf7f4;
+    --surface: #f1ebe5;
+    --ink: #2b2420;
+    --muted: #6d6156;
+    --line: #ddd2c7;
+    --accent: #9a4e2e;
+    --accent-ink: #7c3d21;
+    --mono-bg: #ece4db;
+    --adopt: #2e6b46;
+    --adapt: #8a6d1f;
+    --avoid: #a03c34;
+    --chipbg-adopt: #e2efe7;
+    --chipbg-adapt: #f3ecd6;
+    --chipbg-avoid: #f6e3e0;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #201a16;
+      --surface: #2a221d;
+      --ink: #e8e0d8;
+      --muted: #a99c8f;
+      --line: #423731;
+      --accent: #d98a63;
+      --accent-ink: #e5a381;
+      --mono-bg: #322922;
+      --adopt: #7fc39a;
+      --adapt: #d3b45e;
+      --avoid: #e08a80;
+      --chipbg-adopt: #23372c;
+      --chipbg-adapt: #3a3221;
+      --chipbg-avoid: #3f2724;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #201a16;
+    --surface: #2a221d;
+    --ink: #e8e0d8;
+    --muted: #a99c8f;
+    --line: #423731;
+    --accent: #d98a63;
+    --accent-ink: #e5a381;
+    --mono-bg: #322922;
+    --adopt: #7fc39a;
+    --adapt: #d3b45e;
+    --avoid: #e08a80;
+    --chipbg-adopt: #23372c;
+    --chipbg-adapt: #3a3221;
+    --chipbg-avoid: #3f2724;
+  }
+  * { box-sizing: border-box; }
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font: 16px/1.65 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    margin: 0;
+    padding: 0 1.25rem 5rem;
+  }
+  main { max-width: 76ch; margin: 0 auto; }
+  h1, h2, h3 {
+    font-family: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+    line-height: 1.25;
+    text-wrap: balance;
+  }
+  h1 { font-size: 2.1rem; margin: 2.5rem 0 0.4rem; }
+  h2 {
+    font-size: 1.45rem; margin: 3rem 0 0.8rem;
+    padding-top: 1.2rem; border-top: 1px solid var(--line);
+  }
+  h3 { font-size: 1.12rem; margin: 1.8rem 0 0.5rem; }
+  p { margin: 0.7rem 0; }
+  .lede { font-size: 1.08rem; color: var(--muted); max-width: 66ch; }
+  .meta { color: var(--muted); font-size: 0.85rem; letter-spacing: 0.02em; }
+  .eyebrow {
+    text-transform: uppercase; letter-spacing: 0.14em; font-size: 0.72rem;
+    color: var(--accent); font-weight: 600; margin-top: 3.2rem;
+  }
+  code, .mono {
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    font-size: 0.86em;
+    background: var(--mono-bg);
+    padding: 0.08em 0.35em;
+    border-radius: 3px;
+  }
+  .cite {
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    font-size: 0.76rem; color: var(--muted); background: none; padding: 0;
+  }
+  a { color: var(--accent-ink); }
+  table {
+    border-collapse: collapse; width: 100%; font-size: 0.9rem; margin: 1rem 0;
+  }
+  .tablewrap { overflow-x: auto; }
+  th, td {
+    text-align: left; padding: 0.5rem 0.7rem; vertical-align: top;
+    border-bottom: 1px solid var(--line);
+  }
+  th {
+    font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.08em;
+    color: var(--muted); font-weight: 600;
+  }
+  .chip {
+    display: inline-block; font-size: 0.7rem; font-weight: 700;
+    text-transform: uppercase; letter-spacing: 0.06em;
+    padding: 0.12em 0.55em; border-radius: 999px; white-space: nowrap;
+  }
+  .chip.adopt { color: var(--adopt); background: var(--chipbg-adopt); }
+  .chip.adapt { color: var(--adapt); background: var(--chipbg-adapt); }
+  .chip.avoid { color: var(--avoid); background: var(--chipbg-avoid); }
+  .panel {
+    background: var(--surface); border: 1px solid var(--line);
+    border-left: 3px solid var(--accent);
+    border-radius: 6px; padding: 1rem 1.2rem; margin: 1.4rem 0;
+  }
+  .panel h3 { margin-top: 0.2rem; }
+  ul, ol { padding-left: 1.3rem; }
+  li { margin: 0.35rem 0; }
+  .verdict {
+    display: grid; grid-template-columns: auto 1fr; gap: 0.4rem 1rem;
+    font-size: 0.95rem; margin: 1rem 0;
+  }
+  .verdict dt { font-weight: 700; white-space: nowrap; }
+  .verdict dd { margin: 0; }
+  nav.toc {
+    background: var(--surface); border: 1px solid var(--line); border-radius: 6px;
+    padding: 0.9rem 1.2rem; margin: 1.6rem 0; font-size: 0.92rem;
+  }
+  nav.toc a { text-decoration: none; }
+  nav.toc li { margin: 0.2rem 0; }
+  .qgrid { display: grid; gap: 0.9rem; margin: 1rem 0; }
+  .q {
+    border: 1px solid var(--line); border-radius: 6px; padding: 0.8rem 1rem;
+    background: var(--surface);
+  }
+  .q .qtag {
+    font-size: 0.7rem; font-weight: 700; letter-spacing: 0.08em;
+    text-transform: uppercase; color: var(--muted);
+  }
+  .q .state-open { color: var(--adapt); }
+  .q .state-closed { color: var(--adopt); }
+</style>
+</head>
+<body>
+<main>
+<div style="max-width:76ch;margin:1.4rem auto 0;padding:.55rem .95rem;background:var(--surface);border:1px solid var(--line);border-left:3px solid var(--accent);border-radius:8px;font-size:.82rem;line-height:1.5;color:var(--muted)">📎 <strong style="color:var(--accent)">Origin.</strong> Authored as a Claude artifact; this file is the repository’s local snapshot for review. Live version: <a href="https://claude.ai/code/artifact/d611cd1c-03a4-4c4b-9b9c-94d129b7ee0d" style="color:var(--accent)">https://claude.ai/code/artifact/d611cd1c-03a4-4c4b-9b9c-94d129b7ee0d</a></div>
+
+<p class="eyebrow">agentic-kit · phase 2 design input · grounded 2026-08-14/15</p>
+<h1>Adapter Contract Dossier</h1>
+<p class="lede">What four source-grounded research sweeps — ruflo's plugin history, the three
+hosts' extension models, Hermes at HEAD, and agentic-qe's parity constraints — teach us about
+building agentic-kit's host-adapter extension point without sacrificing quality, symmetry, or
+maintainability. Ends in one finalized mechanism recommendation and the decisions still open.</p>
+<p class="meta">Prepared 2026-08-15 · companion to the Host &amp; Provider Consistency master
+document · every claim below carries a citation from a live sweep of upstream source</p>
+
+<nav class="toc">
+  <strong>Contents</strong>
+  <ol>
+    <li><a href="#correction">The manifesto correction</a></li>
+    <li><a href="#evidence">Evidence base</a></li>
+    <li><a href="#lessons">Five load-bearing lessons</a></li>
+    <li><a href="#constraints">Hard constraints the design inherits</a></li>
+    <li><a href="#anatomy">Interfaces &amp; anatomy — as-is and to-be</a></li>
+    <li><a href="#mechanism">The recommended mechanism (Q2, finalized)</a></li>
+    <li><a href="#contract">Contract sketch</a></li>
+    <li><a href="#waves">Impact on the Phase 2 plan</a></li>
+    <li><a href="#decisions">Decision board</a></li>
+    <li><a href="#sources">Sources</a></li>
+  </ol>
+</nav>
+
+<h2 id="correction">1 · The manifesto correction</h2>
+<p><strong>"Everything is a plugin" is not ruflo's manifesto.</strong> The phrase is the title of
+a blog post for a different rUv product — <em>cognitum-open-design</em> v0.8.0
+(<span class="cite">apps/landing-page/…/open-design-0-8-0-everything-is-a-plugin.md</span>).
+Training data conflates the two because both are rUv projects with plugin systems; treat any
+unsourced claim of a ruflo "everything is a plugin" manifesto as false.</p>
+<p>Ruflo's actual founding document is
+<span class="cite">v3/implementation/adrs/ADR-004-PLUGIN-ARCHITECTURE.md</span> (Implemented,
+2026-01): <em>"We will adopt a microkernel architecture with plugins for optional features."</em>
+Core stays small (agent lifecycle, task execution, memory, coordination, MCP server); everything
+else is an optional plugin. Notably, one of its own success metrics was still unchecked at ship
+time: <code>[ ] Community plugin contributed</code>. That gap — a designed-for ecosystem that
+did not materialize on the designed timeline — frames every lesson below.</p>
+
+<h2 id="evidence">2 · Evidence base</h2>
+<div class="tablewrap"><table>
+  <tr><th>Sweep</th><th>Grounded against</th><th>Headline</th></tr>
+  <tr><td>ruflo</td><td><span class="cite">ruvnet/ruflo@45e65b5</span> (HEAD 3.38.11; local CLI 3.38.8)</td>
+    <td>Two plugin layers: the Claude Code plugin catalog (38 plugins, real and disciplined) and
+    the internal <code>IPlugin</code> runtime framework (well-designed; trust layer honestly
+    self-documented as demo/stub).</td></tr>
+  <tr><td>hosts</td><td>Claude Code docs (2026-08-14) · Codex <span class="cite">rust-v0.147.0</span> · OpenCode v1.18.18</td>
+    <td>Manifest-first everywhere mature; Codex's plugin system has <em>shipped</em> and converged
+    with Claude Code's hook taxonomy; nobody sandboxes or signs anything; every lifecycle has
+    real atomicity bugs.</td></tr>
+  <tr><td>hermes</td><td><span class="cite">NousResearch/hermes-agent@cb47f59</span> (245 commits past v0.20.1)</td>
+    <td>Every load-bearing adapter fact holds unchanged. New: a native ACP server (third driving
+    surface), a <code>--tui</code> statusline, three-tier hooks with consent allowlists. PyPI is
+    stale; the npm bridge now ships three bins.</td></tr>
+  <tr><td>agentic-qe</td><td>agentic-qe 3.13.10 (local = latest published)</td>
+    <td>Provider set closed at every layer; its real plugin system reaches QE domains only; the
+    <code>vendorOf</code> mirror is in sync; quality-gate anchors are a content-authoring task,
+    not a flag.</td></tr>
+</table></div>
+
+<h2 id="lessons">3 · Five load-bearing lessons</h2>
+
+<h3>3.1 Manifests ship; trust layers stall</h3>
+<p>Across every system surveyed, the parts that work are declarative data: Claude Code's
+<code>plugin.json</code>, Codex's semver-required <code>plugin.json</code>, aqe's
+<code>QEPluginManifest</code> with its fail-closed install gate, ruflo's flat
+<code>marketplace.json</code>. The parts that stalled are the code-trust layers: ruflo's typed
+<code>PluginPermissions</code> shipped as types with <em>zero runtime enforcement</em>
+(verified: no "permission"/"capability"/"sandbox" occurrence in either shipped registry file);
+its Ed25519-signed IPFS marketplace fell back to a hardcoded demo list every time by its own
+ADR's admission; no host sandboxes extension code; no host signs anything.
+<strong>Design consequence:</strong> make the adapter a data artifact validated by the same
+validators built-ins use, and never rely on honor-system runtime capability checks.</p>
+
+<h3>3.2 The design→ship gap is the #1 failure mode — counter it with graded ADRs</h3>
+<p>Ruflo's best practice is the antidote to its own failure: ADR-015-v2 carries a dated
+self-graded table (<em>Working / Demo / TBD</em> per feature). The reliable predictor of "is
+this mechanism real" across the whole sweep was whether the ADR carried that table with test
+counts. Ruflo also produced two near-identical, never-reconciled security ADRs from separate
+agent runs (ADR-145 / ADR-337) — a governance failure to design against.
+<strong>Design consequence:</strong> agentic-kit's extension ADRs ship with a graded table and
+are not marked Accepted until the table is backed by dated evidence; each published contract
+gets its own ADR pinned to an ak version, with a CI check that fails when the pin goes stale
+(ruflo's per-plugin contract ADRs drifted ~32 minor versions unnoticed).</p>
+
+<h3>3.3 Fail-closed admission is the differentiator; per-adapter isolation is table stakes</h3>
+<p>Hosts degrade by default — and their open bugs show even that contract breaking (a removed
+Codex plugin's <code>Stop</code> hook keeps firing until restart
+<span class="cite">openai/codex#38339</span>; an OpenCode plugin segfault left installs
+permanently unusable <span class="cite">anomalyco/opencode#26890</span>; a Claude Code
+marketplace update reports success while doing nothing
+<span class="cite">anthropics/claude-code#46594</span>). Ruflo's admission is warn-only even
+for unsigned plugins. Nobody in this space is fail-closed at the door — agentic-kit already is
+(ADR-0023), and should stay so: an invalid adapter is refused by name, never warned past.
+Equally: one bad adapter must never brick ak — which is precisely the F-01 import-time-throw
+blocker, now with ecosystem-wide evidence behind the fix.</p>
+
+<h3>3.4 Hash-pinned consent is the strongest achievable integrity primitive</h3>
+<p>Codex hash-pins each trusted hook and <em>invalidates trust automatically on any edit</em> —
+the strongest integrity mechanism found anywhere, and cheap. Hermes independently converged on
+per-<code>(event, command)</code> consent allowlists for its shell hooks. Signing exists nowhere.
+<strong>Design consequence:</strong> record a content hash of the adapter manifest (and each
+declared hook command) at trust time; a changed manifest re-prompts. This composes with ak's
+existing trust-manifest machinery and with aqe's <code>contentHash</code>-frozen anchor
+precedent. Do not require signatures the ecosystem cannot produce.</p>
+
+<h3>3.5 Conformance means black-box subprocess tests against the installed layout</h3>
+<p>Ruflo's hook regression (flags that didn't exist; <code>--success true</code> silently
+recording the string <code>"true"</code> as a path — <span class="cite">ADR-102</span>) was
+caught only by a harness that drives the <em>real CLI binary</em> with synthetic stdin and
+asserts <em>negative</em> cases. Its counter-example: a plugin smoke test hardcoding a
+monorepo-sibling path fails for every real installed user
+(<span class="cite">ruvnet/ruflo#2912</span>).
+<strong>Design consequence:</strong> the conformance kit spawns real processes, asserts negative
+cases, runs against an installed topology (not the repo checkout), and returns a numeric
+pass/fail — the contract's graduation evidence.</p>
+
+<h2 id="constraints">4 · Hard constraints the design inherits</h2>
+<ul>
+  <li><strong>AQE's provider set is closed at every layer</strong> — 11 declared types, 10
+  constructible (<code>onnx</code> is declared-but-unconstructible); its real plugin system
+  (<code>aqe plugin install</code>) reaches QE domains only. No adapter may ever project into
+  any AQE surface. Phase 1's asymmetry decision already encodes this.</li>
+  <li><strong>Two AQE "host" surfaces exist and must not be conflated</strong>: LLM-execution
+  binding (spawns <code>claude</code>/<code>codex</code>; closed) vs. platform/MCP installers
+  (8 hardcoded; closed). ak's extension point extends neither — it extends ak's own host axis.</li>
+  <li><strong>Driving surfaces are plural now.</strong> Hermes ships a native ACP
+  (Agent Client Protocol) server alongside CLI oneshot — the contract must express <em>how</em>
+  a host is driven (cli-subprocess, ACP, MCP) as declared capability data, not assume
+  subprocess.</li>
+  <li><strong>Detection can trust nothing indirect</strong>: Hermes's PyPI is two releases
+  stale while the unofficial npm bridge tracks releases within an hour and now ships three bins;
+  Claude Code plugin identity falls back through version→SHA→digest→unknown. Detect binaries and
+  verify independently; never infer identity or currency from a package registry.</li>
+  <li><strong>Statusline claims must be scoped</strong>: Hermes's statusline exists only in its
+  new <code>--tui</code> mode; Codex has no <code>tui.status_line</code> free-text key at all.
+  The capability vocabulary already handles this (<code>commandStatusline</code>) — keep claims
+  mode-scoped and truthful.</li>
+  <li><strong>The <code>vendorOf</code> mirror tracks upstream referee.ts</strong> — in sync at
+  aqe 3.13.10 with one documented fail-closed divergence; any upstream prefix-table change needs
+  a mirror update (no version gate exists beyond presence).</li>
+  <li><strong>Ruflo cannot drive Hermes.</strong> Its repo description names "Hermes" as
+  integrated, but source shows only technique adoptions <em>from</em> hermes-agent
+  (prompt-caching pattern, reasoning-tag scrubbing, tool-loop breaker —
+  <span class="cite">v3/@claude-flow/cli/__tests__/hermes-tier1.test.ts</span>); no Hermes
+  execution backend exists. Hermes reaches ak only through ak's own adapter seam.</li>
+</ul>
+
+<h2 id="anatomy">5 · Interfaces &amp; anatomy — as-is and to-be</h2>
+
+<h3>5.1 The interfaces ak actually has</h3>
+<p>Signatures below are read from source on this branch, not recalled. Everything in this table
+is host-neutral, validated, and test-enforced — this is the spine the extension point builds on.</p>
+<div class="tablewrap"><table>
+  <tr><th>Axis</th><th>Interface</th><th>Where</th></tr>
+  <tr><td>Registries</td>
+    <td><code>HOST_REGISTRY</code> · <code>PROVIDER_REGISTRY</code> · <code>PROJECTION_REGISTRY</code> ·
+    <code>OBSERVABILITY_REGISTRY</code> — immutable, cross-axis-validated <em>at construction</em>
+    (<code>validateRegistries</code> throws at load); capability queries
+    <code>hostIds(pred)</code>, <code>primaryHostIds()</code>, <code>routableHostIds()</code>,
+    <code>managedHostIds()</code>, <code>hostsWithCapability()</code>, <code>defaultHostMap()</code></td>
+    <td class="cite">adapters/registries.mjs</td></tr>
+  <tr><td>Bindings</td>
+    <td><code>assertValidBinding</code> (throwing) · <code>validateBinding</code> (error list —
+    wired to <code>ak host status</code> warnings) · <code>resolveBinding</code> ·
+    <code>validateEndpoint</code> (loopback-http / remote-https / secret-param rules)</td>
+    <td class="cite">adapters/bindings.mjs · adapters/config.mjs</td></tr>
+  <tr><td>Lifecycle</td>
+    <td><code>LIFECYCLE_OPERATIONS = [detect, plan, apply, verify, undo]</code> ·
+    <code>validateLifecycleAdapter</code> · <code>runLifecycle</code> (dry-run gate on apply) ·
+    <code>ownership()/mayUndo()</code> teardown-safety receipts</td>
+    <td class="cite">adapters/lifecycle.mjs · adapters/ownership.mjs</td></tr>
+  <tr><td>Execution</td>
+    <td><code>validateExecutionAdapter</code> — 8 required methods
+    <code>[readiness, prepare, launch, observe, interpret, summarize, cancel, cleanup]</code> ·
+    <code>validateWorkerResult</code> · <code>EXIT_CATEGORIES</code> incl.
+    <code>cli_unavailable</code> graceful degradation ·
+    <code>createSubprocessExecutionAdapter</code> ·
+    <code>createJsonlSummaryCapture</code> / <code>createPlainTextSummaryCapture</code></td>
+    <td class="cite">execution/schema.mjs · execution/subprocess.mjs</td></tr>
+  <tr><td>Facts</td>
+    <td><code>normalizedFacts</code> (<code>schemaVersion: 1</code>, provenance-bearing) ·
+    <code>provenance()/mergeProvenance()</code> · <code>mergeFacts</code> ·
+    <code>normalizeIntegrationFacts</code></td>
+    <td class="cite">adapters/facts.mjs</td></tr>
+  <tr><td>Trust</td>
+    <td>Per-host <code>trust.changes</code> declarations (kinds: auto-approve, mcp-registration,
+    lifecycle-extension, host-integration; scoped, operation-gated) — disclosed before first
+    mutation; synthetic-host injection already test-proven end-to-end</td>
+    <td class="cite">adapters/registries.mjs · tests/kit/trust-manifest.test.mjs</td></tr>
+  <tr><td>Config</td>
+    <td><code>migrateIntegrationConfig</code> (registry-derived native providers, idempotent,
+    ambiguity-guarded) · versioned <code>integrations</code>/<code>routing</code> envelopes</td>
+    <td class="cite">adapters/config.mjs · lib/config.mjs</td></tr>
+</table></div>
+
+<h3>5.2 The honest verdict: not spaghetti — bimodal</h3>
+<p>Introspection says the codebase is not a hack job; it is a <strong>disciplined core wearing
+an accreted shell</strong>. Every contract above was built host-neutral and is enforced by
+validators and tests — several at module construction, which is stricter than most of the
+ecosystem surveyed. The debt is concentrated and countable: roughly ten dispatch sites where a
+command reaches a host by <em>name</em> instead of by <em>lookup</em> — the five
+<code>OPENCODE_LIFECYCLE_ADAPTER</code> named-import call sites (F-02), the frozen three-entry
+execution map whose invariant throws at import (F-01), status's 88-line opencode block (F-05),
+routing's <code>{claude, codex}</code> literals and binary escalation swap (F-23), guidance's
+closed four-target list (F-17), setup's claude-only permission pass (F-04), uninstall bypassing
+<code>runLifecycle</code> (F-03), the fixed quota record (F-10), the two statusline patchers,
+and the hand-mirrored npm package list (F-18). Phases 0–1 already moved attribution, host
+defaults, the binding migrator, and provider records from the shell to the spine. Phase 2's
+waves 1–2 are precisely the remaining shell-to-spine moves — deletion of hand-wiring, not new
+machinery.</p>
+
+<figure>
+<svg viewBox="0 0 880 330" role="img" style="max-width:100%;height:auto"
+  aria-label="As-is: commands reach the contract core by two paths — a registry-driven spine and a hand-wired shell of named imports and literals">
+  <defs>
+    <marker id="ar1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="currentColor"/>
+    </marker>
+    <marker id="ar1a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" style="fill:var(--accent)"/>
+    </marker>
+  </defs>
+  <g font-size="12" fill="currentColor">
+    <!-- commands -->
+    <rect x="16" y="90" width="150" height="150" rx="6" fill="none" stroke="currentColor"/>
+    <text x="91" y="110" text-anchor="middle" font-weight="700">commands</text>
+    <text x="91" y="132" text-anchor="middle">setup · sync · host</text>
+    <text x="91" y="150" text-anchor="middle">run · status · usage</text>
+    <text x="91" y="168" text-anchor="middle">uninstall · live · about</text>
+    <!-- shell lane -->
+    <rect x="230" y="26" width="380" height="128" rx="6" fill="none" stroke-dasharray="6 4" style="stroke:var(--accent)"/>
+    <text x="420" y="46" text-anchor="middle" font-weight="700" style="fill:var(--accent)">the shell — reach-by-name (the debt)</text>
+    <text x="420" y="67" text-anchor="middle">OPENCODE_LIFECYCLE_ADAPTER named import ×5 · F-02</text>
+    <text x="420" y="85" text-anchor="middle">frozen 3-host execution map, throws at import · F-01</text>
+    <text x="420" y="103" text-anchor="middle">status: 88-line opencode block · F-05 &nbsp;·&nbsp; routing literals · F-23</text>
+    <text x="420" y="121" text-anchor="middle">guidance: 4 literal targets · F-17 &nbsp;·&nbsp; uninstall skips undo · F-03</text>
+    <text x="420" y="139" text-anchor="middle">claude-only permission pass · F-04 &nbsp;·&nbsp; fixed quota record · F-10</text>
+    <!-- spine lane -->
+    <rect x="230" y="178" width="380" height="110" rx="6" fill="none" stroke="currentColor"/>
+    <text x="420" y="198" text-anchor="middle" font-weight="700">the spine — reach-by-lookup (the base)</text>
+    <text x="420" y="219" text-anchor="middle">capability queries · defaultHostMap() · migrator derivation</text>
+    <text x="420" y="237" text-anchor="middle">validators on every load · trust disclosure · facts merge</text>
+    <text x="420" y="255" text-anchor="middle">truthful attribution (usage · live · court) — moved here</text>
+    <text x="420" y="273" text-anchor="middle">by Phases 0–1</text>
+    <!-- core -->
+    <rect x="672" y="66" width="192" height="196" rx="6" fill="none" stroke="currentColor" stroke-width="1.6"/>
+    <text x="768" y="88" text-anchor="middle" font-weight="700">contract core</text>
+    <text x="768" y="110" text-anchor="middle">registries + validators</text>
+    <text x="768" y="128" text-anchor="middle">lifecycle · 5 verbs</text>
+    <text x="768" y="146" text-anchor="middle">execution · 8 methods</text>
+    <text x="768" y="164" text-anchor="middle">facts · schemaVersion 1</text>
+    <text x="768" y="182" text-anchor="middle">bindings + endpoints</text>
+    <text x="768" y="200" text-anchor="middle">trust manifest</text>
+    <text x="768" y="222" text-anchor="middle" font-style="italic">construction-enforced,</text>
+    <text x="768" y="240" text-anchor="middle" font-style="italic">host-neutral, tested</text>
+    <!-- arrows -->
+    <line x1="166" y1="130" x2="226" y2="90" stroke-width="1.4" marker-end="url(#ar1a)" style="stroke:var(--accent)"/>
+    <line x1="166" y1="200" x2="226" y2="230" stroke="currentColor" stroke-width="1.4" marker-end="url(#ar1)"/>
+    <line x1="610" y1="90" x2="668" y2="120" stroke-width="1.4" marker-end="url(#ar1a)" style="stroke:var(--accent)"/>
+    <line x1="610" y1="230" x2="668" y2="200" stroke="currentColor" stroke-width="1.4" marker-end="url(#ar1)"/>
+    <text x="196" y="82" text-anchor="middle" font-size="11" style="fill:var(--accent)">by name</text>
+    <text x="196" y="248" text-anchor="middle" font-size="11">by lookup</text>
+  </g>
+</svg>
+<figcaption><strong>Fig 1 — as-is, conceptual.</strong> Two paths run between commands and the
+same contract core. The spine resolves hosts by registry lookup; the shell reaches specific
+hosts by name — each shell item is a finding, and each is a deletion target, not a rewrite.</figcaption>
+</figure>
+
+<figure>
+<svg viewBox="0 0 880 320" role="img" style="max-width:100%;height:auto"
+  aria-label="As-is sequence for ak sync: config migration flows through the registry spine, but the lifecycle adapter is reached by named import">
+  <defs>
+    <marker id="ar2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="currentColor"/>
+    </marker>
+    <marker id="ar2a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" style="fill:var(--accent)"/>
+    </marker>
+  </defs>
+  <g font-size="12" fill="currentColor">
+    <!-- lifelines -->
+    <text x="70" y="24" text-anchor="middle" font-weight="700">ak sync</text>
+    <text x="255" y="24" text-anchor="middle" font-weight="700">kit.json config</text>
+    <text x="455" y="24" text-anchor="middle" font-weight="700">adapters core</text>
+    <text x="650" y="24" text-anchor="middle" font-weight="700" style="fill:var(--accent)">opencode adapter</text>
+    <text x="650" y="40" text-anchor="middle" font-size="10" style="fill:var(--accent)">(named import — F-02)</text>
+    <text x="820" y="24" text-anchor="middle" font-weight="700">host surfaces</text>
+    <line x1="70" y1="48" x2="70" y2="300" stroke="currentColor" stroke-dasharray="3 4" opacity="0.5"/>
+    <line x1="255" y1="48" x2="255" y2="300" stroke="currentColor" stroke-dasharray="3 4" opacity="0.5"/>
+    <line x1="455" y1="48" x2="455" y2="300" stroke="currentColor" stroke-dasharray="3 4" opacity="0.5"/>
+    <line x1="650" y1="48" x2="650" y2="300" stroke-dasharray="3 4" opacity="0.7" style="stroke:var(--accent)"/>
+    <line x1="820" y1="48" x2="820" y2="300" stroke="currentColor" stroke-dasharray="3 4" opacity="0.5"/>
+    <!-- messages -->
+    <line x1="70" y1="66" x2="251" y2="66" stroke="currentColor" stroke-width="1.3" marker-end="url(#ar2)"/>
+    <text x="160" y="60" text-anchor="middle" font-size="11">loadKitConfig()</text>
+    <line x1="255" y1="94" x2="451" y2="94" stroke="currentColor" stroke-width="1.3" marker-end="url(#ar2)"/>
+    <text x="353" y="88" text-anchor="middle" font-size="11">migrateIntegrationConfig()</text>
+    <line x1="451" y1="120" x2="259" y2="120" stroke="currentColor" stroke-width="1.3" marker-end="url(#ar2)"/>
+    <text x="353" y="114" text-anchor="middle" font-size="11">integrations v2 — registry-derived defaults</text>
+    <line x1="70" y1="158" x2="646" y2="158" stroke-width="1.3" marker-end="url(#ar2a)" style="stroke:var(--accent)"/>
+    <text x="353" y="152" text-anchor="middle" font-size="11" style="fill:var(--accent)">runLifecycle(detect · plan · apply · verify) — reached by name, not lookup</text>
+    <line x1="650" y1="186" x2="816" y2="186" stroke="currentColor" stroke-width="1.3" marker-end="url(#ar2)"/>
+    <text x="733" y="180" text-anchor="middle" font-size="11">probe bins · write configs (backup-first)</text>
+    <line x1="816" y1="212" x2="654" y2="212" stroke="currentColor" stroke-width="1.3" marker-end="url(#ar2)"/>
+    <text x="733" y="206" text-anchor="middle" font-size="11">facts (provenance-graded)</text>
+    <line x1="646" y1="238" x2="74" y2="238" stroke="currentColor" stroke-width="1.3" marker-end="url(#ar2)"/>
+    <text x="353" y="232" text-anchor="middle" font-size="11">lifecycleResult · ownership receipt</text>
+    <rect x="120" y="258" width="640" height="34" rx="5" fill="none" stroke-dasharray="6 4" style="stroke:var(--accent)"/>
+    <text x="440" y="279" text-anchor="middle" font-size="11">the five verbs are host-neutral — but only one host's adapter is reachable, and only by its name</text>
+  </g>
+</svg>
+<figcaption><strong>Fig 2 — as-is, sequence (<code>ak sync</code> wiring pass).</strong> The
+config half already runs on the spine. The lifecycle half runs through the full five-verb
+contract — but the adapter is a named import; the same is true at setup, host pick, and host
+off, while uninstall skips the contract entirely.</figcaption>
+</figure>
+
+<h3>5.3 To-be: one path, one door</h3>
+
+<figure>
+<svg viewBox="0 0 880 350" role="img" style="max-width:100%;height:auto"
+  aria-label="To-be: every command resolves hosts through the registry; external adapters enter only through a fail-closed admission gate; capability caps are enforced by schema shape">
+  <defs>
+    <marker id="ar3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="currentColor"/>
+    </marker>
+    <marker id="ar3a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" style="fill:var(--accent)"/>
+    </marker>
+  </defs>
+  <g font-size="12" fill="currentColor">
+    <!-- adapter package -->
+    <rect x="16" y="40" width="180" height="104" rx="6" fill="none" stroke="currentColor"/>
+    <text x="106" y="62" text-anchor="middle" font-weight="700">adapter package</text>
+    <text x="106" y="84" text-anchor="middle">manifest.json — data only:</text>
+    <text x="106" y="102" text-anchor="middle">registry entry · detection</text>
+    <text x="106" y="120" text-anchor="middle">lifecycle data · hook argv</text>
+    <text x="106" y="138" text-anchor="middle">declared trust changes</text>
+    <!-- admission gate -->
+    <rect x="252" y="26" width="204" height="152" rx="6" fill="none" stroke-width="1.6" style="stroke:var(--accent)"/>
+    <text x="354" y="48" text-anchor="middle" font-weight="700" style="fill:var(--accent)">admission gate — fail closed</text>
+    <text x="354" y="70" text-anchor="middle">same validators as built-ins</text>
+    <text x="354" y="88" text-anchor="middle">caps by schema shape —</text>
+    <text x="354" y="106" text-anchor="middle">canBePrimary inexpressible</text>
+    <text x="354" y="124" text-anchor="middle">hash consent · re-consent on edit</text>
+    <text x="354" y="142" text-anchor="middle">contract: 1 version match</text>
+    <text x="354" y="164" text-anchor="middle" font-style="italic">refused ⇒ named reason,</text>
+    <!-- registry -->
+    <rect x="512" y="52" width="170" height="100" rx="6" fill="none" stroke="currentColor" stroke-width="1.6"/>
+    <text x="597" y="76" text-anchor="middle" font-weight="700">registry</text>
+    <text x="597" y="98" text-anchor="middle">built-ins + admitted</text>
+    <text x="597" y="116" text-anchor="middle">external entries</text>
+    <text x="597" y="134" text-anchor="middle">(experimental flag)</text>
+    <!-- commands -->
+    <rect x="512" y="210" width="170" height="66" rx="6" fill="none" stroke="currentColor"/>
+    <text x="597" y="234" text-anchor="middle" font-weight="700">every command</text>
+    <text x="597" y="254" text-anchor="middle">setup · sync · run · status</text>
+    <text x="597" y="270" text-anchor="middle">uninstall · usage · guidance</text>
+    <!-- core -->
+    <rect x="726" y="52" width="138" height="224" rx="6" fill="none" stroke="currentColor" stroke-width="1.6"/>
+    <text x="795" y="76" text-anchor="middle" font-weight="700">contract core</text>
+    <text x="795" y="98" text-anchor="middle">lifecycle · 5 verbs</text>
+    <text x="795" y="116" text-anchor="middle">execution · 8 methods</text>
+    <text x="795" y="134" text-anchor="middle">facts · provenance</text>
+    <text x="795" y="152" text-anchor="middle">bindings · trust</text>
+    <text x="795" y="174" text-anchor="middle" font-style="italic">unchanged —</text>
+    <text x="795" y="192" text-anchor="middle" font-style="italic">already the spine</text>
+    <!-- refused stub -->
+    <rect x="252" y="216" width="204" height="40" rx="6" fill="none" stroke-dasharray="6 4" style="stroke:var(--accent)"/>
+    <text x="354" y="240" text-anchor="middle" font-size="11">refused — built-ins unaffected</text>
+    <!-- arrows -->
+    <line x1="196" y1="92" x2="248" y2="92" stroke="currentColor" stroke-width="1.4" marker-end="url(#ar3)"/>
+    <text x="222" y="86" text-anchor="middle" font-size="10">admit?</text>
+    <line x1="456" y1="92" x2="508" y2="92" stroke="currentColor" stroke-width="1.4" marker-end="url(#ar3)"/>
+    <text x="482" y="86" text-anchor="middle" font-size="10">merge</text>
+    <line x1="354" y1="178" x2="354" y2="212" stroke-width="1.4" marker-end="url(#ar3a)" style="stroke:var(--accent)"/>
+    <line x1="597" y1="206" x2="597" y2="156" stroke="currentColor" stroke-width="1.4" marker-end="url(#ar3)"/>
+    <text x="643" y="184" text-anchor="middle" font-size="10">one lookup path</text>
+    <line x1="682" y1="102" x2="722" y2="102" stroke="currentColor" stroke-width="1.4" marker-end="url(#ar3)"/>
+    <text x="702" y="96" text-anchor="middle" font-size="10">drives</text>
+  </g>
+</svg>
+<figcaption><strong>Fig 3 — to-be, conceptual.</strong> The shell is gone: every command
+resolves hosts through one registry lookup. External adapters are data admitted through one
+fail-closed door; a refusal names its reason and cannot disturb built-ins. The contract core
+does not change — it was already right.</figcaption>
+</figure>
+
+<figure>
+<svg viewBox="0 0 880 330" role="img" style="max-width:100%;height:auto"
+  aria-label="To-be sequence: admission, registry merge, lifecycle via lookup, supervised subprocess hook, independent verification">
+  <defs>
+    <marker id="ar4" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="currentColor"/>
+    </marker>
+    <marker id="ar4a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" style="fill:var(--accent)"/>
+    </marker>
+  </defs>
+  <g font-size="12" fill="currentColor">
+    <text x="66" y="24" text-anchor="middle" font-weight="700">ak sync</text>
+    <text x="240" y="24" text-anchor="middle" font-weight="700" style="fill:var(--accent)">admission gate</text>
+    <text x="420" y="24" text-anchor="middle" font-weight="700">registry</text>
+    <text x="618" y="24" text-anchor="middle" font-weight="700">adapter hook</text>
+    <text x="618" y="40" text-anchor="middle" font-size="10">(subprocess, supervised)</text>
+    <text x="812" y="24" text-anchor="middle" font-weight="700">host surface</text>
+    <line x1="66" y1="48" x2="66" y2="310" stroke="currentColor" stroke-dasharray="3 4" opacity="0.5"/>
+    <line x1="240" y1="48" x2="240" y2="310" stroke-dasharray="3 4" opacity="0.7" style="stroke:var(--accent)"/>
+    <line x1="420" y1="48" x2="420" y2="310" stroke="currentColor" stroke-dasharray="3 4" opacity="0.5"/>
+    <line x1="618" y1="48" x2="618" y2="310" stroke="currentColor" stroke-dasharray="3 4" opacity="0.5"/>
+    <line x1="812" y1="48" x2="812" y2="310" stroke="currentColor" stroke-dasharray="3 4" opacity="0.5"/>
+    <line x1="66" y1="66" x2="236" y2="66" stroke="currentColor" stroke-width="1.3" marker-end="url(#ar4)"/>
+    <text x="152" y="60" text-anchor="middle" font-size="11">kit.json hostAdapters[]</text>
+    <line x1="240" y1="94" x2="416" y2="94" stroke-width="1.3" marker-end="url(#ar4a)" style="stroke:var(--accent)"/>
+    <text x="328" y="88" text-anchor="middle" font-size="11" style="fill:var(--accent)">validate · caps · hash · contract ⇒ merge (or refuse, named)</text>
+    <line x1="66" y1="130" x2="416" y2="130" stroke="currentColor" stroke-width="1.3" marker-end="url(#ar4)"/>
+    <text x="240" y="124" text-anchor="middle" font-size="11">runLifecycle(host) — registry lookup, any admitted host</text>
+    <line x1="420" y1="158" x2="614" y2="158" stroke="currentColor" stroke-width="1.3" marker-end="url(#ar4)"/>
+    <text x="518" y="152" text-anchor="middle" font-size="11">spawn hook — timeout · captured · consented</text>
+    <line x1="618" y1="186" x2="808" y2="186" stroke="currentColor" stroke-width="1.3" marker-end="url(#ar4)"/>
+    <text x="713" y="180" text-anchor="middle" font-size="11">apply (backup-first)</text>
+    <line x1="808" y1="214" x2="622" y2="214" stroke="currentColor" stroke-width="1.3" marker-end="url(#ar4)"/>
+    <text x="713" y="208" text-anchor="middle" font-size="11">claimed result</text>
+    <line x1="66" y1="252" x2="808" y2="252" stroke="currentColor" stroke-width="1.3" marker-end="url(#ar4)"/>
+    <text x="437" y="246" text-anchor="middle" font-size="11">independent verify — ak reads the surface itself; a host's success claim is never trusted</text>
+    <rect x="120" y="272" width="640" height="30" rx="5" fill="none" stroke="currentColor" stroke-dasharray="6 4" opacity="0.7"/>
+    <text x="440" y="291" text-anchor="middle" font-size="11">uninstall runs the same path with undo — the ownership receipt decides what may be removed</text>
+  </g>
+</svg>
+<figcaption><strong>Fig 4 — to-be, sequence.</strong> Admission happens once, up front, fail
+closed. After that an external host is indistinguishable from a built-in at every call site:
+same five verbs, same supervision, same independent verification, same undo path.</figcaption>
+</figure>
+
+<h2 id="mechanism">6 · The recommended mechanism — Q2, finalized</h2>
+<div class="panel">
+<h3>An adapter is data plus consented subprocess hooks. No third-party code runs inside ak.</h3>
+<p>Every line of evidence points the same way: the manifest-first layers succeed everywhere;
+the in-process-code trust layers failed at ruflo (types without enforcement), don't exist at
+any host (no sandboxing, no signing), and would make ak the only tool in this ecosystem running
+foreign code in-process on an honor-system cap. Hermes's own extension philosophy — "any CLI
+you already have becomes a plugin without writing code" — plus its subprocess shell hooks with
+consent allowlists, is the shape a Hermes-class adapter naturally wants.</p>
+</div>
+<ul>
+  <li><strong>Declarative core:</strong> an adapter package is a versioned manifest — the host
+  registry entry (validated by the same <code>validateHostAdapter</code> built-ins pass), plus
+  declarative detection (bin names, version argv + regex), lifecycle described as data where
+  possible, and declared trust changes.</li>
+  <li><strong>Subprocess hooks for the remainder:</strong> lifecycle verbs that genuinely need
+  logic run as short-lived subprocess commands declared in the manifest — each hash-pinned at
+  consent time, re-consented on change, executed with ak supervising (timeout, captured output,
+  independent verify after).</li>
+  <li><strong>Capability caps are structural, not runtime:</strong> the adapter manifest
+  <em>schema</em> cannot express <code>canBePrimary</code>, <code>aqeProvider</code>, or
+  managed-statusline claims — a cap enforced by shape is stronger than any runtime check, and
+  is precisely where ruflo's honor-system caps failed.</li>
+  <li><strong>Fail-closed admission, isolated failure:</strong> a manifest that fails
+  validation, hash check, or contract version is refused with a message naming adapter and
+  reason; a refused or broken adapter never affects built-ins or other adapters (the F-01 merge
+  seam is the enabling refactor).</li>
+  <li><strong>Independent verification:</strong> ak never trusts an adapter's (or host's)
+  reported success — post-apply verify is part of the lifecycle contract, per the
+  lifecycle-atomicity bugs found in every host.</li>
+</ul>
+
+<h2 id="contract">7 · Contract sketch</h2>
+<div class="tablewrap"><table>
+  <tr><th>Element</th><th>Shape</th><th>Precedent</th></tr>
+  <tr><td>Registration</td><td>kit.json <code>hostAdapters: [{name, source, contract: 1}]</code> — explicit, never scanned</td>
+    <td>ruflo <code>PluginRegistry.register()</code>; Claude Code <code>--plugin-dir</code></td></tr>
+  <tr><td>Manifest</td><td>One JSON document: registry entry + detection + lifecycle descriptors + declared trust changes + hook commands; semver'd; content-hashed</td>
+    <td>Codex <code>plugin.json</code> (semver required); aqe <code>QEPluginManifest</code></td></tr>
+  <tr><td>Admission</td><td>Validate → cap-check (schema-structural) → hash-verify → contract-version match → per-adapter admit/refuse with named reason</td>
+    <td>aqe <code>checkPluginSecurity()</code> fail-closed install; ADR-0023</td></tr>
+  <tr><td>Trust</td><td><code>third-party-adapter</code> trust-manifest kind; hash-pinned hooks, edit re-consent; disclosure before first mutation</td>
+    <td>Codex hook hash-pinning; Hermes consent allowlist; ADR-0021/0023</td></tr>
+  <tr><td>Lifecycle</td><td>Five verbs (detect/plan/apply/verify/undo) — declarative where possible, supervised subprocess hooks where not; uninstall routed through undo (F-03)</td>
+    <td>ak's own <code>validateLifecycleAdapter</code>; OpenCode's low-trust/high-trust tier split</td></tr>
+  <tr><td>Conformance</td><td>Fixture adapter in <code>tests/</code> + black-box harness: real spawns, installed layout, negative assertions, numeric pass/fail; graduation gate for freezing <code>contract: 1</code></td>
+    <td>ruflo ADR-102 harness + smoke-as-contract (and its #2912 counter-example)</td></tr>
+  <tr><td>ADR discipline</td><td>One contract ADR per published seam, pinned to an ak version with CI staleness check; graded Working/Demo/TBD table; Accepted only with dated evidence</td>
+    <td>ruflo per-plugin contract ADRs + ADR-015-v2's self-grading table</td></tr>
+</table></div>
+
+<h2 id="waves">8 · Impact on the Phase 2 plan</h2>
+<ul>
+  <li><strong>Waves 1–3 unchanged</strong> (in-tree generalization, F-05 status hot zone, test
+  derivations) — every mechanism finding lands in wave 4's shape, not the refactors.</li>
+  <li><strong>Wave 4 is now concrete:</strong> manifest schema + admission gate + hash-consent
+  + supervised hook runner + fixture adapter + conformance harness. No module loader for foreign
+  code — which shrinks the security surface the loader review must defend.</li>
+  <li><strong>New wave-4 item:</strong> driving-surface vocabulary — capability data expressing
+  cli-subprocess / ACP / MCP driving, so the contract doesn't fossilize the subprocess
+  assumption (Hermes ACP evidence).</li>
+  <li><strong>Phase 3 note:</strong> a truthful Hermes adapter today could declare
+  session-driving (oneshot or ACP), transcripts, scoped usage (<code>--usage-file</code>),
+  bidirectional MCP config, and tui-scoped statusline — with <code>nativeGuidance</code>
+  pending a definition check against Hermes vocabulary (AGENTS.md/SOUL.md injection exists;
+  a literal guidance artifact does not).</li>
+</ul>
+
+<h2 id="decisions">9 · Decision board</h2>
+<div class="qgrid">
+  <div class="q"><span class="qtag state-closed">Settled</span>
+    <p><strong>Ownership.</strong> agentic-kit authors and owns the design, ADRs, tests, and
+    implementation. PR #131 is credited as the originating proposal; the maintainer comments on
+    it once the Phase 2/3 approach is settled.</p></div>
+  <div class="q"><span class="qtag state-closed">Settled — this dossier</span>
+    <p><strong>Q2 · Mechanism.</strong> Declarative manifest + consented subprocess hooks; no
+    in-process third-party code; structural capability caps; hash-pinned trust; fail-closed
+    admission with per-adapter isolation.</p></div>
+  <div class="q"><span class="qtag state-open">Open — recommendation stands</span>
+    <p><strong>Q1 · Posture.</strong> Staged: in-tree generalization at GA; loader + contract
+    behind an experimental flag with written graduation criteria (recommended) — vs. fully
+    published day one, vs. in-tree only.</p></div>
+  <div class="q"><span class="qtag state-open">Open — recommendation stands</span>
+    <p><strong>Q3 · Tier vocabulary.</strong> Capability-derived phrases in status/about/help
+    (recommended) — vs. tier nouns, vs. role nouns.</p></div>
+  <div class="q"><span class="qtag state-open">Open — recommendation stands</span>
+    <p><strong>Q4 · Hermes adapter ownership.</strong> Fixture-only through Phase 2; revisit an
+    ak-org reference adapter once the contract freezes (recommended) — vs. ak-org adapter now,
+    vs. in-tree host code (rejected).</p></div>
+  <div class="q"><span class="qtag state-open">Open — recommendation stands</span>
+    <p><strong>Q5 · Docs restructure depth.</strong> Targeted Phase 3 sweep of known offenders
+    with appendices, standing current-state-only rule preventing new violations (recommended) —
+    vs. full-corpus audit, vs. separate phase.</p></div>
+</div>
+
+<h2 id="sources">10 · Sources</h2>
+<p class="meta">Each sweep's full citation set lives in its research report; the load-bearing
+references:</p>
+<ul class="meta">
+  <li>ruflo: <span class="cite">v3/implementation/adrs/ADR-004, ADR-015-v2 · v3/docs/adr/ADR-102, ADR-145/337 · v3/@claude-flow/plugins/src/** · plugins/ruflo-*/docs/adrs/0001-* · issues #1859/#1862/#2870/#2912/#2971/#2254</span> @ 45e65b5</li>
+  <li>hosts: <span class="cite">code.claude.com/docs (plugins, skills, hooks, mcp, settings) · learn.chatgpt.com/docs + developers.openai.com/codex/plugins @ rust-v0.147.0 · opencode.ai/docs @ v1.18.18 · issues cited inline</span></li>
+  <li>hermes: <span class="cite">hermes_cli/{oneshot,mcp_config,runtime_provider,_parser,config_migrations}.py · acp_adapter/ · ui-tui/ · agent/shell_hooks.py</span> @ cb47f59</li>
+  <li>agentic-qe: <span class="cite">shared/llm/router/* · plugins/manifest.d.ts · skills/qe-court/referee.js · validation/anchor-set.js</span> @ 3.13.10</li>
+</ul>
+
+</main>
+
+</body>
+</html>

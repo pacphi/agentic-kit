@@ -46,9 +46,38 @@ const DEFAULTS = {
   statusline: { codex: null }, // {preset,lastProjection}: explicit ownership of Codex [tui] keys
   customBlocks: [],     // [{slug, templatePath, detector:{type:'command'|'dir'|'file', target}}]
   versionCheck: { ttlHours: 24, last: null, seen: {} },
+  // Experimental adapter door (staged behind AK_EXPERIMENTAL_HOST_ADAPTERS=1):
+  // [{name, source, contract}] entries admitted by admission.mjs's
+  // admitAdapters/bootstrapHostAdapters. Empty by default = zero effect.
+  hostAdapters: [],
 };
 
 const plain = (value) => value !== null && typeof value === 'object' && !Array.isArray(value);
+
+// F-14: kit.json top-level keys this ak version understands, derived from
+// DEFAULTS (the envelope already lists every recognized key, versioned
+// sub-objects included) rather than a second literal that could drift.
+const KNOWN_TOP_LEVEL_KEYS = new Set(Object.keys(DEFAULTS));
+
+// Warn once per process per distinct unknown-key set, not once per load —
+// loadKitConfig runs on nearly every command invocation.
+const warnedUnknownKeySignatures = new Set();
+
+function warnUnknownTopLevelKeys(parsed) {
+  if (!plain(parsed)) return;
+  const unknown = Object.keys(parsed).filter((key) => !KNOWN_TOP_LEVEL_KEYS.has(key));
+  if (unknown.length === 0) return;
+  const signature = [...unknown].sort().join(',');
+  if (warnedUnknownKeySignatures.has(signature)) return;
+  warnedUnknownKeySignatures.add(signature);
+  // Deliberately console.error, not lib/output.mjs's warn() — that helper
+  // writes to stdout (console.log), which would corrupt `--json` consumers
+  // of loadKitConfig. console.error here mirrors the existing stderr-only
+  // warning convention in commands/run.mjs.
+  console.error(
+    `kit.json keys not recognized by this ak version: ${unknown.join(', ')} — preserved, ignored`,
+  );
+}
 
 function assertLoadableEnvelopes(config) {
   if (!plain(config.integrations)) {
@@ -145,6 +174,7 @@ export function loadKitConfig(file = kitConfigPath()) {
     } catch (error) {
       throw new KitConfigError(cand, error.message, { cause: error });
     }
+    warnUnknownTopLevelKeys(parsed);
     // Migrate raw presence before defaults can masquerade as legacy user intent.
     try {
       return structuredClone(withDefaults(migrateKitConfig(parsed)));

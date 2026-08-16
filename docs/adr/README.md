@@ -24,7 +24,7 @@ Consequences**, and cites the grounded source it rests on where relevant.
 | [0013](0013-admin-build-security-signals-and-honest-reach.md) | Admin: build/security signals, an honest Reach panel, and a pagination fix | Accepted |
 | [0014](0014-dashboard-auth-and-remediation.md) | Dashboard auth token, plus a security/quality remediation pass | Accepted |
 | [0015](0015-managed-codex-native-statusline.md) | Manage Codex's native user-wide status line without claiming rich-renderer parity | Accepted |
-| [0016](0016-capability-driven-integration-adapters.md) | Capability-driven host, provider, binding, projection, and observability adapters | Accepted; compatibility amended |
+| [0016](0016-capability-driven-integration-adapters.md) | Capability-driven host, provider, binding, projection, and observability adapters | Accepted; compatibility amended; closed-registry clause superseded by 0029 |
 | [0017](0017-opencode-host.md) | OpenCode as a managed, observable host through native surfaces | Accepted; compatibility amended |
 | [0018](0018-generalized-host-worker-execution.md) | Generalized host-worker execution; `ak run` canonical | Accepted; compatibility amended |
 | [0019](0019-escalation-in-ak-run.md) | Bounded per-worker escalation in `ak run` | Accepted; historical context closed |
@@ -36,6 +36,9 @@ Consequences**, and cites the grounded source it rests on where relevant.
 | [0025](0025-machine-footprint-metrics.md) | Machine footprint: infrastructure metrics for install, runtime, storage, and catalog | Implemented |
 | [0026](0026-about-component-directory.md) | About: a component directory that explains everything ak installs | Implemented |
 | [0027](0027-shared-project-census.md) | One project census, four scopes, every count explains itself | Implemented |
+| [0028](0028-local-openai-compatible-providers.md) | One generic local OpenAI-compatible provider, not a vendor enumeration | Accepted |
+| [0029](0029-host-adapter-extension-point.md) | External host adapters: declarative manifest, subprocess hooks | Accepted (experimental contract) |
+| [0031](0031-capability-graduation-and-upstream-requests.md) | Capability graduation: earned parity for external adapters, and the upstream request path | Accepted (governance; implementation staged) |
 
 Theme: ADRs **0001–0006** define **dual-host LLM routing and leadership** — how `ak` lets ruflo route
 each development activity (architecture, implementation, testing, review, …) to the right host (Claude
@@ -187,3 +190,38 @@ it, while Intelligence folds a repo's sub-directories and throwaway agent worktr
 identity because that is what a user picks — a distinction that was also a live bug, since keying
 the picker off identity while listing directories made 7 of 24 rows unreachable. Counts that remain
 different stay different, and say why.
+
+**0028** adds a second local provider, `local-openai`, because a local model is normally served as
+an OpenAI-compatible endpoint on loopback — MLX, LM Studio, `llama.cpp`, vLLM — and frequently under
+a name the *user* chose, which no vendor enumeration can cover; the registry previously knew only
+`ollama`. It deliberately claims less than `ollama` (no catalogue, no runtime probe, no digest),
+puts the runtime's identity in the binding's endpoint rather than in the provider id, and projects
+to `['ruflo', 'codex', 'opencode']` only — no `claude` (the row claims only the OpenAI-compatible
+transport) and no `aqe` (AQE's provider set is upstream's own enumeration; `ollama` is in it,
+`local-openai` deliberately is not). Proposed by community contributor adrianco in PR #131, accepted
+with a correction to the PR's quoted Hermes reference config, whose `api_mode: openai` is not a
+valid Hermes value.
+
+**0029** answers the same PR #131 with a different mechanism than it proposed. Where the PR asked
+for an in-process ESM module loaded by `import()`, this ADR accepts a declarative manifest driving
+a fixed set of consented, subprocess-only hooks — no third-party code ever runs inside the `ak`
+process, gated behind `AK_EXPERIMENTAL_HOST_ADAPTERS=1`, admitted only after a hash-pinned consent
+that invalidates the moment the manifest's content changes. `canBePrimary`, `aqeProvider`, and
+`commandStatusline` are not fields the manifest schema accepts at all, so those three obligations
+stay first-party by construction rather than by an adapter's own promise. It formally supersedes
+ADR-0016's closed-registry clause, folds in the maintainer's full PR #131 gate list (import-time
+routable-host invariant, uninstall-through-undo, permission authorization by host, attribution
+surfaces policy, and kit.json's unknown-key warning — landed in wave 1 and Phase 0; registry↔directory
+test pins remain wave 3), and stays experimental until a real external adapter clears the
+conformance kit and a release of soak.
+
+**0031** amends 0029 on one point and adds the governance around it. The three capability caps
+(`canBePrimary`, `aqeProvider`, `commandStatusline`) stay *inexpressible* in the manifest — that
+block on self-declaration is permanent — but the capability itself becomes *earnable*: passing a
+conformance tier plus an explicit maintainer grant (hash-pinned, outside the manifest) confers it,
+up to and including promotion to a first-party built-in with full parity. It also records the
+upstream-request path: some ceilings are not `ak`'s to lift (being an AQE provider type is
+agentic-qe's closed enum; being a native ruflo backend is ruflo's `ENABLE_*` model), so those become
+tracked capability requests with honest interim behaviour rather than pretended support. Accepted as
+a governance decision; the machinery (the trust CLI, external execution, tiered conformance, the
+grant store) is staged and self-graded in the ADR's implementation-status table.

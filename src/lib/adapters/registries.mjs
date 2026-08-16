@@ -225,22 +225,97 @@ const hostEntries = [
   },
 ];
 
+// F-28: was a tuple-array `.map` that derived capabilities by identity
+// comparison (`modelDiscovery: id === 'ollama'`, `pricing: id === 'ollama' ?
+// 'zero' : …`) — a construction that cannot express a second local provider
+// needing pricing 'zero' WITHOUT modelDiscovery (ADR-0028's local-openai).
+// Explicit per-entry records instead, matching the style hostEntries already
+// uses; the five pre-existing rows are pinned deep-equal in
+// tests/kit/adapter-registries.test.mjs so this rewrite cannot silently
+// change what ships.
 const providerEntries = [
-  ['anthropic', 'Anthropic', 'subscription', { kind: 'host-login' }, ['native'], ['claude'], []],
-  ['openai', 'OpenAI', 'subscription', { kind: 'host-login' }, ['native', 'openai-compatible'], ['codex'], []],
-  ['google', 'Google Gemini', 'metered', { kind: 'environment', env: ['GOOGLE_API_KEY', 'GEMINI_API_KEY'] }, ['native'], ['ruflo', 'aqe'], []],
-  ['openrouter', 'OpenRouter', 'metered', { kind: 'environment', env: ['OPENROUTER_API_KEY'] }, ['openai-compatible'], ['ruflo', 'aqe', 'claude', 'codex', 'opencode'], ['openrouter-metadata']],
-  ['ollama', 'Ollama', 'local', { kind: 'none' }, ['native', 'openai-compatible', 'anthropic-compatible'], ['ruflo', 'aqe', 'claude', 'codex', 'opencode'], ['ollama-catalog', 'ollama-runtime']],
-].map(([id, label, billing, credentials, transports, projections, observability]) => ({
-  id, label, billing, credentials, transports, projections, observability,
-  legacy: { apiProvider: id !== 'openrouter' },
-  capabilities: {
-    modelDiscovery: id === 'ollama', runtimeDiscovery: id === 'ollama',
-    pricing: id === 'ollama' ? 'zero' : (id === 'openrouter' ? 'dated-offline' : 'provider-specific'),
-    quota: id === 'anthropic' || id === 'openai',
-    cacheAccounting: id === 'ollama' ? 'unknown' : 'provider-dependent',
+  {
+    id: 'anthropic', label: 'Anthropic', billing: 'subscription',
+    credentials: { kind: 'host-login' }, transports: ['native'], projections: ['claude'], observability: [],
+    legacy: { apiProvider: true },
+    capabilities: {
+      modelDiscovery: false, runtimeDiscovery: false, pricing: 'provider-specific',
+      quota: true, cacheAccounting: 'provider-dependent',
+    },
   },
-}));
+  {
+    id: 'openai', label: 'OpenAI', billing: 'subscription',
+    credentials: { kind: 'host-login' }, transports: ['native', 'openai-compatible'], projections: ['codex'], observability: [],
+    legacy: { apiProvider: true },
+    capabilities: {
+      modelDiscovery: false, runtimeDiscovery: false, pricing: 'provider-specific',
+      quota: true, cacheAccounting: 'provider-dependent',
+    },
+  },
+  {
+    id: 'google', label: 'Google Gemini', billing: 'metered',
+    credentials: { kind: 'environment', env: ['GOOGLE_API_KEY', 'GEMINI_API_KEY'] },
+    transports: ['native'], projections: ['ruflo', 'aqe'], observability: [],
+    legacy: { apiProvider: true },
+    capabilities: {
+      modelDiscovery: false, runtimeDiscovery: false, pricing: 'provider-specific',
+      quota: false, cacheAccounting: 'provider-dependent',
+    },
+  },
+  {
+    id: 'openrouter', label: 'OpenRouter', billing: 'metered',
+    credentials: { kind: 'environment', env: ['OPENROUTER_API_KEY'] },
+    transports: ['openai-compatible'], projections: ['ruflo', 'aqe', 'claude', 'codex', 'opencode'],
+    observability: ['openrouter-metadata'],
+    // Unlike the other four, openrouter fronts many vendors' models behind one
+    // aggregator surface rather than being itself a single named vendor's API
+    // (F-28 dead-field trace: apiProviderIds() — the sole consumer — was
+    // removed in #100; the field is kept as honest metadata for any future
+    // reader, not for a live filter).
+    legacy: { apiProvider: false },
+    capabilities: {
+      modelDiscovery: false, runtimeDiscovery: false, pricing: 'dated-offline',
+      quota: false, cacheAccounting: 'provider-dependent',
+    },
+  },
+  {
+    id: 'ollama', label: 'Ollama', billing: 'local',
+    credentials: { kind: 'none' },
+    transports: ['native', 'openai-compatible', 'anthropic-compatible'],
+    projections: ['ruflo', 'aqe', 'claude', 'codex', 'opencode'],
+    observability: ['ollama-catalog', 'ollama-runtime'],
+    legacy: { apiProvider: true },
+    capabilities: {
+      modelDiscovery: true, runtimeDiscovery: true, pricing: 'zero',
+      quota: false, cacheAccounting: 'unknown',
+    },
+  },
+  // ADR-0028: one generic local provider for any OpenAI-compatible model
+  // server on loopback (MLX, LM Studio, llama.cpp, vLLM, user-named
+  // endpoints), instead of enumerating vendors.
+  {
+    id: 'local-openai', label: 'Local OpenAI-compatible', billing: 'local',
+    credentials: { kind: 'none' }, transports: ['openai-compatible'],
+    // No 'aqe' — ollama is an AQE provider type, local-openai deliberately is
+    // not (ADR-0028's stated asymmetry). No 'claude' — assertValidBinding
+    // gates a binding's projection through provider.projections, and
+    // claude's own configProjection ('claude') expects an
+    // anthropic-compatible surface; this row claims only openai-compatible,
+    // so 'claude' is absent by design, not by oversight.
+    projections: ['ruflo', 'codex', 'opencode'],
+    // No daemon API ak has verified for a generic endpoint (unlike ollama's
+    // catalog/runtime sources), so no observability sources.
+    observability: [],
+    // Same reasoning as openrouter above: a generic OpenAI-compatible proxy
+    // for an arbitrary user-run server is not itself a distinct named
+    // vendor's API.
+    legacy: { apiProvider: false },
+    capabilities: {
+      modelDiscovery: false, runtimeDiscovery: false, pricing: 'zero',
+      quota: false, cacheAccounting: 'unknown',
+    },
+  },
+];
 
 const HOST_MAP = registryFrom(hostEntries,
   (entry) => validateHostAdapter(entry, { projections: PROJECTION_MAP, observability: OBSERVABILITY_MAP }), 'host');

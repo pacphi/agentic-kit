@@ -1,0 +1,27 @@
+{
+  "name": "acme-primary",
+  "version": "1.0.0",
+  "contract": 1,
+  "host": {
+    "id": "acme-primary",
+    "label": "Acme CLI (would-be primary)",
+    "install": { "bin": "acme", "externalInstallPolicy": "detect-never-overwrite" },
+    "capabilities": {
+      "canDriveSession": false,
+      "canBePrimary": true,
+      "canRouteActivities": false,
+      "commandStatusline": false,
+      "transcripts": false,
+      "usage": false,
+      "nativeMcpConfig": false,
+      "nativeGuidance": false
+    },
+    "trust": { "approvalPolicy": "unchanged", "changes": [] },
+    "enabledByDefault": false,
+    "configProjection": "ruflo",
+    "observability": []
+  },
+  "detection": { "bin": "acme" },
+  "driving": { "surfaces": ["cli-subprocess"] },
+  "trust": { "changes": [] }
+}

@@ -8,8 +8,8 @@ import { have } from '../lib/exec.mjs';
 import { fixStatusline, helperStampStale } from '../lib/statusline.mjs';
 import { reconcileGuidance } from '../lib/blocks.mjs';
 import { register as mcpRegister, applyExclusions } from '../lib/mcp.mjs';
-import { OPENCODE_LIFECYCLE_ADAPTER } from '../lib/opencode.mjs';
 import { runLifecycle } from '../lib/adapters/lifecycle.mjs';
+import { builtinHostsWithLifecycle, lifecycleAdapterFor } from '../lib/adapters/lifecycle-registry.mjs';
 import { listDaemons, staleDaemons, reap } from '../lib/daemons.mjs';
 import { loadKitConfig, saveKitConfig } from '../lib/config.mjs';
 import { commandHosts, applyHosts, applyProviders, hostInstallState, installHost, applyAqeRouter, seedActivityRoutesIfMultiHost, migrateRetiredRoutesInConfig, ensureCodexMcp, ensureRufloMcpInCodex, bothHostsEnabled } from '../lib/providers.mjs';
@@ -188,23 +188,32 @@ export async function run({ flags, pkgRoot, fetchLatest }) {
   // Runs BEFORE the blocks branch: the agents-opencode guidance target is gated
   // on the config home this branch creates — this order lets a fresh enable
   // converge guidance in the SAME sync (a second sync is then a true no-op).
-  if (subsystems.has('opencode') && cfg.integrations?.hosts?.opencode) {
-    if (!(await have('opencode'))) {
-      info('opencode: enabled but CLI not installed — wiring skipped (hosts step installs it)');
-    } else {
-      const lifecycle = await runLifecycle({
-        adapter: OPENCODE_LIFECYCLE_ADAPTER, action: 'apply', cfg, options: { pkgRoot },
-      });
-      const stack = lifecycle.result;
-      // persist the markers on ANY refresh (a converged file whose kit.json
-      // markers are stale/missing still needs the save, or the next teardown
-      // cannot prove ownership — codex-review r3), not only on file changes.
-      if (stack.oc.changed || stack.markersChanged) saveKitConfig(cfg);
-      if (stack.oc.changed || !stack.oc.ok) report('opencode', stack.oc);
-      report('opencode plugin', stack.plugin);
-      report('opencode agents', stack.agents);
-      if (stack.skill.changed || !stack.skill.ok) report('opencode skill', stack.skill);
+  // Registry-driven: loops builtinHostsWithLifecycle() rather than naming
+  // opencode, so a second BUILT-IN lifecycle host needs no new branch here.
+  // Only opencode is registered today, so this loop runs exactly once —
+  // byte-identical to the single-host branch it replaces. The result SHAPE
+  // consumed below (stack.oc/plugin/agents/skill) is still opencode's own —
+  // the lifecycle contract doesn't mandate a common `apply()` result shape
+  // across hosts. builtinHostsWithLifecycle() (not hostsWithLifecycle())
+  // deliberately excludes admitted external hosts — see lifecycle-registry.mjs.
+  for (const hostId of builtinHostsWithLifecycle()) {
+    if (!subsystems.has(hostId) || !cfg.integrations?.hosts?.[hostId]) continue;
+    if (!(await have(hostId))) {
+      info(`${hostId}: enabled but CLI not installed — wiring skipped (hosts step installs it)`);
+      continue;
     }
+    const lifecycle = await runLifecycle({
+      adapter: lifecycleAdapterFor(hostId), action: 'apply', cfg, options: { pkgRoot },
+    });
+    const stack = lifecycle.result;
+    // persist the markers on ANY refresh (a converged file whose kit.json
+    // markers are stale/missing still needs the save, or the next teardown
+    // cannot prove ownership — codex-review r3), not only on file changes.
+    if (stack.oc.changed || stack.markersChanged) saveKitConfig(cfg);
+    if (stack.oc.changed || !stack.oc.ok) report('opencode', stack.oc);
+    report('opencode plugin', stack.plugin);
+    report('opencode agents', stack.agents);
+    if (stack.skill.changed || !stack.skill.ok) report('opencode skill', stack.skill);
   }
   // The 'opencode' guard: the opencode branch above can CREATE the config home
   // that activates the agents-opencode guidance target — a machine whose other
