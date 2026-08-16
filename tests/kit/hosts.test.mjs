@@ -6,6 +6,7 @@ import path from 'node:path';
 import { HOST_IDS, adapterFor, drivingHost, hostTierLabel, hostAsymmetryNote } from '../../src/lib/hosts.mjs';
 import { hostAuthState } from '../../src/lib/providers.mjs';
 import { managedHostIds } from '../../src/lib/adapters/registries.mjs';
+import { applyAdmitted, resetAdmitted, effectivePrimaryHostIds } from '../../src/lib/adapters/admitted.mjs';
 
 // ── HOST_ADAPTERS descriptors ────────────────────────────────────────────────
 // HOST_IDS is HOST_ADAPTERS' key order (hosts.mjs filters HOST_REGISTRY by
@@ -70,6 +71,60 @@ test('drivingHost rejects a non-primary-capable host from hand-edited config', (
 
 test('drivingHost defaults to claude with no signal', () => {
   assert.equal(drivingHost({}), 'claude');
+});
+
+// ── D2 keystone (ADR-0031 §1), F-3-hardened: drivingHost's ELIGIBILITY check
+// reads the EFFECTIVE (grant-overlaid) registry, not HOST_REGISTRY directly —
+// that primitive is live even for an admitted external host. But eligibility
+// alone is not enough to RETURN the host: HOST_ADAPTERS (this module's own
+// session-driving descriptors — guidanceFile, statusline, envMarkers) stays
+// built-in-only, so an admitted external host — however eligible, however
+// granted — has nothing here to resolve adapterFor() against. drivingHost()
+// must fall back to 'claude' rather than return an id a caller's
+// `adapterFor(drivingHost(...)).guidanceFile` would crash on.
+test('drivingHost recognizes a granted external host as eligible, but still falls back to claude (no HOST_ADAPTERS descriptor to resolve it)', (t) => {
+  t.after(() => resetAdmitted());
+  applyAdmitted([{
+    entry: {
+      id: 'hermes',
+      label: 'Hermes',
+      install: { bin: 'hermes', externalInstallPolicy: 'detect-never-overwrite' },
+      capabilities: {
+        canDriveSession: true, canBePrimary: false, canRouteActivities: true,
+        commandStatusline: false, transcripts: true, usage: false,
+        nativeMcpConfig: false, nativeGuidance: false,
+      },
+      trust: { approvalPolicy: 'unchanged', changes: [] },
+      enabledByDefault: false,
+      configProjection: 'ruflo',
+      observability: [],
+    },
+  }], { grantsByName: { hermes: { canBePrimary: true } } });
+  assert.ok(effectivePrimaryHostIds().includes('hermes'), 'sanity: the eligibility primitive DOES see the grant');
+  assert.equal(adapterFor('hermes'), null, 'sanity: this module has no session-driving descriptor for it');
+  assert.equal(drivingHost({}, { routing: { primaryHost: 'hermes' } }), 'claude',
+    'eligible-but-unresolvable must never be returned — falls back to claude, never crashes a caller downstream');
+});
+
+test('drivingHost also falls back to claude for the same external host before it is granted canBePrimary', (t) => {
+  t.after(() => resetAdmitted());
+  applyAdmitted([{
+    entry: {
+      id: 'hermes',
+      label: 'Hermes',
+      install: { bin: 'hermes', externalInstallPolicy: 'detect-never-overwrite' },
+      capabilities: {
+        canDriveSession: true, canBePrimary: false, canRouteActivities: true,
+        commandStatusline: false, transcripts: true, usage: false,
+        nativeMcpConfig: false, nativeGuidance: false,
+      },
+      trust: { approvalPolicy: 'unchanged', changes: [] },
+      enabledByDefault: false,
+      configProjection: 'ruflo',
+      observability: [],
+    },
+  }]); // no grantsByName
+  assert.equal(drivingHost({}, { routing: { primaryHost: 'hermes' } }), 'claude');
 });
 
 // ── hostAuthState (billing axis) ─────────────────────────────────────────────

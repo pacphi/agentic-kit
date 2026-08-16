@@ -16,6 +16,7 @@ import {
 import {
   applyAdmitted, resetAdmitted, admittedHostIds, effectiveHostRegistry,
 } from '../../src/lib/adapters/admitted.mjs';
+import { recordTierResult, grantCapability } from '../../src/lib/adapters/grants.mjs';
 import { validateAdapterManifest } from '../../src/lib/adapters/manifest.mjs';
 import { validateLifecycleAdapter } from '../../src/lib/adapters/lifecycle.mjs';
 import {
@@ -237,6 +238,93 @@ test('flag-on with a trusted entry admits it and applies the overlay', async () 
   assert.deepEqual(result.warnings, []);
   assert.deepEqual(admittedHostIds(), ['hermes']);
   assert.equal(effectiveHostRegistry().length, HOST_REGISTRY.length + 1);
+});
+
+// ── D2 keystone: bootstrapHostAdapters wires REAL grants.mjs grants into the
+// overlay, live (ADR-0031 §1). Unlike admitted-grants.test.mjs (which injects
+// grantsByName directly to test applyAdmitted's own guarantee in isolation),
+// these two exercise the actual bootstrap -> grantedCapabilitiesFor(name,
+// freshly-computed hash) -> applyAdmitted wiring end to end, against the
+// REAL grants.mjs file store — redirected via XDG_CONFIG_HOME to a throwaway
+// directory so they never touch the developer's real
+// ~/.config/agentic-kit/adapter-grants.json.
+
+test('bootstrapHostAdapters: a real, currently-hashed grant for primary-eligible makes canBePrimary live in effectiveHostRegistry()', async (t) => {
+  const prevXdg = process.env.XDG_CONFIG_HOME;
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-d2-grant-live-'));
+  process.env.XDG_CONFIG_HOME = dir;
+  t.after(() => { process.env.XDG_CONFIG_HOME = prevXdg; fs.rmSync(dir, { recursive: true, force: true }); });
+
+  const name = 'hermes-grant-live';
+  const manifest = validateAdapterManifest(validManifest({ name, host: validHost({ id: name }) }));
+  const hash = hashManifest(manifest);
+  recordTierResult(name, 'primary-eligible', { hash, evidence: 'harness-driven lead + escalation, real WorkerResult trail' });
+  grantCapability(name, 'canBePrimary', { hash });
+
+  const result = await bootstrapHostAdapters({
+    cfg: { hostAdapters: [{ name, source: 'mem://hermes-grant-live' }] },
+    env: { AK_EXPERIMENTAL_HOST_ADAPTERS: '1' },
+    readManifest: async () => manifest,
+    consent: trustingConsent({ [name]: hash }),
+  });
+  assert.equal(result.admitted.length, 1);
+  const entry = effectiveHostRegistry().find((h) => h.id === name);
+  assert.ok(entry, 'the admitted host must be in the effective registry');
+  assert.equal(entry.capabilities.canBePrimary, true, 'the real, currently-hashed grant must be live');
+});
+
+test('bootstrapHostAdapters: a grant recorded against a STALE manifest hash never lights up (edit-invalidation)', async (t) => {
+  const prevXdg = process.env.XDG_CONFIG_HOME;
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-d2-grant-stale-'));
+  process.env.XDG_CONFIG_HOME = dir;
+  t.after(() => { process.env.XDG_CONFIG_HOME = prevXdg; fs.rmSync(dir, { recursive: true, force: true }); });
+
+  const name = 'hermes-grant-stale';
+  const oldManifest = validateAdapterManifest(validManifest({ name, host: validHost({ id: name }) }));
+  const oldHash = hashManifest(oldManifest);
+  recordTierResult(name, 'primary-eligible', { hash: oldHash, evidence: 'led a run, escalated to' });
+  grantCapability(name, 'canBePrimary', { hash: oldHash });
+
+  // The manifest changes underneath the grant (a real edit — a bumped
+  // version string) WITHOUT the tier being re-earned/re-granted at the new
+  // hash. Bootstrap must compute the hash of the manifest it just admitted
+  // (newHash), never reuse oldHash — so grantedCapabilitiesFor sees a
+  // mismatch and returns {}.
+  const newManifest = validateAdapterManifest(validManifest({ name, host: validHost({ id: name }), version: '1.0.1' }));
+  const newHash = hashManifest(newManifest);
+  assert.notEqual(oldHash, newHash, 'sanity: the edit must actually change the hash');
+
+  const result = await bootstrapHostAdapters({
+    cfg: { hostAdapters: [{ name, source: 'mem://hermes-grant-stale' }] },
+    env: { AK_EXPERIMENTAL_HOST_ADAPTERS: '1' },
+    readManifest: async () => newManifest,
+    consent: trustingConsent({ [name]: newHash }),
+  });
+  assert.equal(result.admitted.length, 1);
+  const entry = effectiveHostRegistry().find((h) => h.id === name);
+  assert.equal(entry.capabilities.canBePrimary, false, 'a grant pinned to the OLD hash must not apply to the new manifest');
+});
+
+test('bootstrapHostAdapters: with no grant recorded at all, an admitted host stays at the manifest floor (canBePrimary false)', async (t) => {
+  const prevXdg = process.env.XDG_CONFIG_HOME;
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-d2-grant-none-'));
+  process.env.XDG_CONFIG_HOME = dir;
+  t.after(() => { process.env.XDG_CONFIG_HOME = prevXdg; fs.rmSync(dir, { recursive: true, force: true }); });
+
+  const name = 'hermes-grant-none';
+  const manifest = validateAdapterManifest(validManifest({ name, host: validHost({ id: name }) }));
+  const hash = hashManifest(manifest);
+
+  const result = await bootstrapHostAdapters({
+    cfg: { hostAdapters: [{ name, source: 'mem://hermes-grant-none' }] },
+    env: { AK_EXPERIMENTAL_HOST_ADAPTERS: '1' },
+    readManifest: async () => manifest,
+    consent: trustingConsent({ [name]: hash }),
+  });
+  assert.equal(result.admitted.length, 1);
+  assert.deepEqual(result.warnings, []);
+  const entry = effectiveHostRegistry().find((h) => h.id === name);
+  assert.equal(entry.capabilities.canBePrimary, false);
 });
 
 // ── overlay ──────────────────────────────────────────────────────────────

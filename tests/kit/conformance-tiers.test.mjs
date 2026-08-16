@@ -12,7 +12,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { runTieredConformance, CONFORMANCE_TIERS } from '../../src/lib/adapters/conformance.mjs';
-import { grantsFor, recordTierResult, grantCapability } from '../../src/lib/adapters/grants.mjs';
+import { grantsFor, grantCapability, grantedCapabilitiesFor } from '../../src/lib/adapters/grants.mjs';
 import { lifecycleAdapterFor } from '../../src/lib/adapters/lifecycle-registry.mjs';
 
 const FIXTURE_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../fixtures/adapters/acme');
@@ -259,54 +259,30 @@ test('session-driving tier persists via recordTierGate when a real upstream ref 
   assert.equal(record.tiers['session-driving'].gatedBy, 'ruvnet/ruflo#9001');
 });
 
-// ── primary-eligible / statusline: honest gated, ungranted or unbuilt ──────
+// ── statusline: honest gated, ungranted (untouched this wave) ──────────────
 
-test('primary-eligible and statusline tiers are gated (never passed) against acme with no grant recorded', async () => {
+test('statusline tier is gated (never passed) against acme with no grant recorded', async () => {
   const grantsFile = tempGrantsFile();
   const report = await runTieredConformance({
     manifestSource: VALID_MANIFEST_PATH,
     readManifest: readManifestFromFile,
-    tiers: ['primary-eligible', 'statusline'],
+    tiers: ['statusline'],
     grantsFile,
   });
-  for (const tier of report.tiers) {
-    assert.equal(tier.status, 'gated', `${tier.tier}: ${JSON.stringify(tier.checks)}`);
-    assert.notEqual(tier.status, 'passed');
-    assert.match(tier.detail, /ak-local/);
-  }
+  const [tier] = report.tiers;
+  assert.equal(tier.status, 'gated', JSON.stringify(tier.checks));
+  assert.notEqual(tier.status, 'passed');
+  assert.match(tier.detail, /ak-local/);
   assert.equal(grantsFor('acme', { file: grantsFile }), null);
 });
 
-// F-6 (security review): the property that actually holds the "no exercise
-// confers a grant" invariant is checkGrantGatedTier evaluating `granted`
-// BEFORE ever calling `exercise` (conformance.mjs) — a caller-supplied
-// exercise result can never confer the FIRST grant, because exercise is
-// simply never reached without one already recorded. Pin that ordering
-// directly: inject a real exercisePrimaryEligible with NO existing grant.
-test('primary-eligible tier stays gated (never passed) when an exercise callback is injected but no grant exists — granted is checked BEFORE exercise runs', async () => {
-  const grantsFile = tempGrantsFile();
-  const report = await runTieredConformance({
-    manifestSource: VALID_MANIFEST_PATH,
-    readManifest: readManifestFromFile,
-    tiers: ['primary-eligible'],
-    grantsFile,
-    exercisePrimaryEligible: async () => ({ ok: true }),
-  });
-  const [tier] = report.tiers;
-  assert.equal(tier.status, 'gated');
-  assert.notEqual(tier.status, 'passed');
-  assert.equal(grantsFor('acme', { file: grantsFile }), null, 'a caller-supplied exercise result must never confer the FIRST grant');
-});
+// ── primary-eligible: honest activity-routing dependency ───────────────────
 
-test('primary-eligible tier stays honestly gated even when GRANTED, because no lead/escalation runtime path is built yet', async () => {
+test('primary-eligible tier is skipped when activity-routing did not pass this run', async () => {
   const grantsFile = tempGrantsFile();
-  // Seed a real grant the way the (future) promotion command would.
-  const hash = (await runTieredConformance({
-    manifestSource: VALID_MANIFEST_PATH, readManifest: readManifestFromFile, tiers: ['admission'], grantsFile,
-  })).hash;
-  recordTierResult('acme', 'primary-eligible', { hash, evidence: 'seeded for test' }, { file: grantsFile });
-  grantCapability('acme', 'canBePrimary', { hash }, { file: grantsFile });
-
+  // No haveFn override: acme's detection.bin will never be on a test
+  // machine's real PATH, so activity-routing genuinely fails this run —
+  // primary-eligible must short-circuit on that.
   const report = await runTieredConformance({
     manifestSource: VALID_MANIFEST_PATH,
     readManifest: readManifestFromFile,
@@ -314,33 +290,125 @@ test('primary-eligible tier stays honestly gated even when GRANTED, because no l
     grantsFile,
   });
   const [tier] = report.tiers;
-  assert.equal(tier.status, 'gated');
+  assert.equal(tier.status, 'skipped', JSON.stringify(tier.checks));
   assert.notEqual(tier.status, 'passed');
-  assert.match(tier.detail, /granted/);
-  assert.match(tier.detail, /not built/);
+  assert.match(tier.checks[0].detail, /activity-routing did not pass/);
+  assert.equal(grantsFor('acme', { file: grantsFile }), null);
 });
 
-test('primary-eligible tier PASSES when granted AND a real exercise path is injected (proves the injection seam, not a built-in fake)', async () => {
+test('primary-eligible tier is skipped on a missing activity-routing prerequisite even when a real grant was earned earlier through the sanctioned flow', async () => {
   const grantsFile = tempGrantsFile();
-  const hash = (await runTieredConformance({
-    manifestSource: VALID_MANIFEST_PATH, readManifest: readManifestFromFile, tiers: ['admission'], grantsFile,
-  })).hash;
-  recordTierResult('acme', 'primary-eligible', { hash, evidence: 'seeded for test' }, { file: grantsFile });
-  grantCapability('acme', 'canBePrimary', { hash }, { file: grantsFile });
+  // Earn the grant honestly first, via the real sanctioned sequence (ADR-0031
+  // §2): a run with activity-routing genuinely passing records a real
+  // 'passed' primary-eligible tier, which grantCapability (grants.mjs)
+  // requires before it will confer canBePrimary — never hand-seeded.
+  const earned = await runTieredConformance({
+    manifestSource: VALID_MANIFEST_PATH,
+    readManifest: readManifestFromFile,
+    tiers: ['primary-eligible'],
+    grantsFile,
+    haveFn: async () => true,
+  });
+  assert.equal(earned.tiers[0].status, 'passed', JSON.stringify(earned.tiers[0].checks));
+  grantCapability('acme', 'canBePrimary', { hash: earned.hash }, { file: grantsFile });
+
+  // Re-run WITHOUT the haveFn override — activity-routing genuinely fails
+  // this run, so primary-eligible must short-circuit regardless of the (now
+  // real, honestly earned) grant already sitting in the store.
+  const report = await runTieredConformance({
+    manifestSource: VALID_MANIFEST_PATH,
+    readManifest: readManifestFromFile,
+    tiers: ['primary-eligible'],
+    grantsFile,
+  });
+  const [tier] = report.tiers;
+  assert.equal(tier.status, 'skipped', JSON.stringify(tier.checks));
+  assert.match(tier.checks[0].detail, /activity-routing did not pass/);
+});
+
+// ── primary-eligible: the real exercise, evidence-first (F-1 fix) ──────────
+// F-1 (security review, HIGH, fixed): the exercise runs UNCONDITIONALLY —
+// never gated on a pre-existing canBePrimary grant. Gating it on the grant
+// it exists to justify was a deadlock: grantCapability (grants.mjs) refuses
+// unless a 'passed' primary-eligible tier is ALREADY recorded at this hash,
+// so the only way it could ever pass before this fix was hand-seeding a fake
+// tier result first — defeating the whole earned-evidence point of
+// ADR-0031 §2 ("passing a tier records evidence; the maintainer's grant
+// turns evidence into capability" — evidence comes FIRST). These tests prove
+// the corrected, sanctioned sequence with NO hand-seeding anywhere.
+
+test('primary-eligible tier GENUINELY PASSES via the real exercise with NO pre-existing grant — evidence records first, per ADR-0031 §2', async () => {
+  const grantsFile = tempGrantsFile();
+  assert.equal(grantsFor('acme', { file: grantsFile }), null, 'sanity: nothing recorded before this run');
 
   const report = await runTieredConformance({
     manifestSource: VALID_MANIFEST_PATH,
     readManifest: readManifestFromFile,
     tiers: ['primary-eligible'],
     grantsFile,
-    exercisePrimaryEligible: async () => ({ ok: true, detail: 'led a run and received a simulated escalation' }),
+    haveFn: async () => true,
+  });
+  const [tier] = report.tiers;
+  assert.equal(tier.status, 'passed', JSON.stringify(tier.checks, null, 2));
+  // Real evidence, not a fabricated string — worded to what was actually
+  // demonstrated (a direct run plus a genuine ADR-0019 escalation onto the
+  // same host: ladder + execution-contract plumbing), not an overclaim about
+  // agentic task quality (F-7).
+  assert.match(tier.evidence, /'acme' completed a direct \(non-escalated\) run/);
+  assert.match(tier.evidence, /genuine ADR-0019 escalation onto itself/);
+  assert.match(tier.evidence, /2 attempts:/);
+  assert.match(tier.evidence, /=failed -> acme=succeeded/);
+
+  const record = grantsFor('acme', { file: grantsFile });
+  assert.equal(record.tiers['primary-eligible'].status, 'passed');
+  assert.match(record.tiers['primary-eligible'].evidence, /genuine ADR-0019 escalation/);
+});
+
+test('the sanctioned §2 sequence end to end: a freshly-passed tier with NO prior grant lets grantCapability confer a LIVE canBePrimary', async () => {
+  const grantsFile = tempGrantsFile();
+  assert.equal(grantsFor('acme', { file: grantsFile }), null, 'sanity: nothing recorded before this run');
+
+  // Step 1: the real exercise earns the evidence (no grant exists yet).
+  const report = await runTieredConformance({
+    manifestSource: VALID_MANIFEST_PATH,
+    readManifest: readManifestFromFile,
+    tiers: ['primary-eligible'],
+    grantsFile,
+    haveFn: async () => true,
+  });
+  assert.equal(report.tiers[0].status, 'passed', JSON.stringify(report.tiers[0].checks));
+  assert.equal(
+    grantedCapabilitiesFor('acme', report.hash, { file: grantsFile }).canBePrimary,
+    undefined,
+    'passing the tier alone must never itself grant the capability',
+  );
+
+  // Step 2: the maintainer's explicit act (ADR-0031 §1) — only possible now
+  // because the tier is genuinely 'passed' at this hash, not because
+  // anything above hand-seeded it.
+  grantCapability('acme', 'canBePrimary', { hash: report.hash }, { file: grantsFile });
+  assert.equal(grantedCapabilitiesFor('acme', report.hash, { file: grantsFile }).canBePrimary, true);
+});
+
+test('primary-eligible tier: a caller-supplied legacy exercisePrimaryEligible option has no effect — there is no injection seam, only the real exercise ever runs', async () => {
+  const grantsFile = tempGrantsFile();
+  const report = await runTieredConformance({
+    manifestSource: VALID_MANIFEST_PATH,
+    readManifest: readManifestFromFile,
+    tiers: ['primary-eligible'],
+    grantsFile,
+    haveFn: async () => true,
+    // Not a real option on runTieredConformance anymore (silently ignored) —
+    // proves a caller cannot launder a fabricated pass through what used to
+    // be the injection point.
+    exercisePrimaryEligible: async () => ({ ok: true, detail: 'FAKE-LAUNDERED-PASS' }),
   });
   const [tier] = report.tiers;
   assert.equal(tier.status, 'passed');
-  assert.equal(tier.evidence, 'led a run and received a simulated escalation');
+  assert.notEqual(tier.evidence, 'FAKE-LAUNDERED-PASS');
+  assert.match(tier.evidence, /genuine ADR-0019 escalation onto itself/);
   const record = grantsFor('acme', { file: grantsFile });
-  assert.equal(record.tiers['primary-eligible'].status, 'passed');
-  assert.equal(record.tiers['primary-eligible'].evidence, 'led a run and received a simulated escalation');
+  assert.notEqual(record.tiers['primary-eligible'].evidence, 'FAKE-LAUNDERED-PASS');
 });
 
 test('statusline tier is skipped/gated (never passed) when the admission prerequisite tier is not part of this run and the manifest never admitted', async () => {
@@ -358,7 +426,7 @@ test('statusline tier is skipped/gated (never passed) when the admission prerequ
 
 // ── full sequence + persistence summary ─────────────────────────────────
 
-test('running all five tiers together against acme yields exactly one passed-non-admission tier (activity-routing) plus admission, with nothing faked', async () => {
+test('running all five tiers together against acme yields three genuinely-passed tiers (admission, activity-routing, primary-eligible) plus an honestly gated statusline, with nothing faked', async () => {
   const grantsFile = tempGrantsFile();
   const report = await runTieredConformance({
     manifestSource: VALID_MANIFEST_PATH,
@@ -371,13 +439,17 @@ test('running all five tiers together against acme yields exactly one passed-non
   assert.equal(byTier.admission, 'passed');
   assert.equal(byTier['session-driving'], 'skipped'); // acme declares canDriveSession:false
   assert.equal(byTier['activity-routing'], 'passed');
-  assert.equal(byTier['primary-eligible'], 'gated');
+  // primary-eligible now genuinely passes in the same run (F-1 fix): its
+  // real exercise is unconditional, not gated on a pre-existing grant — no
+  // grant was seeded anywhere in this test.
+  assert.equal(byTier['primary-eligible'], 'passed');
   assert.equal(byTier.statusline, 'gated');
 
   const record = grantsFor('acme', { file: grantsFile });
   assert.equal(record.tiers.admission.status, 'passed');
   assert.equal(record.tiers['activity-routing'].status, 'passed');
-  assert.equal(record.tiers['primary-eligible'], undefined, 'an ak-local gate with no upstream ref persists nothing');
+  assert.equal(record.tiers['primary-eligible'].status, 'passed');
+  assert.ok(record.tiers['primary-eligible'].evidence.length > 0);
   assert.equal(record.tiers.statusline, undefined);
 });
 
