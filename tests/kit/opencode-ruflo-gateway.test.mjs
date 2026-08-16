@@ -232,7 +232,11 @@ test('gateway coalesces concurrent catalogue startup and recovers from a timed-o
   const root = tmp('ak-oc-ruflo-gateway-recovery-');
   const priorTimeout = process.env.AK_OPENCODE_GATEWAY_TIMEOUT_MS;
   try {
-    process.env.AK_OPENCODE_GATEWAY_TIMEOUT_MS = '80';
+    // The gateway's per-request timer starts before the child finishes booting,
+    // so this budget must absorb a node process cold start — >80ms on slow
+    // Windows CI runners. The hang phase still times out deterministically at
+    // any budget: the fake server never answers the first initialize.
+    process.env.AK_OPENCODE_GATEWAY_TIMEOUT_MS = '2000';
     const server = path.join(root, 'fake-mcp.mjs');
     const log = path.join(root, 'mcp.log');
     const marker = path.join(root, 'hung-once');
