@@ -141,7 +141,45 @@ names:
 An adapter manifest declaring `acp` or `mcp` today fails admission with an explicit "surface not yet
 supported" diagnostic. It is never silently downgraded to `cli-subprocess` — a silent downgrade
 would run a hook the adapter author never tested against that surface, exactly the kind of guessed
-success ADR-0016 §5 and ADR-0023 already forbid elsewhere.
+success ADR-0016 §5 and ADR-0023 already forbid elsewhere. An admitted host is given a
+`cli-subprocess` **execution** adapter only when it declares that surface; a manifest missing it is
+refused (`surface-unsupported`) rather than downgraded.
+
+**`cli-subprocess` execution details** (settled while wiring [ADR-0031](0031-capability-graduation-and-upstream-requests.md)'s
+external-execution row, after an adversarial review of the surface):
+
+- **Command resolution is anchored, not ambient.** A hook subprocess runs with its working
+  directory pinned to the adapter's own resolved directory (a file-sourced manifest's `realpath`
+  directory), never `ak`'s current working directory — so a manifest declaring
+  `["node", "run-hook.mjs"]` runs *the adapter's* `run-hook.mjs`, and a file planted in the
+  operator's cwd is unreachable. A remote-sourced manifest (`npm:`/`https://`) has no persistent
+  local directory, so a *relative* hook command from such a source is refused
+  (`execution-unanchored`) rather than resolved against an ambient path; a bare PATH binary
+  (`node`, `hermes`) stays legal. The consent hash still pins the manifest text verbatim; the
+  resolution is a pure function of that text plus the (already-pinned) source, so it cannot drift
+  without the hash changing.
+  - *Boundary of the anchorability check for remote sources.* When a remote-sourced adapter has no
+    local directory to anchor to, its hook command spawns in the repository `ak run` was invoked in
+    (which the operator already runs at full trust, per ADR-0018), and the `execution-unanchored`
+    refusal is a **best-effort** screen for path-shaped tokens (separators, script extensions, flag
+    values), not a complete one: an *extensionless, separator-free* relative token
+    (`["node", "runhook"]`) is indistinguishable by inspection from an ordinary positional argument
+    (`["hermes-run", "build"]`), so it is not refused and would resolve against the repo. A complete
+    rule would have to reject every non-absolute, non-flag argument, which would also reject
+    legitimate positional arguments — a false-positive cost this contract does not pay by default.
+    The exposure is bounded on every axis that matters: it requires a remote (`npm:`/`https://`)
+    source, a consented manifest the operator hash-pinned with that exact relative token, and write
+    access to the operator's repo. A **file-sourced** adapter — the fixture, and every adapter that
+    ships a bundle — is fully anchored and unaffected. A remote-sourced adapter should declare
+    absolute paths or PATH binaries; a future contract revision may make that a hard requirement.
+- **Reserved exit codes carry consent/auth boundaries.** Hook exit `77` maps to
+  `permission_required` (a blocked, never-escalated result — escalating around a consent boundary
+  is the safety violation ADR-0019 already forbids) and `78` to `auth_required`. This gives an
+  external host an honest way to say "I refused" or "I am not logged in" instead of a bare
+  non-zero exit that would be re-run on another host.
+- **Results never launder trust.** Exit code is the sole authority for success; a self-declared
+  `provider` in hook stdout is stamped `inferred`, never `observed`; stderr is never promoted into
+  a downstream worker's prompt; and handoff data is redacted from public `WorkerResult`s.
 
 ### 3. Capability caps are schema-structural, not runtime-checked
 
