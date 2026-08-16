@@ -51,7 +51,31 @@ export async function runLifecycle(adapterOrRequest, operation, context = {}) {
   const facts = request.facts ?? await adapter.detect(request);
   if (action === 'plan') return adapter.plan({ ...request, facts });
   if (action === 'apply') {
+    // F8 (security-review follow-up): fail closed when detect (or plan)
+    // signals a hook failure — never let apply run against facts/a plan the
+    // adapter itself refused to produce. The gate fires on ANY truthy
+    // `.error` on the detect-facts/plan object — an ADMITTED host's hook
+    // failure is reported this way ({observed:null, error} from
+    // detect/verify, {changed:false, operations:[], error} from plan —
+    // lifecycle-registry.mjs's hookFailureResult/unanchoredResult), but a
+    // SUCCESSFUL hook's own JSON payload is returned verbatim too (same
+    // file's buildAdmittedLifecycleAdapter, `return payload`), so `error` is
+    // effectively RESERVED in the detect/plan payload contract: a hook must
+    // never use it for a non-fatal note, only genuine failure. opencode's own
+    // detect()/plan() (see opencode.mjs's createOpencodeLifecycleAdapter)
+    // never set an `.error` key on any path, so this check is a strict no-op
+    // for opencode regardless.
+    if (facts?.error) {
+      return lifecycleResult({ ok: false, changed: false, errors: [facts.error] });
+    }
     const plan = request.plan ?? await adapter.plan({ ...request, facts });
+    if (plan?.error) {
+      return lifecycleResult({ ok: false, changed: false, errors: [plan.error] });
+    }
+    // The abort above intentionally precedes the dryRun preview below: a
+    // failed detect/plan has no valid plan to preview, so dryRun on a hook
+    // failure returns this lifecycleResult (no `.dryRun` field) rather than a
+    // fabricated {dryRun:true, facts, plan}.
     if (dryRun) return { dryRun: true, facts, plan };
     return adapter.apply({ ...request, facts, plan });
   }

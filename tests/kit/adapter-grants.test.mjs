@@ -8,7 +8,7 @@ import os from 'node:os';
 import path from 'node:path';
 import {
   CONFORMANCE_TIERS, TIER_GRANTS,
-  recordTierResult, recordTierGate, grantCapability, revokeGrants,
+  recordTierResult, recordTierGate, recordTierFailure, grantCapability, revokeGrants, revokeCapability,
   grantsFor, grantedCapabilitiesFor, gatedTiersFor,
 } from '../../src/lib/adapters/grants.mjs';
 
@@ -338,4 +338,112 @@ test('F-2: recordTierGate on a tier with no live capability (never granted) is a
   const record = grantsFor('acme', { file });
   assert.equal(record.tiers['primary-eligible'].status, 'gated');
   assert.equal(record.capabilities, undefined);
+});
+
+// ── N-1 (security-review follow-up): recordTierFailure — the un-earn path
+// mirroring recordTierGate's downgrade, but for a genuine RE-FAIL at the
+// same hash a capability was earned at. ────────────────────────────────────
+
+test('N-1: recordTierFailure on a grant-bearing tier that currently backs a live capability drops that capability', () => {
+  const file = tempFile();
+  recordTierResult('acme', 'primary-eligible', { hash: HASH_A, evidence: 'led a run' }, { file });
+  grantCapability('acme', 'canBePrimary', { hash: HASH_A }, { file });
+  assert.deepEqual(grantedCapabilitiesFor('acme', HASH_A, { file }), { canBePrimary: true });
+
+  recordTierFailure('acme', 'primary-eligible', { hash: HASH_A }, { file });
+
+  const record = grantsFor('acme', { file });
+  assert.equal(record.tiers['primary-eligible'].status, 'failed');
+  assert.ok(!Object.hasOwn(record.capabilities ?? {}, 'canBePrimary'), 'the stored record must drop the capability, not just the read side');
+  assert.deepEqual(grantedCapabilitiesFor('acme', HASH_A, { file }), {});
+});
+
+test('N-1: recordTierFailure on a grant-bearing tier leaves an UNRELATED live capability untouched', () => {
+  const file = tempFile();
+  recordTierResult('acme', 'primary-eligible', { hash: HASH_A, evidence: 'led a run' }, { file });
+  grantCapability('acme', 'canBePrimary', { hash: HASH_A }, { file });
+  recordTierResult('acme', 'statusline', { hash: HASH_A, evidence: 'footer renders' }, { file });
+  grantCapability('acme', 'commandStatusline', { hash: HASH_A }, { file });
+
+  recordTierFailure('acme', 'primary-eligible', { hash: HASH_A }, { file });
+
+  assert.deepEqual(grantedCapabilitiesFor('acme', HASH_A, { file }), { commandStatusline: true });
+});
+
+test('N-1: recordTierFailure on a tier with no live capability (never granted) is a no-op on capabilities', () => {
+  const file = tempFile();
+  recordTierResult('acme', 'primary-eligible', { hash: HASH_A, evidence: 'led a run' }, { file });
+  recordTierFailure('acme', 'primary-eligible', { hash: HASH_A }, { file });
+  const record = grantsFor('acme', { file });
+  assert.equal(record.tiers['primary-eligible'].status, 'failed');
+  assert.equal(record.capabilities, undefined);
+});
+
+test('N-1: recordTierFailure at a DIFFERENT hash still wipes prior tiers/capabilities via the existing freshRecordAt path', () => {
+  const file = tempFile();
+  recordTierResult('acme', 'primary-eligible', { hash: HASH_A, evidence: 'led a run' }, { file });
+  grantCapability('acme', 'canBePrimary', { hash: HASH_A }, { file });
+
+  recordTierFailure('acme', 'primary-eligible', { hash: HASH_B }, { file });
+
+  const record = grantsFor('acme', { file });
+  assert.equal(record.hash, HASH_B);
+  assert.deepEqual(Object.keys(record.tiers), ['primary-eligible']);
+  assert.equal(record.tiers['primary-eligible'].status, 'failed');
+  assert.equal(record.capabilities, undefined);
+  // The old hash's grant is gone too — a hash change voids everything.
+  assert.deepEqual(grantedCapabilitiesFor('acme', HASH_A, { file }), {});
+});
+
+test('recordTierFailure throws TypeError on invalid name/tier/hash', () => {
+  const file = tempFile();
+  assert.throws(() => recordTierFailure('', 'primary-eligible', { hash: HASH_A }, { file }), TypeError);
+  assert.throws(() => recordTierFailure('acme', 'not-a-tier', { hash: HASH_A }, { file }), TypeError);
+  assert.throws(() => recordTierFailure('acme', 'primary-eligible', { hash: '' }, { file }), TypeError);
+});
+
+// ── F-9 (deferred nit, now taken): revokeCapability — per-capability revoke,
+// narrower than revokeGrants' whole-record wipe. ───────────────────────────
+
+test('revokeCapability removes only the named capability, leaving other tiers/capabilities intact', () => {
+  const file = tempFile();
+  recordTierResult('acme', 'primary-eligible', { hash: HASH_A, evidence: 'led a run' }, { file });
+  grantCapability('acme', 'canBePrimary', { hash: HASH_A }, { file });
+  recordTierResult('acme', 'statusline', { hash: HASH_A, evidence: 'footer renders' }, { file });
+  grantCapability('acme', 'commandStatusline', { hash: HASH_A }, { file });
+
+  assert.equal(revokeCapability('acme', 'canBePrimary', { file }), true);
+
+  const record = grantsFor('acme', { file });
+  assert.ok(!Object.hasOwn(record.capabilities, 'canBePrimary'));
+  assert.equal(record.capabilities.commandStatusline, true);
+  // Tiers are untouched — still 'passed', not reverted.
+  assert.equal(record.tiers['primary-eligible'].status, 'passed');
+  assert.equal(record.tiers.statusline.status, 'passed');
+  assert.deepEqual(grantedCapabilitiesFor('acme', HASH_A, { file }), { commandStatusline: true });
+});
+
+test('revokeCapability returns false when the capability was never granted, or the adapter has no record', () => {
+  const file = tempFile();
+  assert.equal(revokeCapability('acme', 'canBePrimary', { file }), false);
+  recordTierResult('acme', 'primary-eligible', { hash: HASH_A, evidence: 'led a run' }, { file });
+  // Tier passed but never granted -> capability never existed to revoke.
+  assert.equal(revokeCapability('acme', 'canBePrimary', { file }), false);
+});
+
+test('revokeCapability rejects a non-grantable capability, including a forged aqeProvider key', () => {
+  const file = tempFile();
+  recordTierResult('acme', 'primary-eligible', { hash: HASH_A, evidence: 'led a run' }, { file });
+  grantCapability('acme', 'canBePrimary', { hash: HASH_A }, { file });
+  assert.throws(() => revokeCapability('acme', 'aqeProvider', { file }), TypeError);
+  assert.throws(() => revokeCapability('acme', 'transcripts', { file }), TypeError);
+  // Nothing was touched by the rejected attempts.
+  assert.deepEqual(grantedCapabilitiesFor('acme', HASH_A, { file }), { canBePrimary: true });
+});
+
+test('revokeCapability on prototype-chain names returns false, never a prototype-chain hit', () => {
+  const file = tempFile();
+  for (const protoName of ['constructor', 'toString', 'hasOwnProperty', '__proto__']) {
+    assert.equal(revokeCapability(protoName, 'canBePrimary', { file }), false);
+  }
 });

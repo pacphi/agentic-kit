@@ -10,13 +10,14 @@
 // setup.mjs and uninstall.mjs's admitted-host branch is reachable through a
 // real command call (setup.run_machine / uninstall.run). sync.mjs's branch
 // is additionally gated by `subsystems.has(hostId)`, sourced from
-// status.mjs's collect() — which has no admitted-host awareness yet
-// (HOST_DETAIL_RENDERERS is hardcoded to opencode; status.mjs is out of this
-// wave's scope). That pre-existing gate means an admitted host's row never
-// enters sync's plan today, so its lifecycle loop body is honestly
-// unreachable through a real `ak sync` — pinned below as documented, current
-// behavior (not a P3 regression: the gate and its rationale predate this
-// wave, and generalizing status.mjs is a separate follow-up).
+// status.mjs's collect() — which (D4, ADR-0031 P3 tracked follow-up) now
+// emits a lean, generic subsystem row (subsystem === hostId) for any admitted
+// lifecycle host that lifecycleExecutionEnabled() gates in for this run
+// (cfg enablement AND the experimental flag — see status.mjs's
+// admittedLifecycleFallbackRows). That closes the gap this file used to
+// pin as a documented gap: an admitted host's row now enters sync's plan,
+// so its already-wired lifecycle loop body runs for real, exactly like
+// setup's and uninstall's below.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -300,9 +301,9 @@ test('uninstall.run --dry-run reports the admitted host generically and runs not
   }
 });
 
-// ── sync: documented, current non-reach (status.mjs has no admitted-host row) ─
+// ── sync: the admitted-host lifecycle branch is reachable (D4) ─────────────
 
-test('sync.run never exercises an admitted host\'s lifecycle hook — status.mjs has no row for it yet (documented, out-of-scope gap)', async () => {
+test('sync.run exercises an admitted host\'s lifecycle hook now that status.mjs emits its subsystem row (D4 closes the ADR-0031 P3 gap)', async () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-ext-lifecycle-sync-'));
   const prevFlag = process.env[FLAG];
   seedHome(cfgWithGlobex(true));
@@ -311,10 +312,10 @@ test('sync.run never exercises an admitted host\'s lifecycle hook — status.mjs
   try {
     const { applyMarker } = admitGlobex(tmpDir);
     const { out } = await withGlobexCli(() => captureLog(() => sync.run({ flags: {}, pkgRoot: PKG_ROOT })));
-    assert.ok(!fs.existsSync(applyMarker),
-      'status.mjs never emits a subsystem row for an admitted host, so subsystems.has(\'globex\') is always false — '
-      + 'sync\'s lifecycle loop is correctly wired but currently unreachable for an admitted host through a real `ak sync`');
-    assert.doesNotMatch(out, /globex:/);
+    assert.ok(fs.existsSync(applyMarker),
+      'status.mjs now emits a subsystem row for an admitted lifecycle host that lifecycleExecutionEnabled() gates '
+      + 'in, so subsystems.has(\'globex\') is true and sync\'s already-wired admitted-host branch runs for real');
+    assert.match(out, /globex: applied — 1 action\(s\)/, `expected the generic one-line summary; got:\n${out}`);
   } finally {
     if (prevFlag === undefined) delete process.env[FLAG]; else process.env[FLAG] = prevFlag;
     resetAdmitted();

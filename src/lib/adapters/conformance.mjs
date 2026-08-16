@@ -39,7 +39,8 @@ import { registerAdmittedExecution, resetAdmittedExecution } from '../execution/
 import { executeRunPlan } from '../execution/runner.mjs';
 import { have } from '../exec.mjs';
 import {
-  CONFORMANCE_TIERS, TIER_GRANTS, adapterGrantsPath, recordTierResult, recordTierGate, grantedCapabilitiesFor,
+  CONFORMANCE_TIERS, TIER_GRANTS, adapterGrantsPath, recordTierResult, recordTierGate, recordTierFailure,
+  grantedCapabilitiesFor,
 } from './grants.mjs';
 
 export { CONFORMANCE_TIERS, TIER_GRANTS };
@@ -439,8 +440,16 @@ async function checkGrantGatedTier({
  * Recording (grants.mjs): a 'passed' tier is recorded via recordTierResult;
  * a 'gated' tier carrying a `gatedBy` upstream ref (only ever session-driving,
  * and only when the caller supplies one — see checkSessionDriving) is
- * recorded via recordTierGate. 'skipped'/'failed' tiers, and 'gated' tiers
- * with no upstream ref, record nothing — there is nothing new to persist.
+ * recorded via recordTierGate, which also VOIDS a live capability the tier
+ * used to back at this same hash. A genuinely 'failed' grant-bearing tier
+ * (one of TIER_GRANTS' keys) is recorded via recordTierFailure — the un-earn
+ * path: a re-run that fails at the SAME hash a capability was earned at
+ * voids that capability too, mirroring the 'gated' downgrade (N-1,
+ * security-review follow-up). A 'skipped' result records nothing, even for a
+ * grant-bearing tier — the tier was never actually evaluated this run (e.g.
+ * its own prerequisite didn't pass), which is ambiguous, not a disproof, so
+ * it must never void a live capability. 'gated' tiers with no upstream ref
+ * also record nothing — there is nothing new to persist.
  * `grantsFile` defaults to the REAL adapter-grants.json (matching grants.mjs's
  * own default-to-real-config-path convention) — callers that don't want a
  * conformance run to touch the real store (tests, dry runs) must pass an
@@ -603,6 +612,21 @@ export async function runTieredConformance({
             recordTierResult(resolvedName, tierResult.tier, { hash, evidence: evidence || tierResult.tier }, { file: grantsFile });
           } else if (tierResult.status === 'gated' && tierResult.gatedBy) {
             recordTierGate(resolvedName, tierResult.tier, { hash, gatedBy: tierResult.gatedBy }, { file: grantsFile });
+          } else if (tierResult.status === 'failed' && Object.hasOwn(TIER_GRANTS, tierResult.tier)) {
+            // N-1 (security-review follow-up): a grant-bearing tier that
+            // RE-RUNS 'failed' at the SAME (unchanged) hash means evidence a
+            // live capability rests on was just shown non-reproducible — void
+            // the stored tier and the capability together (grants.mjs's
+            // recordTierFailure), mirroring recordTierGate's downgrade for
+            // 'gated' immediately above. Deliberately NOT triggered by
+            // 'skipped': a skipped tier (e.g. primary-eligible
+            // short-circuiting because its own prerequisite — activity-
+            // routing — didn't run/pass THIS run) means the tier was never
+            // actually EVALUATED this run, which is ambiguous, not disproven
+            // — downgrading on an ambiguous non-evaluation would void a live
+            // capability on evidence that says nothing about whether it
+            // still holds.
+            recordTierFailure(resolvedName, tierResult.tier, { hash }, { file: grantsFile });
           }
         } catch (error) {
           tierResult.recordError = error?.message ?? String(error);

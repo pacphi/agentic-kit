@@ -13,7 +13,7 @@
 // both the pass and its own evidence) — so no subcommand here accepts or
 // forwards any 'exercise'/callback option.
 import {
-  CONFORMANCE_TIERS, TIER_GRANTS, recordTierGate, grantCapability, revokeGrants,
+  CONFORMANCE_TIERS, TIER_GRANTS, recordTierGate, grantCapability, revokeGrants, revokeCapability,
   grantsFor, grantedCapabilitiesFor, gatedTiersFor,
 } from '../../lib/adapters/grants.mjs';
 import { ok, warn, fail, info, bold } from '../../lib/output.mjs';
@@ -256,10 +256,39 @@ export async function status({
 // capabilities EARNED separately, and vice versa; they are separate stores
 // for separate questions. Fail-safe like `revoke`: reachable with the
 // experimental flag off, so a disabled surface can still be voided.
+//
+// F-9 (deferred nit, now taken): `revoke-grant <name>` alone stays
+// all-or-nothing (revokeGrants — the whole record, forcing a full
+// conformance re-run to recover every OTHER capability too). An optional
+// `[capability]` third positional narrows this to just that one capability
+// (revokeCapability), leaving every other tier result and granted capability
+// untouched.
+//
+// F-6 (security-review follow-up): the two forms differ in what they leave
+// behind, not just in scope. `revoke-grant <name> <capability>` is UN-GRANT,
+// not un-earn — it drops the capability but leaves the gating tier 'passed',
+// so a later re-grant needs no new conformance evidence. `revoke-grant
+// <name>` (no capability) also wipes the tier evidence itself, forcing a
+// fresh conformance run before anything can be re-granted. An operator
+// revoking because they no longer TRUST the recorded evidence (not just
+// withdrawing the grant) wants the whole-record form.
 
-export function revokeGrant({ name, grantsFile }) {
-  if (typeof name !== 'string' || !name) { fail('usage: ak host adapters revoke-grant <name>'); return 2; }
+export function revokeGrant({ name, capability, grantsFile }) {
+  if (typeof name !== 'string' || !name) { fail('usage: ak host adapters revoke-grant <name> [capability]'); return 2; }
   const safeName = stripControl(name);
+
+  if (typeof capability === 'string' && capability) {
+    const safeCapability = stripControl(capability);
+    if (!grantableCapability(capability)) {
+      fail(`'${safeCapability}' is not a grantable capability — ak can only grant ${Object.values(TIER_GRANTS).join(', ')}.`);
+      return 1;
+    }
+    const existed = revokeCapability(name, capability, { file: grantsFile });
+    if (existed) { ok(`revoked capability '${safeCapability}' for '${safeName}' — other tiers and capabilities are untouched`); return 0; }
+    info(`no recorded '${safeCapability}' grant for '${safeName}'`);
+    return 0;
+  }
+
   const existed = revokeGrants(name, { file: grantsFile });
   if (existed) { ok(`revoked all conformance evidence and grants for '${safeName}'`); return 0; }
   info(`no recorded grants for '${safeName}'`);

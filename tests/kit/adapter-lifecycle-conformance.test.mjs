@@ -102,6 +102,58 @@ test('undo preserves a user value changed after apply', () => {
   });
 });
 
+// ── F8 (security-review follow-up): fail-closed gate on apply ─────────────
+// Mirrors the ADMITTED-host hook-failure shapes exactly (lifecycle-registry.mjs's
+// hookFailureResult): detect/verify failure -> {observed:null, error}; plan
+// failure -> {changed:false, operations:[], error}. opencode's own detect()/
+// plan() never emit a `.error` key on any path (see opencode.mjs), so the
+// gate below only ever fires for an admitted host's genuine hook failure.
+
+test('apply is aborted when detect returns the admitted-host hook-failure shape ({observed:null, error})', async () => {
+  let applyCalls = 0;
+  const adapter = {
+    id: 'fake-hook-failure',
+    detect() { return { observed: null, error: 'detect hook exited 1' }; },
+    plan() { throw new Error('plan must never run when detect failed'); },
+    apply() { applyCalls++; return { changed: true }; },
+    verify() { return { observed: null }; },
+    undo() { return { changed: false }; },
+  };
+  const result = await runLifecycle({ adapter, action: 'apply' });
+  assert.equal(applyCalls, 0, 'apply must never run after a detect hook failure');
+  assert.equal(result.ok, false);
+  assert.equal(result.changed, false);
+  assert.deepEqual(result.errors, ['detect hook exited 1']);
+});
+
+test('apply is aborted when plan returns the admitted-host hook-failure shape ({changed:false, operations:[], error})', async () => {
+  let applyCalls = 0;
+  const adapter = {
+    id: 'fake-hook-failure',
+    detect() { return { observed: { enabled: false } }; },
+    plan() { return { changed: false, operations: [], error: 'plan hook exited 1' }; },
+    apply() { applyCalls++; return { changed: true }; },
+    verify() { return { observed: { enabled: false } }; },
+    undo() { return { changed: false }; },
+  };
+  const result = await runLifecycle({ adapter, action: 'apply' });
+  assert.equal(applyCalls, 0, 'apply must never run after a plan hook failure');
+  assert.equal(result.ok, false);
+  assert.equal(result.changed, false);
+  assert.deepEqual(result.errors, ['plan hook exited 1']);
+});
+
+test('the fail-closed gate does not fire for a normal facts/plan shape carrying no `.error` key (opencode-safety proof)', async () => {
+  // fakeLifecycleAdapter's detect/plan return {observed:{...}} / {changed,
+  // operations} — exactly the shape opencode's own detect()/plan() return
+  // (no `.error` key ever) — so apply must run through untouched.
+  const surface = fakeSurface({ enabled: false });
+  const adapter = fakeLifecycleAdapter(surface);
+  const result = await runLifecycle({ adapter, action: 'apply' });
+  assert.equal(result.changed, true, 'apply must still run when neither facts nor plan carry an `.error` key');
+  assert.deepEqual(surface.snapshot(), { enabled: true });
+});
+
 test('undo removes an ak-created value while preserving sibling configuration', () => {
   assert.deepEqual(undoOwnedValues(
     { env: { AK_MANAGED: 'yes', USER_KEY: 'keep' } },

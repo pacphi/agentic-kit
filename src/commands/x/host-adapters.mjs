@@ -408,7 +408,7 @@ export async function run({
   // `conformance`/`grant`/`gate`/`status` stay gated — they're the surface
   // that reads/records new trust, evidence, or capability.
   if (sub === 'revoke') return revoke({ name, consent });
-  if (sub === 'revoke-grant') return revokeGrant({ name, grantsFile });
+  if (sub === 'revoke-grant') return revokeGrant({ name, capability: positionals[2], grantsFile });
 
   if (!flagEnabled(env)) {
     fail(`experimental host-adapter surface is disabled — set ${FLAG_ENV_VAR}=1`);
