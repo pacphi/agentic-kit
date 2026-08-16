@@ -1,0 +1,191 @@
+# ADR-0031 — Capability graduation: earned parity for external host adapters, and the upstream request path
+
+- **Status:** Accepted (governance decision; implementation staged)
+- **Date:** 2026-08-16
+- **Deciders:** agentic-kit maintainers
+- **Related:** [ADR-0016](0016-capability-driven-integration-adapters.md),
+  [ADR-0018](0018-generalized-host-worker-execution.md),
+  [ADR-0019](0019-escalation-in-ak-run.md),
+  [ADR-0023](0023-fail-closed-operations-and-explicit-degradation.md),
+  [ADR-0029](0029-host-adapter-extension-point.md) (amends its "permanent caps" framing — see
+  [Amendment](#amendment-to-adr-0029))
+- **Amends:** ADR-0029, on one point only: the three capability caps are reframed from *permanent*
+  to *not self-declarable, but earnable*.
+
+## Context
+
+[ADR-0029](0029-host-adapter-extension-point.md) admitted external host adapters as a declarative
+manifest plus consented, subprocess-only hooks, behind `AK_EXPERIMENTAL_HOST_ADAPTERS=1`. To make
+the door safe, three capabilities were made **inexpressible** in the manifest schema —
+`canBePrimary`, `aqeProvider`, and `commandStatusline` — and ADR-0029 described that block as
+permanent.
+
+Two things push past that framing:
+
+1. **The product intent is full parity.** A host that clears conformance should be able to
+   participate exactly like a built-in — lead a run, own a status line, be accounted for in
+   quality — not sit permanently behind a glass wall. "Second-class forever" is not the goal;
+   "earn your way to first-class" is.
+
+2. **`ak` is downstream of two other systems.** [ruflo](https://github.com/ruvnet/ruflo)
+   orchestrates the agent loop and [agentic-qe](https://github.com/proffesor-for-testing/agentic-qe)
+   runs quality. Some parity ceilings are genuinely not `ak`'s to lift — they live upstream — and a
+   contributor chasing a conformance tier needs a real route to express what's missing, not a dead
+   end.
+
+This ADR resolves both. It keeps every safety property ADR-0029 established and adds the governance
+model that turns the caps from a wall into a ladder.
+
+## Decision
+
+### 1. Earned, never self-declared
+
+The manifest schema stays a **strict allow-list in which a capped capability is inexpressible**. An
+adapter can never *write down* that it is primary, an AQE provider, or a command-statusline owner.
+This is the safety invariant from ADR-0029 and it is permanent: self-declaration is the attack
+surface, so it stays closed forever.
+
+Parity comes through a **separate channel**. A capability is *earned* by passing a conformance tier
+and *granted* by the maintainer — recorded as a hash-pinned **capability grant** (the same
+edit-invalidation model as adapter consent), never as a field in the adapter's own manifest. The
+adapter never asserts the capability; conformance evidence plus an explicit maintainer grant confers
+it. `hostTierLabel()` and the registry already render behaviour from capabilities, so a granted
+capability lights up at every call site without special-casing.
+
+### 2. Tiered conformance
+
+Conformance becomes tiered rather than pass/fail. Each tier is a black-box test set — spawn the real
+host, assert the real behaviour, against an installed layout — that gates one capability:
+
+| Tier | Gates | Evidence shape |
+| ---- | ----- | -------------- |
+| `admission` | Registration through the fail-closed gate (ADR-0029, shipped) | manifest validates, admits, hooks run |
+| `session-driving` | `canDriveSession` — the host actually drives an interactive/oneshot session | a real session completes and is observed |
+| `activity-routing` | `canRouteActivities` — the host runs a supervised `ak run` worker to a structured result | a worker completes under the runner's contract (ADR-0018) |
+| `primary-eligible` | Grants `canBePrimary` — the host can *lead*: anchor routing, be escalated toward | leads a run and receives an escalation, per ADR-0019 |
+| `statusline` | Grants `commandStatusline` — renders a command-backed footer through supervised hooks | a footer renders and refreshes |
+
+Passing a tier records evidence; the maintainer's grant turns evidence into capability. A tier the
+adapter cannot meet because the capability is upstream is marked **gated** (§4), not failed.
+
+### 3. Two graduation destinations
+
+A conformed adapter lands in one of two places, the maintainer's call:
+
+- **Blessed external adapter** — added to a curated, hash-pinned list. It stays out-of-tree and
+  experimental, holding exactly the capabilities its tiers earned. Right for niche or long-tail
+  hosts the project does not want to own.
+- **Promoted built-in** — its host descriptor is adopted as a first-party registry entry. Because of
+  the registry-driven refactor delivered across Phases&nbsp;0–2, this is a small, ordinary PR (a
+  registry entry, a lifecycle adapter, an About card). Once built-in, the caps no longer apply
+  *because it is now first-party code the maintainer vouches for* — that is what promotion means. Its
+  hook scripts either ship bundled or are reimplemented as in-process glue, the maintainer's choice.
+
+### 4. The upstream capability-request path
+
+When a conformance tier cannot be met, the first question is **whose capability is missing**:
+
+- **`ak`-local** (run execution, the trust CLI, remote manifest sources, quality-gate anchors) — the
+  project's to build. A normal `ak` change; no one to wait on.
+- **Upstream — agentic-qe** — being a recognized **AQE provider type** is not `ak`'s to grant.
+  agentic-qe's provider set is a closed, upstream-defined enumeration (verified against
+  `agentic-qe@3.13.10`: `ALL_PROVIDER_TYPES` plus a `createProvider` switch, extended only by an
+  upstream code change). The path: file a concrete capability request against agentic-qe (a
+  provider-plugin API), record the tier as `gated: agentic-qe#NNN`, and light it up when the upstream
+  release ships. *Interim:* quality still runs through the model provider underneath the host, so QE
+  is not blocked — only the host's own AQE identity is.
+- **Upstream — ruflo** — being a native ruflo **backend** (an `ENABLE_*` target that drives the loop)
+  is defined inside ruflo (grounded against `ruvnet/ruflo@45e65b5`: backend enablement is per-host
+  `ENABLE_CLAUDE_CODE` / `ENABLE_CODEX` / `ENABLE_GEMINI_MCP`, not an outside registration). The path:
+  request a documented backend-registration surface upstream. *Interim:* the host runs through `ak`'s
+  own supervised execution, just not as a ruflo-native backend.
+
+The maintainer champions the request upstream with a named extension point, tracks the gated tier so
+an adapter's status shows exactly what it waits on, and exposes the capability in the adapter contract
+once upstream releases it. This is what keeps "no limitations after conformance" honest: the
+limitations that *are* real get a documented, per-layer route to disappear.
+
+### 5. The contributor-to-built-in lifecycle
+
+Graduation runs on a fixed sequence. A contributor **authors** a manifest and hooks,
+**self-tests** against the conformance kit, and **publishes** — at which point any user may opt in
+behind the experimental flag with hash-pinned consent, needing nothing from the maintainer. To go
+further, the contributor **proposes** it with a conformance report; the maintainer **verifies** by
+re-running the conformance kit and reviewing the hook scripts (the only part that executes),
+**decides** the tier and destination (§3), and **releases**. Conformance is objective; the
+maintainer is the judge; trust rests on reproduced evidence plus a hook read, never on running the
+contributor's code inside `ak`.
+
+### 6. Freeze criteria
+
+`contract: 1` (ADR-0029) freezes and the experimental flag is dropped when a **real** external
+adapter (Hermes first) clears the full conformance kit and survives one release of soak. Graduation
+of a capability tier and the freeze of the contract are distinct: tiers can be earned while the
+contract is still experimental.
+
+## Amendment to ADR-0029
+
+ADR-0029 states the three caps are permanent. This ADR amends that: **the block on
+*self-declaration* is permanent; the *capability* is earnable** through a conformance tier and a
+maintainer grant (§1, §2). ADR-0029's schema, admission gate, consent model, and hook runner are
+unchanged — capability grants are additive and live outside the manifest. A matching update note is
+added to ADR-0029 pointing here.
+
+## Consequences
+
+- An external adapter has a documented, evidence-gated route to full parity, up to and including
+  shipping as a built-in — without ever loading third-party code into the `ak` process and without
+  ever letting a manifest self-assert a capability.
+- The maintainer's review burden is bounded and objective: reproduce a conformance report, read the
+  hooks, grant a tier. No new trust primitive beyond the hash-pinned grant.
+- Real upstream ceilings are neither hidden nor faked: they become tracked capability requests with
+  an honest interim behaviour and a light-up path.
+- `ak` positions itself as the integrator that *shapes* its substrates rather than only consuming
+  them — the upstream-request path is a first-class part of the model, not a footnote.
+
+## Implementation status
+
+Per the ADR discipline this repository adopted (a dated, self-graded table before an Accepted claim
+rests on delivery): the **governance decision** is accepted; the **machinery** is staged and mostly
+unbuilt. This table is the source of truth for what is real.
+
+| Piece | Status (2026-08-16) | Note |
+| ----- | ------------------- | ---- |
+| Admission gate, consent store, hook runner, conformance kit (`admission` tier) | **Working** | ADR-0029, merged (PR #149) |
+| `ak host adapters trust` CLI (records consent/grants) | **Proposed — not built** | Smallest next step; today admission refuses `consent-required` |
+| External execution (`ak run` drives an admitted host) | **Proposed — not built** | The seam is a comment-only lookup today |
+| External lifecycle execution wired into setup/sync/uninstall | **Proposed — not built** | Loops are built-in-scoped by design until generalized |
+| Tiered conformance harness (`session-driving` … `statusline`) | **Proposed — not built** | Extends the single conformance kit |
+| Capability-grant store + promotion command | **Proposed — not built** | Hash-pinned, mirrors consent |
+| Remote manifest sources (npm / URL) + resolve→hash ordering | **Proposed — not built** | File-path manifests only today |
+| Upstream request tracking (`gated: <repo>#NNN` against a tier) | **Proposed — not built** | Needs a place to record per-tier gating |
+| A real external adapter (Hermes) clearing the kit → contract freeze | **Not started** | Freeze criterion (§6) |
+
+## Alternatives considered
+
+- **Keep the caps permanent (ADR-0029 as written).** Rejected: it makes external hosts second-class
+  forever and contradicts the product intent of full parity after conformance.
+- **Let the manifest self-declare capabilities, checked at runtime.** Rejected outright. This is
+  ruflo's own cautionary tale, surfaced in the research sweep behind this work: a fully typed
+  capability-permission system shipped with *zero runtime enforcement*. Runtime checks on a
+  self-asserted capability are exactly the honor-system trap the strict-allow-list schema exists to
+  avoid. Self-declaration stays inexpressible; capability comes from earned evidence plus an explicit
+  grant.
+- **Treat every ceiling as `ak`-local and build around upstream.** Rejected as dishonest and
+  unmaintainable: agentic-qe's provider enum and ruflo's backend model are upstream facts. Faking a
+  local shim (e.g. projecting an unknown host into agentic-qe's config) would fabricate an identity
+  the upstream tool never declared it understands. The upstream-request path (§4) is the honest
+  alternative.
+
+## References
+
+- ADR-0029 (the extension point, schema, admission, consent, hook runner) and its amendment above.
+- ADR-0018 (supervised worker contract), ADR-0019 (bounded escalation) — the substance of the
+  `activity-routing` and `primary-eligible` tiers.
+- Upstream facts grounded in a source-cited research sweep: `agentic-qe@3.13.10`
+  (`ALL_PROVIDER_TYPES`, the `createProvider` switch, the closed provider enum) and
+  `ruvnet/ruflo@45e65b5` (`ENABLE_*` backend model). Re-verify against upstream HEAD before filing an
+  actual capability request.
+- Companion explainer for consumers and implementers:
+  [`docs/HOST-EXTENSIBILITY-EXPLAINER.html`](../HOST-EXTENSIBILITY-EXPLAINER.html); design dossier:
+  [`docs/ADAPTER-CONTRACT-DOSSIER.html`](../ADAPTER-CONTRACT-DOSSIER.html).
