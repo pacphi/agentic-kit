@@ -58,16 +58,28 @@ function globexHost(overrides = {}) {
   };
 }
 
-/** A real, standalone `node -e` subprocess — no injected runHook — that
- *  writes a marker file (proving it actually ran) then echoes a valid
- *  lifecycleResult payload on stdout. */
-function markerHookCommand(markerFile, payload) {
-  const script = `require('fs').writeFileSync(${JSON.stringify(markerFile)}, 'ran');`
-    + `process.stdout.write(${JSON.stringify(JSON.stringify(payload))});`;
-  return [process.execPath, '-e', script];
+/** Writes a real, standalone marker-writing hook script (ESM `.mjs`, no
+ *  injected runHook — spawned through the REAL hook-runner) into `dir` under
+ *  `filename`, and returns the RELATIVE `[process.execPath, filename]`
+ *  command anchored to `dir` via baseDir. The marker path lives in FILE
+ *  CONTENT, never a spawn argv element — a `node -e '<script embedding a
+ *  JSON-stringified absolute path>'` command used to do the latter, but an
+ *  absolute path is full of backslashes and quotes on Windows, exactly what
+ *  CreateProcess's argv-quoting algorithm is most likely to mangle. File
+ *  content is plain JS source text handed to Node's own parser, never
+ *  touched by OS argv quoting, so this sidesteps that risk entirely (and,
+ *  as a side effect, the relative filename argument is unambiguous under
+ *  the F-1 anchorability check — no embedded '/' from a marker path to be
+ *  mistaken for a relative path argument). */
+function writeMarkerHook(dir, filename, markerFile, payload) {
+  fs.writeFileSync(path.join(dir, filename),
+    "import fs from 'node:fs';\n"
+    + `fs.writeFileSync(${JSON.stringify(markerFile)}, 'ran');\n`
+    + `process.stdout.write(${JSON.stringify(JSON.stringify(payload))});\n`);
+  return [process.execPath, filename];
 }
 
-function globexManifest({ applyMarker, undoMarker }) {
+function globexManifest({ applyCommand, undoCommand }) {
   return validateAdapterManifest({
     name: 'globex',
     version: '1.0.0',
@@ -76,22 +88,8 @@ function globexManifest({ applyMarker, undoMarker }) {
     detection: { bin: 'globex-cli' },
     driving: { surfaces: ['acp'] },
     lifecycle: {
-      apply: {
-        hook: {
-          command: markerHookCommand(applyMarker, {
-            ok: true, changed: true, facts: null, actions: ['wired'], ownership: [], warnings: [], errors: [],
-          }),
-          timeoutMs: 5000,
-        },
-      },
-      undo: {
-        hook: {
-          command: markerHookCommand(undoMarker, {
-            ok: true, changed: true, facts: null, actions: ['unwired'], ownership: [], warnings: [], errors: [],
-          }),
-          timeoutMs: 5000,
-        },
-      },
+      apply: { hook: { command: applyCommand, timeoutMs: 5000 } },
+      undo: { hook: { command: undoCommand, timeoutMs: 5000 } },
     },
     trust: {
       changes: [{
@@ -107,28 +105,41 @@ function globexManifest({ applyMarker, undoMarker }) {
  *  These tests are about the command-loop WIRING/gating (does the loop reach
  *  the hook at all), not F-1 anchoring itself — F-1 has its own dedicated
  *  tests below and in lifecycle-registry.test.mjs / adapter-admission.test.mjs
- *  — so `baseDir` is passed explicitly (tmpDir plays the adapter's own
- *  directory) rather than left null: the hook commands here are `node -e
- *  <script>`, and the script argument legitimately embeds absolute marker
- *  paths containing '/', which the anchorability heuristic (correctly, for
- *  the real file-path-argument case it targets) cannot tell apart from a
- *  relative path argument. A null baseDir would refuse them here for the
- *  wrong reason. */
+ *  — but `baseDir: tmpDir` is still required here (not optional): the hook
+ *  scripts are written INTO tmpDir and referenced by a relative filename, so
+ *  tmpDir must be the adapter directory the relative command resolves
+ *  against, or the hook simply wouldn't be found. */
 function admitGlobex(tmpDir) {
   const applyMarker = path.join(tmpDir, 'apply.marker');
   const undoMarker = path.join(tmpDir, 'undo.marker');
+  const applyCommand = writeMarkerHook(tmpDir, 'apply-hook.mjs', applyMarker, {
+    ok: true, changed: true, facts: null, actions: ['wired'], ownership: [], warnings: [], errors: [],
+  });
+  const undoCommand = writeMarkerHook(tmpDir, 'undo-hook.mjs', undoMarker, {
+    ok: true, changed: true, facts: null, actions: ['unwired'], ownership: [], warnings: [], errors: [],
+  });
   applyAdmitted([{ entry: globexHost() }]);
-  registerAdmittedLifecycle(globexManifest({ applyMarker, undoMarker }), { baseDir: tmpDir });
+  registerAdmittedLifecycle(globexManifest({ applyCommand, undoCommand }), { baseDir: tmpDir });
   return { applyMarker, undoMarker };
 }
 
 /** Prepend a fake `globex-cli` bin to PATH for the duration of `fn` — plays
  *  the installed CLI for detection.bin's `have()` probe. /usr/bin:/bin ride
- *  along for the underlying `which` call itself. */
+ *  along for the underlying `which` call itself.
+ *
+ *  Cross-OS shim, mirroring setup-command.test.mjs's own withOpencodeCli
+ *  exactly: a bare, extensionless, chmod+x file satisfies POSIX `which`, but
+ *  `have()`'s Windows path (exec.mjs's resolveShim) walks PATHEXT looking
+ *  for a `.com`/`.exe`/no-ext file OR a `.cmd` shim with a `.ps1` sidecar —
+ *  an extensionless file alone is invisible to it there. All three variants
+ *  are written unconditionally (not gated on process.platform): harmless
+ *  extras on POSIX, load-bearing on Windows. */
 async function withGlobexCli(fn) {
   const bin = path.join(HOME, `fake-bin-globex-${Math.random().toString(36).slice(2, 8)}`);
   fs.mkdirSync(bin, { recursive: true });
   fs.writeFileSync(path.join(bin, 'globex-cli'), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+  fs.writeFileSync(path.join(bin, 'globex-cli.cmd'), '@echo off\r\nexit /b 0\r\n');
+  fs.writeFileSync(path.join(bin, 'globex-cli.ps1'), 'exit 0\r\n');
   const prev = process.env.PATH;
   process.env.PATH = [bin, '/usr/bin', '/bin'].join(path.delimiter);
   try { return await fn(); } finally { process.env.PATH = prev; rmrf(bin); }

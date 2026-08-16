@@ -431,9 +431,15 @@ test('F-1 (bootstrap): a file-sourced manifest derives baseDir from realpath(dir
     // than wherever this test process happens to be running from.
     fs.writeFileSync(path.join(tmpDir, 'apply-hook.mjs'),
       "process.stdout.write(JSON.stringify({ok:true,changed:true,actions:['wired'],ownership:[],warnings:[],errors:[]}));\n");
+    // process.execPath (absolute), not the bare token 'node' — runAdapterHook
+    // spawns with shell:false, and a bare 'node' does not resolve on Windows
+    // (no PATHEXT/shell resolution there), so the subprocess would never
+    // start. process.execPath is the running node's own absolute path,
+    // always spawnable on every OS; the RELATIVE 'apply-hook.mjs' argument
+    // is what this test is actually anchoring, unaffected by the change.
     const manifest = validateAdapterManifest(validManifest({
       name, host: validHost({ id: name }),
-      lifecycle: { apply: { hook: { command: ['node', 'apply-hook.mjs'] } } },
+      lifecycle: { apply: { hook: { command: [process.execPath, 'apply-hook.mjs'] } } },
     }));
     const manifestPath = path.join(tmpDir, 'manifest.json');
     fs.writeFileSync(manifestPath, JSON.stringify(manifest));
@@ -458,9 +464,13 @@ test('F-1 (bootstrap): a file-sourced manifest derives baseDir from realpath(dir
 
 test('F-1 (bootstrap): an npm-sourced admitted manifest with a relative lifecycle hook surfaces a lifecycle-unanchored warning, and the verb is refused (never spawned)', async () => {
   const name = 'hermes-f1-npm';
+  // process.execPath, not the bare token 'node' — this verb is refused
+  // before ever spawning either way (npm source -> null baseDir -> unanchored),
+  // but kept consistent with the file-sourced test above rather than leaving
+  // a bare token that would misbehave the moment this test's shape changes.
   const manifest = validateAdapterManifest(validManifest({
     name, host: validHost({ id: name }),
-    lifecycle: { apply: { hook: { command: ['node', 'apply-hook.mjs'] } } },
+    lifecycle: { apply: { hook: { command: [process.execPath, 'apply-hook.mjs'] } } },
   }));
   const hash = hashManifest(manifest);
   const result = await bootstrapHostAdapters({
