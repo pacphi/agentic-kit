@@ -1,5 +1,10 @@
 // x host adapters — the trust CLI for external host-adapter manifests (ADR-0031
-// P1). Nothing in admission.mjs ever writes consent; this closes that gap by
+// P1) plus the tiered conformance runner (P4). The maintainer's grant/gate CLI
+// (P5) and the upstream-gate display (P7) live in the sibling
+// host-adapters-grants.mjs (split out to stay under the house 500-line-per-file
+// budget) and are re-exported into this file's `run()` dispatch below — from
+// the operator's point of view it is all one `ak host adapters` surface.
+// Nothing in admission.mjs ever writes consent; this closes that gap by
 // recording hash-pinned consent the same way Codex pins an MCP server's
 // content (ADR-0029 §6). No adapter code ever executes here — this module
 // only reads, validates, hashes, discloses, and (on confirmation) records.
@@ -17,6 +22,9 @@ import * as consentStore from '../../lib/adapters/consent.mjs';
 import { runTieredConformance as defaultRunTieredConformance } from '../../lib/adapters/conformance.mjs';
 import { loadKitConfig } from '../../lib/config.mjs';
 import { ok, warn, fail, info, dim, bold } from '../../lib/output.mjs';
+import {
+  grant as grantCap, gate as gateTier, status as statusReport, revokeGrant,
+} from './host-adapters-grants.mjs';
 
 const FLAG_ENV_VAR = 'AK_EXPERIMENTAL_HOST_ADAPTERS';
 
@@ -48,7 +56,7 @@ async function defaultAsk(question) {
  * JSON.stringify does NOT escape, unlike C0) outright; \n/\t/\r collapse to
  * a single space instead of vanishing, so a multi-line/tabbed string stays
  * readable as one line rather than silently losing a word boundary. */
-function stripControl(value) {
+export function stripControl(value) {
   const input = String(value ?? '');
   let out = '';
   for (const ch of input) {
@@ -60,7 +68,7 @@ function stripControl(value) {
   return out;
 }
 
-function findEntry(cfg, name) {
+export function findEntry(cfg, name) {
   return (Array.isArray(cfg?.hostAdapters) ? cfg.hostAdapters : []).find((e) => e?.name === name) ?? null;
 }
 
@@ -69,7 +77,7 @@ function findEntry(cfg, name) {
  * posture admission.mjs's admitOne holds. `reader` may return either the
  * sources.mjs `{raw, origin}` shape or a bare raw document (tests are free
  * to stub either). */
-async function loadAndHash(entry, { reader }) {
+export async function loadAndHash(entry, { reader }) {
   let raw;
   // Fail-closed, not fail-open: a bare-raw reader result (no {raw,origin}
   // wrapper — including one whose `origin` is missing/malformed) is
@@ -128,7 +136,7 @@ async function loadAndHash(entry, { reader }) {
 
 /** Trust state for one entry — never throws. One of 'trusted', 'consent-stale',
  * 'not consented', or 'manifest error (<reason>)'. */
-async function stateFor(entry, { consent, reader }) {
+export async function stateFor(entry, { consent, reader }) {
   if (typeof entry?.name !== 'string' || !entry.name) return 'manifest error (invalid-entry: missing name)';
   const loaded = await loadAndHash(entry, { reader });
   if (!loaded.ok) return `manifest error (${stripControl(loaded.reason)})`;
@@ -288,7 +296,7 @@ function tierLine(tier) {
   return `${String(tier.tier).padEnd(18)} ${String(tier.status).padEnd(8)} ${dim(stripControl(detail))}`;
 }
 
-function hookCommandsFor(manifest) {
+export function hookCommandsFor(manifest) {
   const hooks = [];
   for (const [verb, def] of Object.entries(manifest.lifecycle ?? {})) {
     if (def?.hook?.command) hooks.push(`lifecycle.${verb}: ${JSON.stringify(def.hook.command)}`);
@@ -395,11 +403,12 @@ export async function run({
 
   // Revocation is fail-safe and stays reachable regardless of the
   // experimental flag: an operator who turns the flag OFF must still be
-  // able to withdraw a standing consent record, or that record silently
+  // able to withdraw a standing consent or grant record, or it silently
   // reactivates the next time the flag is turned back on. `list`/`trust`/
-  // `conformance` stay gated — they're the surface that reads/records new
-  // trust or evidence.
+  // `conformance`/`grant`/`gate`/`status` stay gated — they're the surface
+  // that reads/records new trust, evidence, or capability.
   if (sub === 'revoke') return revoke({ name, consent });
+  if (sub === 'revoke-grant') return revokeGrant({ name, grantsFile });
 
   if (!flagEnabled(env)) {
     fail(`experimental host-adapter surface is disabled — set ${FLAG_ENV_VAR}=1`);
@@ -420,7 +429,23 @@ export async function run({
       name, cfg: resolvedCfg, reader, runTiered: runTieredConformance, consentFile, grantsFile,
     });
   }
+  // F-8 (security review, ADR-0031-accurate naming): `bless` is the alias —
+  // §3 calls this exact out-of-tree grant path a "Blessed external adapter";
+  // "Promoted built-in" is the separate manual registry PR this command does
+  // NOT do. `grant` stays the primary spelling; `promote` was dropped.
+  if (sub === 'grant' || sub === 'bless') {
+    return grantCap({
+      name, capability: positionals[2], cfg: resolvedCfg, consent, reader, ask, isTTY,
+      yes: !!flags.yes, grantsFile,
+    });
+  }
+  if (sub === 'gate') {
+    return gateTier({
+      name, tier: positionals[2], ref: positionals[3], cfg: resolvedCfg, reader, grantsFile,
+    });
+  }
+  if (sub === 'status') return statusReport({ name, cfg: resolvedCfg, reader, grantsFile });
 
-  fail(`unknown host adapters subcommand: ${sub} (list|trust|revoke|conformance)`);
+  fail(`unknown host adapters subcommand: ${sub} (list|trust|revoke|conformance|grant|bless|gate|status|revoke-grant)`);
   return 2;
 }
