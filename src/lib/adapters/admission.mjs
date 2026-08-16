@@ -217,7 +217,48 @@ export async function bootstrapHostAdapters({
 
   if (admitted.length) {
     const { applyAdmitted } = await import('./admitted.mjs');
-    applyAdmitted(admitted);
+
+    // Keystone (ADR-0031 §1): build the per-host granted-capability lookup
+    // BEFORE applying the overlay, so an earned canBePrimary/commandStatusline
+    // is live in effectiveHostRegistry() from process start. Guarded and
+    // non-fatal, lazy import — the same posture as the execution/lifecycle
+    // registration blocks below, and a NEW sibling concern to them (it does
+    // not touch either). One host's grant lookup failing must never block
+    // another host's, or the admission result itself.
+    //
+    // CRITICAL: the hash passed to grantedCapabilitiesFor is computed FRESH
+    // here, via hashManifest(result.manifest) — never read from a cache or
+    // carried over from admitOne's own internal hash — because a stale hash
+    // would silently defeat grants.mjs's edit-invalidation pin (a manifest
+    // edited since the grant must re-hash to a different value and come back
+    // {}, dropping the capability). grantedCapabilitiesFor is the ONLY
+    // sanctioned reader for this (see grants.mjs's module-header invariant);
+    // reading grantsFor(name).capabilities directly would return the
+    // unfiltered set and is exactly the bug that invariant exists to prevent.
+    let grantsByName;
+    try {
+      const { grantedCapabilitiesFor } = await import('./grants.mjs');
+      // Object.create(null), not {} (F-6): admitted host ids come from
+      // consented adapter names, which are attacker-influenceable in
+      // principle — a plain object literal's prototype chain would make
+      // 'constructor' a live (if inert) key collision. No inherited
+      // properties at all closes that off entirely; admitted.mjs's own
+      // Object.hasOwn guard on the read side is the belt to this suspenders.
+      grantsByName = Object.create(null);
+      for (const result of admitted) {
+        try {
+          grantsByName[result.name] = grantedCapabilitiesFor(result.name, hashManifest(result.manifest));
+        } catch (error) {
+          warnings.push({ name: result.name, reason: 'grant-lookup-failed', detail: error?.message ?? String(error) });
+        }
+      }
+    } catch {
+      // grants.mjs unavailable — proceed ungranted (manifest-floor
+      // capabilities only), exactly like the flag-off path. Never fatal.
+      grantsByName = undefined;
+    }
+
+    applyAdmitted(admitted, { grantsByName });
 
     // name -> the cfg entry's own declared source, for F-1's baseDir
     // derivation below (admitted results carry the validated manifest, not

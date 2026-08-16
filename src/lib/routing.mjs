@@ -172,6 +172,20 @@ export function formatModelHelp() {
 // reasoning roles). When codex is chosen as PRIMARY, we mirror each default route
 // to the opposite host so codex takes the lead and claude becomes the alternate —
 // a defaults/policy change only (DualModeOrchestrator workers are symmetric).
+// Frozen at import time — built-ins only, deliberately (audited for the D2
+// keystone wave, ADR-0031 §1). Every current reader of PRIMARY_HOSTS
+// (providers.mjs's applySetupHostFlags `--primary-host` validation, and
+// x/host.mjs's `ak host pick` primary-host flag + selection menu) is the
+// primary-host SELECTION UX, not an eligibility-VALIDATION path — extending
+// that picker surface to an admitted external host is explicitly out of
+// scope this wave (the deferred pick surface), mirroring how HOSTS above
+// stays display-only. hosts.mjs's drivingHost() does NOT use this constant —
+// it consults admitted.mjs's effectivePrimaryHostIds() (fresh per call)
+// instead, so the eligibility PRIMITIVE is live there. That said, no
+// production path drives kit.json's routing.primaryHost to an admitted
+// external id today (the picker that writes it stays built-in-only, as
+// above), so this is a live primitive with no live privileged caller yet —
+// not an active validation gate anything currently depends on.
 export const PRIMARY_HOSTS = primaryHostIds();
 export const DEFAULT_PRIMARY_HOST = 'claude';
 
