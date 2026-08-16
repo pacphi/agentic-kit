@@ -12,7 +12,9 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { runTieredConformance, CONFORMANCE_TIERS } from '../../src/lib/adapters/conformance.mjs';
-import { grantsFor, grantCapability, grantedCapabilitiesFor } from '../../src/lib/adapters/grants.mjs';
+import {
+  grantsFor, grantCapability, grantedCapabilitiesFor, recordTierResult,
+} from '../../src/lib/adapters/grants.mjs';
 import { lifecycleAdapterFor } from '../../src/lib/adapters/lifecycle-registry.mjs';
 
 const FIXTURE_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../fixtures/adapters/acme');
@@ -409,6 +411,114 @@ test('primary-eligible tier: a caller-supplied legacy exercisePrimaryEligible op
   assert.match(tier.evidence, /genuine ADR-0019 escalation onto itself/);
   const record = grantsFor('acme', { file: grantsFile });
   assert.notEqual(record.tiers['primary-eligible'].evidence, 'FAKE-LAUNDERED-PASS');
+});
+
+// ── N-1 (security-review follow-up): the persist loop's un-earn path ───────
+// recordTierGate already voids a live capability when a grant-bearing tier
+// is downgraded to 'gated' at the same hash (F-2 above). These tests prove
+// the mirrored path for a genuine RE-FAIL: a grant-bearing tier that runs
+// 'failed' at the SAME (unchanged) hash a capability was earned at must void
+// both the stored tier and the capability — never leave a live capability
+// standing on evidence just shown non-reproducible.
+
+/** A custom execution.run.hook (inline `node -e`, no fixture file edits) that
+ * succeeds for activity-routing's own worker (id 'conformance-w1' — never
+ * matches the 'primary-eligible' prefix check) but genuinely fails for
+ * primary-eligible's two workers (ids 'primary-eligible-direct'/
+ * '-escalation'), gated behind an on-disk flag file the test flips between
+ * runs. This lets the SAME manifest content (same hash) genuinely PASS
+ * primary-eligible on one run and genuinely FAIL it on the next, while
+ * activity-routing — primary-eligible's own real prerequisite — keeps
+ * genuinely passing both times. No '/' or '\' anywhere in the inline script
+ * text: commandIsUnanchorable (execution/admitted.mjs) inspects every arg,
+ * and a slash would make this otherwise-absolute-argv0 command read as
+ * needing baseDir anchoring, which this mem:// source has none of. */
+function flakyPrimaryEligibleManifest(flagPath) {
+  const NODE = process.execPath;
+  const script = 'const fs=require("fs");let i="";process.stdin.on("data",c=>{i+=c});'
+    + 'process.stdin.on("end",()=>{const id=process.env.AK_WORKER_ID||"";const flag=process.argv[1];'
+    + 'if(id.indexOf("primary-eligible")===0&&fs.existsSync(flag)){process.stderr.write("deliberate re-run failure");process.exit(3);return}'
+    + 'process.stdout.write(JSON.stringify({summary:"ok "+id,observedModel:null,provider:"acme-flaky"}))});';
+  const raw = rawAcmeManifest();
+  // No baseDir exists for this mem:// source, so the fixture's own relative
+  // lifecycle.detect.hook.command would be refused as unanchorable (F1) —
+  // orthogonal to what this test isolates, so drop it, same pattern the
+  // other mem:// tests in this file already use.
+  delete raw.lifecycle;
+  raw.execution = { run: { hook: { command: [NODE, '-e', script, flagPath] } } };
+  return raw;
+}
+
+test('N-1: a grant-bearing tier that RE-FAILS at the SAME hash voids the stored tier and the live capability, leaving an unrelated grant untouched', async () => {
+  const grantsFile = tempGrantsFile();
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-conformance-tiers-refail-'));
+  const flagPath = path.join(dir, 'fail-after-here');
+  const manifestSource = 'mem://acme-flaky-primary-eligible';
+  const readManifest = async () => flakyPrimaryEligibleManifest(flagPath);
+
+  // Step 1: earn primary-eligible honestly (no flag file yet -> the flaky
+  // hook succeeds for every worker id), grant canBePrimary, and separately
+  // force-record + grant an UNRELATED statusline capability at the same hash
+  // — the control this test proves survives untouched.
+  const earned = await runTieredConformance({
+    manifestSource, readManifest, tiers: ['primary-eligible'], grantsFile, haveFn: async () => true,
+  });
+  assert.equal(earned.tiers[0].status, 'passed', JSON.stringify(earned.tiers[0].checks, null, 2));
+  grantCapability('acme', 'canBePrimary', { hash: earned.hash }, { file: grantsFile });
+  recordTierResult('acme', 'statusline', { hash: earned.hash, evidence: 'footer renders' }, { file: grantsFile });
+  grantCapability('acme', 'commandStatusline', { hash: earned.hash }, { file: grantsFile });
+  assert.deepEqual(
+    grantedCapabilitiesFor('acme', earned.hash, { file: grantsFile }),
+    { canBePrimary: true, commandStatusline: true },
+  );
+
+  // Step 2: flip the flag -> the SAME manifest content (same hash, same
+  // command) now genuinely fails the primary-eligible exercise, while
+  // activity-routing (worker id 'conformance-w1') still genuinely passes.
+  fs.writeFileSync(flagPath, '');
+  const refailed = await runTieredConformance({
+    manifestSource, readManifest, tiers: ['primary-eligible'], grantsFile, haveFn: async () => true,
+  });
+  assert.equal(refailed.hash, earned.hash, 'sanity: same manifest content, same hash');
+  const [tier] = refailed.tiers;
+  assert.equal(tier.status, 'failed', JSON.stringify(tier.checks, null, 2));
+
+  const record = grantsFor('acme', { file: grantsFile });
+  assert.equal(record.tiers['primary-eligible'].status, 'failed');
+  assert.ok(!Object.hasOwn(record.capabilities ?? {}, 'canBePrimary'), 'canBePrimary must be voided, not left standing on disproven evidence');
+  assert.deepEqual(
+    grantedCapabilitiesFor('acme', earned.hash, { file: grantsFile }),
+    { commandStatusline: true },
+    'an unrelated live grant earned at the same hash must survive a primary-eligible re-fail',
+  );
+});
+
+test('N-1: a SKIPPED primary-eligible result (its own prerequisite did not run/pass this run) does NOT void an already-earned capability', async () => {
+  const grantsFile = tempGrantsFile();
+  // Earn the grant honestly first, same sanctioned flow the F-1 tests above use.
+  const earned = await runTieredConformance({
+    manifestSource: VALID_MANIFEST_PATH, readManifest: readManifestFromFile, tiers: ['primary-eligible'], grantsFile,
+    haveFn: async () => true,
+  });
+  assert.equal(earned.tiers[0].status, 'passed', JSON.stringify(earned.tiers[0].checks));
+  grantCapability('acme', 'canBePrimary', { hash: earned.hash }, { file: grantsFile });
+  assert.deepEqual(grantedCapabilitiesFor('acme', earned.hash, { file: grantsFile }), { canBePrimary: true });
+
+  // Re-run WITHOUT the haveFn override -> activity-routing genuinely fails
+  // this run (acme's detection.bin is never really on a test machine's
+  // PATH), so primary-eligible short-circuits to 'skipped' — its own
+  // prerequisite was never evaluated this run, which is ambiguous, not a
+  // disproof of anything already earned.
+  const report = await runTieredConformance({
+    manifestSource: VALID_MANIFEST_PATH, readManifest: readManifestFromFile, tiers: ['primary-eligible'], grantsFile,
+  });
+  assert.equal(report.tiers[0].status, 'skipped', JSON.stringify(report.tiers[0].checks));
+
+  assert.deepEqual(
+    grantedCapabilitiesFor('acme', earned.hash, { file: grantsFile }),
+    { canBePrimary: true },
+    'a skipped (never-evaluated) tier must never void an already-earned capability',
+  );
 });
 
 test('statusline tier is skipped/gated (never passed) when the admission prerequisite tier is not part of this run and the manifest never admitted', async () => {

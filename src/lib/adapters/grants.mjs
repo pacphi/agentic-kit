@@ -186,6 +186,55 @@ export function recordTierGate(name, tier, { hash, gatedBy } = {}, { file = adap
   writeStore(file, store);
 }
 
+/** Record a genuinely FAILED conformance-tier result for `name` at `hash` —
+ * the un-earn path recordTierGate already implements for the 'gated' case
+ * (N-1, security-review follow-up), mirrored here for 'failed': a
+ * grant-bearing tier (a TIER_GRANTS key) that RE-RUNS 'failed' at the SAME
+ * hash a capability was previously granted at means the evidence a live
+ * capability rests on no longer reproduces — the stored 'passed' tier and
+ * the granted capability must both be voided, not left standing on evidence
+ * just shown non-reproducible. Same hash-replace semantics as
+ * recordTierResult/recordTierGate: a DIFFERENT hash means "start fresh"
+ * (freshRecordAt already wipes every prior tier and capability), so this
+ * only has anything to drop for the same-hash case.
+ *
+ * No `evidence` field: a failure records that the tier no longer passes, not
+ * new evidence of anything — callers wanting the failure detail keep it in
+ * their own report (conformance.mjs's `checks`), same as recordTierGate
+ * keeps no evidence field either.
+ *
+ * F-4 (security-review follow-up): this function itself is generic over any
+ * grant-bearing tier, but conformance.mjs's harness only ever calls it for
+ * 'primary-eligible' today — 'statusline's own check (checkGrantGatedTier)
+ * can only report 'passed'/'gated'/'skipped', never 'failed', so this un-earn
+ * path currently has no way to reach commandStatusline through the
+ * conformance runner. That is fine while commandStatusline stays inert (no
+ * runtime reader anywhere in src/ yet) — a stale/non-reproducing statusline
+ * grant can only be voided by a hash change or an explicit `revoke-grant`
+ * until commandStatusline's own render path lands and its exercise can
+ * genuinely fail, not just gate.
+ * @param {string} name
+ * @param {string} tier
+ * @param {{hash?: string}} details
+ * @param {{file?: string}} [options]
+ */
+export function recordTierFailure(name, tier, { hash } = {}, { file = adapterGrantsPath() } = {}) {
+  requireName(name, 'recordTierFailure');
+  requireHash(hash, 'recordTierFailure');
+  if (!isValidTier(tier)) throw new TypeError(`recordTierFailure requires a valid tier (one of ${CONFORMANCE_TIERS.join(', ')}), got: ${tier}`);
+  const store = readStore(file);
+  const record = freshRecordAt(store, name, hash);
+  record.tiers[tier] = { status: 'failed', recordedAt: new Date().toISOString() };
+  const capability = TIER_GRANTS[tier];
+  if (capability && record.capabilities && Object.hasOwn(record.capabilities, capability)) {
+    const capabilities = { ...record.capabilities };
+    delete capabilities[capability];
+    record.capabilities = capabilities;
+  }
+  store[name] = record;
+  writeStore(file, store);
+}
+
 /** Grant `capability` to `name` — the maintainer's act that turns conformance
  * evidence into an actual capability (ADR-0031 §1). Refuses unless the tier
  * that gates `capability` is recorded 'passed' AT THE SAME hash: evidence
@@ -224,6 +273,30 @@ export function revokeGrants(name, { file = adapterGrantsPath() } = {}) {
   const store = readStore(file);
   if (!Object.hasOwn(store, name)) return false;
   delete store[name];
+  writeStore(file, store);
+  return true;
+}
+
+/** Remove ONLY `capability` from `name`'s record.capabilities — every tier
+ * result (and any OTHER granted capability) is left intact, unlike
+ * revokeGrants above which wipes the whole record. Refuses (throws
+ * TypeError) any `capability` that is not one of TIER_GRANTS' values —
+ * matches grantCapability's own allow-list, so this can never be asked to
+ * remove a forged/legacy key (e.g. 'aqeProvider') that grantCapability could
+ * never have written in the first place. Returns whether the capability
+ * existed beforehand; false (never throws) for a missing/never-recorded
+ * `name`. */
+export function revokeCapability(name, capability, { file = adapterGrantsPath() } = {}) {
+  if (typeof name !== 'string' || !name) return false;
+  if (!Object.values(TIER_GRANTS).includes(capability)) {
+    throw new TypeError(`revokeCapability: '${capability}' is not a grantable capability (must be one of ${Object.values(TIER_GRANTS).join(', ')})`);
+  }
+  const store = readStore(file);
+  const existing = Object.hasOwn(store, name) ? store[name] : null;
+  if (!existing || !existing.capabilities || !Object.hasOwn(existing.capabilities, capability)) return false;
+  const capabilities = { ...existing.capabilities };
+  delete capabilities[capability];
+  store[name] = { ...existing, tiers: { ...existing.tiers }, capabilities };
   writeStore(file, store);
   return true;
 }

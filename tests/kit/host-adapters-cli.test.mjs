@@ -1420,6 +1420,98 @@ test('revoke-grant reports no recorded grants when none existed', async () => {
   assert.match(cap.text(), /no recorded grants/);
 });
 
+// ── revoke-grant with a [capability] positional (F-9, deferred nit) ─────
+// Narrower than the whole-record wipe above: only the named capability is
+// removed, leaving every other tier result and granted capability intact.
+
+test('revoke-grant <name> <capability> removes only that capability; other tiers and capabilities survive', async () => {
+  const grantsFile = tmpGrantsFile();
+  const raw = validManifest();
+  const hash = hashManifest(validateAdapterManifest(raw));
+  recordTierResult('hermes', 'primary-eligible', { hash, evidence: 'leads a run' }, { file: grantsFile });
+  grantCapability('hermes', 'canBePrimary', { hash }, { file: grantsFile });
+  recordTierResult('hermes', 'statusline', { hash, evidence: 'footer renders' }, { file: grantsFile });
+  grantCapability('hermes', 'commandStatusline', { hash }, { file: grantsFile });
+
+  const cap = capture();
+  let code;
+  try {
+    code = await run({
+      positionals: ['revoke-grant', 'hermes', 'canBePrimary'], env: OFF_ENV, cfg: cfgWith([]), grantsFile, flags: {},
+    });
+  } finally { cap.restore(); }
+
+  assert.equal(code, 0, cap.text());
+  assert.match(cap.text(), /revoked capability 'canBePrimary'/);
+  assert.deepEqual(grantedCapabilitiesFor('hermes', hash, { file: grantsFile }), { commandStatusline: true });
+  // The tiers themselves are untouched — still 'passed', not reverted.
+  const record = grantsFor('hermes', { file: grantsFile });
+  assert.equal(record.tiers['primary-eligible'].status, 'passed');
+  assert.equal(record.tiers.statusline.status, 'passed');
+});
+
+test('revoke-grant <name> <capability> reports nothing-to-revoke when that capability was never granted', async () => {
+  const grantsFile = tmpGrantsFile();
+  const raw = validManifest();
+  const hash = hashManifest(validateAdapterManifest(raw));
+  recordTierResult('hermes', 'primary-eligible', { hash, evidence: 'leads a run' }, { file: grantsFile });
+  // No grantCapability call — the tier passed but was never granted.
+
+  const cap = capture();
+  let code;
+  try {
+    code = await run({
+      positionals: ['revoke-grant', 'hermes', 'canBePrimary'], env: OFF_ENV, cfg: cfgWith([]), grantsFile, flags: {},
+    });
+  } finally { cap.restore(); }
+
+  assert.equal(code, 0);
+  assert.match(cap.text(), /no recorded 'canBePrimary' grant/);
+  const record = grantsFor('hermes', { file: grantsFile });
+  assert.equal(record.tiers['primary-eligible'].status, 'passed', 'the unrelated tier evidence must survive untouched');
+});
+
+test('revoke-grant <name> <capability>: an invalid/non-grantable capability is rejected, exit 1, nothing changed', async () => {
+  const grantsFile = tmpGrantsFile();
+  const raw = validManifest();
+  const hash = hashManifest(validateAdapterManifest(raw));
+  recordTierResult('hermes', 'primary-eligible', { hash, evidence: 'leads a run' }, { file: grantsFile });
+  grantCapability('hermes', 'canBePrimary', { hash }, { file: grantsFile });
+
+  for (const bogus of ['aqeProvider', 'transcripts']) {
+    const cap = capture();
+    let code;
+    try {
+      code = await run({
+        positionals: ['revoke-grant', 'hermes', bogus], env: OFF_ENV, cfg: cfgWith([]), grantsFile, flags: {},
+      });
+    } finally { cap.restore(); }
+    assert.equal(code, 1, `capability=${bogus}`);
+    assert.match(cap.text(), /not a grantable capability/);
+  }
+  // Nothing touched by the rejected attempts.
+  assert.deepEqual(grantedCapabilitiesFor('hermes', hash, { file: grantsFile }), { canBePrimary: true });
+});
+
+test('revoke-grant <name> <capability> works even when the experimental flag is off (fail-safe, same as the whole-record form)', async () => {
+  const grantsFile = tmpGrantsFile();
+  const raw = validManifest();
+  const hash = hashManifest(validateAdapterManifest(raw));
+  recordTierResult('hermes', 'statusline', { hash, evidence: 'footer renders' }, { file: grantsFile });
+  grantCapability('hermes', 'commandStatusline', { hash }, { file: grantsFile });
+
+  const cap = capture();
+  let code;
+  try {
+    code = await run({
+      positionals: ['revoke-grant', 'hermes', 'commandStatusline'], env: OFF_ENV, cfg: cfgWith([]), grantsFile, flags: {},
+    });
+  } finally { cap.restore(); }
+
+  assert.equal(code, 0, cap.text());
+  assert.deepEqual(grantedCapabilitiesFor('hermes', hash, { file: grantsFile }), {});
+});
+
 // ── no exercise/callback surface anywhere in the new commands ───────────
 
 test('the grant/gate/status implementation never destructures or forwards an exercise/callback parameter', () => {
