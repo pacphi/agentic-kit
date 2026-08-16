@@ -152,13 +152,13 @@ unbuilt. This table is the source of truth for what is real.
 | Piece | Status (2026-08-16) | Note |
 | ----- | ------------------- | ---- |
 | Admission gate, consent store, hook runner, conformance kit (`admission` tier) | **Working** | ADR-0029, merged (PR #149) |
-| `ak host adapters trust` CLI (records consent/grants) | **Proposed — not built** | Smallest next step; today admission refuses `consent-required` |
+| `ak host adapters trust` CLI (records consent/grants) | **Working** (2026-08-16, wave A) | `list`/`trust`/`revoke` + `--expect-hash` pinning; disclosure prints the full validated manifest (control-char-safe); mirrors every pre-hash admission refusal; `revoke` works with the flag off (fail-safe) |
 | External execution (`ak run` drives an admitted host) | **Proposed — not built** | The seam is a comment-only lookup today |
 | External lifecycle execution wired into setup/sync/uninstall | **Proposed — not built** | Loops are built-in-scoped by design until generalized |
 | Tiered conformance harness (`session-driving` … `statusline`) | **Proposed — not built** | Extends the single conformance kit |
-| Capability-grant store + promotion command | **Proposed — not built** | Hash-pinned, mirrors consent |
-| Remote manifest sources (npm / URL) + resolve→hash ordering | **Proposed — not built** | File-path manifests only today |
-| Upstream request tracking (`gated: <repo>#NNN` against a tier) | **Proposed — not built** | Needs a place to record per-tier gating |
+| Capability-grant store + promotion command | **Partial** (2026-08-16, wave A) | Data layer working (`grants.mjs`): hash-pinned, evidence-gated (grant-bearing tiers require non-empty evidence), edit-invalidated like consent; promotion command pending a later wave |
+| Remote manifest sources (npm / URL) + resolve→hash ordering | **Working** (2026-08-16, wave A) | file / https (no redirects, bounded time+bytes) / `npm:` (`npm pack --ignore-scripts` + `tar -xzOf` stdout-only — nothing extracted to disk, package scripts never run); resolver runs before hashing, so a mutated remote surfaces as `consent-stale`. The https fetch is host-unrestricted by design (the source is operator-authored in user-scope `kit.json`; redirects refused, no credentials attached) |
+| Upstream request tracking (`gated: <repo>#NNN` against a tier) | **Partial** (2026-08-16, wave A) | Per-tier `gated` records exist in the grant store (`recordTierGate`, ref-format-validated); CLI recording/display pending a later wave |
 | A real external adapter (Hermes) clearing the kit → contract freeze | **Not started** | Freeze criterion (§6) |
 
 ## Alternatives considered
