@@ -219,6 +219,14 @@ export async function bootstrapHostAdapters({
     const { applyAdmitted } = await import('./admitted.mjs');
     applyAdmitted(admitted);
 
+    // name -> the cfg entry's own declared source, for F-1's baseDir
+    // derivation below (admitted results carry the validated manifest, not
+    // the raw cfg entry that named where it came from). Shared by both the
+    // execution- and lifecycle-registration blocks below — one map, not a
+    // second copy — so a caller correcting F-1 in one place can't drift from
+    // the other.
+    const sourceByName = new Map(entries.map((entry) => [entry?.name, entry?.source]));
+
     // P2 (ADR-0031): an admitted manifest declaring both an execution block
     // and host.capabilities.canRouteActivities gets its execution adapter
     // derived and registered here, so `ak run` can route to it. Same
@@ -228,10 +236,6 @@ export async function bootstrapHostAdapters({
       result.manifest?.execution && result.entry?.capabilities?.canRouteActivities === true
     ));
     if (executionCandidates.length) {
-      // name -> the cfg entry's own declared source, for F-1's baseDir
-      // derivation below (admitted results carry the validated manifest, not
-      // the raw cfg entry that named where it came from).
-      const sourceByName = new Map(entries.map((entry) => [entry?.name, entry?.source]));
       try {
         const { registerAdmittedExecution } = await import('../execution/admitted.mjs');
         for (const result of executionCandidates) {
@@ -256,6 +260,47 @@ export async function bootstrapHostAdapters({
       } catch (error) {
         for (const result of executionCandidates) {
           warnings.push({ name: result.name, reason: 'execution-registration-failed', detail: error?.message ?? String(error) });
+        }
+      }
+    }
+
+    // P3 (ADR-0031): an admitted manifest declaring a lifecycle block gets its
+    // derived lifecycle adapter registered here, so it appears in
+    // hostsWithLifecycle() and setup/sync/uninstall's lifecycle loops can
+    // drive it (gated per-run by lifecycleExecutionEnabled — registration
+    // alone never runs a hook). Same guarded, non-fatal posture as the
+    // execution-registration block above: one adapter's registration failure
+    // never blocks the others or the admission result. F-1 (same as
+    // execution above): baseDir anchors a relative lifecycle hook command to
+    // the adapter's own directory — without it, a relative command would
+    // resolve against the OPERATOR's cwd, arbitrary-code-execution with the
+    // consent hash unchanged. Unlike execution (one hook, all-or-nothing),
+    // lifecycle has five independently-optional verbs, so an unanchorable
+    // one is refused per-verb (buildAdmittedLifecycleAdapter never wires it
+    // to spawn) rather than failing the whole registration — the other,
+    // anchored/PATH-binary verbs still register and work.
+    const lifecycleCandidates = admitted.filter((result) => !!result.manifest?.lifecycle);
+    if (lifecycleCandidates.length) {
+      try {
+        const { registerAdmittedLifecycle } = await import('./lifecycle-registry.mjs');
+        for (const result of lifecycleCandidates) {
+          try {
+            const baseDir = baseDirForSource(sourceByName.get(result.name));
+            const adapter = registerAdmittedLifecycle(result.manifest, { baseDir });
+            if (adapter.unanchoredVerbs.length) {
+              warnings.push({
+                name: result.name, reason: 'lifecycle-unanchored',
+                detail: `'${result.name}' lifecycle hook(s) refused (relative command, no anchored adapter `
+                  + `base directory): ${adapter.unanchoredVerbs.join(', ')}`,
+              });
+            }
+          } catch (error) {
+            warnings.push({ name: result.name, reason: error?.reason ?? 'lifecycle-registration-failed', detail: error?.message ?? String(error) });
+          }
+        }
+      } catch (error) {
+        for (const result of lifecycleCandidates) {
+          warnings.push({ name: result.name, reason: 'lifecycle-registration-failed', detail: error?.message ?? String(error) });
         }
       }
     }

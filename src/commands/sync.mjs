@@ -9,7 +9,8 @@ import { fixStatusline, helperStampStale } from '../lib/statusline.mjs';
 import { reconcileGuidance } from '../lib/blocks.mjs';
 import { register as mcpRegister, applyExclusions } from '../lib/mcp.mjs';
 import { runLifecycle } from '../lib/adapters/lifecycle.mjs';
-import { builtinHostsWithLifecycle, lifecycleAdapterFor } from '../lib/adapters/lifecycle-registry.mjs';
+import { hostsWithLifecycle, lifecycleAdapterFor, lifecycleExecutionEnabled, detectionBinFor } from '../lib/adapters/lifecycle-registry.mjs';
+import { renderApplyReport } from '../lib/adapters/lifecycle-render.mjs';
 import { listDaemons, staleDaemons, reap } from '../lib/daemons.mjs';
 import { loadKitConfig, saveKitConfig } from '../lib/config.mjs';
 import { commandHosts, applyHosts, applyProviders, hostInstallState, installHost, applyAqeRouter, seedActivityRoutesIfMultiHost, migrateRetiredRoutesInConfig, ensureCodexMcp, ensureRufloMcpInCodex, bothHostsEnabled } from '../lib/providers.mjs';
@@ -23,6 +24,17 @@ import { appendToConfig } from '../lib/health-history.mjs';
 import * as paths from '../lib/paths.mjs';
 import { ok, warn, fail, info, bold, dim, withProgress, reportOutcome } from '../lib/output.mjs';
 import { applyCodexStatusline, projectionFor } from '../lib/codex-statusline.mjs';
+
+/** Prints one lifecycle-render.mjs report line at its own level — 'fail'
+ *  (F5, Wave C security review) reaches `fail()`, not a fallback `info()`,
+ *  so a genuinely failed opencode sub-surface never reads as merely
+ *  informational. */
+function printReportLine(line) {
+  if (line.level === 'ok') ok(line.text);
+  else if (line.level === 'warn') warn(line.text);
+  else if (line.level === 'fail') fail(line.text);
+  else info(line.text);
+}
 
 export const options = {
   'dry-run': { type: 'boolean', default: false },
@@ -188,32 +200,29 @@ export async function run({ flags, pkgRoot, fetchLatest }) {
   // Runs BEFORE the blocks branch: the agents-opencode guidance target is gated
   // on the config home this branch creates — this order lets a fresh enable
   // converge guidance in the SAME sync (a second sync is then a true no-op).
-  // Registry-driven: loops builtinHostsWithLifecycle() rather than naming
-  // opencode, so a second BUILT-IN lifecycle host needs no new branch here.
-  // Only opencode is registered today, so this loop runs exactly once —
-  // byte-identical to the single-host branch it replaces. The result SHAPE
-  // consumed below (stack.oc/plugin/agents/skill) is still opencode's own —
-  // the lifecycle contract doesn't mandate a common `apply()` result shape
-  // across hosts. builtinHostsWithLifecycle() (not hostsWithLifecycle())
-  // deliberately excludes admitted external hosts — see lifecycle-registry.mjs.
-  for (const hostId of builtinHostsWithLifecycle()) {
-    if (!subsystems.has(hostId) || !cfg.integrations?.hosts?.[hostId]) continue;
-    if (!(await have(hostId))) {
+  // Registry-driven: loops hostsWithLifecycle() (built-ins + admitted,
+  // ADR-0031 P3) rather than naming opencode, so a second lifecycle host —
+  // built-in or admitted — needs no new branch here. lifecycleExecutionEnabled
+  // gates each host exactly as setup.mjs does (built-in: cfg enablement only;
+  // admitted: cfg enablement AND the experimental flag — never auto-enabled).
+  // lifecycle-render.mjs's renderApplyReport dispatches on the runLifecycle
+  // result's own shape, so this loop body never destructures a host-specific
+  // result directly; opencode's per-surface lines render exactly as before.
+  for (const hostId of hostsWithLifecycle()) {
+    if (!subsystems.has(hostId) || !lifecycleExecutionEnabled(hostId, cfg)) continue;
+    if (!(await have(detectionBinFor(hostId)))) {
       info(`${hostId}: enabled but CLI not installed — wiring skipped (hosts step installs it)`);
       continue;
     }
     const lifecycle = await runLifecycle({
       adapter: lifecycleAdapterFor(hostId), action: 'apply', cfg, options: { pkgRoot },
     });
-    const stack = lifecycle.result;
+    const applyReport = renderApplyReport(hostId, lifecycle);
     // persist the markers on ANY refresh (a converged file whose kit.json
     // markers are stale/missing still needs the save, or the next teardown
     // cannot prove ownership — codex-review r3), not only on file changes.
-    if (stack.oc.changed || stack.markersChanged) saveKitConfig(cfg);
-    if (stack.oc.changed || !stack.oc.ok) report('opencode', stack.oc);
-    report('opencode plugin', stack.plugin);
-    report('opencode agents', stack.agents);
-    if (stack.skill.changed || !stack.skill.ok) report('opencode skill', stack.skill);
+    if (applyReport.ocChanged || applyReport.markersChanged) saveKitConfig(cfg);
+    for (const line of applyReport.lines) printReportLine(line);
   }
   // The 'opencode' guard: the opencode branch above can CREATE the config home
   // that activates the agents-opencode guidance target — a machine whose other
