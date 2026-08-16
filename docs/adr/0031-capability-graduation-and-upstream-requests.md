@@ -149,11 +149,11 @@ Per the ADR discipline this repository adopted (a dated, self-graded table befor
 rests on delivery): the **governance decision** is accepted; the **machinery** is staged and mostly
 unbuilt. This table is the source of truth for what is real.
 
-| Piece | Status (2026-08-16) | Note |
+| Piece | Status | Note |
 | ----- | ------------------- | ---- |
 | Admission gate, consent store, hook runner, conformance kit (`admission` tier) | **Working** | ADR-0029, merged (PR #149) |
 | `ak host adapters trust` CLI (records consent/grants) | **Working** (2026-08-16, wave A) | `list`/`trust`/`revoke` + `--expect-hash` pinning; disclosure prints the full validated manifest (control-char-safe); mirrors every pre-hash admission refusal; `revoke` works with the flag off (fail-safe) |
-| External execution (`ak run` drives an admitted host) | **Proposed — not built** | The seam is a comment-only lookup today |
+| External execution (`ak run` drives an admitted host) | **Working** (2026-08-16, wave B) | Manifest `execution.run` hook (coupled to `canRouteActivities`, else refused `execution-not-routable`); derived subprocess adapter behind `executionAdapterFor`; routing is overlay-aware via a lazy `effectiveRoutableHostIds()`. Security-hardened (adversarial review): hooks spawn with `cwd` pinned to the adapter's own resolved directory (never the operator's cwd — a relative hook on a remote source is refused `execution-unanchored`); an unresolved-launch cancellation reports `orphaned` (non-escalating), never an escalatable `timed_out`; handoff data is redacted from public results; stderr is never promoted into a downstream prompt; reserved hook exit codes `77`/`78` express `permission_required`/`auth_required` boundaries; a self-declared `provider` is stamped `inferred`, never `observed` |
 | External lifecycle execution wired into setup/sync/uninstall | **Proposed — not built** | Loops are built-in-scoped by design until generalized |
 | Tiered conformance harness (`session-driving` … `statusline`) | **Proposed — not built** | Extends the single conformance kit |
 | Capability-grant store + promotion command | **Partial** (2026-08-16, wave A) | Data layer working (`grants.mjs`): hash-pinned, evidence-gated (grant-bearing tiers require non-empty evidence), edit-invalidated like consent; promotion command pending a later wave |

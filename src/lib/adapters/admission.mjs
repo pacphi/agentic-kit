@@ -7,10 +7,35 @@
 // entry or the built-in registries (try/caught per entry, in admitOne AND as
 // a belt-and-suspenders net in admitAdapters).
 import { createHash } from 'node:crypto';
+import fs from 'node:fs';
+import path from 'node:path';
 import { HOST_REGISTRY } from './registries.mjs';
 import { validateAdapterManifest } from './manifest.mjs';
 
 export const SUPPORTED_CONTRACT = 1;
+
+/** The adapter's own directory (F-1, ADR-0031): where its execution/lifecycle
+ *  hooks resolve a relative command FROM, never the operator's process.cwd()
+ *  when `ak run` was invoked. A file-sourced manifest anchors to its own
+ *  directory — `fs.realpathSync` so a symlinked manifest can't relocate that
+ *  pin out from under consent. An npm/https source has no persistent local
+ *  bundle (resolved, hashed, and discarded per admission pass — sources.mjs)
+ *  so there is nothing to anchor to: `null`. buildAdmittedExecutionAdapter
+ *  (execution/admitted.mjs) then refuses a relative hook command outright
+ *  for a `null` baseDir rather than guessing a cwd. An unreadable/vanished
+ *  file source also resolves to `null` — the same honest refusal, not a
+ *  silent fallback to process.cwd(). */
+function baseDirForSource(source) {
+  if (typeof source !== 'string' || !source
+    || source.startsWith('https://') || source.startsWith('http://') || source.startsWith('npm:')) {
+    return null;
+  }
+  try {
+    return path.dirname(fs.realpathSync(source));
+  } catch {
+    return null;
+  }
+}
 
 /** Deterministic, key-sorted JSON — same stable-stringify shape used
  *  elsewhere in this codebase (e.g. opencode.mjs's deepEqual) so two manifests
@@ -193,6 +218,47 @@ export async function bootstrapHostAdapters({
   if (admitted.length) {
     const { applyAdmitted } = await import('./admitted.mjs');
     applyAdmitted(admitted);
+
+    // P2 (ADR-0031): an admitted manifest declaring both an execution block
+    // and host.capabilities.canRouteActivities gets its execution adapter
+    // derived and registered here, so `ak run` can route to it. Same
+    // guarded, non-fatal posture as the rest of bootstrap: one adapter's
+    // registration failure never blocks the others or the admission result.
+    const executionCandidates = admitted.filter((result) => (
+      result.manifest?.execution && result.entry?.capabilities?.canRouteActivities === true
+    ));
+    if (executionCandidates.length) {
+      // name -> the cfg entry's own declared source, for F-1's baseDir
+      // derivation below (admitted results carry the validated manifest, not
+      // the raw cfg entry that named where it came from).
+      const sourceByName = new Map(entries.map((entry) => [entry?.name, entry?.source]));
+      try {
+        const { registerAdmittedExecution } = await import('../execution/admitted.mjs');
+        for (const result of executionCandidates) {
+          // F-5 (ADR-0029 §2): a manifest that never declared the
+          // cli-subprocess driving surface gets no cli-subprocess execution
+          // adapter — refused with its own reason, before even attempting
+          // registration (buildAdmittedExecutionAdapter re-checks this too,
+          // defence-in-depth for any caller that bypasses this filter).
+          if (!result.manifest?.driving?.surfaces?.includes('cli-subprocess')) {
+            warnings.push({
+              name: result.name, reason: 'surface-unsupported',
+              detail: `'${result.name}' declares an execution block but not driving.surfaces including 'cli-subprocess'`,
+            });
+            continue;
+          }
+          try {
+            registerAdmittedExecution(result.manifest, { baseDir: baseDirForSource(sourceByName.get(result.name)) });
+          } catch (error) {
+            warnings.push({ name: result.name, reason: error?.reason ?? 'execution-registration-failed', detail: error?.message ?? String(error) });
+          }
+        }
+      } catch (error) {
+        for (const result of executionCandidates) {
+          warnings.push({ name: result.name, reason: 'execution-registration-failed', detail: error?.message ?? String(error) });
+        }
+      }
+    }
   }
 
   return { active: true, admitted, warnings };
