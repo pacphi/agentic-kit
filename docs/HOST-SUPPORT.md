@@ -93,13 +93,13 @@ Official extension references: [Claude hooks](https://code.claude.com/docs/en/ho
 | Ruflo capability | Claude Code | Codex | OpenCode |
 | --- | --- | --- | --- |
 | Upstream host orientation | **Native:** primary/reference CLI surface | **Native + managed:** upstream backend/plugin pieces plus agentic-kit bridge | **Managed:** no equivalent upstream backend flag |
-| Ruflo MCP tools | Native registration | Managed Ruflo MCP registration | Managed OpenCode MCP entry |
+| Ruflo MCP tools | Native registration | Managed Ruflo MCP registration | Connected managed MCP; compact lazy `ak_ruflo_*` provider projection |
 | Shared Ruflo memory | Same project store | Same project store | Same project store when pointed at the same Ruflo server |
-| Agents and skills | Upstream Claude assets | Codex-compatible skills/plugin assets and generated guidance | Ruflo agents converted to OpenCode frontmatter/tool names |
+| Agents and skills | Upstream Claude assets | Codex-compatible skills/plugin assets and generated guidance | Receipt-owned lazy profile catalogue through one stock `ak-specialist`; stock skills loaded on demand |
 | Lifecycle hooks | Native Claude hooks | Codex hooks/plugin surfaces | OpenCode events translated by `ruflo-hooks.js` |
 | Inference-backend flag | `ENABLE_CLAUDE_CODE` | `ENABLE_CODEX` | None |
 | Cross-host bridge | Claude can call the Codex MCP server | Codex can call Ruflo MCP | No equivalent peer bridge |
-| Upgrade convergence | `ak sync` heals managed assets | `ak sync` heals bridge/guidance | `ak sync` reconverts catalog assets and repairs the plugin/config |
+| Upgrade convergence | `ak sync` heals managed assets | `ak sync` heals bridge/guidance | `ak sync` regenerates the embedded catalogue and repairs exact-receipted plugins/config |
 | Teardown | Managed blocks and registrations | Receipt-based managed teardown | Value- and hash-receipt teardown; user-owned values survive |
 
 Ruflo MCP access and Ruflo-backed inference are different contracts. In

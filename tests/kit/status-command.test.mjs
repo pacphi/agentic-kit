@@ -410,8 +410,8 @@ test('exact legacy artifacts without receipts surface as read-only adoption work
   const rows = await withOpencodeCli(() => collect());
   const adoption = rowsFor(rows, 'opencode')
     .filter((r) => /lacks? (?:an |ownership )?ownership receipt|lack ownership receipts/.test(r.message));
-  assert.equal(adoption.length, 3,
-    `plugin, agents/stamp, and skill must each expose adoption: ${rowsFor(rows, 'opencode').map((r) => r.message)}`);
+  assert.equal(adoption.length, 4,
+    `lifecycle plugin, gateway, agent projection, and skill must each expose adoption: ${rowsFor(rows, 'opencode').map((r) => r.message)}`);
   for (const row of adoption) {
     assert.equal(row.level, 'warn');
     assert.match(row.fix, /sync adopts .*receipt ledger without rewriting/i);

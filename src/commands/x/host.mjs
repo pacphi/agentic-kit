@@ -622,8 +622,8 @@ async function pick({ flags, cwd, pkgRoot }) {
   }
 
   // opencode (integration host): apply the same owner-module stack setup/sync
-  // use — config wiring, lifecycle plugin, converted agents, platform skill —
-  // then converge the guidance blocks the same way setup/sync do ("wired +
+  // use — connected MCPs, compact lazy gateway, lifecycle plugin, specialist
+  // dispatcher, and platform skill — then converge guidance the same way ("wired +
   // guided" is one contract, not two).
   // CLI-gated: an enabled-but-absent CLI never fabricates the config home.
   let incompleteTeardown = false;
@@ -640,14 +640,16 @@ async function pick({ flags, cwd, pkgRoot }) {
       if (stack.oc.changed || stack.markersChanged) saveKitConfig(cfg);
       if (stack.oc.changed || !stack.oc.ok) (stack.oc.ok ? ok : warn)(`opencode: ${stack.oc.detail}`);
       if (stack.plugin.changed || !stack.plugin.ok) (stack.plugin.ok ? ok : warn)(`opencode plugin: ${stack.plugin.detail}`);
-      if (stack.agents.changed || !stack.agents.ok) (stack.agents.ok ? ok : warn)(`opencode agents: ${stack.agents.detail}`);
+      if (stack.gateway.changed || !stack.gateway.ok) (stack.gateway.ok ? ok : warn)(`opencode gateway: ${stack.gateway.detail}`);
+      if (stack.agents.changed || !stack.agents.ok) (stack.agents.ok ? ok : warn)(`opencode agent projection: ${stack.agents.detail}`);
       if (stack.skill.changed || !stack.skill.ok) (stack.skill.ok ? ok : warn)(`opencode skill: ${stack.skill.detail}`);
       const guidance = await reconcileOpencodeGuidance({ pkgRoot, cfg, cwd, enabled: true });
       if (guidance.changed) ok(`opencode ${guidance.detail}`);
       // opencode loads config/plugins/MCP/agents once at startup — say so now,
       // or the user files "hooks don't work" issues (observed live).
-      if (stack.oc.changed || stack.plugin.changed || stack.agents.changed || stack.skill.changed) {
-        info('restart opencode to load the hooks + MCP servers (loaded once at startup)');
+      if (stack.oc.changed || stack.plugin.changed || stack.gateway.changed
+          || stack.agents.changed || stack.skill.changed) {
+        info('restart opencode to load the Agentic Kit hooks, compact gateway, and MCP connections (loaded once at startup)');
       }
     }
   } else if (prevOpencode) {

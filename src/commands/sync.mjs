@@ -180,8 +180,8 @@ export async function run({ flags, pkgRoot, fetchLatest }) {
       await step(`install ${h.id}`, () => installHost(h.id));
     }
   }
-  // opencode host wiring: config-file MCP + skills + permissions, the plugins/
-  // lifecycle bridge, the converted agent set, the platform skill. Runs AFTER
+  // opencode host wiring: connected MCPs, compact lazy gateway, lifecycle
+  // bridge, specialist dispatcher, and platform skill. Runs AFTER
   // the hosts install branch so an enable+install converges in one sync, and
   // only when the CLI is actually present — otherwise the writers would create
   // the host's config home for a host that isn't there (codex-review #4).
@@ -212,7 +212,8 @@ export async function run({ flags, pkgRoot, fetchLatest }) {
     if (stack.oc.changed || stack.markersChanged) saveKitConfig(cfg);
     if (stack.oc.changed || !stack.oc.ok) report('opencode', stack.oc);
     report('opencode plugin', stack.plugin);
-    report('opencode agents', stack.agents);
+    report('opencode gateway', stack.gateway);
+    report('opencode agent projection', stack.agents);
     if (stack.skill.changed || !stack.skill.ok) report('opencode skill', stack.skill);
   }
   // The 'opencode' guard: the opencode branch above can CREATE the config home

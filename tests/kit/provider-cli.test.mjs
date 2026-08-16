@@ -221,7 +221,8 @@ test('pick --host claude,opencode enables + wires opencode (config, plugin, agen
 
     const r = akPick(['x', 'host', 'pick', '--host', 'claude,opencode', '--yes'], sb);
     assert.equal(r.status, 0, `pick failed\nstdout: ${r.stdout}\nstderr: ${r.stderr}`);
-    assert.match(r.stdout, /restart opencode to load the hooks/, 'restart guidance printed after wiring');
+    assert.match(r.stdout, /restart opencode to load the Agentic Kit hooks, compact gateway, and MCP connections/,
+      'restart guidance printed after wiring');
 
     const doc = ocJson(sb.home);
     assert.ok(doc.mcp['claude-flow'], 'claude-flow MCP wired into opencode.json');
@@ -232,9 +233,13 @@ test('pick --host claude,opencode enables + wires opencode (config, plugin, agen
 
     const plugin = path.join(sb.home, '.config', 'opencode', 'plugins', 'ruflo-hooks.js');
     assert.ok(fs.existsSync(plugin), 'lifecycle plugin deployed');
-    const agent = path.join(sb.home, '.config', 'opencode', 'agents', 'coder.md');
-    assert.ok(fs.existsSync(agent), 'ruflo agent converted into opencode subagents');
-    assert.match(fs.readFileSync(agent, 'utf8'), /claude-flow_swarm_init/, 'MCP tool refs rewritten for opencode');
+    const agent = path.join(sb.home, '.config', 'opencode', 'agents', 'ak-specialist.md');
+    assert.ok(fs.existsSync(agent), 'compact Agentic Kit specialist dispatcher deployed');
+    assert.match(
+      fs.readFileSync(agent, 'utf8'),
+      /Call `ak_agent_load`/,
+      'dispatcher loads the selected receipt-owned profile lazily',
+    );
     const agentsMd = path.join(sb.home, '.config', 'opencode', 'AGENTS.md');
     assert.ok(fs.existsSync(agentsMd) && fs.readFileSync(agentsMd, 'utf8').includes('BEGIN ruflo-opencode-reference'),
       'enablement-gated guidance converges on enable — "wired + guided" is one contract');
@@ -260,7 +265,10 @@ test('pick --host claude on an opencode-enabled machine disables it: ak wiring s
 
     const on = akPick(['x', 'host', 'pick', '--host', 'claude,opencode', '--yes'], sb);
     assert.equal(on.status, 0, on.stderr);
-    assert.ok(fs.existsSync(path.join(agentsDir, 'coder.md')), 'ak agents deployed in the enable run');
+    assert.ok(
+      fs.existsSync(path.join(agentsDir, 'ak-specialist.md')),
+      'compact Agentic Kit specialist dispatcher deployed in the enable run',
+    );
 
     const off = akPick(['x', 'host', 'pick', '--host', 'claude', '--yes'], sb);
     assert.equal(off.status, 0, `disable failed\nstdout: ${off.stdout}\nstderr: ${off.stderr}`);
@@ -270,7 +278,7 @@ test('pick --host claude on an opencode-enabled machine disables it: ak wiring s
     assert.ok(!doc.mcp?.['claude-flow'], 'ak-managed MCP entry stripped');
     assert.equal(doc.model, 'opencode/kimi-k3', 'user model key survives the strip');
     assert.ok(!doc.permission?.['claude-flow_*'], 'ak permission patterns stripped');
-    assert.ok(!fs.existsSync(path.join(agentsDir, 'coder.md')), 'ak-generated agents removed');
+    assert.ok(!fs.existsSync(path.join(agentsDir, 'ak-specialist.md')), 'ak dispatcher removed');
     assert.ok(!fs.existsSync(path.join(agentsDir, '.ak-agents-stamp.json')), 'agent stamp removed');
     assert.ok(fs.existsSync(path.join(agentsDir, 'my-agent.md')), 'user-owned agent survives');
     assert.ok(!fs.existsSync(path.join(sb.home, '.config', 'opencode', 'plugins', 'ruflo-hooks.js')),

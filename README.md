@@ -224,27 +224,29 @@ native surfaces rather than env flags.
 `ak setup --opencode` (or `integrations.hosts.opencode: true`
 in `kit.json`) converges, on every `ak sync`:
 
-- **`~/.config/opencode/opencode.json`** — the `claude-flow` MCP server (ruflo's 300+ tools,
-  via `claude-flow-mcp` with `ruflo mcp start` fallback) and `ruvnet-brain` MCP (the
-  stable-spine shim, hot-swapped on brain updates), plus ruflo's `skills.paths` and
-  pre-approved `permission` patterns — merged backup-first into whatever you already have
-  (a JSONC file ak can't parse is refused, never clobbered). Opting in authorizes the
-  `claude-flow_*` and `ruvnet-brain_*` MCP tool families without per-call prompts; use
-  OpenCode's permission configuration if you need narrower approval policy.
+- **`~/.config/opencode/opencode.json`** — connected `claude-flow`, `agentic-qe`, and
+  `ruvnet-brain` MCP entries, plus Ruflo skill paths and explicit permission rules. Values are
+  merged backup-first into the operator's existing JSON; collisions and user-authored tool or
+  permission policies are preserved rather than overwritten.
+- **Compact rUv gateway** — `claude-flow` and `agentic-qe` remain visibly connected in OpenCode,
+  while their hundreds of direct tool schemas are blacklisted from provider requests and exposed
+  lazily as `ak_ruflo_search` / `ak_ruflo_call` and `ak_aqe_search` / `ak_aqe_call`. RuvNet Brain
+  remains a small direct MCP. The gateway asks through OpenCode's permission system before calls
+  and opts a family back into direct exposure when user tool policy conflicts with projection.
 - **Lifecycle hooks** — `~/.config/opencode/plugins/ruflo-hooks.js`: session restore/end,
   best-effort bash safety screening (defense-in-depth, fail-open if the local handler is
   unavailable), edit/task outcome recording for ruflo's learning substrate
   (opencode has no settings-hooks surface; its plugin events are the hook spine).
-- **Subagents + skills** — ruflo's agent set converted to opencode subagents
-  (`~/.config/opencode/agents/`, re-converted whenever the catalog source changes) and the
-  platform skill (`~/.config/opencode/skills/ruflo/`). The catalog source resolves
-  automatically: claude marketplace clone (full set, auto-updated) → published
-  `@claude-flow/cli` package (substrate set); override via
-  `integrations.ownership.opencode.catalogDir` or `$RUFLO_REPO`.
+- **Lazy specialists + skills** — one receipt-owned `ak-specialist` subagent replaces the eager
+  107-profile task catalogue. The complete converted catalogue is embedded in the gateway and
+  reached through `ak_agent_search`, stock OpenCode `task`, and `ak_agent_load`. Installed skills
+  remain loadable through stock `skill`; only their eager system-prompt catalogue is compacted
+  behind `ak_skill_search`. Optional external MCP dependencies named by a specialist are reported
+  explicitly and are never presented as installed by Agentic Kit.
 - **Guidance** — `~/.config/opencode/AGENTS.md` gets ak's managed blocks with
-  opencode-correct tool names (`claude-flow_*`, `ruvnet-brain_search_ruvnet`).
+  the compact OpenCode workflow and direct RuvNet Brain grounding rule.
 
-Everything is ownership-recorded (`integrations.ownership.opencode.mcp`) and stripped surgically by
+Everything is value- and SHA-receipted under `integrations.ownership.opencode` and stripped surgically by
 `ak host off` / `ak uninstall` — your own opencode.json entries are never touched.
 
 **Execution routing.** `ak run` is the host-neutral runner for explicit OpenCode routes. For

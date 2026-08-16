@@ -3,13 +3,15 @@
 - **Status:** Accepted; compatibility references amended by
   [ADR-0020](0020-ga-stable-surfaces.md)
 - **Date:** 2026-07-28
-- **Updated:** 2026-08-04
+- **Updated:** 2026-08-15
 - **Update note:** Clarified that the AQE boundary applies to inference-provider routing, not
   AQE's upstream OpenCode platform assets, and recorded the implemented OpenCode transcript,
   token, observed-cost, and provider-id analytics path. ADR-0023 adds classified SQLite source
   health, preserves last-good OpenCode usage when a present store is temporarily unreadable,
   and requires pre-mutation disclosure of OpenCode's wildcard approvals, MCP registrations,
-  lifecycle plugin, and managed host assets.
+  lifecycle plugin, and managed host assets. The 2026-08-15 amendment keeps Ruflo and Agentic QE
+  connected in stock OpenCode while blacklisting their eager tool catalogues from model requests
+  and projecting a compact, lazy Agentic Kit gateway instead.
 - **Deciders:** agentic-kit maintainers
 
 > **GA amendment:** OpenCode remains opt-in, non-primary, and outside AQE inference-provider
@@ -47,6 +49,82 @@ Without an adapter, a ruflo upgrade leaves opencode's wiring stale: the agent co
 the plugin, the config entries, and the guidance file are static artifacts with no owner.
 
 ## Decision
+
+### 2026-08-15 amendment: connected MCPs with a compact model projection
+
+Agentic Kit keeps its managed `claude-flow` and `agentic-qe` MCP entries enabled. Operators must
+see both integrations as connected in OpenCode; hiding hundreds of eager schemas from the model
+must not be implemented by disabling either MCP integration.
+
+The OpenCode-only gateway separates process connectivity from model-facing catalogue exposure:
+
+- the managed MCP processes remain enabled and available to the host;
+- direct `claude-flow_*` and `agentic-qe_*` tool families are blacklisted from the provider
+  request at runtime;
+- compact `ak_ruflo_search`, `ak_ruflo_call`, `ak_aqe_search`, and `ak_aqe_call` tools discover
+  and execute the live catalogues lazily; and
+- RuvNet Brain remains a small direct MCP integration rather than being folded into the lazy
+  Ruflo/AQE projection.
+
+This projection is provider- and model-neutral. It belongs only to Agentic Kit's OpenCode host
+adapter and does not change the Claude or Codex integrations. Receipt ownership, user permission
+policy, explicit tool-policy collisions, and teardown protections still apply: the gateway may
+hide or proxy only the exact family entries Agentic Kit can prove it owns.
+Because stock OpenCode loads `opencode.jsonc` after `opencode.json`, a sibling later override makes
+the effective MCP and permission values unprovable. Agentic Kit preserves that user file and fails
+closed before writing config or deploying executable projections; status names the collision.
+
+The first load-bearing acceptance slice is intentionally narrower than full rUv-stack parity.
+Isolated exact-stock OpenCode 1.18.18 runs (binary SHA-256
+`4f5979c2dadb06fbff1335335afaaea274e58f92e79aa43cf2ed98618d555422`) proved:
+
+- `/mcp` reported both `claude-flow` and `agentic-qe` as `connected`;
+- the Brain route additionally reported `ruvnet-brain` as `connected`;
+- the deterministic fixture run advertised 18 provider tools and the installed-service run
+  advertised 21; both included seven compact `ak_*` gateway tools and zero direct Ruflo/AQE
+  tools;
+- `ak_ruflo_search` selected `memory_search`, `ak_ruflo_call` executed it through a real MCP
+  protocol child, and the resulting tool output continued through the stock OpenCode session in
+  both modes;
+- `ak_aqe_search` independently selected `fleet_init`, `ak_aqe_call` executed it without a
+  gateway or MCP error, and its result continued through the same stock session;
+- direct `ruvnet-brain_search_ruvnet` executed a grounded AgentDB capability search and continued
+  through the stock session;
+- `ak_skill_search` selected the receipt-known `memory` skill and the stock `skill` tool loaded
+  its exact body;
+- `ak_agent_search` selected `memory-specialist`, the stock `task` tool created an
+  `ak-specialist` child session, and that child loaded the exact profile through
+  `ak_agent_load`; and
+- the installed `marketplace@3.35.0` catalogue independently loaded the real `memory-search`
+  skill and dispatched the real `coder` profile from its 107 converted profiles; and
+- the installed-service modes used the machine's installed `claude-flow-mcp`, `aqe-mcp`, and
+  RuvNet Brain shim rather than fixture servers.
+
+The fixture mode provides deterministic argument and call-ID inspection; the installed mode
+proves one live Ruflo operation, one live Agentic QE initialization operation, and one live Brain
+grounding operation. Together they prove host, gateway, protocol, schema-projection, and
+continuation behavior—not full rUv-stack outcome parity. The deterministic fixture checks and
+installed-catalogue checks prove loading and dispatch mechanics, not that every profile's optional
+dependencies are installed or every specialist outcome is correct. `ak_agent_load` therefore names
+remaining external MCP families in the selected profile, states that this adapter does not provision
+them, and requires the specialist to report an unavailable dependency instead of inventing a call or
+result. Full acceptance still requires
+broader representative operations, command/status and collision/rollback coverage,
+packed-artifact replay, and measured initial-provider-request reduction. Those gates must pass
+before the adapter is described as full-stack parity or release-ready.
+
+The matched installed-service projection capture quantifies the initial-load objective. With the
+gateway removed, stock OpenCode advertised 429 tools, including 415 direct Ruflo/AQE tools; tool
+schemas occupied 335,442 bytes and the serialized provider request occupied 413,542 bytes. With
+the compact gateway enabled, the same stock binary and installed MCPs advertised 21 tools, zero
+direct Ruflo/AQE tools, 27,458 schema bytes, and a 37,501-byte provider request. That is a 95.10%
+tool-count reduction, 91.81% schema-byte reduction, and 90.93% total-request reduction. The direct
+Brain route advertised 24 tools, 29,492 schema bytes, and a 39,650-byte request, remaining inside
+the same compact ceilings. The stock
+acceptance gate therefore enforces both sides: at least 400/300,000 direct tools/schema bytes in
+the installed eager control, and no more than 25 tools, 30,000 schema bytes, or 45,000 request
+bytes in the compact candidate. These are serialized request sizes, not tokenizer-specific token
+estimates or end-to-end inference timings.
 
 ### 1. A managed host adapter — opt-in, `hosts.opencode: false` by default
 
@@ -101,20 +179,16 @@ Every ak-managed byte on opencode's surfaces lives behind one module, following 
   refreshed or removed; marker-bearing user edits are preserved and reported. Failure
   policy: hooks never break the host. Bash screening is explicitly defense-in-depth and
   fails open when the local handler errors or times out.
-- **Agents converted, not copied:** `convertAgents` rewrites Claude-format frontmatter to
-  `{description, mode: subagent}` (dropping the `tools:` string list — opencode uses
-  permissions, and subagents inherit the invoker's tools, matching the broad lists these
-  agents declare), emits descriptions as JSON double-quoted scalars (valid YAML 1.2 —
-  unquoted colon-space content would corrupt frontmatter), rewrites body refs across
-  all three
-  catalog spellings (`mcp__claude-flow__`/`mcp__claude_flow__`/`mcp__ruflo__` →
-  `claude-flow_`), prefixes basename collisions with the category dir, and skips
-  `type: documentation` files. Generated files carry an ak marker; `syncAgents`
-  rewrites/removes marked files only and leaves user files untouched (the earlier
-  standalone script's marker alone is not treated as proof of ownership). The stamp
-  (`.ak-agents-stamp.json`) records the source id, actually-deployed file list, and
-  content hashes; kit.json retains the authoritative last-written receipts. Status
-  distinguishes user-modified files from repairable structural/version drift.
+- **Agents converted into a lazy receipt-owned catalogue:** `convertAgents` normalizes the
+  complete upstream profile set, deterministically resolves name collisions, and embeds the
+  resulting metadata and bodies in the exact-receipted gateway. OpenCode scans only one managed
+  `ak-specialist` subagent. The parent chooses a profile with `ak_agent_search`, stock `task`
+  creates the child, and the child loads the exact body with `ak_agent_load`. Managed Ruflo/AQE
+  references are translated at load time from the capabilities the gateway actually captured;
+  remaining external MCP families are named as optional dependencies and never claimed as
+  installed. Migration removes only receipt-matching legacy generated agents after the gateway
+  and dispatcher are both current; user-modified files and a user-owned dispatcher name collision
+  preserve the eager fallback and are reported rather than overwritten.
 - **Catalog source resolution** (`catalogSource`): kit.json `opencodeCatalogDir` override
   → `$RUFLO_REPO` → the claude marketplace clone `~/.claude/plugins/marketplaces/ruflo`
   (full repo mirror — all agents, all plugin skills, platform `SKILL.md` — auto-updated
@@ -132,8 +206,8 @@ Every ak-managed byte on opencode's surfaces lives behind one module, following 
 
 `guidanceTargets` gains `agents-opencode` → `~/.config/opencode/AGENTS.md` under the same
 dir-exists gate as `~/.codex` (never `mkdir`'d; existence = install signal). Two new
-registry rows carry opencode-correct content — `ruflo-opencode-reference` (opencode tool
-naming, plugin bridge, converted agents) and `ruvnet-brain-opencode-reference` (the
+registry rows carry opencode-correct content — `ruflo-opencode-reference` (connected MCPs,
+compact gateway, lazy skills/specialists) and `ruvnet-brain-opencode-reference` (the
 `ruvnet-brain_search_ruvnet` tool name) — both **enablement-gated**
 (`flag: opencodeEnabled`: the template asserts active wiring, so an installed-but-disabled
 host must not receive it; `ak host off` / pick-disable strip them on the next
@@ -274,3 +348,6 @@ discrepancy until reconciled.
   (enable/disable/dry-run/teardown orchestration, sandboxed),
   `tests/kit/opencode-version-drift.test.mjs` (npm-managed vs external update
   ownership), `tests/kit/{hosts,guidance-targets}.test.mjs` (extended).
+- Compact-gateway tests: `tests/kit/opencode-ruflo-gateway.test.mjs` (gateway protocol,
+  lifecycle, policy, and ownership contracts) and
+  `tests/kit/opencode-stock-ruflo-gateway.test.mjs` (isolated exact-stock OpenCode acceptance).

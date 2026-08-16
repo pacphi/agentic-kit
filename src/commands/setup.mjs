@@ -213,8 +213,9 @@ export async function run_machine({ flags, pkgRoot, cfg }) {
     }
   }
 
-  // 6b. host lifecycle wiring — config-file MCP + skills, lifecycle plugin,
-  //     converted agents, platform skill (each adapter owns its own surfaces
+  // 6b. host lifecycle wiring — connected MCPs, compact lazy gateway,
+  //     lifecycle plugin, converted agents, specialist dispatcher, and
+  //     platform skill (each adapter owns its own surfaces
   //     — opencode.mjs for opencode). Registry-driven: loops
   //     builtinHostsWithLifecycle() rather than naming opencode, so a second
   //     BUILT-IN lifecycle host needs no new branch here. Only when the CLI
@@ -240,11 +241,12 @@ export async function run_machine({ flags, pkgRoot, cfg }) {
     const stack = lifecycle.result;
     (stack.oc.ok ? ok : warn)(`opencode: ${stack.oc.detail}`);
     if (stack.oc.fatal) {
-      warn(`opencode plugin/agents/skill/guidance skipped — ${stack.oc.detail}`);
+      warn(`opencode plugins/agent projection/skill/guidance skipped — ${stack.oc.detail}`);
       return false;
     }
     ok(`opencode plugin: ${stack.plugin.detail}`);
-    ok(`opencode agents: ${stack.agents.detail}`);
+    ok(`opencode gateway: ${stack.gateway.detail}`);
+    ok(`opencode agent projection: ${stack.agents.detail}`);
     if (stack.skill.changed) ok(`opencode skill: ${stack.skill.detail}`);
     // guidance blocks for the opencode AGENTS.md land NOW (codex-review #18)
     // — not on the next status-driven reconcile. Same shared reconcile pick
@@ -253,7 +255,7 @@ export async function run_machine({ flags, pkgRoot, cfg }) {
     ok(`opencode guidance: ${guidance.detail.replace(/^guidance: /, '')}`);
     // opencode loads config/plugins/MCP/agents once at startup — say so now,
     // or the user files "hooks don't work" issues (observed live).
-    info('restart opencode to load the hooks + MCP servers (loaded once at startup)');
+    info('restart opencode to load the Agentic Kit hooks, compact gateway, and MCP connections (loaded once at startup)');
   }
 
   // 7. frontier host hint — codex detected but not enabled (opt-in via `ak host pick`)

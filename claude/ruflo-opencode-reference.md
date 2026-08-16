@@ -6,22 +6,25 @@
 ## Ruflo for opencode
 
 Ruflo is an AI orchestration toolkit (memory, hooks, swarms, neural learning,
-security). On this machine it is wired into opencode three ways (all managed by
+security). On this machine it is wired into opencode through native host surfaces (all managed by
 `ak`, converged on every `ak sync`):
 
-1. **MCP server `claude-flow`** — the full ruflo tool surface (300+ tools):
-   memory, swarms, agents, hooks, routing, workflows. Tools appear with the
-   `claude-flow_` prefix (e.g. `claude-flow_memory_store`,
-   `claude-flow_memory_search`, `claude-flow_swarm_init`,
-   `claude-flow_agent_spawn`, `claude-flow_hooks_route`). Pre-approved in
-   `~/.config/opencode/opencode.json` (`permission`).
+1. **Connected MCP servers, compact provider projection** — `claude-flow` and
+   `agentic-qe` stay connected in OpenCode, but their eager direct tool catalogues are
+   blacklisted from model requests. Discover and invoke the full live surfaces through
+   `ak_ruflo_search` / `ak_ruflo_call` and `ak_aqe_search` / `ak_aqe_call`.
+   RuvNet Brain stays direct: search it before making a factual rUv capability claim and
+   cite the returned source. Never substitute memory or model priors for Brain evidence.
 2. **Lifecycle hooks** — `~/.config/opencode/plugins/ruflo-hooks.js` maps
    opencode events to `ruflo hooks` verbs: session restore/end, bash safety
    screening, edit/task outcome recording for the learning substrate.
-3. **Skills + agents** — ruflo's skill catalog is on the skills path
-   (`skills.paths` in opencode.json), and ruflo's agent set is converted to
-   opencode subagents under `~/.config/opencode/agents/` (re-converted on
-   every `ak sync` after a ruflo upgrade).
+3. **Lazy skills + specialists** — use `ak_skill_search`, then stock `skill` with the
+   exact selected name. Use `ak_agent_search`, then stock `task` with
+   `subagent_type="ak-specialist"` and a prompt beginning `PROFILE: <exact name>`.
+   The specialist loads its receipt-owned profile with `ak_agent_load`. This preserves the
+   complete catalogue without paying its descriptions on every initial provider request.
+   If a profile names an external MCP dependency that is unavailable, report it; do not
+   invent the tool call or its result.
 
 **Restart after wiring.** opencode loads config, plugins, MCP servers, and
 agents once at startup. After `ak setup --opencode` (or any `ak sync` that
@@ -48,14 +51,14 @@ over prior decisions.
 
 ### Quick decision tree
 
-```
+```text
 Need to ... ?
-├─ Search past work / decisions      → ruflo memory search -q "..." --smart  (or claude-flow_memory_search)
+├─ Search past work / decisions      → ak_ruflo_search, then ak_ruflo_call(memory_search)
 ├─ Store a decision/pattern          → ruflo memory store -k K --value V -n patterns
-├─ Pick the right agent for a task   → ruflo route "task description"
-├─ Run a security audit              → ruflo security scan && the security-auditor subagent
+├─ Pick the right specialist         → ak_agent_search, then task(ak-specialist)
+├─ Run a security audit              → ak_agent_search for the security specialist
 ├─ Check ruv stack health            → ruflo doctor && ruflo status && ak status
-├─ Coordinate 3+ subagents           → native task tool first; claude-flow_swarm_init if topology/consensus needed
+├─ Coordinate 3+ agents              → ak_ruflo_search, then invoke the selected swarm operation
 ├─ Scan untrusted text               → ruflo security defend -i "..."
 ├─ Re-apply after a ruflo upgrade    → ak sync   (one command heals everything)
 └─ Anything rUv CLI                  → ruflo <cmd> --help
@@ -63,12 +66,10 @@ Need to ... ?
 
 ### Subagent coordination
 
-opencode's native `task` tool spawns subagents (ruflo's converted agent set is
-under `~/.config/opencode/agents/`, e.g. `coder`, `reviewer`, `tester`,
-`planner`, `researcher`, `security-auditor`, swarm coordinators). Spawn
-parallel subagents in ONE message whenever the work is independent. There is
-no SendMessage equivalent — subagents return a single final report; design
-prompts accordingly (self-contained context, explicit deliverable).
+opencode's native `task` tool spawns the receipt-owned `ak-specialist` dispatcher.
+Select the exact profile with `ak_agent_search`; do not guess profile names. Spawn parallel
+specialists in one message only when work is genuinely independent. There is no SendMessage
+equivalent — subagents return a final report, so give each a self-contained task and deliverable.
 
 ### Daemon (host-independent)
 

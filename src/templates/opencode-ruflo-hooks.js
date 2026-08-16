@@ -108,6 +108,12 @@ function promptText(parts) {
     .trim()
 }
 
+function directOpenCodeReferences(text) {
+  return String(text)
+    .replace(/mcp__(?:claude-flow|claude_flow|ruflo)__([A-Za-z0-9_*-]+)/g, "claude-flow_$1")
+    .replace(/mcp__(?:agentic-qe|agentic_qe)__([A-Za-z0-9_*-]+)/g, "agentic-qe_$1")
+}
+
 const plugin = async ({ client }) => {
   await client.app.log({
     body: {
@@ -182,6 +188,13 @@ const plugin = async ({ client }) => {
 
     "tool.execute.after": async (input, output) => {
       try {
+        // Skills originate in the shared Ruflo catalogue and can carry Claude
+        // MCP spellings. Normalize them on the OpenCode-only surface even when
+        // the optional lazy gateway is unavailable; the gateway may then
+        // rewrite an owned family from this direct spelling to search/call.
+        if (input.tool === "skill" && typeof output?.output === "string") {
+          output.output = directOpenCodeReferences(output.output)
+        }
         if (input.tool === "edit" || input.tool === "write" || input.tool === "apply_patch") {
           const filePath = input?.args?.filePath ?? input?.args?.file_path ?? ""
           fire("post-edit", {

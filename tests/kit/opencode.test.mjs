@@ -3,11 +3,12 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import {
   applyOpencode, undoOpencode, opencodeMcpStatus, opencodeConverged, mcpEntriesFor,
   catalogSource, skillPathsFor, convertAgents, syncAgents, agentsStatus,
   deployPlugin, pluginStatus, deploySkill, skillStatus, removeArtifacts,
-  PERMISSION_KEYS, PLUGIN_NAME, createOpencodeLifecycleAdapter,
+  PLUGIN_NAME, createOpencodeLifecycleAdapter, opencodeStack,
 } from '../../src/lib/opencode.mjs';
 import { runLifecycle } from '../../src/lib/adapters/lifecycle.mjs';
 import { detectHosts } from '../../src/lib/providers.mjs';
@@ -105,6 +106,38 @@ test('opencodeMcpStatus flags JSONC files as parseError instead of clobbering', 
   rm(d);
 });
 
+test('a later opencode.jsonc override blocks convergence and executable projection', async () => {
+  const d = tmp('ak-oc-later-jsonc-');
+  const configFile = path.join(d, 'opencode.json');
+  const pluginsDir = path.join(d, 'plugins');
+  const agentsDir = path.join(d, 'agents');
+  const skillsDir = path.join(d, 'skills');
+  fs.writeFileSync(configFile, JSON.stringify({ user: { keep: true } }));
+  fs.writeFileSync(path.join(d, 'opencode.jsonc'), '{\n// loaded last\n"mcp": {}\n}\n');
+  const before = fs.readFileSync(configFile, 'utf8');
+
+  const status = opencodeMcpStatus(cfgOn(), { configFile });
+  assert.equal(status.laterOverride, path.join(d, 'opencode.jsonc'));
+  const convergence = await opencodeConverged(cfgOn(), { configFile });
+  assert.equal(convergence.converged, false);
+  assert.match(convergence.reasons[0], /later OpenCode config override is unverified/);
+
+  const result = await opencodeStack(cfgOn(), {
+    pkgRoot: path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..'),
+    configFile,
+    pluginsDir,
+    agentsDir,
+    skillsDir,
+  });
+  assert.equal(result.oc.fatal, true);
+  assert.match(result.oc.detail, /loads after opencode\.json/);
+  assert.equal(fs.readFileSync(configFile, 'utf8'), before, 'owned JSON is untouched');
+  assert.equal(fs.existsSync(pluginsDir), false, 'no executable plugin is deployed');
+  assert.equal(fs.existsSync(agentsDir), false, 'no specialist is deployed');
+  assert.equal(fs.existsSync(skillsDir), false, 'no skill is deployed');
+  rm(d);
+});
+
 // ── applyOpencode / undoOpencode round-trip ──────────────────────────────────
 
 test('applyOpencode merges wiring, preserves user keys, records value-precise ownership; undo restores priors', async () => {
@@ -135,7 +168,12 @@ test('applyOpencode merges wiring, preserves user keys, records value-precise ow
   assert.ok(doc.skills.paths.includes('/user/path'), 'user skills path preserved');
   assert.ok(doc.skills.paths.includes(path.join(srcRoot, 'plugins')), 'catalog plugins path added');
   assert.equal(doc.permission.edit, 'ask', 'user permission preserved');
-  for (const k of PERMISSION_KEYS) assert.equal(doc.permission[k], 'allow');
+  const expectedPermissionKeys = [
+    'claude-flow_*', 'claude_flow_*',
+    'agentic-qe_*', 'agentic_qe_*',
+    'ruvnet-brain_*', 'ruvnet_brain_*',
+  ];
+  for (const k of expectedPermissionKeys) assert.equal(doc.permission[k], 'allow');
   assert.equal(cfg.integrations.ownership.opencode.mcp, 'ak');
   // value-precise ownership: claude-flow had no prior → prior null, written recorded
   const rec = cfg.integrations.ownership.opencode.managed.mcp['claude-flow'];
@@ -155,7 +193,7 @@ test('applyOpencode merges wiring, preserves user keys, records value-precise ow
   assert.ok(after.mcp['my-server'], 'user server survives teardown');
   assert.deepEqual(after.skills.paths, ['/user/path']);
   assert.equal(after.permission.edit, 'ask');
-  for (const k of PERMISSION_KEYS) assert.equal(after.permission[k], undefined);
+  for (const k of expectedPermissionKeys) assert.equal(after.permission[k], undefined);
   assert.equal(cfg.integrations.ownership.opencode.mcp, null);
   rm(d);
 });
@@ -716,16 +754,15 @@ test('desired-set shrink RESTORES a prior (user entry that equaled the old desir
 test('permission desired-set shrink restores a recorded user prior', async () => {
   const d = tmp('ak-oc-permission-restore-');
   const file = path.join(d, 'opencode.json');
-  const key = PERMISSION_KEYS.at(-1);
+  const key = 'agentic-qe_*';
   fs.writeFileSync(file, JSON.stringify({ permission: { [key]: 'allow' } }));
   const cfg = cfgOn();
   try {
     await applyOpencode(cfg, { configFile: file, brainShim: path.join(d, 'absent-shim') });
-    PERMISSION_KEYS.pop();
+    cfg.aqe = false;
     await applyOpencode(cfg, { configFile: file, brainShim: path.join(d, 'absent-shim') });
     assert.equal(JSON.parse(fs.readFileSync(file, 'utf8')).permission[key], 'allow');
   } finally {
-    if (!PERMISSION_KEYS.includes(key)) PERMISSION_KEYS.push(key);
     rm(d);
   }
 });
@@ -838,7 +875,7 @@ test('opencodeStack reports markersChanged when a converged file has stale/missi
   assert.equal(cfg.integrations.ownership.opencode.mcp, 'ak');
   assert.ok(cfg.integrations.ownership.opencode.managed?.mcp?.['claude-flow']?.written);
   assert.ok(cfg.integrations.ownership.opencode.managed?.artifacts?.plugin);
-  assert.ok(cfg.integrations.ownership.opencode.managed?.artifacts?.agents?.['coder.md']);
+  assert.ok(cfg.integrations.ownership.opencode.managed?.artifacts?.agents?.['ak-specialist.md']);
   assert.ok(cfg.integrations.ownership.opencode.managed?.artifacts?.agentStamp);
   assert.ok(cfg.integrations.ownership.opencode.managed?.artifacts?.skill);
   // A third run with truthful markers is then fully quiet.
@@ -868,7 +905,7 @@ test('opencodeStack normalizes poisoned null artifact maps before adopting exact
   assert.equal(adopted.plugin.adopted, true);
   assert.ok(adopted.agents.adopted > 0);
   assert.equal(adopted.skill.adopted, true);
-  assert.ok(cfg.integrations.ownership.opencode.managed.artifacts.agents['coder.md']);
+  assert.ok(cfg.integrations.ownership.opencode.managed.artifacts.agents['ak-specialist.md']);
   rm(d);
 });
 
@@ -1017,7 +1054,7 @@ test('opencodeStack preserves a valid config collision while converging independ
   assert.equal(result.oc.ok, false, 'collision remains an explicit warning');
   assert.deepEqual(JSON.parse(fs.readFileSync(configFile, 'utf8')).mcp['claude-flow'], userMcp);
   assert.ok(fs.existsSync(path.join(d, 'plugins', PLUGIN_NAME)));
-  assert.ok(fs.existsSync(path.join(d, 'agents', 'coder.md')));
+  assert.ok(fs.existsSync(path.join(d, 'agents', 'ak-specialist.md')));
   assert.ok(fs.existsSync(path.join(d, 'skills', 'ruflo', 'SKILL.md')));
   rm(d);
 });
