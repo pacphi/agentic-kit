@@ -62,3 +62,15 @@ export function effectiveHostRegistry() {
   if (!applied || admittedEntries.length === 0) return HOST_REGISTRY;
   return Object.freeze([...HOST_REGISTRY, ...admittedEntries]);
 }
+
+/** Built-ins ∪ admitted hosts whose manifest declares
+ *  capabilities.canRouteActivities — the LAZY set every routing VALIDATION
+ *  path (routing.mjs's isRoutableHost, validateRoute, materializeRunPlan)
+ *  must consult (P2, ADR-0031). routing.mjs's `HOSTS` constant stays frozen
+ *  at import time and built-ins-only — it is display strings only now, never
+ *  a validation source. Fresh on every call, like admittedHostIds() above. */
+export function effectiveRoutableHostIds() {
+  return effectiveHostRegistry()
+    .filter((host) => host.capabilities.canRouteActivities === true)
+    .map((host) => host.id);
+}

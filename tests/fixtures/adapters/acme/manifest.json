@@ -9,7 +9,7 @@
     "capabilities": {
       "canDriveSession": false,
       "canBePrimary": false,
-      "canRouteActivities": false,
+      "canRouteActivities": true,
       "commandStatusline": false,
       "transcripts": false,
       "usage": false,
@@ -30,6 +30,11 @@
   "lifecycle": {
     "detect": {
       "hook": { "command": ["node", "detect-hook.mjs"], "timeoutMs": 5000 }
+    }
+  },
+  "execution": {
+    "run": {
+      "hook": { "command": ["node", "run-hook.mjs"], "timeoutMs": 5000 }
     }
   },
   "trust": {

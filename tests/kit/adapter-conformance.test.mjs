@@ -28,6 +28,8 @@ import {
   recordConsent, recordedHashFor, isTrusted, revokeConsent,
 } from '../../src/lib/adapters/consent.mjs';
 import { registerAdmittedLifecycle } from '../../src/lib/adapters/lifecycle-registry.mjs';
+import { registerAdmittedExecution, resetAdmittedExecution } from '../../src/lib/execution/admitted.mjs';
+import { executeRunPlan } from '../../src/lib/execution/runner.mjs';
 
 // Resolved relative to THIS file via fileURLToPath, never a hardcoded
 // repo-absolute or monorepo-sibling path (ruflo #2912 counter-example) — so
@@ -42,28 +44,42 @@ const NEGATIVE_CORPUS = [
 ];
 
 /**
- * The manifest contract has no path-resolution policy of its own yet
- * (hook.command is just "a non-empty array of non-empty strings" —
- * manifest.mjs never inspects the values). A real installed adapter would
- * need SOME resolution step to turn a portable manifest's declared command
+ * The manifest contract has no path-resolution policy of its own for
+ * LIFECYCLE hooks (hook.command is just "a non-empty array of non-empty
+ * strings" — manifest.mjs never inspects the values, and lifecycle-registry.mjs
+ * spawns with no `cwd` anchoring). A real installed adapter would need SOME
+ * resolution step to turn a portable manifest's declared lifecycle command
  * into a locally-runnable one; that step doesn't exist in src/ today, so
- * this is a minimal, test-owned stand-in: the literal token 'node' becomes
- * process.execPath (never a bare PATH-searched 'node' — the same portability
- * concern the hook-runner tests already document), and a relative *.mjs
- * argument is resolved against the fixture's own directory (where the
- * committed hook script actually lives), not the CWD.
+ * this remains a minimal, test-owned stand-in for lifecycle hooks ONLY: the
+ * literal token 'node' becomes process.execPath, and a relative *.mjs
+ * argument is resolved against the fixture's own directory.
+ *
+ * The EXECUTION hook (`execution.run.hook`) needs no such rewriting — Wave B
+ * security review (F-1) gave admission.mjs a real baseDir-derivation +
+ * cwd-anchoring path (registerAdmittedExecution -> buildAdmittedExecutionAdapter
+ * -> runAdapterHook's `cwd` option), so the fixture's literal, UNREWRITTEN
+ * `["node", "run-hook.mjs"]` resolves correctly through the real resolver:
+ * 'node' via PATH, 'run-hook.mjs' relative to the fixture's own directory
+ * (this manifest's `source` is a file path, so baseDir = FIXTURE_ROOT). A
+ * test-side rewrite here would prove a safer-than-production path, not the
+ * real one — see the negative-corpus/unanchored tests in adapter-execution.test.mjs
+ * for what happens when there is no baseDir to anchor to.
  */
+function resolveHookCommand(command, hookDir) {
+  return command.map((part) => {
+    if (part === 'node') return process.execPath;
+    if (part.endsWith('.mjs') && !path.isAbsolute(part)) return path.join(hookDir, part);
+    return part;
+  });
+}
+
 function resolveManifestCommands(raw, hookDir) {
   if (!raw || typeof raw !== 'object' || !raw.lifecycle || typeof raw.lifecycle !== 'object') return raw;
   const lifecycle = {};
   for (const [verb, entry] of Object.entries(raw.lifecycle)) {
-    if (!entry?.hook?.command) { lifecycle[verb] = entry; continue; }
-    const command = entry.hook.command.map((part) => {
-      if (part === 'node') return process.execPath;
-      if (part.endsWith('.mjs') && !path.isAbsolute(part)) return path.join(hookDir, part);
-      return part;
-    });
-    lifecycle[verb] = { ...entry, hook: { ...entry.hook, command } };
+    lifecycle[verb] = entry?.hook?.command
+      ? { ...entry, hook: { ...entry.hook, command: resolveHookCommand(entry.hook.command, hookDir) } }
+      : entry;
   }
   return { ...raw, lifecycle };
 }
@@ -151,6 +167,44 @@ export async function runConformanceReport({ fixtureRoot = FIXTURE_ROOT } = {}) 
     assert.equal(typeof detected?.observed?.pid, 'number');
   });
 
+  await run("the fixture's declared execution.run hook drives a real one-worker plan end-to-end (P2, ADR-0031)", async () => {
+    if (!validated) throw new Error('prerequisite: manifest was not validated');
+    // No runHook injection here either: registerAdmittedExecution's default
+    // dynamically imports the real hook-runner.mjs, and executeRunPlan's
+    // default adapter lookup (executionAdapterFor) falls through to the
+    // admitted overlay — proof the whole `ak run` path (materialized plan ->
+    // execution seam -> derived adapter -> hook runner -> spawned Node
+    // process -> stdout JSON -> WorkerResult) actually runs end-to-end.
+    // baseDir mirrors exactly what bootstrapHostAdapters derives in
+    // production (F-1) — this call bypasses that bootstrap wiring (it calls
+    // registerAdmittedExecution directly), so it must reproduce the same
+    // derivation rather than a test-only shortcut.
+    resetAdmittedExecution();
+    try {
+      // haveFn only: the fixture's detection.bin ('acme') is a fictitious
+      // binary that will never actually be on a test machine's PATH — that's
+      // orthogonal to what this check proves (the execution.run hook itself
+      // running end-to-end), so readiness is stubbed the same way a real
+      // installed adapter's `acme` binary would report present. runHook
+      // stays the real default: a genuine spawned subprocess.
+      registerAdmittedExecution(validated, {
+        haveFn: async () => true,
+        baseDir: path.dirname(fs.realpathSync(validManifestPath)),
+      });
+      const plan = { workers: [{ id: 'w1', activity: 'implementation', role: 'coder', host: 'acme', prompt: 'do the thing' }] };
+      const [result] = await executeRunPlan(plan, { clock: () => new Date().toISOString() });
+      assert.equal(result.status, 'succeeded', result.failure?.reason ?? 'expected a succeeded WorkerResult');
+      assert.equal(result.host, 'acme');
+      assert.equal(result.exitCategory, 'success');
+      assert.equal(result.provider, 'acme');
+      // F-7: a payload-declared provider is 'inferred', never 'observed' —
+      // ak did not verify the hook's claim against anything.
+      assert.equal(result.providerProvenance, 'inferred');
+    } finally {
+      resetAdmittedExecution();
+    }
+  });
+
   for (const [description, file, cfgName, reason] of NEGATIVE_CORPUS) {
     await run(`negative corpus: ${description} is refused with reason '${reason}'`, async () => {
       const results = await admitAdapters({
@@ -216,6 +270,10 @@ test("the fixture's declared detect hook runs as a real subprocess and its JSON 
   assertCheck("the fixture's declared detect hook runs as a real subprocess and its JSON payload flows back");
 });
 
+test("the fixture's declared execution.run hook drives a real one-worker plan end-to-end (P2, ADR-0031)", () => {
+  assertCheck("the fixture's declared execution.run hook drives a real one-worker plan end-to-end (P2, ADR-0031)");
+});
+
 for (const [description, , , reason] of NEGATIVE_CORPUS) {
   const name = `negative corpus: ${description} is refused with reason '${reason}'`;
   test(name, () => assertCheck(name));
@@ -227,8 +285,8 @@ test('edit-invalidation: mutating one byte of the manifest invalidates the prior
 
 test('runConformanceReport reports a clean pass with no failures', () => {
   assert.equal(report.failed, 0, JSON.stringify(report.checks.filter((c) => !c.ok), null, 2));
-  assert.equal(report.total, 8);
-  assert.equal(report.passed, 8);
+  assert.equal(report.total, 9);
+  assert.equal(report.passed, 9);
 });
 
 // ── GAP CLOSED (Wave 4 security remediation, P0-A): consent hashing used to

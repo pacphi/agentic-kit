@@ -4,6 +4,7 @@ import { OPENCODE_EXECUTION_ADAPTER } from './opencode.mjs';
 import { CLAUDE_EXECUTION_ADAPTER } from './claude.mjs';
 import { CODEX_EXECUTION_ADAPTER } from './codex.mjs';
 import { routableHostIds } from '../adapters/index.mjs';
+import { admittedExecutionAdapterFor } from './admitted.mjs';
 
 export const EXECUTION_ADAPTERS = Object.freeze(new Map([
   ['claude', CLAUDE_EXECUTION_ADAPTER],
@@ -43,11 +44,10 @@ assertBuiltinAdaptersRoutable();
  *  single worker instead of failing an entire run. */
 export function executionAdapterFor(hostId) {
   if (EXECUTION_ADAPTERS.has(hostId)) return EXECUTION_ADAPTERS.get(hostId);
-  // Wave 4 (adapter door): an admitted external host whose manifest declares
-  // driving.surfaces including 'cli-subprocess' MAY, in a later wave, get a
-  // constructed execution adapter here. This wave builds none: admitted
-  // hosts have no execution adapter yet, full stop, so they fall through to
-  // the same null return (and the runner's existing cli_unavailable
-  // degradation) as any other routable-but-unadapted host.
-  return null;
+  // P2 (ADR-0031): an admitted external host whose manifest declared an
+  // execution block gets its adapter derived and registered at bootstrap
+  // (admission.mjs) into execution/admitted.mjs's overlay. A routable host
+  // with no execution block (or nothing admitted at all) still returns null
+  // here — the runner's existing cli_unavailable degradation, unchanged.
+  return admittedExecutionAdapterFor(hostId);
 }
