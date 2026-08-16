@@ -249,19 +249,153 @@ async function checkActivityRouting({
   };
 }
 
-// ── primary-eligible / statusline tiers ─────────────────────────────────
-// Both gate a capability the manifest can NEVER declare (canBePrimary,
-// commandStatusline are inexpressible in the schema — ADR-0029/0031). Neither
-// can be exercised end-to-end today: there is no lead-a-run/receive-an-
-// escalation runtime path (ADR-0019) and no admitted-host statusline
-// footer-render path anywhere in src/ yet (grep-verified against this wave) —
-// so even a granted capability has nothing real to drive through. `exercise`
-// is the injection point for the day one of those paths lands: the honest
-// default reports 'gated' rather than fabricate a pass, per ADR-0031's "do
-// not fake a pass" discipline. Ungranted is reported 'gated' too (an
-// ak-local wait on the maintainer's promotion-command grant, Wave D — never
-// an upstream ceiling, so it is never persisted via grants.mjs's
-// recordTierGate, which is reserved for genuinely upstream gates).
+// ── primary-eligible tier: real exercise (ADR-0031 §2, ADR-0019) ───────────
+// The chicken-and-egg this tier exists to break: earning canBePrimary needs
+// evidence of leading a run and receiving an escalation, but ak's real
+// primary-host machinery (routing.mjs) only ever selects a host that has
+// ALREADY got canBePrimary — proving it through that live path would need
+// the grant this tier exists to justify. The harness sidesteps that by
+// building the lead/escalation plan directly in its OWN sandbox and driving
+// it through the real executeRunPlan (ADR-0018/0019) — genuine subprocess
+// behaviour, not the live primary-host registry.
+//
+// F-1 (security review, HIGH, fixed): this exercise runs UNCONDITIONALLY —
+// never gated on an existing canBePrimary grant. ADR-0031 §2's own sequence
+// is evidence FIRST, grant SECOND ("passing a tier records evidence; the
+// maintainer's grant turns evidence into capability"): grantCapability
+// (grants.mjs) refuses unless a 'passed' primary-eligible tier is ALREADY
+// recorded at this hash, so gating the exercise on the grant it is meant to
+// justify is a deadlock — the only way out would be hand-seeding a 'passed'
+// tier before ever running the exercise, which defeats the entire earned-
+// evidence point. checkPrimaryEligible below records 'passed' straight off a
+// genuine exercise result; a maintainer's subsequent `ak host adapters grant
+// <name> canBePrimary` is the ONLY thing that turns that recorded evidence
+// into a live capability via the keystone overlay (admitted.mjs) — that
+// separation, not a pre-exercise grant check, is what ADR-0031 §1 actually
+// asks for. (The grant check this replaced existed to stop a caller-supplied
+// exercise result from being self-evidence — moot now: there is no
+// caller-injectable exercise at all, see below.)
+//
+// Two things the exercise proves, and what it does NOT claim (F-7):
+// - A direct, non-escalated worker completes on the admitted host — the same
+//   worker-execution path activity-routing already proved, run again here as
+//   this tier's own independent evidence.
+// - A SEPARATE worker starts on a host id this harness invents on the spot —
+//   never a built-in, never admitted, never registered in ANY adapter
+//   overlay — which the real runner genuinely cannot route: a real
+//   `cli_unavailable` WorkerResult, not a fabricated one (no hook trickery,
+//   no fixture changes needed: the failure is architectural — no adapter
+//   exists for that host id at all). That worker's one-rung escalation
+//   ladder points at the admitted host, so a real escalatable failure
+//   (runner.mjs's ESCALATABLE_STATUSES/BLOCKING_CATEGORIES) genuinely
+//   advances onto it (ADR-0019) — the `attempts` trail proves more than one
+//   attempt ran and the admitted host is the LAST rung, succeeded.
+// Both completions are the SAME execution.run hook exiting 0 twice, driven
+// through the real derived execution adapter — this demonstrates the
+// escalation ladder and execution-adapter contract plumbing over an
+// already-proven activity-routing path. It is NOT evidence the host can
+// "lead agentic work" in any qualitative sense — the evidence string below
+// is worded to that precision, not more.
+//
+// This needs the host's activity-routing to actually work (it runs real
+// workers through the same derived execution adapter), so this tier depends
+// on activity-routing genuinely passing THIS run — enforced by the caller
+// (runTieredConformance) before this function is ever reached.
+//
+// No caller-injectable seam: unlike the placeholder this replaces, there is
+// no `exercisePrimaryEligible` option anymore — the ONLY exercise that can
+// ever run is this real one, so a caller cannot launder a fabricated
+// {ok:true} into a pass (Wave C's off-the-CLI constraint, hardened: not just
+// unreachable from the CLI, structurally unreachable from ANY caller).
+const PRIMARY_ELIGIBLE_UNROUTED_HOST_SUFFIX = 'conformance-unrouted-rung';
+
+async function runPrimaryEligibleExercise({
+  manifest, name, baseDir, haveFn, clock,
+}) {
+  const unroutedHost = `${PRIMARY_ELIGIBLE_UNROUTED_HOST_SUFFIX}-${name}`;
+  resetAdmittedExecution();
+  try {
+    registerAdmittedExecution(manifest, { haveFn, baseDir });
+    const plan = {
+      workers: [
+        {
+          id: 'primary-eligible-direct', activity: 'implementation', role: 'coder', host: name,
+          prompt: 'conformance harness probe: primary-eligible direct run (non-escalated)',
+        },
+        {
+          id: 'primary-eligible-escalation', activity: 'implementation', role: 'coder', host: unroutedHost,
+          prompt: 'conformance harness probe: primary-eligible escalation (receives an escalation)',
+          escalate: [{ host: name, model: null }],
+        },
+      ],
+    };
+    const [direct, escalation] = await executeRunPlan(plan, { clock, escalate: true });
+
+    if (direct?.status !== 'succeeded' || direct.host !== name) {
+      return { ok: false, detail: `direct (non-escalated) worker did not complete via '${name}' (status=${direct?.status})` };
+    }
+    const attempts = escalation?.attempts ?? [];
+    const lastAttempt = attempts[attempts.length - 1];
+    const genuinelyEscalated = attempts.length > 1
+      && lastAttempt?.host === name && lastAttempt?.status === 'succeeded'
+      && attempts.slice(0, -1).every((a) => a.host !== name);
+    if (escalation?.status !== 'succeeded' || escalation.host !== name || !genuinelyEscalated) {
+      return {
+        ok: false,
+        detail: `escalation worker did not genuinely advance onto '${name}' via ADR-0019 (status=${escalation?.status}, attempts=${attempts.length})`,
+      };
+    }
+    return {
+      ok: true,
+      detail: `'${name}' completed a direct (non-escalated) run to a succeeded result, and separately received a `
+        + `genuine ADR-0019 escalation onto itself after an unrouted host's real cli_unavailable failure `
+        + `(${attempts.length} attempts: ${attempts.map((a) => `${a.host}=${a.status}`).join(' -> ')}) — both runs `
+        + "completed via the adapter's real execution.run hook (escalation-ladder and execution-contract plumbing "
+        + 'over the already-proven activity-routing path, not a claim about agentic task quality)',
+    };
+  } catch (error) {
+    return { ok: false, detail: `primary-eligible exercise threw: ${error?.message ?? String(error)}` };
+  } finally {
+    resetAdmittedExecution();
+  }
+}
+
+/**
+ * primary-eligible's own check (ADR-0031 §2, ADR-0019) — deliberately NOT
+ * checkGrantGatedTier: F-1 (security review) found that gating this
+ * exercise on an EXISTING canBePrimary grant deadlocks against
+ * grantCapability's own requirement of an already-'passed' tier. This runs
+ * the real exercise unconditionally (once admission and activity-routing
+ * have genuinely passed) and reports 'passed' straight off a genuine result
+ * — recordTierResult (the caller's shared persist step) writes that evidence
+ * regardless of whether anything is granted yet, which is precisely what
+ * lets a maintainer's later grantCapability succeed at all.
+ */
+async function checkPrimaryEligible({
+  manifest, name, baseDir, haveFn, clock,
+}) {
+  const exerciseLabel = 'leads a run and receives an escalation (ADR-0019)';
+  const outcome = await runPrimaryEligibleExercise({
+    manifest, name, baseDir, haveFn, clock,
+  });
+  if (outcome.ok) {
+    return { status: 'passed', checks: [{ name: exerciseLabel, ok: true, detail: outcome.detail }], evidence: outcome.detail };
+  }
+  return { status: 'failed', checks: [{ name: exerciseLabel, ok: false, detail: outcome.detail }] };
+}
+
+// ── statusline tier ─────────────────────────────────────────────────────
+// Gates a capability the manifest can NEVER declare (commandStatusline is
+// inexpressible in the schema — ADR-0029/0031). Cannot be exercised
+// end-to-end today: there is no admitted-host statusline footer-render path
+// anywhere in src/ yet (grep-verified against this wave) — so even a granted
+// capability has nothing real to drive through. `exercise` is the injection
+// point for the day that path lands: the honest default reports 'gated'
+// rather than fabricate a pass, per ADR-0031's "do not fake a pass"
+// discipline. Ungranted is reported 'gated' too (an ak-local wait on the
+// maintainer's promotion-command grant, Wave D — never an upstream ceiling,
+// so it is never persisted via grants.mjs's recordTierGate, which is
+// reserved for genuinely upstream gates).
 async function checkGrantGatedTier({
   capability, manifest, name, hash, grantsFile, exercise, exerciseLabel,
 }) {
@@ -312,13 +446,25 @@ async function checkGrantGatedTier({
  * conformance run to touch the real store (tests, dry runs) must pass an
  * explicit path. Pass `persist: false` to skip recording altogether.
  *
+ * primary-eligible has no caller-injectable exercise (unlike statusline,
+ * still a placeholder this wave): it always runs runPrimaryEligibleExercise,
+ * a real escalation-plus-direct-run probe driven through executeRunPlan
+ * (ADR-0018/0019), UNCONDITIONALLY — never gated on an existing canBePrimary
+ * grant (F-1, security review: gating the exercise on the grant it exists to
+ * justify is a deadlock against grantCapability's own "already passed"
+ * requirement). It depends on activity-routing genuinely passing in THIS run
+ * (computed regardless of whether 'activity-routing' is in `tiers`) —
+ * 'skipped' with "activity-routing did not pass" otherwise, mirroring the
+ * admission short-circuit above it. A genuine pass is recorded via
+ * recordTierResult like any other tier; a maintainer's subsequent
+ * grantCapability call is what turns that evidence into a live capability.
+ *
  * @param {{
  *   fixtureRoot?: string, manifestSource?: string, name?: string,
  *   tiers?: readonly string[], readManifest?: (source: string) => Promise<any>,
  *   consentFile?: string, grantsFile?: string, persist?: boolean,
  *   haveFn?: (cmd: string, opts?: any) => Promise<boolean>, baseDir?: string|null,
  *   sessionDrivingUpstreamRef?: string,
- *   exercisePrimaryEligible?: (ctx: {manifest:any,name:string,hash:string}) => Promise<{ok:boolean,detail?:string}>,
  *   exerciseStatusline?: (ctx: {manifest:any,name:string,hash:string}) => Promise<{ok:boolean,detail?:string}>,
  *   clock?: () => string,
  * }} [options]
@@ -339,7 +485,6 @@ export async function runTieredConformance({
   haveFn = have,
   baseDir,
   sessionDrivingUpstreamRef,
-  exercisePrimaryEligible,
   exerciseStatusline,
   clock = nowIso,
 } = {}) {
@@ -393,23 +538,47 @@ export async function runTieredConformance({
       tierResults.push({ tier: 'session-driving', ...checkSessionDriving({ manifest: effectiveManifest, upstreamRef: sessionDrivingUpstreamRef }) });
     }
 
-    if (wantTier('activity-routing')) {
-      const result = await checkActivityRouting({
+    // primary-eligible's real exercise runs actual workers through the
+    // admitted host's derived execution adapter, so it needs activity-routing
+    // to have genuinely passed THIS run — not merely to have been requested.
+    // Computed here, once, whenever either tier needs it, so a caller asking
+    // for `tiers: ['primary-eligible']` alone still gets the real dependency
+    // check rather than an unconditioned pass/skip.
+    let activityRoutingResult = null;
+    if (wantTier('activity-routing') || wantTier('primary-eligible')) {
+      activityRoutingResult = await checkActivityRouting({
         manifest: effectiveManifest, name: resolvedName, baseDir: derivedBaseDir, haveFn, clock,
       });
-      tierResults.push({ tier: 'activity-routing', ...result });
+      if (wantTier('activity-routing')) {
+        tierResults.push({ tier: 'activity-routing', ...activityRoutingResult });
+      }
     }
 
     if (wantTier('primary-eligible')) {
-      const result = await checkGrantGatedTier({
-        capability: 'canBePrimary',
-        manifest: effectiveManifest,
-        name: resolvedName,
-        hash,
-        grantsFile,
-        exercise: exercisePrimaryEligible,
-        exerciseLabel: 'leads a run and receives an escalation (ADR-0019)',
-      });
+      // F-1 (security review): NOT checkGrantGatedTier — that gates the
+      // exercise on an already-existing canBePrimary grant, which deadlocks
+      // against grantCapability's own requirement of an already-'passed'
+      // tier (see checkPrimaryEligible's header comment). checkPrimaryEligible
+      // runs the real exercise unconditionally once its own prerequisites
+      // (admission, activity-routing) are met — evidence first, grant second,
+      // per ADR-0031 §1/§2.
+      let result;
+      if (!effectiveManifest) {
+        result = { status: 'skipped', checks: [{ name: 'admission prerequisite', ok: false, detail: 'admission tier did not pass — cannot evaluate' }] };
+      } else if (activityRoutingResult?.status !== 'passed') {
+        // Mirrors the admission short-circuit above: when admission passed
+        // but activity-routing (this tier's own real prerequisite) did not,
+        // report the SAME 'skipped' shape with a distinct reason, rather
+        // than attempting an exercise the host cannot actually support yet.
+        result = {
+          status: 'skipped',
+          checks: [{ name: 'activity-routing prerequisite', ok: false, detail: 'activity-routing did not pass — cannot evaluate' }],
+        };
+      } else {
+        result = await checkPrimaryEligible({
+          manifest: effectiveManifest, name: resolvedName, baseDir: derivedBaseDir, haveFn, clock,
+        });
+      }
       tierResults.push({ tier: 'primary-eligible', ...result });
     }
 
