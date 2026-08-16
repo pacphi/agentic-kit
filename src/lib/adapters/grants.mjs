@@ -40,6 +40,16 @@ export const TIER_GRANTS = Object.freeze({
   statusline: 'commandStatusline',
 });
 
+/** Reverse of TIER_GRANTS: capability -> its gating tier, or undefined if
+ * `capability` is not one `ak` can actually grant (e.g. a forged/legacy
+ * 'aqeProvider' key sitting in a hand-edited or merged store). Shared by
+ * grantCapability (write-time check) and grantedCapabilitiesFor (read-time
+ * re-check — F-1: the write-time gate alone does not protect a flat JSON
+ * file an operator can edit directly). */
+function gatingTierForCapability(capability) {
+  return Object.entries(TIER_GRANTS).find(([, cap]) => cap === capability)?.[0];
+}
+
 export const adapterGrantsPath = () => path.join(configDir(), 'adapter-grants.json');
 
 function readStore(file) {
@@ -144,6 +154,13 @@ export function recordTierResult(name, tier, { hash, evidence } = {}, { file = a
  * (ADR-0031 §4) — gated, not failed. `gatedBy` pins the tracking issue, e.g.
  * 'agentic-qe#563' or 'ruvnet/ruflo#2962'. Same hash-replace semantics as
  * recordTierResult.
+ *
+ * F-2: if `tier` is grant-bearing (a TIER_GRANTS key) and currently backs a
+ * LIVE capability at this same hash, downgrading it to 'gated' must also
+ * drop that capability — evidence and grant must never disagree (a status
+ * display must never show a tier as 'gated' while the capability it used to
+ * back is still listed as granted). A hash change already wipes capabilities
+ * via freshRecordAt, so this only matters for the same-hash downgrade case.
  * @param {string} name
  * @param {string} tier
  * @param {{hash?: string, gatedBy?: string}} details
@@ -159,6 +176,12 @@ export function recordTierGate(name, tier, { hash, gatedBy } = {}, { file = adap
   const store = readStore(file);
   const record = freshRecordAt(store, name, hash);
   record.tiers[tier] = { status: 'gated', recordedAt: new Date().toISOString(), gatedBy };
+  const capability = TIER_GRANTS[tier];
+  if (capability && record.capabilities && Object.hasOwn(record.capabilities, capability)) {
+    const capabilities = { ...record.capabilities };
+    delete capabilities[capability];
+    record.capabilities = capabilities;
+  }
   store[name] = record;
   writeStore(file, store);
 }
@@ -176,7 +199,7 @@ export function recordTierGate(name, tier, { hash, gatedBy } = {}, { file = adap
 export function grantCapability(name, capability, { hash } = {}, { file = adapterGrantsPath() } = {}) {
   requireName(name, 'grantCapability');
   requireHash(hash, 'grantCapability');
-  const tier = Object.entries(TIER_GRANTS).find(([, cap]) => cap === capability)?.[0];
+  const tier = gatingTierForCapability(capability);
   if (!tier) {
     throw new TypeError(`grantCapability: '${capability}' is not a grantable capability (must be one of ${Object.values(TIER_GRANTS).join(', ')})`);
   }
@@ -238,14 +261,32 @@ export function grantsFor(name, { file = adapterGrantsPath(), currentHash } = {}
  * hash matches `currentHash` — a manifest edit silently voids every grant
  * until re-earned, exactly consent's pin model. {} on any mismatch, missing
  * record, or read failure. Never throws. This is the ONLY reader capability-
- * wiring code may consume — see the module-header invariant. */
+ * wiring code may consume — see the module-header invariant.
+ *
+ * F-1: this re-derives the grant invariant at READ time rather than trusting
+ * record.capabilities verbatim. adapter-grants.json is a flat JSON file an
+ * operator (or a bad merge) can hand-edit directly — grantCapability's
+ * write-time gate does not protect against that. A capability is only ever
+ * returned when it (a) is a real TIER_GRANTS value — never e.g. a forged
+ * 'aqeProvider' key — AND (b) its gating tier is recorded 'passed' at this
+ * exact hash. This raises store forgery from "add one key" to "also forge a
+ * matching passed tier", and makes aqeProvider unreturnable even if present
+ * in the raw file. */
 export function grantedCapabilitiesFor(name, currentHash, { file = adapterGrantsPath() } = {}) {
   try {
     const record = grantsFor(name, { file });
     if (!record || record.hash !== currentHash) return {};
-    return record.capabilities && typeof record.capabilities === 'object' && !Array.isArray(record.capabilities)
-      ? { ...record.capabilities }
+    const stored = record.capabilities && typeof record.capabilities === 'object' && !Array.isArray(record.capabilities)
+      ? record.capabilities
       : {};
+    const out = {};
+    for (const [capability, value] of Object.entries(stored)) {
+      if (value !== true) continue;
+      const tier = gatingTierForCapability(capability);
+      if (!tier || record.tiers?.[tier]?.status !== 'passed') continue;
+      out[capability] = true;
+    }
+    return out;
   } catch {
     return {};
   }

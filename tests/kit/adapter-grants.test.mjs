@@ -252,3 +252,90 @@ test('recordTierResult on an evidence-only tier (admission) still accepts empty/
   assert.equal(record.tiers.admission.status, 'passed');
   assert.equal(record.tiers.admission.evidence, '');
 });
+
+// ── F-1 (security review): grantedCapabilitiesFor re-derives the grant
+// invariant at READ time, not just at write time. adapter-grants.json is a
+// flat JSON file an operator (or a bad merge) can hand-edit directly —
+// grantCapability's write-time gate does not protect against that. A
+// capability must only ever be returned when it is a real TIER_GRANTS value
+// AND its gating tier is recorded 'passed' at the exact same hash. ─────────
+
+test('F-1: grantedCapabilitiesFor rejects a forged capability that has no matching passed tier, even at the correct hash', () => {
+  const file = tempFile();
+  // Simulate a hand-edited/forged/merged store: 'canBePrimary' sits in
+  // capabilities with NO 'primary-eligible' tier ever recorded passed.
+  recordTierResult('acme', 'admission', { hash: HASH_A }, { file });
+  const store = JSON.parse(fs.readFileSync(file, 'utf8'));
+  store.acme.capabilities = { canBePrimary: true };
+  fs.writeFileSync(file, JSON.stringify(store, null, 2), 'utf8');
+
+  assert.deepEqual(
+    grantedCapabilitiesFor('acme', HASH_A, { file }),
+    {},
+    'a forged capability with no backing passed tier must never be returned',
+  );
+});
+
+test("F-1: grantedCapabilitiesFor rejects a forged 'aqeProvider' key even though it is present in the raw store", () => {
+  const file = tempFile();
+  recordTierResult('acme', 'primary-eligible', { hash: HASH_A, evidence: 'led a run' }, { file });
+  grantCapability('acme', 'canBePrimary', { hash: HASH_A }, { file });
+  const store = JSON.parse(fs.readFileSync(file, 'utf8'));
+  store.acme.capabilities.aqeProvider = true; // forged — never written by grantCapability
+  fs.writeFileSync(file, JSON.stringify(store, null, 2), 'utf8');
+
+  const granted = grantedCapabilitiesFor('acme', HASH_A, { file });
+  assert.deepEqual(granted, { canBePrimary: true }, 'the real grant still returns; the forged aqeProvider key must not');
+  assert.ok(!Object.hasOwn(granted, 'aqeProvider'));
+});
+
+test('F-1: grantedCapabilitiesFor rejects a capability whose gating tier was recorded but is not status "passed"', () => {
+  const file = tempFile();
+  recordTierGate('acme', 'primary-eligible', { hash: HASH_A, gatedBy: 'agentic-qe#563' }, { file });
+  const store = JSON.parse(fs.readFileSync(file, 'utf8'));
+  store.acme.capabilities = { canBePrimary: true }; // forged alongside a merely-gated tier
+  fs.writeFileSync(file, JSON.stringify(store, null, 2), 'utf8');
+
+  assert.deepEqual(grantedCapabilitiesFor('acme', HASH_A, { file }), {});
+});
+
+// ── F-2 (security review): running `gate` AFTER a grant must downgrade the
+// live capability along with the tier — evidence and grant must never
+// disagree, or a status display would show a self-contradiction (a 'gated'
+// tier backing a still-live capability) and the audit trail would be lost.
+
+test('F-2: recordTierGate on a grant-bearing tier that currently backs a live capability drops that capability', () => {
+  const file = tempFile();
+  recordTierResult('acme', 'primary-eligible', { hash: HASH_A, evidence: 'led a run' }, { file });
+  grantCapability('acme', 'canBePrimary', { hash: HASH_A }, { file });
+  assert.deepEqual(grantedCapabilitiesFor('acme', HASH_A, { file }), { canBePrimary: true });
+
+  recordTierGate('acme', 'primary-eligible', { hash: HASH_A, gatedBy: 'ruvnet/ruflo#2962' }, { file });
+
+  const record = grantsFor('acme', { file });
+  assert.equal(record.tiers['primary-eligible'].status, 'gated');
+  assert.ok(!Object.hasOwn(record.capabilities ?? {}, 'canBePrimary'), 'the stored record must drop the capability, not just the read side');
+  assert.deepEqual(grantedCapabilitiesFor('acme', HASH_A, { file }), {});
+});
+
+test('F-2: recordTierGate on a grant-bearing tier leaves an UNRELATED live capability untouched', () => {
+  const file = tempFile();
+  recordTierResult('acme', 'primary-eligible', { hash: HASH_A, evidence: 'led a run' }, { file });
+  grantCapability('acme', 'canBePrimary', { hash: HASH_A }, { file });
+  recordTierResult('acme', 'statusline', { hash: HASH_A, evidence: 'footer renders' }, { file });
+  grantCapability('acme', 'commandStatusline', { hash: HASH_A }, { file });
+
+  recordTierGate('acme', 'primary-eligible', { hash: HASH_A, gatedBy: 'ruvnet/ruflo#2962' }, { file });
+
+  assert.deepEqual(grantedCapabilitiesFor('acme', HASH_A, { file }), { commandStatusline: true });
+});
+
+test('F-2: recordTierGate on a tier with no live capability (never granted) is a no-op on capabilities', () => {
+  const file = tempFile();
+  recordTierResult('acme', 'primary-eligible', { hash: HASH_A, evidence: 'led a run' }, { file });
+  // No grantCapability call — the tier passed but was never granted.
+  recordTierGate('acme', 'primary-eligible', { hash: HASH_A, gatedBy: 'ruvnet/ruflo#2962' }, { file });
+  const record = grantsFor('acme', { file });
+  assert.equal(record.tiers['primary-eligible'].status, 'gated');
+  assert.equal(record.capabilities, undefined);
+});
