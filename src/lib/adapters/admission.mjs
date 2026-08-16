@@ -128,9 +128,18 @@ export async function admitAdapters({ cfg, readManifest, consent }) {
 }
 
 async function defaultReadManifest(source) {
-  const fs = await import('node:fs/promises');
-  const raw = await fs.readFile(source, 'utf8');
-  return JSON.parse(raw);
+  // Lazy dynamic import — keeps bootstrapHostAdapters's flag-off zero-cost
+  // property intact (no import happens unless a readManifest call actually
+  // runs, which only happens during admission with the flag set and
+  // adapters configured). Ordering is mandated by security review: resolve
+  // -> validate -> hash -> consent. The resolver (sources.mjs) runs here,
+  // BEFORE admitOne ever hashes the manifest, so consent pins the RESOLVED
+  // bytes — a mutable remote source (an npm dist-tag moving, a URL's
+  // content changing) invalidates consent automatically ('consent-stale')
+  // on the next admission pass, rather than being silently re-trusted.
+  const { resolveManifestSource } = await import('./sources.mjs');
+  const { raw } = await resolveManifestSource(source);
+  return raw;
 }
 
 /**
