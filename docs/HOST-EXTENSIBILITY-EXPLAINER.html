@@ -1,0 +1,1022 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Room for More Hosts</title>
+<style>
+  :root {
+    --bg: #f5f8f8;
+    --surface: #eaf0f1;
+    --surface-2: #e0e8ea;
+    --ink: #15242a;
+    --muted: #566a72;
+    --line: #cfdbdf;
+    --accent: #0d7a74;
+    --accent-ink: #0a5f5a;
+    --accent-soft: #d5ebe9;
+    --future: #7d6a3f;
+    --future-soft: #efe7d4;
+    --caution: #9a5a1c;
+    --caution-soft: #f4e4d3;
+    --ok: #2c7a4b;
+    --ok-soft: #d9ecdf;
+    --gov: #3f5c93;
+    --gov-soft: #e0e6f3;
+    --mono-bg: #e2eaec;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #101a1e;
+      --surface: #172329;
+      --surface-2: #1f2d33;
+      --ink: #e2ecee;
+      --muted: #94a7ad;
+      --line: #2b3a41;
+      --accent: #45bdb3;
+      --accent-ink: #6bd0c7;
+      --accent-soft: #143430;
+      --future: #cdb277;
+      --future-soft: #2f2919;
+      --caution: #e0a366;
+      --caution-soft: #33251a;
+      --ok: #74c491;
+      --ok-soft: #17301f;
+      --gov: #86a8e0;
+      --gov-soft: #1c2740;
+      --mono-bg: #1e2a30;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #101a1e;
+    --surface: #172329;
+    --surface-2: #1f2d33;
+    --ink: #e2ecee;
+    --muted: #94a7ad;
+    --line: #2b3a41;
+    --accent: #45bdb3;
+    --accent-ink: #6bd0c7;
+    --accent-soft: #143430;
+    --future: #cdb277;
+    --future-soft: #2f2919;
+    --caution: #e0a366;
+    --caution-soft: #33251a;
+    --ok: #74c491;
+    --ok-soft: #17301f;
+    --gov: #86a8e0;
+    --gov-soft: #1c2740;
+    --mono-bg: #1e2a30;
+  }
+  * { box-sizing: border-box; }
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font: 16px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, sans-serif;
+    margin: 0;
+    padding: 0 1.25rem 6rem;
+    -webkit-font-smoothing: antialiased;
+  }
+  main { max-width: 78ch; margin: 0 auto; }
+  .hero { padding: 3.5rem 0 1.5rem; }
+  .eyebrow {
+    text-transform: uppercase; letter-spacing: 0.16em; font-size: 0.72rem;
+    color: var(--accent-ink); font-weight: 700;
+  }
+  h1 {
+    font-size: clamp(2.1rem, 6vw, 3.1rem); line-height: 1.05; letter-spacing: -0.02em;
+    margin: 0.6rem 0 0.5rem; text-wrap: balance; font-weight: 800;
+  }
+  h2 {
+    font-size: 1.5rem; letter-spacing: -0.01em; font-weight: 750;
+    margin: 3.2rem 0 0.4rem; padding-top: 1.4rem; border-top: 2px solid var(--line);
+    text-wrap: balance; scroll-margin-top: 1rem;
+  }
+  h3 { font-size: 1.1rem; font-weight: 700; margin: 1.7rem 0 0.4rem; }
+  p { margin: 0.7rem 0; }
+  .lede { font-size: 1.2rem; line-height: 1.5; color: var(--muted); max-width: 60ch; }
+  .kicker { font-size: 1.02rem; color: var(--muted); max-width: 62ch; }
+  code, .mono {
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    font-size: 0.85em; background: var(--mono-bg); padding: 0.08em 0.36em; border-radius: 4px;
+  }
+  a { color: var(--accent-ink); }
+  strong { font-weight: 700; }
+  .tag {
+    display: inline-block; font-size: 0.7rem; font-weight: 700; text-transform: uppercase;
+    letter-spacing: 0.05em; padding: 0.14em 0.6em; border-radius: 999px; vertical-align: middle;
+  }
+  .tag.now { color: var(--ok); background: var(--ok-soft); }
+  .tag.soon { color: var(--future); background: var(--future-soft); }
+  .tag.flag { color: var(--gov); background: var(--gov-soft); }
+  nav.toc {
+    background: var(--surface); border: 1px solid var(--line); border-radius: 12px;
+    padding: 1.1rem 1.4rem 1.2rem; margin: 1.6rem 0 0.5rem;
+  }
+  nav.toc .toc-h {
+    text-transform: uppercase; letter-spacing: 0.12em; font-size: 0.7rem;
+    color: var(--muted); font-weight: 700; margin-bottom: 0.6rem;
+  }
+  nav.toc ol { margin: 0; padding: 0; list-style: none; counter-reset: toc; }
+  nav.toc li { counter-increment: toc; margin: 0.32rem 0; padding-left: 2rem; position: relative; line-height: 1.35; }
+  nav.toc li::before {
+    content: counter(toc); position: absolute; left: 0; top: 0.05rem;
+    font-variant-numeric: tabular-nums; font-weight: 700; font-size: 0.82rem;
+    color: var(--accent-ink); width: 1.4rem; text-align: right;
+  }
+  nav.toc a { text-decoration: none; font-weight: 600; }
+  nav.toc a:hover { text-decoration: underline; }
+  nav.toc .sub { color: var(--muted); font-weight: 400; }
+  figure { margin: 1.8rem 0; }
+  figcaption { font-size: 0.86rem; color: var(--muted); margin-top: 0.6rem; max-width: 64ch; }
+  svg { max-width: 100%; height: auto; display: block; }
+  .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin: 1.2rem 0; }
+  @media (max-width: 620px) { .cols { grid-template-columns: 1fr; } }
+  .card {
+    background: var(--surface); border: 1px solid var(--line); border-radius: 10px;
+    padding: 1.1rem 1.2rem;
+  }
+  .card.builtin { border-top: 3px solid var(--accent); }
+  .card.external { border-top: 3px dashed var(--future); }
+  .card h3 { margin-top: 0; }
+  .card ul { margin: 0.5rem 0 0; padding-left: 1.1rem; }
+  .card li { margin: 0.3rem 0; font-size: 0.95rem; }
+  .panel {
+    background: var(--surface); border: 1px solid var(--line);
+    border-left: 4px solid var(--accent); border-radius: 8px;
+    padding: 1rem 1.2rem; margin: 1.4rem 0;
+  }
+  .panel.caution { border-left-color: var(--caution); }
+  .panel.caution .ptitle { color: var(--caution); }
+  .ptitle { font-weight: 700; font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.07em; color: var(--accent-ink); }
+  .tablewrap { overflow-x: auto; margin: 1.2rem 0; }
+  table { border-collapse: collapse; width: 100%; font-size: 0.92rem; }
+  th, td { text-align: left; padding: 0.55rem 0.75rem; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); font-weight: 700; }
+  td .yes { color: var(--ok); font-weight: 700; }
+  td .no { color: var(--muted); }
+  .steps { list-style: none; padding: 0; margin: 1.2rem 0; counter-reset: s; }
+  .steps > li {
+    position: relative; padding: 0.2rem 0 1.1rem 2.6rem; counter-increment: s;
+    border-left: 2px solid var(--line); margin-left: 0.8rem;
+  }
+  .steps > li::before {
+    content: counter(s); position: absolute; left: -0.85rem; top: 0;
+    width: 1.6rem; height: 1.6rem; border-radius: 50%; background: var(--accent); color: #fff;
+    display: grid; place-items: center; font-size: 0.82rem; font-weight: 700;
+  }
+  .steps > li:last-child { border-left-color: transparent; }
+  .steps .st { font-weight: 700; }
+  pre {
+    background: var(--mono-bg); border: 1px solid var(--line); border-radius: 8px;
+    padding: 0.9rem 1rem; overflow-x: auto; font-size: 0.82rem; line-height: 1.5;
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  }
+  .lg { color: var(--muted); }
+  .meta { color: var(--muted); font-size: 0.85rem; }
+  .quiet { color: var(--muted); }
+  hr.soft { border: none; border-top: 1px solid var(--line); margin: 2.4rem 0; }
+</style>
+</head>
+<body>
+<main>
+<div style="max-width:76ch;margin:1.4rem auto 0;padding:.55rem .95rem;background:var(--surface);border:1px solid var(--line);border-left:3px solid var(--accent);border-radius:8px;font-size:.82rem;line-height:1.5;color:var(--muted)">📎 <strong style="color:var(--accent)">Origin.</strong> Authored as a Claude artifact; this file is the repository’s local snapshot for review. Live version: <a href="https://claude.ai/code/artifact/931c19be-6ce3-45bb-a51d-d8289832cea6" style="color:var(--accent)">https://claude.ai/code/artifact/931c19be-6ce3-45bb-a51d-d8289832cea6</a></div>
+
+<header class="hero">
+  <p class="eyebrow">agentic-kit · how hosts work, and how new ones join</p>
+  <h1>Room for more hosts</h1>
+  <p class="lede">The kit drives work through an AI coding assistant — a <em>host</em>. It ships
+  with three. This effort rebuilt the plumbing so all three are treated the same, and added a
+  door for a fourth, a fifth, a tenth — without rewriting the kit each time.</p>
+  <p class="meta">A plain-language explainer for people who use agentic-kit and for people who might
+  write a host adapter for it. Throughout, <strong>maintainer</strong> means the maintainer of
+  agentic-kit. Companion to ADR-0016 and ADR-0029.</p>
+</header>
+
+<nav class="toc" aria-label="Contents">
+  <div class="toc-h">What's inside</div>
+  <ol>
+    <li><a href="#one-sentence">The one-sentence version</a> <span class="sub">— the whole idea in a breath</span></li>
+    <li><a href="#two-kinds">Two kinds of host</a> <span class="sub">— built-in today vs. the external door</span></li>
+    <li><a href="#why">Why this was worth doing</a> <span class="sub">— the end of open-heart surgery</span></li>
+    <li><a href="#what-is">What an external adapter actually is</a> <span class="sub">— data plus arm's-length hooks</span></li>
+    <li><a href="#today">Where we are — and what's honestly next</a> <span class="sub">— the rollout, and the limits</span></li>
+    <li><a href="#implementers">For implementers: the shape of an adapter</a> <span class="sub">— the manifest</span></li>
+    <li><a href="#lifecycle">From a contributor's idea to a built-in host</a> <span class="sub">— the exact sequence</span></li>
+    <li><a href="#upstream">Some ceilings aren't ours to lift</a> <span class="sub">— the upstream path to ruflo &amp; agentic-qe</span></li>
+    <li><a href="#opencode-example">OpenCode in practice — a worked example</a> <span class="sub">— the whole model in one host</span></li>
+  </ol>
+</nav>
+
+<h2 id="one-sentence">1 · The one-sentence version</h2>
+<p class="kicker">Adding a new assistant used to mean surgery on a dozen places inside the kit;
+now the three built-in assistants are described by data in one registry, and an outside assistant
+can be described the same way — as a signed-off manifest, never as code that runs inside the kit.</p>
+
+<div class="panel">
+  <div class="ptitle">Is this what lets us use Gemini CLI, Hermes, and others?</div>
+  <p style="margin-bottom:0">Yes — this is the <strong>foundation</strong> that makes those possible.
+  It is not yet a finished on-ramp an external assistant can be driven across today. What exists now:
+  the kit can <strong>recognize and register</strong> an external host from a manifest, safely and
+  reversibly, behind an experimental switch. What comes next is turning that recognition into
+  <strong>running work</strong> through it. The staging is spelled out in
+  <a href="#today">section&nbsp;5</a> — honestly, so nobody expects more than is there.</p>
+</div>
+
+<h2 id="two-kinds">2 · Two kinds of host</h2>
+<p>Everything the kit can drive falls into two buckets. The difference isn't the assistant — it's
+<em>how the kit came to know about it</em>.</p>
+
+<figure>
+<svg viewBox="0 0 860 330" role="img"
+  aria-label="Two doors into one registry: built-in hosts are compiled in; external adapters enter through an admission gate. Both feed the same registry, which every command reads.">
+  <defs>
+    <marker id="d1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker>
+    <marker id="d1t" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" style="fill:var(--accent)"/></marker>
+    <marker id="d1f" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" style="fill:var(--future)"/></marker>
+  </defs>
+  <g font-size="12" fill="currentColor" font-family="-apple-system, sans-serif">
+    <!-- BUILT-IN lane (top-left) -->
+    <text x="20" y="24" font-weight="700" font-size="12.5" style="fill:var(--accent)">BUILT-IN HOSTS — here today</text>
+    <rect x="20" y="36" width="150" height="50" rx="8" fill="none" stroke-width="1.5" stroke="currentColor"/>
+    <text x="95" y="60" text-anchor="middle" font-weight="700">Claude Code</text>
+    <text x="95" y="76" text-anchor="middle" font-size="10.5" class="lg">can lead</text>
+    <rect x="184" y="36" width="150" height="50" rx="8" fill="none" stroke-width="1.5" stroke="currentColor"/>
+    <text x="259" y="60" text-anchor="middle" font-weight="700">Codex</text>
+    <text x="259" y="76" text-anchor="middle" font-size="10.5" class="lg">can lead</text>
+    <rect x="348" y="36" width="150" height="50" rx="8" fill="none" stroke-width="1.5" stroke="currentColor"/>
+    <text x="423" y="60" text-anchor="middle" font-weight="700">OpenCode</text>
+    <text x="423" y="76" text-anchor="middle" font-size="10.5" class="lg">routing only</text>
+    <text x="20" y="108" font-size="11" class="lg">Shipped in the kit — trusted because they ARE the kit.</text>
+
+    <!-- REGISTRY (top-right) -->
+    <rect x="600" y="66" width="184" height="56" rx="9" fill="none" stroke-width="1.8" stroke="currentColor"/>
+    <text x="692" y="90" text-anchor="middle" font-weight="800">host registry</text>
+    <text x="692" y="108" text-anchor="middle" font-size="10.5" class="lg">read by every command</text>
+
+    <!-- EVERY COMMAND (right, below registry) -->
+    <rect x="600" y="150" width="184" height="66" rx="9" fill="none" stroke-width="1.5" stroke="currentColor"/>
+    <text x="692" y="174" text-anchor="middle" font-weight="700">every command</text>
+    <text x="692" y="192" text-anchor="middle" font-size="10.5" class="lg">setup · status · run</text>
+    <text x="692" y="208" text-anchor="middle" font-size="10.5" class="lg">sync · uninstall</text>
+
+    <!-- EXTERNAL lane (bottom-left) -->
+    <text x="20" y="182" font-weight="700" font-size="12.5" style="fill:var(--future)">EXTERNAL ADAPTERS — the door (experimental)</text>
+    <rect x="20" y="194" width="140" height="48" rx="8" fill="none" stroke-dasharray="5 4" stroke-width="1.5" style="stroke:var(--future)"/>
+    <text x="90" y="216" text-anchor="middle" font-weight="700">Hermes</text>
+    <text x="90" y="232" text-anchor="middle" font-size="10" class="lg">candidate</text>
+    <rect x="172" y="194" width="140" height="48" rx="8" fill="none" stroke-dasharray="5 4" stroke-width="1.5" style="stroke:var(--future)"/>
+    <text x="242" y="216" text-anchor="middle" font-weight="700">Gemini CLI</text>
+    <text x="242" y="232" text-anchor="middle" font-size="10" class="lg">candidate</text>
+    <rect x="324" y="194" width="66" height="48" rx="8" fill="none" stroke-dasharray="5 4" stroke-width="1.5" style="stroke:var(--future)"/>
+    <text x="357" y="222" text-anchor="middle" font-weight="700">…</text>
+    <text x="20" y="264" font-size="11" class="lg">Described by a manifest the author ships — never code that runs in the kit.</text>
+
+    <!-- ADMISSION GATE (center) -->
+    <rect x="416" y="184" width="156" height="72" rx="9" fill="none" stroke-width="1.7" style="stroke:var(--future)"/>
+    <text x="494" y="206" text-anchor="middle" font-weight="700" style="fill:var(--future)">admission gate</text>
+    <text x="494" y="224" text-anchor="middle" font-size="10.5" class="lg">validate · cap-check</text>
+    <text x="494" y="240" text-anchor="middle" font-size="10.5" class="lg">consent · fail closed</text>
+
+    <!-- arrows -->
+    <!-- built-in group -> registry left edge -->
+    <path d="M498 62 C 552 60, 560 88, 596 90" fill="none" stroke-width="1.6" style="stroke:var(--accent)" marker-end="url(#d1t)"/>
+    <text x="540" y="52" text-anchor="middle" font-size="10.5" style="fill:var(--accent)">compiled in</text>
+    <!-- candidates -> gate -->
+    <path d="M390 218 L 412 218" fill="none" stroke-width="1.6" style="stroke:var(--future)" marker-end="url(#d1f)"/>
+    <!-- gate top -> registry bottom edge -->
+    <path d="M520 184 C 556 152, 586 134, 618 124" fill="none" stroke-width="1.6" style="stroke:var(--future)" marker-end="url(#d1f)"/>
+    <text x="554" y="140" text-anchor="middle" font-size="10.5" style="fill:var(--future)">if admitted</text>
+    <!-- registry -> every command -->
+    <path d="M692 122 L 692 146" fill="none" stroke-width="1.6" stroke="currentColor" marker-end="url(#d1)"/>
+  </g>
+</svg>
+<figcaption><strong>Two doors, one hallway.</strong> Built-in hosts are compiled into the kit and
+trusted by definition. External adapters arrive as data and must pass a fail-closed admission gate.
+Once inside, both are just entries in one registry — every command treats them the same, which is
+the whole point.</figcaption>
+</figure>
+
+<div class="cols">
+  <div class="card builtin">
+    <h3>Built-in hosts <span class="tag now">here now</span></h3>
+    <p class="quiet" style="margin-top:0">Claude Code · Codex · OpenCode</p>
+    <ul>
+      <li>Ship inside the kit; nothing to install or trust separately.</li>
+      <li>Fully wired: setup, status, running work, teardown.</li>
+      <li>Claude and Codex can <em>lead</em>; OpenCode is a supervised routing host.</li>
+      <li>This effort made all three consistent — same commands, same truthful reporting.</li>
+    </ul>
+  </div>
+  <div class="card external">
+    <h3>External adapters <span class="tag soon">the foundation</span></h3>
+    <p class="quiet" style="margin-top:0">Hermes · Gemini CLI · anything CLI-shaped</p>
+    <ul>
+      <li>Described by a manifest the adapter author publishes — not bundled in the kit.</li>
+      <li>Enter only through the admission gate, only behind an experimental switch.</li>
+      <li>Cannot self-declare that they lead, bill, or own a status line.</li>
+      <li>Today: can be recognized and registered. Running work through them is the next step.</li>
+    </ul>
+  </div>
+</div>
+
+<h2 id="why">3 · Why this was worth doing</h2>
+<p>Before this effort, the three assistants were <em>described</em> in a registry but <em>acted on</em>
+by name, scattered across the codebase. Adding a fourth meant finding and editing roughly ten
+places that each hard-coded "claude / codex / opencode" — and missing one meant a new host that
+looked installed but silently misbehaved. That's the "open-heart surgery" problem.</p>
+
+<figure>
+<svg viewBox="0 0 860 300" role="img"
+  aria-label="Before: adding a host meant editing about ten scattered dispatch sites. After: one registry entry or one manifest, read everywhere.">
+  <defs>
+    <marker id="w1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker>
+    <marker id="w1t" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" style="fill:var(--accent)"/></marker>
+    <marker id="w1c" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" style="fill:var(--caution)"/></marker>
+  </defs>
+  <g font-size="12" fill="currentColor" font-family="-apple-system, sans-serif">
+    <!-- BEFORE -->
+    <text x="20" y="24" font-weight="700" style="fill:var(--caution)">BEFORE — reach each host by name</text>
+    <rect x="20" y="40" width="96" height="36" rx="7" fill="none" stroke-width="1.4" style="stroke:var(--caution)"/>
+    <text x="68" y="62" text-anchor="middle" font-weight="700">new host</text>
+    <g font-size="10.5" class="lg">
+      <rect x="176" y="22" width="90" height="26" rx="5" fill="none" stroke="currentColor" opacity="0.85"/><text x="221" y="39" text-anchor="middle">dispatch</text>
+      <rect x="176" y="54" width="90" height="26" rx="5" fill="none" stroke="currentColor" opacity="0.85"/><text x="221" y="71" text-anchor="middle">status</text>
+      <rect x="176" y="86" width="90" height="26" rx="5" fill="none" stroke="currentColor" opacity="0.85"/><text x="221" y="103" text-anchor="middle">uninstall</text>
+      <rect x="282" y="22" width="94" height="26" rx="5" fill="none" stroke="currentColor" opacity="0.85"/><text x="329" y="39" text-anchor="middle">permissions</text>
+      <rect x="282" y="54" width="94" height="26" rx="5" fill="none" stroke="currentColor" opacity="0.85"/><text x="329" y="71" text-anchor="middle">routing</text>
+      <rect x="282" y="86" width="94" height="26" rx="5" fill="none" stroke="currentColor" opacity="0.85"/><text x="329" y="103" text-anchor="middle">guidance</text>
+      <rect x="392" y="38" width="94" height="26" rx="5" fill="none" stroke="currentColor" opacity="0.85"/><text x="439" y="55" text-anchor="middle">usage</text>
+      <rect x="392" y="70" width="94" height="26" rx="5" fill="none" stroke="currentColor" opacity="0.85"/><text x="439" y="87" text-anchor="middle">…and more</text>
+    </g>
+    <path d="M116 54 L 172 38" stroke-width="1.2" style="stroke:var(--caution)" marker-end="url(#w1c)"/>
+    <path d="M116 60 L 172 66" stroke-width="1.2" style="stroke:var(--caution)" marker-end="url(#w1c)"/>
+    <path d="M116 66 L 172 96" stroke-width="1.2" style="stroke:var(--caution)" marker-end="url(#w1c)"/>
+    <path d="M116 58 L 278 40" stroke-width="1.2" style="stroke:var(--caution)" marker-end="url(#w1c)"/>
+    <path d="M116 63 L 278 92" stroke-width="1.2" style="stroke:var(--caution)" marker-end="url(#w1c)"/>
+    <path d="M116 57 L 388 54" stroke-width="1.2" style="stroke:var(--caution)" marker-end="url(#w1c)"/>
+    <text x="255" y="132" font-size="11" style="fill:var(--caution)">~10 edits · miss one and the host silently breaks</text>
+
+    <line x1="20" y1="158" x2="840" y2="158" stroke="currentColor" opacity="0.22"/>
+
+    <!-- AFTER -->
+    <text x="20" y="186" font-weight="700" style="fill:var(--accent)">AFTER — describe it once, read everywhere</text>
+    <rect x="20" y="202" width="124" height="42" rx="7" fill="none" stroke-width="1.5" style="stroke:var(--accent)"/>
+    <text x="82" y="221" text-anchor="middle" font-weight="700">one entry</text>
+    <text x="82" y="237" text-anchor="middle" font-size="10" class="lg">registry or manifest</text>
+    <rect x="212" y="200" width="150" height="46" rx="8" fill="none" stroke-width="1.8" stroke="currentColor"/>
+    <text x="287" y="220" text-anchor="middle" font-weight="800">host registry</text>
+    <text x="287" y="237" text-anchor="middle" font-size="10" class="lg">capability queries</text>
+    <path d="M144 223 L 208 223" stroke-width="1.6" style="stroke:var(--accent)" marker-end="url(#w1t)"/>
+    <g font-size="10.5" class="lg">
+      <rect x="432" y="176" width="96" height="24" rx="5" fill="none" stroke="currentColor"/><text x="480" y="192" text-anchor="middle">dispatch</text>
+      <rect x="432" y="206" width="96" height="24" rx="5" fill="none" stroke="currentColor"/><text x="480" y="222" text-anchor="middle">status</text>
+      <rect x="432" y="236" width="96" height="24" rx="5" fill="none" stroke="currentColor"/><text x="480" y="252" text-anchor="middle">uninstall</text>
+      <rect x="544" y="176" width="96" height="24" rx="5" fill="none" stroke="currentColor"/><text x="592" y="192" text-anchor="middle">permissions</text>
+      <rect x="544" y="206" width="96" height="24" rx="5" fill="none" stroke="currentColor"/><text x="592" y="222" text-anchor="middle">routing</text>
+      <rect x="544" y="236" width="96" height="24" rx="5" fill="none" stroke="currentColor"/><text x="592" y="252" text-anchor="middle">guidance</text>
+    </g>
+    <path d="M362 214 L 428 190" stroke-width="1.4" stroke="currentColor" marker-end="url(#w1)"/>
+    <path d="M362 222 L 428 218" stroke-width="1.4" stroke="currentColor" marker-end="url(#w1)"/>
+    <path d="M362 230 L 428 246" stroke-width="1.4" stroke="currentColor" marker-end="url(#w1)"/>
+    <path d="M362 218 L 540 190" stroke-width="1.4" stroke="currentColor" marker-end="url(#w1)"/>
+    <text x="716" y="220" text-anchor="middle" font-size="11" style="fill:var(--accent)">they ask the registry — never a name</text>
+  </g>
+</svg>
+<figcaption><strong>The value, in one picture.</strong> The commands stopped hard-coding host names
+and started asking the registry "who can do this?" That refactor is done for the three built-ins —
+and it's the same machinery an external adapter plugs into, which is why a fourth host no longer
+means touching ten files.</figcaption>
+</figure>
+
+<p>Along the way the same effort fixed a batch of honesty bugs that were quietly mis-labelling work —
+usage records filed under the wrong assistant, live sessions renamed to an internal placeholder,
+vendor-diversity checks that could be fooled. Truthful reporting is part of the value: a kit that
+supports more hosts has to <em>account</em> for them correctly, not just run them.</p>
+
+<h2 id="what-is">4 · What an external adapter actually is</h2>
+<p><span class="tag soon">for implementers</span> The core safety idea: an adapter is
+<strong>description plus a few small scripts the kit runs at arm's length</strong> — never a plug-in
+loaded into the kit's own process. If a plug-in can crash or take over its host, this is deliberately
+<em>not</em> that.</p>
+
+<figure>
+<svg viewBox="0 0 860 340" role="img"
+  aria-label="An adapter is a JSON manifest plus subprocess hooks. The manifest passes the admission gate's checks; hooks run as separate supervised processes, never in-process.">
+  <defs>
+    <marker id="m1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker>
+    <marker id="m1t" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" style="fill:var(--accent)"/></marker>
+  </defs>
+  <g font-size="12" fill="currentColor" font-family="-apple-system, sans-serif">
+    <!-- manifest -->
+    <rect x="18" y="30" width="208" height="258" rx="10" fill="none" stroke-width="1.6" stroke="currentColor"/>
+    <text x="122" y="54" text-anchor="middle" font-weight="800">the manifest</text>
+    <text x="122" y="71" text-anchor="middle" font-size="10.5" class="lg">one JSON file — pure data</text>
+    <g font-size="11" font-family="ui-monospace, monospace">
+      <text x="36" y="100">name, version, contract</text>
+      <text x="36" y="122">host { capabilities }</text>
+      <text x="36" y="144">detection { bin }</text>
+      <text x="36" y="166">driving { surfaces }</text>
+      <text x="36" y="188">lifecycle { hooks }</text>
+      <text x="36" y="210">trust { changes }</text>
+    </g>
+    <text x="36" y="244" font-size="10.5" class="lg">Any unknown field is rejected —</text>
+    <text x="36" y="260" font-size="10.5" class="lg">the schema is a strict allow-list.</text>
+
+    <!-- gate -->
+    <rect x="270" y="60" width="204" height="188" rx="10" fill="none" stroke-width="1.8" style="stroke:var(--accent)"/>
+    <text x="372" y="84" text-anchor="middle" font-weight="800" style="fill:var(--accent)">admission gate</text>
+    <g font-size="11">
+      <text x="288" y="112">✓ shape is valid</text>
+      <text x="288" y="136">✓ no forbidden claims</text>
+      <text x="288" y="160">✓ contract version matches</text>
+      <text x="288" y="184">✓ not shadowing a built-in</text>
+      <text x="288" y="208">✓ consent matches these bytes</text>
+    </g>
+    <text x="372" y="234" text-anchor="middle" font-size="10" class="lg">any miss → refused, by name</text>
+    <path d="M226 150 L 266 150" stroke-width="1.6" style="stroke:var(--accent)" marker-end="url(#m1t)"/>
+
+    <!-- registry out -->
+    <rect x="512" y="96" width="152" height="52" rx="8" fill="none" stroke-width="1.6" stroke="currentColor"/>
+    <text x="588" y="120" text-anchor="middle" font-weight="700">host registry</text>
+    <text x="588" y="137" text-anchor="middle" font-size="10" class="lg">joins the built-ins</text>
+    <path d="M474 132 L 508 124" stroke-width="1.6" stroke="currentColor" marker-end="url(#m1)"/>
+
+    <!-- hooks -->
+    <rect x="512" y="184" width="330" height="120" rx="10" fill="none" stroke-dasharray="6 4" stroke-width="1.5" stroke="currentColor"/>
+    <text x="677" y="208" text-anchor="middle" font-weight="700">the hooks — run at arm's length</text>
+    <rect x="530" y="224" width="146" height="64" rx="7" fill="none" stroke="currentColor"/>
+    <text x="603" y="250" text-anchor="middle" font-size="11">separate process</text>
+    <text x="603" y="268" text-anchor="middle" font-size="10" class="lg">no shell · env allow-list</text>
+    <rect x="688" y="224" width="138" height="64" rx="7" fill="none" stroke="currentColor"/>
+    <text x="757" y="250" text-anchor="middle" font-size="11">time-boxed</text>
+    <text x="757" y="268" text-anchor="middle" font-size="10" class="lg">killed if it hangs</text>
+    <path d="M588 148 L 588 180" stroke-width="1.4" stroke="currentColor" marker-end="url(#m1)"/>
+    <text x="606" y="170" font-size="10" class="lg">when a step needs logic</text>
+  </g>
+</svg>
+<figcaption><strong>Data first, code at a distance.</strong> The manifest is validated by the same
+checks the built-in hosts pass, plus caps that make forbidden claims impossible to even write down.
+The only code that ever runs is a hook — a separate, supervised, shell-free subprocess with a
+timeout and a minimal environment. Nothing from an adapter runs inside the kit.</figcaption>
+</figure>
+
+<h3>What the kit guarantees about an external host</h3>
+<div class="tablewrap"><table>
+  <tr><th>Question</th><th>Built-in host</th><th>External adapter</th></tr>
+  <tr><td>Can it lead a session (be primary)?</td><td><span class="yes">yes*</span></td><td><span class="no">not by self-declaring — earned only</span></td></tr>
+  <tr><td>Can it claim a billing / quota provider?</td><td><span class="yes">yes*</span></td><td><span class="no">not by self-declaring</span></td></tr>
+  <tr><td>Can it claim a custom status line?</td><td><span class="yes">yes*</span></td><td><span class="no">not by self-declaring</span></td></tr>
+  <tr><td>Does any of its code run inside the kit?</td><td class="no">it <em>is</em> the kit</td><td><span class="no">no — subprocess only</span></td></tr>
+  <tr><td>Can it install software silently?</td><td class="no">only disclosed steps</td><td><span class="no">no — may not even name a package</span></td></tr>
+  <tr><td>What if its manifest is edited after it's trusted?</td><td class="no">n/a</td><td><span class="no">trust is void until re-approved</span></td></tr>
+  <tr><td>What happens if it's broken or malicious?</td><td class="no">n/a</td><td><span class="no">refused by name; other hosts unaffected</span></td></tr>
+</table></div>
+<p class="meta">* "yes" here means a built-in <em>can</em> hold these — which ones actually do varies
+(Claude: all three; Codex: leads and is an AQE provider, but uses a native, not command-backed,
+status line; OpenCode: none). "Primary" means <em>leading</em> the session — a separate axis from
+taking part in <code>ak run</code>, which OpenCode does as a <em>supervised worker</em> (unpacked in
+<a href="#lead-supervised">"Leading vs. being supervised"</a> just below). The safety point stands:
+an external adapter cannot <em>self-declare</em> any of these — the schema has no field to say so —
+but a capability can be <strong>earned</strong> via conformance
+(<a href="#lifecycle">section&nbsp;7</a>).</p>
+
+<h3 id="lead-supervised">Leading vs. being supervised</h3>
+<p>Two capabilities sound similar but are different axes, and the difference is the crux of why
+OpenCode is a full member in some ways and not others. <strong>Leading</strong>
+(<code>canBePrimary</code>) is a host's authority to <em>anchor</em> a run; <strong>being
+supervised</strong> (<code>canRouteActivities</code>) is a host's ability to <em>execute an assigned
+step</em> under the runner's control. A host can have one, both, or — for an external adapter that
+hasn't earned leading — just the second.</p>
+
+<figure>
+<svg viewBox="0 0 860 296" role="img"
+  aria-label="An ak run pipeline: the supervisor materializes a role-to-host plan from the routing policy and spawns each worker under a bounded, supervised contract. The primary host leads — reasoning roles route to it and failed workers escalate toward it. OpenCode can be a supervised worker but never the primary.">
+  <defs>
+    <marker id="ls" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker>
+    <marker id="lsp" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" style="fill:var(--gov)"/></marker>
+    <marker id="lse" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" style="fill:var(--caution)"/></marker>
+  </defs>
+  <g font-size="12" fill="currentColor" font-family="-apple-system, sans-serif">
+    <!-- ak run -->
+    <rect x="20" y="118" width="120" height="52" rx="8" fill="none" stroke-width="1.6" stroke="currentColor"/>
+    <text x="80" y="140" text-anchor="middle" font-weight="700" font-family="ui-monospace, monospace" font-size="11">ak run</text>
+    <text x="80" y="156" text-anchor="middle" font-size="10" class="lg">"add feature"</text>
+    <path d="M140 144 L 172 144" stroke-width="1.6" stroke="currentColor" marker-end="url(#ls)"/>
+
+    <!-- supervisor -->
+    <rect x="176" y="106" width="176" height="76" rx="9" fill="none" stroke-width="1.8" stroke="currentColor"/>
+    <text x="264" y="130" text-anchor="middle" font-weight="700">supervisor (runner)</text>
+    <text x="264" y="149" text-anchor="middle" font-size="10" class="lg">spawns each worker bounded:</text>
+    <text x="264" y="164" text-anchor="middle" font-size="10" class="lg">timeout · escalation · result</text>
+
+    <!-- workers -->
+    <rect x="418" y="24" width="220" height="42" rx="8" fill="none" stroke-width="1.7" style="stroke:var(--gov)"/>
+    <text x="432" y="42" font-size="11">architecture →</text>
+    <text x="528" y="42" font-weight="700" style="fill:var(--gov)">claude</text>
+    <text x="588" y="42" font-size="9.5" style="fill:var(--gov)">· PRIMARY</text>
+    <text x="432" y="57" font-size="9.5" class="lg">supervised worker · leads the run</text>
+
+    <rect x="418" y="76" width="220" height="42" rx="8" fill="none" stroke-width="1.5" stroke="currentColor"/>
+    <text x="432" y="94" font-size="11">implementation →</text>
+    <text x="546" y="94" font-weight="700">codex</text>
+    <text x="432" y="109" font-size="9.5" class="lg">supervised worker</text>
+
+    <rect x="418" y="128" width="220" height="42" rx="8" fill="none" stroke-width="1.5" stroke="currentColor"/>
+    <text x="432" y="146" font-size="11">testing →</text>
+    <text x="500" y="146" font-weight="700">codex</text>
+    <text x="432" y="161" font-size="9.5" class="lg">supervised worker</text>
+
+    <rect x="418" y="180" width="220" height="42" rx="8" fill="none" stroke-width="1.5" stroke="currentColor"/>
+    <text x="432" y="198" font-size="11">review →</text>
+    <text x="496" y="198" font-weight="700">claude</text>
+    <text x="432" y="213" font-size="9.5" class="lg">supervised worker</text>
+
+    <!-- fan-out arrows -->
+    <path d="M352 128 C 386 100, 396 60, 414 48" fill="none" stroke-width="1.4" stroke="currentColor" marker-end="url(#ls)"/>
+    <path d="M352 140 L 414 100" fill="none" stroke-width="1.4" stroke="currentColor" marker-end="url(#ls)"/>
+    <path d="M352 152 L 414 150" fill="none" stroke-width="1.4" stroke="currentColor" marker-end="url(#ls)"/>
+    <path d="M352 160 C 386 190, 396 200, 414 202" fill="none" stroke-width="1.4" stroke="currentColor" marker-end="url(#ls)"/>
+
+    <!-- escalation: codex worker fails -> claude (the primary anchors it) -->
+    <path d="M648 97 C 700 97, 700 45, 646 45" fill="none" stroke-width="1.4" stroke-dasharray="5 4" style="stroke:var(--caution)" marker-end="url(#lse)"/>
+    <text x="712" y="74" text-anchor="middle" font-size="9.5" style="fill:var(--caution)">on failure,</text>
+    <text x="712" y="87" text-anchor="middle" font-size="9.5" style="fill:var(--caution)">escalates to</text>
+    <text x="712" y="100" text-anchor="middle" font-size="9.5" style="fill:var(--caution)">the primary</text>
+
+    <!-- opencode note -->
+    <text x="20" y="212" font-size="10.5" class="lg">An enabled OpenCode would appear here as</text>
+    <text x="20" y="227" font-size="10.5" class="lg">a supervised worker too — never the PRIMARY row.</text>
+    <line x1="20" y1="250" x2="840" y2="250" stroke="currentColor" opacity="0.16"/>
+    <text x="20" y="270" font-size="11" class="lg">Leading = anchors the run (routing + escalation).  Supervised = executes one assigned step, bounded.</text>
+  </g>
+</svg>
+<figcaption><strong>One run, two roles.</strong> The supervisor turns "add feature" into a
+role-to-host plan and spawns each step as a bounded, supervised worker. The <em>primary</em> host
+(Claude by default; <code>ak host pick --primary-host codex</code> flips the lead) anchors the run —
+the reasoning roles route to it and a failed worker escalates toward it. Claude and Codex each appear
+as both a lead and a worker; OpenCode can only ever be a worker.</figcaption>
+</figure>
+
+<div class="tablewrap"><table>
+  <tr><th>Dimension</th><th>Leading (primary)</th><th>Being supervised (routed worker)</th></tr>
+  <tr><td>Capability flag</td><td><code>canBePrimary</code></td><td><code>canRouteActivities</code></td></tr>
+  <tr><td>Which built-ins have it</td><td>Claude, Codex</td><td>Claude, Codex, <strong>OpenCode</strong></td></tr>
+  <tr><td>What it means</td><td>Anchors the run: the default host, the reasoning roles route to it, and failed workers escalate toward it; it leads dual-host mode.</td><td>Executes one assigned activity (architecture, coding, testing, review…) that the runner spawned for it.</td></tr>
+  <tr><td>Chosen by</td><td><code>ak host pick --primary-host</code></td><td>the routing policy, per activity (or a run-local <code>--route</code>)</td></tr>
+  <tr><td>Degree of control</td><td>leads — decides the shape, anchors escalation</td><td>given a task, host, model, and deadline; runs; reports back</td></tr>
+  <tr><td>Bounded?</td><td>it <em>is</em> the session lead</td><td>yes — timeout, a bounded escalation ladder, a structured result</td></tr>
+  <tr><td>OpenCode</td><td><span class="no">never (<code>canBePrimary: false</code>)</span></td><td><span class="yes">yes — a supervised worker</span></td></tr>
+</table></div>
+<p>So "supervised, never primary" isn't a demotion from <code>ak run</code> — it's the opposite:
+OpenCode <em>does</em> run work in a pipeline, as a supervised worker like any other. What it can't
+do is <em>lead</em> one — be the default, own the reasoning roles, or be the host escalation resolves
+toward. That authority stays with a host that can be primary.</p>
+
+<h2 id="today">5 · Where we are — and what's honestly next</h2>
+<p>The door is built and its safety is proven. But a door a host can be <em>registered</em> through is
+not yet a door work can be <em>run</em> through. Here is the truthful staging.</p>
+
+<figure>
+<svg viewBox="0 0 860 210" role="img"
+  aria-label="Rollout stages: today the door can admit a host; next comes a trust command, then running work, then a real adapter passing conformance, then freezing the contract.">
+  <defs>
+    <marker id="r1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker>
+  </defs>
+  <g font-size="12" fill="currentColor" font-family="-apple-system, sans-serif">
+    <rect x="16" y="42" width="150" height="98" rx="10" fill="none" stroke-width="2" style="stroke:var(--ok)"/>
+    <text x="91" y="34" text-anchor="middle" font-weight="700" font-size="11" style="fill:var(--ok)">HERE NOW</text>
+    <text x="91" y="70" text-anchor="middle" font-weight="700">Admit</text>
+    <text x="91" y="90" text-anchor="middle" font-size="10.5" class="lg">register an</text>
+    <text x="91" y="105" text-anchor="middle" font-size="10.5" class="lg">external host</text>
+    <text x="91" y="120" text-anchor="middle" font-size="10.5" class="lg">from a manifest</text>
+
+    <g class="lg" font-size="10.5">
+      <rect x="196" y="42" width="140" height="98" rx="10" fill="none" stroke-dasharray="5 4" stroke-width="1.5" stroke="currentColor"/>
+      <text x="266" y="70" text-anchor="middle" font-weight="700" fill="currentColor" font-size="12">Trust</text>
+      <text x="266" y="92" text-anchor="middle">a command to</text>
+      <text x="266" y="107" text-anchor="middle">approve an adapter</text>
+      <text x="266" y="122" text-anchor="middle">(smallest next step)</text>
+
+      <rect x="366" y="42" width="140" height="98" rx="10" fill="none" stroke-dasharray="5 4" stroke-width="1.5" stroke="currentColor"/>
+      <text x="436" y="70" text-anchor="middle" font-weight="700" fill="currentColor" font-size="12">Run</text>
+      <text x="436" y="92" text-anchor="middle">actually drive</text>
+      <text x="436" y="107" text-anchor="middle">work through it</text>
+
+      <rect x="536" y="42" width="140" height="98" rx="10" fill="none" stroke-dasharray="5 4" stroke-width="1.5" stroke="currentColor"/>
+      <text x="606" y="70" text-anchor="middle" font-weight="700" fill="currentColor" font-size="12">Prove</text>
+      <text x="606" y="92" text-anchor="middle">a real adapter</text>
+      <text x="606" y="107" text-anchor="middle">(Hermes) passes</text>
+      <text x="606" y="122" text-anchor="middle">the conformance kit</text>
+
+      <rect x="706" y="42" width="140" height="98" rx="10" fill="none" stroke-dasharray="5 4" stroke-width="1.5" stroke="currentColor"/>
+      <text x="776" y="70" text-anchor="middle" font-weight="700" fill="currentColor" font-size="12">Open</text>
+      <text x="776" y="92" text-anchor="middle">freeze the contract,</text>
+      <text x="776" y="107" text-anchor="middle">drop the flag</text>
+    </g>
+    <path d="M166 90 L 194 90" stroke-width="1.5" marker-end="url(#r1)"/>
+    <path d="M336 90 L 364 90" stroke-width="1.5" marker-end="url(#r1)"/>
+    <path d="M506 90 L 534 90" stroke-width="1.5" marker-end="url(#r1)"/>
+    <path d="M676 90 L 704 90" stroke-width="1.5" marker-end="url(#r1)"/>
+    <text x="430" y="172" text-anchor="middle" font-size="11" class="lg">the experimental switch stays ON until the last step</text>
+  </g>
+</svg>
+<figcaption><strong>Foundation laid, on-ramp staged.</strong> Only the first box is done. Each later
+box is a small, self-contained increment behind the same experimental switch — so nobody is exposed
+to a half-built external host by accident.</figcaption>
+</figure>
+
+<h3>What can be expected today</h3>
+<ul>
+  <li><strong>The three built-in hosts work fully and consistently</strong> — that's the immediate,
+  shipped payoff, and it needs no flag.</li>
+  <li><strong>The internals are ready for more</strong> — a new host is a registry entry or a
+  manifest, not a rewrite.</li>
+  <li><strong>An external host can be recognized and registered</strong> from a manifest, safely and
+  reversibly, behind <code>AK_EXPERIMENTAL_HOST_ADAPTERS=1</code>.</li>
+</ul>
+
+<div class="panel caution">
+  <div class="ptitle">Limitations — read before expecting an external host to "just work"</div>
+  <ul style="margin-bottom:0">
+    <li><strong>Work can't be run through an external host yet.</strong> The kit can admit one into
+    its registry, but driving a task through it (the <code>ak run</code> path) is not built — an
+    admitted external host currently reports "no execution available" rather than running.</li>
+    <li><strong>There's no command to approve one yet.</strong> Approval is checked at admission, but
+    the <code>ak host adapters trust</code> command that would record it isn't built — so in practice
+    admission refuses until that lands. This is the intended <em>next</em> step.</li>
+    <li><strong>Manifests are local files only.</strong> Fetching an adapter from npm or a URL isn't
+    built; a manifest is a file path today.</li>
+    <li><strong>An external host can't <em>self-declare</em> that it's primary, an AQE provider, or a
+    status-line owner.</strong> That block on self-declaration is permanent — it's the safety
+    invariant. But the capability itself is <em>earnable</em>: pass the matching conformance tier and
+    get a maintainer's grant, and an adapter reaches full parity (the graduation ladder in
+    <a href="#lifecycle">section&nbsp;7</a>). One honest exception — being an <em>AQE provider
+    type</em> isn't the kit's to grant; agentic-qe's provider list is defined upstream
+    (<a href="#upstream">section&nbsp;8</a>).</li>
+    <li><strong>It's experimental.</strong> The contract version can still change; nothing about the
+    external-adapter surface is promised stable until the final "Open" stage above.</li>
+  </ul>
+</div>
+
+<h2 id="implementers">6 · For implementers: the shape of an adapter</h2>
+<p>When the on-ramp is complete, authoring a host adapter will mean shipping one manifest and a few
+small hook scripts. The manifest looks like this (illustrative):</p>
+<pre>{
+  "name": "hermes",
+  "version": "0.1.0",
+  "contract": 1,
+  "host": {
+    "id": "hermes",
+    "label": "Hermes",
+    "capabilities": {
+      "canDriveSession": true,
+      "canRouteActivities": true
+      // canBePrimary / commandStatusline: not allowed — omitted by force
+    },
+    "install": { "bin": "hermes", "externalInstallPolicy": "detect-never-overwrite" }
+  },
+  "detection": { "bin": "hermes", "versionArgs": ["--version"] },
+  "driving": { "surfaces": ["cli-subprocess"] },
+  "lifecycle": {
+    "detect": { "hook": { "command": ["hermes", "doctor", "--json"] } }
+  },
+  "trust": { "changes": [ /* what the adapter will touch, disclosed up front */ ] }
+}</pre>
+<p>It is registered in the user's own <code>kit.json</code>, and its exact bytes are approved:</p>
+<pre>// kit.json
+"hostAdapters": [
+  { "name": "hermes", "source": "~/.config/ak/adapters/hermes.json", "contract": 1 }
+]</pre>
+<ul>
+  <li><strong>The conformance kit is the contract.</strong> A committed test harness admits a real
+  fixture adapter, runs its hooks as real subprocesses, and refuses a corpus of bad manifests with
+  exact reasons — the same bar a real adapter (Hermes first) must clear to graduate.</li>
+  <li><strong>Approval is pinned to the bytes.</strong> Consent is a hash of the exact manifest;
+  edit one character and the kit asks again. Content is never approved unseen.</li>
+  <li><strong>Refusals are specific.</strong> An unknown field, a forbidden capability, a bad
+  contract version, a name that collides with a built-in — each is refused by name, and one bad
+  adapter never disturbs the others or the built-ins.</li>
+</ul>
+
+<h2 id="lifecycle">7 · From a contributor's idea to a built-in host</h2>
+<p>This is the part that ties it together: the exact sequence from "someone wants to add Hermes" to
+"a released version of agentic-kit ships Hermes as a first-class built-in." The governing idea —
+<strong>an external adapter is experimental until conformance graduates it.</strong> Conformance is
+the gate; the maintainer is the judge; there are two places a host can land.</p>
+
+<figure>
+<svg viewBox="0 0 880 500" role="img"
+  aria-label="Lifecycle: a contributor authors, self-tests, and publishes an adapter for opt-in users, then proposes it to the maintainer with conformance evidence. The maintainer reproduces conformance and reviews the hooks, then either blesses it as a curated external adapter or promotes it into the built-in registry for the next release.">
+  <defs>
+    <marker id="c1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7.5" markerHeight="7.5" orient="auto"><path d="M0,0 L10,5 L0,10 z" style="fill:var(--accent)"/></marker>
+    <marker id="c1g" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7.5" markerHeight="7.5" orient="auto"><path d="M0,0 L10,5 L0,10 z" style="fill:var(--gov)"/></marker>
+    <marker id="c1k" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7.5" markerHeight="7.5" orient="auto"><path d="M0,0 L10,5 L0,10 z" style="fill:var(--ok)"/></marker>
+    <marker id="c1f" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7.5" markerHeight="7.5" orient="auto"><path d="M0,0 L10,5 L0,10 z" style="fill:var(--future)"/></marker>
+  </defs>
+  <g font-size="12" fill="currentColor" font-family="-apple-system, sans-serif">
+    <!-- CONTRIBUTOR lane -->
+    <text x="20" y="24" font-weight="700" font-size="12.5" style="fill:var(--accent)">CONTRIBUTOR — permissionless, no maintainer needed to start</text>
+    <rect x="20" y="38" width="150" height="60" rx="9" fill="none" stroke-width="1.6" style="stroke:var(--accent)"/>
+    <text x="95" y="60" text-anchor="middle" font-weight="700">1 · Author</text>
+    <text x="95" y="78" text-anchor="middle" font-size="10.5" class="lg">manifest +</text>
+    <text x="95" y="92" text-anchor="middle" font-size="10.5" class="lg">hook scripts</text>
+
+    <rect x="196" y="38" width="150" height="60" rx="9" fill="none" stroke-width="1.6" style="stroke:var(--accent)"/>
+    <text x="271" y="60" text-anchor="middle" font-weight="700">2 · Self-test</text>
+    <text x="271" y="78" text-anchor="middle" font-size="10.5" class="lg">run the conformance</text>
+    <text x="271" y="92" text-anchor="middle" font-size="10.5" class="lg">kit until green</text>
+
+    <rect x="372" y="38" width="150" height="60" rx="9" fill="none" stroke-width="1.6" style="stroke:var(--accent)"/>
+    <text x="447" y="60" text-anchor="middle" font-weight="700">3 · Publish</text>
+    <text x="447" y="78" text-anchor="middle" font-size="10.5" class="lg">ship the manifest</text>
+    <text x="447" y="92" text-anchor="middle" font-size="10.5" class="lg">(their own repo)</text>
+
+    <rect x="548" y="38" width="150" height="60" rx="9" fill="none" stroke-width="1.6" style="stroke:var(--accent)"/>
+    <text x="623" y="60" text-anchor="middle" font-weight="700">4 · Propose</text>
+    <text x="623" y="78" text-anchor="middle" font-size="10.5" class="lg">open a PR with the</text>
+    <text x="623" y="92" text-anchor="middle" font-size="10.5" class="lg">conformance report</text>
+
+    <path d="M170 68 L 192 68" stroke-width="1.5" style="stroke:var(--accent)" marker-end="url(#c1)"/>
+    <path d="M346 68 L 368 68" stroke-width="1.5" style="stroke:var(--accent)" marker-end="url(#c1)"/>
+    <path d="M522 68 L 544 68" stroke-width="1.5" style="stroke:var(--accent)" marker-end="url(#c1)"/>
+
+    <!-- permissionless offshoot from Publish (down, clear of the bridge) -->
+    <rect x="372" y="124" width="150" height="44" rx="7" fill="none" stroke-dasharray="4 3" stroke-width="1.3" style="stroke:var(--future)"/>
+    <text x="447" y="143" text-anchor="middle" font-size="10" style="fill:var(--future)">any user can opt in now</text>
+    <text x="447" y="157" text-anchor="middle" font-size="10" style="fill:var(--future)">experimental flag + consent</text>
+    <path d="M447 98 L 447 122" stroke-width="1.2" style="stroke:var(--future)" marker-end="url(#c1f)"/>
+
+    <!-- bridge from Propose down to Verify top; stays right of the offshoot, sweeps left below it -->
+    <path d="M623 98 C 623 190, 540 232, 360 246 S 150 256, 116 258" fill="none" stroke-width="1.6" style="stroke:var(--gov)" marker-end="url(#c1g)"/>
+    <text x="626" y="150" text-anchor="start" font-size="10.5" style="fill:var(--gov)">PR + conformance evidence ↓</text>
+
+    <!-- MAINTAINER lane -->
+    <text x="20" y="248" font-weight="700" font-size="12.5" style="fill:var(--gov)">MAINTAINER — the judge</text>
+    <rect x="20" y="260" width="190" height="66" rx="9" fill="none" stroke-width="1.6" style="stroke:var(--gov)"/>
+    <text x="115" y="284" text-anchor="middle" font-weight="700">5 · Verify</text>
+    <text x="115" y="302" text-anchor="middle" font-size="10.5" class="lg">reproduce conformance</text>
+    <text x="115" y="316" text-anchor="middle" font-size="10.5" class="lg">+ review the hook scripts</text>
+
+    <rect x="238" y="260" width="132" height="66" rx="9" fill="none" stroke-width="1.6" style="stroke:var(--gov)"/>
+    <text x="304" y="290" text-anchor="middle" font-weight="700">6 · Decide</text>
+    <text x="304" y="308" text-anchor="middle" font-size="10.5" class="lg">which tier?</text>
+    <path d="M210 293 L 234 293" stroke-width="1.5" style="stroke:var(--gov)" marker-end="url(#c1g)"/>
+
+    <!-- Outcome A: bless (external, gold) -->
+    <rect x="410" y="236" width="216" height="60" rx="9" fill="none" stroke-dasharray="5 4" stroke-width="1.5" style="stroke:var(--future)"/>
+    <text x="518" y="258" text-anchor="middle" font-weight="700" style="fill:var(--future)">Bless — stays external</text>
+    <text x="518" y="275" text-anchor="middle" font-size="10" class="lg">curated list, hash-pinned;</text>
+    <text x="518" y="289" text-anchor="middle" font-size="10" class="lg">maintainer vouches, users opt in</text>
+    <path d="M370 280 C 388 268, 396 262, 406 258" fill="none" stroke-width="1.5" style="stroke:var(--future)" marker-end="url(#c1f)"/>
+
+    <!-- Outcome B: promote (built-in, green) -->
+    <rect x="410" y="318" width="216" height="60" rx="9" fill="none" stroke-width="1.7" style="stroke:var(--ok)"/>
+    <text x="518" y="340" text-anchor="middle" font-weight="700" style="fill:var(--ok)">Promote — into the tree</text>
+    <text x="518" y="357" text-anchor="middle" font-size="10" class="lg">becomes a registry entry —</text>
+    <text x="518" y="371" text-anchor="middle" font-size="10" class="lg">a normal PR, now easy</text>
+    <path d="M370 306 C 388 320, 396 336, 406 344" fill="none" stroke-width="1.6" style="stroke:var(--ok)" marker-end="url(#c1k)"/>
+
+    <!-- Release -->
+    <rect x="644" y="318" width="206" height="60" rx="9" fill="none" stroke-width="1.9" style="stroke:var(--ok)"/>
+    <text x="747" y="340" text-anchor="middle" font-weight="800" style="fill:var(--ok)">7 · Release — built-in</text>
+    <text x="747" y="357" text-anchor="middle" font-size="10" class="lg">next version ships it, no flag —</text>
+    <text x="747" y="371" text-anchor="middle" font-size="10" class="lg">full parity, like Claude / Codex</text>
+    <path d="M626 348 L 640 348" stroke-width="1.7" style="stroke:var(--ok)" marker-end="url(#c1k)"/>
+
+    <!-- graduation caption band -->
+    <line x1="20" y1="418" x2="860" y2="418" stroke="currentColor" opacity="0.18"/>
+    <text x="20" y="410" font-size="11" class="lg">Experimental ▸▸▸ every step right is more conformance proven and more trust earned ▸▸▸ full built-in parity</text>
+
+    <!-- legend -->
+    <g font-size="10.5">
+      <rect x="20" y="444" width="16" height="10" rx="2" fill="none" stroke-width="1.5" style="stroke:var(--accent)"/>
+      <text x="42" y="453" class="lg">contributor</text>
+      <rect x="150" y="444" width="16" height="10" rx="2" fill="none" stroke-width="1.5" style="stroke:var(--gov)"/>
+      <text x="172" y="453" class="lg">maintainer</text>
+      <rect x="270" y="444" width="16" height="10" rx="2" fill="none" stroke-dasharray="4 3" stroke-width="1.5" style="stroke:var(--future)"/>
+      <text x="292" y="453" class="lg">external / experimental outcome</text>
+      <rect x="510" y="444" width="16" height="10" rx="2" fill="none" stroke-width="1.7" style="stroke:var(--ok)"/>
+      <text x="532" y="453" class="lg">built-in / shipped outcome</text>
+    </g>
+  </g>
+</svg>
+<figcaption><strong>The full journey.</strong> A contributor can go all the way to step 3 alone —
+publish an adapter, and any user opts in behind the experimental flag. Getting <em>into the kit</em>
+starts at step 4: propose it to the maintainer with conformance evidence. The maintainer reproduces
+that evidence and reads the hook scripts (the only part that executes), then chooses a landing spot —
+a vetted external adapter, or a promotion into the built-in registry that ships in the next release
+with no flag and full parity.</figcaption>
+</figure>
+
+<h3>What each actor actually does</h3>
+<ol class="steps">
+  <li><span class="st">Author the adapter.</span> <span class="tag soon">contributor</span> Write the
+  manifest (host descriptor, detection, driving surfaces, lifecycle hooks, disclosed trust changes)
+  and the small hook scripts that implement each lifecycle verb. This is data and a few subprocess
+  scripts — in the contributor's own repo, their own language.</li>
+  <li><span class="st">Self-test against the conformance kit.</span> <span class="tag soon">contributor</span>
+  The kit ships a black-box harness: it admits the adapter through the real gate, runs its hooks as
+  real subprocesses, and refuses a corpus of bad manifests with exact reasons. The contributor
+  iterates until it reports a clean pass. <em>Conformance is objective</em> — the same harness the
+  maintainer will run, so there are no surprises at review time.</li>
+  <li><span class="st">Publish.</span> <span class="tag soon">contributor</span> They ship the manifest
+  from their own repo. At this point any user can already opt in — behind
+  <code>AK_EXPERIMENTAL_HOST_ADAPTERS=1</code>, with hash-pinned consent. This path needs
+  <em>nothing</em> from the maintainer; it's the permissionless escape valve. It stays experimental.</li>
+  <li><span class="st">Propose it.</span> <span class="tag soon">contributor</span> To get it vetted or
+  into the kit, they open a PR/issue attaching the conformance report — the numeric, reproducible
+  pass. That report is the currency of the conversation.</li>
+  <li><span class="st">Verify.</span> <span class="tag flag">maintainer</span> The maintainer re-runs
+  the conformance kit against the adapter (black-box, reproducible) and <em>reads the hook scripts</em>
+  — the one part that executes — with the same adversarial review discipline the rest of the kit
+  gets. Conformance evidence + an independent reproduction + a hook read = the basis for trust. The
+  maintainer never had to run the contributor's code inside the kit to evaluate it.</li>
+  <li><span class="st">Decide the tier.</span> <span class="tag flag">maintainer</span> Based on which
+  conformance tiers passed, the maintainer chooses where it lands:
+    <ul>
+      <li><strong>Bless it as a curated external adapter</strong> <span class="tag soon">stays external</span>
+      — add it to a vetted list with its manifest hash pinned. Users still opt in themselves, but now
+      with the maintainer's vouch behind it. Lightweight; good for niche or long-tail hosts the kit
+      doesn't want to own. Still experimental, still capped by what it earned.</li>
+      <li><strong>Promote it into the tree</strong> <span class="tag now">becomes built-in</span> —
+      adopt its host descriptor as a built-in registry entry. Because of the registry-driven refactor
+      this whole effort delivered, that's a <em>normal, small PR</em> — an entry plus a lifecycle
+      adapter plus an About card, following the established pattern. No open-heart surgery.</li>
+    </ul>
+  </li>
+  <li><span class="st">Release.</span> <span class="tag now">maintainer</span> The promotion PR goes
+  through the ordinary release process — CI, review, merge. The next version of agentic-kit ships the
+  host as a <strong>first-class built-in</strong>: it appears for every user with no flag, no
+  manifest, no consent step, participating exactly like Claude, Codex, and OpenCode. The caps are gone
+  because it's now code the maintainer vouches for — that's what graduation <em>means</em>.</li>
+</ol>
+
+<div class="panel">
+  <div class="ptitle">So, concretely, "a release with Hermes built in"</div>
+  <p style="margin-bottom:0">Hermes graduates: its author gets it passing the conformance kit and
+  proposes it; the maintainer reproduces the pass and reviews its hooks; the maintainer promotes its
+  descriptor into the built-in registry (a small PR, thanks to the groundwork); it rides a normal
+  release. From that version on, Hermes is one of the built-in hosts — indistinguishable from
+  Claude/Codex/OpenCode to a user — and its adapter code either ships as bundled hook scripts or gets
+  reimplemented as in-process glue, the maintainer's call. The experimental external-adapter door was
+  the <em>proving ground</em>; being built-in is the diploma.</p>
+</div>
+
+<h2 id="upstream">8 · Some ceilings aren't ours to lift — the upstream path</h2>
+<p>agentic-kit doesn't stand alone. It sits <em>downstream</em> of two other systems: <strong>ruflo</strong>,
+which orchestrates the agent loop, and <strong>agentic-qe</strong>, which runs quality. A host's full
+participation touches all three layers — and that means a contributor chasing a conformance tier can
+hit a ceiling that <em>agentic-kit cannot lift</em>, because the missing capability lives upstream.
+When that happens, the answer isn't "blocked forever" — it's a deliberate request, carried upstream,
+that lights up in the kit once it ships.</p>
+
+<figure>
+<svg viewBox="0 0 880 430" role="img"
+  aria-label="Three-layer stack: a contributor's adapter meets agentic-kit, the integrator, which depends on ruflo (orchestration) and agentic-qe (quality). Most conformance gaps are fixed in agentic-kit; some are upstream, sent as capability requests that light up in the kit when upstream ships.">
+  <defs>
+    <marker id="s1c" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7.5" markerHeight="7.5" orient="auto"><path d="M0,0 L10,5 L0,10 z" style="fill:var(--accent)"/></marker>
+    <marker id="s1f" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7.5" markerHeight="7.5" orient="auto"><path d="M0,0 L10,5 L0,10 z" style="fill:var(--future)"/></marker>
+    <marker id="s1k" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7.5" markerHeight="7.5" orient="auto"><path d="M0,0 L10,5 L0,10 z" style="fill:var(--ok)"/></marker>
+  </defs>
+  <g font-size="12" fill="currentColor" font-family="-apple-system, sans-serif">
+    <!-- adapter -->
+    <rect x="336" y="16" width="208" height="48" rx="9" fill="none" stroke-width="1.6" style="stroke:var(--accent)"/>
+    <text x="440" y="38" text-anchor="middle" font-weight="700" style="fill:var(--accent)">Contributor's adapter</text>
+    <text x="440" y="54" text-anchor="middle" font-size="10.5" class="lg">reaching for a conformance tier</text>
+    <path d="M440 64 L 440 96" stroke-width="1.6" style="stroke:var(--accent)" marker-end="url(#s1c)"/>
+    <text x="448" y="84" text-anchor="start" font-size="10.5" class="lg">conformance</text>
+
+    <!-- agentic-kit integrator -->
+    <rect x="150" y="100" width="580" height="86" rx="11" fill="none" stroke-width="2" stroke="currentColor"/>
+    <text x="440" y="126" text-anchor="middle" font-weight="800" font-size="14">agentic-kit — the integrator</text>
+    <text x="440" y="146" text-anchor="middle" font-size="11" class="lg">the host registry · the adapter contract · execution · consistency</text>
+    <text x="440" y="171" text-anchor="middle" font-size="11" style="fill:var(--ok)">Most conformance gaps are fixed right here — a normal agentic-kit PR.</text>
+
+    <!-- ruflo substrate -->
+    <rect x="40" y="300" width="330" height="104" rx="11" fill="none" stroke-width="1.6" stroke="currentColor"/>
+    <text x="205" y="326" text-anchor="middle" font-weight="700">ruflo — orchestration substrate</text>
+    <text x="205" y="345" text-anchor="middle" font-size="10.5" class="lg">drives the loop · memory · routing · swarms</text>
+    <text x="205" y="362" text-anchor="middle" font-size="10.5" class="lg">host backends are ENABLE_* targets,</text>
+    <text x="205" y="377" text-anchor="middle" font-size="10.5" class="lg">defined inside ruflo, not from outside</text>
+    <text x="205" y="394" text-anchor="middle" font-size="10" style="fill:var(--future)">ask: register a new host backend</text>
+
+    <!-- aqe substrate -->
+    <rect x="510" y="300" width="330" height="104" rx="11" fill="none" stroke-width="1.6" stroke="currentColor"/>
+    <text x="675" y="326" text-anchor="middle" font-weight="700">agentic-qe — quality substrate</text>
+    <text x="675" y="345" text-anchor="middle" font-size="10.5" class="lg">test gen · coverage · quality court</text>
+    <text x="675" y="362" text-anchor="middle" font-size="10.5" class="lg">the provider list is a closed upstream</text>
+    <text x="675" y="377" text-anchor="middle" font-size="10.5" class="lg">enum — a host can't self-add as one</text>
+    <text x="675" y="394" text-anchor="middle" font-size="10" style="fill:var(--future)">ask: a provider-plugin API</text>
+
+    <!-- request down (gold dashed) : ruflo -->
+    <path d="M320 186 C 250 224, 210 256, 195 296" fill="none" stroke-width="1.5" stroke-dasharray="6 4" style="stroke:var(--future)" marker-end="url(#s1f)"/>
+    <text x="150" y="238" text-anchor="middle" font-size="10" style="fill:var(--future)">capability request ↓</text>
+    <!-- ship up (green) : ruflo -->
+    <path d="M245 296 C 275 256, 305 224, 336 188" fill="none" stroke-width="1.5" style="stroke:var(--ok)" marker-end="url(#s1k)"/>
+    <text x="330" y="252" text-anchor="middle" font-size="10" style="fill:var(--ok)">ships → lights up ↑</text>
+
+    <!-- request down : aqe -->
+    <path d="M560 186 C 630 224, 670 256, 685 296" fill="none" stroke-width="1.5" stroke-dasharray="6 4" style="stroke:var(--future)" marker-end="url(#s1f)"/>
+    <text x="730" y="238" text-anchor="middle" font-size="10" style="fill:var(--future)">capability request ↓</text>
+    <!-- ship up : aqe -->
+    <path d="M635 296 C 605 256, 575 224, 544 188" fill="none" stroke-width="1.5" style="stroke:var(--ok)" marker-end="url(#s1k)"/>
+    <text x="550" y="252" text-anchor="middle" font-size="10" style="fill:var(--ok)">ships → lights up ↑</text>
+  </g>
+</svg>
+<figcaption><strong>Downstream, but not powerless.</strong> When a conformance ceiling is really an
+upstream one, the kit doesn't fake it or bury it — it files a specific capability request against
+ruflo or agentic-qe, tracks the tier as "gated on upstream," and exposes the capability the moment
+the upstream release lands. The dashed gold arrows are the ask; the green arrows are the payoff.</figcaption>
+</figure>
+
+<h3>Which layer owns the blocker?</h3>
+<p>The first diagnostic when a conformance tier can't be met: <em>whose capability is missing?</em></p>
+<div class="tablewrap"><table>
+  <tr><th>The blocker</th><th>Owner</th><th>What happens</th></tr>
+  <tr><td>Can't run work through the host; no trust command; local-file manifests only</td>
+      <td><strong style="color:var(--ok)">agentic-kit</strong></td>
+      <td>The kit's to fix — a normal kit PR. This is the on-ramp work, no one to wait on.</td></tr>
+  <tr><td>Host wants to be a recognized <em>AQE provider type</em></td>
+      <td><strong style="color:var(--gov)">agentic-qe</strong></td>
+      <td>Upstream — the provider list is a closed enum. Request a provider-plugin API. <em>Interim:</em> QE works through the model provider underneath the host, so quality isn't blocked, only the host's own AQE identity is.</td></tr>
+  <tr><td>Host wants to be a native ruflo <em>backend</em> (drive the loop, an ENABLE_* target)</td>
+      <td><strong style="color:var(--gov)">ruflo</strong></td>
+      <td>Upstream — backends are defined in ruflo. Request a documented backend-registration path. <em>Interim:</em> the host runs through the kit's own supervised execution, just not as a ruflo-native backend.</td></tr>
+  <tr><td>Host wants to participate in the QE quality gate</td>
+      <td><strong style="color:var(--ok)">agentic-kit</strong></td>
+      <td>Mostly the kit's — adopt an anchor set. Not blocked upstream.</td></tr>
+</table></div>
+
+<div class="panel">
+  <div class="ptitle">The request path, and why it's credible</div>
+  <p style="margin-bottom:0">A capability request isn't a wish into the void. The kit's maintainer
+  <em>champions</em> it upstream — the same maintainer already contributes to these projects — with a
+  concrete extension point named, not a vague "please support us." The pending dependency is recorded
+  against the conformance tier (<code>gated: agentic-qe#NNN</code>), so anyone reading an adapter's
+  status can see exactly what it's waiting on and why. When the upstream release ships the capability,
+  the kit exposes it in the adapter contract and the tier flips from gated to earnable. This is what
+  keeps "no limitations after conformance" honest: the limitations that <em>are</em> real get a
+  documented route to disappear, layer by layer.</p>
+</div>
+
+<h2 id="opencode-example">9 · OpenCode in practice — a worked example</h2>
+<p>All of this becomes concrete with a host that's already here. OpenCode is a <em>built-in</em>, ak
+installs and configures it, and a user can open the OpenCode CLI on a project and get real benefit —
+yet it isn't a full peer on every layer. Here's exactly what it gets, what it doesn't, and — the
+useful part — <em>who owns each gap</em>. It's the whole three-layer story in one host.</p>
+
+<div class="cols">
+  <div class="card" style="border-top:3px solid var(--ok)">
+    <h3 style="color:var(--ok)">What OpenCode gets <span class="tag now">wired by ak</span></h3>
+    <p class="quiet" style="margin-top:0">On an ak-configured project, opening the OpenCode CLI comes with:</p>
+    <ul>
+      <li><strong>Ruflo's full MCP server</strong> — memory, routing, swarm tools, registered in
+      OpenCode's own config and auto-approved.</li>
+      <li><strong>RuvNet Brain MCP</strong> — grounding in rUv source.</li>
+      <li><strong>Ruflo lifecycle hooks</strong> — OpenCode's own edit/tool/task events wired to
+      ruflo, so learning fires as work happens.</li>
+      <li><strong>Managed ruflo agents, skills, and AGENTS.md guidance</strong> projected in.</li>
+    </ul>
+    <p class="meta" style="margin-bottom:0">The orchestration + grounding layers: fully first-class.</p>
+  </div>
+  <div class="card" style="border-top:3px solid var(--caution)">
+    <h3 style="color:var(--caution)">What it doesn't — and who owns it</h3>
+    <ul>
+      <li><strong>It never leads</strong> (never primary) — <span class="quiet">by design; it's a
+      supervised host.</span></li>
+      <li><strong>agentic-qe tools/skills aren't projected in</strong> (unlike Claude &amp; Codex) —
+      <span class="quiet">ak's choice; ak could run aqe's OpenCode installer and doesn't yet.</span></li>
+      <li><strong>It isn't an AQE provider type</strong> (analysis can't run <em>on</em> it) —
+      <span class="quiet">upstream; agentic-qe's provider list is a closed enum.</span></li>
+      <li><strong>No command status-line footer, no quota surface, no cross-host bridge</strong> —
+      <span class="quiet">by design.</span></li>
+    </ul>
+  </div>
+</div>
+
+<div class="panel">
+  <div class="ptitle">The pattern, in one host</div>
+  <p style="margin-bottom:0">OpenCode is a <strong>first-class ruflo + brain host</strong>, a
+  <strong>supervised (never-leading) execution host</strong>, and largely <strong>outside the
+  agentic-qe layer</strong> — and that last gap splits cleanly the way
+  <a href="#upstream">section&nbsp;8</a> describes: "no aqe tools projected in" is <em>ak's</em> to
+  close (a normal kit change), while "can't be an AQE provider type" is an <em>upstream</em> request
+  to agentic-qe. That's the entire model — host layer, lead vs. supervised, and the ak-vs-upstream
+  split — visible in a single assistant available today.</p>
+</div>
+
+<hr class="soft">
+<p class="meta">Built-in host behavior is authoritative in ADR-0016; the external-adapter extension
+point and its safety model are ADR-0029 (which supersedes ADR-0016's original "closed registry"
+stance, narrowly — nothing under a manifest is ever loaded into the kit's process). The graduation
+ladder — experimental external adapter, earned capabilities via conformance tiers, promotion to
+built-in, and the upstream capability-request path to ruflo and agentic-qe — is the proposed next
+decision (a prospective ADR-0031), not yet ratified. Upstream facts (agentic-qe's closed provider
+enum; ruflo's ENABLE_* backend model) are grounded in a source-cited research sweep of
+<code>agentic-qe@3.13.10</code> and <code>ruvnet/ruflo@45e65b5</code>. Hermes and Gemini CLI are named
+here as illustrative candidates for the external door, not as hosts the kit supports today.</p>
+
+</main>
+
+</body>
+</html>

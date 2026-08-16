@@ -1,0 +1,613 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Host &amp; Provider Consistency — agentic-kit</title>
+<style>
+  :root {
+    --bg: #f5f7f8;
+    --surface: #ffffff;
+    --surface-2: #eef1f3;
+    --ink: #1a222c;
+    --muted: #5b6673;
+    --line: #d9dfe4;
+    --accent: #266e73;
+    --accent-soft: #e2eeef;
+    --sev-blocker: #a93a2c;
+    --sev-blocker-bg: #f7e5e1;
+    --sev-major: #8f6400;
+    --sev-major-bg: #f6edd6;
+    --sev-minor: #4a6180;
+    --sev-minor-bg: #e6ecf3;
+    --sev-ok: #2c7a4b;
+    --sev-ok-bg: #e2f0e7;
+    --code-bg: #eceff1;
+    --shadow: 0 1px 2px rgba(26, 34, 44, 0.06);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #14181b;
+      --surface: #1b2126;
+      --surface-2: #21282e;
+      --ink: #e3e8ec;
+      --muted: #96a1ab;
+      --line: #2c343b;
+      --accent: #72c0c5;
+      --accent-soft: #1e3336;
+      --sev-blocker: #e08a7c;
+      --sev-blocker-bg: #3a231f;
+      --sev-major: #d9b25e;
+      --sev-major-bg: #352c17;
+      --sev-minor: #9db4d0;
+      --sev-minor-bg: #232c37;
+      --sev-ok: #85c9a1;
+      --sev-ok-bg: #1d3226;
+      --code-bg: #242b31;
+      --shadow: none;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #14181b;
+    --surface: #1b2126;
+    --surface-2: #21282e;
+    --ink: #e3e8ec;
+    --muted: #96a1ab;
+    --line: #2c343b;
+    --accent: #72c0c5;
+    --accent-soft: #1e3336;
+    --sev-blocker: #e08a7c;
+    --sev-blocker-bg: #3a231f;
+    --sev-major: #d9b25e;
+    --sev-major-bg: #352c17;
+    --sev-minor: #9db4d0;
+    --sev-minor-bg: #232c37;
+    --sev-ok: #85c9a1;
+    --sev-ok-bg: #1d3226;
+    --code-bg: #242b31;
+    --shadow: none;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    line-height: 1.55;
+    margin: 0;
+    font-size: 15.5px;
+  }
+  .wrap { max-width: 920px; margin: 0 auto; padding: 3rem 1.5rem 6rem; }
+  code, .mono {
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    font-size: 0.86em;
+    background: var(--code-bg);
+    border-radius: 3px;
+    padding: 0.08em 0.32em;
+  }
+  th code, td code { white-space: nowrap; }
+  h1, h2, h3, h4 { line-height: 1.25; text-wrap: balance; letter-spacing: -0.01em; }
+  h1 { font-size: 1.9rem; margin: 0.4rem 0 0.6rem; }
+  h2 {
+    font-size: 1.28rem; margin: 3.2rem 0 0.9rem;
+    padding-top: 1.6rem; border-top: 1px solid var(--line);
+  }
+  h3 { font-size: 1.05rem; margin: 1.8rem 0 0.5rem; }
+  p { max-width: 72ch; margin: 0.65rem 0; }
+  ul, ol { max-width: 72ch; padding-left: 1.4rem; }
+  li { margin: 0.3rem 0; }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover, a:focus-visible { text-decoration: underline; }
+  a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  .eyebrow {
+    text-transform: uppercase; letter-spacing: 0.12em; font-size: 0.72rem;
+    font-weight: 650; color: var(--accent); margin: 0;
+  }
+  .meta {
+    display: flex; flex-wrap: wrap; gap: 0.4rem 1.4rem;
+    color: var(--muted); font-size: 0.85rem; margin: 0.4rem 0 0;
+  }
+  .lede { font-size: 1.02rem; color: var(--muted); max-width: 68ch; }
+
+  nav.toc {
+    background: var(--surface); border: 1px solid var(--line); border-radius: 8px;
+    padding: 1rem 1.3rem; margin: 1.8rem 0 0; box-shadow: var(--shadow);
+    font-size: 0.9rem; columns: 2; column-gap: 2.5rem;
+  }
+  nav.toc a { display: block; padding: 0.14rem 0; break-inside: avoid; }
+  @media (max-width: 640px) { nav.toc { columns: 1; } }
+
+  .chip {
+    display: inline-block; font-size: 0.68rem; font-weight: 700;
+    text-transform: uppercase; letter-spacing: 0.06em;
+    border-radius: 999px; padding: 0.14em 0.6em; white-space: nowrap;
+  }
+  .chip.blocker { color: var(--sev-blocker); background: var(--sev-blocker-bg); }
+  .chip.major   { color: var(--sev-major);   background: var(--sev-major-bg); }
+  .chip.minor   { color: var(--sev-minor);   background: var(--sev-minor-bg); }
+  .chip.ok      { color: var(--sev-ok);      background: var(--sev-ok-bg); }
+  .chip.today   { color: var(--accent);      background: var(--accent-soft); }
+  .chip.ext     { color: var(--muted);       background: var(--surface-2); }
+
+  .tablewrap { overflow-x: auto; margin: 1rem 0; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); box-shadow: var(--shadow); }
+  table { border-collapse: collapse; width: 100%; font-size: 0.87rem; }
+  th {
+    text-align: left; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.08em;
+    color: var(--muted); padding: 0.6rem 0.85rem; border-bottom: 1px solid var(--line);
+    background: var(--surface-2); white-space: nowrap;
+  }
+  td { padding: 0.6rem 0.85rem; border-bottom: 1px solid var(--line); vertical-align: top; }
+  tr:last-child td { border-bottom: none; }
+  td.id { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-size: 0.8rem; font-weight: 700; color: var(--accent); white-space: nowrap; }
+  td.nowrap { white-space: nowrap; }
+
+  .decision {
+    background: var(--surface); border: 1px solid var(--line); border-radius: 8px;
+    padding: 1.2rem 1.4rem 1.1rem; margin: 1.4rem 0; box-shadow: var(--shadow);
+  }
+  .decision h3 { margin: 0 0 0.2rem; }
+  .decision .dq { color: var(--muted); font-size: 0.92rem; margin: 0 0 0.8rem; }
+  .opt { margin: 0.55rem 0; padding-left: 1.9rem; position: relative; max-width: 72ch; }
+  .opt b.tag {
+    position: absolute; left: 0; top: 0.1rem; font-size: 0.72rem; font-weight: 750;
+    color: var(--muted); font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  }
+  .rec {
+    margin-top: 0.9rem; padding: 0.7rem 1rem; border-left: 3px solid var(--accent);
+    background: var(--accent-soft); border-radius: 0 6px 6px 0; font-size: 0.93rem;
+    max-width: 72ch;
+  }
+  .rec b:first-child { color: var(--accent); text-transform: uppercase; font-size: 0.72rem; letter-spacing: 0.08em; }
+
+  .phase {
+    border: 1px solid var(--line); border-left: 3px solid var(--accent);
+    border-radius: 0 8px 8px 0; background: var(--surface);
+    padding: 1rem 1.3rem; margin: 1rem 0; box-shadow: var(--shadow);
+  }
+  .phase h3 { margin: 0 0 0.3rem; }
+  .phase .ph-meta { color: var(--muted); font-size: 0.83rem; margin-bottom: 0.5rem; }
+
+  .callout {
+    border: 1px solid var(--line); background: var(--surface-2); border-radius: 8px;
+    padding: 0.9rem 1.2rem; margin: 1.2rem 0; font-size: 0.94rem; max-width: 76ch;
+  }
+  section.brief {
+    background: var(--surface); border: 1px solid var(--line); border-top: 3px solid var(--accent);
+    border-radius: 8px; padding: 1.4rem 1.6rem 1.5rem; margin: 2rem 0 0.5rem;
+    box-shadow: var(--shadow);
+  }
+  section.brief h2 { border-top: none; padding-top: 0; margin: 0 0 0.2rem; }
+  section.brief h3 { font-size: 0.98rem; margin: 1.3rem 0 0.35rem; }
+  section.brief p, section.brief li { font-size: 0.97rem; }
+  section.brief .audience { color: var(--muted); font-size: 0.88rem; margin-top: 0; }
+  .footer { margin-top: 4rem; padding-top: 1.2rem; border-top: 1px solid var(--line); color: var(--muted); font-size: 0.82rem; }
+</style>
+</head>
+<body>
+<div style="max-width:76ch;margin:1.4rem auto 0;padding:.55rem .95rem;background:var(--surface);border:1px solid var(--line);border-left:3px solid var(--accent);border-radius:8px;font-size:.82rem;line-height:1.5;color:var(--muted)">📎 <strong style="color:var(--accent)">Origin.</strong> Authored as a Claude artifact; this file is the repository’s local snapshot for review. Live version: <a href="https://claude.ai/code/artifact/db1bae65-adf9-45f1-80f1-163dcc1af50c" style="color:var(--accent)">https://claude.ai/code/artifact/db1bae65-adf9-45f1-80f1-163dcc1af50c</a></div>
+
+<div class="wrap">
+  <p class="eyebrow">agentic-kit · master consistency document</p>
+  <h1>Host &amp; provider axis — findings, gaps, options, recommendations</h1>
+  <p class="meta">
+    <span>Prepared 2026-08-13 · rev 2 (executive brief added)</span>
+    <span>Trigger: <a href="https://github.com/pacphi/agentic-kit/pull/131">PR #131</a> (ADR-0028/0029/0030, adrianco)</span>
+    <span>Repo: pacphi/agentic-kit @ main (8aad47b)</span>
+  </p>
+  <p class="lede">
+    Every claim below was verified against source: the ak side by a full surface sweep of the
+    repository, the Hermes side against NousResearch/hermes-agent HEAD (v0.20.0, 2026-08-13).
+    Finding IDs (F-nn) and decision IDs (D-n) are stable and cross-referenced by the roadmap
+    and the PR #131 review response.
+  </p>
+
+  <section class="brief" id="brief">
+    <h2>0 · Executive brief — in plain language</h2>
+    <p class="audience">For every consumer of agentic-kit — no engineering background needed.
+    Everything after this section is the technical evidence behind this summary.</p>
+
+    <h3>What agentic-kit is</h3>
+    <p>
+      agentic-kit ("ak") is a set-up and housekeeping tool for AI coding assistants. Today it
+      manages three of them — Claude Code, Codex, and OpenCode. It installs them, keeps their
+      settings consistent, routes different kinds of work to the assistant best suited for it,
+      and reports on what they did and roughly what it cost.
+    </p>
+
+    <h3>The problem</h3>
+    <p>
+      A contributor asked us to support a fourth assistant — Hermes, notable because it drives
+      AI models that run entirely on your own computer instead of in a vendor's cloud. Studying
+      that request exposed something broader: the kit does not treat its three current
+      assistants evenly. Under the hood, roughly half of the kit treats "an assistant" as a
+      generic thing any newcomer could slot into; the other half has the three names written in
+      by hand. In practice, some features quietly apply to only one or two assistants, a
+      newcomer would be invisible to most of the kit — and, worst of all, a few reports file
+      activity from an unrecognized assistant <em>under the wrong name</em> instead of saying
+      "unrecognized."
+    </p>
+
+    <h3>The challenges</h3>
+    <ul>
+      <li><b>Adding an assistant today is open-heart surgery.</b> The last time we added one it
+      touched roughly fourteen files and eight test suites — and permanently made the kit's
+      maintainer responsible for software they don't personally use.</li>
+      <li><b>Assistants differ in ways users must be told about.</b> Example: in unattended
+      mode, Hermes approves every action automatically, by its own design — where OpenCode
+      pauses and asks. The kit has to state differences like that plainly, never average them
+      away.</li>
+      <li><b>The bookkeeping isn't honest yet.</b> Usage and session reports currently mis-file
+      unknown assistants into an existing bucket rather than labeling them truthfully. That is
+      a correctness problem today, not a someday problem.</li>
+      <li><b>Changing course must happen on the record.</b> An earlier design decision
+      deliberately said "no third-party plug-ins." Opening a plug-in door means revisiting that
+      decision explicitly, with its trade-offs written down — not quietly working around it.</li>
+    </ul>
+
+    <h3>The planned work, in phases</h3>
+    <ul>
+      <li><b>Phase 0 — Truthfulness fixes.</b> Stop mis-filing unknown assistants; replace
+      silences with plain labels ("this assistant has no usage report"); remove duplicated and
+      dead configuration. These are owed no matter what else is decided.</li>
+      <li><b>Phase 1 — Local models, generically.</b> Recognize any locally-run model server
+      (LM Studio, llama.cpp, MLX, vLLM, and whatever comes next) — not just one vendor — so
+      people running models on their own machines are first-class citizens.</li>
+      <li><b>Phase 2 — The plug-in door.</b> Rework the kit's insides so an assistant is
+      something the kit <em>looks up</em> rather than something <em>written into it</em>. Then,
+      if the decision to open up is confirmed, publish one well-tested connection point so a
+      new assistant can be added by the people who want it.</li>
+      <li><b>Phase 3 — Hermes, and honest labels everywhere.</b> Hermes arrives as the first
+      plug-in, maintained by its proposer rather than by us. Every status screen learns to say
+      what each assistant can and cannot do — and why.</li>
+      <li><b>Phase 4 — Parked, on purpose.</b> Ideas that need more real-world evidence first
+      (deeper usage reporting for plug-ins, a stronger isolation model) are listed and
+      deferred, not forgotten.</li>
+    </ul>
+
+    <h3>What you get at the end</h3>
+    <p>
+      Whichever assistants you use: the same commands work the same way, reports name things
+      truthfully, and capability differences are stated rather than hidden. Adding tomorrow's
+      assistant no longer depends on one maintainer's spare time. And one thing deliberately
+      does <em>not</em> change: the kit never installs a plug-in on its own — you choose one
+      explicitly, and the kit tells you exactly what it is and what it is allowed to do before
+      anything runs.
+    </p>
+  </section>
+
+  <nav class="toc" aria-label="Contents">
+    <a href="#brief">0 · Executive brief (plain language)</a>
+    <a href="#state">1 · The state model: a bimodal host axis</a>
+    <a href="#tiers">2 · The de-facto host tiers</a>
+    <a href="#findings">3 · Findings inventory (F-01…F-30)</a>
+    <a href="#decisions">4 · Decision areas (D-1…D-7)</a>
+    <a href="#amendments">5 · ADR amendments register</a>
+    <a href="#tests">6 · Test &amp; docs remediation</a>
+    <a href="#roadmap">7 · Sequenced roadmap</a>
+    <a href="#hermes">8 · Appendix: Hermes verification</a>
+  </nav>
+
+  <h2 id="state">1 · The state model: a bimodal host axis</h2>
+  <p>
+    The single most important structural fact: <b>everything that validates a host is generic;
+    nearly everything that acts on a host is hardcoded by name.</b>
+  </p>
+  <p>
+    The registry, capability vocabulary, and all six validators are host-agnostic and already
+    proven against synthetic hosts (<code>capability-derived.test.mjs</code> exercises a
+    <code>future-host</code>; <code>trust-manifest.test.mjs:47-69</code> injects a
+    <code>grok</code> host end-to-end through setup disclosure). But dispatch, presentation,
+    attribution, guidance, teardown, and version tracking each carry literal
+    <code>claude</code>/<code>codex</code>/<code>opencode</code> branches. A conforming
+    fourth host registered today would validate cleanly, appear in exactly two surfaces
+    (the setup/sync install loop and the trust manifest), and be invisible — or actively
+    breaking — everywhere else.
+  </p>
+  <p>
+    This is why "inconsistent UX" is the right frame: the inconsistency is not a Hermes
+    problem. Several gaps below already bite OpenCode, the third <em>built-in</em> host.
+    The extensibility question (D-1) only raises the stakes; it does not create the debt.
+  </p>
+
+  <h2 id="tiers">2 · The de-facto host tiers</h2>
+  <p>
+    Three tiers already exist in behavior but not in vocabulary. The command surface calls all
+    of them "host," and <code>ak host pick</code> means something different at each tier.
+  </p>
+  <div class="tablewrap"><table>
+    <tr><th>Tier</th><th>Hosts</th><th>Can do</th><th>Cannot do</th></tr>
+    <tr>
+      <td class="nowrap"><b>Session host</b></td>
+      <td class="nowrap">claude, codex</td>
+      <td>Drive the ruflo loop (<code>ENABLE_*</code>), be primary, statusline, quota channels, usage scorecard, MCP bridge</td>
+      <td>—</td>
+    </tr>
+    <tr>
+      <td class="nowrap"><b>Supervised execution host</b></td>
+      <td class="nowrap">opencode</td>
+      <td>Route <code>ak run</code> activities; permission events intercepted (<code>permission_required</code>)</td>
+      <td>Primary, AQE provider, statusline, vendor-diversity credit, usage/quota/live-session attribution</td>
+    </tr>
+    <tr>
+      <td class="nowrap"><b>External execution host</b> <span class="chip ext">proposed</span></td>
+      <td class="nowrap">hermes (ADR-0030)</td>
+      <td>Route activities via an externally maintained adapter; host-declared usage sidecar</td>
+      <td>Everything tier 2 cannot, <em>plus</em> no interceptable permission event — <code>hermes&nbsp;-z</code> auto-approves by its own headless contract (disclosed, verified)</td>
+    </tr>
+  </table></div>
+  <p>
+    ADR-0020 already mandates tier 2's shape for OpenCode ("explicit, supervised, non-primary,
+    outside AQE provider routing, absent from vendor-diversity facts"). ADR-0029's capability
+    caps reproduce that shape for external hosts — tested policy, not new policy. What is
+    missing is the <em>vocabulary</em>: no surface tells the user which tier a host is in or why
+    a capability is absent (see D-2).
+  </p>
+
+  <h2 id="findings">3 · Findings inventory</h2>
+  <p>
+    Severity: <span class="chip blocker">blocker</span> crashes or corrupts;
+    <span class="chip major">major</span> wrong or missing behavior a user will hit;
+    <span class="chip minor">minor</span> debt, dead code, or docs drift;
+    <span class="chip ok">healthy</span> baseline worth protecting.
+    Scope: <span class="chip today">today</span> affects built-in hosts now;
+    <span class="chip ext">ext</span> manifests only if extensibility (D-1) proceeds.
+  </p>
+
+  <h3>3.1 Registry &amp; validation — the healthy baseline</h3>
+  <div class="tablewrap"><table>
+    <tr><th>ID</th><th>Finding</th><th>Severity</th><th>Scope</th></tr>
+    <tr><td class="id">F-00</td><td>Registry descriptors, closed capability vocabulary (<code>registries.mjs:6-9,154-225</code>), six host-agnostic validators, <code>validateRegistries</code> at construction, pure capability selectors, graceful runner degradation (<code>runner.mjs:246-252</code>), fully generic trust manifest (<code>trust-manifest.mjs</code>) and footprint install loop (<code>footprint/install.mjs:170-178</code>). Protect this.</td><td><span class="chip ok">healthy</span></td><td><span class="chip today">today</span></td></tr>
+  </table></div>
+
+  <h3>3.2 Dispatch &amp; lifecycle</h3>
+  <div class="tablewrap"><table>
+    <tr><th>ID</th><th>Finding</th><th>Severity</th><th>Scope</th></tr>
+    <tr><td class="id">F-01</td><td><code>EXECUTION_ADAPTERS</code> is a frozen 3-entry Map with a <b>bidirectional invariant that throws at module import</b> (<code>execution/adapters.mjs:8-12,20-30</code>). Any registered routable host outside the Map bricks <code>ak run</code> for everyone. ADR-0018 prose states the invariant in one direction only; the code enforces both. The single hardest extensibility gate — absent from ADR-0029 §8.</td><td><span class="chip blocker">blocker</span></td><td><span class="chip ext">ext</span></td></tr>
+    <tr><td class="id">F-02</td><td>Lifecycle adapter selection is a named import at five call sites (<code>sync.mjs:11,195-197</code>; <code>x/host.mjs:19,326,617-619,642</code>; <code>setup.mjs:15,216</code>). No lifecycle registry, no <code>host.lifecycle</code> field; <code>validateHostAdapter</code> doesn't accept one. A conforming third-party lifecycle has no dispatch path.</td><td><span class="chip major">major</span></td><td><span class="chip ext">ext</span></td></tr>
+    <tr><td class="id">F-03</td><td><code>ak uninstall</code> bypasses <code>runLifecycle</code> entirely — calls <code>retireOpencode(cfg)</code> directly (<code>uninstall.mjs:112-142</code>). Third-party footprint would persist on disk permanently; even for built-ins, teardown has two code paths.</td><td><span class="chip major">major</span></td><td><span class="chip today">today</span></td></tr>
+    <tr><td class="id">F-04</td><td>Setup permission handling authorizes only claude-host rules; <code>removeUndisclosedPermissions</code> (<code>setup.mjs:95,102,120-128</code>) would strip a third-party host's permissions and fail setup.</td><td><span class="chip major">major</span></td><td><span class="chip ext">ext</span></td></tr>
+  </table></div>
+
+  <h3>3.3 Presentation</h3>
+  <div class="tablewrap"><table>
+    <tr><th>ID</th><th>Finding</th><th>Severity</th><th>Scope</th></tr>
+    <tr><td class="id">F-05</td><td><code>status.mjs</code> is split-brained: a generic host loop yields install+auth rows (<code>:500-529</code>), then hand-rolled blocks per host — codex MCP/bridge (<code>:352-382</code>), codex plugins (<code>:387-400</code>), an 88-line opencode block importing 8 symbols (<code>:407-495</code>), codex statusline row (<code>:729-746</code>), a claude-only blocks loop (<code>:670</code>). <code>normalizedFacts</code> is collected but consumed for exactly one field (<code>:505-506</code>) — everything else re-probes. Rendering from <code>normalizedFacts</code> is also the direction of the #129/#133/#136 status-vs-sync projection fixes.</td><td><span class="chip major">major</span></td><td><span class="chip today">today</span></td></tr>
+    <tr><td class="id">F-06</td><td>About directory cards are a frozen literal (<code>dashboard/about-directory.mjs:54-110</code>) with a <b>test-enforced</b> registry↔directory parity invariant (<code>about-directory.test.mjs:118-140,157-161,381-385</code>; <code>ddd/component-directory.md:164-165</code>). Any registered host without an authored card fails CI; card matching also assumes <code>npmPackage</code> is non-null.</td><td><span class="chip major">major</span></td><td><span class="chip ext">ext</span></td></tr>
+    <tr><td class="id">F-07</td><td>Statusline is two host-specific patchers (claude helper, codex TOML) with <code>cfg.statusline.codex</code> as a literal config key; consistent with the <code>commandStatusline</code> cap — but <code>statuslineSupported</code> (<code>hosts.mjs:37,53-55</code>) has zero call sites: a dead capability consumer.</td><td><span class="chip minor">minor</span></td><td><span class="chip today">today</span></td></tr>
+  </table></div>
+
+  <h3>3.4 Attribution &amp; observability</h3>
+  <div class="tablewrap"><table>
+    <tr><th>ID</th><th>Finding</th><th>Severity</th><th>Scope</th></tr>
+    <tr><td class="id">F-08</td><td>Usage scorecard needs seven per-host edits; worse, unknown hosts are <b>misattributed, not omitted</b>: non-codex sessions collapse to <code>claude</code> (<code>usage-index.mjs:1407-1408</code>), <code>parseFile</code>'s 2-branch ternary falls through to <code>parseClaude</code> (<code>:831-848</code>), and a fourth root would collide in the single-flight cache (<code>scanKey</code>, <code>:1169</code>). Aggregation itself is generically string-keyed (<code>:1083</code>) — records just never reach it correctly.</td><td><span class="chip major">major</span></td><td><span class="chip today">today</span></td></tr>
+    <tr><td class="id">F-09</td><td>Live sessions rewrite unknown hosts to <code>'internal'</code> (<code>live/event-schema.mjs:3,107</code>) — namespace collision — and <code>process-sessions.mjs:49-53</code> filters unknown binaries out entirely. No opencode transcript reader exists.</td><td><span class="chip major">major</span></td><td><span class="chip today">today</span></td></tr>
+    <tr><td class="id">F-10</td><td>Quota is a fixed <code>{claude, codex}</code> record (<code>quota.mjs:30-31,252-257</code>). Consistent with ADR-0010's sanctioned channels — but hosts without a quota channel are silent rather than labeled ("no quota surface for this host").</td><td><span class="chip minor">minor</span></td><td><span class="chip today">today</span></td></tr>
+    <tr><td class="id">F-11</td><td><code>qeCourt.vendorOf</code> is a literal prefix table (<code>qeCourt.mjs:24-32</code>); any unregistered host id maps to <code>'unknown'</code>, so N distinct third-party vendors collapse into one bucket — vendor-diversity findings can be spuriously tripped or spuriously satisfied.</td><td><span class="chip major">major</span></td><td><span class="chip ext">ext</span></td></tr>
+    <tr><td class="id">F-12</td><td><code>host.observability</code> is declared-but-dead: <code>OBSERVABILITY_REGISTRY</code> is exported (<code>registries.mjs:250</code>) and imported nowhere; no dispatcher maps an observability id to a collector. It looks like the telemetry extension point and is validation metadata only.</td><td><span class="chip minor">minor</span></td><td><span class="chip today">today</span></td></tr>
+    <tr><td class="id">F-13</td><td>The provider-binding migrator's defaults map is <code>{claude:'anthropic', codex:'openai'}</code> (<code>adapters/config.mjs:64-79</code>); every other host is stamped <code>unknown-via-&lt;host&gt;</code>, provider <code>null</code>, provenance <code>'unknown'</code> on <b>every load</b>. Already affects opencode.</td><td><span class="chip major">major</span></td><td><span class="chip today">today</span></td></tr>
+  </table></div>
+
+  <h3>3.5 Config &amp; schema</h3>
+  <div class="tablewrap"><table>
+    <tr><th>ID</th><th>Finding</th><th>Severity</th><th>Scope</th></tr>
+    <tr><td class="id">F-14</td><td><code>kit.json</code> accepts unknown top-level keys silently (blind spread, <code>config.mjs:99-124</code>; envelope check only asserts <code>integrations.hosts</code> is an object, <code>:52-82</code>). A future <code>hostAdapters</code> key on an older ak round-trips untouched and does nothing — a silent no-op with no warning story.</td><td><span class="chip major">major</span></td><td><span class="chip ext">ext</span></td></tr>
+    <tr><td class="id">F-15</td><td>The DEFAULTS host map <code>{claude:true, codex:false, opencode:false}</code> is triplicated (<code>config.mjs:28</code>, <code>providers.mjs:547</code>, <code>x/host.mjs:334</code>).</td><td><span class="chip minor">minor</span></td><td><span class="chip today">today</span></td></tr>
+    <tr><td class="id">F-16</td><td><code>validateBinding</code> with an <code>unknown-host</code> error code exists (<code>bindings.mjs:72-84</code>) and is called from nowhere in <code>src/</code>. The registry-aware validation the extension point needs is already written and dead.</td><td><span class="chip minor">minor</span></td><td><span class="chip today">today</span></td></tr>
+  </table></div>
+
+  <h3>3.6 Guidance, paths, versions</h3>
+  <div class="tablewrap"><table>
+    <tr><th>ID</th><th>Finding</th><th>Severity</th><th>Scope</th></tr>
+    <tr><td class="id">F-17</td><td>Guidance targets are a closed list of four literal names (<code>blocks.mjs:280-292</code>); <code>customBlocks</code> rows are generic over target names but <code>retiredForTarget</code> force-strips rows naming a fifth (<code>:315</code>). Meanwhile <code>host.legacy.guidanceFile</code> is declared, read once (<code>hosts.mjs:34</code>), and consumed by nothing. ADR-0030 §6 sidesteps this by reusing the <code>agents</code> target — the trap remains for any host whose file differs.</td><td><span class="chip major">major</span></td><td><span class="chip today">today</span></td></tr>
+    <tr><td class="id">F-18</td><td><code>versions.mjs:70</code> hand-mirrors the host npm package list "to avoid an import cycle" — but <code>footprint/install.mjs</code> already imports <code>HOST_REGISTRY</code>, so the cycle is one-directional and solvable. A no-npm host is invisible to the drift nudge.</td><td><span class="chip minor">minor</span></td><td><span class="chip today">today</span></td></tr>
+    <tr><td class="id">F-19</td><td><code>lib/paths.mjs</code> is named per-host constants with no <code>hostDir(id)</code> resolver; the registry carries no path metadata at all, so even a fully-looped consumer has nothing to loop over.</td><td><span class="chip minor">minor</span></td><td><span class="chip ext">ext</span></td></tr>
+    <tr><td class="id">F-20</td><td><code>npmRoot(host.install.npmPackage)</code> is called unguarded in <code>footprint/install.mjs</code>; the first host without an npm package breaks the census. (ADR-0029 §8 names this; trivially fixable independently.)</td><td><span class="chip minor">minor</span></td><td><span class="chip ext">ext</span></td></tr>
+  </table></div>
+
+  <h3>3.7 Routing &amp; run</h3>
+  <div class="tablewrap"><table>
+    <tr><th>ID</th><th>Finding</th><th>Severity</th><th>Scope</th></tr>
+    <tr><td class="id">F-23</td><td>Routing hardcodes <code>HOST_PROVIDER = {claude, codex}</code> (<code>routing.mjs:25</code>), <code>DEFAULT_ROUTES</code> (<code>:203-216</code>), <code>MODEL_CATALOG</code> (<code>:56-72</code>), and a strictly binary escalation swap — <code>host === 'claude' ? 'codex' : 'claude'</code> (<code>:180,193,354</code>). Plan eligibility itself is generic (<code>:584-598</code>). A third routable host is routable in name only: no ladder can name it and no seed includes it.</td><td><span class="chip major">major</span></td><td><span class="chip today">today</span></td></tr>
+    <tr><td class="id">F-24</td><td><code>--primary-host</code> validates generically against <code>PRIMARY_HOSTS</code>, but help text is literal (<code>x/host.mjs:87-90</code>) and the fallback unshifts <code>'claude'</code> (<code>:494</code>).</td><td><span class="chip minor">minor</span></td><td><span class="chip today">today</span></td></tr>
+    <tr><td class="id">F-25</td><td>The Claude↔Codex MCP bridge is literal wiring (<code>providers.mjs:622-681</code>) — correct for a codex-specific feature, but there is no per-host "bridge capability" concept, so the asymmetry (codex delegable via MCP, opencode/hermes not) is nowhere stated to the user.</td><td><span class="chip minor">minor</span></td><td><span class="chip today">today</span></td></tr>
+    <tr><td class="id">F-26</td><td>Managed env emits only <code>ENABLE_CLAUDE_CODE</code>/<code>ENABLE_CODEX</code> (<code>providers.mjs:686-698</code>); hosts with no ruflo backend flag are simply absent, with no capability-derived explanation.</td><td><span class="chip minor">minor</span></td><td><span class="chip today">today</span></td></tr>
+  </table></div>
+
+  <h3>3.8 Provider axis</h3>
+  <div class="tablewrap"><table>
+    <tr><th>ID</th><th>Finding</th><th>Severity</th><th>Scope</th></tr>
+    <tr><td class="id">F-28</td><td><code>providerEntries</code> derives capabilities from identity comparisons inside a <code>.map</code> (<code>modelDiscovery: id === 'ollama'</code>). Does not survive a second local provider. ADR-0028 §4's per-entry-data refactor is correct and needed regardless of the rest of PR #131.</td><td><span class="chip major">major</span></td><td><span class="chip today">today</span></td></tr>
+    <tr><td class="id">F-29</td><td>AQE projection asymmetry: <code>ollama</code> is an AQE provider type; <code>local-openai</code> (ADR-0028) is deliberately not projected. Right call — but it must be stated in the ADR and surfaced in status, or it reads as a bug later.</td><td><span class="chip minor">minor</span></td><td><span class="chip today">today</span></td></tr>
+    <tr><td class="id">F-30</td><td>Hermes factual corrections required in ADR-0028/0030 (verified against source, see <a href="#hermes">appendix</a>): unofficial npm bridge exists; <code>lmstudio</code> is first-class, no <code>mlx</code> alias; <code>api_mode: openai</code> is invalid and silently dropped; <code>--max-turns</code> exists on <code>chat -q</code>; config dispatcher pointer wrong.</td><td><span class="chip minor">minor</span></td><td><span class="chip ext">ext</span></td></tr>
+  </table></div>
+
+  <h2 id="decisions">4 · Decision areas</h2>
+
+  <div class="decision" id="d1">
+    <h3>D-1 · Extensibility posture <span class="chip today">the one genuinely user-owned call</span></h3>
+    <p class="dq">Do we publish host adapters as an extension point (ADR-0029), stay closed, or absorb Hermes in-tree?</p>
+    <p class="opt"><b class="tag">A</b><b>Accept ADR-0029, amended.</b> Publish the seam with the honest gate list (F-01…F-06, F-11, F-14, F-21), formally superseding ADR-0016's closed-registry clause. Cost: the in-tree refactors plus a loader and fixture adapter; contract consumers constrain refactors (bounded by the alpha-instability statement). Benefit: fourth-host requests answered once; conformance evidence about our own abstractions.</p>
+    <p class="opt"><b class="tag">B</b><b>Decline and reaffirm.</b> Keep ADR-0016's closed registry, record the reaffirmation explicitly, and point Hermes at a fork. Cost: the fork drifts, no conformance evidence, the fifth-host request re-litigates this. Benefit: zero contract obligation while alpha churns.</p>
+    <p class="opt"><b class="tag">C</b><b>Absorb Hermes in-tree (ADR-0017 style).</b> ~14 files and ~8 test suites per host, permanent maintainer obligation for a CLI driven by another vendor's daily release cadence (40+ commits/day observed). The contributor themselves argues against this.</p>
+    <p class="rec"><b>Recommendation</b> — Option A, sequenced so the in-tree refactors land first and stand on their own (they delete host-specific code and fix bugs that bite OpenCode today). Critically: <b>Phase 0 hygiene below is owed under every option</b>, including B — misattribution and dead seams are not extensibility problems.</p>
+  </div>
+
+  <div class="decision" id="d2">
+    <h3>D-2 · Host tier vocabulary &amp; UX</h3>
+    <p class="dq">Three behavioral tiers exist (§2) with no product vocabulary. How do we make capability differences legible?</p>
+    <p class="opt"><b class="tag">A</b><b>Capability-derived labels everywhere.</b> Status, about, and help render a tier label and per-capability explanations derived from the registry ("no quota surface for this host", "auto-approving — no permission event to intercept"). No new config; the registry already knows.</p>
+    <p class="opt"><b class="tag">B</b><b>Docs-only tiers.</b> Name the tiers in HOST-SUPPORT.md and leave commands as-is. Cheaper, but the inconsistency the user experiences is in the commands, not the docs.</p>
+    <p class="opt"><b class="tag">C</b><b>Flatten.</b> Pretend all hosts are equal. Rejected: it would misrepresent the Hermes approval posture, which ADR-0030 rightly insists on disclosing.</p>
+    <p class="rec"><b>Recommendation</b> — Option A. Every absence becomes a stated fact instead of silence: this is the single highest-leverage UX consistency move, it consumes the same capability flags the caps enforce, and it revives the dead consumers (F-07, F-12, F-26).</p>
+  </div>
+
+  <div class="decision" id="d3">
+    <h3>D-3 · Dispatch generalization depth</h3>
+    <p class="dq">How far do the in-tree refactors go?</p>
+    <p class="opt"><b class="tag">A</b><b>Minimal:</b> registry-driven lifecycle lookup only (F-02). Unblocks a loader but leaves status, uninstall, and guidance split-brained.</p>
+    <p class="opt"><b class="tag">B</b><b>Full generalization:</b> lifecycle lookup (F-02) + uninstall through <code>runLifecycle undo</code> (F-03) + status rendered from <code>normalizedFacts</code> (F-05) + guidance targets derived from the registry (F-17) + the <code>adapters.mjs</code> invariant softened to built-ins with a merge seam (F-01) + setup permission authorization keyed by host (F-04).</p>
+    <p class="rec"><b>Recommendation</b> — Option B. Each piece deletes host-specific code, and the status refactor continues the #129/#133/#136 single-projection direction — it must preserve the configured-projection + repoRoot scope gate landed there. F-01's softer rule has in-corpus precedent (ADR-0019:75-76: a rung naming a host with no adapter records <code>cli_unavailable</code> and continues).</p>
+  </div>
+
+  <div class="decision" id="d4">
+    <h3>D-4 · Attribution policy for non-first-party hosts</h3>
+    <p class="dq">Usage, live sessions, quota, and vendor facts currently misattribute or erase unknown hosts. What is the policy?</p>
+    <p class="opt"><b class="tag">A</b><b>Exclude-and-label now.</b> Unknown/uninstrumented hosts get an explicit bucket keyed by host id — never collapsed to <code>claude</code> (F-08), never rewritten to <code>internal</code> (F-09), never silently absent from quota (F-10). <code>qeCourt.vendorOf</code> returns a per-id <code>unregistered:&lt;host&gt;</code> verdict that <b>never counts toward vendor diversity</b> (F-11) — consistent with ADR-0020's "absent unless independently observed."</p>
+    <p class="opt"><b class="tag">B</b><b>Ingestion contract later.</b> A v2 adapter contract lets a host declare a usage sidecar (Hermes <code>--usage-file</code> is the model: host-declared, ADR-0021 <code>configured</code>-grade, written even on failure). Real value, but it needs the extension point to exist first and a provenance-grading decision.</p>
+    <p class="opt"><b class="tag">C</b><b>Status quo.</b> Rejected: it is not neutral — it actively corrupts the claude bucket and the <code>internal</code> namespace today.</p>
+    <p class="rec"><b>Recommendation</b> — A immediately (it is a correctness fix for the scorecard you already hardened in PR #60), B as a v2 contract item once D-1/Phase 2 lands.</p>
+  </div>
+
+  <div class="decision" id="d5">
+    <h3>D-5 · Config &amp; schema hygiene</h3>
+    <p class="dq">kit.json silently swallows the unknown; host defaults live in three places.</p>
+    <p class="opt"><b class="tag">A</b><b>Warn-on-unknown top-level keys</b> (F-14) so a <code>hostAdapters</code> block on an older ak is a visible message, not a silent no-op; derive the DEFAULTS host map from the registry once (F-15); wire <code>validateBinding</code> into the load path or delete it (F-16); make the migrator's defaults registry-driven and stop re-stamping <code>unknown-via-&lt;host&gt;</code> on every load (F-13).</p>
+    <p class="opt"><b class="tag">B</b><b>Strict-reject unknown keys.</b> Rejected: breaks forward-compatibility between ak versions sharing a kit.json — warn is the right strength.</p>
+    <p class="rec"><b>Recommendation</b> — Option A, all four items in one hygiene pass; each is small and none depends on D-1.</p>
+  </div>
+
+  <div class="decision" id="d6">
+    <h3>D-6 · Guidance, paths, versions derivation</h3>
+    <p class="dq">Three registry fields are declared and consumed by nothing; three consumers hand-mirror what the registry knows.</p>
+    <p class="opt"><b class="tag">A</b><b>Make the registry the source:</b> guidance targets derived from a real (non-legacy) registry field (F-17); <code>HOST_PKGS</code> derived from <code>install.npmPackage</code> (F-18); add path metadata / a <code>hostDir(id)</code> resolver or explicitly document paths as first-party-only (F-19); either implement observability dispatch or re-document the field as validation metadata (F-12).</p>
+    <p class="opt"><b class="tag">B</b><b>Delete the dead fields.</b> Honest, but forfeits the derivation wins and re-opens each on the next host.</p>
+    <p class="rec"><b>Recommendation</b> — Option A for guidance/versions (both fix real drift hazards ADR-0017 §retrospective already named); for observability and paths, decide per field — a one-line ADR note ("validation metadata only") is an acceptable terminal state if no consumer is planned.</p>
+  </div>
+
+  <div class="decision" id="d7">
+    <h3>D-7 · Provider axis</h3>
+    <p class="dq">ADR-0028 and the provider registry's shape.</p>
+    <p class="opt"><b class="tag">A</b><b>Accept ADR-0028</b> with the <code>api_mode</code> citation fix (F-30) and an explicit note on the AQE projection asymmetry (F-29); land the per-entry capability refactor (F-28) with it.</p>
+    <p class="opt"><b class="tag">B</b><b>Vendor enumeration instead</b> (<code>mlx</code>, <code>lmstudio</code>, …). Rejected in the ADR itself, and our verification strengthens the rejection: MLX has no Hermes alias either — users name their own providers.</p>
+    <p class="rec"><b>Recommendation</b> — Option A. This is the easiest accept in PR #131: small, independent, fixes F-28, and useful to the hosts already shipped.</p>
+  </div>
+
+  <h2 id="amendments">5 · ADR amendments register</h2>
+  <p>The prior decisions this work touches, and what happens to each. Nothing is amended silently.</p>
+  <div class="tablewrap"><table>
+    <tr><th>ADR</th><th>Clause at stake</th><th>Action</th><th>Trigger</th></tr>
+    <tr><td class="nowrap">0016</td><td>"A closed, validated registry of built-in code, not an arbitrary third-party plugin runtime" (:59-61; non-goal :441-442)</td><td><b>Supersede that clause</b> if D-1 = A; <b>reaffirm explicitly</b> if D-1 = B. Either way, decide on the record — ADR-0029 currently routes around it.</td><td class="nowrap">D-1</td></tr>
+    <tr><td class="nowrap">0018</td><td>Routability→adapter invariant stated one-directionally in prose; enforced bidirectionally at import (F-01)</td><td><b>Amend</b> to the decided rule: bidirectional for built-ins, merge seam for registered adapters.</td><td class="nowrap">D-3</td></tr>
+    <tr><td class="nowrap">0019</td><td><code>cli_unavailable</code> graceful degradation (:75-76)</td><td><b>Reaffirm</b>; cite as the degradation norm F-01's softening follows.</td><td class="nowrap">D-3</td></tr>
+    <tr><td class="nowrap">0010</td><td>Sanctioned quota channels (statusline tee, codex app-server)</td><td><b>Amend</b>: quota channels are a per-host capability; hosts without one are labeled, not silent (F-10).</td><td class="nowrap">D-2/D-4</td></tr>
+    <tr><td class="nowrap">0021</td><td>Provenance grades for inference evidence</td><td><b>Extend</b> for host-declared usage sidecars (<code>configured</code> grade; Hermes <code>--usage-file</code> is the reference case).</td><td class="nowrap">D-4 (B)</td></tr>
+    <tr><td class="nowrap">0020</td><td>OpenCode's supervised, non-primary shape</td><td><b>Amend</b> to name the host-tier taxonomy (§2) as product vocabulary.</td><td class="nowrap">D-2</td></tr>
+    <tr><td class="nowrap">0028</td><td>New — local OpenAI-compatible provider</td><td><b>Accept</b> after the <code>api_mode: chat_completions</code> citation fix + F-29 note.</td><td class="nowrap">D-7</td></tr>
+    <tr><td class="nowrap">0029</td><td>New — extension point</td><td><b>Amend then accept</b> (if D-1 = A): full gate list (F-01…F-06, F-11, F-14, F-21), ADR-0016 supersession, older-ak silent no-op mitigation.</td><td class="nowrap">D-1</td></tr>
+    <tr><td class="nowrap">0030</td><td>New — Hermes reference adapter</td><td><b>Correct then accept</b>, contingent on 0029: F-30's four factual fixes. Its safety posture (YOLO disclosure, reverse-bridge exclusion) is verified and right.</td><td class="nowrap">D-1</td></tr>
+    <tr><td class="nowrap">0031 (new)</td><td>—</td><td><b>Author</b>: "Host tiers and attribution surfaces" — records D-2 + D-4(A) as one decision, whichever way D-1 goes.</td><td class="nowrap">D-2/D-4</td></tr>
+  </table></div>
+
+  <h2 id="tests">6 · Test &amp; docs remediation</h2>
+  <h3>Tests that pin the host set (F-21, F-22)</h3>
+  <ul>
+    <li><b>Hard pins (7):</b> <code>hosts.test.mjs:10-11</code> (<code>deepEqual(HOST_IDS, [...])</code>); <code>providers.test.mjs:222-225</code> (test name says "come only from registry capabilities", body hardcodes the set — fix the body to match the name); <code>about-directory.test.mjs:118-140, 157-161, 381-385</code> (parity + order); <code>execution-runner.test.mjs:459-469</code> (pins the import-time invariant); <code>routing-primary.test.mjs:45-48</code> (stays green under the capability cap).</li>
+    <li><b>DEFAULTS literal pins (5):</b> <code>setup-host-flags.test.mjs:93-101</code>, <code>provider-cli.test.mjs:242,279</code>, <code>routing-config.test.mjs:162-163</code>, <code>integration-config.test.mjs:176-177</code>.</li>
+    <li><b>Fix pattern:</b> derive expected sets from the registry (scoped to built-ins where the assertion is about built-ins), never from a fresh literal.</li>
+    <li><b>Sentinel hazard:</b> five negative tests use <code>gemini</code> as the "unknown host" — they silently invert if that id ever registers (<code>hosts.test.mjs:40-41,106-108</code>; <code>setup-host-flags.test.mjs:48-53</code>; <code>routing.test.mjs:155-158,163-169,212-217</code>). Replace with an unmistakably synthetic id.</li>
+  </ul>
+  <h3>Docs stating a closed set as normative (F-27)</h3>
+  <ul>
+    <li><code>docs/HOST-SUPPORT.md</code> — "the three execution hosts" + five fixed-arity matrices; consider generating the matrices from the registry.</li>
+    <li><code>docs/ddd/ubiquitous-language.md:143</code> — defines "host" by enumeration.</li>
+    <li><code>docs/PROVIDERS.md</code> §3.5 — routing table prose.</li>
+    <li><code>docs/ddd/component-directory.md:164-165</code> — the parity invariant that is also test-enforced (F-06).</li>
+  </ul>
+
+  <h2 id="roadmap">7 · Sequenced roadmap</h2>
+
+  <div class="phase">
+    <h3>Phase 0 — Consistency hygiene owed regardless of D-1</h3>
+    <p class="ph-meta">No decisions required · every item bites built-in hosts today · each independently shippable</p>
+    <ul>
+      <li>F-08: unknown-host usage records → explicit per-id bucket, kill the collapse-to-claude and the scanKey collision.</li>
+      <li>F-09: live-session unknown hosts → explicit bucket, not <code>'internal'</code>.</li>
+      <li>F-11: <code>vendorOf</code> → registry-driven with <code>unregistered:&lt;id&gt;</code>, never counted toward diversity.</li>
+      <li>F-13: migrator defaults registry-driven; stop restamping on every load.</li>
+      <li>F-15/F-16: single registry-derived DEFAULTS; wire or delete <code>validateBinding</code>.</li>
+      <li>F-07/F-12: remove or revive the dead capability consumers (<code>statuslineSupported</code>, observability field) — one-line ADR note if terminal.</li>
+      <li>F-20 + the plain-text subprocess capture: tiny, independently useful, and they de-risk Phase 3.</li>
+      <li>F-22: replace the <code>gemini</code> sentinels.</li>
+    </ul>
+  </div>
+
+  <div class="phase">
+    <h3>Phase 1 — Provider axis (D-7)</h3>
+    <p class="ph-meta">Accept ADR-0028 · independent of everything else</p>
+    <ul>
+      <li>F-28: <code>providerEntries</code> → per-entry capability records (matches <code>hostEntries</code>).</li>
+      <li><code>local-openai</code> row + user-declared bindings; F-29 asymmetry stated in ADR and surfaced in status; F-30 <code>api_mode</code> citation fix.</li>
+    </ul>
+  </div>
+
+  <div class="phase">
+    <h3>Phase 2 — The extensibility decision (D-1, D-3) and in-tree generalization</h3>
+    <p class="ph-meta">Gate: ADR-0016 supersession + amended ADR-0029 accepted · refactors delete host-specific code and stand alone even if the loader never ships</p>
+    <ul>
+      <li>F-01: <code>adapters.mjs</code> invariant → built-ins-bidirectional + merge seam (ADR-0019 precedent).</li>
+      <li>F-02: lifecycle registry field + five call sites → registry lookup; OpenCode passes unchanged.</li>
+      <li>F-03: uninstall through <code>runLifecycle undo</code>.</li>
+      <li>F-04: setup permission authorization keyed by host.</li>
+      <li>F-05: status rendered from <code>normalizedFacts</code> — preserving the #129/#133/#136 projection + scope-gate behavior.</li>
+      <li>F-17: guidance targets derived from the registry.</li>
+      <li>F-06: default host card generation or built-in-scoped parity.</li>
+      <li>F-14: warn-on-unknown kit.json keys (the <code>hostAdapters</code> silent no-op mitigation).</li>
+      <li>F-21: test derivations from the registry.</li>
+      <li>The loader: explicit <code>hostAdapters</code> registration, <code>contract: 1</code>, capability caps, per-adapter fail-closed admission, <code>third-party-adapter</code> trust-manifest kind, fixture adapter in <code>tests/</code>.</li>
+    </ul>
+  </div>
+
+  <div class="phase">
+    <h3>Phase 3 — Hermes as first external consumer (ADR-0030) + tier vocabulary (D-2)</h3>
+    <p class="ph-meta">Adapter externally maintained by its proposer · ak carries no hermes-specific code</p>
+    <ul>
+      <li>ADR-0030 corrections (F-30) then acceptance; conformance evidence flows back.</li>
+      <li>D-2 capability-derived tier labels in status/about/help; F-10 quota labeling; F-25/F-26 stated asymmetries.</li>
+      <li>Docs corpus update (§6), HOST-SUPPORT matrices generated from the registry.</li>
+    </ul>
+  </div>
+
+  <div class="phase">
+    <h3>Phase 4 — Deferred, deliberately</h3>
+    <p class="ph-meta">Each needs evidence that doesn't exist yet</p>
+    <ul>
+      <li>D-4 (B): v2 ingestion contract for host-declared usage sidecars (ADR-0021 extension).</li>
+      <li>Subprocess/RPC adapter protocol (sandboxable, language-agnostic) — deferred per ADR-0029 §3 until a second adapter exists to generalize from.</li>
+      <li>Semver stability promise for the adapter contract — a GA-time decision (ADR-0020 companion).</li>
+    </ul>
+  </div>
+
+  <h2 id="hermes">8 · Appendix — Hermes verification summary</h2>
+  <p>
+    Verified against NousResearch/hermes-agent HEAD (v0.20.0, 2026-08-13; the files underlying
+    the claims last changed on or before 2026-08-08, so HEAD matches the ADRs' basis).
+    5 of 7 claim groups confirmed at source level.
+  </p>
+  <div class="tablewrap"><table>
+    <tr><th>Claim group</th><th>Verdict</th><th>Notes</th></tr>
+    <tr><td>Python CLI, pip/uv, no npm</td><td><span class="chip major">partial</span></td><td>Official: correct. But an <b>unofficial npm bridge exists</b> (<code>hermes-agent</code> by wyrtensi, v0.20.0, ships <code>hermes</code>/<code>hermes-agent</code> bins). ADRs must say "no <em>official</em> npm package"; detection must not infer identity/version from npm presence. PyPI carries 0.19.0.</td></tr>
+    <tr><td>YAML config, HERMES_HOME, profiles</td><td><span class="chip major">partial</span></td><td>All confirmed; config actions are a superset (<code>show|edit|get|set|unset|path|env-path|check|migrate</code>). Pointer wrong: dispatcher is <code>cmd_config</code> in <code>hermes_cli/subcommands/config.py</code>, not <code>config_command</code>.</td></tr>
+    <tr><td><code>mcp add</code> EOF-default silent no-op</td><td><span class="chip ok">confirmed</span></td><td>All five sub-claims; stronger than claimed — <b>no</b> <code>hermes mcp</code> subcommand except <code>install</code> can signal failure via exit code (returns swallowed at <code>mcp_config.py:1073</code> → <code>main.py:12872</code>).</td></tr>
+    <tr><td>Oneshot <code>-z</code> behavior</td><td><span class="chip ok">confirmed</span></td><td>YOLO/accept-hooks env, devnull redirect, final-write channel, exit codes 0/1/2 exact, <code>--usage-file</code> on failure too. One correction: <code>--max-turns</code> exists on <code>hermes chat</code> (non-interactive via <code>-q</code>) — just not on <code>-z</code>.</td></tr>
+    <tr><td>Local provider aliases</td><td><span class="chip major">partial</span></td><td><code>ollama</code>/<code>vllm</code>/<code>llamacpp</code> → <code>custom</code>: confirmed (in <code>auth.py</code>, not <code>runtime_provider.py</code>). <b><code>lmstudio</code> is first-class</b> with its own URL normalizer; no <code>mlx</code> alias. And <code>api_mode: openai</code> — as quoted in ADR-0028's reference config — is <b>invalid and silently dropped</b>; the valid value is <code>chat_completions</code> (newer key: <code>transport</code>).</td></tr>
+    <tr><td><code>mcp serve</code> is a messaging bridge</td><td><span class="chip ok">confirmed</span></td><td>Exactly ten tools (<code>conversations_list</code>, <code>messages_send</code>, <code>permissions_respond</code>, …); zero delegation-shaped tools. The reverse-bridge exclusion is the right security call.</td></tr>
+    <tr><td>Docs corroboration</td><td><span class="chip ok">confirmed</span></td><td>Authoritative CLI reference is <code>website/docs/reference/cli-commands.md</code> (not the README). Local-model guides confirm MLX/llama.cpp via custom endpoints.</td></tr>
+  </table></div>
+
+  <div class="callout">
+    <b>Bottom line.</b> The contributor's evidence is accurate where it counts — every claim about
+    ak's internals was confirmed by the surface sweep, and both Hermes safety findings are real.
+    The gap is scope, not honesty: "a loader and two refactors that delete code" is nearer to
+    three blockers, eight majors, twelve test pins, and a docs corpus. Phase 0 is owed today under
+    every posture; the extensibility decision (D-1) is the only call that is genuinely yours alone.
+  </div>
+
+  <p class="footer">
+    Sources: ak surface sweep (file:line citations verified in-repo) · NousResearch/hermes-agent
+    source verification · docs/adr corpus · PR #131 diff. Companion: the PR #131 review response
+    references F-nn / D-n IDs from this document.
+  </p>
+</div>
+</body>
+</html>
