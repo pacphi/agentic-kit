@@ -2,6 +2,13 @@
 
 - **Status:** Accepted (experimental contract)
 - **Date:** 2026-08-15
+- **Updated:** 2026-08-16
+- **Update note:** [ADR-0031](0031-capability-graduation-and-upstream-requests.md) amends this ADR's
+  "permanent caps" framing. The block on *self-declaring* `canBePrimary` / `aqeProvider` /
+  `commandStatusline` in the manifest is permanent (the safety invariant here), but the *capability*
+  is earnable through a conformance tier plus a maintainer grant recorded outside the manifest — up
+  to promotion to a first-party built-in. The schema, admission gate, consent model, and hook runner
+  in this ADR are unchanged.
 - **Deciders:** agentic-kit maintainers
 - **Related:** [ADR-0016](0016-capability-driven-integration-adapters.md) (closed-registry clause
   superseded — see [Supersession](#supersession-of-adr-0016s-closed-registry-clause)),

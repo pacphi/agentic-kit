@@ -38,6 +38,7 @@ Consequences**, and cites the grounded source it rests on where relevant.
 | [0027](0027-shared-project-census.md) | One project census, four scopes, every count explains itself | Implemented |
 | [0028](0028-local-openai-compatible-providers.md) | One generic local OpenAI-compatible provider, not a vendor enumeration | Accepted |
 | [0029](0029-host-adapter-extension-point.md) | External host adapters: declarative manifest, subprocess hooks | Accepted (experimental contract) |
+| [0031](0031-capability-graduation-and-upstream-requests.md) | Capability graduation: earned parity for external adapters, and the upstream request path | Accepted (governance; implementation staged) |
 
 Theme: ADRs **0001–0006** define **dual-host LLM routing and leadership** — how `ak` lets ruflo route
 each development activity (architecture, implementation, testing, review, …) to the right host (Claude
@@ -213,3 +214,14 @@ routable-host invariant, uninstall-through-undo, permission authorization by hos
 surfaces policy, and kit.json's unknown-key warning — landed in wave 1 and Phase 0; registry↔directory
 test pins remain wave 3), and stays experimental until a real external adapter clears the
 conformance kit and a release of soak.
+
+**0031** amends 0029 on one point and adds the governance around it. The three capability caps
+(`canBePrimary`, `aqeProvider`, `commandStatusline`) stay *inexpressible* in the manifest — that
+block on self-declaration is permanent — but the capability itself becomes *earnable*: passing a
+conformance tier plus an explicit maintainer grant (hash-pinned, outside the manifest) confers it,
+up to and including promotion to a first-party built-in with full parity. It also records the
+upstream-request path: some ceilings are not `ak`'s to lift (being an AQE provider type is
+agentic-qe's closed enum; being a native ruflo backend is ruflo's `ENABLE_*` model), so those become
+tracked capability requests with honest interim behaviour rather than pretended support. Accepted as
+a governance decision; the machinery (the trust CLI, external execution, tiered conformance, the
+grant store) is staged and self-graded in the ADR's implementation-status table.
