@@ -50,6 +50,7 @@ export const options = {
   provider: { type: 'string' },      // csv of ruflo API providers, optional id:model (openai:gpt-5.6)
   route: { type: 'string', multiple: true }, // repeatable: 'activity:host[:model]' per-activity routing override
   activity: { type: 'string' },      // refresh: csv of activities to re-seed (default = prompt)
+  'expect-hash': { type: 'string' }, // adapters trust: required sha256 pin when --yes resolves a non-file source
   yes: { type: 'boolean', default: false },
   json: { type: 'boolean', default: false },
 };
@@ -81,6 +82,12 @@ Subcommands:
              (per-activity, opt-in; user pins are never touched, and \`ak sync\`
              never does this for you)
   off      reversible teardown (reset to claude-only; strip managed env keys)
+  adapters record hash-pinned consent for external host-adapter manifests
+             (experimental — set AK_EXPERIMENTAL_HOST_ADAPTERS=1; revoke
+             always works, list/trust need the flag)
+             list        show each configured adapter's trust state (default)
+             trust <name> [--expect-hash <sha256>]   grant consent (required
+                          with --yes against a non-file source); revoke <name>
 
 Options (pick, all optional — omit for interactive):
   --host <csv>                 the complete desired enabled-host set, e.g.
@@ -148,8 +155,12 @@ export async function run({ flags, positionals, pkgRoot }) {
   if (sub === 'off') return off({ cwd, pkgRoot });
   if (sub === 'pick') return pick({ flags, cwd, pkgRoot });
   if (sub === 'refresh') return refresh({ flags, cwd });
+  if (sub === 'adapters') {
+    const { run: runHostAdapters } = await import('./host-adapters.mjs');
+    return runHostAdapters({ flags, positionals: positionals.slice(1) });
+  }
 
-  fail(`unknown host subcommand: ${sub} (status|pick|refresh|off)`);
+  fail(`unknown host subcommand: ${sub} (status|pick|refresh|off|adapters)`);
   return 2;
 }
 

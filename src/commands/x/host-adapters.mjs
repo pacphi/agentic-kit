@@ -1,0 +1,308 @@
+// x host adapters — the trust CLI for external host-adapter manifests (ADR-0031
+// P1). Nothing in admission.mjs ever writes consent; this closes that gap by
+// recording hash-pinned consent the same way Codex pins an MCP server's
+// content (ADR-0029 §6). No adapter code ever executes here — this module
+// only reads, validates, hashes, discloses, and (on confirmation) records.
+//
+// Mirrors admitOne's refusal semantics exactly: a manifest is hashed only
+// after validateAdapterManifest accepts it (hashManifest(validateAdapterManifest(raw))),
+// so the hash a user consents to is always the VALIDATED shape, never the
+// raw file — an invalid manifest (e.g. one claiming canBePrimary) is refused
+// with its .reason and nothing is ever recorded for it.
+import readline from 'node:readline/promises';
+import { hashManifest, SUPPORTED_CONTRACT } from '../../lib/adapters/admission.mjs';
+import { validateAdapterManifest } from '../../lib/adapters/manifest.mjs';
+import { HOST_REGISTRY } from '../../lib/adapters/registries.mjs';
+import * as consentStore from '../../lib/adapters/consent.mjs';
+import { loadKitConfig } from '../../lib/config.mjs';
+import { ok, warn, fail, info, dim, bold } from '../../lib/output.mjs';
+
+const FLAG_ENV_VAR = 'AK_EXPERIMENTAL_HOST_ADAPTERS';
+
+const flagEnabled = (env) => env?.[FLAG_ENV_VAR] === '1';
+
+/** Lazy dynamic import so this file loads even before sources.mjs lands (a
+ * sibling work item this same wave) and so tests never pay for it unless
+ * they choose to — same pattern admission.mjs uses for consent.mjs. */
+async function defaultReader(source) {
+  const { resolveManifestSource } = await import('../../lib/adapters/sources.mjs');
+  return resolveManifestSource(source);
+}
+
+async function defaultAsk(question) {
+  const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+  const answer = (await rl.question(question)).trim().toLowerCase();
+  rl.close();
+  return answer === 'y' || answer === 'yes';
+}
+
+/** Untrusted text (manifest trust.changes fields, reader/validator error
+ * detail) is printed verbatim ahead of a consent prompt — a crafted string
+ * carrying cursor-movement/erase ANSI escapes or extra newlines could
+ * visually rewrite the disclosure the operator is about to agree to. A
+ * codepoint loop, not a control-character regex class (that trips
+ * `no-control-regex` AND is what sources.mjs's sanitizeDetail already uses,
+ * so this stays lint-clean the same way). Strips C0 (0x00-0x1F), DEL
+ * (0x7F), and C1 (0x80-0x9F, e.g. U+009B CSI — a real terminal control that
+ * JSON.stringify does NOT escape, unlike C0) outright; \n/\t/\r collapse to
+ * a single space instead of vanishing, so a multi-line/tabbed string stays
+ * readable as one line rather than silently losing a word boundary. */
+function stripControl(value) {
+  const input = String(value ?? '');
+  let out = '';
+  for (const ch of input) {
+    const code = ch.codePointAt(0);
+    if (code === 0x09 || code === 0x0a || code === 0x0d) { out += ' '; continue; }
+    if (code <= 0x1f || (code >= 0x7f && code <= 0x9f)) continue;
+    out += ch;
+  }
+  return out;
+}
+
+function findEntry(cfg, name) {
+  return (Array.isArray(cfg?.hostAdapters) ? cfg.hostAdapters : []).find((e) => e?.name === name) ?? null;
+}
+
+/** Read + validate + hash one adapter entry. Never throws — reports
+ * {ok:false, reason, detail} on any failure, the same per-entry isolation
+ * posture admission.mjs's admitOne holds. `reader` may return either the
+ * sources.mjs `{raw, origin}` shape or a bare raw document (tests are free
+ * to stub either). */
+async function loadAndHash(entry, { reader }) {
+  let raw;
+  // Fail-closed, not fail-open: a bare-raw reader result (no {raw,origin}
+  // wrapper — including one whose `origin` is missing/malformed) is
+  // 'unknown', never assumed to be 'file'. Defaulting to 'file' would let
+  // --yes silently skip the --expect-hash pin (finding 8) for a source that
+  // was never actually proven local; only an explicit origin:'file' counts.
+  let origin = 'unknown';
+  try {
+    const resolved = await reader(entry.source);
+    if (resolved && typeof resolved === 'object' && 'raw' in resolved) {
+      raw = resolved.raw;
+      origin = typeof resolved.origin === 'string' && resolved.origin ? resolved.origin : 'unknown';
+    } else {
+      raw = resolved;
+    }
+  } catch (error) {
+    return { ok: false, reason: error?.reason ?? 'manifest-unreadable', detail: error?.message ?? String(error) };
+  }
+
+  // Same distinct failure admitOne draws: cfg's pinned contract disagreeing
+  // with the manifest's self-declared one means the file changed underneath
+  // the operator, not merely "unsupported version".
+  if (entry.contract !== undefined && raw?.contract !== undefined && entry.contract !== raw.contract) {
+    return {
+      ok: false, reason: 'contract-mismatch',
+      detail: `cfg declares contract ${entry.contract}, manifest declares ${raw.contract}`,
+    };
+  }
+
+  let manifest;
+  try {
+    manifest = validateAdapterManifest(raw);
+  } catch (error) {
+    return { ok: false, reason: error?.reason ?? 'manifest-invalid', detail: error?.message ?? String(error) };
+  }
+
+  if (manifest.contract !== SUPPORTED_CONTRACT) {
+    return { ok: false, reason: 'contract-version', detail: `unsupported contract ${manifest.contract}` };
+  }
+  if (manifest.host.id !== entry.name) {
+    return {
+      ok: false, reason: 'name-mismatch',
+      detail: `cfg entry '${entry.name}' does not match manifest host id '${manifest.host.id}'`,
+    };
+  }
+  // Same check admitOne applies before ever computing a hash: a manifest
+  // whose host id collides with a built-in can never actually be admitted,
+  // so trusting it would record a standing consent for content admission
+  // will always refuse — misleading UX for nothing gained.
+  if (HOST_REGISTRY.some((host) => host.id === manifest.host.id)) {
+    return { ok: false, reason: 'builtin-shadow', detail: `'${manifest.host.id}' is a built-in host id` };
+  }
+
+  return { ok: true, manifest, hash: hashManifest(manifest), origin };
+}
+
+/** Trust state for one entry — never throws. One of 'trusted', 'consent-stale',
+ * 'not consented', or 'manifest error (<reason>)'. */
+async function stateFor(entry, { consent, reader }) {
+  if (typeof entry?.name !== 'string' || !entry.name) return 'manifest error (invalid-entry: missing name)';
+  const loaded = await loadAndHash(entry, { reader });
+  if (!loaded.ok) return `manifest error (${stripControl(loaded.reason)})`;
+  let recorded;
+  try {
+    recorded = consent.recordedHashFor(entry.name);
+  } catch (error) {
+    return `manifest error (consent-error: ${error?.message ?? String(error)})`;
+  }
+  if (recorded === null || recorded === undefined) return 'not consented';
+  return recorded === loaded.hash ? 'trusted' : 'consent-stale';
+}
+
+async function list({ cfg, consent, reader }) {
+  const entries = Array.isArray(cfg?.hostAdapters) ? cfg.hostAdapters : [];
+  if (!entries.length) { info('no host adapters configured in kit.json'); return 0; }
+  console.log(bold('host adapters') + dim('  (trust state)'));
+  for (const entry of entries) {
+    const name = entry?.name ?? '(unnamed)';
+    console.log(`  ${String(name).padEnd(16)} ${dim(entry?.source ?? '')}`);
+    console.log(`    ${await stateFor(entry, { consent, reader })}`);
+  }
+  return 0;
+}
+
+function discloseManifest(name, manifest, hash) {
+  console.log(bold(`host adapter manifest — ${name}`));
+  // Full content FIRST, decision-critical summary LAST (finding 16): a
+  // large-but-legal manifest can run many screens of JSON, and whatever
+  // prints immediately before the [y/N] prompt is what the operator's eyes
+  // are actually on. Burying the summary above the JSON block meant it
+  // scrolled off-screen entirely on a big manifest, well before the prompt.
+  //
+  // Consent is granted over the WHOLE validated manifest (ADR-0029 §6),
+  // including fields the curated summary below doesn't call out by name
+  // (host.legacy.*, host.trust.approvalPolicy, detection, driving.surfaces,
+  // ...) — printing it in full means nothing hashed is ever hidden from the
+  // thing being consented to.
+  console.log(bold('full manifest (exactly the content being hashed):'));
+  // JSON.stringify escapes every C0 control character (0x00-0x1F) WITHIN A
+  // STRING VALUE by construction, but leaves C1 (0x80-0x9F, e.g. U+009B
+  // CSI) untouched — those can only reach this text as a raw byte that
+  // leaked from an untrusted manifest field, never from the pretty-printer's
+  // own structural indentation (spaces/real newlines are the ONLY raw
+  // control-range bytes stringify itself emits). Splitting on that
+  // structural newline before sanitizing each line and rejoining after
+  // means stripControl only ever sees within-line content — it strips a
+  // leaked C1 byte (and is a no-op on \n/\t/\r, since none survive stringify
+  // raw inside a line) without collapsing the block's own line breaks.
+  console.log(JSON.stringify(manifest, null, 2).split('\n').map(stripControl).join('\n'));
+  console.log('');
+  console.log(`  version:  ${manifest.version}`);
+  console.log(`  contract: ${manifest.contract}`);
+  console.log(`  host id:  ${manifest.host.id}`);
+  const trueCaps = Object.entries(manifest.host.capabilities ?? {})
+    .filter(([, v]) => v === true).map(([k]) => k);
+  console.log(`  capabilities: ${trueCaps.length ? trueCaps.join(', ') : '(none)'}`);
+  const lifecycle = manifest.lifecycle ?? {};
+  const verbs = Object.keys(lifecycle);
+  console.log(`  lifecycle hooks:${verbs.length ? '' : ' (none)'}`);
+  for (const verb of verbs) {
+    const { hook } = lifecycle[verb];
+    const timeout = hook.timeoutMs !== undefined ? ` (timeout ${hook.timeoutMs}ms)` : '';
+    console.log(`    ${verb}: ${JSON.stringify(hook.command)}${timeout}`);
+  }
+  const changes = manifest.trust?.changes ?? [];
+  console.log(`  trust changes:${changes.length ? '' : ' (none)'}`);
+  for (const change of changes) {
+    console.log(`    [${change.scope}] ${stripControl(change.owner)}: ${stripControl(change.value)} — ${stripControl(change.effect)}`);
+  }
+  console.log(`  sha256: ${hash}`);
+}
+
+async function trust({ name, cfg, consent, reader, ask, isTTY, yes, expectHash }) {
+  if (typeof name !== 'string' || !name) { fail('usage: ak host adapters trust <name>'); return 2; }
+  const entry = findEntry(cfg, name);
+  if (!entry) { fail(`no host adapter named '${name}' in kit.json hostAdapters`); return 1; }
+
+  const loaded = await loadAndHash(entry, { reader });
+  if (!loaded.ok) {
+    fail(`'${name}' manifest refused: ${stripControl(loaded.reason)} — ${stripControl(loaded.detail)}`);
+    return 1;
+  }
+  const { manifest, hash, origin } = loaded;
+
+  // --expect-hash pinning (finding 8): required whenever --yes is paired
+  // with a non-file origin, so an unattended (CI) run can never blanket-
+  // consent to "whatever content the remote currently serves" — that
+  // defeats hash pinning exactly where it matters. Checked before any
+  // consent-store lookup or disclosure.
+  if (yes && origin !== 'file' && !expectHash) {
+    fail(`'${name}' resolved from a non-file origin ('${stripControl(origin)}') — --yes needs --expect-hash <sha256> so an unattended run pins exact content instead of trusting whatever the remote serves right now (drop --yes to review interactively, or pass the hash from a prior interactive trust)`);
+    return 2;
+  }
+  if (expectHash !== undefined && expectHash !== hash) {
+    fail(`'${name}' hash mismatch — --expect-hash ${expectHash} does not match the resolved manifest hash ${hash}; refusing to record consent for unexpected content`);
+    return 1;
+  }
+
+  let recorded;
+  try {
+    recorded = consent.recordedHashFor(name);
+  } catch (error) {
+    fail(`consent store error: ${error?.message ?? String(error)}`);
+    return 1;
+  }
+  if (recorded === hash) {
+    ok(`'${name}' is already trusted at this exact content (${hash}) — nothing to do`);
+    return 0;
+  }
+  if (recorded !== null && recorded !== undefined) {
+    warn(`'${name}' consent is stale — previously trusted hash ${recorded}, current manifest hash ${hash}`);
+  }
+
+  discloseManifest(name, manifest, hash);
+
+  if (!yes) {
+    if (!isTTY) {
+      fail('trust needs confirmation — re-run with --yes after reviewing the manifest above (non-interactive session)');
+      return 2;
+    }
+    const confirmed = await ask('Trust this manifest content exactly as disclosed above? [y/N] ');
+    if (!confirmed) { info(`consent for '${name}' left unchanged`); return 0; }
+  }
+
+  consent.recordConsent(name, hash);
+  ok(`consent recorded for '${name}' at ${hash}`);
+  info('admission will now accept this exact manifest content — ANY edit to the manifest invalidates this consent; re-run `ak host adapters trust` after an edit');
+  return 0;
+}
+
+function revoke({ name, consent }) {
+  if (typeof name !== 'string' || !name) { fail('usage: ak host adapters revoke <name>'); return 2; }
+  const existed = consent.revokeConsent(name);
+  if (existed) { ok(`revoked consent for '${name}'`); return 0; }
+  info(`no recorded consent for '${name}'`);
+  return 0;
+}
+
+/**
+ * @param {{ positionals?: string[], flags?: any, env?: NodeJS.ProcessEnv,
+ *   consent?: { recordedHashFor(name:string): string|null, recordConsent(name:string, hash:string): void, revokeConsent(name:string): boolean },
+ *   reader?: (source: string) => Promise<any>, ask?: (question: string) => Promise<boolean>,
+ *   isTTY?: boolean, cfg?: any }} [args]
+ */
+export async function run({
+  positionals = [], flags = {}, env = process.env,
+  consent = consentStore, reader = defaultReader, ask = defaultAsk,
+  isTTY = process.stdin.isTTY === true, cfg,
+} = {}) {
+  const sub = positionals[0] ?? 'list';
+  const name = positionals[1];
+
+  // Revocation is fail-safe and stays reachable regardless of the
+  // experimental flag: an operator who turns the flag OFF must still be
+  // able to withdraw a standing consent record, or that record silently
+  // reactivates the next time the flag is turned back on. `list`/`trust`
+  // stay gated — they're the surface that reads/records new trust.
+  if (sub === 'revoke') return revoke({ name, consent });
+
+  if (!flagEnabled(env)) {
+    fail(`experimental host-adapter surface is disabled — set ${FLAG_ENV_VAR}=1`);
+    return 2;
+  }
+
+  const resolvedCfg = cfg ?? loadKitConfig();
+
+  if (sub === 'list') return list({ cfg: resolvedCfg, consent, reader });
+  if (sub === 'trust') {
+    return trust({
+      name, cfg: resolvedCfg, consent, reader, ask, isTTY,
+      yes: !!flags.yes, expectHash: flags['expect-hash'],
+    });
+  }
+
+  fail(`unknown host adapters subcommand: ${sub} (list|trust|revoke)`);
+  return 2;
+}
