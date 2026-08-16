@@ -307,6 +307,17 @@ test('a valid https manifest resolves with origin "url"', async () => {
 
 // ── npm:<pkg> source ─────────────────────────────────────────────────────
 
+/** Injected into every npm-path test in place of the real resolveShim
+ * (src/lib/exec.mjs). On Windows, the real resolveShim rewrites npm/tar
+ * into PowerShell-shim invocations (a different command and a different
+ * argv shape), which would make these execFileFn stubs — written against
+ * the LOGICAL invocation (cmd === 'npm'/'tar', args starting with
+ * 'pack'/'-xzOf') — see something they don't recognize and fail, even
+ * though production behavior is correct. That Windows-shim rewriting is
+ * already covered by exec.mjs's own test suite; this module's tests only
+ * need to prove sources.mjs's own logic, platform-independently. */
+const passthroughResolveShim = (command, args) => ({ command, args, resolved: true });
+
 /** Stub execFileFn that fabricates what real npm+tar would have produced:
  * `npm pack` "writes" a .tgz into --pack-destination, and
  * `tar -xzOf <tgz> package/ak-adapter.json` "extracts" by returning the
@@ -339,6 +350,7 @@ test('npm: happy path — resolves ak-adapter.json extracted (via stdout) from t
   try {
     const result = await resolveManifestSource('npm:fake-pkg@1.0.0', {
       execFileFn: fakeNpmExecFileFn(payload),
+      resolveShimFn: passthroughResolveShim,
       tmpDir: tmpBase,
     });
     assert.deepEqual(result.raw, payload);
@@ -356,6 +368,7 @@ test('npm: scoped package spec with a version resolves correctly', async () => {
   try {
     const result = await resolveManifestSource('npm:@acme/hermes-adapter@2.1.0', {
       execFileFn: fakeNpmExecFileFn(payload),
+      resolveShimFn: passthroughResolveShim,
       tmpDir: tmpBase,
     });
     assert.deepEqual(result.raw, payload);
@@ -369,7 +382,7 @@ test('npm: exact semver version is accepted', async () => {
   const tmpBase = await fs.mkdtemp(path.join(os.tmpdir(), 'ak-src-npm-ver-'));
   try {
     const result = await resolveManifestSource('npm:fake-pkg@1.2.3', {
-      execFileFn: fakeNpmExecFileFn(payload), tmpDir: tmpBase,
+      execFileFn: fakeNpmExecFileFn(payload), resolveShimFn: passthroughResolveShim, tmpDir: tmpBase,
     });
     assert.deepEqual(result.raw, payload);
   } finally {
@@ -382,7 +395,7 @@ test('npm: a dist-tag version ("latest") is accepted', async () => {
   const tmpBase = await fs.mkdtemp(path.join(os.tmpdir(), 'ak-src-npm-tag-'));
   try {
     const result = await resolveManifestSource('npm:fake-pkg@latest', {
-      execFileFn: fakeNpmExecFileFn(payload), tmpDir: tmpBase,
+      execFileFn: fakeNpmExecFileFn(payload), resolveShimFn: passthroughResolveShim, tmpDir: tmpBase,
     });
     assert.deepEqual(result.raw, payload);
   } finally {
@@ -392,7 +405,9 @@ test('npm: a dist-tag version ("latest") is accepted', async () => {
 
 test('npm (finding 7): a git-shorthand disguised as a version is rejected before execFileFn is called', async () => {
   await assert.rejects(
-    () => resolveManifestSource('npm:pkg@attacker/repo', { execFileFn: neverCalled('execFileFn') }),
+    () => resolveManifestSource('npm:pkg@attacker/repo', {
+      execFileFn: neverCalled('execFileFn'), resolveShimFn: passthroughResolveShim,
+    }),
     (error) => error instanceof SourceError && error.reason === 'source-invalid'
       && /not a version or dist-tag/.test(error.message),
   );
@@ -400,7 +415,9 @@ test('npm (finding 7): a git-shorthand disguised as a version is rejected before
 
 test('npm (finding 7): a local-path-shaped version is rejected before execFileFn is called', async () => {
   await assert.rejects(
-    () => resolveManifestSource('npm:pkg@../../x', { execFileFn: neverCalled('execFileFn') }),
+    () => resolveManifestSource('npm:pkg@../../x', {
+      execFileFn: neverCalled('execFileFn'), resolveShimFn: passthroughResolveShim,
+    }),
     (error) => error instanceof SourceError && error.reason === 'source-invalid',
   );
 });
@@ -409,7 +426,9 @@ test('npm: package-name injection attempts are rejected before execFileFn is eve
   const attempts = ['npm:foo; rm -rf /', 'npm:foo$(x)', 'npm:foo bar', 'npm:foo`x`', 'npm:foo|bar'];
   for (const source of attempts) {
     await assert.rejects(
-      () => resolveManifestSource(source, { execFileFn: neverCalled(`execFileFn for ${source}`) }),
+      () => resolveManifestSource(source, {
+        execFileFn: neverCalled(`execFileFn for ${source}`), resolveShimFn: passthroughResolveShim,
+      }),
       (error) => error instanceof SourceError && error.reason === 'source-invalid',
       `expected ${source} to be rejected as source-invalid`,
     );
@@ -422,6 +441,7 @@ test('npm (finding 2): tar exiting non-zero (member not in archive) -> source-in
     await assert.rejects(
       () => resolveManifestSource('npm:fake-pkg@1.0.0', {
         execFileFn: fakeNpmExecFileFn({}, { failTar: true }),
+        resolveShimFn: passthroughResolveShim,
         tmpDir: tmpBase,
       }),
       (error) => error instanceof SourceError && error.reason === 'source-invalid'
@@ -440,6 +460,7 @@ test('npm (finding 2): a symlink member (empty stdout, tar exits 0) is refused e
     await assert.rejects(
       () => resolveManifestSource('npm:fake-pkg@1.0.0', {
         execFileFn: fakeNpmExecFileFn({}, { emptyMember: true }),
+        resolveShimFn: passthroughResolveShim,
         tmpDir: tmpBase,
       }),
       (error) => error instanceof SourceError && error.reason === 'source-invalid'
@@ -455,7 +476,9 @@ test('npm: npm pack itself failing -> source-unreachable, temp dir cleaned up', 
   const execFileFn = async () => { throw new Error('npm ERR! 404 Not Found'); };
   try {
     await assert.rejects(
-      () => resolveManifestSource('npm:does-not-exist@9.9.9', { execFileFn, tmpDir: tmpBase }),
+      () => resolveManifestSource('npm:does-not-exist@9.9.9', {
+        execFileFn, resolveShimFn: passthroughResolveShim, tmpDir: tmpBase,
+      }),
       (error) => error instanceof SourceError && error.reason === 'source-unreachable',
     );
     const remaining = await fs.readdir(tmpBase);
@@ -472,6 +495,7 @@ test('npm (finding 5): oversized extracted manifest (stdout) -> source-too-large
     await assert.rejects(
       () => resolveManifestSource('npm:fake-pkg@1.0.0', {
         execFileFn: fakeNpmExecFileFn(bigPayload),
+        resolveShimFn: passthroughResolveShim,
         tmpDir: tmpBase,
         maxBytes: 100,
       }),
@@ -488,7 +512,9 @@ test('regression (finding 14): control characters (C0 and C1, incl. U+009B CSI) 
   const tmpBase = await fs.mkdtemp(path.join(os.tmpdir(), 'ak-src-npm-dirty-'));
   try {
     await assert.rejects(
-      () => resolveManifestSource('npm:fake-pkg@1.0.0', { execFileFn, tmpDir: tmpBase }),
+      () => resolveManifestSource('npm:fake-pkg@1.0.0', {
+        execFileFn, resolveShimFn: passthroughResolveShim, tmpDir: tmpBase,
+      }),
       (error) => {
         assert.ok(error instanceof SourceError);
         assert.ok(!error.message.includes('\x1B'), 'ESC control byte must be stripped');

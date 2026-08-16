@@ -275,12 +275,15 @@ async function resolveHttpsSource(url, { fetchFn, timeoutMs, maxBytes }) {
   }
 }
 
-/** Run `npm pack` as a bounded subprocess. Resolves the command through the
- * same Windows-shim logic as the rest of the codebase (src/lib/exec.mjs's
- * resolveShim) — a no-op on POSIX, but the difference between a working and
- * ENOENT'd npm invocation on Windows. Never shell:true; argv arrays only. */
-async function execBounded(execFileFn, cmd, args, { cwd, timeoutMs, maxBuffer }, label) {
-  const invocation = resolveShim(cmd, args);
+/** Run `npm pack` as a bounded subprocess. Resolves the command through
+ * `resolveShimFn` — production always passes src/lib/exec.mjs's real
+ * resolveShim (a no-op on POSIX, but the difference between a working and
+ * ENOENT'd npm invocation on Windows); tests inject a passthrough so their
+ * execFileFn stubs can assert the LOGICAL argv without also having to model
+ * Windows' PowerShell-wrapped shim shape (that shape is exec.mjs's own test
+ * responsibility, not this module's). Never shell:true; argv arrays only. */
+async function execBounded(execFileFn, cmd, args, { cwd, timeoutMs, maxBuffer }, label, resolveShimFn) {
+  const invocation = resolveShimFn(cmd, args);
   if (invocation.resolved === false) {
     throw sourceError('source-unreachable', `no safe invocation found for ${cmd}`);
   }
@@ -294,7 +297,7 @@ async function execBounded(execFileFn, cmd, args, { cwd, timeoutMs, maxBuffer },
 }
 
 async function resolveNpmSource(spec, {
-  execFileFn, timeoutMs, maxBytes, tmpDir,
+  execFileFn, timeoutMs, maxBytes, tmpDir, resolveShimFn,
 }) {
   if (!NPM_SPEC_CHARS_RE.test(spec)) {
     throw sourceError('source-invalid', `npm spec contains disallowed characters: ${spec}`);
@@ -321,6 +324,7 @@ async function resolveNpmSource(spec, {
       ['pack', spec, '--ignore-scripts', '--pack-destination', dir],
       { cwd: dir, timeoutMs, maxBuffer: SUBPROCESS_MAX_BUFFER },
       'npm pack',
+      resolveShimFn,
     );
 
     const entries = await fs.readdir(dir);
@@ -331,7 +335,7 @@ async function resolveNpmSource(spec, {
 
     // Extract ONLY package/ak-adapter.json, straight to stdout (-O) —
     // never to disk. See the module header for why.
-    const invocation = resolveShim('tar', ['-xzOf', tarball, 'package/ak-adapter.json']);
+    const invocation = resolveShimFn('tar', ['-xzOf', tarball, 'package/ak-adapter.json']);
     if (invocation.resolved === false) {
       throw sourceError('source-unreachable', 'no safe invocation found for tar');
     }
@@ -386,12 +390,14 @@ async function resolveNpmSource(spec, {
  *
  * @param {string} source
  * @param {{fetchFn?:typeof fetch, execFileFn?:(cmd:string,args:string[],opts:any)=>Promise<{stdout:string,stderr:string}>,
+ *   resolveShimFn?:(cmd:string,args:string[])=>{command:string,args:string[],resolved:boolean},
  *   timeoutMs?:number, maxBytes?:number, tmpDir?:string}} [options]
  * @returns {Promise<{raw:any, origin:'file'|'url'|'npm'}>}
  */
 export async function resolveManifestSource(source, {
   fetchFn = globalThis.fetch,
   execFileFn = defaultExecFile,
+  resolveShimFn = resolveShim,
   timeoutMs = DEFAULT_TIMEOUT_MS,
   maxBytes = DEFAULT_MAX_BYTES,
   tmpDir,
@@ -407,7 +413,7 @@ export async function resolveManifestSource(source, {
   }
   if (source.startsWith('npm:')) {
     return resolveNpmSource(source.slice('npm:'.length), {
-      execFileFn, timeoutMs, maxBytes, tmpDir,
+      execFileFn, timeoutMs, maxBytes, tmpDir, resolveShimFn,
     });
   }
   return resolveFileSource(source, maxBytes);
