@@ -631,36 +631,42 @@ to a half-built external host by accident.</figcaption>
   shipped payoff, and it needs no flag.</li>
   <li><strong>The internals are ready for more</strong> — a new host is a registry entry or a
   manifest, not a rewrite.</li>
-  <li><strong>An external host can be recognized and registered</strong> from a manifest, safely and
-  reversibly, behind <code>AK_EXPERIMENTAL_HOST_ADAPTERS=1</code>.</li>
+  <li><strong>An external host can be trusted, run, and can earn capabilities</strong> — from a
+  manifest, safely and reversibly, behind <code>AK_EXPERIMENTAL_HOST_ADAPTERS=1</code>:
+  <code>ak host adapters trust</code> records hash-pinned consent, <code>ak run</code> drives it as a
+  supervised subprocess, and the conformance kit certifies it tier by tier.</li>
 </ul>
 
 <div class="panel caution">
   <div class="ptitle">Limitations — read before expecting an external host to "just work"</div>
   <ul style="margin-bottom:0">
-    <li><strong>Work can't be run through an external host yet.</strong> The kit can admit one into
-    its registry, but driving a task through it (the <code>ak run</code> path) is not built — an
-    admitted external host currently reports "no execution available" rather than running.</li>
-    <li><strong>There's no command to approve one yet.</strong> Approval is checked at admission, but
-    the <code>ak host adapters trust</code> command that would record it isn't built — so in practice
-    admission refuses until that lands. This is the intended <em>next</em> step.</li>
-    <li><strong>Manifests are local files only.</strong> Fetching an adapter from npm or a URL isn't
-    built; a manifest is a file path today.</li>
     <li><strong>An external host can't <em>self-declare</em> that it's primary, an AQE provider, or a
     status-line owner.</strong> That block on self-declaration is permanent — it's the safety
     invariant. But the capability itself is <em>earnable</em>: pass the matching conformance tier and
-    get a maintainer's grant, and an adapter reaches full parity (the graduation ladder in
-    <a href="#lifecycle">section&nbsp;7</a>). One honest exception — being an <em>AQE provider
-    type</em> isn't the kit's to grant; agentic-qe's provider list is defined upstream
-    (<a href="#upstream">section&nbsp;8</a>).</li>
-    <li><strong>It's experimental.</strong> The contract version can still change; nothing about the
-    external-adapter surface is promised stable until the final "Open" stage above.</li>
+    get a maintainer's grant (the graduation ladder in <a href="#lifecycle">section&nbsp;7</a>). One
+    honest exception — being an <em>AQE provider type</em> isn't the kit's to grant; agentic-qe's
+    provider list is defined upstream (<a href="#upstream">section&nbsp;8</a>).</li>
+    <li><strong>Two conformance tiers can't be cleared yet, by design.</strong> <code>session-driving</code>
+    is <em>gated</em> on an upstream ruflo backend, and <code>statusline</code> is <em>gated</em>
+    because the kit has no footer-render surface for a third-party host. They report
+    <code>gated</code>/<code>skipped</code> honestly — never a fabricated pass.</li>
+    <li><strong>An earned capability isn't fully consumed yet.</strong> A granted
+    <code>canBePrimary</code> makes a host show as primary-eligible, but no path yet <em>selects</em>
+    an external host as primary (<code>ak host pick</code> stays built-in-scoped); a granted
+    <code>commandStatusline</code> is currently inert (nothing reads it at runtime).</li>
+    <li><strong>It's experimental.</strong> <code>contract: 1</code> can still change between alpha
+    releases; nothing about the external-adapter surface is promised stable until a real external
+    adapter clears the full kit and soaks — the final "Open" stage above.</li>
   </ul>
 </div>
 
 <h2 id="implementers">6 · For implementers: the shape of an adapter</h2>
-<p>When the on-ramp is complete, authoring a host adapter will mean shipping one manifest and a few
-small hook scripts. The manifest looks like this (illustrative):</p>
+<p>Authoring a host adapter means shipping <strong>one JSON manifest</strong> and <strong>a few small
+hook scripts</strong> — nothing else, and no code of yours ever runs inside the kit's own process.
+The step-by-step walkthrough lives in
+<a href="AUTHORING-HOST-ADAPTERS.md"><code>docs/AUTHORING-HOST-ADAPTERS.md</code></a>; this is the
+shape of it.</p>
+<p>The manifest (abridged — the guide has a complete, validating one):</p>
 <pre>{
   "name": "hermes",
   "version": "0.1.0",
@@ -668,35 +674,73 @@ small hook scripts. The manifest looks like this (illustrative):</p>
   "host": {
     "id": "hermes",
     "label": "Hermes",
+    "install": { "bin": "hermes", "externalInstallPolicy": "detect-never-overwrite" },
     "capabilities": {
-      "canDriveSession": true,
-      "canRouteActivities": true
-      // canBePrimary / commandStatusline: not allowed — omitted by force
+      "canDriveSession": false,
+      "canBePrimary": false,
+      "canRouteActivities": true,
+      "commandStatusline": false,
+      "transcripts": false, "usage": false,
+      "nativeMcpConfig": false, "nativeGuidance": false
     },
-    "install": { "bin": "hermes", "externalInstallPolicy": "detect-never-overwrite" }
+    "trust": { "approvalPolicy": "unchanged", "changes": [] },
+    "enabledByDefault": false, "configProjection": "ruflo", "observability": []
   },
   "detection": { "bin": "hermes", "versionArgs": ["--version"] },
   "driving": { "surfaces": ["cli-subprocess"] },
   "lifecycle": {
-    "detect": { "hook": { "command": ["hermes", "doctor", "--json"] } }
+    "detect": { "hook": { "command": ["node", "detect-hook.mjs"] } }
   },
-  "trust": { "changes": [ /* what the adapter will touch, disclosed up front */ ] }
+  "execution": {
+    "run": { "hook": { "command": ["node", "run-hook.mjs"] } }
+  },
+  "trust": { "changes": [ ... what the adapter will touch, disclosed up front ... ] }
 }</pre>
-<p>It is registered in the user's own <code>kit.json</code>, and its exact bytes are approved:</p>
+<p>A user registers it in their own <code>kit.json</code> and approves its exact bytes:</p>
 <pre>// kit.json
 "hostAdapters": [
   { "name": "hermes", "source": "~/.config/ak/adapters/hermes.json", "contract": 1 }
-]</pre>
+]
+
+$ export AK_EXPERIMENTAL_HOST_ADAPTERS=1
+$ ak host adapters trust hermes     # discloses the manifest, then pins its hash</pre>
+<p>A manifest can also be published as an npm package shipping <code>ak-adapter.json</code> at its
+root, or as an <code>https</code> URL.</p>
 <ul>
-  <li><strong>The conformance kit is the contract.</strong> A committed test harness admits a real
-  fixture adapter, runs its hooks as real subprocesses, and refuses a corpus of bad manifests with
-  exact reasons — the same bar a real adapter (Hermes first) must clear to graduate.</li>
+  <li><strong>The hooks are the only code that runs</strong> — as supervised subprocesses. A hook
+  reads the worker prompt on stdin, gets the worker's identity in its environment, prints a JSON
+  result, and exits: <code>0</code> for success, <code>77</code> to refuse on a consent boundary
+  (never escalated), <code>78</code> for "not authenticated". The kit pins each hook's working
+  directory to the adapter's own bundle, hands it a minimal environment, bounds its output and its
+  time, and never promotes its stderr into another worker's prompt.</li>
   <li><strong>Approval is pinned to the bytes.</strong> Consent is a hash of the exact manifest;
   edit one character and the kit asks again. Content is never approved unseen.</li>
   <li><strong>Refusals are specific.</strong> An unknown field, a forbidden capability, a bad
   contract version, a name that collides with a built-in — each is refused by name, and one bad
   adapter never disturbs the others or the built-ins.</li>
+  <li><strong>Self-test before you ask anyone for anything.</strong>
+  <code>ak host adapters conformance hermes</code> runs the tiered harness against your real host and
+  reports each tier honestly. <code>admission</code>, <code>activity-routing</code> and
+  <code>primary-eligible</code> can genuinely pass — the last one by driving a real run and receiving
+  a real escalation onto your host. <code>session-driving</code> and <code>statusline</code> come back
+  <em>gated</em> (or <em>skipped</em>, if you never declared the capability) because those paths are
+  not built; that is expected, not your adapter failing. The harness never fabricates a pass.</li>
 </ul>
+<div class="panel caution">
+  <div class="ptitle">What an author should not expect yet</div>
+  <ul style="margin-bottom:0">
+    <li><strong><code>cli-subprocess</code> is the only working driving surface.</strong>
+    <code>acp</code> and <code>mcp</code> are named in the vocabulary for forward compatibility;
+    declaring one is refused, never silently downgraded.</li>
+    <li><strong>An earned <code>canBePrimary</code> is only partly consumed.</strong> A grant does
+    raise the capability, so the host shows as primary-eligible — but no path yet <em>selects</em> an
+    external host as primary. An earned <code>commandStatusline</code> is currently inert: there is no
+    runtime reader for an admitted host's footer.</li>
+    <li><strong>The contract is still experimental.</strong> <code>contract: 1</code> can change
+    between alpha releases, and freezes only once a real external adapter clears the full kit and
+    survives a release of soak.</li>
+  </ul>
+</div>
 
 <h2 id="lifecycle">7 · From a contributor's idea to a built-in host</h2>
 <p>This is the part that ties it together: the exact sequence from "someone wants to add Hermes" to
