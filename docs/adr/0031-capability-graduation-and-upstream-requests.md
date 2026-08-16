@@ -194,8 +194,12 @@ unbuilt. This table is the source of truth for what is real.
   `activity-routing` and `primary-eligible` tiers.
 - Upstream facts grounded in a source-cited research sweep: `agentic-qe@3.13.10`
   (`ALL_PROVIDER_TYPES`, the `createProvider` switch, the closed provider enum) and
-  `ruvnet/ruflo@45e65b5` (`ENABLE_*` backend model). Re-verify against upstream HEAD before filing an
-  actual capability request.
+  `ruvnet/ruflo@45e65b5` (`ENABLE_*` backend model). The two §4 capability requests have been filed —
+  the AQE provider-plugin request as
+  [proffesor-for-testing/agentic-qe#628](https://github.com/proffesor-for-testing/agentic-qe/issues/628)
+  and the ruflo backend-registration request as
+  [ruvnet/ruflo#3046](https://github.com/ruvnet/ruflo/issues/3046), each inviting the maintainer to
+  close-as-satisfied if the current source already provides the surface.
 - Companion explainer for consumers and implementers:
   [`docs/HOST-EXTENSIBILITY-EXPLAINER.html`](../HOST-EXTENSIBILITY-EXPLAINER.html); design dossier:
   [`docs/ADAPTER-CONTRACT-DOSSIER.html`](../ADAPTER-CONTRACT-DOSSIER.html).
