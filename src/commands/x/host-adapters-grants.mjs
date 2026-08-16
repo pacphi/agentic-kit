@@ -39,6 +39,28 @@ function gatingTierFor(capability) {
   return Object.entries(TIER_GRANTS).find(([, cap]) => cap === capability)?.[0];
 }
 
+/** F-2 (security re-review, HIGH): what a grant of `capability` ACTUALLY
+ * does today — precisely bounded, not overclaimed and not underclaimed. The
+ * D2 keystone (admission.mjs) makes grantedCapabilitiesFor overlay into
+ * effectiveHostRegistry() on every AK_EXPERIMENTAL_HOST_ADAPTERS=1
+ * invocation, so a granted canBePrimary is genuinely live from the next
+ * invocation: hostTierLabel() shows 'drives sessions · can lead' and the
+ * host joins effectivePrimaryHostIds(). What is still deferred: no
+ * production path SELECTS an external host as primary today (`ak host pick
+ * --primary-host` only accepts claude|codex — built-in-scoped), so a
+ * granted canBePrimary is visible/eligible but not yet auto-consumed.
+ * commandStatusline reaches the same overlay but has NO runtime reader
+ * anywhere in src/ (grep-verified) — its statusline render path is a later
+ * wave, so it is currently inert. F-5: this is also the one-sentence
+ * distinction between the two grantable caps the disclosure owes the
+ * maintainer, so both call sites (pre-confirm disclosure, post-grant
+ * success) share this single source of truth rather than drifting. */
+function capabilityStatusNote(capability) {
+  return capability === 'canBePrimary'
+    ? "canBePrimary is live: from the next ak invocation this host's tier label shows 'can lead' and it joins effectivePrimaryHostIds() — but no production path yet SELECTS an external host as primary ('ak host pick' stays built-in-scoped), so this is visible/eligible, not yet auto-consumed."
+    : 'commandStatusline is currently inert: it reaches the effective host registry, but no runtime path reads it anywhere yet — the statusline render path is a later wave.';
+}
+
 export async function grant({
   name, capability, cfg, consent, reader, ask, isTTY, yes, grantsFile,
 }) {
@@ -98,7 +120,8 @@ export async function grant({
   }
   console.log(`  manifest trust state: ${trustState}`);
   info('this grant pins the MANIFEST content (its hash), not the hook script bytes it references — see ADR-0031 §2 for that boundary.');
-  info("granting a capability is a trust act, same posture as 'trust': it is recorded now, but nothing in ak reads granted capabilities into runtime behaviour yet — see the note after recording.");
+  info("granting a capability is a trust act, same posture as 'trust': it takes effect in the effective host registry from the next ak invocation.");
+  info(capabilityStatusNote(capability));
 
   if (!yes) {
     if (!isTTY) {
@@ -118,12 +141,15 @@ export async function grant({
 
   ok(`granted '${safeCapability}' to '${safeName}' at ${hash}`);
   info('an edit to the manifest voids this grant until the tier is re-earned and re-granted');
-  // F-7 (honesty, ADR-0023): no runtime code reads granted capabilities
-  // today — grantedCapabilitiesFor's only call sites are the conformance
-  // harness's own gate and `ak host adapters status`. The grant is recorded,
-  // not yet live; it lights up once a later wave wires granted capabilities
-  // into actual runtime behaviour.
-  info("this grant is recorded, not yet live: nothing in ak reads granted capabilities into runtime behaviour today — it will take effect once a later wave wires that in");
+  // F-2 (security re-review, HIGH — corrects the prior F-7 wording, which
+  // was accurate when written but was made FALSE by the D2 keystone
+  // (admission.mjs) that landed since: grantedCapabilitiesFor is now read on
+  // every flagged ak invocation and overlaid into effectiveHostRegistry(),
+  // so a granted capability is NOT inert in general — see
+  // capabilityStatusNote's header comment for exactly what is and isn't
+  // live yet, per capability.
+  info("this grant takes effect from the next ak invocation (with AK_EXPERIMENTAL_HOST_ADAPTERS=1 set): it is reflected in the effective host registry and this host's tier label.");
+  info(capabilityStatusNote(capability));
   return 0;
 }
 

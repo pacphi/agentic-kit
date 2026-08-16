@@ -824,12 +824,17 @@ test('conformance: happy path against the real acme fixture prints a per-tier ta
   assert.match(text, /admission\s+passed/);
   assert.match(text, /activity-routing\s+passed/);
   assert.match(text, /session-driving\s+skipped/);
-  assert.match(text, /primary-eligible\s+gated/);
+  // primary-eligible now runs its real exercise unconditionally once
+  // admission and activity-routing have genuinely passed (conformance.mjs's
+  // checkPrimaryEligible, landed concurrently on this branch) — it is no
+  // longer gated on a pre-existing grant, so it genuinely passes here.
+  assert.match(text, /primary-eligible\s+passed/);
   assert.match(text, /statusline\s+gated/);
 
   const record = grantsFor('acme', { file: grantsFile });
   assert.equal(record.tiers.admission.status, 'passed');
   assert.equal(record.tiers['activity-routing'].status, 'passed');
+  assert.equal(record.tiers['primary-eligible'].status, 'passed');
 });
 
 test('conformance: nothing is recorded when the flag is off, even with a real cfg entry and grantsFile supplied', async () => {
@@ -958,10 +963,42 @@ test('grant: happy path — capability granted once the gating tier is force-rec
   assert.equal(code, 0, cap.text());
   assert.match(cap.text(), /granted 'canBePrimary'/);
   // F-3: the disclosure prints the actual evidence backing the tier, not
-  // just a hash, and the F-7 honesty note that the grant is not yet live.
+  // just a hash. F-2 (security re-review, HIGH): the D2 keystone
+  // (admission.mjs) makes a granted canBePrimary genuinely live in the
+  // effective host registry / tier label / primary-eligibility set from the
+  // next invocation — the message must say so, not claim the grant is
+  // inert. It must also disclose the honestly-deferred last mile: no
+  // production path yet SELECTS an external host as primary.
   assert.match(cap.text(), /tier evidence:\s+leads a run, receives escalation/);
-  assert.match(cap.text(), /not yet live/);
+  assert.match(cap.text(), /effective host registry/);
+  assert.match(cap.text(), /canBePrimary is live/);
+  assert.match(cap.text(), /effectivePrimaryHostIds/);
+  assert.match(cap.text(), /no production path yet SELECTS an external host as primary/);
+  assert.doesNotMatch(cap.text(), /not yet live/, 'must never claim the grant is inert now that D2 makes it live');
   assert.deepEqual(grantedCapabilitiesFor('hermes', hash, { file: grantsFile }), { canBePrimary: true });
+});
+
+test('grant: commandStatusline is honestly disclosed as currently inert (no runtime reader yet), unlike canBePrimary', async () => {
+  const grantsFile = tmpGrantsFile();
+  const raw = validManifest();
+  const hash = hashManifest(validateAdapterManifest(raw));
+  recordTierResult('hermes', 'statusline', { hash, evidence: 'footer renders' }, { file: grantsFile });
+  const cfg = cfgWith([{ name: 'hermes', source: 'mem://hermes' }]);
+
+  const cap = capture();
+  let code;
+  try {
+    code = await run({
+      positionals: ['grant', 'hermes', 'commandStatusline'], env: ON_ENV, cfg,
+      reader: async () => raw, ask: async () => true, isTTY: true, grantsFile, flags: {},
+      consent: fileConsent(tmpConsentFile()),
+    });
+  } finally { cap.restore(); }
+
+  assert.equal(code, 0, cap.text());
+  assert.match(cap.text(), /commandStatusline is currently inert/);
+  assert.match(cap.text(), /no runtime path reads it/);
+  assert.deepEqual(grantedCapabilitiesFor('hermes', hash, { file: grantsFile }), { commandStatusline: true });
 });
 
 // N-1 (security re-review): grant must resolve the manifest source EXACTLY
