@@ -45,7 +45,7 @@ while the contract is still experimental.
   - [ ] `activity-routing` passed
   - [ ] `primary-eligible` passed *(or consciously out of scope for this adapter)*
   - [ ] `session-driving` — passed **iff** the upstream ruflo backend-registration request
-        (`docs/upstream-requests/ruflo-backend-registration.md`) has shipped; otherwise
+        ([ruvnet/ruflo#3046](https://github.com/ruvnet/ruflo/issues/3046)) has shipped; otherwise
         legitimately `gated` and recorded via `ak host adapters gate`.
   - [ ] `statusline` — `gated` remains acceptable at freeze (its render path is a later wave);
         the freeze is of the **contract shape**, not of every tier passing.
@@ -69,8 +69,10 @@ while the contract is still experimental.
 The freeze is of the **contract shape**, not of universal tier passage. These stay open by
 design and are recorded as gated, not as failures:
 
-- `session-driving` until ruflo ships a backend-registration surface (upstream request drafted).
-- An `aqeProvider` identity until agentic-qe ships a provider-plugin API (upstream request drafted).
+- `session-driving` until ruflo ships a backend-registration surface (filed:
+  [ruvnet/ruflo#3046](https://github.com/ruvnet/ruflo/issues/3046)).
+- An `aqeProvider` identity until agentic-qe ships a provider-plugin API (filed:
+  [proffesor-for-testing/agentic-qe#628](https://github.com/proffesor-for-testing/agentic-qe/issues/628)).
 - `statusline` runtime rendering (no `ak` render surface for a third-party TUI yet).
 - Grant *consumption* last-mile: selecting an external host as primary, and a `commandStatusline`
   runtime reader.
