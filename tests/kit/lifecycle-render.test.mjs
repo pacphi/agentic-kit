@@ -44,6 +44,7 @@ test('F3: control chars are stripped from opencode-shaped lines too (defence-in-
     result: {
       oc: { ok: false, changed: false, detail: hostile },
       plugin: { ok: true, changed: false, detail: 'ok' },
+      gateway: { ok: true, changed: false, detail: 'ok' },
       agents: { ok: true, changed: false, detail: 'ok' },
       skill: { ok: true, changed: false, detail: 'ok' },
       markersChanged: false,
@@ -66,12 +67,13 @@ test('F3: a tab/newline/CR embedded in hook text collapses to spaces, not a seco
 // ── F5: opencode sub-surface levels reflect their OWN ok/status, never a
 // hard-coded 'ok' — and a failed skill write is never silently dropped ─────
 
-function opencodeApply({ oc, plugin, agents, skill, markersChanged = false, changed = true }) {
+function opencodeApply({ oc, plugin, gateway, agents, skill, markersChanged = false, changed = true }) {
   return {
     changed,
     result: {
       oc: { ok: true, changed: false, detail: 'converged', ...oc },
       plugin: { ok: true, changed: false, detail: 'plugin ok', ...plugin },
+      gateway: { ok: true, changed: false, detail: 'gateway ok', ...gateway },
       agents: { ok: true, changed: false, detail: 'agents ok', ...agents },
       skill: { ok: true, changed: false, detail: 'skill ok', ...skill },
       markersChanged,
@@ -137,7 +139,7 @@ test('F5: the fatal (opencode.json did not converge) branch is unaffected by the
   assert.equal(report.fatal, true);
   assert.equal(report.lines.length, 2);
   assert.equal(report.lines[0].level, 'fail');
-  assert.match(report.lines[1].text, /plugin\/agents\/skill\/guidance skipped/);
+  assert.match(report.lines[1].text, /plugin\/gateway\/agents\/skill\/guidance skipped/);
 });
 
 // ── generic (admitted) apply/undo still render a plain ok/warn summary ─────

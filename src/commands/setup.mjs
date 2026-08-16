@@ -225,10 +225,11 @@ export async function run_machine({ flags, pkgRoot, cfg }) {
     }
   }
 
-  // 6b. host lifecycle wiring — config-file MCP + skills, lifecycle plugin,
-  //     converted agents, platform skill (each adapter owns its own surfaces
-  //     — opencode.mjs for opencode; a subprocess hook for an admitted
-  //     external — see lifecycle-registry.mjs's buildAdmittedLifecycleAdapter).
+  // 6b. host lifecycle wiring — connected MCPs, compact lazy gateway,
+  //     lifecycle plugin, converted agents, specialist dispatcher, and
+  //     platform skill (each adapter owns its own surfaces — opencode.mjs for
+  //     opencode; a subprocess hook for an admitted external, see
+  //     lifecycle-registry.mjs's buildAdmittedLifecycleAdapter).
   //     Registry-driven: loops hostsWithLifecycle() (built-ins + admitted,
   //     ADR-0031 P3) rather than naming opencode, so a second lifecycle host
   //     — built-in or admitted — needs no new branch here. lifecycleExecutionEnabled
@@ -238,9 +239,9 @@ export async function run_machine({ flags, pkgRoot, cfg }) {
   //     Only when the CLI is actually present: a declined/failed install must
   //     not leave a freshly-created config home behind (codex-review #4).
   //     lifecycle-render.mjs's renderApplyReport dispatches on the runLifecycle
-  //     result's own shape (opencode's rich per-surface shape vs. an admitted
-  //     host's generic lifecycleResult), so this loop body never destructures
-  //     a host-specific result directly.
+  //     result's own shape (opencode's rich per-surface shape — including the
+  //     compact gateway — vs. an admitted host's generic lifecycleResult), so
+  //     this loop body never destructures a host-specific result directly.
   for (const hostId of hostsWithLifecycle()) {
     if (!lifecycleExecutionEnabled(hostId, cfg)) continue;
     if (!(await have(detectionBinFor(hostId)))) {
@@ -265,7 +266,7 @@ export async function run_machine({ flags, pkgRoot, cfg }) {
       ok(`opencode guidance: ${guidance.detail.replace(/^guidance: /, '')}`);
       // opencode loads config/plugins/MCP/agents once at startup — say so now,
       // or the user files "hooks don't work" issues (observed live).
-      info('restart opencode to load the hooks + MCP servers (loaded once at startup)');
+      info('restart opencode to load the Agentic Kit hooks, compact gateway, and MCP connections (loaded once at startup)');
     }
   }
 

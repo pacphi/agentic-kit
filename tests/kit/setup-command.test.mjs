@@ -298,7 +298,9 @@ test('ak setup --opencode --yes persists the host and wires it via the shared st
       const { result, out } = await captureLog(() =>
         setup.run({ flags: FLAGS({ opencode: true, yes: true, minimal: true }), pkgRoot: PKG_ROOT }));
       assert.equal(result, 0, out);
-      assert.match(out, /restart opencode to load the hooks/, 'restart guidance after successful wiring');
+      assert.match(out, /restart opencode to load the Agentic Kit hooks, compact gateway, and MCP connections/,
+        'restart guidance after successful wiring');
+      assert.match(out, /opencode gateway:/, 'setup reports the compact gateway explicitly');
     });
     const cfg = loadKitConfig();
     assert.equal(cfg.integrations.hosts.opencode, true, 'enabled host persisted to kit.json');
@@ -306,7 +308,10 @@ test('ak setup --opencode --yes persists the host and wires it via the shared st
     const doc = JSON.parse(fs.readFileSync(path.join(ocHome(), 'opencode.json'), 'utf8'));
     assert.ok(doc.mcp['claude-flow'], 'claude-flow MCP wired');
     assert.ok(fs.existsSync(path.join(ocHome(), 'plugins', 'ruflo-hooks.js')), 'lifecycle plugin deployed');
-    assert.ok(fs.existsSync(path.join(ocHome(), 'agents', 'coder.md')), 'agents converted');
+    assert.ok(fs.existsSync(path.join(ocHome(), 'plugins', 'ruflo-gateway.js')), 'lazy gateway deployed');
+    assert.ok(fs.existsSync(path.join(ocHome(), 'agents', 'ak-specialist.md')), 'specialist dispatcher deployed');
+    assert.equal(fs.existsSync(path.join(ocHome(), 'agents', 'coder.md')), false,
+      'eager agent catalogue is not projected into the initial task description');
     assert.ok(fs.existsSync(path.join(ocHome(), 'skills', 'ruflo', 'SKILL.md')), 'platform skill deployed');
     // guidance blocks land NOW, not on the next reconcile (codex-review #18)
     const agentsMd = path.join(ocHome(), 'AGENTS.md');
@@ -354,7 +359,7 @@ test('ak setup --opencode fails honestly and deploys nothing when JSONC is refus
   const { result, out } = await withOpencodeCli(() => captureLog(() =>
     setup.run({ flags: FLAGS({ opencode: true, yes: true, minimal: true }), pkgRoot: PKG_ROOT })));
   assert.equal(result, 1);
-  assert.match(out, /plugin\/agents\/skill\/guidance skipped/);
+  assert.match(out, /plugin\/gateway\/agents\/skill\/guidance skipped/);
   assert.doesNotMatch(out, /restart opencode|setup complete/);
   for (const surface of ['plugins', 'agents', 'skills', 'AGENTS.md']) {
     assert.equal(fs.existsSync(path.join(ocHome(), surface)), false, `${surface} must not be deployed`);

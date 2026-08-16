@@ -192,8 +192,8 @@ export async function run({ flags, pkgRoot, fetchLatest }) {
       await step(`install ${h.id}`, () => installHost(h.id));
     }
   }
-  // opencode host wiring: config-file MCP + skills + permissions, the plugins/
-  // lifecycle bridge, the converted agent set, the platform skill. Runs AFTER
+  // opencode host wiring: connected MCPs, compact lazy gateway, lifecycle
+  // bridge, specialist dispatcher, and platform skill. Runs AFTER
   // the hosts install branch so an enable+install converges in one sync, and
   // only when the CLI is actually present — otherwise the writers would create
   // the host's config home for a host that isn't there (codex-review #4).

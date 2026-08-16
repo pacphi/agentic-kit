@@ -106,13 +106,16 @@ function renderOpencodeApply(hostId, lifecycle) {
   const stack = lifecycle.result;
   const lines = [line(levelForResult(stack.oc), `${hostId}: ${stack.oc.detail}`)];
   if (stack.oc.fatal) {
-    lines.push(line('warn', `${hostId} plugin/agents/skill/guidance skipped — ${stack.oc.detail}`));
+    lines.push(line('warn', `${hostId} plugin/gateway/agents/skill/guidance skipped — ${stack.oc.detail}`));
     return {
       shape: 'opencode', fatal: true, ok: !!stack.oc.ok, changed: !!lifecycle.changed,
       ocChanged: !!stack.oc.changed, markersChanged: !!stack.markersChanged, lines,
     };
   }
   lines.push(line(levelForResult(stack.plugin), `${hostId} plugin: ${stack.plugin.detail}`));
+  // The compact lazy gateway (#152) is opencode's own apply surface, rendered
+  // through the same shape-agnostic path as the other sub-surfaces.
+  lines.push(line(levelForResult(stack.gateway), `${hostId} gateway: ${stack.gateway.detail}`));
   lines.push(line(levelForResult(stack.agents), `${hostId} agents: ${stack.agents.detail}`));
   // F5: restored the `|| !skill.ok` half of the gate — a failed skill write
   // (ok:false, changed:false, e.g. opencode.mjs's adoptionBlocked path) must

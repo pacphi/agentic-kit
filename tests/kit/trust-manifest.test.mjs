@@ -40,7 +40,10 @@ test('built-in hosts distinguish managed approval from unchanged host policy', (
   assert.equal(byId.opencode.trust.approvalPolicy, 'managed');
   assert.equal(byId.codex.trust.approvalPolicy, 'unchanged');
   assert.deepEqual(autoApproveValues('opencode'), [
-    'claude-flow_*', 'claude_flow_*', 'ruvnet-brain_*', 'ruvnet_brain_*',
+    'claude-flow_*', 'claude_flow_*',
+    'agentic-qe_*', 'agentic_qe_*',
+    'ruvnet-brain_*', 'ruvnet_brain_*',
+    'ak_ruflo_*, ak_aqe_*, ak_skill_search, ak_agent_*',
   ]);
 });
 

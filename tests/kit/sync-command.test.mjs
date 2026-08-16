@@ -218,9 +218,13 @@ test('enabled + drifted: a real sync converges opencode after hosts, before fina
   const doc = JSON.parse(fs.readFileSync(path.join(ocHome(), 'opencode.json'), 'utf8'));
   assert.ok(doc.mcp['claude-flow'], 'claude-flow MCP converged by sync');
   assert.ok(fs.existsSync(path.join(ocHome(), 'plugins', 'ruflo-hooks.js')), 'plugin deployed by sync');
-  assert.ok(fs.existsSync(path.join(ocHome(), 'agents', 'coder.md')), 'agents converted by sync');
+  assert.ok(fs.existsSync(path.join(ocHome(), 'plugins', 'ruflo-gateway.js')), 'lazy gateway deployed by sync');
+  assert.ok(fs.existsSync(path.join(ocHome(), 'agents', 'ak-specialist.md')),
+    'specialist dispatcher deployed by sync');
+  assert.equal(fs.existsSync(path.join(ocHome(), 'agents', 'coder.md')), false,
+    'sync retires the eager agent projection after the dispatcher is current');
   // ordering: opencode steps ran before the convergence proof
-  const stepIdx = out.search(/opencode (plugin|agents):/);
+  const stepIdx = out.search(/opencode (plugin|gateway|agent projection):/);
   const verdictIdx = out.search(/converged — no failing subsystems/);
   assert.ok(stepIdx > -1 && verdictIdx > -1 && stepIdx < verdictIdx,
     `opencode convergence must land before the final verification:\n${out}`);
@@ -235,7 +239,7 @@ test('a second sync is a no-op for every opencode surface', async () => {
   const { result, out } = await withOpencodeCli(() => realSync());
   assert.equal(result, 0, out);
   assertUnchanged(convergedHome, ocHome(), 'a converged sync must not rewrite any opencode file');
-  assert.ok(!/opencode (plugin|agents|skill):/.test(out),
+  assert.ok(!/opencode (plugin|gateway|agent projection|skill):/.test(out),
     'the opencode branch is not even entered once every row reports converged');
 });
 

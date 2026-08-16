@@ -6,22 +6,26 @@
 // claude (settings.mjs / mcp.mjs) and codex (providers.mjs reverse bridge)
 // contracts:
 //
-//   ~/.config/opencode/opencode.json   mcp.claude-flow + mcp.ruvnet-brain,
+//   ~/.config/opencode/opencode.json   mcp.claude-flow + mcp.agentic-qe +
+//                                      mcp.ruvnet-brain,
 //                                      skills.paths, permission patterns
 //   ~/.config/opencode/AGENTS.md       guidance blocks (blocks.mjs target
 //                                      'agents-opencode' — NOT here)
 //   ~/.config/opencode/plugins/ruflo-hooks.js   lifecycle bridge (opencode has
 //                                      no settings-hooks surface; its plugin
 //                                      events are the hook spine)
-//   ~/.config/opencode/agents/*.md     ruflo's agent set, converted (Claude
-//                                      Code agent format → opencode subagent)
+//   ~/.config/opencode/plugins/ruflo-gateway.js lazy bridges to the complete
+//                                      live Ruflo and Agentic QE catalogues
+//   ~/.config/opencode/agents/ak-specialist.md
+//                                      one stock subagent; receipt-owned rUv
+//                                      profiles stay embedded and load lazily
 //   ~/.config/opencode/skills/ruflo/   the platform SKILL.md
 //
 // Grounded:
 //   - opencode.json schema (https://opencode.ai/config.json): mcp local
 //     servers {type,command[],environment,enabled,timeout}, skills.paths[],
 //     permission as wildcard tool-name patterns (MCP tools surface as
-//     `<server>_<tool>`, hence the claude-flow_*/ruvnet-brain_* patterns).
+//     `<server>_<tool>`, hence the claude-flow_*/agentic-qe_*/ruvnet-brain_* patterns).
 //   - ruflo's own init/mcp-generator.ts env block (CLAUDE_FLOW_* below).
 //   - `claude-flow-mcp` (the dedicated stdio bin of @claude-flow/cli) answers
 //     initialize directly; `ruflo mcp start` is the fallback (what ak already
@@ -37,7 +41,6 @@ import { have } from './exec.mjs';
 import { readJson, writeJsonWithBackup } from './settings.mjs';
 import { registry, syncBlocks, blocksForTarget, retiredForTarget, guidanceTargets } from './blocks.mjs';
 import { CURRENT_INTEGRATIONS_VERSION } from './adapters/config.mjs';
-import { autoApproveValues } from './trust-manifest.mjs';
 import * as paths from './paths.mjs';
 
 const opencodeOwnership = (cfg) => cfg?.integrations?.ownership?.opencode ?? {};
@@ -64,9 +67,25 @@ export const RUFLO_MCP_ENV = {
   CLAUDE_FLOW_MEMORY_BACKEND: 'hybrid',
 };
 
-/** Permission patterns ak pre-approves (opencode surfaces MCP tools as
- *  `<server>_<tool>`; cover both separator spellings defensively). */
-export const PERMISSION_KEYS = autoApproveValues('opencode');
+/** agentic-qe init's project MCP environment, mirrored for OpenCode. */
+export const AQE_MCP_ENV = {
+  AQE_LEARNING_ENABLED: 'true',
+  AQE_WORKERS_ENABLED: 'true',
+  NODE_ENV: 'production',
+};
+
+/** Permission patterns follow the rUv capabilities AK actually projects. */
+function permissionFamiliesFor(entries) {
+  return [
+    ...('claude-flow' in entries ? [['claude-flow_*', 'claude_flow_*']] : []),
+    ...('agentic-qe' in entries ? [['agentic-qe_*', 'agentic_qe_*']] : []),
+    ...('ruvnet-brain' in entries ? [['ruvnet-brain_*', 'ruvnet_brain_*']] : []),
+  ];
+}
+
+function permissionKeysFor(entries) {
+  return permissionFamiliesFor(entries).flat();
+}
 
 /** The brain's stable-spine shim (same registration codex carries). */
 export const brainShimPath = () => path.join(paths.home, '.claude', 'ruvnet-brain', 'mcp', 'server.mjs');
@@ -90,10 +109,13 @@ export function mcpCommandFor({ binPresent, nestedPath }) {
 /** @typedef {{ kind: string, root: string, id: string, hasPlugins: boolean, hasPlatformSkill: boolean }} CatalogSource */
 
 /** The MCP server entries ak writes. `claude-flow` resolves via mcpCommandFor
- *  (bin on PATH → nested mcp-server.js → `ruflo mcp start`). ruvnet-brain is
- *  included only when its shim is on disk.
- *  @param {{ brainShim?: string, nestedPath?: string }} [opts] */
-export async function mcpEntriesFor({ brainShim = brainShimPath(), nestedPath = nestedMcpServerPath() } = {}) {
+ *  (bin on PATH → nested mcp-server.js → `ruflo mcp start`). Agentic QE is
+ *  included by default because machine setup installs it; `--no-aqe` disables
+ *  that projection. ruvnet-brain is included only when its shim is on disk.
+ *  @param {{ brainShim?: string, nestedPath?: string, includeAqe?: boolean }} [opts] */
+export async function mcpEntriesFor({
+  brainShim = brainShimPath(), nestedPath = nestedMcpServerPath(), includeAqe = true,
+} = {}) {
   const entries = {
     'claude-flow': {
       type: 'local',
@@ -103,6 +125,15 @@ export async function mcpEntriesFor({ brainShim = brainShimPath(), nestedPath = 
       environment: { ...RUFLO_MCP_ENV },
     },
   };
+  if (includeAqe) {
+    entries['agentic-qe'] = {
+      type: 'local',
+      command: ['aqe-mcp'],
+      enabled: true,
+      timeout: 30000,
+      environment: { ...AQE_MCP_ENV },
+    };
+  }
   if (fs.existsSync(brainShim)) {
     entries['ruvnet-brain'] = { type: 'local', command: ['node', brainShim], enabled: true, timeout: 30000 };
   }
@@ -122,20 +153,35 @@ function readJsonStrict(file) {
   }
 }
 
+/** OpenCode loads opencode.jsonc after opencode.json. A sibling JSONC file can
+ *  shadow managed MCP, permission, or plugin values, and AK deliberately does
+ *  not normalize or rewrite user comments. */
+function laterJsoncOverride(configFile) {
+  if (path.basename(configFile) !== 'opencode.json') return null;
+  const candidate = path.join(path.dirname(configFile), 'opencode.jsonc');
+  return fs.existsSync(candidate) ? candidate : null;
+}
+
 /** Registration state, spawn-free (mirrors mcp.mjs registrationStatus's
  *  file-read approach). `parseError` distinguishes "absent" from "present but
  *  not plain JSON" (JSONC) — the writer refuses the latter.
  *  @param {any} cfg @param {{ configFile?: string }} [opts] */
 export function opencodeMcpStatus(cfg, { configFile = paths.opencodeConfigPath() } = {}) {
   const exists = fs.existsSync(configFile);
+  const laterOverride = laterJsoncOverride(configFile);
   const { ok, doc } = exists ? readJsonStrict(configFile) : { ok: true, doc: {} };
   if (!ok) {
-    return { exists, parseError: true, claudeFlow: false, brain: false, owned: opencodeOwnership(cfg).mcp === 'ak' };
+    return {
+      exists, parseError: true, laterOverride, claudeFlow: false, aqe: false, brain: false,
+      owned: opencodeOwnership(cfg).mcp === 'ak',
+    };
   }
   return {
     exists,
     parseError: false,
+    laterOverride,
     claudeFlow: !!doc?.mcp?.['claude-flow'],
+    aqe: !!doc?.mcp?.['agentic-qe'],
     brain: !!doc?.mcp?.['ruvnet-brain'],
     paths: doc?.skills?.paths ?? [],
     owned: opencodeOwnership(cfg).mcp === 'ak',
@@ -153,20 +199,38 @@ export function opencodeMcpStatus(cfg, { configFile = paths.opencodeConfigPath()
 export async function opencodeConverged(cfg, { configFile = paths.opencodeConfigPath(), brainShim } = {}) {
   const st = opencodeMcpStatus(cfg, { configFile });
   if (!st.exists || st.parseError) return { converged: false, reasons: st.parseError ? ['unparseable config'] : ['no config file'] };
+  if (st.laterOverride) {
+    return {
+      converged: false,
+      reasons: [`later OpenCode config override is unverified: ${st.laterOverride}`],
+    };
+  }
   const doc = readJsonStrict(configFile).doc;
   const reasons = [];
-  const entries = await mcpEntriesFor({ brainShim });
+  const entries = await mcpEntriesFor({ brainShim, includeAqe: cfg.aqe !== false });
   for (const [name, want] of Object.entries(entries)) {
     if (!(name in (doc.mcp ?? {}))) reasons.push(`${name} missing`);
     else if (!deepEqual(doc.mcp[name], want)) reasons.push(`${name} drifted`);
   }
-  if (doc.mcp?.['ruvnet-brain'] && !entries['ruvnet-brain']) reasons.push('ruvnet-brain stale (brain shim gone)');
+  const managed = normalizeManaged(opencodeOwnership(cfg).managed);
+  const ownedEntries = Object.fromEntries(Object.entries(entries).filter(
+    ([name]) => managed.mcp[name]?.written != null,
+  ));
+  const permissionKeys = permissionKeysFor(ownedEntries);
+  for (const [name, rec] of Object.entries(managed.mcp)) {
+    if (name in entries || rec.written == null) continue;
+    if (deepEqual(doc.mcp?.[name], rec.written)) reasons.push(`${name} stale (no longer desired)`);
+  }
   const source = catalogSource({ override: opencodeOwnership(cfg).catalogDir });
   for (const p of skillPathsFor(source)) {
     if (!(doc.skills?.paths ?? []).includes(p)) reasons.push(`skills path missing: ${p}`);
   }
-  for (const k of PERMISSION_KEYS) {
+  for (const k of permissionKeys) {
     if (doc.permission?.[k] !== 'allow') reasons.push(`permission ${k} not allowed`);
+  }
+  for (const [key, rec] of Object.entries(managed.permissions)) {
+    if (permissionKeys.includes(key) || rec.written == null) continue;
+    if (deepEqual(doc.permission?.[key], rec.written)) reasons.push(`permission ${key} stale (no longer desired)`);
   }
   return { converged: reasons.length === 0, reasons };
 }
@@ -194,7 +258,7 @@ const receiptMatches = (text, receipt) =>
 function normalizeManaged(m) {
   const out = {
     mcp: {}, paths: [], permissions: {}, permissionScalar: null,
-    artifacts: { plugin: null, agents: {}, agentStamp: null, skill: null },
+    artifacts: { plugin: null, gateway: null, agents: {}, agentStamp: null, skill: null },
     artifactState: {
       containerMalformed: false, agentsMalformed: false,
       rawContainer: null,
@@ -223,6 +287,7 @@ function normalizeManaged(m) {
   }
   const artifacts = m.artifacts ?? {};
   out.artifacts.plugin = hasReceiptValue(artifacts.plugin) ? artifacts.plugin : null;
+  out.artifacts.gateway = hasReceiptValue(artifacts.gateway) ? artifacts.gateway : null;
   out.artifacts.agentStamp = hasReceiptValue(artifacts.agentStamp) ? artifacts.agentStamp : null;
   out.artifacts.skill = hasReceiptValue(artifacts.skill) ? artifacts.skill : null;
   if (hasReceiptValue(artifacts.agents)
@@ -250,6 +315,29 @@ export function opencodeArtifactReceiptState(managed) {
   };
 }
 
+/** Exact MCP values the lazy gateway may capture. A same-name entry is not
+ * enough: the command and both direct permission spellings must still match
+ * values positively recorded as AK-written. Explicit direct-tool enablement
+ * is an operator opt-out from lazy capture. */
+export function managedGatewayMcp(cfg, { configFile = paths.opencodeConfigPath() } = {}) {
+  const managed = normalizeManaged(opencodeOwnership(cfg).managed);
+  const parsed = fs.existsSync(configFile) ? readJsonStrict(configFile) : { ok: true, doc: {} };
+  const tools = parsed.ok ? (parsed.doc?.tools ?? {}) : {};
+  const permissions = parsed.ok && typeof parsed.doc?.permission === 'object'
+    ? parsed.doc.permission
+    : {};
+  const families = {
+    'claude-flow': ['claude-flow_*', 'claude_flow_*'],
+    'agentic-qe': ['agentic-qe_*', 'agentic_qe_*'],
+  };
+  return Object.fromEntries(Object.entries(families)
+    .filter(([name, keys]) => managed.mcp[name]?.written != null
+      && keys.every((key) => managed.permissions[key]?.written === 'allow'
+        && permissions[key] === 'allow')
+      && !keys.some((key) => tools[key] === true))
+    .map(([name]) => [name, structuredClone(managed.mcp[name].written)]));
+}
+
 /** Reconcile opencode.json: ak's MCP servers, skills.paths, and permission
  *  patterns merged into whatever is already there. The ownership contract is
  *  VALUE-PRECISE, not name-precise:
@@ -267,6 +355,13 @@ export function opencodeArtifactReceiptState(managed) {
  *  @param {any} cfg @param {{ dryRun?: boolean, configFile?: string, brainShim?: string }} [opts] */
 export async function applyOpencode(cfg, { dryRun = false, configFile = paths.opencodeConfigPath(), brainShim } = {}) {
   if (!cfg.integrations?.hosts?.opencode) return { ok: true, changed: false, detail: 'opencode not enabled — unmanaged' };
+  const laterOverride = laterJsoncOverride(configFile);
+  if (laterOverride) {
+    return {
+      ok: false, fatal: true, changed: false,
+      detail: `${laterOverride} loads after opencode.json — refusing to write or claim an unverified effective config; merge the Agentic Kit entries there manually or remove the override`,
+    };
+  }
   const exists = fs.existsSync(configFile);
   const { ok: parsedOk, doc } = exists ? readJsonStrict(configFile) : { ok: true, doc: {} };
   if (!parsedOk) {
@@ -275,7 +370,7 @@ export async function applyOpencode(cfg, { dryRun = false, configFile = paths.op
       detail: `${configFile} is not plain JSON (JSONC comments?) — refusing to touch it; merge manually`,
     };
   }
-  const entries = await mcpEntriesFor({ brainShim });
+  const entries = await mcpEntriesFor({ brainShim, includeAqe: cfg.aqe !== false });
   const source = catalogSource({ override: opencodeOwnership(cfg).catalogDir });
   const skillPaths = skillPathsFor(source);
   const prevManaged = normalizeManaged(opencodeOwnership(cfg).managed);
@@ -352,8 +447,44 @@ export async function applyOpencode(cfg, { dryRun = false, configFile = paths.op
     : (prevManaged.permissionScalar ?? null);
   if (typeof next.permission === 'string') next.permission = { '*': next.permission };
   next.permission = { ...(next.permission ?? {}) };
+
+  // Permissions are family-atomic with MCP ownership. A foreign/colliding
+  // same-name MCP must never inherit broad AK-written `allow` patterns, and a
+  // collision on either spelling prevents AK from adding the other spelling.
+  const ownedEntries = Object.fromEntries(Object.entries(entries).filter(
+    ([name]) => managed.mcp[name]?.written != null,
+  ));
+  const permissionKeys = [];
+  for (const keys of permissionFamiliesFor(ownedEntries)) {
+    const blocked = keys.some((key) => {
+      const cur = next.permission[key];
+      const priorRec = prevManaged.permissions[key];
+      const conflicts = cur !== undefined && cur !== 'allow'
+        && !(priorRec?.written && deepEqual(cur, priorRec.written));
+      const previouslyUnowned = cur !== undefined && priorRec && priorRec.written == null;
+      return conflicts || previouslyUnowned;
+    });
+    if (!blocked) {
+      permissionKeys.push(...keys);
+      continue;
+    }
+    for (const key of keys) {
+      const cur = next.permission[key];
+      const priorRec = prevManaged.permissions[key];
+      if (cur !== undefined && cur !== 'allow'
+          && !(priorRec?.written && deepEqual(cur, priorRec.written))) {
+        collisions.push(`permission.${key}`);
+      }
+      if (cur !== undefined) {
+        managed.permissions[key] = {
+          prior: priorRec ? priorRec.prior : cur,
+          written: null,
+        };
+      }
+    }
+  }
   for (const [k, rec] of Object.entries(prevManaged.permissions)) {
-    if (PERMISSION_KEYS.includes(k)) continue;
+    if (permissionKeys.includes(k)) continue;
     if (!(k in next.permission)) continue;
     if (rec.written && deepEqual(next.permission[k], rec.written)) {
       if (rec.prior != null) {
@@ -365,14 +496,9 @@ export async function applyOpencode(cfg, { dryRun = false, configFile = paths.op
       }
     }
   }
-  for (const k of PERMISSION_KEYS) {
+  for (const k of permissionKeys) {
     const cur = next.permission[k];
     const priorRec = prevManaged.permissions[k];
-    if (cur !== undefined && cur !== 'allow' && !(priorRec?.written && deepEqual(cur, priorRec.written))) {
-      collisions.push(`permission.${k}`);
-      managed.permissions[k] = { prior: cur, written: null };
-      continue;
-    }
     managed.permissions[k] = { prior: priorRec ? priorRec.prior : (cur ?? null), written: 'allow' };
     next.permission[k] = 'allow';
   }
@@ -384,14 +510,21 @@ export async function applyOpencode(cfg, { dryRun = false, configFile = paths.op
     ownership.managed = managed;
   }
   if (changed && !dryRun) writeJsonWithBackup(configFile, next);
-  const brain = entries['ruvnet-brain'] ? ' + ruvnet-brain' : ' (brain shim absent — ruflo only)';
+  const aqe = entries['agentic-qe'] ? ' + agentic-qe' : '';
+  const brain = entries['ruvnet-brain'] ? ' + ruvnet-brain' : ' (brain shim absent)';
   const notes = [
-    changed ? `opencode.json wired: claude-flow (${entries['claude-flow'].command.join(' ')})${brain}, ${skillPaths.length} skills path(s), ${PERMISSION_KEYS.length} permission pattern(s)`
+    changed ? `opencode.json wired: claude-flow (${entries['claude-flow'].command.join(' ')})${aqe}${brain}, ${skillPaths.length} skills path(s), ${permissionKeys.length} permission pattern(s)`
       : `opencode.json in sync${source ? '' : ' — ⚠ no ruflo catalog source found for skills.paths'}`,
   ];
   if (pruned.length) notes.push(`pruned: ${pruned.join(', ')}`);
   if (collisions.length) notes.push(`⚠ collisions preserved (user-owned, untouched): ${collisions.join(', ')}`);
-  return { ok: collisions.length === 0, fatal: false, changed, detail: notes.join(' — ') };
+  return {
+    ok: collisions.length === 0,
+    fatal: false,
+    changed,
+    collisions,
+    detail: notes.join(' — '),
+  };
 }
 
 /** Surgical teardown of ak's opencode.json wiring — ONLY the recorded managed
@@ -484,8 +617,8 @@ export function undoOpencode(cfg, { configFile = paths.opencodeConfigPath() } = 
 // CALLER (applyOpencode/undoOpencode mutate the ownership markers; the command
 // decides when saveKitConfig runs).
 
-/** Enable path: wire opencode.json, deploy the lifecycle plugin, convert the
- *  agent set, deploy the platform skill. Callers gate on the CLI being present
+/** Enable path: wire opencode.json, deploy the lifecycle and lazy-catalogue
+ *  plugins, convert the agent set, deploy the platform skill. Callers gate on the CLI being present
  *  first (have('opencode')) — this never fabricates the config home for an
  *  absent host. Returns each step's result for the caller's own formatting,
  *  plus `markersChanged`: applyOpencode re-records the ownership markers on
@@ -505,7 +638,10 @@ export async function opencodeStack(cfg, { pkgRoot, configFile, brainShim, plugi
   const oc = await applyOpencode(cfg, { ...(configFile ? { configFile } : {}), ...(brainShim ? { brainShim } : {}) });
   if (oc.fatal) {
     const skipped = { ok: false, changed: false, detail: 'skipped because opencode.json did not converge' };
-    return { oc, plugin: skipped, agents: skipped, skill: skipped, source: null, markersChanged: false };
+    return {
+      oc, plugin: skipped, gateway: skipped, agents: skipped, skill: skipped,
+      source: null, markersChanged: false,
+    };
   }
   const receiptState = opencodeArtifactReceiptState(opencodeOwnership(cfg).managed);
   const { receipts, adoptionBlocked } = receiptState;
@@ -513,6 +649,7 @@ export async function opencodeStack(cfg, { pkgRoot, configFile, brainShim, plugi
   if (adoptionBlocked) {
     const detail = 'skipped because the artifact receipt ledger is malformed';
     const plugin = { ok: false, changed: false, receipt: receipts.plugin, adoptionBlocked: true, detail };
+    const gateway = { ok: false, changed: false, receipt: receipts.gateway, adoptionBlocked: true, detail };
     const agents = {
       ok: false, changed: false, receipts: receipts.agents,
       stampReceipt: receipts.agentStamp, adopted: 0, adoptionBlocked: true, detail,
@@ -522,17 +659,52 @@ export async function opencodeStack(cfg, { pkgRoot, configFile, brainShim, plugi
       opencodeOwnership(cfg).mcp ?? null,
       opencodeOwnership(cfg).managed ?? null,
     ]) !== before;
-    return { oc, plugin, agents, skill, source, markersChanged };
+    return { oc, plugin, gateway, agents, skill, source, markersChanged };
   }
+  const managedMcp = managedGatewayMcp(cfg, { ...(configFile ? { configFile } : {}) });
+  const dispatcher = specialistDispatcherState({
+    destDir: agentsDir ?? paths.opencodeAgentsDir(),
+    receipts: receipts.agents,
+    adoptionBlocked: receiptState.agentsAdoptionBlocked,
+  });
+  const agentCatalog = dispatcher.available ? gatewayAgentCatalog(source) : [];
+  const gatewayRequired = Object.keys(managedMcp).length > 0 || agentCatalog.length > 0;
   const plugin = deployPlugin({
     pkgRoot, receipt: receipts.plugin, adoptionBlocked,
     ...(pluginsDir ? { pluginsDir } : {}),
   });
-  const agents = syncAgents({
-    source, receipts: receipts.agents, stampReceipt: receipts.agentStamp,
-    adoptionBlocked: receiptState.agentsAdoptionBlocked,
-    ...(agentsDir ? { destDir: agentsDir } : {}),
-  });
+  const gateway = gatewayRequired
+    ? deployGatewayPlugin({
+        pkgRoot, managedMcp, agentCatalog, receipt: receipts.gateway, adoptionBlocked,
+        ...(pluginsDir ? { pluginsDir } : {}),
+      })
+    : retireGatewayPlugin({
+        receipt: receipts.gateway, ...(pluginsDir ? { pluginsDir } : {}),
+      });
+  const gatewayFacts = gatewayRequired
+    ? gatewayPluginStatus({
+        pkgRoot, managedMcp, agentCatalog,
+        receipt: gateway.receipt ?? receipts.gateway ?? null,
+        ...(pluginsDir ? { pluginsDir } : {}),
+      })
+    : { current: false };
+  const gatewayCapabilities = {
+    ruflo: gatewayFacts.current && managedMcp['claude-flow'] != null,
+    aqe: gatewayFacts.current && managedMcp['agentic-qe'] != null,
+  };
+  const agents = dispatcher.blocked
+    ? {
+        ok: false, changed: false, receipts: receipts.agents,
+        stampReceipt: receipts.agentStamp, adopted: 0, adoptionBlocked: true,
+        detail: 'specialist dispatcher receipt mismatch; agent projection preserved',
+      }
+    : syncAgents({
+        source, receipts: receipts.agents, stampReceipt: receipts.agentStamp,
+        adoptionBlocked: receiptState.agentsAdoptionBlocked,
+        gatewayCapabilities,
+        lazyCatalog: gatewayFacts.current && agentCatalog.length > 0,
+        ...(agentsDir ? { destDir: agentsDir } : {}),
+      });
   const skill = deploySkill({
     source, receipt: receipts.skill, adoptionBlocked,
     ...(skillsDir ? { skillsDir } : {}),
@@ -540,6 +712,9 @@ export async function opencodeStack(cfg, { pkgRoot, configFile, brainShim, plugi
   if (!adoptionBlocked) {
     mutableOpencodeOwnership(cfg).managed.artifacts = {
       plugin: plugin.receipt ?? receipts.plugin ?? null,
+      gateway: gatewayRequired
+        ? (gateway.receipt ?? receipts.gateway ?? null)
+        : (gateway.ok ? null : (gateway.receipt ?? receipts.gateway ?? null)),
       agents: agents.receipts ?? receipts.agents ?? {},
       agentStamp: agents.stampReceipt ?? receipts.agentStamp ?? null,
       skill: skill.receipt ?? receipts.skill ?? null,
@@ -549,7 +724,7 @@ export async function opencodeStack(cfg, { pkgRoot, configFile, brainShim, plugi
     opencodeOwnership(cfg).mcp ?? null,
     opencodeOwnership(cfg).managed ?? null,
   ]) !== before;
-  return { oc, plugin, agents, skill, source, markersChanged };
+  return { oc, plugin, gateway, agents, skill, source, markersChanged };
 }
 
 /** Retire path: strip the ak-managed opencode.json wiring (user priors
@@ -597,22 +772,48 @@ export function createOpencodeLifecycleAdapter(defaults = {}) {
     });
     const receiptState = opencodeArtifactReceiptState(opencodeOwnership(cfg).managed);
     const { receipts, adoptionBlocked } = receiptState;
+    const managedMcp = managedGatewayMcp(cfg, {
+      ...(opts.configFile ? { configFile: opts.configFile } : {}),
+    });
+    const dispatcher = specialistDispatcherState({
+      destDir: opts.agentsDir ?? paths.opencodeAgentsDir(),
+      receipts: receipts.agents,
+      adoptionBlocked: receiptState.agentsAdoptionBlocked,
+    });
+    const agentCatalog = dispatcher.available ? gatewayAgentCatalog(source) : [];
+    const gatewayRequired = Object.keys(managedMcp).length > 0 || agentCatalog.length > 0;
     const plugin = opts.pkgRoot
       ? pluginStatus({
           pkgRoot: opts.pkgRoot, receipt: receipts.plugin, adoptionBlocked,
           ...(opts.pluginsDir ? { pluginsDir: opts.pluginsDir } : {}),
         })
       : { present: false, current: false, foreign: false, adoptable: false };
+    const gateway = opts.pkgRoot
+      ? gatewayPluginStatus({
+          pkgRoot: opts.pkgRoot, managedMcp, agentCatalog,
+          receipt: receipts.gateway, adoptionBlocked,
+          ...(opts.pluginsDir ? { pluginsDir: opts.pluginsDir } : {}),
+        })
+      : { present: false, current: false, foreign: false, adoptable: false };
+    gateway.required = gatewayRequired;
     const agents = agentsStatus({
       source, receipts: receipts.agents, stampReceipt: receipts.agentStamp,
-      adoptionBlocked: receiptState.agentsAdoptionBlocked,
+      adoptionBlocked: receiptState.agentsAdoptionBlocked || dispatcher.blocked,
+      gatewayCapabilities: {
+        ruflo: gateway.current && managedMcp['claude-flow'] != null,
+        aqe: gateway.current && managedMcp['agentic-qe'] != null,
+      },
+      lazyCatalog: gateway.current && agentCatalog.length > 0,
       ...(opts.agentsDir ? { destDir: opts.agentsDir } : {}),
     });
     const skill = skillStatus({
       source, receipt: receipts.skill, adoptionBlocked,
       ...(opts.skillsDir ? { skillsDir: opts.skillsDir } : {}),
     });
-    return { enabled: !!cfg.integrations?.hosts?.opencode, convergence, plugin, agents, skill };
+    return {
+      enabled: !!cfg.integrations?.hosts?.opencode,
+      convergence, plugin, gateway, agents, skill,
+    };
   };
   return {
     id: 'opencode',
@@ -621,9 +822,15 @@ export function createOpencodeLifecycleAdapter(defaults = {}) {
       const facts = request.facts ?? await detect(request);
       const changed = facts.enabled && (!facts.convergence.converged
         || facts.plugin.adoptable || (!facts.plugin.current && !facts.plugin.foreign)
+        || (facts.gateway.required
+          && (facts.gateway.adoptable || (!facts.gateway.current && !facts.gateway.foreign)))
+        || (!facts.gateway.required && facts.gateway.present && !facts.gateway.foreign)
         || (!facts.agents.adoptionBlocked && (facts.agents.adoptable || facts.agents.stale))
         || facts.skill.adoptable || (!facts.skill.current && !facts.skill.foreign));
-      return { changed, facts, operations: changed ? ['config', 'plugin', 'agents', 'skill'] : [] };
+      return {
+        changed, facts,
+        operations: changed ? ['config', 'plugin', 'gateway', 'agents', 'skill'] : [],
+      };
     },
     async apply(request = {}) {
       const cfg = request.cfg;
@@ -631,7 +838,7 @@ export function createOpencodeLifecycleAdapter(defaults = {}) {
       if (!cfg || !opts.pkgRoot) throw new TypeError('opencode lifecycle apply requires cfg and pkgRoot');
       const result = await opencodeStack(cfg, opts);
       return {
-        changed: result.oc.changed || result.plugin.changed || result.agents.changed
+        changed: result.oc.changed || result.plugin.changed || result.gateway.changed || result.agents.changed
           || result.skill.changed || result.markersChanged,
         result,
       };
@@ -732,7 +939,8 @@ const AGENT_MARKERS = ['generated-by: agentic-kit', 'generated-by: sync-ruflo-ag
 const STAMP_FILE = '.ak-agents-stamp.json';
 
 function* walkMd(dir) {
-  for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+  for (const e of fs.readdirSync(dir, { withFileTypes: true })
+    .sort((left, right) => left.name.localeCompare(right.name))) {
     const p = path.join(dir, e.name);
     if (e.isDirectory()) yield* walkMd(p);
     else if (e.isFile() && e.name.endsWith('.md')) yield p;
@@ -770,18 +978,50 @@ function parseFrontmatter(text) {
 
 const collapse = (s) => String(s ?? '').replace(/\s+/g, ' ').trim();
 
+const lazyGatewayCall = (family, name) =>
+  `\`${family}_call\` with \`name=${JSON.stringify(name)}\` and \`arguments_json\` set to one JSON object string`;
+
+const directOpenCodeReferences = (body) => String(body)
+  .replace(/mcp__(?:claude-flow|claude_flow|ruflo)__([A-Za-z0-9_./:*-]+)/g, 'claude-flow_$1')
+  .replace(/mcp__(?:agentic-qe|agentic_qe)__([A-Za-z0-9_./:*-]+)/g, 'agentic-qe_$1');
+
+/** Rewrite tool-name references inside an OpenCode-only generated agent so
+ *  the instructions use the lazy gateway that is actually advertised. The
+ *  Claude/Ruflo source file is never changed. Families without a managed
+ *  gateway retain their direct OpenCode tool spelling.
+ *  @param {string} body @param {{ruflo?:boolean,aqe?:boolean}} capabilities */
+export function rewriteAgentGatewayReferences(body, capabilities = {}) {
+  let result = directOpenCodeReferences(body);
+  if (capabilities.ruflo) {
+    result = result
+      .replace(/\b(?:claude-flow|claude_flow)_\*/g,
+        () => 'the Ruflo operation selected with `ak_ruflo_search`, then invoked through `ak_ruflo_call`')
+      .replace(/\b(?:claude-flow|claude_flow)_([A-Za-z0-9_./:-]+)/g,
+        (_match, name) => lazyGatewayCall('ruflo', name));
+  }
+  if (capabilities.aqe) {
+    result = result
+      .replace(/\b(?:agentic-qe|agentic_qe)_\*/g,
+        () => 'the Agentic QE operation selected with `ak_aqe_search`, then invoked through `ak_aqe_call`')
+      .replace(/\b(?:agentic-qe|agentic_qe)_([A-Za-z0-9_./:-]+)/g,
+        (_match, name) => lazyGatewayCall('aqe', name));
+  }
+  return result;
+}
+
 /** Convert every agent under <src>/.claude/agents into opencode form:
  *  frontmatter → {description, mode: subagent} (Claude's `tools:` string list
- *  is dropped — opencode uses permissions; subagents inherit the invoker's
- *  tool access, matching the broad lists these agents declare); body MCP refs
- *  rewritten across all three spellings the catalog uses
- *  (mcp__claude-flow__ / mcp__claude_flow__ / mcp__ruflo__ → claude-flow_);
+ *  is dropped — OpenCode applies the subagent's permissions plus inherited
+ *  parent/session deny rules); body MCP refs
+ *  rewritten across all catalogue spellings. Lazy-gateway conversion emits
+ *  ak_ruflo_call/ak_aqe_call guidance; direct fallback conversion emits OpenCode's
+ *  direct tool spelling.
  *  basename collisions across category dirs get the parent dir prefixed. The
  *  description is emitted as a JSON double-quoted scalar (valid YAML 1.2 —
  *  unquoted values containing ': ' or '#' would corrupt the frontmatter).
  *  Pure (returns content, writes nothing).
  *  @param {string} srcRoot */
-export function convertAgents(srcRoot) {
+export function convertAgents(srcRoot, { gatewayCapabilities = {} } = {}) {
   const srcDir = path.join(srcRoot, '.claude', 'agents');
   const agents = [];
   let scanned = 0;
@@ -799,10 +1039,7 @@ export function convertAgents(srcRoot) {
       base: path.basename(file, '.md'),
       dir,
       description,
-      body: parsed.body
-        .replace(/mcp__claude-flow__/g, 'claude-flow_')
-        .replace(/mcp__claude_flow__/g, 'claude-flow_')
-        .replace(/mcp__ruflo__/g, 'claude-flow_'),
+      body: rewriteAgentGatewayReferences(parsed.body, gatewayCapabilities),
     });
   }
   const seen = new Set();
@@ -819,6 +1056,55 @@ export function convertAgents(srcRoot) {
   return { agents, scanned, skipped: scanned - agents.length, renamed };
 }
 
+const SPECIALIST_AGENT = {
+  name: 'ak-specialist',
+  description: 'Runs one Agentic Kit specialist profile selected lazily with ak_agent_search',
+  content: `---
+description: "Runs one Agentic Kit specialist profile selected lazily with ak_agent_search"
+mode: subagent
+---
+
+<!-- ${AGENT_MARKERS[0]} — re-synced by \`ak sync\`; do not edit -->
+You are the Agentic Kit specialist dispatcher for stock OpenCode.
+
+The parent task must begin with \`PROFILE: <exact-name>\`. Call \`ak_agent_load\` with that exact
+name before doing any work. Treat the returned receipt-owned profile as your specialist
+instructions for the rest of this task. If the profile names an optional dependency that is not
+available, report the missing dependency instead of inventing a result.
+`,
+};
+
+function specialistDispatcherState({
+  destDir = paths.opencodeAgentsDir(), receipts = {}, adoptionBlocked = false,
+} = {}) {
+  if (adoptionBlocked) return { available: false, blocked: true };
+  const file = 'ak-specialist.md';
+  const target = path.join(destDir, file);
+  if (!fs.existsSync(target)) return { available: true, blocked: false };
+  let current;
+  try { current = fs.readFileSync(target, 'utf8'); } catch {
+    return { available: false, blocked: true };
+  }
+  if (receiptMatches(current, receipts?.[file])) return { available: true, blocked: false };
+  if (hasReceiptValue(receipts?.[file])) return { available: false, blocked: true };
+  const adoptable = current === SPECIALIST_AGENT.content && isGeneratedContent(current);
+  return { available: adoptable, blocked: false };
+}
+
+function desiredAgentSet(source, gatewayCapabilities, lazyCatalog) {
+  const converted = convertAgents(source.root, { gatewayCapabilities });
+  return { ...converted, agents: lazyCatalog ? [SPECIALIST_AGENT] : converted.agents };
+}
+
+function gatewayAgentCatalog(source) {
+  if (!source) return [];
+  return convertAgents(source.root, { gatewayCapabilities: {} }).agents.map((agent) => ({
+    name: agent.name,
+    description: agent.description,
+    body: agent.body,
+  }));
+}
+
 const isGeneratedContent = (text) => AGENT_MARKERS.some((m) => text.includes(m));
 
 /** Reconcile the converted agent set into the dest dir: rewrite generated
@@ -827,32 +1113,21 @@ const isGeneratedContent = (text) => AGENT_MARKERS.some((m) => text.includes(m))
  *  is preserved and reported). The stamp records the source id + the exact
  *  generated file list and is only rewritten when the set actually changed
  *  (no per-run timestamp churn — idempotent-write semantics).
- *  @param {{ source: CatalogSource|null, destDir?: string, dryRun?: boolean, receipts?:Record<string,string>, stampReceipt?:string|null, adoptionBlocked?:boolean }} opts */
+ *  @param {{ source: CatalogSource|null, destDir?: string, dryRun?: boolean, receipts?:Record<string,string>, stampReceipt?:string|null, adoptionBlocked?:boolean, gatewayCapabilities?:{ruflo?:boolean,aqe?:boolean}, lazyCatalog?:boolean }} opts */
 export function syncAgents({
   source, destDir = paths.opencodeAgentsDir(), dryRun = false, receipts = {}, stampReceipt = null,
-  adoptionBlocked = false,
+  adoptionBlocked = false, gatewayCapabilities = {}, lazyCatalog = false,
 }) {
   if (!source) return { ok: false, changed: false, detail: 'no ruflo catalog source (marketplace clone or @claude-flow/cli) found' };
   const receiptMap = receipts && typeof receipts === 'object' && !Array.isArray(receipts)
     ? receipts
     : {};
-  const { agents, scanned, skipped, renamed } = convertAgents(source.root);
+  const { agents, scanned, skipped, renamed } = desiredAgentSet(
+    source, gatewayCapabilities, lazyCatalog,
+  );
   if (!dryRun) fs.mkdirSync(destDir, { recursive: true });
   let removed = 0, userOwned = 0, adopted = 0;
   const removedFiles = new Set();
-  if (fs.existsSync(destDir)) {
-    for (const f of fs.readdirSync(destDir).filter((f) => f.endsWith('.md'))) {
-      const p = path.join(destDir, f);
-      let owned = false;
-      try { owned = receiptMatches(fs.readFileSync(p, 'utf8'), receiptMap[f]); } catch { /* leave alone */ }
-      const wanted = agents.some((a) => `${a.name}.md` === f);
-      if (owned && !wanted) {
-        if (!dryRun) fs.rmSync(p);
-        removedFiles.add(f);
-        removed++;
-      }
-    }
-  }
   let written = 0;
   const deployed = [];
   for (const a of agents) {
@@ -871,6 +1146,22 @@ export function syncAgents({
       if (!dryRun) fs.writeFileSync(p, a.content);
     }
   }
+  // Deploy/adopt the dispatcher or complete direct set before retiring any
+  // receipt-owned predecessor. A write failure therefore preserves the last
+  // known-good eager catalogue instead of leaving no executable agent path.
+  if ((!lazyCatalog || deployed.includes('ak-specialist.md')) && fs.existsSync(destDir)) {
+    for (const f of fs.readdirSync(destDir).filter((f) => f.endsWith('.md'))) {
+      const p = path.join(destDir, f);
+      let owned = false;
+      try { owned = receiptMatches(fs.readFileSync(p, 'utf8'), receiptMap[f]); } catch { /* leave alone */ }
+      const wanted = agents.some((a) => `${a.name}.md` === f);
+      if (owned && !wanted) {
+        if (!dryRun) fs.rmSync(p);
+        removedFiles.add(f);
+        removed++;
+      }
+    }
+  }
   const changed = written > 0 || removed > 0;
   // The stamp records what was ACTUALLY deployed (a user-owned file occupying
   // a slot is never in it) — otherwise status would diverge forever.
@@ -885,7 +1176,11 @@ export function syncAgents({
     return [f, contentHash(agent.content)];
   }));
   Object.assign(nextReceipts, deployedHashes);
-  const stamp = { source: source.id, count: deployed.length, files: deployed.sort(), hashes: deployedHashes };
+  const gateway = { ruflo: !!gatewayCapabilities.ruflo, aqe: !!gatewayCapabilities.aqe };
+  const stamp = {
+    source: source.id, gateway, lazyCatalog: !!lazyCatalog,
+    count: deployed.length, files: deployed.sort(), hashes: deployedHashes,
+  };
   const stampText = JSON.stringify(stamp, null, 2) + '\n';
   const stampPath = path.join(destDir, STAMP_FILE);
   const priorStampText = fs.existsSync(stampPath) ? fs.readFileSync(stampPath, 'utf8') : null;
@@ -905,12 +1200,12 @@ export function syncAgents({
     fs.writeFileSync(stampPath, stampText);
   }
   return {
-    ok: true,
+    ok: !lazyCatalog || deployed.includes('ak-specialist.md'),
     changed,
     receipts: nextReceipts,
     stampReceipt: mayWriteStamp ? contentHash(stampText) : stampReceipt,
     adopted,
-    detail: `${agents.length} agents from ${source.id} (${written} written, ${removed} removed, ${skipped} skipped, ${renamed} collision-renamed${adopted ? `, ${adopted} adopted` : ''}${userOwned ? `, ${userOwned} user-owned preserved` : ''}; scanned ${scanned})`,
+    detail: `${agents.length} ${lazyCatalog ? 'lazy dispatcher agent' : 'agents'} from ${source.id} (${written} written, ${removed} removed, ${skipped} skipped, ${renamed} collision-renamed${adopted ? `, ${adopted} adopted` : ''}${userOwned ? `, ${userOwned} user-owned preserved` : ''}; scanned ${scanned})`,
   };
 }
 
@@ -919,10 +1214,10 @@ export function syncAgents({
  *  file set differs from the stamp. Count reports marker-bearing agents for
  *  visibility, while receipt/hash divergence is reported as `modified` so
  *  callers classify user edits as preserved rather than repairable drift.
- *  @param {{ source?: CatalogSource|null, destDir?: string, receipts?:Record<string,string>|null, stampReceipt?:string|null, adoptionBlocked?:boolean }} [opts] */
+ *  @param {{ source?: CatalogSource|null, destDir?: string, receipts?:Record<string,string>|null, stampReceipt?:string|null, adoptionBlocked?:boolean, gatewayCapabilities?:{ruflo?:boolean,aqe?:boolean}, lazyCatalog?:boolean }} [opts] */
 export function agentsStatus({
   source, destDir = paths.opencodeAgentsDir(), receipts = null, stampReceipt = null,
-  adoptionBlocked = false,
+  adoptionBlocked = false, gatewayCapabilities = {}, lazyCatalog = false,
 } = {}) {
   const stampPath = path.join(destDir, STAMP_FILE);
   const stamp = readJson(stampPath, null);
@@ -932,7 +1227,8 @@ export function agentsStatus({
     ? receipts
     : {};
   const desired = source
-    ? new Map(convertAgents(source.root).agents.map((a) => [`${a.name}.md`, a.content]))
+    ? new Map(desiredAgentSet(source, gatewayCapabilities, lazyCatalog)
+      .agents.map((a) => [`${a.name}.md`, a.content]))
     : new Map();
   const adoptableFiles = [];
   let generatedCount = 0;
@@ -964,7 +1260,9 @@ export function agentsStatus({
   });
   const expectedStamp = source && onDisk.length > 0 && onDisk.every((f) => desired.has(f))
     ? `${JSON.stringify({
-        source: source.id,
+      source: source.id,
+      gateway: { ruflo: !!gatewayCapabilities.ruflo, aqe: !!gatewayCapabilities.aqe },
+        lazyCatalog: !!lazyCatalog,
         count: onDisk.length,
         files: onDisk,
         // syncAgents hashes in converter declaration order, then sorts only
@@ -990,17 +1288,77 @@ export function agentsStatus({
             && !receiptMatches(fs.readFileSync(path.join(destDir, f), 'utf8'), receiptMap[f]);
         } catch { return true; }
       })),
-    stale: !stamp || stamp.source !== (source?.id ?? null) || filesDiverged,
+    stale: !stamp || stamp.source !== (source?.id ?? null) || filesDiverged
+      || !!stamp.lazyCatalog !== !!lazyCatalog
+      || !deepEqual(stamp.gateway ?? { ruflo: false, aqe: false }, {
+        ruflo: !!gatewayCapabilities.ruflo, aqe: !!gatewayCapabilities.aqe,
+      }),
   };
 }
 
 // ── plugin (lifecycle bridge) ────────────────────────────────────────────────
 
 export const PLUGIN_NAME = 'ruflo-hooks.js';
+export const GATEWAY_PLUGIN_NAME = 'ruflo-gateway.js';
 const pluginTemplate = (pkgRoot) => path.join(pkgRoot, 'src', 'templates', 'opencode-ruflo-hooks.js');
+const gatewayPluginTemplate = (pkgRoot) => path.join(pkgRoot, 'src', 'templates', 'opencode-ruflo-gateway.js');
 
 /** The marker any ak-deployed plugin copy carries (from the template header). */
 const PLUGIN_MARKER = 'src/templates/opencode-ruflo-hooks.js';
+const GATEWAY_PLUGIN_MARKER = 'src/templates/opencode-ruflo-gateway.js';
+
+function deployManagedPlugin({
+  template, marker, name, label, pluginsDir, dryRun, receipt, adoptionBlocked,
+  desiredText = null,
+}) {
+  if (!fs.existsSync(template)) return { ok: false, changed: false, detail: `template missing: ${template}` };
+  const want = desiredText ?? fs.readFileSync(template, 'utf8');
+  const dest = path.join(pluginsDir, name);
+  const cur = fs.existsSync(dest) ? fs.readFileSync(dest, 'utf8') : null;
+  const hasReceipt = adoptionBlocked || hasReceiptValue(receipt);
+  const adoptable = cur === want && !hasReceipt && cur.includes(marker);
+  if (cur === want && (receiptMatches(cur, receipt) || adoptable)) {
+    return {
+      ok: true, changed: false, receipt: contentHash(cur), adopted: adoptable,
+      detail: adoptable ? `${label} adopted into receipt ledger` : `${label} current`,
+    };
+  }
+  if (cur !== null && (!hasReceipt || !receiptMatches(cur, receipt))) {
+    return { ok: true, changed: false, receipt, detail: `⚠ ${dest} differs from ak's last-written receipt (user-owned/edited) — left untouched` };
+  }
+  if (!want.includes(marker)) return { ok: false, changed: false, receipt, detail: `template marker missing: ${marker}` };
+  if (!dryRun) {
+    fs.mkdirSync(pluginsDir, { recursive: true });
+    fs.writeFileSync(dest, want);
+  }
+  return {
+    ok: true,
+    changed: true,
+    receipt: contentHash(want),
+    detail: cur == null ? `${label} deployed (${name})` : `${label} updated (${name})`,
+  };
+}
+
+function managedPluginStatus({
+  template, marker, name, pluginsDir, receipt, adoptionBlocked, desiredText = null,
+}) {
+  const dest = path.join(pluginsDir, name);
+  const present = fs.existsSync(dest);
+  const currentText = present ? fs.readFileSync(dest, 'utf8') : null;
+  const desired = fs.existsSync(template) ? (desiredText ?? fs.readFileSync(template, 'utf8')) : null;
+  const hasReceipt = adoptionBlocked || hasReceiptValue(receipt);
+  const receiptOwned = present && receiptMatches(currentText, receipt);
+  const adoptable = present && !hasReceipt && desired !== null
+    && currentText === desired && currentText.includes(marker);
+  const foreign = present && !receiptOwned && !adoptable;
+  return {
+    present,
+    current: present && !foreign && desired !== null && currentText === desired,
+    foreign,
+    adoptable,
+    adoptionBlocked,
+  };
+}
 
 /** Deploy the lifecycle bridge plugin from the kit's template, content-diffed
  *  (rewrites only when the template changed — hash-stamped by content itself).
@@ -1011,27 +1369,69 @@ export function deployPlugin({
   pkgRoot, pluginsDir = paths.opencodePluginsDir(), dryRun = false, receipt = null,
   adoptionBlocked = false,
 }) {
-  const tpl = pluginTemplate(pkgRoot);
-  if (!fs.existsSync(tpl)) return { ok: false, changed: false, detail: `template missing: ${tpl}` };
-  const want = fs.readFileSync(tpl, 'utf8');
-  const dest = path.join(pluginsDir, PLUGIN_NAME);
-  const cur = fs.existsSync(dest) ? fs.readFileSync(dest, 'utf8') : null;
-  const hasReceipt = adoptionBlocked || hasReceiptValue(receipt);
-  const adoptable = cur === want && !hasReceipt && cur.includes(PLUGIN_MARKER);
-  if (cur === want && (receiptMatches(cur, receipt) || adoptable)) {
+  return deployManagedPlugin({
+    template: pluginTemplate(pkgRoot), marker: PLUGIN_MARKER, name: PLUGIN_NAME,
+    label: 'lifecycle plugin', pluginsDir, dryRun, receipt, adoptionBlocked,
+  });
+}
+
+const GATEWAY_MCP_PLACEHOLDER = '/* AK_MANAGED_MCP_ENTRIES */ {}';
+const GATEWAY_AGENT_PLACEHOLDER = '/* AK_MANAGED_AGENT_CATALOG */ []';
+const GATEWAY_SPECIALIST_PLACEHOLDER = '/* AK_SPECIALIST_AGENT_PROMPT */ ""';
+
+function gatewayDesiredText(pkgRoot, managedMcp, agentCatalog = []) {
+  const template = gatewayPluginTemplate(pkgRoot);
+  if (!fs.existsSync(template)) return null;
+  const source = fs.readFileSync(template, 'utf8');
+  for (const [placeholder, label] of [
+    [GATEWAY_MCP_PLACEHOLDER, 'managed-MCP'],
+    [GATEWAY_AGENT_PLACEHOLDER, 'managed-agent'],
+    [GATEWAY_SPECIALIST_PLACEHOLDER, 'specialist-agent'],
+  ]) {
+    const first = source.indexOf(placeholder);
+    if (first < 0 || source.indexOf(placeholder, first + 1) >= 0) {
+      throw new Error(`lazy gateway template must contain exactly one ${label} placeholder`);
+    }
+  }
+  const stable = Object.fromEntries(Object.entries(managedMcp ?? {})
+    .sort(([a], [b]) => a.localeCompare(b)));
+  const specialistPrompt = parseFrontmatter(SPECIALIST_AGENT.content)?.body.trim() ?? '';
+  return source
+    .replace(GATEWAY_MCP_PLACEHOLDER, JSON.stringify(stable))
+    .replace(GATEWAY_AGENT_PLACEHOLDER, JSON.stringify(agentCatalog))
+    .replace(GATEWAY_SPECIALIST_PLACEHOLDER, JSON.stringify(specialistPrompt));
+}
+
+/** Deploy the lazy Ruflo/Agentic-QE catalogue gateway for stock OpenCode. */
+export function deployGatewayPlugin({
+  pkgRoot, managedMcp = {}, agentCatalog = [], pluginsDir = paths.opencodePluginsDir(), dryRun = false,
+  receipt = null, adoptionBlocked = false,
+}) {
+  return deployManagedPlugin({
+    template: gatewayPluginTemplate(pkgRoot), marker: GATEWAY_PLUGIN_MARKER,
+    name: GATEWAY_PLUGIN_NAME, label: 'lazy rUv gateway', pluginsDir, dryRun,
+    receipt, adoptionBlocked, desiredText: gatewayDesiredText(pkgRoot, managedMcp, agentCatalog),
+  });
+}
+
+/** Remove only exact receipt-owned gateway bytes when no rUv family remains
+ * safe to capture. User-edited/unreceipted files are preserved. */
+export function retireGatewayPlugin({
+  pluginsDir = paths.opencodePluginsDir(), receipt = null, dryRun = false,
+} = {}) {
+  const dest = path.join(pluginsDir, GATEWAY_PLUGIN_NAME);
+  if (!fs.existsSync(dest)) {
+    return { ok: true, changed: false, receipt: null, detail: 'lazy gateway not deployed' };
+  }
+  const current = fs.readFileSync(dest, 'utf8');
+  if (!receipt || !receiptMatches(current, receipt)) {
     return {
-      ok: true, changed: false, receipt: contentHash(cur), adopted: adoptable,
-      detail: adoptable ? 'lifecycle plugin adopted into receipt ledger' : 'lifecycle plugin current',
+      ok: false, changed: false, receipt,
+      detail: `⚠ ${dest} is not provably ak-owned; left untouched`,
     };
   }
-  if (cur !== null && (!hasReceipt || !receiptMatches(cur, receipt))) {
-    return { ok: true, changed: false, receipt, detail: `⚠ ${dest} differs from ak's last-written receipt (user-owned/edited) — left untouched` };
-  }
-  if (!dryRun) {
-    fs.mkdirSync(pluginsDir, { recursive: true });
-    fs.writeFileSync(dest, want);
-  }
-  return { ok: true, changed: true, receipt: contentHash(want), detail: cur == null ? 'lifecycle plugin deployed (ruflo-hooks.js)' : 'lifecycle plugin updated (ruflo-hooks.js)' };
+  if (!dryRun) fs.rmSync(dest, { force: true });
+  return { ok: true, changed: true, receipt: null, detail: 'lazy rUv gateway retired' };
 }
 
 /** Plugin presence/currency against the kit template. `foreign` flags a
@@ -1040,18 +1440,22 @@ export function deployPlugin({
 export function pluginStatus({
   pkgRoot, pluginsDir = paths.opencodePluginsDir(), receipt = null, adoptionBlocked = false,
 }) {
-  const dest = path.join(pluginsDir, PLUGIN_NAME);
-  const present = fs.existsSync(dest);
-  const currentText = present ? fs.readFileSync(dest, 'utf8') : null;
-  const tpl = pluginTemplate(pkgRoot);
-  const desired = fs.existsSync(tpl) ? fs.readFileSync(tpl, 'utf8') : null;
-  const hasReceipt = adoptionBlocked || hasReceiptValue(receipt);
-  const receiptOwned = present && receiptMatches(currentText, receipt);
-  const adoptable = present && !hasReceipt && desired !== null
-    && currentText === desired && currentText.includes(PLUGIN_MARKER);
-  const foreign = present && !receiptOwned && !adoptable;
-  const current = present && !foreign && desired !== null && currentText === desired;
-  return { present, current, foreign, adoptable, adoptionBlocked };
+  return managedPluginStatus({
+    template: pluginTemplate(pkgRoot), marker: PLUGIN_MARKER, name: PLUGIN_NAME,
+    pluginsDir, receipt, adoptionBlocked,
+  });
+}
+
+/** Lazy gateway presence/currency against its embedded, receipt-bound MCP commands. */
+export function gatewayPluginStatus({
+  pkgRoot, managedMcp = {}, agentCatalog = [], pluginsDir = paths.opencodePluginsDir(), receipt = null,
+  adoptionBlocked = false,
+}) {
+  return managedPluginStatus({
+    template: gatewayPluginTemplate(pkgRoot), marker: GATEWAY_PLUGIN_MARKER,
+    name: GATEWAY_PLUGIN_NAME, pluginsDir, receipt, adoptionBlocked,
+    desiredText: gatewayDesiredText(pkgRoot, managedMcp, agentCatalog),
+  });
 }
 
 // ── platform skill ───────────────────────────────────────────────────────────
@@ -1134,6 +1538,12 @@ export function removeArtifacts({
       && contentHash(fs.readFileSync(plugin, 'utf8')) === receipts.plugin) {
     fs.rmSync(plugin, { force: true });
     removed.push('plugin ruflo-hooks.js');
+  }
+  const gateway = path.join(pluginsDir, GATEWAY_PLUGIN_NAME);
+  if (fs.existsSync(gateway) && receipts.gateway
+      && contentHash(fs.readFileSync(gateway, 'utf8')) === receipts.gateway) {
+    fs.rmSync(gateway, { force: true });
+    removed.push('plugin ruflo-gateway.js');
   }
   if (fs.existsSync(agentsDir)) {
     let n = 0;
