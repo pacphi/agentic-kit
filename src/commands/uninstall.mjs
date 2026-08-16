@@ -11,11 +11,24 @@ import { stripBlock, BEGIN, BUILTIN_BLOCKS } from '../lib/blocks.mjs';
 import { unregister } from '../lib/mcp.mjs';
 import { loadKitConfig, saveKitConfig } from '../lib/config.mjs';
 import { runLifecycle } from '../lib/adapters/lifecycle.mjs';
-import { builtinHostsWithLifecycle, lifecycleAdapterFor } from '../lib/adapters/lifecycle-registry.mjs';
+import { hostsWithLifecycle, lifecycleAdapterFor, lifecycleExecutionEnabled, isBuiltinHost } from '../lib/adapters/lifecycle-registry.mjs';
+import { renderUndoReport } from '../lib/adapters/lifecycle-render.mjs';
 import { present as rbPresent } from '../lib/ruvnet-brain.mjs';
 import * as paths from '../lib/paths.mjs';
-import { ok, warn, info } from '../lib/output.mjs';
+import { ok, warn, fail, info } from '../lib/output.mjs';
 import { removeCodexStatusline } from '../lib/codex-statusline.mjs';
+
+/** Prints one lifecycle-render.mjs report line at its own level — mirrors
+ *  setup.mjs/sync.mjs's own printReportLine (N-2, Wave C security review
+ *  follow-up): renderUndoReport only ever emits 'ok'/'warn' today, so this is
+ *  latent, but the day an undo renderer adopts levelForResult (F5's mapping)
+ *  a 'fail' line must reach fail(), not be silently downgraded to warn(). */
+export function printReportLine(line) {
+  if (line.level === 'ok') ok(line.text);
+  else if (line.level === 'warn') warn(line.text);
+  else if (line.level === 'fail') fail(line.text);
+  else info(line.text);
+}
 
 export const options = {
   'dry-run': { type: 'boolean', default: false },
@@ -128,23 +141,31 @@ export async function run({ flags }) {
   // removes kit.json below, so persisting cfg here would recreate it. Each
   // adapter's own undo() already honors ownership/receipts (opencode's
   // undoOpencode no-ops when it never held mcp:'ak', and marker-gates
-  // artifact removal independent of that), so this call is unconditional per
-  // host — the only kit-side gate is "did anything actually happen", to
-  // avoid a no-op teardown line (and a needless kit.json rewrite) on a host
-  // that was never enabled. builtinHostsWithLifecycle() (not
-  // hostsWithLifecycle()) deliberately excludes admitted external hosts:
-  // this loop body destructures an opencode-shaped result (ret.undo,
-  // ret.artifacts) — see lifecycle-registry.mjs's registerAdmittedLifecycle
-  // comment for why external lifecycle execution isn't wired through here yet.
-  for (const hostId of builtinHostsWithLifecycle()) {
+  // artifact removal independent of that), so a BUILT-IN's call is
+  // unconditional per host, same as before ADR-0031 P3 — the only kit-side
+  // gate is "did anything actually happen", to avoid a no-op teardown line
+  // (and a needless kit.json rewrite) on a host that was never enabled. An
+  // ADMITTED external host is different: there is no "always safe, always
+  // idempotent" guarantee for an arbitrary third-party hook the way there is
+  // for opencode's own undo, so an admitted host's teardown is gated by
+  // lifecycleExecutionEnabled (cfg enablement AND the experimental flag) —
+  // an admitted host that was never enabled/consented for this run is never
+  // invoked. hostsWithLifecycle() (built-ins + admitted, ADR-0031 P3) is safe
+  // to loop unconditionally now: lifecycle-render.mjs's renderUndoReport
+  // dispatches on the runLifecycle result's own shape, so this loop body
+  // never destructures a host-specific result directly.
+  for (const hostId of hostsWithLifecycle()) {
+    if (!isBuiltinHost(hostId) && !lifecycleExecutionEnabled(hostId, cfg)) continue;
     const adapter = lifecycleAdapterFor(hostId);
     if (dry) {
-      info(`[dry-run] stripped ak-managed ${hostId} wiring + artifacts (opencode.json, plugin, agents, skill)`);
+      info(isBuiltinHost(hostId)
+        ? `[dry-run] stripped ak-managed ${hostId} wiring + artifacts (opencode.json, plugin, agents, skill)`
+        : `[dry-run] stripped ak-managed ${hostId} wiring + artifacts (hook-declared undo)`);
       continue;
     }
     const retired = await runLifecycle({ adapter, action: 'undo', cfg });
-    const ret = retired.result;
-    ownershipTeardownOk = ownershipTeardownOk && ret.ok;
+    const undoReport = renderUndoReport(hostId, retired);
+    ownershipTeardownOk = ownershipTeardownOk && undoReport.ok;
     // Persist markers unconditionally, exactly like x/host.mjs's off()/pick():
     // undo() mutates cfg's ownership markers in memory even when it rewrote
     // no file (`undo.changed` measures the FILE, not cfg), so gating the save
@@ -152,11 +173,7 @@ export async function run({ flags }) {
     // quiet-success path. Only the human-facing line stays gated on "did
     // anything observable happen".
     if (!flags.purge) saveKitConfig(cfg);
-    if (ret.undo.changed || ret.artifacts.changed || !ret.ok) {
-      (ret.ok ? ok : warn)(ret.ok
-        ? `stripped ak-managed ${hostId} wiring + artifacts (opencode.json, plugin, agents, skill)`
-        : `${hostId} teardown incomplete — ${ret.undo.detail}`);
-    }
+    for (const line of undoReport.lines) printReportLine(line);
   }
   if (flags.purge && fs.existsSync(paths.kitConfigPath())) {
     if (ownershipTeardownOk) act('removed kit.json', () => fs.rmSync(paths.kitConfigPath()));

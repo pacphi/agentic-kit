@@ -359,7 +359,7 @@ test('ak setup --opencode fails honestly and deploys nothing when JSONC is refus
   const { result, out } = await withOpencodeCli(() => captureLog(() =>
     setup.run({ flags: FLAGS({ opencode: true, yes: true, minimal: true }), pkgRoot: PKG_ROOT })));
   assert.equal(result, 1);
-  assert.match(out, /plugins\/agent projection\/skill\/guidance skipped/);
+  assert.match(out, /plugin\/gateway\/agents\/skill\/guidance skipped/);
   assert.doesNotMatch(out, /restart opencode|setup complete/);
   for (const surface of ['plugins', 'agents', 'skills', 'AGENTS.md']) {
     assert.equal(fs.existsSync(path.join(ocHome(), surface)), false, `${surface} must not be deployed`);

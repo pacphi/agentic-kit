@@ -8,6 +8,7 @@
 // summary capture, no graceful-then-forced two-step shutdown. A timed-out
 // adapter hook gets no cleanup grace period; it already spent its budget.
 import { spawn as nodeSpawn, execFile as nodeExecFile } from 'node:child_process';
+import { isAbsolute as pathIsAbsolute } from 'node:path';
 
 const DEFAULT_TIMEOUT_MS = 30_000;
 const OUTPUT_CAP_BYTES = 256 * 1024;
@@ -88,6 +89,15 @@ function mergeCapture(stdout, stderr) {
   return `${kept}${TRUNCATION_MARKER}`;
 }
 
+/** stderr alone, with the same per-stream truncation marker `mergeCapture`
+ * would append — never folded into `stdout`. F-4: a caller that parses
+ * `stdout` as a structured payload (e.g. the admitted execution adapter)
+ * must never see raw stderr promoted into that parse; this is the field it
+ * reads instead when it needs the process's diagnostic chatter. */
+function boundedText({ text, truncated }) {
+  return truncated ? `${text}${TRUNCATION_MARKER}` : text;
+}
+
 function describeFailure(hostId, verb, error) {
   const reason = error?.code ? `${error.code} (${error.message ?? 'no message'})` : (error?.message ?? String(error));
   return `${hostId}:${verb} adapter hook failed to start: ${reason}`;
@@ -104,7 +114,12 @@ function raceTimeout(promise, ms) {
  * child — a timed-out adapter hook may have spawned descendants of its own.
  * POSIX: the child was spawned detached so its pid is also its process group
  * id; signalling `-pid` reaches the whole group. Windows has no portable
- * signal for arbitrary console trees, so `taskkill /T /F` owns it there. */
+ * signal for arbitrary console trees, so `taskkill /T /F` owns it there.
+ * F-2: this cannot PROVE a double-forked or re-`setsid`'d grandchild died —
+ * a signal sent is not a death confirmed. Callers that need that proof (the
+ * admitted execution adapter's cancel path) must treat an unresolved launch
+ * as honestly unproven (`orphaned`), not assume this function's return means
+ * the tree is gone. */
 async function killGroup(child) {
   if (!Number.isInteger(child?.pid)) return;
   if (isWindows) {
@@ -127,37 +142,70 @@ async function killGroup(child) {
  * (missing/invalid `hook`, `hostId`, or `verb`) throw synchronously.
  *
  * @param {{hook:{command:string[], timeoutMs?:number}, hostId:string,
- *   verb:string, timeoutMs?:number, env?:Record<string,string>}} options
- * @returns {Promise<{ok:boolean, stdout:string, exitCode:number|null, detail:string|null}>}
+ *   verb:string, timeoutMs?:number, env?:Record<string,string>, stdin?:string,
+ *   cwd?:string}} options
+ * @returns {Promise<{ok:boolean, stdout:string, stdoutText:string, stderrText:string,
+ *   exitCode:number|null, detail:string|null}>}
  */
-export async function runAdapterHook({ hook, hostId, verb, timeoutMs, env } = /** @type {any} */ ({})) {
+export async function runAdapterHook({
+  hook, hostId, verb, timeoutMs, env, stdin, cwd,
+} = /** @type {any} */ ({})) {
   if (!hook || !Array.isArray(hook.command) || hook.command.length === 0
     || !hook.command.every((part) => typeof part === 'string' && part.length > 0)) {
     throw new TypeError('runAdapterHook requires hook.command as a non-empty array of non-empty strings');
   }
   if (typeof hostId !== 'string' || !hostId) throw new TypeError('runAdapterHook requires a hostId');
   if (typeof verb !== 'string' || !verb) throw new TypeError('runAdapterHook requires a verb');
+  // F-1: a relative cwd would resolve against wherever the ak process
+  // happens to be running, defeating the whole point of pinning the child to
+  // the adapter's own directory — refused synchronously, same class as the
+  // arg-shape checks above, never silently reinterpreted as "inherit".
+  if (cwd !== undefined && (typeof cwd !== 'string' || !cwd || !pathIsAbsolute(cwd))) {
+    throw new TypeError('runAdapterHook requires cwd to be an absolute path when provided');
+  }
 
   const effectiveTimeoutMs = resolveTimeout(timeoutMs, hook.timeoutMs);
   const [argv0, ...args] = hook.command;
   const childEnv = minimalEnv(env);
 
+  const wantsStdin = typeof stdin === 'string';
   let child;
   try {
     child = nodeSpawn(argv0, args, {
       env: childEnv,
       shell: false,
-      stdio: ['ignore', 'pipe', 'pipe'],
+      stdio: [wantsStdin ? 'pipe' : 'ignore', 'pipe', 'pipe'],
       detached: !isWindows,
+      // Absent cwd falls through to Node's own default (inherit
+      // process.cwd()) — today's behavior for callers that don't pass one
+      // yet (B2 threads the real adapter-base-dir cwd through this wave).
+      ...(cwd === undefined ? {} : { cwd }),
     });
   } catch (error) {
-    return { ok: false, stdout: '', exitCode: null, detail: describeFailure(hostId, verb, error) };
+    return {
+      ok: false, stdout: '', stdoutText: '', stderrText: '', exitCode: null, detail: describeFailure(hostId, verb, error),
+    };
   }
 
   const stdoutCollector = boundedCollector(OUTPUT_CAP_BYTES);
   const stderrCollector = boundedCollector(OUTPUT_CAP_BYTES);
   child.stdout?.on('data', (chunk) => stdoutCollector.write(chunk));
   child.stderr?.on('data', (chunk) => stderrCollector.write(chunk));
+
+  if (wantsStdin) {
+    // A child that exits before (or without) reading stdin makes the pipe
+    // write EPIPE — that is a normal outcome (the process's own exit code
+    // already reports what happened), never a reason to crash or reject
+    // runAdapterHook's promise. The 'close' handler below still fires and
+    // resolves the race normally regardless of whether this write lands.
+    child.stdin?.on('error', () => {});
+    try {
+      child.stdin?.end(stdin);
+    } catch {
+      // Synchronous throw from an already-closed stream — same non-fatal
+      // treatment as the async 'error' event above.
+    }
+  }
 
   let settled = false;
   let spawnError = null;
@@ -175,27 +223,40 @@ export async function runAdapterHook({ hook, hostId, verb, timeoutMs, env } = /*
   if (raced === TIMEOUT_SENTINEL) {
     await killGroup(child);
     await raceTimeout(closeResult, KILL_GRACE_MS); // best-effort; result unused
+    const stdoutCaptured = { text: stdoutCollector.text(), truncated: stdoutCollector.wasTruncated() };
+    const stderrCaptured = { text: stderrCollector.text(), truncated: stderrCollector.wasTruncated() };
     return {
       ok: false,
       exitCode: null,
-      stdout: mergeCapture(
-        { text: stdoutCollector.text(), truncated: stdoutCollector.wasTruncated() },
-        { text: stderrCollector.text(), truncated: stderrCollector.wasTruncated() },
-      ),
+      stdout: mergeCapture(stdoutCaptured, stderrCaptured),
+      stdoutText: boundedText(stdoutCaptured),
+      stderrText: boundedText(stderrCaptured),
       detail: `${hostId}:${verb} adapter hook timed out after ${effectiveTimeoutMs}ms and was killed`,
     };
   }
 
   if (spawnError) {
-    return { ok: false, stdout: '', exitCode: null, detail: describeFailure(hostId, verb, spawnError) };
+    return {
+      ok: false, stdout: '', stdoutText: '', stderrText: '', exitCode: null, detail: describeFailure(hostId, verb, spawnError),
+    };
   }
 
   const { code } = raced;
-  const stdout = mergeCapture(
-    { text: stdoutCollector.text(), truncated: stdoutCollector.wasTruncated() },
-    { text: stderrCollector.text(), truncated: stderrCollector.wasTruncated() },
-  );
+  // F-4/R-1: stdout stays the combined stream for diagnostics/back-compat,
+  // but a caller parsing stdout as a structured payload (the admitted
+  // execution adapter) must read stdoutText instead — stdout has stderr
+  // folded in after a separator, which breaks JSON.parse the instant the
+  // hook writes anything to stderr at all. stderrText is diagnostics-only.
+  const stdoutCaptured = { text: stdoutCollector.text(), truncated: stdoutCollector.wasTruncated() };
+  const stderrCaptured = { text: stderrCollector.text(), truncated: stderrCollector.wasTruncated() };
+  const stdout = mergeCapture(stdoutCaptured, stderrCaptured);
+  const stdoutText = boundedText(stdoutCaptured);
+  const stderrText = boundedText(stderrCaptured);
   return code === 0
-    ? { ok: true, stdout, exitCode: 0, detail: null }
-    : { ok: false, stdout, exitCode: code, detail: `${hostId}:${verb} adapter hook exited with code ${code}` };
+    ? {
+      ok: true, stdout, stdoutText, stderrText, exitCode: 0, detail: null,
+    }
+    : {
+      ok: false, stdout, stdoutText, stderrText, exitCode: code, detail: `${hostId}:${verb} adapter hook exited with code ${code}`,
+    };
 }

@@ -7,10 +7,35 @@
 // entry or the built-in registries (try/caught per entry, in admitOne AND as
 // a belt-and-suspenders net in admitAdapters).
 import { createHash } from 'node:crypto';
+import fs from 'node:fs';
+import path from 'node:path';
 import { HOST_REGISTRY } from './registries.mjs';
 import { validateAdapterManifest } from './manifest.mjs';
 
 export const SUPPORTED_CONTRACT = 1;
+
+/** The adapter's own directory (F-1, ADR-0031): where its execution/lifecycle
+ *  hooks resolve a relative command FROM, never the operator's process.cwd()
+ *  when `ak run` was invoked. A file-sourced manifest anchors to its own
+ *  directory — `fs.realpathSync` so a symlinked manifest can't relocate that
+ *  pin out from under consent. An npm/https source has no persistent local
+ *  bundle (resolved, hashed, and discarded per admission pass — sources.mjs)
+ *  so there is nothing to anchor to: `null`. buildAdmittedExecutionAdapter
+ *  (execution/admitted.mjs) then refuses a relative hook command outright
+ *  for a `null` baseDir rather than guessing a cwd. An unreadable/vanished
+ *  file source also resolves to `null` — the same honest refusal, not a
+ *  silent fallback to process.cwd(). */
+function baseDirForSource(source) {
+  if (typeof source !== 'string' || !source
+    || source.startsWith('https://') || source.startsWith('http://') || source.startsWith('npm:')) {
+    return null;
+  }
+  try {
+    return path.dirname(fs.realpathSync(source));
+  } catch {
+    return null;
+  }
+}
 
 /** Deterministic, key-sorted JSON — same stable-stringify shape used
  *  elsewhere in this codebase (e.g. opencode.mjs's deepEqual) so two manifests
@@ -128,9 +153,18 @@ export async function admitAdapters({ cfg, readManifest, consent }) {
 }
 
 async function defaultReadManifest(source) {
-  const fs = await import('node:fs/promises');
-  const raw = await fs.readFile(source, 'utf8');
-  return JSON.parse(raw);
+  // Lazy dynamic import — keeps bootstrapHostAdapters's flag-off zero-cost
+  // property intact (no import happens unless a readManifest call actually
+  // runs, which only happens during admission with the flag set and
+  // adapters configured). Ordering is mandated by security review: resolve
+  // -> validate -> hash -> consent. The resolver (sources.mjs) runs here,
+  // BEFORE admitOne ever hashes the manifest, so consent pins the RESOLVED
+  // bytes — a mutable remote source (an npm dist-tag moving, a URL's
+  // content changing) invalidates consent automatically ('consent-stale')
+  // on the next admission pass, rather than being silently re-trusted.
+  const { resolveManifestSource } = await import('./sources.mjs');
+  const { raw } = await resolveManifestSource(source);
+  return raw;
 }
 
 /**
@@ -183,7 +217,134 @@ export async function bootstrapHostAdapters({
 
   if (admitted.length) {
     const { applyAdmitted } = await import('./admitted.mjs');
-    applyAdmitted(admitted);
+
+    // Keystone (ADR-0031 §1): build the per-host granted-capability lookup
+    // BEFORE applying the overlay, so an earned canBePrimary/commandStatusline
+    // is live in effectiveHostRegistry() from process start. Guarded and
+    // non-fatal, lazy import — the same posture as the execution/lifecycle
+    // registration blocks below, and a NEW sibling concern to them (it does
+    // not touch either). One host's grant lookup failing must never block
+    // another host's, or the admission result itself.
+    //
+    // CRITICAL: the hash passed to grantedCapabilitiesFor is computed FRESH
+    // here, via hashManifest(result.manifest) — never read from a cache or
+    // carried over from admitOne's own internal hash — because a stale hash
+    // would silently defeat grants.mjs's edit-invalidation pin (a manifest
+    // edited since the grant must re-hash to a different value and come back
+    // {}, dropping the capability). grantedCapabilitiesFor is the ONLY
+    // sanctioned reader for this (see grants.mjs's module-header invariant);
+    // reading grantsFor(name).capabilities directly would return the
+    // unfiltered set and is exactly the bug that invariant exists to prevent.
+    let grantsByName;
+    try {
+      const { grantedCapabilitiesFor } = await import('./grants.mjs');
+      // Object.create(null), not {} (F-6): admitted host ids come from
+      // consented adapter names, which are attacker-influenceable in
+      // principle — a plain object literal's prototype chain would make
+      // 'constructor' a live (if inert) key collision. No inherited
+      // properties at all closes that off entirely; admitted.mjs's own
+      // Object.hasOwn guard on the read side is the belt to this suspenders.
+      grantsByName = Object.create(null);
+      for (const result of admitted) {
+        try {
+          grantsByName[result.name] = grantedCapabilitiesFor(result.name, hashManifest(result.manifest));
+        } catch (error) {
+          warnings.push({ name: result.name, reason: 'grant-lookup-failed', detail: error?.message ?? String(error) });
+        }
+      }
+    } catch {
+      // grants.mjs unavailable — proceed ungranted (manifest-floor
+      // capabilities only), exactly like the flag-off path. Never fatal.
+      grantsByName = undefined;
+    }
+
+    applyAdmitted(admitted, { grantsByName });
+
+    // name -> the cfg entry's own declared source, for F-1's baseDir
+    // derivation below (admitted results carry the validated manifest, not
+    // the raw cfg entry that named where it came from). Shared by both the
+    // execution- and lifecycle-registration blocks below — one map, not a
+    // second copy — so a caller correcting F-1 in one place can't drift from
+    // the other.
+    const sourceByName = new Map(entries.map((entry) => [entry?.name, entry?.source]));
+
+    // P2 (ADR-0031): an admitted manifest declaring both an execution block
+    // and host.capabilities.canRouteActivities gets its execution adapter
+    // derived and registered here, so `ak run` can route to it. Same
+    // guarded, non-fatal posture as the rest of bootstrap: one adapter's
+    // registration failure never blocks the others or the admission result.
+    const executionCandidates = admitted.filter((result) => (
+      result.manifest?.execution && result.entry?.capabilities?.canRouteActivities === true
+    ));
+    if (executionCandidates.length) {
+      try {
+        const { registerAdmittedExecution } = await import('../execution/admitted.mjs');
+        for (const result of executionCandidates) {
+          // F-5 (ADR-0029 §2): a manifest that never declared the
+          // cli-subprocess driving surface gets no cli-subprocess execution
+          // adapter — refused with its own reason, before even attempting
+          // registration (buildAdmittedExecutionAdapter re-checks this too,
+          // defence-in-depth for any caller that bypasses this filter).
+          if (!result.manifest?.driving?.surfaces?.includes('cli-subprocess')) {
+            warnings.push({
+              name: result.name, reason: 'surface-unsupported',
+              detail: `'${result.name}' declares an execution block but not driving.surfaces including 'cli-subprocess'`,
+            });
+            continue;
+          }
+          try {
+            registerAdmittedExecution(result.manifest, { baseDir: baseDirForSource(sourceByName.get(result.name)) });
+          } catch (error) {
+            warnings.push({ name: result.name, reason: error?.reason ?? 'execution-registration-failed', detail: error?.message ?? String(error) });
+          }
+        }
+      } catch (error) {
+        for (const result of executionCandidates) {
+          warnings.push({ name: result.name, reason: 'execution-registration-failed', detail: error?.message ?? String(error) });
+        }
+      }
+    }
+
+    // P3 (ADR-0031): an admitted manifest declaring a lifecycle block gets its
+    // derived lifecycle adapter registered here, so it appears in
+    // hostsWithLifecycle() and setup/sync/uninstall's lifecycle loops can
+    // drive it (gated per-run by lifecycleExecutionEnabled — registration
+    // alone never runs a hook). Same guarded, non-fatal posture as the
+    // execution-registration block above: one adapter's registration failure
+    // never blocks the others or the admission result. F-1 (same as
+    // execution above): baseDir anchors a relative lifecycle hook command to
+    // the adapter's own directory — without it, a relative command would
+    // resolve against the OPERATOR's cwd, arbitrary-code-execution with the
+    // consent hash unchanged. Unlike execution (one hook, all-or-nothing),
+    // lifecycle has five independently-optional verbs, so an unanchorable
+    // one is refused per-verb (buildAdmittedLifecycleAdapter never wires it
+    // to spawn) rather than failing the whole registration — the other,
+    // anchored/PATH-binary verbs still register and work.
+    const lifecycleCandidates = admitted.filter((result) => !!result.manifest?.lifecycle);
+    if (lifecycleCandidates.length) {
+      try {
+        const { registerAdmittedLifecycle } = await import('./lifecycle-registry.mjs');
+        for (const result of lifecycleCandidates) {
+          try {
+            const baseDir = baseDirForSource(sourceByName.get(result.name));
+            const adapter = registerAdmittedLifecycle(result.manifest, { baseDir });
+            if (adapter.unanchoredVerbs.length) {
+              warnings.push({
+                name: result.name, reason: 'lifecycle-unanchored',
+                detail: `'${result.name}' lifecycle hook(s) refused (relative command, no anchored adapter `
+                  + `base directory): ${adapter.unanchoredVerbs.join(', ')}`,
+              });
+            }
+          } catch (error) {
+            warnings.push({ name: result.name, reason: error?.reason ?? 'lifecycle-registration-failed', detail: error?.message ?? String(error) });
+          }
+        }
+      } catch (error) {
+        for (const result of lifecycleCandidates) {
+          warnings.push({ name: result.name, reason: 'lifecycle-registration-failed', detail: error?.message ?? String(error) });
+        }
+      }
+    }
   }
 
   return { active: true, admitted, warnings };

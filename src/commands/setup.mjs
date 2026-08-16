@@ -14,7 +14,8 @@ import { reconcileGuidance } from '../lib/blocks.mjs';
 import { register as mcpRegister, applyExclusions } from '../lib/mcp.mjs';
 import { reconcileOpencodeGuidance } from '../lib/opencode.mjs';
 import { runLifecycle } from '../lib/adapters/lifecycle.mjs';
-import { builtinHostsWithLifecycle, lifecycleAdapterFor } from '../lib/adapters/lifecycle-registry.mjs';
+import { hostsWithLifecycle, lifecycleAdapterFor, lifecycleExecutionEnabled, detectionBinFor } from '../lib/adapters/lifecycle-registry.mjs';
+import { renderApplyReport } from '../lib/adapters/lifecycle-render.mjs';
 import { loadKitConfig, saveKitConfig } from '../lib/config.mjs';
 import { HOSTS, applyHosts, applyProviders, hostInstallState, installHost, applyAqeRouter, seedActivityRoutesIfMultiHost, printActivityRoutingTable, aqeSupportsAgentOverrides, ensureCodexMcp, ensureRufloMcpInCodex, applySetupHostFlags, bothHostsEnabled } from '../lib/providers.mjs';
 import { installedVersion } from '../lib/versions.mjs';
@@ -28,6 +29,17 @@ import {
 } from '../lib/trust-manifest.mjs';
 import * as paths from '../lib/paths.mjs';
 import { ok, warn, fail, info, heading, bold, dim, reportOutcome } from '../lib/output.mjs';
+
+/** Prints one lifecycle-render.mjs report line at its own level — 'fail'
+ *  (F5, Wave C security review) reaches `fail()`, not a fallback `info()`,
+ *  so a genuinely failed opencode sub-surface never reads as merely
+ *  informational. */
+function printReportLine(line) {
+  if (line.level === 'ok') ok(line.text);
+  else if (line.level === 'warn') warn(line.text);
+  else if (line.level === 'fail') fail(line.text);
+  else info(line.text);
+}
 
 export const options = {
   'dry-run': { type: 'boolean', default: false },
@@ -215,22 +227,24 @@ export async function run_machine({ flags, pkgRoot, cfg }) {
 
   // 6b. host lifecycle wiring — connected MCPs, compact lazy gateway,
   //     lifecycle plugin, converted agents, specialist dispatcher, and
-  //     platform skill (each adapter owns its own surfaces
-  //     — opencode.mjs for opencode). Registry-driven: loops
-  //     builtinHostsWithLifecycle() rather than naming opencode, so a second
-  //     BUILT-IN lifecycle host needs no new branch here. Only when the CLI
-  //     is actually present: a declined/failed install must not leave a
-  //     freshly-created config home behind (codex-review #4). The result
-  //     SHAPE consumed below (stack.oc/plugin/agents/skill) is still
-  //     opencode's own — the lifecycle contract doesn't mandate a common
-  //     `apply()` result shape across hosts. builtinHostsWithLifecycle()
-  //     (not hostsWithLifecycle()) deliberately excludes admitted external
-  //     hosts: this loop body is opencode-shaped, and external lifecycle
-  //     execution graduates in a later wave alongside a shape-agnostic body
-  //     (see lifecycle-registry.mjs's registerAdmittedLifecycle comment).
-  for (const hostId of builtinHostsWithLifecycle()) {
-    if (!cfg.integrations?.hosts?.[hostId]) continue;
-    if (!(await have(hostId))) {
+  //     platform skill (each adapter owns its own surfaces — opencode.mjs for
+  //     opencode; a subprocess hook for an admitted external, see
+  //     lifecycle-registry.mjs's buildAdmittedLifecycleAdapter).
+  //     Registry-driven: loops hostsWithLifecycle() (built-ins + admitted,
+  //     ADR-0031 P3) rather than naming opencode, so a second lifecycle host
+  //     — built-in or admitted — needs no new branch here. lifecycleExecutionEnabled
+  //     gates each host: a built-in only needs cfg enablement (unchanged); an
+  //     admitted external ALSO needs the experimental flag — an admitted host
+  //     is opt-in exactly like opencode, and this never auto-enables anything.
+  //     Only when the CLI is actually present: a declined/failed install must
+  //     not leave a freshly-created config home behind (codex-review #4).
+  //     lifecycle-render.mjs's renderApplyReport dispatches on the runLifecycle
+  //     result's own shape (opencode's rich per-surface shape — including the
+  //     compact gateway — vs. an admitted host's generic lifecycleResult), so
+  //     this loop body never destructures a host-specific result directly.
+  for (const hostId of hostsWithLifecycle()) {
+    if (!lifecycleExecutionEnabled(hostId, cfg)) continue;
+    if (!(await have(detectionBinFor(hostId)))) {
       const pkg = HOSTS.find((h) => h.id === hostId)?.pkg ?? hostId;
       warn(`${hostId}: enabled but CLI not installed — wiring skipped (re-run \`ak sync\` after installing ${pkg})`);
       continue;
@@ -238,24 +252,22 @@ export async function run_machine({ flags, pkgRoot, cfg }) {
     const lifecycle = await runLifecycle({
       adapter: lifecycleAdapterFor(hostId), action: 'apply', cfg, options: { pkgRoot },
     });
-    const stack = lifecycle.result;
-    (stack.oc.ok ? ok : warn)(`opencode: ${stack.oc.detail}`);
-    if (stack.oc.fatal) {
-      warn(`opencode plugins/agent projection/skill/guidance skipped — ${stack.oc.detail}`);
-      return false;
+    const report = renderApplyReport(hostId, lifecycle);
+    for (const line of report.lines) printReportLine(line);
+    if (report.fatal) return false;
+    // guidance blocks + the startup-reload note are opencode-specific surfaces
+    // (AGENTS.md blocks, opencode's own load-once-at-startup behavior) with no
+    // equivalent in the generic hook contract — stays gated on the rich shape.
+    if (report.shape === 'opencode') {
+      // guidance blocks for the opencode AGENTS.md land NOW (codex-review #18)
+      // — not on the next status-driven reconcile. Same shared reconcile pick
+      // and off use, so every command converges guidance identically.
+      const guidance = await reconcileOpencodeGuidance({ pkgRoot, cfg, cwd: process.cwd(), enabled: true });
+      ok(`opencode guidance: ${guidance.detail.replace(/^guidance: /, '')}`);
+      // opencode loads config/plugins/MCP/agents once at startup — say so now,
+      // or the user files "hooks don't work" issues (observed live).
+      info('restart opencode to load the Agentic Kit hooks, compact gateway, and MCP connections (loaded once at startup)');
     }
-    ok(`opencode plugin: ${stack.plugin.detail}`);
-    ok(`opencode gateway: ${stack.gateway.detail}`);
-    ok(`opencode agent projection: ${stack.agents.detail}`);
-    if (stack.skill.changed) ok(`opencode skill: ${stack.skill.detail}`);
-    // guidance blocks for the opencode AGENTS.md land NOW (codex-review #18)
-    // — not on the next status-driven reconcile. Same shared reconcile pick
-    // and off use, so every command converges guidance identically.
-    const guidance = await reconcileOpencodeGuidance({ pkgRoot, cfg, cwd: process.cwd(), enabled: true });
-    ok(`opencode guidance: ${guidance.detail.replace(/^guidance: /, '')}`);
-    // opencode loads config/plugins/MCP/agents once at startup — say so now,
-    // or the user files "hooks don't work" issues (observed live).
-    info('restart opencode to load the Agentic Kit hooks, compact gateway, and MCP connections (loaded once at startup)');
   }
 
   // 7. frontier host hint — codex detected but not enabled (opt-in via `ak host pick`)

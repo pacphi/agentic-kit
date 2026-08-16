@@ -6,7 +6,9 @@
 // (no I/O) so the projectors and defaults are unit-testable in isolation; the
 // writers/UX that consume it live in providers.mjs / the commands.
 import { vendorOf } from './qeCourt.mjs';
-import { routableHostIds, primaryHostIds, validateActivityHost } from './adapters/index.mjs';
+import {
+  routableHostIds, primaryHostIds, validateActivityHost, effectiveHostRegistry, effectiveRoutableHostIds,
+} from './adapters/index.mjs';
 
 // ── Vocabulary ───────────────────────────────────────────────────────────────
 // Canonical development activities ak routes (ADR-0002). Array order = display order.
@@ -21,8 +23,14 @@ export const AK_ORIGINATED = new Set(['packaging', 'release']);
 
 // Host → aqe/router provider type. OpenCode deliberately has no entry: its
 // execution provider is observed per worker and must never be inferred from the
-// host or silently projected into AQE's separate provider vocabulary.
+// host or silently projected into AQE's separate provider vocabulary. An
+// admitted external host (P2, ADR-0031) gets no entry either, same reasoning.
 export const HOST_PROVIDER = { claude: 'claude-code', codex: 'codex' };
+// Frozen at import time — built-ins only. Display strings and built-in
+// listings ONLY (formatModelHelp, model catalogs below): every VALIDATION
+// path (isRoutableHost, validateRoute, materializeRunPlan) consults the lazy
+// effectiveRoutableHostIds()/effectiveHostRegistry() instead, so an admitted
+// external host routes without this constant ever needing to change.
 export const HOSTS = routableHostIds();
 
 // Providers aqe's ProviderManager can construct — grounded in agentic-qe 3.13.1
@@ -164,6 +172,20 @@ export function formatModelHelp() {
 // reasoning roles). When codex is chosen as PRIMARY, we mirror each default route
 // to the opposite host so codex takes the lead and claude becomes the alternate —
 // a defaults/policy change only (DualModeOrchestrator workers are symmetric).
+// Frozen at import time — built-ins only, deliberately (audited for the D2
+// keystone wave, ADR-0031 §1). Every current reader of PRIMARY_HOSTS
+// (providers.mjs's applySetupHostFlags `--primary-host` validation, and
+// x/host.mjs's `ak host pick` primary-host flag + selection menu) is the
+// primary-host SELECTION UX, not an eligibility-VALIDATION path — extending
+// that picker surface to an admitted external host is explicitly out of
+// scope this wave (the deferred pick surface), mirroring how HOSTS above
+// stays display-only. hosts.mjs's drivingHost() does NOT use this constant —
+// it consults admitted.mjs's effectivePrimaryHostIds() (fresh per call)
+// instead, so the eligibility PRIMITIVE is live there. That said, no
+// production path drives kit.json's routing.primaryHost to an admitted
+// external id today (the picker that writes it stays built-in-only, as
+// above), so this is a live primitive with no live privileged caller yet —
+// not an active validation gate anything currently depends on.
 export const PRIMARY_HOSTS = primaryHostIds();
 export const DEFAULT_PRIMARY_HOST = 'claude';
 
@@ -234,9 +256,12 @@ export const AGENT_ACTIVITY_MAP = {
 
 // ── Policy resolution + projections (pure) ──────────────────────────────────
 
-/** True when both frontier hosts appear in a route (a route's host is valid). */
+/** True when `host` is routable: a built-in, or an admitted external host
+ *  whose manifest declared capabilities.canRouteActivities (P2, ADR-0031).
+ *  Lazy — re-reads the effective registry on every call, so it reflects an
+ *  overlay applied after this module first loaded. */
 export function isRoutableHost(host) {
-  return HOSTS.includes(host);
+  return effectiveRoutableHostIds().includes(host);
 }
 
 /** Substitute a retired model for its replacement, recording what was swapped.
@@ -576,11 +601,15 @@ export function materializeRunPlan(policy = {}, { template = 'feature', task = '
   const nodes = RUN_TEMPLATES[template];
   if (!nodes) throw new Error(`unknown template "${template}" (expected: ${RUN_TEMPLATE_NAMES.join(', ')})`);
   const routes = resolveRoutes(policy);
+  // Snapshot once per materialization (not per validateActivityHost call): an
+  // admitted overlay applied mid-call must not be able to make one worker's
+  // eligibility check see a different registry than another's in the same plan.
+  const hosts = effectiveHostRegistry();
   return {
     template,
     workers: nodes.map((n) => {
     const r = routes[n.activity];
-    const eligibility = validateActivityHost(r.host);
+    const eligibility = validateActivityHost(r.host, hosts);
     if (!eligibility.ok) {
       throw new Error(`route for "${n.activity}" cannot materialize: host "${r.host}" requires canRouteActivities`);
     }
@@ -591,7 +620,7 @@ export function materializeRunPlan(policy = {}, { template = 'feature', task = '
     const ladder = (r.escalation ?? [])
       .filter((rung) => rung && (rung.host !== r.host || (rung.model ?? null) !== (r.model ?? null)))
       .map((rung) => {
-        const rungEligibility = validateActivityHost(rung.host);
+        const rungEligibility = validateActivityHost(rung.host, hosts);
         if (!rungEligibility.ok) {
           throw new Error(`escalation rung for "${n.activity}" cannot materialize: host "${rung.host}" requires canRouteActivities`);
         }
@@ -647,7 +676,7 @@ export function routingSummary(policy = {}) {
 export function validateRoute(route = {}) {
   const { host, model } = route;
   const errs = [];
-  if (!isRoutableHost(host)) errs.push(`unknown host "${host}" (expected: ${HOSTS.join('|')})`);
+  if (!isRoutableHost(host)) errs.push(`unknown host "${host}" (expected: ${effectiveRoutableHostIds().join('|')})`);
   else if (HOST_PROVIDER[host] && !AQE_CONSTRUCTIBLE_PROVIDERS.includes(HOST_PROVIDER[host])) errs.push(`host "${host}" maps to a non-constructible provider`);
   if (model != null && (typeof model !== 'string' || model.trim() === '')) errs.push('model must be a non-empty string');
   return errs;

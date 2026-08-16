@@ -88,14 +88,58 @@ like Hermes, say? Set `AK_EXPERIMENTAL_HOST_ADAPTERS=1` and declare it as **data
 ```
 
 An adapter is a manifest plus a handful of subprocess hooks — nothing an adapter declares ever
-runs inside the `ak` process itself. Registering one asks you to confirm a content hash of the
-manifest; edit the manifest afterward and that consent is invalidated until you confirm again. A
-broken adapter is reported and skipped — it never takes down the hosts that already work.
+runs inside the `ak` process itself. `source` may be a local file path, an `https://` URL (HTTPS
+only, no redirects, bounded), or `npm:<pkg>[@version]`, fetched with `npm pack --ignore-scripts`
+and extracted to stdout — nothing runs and nothing lands on disk. The source is resolved *before*
+hashing, so a mutated remote surfaces as `consent-stale` rather than sliding in quietly.
 
-An external adapter can never claim to be the primary host, an AQE provider, or the status-line
-owner; those stay first-party. Nothing here installs itself: you declare the adapter, you consent
-to it, and teardown remains reversible. See
-[ADR-0029](adr/0029-host-adapter-extension-point.md).
+Consent is explicit and hash-pinned. `ak host adapters trust <name>` discloses the full validated
+manifest and records your consent against its content hash (`--expect-hash` pins it
+non-interactively); `list` shows trust state, and `revoke` works even with the flag off. Once a
+host is admitted *and* explicitly enabled in `kit.json`, its lifecycle hooks run through
+`ak setup`, `ak sync`, and uninstall — a failed detect or plan aborts the apply. A broken adapter
+is reported and skipped; it never takes down the hosts that already work.
+
+### What an external adapter can earn
+
+An external adapter can never **self-declare** that it is the primary host, an AQE provider, or
+the status-line owner. That ban is permanent — it is the safety invariant the whole extension
+point rests on. But `canBePrimary` and `commandStatusline` are **earnable**: passing the gating
+conformance tier is evidence, and `ak host adapters grant <name> <capability>` (alias `bless`) is
+a maintainer's explicit grant, refused unless that tier is recorded passed at the adapter's
+current manifest hash. `aqeProvider` stays upstream-owned and is never `ak`-grantable.
+
+`ak host adapters conformance <name>` runs the tiered black-box kit:
+
+| Tier | Status today | Gates |
+| --- | --- | --- |
+| `admission` | Genuinely passes against a real adapter | — |
+| `activity-routing` | Genuinely passes — real supervised subprocess worker | — |
+| `primary-eligible` | Genuinely passes — observes a real escalation | `canBePrimary` |
+| `session-driving` | **Gated** — a native Ruflo backend is upstream's to grant | — |
+| `statusline` | **Gated** — `ak` has no render surface for it yet | `commandStatusline` |
+
+The two gated tiers are honest ceilings, not failures: they report `gated`/`skipped` and never
+`passed`. `ak host adapters gate <name> <tier> <repo>#NNN` records the upstream issue the ceiling
+is waiting on, `status [name]` shows per-tier state (stale-marked the moment the manifest changes)
+alongside granted capabilities, and `revoke-grant <name> [capability]` withdraws one or all.
+
+Be precise about what a grant buys **today**. A granted capability goes live in the effective host
+registry from the next flagged invocation — the host's tier label reflects it and it joins
+primary-eligibility. But no path yet *selects* an external host as primary (`ak host pick` stays
+built-in-scoped), and `commandStatusline` has no runtime reader. So a granted `canBePrimary` is
+visible and eligible, while a granted `commandStatusline` is currently inert.
+
+Graduation has two destinations: a **blessed external adapter** stays out-of-tree holding exactly
+the capabilities its tiers earned, or a maintainer **promotes it to a built-in** by adopting its
+descriptor as a first-party registry entry — an ordinary PR, not a command.
+
+Nothing here installs itself: you declare the adapter, you consent to it, and teardown remains
+reversible. `contract: 1` is still experimental and **not frozen** — freezing waits on a real
+external adapter clearing the conformance kit and soaking. Writing one? See
+[AUTHORING-HOST-ADAPTERS.md](AUTHORING-HOST-ADAPTERS.md). The governing decisions are
+[ADR-0029](adr/0029-host-adapter-extension-point.md) and
+[ADR-0031](adr/0031-capability-graduation-and-upstream-requests.md).
 
 ---
 
@@ -391,6 +435,8 @@ just makes the good default automatic and the customization reversible.
 - Capability-driven integration axes, bindings, and provenance:
   [ADR-0016](adr/0016-capability-driven-integration-adapters.md).
 - The generic local OpenAI-compatible provider: [ADR-0028](adr/0028-local-openai-compatible-providers.md).
-- External host adapters (experimental): [ADR-0029](adr/0029-host-adapter-extension-point.md).
+- External host adapters (experimental): [ADR-0029](adr/0029-host-adapter-extension-point.md),
+  amended by [ADR-0031](adr/0031-capability-graduation-and-upstream-requests.md) — capability
+  graduation. Authoring guide: [AUTHORING-HOST-ADAPTERS.md](AUTHORING-HOST-ADAPTERS.md).
 - Host env flags (`ENABLE_CLAUDE_CODE` / `ENABLE_CODEX`): upstream ruflo
   ADR-034, "Optional MCP Backends".

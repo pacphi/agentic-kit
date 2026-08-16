@@ -23,7 +23,7 @@
 //     ~/.codex/auth.json (key overrides login). claude auth on macOS lives in the
 //     Keychain (no readable file); ANTHROPIC_API_KEY, when used, is not a simple
 //     override of a subscription login, so we label it conservatively.
-import { HOST_REGISTRY, effectiveHostRegistry } from './adapters/index.mjs';
+import { HOST_REGISTRY, effectiveHostRegistry, effectivePrimaryHostIds } from './adapters/index.mjs';
 
 /** Per-host adapter descriptors. Logical names (`guidanceFile`, `loginFile`
  *  segments) are resolved to real paths by callers so this stays pure. */
@@ -53,6 +53,11 @@ export function adapterFor(id) {
  * (heuristic) → configured primary (kit.json routing.primaryHost) → 'claude'.
  * Pure: reads only env + the passed cfg; never spawns.
  *
+ * Always returns a host id HOST_ADAPTERS/adapterFor can resolve (a built-in,
+ * canDriveSession host) — never an id that is merely eligible per
+ * effectivePrimaryHostIds() (below) but that this module has no session-
+ * driving descriptor for.
+ *
  * @param {NodeJS.ProcessEnv} [env]
  * @param {any} [cfg] kit.json config (for routing.primaryHost)
  * @returns {'claude'|'codex'|'opencode'}
@@ -65,8 +70,27 @@ export function drivingHost(env = process.env, cfg = null) {
   // heuristic because the fallback below covers the miss.
   if (Object.keys(env).some((k) => k.startsWith('CODEX_'))) return 'codex';
   const primary = cfg?.routing?.primaryHost;
-  const primaryCapable = HOST_REGISTRY.some((host) => host.id === primary && host.capabilities.canBePrimary);
-  if (primary && primaryCapable) return /** @type {'claude'|'codex'} */ (primary);
+  // effectivePrimaryHostIds() reads the EFFECTIVE (built-in + grant-overlaid
+  // admitted) set for ELIGIBILITY, not HOST_REGISTRY directly (ADR-0031 §1) —
+  // that primitive is live, so a hand-edited kit.json pointing
+  // routing.primaryHost at a host that has since earned a canBePrimary grant
+  // is recognized as eligible here. (No production path drives kit.json's
+  // primaryHost to an admitted external id today — `ak host pick`'s
+  // selection menu stays built-in-scoped this wave — so this is a live
+  // primitive with no live caller yet, not an active privilege boundary.)
+  //
+  // Eligibility alone is not enough to RETURN the host, though: HOST_ADAPTERS
+  // (built from HOST_REGISTRY, filtered by canDriveSession) is what this
+  // module actually knows how to drive a session for — guidanceFile,
+  // statusline, envMarkers, auth — and stays built-in-only; no admitted
+  // external host has that wiring registered. Without the adapterFor(primary)
+  // guard, an eligible-but-unresolvable host would be returned here and a
+  // caller doing `adapterFor(drivingHost(...)).guidanceFile` would crash on
+  // null. Both checks must agree, so this function's contract (always a
+  // HOST_ADAPTERS-resolvable id) holds even once effectivePrimaryHostIds()
+  // can name a host HOST_ADAPTERS doesn't.
+  const primaryCapable = effectivePrimaryHostIds().includes(primary);
+  if (primary && primaryCapable && adapterFor(primary)) return /** @type {'claude'|'codex'} */ (primary);
   return 'claude';
 }
 

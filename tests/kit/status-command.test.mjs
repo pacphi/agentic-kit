@@ -18,6 +18,9 @@ const HOME = sandboxHome('ak-status');
 const paths = await import('../../src/lib/paths.mjs');
 const status = await import('../../src/commands/status.mjs');
 const { loadKitConfig } = await import('../../src/lib/config.mjs');
+const { applyAdmitted, resetAdmitted } = await import('../../src/lib/adapters/admitted.mjs');
+const { registerAdmittedLifecycle, resetAdmittedLifecycle } = await import('../../src/lib/adapters/lifecycle-registry.mjs');
+const { validateAdapterManifest } = await import('../../src/lib/adapters/manifest.mjs');
 assertSandboxed(paths, HOME);
 
 const PKG_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
@@ -564,6 +567,137 @@ test('a synthetic fourth host renders through the same host-neutral dispatch loo
     renderers: {},
   });
   assert.deepEqual(noRendererRows, []);
+});
+
+// D4 (ADR-0031 P3 tracked follow-up): sync.mjs derives its `subsystems` set
+// from THIS collector's rows (`new Set(plan.map(p => p.subsystem))`), and its
+// admitted-host lifecycle branch is gated on `subsystems.has(hostId) &&
+// lifecycleExecutionEnabled(hostId, cfg)`. Before this fix, an admitted host
+// with no HOST_DETAIL_RENDERERS entry (only opencode has one) produced no row
+// at all, so that gate could never open through a real `ak sync` — pinned as
+// a documented gap in external-lifecycle.test.mjs. These tests prove
+// collect() now emits the row that closes it, with the SAME gating
+// lifecycleExecutionEnabled uses (cfg enablement AND the experimental flag).
+const SYNC_GAP_FLAG = 'AK_EXPERIMENTAL_HOST_ADAPTERS';
+const SYNC_GAP_HOST_ID = 'ak-sync-gap-probe';
+
+function syncGapHost(overrides = {}) {
+  return {
+    id: SYNC_GAP_HOST_ID,
+    label: 'Sync Gap Probe',
+    install: { bin: SYNC_GAP_HOST_ID, externalInstallPolicy: 'detect-never-overwrite' },
+    capabilities: {
+      canDriveSession: false, canBePrimary: false, canRouteActivities: false,
+      commandStatusline: false, transcripts: false, usage: false,
+      nativeMcpConfig: false, nativeGuidance: false,
+    },
+    trust: { approvalPolicy: 'unchanged', changes: [] },
+    enabledByDefault: false,
+    configProjection: 'ruflo',
+    observability: [],
+    ...overrides,
+  };
+}
+
+function syncGapManifest() {
+  return validateAdapterManifest({
+    name: SYNC_GAP_HOST_ID,
+    version: '1.0.0',
+    contract: 1,
+    host: syncGapHost(),
+    detection: { bin: SYNC_GAP_HOST_ID },
+    driving: { surfaces: ['acp'] },
+    lifecycle: { apply: { hook: { command: [SYNC_GAP_HOST_ID, 'apply'] } } },
+    trust: {
+      changes: [{
+        id: 'sync-gap-probe-subprocess-hooks', kind: 'third-party-adapter', scope: 'project',
+        owner: 'sync-gap-probe', value: 'subprocess hooks', effect: 'run consented lifecycle hooks',
+      }],
+    },
+  });
+}
+
+/** Admits the host + registers its lifecycle adapter (no real subprocess ever
+ *  runs here — a status collector must never spawn to decide whether a row
+ *  belongs in the plan, so `runHook` throwing on any call is the correctness
+ *  proof, not just a stub). Cleans up both overlays symmetrically, mirroring
+ *  lifecycle-registry.mjs's own F7 resetAdmittedLifecycle() pairing note. */
+async function withSyncGapHostAdmitted(fn) {
+  applyAdmitted([{ entry: syncGapHost() }]);
+  registerAdmittedLifecycle(syncGapManifest(), {
+    runHook: async () => { throw new Error('a status collector must never spawn a lifecycle hook'); },
+  });
+  // `await` (not a bare `return fn()`) — the fn is async and `finally` runs
+  // as soon as control leaves `try`, which for a bare returned promise is
+  // BEFORE it settles; without the await, resetAdmitted() would tear down
+  // the overlay while collect() is still mid-flight.
+  try { return await fn(); } finally { resetAdmitted(); resetAdmittedLifecycle(); }
+}
+
+async function withFlag(value, fn) {
+  const prev = process.env[SYNC_GAP_FLAG];
+  if (value === undefined) delete process.env[SYNC_GAP_FLAG]; else process.env[SYNC_GAP_FLAG] = value;
+  try { return await fn(); } finally {
+    if (prev === undefined) delete process.env[SYNC_GAP_FLAG]; else process.env[SYNC_GAP_FLAG] = prev;
+  }
+}
+
+test('collect(): an admitted lifecycle host enabled + flag on gets a subsystem-tagged, fix-bearing row matching sync\'s gate', async () => {
+  seedHome();
+  const cfg = loadKitConfig();
+  cfg.integrations.hosts[SYNC_GAP_HOST_ID] = true;
+  writeKitConfig(HOME, cfg);
+  await withFlag('1', async () => withSyncGapHostAdmitted(async () => {
+    const rows = await collect();
+    const hit = rowsFor(rows, SYNC_GAP_HOST_ID);
+    assert.equal(hit.length, 1, `expected exactly one '${SYNC_GAP_HOST_ID}' row, got ${JSON.stringify(hit)}`);
+    assert.equal(hit[0].level, 'warn');
+    assert.equal(typeof hit[0].fix, 'string');
+    assert.match(hit[0].message, /external lifecycle host, enabled/);
+    // The exact reachability proof: sync.mjs derives subsystems this way.
+    const subsystems = new Set(rows.filter((r) => r.fix).map((r) => r.subsystem));
+    assert.ok(subsystems.has(SYNC_GAP_HOST_ID),
+      'sync\'s admitted-host lifecycle branch gates on subsystems.has(hostId) — this row must open it');
+  }));
+});
+
+test('collect(): the experimental flag off (cfg enabled) produces no row for the admitted host', async () => {
+  seedHome();
+  const cfg = loadKitConfig();
+  cfg.integrations.hosts[SYNC_GAP_HOST_ID] = true;
+  writeKitConfig(HOME, cfg);
+  await withFlag(undefined, async () => withSyncGapHostAdmitted(async () => {
+    const rows = await collect();
+    assert.deepEqual(rowsFor(rows, SYNC_GAP_HOST_ID), []);
+  }));
+});
+
+test('collect(): the admitted host enrolled but never enabled in cfg (flag on) produces no row', async () => {
+  seedHome();
+  const cfg = loadKitConfig();
+  cfg.integrations.hosts[SYNC_GAP_HOST_ID] = false;
+  writeKitConfig(HOME, cfg);
+  await withFlag('1', async () => withSyncGapHostAdmitted(async () => {
+    const rows = await collect();
+    assert.deepEqual(rowsFor(rows, SYNC_GAP_HOST_ID), []);
+  }));
+});
+
+test('collect(): with nothing admitted, rows are unaffected (flag-off/no-admitted-host stays byte-identical)', async () => {
+  seedHome();
+  const before = await collect();
+  const after = await withFlag('1', async () => collect());
+  assert.deepEqual(after, before, 'no admitted lifecycle host registered — the fallback must add nothing');
+});
+
+test('collect(): a built-in host (opencode) never gets the generic admitted-host fallback row, even when enabled', async () => {
+  seedHome();
+  const cfg = loadKitConfig();
+  cfg.integrations.hosts.opencode = true;
+  writeKitConfig(HOME, cfg);
+  const rows = await withFlag('1', async () => collect());
+  const stray = rowsFor(rows, 'opencode').find((r) => /external lifecycle host, enabled/.test(r.message));
+  assert.equal(stray, undefined, 'opencode already has its own bespoke renderer — the generic fallback must never fire for it');
 });
 
 // ADR-0028 F-29: local-openai is a local ($0) provider deliberately NOT
