@@ -51,7 +51,11 @@ function execError(reason, message) {
 // A bare interpreter/binary name found through PATH (node, hermes) is
 // unaffected by cwd and stays legal; only a path-separator-bearing or
 // script-looking bare token is refused.
-const SCRIPT_LIKE_RE = /\.(?:mjs|cjs|js|ts|py|rb|sh|pl)$/i;
+// Windows executable/script extensions (exe|bat|cmd|com|ps1) are included
+// because Windows CreateProcess searches the current directory, so a bare
+// `hook.bat` with no anchoring base directory would resolve from the
+// operator's cwd — the same planted-file vector as a relative script on POSIX.
+const SCRIPT_LIKE_RE = /\.(?:mjs|cjs|js|ts|py|rb|sh|pl|exe|bat|cmd|com|ps1)$/i;
 
 function looksRelative(token) {
   if (typeof token !== 'string' || !token) return false;

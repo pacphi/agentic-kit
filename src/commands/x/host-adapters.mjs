@@ -14,6 +14,7 @@ import { hashManifest, SUPPORTED_CONTRACT } from '../../lib/adapters/admission.m
 import { validateAdapterManifest } from '../../lib/adapters/manifest.mjs';
 import { HOST_REGISTRY } from '../../lib/adapters/registries.mjs';
 import * as consentStore from '../../lib/adapters/consent.mjs';
+import { runTieredConformance as defaultRunTieredConformance } from '../../lib/adapters/conformance.mjs';
 import { loadKitConfig } from '../../lib/config.mjs';
 import { ok, warn, fail, info, dim, bold } from '../../lib/output.mjs';
 
@@ -267,16 +268,127 @@ function revoke({ name, consent }) {
   return 0;
 }
 
+/** Unwrap a reader result down to the raw manifest document —
+ * runTieredConformance's `readManifest` follows admitAdapters' own contract
+ * ((source) => Promise<any> raw), while `reader` here may return either the
+ * sources.mjs `{raw, origin}` shape or a bare raw document (same tolerance
+ * loadAndHash above applies). */
+function toRawManifestReader(reader) {
+  return async (source) => {
+    const resolved = await reader(source);
+    return resolved && typeof resolved === 'object' && 'raw' in resolved ? resolved.raw : resolved;
+  };
+}
+
+function tierLine(tier) {
+  const detail = tier.detail
+    ?? tier.checks.find((c) => !c.ok)?.detail
+    ?? tier.checks[0]?.detail
+    ?? '';
+  return `${String(tier.tier).padEnd(18)} ${String(tier.status).padEnd(8)} ${dim(stripControl(detail))}`;
+}
+
+function hookCommandsFor(manifest) {
+  const hooks = [];
+  for (const [verb, def] of Object.entries(manifest.lifecycle ?? {})) {
+    if (def?.hook?.command) hooks.push(`lifecycle.${verb}: ${JSON.stringify(def.hook.command)}`);
+  }
+  if (manifest.execution?.run?.hook?.command) {
+    hooks.push(`execution.run: ${JSON.stringify(manifest.execution.run.hook.command)}`);
+  }
+  return hooks;
+}
+
+/** F6 (Wave C security review): `conformance` self-consents — it records its
+ * own temporary consent and spawns declared hooks with only the experimental
+ * flag plus a kit.json entry as gates, needing no prior
+ * `ak host adapters trust`. That is the intended self-test posture (ADR-0031
+ * §5), not a consent bypass, but the operator/maintainer must not be
+ * surprised by it: disclose every hook command about to run as a REAL
+ * subprocess before the harness does anything. Best-effort and non-fatal —
+ * a manifest that can't be pre-read/validated here still gets a generic
+ * warning; the harness's own admission tier reports the real failure reason
+ * either way, this is disclosure only, never a gate. */
+async function warnAboutHooks(name, entry, rawReader) {
+  warn(`'${name}' conformance is a SELF-TEST (ADR-0031 §5) — it records its own temporary consent and needs no prior 'ak host adapters trust'.`);
+  let manifest;
+  try {
+    manifest = validateAdapterManifest(await rawReader(entry.source));
+  } catch {
+    warn('  the manifest could not be pre-disclosed here; any declared hooks still run as REAL subprocesses.');
+    return;
+  }
+  const hooks = hookCommandsFor(manifest);
+  if (!hooks.length) {
+    info(`  '${name}' declares no lifecycle/execution hooks — nothing will be spawned.`);
+    return;
+  }
+  warn('  the following hooks will run as REAL subprocesses:');
+  // N-1 (Wave C security review): hook.command is arbitrary validated
+  // strings — JSON.stringify escapes C0 (0x00-0x1F) but leaves C1
+  // (0x80-0x9F, e.g. U+009B CSI) and DEL (0x7F) untouched, same gap F3
+  // closed elsewhere in this file. This is the one line whose entire job is
+  // to be trustworthy before any code runs, so it routes through the same
+  // stripControl every other untrusted-string sink here already uses.
+  for (const line of hooks) console.log(`    ${dim(stripControl(line))}`);
+}
+
+/** `ak host adapters conformance <name>` — runs the ADR-0031 §2 tiered
+ * conformance harness against one configured adapter entry and prints a
+ * per-tier table. Recording into the grant store happens INSIDE
+ * runTieredConformance itself (conformance.mjs) — this command's job is
+ * resolving the cfg entry, wiring a real reader, disclosing what is about to
+ * spawn, and rendering the report; see conformance.mjs's own header for the
+ * recording semantics (passed -> recordTierResult, upstream-gated ->
+ * recordTierGate, everything else persists nothing). */
+async function conformance({
+  name, cfg, reader, runTiered, consentFile, grantsFile,
+}) {
+  if (typeof name !== 'string' || !name) { fail('usage: ak host adapters conformance <name>'); return 2; }
+  const entry = findEntry(cfg, name);
+  if (!entry) { fail(`no host adapter named '${name}' in kit.json hostAdapters`); return 1; }
+
+  const rawReader = toRawManifestReader(reader);
+  await warnAboutHooks(name, entry, rawReader);
+
+  let report;
+  try {
+    report = await runTiered({
+      name,
+      manifestSource: entry.source,
+      readManifest: rawReader,
+      consentFile,
+      grantsFile,
+    });
+  } catch (error) {
+    fail(`'${name}' conformance run failed: ${stripControl(error?.message ?? String(error))}`);
+    return 1;
+  }
+
+  console.log(bold(`host adapter conformance — ${report.name}`) + (report.hash ? dim(`  (${report.hash})`) : ''));
+  let anyFailed = false;
+  for (const tier of report.tiers) {
+    const line = tierLine(tier);
+    if (tier.status === 'passed') ok(line);
+    else if (tier.status === 'failed') { fail(line); anyFailed = true; }
+    else if (tier.status === 'gated') warn(line);
+    else info(line);
+  }
+  return anyFailed ? 1 : 0;
+}
+
 /**
  * @param {{ positionals?: string[], flags?: any, env?: NodeJS.ProcessEnv,
  *   consent?: { recordedHashFor(name:string): string|null, recordConsent(name:string, hash:string): void, revokeConsent(name:string): boolean },
  *   reader?: (source: string) => Promise<any>, ask?: (question: string) => Promise<boolean>,
- *   isTTY?: boolean, cfg?: any }} [args]
+ *   isTTY?: boolean, cfg?: any, runTieredConformance?: (options: any) => Promise<any>,
+ *   consentFile?: string, grantsFile?: string }} [args]
  */
 export async function run({
   positionals = [], flags = {}, env = process.env,
   consent = consentStore, reader = defaultReader, ask = defaultAsk,
   isTTY = process.stdin.isTTY === true, cfg,
+  runTieredConformance = defaultRunTieredConformance, consentFile, grantsFile,
 } = {}) {
   const sub = positionals[0] ?? 'list';
   const name = positionals[1];
@@ -284,8 +396,9 @@ export async function run({
   // Revocation is fail-safe and stays reachable regardless of the
   // experimental flag: an operator who turns the flag OFF must still be
   // able to withdraw a standing consent record, or that record silently
-  // reactivates the next time the flag is turned back on. `list`/`trust`
-  // stay gated — they're the surface that reads/records new trust.
+  // reactivates the next time the flag is turned back on. `list`/`trust`/
+  // `conformance` stay gated — they're the surface that reads/records new
+  // trust or evidence.
   if (sub === 'revoke') return revoke({ name, consent });
 
   if (!flagEnabled(env)) {
@@ -302,7 +415,12 @@ export async function run({
       yes: !!flags.yes, expectHash: flags['expect-hash'],
     });
   }
+  if (sub === 'conformance') {
+    return conformance({
+      name, cfg: resolvedCfg, reader, runTiered: runTieredConformance, consentFile, grantsFile,
+    });
+  }
 
-  fail(`unknown host adapters subcommand: ${sub} (list|trust|revoke)`);
+  fail(`unknown host adapters subcommand: ${sub} (list|trust|revoke|conformance)`);
   return 2;
 }

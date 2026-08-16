@@ -7,6 +7,9 @@
 // undeclared one.
 import { test, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import {
   admitAdapters, bootstrapHostAdapters, hashManifest, canonicalizeManifest, SUPPORTED_CONTRACT,
 } from '../../src/lib/adapters/admission.mjs';
@@ -285,7 +288,11 @@ test('buildAdmittedLifecycleAdapter satisfies validateLifecycleAdapter and route
   const calls = [];
   const runHook = async (args) => {
     calls.push(args);
-    return { ok: true, stdout: JSON.stringify({ observed: { version: '1.0.0' } }), exitCode: 0 };
+    // F4: parseHookPayload reads stdoutText (the UNMERGED stdout hook-runner
+    // reports), not stdout (stdout+stderr merged) — a real runAdapterHook
+    // call always populates both; this mock does too, to match that contract.
+    const stdout = JSON.stringify({ observed: { version: '1.0.0' } });
+    return { ok: true, stdout, stdoutText: stdout, exitCode: 0 };
   };
   const adapter = buildAdmittedLifecycleAdapter(manifest, { runHook });
   assert.doesNotThrow(() => validateLifecycleAdapter(adapter));
@@ -313,11 +320,45 @@ test('buildAdmittedLifecycleAdapter reports a hook failure honestly instead of f
   const manifest = validateAdapterManifest(validManifest({
     lifecycle: { verify: { hook: { command: ['hermes', 'verify'] } } },
   }));
-  const runHook = async () => ({ ok: false, stdout: 'boom', exitCode: 1 });
+  // No `.detail` (a real failed runAdapterHook call always sets one — see
+  // hook-runner.mjs — so this specifically exercises hookFailureResult's
+  // OWN fallback: F4's fix reads stdoutText for that fallback, not stdout).
+  const runHook = async () => ({ ok: false, stdout: 'boom', stdoutText: 'boom', exitCode: 1 });
   const adapter = buildAdmittedLifecycleAdapter(manifest, { runHook });
   const result = await adapter.verify({});
   assert.equal(result.observed, null);
   assert.equal(result.error, 'boom');
+});
+
+test('F4: hookFailureResult\'s detail fallback reads stdoutText (unmerged), never the merged stdout+stderr blob', async () => {
+  const manifest = validateAdapterManifest(validManifest({
+    lifecycle: { verify: { hook: { command: ['hermes', 'verify'] } } },
+  }));
+  // stdout is the MERGED blob (what a real hook-runner would produce when
+  // stderr chatter follows); stdoutText is the real, unmerged signal.
+  const runHook = async () => ({
+    ok: false, stdout: 'clean-stdout\n--- stderr ---\nnoisy stderr chatter', stdoutText: 'clean-stdout', exitCode: 1,
+  });
+  const adapter = buildAdmittedLifecycleAdapter(manifest, { runHook });
+  const result = await adapter.verify({});
+  assert.equal(result.error, 'clean-stdout', 'the fallback must read stdoutText, not the merged stdout blob');
+});
+
+test('F4: a successful hook exit with valid JSON on stdout and unrelated stderr chatter still reports ok:true (Wave B R-1 twin)', async () => {
+  const manifest = validateAdapterManifest(validManifest({
+    lifecycle: { apply: { hook: { command: ['hermes', 'apply'] } } },
+  }));
+  const payload = JSON.stringify({ ok: true, changed: true, actions: ['wired'], ownership: [], warnings: [], errors: [] });
+  // A stray stderr warning would break JSON.parse(stdout) (the merged blob)
+  // pre-fix — the hook still exited 0 with a fully valid JSON payload on its
+  // OWN stdout, so this must report success.
+  const runHook = async () => ({
+    ok: true, stdout: `${payload}\n--- stderr ---\nsome deprecation warning`, stdoutText: payload, exitCode: 0,
+  });
+  const adapter = buildAdmittedLifecycleAdapter(manifest, { runHook });
+  const result = await adapter.apply({});
+  assert.equal(result.ok, true, 'stderr chatter alongside valid stdout JSON must not fail the apply');
+  assert.equal(result.changed, true);
 });
 
 test('registerAdmittedLifecycle checks effectiveHostRegistry, not HOST_REGISTRY, and is retrievable via lifecycleAdapterFor', () => {
@@ -331,4 +372,120 @@ test('registerAdmittedLifecycle checks effectiveHostRegistry, not HOST_REGISTRY,
 test('registerAdmittedLifecycle throws for a host id absent from effectiveHostRegistry', () => {
   const manifest = validateAdapterManifest(validManifest({ name: 'ghost', host: validHost({ id: 'ghost' }) }));
   assert.throws(() => registerAdmittedLifecycle(manifest), /ghost/);
+});
+
+// ── P3 (ADR-0031): bootstrapHostAdapters registers an admitted lifecycle ────
+// The sibling block to execution registration (§222-261 above): an admitted
+// manifest declaring a lifecycle block gets its derived adapter registered
+// during bootstrap, guarded and non-fatal, the same posture as execution.
+// Every test here uses its own host id — LIFECYCLE_ADAPTERS is a
+// process-shared Map with no unregister, so reusing 'hermes' would collide
+// with the registerAdmittedLifecycle tests above.
+
+test('bootstrapHostAdapters registers the lifecycle adapter for an admitted manifest that declares one', async () => {
+  const name = 'hermes-boot-lifecycle';
+  const manifest = validateAdapterManifest(validManifest({
+    name, host: validHost({ id: name }),
+    lifecycle: { apply: { hook: { command: [name, 'apply'] } } },
+  }));
+  const hash = hashManifest(manifest);
+  const result = await bootstrapHostAdapters({
+    cfg: { hostAdapters: [{ name, source: 'mem://hermes-boot-lifecycle' }] },
+    env: { AK_EXPERIMENTAL_HOST_ADAPTERS: '1' },
+    readManifest: async () => manifest,
+    consent: trustingConsent({ [name]: hash }),
+  });
+  assert.equal(result.admitted.length, 1);
+  assert.deepEqual(result.warnings, [], `expected no warnings; got ${JSON.stringify(result.warnings)}`);
+  assert.notEqual(lifecycleAdapterFor(name), null, 'the lifecycle adapter must be registered by bootstrap');
+});
+
+test('bootstrapHostAdapters never registers a lifecycle adapter for an admitted manifest with no lifecycle block', async () => {
+  const name = 'hermes-boot-no-lifecycle';
+  const manifest = validateAdapterManifest(validManifest({ name, host: validHost({ id: name }) }));
+  const hash = hashManifest(manifest);
+  const result = await bootstrapHostAdapters({
+    cfg: { hostAdapters: [{ name, source: 'mem://hermes-boot-no-lifecycle' }] },
+    env: { AK_EXPERIMENTAL_HOST_ADAPTERS: '1' },
+    readManifest: async () => manifest,
+    consent: trustingConsent({ [name]: hash }),
+  });
+  assert.equal(result.admitted.length, 1);
+  assert.equal(lifecycleAdapterFor(name), null, 'no lifecycle block declared — nothing to register');
+});
+
+// ── F-1 (ADR-0031 P3, critical fix): bootstrap-level baseDir derivation ────
+// Mirrors adapter-execution.test.mjs's own F-1 (bootstrap) tests exactly:
+// a file-sourced manifest's relative lifecycle hook resolves against the
+// manifest's own directory (never the operator's cwd — this is a REAL
+// subprocess spawn, not an injected runHook); a remote (npm/https) source
+// has no persistent local bundle to anchor to, so its relative hook is
+// refused with a surfaced 'lifecycle-unanchored' warning instead.
+
+test('F-1 (bootstrap): a file-sourced manifest derives baseDir from realpath(dirname(source)) and a real relative lifecycle hook runs anchored to it', async () => {
+  const name = 'hermes-f1-file';
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-lifecycle-f1-basedir-'));
+  try {
+    // A REAL script, on disk, referenced by a RELATIVE path — proves the
+    // hook actually resolves against the manifest's own directory rather
+    // than wherever this test process happens to be running from.
+    fs.writeFileSync(path.join(tmpDir, 'apply-hook.mjs'),
+      "process.stdout.write(JSON.stringify({ok:true,changed:true,actions:['wired'],ownership:[],warnings:[],errors:[]}));\n");
+    // process.execPath (absolute), not the bare token 'node' — runAdapterHook
+    // spawns with shell:false, and a bare 'node' does not resolve on Windows
+    // (no PATHEXT/shell resolution there), so the subprocess would never
+    // start. process.execPath is the running node's own absolute path,
+    // always spawnable on every OS; the RELATIVE 'apply-hook.mjs' argument
+    // is what this test is actually anchoring, unaffected by the change.
+    const manifest = validateAdapterManifest(validManifest({
+      name, host: validHost({ id: name }),
+      lifecycle: { apply: { hook: { command: [process.execPath, 'apply-hook.mjs'] } } },
+    }));
+    const manifestPath = path.join(tmpDir, 'manifest.json');
+    fs.writeFileSync(manifestPath, JSON.stringify(manifest));
+    const hash = hashManifest(manifest);
+    const result = await bootstrapHostAdapters({
+      cfg: { hostAdapters: [{ name, source: manifestPath }] },
+      env: { AK_EXPERIMENTAL_HOST_ADAPTERS: '1' },
+      readManifest: async () => manifest,
+      consent: trustingConsent({ [name]: hash }),
+    });
+    assert.equal(result.admitted.length, 1);
+    assert.deepEqual(result.warnings, [], `expected no warnings; got ${JSON.stringify(result.warnings)}`);
+    const adapter = lifecycleAdapterFor(name);
+    assert.notEqual(adapter, null);
+    assert.deepEqual(adapter.unanchoredVerbs, []);
+    const applied = await adapter.apply({});
+    assert.equal(applied.ok, true, 'the real relative script must have actually run, anchored to the manifest\'s own directory');
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test('F-1 (bootstrap): an npm-sourced admitted manifest with a relative lifecycle hook surfaces a lifecycle-unanchored warning, and the verb is refused (never spawned)', async () => {
+  const name = 'hermes-f1-npm';
+  // process.execPath, not the bare token 'node' — this verb is refused
+  // before ever spawning either way (npm source -> null baseDir -> unanchored),
+  // but kept consistent with the file-sourced test above rather than leaving
+  // a bare token that would misbehave the moment this test's shape changes.
+  const manifest = validateAdapterManifest(validManifest({
+    name, host: validHost({ id: name }),
+    lifecycle: { apply: { hook: { command: [process.execPath, 'apply-hook.mjs'] } } },
+  }));
+  const hash = hashManifest(manifest);
+  const result = await bootstrapHostAdapters({
+    cfg: { hostAdapters: [{ name, source: 'npm:hermes-f1-npm-adapter@1.0.0' }] },
+    env: { AK_EXPERIMENTAL_HOST_ADAPTERS: '1' },
+    readManifest: async () => manifest,
+    consent: trustingConsent({ [name]: hash }),
+  });
+  assert.equal(result.admitted.length, 1, 'the host itself still admits — only the unanchored verb is refused');
+  const warning = result.warnings.find((w) => w.reason === 'lifecycle-unanchored');
+  assert.ok(warning, `expected a 'lifecycle-unanchored' warning; got ${JSON.stringify(result.warnings)}`);
+  const adapter = lifecycleAdapterFor(name);
+  assert.notEqual(adapter, null, 'the adapter still registers — an unanchorable verb refuses itself, not the whole adapter');
+  assert.deepEqual(adapter.unanchoredVerbs, ['apply']);
+  const applied = await adapter.apply({});
+  assert.equal(applied.ok, false, 'the hook must NEVER have been spawned for an unanchored verb');
+  assert.match(applied.errors[0], /no anchored adapter base directory/);
 });

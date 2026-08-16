@@ -1,14 +1,17 @@
-// x host adapters — the trust CLI (ADR-0031 P1). Covers: flag gating (zero
-// reads/writes when off), the trust happy path (consent recorded at
+// x host adapters — the trust CLI (ADR-0031 P1) plus the tiered conformance
+// subcommand (ADR-0031 P4). Covers: flag gating (zero reads/writes when off),
+// the trust happy path (consent recorded at
 // hashManifest(validateAdapterManifest(raw))), refusal of an invalid
 // manifest, the non-interactive-without---yes fail-closed guard, idempotent
-// re-trust, stale-hash disclosure, revoke true/false, list states, and an
-// unknown adapter name.
+// re-trust, stale-hash disclosure, revoke true/false, list states, an
+// unknown adapter name, and `conformance`'s printed table + recording +
+// exit codes.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { run } from '../../src/commands/x/host-adapters.mjs';
 import { hashManifest } from '../../src/lib/adapters/admission.mjs';
 import { validateAdapterManifest } from '../../src/lib/adapters/manifest.mjs';
@@ -16,6 +19,8 @@ import {
   recordedHashFor, recordConsent, revokeConsent,
 } from '../../src/lib/adapters/consent.mjs';
 import { HOST_REGISTRY } from '../../src/lib/adapters/registries.mjs';
+import { grantsFor } from '../../src/lib/adapters/grants.mjs';
+import { runTieredConformance } from '../../src/lib/adapters/conformance.mjs';
 
 const ON_ENV = { AK_EXPERIMENTAL_HOST_ADAPTERS: '1' };
 const OFF_ENV = {};
@@ -712,4 +717,207 @@ test('unknown subcommand fails with usage, exit 2', async () => {
     });
   } finally { cap.restore(); }
   assert.equal(code, 2);
+});
+
+// ── conformance subcommand (ADR-0031 P4) ────────────────────────────────
+// Uses the same real acme fixture (tests/fixtures/adapters/acme/) the
+// black-box admission report and the tiered-harness unit tests exercise —
+// real manifest, real admission, a real spawned subprocess for the declared
+// detect and execution.run hooks.
+
+const FIXTURE_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../fixtures/adapters/acme');
+const ACME_MANIFEST_PATH = path.join(FIXTURE_ROOT, 'manifest.json');
+const ACME_PRIMARY_INVALID_PATH = path.join(FIXTURE_ROOT, 'invalid', 'can-be-primary.json');
+
+/** Reads the fixture manifest EXACTLY as authored — no command rewriting.
+ * checkAdmission (conformance.mjs) now threads a real baseDir into
+ * registerAdmittedLifecycle (Wave C, F1), so the fixture's own literal,
+ * unrewritten ["node","detect-hook.mjs"] resolves correctly through the real
+ * resolver without any test-side rewrite. */
+async function acmeReader(source) {
+  const text = fs.readFileSync(source, 'utf8');
+  return JSON.parse(text);
+}
+
+function tmpGrantsFile() {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-adapter-conformance-cli-'));
+  return path.join(dir, 'adapter-grants.json');
+}
+
+test('conformance: flag unset refuses with exit 2 and never calls runTiered', async () => {
+  const cap = capture();
+  let code;
+  try {
+    code = await run({
+      positionals: ['conformance', 'acme'], env: OFF_ENV, cfg: cfgWith([{ name: 'acme', source: ACME_MANIFEST_PATH }]),
+      runTieredConformance: neverCalled('runTieredConformance'), flags: {},
+    });
+  } finally { cap.restore(); }
+  assert.equal(code, 2);
+});
+
+test('conformance: usage error (no name) exits 2 without running the harness', async () => {
+  const cap = capture();
+  let code;
+  try {
+    code = await run({
+      positionals: ['conformance'], env: ON_ENV, cfg: cfgWith([]),
+      runTieredConformance: neverCalled('runTieredConformance'), flags: {},
+    });
+  } finally { cap.restore(); }
+  assert.equal(code, 2);
+});
+
+test('conformance: unknown adapter name exits 1 without running the harness', async () => {
+  const cap = capture();
+  let code;
+  try {
+    code = await run({
+      positionals: ['conformance', 'nope'], env: ON_ENV, cfg: cfgWith([{ name: 'acme', source: ACME_MANIFEST_PATH }]),
+      runTieredConformance: neverCalled('runTieredConformance'), flags: {},
+    });
+  } finally { cap.restore(); }
+  assert.equal(code, 1);
+});
+
+test('conformance: happy path against the real acme fixture prints a per-tier table, records into the grant store, and exits 0', async () => {
+  const grantsFile = tmpGrantsFile();
+  const cfg = cfgWith([{ name: 'acme', source: ACME_MANIFEST_PATH }]);
+
+  const cap = capture();
+  let code;
+  try {
+    code = await run({
+      positionals: ['conformance', 'acme'], env: ON_ENV, cfg,
+      reader: acmeReader, grantsFile, flags: {},
+      // acme's detection.bin will never actually be on a test machine's
+      // PATH — orthogonal to what this test proves (the CLI's plumbing:
+      // printing, recording, exit codes), so readiness is stubbed the same
+      // way the tiered-harness unit tests do.
+      runTieredConformance: (opts) => runTieredConformance({ ...opts, haveFn: async () => true }),
+    });
+  } finally { cap.restore(); }
+
+  assert.equal(code, 0, cap.text());
+  const text = cap.text();
+  // F6 (Wave C security review): a warning banner discloses the real
+  // subprocess hooks about to run, and it prints BEFORE the report header —
+  // the operator sees what will spawn before it does.
+  assert.match(text, /SELF-TEST \(ADR-0031 §5\)/);
+  assert.match(text, /needs no prior 'ak host adapters trust'/);
+  assert.match(text, /lifecycle\.detect: \["node","detect-hook\.mjs"\]/);
+  assert.match(text, /execution\.run: \["node","run-hook\.mjs"\]/);
+  assert.ok(text.indexOf('SELF-TEST') < text.indexOf('host adapter conformance — acme'), 'the disclosure banner must print before the report');
+
+  assert.match(text, /host adapter conformance — acme/);
+  assert.match(text, /admission\s+passed/);
+  assert.match(text, /activity-routing\s+passed/);
+  assert.match(text, /session-driving\s+skipped/);
+  assert.match(text, /primary-eligible\s+gated/);
+  assert.match(text, /statusline\s+gated/);
+
+  const record = grantsFor('acme', { file: grantsFile });
+  assert.equal(record.tiers.admission.status, 'passed');
+  assert.equal(record.tiers['activity-routing'].status, 'passed');
+});
+
+test('conformance: nothing is recorded when the flag is off, even with a real cfg entry and grantsFile supplied', async () => {
+  const grantsFile = tmpGrantsFile();
+  const cfg = cfgWith([{ name: 'acme', source: ACME_MANIFEST_PATH }]);
+
+  const cap = capture();
+  let code;
+  try {
+    code = await run({
+      positionals: ['conformance', 'acme'], env: OFF_ENV, cfg,
+      reader: acmeReader, grantsFile, flags: {},
+    });
+  } finally { cap.restore(); }
+
+  assert.equal(code, 2);
+  assert.equal(grantsFor('acme', { file: grantsFile }), null);
+});
+
+test('conformance: a failing admission tier prints failed, exits 1, and records nothing', async () => {
+  const grantsFile = tmpGrantsFile();
+  const cfg = cfgWith([{ name: 'acme-primary', source: ACME_PRIMARY_INVALID_PATH }]);
+
+  const cap = capture();
+  let code;
+  try {
+    code = await run({
+      positionals: ['conformance', 'acme-primary'], env: ON_ENV, cfg,
+      reader: async (source) => JSON.parse(fs.readFileSync(source, 'utf8')),
+      grantsFile, flags: {},
+    });
+  } finally { cap.restore(); }
+
+  assert.equal(code, 1, cap.text());
+  assert.match(cap.text(), /admission\s+failed/);
+  assert.equal(grantsFor('acme-primary', { file: grantsFile }), null);
+});
+
+// ── F6: the disclosure banner degrades honestly (no hooks / unreadable) ────
+
+test('conformance: the banner reports "nothing will be spawned" for a manifest declaring no lifecycle/execution hooks', async () => {
+  const raw = validManifest({ lifecycle: {} });
+  const cfg = cfgWith([{ name: 'hermes', source: 'mem://hermes-no-hooks' }]);
+
+  const cap = capture();
+  try {
+    await run({
+      positionals: ['conformance', 'hermes'], env: ON_ENV, cfg,
+      reader: async () => raw, grantsFile: tmpGrantsFile(), flags: {},
+    });
+  } finally { cap.restore(); }
+
+  const text = cap.text();
+  assert.match(text, /SELF-TEST \(ADR-0031 §5\)/);
+  assert.match(text, /declares no lifecycle\/execution hooks — nothing will be spawned/);
+});
+
+test('conformance: the banner falls back to a generic warning when the manifest cannot be pre-disclosed, and the harness still runs and reports the real failure', async () => {
+  const grantsFile = tmpGrantsFile();
+  const cfg = cfgWith([{ name: 'hermes', source: 'mem://hermes-unreadable' }]);
+
+  const cap = capture();
+  let code;
+  try {
+    code = await run({
+      positionals: ['conformance', 'hermes'], env: ON_ENV, cfg,
+      reader: async () => { throw new Error('boom: source unreadable'); },
+      grantsFile, flags: {},
+    });
+  } finally { cap.restore(); }
+
+  const text = cap.text();
+  assert.match(text, /SELF-TEST \(ADR-0031 §5\)/);
+  assert.match(text, /could not be pre-disclosed here/);
+  assert.match(text, /admission\s+failed/);
+  assert.equal(code, 1);
+  assert.equal(grantsFor('hermes', { file: grantsFile }), null);
+});
+
+// N-1 (Wave C security review): JSON.stringify escapes C0 (0x00-0x1F) but
+// leaves C1 (0x80-0x9F, e.g. U+009B CSI) and DEL (0x7F) untouched — a hook
+// command carrying one of those bytes must never reach the disclosure line
+// raw, the same class F3 already closed for the tier-detail line.
+test('conformance: the banner strips a raw C1 byte (U+009B, CSI) out of a hook command before printing it', async () => {
+  const CSI = String.fromCharCode(0x9b);
+  const raw = validManifest({
+    lifecycle: { detect: { hook: { command: ['hermes', `detect${CSI}payload`], timeoutMs: 5000 } } },
+  });
+  const cfg = cfgWith([{ name: 'hermes', source: 'mem://hermes-hostile-hook' }]);
+
+  const cap = capture();
+  try {
+    await run({
+      positionals: ['conformance', 'hermes'], env: ON_ENV, cfg,
+      reader: async () => raw, grantsFile: tmpGrantsFile(), flags: {},
+    });
+  } finally { cap.restore(); }
+
+  const text = cap.text();
+  assert.ok(!text.includes(CSI), 'no raw C1 control character may reach the disclosure output');
+  assert.match(text, /detectpayload/, 'the C1 byte is removed outright, the surrounding text survives');
 });
