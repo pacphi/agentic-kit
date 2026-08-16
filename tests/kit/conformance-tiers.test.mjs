@@ -277,6 +277,27 @@ test('primary-eligible and statusline tiers are gated (never passed) against acm
   assert.equal(grantsFor('acme', { file: grantsFile }), null);
 });
 
+// F-6 (security review): the property that actually holds the "no exercise
+// confers a grant" invariant is checkGrantGatedTier evaluating `granted`
+// BEFORE ever calling `exercise` (conformance.mjs) — a caller-supplied
+// exercise result can never confer the FIRST grant, because exercise is
+// simply never reached without one already recorded. Pin that ordering
+// directly: inject a real exercisePrimaryEligible with NO existing grant.
+test('primary-eligible tier stays gated (never passed) when an exercise callback is injected but no grant exists — granted is checked BEFORE exercise runs', async () => {
+  const grantsFile = tempGrantsFile();
+  const report = await runTieredConformance({
+    manifestSource: VALID_MANIFEST_PATH,
+    readManifest: readManifestFromFile,
+    tiers: ['primary-eligible'],
+    grantsFile,
+    exercisePrimaryEligible: async () => ({ ok: true }),
+  });
+  const [tier] = report.tiers;
+  assert.equal(tier.status, 'gated');
+  assert.notEqual(tier.status, 'passed');
+  assert.equal(grantsFor('acme', { file: grantsFile }), null, 'a caller-supplied exercise result must never confer the FIRST grant');
+});
+
 test('primary-eligible tier stays honestly gated even when GRANTED, because no lead/escalation runtime path is built yet', async () => {
   const grantsFile = tempGrantsFile();
   // Seed a real grant the way the (future) promotion command would.

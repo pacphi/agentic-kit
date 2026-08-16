@@ -6,6 +6,15 @@
 // re-trust, stale-hash disclosure, revoke true/false, list states, an
 // unknown adapter name, and `conformance`'s printed table + recording +
 // exit codes.
+//
+// Also covers grant/promote, gate, status, and revoke-grant (ADR-0031 P5 +
+// P7, implemented in the sibling host-adapters-grants.mjs but dispatched
+// through this same `run()`): the grant happy/refusal paths against a
+// force-recorded passed tier, capability allow-listing (aqeProvider and any
+// other non-TIER_GRANTS value rejected), hash-pinned staleness voiding a
+// grant, the non-interactive confirm gate, gate's ref validation, status's
+// passed/gated/granted rendering and stale marking, and that no new
+// subcommand ever accepts/forwards an exercise/callback option.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -19,7 +28,9 @@ import {
   recordedHashFor, recordConsent, revokeConsent,
 } from '../../src/lib/adapters/consent.mjs';
 import { HOST_REGISTRY } from '../../src/lib/adapters/registries.mjs';
-import { grantsFor } from '../../src/lib/adapters/grants.mjs';
+import {
+  grantsFor, recordTierResult, recordTierGate, grantCapability, grantedCapabilitiesFor,
+} from '../../src/lib/adapters/grants.mjs';
 import { runTieredConformance } from '../../src/lib/adapters/conformance.mjs';
 
 const ON_ENV = { AK_EXPERIMENTAL_HOST_ADAPTERS: '1' };
@@ -920,4 +931,470 @@ test('conformance: the banner strips a raw C1 byte (U+009B, CSI) out of a hook c
   const text = cap.text();
   assert.ok(!text.includes(CSI), 'no raw C1 control character may reach the disclosure output');
   assert.match(text, /detectpayload/, 'the C1 byte is removed outright, the surrounding text survives');
+});
+
+// ── grant / bless (ADR-0031 P5) ─────────────────────────────────────────
+// grant's disclosure now also derives the manifest trust state (F-3), so
+// every test that reaches loadAndHash passes an isolated `consent` store —
+// never the real default consentStore — to stay hermetic.
+
+test('grant: happy path — capability granted once the gating tier is force-recorded passed at the current hash', async () => {
+  const grantsFile = tmpGrantsFile();
+  const raw = validManifest();
+  const hash = hashManifest(validateAdapterManifest(raw));
+  recordTierResult('hermes', 'primary-eligible', { hash, evidence: 'leads a run, receives escalation' }, { file: grantsFile });
+  const cfg = cfgWith([{ name: 'hermes', source: 'mem://hermes' }]);
+
+  const cap = capture();
+  let code;
+  try {
+    code = await run({
+      positionals: ['grant', 'hermes', 'canBePrimary'], env: ON_ENV, cfg,
+      reader: async () => raw, ask: async () => true, isTTY: true, grantsFile, flags: {},
+      consent: fileConsent(tmpConsentFile()),
+    });
+  } finally { cap.restore(); }
+
+  assert.equal(code, 0, cap.text());
+  assert.match(cap.text(), /granted 'canBePrimary'/);
+  // F-3: the disclosure prints the actual evidence backing the tier, not
+  // just a hash, and the F-7 honesty note that the grant is not yet live.
+  assert.match(cap.text(), /tier evidence:\s+leads a run, receives escalation/);
+  assert.match(cap.text(), /not yet live/);
+  assert.deepEqual(grantedCapabilitiesFor('hermes', hash, { file: grantsFile }), { canBePrimary: true });
+});
+
+// N-1 (security re-review): grant must resolve the manifest source EXACTLY
+// ONCE. Previously the disclosure's trust-state line called stateFor, which
+// ran its own independent loadAndHash — on a mutable remote source a second
+// resolve could return different bytes than the first, so the disclosed
+// trust state could describe content that was never the granted content.
+// This reader returns different content on any call after the first; if
+// grant ever resolved twice, the trust-state line would be computed against
+// `secondRaw` while the granted hash is `firstRaw`'s — a display-integrity
+// bug on the highest-privilege command.
+test('grant: resolves the manifest exactly once, and the disclosed trust state describes the ACTUAL granted hash even when a second resolve would differ', async () => {
+  const grantsFile = tmpGrantsFile();
+  const firstRaw = validManifest();
+  const secondRaw = validManifest({ version: '9.9.9' }); // different content/hash
+  const firstHash = hashManifest(validateAdapterManifest(firstRaw));
+  recordTierResult('hermes', 'primary-eligible', { hash: firstHash, evidence: 'leads a run' }, { file: grantsFile });
+
+  const consentFile = tmpConsentFile();
+  recordConsent('hermes', firstHash, { file: consentFile }); // consent pinned to the FIRST hash
+
+  let calls = 0;
+  const reader = async () => { calls += 1; return calls === 1 ? firstRaw : secondRaw; };
+  const cfg = cfgWith([{ name: 'hermes', source: 'mem://hermes' }]);
+
+  const cap = capture();
+  let code;
+  try {
+    code = await run({
+      positionals: ['grant', 'hermes', 'canBePrimary'], env: ON_ENV, cfg,
+      reader, ask: async () => true, isTTY: true, grantsFile, flags: {},
+      consent: fileConsent(consentFile),
+    });
+  } finally { cap.restore(); }
+
+  assert.equal(code, 0, cap.text());
+  assert.equal(calls, 1, 'the manifest source must be resolved exactly once, not once for the grant and again for the trust-state line');
+  // If grant had resolved twice, the trust state would be computed against
+  // secondRaw's hash (which the consent store never recorded) and show
+  // 'not consented' or 'consent-stale' instead of 'trusted'.
+  assert.match(cap.text(), /manifest trust state: trusted/);
+  assert.match(cap.text(), new RegExp(`manifest hash: ${firstHash}`));
+  assert.deepEqual(grantedCapabilitiesFor('hermes', firstHash, { file: grantsFile }), { canBePrimary: true });
+});
+
+test('grant: `bless` is an accepted alias for `grant`', async () => {
+  const grantsFile = tmpGrantsFile();
+  const raw = validManifest();
+  const hash = hashManifest(validateAdapterManifest(raw));
+  recordTierResult('hermes', 'statusline', { hash, evidence: 'footer renders' }, { file: grantsFile });
+  const cfg = cfgWith([{ name: 'hermes', source: 'mem://hermes' }]);
+
+  const cap = capture();
+  let code;
+  try {
+    code = await run({
+      positionals: ['bless', 'hermes', 'commandStatusline'], env: ON_ENV, cfg,
+      reader: async () => raw, ask: async () => true, isTTY: true, grantsFile, flags: {},
+      consent: fileConsent(tmpConsentFile()),
+    });
+  } finally { cap.restore(); }
+
+  assert.equal(code, 0, cap.text());
+  assert.deepEqual(grantedCapabilitiesFor('hermes', hash, { file: grantsFile }), { commandStatusline: true });
+});
+
+test('grant: REFUSED when the gating tier is not recorded passed — exit 1, nothing granted, names the tier', async () => {
+  const grantsFile = tmpGrantsFile();
+  const raw = validManifest();
+  const cfg = cfgWith([{ name: 'hermes', source: 'mem://hermes' }]);
+
+  const cap = capture();
+  let code;
+  try {
+    code = await run({
+      positionals: ['grant', 'hermes', 'canBePrimary'], env: ON_ENV, cfg,
+      reader: async () => raw, ask: neverCalled('ask'), isTTY: true, grantsFile, flags: { yes: true },
+      consent: fileConsent(tmpConsentFile()),
+    });
+  } finally { cap.restore(); }
+
+  assert.equal(code, 1);
+  assert.match(cap.text(), /primary-eligible/);
+  const hash = hashManifest(validateAdapterManifest(raw));
+  assert.deepEqual(grantedCapabilitiesFor('hermes', hash, { file: grantsFile }), {});
+});
+
+test("grant: 'aqeProvider' is rejected as never ak-grantable (ADR-0031 §4), before any manifest read", async () => {
+  const grantsFile = tmpGrantsFile();
+  const cfg = cfgWith([{ name: 'hermes', source: 'mem://hermes' }]);
+
+  const cap = capture();
+  let code;
+  try {
+    code = await run({
+      positionals: ['grant', 'hermes', 'aqeProvider'], env: ON_ENV, cfg,
+      reader: neverCalled('reader'), ask: neverCalled('ask'), isTTY: true, grantsFile, flags: { yes: true },
+    });
+  } finally { cap.restore(); }
+
+  assert.equal(code, 1);
+  assert.match(cap.text(), /upstream-owned/);
+  assert.match(cap.text(), /ADR-0031 §4/);
+});
+
+test('grant: any other non-TIER_GRANTS capability is rejected, before any manifest read', async () => {
+  const grantsFile = tmpGrantsFile();
+  const cfg = cfgWith([{ name: 'hermes', source: 'mem://hermes' }]);
+
+  const cap = capture();
+  let code;
+  try {
+    code = await run({
+      positionals: ['grant', 'hermes', 'transcripts'], env: ON_ENV, cfg,
+      reader: neverCalled('reader'), ask: neverCalled('ask'), isTTY: true, grantsFile, flags: { yes: true },
+    });
+  } finally { cap.restore(); }
+
+  assert.equal(code, 1);
+  assert.match(cap.text(), /not a grantable capability/);
+});
+
+test('grant: refuses when the manifest changed since the tier was recorded passed (hash mismatch)', async () => {
+  const grantsFile = tmpGrantsFile();
+  const originalRaw = validManifest();
+  const originalHash = hashManifest(validateAdapterManifest(originalRaw));
+  recordTierResult('hermes', 'primary-eligible', { hash: originalHash, evidence: 'ev' }, { file: grantsFile });
+
+  const editedRaw = validManifest({ version: '1.0.1' }); // edited since the tier passed -> new hash
+  const cfg = cfgWith([{ name: 'hermes', source: 'mem://hermes' }]);
+
+  const cap = capture();
+  let code;
+  try {
+    code = await run({
+      positionals: ['grant', 'hermes', 'canBePrimary'], env: ON_ENV, cfg,
+      reader: async () => editedRaw, ask: neverCalled('ask'), isTTY: true, grantsFile, flags: { yes: true },
+      consent: fileConsent(tmpConsentFile()),
+    });
+  } finally { cap.restore(); }
+
+  assert.equal(code, 1);
+  assert.match(cap.text(), /no passed 'primary-eligible' tier recorded at hash/);
+  const editedHash = hashManifest(validateAdapterManifest(editedRaw));
+  assert.deepEqual(grantedCapabilitiesFor('hermes', editedHash, { file: grantsFile }), {});
+});
+
+test('grant: non-interactive without --yes fails 2 before writing, even with a passed tier available', async () => {
+  const grantsFile = tmpGrantsFile();
+  const raw = validManifest();
+  const hash = hashManifest(validateAdapterManifest(raw));
+  recordTierResult('hermes', 'statusline', { hash, evidence: 'footer renders' }, { file: grantsFile });
+  const cfg = cfgWith([{ name: 'hermes', source: 'mem://hermes' }]);
+
+  const cap = capture();
+  let code;
+  try {
+    code = await run({
+      positionals: ['grant', 'hermes', 'commandStatusline'], env: ON_ENV, cfg,
+      reader: async () => raw, ask: neverCalled('ask'), isTTY: false, grantsFile, flags: {},
+      consent: fileConsent(tmpConsentFile()),
+    });
+  } finally { cap.restore(); }
+
+  assert.equal(code, 2);
+  assert.deepEqual(grantedCapabilitiesFor('hermes', hash, { file: grantsFile }), {});
+});
+
+test('grant: a declined interactive confirmation leaves the grant unchanged, exit 0', async () => {
+  const grantsFile = tmpGrantsFile();
+  const raw = validManifest();
+  const hash = hashManifest(validateAdapterManifest(raw));
+  recordTierResult('hermes', 'statusline', { hash, evidence: 'footer renders' }, { file: grantsFile });
+  const cfg = cfgWith([{ name: 'hermes', source: 'mem://hermes' }]);
+
+  const cap = capture();
+  let code;
+  try {
+    code = await run({
+      positionals: ['grant', 'hermes', 'commandStatusline'], env: ON_ENV, cfg,
+      reader: async () => raw, ask: async () => false, isTTY: true, grantsFile, flags: {},
+      consent: fileConsent(tmpConsentFile()),
+    });
+  } finally { cap.restore(); }
+
+  assert.equal(code, 0);
+  assert.deepEqual(grantedCapabilitiesFor('hermes', hash, { file: grantsFile }), {});
+});
+
+test('grant: ignores an exercise-shaped extra option — a capability is never conferred by a caller-supplied exercise result', async () => {
+  const grantsFile = tmpGrantsFile();
+  const raw = validManifest();
+  const cfg = cfgWith([{ name: 'hermes', source: 'mem://hermes' }]);
+
+  const cap = capture();
+  let code;
+  try {
+    code = await run({
+      positionals: ['grant', 'hermes', 'canBePrimary'], env: ON_ENV, cfg,
+      reader: async () => raw, ask: neverCalled('ask'), isTTY: true, grantsFile, flags: { yes: true },
+      consent: fileConsent(tmpConsentFile()),
+      // No such input exists on run()'s contract; if it were ever wired
+      // through, this would be exactly the security-review-forbidden shape
+      // (a caller-supplied exercise result standing in as both the pass and
+      // its own evidence). It must be silently inert.
+      exercise: async () => ({ status: 'passed' }),
+    });
+  } finally { cap.restore(); }
+
+  assert.equal(code, 1, 'no passed tier was ever actually recorded, so the grant must still be refused');
+});
+
+// ── gate (ADR-0031 P7) ───────────────────────────────────────────────────
+
+test('gate: records a valid <repo>#NNN ref at the current manifest hash', async () => {
+  const grantsFile = tmpGrantsFile();
+  const raw = validManifest();
+  const hash = hashManifest(validateAdapterManifest(raw));
+  const cfg = cfgWith([{ name: 'hermes', source: 'mem://hermes' }]);
+
+  const cap = capture();
+  let code;
+  try {
+    code = await run({
+      positionals: ['gate', 'hermes', 'primary-eligible', 'ruvnet/ruflo#2962'], env: ON_ENV, cfg,
+      reader: async () => raw, grantsFile, flags: {},
+    });
+  } finally { cap.restore(); }
+
+  assert.equal(code, 0, cap.text());
+  assert.match(cap.text(), /gated on ruvnet\/ruflo#2962/);
+  const record = grantsFor('hermes', { file: grantsFile, currentHash: hash });
+  assert.equal(record.tiers['primary-eligible'].status, 'gated');
+  assert.equal(record.tiers['primary-eligible'].gatedBy, 'ruvnet/ruflo#2962');
+});
+
+test('gate: rejects a malformed ref — recordTierGate throws, surfaced honestly, exit 1, nothing recorded', async () => {
+  const grantsFile = tmpGrantsFile();
+  const raw = validManifest();
+  const cfg = cfgWith([{ name: 'hermes', source: 'mem://hermes' }]);
+
+  const cap = capture();
+  let code;
+  try {
+    code = await run({
+      positionals: ['gate', 'hermes', 'primary-eligible', 'not-a-valid-ref'], env: ON_ENV, cfg,
+      reader: async () => raw, grantsFile, flags: {},
+    });
+  } finally { cap.restore(); }
+
+  assert.equal(code, 1);
+  assert.match(cap.text(), /gate refused/);
+  assert.equal(grantsFor('hermes', { file: grantsFile }), null);
+});
+
+test('gate: rejects a tier not in CONFORMANCE_TIERS before ever touching the manifest', async () => {
+  const grantsFile = tmpGrantsFile();
+  const cfg = cfgWith([{ name: 'hermes', source: 'mem://hermes' }]);
+
+  const cap = capture();
+  let code;
+  try {
+    code = await run({
+      positionals: ['gate', 'hermes', 'bogus-tier', 'agentic-qe#563'], env: ON_ENV, cfg,
+      reader: neverCalled('reader'), grantsFile, flags: {},
+    });
+  } finally { cap.restore(); }
+
+  assert.equal(code, 1);
+  assert.match(cap.text(), /not a valid conformance tier/);
+});
+
+// ── status (ADR-0031 P7 display) ────────────────────────────────────────
+
+test('status: shows passed tiers, gated tiers, and granted capabilities, then marks it all STALE after a manifest edit', async () => {
+  const grantsFile = tmpGrantsFile();
+  const raw = validManifest();
+  const hash = hashManifest(validateAdapterManifest(raw));
+  recordTierResult('hermes', 'admission', { hash, evidence: 'admits' }, { file: grantsFile });
+  recordTierResult('hermes', 'statusline', { hash, evidence: 'footer renders' }, { file: grantsFile });
+  grantCapability('hermes', 'commandStatusline', { hash }, { file: grantsFile });
+  recordTierGate('hermes', 'primary-eligible', { hash, gatedBy: 'ruvnet/ruflo#2962' }, { file: grantsFile });
+  const cfg = cfgWith([{ name: 'hermes', source: 'mem://hermes' }]);
+
+  let cap = capture();
+  let code;
+  try {
+    code = await run({
+      positionals: ['status', 'hermes'], env: ON_ENV, cfg,
+      reader: async () => raw, grantsFile, flags: {},
+    });
+  } finally { cap.restore(); }
+
+  assert.equal(code, 0, cap.text());
+  let text = cap.text();
+  assert.match(text, /passed tiers:/);
+  assert.match(text, /admission/);
+  assert.match(text, /statusline/);
+  assert.match(text, /gated tiers \(waiting on upstream\):/);
+  assert.match(text, /primary-eligible -> ruvnet\/ruflo#2962/);
+  assert.match(text, /granted capabilities: commandStatusline/);
+  assert.doesNotMatch(text, /STALE/);
+
+  // Edit the manifest — the hash changes, so every prior tier result and
+  // granted capability must render as void, not silently vanish.
+  const editedRaw = validManifest({ version: '9.9.9' });
+  cap = capture();
+  try {
+    code = await run({
+      positionals: ['status', 'hermes'], env: ON_ENV, cfg,
+      reader: async () => editedRaw, grantsFile, flags: {},
+    });
+  } finally { cap.restore(); }
+
+  assert.equal(code, 0, cap.text());
+  text = cap.text();
+  assert.match(text, /STALE/);
+  assert.match(text, /gated tiers: \(none\)/, 'a stale record voids gated-tier visibility too');
+  assert.match(text, /granted capabilities: \(none\)/, 'a stale record voids granted capabilities');
+});
+
+test('status: with no <name> summarizes every configured adapter', async () => {
+  const grantsFile = tmpGrantsFile();
+  const rawHermes = validManifest({ name: 'hermes', host: validHost({ id: 'hermes' }) });
+  const rawAtlas = validManifest({ name: 'atlas', host: validHost({ id: 'atlas' }) });
+  const cfg = cfgWith([
+    { name: 'hermes', source: 'mem://hermes' },
+    { name: 'atlas', source: 'mem://atlas' },
+  ]);
+  const reader = async (source) => (source === 'mem://hermes' ? rawHermes : rawAtlas);
+
+  const cap = capture();
+  let code;
+  try {
+    code = await run({ positionals: ['status'], env: ON_ENV, cfg, reader, grantsFile, flags: {} });
+  } finally { cap.restore(); }
+
+  assert.equal(code, 0);
+  const text = cap.text();
+  assert.match(text, /host adapter status — hermes/);
+  assert.match(text, /host adapter status — atlas/);
+});
+
+test('status: an unknown adapter name fails 1', async () => {
+  const cap = capture();
+  let code;
+  try {
+    code = await run({
+      positionals: ['status', 'nope'], env: ON_ENV, cfg: cfgWith([{ name: 'hermes', source: 'mem://hermes' }]),
+      reader: neverCalled('reader'), grantsFile: tmpGrantsFile(), flags: {},
+    });
+  } finally { cap.restore(); }
+  assert.equal(code, 1);
+});
+
+// ── flag-off for grant/gate/status: exit 2, nothing written ─────────────
+
+test('grant/bless/gate/status all refuse with exit 2 when the flag is off, and write nothing', async () => {
+  const grantsFile = tmpGrantsFile();
+  const raw = validManifest();
+  const hash = hashManifest(validateAdapterManifest(raw));
+  recordTierResult('hermes', 'primary-eligible', { hash, evidence: 'ev' }, { file: grantsFile });
+  const cfg = cfgWith([{ name: 'hermes', source: 'mem://hermes' }]);
+  const reader = neverCalled('reader');
+
+  for (const positionals of [
+    ['grant', 'hermes', 'canBePrimary'],
+    ['bless', 'hermes', 'canBePrimary'],
+    ['gate', 'hermes', 'primary-eligible', 'agentic-qe#563'],
+    ['status', 'hermes'],
+    ['status'],
+  ]) {
+    const cap = capture();
+    let code;
+    try {
+      code = await run({ positionals, env: OFF_ENV, cfg, reader, grantsFile, flags: { yes: true } });
+    } finally { cap.restore(); }
+    assert.equal(code, 2, `positionals=${JSON.stringify(positionals)}`);
+  }
+
+  assert.deepEqual(grantedCapabilitiesFor('hermes', hash, { file: grantsFile }), {});
+});
+
+// ── revoke-grant ─────────────────────────────────────────────────────────
+
+test('revoke-grant works even when the experimental flag is off (fail-safe), and only touches the grants store', async () => {
+  const grantsFile = tmpGrantsFile();
+  const raw = validManifest();
+  const hash = hashManifest(validateAdapterManifest(raw));
+  recordTierResult('hermes', 'admission', { hash, evidence: 'ev' }, { file: grantsFile });
+
+  const file = tmpConsentFile();
+  const consent = fileConsent(file);
+  recordConsent('hermes', hash, { file });
+
+  const cap = capture();
+  let code;
+  try {
+    code = await run({
+      positionals: ['revoke-grant', 'hermes'], env: OFF_ENV, cfg: cfgWith([]), consent, grantsFile, flags: {},
+    });
+  } finally { cap.restore(); }
+
+  assert.equal(code, 0);
+  assert.match(cap.text(), /revoked all conformance evidence and grants/);
+  assert.equal(grantsFor('hermes', { file: grantsFile }), null);
+  // revoke-grant must never touch the separate consent (trust) store.
+  assert.equal(recordedHashFor('hermes', { file }), hash);
+});
+
+test('revoke-grant reports no recorded grants when none existed', async () => {
+  const grantsFile = tmpGrantsFile();
+  const cap = capture();
+  let code;
+  try {
+    code = await run({ positionals: ['revoke-grant', 'ghost'], env: ON_ENV, cfg: cfgWith([]), grantsFile, flags: {} });
+  } finally { cap.restore(); }
+  assert.equal(code, 0);
+  assert.match(cap.text(), /no recorded grants/);
+});
+
+// ── no exercise/callback surface anywhere in the new commands ───────────
+
+test('the grant/gate/status implementation never destructures or forwards an exercise/callback parameter', () => {
+  const grantsSrcPath = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../src/commands/x/host-adapters-grants.mjs');
+  const hostAdaptersSrcPath = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../src/commands/x/host-adapters.mjs');
+  const grantsSrc = fs.readFileSync(grantsSrcPath, 'utf8');
+  const hostAdaptersSrc = fs.readFileSync(hostAdaptersSrcPath, 'utf8');
+  // Real code destructuring/forwarding a parameter reads as `exercise,`,
+  // `exercise:`, or `exercise }` — distinct from this constraint's own prose
+  // ("exercising a path", "'exercise'/callback option"), which never follows
+  // the word with one of those three characters.
+  const PARAM_SHAPE = /\bexercise\s*[,:}]/;
+  assert.doesNotMatch(grantsSrc, PARAM_SHAPE, 'host-adapters-grants.mjs must never destructure/forward an exercise parameter');
+  assert.doesNotMatch(hostAdaptersSrc, PARAM_SHAPE, 'host-adapters.mjs must never destructure/forward an exercise parameter into grant/gate');
 });
