@@ -127,6 +127,151 @@ test('a non-zero exit is reported as ok:false with the exit code preserved', asy
   assert.equal(result.exitCode, 7);
 });
 
+// --- stdin (P2, ADR-0031: worker prompt delivery) ---------------------------
+
+test('stdin: a payload written to the child is delivered and echoed back', async () => {
+  const payload = 'the worker prompt, rendered task + handoffs';
+  const result = await runAdapterHook({
+    hook: { command: [NODE, '-e', 'process.stdin.pipe(process.stdout)'] },
+    hostId: 'claude', verb: 'run', stdin: payload,
+  });
+  assert.equal(result.ok, true);
+  assert.equal(result.stdout, payload);
+});
+
+test('stdin: a child that exits without reading stdin (EPIPE) still yields a normal result', async () => {
+  // A large payload makes it likely the write is still in flight (or at
+  // least unread) when the child exits, so the pipe's write side sees EPIPE.
+  const bigPayload = 'x'.repeat(4 * 1024 * 1024);
+  const result = await runAdapterHook({
+    hook: { command: [NODE, '-e', 'process.exit(3)'] },
+    hostId: 'claude', verb: 'run', stdin: bigPayload,
+  });
+  assert.equal(result.ok, false);
+  assert.equal(result.exitCode, 3);
+});
+
+test('stdin: absent stdin keeps the existing ignore behavior (reading it yields EOF, not a hang)', async () => {
+  const result = await runAdapterHook({
+    hook: {
+      command: [NODE, '-e', "let n=0; process.stdin.on('data', () => { n++; }); process.stdin.on('end', () => console.log('eof', n));"],
+    },
+    hostId: 'claude', verb: 'discover', timeoutMs: 5000,
+  });
+  assert.equal(result.ok, true);
+  assert.ok(result.stdout.includes('eof 0'), result.stdout);
+});
+
+// --- cwd (F-1: pin the child to the adapter's own directory, never the
+// operator's process.cwd() — a relative hook.command like `node
+// run-hook.mjs` must resolve against the adapter bundle, not wherever `ak
+// run` happened to be invoked from) --------------------------------------
+
+test('cwd: when provided, the child actually runs there — not in process.cwd()', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-adapter-hook-cwd-'));
+  try {
+    const target = fs.realpathSync(dir); // resolve /private symlink on macOS
+    const result = await runAdapterHook({
+      hook: { command: [NODE, '-e', 'console.log(process.cwd())'] },
+      hostId: 'claude', verb: 'run', cwd: target,
+    });
+    assert.equal(result.ok, true);
+    assert.equal(result.stdout.trim(), target);
+    assert.notEqual(result.stdout.trim(), process.cwd());
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('cwd: a relative path is refused synchronously, same class as the other arg-shape checks', async () => {
+  await assert.rejects(
+    () => runAdapterHook({
+      hook: { command: [NODE, '-e', "console.log('should not run')"] },
+      hostId: 'claude', verb: 'run', cwd: 'relative/dir',
+    }),
+    TypeError,
+  );
+});
+
+test('cwd: a non-string cwd is refused synchronously', async () => {
+  await assert.rejects(
+    () => runAdapterHook({
+      hook: { command: [NODE, '-e', "console.log('should not run')"] },
+      hostId: 'claude', verb: 'run', cwd: 42,
+    }),
+    TypeError,
+  );
+});
+
+test('cwd: omitted keeps the existing inherited-process.cwd() behavior', async () => {
+  const result = await runAdapterHook({
+    hook: { command: [NODE, '-e', 'console.log(process.cwd())'] },
+    hostId: 'claude', verb: 'discover',
+  });
+  assert.equal(result.ok, true);
+  assert.equal(result.stdout.trim(), process.cwd());
+});
+
+// --- stderrText (F-4: stderr must never be silently folded into a caller's
+// parse of `stdout` — the admitted execution adapter reads the payload from
+// stdout alone and diagnostics from stderrText, never a blended blob) ------
+
+test('stderrText: carries only stderr, independent of the combined stdout field', async () => {
+  const result = await runAdapterHook({
+    hook: {
+      command: [NODE, '-e', "process.stdout.write('PAYLOAD'); process.stderr.write('noisy diagnostic log line');"],
+    },
+    hostId: 'claude', verb: 'run',
+  });
+  assert.equal(result.ok, true);
+  assert.equal(result.stderrText, 'noisy diagnostic log line');
+  // the combined `stdout` field still folds both streams together, unchanged
+  // back-compat behavior for lifecycle callers/diagnostics that read it.
+  assert.ok(result.stdout.includes('PAYLOAD'));
+  assert.ok(result.stdout.includes('noisy diagnostic log line'));
+});
+
+test('stderrText: empty when the hook writes nothing to stderr', async () => {
+  const result = await runAdapterHook({
+    hook: { command: [NODE, '-e', "console.log('only stdout')"] },
+    hostId: 'claude', verb: 'run',
+  });
+  assert.equal(result.ok, true);
+  assert.equal(result.stderrText, '');
+});
+
+// --- stdoutText (R-1: mergeCapture's `stdout` folds stderr in after a
+// separator, so a JSON.parse of `stdout` breaks the instant the hook writes
+// ANYTHING to stderr — a warning, a deprecation notice, a logging library
+// defaulting to stderr. stdoutText is the unmerged, stdout-only capture the
+// admitted adapter must parse the payload from instead.) ------------------
+
+test('stdoutText: a JSON payload on stdout plus a warning on stderr — stdoutText parses cleanly, stdout does not', async () => {
+  const result = await runAdapterHook({
+    hook: {
+      command: [NODE, '-e', "process.stdout.write(JSON.stringify({summary:'ok'})); process.stderr.write('deprecation warning');"],
+    },
+    hostId: 'claude', verb: 'run',
+  });
+  assert.equal(result.ok, true);
+  assert.deepEqual(JSON.parse(result.stdoutText), { summary: 'ok' });
+  assert.equal(result.stderrText, 'deprecation warning');
+  // the combined `stdout` field is unchanged back-compat behavior — it folds
+  // both streams, so parsing IT as JSON is exactly the break R-1 fixes.
+  assert.throws(() => JSON.parse(result.stdout));
+  assert.ok(result.stdout.includes('deprecation warning'));
+});
+
+test('stdoutText: equals the plain stdout capture when the hook writes nothing to stderr', async () => {
+  const result = await runAdapterHook({
+    hook: { command: [NODE, '-e', "console.log('only stdout')"] },
+    hostId: 'claude', verb: 'run',
+  });
+  assert.equal(result.ok, true);
+  assert.equal(result.stdoutText.trim(), 'only stdout');
+  assert.equal(result.stdout, result.stdoutText);
+});
+
 // --- consent.mjs -----------------------------------------------------------
 
 function sandboxFile() {
