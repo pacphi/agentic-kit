@@ -15,8 +15,9 @@
 //   task before/after  → pre-task/post-task(route subagent work, feed learning)
 //   chat.message       → route             (inject routing recommendation)
 //
-// Failure policy: hooks NEVER break opencode. Only an explicit [BLOCKED]
-// verdict from pre-bash blocks a tool call; every other error is swallowed.
+// Failure policy: lifecycle and learning hooks never break opencode. An
+// explicit [BLOCKED] pre-bash verdict or a proven repeated tool+args+output
+// loop stops the active tool call; every other integration error is swallowed.
 
 import { spawn } from "node:child_process"
 import fs from "node:fs"
@@ -27,6 +28,82 @@ const HOOK_TIMEOUT_MS = 4500
 const ROUTE_MIN_PROMPT = 12
 const ROUTE_MAX_INJECT = 1200
 const TRIVIAL_PROMPT = /^(yes|y|ok|k|sure|continue|go ahead|proceed|lgtm|next)[.!]?$/i
+const TOOL_LOOP_THRESHOLD = 3
+const TOOL_LOOP_SESSION_LIMIT = 256
+
+function canonicalJson(value) {
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`
+  if (value && typeof value === "object") {
+    return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${canonicalJson(value[key])}`).join(",")}}`
+  }
+  const encoded = JSON.stringify(value)
+  return encoded === undefined ? String(value) : encoded
+}
+
+function trimOldest(map, limit) {
+  while (map.size > limit) map.delete(map.keys().next().value)
+}
+
+// OpenCode 1.18.18's native detector only inspects parts on the current
+// assistant message. Tool-driven agent turns create a new assistant message
+// after every tool result, so the detector never sees a three-call streak.
+// This guard keeps only the trailing completed call per session. It requires
+// the tool name, canonical args, and output to repeat three times before it
+// blocks the next identical call. A real user message resets the streak;
+// assistant continuations and compaction do not.
+function createToolLoopGuard({ threshold = TOOL_LOOP_THRESHOLD } = {}) {
+  const completed = new Map()
+  const pending = new Map()
+  const pendingKey = (sessionID, callID) => `${sessionID}\u0000${callID}`
+
+  return {
+    before({ sessionID, callID, tool }, args) {
+      const signature = `${tool}\u0000${canonicalJson(args)}`
+      const prior = completed.get(sessionID)
+      if (prior && prior.signature === signature && prior.count >= threshold) {
+        return {
+          blocked: true,
+          count: prior.count,
+          fingerprint: signature,
+        }
+      }
+      // An intervening tool or argument set breaks a trailing streak even if
+      // that call later fails before the after-hook can run.
+      if (prior && prior.signature !== signature) completed.delete(sessionID)
+      pending.set(pendingKey(sessionID, callID), { sessionID, signature })
+      trimOldest(pending, TOOL_LOOP_SESSION_LIMIT * 8)
+      return { blocked: false }
+    },
+
+    after({ sessionID, callID }, output) {
+      const key = pendingKey(sessionID, callID)
+      const call = pending.get(key)
+      pending.delete(key)
+      if (!call) return
+      const outputFingerprint = canonicalJson(output)
+      const prior = completed.get(sessionID)
+      const count = prior
+        && prior.signature === call.signature
+        && prior.outputFingerprint === outputFingerprint
+        ? prior.count + 1
+        : 1
+      completed.delete(sessionID)
+      completed.set(sessionID, {
+        signature: call.signature,
+        outputFingerprint,
+        count,
+      })
+      trimOldest(completed, TOOL_LOOP_SESSION_LIMIT)
+    },
+
+    reset(sessionID) {
+      completed.delete(sessionID)
+      for (const [key, call] of pending) {
+        if (call.sessionID === sessionID) pending.delete(key)
+      }
+    },
+  }
+}
 
 // The hook-handler ships with ruflo — resolve it without machine-specific
 // hardcodes: explicit override → claude marketplace clone (auto-updated) →
@@ -115,6 +192,7 @@ function directOpenCodeReferences(text) {
 }
 
 const plugin = async ({ client }) => {
+  const toolLoopGuard = createToolLoopGuard()
   await client.app.log({
     body: {
       service: "ruflo-hooks",
@@ -134,6 +212,7 @@ const plugin = async ({ client }) => {
             fire("session-restore")
             break
           case "session.deleted":
+            toolLoopGuard.reset(event?.properties?.info?.id ?? event?.properties?.sessionID)
             fire("session-end")
             break
         }
@@ -142,6 +221,7 @@ const plugin = async ({ client }) => {
 
     "chat.message": async (input, output) => {
       try {
+        toolLoopGuard.reset(input.sessionID)
         const prompt = promptText(output?.parts)
         if (prompt.length < ROUTE_MIN_PROMPT || TRIVIAL_PROMPT.test(prompt)) return
         const res = await runHook("route", { prompt })
@@ -166,6 +246,15 @@ const plugin = async ({ client }) => {
 
     "tool.execute.before": async (input, output) => {
       try {
+        const loop = toolLoopGuard.before(input, output?.args)
+        if (loop.blocked) {
+          try {
+            await client.session.abort({ path: { id: input.sessionID } })
+          } catch { /* the guard error below is the fail-closed path */ }
+          throw new Error(
+            `[ruflo] Probable doom loop stopped after ${loop.count} identical completed calls: ${input.tool}`,
+          )
+        }
         if (input.tool === "bash") {
           const command = output?.args?.command
           if (typeof command !== "string" || !command) return
@@ -188,6 +277,7 @@ const plugin = async ({ client }) => {
 
     "tool.execute.after": async (input, output) => {
       try {
+        toolLoopGuard.after(input, output?.output)
         // Skills originate in the shared Ruflo catalogue and can carry Claude
         // MCP spellings. Normalize them on the OpenCode-only surface even when
         // the optional lazy gateway is unavailable; the gateway may then
@@ -213,4 +303,4 @@ const plugin = async ({ client }) => {
 }
 
 export default plugin
-export { plugin as RufloHooks }
+export { canonicalJson, createToolLoopGuard, plugin as RufloHooks }
