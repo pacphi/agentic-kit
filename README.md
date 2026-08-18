@@ -236,7 +236,9 @@ in `kit.json`) converges, on every `ak sync`:
 - **Lifecycle hooks** — `~/.config/opencode/plugins/ruflo-hooks.js`: session restore/end,
   best-effort bash safety screening (defense-in-depth, fail-open if the local handler is
   unavailable), edit/task outcome recording for ruflo's learning substrate
-  (opencode has no settings-hooks surface; its plugin events are the hook spine).
+  (opencode has no settings-hooks surface; its plugin events are the hook spine), plus a bounded
+  repeated-tool guard. Three identical completed tool/argument/output calls in one user turn stop
+  a fourth identical attempt; changed calls, outputs, user turns, and sessions do not collide.
 - **Lazy specialists + skills** — one receipt-owned `ak-specialist` subagent replaces the eager
   107-profile task catalogue. The complete converted catalogue is embedded in the gateway and
   reached through `ak_agent_search`, stock OpenCode `task`, and `ak_agent_load`. Installed skills

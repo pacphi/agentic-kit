@@ -3,7 +3,7 @@
 - **Status:** Accepted; compatibility references amended by
   [ADR-0020](0020-ga-stable-surfaces.md)
 - **Date:** 2026-07-28
-- **Updated:** 2026-08-15
+- **Updated:** 2026-08-17
 - **Update note:** Clarified that the AQE boundary applies to inference-provider routing, not
   AQE's upstream OpenCode platform assets, and recorded the implemented OpenCode transcript,
   token, observed-cost, and provider-id analytics path. ADR-0023 adds classified SQLite source
@@ -11,7 +11,8 @@
   and requires pre-mutation disclosure of OpenCode's wildcard approvals, MCP registrations,
   lifecycle plugin, and managed host assets. The 2026-08-15 amendment keeps Ruflo and Agentic QE
   connected in stock OpenCode while blacklisting their eager tool catalogues from model requests
-  and projecting a compact, lazy Agentic Kit gateway instead.
+  and projecting a compact, lazy Agentic Kit gateway instead. The 2026-08-17 amendment adds a
+  bounded cross-assistant-message repeated-tool guard to the managed lifecycle plugin.
 - **Deciders:** agentic-kit maintainers
 
 > **GA amendment:** OpenCode remains opt-in, non-primary, and outside AQE inference-provider
@@ -177,8 +178,16 @@ Every ak-managed byte on opencode's surfaces lives behind one module, following 
   content-diffed (`deployPlugin`), refreshed whenever the template changes, and
   **no-clobber**: only content matching the exact last-written SHA-256 receipt may be
   refreshed or removed; marker-bearing user edits are preserved and reported. Failure
-  policy: hooks never break the host. Bash screening is explicitly defense-in-depth and
-  fails open when the local handler errors or times out.
+  policy: lifecycle, routing, and learning integration failures never break the host. Bash
+  screening is explicitly defense-in-depth and fails open when the local handler errors or times
+  out. One host-local safety condition fails closed: after three completed calls with the same
+  tool name, recursively canonicalized arguments, and exact output in one user turn, a fourth
+  identical call aborts that session. A changed tool/argument/output or new user message resets
+  the trailing streak; sessions are isolated and compaction does not erase it. This closes stock
+  OpenCode 1.18.18's current-message-only detector gap without copying the over-broad upstream
+  proposal that counts nonconsecutive matches anywhere in compacted history. Focused tests cover
+  reordered object keys, changed-call/output reset, user-turn reset, session isolation, and the
+  wired session-abort path.
 - **Agents converted into a lazy receipt-owned catalogue:** `convertAgents` normalizes the
   complete upstream profile set, deterministically resolves name collisions, and embeds the
   resulting metadata and bodies in the exact-receipted gateway. OpenCode scans only one managed
