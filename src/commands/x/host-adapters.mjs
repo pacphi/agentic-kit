@@ -15,6 +15,7 @@
 // raw file — an invalid manifest (e.g. one claiming canBePrimary) is refused
 // with its .reason and nothing is ever recorded for it.
 import readline from 'node:readline/promises';
+import { positiveInt } from '../run.mjs';
 import { hashManifest, SUPPORTED_CONTRACT } from '../../lib/adapters/admission.mjs';
 import { validateAdapterManifest } from '../../lib/adapters/manifest.mjs';
 import { HOST_REGISTRY } from '../../lib/adapters/registries.mjs';
@@ -350,11 +351,19 @@ async function warnAboutHooks(name, entry, rawReader) {
  * recording semantics (passed -> recordTierResult, upstream-gated ->
  * recordTierGate, everything else persists nothing). */
 async function conformance({
-  name, cfg, reader, runTiered, consentFile, grantsFile,
+  name, cfg, reader, runTiered, consentFile, grantsFile, flags = /** @type {{timeout?:string}} */ ({}),
 }) {
   if (typeof name !== 'string' || !name) { fail('usage: ak host adapters conformance <name>'); return 2; }
   const entry = findEntry(cfg, name);
   if (!entry) { fail(`no host adapter named '${name}' in kit.json hostAdapters`); return 1; }
+
+  let timeoutMs;
+  try {
+    timeoutMs = positiveInt(flags.timeout, 'timeout', { ceiling: 2_147_483_647 });
+  } catch (error) {
+    fail(error.message);
+    return 2;
+  }
 
   const rawReader = toRawManifestReader(reader);
   await warnAboutHooks(name, entry, rawReader);
@@ -367,6 +376,7 @@ async function conformance({
       readManifest: rawReader,
       consentFile,
       grantsFile,
+      timeoutMs,
     });
   } catch (error) {
     fail(`'${name}' conformance run failed: ${stripControl(error?.message ?? String(error))}`);
@@ -426,7 +436,7 @@ export async function run({
   }
   if (sub === 'conformance') {
     return conformance({
-      name, cfg: resolvedCfg, reader, runTiered: runTieredConformance, consentFile, grantsFile,
+      name, cfg: resolvedCfg, reader, runTiered: runTieredConformance, consentFile, grantsFile, flags,
     });
   }
   // F-8 (security review, ADR-0031-accurate naming): `bless` is the alias —

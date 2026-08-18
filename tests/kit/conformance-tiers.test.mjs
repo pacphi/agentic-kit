@@ -52,6 +52,57 @@ function rawAcmeManifest(overrides = {}) {
   };
 }
 
+/**
+ * A minimal routable-adapter fixture written fresh into `tempDir` for one
+ * test — real subprocess, no shared state with the acme fixture — so a
+ * test can supply its own `run-hook.mjs` body to observe exactly what the
+ * activity-routing tier's real worker receives (prompt, AK_WORKER_CWD).
+ */
+function writeProbeAdapter(tempDir, { runHookSource, hookTimeoutMs = 5000 } = {}) {
+  const manifest = {
+    name: 'probe',
+    version: '1.0.0',
+    contract: 1,
+    host: {
+      id: 'probe',
+      label: 'Probe CLI',
+      install: { bin: 'probe', externalInstallPolicy: 'detect-never-overwrite' },
+      capabilities: {
+        canDriveSession: false,
+        canBePrimary: false,
+        canRouteActivities: true,
+        commandStatusline: false,
+        transcripts: false,
+        usage: false,
+        nativeMcpConfig: false,
+        nativeGuidance: false,
+      },
+      trust: { approvalPolicy: 'unchanged', changes: [] },
+      enabledByDefault: false,
+      configProjection: 'ruflo',
+      observability: [],
+    },
+    detection: { bin: 'probe', versionArgs: ['--version'], versionPattern: '\\d+\\.\\d+\\.\\d+' },
+    driving: { surfaces: ['cli-subprocess'] },
+    execution: { run: { hook: { command: ['node', 'run-hook.mjs'], timeoutMs: hookTimeoutMs } } },
+    trust: {
+      changes: [{
+        id: 'probe-subprocess-hooks',
+        kind: 'third-party-adapter',
+        scope: 'project',
+        owner: 'probe',
+        value: 'subprocess hooks',
+        effect: 'run consented execution hooks for probe',
+      }],
+    },
+  };
+  fs.writeFileSync(path.join(tempDir, 'manifest.json'), JSON.stringify(manifest, null, 2));
+  fs.writeFileSync(path.join(tempDir, 'run-hook.mjs'), runHookSource);
+  return path.join(tempDir, 'manifest.json');
+}
+
+const readManifestFromTempFile = async (source) => JSON.parse(fs.readFileSync(source, 'utf8'));
+
 // ── exports sanity ───────────────────────────────────────────────────────
 
 test('re-exports the five ADR-0031 §2 conformance tiers in graduation order', () => {
@@ -185,6 +236,86 @@ test('activity-routing tier is honestly skipped when the manifest declares neith
   const record = grantsFor('acme', { file: grantsFile });
   assert.equal(record.tiers.admission.status, 'passed'); // admission legitimately recorded
   assert.equal(record.tiers['activity-routing'], undefined); // the skipped tier recorded nothing
+});
+
+// ── activity-routing tier: bounded probe + scratch cwd (adrianco#131) ──────
+
+test("activity-routing sends a bounded, directive probe prompt and runs the worker in a throwaway scratch cwd, never the caller's process.cwd()", async () => {
+  const grantsFile = tempGrantsFile();
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-conformance-probe-'));
+  const runHookSource = `
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+let prompt = '';
+process.stdin.setEncoding('utf8');
+process.stdin.on('data', (chunk) => { prompt += chunk; });
+process.stdin.on('end', () => {
+  const captureFile = path.join(path.dirname(fileURLToPath(import.meta.url)), 'capture.json');
+  const cwdEnv = process.env.AK_WORKER_CWD ?? null;
+  fs.writeFileSync(captureFile, JSON.stringify({ prompt, cwdEnv, dirExistedDuringRun: cwdEnv ? fs.existsSync(cwdEnv) : false }));
+  process.stdout.write(JSON.stringify({ summary: 'probe captured', provider: 'probe' }));
+});
+`;
+  const manifestSource = writeProbeAdapter(tempDir, { runHookSource });
+
+  const report = await runTieredConformance({
+    manifestSource,
+    readManifest: readManifestFromTempFile,
+    tiers: ['activity-routing'],
+    grantsFile,
+    haveFn: async () => true,
+  });
+
+  const [tier] = report.tiers;
+  assert.equal(tier.status, 'passed', JSON.stringify(tier.checks, null, 2));
+
+  const capture = JSON.parse(fs.readFileSync(path.join(tempDir, 'capture.json'), 'utf8'));
+  assert.equal(capture.prompt, 'Reply with exactly: OK');
+  assert.ok(capture.cwdEnv, 'AK_WORKER_CWD must be set');
+  assert.notEqual(capture.cwdEnv, process.cwd());
+  assert.equal(capture.dirExistedDuringRun, true, 'the scratch cwd must be a real, existing directory while the hook runs');
+  assert.ok(!fs.existsSync(capture.cwdEnv), 'the scratch cwd must be cleaned up once the conformance run returns');
+});
+
+test('an explicit timeoutMs option reaches the real worker: a hook that outlives it fails the tier as a genuine timeout, not a 120s wait', async () => {
+  const grantsFile = tempGrantsFile();
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-conformance-timeout-override-'));
+  const runHookSource = "setTimeout(() => { process.stdout.write(JSON.stringify({ summary: 'too slow', provider: 'probe' })); }, 3000);\n";
+  const manifestSource = writeProbeAdapter(tempDir, { runHookSource, hookTimeoutMs: 5000 });
+
+  const report = await runTieredConformance({
+    manifestSource,
+    readManifest: readManifestFromTempFile,
+    tiers: ['activity-routing'],
+    grantsFile,
+    haveFn: async () => true,
+    timeoutMs: 200,
+  });
+
+  const [tier] = report.tiers;
+  assert.equal(tier.status, 'failed', JSON.stringify(tier.checks, null, 2));
+});
+
+test("with no explicit override, the outer runner honors the manifest's own declared execution.run.hook.timeoutMs instead of the runner's 120s default", async () => {
+  const grantsFile = tempGrantsFile();
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-conformance-declared-timeout-'));
+  const runHookSource = "setTimeout(() => { process.stdout.write(JSON.stringify({ summary: 'too slow', provider: 'probe' })); }, 3000);\n";
+  const manifestSource = writeProbeAdapter(tempDir, { runHookSource, hookTimeoutMs: 300 });
+
+  const startedAt = Date.now();
+  const report = await runTieredConformance({
+    manifestSource,
+    readManifest: readManifestFromTempFile,
+    tiers: ['activity-routing'],
+    grantsFile,
+    haveFn: async () => true,
+  });
+  const elapsedMs = Date.now() - startedAt;
+
+  const [tier] = report.tiers;
+  assert.equal(tier.status, 'failed', JSON.stringify(tier.checks, null, 2));
+  assert.ok(elapsedMs < 2500, `expected the manifest's declared 300ms hook timeout to bound the run, took ${elapsedMs}ms`);
 });
 
 // ── session-driving tier: honest skipped/gated, never faked ────────────────

@@ -938,6 +938,41 @@ test('conformance: the banner strips a raw C1 byte (U+009B, CSI) out of a hook c
   assert.match(text, /detectpayload/, 'the C1 byte is removed outright, the surrounding text survives');
 });
 
+test('conformance: --timeout is parsed and forwarded to runTiered as timeoutMs (adrianco#131 #1)', async () => {
+  const cfg = cfgWith([{ name: 'acme', source: ACME_MANIFEST_PATH }]);
+  let received;
+  const cap = capture();
+  let code;
+  try {
+    code = await run({
+      positionals: ['conformance', 'acme'], env: ON_ENV, cfg,
+      reader: acmeReader, grantsFile: tmpGrantsFile(), flags: { timeout: '900000' },
+      runTieredConformance: (opts) => {
+        received = opts;
+        return runTieredConformance({ ...opts, haveFn: async () => true });
+      },
+    });
+  } finally { cap.restore(); }
+
+  assert.equal(code, 0, cap.text());
+  assert.equal(received.timeoutMs, 900000);
+});
+
+test('conformance: an invalid --timeout fails with exit 2 before the harness ever runs', async () => {
+  const cfg = cfgWith([{ name: 'acme', source: ACME_MANIFEST_PATH }]);
+  const cap = capture();
+  let code;
+  try {
+    code = await run({
+      positionals: ['conformance', 'acme'], env: ON_ENV, cfg,
+      reader: acmeReader, grantsFile: tmpGrantsFile(), flags: { timeout: 'not-a-number' },
+      runTieredConformance: neverCalled('runTieredConformance'),
+    });
+  } finally { cap.restore(); }
+  assert.equal(code, 2);
+  assert.match(cap.text(), /timeout must be a positive integer/);
+});
+
 // ── grant / bless (ADR-0031 P5) ─────────────────────────────────────────
 // grant's disclosure now also derives the manifest trust state (F-3), so
 // every test that reaches loadAndHash passes an isolated `consent` store —

@@ -47,7 +47,7 @@ Examples:
   ak run feature "fix the flaky parser" --escalate`;
 
 /** @param {string|undefined} value @param {string} name @param {{ ceiling?: number }} [opts] */
-function positiveInt(value, name, { ceiling } = {}) {
+export function positiveInt(value, name, { ceiling } = {}) {
   if (value === undefined) return undefined;
   if (!/^\d+$/.test(value) || Number(value) < 1) throw new TypeError(`${name} must be a positive integer`);
   const n = Number(value);
