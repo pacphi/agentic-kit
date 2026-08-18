@@ -102,6 +102,14 @@ Field by field:
 | `driving.surfaces` | Declare `cli-subprocess`. See below. |
 | `lifecycle` / `execution` | Your hooks ([section 3](#3-write-the-hooks)). Both are optional; a manifest with neither is a pure description. |
 
+> **Capabilities describe what the adapter *delivers through `ak`*, not what your host can do in
+> principle.** A real Hermes adapter's first draft declared `nativeMcpConfig: true` and
+> `nativeGuidance: true` — both true of Hermes itself (`hermes mcp add`, reading `AGENTS.md` from
+> cwd) but false of the adapter, which shipped no `apply`/`undo` hooks to actually *wire* either.
+> If your manifest has no hooks for a capability, declare it `false` even when the underlying CLI
+> supports it — the example manifest above is right (all three `false`) precisely because it has
+> no `lifecycle.apply`/`lifecycle.undo` hooks yet.
+
 ### Driving surfaces
 
 The vocabulary has three names — `cli-subprocess`, `acp`, `mcp` — but **`cli-subprocess` is the only
@@ -160,7 +168,10 @@ This is the one that actually drives your host as a worker under `ak run`.
 - **stdin** carries the worker prompt.
 - **the environment** carries `AK_WORKER_ID`, `AK_WORKER_ACTIVITY`, `AK_WORKER_ROLE`,
   `AK_WORKER_MODEL`, and `AK_WORKER_CWD` (the repository being worked on — your hook does *not*
-  spawn there, see below).
+  spawn there, see below). **`AK_WORKER_CWD` is advisory, not a sandbox boundary** — `ak` tells
+  your hook which directory to work in, but nothing confines an auto-approving host to it once your
+  hook hands control to it. If your host has no permission event to intercept (many local-model
+  CLIs don't), it is your hook's job to make that boundary real.
 - **stdout** carries either a JSON object — `{summary, observedModel, provider, usage}`, all
   optional — or plain text, which is taken as the summary.
 - **the exit code** is the sole authority for success.
@@ -276,6 +287,13 @@ This runs the tiered black-box harness against your **real** host — spawning y
 prints an honest per-tier verdict. It warns first, listing every hook command it is about to run as
 a real subprocess. Here is a real run against the repository's conformance fixture
 (an adapter shaped exactly like the manifest in section 2):
+
+`activity-routing` and `primary-eligible` drive a genuine worker through your `execution.run` hook,
+so two things are handled for you: the outer time budget honors your manifest's own declared
+`execution.run.hook.timeoutMs` automatically (pass `--timeout <ms>` to override it), and the worker's
+cwd is a throwaway scratch directory, never wherever you happened to run the command from — an
+auto-approving agentic host has no business landing in your real working directory during a
+self-test.
 
 ```text
 host adapter conformance — acme  (56fa107674d2)

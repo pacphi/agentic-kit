@@ -47,6 +47,13 @@ export { CONFORMANCE_TIERS, TIER_GRANTS };
 
 const nowIso = () => new Date().toISOString();
 
+// A real adapter drives a real, often agentic, host (Wave adrianco#131: an
+// open-ended probe like "conformance harness probe" reads as a TASK to an
+// agentic CLI, which then goes and builds one — minutes of real work instead
+// of a transport check). Directive and bounded so every tier's exercise
+// tests wiring, not the model's ambition.
+const CONFORMANCE_PROBE_PROMPT = 'Reply with exactly: OK';
+
 /** admitAdapters' readManifest contract: `(source) => Promise<any>` — a real
  * resolve, matching admission.mjs's own default (dynamic import so this
  * module's own load stays cheap for callers that always inject a reader). */
@@ -201,7 +208,7 @@ function checkSessionDriving({ manifest, upstreamRef }) {
 // real, so it is the one tier expected to genuinely PASS against a conforming
 // fixture today.
 async function checkActivityRouting({
-  manifest, name, baseDir, haveFn, clock,
+  manifest, name, baseDir, haveFn, clock, cwd, timeoutMs,
 }) {
   if (!manifest) {
     return { status: 'skipped', checks: [{ name: 'admission prerequisite', ok: false, detail: 'admission tier did not pass — cannot evaluate' }] };
@@ -231,10 +238,10 @@ async function checkActivityRouting({
     // subprocess, not a stub.
     const plan = {
       workers: [{
-        id: 'conformance-w1', activity: 'implementation', role: 'coder', host: name, prompt: 'conformance harness probe',
+        id: 'conformance-w1', activity: 'implementation', role: 'coder', host: name, prompt: CONFORMANCE_PROBE_PROMPT,
       }],
     };
-    const [result] = await executeRunPlan(plan, { clock });
+    const [result] = await executeRunPlan(plan, { clock, cwd, timeoutMs });
     if (result.status !== 'succeeded') throw new Error(result.failure?.reason ?? `expected a succeeded WorkerResult, got '${result.status}'`);
     succeeded = result;
     return `worker '${result.workerId}' succeeded via host '${result.host}' (exitCategory=${result.exitCategory})`;
@@ -311,7 +318,7 @@ async function checkActivityRouting({
 const PRIMARY_ELIGIBLE_UNROUTED_HOST_SUFFIX = 'conformance-unrouted-rung';
 
 async function runPrimaryEligibleExercise({
-  manifest, name, baseDir, haveFn, clock,
+  manifest, name, baseDir, haveFn, clock, cwd, timeoutMs,
 }) {
   const unroutedHost = `${PRIMARY_ELIGIBLE_UNROUTED_HOST_SUFFIX}-${name}`;
   resetAdmittedExecution();
@@ -321,16 +328,18 @@ async function runPrimaryEligibleExercise({
       workers: [
         {
           id: 'primary-eligible-direct', activity: 'implementation', role: 'coder', host: name,
-          prompt: 'conformance harness probe: primary-eligible direct run (non-escalated)',
+          prompt: CONFORMANCE_PROBE_PROMPT,
         },
         {
           id: 'primary-eligible-escalation', activity: 'implementation', role: 'coder', host: unroutedHost,
-          prompt: 'conformance harness probe: primary-eligible escalation (receives an escalation)',
+          prompt: CONFORMANCE_PROBE_PROMPT,
           escalate: [{ host: name, model: null }],
         },
       ],
     };
-    const [direct, escalation] = await executeRunPlan(plan, { clock, escalate: true });
+    const [direct, escalation] = await executeRunPlan(plan, {
+      clock, escalate: true, cwd, timeoutMs,
+    });
 
     if (direct?.status !== 'succeeded' || direct.host !== name) {
       return { ok: false, detail: `direct (non-escalated) worker did not complete via '${name}' (status=${direct?.status})` };
@@ -373,11 +382,11 @@ async function runPrimaryEligibleExercise({
  * lets a maintainer's later grantCapability succeed at all.
  */
 async function checkPrimaryEligible({
-  manifest, name, baseDir, haveFn, clock,
+  manifest, name, baseDir, haveFn, clock, cwd, timeoutMs,
 }) {
   const exerciseLabel = 'leads a run and receives an escalation (ADR-0019)';
   const outcome = await runPrimaryEligibleExercise({
-    manifest, name, baseDir, haveFn, clock,
+    manifest, name, baseDir, haveFn, clock, cwd, timeoutMs,
   });
   if (outcome.ok) {
     return { status: 'passed', checks: [{ name: exerciseLabel, ok: true, detail: outcome.detail }], evidence: outcome.detail };
@@ -455,6 +464,18 @@ async function checkGrantGatedTier({
  * conformance run to touch the real store (tests, dry runs) must pass an
  * explicit path. Pass `persist: false` to skip recording altogether.
  *
+ * activity-routing and primary-eligible drive a REAL worker through the
+ * adapter's execution.run hook (adrianco#131): `timeoutMs` explicitly
+ * overrides the outer budget; omitted, the manifest's own declared
+ * `execution.run.hook.timeoutMs` is honored instead of the runner's 120s
+ * default, so a manifest that already declares a longer budget just works
+ * (the hook-level `resolveTimeout` still takes the tighter of the two, so
+ * this can only raise the ceiling, never bypass a SHORTER hook-declared one).
+ * `cwd` defaults to a throwaway temp directory (cleaned up on return) rather
+ * than the operator's `process.cwd()` — an auto-approving agentic worker has
+ * no business landing in whatever directory the operator happened to run
+ * `ak host adapters conformance` from.
+ *
  * primary-eligible has no caller-injectable exercise (unlike statusline,
  * still a placeholder this wave): it always runs runPrimaryEligibleExercise,
  * a real escalation-plus-direct-run probe driven through executeRunPlan
@@ -475,7 +496,7 @@ async function checkGrantGatedTier({
  *   haveFn?: (cmd: string, opts?: any) => Promise<boolean>, baseDir?: string|null,
  *   sessionDrivingUpstreamRef?: string,
  *   exerciseStatusline?: (ctx: {manifest:any,name:string,hash:string}) => Promise<{ok:boolean,detail?:string}>,
- *   clock?: () => string,
+ *   clock?: () => string, timeoutMs?: number, cwd?: string,
  * }} [options]
  * @returns {Promise<{ name: string, hash: string|null,
  *   tiers: Array<{ tier: string, status: 'passed'|'failed'|'gated'|'skipped',
@@ -496,6 +517,8 @@ export async function runTieredConformance({
   sessionDrivingUpstreamRef,
   exerciseStatusline,
   clock = nowIso,
+  timeoutMs,
+  cwd,
 } = {}) {
   if (typeof manifestSource !== 'string' || !manifestSource) {
     throw new TypeError('runTieredConformance requires fixtureRoot or manifestSource');
@@ -506,6 +529,16 @@ export async function runTieredConformance({
   if (!consentFileUsed) {
     tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-adapter-conformance-tiers-'));
     consentFileUsed = path.join(tempDir, 'adapter-consent.json');
+  }
+
+  // adrianco#131 #2: a live, often auto-approving worker must never land in
+  // the operator's own $PWD by accident — a throwaway scratch directory,
+  // never process.cwd(), unless a caller (tests) supplies its own.
+  let workerCwdTempDir = null;
+  let workerCwd = cwd;
+  if (!workerCwd) {
+    workerCwdTempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-adapter-conformance-cwd-'));
+    workerCwd = workerCwdTempDir;
   }
 
   try {
@@ -533,6 +566,15 @@ export async function runTieredConformance({
     const effectiveManifest = admissionPassed ? admission.manifest : null;
     const wantTier = (tier) => tiers.includes(tier);
 
+    // adrianco#131 #1: an explicit override always wins; otherwise honor the
+    // manifest's own declared execution.run.hook.timeoutMs (if any) as the
+    // OUTER runner budget too, so a manifest that already declares a longer
+    // one (e.g. a local-model host) isn't silently capped at the runner's
+    // 120s default before the hook's own tighter-of-the-two ever applies.
+    const effectiveTimeoutMs = timeoutMs !== undefined
+      ? timeoutMs
+      : effectiveManifest?.execution?.run?.hook?.timeoutMs;
+
     const tierResults = [];
 
     if (wantTier('admission')) {
@@ -557,6 +599,7 @@ export async function runTieredConformance({
     if (wantTier('activity-routing') || wantTier('primary-eligible')) {
       activityRoutingResult = await checkActivityRouting({
         manifest: effectiveManifest, name: resolvedName, baseDir: derivedBaseDir, haveFn, clock,
+        cwd: workerCwd, timeoutMs: effectiveTimeoutMs,
       });
       if (wantTier('activity-routing')) {
         tierResults.push({ tier: 'activity-routing', ...activityRoutingResult });
@@ -586,6 +629,7 @@ export async function runTieredConformance({
       } else {
         result = await checkPrimaryEligible({
           manifest: effectiveManifest, name: resolvedName, baseDir: derivedBaseDir, haveFn, clock,
+          cwd: workerCwd, timeoutMs: effectiveTimeoutMs,
         });
       }
       tierResults.push({ tier: 'primary-eligible', ...result });
@@ -648,5 +692,6 @@ export async function runTieredConformance({
     resetAdmittedExecution();
     resetAdmittedLifecycle();
     if (tempDir) { try { fs.rmSync(tempDir, { recursive: true, force: true }); } catch { /* best-effort cleanup */ } }
+    if (workerCwdTempDir) { try { fs.rmSync(workerCwdTempDir, { recursive: true, force: true }); } catch { /* best-effort cleanup */ } }
   }
 }
