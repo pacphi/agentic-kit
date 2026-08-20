@@ -51,6 +51,11 @@ const initDelay = Number(process.env.AK_FAKE_MCP_INIT_DELAY_MS || 0)
 const hangMarker = process.env.AK_FAKE_MCP_FIRST_INIT_HANG_MARKER
 const termDelay = Number(process.env.AK_FAKE_MCP_TERM_DELAY_MS || 0)
 const pidFile = process.env.AK_FAKE_MCP_PID_FILE
+const contextFile = process.env.AK_FAKE_MCP_CONTEXT_FILE
+if (contextFile) fs.writeFileSync(contextFile, JSON.stringify({
+  cwd: process.cwd(),
+  db: process.env.CLAUDE_FLOW_DB_PATH,
+}))
 if (pidFile) fs.writeFileSync(pidFile, String(process.pid))
 if (process.env.AK_FAKE_MCP_IGNORE_TERM === '1') {
   process.on('SIGTERM', () => {})
@@ -125,11 +130,12 @@ test('gateway uses the ak-managed MCP command lazily and preserves the full live
     const server = path.join(root, 'fake-mcp.mjs');
     const log = path.join(root, 'mcp.log');
     const aqeLog = path.join(root, 'aqe-mcp.log');
+    const contextFile = path.join(root, 'mcp-context.json');
     writeFakeMcp(server);
     const mcp = {
         'claude-flow': {
           type: 'local', command: [process.execPath, server], enabled: true,
-          environment: { AK_FAKE_MCP_LOG: log },
+          environment: { AK_FAKE_MCP_LOG: log, AK_FAKE_MCP_CONTEXT_FILE: contextFile },
         },
         'agentic-qe': {
           type: 'local', command: [process.execPath, server], enabled: true,
@@ -137,7 +143,7 @@ test('gateway uses the ak-managed MCP command lazily and preserves the full live
         },
       };
     const mod = await loadGateway(root, mcp);
-    const hooks = await mod.default();
+    const hooks = await mod.default({ directory: root });
     t.after(() => hooks.dispose());
     const cfg = {
       mcp,
@@ -169,6 +175,11 @@ test('gateway uses the ak-managed MCP command lazily and preserves the full live
     const context = toolContext();
     const search = await hooks.tool.ak_ruflo_search.execute({ query: 'semantic memory', limit: 4 }, context);
     const searchResult = JSON.parse(search);
+    const canonicalRoot = fs.realpathSync(root);
+    assert.deepEqual(JSON.parse(fs.readFileSync(contextFile, 'utf8')), {
+      cwd: canonicalRoot,
+      db: path.join(canonicalRoot, '.swarm', 'memory.db'),
+    });
     assert.match(searchResult.instruction, /arguments_json/);
     assert.equal(searchResult.matches[0].name, 'memory_search');
     assert.deepEqual(searchResult.matches[0].inputSchema.properties.query, { type: 'string' });

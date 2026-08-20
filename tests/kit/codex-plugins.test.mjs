@@ -20,6 +20,7 @@ function seedPlugin({
   manifest = {},
   manifestDir = '.codex-plugin',
   hook,
+  skills = [],
 }) {
   const root = pluginRoot(marketplace, plugin, version);
   fs.mkdirSync(path.join(root, manifestDir), { recursive: true });
@@ -29,6 +30,11 @@ function seedPlugin({
     const hookFile = path.join(root, manifest.hooks ?? 'hooks/hooks.json');
     fs.mkdirSync(path.dirname(hookFile), { recursive: true });
     fs.writeFileSync(hookFile, JSON.stringify(hook));
+  }
+  for (const skill of skills) {
+    const skillDir = path.join(root, 'skills', skill.directory);
+    fs.mkdirSync(skillDir, { recursive: true });
+    fs.writeFileSync(path.join(skillDir, 'SKILL.md'), skill.source);
   }
   return root;
 }
@@ -107,6 +113,38 @@ test('missing cache and unsafe manifest paths produce actionable facts', () => {
     manifest: { hooks: '../outside.json' },
   });
   assert.match(inspect().issues[0], /must start with "\.\/"/);
+});
+
+test('skills without portable YAML frontmatter are reported', () => {
+  fs.rmSync(cacheDir, { recursive: true, force: true });
+  fs.writeFileSync(configFile, '[plugins."spring-m11n@market"]\nenabled = true\n');
+  seedPlugin({
+    marketplace: 'market', plugin: 'spring-m11n', version: '1.0.0',
+    skills: [
+      { directory: 'valid-skill', source: '---\nname: valid-skill\ndescription: Works in both hosts\n---\n\n# Valid\n' },
+      { directory: 'missing-frontmatter', source: '# Claude-only skill metadata\n' },
+    ],
+  });
+  const result = inspect();
+  assert.equal(result.plugins[0].skillFiles.length, 2);
+  assert.equal(result.issues.length, 1);
+  assert.match(result.issues[0], /missing-frontmatter[\\/]SKILL\.md: missing YAML frontmatter/);
+});
+
+test('known Codex runtime-output incompatibilities are version-bounded advisories', () => {
+  fs.rmSync(cacheDir, { recursive: true, force: true });
+  fs.writeFileSync(configFile,
+    '[plugins."security-guidance@claude-plugins-official"]\nenabled = true\n');
+  seedPlugin({
+    marketplace: 'claude-plugins-official', plugin: 'security-guidance', version: '2.0.7',
+  });
+  assert.match(inspect().issues[0], /top-level "metrics" field that Codex rejects/);
+
+  fs.rmSync(cacheDir, { recursive: true, force: true });
+  seedPlugin({
+    marketplace: 'claude-plugins-official', plugin: 'security-guidance', version: '2.0.8',
+  });
+  assert.deepEqual(inspect().issues, [], 'a later release is not presumed broken');
 });
 
 test.after(() => fs.rmSync(ROOT, { recursive: true, force: true }));

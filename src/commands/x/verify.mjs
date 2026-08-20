@@ -7,8 +7,9 @@ import path from 'node:path';
 import { run as runCmd, have } from '../../lib/exec.mjs';
 import { aidefencePresent, securityPresent } from '../../lib/natives.mjs';
 import { scanRvf } from '../../lib/rvf.mjs';
-import { projectAqeDir, projectMemoryDb } from '../../lib/paths.mjs';
+import { projectAqeDir } from '../../lib/paths.mjs';
 import { findMemoryEntry } from '../../lib/project-memory.mjs';
+import { projectMemoryEnv } from '../../lib/ruflo-memory.mjs';
 import { loadKitConfig } from '../../lib/config.mjs';
 import { HOSTS, collectIntegrationFacts, aqeRouterFile } from '../../lib/providers.mjs';
 import { readJson } from '../../lib/settings.mjs';
@@ -67,10 +68,9 @@ async function verifyMemory() {
   const namespace = `agentic-kit-verify-${process.pid}-${Date.now()}`;
   const key = 'roundtrip';
   const value = `memory-proof-${process.pid}-${Date.now()}`;
-  const env = {
-    CLAUDE_FLOW_DB_PATH: projectMemoryDb(tmp),
+  const env = projectMemoryEnv(tmp, {
     RUFLO_DAEMON_AUTOSTART: '0',
-  };
+  });
   let stored = false;
   let purged = false;
   try {

@@ -4,7 +4,7 @@
   [ADR-0020](0020-ga-stable-surfaces.md); closed-registry clause superseded by
   [ADR-0029](0029-host-adapter-extension-point.md)
 - **Date:** 2026-07-28
-- **Updated:** 2026-08-15
+- **Updated:** 2026-08-20
 - **Update note:** Added read-only Codex plugin-hook compatibility facts,
   runtime-selected Ruflo project-memory store proofs, and the non-correlatable
   OpenRouter account-analytics boundary; removed the pre-GA compatibility command,
@@ -25,6 +25,12 @@
   flag; every other property that clause protected (zero-runtime-dependency,
   offline-first normal operation, no in-process third-party code) remains
   intact.
+  2026-08-20: the read-only Codex plugin fact now covers portable skill
+  frontmatter and version-bounded runtime-output advisories as well as hook
+  documents. Setup and sync explicitly install or enable no Codex plugins. The
+  project-memory pin is now projected through host-specific launch context:
+  Claude project env, Codex's workspace-aware MCP launcher, and OpenCode's
+  project-aware MCP/lifecycle processes.
 - **Deciders:** agentic-kit maintainers
 - **Related:** [ADR-0001](0001-one-routing-policy-many-projections.md),
   [ADR-0003](0003-auto-seed-dual-host-provenance.md),
@@ -222,10 +228,11 @@ weakening it.
 
 #### Externally-owned plugin cache and runtime-selected memory
 
-Codex plugin configuration and `~/.codex/plugins/cache` are externally owned. Agentic-kit reads
-every explicitly enabled plugin's newest cached manifest, follows its declared hook paths (or the
-default `hooks/hooks.json`), and validates the Codex hook-file contract. It does not refresh,
-rewrite, delete, or adopt any plugin cache entry. An invalid newest cached bundle is a diagnostic fact
+Codex plugin configuration and `~/.codex/plugins/cache` are externally owned. Agentic-kit installs
+or enables no Codex plugin. It reads every explicitly enabled plugin's newest cached manifest,
+follows its declared hook paths (or the default `hooks/hooks.json`), validates the Codex hook-file
+contract and portable skill frontmatter, and applies version-bounded runtime-output advisories. It
+does not refresh, rewrite, delete, or adopt any plugin cache entry. An invalid newest cached bundle is a diagnostic fact
 with native remediation: open Codex `/plugins` to refresh or disable the plugin, then start a new
 session. The row has no `sync` fix.
 
@@ -237,6 +244,12 @@ compatibility store may coexist without representing drift. Read-only status ide
 writer and counts observable entries. Setup and `ak x verify memory` prove persistence by storing
 a disposable row, locating it in the runtime-selected store, retrieving it through the real CLI,
 and removing it. File or package presence alone is never reported as a persistence proof.
+Claude carries the absolute compatibility path in project settings. Codex's user-scoped MCP entry
+uses an agentic-kit launcher that derives the same absolute pin from each runtime workspace;
+agentic-kit migrates only a legacy entry it previously registered and preserves user-owned Codex
+entries. OpenCode's receipt-owned gateway and lifecycle processes set their cwd and pin from the
+host-provided project directory. These are host projections of one project-memory contract, not
+separate stores.
 
 ### 5. Normalize field-level facts before rendering conclusions
 

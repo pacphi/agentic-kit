@@ -19,6 +19,8 @@
 
 import { spawn } from "node:child_process"
 import { createInterface } from "node:readline"
+import fs from "node:fs"
+import path from "node:path"
 import { tool } from "@opencode-ai/plugin"
 
 const configuredTimeout = Number(process.env.AK_OPENCODE_GATEWAY_TIMEOUT_MS)
@@ -262,8 +264,10 @@ function hideDirectFamily(permission, patterns) {
 }
 
 class RufloGatewayClient {
-  constructor(label) {
+  constructor(label, directory) {
     this.label = label
+    const resolved = path.resolve(directory)
+    try { this.directory = fs.realpathSync(resolved) } catch { this.directory = resolved }
     this.command = null
     this.args = []
     this.environment = {}
@@ -289,9 +293,10 @@ class RufloGatewayClient {
     if (this.child || this.starting) throw new Error(`${this.label} gateway cannot be reconfigured after use`)
     this.command = command[0]
     this.args = command.slice(1)
-    this.environment = entry.environment && typeof entry.environment === "object"
-      ? { ...entry.environment }
-      : {}
+    this.environment = {
+      ...(entry.environment && typeof entry.environment === "object" ? entry.environment : {}),
+      CLAUDE_FLOW_DB_PATH: path.join(this.directory, ".swarm", "memory.db"),
+    }
     return true
   }
 
@@ -307,6 +312,7 @@ class RufloGatewayClient {
 
   async startInner() {
     const child = spawn(this.command, this.args, {
+      cwd: this.directory,
       env: { ...process.env, ...this.environment },
       stdio: ["pipe", "pipe", "pipe"],
       detached: false,
@@ -496,9 +502,9 @@ function renderToolResult(result, errorPrefix) {
 }
 
 /** @type {import("@opencode-ai/plugin").Plugin} */
-export default async function rufloGateway() {
-  const rufloClient = new RufloGatewayClient("Ruflo")
-  const aqeClient = new RufloGatewayClient("Agentic QE")
+export default async function rufloGateway({ directory = process.cwd() } = {}) {
+  const rufloClient = new RufloGatewayClient("Ruflo", directory)
+  const aqeClient = new RufloGatewayClient("Agentic QE", directory)
   const skillCatalogs = new Map()
   let available = { ruflo: false, aqe: false, brain: false, agents: false }
   const plugin = {

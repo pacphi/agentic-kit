@@ -553,10 +553,16 @@ export async function collect({ pkgRoot, cwd = process.cwd() }) {
     // reverse bridge: ruflo MCP → codex (a codex-driven session reaches ruflo's
     // tools). The mirror of the claude→codex row above; makes the bridge two-way.
     try {
-      const { registered, owned } = rufloCodexMcpStatus(cfg);
-      if (registered) {
+      const { registered, owned, command, args } = rufloCodexMcpStatus(cfg);
+      const workspacePinned = command === 'ak'
+        && JSON.stringify(args) === JSON.stringify(['x', 'ruflo-mcp']);
+      if (registered && owned && !workspacePinned) {
+        rows.push(row('codex-mcp', 'warn',
+          'ak-owned ruflo MCP in codex uses the legacy cwd-only launcher',
+          'sync migrates it to workspace-pinned project memory'));
+      } else if (registered) {
         rows.push(row('codex-mcp', 'ok',
-          `ruflo MCP registered in codex ([mcp_servers.ruflo])${owned ? '' : ' — pre-existing (not ak-managed)'}`));
+          `ruflo MCP registered in codex ([mcp_servers.ruflo])${owned ? ' — workspace memory pinned' : ' — pre-existing (not ak-managed)'}`));
       } else if (await have('codex')) {
         rows.push(row('codex-mcp', 'warn', 'codex enabled but ruflo MCP not registered in codex',
           'sync registers the ruflo MCP into codex'));
@@ -566,9 +572,10 @@ export async function collect({ pkgRoot, cwd = process.cwd() }) {
     }
   }
 
-  // Codex owns plugin installation and refresh. Inspect every explicitly
-  // enabled cached plugin, but never attach a sync fix: the supported repair
-  // surface is Codex's /plugins UI followed by a fresh session.
+  // Codex owns plugin installation, enablement, and refresh. Inspect every
+  // explicitly enabled cached plugin's hooks and skills, but never attach a
+  // sync fix: the supported repair surface is Codex's /plugins UI followed by
+  // a fresh session.
   try {
     const plugins = inspectCodexPlugins();
     if (plugins.enabled.length && plugins.issues.length) {
@@ -578,7 +585,7 @@ export async function collect({ pkgRoot, cwd = process.cwd() }) {
     } else if (plugins.enabled.length) {
       const versions = plugins.plugins.map((plugin) => `${plugin.ref} (${plugin.version})`).join(', ');
       rows.push(row('codex-plugins', 'ok',
-        `${plugins.enabled.length} enabled Codex plugin(s); newest cached hook configs compatible (${versions})`));
+        `${plugins.enabled.length} enabled Codex plugin(s); newest cached hooks and skills pass known compatibility checks (${versions})`));
     }
   } catch (e) {
     rows.push(row('codex-plugins', 'warn', `Codex plugin check unavailable: ${e.message}`));

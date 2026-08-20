@@ -193,7 +193,7 @@ const hostEntries = [
       approvalPolicy: 'unchanged',
       changes: [
         { id: 'claude-to-codex-mcp', kind: 'mcp-registration', scope: 'project', owner: 'agentic-kit', value: 'codex mcp-server', effect: 'expose Codex to Claude Code as mcp__codex__codex in this project', operations: ['setup', 'host-pick', 'sync'], features: ['project'] },
-        { id: 'codex-to-ruflo-mcp', kind: 'mcp-registration', scope: 'user', owner: 'agentic-kit', value: 'ruflo mcp start', effect: 'register the Ruflo MCP server in Codex configuration', operations: ['setup', 'host-pick', 'sync'], features: ['project'] },
+        { id: 'codex-to-ruflo-mcp', kind: 'mcp-registration', scope: 'user', owner: 'agentic-kit', value: 'ak x ruflo-mcp', effect: 'register the Ruflo MCP server in Codex with workspace-pinned project memory', operations: ['setup', 'host-pick', 'sync'], features: ['project'] },
         { id: 'aqe-codex-integration', kind: 'host-integration', scope: 'project', owner: 'agentic-qe', value: 'aqe init --with-codex', effect: 'project Agentic-QE Codex skills and configuration', operations: ['setup'], features: ['project', 'aqe'] },
       ],
     },

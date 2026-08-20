@@ -24,6 +24,7 @@ import * as adb from '../lib/agentdb.mjs';
 import { readJson, writeJsonWithBackup } from '../lib/settings.mjs';
 import { withDb } from '../lib/sqlite.mjs';
 import { findMemoryEntry } from '../lib/project-memory.mjs';
+import { projectMemoryEnv } from '../lib/ruflo-memory.mjs';
 import {
   setupTrustManifest, trustManifestLines,
 } from '../lib/trust-manifest.mjs';
@@ -329,7 +330,7 @@ export async function run_project({ flags, cfg, trustDisclosed = false }) {
   ok(`CLAUDE_FLOW_DB_PATH pinned → ${dbPath}`);
 
   // 5. activate memory + swarm with the pin exported
-  const env = { CLAUDE_FLOW_DB_PATH: dbPath };
+  const env = projectMemoryEnv(root);
   (await runCmd('ruflo', ['memory', 'init'], { cwd: root, env })).code === 0
     ? ok('memory initialized') : warn('ruflo memory init failed');
   (await runCmd('ruflo', ['swarm', 'init', '--v3-mode'], { cwd: root, env })).code === 0
