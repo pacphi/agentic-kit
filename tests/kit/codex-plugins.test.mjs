@@ -128,7 +128,7 @@ test('skills without portable YAML frontmatter are reported', () => {
   const result = inspect();
   assert.equal(result.plugins[0].skillFiles.length, 2);
   assert.equal(result.issues.length, 1);
-  assert.match(result.issues[0], /missing-frontmatter\/SKILL\.md: missing YAML frontmatter/);
+  assert.match(result.issues[0], /missing-frontmatter[\\/]SKILL\.md: missing YAML frontmatter/);
 });
 
 test('known Codex runtime-output incompatibilities are version-bounded advisories', () => {
