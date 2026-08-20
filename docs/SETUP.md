@@ -122,6 +122,11 @@ the project Claude-to-Codex MCP bridge, the user-scope Codex-to-Ruflo MCP
 registration, and the AQE Codex integration that project setup will create.
 Agentic-kit does not alter Codex's sandbox or approval policy.
 
+Codex also retains exclusive ownership of third-party plugins. Agentic-kit never
+installs or enables a Codex plugin (including `security-guidance`), and setup/sync
+never rewrites Codex's plugin tables or cache. `ak status` only reads enabled
+bundles to report known hook and skill portability problems.
+
 OpenCode's user-scope manifest names all four wildcard tool approvals, the
 Ruflo and optional Brain MCP registrations, the lifecycle plugin, and the
 managed agent/skill/guidance projection. These are workspace-trust grants, not

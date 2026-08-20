@@ -4,7 +4,7 @@
   [ADR-0020](0020-ga-stable-surfaces.md); closed-registry clause superseded by
   [ADR-0029](0029-host-adapter-extension-point.md)
 - **Date:** 2026-07-28
-- **Updated:** 2026-08-15
+- **Updated:** 2026-08-20
 - **Update note:** Added read-only Codex plugin-hook compatibility facts,
   runtime-selected Ruflo project-memory store proofs, and the non-correlatable
   OpenRouter account-analytics boundary; removed the pre-GA compatibility command,
@@ -25,6 +25,9 @@
   flag; every other property that clause protected (zero-runtime-dependency,
   offline-first normal operation, no in-process third-party code) remains
   intact.
+  2026-08-20: the read-only Codex plugin fact now covers portable skill
+  frontmatter and version-bounded runtime-output advisories as well as hook
+  documents. Setup and sync explicitly install or enable no Codex plugins.
 - **Deciders:** agentic-kit maintainers
 - **Related:** [ADR-0001](0001-one-routing-policy-many-projections.md),
   [ADR-0003](0003-auto-seed-dual-host-provenance.md),
@@ -222,10 +225,11 @@ weakening it.
 
 #### Externally-owned plugin cache and runtime-selected memory
 
-Codex plugin configuration and `~/.codex/plugins/cache` are externally owned. Agentic-kit reads
-every explicitly enabled plugin's newest cached manifest, follows its declared hook paths (or the
-default `hooks/hooks.json`), and validates the Codex hook-file contract. It does not refresh,
-rewrite, delete, or adopt any plugin cache entry. An invalid newest cached bundle is a diagnostic fact
+Codex plugin configuration and `~/.codex/plugins/cache` are externally owned. Agentic-kit installs
+or enables no Codex plugin. It reads every explicitly enabled plugin's newest cached manifest,
+follows its declared hook paths (or the default `hooks/hooks.json`), validates the Codex hook-file
+contract and portable skill frontmatter, and applies version-bounded runtime-output advisories. It
+does not refresh, rewrite, delete, or adopt any plugin cache entry. An invalid newest cached bundle is a diagnostic fact
 with native remediation: open Codex `/plugins` to refresh or disable the plugin, then start a new
 session. The row has no `sync` fix.
 
