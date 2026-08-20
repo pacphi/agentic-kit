@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { applyAqeRouter, aqeRouterFile, undoAqeRouter, ensureCodexMcp, undoCodexMcp, undoRufloMcpInCodex } from '../../src/lib/providers.mjs';
+import { applyAqeRouter, aqeRouterFile, undoAqeRouter, ensureCodexMcp, ensureRufloMcpInCodex, undoCodexMcp, undoRufloMcpInCodex } from '../../src/lib/providers.mjs';
 import { seedActivityRoutes } from '../../src/lib/routing.mjs';
 import { _setGlobalRootForTest } from '../../src/lib/paths.mjs';
 
@@ -174,6 +174,40 @@ test('owned bridge teardown sends the precise safe argv on every platform', asyn
     { cmd: 'claude', args: ['mcp', 'remove', 'codex', '-s', 'project'], opts: { cwd } },
     { cmd: 'codex', args: ['mcp', 'remove', 'ruflo'], opts: { cwd } },
   ]);
+});
+
+test('codex reverse bridge uses the workspace-aware memory launcher and migrates only ak-owned state', async () => {
+  const calls = [];
+  const runner = async (cmd, args, opts) => {
+    calls.push({ cmd, args, opts });
+    return { code: 0, stdout: '', stderr: '' };
+  };
+  const cfg = {
+    integrations: {
+      hosts: { codex: true },
+      ownership: { codex: { reverseMcp: 'ak' } },
+    },
+  };
+  const result = await ensureRufloMcpInCodex(cfg, '/work/project', {
+    runner,
+    haveFn: async () => true,
+    inspect: () => ({ registered: true, owned: true, command: 'ruflo', args: ['mcp', 'start'] }),
+  });
+  assert.equal(result.changed, true);
+  assert.deepEqual(calls, [
+    { cmd: 'codex', args: ['mcp', 'remove', 'ruflo'], opts: { cwd: '/work/project' } },
+    { cmd: 'codex', args: ['mcp', 'add', 'ruflo', '--', 'ak', 'x', 'ruflo-mcp'], opts: { cwd: '/work/project' } },
+  ]);
+
+  calls.length = 0;
+  const preserved = await ensureRufloMcpInCodex(cfg, '/work/project', {
+    runner,
+    haveFn: async () => true,
+    inspect: () => ({ registered: true, owned: false, command: 'custom', args: [] }),
+  });
+  assert.equal(preserved.changed, false);
+  assert.match(preserved.detail, /user-owned; left unchanged/);
+  assert.deepEqual(calls, []);
 });
 
 test('undoAqeRouter removes the ak-created file (agentOverrides included)', () => {

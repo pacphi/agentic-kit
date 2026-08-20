@@ -1,11 +1,21 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import path from 'node:path';
 
 import {
   canonicalJson,
   createToolLoopGuard,
   RufloHooks,
+  projectHookEnv,
 } from '../../src/templates/opencode-ruflo-hooks.js';
+
+test('OpenCode lifecycle hooks pin Ruflo memory to their project directory', () => {
+  const directory = path.resolve('/work/project');
+  assert.deepEqual(projectHookEnv(directory, { KEEP: 'yes' }), {
+    KEEP: 'yes',
+    CLAUDE_FLOW_DB_PATH: path.join(directory, '.swarm', 'memory.db'),
+  });
+});
 
 function complete(guard, {
   sessionID = 'ses_1',

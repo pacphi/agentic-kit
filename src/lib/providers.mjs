@@ -36,6 +36,7 @@ import {
 } from './adapters/index.mjs';
 import { CURRENT_INTEGRATIONS_VERSION } from './adapters/config.mjs';
 import { opencodeMcpStatus } from './opencode.mjs';
+import { rufloCodexMcpStatus } from './mcp.mjs';
 import {
   DEFAULT_PRIMARY_HOST,
   ROUTING_SCHEMA_VERSION,
@@ -649,21 +650,39 @@ export async function undoCodexMcp(cwd = process.cwd(), { managed = false, runne
 // This is the MIRROR: register the ruflo MCP server INTO Codex so a Codex-driven
 // session can reach ruflo's tools — the codex→ruflo half that makes the bridge
 // bidirectional (ambidextrous parity). The reverse bridge intentionally uses:
-// `codex mcp add ruflo -- <cmd> mcp start` writes a [mcp_servers.ruflo] table into
-// ~/.codex/config.toml. aqe's own codex MCP is handled by `aqe init --with-codex`
+// `codex mcp add ruflo -- ak x ruflo-mcp` writes a [mcp_servers.ruflo] table into
+// ~/.codex/config.toml; the launcher pins memory from each runtime workspace.
+// aqe's own codex MCP is handled by `aqe init --with-codex`
 // (setup runs it), and Claude Code is not itself an MCP server, so those two legs
 // live elsewhere; this owns the ruflo leg. Best-effort; a failure never fails the
 // caller. Ownership marker: integrations.ownership.codex.reverseMcp === 'ak'.
-export async function ensureRufloMcpInCodex(cfg, cwd = process.cwd()) {
+export async function ensureRufloMcpInCodex(cfg, cwd = process.cwd(), {
+  runner = run, haveFn = have, inspect = rufloCodexMcpStatus,
+} = {}) {
   if (!cfg.integrations?.hosts?.codex) return { ok: true, changed: false, detail: 'codex not enabled — ruflo→codex MCP unmanaged' };
-  if (!(await have('codex'))) return { ok: true, changed: false, detail: 'codex CLI not installed' };
-  if (!(await have('ruflo'))) return { ok: true, changed: false, detail: 'ruflo not on PATH — ruflo→codex MCP skipped' };
-  const r = await run('codex', ['mcp', 'add', 'ruflo', '--', 'ruflo', 'mcp', 'start'], { cwd });
+  if (!(await haveFn('codex'))) return { ok: true, changed: false, detail: 'codex CLI not installed' };
+  if (!(await haveFn('ruflo'))) return { ok: true, changed: false, detail: 'ruflo not on PATH — ruflo→codex MCP skipped' };
+  const current = inspect(cfg);
+  const desired = current.command === 'ak'
+    && JSON.stringify(current.args) === JSON.stringify(['x', 'ruflo-mcp']);
+  if (current.registered && desired) {
+    return { ok: true, changed: false, detail: 'ruflo MCP already registered in codex (workspace memory pinned)' };
+  }
+  if (current.registered && !current.owned) {
+    return { ok: true, changed: false, detail: 'ruflo MCP already registered in codex (user-owned; left unchanged)' };
+  }
+  if (current.registered) {
+    const removed = await runner('codex', ['mcp', 'remove', 'ruflo'], { cwd });
+    if (removed.code !== 0) {
+      return { ok: false, changed: false, detail: 'ruflo→codex MCP migration could not remove the ak-owned legacy registration' };
+    }
+  }
+  const r = await runner('codex', ['mcp', 'add', 'ruflo', '--', 'ak', 'x', 'ruflo-mcp'], { cwd });
   if (r.code === 0) {
     cfg.integrations.ownership ??= {};
     cfg.integrations.ownership.codex ??= {};
     cfg.integrations.ownership.codex.reverseMcp = 'ak';
-    return { ok: true, changed: true, detail: 'ruflo MCP registered into codex ([mcp_servers.ruflo])' };
+    return { ok: true, changed: true, detail: 'ruflo MCP registered into codex with workspace-pinned project memory ([mcp_servers.ruflo])' };
   }
   if (/already exists|already configured/i.test(`${r.stderr}${r.stdout}`)) {
     return { ok: true, changed: false, detail: 'ruflo MCP already registered in codex' };

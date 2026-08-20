@@ -27,7 +27,10 @@
   intact.
   2026-08-20: the read-only Codex plugin fact now covers portable skill
   frontmatter and version-bounded runtime-output advisories as well as hook
-  documents. Setup and sync explicitly install or enable no Codex plugins.
+  documents. Setup and sync explicitly install or enable no Codex plugins. The
+  project-memory pin is now projected through host-specific launch context:
+  Claude project env, Codex's workspace-aware MCP launcher, and OpenCode's
+  project-aware MCP/lifecycle processes.
 - **Deciders:** agentic-kit maintainers
 - **Related:** [ADR-0001](0001-one-routing-policy-many-projections.md),
   [ADR-0003](0003-auto-seed-dual-host-provenance.md),
@@ -241,6 +244,12 @@ compatibility store may coexist without representing drift. Read-only status ide
 writer and counts observable entries. Setup and `ak x verify memory` prove persistence by storing
 a disposable row, locating it in the runtime-selected store, retrieving it through the real CLI,
 and removing it. File or package presence alone is never reported as a persistence proof.
+Claude carries the absolute compatibility path in project settings. Codex's user-scoped MCP entry
+uses an agentic-kit launcher that derives the same absolute pin from each runtime workspace;
+agentic-kit migrates only a legacy entry it previously registered and preserves user-owned Codex
+entries. OpenCode's receipt-owned gateway and lifecycle processes set their cwd and pin from the
+host-provided project directory. These are host projections of one project-memory contract, not
+separate stores.
 
 ### 5. Normalize field-level facts before rendering conclusions
 

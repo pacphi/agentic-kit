@@ -132,7 +132,17 @@ function resolveHookHandler() {
 
 const HANDLER = resolveHookHandler()
 
-function runHook(verb, payload) {
+function projectHookEnv(directory, env = process.env) {
+  const resolved = path.resolve(directory)
+  let root = resolved
+  try { root = fs.realpathSync(resolved) } catch { /* preserve the resolved path */ }
+  return {
+    ...env,
+    CLAUDE_FLOW_DB_PATH: path.join(root, ".swarm", "memory.db"),
+  }
+}
+
+function runHook(verb, payload, directory = process.cwd()) {
   return new Promise((resolve) => {
     if (!HANDLER) return resolve({ ok: false, stdout: "", stderr: "no handler" })
     let stdout = ""
@@ -147,9 +157,13 @@ function runHook(verb, payload) {
     }
     let child
     try {
+      const resolved = path.resolve(directory)
+      let cwd = resolved
+      try { cwd = fs.realpathSync(resolved) } catch { /* preserve the resolved path */ }
       child = spawn("node", [HANDLER, verb], {
+        cwd,
         stdio: ["pipe", "pipe", "pipe"],
-        env: process.env,
+        env: projectHookEnv(directory),
       })
     } catch {
       return done({ ok: false, stdout: "", stderr: "spawn failed" })
@@ -172,8 +186,8 @@ function runHook(verb, payload) {
 }
 
 // Fire-and-forget wrapper: never throws, never blocks the event loop turn.
-function fire(verb, payload) {
-  runHook(verb, payload).catch(() => {})
+function fire(verb, payload, directory) {
+  runHook(verb, payload, directory).catch(() => {})
 }
 
 function promptText(parts) {
@@ -191,7 +205,7 @@ function directOpenCodeReferences(text) {
     .replace(/mcp__(?:agentic-qe|agentic_qe)__([A-Za-z0-9_*-]+)/g, "agentic-qe_$1")
 }
 
-const plugin = async ({ client }) => {
+const plugin = async ({ client, directory = process.cwd() }) => {
   const toolLoopGuard = createToolLoopGuard()
   await client.app.log({
     body: {
@@ -206,14 +220,14 @@ const plugin = async ({ client }) => {
       try {
         switch (event?.type) {
           case "session.created":
-            fire("session-restore")
+            fire("session-restore", undefined, directory)
             break
           case "session.compacted":
-            fire("session-restore")
+            fire("session-restore", undefined, directory)
             break
           case "session.deleted":
             toolLoopGuard.reset(event?.properties?.info?.id ?? event?.properties?.sessionID)
-            fire("session-end")
+            fire("session-end", undefined, directory)
             break
         }
       } catch { /* never break opencode */ }
@@ -224,7 +238,7 @@ const plugin = async ({ client }) => {
         toolLoopGuard.reset(input.sessionID)
         const prompt = promptText(output?.parts)
         if (prompt.length < ROUTE_MIN_PROMPT || TRIVIAL_PROMPT.test(prompt)) return
-        const res = await runHook("route", { prompt })
+        const res = await runHook("route", { prompt }, directory)
         const text = (res.stdout || "").trim()
         if (!res.ok || !text || text.includes("Router not available")) return
         // A part opencode can actually persist (codex review): the validator
@@ -261,13 +275,13 @@ const plugin = async ({ client }) => {
           const res = await runHook("pre-bash", {
             tool_name: "Bash",
             tool_input: { command },
-          })
+          }, directory)
           if (!res.ok && /\[BLOCKED]/i.test(res.stderr + res.stdout)) {
             throw new Error(`[ruflo] Blocked dangerous command: ${command.slice(0, 120)}`)
           }
         } else if (input.tool === "task") {
           const description = output?.args?.description ?? output?.args?.prompt ?? ""
-          fire("pre-task", { prompt: String(description).slice(0, 500) })
+          fire("pre-task", { prompt: String(description).slice(0, 500) }, directory)
         }
       } catch (e) {
         if (e && e.message && e.message.startsWith("[ruflo]")) throw e
@@ -291,11 +305,11 @@ const plugin = async ({ client }) => {
             tool_name: input.tool,
             tool_input: { file_path: filePath },
             tool_response: typeof output?.output === "string" ? output.output.slice(0, 2000) : "",
-          })
+          }, directory)
         } else if (input.tool === "task") {
           fire("post-task", {
             tool_response: typeof output?.output === "string" ? output.output.slice(0, 2000) : "",
-          })
+          }, directory)
         }
       } catch { /* learning hooks are best-effort */ }
     },
@@ -303,4 +317,4 @@ const plugin = async ({ client }) => {
 }
 
 export default plugin
-export { canonicalJson, createToolLoopGuard, plugin as RufloHooks }
+export { canonicalJson, createToolLoopGuard, plugin as RufloHooks, projectHookEnv }

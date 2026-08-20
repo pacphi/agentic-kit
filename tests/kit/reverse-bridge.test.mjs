@@ -19,12 +19,16 @@ test('rufloCodexMcpStatus detects a registered ruflo MCP server', () => {
   const home = tempHome('[mcp_servers.ruflo]\ncommand = "ruflo"\nargs = ["mcp", "start"]\n');
   const s = rufloCodexMcpStatus({}, { home });
   assert.equal(s.registered, true);
+  assert.equal(s.command, 'ruflo');
+  assert.deepEqual(s.args, ['mcp', 'start']);
 });
 
 test('rufloCodexMcpStatus reports not-registered when the table is absent', () => {
   const home = tempHome('[mcp_servers.other]\ncommand = "x"\n');
   const s = rufloCodexMcpStatus({}, { home });
   assert.equal(s.registered, false);
+  assert.equal(s.command, null);
+  assert.equal(s.args, null);
 });
 
 test('rufloCodexMcpStatus reports not-registered when config.toml is missing', () => {

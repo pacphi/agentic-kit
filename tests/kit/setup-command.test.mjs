@@ -193,7 +193,7 @@ test('--codex project dry-run discloses registrations while preserving Codex pol
     assert.equal(result, 0);
     assert.match(out, /OpenAI Codex — approval\/sandbox policy unchanged/);
     assert.match(out, /\[project\] mcp-registration: codex mcp-server/);
-    assert.match(out, /\[user\] mcp-registration: ruflo mcp start/);
+    assert.match(out, /\[user\] mcp-registration: ak x ruflo-mcp/);
   } finally { process.chdir(cwd); rmrf(project); }
 });
 

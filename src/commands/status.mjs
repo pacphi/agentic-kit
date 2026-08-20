@@ -553,10 +553,16 @@ export async function collect({ pkgRoot, cwd = process.cwd() }) {
     // reverse bridge: ruflo MCP → codex (a codex-driven session reaches ruflo's
     // tools). The mirror of the claude→codex row above; makes the bridge two-way.
     try {
-      const { registered, owned } = rufloCodexMcpStatus(cfg);
-      if (registered) {
+      const { registered, owned, command, args } = rufloCodexMcpStatus(cfg);
+      const workspacePinned = command === 'ak'
+        && JSON.stringify(args) === JSON.stringify(['x', 'ruflo-mcp']);
+      if (registered && owned && !workspacePinned) {
+        rows.push(row('codex-mcp', 'warn',
+          'ak-owned ruflo MCP in codex uses the legacy cwd-only launcher',
+          'sync migrates it to workspace-pinned project memory'));
+      } else if (registered) {
         rows.push(row('codex-mcp', 'ok',
-          `ruflo MCP registered in codex ([mcp_servers.ruflo])${owned ? '' : ' — pre-existing (not ak-managed)'}`));
+          `ruflo MCP registered in codex ([mcp_servers.ruflo])${owned ? ' — workspace memory pinned' : ' — pre-existing (not ak-managed)'}`));
       } else if (await have('codex')) {
         rows.push(row('codex-mcp', 'warn', 'codex enabled but ruflo MCP not registered in codex',
           'sync registers the ruflo MCP into codex'));

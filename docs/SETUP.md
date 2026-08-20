@@ -127,6 +127,15 @@ installs or enables a Codex plugin (including `security-guidance`), and setup/sy
 never rewrites Codex's plugin tables or cache. `ak status` only reads enabled
 bundles to report known hook and skill portability problems.
 
+All enabled hosts converge on the same project-scoped Ruflo memory contract.
+Claude receives the absolute `CLAUDE_FLOW_DB_PATH` in project settings. Codex's
+user-scoped Ruflo MCP registration launches `ak x ruflo-mcp`, which derives the
+pin from the workspace at process start. OpenCode's managed MCP gateway and
+lifecycle bridge receive its project directory and set the same absolute pin.
+Ruflo's native bridge may write `.swarm/agentdb-memory.db` beside the pinned
+`.swarm/memory.db`; that sibling is the active native store, not configuration
+drift. `ak x verify memory` proves the actual writer with a disposable round trip.
+
 OpenCode's user-scope manifest names all four wildcard tool approvals, the
 Ruflo and optional Brain MCP registrations, the lifecycle plugin, and the
 managed agent/skill/guidance projection. These are workspace-trust grants, not

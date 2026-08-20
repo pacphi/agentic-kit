@@ -70,17 +70,36 @@ export function codexMcpStatus(cfg, cwd = process.cwd()) {
  * Reverse-bridge state: is the ruflo MCP registered INTO Codex? `ensureRufloMcpInCodex`
  * runs `codex mcp add ruflo …`, which writes a `[mcp_servers.ruflo]` table into
  * ~/.codex/config.toml — so a spawn-free presence check reads that file (mirrors
- * codexMcpStatus's file-read approach; no TOML parser needed for a header check).
+ * codexMcpStatus's file-read approach). The command and args facts let sync
+ * migrate only an ak-owned legacy registration to the workspace-aware launcher.
  * `owned` reflects kit.json's ak-ownership marker
  * (`integrations.ownership.codex.reverseMcp === 'ak'`).
- * @returns {{ registered: boolean, owned: boolean }}
+ * @returns {{ registered: boolean, owned: boolean, command: string|null, args: string[]|null }}
  */
 export function rufloCodexMcpStatus(cfg, { home = os.homedir() } = {}) {
   let registered = false;
+  let command = null;
+  let args = null;
   try {
-    registered = /^\s*\[mcp_servers\.ruflo\]/m.test(fs.readFileSync(path.join(home, '.codex', 'config.toml'), 'utf8'));
+    const source = fs.readFileSync(path.join(home, '.codex', 'config.toml'), 'utf8');
+    const header = /^\s*\[mcp_servers\.(?:ruflo|"ruflo")\]\s*$/m.exec(source);
+    registered = !!header;
+    if (header) {
+      const rest = source.slice(header.index + header[0].length);
+      const next = rest.search(/^\s*\[/m);
+      const body = rest.slice(0, next < 0 ? rest.length : next);
+      const commandMatch = /^\s*command\s*=\s*("(?:[^"\\]|\\.)*")\s*$/m.exec(body);
+      const argsMatch = /^\s*args\s*=\s*(\[[^\n]*\])\s*$/m.exec(body);
+      try { if (commandMatch) command = JSON.parse(commandMatch[1]); } catch { /* non-canonical TOML */ }
+      try { if (argsMatch) args = JSON.parse(argsMatch[1]); } catch { /* non-canonical TOML */ }
+    }
   } catch { /* config absent → not registered */ }
-  return { registered, owned: cfg?.integrations?.ownership?.codex?.reverseMcp === 'ak' };
+  return {
+    registered,
+    owned: cfg?.integrations?.ownership?.codex?.reverseMcp === 'ak',
+    command,
+    args,
+  };
 }
 
 export async function register() {

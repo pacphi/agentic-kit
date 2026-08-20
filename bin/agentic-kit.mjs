@@ -37,6 +37,7 @@ const PLUMBING = Object.assign(Object.create(null), {
   'mcp': () => import('../src/commands/x/mcp.mjs'),
   'host': () => import('../src/commands/x/host.mjs'),
   'reference': () => import('../src/commands/x/reference.mjs'),
+  'ruflo-mcp': () => import('../src/commands/x/ruflo-mcp.mjs'),
   'statusline': () => import('../src/commands/x/statusline.mjs'),
   'verify': () => import('../src/commands/x/verify.mjs'),
 });
@@ -176,7 +177,7 @@ async function main() {
   // setup and host own complete mutation/reporting flows. Running the generic
   // nudge after a declined trust preflight could write version-cache state and
   // violate their "before any changes" boundary.
-  if (!values.json && !values['dry-run'] && !['sync', 'usage', 'setup', 'host'].includes(cmd)) {
+  if (!values.json && !values['dry-run'] && !['sync', 'usage', 'setup', 'host', 'ruflo-mcp'].includes(cmd)) {
     try {
       const { driftReport } = await import('../src/lib/versions.mjs');
       for (const r of await driftReport()) {
