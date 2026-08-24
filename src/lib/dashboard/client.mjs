@@ -1069,7 +1069,7 @@ export const JS = `
       var grp=SOURCE_HEALTH_GROUPS[g],present=[];
       for(var p=0; p<grp.parts.length; p++){
         var part=grp.parts[p],item=health[part.key];
-        if(item) present.push({status:String(item.status||"not-read"),reason:item.reason,sub:part.sub});
+        if(item) present.push({status:String(item.status||"not-read"),reason:item.reason,diagnostics:item.diagnostics,sub:part.sub});
       }
       if(!present.length)continue;
       var lead=present.slice().sort(function(a,b){
@@ -1077,6 +1077,9 @@ export const JS = `
       })[0];
       var detail=grp.label+": "+present.map(function(pt){
         var d=pt.status+(pt.reason?" · "+pt.reason:"");
+        var q=pt.diagnostics;
+        if(q&&q.files) d+=" · "+fmtNum(q.responses)+" responses / "+fmtNum(q.files)+" files";
+        if(q&&q.warnings&&q.warnings.length) d+=" · "+q.warnings.join(", ");
         return pt.sub?pt.sub+": "+d:d;
       }).join(" · ");
       pills.push('<span class="source-pill" data-status="'+esc(lead.status)+'">'
@@ -1190,7 +1193,8 @@ export const JS = `
     document.getElementById("u-days-note").textContent="api-equivalent · "+usageDays+"-day window";
     document.getElementById("u-daybars").innerHTML=days.length?days.map(function(x){
       var c=fld(x.v,"cost"), h=maxDay?Math.max(2,c/maxDay*100):2;
-      var tip=x.day+" · "+fmtUsd(c)+" · "+fmtTok(fld(x.v,"tokens"))+" tok · "+fmtNum(fld(x.v,"sessions"))+" sessions";
+      var tip=x.day+" · "+fmtUsd(c)+" · "+fmtTok(fld(x.v,"tokens"))+" tok · "+fmtNum(fld(x.v,"sessions"))+" started";
+      if(x.v&&x.v.sessionsActive!==undefined) tip+=" · "+fmtNum(fld(x.v,"sessionsActive"))+" active";
       return '<div class="daybar" title="'+esc(tip)+'"><div class="db-fill" style="height:'+h.toFixed(1)+'%"></div>'
         +'<span class="db-lab">'+esc(x.day.slice(8))+"</span></div>";
     }).join(""):'<div class="empty">no days in window.</div>';
