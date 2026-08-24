@@ -424,6 +424,10 @@ export function renderPage({ name, version }) {
         <div class="sh"><h2>cost per day</h2><span class="n mono" id="u-days-note"></span></div>
         <div class="days" id="u-daybars"></div>
       </section>
+      <section class="strip">
+        <div class="sh"><h2>telemetry coverage</h2><span class="n mono" id="u-telemetry-note">capabilities &middot; observed locally</span></div>
+        <div class="telemetry-grid" id="u-telemetry-grid"></div>
+      </section>
       <div class="two">
         <section class="strip">
           <div class="sh"><h2>by host</h2><span class="n mono" id="u-hosts-note"></span></div>

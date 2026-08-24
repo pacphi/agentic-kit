@@ -36,6 +36,10 @@ import {
   defaultOpencodeDbPath, listSessionsResult as listOpencodeSessionsResult,
   parseSession as parseOpencodeSession, sessionExistsResult as opencodeSessionExistsResult,
 } from './usage-opencode.mjs';
+import {
+  addTelemetryDiagnostics, emptyTelemetryDiagnostics, finalizeTelemetryDiagnostics,
+  MAX_TELEMETRY_UNKNOWN_KINDS, recordTelemetryUnit, telemetryCapabilities,
+} from './usage-telemetry.mjs';
 
 /** Bump to invalidate every cached entry wholesale.
  *  v2: cached records carry `active` sub-intervals for the idle-gap split.
@@ -641,8 +645,18 @@ function codexItemText(item) {
 function codexParseStats() {
   return {
     legacyEvents: 0, itemCompletedEvents: 0, tokenCountEvents: 0,
-    prompts: 0, responses: 0, unknownItemTypes: {},
+    prompts: 0, responses: 0, unknownItemTypes: {}, unknownItemTypeOverflow: 0,
   };
+}
+
+function recordCodexUnknownType(stats, type) {
+  if (Object.hasOwn(stats.unknownItemTypes, type)) {
+    stats.unknownItemTypes[type]++;
+  } else if (Object.keys(stats.unknownItemTypes).length < MAX_TELEMETRY_UNKNOWN_KINDS) {
+    stats.unknownItemTypes[type] = 1;
+  } else {
+    stats.unknownItemTypeOverflow++;
+  }
 }
 
 function codexEvent(payload, stats) {
@@ -662,7 +676,7 @@ function codexEvent(payload, stats) {
   if (item?.type === 'AgentMessage') return { kind: 'response', text: codexItemText(item) };
 
   const type = typeof item?.type === 'string' ? item.type : '<unknown>';
-  stats.unknownItemTypes[type] = (stats.unknownItemTypes[type] ?? 0) + 1;
+  recordCodexUnknownType(stats, type);
   return null;
 }
 
@@ -832,7 +846,7 @@ function emptyCodexDiagnostics() {
     files: 0, cachedFiles: 0, parsedFiles: 0, unparsedFiles: 0,
     filesWithTokens: 0, filesWithResponses: 0,
     legacyEvents: 0, itemCompletedEvents: 0, tokenCountEvents: 0,
-    prompts: 0, responses: 0, unknownItemTypes: {}, warnings: [],
+    prompts: 0, responses: 0, unknownItemTypes: {}, unknownItemTypeOverflow: 0, warnings: [],
   };
 }
 
@@ -847,8 +861,15 @@ function addCodexParseDiagnostics(target, stats) {
   target.prompts += stats.prompts;
   target.responses += stats.responses;
   for (const [type, count] of Object.entries(stats.unknownItemTypes ?? {})) {
-    target.unknownItemTypes[type] = (target.unknownItemTypes[type] ?? 0) + count;
+    if (Object.hasOwn(target.unknownItemTypes, type)) {
+      target.unknownItemTypes[type] += count;
+    } else if (Object.keys(target.unknownItemTypes).length < MAX_TELEMETRY_UNKNOWN_KINDS) {
+      target.unknownItemTypes[type] = count;
+    } else {
+      target.unknownItemTypeOverflow += count;
+    }
   }
+  target.unknownItemTypeOverflow += stats.unknownItemTypeOverflow ?? 0;
 }
 
 function finalizeCodexHealth(root, diagnostics) {
@@ -857,7 +878,9 @@ function finalizeCodexHealth(root, diagnostics) {
   const responseFiles = diagnostics.filesWithResponses;
   if (tokenFiles > 0 && responseFiles === 0) warnings.push('zero-response-yield');
   else if (tokenFiles > responseFiles) warnings.push('partial-response-yield');
-  if (Object.keys(diagnostics.unknownItemTypes).length) warnings.push('unknown-item-types');
+  if (Object.keys(diagnostics.unknownItemTypes).length || diagnostics.unknownItemTypeOverflow > 0) {
+    warnings.push('unknown-item-types');
+  }
   diagnostics.warnings = warnings;
   const hasYieldWarning = warnings.includes('zero-response-yield') || warnings.includes('partial-response-yield');
   const status = root.status === 'ok' && hasYieldWarning
@@ -865,6 +888,21 @@ function finalizeCodexHealth(root, diagnostics) {
   const reason = status === 'degraded' && root.status === 'ok'
     ? (warnings.includes('zero-response-yield') ? 'parse-yield-zero' : 'parse-yield-partial') : root.reason;
   return { ...root, status, reason, diagnostics };
+}
+
+/** Attach the additive host-neutral telemetry contract to source health.
+ * Existing status/reason and Codex diagnostic keys remain where consumers
+ * already find them; `diagnostics.common` and `capabilities` are the new
+ * cross-host surface. */
+function attachTelemetryHealth(host, health, common, diagnostics = health.diagnostics) {
+  return {
+    ...health,
+    capabilities: telemetryCapabilities(host, health.status),
+    diagnostics: {
+      ...(diagnostics ?? {}),
+      common: finalizeTelemetryDiagnostics(common),
+    },
+  };
 }
 
 function defaultRoots() {
@@ -1356,6 +1394,11 @@ async function scan(o = {}) {
   const entries = {};
   const records = [];
   const codexDiagnostics = emptyCodexDiagnostics();
+  const commonDiagnostics = {
+    claude: emptyTelemetryDiagnostics(),
+    codex: emptyTelemetryDiagnostics(),
+    opencode: emptyTelemetryDiagnostics(),
+  };
   const total = candidates.length;
   let scanned = 0;
 
@@ -1371,6 +1414,15 @@ async function scan(o = {}) {
       const parsed = parseFile(c);
       session = parsed ? parsed.session : null;
       parseStats = parsed?.parseStats ?? null;
+    }
+    if (commonDiagnostics[c.provider]) {
+      recordTelemetryUnit(commonDiagnostics[c.provider], session);
+      if (c.provider === 'codex') {
+        addTelemetryDiagnostics(commonDiagnostics.codex, {
+          unknownKinds: parseStats?.unknownItemTypes,
+          unknownKindOverflow: parseStats?.unknownItemTypeOverflow,
+        });
+      }
     }
     if (c.provider === 'codex') {
       codexDiagnostics.files++;
@@ -1448,10 +1500,15 @@ async function scan(o = {}) {
       : { status: observed.error.kind === 'absent' ? 'absent' : 'degraded', reason: observed.error.kind };
   }
   const result = aggregate(applyCodexLedger(records, ledger), { days, now, cutoff, deps });
+  const codexSourceHealth = finalizeCodexHealth(codexHealth, codexDiagnostics);
+  addTelemetryDiagnostics(commonDiagnostics.codex, {
+    warnings: codexSourceHealth.diagnostics.warnings,
+  });
   result.sourceHealth = {
-    claude: claudeHealth,
-    codex: finalizeCodexHealth(codexHealth, codexDiagnostics),
-    opencode: opencodeHealth, codexLedger: codexLedgerHealth,
+    claude: attachTelemetryHealth('claude', claudeHealth, commonDiagnostics.claude),
+    codex: attachTelemetryHealth('codex', codexSourceHealth, commonDiagnostics.codex),
+    opencode: attachTelemetryHealth('opencode', opencodeHealth, commonDiagnostics.opencode),
+    codexLedger: codexLedgerHealth,
   };
   return result;
 }

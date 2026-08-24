@@ -470,7 +470,15 @@ async function main() {
     sourceHealth: {
       claude: { status: 'ok', reason: null },
       codex: { status: 'ok', reason: null },
-      opencode: { status: 'degraded', reason: 'busy' },
+      opencode: {
+        status: 'degraded', reason: 'busy',
+        capabilities: { prompts: 'unavailable', toolCalls: 'unavailable' },
+        diagnostics: { common: {
+          unitsSeen: 0, unitsParsed: 0, unitsWithUsage: 0,
+          unitsWithPrompts: 0, unitsWithResponses: 0,
+          prompts: 0, responses: 0, warnings: ['corrupt'], unknownKinds: {}, unknownKindOverflow: 0,
+        } },
+      },
       codexLedger: { status: 'ok', reason: null },
     },
     totals: { sessions: 2, responses: 9, input: 100, output: 200, cacheRead: 900, cacheWrite: 50, tokens: 1250, cost: 12.5, spanMinutes: 90, engagedSeconds: 3600 },
@@ -567,6 +575,10 @@ async function main() {
       assert(Array.isArray(j.insights) && j.insights.length === 1, 'insights must survive');
       assert(j.sourceHealth.opencode.status === 'degraded' && j.sourceHealth.opencode.reason === 'busy',
         'source-health evidence must survive the dashboard route');
+      assert(j.sourceHealth.opencode.capabilities.toolCalls === 'unavailable',
+        'capability states must survive the dashboard route');
+      assert(j.sourceHealth.opencode.diagnostics.common.warnings[0] === 'corrupt',
+        'common telemetry diagnostics must survive the dashboard route');
       assert(spy.calls.readIndex.some((o) => o && o.days === 7), 'days must reach readIndex, got ' + JSON.stringify(spy.calls.readIndex));
     });
 

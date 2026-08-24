@@ -36,10 +36,10 @@ rewritten; rule 3 of the module header, `usage-index.mjs:22-29`):
 
 | Host | Store | Discovered by |
 |---|---|---|
-| Claude Code | `~/.claude/projects/<encoded-project-dir>/<sessionId>.jsonl` | `listClaude` (`usage-index.mjs:876-886`) — exactly one level of project directories |
+| Claude Code | `~/.claude/projects/<encoded-project-dir>/<sessionId>.jsonl` | `listClaude` (`usage-index.mjs:916-926`) — exactly one level of project directories |
 | Codex CLI | `~/.codex/sessions/<yyyy>/<mm>/<dd>/rollout-<ts>-<uuid>.jsonl` | `listCodex` (`usage-index.mjs:891-904`) — the `yyyy/mm/dd` tree walk |
 
-Roots come from `defaultRoots()` (`usage-index.mjs:750-754`) and are injectable
+Roots come from `defaultRoots()` (`usage-index.mjs:908-912`) and are injectable
 for tests. A malformed line is skipped, never fatal (`jsonLines`,
 `usage-index.mjs:381-387` — one corrupt line must not cost a whole file).
 
@@ -89,6 +89,39 @@ and counted in Codex source diagnostics; they are not silently reclassified as
 human prompts, model responses, or existing tool metrics. Codex tool calls and
 tool outputs therefore still travel in event types the parser does not surface
 as turns — a fidelity gap, not an attribution bug.
+
+### 1.3 Cross-host telemetry capability contract
+
+The public host APIs are richer than the historical readers in this module, and
+they are not interchangeable transcript schemas. This distinction is verified
+against the public surfaces available on **2026-08-24**:
+
+| Host | Public evidence | Historical adapter contract in this repository |
+|---|---|---|
+| Claude Code | Hooks expose `transcript_path`, `tool_name`, tool input/results, and `tool_use_id`; its monitoring surface also documents `claude_code.tool` spans and tool-result events ([hooks reference](https://code.claude.com/docs/en/hooks), [monitoring](https://code.claude.com/docs/en/monitoring-usage)) | `prompts`, `responses`, and normalized `toolCalls` are supported; command/file/MCP/collaboration subcategories remain unclaimed until their cross-host semantics are specified |
+| Codex | The public `codex app-server` protocol documents typed `userMessage`, `agentMessage`, `commandExecution`, `fileChange`, `mcpToolCall`, and `collabToolCall` items ([app-server protocol](https://github.com/openai/codex/blob/main/codex-rs/app-server/README.md)) | Only prompt/response items are normalized today. The rollout parser records unknown item kinds diagnostically; Codex activity categories are `unsupported` in this historical adapter, not measured zero |
+| OpenCode | The public SDK returns session messages with `parts`, and its public message model includes tool invocation parts ([SDK](https://github.com/anomalyco/opencode/blob/dev/packages/web/src/content/docs/sdk.mdx), [message model](https://github.com/anomalyco/opencode/blob/dev/packages/opencode/src/session/message.ts)) | `prompts`, `responses`, and persisted `toolCalls` are supported; command/file/MCP/collaboration subcategories remain unclaimed |
+
+`sourceHealth.<host>.diagnostics.common` is the additive, host-neutral
+coverage envelope. `unitsSeen` counts discovered session candidates in the
+requested window; `unitsParsed` counts candidates parsed successfully;
+`unitsWithUsage`, `unitsWithPrompts`, and `unitsWithResponses` count parsed
+units carrying each kind of evidence; `prompts` and `responses` are observed
+totals. `sourceHealth.<host>.capabilities` uses three states:
+
+`unknownKinds` is capped at 32 distinct wire kinds; additional occurrences are
+retained in `unknownKindOverflow` so future schema growth cannot expand the
+diagnostics payload without limit.
+
+* `supported` means this historical adapter can produce the category;
+* `unsupported` means the category is intentionally not claimed by this adapter;
+* `unavailable` means the adapter supports the category in principle, but the
+  source is absent or degraded for this scan.
+
+Therefore a supported source with zero observations is different from an
+absent/degraded source, and neither is silently converted into a host-specific
+metric. Existing status/reason fields and Codex diagnostic keys remain in place
+for compatibility; the common envelope and capability matrix are additive.
 
 ---
 
@@ -154,20 +187,20 @@ story is [Appendix A](#appendix-a--fix-history).)
 
 Two deliberate subtleties:
 
-- **`kind` is broader than `prompt` on the image-only edge.** An image-only
+* **`kind` is broader than `prompt` on the image-only edge.** An image-only
   paste has no text block, so `isHumanPrompt` returns `false` (it is not
   *counted* as a text prompt) — but it **is** the person acting, and
   `userTurnKind` returns `'prompt'` for it. "Not countable as a text prompt"
   and "not the human" are different claims.
-- **Harness-output envelopes are excluded from the prompt *count* too.**
+* **Harness-output envelopes are excluded from the prompt *count* too.**
   `isHumanPrompt` shares `HARNESS_OUTPUT_RE`, so a session's `prompts` figure
   never counts stdout dumps or task notifications as things the person said
   (`SCHEMA_VERSION` 5, `usage-index.mjs:47-51`; the correction this shipped
   with is in [Appendix A](#appendix-a--fix-history)).
-- **`tool-result` outranks `context`**: a `tool_result` block on an `isMeta`
+* **`tool-result` outranks `context`**: a `tool_result` block on an `isMeta`
   entry is still tool feedback.
 
-Codex user turns are `kind: 'prompt'` by construction (`usage-index.mjs:710`)
+Codex user turns are `kind: 'prompt'` by construction (`usage-index.mjs:767-775`)
 — rollouts only record real prompts as `user_message` events (§1.2).
 
 Coverage: `tests/kit/usage-index.test.mjs` — "user-role turns carry a kind"
@@ -185,8 +218,8 @@ transcript content leaves the module, and every step is a gate:
 
 1. **Id grammar before any filesystem access** — `VALID_ID`
    (`/^[A-Za-z0-9._-]{1,128}$/`, `usage-index.mjs:95`) rejects traversal
-   shapes with `ERR_INVALID_SESSION_ID` (`usage-index.mjs:1508-1512`).
-2. **Locate by id** across both roots (`locate`, `usage-index.mjs:1518`),
+   shapes with `ERR_INVALID_SESSION_ID` (`usage-index.mjs:1568-1572`).
+2. **Locate by id** across both roots (`locate`, `usage-index.mjs:1578`),
    consulting the scan cache when present but never requiring it —
    `readSession` works with no prior `buildIndex`.
 3. **Realpath containment** (`usage-index.mjs:1587-1601`) — the resolved file
@@ -213,11 +246,11 @@ Every turn body is passed through `maskSecrets` (`usage-index.mjs:208` — the
 23 secret shapes) **server-side, before
 serialization**, then length-capped at `MAX_TURN_CHARS` (40,000,
 `usage-index.mjs:89`) with the marker appended
-(`usage-index.mjs:1661-1670`). Two invariants:
+(`usage-index.mjs:1721-1729`). Two invariants:
 
-- **Presence is the signal.** `truncated`/`originalChars` are emitted only
+* **Presence is the signal.** `truncated`/`originalChars` are emitted only
   when the slice fired, so a complete turn cannot be misread as abridged.
-- **`originalChars` is measured after masking** — it describes loss due to
+* **`originalChars` is measured after masking** — it describes loss due to
   truncation alone, never a raw-file length.
 
 The two kinds of withholding keep distinct vocabulary end-to-end: masking
@@ -352,25 +385,25 @@ and [#59](https://github.com/pacphi/agentic-kit/issues/59).
 The main body describes only current behavior; this appendix records what
 was wrong before, for the curious.
 
-- **User-role turns rendered as "you" (fixed 2026-07-26).** Before `kind`
+* **User-role turns rendered as "you" (fixed 2026-07-26).** Before `kind`
   existed, the Transcript view labelled every user-role turn as the person.
   On the reference session that misattributed 276 tool results and 6 harness
   context injections — ~93% of its "you" turns (§3.1's measured split). The
   turn-`kind` machinery in §3 is the fix.
-- **Prompt counts included harness output (SCHEMA_VERSION 5).**
+* **Prompt counts included harness output (SCHEMA_VERSION 5).**
   `isHumanPrompt` once counted `harness-output` envelopes as human prompts —
   32 claimed vs 20 real on the reference session. Cached session records
   carried the inflated counts, hence the wholesale `SCHEMA_VERSION` 5 cache
   invalidation (`usage-index.mjs:48-51`).
-- **Session expander fields shipped but unrendered.** The per-session fields
+* **Session expander fields shipped but unrendered.** The per-session fields
   §6.1's expander now renders (classification `basis` + confidence, the
   token split, flags) once travelled on the wire and rendered nowhere.
-- **Transcript header once showed a hardcoded `$0.00`.** `readSession`'s
+* **Transcript header once showed a hardcoded `$0.00`.** `readSession`'s
   assembled `meta` left `cost` undefined, and `fmtUsd(undefined)` renders the
   truthy string `"$0.00"` — a fixed-looking zero on a panel whose whole
   subject is cost. `meta.cost` is now priced via `sessionCost()` from the
-  same per-model usage rows `aggregate()` uses (`usage-index.mjs:1651`).
-- **Aggregate-side incidents** (the v4/v5 cache bumps, the Codex parsing
+  same per-model usage rows `aggregate()` uses (`usage-index.mjs:1691`).
+* **Aggregate-side incidents** (the v4/v5 cache bumps, the Codex parsing
   defects) are recorded in `USAGE-SCORECARD-METRICS.md` Appendix A.
 
 ---
@@ -386,10 +419,10 @@ kind-attribution behavior is pinned by unit tests at both layers — parser
 
 **Against real data** (this machine's real stores, 2026-07-26):
 
-- A real Claude session (this feature's own working session, 884 turns):
+* A real Claude session (this feature's own working session, 884 turns):
   `{ prompt: 20, context: 6, 'tool-result': 276, assistant: 588 }`, zero
   user turns missing `kind`.
-- A real Codex rollout (8 user turns): every one `kind: 'prompt'`, as §1.2
+* A real Codex rollout (8 user turns): every one `kind: 'prompt'`, as §1.2
   predicts.
 
 ---
