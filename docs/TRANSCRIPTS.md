@@ -36,8 +36,8 @@ rewritten; rule 3 of the module header, `usage-index.mjs:22-29`):
 
 | Host | Store | Discovered by |
 |---|---|---|
-| Claude Code | `~/.claude/projects/<encoded-project-dir>/<sessionId>.jsonl` | `listClaude` (`usage-index.mjs:786`) — exactly one level of project directories |
-| Codex CLI | `~/.codex/sessions/<yyyy>/<mm>/<dd>/rollout-<ts>-<uuid>.jsonl` | `listCodex` (`usage-index.mjs:758`) — the `yyyy/mm/dd` tree walk |
+| Claude Code | `~/.claude/projects/<encoded-project-dir>/<sessionId>.jsonl` | `listClaude` (`usage-index.mjs:876-886`) — exactly one level of project directories |
+| Codex CLI | `~/.codex/sessions/<yyyy>/<mm>/<dd>/rollout-<ts>-<uuid>.jsonl` | `listCodex` (`usage-index.mjs:891-904`) — the `yyyy/mm/dd` tree walk |
 
 Roots come from `defaultRoots()` (`usage-index.mjs:750-754`) and are injectable
 for tests. A malformed line is skipped, never fatal (`jsonLines`,
@@ -78,14 +78,17 @@ Codex rollout lines carry `type` + `payload`. The parser (`parseCodex`,
 | `session_meta` | Authoritative session id, `cwd`, and `thread_source` (`usage-index.mjs:592-597`) — `"subagent"` marks a thread_spawn replay whose tokens are excluded from aggregation (`usage-index.mjs:662`; `USAGE-SCORECARD-METRICS.md` Appendix A, Bug B) |
 | `turn_context` | The model id in effect from this point on (`usage-index.mjs:598`) |
 | `event_msg` → `token_count` | A **cumulative** usage snapshot; only the last one is kept (`usage-index.mjs:662-664`) |
-| `event_msg` → `user_message` | A real human prompt — Codex does not route tool output through this event (`usage-index.mjs:637-645`) |
-| `event_msg` → `agent_message` | A model response (`usage-index.mjs:647-658`) |
+| `event_msg` → `user_message` | A legacy-format real human prompt — Codex does not route tool output through this event |
+| `event_msg` → `agent_message` | A legacy-format model response |
+| `event_msg` → `item_completed` → `UserMessage` | A current-format real human prompt; text blocks use the observed lowercase `text` discriminator |
+| `event_msg` → `item_completed` → `AgentMessage` | A current-format model response; text blocks use the observed uppercase `Text` discriminator |
 
-Codex tool calls and tool outputs travel in event types the parser does not
-surface as turns at all — so a Codex transcript renders as a prompt/response
-conversation without the tool-result interleaving a Claude transcript shows.
-That is a fidelity gap (less detail), not an attribution bug (nothing is
-mislabelled).
+The parser normalizes both message generations into the same prompt/response
+turn model. Unknown `item_completed` item types are ignored for those metrics
+and counted in Codex source diagnostics; they are not silently reclassified as
+human prompts, model responses, or existing tool metrics. Codex tool calls and
+tool outputs therefore still travel in event types the parser does not surface
+as turns — a fidelity gap, not an attribution bug.
 
 ---
 
@@ -95,8 +98,8 @@ The same parsers serve two very different callers, switched by `withTurns`:
 
 | Path | Entry point | `withTurns` | Message bodies | Cached? |
 |---|---|---|---|---|
-| **Scan** — the aggregate index behind the Scorecard/Findings/Sessions views | `buildIndex` → `parseFile` (`usage-index.mjs:746`) | `false` | never held — holding them would balloon memory across 3,000+ files (`usage-index.mjs:490-493`) | yes: per-file derived records in `~/.config/agentic-kit/usage-index.json`, keyed `(path, mtime, size)`, invalidated wholesale by `SCHEMA_VERSION` (`usage-index.mjs:51`) |
-| **Reader** — one transcript for the Transcript view | `readSession` (`usage-index.mjs:1363`) | `true` | full turn list built | **never** — every call re-reads and re-parses the one file |
+| **Scan** — the aggregate index behind the Scorecard/Findings/Sessions views | `buildIndex` → `parseFile` (`usage-index.mjs:925`) | `false` | never held — holding them would balloon memory across 3,000+ files (`usage-index.mjs:490-493`) | yes: per-file derived records in `~/.config/agentic-kit/usage-index.json`, keyed `(path, mtime, size)`, invalidated wholesale by `SCHEMA_VERSION` (`usage-index.mjs:77`) |
+| **Reader** — one transcript for the Transcript view | `readSession` (`usage-index.mjs:1566`) | `true` | full turn list built | **never** — every call re-reads and re-parses the one file |
 
 ![Figure: one parser, two read paths — the scan path (withTurns false) caches per-file records keyed by path, mtime and size; the reader path (withTurns true) builds full turns and is never cached](assets/transcript-read-paths.svg)
 
@@ -117,7 +120,7 @@ recorded in `USAGE-SCORECARD-METRICS.md` Appendix A).
 |---|---|---|
 | `role` | all | `"user"` or `"assistant"` — the **Messages-API role**, not the author (see below) |
 | `at` | all | ISO timestamp |
-| `text` | all | Flattened display text (`claudeText`, `usage-index.mjs:437` — binary payloads dropped: a pasted screenshot renders as `[image]`, a tool result is prefixed `[tool result]`) |
+| `text` | all | Flattened display text (`claudeText`, `usage-index.mjs:459-479` — binary payloads dropped: a pasted screenshot renders as `[image]`, a tool result is prefixed `[tool result]`) |
 | `model` | assistant | The model id; the literal string `exception` for an API-error placeholder turn (`usage-index.mjs:526`) |
 | `tools` | assistant | Tool names invoked in the turn |
 | `prompt` | user | `isHumanPrompt`'s verdict (`usage-index.mjs:441-450`) — drives the **prompt counts** |
@@ -175,42 +178,42 @@ and image-only pastes get the right kind" (the two edges).
 
 ## 4. The `readSession` pipeline — how one session becomes a payload
 
-`readSession(id, opts)` (`usage-index.mjs:1457-1513`) is the only way
+`readSession(id, opts)` (`usage-index.mjs:1566-1621`) is the only way
 transcript content leaves the module, and every step is a gate:
 
 ### 4.1 Locate, contain, bound
 
 1. **Id grammar before any filesystem access** — `VALID_ID`
-   (`/^[A-Za-z0-9._-]{1,128}$/`, `usage-index.mjs:83`) rejects traversal
-   shapes with `ERR_INVALID_SESSION_ID` (`usage-index.mjs:1399-1406`).
-2. **Locate by id** across both roots (`locate`, `usage-index.mjs:1409`),
+   (`/^[A-Za-z0-9._-]{1,128}$/`, `usage-index.mjs:95`) rejects traversal
+   shapes with `ERR_INVALID_SESSION_ID` (`usage-index.mjs:1508-1512`).
+2. **Locate by id** across both roots (`locate`, `usage-index.mjs:1518`),
    consulting the scan cache when present but never requiring it —
    `readSession` works with no prior `buildIndex`.
-3. **Realpath containment** (`usage-index.mjs:1388-1402`) — the resolved file
+3. **Realpath containment** (`usage-index.mjs:1587-1601`) — the resolved file
    must live under a transcript root *after* `realpathSync` collapses
    symlinks; a symlink planted inside a root pointing at `/etc/anything`
    passes a lexical `startsWith` but fails this. Roots are realpath'd too so
    a symlinked dotfiles setup still works.
-4. **Size cap** — `MAX_SESSION_BYTES` (64 MB, `usage-index.mjs:70`): a
+4. **Size cap** — `MAX_SESSION_BYTES` (64 MB, `usage-index.mjs:90`): a
    transcript is read whole and JSON-expands ~5×, so an unbounded read is a
    memory-amplification primitive. Oversized reads as unavailable, not risky.
 
 ### 4.2 Parse and price
 
 The file is parsed with `withTurns: true` by the provider's parser
-(`usage-index.mjs:1502-1509`), and `meta` is assembled
-(`usage-index.mjs:1518-1545`) with the same fields the Sessions view rows
+(`usage-index.mjs:1614-1618`), and `meta` is assembled
+(`usage-index.mjs:1624-1653`) with the same fields the Sessions view rows
 carry — `prompts`, `responses`, `exceptions`, `sidechain`, `threadSource`,
 `models`, `tools`, `skill`/`plugin`, worktree — plus a `cost` priced from the
 same per-model usage rows `aggregate()` uses.
 
 ### 4.3 Mask, then truncate — both marked, differently
 
-Every turn body is passed through `maskSecrets` (`usage-index.mjs:196` — the
+Every turn body is passed through `maskSecrets` (`usage-index.mjs:208` — the
 23 secret shapes) **server-side, before
 serialization**, then length-capped at `MAX_TURN_CHARS` (40,000,
-`usage-index.mjs:77`) with the marker appended
-(`usage-index.mjs:1552-1561`). Two invariants:
+`usage-index.mjs:89`) with the marker appended
+(`usage-index.mjs:1661-1670`). Two invariants:
 
 - **Presence is the signal.** `truncated`/`originalChars` are emitted only
   when the slice fired, so a complete turn cannot be misread as abridged.
@@ -366,7 +369,7 @@ was wrong before, for the curious.
   assembled `meta` left `cost` undefined, and `fmtUsd(undefined)` renders the
   truthy string `"$0.00"` — a fixed-looking zero on a panel whose whole
   subject is cost. `meta.cost` is now priced via `sessionCost()` from the
-  same per-model usage rows `aggregate()` uses (`usage-index.mjs:1538-1542`).
+  same per-model usage rows `aggregate()` uses (`usage-index.mjs:1651`).
 - **Aggregate-side incidents** (the v4/v5 cache bumps, the Codex parsing
   defects) are recorded in `USAGE-SCORECARD-METRICS.md` Appendix A.
 
