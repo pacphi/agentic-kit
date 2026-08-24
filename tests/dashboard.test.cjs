@@ -1380,6 +1380,41 @@ async function main() {
       assert(historyCalls[2].sinceMs === null, '?window=all must scan without a cutoff');
     });
 
+    await test('GET /api/live/history adds pagination metadata without changing the legacy shape', async () => {
+      const pageCalls = [];
+      live.historyPage = (opts) => {
+        pageCalls.push(opts);
+        return {
+          schemaVersion: 2, cursor: null,
+          sessions: [{ id: 'h1', project: 'agentic-kit', projectKey: 'project:test', nodes: [], edges: [] }],
+          projects: [{ id: 'project:test', label: 'agentic-kit', sessionCount: 2 }],
+          pagination: {
+            pageSize: opts.limit, offset: 0, returned: 1, total: 2,
+            totalExact: true, hasMore: true, nextPageToken: 'opaque-page-token',
+          },
+          coverage: { complete: true, timeBasis: 'file-mtime' },
+        };
+      };
+      const r = await get(liveSrv.url + 'api/live/history?window=1y&limit=1&projectKey=project%3Atest', liveSrv.token);
+      assert(r.status === 200, 'expected 200, got ' + r.status);
+      const body = JSON.parse(r.body);
+      assert(body.pagination.nextPageToken === 'opaque-page-token', 'pagination token must pass through');
+      assert(body.coverage.complete === true, 'coverage must pass through');
+      assert(pageCalls[0].limit === 1, 'limit must pass through');
+      assert(pageCalls[0].projectKey === 'project:test', 'project key must pass through');
+      assert(!r.body.includes('/Users/private'), 'pagination must preserve the same privacy scrubber');
+
+      const historyPage = live.historyPage;
+      live.historyPage = undefined;
+      try {
+        const legacy = await get(liveSrv.url + 'api/live/history?window=1y&limit=1', liveSrv.token);
+        assert(legacy.status === 200, 'new callers must fall back to a pre-pagination service');
+        assert(!JSON.parse(legacy.body).pagination, 'legacy fallback must preserve the old response shape');
+      } finally {
+        live.historyPage = historyPage;
+      }
+    });
+
     await test('GET /api/live/events with no token → 401 before any subscribe', async () => {
       const before = liveCalls.subscribe;
       const r = await getRaw(liveSrv.port, '/api/live/events');
@@ -1806,7 +1841,7 @@ async function main() {
   // is the suite where it matters most — the traversal-guard and credential-
   // leak tests live here and were the reviewer's cited example of a block
   // that could silently vanish with the old harness never noticing.
-  const EXPECTED = 72;
+  const EXPECTED = 73;
   if (passed + failed !== EXPECTED) {
     console.error(`\nPLAN MISMATCH: expected ${EXPECTED} tests, ran ${passed + failed}`);
     process.exit(1);

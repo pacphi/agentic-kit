@@ -661,10 +661,25 @@ const LIVE_STUB = {
   start: async () => {},
   snapshot: async () => LIVE_SNAPSHOT,
   // The fixture is static, so History's ?window= is a no-op here — the real
-  // LiveSessionsService.historySnapshot() date-windowing is covered by
+  // LiveSessionsService history scan and pagination are covered by
   // tests/kit/live-service.test.mjs; this stub only needs to exist so the
   // Observability → History tab has something to render end-to-end.
   historySnapshot: async () => LIVE_SNAPSHOT,
+  historyPage: async () => ({
+    ...LIVE_SNAPSHOT,
+    pagination: {
+      pageSize: 100, offset: 0, returned: LIVE_SNAPSHOT.sessions.length,
+      total: LIVE_SNAPSHOT.sessions.length, totalExact: true,
+      hasMore: false, nextPageToken: null,
+    },
+    coverage: {
+      complete: true, timeBasis: 'file-mtime', scannedAt: new Date().toISOString(),
+      sources: {
+        claude: { candidateFiles: 2, returnedFiles: 2, fileLimit: 8192, truncated: false },
+        codex: { candidateFiles: 1, returnedFiles: 1, fileLimit: 8192, truncated: false },
+      },
+    },
+  }),
   replay: async () => ({ reset: false, events: [] }),
   subscribe: () => () => {},
   close: async () => {},
