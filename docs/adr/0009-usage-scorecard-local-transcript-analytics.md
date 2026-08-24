@@ -11,8 +11,38 @@
   host, inference-provider, provenance, and model facts in session rows. ADR-0023 subsequently
   classified SQLite source failures and made transient OpenCode failures preserve last-good records
   with explicit degraded source health instead of becoming observed zero usage; the Usage UI now
-  renders each local source state rather than leaving that evidence API-only.
+  renders each local source state rather than leaving that evidence API-only. The 2026-08-24
+  cross-host telemetry amendment adds an additive common diagnostics envelope and capability states;
+  it deliberately does not promote Codex's richer public app-server activity items into historical
+  scorecard metrics until cross-host taxonomy and deduplication rules are answered.
 - **Deciders:** agentic-kit maintainers
+
+## Amendment — cross-host telemetry evidence and capability states (2026-08-24)
+
+The public surfaces were re-checked before the implementation: [Claude Code hooks and monitoring](https://code.claude.com/docs/en/hooks),
+[Codex app-server](https://github.com/openai/codex/blob/main/codex-rs/app-server/README.md), and
+[OpenCode's SDK and message model](https://github.com/anomalyco/opencode/blob/dev/packages/web/src/content/docs/sdk.mdx)
+all expose richer runtime activity than a single shared historical transcript schema. Claude exposes
+tool hooks and `claude_code.tool` telemetry; Codex exposes typed command, file-change, MCP, and
+collaboration items; OpenCode exposes message parts including tool invocations.
+
+The implemented boundary is therefore additive and evidence-graded:
+
+- `sourceHealth.<host>.diagnostics.common` reports discovered, parsed, usage-bearing,
+  prompt-bearing, and response-bearing session units, plus observed prompt/response totals,
+  warnings, and unknown kinds. Unknown kinds are bounded to 32 distinct names;
+  `unknownKindOverflow` retains additional occurrence volume.
+- `sourceHealth.<host>.capabilities` reports `supported`, `unsupported`, or `unavailable` for
+  prompts, responses, tool calls, command executions, file changes, MCP calls, and collaboration.
+  A supported source with zero observations is not the same as an absent or degraded source.
+- Existing source status/reason fields and Codex-specific diagnostics remain unchanged for callers;
+  the new fields are additive. The Usage dashboard renders the common coverage and capability
+  states, including the distinction between unsupported and unavailable.
+- The historical scorecard still normalizes only prompts/responses across all hosts and the existing
+  Claude/OpenCode tool-call contract. Codex wire kinds such as `commandExecution` and `fileChange`
+  remain diagnostic evidence, not Codex-only scorecard counters. A future activity taxonomy requires
+  maintainer answers on categories, nested-agent semantics, and deduplication before it changes that
+  boundary.
 
 ## Context
 

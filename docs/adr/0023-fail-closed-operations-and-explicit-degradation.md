@@ -168,6 +168,17 @@ shows the full per-field detail. The pill itself uses a solid `var(--panel-2)` b
 the segmented tab control's own look — no border, state shown via status-text color/weight — rather
 than the colored-outline chip style originally shipped.
 
+#### 7.1 Cross-host telemetry coverage is additive and evidence-graded (2026-08-24)
+
+Usage adds `sourceHealth.<host>.diagnostics.common` and
+`sourceHealth.<host>.capabilities` without changing existing status/reason or Codex-specific
+diagnostic fields. `supported`, `unsupported`, and `unavailable` are capability states, not
+observed counts: a readable source may report a supported zero, while an absent or degraded source
+must not render a fabricated zero. The Usage panel therefore says coverage is unavailable when
+common evidence cannot be read, and labels the Codex card as transcript coverage because
+`codexLedger` remains a separate corrective source folded only into the persistent host-health pill.
+The common unknown-kind map is capped at 32 names with overflow volume retained separately.
+
 ### 8. Clean-machine proof is isolated at every mutable boundary
 
 Required tests redirect HOME, USERPROFILE, XDG config/state, APPDATA, npm prefix/cache, Brain KB, and

@@ -508,6 +508,19 @@ body.gated .band,body.gated .tabbar,body.gated main{display:none}
   transition:filter .15s ease;
 }
 .daybar:hover .db-fill{filter:brightness(1.35)}
+.telemetry-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:8px}
+.telemetry-card{min-width:0;padding:10px 12px;border:1px solid var(--line);border-radius:var(--r-sm);background:var(--panel-2)}
+.telemetry-card .tc-head{display:flex;align-items:center;justify-content:space-between;gap:8px;color:var(--ink);font-size:12px;font-weight:650}
+.telemetry-card .tc-status{font-size:9px;font-weight:650;text-transform:uppercase;letter-spacing:.06em;color:var(--ink-dim)}
+.telemetry-card[data-status="ok"] .tc-status{color:var(--ok)}
+.telemetry-card[data-status="degraded"] .tc-status{color:var(--warn)}
+.telemetry-card[data-status="absent"] .tc-status,.telemetry-card[data-status="not-read"] .tc-status{color:var(--ink-dim)}
+.telemetry-card .tc-counts{margin-top:5px;color:var(--ink-2);font-size:10px;line-height:1.45}
+.telemetry-card .tc-caps{display:flex;flex-wrap:wrap;gap:4px;margin-top:8px}
+.telemetry-card .tc-cap{padding:3px 5px;border:1px solid var(--line);border-radius:5px;color:var(--ink-dim);font:9px/1.1 ui-monospace,monospace}
+.telemetry-card .tc-cap[data-state="supported"]{border-color:color-mix(in srgb,var(--ok) 42%,var(--line));color:var(--ok)}
+.telemetry-card .tc-cap[data-state="unsupported"]{color:var(--ink-dim)}
+.telemetry-card .tc-cap[data-state="unavailable"]{border-color:color-mix(in srgb,var(--warn) 42%,var(--line));color:var(--warn)}
 .db-lab{font-family:var(--mono); font-size:9.5px; color:var(--ink-dim); margin-top:6px}
 
 /* punchcard */

@@ -166,7 +166,11 @@ test('a corrupt OpenCode store preserves last-good usage and surfaces degraded s
   fs.writeFileSync(sb.dbFile, 'not a sqlite database');
   _resetForTest();
   const degraded = await buildIndex(opts(sb));
-  assert.deepEqual(degraded.sourceHealth.opencode, { status: 'degraded', reason: 'corrupt' });
+  assert.equal(degraded.sourceHealth.opencode.status, 'degraded');
+  assert.equal(degraded.sourceHealth.opencode.reason, 'corrupt');
+  assert.equal(degraded.sourceHealth.opencode.capabilities.prompts, 'unavailable');
+  assert.equal(degraded.sourceHealth.opencode.capabilities.toolCalls, 'unavailable');
+  assert.equal(degraded.sourceHealth.opencode.diagnostics.common.unitsSeen, 0);
   assert.equal(degraded.sessions.find((x) => x.id === 'ses_last_good').cost, 0.4,
     'a transient source failure must not become an observed zero');
   rm(sb.dir);

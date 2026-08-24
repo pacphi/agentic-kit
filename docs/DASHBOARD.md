@@ -179,6 +179,13 @@ control, and the original masked value never reaches the browser. See
 [ADR-0009](adr/0009-usage-scorecard-local-transcript-analytics.md) for the full evidence and pricing
 contract.
 
+The Scorecard view also shows a host-neutral **telemetry coverage** panel for Claude, Codex
+transcript evidence, and OpenCode. It reports parsed units and observed prompt/response totals, plus
+capability states (`supported`, `unsupported`, or `unavailable`). A readable source with no observed
+activity is a measured zero; an absent, degraded, or old API response is disclosed as unavailable or
+not reported rather than rendered as zero. The Codex transcript card does not merge the separate
+`codexLedger` corrective source into its coverage counts.
+
 ## Observability
 
 Observability separates navigation scope from playback state:

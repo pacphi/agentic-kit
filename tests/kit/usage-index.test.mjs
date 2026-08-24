@@ -843,7 +843,10 @@ test('an empty corpus yields a zeroed Aggregate rather than throwing', async () 
   assert.deepEqual(agg.projectTree, []);
   // A never-used host (root simply doesn't exist yet) reads as absent, not ok —
   // "zero sessions" and "we never found the directory" must stay distinguishable.
-  assert.deepEqual(agg.sourceHealth.claude, { status: 'absent', reason: null });
+  assert.equal(agg.sourceHealth.claude.status, 'absent');
+  assert.equal(agg.sourceHealth.claude.reason, null);
+  assert.equal(agg.sourceHealth.claude.capabilities.prompts, 'unavailable');
+  assert.equal(agg.sourceHealth.claude.diagnostics.common.unitsSeen, 0);
   assert.equal(agg.sourceHealth.codex.status, 'absent');
   assert.equal(agg.sourceHealth.codex.reason, null);
   assert.equal(agg.sourceHealth.codex.diagnostics.files, 0);
@@ -853,7 +856,12 @@ test('buildIndex reports ok claude/codex root health when the transcript roots e
   _resetForTest();
   const sb = sandbox();
   const agg = await buildIndex(opts(sb));
-  assert.deepEqual(agg.sourceHealth.claude, { status: 'ok', reason: null });
+  assert.equal(agg.sourceHealth.claude.status, 'ok');
+  assert.equal(agg.sourceHealth.claude.reason, null);
+  assert.equal(agg.sourceHealth.claude.capabilities.prompts, 'supported');
+  assert.equal(agg.sourceHealth.claude.diagnostics.common.unitsParsed, 3);
+  assert.equal(agg.sourceHealth.claude.diagnostics.common.prompts, 4);
+  assert.equal(agg.sourceHealth.claude.diagnostics.common.responses, 5);
   assert.equal(agg.sourceHealth.codex.status, 'ok');
   assert.equal(agg.sourceHealth.codex.reason, null);
   assert.equal(agg.sourceHealth.codex.diagnostics.files, 1);

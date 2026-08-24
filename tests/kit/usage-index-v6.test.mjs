@@ -132,7 +132,14 @@ test('parseCodex normalizes current item_completed messages and exposes bounded 
     files: 1, cachedFiles: 0, parsedFiles: 1, unparsedFiles: 0,
     filesWithTokens: 1, filesWithResponses: 1,
     legacyEvents: 0, itemCompletedEvents: 3, tokenCountEvents: 1,
-    prompts: 1, responses: 1, unknownItemTypes: { CommandExecution: 1 }, warnings: ['unknown-item-types'],
+    prompts: 1, responses: 1, unknownItemTypes: { CommandExecution: 1 }, unknownItemTypeOverflow: 0,
+    warnings: ['unknown-item-types'],
+    common: {
+      unitsSeen: 1, unitsParsed: 1, unitsWithUsage: 1,
+      unitsWithPrompts: 1, unitsWithResponses: 1,
+      prompts: 1, responses: 1,
+      warnings: ['unknown-item-types'], unknownKinds: { CommandExecution: 1 }, unknownKindOverflow: 0,
+    },
   });
 
   const detail = await readSession(id, opts(sb));
