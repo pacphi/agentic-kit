@@ -25,6 +25,12 @@ Claude Code `2.1.222`, Codex CLI `0.146.0`, and OpenCode `1.18.x`. Host and
 upstream behavior changes quickly; open issues below are a risk snapshot, not a
 promise that an issue remains open forever.
 
+The stock OpenCode gateway acceptance test currently covers the stable compatibility
+window **`>=1.18.18 <1.19.0`**. This is a tested release-line window, not a claim
+that every future OpenCode release is compatible and not a target for `ak sync` to
+downgrade toward. Expanding the window requires the gateway behavior test to pass
+against the new release line.
+
 ## Reading the matrices
 
 - **Native** means the upstream project ships a host-specific integration.

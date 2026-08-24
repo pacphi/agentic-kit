@@ -8,6 +8,11 @@ import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import {
+  extractStockOpenCodeVersion,
+  isSupportedStockOpenCodeVersion,
+  STOCK_OPENCODE_VERSION_RANGE,
+} from './helpers/opencode-version-policy.mjs';
 
 const harnessRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const pkgRoot = process.env.AK_STOCK_PACKAGE_ROOT
@@ -271,9 +276,13 @@ test(`stock OpenCode keeps Ruflo and Agentic QE connected with ${compactProjecti
     fs.rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   });
 
-  const version = execFileSync(opencode, ['--version'], { encoding: 'utf8' }).trim();
+  const reportedVersion = execFileSync(opencode, ['--version'], { encoding: 'utf8' }).trim();
   const binarySha256 = createHash('sha256').update(fs.readFileSync(opencode)).digest('hex');
-  assert.match(version, /^1\.18\.18(?:\b|$)/, `acceptance is pinned to stock OpenCode 1.18.18 (${binarySha256})`);
+  const version = extractStockOpenCodeVersion(reportedVersion);
+  assert.equal(
+    isSupportedStockOpenCodeVersion(version), true,
+    `unsupported stock OpenCode version '${reportedVersion}'; supported range is ${STOCK_OPENCODE_VERSION_RANGE} (${binarySha256})`,
+  );
 
   const configHome = path.join(root, 'config');
   const configDir = path.join(configHome, 'opencode');
