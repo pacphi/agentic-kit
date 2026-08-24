@@ -961,9 +961,20 @@ export function startDashboard({
           return;
         }
         const sinceMs = windowToSinceMs(query.get('window'));
-        sendJson(res, 200, publicLivePayload(await service.historySnapshot({ sinceMs })));
-      } catch {
-        sendJson(res, 503, { error: 'live telemetry unavailable' });
+        const pageRequested = query.has('limit') || query.has('pageToken') || query.has('projectKey');
+        const payload = pageRequested && typeof service.historyPage === 'function'
+          ? await service.historyPage({
+            sinceMs,
+            projectKey: query.get('projectKey') || null,
+            pageToken: query.get('pageToken') || null,
+            limit: clampInt(query.get('limit'), 100, 1, 250),
+          })
+          : await service.historySnapshot({ sinceMs });
+        sendJson(res, 200, publicLivePayload(payload));
+      } catch (error) {
+        sendJson(res, error?.code === 'INVALID_HISTORY_PAGE_TOKEN' ? 400 : 503,
+          { error: error?.code === 'INVALID_HISTORY_PAGE_TOKEN'
+            ? 'invalid history page token' : 'live telemetry unavailable' });
       } finally {
         scheduleLiveIdle();
       }

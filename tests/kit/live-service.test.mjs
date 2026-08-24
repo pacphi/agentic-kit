@@ -673,3 +673,44 @@ test('historySnapshot() date-windows a one-shot scan without disturbing the live
   // projection is still empty — historySnapshot() must not have populated it.
   assert.deepEqual(service.snapshot().sessions, []);
 });
+
+test('historyPage() pages the complete cross-host set after materialization', (t) => {
+  const sb = sandbox();
+  for (let index = 0; index < 1001; index++) {
+    const id = `claude-${String(index).padStart(4, '0')}`;
+    fs.writeFileSync(path.join(sb.claude, `${id}.jsonl`), line({
+      type: 'user', sessionId: id, timestamp: '2026-08-01T10:00:00Z',
+      cwd: '/Users/private-user/work/claude-project', message: { role: 'user' },
+    }));
+  }
+  const codexFile = path.join(sb.codex, 'rollout-2026-08-02T10-00-00-codex.jsonl');
+  fs.writeFileSync(codexFile, line({
+    type: 'session_meta', timestamp: '2026-08-02T10:00:00Z',
+    payload: { id: 'codex-1', cwd: '/Users/private-user/work/codex-project', model_provider: 'openai' },
+  }));
+  const service = new LiveSessionsService({
+    roots: sb.roots, readCodexState: () => null,
+    now: () => '2026-08-03T12:00:00Z',
+  });
+  t.after(() => service.close());
+
+  const all = service.historySnapshot();
+  assert.equal(all.sessions.length, 1002, 'history must not apply the live 100-session bound');
+  assert.equal(all.coverage.complete, true);
+  assert.equal(all.coverage.sources.claude.returnedFiles, 1001);
+  assert.equal(all.coverage.sources.codex.returnedFiles, 1);
+
+  const seen = new Set();
+  let page = service.historyPage({ limit: 100 });
+  while (page) {
+    for (const session of page.sessions) {
+      assert.equal(seen.has(session.key), false, `duplicate session ${session.key}`);
+      seen.add(session.key);
+    }
+    if (!page.pagination.hasMore) break;
+    page = service.historyPage({ limit: 100, pageToken: page.pagination.nextPageToken });
+  }
+  assert.equal(seen.size, 1002);
+  assert.equal([...seen].filter((key) => key.startsWith('claude:')).length, 1001);
+  assert.equal([...seen].filter((key) => key.startsWith('codex:')).length, 1);
+});

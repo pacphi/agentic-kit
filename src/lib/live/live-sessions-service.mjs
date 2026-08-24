@@ -1,4 +1,5 @@
 import path from 'node:path';
+import { randomUUID } from 'node:crypto';
 import { claudeDir, codexDir, observabilityWorkspacePath } from '../paths.mjs';
 import { readCodexState as defaultReadCodexState } from '../codex-state.mjs';
 import { adaptClaudeRecord } from './claude-adapter.mjs';
@@ -16,16 +17,20 @@ import { canonicalSessionKey, resolveProjectIdentity } from './project-label.mjs
 import { workspaceFromSource } from './git-workspace.mjs';
 import { WorkspaceSnapshotStore } from './workspace-store.mjs';
 import {
-  bootstrapRecords, codexTranscriptId, discoverJsonl,
+  bootstrapRecords, codexTranscriptId, discoverJsonl, discoverJsonlDetailed,
 } from './native-transcript-discovery.mjs';
 
 // historySnapshot() is a one-shot on-demand scan, not a continuously-tailed
 // live feed, so it can afford limits well above the live path's maxFiles(256)
-// /maxSessions(100) defaults — those stay small purely to keep the always-on
-// tailer set cheap. discoverJsonl's own hard 4096-file safety cap is the real
-// backstop for the "all time" window on a machine with a large corpus.
-const HISTORY_MAX_FILES = 2048;
-const HISTORY_MAX_SESSIONS = 1000;
+// /maxSessions(100) defaults. History pages are sliced only after this scan;
+// the live projection's smaller bound must never decide which host's history
+// survives. The detailed discovery result makes any safety boundary visible.
+const HISTORY_MAX_FILES = 8192;
+const HISTORY_MAX_SESSIONS = HISTORY_MAX_FILES * 2;
+const HISTORY_DEFAULT_PAGE_SIZE = 100;
+const HISTORY_MAX_PAGE_SIZE = 250;
+const HISTORY_PAGE_TTL_MS = 60_000;
+const HISTORY_PAGE_CACHE_SIZE = 8;
 
 /**
  * Coordinates bounded transcript tailers into one privacy-safe live projection.
@@ -46,6 +51,7 @@ export class LiveSessionsService {
   #lastRuntimeScan = 0;
   #runtimeSurvey = null;
   #workspaceStore = null;
+  #historyPages = new Map();
 
   constructor(options = {}) {
     const roots = options.roots ?? {};
@@ -107,6 +113,7 @@ export class LiveSessionsService {
     this.#tailers.clear();
     this.#contexts.clear();
     this.#runtimeBindings.clear();
+    this.#historyPages.clear();
     this.#started = false;
   }
 
@@ -279,14 +286,73 @@ export class LiveSessionsService {
    * renders identically whichever scope produced it.
    * @param {{ sinceMs?: number|null }} [options] sinceMs is an epoch-ms
    *   cutoff on file mtime; omit/null scans "all time".
-   * @returns {ReturnType<typeof serializeLiveProjection>}
+   * @returns {ReturnType<typeof serializeLiveProjection> & {coverage: object}}
    */
   historySnapshot({ sinceMs = null } = {}) {
-    const claude = discoverJsonl(this.#options.roots.claude, {
+    return this.#scanHistory({ sinceMs });
+  }
+
+  /**
+   * Return one stable, project-scoped page from a retained history snapshot.
+   * The snapshot is cached briefly so scrolling does not rescan or reorder the
+   * same history set between requests. pageToken is intentionally opaque to
+   * callers and contains no filesystem identity.
+   * @param {{ sinceMs?: number|null, projectKey?: string|null,
+   *   limit?: number, pageToken?: string|null }} [options]
+   */
+  historyPage({ sinceMs = null, projectKey = null, limit = HISTORY_DEFAULT_PAGE_SIZE,
+    pageToken = null } = {}) {
+    const pageSize = Math.min(HISTORY_MAX_PAGE_SIZE, Math.max(1,
+      Number.parseInt(String(limit), 10) || HISTORY_DEFAULT_PAGE_SIZE));
+    let entry;
+    let offset = 0;
+    if (pageToken) {
+      const token = decodeHistoryPageToken(pageToken);
+      entry = this.#historyPages.get(token.snapshotId);
+      if (!entry || Date.now() - entry.createdAt > HISTORY_PAGE_TTL_MS
+        || entry.projectKey !== (projectKey ?? null)) {
+        throw invalidHistoryPageToken();
+      }
+      offset = Number.isInteger(token.offset) && token.offset >= 0
+        && token.offset <= entry.sessions.length ? token.offset : -1;
+      if (offset < 0) throw invalidHistoryPageToken();
+    } else {
+      const snapshot = this.#scanHistory({ sinceMs });
+      const sessions = snapshot.sessions
+        .filter((session) => !projectKey || session.projectKey === projectKey)
+        .sort(compareHistorySessions);
+      entry = { snapshot, sessions, projectKey: projectKey ?? null, sinceMs: sinceMs ?? null,
+        snapshotId: randomUUID(), createdAt: Date.now() };
+      this.#historyPages.set(entry.snapshotId, entry);
+      while (this.#historyPages.size > HISTORY_PAGE_CACHE_SIZE) {
+        this.#historyPages.delete(this.#historyPages.keys().next().value);
+      }
+    }
+
+    const sessions = entry.sessions.slice(offset, offset + pageSize);
+    const nextOffset = offset + sessions.length;
+    const hasMore = nextOffset < entry.sessions.length;
+    return {
+      ...entry.snapshot,
+      sessions,
+      pagination: {
+        pageSize, offset, returned: sessions.length,
+        total: entry.sessions.length,
+        totalExact: entry.snapshot.coverage.complete,
+        hasMore,
+        nextPageToken: hasMore
+          ? encodeHistoryPageToken({ snapshotId: entry.snapshotId, offset: nextOffset }) : null,
+      },
+    };
+  }
+
+  #scanHistory({ sinceMs = null } = {}) {
+    const claude = discoverJsonlDetailed(this.#options.roots.claude, {
       maxDepth: 3, maxFiles: HISTORY_MAX_FILES, sinceMs, accept: () => true,
     });
-    const codex = discoverJsonl(this.#options.roots.codex, {
-      maxDepth: 4, maxFiles: HISTORY_MAX_FILES, sinceMs, accept: (name) => name.startsWith('rollout-'),
+    const codex = discoverJsonlDetailed(this.#options.roots.codex, {
+      maxDepth: 4, maxFiles: HISTORY_MAX_FILES, sinceMs,
+      accept: (name) => name.startsWith('rollout-'),
     });
     let projection = emptyLiveProjection();
     const ingest = (file, adapter, context) => {
@@ -298,10 +364,10 @@ export class LiveSessionsService {
         }
       }
     };
-    for (const file of claude) {
+    for (const file of claude.files) {
       ingest(file, 'claude', { adapter: 'claude', sessionId: path.basename(file, '.jsonl'), project: 'unknown' });
     }
-    for (const file of codex) {
+    for (const file of codex.files) {
       ingest(file, 'codex', { adapter: 'codex', sessionId: codexTranscriptId(file), meta: {} });
     }
     // A one-shot scan never observes the process ending, so the reducer's
@@ -316,7 +382,19 @@ export class LiveSessionsService {
     projection = sweepLiveProjection(projection, {
       now: this.#options.now(), quiescentMs: 0, expiryMs: 0, pendingExpiryMs: 0,
     });
-    return serializeLiveProjection(projection);
+    const snapshot = serializeLiveProjection(projection);
+    return {
+      ...snapshot,
+      coverage: {
+        complete: !claude.truncated && !codex.truncated,
+        timeBasis: 'file-mtime',
+        scannedAt: this.#options.now(),
+        sources: {
+          claude: historyDiscoveryCoverage(claude),
+          codex: historyDiscoveryCoverage(codex),
+        },
+      },
+    };
   }
 
   /** Configuration reads are per-project, so memoize by session cwd. */
@@ -551,4 +629,40 @@ export class LiveSessionsService {
       lastError: code ?? (error instanceof SyntaxError ? 'invalid-json' : 'unknown-error'),
     });
   }
+}
+
+function compareHistorySessions(left, right) {
+  return Date.parse(right.updatedAt ?? 0) - Date.parse(left.updatedAt ?? 0)
+    || String(left.host ?? '').localeCompare(String(right.host ?? ''))
+    || String(left.id ?? '').localeCompare(String(right.id ?? ''));
+}
+
+function historyDiscoveryCoverage(discovery) {
+  return {
+    candidateFiles: discovery.candidateCount,
+    returnedFiles: discovery.returnedCount,
+    fileLimit: HISTORY_MAX_FILES,
+    truncated: discovery.truncated,
+  };
+}
+
+function encodeHistoryPageToken(value) {
+  return Buffer.from(JSON.stringify(value), 'utf8').toString('base64url');
+}
+
+function decodeHistoryPageToken(value) {
+  try {
+    const parsed = JSON.parse(Buffer.from(String(value), 'base64url').toString('utf8'));
+    if (!parsed || typeof parsed.snapshotId !== 'string'
+      || !Number.isInteger(parsed.offset) || parsed.offset < 0) throw new Error('invalid');
+    return parsed;
+  } catch {
+    throw invalidHistoryPageToken();
+  }
+}
+
+function invalidHistoryPageToken() {
+  return Object.assign(new Error('invalid history page token'), {
+    code: 'INVALID_HISTORY_PAGE_TOKEN',
+  });
 }

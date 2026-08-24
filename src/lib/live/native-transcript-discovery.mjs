@@ -5,6 +5,8 @@ const safeEntries = (dir) => {
   try { return fs.readdirSync(dir, { withFileTypes: true }); } catch { return []; }
 };
 
+const DISCOVERY_HARD_LIMIT = 16_384;
+
 /**
  * @param {string} root
  * @param {{ maxDepth: number, maxFiles: number, accept: (name: string) => boolean,
@@ -14,11 +16,27 @@ const safeEntries = (dir) => {
  *   existing caller (the live tailer, project-discovery) relies on.
  */
 export function discoverJsonl(root, { maxDepth, maxFiles, accept, sinceMs = null }) {
+  return discoverJsonlDetailed(root, { maxDepth, maxFiles, accept, sinceMs }).files;
+}
+
+/**
+ * Discover files while retaining enough bounded-source evidence for callers to
+ * say whether the returned set is complete. The legacy discoverJsonl() wrapper
+ * deliberately keeps returning only paths for existing tailer callers.
+ */
+export function discoverJsonlDetailed(root, { maxDepth, maxFiles, accept, sinceMs = null }) {
   const found = [];
+  let truncated = false;
   const visit = (dir, depth) => {
-    if (depth > maxDepth || found.length >= 4096) return;
+    if (depth > maxDepth || found.length >= DISCOVERY_HARD_LIMIT) {
+      if (found.length >= DISCOVERY_HARD_LIMIT) truncated = true;
+      return;
+    }
     for (const entry of safeEntries(dir)) {
-      if (found.length >= 4096) break;
+      if (found.length >= DISCOVERY_HARD_LIMIT) {
+        truncated = true;
+        break;
+      }
       const file = path.join(dir, entry.name);
       if (entry.isDirectory()) visit(file, depth + 1);
       else if (entry.isFile() && entry.name.endsWith('.jsonl') && accept(entry.name)) {
@@ -30,8 +48,14 @@ export function discoverJsonl(root, { maxDepth, maxFiles, accept, sinceMs = null
     }
   };
   visit(root, 0);
-  return found.sort((a, b) => b.mtimeMs - a.mtimeMs)
-    .slice(0, maxFiles).map((entry) => entry.file);
+  const ordered = found.sort((a, b) => b.mtimeMs - a.mtimeMs);
+  const files = ordered.slice(0, maxFiles).map((entry) => entry.file);
+  return {
+    files,
+    candidateCount: ordered.length,
+    returnedCount: files.length,
+    truncated: truncated || ordered.length > files.length,
+  };
 }
 
 /**

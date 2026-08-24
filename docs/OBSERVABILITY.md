@@ -225,6 +225,27 @@ secondary tab row directly beneath the main Observability tab; the Left/Right, H
 also move between these two views when the tab row has focus. Their canonical hashes are
 `#observability/live` and `#observability/history`.
 
+### History loading, pagination, and coverage
+
+History is loaded newest-first in bounded pages. The browser requests an initial page of up to
+100 sessions, automatically asks for the next opaque continuation token as the list approaches
+its sentinel, and keeps a visible **Load older sessions** fallback when automatic loading is not
+available. The project browser uses the server's full project metadata, so a page containing only
+the newest sessions does not make a project's total look smaller than it is.
+
+The server keeps the history scan separate from the live tailer. It discovers eligible Claude and
+Codex transcript files by file modification time, materializes a stable short-lived snapshot, and
+then pages that snapshot. Each paginated response reports `pagination.total`, `hasMore`, and an
+opaque `nextPageToken`; `coverage` reports the per-host candidate/returned file counts, the file
+limit, the scan time, and whether discovery was complete. An incomplete scan is disclosed in the
+History view rather than presented as an authoritative empty or complete result.
+
+This was added compatibly. `GET /api/live/history` without `limit`, `pageToken`, or `projectKey`
+continues to return the pre-pagination snapshot shape. Clients that understand pagination opt in
+with those query parameters and receive the same snapshot fields plus additive `pagination` and
+`coverage` fields. Continuation tokens are short-lived and scoped to their project/window snapshot;
+an expired or malformed token returns `400` so a client can restart from the first page.
+
 ### Live and Review playback
 
 An active session opens in **Live** mode and follows new topology and transcript
@@ -394,6 +415,7 @@ unbounded content snapshot.
 | Symptom | Explanation |
 |---------|-------------|
 | No sessions | No supported metadata was found within the bounded newest-first discovery set |
+| History says the scan is incomplete | The per-host discovery bound was reached; older files may not be represented, so widen the configured source or rerun after reducing the corpus |
 | Live shows 0 projects | No retained root currently satisfies the Live predicate; switch to History for past sessions |
 | History shows 0 projects | No retained non-live root exists; current work, if any, remains in Live |
 | Green or moving content appears in History | This violates the Observability contract; refresh, then report it as a presentation defect if it remains |
