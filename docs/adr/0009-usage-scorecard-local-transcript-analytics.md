@@ -2,8 +2,11 @@
 
 - **Status:** Implemented
 - **Date:** 2026-07-25
-- **Updated:** 2026-08-04
-- **Update note:** Added the explicit OpenRouter account-analytics cache boundary for issue #59,
+- **Updated:** 2026-08-24
+- **Update note:** Issue #170 added backward-compatible parsing for legacy Codex messages and
+  `item_completed` envelopes, bumped the derived-index schema to force reparse of stale zero-turn
+  records, added Codex parse-yield diagnostics, and separated first-billed-day session counts from
+  token-bearing active-day counts. The earlier OpenRouter account-analytics cache boundary for issue #59,
   aligned Usage with the dashboard's shared three-area navigation, and documented independent
   host, inference-provider, provenance, and model facts in session rows. ADR-0023 subsequently
   classified SQLite source failures and made transient OpenCode failures preserve last-good records

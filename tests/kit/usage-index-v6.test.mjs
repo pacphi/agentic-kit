@@ -7,7 +7,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { buildIndex, _resetForTest } from '../../src/lib/usage-index.mjs';
+import { buildIndex, readSession, _resetForTest } from '../../src/lib/usage-index.mjs';
 
 const NOW = Date.parse('2026-07-25T12:00:00.000Z');
 const T0 = '2026-07-24T09:00:00.000Z';
@@ -55,6 +55,31 @@ function rollout(id, { threadSource = 'user' } = {}) {
     });
 }
 
+function rolloutItemCompleted(id, { mixed = false } = {}) {
+  const line = (o) => `${JSON.stringify(o)}\n`;
+  const meta = line({ timestamp: T0, type: 'session_meta', payload: {
+    id, cwd: '/Users/me/proj', thread_source: 'user', model_provider: 'openai',
+  } });
+  const context = line({ timestamp: T0, type: 'turn_context', payload: { model: 'gpt-5.6' } });
+  const legacy = mixed
+    ? line({ timestamp: T0, type: 'event_msg', payload: { type: 'user_message', message: 'legacy prompt' } })
+      + line({ timestamp: T1, type: 'event_msg', payload: { type: 'agent_message', message: 'legacy response' } })
+    : '';
+  const current = line({ timestamp: T0, type: 'event_msg', payload: {
+    type: 'item_completed', item: { type: 'UserMessage', id: 'user-1', content: [{ type: 'text', text: 'current prompt' }] },
+  } }) + line({
+    timestamp: T0, type: 'event_msg', payload: {
+      type: 'token_count',
+      info: { total_token_usage: { input_tokens: 100, cached_input_tokens: 40, output_tokens: 20, total_tokens: 120 } },
+    },
+  }) + line({ timestamp: T1, type: 'event_msg', payload: {
+    type: 'item_completed', item: { type: 'AgentMessage', id: 'agent-1', content: [{ type: 'Text', text: 'current response' }] },
+  } }) + line({ timestamp: T1, type: 'event_msg', payload: {
+    type: 'item_completed', item: { type: 'CommandExecution', id: 'command-1', command: 'echo hidden' },
+  } });
+  return meta + context + legacy + current;
+}
+
 function sandbox(files) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-usage-v6-'));
   const day = path.join(dir, 'codex', '2026', '07', '24');
@@ -90,6 +115,105 @@ test('parseCodex captures reasoning output and the LAST rate-limit snapshot', as
   // And the aggregate exposes the window's snapshots as a history, oldest first.
   assert.equal(agg.codexRateLimits.length, 1);
   assert.equal(agg.codexRateLimits[0].windows[0].usedPercent, 9);
+});
+
+test('parseCodex normalizes current item_completed messages and exposes bounded diagnostics', async () => {
+  _resetForTest();
+  const id = 'item-completed-1';
+  const sb = sandbox({ [`rollout-2026-07-24T09-00-00-${id}.jsonl`]: rolloutItemCompleted(id) });
+  const agg = await buildIndex(opts(sb));
+  const s = agg.sessions.find((x) => x.id === id);
+  assert.ok(s, 'current-format session is retained');
+  assert.equal(s.prompts, 1);
+  assert.equal(s.responses, 1);
+  assert.equal(s.tokens, 120);
+  assert.equal(agg.sourceHealth.codex.status, 'ok');
+  assert.deepEqual(agg.sourceHealth.codex.diagnostics, {
+    files: 1, cachedFiles: 0, parsedFiles: 1, unparsedFiles: 0,
+    filesWithTokens: 1, filesWithResponses: 1,
+    legacyEvents: 0, itemCompletedEvents: 3, tokenCountEvents: 1,
+    prompts: 1, responses: 1, unknownItemTypes: { CommandExecution: 1 }, warnings: ['unknown-item-types'],
+  });
+
+  const detail = await readSession(id, opts(sb));
+  assert.deepEqual(detail.turns.map((t) => [t.role, t.text]), [
+    ['user', 'current prompt'], ['assistant', 'current response'],
+  ]);
+});
+
+test('parseCodex accepts a mixed legacy/current rollout without dropping either message family', async () => {
+  _resetForTest();
+  const id = 'item-completed-mixed';
+  const sb = sandbox({ [`rollout-2026-07-24T09-00-00-${id}.jsonl`]: rolloutItemCompleted(id, { mixed: true }) });
+  const agg = await buildIndex(opts(sb));
+  const s = agg.sessions.find((x) => x.id === id);
+  assert.equal(s.prompts, 2);
+  assert.equal(s.responses, 2);
+  assert.equal(agg.sourceHealth.codex.diagnostics.legacyEvents, 2);
+  assert.equal(agg.sourceHealth.codex.diagnostics.itemCompletedEvents, 3);
+});
+
+test('Codex source health degrades when token-bearing files yield zero normalized responses', async () => {
+  _resetForTest();
+  const id = 'item-completed-zero';
+  const line = (o) => `${JSON.stringify(o)}\n`;
+  const raw = line({ timestamp: T0, type: 'session_meta', payload: { id, cwd: '/Users/me/proj' } })
+    + line({ timestamp: T0, type: 'turn_context', payload: { model: 'gpt-5.6' } })
+    + line({ timestamp: T0, type: 'event_msg', payload: {
+      type: 'token_count', info: { total_token_usage: { input_tokens: 100, cached_input_tokens: 0, output_tokens: 20, total_tokens: 120 } },
+    } });
+  const sb = sandbox({ [`rollout-2026-07-24T09-00-00-${id}.jsonl`]: raw });
+  const agg = await buildIndex(opts(sb));
+  assert.equal(agg.totals.sessions, 0);
+  assert.equal(agg.sourceHealth.codex.status, 'degraded');
+  assert.equal(agg.sourceHealth.codex.reason, 'parse-yield-zero');
+  assert.deepEqual(agg.sourceHealth.codex.diagnostics.warnings, ['zero-response-yield']);
+});
+
+test('Codex source health exposes partial response yield across token-bearing files', async () => {
+  _resetForTest();
+  const id = 'item-completed-partial';
+  const line = (o) => `${JSON.stringify(o)}\n`;
+  const zero = line({ timestamp: T0, type: 'session_meta', payload: { id: 'zero-yield', cwd: '/Users/me/proj' } })
+    + line({ timestamp: T0, type: 'event_msg', payload: {
+      type: 'token_count', info: { total_token_usage: { input_tokens: 100, cached_input_tokens: 0, output_tokens: 20, total_tokens: 120 } },
+    } });
+  const sb = sandbox({
+    [`rollout-2026-07-24T09-00-00-${id}.jsonl`]: rollout(id),
+    'rollout-2026-07-24T09-00-01-zero-yield.jsonl': zero,
+  });
+  const agg = await buildIndex(opts(sb));
+  assert.equal(agg.totals.sessions, 1);
+  assert.equal(agg.sourceHealth.codex.status, 'degraded');
+  assert.equal(agg.sourceHealth.codex.reason, 'parse-yield-partial');
+  assert.deepEqual(agg.sourceHealth.codex.diagnostics.warnings, ['partial-response-yield']);
+  assert.equal(agg.sourceHealth.codex.diagnostics.filesWithTokens, 2);
+  assert.equal(agg.sourceHealth.codex.diagnostics.filesWithResponses, 1);
+});
+
+test('schema 10 reparses a legacy Codex cache instead of trusting zero-turn records', async () => {
+  _resetForTest();
+  const id = 'schema-bump-codex';
+  const fileName = `rollout-2026-07-24T09-00-00-${id}.jsonl`;
+  const sb = sandbox({ [fileName]: rolloutItemCompleted(id) });
+  await buildIndex(opts(sb));
+
+  const cache = JSON.parse(fs.readFileSync(sb.cachePath, 'utf8'));
+  const file = path.join(sb.roots.codex, '2026', '07', '24', fileName);
+  cache.schemaVersion = 9;
+  cache.entries[file].session.prompts = 0;
+  cache.entries[file].session.responses = 0;
+  cache.entries[file].session.usage = [];
+  fs.writeFileSync(sb.cachePath, JSON.stringify(cache));
+
+  _resetForTest();
+  const agg = await buildIndex(opts(sb));
+  const s = agg.sessions.find((x) => x.id === id);
+  assert.equal(s.prompts, 1);
+  assert.equal(s.responses, 1);
+  assert.equal(s.tokens, 120);
+  assert.equal(agg.sourceHealth.codex.diagnostics.cachedFiles, 0);
+  assert.equal(agg.sourceHealth.codex.diagnostics.parsedFiles, 1);
 });
 
 test('reasoning tokens are annotation only — token totals are unchanged by them', async () => {

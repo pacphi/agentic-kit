@@ -1,9 +1,10 @@
 # ADR-0023 — Fail-closed mutations and explicit degraded operation evidence
 
 - **Status:** Implemented
-- **Updated:** 2026-08-07 — §9 permanently unmeasurable quantities, §10 stated exclusions
+- **Updated:** 2026-08-24 — issue #170 parser-yield diagnostics distinguish readable Codex roots from
+  readable roots whose transcript schema produces no normalized responses
 - **Date:** 2026-08-04
-- **Updated:** 2026-08-06
+- **Previous update:** 2026-08-06
 - **Update note:** Generalized setup preflight into a required host-adapter trust contract, added
   Codex registration/OpenCode approval disclosure, documented current-UID installation-mode
   boundaries, and surfaced usage-source health in the dashboard UI. Closed a parity gap §7 left

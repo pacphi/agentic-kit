@@ -671,6 +671,40 @@ test('a session that opens before midnight is counted on its first billed day', 
   );
 });
 
+test('byDay preserves first-billed sessions and adds active sessions for later token days', async () => {
+  _resetForTest();
+  const sb = soloSandbox();
+  const iso = (d) => new Date(d).toISOString();
+  fs.writeFileSync(path.join(sb.claude, 'multi-day-7777.jsonl'), [
+    JSON.stringify({
+      type: 'user', sessionId: 'multi-day-7777', cwd: '/Users/me/proj',
+      timestamp: iso(new Date(2026, 6, 24, 23, 58)),
+      message: { role: 'user', content: [{ type: 'text', text: 'day one' }] },
+    }),
+    JSON.stringify({
+      type: 'assistant', sessionId: 'multi-day-7777', cwd: '/Users/me/proj',
+      timestamp: iso(new Date(2026, 6, 24, 23, 59)),
+      message: { role: 'assistant', model: 'claude-opus-5', usage: { input_tokens: 7, output_tokens: 3 }, content: [] },
+    }),
+    JSON.stringify({
+      type: 'user', sessionId: 'multi-day-7777', cwd: '/Users/me/proj',
+      timestamp: iso(new Date(2026, 6, 25, 0, 4)),
+      message: { role: 'user', content: [{ type: 'text', text: 'day two' }] },
+    }),
+    JSON.stringify({
+      type: 'assistant', sessionId: 'multi-day-7777', cwd: '/Users/me/proj',
+      timestamp: iso(new Date(2026, 6, 25, 0, 5)),
+      message: { role: 'assistant', model: 'claude-opus-5', usage: { input_tokens: 11, output_tokens: 5 }, content: [] },
+    }),
+  ].join('\n') + '\n');
+
+  const agg = await buildIndex(opts(sb, { days: 30 }));
+  assert.equal(agg.byDay['2026-07-24'].sessions, 1);
+  assert.equal(agg.byDay['2026-07-24'].sessionsActive, 1);
+  assert.equal(agg.byDay['2026-07-25'].sessions, 0);
+  assert.equal(agg.byDay['2026-07-25'].sessionsActive, 1);
+});
+
 test('a dropped-connection turn (isApiErrorMessage) counts as an exception, never a $0 model', async () => {
   // Claude Code synthesizes a local placeholder turn — model: "<synthetic>",
   // isApiErrorMessage: true, all-zero usage — when a request's connection
@@ -810,7 +844,9 @@ test('an empty corpus yields a zeroed Aggregate rather than throwing', async () 
   // A never-used host (root simply doesn't exist yet) reads as absent, not ok —
   // "zero sessions" and "we never found the directory" must stay distinguishable.
   assert.deepEqual(agg.sourceHealth.claude, { status: 'absent', reason: null });
-  assert.deepEqual(agg.sourceHealth.codex, { status: 'absent', reason: null });
+  assert.equal(agg.sourceHealth.codex.status, 'absent');
+  assert.equal(agg.sourceHealth.codex.reason, null);
+  assert.equal(agg.sourceHealth.codex.diagnostics.files, 0);
 });
 
 test('buildIndex reports ok claude/codex root health when the transcript roots exist', async () => {
@@ -818,7 +854,9 @@ test('buildIndex reports ok claude/codex root health when the transcript roots e
   const sb = sandbox();
   const agg = await buildIndex(opts(sb));
   assert.deepEqual(agg.sourceHealth.claude, { status: 'ok', reason: null });
-  assert.deepEqual(agg.sourceHealth.codex, { status: 'ok', reason: null });
+  assert.equal(agg.sourceHealth.codex.status, 'ok');
+  assert.equal(agg.sourceHealth.codex.reason, null);
+  assert.equal(agg.sourceHealth.codex.diagnostics.files, 1);
 });
 
 test('an unreadable Claude root degrades rather than silently reading as zero sessions', async () => {

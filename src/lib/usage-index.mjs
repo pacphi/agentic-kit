@@ -70,8 +70,11 @@ import {
  *      `isApiErrorMessage: true` — some builds emit the placeholder without
  *      that flag set. A v8-cached session parsed from such a transcript still
  *      carries `"<synthetic>"` in `models` and a $0 usage row, so it must be
- *      re-derived or the placeholder keeps showing as a real "model in play". */
-export const SCHEMA_VERSION = 9;
+ *      re-derived or the placeholder keeps showing as a real "model in play".
+ *  v10: Codex rollout messages can arrive in the `item_completed` envelope;
+ *       v9-cached records parsed from those files have token rows but zero
+ *       prompts/responses, so every Codex record must be re-derived. */
+export const SCHEMA_VERSION = 10;
 
 /** Silence longer than this ends a stretch of engagement. A session is split
  *  into active sub-intervals at gaps ABOVE this bound (exactly this much is not
@@ -620,6 +623,49 @@ function parseClaude(raw, { id, dirName, withTurns = false }) {
   return { session: seal(rec), turns };
 }
 
+/** Newer Codex rollouts wrap messages in `item_completed` and use a different
+ * content-block discriminator for each message role (`Text` for agent output,
+ * `text` for user input). Keep that wire detail at the parser boundary so the
+ * rest of the scorecard consumes the same prompt/response model for both
+ * generations. */
+function codexItemText(item) {
+  if (typeof item?.text === 'string') return item.text;
+  if (typeof item?.message === 'string') return item.message;
+  if (!Array.isArray(item?.content)) return '';
+  return item.content
+    .filter((block) => (block?.type === 'Text' || block?.type === 'text') && typeof block.text === 'string')
+    .map((block) => block.text)
+    .join('\n');
+}
+
+function codexParseStats() {
+  return {
+    legacyEvents: 0, itemCompletedEvents: 0, tokenCountEvents: 0,
+    prompts: 0, responses: 0, unknownItemTypes: {},
+  };
+}
+
+function codexEvent(payload, stats) {
+  if (payload?.type === 'user_message') {
+    stats.legacyEvents++;
+    return { kind: 'prompt', text: typeof payload.message === 'string' ? payload.message : '' };
+  }
+  if (payload?.type === 'agent_message') {
+    stats.legacyEvents++;
+    return { kind: 'response', text: typeof payload.message === 'string' ? payload.message : '' };
+  }
+  if (payload?.type !== 'item_completed') return null;
+
+  stats.itemCompletedEvents++;
+  const item = payload.item;
+  if (item?.type === 'UserMessage') return { kind: 'prompt', text: codexItemText(item) };
+  if (item?.type === 'AgentMessage') return { kind: 'response', text: codexItemText(item) };
+
+  const type = typeof item?.type === 'string' ? item.type : '<unknown>';
+  stats.unknownItemTypes[type] = (stats.unknownItemTypes[type] ?? 0) + 1;
+  return null;
+}
+
 /**
  * Parse one Codex rollout. `total_token_usage` is CUMULATIVE, so the LAST
  * token_count event is the session total — summing them would multiply the
@@ -638,6 +684,7 @@ function parseClaude(raw, { id, dirName, withTurns = false }) {
 function parseCodex(raw, { id, withTurns = false }) {
   const rec = blankSession(id, 'codex');
   const turns = [];
+  const stats = codexParseStats();
   let lastUsage = null;
   let lastUsageAt = null;
   let firstPrompt = '';
@@ -669,6 +716,7 @@ function parseCodex(raw, { id, withTurns = false }) {
     if (e.type !== 'event_msg') continue;
 
     if (p.type === 'token_count') {
+      stats.tokenCountEvents++;
       const t = p.info?.total_token_usage;
       if (t && typeof t === 'object') { lastUsage = t; lastUsageAt = ms; }
       // Every token_count also carries a live rate-limit snapshot — keep the
@@ -700,18 +748,22 @@ function parseCodex(raw, { id, withTurns = false }) {
       }
       continue;
     }
-    if (p.type === 'user_message') {
+    const event = codexEvent(p, stats);
+    if (!event) continue;
+    if (event.kind === 'prompt') {
       rec.prompts++;
-      const text = typeof p.message === 'string' ? p.message : '';
+      stats.prompts++;
+      const text = event.text;
       if (!firstPrompt) firstPrompt = text;
       // Codex rollouts record only real prompts as user_message events — tool
       // output travels in other event types that are not surfaced as turns —
-      // so every Codex user turn is kind 'prompt' by construction.
+      // so every normalized Codex user turn is kind 'prompt' by construction.
       if (withTurns && text) turns.push({ role: 'user', at: new Date(ms).toISOString(), text, prompt: true, kind: 'prompt' });
       continue;
     }
-    if (p.type === 'agent_message') {
+    if (event.kind === 'response') {
       rec.responses++;
+      stats.responses++;
       const at = Number.isFinite(ms) ? ms : (rec.start ?? Date.now());
       const pk = punchKey(at);
       rec.punchcard[pk] = (rec.punchcard[pk] ?? 0) + 1;
@@ -719,7 +771,7 @@ function parseCodex(raw, { id, withTurns = false }) {
         turns.push({
           role: 'assistant', at: new Date(at).toISOString(),
           model: rec.models[rec.models.length - 1] ?? 'unknown',
-          text: typeof p.message === 'string' ? p.message : '', tools: [],
+          text: event.text, tools: [],
         });
       }
     }
@@ -743,7 +795,7 @@ function parseCodex(raw, { id, withTurns = false }) {
   }
 
   rec.title = maskSecrets(clip(firstPrompt)) || '(untitled)';
-  return { session: seal(rec), turns };
+  return { session: seal(rec), turns, parseStats: stats };
 }
 
 // ── file discovery ──────────────────────────────────────────────────────────
@@ -773,6 +825,46 @@ function rootHealth(dir) {
       ? { status: 'absent', reason: null }
       : { status: 'degraded', reason: err?.code || 'io' };
   }
+}
+
+function emptyCodexDiagnostics() {
+  return {
+    files: 0, cachedFiles: 0, parsedFiles: 0, unparsedFiles: 0,
+    filesWithTokens: 0, filesWithResponses: 0,
+    legacyEvents: 0, itemCompletedEvents: 0, tokenCountEvents: 0,
+    prompts: 0, responses: 0, unknownItemTypes: {}, warnings: [],
+  };
+}
+
+function addCodexParseDiagnostics(target, stats) {
+  if (!stats) return;
+  target.parsedFiles++;
+  if (stats.tokenCountEvents > 0) target.filesWithTokens++;
+  if (stats.responses > 0) target.filesWithResponses++;
+  target.legacyEvents += stats.legacyEvents;
+  target.itemCompletedEvents += stats.itemCompletedEvents;
+  target.tokenCountEvents += stats.tokenCountEvents;
+  target.prompts += stats.prompts;
+  target.responses += stats.responses;
+  for (const [type, count] of Object.entries(stats.unknownItemTypes ?? {})) {
+    target.unknownItemTypes[type] = (target.unknownItemTypes[type] ?? 0) + count;
+  }
+}
+
+function finalizeCodexHealth(root, diagnostics) {
+  const warnings = [];
+  const tokenFiles = diagnostics.filesWithTokens;
+  const responseFiles = diagnostics.filesWithResponses;
+  if (tokenFiles > 0 && responseFiles === 0) warnings.push('zero-response-yield');
+  else if (tokenFiles > responseFiles) warnings.push('partial-response-yield');
+  if (Object.keys(diagnostics.unknownItemTypes).length) warnings.push('unknown-item-types');
+  diagnostics.warnings = warnings;
+  const hasYieldWarning = warnings.includes('zero-response-yield') || warnings.includes('partial-response-yield');
+  const status = root.status === 'ok' && hasYieldWarning
+    ? 'degraded' : root.status;
+  const reason = status === 'degraded' && root.status === 'ok'
+    ? (warnings.includes('zero-response-yield') ? 'parse-yield-zero' : 'parse-yield-partial') : root.reason;
+  return { ...root, status, reason, diagnostics };
 }
 
 function defaultRoots() {
@@ -995,6 +1087,7 @@ function aggregate(records, { days, now, cutoff, deps }) {
 
     let input = 0, output = 0, cacheRead = 0, cacheWrite = 0, cost = 0;
     let firstDay = null;
+    const activeDays = new Set();
     for (const row of rec.usage) {
       if (firstDay === null || row.day < firstDay) firstDay = row.day;
       // `day` prices the row at the rate in effect WHEN THOSE TOKENS WERE
@@ -1015,14 +1108,16 @@ function aggregate(records, { days, now, cutoff, deps }) {
       cost += rowCost;
 
       const rowTokens = row.input + row.output + row.cacheRead + row.cacheWrite;
-      if (!byDay[row.day]) byDay[row.day] = { tokens: 0, cost: 0, sessions: 0 };
+      if (!byDay[row.day]) byDay[row.day] = { tokens: 0, cost: 0, sessions: 0, sessionsActive: 0 };
       byDay[row.day].tokens += rowTokens;
       byDay[row.day].cost = round(byDay[row.day].cost + rowCost);
+      activeDays.add(row.day);
       const m = bucket(byModel, row.model);
       m.responses += row.responses; m.input += row.input; m.output += row.output;
       m.cacheRead += row.cacheRead; m.cacheWrite += row.cacheWrite;
       m.tokens += rowTokens; m.cost = round(m.cost + rowCost);
     }
+    for (const day of activeDays) byDay[day].sessionsActive++;
 
     const verdict = deps.classify({
       title: rec.title, skill: rec.skill, plugin: rec.plugin,
@@ -1260,6 +1355,7 @@ async function scan(o = {}) {
   const cache = force ? null : readCache(cacheFile);
   const entries = {};
   const records = [];
+  const codexDiagnostics = emptyCodexDiagnostics();
   const total = candidates.length;
   let scanned = 0;
 
@@ -1267,13 +1363,27 @@ async function scan(o = {}) {
   for (const c of candidates) {
     const key = { mtime: c.stat.mtimeMs, size: c.stat.size };
     const hit = cache?.entries?.[c.file];
-    let session = (hit && hit.mtime === key.mtime && hit.size === key.size) ? hit.session : null;
+    const cacheHit = !!(hit && hit.mtime === key.mtime && hit.size === key.size
+      && (c.provider !== 'codex' || hit.parseStats));
+    let session = cacheHit ? hit.session : null;
+    let parseStats = cacheHit ? hit.parseStats : null;
     if (!session) {
       const parsed = parseFile(c);
       session = parsed ? parsed.session : null;
+      parseStats = parsed?.parseStats ?? null;
+    }
+    if (c.provider === 'codex') {
+      codexDiagnostics.files++;
+      if (cacheHit) codexDiagnostics.cachedFiles++;
+      if (session) addCodexParseDiagnostics(codexDiagnostics, parseStats);
+      else codexDiagnostics.unparsedFiles++;
     }
     if (session) {
-      entries[c.file] = { ...key, session, ...(c.dbFile ? { dbFile: c.dbFile } : {}) };
+      entries[c.file] = {
+        ...key, session,
+        ...(parseStats ? { parseStats } : {}),
+        ...(c.dbFile ? { dbFile: c.dbFile } : {}),
+      };
       records.push(session);
     }
     scanned++;
@@ -1339,7 +1449,9 @@ async function scan(o = {}) {
   }
   const result = aggregate(applyCodexLedger(records, ledger), { days, now, cutoff, deps });
   result.sourceHealth = {
-    claude: claudeHealth, codex: codexHealth, opencode: opencodeHealth, codexLedger: codexLedgerHealth,
+    claude: claudeHealth,
+    codex: finalizeCodexHealth(codexHealth, codexDiagnostics),
+    opencode: opencodeHealth, codexLedger: codexLedgerHealth,
   };
   return result;
 }
