@@ -7,6 +7,7 @@ RuvNet Brain without treating those independent layers as interchangeable.
 Behind an experimental flag, agentic-kit can also admit **external host adapters**
 that extend this set with a host not shipped in-tree — see
 [External host adapters](PROVIDERS.md#external-host-adapters-experimental),
+[Using Hermes through the external adapter](HERMES-HOST-ADAPTER.md),
 [AUTHORING-HOST-ADAPTERS.md](AUTHORING-HOST-ADAPTERS.md),
 [ADR-0029](adr/0029-host-adapter-extension-point.md), and
 [ADR-0031](adr/0031-capability-graduation-and-upstream-requests.md). An admitted
