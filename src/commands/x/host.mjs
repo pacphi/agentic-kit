@@ -52,6 +52,7 @@ export const options = {
   activity: { type: 'string' },      // refresh: csv of activities to re-seed (default = prompt)
   'expect-hash': { type: 'string' }, // adapters trust: required sha256 pin when --yes resolves a non-file source
   timeout: { type: 'string' },       // adapters conformance: outer ms budget override (default: manifest's own execution.run.hook.timeoutMs, else 120000)
+  dev: { type: 'boolean', default: false }, // adapters conformance: run without persisting evidence/grants
   yes: { type: 'boolean', default: false },
   json: { type: 'boolean', default: false },
 };
@@ -89,10 +90,10 @@ Subcommands:
              list        show each configured adapter's trust state (default)
              trust <name> [--expect-hash <sha256>]   grant consent (required
                           with --yes against a non-file source); revoke <name>
-             conformance <name> [--timeout <ms>]   run the tiered black-box
-                          harness; --timeout overrides the outer per-worker
-                          budget (default: the manifest's own declared
-                          execution.run.hook.timeoutMs, else 120000)
+             conformance <name> [--timeout <ms>] [--dev]
+                          run the tiered black-box harness; --dev is a loud,
+                          non-persistent self-test and never produces
+                          graduation evidence
 
 Options (pick, all optional — omit for interactive):
   --host <csv>                 the complete desired enabled-host set, e.g.

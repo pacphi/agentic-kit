@@ -2,13 +2,13 @@
 
 - **Status:** Accepted (experimental contract)
 - **Date:** 2026-08-15
-- **Updated:** 2026-08-16
+- **Updated:** 2026-08-24
 - **Update note:** [ADR-0031](0031-capability-graduation-and-upstream-requests.md) amends this ADR's
   "permanent caps" framing. The block on *self-declaring* `canBePrimary` / `aqeProvider` /
   `commandStatusline` in the manifest is permanent (the safety invariant here), but the *capability*
   is earnable through a conformance tier plus a maintainer grant recorded outside the manifest — up
   to promotion to a first-party built-in. The schema, admission gate, consent model, and hook runner
-  in this ADR are unchanged.
+  now also pin declared hook-file bytes as described in §6.
 - **Deciders:** agentic-kit maintainers
 - **Related:** [ADR-0016](0016-capability-driven-integration-adapters.md) (closed-registry clause
   superseded — see [Supersession](#supersession-of-adr-0016s-closed-registry-clause)),
@@ -155,23 +155,15 @@ external-execution row, after an adversarial review of the surface):
   operator's cwd is unreachable. A remote-sourced manifest (`npm:`/`https://`) has no persistent
   local directory, so a *relative* hook command from such a source is refused
   (`execution-unanchored`) rather than resolved against an ambient path; a bare PATH binary
-  (`node`, `hermes`) stays legal. The consent hash still pins the manifest text verbatim; the
-  resolution is a pure function of that text plus the (already-pinned) source, so it cannot drift
-  without the hash changing.
-  - *Boundary of the anchorability check for remote sources.* When a remote-sourced adapter has no
-    local directory to anchor to, its hook command spawns in the repository `ak run` was invoked in
-    (which the operator already runs at full trust, per ADR-0018), and the `execution-unanchored`
-    refusal is a **best-effort** screen for path-shaped tokens (separators, script extensions, flag
-    values), not a complete one: an *extensionless, separator-free* relative token
-    (`["node", "runhook"]`) is indistinguishable by inspection from an ordinary positional argument
-    (`["hermes-run", "build"]`), so it is not refused and would resolve against the repo. A complete
-    rule would have to reject every non-absolute, non-flag argument, which would also reject
-    legitimate positional arguments — a false-positive cost this contract does not pay by default.
-    The exposure is bounded on every axis that matters: it requires a remote (`npm:`/`https://`)
-    source, a consented manifest the operator hash-pinned with that exact relative token, and write
-    access to the operator's repo. A **file-sourced** adapter — the fixture, and every adapter that
-    ships a bundle — is fully anchored and unaffected. A remote-sourced adapter should declare
-    absolute paths or PATH binaries; a future contract revision may make that a hard requirement.
+  (`node`, `hermes`) stays legal. The combined content hash pins the manifest text and any declared
+  local hook bytes; the resolution is anchored to the source's real directory, so those bytes cannot
+  drift without the hash changing.
+  - *Remote sources are path-independent in contract v1.* A remote (`npm:`/`https://`) resolver does
+    not retain a bundle after extracting the manifest, so admission refuses script-like hook paths
+    and any declared `hook.files` with `hook-files-unavailable`. Remote adapters must use PATH
+    binaries or inline evaluator commands. A retained file source may use relative hook paths, but
+    every adapter-owned file must be listed in that hook's `files` inventory and is hashed before
+    consent.
 - **Reserved exit codes carry consent/auth boundaries.** Hook exit `77` maps to
   `permission_required` (a blocked, never-escalated result — escalating around a consent boundary
   is the safety violation ADR-0019 already forbids) and `78` to `auth_required`. This gives an
@@ -224,14 +216,15 @@ amended gate list below.
 
 ### 6. Consent: hash-pinned, edit-invalidated
 
-Registering an adapter computes a content hash over the manifest and every declared subprocess hook
-command, discloses the full manifest through the same trust-manifest surface ADR-0018/ADR-0023
-already use before any other mutation, and requires explicit confirmation before persisting
-`trust.hash` and `trust.consentedAt`. Every subsequent load re-hashes the manifest and compares: a
-mismatch means the manifest changed since consent, and the adapter is **not admitted** until
-re-consented. This is Codex's pin-and-invalidate model, applied to `ak`'s own adapter manifests
-instead of Codex's MCP servers — consent lives outside the trusted boundary, attached to a specific
-byte sequence, never to an identity that content can silently drift underneath.
+Registering an adapter computes a content hash over the validated manifest and every declared
+subprocess hook command. For a file-sourced adapter, each hook's explicit relative `files` inventory
+also contributes a per-path SHA-256 digest; the combined identity is disclosed before confirmation
+and stored in `trust.hash`/`trust.consentedAt`. Every subsequent load re-hashes the manifest and
+declared files and compares: a mismatch means the adapter is **not admitted** until re-consented.
+Every admitted spawn repeats the file check immediately before execution, so a file edited after
+admission cannot run under the old consent or grant. This is Codex's pin-and-invalidate model,
+extended to the bytes the manifest names. It is not a race-free immutable snapshot; a future retained
+bundle/signature design can provide that stronger TOCTOU guarantee.
 
 ### 7. No in-process third-party code, ever
 
@@ -333,24 +326,19 @@ A matching one-line update-note has been added to ADR-0016 itself, pointing here
 
 ## Self-graded implementation status
 
-Dated 2026-08-15, at Wave 4 doc-authoring time. Rows already covered by the amended gate list are
-not repeated; this table grades the mechanism this ADR newly decides — the manifest, admission,
-overlay, hook-runner, and consent — none of which existed as code prior to this wave. Grades:
-**Working** (implemented and tested in this worktree), **Demo** (implemented, not yet under test),
-**TBD** (not yet implemented as of this dating). Per the model set by ruflo's own ADR-015-v2
-practice — a self-graded status table an ADR carries at acceptance time, filled in with real
-evidence as implementation lands rather than promised in prose — the lead fills in test counts and
-flips remaining TBD cells at Wave 4 integration.
+Dated 2026-08-24, after the PR #131 follow-up implementation. Rows already covered by the amended
+gate list are not repeated; this table grades the mechanism this ADR newly decides. **Working** means
+implemented and tested in this worktree.
 
-| Mechanism | Grade (2026-08-15) | Evidence |
+| Mechanism | Grade (2026-08-24) | Evidence |
 |---|---|---|
-| Manifest schema (contract: 1) | TBD | Owned by the sibling contract work package; no schema module present in this worktree as of this dating. |
-| Admission gate (fail-closed, per-adapter isolated) | TBD | Owned by the sibling contract work package; not present in this worktree as of this dating. |
-| `AK_EXPERIMENTAL_HOST_ADAPTERS` flag gating | TBD | Not present in this worktree as of this dating; no occurrences found under `src/`. |
-| Admitted-host overlay (registry-adjacent, non-mutating) | TBD | Depends on the admission gate landing first. |
-| Subprocess hook-runner (`cli-subprocess` surface) | TBD | Owned by the sibling hook work package; not present in this worktree as of this dating. |
-| Hash-pinned consent + edit-invalidation | TBD | Owned by the sibling hook work package; not present in this worktree as of this dating. |
-| Capability-cap schema absence (§3) | TBD | Depends on the manifest schema landing first. |
+| Manifest schema (contract: 1) | **Working** | `src/lib/adapters/manifest.mjs`; strict hook `files` inventory validation; manifest tests. |
+| Admission gate (fail-closed, per-adapter isolated) | **Working** | `src/lib/adapters/admission.mjs`; admission and integrity tests. |
+| `AK_EXPERIMENTAL_HOST_ADAPTERS` flag gating | **Working** | Bootstrap and CLI flag-off tests. |
+| Admitted-host overlay (registry-adjacent, non-mutating) | **Working** | `src/lib/adapters/admitted.mjs`; overlay/grant tests. |
+| Subprocess hook-runner (`cli-subprocess` surface) | **Working** | `src/lib/adapters/hook-runner.mjs`; bounded real-subprocess tests. |
+| Hash-pinned consent + edit-invalidation | **Working** | `src/lib/adapters/integrity.mjs`; manifest + declared hook-file digests, pre-spawn recheck, integrity tests. |
+| Capability-cap schema absence (§3) | **Working** | Schema refusal tests and maintainer-only grant allow-list. |
 | Gate item 1 — import-time invariant | **Working** | `assertBuiltinAdaptersRoutable`, one-directional since W1-B (`src/lib/execution/adapters.mjs`). |
 | Gate item 2 — uninstall-through-undo | **Working** | Registry-driven `hostsWithLifecycle()` teardown loop (`src/commands/uninstall.mjs`). |
 | Gate item 3 — permission authorization by host | **Working** | `projectPermissionManifest` union-across-enabled-hosts, F-04 (`src/commands/setup.mjs`). |

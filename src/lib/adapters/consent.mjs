@@ -1,7 +1,8 @@
 // Hash-pinned adapter trust store (Codex-hooks/Hermes-allowlist precedent).
 // A JSON map of adapter name -> { hash, consentedAt } under the kit config
-// dir. Edit-invalidation is inherent: change an adapter's hook command and
-// its hash changes, so `isTrusted` fails closed until consent is re-granted.
+// dir. Edit-invalidation is inherent: change an adapter's manifest, hook
+// command, or declared hook-file bytes and its combined content hash changes,
+// so `isTrusted` fails closed until consent is re-granted.
 //
 // No interactive prompting lives here — consent is GRANTED elsewhere (a
 // future `ak host adapters trust <name>` command). `recordConsent` is the

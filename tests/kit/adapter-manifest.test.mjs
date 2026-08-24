@@ -269,6 +269,22 @@ test('unknown-field: an extraneous lifecycle hook key is refused', () => {
   }), 'unknown-field');
 });
 
+test('hook.files round-trips as a relative adapter-owned file inventory', () => {
+  const manifest = validateAdapterManifest(validManifest({
+    lifecycle: { detect: { hook: { command: ['node', 'detect-hook.mjs'], files: ['./detect-hook.mjs'] } } },
+  }));
+  assert.deepEqual(manifest.lifecycle.detect.hook.files, ['./detect-hook.mjs']);
+});
+
+test('hook.files rejects absolute paths and traversal before filesystem access', () => {
+  rejects(validManifest({
+    lifecycle: { detect: { hook: { command: ['node', 'detect-hook.mjs'], files: ['/tmp/detect-hook.mjs'] } } },
+  }), 'invalid-lifecycle-hook');
+  rejects(validManifest({
+    lifecycle: { detect: { hook: { command: ['node', 'detect-hook.mjs'], files: ['../../detect-hook.mjs'] } } },
+  }), 'invalid-lifecycle-hook');
+});
+
 test('unknown-field: an extraneous trust-change key is refused', () => {
   rejects(validManifest({
     trust: { changes: [{

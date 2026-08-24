@@ -27,7 +27,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { validateAdapterManifest } from './manifest.mjs';
-import { admitAdapters, hashManifest } from './admission.mjs';
+import { admitAdapters, hashAdapterContent } from './admission.mjs';
 import {
   applyAdmitted, resetAdmitted, effectiveHostRegistry, admittedHostIds,
 } from './admitted.mjs';
@@ -113,7 +113,14 @@ async function checkAdmission({
 
   if (!manifest) return { checks, manifest: null, hash: null };
 
-  const hash = hashManifest(manifest);
+  let integrity;
+  try {
+    integrity = hashAdapterContent(manifest, { baseDir });
+  } catch (error) {
+    checks.push({ name: 'hook files are content-addressed', ok: false, detail: error?.message ?? String(error) });
+    return { checks, manifest: null, hash: null, integrity: null };
+  }
+  const { hash } = integrity;
   const resolvedName = name ?? manifest.host.id;
 
   await runCheck(checks, 'admits through admitAdapters with a real on-disk consent record', async () => {
@@ -154,7 +161,7 @@ async function checkAdmission({
       // realistically-authored file-sourced adapter — including the repo's
       // own acme fixture — as FAILED here for a reason that has nothing to
       // do with the adapter's actual conformance.
-      const adapter = registerAdmittedLifecycle(manifest, { baseDir });
+      const adapter = registerAdmittedLifecycle(manifest, { baseDir, integrity });
       const detected = await adapter.detect({});
       if (!detected || typeof detected !== 'object') throw new Error('detect hook returned no observation');
       if (detected.error) throw new Error(`detect hook reported an error: ${detected.error}`);
@@ -164,7 +171,7 @@ async function checkAdmission({
     checks.push({ name: 'declared detect hook runs as a real subprocess', ok: true, detail: 'no detect hook declared — nothing to prove' });
   }
 
-  return { checks, manifest, hash };
+  return { checks, manifest, hash, integrity };
 }
 
 // ── session-driving tier ────────────────────────────────────────────────
@@ -208,7 +215,7 @@ function checkSessionDriving({ manifest, upstreamRef }) {
 // real, so it is the one tier expected to genuinely PASS against a conforming
 // fixture today.
 async function checkActivityRouting({
-  manifest, name, baseDir, haveFn, clock, cwd, timeoutMs,
+  manifest, name, baseDir, integrity, haveFn, clock, cwd, timeoutMs,
 }) {
   if (!manifest) {
     return { status: 'skipped', checks: [{ name: 'admission prerequisite', ok: false, detail: 'admission tier did not pass — cannot evaluate' }] };
@@ -227,7 +234,7 @@ async function checkActivityRouting({
 
   await runCheck(checks, 'registerAdmittedExecution derives and registers a real execution adapter', async () => {
     resetAdmittedExecution();
-    registerAdmittedExecution(manifest, { haveFn, baseDir });
+    registerAdmittedExecution(manifest, { haveFn, baseDir, integrity });
     return `registered for '${name}'`;
   });
 
@@ -318,12 +325,12 @@ async function checkActivityRouting({
 const PRIMARY_ELIGIBLE_UNROUTED_HOST_SUFFIX = 'conformance-unrouted-rung';
 
 async function runPrimaryEligibleExercise({
-  manifest, name, baseDir, haveFn, clock, cwd, timeoutMs,
+  manifest, name, baseDir, integrity, haveFn, clock, cwd, timeoutMs,
 }) {
   const unroutedHost = `${PRIMARY_ELIGIBLE_UNROUTED_HOST_SUFFIX}-${name}`;
   resetAdmittedExecution();
   try {
-    registerAdmittedExecution(manifest, { haveFn, baseDir });
+    registerAdmittedExecution(manifest, { haveFn, baseDir, integrity });
     const plan = {
       workers: [
         {
@@ -382,11 +389,11 @@ async function runPrimaryEligibleExercise({
  * lets a maintainer's later grantCapability succeed at all.
  */
 async function checkPrimaryEligible({
-  manifest, name, baseDir, haveFn, clock, cwd, timeoutMs,
+  manifest, name, baseDir, integrity, haveFn, clock, cwd, timeoutMs,
 }) {
   const exerciseLabel = 'leads a run and receives an escalation (ADR-0019)';
   const outcome = await runPrimaryEligibleExercise({
-    manifest, name, baseDir, haveFn, clock, cwd, timeoutMs,
+    manifest, name, baseDir, integrity, haveFn, clock, cwd, timeoutMs,
   });
   if (outcome.ok) {
     return { status: 'passed', checks: [{ name: exerciseLabel, ok: true, detail: outcome.detail }], evidence: outcome.detail };
@@ -414,7 +421,7 @@ async function checkGrantGatedTier({
   }
   const granted = grantedCapabilitiesFor(name, hash, { file: grantsFile })[capability] === true;
   if (!granted) {
-    const detail = `no '${capability}' grant recorded at this manifest hash — conferred only by an explicit `
+    const detail = `no '${capability}' grant recorded at this adapter-content hash — conferred only by an explicit `
       + 'maintainer grant on top of passed conformance evidence (ADR-0031 §1), via the promotion command';
     return {
       status: 'gated',
@@ -551,7 +558,7 @@ export async function runTieredConformance({
       name, source: manifestSource, readManifest, consentFile: consentFileUsed, baseDir: derivedBaseDir,
     });
     const resolvedName = name ?? admission.manifest?.host?.id ?? '(unknown)';
-    const { hash } = admission;
+    const { hash, integrity } = admission;
     // F2 (Wave C, BLOCKER): every post-admission tier gated on manifest
     // validity alone (`admission.manifest != null`) would still exercise a
     // manifest that schema-validated but whose REAL admission (admitAdapters
@@ -598,7 +605,7 @@ export async function runTieredConformance({
     let activityRoutingResult = null;
     if (wantTier('activity-routing') || wantTier('primary-eligible')) {
       activityRoutingResult = await checkActivityRouting({
-        manifest: effectiveManifest, name: resolvedName, baseDir: derivedBaseDir, haveFn, clock,
+        manifest: effectiveManifest, name: resolvedName, baseDir: derivedBaseDir, integrity, haveFn, clock,
         cwd: workerCwd, timeoutMs: effectiveTimeoutMs,
       });
       if (wantTier('activity-routing')) {
@@ -628,7 +635,7 @@ export async function runTieredConformance({
         };
       } else {
         result = await checkPrimaryEligible({
-          manifest: effectiveManifest, name: resolvedName, baseDir: derivedBaseDir, haveFn, clock,
+          manifest: effectiveManifest, name: resolvedName, baseDir: derivedBaseDir, integrity, haveFn, clock,
           cwd: workerCwd, timeoutMs: effectiveTimeoutMs,
         });
       }

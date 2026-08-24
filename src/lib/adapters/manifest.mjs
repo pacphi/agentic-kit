@@ -158,7 +158,7 @@ function validateManifestLifecycle(value) {
     assertRecord(entry, `lifecycle.${verb}`);
     assertNoUnknownKeys(entry, ['hook'], `lifecycle.${verb}`);
     assertRecord(entry.hook, `lifecycle.${verb}.hook`);
-    assertNoUnknownKeys(entry.hook, ['command', 'timeoutMs'], `lifecycle.${verb}.hook`);
+    assertNoUnknownKeys(entry.hook, ['command', 'timeoutMs', 'files'], `lifecycle.${verb}.hook`);
     try {
       assertStringArray(entry.hook.command, `lifecycle.${verb}.hook.command`, { allowEmpty: false });
     } catch (error) {
@@ -168,6 +168,7 @@ function validateManifestLifecycle(value) {
       && (!Number.isInteger(entry.hook.timeoutMs) || entry.hook.timeoutMs <= 0)) {
       throw new ManifestRejected('invalid-lifecycle-hook', `lifecycle.${verb}.hook.timeoutMs must be a positive integer`);
     }
+    validateHookFiles(entry.hook.files, `lifecycle.${verb}.hook.files`, 'invalid-lifecycle-hook');
   }
   return structuredClone(value);
 }
@@ -183,7 +184,7 @@ function validateExecution(value) {
   assertRecord(value.run, 'execution.run');
   assertNoUnknownKeys(value.run, ['hook'], 'execution.run');
   assertRecord(value.run.hook, 'execution.run.hook');
-  assertNoUnknownKeys(value.run.hook, ['command', 'timeoutMs'], 'execution.run.hook');
+  assertNoUnknownKeys(value.run.hook, ['command', 'timeoutMs', 'files'], 'execution.run.hook');
   try {
     assertStringArray(value.run.hook.command, 'execution.run.hook.command', { allowEmpty: false });
   } catch (error) {
@@ -193,7 +194,34 @@ function validateExecution(value) {
     && (!Number.isInteger(value.run.hook.timeoutMs) || value.run.hook.timeoutMs <= 0)) {
     throw new ManifestRejected('invalid-execution', 'execution.run.hook.timeoutMs must be a positive integer');
   }
+  validateHookFiles(value.run.hook.files, 'execution.run.hook.files', 'invalid-execution');
   return structuredClone(value);
+}
+
+/** Hook file inventories are portable paths relative to the manifest's own
+ * directory. Content is hashed later, once admission has resolved that
+ * directory; schema validation keeps absolute/traversal paths out of the
+ * contract before they can reach filesystem code. */
+function validateHookFiles(value, field, reason) {
+  if (value === undefined) return;
+  try {
+    assertStringArray(value, field, { allowEmpty: false });
+  } catch (error) {
+    throw new ManifestRejected(reason, error.message);
+  }
+  const normalized = value.map((file) => file.replaceAll('\\', '/'));
+  const invalid = normalized.find((file) => {
+    const parts = file.split('/');
+    return file.startsWith('/') || /^[A-Za-z]:\//.test(file) || file.includes('\0')
+      || parts.includes('..') || file === '.' || file === './';
+  });
+  if (invalid !== undefined) {
+    throw new ManifestRejected(reason, `${field} entry '${value[normalized.indexOf(invalid)]}' must be a relative path without traversal`);
+  }
+  const canonical = normalized.map((file) => file.replace(/^\.\//, ''));
+  if (new Set(canonical).size !== canonical.length) {
+    throw new ManifestRejected(reason, `${field} contains duplicate paths after normalization`);
+  }
 }
 
 function validateManifestTrust(value) {

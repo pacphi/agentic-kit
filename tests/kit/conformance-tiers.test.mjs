@@ -84,7 +84,7 @@ function writeProbeAdapter(tempDir, { runHookSource, hookTimeoutMs = 5000 } = {}
     },
     detection: { bin: 'probe', versionArgs: ['--version'], versionPattern: '\\d+\\.\\d+\\.\\d+' },
     driving: { surfaces: ['cli-subprocess'] },
-    execution: { run: { hook: { command: ['node', 'run-hook.mjs'], timeoutMs: hookTimeoutMs } } },
+    execution: { run: { hook: { command: ['node', 'run-hook.mjs'], files: ['run-hook.mjs'], timeoutMs: hookTimeoutMs } } },
     trust: {
       changes: [{
         id: 'probe-subprocess-hooks',

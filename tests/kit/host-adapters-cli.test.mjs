@@ -837,6 +837,25 @@ test('conformance: happy path against the real acme fixture prints a per-tier ta
   assert.equal(record.tiers['primary-eligible'].status, 'passed');
 });
 
+test('conformance: --dev runs real probes but persists no graduation evidence or grants', async () => {
+  const grantsFile = tmpGrantsFile();
+  const cfg = cfgWith([{ name: 'acme', source: ACME_MANIFEST_PATH }]);
+  const cap = capture();
+  let code;
+  try {
+    code = await run({
+      positionals: ['conformance', 'acme'], env: ON_ENV, cfg,
+      reader: acmeReader, grantsFile, flags: { dev: true },
+      runTieredConformance: (opts) => runTieredConformance({ ...opts, haveFn: async () => true }),
+    });
+  } finally { cap.restore(); }
+
+  assert.equal(code, 0, cap.text());
+  assert.match(cap.text(), /DEV MODE/);
+  assert.match(cap.text(), /evidence not persisted/);
+  assert.equal(grantsFor('acme', { file: grantsFile }), null);
+});
+
 test('conformance: nothing is recorded when the flag is off, even with a real cfg entry and grantsFile supplied', async () => {
   const grantsFile = tmpGrantsFile();
   const cfg = cfgWith([{ name: 'acme', source: ACME_MANIFEST_PATH }]);
@@ -1075,7 +1094,7 @@ test('grant: resolves the manifest exactly once, and the disclosed trust state d
   // secondRaw's hash (which the consent store never recorded) and show
   // 'not consented' or 'consent-stale' instead of 'trusted'.
   assert.match(cap.text(), /manifest trust state: trusted/);
-  assert.match(cap.text(), new RegExp(`manifest hash: ${firstHash}`));
+  assert.match(cap.text(), new RegExp(String.raw`content hash \(manifest \+ hook files\): ${firstHash}`));
   assert.deepEqual(grantedCapabilitiesFor('hermes', firstHash, { file: grantsFile }), { canBePrimary: true });
 });
 

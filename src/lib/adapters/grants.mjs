@@ -1,11 +1,12 @@
 // Hash-pinned capability-grant store (ADR-0031 §1, §2, §4). A JSON map of
 // adapter name -> record under the kit config dir, mirroring adapter-consent's
 // edit-invalidation model: a capability is earned by passing a conformance
-// tier and GRANTED by the maintainer at a specific manifest hash, never
+// tier and GRANTED by the maintainer at a specific combined adapter-content hash, never
 // self-declared in the adapter's own manifest (the permanent safety invariant
 // this store exists to keep honest — see admission.mjs's schema allow-list).
-// Change the manifest and the hash changes, so every prior tier result and
-// every granted capability is void until re-earned at the new hash.
+// Change the manifest or a declared hook file and the hash changes, so every
+// prior tier result and every granted capability is void until re-earned at
+// the new content identity.
 //
 // No interactive prompting lives here — grants are RECORDED elsewhere (a
 // future `ak host adapters trust` / `ak host adapters grant` command). This

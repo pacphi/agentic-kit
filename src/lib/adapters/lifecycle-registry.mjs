@@ -264,9 +264,9 @@ function unanchoredResult(verb, hostId, command) {
  * without needing to re-derive the check itself.
  * @param {any} manifest — validateAdapterManifest's return shape
  * @param {{ runHook?: (args: any) => Promise<{ok:boolean, stdout:string, exitCode:number}>,
- *   baseDir?: string|null }} [opts]
+ *   baseDir?: string|null, integrity?: object }} [opts]
  */
-export function buildAdmittedLifecycleAdapter(manifest, { runHook, baseDir = null } = {}) {
+export function buildAdmittedLifecycleAdapter(manifest, { runHook, baseDir = null, integrity } = {}) {
   const hostId = manifest.host.id;
   const declared = manifest.lifecycle ?? {};
   // Stashed alongside the verb functions (validateLifecycleAdapter only
@@ -289,6 +289,7 @@ export function buildAdmittedLifecycleAdapter(manifest, { runHook, baseDir = nul
       const run = runHook ?? (await import('./hook-runner.mjs')).runAdapterHook;
       const result = await run({
         hook: hookEntry, hostId, verb, timeoutMs: hookEntry.timeoutMs, env: context.env,
+        ...(integrity ? { manifest, integrity } : {}), baseDir,
         // F-1: anchor a relative command to the adapter's own directory when
         // one was declared; with no baseDir, the check above already proved
         // this command has no relative component a cwd could redirect (bare
@@ -324,14 +325,14 @@ export function buildAdmittedLifecycleAdapter(manifest, { runHook, baseDir = nul
  * caller derives it from the manifest's own source the same way the
  * execution-registration block does (baseDirForSource).
  * @param {any} manifest
- * @param {{ runHook?: (args: any) => Promise<any>, baseDir?: string|null }} [opts]
+ * @param {{ runHook?: (args: any) => Promise<any>, baseDir?: string|null, integrity?: object }} [opts]
  */
-export function registerAdmittedLifecycle(manifest, { runHook, baseDir = null } = {}) {
+export function registerAdmittedLifecycle(manifest, { runHook, baseDir = null, integrity } = {}) {
   const hostId = manifest.host.id;
   if (!effectiveHostRegistry().some((host) => host.id === hostId)) {
     throw new TypeError(`lifecycle registry: unknown host id '${hostId}' — not present in effectiveHostRegistry`);
   }
-  const adapter = buildAdmittedLifecycleAdapter(manifest, { runHook, baseDir });
+  const adapter = buildAdmittedLifecycleAdapter(manifest, { runHook, baseDir, integrity });
   validateLifecycleAdapter(adapter);
   LIFECYCLE_ADAPTERS.set(hostId, adapter);
   ADMITTED_LIFECYCLE_IDS.add(hostId);

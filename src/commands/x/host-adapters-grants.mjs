@@ -7,7 +7,7 @@
 // Nothing here loads third-party code. grant/gate/status call grants.mjs, a
 // pure data layer over a hash-pinned JSON store (adapter-grants.json).
 // grantCapability there REFUSES unless the gating tier is already recorded
-// 'passed' at the exact current manifest hash: a capability is conferred by
+// 'passed' at the exact current adapter-content hash: a capability is conferred by
 // already-recorded evidence plus this explicit maintainer act, never by the
 // CLI itself exercising a path (a caller-supplied exercise result would be
 // both the pass and its own evidence) — so no subcommand here accepts or
@@ -97,7 +97,7 @@ export async function grant({
 
   console.log(bold(`grant '${safeCapability}' to '${safeName}'`));
   console.log(`  gating tier:   ${safeTier}`);
-  console.log(`  manifest hash: ${hash}`);
+  console.log(`  content hash (manifest + hook files): ${hash}`);
   console.log(`  tier evidence: ${evidence ? stripControl(evidence) : '(no passed-tier evidence recorded at this hash — the grant below will be refused)'}`);
   const hooks = hookCommandsFor(manifest);
   console.log(`  manifest hooks:${hooks.length ? '' : ' (none)'}`);
@@ -135,7 +135,7 @@ export async function grant({
   try {
     grantCapability(name, capability, { hash }, { file: grantsFile });
   } catch (error) {
-    fail(`grant refused: ${stripControl(error?.message ?? String(error))} — earn it first with \`ak host adapters conformance ${safeName}\` (needs a passed '${safeTier}' tier at this exact manifest hash)`);
+    fail(`grant refused: ${stripControl(error?.message ?? String(error))} — earn it first with \`ak host adapters conformance ${safeName}\` (needs a passed '${safeTier}' tier at this exact adapter-content hash)`);
     return 1;
   }
 
@@ -204,7 +204,7 @@ async function statusOne(name, entry, { reader, grantsFile }) {
     return 1;
   }
   const { hash } = loaded;
-  console.log(`  manifest hash: ${hash}`);
+  console.log(`  content hash (manifest + hook files): ${hash}`);
 
   const record = grantsFor(name, { file: grantsFile, currentHash: hash });
   const passed = record ? Object.entries(record.tiers).filter(([, t]) => t?.status === 'passed') : [];

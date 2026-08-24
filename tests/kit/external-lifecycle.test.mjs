@@ -89,8 +89,8 @@ function globexManifest({ applyCommand, undoCommand }) {
     detection: { bin: 'globex-cli' },
     driving: { surfaces: ['acp'] },
     lifecycle: {
-      apply: { hook: { command: applyCommand, timeoutMs: 5000 } },
-      undo: { hook: { command: undoCommand, timeoutMs: 5000 } },
+      apply: { hook: { command: applyCommand, files: ['apply-hook.mjs'], timeoutMs: 5000 } },
+      undo: { hook: { command: undoCommand, files: ['undo-hook.mjs'], timeoutMs: 5000 } },
     },
     trust: {
       changes: [{
@@ -395,7 +395,7 @@ test('F-1: setup.run_machine anchors a relative apply hook to the adapter direct
       host: globexHost(),
       detection: { bin: 'globex-cli' },
       driving: { surfaces: ['acp'] },
-      lifecycle: { apply: { hook: { command: [process.execPath, 'apply-hook.mjs'] } } },
+      lifecycle: { apply: { hook: { command: [process.execPath, 'apply-hook.mjs'], files: ['apply-hook.mjs'] } } },
       trust: {
         changes: [{
           id: 'globex-subprocess-hooks', kind: 'third-party-adapter', scope: 'project',
@@ -405,8 +405,8 @@ test('F-1: setup.run_machine anchors a relative apply hook to the adapter direct
     });
     fs.writeFileSync(manifestPath, JSON.stringify(manifest));
 
-    const { bootstrapHostAdapters, hashManifest } = await import('../../src/lib/adapters/admission.mjs');
-    const hash = hashManifest(manifest);
+    const { bootstrapHostAdapters, hashAdapterContent } = await import('../../src/lib/adapters/admission.mjs');
+    const hash = hashAdapterContent(manifest, { baseDir: adapterDir }).hash;
     const bootstrap = await bootstrapHostAdapters({
       cfg: { hostAdapters: [{ name: 'globex', source: manifestPath }] },
       env: { AK_EXPERIMENTAL_HOST_ADAPTERS: '1' },

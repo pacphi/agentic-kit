@@ -6,56 +6,16 @@
 // isolation: one bad adapter is refused in place and never affects any other
 // entry or the built-in registries (try/caught per entry, in admitOne AND as
 // a belt-and-suspenders net in admitAdapters).
-import { createHash } from 'node:crypto';
-import fs from 'node:fs';
-import path from 'node:path';
 import { HOST_REGISTRY } from './registries.mjs';
 import { validateAdapterManifest } from './manifest.mjs';
+import {
+  baseDirForSource, hashAdapterContent, hashManifest,
+} from './integrity.mjs';
+
+export { baseDirForSource, canonicalizeManifest, hashAdapterContent, hashManifest } from './integrity.mjs';
 
 export const SUPPORTED_CONTRACT = 1;
 
-/** The adapter's own directory (F-1, ADR-0031): where its execution/lifecycle
- *  hooks resolve a relative command FROM, never the operator's process.cwd()
- *  when `ak run` was invoked. A file-sourced manifest anchors to its own
- *  directory — `fs.realpathSync` so a symlinked manifest can't relocate that
- *  pin out from under consent. An npm/https source has no persistent local
- *  bundle (resolved, hashed, and discarded per admission pass — sources.mjs)
- *  so there is nothing to anchor to: `null`. buildAdmittedExecutionAdapter
- *  (execution/admitted.mjs) then refuses a relative hook command outright
- *  for a `null` baseDir rather than guessing a cwd. An unreadable/vanished
- *  file source also resolves to `null` — the same honest refusal, not a
- *  silent fallback to process.cwd(). */
-function baseDirForSource(source) {
-  if (typeof source !== 'string' || !source
-    || source.startsWith('https://') || source.startsWith('http://') || source.startsWith('npm:')) {
-    return null;
-  }
-  try {
-    return path.dirname(fs.realpathSync(source));
-  } catch {
-    return null;
-  }
-}
-
-/** Deterministic, key-sorted JSON — same stable-stringify shape used
- *  elsewhere in this codebase (e.g. opencode.mjs's deepEqual) so two manifests
- *  that differ only in key order or incidental whitespace hash identically.
- *  The sort comparator is a plain code-unit compare, NOT localeCompare: with
- *  localeCompare, key order (and therefore the hash) could shift across
- *  locales (e.g. en_US vs sv_SE collation), so a CI runner or container with
- *  a different locale than where consent was recorded could see a bogus
- *  consent-stale refusal for a manifest that never actually changed. */
-export function canonicalizeManifest(value) {
-  return JSON.stringify(value, (_key, val) => (
-    val && typeof val === 'object' && !Array.isArray(val)
-      ? Object.fromEntries(Object.entries(val).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)))
-      : val
-  ));
-}
-
-export function hashManifest(value) {
-  return createHash('sha256').update(canonicalizeManifest(value)).digest('hex');
-}
 
 const builtinIds = () => new Set(HOST_REGISTRY.map((host) => host.id));
 
@@ -104,7 +64,13 @@ async function admitOne(entry, { readManifest, consent, builtins }) {
     return { name, admitted: false, reason: 'builtin-shadow', detail: `'${manifest.host.id}' is a built-in host id` };
   }
 
-  const hash = hashManifest(manifest);
+  let integrity;
+  try {
+    integrity = hashAdapterContent(manifest, { baseDir: baseDirForSource(entry.source) });
+  } catch (error) {
+    return { name, admitted: false, reason: error?.reason ?? 'hook-integrity', detail: error?.message ?? String(error) };
+  }
+  const { hash } = integrity;
   let recorded;
   try {
     recorded = consent.recordedHashFor(name);
@@ -122,16 +88,16 @@ async function admitOne(entry, { readManifest, consent, builtins }) {
     return { name, admitted: false, reason: 'consent-error', detail: error?.message ?? String(error) };
   }
   if (!trusted || recorded !== hash) {
-    return { name, admitted: false, reason: 'consent-stale', detail: `manifest hash ${hash} does not match consented ${recorded}` };
+    return { name, admitted: false, reason: 'consent-stale', detail: `adapter content hash ${hash} does not match consented ${recorded}` };
   }
 
-  return { name, admitted: true, entry: manifest.host, manifest };
+  return { name, admitted: true, entry: manifest.host, manifest, integrity, contentHash: hash };
 }
 
 /**
  * @param {{ cfg: any, readManifest: (source: string) => Promise<any>,
  *   consent: { recordedHashFor(name: string): string|null, isTrusted(name: string, hash: string): boolean } }} args
- * @returns {Promise<Array<{name:string, admitted:boolean, reason?:string, detail?:string, entry?:any, manifest?:any}>>}
+ * @returns {Promise<Array<{name:string, admitted:boolean, reason?:string, detail?:string, entry?:any, manifest?:any, integrity?:any, contentHash?:string}>>}
  */
 export async function admitAdapters({ cfg, readManifest, consent }) {
   const entries = Array.isArray(cfg?.hostAdapters) ? cfg.hostAdapters : [];
@@ -226,15 +192,10 @@ export async function bootstrapHostAdapters({
     // not touch either). One host's grant lookup failing must never block
     // another host's, or the admission result itself.
     //
-    // CRITICAL: the hash passed to grantedCapabilitiesFor is computed FRESH
-    // here, via hashManifest(result.manifest) — never read from a cache or
-    // carried over from admitOne's own internal hash — because a stale hash
-    // would silently defeat grants.mjs's edit-invalidation pin (a manifest
-    // edited since the grant must re-hash to a different value and come back
-    // {}, dropping the capability). grantedCapabilitiesFor is the ONLY
-    // sanctioned reader for this (see grants.mjs's module-header invariant);
-    // reading grantsFor(name).capabilities directly would return the
-    // unfiltered set and is exactly the bug that invariant exists to prevent.
+    // CRITICAL: the hash passed to grantedCapabilitiesFor is the content
+    // identity produced by admission, not a manifest-only fallback. It pins
+    // both the validated manifest and any declared hook bytes, so a file edit
+    // cannot leave a capability grant live under the old content hash.
     let grantsByName;
     try {
       const { grantedCapabilitiesFor } = await import('./grants.mjs');
@@ -247,7 +208,7 @@ export async function bootstrapHostAdapters({
       grantsByName = Object.create(null);
       for (const result of admitted) {
         try {
-          grantsByName[result.name] = grantedCapabilitiesFor(result.name, hashManifest(result.manifest));
+          grantsByName[result.name] = grantedCapabilitiesFor(result.name, result.contentHash ?? hashManifest(result.manifest));
         } catch (error) {
           warnings.push({ name: result.name, reason: 'grant-lookup-failed', detail: error?.message ?? String(error) });
         }
@@ -293,7 +254,9 @@ export async function bootstrapHostAdapters({
             continue;
           }
           try {
-            registerAdmittedExecution(result.manifest, { baseDir: baseDirForSource(sourceByName.get(result.name)) });
+            registerAdmittedExecution(result.manifest, {
+              baseDir: baseDirForSource(sourceByName.get(result.name)), integrity: result.integrity,
+            });
           } catch (error) {
             warnings.push({ name: result.name, reason: error?.reason ?? 'execution-registration-failed', detail: error?.message ?? String(error) });
           }
@@ -327,7 +290,7 @@ export async function bootstrapHostAdapters({
         for (const result of lifecycleCandidates) {
           try {
             const baseDir = baseDirForSource(sourceByName.get(result.name));
-            const adapter = registerAdmittedLifecycle(result.manifest, { baseDir });
+            const adapter = registerAdmittedLifecycle(result.manifest, { baseDir, integrity: result.integrity });
             if (adapter.unanchoredVerbs.length) {
               warnings.push({
                 name: result.name, reason: 'lifecycle-unanchored',
