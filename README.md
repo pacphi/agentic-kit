@@ -306,8 +306,9 @@ codebase.
 Thanks to everyone who opened PRs against this kit (v4.0.0-alpha.15 through the
 current release):
 
-- [@robertelee78](https://github.com/robertelee78) — [#67](https://github.com/pacphi/agentic-kit/pull/67), [#85](https://github.com/pacphi/agentic-kit/pull/85), [#86](https://github.com/pacphi/agentic-kit/pull/86), [#87](https://github.com/pacphi/agentic-kit/pull/87), [#89](https://github.com/pacphi/agentic-kit/pull/89), [#90](https://github.com/pacphi/agentic-kit/pull/90), [#91](https://github.com/pacphi/agentic-kit/pull/91)
-- [Anupam Mediratta](https://github.com/anupamme) — [#78](https://github.com/pacphi/agentic-kit/pull/78)
+- [@robertelee78](https://github.com/robertelee78) — [#67](https://github.com/pacphi/agentic-kit/pull/67), [#85](https://github.com/pacphi/agentic-kit/pull/85), [#86](https://github.com/pacphi/agentic-kit/pull/86), [#87](https://github.com/pacphi/agentic-kit/pull/87), [#89](https://github.com/pacphi/agentic-kit/pull/89), [#90](https://github.com/pacphi/agentic-kit/pull/90), [#91](https://github.com/pacphi/agentic-kit/pull/91), [#152](https://github.com/pacphi/agentic-kit/pull/152), [#165](https://github.com/pacphi/agentic-kit/pull/165) — built the OpenCode path from managed host integration and execution protocol through QE-court remands, usage/transcript attribution, bounded escalation, security and Windows hardening, a compact lazy Ruflo/AQE/RuvNet gateway, and a fail-closed cross-turn tool-loop guard
+- [Anupam Mediratta](https://github.com/anupamme) — [#78](https://github.com/pacphi/agentic-kit/pull/78) — added seven-day Dependabot cooldowns to reduce exposure to newly published malicious or unstable package versions
+- [Adrian Cockcroft](https://github.com/adrianco) — [#130](https://github.com/pacphi/agentic-kit/pull/130), [#131](https://github.com/pacphi/agentic-kit/pull/131) — fixed global npm-root discovery for kegged and versioned Node layouts, with a bounded cross-platform ancestor walk, `npm_config_prefix` support, and regression coverage; co-authored the Hermes adapter effort by defining the external host-adapter seam, Hermes conformance and security requirements, and field validation that shaped the subprocess-hook contract
 
 > v4 (npm, cross-platform). The shell-based v3 kit is archived in
 > [docs/archive/](docs/archive/) — `ak setup` migrates an existing shell-kit
