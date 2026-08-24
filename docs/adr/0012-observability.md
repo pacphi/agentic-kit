@@ -2,7 +2,7 @@
 
 - **Status:** Implemented
 - **Date:** 2026-07-27
-- **Updated:** 2026-08-04
+- **Updated:** 2026-08-24
 - **GA surface:** Canonical naming and retired vocabulary follow
   [ADR-0020](0020-ga-stable-surfaces.md).
 - **Update note:** Renamed the dashboard surface from Live to Observability and made Live and
@@ -29,6 +29,11 @@
   Historical and active-session Review playback exposes 0.5× through 10× speeds.
   ADR-0023 restricts runtime discovery to the current UID and reads argv only for selected current-user
   host/Node candidates, before the existing path-redacted event boundary.
+
+**2026-08-24 pagination amendment:** History now supports bounded opaque-token pagination with
+explicit totals, coverage, and incomplete-scan disclosure while preserving the legacy no-query
+snapshot shape.
+
 - **Deciders:** agentic-kit maintainers
 - **Related:** [ADR-0005](0005-dashboard-in-page-routing-reveal.md),
   [ADR-0007](0007-maintainer-admin-local-telemetry.md),
