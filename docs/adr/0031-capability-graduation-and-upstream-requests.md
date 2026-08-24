@@ -1,7 +1,8 @@
 # ADR-0031 — Capability graduation: earned parity for external host adapters, and the upstream request path
 
-- **Status:** Accepted (governance decision; implementation staged)
+- **Status:** Accepted (governance decision; implementation active)
 - **Date:** 2026-08-16
+- **Updated:** 2026-08-24
 - **Deciders:** agentic-kit maintainers
 - **Related:** [ADR-0016](0016-capability-driven-integration-adapters.md),
   [ADR-0018](0018-generalized-host-worker-execution.md),
@@ -68,15 +69,15 @@ host, assert the real behaviour, against an installed layout — that gates one 
 Passing a tier records evidence; the maintainer's grant turns evidence into capability. A tier the
 adapter cannot meet because the capability is upstream is marked **gated** (§4), not failed.
 
-The recorded evidence is hash-pinned to the **manifest** — the same content pin consent uses
-(ADR-0029 §6) — so any edit to the manifest voids the evidence and the grants that rest on it. It is
-**not** pinned to the bytes of the hook *scripts* the manifest references: a file-sourced adapter can
-rewrite `run-hook.mjs` under an unchanged manifest hash. This is the identical boundary ADR-0029
-already accepted for consent, carried forward here; the grant confirmation states it explicitly so a
-maintainer granting `primary-eligible`/`statusline` knows the pin covers the declaration, not the
-script that produced the observation. Tightening this — hashing the referenced hook files into the
-tier evidence and re-verifying at grant time — is a tracked follow-up, warranted before the freeze
-(§6) if a real adapter's graduation depends on it.
+The recorded evidence is hash-pinned to the **combined adapter content identity** — the validated
+manifest plus each explicitly declared relative hook-file digest — using the same content pin consent
+uses (ADR-0029 §6). A manifest edit or declared hook-file edit therefore voids the evidence and the
+grants that rest on it. File inventories are explicit rather than a language-specific import scan:
+authors must list every adapter-owned file a hook executes. Immediately before every lifecycle or
+execution spawn, `ak` re-reads the declared files and fails closed if that identity changed. Remote
+manifest sources have no retained bundle and are limited to PATH binaries or inline commands in
+contract v1; an immutable bundle/signature design remains a later strengthening for race-free TOCTOU
+protection.
 
 ### 3. Two graduation destinations
 
@@ -137,8 +138,9 @@ contract is still experimental.
 
 ADR-0029 states the three caps are permanent. This ADR amends that: **the block on
 *self-declaration* is permanent; the *capability* is earnable** through a conformance tier and a
-maintainer grant (§1, §2). ADR-0029's schema, admission gate, consent model, and hook runner are
-unchanged — capability grants are additive and live outside the manifest. A matching update note is
+maintainer grant (§1, §2). ADR-0029's schema, admission gate, consent model, and hook runner remain
+the governing path; contract v1 now includes the additive `hook.files` inventory and combined
+manifest/file identity. Capability grants still live outside the manifest. A matching update note is
 added to ADR-0029 pointing here.
 
 ## Consequences
@@ -156,18 +158,19 @@ added to ADR-0029 pointing here.
 ## Implementation status
 
 Per the ADR discipline this repository adopted (a dated, self-graded table before an Accepted claim
-rests on delivery): the **governance decision** is accepted; the **machinery** is staged and mostly
-unbuilt. This table is the source of truth for what is real.
+rests on delivery): the **governance decision** is accepted and the core machinery is working behind
+the experimental flag. This table is the source of truth for what is real.
 
 | Piece | Status | Note |
 | ----- | ------------------- | ---- |
 | Admission gate, consent store, hook runner, conformance kit (`admission` tier) | **Working** | ADR-0029, merged (PR #149) |
 | `ak host adapters trust` CLI (records consent/grants) | **Working** (2026-08-16, wave A) | `list`/`trust`/`revoke` + `--expect-hash` pinning; disclosure prints the full validated manifest (control-char-safe); mirrors every pre-hash admission refusal; `revoke` works with the flag off (fail-safe) |
-| External execution (`ak run` drives an admitted host) | **Working** (2026-08-16, wave B) | Manifest `execution.run` hook (coupled to `canRouteActivities`, else refused `execution-not-routable`); derived subprocess adapter behind `executionAdapterFor`; routing is overlay-aware via a lazy `effectiveRoutableHostIds()`. Security-hardened (adversarial review): hooks spawn with `cwd` pinned to the adapter's own resolved directory (never the operator's cwd — a relative hook on a remote source is refused `execution-unanchored`); an unresolved-launch cancellation reports `orphaned` (non-escalating), never an escalatable `timed_out`; handoff data is redacted from public results; stderr is never promoted into a downstream prompt; reserved hook exit codes `77`/`78` express `permission_required`/`auth_required` boundaries; a self-declared `provider` is stamped `inferred`, never `observed` |
+| External execution (`ak run` drives an admitted host) | **Working** (2026-08-16, wave B; integrity tightened 2026-08-24) | Manifest `execution.run` hook (coupled to `canRouteActivities`, else refused `execution-not-routable`); derived subprocess adapter behind `executionAdapterFor`; routing is overlay-aware via a lazy `effectiveRoutableHostIds()`. Security-hardened (adversarial review): hooks spawn with `cwd` pinned to the adapter's own resolved directory; remote path-backed hooks are refused before admission because no bundle is retained; declared local hook files are rechecked immediately before spawn; an unresolved-launch cancellation reports `orphaned` (non-escalating), never an escalatable `timed_out`; handoff data is redacted from public results; stderr is never promoted into a downstream prompt; reserved hook exit codes `77`/`78` express `permission_required`/`auth_required` boundaries; a self-declared `provider` is stamped `inferred`, never `observed` |
 | External lifecycle execution wired into setup/sync/uninstall | **Working** (2026-08-16, wave C) | The loops iterate `hostsWithLifecycle()` (built-ins + admitted) through a shape-agnostic renderer; an admitted host's lifecycle runs only when explicitly enabled in `kit.json` **and** the flag is set. Admitted lifecycle hooks are cwd-anchored to the adapter's own directory (per-verb `lifecycle-unanchored` refusal for a relative hook on a remote source), the same F-1 protection as execution. `setup`, `uninstall`, **and now `sync`** are fully live: `status.mjs`'s collector emits a subsystem-tagged row for an enabled admitted lifecycle host, so `sync`'s convergence plan reaches its admitted-host branch (wave D4 closed the earlier `sync`-only reachability gap) |
-| Tiered conformance harness (`session-driving` … `statusline`) | **Working** (2026-08-16, waves C+D2) | `runTieredConformance` + `ak host adapters conformance`: `admission`, `activity-routing`, and now `primary-eligible` genuinely pass black-box against a real fixture — `primary-eligible` drives a real `executeRunPlan` where the host anchors a run and receives a genuine ADR-0019 escalation onto itself (a real second subprocess), recorded with no pre-existing grant. `session-driving`/`statusline` stay honestly `gated`/`skipped` (external session driving and the statusline render path are not built) — the harness never fabricates a pass, and there is no injection seam through which a caller could substitute one. A failed `admission` tier short-circuits every downstream tier so no evidence is laundered. A grant-bearing tier that re-runs `failed` under the same manifest hash now auto-voids the stored tier **and** the live granted capability (wave D4, N-1) — the un-earn path mirrors the gated-downgrade; a `skipped` result never voids (prerequisite not evaluated ≠ disproof). Capabilities can also be withdrawn per-capability with `ak host adapters revoke-grant <name> [capability]`. *Bounded (tracked with the hook-bytes-pinning work before §6 freeze):* the auto-void covers a same-hash failure of the *grant-bearing* tier itself, not of its *prerequisite* (`activity-routing`) — an adapter could retain `canBePrimary` by regressing the prerequisite instead; closing this needs the `cli_unavailable`-vs-real-failure distinction (so a machine merely lacking the host CLI never false-voids a legitimate grant) and is the same manifest-vs-hook-bytes boundary the hashing work addresses. `statusline` un-earn lands with its render path |
-| Capability-grant store + promotion command | **Working** (2026-08-16, waves D+D2) | `grants.mjs` (hash-pinned, evidence-gated, edit-invalidated like consent — the earned capability is enforced at **read** time, not only at grant time) plus `ak host adapters grant`/`bless`: the maintainer's explicit grant of a tier-earned capability, refused unless the gating tier is recorded `passed` at the current manifest hash. **Wave D2 makes a grant live:** at bootstrap the admitted-host overlay reads `grantedCapabilitiesFor` at the fresh current hash and raises `canBePrimary`/`commandStatusline` on the effective-registry entry (through a local allow-list that can raise only those two, never `aqeProvider` or any other key), so `hostTierLabel` and `effectivePrimaryHostIds()` reflect it. Two consumption gaps remain, honestly disclosed at grant time: no path yet *selects* an external host as primary (`ak host pick` stays built-in-scoped), and `commandStatusline` has no runtime reader yet (its render path is a later wave) |
-| Remote manifest sources (npm / URL) + resolve→hash ordering | **Working** (2026-08-16, wave A) | file / https (no redirects, bounded time+bytes) / `npm:` (`npm pack --ignore-scripts` + `tar -xzOf` stdout-only — nothing extracted to disk, package scripts never run); resolver runs before hashing, so a mutated remote surfaces as `consent-stale`. The https fetch is host-unrestricted by design (the source is operator-authored in user-scope `kit.json`; redirects refused, no credentials attached) |
+| Tiered conformance harness (`session-driving` … `statusline`) | **Working** (2026-08-16, waves C+D2) | `runTieredConformance` + `ak host adapters conformance`: `admission`, `activity-routing`, and now `primary-eligible` genuinely pass black-box against a real fixture — `primary-eligible` drives a real `executeRunPlan` where the host anchors a run and receives a genuine ADR-0019 escalation onto itself (a real second subprocess), recorded with no pre-existing grant. `session-driving`/`statusline` stay honestly `gated`/`skipped` (external session driving and the statusline render path are not built) — the harness never fabricates a pass, and there is no injection seam through which a caller could substitute one. A failed `admission` tier short-circuits every downstream tier so no evidence is laundered. A grant-bearing tier that re-runs `failed` under the same adapter-content hash now auto-voids the stored tier **and** the live granted capability (wave D4, N-1) — the un-earn path mirrors the gated-downgrade; a `skipped` result never voids (prerequisite not evaluated ≠ disproof). Capabilities can also be withdrawn per-capability with `ak host adapters revoke-grant <name> [capability]`. The content identity covers the validated manifest plus declared hook-file bytes; the explicit inventory and immediate pre-spawn recheck are the remaining contract-v1 boundary. `statusline` un-earn lands with its render path |
+| Hook-file integrity and development conformance mode | **Working** (2026-08-24, PR #131 follow-up) | `hook.files` validates an explicit relative inventory; `hashAdapterContent` adds per-path SHA-256 digests; admission, consent, grants, and pre-spawn execution use the combined identity; `ak host adapters conformance <name> --dev` runs real probes without persisting evidence or grants. |
+| Capability-grant store + promotion command | **Working** (2026-08-16, waves D+D2) | `grants.mjs` (hash-pinned, evidence-gated, edit-invalidated like consent — the earned capability is enforced at **read** time, not only at grant time) plus `ak host adapters grant`/`bless`: the maintainer's explicit grant of a tier-earned capability, refused unless the gating tier is recorded `passed` at the current adapter-content hash. **Wave D2 makes a grant live:** at bootstrap the admitted-host overlay reads `grantedCapabilitiesFor` at the fresh current content hash and raises `canBePrimary`/`commandStatusline` on the effective-registry entry (through a local allow-list that can raise only those two, never `aqeProvider` or any other key), so `hostTierLabel` and `effectivePrimaryHostIds()` reflect it. Two consumption gaps remain, honestly disclosed at grant time: no path yet *selects* an external host as primary (`ak host pick` stays built-in-scoped), and `commandStatusline` has no runtime reader yet (its render path is a later wave) |
+| Remote manifest sources (npm / URL) + resolve→hash ordering | **Working** (2026-08-16, wave A; tightened 2026-08-24) | file / https (no redirects, bounded time+bytes) / `npm:` (`npm pack --ignore-scripts` + `tar -xzOf` stdout-only — nothing extracted to disk, package scripts never run); resolver runs before hashing, and remote sources with script-like hook paths are refused because no bundle is retained. |
 | Upstream request tracking (`gated: <repo>#NNN` against a tier) | **Working** (2026-08-16, wave D) | `ak host adapters gate <name> <tier> <ref>` records a ref-format-validated upstream gate; `ak host adapters status` surfaces per-tier passed/gated state (stale-marked on a manifest edit) and the granted capabilities |
 | A real external adapter (Hermes) clearing the kit → contract freeze | **Not started** | Freeze criterion (§6) |
 

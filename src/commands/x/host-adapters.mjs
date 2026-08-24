@@ -9,14 +9,17 @@
 // content (ADR-0029 §6). No adapter code ever executes here — this module
 // only reads, validates, hashes, discloses, and (on confirmation) records.
 //
-// Mirrors admitOne's refusal semantics exactly: a manifest is hashed only
-// after validateAdapterManifest accepts it (hashManifest(validateAdapterManifest(raw))),
-// so the hash a user consents to is always the VALIDATED shape, never the
-// raw file — an invalid manifest (e.g. one claiming canBePrimary) is refused
-// with its .reason and nothing is ever recorded for it.
+// Mirrors admitOne's refusal semantics exactly: the validated manifest and
+// declared hook files are hashed only after validateAdapterManifest accepts
+// the shape, so the content a user consents to is always the VALIDATED shape
+// plus disclosed file bytes, never the raw file — an invalid manifest (e.g.
+// one claiming canBePrimary) is refused with its .reason and nothing is ever
+// recorded for it.
 import readline from 'node:readline/promises';
 import { positiveInt } from '../run.mjs';
-import { hashManifest, SUPPORTED_CONTRACT } from '../../lib/adapters/admission.mjs';
+import {
+  baseDirForSource, hashAdapterContent, SUPPORTED_CONTRACT,
+} from '../../lib/adapters/admission.mjs';
 import { validateAdapterManifest } from '../../lib/adapters/manifest.mjs';
 import { HOST_REGISTRY } from '../../lib/adapters/registries.mjs';
 import * as consentStore from '../../lib/adapters/consent.mjs';
@@ -132,7 +135,13 @@ export async function loadAndHash(entry, { reader }) {
     return { ok: false, reason: 'builtin-shadow', detail: `'${manifest.host.id}' is a built-in host id` };
   }
 
-  return { ok: true, manifest, hash: hashManifest(manifest), origin };
+  let integrity;
+  try {
+    integrity = hashAdapterContent(manifest, { baseDir: baseDirForSource(entry.source) });
+  } catch (error) {
+    return { ok: false, reason: error?.reason ?? 'hook-integrity', detail: error?.message ?? String(error) };
+  }
+  return { ok: true, manifest, hash: integrity.hash, integrity, origin };
 }
 
 /** Trust state for one entry — never throws. One of 'trusted', 'consent-stale',
@@ -163,7 +172,8 @@ async function list({ cfg, consent, reader }) {
   return 0;
 }
 
-function discloseManifest(name, manifest, hash) {
+function discloseManifest(name, manifest, integrity) {
+  const hash = integrity.hash;
   console.log(bold(`host adapter manifest — ${name}`));
   // Full content FIRST, decision-critical summary LAST (finding 16): a
   // large-but-legal manifest can run many screens of JSON, and whatever
@@ -208,6 +218,8 @@ function discloseManifest(name, manifest, hash) {
   for (const change of changes) {
     console.log(`    [${change.scope}] ${stripControl(change.owner)}: ${stripControl(change.value)} — ${stripControl(change.effect)}`);
   }
+  console.log(`  hook file digests: ${integrity.hookFiles.length ? '' : '(none)'}`);
+  for (const file of integrity.hookFiles) console.log(`    ${file.path}: ${file.sha256}`);
   console.log(`  sha256: ${hash}`);
 }
 
@@ -221,7 +233,7 @@ async function trust({ name, cfg, consent, reader, ask, isTTY, yes, expectHash }
     fail(`'${name}' manifest refused: ${stripControl(loaded.reason)} — ${stripControl(loaded.detail)}`);
     return 1;
   }
-  const { manifest, hash, origin } = loaded;
+  const { manifest, integrity, hash, origin } = loaded;
 
   // --expect-hash pinning (finding 8): required whenever --yes is paired
   // with a non-file origin, so an unattended (CI) run can never blanket-
@@ -233,7 +245,7 @@ async function trust({ name, cfg, consent, reader, ask, isTTY, yes, expectHash }
     return 2;
   }
   if (expectHash !== undefined && expectHash !== hash) {
-    fail(`'${name}' hash mismatch — --expect-hash ${expectHash} does not match the resolved manifest hash ${hash}; refusing to record consent for unexpected content`);
+    fail(`'${name}' hash mismatch — --expect-hash ${expectHash} does not match the resolved adapter content hash ${hash}; refusing to record consent for unexpected content`);
     return 1;
   }
 
@@ -249,10 +261,10 @@ async function trust({ name, cfg, consent, reader, ask, isTTY, yes, expectHash }
     return 0;
   }
   if (recorded !== null && recorded !== undefined) {
-    warn(`'${name}' consent is stale — previously trusted hash ${recorded}, current manifest hash ${hash}`);
+    warn(`'${name}' consent is stale — previously trusted content hash ${recorded}, current adapter content hash ${hash}`);
   }
 
-  discloseManifest(name, manifest, hash);
+  discloseManifest(name, manifest, integrity);
 
   if (!yes) {
     if (!isTTY) {
@@ -265,7 +277,7 @@ async function trust({ name, cfg, consent, reader, ask, isTTY, yes, expectHash }
 
   consent.recordConsent(name, hash);
   ok(`consent recorded for '${name}' at ${hash}`);
-  info('admission will now accept this exact manifest content — ANY edit to the manifest invalidates this consent; re-run `ak host adapters trust` after an edit');
+  info('admission will now accept this exact manifest and declared hook-file content — edit either and re-run `ak host adapters trust` after reviewing the new digest');
   return 0;
 }
 
@@ -351,7 +363,7 @@ async function warnAboutHooks(name, entry, rawReader) {
  * recording semantics (passed -> recordTierResult, upstream-gated ->
  * recordTierGate, everything else persists nothing). */
 async function conformance({
-  name, cfg, reader, runTiered, consentFile, grantsFile, flags = /** @type {{timeout?:string}} */ ({}),
+  name, cfg, reader, runTiered, consentFile, grantsFile, flags = /** @type {{timeout?:string,dev?:boolean}} */ ({}),
 }) {
   if (typeof name !== 'string' || !name) { fail('usage: ak host adapters conformance <name>'); return 2; }
   const entry = findEntry(cfg, name);
@@ -366,6 +378,9 @@ async function conformance({
   }
 
   const rawReader = toRawManifestReader(reader);
+  if (flags.dev) {
+    warn(`'${name}' conformance DEV MODE — hooks still run as real subprocesses, but no consent, tier evidence, or capability grant is persisted; this run cannot graduate the adapter.`);
+  }
   await warnAboutHooks(name, entry, rawReader);
 
   let report;
@@ -377,6 +392,7 @@ async function conformance({
       consentFile,
       grantsFile,
       timeoutMs,
+      persist: !flags.dev,
     });
   } catch (error) {
     fail(`'${name}' conformance run failed: ${stripControl(error?.message ?? String(error))}`);
@@ -384,6 +400,7 @@ async function conformance({
   }
 
   console.log(bold(`host adapter conformance — ${report.name}`) + (report.hash ? dim(`  (${report.hash})`) : ''));
+  if (flags.dev) info('  [dev: evidence not persisted]');
   let anyFailed = false;
   for (const tier of report.tiers) {
     const line = tierLine(tier);

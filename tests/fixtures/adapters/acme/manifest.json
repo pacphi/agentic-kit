@@ -29,12 +29,12 @@
   "driving": { "surfaces": ["cli-subprocess"] },
   "lifecycle": {
     "detect": {
-      "hook": { "command": ["node", "detect-hook.mjs"], "timeoutMs": 5000 }
+      "hook": { "command": ["node", "detect-hook.mjs"], "files": ["detect-hook.mjs"], "timeoutMs": 5000 }
     }
   },
   "execution": {
     "run": {
-      "hook": { "command": ["node", "run-hook.mjs"], "timeoutMs": 5000 }
+      "hook": { "command": ["node", "run-hook.mjs"], "files": ["run-hook.mjs"], "timeoutMs": 5000 }
     }
   },
   "trust": {

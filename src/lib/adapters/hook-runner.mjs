@@ -9,6 +9,7 @@
 // adapter hook gets no cleanup grace period; it already spent its budget.
 import { spawn as nodeSpawn, execFile as nodeExecFile } from 'node:child_process';
 import { isAbsolute as pathIsAbsolute } from 'node:path';
+import { verifyAdapterContent } from './integrity.mjs';
 
 const DEFAULT_TIMEOUT_MS = 30_000;
 const OUTPUT_CAP_BYTES = 256 * 1024;
@@ -143,12 +144,12 @@ async function killGroup(child) {
  *
  * @param {{hook:{command:string[], timeoutMs?:number}, hostId:string,
  *   verb:string, timeoutMs?:number, env?:Record<string,string>, stdin?:string,
- *   cwd?:string}} options
+ *   cwd?:string, manifest?:object, integrity?:{hash:string}, baseDir?:string|null}} options
  * @returns {Promise<{ok:boolean, stdout:string, stdoutText:string, stderrText:string,
  *   exitCode:number|null, detail:string|null}>}
  */
 export async function runAdapterHook({
-  hook, hostId, verb, timeoutMs, env, stdin, cwd,
+  hook, hostId, verb, timeoutMs, env, stdin, cwd, manifest, integrity, baseDir,
 } = /** @type {any} */ ({})) {
   if (!hook || !Array.isArray(hook.command) || hook.command.length === 0
     || !hook.command.every((part) => typeof part === 'string' && part.length > 0)) {
@@ -167,6 +168,23 @@ export async function runAdapterHook({
   const effectiveTimeoutMs = resolveTimeout(timeoutMs, hook.timeoutMs);
   const [argv0, ...args] = hook.command;
   const childEnv = minimalEnv(env);
+
+  // Adrian's trust-gap finding: the manifest-only hash is not enough when a hook
+  // points at mutable files. Re-read the declared bytes immediately before
+  // spawn and fail closed if the content identity no longer matches the
+  // admitted/consented identity. The check is optional for direct unit-level
+  // callers that do not represent an admitted adapter; production registration
+  // always supplies all three values.
+  if (manifest || integrity) {
+    try {
+      verifyAdapterContent(manifest, integrity, { baseDir });
+    } catch (error) {
+      return {
+        ok: false, stdout: '', stdoutText: '', stderrText: '', exitCode: null,
+        detail: `${hostId}:${verb} adapter hook integrity check failed: ${error?.message ?? String(error)}`,
+      };
+    }
+  }
 
   const wantsStdin = typeof stdin === 'string';
   let child;

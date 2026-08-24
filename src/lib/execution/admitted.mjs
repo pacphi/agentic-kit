@@ -116,10 +116,15 @@ function parseStdout(stdoutText, stderrText) {
  * production defaults spawn the real subprocess. `baseDir` (F-1) is the
  * adapter's own directory — derived by the caller (admission.mjs) from the
  * manifest's `source` at registration time, `null` for a source with no
- * persistent local bundle (npm/https) — never process.cwd().
+ * persistent local bundle (npm/https) — never process.cwd(). `integrity` is
+ * the admission-time combined manifest + hook-file identity; hook-runner
+ * rechecks it immediately before every spawn.
+ * @param {any} manifest
+ * @param {{ runHook?: (args: any) => Promise<any>, haveFn?: (cmd: any, opts?: any) => Promise<boolean>,
+ *   clock?: () => string, baseDir?: string|null, integrity?: object }} [options]
  */
 export function buildAdmittedExecutionAdapter(manifest, {
-  runHook = runAdapterHook, haveFn = have, clock = nowIso, baseDir = null,
+  runHook = runAdapterHook, haveFn = have, clock = nowIso, baseDir = null, integrity,
 } = {}) {
   if (!manifest || typeof manifest !== 'object') throw new TypeError('buildAdmittedExecutionAdapter requires a manifest');
   const hostId = manifest.host?.id;
@@ -203,6 +208,7 @@ export function buildAdmittedExecutionAdapter(manifest, {
       };
       state.hookResult = await runHook({
         hook, hostId, verb: 'run', timeoutMs: innerTimeoutMs, env, stdin: state.prompt,
+        ...(integrity ? { manifest, integrity } : {}), baseDir,
         // R-2: the spawn cwd is uniform and explicit, never Node's own
         // "inherit ak's process.cwd()" default (runAdapterHook's own
         // fallback for an omitted cwd) — baseDir anchors a relative script

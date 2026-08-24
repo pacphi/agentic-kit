@@ -69,10 +69,10 @@ validator:
   },
   "driving": { "surfaces": ["cli-subprocess"] },
   "lifecycle": {
-    "detect": { "hook": { "command": ["node", "detect-hook.mjs"], "timeoutMs": 5000 } }
+    "detect": { "hook": { "command": ["node", "detect-hook.mjs"], "files": ["detect-hook.mjs"], "timeoutMs": 5000 } }
   },
   "execution": {
-    "run": { "hook": { "command": ["node", "run-hook.mjs"], "timeoutMs": 120000 } }
+    "run": { "hook": { "command": ["node", "run-hook.mjs"], "files": ["run-hook.mjs"], "timeoutMs": 120000 } }
   },
   "trust": {
     "changes": [
@@ -100,7 +100,7 @@ Field by field:
 | `host.trust` / `trust.changes` | Up-front disclosure of what your adapter touches. `trust.changes` is what the user reads before consenting. |
 | `detection` | How `ak` proves your CLI is present: the binary, the version arguments, and a regular-expression source for the version. |
 | `driving.surfaces` | Declare `cli-subprocess`. See below. |
-| `lifecycle` / `execution` | Your hooks ([section 3](#3-write-the-hooks)). Both are optional; a manifest with neither is a pure description. |
+| `lifecycle` / `execution` | Your hooks ([section 3](#3-write-the-hooks)). Both are optional; a manifest with neither is a pure description. A file-backed hook must list its adapter-owned files in `hook.files`. |
 
 > **Capabilities describe what the adapter *delivers through `ak`*, not what your host can do in
 > principle.** A real Hermes adapter's first draft declared `nativeMcpConfig: true` and
@@ -217,8 +217,17 @@ how you write it:
   file planted in the operator's cwd is unreachable. This is why `AK_WORKER_CWD` exists: it's how
   you learn which repository to work on. A *remote*-sourced manifest (`npm:` / `https://`) has no
   local directory to anchor to, so a relative command from such a source is refused
-  (`execution-unanchored` / `lifecycle-unanchored`) — publish remotely and you must use absolute
-  paths or bare PATH binaries.
+  (`execution-unanchored` / `lifecycle-unanchored`) — publish remotely and contract v1 requires
+  path-independent PATH binaries or inline evaluator commands.
+- **Declared hook-file integrity.** A relative/script-like hook argument must be covered by that
+  hook's `files` array, with a path relative to the manifest directory. `ak` reads each declared
+  regular file, records its SHA-256 digest alongside the manifest identity, discloses the digest during
+  `trust`, and rechecks it immediately before every spawn. Edit, remove, or replace a declared file
+  and admission/grants go stale; an edit after admission is refused at spawn time. The inventory is
+  explicit, not a transitive import scanner: list every adapter-owned file your hook executes.
+- **Remote path restriction.** npm/URL manifests are read and discarded rather than retained as a
+  local bundle. Contract v1 therefore refuses script-like hook paths from those sources; use a PATH
+  binary or inline evaluator command. A future immutable bundle/signature contract may widen this.
 - **Minimal environment.** Your hook gets `PATH`, `HOME`, and whatever `ak` injects for that verb —
   never `ak`'s full environment. Don't expect to inherit the operator's secrets.
 - **Bounded output.** Captured output is capped at 256 KB and truncated with a marker beyond that.
@@ -260,11 +269,11 @@ export AK_EXPERIMENTAL_HOST_ADAPTERS=1
 ak host adapters trust hermes
 ```
 
-`trust` prints the full validated manifest — every hook command that will spawn is right there in it
-— then asks for confirmation before pinning a hash of that content. **Edit the manifest afterwards
-and consent invalidates**: the adapter is not admitted again until the user re-confirms the new
-content. Consent lives outside your code, attached to a specific byte sequence, never to a name your
-content could drift underneath.
+`trust` prints the full validated manifest, every declared hook-file digest, and every hook command
+that will spawn — then asks for confirmation before pinning a hash of that combined content. **Edit
+the manifest or a declared hook file afterwards and consent invalidates**: the adapter is not admitted
+again until the user re-confirms the new content. Consent lives outside your code, attached to a
+specific byte sequence, never to a name your content could drift underneath.
 
 Three more notes for your install docs:
 
@@ -316,12 +325,17 @@ What each tier means for you:
 | `primary-eligible` | Earns `canBePrimary`. Your host anchors a real run *and* receives a genuine ADR-0019 escalation onto itself — a second real subprocess. | **Can genuinely pass**, with no pre-existing grant. |
 | `statusline` | Earns `commandStatusline`. | **`gated`.** There is no admitted-host footer-render path yet, so even a granted capability has nothing real to drive. |
 
+Use `ak host adapters conformance <name> --dev` while iterating. It runs the same real subprocess
+checks but loudly persists no consent, tier evidence, or capability grant; a dev run cannot graduate
+the adapter. Use the default command when you want the reproduced evidence that a maintainer may
+review.
+
 **A `gated` or `skipped` result on `session-driving` and `statusline` is expected, not your adapter
 failing.** The harness never fabricates a pass, and there is no injection seam through which a caller
 could substitute one. Only `failed` means something is wrong with your adapter.
 
-Evidence is hash-pinned to your manifest, so any edit voids it. And it's a two-way street: if a
-grant-bearing tier later re-runs `failed` at the same manifest hash, the stored evidence *and* the
+Evidence is hash-pinned to your combined manifest/file identity, so any declared edit voids it. And it's a two-way street: if a
+grant-bearing tier later re-runs `failed` at the same adapter-content hash, the stored evidence *and* the
 live capability are auto-voided.
 
 ## 6. Propose it for graduation
@@ -341,7 +355,7 @@ Two destinations, the maintainer's call:
 - **Blessed external adapter** — `ak host adapters bless hermes <capability>` (`grant` is the same
   command). Your adapter stays out-of-tree and experimental, holding exactly the capabilities its
   tiers earned. A grant is refused unless the gating tier is recorded `passed` at the current
-  manifest hash, and it's re-checked at read time, not just at write time.
+  adapter-content hash, and it's re-checked at read time, not just at write time.
 - **Promoted built-in** — your host descriptor is adopted into the first-party registry. This is now
   an ordinary PR: a registry entry, a lifecycle adapter, an About card. Once built-in, the caps no
   longer apply, because it is first-party code the maintainer vouches for. That's what promotion
@@ -366,6 +380,7 @@ ak host adapters trust <name>               # disclose the manifest, confirm, pi
                                             #   (--yes --expect-hash <sha256> for unattended/remote)
 ak host adapters revoke <name>              # withdraw consent (works with the flag off)
 ak host adapters conformance <name>         # run the tiered harness
+ak host adapters conformance <name> --dev   # real self-test; persist no evidence or grants
 ak host adapters status <name>              # per-tier state + granted capabilities
 ak host adapters grant <name> <capability>  # maintainer: confer an earned capability (alias: bless)
 ak host adapters revoke-grant <name> [cap]  # withdraw a granted capability

@@ -20,7 +20,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { validateAdapterManifest } from '../../src/lib/adapters/manifest.mjs';
-import { admitAdapters, hashManifest } from '../../src/lib/adapters/admission.mjs';
+import { admitAdapters, hashAdapterContent } from '../../src/lib/adapters/admission.mjs';
 import {
   applyAdmitted, resetAdmitted, effectiveHostRegistry, admittedHostIds,
 } from '../../src/lib/adapters/admitted.mjs';
@@ -135,7 +135,7 @@ export async function runConformanceReport({ fixtureRoot = FIXTURE_ROOT } = {}) 
   await run('valid manifest parses, validates, and is admitted through a real on-disk consent record', async () => {
     const raw = await readManifestFromFile(validManifestPath);
     validated = validateAdapterManifest(raw);
-    const validHash = hashManifest(validated);
+    const validHash = hashAdapterContent(validated, { baseDir: FIXTURE_ROOT }).hash;
     recordConsent('acme', validHash, { file: consentFile });
     const results = await admitAdapters({
       cfg: { hostAdapters: [{ name: 'acme', source: validManifestPath }] },
@@ -228,7 +228,7 @@ export async function runConformanceReport({ fixtureRoot = FIXTURE_ROOT } = {}) 
     assert.notEqual(mutatedText, rawText);
     const mutatedRaw = resolveManifestCommands(JSON.parse(mutatedText), fixtureRoot);
     const results = await admitAdapters({
-      cfg: { hostAdapters: [{ name: 'acme', source: 'mem://acme-mutated-by-conformance-report' }] },
+      cfg: { hostAdapters: [{ name: 'acme', source: validManifestPath }] },
       readManifest: async () => mutatedRaw,
       consent, // same store — still holds the ORIGINAL (pre-mutation) hash
     });
@@ -324,7 +324,7 @@ test('GAP CLOSED: an added top-level field outside the schema is refused, not si
     return true;
   });
 
-  const hash = hashManifest(validated);
+  const hash = hashAdapterContent(validated, { baseDir: FIXTURE_ROOT }).hash;
 
   // Consequence, proven end-to-end: a manifest carrying the extraneous field
   // is refused by the real admission gate itself — reason 'unknown-field',

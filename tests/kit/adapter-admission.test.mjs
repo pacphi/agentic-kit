@@ -11,7 +11,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import {
-  admitAdapters, bootstrapHostAdapters, hashManifest, canonicalizeManifest, SUPPORTED_CONTRACT,
+  admitAdapters, bootstrapHostAdapters, hashAdapterContent, hashManifest, canonicalizeManifest, SUPPORTED_CONTRACT,
 } from '../../src/lib/adapters/admission.mjs';
 import {
   applyAdmitted, resetAdmitted, admittedHostIds, effectiveHostRegistry,
@@ -527,11 +527,11 @@ test('F-1 (bootstrap): a file-sourced manifest derives baseDir from realpath(dir
     // is what this test is actually anchoring, unaffected by the change.
     const manifest = validateAdapterManifest(validManifest({
       name, host: validHost({ id: name }),
-      lifecycle: { apply: { hook: { command: [process.execPath, 'apply-hook.mjs'] } } },
+      lifecycle: { apply: { hook: { command: [process.execPath, 'apply-hook.mjs'], files: ['apply-hook.mjs'] } } },
     }));
     const manifestPath = path.join(tmpDir, 'manifest.json');
     fs.writeFileSync(manifestPath, JSON.stringify(manifest));
-    const hash = hashManifest(manifest);
+    const hash = hashAdapterContent(manifest, { baseDir: tmpDir }).hash;
     const result = await bootstrapHostAdapters({
       cfg: { hostAdapters: [{ name, source: manifestPath }] },
       env: { AK_EXPERIMENTAL_HOST_ADAPTERS: '1' },
@@ -550,30 +550,23 @@ test('F-1 (bootstrap): a file-sourced manifest derives baseDir from realpath(dir
   }
 });
 
-test('F-1 (bootstrap): an npm-sourced admitted manifest with a relative lifecycle hook surfaces a lifecycle-unanchored warning, and the verb is refused (never spawned)', async () => {
+test('F-1 (bootstrap): an npm-sourced path-backed lifecycle hook is refused before admission because the source has no retained bundle', async () => {
   const name = 'hermes-f1-npm';
-  // process.execPath, not the bare token 'node' — this verb is refused
-  // before ever spawning either way (npm source -> null baseDir -> unanchored),
-  // but kept consistent with the file-sourced test above rather than leaving
-  // a bare token that would misbehave the moment this test's shape changes.
+  // process.execPath, not the bare token 'node' — the path-backed hook is
+  // refused before any registration because an npm source has no retained
+  // bundle whose bytes could be pinned.
   const manifest = validateAdapterManifest(validManifest({
     name, host: validHost({ id: name }),
     lifecycle: { apply: { hook: { command: [process.execPath, 'apply-hook.mjs'] } } },
   }));
-  const hash = hashManifest(manifest);
   const result = await bootstrapHostAdapters({
     cfg: { hostAdapters: [{ name, source: 'npm:hermes-f1-npm-adapter@1.0.0' }] },
     env: { AK_EXPERIMENTAL_HOST_ADAPTERS: '1' },
     readManifest: async () => manifest,
-    consent: trustingConsent({ [name]: hash }),
+      consent: trustingConsent({}),
   });
-  assert.equal(result.admitted.length, 1, 'the host itself still admits — only the unanchored verb is refused');
-  const warning = result.warnings.find((w) => w.reason === 'lifecycle-unanchored');
-  assert.ok(warning, `expected a 'lifecycle-unanchored' warning; got ${JSON.stringify(result.warnings)}`);
-  const adapter = lifecycleAdapterFor(name);
-  assert.notEqual(adapter, null, 'the adapter still registers — an unanchorable verb refuses itself, not the whole adapter');
-  assert.deepEqual(adapter.unanchoredVerbs, ['apply']);
-  const applied = await adapter.apply({});
-  assert.equal(applied.ok, false, 'the hook must NEVER have been spawned for an unanchored verb');
-  assert.match(applied.errors[0], /no anchored adapter base directory/);
+  assert.equal(result.admitted.length, 0);
+  const warning = result.warnings.find((w) => w.reason === 'hook-files-unavailable');
+  assert.ok(warning, `expected a 'hook-files-unavailable' warning; got ${JSON.stringify(result.warnings)}`);
+  assert.equal(lifecycleAdapterFor(name), null, 'the adapter must not register an unpinnable remote hook');
 });

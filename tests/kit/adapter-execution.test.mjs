@@ -462,7 +462,7 @@ test('R-2: launch falls back to state.cwd (never omits cwd) when there is no bas
 
 // ── F-1 (bootstrap-level): baseDir derives from entry.source ─────────────
 
-test('F-1 (bootstrap): an npm-sourced execution adapter with a relative command is refused with a surfaced warning', async () => {
+test('F-1 (bootstrap): an npm-sourced path-backed execution hook is refused before admission because the source has no retained bundle', async () => {
   const manifest = hermesManifest({ execution: { run: { hook: { command: ['run-hook.mjs'] } } } });
   const { hashManifest } = await import('../../src/lib/adapters/admission.mjs');
   const hash = hashManifest(manifest);
@@ -472,17 +472,18 @@ test('F-1 (bootstrap): an npm-sourced execution adapter with a relative command 
     readManifest: async () => manifest,
     consent: { recordedHashFor: () => hash, isTrusted: () => true },
   });
-  assert.equal(result.admitted.length, 1, 'the host itself still admits — only execution registration fails');
-  const warning = result.warnings.find((w) => w.reason === 'execution-unanchored');
-  assert.ok(warning, `expected an 'execution-unanchored' warning; got ${JSON.stringify(result.warnings)}`);
+  assert.equal(result.admitted.length, 0);
+  const warning = result.warnings.find((w) => w.reason === 'hook-files-unavailable');
+  assert.ok(warning, `expected a 'hook-files-unavailable' warning; got ${JSON.stringify(result.warnings)}`);
 });
 
 test('F-1 (bootstrap): a file-sourced manifest derives baseDir from realpath(dirname(source)) and registers cleanly', async () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-execution-basedir-'));
   try {
-    const manifest = hermesManifest({ execution: { run: { hook: { command: ['node', 'run-hook.mjs'] } } } });
-    const { hashManifest } = await import('../../src/lib/adapters/admission.mjs');
-    const hash = hashManifest(manifest);
+    const manifest = hermesManifest({ execution: { run: { hook: { command: ['node', 'run-hook.mjs'], files: ['run-hook.mjs'] } } } });
+    fs.writeFileSync(path.join(tmpDir, 'run-hook.mjs'), 'process.stdout.write(JSON.stringify({summary:"ok"}));\n');
+    const { hashAdapterContent } = await import('../../src/lib/adapters/admission.mjs');
+    const hash = hashAdapterContent(manifest, { baseDir: tmpDir }).hash;
     const manifestPath = path.join(tmpDir, 'manifest.json');
     fs.writeFileSync(manifestPath, JSON.stringify(manifest));
     const result = await bootstrapHostAdapters({

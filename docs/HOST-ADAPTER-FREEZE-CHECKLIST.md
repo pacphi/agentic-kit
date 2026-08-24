@@ -25,6 +25,10 @@ while the contract is still experimental.
 
 - [ ] Admission gate, hash-pinned consent, subprocess hook-runner, `admission` tier
       (ADR-0029).
+- [ ] File-backed hooks declare a relative `hook.files` inventory; each path is digest-pinned,
+      rechecked immediately before spawn, and a changed/missing/non-regular file fails closed.
+- [ ] Remote (`npm:` / URL) adapters use only path-independent hooks, or move to a retained,
+      immutable bundle contract before freeze; no remote hook bytes are assumed immutable.
 - [ ] `ak host adapters trust` / `list` / `revoke` (+ `--expect-hash`).
 - [ ] Remote manifest sources (file / `https` / `npm:`), resolve-before-hash.
 - [ ] `ak run` drives an admitted routable host (cwd-anchored, exit-code authority,
@@ -50,6 +54,10 @@ while the contract is still experimental.
   - [ ] `statusline` — `gated` remains acceptable at freeze (its render path is a later wave);
         the freeze is of the **contract shape**, not of every tier passing.
 - [ ] **Hooks read** by a maintainer (the only executing part).
+- [ ] **Hook-byte evidence reproduced** by the maintainer: the disclosed per-path digests match the
+      files reviewed, and an edit between admission and spawn is observed to fail closed.
+- [ ] **Development conformance evidence kept separate**: any `ak host adapters conformance <name>
+      --dev` run is explicitly non-persistent and is not used for graduation.
 - [ ] **Grant/bless decision** recorded (blessed external adapter, or promoted built-in).
 - [ ] **Soak: one full release** elapsed with the adapter in the field and **no
       contract-shape change** required. Release soaked through: `__________`.
