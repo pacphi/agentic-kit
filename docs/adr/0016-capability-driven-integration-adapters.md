@@ -4,7 +4,7 @@
   [ADR-0020](0020-ga-stable-surfaces.md); closed-registry clause superseded by
   [ADR-0029](0029-host-adapter-extension-point.md)
 - **Date:** 2026-07-28
-- **Updated:** 2026-08-20
+- **Updated:** 2026-08-25
 - **Update note:** Added read-only Codex plugin-hook compatibility facts,
   runtime-selected Ruflo project-memory store proofs, and the non-correlatable
   OpenRouter account-analytics boundary; removed the pre-GA compatibility command,
@@ -12,10 +12,12 @@
   to declare its setup trust posture and changes for host-neutral preflight.
   Phase 0 consistency pass (2026-08-14): host adapters gained a required
   `enabledByDefault` boolean and the three enabled-host default literals now
-  derive from it via `defaultHostMap()` (F-15); the `observability` axis is
-  recorded as terminal — validation metadata with referential integrity only,
-  deliberately not a dispatch surface, no collector loop exists (F-12); the
-  non-throwing `validateBinding` is wired into `ak host status` as per-entry
+  derive from it via `defaultHostMap()` (F-15); the `observability` axis remains validation
+  metadata for implemented integrations: no general-purpose collector loop
+  exists (F-12). ADR-0032 now accepts one narrow future exception: Model lifecycle intelligence
+  may select catalogue descriptors and dispatch only to built-in, bounded source adapters; it does
+  not turn descriptors into arbitrary executable plugins or claim that behavior is implemented.
+  The non-throwing `validateBinding` is wired into `ak host status` as per-entry
   warnings (F-16); and the integrations migrator derives each host's native
   default provider from the provider registry's host-login entries instead of a
   literal map, inferring no binding at all for hosts without one (F-13).

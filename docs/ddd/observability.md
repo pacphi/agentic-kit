@@ -569,22 +569,31 @@ The UI receives only projection DTOs:
 - `health`: sanitized adapter status and aggregate counters;
 - `cursor` and `schemaVersion`.
 
-The dashboard shell has exactly three primary areas: `Overview`, `Usage`, and `Observability`. One
-fixed, left-aligned secondary navigation rail remains in the same location while its contents change:
+The dashboard shell has five primary areas: `About`, `Overview`, `Usage`, `Observability`, and
+`System`. One fixed, left-aligned secondary navigation rail remains in the same location while its
+contents change:
 
 ```text
 Overview      → Summary | Hosts & Routing | Providers | Runtime | Intelligence
 Usage         → Scorecard | Limits | Findings | Sessions | Transcript
 Observability → Live | History
+System        → Summary | Advisory | Sessions | Storage | Runtime | Catalog | Projects
 ```
+
+About is a continuous editorial directory with secondary section anchors. ADR-0032 accepts a
+planned Models destination beneath Usage; it is not part of the implemented navigation until that
+ADR is marked Implemented. Model lifecycle read models may consume sanitized observed identity,
+but Observability retains ownership of live sessions, events, topology, and replay.
 
 Navigation state has canonical hierarchical hashes:
 
 ```text
+#about/{hosts,engine,quality,kit,configured}
 #overview/{summary,hosts,providers,runtime,intelligence}
 #usage/{score,limits,findings,sessions,transcript}
 #usage/{sessionId}
 #observability/{live,history}
+#system/{summary,advisory,sessions,storage,runtime,catalog,projects}
 ```
 
 Each destination owns a visible heading and concise description. The primary and secondary controls
@@ -812,7 +821,7 @@ process memory limits.
   independently draggable and pinnable.
 - Hover/focus descriptions, persistent selection detail, and Legend / Help explain every unit and
   the available next interaction.
-- Exactly three primary areas share one fixed, left-aligned secondary rail; canonical hashes,
+- Five primary areas share one fixed, left-aligned secondary rail; canonical hashes,
   headings, descriptions, roving Left/Right focus, and Home/End behavior match each destination.
 - Collapsing Session Stream preserves its connection and local choice, expands Agent activity,
   leaves a keyboard-accessible restore rail, and remains compact when the layout stacks.
@@ -848,8 +857,8 @@ The server subscribes before taking the initial snapshot and reconciles buffered
 closing the snapshot-to-subscribe race. A slow-client queue overflow discards queued frames and
 sends a reset snapshot after drain.
 
-The implemented dashboard shell exposes three primary areas and one shared secondary rail. It emits
-the canonical Overview, Usage, and Observability hashes above, gives every view a heading and
+The implemented dashboard shell exposes five primary areas and one shared secondary rail. It emits
+the canonical About, Overview, Usage, Observability, and System hashes, gives every view a heading and
 description, and implements Left/Right/Home/End tab semantics. Observability's locally persisted
 Session Stream chevron changes layout without changing subscription ownership. Usage session rows
 show a host-only badge and reveal provider/provenance/model facts in their own detail strip.

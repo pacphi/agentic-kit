@@ -2,12 +2,15 @@
 
 - **Status:** Implemented
 - **Date:** 2026-07-25
-- **Updated:** 2026-08-24
-- **Update note:** Issue #170 added backward-compatible parsing for legacy Codex messages and
+- **Updated:** 2026-08-25
+- **Update note:** Reconciled Usage with the implemented five-area Dashboard. ADR-0032 is Accepted
+  but not implemented; its planned Models destination will consume structured observed-model facts
+  without moving transcript indexing, session history, or usage aggregates out of this context.
+  Issue #170 added backward-compatible parsing for legacy Codex messages and
   `item_completed` envelopes, bumped the derived-index schema to force reparse of stale zero-turn
   records, added Codex parse-yield diagnostics, and separated first-billed-day session counts from
   token-bearing active-day counts. The earlier OpenRouter account-analytics cache boundary for issue #59,
-  aligned Usage with the dashboard's shared three-area navigation, and documented independent
+  aligned Usage with the dashboard's shared navigation, and documented independent
   host, inference-provider, provenance, and model facts in session rows. ADR-0023 subsequently
   classified SQLite source failures and made transient OpenCode failures preserve last-good records
   with explicit degraded source health instead of becoming observed zero usage; the Usage UI now
@@ -77,12 +80,12 @@ Three properties of the data force most of the design:
 ADR-0007 split `admin` from `dashboard` along **network egress**: `dashboard` promises silence,
 `admin` promises reach. Usage analytics reads **local files only** and makes **zero network calls**.
 It therefore sits squarely inside the dashboard's existing offline-first contract and ships as one
-of the dashboard's three primary areas, not a new server.
+of the dashboard's five primary areas, not a new server.
 
-> **Current implementation note (2026-08-04):** The dashboard exposes exactly three primary areas:
-> Overview, Usage, and Observability. One fixed, left-aligned secondary rail provides the current
-> area's destinations. Usage still loads lazily and remains separate from the live transcript
-> tailers.
+> **Current implementation note (2026-08-25):** The dashboard exposes five primary areas: About,
+> Overview, Usage, Observability, and System. One fixed, left-aligned secondary rail provides the
+> current area's destinations. Usage still loads lazily and remains separate from the live
+> transcript tailers.
 
 Usage carries five in-page views — **Scorecard**, **Limits**, **Findings**, **Sessions**, and
 **Transcript** — deep-linked as `#usage/score`, `#usage/limits`, `#usage/findings`,
@@ -92,6 +95,10 @@ plain-language description. The primary and secondary tab sets use a roving sele
 Left/Right Arrow activates the adjacent destination with wrapping, while Home and End activate the
 first and last destination. This reuses ADR-0005's in-page reveal idiom without adding navigation
 concepts.
+
+> **Planned ADR-0032 amendment:** Models will become a sixth secondary Usage destination after the
+> model-lifecycle contract is implemented. It will read inventory and lifecycle projections; it
+> will not make Historical Usage own catalogues, entitlement, route impact, or model quality.
 
 **2026-08-04 session-identity amendment:** the compact session badge identifies the execution host
 only. Its adjacent disclosure control expands evidence without navigating away from the session

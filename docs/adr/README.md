@@ -39,6 +39,7 @@ Consequences**, and cites the grounded source it rests on where relevant.
 | [0028](0028-local-openai-compatible-providers.md) | One generic local OpenAI-compatible provider, not a vendor enumeration | Accepted |
 | [0029](0029-host-adapter-extension-point.md) | External host adapters: declarative manifest, subprocess hooks | Accepted (experimental contract) |
 | [0031](0031-capability-graduation-and-upstream-requests.md) | Capability graduation: earned parity for external adapters, and the upstream request path | Accepted (governance; implementation staged) |
+| [0032](0032-model-lifecycle-intelligence.md) | Model lifecycle intelligence from provenance-aware local evidence | Accepted (implementation planned) |
 
 Theme: ADRs **0001–0006** define **dual-host LLM routing and leadership** — how `ak` lets ruflo route
 each development activity (architecture, implementation, testing, review, …) to the right host (Claude
@@ -225,3 +226,13 @@ agentic-qe's closed enum; being a native ruflo backend is ruflo's `ENABLE_*` mod
 tracked capability requests with honest interim behaviour rather than pretended support. Accepted as
 a governance decision; the machinery (the trust CLI, external execution, tiered conformance, the
 grant store) is staged and self-graded in the ADR's implementation-status table.
+
+**0032** accepts Model lifecycle intelligence as a new bounded context while leaving implementation
+planned. It keeps configured, effective, observed, discoverable, entitled, policy-allowed,
+routable, lifecycle, and recommended state independent; normalizes host/provider catalogues through
+bounded descriptor-driven source adapters; and persists sanitized same-scope snapshots whose
+baselines advance only on sufficiently complete evidence. Diffs, explanations, and swap plans are
+read-only. Canonical route mutation remains `ak host pick`, first-party migration remains distinct
+from quality, and only Route Intelligence may claim evidence-backed equivalence. When implemented,
+the feature adds `ak models`, a cache-only status row, an Overview summary, and Models beneath Usage
+without changing the Dashboard's five primary areas.

@@ -60,6 +60,30 @@ missing price.
 `Dual-host` describes two enabled peer hosts, not an execution command and not evidence that two
 inference vendors served a workflow. Generalized execution belongs to `ak run`.
 
+## Model lifecycle language
+
+These terms define the Accepted target contract in ADR-0032. They are not shipped command claims
+until that ADR becomes Implemented.
+
+| Term | Meaning |
+|------|---------|
+| Model identity | Host-, provider-, model-id-, and scope-qualified inference target, plus a digest when local bytes are mutable and evidenced |
+| Model scope | Non-identifying account/profile/project/source boundary within which catalogue snapshots are comparable |
+| Execution variant | Binding- or execution-level reasoning effort, service tier, modality, or similar setting; not a separate base model identity |
+| Model binding | One consumer's configured reference and, when established, effective concrete model identity with provenance |
+| Catalog source | Host/provider-native configuration, cache, protocol, or catalogue input with version, scope, freshness, completeness, and diagnostics |
+| Catalog snapshot | Sanitized immutable inventory of source states, model records, bindings, scope, and diagnostics at one capture time |
+| Baseline-eligible snapshot | Sufficiently complete same-scope snapshot permitted to replace the prior lifecycle comparison baseline |
+| Model change | Evidence-backed difference between comparable snapshots; removal needs authoritative evidence or repeated complete absence |
+| Lifecycle edge | Typed alias resolution, first-party migration, or same-family-newer relationship with provenance and scope |
+| Compatibility edge | Typed mechanical swap relationship; it is not a quality or economic recommendation |
+| Consumer impact | Read-only link from a lifecycle fact to affected routes, projections, Agentic QE/Ruflo consumers, or Route Intelligence evidence |
+| Swap plan | Read-only impact report and copyable canonical route action; never an independent routing policy or apply operation |
+
+Configured, effective, observed, discoverable, entitled, policy allowed, routable, lifecycle, and
+recommended are separate model-state dimensions. `Unknown` in one dimension cannot be filled from
+another. A first-party migration is a supported lifecycle edge, not proof of equivalence.
+
 ## Project intelligence language
 
 | Term | Meaning |
@@ -148,6 +172,10 @@ runtime state is a chip word, never a prose word. See
 - Qualify **projection** as configuration projection or read-model projection when ambiguity is
   possible.
 - Qualify **adapter** as integration adapter or source adapter when ambiguity is possible.
+- Say **catalogue source** for model discovery evidence and **catalog snapshot** for the normalized,
+  sanitized local record; neither is canonical routing policy.
+- Say **compatible candidate** only when required mechanical facts are established. Reserve
+  **cheaper equivalent** and **premium justified** for Route Intelligence evidence.
 - Do not infer an inference provider from a transcript host alone.
 - Do not replace an unknown fact with a convenient default.
 - Say **System** for the dashboard area and the command; say **Machine footprint** only for the
@@ -161,6 +189,8 @@ runtime state is a chip word, never a prose word. See
   providers.
 - `ak system [--deep] [--json]` renders the Machine footprint collector; `ak about [--category]
   [--json]` renders the Component directory. Both are read-only twins of a dashboard area.
+- ADR-0032 reserves `ak models` for the planned read-only model inventory, refresh, diff, explain,
+  and plan family. Route mutation remains `ak host pick`; there is no accepted `ak models apply`.
 - `kit.json.integrations.hosts` records enabled hosts. Top-level `routing` records `version`,
   `primaryHost`, and per-activity `routes`; route entries use `provenance` and `escalation`.
 - Derived exports in `hosts.mjs`, `providers.mjs`, and `routing.mjs` are views, not independent
