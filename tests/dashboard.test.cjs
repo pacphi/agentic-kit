@@ -634,6 +634,36 @@ async function main() {
     await usageSrv.close();
   }
 
+  // ── /api/models (#110): authenticated, no-store, injected cache-only read ──
+  let modelReads = 0;
+  const modelPayload = {
+    status: 'cached',
+    snapshot: {
+      snapshotId: 'models:test', capturedAt: '2026-08-25T13:00:00.000Z',
+      counts: { models: 1, configured: 1, observed: 1, migrations: 0, aliasChanges: 0, staleSources: 0, driftedConsumers: 0 },
+      sources: [{ id: 'codex-cache', status: 'complete' }], models: [], bindings: [], changes: [], attention: [],
+    },
+    history: [{ snapshotId: 'models:test', capturedAt: '2026-08-25T13:00:00.000Z' }],
+  };
+  const modelSrv = await startDashboard({
+    port: 0, cwd: fixture, fetchStatus: async () => STUB_STATUS, usage: spyUsage().api,
+    models: async () => { modelReads++; return modelPayload; },
+  });
+  try {
+    await test('GET /api/models is authenticated, no-store, and reads only its injected cache provider', async () => {
+      const denied = await get(modelSrv.url + 'api/models');
+      assert(denied.status === 401, 'missing dashboard token must be rejected');
+      assert(modelReads === 0, 'authentication must run before the model provider');
+      const r = await get(modelSrv.url + 'api/models', modelSrv.token);
+      assert(r.status === 200, 'expected 200, got ' + r.status);
+      assert(r.headers['cache-control'] === 'no-store', 'model evidence must never be browser-cached');
+      assert(JSON.parse(r.body).snapshot.snapshotId === 'models:test', 'cached read model must survive');
+      assert(modelReads === 1, 'the provider is called exactly once for the explicit route');
+    });
+  } finally {
+    await modelSrv.close();
+  }
+
   // ── /api/limits (ADR-0010): injected provider, insights computed server-side ──
   const limitsSrv = await startDashboard({
     port: 0, cwd: fixture, fetchStatus: async () => STUB_STATUS, usage: spyUsage().api,
@@ -1018,18 +1048,23 @@ async function main() {
     await srv3.close();
   }
 
-  // ── the served page: three primary areas, hierarchical views, poll control ──
+  // ── the served page: five primary areas, hierarchical views, poll control ──
   const uiSrv = await startDashboard({ port: 0, cwd: fixture, fetchStatus: async () => STUB_STATUS, usage: spyUsage().api });
   try {
-    await test('served HTML carries the Usage primary area and its five sub-views', async () => {
+    await test('served HTML carries the Usage primary area and its six accessible sub-views', async () => {
       const r = await get(uiSrv.url);
       contains(r.body, 'data-tab="usage"');
       contains(r.body, '>Usage<');
       contains(r.body, 'id="panel-usage"');
-      for (const v of ['score', 'limits', 'findings', 'sessions', 'transcript']) {
+      for (const v of ['score', 'limits', 'findings', 'sessions', 'models', 'transcript']) {
         contains(r.body, 'id="v-' + v + '"');
         contains(r.body, 'data-view="' + v + '"');
+        contains(r.body, 'aria-controls="v-' + v + '"');
+        contains(r.body, 'aria-labelledby="usage-tab-' + v + '"');
       }
+      contains(r.body, 'id="mli-models"');
+      contains(r.body, 'function renderModelLifecycle');
+      contains(r.body, 'fetch("/api/models"');
       contains(r.body, 'id="u-openrouter"');
       contains(r.body, 'id="u-source-health"');
       contains(r.body, 'function renderSourceHealth');
@@ -1841,7 +1876,7 @@ async function main() {
   // is the suite where it matters most — the traversal-guard and credential-
   // leak tests live here and were the reviewer's cited example of a block
   // that could silently vanish with the old harness never noticing.
-  const EXPECTED = 73;
+  const EXPECTED = 74;
   if (passed + failed !== EXPECTED) {
     console.error(`\nPLAN MISMATCH: expected ${EXPECTED} tests, ran ${passed + failed}`);
     process.exit(1);

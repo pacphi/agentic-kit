@@ -156,11 +156,12 @@ export function renderPage({ name, version }) {
     </div>
     <div class="secondary-group" id="secondary-usage" hidden>
       <div class="seg subseg" role="tablist" aria-label="Usage views" id="usage-seg">
-        <button class="seg-btn" role="tab" data-view="score" aria-selected="true" type="button">Scorecard</button>
-        <button class="seg-btn" role="tab" data-view="limits" aria-selected="false" type="button">Limits</button>
-        <button class="seg-btn" role="tab" data-view="findings" aria-selected="false" type="button">Findings<span class="segbadge" id="u-findings-n" hidden></span></button>
-        <button class="seg-btn" role="tab" data-view="sessions" aria-selected="false" type="button">Sessions<span class="mono seg-n" id="u-sessions-n"></span></button>
-        <button class="seg-btn" role="tab" data-view="transcript" aria-selected="false" type="button">Transcript</button>
+        <button class="seg-btn" role="tab" id="usage-tab-score" data-view="score" aria-selected="true" aria-controls="v-score" type="button">Scorecard</button>
+        <button class="seg-btn" role="tab" id="usage-tab-limits" data-view="limits" aria-selected="false" aria-controls="v-limits" tabindex="-1" type="button">Limits</button>
+        <button class="seg-btn" role="tab" id="usage-tab-findings" data-view="findings" aria-selected="false" aria-controls="v-findings" tabindex="-1" type="button">Findings<span class="segbadge" id="u-findings-n" hidden></span></button>
+        <button class="seg-btn" role="tab" id="usage-tab-sessions" data-view="sessions" aria-selected="false" aria-controls="v-sessions" tabindex="-1" type="button">Sessions<span class="mono seg-n" id="u-sessions-n"></span></button>
+        <button class="seg-btn" role="tab" id="usage-tab-models" data-view="models" aria-selected="false" aria-controls="v-models" tabindex="-1" type="button">Models<span class="segbadge" id="mli-attention-n" hidden></span></button>
+        <button class="seg-btn" role="tab" id="usage-tab-transcript" data-view="transcript" aria-selected="false" aria-controls="v-transcript" tabindex="-1" type="button">Transcript</button>
       </div>
       <div class="filters secondary-actions" id="usage-days" role="group" aria-label="Usage window">
         <button class="chipf" type="button" data-days="7">7d</button>
@@ -277,6 +278,10 @@ export function renderPage({ name, version }) {
          theme preferences. It renders BELOW the triage summary so a failing
          subsystem is never displaced by an introduction. -->
     <div class="summary" id="summary" hidden></div>
+    <a class="mli-summary" id="mli-summary" data-model-lifecycle href="#usage/models">
+      <span><b>Model lifecycle</b><small id="mli-summary-copy">No cached inventory yet</small></span>
+      <span class="pill" id="mli-summary-state" data-level="warn"><span class="dot" data-level="warn"></span>refresh</span>
+    </a>
     <div class="ab-nudge" id="about-nudge" hidden>
       <span class="i" aria-hidden="true">&#9432;</span>
       <span>New here? <b>About</b> explains every tool agentic-kit installed on this machine, in
@@ -414,7 +419,7 @@ export function renderPage({ name, version }) {
       <p id="usage-view-description">Token consumption, API-equivalent cost, efficiency, and trends.</p>
     </header>
 
-    <section class="view" id="v-score">
+    <section class="view" id="v-score" role="tabpanel" aria-labelledby="usage-tab-score">
       <div class="hero" id="u-hero"></div>
       <div class="note"><span class="i">&#8505;</span><span>Dollar figures are <b>API list-price equivalents</b> &mdash;
         what these tokens would cost metered. On a Max/Pro subscription you are not billed this.
@@ -472,7 +477,7 @@ export function renderPage({ name, version }) {
       </section>
     </section>
 
-    <section class="view" id="v-limits" hidden>
+    <section class="view" id="v-limits" role="tabpanel" aria-labelledby="usage-tab-limits" hidden>
       <div class="note"><span class="i">&#8505;</span><span>Utilization here is <b>vendor-reported</b> &mdash;
         the plan&rsquo;s own percentages, a denominator local transcripts cannot compute.
         Claude&rsquo;s numbers arrive via the managed statusLine while a session runs; Codex&rsquo;s come from
@@ -492,21 +497,42 @@ export function renderPage({ name, version }) {
         stale data is labelled stale, not hidden</div>
     </section>
 
-    <section class="view" id="v-findings" hidden>
+    <section class="view" id="v-findings" role="tabpanel" aria-labelledby="usage-tab-findings" hidden>
       <div class="note"><span class="i">&#8505;</span><span id="u-findings-note"></span></div>
       <div class="ins-grid" id="u-insights"></div>
       <div class="foot">grounded in local measurement first; vendor benchmarks are labelled as such &middot;
         third-party &ldquo;model X vs Y&rdquo; blog comparisons are deliberately not used as evidence</div>
     </section>
 
-    <section class="view" id="v-sessions" hidden>
+    <section class="view" id="v-sessions" role="tabpanel" aria-labelledby="usage-tab-sessions" hidden>
       <div class="note"><span class="i">&#8505;</span><span>Grouped by project, aggregate first.
         Expand a project to see its sessions. Open a row&rsquo;s chevron for execution host, independently evidenced provider, model, and usage details; click <b>&#9707;</b> to read its transcript. &ldquo;Not recorded&rdquo; means the source did not establish that fact.</span></div>
       <div class="ptree" id="u-tree"></div>
       <div class="foot">durations are session span (first&rarr;last event), not exclusive wall-clock</div>
     </section>
 
-    <section class="view" id="v-transcript" hidden>
+    <section class="view" id="v-models" role="tabpanel" aria-labelledby="usage-tab-models" hidden>
+      <div class="note"><span class="i">&#8505;</span><span>This is a <b>read-only evidence ledger</b>.
+        Configured, effective, observed, discoverable, entitled, policy, and routability are independent facts.
+        Unknown stays unknown; refresh is the only operation that contacts model sources.</span></div>
+      <div class="mli-attention" id="mli-attention"></div>
+      <section class="strip mli-ledger">
+        <div class="sh"><h2>host inventory</h2><span class="n mono" id="mli-asof"></span></div>
+        <div class="mli-table-wrap"><table class="mli-table">
+          <thead><tr><th>Host / model</th><th>Configured</th><th>Effective</th><th>Observed</th><th>Discoverable</th><th>Entitled</th><th>Policy</th><th>Routable</th><th>Lifecycle</th></tr></thead>
+          <tbody id="mli-models"></tbody>
+        </table></div>
+      </section>
+      <div class="two">
+        <section class="strip"><div class="sh"><h2>change history</h2><span class="n mono" id="mli-history-note"></span></div><div id="mli-history"></div></section>
+        <section class="strip"><div class="sh"><h2>consumers</h2><span class="n mono">configured / reported evidence</span></div><div id="mli-consumers"></div></section>
+      </div>
+      <section class="strip"><div class="sh"><h2>swap impact</h2><span class="n mono">read-only canonical-policy preview</span></div><div id="mli-impact"></div></section>
+      <section class="strip"><div class="sh"><h2>evidence sources</h2><span class="n mono">private local cache</span></div><div class="mli-sources" id="mli-sources"></div></section>
+      <div class="foot">swap analysis is available with <b>ak models plan</b> &middot; the dashboard never changes a route</div>
+    </section>
+
+    <section class="view" id="v-transcript" role="tabpanel" aria-labelledby="usage-tab-transcript" hidden>
       <div class="tcrumb" id="u-crumb"></div>
       <section class="strip" id="u-turns"></section>
       <div class="foot">secret-shaped strings are masked server-side &mdash; the original never reaches this page &middot; no export button by design</div>

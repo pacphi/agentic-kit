@@ -445,6 +445,37 @@ body.gated .band,body.gated .tabbar,body.gated main{display:none}
 .chipf:disabled{opacity:.5; cursor:not-allowed}
 .view[hidden]{display:none}
 
+/* Model lifecycle intelligence: an evidence ledger, intentionally denser than
+   the Usage charts because each column is an independent provenance claim. */
+.mli-summary{display:flex;align-items:center;justify-content:space-between;gap:16px;margin:12px 0 18px;
+  padding:13px 15px;border:1px solid var(--line);border-radius:var(--r);background:var(--panel);
+  color:var(--ink);text-decoration:none;box-shadow:var(--shadow)}
+.mli-summary:hover{border-color:color-mix(in srgb,var(--accent) 45%,var(--line))}
+.mli-summary:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.mli-summary span:first-child{display:flex;flex-direction:column;gap:3px}.mli-summary small{color:var(--ink-2)}
+.mli-attention{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:8px;margin-bottom:16px}
+.mli-alert{padding:10px 12px;border-left:3px solid var(--warn);border-radius:0 var(--r-sm) var(--r-sm) 0;
+  background:color-mix(in srgb,var(--warn) 9%,var(--panel));font-size:12px;color:var(--ink-2)}
+.mli-alert[data-level="fail"]{border-left-color:var(--fail);background:color-mix(in srgb,var(--fail) 8%,var(--panel))}
+.mli-table-wrap{overflow-x:auto}.mli-table{width:100%;border-collapse:collapse;min-width:920px;font-size:11.5px}
+.mli-table th{text-align:left;padding:0 9px 9px;color:var(--ink-dim);font-size:9.5px;text-transform:uppercase;
+  letter-spacing:.06em;border-bottom:1px solid var(--line)}
+.mli-table td{padding:10px 9px;border-bottom:1px solid var(--line);vertical-align:middle}
+.mli-table tbody tr:last-child td{border-bottom:0}.mli-id{display:flex;flex-direction:column;gap:2px}
+.mli-id b{font-size:12px}.mli-id small{color:var(--ink-dim);font-family:var(--mono)}
+.mli-state{display:inline-flex;align-items:center;gap:5px;white-space:nowrap;color:var(--ink-dim)}
+.mli-state::before{content:"?";display:grid;place-items:center;width:15px;height:15px;border-radius:50%;
+  background:var(--panel-2);font:700 9px var(--mono)}
+.mli-state[data-state="yes"]{color:var(--ok)}.mli-state[data-state="yes"]::before{content:"✓";background:color-mix(in srgb,var(--ok) 13%,var(--panel))}
+.mli-state[data-state="no"]{color:var(--fail)}.mli-state[data-state="no"]::before{content:"×";background:color-mix(in srgb,var(--fail) 12%,var(--panel))}
+.mli-list{display:grid;gap:8px}.mli-row{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;
+  padding:8px 0;border-bottom:1px solid var(--line);font-size:12px}.mli-row:last-child{border-bottom:0}
+.mli-row small{color:var(--ink-dim);text-align:right}.mli-sources{display:flex;gap:8px;flex-wrap:wrap}
+.mli-source{padding:7px 10px;border:1px solid var(--line);border-radius:999px;font:11px var(--mono);color:var(--ink-2)}
+.mli-source[data-status="complete"]{border-color:color-mix(in srgb,var(--ok) 35%,var(--line))}
+.mli-source:not([data-status="complete"]){border-color:color-mix(in srgb,var(--warn) 45%,var(--line))}
+@media(max-width:720px){.mli-summary{align-items:flex-start}.mli-attention{grid-template-columns:1fr}}
+
 /* hero KPIs */
 .hero{display:grid; gap:12px; grid-template-columns:repeat(auto-fit,minmax(168px,1fr)); margin-bottom:14px}
 .kpi{background:var(--panel); border:1px solid var(--line); border-radius:var(--r); padding:15px 16px; box-shadow:var(--shadow)}

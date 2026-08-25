@@ -102,7 +102,7 @@ export const JS = `
   var OVERVIEW_VIEWS=["summary","hosts","providers","runtime","intel"];
   var SYSTEM_VIEWS=["summary","advisory","sessions","storage","runtime","catalog","projects"];
   var ABOUT_SECTIONS=["hosts","engine","quality","kit","configured"];
-  var VIEWS=["score","limits","findings","sessions","transcript"];
+  var VIEWS=["score","limits","findings","sessions","models","transcript"];
   var CAT=${CAT_JS};
   ${catOf.toString()}
 
@@ -776,6 +776,7 @@ export const JS = `
     renderHistory(buildHistoryView(data));
     renderRouting(data.routing);
     renderModels(data.routing);
+    renderModelSummary(data.rows||[]);
     positionThumb(); // badges can change segment widths
   }
 
@@ -922,7 +923,10 @@ export const JS = `
     var btn=document.getElementById("poll-now");
     if(btn)btn.classList.add("spin");
     var jobs=[pollStatus()];
-    if(activeTab==="usage")jobs.push(loadUsage(true));
+    if(activeTab==="usage"){
+      jobs.push(loadUsage(true));
+      if(usageView==="models")jobs.push(loadModelLifecycle(true));
+    }
     // The Runtime view is a live census — processes, CPU, RSS, daemon ages —
     // and it used to load ONCE when the System tab was first opened, so its
     // "live" figures could sit unchanged for an entire session while the
@@ -999,6 +1003,7 @@ export const JS = `
 
   // ══ Usage tab ══════════════════════════════════════════════════════════════
   var USAGE=null, usageLoaded=false, usageBusy=false, TRANSCRIPT=null;
+  var MODELS=null,modelsBusy=false;
 
   function fmtUsd(n){
     n=Number(n)||0;
@@ -1112,13 +1117,22 @@ export const JS = `
       .then(function(d){TRANSCRIPT=d&&!d.error?{id:id,meta:d.meta,turns:d.turns||[]}:{id:id,error:(d&&d.error)||"unreadable"};});
   }
 
+  function loadModelLifecycle(force){
+    if(modelsBusy||(!force&&MODELS))return Promise.resolve();
+    modelsBusy=true;
+    return fetch("/api/models",{cache:"no-store",headers:authHeaders()})
+      .then(function(r){return r.json();}).then(function(d){MODELS=d;})
+      .catch(function(){MODELS={error:"model inventory unavailable"};})
+      .then(function(){modelsBusy=false;renderModelLifecycle();});
+  }
+
   function setUsageView(v,session){
     usageView=v;
     if(session!==undefined)usageSession=session;
-    var headings={score:["Usage scorecard","Token consumption, API-equivalent cost, efficiency, and trends."],limits:["Provider limits","Current provider windows, reset timing, and available capacity."],findings:["Usage findings","Actionable anomalies, efficiency opportunities, and evidence-backed recommendations."],sessions:["Session usage","Browse retained sessions by project, category, duration, tokens, and cost."],transcript:["Transcript detail","Inspect the selected session's locally retained, server-masked evidence."]},heading=headings[v]||headings.score;
+    var headings={score:["Usage scorecard","Token consumption, API-equivalent cost, efficiency, and trends."],limits:["Provider limits","Current provider windows, reset timing, and available capacity."],findings:["Usage findings","Actionable anomalies, efficiency opportunities, and evidence-backed recommendations."],sessions:["Session usage","Browse retained sessions by project, category, duration, tokens, and cost."],models:["Model lifecycle","Host-scoped inventory, change history, consumers, and evidence-backed swap impact."],transcript:["Transcript detail","Inspect the selected session's locally retained, server-masked evidence."]},heading=headings[v]||headings.score;
     document.getElementById("usage-view-title").textContent=heading[0];document.getElementById("usage-view-description").textContent=heading[1];
     var btns=document.querySelectorAll("#usage-seg [data-view]");
-    for(var i=0;i<btns.length;i++)btns[i].setAttribute("aria-selected",btns[i].getAttribute("data-view")===v?"true":"false");
+    for(var i=0;i<btns.length;i++){var on=btns[i].getAttribute("data-view")===v;btns[i].setAttribute("aria-selected",on?"true":"false");btns[i].tabIndex=on?0:-1;}
     for(var j=0;j<VIEWS.length;j++){
       var el=document.getElementById("v-"+VIEWS[j]);
       if(el)el.hidden=(VIEWS[j]!==v);
@@ -1130,6 +1144,8 @@ export const JS = `
     // Limits is LAZY like the tab itself: the Codex side may spawn one vendor
     // subprocess server-side, so it runs when the view is opened, not on poll.
     if(v==="limits"&&!LIMITS)loadLimits();
+    if(v==="models")loadModelLifecycle();
+    var days=document.getElementById("usage-days");if(days)days.hidden=(v==="models"||v==="transcript");
   }
 
   // Explicit bridge from Observability metadata to the separately fetched,
@@ -1727,6 +1743,49 @@ export const JS = `
     }).join(""):'<div class="empty">this session has no readable turns.</div>';
   }
 
+  function renderModelSummary(rows){
+    var row=(rows||[]).find(function(value){return value&&value.subsystem==="models";});
+    var copy=document.getElementById("mli-summary-copy"),state=document.getElementById("mli-summary-state");
+    if(!copy||!state)return;
+    var level=row&&row.level||"warn";
+    copy.textContent=row&&row.message||"No cached inventory yet";
+    state.setAttribute("data-level",level);
+    state.innerHTML='<span class="dot" data-level="'+esc(level)+'"></span>'+esc(level==="ok"?"current":level==="fail"?"attention":"review");
+  }
+
+  function mliState(model,name){
+    var value=model&&model.dimensions&&model.dimensions[name]&&model.dimensions[name].value;
+    var state=value===true?"yes":value===false?"no":"unknown";
+    return '<span class="mli-state" data-state="'+state+'">'+(state==="yes"?"yes":state==="no"?"no":"unknown")+"</span>";
+  }
+
+  function renderModelLifecycle(){
+    if(!MODELS)return;
+    var empty=MODELS.error||MODELS.status==="empty"||!MODELS.snapshot;
+    var snap=MODELS.snapshot||{},models=snap.models||[],attention=snap.attention||[],bindings=snap.bindings||[];
+    var badge=document.getElementById("mli-attention-n");
+    if(badge){badge.hidden=!attention.length;badge.textContent=attention.length?String(attention.length):"";}
+    document.getElementById("mli-asof").textContent=empty?"not captured":("captured "+String(snap.capturedAt||"").replace("T"," ").replace(".000Z","Z"));
+    document.getElementById("mli-attention").innerHTML=empty
+      ?'<div class="empty">'+esc(MODELS.error||"No model inventory yet. Run ak models refresh explicitly.")+"</div>"
+      :attention.map(function(item){return '<div class="mli-alert" data-level="'+esc(item.severity||"warn")+'"><b>'+esc(item.kind)+"</b> · "+esc(item.reason)+"</div>";}).join("");
+    document.getElementById("mli-models").innerHTML=models.map(function(model){
+      var key=model.key||{},life=model.lifecycle||{};
+      return '<tr><td><span class="mli-id"><b>'+esc(key.modelId||"unknown")+'</b><small>'+esc(key.host||"unknown")+(key.provider?" / "+esc(key.provider):"")+"</small></span></td>"
+        +"<td>"+mliState(model,"configured")+"</td><td>"+mliState(model,"effective")+"</td><td>"+mliState(model,"observed")
+        +"</td><td>"+mliState(model,"discoverable")+"</td><td>"+mliState(model,"entitled")+"</td><td>"+mliState(model,"policyAllowed")
+        +"</td><td>"+mliState(model,"routable")+'</td><td><span class="mono">'+esc(life.state||"unknown")+(life.replacement?" → "+esc(life.replacement):"")+"</span></td></tr>";
+    }).join("")||'<tr><td colspan="9"><div class="empty">No model records in this snapshot.</div></td></tr>';
+    var changes=snap.changes||[];
+    document.getElementById("mli-history-note").textContent=(MODELS.history||[]).length+" retained snapshot"+((MODELS.history||[]).length===1?"":"s");
+    document.getElementById("mli-history").innerHTML='<div class="mli-list">'+(changes.map(function(change){return '<div class="mli-row"><span><b>'+esc(change.kind)+'</b><br><small>'+esc(change.subject)+"</small></span><small>"+esc(change.provisional?"provisional":"established")+"</small></div>";}).join("")||'<div class="empty">No same-scope lifecycle changes.</div>')+"</div>";
+    document.getElementById("mli-consumers").innerHTML='<div class="mli-list">'+(bindings.map(function(binding){return '<div class="mli-row"><span><b>'+esc(binding.consumer)+'</b><br><small>'+esc(binding.activity||binding.host||binding.provider||"consumer")+'</small></span><small>'+esc(binding.consumerState)+" · "+esc(binding.configured||"model not pinned")+"</small></div>";}).join("")||'<div class="empty">No configured model consumers.</div>')+"</div>";
+    document.getElementById("mli-impact").innerHTML=bindings.length
+      ?'<div class="note"><span class="i">→</span><span><b>'+bindings.length+' consumer'+(bindings.length===1?"":"s")+'</b> may be affected by a concrete model swap. Run <span class="mono">ak models plan --activity ACTIVITY --to HOST:MODEL</span> for evidence-backed compatibility and a copyable action.</span></div>'
+      :'<div class="empty">No bound consumers to assess. A plan will remain read-only and report the missing binding.</div>';
+    document.getElementById("mli-sources").innerHTML=(snap.sources||[]).map(function(source){return '<span class="mli-source" data-status="'+esc(source.status)+'">'+esc(source.id)+" · "+esc(source.status)+"</span>";}).join("")||'<div class="empty">No source evidence.</div>';
+  }
+
   function renderUsage(){
     if(!USAGE)return;
     if(USAGE.error){
@@ -1748,6 +1807,8 @@ export const JS = `
       if(b)setUsageView(b.getAttribute("data-view"));
     });
     if(seg)seg.addEventListener("keydown",function(e){if(!/^(ArrowLeft|ArrowRight|Home|End)$/.test(e.key))return;var i=VIEWS.indexOf(usageView);i=e.key==="Home"?0:e.key==="End"?VIEWS.length-1:(i+(e.key==="ArrowRight"?1:VIEWS.length-1))%VIEWS.length;setUsageView(VIEWS[i]);var b=seg.querySelector('[data-view="'+VIEWS[i]+'"]');if(b)b.focus();e.preventDefault();});
+    var summary=document.getElementById("mli-summary");
+    if(summary)summary.addEventListener("click",function(e){e.preventDefault();setTab("usage");setUsageView("models");});
     var chips=document.getElementById("usage-days");
     if(chips)chips.addEventListener("click",function(e){
       var b=e.target.closest?e.target.closest("[data-days]"):null;
