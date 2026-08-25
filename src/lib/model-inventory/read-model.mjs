@@ -89,6 +89,18 @@ function privateLabel(kind, value, key) {
   return `${kind}-${digest}`;
 }
 
+function privateModelName(host) {
+  if (host === 'opencode') return 'Custom OpenCode deployment';
+  if (host === 'codex') return 'Private Codex model';
+  if (host === 'claude') return 'Private Claude model';
+  if (host === 'ollama') return 'Private local model';
+  return 'Private model';
+}
+
+function privateAccessPath(host) {
+  return host === 'opencode' ? 'Custom OpenCode access path' : 'Private access path';
+}
+
 const publicHost = (value, key) => PUBLIC_HOSTS.has(value) ? value : privateLabel('host', value, key);
 const publicActivity = (value, key) => value == null ? null
   : PUBLIC_ACTIVITIES.has(value) ? value : privateLabel('activity', value, key);
@@ -258,7 +270,9 @@ function sanitizeModel(model, key, publicModels = new Map()) {
       digest: privateLabel('digest', model.key.digest, key),
     },
     identity: privateLabel('identity', model.identity, key),
-    displayName: publicIdentity?.humanName ?? modelLabel,
+    // Keyed identifiers stay in the payload as opaque join keys only. Normal
+    // presentation gets an honest semantic label rather than a hash-shaped UI.
+    displayName: publicIdentity?.humanName ?? privateModelName(model.key.host),
     humanName: publicIdentity?.humanName ?? null,
     host: publicHost(model.key.host, key),
     servingProvider: publicIdentity?.servingProvider ?? null,
@@ -335,7 +349,13 @@ function consumerLabel(value, key) {
   return `${family} · ${privateLabel('binding', text, key)}`;
 }
 
-function sanitizeBinding(binding, key) {
+function bindingRole(consumer) {
+  const route = /^route:[^:]+(?::escalation:(\d+))?$/.exec(consumer);
+  if (!route) return 'Configured consumer';
+  return route[1] == null ? 'primary' : `fallback ${Number(route[1]) + 1}`;
+}
+
+function sanitizeBinding(binding, key, linkedModel) {
   return {
     ...binding,
     id: privateLabel('binding', binding.id, key),
@@ -346,6 +366,15 @@ function sanitizeBinding(binding, key) {
     configured: privateLabel('model', binding.configured, key),
     effective: privateLabel('model', binding.effective, key),
     evidenceRefs: (binding.evidenceRefs ?? []).map((ref) => privateLabel('evidence', ref, key)),
+    modelName: linkedModel?.displayName ?? privateModelName(binding.host),
+    selector: linkedModel?.selector ?? null,
+    accessPath: linkedModel?.servingProvider ?? privateAccessPath(binding.host),
+    role: bindingRole(binding.consumer),
+    lifecycle: linkedModel?.lifecycle?.state ?? 'unknown',
+    capabilities: linkedModel?.capabilities ?? {},
+    pricing: linkedModel?.pricing ?? null,
+    lastUsed: linkedModel?.evidence?.filter((entry) => entry.field === 'dimensions.observed')
+      .map((entry) => entry.capturedAt).sort().at(-1) ?? null,
   };
 }
 
@@ -402,7 +431,11 @@ export function createDashboardModelReadModel(snapshotValue, options = {}) {
   }
   for (const indexKey of ambiguousPublicModels) publicModels.delete(indexKey);
   const models = exact.models.map((model) => sanitizeModel(model, key, publicModels));
-  const bindings = exact.bindings.map((binding) => sanitizeBinding(binding, key));
+  const bindings = exact.bindings.map((binding) => {
+    const index = exact.models.findIndex((model) => model.key.host === binding.host
+      && [binding.effective, binding.configured].includes(model.key.modelId));
+    return sanitizeBinding(binding, key, index < 0 ? null : models[index]);
+  });
   const changes = exact.changes.map((change) => sanitizeChange(change, key));
   const modelByIdentity = new Map(exact.models.map((model, index) => [model.identity, models[index]]));
   const bindingById = new Map(exact.bindings.map((binding, index) => [binding.id, bindings[index]]));
@@ -415,7 +448,7 @@ export function createDashboardModelReadModel(snapshotValue, options = {}) {
     if (item.kind === 'migration') {
       const model = modelByIdentity.get(item.subject);
       return { ...item, subject: model?.identity ?? privateLabel('identity', item.subject, key),
-        reason: `${model?.lifecycle.state ?? 'unknown'} → ${model?.lifecycle.replacement ?? 'private target'}` };
+        reason: `${model?.lifecycle.state ?? 'unknown'} → ${model?.lifecycle.replacementName ?? 'private replacement'}` };
     }
     if (item.kind === 'consumer') {
       return { ...item, subject: bindingById.get(item.subject)?.id ?? privateLabel('binding', item.subject, key) };

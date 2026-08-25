@@ -165,12 +165,12 @@ Open `ak dashboard`, then choose **Usage → Models**. The view includes:
 - read-only swap-impact guidance; and
 - evidence source status and capture time.
 
-The host inventory loads only when Models opens. It first fetches the small summary and then the
-first 50 relevant rows; catalogue-only rows load in explicit pages. Search and host, serving
-provider, publisher, relevance, lifecycle, and evidence filters reset pagination. Every column
-header sorts ascending and descending with unknown values last. The table is height-bounded,
-scrolls internally in both axes, keeps its header sticky, and retains an explicit **Load 50 more**
-control.
+The Models view loads only when it opens. It leads with **Your routes** — the configured primary and
+fallback paths — and keeps the catalogue explorer collapsed until requested. The explorer first
+fetches the small summary and then the first 50 relevant rows; catalogue-only rows load in explicit
+pages. Search, access host, access path, model maker, view, lifecycle, and evidence filters reset
+pagination. Every sortable catalogue column keeps unknown values last, and its bounded table
+scrolls internally with a sticky header and an explicit **Load 50 more** control.
 
 Source-proven public catalogue records show a human name, host, publisher when proven, serving
 provider when known, exact public selector, and trusted documentation/catalogue links. Codex cache
@@ -181,8 +181,10 @@ Models.dev catalogue; provider syntax or verbose metadata alone is not proof. Th
 link remains generic unless that source supplies an exact canonical page. Hugging Face and Ollama
 links appear only when source metadata verifies the exact repository/library identity. Custom
 providers, private deployments, local tags, observed-only ids, configured variants, digests,
-aliases, bindings, scopes, history, and evidence ids remain stable keyed pseudonyms. The browser
-never derives provider or publisher from a name and never invents an external link.
+aliases, bindings, scopes, history, and evidence ids never appear as visible keyed pseudonyms. The
+browser uses honest semantic labels such as **Private Codex model** or **Custom OpenCode deployment**;
+keyed values remain hidden transport joins only. The browser never derives provider or publisher from
+a name and never invents an external link.
 
 An `unknown` cell explains which evidence is absent. A local refresh now resolves OpenCode's
 effective configuration, removing unknowns caused only by ignored global, JSONC, agent, or command

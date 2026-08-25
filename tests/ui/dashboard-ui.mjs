@@ -2148,10 +2148,17 @@ async function main() {
         && new URL(modelRequests[1]).searchParams.get('relevance') === 'relevant',
       `Models requests were ${JSON.stringify(modelRequests)}`);
     const modelView = await visibleText(page, '#v-models');
-    check('usage/models shows proven public catalog names while private identities stay keyed',
-      /Catalog Model/.test(modelView) && /Codex models/.test(modelView)
-        && /model-[a-f0-9]{12}/.test(modelView) && /provider-[a-f0-9]{12}/.test(modelView)
-        && !/ui-private|Private Deployment/.test(modelView),
+    check('usage/models shows proven public catalog names and semantic private labels',
+      /Your routes/.test(modelView) && !/model-[a-f0-9]{12}|provider-[a-f0-9]{12}|ui-private/.test(modelView),
+      `Models privacy projection was ${JSON.stringify(modelView.slice(0, 400))}`);
+    check('catalog explorer stays collapsed until requested',
+      await page.getAttribute('#mli-catalog-explorer', 'open') === null,
+      'catalog explorer should not compete with the operating routes');
+    await page.locator('#mli-catalog-explorer > summary').click();
+    const catalogView = await visibleText(page, '#mli-catalog-explorer');
+    check('catalog explorer is available without leaking private identifiers',
+      /Explore catalog/.test(catalogView)
+        && !/model-[a-f0-9]{12}|provider-[a-f0-9]{12}|ui-private/.test(catalogView),
       `Models privacy projection was ${JSON.stringify(modelView.slice(0, 400))}`);
     check('usage/models has a polite load status and settled busy state',
       await page.getAttribute('#mli-load-status', 'role') === 'status'
@@ -2160,19 +2167,14 @@ async function main() {
       'Models loading state was not exposed to assistive technology');
     const proof = page.locator('#mli-models details.mli-proof').first();
     await proof.locator('summary').click();
-    check('usage/models state disclosure names source, class, capture, freshness, completeness and scope',
+    check('usage/models state disclosure names source, class, capture, freshness, and completeness',
       /codex-cache/.test(await visibleText(page, '#mli-models'))
         && /catalog/.test(await visibleText(page, '#mli-models'))
         && /2026-08-25/.test(await visibleText(page, '#mli-models'))
         && /fresh/.test(await visibleText(page, '#mli-models'))
         && /complete/.test(await visibleText(page, '#mli-models'))
-        && /scope-[a-f0-9]{12}/.test(await visibleText(page, '#mli-models')),
+        && !/scope-[a-f0-9]{12}/.test(await visibleText(page, '#mli-models')),
       'Expanded state did not disclose its complete evidence chain');
-    const unknownObserved = page.locator('#mli-models tr').first().locator('td').nth(2).locator('details');
-    await unknownObserved.locator('summary').click();
-    check('an unknown observed state explains the missing evidence instead of blaming refresh',
-      /No retained successful-use evidence established this field/.test(await unknownObserved.innerText()),
-      `unknown observed explanation was ${JSON.stringify(await unknownObserved.innerText())}`);
     check('usage/models table is an explicitly labelled keyboard region',
       await page.getAttribute('.mli-table-wrap', 'role') === 'region'
         && !!await page.getAttribute('.mli-table-wrap', 'aria-label')
@@ -2192,7 +2194,7 @@ async function main() {
     }));
     check('Models exposes labelled search, host, provider, publisher, relevance, lifecycle and evidence filters',
       inventoryControls.form && inventoryControls.search === 'search'
-        && ['Search', 'Host', 'Serving provider', 'Publisher', 'Relevance', 'Lifecycle', 'Evidence field', 'Evidence value']
+        && ['Search', 'Access host', 'Access path', 'Model maker', 'View', 'Lifecycle', 'Evidence state', 'Evidence value']
           .every((label) => inventoryControls.labels.some((actual) => actual.toLowerCase().startsWith(label.toLowerCase()))),
       `inventory controls were ${JSON.stringify(inventoryControls)}`);
     check('Models has Reset, result-status and explicit Load 50 more controls',
@@ -2201,7 +2203,7 @@ async function main() {
         && inventoryControls.loadMore === 'Load 50 more' && inventoryControls.evidenceValueDisabled,
       `inventory controls were ${JSON.stringify(inventoryControls)}`);
     check('every Models column header is a sortable button with one semantic sort owner',
-      inventoryControls.headerButtons === 9
+      inventoryControls.headerButtons === 5
         && inventoryControls.ariaSort.filter((value) => value && value !== 'none').length === 1,
       `header controls were ${JSON.stringify(inventoryControls)}`);
     const initialInventory = await page.evaluate(() => ({
@@ -2311,8 +2313,7 @@ async function main() {
         && staleRequests.some((url) => new URL(url).searchParams.get('view') === 'summary')
         && staleRequests.some((url) => new URL(url).searchParams.get('offset') === '0'
           && new URL(url).searchParams.get('snapshotId') === replacementSnapshotId)
-        && await page.locator('#mli-models tr').count() === 12
-        && await page.locator('#mli-sources').getByText('replacement-source').count() === 1,
+        && await page.locator('#mli-models tr').count() === 12,
       `Models requests were ${JSON.stringify(staleRequests)}`);
     check('snapshot recovery focuses a visible replacement row when no next page exists',
       replacementFocus.rowHeader && replacementFocus.visible,

@@ -1,13 +1,13 @@
 # ADR-0032 — Model lifecycle intelligence from provenance-aware local evidence
 
-- **Status:** Implemented
+- **Status:** Accepted
 - **Date:** 2026-08-25
 - **Updated:** 2026-08-25
-- **Update note:** Implemented and release-proved the bounded inventory, descriptor-selected source
-  adapters, conservative snapshot diff, read-only CLI/status/Dashboard surfaces, consumer impact,
-  privacy-projected public catalogue identity, and lazy paginated inventory controls. Exact-head
-  project, feature-specific Agentic QE, privacy, security, accessibility, packaging, and
-  dependency-audit evidence is recorded below.
+- **Update note:** The bounded inventory, descriptor-selected source adapters, conservative snapshot
+  diff, and read-only CLI/status surfaces are implemented. The Dashboard is being reconciled with the
+  operator-first contract: routes lead, catalogue exploration is progressive, and private identities
+  use semantic labels rather than visible keyed references. Remaining source-enrichment and complete
+  route-detail evidence are implementation work, so the ADR is Accepted rather than release-proved.
 - **Deciders:** agentic-kit maintainers
 - **Related:** [issue #110](https://github.com/pacphi/agentic-kit/issues/110),
   [implementation PR #179](https://github.com/pacphi/agentic-kit/pull/179),

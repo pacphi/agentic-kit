@@ -513,48 +513,58 @@ export function renderPage({ name, version }) {
 
     <section class="view" id="v-models" role="tabpanel" aria-labelledby="usage-tab-models" aria-busy="false" hidden>
       <div class="sr-only" id="mli-load-status" role="status" aria-live="polite" aria-atomic="true"></div>
-      <div class="note"><span class="i">&#8505;</span><span>This is a <b>read-only evidence ledger</b>.
-        Configured, effective, observed, discoverable, entitled, policy, and routability are independent facts.
+      <div class="note"><span class="i">&#8505;</span><span>This is a <b>read-only operator view</b>.
+        It shows the routes you use first and keeps catalogue availability, account access, and observed use as separate evidence.
         Unknown stays unknown; refresh is the only operation that contacts model sources.</span></div>
       <div class="mli-attention" id="mli-attention" role="status" aria-live="polite"></div>
-      <section class="strip mli-ledger">
-        <div class="sh"><h2>host inventory</h2><span class="n mono" id="mli-asof"></span></div>
+      <section class="strip mli-routes-panel">
+        <div class="sh"><h2>Your routes</h2><span class="n mono" id="mli-asof"></span></div>
+        <p class="mli-copy">Configured routes and fallbacks. Catalogue-only models are kept below so they do not obscure what is operating now.</p>
+        <div class="mli-table-wrap" role="region" aria-label="Your model routes; scroll in either direction for every route" tabindex="0"><table class="mli-table mli-routes-table">
+          <caption class="sr-only">Configured model routes and their lifecycle evidence.</caption>
+          <thead><tr><th>Model</th><th>Access path</th><th>Used for</th><th>Last used</th><th>Capabilities</th><th>Cost</th><th>Lifecycle</th></tr></thead>
+          <tbody id="mli-routes"></tbody>
+        </table></div>
+      </section>
+      <details class="strip mli-ledger" id="mli-catalog-explorer">
+        <summary><span><b>Catalog explorer</b><small>Available and catalogue-only models are separate from your routes.</small></span><span class="n mono">Open when needed</span></summary>
+        <div class="mli-catalog-body">
+        <div class="sh"><h2>Explore catalog</h2><span class="n mono">public metadata is not entitlement</span></div>
         <form class="mli-filters" id="mli-filters" role="search">
           <label class="mli-filter mli-filter-search" for="mli-search"><span>Search</span><input id="mli-search" name="search" type="search" autocomplete="off" placeholder="Name or selector"></label>
-          <label class="mli-filter" for="mli-host"><span>Host</span><select id="mli-host" name="host"><option value="">All hosts</option></select></label>
-          <label class="mli-filter" for="mli-provider"><span>Serving provider</span><select id="mli-provider" name="provider"><option value="">All providers</option></select></label>
-          <label class="mli-filter" for="mli-publisher"><span>Publisher</span><select id="mli-publisher" name="publisher"><option value="">All publishers</option></select></label>
-          <label class="mli-filter" for="mli-relevance"><span>Relevance</span><select id="mli-relevance" name="relevance"><option value="relevant">Relevant</option><option value="all">All catalog</option></select></label>
+          <label class="mli-filter" for="mli-host"><span>Access host</span><select id="mli-host" name="host"><option value="">All hosts</option></select></label>
+          <label class="mli-filter" for="mli-provider"><span>Access path</span><select id="mli-provider" name="provider"><option value="">All access paths</option></select></label>
+          <label class="mli-filter" for="mli-publisher"><span>Model maker</span><select id="mli-publisher" name="publisher"><option value="">All makers</option></select></label>
+          <label class="mli-filter" for="mli-relevance"><span>View</span><select id="mli-relevance" name="relevance"><option value="relevant">In use</option><option value="catalog">Available</option><option value="all">All</option></select></label>
           <label class="mli-filter" for="mli-lifecycle"><span>Lifecycle</span><select id="mli-lifecycle" name="lifecycle"><option value="">Any lifecycle</option><option value="removed">Removed</option><option value="retiring">Retiring</option><option value="deprecated">Deprecated</option><option value="hidden">Hidden</option><option value="preview">Preview</option><option value="active">Active</option><option value="unknown">Unknown</option></select></label>
-          <label class="mli-filter" for="mli-evidence-field"><span>Evidence field</span><select id="mli-evidence-field" name="evidenceField"><option value="">Any field</option><option value="configured">Configured</option><option value="effective">Effective</option><option value="observed">Observed</option><option value="discoverable">Discoverable</option><option value="entitled">Entitled</option><option value="policyAllowed">Policy</option><option value="routable">Routable</option></select></label>
+          <label class="mli-filter" for="mli-evidence-field"><span>Evidence state</span><select id="mli-evidence-field" name="evidenceField"><option value="">Any evidence</option><option value="configured">Configured</option><option value="effective">Effective</option><option value="observed">Observed</option><option value="discoverable">Available</option><option value="entitled">Entitled</option><option value="policyAllowed">Policy</option><option value="routable">Routable</option></select></label>
           <label class="mli-filter" for="mli-evidence-value"><span>Evidence value</span><select id="mli-evidence-value" name="evidenceValue" disabled><option value="">Any value</option><option value="yes">Yes</option><option value="no">No</option><option value="unknown">Unknown</option></select></label>
           <button class="mli-reset" id="mli-reset" type="reset">Reset</button>
         </form>
         <div class="mli-results"><span id="mli-result-count" role="status" aria-live="polite" aria-atomic="true">Loading inventory…</span><span class="mono">unknown values sort last</span></div>
         <div class="mli-table-wrap" role="region" aria-label="Host model evidence table; scroll in either direction for every model and state" aria-describedby="mli-result-count" tabindex="0"><table class="mli-table">
-          <caption class="sr-only">Host-scoped model lifecycle facts. Expand a state to inspect its evidence.</caption>
+          <caption class="sr-only">Catalogue model lifecycle facts. Open Details to inspect evidence.</caption>
           <thead><tr>
-            <th scope="col" aria-sort="none"><button type="button" data-mli-sort="host">Host / model <span aria-hidden="true">↕</span></button></th>
+            <th scope="col" aria-sort="none"><button type="button" data-mli-sort="host">Model <span aria-hidden="true">↕</span></button></th>
             <th scope="col" aria-sort="none"><button type="button" data-mli-sort="configured">Configured <span aria-hidden="true">↕</span></button></th>
-            <th scope="col" aria-sort="none"><button type="button" data-mli-sort="effective">Effective <span aria-hidden="true">↕</span></button></th>
             <th scope="col" aria-sort="none"><button type="button" data-mli-sort="observed">Observed <span aria-hidden="true">↕</span></button></th>
-            <th scope="col" aria-sort="none"><button type="button" data-mli-sort="discoverable">Discoverable <span aria-hidden="true">↕</span></button></th>
-            <th scope="col" aria-sort="none"><button type="button" data-mli-sort="entitled">Entitled <span aria-hidden="true">↕</span></button></th>
-            <th scope="col" aria-sort="none"><button type="button" data-mli-sort="policyAllowed">Policy <span aria-hidden="true">↕</span></button></th>
-            <th scope="col" aria-sort="none"><button type="button" data-mli-sort="routable">Routable <span aria-hidden="true">↕</span></button></th>
+            <th scope="col" aria-sort="none"><button type="button" data-mli-sort="discoverable">Available <span aria-hidden="true">↕</span></button></th>
             <th scope="col" aria-sort="ascending"><button type="button" data-mli-sort="lifecycle">Lifecycle <span aria-hidden="true">↑</span></button></th>
+            <th scope="col">Details</th>
           </tr></thead>
           <tbody id="mli-models"></tbody>
         </table></div>
         <div class="mli-pager"><button class="mli-load-more" id="mli-load-more" type="button" hidden>Load 50 more</button></div>
+        </div>
       </section>
       <div class="two">
         <section class="strip"><div class="sh"><h2>change history</h2><span class="n mono" id="mli-history-note"></span></div><div id="mli-history"></div></section>
         <section class="strip"><div class="sh"><h2>consumers</h2><span class="n mono">configured / reported evidence</span></div><div id="mli-consumers"></div></section>
       </div>
       <section class="strip"><div class="sh"><h2>swap impact</h2><span class="n mono">read-only canonical-policy preview</span></div><div id="mli-impact"></div></section>
-      <section class="strip"><div class="sh"><h2>evidence sources</h2><span class="n mono">private local cache</span></div><div class="mli-sources" id="mli-sources"></div></section>
+      <section class="strip"><div class="sh"><h2>Source coverage</h2><span class="n mono">what each source can establish</span></div><div class="mli-sources" id="mli-sources"></div></section>
       <div class="foot">swap analysis is available with <b>ak models plan</b> &middot; the dashboard never changes a route</div>
+      <dialog class="mli-detail-dialog" id="mli-detail" aria-labelledby="mli-detail-title"><div class="mli-detail-head"><h2 id="mli-detail-title">Model details</h2><button type="button" id="mli-detail-close" aria-label="Close model details">Close</button></div><div id="mli-detail-body"></div></dialog>
     </section>
 
     <section class="view" id="v-transcript" role="tabpanel" aria-labelledby="usage-tab-transcript" hidden>

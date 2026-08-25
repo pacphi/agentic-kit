@@ -1122,8 +1122,7 @@ async function main() {
       for (const id of ['mli-filters', 'mli-search', 'mli-host', 'mli-provider', 'mli-publisher',
         'mli-relevance', 'mli-lifecycle', 'mli-evidence-field', 'mli-evidence-value',
         'mli-result-count', 'mli-reset', 'mli-load-more']) contains(r.body, 'id="' + id + '"');
-      for (const field of ['host', 'configured', 'effective', 'observed', 'discoverable',
-        'entitled', 'policyAllowed', 'routable', 'lifecycle']) {
+      for (const field of ['host', 'configured', 'observed', 'discoverable', 'lifecycle']) {
         contains(r.body, 'data-mli-sort="' + field + '"');
       }
       contains(r.body, 'aria-sort="ascending"');

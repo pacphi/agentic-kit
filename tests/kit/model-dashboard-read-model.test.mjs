@@ -162,7 +162,7 @@ test('privacy projection exposes only evidence-backed public catalog identity an
     assert.equal(item.humanName, null);
     assert.equal(item.selector, null);
     assert.equal(item.servingProvider, null);
-    assert.match(item.displayName, /^model-[a-f0-9]{12}$/);
+    assert.match(item.displayName, /^(Private Codex model|Custom OpenCode deployment|Private Claude model)$/);
   }
 
   const datedInput = payload();
@@ -275,7 +275,7 @@ test('inventory mode defaults to relevant rows, pages at 100 max, and returns st
   assert.equal(result.snapshot.snapshotId.startsWith('snapshot-'), true);
   const names = result.inventory.items.map(({ displayName }) => displayName);
   assert.deepEqual(names.slice(0, 2), ['Claude Sonnet 4.6', 'GPT-5.6 Codex']);
-  assert.equal(names.slice(2).every((name) => /^model-[a-f0-9]{12}$/.test(name)), true);
+  assert.equal(names.slice(2).every((name) => /^Private (Codex|Claude|local) model$/.test(name)), true);
 });
 
 test('inventory filtering and sorting use only projected fields and keep unknown last both directions', () => {
