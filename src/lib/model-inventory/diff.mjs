@@ -1,0 +1,124 @@
+import { isCompleteStableSnapshot, normalizeSnapshot } from './contracts.mjs';
+
+function canonical(value) {
+  if (Array.isArray(value)) return value.map(canonical)
+    .sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)));
+  if (!value || typeof value !== 'object') return value;
+  return Object.fromEntries(Object.keys(value).sort().map((key) => [key, canonical(value[key])]));
+}
+
+const equal = (a, b) => JSON.stringify(canonical(a)) === JSON.stringify(canonical(b));
+const evidenceRefs = (model, prefix) => model.evidence
+  .filter((entry) => entry.field === prefix || entry.field.startsWith(`${prefix}.`))
+  .map(({ id }) => id);
+
+function change(kind, model, before, after, {
+  severity = 'info', field = kind, provisional = false,
+} = {}) {
+  return {
+    kind,
+    subject: model.identity,
+    before: structuredClone(before),
+    after: structuredClone(after),
+    severity,
+    provisional,
+    evidenceRefs: evidenceRefs(model, field),
+  };
+}
+
+function aliasTargets(model) {
+  return Object.fromEntries(model.aliases.map(({ name, resolvesTo }) => [name, resolvesTo]));
+}
+
+function fieldChanges(before, after, provisional) {
+  const out = [];
+  const oldAliases = aliasTargets(before);
+  const newAliases = aliasTargets(after);
+  for (const name of new Set([...Object.keys(oldAliases), ...Object.keys(newAliases)])) {
+    if (oldAliases[name] !== newAliases[name]) {
+      out.push(change('alias-target-changed', after,
+        { name, resolvesTo: oldAliases[name] ?? null },
+        { name, resolvesTo: newAliases[name] ?? null },
+        { severity: 'warn', field: 'aliases', provisional }));
+    }
+  }
+  if (!equal(before.lifecycle, after.lifecycle)) {
+    out.push(change('lifecycle-changed', after, before.lifecycle, after.lifecycle,
+      { severity: after.lifecycle.state === 'removed' ? 'fail' : 'warn', field: 'lifecycle', provisional }));
+  }
+  if (before.visibility !== after.visibility) {
+    out.push(change('visibility-changed', after, before.visibility, after.visibility,
+      { severity: 'warn', field: 'visibility', provisional }));
+  }
+  const capabilityNames = new Set([
+    ...Object.keys(before.capabilities), ...Object.keys(after.capabilities),
+  ]);
+  for (const field of capabilityNames) {
+    if (!equal(before.capabilities[field], after.capabilities[field])) {
+      out.push(change('capability-changed', after,
+        { field, value: before.capabilities[field] ?? null },
+        { field, value: after.capabilities[field] ?? null },
+        { severity: 'warn', field: `capabilities.${field}`, provisional }));
+    }
+  }
+  return out;
+}
+
+export function diffSnapshots(beforeValue, afterValue, {
+  absenceCounts = {}, authoritativeRemovals = [], removalThreshold = 2,
+} = {}) {
+  const before = normalizeSnapshot(beforeValue);
+  const after = normalizeSnapshot(afterValue);
+  if (before.scope.fingerprint !== after.scope.fingerprint) {
+    return {
+      comparable: false,
+      reason: 'scope-changed',
+      beforeSnapshotId: before.snapshotId,
+      afterSnapshotId: after.snapshotId,
+      changes: [],
+      diagnostics: ['snapshot scopes differ; lifecycle comparison refused'],
+    };
+  }
+
+  const complete = isCompleteStableSnapshot(before) && isCompleteStableSnapshot(after);
+  const oldModels = new Map(before.models.map((model) => [model.identity, model]));
+  const newModels = new Map(after.models.map((model) => [model.identity, model]));
+  const changes = [];
+  for (const [identity, model] of newModels) {
+    const prior = oldModels.get(identity);
+    if (!prior) {
+      changes.push(change('model-added', model, null, model.key,
+        { field: 'key', provisional: !complete }));
+      continue;
+    }
+    changes.push(...fieldChanges(prior, model, !complete));
+  }
+  if (complete) {
+    const authoritative = new Set(authoritativeRemovals);
+    for (const [identity, model] of oldModels) {
+      if (!newModels.has(identity)) {
+        const absenceCount = Number(absenceCounts[identity] ?? 1);
+        const removed = authoritative.has(identity) || absenceCount >= removalThreshold;
+        changes.push(change(removed ? 'model-removed' : 'model-missing', model, model.key, null,
+          { severity: 'warn', field: 'key', provisional: !removed }));
+      }
+    }
+  }
+
+  const diagnostics = [];
+  if (!complete) diagnostics.push('incomplete or stale evidence suppressed model removals');
+  if (changes.some(({ kind }) => kind === 'model-missing')) {
+    diagnostics.push(`model absence is provisional until ${removalThreshold} complete same-scope snapshots`);
+  }
+  for (const source of after.sources.filter(({ status }) => status !== 'complete')) {
+    diagnostics.push(`${source.id}: ${source.status}`);
+  }
+  return {
+    comparable: true,
+    reason: null,
+    beforeSnapshotId: before.snapshotId,
+    afterSnapshotId: after.snapshotId,
+    changes,
+    diagnostics: [...new Set(diagnostics)],
+  };
+}
