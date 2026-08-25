@@ -1804,7 +1804,9 @@ export const JS = `
       :'<div class="empty">No bound consumers to assess. A plan will remain read-only and report the missing binding.</div>';
     document.getElementById("mli-sources").innerHTML=(snap.sources||[]).map(function(source){return '<span class="mli-source" data-status="'+esc(source.status)+'"><b>'+esc(source.id)+" · "+esc(source.status)
       +'</b><small>'+esc(source.capturedAt||"capture unknown")+' · '+esc(source.complete?"complete":"not complete")
-      +' · '+esc(source.scopeFingerprint||"scope unknown")+'</small></span>';}).join("")||'<div class="empty">No source evidence.</div>';
+      +' · '+esc(source.scopeFingerprint||"scope unknown")+'</small><small>'+esc(source.owner||"owner unknown")
+      +' · '+esc(source.ownerType||"type unknown")+' · '+esc(source.transport||"transport unknown")
+      +' · '+esc(source.mode||"mode unknown")+' / '+esc(source.network||"network unknown")+'</small></span>';}).join("")||'<div class="empty">No source evidence.</div>';
   }
 
   function renderUsage(){

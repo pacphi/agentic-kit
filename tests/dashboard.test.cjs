@@ -644,7 +644,8 @@ async function main() {
       scope: { fingerprint: 'scope:private-project', hosts: ['codex'], profileFingerprints: { codex: 'scope:private-profile' } },
       counts: { models: 1, configured: 1, observed: 1, migrations: 0, aliasChanges: 0, staleSources: 0, driftedConsumers: 0 },
       sources: [{ id: 'private-codex-cache', status: 'complete', complete: true,
-        capturedAt: '2026-08-25T13:00:00.000Z', scopeFingerprint: 'scope:private-project' }],
+        owner: 'private-owner', ownerType: 'host', transport: 'file', network: 'never', mode: 'local',
+        schema: 'private-schema', capturedAt: '2026-08-25T13:00:00.000Z', scopeFingerprint: 'scope:private-project' }],
       models: [{
         key: { host: 'codex', provider: 'private-provider', modelId: 'private-deployment',
           scopeId: 'scope:private-project', digest: 'private-digest' },
@@ -690,7 +691,8 @@ async function main() {
       assert(/^source-[a-f0-9]{12}$/.test(body.snapshot.models[0].evidence[0].source), 'evidence source must be pseudonymous');
       for (const secret of ['private-provider', 'private-deployment', 'Private Deployment', 'private-alias',
         'private-replacement', 'private-binding', 'private-evidence', 'private-reference', 'private-digest',
-        'private-basis', 'private-snapshot', 'private-project', 'private-profile', 'private diagnostic detail']) {
+        'private-basis', 'private-owner', 'private-schema', 'private-snapshot', 'private-project',
+        'private-profile', 'private diagnostic detail']) {
         assert(!r.body.includes(secret), 'Dashboard model payload leaked ' + secret);
       }
       assert(modelReads === 1, 'the provider is called exactly once for the explicit route');

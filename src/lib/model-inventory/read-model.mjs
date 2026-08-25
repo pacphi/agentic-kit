@@ -71,8 +71,9 @@ const PUBLIC_SOURCES = new Set([
 ]);
 const PUBLIC_SOURCE_SCHEMAS = new Set([
   'claude-settings-v1', 'codex-model-cache-v1', 'opencode-models-lines-v1',
-  'ollama-ls-v1', 'usage-models-v1',
+  'ollama-ls-v1', 'usage-models-v1', 'usage-index-v6',
 ]);
+const PUBLIC_SOURCE_OWNERS = new Set(['claude', 'codex', 'opencode', 'ollama', 'usage']);
 
 function dashboardKey(key) {
   if (typeof key !== 'string' || !/^[a-f0-9]{64}$/i.test(key)) {
@@ -93,6 +94,9 @@ const publicActivity = (value, key) => value == null ? null
 const publicSource = (value, key) => PUBLIC_SOURCES.has(value) ? value : privateLabel('source', value, key);
 const publicDiagnostic = (value, key) => /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(String(value ?? ''))
   ? value : privateLabel('diagnostic', value, key);
+const publicSchema = (value) => PUBLIC_SOURCE_SCHEMAS.has(value)
+  || /^codex-model-cache-v1@v?\d+(?:\.\d+){0,3}(?:-[a-z0-9.-]+)?$/i.test(String(value ?? ''))
+  ? value : null;
 
 function sanitizeVariant(value, key, field = '') {
   if (Array.isArray(value)) return value.map((entry) => sanitizeVariant(entry, key, field));
@@ -232,10 +236,9 @@ export function createDashboardModelReadModel(snapshotValue, options = {}) {
     ...source,
     id: publicSource(source.id, key),
     owner: source.owner == null ? null
-      : PUBLIC_HOSTS.has(source.owner) ? source.owner : privateLabel('owner', source.owner, key),
-    schema: PUBLIC_SOURCE_SCHEMAS.has(source.schema) ? source.schema : null,
-    schemaVersion: typeof source.schemaVersion === 'string' && PUBLIC_SOURCE_SCHEMAS.has(source.schemaVersion)
-      ? source.schemaVersion : null,
+      : PUBLIC_SOURCE_OWNERS.has(source.owner) ? source.owner : privateLabel('owner', source.owner, key),
+    schema: publicSchema(source.schema),
+    schemaVersion: typeof source.schemaVersion === 'string' ? publicSchema(source.schemaVersion) : null,
     sourceVersion: typeof source.sourceVersion === 'string' && /^v?\d+(?:\.\d+){0,3}$/.test(source.sourceVersion)
       ? source.sourceVersion : null,
     scopeFingerprint: privateLabel('scope', source.scopeFingerprint, key),

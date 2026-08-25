@@ -46,7 +46,9 @@ function fixture({ targetDimensions = {} } = {}) {
   return {
     schemaVersion: 1, snapshotId: 'snapshot-a', capturedAt: AT,
     scope: { fingerprint: 'scope-a', hosts: ['codex'] },
-    sources: [{ id: 'codex-cache', status: 'complete', capturedAt: AT, scopeFingerprint: 'scope-a' }],
+    sources: [{ id: 'codex-cache', owner: 'codex', ownerType: 'host', transport: 'file', network: 'never',
+      mode: 'local', schema: 'codex-model-cache-v1', status: 'complete', capturedAt: AT,
+      scopeFingerprint: 'scope-a' }],
     models: [oldModel, newModel],
     bindings: [
       {
@@ -153,6 +155,9 @@ test('Dashboard projection pseudonymizes identifiers while exact CLI evidence re
   assert.match(payload.snapshot.models[0].key.modelId, /^model-[a-f0-9]{12}$/);
   assert.equal(payload.snapshot.models[0].evidence[0].source, 'codex-cache');
   assert.equal(payload.snapshot.sources[0].id, 'codex-cache');
+  assert.deepEqual({ owner: payload.snapshot.sources[0].owner, mode: payload.snapshot.sources[0].mode,
+    schema: payload.snapshot.sources[0].schema },
+  { owner: 'codex', mode: 'local', schema: 'codex-model-cache-v1' });
   assert.match(payload.snapshot.models[0].key.digest, /^digest-[a-f0-9]{12}$/);
   assert.match(payload.snapshot.models[0].edges[0].from, /^model-[a-f0-9]{12}$/);
   assert.match(payload.snapshot.models[0].edges[0].evidenceRefs[0], /^evidence-[a-f0-9]{12}$/);
