@@ -1395,7 +1395,8 @@ export function startDashboard({
       try {
         const payload = await provideModels();
         if (!payload || payload.status === 'empty' || !payload.snapshot) {
-          sendJson(res, 200, payload);
+          const { createDashboardModelViewPayload } = await import('./model-inventory/read-model.mjs');
+          sendJson(res, 200, createDashboardModelViewPayload(payload, { query }));
           return;
         }
         const [{ readModelScopeKey }, { createDashboardModelViewPayload }] = await Promise.all([

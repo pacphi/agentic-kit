@@ -130,6 +130,19 @@ const TRUSTED_MODEL_LINK_HOSTS = new Set([
   'opencode.ai', 'openrouter.ai', 'platform.claude.com',
 ]);
 const PUBLIC_CATALOG_METADATA_SOURCES = new Set(['models.dev']);
+// Maintained from Anthropic's Models overview and Model deprecations tables.
+// IDs and pre-4.6 aliases are exact: the documented grammar is not publication proof.
+const OFFICIAL_CLAUDE_IDS = new Set([
+  'claude-fable-5', 'claude-mythos-5', 'claude-mythos-preview',
+  'claude-opus-5', 'claude-opus-4-8', 'claude-opus-4-7', 'claude-opus-4-6',
+  'claude-opus-4-5', 'claude-opus-4-5-20251101',
+  'claude-opus-4-1', 'claude-opus-4-1-20250805',
+  'claude-opus-4-0', 'claude-opus-4-20250514',
+  'claude-sonnet-5', 'claude-sonnet-4-6',
+  'claude-sonnet-4-5', 'claude-sonnet-4-5-20250929',
+  'claude-sonnet-4-0', 'claude-sonnet-4-20250514',
+  'claude-haiku-4-5', 'claude-haiku-4-5-20251001',
+]);
 
 function boundedPublicText(value, max = 256) {
   return typeof value === 'string' && value.length > 0 && value.length <= max
@@ -158,21 +171,6 @@ function trustedModelLinks(value) {
       return [{ kind, label, url: url.href }];
     } catch { return []; }
   });
-}
-
-function officialClaudeId(modelId) {
-  const match = /^claude-(haiku|sonnet|opus|fable|mythos)-(.+)$/.exec(modelId);
-  if (!match) return false;
-  const parts = match[2].split('-');
-  if (!/^\d{1,2}$/.test(parts[0])) return false;
-  if (parts.length === 1) return true;
-  if (!/^\d{1,2}$/.test(parts[1])) return false;
-  if (parts.length === 2) return true;
-  if (parts.length !== 3 || !/^\d{8}$/.test(parts[2])) return false;
-  const raw = parts[2];
-  const date = `${raw.slice(0, 4)}-${raw.slice(4, 6)}-${raw.slice(6, 8)}`;
-  const parsed = new Date(`${date}T00:00:00.000Z`);
-  return !Number.isNaN(parsed.valueOf()) && parsed.toISOString().slice(0, 10) === date;
 }
 
 function hasEvidence(model, predicate) {
@@ -213,7 +211,7 @@ function publicModelIdentity(model) {
       links: [{ kind: 'documentation', label: 'Codex models', url: 'https://developers.openai.com/codex/models/' }],
     };
   }
-  if (model.key.host === 'claude' && officialClaudeId(model.key.modelId)
+  if (model.key.host === 'claude' && OFFICIAL_CLAUDE_IDS.has(model.key.modelId)
     && hasEvidence(model, (entry) => entry.source === 'claude-config'
       && ['configured', 'first-party'].includes(entry.class))) {
     return {
@@ -448,22 +446,31 @@ export function createDashboardModelReadModel(snapshotValue, options = {}) {
  * @param {{key?: string}} [options]
  */
 export function createDashboardModelPayload(value, { key } = {}) {
+  if (!value || value.status === 'empty' || !value.snapshot) return immutable({
+    status: 'empty', snapshot: null, history: [], hint: 'ak models refresh',
+  });
   const privateKey = dashboardKey(key);
-  if (!value || value.status === 'empty' || !value.snapshot) return value;
   const changes = value.snapshot.changes ?? [];
   const snapshot = createDashboardModelReadModel(value.snapshot, { key, changes });
+  const timestamp = (entry) => {
+    if (typeof entry !== 'string') return null;
+    const parsed = Date.parse(entry);
+    return Number.isFinite(parsed) ? new Date(parsed).toISOString() : null;
+  };
   return immutable({
-    ...value,
-    snapshot,
-    history: (value.history ?? []).map((entry) => ({
-      ...entry, snapshotId: privateLabel('snapshot', entry.snapshotId, privateKey),
-    })),
+    status: ['cached', 'complete', 'partial', 'stale'].includes(value.status) ? value.status : 'cached',
+    snapshot, history: (Array.isArray(value.history) ? value.history : []).slice(0, 32)
+      .flatMap((entry) => {
+        const capturedAt = timestamp(entry?.capturedAt);
+        const snapshotId = privateLabel('snapshot', entry?.snapshotId, privateKey);
+        return capturedAt && snapshotId ? [{ snapshotId, capturedAt }] : [];
+      }),
     comparison: value.comparison ? {
-      ...value.comparison,
       baseline: privateLabel('snapshot', value.comparison.baseline, privateKey),
       latest: privateLabel('snapshot', value.comparison.latest, privateKey),
-      diagnostics: (value.comparison.diagnostics ?? [])
-        .map((item) => privateLabel('diagnostic', item, privateKey)),
+      comparable: value.comparison.comparable === true,
+      diagnostics: (Array.isArray(value.comparison.diagnostics) ? value.comparison.diagnostics : [])
+        .slice(0, 32).map((item) => privateLabel('diagnostic', item, privateKey)),
     } : undefined,
   });
 }

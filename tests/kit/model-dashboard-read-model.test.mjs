@@ -171,6 +171,18 @@ test('privacy projection exposes only evidence-backed public catalog identity an
   const dated = createDashboardModelPayload(datedInput, { key: KEY }).snapshot.models[5];
   assert.equal(dated.displayName, 'Claude Haiku 4.5 (2025-10-01)');
 
+  const legacyAliasInput = payload();
+  legacyAliasInput.snapshot.models[5].key.modelId = 'claude-opus-4-5';
+  legacyAliasInput.snapshot.models[5].displayName = 'claude-opus-4-5';
+  const legacyAlias = createDashboardModelPayload(legacyAliasInput, { key: KEY }).snapshot.models[5];
+  assert.deepEqual({
+    displayName: legacyAlias.displayName, selector: legacyAlias.selector,
+    privacyClass: legacyAlias.privacyClass,
+  }, {
+    displayName: 'Claude Opus 4.5', selector: 'claude-opus-4-5',
+    privacyClass: 'public-catalog',
+  });
+
   const gatewayInput = payload();
   gatewayInput.snapshot.models[5].key.provider = 'private-gateway';
   const gatewayOfficial = createDashboardModelPayload(gatewayInput, { key: KEY }).snapshot.models[5];
@@ -178,18 +190,57 @@ test('privacy projection exposes only evidence-backed public catalog identity an
   assert.equal(gatewayOfficial.servingProvider, null);
 
   const privateLookingOfficial = payload();
-  privateLookingOfficial.snapshot.models.push(model({
-    host: 'claude', provider: 'private-gateway', id: 'claude-sonnet-private-acme',
-    name: 'Claude Secret Acquisition', source: 'claude-config',
-    values: { configured: true, effective: true },
+  for (const id of [
+    'claude-sonnet-private-acme', 'claude-sonnet-42', 'claude-opus-99-99',
+    'claude-haiku-4-5-20991231',
+  ]) privateLookingOfficial.snapshot.models.push(model({
+    host: 'claude', provider: 'private-gateway', id,
+    name: `Secret ${id}`, source: 'claude-config', values: { configured: true, effective: true },
   }));
   privateLookingOfficial.snapshot.models[3].variant.configuredVariants = ['private-prod'];
   const privateProjection = createDashboardModelPayload(privateLookingOfficial, { key: KEY });
   const serializedPrivate = JSON.stringify(privateProjection);
-  for (const secret of ['claude-sonnet-private-acme', 'Claude Secret Acquisition', 'private-prod']) {
+  for (const secret of [
+    'claude-sonnet-private-acme', 'claude-sonnet-42', 'claude-opus-99-99',
+    'claude-haiku-4-5-20991231', 'private-prod',
+  ]) {
     assert.equal(serializedPrivate.includes(secret), false, secret);
   }
-  assert.equal(privateProjection.snapshot.models.at(-1).privacyClass, 'private');
+  assert.equal(privateProjection.snapshot.models.slice(-4)
+    .every(({ privacyClass }) => privacyClass === 'private'), true);
+});
+
+test('payload envelopes allowlist cached, history, comparison, and empty fields', () => {
+  const input = payload();
+  input.status = 'private-status-secret';
+  input.privateDebug = 'private-deployment';
+  input.history[0].privatePath = '/secret/history/path';
+  input.history.push({
+    snapshotId: 'snapshot-private-two', capturedAt: 'not-a-timestamp-secret',
+    rawIdentifier: 'history-private-identifier',
+  });
+  input.comparison.privateProvider = 'comparison-private-provider';
+  const result = createDashboardModelPayload(input, { key: KEY });
+  const wire = JSON.stringify(result);
+  for (const secret of [
+    'private-status-secret', 'private-deployment', '/secret/history/path', 'not-a-timestamp-secret',
+    'history-private-identifier', 'comparison-private-provider',
+  ]) assert.equal(wire.includes(secret), false, secret);
+  assert.deepEqual(Object.keys(result).sort(), ['comparison', 'history', 'snapshot', 'status']);
+  assert.equal(result.status, 'cached');
+  assert.deepEqual(Object.keys(result.history[0]).sort(), ['capturedAt', 'snapshotId']);
+  assert.deepEqual(Object.keys(result.comparison).sort(), [
+    'baseline', 'comparable', 'diagnostics', 'latest',
+  ]);
+  assert.equal(result.history.length, 1);
+
+  for (const empty of [
+    null,
+    { status: 'empty', snapshot: null, history: [], hint: 'private hint', privateDebug: 'secret' },
+    { status: 'cached', snapshot: null, history: [], privateDebug: 'secret' },
+  ]) assert.deepEqual(createDashboardModelPayload(empty), {
+    status: 'empty', snapshot: null, history: [], hint: 'ak models refresh',
+  });
 });
 
 test('summary mode omits only the large model inventory and reports inventory counts', () => {
@@ -321,6 +372,47 @@ test('authenticated /api/models exposes additive summary/inventory modes and gen
     assert.equal(stale.response.status, 409);
     assert.deepEqual(stale.body, { error: 'model inventory changed; retry' });
     assert.equal(reads, 4);
+  } finally {
+    await server.close();
+    fs.rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test('authenticated /api/models allowlists adversarial cached and empty envelopes', async () => {
+  const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-model-dashboard-private-envelope-'));
+  const cached = payload();
+  cached.privateDebug = 'http-private-deployment';
+  cached.history[0].privatePath = '/http/secret/history';
+  cached.comparison.privateProvider = 'http-private-provider';
+  let provided = cached;
+  const server = await startDashboard({
+    cwd, port: 0, fetchStatus: async () => ({ overall: 'ok', rows: [] }),
+    usage: {}, modelScopeKey: KEY, models: async () => provided,
+    discoverProjects: () => [], machineWideIntel: () => ({}),
+  });
+  const get = async () => {
+    const response = await fetch(`${server.url}api/models`, {
+      headers: { 'x-dash-token': server.token },
+    });
+    return { response, body: await response.json() };
+  };
+  try {
+    const full = await get();
+    assert.equal(full.response.status, 200);
+    const fullWire = JSON.stringify(full.body);
+    for (const secret of [
+      'http-private-deployment', '/http/secret/history', 'http-private-provider',
+    ]) assert.equal(fullWire.includes(secret), false, secret);
+
+    provided = {
+      status: 'empty', snapshot: null, history: [], hint: 'http-private-hint',
+      privateDebug: 'http-empty-private-deployment',
+    };
+    const empty = await get();
+    assert.equal(empty.response.status, 200);
+    assert.deepEqual(empty.body, {
+      status: 'empty', snapshot: null, history: [], hint: 'ak models refresh',
+    });
   } finally {
     await server.close();
     fs.rmSync(cwd, { recursive: true, force: true });
