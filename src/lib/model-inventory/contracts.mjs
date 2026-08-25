@@ -17,6 +17,10 @@ export const LIFECYCLE_STATES = Object.freeze([
 export const CONSUMER_STATES = Object.freeze([
   'configured', 'reported', 'runtime-proven', 'unknown',
 ]);
+export const MODEL_EDGE_KINDS = Object.freeze([
+  'resolves-to', 'first-party-migration', 'same-family-newer',
+  'mechanically-compatible', 'tier-up', 'tier-down', 'specialized-alternative',
+]);
 
 const plain = (value) => value !== null && typeof value === 'object' && !Array.isArray(value);
 const text = (value, field, { nullable = false, max = 512 } = {}) => {
@@ -44,12 +48,13 @@ const strings = (value, field) => {
   return [...new Set(value)];
 };
 
-export function modelIdentityKey({ host, provider = null, modelId, scopeId }) {
+export function modelIdentityKey({ host, provider = null, modelId, scopeId, digest = null }) {
   return [
     text(host, 'model.key.host', { max: 128 }),
     provider == null ? '' : text(provider, 'model.key.provider', { max: 256 }),
     text(modelId, 'model.key.modelId', { max: 256 }),
     text(scopeId, 'model.key.scopeId', { max: 256 }),
+    digest == null ? '' : text(digest, 'model.key.digest', { max: 256 }),
   ].map((part) => encodeURIComponent(part)).join('|');
 }
 
@@ -100,6 +105,39 @@ function normalizeAlias(value, index) {
   });
 }
 
+export function normalizeModelEdge(value, index = 0) {
+  if (!plain(value)) throw new TypeError(`edges[${index}] must be an object`);
+  return immutable({
+    kind: enumValue(value.kind, MODEL_EDGE_KINDS, `edges[${index}].kind`),
+    from: text(value.from, `edges[${index}].from`, { max: 512 }),
+    to: text(value.to, `edges[${index}].to`, { max: 512 }),
+    provenance: enumValue(value.provenance ?? 'unknown',
+      ['configured', 'first-party', 'observed', 'derived', 'unknown'], `edges[${index}].provenance`),
+    scopeFingerprint: text(value.scopeFingerprint, `edges[${index}].scopeFingerprint`, { max: 256 }),
+    evidenceRefs: strings(value.evidenceRefs, `edges[${index}].evidenceRefs`),
+  });
+}
+
+function normalizePricing(value) {
+  if (value == null) return null;
+  if (!plain(value)) throw new TypeError('model.pricing must be an object or null');
+  const amount = (name) => {
+    const entry = value[name];
+    if (entry == null) return null;
+    if (typeof entry !== 'number' || !Number.isFinite(entry) || entry < 0) {
+      throw new TypeError(`model.pricing.${name} must be a non-negative finite number or null`);
+    }
+    return entry;
+  };
+  return immutable({
+    basis: value.basis == null ? null : text(value.basis, 'model.pricing.basis', { max: 128 }),
+    input: amount('input'), output: amount('output'),
+    currency: value.currency == null ? null : text(value.currency, 'model.pricing.currency', { max: 16 }),
+    effectiveAt: iso(value.effectiveAt, 'model.pricing.effectiveAt'),
+    evidenceRefs: strings(value.evidenceRefs, 'model.pricing.evidenceRefs'),
+  });
+}
+
 export function normalizeModelRecord(value) {
   if (!plain(value)) throw new TypeError('model must be an object');
   if (!plain(value.key)) throw new TypeError('model.key must be an object');
@@ -109,6 +147,7 @@ export function normalizeModelRecord(value) {
       ? null : text(value.key.provider, 'model.key.provider', { max: 256 }),
     modelId: text(value.key.modelId, 'model.key.modelId', { max: 256 }),
     scopeId: text(value.key.scopeId, 'model.key.scopeId', { max: 256 }),
+    digest: value.key.digest == null ? null : text(value.key.digest, 'model.key.digest', { max: 256 }),
   };
   const evidence = (value.evidence ?? []).map(normalizeEvidence);
   const evidenceIds = new Set(evidence.map(({ id }) => id));
@@ -122,12 +161,24 @@ export function normalizeModelRecord(value) {
     }
   }
   const lifecycle = plain(value.lifecycle) ? value.lifecycle : {};
+  const aliases = (value.aliases ?? []).map(normalizeAlias);
+  const edges = (value.edges ?? []).map(normalizeModelEdge);
+  const pricing = normalizePricing(value.pricing);
+  for (const [field, refs] of [
+    ['lifecycle', lifecycle.evidenceRefs], ['pricing', pricing?.evidenceRefs],
+    ...aliases.map((alias, index) => [`aliases[${index}]`, alias.evidenceRefs]),
+    ...edges.map((edge, index) => [`edges[${index}]`, edge.evidenceRefs]),
+  ]) {
+    for (const ref of refs ?? []) {
+      if (!evidenceIds.has(ref)) throw new TypeError(`model.${field} references unknown evidence ${ref}`);
+    }
+  }
   return immutable({
     key: immutable(key),
     identity: modelIdentityKey(key),
     displayName: value.displayName == null ? key.modelId
       : text(value.displayName, 'model.displayName', { max: 256 }),
-    aliases: (value.aliases ?? []).map(normalizeAlias),
+    aliases,
     visibility: value.visibility == null ? 'unknown'
       : text(value.visibility, 'model.visibility', { max: 64 }),
     variant: immutable(structuredClone(plain(value.variant) ? value.variant : {})),
@@ -141,6 +192,8 @@ export function normalizeModelRecord(value) {
       evidenceRefs: strings(lifecycle.evidenceRefs, 'model.lifecycle.evidenceRefs'),
     }),
     capabilities: immutable(structuredClone(plain(value.capabilities) ? value.capabilities : {})),
+    pricing,
+    edges,
     dimensions: immutable(dimensions),
     evidence,
   });
@@ -174,12 +227,21 @@ export function normalizeSourceResult(value, index = 0) {
   const status = enumValue(value.status, SOURCE_STATUSES, `sources[${index}].status`);
   return immutable({
     id: text(value.id, `sources[${index}].id`, { max: 256 }),
+    owner: value.owner == null ? null : text(value.owner, `sources[${index}].owner`, { max: 128 }),
+    ownerType: value.ownerType == null ? null
+      : enumValue(value.ownerType, ['host', 'provider', 'usage'], `sources[${index}].ownerType`),
+    transport: value.transport == null ? null
+      : enumValue(value.transport, ['file', 'command', 'index'], `sources[${index}].transport`),
+    network: value.network == null ? null
+      : enumValue(value.network, ['never', 'local', 'explicit'], `sources[${index}].network`),
+    mode: enumValue(value.mode ?? 'local', ['local', 'online'], `sources[${index}].mode`),
     status,
     complete: status === 'complete' && value.complete !== false,
     capturedAt: iso(value.capturedAt, `sources[${index}].capturedAt`),
     sourceVersion: value.sourceVersion == null ? null
       : text(value.sourceVersion, `sources[${index}].sourceVersion`, { max: 256 }),
     schemaVersion: value.schemaVersion ?? null,
+    schema: value.schema == null ? null : text(value.schema, `sources[${index}].schema`, { max: 256 }),
     scopeFingerprint: value.scopeFingerprint == null ? null
       : text(value.scopeFingerprint, `sources[${index}].scopeFingerprint`, { max: 256 }),
     diagnostics: strings(value.diagnostics, `sources[${index}].diagnostics`),

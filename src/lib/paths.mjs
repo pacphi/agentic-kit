@@ -27,6 +27,12 @@ export const legacyKitConfigPath = () => path.join(legacyConfigDir(), 'kit.json'
 export const claudeDir = () => path.join(home, '.claude');
 export const claudeMdPath = () => path.join(claudeDir(), 'CLAUDE.md');
 export const claudeSettingsPath = () => path.join(claudeDir(), 'settings.json');
+/** Claude Code's machine-managed policy file, when the platform defines one. */
+export const claudeManagedSettingsPath = (platform = process.platform) => ({
+  darwin: '/Library/Application Support/ClaudeCode/managed-settings.json',
+  linux: '/etc/claude-code/managed-settings.json',
+  win32: 'C:\\ProgramData\\ClaudeCode\\managed-settings.json',
+})[platform] ?? null;
 export const claudeUserMcpPath = () => path.join(home, '.claude.json');
 export const claudeSkillsDir = () => path.join(claudeDir(), 'skills');
 

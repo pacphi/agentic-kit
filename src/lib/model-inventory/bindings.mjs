@@ -12,7 +12,8 @@ function record({ consumer, source, host = null, provider = null, modelRef = nul
   return {
     id: bindingId([consumer, source, host, provider, modelRef, activity, index].map(String)),
     consumer, source, host, provider, modelRef, activity, variant,
-    configured: modelRef, effective: null, consumerState, drift: false, evidenceRefs: [],
+    configured: modelRef, effective: consumer.startsWith('route:') ? modelRef : null,
+    consumerState, drift: false, evidenceRefs: [],
     evidenceClass, provenance: evidenceClass,
   };
 }

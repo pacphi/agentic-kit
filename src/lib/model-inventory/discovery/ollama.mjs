@@ -27,7 +27,7 @@ export function discoverOllama({ raw, capturedAt, scope = {}, scopeKey } = /** @
     if (models.length >= MAX_MODELS) break;
     models.push(modelRecord({
       host: null, provider: 'ollama', modelId, scopeId: source.scopeId, source,
-      variant: { digest }, states: { discoverable: true, entitled: 'unknown', routable: 'unknown' },
+      digest, variant: { digest }, states: { discoverable: true },
     }));
   }
   const complete = diagnostics.length === 0 && models.length < MAX_MODELS;

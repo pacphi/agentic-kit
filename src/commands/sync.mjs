@@ -73,6 +73,9 @@ export async function run({ flags, pkgRoot, fetchLatest }) {
   }
   const rows = await collect({ pkgRoot, cwd });
   const plan = rows.filter((r) => r.fix)
+    // Model lifecycle actions are explicit advisory commands. `ak status` must
+    // name them, but sync neither refreshes catalogs nor applies model plans.
+    .filter((r) => r.subsystem !== 'models')
     .filter((r) => !(flags['no-upgrade'] && ['versions', 'self', 'ruvnet-brain', 'ruvector'].includes(r.subsystem)));
 
   if (plan.length === 0) { ok('nothing to do — all subsystems healthy'); return 0; }

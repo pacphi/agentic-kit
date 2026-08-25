@@ -94,3 +94,30 @@ test('cross-scope comparison is refused rather than reported as mass churn', () 
   assert.equal(result.reason, 'scope-changed');
   assert.deepEqual(result.changes, []);
 });
+
+test('alias continuity reports a target move without fabricating add/missing churn', () => {
+  const before = model('claude-old', { aliases: [{ name: 'sonnet', resolvesTo: 'claude-old' }] });
+  const after = model('claude-new', { aliases: [{ name: 'sonnet', resolvesTo: 'claude-new' }] });
+  const kinds = diffSnapshots(snapshot('before', [before]), snapshot('after', [after]))
+    .changes.map(({ kind }) => kind);
+  assert.equal(kinds.includes('alias-target-changed'), true);
+  assert.equal(kinds.includes('model-added') || kinds.includes('model-missing'), false);
+});
+
+test('digest, reasoning, context, variant, and supplied pricing metadata diff independently', () => {
+  const before = model('local', {
+    key: { host: 'unknown', provider: 'ollama', modelId: 'local', scopeId: 'scope-a', digest: 'aaaaaa' },
+    variant: { digest: 'aaaaaa', reasoningEfforts: ['low'], contextWindow: 8_192, serviceTier: 'standard' },
+    pricing: null,
+  });
+  const after = model('local', {
+    key: { host: 'unknown', provider: 'ollama', modelId: 'local', scopeId: 'scope-a', digest: 'bbbbbb' },
+    variant: { digest: 'bbbbbb', reasoningEfforts: ['low', 'high'], contextWindow: 16_384, serviceTier: 'priority' },
+    pricing: { basis: 'per-token', input: 0.1, output: 0.2, currency: 'USD' },
+  });
+  const kinds = new Set(diffSnapshots(snapshot('before', [before]), snapshot('after', [after]))
+    .changes.map(({ kind }) => kind));
+  for (const kind of ['digest-changed', 'reasoning-changed', 'context-changed', 'variant-changed', 'pricing-changed']) {
+    assert.equal(kinds.has(kind), true, kind);
+  }
+});

@@ -49,7 +49,13 @@ test('observed collection reuses readIndex and emits no prompt, title, or transc
   });
   assert.equal(calls.length, 1);
   assert.equal(result.status, 'complete');
-  assert.equal(result.models.find((model) => model.identity.modelId === 'gpt-5.6-terra').observations, 2);
+  const observed = result.models.find((model) => model.identity.modelId === 'gpt-5.6-terra');
+  assert.equal(observed.observations, 2);
+  for (const field of ['observed', 'entitled', 'policyAllowed', 'routable']) {
+    assert.equal(observed.dimensions[field].value, true, field);
+    assert.equal(observed.evidence.find(({ id }) => observed.dimensions[field].evidenceRefs.includes(id)).field,
+      `dimensions.${field}`);
+  }
   assert.doesNotThrow(() => result.models.map(normalizeModelRecord));
   const wire = JSON.stringify(result);
   for (const secret of ['PRIVATE PROMPT', 'PRIVATE', 'secret-id', '/private/repo']) assert.equal(wire.includes(secret), false);
@@ -66,6 +72,11 @@ test('refresh names contacts, never invokes a model, and preserves per-source fa
   assert.deepEqual(result.contacts, ['opencode catalog', 'local Ollama daemon']);
   assert.equal(result.results.opencode.status, 'unavailable');
   assert.equal(result.results.ollama.status, 'complete');
+  assert.deepEqual(
+    [result.results.opencode.source.owner, result.results.opencode.source.mode,
+      result.results.opencode.source.transport],
+    ['opencode', 'online', 'command'],
+  );
   assert.equal(calls.some(([, args]) => args.some((arg) => /prompt|chat|run|generate/.test(arg))), false);
 });
 
@@ -96,6 +107,30 @@ test('snapshot composition emits a normalized same-scope stable baseline', async
   assert.equal(isCompleteStableSnapshot(snapshot), true);
   assert.equal(snapshot.models.length, 1);
   assert.equal(snapshot.bindings.length, 1);
+  assert.equal(snapshot.models[0].dimensions.configured.value, true);
+  assert.equal(snapshot.models[0].dimensions.effective.value, true);
+  assert.equal(snapshot.models[0].dimensions.configured.evidenceRefs.length > 0, true);
   assert.equal(JSON.stringify(snapshot).includes('/private/repo'), false);
   assert.equal(snapshot.sources.every((source) => source.scopeFingerprint === snapshot.scope.fingerprint), true);
+});
+
+test('Claude descriptor reads managed policy and only whitelisted process model environment', async () => {
+  const reads = [];
+  const result = await refreshModelDiscovery({
+    owners: ['claude'], scopeKey: SCOPE_KEY,
+    inputs: { claude: { settingsRaw: JSON.stringify({ model: 'sonnet' }) } },
+    processEnvironment: {
+      ANTHROPIC_DEFAULT_SONNET_MODEL: 'claude-sonnet-managed',
+      ANTHROPIC_API_KEY: 'must-not-cross', UNRELATED: 'must-not-cross',
+    },
+    readFileFn: (file) => {
+      reads.push(file);
+      if (String(file).includes('managed-settings.json')) return JSON.stringify({ availableModels: ['sonnet'] });
+      throw new Error('unexpected read');
+    },
+  });
+  assert.equal(reads.some((file) => String(file).includes('managed-settings.json')), true);
+  assert.equal(result.results.claude.models[0].key.modelId, 'claude-sonnet-managed');
+  assert.equal(JSON.stringify(result).includes('must-not-cross'), false);
+  assert.deepEqual([result.results.claude.source.owner, result.results.claude.source.mode], ['claude', 'local']);
 });

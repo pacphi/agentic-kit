@@ -1,4 +1,4 @@
-import { isCompleteStableSnapshot, normalizeSnapshot } from './contracts.mjs';
+import { isCompleteStableSnapshot, modelIdentityKey, normalizeSnapshot } from './contracts.mjs';
 
 function canonical(value) {
   if (Array.isArray(value)) return value.map(canonical)
@@ -61,7 +61,62 @@ function fieldChanges(before, after, provisional) {
         { severity: 'warn', field: `capabilities.${field}`, provisional }));
     }
   }
+  const variantNames = new Set([
+    ...Object.keys(before.variant), ...Object.keys(after.variant),
+  ]);
+  for (const field of variantNames) {
+    if (!equal(before.variant[field], after.variant[field])) {
+      const kind = field === 'digest' ? 'digest-changed'
+        : /reasoning/i.test(field) ? 'reasoning-changed'
+          : /context/i.test(field) ? 'context-changed' : 'variant-changed';
+      out.push(change(kind, after,
+        { field, value: before.variant[field] ?? null },
+        { field, value: after.variant[field] ?? null },
+        { severity: 'warn', field: `variant.${field}`, provisional }));
+    }
+  }
+  if (before.key.digest !== after.key.digest && !variantNames.has('digest')) {
+    out.push(change('digest-changed', after, before.key.digest, after.key.digest,
+      { severity: 'warn', field: 'key.digest', provisional }));
+  }
+  if (!equal(before.pricing, after.pricing)) {
+    out.push(change('pricing-changed', after, before.pricing, after.pricing,
+      { severity: 'info', field: 'pricing', provisional }));
+  }
+  if (!equal(before.edges, after.edges)) {
+    out.push(change('edges-changed', after, before.edges, after.edges,
+      { severity: 'info', field: 'edges', provisional }));
+  }
   return out;
+}
+
+function sharedAlias(before, after) {
+  const oldAliases = new Map(before.aliases.map((alias) => [alias.name, alias.resolvesTo]));
+  return after.aliases.some((alias) => oldAliases.has(alias.name)
+    && oldAliases.get(alias.name) !== alias.resolvesTo);
+}
+
+const baseIdentity = (model) => modelIdentityKey({ ...model.key, digest: null });
+
+function pairModels(before, after) {
+  const oldModels = new Map(before.models.map((model) => [model.identity, model]));
+  const newModels = new Map(after.models.map((model) => [model.identity, model]));
+  const usedOld = new Set();
+  const usedNew = new Set();
+  const pairs = [];
+  for (const [identity, model] of newModels) {
+    const prior = oldModels.get(identity);
+    if (!prior) continue;
+    pairs.push([prior, model]); usedOld.add(prior.identity); usedNew.add(model.identity);
+  }
+  for (const model of newModels.values()) {
+    if (usedNew.has(model.identity)) continue;
+    const prior = [...oldModels.values()].find((candidate) => !usedOld.has(candidate.identity)
+      && (sharedAlias(candidate, model) || baseIdentity(candidate) === baseIdentity(model)));
+    if (!prior) continue;
+    pairs.push([prior, model]); usedOld.add(prior.identity); usedNew.add(model.identity);
+  }
+  return { oldModels, newModels, pairs, usedOld, usedNew };
 }
 
 export function diffSnapshots(beforeValue, afterValue, {
@@ -81,22 +136,19 @@ export function diffSnapshots(beforeValue, afterValue, {
   }
 
   const complete = isCompleteStableSnapshot(before) && isCompleteStableSnapshot(after);
-  const oldModels = new Map(before.models.map((model) => [model.identity, model]));
-  const newModels = new Map(after.models.map((model) => [model.identity, model]));
+  const { oldModels, newModels, pairs, usedOld, usedNew } = pairModels(before, after);
   const changes = [];
+  for (const [prior, model] of pairs) changes.push(...fieldChanges(prior, model, !complete));
   for (const [identity, model] of newModels) {
-    const prior = oldModels.get(identity);
-    if (!prior) {
+    if (!usedNew.has(identity)) {
       changes.push(change('model-added', model, null, model.key,
         { field: 'key', provisional: !complete }));
-      continue;
     }
-    changes.push(...fieldChanges(prior, model, !complete));
   }
   if (complete) {
     const authoritative = new Set(authoritativeRemovals);
     for (const [identity, model] of oldModels) {
-      if (!newModels.has(identity)) {
+      if (!usedOld.has(identity)) {
         const absenceCount = Number(absenceCounts[identity] ?? 1);
         const removed = authoritative.has(identity) || absenceCount >= removalThreshold;
         changes.push(change(removed ? 'model-removed' : 'model-missing', model, model.key, null,
@@ -162,6 +214,9 @@ export function diffSnapshotHistory(beforeValue, afterValue, snapshots = [], opt
       } else if (lastKnown) absenceCount++;
     }
     if (!lastKnown || (!authoritative.has(identity) && absenceCount < removalThreshold)) continue;
+    const aliasContinues = lastKnown.aliases.some((oldAlias) => after.models.some((model) =>
+      model.aliases.some((alias) => alias.name === oldAlias.name)));
+    if (aliasContinues) continue;
     const existing = result.changes.findIndex((entry) => entry.subject === identity
       && (entry.kind === 'model-missing' || entry.kind === 'model-removed'));
     const removal = change('model-removed', lastKnown, lastKnown.key, null,

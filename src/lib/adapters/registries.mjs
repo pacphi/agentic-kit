@@ -83,7 +83,7 @@ export function validateObservabilityAdapter(value) {
 
 export function validateModelDiscoveryAdapter(value) {
   assertRecord(value, 'modelDiscovery');
-  const allowed = new Set(['id', 'ownerType', 'ownerId', 'transport', 'command', 'network', 'schema']);
+  const allowed = new Set(['id', 'ownerType', 'ownerId', 'transport', 'command', 'network', 'schema', 'scope']);
   for (const key of Object.keys(value)) {
     if (!allowed.has(key)) throw new TypeError(`modelDiscovery has unknown field ${key}`);
   }
@@ -92,6 +92,7 @@ export function validateModelDiscoveryAdapter(value) {
   assertId(value.ownerId, 'modelDiscovery.ownerId');
   assertEnum(value.transport, ['file', 'command'], 'modelDiscovery.transport');
   assertEnum(value.network, ['never', 'local', 'explicit'], 'modelDiscovery.network');
+  assertEnum(value.scope ?? 'profile', ['profile', 'project', 'local'], 'modelDiscovery.scope');
   if (typeof value.schema !== 'string' || !value.schema) throw new TypeError('modelDiscovery.schema is required');
   if (value.transport === 'command') {
     if (typeof value.command !== 'string' || !/^[A-Za-z0-9._-]+$/.test(value.command)) {
@@ -175,10 +176,10 @@ const OBSERVABILITY_MAP = registryFrom([
 ], validateObservabilityAdapter, 'observability');
 
 const MODEL_DISCOVERY_MAP = registryFrom([
-  { id: 'claude-config', ownerType: 'host', ownerId: 'claude', transport: 'file', network: 'never', schema: 'claude-settings-v1' },
-  { id: 'codex-cache', ownerType: 'host', ownerId: 'codex', transport: 'file', network: 'never', schema: 'codex-model-cache-v1' },
-  { id: 'opencode-models', ownerType: 'host', ownerId: 'opencode', transport: 'command', command: 'opencode', network: 'explicit', schema: 'opencode-models-lines-v1' },
-  { id: 'ollama-catalog', ownerType: 'provider', ownerId: 'ollama', transport: 'command', command: 'ollama', network: 'local', schema: 'ollama-ls-v1' },
+  { id: 'claude-config', ownerType: 'host', ownerId: 'claude', transport: 'file', network: 'never', scope: 'profile', schema: 'claude-settings-v1' },
+  { id: 'codex-cache', ownerType: 'host', ownerId: 'codex', transport: 'file', network: 'never', scope: 'profile', schema: 'codex-model-cache-v1' },
+  { id: 'opencode-models', ownerType: 'host', ownerId: 'opencode', transport: 'command', command: 'opencode', network: 'explicit', scope: 'project', schema: 'opencode-models-lines-v1' },
+  { id: 'ollama-catalog', ownerType: 'provider', ownerId: 'ollama', transport: 'command', command: 'ollama', network: 'local', scope: 'local', schema: 'ollama-ls-v1' },
 ], validateModelDiscoveryAdapter, 'model discovery');
 
 const hostEntries = [

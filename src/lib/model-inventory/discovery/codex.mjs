@@ -79,7 +79,8 @@ export function discoverCodex({
         ? { state: 'retiring', replacement: { modelId: replacementId, edge: 'first-party-migration' } }
         : { state: visibility === 'hide' || visibility === 'hidden' ? 'hidden' : 'active', replacement: null },
       states: {
-        configured: config.model === modelId, effective: config.model === modelId,
+        configured: config.model === modelId ? true : 'unknown',
+        effective: config.model === modelId ? true : 'unknown',
         discoverable: visibility === 'list' || visibility === 'visible', entitled: 'unknown',
       },
     }));

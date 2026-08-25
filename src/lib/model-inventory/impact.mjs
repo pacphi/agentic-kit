@@ -1,4 +1,4 @@
-import { modelIdentityKey, normalizeSnapshot } from './contracts.mjs';
+import { modelIdentityKey, normalizeModelEdge, normalizeSnapshot } from './contracts.mjs';
 
 function parseSelector(selector) {
   if (selector && typeof selector === 'object' && !Array.isArray(selector)) return selector;
@@ -107,6 +107,17 @@ function compatibility(source, target) {
   };
 }
 
+const modelRef = (model) => model.key.provider
+  ? `${model.key.provider}/${model.key.modelId}` : model.key.modelId;
+
+function compatibilityEvidence(model) {
+  return [...new Set([
+    ...['discoverable', 'entitled', 'policyAllowed', 'routable']
+      .flatMap((name) => model.dimensions[name]?.evidenceRefs ?? []),
+    ...(model.lifecycle.evidenceRefs ?? []),
+  ])];
+}
+
 const shellQuote = (value) => `'${String(value).replaceAll("'", "'\"'\"'")}'`;
 
 /**
@@ -138,7 +149,8 @@ export function planModelChange(snapshotValue, options) {
   const affectedBindings = snapshot.bindings.filter((binding) =>
     binding.activity === activity && (!source || bindingReferences(binding, source)));
   const assessment = compatibility(source, target);
-  const routeSpec = `${activity}:${target.key.host}:${target.key.modelId}`;
+  const routeModel = target.key.host === 'opencode' ? modelRef(target) : target.key.modelId;
+  const routeSpec = `${activity}:${target.key.host}:${routeModel}`;
   const warnings = [...assessment.warnings];
   if (!affectedBindings.length) warnings.push(`no canonical binding for activity ${activity} matched the source`);
   if (target.key.provider == null) warnings.push('target inference provider is unknown');
@@ -150,6 +162,13 @@ export function planModelChange(snapshotValue, options) {
     retainHistory: true,
     evidenceRefs: binding.evidenceRefs,
   }));
+  const compatibilityEdges = assessment.mechanicallyCompatible ? [normalizeModelEdge({
+    kind: 'mechanically-compatible',
+    from: source ? `${source.key.host}:${modelRef(source)}` : `activity:${activity}`,
+    to: `${target.key.host}:${modelRef(target)}`,
+    provenance: 'derived', scopeFingerprint: target.key.scopeId,
+    evidenceRefs: compatibilityEvidence(target),
+  })] : [];
   return {
     plannable: assessment.mechanicallyCompatible,
     readOnly: true,
@@ -161,6 +180,7 @@ export function planModelChange(snapshotValue, options) {
       models: source ? [source] : [target],
     }),
     compatibility: { ...assessment, warnings },
+    edges: compatibilityEdges,
     invalidationMarkers,
     action: assessment.mechanicallyCompatible ? {
       command: `ak host pick --route ${shellQuote(routeSpec)}`,
@@ -170,6 +190,53 @@ export function planModelChange(snapshotValue, options) {
       requiresExplicitUserAction: true,
       note: 'copyable canonical-policy action; this plan does not execute it',
     } : null,
+  };
+}
+
+/**
+ * Pure handoff contract for Route Intelligence (#109). This inventory feed
+ * establishes mechanical eligibility and lifecycle invalidation only; it never
+ * claims quality, cost equivalence, or premium value.
+ */
+export function routeIntelligenceFeed(snapshotValue, { changes = [] } = {}) {
+  const snapshot = normalizeSnapshot(snapshotValue);
+  const required = ['discoverable', 'entitled', 'policyAllowed', 'routable'];
+  const candidates = snapshot.models.filter((model) => required.every((name) =>
+    model.dimensions[name].value === true)
+    && !['hidden', 'removed'].includes(model.lifecycle.state)).map((model) => ({
+    identity: model.identity,
+    key: model.key,
+    variant: model.variant,
+    capabilities: model.capabilities,
+    pricing: model.pricing,
+    lifecycle: model.lifecycle,
+    evidenceRefs: compatibilityEvidence(model),
+    quality: 'unknown',
+  }));
+  const invalidatingKinds = new Set([
+    'alias-target-changed', 'lifecycle-changed', 'model-removed', 'capability-changed',
+    'digest-changed', 'reasoning-changed', 'context-changed', 'variant-changed', 'pricing-changed',
+  ]);
+  const invalidations = changes.filter(({ kind }) => invalidatingKinds.has(kind)).map((entry) => ({
+    kind: 'route-intelligence-stale', subject: entry.subject, reason: entry.kind,
+    evidenceRefs: [...new Set(entry.evidenceRefs ?? [])], retainHistory: true,
+  }));
+  for (const model of snapshot.models.filter(({ lifecycle }) =>
+    lifecycle.replacement || ['deprecated', 'retiring', 'removed'].includes(lifecycle.state))) {
+    invalidations.push({
+      kind: 'route-intelligence-stale', subject: model.identity,
+      reason: model.lifecycle.replacement ? 'first-party-migration' : `lifecycle-${model.lifecycle.state}`,
+      evidenceRefs: [...model.lifecycle.evidenceRefs], retainHistory: true,
+    });
+  }
+  return {
+    schemaVersion: 1,
+    snapshotId: snapshot.snapshotId,
+    scopeFingerprint: snapshot.scope.fingerprint,
+    candidates,
+    invalidations: invalidations.filter((entry, index, all) => all.findIndex((candidate) =>
+      candidate.subject === entry.subject && candidate.reason === entry.reason) === index),
+    claims: { quality: false, economics: false },
   };
 }
 

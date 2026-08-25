@@ -26,6 +26,8 @@ test('Claude preserves alias and concrete resolution while entitlement stays unk
   assert.equal(selected.states.configured, true);
   assert.equal(selected.states.effective, true);
   assert.equal(selected.states.entitled, 'unknown');
+  assert.equal(selected.edges.some(({ kind, from, to }) =>
+    kind === 'resolves-to' && from === 'sonnet' && to === 'claude-sonnet-5-20260801'), true);
   assert.equal(result.models.find((model) => model.identity.modelId === 'claude-opus-5').states.policyAllowed, true);
   assert.doesNotThrow(() => result.models.map(normalizeModelRecord));
   assert.doesNotThrow(() => normalizeSourceResult(result.source));
@@ -52,9 +54,14 @@ test('Codex parses visibility, reasoning variants, and first-party migration met
   assert.deepEqual(terra.variant.reasoningEfforts, ['none', 'low', 'medium', 'high', 'xhigh', 'max']);
   assert.equal(terra.variant.contextWindow, 1050000);
   assert.equal(terra.states.entitled, 'unknown');
+  assert.equal(terra.states.configured, 'unknown');
+  assert.equal(terra.states.observed, 'unknown');
+  assert.equal(terra.dimensions.configured.value, null);
   const old = result.models.find((model) => model.identity.modelId === 'gpt-5.4');
   assert.equal(old.lifecycle.state, 'retiring');
   assert.equal(old.lifecycle.replacement, 'gpt-5.6-terra');
+  assert.equal(old.edges.some(({ kind, to }) =>
+    kind === 'first-party-migration' && to === 'gpt-5.6-terra'), true);
   assert.equal(old.states.discoverable, false);
   assert.doesNotThrow(() => result.models.map(normalizeModelRecord));
   assert.doesNotThrow(() => normalizeSourceResult(result.source));

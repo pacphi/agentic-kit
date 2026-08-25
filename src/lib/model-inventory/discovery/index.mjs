@@ -1,4 +1,4 @@
-import { createHmac } from 'node:crypto';
+import { createHash, createHmac } from 'node:crypto';
 
 export const MAX_CONFIG_BYTES = 1024 * 1024;
 export const MAX_COMMAND_BYTES = 2 * 1024 * 1024;
@@ -16,11 +16,12 @@ export function scopeFingerprint(owner, scope = {}, key) {
 }
 
 export function sourceRecord({
-  id, owner, scope, scopeKey, capturedAt, complete, schema, freshness = 'current', status = null, diagnostics = [],
+  id, owner, ownerType = null, transport = null, network = null, mode = 'local', scope, scopeKey,
+  capturedAt, complete, schema, freshness = 'current', status = null, diagnostics = [],
 }) {
   const fingerprint = scopeFingerprint(owner, scope, scopeKey);
   return {
-    id, owner, schema, schemaVersion: schema, sourceVersion: null,
+    id, owner, ownerType, transport, network, mode, schema, schemaVersion: schema, sourceVersion: null,
     capturedAt: capturedAt ?? new Date().toISOString(),
     scopeId: fingerprint, scopeFingerprint: fingerprint,
     complete: Boolean(complete), freshness,
@@ -35,41 +36,69 @@ export function diagnostic(code, message) {
 
 export function modelRecord({ host, provider = null, modelId, scopeId, displayName = null, aliases = [],
   variant = {}, lifecycle = /** @type {any} */ ({ state: 'unknown', replacement: null }),
-  states = /** @type {any} */ ({}), source }) {
+  states = /** @type {any} */ ({}), capabilities = {}, pricing = null, digest = null, source }) {
   const safeHost = host || 'unknown';
-  const evidenceId = `${source.id}:${modelId}:${source.capturedAt}`.slice(0, 256);
-  const evidenceClass = source.id === 'usage-index' ? 'observed'
-    : source.id.includes('config') ? 'configured' : 'catalog';
+  const evidenceClass = source.evidenceClass ?? (source.id === 'usage-index' ? 'observed'
+    : source.id.includes('config') ? 'configured' : 'catalog');
   const normalizedStates = {
-    configured: false, effective: false, observed: false, discoverable: false,
-    entitled: 'unknown', policyAllowed: 'unknown', routable: 'unknown', recommended: false,
+    configured: 'unknown', effective: 'unknown', observed: 'unknown', discoverable: 'unknown',
+    entitled: 'unknown', policyAllowed: 'unknown', routable: 'unknown', recommended: 'unknown',
     ...states,
+  };
+  const evidence = [];
+  const evidenceFor = (field, klass = evidenceClass) => {
+    const id = `evidence:${createHash('sha256').update([
+      source.id, safeHost, provider ?? '', modelId, scopeId, field, source.capturedAt,
+    ].join('\n')).digest('hex').slice(0, 24)}`;
+    evidence.push({
+      id, field, source: source.id, class: klass, capturedAt: source.capturedAt,
+      freshness: source.freshness === 'stale' ? 'stale' : 'fresh',
+      completeness: source.complete ? 'complete' : 'partial', scopeFingerprint: scopeId, refs: [],
+    });
+    return id;
   };
   const dimensions = Object.fromEntries(Object.entries(normalizedStates).map(([name, value]) => [name, {
     value: value === 'unknown' ? null : Boolean(value),
-    evidenceRefs: value === 'unknown' ? [] : [evidenceId],
+    evidenceRefs: value === 'unknown' ? [] : [evidenceFor(`dimensions.${name}`)],
   }]));
   const replacement = lifecycle?.replacement && typeof lifecycle.replacement === 'object'
     ? lifecycle.replacement.modelId : lifecycle?.replacement ?? null;
-  return {
-    key: { host: safeHost, provider, modelId, scopeId },
-    identity: { host: safeHost, provider, modelId, scopeId },
-    displayName: displayName || modelId,
-    aliases: aliases.map((alias) => ({
-      name: alias.name, resolvesTo: alias.resolvesTo ?? null, observedAt: alias.observedAt ?? null,
-      evidenceRefs: alias.evidenceRefs ?? [evidenceId],
+  const normalizedAliases = aliases.map((alias) => ({
+    name: alias.name, resolvesTo: alias.resolvesTo ?? null, observedAt: alias.observedAt ?? null,
+    evidenceRefs: [evidenceFor(`aliases.${alias.name}`)],
+  }));
+  const lifecycleKnown = lifecycle?.state && lifecycle.state !== 'unknown';
+  const lifecycleEvidence = lifecycleKnown || replacement
+    ? [evidenceFor('lifecycle', replacement ? 'first-party' : evidenceClass)] : [];
+  if (digest) evidenceFor('key.digest');
+  for (const field of Object.keys(variant)) evidenceFor(`variant.${field}`);
+  for (const field of Object.keys(capabilities)) evidenceFor(`capabilities.${field}`);
+  const normalizedPricing = pricing == null ? null : {
+    ...pricing,
+    evidenceRefs: pricing.evidenceRefs?.length ? pricing.evidenceRefs : [evidenceFor('pricing')],
+  };
+  const edges = [
+    ...normalizedAliases.filter(({ resolvesTo }) => resolvesTo).map((alias) => ({
+      kind: 'resolves-to', from: alias.name, to: alias.resolvesTo,
+      provenance: 'configured', scopeFingerprint: scopeId, evidenceRefs: alias.evidenceRefs,
     })),
+    ...(replacement ? [{
+      kind: 'first-party-migration', from: modelId, to: replacement,
+      provenance: 'first-party', scopeFingerprint: scopeId, evidenceRefs: lifecycleEvidence,
+    }] : []),
+  ];
+  return {
+    key: { host: safeHost, provider, modelId, scopeId, digest },
+    identity: { host: safeHost, provider, modelId, scopeId, digest },
+    displayName: displayName || modelId,
+    aliases: normalizedAliases,
     visibility: states.discoverable === true ? 'visible' : states.discoverable === false ? 'hidden' : 'unknown',
     variant,
     lifecycle: { state: lifecycle?.state ?? 'unknown', replacement, notice: lifecycle?.notice ?? null,
-      effectiveAt: lifecycle?.effectiveAt ?? null, evidenceRefs: [evidenceId] },
-    capabilities: {}, dimensions,
+      effectiveAt: lifecycle?.effectiveAt ?? null, evidenceRefs: lifecycleEvidence },
+    capabilities, pricing: normalizedPricing, edges, dimensions,
     states: normalizedStates,
-    evidence: [{
-      id: evidenceId, field: 'catalog', source: source.id, class: evidenceClass,
-      capturedAt: source.capturedAt, freshness: source.freshness === 'stale' ? 'stale' : 'fresh',
-      completeness: source.complete ? 'complete' : 'partial', scopeFingerprint: scopeId, refs: [],
-    }],
+    evidence,
   };
 }
 

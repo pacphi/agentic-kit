@@ -62,6 +62,8 @@ test('Ollama parses local names and digests without claiming entitlement', () =>
   assert.equal(result.status, 'complete');
   assert.deepEqual(result.models.map((model) => model.identity.modelId), ['qwen3-coder:latest', 'deepseek-r1:8b']);
   assert.equal(result.models[0].variant.digest, '9e3f6a12abcd');
+  assert.equal(result.models[0].key.digest, '9e3f6a12abcd');
+  assert.equal(result.models[0].states.configured, 'unknown');
   assert.equal(result.models[0].states.entitled, 'unknown');
   assert.doesNotThrow(() => result.models.map(normalizeModelRecord));
   assert.doesNotThrow(() => normalizeSourceResult(result.source));

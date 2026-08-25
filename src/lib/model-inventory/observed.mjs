@@ -12,6 +12,7 @@ export async function collectObservedModels({
     return {
       status: 'unavailable', generatedAt: capturedAt, models: [],
       source: sourceRecord({ id: 'usage-index', owner: 'usage', scope, scopeKey, capturedAt,
+        ownerType: 'usage', transport: 'index', network: 'never', mode: 'local',
         complete: false, status: 'unavailable', schema: 'usage-index-v6', diagnostics: ['usage-index-unavailable'] }),
       diagnostics: [diagnostic('usage-index-unavailable', error?.message ?? error)],
     };
@@ -31,7 +32,10 @@ export async function collectObservedModels({
       };
       const record = modelRecord({
         host, provider, modelId, scopeId: scopeFingerprint(host, scope, scopeKey), source,
-        states: { observed: true, entitled: 'unknown' },
+        // A successful structured invocation proves this exact observed path was
+        // entitled, policy-allowed, and routable at capture time. It says
+        // nothing about catalog completeness or other profiles/projects.
+        states: { observed: true, entitled: true, policyAllowed: true, routable: true },
       });
       record.observations = 1;
       record.evidence[0].providerProvenance = session.providerProvenance ?? 'unknown';
@@ -42,6 +46,7 @@ export async function collectObservedModels({
   const capturedAt = aggregate?.generatedAt ?? new Date().toISOString();
   const source = sourceRecord({
     id: 'usage-index', owner: 'usage', scope, scopeKey, capturedAt, complete: !degraded,
+    ownerType: 'usage', transport: 'index', network: 'never', mode: 'local',
     status: degraded ? 'partial' : 'complete', schema: 'usage-index-v6',
     diagnostics: degraded ? ['usage-source-degraded'] : [],
   });

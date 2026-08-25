@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   MODEL_INVENTORY_SCHEMA_VERSION, modelIdentityKey, normalizeModelRecord,
-  normalizeSnapshot, normalizeSourceResult,
+  normalizeModelEdge, normalizeSnapshot, normalizeSourceResult,
 } from '../../src/lib/model-inventory/contracts.mjs';
 
 const AT = '2026-08-25T12:00:00.000Z';
@@ -47,6 +47,26 @@ test('host, provider, concrete model, and scope are all part of identity', () =>
   assert.notEqual(modelIdentityKey(base), modelIdentityKey({ ...base, provider: 'gateway' }));
   assert.notEqual(modelIdentityKey(base), modelIdentityKey({ ...base, scopeId: 'project-b' }));
   assert.notEqual(modelIdentityKey(base), modelIdentityKey({ ...base, host: 'codex' }));
+  assert.notEqual(modelIdentityKey(base), modelIdentityKey({ ...base, digest: 'abc123' }));
+});
+
+test('typed edges, optional pricing, and source execution metadata normalize without inventing claims', () => {
+  const edge = normalizeModelEdge({
+    kind: 'mechanically-compatible', from: 'codex:gpt-x', to: 'codex:gpt-y',
+    provenance: 'derived', scopeFingerprint: 'scope-a', evidenceRefs: ['configured'],
+  });
+  assert.equal(edge.kind, 'mechanically-compatible');
+  const value = normalizeModelRecord(model({
+    pricing: { basis: 'per-token', input: 1, output: 2, currency: 'USD', evidenceRefs: ['configured'] },
+    edges: [{ ...edge }],
+  }));
+  assert.equal(value.pricing.output, 2);
+  const source = normalizeSourceResult({
+    id: 'opencode-models', owner: 'opencode', ownerType: 'host', transport: 'command',
+    network: 'explicit', mode: 'online', schema: 'opencode-v1', status: 'complete',
+    capturedAt: AT, scopeFingerprint: 'scope-a',
+  });
+  assert.deepEqual([source.owner, source.mode, source.network], ['opencode', 'online', 'explicit']);
 });
 
 test('dimension evidence references must resolve within the model record', () => {

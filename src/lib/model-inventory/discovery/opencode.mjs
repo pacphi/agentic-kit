@@ -74,7 +74,8 @@ export function discoverOpenCode({ raw, configRaw, capturedAt, scope = {}, scope
     return modelRecord({
       host: 'opencode', provider, modelId, scopeId: source.scopeId, displayName: qualified, source,
       states: {
-        configured: configuredIds.includes(qualified), effective: configRaw !== undefined && configured[0]?.id === qualified,
+        configured: configuredIds.includes(qualified) ? true : 'unknown',
+        effective: configRaw !== undefined && configured[0]?.id === qualified ? true : 'unknown',
         discoverable: ids.includes(qualified) ? true : 'unknown', entitled: 'unknown',
       }, variant: { configuredVariants: configured.filter(({ id }) => id === qualified)
         .map(({ variant }) => variant).filter(Boolean) },
