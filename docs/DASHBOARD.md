@@ -183,22 +183,28 @@ contract.
 ### Models
 
 Models is a cache-only lifecycle evidence view backed by `/api/models`. It never performs discovery
-or invokes a model; `ak models refresh` owns collection. The semantic table keeps configured,
-effective, observed, discoverable, entitled, policy-allowed, and routable states independent and
-labels missing evidence `unknown`. Attention, same-scope changes, bindings, swap impact, and source
-freshness all come from the normalized private snapshot.
+or invokes a model; `ak models refresh` owns collection. The first panels answer two different
+questions: **Observed in this window** aggregates actual retained transcript evidence for the same
+7/14/30-day selector used by Usage, while **Your routes** names configured primary and fallback
+models and joins their actual last-use timestamp when one exists in that window. GPT, Claude,
+OpenCode, or local models therefore do not disappear merely because they are not pinned to a route.
+The collapsed catalogue separately answers what is installed or discoverable; catalogue presence
+does not claim use.
 
-The view fetches a compact summary first, then a 50-row relevant inventory page. Search and filters
-for host, serving provider, publisher, relevance, lifecycle, and evidence request fresh bounded
-pages; **Load 50 more** appends the next page. Every column header is a keyboard-operable sort button
+The view fetches a compact, windowed summary first, then a 50-row relevant inventory page. Search
+and facet-counted filters for host, model provider, relevance, lifecycle, and evidence request fresh
+bounded pages; controls with fewer than two meaningful choices are suppressed. **Load 50 more**
+appends the next page. Every meaningful column header is a keyboard-operable sort button
 that toggles ascending and descending order, exposes `aria-sort`, and leaves unknown values last.
 Later pages carry the privacy-projected snapshot id; if refresh replaces the snapshot, the browser
 reloads page one instead of mixing two inventories. A failed later page preserves the rows already
 shown and leaves a focused retry control.
 
 The inventory region is height-bounded and scrolls internally in both axes, so change history and
-consumer panels remain nearby. Its header stays sticky. The region is labelled and
-keyboard-focusable, with a caption, column scopes, `aria-busy` loading state, result and load
+the bounded route-consumer panel remain nearby. These lifecycle panels are structurally owned by
+Usage → Models and are never rendered in Scorecard, Limits, Findings, Sessions, or Transcript.
+Its header stays sticky. The region is labelled and keyboard-focusable, with a caption, column
+scopes, `aria-busy` loading state, result and load
 announcements, visible focus, and an explicit load control in addition to lazy fetching.
 
 Source-proven public catalogue records show readable names and trusted source links while private

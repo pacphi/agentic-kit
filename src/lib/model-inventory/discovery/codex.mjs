@@ -67,7 +67,6 @@ export function discoverCodex({
     const reasoningEfforts = (Array.isArray(raw.supported_reasoning_levels) ? raw.supported_reasoning_levels : [])
       .map((entry) => typeof entry === 'string' ? entry : entry?.effort)
       .filter((effort) => REASONING.has(effort));
-    const replacementId = bounded(raw.upgrade?.model ?? raw.upgrade?.model_id);
     models.push(modelRecord({
       host: 'codex', provider: null, modelId, scopeId: source.scopeId,
       displayName: bounded(raw.display_name) ?? modelId, source,
@@ -75,9 +74,11 @@ export function discoverCodex({
         reasoningEfforts: [...new Set(reasoningEfforts)],
         contextWindow: Number.isInteger(raw.context_window) && raw.context_window > 0 ? raw.context_window : null,
       },
-      lifecycle: replacementId
-        ? { state: 'retiring', replacement: { modelId: replacementId, edge: 'first-party-migration' } }
-        : { state: visibility === 'hide' || visibility === 'hidden' ? 'hidden' : 'active', replacement: null },
+      // `upgrade` is a local client hint, not a public retirement notice. It
+      // must never promote a target model into a lifecycle warning or cause a
+      // route to be treated as retired. A warning needs an explicit first-party
+      // notice URL captured by a source that can establish that fact.
+      lifecycle: { state: visibility === 'hide' || visibility === 'hidden' ? 'hidden' : 'active', replacement: null },
       states: {
         configured: config.model === modelId ? true : 'unknown',
         effective: config.model === modelId ? true : 'unknown',

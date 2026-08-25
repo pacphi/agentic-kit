@@ -55,11 +55,11 @@ The initial source adapters are:
   allowlist;
 - the Codex model cache plus top-level `config.toml` model selection;
 - OpenCode's project/provider-scoped verbose `models` output plus its resolved `debug config` view;
-- the local Ollama catalogue and immutable model digest; and
+- the local Ollama `/api/tags`, bounded `/api/show`, and `/api/ps` catalogue/runtime facts; and
 - sanitized model ids from the existing local usage index.
 
 The collector selects these adapters from the immutable model-discovery descriptor registry. Each
-source record retains its owner and owner type, file/command/index transport, `never`/`local`/
+source record retains its owner and owner type, file/command/HTTP/index transport, `never`/`local`/
 `explicit` network policy, local/online collection mode, schema, freshness, completeness, and scope.
 A descriptor authorizes only its matching built-in parser; it cannot supply executable code or give
 an external host an inferred catalogue capability.
@@ -92,9 +92,12 @@ The lookup contracts were checked against current first-party documentation in A
 - Models.dev publishes provider-independent human names, labs, serving providers, limits,
   capabilities, pricing, release dates, and explicit weight links through JSON endpoints
   ([Models.dev](https://models.dev/)). Catalogue presence proves discovery, not account access.
-- Ollama's current local catalogue command is `ollama ls`; immutable digests are also part of the
-  documented list-models response ([Ollama CLI](https://docs.ollama.com/cli),
-  [Ollama list models API](https://docs.ollama.com/api/tags)).
+- Ollama refresh prefers the loopback [list models](https://docs.ollama.com/api/tags),
+  [show model details](https://docs.ollama.com/api-reference/show-model-details), and
+  [list running models](https://docs.ollama.com/api/ps) APIs. It retains bounded installed-model
+  metadata and loaded memory/context/expiry facts, never raw templates, model files, or full license
+  bodies. `ollama ls` is a partial compatibility fallback when the local API is unavailable.
+  Installed or loaded remains distinct from successful observed inference.
 - User-facing GPT-5.6 examples use current official ids and reasoning levels
   ([OpenAI model catalogue](https://developers.openai.com/api/docs/models)). Codex's local cache is
   still treated as a guarded native schema, not as a public API contract.
@@ -158,7 +161,7 @@ explicit operator boundaries.
 
 Open `ak dashboard`, then choose **Usage → Models**. The view includes:
 
-- attention items for degraded sources, lifecycle migrations, alias changes, and drift;
+- attention items for degraded sources, cited lifecycle migrations, alias changes, and drift;
 - a semantic host/model table with every independent state;
 - same-scope change history;
 - configured and reported consumers;
@@ -171,6 +174,10 @@ fetches the small summary and then the first 50 relevant rows; catalogue-only ro
 pages. Search, access host, model provider, view, lifecycle, and evidence filters reset
 pagination. Every sortable catalogue column keeps unknown values last, and its bounded table
 scrolls internally with a sticky header and an explicit **Load 50 more** control.
+
+A lifecycle migration becomes an alert only when the snapshot includes a direct first-party
+withdrawal-notice URL and matching first-party lifecycle evidence. A local host cache's `upgrade`
+hint or a preferred successor remains a discovery detail, never a retirement claim or route rewrite.
 
 Source-proven public catalogue records show a human name, host, publisher when proven, serving
 provider when known, exact public selector, and trusted documentation/catalogue links. Codex cache

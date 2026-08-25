@@ -231,7 +231,7 @@ export function normalizeSourceResult(value, index = 0) {
     ownerType: value.ownerType == null ? null
       : enumValue(value.ownerType, ['host', 'provider', 'usage'], `sources[${index}].ownerType`),
     transport: value.transport == null ? null
-      : enumValue(value.transport, ['file', 'command', 'index'], `sources[${index}].transport`),
+      : enumValue(value.transport, ['file', 'command', 'http', 'index'], `sources[${index}].transport`),
     network: value.network == null ? null
       : enumValue(value.network, ['never', 'local', 'explicit'], `sources[${index}].network`),
     mode: enumValue(value.mode ?? 'local', ['local', 'online'], `sources[${index}].mode`),

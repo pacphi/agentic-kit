@@ -102,7 +102,7 @@ export const JS = `
   var OVERVIEW_VIEWS=["summary","hosts","providers","runtime","intel"];
   var SYSTEM_VIEWS=["summary","advisory","sessions","storage","runtime","catalog","projects"];
   var ABOUT_SECTIONS=["hosts","engine","quality","kit","configured"];
-  var VIEWS=["score","limits","findings","sessions","models","transcript"];
+  var VIEWS=["score","limits","findings","models","sessions","transcript"];
   var CAT=${CAT_JS};
   ${catOf.toString()}
 
@@ -1004,7 +1004,7 @@ export const JS = `
   // ══ Usage tab ══════════════════════════════════════════════════════════════
   var USAGE=null, usageLoaded=false, usageBusy=false, TRANSCRIPT=null;
   var MODELS=null,MODEL_PAGE=null,modelRows=[],modelSnapshotId=null,modelsBusy=false,modelRequestSeq=0,modelSearchTimer=null;
-  var MODEL_LIMIT=50,modelSort="lifecycle",modelDirection="asc";
+  var MODEL_LIMIT=50,modelSort="lifecycle",modelDirection="asc",modelRouteSort="model",modelRouteDirection="asc";
 
   function fmtUsd(n){
     n=Number(n)||0;
@@ -1198,7 +1198,7 @@ export const JS = `
   function loadModelLifecycle(force,focusAfter,recovering){
     if(!recovering&&(modelsBusy||(!force&&MODELS)))return Promise.resolve();
     setModelsBusy(true,"Loading model lifecycle summary.");
-    return modelJson("/api/models?view=summary").then(function(d){
+    return modelJson("/api/models?view=summary&days="+usageDays).then(function(d){
       MODELS=d;
       modelSnapshotId=d&&d.snapshot&&d.snapshot.snapshotId||null;
       renderModelLifecycle();
@@ -1214,13 +1214,23 @@ export const JS = `
   function setUsageView(v,session){
     usageView=v;
     if(session!==undefined)usageSession=session;
-    var headings={score:["Usage scorecard","Token consumption, API-equivalent cost, efficiency, and trends."],limits:["Provider limits","Current provider windows, reset timing, and available capacity."],findings:["Usage findings","Actionable anomalies, efficiency opportunities, and evidence-backed recommendations."],sessions:["Session usage","Browse retained sessions by project, category, duration, tokens, and cost."],models:["Model lifecycle","Host-scoped inventory, change history, consumers, and evidence-backed swap impact."],transcript:["Transcript detail","Inspect the selected session's locally retained, server-masked evidence."]},heading=headings[v]||headings.score;
+    var headings={score:["Usage scorecard","Token consumption, API-equivalent cost, efficiency, and trends."],limits:["Provider limits","Current provider windows, reset timing, and available capacity."],findings:["Usage findings","Actionable anomalies, efficiency opportunities, and evidence-backed recommendations."],sessions:["Session usage","Browse retained sessions by project, category, duration, tokens, and cost."],models:["Models","Observed models in this window, configured routes, and the separate available catalogue."],transcript:["Transcript detail","Inspect the selected session's locally retained, server-masked evidence."]},heading=headings[v]||headings.score;
     document.getElementById("usage-view-title").textContent=heading[0];document.getElementById("usage-view-description").textContent=heading[1];
     var btns=document.querySelectorAll("#usage-seg [data-view]");
     for(var i=0;i<btns.length;i++){var on=btns[i].getAttribute("data-view")===v;btns[i].setAttribute("aria-selected",on?"true":"false");btns[i].tabIndex=on?0:-1;}
     for(var j=0;j<VIEWS.length;j++){
       var el=document.getElementById("v-"+VIEWS[j]);
-      if(el)el.hidden=(VIEWS[j]!==v);
+      if(el){
+        var visible=VIEWS[j]===v;
+        // The hidden attribute is the semantic boundary. Keep the visual
+        // boundary inline and important as well: third-party browser CSS or a
+        // broad future section rule must not expose Models beneath another
+        // Usage view.
+        el.hidden=!visible;
+        el.setAttribute("aria-hidden",visible?"false":"true");
+        if(visible){el.removeAttribute("inert");el.style.removeProperty("display");}
+        else{el.setAttribute("inert","");el.style.setProperty("display","none","important");}
+      }
     }
     syncHash();
     if(v==="transcript"&&usageSession&&(!TRANSCRIPT||TRANSCRIPT.id!==usageSession)){
@@ -1230,7 +1240,7 @@ export const JS = `
     // subprocess server-side, so it runs when the view is opened, not on poll.
     if(v==="limits"&&!LIMITS)loadLimits();
     if(v==="models"){loadModelLifecycle();if(!LIMITS)loadLimits();}
-    var days=document.getElementById("usage-days");if(days)days.hidden=(v==="models"||v==="transcript");
+    var days=document.getElementById("usage-days");if(days)days.hidden=(v==="transcript");
   }
 
   // Explicit bridge from Observability metadata to the separately fetched,
@@ -1924,34 +1934,94 @@ export const JS = `
       source=pricing.source||'catalogue evidence';
       if(pricing.asOf)source+=' · rates as of '+pricing.asOf;
     }
-    return '<span class="mli-rate"><b>'+esc(rate)+'</b><small>'+esc(source)+' · '+esc(mliPlanUse(host))+'</small></span>';
+    var cited=esc(source);
+    if(pricing&&pricing.sourceUrl){
+      try{var sourceUrl=new URL(String(pricing.sourceUrl));if(sourceUrl.protocol==="https:"&&sourceUrl.hostname==="developers.openai.com")cited='<a href="'+esc(sourceUrl.href)+'" target="_blank" rel="noopener noreferrer">'+esc(source)+'</a>';}catch(e){}
+    }
+    return '<span class="mli-rate"><b>'+esc(rate)+'</b><small>'+cited+' · '+esc(mliPlanUse(host))+'</small></span>';
   }
 
   function mliCapabilities(model){
     var cap=model&&model.capabilities||{},names=[];
     if(cap.toolcall||cap.tools)names.push('Tools');
     if(cap.reasoning)names.push('Reasoning');
+    if(cap.embedding)names.push('Embeddings');
+    if(cap.input&&cap.input.image)names.push('Vision');
     if(cap.structuredOutput)names.push('Structured output');
     if(cap.contextLimit)names.push('Context '+cap.contextLimit);
     return names.length?names.join(' · '):'No capability metadata recorded';
   }
 
+  function mliProviderName(value){
+    var names={openai:'OpenAI',anthropic:'Anthropic',ollama:'Ollama',lmstudio:'LM Studio',
+      'openrouter':'OpenRouter','github-copilot':'GitHub Copilot','claude-code':'Claude Code'};
+    return value?(names[String(value).toLowerCase()]||String(value)):'Not recorded';
+  }
+
+  function mliRouteValue(binding,field){
+    if(field==="model")return binding.modelName||binding.selector||binding.configured||null;
+    if(field==="provider")return binding.modelProvider||binding.provider||null;
+    if(field==="used")return (binding.activity||"")+"\u0000"+(binding.role||"");
+    if(field==="lastUsed"){
+      var when=Date.parse(String(binding.lastUsed||""));return Number.isFinite(when)?when:null;
+    }
+    if(field==="rate"){
+      var pricing=binding.pricing||{},input=Number(pricing.input),output=Number(pricing.output);
+      return Number.isFinite(input)?{input:input,output:Number.isFinite(output)?output:null}:null;
+    }
+    return null;
+  }
+
+  function mliRouteCompare(a,b){
+    var av=mliRouteValue(a,modelRouteSort),bv=mliRouteValue(b,modelRouteSort),aUnknown=av===null,bUnknown=bv===null;
+    if(aUnknown||bUnknown)return aUnknown===bUnknown?0:(aUnknown?1:-1);
+    var order;
+    if(modelRouteSort==="rate"){
+      order=av.input-bv.input;
+      if(!order){
+        var aOutput=av.output===null?Infinity:av.output,bOutput=bv.output===null?Infinity:bv.output;
+        order=aOutput-bOutput;
+      }
+    }else if(typeof av==="number")order=av-bv;
+    else order=String(av).localeCompare(String(bv),undefined,{sensitivity:"base"});
+    if(!order){
+      var aName=String(a.modelName||a.selector||a.configured||""),bName=String(b.modelName||b.selector||b.configured||"");
+      order=aName.localeCompare(bName,undefined,{sensitivity:"base"});
+    }
+    return modelRouteDirection==="desc"?-order:order;
+  }
+
   function mliRouteRows(bindings){
-    var rows=(bindings||[]).filter(function(binding){return binding&&binding.role&&binding.role!=="Configured consumer";});
+    var rows=(bindings||[]).filter(function(binding){return binding&&binding.role&&binding.role!=="Configured consumer";}).sort(mliRouteCompare);
     return rows.map(function(binding){
       var used=(binding.activity||'Unclassified')+' · '+(binding.role||'configured');
       return '<tr><th scope="row"><span class="mli-id"><b>'+esc(binding.modelName||'Model not recorded')+'</b>'
         +(binding.selector?'<small class="mli-selector">'+esc(binding.selector)+'</small>':'')+'</span></th>'
-        +'<td>'+esc(binding.modelProvider||'Not recorded')+'</td><td>'+esc(used)+'</td>'
+        +'<td>'+esc(mliProviderName(binding.modelProvider))+'</td><td>'+esc(used)+'</td>'
         +'<td>'+esc(binding.lastUsed?String(binding.lastUsed).replace('T',' ').replace('.000Z','Z'):'Not observed')+'</td>'
         +'<td>'+mliPrice(binding.pricing,binding.host)+'</td></tr>';
     }).join('')||'<tr><td colspan="5"><div class="empty">No configured routes are recorded. Catalog availability does not create a route.</div></td></tr>';
+  }
+
+  function mliObservedRows(windowed){
+    var models=windowed&&Array.isArray(windowed.models)?windowed.models:[];
+    if(windowed&&windowed.status==='unavailable')return '<tr><td colspan="5"><div class="empty">Observed-use evidence is unavailable. Configured routes and catalog evidence remain available.</div></td></tr>';
+    return models.map(function(model){
+      return '<tr><th scope="row"><span class="mli-id"><b>'+esc(model.modelName||model.selector||'Model not recorded')+'</b>'
+        +(model.selector&&model.selector!==model.modelName?'<small class="mli-selector">'+esc(model.selector)+'</small>':'')+'</span></th>'
+        +'<td>'+esc(mliProviderName(model.modelProvider))+'</td><td>'+esc(model.host||'unknown')+'</td>'
+        +'<td>'+esc(fmtNum(model.sessions||0))+'</td><td>'+esc(model.lastUsed?String(model.lastUsed).replace('T',' ').replace('.000Z','Z'):'Not recorded')+'</td></tr>';
+    }).join('')||'<tr><td colspan="5"><div class="empty">No model use was observed in this window. This does not mean no models are installed or available.</div></td></tr>';
   }
 
   function mliDetail(model){
     var detail=document.getElementById('mli-detail'),body=document.getElementById('mli-detail-body'),title=document.getElementById('mli-detail-title');
     if(!detail||!body||!title||!model)return;
     var id=mliIdentity(model),life=model.lifecycle||{},variants=model.variant||{},observed=model.dimensions&&model.dimensions.observed;
+    var local=id.provider==='ollama'?'<div><dt>Local installation</dt><dd>Installed'+(variants.modifiedAt?' · updated '+esc(variants.modifiedAt):'')+'</dd></div>'
+      +'<div><dt>Loaded now</dt><dd>'+esc(variants.loaded?'Yes':'No')+(variants.expiresAt?' · expires '+esc(variants.expiresAt):'')+'</dd></div>'
+      +'<div><dt>Local model build</dt><dd>'+esc([variants.parameterSize,variants.quantizationLevel,variants.format].filter(Boolean).join(' · ')||'Not exposed')+'</dd></div>'
+      +'<div><dt>Local memory</dt><dd>'+esc(variants.memoryBytes!=null?fmtBytes(variants.memoryBytes)+(variants.vramBytes!=null?' · VRAM '+fmtBytes(variants.vramBytes):''):'Not loaded')+'</dd></div>':'';
     title.textContent=id.name;
     body.innerHTML='<dl class="mli-detail-grid">'
       +'<div><dt>Exact selector</dt><dd>'+esc(id.selector||'Not recorded')+'</dd></div>'
@@ -1962,18 +2032,31 @@ export const JS = `
       +'<div><dt>Context limit</dt><dd>'+esc(variants.contextWindow||model.capabilities&&model.capabilities.contextLimit||'Not exposed')+'</dd></div>'
       +'<div><dt>Capabilities</dt><dd>'+esc(mliCapabilities(model))+'</dd></div>'
       +'<div><dt>API rate / plan use</dt><dd>'+mliPrice(model.pricing,id.host)+'</dd></div>'
+      +local
       +'</dl><h3>Evidence and limitations</h3><div class="mli-proof-body">'+mliEvidence(model,(model.evidence||[]).map(function(row){return row.id;}),'No evidence is available.')+'</div>';
     if(typeof detail.showModal==='function')detail.showModal(); else detail.setAttribute('open','');
   }
 
   function renderModelSort(){
-    var heads=document.querySelectorAll(".mli-table thead th");
+    var heads=document.querySelectorAll(".mli-ledger .mli-table thead th");
     for(var i=0;i<heads.length;i++){
       var button=heads[i].querySelector("[data-mli-sort]"),active=button&&button.getAttribute("data-mli-sort")===modelSort;
       heads[i].setAttribute("aria-sort",active?(modelDirection==="desc"?"descending":"ascending"):"none");
       if(button){
         var mark=button.querySelector("[aria-hidden]");if(mark)mark.textContent=active?(modelDirection==="desc"?"↓":"↑"):"↕";
         button.title=active?"Sorted "+(modelDirection==="desc"?"descending":"ascending")+"; activate to reverse":"Sort by "+button.textContent.replace(/[↕↑↓]/g,"").trim();
+      }
+    }
+  }
+
+  function renderModelRouteSort(){
+    var heads=document.querySelectorAll(".mli-routes-table thead th");
+    for(var i=0;i<heads.length;i++){
+      var button=heads[i].querySelector("[data-mli-route-sort]"),active=button&&button.getAttribute("data-mli-route-sort")===modelRouteSort;
+      heads[i].setAttribute("aria-sort",active?(modelRouteDirection==="desc"?"descending":"ascending"):"none");
+      if(button){
+        var mark=button.querySelector("[aria-hidden]");if(mark)mark.textContent=active?(modelRouteDirection==="desc"?"↓":"↑"):"↕";
+        button.title=active?"Sorted "+(modelRouteDirection==="desc"?"descending":"ascending")+"; activate to reverse":"Sort by "+button.textContent.replace(/[↕↑↓]/g,"").trim();
       }
     }
   }
@@ -2012,12 +2095,32 @@ export const JS = `
     }
     function options(id,all,items){
       var el=document.getElementById(id);if(!el)return;var selected=el.value;
-      var vals=items.filter(function(item){return item&&item!==selected;});if(selected)vals.unshift(selected);
-      el.innerHTML='<option value="">'+esc(all)+'</option>'+vals.map(function(item){return '<option value="'+esc(item)+'">'+esc(item)+'</option>';}).join("");
+      var vals=items.map(function(item){return item&&typeof item==="object"?item:{value:item,count:null};})
+        .filter(function(item){return item&&item.value;});
+      if(selected&&!vals.some(function(item){return String(item.value)===selected;}))vals.unshift({value:selected,count:null});
+      el.innerHTML='<option value="">'+esc(all)+'</option>'+vals.map(function(item){var label=String(item.value)+(Number.isFinite(Number(item.count))?' ('+String(item.count)+')':'');return '<option value="'+esc(item.value)+'">'+esc(label)+'</option>';}).join("");
       el.value=selected;
+      var field=el.closest&&el.closest('.mli-filter');if(field)field.hidden=vals.length<2&&!selected;
     }
     options("mli-host","All hosts",values("hosts",function(id){return id.host;}));
     options("mli-provider","All providers",values("providers",function(id){return id.provider;}));
+    options("mli-lifecycle","Any lifecycle",values("lifecycles",function(){return null;}));
+    var dimensions=facets.dimensions||{},labels={configured:'Configured',effective:'Effective',observed:'Observed',discoverable:'Available',entitled:'Entitled',policyAllowed:'Policy',routable:'Routable'};
+    var fields=Object.keys(labels).filter(function(name){return Array.isArray(dimensions[name])&&dimensions[name].length>=2;});
+    var field=document.getElementById('mli-evidence-field'),selected=field&&field.value;
+    if(field){
+      field.innerHTML='<option value="">Any evidence</option>'+fields.map(function(name){return '<option value="'+esc(name)+'">'+esc(labels[name])+'</option>';}).join('');
+      field.value=fields.indexOf(selected)>=0?selected:'';
+      var fieldWrap=field.closest&&field.closest('.mli-filter');if(fieldWrap)fieldWrap.hidden=fields.length===0;
+    }
+    var evidenceValue=document.getElementById('mli-evidence-value'),states=field&&field.value&&dimensions[field.value]||[];
+    if(evidenceValue){
+      var stateSelected=evidenceValue.value;
+      evidenceValue.innerHTML='<option value="">Any value</option>'+states.map(function(item){var label=String(item.value)+(Number.isFinite(Number(item.count))?' ('+String(item.count)+')':'');return '<option value="'+esc(item.value)+'">'+esc(label)+'</option>';}).join('');
+      evidenceValue.value=states.some(function(item){return item.value===stateSelected;})?stateSelected:'';
+      evidenceValue.disabled=!field||!field.value;
+      var valueWrap=evidenceValue.closest&&evidenceValue.closest('.mli-filter');if(valueWrap)valueWrap.hidden=fields.length===0;
+    }
   }
 
   function renderModelLifecycle(){
@@ -2029,15 +2132,33 @@ export const JS = `
     document.getElementById("mli-asof").textContent=empty?"not captured":("captured "+String(snap.capturedAt||"").replace("T"," ").replace(".000Z","Z"));
     document.getElementById("mli-attention").innerHTML=empty
       ?'<div class="empty">'+esc(MODELS.error||"No model inventory yet. Run ak models refresh explicitly.")+"</div>"
-      :attention.map(function(item){return '<div class="mli-alert" data-level="'+esc(item.severity||"warn")+'"><b>'+esc(item.kind==='migration'?'Route needs attention':item.kind==='source'?'Source needs attention':'Route needs attention')+"</b><br><span>"+esc(item.reason)+". Review this route or run ak models plan for a safe next step.</span></div>";}).join("");
+      :attention.map(function(item){
+        var migration=item.kind==='migration',routes=(item.affectedRoutes||[]).map(function(route){return (route.activity||route.consumer||'Route')+(route.role?' · '+route.role:'');});
+        var title=migration?(routes.length?'Route needs attention':'Model needs attention'):item.kind==='source'?'Source needs attention':'Route needs attention';
+        var detail=migration
+          ? '<span><b>Current:</b> '+esc(item.currentModel||'Model not recorded')+' · <b>recommended:</b> '+esc(item.replacementModel||'Not recorded')+'</span>'
+            +(routes.length?'<br><span><b>Affects:</b> '+esc(routes.join(', '))+'</span>':'')
+            +'<br><span>'+esc(item.reason||'A cited lifecycle change requires review.')+'</span>'
+            +(item.documentationUrl?'<br><a href="'+esc(item.documentationUrl)+'" target="_blank" rel="noopener noreferrer">Read the provider lifecycle notice</a>':'')
+            +'<br><span><b>Next step:</b> <span class="mono">'+esc(item.action||'ak models plan')+'</span></span>'
+          : '<span>'+esc(item.reason||'Evidence needs review')+'. Run <span class="mono">ak models refresh --all</span> for current evidence.</span>';
+        return '<div class="mli-alert" data-level="'+esc(item.severity||"warn")+'"><b>'+esc(title)+'</b><br>'+detail+'</div>';
+      }).join("");
     document.getElementById('mli-routes').innerHTML=mliRouteRows(bindings);
+    var observed=MODELS.observedWindow||{days:usageDays,models:[]};
+    document.getElementById('mli-observed').innerHTML=mliObservedRows(observed);
+    document.getElementById('mli-observed-note').textContent=observed.status==='unavailable'
+      ? String(observed.days||usageDays)+' days · use unavailable'
+      : String(observed.days||usageDays)+' days · '+String((observed.models||[]).length)+' model'+((observed.models||[]).length===1?'':'s');
+    renderModelRouteSort();
     renderModelInventory();
     var changes=snap.changes||[];
     document.getElementById("mli-history-note").textContent=(MODELS.history||[]).length+" retained snapshot"+((MODELS.history||[]).length===1?"":"s");
     document.getElementById("mli-history").innerHTML='<div class="mli-list">'+(changes.map(function(change){return '<div class="mli-row"><span><b>'+esc(change.kind)+'</b><br><small>'+esc(change.subject)+"</small></span><small>"+esc(change.provisional?"provisional":"established")+"</small></div>";}).join("")||'<div class="empty">No same-scope lifecycle changes.</div>')+"</div>";
-    document.getElementById("mli-consumers").innerHTML='<div class="mli-consumer-scroll"><div class="mli-list">'+(bindings.map(function(binding){var model=binding.modelName||binding.configured||'Model not pinned',provider=binding.modelProvider||binding.provider||'Provider not recorded';return '<div class="mli-row"><span><b>'+esc(binding.consumer)+'</b><br><small>'+esc(model)+' · '+esc(provider)+'</small></span><small>'+esc(binding.consumerState||'configured')+'</small></div>';}).join("")||'<div class="empty">No configured model consumers.</div>')+"</div></div>";
-    document.getElementById("mli-impact").innerHTML=bindings.length
-      ?'<div class="note"><span class="i">→</span><span><b>'+bindings.length+' consumer'+(bindings.length===1?"":"s")+'</b> may be affected by a concrete model swap. Run <span class="mono">ak models plan --activity ACTIVITY --to HOST:MODEL</span> for evidence-backed compatibility and a copyable action.</span></div>'
+    var routeBindings=bindings.filter(function(binding){return binding.role&&binding.role!=="Configured consumer";});
+    document.getElementById("mli-consumers").innerHTML='<div class="mli-consumer-scroll"><div class="mli-list">'+(routeBindings.map(function(binding){var model=binding.modelName||binding.configured||'Model not pinned';return '<div class="mli-row"><span><b>'+esc(binding.consumer)+'</b><br><small>'+esc(model)+' · '+esc(mliProviderName(binding.modelProvider||binding.provider))+'</small></span><small>'+esc(binding.lastUsed?'last used '+String(binding.lastUsed).replace('T',' ').replace('.000Z','Z'):'not observed in this window')+'</small></div>';}).join("")||'<div class="empty">No configured model routes.</div>')+"</div></div>";
+    document.getElementById("mli-impact").innerHTML=routeBindings.length
+      ?'<div class="note"><span class="i">→</span><span><b>'+routeBindings.length+' route consumer'+(routeBindings.length===1?"":"s")+'</b> may be affected by a concrete model swap. Run <span class="mono">ak models plan --activity ACTIVITY --to HOST:MODEL</span> for evidence-backed compatibility and a copyable action.</span></div>'
       :'<div class="empty">No bound consumers to assess. A plan will remain read-only and report the missing binding.</div>';
   }
 
@@ -2079,8 +2200,7 @@ export const JS = `
       modelForm.addEventListener("change",function(e){
         if(!e.target||e.target.id==="mli-search")return;
         if(e.target.id==="mli-evidence-field"){
-          var evidenceValue=document.getElementById("mli-evidence-value"),hasField=!!String(e.target.value||"").trim();
-          if(evidenceValue){evidenceValue.disabled=!hasField;if(!hasField)evidenceValue.value="";}
+          renderModelFacets();
         }
         resetModelPage();
       });
@@ -2100,6 +2220,16 @@ export const JS = `
       if(modelSort===next)modelDirection=modelDirection==="asc"?"desc":"asc";
       else{modelSort=next;modelDirection="asc";}
       renderModelSort();resetModelPage();
+    });
+    var routesTable=document.querySelector(".mli-routes-table");
+    if(routesTable)routesTable.addEventListener("click",function(e){
+      var button=e.target.closest?e.target.closest("[data-mli-route-sort]"):null;if(!button)return;
+      var next=button.getAttribute("data-mli-route-sort");
+      if(modelRouteSort===next)modelRouteDirection=modelRouteDirection==="asc"?"desc":"asc";
+      else{modelRouteSort=next;modelRouteDirection="asc";}
+      var body=document.getElementById("mli-routes"),bindings=MODELS&&MODELS.snapshot&&MODELS.snapshot.bindings||[];
+      if(body)body.innerHTML=mliRouteRows(bindings);
+      renderModelRouteSort();
     });
     if(modelTable)modelTable.addEventListener('click',function(e){
       var button=e.target.closest?e.target.closest('[data-mli-detail]'):null;if(!button)return;
@@ -2123,6 +2253,7 @@ export const JS = `
       usageLoaded=false; loadUsage(true);
       // limit findings are computed against the same window; refetch on change.
       LIMITS=null; if(usageView==="limits")loadLimits();
+      if(usageView==="models"){MODELS=null;modelSnapshotId=null;loadModelLifecycle(true,false,false);}
     });
     var panel=document.getElementById("panel-usage");
     if(panel)panel.addEventListener("click",function(e){

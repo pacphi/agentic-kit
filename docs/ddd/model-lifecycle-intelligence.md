@@ -2,7 +2,7 @@
 
 This document defines the bounded context accepted by
 [ADR-0032](../adr/0032-model-lifecycle-intelligence.md). The implementation and exact-head release
-proof are recorded by ADR-0032, whose status is Implemented.
+proof are recorded by ADR-0032, whose current status is Implemented.
 
 ## Purpose
 
@@ -102,7 +102,7 @@ binding even after an effective concrete target is resolved.
 
 ### CatalogSource
 
-A source identifies its owner and owner type, file/command/index transport, `never`/`local`/
+A source identifies its owner and owner type, file/command/HTTP/index transport, `never`/`local`/
 `explicit` network policy, local or online collection mode, source/schema version, capture time,
 non-identifying scope fingerprint, status, completeness, and diagnostics. Status is one of
 `complete`, `partial`, `stale`, `unavailable`, `unsupported`, or `unsupported-schema`.
@@ -214,6 +214,12 @@ listing. Display name, family, capabilities, limits, lifecycle, and pricing are 
 an exact provider/model-key catalogue join. Arbitrary bounded selectors remain usable without
 making custom provider URLs, headers, options, or ids public. Neither path invokes a model or sends
 a prompt.
+
+Ollama refresh contacts only its loopback `/api/tags`, `/api/show`, and `/api/ps` endpoints. It
+keeps installed name, digest, size, update time, format/family/build, bounded capability/context and
+license summaries, plus loaded memory/VRAM/context/expiry. Raw templates, model files, parameters,
+and full license bodies are discarded. A bounded `ollama ls` compatibility fallback is marked
+partial because it cannot establish runtime facts. Installed and loaded never imply observed use.
 
 ## Privacy and delivery
 

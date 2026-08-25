@@ -45,7 +45,9 @@ const DISCOVERY_OPTIONS = Object.freeze({
     configRaw: inputs.opencode?.configRaw, catalogRaw: inputs.opencode?.catalogRaw,
     fetchFn: inputs.opencode?.fetchFn,
   }),
-  'ollama-catalog': ({ base, runner }) => ({ ...base, runner }),
+  'ollama-catalog': ({ base, inputs, runner }) => ({
+    ...base, runner, fetchFn: inputs.ollama?.fetchFn, baseUrl: inputs.ollama?.baseUrl,
+  }),
 });
 
 function descriptorResult(result, descriptor, online) {

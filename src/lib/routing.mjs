@@ -103,22 +103,12 @@ export const MODEL_CATALOG = {
 // it; adding it here asserts it no longer ANSWERS. Those are different claims
 // and only the second one needs a citation.
 //
-// Verified against the hosts' own deprecation notices on MODEL_CATALOG_VERIFIED:
-//   developers.openai.com/codex/models — gpt-5.4 and gpt-5.4-mini retire
-//     2026-08-31 (migrate to gpt-5.6-terra / gpt-5.6-luna); gpt-5.3-codex is
-//     already withdrawn for ChatGPT sign-in.
-//   platform.claude.com/docs/en/about-claude/model-deprecations — claude-opus-4-8
-//     carries NO deprecation notice; it is the migration TARGET for opus-4-1
-//     (which retires 2026-08-05). So it is deliberately absent here even though
-//     the defaults have moved past it: that is divergence, not retirement, and
-//     divergedRoutes() already reports it for the user to decide.
-//
-// `retiresOn` is null when the withdrawal has already taken effect.
-export const RETIRED_MODELS = Object.freeze({
-  'gpt-5.4': { replacement: 'gpt-5.6-terra', retiresOn: '2026-08-31' },
-  'gpt-5.4-mini': { replacement: 'gpt-5.6-luna', retiresOn: '2026-08-31' },
-  'gpt-5.3-codex': { replacement: 'gpt-5.6-luna', retiresOn: null },
-});
+// No automatic migrations are currently asserted. The 2026-08-25 OpenAI API
+// catalog still publishes GPT-5.4 and GPT-5.4 mini, and its deprecations list
+// does not establish the previously claimed 2026-08-31 withdrawal. A local
+// host cache or a preferred successor is not enough to override a user route.
+// Add an entry only with its direct first-party withdrawal-notice URL.
+export const RETIRED_MODELS = Object.freeze({});
 
 /** The retirement record for a model id, or null when it is still current. Pure. */
 export function retirementOf(model) {

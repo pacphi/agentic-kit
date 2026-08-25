@@ -29,21 +29,21 @@ test('dashboard routing describes host assignment without manufacturing a provid
   assert.equal(Object.hasOwn(route, 'provider'), false);
 });
 
-test('a route pinned to a retired model reports the substitution, not the dead id', () => {
+test('a route keeps its exact configured model when no cited retirement exists', () => {
   const payload = routingPayload({
     routing: {
       primaryHost: 'claude',
       routes: {
-        // A `user` pin: never rewritten on disk, but still substituted for the
-        // run, because honoring a pin into a withdrawn model just fails.
+        // A user pin is an operator fact. Without a direct first-party
+        // withdrawal notice, the dashboard must not manufacture a replacement.
         implementation: { host: 'codex', model: 'gpt-5.4', provenance: 'user' },
       },
     },
   });
   const route = payload.routes.find((entry) => entry.activity === 'implementation');
-  assert.equal(route.model, 'gpt-5.6-terra', 'the panel must show what will actually run');
-  assert.equal(route.retiredFrom, 'gpt-5.4', 'and name the id it replaced');
-  assert.equal(route.retiresOn, '2026-08-31');
+  assert.equal(route.model, 'gpt-5.4', 'the panel must show the exact configured model');
+  assert.equal(Object.hasOwn(route, 'retiredFrom'), false);
+  assert.equal(Object.hasOwn(route, 'retiresOn'), false);
 });
 
 test('retirement and divergence are separate signals on the wire', () => {

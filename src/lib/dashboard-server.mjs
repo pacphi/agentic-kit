@@ -1407,7 +1407,15 @@ export function startDashboard({
           sendJson(res, 503, { error: 'model dashboard privacy key unavailable' });
           return;
         }
-        sendJson(res, 200, createDashboardModelViewPayload(payload, { key, query }));
+        const days = clampDays(query.get('days'));
+        let usage = null;
+        if (query.get('view') === 'summary' && typeof usageApi.readIndex === 'function') {
+          try { usage = await usageApi.readIndex({ days }); }
+          catch { usage = { unavailable: true, sessions: [] }; }
+        }
+        sendJson(res, 200, createDashboardModelViewPayload(payload, {
+          key, query, ...(usage ? { usage, days } : {}),
+        }));
       } catch (error) {
         // Do not echo native parser/provider errors: they may contain a private identifier.
         const invalid = error?.code === 'INVALID_MODEL_INVENTORY_QUERY';

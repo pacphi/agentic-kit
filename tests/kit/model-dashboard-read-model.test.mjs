@@ -123,7 +123,7 @@ test('owner-visible projection exposes exact model identity while withholding co
     servingProvider: codex.servingProvider, publisher: codex.publisher, privacyClass: codex.privacyClass,
   }, {
     displayName: 'GPT-5.6 Codex', humanName: 'GPT-5.6 Codex', selector: 'gpt-5.6-codex',
-    servingProvider: null, publisher: 'OpenAI', privacyClass: 'public-catalog',
+    servingProvider: 'openai', publisher: 'OpenAI', privacyClass: 'public-catalog',
   });
   assert.deepEqual({
     displayName: opencode.displayName, selector: opencode.selector,
@@ -209,6 +209,44 @@ test('owner-visible projection exposes exact model identity while withholding co
   assert.equal(serializedPrivate.includes('private-prod'), false, 'private execution variant stays hidden');
   assert.equal(privateProjection.snapshot.models.slice(-4)
     .every(({ privacyClass }) => privacyClass === 'owner-visible'), true);
+
+  const localInput = payload();
+  localInput.snapshot.models[4].key.provider = 'ollama';
+  localInput.snapshot.models[4].variant = {
+    modifiedAt: '2026-08-24T10:00:00.000Z', format: 'gguf', family: 'qwen3',
+    families: ['qwen3'], parameterSize: '30.5B', quantizationLevel: 'Q4_K_M',
+    expiresAt: '2026-08-25T14:00:00.000Z', licenseSummary: 'Apache-2.0',
+    advertisedCapabilities: ['completion', 'tools'], reasoningEffort: 'private-local-setting',
+  };
+  const local = createDashboardModelPayload(localInput, { key: KEY }).snapshot.models[4];
+  assert.deepEqual(local.variant, {
+    modifiedAt: '2026-08-24T10:00:00.000Z', format: 'gguf', family: 'qwen3',
+    families: ['qwen3'], parameterSize: '30.5B', quantizationLevel: 'Q4_K_M',
+    expiresAt: '2026-08-25T14:00:00.000Z', licenseSummary: 'Apache-2.0',
+    advertisedCapabilities: ['completion', 'tools'],
+    reasoningEffort: local.variant.reasoningEffort,
+  });
+  assert.match(local.variant.reasoningEffort, /^variant-[a-f0-9]{12}$/);
+});
+
+test('migration attention names affected routes, replacement, action, and first-party notice', () => {
+  const input = payload();
+  input.snapshot.models[0].lifecycle.notice = 'https://developers.openai.com/api/docs/deprecations/';
+  input.snapshot.bindings = [{
+    id: 'binding:codex-review', consumer: 'route:review', activity: 'review',
+    host: 'codex', provider: 'openai', configured: 'gpt-5.6-codex', effective: 'gpt-5.6-codex',
+    consumerState: 'configured', evidenceRefs: [],
+  }];
+  const [attention] = createDashboardModelPayload(input, { key: KEY }).snapshot.attention;
+  assert.deepEqual({
+    kind: attention.kind, current: attention.currentModel, replacement: attention.replacementModel,
+    routes: attention.affectedRoutes, docs: attention.documentationUrl, action: attention.action,
+  }, {
+    kind: 'migration', current: 'GPT-5.6 Codex', replacement: 'gpt-5.7-codex',
+    routes: [{ activity: 'review', consumer: 'review · primary', role: 'primary' }],
+    docs: 'https://developers.openai.com/api/docs/deprecations/',
+    action: 'ak models plan --activity review --to codex:gpt-5.7-codex',
+  });
 });
 
 test('payload envelopes allowlist cached, history, comparison, and empty fields', () => {
@@ -262,6 +300,20 @@ test('owner-visible bindings name the consumer, exact model, and provider withou
   assert.equal(JSON.stringify(binding).includes('secret-route-id'), false);
 });
 
+test('an exact official Claude id observed by the Claude host establishes Anthropic as model provider', () => {
+  const input = payload();
+  const observed = model({
+    host: 'claude', provider: null, id: 'claude-opus-4-8', name: 'claude-opus-4-8',
+    source: 'usage-index', values: { observed: true, entitled: true },
+  });
+  for (const row of observed.evidence) row.class = 'observed';
+  input.snapshot.models.push(observed);
+  const projected = createDashboardModelPayload(input, { key: KEY }).snapshot.models.at(-1);
+  assert.deepEqual({
+    name: projected.displayName, provider: projected.servingProvider, publisher: projected.publisher,
+  }, { name: 'Claude Opus 4.8', provider: 'anthropic', publisher: 'Anthropic' });
+});
+
 test('summary mode omits only the large model inventory and reports inventory counts', () => {
   const result = createDashboardModelViewPayload(payload(), {
     key: KEY, query: new URLSearchParams('view=summary'),
@@ -272,6 +324,52 @@ test('summary mode omits only the large model inventory and reports inventory co
   assert.equal(result.inventory.total, 8);
   assert.equal(result.inventory.relevantTotal, 5);
   assert.equal(result.snapshot.counts.models, 8);
+});
+
+test('summary mode projects windowed observed models and joins actual route last-use evidence', () => {
+  const input = payload();
+  input.snapshot.bindings = [{
+    id: 'binding:codex-review', consumer: 'route:review', activity: 'review',
+    host: 'codex', provider: null, configured: 'gpt-5.6-codex', effective: 'gpt-5.6-codex',
+    consumerState: 'configured', evidenceRefs: [],
+  }];
+  const usage = {
+    generatedAt: '2026-08-25T13:30:00.000Z',
+    sessions: [{
+      id: 'private-session-one', host: 'codex', provider: 'openai',
+      models: ['gpt-5.6-codex'], start: '2026-08-24T10:00:00.000Z', minutes: 30,
+      responses: 8, tokens: 1_000, cost: 0.25, title: 'private title', project: 'private project',
+    }, {
+      id: 'private-session-two', host: 'codex', provider: 'openai',
+      models: ['gpt-5.6-codex'], start: '2026-08-25T12:00:00.000Z', minutes: 15,
+      responses: 3, tokens: 500, cost: 0.1,
+    }, {
+      id: 'private-opencode-session', host: 'opencode', provider: 'lmstudio',
+      models: ['qwen/qwen3-coder-30b'], start: '2026-08-23T12:00:00.000Z', minutes: 5,
+      responses: 1, tokens: 100, cost: 0,
+    }],
+  };
+  const result = createDashboardModelViewPayload(input, {
+    key: KEY, usage, days: 14, query: new URLSearchParams('view=summary&days=14'),
+  });
+  assert.equal(result.observedWindow.days, 14);
+  assert.equal(result.observedWindow.generatedAt, usage.generatedAt);
+  assert.deepEqual(result.observedWindow.models.map((row) => ({
+    model: row.modelName, provider: row.modelProvider, host: row.host,
+    sessions: row.sessions, lastUsed: row.lastUsed,
+  })), [{
+    model: 'GPT-5.6 Codex', provider: 'openai', host: 'codex', sessions: 2,
+    lastUsed: '2026-08-25T12:15:00.000Z',
+  }, {
+    model: 'qwen/qwen3-coder-30b', provider: 'lmstudio', host: 'opencode', sessions: 1,
+    lastUsed: '2026-08-23T12:05:00.000Z',
+  }]);
+  assert.equal(result.snapshot.bindings[0].modelProvider, 'openai');
+  assert.equal(result.snapshot.bindings[0].lastUsed, '2026-08-25T12:15:00.000Z');
+  const wire = JSON.stringify(result);
+  assert.equal(wire.includes('private-session-one'), false);
+  assert.equal(wire.includes('private title'), false);
+  assert.equal(wire.includes('private project'), false);
 });
 
 test('inventory mode defaults to relevant rows, pages at 100 max, and returns stable metadata', () => {
@@ -287,11 +385,19 @@ test('inventory mode defaults to relevant rows, pages at 100 max, and returns st
   assert.equal(result.inventory.nextOffset, null);
   assert.equal(result.inventory.sort, 'displayName');
   assert.equal(result.inventory.direction, 'asc');
-  assert.deepEqual(result.inventory.facets.hosts, ['claude', 'codex', 'ollama', 'opencode']);
+  assert.deepEqual(result.inventory.facets.hosts, [
+    { value: 'claude', count: 2 }, { value: 'codex', count: 3 },
+    { value: 'ollama', count: 1 }, { value: 'opencode', count: 2 },
+  ]);
   assert.deepEqual(result.inventory.facets.providers,
-    ['anthropic', 'custom-private', 'openrouter', 'private-gateway', 'private-provider']);
-  assert.deepEqual(result.inventory.facets.publishers, ['Anthropic', 'OpenAI']);
-  assert.deepEqual(result.inventory.facets.lifecycles, ['active', 'retiring']);
+    ['anthropic', 'custom-private', 'openai', 'openrouter', 'private-gateway', 'private-provider']
+      .map((value) => ({ value, count: value === 'openai' ? 2 : 1 })));
+  assert.deepEqual(result.inventory.facets.publishers,
+    [{ value: 'Anthropic', count: 2 }, { value: 'OpenAI', count: 2 }]);
+  assert.deepEqual(result.inventory.facets.lifecycles,
+    [{ value: 'active', count: 6 }, { value: 'retiring', count: 2 }]);
+  assert.deepEqual(result.inventory.facets.dimensions.entitled,
+    [{ value: 'unknown', count: 7 }, { value: 'yes', count: 1 }]);
   assert.equal(result.snapshot.snapshotId.startsWith('snapshot-'), true);
   const names = result.inventory.items.map(({ displayName }) => displayName);
   for (const name of ['Acme Claude Gateway', 'Acme Secret Model', 'Claude Sonnet 4.6', 'GPT-5.6 Codex']) {
@@ -363,9 +469,16 @@ test('inventory pages are bound to one privacy-projected snapshot id', () => {
 test('authenticated /api/models exposes additive summary/inventory modes and generic query failures', async () => {
   const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-model-dashboard-'));
   let reads = 0;
+  const usageReads = [];
+  let usageFails = false;
   const server = await startDashboard({
     cwd, port: 0, fetchStatus: async () => ({ overall: 'ok', rows: [] }),
-    usage: {}, modelScopeKey: KEY, models: async () => { reads++; return payload(); },
+    usage: { readIndex: async (options) => {
+      usageReads.push(options);
+      if (usageFails) throw new Error('private usage failure');
+      return { generatedAt: AT, sessions: [] };
+    } },
+    modelScopeKey: KEY, models: async () => { reads++; return payload(); },
     discoverProjects: () => [], machineWideIntel: () => ({}),
   });
   const get = async (suffix) => {
@@ -375,10 +488,20 @@ test('authenticated /api/models exposes additive summary/inventory modes and gen
     return { response, body: await response.json() };
   };
   try {
-    const summary = await get('?view=summary');
+    const summary = await get('?view=summary&days=30');
     assert.equal(summary.response.status, 200);
     assert.equal('models' in summary.body.snapshot, false);
+    assert.equal(summary.body.observedWindow.days, 30);
+    assert.deepEqual(usageReads, [{ days: 30 }]);
     assert.equal(summary.response.headers.get('cache-control'), 'no-store');
+
+    usageFails = true;
+    const degraded = await get('?view=summary&days=7');
+    assert.equal(degraded.response.status, 200);
+    assert.equal(degraded.body.observedWindow.status, 'unavailable');
+    assert.equal(degraded.body.observedWindow.days, 7);
+    assert.equal(degraded.body.snapshot.counts.models, 8);
+    usageFails = false;
 
     const inventory = await get('?view=inventory&relevance=all&limit=2&offset=2');
     assert.equal(inventory.response.status, 200);
@@ -392,7 +515,7 @@ test('authenticated /api/models exposes additive summary/inventory modes and gen
     const stale = await get('?view=inventory&offset=2&snapshotId=snapshot-stale');
     assert.equal(stale.response.status, 409);
     assert.deepEqual(stale.body, { error: 'model inventory changed; retry' });
-    assert.equal(reads, 4);
+    assert.equal(reads, 5);
   } finally {
     await server.close();
     fs.rmSync(cwd, { recursive: true, force: true });

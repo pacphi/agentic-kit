@@ -447,7 +447,10 @@ body.gated .band,body.gated .tabbar,body.gated main{display:none}
 .chipf.on{border-color:var(--accent); color:var(--accent); background:var(--accent-soft)}
 .chipf:focus-visible{outline:2px solid var(--accent); outline-offset:1px}
 .chipf:disabled{opacity:.5; cursor:not-allowed}
-.view[hidden]{display:none}
+/* Usage panes are independent products. The !important guard is intentional here:
+   a broad future section rule must never let the Models operator panels leak
+   into Scorecard, Limits, Findings, Sessions, or Transcript. */
+#panel-usage > .view[hidden]{display:none!important}
 
 /* Model lifecycle intelligence: an evidence ledger, intentionally denser than
    the Usage charts because each column is an independent provenance claim. */
@@ -457,7 +460,7 @@ body.gated .band,body.gated .tabbar,body.gated main{display:none}
 .mli-summary:hover{border-color:color-mix(in srgb,var(--accent) 45%,var(--line))}
 .mli-summary:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 .mli-summary span:first-child{display:flex;flex-direction:column;gap:3px}.mli-summary small{color:var(--mli-muted)}
-.mli-copy{margin:0 0 12px;color:var(--mli-muted);font-size:12px}.mli-ledger>summary{display:flex;justify-content:space-between;align-items:center;gap:12px;cursor:pointer;list-style:none}.mli-ledger>summary::-webkit-details-marker{display:none}.mli-ledger>summary small{display:block;margin-top:3px;color:var(--mli-muted);font-size:11px}.mli-catalog-body{padding-top:14px}
+.mli-copy{margin:0 0 12px;color:var(--mli-muted);font-size:12px}.mli-ledger>summary{display:flex;justify-content:space-between;align-items:center;gap:12px;cursor:pointer;list-style:none}.mli-ledger>summary::-webkit-details-marker{display:none}.mli-ledger-title{display:flex;align-items:baseline;gap:8px}.mli-ledger>summary:hover .chev{color:var(--accent)}.mli-ledger[open]>summary .chev{transform:rotate(90deg);color:var(--accent)}.mli-ledger>summary:focus-visible{outline:2px solid var(--accent);outline-offset:3px;border-radius:4px}.mli-ledger>summary small{display:block;margin-top:3px;color:var(--mli-muted);font-size:11px}.mli-catalog-body{padding-top:14px}
 .mli-attention{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:8px;margin-bottom:16px}
 .mli-alert{padding:10px 12px;border-left:3px solid var(--warn);border-radius:0 var(--r-sm) var(--r-sm) 0;
   background:color-mix(in srgb,var(--warn) 9%,var(--panel));font-size:12px;color:var(--ink)}

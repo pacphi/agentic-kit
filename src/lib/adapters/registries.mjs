@@ -83,14 +83,14 @@ export function validateObservabilityAdapter(value) {
 
 export function validateModelDiscoveryAdapter(value) {
   assertRecord(value, 'modelDiscovery');
-  const allowed = new Set(['id', 'ownerType', 'ownerId', 'transport', 'command', 'network', 'schema', 'scope']);
+  const allowed = new Set(['id', 'ownerType', 'ownerId', 'transport', 'command', 'endpoint', 'network', 'schema', 'scope']);
   for (const key of Object.keys(value)) {
     if (!allowed.has(key)) throw new TypeError(`modelDiscovery has unknown field ${key}`);
   }
   assertId(value.id, 'modelDiscovery.id');
   assertEnum(value.ownerType, ['host', 'provider'], 'modelDiscovery.ownerType');
   assertId(value.ownerId, 'modelDiscovery.ownerId');
-  assertEnum(value.transport, ['file', 'command'], 'modelDiscovery.transport');
+  assertEnum(value.transport, ['file', 'command', 'http'], 'modelDiscovery.transport');
   assertEnum(value.network, ['never', 'local', 'explicit'], 'modelDiscovery.network');
   assertEnum(value.scope ?? 'profile', ['profile', 'project', 'local'], 'modelDiscovery.scope');
   if (typeof value.schema !== 'string' || !value.schema) throw new TypeError('modelDiscovery.schema is required');
@@ -99,7 +99,16 @@ export function validateModelDiscoveryAdapter(value) {
       throw new TypeError('modelDiscovery.command must be an executable name');
     }
   } else if (value.command !== undefined) {
-    throw new TypeError('file modelDiscovery cannot declare command');
+    throw new TypeError('non-command modelDiscovery cannot declare command');
+  }
+  if (value.transport === 'http') {
+    let endpoint;
+    try { endpoint = new URL(value.endpoint); } catch { throw new TypeError('HTTP modelDiscovery.endpoint must be a URL'); }
+    if (endpoint.protocol !== 'http:' || !['127.0.0.1', 'localhost', '[::1]'].includes(endpoint.hostname)) {
+      throw new TypeError('HTTP modelDiscovery.endpoint must be loopback HTTP');
+    }
+  } else if (value.endpoint !== undefined) {
+    throw new TypeError('non-HTTP modelDiscovery cannot declare endpoint');
   }
   return immutable(structuredClone(value));
 }
@@ -179,7 +188,7 @@ const MODEL_DISCOVERY_MAP = registryFrom([
   { id: 'claude-config', ownerType: 'host', ownerId: 'claude', transport: 'file', network: 'never', scope: 'profile', schema: 'claude-settings-v1' },
   { id: 'codex-cache', ownerType: 'host', ownerId: 'codex', transport: 'file', network: 'never', scope: 'profile', schema: 'codex-model-cache-v1' },
   { id: 'opencode-models', ownerType: 'host', ownerId: 'opencode', transport: 'command', command: 'opencode', network: 'explicit', scope: 'project', schema: 'opencode-models-lines-v1' },
-  { id: 'ollama-catalog', ownerType: 'provider', ownerId: 'ollama', transport: 'command', command: 'ollama', network: 'local', scope: 'local', schema: 'ollama-ls-v1' },
+  { id: 'ollama-catalog', ownerType: 'provider', ownerId: 'ollama', transport: 'http', endpoint: 'http://127.0.0.1:11434', network: 'local', scope: 'local', schema: 'ollama-api-v1' },
 ], validateModelDiscoveryAdapter, 'model discovery');
 
 const hostEntries = [

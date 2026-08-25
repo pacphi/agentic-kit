@@ -15,7 +15,7 @@
 // ── Table ────────────────────────────────────────────────────────────────────
 
 /** The date the whole table was last verified — date-stamped in the UI. */
-export const PRICES_AS_OF = '2026-07-25';
+export const PRICES_AS_OF = '2026-08-25';
 
 // ── Rate constructors ────────────────────────────────────────────────────────
 // A rate entry is always a SCHEDULE — an ordered list of periods, each with the
@@ -88,17 +88,14 @@ export const PRICES = {
   // Anthropic — Haiku line
   'claude-haiku-4-5': anthropic(1, 5),
 
-  // OpenAI (Codex). Verified against developers.openai.com/api/docs/pricing and
-  // /api/docs/models on 2026-07-25. There is NO machine-readable pricing in
+  // OpenAI (Codex). Verified against the individual OpenAI API model pages on
+  // 2026-08-25. There is NO machine-readable pricing in
   // ~/.codex/models_cache.json (checked: zero price/pricing/usd keys), so this
   // table is maintained by hand and is the most drift-prone thing in this file.
   //
-  // As of the verification date OpenAI publishes no introductory or promotional
-  // rates — the pricing page carries no promo tiers and no expiry dates — so
-  // every entry below is a single always-applied period. That is a fact about
-  // the DATA, not a limitation of the table: `openai.dated([...])` is available
-  // and behaves identically to the Anthropic case, so if OpenAI ships a dated
-  // promo it is a one-line edit here rather than new machinery.
+  // GPT-5.6 Sol currently has promotional pricing, but OpenAI publishes no
+  // start date and only says it is available at least through 2026-11-21. The
+  // current rate is therefore recorded without inventing a future boundary.
   //
   // OpenAI's cached-input rate is a 90% discount (0.1x) and cache writes are
   // 1.25x — the SAME multipliers as Anthropic, which is why costOf() needs no
@@ -112,9 +109,9 @@ export const PRICES = {
   // spent tokens on them are read forever, and deleting their keys would
   // silently re-cost that history at FALLBACK_PRICE. Retirement is a routing
   // decision; this table is a historical record. Never prune one from the other.
-  'gpt-5.6-sol': openai(5, 30),
-  'gpt-5.6-terra': openai(2.5, 15),
-  'gpt-5.6-luna': openai(1, 6),
+  'gpt-5.6-sol': openai(4, 20),
+  'gpt-5.6-terra': openai(2, 12),
+  'gpt-5.6-luna': openai(0.2, 1.2),
   'gpt-5.5-pro': openai(30, 180), // before gpt-5.5, so the longer key wins
   'gpt-5.5': openai(5, 30),
   'gpt-5.4-mini': openai(0.75, 4.5),

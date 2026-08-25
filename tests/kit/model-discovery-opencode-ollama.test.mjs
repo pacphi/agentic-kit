@@ -4,7 +4,9 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { collectOpenCode, discoverOpenCode } from '../../src/lib/model-inventory/discovery/opencode.mjs';
-import { collectOllama, discoverOllama } from '../../src/lib/model-inventory/discovery/ollama.mjs';
+import {
+  collectOllama, discoverOllama, discoverOllamaApi,
+} from '../../src/lib/model-inventory/discovery/ollama.mjs';
 import { DISCOVERY_DISPATCH, discoverModels } from '../../src/lib/model-inventory/discovery/index.mjs';
 import { normalizeModelRecord, normalizeSourceResult } from '../../src/lib/model-inventory/contracts.mjs';
 
@@ -244,16 +246,94 @@ test('Ollama parses local names and digests without claiming entitlement', () =>
   assert.doesNotThrow(() => normalizeSourceResult(result.source));
 });
 
-test('Ollama collector invokes ls only and caps untrusted output', async () => {
+test('Ollama API joins installed, bounded details, and loaded runtime evidence without claiming use', () => {
+  const result = discoverOllamaApi({
+    scopeKey: SCOPE_KEY,
+    tagsRaw: { models: [{ name: 'qwen3-coder:latest', digest: 'sha256:9e3f6a12abcd', size: 18_000,
+      modified_at: '2026-08-24T10:00:00Z', details: { format: 'gguf', family: 'qwen3', families: ['qwen3'],
+        parameter_size: '30.5B', quantization_level: 'Q4_K_M' } }] },
+    psRaw: { models: [{ name: 'qwen3-coder:latest', size: 12_000, size_vram: 8_000,
+      context_length: 32_768, expires_at: '2026-08-25T14:00:00Z' }] },
+    showByModel: { 'qwen3-coder:latest': { license: 'Apache-2.0\nfull body omitted',
+      capabilities: ['completion', 'tools', 'thinking', 'unknown-private'],
+      model_info: { 'qwen3.context_length': 131_072 }, details: { family: 'qwen3' },
+      template: 'PRIVATE TEMPLATE', modelfile: 'PRIVATE MODELFILE' } },
+  });
+  assert.equal(result.status, 'complete');
+  assert.equal(result.source.schema, 'ollama-api-v1');
+  assert.equal(result.source.transport, 'http');
+  const [model] = result.models;
+  assert.equal(model.identity.host, 'ollama');
+  assert.equal(model.identity.provider, 'ollama');
+  assert.deepEqual(model.variant, {
+    digest: 'sha256:9e3f6a12abcd', sizeBytes: 18_000, modifiedAt: '2026-08-24T10:00:00.000Z',
+    format: 'gguf', family: 'qwen3', families: ['qwen3'], parameterSize: '30.5B',
+    quantizationLevel: 'Q4_K_M', loaded: true, memoryBytes: 12_000, vramBytes: 8_000,
+    expiresAt: '2026-08-25T14:00:00.000Z', contextWindow: 32_768,
+    licenseSummary: 'Apache-2.0', advertisedCapabilities: ['completion', 'tools', 'thinking'],
+  });
+  assert.deepEqual(model.capabilities, { contextLimit: 32_768, toolcall: true, reasoning: true });
+  assert.equal(model.pricing.input, 0);
+  assert.equal(model.dimensions.observed.value, null);
+  assert.equal(model.evidence.find(({ field }) => field === 'variant.loaded').class, 'runtime');
+  assert.equal(JSON.stringify(model).includes('PRIVATE TEMPLATE'), false);
+  assert.equal(JSON.stringify(model).includes('PRIVATE MODELFILE'), false);
+  assert.doesNotThrow(() => normalizeModelRecord(model));
+  assert.doesNotThrow(() => normalizeSourceResult(result.source));
+});
+
+test('Ollama collector contacts only loopback tags, show, and runtime APIs', async () => {
+  const calls = [];
+  const payload = (value) => new Response(JSON.stringify(value), {
+    headers: { 'content-type': 'application/json' },
+  });
+  const fetchFn = async (url, options) => {
+    calls.push([new URL(url).pathname, options.method, options.body]);
+    if (new URL(url).pathname === '/api/tags') return payload({ models: [
+      { name: 'qwen3-coder:latest', digest: '9e3f6a12abcd', details: {} },
+    ] });
+    if (new URL(url).pathname === '/api/ps') return payload({ models: [] });
+    return payload({ capabilities: ['tools'] });
+  };
+  const result = await collectOllama({ fetchFn, runner: async () => assert.fail('CLI fallback ran'), scopeKey: SCOPE_KEY });
+  assert.equal(result.status, 'complete');
+  assert.deepEqual(calls.map(([pathname, method]) => [pathname, method]), [
+    ['/api/tags', 'GET'], ['/api/ps', 'GET'], ['/api/show', 'POST'],
+  ]);
+  assert.deepEqual(JSON.parse(calls[2][2]), { model: 'qwen3-coder:latest' });
+});
+
+test('Ollama API failure falls back to bounded argv and remains partial', async () => {
   const calls = [];
   const runner = async (command, args, options) => {
     calls.push({ command, args, options });
-    return { code: 0, stdout: 'x'.repeat(3_000_000), stderr: '' };
+    return { code: 0, stdout: fixture('ollama', 'list.txt'), stderr: '' };
   };
-  const result = await collectOllama({ runner, scopeKey: SCOPE_KEY });
+  const result = await collectOllama({ fetchFn: async () => { throw new Error('offline'); }, runner, scopeKey: SCOPE_KEY });
+  assert.equal(result.status, 'partial');
   assert.deepEqual(calls[0].args, ['ls']);
   assert.equal(calls[0].options.shell, false);
+  assert.equal(result.source.diagnostics.includes('api-unavailable'), true);
+  const oversized = await collectOllama({ fetchFn: async () => { throw new Error('offline'); },
+    runner: async () => ({ code: 0, stdout: 'x'.repeat(3_000_000), stderr: '' }), scopeKey: SCOPE_KEY });
+  assert.equal(oversized.status, 'unsupported');
+  assert.equal(oversized.source.diagnostics.includes('output-too-large'), true);
+});
+
+test('Ollama collector applies one end-to-end refresh time budget', async () => {
+  let runnerCalled = false;
+  const fetchFn = async (_url, { signal }) => new Promise((_resolve, reject) => {
+    signal.addEventListener('abort', () => reject(new Error('aborted')), { once: true });
+  });
+  const started = Date.now();
+  const result = await collectOllama({
+    fetchFn, timeout: 25, scopeKey: SCOPE_KEY,
+    runner: async () => { runnerCalled = true; return { code: 1, stdout: '', stderr: '' }; },
+  });
+  assert.ok(Date.now() - started < 250);
+  assert.equal(runnerCalled, false);
   assert.equal(result.status, 'unsupported');
+  assert.equal(result.source.diagnostics.includes('refresh-timeout'), true);
 });
 
 test('dispatch map is separate from immutable registry metadata', async () => {

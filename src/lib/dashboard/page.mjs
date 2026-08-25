@@ -159,8 +159,8 @@ export function renderPage({ name, version }) {
         <button class="seg-btn" role="tab" id="usage-tab-score" data-view="score" aria-selected="true" aria-controls="v-score" type="button">Scorecard</button>
         <button class="seg-btn" role="tab" id="usage-tab-limits" data-view="limits" aria-selected="false" aria-controls="v-limits" tabindex="-1" type="button">Limits</button>
         <button class="seg-btn" role="tab" id="usage-tab-findings" data-view="findings" aria-selected="false" aria-controls="v-findings" tabindex="-1" type="button">Findings<span class="segbadge" id="u-findings-n" hidden></span></button>
-        <button class="seg-btn" role="tab" id="usage-tab-sessions" data-view="sessions" aria-selected="false" aria-controls="v-sessions" tabindex="-1" type="button">Sessions<span class="mono seg-n" id="u-sessions-n"></span></button>
         <button class="seg-btn" role="tab" id="usage-tab-models" data-view="models" aria-selected="false" aria-controls="v-models" tabindex="-1" type="button">Models<span class="segbadge" id="mli-attention-n" hidden></span></button>
+        <button class="seg-btn" role="tab" id="usage-tab-sessions" data-view="sessions" aria-selected="false" aria-controls="v-sessions" tabindex="-1" type="button">Sessions<span class="mono seg-n" id="u-sessions-n"></span></button>
         <button class="seg-btn" role="tab" id="usage-tab-transcript" data-view="transcript" aria-selected="false" aria-controls="v-transcript" tabindex="-1" type="button">Transcript</button>
       </div>
       <div class="filters secondary-actions" id="usage-days" role="group" aria-label="Usage window">
@@ -517,17 +517,32 @@ export function renderPage({ name, version }) {
         It shows the routes you use first and keeps catalogue availability, account access, and observed use as separate evidence.
         Unknown stays unknown; refresh is the only operation that contacts model sources.</span></div>
       <div class="mli-attention" id="mli-attention" role="status" aria-live="polite"></div>
+      <section class="strip" id="mli-observed-panel">
+        <div class="sh"><h2>Observed in this window</h2><span class="n mono" id="mli-observed-note"></span></div>
+        <p class="mli-copy">Successful local transcript evidence for the selected Usage window. This is actual use, whether or not the model is pinned to a route.</p>
+        <div class="mli-table-wrap" role="region" aria-label="Models observed in the selected Usage window" tabindex="0"><table class="mli-table mli-observed-table">
+          <caption class="sr-only">Models observed in retained sessions for the selected Usage window.</caption>
+          <thead><tr><th scope="col">Model</th><th scope="col">Model provider</th><th scope="col">Used via</th><th scope="col">Sessions</th><th scope="col">Last used</th></tr></thead>
+          <tbody id="mli-observed"></tbody>
+        </table></div>
+      </section>
       <section class="strip mli-routes-panel">
         <div class="sh"><h2>Your routes</h2><span class="n mono" id="mli-asof"></span></div>
-        <p class="mli-copy">Configured routes and fallbacks. Catalogue-only models are kept below so they do not obscure what is operating now.</p>
+        <p class="mli-copy">Configured routes and fallbacks. Last used comes from the selected Usage window; catalogue-only models are kept below.</p>
         <div class="mli-table-wrap" role="region" aria-label="Your model routes; scroll in either direction for every route" tabindex="0"><table class="mli-table mli-routes-table">
           <caption class="sr-only">Configured model routes, providers, observed use, and API-equivalent pricing.</caption>
-          <thead><tr><th>Model</th><th>Model provider</th><th>Used for</th><th>Last used</th><th>API rate / plan use</th></tr></thead>
+          <thead><tr>
+            <th scope="col" aria-sort="ascending"><button type="button" data-mli-route-sort="model">Model <span aria-hidden="true">↑</span></button></th>
+            <th scope="col" aria-sort="none"><button type="button" data-mli-route-sort="provider">Model provider <span aria-hidden="true">↕</span></button></th>
+            <th scope="col" aria-sort="none"><button type="button" data-mli-route-sort="used">Used for <span aria-hidden="true">↕</span></button></th>
+            <th scope="col" aria-sort="none"><button type="button" data-mli-route-sort="lastUsed">Last used <span aria-hidden="true">↕</span></button></th>
+            <th scope="col" aria-sort="none"><button type="button" data-mli-route-sort="rate">API rate / plan use <span aria-hidden="true">↕</span></button></th>
+          </tr></thead>
           <tbody id="mli-routes"></tbody>
         </table></div>
       </section>
       <details class="strip mli-ledger" id="mli-catalog-explorer">
-        <summary><span><b>Catalog explorer</b><small>Available and catalogue-only models are separate from your routes.</small></span><span class="n mono">Open when needed</span></summary>
+        <summary><span class="mli-ledger-title"><span class="chev" aria-hidden="true">&rsaquo;</span><span><b>Catalog explorer</b><small>Available and catalogue-only models are separate from your routes.</small></span></span><span class="n mono">catalogue-only models</span></summary>
         <div class="mli-catalog-body">
         <div class="sh"><h2>Explore catalog</h2><span class="n mono">public metadata is not entitlement</span></div>
         <form class="mli-filters" id="mli-filters" role="search">
@@ -555,7 +570,7 @@ export function renderPage({ name, version }) {
         </table></div>
         <div class="mli-pager"><button class="mli-load-more" id="mli-load-more" type="button" hidden>Load 50 more</button></div>
         </div>
-      </section>
+      </details>
       <div class="two">
         <section class="strip"><div class="sh"><h2>change history</h2><span class="n mono" id="mli-history-note"></span></div><div id="mli-history"></div></section>
         <section class="strip"><div class="sh"><h2>consumers</h2><span class="n mono">configured / reported evidence</span></div><div id="mli-consumers"></div></section>

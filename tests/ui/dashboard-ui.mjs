@@ -265,8 +265,8 @@ const USAGE_VIEWS = [
   ['score', '#v-score'],
   ['limits', '#v-limits'],
   ['findings', '#v-findings'],
-  ['sessions', '#v-sessions'],
   ['models', '#v-models'],
+  ['sessions', '#v-sessions'],
   ['transcript', '#v-transcript'],
 ];
 // Seven sub-views, in order. Asserting the list here means a merge would fail
@@ -708,14 +708,18 @@ const MODELS_STUB = {
     scope: { fingerprint: 'scope:ui-private', hosts: ['codex'], profileFingerprints: {} },
     sources: [{ id: 'codex-cache', owner: 'codex', ownerType: 'host', transport: 'file', network: 'never',
       mode: 'local', status: 'complete', complete: true, capturedAt: MODEL_AT,
-      schema: 'codex-model-cache-v1', scopeFingerprint: 'scope:ui-private' }],
+      schema: 'codex-model-cache-v1', scopeFingerprint: 'scope:ui-private' },
+    { id: 'ollama-catalog', owner: 'ollama', ownerType: 'provider', transport: 'http', network: 'local',
+      mode: 'local', status: 'complete', complete: true, capturedAt: MODEL_AT,
+      schema: 'ollama-api-v1', scopeFingerprint: 'scope:ui-private' }],
     models: [{
       key: { host: 'opencode', provider: 'ui-private-provider', modelId: 'ui-private-deployment',
         scopeId: 'scope:ui-private', digest: 'ui-private-digest' },
       displayName: 'UI Private Deployment', aliases: [{ name: 'ui-private-alias',
         resolvesTo: 'ui-private-deployment', observedAt: MODEL_AT, evidenceRefs: ['ui-private-evidence'] }],
       variant: { reasoningEffort: 'high' }, visibility: 'visible', capabilities: { tools: true }, pricing: null,
-      lifecycle: { state: 'retiring', replacement: 'ui-private-replacement', evidenceRefs: ['ui-private-evidence'] },
+      lifecycle: { state: 'retiring', replacement: 'ui-private-replacement',
+        notice: 'https://developers.openai.com/api/docs/deprecations/', evidenceRefs: ['ui-lifecycle-notice'] },
       edges: [{ kind: 'first-party-migration', from: 'ui-private-deployment', to: 'ui-private-replacement',
         provenance: 'first-party', scopeFingerprint: 'scope:ui-private', evidenceRefs: ['ui-private-evidence'] }],
       dimensions: { configured: { value: true, evidenceRefs: ['ui-private-evidence'] },
@@ -723,8 +727,11 @@ const MODELS_STUB = {
         discoverable: { value: true, evidenceRefs: ['ui-private-evidence'] } },
       evidence: [{ id: 'ui-private-evidence', field: 'catalog', source: 'codex-cache', class: 'catalog',
         capturedAt: MODEL_AT, freshness: 'fresh', completeness: 'complete',
+        scopeFingerprint: 'scope:ui-private', refs: [] },
+      { id: 'ui-lifecycle-notice', field: 'lifecycle', source: 'codex-cache', class: 'first-party',
+        capturedAt: MODEL_AT, freshness: 'fresh', completeness: 'complete',
         scopeFingerprint: 'scope:ui-private', refs: [] }],
-    }, ...Array.from({ length: 61 }, (_, i) => ({
+    }, ...Array.from({ length: 60 }, (_, i) => ({
       key: { host: i % 3 === 0 ? 'claude' : i % 3 === 1 ? 'codex' : 'opencode',
         provider: i % 2 === 0 ? 'ui-private-provider-a' : 'ui-private-provider-b',
         modelId: `catalog-model-${String(i + 2).padStart(2, '0')}`,
@@ -732,7 +739,11 @@ const MODELS_STUB = {
       displayName: `Catalog Model ${i + 2}`,
       publisher: i % 2 === 0 ? 'Catalog Lab A' : 'Catalog Lab B',
       selector: `catalog-provider/catalog-model-${i + 2}`,
-      visibility: 'visible', capabilities: { tools: i % 2 === 0 }, pricing: null,
+      visibility: 'visible', capabilities: { tools: i % 2 === 0 }, pricing: i === 0
+        ? { basis: 'per-million-tokens', input: 5, output: 15, currency: 'USD', evidenceRefs: [] }
+        : i === 1 ? { basis: 'per-million-tokens', input: 1, output: 3, currency: 'USD', evidenceRefs: [] }
+          : i === 2 ? { basis: 'per-million-tokens', input: 3, output: 9, currency: 'USD', evidenceRefs: [] }
+            : null,
       lifecycle: { state: i % 11 === 0 ? 'retiring' : 'active', replacement: null,
         evidenceRefs: ['ui-private-evidence'] },
       dimensions: {
@@ -747,10 +758,42 @@ const MODELS_STUB = {
       evidence: [{ id: 'ui-private-evidence', field: 'catalog', source: 'codex-cache', class: 'catalog',
         capturedAt: MODEL_AT, freshness: 'fresh', completeness: 'complete',
         scopeFingerprint: 'scope:ui-private', refs: [] }],
-    }))],
+    })), {
+      key: { host: 'ollama', provider: 'ollama', modelId: 'qwen3-coder:30b',
+        scopeId: 'scope:ui-private', digest: 'sha256:9e3f6a12abcd' },
+      displayName: 'qwen3-coder:30b', aliases: [], visibility: 'visible',
+      variant: { modifiedAt: '2026-08-24T10:00:00.000Z', parameterSize: '30.5B',
+        quantizationLevel: 'Q4_K_M', format: 'gguf', family: 'qwen3', families: ['qwen3'],
+        loaded: true, memoryBytes: 18_000_000_000, vramBytes: 12_000_000_000,
+        expiresAt: '2026-08-25T14:00:00.000Z', contextWindow: 32_768,
+        licenseSummary: 'Apache-2.0', advertisedCapabilities: ['completion', 'tools'] },
+      capabilities: { toolcall: true, contextLimit: 32_768 },
+      pricing: { basis: 'local-compute', input: 0, output: 0, currency: 'USD', evidenceRefs: [] },
+      lifecycle: { state: 'unknown', replacement: null, evidenceRefs: [] }, edges: [],
+      dimensions: { configured: { value: null, evidenceRefs: [] },
+        effective: { value: null, evidenceRefs: [] }, observed: { value: null, evidenceRefs: [] },
+        discoverable: { value: true, evidenceRefs: ['ui-ollama-evidence'] },
+        entitled: { value: null, evidenceRefs: [] }, policyAllowed: { value: null, evidenceRefs: [] },
+        routable: { value: null, evidenceRefs: [] } },
+      evidence: [{ id: 'ui-ollama-evidence', field: 'variant.loaded', source: 'ollama-catalog', class: 'runtime',
+        capturedAt: MODEL_AT, freshness: 'fresh', completeness: 'complete',
+        scopeFingerprint: 'scope:ui-private', refs: [] }],
+    }],
     bindings: [{ id: 'ui-private-binding', consumer: 'route:implementation', activity: 'implementation',
-      host: 'codex', provider: 'ui-private-provider', configured: 'ui-private-deployment',
+      host: 'opencode', provider: 'ui-private-provider', configured: 'ui-private-deployment',
       effective: 'ui-private-deployment', provenance: 'configured', consumerState: 'configured',
+      evidenceRefs: ['ui-private-evidence'] },
+    { id: 'ui-route-architecture', consumer: 'route:architecture', activity: 'architecture',
+      host: 'claude', provider: 'ui-private-provider-a', configured: 'catalog-model-02',
+      effective: 'catalog-model-02', provenance: 'configured', consumerState: 'configured',
+      evidenceRefs: ['ui-private-evidence'] },
+    { id: 'ui-route-design', consumer: 'route:design', activity: 'design',
+      host: 'codex', provider: 'ui-private-provider-b', configured: 'catalog-model-03',
+      effective: 'catalog-model-03', provenance: 'configured', consumerState: 'configured',
+      evidenceRefs: ['ui-private-evidence'] },
+    { id: 'ui-route-testing', consumer: 'route:testing', activity: 'testing',
+      host: 'opencode', provider: 'ui-private-provider-a', configured: 'catalog-model-04',
+      effective: 'catalog-model-04', provenance: 'configured', consumerState: 'configured',
       evidenceRefs: ['ui-private-evidence'] }],
     changes: [], opportunities: [], diagnostics: [],
   },
@@ -2115,6 +2158,17 @@ async function main() {
     await page.waitForTimeout(800);
     check('model inventory stays network-lazy until its tab opens', modelRequests.length === 0,
       `Models made ${modelRequests.length} request(s) before its tab opened: ${modelRequests.join(', ')}`);
+    const usageSubmenu = await page.evaluate(() => [...document.querySelectorAll('#usage-seg [data-view]')]
+      .map((button) => button.dataset.view));
+    check('Usage submenu puts Models before Sessions',
+      JSON.stringify(usageSubmenu) === JSON.stringify(['score', 'limits', 'findings', 'models', 'sessions', 'transcript']),
+      `Usage submenu was ${JSON.stringify(usageSubmenu)}`);
+    const modelPanelOwnership = await page.evaluate(() => [
+      '#mli-observed-panel', '.mli-routes-panel', '#mli-catalog-explorer', '#mli-history', '#mli-consumers', '#mli-impact',
+    ].map((selector) => ({ selector, owner: document.querySelector(selector)?.closest('.view')?.id ?? null })));
+    check('every Models-only panel is structurally owned by the Models view',
+      modelPanelOwnership.every(({ owner }) => owner === 'v-models'),
+      `Models panel ownership was ${JSON.stringify(modelPanelOwnership)}`);
     for (const [view, sel] of USAGE_VIEWS) {
       await page.click(`[data-view="${view}"]`).catch(() => {});
       await page.waitForSelector(`${sel}:not([hidden])`, { timeout: 8000 }).catch(() => {});
@@ -2133,6 +2187,27 @@ async function main() {
       const arts = artifactsIn(text);
       check(`usage/${view} is free of rendering artifacts`, arts.length === 0,
         `found ${arts.join(', ')} — this is the class of bug unit tests cannot see`);
+      if (view !== 'models') {
+        const modelBoundary = await page.evaluate(() => {
+          const models = document.getElementById('v-models');
+          const active = document.getElementById(`v-${document.querySelector('#usage-seg [aria-selected="true"]')?.dataset.view}`);
+          return {
+            modelsHidden: models?.hidden === true,
+            modelsDisplay: models ? getComputedStyle(models).display : null,
+            modelsDisplayPriority: models?.style.getPropertyPriority('display'),
+            modelsInert: models?.hasAttribute('inert') === true,
+            modelPanelsInActiveView: active?.querySelectorAll('[id^="mli-"]').length ?? null,
+            modelOnlyPanelsVisible: [...document.querySelectorAll(
+              '#mli-observed-panel, .mli-routes-panel, #mli-catalog-explorer, #mli-history, #mli-consumers, #mli-impact',
+            )].filter((node) => node.getClientRects().length > 0).length,
+          };
+        });
+        check(`usage/${view} excludes Model lifecycle panels`,
+          modelBoundary.modelsHidden && modelBoundary.modelsDisplay === 'none'
+            && modelBoundary.modelsDisplayPriority === 'important' && modelBoundary.modelsInert
+            && modelBoundary.modelPanelsInActiveView === 0 && modelBoundary.modelOnlyPanelsVisible === 0,
+          `model boundary was ${JSON.stringify(modelBoundary)}`);
+      }
     }
 
     // ── Models privacy, evidence disclosure, keyboard and narrow layout ──
@@ -2141,22 +2216,57 @@ async function main() {
     check('Models loads summary before its first bounded inventory page',
       modelRequests.length >= 2
         && new URL(modelRequests[0]).searchParams.get('view') === 'summary'
+        && new URL(modelRequests[0]).searchParams.get('days') === '14'
         && new URL(modelRequests[1]).searchParams.get('view') === 'inventory'
         && new URL(modelRequests[1]).searchParams.get('offset') === '0'
         && new URL(modelRequests[1]).searchParams.get('limit') === '50'
         && new URL(modelRequests[1]).searchParams.get('snapshotId') === modelSnapshotId
         && new URL(modelRequests[1]).searchParams.get('relevance') === 'relevant',
       `Models requests were ${JSON.stringify(modelRequests)}`);
+    check('Models keeps the shared 7/14/30-day selector visible',
+      await page.locator('#usage-days').isVisible(),
+      'Models hid the window selector used by its observed-use evidence');
+    check('Models renders aggregate observed-use evidence for the selected window',
+      /^14 days · \d+ models?$/.test((await page.locator('#mli-observed-note').innerText()).trim())
+        && await page.locator('#mli-observed tr').count() > 0,
+      `observed note was ${JSON.stringify(await page.locator('#mli-observed-note').innerText())}`);
+    const beforeThirtyDayModels = modelRequests.length;
+    await page.click('#usage-days [data-days="30"]');
+    await page.waitForFunction(() => document.getElementById('mli-observed-note')?.textContent?.startsWith('30 days'));
+    check('changing the Models window refetches its observed-use summary only for that window',
+      modelRequests.slice(beforeThirtyDayModels).some((url) => {
+        const parsed = new URL(url);
+        return parsed.searchParams.get('view') === 'summary' && parsed.searchParams.get('days') === '30';
+      }), `Models requests were ${JSON.stringify(modelRequests.slice(beforeThirtyDayModels))}`);
+    await page.click('#usage-days [data-days="14"]');
+    await page.waitForFunction(() => document.getElementById('mli-observed-note')?.textContent?.startsWith('14 days'));
     const modelView = await visibleText(page, '#v-models');
     check('usage/models shows exact configured model names without opaque identifiers',
       /Your routes/.test(modelView) && /ui-private-deployment/.test(modelView)
         && /ui-private-provider/.test(modelView)
         && !/model-[a-f0-9]{12}|provider-[a-f0-9]{12}|scope-[a-f0-9]{12}/.test(modelView),
       `Models privacy projection was ${JSON.stringify(modelView.slice(0, 400))}`);
+    const attentionView = await visibleText(page, '#mli-attention');
+    check('Models attention names the route, current model, replacement, action, and cited notice',
+      /implementation · primary/.test(attentionView)
+        && /UI Private Deployment/.test(attentionView)
+        && /ui-private-replacement/.test(attentionView)
+        && /ak models plan --activity implementation --to opencode:ui-private-replacement/.test(attentionView)
+        && await page.getAttribute('#mli-attention a', 'href') === 'https://developers.openai.com/api/docs/deprecations/',
+      `attention panel was ${JSON.stringify(attentionView)}`);
     check('catalog explorer stays collapsed until requested',
       await page.getAttribute('#mli-catalog-explorer', 'open') === null,
       'catalog explorer should not compete with the operating routes');
+    const catalogChevron = page.locator('#mli-catalog-explorer > summary .chev');
+    check('catalog explorer uses the shared chevron affordance before opening',
+      await catalogChevron.textContent() === '›' && await catalogChevron.getAttribute('aria-hidden') === 'true',
+      'catalog explorer did not expose the shared directional chevron');
     await page.locator('#mli-catalog-explorer > summary').click();
+    await page.waitForTimeout(250);
+    check('catalog explorer rotates its chevron when open',
+      await page.getAttribute('#mli-catalog-explorer', 'open') !== null
+        && await catalogChevron.evaluate((node) => getComputedStyle(node).transform !== 'none'),
+      'catalog chevron did not communicate its expanded state');
     const catalogView = await visibleText(page, '#mli-catalog-explorer');
     check('catalog explorer is available without leaking opaque implementation identifiers',
       /Explore catalog/.test(catalogView)
@@ -2170,6 +2280,10 @@ async function main() {
     check('Models consumers are a bounded, scrollable operator panel',
       !!consumerPanel && /(auto|scroll)/.test(consumerPanel.overflowY) && consumerPanel.maxHeight !== 'none',
       `consumer panel was ${JSON.stringify(consumerPanel)}`);
+    check('Models consumers contain named routes rather than opaque or unclassified bindings',
+      /implementation · primary/.test(await visibleText(page, '#mli-consumers'))
+        && !/Configured consumer|activity-[a-f0-9]{12}|binding-[a-f0-9]{12}/.test(await visibleText(page, '#mli-consumers')),
+      `consumer panel was ${JSON.stringify((await visibleText(page, '#mli-consumers')).slice(0, 500))}`);
     check('Models removes low-value source coverage from the live surface',
       await page.locator('#mli-sources').count() === 0,
       'source coverage should remain documented rather than occupy the operator view');
@@ -2202,8 +2316,8 @@ async function main() {
       countLive: document.getElementById('mli-result-count')?.getAttribute('aria-live'),
       loadMore: document.getElementById('mli-load-more')?.textContent?.trim(),
       evidenceValueDisabled: document.getElementById('mli-evidence-value')?.disabled,
-      headerButtons: document.querySelectorAll('.mli-table thead [data-mli-sort]').length,
-      ariaSort: [...document.querySelectorAll('.mli-table thead th')].map((node) => node.getAttribute('aria-sort')),
+      headerButtons: document.querySelectorAll('.mli-ledger .mli-table thead [data-mli-sort]').length,
+      ariaSort: [...document.querySelectorAll('.mli-ledger .mli-table thead th')].map((node) => node.getAttribute('aria-sort')),
     }));
     check('Models exposes labelled search, host, provider, relevance, lifecycle and evidence filters',
       inventoryControls.form && inventoryControls.search === 'search'
@@ -2219,6 +2333,39 @@ async function main() {
       inventoryControls.headerButtons === 5
         && inventoryControls.ariaSort.filter((value) => value && value !== 'none').length === 1,
       `header controls were ${JSON.stringify(inventoryControls)}`);
+    const routeSortControls = await page.evaluate(() => ({
+      buttons: [...document.querySelectorAll('.mli-routes-table [data-mli-route-sort]')]
+        .map((button) => button.getAttribute('data-mli-route-sort')),
+      active: document.querySelector('.mli-routes-table th[aria-sort="ascending"] [data-mli-route-sort]')?.getAttribute('data-mli-route-sort'),
+    }));
+    check('every route column is an accessible sortable button with Model ascending by default',
+      JSON.stringify(routeSortControls.buttons) === JSON.stringify(['model', 'provider', 'used', 'lastUsed', 'rate'])
+        && routeSortControls.active === 'model',
+      `route sort controls were ${JSON.stringify(routeSortControls)}`);
+    const sortableRouteModel = page.locator('[data-mli-route-sort="model"]');
+    await sortableRouteModel.click();
+    await page.waitForFunction(() => document.querySelector('[data-mli-route-sort="model"]')?.closest('th')?.getAttribute('aria-sort') === 'descending');
+    check('route Model descending reorders rows in the rendered dashboard',
+      await page.locator('#mli-routes tr').first().locator('th b').innerText() === 'UI Private Deployment',
+      `route rows were ${JSON.stringify(await page.locator('#mli-routes tr th b').allInnerTexts())}`);
+    await sortableRouteModel.click();
+    await page.waitForFunction(() => document.querySelector('[data-mli-route-sort="model"]')?.closest('th')?.getAttribute('aria-sort') === 'ascending');
+    for (const field of ['provider', 'used', 'lastUsed', 'rate']) {
+      const control = page.locator(`[data-mli-route-sort="${field}"]`);
+      await control.click();
+      await page.waitForFunction((name) => document.querySelector(`[data-mli-route-sort="${name}"]`)?.closest('th')?.getAttribute('aria-sort') === 'ascending', field);
+      if (field === 'rate') {
+        check('route rate ascending uses published input rate and keeps unknown rate last',
+          JSON.stringify(await page.locator('#mli-routes tr th b').allInnerTexts())
+            === JSON.stringify(['Catalog Model 3', 'Catalog Model 4', 'Catalog Model 2', 'UI Private Deployment']),
+          `ascending rate rows were ${JSON.stringify(await page.locator('#mli-routes tr th b').allInnerTexts())}`);
+      }
+      await control.click();
+      await page.waitForFunction((name) => document.querySelector(`[data-mli-route-sort="${name}"]`)?.closest('th')?.getAttribute('aria-sort') === 'descending', field);
+    }
+    check('route column buttons toggle ascending then descending without reloading the inventory',
+      await page.evaluate(() => document.querySelector('.mli-routes-table th[aria-sort="descending"] [data-mli-route-sort]')?.getAttribute('data-mli-route-sort')) === 'rate',
+      'route headers did not retain their descending sort state');
     const initialInventory = await page.evaluate(() => ({
       rows: document.querySelectorAll('#mli-models tr').length,
       count: document.getElementById('mli-result-count')?.textContent?.trim(),
@@ -2274,6 +2421,22 @@ async function main() {
         && await page.inputValue('#mli-relevance') === 'relevant'
         && await page.evaluate(() => document.activeElement?.id) === 'mli-search',
       'Reset did not restore the default filter state or return focus to Search');
+    await page.selectOption('#mli-relevance', 'catalog');
+    await page.waitForFunction(() => document.getElementById('mli-result-count')?.textContent !== 'Loading models…');
+    await page.fill('#mli-search', 'qwen3-coder:30b');
+    await page.waitForFunction(() => document.querySelectorAll('#mli-models tr').length === 1
+      && document.getElementById('mli-result-count')?.textContent !== 'Loading models…');
+    await page.click('#mli-models .mli-detail-open');
+    const localDetail = await visibleText(page, '#mli-detail');
+    check('Ollama details show human build and runtime metadata rather than opaque hashes',
+      /30\.5B · Q4_K_M · gguf/.test(localDetail)
+        && /Loaded now\s+Yes/i.test(localDetail)
+        && /Context limit\s+32768/i.test(localDetail)
+        && !/variant-[a-f0-9]{12}/.test(localDetail),
+      `Ollama detail was ${JSON.stringify(localDetail)}`);
+    await page.click('#mli-detail-close');
+    await page.click('#mli-reset');
+    await page.waitForFunction(() => document.querySelectorAll('#mli-models tr').length === 50);
     const replacementSnapshotId = `${modelSnapshotId}-replacement`;
     const replacementSummary = structuredClone(modelSummaryFixture);
     replacementSummary.snapshot.snapshotId = replacementSnapshotId;
@@ -2358,9 +2521,9 @@ async function main() {
     if (expectedFailure >= 0) consoleErrors.splice(expectedFailure, 1);
     await page.unroute(/\/api\/models\?/, failPageHandler);
     await page.click('#mli-load-more');
-    await page.waitForFunction(() => document.querySelectorAll('#mli-models tr').length === 62);
+    await page.waitForFunction(() => document.querySelectorAll('#mli-models tr').length === 61);
     check('Load 50 more appends the remaining page without replacing the first page',
-      await page.locator('#mli-models tr').count() === 62
+      await page.locator('#mli-models tr').count() === 61
         && await page.isHidden('#mli-load-more')
         && await page.evaluate(() => document.activeElement === document.querySelectorAll('#mli-models tr > th[scope="row"]')[50]),
       'the second page did not append to the first or the exhausted control stayed visible');
@@ -2375,10 +2538,10 @@ async function main() {
       horizontal.scroll > horizontal.client && horizontal.left > 0,
       `table scroll state was ${JSON.stringify(horizontal)}`);
     await page.setViewportSize({ width: 1440, height: 900 });
-    await page.click('#usage-tab-sessions');
-    await page.focus('#usage-tab-sessions');
+    await page.click('#usage-tab-findings');
+    await page.focus('#usage-tab-findings');
     await page.keyboard.press('ArrowRight');
-    check('usage/models participates in arrow-key tab navigation',
+    check('usage/models follows Findings in arrow-key tab navigation',
       await page.getAttribute('#usage-tab-models', 'aria-selected') === 'true'
         && await page.evaluate(() => document.activeElement?.id) === 'usage-tab-models',
       'Models tab did not receive selection and focus after ArrowRight');

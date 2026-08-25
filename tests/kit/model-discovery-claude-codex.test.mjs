@@ -43,7 +43,7 @@ test('Claude rejects oversized or invalid settings as unsupported without leakin
   }
 });
 
-test('Codex parses visibility, reasoning variants, and first-party migration metadata', () => {
+test('Codex parses visibility and reasoning variants without treating a local upgrade hint as retirement evidence', () => {
   const result = discoverCodex({
     cacheRaw: fixture('codex', 'models-cache.json'),
     now: Date.parse('2026-08-25T13:00:00.000Z'), scope: { profile: 'default' }, scopeKey: SCOPE_KEY,
@@ -58,10 +58,9 @@ test('Codex parses visibility, reasoning variants, and first-party migration met
   assert.equal(terra.states.observed, 'unknown');
   assert.equal(terra.dimensions.configured.value, null);
   const old = result.models.find((model) => model.identity.modelId === 'gpt-5.4');
-  assert.equal(old.lifecycle.state, 'retiring');
-  assert.equal(old.lifecycle.replacement, 'gpt-5.6-terra');
-  assert.equal(old.edges.some(({ kind, to }) =>
-    kind === 'first-party-migration' && to === 'gpt-5.6-terra'), true);
+  assert.equal(old.lifecycle.state, 'hidden');
+  assert.equal(old.lifecycle.replacement, null);
+  assert.equal(old.edges.some(({ kind }) => kind === 'first-party-migration'), false);
   assert.equal(old.states.discoverable, false);
   assert.doesNotThrow(() => result.models.map(normalizeModelRecord));
   assert.doesNotThrow(() => normalizeSourceResult(result.source));

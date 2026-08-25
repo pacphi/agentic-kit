@@ -8,7 +8,7 @@ const SORTS = new Set(['displayName', 'host', 'provider', 'publisher', 'lifecycl
 const QUERY_KEYS = new Set([
   'view', 'offset', 'limit', 'sort', 'direction', 'search', 'host', 'provider',
   'publisher', 'lifecycle', 'relevance', 'evidenceField', 'evidenceValue',
-  'snapshotId', ...DIMENSIONS, 'token',
+  'snapshotId', 'days', ...DIMENSIONS, 'token',
 ]);
 const LIFECYCLE_ORDER = new Map([
   ['removed', 0], ['retiring', 1], ['deprecated', 2], ['hidden', 3],
@@ -59,9 +59,15 @@ function parseQuery(raw) {
   const view = one(query, 'view') ?? 'full';
   if (!['full', 'summary', 'inventory'].includes(view)) throw invalidQuery();
   if (view !== 'inventory') {
-    for (const key of query.keys()) if (!['view', 'token'].includes(key)) throw invalidQuery();
-    return { view };
+    for (const key of query.keys()) if (!['view', 'token', 'days'].includes(key)) throw invalidQuery();
+    const rawDays = one(query, 'days');
+    if (view !== 'summary' && rawDays != null) throw invalidQuery();
+    if (rawDays != null && (!/^\d+$/.test(rawDays) || Number(rawDays) < 1 || Number(rawDays) > 365)) {
+      throw invalidQuery();
+    }
+    return { view, days: rawDays == null ? null : Number(rawDays) };
   }
+  if (one(query, 'days') != null) throw invalidQuery();
   const integer = (name, fallback) => {
     const rawValue = one(query, name);
     if (rawValue == null || rawValue === '') return fallback;
@@ -131,13 +137,25 @@ function compareModels(a, b, sort, direction) {
 }
 
 function facets(models) {
-  const values = (pick, max = 100) => [...new Set(models.map(pick).filter(Boolean))]
-    .sort(compareKnown).slice(0, max);
+  const values = (pick, max = 100) => {
+    const counts = new Map();
+    for (const model of models) {
+      const value = pick(model);
+      if (value != null && value !== '') counts.set(value, (counts.get(value) ?? 0) + 1);
+    }
+    return [...counts].sort(([left], [right]) => compareKnown(left, right)).slice(0, max)
+      .map(([value, count]) => ({ value, count }));
+  };
+  const dimensions = Object.fromEntries(DIMENSIONS.map((name) => [name, values((model) => {
+    const value = model.dimensions[name]?.value;
+    return value == null ? 'unknown' : value ? 'yes' : 'no';
+  }, 3)]));
   return {
     hosts: values((model) => model.host, 32),
     providers: values((model) => model.servingProvider),
     publishers: values((model) => model.publisher),
     lifecycles: values((model) => model.lifecycle.state, 16),
+    dimensions,
   };
 }
 

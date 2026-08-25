@@ -1116,9 +1116,10 @@ async function main() {
       }
       contains(r.body, 'id="mli-models"');
       contains(r.body, 'mli-consumer-scroll');
+      contains(r.body, '</details>\n      <div class="two">');
       assert(!r.body.includes('id="mli-sources"'), 'removed source-coverage panel must not ship unused UI');
       contains(r.body, 'function renderModelLifecycle');
-      contains(r.body, 'modelJson("/api/models?view=summary")');
+      contains(r.body, 'modelJson("/api/models?view=summary&days="+usageDays)');
       contains(r.body, 'view:"inventory"');
       contains(r.body, 'limit:String(MODEL_LIMIT)');
       for (const id of ['mli-filters', 'mli-search', 'mli-host', 'mli-provider',
@@ -1126,6 +1127,9 @@ async function main() {
         'mli-result-count', 'mli-reset', 'mli-load-more']) contains(r.body, 'id="' + id + '"');
       for (const field of ['host', 'configured', 'observed', 'discoverable', 'lifecycle']) {
         contains(r.body, 'data-mli-sort="' + field + '"');
+      }
+      for (const field of ['model', 'provider', 'used', 'lastUsed', 'rate']) {
+        contains(r.body, 'data-mli-route-sort="' + field + '"');
       }
       contains(r.body, 'aria-sort="ascending"');
       contains(r.body, 'unknown values sort last');

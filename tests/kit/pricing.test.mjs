@@ -10,7 +10,7 @@ const M = 1_000_000;
 // ── Table shape ──────────────────────────────────────────────────────────────
 
 test('PRICES_AS_OF is the ISO date the table was last verified', () => {
-  assert.equal(PRICES_AS_OF, '2026-07-25');
+  assert.equal(PRICES_AS_OF, '2026-08-25');
 });
 
 test('every PRICES entry carries finite in/out rates, a provider, and asOf', () => {
@@ -48,9 +48,9 @@ test('the table carries the ADR-0009 §3 rates for each Anthropic tier', () => {
 });
 
 test('the table carries the maintained OpenAI rates', () => {
-  assert.deepEqual([priceFor('gpt-5.6-sol').in, priceFor('gpt-5.6-sol').out], [5, 30]);
-  assert.deepEqual([priceFor('gpt-5.6-terra').in, priceFor('gpt-5.6-terra').out], [2.5, 15]);
-  assert.deepEqual([priceFor('gpt-5.6-luna').in, priceFor('gpt-5.6-luna').out], [1, 6]);
+  assert.deepEqual([priceFor('gpt-5.6-sol').in, priceFor('gpt-5.6-sol').out], [4, 20]);
+  assert.deepEqual([priceFor('gpt-5.6-terra').in, priceFor('gpt-5.6-terra').out], [2, 12]);
+  assert.deepEqual([priceFor('gpt-5.6-luna').in, priceFor('gpt-5.6-luna').out], [0.2, 1.2]);
   // gpt-5.5 is the model real Codex rollouts on this machine actually used.
   assert.deepEqual([priceFor('gpt-5.5').in, priceFor('gpt-5.5').out], [5, 30]);
   assert.deepEqual([priceFor('gpt-5.4-mini').in, priceFor('gpt-5.4-mini').out], [0.75, 4.5]);

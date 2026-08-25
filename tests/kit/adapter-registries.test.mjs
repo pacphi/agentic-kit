@@ -52,6 +52,14 @@ test('model discovery descriptor validation rejects ambiguous owners and unsafe 
     id: 'unsafe', ownerType: 'host', ownerId: 'opencode', transport: 'command',
     command: 'opencode models', network: 'explicit', schema: 'v1',
   }), /command must be an executable name/);
+  assert.throws(() => validateModelDiscoveryAdapter({
+    id: 'unsafe-http', ownerType: 'provider', ownerId: 'ollama', transport: 'http',
+    endpoint: 'http://remote.example:11434', network: 'local', schema: 'v1',
+  }), /loopback HTTP/);
+  assert.doesNotThrow(() => validateModelDiscoveryAdapter({
+    id: 'local-http', ownerType: 'provider', ownerId: 'ollama', transport: 'http',
+    endpoint: 'http://127.0.0.1:11434', network: 'local', schema: 'v1',
+  }));
 });
 
 // qe-court A3: the cross-axis invariants now run AT module construction — a

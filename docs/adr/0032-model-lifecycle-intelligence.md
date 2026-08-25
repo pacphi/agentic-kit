@@ -1,15 +1,16 @@
 # ADR-0032 — Model lifecycle intelligence from provenance-aware local evidence
 
-- **Status:** Accepted
+- **Status:** Implemented
 - **Date:** 2026-08-25
 - **Updated:** 2026-08-25
 - **Update note:** The bounded inventory, descriptor-selected source adapters, conservative snapshot
-  diff, and read-only CLI/status surfaces are implemented. The Dashboard is being reconciled with the
-  operator-first contract: routes lead, catalogue exploration is progressive, and the token-gated
-  loopback operator view shows exact configured/observed model selectors and providers. Credentials,
-  endpoints, scopes, digests, aliases, evidence references, and history identifiers remain protected.
-  Remaining source-enrichment and complete route-detail evidence are implementation work, so the ADR
-  is Accepted rather than release-proved.
+  diff, and read-only CLI/status surfaces are implemented. The operator-first Dashboard separates
+  configured routes, aggregate model use in the selected 7/14/30-day window, and a progressive
+  catalogue explorer. Ollama refresh now uses bounded loopback `/api/tags`, `/api/show`, and `/api/ps`
+  evidence with a partial CLI fallback. Credentials, endpoints, scopes, digests, aliases, evidence
+  references, session identity, and history identifiers remain protected. Cited lifecycle alerts now
+  name affected routes, current and recommended models, the provider notice, and a concrete planning
+  action. The acceptance conditions and exact-head release proof are complete.
 - **Deciders:** agentic-kit maintainers
 - **Related:** [issue #110](https://github.com/pacphi/agentic-kit/issues/110),
   [implementation PR #179](https://github.com/pacphi/agentic-kit/pull/179),
@@ -98,7 +99,9 @@ The initial adapter set covers:
   overrides, and policy allowlists while leaving unsupported entitlement unknown;
 - Codex's host-owned model cache or stable model-list protocol behind schema/version guards;
 - OpenCode's project/provider-scoped model list and separately authorized online refresh; and
-- Ollama catalogue, digest, and runtime evidence through the same normalized contract.
+- Ollama installed catalogue, digest, safe model detail, and loaded runtime evidence from its
+  loopback HTTP API through the same normalized contract. Raw templates, model files, and full
+  license bodies are discarded; the CLI list is only a partial compatibility fallback.
 
 OpenCode collection resolves the effective global, project, JSONC, agent, and command configuration
 through `opencode debug config`. An explicitly online refresh runs `opencode models --refresh`
@@ -236,9 +239,10 @@ The decision may be marked Implemented only when:
 The implementation branch was validated on 2026-08-25 with the following exact-head evidence:
 
 - `pnpm run check` passed TypeScript checking, ESLint, Markdown lint, packaging, CLI-load checks,
-  and the full unit/integration suite. Native instrumented coverage was 86.85% lines, 80.24%
-  branches, and 84.50% functions against 70% repository floors.
-- `pnpm run test:ui` passed the 305-check deterministic browser matrix, including lazy Models
+  and the full unit/integration suite. Native instrumented coverage was 86.97% lines, 79.93%
+  branches, and 84.58% functions against 70% repository floors.
+- `pnpm run test:ui` passed the 327-check deterministic browser matrix, including Models-only panel
+  ownership across every Usage submenu, readable Ollama build/runtime detail, lazy Models
   loading, paired evidence filters, clickable ascending/descending column sorting, snapshot-bound
   pagination with safe reset, append retry without row loss, keyboard movement in the bounded
   scrolling table, tab navigation, evidence disclosure, responsive behavior, and network-silent
@@ -246,10 +250,13 @@ The implementation branch was validated on 2026-08-25 with the following exact-h
 - A production-sized OpenCode 1.18.23 fixture yielded all 402 models without truncation. Exact
   Models.dev proof normalized the catalogue's omitted active status, while malformed successful
   responses degraded to partial evidence rather than public identity.
-- Agentic QE coverage analysis passed its configured 70% feature threshold; its SAST scan reported
-  zero vulnerabilities. Its generic `aqe quality --gate` shortcut rejected its retained aggregate
-  evidence as stale even after the analyzers ran, so that unavailable aggregate was recorded rather
-  than silently replaced with invented metrics.
+- Agentic QE's native Node-test execution passed 13/13 focused projection/API tests, its heuristic
+  coverage analysis reported the configured 70% feature threshold met, and its SAST scan reported
+  zero vulnerabilities. The tool does not ingest this repository's native instrumented coverage or
+  carry the successful test run into a later process: `aqe quality --gate` therefore reported missing
+  measured `criticalBugs` evidence, while `aqe prove` explicitly marked tests and coverage unchecked.
+  Its emitted 30/100 partial attestation is not treated as a repository score or silently inflated;
+  this tool-state limitation prevented a valid 98/100 Agentic-QE aggregate.
 - Privacy and security tests proved owner-only atomic snapshots, bounded subprocess output,
   cache-only reads, explicit no-write/no-network online dry runs, source-proven public identity,
   keyed private Dashboard pseudonyms, fail-closed missing-key behavior, and absence of raw private

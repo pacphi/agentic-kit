@@ -68,7 +68,12 @@ test('refresh names contacts, never invokes a model, and preserves per-source fa
     if (command === 'opencode') return { code: 1, stdout: '', stderr: 'catalog unavailable' };
     return { code: 0, stdout: 'NAME ID SIZE MODIFIED\nqwen:latest abcdef 1 GB now\n', stderr: '' };
   };
-  const result = await refreshModelDiscovery({ owners: ['opencode', 'ollama'], online: true, runner, scopeKey: SCOPE_KEY });
+  const result = await refreshModelDiscovery({
+    owners: ['opencode', 'ollama'], online: true, runner, scopeKey: SCOPE_KEY,
+    inputs: { ollama: { fetchFn: async (url) => new Response(JSON.stringify(
+      new URL(url).pathname === '/api/tags' ? { models: [] } : { models: [] },
+    )) } },
+  });
   assert.deepEqual(result.contacts, ['OpenCode and Models.dev catalogues', 'local Ollama daemon']);
   assert.equal(result.results.opencode.status, 'unavailable');
   assert.equal(result.results.ollama.status, 'complete');
