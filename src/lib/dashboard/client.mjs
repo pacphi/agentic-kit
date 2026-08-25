@@ -1003,7 +1003,8 @@ export const JS = `
 
   // ══ Usage tab ══════════════════════════════════════════════════════════════
   var USAGE=null, usageLoaded=false, usageBusy=false, TRANSCRIPT=null;
-  var MODELS=null,modelsBusy=false;
+  var MODELS=null,MODEL_PAGE=null,modelRows=[],modelsBusy=false,modelRequestSeq=0,modelSearchTimer=null;
+  var MODEL_LIMIT=50,modelSort="lifecycle",modelDirection="asc";
 
   function fmtUsd(n){
     n=Number(n)||0;
@@ -1117,17 +1118,72 @@ export const JS = `
       .then(function(d){TRANSCRIPT=d&&!d.error?{id:id,meta:d.meta,turns:d.turns||[]}:{id:id,error:(d&&d.error)||"unreadable"};});
   }
 
+  function modelJson(url){
+    return fetch(url,{cache:"no-store",headers:authHeaders()}).then(function(r){
+      return r.json().then(function(d){if(!r.ok)throw new Error(d&&d.error||"unavailable");return d;});
+    });
+  }
+
+  function modelFilters(){
+    function value(id){var el=document.getElementById(id);return el?String(el.value||"").trim():"";}
+    var evidenceField=value("mli-evidence-field"),evidenceValue=value("mli-evidence-value");
+    if(!evidenceField||!evidenceValue){evidenceField="";evidenceValue="";}
+    return {search:value("mli-search"),host:value("mli-host"),provider:value("mli-provider"),
+      publisher:value("mli-publisher"),relevance:value("mli-relevance")||"relevant",
+      lifecycle:value("mli-lifecycle"),evidenceField:evidenceField,evidenceValue:evidenceValue};
+  }
+
+  function modelInventoryUrl(offset){
+    var query=new URLSearchParams({view:"inventory",offset:String(offset||0),limit:String(MODEL_LIMIT),
+      sort:modelSort,direction:modelDirection}),filters=modelFilters();
+    Object.keys(filters).forEach(function(key){if(filters[key])query.set(key,filters[key]);});
+    return "/api/models?"+query.toString();
+  }
+
+  function setModelsBusy(busy,message){
+    modelsBusy=busy;
+    var panel=document.getElementById("v-models"),status=document.getElementById("mli-load-status"),more=document.getElementById("mli-load-more");
+    if(panel)panel.setAttribute("aria-busy",busy?"true":"false");
+    if(more)more.disabled=busy;
+    if(status&&message)status.textContent=message;
+  }
+
+  function loadModelInventory(offset,append,focusAfter){
+    var seq=++modelRequestSeq;
+    setModelsBusy(true,append?"Loading more model evidence.":"Loading model inventory evidence.");
+    return modelJson(modelInventoryUrl(offset)).then(function(d){
+      if(seq!==modelRequestSeq)return;
+      MODEL_PAGE=d&&d.inventory||{};
+      var items=Array.isArray(MODEL_PAGE.items)?MODEL_PAGE.items:[];
+      modelRows=append?modelRows.concat(items):items;
+      renderModelInventory();
+      renderModelFacets();
+      setModelsBusy(false,"Model lifecycle evidence loaded. "+modelRows.length+" rows shown.");
+      if(focusAfter){
+        var more=document.getElementById("mli-load-more"),region=document.querySelector(".mli-table-wrap");
+        if(more&&!more.hidden)more.focus();else if(region)region.focus();
+      }
+    }).catch(function(){
+      if(seq!==modelRequestSeq)return;
+      MODEL_PAGE={items:[],total:0,filteredTotal:0,relevantTotal:0,offset:0,limit:MODEL_LIMIT,hasMore:false};
+      modelRows=[];
+      renderModelInventory();
+      setModelsBusy(false,"Model lifecycle evidence is unavailable.");
+    });
+  }
+
   function loadModelLifecycle(force){
     if(modelsBusy||(!force&&MODELS))return Promise.resolve();
-    modelsBusy=true;
-    var panel=document.getElementById("v-models"),status=document.getElementById("mli-load-status");
-    if(panel)panel.setAttribute("aria-busy","true");
-    if(status)status.textContent="Loading model lifecycle evidence.";
-    return fetch("/api/models",{cache:"no-store",headers:authHeaders()})
-      .then(function(r){return r.json().then(function(d){if(!r.ok)throw new Error(d&&d.error||"unavailable");return d;});}).then(function(d){MODELS=d;})
-      .catch(function(){MODELS={error:"model inventory unavailable"};})
-      .then(function(){modelsBusy=false;if(panel)panel.setAttribute("aria-busy","false");renderModelLifecycle();
-        if(status)status.textContent=MODELS.error?"Model lifecycle evidence is unavailable.":"Model lifecycle evidence loaded.";});
+    setModelsBusy(true,"Loading model lifecycle summary.");
+    return modelJson("/api/models?view=summary").then(function(d){
+      MODELS=d;
+      renderModelLifecycle();
+      return loadModelInventory(0,false,false);
+    }).catch(function(){
+      MODELS={error:"model inventory unavailable"};MODEL_PAGE=null;modelRows=[];
+      renderModelLifecycle();renderModelInventory();
+      setModelsBusy(false,"Model lifecycle evidence is unavailable.");
+    });
   }
 
   function setUsageView(v,session){
@@ -1765,11 +1821,24 @@ export const JS = `
       +' · '+esc(row.scopeFingerprint||"scope unknown")+'</span>';}).join("");
   }
 
+  var MLI_UNKNOWN_COPY={
+    configured:"No active route or configuration evidence established this field.",
+    effective:"No active route or configuration evidence established this field.",
+    observed:"No retained successful-use evidence established this field.",
+    discoverable:"The source did not establish catalog visibility.",
+    entitled:"Catalog visibility does not prove account access.",
+    policyAllowed:"No policy source established this field.",
+    routable:"No complete host, provider, and authentication path evidence established this field."
+  };
+
   function mliState(model,name){
     var dimension=model&&model.dimensions&&model.dimensions[name]||{},value=dimension.value;
-    var state=value===true?"yes":value===false?"no":"unknown";
+    var state=value===true?"yes":value===false?"no":"unknown",refs=dimension.evidenceRefs||[];
+    var proof=state==="unknown"
+      ?'<span class="mli-proof-row">'+esc(MLI_UNKNOWN_COPY[name]||"No accepted source established this field.")+'</span>'+(refs.length?mliEvidence(model,refs):"")
+      :mliEvidence(model,refs);
     return '<details class="mli-proof"><summary class="mli-state" data-state="'+state+'" aria-label="'+esc(name)+': '+state+'. Expand for evidence.">'
-      +state+'</summary><span class="mli-proof-body">'+mliEvidence(model,dimension.evidenceRefs)+'</span></details>';
+      +state+'</summary><span class="mli-proof-body">'+proof+'</span></details>';
   }
 
   function mliLifecycle(model){
@@ -1778,23 +1847,94 @@ export const JS = `
       +copy+'</summary><span class="mli-proof-body">'+mliEvidence(model,life.evidenceRefs)+'</span></details>';
   }
 
+  function mliIdentity(model){
+    var key=model&&model.key||{},identity=model&&model.identity||{};
+    return {host:model.host||key.host||"unknown",provider:model.servingProvider||(model.privacyClass==="private"?(key.provider||model.provider||identity.provider):"")||"",
+      publisher:model.publisher||identity.publisher||"",selector:model.selector||identity.selector||"",
+      name:model.humanName||model.displayName||identity.name||key.modelId||model.modelRef||"unknown",
+      ref:model.internalRef||model.modelRef||key.modelId||""};
+  }
+
+  function mliLinks(model){
+    var raw=model&&model.links||[],links=[];
+    if(!Array.isArray(raw))raw=Object.keys(raw).map(function(label){var item=raw[label];return typeof item==="string"?{label:label,url:item}:Object.assign({label:label},item||{});});
+    raw.forEach(function(item){
+      if(!item)return;var url=typeof item==="string"?item:(item.url||item.href),label=typeof item==="string"?"source":(item.label||item.kind||"source");
+      try{if(new URL(String(url||"")).protocol==="https:")links.push('<a href="'+esc(url)+'" target="_blank" rel="noopener noreferrer">'+esc(label)+'</a>');}catch(e){}
+    });
+    return links.length?'<small class="mli-links">'+links.join(" · ")+'</small>':"";
+  }
+
+  function mliIdentityHtml(model){
+    var id=mliIdentity(model),parts=[id.host];
+    if(id.provider&&id.provider!==id.host)parts.push(id.provider);
+    if(id.publisher&&parts.indexOf(id.publisher)<0)parts.push(id.publisher);
+    var detail='<small>'+parts.map(esc).join(" · ")+'</small>';
+    if(id.selector&&id.selector!==id.name)detail+='<small class="mli-selector">'+esc(id.selector)+'</small>';
+    if(id.ref&&id.ref!==id.name&&id.ref!==id.selector)detail+='<small class="mli-ref">internal ref · '+esc(id.ref)+'</small>';
+    return '<span class="mli-id"><b>'+esc(id.name)+'</b>'+detail+mliLinks(model)+'</span>';
+  }
+
+  function renderModelSort(){
+    var heads=document.querySelectorAll(".mli-table thead th");
+    for(var i=0;i<heads.length;i++){
+      var button=heads[i].querySelector("[data-mli-sort]"),active=button&&button.getAttribute("data-mli-sort")===modelSort;
+      heads[i].setAttribute("aria-sort",active?(modelDirection==="desc"?"descending":"ascending"):"none");
+      if(button){
+        var mark=button.querySelector("[aria-hidden]");if(mark)mark.textContent=active?(modelDirection==="desc"?"↓":"↑"):"↕";
+        button.title=active?"Sorted "+(modelDirection==="desc"?"descending":"ascending")+"; activate to reverse":"Sort by "+button.textContent.replace(/[↕↑↓]/g,"").trim();
+      }
+    }
+  }
+
+  function renderModelInventory(){
+    var body=document.getElementById("mli-models"),count=document.getElementById("mli-result-count"),more=document.getElementById("mli-load-more");
+    if(!body)return;
+    body.innerHTML=modelRows.map(function(model){
+      return '<tr><td>'+mliIdentityHtml(model)+"</td>"
+        +"<td>"+mliState(model,"configured")+"</td><td>"+mliState(model,"effective")+"</td><td>"+mliState(model,"observed")
+        +"</td><td>"+mliState(model,"discoverable")+"</td><td>"+mliState(model,"entitled")+"</td><td>"+mliState(model,"policyAllowed")
+        +"</td><td>"+mliState(model,"routable")+"</td><td>"+mliLifecycle(model)+"</td></tr>";
+    }).join("")||'<tr><td colspan="9"><div class="empty">No models match these filters.</div></td></tr>';
+    var page=MODEL_PAGE||{},filtered=Number(page.filteredTotal)||0,total=Number(page.total)||filtered,relevant=Number(page.relevantTotal)||0;
+    if(count){
+      var mode=modelFilters().relevance;
+      count.textContent=modelRows.length+" shown · "+filtered+(mode==="relevant"?" relevant":" matching")+" of "+total+" discovered"+(relevant&&mode!=="relevant"?" · "+relevant+" relevant":"");
+    }
+    if(more){more.hidden=!page.hasMore;more.disabled=modelsBusy;}
+    renderModelSort();
+  }
+
+  function renderModelFacets(){
+    var facets=MODEL_PAGE&&MODEL_PAGE.facets||{};
+    function values(name,read){
+      var fromApi=facets[name];
+      if(Array.isArray(fromApi))return fromApi;
+      var out=[];modelRows.forEach(function(model){var value=read(mliIdentity(model));if(value&&out.indexOf(value)<0)out.push(value);});
+      return out.sort();
+    }
+    function options(id,all,items){
+      var el=document.getElementById(id);if(!el)return;var selected=el.value;
+      var vals=items.filter(function(item){return item&&item!==selected;});if(selected)vals.unshift(selected);
+      el.innerHTML='<option value="">'+esc(all)+'</option>'+vals.map(function(item){return '<option value="'+esc(item)+'">'+esc(item)+'</option>';}).join("");
+      el.value=selected;
+    }
+    options("mli-host","All hosts",values("hosts",function(id){return id.host;}));
+    options("mli-provider","All providers",values("providers",function(id){return id.provider;}));
+    options("mli-publisher","All publishers",values("publishers",function(id){return id.publisher;}));
+  }
+
   function renderModelLifecycle(){
     if(!MODELS)return;
     var empty=MODELS.error||MODELS.status==="empty"||!MODELS.snapshot;
-    var snap=MODELS.snapshot||{},models=snap.models||[],attention=snap.attention||[],bindings=snap.bindings||[];
+    var snap=MODELS.snapshot||{},attention=snap.attention||[],bindings=snap.bindings||[];
     var badge=document.getElementById("mli-attention-n");
     if(badge){badge.hidden=!attention.length;badge.textContent=attention.length?String(attention.length):"";}
     document.getElementById("mli-asof").textContent=empty?"not captured":("captured "+String(snap.capturedAt||"").replace("T"," ").replace(".000Z","Z"));
     document.getElementById("mli-attention").innerHTML=empty
       ?'<div class="empty">'+esc(MODELS.error||"No model inventory yet. Run ak models refresh explicitly.")+"</div>"
       :attention.map(function(item){return '<div class="mli-alert" data-level="'+esc(item.severity||"warn")+'"><b>'+esc(item.kind)+"</b> · "+esc(item.reason)+"</div>";}).join("");
-    document.getElementById("mli-models").innerHTML=models.map(function(model){
-      var key=model.key||{};
-      return '<tr><td><span class="mli-id"><b>'+esc(key.modelId||"unknown")+'</b><small>'+esc(key.host||"unknown")+(key.provider?" / "+esc(key.provider):"")+"</small></span></td>"
-        +"<td>"+mliState(model,"configured")+"</td><td>"+mliState(model,"effective")+"</td><td>"+mliState(model,"observed")
-        +"</td><td>"+mliState(model,"discoverable")+"</td><td>"+mliState(model,"entitled")+"</td><td>"+mliState(model,"policyAllowed")
-        +"</td><td>"+mliState(model,"routable")+"</td><td>"+mliLifecycle(model)+"</td></tr>";
-    }).join("")||'<tr><td colspan="9"><div class="empty">No model records in this snapshot.</div></td></tr>';
+    renderModelInventory();
     var changes=snap.changes||[];
     document.getElementById("mli-history-note").textContent=(MODELS.history||[]).length+" retained snapshot"+((MODELS.history||[]).length===1?"":"s");
     document.getElementById("mli-history").innerHTML='<div class="mli-list">'+(changes.map(function(change){return '<div class="mli-row"><span><b>'+esc(change.kind)+'</b><br><small>'+esc(change.subject)+"</small></span><small>"+esc(change.provisional?"provisional":"established")+"</small></div>";}).join("")||'<div class="empty">No same-scope lifecycle changes.</div>')+"</div>";
@@ -1832,6 +1972,48 @@ export const JS = `
     if(seg)seg.addEventListener("keydown",function(e){if(!/^(ArrowLeft|ArrowRight|Home|End)$/.test(e.key))return;var i=VIEWS.indexOf(usageView);i=e.key==="Home"?0:e.key==="End"?VIEWS.length-1:(i+(e.key==="ArrowRight"?1:VIEWS.length-1))%VIEWS.length;setUsageView(VIEWS[i]);var b=seg.querySelector('[data-view="'+VIEWS[i]+'"]');if(b)b.focus();e.preventDefault();});
     var summary=document.getElementById("mli-summary");
     if(summary)summary.addEventListener("click",function(e){e.preventDefault();setTab("usage");setUsageView("models");});
+    function resetModelPage(){
+      var region=document.querySelector(".mli-table-wrap");if(region){region.scrollTop=0;region.scrollLeft=0;}
+      loadModelInventory(0,false,false);
+    }
+    var modelForm=document.getElementById("mli-filters");
+    if(modelForm){
+      modelForm.addEventListener("submit",function(e){e.preventDefault();if(modelSearchTimer)clearTimeout(modelSearchTimer);resetModelPage();});
+      modelForm.addEventListener("input",function(e){
+        if(!e.target||e.target.id!=="mli-search")return;
+        if(modelSearchTimer)clearTimeout(modelSearchTimer);
+        modelSearchTimer=setTimeout(resetModelPage,250);
+      });
+      modelForm.addEventListener("change",function(e){
+        if(!e.target||e.target.id==="mli-search")return;
+        if(e.target.id==="mli-evidence-field"){
+          var evidenceValue=document.getElementById("mli-evidence-value"),hasField=!!String(e.target.value||"").trim();
+          if(evidenceValue){evidenceValue.disabled=!hasField;if(!hasField)evidenceValue.value="";}
+        }
+        resetModelPage();
+      });
+      modelForm.addEventListener("reset",function(){
+        if(modelSearchTimer)clearTimeout(modelSearchTimer);
+        setTimeout(function(){
+          modelSort="lifecycle";modelDirection="asc";
+          var evidenceValue=document.getElementById("mli-evidence-value");if(evidenceValue)evidenceValue.disabled=true;
+          resetModelPage();var search=document.getElementById("mli-search");if(search)search.focus();
+        },0);
+      });
+    }
+    var modelTable=document.querySelector(".mli-table");
+    if(modelTable)modelTable.addEventListener("click",function(e){
+      var button=e.target.closest?e.target.closest("[data-mli-sort]"):null;if(!button)return;
+      var next=button.getAttribute("data-mli-sort");
+      if(modelSort===next)modelDirection=modelDirection==="asc"?"desc":"asc";
+      else{modelSort=next;modelDirection="asc";}
+      renderModelSort();resetModelPage();
+    });
+    var modelMore=document.getElementById("mli-load-more");
+    if(modelMore)modelMore.addEventListener("click",function(){
+      var next=MODEL_PAGE&&MODEL_PAGE.nextOffset;
+      loadModelInventory(next==null?modelRows.length:Number(next),true,true);
+    });
     var chips=document.getElementById("usage-days");
     if(chips)chips.addEventListener("click",function(e){
       var b=e.target.closest?e.target.closest("[data-days]"):null;

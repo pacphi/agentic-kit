@@ -519,11 +519,34 @@ export function renderPage({ name, version }) {
       <div class="mli-attention" id="mli-attention" role="status" aria-live="polite"></div>
       <section class="strip mli-ledger">
         <div class="sh"><h2>host inventory</h2><span class="n mono" id="mli-asof"></span></div>
-        <div class="mli-table-wrap" role="region" aria-label="Host model evidence table; scroll horizontally for every state" tabindex="0"><table class="mli-table">
+        <form class="mli-filters" id="mli-filters" role="search">
+          <label class="mli-filter mli-filter-search" for="mli-search"><span>Search</span><input id="mli-search" name="search" type="search" autocomplete="off" placeholder="Name or selector"></label>
+          <label class="mli-filter" for="mli-host"><span>Host</span><select id="mli-host" name="host"><option value="">All hosts</option></select></label>
+          <label class="mli-filter" for="mli-provider"><span>Serving provider</span><select id="mli-provider" name="provider"><option value="">All providers</option></select></label>
+          <label class="mli-filter" for="mli-publisher"><span>Publisher</span><select id="mli-publisher" name="publisher"><option value="">All publishers</option></select></label>
+          <label class="mli-filter" for="mli-relevance"><span>Relevance</span><select id="mli-relevance" name="relevance"><option value="relevant">Relevant</option><option value="all">All catalog</option></select></label>
+          <label class="mli-filter" for="mli-lifecycle"><span>Lifecycle</span><select id="mli-lifecycle" name="lifecycle"><option value="">Any lifecycle</option><option value="removed">Removed</option><option value="retiring">Retiring</option><option value="deprecated">Deprecated</option><option value="hidden">Hidden</option><option value="preview">Preview</option><option value="active">Active</option><option value="unknown">Unknown</option></select></label>
+          <label class="mli-filter" for="mli-evidence-field"><span>Evidence field</span><select id="mli-evidence-field" name="evidenceField"><option value="">Any field</option><option value="configured">Configured</option><option value="effective">Effective</option><option value="observed">Observed</option><option value="discoverable">Discoverable</option><option value="entitled">Entitled</option><option value="policyAllowed">Policy</option><option value="routable">Routable</option></select></label>
+          <label class="mli-filter" for="mli-evidence-value"><span>Evidence value</span><select id="mli-evidence-value" name="evidenceValue" disabled><option value="">Any value</option><option value="yes">Yes</option><option value="no">No</option><option value="unknown">Unknown</option></select></label>
+          <button class="mli-reset" id="mli-reset" type="reset">Reset</button>
+        </form>
+        <div class="mli-results"><span id="mli-result-count" role="status" aria-live="polite" aria-atomic="true">Loading inventory…</span><span class="mono">unknown values sort last</span></div>
+        <div class="mli-table-wrap" role="region" aria-label="Host model evidence table; scroll in either direction for every model and state" aria-describedby="mli-result-count" tabindex="0"><table class="mli-table">
           <caption class="sr-only">Host-scoped model lifecycle facts. Expand a state to inspect its evidence.</caption>
-          <thead><tr><th scope="col">Host / model</th><th scope="col">Configured</th><th scope="col">Effective</th><th scope="col">Observed</th><th scope="col">Discoverable</th><th scope="col">Entitled</th><th scope="col">Policy</th><th scope="col">Routable</th><th scope="col">Lifecycle</th></tr></thead>
+          <thead><tr>
+            <th scope="col" aria-sort="none"><button type="button" data-mli-sort="host">Host / model <span aria-hidden="true">↕</span></button></th>
+            <th scope="col" aria-sort="none"><button type="button" data-mli-sort="configured">Configured <span aria-hidden="true">↕</span></button></th>
+            <th scope="col" aria-sort="none"><button type="button" data-mli-sort="effective">Effective <span aria-hidden="true">↕</span></button></th>
+            <th scope="col" aria-sort="none"><button type="button" data-mli-sort="observed">Observed <span aria-hidden="true">↕</span></button></th>
+            <th scope="col" aria-sort="none"><button type="button" data-mli-sort="discoverable">Discoverable <span aria-hidden="true">↕</span></button></th>
+            <th scope="col" aria-sort="none"><button type="button" data-mli-sort="entitled">Entitled <span aria-hidden="true">↕</span></button></th>
+            <th scope="col" aria-sort="none"><button type="button" data-mli-sort="policyAllowed">Policy <span aria-hidden="true">↕</span></button></th>
+            <th scope="col" aria-sort="none"><button type="button" data-mli-sort="routable">Routable <span aria-hidden="true">↕</span></button></th>
+            <th scope="col" aria-sort="ascending"><button type="button" data-mli-sort="lifecycle">Lifecycle <span aria-hidden="true">↑</span></button></th>
+          </tr></thead>
           <tbody id="mli-models"></tbody>
         </table></div>
+        <div class="mli-pager"><button class="mli-load-more" id="mli-load-more" type="button" hidden>Load 50 more</button></div>
       </section>
       <div class="two">
         <section class="strip"><div class="sh"><h2>change history</h2><span class="n mono" id="mli-history-note"></span></div><div id="mli-history"></div></section>

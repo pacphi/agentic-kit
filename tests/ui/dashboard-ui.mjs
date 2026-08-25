@@ -710,7 +710,7 @@ const MODELS_STUB = {
       mode: 'local', status: 'complete', complete: true, capturedAt: MODEL_AT,
       schema: 'codex-model-cache-v1', scopeFingerprint: 'scope:ui-private' }],
     models: [{
-      key: { host: 'codex', provider: 'ui-private-provider', modelId: 'ui-private-deployment',
+      key: { host: 'opencode', provider: 'ui-private-provider', modelId: 'ui-private-deployment',
         scopeId: 'scope:ui-private', digest: 'ui-private-digest' },
       displayName: 'UI Private Deployment', aliases: [{ name: 'ui-private-alias',
         resolvesTo: 'ui-private-deployment', observedAt: MODEL_AT, evidenceRefs: ['ui-private-evidence'] }],
@@ -724,7 +724,30 @@ const MODELS_STUB = {
       evidence: [{ id: 'ui-private-evidence', field: 'catalog', source: 'codex-cache', class: 'catalog',
         capturedAt: MODEL_AT, freshness: 'fresh', completeness: 'complete',
         scopeFingerprint: 'scope:ui-private', refs: [] }],
-    }],
+    }, ...Array.from({ length: 61 }, (_, i) => ({
+      key: { host: i % 3 === 0 ? 'claude' : i % 3 === 1 ? 'codex' : 'opencode',
+        provider: i % 2 === 0 ? 'ui-private-provider-a' : 'ui-private-provider-b',
+        modelId: `catalog-model-${String(i + 2).padStart(2, '0')}`,
+        scopeId: 'scope:ui-private', digest: `catalog-digest-${i + 2}` },
+      displayName: `Catalog Model ${i + 2}`,
+      publisher: i % 2 === 0 ? 'Catalog Lab A' : 'Catalog Lab B',
+      selector: `catalog-provider/catalog-model-${i + 2}`,
+      visibility: 'visible', capabilities: { tools: i % 2 === 0 }, pricing: null,
+      lifecycle: { state: i % 11 === 0 ? 'retiring' : 'active', replacement: null,
+        evidenceRefs: ['ui-private-evidence'] },
+      dimensions: {
+        configured: { value: true, evidenceRefs: ['ui-private-evidence'] },
+        effective: { value: i % 4 === 0 ? null : true, evidenceRefs: ['ui-private-evidence'] },
+        observed: { value: i % 5 === 0 ? true : null, evidenceRefs: ['ui-private-evidence'] },
+        discoverable: { value: true, evidenceRefs: ['ui-private-evidence'] },
+        entitled: { value: i % 7 === 0 ? false : null, evidenceRefs: ['ui-private-evidence'] },
+        policyAllowed: { value: null, evidenceRefs: ['ui-private-evidence'] },
+        routable: { value: null, evidenceRefs: ['ui-private-evidence'] },
+      },
+      evidence: [{ id: 'ui-private-evidence', field: 'catalog', source: 'codex-cache', class: 'catalog',
+        capturedAt: MODEL_AT, freshness: 'fresh', completeness: 'complete',
+        scopeFingerprint: 'scope:ui-private', refs: [] }],
+    }))],
     bindings: [{ id: 'ui-private-binding', consumer: 'route:implementation', activity: 'implementation',
       host: 'codex', provider: 'ui-private-provider', configured: 'ui-private-deployment',
       effective: 'ui-private-deployment', provenance: 'configured', consumerState: 'configured',
@@ -768,6 +791,7 @@ async function main() {
   // collected globally so a failure in one view is not silently swallowed.
   const consoleErrors = [];
   const failedRequests = [];
+  const modelRequests = [];
   // Capture the LOCATION too. A bare "Failed to load resource" is
   // undiagnosable, and a console listener that records only the message makes
   // the harness's own failures impossible to act on.
@@ -785,6 +809,7 @@ async function main() {
   const offOriginRequests = [];
   page.on('request', (r) => {
     const u = r.url();
+    if (/\/api\/models(?:\?|$)/.test(u)) modelRequests.push(u);
     if (u.startsWith(ORIGIN) || /^(data|blob|about|chrome-extension):/.test(u)) return;
     offOriginRequests.push(`${r.resourceType()} ${u}`);
   });
@@ -2081,6 +2106,8 @@ async function main() {
     // ── every Usage sub-view ──
     await page.click('[data-tab="usage"]');
     await page.waitForTimeout(800);
+    check('model inventory stays network-lazy until its tab opens', modelRequests.length === 0,
+      `Models made ${modelRequests.length} request(s) before its tab opened: ${modelRequests.join(', ')}`);
     for (const [view, sel] of USAGE_VIEWS) {
       await page.click(`[data-view="${view}"]`).catch(() => {});
       await page.waitForSelector(`${sel}:not([hidden])`, { timeout: 8000 }).catch(() => {});
@@ -2104,9 +2131,18 @@ async function main() {
     // ── Models privacy, evidence disclosure, keyboard and narrow layout ──
     await page.click('[data-view="models"]');
     await page.waitForFunction(() => document.getElementById('mli-load-status')?.textContent?.includes('loaded'));
+    check('Models loads summary before its first bounded inventory page',
+      modelRequests.length >= 2
+        && new URL(modelRequests[0]).searchParams.get('view') === 'summary'
+        && new URL(modelRequests[1]).searchParams.get('view') === 'inventory'
+        && new URL(modelRequests[1]).searchParams.get('offset') === '0'
+        && new URL(modelRequests[1]).searchParams.get('limit') === '50'
+        && new URL(modelRequests[1]).searchParams.get('relevance') === 'relevant',
+      `Models requests were ${JSON.stringify(modelRequests)}`);
     const modelView = await visibleText(page, '#v-models');
-    check('usage/models exposes only keyed model and provider labels',
-      /model-[a-f0-9]{12}/.test(modelView) && /provider-[a-f0-9]{12}/.test(modelView)
+    check('usage/models shows proven public catalog names while private identities stay keyed',
+      /Catalog Model/.test(modelView) && /Codex models/.test(modelView)
+        && /model-[a-f0-9]{12}/.test(modelView) && /provider-[a-f0-9]{12}/.test(modelView)
         && !/ui-private|Private Deployment/.test(modelView),
       `Models privacy projection was ${JSON.stringify(modelView.slice(0, 400))}`);
     check('usage/models has a polite load status and settled busy state',
@@ -2124,11 +2160,100 @@ async function main() {
         && /complete/.test(await visibleText(page, '#mli-models'))
         && /scope-[a-f0-9]{12}/.test(await visibleText(page, '#mli-models')),
       'Expanded state did not disclose its complete evidence chain');
+    const unknownObserved = page.locator('#mli-models tr').first().locator('td').nth(3).locator('details');
+    await unknownObserved.locator('summary').click();
+    check('an unknown observed state explains the missing evidence instead of blaming refresh',
+      /No retained successful-use evidence established this field/.test(await unknownObserved.innerText()),
+      `unknown observed explanation was ${JSON.stringify(await unknownObserved.innerText())}`);
     check('usage/models table is an explicitly labelled keyboard region',
       await page.getAttribute('.mli-table-wrap', 'role') === 'region'
         && !!await page.getAttribute('.mli-table-wrap', 'aria-label')
         && await page.getAttribute('.mli-table-wrap', 'tabindex') === '0',
       'responsive table region lacked keyboard semantics');
+    const inventoryControls = await page.evaluate(() => ({
+      form: !!document.getElementById('mli-filters'),
+      search: document.getElementById('mli-search')?.getAttribute('type'),
+      labels: [...document.querySelectorAll('#mli-filters label')].map((node) => node.innerText.trim()),
+      reset: document.getElementById('mli-reset')?.textContent?.trim(),
+      countRole: document.getElementById('mli-result-count')?.getAttribute('role'),
+      countLive: document.getElementById('mli-result-count')?.getAttribute('aria-live'),
+      loadMore: document.getElementById('mli-load-more')?.textContent?.trim(),
+      evidenceValueDisabled: document.getElementById('mli-evidence-value')?.disabled,
+      headerButtons: document.querySelectorAll('.mli-table thead [data-mli-sort]').length,
+      ariaSort: [...document.querySelectorAll('.mli-table thead th')].map((node) => node.getAttribute('aria-sort')),
+    }));
+    check('Models exposes labelled search, host, provider, publisher, relevance, lifecycle and evidence filters',
+      inventoryControls.form && inventoryControls.search === 'search'
+        && ['Search', 'Host', 'Serving provider', 'Publisher', 'Relevance', 'Lifecycle', 'Evidence field', 'Evidence value']
+          .every((label) => inventoryControls.labels.some((actual) => actual.toLowerCase().startsWith(label.toLowerCase()))),
+      `inventory controls were ${JSON.stringify(inventoryControls)}`);
+    check('Models has Reset, result-status and explicit Load 50 more controls',
+      inventoryControls.reset === 'Reset'
+        && inventoryControls.countRole === 'status' && inventoryControls.countLive === 'polite'
+        && inventoryControls.loadMore === 'Load 50 more' && inventoryControls.evidenceValueDisabled,
+      `inventory controls were ${JSON.stringify(inventoryControls)}`);
+    check('every Models column header is a sortable button with one semantic sort owner',
+      inventoryControls.headerButtons === 9
+        && inventoryControls.ariaSort.filter((value) => value && value !== 'none').length === 1,
+      `header controls were ${JSON.stringify(inventoryControls)}`);
+    const initialInventory = await page.evaluate(() => ({
+      rows: document.querySelectorAll('#mli-models tr').length,
+      count: document.getElementById('mli-result-count')?.textContent?.trim(),
+      overflowY: getComputedStyle(document.querySelector('.mli-table-wrap')).overflowY,
+      maxHeight: getComputedStyle(document.querySelector('.mli-table-wrap')).maxHeight,
+      headPosition: getComputedStyle(document.querySelector('.mli-table thead')).position,
+    }));
+    check('Models renders only its first 50 relevant rows and states the total',
+      initialInventory.rows === 50 && /50/.test(initialInventory.count) && /62/.test(initialInventory.count),
+      `initial inventory was ${JSON.stringify(initialInventory)}`);
+    check('host inventory is height-bounded, vertically scrollable and keeps its header sticky',
+      initialInventory.overflowY === 'auto' && initialInventory.maxHeight !== 'none'
+        && initialInventory.headPosition === 'sticky',
+      `inventory geometry styles were ${JSON.stringify(initialInventory)}`);
+    await page.selectOption('#mli-evidence-field', 'observed');
+    await page.waitForFunction(() => !document.getElementById('mli-evidence-value')?.disabled);
+    check('evidence filtering enables its dependent value without sending a half-formed query',
+      !modelRequests.some((url) => new URL(url).searchParams.has('evidenceField')
+        !== new URL(url).searchParams.has('evidenceValue')),
+      `Models requests were ${JSON.stringify(modelRequests)}`);
+    await page.selectOption('#mli-evidence-value', 'unknown');
+    await page.waitForFunction(() => document.getElementById('mli-result-count')?.textContent !== 'Loading models…');
+    check('evidence field and value travel together as one filter',
+      modelRequests.some((url) => new URL(url).searchParams.get('evidenceField') === 'observed'
+        && new URL(url).searchParams.get('evidenceValue') === 'unknown'),
+      `Models requests were ${JSON.stringify(modelRequests)}`);
+    await page.click('#mli-reset');
+    await page.waitForFunction(() => document.activeElement?.id === 'mli-search'
+      && document.getElementById('mli-evidence-value')?.disabled);
+    const sortableHost = page.locator('[data-mli-sort="host"]');
+    await sortableHost.click();
+    await page.waitForFunction(() => document.querySelector('[data-mli-sort="host"]')?.closest('th')?.getAttribute('aria-sort') === 'ascending');
+    await sortableHost.click();
+    await page.waitForFunction(() => document.querySelector('[data-mli-sort="host"]')?.closest('th')?.getAttribute('aria-sort') === 'descending');
+    check('column buttons toggle ascending then descending and request server ordering',
+      modelRequests.some((url) => new URL(url).searchParams.get('sort') === 'host'
+        && new URL(url).searchParams.get('direction') === 'desc'),
+      `Models requests were ${JSON.stringify(modelRequests)}`);
+    await page.fill('#mli-search', 'deployment');
+    await page.waitForTimeout(350);
+    check('search resets inventory pagination and travels as a filter parameter',
+      modelRequests.some((url) => new URL(url).searchParams.get('search') === 'deployment'
+        && new URL(url).searchParams.get('offset') === '0'),
+      `Models requests were ${JSON.stringify(modelRequests)}`);
+    await page.click('#mli-reset');
+    await page.waitForFunction(() => document.activeElement?.id === 'mli-search'
+      && document.getElementById('mli-relevance')?.value === 'relevant');
+    check('Reset restores the relevance-first filter set and keyboard focus',
+      await page.inputValue('#mli-search') === ''
+        && await page.inputValue('#mli-relevance') === 'relevant'
+        && await page.evaluate(() => document.activeElement?.id) === 'mli-search',
+      'Reset did not restore the default filter state or return focus to Search');
+    await page.click('#mli-load-more');
+    await page.waitForFunction(() => document.querySelectorAll('#mli-models tr').length === 62);
+    check('Load 50 more appends the remaining page without replacing the first page',
+      await page.locator('#mli-models tr').count() === 62
+        && await page.isHidden('#mli-load-more'),
+      'the second page did not append to the first or the exhausted control stayed visible');
     await page.setViewportSize({ width: 640, height: 900 });
     await page.focus('.mli-table-wrap');
     await page.keyboard.press('ArrowRight');

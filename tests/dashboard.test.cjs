@@ -1116,7 +1116,18 @@ async function main() {
       }
       contains(r.body, 'id="mli-models"');
       contains(r.body, 'function renderModelLifecycle');
-      contains(r.body, 'fetch("/api/models"');
+      contains(r.body, 'modelJson("/api/models?view=summary")');
+      contains(r.body, 'view:"inventory"');
+      contains(r.body, 'limit:String(MODEL_LIMIT)');
+      for (const id of ['mli-filters', 'mli-search', 'mli-host', 'mli-provider', 'mli-publisher',
+        'mli-relevance', 'mli-lifecycle', 'mli-evidence-field', 'mli-evidence-value',
+        'mli-result-count', 'mli-reset', 'mli-load-more']) contains(r.body, 'id="' + id + '"');
+      for (const field of ['host', 'configured', 'effective', 'observed', 'discoverable',
+        'entitled', 'policyAllowed', 'routable', 'lifecycle']) {
+        contains(r.body, 'data-mli-sort="' + field + '"');
+      }
+      contains(r.body, 'aria-sort="ascending"');
+      contains(r.body, 'unknown values sort last');
       contains(r.body, 'id="u-openrouter"');
       contains(r.body, 'id="u-source-health"');
       contains(r.body, 'function renderSourceHealth');
