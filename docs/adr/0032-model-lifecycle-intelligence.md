@@ -1,12 +1,12 @@
 # ADR-0032 — Model lifecycle intelligence from provenance-aware local evidence
 
-- **Status:** Accepted (implementation complete; release proof pending)
+- **Status:** Implemented
 - **Date:** 2026-08-25
 - **Updated:** 2026-08-25
-- **Update note:** Implemented the bounded inventory, descriptor-selected source adapters,
-  conservative snapshot diff, read-only CLI/status/Dashboard surfaces, consumer impact, and keyed
-  Dashboard privacy projection. Exact-head project, Agentic QE, privacy, security, accessibility,
-  and release evidence remain pending; this ADR is deliberately not marked Implemented yet.
+- **Update note:** Implemented and release-proved the bounded inventory, descriptor-selected source
+  adapters, conservative snapshot diff, read-only CLI/status/Dashboard surfaces, consumer impact,
+  and keyed Dashboard privacy projection. Exact-head project, feature-specific Agentic QE,
+  privacy, security, accessibility, packaging, and dependency-audit evidence is recorded below.
 - **Deciders:** agentic-kit maintainers
 - **Related:** [issue #110](https://github.com/pacphi/agentic-kit/issues/110),
   [ADR-0001](0001-one-routing-policy-many-projections.md),
@@ -212,3 +212,30 @@ The decision may be marked Implemented only when:
    pseudonym, and fail-closed disclosure checks;
 8. Dashboard keyboard, responsive, and screen-reader contracts pass; and
 9. exact-head project, Agentic QE, privacy, security, and release gates are recorded.
+
+## Implementation and release proof
+
+The implementation branch was validated on 2026-08-25 with the following exact-head evidence:
+
+- `pnpm run check` passed TypeScript checking, ESLint, Markdown lint, packaging, CLI-load checks,
+  and the full unit/integration suite. Native instrumented coverage was 86.51% lines, 80.11%
+  branches, and 83.99% functions against 70% repository floors.
+- `pnpm run test:ui` passed the 287-check deterministic browser matrix, including the Models view,
+  keyboard table scrolling, tab navigation, evidence disclosure, responsive behavior, and
+  network-silent page loading.
+- Agentic QE coverage analysis passed its configured 70% feature threshold; its SAST scan reported
+  zero vulnerabilities. Its generic `aqe quality --gate` shortcut rejected its retained aggregate
+  evidence as stale even after the analyzers ran, so that unavailable aggregate was recorded rather
+  than silently replaced with invented metrics.
+- Privacy and security tests proved owner-only atomic snapshots, bounded subprocess output,
+  cache-only reads, explicit no-write/no-network online dry runs, keyed Dashboard pseudonyms,
+  fail-closed missing-key behavior, and absence of raw private identifiers from `/api/models`.
+- `pnpm audit --prod` reported no known vulnerabilities. No runtime dependency was introduced;
+  the implementation uses Node's built-in filesystem and cryptography APIs.
+- The package dry run included this ADR, the DDD model, and `docs/MODELS.md`; internal Markdown
+  links and the stable command-surface guards passed.
+
+Current official Claude Code, OpenCode, OpenAI, Ollama, and Node documentation was rechecked on
+2026-08-25 before freezing source commands, selector parsing, model lookup semantics, and runtime
+API usage. Public provider catalogues remain discovery evidence only; they are not promoted to
+host entitlement evidence.
