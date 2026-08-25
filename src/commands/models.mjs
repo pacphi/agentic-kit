@@ -101,13 +101,16 @@ export async function run({ flags, positionals, deps = {} }) {
 
   if (action === 'refresh') {
     const owners = selectedOwners(flags, cfg);
+    const onlineContact = Boolean(flags.online && owners.includes('opencode'));
     if (flags['dry-run']) {
-      const result = { dryRun: true, action, owners, online: flags.online, network: false, writes: false, cacheFile };
+      const result = { dryRun: true, action, owners, online: onlineContact,
+        onlineRequested: flags.online, network: false, writes: false, cacheFile };
       if (flags.json) printJson(result);
       else {
         heading('ak models — refresh plan (dry-run)');
         info(`Would inspect: ${owners.join(', ')}.`);
-        info(flags.online ? 'OpenCode catalog refresh would be permitted.' : 'No online catalog refresh would be permitted.');
+        info(onlineContact ? 'OpenCode catalog refresh would be permitted.'
+          : 'No online catalog refresh would be contacted.');
         info(dim('No source was contacted and no file was written.'));
       }
       return 0;
@@ -118,7 +121,8 @@ export async function run({ flags, positionals, deps = {} }) {
       discoveryOptions: { owners, online: flags.online, cwd: process.cwd() },
     });
     const store = append(snapshot, { file: cacheFile });
-    const result = { status: 'refreshed', cacheFile, contacts: owners, online: flags.online,
+    const result = { status: 'refreshed', cacheFile, contacts: owners, online: onlineContact,
+      onlineRequested: flags.online,
       snapshot: createModelReadModel(snapshot), retainedSnapshots: store.snapshots.length };
     if (flags.json) printJson(result);
     else {

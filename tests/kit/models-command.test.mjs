@@ -72,6 +72,21 @@ test('models refresh dry-run contacts nothing and writes nothing', async () => {
   assert.equal(collected, 0);
   assert.equal(appended, 0);
   assert.deepEqual(JSON.parse(result.output).owners, ['claude', 'codex', 'opencode', 'ollama']);
+  assert.equal(JSON.parse(result.output).online, false);
+});
+
+test('online contact is reported only when OpenCode is in refresh scope', async () => {
+  const codex = await capture(() => run({
+    flags: { json: true, online: true, host: 'codex', 'dry-run': true }, positionals: ['refresh'],
+    deps: { loadConfig: () => cfg },
+  }));
+  assert.equal(JSON.parse(codex.output).online, false);
+  assert.equal(JSON.parse(codex.output).onlineRequested, true);
+  const opencode = await capture(() => run({
+    flags: { json: true, online: true, host: 'opencode', 'dry-run': true }, positionals: ['refresh'],
+    deps: { loadConfig: () => cfg },
+  }));
+  assert.equal(JSON.parse(opencode.output).online, true);
 });
 
 test('models refresh is the sole collection and snapshot write boundary', async () => {
