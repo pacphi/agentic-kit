@@ -34,6 +34,7 @@ import os from 'node:os';
 import { chromium } from 'playwright';
 import { startDashboard } from '../../src/lib/dashboard-server.mjs';
 import { readIndex, readSession, maskSecrets } from '../../src/lib/usage-index.mjs';
+import { modelIdentityKey } from '../../src/lib/model-inventory/contracts.mjs';
 // The About area's directory is authored DATA, not a renderer — importing it
 // here asserts the real contract ("one card per directory entry") instead of a
 // hardcoded 15 that rots the day an entry is added. This is not the thing the
@@ -795,7 +796,19 @@ const MODELS_STUB = {
       host: 'opencode', provider: 'ui-private-provider-a', configured: 'catalog-model-04',
       effective: 'catalog-model-04', provenance: 'configured', consumerState: 'configured',
       evidenceRefs: ['ui-private-evidence'] }],
-    changes: [], opportunities: [], diagnostics: [],
+    changes: Array.from({ length: 12 }, (_, i) => {
+      const offset = i + 2;
+      const key = {
+        host: i % 3 === 0 ? 'claude' : i % 3 === 1 ? 'codex' : 'opencode',
+        provider: i % 2 === 0 ? 'ui-private-provider-a' : 'ui-private-provider-b',
+        modelId: `catalog-model-${String(offset).padStart(2, '0')}`,
+        scopeId: 'scope:ui-private', digest: `catalog-digest-${offset}`,
+      };
+      return {
+        kind: 'model-added', subject: modelIdentityKey(key), before: null, after: key,
+        severity: 'info', provisional: false, evidenceRefs: ['ui-private-evidence'],
+      };
+    }), opportunities: [], diagnostics: [],
   },
   history: [{ snapshotId: 'models:ui-private', capturedAt: MODEL_AT }],
   comparison: { baseline: null, latest: 'models:ui-private', comparable: false, diagnostics: [] },
@@ -2284,6 +2297,36 @@ async function main() {
       /implementation · primary/.test(await visibleText(page, '#mli-consumers'))
         && !/Configured consumer|activity-[a-f0-9]{12}|binding-[a-f0-9]{12}/.test(await visibleText(page, '#mli-consumers')),
       `consumer panel was ${JSON.stringify((await visibleText(page, '#mli-consumers')).slice(0, 500))}`);
+    const historyPanel = await page.evaluate(() => {
+      const panel = document.querySelector('#mli-history .mli-history-scroll');
+      const table = panel?.querySelector('table');
+      return panel ? {
+        overflowY: getComputedStyle(panel).overflowY,
+        maxHeight: getComputedStyle(panel).maxHeight,
+        scrollHeight: panel.scrollHeight,
+        clientHeight: panel.clientHeight,
+        region: panel.getAttribute('role'),
+        label: panel.getAttribute('aria-label'),
+        tabindex: panel.getAttribute('tabindex'),
+        columns: table?.querySelectorAll('thead th').length ?? 0,
+        rows: table?.querySelectorAll('tbody tr').length ?? 0,
+      } : null;
+    });
+    check('Models change history is a bounded, internally scrollable semantic table',
+      !!historyPanel && /(auto|scroll)/.test(historyPanel.overflowY)
+        && historyPanel.maxHeight !== 'none'
+        && historyPanel.scrollHeight > historyPanel.clientHeight
+        && historyPanel.region === 'region' && !!historyPanel.label && historyPanel.tabindex === '0'
+        && historyPanel.columns === 6 && historyPanel.rows === 12,
+      `change history panel was ${JSON.stringify(historyPanel)}`);
+    const historyText = await visibleText(page, '#mli-history');
+    check('Models change history uses exact human model facts instead of identity hashes or enum labels',
+      /Model added/.test(historyText) && /Catalog Model 2/.test(historyText)
+        && /ui-private-provider-a/.test(historyText) && /Claude/.test(historyText)
+        && /Appeared in the latest inventory/.test(historyText) && /Confirmed/.test(historyText)
+        && !/model-added|identity-[a-f0-9]{12}/.test(historyText)
+        && /12 changes · 1 retained snapshot/.test(await visibleText(page, '#mli-history-note')),
+      `change history was ${JSON.stringify(historyText.slice(0, 700))}`);
     check('Models removes low-value source coverage from the live surface',
       await page.locator('#mli-sources').count() === 0,
       'source coverage should remain documented rather than occupy the operator view');

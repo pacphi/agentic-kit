@@ -572,7 +572,7 @@ export function renderPage({ name, version }) {
         </div>
       </details>
       <div class="two">
-        <section class="strip"><div class="sh"><h2>change history</h2><span class="n mono" id="mli-history-note"></span></div><div id="mli-history"></div></section>
+        <section class="strip" aria-labelledby="mli-history-title"><div class="sh"><h2 id="mli-history-title">change history</h2><span class="n mono" id="mli-history-note"></span></div><div id="mli-history"></div></section>
         <section class="strip"><div class="sh"><h2>consumers</h2><span class="n mono">configured / reported evidence</span></div><div id="mli-consumers"></div></section>
       </div>
       <section class="strip"><div class="sh"><h2>swap impact</h2><span class="n mono">read-only canonical-policy preview</span></div><div id="mli-impact"></div></section>

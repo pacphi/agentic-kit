@@ -200,9 +200,11 @@ Later pages carry the privacy-projected snapshot id; if refresh replaces the sna
 reloads page one instead of mixing two inventories. A failed later page preserves the rows already
 shown and leaves a focused retry control.
 
-The inventory region is height-bounded and scrolls internally in both axes, so change history and
-the bounded route-consumer panel remain nearby. These lifecycle panels are structurally owned by
-Usage → Models and are never rendered in Scorecard, Limits, Findings, Sessions, or Transcript.
+The inventory region is height-bounded and scrolls internally in both axes. Change history is also a
+bounded, internally scrollable table; it names the exact model, provider, host, plain-language change,
+evidence status, and detection time instead of exposing an opaque identity join. The route-consumer
+panel remains bounded beside it. These lifecycle panels are structurally owned by Usage → Models and
+are never rendered in Scorecard, Limits, Findings, Sessions, or Transcript.
 Its header stays sticky. The region is labelled and keyboard-focusable, with a caption, column
 scopes, `aria-busy` loading state, result and load
 announcements, visible focus, and an explicit load control in addition to lazy fetching.

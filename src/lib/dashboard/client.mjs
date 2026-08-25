@@ -1958,6 +1958,32 @@ export const JS = `
     return value?(names[String(value).toLowerCase()]||String(value)):'Not recorded';
   }
 
+  function mliHostName(value){
+    var names={claude:'Claude',codex:'Codex',opencode:'OpenCode',ollama:'Ollama'};
+    return value?(names[String(value).toLowerCase()]||String(value)):'Not recorded';
+  }
+
+  function mliDetectedAt(value){
+    var when=new Date(String(value||''));
+    return isNaN(when)?'Time not recorded':when.toLocaleString(undefined,{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'});
+  }
+
+  function mliChangeRows(changes){
+    if(!changes.length)return '<div class="empty">No same-scope model changes.</div>';
+    return '<div class="mli-history-scroll" role="region" aria-label="Model change history table" tabindex="0">'
+      +'<table class="mli-history-table"><caption class="sr-only">Changes detected between retained model inventory snapshots.</caption>'
+      +'<thead><tr><th scope="col">Change</th><th scope="col">Model</th><th scope="col">Model provider</th><th scope="col">Host</th><th scope="col">What changed</th><th scope="col">Evidence</th></tr></thead><tbody>'
+      +changes.map(function(change){
+        var status=change.provisional?'Needs confirmation':'Confirmed';
+        return '<tr data-change="'+esc(change.kind||'changed')+'"><th scope="row">'+esc(change.label||'Model changed')+'</th>'
+          +'<td><span class="mli-history-model"><b>'+esc(change.modelName||'Model not recorded')+'</b>'
+          +(change.selector&&change.selector!==change.modelName?'<small>'+esc(change.selector)+'</small>':'')+'</span></td>'
+          +'<td>'+esc(mliProviderName(change.modelProvider))+'</td><td>'+esc(mliHostName(change.host))+'</td>'
+          +'<td>'+esc(change.detail||'A model inventory fact changed.')+'</td>'
+          +'<td><span class="mli-history-evidence" data-state="'+(change.provisional?'provisional':'confirmed')+'"><b>'+esc(status)+'</b><small>'+esc(mliDetectedAt(change.detectedAt))+'</small></span></td></tr>';
+      }).join('')+'</tbody></table></div>';
+  }
+
   function mliRouteValue(binding,field){
     if(field==="model")return binding.modelName||binding.selector||binding.configured||null;
     if(field==="provider")return binding.modelProvider||binding.provider||null;
@@ -2153,8 +2179,9 @@ export const JS = `
     renderModelRouteSort();
     renderModelInventory();
     var changes=snap.changes||[];
-    document.getElementById("mli-history-note").textContent=(MODELS.history||[]).length+" retained snapshot"+((MODELS.history||[]).length===1?"":"s");
-    document.getElementById("mli-history").innerHTML='<div class="mli-list">'+(changes.map(function(change){return '<div class="mli-row"><span><b>'+esc(change.kind)+'</b><br><small>'+esc(change.subject)+"</small></span><small>"+esc(change.provisional?"provisional":"established")+"</small></div>";}).join("")||'<div class="empty">No same-scope lifecycle changes.</div>')+"</div>";
+    var snapshotCount=(MODELS.history||[]).length;
+    document.getElementById("mli-history-note").textContent=changes.length+" change"+(changes.length===1?"":"s")+' · '+snapshotCount+" retained snapshot"+(snapshotCount===1?"":"s");
+    document.getElementById("mli-history").innerHTML=mliChangeRows(changes);
     var routeBindings=bindings.filter(function(binding){return binding.role&&binding.role!=="Configured consumer";});
     document.getElementById("mli-consumers").innerHTML='<div class="mli-consumer-scroll"><div class="mli-list">'+(routeBindings.map(function(binding){var model=binding.modelName||binding.configured||'Model not pinned';return '<div class="mli-row"><span><b>'+esc(binding.consumer)+'</b><br><small>'+esc(model)+' · '+esc(mliProviderName(binding.modelProvider||binding.provider))+'</small></span><small>'+esc(binding.lastUsed?'last used '+String(binding.lastUsed).replace('T',' ').replace('.000Z','Z'):'not observed in this window')+'</small></div>';}).join("")||'<div class="empty">No configured model routes.</div>')+"</div></div>";
     document.getElementById("mli-impact").innerHTML=routeBindings.length

@@ -6,6 +6,7 @@ import path from 'node:path';
 import {
   createDashboardModelPayload, createDashboardModelViewPayload,
 } from '../../src/lib/model-inventory/read-model.mjs';
+import { modelIdentityKey } from '../../src/lib/model-inventory/contracts.mjs';
 import { startDashboard } from '../../src/lib/dashboard-server.mjs';
 
 const AT = '2026-08-25T12:00:00.000Z';
@@ -247,6 +248,26 @@ test('migration attention names affected routes, replacement, action, and first-
     docs: 'https://developers.openai.com/api/docs/deprecations/',
     action: 'ak models plan --activity review --to codex:gpt-5.7-codex',
   });
+});
+
+test('owner-visible change history names the model and change without exposing transport joins', () => {
+  const input = payload();
+  const target = input.snapshot.models[0];
+  const identity = modelIdentityKey(target.key);
+  input.snapshot.changes = [{
+    kind: 'model-added', subject: identity, before: null, after: target.key,
+    severity: 'info', provisional: false, evidenceRefs: ['private-change-evidence'],
+  }];
+
+  const [change] = createDashboardModelPayload(input, { key: KEY }).snapshot.changes;
+  assert.deepEqual(change, {
+    kind: 'model-added', label: 'Model added', modelName: 'GPT-5.6 Codex',
+    selector: 'gpt-5.6-codex', modelProvider: 'openai', host: 'codex',
+    detail: 'Appeared in the latest inventory.', severity: 'info', provisional: false,
+    detectedAt: AT,
+  });
+  assert.equal(JSON.stringify(change).includes(identity), false);
+  assert.equal(JSON.stringify(change).includes('private-change-evidence'), false);
 });
 
 test('payload envelopes allowlist cached, history, comparison, and empty fields', () => {

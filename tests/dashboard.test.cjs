@@ -1115,6 +1115,8 @@ async function main() {
         contains(r.body, 'aria-labelledby="usage-tab-' + v + '"');
       }
       contains(r.body, 'id="mli-models"');
+      contains(r.body, 'mli-history-scroll');
+      contains(r.body, 'mli-history-table');
       contains(r.body, 'mli-consumer-scroll');
       contains(r.body, '</details>\n      <div class="two">');
       assert(!r.body.includes('id="mli-sources"'), 'removed source-coverage panel must not ship unused UI');

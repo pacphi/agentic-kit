@@ -528,25 +528,81 @@ function joinWindowedRouteUse(snapshot, window) {
   return { ...snapshot, bindings };
 }
 
-function sanitizeChangeValue(value, key, field = '') {
-  if (Array.isArray(value)) return value.map((entry) => sanitizeChangeValue(entry, key, field));
-  if (!value || typeof value !== 'object') {
-    if (typeof value !== 'string') return value;
-    if (field === 'host') return publicHost(value, key);
-    if (['state', 'visibility', 'severity', 'kind', 'field'].includes(field)) return value;
-    return privateLabel(field === 'name' ? 'alias' : field === 'provider' ? 'provider' : 'model', value, key);
-  }
-  return Object.fromEntries(Object.entries(value)
-    .map(([name, entry]) => [name, sanitizeChangeValue(entry, key, name)]));
+const CHANGE_LABELS = Object.freeze({
+  'model-added': 'Model added',
+  'model-missing': 'Model not reported',
+  'model-removed': 'Model removed',
+  'lifecycle-changed': 'Lifecycle changed',
+  'visibility-changed': 'Catalog visibility changed',
+  'alias-target-changed': 'Alias changed',
+  'capability-changed': 'Capability changed',
+  'reasoning-changed': 'Reasoning options changed',
+  'context-changed': 'Context window changed',
+  'variant-changed': 'Model metadata changed',
+  'digest-changed': 'Installed build changed',
+  'pricing-changed': 'API pricing changed',
+  'edges-changed': 'Compatibility guidance changed',
+});
+
+function changeLabel(kind) {
+  return CHANGE_LABELS[kind] ?? String(kind ?? 'Model changed')
+    .replaceAll('-', ' ').replace(/^./, (letter) => letter.toUpperCase());
 }
 
-function sanitizeChange(change, key) {
+function safeState(value) {
+  return typeof value === 'string' && /^[a-z][a-z0-9-]{0,31}$/i.test(value) ? value : 'unknown';
+}
+
+function humanField(value) {
+  return safeState(value).replace(/([a-z0-9])([A-Z])/g, '$1 $2').replaceAll('-', ' ').toLowerCase();
+}
+
+function changeDetail(change) {
+  if (change.kind === 'model-added') return 'Appeared in the latest inventory.';
+  if (change.kind === 'model-missing') return 'Not reported by the latest complete source; confirmation is pending.';
+  if (change.kind === 'model-removed') return 'No longer reported after repeated complete refreshes.';
+  if (change.kind === 'lifecycle-changed') {
+    const before = safeState(change.before?.state);
+    const after = safeState(change.after?.state);
+    const replacement = ownerVisibleModelText(change.after?.replacement);
+    return `Lifecycle ${before} → ${after}${replacement ? `; replacement ${replacement}` : ''}.`;
+  }
+  if (change.kind === 'visibility-changed') {
+    return `Catalog visibility ${safeState(change.before)} → ${safeState(change.after)}.`;
+  }
+  if (change.kind === 'alias-target-changed') return 'A configured alias now resolves to a different model.';
+  if (change.kind === 'capability-changed') {
+    const field = humanField(change.after?.field ?? change.before?.field);
+    return `${field === 'unknown' ? 'A reported capability' : `Reported ${field} support`} changed.`;
+  }
+  if (change.kind === 'reasoning-changed') return 'The reported reasoning options changed.';
+  if (change.kind === 'context-changed') return 'The reported context window changed.';
+  if (change.kind === 'variant-changed') {
+    const field = humanField(change.after?.field ?? change.before?.field);
+    return `${field === 'unknown' ? 'Reported model metadata' : `Reported ${field}`} changed.`;
+  }
+  if (change.kind === 'digest-changed') return 'The installed model build changed; private digests remain hidden.';
+  if (change.kind === 'pricing-changed') return 'The published API rate changed.';
+  if (change.kind === 'edges-changed') return 'Compatibility or migration guidance changed.';
+  return 'A model inventory fact changed.';
+}
+
+function sanitizeChange(change, key, linkedModel, detectedAt) {
+  const rawKey = [change.after, change.before].find((value) => value && typeof value === 'object'
+    && typeof value.modelId === 'string');
+  const selector = linkedModel?.selector ?? ownerVisibleModelText(rawKey?.modelId);
+  const modelName = linkedModel?.displayName ?? selector ?? 'Model not recorded';
   return {
-    ...change,
-    subject: privateLabel('identity', change.subject, key),
-    before: sanitizeChangeValue(change.before, key),
-    after: sanitizeChangeValue(change.after, key),
-    evidenceRefs: (change.evidenceRefs ?? []).map((ref) => privateLabel('evidence', ref, key)),
+    kind: change.kind,
+    label: changeLabel(change.kind),
+    modelName,
+    selector,
+    modelProvider: linkedModel?.servingProvider ?? ownerVisibleModelText(rawKey?.provider),
+    host: linkedModel?.host ?? publicHost(rawKey?.host, key),
+    detail: changeDetail(change),
+    severity: change.severity,
+    provisional: change.provisional === true,
+    detectedAt,
   };
 }
 
@@ -576,9 +632,11 @@ export function createDashboardModelReadModel(snapshotValue, options = {}) {
       && [binding.effective, binding.configured].includes(model.key.modelId));
     return sanitizeBinding(binding, key, index < 0 ? null : models[index]);
   });
-  const changes = exact.changes.map((change) => sanitizeChange(change, key));
   const exactModelByIdentity = new Map(exact.models.map((model) => [model.identity, model]));
   const modelByIdentity = new Map(exact.models.map((model, index) => [model.identity, models[index]]));
+  const changes = exact.changes.map((change) => sanitizeChange(
+    change, key, modelByIdentity.get(change.subject), exact.capturedAt,
+  ));
   const bindingById = new Map(exact.bindings.map((binding, index) => [binding.id, bindings[index]]));
   const sourceById = new Map(exact.sources.map((source, index) => [source.id, sources[index]]));
   const changeBySubject = new Map(exact.changes.map((change, index) => [change.subject, changes[index]]));
@@ -614,7 +672,7 @@ export function createDashboardModelReadModel(snapshotValue, options = {}) {
     if (item.kind === 'consumer') {
       return { ...item, subject: bindingById.get(item.subject)?.id ?? privateLabel('binding', item.subject, key) };
     }
-    return { ...item, subject: changeBySubject.get(item.subject)?.subject
+    return { ...item, subject: changeBySubject.get(item.subject)?.modelName
       ?? privateLabel('identity', item.subject, key) };
   });
   return immutable({

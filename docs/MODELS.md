@@ -163,7 +163,8 @@ Open `ak dashboard`, then choose **Usage → Models**. The view includes:
 
 - attention items for degraded sources, cited lifecycle migrations, alias changes, and drift;
 - a semantic host/model table with every independent state;
-- same-scope change history;
+- bounded, scrollable same-scope change history with the exact model, provider, host, plain-language
+  change, evidence status, and detection time;
 - configured and reported consumers;
 - read-only swap-impact guidance; and
 - evidence source status and capture time.
@@ -189,9 +190,10 @@ link remains generic unless that source supplies an exact canonical page. Huggin
 links appear only when source metadata verifies the exact repository/library identity. Custom
 providers, private deployments, local tags, and observed-only ids appear with their exact bounded
 model selector, display name, and independently recorded provider in the owner-only Dashboard.
-Configured variants, digests, aliases, binding ids, scopes, history, evidence ids, credentials, and
-endpoints remain hidden transport joins only. The browser never derives a provider or publisher from
-a name and never invents an external link.
+Configured variants, digests, aliases, binding ids, scopes, snapshot ids, evidence ids, credentials,
+and endpoints remain hidden transport joins only. Change history uses the same owner-visible exact
+model identity as the route and catalogue views, but never exposes the underlying identity join. The
+browser never derives a provider or publisher from a name and never invents an external link.
 
 An `unknown` cell explains which evidence is absent. A local refresh now resolves OpenCode's
 effective configuration, removing unknowns caused only by ignored global, JSONC, agent, or command
