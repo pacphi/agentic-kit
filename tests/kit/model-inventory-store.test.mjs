@@ -38,6 +38,41 @@ test('append writes atomically with private permissions and advances a complete 
   fs.rmSync(sb.dir, { recursive: true, force: true });
 });
 
+test('store temp files use an unpredictable injected suffix and exclusive private creation', () => {
+  const sb = sandbox();
+  const writes = [];
+  const fsImpl = new Proxy(fs, {
+    get(target, property) {
+      if (property !== 'writeFileSync') return Reflect.get(target, property);
+      return (file, data, options) => {
+        writes.push({ file, options });
+        return target.writeFileSync(file, data, options);
+      };
+    },
+  });
+  appendModelSnapshot(snapshot('secure-temp', NOW), {
+    file: sb.file, fsImpl, now: NOW, randomBytesFn: () => Buffer.alloc(12, 0x5a),
+  });
+  const temporary = writes.find(({ file }) => file.endsWith('.tmp'));
+  assert.equal(temporary.file, `${sb.file}.${'5a'.repeat(12)}.tmp`);
+  assert.deepEqual(temporary.options, { mode: 0o600, flag: 'wx' });
+  assert.equal(fs.existsSync(temporary.file), false);
+  fs.rmSync(sb.dir, { recursive: true, force: true });
+});
+
+test('exclusive temp collision fails without deleting the pre-existing file', () => {
+  const sb = sandbox();
+  const suffix = '7b'.repeat(12);
+  const temporary = `${sb.file}.${suffix}.tmp`;
+  fs.writeFileSync(temporary, 'pre-existing');
+  assert.throws(() => appendModelSnapshot(snapshot('collision', NOW), {
+    file: sb.file, now: NOW, randomBytesFn: () => Buffer.alloc(12, 0x7b),
+  }), { code: 'EEXIST' });
+  assert.equal(fs.readFileSync(temporary, 'utf8'), 'pre-existing');
+  assert.equal(fs.existsSync(sb.file), false);
+  fs.rmSync(sb.dir, { recursive: true, force: true });
+});
+
 test('previous snapshot is the prior complete capture in the same scope', () => {
   const current = snapshot('current', NOW);
   const store = {

@@ -100,18 +100,24 @@ function pruneStore(store, now) {
 }
 
 export function writeModelStore(value, {
-  file = modelInventoryPath(), fsImpl = fs, now = Date.now(),
+  file = modelInventoryPath(), fsImpl = fs, now = Date.now(), randomBytesFn = randomBytes,
 } = {}) {
   const store = pruneStore(normalizeStore(value), now);
   store.updatedAt = new Date(now).toISOString();
   fsImpl.mkdirSync(path.dirname(file), { recursive: true });
-  const tmp = `${file}.${process.pid}.${now}.tmp`;
+  const nonce = randomBytesFn(12).toString('hex');
+  if (!/^[a-f0-9]{24}$/i.test(nonce)) throw new TypeError('invalid model store temporary suffix');
+  const tmp = `${file}.${nonce}.tmp`;
+  let created = false;
   try {
-    fsImpl.writeFileSync(tmp, JSON.stringify(store), { mode: 0o600 });
+    fsImpl.writeFileSync(tmp, JSON.stringify(store), { mode: 0o600, flag: 'wx' });
+    created = true;
     fsImpl.renameSync(tmp, file);
     try { fsImpl.chmodSync(file, 0o600); } catch { /* best effort on filesystems without modes */ }
   } catch (error) {
-    try { fsImpl.rmSync(tmp, { force: true }); } catch { /* preserve the original error */ }
+    if (created) {
+      try { fsImpl.rmSync(tmp, { force: true }); } catch { /* preserve the original error */ }
+    }
     throw error;
   }
   return store;
