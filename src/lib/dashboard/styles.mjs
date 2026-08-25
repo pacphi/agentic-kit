@@ -14,6 +14,7 @@ export const CSS = `
 :root[data-theme="dark"]{
   --bg:#000000; --panel:#1c1c1e; --panel-2:#2c2c2e; --raised:#3a3a3c; --thumb:#48484a;
   --ink:#f5f5f7; --ink-2:rgba(235,235,245,.64); --ink-dim:rgba(235,235,245,.38);
+  --mli-muted:#b8b8be; --mli-ok:#58dc78; --mli-fail:#ff6961;
   --line:rgba(255,255,255,.09); --line-2:rgba(255,255,255,.17);
   --accent:#0a84ff; --accent-soft:rgba(10,132,255,.16);
   --ok:#30d158; --warn:#ff9f0a; --fail:#ff453a; --info:#98989d; --purple:#bf5af2;
@@ -36,6 +37,7 @@ export const CSS = `
 :root[data-theme="light"]{
   --bg:#f5f5f7; --panel:#ffffff; --panel-2:#f2f2f7; --raised:#ffffff; --thumb:#ffffff;
   --ink:#1d1d1f; --ink-2:rgba(60,60,67,.68); --ink-dim:rgba(60,60,67,.42);
+  --mli-muted:#59595e; --mli-ok:#167d32; --mli-fail:#c5221f;
   --line:rgba(60,60,67,.12); --line-2:rgba(60,60,67,.22);
   --accent:#007aff; --accent-soft:rgba(0,122,255,.12);
   --ok:#34c759; --warn:#ff9500; --fail:#ff3b30; --info:#8e8e93; --purple:#af52de;
@@ -52,6 +54,8 @@ export const CSS = `
   :root:not([data-theme]){ color-scheme:light; }
 }
 *{box-sizing:border-box}
+.sr-only{position:absolute!important;width:1px!important;height:1px!important;padding:0!important;margin:-1px!important;
+  overflow:hidden!important;clip:rect(0,0,0,0)!important;white-space:nowrap!important;border:0!important}
 html,body{margin:0;padding:0}
 body{
   background:var(--bg);
@@ -452,26 +456,34 @@ body.gated .band,body.gated .tabbar,body.gated main{display:none}
   color:var(--ink);text-decoration:none;box-shadow:var(--shadow)}
 .mli-summary:hover{border-color:color-mix(in srgb,var(--accent) 45%,var(--line))}
 .mli-summary:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
-.mli-summary span:first-child{display:flex;flex-direction:column;gap:3px}.mli-summary small{color:var(--ink-2)}
+.mli-summary span:first-child{display:flex;flex-direction:column;gap:3px}.mli-summary small{color:var(--mli-muted)}
 .mli-attention{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:8px;margin-bottom:16px}
 .mli-alert{padding:10px 12px;border-left:3px solid var(--warn);border-radius:0 var(--r-sm) var(--r-sm) 0;
-  background:color-mix(in srgb,var(--warn) 9%,var(--panel));font-size:12px;color:var(--ink-2)}
+  background:color-mix(in srgb,var(--warn) 9%,var(--panel));font-size:12px;color:var(--ink)}
 .mli-alert[data-level="fail"]{border-left-color:var(--fail);background:color-mix(in srgb,var(--fail) 8%,var(--panel))}
-.mli-table-wrap{overflow-x:auto}.mli-table{width:100%;border-collapse:collapse;min-width:920px;font-size:11.5px}
-.mli-table th{text-align:left;padding:0 9px 9px;color:var(--ink-dim);font-size:9.5px;text-transform:uppercase;
+.mli-table-wrap{overflow-x:auto}.mli-table-wrap:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
+.mli-table{width:100%;border-collapse:collapse;min-width:920px;font-size:11.5px}
+.mli-table th{text-align:left;padding:0 9px 9px;color:var(--mli-muted);font-size:10px;text-transform:uppercase;
   letter-spacing:.06em;border-bottom:1px solid var(--line)}
 .mli-table td{padding:10px 9px;border-bottom:1px solid var(--line);vertical-align:middle}
 .mli-table tbody tr:last-child td{border-bottom:0}.mli-id{display:flex;flex-direction:column;gap:2px}
-.mli-id b{font-size:12px}.mli-id small{color:var(--ink-dim);font-family:var(--mono)}
-.mli-state{display:inline-flex;align-items:center;gap:5px;white-space:nowrap;color:var(--ink-dim)}
+.mli-id b{font-size:12px}.mli-id small{color:var(--mli-muted);font-family:var(--mono)}
+.mli-state{display:inline-flex;align-items:center;gap:5px;white-space:nowrap;color:var(--mli-muted);cursor:pointer}
 .mli-state::before{content:"?";display:grid;place-items:center;width:15px;height:15px;border-radius:50%;
   background:var(--panel-2);font:700 9px var(--mono)}
-.mli-state[data-state="yes"]{color:var(--ok)}.mli-state[data-state="yes"]::before{content:"✓";background:color-mix(in srgb,var(--ok) 13%,var(--panel))}
-.mli-state[data-state="no"]{color:var(--fail)}.mli-state[data-state="no"]::before{content:"×";background:color-mix(in srgb,var(--fail) 12%,var(--panel))}
+.mli-state[data-state="yes"]{color:var(--mli-ok)}.mli-state[data-state="yes"]::before{content:"✓";background:color-mix(in srgb,var(--mli-ok) 13%,var(--panel))}
+.mli-state[data-state="no"]{color:var(--mli-fail)}.mli-state[data-state="no"]::before{content:"×";background:color-mix(in srgb,var(--mli-fail) 12%,var(--panel))}
+.mli-proof{position:relative}.mli-proof summary{list-style:none}.mli-proof summary::-webkit-details-marker{display:none}
+.mli-proof summary:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:4px}
+.mli-life{cursor:pointer;color:var(--ink)}.mli-life::after{content:" · evidence";color:var(--mli-muted);font-family:var(--sans);font-size:10px}
+.mli-proof-body{display:grid;gap:3px;min-width:220px;margin-top:6px;padding:7px 8px;border:1px solid var(--line-2);
+  border-radius:8px;background:var(--panel-2);color:var(--ink);font-size:10.5px;line-height:1.45}
+.mli-proof-row{display:block}.mli-proof-row b{color:var(--ink)}
 .mli-list{display:grid;gap:8px}.mli-row{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;
   padding:8px 0;border-bottom:1px solid var(--line);font-size:12px}.mli-row:last-child{border-bottom:0}
-.mli-row small{color:var(--ink-dim);text-align:right}.mli-sources{display:flex;gap:8px;flex-wrap:wrap}
-.mli-source{padding:7px 10px;border:1px solid var(--line);border-radius:999px;font:11px var(--mono);color:var(--ink-2)}
+.mli-row small{color:var(--mli-muted);text-align:right}.mli-sources{display:flex;gap:8px;flex-wrap:wrap}
+.mli-source{display:flex;flex-direction:column;gap:3px;padding:8px 11px;border:1px solid var(--line);border-radius:10px;
+  font:11px var(--mono);color:var(--mli-muted)}.mli-source b{color:var(--ink)}.mli-source small{font:10px var(--mono)}
 .mli-source[data-status="complete"]{border-color:color-mix(in srgb,var(--ok) 35%,var(--line))}
 .mli-source:not([data-status="complete"]){border-color:color-mix(in srgb,var(--warn) 45%,var(--line))}
 @media(max-width:720px){.mli-summary{align-items:flex-start}.mli-attention{grid-template-columns:1fr}}

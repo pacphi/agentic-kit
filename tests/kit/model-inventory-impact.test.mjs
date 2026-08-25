@@ -3,7 +3,9 @@ import assert from 'node:assert/strict';
 import {
   consumerDiagnostics, explainModel, impactGraph, planModelChange,
 } from '../../src/lib/model-inventory/impact.mjs';
-import { createModelReadModel, summarizeModelHealth } from '../../src/lib/model-inventory/read-model.mjs';
+import {
+  createDashboardModelPayload, createModelReadModel, summarizeModelHealth,
+} from '../../src/lib/model-inventory/read-model.mjs';
 
 const AT = '2026-08-25T12:00:00.000Z';
 
@@ -20,13 +22,17 @@ function model(id, { dimensions = {}, capabilities = {}, lifecycle = { state: 'a
     evidence(`${id}-lifecycle`, 'lifecycle'),
   ];
   return {
-    key: { host: 'codex', provider: 'openai', modelId: id, scopeId: 'scope-a' },
+    key: { host: 'codex', provider: 'openai', modelId: id, scopeId: 'scope-a', digest: `digest-${id}` },
     dimensions: {
       routable: { value: true, evidenceRefs: [`${id}-routable`] },
       discoverable: { value: true }, entitled: { value: true }, policyAllowed: { value: true },
       ...dimensions,
     },
     capabilities, lifecycle: { ...lifecycle, evidenceRefs: [`${id}-lifecycle`] },
+    pricing: { basis: 'per-million-tokens', input: 1, output: 2, currency: 'USD',
+      evidenceRefs: [`${id}-lifecycle`] },
+    edges: [{ kind: 'same-family-newer', from: id, to: `${id}-next`, provenance: 'first-party',
+      scopeFingerprint: 'scope-a', evidenceRefs: [`${id}-lifecycle`] }],
     evidence: evidenceRows,
   };
 }
@@ -130,4 +136,38 @@ test('impact graph and read model expose consumers and attention without mutatio
   assert.equal(readModel.counts.aliasChanges, 1);
   assert.equal(readModel.counts.driftedConsumers, 1);
   assert.equal(summarizeModelHealth(snapshot).level, 'warn');
+});
+
+test('Dashboard projection pseudonymizes identifiers while exact CLI evidence remains unchanged', () => {
+  const snapshot = fixture();
+  const exact = createModelReadModel(snapshot);
+  const payload = createDashboardModelPayload({
+    status: 'cached', snapshot: exact,
+    history: [{ snapshotId: snapshot.snapshotId, capturedAt: snapshot.capturedAt }],
+    comparison: { baseline: snapshot.snapshotId, latest: snapshot.snapshotId,
+      diagnostics: ['codex-cache: stale'] },
+  }, { key: 'ef'.repeat(32) });
+  const wire = JSON.stringify(payload);
+  for (const raw of ['gpt-old', 'gpt-new', 'digest-gpt', 'openai', 'route-implementation',
+    'aqe-coder', 'ruflo-openai']) assert.equal(wire.includes(raw), false, raw);
+  assert.match(payload.snapshot.models[0].key.modelId, /^model-[a-f0-9]{12}$/);
+  assert.equal(payload.snapshot.models[0].evidence[0].source, 'codex-cache');
+  assert.equal(payload.snapshot.sources[0].id, 'codex-cache');
+  assert.match(payload.snapshot.models[0].key.digest, /^digest-[a-f0-9]{12}$/);
+  assert.match(payload.snapshot.models[0].edges[0].from, /^model-[a-f0-9]{12}$/);
+  assert.match(payload.snapshot.models[0].edges[0].evidenceRefs[0], /^evidence-[a-f0-9]{12}$/);
+  assert.deepEqual({ input: payload.snapshot.models[0].pricing.input,
+    output: payload.snapshot.models[0].pricing.output, currency: payload.snapshot.models[0].pricing.currency },
+  { input: 1, output: 2, currency: 'USD' });
+  assert.notEqual(payload.snapshot.scope.fingerprint, 'scope-a');
+  assert.notEqual(payload.snapshot.snapshotId, 'snapshot-a');
+  assert.equal(payload.snapshot.privacy.exactIdentifiers, false);
+  assert.equal(exact.models[0].key.modelId, 'gpt-old');
+  assert.equal(exact.bindings[0].id, 'route-implementation');
+});
+
+test('Dashboard projection fails closed without a valid existing key', () => {
+  assert.throws(() => createDashboardModelPayload({
+    status: 'cached', snapshot: createModelReadModel(fixture()),
+  }), /privacy key unavailable/);
 });

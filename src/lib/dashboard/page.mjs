@@ -511,15 +511,17 @@ export function renderPage({ name, version }) {
       <div class="foot">durations are session span (first&rarr;last event), not exclusive wall-clock</div>
     </section>
 
-    <section class="view" id="v-models" role="tabpanel" aria-labelledby="usage-tab-models" hidden>
+    <section class="view" id="v-models" role="tabpanel" aria-labelledby="usage-tab-models" aria-busy="false" hidden>
+      <div class="sr-only" id="mli-load-status" role="status" aria-live="polite" aria-atomic="true"></div>
       <div class="note"><span class="i">&#8505;</span><span>This is a <b>read-only evidence ledger</b>.
         Configured, effective, observed, discoverable, entitled, policy, and routability are independent facts.
         Unknown stays unknown; refresh is the only operation that contacts model sources.</span></div>
-      <div class="mli-attention" id="mli-attention"></div>
+      <div class="mli-attention" id="mli-attention" role="status" aria-live="polite"></div>
       <section class="strip mli-ledger">
         <div class="sh"><h2>host inventory</h2><span class="n mono" id="mli-asof"></span></div>
-        <div class="mli-table-wrap"><table class="mli-table">
-          <thead><tr><th>Host / model</th><th>Configured</th><th>Effective</th><th>Observed</th><th>Discoverable</th><th>Entitled</th><th>Policy</th><th>Routable</th><th>Lifecycle</th></tr></thead>
+        <div class="mli-table-wrap" role="region" aria-label="Host model evidence table; scroll horizontally for every state" tabindex="0"><table class="mli-table">
+          <caption class="sr-only">Host-scoped model lifecycle facts. Expand a state to inspect its evidence.</caption>
+          <thead><tr><th scope="col">Host / model</th><th scope="col">Configured</th><th scope="col">Effective</th><th scope="col">Observed</th><th scope="col">Discoverable</th><th scope="col">Entitled</th><th scope="col">Policy</th><th scope="col">Routable</th><th scope="col">Lifecycle</th></tr></thead>
           <tbody id="mli-models"></tbody>
         </table></div>
       </section>

@@ -4,8 +4,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import {
-  MAX_MODEL_SNAPSHOTS, appendModelSnapshot, baselineFor, latestSnapshot, previousSnapshot, readModelStore,
-  readOrCreateModelScopeKey,
+  MAX_MODEL_SNAPSHOTS, appendModelSnapshot, baselineFor, latestSnapshot, previousSnapshot,
+  readModelScopeKey, readModelStore, readOrCreateModelScopeKey,
 } from '../../src/lib/model-inventory/store.mjs';
 
 const DAY = 86_400_000;
@@ -109,5 +109,17 @@ test('scope fingerprints use a stable private per-install key', () => {
   assert.equal(key, 'ab'.repeat(32));
   assert.equal(readOrCreateModelScopeKey({ file, randomBytesFn: () => Buffer.alloc(32) }), key);
   if (process.platform !== 'win32') assert.equal(fs.statSync(file).mode & 0o777, 0o600);
+  fs.rmSync(sb.dir, { recursive: true, force: true });
+});
+
+test('read-only scope key lookup never creates state and rejects corrupt keys', () => {
+  const sb = sandbox();
+  const file = path.join(sb.dir, 'model-scope.key');
+  assert.equal(readModelScopeKey({ file }), null);
+  assert.equal(fs.existsSync(file), false);
+  fs.writeFileSync(file, 'not-a-key');
+  assert.equal(readModelScopeKey({ file }), null);
+  fs.writeFileSync(file, `${'cd'.repeat(32)}\n`);
+  assert.equal(readModelScopeKey({ file }), 'cd'.repeat(32));
   fs.rmSync(sb.dir, { recursive: true, force: true });
 });

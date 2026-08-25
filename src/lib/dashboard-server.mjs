@@ -672,7 +672,7 @@ function lazyLive(liveOptions = {}) {
  *           intelClientBuffer?: number, intelMaxClients?: number,
  *           discoverProjects?: () => Array<{ path: string, label: string, source?: string }>,
  *           machineWideIntel?: (projects: Array<any>) => any,
- *           models?: any, system?: any, systemOptions?: any }} [opts]
+ *           models?: any, modelScopeKey?: string, system?: any, systemOptions?: any }} [opts]
  * @returns {Promise<{ url: string, urlWithToken: string, port: number, token: string, close: () => Promise<void> }>}
  */
 export function startDashboard({
@@ -681,7 +681,7 @@ export function startDashboard({
   liveOptions = {}, liveIdleMs = 30_000, transcripts, transcriptOptions = {},
   transcriptClientBuffer = 64, transcriptMaxClients = 16,
   intelWatch, intelClientBuffer = 256, intelMaxClients = 32,
-  discoverProjects, machineWideIntel, models, system, systemOptions = {},
+  discoverProjects, machineWideIntel, models, modelScopeKey, system, systemOptions = {},
 } = {}) {
   const provide = fetchStatus || shellOutStatus(cwd);
   const usageApi = usage || lazyUsage();
@@ -1393,9 +1393,23 @@ export function startDashboard({
 
     if (url === '/api/models') {
       try {
-        sendJson(res, 200, await provideModels());
-      } catch (e) {
-        sendJson(res, 500, { error: String(e && e.message || e) });
+        const payload = await provideModels();
+        if (!payload || payload.status === 'empty' || !payload.snapshot) {
+          sendJson(res, 200, payload);
+          return;
+        }
+        const [{ readModelScopeKey }, { createDashboardModelPayload }] = await Promise.all([
+          import('./model-inventory/store.mjs'), import('./model-inventory/read-model.mjs'),
+        ]);
+        const key = modelScopeKey === undefined ? readModelScopeKey() : modelScopeKey;
+        if (!key) {
+          sendJson(res, 503, { error: 'model dashboard privacy key unavailable' });
+          return;
+        }
+        sendJson(res, 200, createDashboardModelPayload(payload, { key }));
+      } catch {
+        // Do not echo native parser/provider errors: they may contain a private identifier.
+        sendJson(res, 500, { error: 'model dashboard evidence unavailable' });
       }
       return;
     }

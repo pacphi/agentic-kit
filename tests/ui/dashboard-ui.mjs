@@ -266,6 +266,7 @@ const USAGE_VIEWS = [
   ['limits', '#v-limits'],
   ['findings', '#v-findings'],
   ['sessions', '#v-sessions'],
+  ['models', '#v-models'],
   ['transcript', '#v-transcript'],
 ];
 // Seven sub-views, in order. Asserting the list here means a merge would fail
@@ -699,6 +700,40 @@ const TRANSCRIPT_STUB = {
   },
   close() {},
 };
+const MODEL_AT = '2026-08-25T13:00:00.000Z';
+const MODELS_STUB = {
+  status: 'cached',
+  snapshot: {
+    schemaVersion: 1, snapshotId: 'models:ui-private', capturedAt: MODEL_AT,
+    scope: { fingerprint: 'scope:ui-private', hosts: ['codex'], profileFingerprints: {} },
+    sources: [{ id: 'codex-cache', owner: 'codex', ownerType: 'host', transport: 'file', network: 'never',
+      mode: 'local', status: 'complete', complete: true, capturedAt: MODEL_AT,
+      schema: 'codex-model-cache-v1', scopeFingerprint: 'scope:ui-private' }],
+    models: [{
+      key: { host: 'codex', provider: 'ui-private-provider', modelId: 'ui-private-deployment',
+        scopeId: 'scope:ui-private', digest: 'ui-private-digest' },
+      displayName: 'UI Private Deployment', aliases: [{ name: 'ui-private-alias',
+        resolvesTo: 'ui-private-deployment', observedAt: MODEL_AT, evidenceRefs: ['ui-private-evidence'] }],
+      variant: { reasoningEffort: 'high' }, visibility: 'visible', capabilities: { tools: true }, pricing: null,
+      lifecycle: { state: 'retiring', replacement: 'ui-private-replacement', evidenceRefs: ['ui-private-evidence'] },
+      edges: [{ kind: 'first-party-migration', from: 'ui-private-deployment', to: 'ui-private-replacement',
+        provenance: 'first-party', scopeFingerprint: 'scope:ui-private', evidenceRefs: ['ui-private-evidence'] }],
+      dimensions: { configured: { value: true, evidenceRefs: ['ui-private-evidence'] },
+        effective: { value: true, evidenceRefs: ['ui-private-evidence'] },
+        discoverable: { value: true, evidenceRefs: ['ui-private-evidence'] } },
+      evidence: [{ id: 'ui-private-evidence', field: 'catalog', source: 'codex-cache', class: 'catalog',
+        capturedAt: MODEL_AT, freshness: 'fresh', completeness: 'complete',
+        scopeFingerprint: 'scope:ui-private', refs: [] }],
+    }],
+    bindings: [{ id: 'ui-private-binding', consumer: 'route:implementation', activity: 'implementation',
+      host: 'codex', provider: 'ui-private-provider', configured: 'ui-private-deployment',
+      effective: 'ui-private-deployment', provenance: 'configured', consumerState: 'configured',
+      evidenceRefs: ['ui-private-evidence'] }],
+    changes: [], opportunities: [], diagnostics: [],
+  },
+  history: [{ snapshotId: 'models:ui-private', capturedAt: MODEL_AT }],
+  comparison: { baseline: null, latest: 'models:ui-private', comparable: false, diagnostics: [] },
+};
 
 async function main() {
   // The usage API is injected rather than reaching for the real stores, so the
@@ -720,6 +755,8 @@ async function main() {
     limits: LIMITS_STUB,
     live: LIVE_STUB,
     transcripts: TRANSCRIPT_STUB,
+    models: MODELS_STUB,
+    modelScopeKey: 'ab'.repeat(32),
     system: SYSTEM_STUB,
   });
   const ORIGIN = new URL(srv.url).origin;
@@ -2063,6 +2100,53 @@ async function main() {
       check(`usage/${view} is free of rendering artifacts`, arts.length === 0,
         `found ${arts.join(', ')} — this is the class of bug unit tests cannot see`);
     }
+
+    // ── Models privacy, evidence disclosure, keyboard and narrow layout ──
+    await page.click('[data-view="models"]');
+    await page.waitForFunction(() => document.getElementById('mli-load-status')?.textContent?.includes('loaded'));
+    const modelView = await visibleText(page, '#v-models');
+    check('usage/models exposes only keyed model and provider labels',
+      /model-[a-f0-9]{12}/.test(modelView) && /provider-[a-f0-9]{12}/.test(modelView)
+        && !/ui-private|Private Deployment/.test(modelView),
+      `Models privacy projection was ${JSON.stringify(modelView.slice(0, 400))}`);
+    check('usage/models has a polite load status and settled busy state',
+      await page.getAttribute('#mli-load-status', 'role') === 'status'
+        && await page.getAttribute('#mli-load-status', 'aria-live') === 'polite'
+        && await page.getAttribute('#v-models', 'aria-busy') === 'false',
+      'Models loading state was not exposed to assistive technology');
+    const proof = page.locator('#mli-models details.mli-proof').first();
+    await proof.locator('summary').click();
+    check('usage/models state disclosure names source, class, capture, freshness, completeness and scope',
+      /codex-cache/.test(await visibleText(page, '#mli-models'))
+        && /catalog/.test(await visibleText(page, '#mli-models'))
+        && /2026-08-25/.test(await visibleText(page, '#mli-models'))
+        && /fresh/.test(await visibleText(page, '#mli-models'))
+        && /complete/.test(await visibleText(page, '#mli-models'))
+        && /scope-[a-f0-9]{12}/.test(await visibleText(page, '#mli-models')),
+      'Expanded state did not disclose its complete evidence chain');
+    check('usage/models table is an explicitly labelled keyboard region',
+      await page.getAttribute('.mli-table-wrap', 'role') === 'region'
+        && !!await page.getAttribute('.mli-table-wrap', 'aria-label')
+        && await page.getAttribute('.mli-table-wrap', 'tabindex') === '0',
+      'responsive table region lacked keyboard semantics');
+    await page.setViewportSize({ width: 640, height: 900 });
+    await page.focus('.mli-table-wrap');
+    await page.keyboard.press('ArrowRight');
+    await page.waitForTimeout(150);
+    const horizontal = await page.$eval('.mli-table-wrap', (node) => ({
+      left: node.scrollLeft, client: node.clientWidth, scroll: node.scrollWidth,
+    }));
+    check('usage/models narrow table scrolls from keyboard focus',
+      horizontal.scroll > horizontal.client && horizontal.left > 0,
+      `table scroll state was ${JSON.stringify(horizontal)}`);
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.click('#usage-tab-sessions');
+    await page.focus('#usage-tab-sessions');
+    await page.keyboard.press('ArrowRight');
+    check('usage/models participates in arrow-key tab navigation',
+      await page.getAttribute('#usage-tab-models', 'aria-selected') === 'true'
+        && await page.evaluate(() => document.activeElement?.id) === 'usage-tab-models',
+      'Models tab did not receive selection and focus after ArrowRight');
 
     // ── the specific zeros that were silently wrong ──
     await page.click('[data-view="sessions"]');

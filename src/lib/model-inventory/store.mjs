@@ -13,13 +13,21 @@ export const MODEL_SNAPSHOT_RETENTION_MS = 90 * 86_400_000;
 export const modelInventoryPath = () => path.join(configDir(), 'model-inventory.json');
 export const modelScopeKeyPath = () => path.join(configDir(), 'model-scope.key');
 
+/** Read the existing private scope key without creating machine state. */
+export function readModelScopeKey({ file = modelScopeKeyPath(), fsImpl = fs } = {}) {
+  try {
+    const value = String(fsImpl.readFileSync(file, 'utf8')).trim();
+    return /^[a-f0-9]{64}$/i.test(value) ? value.toLowerCase() : null;
+  } catch {
+    return null;
+  }
+}
+
 export function readOrCreateModelScopeKey({
   file = modelScopeKeyPath(), fsImpl = fs, randomBytesFn = randomBytes,
 } = {}) {
-  try {
-    const existing = String(fsImpl.readFileSync(file, 'utf8')).trim();
-    if (/^[a-f0-9]{64}$/i.test(existing)) return existing.toLowerCase();
-  } catch { /* create a new key below */ }
+  const existing = readModelScopeKey({ file, fsImpl });
+  if (existing) return existing;
   const value = randomBytesFn(32).toString('hex');
   if (!/^[a-f0-9]{64}$/i.test(value)) throw new TypeError('invalid generated model scope key');
   fsImpl.mkdirSync(path.dirname(file), { recursive: true });

@@ -1120,10 +1120,14 @@ export const JS = `
   function loadModelLifecycle(force){
     if(modelsBusy||(!force&&MODELS))return Promise.resolve();
     modelsBusy=true;
+    var panel=document.getElementById("v-models"),status=document.getElementById("mli-load-status");
+    if(panel)panel.setAttribute("aria-busy","true");
+    if(status)status.textContent="Loading model lifecycle evidence.";
     return fetch("/api/models",{cache:"no-store",headers:authHeaders()})
-      .then(function(r){return r.json();}).then(function(d){MODELS=d;})
+      .then(function(r){return r.json().then(function(d){if(!r.ok)throw new Error(d&&d.error||"unavailable");return d;});}).then(function(d){MODELS=d;})
       .catch(function(){MODELS={error:"model inventory unavailable"};})
-      .then(function(){modelsBusy=false;renderModelLifecycle();});
+      .then(function(){modelsBusy=false;if(panel)panel.setAttribute("aria-busy","false");renderModelLifecycle();
+        if(status)status.textContent=MODELS.error?"Model lifecycle evidence is unavailable.":"Model lifecycle evidence loaded.";});
   }
 
   function setUsageView(v,session){
@@ -1753,10 +1757,25 @@ export const JS = `
     state.innerHTML='<span class="dot" data-level="'+esc(level)+'"></span>'+esc(level==="ok"?"current":level==="fail"?"attention":"review");
   }
 
+  function mliEvidence(model,refs,fallback){
+    var wanted=new Set(refs||[]),rows=(model&&model.evidence||[]).filter(function(row){return wanted.has(row.id);});
+    if(!rows.length)return '<span class="mli-proof-row">'+esc(fallback||"No accepted source established this field.")+'</span>';
+    return rows.map(function(row){return '<span class="mli-proof-row"><b>'+esc(row.source)+'</b> · '+esc(row.class)
+      +' · '+esc(row.capturedAt||"capture unknown")+' · '+esc(row.freshness)+' · '+esc(row.completeness)
+      +' · '+esc(row.scopeFingerprint||"scope unknown")+'</span>';}).join("");
+  }
+
   function mliState(model,name){
-    var value=model&&model.dimensions&&model.dimensions[name]&&model.dimensions[name].value;
+    var dimension=model&&model.dimensions&&model.dimensions[name]||{},value=dimension.value;
     var state=value===true?"yes":value===false?"no":"unknown";
-    return '<span class="mli-state" data-state="'+state+'">'+(state==="yes"?"yes":state==="no"?"no":"unknown")+"</span>";
+    return '<details class="mli-proof"><summary class="mli-state" data-state="'+state+'" aria-label="'+esc(name)+': '+state+'. Expand for evidence.">'
+      +state+'</summary><span class="mli-proof-body">'+mliEvidence(model,dimension.evidenceRefs)+'</span></details>';
+  }
+
+  function mliLifecycle(model){
+    var life=model.lifecycle||{},copy=esc(life.state||"unknown")+(life.replacement?" → "+esc(life.replacement):"");
+    return '<details class="mli-proof"><summary class="mli-life mono" aria-label="Lifecycle: '+copy+'. Expand for evidence.">'
+      +copy+'</summary><span class="mli-proof-body">'+mliEvidence(model,life.evidenceRefs)+'</span></details>';
   }
 
   function renderModelLifecycle(){
@@ -1770,11 +1789,11 @@ export const JS = `
       ?'<div class="empty">'+esc(MODELS.error||"No model inventory yet. Run ak models refresh explicitly.")+"</div>"
       :attention.map(function(item){return '<div class="mli-alert" data-level="'+esc(item.severity||"warn")+'"><b>'+esc(item.kind)+"</b> · "+esc(item.reason)+"</div>";}).join("");
     document.getElementById("mli-models").innerHTML=models.map(function(model){
-      var key=model.key||{},life=model.lifecycle||{};
+      var key=model.key||{};
       return '<tr><td><span class="mli-id"><b>'+esc(key.modelId||"unknown")+'</b><small>'+esc(key.host||"unknown")+(key.provider?" / "+esc(key.provider):"")+"</small></span></td>"
         +"<td>"+mliState(model,"configured")+"</td><td>"+mliState(model,"effective")+"</td><td>"+mliState(model,"observed")
         +"</td><td>"+mliState(model,"discoverable")+"</td><td>"+mliState(model,"entitled")+"</td><td>"+mliState(model,"policyAllowed")
-        +"</td><td>"+mliState(model,"routable")+'</td><td><span class="mono">'+esc(life.state||"unknown")+(life.replacement?" → "+esc(life.replacement):"")+"</span></td></tr>";
+        +"</td><td>"+mliState(model,"routable")+"</td><td>"+mliLifecycle(model)+"</td></tr>";
     }).join("")||'<tr><td colspan="9"><div class="empty">No model records in this snapshot.</div></td></tr>';
     var changes=snap.changes||[];
     document.getElementById("mli-history-note").textContent=(MODELS.history||[]).length+" retained snapshot"+((MODELS.history||[]).length===1?"":"s");
@@ -1783,7 +1802,9 @@ export const JS = `
     document.getElementById("mli-impact").innerHTML=bindings.length
       ?'<div class="note"><span class="i">→</span><span><b>'+bindings.length+' consumer'+(bindings.length===1?"":"s")+'</b> may be affected by a concrete model swap. Run <span class="mono">ak models plan --activity ACTIVITY --to HOST:MODEL</span> for evidence-backed compatibility and a copyable action.</span></div>'
       :'<div class="empty">No bound consumers to assess. A plan will remain read-only and report the missing binding.</div>';
-    document.getElementById("mli-sources").innerHTML=(snap.sources||[]).map(function(source){return '<span class="mli-source" data-status="'+esc(source.status)+'">'+esc(source.id)+" · "+esc(source.status)+"</span>";}).join("")||'<div class="empty">No source evidence.</div>';
+    document.getElementById("mli-sources").innerHTML=(snap.sources||[]).map(function(source){return '<span class="mli-source" data-status="'+esc(source.status)+'"><b>'+esc(source.id)+" · "+esc(source.status)
+      +'</b><small>'+esc(source.capturedAt||"capture unknown")+' · '+esc(source.complete?"complete":"not complete")
+      +' · '+esc(source.scopeFingerprint||"scope unknown")+'</small></span>';}).join("")||'<div class="empty">No source evidence.</div>';
   }
 
   function renderUsage(){

@@ -636,18 +636,45 @@ async function main() {
 
   // ── /api/models (#110): authenticated, no-store, injected cache-only read ──
   let modelReads = 0;
+  const modelKey = 'ab'.repeat(32);
   const modelPayload = {
     status: 'cached',
     snapshot: {
-      snapshotId: 'models:test', capturedAt: '2026-08-25T13:00:00.000Z',
+      schemaVersion: 1, snapshotId: 'models:private-snapshot', capturedAt: '2026-08-25T13:00:00.000Z',
+      scope: { fingerprint: 'scope:private-project', hosts: ['codex'], profileFingerprints: { codex: 'scope:private-profile' } },
       counts: { models: 1, configured: 1, observed: 1, migrations: 0, aliasChanges: 0, staleSources: 0, driftedConsumers: 0 },
-      sources: [{ id: 'codex-cache', status: 'complete' }], models: [], bindings: [], changes: [], attention: [],
+      sources: [{ id: 'private-codex-cache', status: 'complete', complete: true,
+        capturedAt: '2026-08-25T13:00:00.000Z', scopeFingerprint: 'scope:private-project' }],
+      models: [{
+        key: { host: 'codex', provider: 'private-provider', modelId: 'private-deployment',
+          scopeId: 'scope:private-project', digest: 'private-digest' },
+        displayName: 'Private Deployment', aliases: [{ name: 'private-alias', resolvesTo: 'private-deployment',
+          observedAt: '2026-08-25T13:00:00.000Z', evidenceRefs: ['private-evidence'] }],
+        variant: { digest: 'private-digest', reasoningEffort: 'high' }, visibility: 'visible', capabilities: { tools: true },
+        lifecycle: { state: 'retiring', replacement: 'private-replacement', evidenceRefs: ['private-evidence'] },
+        pricing: { basis: 'private-basis', input: 1, output: 2, currency: 'USD', evidenceRefs: ['private-evidence'] },
+        edges: [{ kind: 'first-party-migration', from: 'private-deployment', to: 'private-replacement',
+          provenance: 'first-party', scopeFingerprint: 'scope:private-project', evidenceRefs: ['private-evidence'] }],
+        dimensions: { configured: { value: true, evidenceRefs: ['private-evidence'] } },
+        evidence: [{ id: 'private-evidence', field: 'catalog', source: 'private-codex-cache', class: 'catalog',
+          capturedAt: '2026-08-25T13:00:00.000Z', freshness: 'fresh', completeness: 'complete',
+          scopeFingerprint: 'scope:private-project', refs: ['private-reference'] }],
+      }],
+      bindings: [{ id: 'private-binding', consumer: 'ruflo:provider:private-provider', activity: 'implementation',
+        host: 'codex', provider: 'private-provider', configured: 'private-deployment', effective: 'private-deployment',
+        provenance: 'configured', consumerState: 'reported', evidenceRefs: ['private-evidence'] }],
+      changes: [{ kind: 'alias-target-changed', subject: 'private-identity',
+        before: { name: 'private-alias', resolvesTo: 'private-old' },
+        after: { name: 'private-alias', resolvesTo: 'private-deployment' }, severity: 'warn', provisional: false,
+        evidenceRefs: ['private-evidence'] }], opportunities: [], diagnostics: ['private diagnostic detail'],
     },
-    history: [{ snapshotId: 'models:test', capturedAt: '2026-08-25T13:00:00.000Z' }],
+    history: [{ snapshotId: 'models:private-snapshot', capturedAt: '2026-08-25T13:00:00.000Z' }],
+    comparison: { baseline: 'models:private-before', latest: 'models:private-snapshot', comparable: true,
+      diagnostics: ['private-comparison-diagnostic'] },
   };
   const modelSrv = await startDashboard({
     port: 0, cwd: fixture, fetchStatus: async () => STUB_STATUS, usage: spyUsage().api,
-    models: async () => { modelReads++; return modelPayload; },
+    models: async () => { modelReads++; return modelPayload; }, modelScopeKey: modelKey,
   });
   try {
     await test('GET /api/models is authenticated, no-store, and reads only its injected cache provider', async () => {
@@ -657,11 +684,34 @@ async function main() {
       const r = await get(modelSrv.url + 'api/models', modelSrv.token);
       assert(r.status === 200, 'expected 200, got ' + r.status);
       assert(r.headers['cache-control'] === 'no-store', 'model evidence must never be browser-cached');
-      assert(JSON.parse(r.body).snapshot.snapshotId === 'models:test', 'cached read model must survive');
+      const body = JSON.parse(r.body);
+      assert(body.snapshot.privacy.projection === 'keyed-v1', 'Dashboard projection must identify keyed privacy');
+      assert(/^model-[a-f0-9]{12}$/.test(body.snapshot.models[0].key.modelId), 'model id must be pseudonymous');
+      assert(/^source-[a-f0-9]{12}$/.test(body.snapshot.models[0].evidence[0].source), 'evidence source must be pseudonymous');
+      for (const secret of ['private-provider', 'private-deployment', 'Private Deployment', 'private-alias',
+        'private-replacement', 'private-binding', 'private-evidence', 'private-reference', 'private-digest',
+        'private-basis', 'private-snapshot', 'private-project', 'private-profile', 'private diagnostic detail']) {
+        assert(!r.body.includes(secret), 'Dashboard model payload leaked ' + secret);
+      }
       assert(modelReads === 1, 'the provider is called exactly once for the explicit route');
     });
   } finally {
     await modelSrv.close();
+  }
+
+  const noModelKeySrv = await startDashboard({
+    port: 0, cwd: fixture, fetchStatus: async () => STUB_STATUS, usage: spyUsage().api,
+    models: modelPayload, modelScopeKey: null,
+  });
+  try {
+    await test('GET /api/models fails closed without creating or exposing a privacy key', async () => {
+      const r = await get(noModelKeySrv.url + 'api/models', noModelKeySrv.token);
+      assert(r.status === 503, 'missing existing privacy key must return 503');
+      assert(r.body === '{"error":"model dashboard privacy key unavailable"}', 'failure must be generic');
+      assert(!r.body.includes('private-'), 'failure must not echo model evidence');
+    });
+  } finally {
+    await noModelKeySrv.close();
   }
 
   // ── /api/limits (ADR-0010): injected provider, insights computed server-side ──
@@ -1876,7 +1926,7 @@ async function main() {
   // is the suite where it matters most — the traversal-guard and credential-
   // leak tests live here and were the reviewer's cited example of a block
   // that could silently vanish with the old harness never noticing.
-  const EXPECTED = 74;
+  const EXPECTED = 75;
   if (passed + failed !== EXPECTED) {
     console.error(`\nPLAN MISMATCH: expected ${EXPECTED} tests, ran ${passed + failed}`);
     process.exit(1);
