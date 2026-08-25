@@ -1,0 +1,7 @@
+{
+  "model": "sonnet",
+  "env": {
+    "ANTHROPIC_DEFAULT_SONNET_MODEL": "claude-sonnet-5-20260801",
+    "ANTHROPIC_API_KEY": "must-never-appear"
+  }
+}

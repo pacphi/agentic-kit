@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { randomBytes } from 'node:crypto';
 import { configDir } from '../paths.mjs';
 import {
   MODEL_INVENTORY_SCHEMA_VERSION, isCompleteStableSnapshot, normalizeSnapshot,
@@ -10,6 +11,29 @@ export const MAX_MODEL_SNAPSHOTS = 32;
 export const MODEL_SNAPSHOT_RETENTION_MS = 90 * 86_400_000;
 
 export const modelInventoryPath = () => path.join(configDir(), 'model-inventory.json');
+export const modelScopeKeyPath = () => path.join(configDir(), 'model-scope.key');
+
+export function readOrCreateModelScopeKey({
+  file = modelScopeKeyPath(), fsImpl = fs, randomBytesFn = randomBytes,
+} = {}) {
+  try {
+    const existing = String(fsImpl.readFileSync(file, 'utf8')).trim();
+    if (/^[a-f0-9]{64}$/i.test(existing)) return existing.toLowerCase();
+  } catch { /* create a new key below */ }
+  const value = randomBytesFn(32).toString('hex');
+  if (!/^[a-f0-9]{64}$/i.test(value)) throw new TypeError('invalid generated model scope key');
+  fsImpl.mkdirSync(path.dirname(file), { recursive: true });
+  const tmp = `${file}.${process.pid}.${Date.now()}.tmp`;
+  try {
+    fsImpl.writeFileSync(tmp, `${value}\n`, { mode: 0o600, flag: 'wx' });
+    fsImpl.renameSync(tmp, file);
+    try { fsImpl.chmodSync(file, 0o600); } catch { /* best effort */ }
+  } catch (error) {
+    try { fsImpl.rmSync(tmp, { force: true }); } catch { /* preserve original */ }
+    throw error;
+  }
+  return value;
+}
 
 const emptyStore = () => ({
   schemaVersion: MODEL_STORE_SCHEMA_VERSION,

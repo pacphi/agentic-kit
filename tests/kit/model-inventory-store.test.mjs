@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import {
   MAX_MODEL_SNAPSHOTS, appendModelSnapshot, baselineFor, latestSnapshot, readModelStore,
+  readOrCreateModelScopeKey,
 } from '../../src/lib/model-inventory/store.mjs';
 
 const DAY = 86_400_000;
@@ -85,5 +86,15 @@ test('missing or corrupt store degrades to an empty readable store', () => {
   assert.deepEqual(readModelStore({ file: sb.file }).snapshots, []);
   fs.writeFileSync(sb.file, '{broken');
   assert.deepEqual(readModelStore({ file: sb.file }).baselineByScope, {});
+  fs.rmSync(sb.dir, { recursive: true, force: true });
+});
+
+test('scope fingerprints use a stable private per-install key', () => {
+  const sb = sandbox();
+  const file = path.join(sb.dir, 'model-scope.key');
+  const key = readOrCreateModelScopeKey({ file, randomBytesFn: () => Buffer.alloc(32, 0xab) });
+  assert.equal(key, 'ab'.repeat(32));
+  assert.equal(readOrCreateModelScopeKey({ file, randomBytesFn: () => Buffer.alloc(32) }), key);
+  if (process.platform !== 'win32') assert.equal(fs.statSync(file).mode & 0o777, 0o600);
   fs.rmSync(sb.dir, { recursive: true, force: true });
 });

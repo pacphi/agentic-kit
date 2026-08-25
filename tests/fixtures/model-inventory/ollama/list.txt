@@ -1,0 +1,3 @@
+NAME                 ID              SIZE      MODIFIED
+qwen3-coder:latest   9e3f6a12abcd    18 GB     2 hours ago
+deepseek-r1:8b       71aa22bb33cc    5.2 GB    3 days ago

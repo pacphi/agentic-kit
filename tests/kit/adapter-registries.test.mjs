@@ -5,8 +5,10 @@ import {
   PROVIDER_REGISTRY,
   PROJECTION_REGISTRY,
   OBSERVABILITY_REGISTRY,
+  MODEL_DISCOVERY_REGISTRY,
   validateRegistries,
   validateHostAdapter,
+  validateModelDiscoveryAdapter,
   defaultHostMap,
   assertValidBinding,
 } from '../../src/lib/adapters/index.mjs';
@@ -26,6 +28,30 @@ test('the built-in registries satisfy their own contract', () => {
     projections: PROJECTION_REGISTRY,
     observability: OBSERVABILITY_REGISTRY,
   }), []);
+});
+
+test('model discovery registry is immutable metadata, never executable dispatch', () => {
+  assert.deepEqual(MODEL_DISCOVERY_REGISTRY.map((entry) => entry.id), [
+    'claude-config', 'codex-cache', 'opencode-models', 'ollama-catalog',
+  ]);
+  for (const entry of MODEL_DISCOVERY_REGISTRY) {
+    assert.equal(Object.isFrozen(entry), true);
+    assert.equal(Object.values(entry).some((value) => typeof value === 'function'), false);
+    assert.match(entry.ownerType, /^(host|provider)$/);
+    assert.match(entry.network, /^(never|local|explicit)$/);
+  }
+  assert.throws(() => { MODEL_DISCOVERY_REGISTRY[0].id = 'changed'; }, TypeError);
+});
+
+test('model discovery descriptor validation rejects ambiguous owners and unsafe command metadata', () => {
+  assert.throws(() => validateModelDiscoveryAdapter({
+    id: 'ambiguous', ownerType: 'host', ownerId: 'claude', provider: 'anthropic',
+    transport: 'file', network: 'never', schema: 'v1',
+  }), /unknown field provider/);
+  assert.throws(() => validateModelDiscoveryAdapter({
+    id: 'unsafe', ownerType: 'host', ownerId: 'opencode', transport: 'command',
+    command: 'opencode models', network: 'explicit', schema: 'v1',
+  }), /command must be an executable name/);
 });
 
 // qe-court A3: the cross-axis invariants now run AT module construction — a
