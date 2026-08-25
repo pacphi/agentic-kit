@@ -54,7 +54,7 @@ The initial source adapters are:
 - Claude user settings, platform managed policy, model aliases, and a model-only environment
   allowlist;
 - the Codex model cache plus top-level `config.toml` model selection;
-- OpenCode's project/provider-scoped verbose `models` output plus `opencode.json` selection;
+- OpenCode's project/provider-scoped verbose `models` output plus its resolved `debug config` view;
 - the local Ollama catalogue and immutable model digest; and
 - sanitized model ids from the existing local usage index.
 
@@ -83,10 +83,12 @@ The lookup contracts were checked against current first-party documentation in A
 - Claude accepts the `sonnet` and `opus` aliases or a full model name through its documented model
   selection surfaces ([Claude Code CLI reference](https://docs.anthropic.com/en/docs/claude-code/cli-usage)).
 - OpenCode exposes `opencode models [provider] --verbose`; `--refresh` refreshes its
-  Models.dev-backed cache ([OpenCode models](https://opencode.ai/docs/models/)). Its configuration
-  accepts `provider/model`, an optional `#variant`, or the expanded selector object. Current
-  OpenRouter catalogue selectors may contain `~publisher/model`; these are valid ids, not parser
-  errors.
+  Models.dev-backed cache ([OpenCode models](https://opencode.ai/docs/models/)). Agentic Kit runs
+  refresh separately from the verbose list so OpenCode's success banner cannot degrade the list.
+  It reads `opencode debug config` for the resolved global/project/JSONC configuration, including
+  root, agent, and command model overrides. Model references accept bounded non-control
+  `provider/model`, an optional `#variant`, or the expanded selector object; current OpenRouter
+  `~publisher/model` values are valid ids, not parser errors.
 - Models.dev publishes provider-independent human names, labs, serving providers, limits,
   capabilities, pricing, release dates, and explicit weight links through JSON endpoints
   ([Models.dev](https://models.dev/)). Catalogue presence proves discovery, not account access.
@@ -170,19 +172,23 @@ header sorts ascending and descending with unknown values last. The table is hei
 scrolls internally in both axes, keeps its header sticky, and retains an explicit **Load 50 more**
 control.
 
-Source-proven public catalogue records show a human name, host, publisher, serving provider when
-that independent fact is known, exact public selector, and trusted documentation/catalogue links.
-Codex cache identity, official Claude ids, and conservatively recognized Models.dev/OpenRouter rows
-can qualify. Hugging Face and Ollama links appear only when source metadata supplies or verifies the
-exact repository/library identity. Custom providers, private deployments, local tags, observed-only
-ids, digests, aliases, bindings, scopes, history, and evidence ids remain stable keyed pseudonyms.
-The browser never derives provider or publisher from a name and never invents an external link.
+Source-proven public catalogue records show a human name, host, publisher when proven, serving
+provider when known, exact public selector, and trusted documentation/catalogue links. Codex cache
+identity and narrowly validated official Claude ids can qualify locally. OpenCode identity qualifies
+only after `refresh --online` exact-joins the selector to the independently fetched, size-bounded
+Models.dev catalogue; provider syntax or verbose metadata alone is not proof. The Models.dev source
+link remains generic unless that source supplies an exact canonical page. Hugging Face and Ollama
+links appear only when source metadata verifies the exact repository/library identity. Custom
+providers, private deployments, local tags, observed-only ids, configured variants, digests,
+aliases, bindings, scopes, history, and evidence ids remain stable keyed pseudonyms. The browser
+never derives provider or publisher from a name and never invents an external link.
 
-An `unknown` cell explains which evidence is absent. Discovery does not establish entitlement;
-configuration does not establish successful use; and a model id never establishes the serving
-provider. A missing or invalid key fails the API closed, an ordinary Dashboard read never creates
-one, and all reads retain loopback, session-token, CSP/origin, `no-store`, and no-egress
-protections.
+An `unknown` cell explains which evidence is absent. A local refresh now resolves OpenCode's
+effective configuration, removing unknowns caused only by ignored global, JSONC, agent, or command
+layers. Discovery still does not establish entitlement; configuration does not establish successful
+use; and a model id never establishes the serving provider. A missing or invalid key fails the API
+closed, an ordinary Dashboard read never creates one, and all reads retain loopback, session-token,
+CSP/origin, `no-store`, and no-egress protections.
 
 ## Privacy and recovery
 

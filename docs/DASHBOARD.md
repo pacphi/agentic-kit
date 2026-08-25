@@ -192,6 +192,9 @@ The view fetches a compact summary first, then a 50-row relevant inventory page.
 for host, serving provider, publisher, relevance, lifecycle, and evidence request fresh bounded
 pages; **Load 50 more** appends the next page. Every column header is a keyboard-operable sort button
 that toggles ascending and descending order, exposes `aria-sort`, and leaves unknown values last.
+Later pages carry the privacy-projected snapshot id; if refresh replaces the snapshot, the browser
+reloads page one instead of mixing two inventories. A failed later page preserves the rows already
+shown and leaves a focused retry control.
 
 The inventory region is height-bounded and scrolls internally in both axes, so change history and
 consumer panels remain nearby. Its header stays sticky. The region is labelled and
@@ -199,8 +202,10 @@ keyboard-focusable, with a caption, column scopes, `aria-busy` loading state, re
 announcements, visible focus, and an explicit load control in addition to lazy fetching.
 
 Source-proven public catalogue records show readable names and trusted source links while private
-deployments remain keyed pseudonyms. Host, serving provider, publisher, model selector, catalogue
-source, and entitlement remain independent. Each state and lifecycle value expands to its source,
+deployments remain keyed pseudonyms. OpenCode rows need an exact Models.dev join from explicit
+online refresh; selector syntax or verbose metadata alone never makes a row public. Host, serving
+provider, publisher, model selector, catalogue source, and entitlement remain independent. Each
+state and lifecycle value expands to its source,
 class, capture time, freshness, completeness, scope, or a field-specific explanation of missing
 evidence. Model-specific foreground/background pairs meet WCAG AA in both themes, and the same table
 remains operable at narrow widths.

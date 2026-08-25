@@ -98,11 +98,13 @@ The initial adapter set covers:
 - OpenCode's project/provider-scoped model list and separately authorized online refresh; and
 - Ollama catalogue, digest, and runtime evidence through the same normalized contract.
 
-OpenCode collection uses its bounded verbose output. Current `~publisher/model` selectors are valid;
-human name, family, capabilities, limits, lifecycle, and pricing are allowlisted while API URLs,
-headers, options, and custom provider details are discarded. A public Models.dev identity marker is
-reserved for a conservatively recognized catalogue namespace; ambiguous custom providers remain
-private.
+OpenCode collection resolves the effective global, project, JSONC, agent, and command configuration
+through `opencode debug config`. An explicitly online refresh runs `opencode models --refresh`
+separately from the bounded verbose listing and joins each provider/model key exactly against a
+bounded Models.dev catalogue response. Human name, family, capabilities, limits, lifecycle, and
+pricing are allowlisted only after that exact public proof; provider syntax alone never proves a
+public identity. Custom providers, configured variants, and ambiguous selectors remain private.
+Diagnostics and catalogue input are bounded independently of subprocess output.
 
 Interactive picker scraping and inference probes are excluded. All subprocess calls use literal
 argument arrays, bounded timeouts, output-size limits, and no shell interpolation.
@@ -234,9 +236,11 @@ The implementation branch was validated on 2026-08-25 with the following exact-h
 - `pnpm run check` passed TypeScript checking, ESLint, Markdown lint, packaging, CLI-load checks,
   and the full unit/integration suite. Native instrumented coverage was 86.51% lines, 80.11%
   branches, and 83.99% functions against 70% repository floors.
-- `pnpm run test:ui` passed the 301-check deterministic browser matrix, including lazy Models
-  loading, paired evidence filters, server-side sorting, pagination, keyboard table scrolling, tab
-  navigation, evidence disclosure, responsive behavior, and network-silent page loading.
+- `pnpm run test:ui` passed the 304-check deterministic browser matrix, including lazy Models
+  loading, paired evidence filters, clickable ascending/descending column sorting, snapshot-bound
+  pagination with safe reset, append retry without row loss, keyboard movement in the bounded
+  scrolling table, tab navigation, evidence disclosure, responsive behavior, and network-silent
+  page loading.
 - Agentic QE coverage analysis passed its configured 70% feature threshold; its SAST scan reported
   zero vulnerabilities. Its generic `aqe quality --gate` shortcut rejected its retained aggregate
   evidence as stale even after the analyzers ran, so that unavailable aggregate was recorded rather

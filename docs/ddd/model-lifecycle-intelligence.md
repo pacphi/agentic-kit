@@ -74,9 +74,11 @@ The Dashboard projection separates the execution host, serving provider, publish
 name, exact public selector, and catalogue source. These axes cannot be derived from one another.
 A controlled source may mark an identity public only when its bounded parser established that
 catalogue metadata. Codex cache display names and narrowly recognized official Claude ids are
-public product vocabulary; a custom provider, gateway deployment, local tag, or observed-only id
-remains a keyed pseudonym. Trusted documentation and catalogue links are server-produced HTTPS
-links on a fixed host allowlist. The browser never guesses a link from a model-name substring.
+public product vocabulary. OpenCode identity becomes public only after an exact provider/model-key
+join with the bounded Models.dev catalogue; provider syntax does not establish proof. A custom
+provider, configured variant, gateway deployment, local tag, or observed-only id remains a keyed
+pseudonym. Trusted documentation and catalogue links are server-produced HTTPS links on a fixed
+host allowlist. The browser never guesses a link from a model-name substring.
 
 ### ModelBinding
 
@@ -203,12 +205,14 @@ Claude collection reads user settings and the platform-managed settings path. It
 `ANTHROPIC_MODEL` and `ANTHROPIC_DEFAULT_{SONNET,OPUS,HAIKU}_MODEL` from the process environment;
 credentials, endpoints, and unrelated environment values remain outside the collector.
 
-Local refresh reads configuration, local caches/protocols, and observed evidence. OpenCode
-collection requests its verbose, Models.dev-backed local view so display name, family,
-capabilities, limits, lifecycle, and pricing can be normalized without retaining API URLs,
-headers, or provider options. Its selector grammar includes current OpenRouter
-`~publisher/model` namespaces. Online refresh is separate and explicit. Neither path invokes a
-model or sends a prompt.
+Local refresh reads configuration, local caches/protocols, and observed evidence. OpenCode first
+resolves its effective configuration with `opencode debug config`, including global, project,
+JSONC, agent, and command model bindings. Online refresh is separate and explicit: it refreshes the
+OpenCode catalogue, obtains a bounded Models.dev response, then parses a separately bounded verbose
+listing. Display name, family, capabilities, limits, lifecycle, and pricing are public only after
+an exact provider/model-key catalogue join. Arbitrary bounded selectors remain usable without
+making custom provider URLs, headers, options, or ids public. Neither path invokes a model or sends
+a prompt.
 
 ## Privacy and delivery
 
@@ -222,9 +226,10 @@ Dashboard receives `keyed-v1` pseudonyms for private model/provider/digest/alias
 binding/evidence/scope/history identifiers. Source-proven public catalogue identity may retain its
 human name, selector, publisher, and trusted links; public identity never makes entitlement or
 routability known. The summary projection omits the large model array, and the inventory projection
-filters, sorts, and pages only the already-sanitized rows. Missing key material fails closed without
-creating state. Delivery remains behind the loopback, session-token, origin, CSP, and `no-store`
-boundary and cannot apply a plan.
+filters, sorts, and pages only the already-sanitized rows. Later pages carry the privacy-projected
+snapshot id; a changed snapshot is rejected and the browser restarts from page one rather than
+mixing generations. Missing key material fails closed without creating state. Delivery remains
+behind the loopback, session-token, origin, CSP, and `no-store` boundary and cannot apply a plan.
 
 ## Invariants
 
@@ -240,3 +245,4 @@ boundary and cannot apply a plan.
 10. `ak sync` does not execute model refresh or model-plan advisories.
 11. Private configuration and transcript content never enter snapshots or aggregate APIs.
 12. Inventory search, filtering, and sorting operate after privacy projection.
+13. Inventory pagination never mixes rows from different privacy-projected snapshots.
