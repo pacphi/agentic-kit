@@ -114,7 +114,7 @@ function payload() {
   };
 }
 
-test('privacy projection exposes only evidence-backed public catalog identity and trusted links', () => {
+test('owner-visible projection exposes exact model identity while withholding configuration secrets and trusted links', () => {
   const result = createDashboardModelPayload(payload(), { key: KEY });
   const [codex, opencode, privateCodex, customOpenCode, , claude, privateClaude] = result.snapshot.models;
 
@@ -129,7 +129,7 @@ test('privacy projection exposes only evidence-backed public catalog identity an
     displayName: opencode.displayName, selector: opencode.selector,
     servingProvider: opencode.servingProvider, publisher: opencode.publisher, family: opencode.family,
   }, {
-    displayName: 'Anthropic Claude Sonnet Latest', selector: 'openrouter/~anthropic/claude-sonnet-latest',
+    displayName: 'Anthropic Claude Sonnet Latest', selector: '~anthropic/claude-sonnet-latest',
     servingProvider: 'openrouter', publisher: 'Anthropic', family: 'claude-sonnet',
   });
   assert.deepEqual(opencode.links, [{
@@ -149,21 +149,23 @@ test('privacy projection exposes only evidence-backed public catalog identity an
     replacement: codex.lifecycle.replacement, replacementName: codex.lifecycle.replacementName,
     replacementSelector: codex.lifecycle.replacementSelector,
   }, {
-    replacement: 'gpt-5.7-codex', replacementName: 'GPT-5.7 Codex',
+    replacement: 'gpt-5.7-codex', replacementName: 'gpt-5.7-codex',
     replacementSelector: 'gpt-5.7-codex',
   });
 
-  const wire = JSON.stringify([privateCodex, customOpenCode, privateClaude]);
-  for (const secret of ['private-provider', 'private-deployment', 'Acme Secret Model',
-    'custom-private', 'secret/model', 'Secret Model', 'private-gateway',
-    'claude-private-acme', 'Acme Claude Gateway']) assert.equal(wire.includes(secret), false, secret);
-  for (const item of [privateCodex, customOpenCode, privateClaude]) {
-    assert.equal(item.privacyClass, 'private');
-    assert.equal(item.humanName, null);
-    assert.equal(item.selector, null);
-    assert.equal(item.servingProvider, null);
-    assert.match(item.displayName, /^(Private Codex model|Custom OpenCode deployment|Private Claude model)$/);
-  }
+  assert.deepEqual({
+    name: privateCodex.displayName, selector: privateCodex.selector, provider: privateCodex.servingProvider,
+    privacyClass: privateCodex.privacyClass,
+  }, {
+    name: 'Acme Secret Model', selector: 'private-deployment', provider: 'private-provider',
+    privacyClass: 'owner-visible',
+  });
+  assert.deepEqual({
+    name: customOpenCode.displayName, selector: customOpenCode.selector, provider: customOpenCode.servingProvider,
+  }, { name: 'Secret Model', selector: 'secret/model', provider: 'custom-private' });
+  assert.deepEqual({
+    name: privateClaude.displayName, selector: privateClaude.selector, provider: privateClaude.servingProvider,
+  }, { name: 'Acme Claude Gateway', selector: 'claude-private-acme', provider: 'private-gateway' });
 
   const datedInput = payload();
   datedInput.snapshot.models[5].key.modelId = 'claude-haiku-4-5-20251001';
@@ -187,7 +189,7 @@ test('privacy projection exposes only evidence-backed public catalog identity an
   gatewayInput.snapshot.models[5].key.provider = 'private-gateway';
   const gatewayOfficial = createDashboardModelPayload(gatewayInput, { key: KEY }).snapshot.models[5];
   assert.equal(gatewayOfficial.publisher, 'Anthropic');
-  assert.equal(gatewayOfficial.servingProvider, null);
+  assert.equal(gatewayOfficial.servingProvider, 'private-gateway');
 
   const privateLookingOfficial = payload();
   for (const id of [
@@ -200,20 +202,19 @@ test('privacy projection exposes only evidence-backed public catalog identity an
   privateLookingOfficial.snapshot.models[3].variant.configuredVariants = ['private-prod'];
   const privateProjection = createDashboardModelPayload(privateLookingOfficial, { key: KEY });
   const serializedPrivate = JSON.stringify(privateProjection);
-  for (const secret of [
+  for (const modelId of [
     'claude-sonnet-private-acme', 'claude-sonnet-42', 'claude-opus-99-99',
-    'claude-haiku-4-5-20991231', 'private-prod',
-  ]) {
-    assert.equal(serializedPrivate.includes(secret), false, secret);
-  }
+    'claude-haiku-4-5-20991231',
+  ]) assert.equal(serializedPrivate.includes(modelId), true, modelId);
+  assert.equal(serializedPrivate.includes('private-prod'), false, 'private execution variant stays hidden');
   assert.equal(privateProjection.snapshot.models.slice(-4)
-    .every(({ privacyClass }) => privacyClass === 'private'), true);
+    .every(({ privacyClass }) => privacyClass === 'owner-visible'), true);
 });
 
 test('payload envelopes allowlist cached, history, comparison, and empty fields', () => {
   const input = payload();
   input.status = 'private-status-secret';
-  input.privateDebug = 'private-deployment';
+  input.privateDebug = 'private-debug-value';
   input.history[0].privatePath = '/secret/history/path';
   input.history.push({
     snapshotId: 'snapshot-private-two', capturedAt: 'not-a-timestamp-secret',
@@ -223,7 +224,7 @@ test('payload envelopes allowlist cached, history, comparison, and empty fields'
   const result = createDashboardModelPayload(input, { key: KEY });
   const wire = JSON.stringify(result);
   for (const secret of [
-    'private-status-secret', 'private-deployment', '/secret/history/path', 'not-a-timestamp-secret',
+    'private-status-secret', 'private-debug-value', '/secret/history/path', 'not-a-timestamp-secret',
     'history-private-identifier', 'comparison-private-provider',
   ]) assert.equal(wire.includes(secret), false, secret);
   assert.deepEqual(Object.keys(result).sort(), ['comparison', 'history', 'snapshot', 'status']);
@@ -241,6 +242,24 @@ test('payload envelopes allowlist cached, history, comparison, and empty fields'
   ]) assert.deepEqual(createDashboardModelPayload(empty), {
     status: 'empty', snapshot: null, history: [], hint: 'ak models refresh',
   });
+});
+
+test('owner-visible bindings name the consumer, exact model, and provider without internal ids', () => {
+  const input = payload();
+  input.snapshot.bindings = [{
+    id: 'binding:secret-route-id', consumer: 'route:implementation:escalation:0', activity: 'implementation',
+    host: 'codex', provider: 'private-provider', configured: 'private-deployment', effective: 'private-deployment',
+    consumerState: 'configured', evidenceRefs: [],
+  }];
+  const [binding] = createDashboardModelPayload(input, { key: KEY }).snapshot.bindings;
+  assert.deepEqual({
+    consumer: binding.consumer, role: binding.role, modelName: binding.modelName,
+    selector: binding.selector, modelProvider: binding.modelProvider,
+  }, {
+    consumer: 'implementation · fallback 1', role: 'fallback 1', modelName: 'Acme Secret Model',
+    selector: 'private-deployment', modelProvider: 'private-provider',
+  });
+  assert.equal(JSON.stringify(binding).includes('secret-route-id'), false);
 });
 
 test('summary mode omits only the large model inventory and reports inventory counts', () => {
@@ -269,13 +288,15 @@ test('inventory mode defaults to relevant rows, pages at 100 max, and returns st
   assert.equal(result.inventory.sort, 'displayName');
   assert.equal(result.inventory.direction, 'asc');
   assert.deepEqual(result.inventory.facets.hosts, ['claude', 'codex', 'ollama', 'opencode']);
-  assert.deepEqual(result.inventory.facets.providers, ['anthropic', 'openrouter']);
+  assert.deepEqual(result.inventory.facets.providers,
+    ['anthropic', 'custom-private', 'openrouter', 'private-gateway', 'private-provider']);
   assert.deepEqual(result.inventory.facets.publishers, ['Anthropic', 'OpenAI']);
   assert.deepEqual(result.inventory.facets.lifecycles, ['active', 'retiring']);
   assert.equal(result.snapshot.snapshotId.startsWith('snapshot-'), true);
   const names = result.inventory.items.map(({ displayName }) => displayName);
-  assert.deepEqual(names.slice(0, 2), ['Claude Sonnet 4.6', 'GPT-5.6 Codex']);
-  assert.equal(names.slice(2).every((name) => /^Private (Codex|Claude|local) model$/.test(name)), true);
+  for (const name of ['Acme Claude Gateway', 'Acme Secret Model', 'Claude Sonnet 4.6', 'GPT-5.6 Codex']) {
+    assert.equal(names.includes(name), true, name);
+  }
 });
 
 test('inventory filtering and sorting use only projected fields and keep unknown last both directions', () => {
@@ -284,7 +305,7 @@ test('inventory filtering and sorting use only projected fields and keep unknown
     query: new URLSearchParams('view=inventory&relevance=all&provider=openrouter&publisher=Anthropic&search=sonnet'),
   });
   assert.equal(publicOnly.inventory.filteredTotal, 1);
-  assert.equal(publicOnly.inventory.items[0].selector, 'openrouter/~anthropic/claude-sonnet-latest');
+  assert.equal(publicOnly.inventory.items[0].selector, '~anthropic/claude-sonnet-latest');
 
   for (const direction of ['asc', 'desc']) {
     const sorted = createDashboardModelViewPayload(payload(), {

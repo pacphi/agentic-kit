@@ -223,14 +223,17 @@ configured model or deployment identifiers for an explicit local CLI read. An ow
 per-install secret keys scope fingerprints and the separate Dashboard projection.
 
 CLI status and Dashboard reads are cache-only. CLI reads are deliberate exact local disclosure. The
-Dashboard receives `keyed-v1` pseudonyms for private model/provider/digest/alias/replacement/edge/
-binding/evidence/scope/history identifiers. Source-proven public catalogue identity may retain its
-human name, selector, publisher, and trusted links; public identity never makes entitlement or
-routability known. The summary projection omits the large model array, and the inventory projection
-filters, sorts, and pages only the already-sanitized rows. Later pages carry the privacy-projected
-snapshot id; a changed snapshot is rejected and the browser restarts from page one rather than
-mixing generations. Missing key material fails closed without creating state. Delivery remains
-behind the loopback, session-token, origin, CSP, and `no-store` boundary and cannot apply a plan.
+Dashboard's token-gated loopback `owner-visible-v2` projection carries bounded exact model display
+names, selectors, and recorded providers, so a route can answer what it is actually configured to
+use. Digests, aliases, replacement internals, edges, binding ids, evidence, scope, history,
+credentials, endpoints, and arbitrary provider configuration remain pseudonymous. Source-proven
+public catalogue identity may retain its publisher and trusted links; public identity never makes
+entitlement or routability known. The summary projection omits the large model array, and the
+inventory projection filters, sorts, and pages only the already-sanitized rows. Later pages carry
+the privacy-projected snapshot id; a changed snapshot is rejected and the browser restarts from page
+one rather than mixing generations. Missing key material fails closed without creating state.
+Delivery remains behind the loopback, session-token, origin, CSP, and `no-store` boundary and cannot
+apply a plan.
 
 ## Invariants
 

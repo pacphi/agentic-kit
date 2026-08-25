@@ -521,8 +521,8 @@ export function renderPage({ name, version }) {
         <div class="sh"><h2>Your routes</h2><span class="n mono" id="mli-asof"></span></div>
         <p class="mli-copy">Configured routes and fallbacks. Catalogue-only models are kept below so they do not obscure what is operating now.</p>
         <div class="mli-table-wrap" role="region" aria-label="Your model routes; scroll in either direction for every route" tabindex="0"><table class="mli-table mli-routes-table">
-          <caption class="sr-only">Configured model routes and their lifecycle evidence.</caption>
-          <thead><tr><th>Model</th><th>Access path</th><th>Used for</th><th>Last used</th><th>Capabilities</th><th>Cost</th><th>Lifecycle</th></tr></thead>
+          <caption class="sr-only">Configured model routes, providers, observed use, and API-equivalent pricing.</caption>
+          <thead><tr><th>Model</th><th>Model provider</th><th>Used for</th><th>Last used</th><th>API rate / plan use</th></tr></thead>
           <tbody id="mli-routes"></tbody>
         </table></div>
       </section>
@@ -533,8 +533,7 @@ export function renderPage({ name, version }) {
         <form class="mli-filters" id="mli-filters" role="search">
           <label class="mli-filter mli-filter-search" for="mli-search"><span>Search</span><input id="mli-search" name="search" type="search" autocomplete="off" placeholder="Name or selector"></label>
           <label class="mli-filter" for="mli-host"><span>Access host</span><select id="mli-host" name="host"><option value="">All hosts</option></select></label>
-          <label class="mli-filter" for="mli-provider"><span>Access path</span><select id="mli-provider" name="provider"><option value="">All access paths</option></select></label>
-          <label class="mli-filter" for="mli-publisher"><span>Model maker</span><select id="mli-publisher" name="publisher"><option value="">All makers</option></select></label>
+          <label class="mli-filter" for="mli-provider"><span>Model provider</span><select id="mli-provider" name="provider"><option value="">All providers</option></select></label>
           <label class="mli-filter" for="mli-relevance"><span>View</span><select id="mli-relevance" name="relevance"><option value="relevant">In use</option><option value="catalog">Available</option><option value="all">All</option></select></label>
           <label class="mli-filter" for="mli-lifecycle"><span>Lifecycle</span><select id="mli-lifecycle" name="lifecycle"><option value="">Any lifecycle</option><option value="removed">Removed</option><option value="retiring">Retiring</option><option value="deprecated">Deprecated</option><option value="hidden">Hidden</option><option value="preview">Preview</option><option value="active">Active</option><option value="unknown">Unknown</option></select></label>
           <label class="mli-filter" for="mli-evidence-field"><span>Evidence state</span><select id="mli-evidence-field" name="evidenceField"><option value="">Any evidence</option><option value="configured">Configured</option><option value="effective">Effective</option><option value="observed">Observed</option><option value="discoverable">Available</option><option value="entitled">Entitled</option><option value="policyAllowed">Policy</option><option value="routable">Routable</option></select></label>
@@ -562,7 +561,6 @@ export function renderPage({ name, version }) {
         <section class="strip"><div class="sh"><h2>consumers</h2><span class="n mono">configured / reported evidence</span></div><div id="mli-consumers"></div></section>
       </div>
       <section class="strip"><div class="sh"><h2>swap impact</h2><span class="n mono">read-only canonical-policy preview</span></div><div id="mli-impact"></div></section>
-      <section class="strip"><div class="sh"><h2>Source coverage</h2><span class="n mono">what each source can establish</span></div><div class="mli-sources" id="mli-sources"></div></section>
       <div class="foot">swap analysis is available with <b>ak models plan</b> &middot; the dashboard never changes a route</div>
       <dialog class="mli-detail-dialog" id="mli-detail" aria-labelledby="mli-detail-title"><div class="mli-detail-head"><h2 id="mli-detail-title">Model details</h2><button type="button" id="mli-detail-close" aria-label="Close model details">Close</button></div><div id="mli-detail-body"></div></dialog>
     </section>

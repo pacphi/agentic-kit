@@ -5,9 +5,11 @@
 - **Updated:** 2026-08-25
 - **Update note:** The bounded inventory, descriptor-selected source adapters, conservative snapshot
   diff, and read-only CLI/status surfaces are implemented. The Dashboard is being reconciled with the
-  operator-first contract: routes lead, catalogue exploration is progressive, and private identities
-  use semantic labels rather than visible keyed references. Remaining source-enrichment and complete
-  route-detail evidence are implementation work, so the ADR is Accepted rather than release-proved.
+  operator-first contract: routes lead, catalogue exploration is progressive, and the token-gated
+  loopback operator view shows exact configured/observed model selectors and providers. Credentials,
+  endpoints, scopes, digests, aliases, evidence references, and history identifiers remain protected.
+  Remaining source-enrichment and complete route-detail evidence are implementation work, so the ADR
+  is Accepted rather than release-proved.
 - **Deciders:** agentic-kit maintainers
 - **Related:** [issue #110](https://github.com/pacphi/agentic-kit/issues/110),
   [implementation PR #179](https://github.com/pacphi/agentic-kit/pull/179),
@@ -185,13 +187,13 @@ state, freshness, completeness, and scope.
 
 Credentials, auth tokens, prompts, reasoning traces, raw private provider configuration, endpoints,
 and raw account/profile/project identities never enter snapshots or Dashboard payloads. The
-owner-only cache may retain bounded exact configured model or deployment identifiers so an explicit
-local CLI read can explain them. `/api/models` requires the existing owner-only per-install secret.
-Source-proven public catalogue identity may retain its human name, publisher, exact public selector,
-and trusted allowlisted HTTPS links. Private model/provider/digest/alias/replacement/edge/binding/
-evidence/scope/history identifiers remain stable keyed pseudonyms. Public identity does not prove
-serving provider, entitlement, policy, routability, or quality. Filtering and sorting run after
-privacy projection, a missing or invalid key fails closed, and an ordinary read never creates one.
+token-gated loopback Dashboard is an owner operator surface, so it may show bounded exact configured
+or observed model selectors, display names, and providers. `/api/models` still requires the existing
+owner-only per-install secret. Digests, aliases, arbitrary configuration values, edges, binding ids,
+evidence references, scopes, and history identifiers remain keyed pseudonyms. Public identity does
+not prove serving provider, entitlement, policy, routability, capability, or quality. Filtering and
+sorting run after privacy projection, a missing or invalid key fails closed, and an ordinary read
+never creates one.
 
 Snapshot files are owner-only and atomically replaced. Native cache/protocol data is untrusted and
 subject to byte, schema, enum, and timeout bounds. Dashboard delivery retains loopback binding,
@@ -210,8 +212,8 @@ session-token authorization, CSP/origin protections, `no-store`, and secret scan
   privacy documentation must account for.
 - Supporting a new host catalogue requires a descriptor, an anti-corruption adapter, fixtures, and
   explicit evidence semantics; host identity alone grants nothing.
-- Public catalogue identity makes the local ledger readable without weakening private deployment
-  protection; unsupported or ambiguous identity remains pseudonymous.
+- Exact owner-visible model identity makes the local ledger operational without weakening credential,
+  endpoint, account, scope, or configuration-value protection.
 
 ## Acceptance conditions
 

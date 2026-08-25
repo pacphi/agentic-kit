@@ -2148,18 +2148,31 @@ async function main() {
         && new URL(modelRequests[1]).searchParams.get('relevance') === 'relevant',
       `Models requests were ${JSON.stringify(modelRequests)}`);
     const modelView = await visibleText(page, '#v-models');
-    check('usage/models shows proven public catalog names and semantic private labels',
-      /Your routes/.test(modelView) && !/model-[a-f0-9]{12}|provider-[a-f0-9]{12}|ui-private/.test(modelView),
+    check('usage/models shows exact configured model names without opaque identifiers',
+      /Your routes/.test(modelView) && /ui-private-deployment/.test(modelView)
+        && /ui-private-provider/.test(modelView)
+        && !/model-[a-f0-9]{12}|provider-[a-f0-9]{12}|scope-[a-f0-9]{12}/.test(modelView),
       `Models privacy projection was ${JSON.stringify(modelView.slice(0, 400))}`);
     check('catalog explorer stays collapsed until requested',
       await page.getAttribute('#mli-catalog-explorer', 'open') === null,
       'catalog explorer should not compete with the operating routes');
     await page.locator('#mli-catalog-explorer > summary').click();
     const catalogView = await visibleText(page, '#mli-catalog-explorer');
-    check('catalog explorer is available without leaking private identifiers',
+    check('catalog explorer is available without leaking opaque implementation identifiers',
       /Explore catalog/.test(catalogView)
-        && !/model-[a-f0-9]{12}|provider-[a-f0-9]{12}|ui-private/.test(catalogView),
+        && /UI Private Deployment/.test(catalogView)
+        && !/model-[a-f0-9]{12}|provider-[a-f0-9]{12}|scope-[a-f0-9]{12}/.test(catalogView),
       `Models privacy projection was ${JSON.stringify(modelView.slice(0, 400))}`);
+    const consumerPanel = await page.evaluate(() => {
+      const panel = document.querySelector('#mli-consumers .mli-consumer-scroll');
+      return panel ? { overflowY: getComputedStyle(panel).overflowY, maxHeight: getComputedStyle(panel).maxHeight } : null;
+    });
+    check('Models consumers are a bounded, scrollable operator panel',
+      !!consumerPanel && /(auto|scroll)/.test(consumerPanel.overflowY) && consumerPanel.maxHeight !== 'none',
+      `consumer panel was ${JSON.stringify(consumerPanel)}`);
+    check('Models removes low-value source coverage from the live surface',
+      await page.locator('#mli-sources').count() === 0,
+      'source coverage should remain documented rather than occupy the operator view');
     check('usage/models has a polite load status and settled busy state',
       await page.getAttribute('#mli-load-status', 'role') === 'status'
         && await page.getAttribute('#mli-load-status', 'aria-live') === 'polite'
@@ -2192,9 +2205,9 @@ async function main() {
       headerButtons: document.querySelectorAll('.mli-table thead [data-mli-sort]').length,
       ariaSort: [...document.querySelectorAll('.mli-table thead th')].map((node) => node.getAttribute('aria-sort')),
     }));
-    check('Models exposes labelled search, host, provider, publisher, relevance, lifecycle and evidence filters',
+    check('Models exposes labelled search, host, provider, relevance, lifecycle and evidence filters',
       inventoryControls.form && inventoryControls.search === 'search'
-        && ['Search', 'Access host', 'Access path', 'Model maker', 'View', 'Lifecycle', 'Evidence state', 'Evidence value']
+        && ['Search', 'Access host', 'Model provider', 'View', 'Lifecycle', 'Evidence state', 'Evidence value']
           .every((label) => inventoryControls.labels.some((actual) => actual.toLowerCase().startsWith(label.toLowerCase()))),
       `inventory controls were ${JSON.stringify(inventoryControls)}`);
     check('Models has Reset, result-status and explicit Load 50 more controls',

@@ -371,12 +371,13 @@ delivery as every other route.
 
 Models adds a second privacy boundary. The explicit local CLI can show exact model evidence, while
 `/api/models` requires the already-existing private model scope key and returns
-`privacy.projection: keyed-v1`. Source-proven public catalogue identity may retain a human name,
-publisher, public selector, and allowlisted HTTPS links. Private model/provider/digest/alias/
-replacement/edge/binding/evidence/scope/history identifiers remain stable keyed pseudonyms.
-Filtering and sorting run only after that projection. Controlled built-in source metadata and
-diagnostic codes remain named; unknown source metadata is pseudonymized. Missing key material
-returns a generic 503, and opening the Dashboard never creates the key.
+`privacy.projection: owner-visible-v2`. The loopback, token-gated operator view shows bounded exact
+model names, selectors, and recorded providers; source-proven catalogue identity may additionally
+show a publisher and allowlisted HTTPS links. Credentials, endpoints, scopes, digests, aliases,
+binding/evidence/history identifiers, and arbitrary configuration remain keyed pseudonyms. Filtering
+and sorting run only after that projection. Controlled built-in source metadata and diagnostic codes
+remain named; unknown source metadata is pseudonymized. Missing key material returns a generic 503,
+and opening the Dashboard never creates the key.
 
 What System reads is a short, fixed list: directory entries and file `stat` results; your
 `.git/config` origin remote (so a project can link to its repository page — the kit never fetches

@@ -168,7 +168,7 @@ Open `ak dashboard`, then choose **Usage → Models**. The view includes:
 The Models view loads only when it opens. It leads with **Your routes** — the configured primary and
 fallback paths — and keeps the catalogue explorer collapsed until requested. The explorer first
 fetches the small summary and then the first 50 relevant rows; catalogue-only rows load in explicit
-pages. Search, access host, access path, model maker, view, lifecycle, and evidence filters reset
+pages. Search, access host, model provider, view, lifecycle, and evidence filters reset
 pagination. Every sortable catalogue column keeps unknown values last, and its bounded table
 scrolls internally with a sticky header and an explicit **Load 50 more** control.
 
@@ -180,10 +180,10 @@ only after `refresh --online` exact-joins the selector to the independently fetc
 Models.dev catalogue; provider syntax or verbose metadata alone is not proof. The Models.dev source
 link remains generic unless that source supplies an exact canonical page. Hugging Face and Ollama
 links appear only when source metadata verifies the exact repository/library identity. Custom
-providers, private deployments, local tags, observed-only ids, configured variants, digests,
-aliases, bindings, scopes, history, and evidence ids never appear as visible keyed pseudonyms. The
-browser uses honest semantic labels such as **Private Codex model** or **Custom OpenCode deployment**;
-keyed values remain hidden transport joins only. The browser never derives provider or publisher from
+providers, private deployments, local tags, and observed-only ids appear with their exact bounded
+model selector, display name, and independently recorded provider in the owner-only Dashboard.
+Configured variants, digests, aliases, binding ids, scopes, history, evidence ids, credentials, and
+endpoints remain hidden transport joins only. The browser never derives a provider or publisher from
 a name and never invents an external link.
 
 An `unknown` cell explains which evidence is absent. A local refresh now resolves OpenCode's
@@ -198,8 +198,9 @@ CSP/origin, `no-store`, and no-egress protections.
 Snapshots contain no credentials, prompts, reasoning traces, transcript text, private endpoints,
 or raw account/profile/project identifiers. Because the owner-only cache supports explicit local
 CLI evidence, it can retain bounded exact configured model or deployment identifiers. The
-Dashboard receives exact identity only for a source-proven public catalogue record; private exact
-values never cross that boundary. A corrupt cache degrades to an empty readable store;
+Dashboard receives bounded exact model identity for its token-gated loopback owner view; credentials,
+endpoints, scope, digests, aliases, and evidence identifiers never cross that boundary. A corrupt
+cache degrades to an empty readable store;
 run `ak models refresh` to rebuild it. A source schema failure is isolated to that source and shown
 as `unsupported-schema` rather than converted to an empty catalogue.
 

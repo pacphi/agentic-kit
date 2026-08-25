@@ -140,7 +140,7 @@ test('impact graph and read model expose consumers and attention without mutatio
   assert.equal(summarizeModelHealth(snapshot).level, 'warn');
 });
 
-test('Dashboard projection pseudonymizes identifiers while exact CLI evidence remains unchanged', () => {
+test('Dashboard projection exposes model/provider identity while protecting implementation identifiers', () => {
   const snapshot = fixture();
   const exact = createModelReadModel(snapshot);
   const payload = createDashboardModelPayload({
@@ -150,9 +150,11 @@ test('Dashboard projection pseudonymizes identifiers while exact CLI evidence re
       diagnostics: ['codex-cache: stale'] },
   }, { key: 'ef'.repeat(32) });
   const wire = JSON.stringify(payload);
-  for (const raw of ['gpt-old', 'gpt-new', 'digest-gpt', 'openai', 'route-implementation',
-    'aqe-coder', 'ruflo-openai']) assert.equal(wire.includes(raw), false, raw);
-  assert.match(payload.snapshot.models[0].key.modelId, /^model-[a-f0-9]{12}$/);
+  for (const raw of ['digest-gpt', 'route-implementation', 'aqe-coder', 'ruflo-openai']) {
+    assert.equal(wire.includes(raw), false, raw);
+  }
+  for (const raw of ['gpt-old', 'gpt-new', 'openai']) assert.equal(wire.includes(raw), true, raw);
+  assert.equal(payload.snapshot.models[0].key.modelId, 'gpt-old');
   assert.equal(payload.snapshot.models[0].evidence[0].source, 'codex-cache');
   assert.equal(payload.snapshot.sources[0].id, 'codex-cache');
   assert.deepEqual({ owner: payload.snapshot.sources[0].owner, mode: payload.snapshot.sources[0].mode,
@@ -166,7 +168,7 @@ test('Dashboard projection pseudonymizes identifiers while exact CLI evidence re
   { input: 1, output: 2, currency: 'USD' });
   assert.notEqual(payload.snapshot.scope.fingerprint, 'scope-a');
   assert.notEqual(payload.snapshot.snapshotId, 'snapshot-a');
-  assert.equal(payload.snapshot.privacy.exactIdentifiers, false);
+  assert.equal(payload.snapshot.privacy.exactModelIdentity, true);
   assert.equal(exact.models[0].key.modelId, 'gpt-old');
   assert.equal(exact.bindings[0].id, 'route-implementation');
 });

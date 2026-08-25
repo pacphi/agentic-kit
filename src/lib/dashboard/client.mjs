@@ -1132,7 +1132,7 @@ export const JS = `
     var evidenceField=value("mli-evidence-field"),evidenceValue=value("mli-evidence-value");
     if(!evidenceField||!evidenceValue){evidenceField="";evidenceValue="";}
     return {search:value("mli-search"),host:value("mli-host"),provider:value("mli-provider"),
-      publisher:value("mli-publisher"),relevance:value("mli-relevance")||"relevant",
+      relevance:value("mli-relevance")||"relevant",
       lifecycle:value("mli-lifecycle"),evidenceField:evidenceField,evidenceValue:evidenceValue};
   }
 
@@ -1202,6 +1202,7 @@ export const JS = `
       MODELS=d;
       modelSnapshotId=d&&d.snapshot&&d.snapshot.snapshotId||null;
       renderModelLifecycle();
+      if(!LIMITS)loadLimits();
       return loadModelInventory(0,false,!!focusAfter);
     }).catch(function(){
       MODELS={error:"model inventory unavailable"};MODEL_PAGE=null;modelRows=[];modelSnapshotId=null;
@@ -1228,7 +1229,7 @@ export const JS = `
     // Limits is LAZY like the tab itself: the Codex side may spawn one vendor
     // subprocess server-side, so it runs when the view is opened, not on poll.
     if(v==="limits"&&!LIMITS)loadLimits();
-    if(v==="models")loadModelLifecycle();
+    if(v==="models"){loadModelLifecycle();if(!LIMITS)loadLimits();}
     var days=document.getElementById("usage-days");if(days)days.hidden=(v==="models"||v==="transcript");
   }
 
@@ -1468,13 +1469,13 @@ export const JS = `
   var LIMITS=null, limitsBusy=false;
 
   function loadLimits(){
-    if(limitsBusy)return;
+    if(limitsBusy)return Promise.resolve();
     limitsBusy=true;
-    fetch("/api/limits?days="+usageDays,{cache:"no-store",headers:authHeaders()})
+    return fetch("/api/limits?days="+usageDays,{cache:"no-store",headers:authHeaders()})
       .then(function(r){return r.json();})
       .then(function(d){LIMITS=d&&!d.error?d:{error:(d&&d.error)||"limits unavailable"};})
       .catch(function(){LIMITS={error:"limits unavailable"};})
-      .then(function(){limitsBusy=false; renderLimits();});
+      .then(function(){limitsBusy=false; renderLimits();if(usageView==="models")renderModelLifecycle();});
   }
 
   // "as of 3m ago" — an epoch-ms fetchedAt against the browser clock. Stale is
@@ -1873,9 +1874,9 @@ export const JS = `
 
   function mliIdentity(model){
     var key=model&&model.key||{},identity=model&&model.identity||{};
-    return {host:model.host||key.host||"unknown",provider:model.servingProvider||"",
+    return {host:model.host||key.host||"unknown",provider:model.servingProvider||key.provider||"",
       publisher:model.publisher||identity.publisher||"",selector:model.selector||identity.selector||"",
-      name:model.humanName||model.displayName||"Private model"};
+      name:model.humanName||model.displayName||"Model not recorded"};
   }
 
   function mliLinks(model){
@@ -1897,11 +1898,33 @@ export const JS = `
     return '<span class="mli-id"><b>'+esc(id.name)+'</b>'+detail+mliLinks(model)+'</span>';
   }
 
-  function mliPrice(pricing){
-    if(!pricing)return 'Not exposed';
-    if(pricing.input===0&&pricing.output===0)return 'No charge evidenced';
-    var unit=pricing.basis==='per-million-tokens'?' / 1M tokens':'';
-    return [pricing.input,pricing.output].filter(function(value){return value!=null;}).join(' / ')+(pricing.currency?' '+pricing.currency:'')+unit;
+  function mliPlanUse(host){
+    if(!LIMITS)return 'plan utilization loading';
+    if(LIMITS.error)return 'plan utilization unavailable';
+    if(host==='claude'){
+      var windows=LIMITS.claude&&LIMITS.claude.windows||[];
+      return windows.length?'Claude plan '+windows.map(function(w){return (w.label||w.id||'window')+' '+Math.round(Number(w.usedPercent)||0)+'%';}).join(', '):'Claude plan not reported';
+    }
+    if(host==='codex'){
+      var lanes=LIMITS.codex&&LIMITS.codex.lanes||[],values=[];
+      lanes.forEach(function(lane){(lane.windows||[]).forEach(function(w){values.push((w.label||lane.name||'window')+' '+Math.round(Number(w.usedPercent)||0)+'%');});});
+      return values.length?'Codex plan '+values.join(', '):'Codex plan not reported';
+    }
+    return 'plan utilization not reported by this host';
+  }
+
+  function mliPrice(pricing,host){
+    var rate='API rate not published',source='No verified API list rate for this selector.';
+    if(pricing){
+      if(pricing.input===0&&pricing.output===0)rate='No API charge evidenced';
+      else {
+        var currency=pricing.currency||'USD',unit=pricing.basis==='per-million-tokens'?' / 1M tokens':' / token';
+        rate='in $'+String(pricing.input)+' · out $'+String(pricing.output)+' '+currency+unit;
+      }
+      source=pricing.source||'catalogue evidence';
+      if(pricing.asOf)source+=' · rates as of '+pricing.asOf;
+    }
+    return '<span class="mli-rate"><b>'+esc(rate)+'</b><small>'+esc(source)+' · '+esc(mliPlanUse(host))+'</small></span>';
   }
 
   function mliCapabilities(model){
@@ -1910,20 +1933,19 @@ export const JS = `
     if(cap.reasoning)names.push('Reasoning');
     if(cap.structuredOutput)names.push('Structured output');
     if(cap.contextLimit)names.push('Context '+cap.contextLimit);
-    return names.length?names.join(' · '):'Not exposed';
+    return names.length?names.join(' · '):'No capability metadata recorded';
   }
 
   function mliRouteRows(bindings){
-    var rows=(bindings||[]).filter(function(binding){return binding&&binding.consumer&&binding.consumer.indexOf('route ·')===0;});
+    var rows=(bindings||[]).filter(function(binding){return binding&&binding.role&&binding.role!=="Configured consumer";});
     return rows.map(function(binding){
-      var lifecycle=binding.lifecycle||'unknown',used=(binding.activity||'Unclassified')+' · '+(binding.role||'configured');
-      return '<tr><th scope="row"><span class="mli-id"><b>'+esc(binding.modelName||'Private model')+'</b>'
+      var used=(binding.activity||'Unclassified')+' · '+(binding.role||'configured');
+      return '<tr><th scope="row"><span class="mli-id"><b>'+esc(binding.modelName||'Model not recorded')+'</b>'
         +(binding.selector?'<small class="mli-selector">'+esc(binding.selector)+'</small>':'')+'</span></th>'
-        +'<td>'+esc(binding.accessPath||'Private access path')+'</td><td>'+esc(used)+'</td>'
+        +'<td>'+esc(binding.modelProvider||'Not recorded')+'</td><td>'+esc(used)+'</td>'
         +'<td>'+esc(binding.lastUsed?String(binding.lastUsed).replace('T',' ').replace('.000Z','Z'):'Not observed')+'</td>'
-        +'<td>'+esc(mliCapabilities(binding))+'</td><td>'+esc(mliPrice(binding.pricing))+'</td>'
-        +'<td><span class="mli-life">'+esc(lifecycle)+'</span></td></tr>';
-    }).join('')||'<tr><td colspan="7"><div class="empty">No configured routes are recorded. Catalog availability does not create a route.</div></td></tr>';
+        +'<td>'+mliPrice(binding.pricing,binding.host)+'</td></tr>';
+    }).join('')||'<tr><td colspan="5"><div class="empty">No configured routes are recorded. Catalog availability does not create a route.</div></td></tr>';
   }
 
   function mliDetail(model){
@@ -1932,14 +1954,14 @@ export const JS = `
     var id=mliIdentity(model),life=model.lifecycle||{},variants=model.variant||{},observed=model.dimensions&&model.dimensions.observed;
     title.textContent=id.name;
     body.innerHTML='<dl class="mli-detail-grid">'
-      +'<div><dt>Selector</dt><dd>'+esc(id.selector||'Private selector')+'</dd></div>'
-      +'<div><dt>Model maker</dt><dd>'+esc(id.publisher||'Not independently proven')+'</dd></div>'
-      +'<div><dt>Access path</dt><dd>'+esc(id.provider||'Private access path')+'</dd></div>'
+      +'<div><dt>Exact selector</dt><dd>'+esc(id.selector||'Not recorded')+'</dd></div>'
+      +'<div><dt>Model provider</dt><dd>'+esc(id.provider||'Not recorded')+'</dd></div>'
+      +'<div><dt>Publisher</dt><dd>'+esc(id.publisher||'Not independently proven')+'</dd></div>'
       +'<div><dt>Lifecycle</dt><dd>'+esc(life.state||'unknown')+(life.replacementName?' → '+esc(life.replacementName):'')+'</dd></div>'
       +'<div><dt>Observed use</dt><dd>'+esc(observed&&observed.value===true?'Observed locally':'Not observed')+'</dd></div>'
       +'<div><dt>Context limit</dt><dd>'+esc(variants.contextWindow||model.capabilities&&model.capabilities.contextLimit||'Not exposed')+'</dd></div>'
       +'<div><dt>Capabilities</dt><dd>'+esc(mliCapabilities(model))+'</dd></div>'
-      +'<div><dt>Cost</dt><dd>'+esc(mliPrice(model.pricing))+'</dd></div>'
+      +'<div><dt>API rate / plan use</dt><dd>'+mliPrice(model.pricing,id.host)+'</dd></div>'
       +'</dl><h3>Evidence and limitations</h3><div class="mli-proof-body">'+mliEvidence(model,(model.evidence||[]).map(function(row){return row.id;}),'No evidence is available.')+'</div>';
     if(typeof detail.showModal==='function')detail.showModal(); else detail.setAttribute('open','');
   }
@@ -1996,7 +2018,6 @@ export const JS = `
     }
     options("mli-host","All hosts",values("hosts",function(id){return id.host;}));
     options("mli-provider","All providers",values("providers",function(id){return id.provider;}));
-    options("mli-publisher","All publishers",values("publishers",function(id){return id.publisher;}));
   }
 
   function renderModelLifecycle(){
@@ -2014,12 +2035,10 @@ export const JS = `
     var changes=snap.changes||[];
     document.getElementById("mli-history-note").textContent=(MODELS.history||[]).length+" retained snapshot"+((MODELS.history||[]).length===1?"":"s");
     document.getElementById("mli-history").innerHTML='<div class="mli-list">'+(changes.map(function(change){return '<div class="mli-row"><span><b>'+esc(change.kind)+'</b><br><small>'+esc(change.subject)+"</small></span><small>"+esc(change.provisional?"provisional":"established")+"</small></div>";}).join("")||'<div class="empty">No same-scope lifecycle changes.</div>')+"</div>";
-    document.getElementById("mli-consumers").innerHTML='<div class="mli-list">'+(bindings.map(function(binding){return '<div class="mli-row"><span><b>'+esc(binding.consumer)+'</b><br><small>'+esc(binding.activity||binding.host||binding.provider||"consumer")+'</small></span><small>'+esc(binding.consumerState)+" · "+esc(binding.configured||"model not pinned")+"</small></div>";}).join("")||'<div class="empty">No configured model consumers.</div>')+"</div>";
+    document.getElementById("mli-consumers").innerHTML='<div class="mli-consumer-scroll"><div class="mli-list">'+(bindings.map(function(binding){var model=binding.modelName||binding.configured||'Model not pinned',provider=binding.modelProvider||binding.provider||'Provider not recorded';return '<div class="mli-row"><span><b>'+esc(binding.consumer)+'</b><br><small>'+esc(model)+' · '+esc(provider)+'</small></span><small>'+esc(binding.consumerState||'configured')+'</small></div>';}).join("")||'<div class="empty">No configured model consumers.</div>')+"</div></div>";
     document.getElementById("mli-impact").innerHTML=bindings.length
       ?'<div class="note"><span class="i">→</span><span><b>'+bindings.length+' consumer'+(bindings.length===1?"":"s")+'</b> may be affected by a concrete model swap. Run <span class="mono">ak models plan --activity ACTIVITY --to HOST:MODEL</span> for evidence-backed compatibility and a copyable action.</span></div>'
       :'<div class="empty">No bound consumers to assess. A plan will remain read-only and report the missing binding.</div>';
-    document.getElementById("mli-sources").innerHTML=(snap.sources||[]).map(function(source){var state=source.status==='complete'?'Current':source.status==='partial'?'Partial — some facts not exposed':source.status==='unavailable'?'Unavailable — not checked':'Stale or failed';return '<span class="mli-source" data-status="'+esc(source.status)+'"><b>'+esc(source.owner||'Source')+' · '+esc(state)
-      +'</b><small>Establishes '+esc(source.owner==='usage'?'observed use':'configuration, catalog availability, and lifecycle facts where exposed')+'</small><small>'+esc(source.capturedAt||"Not checked")+' · '+esc(source.complete?"complete":"partial")+'</small></span>';}).join("")||'<div class="empty">No source evidence.</div>';
   }
 
   function renderUsage(){

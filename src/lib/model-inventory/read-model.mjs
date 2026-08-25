@@ -1,6 +1,7 @@
 import { createHmac } from 'node:crypto';
 import { immutable } from '../adapters/schema.mjs';
 import { ACTIVITIES } from '../routing.mjs';
+import { PRICES_AS_OF, priceFor } from '../pricing.mjs';
 import { normalizeSnapshot } from './contracts.mjs';
 import { dashboardModelView } from './dashboard-query.mjs';
 
@@ -89,18 +90,6 @@ function privateLabel(kind, value, key) {
   return `${kind}-${digest}`;
 }
 
-function privateModelName(host) {
-  if (host === 'opencode') return 'Custom OpenCode deployment';
-  if (host === 'codex') return 'Private Codex model';
-  if (host === 'claude') return 'Private Claude model';
-  if (host === 'ollama') return 'Private local model';
-  return 'Private model';
-}
-
-function privateAccessPath(host) {
-  return host === 'opencode' ? 'Custom OpenCode access path' : 'Private access path';
-}
-
 const publicHost = (value, key) => PUBLIC_HOSTS.has(value) ? value : privateLabel('host', value, key);
 const publicActivity = (value, key) => value == null ? null
   : PUBLIC_ACTIVITIES.has(value) ? value : privateLabel('activity', value, key);
@@ -160,6 +149,54 @@ function boundedPublicText(value, max = 256) {
   return typeof value === 'string' && value.length > 0 && value.length <= max
     && ![...value].some((char) => char.codePointAt(0) < 32 || char.codePointAt(0) === 127)
     ? value : null;
+}
+
+/**
+ * The Dashboard is loopback/token protected and is an owner operator surface.
+ * A concrete model selector and provider are operational facts, not a secret:
+ * without them the routes table cannot answer which version is actually used.
+ * Keep credentials, endpoints, scopes, digests, evidence refs, and aliases out.
+ */
+function ownerVisibleModelText(value, max = 512) {
+  return boundedPublicText(value, max);
+}
+
+function ownerVisibleCapabilities(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+  const result = {};
+  for (const name of ['tools', 'toolcall', 'reasoning', 'structuredOutput', 'temperature', 'attachment', 'interleaved']) {
+    if (typeof value[name] === 'boolean') result[name] = value[name];
+  }
+  for (const name of ['contextLimit', 'outputLimit']) {
+    if (Number.isSafeInteger(value[name]) && value[name] > 0) result[name] = value[name];
+  }
+  for (const direction of ['input', 'output']) {
+    if (!value[direction] || typeof value[direction] !== 'object' || Array.isArray(value[direction])) continue;
+    const modalities = {};
+    for (const name of ['text', 'audio', 'image', 'video', 'pdf']) {
+      if (typeof value[direction][name] === 'boolean') modalities[name] = value[direction][name];
+    }
+    if (Object.keys(modalities).length) result[direction] = modalities;
+  }
+  return result;
+}
+
+function ownerVisiblePricing(model) {
+  const pricing = model.pricing;
+  if (pricing && ['per-token', 'per-million-tokens', 'zero'].includes(pricing.basis)
+    && (Number.isFinite(pricing.input) || Number.isFinite(pricing.output))
+    && /^[A-Z]{3}$/.test(pricing.currency ?? '')) {
+    return {
+      basis: pricing.basis, input: pricing.input, output: pricing.output, currency: pricing.currency,
+      effectiveAt: pricing.effectiveAt, source: 'catalogue evidence', asOf: null, matched: true,
+    };
+  }
+  const published = priceFor(model.key.modelId, model.key.provider);
+  if (!published.matched) return null;
+  return {
+    basis: 'per-million-tokens', input: published.in, output: published.out, currency: 'USD',
+    effectiveAt: null, source: 'published API list-price table', asOf: PRICES_AS_OF, matched: true,
+  };
 }
 
 function trustedModelLinks(value) {
@@ -249,37 +286,32 @@ function publicModelIdentity(model) {
   };
 }
 
-function sanitizeModel(model, key, publicModels = new Map()) {
+function sanitizeModel(model, key) {
   const evidenceIds = new Map(model.evidence.map(({ id }) => [id, privateLabel('evidence', id, key)]));
   const evidenceRefs = (refs = []) => refs.map((ref) => evidenceIds.get(ref)
     ?? privateLabel('evidence', ref, key));
-  const modelLabel = privateLabel('model', model.key.modelId, key);
   const publicIdentity = publicModelIdentity(model);
-  const lifecycleEvidence = new Set(model.lifecycle.evidenceRefs ?? []);
-  const replacementIdentity = model.lifecycle.replacement
-    && hasEvidence(model, (entry) => lifecycleEvidence.has(entry.id) && entry.class === 'first-party')
-    ? publicModels.get(`${model.key.host}\0${model.lifecycle.replacement}`) ?? null : null;
   const { catalog: _catalog, ...privateVariant } = model.variant ?? {};
   return {
     ...model,
     key: {
       host: publicHost(model.key.host, key),
-      provider: privateLabel('provider', model.key.provider, key),
-      modelId: modelLabel,
+      provider: ownerVisibleModelText(model.key.provider),
+      modelId: ownerVisibleModelText(model.key.modelId),
       scopeId: privateLabel('scope', model.key.scopeId, key),
       digest: privateLabel('digest', model.key.digest, key),
     },
     identity: privateLabel('identity', model.identity, key),
-    // Keyed identifiers stay in the payload as opaque join keys only. Normal
-    // presentation gets an honest semantic label rather than a hash-shaped UI.
-    displayName: publicIdentity?.humanName ?? privateModelName(model.key.host),
-    humanName: publicIdentity?.humanName ?? null,
+    displayName: publicIdentity?.humanName
+      ?? ownerVisibleModelText(model.displayName) ?? ownerVisibleModelText(model.key.modelId) ?? 'Model not recorded',
+    humanName: publicIdentity?.humanName
+      ?? ownerVisibleModelText(model.displayName) ?? ownerVisibleModelText(model.key.modelId),
     host: publicHost(model.key.host, key),
-    servingProvider: publicIdentity?.servingProvider ?? null,
+    servingProvider: ownerVisibleModelText(model.key.provider) ?? publicIdentity?.servingProvider ?? null,
     publisher: publicIdentity?.publisher ?? null,
     family: publicIdentity?.family ?? null,
-    selector: publicIdentity?.selector ?? null,
-    privacyClass: publicIdentity ? 'public-catalog' : 'private',
+    selector: ownerVisibleModelText(model.key.modelId) ?? publicIdentity?.selector ?? null,
+    privacyClass: publicIdentity ? 'public-catalog' : 'owner-visible',
     links: publicIdentity?.links ?? [],
     aliases: model.aliases.map((alias) => ({
       ...alias,
@@ -301,30 +333,14 @@ function sanitizeModel(model, key, publicModels = new Map()) {
     },
     lifecycle: {
       ...model.lifecycle,
-      replacement: replacementIdentity?.selector
-        ?? privateLabel('model', model.lifecycle.replacement, key),
-      replacementName: replacementIdentity?.humanName ?? null,
-      replacementSelector: replacementIdentity?.selector ?? null,
+      replacement: ownerVisibleModelText(model.lifecycle.replacement),
+      replacementName: ownerVisibleModelText(model.lifecycle.replacement),
+      replacementSelector: ownerVisibleModelText(model.lifecycle.replacement),
       notice: model.lifecycle.notice ? 'Lifecycle notice available in explicit CLI evidence.' : null,
       evidenceRefs: evidenceRefs(model.lifecycle.evidenceRefs),
     },
-    pricing: (() => {
-      if (!model.pricing) return null;
-      const refs = new Set(model.pricing.evidenceRefs ?? []);
-      const safe = model.evidence.some((entry) => refs.has(entry.id)
-        && PUBLIC_SOURCES.has(entry.source)
-        && ['catalog', 'first-party'].includes(entry.class));
-      if (!safe) return null;
-      return {
-        basis: ['per-token', 'per-million-tokens', 'zero'].includes(model.pricing.basis)
-          ? model.pricing.basis : null,
-        input: model.pricing.input,
-        output: model.pricing.output,
-        currency: /^[A-Z]{3}$/.test(model.pricing.currency ?? '') ? model.pricing.currency : null,
-        effectiveAt: model.pricing.effectiveAt,
-        evidenceRefs: evidenceRefs(model.pricing.evidenceRefs),
-      };
-    })(),
+    capabilities: ownerVisibleCapabilities(model.capabilities),
+    pricing: ownerVisiblePricing(model),
     edges: (model.edges ?? []).map((edge) => ({
       ...edge,
       from: privateLabel(edge.kind === 'resolves-to' ? 'alias' : 'model', edge.from, key),
@@ -341,12 +357,14 @@ function sanitizeModel(model, key, publicModels = new Map()) {
 
 function consumerLabel(value, key) {
   const text = String(value ?? 'consumer');
-  const family = text.startsWith('route:') ? 'route'
-    : text.startsWith('escalation:') ? 'escalation'
-      : text.startsWith('aqe:') ? 'agentic-qe'
-        : text.startsWith('ruflo:') ? 'ruflo'
-          : text.startsWith('integration:') ? 'integration' : 'consumer';
-  return `${family} · ${privateLabel('binding', text, key)}`;
+  const route = /^route:([^:]+)(?::escalation:(\d+))?$/.exec(text);
+  if (route) return `${publicActivity(route[1], key) ?? 'Route'} · ${route[2] == null ? 'primary' : `fallback ${Number(route[2]) + 1}`}`;
+  if (text === 'aqe:default') return 'Agentic QE · default';
+  if (/^aqe:fallback:\d+$/.test(text)) return `Agentic QE · fallback ${Number(text.split(':').at(-1)) + 1}`;
+  if (text.startsWith('aqe:agent:')) return `Agentic QE · ${publicActivity(text.slice('aqe:agent:'.length), key) ?? 'override'}`;
+  if (/^ruflo:candidate:\d+$/.test(text)) return `Ruflo · candidate ${Number(text.split(':').at(-1)) + 1}`;
+  if (/^integration:\d+$/.test(text)) return `Integration · binding ${Number(text.split(':').at(-1)) + 1}`;
+  return 'Configured consumer';
 }
 
 function bindingRole(consumer) {
@@ -356,23 +374,32 @@ function bindingRole(consumer) {
 }
 
 function sanitizeBinding(binding, key, linkedModel) {
+  const configured = ownerVisibleModelText(binding.configured);
+  const effective = ownerVisibleModelText(binding.effective);
+  const modelName = linkedModel?.displayName ?? configured ?? effective ?? 'Model not pinned';
+  const provider = linkedModel?.servingProvider ?? ownerVisibleModelText(binding.provider);
+  const published = !linkedModel && (configured || effective)
+    ? priceFor(configured ?? effective, provider) : null;
   return {
     ...binding,
     id: privateLabel('binding', binding.id, key),
     consumer: consumerLabel(binding.consumer, key),
     activity: publicActivity(binding.activity, key),
     host: publicHost(binding.host, key),
-    provider: privateLabel('provider', binding.provider, key),
-    configured: privateLabel('model', binding.configured, key),
-    effective: privateLabel('model', binding.effective, key),
+    provider,
+    configured,
+    effective,
     evidenceRefs: (binding.evidenceRefs ?? []).map((ref) => privateLabel('evidence', ref, key)),
-    modelName: linkedModel?.displayName ?? privateModelName(binding.host),
-    selector: linkedModel?.selector ?? null,
-    accessPath: linkedModel?.servingProvider ?? privateAccessPath(binding.host),
+    modelName,
+    selector: linkedModel?.selector ?? configured ?? effective,
+    modelProvider: provider,
     role: bindingRole(binding.consumer),
     lifecycle: linkedModel?.lifecycle?.state ?? 'unknown',
     capabilities: linkedModel?.capabilities ?? {},
-    pricing: linkedModel?.pricing ?? null,
+    pricing: linkedModel?.pricing ?? (published?.matched ? {
+      basis: 'per-million-tokens', input: published.in, output: published.out, currency: 'USD',
+      effectiveAt: null, source: 'published API list-price table', asOf: PRICES_AS_OF, matched: true,
+    } : null),
     lastUsed: linkedModel?.evidence?.filter((entry) => entry.field === 'dimensions.observed')
       .map((entry) => entry.capturedAt).sort().at(-1) ?? null,
   };
@@ -401,7 +428,7 @@ function sanitizeChange(change, key) {
 }
 
 /**
- * Project exact CLI evidence into a keyed, pseudonymous Dashboard contract.
+ * Project exact CLI evidence into an owner-visible Dashboard contract.
  * The caller must supply the already-existing per-install key; this function
  * never creates state and throws closed when the key is unavailable.
  */
@@ -420,17 +447,7 @@ export function createDashboardModelReadModel(snapshotValue, options = {}) {
     scopeFingerprint: privateLabel('scope', source.scopeFingerprint, key),
     diagnostics: source.diagnostics.map((item) => publicDiagnostic(item, key)),
   }));
-  const publicModels = new Map();
-  const ambiguousPublicModels = new Set();
-  for (const model of exact.models) {
-    const identity = publicModelIdentity(model);
-    if (!identity) continue;
-    const indexKey = `${model.key.host}\0${model.key.modelId}`;
-    if (publicModels.has(indexKey)) ambiguousPublicModels.add(indexKey);
-    else publicModels.set(indexKey, identity);
-  }
-  for (const indexKey of ambiguousPublicModels) publicModels.delete(indexKey);
-  const models = exact.models.map((model) => sanitizeModel(model, key, publicModels));
+  const models = exact.models.map((model) => sanitizeModel(model, key));
   const bindings = exact.bindings.map((binding) => {
     const index = exact.models.findIndex((model) => model.key.host === binding.host
       && [binding.effective, binding.configured].includes(model.key.modelId));
@@ -469,7 +486,7 @@ export function createDashboardModelReadModel(snapshotValue, options = {}) {
     },
     sources, models, bindings, changes, attention,
     diagnostics: exact.diagnostics.map((item) => privateLabel('diagnostic', item, key)),
-    privacy: { projection: 'keyed-v1', exactIdentifiers: false },
+    privacy: { projection: 'owner-visible-v2', exactModelIdentity: true },
   });
 }
 

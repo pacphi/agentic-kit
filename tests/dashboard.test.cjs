@@ -686,11 +686,11 @@ async function main() {
       assert(r.status === 200, 'expected 200, got ' + r.status);
       assert(r.headers['cache-control'] === 'no-store', 'model evidence must never be browser-cached');
       const body = JSON.parse(r.body);
-      assert(body.snapshot.privacy.projection === 'keyed-v1', 'Dashboard projection must identify keyed privacy');
-      assert(/^model-[a-f0-9]{12}$/.test(body.snapshot.models[0].key.modelId), 'model id must be pseudonymous');
+      assert(body.snapshot.privacy.projection === 'owner-visible-v2', 'Dashboard projection must identify owner-visible model identity');
+      assert(body.snapshot.models[0].key.modelId === 'private-deployment', 'exact configured model id must be visible to the owner');
+      assert(body.snapshot.models[0].key.provider === 'private-provider', 'exact configured provider must be visible to the owner');
       assert(/^source-[a-f0-9]{12}$/.test(body.snapshot.models[0].evidence[0].source), 'evidence source must be pseudonymous');
-      for (const secret of ['private-provider', 'private-deployment', 'Private Deployment', 'private-alias',
-        'private-replacement', 'private-binding', 'private-evidence', 'private-reference', 'private-digest',
+      for (const secret of ['private-alias', 'private-binding', 'private-evidence', 'private-reference', 'private-digest',
         'private-basis', 'private-owner', 'private-schema', 'private-snapshot', 'private-project',
         'private-profile', 'private diagnostic detail']) {
         assert(!r.body.includes(secret), 'Dashboard model payload leaked ' + secret);
@@ -1115,11 +1115,13 @@ async function main() {
         contains(r.body, 'aria-labelledby="usage-tab-' + v + '"');
       }
       contains(r.body, 'id="mli-models"');
+      contains(r.body, 'mli-consumer-scroll');
+      assert(!r.body.includes('id="mli-sources"'), 'removed source-coverage panel must not ship unused UI');
       contains(r.body, 'function renderModelLifecycle');
       contains(r.body, 'modelJson("/api/models?view=summary")');
       contains(r.body, 'view:"inventory"');
       contains(r.body, 'limit:String(MODEL_LIMIT)');
-      for (const id of ['mli-filters', 'mli-search', 'mli-host', 'mli-provider', 'mli-publisher',
+      for (const id of ['mli-filters', 'mli-search', 'mli-host', 'mli-provider',
         'mli-relevance', 'mli-lifecycle', 'mli-evidence-field', 'mli-evidence-value',
         'mli-result-count', 'mli-reset', 'mli-load-more']) contains(r.body, 'id="' + id + '"');
       for (const field of ['host', 'configured', 'observed', 'discoverable', 'lifecycle']) {
