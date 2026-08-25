@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { planModelChange, routeIntelligenceFeed } from '../../src/lib/model-inventory/impact.mjs';
+import { collectObservedModels } from '../../src/lib/model-inventory/observed.mjs';
 
 const AT = '2026-08-25T12:00:00.000Z';
 
@@ -36,11 +37,30 @@ function snapshot() {
 
 test('OpenCode plans preserve provider-qualified model refs in the canonical command', () => {
   const result = planModelChange(snapshot(), {
-    activity: 'implementation', to: 'opencode:vendor/gpt-new',
+    activity: 'implementation', to: 'opencode:openrouter/vendor/gpt-new',
   });
   assert.equal(result.plannable, true);
   assert.match(result.action.command, /implementation:opencode:openrouter\/vendor\/gpt-new/);
   assert.equal(result.edges[0].kind, 'mechanically-compatible');
+});
+
+test('a real observed success permits planning when only catalog discovery remains unknown', async () => {
+  const observed = await collectObservedModels({
+    scopeKey: '0123456789abcdef0123456789abcdef',
+    readIndexFn: async () => ({
+      generatedAt: AT, sourceHealth: { codex: { status: 'ok' } },
+      sessions: [{ host: 'codex', provider: 'openai', models: ['gpt-observed'] }],
+    }),
+  });
+  const value = {
+    schemaVersion: 1, snapshotId: 'observed-snapshot', capturedAt: AT,
+    scope: { fingerprint: observed.source.scopeFingerprint, hosts: ['codex'] },
+    sources: [observed.source], models: observed.models, bindings: [],
+  };
+  const result = planModelChange(value, { activity: 'testing', to: 'codex:gpt-observed' });
+  assert.equal(result.plannable, true);
+  assert.equal(result.compatibility.blockers.includes('discoverable is unknown'), false);
+  assert.match(result.compatibility.warnings.join(' '), /observed path succeeded/);
 });
 
 test('Route Intelligence feed exports evidence and invalidations without quality claims', () => {

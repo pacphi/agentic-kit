@@ -121,3 +121,19 @@ test('digest, reasoning, context, variant, and supplied pricing metadata diff in
     assert.equal(kinds.has(kind), true, kind);
   }
 });
+
+test('capture-time evidence ids do not create lifecycle, pricing, or edge churn', () => {
+  const factual = (id, capturedAt) => model('gpt-a', {
+    lifecycle: { state: 'retiring', replacement: 'gpt-b', evidenceRefs: [id] },
+    pricing: { basis: 'per-token', input: 1, output: 2, currency: 'USD', evidenceRefs: [id] },
+    edges: [{ kind: 'first-party-migration', from: 'gpt-a', to: 'gpt-b',
+      provenance: 'first-party', scopeFingerprint: 'scope-a', evidenceRefs: [id] }],
+    evidence: [{ id, field: 'lifecycle', source: 'catalog', class: 'first-party', capturedAt,
+      freshness: 'fresh', completeness: 'complete', scopeFingerprint: 'scope-a' }],
+  });
+  const beforeAt = '2026-08-24T12:00:00.000Z';
+  const afterAt = '2026-08-25T12:00:00.000Z';
+  const before = at(snapshot('before', [factual('evidence-before', beforeAt)]), beforeAt);
+  const after = at(snapshot('after', [factual('evidence-after', afterAt)]), afterAt);
+  assert.deepEqual(diffSnapshots(before, after).changes, []);
+});

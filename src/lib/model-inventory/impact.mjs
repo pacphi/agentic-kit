@@ -4,8 +4,14 @@ function parseSelector(selector) {
   if (selector && typeof selector === 'object' && !Array.isArray(selector)) return selector;
   if (typeof selector !== 'string' || !selector) throw new TypeError('model selector is required');
   const split = selector.indexOf(':');
-  return split < 0 ? { modelId: selector }
-    : { host: selector.slice(0, split), modelId: selector.slice(split + 1) };
+  if (split < 0) return { modelId: selector };
+  const host = selector.slice(0, split);
+  const reference = selector.slice(split + 1);
+  if (host === 'opencode' && reference.includes('/')) {
+    const slash = reference.indexOf('/');
+    return { host, provider: reference.slice(0, slash), modelId: reference.slice(slash + 1) };
+  }
+  return { host, modelId: reference };
 }
 
 function selectedModels(snapshot, selector) {
@@ -82,7 +88,10 @@ function compatibility(source, target) {
   for (const dimension of ['discoverable', 'entitled', 'policyAllowed', 'routable']) {
     const value = target.dimensions[dimension].value;
     if (value === false) blockers.push(`${dimension} is false`);
-    else if (value === null) blockers.push(`${dimension} is unknown`);
+    else if (value === null && dimension === 'discoverable'
+      && target.dimensions.observed.value === true) {
+      warnings.push('catalog discoverability is unknown; exact observed path succeeded');
+    } else if (value === null) blockers.push(`${dimension} is unknown`);
   }
   if (target.lifecycle.state === 'removed') blockers.push('target lifecycle is removed');
   else if (['deprecated', 'retiring'].includes(target.lifecycle.state)) {

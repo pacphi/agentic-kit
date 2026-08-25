@@ -30,6 +30,17 @@ function aliasTargets(model) {
   return Object.fromEntries(model.aliases.map(({ name, resolvesTo }) => [name, resolvesTo]));
 }
 
+const lifecycleFacts = ({ state, replacement, notice, effectiveAt }) => (
+  { state, replacement, notice, effectiveAt }
+);
+const pricingFacts = (pricing) => pricing == null ? null : ({
+  basis: pricing.basis, input: pricing.input, output: pricing.output,
+  currency: pricing.currency, effectiveAt: pricing.effectiveAt,
+});
+const edgeFacts = (edges) => edges.map(({ kind, from, to, provenance, scopeFingerprint }) => (
+  { kind, from, to, provenance, scopeFingerprint }
+));
+
 function fieldChanges(before, after, provisional) {
   const out = [];
   const oldAliases = aliasTargets(before);
@@ -42,7 +53,7 @@ function fieldChanges(before, after, provisional) {
         { severity: 'warn', field: 'aliases', provisional }));
     }
   }
-  if (!equal(before.lifecycle, after.lifecycle)) {
+  if (!equal(lifecycleFacts(before.lifecycle), lifecycleFacts(after.lifecycle))) {
     out.push(change('lifecycle-changed', after, before.lifecycle, after.lifecycle,
       { severity: after.lifecycle.state === 'removed' ? 'fail' : 'warn', field: 'lifecycle', provisional }));
   }
@@ -79,11 +90,11 @@ function fieldChanges(before, after, provisional) {
     out.push(change('digest-changed', after, before.key.digest, after.key.digest,
       { severity: 'warn', field: 'key.digest', provisional }));
   }
-  if (!equal(before.pricing, after.pricing)) {
+  if (!equal(pricingFacts(before.pricing), pricingFacts(after.pricing))) {
     out.push(change('pricing-changed', after, before.pricing, after.pricing,
       { severity: 'info', field: 'pricing', provisional }));
   }
-  if (!equal(before.edges, after.edges)) {
+  if (!equal(edgeFacts(before.edges), edgeFacts(after.edges))) {
     out.push(change('edges-changed', after, before.edges, after.edges,
       { severity: 'info', field: 'edges', provisional }));
   }
