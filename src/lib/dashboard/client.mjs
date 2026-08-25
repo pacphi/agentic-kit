@@ -1139,7 +1139,7 @@ export const JS = `
   function modelInventoryUrl(offset){
     var query=new URLSearchParams({view:"inventory",offset:String(offset||0),limit:String(MODEL_LIMIT),
       sort:modelSort,direction:modelDirection}),filters=modelFilters();
-    if(offset>0&&modelSnapshotId)query.set("snapshotId",modelSnapshotId);
+    if(modelSnapshotId)query.set("snapshotId",modelSnapshotId);
     Object.keys(filters).forEach(function(key){if(filters[key])query.set(key,filters[key]);});
     return "/api/models?"+query.toString();
   }
@@ -1158,9 +1158,9 @@ export const JS = `
     return modelJson(modelInventoryUrl(offset)).then(function(d){
       if(seq!==modelRequestSeq)return;
       var nextSnapshotId=d&&d.snapshot&&d.snapshot.snapshotId||null;
-      if(append&&modelSnapshotId&&nextSnapshotId!==modelSnapshotId){
+      if(modelSnapshotId&&nextSnapshotId!==modelSnapshotId){
         modelSnapshotId=null;
-        return loadModelInventory(0,false,focusAfter);
+        return loadModelLifecycle(true,focusAfter,true);
       }
       modelSnapshotId=nextSnapshotId;
       MODEL_PAGE=d&&d.inventory||{};
@@ -1171,15 +1171,16 @@ export const JS = `
       setModelsBusy(false,"Model lifecycle evidence loaded. "+modelRows.length+" rows shown.");
       var more=document.getElementById("mli-load-more");if(more)more.textContent="Load 50 more";
       if(focusAfter){
-        var appended=document.querySelectorAll("#mli-models tr > th[scope=row]")[priorLength];
-        if(more&&!more.hidden)more.focus();else if(appended)appended.focus();
+        var headers=document.querySelectorAll("#mli-models tr > th[scope=row]");
+        var target=headers[append?priorLength:0],region=document.querySelector(".mli-table-wrap");
+        if(append&&more&&!more.hidden)more.focus();else if(target)target.focus();else if(region)region.focus();
       }
     }).catch(function(error){
       if(seq!==modelRequestSeq)return;
-      if(append&&error&&error.status===409){
+      if(error&&error.status===409){
         modelSnapshotId=null;
-        setModelsBusy(true,"Model inventory changed; reloading from the first page.");
-        return loadModelInventory(0,false,focusAfter);
+        setModelsBusy(true,"Model inventory changed; reloading its summary and first page.");
+        return loadModelLifecycle(true,focusAfter,true);
       }
       if(append){
         var more=document.getElementById("mli-load-more");
@@ -1194,13 +1195,14 @@ export const JS = `
     });
   }
 
-  function loadModelLifecycle(force){
-    if(modelsBusy||(!force&&MODELS))return Promise.resolve();
+  function loadModelLifecycle(force,focusAfter,recovering){
+    if(!recovering&&(modelsBusy||(!force&&MODELS)))return Promise.resolve();
     setModelsBusy(true,"Loading model lifecycle summary.");
     return modelJson("/api/models?view=summary").then(function(d){
       MODELS=d;
+      modelSnapshotId=d&&d.snapshot&&d.snapshot.snapshotId||null;
       renderModelLifecycle();
-      return loadModelInventory(0,false,false);
+      return loadModelInventory(0,false,!!focusAfter);
     }).catch(function(){
       MODELS={error:"model inventory unavailable"};MODEL_PAGE=null;modelRows=[];modelSnapshotId=null;
       renderModelLifecycle();renderModelInventory();

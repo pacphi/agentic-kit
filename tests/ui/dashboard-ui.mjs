@@ -783,6 +783,13 @@ async function main() {
     system: SYSTEM_STUB,
   });
   const ORIGIN = new URL(srv.url).origin;
+  const modelHeaders = { 'x-dash-token': srv.token };
+  const modelSummaryFixture = await fetch(`${ORIGIN}/api/models?view=summary`, { headers: modelHeaders })
+    .then((response) => response.json());
+  const modelSnapshotId = modelSummaryFixture.snapshot.snapshotId;
+  const modelInventoryFixture = await fetch(`${ORIGIN}/api/models?view=inventory&offset=0&limit=50`
+    + `&sort=lifecycle&direction=asc&relevance=relevant&snapshotId=${encodeURIComponent(modelSnapshotId)}`,
+  { headers: modelHeaders }).then((response) => response.json());
 
   const browser = await chromium.launch({ channel: 'chrome', headless: !HEADED });
   const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
@@ -2137,6 +2144,7 @@ async function main() {
         && new URL(modelRequests[1]).searchParams.get('view') === 'inventory'
         && new URL(modelRequests[1]).searchParams.get('offset') === '0'
         && new URL(modelRequests[1]).searchParams.get('limit') === '50'
+        && new URL(modelRequests[1]).searchParams.get('snapshotId') === modelSnapshotId
         && new URL(modelRequests[1]).searchParams.get('relevance') === 'relevant',
       `Models requests were ${JSON.stringify(modelRequests)}`);
     const modelView = await visibleText(page, '#v-models');
@@ -2251,25 +2259,64 @@ async function main() {
         && await page.inputValue('#mli-relevance') === 'relevant'
         && await page.evaluate(() => document.activeElement?.id) === 'mli-search',
       'Reset did not restore the default filter state or return focus to Search');
-    let stalePage = true;
+    const replacementSnapshotId = `${modelSnapshotId}-replacement`;
+    const replacementSummary = structuredClone(modelSummaryFixture);
+    replacementSummary.snapshot.snapshotId = replacementSnapshotId;
+    replacementSummary.snapshot.capturedAt = '2026-08-25T14:00:00.000Z';
+    replacementSummary.snapshot.sources[0].id = 'replacement-source';
+    replacementSummary.history = [{ snapshotId: replacementSnapshotId,
+      capturedAt: replacementSummary.snapshot.capturedAt }];
+    const replacementInventory = structuredClone(modelInventoryFixture);
+    replacementInventory.snapshot.snapshotId = replacementSnapshotId;
+    replacementInventory.snapshot.capturedAt = replacementSummary.snapshot.capturedAt;
+    replacementInventory.inventory.items = replacementInventory.inventory.items.slice(0, 12);
+    replacementInventory.inventory.total = 12;
+    replacementInventory.inventory.filteredTotal = 12;
+    replacementInventory.inventory.relevantTotal = 12;
+    replacementInventory.inventory.offset = 0;
+    replacementInventory.inventory.nextOffset = null;
+    replacementInventory.inventory.hasMore = false;
+    let stalePhase = 'append';
     const stalePageHandler = async (route) => {
       const requestUrl = new URL(route.request().url());
-      if (stalePage && requestUrl.searchParams.get('offset') === '50') {
-        stalePage = false;
+      const view = requestUrl.searchParams.get('view');
+      if (stalePhase === 'append' && requestUrl.searchParams.get('offset') === '50') {
+        stalePhase = 'summary';
         await route.fulfill({ status: 409, contentType: 'application/json',
           body: JSON.stringify({ error: 'model inventory changed; retry' }) });
+      } else if (stalePhase === 'summary' && view === 'summary') {
+        stalePhase = 'inventory';
+        await route.fulfill({ status: 200, contentType: 'application/json',
+          body: JSON.stringify(replacementSummary) });
+      } else if (stalePhase === 'inventory' && view === 'inventory'
+        && requestUrl.searchParams.get('offset') === '0') {
+        stalePhase = 'done';
+        await route.fulfill({ status: 200, contentType: 'application/json',
+          body: JSON.stringify(replacementInventory) });
       } else await route.continue();
     };
     await page.route(/\/api\/models\?/, stalePageHandler);
     const requestsBeforeStalePage = modelRequests.length;
     await page.click('#mli-load-more');
     await page.waitForFunction(() => document.getElementById('mli-load-status')?.textContent?.includes('loaded'));
+    const staleRequests = modelRequests.slice(requestsBeforeStalePage);
+    const replacementFocus = await page.evaluate(() => ({
+      rowHeader: document.activeElement?.matches('#mli-models tr > th[scope="row"]'),
+      visible: document.activeElement?.offsetParent !== null,
+      text: document.activeElement?.textContent?.trim(),
+    }));
     check('a changed snapshot resets pagination instead of mixing inventory pages',
-      modelRequests.slice(requestsBeforeStalePage).some((url) => new URL(url).searchParams.get('offset') === '50'
+      staleRequests.some((url) => new URL(url).searchParams.get('offset') === '50'
         && new URL(url).searchParams.has('snapshotId'))
-        && modelRequests.slice(requestsBeforeStalePage).some((url) => new URL(url).searchParams.get('offset') === '0')
-        && await page.locator('#mli-models tr').count() === 50,
-      `Models requests were ${JSON.stringify(modelRequests.slice(requestsBeforeStalePage))}`);
+        && staleRequests.some((url) => new URL(url).searchParams.get('view') === 'summary')
+        && staleRequests.some((url) => new URL(url).searchParams.get('offset') === '0'
+          && new URL(url).searchParams.get('snapshotId') === replacementSnapshotId)
+        && await page.locator('#mli-models tr').count() === 12
+        && await page.locator('#mli-sources').getByText('replacement-source').count() === 1,
+      `Models requests were ${JSON.stringify(staleRequests)}`);
+    check('snapshot recovery focuses a visible replacement row when no next page exists',
+      replacementFocus.rowHeader && replacementFocus.visible,
+      `replacement focus was ${JSON.stringify(replacementFocus)}`);
     const expectedConflict = consoleErrors.findIndex((message) => /status of 409/.test(message)
       && /\/api\/models\?/.test(message));
     if (expectedConflict >= 0) consoleErrors.splice(expectedConflict, 1);
