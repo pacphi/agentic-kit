@@ -178,7 +178,7 @@ const MODEL_DISCOVERY_MAP = registryFrom([
   { id: 'claude-config', ownerType: 'host', ownerId: 'claude', transport: 'file', network: 'never', schema: 'claude-settings-v1' },
   { id: 'codex-cache', ownerType: 'host', ownerId: 'codex', transport: 'file', network: 'never', schema: 'codex-model-cache-v1' },
   { id: 'opencode-models', ownerType: 'host', ownerId: 'opencode', transport: 'command', command: 'opencode', network: 'explicit', schema: 'opencode-models-lines-v1' },
-  { id: 'ollama-catalog', ownerType: 'provider', ownerId: 'ollama', transport: 'command', command: 'ollama', network: 'local', schema: 'ollama-list-v1' },
+  { id: 'ollama-catalog', ownerType: 'provider', ownerId: 'ollama', transport: 'command', command: 'ollama', network: 'local', schema: 'ollama-ls-v1' },
 ], validateModelDiscoveryAdapter, 'model discovery');
 
 const hostEntries = [

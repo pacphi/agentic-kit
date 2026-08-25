@@ -117,8 +117,15 @@ test('the deployed skill is removed but kit.json survives without --purge', asyn
 
 test('--purge removes kit.json', async () => {
   seedHome();
+  const dir = path.dirname(paths.kitConfigPath());
+  const inventory = path.join(dir, 'model-inventory.json');
+  const scopeKey = path.join(dir, 'model-scope.key');
+  fs.writeFileSync(inventory, '{}');
+  fs.writeFileSync(scopeKey, 'ab'.repeat(32));
   await captureLog(() => uninstall.run({ flags: { yes: true, purge: true } }));
   assert.equal(fs.existsSync(paths.kitConfigPath()), false);
+  assert.equal(fs.existsSync(inventory), false);
+  assert.equal(fs.existsSync(scopeKey), false);
 });
 
 test('legacy shell-kit rc lines are removed, other rc lines and a .bak survive', async () => {

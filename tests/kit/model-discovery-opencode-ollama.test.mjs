@@ -34,6 +34,16 @@ test('OpenCode preserves configured global and agent model evidence', () => {
   assert.equal(result.models.find((model) => model.displayName === 'anthropic/claude-opus-5').states.discoverable, 'unknown');
 });
 
+test('OpenCode accepts current object selectors and optional configured variants', () => {
+  const result = discoverOpenCode({
+    raw: '', scopeKey: SCOPE_KEY,
+    configRaw: { model: { providerID: 'openai', model: 'gpt-5.6-terra' },
+      agent: { review: { model: 'openai/gpt-5.6-sol#high' } } },
+  });
+  assert.equal(result.models.find((model) => model.identity.modelId === 'gpt-5.6-terra').states.effective, true);
+  assert.deepEqual(result.models.find((model) => model.identity.modelId === 'gpt-5.6-sol').variant.configuredVariants, ['high']);
+});
+
 test('OpenCode uses literal argv and refresh is the only online boundary', async () => {
   const calls = [];
   const runner = async (command, args, options) => {
@@ -57,14 +67,14 @@ test('Ollama parses local names and digests without claiming entitlement', () =>
   assert.doesNotThrow(() => normalizeSourceResult(result.source));
 });
 
-test('Ollama collector invokes list only and caps untrusted output', async () => {
+test('Ollama collector invokes ls only and caps untrusted output', async () => {
   const calls = [];
   const runner = async (command, args, options) => {
     calls.push({ command, args, options });
     return { code: 0, stdout: 'x'.repeat(3_000_000), stderr: '' };
   };
   const result = await collectOllama({ runner, scopeKey: SCOPE_KEY });
-  assert.deepEqual(calls[0].args, ['list']);
+  assert.deepEqual(calls[0].args, ['ls']);
   assert.equal(calls[0].options.shell, false);
   assert.equal(result.status, 'unsupported');
 });

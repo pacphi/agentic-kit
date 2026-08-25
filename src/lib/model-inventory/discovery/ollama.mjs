@@ -7,7 +7,7 @@ const TOKEN = /^[A-Za-z0-9][A-Za-z0-9._:+@/-]*$/;
 
 export function discoverOllama({ raw, capturedAt, scope = {}, scopeKey } = /** @type {any} */ ({})) {
   const text = String(raw ?? '');
-  const source = sourceRecord({ id: 'ollama-catalog', owner: 'ollama', scope, scopeKey, capturedAt, complete: true, schema: 'ollama-list-v1' });
+  const source = sourceRecord({ id: 'ollama-catalog', owner: 'ollama', scope, scopeKey, capturedAt, complete: true, schema: 'ollama-ls-v1' });
   if (Buffer.byteLength(text) > MAX_COMMAND_BYTES) {
     source.complete = false;
     source.status = 'unsupported';
@@ -40,9 +40,9 @@ export function discoverOllama({ raw, capturedAt, scope = {}, scopeKey } = /** @
 export async function collectOllama({
   runner = run, capturedAt, scope = {}, scopeKey, timeout = 15_000,
 } = /** @type {any} */ ({})) {
-  const result = await runner('ollama', ['list'], { timeout, maxBuffer: MAX_COMMAND_BYTES, shell: false });
+  const result = await runner('ollama', ['ls'], { timeout, maxBuffer: MAX_COMMAND_BYTES, shell: false });
   if (result.code !== 0) {
-    const source = sourceRecord({ id: 'ollama-catalog', owner: 'ollama', scope, scopeKey, capturedAt, complete: false, status: 'unavailable', schema: 'ollama-list-v1', diagnostics: ['command-failed'] });
+    const source = sourceRecord({ id: 'ollama-catalog', owner: 'ollama', scope, scopeKey, capturedAt, complete: false, status: 'unavailable', schema: 'ollama-ls-v1', diagnostics: ['command-failed'] });
     return { status: 'unavailable', source, models: [], diagnostics: [diagnostic('command-failed', result.stderr || 'ollama list failed')] };
   }
   return discoverOllama({ raw: result.stdout, capturedAt, scope, scopeKey });

@@ -49,8 +49,8 @@ test('Codex parses visibility, reasoning variants, and first-party migration met
   assert.equal(result.status, 'complete');
   assert.equal(result.models.length, 2);
   const terra = result.models.find((model) => model.identity.modelId === 'gpt-5.6-terra');
-  assert.deepEqual(terra.variant.reasoningEfforts, ['low', 'high']);
-  assert.equal(terra.variant.contextWindow, 272000);
+  assert.deepEqual(terra.variant.reasoningEfforts, ['none', 'low', 'medium', 'high', 'xhigh', 'max']);
+  assert.equal(terra.variant.contextWindow, 1050000);
   assert.equal(terra.states.entitled, 'unknown');
   const old = result.models.find((model) => model.identity.modelId === 'gpt-5.4');
   assert.equal(old.lifecycle.state, 'retiring');

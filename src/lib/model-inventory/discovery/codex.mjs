@@ -3,7 +3,7 @@ import {
 } from './index.mjs';
 
 const VISIBILITY = new Set(['list', 'visible', 'hide', 'hidden']);
-const REASONING = new Set(['minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra']);
+const REASONING = new Set(['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra']);
 const bounded = (value, max = 256) => typeof value === 'string' && value.length > 0 && value.length <= max ? value : null;
 
 function parseCache(raw) {

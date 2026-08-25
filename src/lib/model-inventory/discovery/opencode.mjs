@@ -4,6 +4,20 @@ import {
 } from './index.mjs';
 
 const MODEL_ID = /^[A-Za-z0-9][A-Za-z0-9._:+@-]*(?:\/[A-Za-z0-9][A-Za-z0-9._:+@/-]*)?$/;
+const VARIANT = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
+
+function selection(value) {
+  let ref = value;
+  if (value && typeof value === 'object' && !Array.isArray(value)) {
+    ref = typeof value.providerID === 'string' && typeof value.model === 'string'
+      ? `${value.providerID}/${value.model}` : null;
+  }
+  if (typeof ref !== 'string' || ref.length > 576) return null;
+  const hash = ref.lastIndexOf('#');
+  const id = hash > 0 ? ref.slice(0, hash) : ref;
+  const variant = hash > 0 ? ref.slice(hash + 1) : null;
+  return MODEL_ID.test(id) && (!variant || VARIANT.test(variant)) ? { id, variant } : null;
+}
 
 function configuredRefs(raw) {
   if (raw === undefined || raw === null || raw === '') return [];
@@ -16,7 +30,8 @@ function configuredRefs(raw) {
   for (const agent of Object.values(config.agent && typeof config.agent === 'object' ? config.agent : {})) {
     if (agent && typeof agent === 'object') refs.push(agent.model);
   }
-  return [...new Set(refs.filter((value) => typeof value === 'string' && MODEL_ID.test(value) && value.length <= 512))];
+  return refs.map(selection).filter(Boolean)
+    .filter((entry, index, all) => all.findIndex(({ id, variant }) => id === entry.id && variant === entry.variant) === index);
 }
 
 export function discoverOpenCode({ raw, configRaw, capturedAt, scope = {}, scopeKey, online = false } = /** @type {any} */ ({})) {
@@ -50,7 +65,8 @@ export function discoverOpenCode({ raw, configRaw, capturedAt, scope = {}, scope
   source.complete = complete;
   source.status = complete ? 'complete' : 'partial';
   source.diagnostics = diagnostics.map(({ code }) => code);
-  const allIds = [...new Set([...ids, ...configured])];
+  const configuredIds = configured.map(({ id }) => id);
+  const allIds = [...new Set([...ids, ...configuredIds])];
   const models = allIds.map((qualified) => {
     const slash = qualified.indexOf('/');
     const provider = slash > 0 ? qualified.slice(0, slash) : null;
@@ -58,9 +74,10 @@ export function discoverOpenCode({ raw, configRaw, capturedAt, scope = {}, scope
     return modelRecord({
       host: 'opencode', provider, modelId, scopeId: source.scopeId, displayName: qualified, source,
       states: {
-        configured: configured.includes(qualified), effective: configRaw !== undefined && configured[0] === qualified,
+        configured: configuredIds.includes(qualified), effective: configRaw !== undefined && configured[0]?.id === qualified,
         discoverable: ids.includes(qualified) ? true : 'unknown', entitled: 'unknown',
-      },
+      }, variant: { configuredVariants: configured.filter(({ id }) => id === qualified)
+        .map(({ variant }) => variant).filter(Boolean) },
     });
   });
   return { status: complete ? 'complete' : 'partial', source, models, diagnostics, networkUsed: online };

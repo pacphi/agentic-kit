@@ -17,6 +17,7 @@ import { present as rbPresent } from '../lib/ruvnet-brain.mjs';
 import * as paths from '../lib/paths.mjs';
 import { ok, warn, fail, info } from '../lib/output.mjs';
 import { removeCodexStatusline } from '../lib/codex-statusline.mjs';
+import { modelInventoryPath, modelScopeKeyPath } from '../lib/model-inventory/store.mjs';
 
 /** Prints one lifecycle-render.mjs report line at its own level — mirrors
  *  setup.mjs/sync.mjs's own printReportLine (N-2, Wave C security review
@@ -174,6 +175,13 @@ export async function run({ flags }) {
     // anything observable happen".
     if (!flags.purge) saveKitConfig(cfg);
     for (const line of undoReport.lines) printReportLine(line);
+  }
+  if (flags.purge) {
+    for (const [label, file] of [
+      ['model inventory cache', modelInventoryPath()], ['model scope key', modelScopeKeyPath()],
+    ]) {
+      if (fs.existsSync(file)) act(`removed ${label}`, () => fs.rmSync(file));
+    }
   }
   if (flags.purge && fs.existsSync(paths.kitConfigPath())) {
     if (ownershipTeardownOk) act('removed kit.json', () => fs.rmSync(paths.kitConfigPath()));
