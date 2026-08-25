@@ -8,7 +8,7 @@ const SORTS = new Set(['displayName', 'host', 'provider', 'publisher', 'lifecycl
 const QUERY_KEYS = new Set([
   'view', 'offset', 'limit', 'sort', 'direction', 'search', 'host', 'provider',
   'publisher', 'lifecycle', 'relevance', 'evidenceField', 'evidenceValue',
-  ...DIMENSIONS, 'token',
+  'snapshotId', ...DIMENSIONS, 'token',
 ]);
 const LIFECYCLE_ORDER = new Map([
   ['removed', 0], ['retiring', 1], ['deprecated', 2], ['hidden', 3],
@@ -18,6 +18,12 @@ const LIFECYCLE_ORDER = new Map([
 function invalidQuery() {
   return Object.assign(new TypeError('invalid model inventory query'), {
     code: 'INVALID_MODEL_INVENTORY_QUERY',
+  });
+}
+
+function snapshotChanged() {
+  return Object.assign(new Error('model inventory snapshot changed'), {
+    code: 'MODEL_INVENTORY_SNAPSHOT_CHANGED',
   });
 }
 
@@ -81,6 +87,7 @@ function parseQuery(raw) {
     sort, direction, relevance, search: queryText(query, 'search'),
     host: queryText(query, 'host'), provider: queryText(query, 'provider'),
     publisher: queryText(query, 'publisher'), lifecycle: queryText(query, 'lifecycle', 64),
+    snapshotId: queryText(query, 'snapshotId', 128),
     evidenceField, evidenceValue, dimensions,
   };
 }
@@ -150,6 +157,8 @@ export function dashboardModelView(projected, rawQuery) {
     return projected;
   }
   const models = projected.snapshot.models;
+  if (parsed.view === 'inventory' && parsed.snapshotId != null
+    && parsed.snapshotId !== projected.snapshot.snapshotId) throw snapshotChanged();
   const relevantTotal = models.filter(isRelevant).length;
   if (parsed.view === 'summary') {
     const { models: _models, ...snapshot } = projected.snapshot;

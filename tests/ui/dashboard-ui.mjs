@@ -2160,7 +2160,7 @@ async function main() {
         && /complete/.test(await visibleText(page, '#mli-models'))
         && /scope-[a-f0-9]{12}/.test(await visibleText(page, '#mli-models')),
       'Expanded state did not disclose its complete evidence chain');
-    const unknownObserved = page.locator('#mli-models tr').first().locator('td').nth(3).locator('details');
+    const unknownObserved = page.locator('#mli-models tr').first().locator('td').nth(2).locator('details');
     await unknownObserved.locator('summary').click();
     check('an unknown observed state explains the missing evidence instead of blaming refresh',
       /No retained successful-use evidence established this field/.test(await unknownObserved.innerText()),
@@ -2206,6 +2206,9 @@ async function main() {
     check('Models renders only its first 50 relevant rows and states the total',
       initialInventory.rows === 50 && /50/.test(initialInventory.count) && /62/.test(initialInventory.count),
       `initial inventory was ${JSON.stringify(initialInventory)}`);
+    check('each model identity is the semantic row header for its evidence cells',
+      await page.locator('#mli-models tr > th[scope="row"]').count() === 50,
+      'model identity cells were not row headers');
     check('host inventory is height-bounded, vertically scrollable and keeps its header sticky',
       initialInventory.overflowY === 'auto' && initialInventory.maxHeight !== 'none'
         && initialInventory.headPosition === 'sticky',
@@ -2248,11 +2251,57 @@ async function main() {
         && await page.inputValue('#mli-relevance') === 'relevant'
         && await page.evaluate(() => document.activeElement?.id) === 'mli-search',
       'Reset did not restore the default filter state or return focus to Search');
+    let stalePage = true;
+    const stalePageHandler = async (route) => {
+      const requestUrl = new URL(route.request().url());
+      if (stalePage && requestUrl.searchParams.get('offset') === '50') {
+        stalePage = false;
+        await route.fulfill({ status: 409, contentType: 'application/json',
+          body: JSON.stringify({ error: 'model inventory changed; retry' }) });
+      } else await route.continue();
+    };
+    await page.route(/\/api\/models\?/, stalePageHandler);
+    const requestsBeforeStalePage = modelRequests.length;
+    await page.click('#mli-load-more');
+    await page.waitForFunction(() => document.getElementById('mli-load-status')?.textContent?.includes('loaded'));
+    check('a changed snapshot resets pagination instead of mixing inventory pages',
+      modelRequests.slice(requestsBeforeStalePage).some((url) => new URL(url).searchParams.get('offset') === '50'
+        && new URL(url).searchParams.has('snapshotId'))
+        && modelRequests.slice(requestsBeforeStalePage).some((url) => new URL(url).searchParams.get('offset') === '0')
+        && await page.locator('#mli-models tr').count() === 50,
+      `Models requests were ${JSON.stringify(modelRequests.slice(requestsBeforeStalePage))}`);
+    const expectedConflict = consoleErrors.findIndex((message) => /status of 409/.test(message)
+      && /\/api\/models\?/.test(message));
+    if (expectedConflict >= 0) consoleErrors.splice(expectedConflict, 1);
+    await page.unroute(/\/api\/models\?/, stalePageHandler);
+
+    let failPage = true;
+    const failPageHandler = async (route) => {
+      const requestUrl = new URL(route.request().url());
+      if (failPage && requestUrl.searchParams.get('offset') === '50') {
+        failPage = false;
+        await route.fulfill({ status: 500, contentType: 'application/json',
+          body: JSON.stringify({ error: 'temporarily unavailable' }) });
+      } else await route.continue();
+    };
+    await page.route(/\/api\/models\?/, failPageHandler);
+    await page.click('#mli-load-more');
+    await page.waitForFunction(() => document.getElementById('mli-load-status')?.textContent?.includes('unavailable'));
+    check('a failed later page preserves prior rows and leaves an explicit retry',
+      await page.locator('#mli-models tr').count() === 50
+        && await page.isVisible('#mli-load-more')
+        && /Retry/.test(await page.textContent('#mli-load-more')),
+      'a failed append discarded rows or hid its retry');
+    const expectedFailure = consoleErrors.findIndex((message) => /status of 500/.test(message)
+      && /\/api\/models\?/.test(message));
+    if (expectedFailure >= 0) consoleErrors.splice(expectedFailure, 1);
+    await page.unroute(/\/api\/models\?/, failPageHandler);
     await page.click('#mli-load-more');
     await page.waitForFunction(() => document.querySelectorAll('#mli-models tr').length === 62);
     check('Load 50 more appends the remaining page without replacing the first page',
       await page.locator('#mli-models tr').count() === 62
-        && await page.isHidden('#mli-load-more'),
+        && await page.isHidden('#mli-load-more')
+        && await page.evaluate(() => document.activeElement === document.querySelectorAll('#mli-models tr > th[scope="row"]')[50]),
       'the second page did not append to the first or the exhausted control stayed visible');
     await page.setViewportSize({ width: 640, height: 900 });
     await page.focus('.mli-table-wrap');

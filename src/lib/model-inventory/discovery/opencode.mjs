@@ -3,11 +3,14 @@ import {
   MAX_COMMAND_BYTES, MAX_MODELS, diagnostic, modelRecord, sourceRecord,
 } from './index.mjs';
 
-const MODEL_ID = /^[A-Za-z0-9][A-Za-z0-9._:+@-]*(?:\/~?[A-Za-z0-9][A-Za-z0-9._:+@/-]*)?$/;
 const VARIANT = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
 const CATALOG_TOKEN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
 const CATALOG_STATUSES = new Set(['active', 'alpha', 'beta', 'deprecated']);
 const MODALITIES = ['text', 'audio', 'image', 'video', 'pdf'];
+const MAX_DIAGNOSTICS = 64;
+const MAX_OUTPUT_LINES = 8_192;
+const MAX_CATALOG_BYTES = 8 * 1024 * 1024;
+const MODELS_DEV_URL = 'https://models.dev/api.json';
 
 const plain = (value) => value !== null && typeof value === 'object' && !Array.isArray(value);
 
@@ -33,20 +36,38 @@ function releaseDate(value) {
   return Number.isNaN(date.valueOf()) || date.toISOString().slice(0, 10) !== text ? null : text;
 }
 
-function publicCatalogIdentity(provider, modelId) {
-  if (provider !== 'openrouter') return { public: false, publisher: null, links: null };
-  const segments = modelId.replace(/^~/, '').split('/');
-  if (segments.length < 2 || !CATALOG_TOKEN.test(segments[0])
-    || segments.slice(1).some((part) => !part || part.length > 256)) {
-    return { public: false, publisher: null, links: null };
+function selectorParts(value) {
+  const selector = boundedText(value, 576);
+  if (!selector || selector.includes('#')) return null;
+  const slash = selector.indexOf('/');
+  if (slash < 1 || slash > 256 || slash === selector.length - 1) return null;
+  const provider = selector.slice(0, slash);
+  const modelId = selector.slice(slash + 1);
+  if (provider.includes('/') || modelId.length > 512) return null;
+  return { selector, provider, modelId };
+}
+
+function catalogDocument(raw) {
+  if (raw == null || raw === '') return null;
+  const text = typeof raw === 'string' ? raw : JSON.stringify(raw);
+  if (Buffer.byteLength(text) > MAX_CATALOG_BYTES) return null;
+  try {
+    const value = typeof raw === 'string' ? JSON.parse(raw) : structuredClone(raw);
+    return plain(value) ? value : null;
+  } catch { return null; }
+}
+
+function catalogEntry(catalog, provider, modelId) {
+  const providerEntry = plain(catalog?.[provider]) ? catalog[provider] : null;
+  const entry = plain(providerEntry?.models?.[modelId]) ? providerEntry.models[modelId] : null;
+  return providerEntry?.id === provider && entry?.id === modelId ? entry : null;
+}
+
+function addDiagnostic(diagnostics, item) {
+  if (diagnostics.length < MAX_DIAGNOSTICS - 1) diagnostics.push(item);
+  else if (!diagnostics.some(({ code }) => code === 'diagnostics-truncated')) {
+    diagnostics.push(diagnostic('diagnostics-truncated', 'additional diagnostics were omitted'));
   }
-  const publisher = segments[0];
-  const modelPath = segments.slice(1).map(encodeURIComponent).join('/');
-  return {
-    public: true,
-    publisher,
-    links: { catalog: `https://models.dev/models/${encodeURIComponent(publisher)}/${modelPath}/` },
-  };
 }
 
 function safeModalities(value) {
@@ -78,6 +99,26 @@ function safeCapabilities(value, limit) {
     if (output !== null) result.outputLimit = output;
   }
   return result;
+}
+
+function catalogCapabilities(value) {
+  if (!plain(value)) return {};
+  const result = {};
+  for (const [source, target] of [
+    ['temperature', 'temperature'], ['reasoning', 'reasoning'],
+    ['attachment', 'attachment'], ['tool_call', 'toolcall'],
+  ]) if (typeof value[source] === 'boolean') result[target] = value[source];
+  if (plain(value.modalities)) {
+    for (const direction of ['input', 'output']) {
+      if (!Array.isArray(value.modalities[direction])) continue;
+      const present = new Set(value.modalities[direction]);
+      result[direction] = Object.fromEntries(MODALITIES.map((name) => [name, present.has(name)]));
+    }
+  }
+  if (typeof value.interleaved === 'boolean') result.interleaved = value.interleaved;
+  else if (plain(value.interleaved)) result.interleaved = true;
+  const limits = safeCapabilities(null, value.limit);
+  return { ...result, ...limits };
 }
 
 function safePricing(value) {
@@ -122,7 +163,7 @@ function jsonBlock(lines, start) {
   return { raw: chunks.join('\n'), end: lines.length - 1 };
 }
 
-function metadataFor(selector, raw) {
+function metadataFor(selector, raw, catalogDocumentValue) {
   let value;
   try { value = JSON.parse(raw); } catch { return { error: 'invalid-model-metadata' }; }
   if (!plain(value)) return { error: 'invalid-model-metadata' };
@@ -131,42 +172,83 @@ function metadataFor(selector, raw) {
   if (!providerID || !id || `${providerID}/${id}` !== selector) {
     return { error: 'metadata-selector-mismatch' };
   }
-  const slash = selector.indexOf('/');
-  const provider = selector.slice(0, slash);
-  const modelId = selector.slice(slash + 1);
-  const statusValue = boundedText(value.status, 32)?.toLowerCase() ?? null;
+  const parts = selectorParts(selector);
+  if (!parts) return { error: 'metadata-selector-mismatch' };
+  const { provider, modelId } = parts;
+  const proof = catalogEntry(catalogDocumentValue, provider, modelId);
+  const metadata = proof ?? value;
+  const statusValue = boundedText(metadata.status, 32)?.toLowerCase() ?? null;
   const status = statusValue && CATALOG_STATUSES.has(statusValue) ? statusValue : null;
-  const familyValue = boundedText(value.family, 128);
+  const familyValue = boundedText(metadata.family, 128);
   const family = familyValue && CATALOG_TOKEN.test(familyValue) ? familyValue : null;
-  const identity = publicCatalogIdentity(provider, modelId);
   const catalog = {
-    source: 'opencode', public: identity.public, servingProvider: provider,
-    publisher: identity.publisher, family, selector, releaseDate: releaseDate(value.release_date), status,
-    ...(identity.links ? { links: identity.links } : {}),
+    source: proof ? 'models.dev' : 'opencode', public: !!proof, servingProvider: provider,
+    publisher: null, family, selector, releaseDate: releaseDate(metadata.release_date), status,
+    ...(proof ? { links: { catalog: 'https://models.dev/' } } : {}),
   };
   const availableVariants = plain(value.variants)
     ? Object.keys(value.variants).filter((name) => VARIANT.test(name)).slice(0, 64).sort() : [];
   return {
     metadata: {
-      displayName: boundedText(value.name, 256) ?? selector,
+      displayName: boundedText(metadata.name, 256) ?? selector,
       catalog,
       availableVariants,
-      capabilities: safeCapabilities(value.capabilities, value.limit),
-      pricing: safePricing(value.cost),
+      capabilities: proof ? catalogCapabilities(proof) : safeCapabilities(value.capabilities, value.limit),
+      pricing: safePricing(metadata.cost),
       lifecycle: { state: lifecycleState(status), replacement: null },
     },
   };
 }
 
-function outputRows(text, diagnostics) {
+async function fetchCatalog(fetchFn, timeout) {
+  if (typeof fetchFn !== 'function') throw new TypeError('catalog-fetch-unavailable');
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeout);
+  try {
+    const response = await fetchFn(MODELS_DEV_URL, {
+      signal: controller.signal, headers: { accept: 'application/json' },
+    });
+    if (!response?.ok) throw new TypeError('catalog-fetch-failed');
+    const declared = Number(response.headers?.get?.('content-length'));
+    if (Number.isFinite(declared) && declared > MAX_CATALOG_BYTES) {
+      throw new TypeError('catalog-too-large');
+    }
+    if (!response.body?.getReader) {
+      const text = await response.text();
+      if (Buffer.byteLength(text) > MAX_CATALOG_BYTES) throw new TypeError('catalog-too-large');
+      return text;
+    }
+    const reader = response.body.getReader();
+    const chunks = [];
+    let bytes = 0;
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      bytes += value.byteLength;
+      if (bytes > MAX_CATALOG_BYTES) {
+        await reader.cancel();
+        throw new TypeError('catalog-too-large');
+      }
+      chunks.push(value);
+    }
+    return Buffer.concat(chunks.map((value) => Buffer.from(value))).toString('utf8');
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function outputRows(text, diagnostics, catalog) {
   const lines = text.split(/\r?\n/);
   const rows = [];
   const seen = new Set();
-  for (let index = 0; index < lines.length; index += 1) {
+  if (lines.length > MAX_OUTPUT_LINES) {
+    addDiagnostic(diagnostics, diagnostic('output-lines-truncated', `output exceeds ${MAX_OUTPUT_LINES} lines`));
+  }
+  for (let index = 0; index < Math.min(lines.length, MAX_OUTPUT_LINES); index += 1) {
     const selector = lines[index].trim();
     if (!selector) continue;
-    if (!MODEL_ID.test(selector) || selector.length > 512) {
-      diagnostics.push(diagnostic('invalid-model-id', `line ${index + 1} is invalid`));
+    if (!selectorParts(selector)) {
+      addDiagnostic(diagnostics, diagnostic('invalid-model-id', `line ${index + 1} is invalid`));
       continue;
     }
     let metadata = null;
@@ -174,8 +256,8 @@ function outputRows(text, diagnostics) {
     while (next < lines.length && !lines[next].trim()) next += 1;
     if (next < lines.length && lines[next].trimStart().startsWith('{')) {
       const block = jsonBlock(lines, next);
-      const parsed = metadataFor(selector, block.raw);
-      if (parsed.error) diagnostics.push(diagnostic(parsed.error, `line ${next + 1} metadata is invalid`));
+      const parsed = metadataFor(selector, block.raw, catalog);
+      if (parsed.error) addDiagnostic(diagnostics, diagnostic(parsed.error, `line ${next + 1} metadata is invalid`));
       else metadata = parsed.metadata;
       index = block.end;
     }
@@ -198,7 +280,7 @@ function selection(value) {
   const hash = ref.lastIndexOf('#');
   const id = hash > 0 ? ref.slice(0, hash) : ref;
   const variant = hash > 0 ? ref.slice(hash + 1) : null;
-  return MODEL_ID.test(id) && (!variant || VARIANT.test(variant)) ? { id, variant } : null;
+  return selectorParts(id) && (!variant || VARIANT.test(variant)) ? { id, variant } : null;
 }
 
 function configuredRefs(raw) {
@@ -212,11 +294,15 @@ function configuredRefs(raw) {
   for (const agent of Object.values(config.agent && typeof config.agent === 'object' ? config.agent : {})) {
     if (agent && typeof agent === 'object') refs.push(agent.model);
   }
+  for (const command of Object.values(config.command && typeof config.command === 'object' ? config.command : {})) {
+    if (command && typeof command === 'object') refs.push(command.model);
+  }
   return refs.map(selection).filter(Boolean)
     .filter((entry, index, all) => all.findIndex(({ id, variant }) => id === entry.id && variant === entry.variant) === index);
 }
 
-export function discoverOpenCode({ raw, configRaw, capturedAt, scope = {}, scopeKey, online = false } = /** @type {any} */ ({})) {
+export function discoverOpenCode({ raw, configRaw, catalogRaw, initialDiagnostics = [], capturedAt,
+  scope = {}, scopeKey, online = false } = /** @type {any} */ ({})) {
   const text = String(raw ?? '');
   const source = sourceRecord({ id: 'opencode-models', owner: 'opencode', scope, scopeKey, capturedAt, complete: true, schema: 'opencode-models-lines-v1' });
   if (Buffer.byteLength(text) > MAX_COMMAND_BYTES) {
@@ -226,13 +312,14 @@ export function discoverOpenCode({ raw, configRaw, capturedAt, scope = {}, scope
     return { status: 'unsupported', source, models: [], diagnostics: [diagnostic('output-too-large', `output exceeds ${MAX_COMMAND_BYTES}`)], networkUsed: online };
   }
   const diagnostics = [];
+  for (const item of initialDiagnostics) addDiagnostic(diagnostics, item);
   let configured = [];
   try { configured = configuredRefs(configRaw); } catch (error) {
     source.complete = false;
     source.status = 'partial';
-    diagnostics.push(diagnostic('unsupported-config-schema', error.message));
+    addDiagnostic(diagnostics, diagnostic('unsupported-config-schema', error.message));
   }
-  const rows = outputRows(text, diagnostics);
+  const rows = outputRows(text, diagnostics, catalogDocument(catalogRaw));
   const ids = rows.map(({ selector }) => selector);
   const complete = diagnostics.length === 0 && ids.length < MAX_MODELS;
   source.complete = complete;
@@ -267,14 +354,47 @@ export function discoverOpenCode({ raw, configRaw, capturedAt, scope = {}, scope
 }
 
 export async function collectOpenCode({
-  runner = run, online = false, provider, configRaw, capturedAt, scope = {}, scopeKey, timeout = 30_000,
+  runner = run, fetchFn = globalThis.fetch, online = false, provider, configRaw, catalogRaw,
+  capturedAt, scope = {}, scopeKey, timeout = 30_000,
 } = /** @type {any} */ ({})) {
   const providerArg = typeof provider === 'string' && provider.length <= 256 ? provider : null;
-  const args = ['models', ...(providerArg ? [providerArg] : []), '--verbose', ...(online ? ['--refresh'] : [])];
-  const result = await runner('opencode', args, { timeout, maxBuffer: MAX_COMMAND_BYTES, shell: false });
+  const baseArgs = ['models', ...(providerArg ? [providerArg] : [])];
+  const initialDiagnostics = [];
+  if (configRaw === undefined) {
+    const configured = await runner('opencode', ['debug', 'config'], {
+      timeout, maxBuffer: MAX_COMMAND_BYTES, shell: false,
+    });
+    if (configured.code === 0) configRaw = configured.stdout;
+    else addDiagnostic(initialDiagnostics, diagnostic('config-unavailable', 'opencode resolved config unavailable'));
+  }
+  if (online) {
+    const refreshed = await runner('opencode', [...baseArgs, '--refresh'], {
+      timeout, maxBuffer: MAX_COMMAND_BYTES, shell: false,
+    });
+    if (refreshed.code !== 0) {
+      const source = sourceRecord({ id: 'opencode-models', owner: 'opencode', scope, scopeKey,
+        capturedAt, complete: false, status: 'unavailable', schema: 'opencode-models-lines-v1',
+        diagnostics: ['command-failed'] });
+      return { status: 'unavailable', source, models: [],
+        diagnostics: [diagnostic('command-failed', refreshed.stderr || 'opencode models refresh failed')],
+        networkUsed: true };
+    }
+    if (catalogRaw === undefined) {
+      try {
+        catalogRaw = await fetchCatalog(fetchFn, timeout);
+      } catch {
+        addDiagnostic(initialDiagnostics,
+          diagnostic('catalog-proof-unavailable', 'Models.dev identity proof unavailable'));
+      }
+    }
+  }
+  const result = await runner('opencode', [...baseArgs, '--verbose'], {
+    timeout, maxBuffer: MAX_COMMAND_BYTES, shell: false,
+  });
   if (result.code !== 0) {
     const source = sourceRecord({ id: 'opencode-models', owner: 'opencode', scope, scopeKey, capturedAt, complete: false, status: 'unavailable', schema: 'opencode-models-lines-v1', diagnostics: ['command-failed'] });
     return { status: 'unavailable', source, models: [], diagnostics: [diagnostic('command-failed', result.stderr || 'opencode models failed')], networkUsed: online };
   }
-  return discoverOpenCode({ raw: result.stdout, configRaw, capturedAt, scope, scopeKey, online });
+  return discoverOpenCode({ raw: result.stdout, configRaw, catalogRaw, initialDiagnostics,
+    capturedAt, scope, scopeKey, online });
 }

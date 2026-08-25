@@ -482,13 +482,15 @@ body.gated .band,body.gated .tabbar,body.gated main{display:none}
 .mli-table-wrap:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
 .mli-table{width:100%;border-collapse:collapse;min-width:920px;font-size:11.5px}
 .mli-table thead{position:sticky;top:0;z-index:3}
-.mli-table th{text-align:left;padding:0 9px 9px;color:var(--mli-muted);font-size:10px;text-transform:uppercase;
+.mli-table thead th{text-align:left;padding:0 9px 9px;color:var(--mli-muted);font-size:10px;text-transform:uppercase;
   letter-spacing:.06em;border-bottom:1px solid var(--line);background:var(--panel)}
 .mli-table th button{display:flex;align-items:center;gap:4px;width:100%;min-height:32px;padding:7px 0 3px;border:0;
   background:transparent;color:inherit;font:inherit;letter-spacing:inherit;text-transform:inherit;text-align:left;cursor:pointer;white-space:nowrap}
 .mli-table th[aria-sort="ascending"],.mli-table th[aria-sort="descending"]{color:var(--accent)}
 .mli-table th button [aria-hidden]{font:700 10px var(--mono)}
-.mli-table td{padding:10px 9px;border-bottom:1px solid var(--line);vertical-align:middle}
+.mli-table td,.mli-table tbody th{padding:10px 9px;border-bottom:1px solid var(--line);vertical-align:middle}
+.mli-table tbody th{text-align:left;color:inherit;font:inherit;text-transform:none}
+.mli-table tbody th:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
 .mli-table tbody tr:last-child td{border-bottom:0}.mli-id{display:flex;flex-direction:column;gap:2px}
 .mli-id b{font-size:12px}.mli-id small{color:var(--mli-muted);font-family:var(--mono)}
 .mli-id .mli-selector{color:var(--ink-2)}.mli-id .mli-ref{font-size:9px;color:var(--ink-dim)}

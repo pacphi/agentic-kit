@@ -40,9 +40,10 @@ const DISCOVERY_OPTIONS = Object.freeze({
     cacheRaw: inputs.codex?.cacheRaw ?? readOptional(path.join(paths.codexDir(), 'models_cache.json'), readFileFn),
     configRaw: inputs.codex?.configRaw ?? readOptional(path.join(paths.codexDir(), 'config.toml'), readFileFn),
   }),
-  'opencode-models': ({ base, inputs, readFileFn, runner, online, cwd }) => ({
+  'opencode-models': ({ base, inputs, runner, online }) => ({
     ...base, runner, online, provider: inputs.opencode?.provider,
-    configRaw: inputs.opencode?.configRaw ?? readOptional(path.join(cwd, 'opencode.json'), readFileFn),
+    configRaw: inputs.opencode?.configRaw, catalogRaw: inputs.opencode?.catalogRaw,
+    fetchFn: inputs.opencode?.fetchFn,
   }),
   'ollama-catalog': ({ base, runner }) => ({ ...base, runner }),
 });
@@ -78,7 +79,9 @@ export async function refreshModelDiscovery({
     const owner = descriptor.ownerId;
     const buildOptions = DISCOVERY_OPTIONS[descriptor.id];
     if (!buildOptions) throw new TypeError(`unsupported model discovery descriptor: ${descriptor.id}`);
-    contacts.push(CONTACT[descriptor.id] ?? descriptor.id);
+    contacts.push(descriptor.id === 'opencode-models' && online
+      ? 'OpenCode and Models.dev catalogues'
+      : (CONTACT[descriptor.id] ?? descriptor.id));
     const ownerScope = { ...scope, ...(descriptor.scope === 'project' ? { project: cwd } : {}) };
     const base = { capturedAt, scope: ownerScope, scopeKey: fingerprintKey };
     const options = buildOptions({ base, inputs, readFileFn, processEnvironment, runner, online, cwd });

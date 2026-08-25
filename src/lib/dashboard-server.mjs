@@ -1409,9 +1409,11 @@ export function startDashboard({
         sendJson(res, 200, createDashboardModelViewPayload(payload, { key, query }));
       } catch (error) {
         // Do not echo native parser/provider errors: they may contain a private identifier.
-        sendJson(res, error?.code === 'INVALID_MODEL_INVENTORY_QUERY' ? 400 : 500,
-          { error: error?.code === 'INVALID_MODEL_INVENTORY_QUERY'
-            ? 'invalid model inventory query' : 'model dashboard evidence unavailable' });
+        const invalid = error?.code === 'INVALID_MODEL_INVENTORY_QUERY';
+        const changed = error?.code === 'MODEL_INVENTORY_SNAPSHOT_CHANGED';
+        sendJson(res, invalid ? 400 : changed ? 409 : 500,
+          { error: invalid ? 'invalid model inventory query'
+            : changed ? 'model inventory changed; retry' : 'model dashboard evidence unavailable' });
       }
       return;
     }

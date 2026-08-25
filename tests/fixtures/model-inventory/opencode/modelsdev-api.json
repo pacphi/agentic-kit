@@ -1,0 +1,35 @@
+{
+  "openrouter": {
+    "id": "openrouter",
+    "name": "OpenRouter",
+    "models": {
+      "~anthropic/claude-sonnet-latest": {
+        "id": "~anthropic/claude-sonnet-latest",
+        "name": "Anthropic Claude Sonnet Latest",
+        "family": "claude-sonnet",
+        "status": "active",
+        "release_date": "2026-04-27",
+        "attachment": true,
+        "reasoning": true,
+        "tool_call": true,
+        "temperature": false,
+        "modalities": { "input": ["text", "image", "pdf"], "output": ["text"] },
+        "limit": { "context": 1000000, "output": 128000 },
+        "cost": { "input": 2, "output": 10 }
+      },
+      "z-ai/glm-5": {
+        "id": "z-ai/glm-5",
+        "name": "GLM-5",
+        "family": "glm",
+        "status": "active",
+        "release_date": "2026-02-12",
+        "reasoning": true,
+        "tool_call": true,
+        "temperature": true,
+        "modalities": { "input": ["text"], "output": ["text"] },
+        "limit": { "context": 204800, "output": 128000 },
+        "cost": { "input": 0.6, "output": 1.92 }
+      }
+    }
+  }
+}

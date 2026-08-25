@@ -34,6 +34,24 @@ test('OpenCode preserves configured global and agent model evidence', () => {
   assert.equal(result.models.find((model) => model.displayName === 'anthropic/claude-opus-5').states.discoverable, 'unknown');
 });
 
+test('OpenCode reads resolved root, agent, and command model configuration', async () => {
+  const calls = [];
+  const runner = async (command, args) => {
+    calls.push([command, args]);
+    if (args[0] === 'debug') return { code: 0, stdout: JSON.stringify({
+      model: 'openrouter/z-ai/glm-5',
+      agent: { review: { model: 'anthropic/claude-opus-5' } },
+      command: { audit: { model: 'openai/gpt-5.6-sol#high' } },
+    }), stderr: '' };
+    return { code: 0, stdout: 'openrouter/z-ai/glm-5\n', stderr: '' };
+  };
+  const result = await collectOpenCode({ runner, scopeKey: SCOPE_KEY });
+  assert.deepEqual(calls.map(([, args]) => args), [['debug', 'config'], ['models', '--verbose']]);
+  assert.equal(result.models.find(({ identity }) => identity.modelId === 'z-ai/glm-5').states.effective, true);
+  assert.equal(result.models.find(({ identity }) => identity.modelId === 'claude-opus-5').states.configured, true);
+  assert.deepEqual(result.models.find(({ identity }) => identity.modelId === 'gpt-5.6-sol').variant.configuredVariants, ['high']);
+});
+
 test('OpenCode accepts current object selectors and optional configured variants', () => {
   const result = discoverOpenCode({
     raw: '', scopeKey: SCOPE_KEY,
@@ -57,22 +75,23 @@ test('OpenCode accepts current OpenRouter tilde selectors', () => {
 
 test('OpenCode parses verbose catalog metadata into bounded public fields only', () => {
   const result = discoverOpenCode({
-    raw: fixture('opencode', 'models-verbose.txt'), scopeKey: SCOPE_KEY,
+    raw: fixture('opencode', 'models-verbose.txt'),
+    catalogRaw: fixture('opencode', 'modelsdev-api.json'), scopeKey: SCOPE_KEY,
   });
   assert.equal(result.status, 'complete');
   assert.equal(result.models.length, 3);
   const claude = result.models.find((model) => model.identity.modelId === '~anthropic/claude-sonnet-latest');
   assert.equal(claude.displayName, 'Anthropic Claude Sonnet Latest');
   assert.deepEqual(claude.variant.catalog, {
-    source: 'opencode',
+    source: 'models.dev',
     public: true,
     servingProvider: 'openrouter',
-    publisher: 'anthropic',
+    publisher: null,
     family: 'claude-sonnet',
     selector: 'openrouter/~anthropic/claude-sonnet-latest',
     releaseDate: '2026-04-27',
     status: 'active',
-    links: { catalog: 'https://models.dev/models/anthropic/claude-sonnet-latest/' },
+    links: { catalog: 'https://models.dev/' },
   });
   assert.deepEqual(claude.variant.availableVariants, ['high', 'low']);
   assert.deepEqual(claude.capabilities, {
@@ -82,7 +101,6 @@ test('OpenCode parses verbose catalog metadata into bounded public fields only',
     toolcall: true,
     input: { text: true, audio: false, image: true, video: false, pdf: true },
     output: { text: true, audio: false, image: false, video: false, pdf: false },
-    interleaved: false,
     contextLimit: 1000000,
     outputLimit: 128000,
   });
@@ -114,16 +132,46 @@ test('OpenCode parses verbose catalog metadata into bounded public fields only',
   assert.doesNotThrow(() => result.models.map(normalizeModelRecord));
 });
 
+test('OpenCode never treats provider syntax or custom metadata as public catalog proof', () => {
+  const raw = [
+    'openrouter/acme/finance-secret',
+    JSON.stringify({ id: 'acme/finance-secret', providerID: 'openrouter',
+      name: 'Board Acquisition Model', family: 'finance' }),
+  ].join('\n');
+  const result = discoverOpenCode({
+    raw, catalogRaw: fixture('opencode', 'modelsdev-api.json'), scopeKey: SCOPE_KEY,
+  });
+  const secret = result.models[0];
+  assert.equal(secret.variant.catalog.public, false);
+  assert.equal(secret.variant.catalog.publisher, null);
+  assert.equal(secret.variant.catalog.links, undefined);
+});
+
+test('OpenCode bounds invalid-line diagnostics and accepts bounded custom string ids', () => {
+  const invalid = Array.from({ length: 10_000 }, () => '!').join('\n');
+  const result = discoverOpenCode({ raw: `custom provider/model with spaces ✓\n${invalid}\n`, scopeKey: SCOPE_KEY });
+  assert.ok(result.diagnostics.length <= 64);
+  assert.equal(result.diagnostics.at(-1).code, 'diagnostics-truncated');
+  assert.equal(result.models.some(({ identity }) => identity.modelId === 'model with spaces ✓'), true);
+});
+
 test('OpenCode uses literal argv and refresh is the only online boundary', async () => {
   const calls = [];
   const runner = async (command, args, options) => {
     calls.push({ command, args, options });
     return { code: 0, stdout: fixture('opencode', 'models.txt'), stderr: '' };
   };
-  await collectOpenCode({ runner, online: false, provider: 'x; touch /tmp/nope', scopeKey: SCOPE_KEY });
-  await collectOpenCode({ runner, online: true, provider: 'anthropic', scopeKey: SCOPE_KEY });
+  const catalogBody = fixture('opencode', 'modelsdev-api.json');
+  const fetchFn = async () => new Response(catalogBody, {
+    headers: { 'content-length': String(Buffer.byteLength(catalogBody)) },
+  });
+  await collectOpenCode({ runner, online: false, provider: 'x; touch /tmp/nope',
+    configRaw: '{}', scopeKey: SCOPE_KEY });
+  await collectOpenCode({ runner, fetchFn, online: true, provider: 'anthropic',
+    configRaw: '{}', scopeKey: SCOPE_KEY });
   assert.deepEqual(calls[0].args, ['models', 'x; touch /tmp/nope', '--verbose']);
-  assert.deepEqual(calls[1].args, ['models', 'anthropic', '--verbose', '--refresh']);
+  assert.deepEqual(calls[1].args, ['models', 'anthropic', '--refresh']);
+  assert.deepEqual(calls[2].args, ['models', 'anthropic', '--verbose']);
   assert.equal(calls.every((call) => call.options.shell === false), true);
 });
 

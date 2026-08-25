@@ -99,14 +99,20 @@ const publicSchema = (value) => PUBLIC_SOURCE_SCHEMAS.has(value)
   || /^codex-model-cache-v1@v?\d+(?:\.\d+){0,3}(?:-[a-z0-9.-]+)?$/i.test(String(value ?? ''))
   ? value : null;
 
-function sanitizeVariant(value, key, field = '') {
-  if (Array.isArray(value)) return value.map((entry) => sanitizeVariant(entry, key, field));
+const SAFE_VARIANT_FIELDS = new Set([
+  'digest', 'reasoningEffort', 'reasoningEfforts', 'serviceTier', 'contextWindow',
+  'configuredVariants', 'availableVariants', 'modalities', 'input', 'output',
+  'text', 'audio', 'image', 'video', 'pdf',
+]);
+
+function sanitizeVariant(value, key, field = '', depth = 0) {
+  if (Array.isArray(value)) return value.map((entry) => sanitizeVariant(entry, key, field, depth + 1));
   if (!value || typeof value !== 'object') {
-    return typeof value === 'string' && /(?:digest|model|provider|deployment|endpoint|alias|^id$)/i.test(field)
-      ? privateLabel('variant', value, key) : value;
+    return typeof value === 'string' ? privateLabel('variant', value, key) : value;
   }
   return Object.fromEntries(Object.entries(value)
-    .map(([name, entry]) => [name, sanitizeVariant(entry, key, name)]));
+    .filter(([name]) => SAFE_VARIANT_FIELDS.has(name))
+    .map(([name, entry]) => [name, sanitizeVariant(entry, key, name, depth + 1)]));
 }
 
 function sanitizeEvidence(entry, key) {
@@ -123,8 +129,7 @@ const TRUSTED_MODEL_LINK_HOSTS = new Set([
   'developers.openai.com', 'huggingface.co', 'models.dev', 'ollama.com',
   'opencode.ai', 'openrouter.ai', 'platform.claude.com',
 ]);
-const PUBLIC_CATALOG_METADATA_SOURCES = new Set(['models.dev', 'opencode']);
-const OFFICIAL_CLAUDE_ID = /^claude-(?:haiku|sonnet|opus|fable|mythos)-[a-z0-9]+(?:-[a-z0-9]+)*$/;
+const PUBLIC_CATALOG_METADATA_SOURCES = new Set(['models.dev']);
 
 function boundedPublicText(value, max = 256) {
   return typeof value === 'string' && value.length > 0 && value.length <= max
@@ -143,7 +148,7 @@ function trustedModelLinks(value) {
   return entries.slice(0, 16).flatMap((entry) => {
     if (!entry || typeof entry !== 'object') return [];
     const kind = boundedPublicText(entry.kind, 64);
-    const label = boundedPublicText(entry.label, 128);
+    const label = labels[kind] ?? null;
     const raw = boundedPublicText(entry.url, 2_048);
     if (!kind || !label || !raw) return [];
     try {
@@ -153,6 +158,21 @@ function trustedModelLinks(value) {
       return [{ kind, label, url: url.href }];
     } catch { return []; }
   });
+}
+
+function officialClaudeId(modelId) {
+  const match = /^claude-(haiku|sonnet|opus|fable|mythos)-(.+)$/.exec(modelId);
+  if (!match) return false;
+  const parts = match[2].split('-');
+  if (!/^\d{1,2}$/.test(parts[0])) return false;
+  if (parts.length === 1) return true;
+  if (!/^\d{1,2}$/.test(parts[1])) return false;
+  if (parts.length === 2) return true;
+  if (parts.length !== 3 || !/^\d{8}$/.test(parts[2])) return false;
+  const raw = parts[2];
+  const date = `${raw.slice(0, 4)}-${raw.slice(4, 6)}-${raw.slice(6, 8)}`;
+  const parsed = new Date(`${date}T00:00:00.000Z`);
+  return !Number.isNaN(parsed.valueOf()) && parsed.toISOString().slice(0, 10) === date;
 }
 
 function hasEvidence(model, predicate) {
@@ -193,7 +213,7 @@ function publicModelIdentity(model) {
       links: [{ kind: 'documentation', label: 'Codex models', url: 'https://developers.openai.com/codex/models/' }],
     };
   }
-  if (model.key.host === 'claude' && OFFICIAL_CLAUDE_ID.test(model.key.modelId)
+  if (model.key.host === 'claude' && officialClaudeId(model.key.modelId)
     && hasEvidence(model, (entry) => entry.source === 'claude-config'
       && ['configured', 'first-party'].includes(entry.class))) {
     return {

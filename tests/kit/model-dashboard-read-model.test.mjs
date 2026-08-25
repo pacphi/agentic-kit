@@ -62,7 +62,7 @@ function payload() {
       name: 'Anthropic Claude Sonnet Latest', source: 'opencode-models',
       values: { discoverable: true },
       catalog: {
-        source: 'opencode', public: true, servingProvider: 'openrouter', publisher: 'Anthropic',
+        source: 'models.dev', public: true, servingProvider: 'openrouter', publisher: 'Anthropic',
         family: 'claude-sonnet', selector: 'openrouter/~anthropic/claude-sonnet-latest',
         links: {
           catalog: 'https://models.dev/models/anthropic/claude-sonnet-4-6',
@@ -176,6 +176,20 @@ test('privacy projection exposes only evidence-backed public catalog identity an
   const gatewayOfficial = createDashboardModelPayload(gatewayInput, { key: KEY }).snapshot.models[5];
   assert.equal(gatewayOfficial.publisher, 'Anthropic');
   assert.equal(gatewayOfficial.servingProvider, null);
+
+  const privateLookingOfficial = payload();
+  privateLookingOfficial.snapshot.models.push(model({
+    host: 'claude', provider: 'private-gateway', id: 'claude-sonnet-private-acme',
+    name: 'Claude Secret Acquisition', source: 'claude-config',
+    values: { configured: true, effective: true },
+  }));
+  privateLookingOfficial.snapshot.models[3].variant.configuredVariants = ['private-prod'];
+  const privateProjection = createDashboardModelPayload(privateLookingOfficial, { key: KEY });
+  const serializedPrivate = JSON.stringify(privateProjection);
+  for (const secret of ['claude-sonnet-private-acme', 'Claude Secret Acquisition', 'private-prod']) {
+    assert.equal(serializedPrivate.includes(secret), false, secret);
+  }
+  assert.equal(privateProjection.snapshot.models.at(-1).privacyClass, 'private');
 });
 
 test('summary mode omits only the large model inventory and reports inventory counts', () => {
@@ -260,6 +274,20 @@ test('inventory query rejects non-allowlisted sort, filters, and invalid offsets
   }
 });
 
+test('inventory pages are bound to one privacy-projected snapshot id', () => {
+  const first = createDashboardModelViewPayload(payload(), {
+    key: KEY, query: new URLSearchParams('view=inventory&limit=2'),
+  });
+  assert.throws(() => createDashboardModelViewPayload(payload(), {
+    key: KEY, query: new URLSearchParams('view=inventory&offset=2&limit=2&snapshotId=snapshot-stale'),
+  }), (error) => error?.code === 'MODEL_INVENTORY_SNAPSHOT_CHANGED');
+  const next = createDashboardModelViewPayload(payload(), {
+    key: KEY,
+    query: new URLSearchParams(`view=inventory&offset=2&limit=2&snapshotId=${first.snapshot.snapshotId}`),
+  });
+  assert.equal(next.inventory.offset, 2);
+});
+
 test('authenticated /api/models exposes additive summary/inventory modes and generic query failures', async () => {
   const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-model-dashboard-'));
   let reads = 0;
@@ -289,7 +317,10 @@ test('authenticated /api/models exposes additive summary/inventory modes and gen
     const invalid = await get('?view=inventory&sort=key.modelId');
     assert.equal(invalid.response.status, 400);
     assert.deepEqual(invalid.body, { error: 'invalid model inventory query' });
-    assert.equal(reads, 3);
+    const stale = await get('?view=inventory&offset=2&snapshotId=snapshot-stale');
+    assert.equal(stale.response.status, 409);
+    assert.deepEqual(stale.body, { error: 'model inventory changed; retry' });
+    assert.equal(reads, 4);
   } finally {
     await server.close();
     fs.rmSync(cwd, { recursive: true, force: true });

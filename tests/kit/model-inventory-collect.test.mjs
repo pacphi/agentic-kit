@@ -69,7 +69,7 @@ test('refresh names contacts, never invokes a model, and preserves per-source fa
     return { code: 0, stdout: 'NAME ID SIZE MODIFIED\nqwen:latest abcdef 1 GB now\n', stderr: '' };
   };
   const result = await refreshModelDiscovery({ owners: ['opencode', 'ollama'], online: true, runner, scopeKey: SCOPE_KEY });
-  assert.deepEqual(result.contacts, ['opencode catalog', 'local Ollama daemon']);
+  assert.deepEqual(result.contacts, ['OpenCode and Models.dev catalogues', 'local Ollama daemon']);
   assert.equal(result.results.opencode.status, 'unavailable');
   assert.equal(result.results.ollama.status, 'complete');
   assert.deepEqual(

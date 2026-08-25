@@ -1003,7 +1003,7 @@ export const JS = `
 
   // ══ Usage tab ══════════════════════════════════════════════════════════════
   var USAGE=null, usageLoaded=false, usageBusy=false, TRANSCRIPT=null;
-  var MODELS=null,MODEL_PAGE=null,modelRows=[],modelsBusy=false,modelRequestSeq=0,modelSearchTimer=null;
+  var MODELS=null,MODEL_PAGE=null,modelRows=[],modelSnapshotId=null,modelsBusy=false,modelRequestSeq=0,modelSearchTimer=null;
   var MODEL_LIMIT=50,modelSort="lifecycle",modelDirection="asc";
 
   function fmtUsd(n){
@@ -1120,7 +1120,10 @@ export const JS = `
 
   function modelJson(url){
     return fetch(url,{cache:"no-store",headers:authHeaders()}).then(function(r){
-      return r.json().then(function(d){if(!r.ok)throw new Error(d&&d.error||"unavailable");return d;});
+      return r.json().then(function(d){
+        if(!r.ok){var error=new Error(d&&d.error||"unavailable");error.status=r.status;throw error;}
+        return d;
+      });
     });
   }
 
@@ -1136,6 +1139,7 @@ export const JS = `
   function modelInventoryUrl(offset){
     var query=new URLSearchParams({view:"inventory",offset:String(offset||0),limit:String(MODEL_LIMIT),
       sort:modelSort,direction:modelDirection}),filters=modelFilters();
+    if(offset>0&&modelSnapshotId)query.set("snapshotId",modelSnapshotId);
     Object.keys(filters).forEach(function(key){if(filters[key])query.set(key,filters[key]);});
     return "/api/models?"+query.toString();
   }
@@ -1149,24 +1153,42 @@ export const JS = `
   }
 
   function loadModelInventory(offset,append,focusAfter){
-    var seq=++modelRequestSeq;
+    var seq=++modelRequestSeq,priorLength=modelRows.length;
     setModelsBusy(true,append?"Loading more model evidence.":"Loading model inventory evidence.");
     return modelJson(modelInventoryUrl(offset)).then(function(d){
       if(seq!==modelRequestSeq)return;
+      var nextSnapshotId=d&&d.snapshot&&d.snapshot.snapshotId||null;
+      if(append&&modelSnapshotId&&nextSnapshotId!==modelSnapshotId){
+        modelSnapshotId=null;
+        return loadModelInventory(0,false,focusAfter);
+      }
+      modelSnapshotId=nextSnapshotId;
       MODEL_PAGE=d&&d.inventory||{};
       var items=Array.isArray(MODEL_PAGE.items)?MODEL_PAGE.items:[];
       modelRows=append?modelRows.concat(items):items;
       renderModelInventory();
       renderModelFacets();
       setModelsBusy(false,"Model lifecycle evidence loaded. "+modelRows.length+" rows shown.");
+      var more=document.getElementById("mli-load-more");if(more)more.textContent="Load 50 more";
       if(focusAfter){
-        var more=document.getElementById("mli-load-more"),region=document.querySelector(".mli-table-wrap");
-        if(more&&!more.hidden)more.focus();else if(region)region.focus();
+        var appended=document.querySelectorAll("#mli-models tr > th[scope=row]")[priorLength];
+        if(more&&!more.hidden)more.focus();else if(appended)appended.focus();
       }
-    }).catch(function(){
+    }).catch(function(error){
       if(seq!==modelRequestSeq)return;
+      if(append&&error&&error.status===409){
+        modelSnapshotId=null;
+        setModelsBusy(true,"Model inventory changed; reloading from the first page.");
+        return loadModelInventory(0,false,focusAfter);
+      }
+      if(append){
+        var more=document.getElementById("mli-load-more");
+        if(more){more.hidden=false;more.disabled=false;more.textContent="Retry loading 50 more";more.focus();}
+        setModelsBusy(false,"More model lifecycle evidence is unavailable; prior rows were preserved.");
+        return;
+      }
       MODEL_PAGE={items:[],total:0,filteredTotal:0,relevantTotal:0,offset:0,limit:MODEL_LIMIT,hasMore:false};
-      modelRows=[];
+      modelRows=[];modelSnapshotId=null;
       renderModelInventory();
       setModelsBusy(false,"Model lifecycle evidence is unavailable.");
     });
@@ -1180,7 +1202,7 @@ export const JS = `
       renderModelLifecycle();
       return loadModelInventory(0,false,false);
     }).catch(function(){
-      MODELS={error:"model inventory unavailable"};MODEL_PAGE=null;modelRows=[];
+      MODELS={error:"model inventory unavailable"};MODEL_PAGE=null;modelRows=[];modelSnapshotId=null;
       renderModelLifecycle();renderModelInventory();
       setModelsBusy(false,"Model lifecycle evidence is unavailable.");
     });
@@ -1890,8 +1912,14 @@ export const JS = `
   function renderModelInventory(){
     var body=document.getElementById("mli-models"),count=document.getElementById("mli-result-count"),more=document.getElementById("mli-load-more");
     if(!body)return;
+    if(!MODEL_PAGE){
+      body.innerHTML='<tr><td colspan="9"><div class="empty">Loading model inventory…</div></td></tr>';
+      if(count)count.textContent="Loading inventory…";
+      if(more)more.hidden=true;
+      renderModelSort();return;
+    }
     body.innerHTML=modelRows.map(function(model){
-      return '<tr><td>'+mliIdentityHtml(model)+"</td>"
+      return '<tr><th scope="row" tabindex="-1">'+mliIdentityHtml(model)+"</th>"
         +"<td>"+mliState(model,"configured")+"</td><td>"+mliState(model,"effective")+"</td><td>"+mliState(model,"observed")
         +"</td><td>"+mliState(model,"discoverable")+"</td><td>"+mliState(model,"entitled")+"</td><td>"+mliState(model,"policyAllowed")
         +"</td><td>"+mliState(model,"routable")+"</td><td>"+mliLifecycle(model)+"</td></tr>";
