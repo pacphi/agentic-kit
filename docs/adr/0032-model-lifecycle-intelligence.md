@@ -9,6 +9,7 @@
   privacy, security, accessibility, packaging, and dependency-audit evidence is recorded below.
 - **Deciders:** agentic-kit maintainers
 - **Related:** [issue #110](https://github.com/pacphi/agentic-kit/issues/110),
+  [implementation PR #179](https://github.com/pacphi/agentic-kit/pull/179),
   [ADR-0001](0001-one-routing-policy-many-projections.md),
   [ADR-0005](0005-dashboard-in-page-routing-reveal.md),
   [ADR-0009](0009-usage-scorecard-local-transcript-analytics.md),
