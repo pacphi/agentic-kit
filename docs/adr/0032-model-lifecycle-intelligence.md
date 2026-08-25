@@ -236,11 +236,14 @@ The implementation branch was validated on 2026-08-25 with the following exact-h
 - `pnpm run check` passed TypeScript checking, ESLint, Markdown lint, packaging, CLI-load checks,
   and the full unit/integration suite. Native instrumented coverage was 86.51% lines, 80.11%
   branches, and 83.99% functions against 70% repository floors.
-- `pnpm run test:ui` passed the 304-check deterministic browser matrix, including lazy Models
+- `pnpm run test:ui` passed the 305-check deterministic browser matrix, including lazy Models
   loading, paired evidence filters, clickable ascending/descending column sorting, snapshot-bound
   pagination with safe reset, append retry without row loss, keyboard movement in the bounded
   scrolling table, tab navigation, evidence disclosure, responsive behavior, and network-silent
   page loading.
+- A production-sized OpenCode 1.18.23 fixture yielded all 402 models without truncation. Exact
+  Models.dev proof normalized the catalogue's omitted active status, while malformed successful
+  responses degraded to partial evidence rather than public identity.
 - Agentic QE coverage analysis passed its configured 70% feature threshold; its SAST scan reported
   zero vulnerabilities. Its generic `aqe quality --gate` shortcut rejected its retained aggregate
   evidence as stale even after the analyzers ran, so that unavailable aggregate was recorded rather

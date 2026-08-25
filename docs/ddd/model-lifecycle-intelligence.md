@@ -74,8 +74,9 @@ The Dashboard projection separates the execution host, serving provider, publish
 name, exact public selector, and catalogue source. These axes cannot be derived from one another.
 A controlled source may mark an identity public only when its bounded parser established that
 catalogue metadata. Codex cache display names and narrowly recognized official Claude ids are
-public product vocabulary. OpenCode identity becomes public only after an exact provider/model-key
-join with the bounded Models.dev catalogue; provider syntax does not establish proof. A custom
+public product vocabulary only when the exact id or alias appears in the maintained documented
+allowlist. OpenCode identity becomes public only after an exact provider/model-key join with the
+bounded Models.dev catalogue; provider syntax does not establish proof. A custom
 provider, configured variant, gateway deployment, local tag, or observed-only id remains a keyed
 pseudonym. Trusted documentation and catalogue links are server-produced HTTPS links on a fixed
 host allowlist. The browser never guesses a link from a model-name substring.

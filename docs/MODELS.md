@@ -174,7 +174,8 @@ control.
 
 Source-proven public catalogue records show a human name, host, publisher when proven, serving
 provider when known, exact public selector, and trusted documentation/catalogue links. Codex cache
-identity and narrowly validated official Claude ids can qualify locally. OpenCode identity qualifies
+identity and exact documented Claude ids or aliases from the maintained allowlist can qualify
+locally. OpenCode identity qualifies
 only after `refresh --online` exact-joins the selector to the independently fetched, size-bounded
 Models.dev catalogue; provider syntax or verbose metadata alone is not proof. The Models.dev source
 link remains generic unless that source supplies an exact canonical page. Hugging Face and Ollama
