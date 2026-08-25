@@ -62,8 +62,8 @@ inference vendors served a workflow. Generalized execution belongs to `ak run`.
 
 ## Model lifecycle language
 
-These terms define the Accepted target contract in ADR-0032. They are not shipped command claims
-until that ADR becomes Implemented.
+These terms define ADR-0032's implemented contract. ADR status remains Accepted while exact-head
+release proof is pending.
 
 | Term | Meaning |
 |------|---------|
@@ -71,7 +71,7 @@ until that ADR becomes Implemented.
 | Model scope | Non-identifying account/profile/project/source boundary within which catalogue snapshots are comparable |
 | Execution variant | Binding- or execution-level reasoning effort, service tier, modality, or similar setting; not a separate base model identity |
 | Model binding | One consumer's configured reference and, when established, effective concrete model identity with provenance |
-| Catalog source | Host/provider-native configuration, cache, protocol, or catalogue input with version, scope, freshness, completeness, and diagnostics |
+| Catalog source | Host/provider-native configuration, cache, protocol, or catalogue input with owner, transport, network policy, collection mode, schema/version, scope, freshness, completeness, and diagnostics |
 | Catalog snapshot | Sanitized immutable inventory of source states, model records, bindings, scope, and diagnostics at one capture time |
 | Baseline-eligible snapshot | Sufficiently complete same-scope snapshot permitted to replace the prior lifecycle comparison baseline |
 | Model change | Evidence-backed difference between comparable snapshots; removal needs authoritative evidence or repeated complete absence |
@@ -79,6 +79,8 @@ until that ADR becomes Implemented.
 | Compatibility edge | Typed mechanical swap relationship; it is not a quality or economic recommendation |
 | Consumer impact | Read-only link from a lifecycle fact to affected routes, projections, Agentic QE/Ruflo consumers, or Route Intelligence evidence |
 | Swap plan | Read-only impact report and copyable canonical route action; never an independent routing policy or apply operation |
+| Route Intelligence feed | Mechanical candidates plus audit-preserving lifecycle invalidations; quality and economics claims are explicitly absent |
+| Keyed model projection | Dashboard-only stable pseudonyms derived from the existing private scope key; distinct from exact explicit CLI evidence |
 
 Configured, effective, observed, discoverable, entitled, policy allowed, routable, lifecycle, and
 recommended are separate model-state dimensions. `Unknown` in one dimension cannot be filled from
@@ -189,8 +191,8 @@ runtime state is a chip word, never a prose word. See
   providers.
 - `ak system [--deep] [--json]` renders the Machine footprint collector; `ak about [--category]
   [--json]` renders the Component directory. Both are read-only twins of a dashboard area.
-- ADR-0032 reserves `ak models` for the planned read-only model inventory, refresh, diff, explain,
-  and plan family. Route mutation remains `ak host pick`; there is no accepted `ak models apply`.
+- `ak models` is the read-only model inventory, refresh, diff, explain, and plan family. Route
+  mutation remains `ak host pick`; there is no accepted `ak models apply`.
 - `kit.json.integrations.hosts` records enabled hosts. Top-level `routing` records `version`,
   `primaryHost`, and per-activity `routes`; route entries use `provenance` and `escalation`.
 - Derived exports in `hosts.mjs`, `providers.mjs`, and `routing.mjs` are views, not independent

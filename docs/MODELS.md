@@ -1,0 +1,182 @@
+# Model lifecycle intelligence
+
+Model lifecycle intelligence answers three questions without changing your routing:
+
+1. Which concrete models are configured, observed, or discoverable for each host?
+2. What changed between trustworthy, same-scope snapshots?
+3. Which routes and consumers would a model swap affect?
+
+The inventory is evidence, not configuration. `kit.json.routing` and `ak host pick` remain the
+canonical routing surfaces.
+
+## Quick start
+
+```bash
+ak models refresh
+ak models status
+ak models diff
+ak models explain codex:gpt-5.6-terra
+ak models plan --activity testing --from codex:gpt-5.4 --to codex:gpt-5.6-terra
+```
+
+Only `refresh` contacts model sources or writes a snapshot. `status`, `diff`, `explain`, `plan`,
+the `ak status` models row, and the Dashboard's **Usage → Models** view read the local cache.
+
+Use `--json` with any command for the normalized evidence contract. Use `--host HOST` to select
+one source, `--all` for Claude, Codex, OpenCode, and Ollama, and `refresh --online` to permit
+OpenCode's explicit catalogue refresh. Ordinary refresh does not opt into an online catalogue
+request.
+
+## What each state means
+
+The states are deliberately independent:
+
+| State | Meaning |
+|---|---|
+| Configured | A local route or host setting names the model. |
+| Effective | Host precedence or alias resolution currently selects it. |
+| Observed | Structured local usage evidence recorded it. |
+| Discoverable | The current host/provider catalogue included it. |
+| Entitled | The active account or profile is proven able to use it. |
+| Policy allowed | Managed or user policy permits it. |
+| Routable | The complete host, provider, auth, and capability path is proven. |
+| Lifecycle | Active, preview, hidden, deprecated, retiring, removed, or unknown. |
+| Recommended | A named first-party or evidence-backed source recommends it. |
+
+`unknown` is not `false`. For example, a Codex cache entry can prove discovery without proving
+account entitlement; a configured Claude alias can be effective without proving catalogue
+completeness.
+
+## Sources and scope
+
+The initial source adapters are:
+
+- Claude user settings, platform managed policy, model aliases, and a model-only environment
+  allowlist;
+- the Codex model cache plus top-level `config.toml` model selection;
+- OpenCode's project/provider-scoped `models` output plus `opencode.json` selection;
+- the local Ollama catalogue and immutable model digest; and
+- sanitized model ids from the existing local usage index.
+
+The collector selects these adapters from the immutable model-discovery descriptor registry. Each
+source record retains its owner and owner type, file/command/index transport, `never`/`local`/
+`explicit` network policy, local/online collection mode, schema, freshness, completeness, and scope.
+A descriptor authorizes only its matching built-in parser; it cannot supply executable code or give
+an external host an inferred catalogue capability.
+
+Claude managed policy is read from the platform path when present:
+
+- macOS: `/Library/Application Support/ClaudeCode/managed-settings.json`;
+- Linux: `/etc/claude-code/managed-settings.json`; and
+- Windows: `C:\ProgramData\ClaudeCode\managed-settings.json`.
+
+The process environment contributes only `ANTHROPIC_MODEL` and the three
+`ANTHROPIC_DEFAULT_{SONNET,OPUS,HAIKU}_MODEL` alias targets. Other environment values, including
+credentials and endpoints, do not enter collection.
+
+Native inputs are untrusted. Parsers cap bytes and row counts, guard schemas and enums, and invoke
+commands with literal argument arrays and no shell. Interactive picker scraping and inference
+probes are excluded.
+
+The lookup contracts were checked against current first-party documentation in August 2026:
+
+- Claude accepts the `sonnet` and `opus` aliases or a full model name through its documented model
+  selection surfaces ([Claude Code CLI reference](https://docs.anthropic.com/en/docs/claude-code/cli-usage)).
+- OpenCode exposes `opencode models [provider]`; `--refresh` refreshes its Models.dev-backed cache
+  ([OpenCode CLI](https://opencode.ai/docs/cli/)). Its configuration accepts `provider/model`, an
+  optional `#variant`, or the expanded selector object.
+- Ollama's current local catalogue command is `ollama ls`; immutable digests are also part of the
+  documented list-models response ([Ollama CLI](https://docs.ollama.com/cli),
+  [Ollama list models API](https://docs.ollama.com/api/tags)).
+- User-facing GPT-5.6 examples use current official ids and reasoning levels
+  ([OpenAI model catalogue](https://developers.openai.com/api/docs/models)). Codex's local cache is
+  still treated as a guarded native schema, not as a public API contract.
+
+Host, provider, concrete model id, a non-identifying scope id, and an evidenced mutable local digest
+form model identity. Reasoning effort, context, service tier, and similar execution settings remain
+variants rather than unrelated base identities. Account, profile, and project scope values are
+HMAC-fingerprinted with a private per-install key; raw scope values do not enter the snapshot. The
+private cache and key live under the Agentic Kit configuration directory with owner-only
+permissions.
+
+Known fields have field-specific evidence references. A configured route can prove `configured`, a
+structured successful invocation can prove the exact observed path's `observed`, `entitled`,
+`policyAllowed`, and `routable` facts at capture time, and a catalogue can prove `discoverable`.
+None of those facts silently strengthens another path or establishes catalogue completeness.
+
+## Snapshots and diffs
+
+Snapshots retain at most 32 captures per scope and expire after 90 days. A complete same-scope
+snapshot may advance the comparison baseline. Partial, stale, unavailable, or unsupported-schema
+sources remain visible but cannot displace that baseline.
+
+Without an authoritative first-party removal signal, a missing model must be absent from two
+consecutive complete same-scope snapshots before it becomes a removal. Partial evidence never
+creates removals. Cross-scope comparison is refused instead of appearing as mass churn.
+
+Diffs report model additions/removals, alias-target continuity and changes, lifecycle transitions,
+visibility, capabilities, local digest, reasoning, context, other variants, optional pricing, and
+typed-edge changes. Every normalized field carries evidence source, class, capture time, freshness,
+completeness, and scope. A digest change stays one comparable local model lineage rather than
+appearing as an unrelated add/remove pair. Lifecycle, pricing, and edge comparisons ignore changing
+evidence-reference ids and capture timestamps, so an identical semantic fact does not churn.
+
+## Read-only swap plans
+
+`ak models plan` checks mechanical compatibility only. `false` discovery is a blocker. Unknown
+discovery is also a blocker unless structured evidence proves that exact model path was observed
+successfully; in that case the plan keeps an explicit catalogue-unknown warning. Entitlement,
+policy, routability, and required capability facts must still be established. The plan does not
+claim quality equivalence, lower cost, or equal performance unless a separate evidence source
+establishes that.
+
+Selectors use `HOST:MODEL`; OpenCode's provider-qualified form is
+`opencode:PROVIDER/MODEL`, for example `opencode:openrouter/anthropic/claude-sonnet-4.5`.
+
+A successful plan lists affected canonical routes, escalation rungs, integration bindings, and
+independently sourced Agentic QE/Ruflo consumers. It prints a copyable `ak host pick --route ...`
+command but does not execute it. There is no `ak models apply`.
+
+The same snapshot can produce a pure Route Intelligence feed: mechanically eligible candidates,
+current optional pricing metadata, and lifecycle/alias/capability/variant invalidations whose audit
+history must be retained. The feed explicitly sets quality and economics claims to false;
+[Issue #109](https://github.com/pacphi/agentic-kit/issues/109) must establish any evidence-backed
+equivalence or cost recommendation.
+
+The `ak status` row may point to `ak models refresh` or `ak models diff`, but `ak sync` excludes
+model actions from its executable convergence plan. Catalogue refresh and route mutation remain
+explicit operator boundaries.
+
+## Dashboard
+
+Open `ak dashboard`, then choose **Usage → Models**. The view includes:
+
+- attention items for degraded sources, lifecycle migrations, alias changes, and drift;
+- a semantic host/model table with every independent state;
+- same-scope change history;
+- configured and reported consumers;
+- read-only swap-impact guidance; and
+- evidence source status and capture time.
+
+The compact Model lifecycle item on Overview links to this view. Exact model, provider, digest,
+alias, replacement, edge, binding, scope, snapshot, history, and evidence identifiers remain
+available only through an explicit local CLI read. Before `/api/models` responds, it replaces those
+identifiers with stable keyed pseudonyms derived from the existing private scope key; lifecycle
+notices become an availability disclosure rather than verbatim private text. Controlled built-in
+source ids, owners, transport, network policy, collection mode, schemas, and diagnostic codes stay
+named so evidence remains actionable; unknown/private source metadata is pseudonymized. A missing or
+invalid key fails the API closed and an ordinary Dashboard read never creates one. The route also
+keeps the Dashboard's loopback, session-token, CSP/origin, `no-store`, and no-egress protections.
+
+## Privacy and recovery
+
+Snapshots contain no credentials, prompts, reasoning traces, transcript text, private endpoints,
+or raw account/profile/project identifiers. Because the owner-only cache supports explicit local
+CLI evidence, it can retain bounded exact configured model or deployment identifiers; the
+Dashboard never receives those exact values. A corrupt cache degrades to an empty readable store;
+run `ak models refresh` to rebuild it. A source schema failure is isolated to that source and shown
+as `unsupported-schema` rather than converted to an empty catalogue.
+
+For common failures, see [Troubleshooting](TROUBLESHOOTING.md). The domain and decision records are
+[Model lifecycle intelligence](ddd/model-lifecycle-intelligence.md) and
+[ADR-0032](adr/0032-model-lifecycle-intelligence.md).

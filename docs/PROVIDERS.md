@@ -38,6 +38,16 @@ read only that cache. Because the management response has no local host/session/
 correlation key, its rows appear only as provider account analytics and never alter transcript
 totals or prove which host executed a request.
 
+**Model lifecycle evidence is separate from both.** `ak models refresh` inventories host-scoped
+configuration, catalogues, and sanitized observed model ids. `ak models status|diff|explain|plan`
+are cache-only. Discovery does not prove quality or mutate provider/routing configuration, and
+`refresh --online` is the only permitted online-catalogue boundary. See [Model lifecycle
+intelligence](MODELS.md).
+
+The model inventory may feed mechanically eligible candidates and stale-evidence markers to Route
+Intelligence, but it explicitly makes no quality or economic claim. Status can recommend an
+explicit model command; `ak sync` never executes model refresh or model-plan actions.
+
 This capability model is
 [ADR-0016](adr/0016-capability-driven-integration-adapters.md) (Accepted); the controls below
 implement it. `ak host` owns execution-host lifecycle and selection (`status`, `pick`, `refresh`,

@@ -575,22 +575,22 @@ contents change:
 
 ```text
 Overview      → Summary | Hosts & Routing | Providers | Runtime | Intelligence
-Usage         → Scorecard | Limits | Findings | Sessions | Transcript
+Usage         → Scorecard | Limits | Findings | Sessions | Models | Transcript
 Observability → Live | History
 System        → Summary | Advisory | Sessions | Storage | Runtime | Catalog | Projects
 ```
 
-About is a continuous editorial directory with secondary section anchors. ADR-0032 accepts a
-planned Models destination beneath Usage; it is not part of the implemented navigation until that
-ADR is marked Implemented. Model lifecycle read models may consume sanitized observed identity,
-but Observability retains ownership of live sessions, events, topology, and replay.
+About is a continuous editorial directory with secondary section anchors. ADR-0032 adds Models
+beneath Usage. Model lifecycle read models may consume bounded observed identity, but Observability
+retains ownership of live sessions, events, topology, and replay. The browser receives a separate
+keyed, pseudonymous model projection rather than exact local identifiers.
 
 Navigation state has canonical hierarchical hashes:
 
 ```text
 #about/{hosts,engine,quality,kit,configured}
 #overview/{summary,hosts,providers,runtime,intelligence}
-#usage/{score,limits,findings,sessions,transcript}
+#usage/{score,limits,findings,sessions,models,transcript}
 #usage/{sessionId}
 #observability/{live,history}
 #system/{summary,advisory,sessions,storage,runtime,catalog,projects}

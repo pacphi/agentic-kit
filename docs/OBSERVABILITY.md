@@ -34,6 +34,11 @@ tab closes that browser's event stream. After the last snapshot/SSE client
 leaves, collectors stop after 30 seconds by default and restart on the next
 request. Stopping the dashboard closes the live service and all clients.
 
+Model lifecycle is a separate read model under **Usage → Models**. It may consume bounded model ids
+already derived by the historical usage index, but it never consumes live transcript content
+or changes Observability state. Catalogue collection remains explicit through `ak models refresh`;
+see [Model lifecycle intelligence](MODELS.md).
+
 ## Read Observability in 30 seconds
 
 Observability has two navigation modes:

@@ -41,6 +41,7 @@ permanent.
 | Usage | Limits | `#usage/limits` | Provider limits | Current provider windows, reset timing, and available capacity |
 | Usage | Findings | `#usage/findings` | Usage findings | Actionable anomalies, efficiency opportunities, and evidence-backed recommendations |
 | Usage | Sessions | `#usage/sessions` | Session usage | Retained sessions grouped by project, category, duration, tokens, and cost |
+| Usage | Models | `#usage/models` | Model lifecycle | Host inventory, lifecycle changes, consumers, swap impact, and evidence sources |
 | Usage | Transcript | `#usage/transcript` | Transcript detail | The selected session's locally retained, server-masked evidence |
 | Observability | Live | `#observability/live` | Observability · Live | Projects and roots with current presence or fresh meaningful activity |
 | Observability | History | `#observability/history` | Observability · History | Retained roots that are not currently Live |
@@ -153,7 +154,7 @@ Each count carries the sentence explaining what it counted; on Intelligence it i
 
 ## Usage
 
-Usage loads lazily when first opened. Scorecard, Limits, Findings, Sessions, and Transcript share the
+Usage loads lazily when first opened. Scorecard, Limits, Findings, Sessions, Models, and Transcript share the
 same secondary rail; the 7/14/30-day filters remain aligned to its right.
 
 ### Reading a session row
@@ -178,6 +179,25 @@ Usage transcript masking happens on the server. Redaction is marked, there is no
 control, and the original masked value never reaches the browser. See
 [ADR-0009](adr/0009-usage-scorecard-local-transcript-analytics.md) for the full evidence and pricing
 contract.
+
+### Models
+
+Models is a cache-only lifecycle evidence view backed by `/api/models`. It never performs discovery
+or invokes a model; `ak models refresh` owns collection. The semantic table keeps configured,
+effective, observed, discoverable, entitled, policy-allowed, and routable states independent and
+labels missing evidence `unknown`. Attention, same-scope changes, bindings, swap impact, and source
+freshness all come from the normalized private snapshot.
+
+The model table keeps Host/model and each independent state in a separately scoped column. Every
+state and lifecycle value expands to its source, class, capture time, freshness, completeness, and
+scope; source cards keep status, capture time, completeness, and scope visible. The horizontally
+scrollable table region is labelled and keyboard-focusable, with a caption, column scopes,
+`aria-busy` loading state, and an `aria-live` status. Model-specific foreground/background pairs meet
+WCAG AA in both themes, and the same table remains operable at narrow widths.
+
+The Overview Model lifecycle summary links to `#usage/models`. The view has no mutation control.
+It points to the read-only `ak models plan` command, which can emit a copyable canonical
+`ak host pick` action but cannot execute it. See [Model lifecycle intelligence](MODELS.md).
 
 The Scorecard view also shows a host-neutral **telemetry coverage** panel for Claude, Codex
 transcript evidence, and OpenCode. It reports parsed units and observed prompt/response totals, plus
@@ -328,11 +348,18 @@ Canonical hashes make views linkable without putting the dashboard token in the 
 string.
 
 The launch token initially arrives in the URL fragment and is then stored locally for authenticated
-API requests. The dashboard remains localhost-only and offline-first. Usage, Observability, and
+API requests. The dashboard remains localhost-only and offline-first. Usage, Models, Observability, and
 System may show sensitive local project, transcript, or filesystem-path information; use them only
 where that local information may be viewed. System deliberately shows absolute paths — a storage
 breakdown that hides where the bytes live answers nothing — behind the same token-gated loopback
 delivery as every other route.
+
+Models adds a second privacy boundary. The explicit local CLI can show exact model evidence, while
+`/api/models` requires the already-existing private model scope key and returns
+`privacy.projection: keyed-v1`. Model/provider/digest/alias/replacement/edge/binding/evidence/scope/
+history identifiers are stable keyed pseudonyms. Controlled built-in source metadata and diagnostic
+codes remain named; unknown source metadata is pseudonymized. Missing key material returns a generic
+503, and opening the Dashboard never creates the key.
 
 What System reads is a short, fixed list: directory entries and file `stat` results; your
 `.git/config` origin remote (so a project can link to its repository page — the kit never fetches

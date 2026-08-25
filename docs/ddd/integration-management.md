@@ -64,10 +64,10 @@ protocols, and non-loopback plaintext HTTP.
 - Adding OpenRouter does not make it a host.
 - Provider claims are rendered only when the provider declares and evidence supports them.
 - Compatibility collections are derived from registries.
-- An observability descriptor grants no executable behavior by itself. Under Accepted ADR-0032, a
-  future Model lifecycle collector may select catalogue descriptors and dispatch only to an
-  explicit bounded source-adapter implementation. External hosts without a supported catalogue
-  descriptor remain `unsupported`.
+- A model-discovery descriptor grants no executable behavior by itself. Under ADR-0032, the bounded
+  Model lifecycle collector selects model-discovery descriptors and dispatches only to explicit
+  built-in source adapters. External hosts without a supported catalogue descriptor remain
+  `unsupported`.
 
 ## Integration facts
 
@@ -92,14 +92,14 @@ Billing follows the access path. Anthropic or OpenAI host login may be subscript
 their API keys are metered. Ollama is local and may be priced at exact zero only after provider
 identity is established.
 
-## Planned model catalogue evidence
+## Model catalogue evidence
 
-ADR-0032 accepts a narrow, read-only use of integration observability descriptors. Catalogue
+ADR-0032 implements a narrow, read-only use of integration model-discovery descriptors. Catalogue
 descriptors identify source ownership, evidence fields, local/online mode, and host/provider scope.
 They remain declarative. The Model lifecycle bounded context owns collector dispatch, native-schema
 translation, completeness, freshness, and snapshot policy.
 
-This planned reader does not widen the managed projection lifecycle: catalogue refresh never calls
+This reader does not widen the managed projection lifecycle: catalogue refresh never calls
 `apply`, never invokes a model, and never changes a binding. Online discovery is separately
 authorized by `ak models refresh --online`; normal status and Dashboard reads remain cache-only.
 

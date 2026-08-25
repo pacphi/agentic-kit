@@ -73,15 +73,15 @@ cache are separate from the live event store.
 
 ### Model lifecycle intelligence
 
-Owns the planned normalized inventory of configured, effective, observed, discoverable, entitled,
+Owns the normalized inventory of configured, effective, observed, discoverable, entitled,
 policy-allowed, routable, and lifecycle model facts; sanitized same-scope snapshots; trustworthy
 diffs; lifecycle and compatibility edges; and read-only consumer impact plans. It consumes
 Configuration Intent, integration descriptors, source-adapted native catalogues, and structured
 observed facts from Historical Usage and Observability. It does not own transcripts, route
 mutation, model quality, or downstream router policy.
 
-See [Model lifecycle intelligence](model-lifecycle-intelligence.md). ADR-0032 is Accepted; this
-context remains a target contract until that ADR is marked Implemented.
+See [Model lifecycle intelligence](model-lifecycle-intelligence.md). The context is implemented on
+the issue branch; ADR-0032 remains Accepted until exact-head release proof is recorded.
 
 ### Workspace snapshot cache
 
@@ -156,7 +156,7 @@ and credential policy is distinct from the offline-first dashboard and integrati
 | Evidence acquisition | Model lifecycle intelligence | Source-adapted catalogue, policy, lifecycle, and runtime evidence |
 | Historical usage | Model lifecycle intelligence | Structured observed host/provider/model facts; transcript ownership stays upstream |
 | Observability | Model lifecycle intelligence | Structured recent execution identity; live-event ownership stays upstream |
-| Model lifecycle intelligence | Routing and orchestration | Read-only lifecycle diagnostics and copyable canonical route actions |
+| Model lifecycle intelligence | Routing and orchestration | Read-only lifecycle diagnostics, mechanical candidate/invalidation feed, and copyable canonical route actions; no quality/economics claim |
 | Model lifecycle intelligence | Dashboard delivery | Sanitized cache-only inventory, changes, consumers, and plan read models |
 | Observability | Dashboard delivery | Read-model snapshots, deltas, and selected evidence |
 | Observability | Workspace snapshot cache | Last safe metadata-only session workspace capture |

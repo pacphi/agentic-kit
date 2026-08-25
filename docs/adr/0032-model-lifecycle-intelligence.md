@@ -1,10 +1,12 @@
 # ADR-0032 — Model lifecycle intelligence from provenance-aware local evidence
 
-- **Status:** Accepted (implementation planned)
+- **Status:** Accepted (implementation complete; release proof pending)
 - **Date:** 2026-08-25
 - **Updated:** 2026-08-25
-- **Update note:** Accepted the domain semantics, source-adapter boundary, snapshot policy,
-  command ownership, privacy rules, and Dashboard placement. No implementation is claimed yet.
+- **Update note:** Implemented the bounded inventory, descriptor-selected source adapters,
+  conservative snapshot diff, read-only CLI/status/Dashboard surfaces, consumer impact, and keyed
+  Dashboard privacy projection. Exact-head project, Agentic QE, privacy, security, accessibility,
+  and release evidence remain pending; this ADR is deliberately not marked Implemented yet.
 - **Deciders:** agentic-kit maintainers
 - **Related:** [issue #110](https://github.com/pacphi/agentic-kit/issues/110),
   [ADR-0001](0001-one-routing-policy-many-projections.md),
@@ -72,23 +74,24 @@ The following dimensions remain independent:
 - lifecycle state; and
 - recommended by a named first-party or evidence-backed source.
 
-Every field and graph edge carries an evidence reference naming its source, class, capture time,
+Every established field and graph edge carries an evidence reference naming its source, class, capture time,
 freshness, completeness, and scope. Evidence strength never leaks from one field to another. In
 particular, observed use may establish entitlement for that observed path, but it does not establish
 the completeness of a catalogue.
 
 ### 3. Translate native catalogues through descriptor-driven source adapters
 
-Integration observability descriptors may identify catalogue sources for a host or provider. A
+The immutable model-discovery registry identifies catalogue sources for a host or provider. A
 bounded Model lifecycle collector loop selects those descriptors and dispatches to explicit
-source-specific adapters. Command code does not branch on host ids. A descriptor is metadata, not
-an executable supplied by the host, and external adapters without a supported catalogue descriptor
-report `unsupported` rather than receiving an inferred capability.
+source-specific adapters. The descriptor determines owner, transport, network policy, schema, and
+scope; command code does not maintain a parallel host switch. A descriptor is metadata, not an
+executable supplied by the host, and external adapters without a supported catalogue descriptor do
+not receive an inferred capability.
 
 The initial adapter set covers:
 
-- Claude configured values, aliases, overrides, policy allowlists, and configured gateway
-  discovery while leaving unsupported entitlement unknown;
+- Claude user settings, platform-managed settings, a model-only environment allowlist, aliases,
+  overrides, and policy allowlists while leaving unsupported entitlement unknown;
 - Codex's host-owned model cache or stable model-list protocol behind schema/version guards;
 - OpenCode's project/provider-scoped model list and separately authorized online refresh; and
 - Ollama catalogue, digest, and runtime evidence through the same normalized contract.
@@ -130,6 +133,11 @@ Only Route Intelligence may contribute `evidence-backed-equivalent`, `cheaper-eq
 `quality unknown`. Alias-target or relevant capability changes keep historical Route Intelligence
 evidence visible but mark it stale; invalidation never deletes its audit history.
 
+The implemented Route Intelligence handoff contains mechanically eligible candidates plus
+lifecycle, alias, capability, digest, reasoning, context, variant, and pricing invalidations. It
+may carry optional source-attributed pricing as a fact, but its contract explicitly denies quality
+and economics claims. Route Intelligence must evaluate those claims under issue #109.
+
 ### 6. Ship one read-only command family
 
 The stable noun is plural: `ak models`.
@@ -146,6 +154,9 @@ There is no `ak models apply`. A future transactional swap requires a separate d
 still mutate only canonical routing intent with preview, confirmation, verification, and undo.
 `ak status --deep` remains local and does not perform remote model refresh.
 
+The `ak status` model row may name explicit advisory actions. `ak sync` excludes them from its
+executable convergence plan: it neither refreshes a catalogue nor applies a model plan.
+
 ### 7. Add cache-only status and Dashboard read models
 
 `ak status` gains one cache-only model-health row. The Dashboard keeps its five primary areas —
@@ -159,11 +170,14 @@ completeness, and scope.
 
 ### 8. Protect private scope and configuration facts
 
-Credentials, auth tokens, prompts, reasoning traces, and raw private provider configuration never
-enter snapshots or Dashboard payloads. Account, profile, project, gateway deployment, and private
-endpoint identities use a stable keyed fingerprint derived from an owner-only per-install secret.
-Normal display uses sanitized identifiers; exact local disclosure is limited to an explicit CLI
-request.
+Credentials, auth tokens, prompts, reasoning traces, raw private provider configuration, endpoints,
+and raw account/profile/project identities never enter snapshots or Dashboard payloads. The
+owner-only cache may retain bounded exact configured model or deployment identifiers so an explicit
+local CLI read can explain them. The Dashboard never receives those exact values: `/api/models`
+requires the existing owner-only per-install secret and projects model, provider, digest, alias,
+replacement, edge, binding, evidence, scope, and history identifiers to stable keyed pseudonyms.
+Controlled built-in source ids, owners, modes, and diagnostic codes remain named so evidence stays
+operable. A missing or invalid key fails closed and an ordinary read never creates one.
 
 Snapshot files are owner-only and atomically replaced. Native cache/protocol data is untrusted and
 subject to byte, schema, enum, and timeout bounds. Dashboard delivery retains loopback binding,
@@ -190,9 +204,11 @@ The decision may be marked Implemented only when:
 1. all independent state dimensions and evidence references survive human and JSON projections;
 2. Claude, Codex, OpenCode, and local-provider fixtures normalize deterministically;
 3. partial or cross-scope snapshots cannot create removals or advance the baseline;
-4. alias, migration, capability, visibility, and local-digest changes diff correctly;
+4. alias, migration, capability, visibility, local-digest, reasoning, context, variant, and pricing
+   changes diff correctly;
 5. plans enumerate canonical routes and independent Agentic QE/Ruflo consumers without mutation;
 6. ordinary CLI/Dashboard reads are proven network-silent and token-silent;
-7. snapshot and Dashboard payloads pass credential, prompt, private-id, and path disclosure checks;
+7. snapshot and Dashboard payloads pass credential, prompt, endpoint, private-id, path, keyed
+   pseudonym, and fail-closed disclosure checks;
 8. Dashboard keyboard, responsive, and screen-reader contracts pass; and
 9. exact-head project, Agentic QE, privacy, security, and release gates are recorded.

@@ -4,8 +4,10 @@
 - **Date:** 2026-07-23
 - **Updated:** 2026-08-25
 - **Update note:** Reconciled the implemented five-area shell introduced by ADR-0025 and ADR-0026.
-  ADR-0032 is Accepted but not implemented; when it ships, Models will be a secondary Usage
-  destination and the Dashboard will remain read-only and network-silent on ordinary reads.
+  ADR-0032 adds Models as a secondary Usage destination and a compact Overview summary while
+  preserving read-only, network-silent ordinary Dashboard reads. Model identifiers use a fail-closed
+  keyed Dashboard projection, and the semantic table has a labelled focusable scroll region plus
+  field-evidence disclosures. ADR-0032 release proof remains pending.
 - **Deciders:** agentic-kit maintainers
 
 > **GA amendment:** the read-only dashboard decision remains. References below to compatibility

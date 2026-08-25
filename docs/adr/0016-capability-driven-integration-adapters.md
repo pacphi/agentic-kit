@@ -14,9 +14,10 @@
   `enabledByDefault` boolean and the three enabled-host default literals now
   derive from it via `defaultHostMap()` (F-15); the `observability` axis remains validation
   metadata for implemented integrations: no general-purpose collector loop
-  exists (F-12). ADR-0032 now accepts one narrow future exception: Model lifecycle intelligence
-  may select catalogue descriptors and dispatch only to built-in, bounded source adapters; it does
-  not turn descriptors into arbitrary executable plugins or claim that behavior is implemented.
+  exists (F-12). ADR-0032 implements one narrow exception: Model lifecycle intelligence selects
+  catalogue descriptors and dispatches only to built-in, bounded source adapters. It does not turn
+  descriptors into arbitrary executable plugins; release proof for the narrow collector remains
+  pending.
   The non-throwing `validateBinding` is wired into `ak host status` as per-entry
   warnings (F-16); and the integrations migrator derives each host's native
   default provider from the provider registry's host-login entries instead of a

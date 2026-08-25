@@ -109,14 +109,18 @@ read-only projection and may emit a copyable `ak host pick --route ...` action; 
 action or become another routing policy.
 
 The curated `RETIRED_MODELS` behavior described above remains the implemented routing rule until a
-separate implementation deliberately changes it. Future catalogue discovery does not feed that
-automatic substitution path merely because a model is hidden, missing, stale, or deprecated.
+separate implementation deliberately changes it. Catalogue discovery does not feed that automatic
+substitution path merely because a model is hidden, missing, stale, or deprecated.
 Inventory lifecycle facts diagnose and plan; only authoritative evidence under an implemented
 contract may justify changing dispatch behavior.
 
 First-party migration and mechanical compatibility are not quality claims. Only imported Route
 Intelligence evidence can call a candidate equivalent, cheaper, or worth a premium. Alias or
 capability changes mark that evidence stale while preserving its audit history.
+
+Model lifecycle exports mechanically eligible candidates and audit-preserving invalidations to
+Route Intelligence, with quality and economics claims explicitly false. `ak status` may recommend a
+model refresh or diff, but `ak sync` excludes every model advisory from its executable plan.
 
 ## Cost safety
 

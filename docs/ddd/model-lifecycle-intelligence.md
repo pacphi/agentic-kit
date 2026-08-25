@@ -1,8 +1,8 @@
 # Model Lifecycle Intelligence Domain
 
 This document defines the bounded context accepted by
-[ADR-0032](../adr/0032-model-lifecycle-intelligence.md). It describes the target contract; until
-ADR-0032 is Implemented, commands and read models named here are planned rather than shipped.
+[ADR-0032](../adr/0032-model-lifecycle-intelligence.md). The implementation is complete on the issue
+branch; ADR-0032 remains Accepted until exact-head release proof is recorded.
 
 ## Purpose
 
@@ -59,9 +59,10 @@ or execution variant, not to the base identity.
 
 ### ModelRecord
 
-A ModelRecord carries display identity, aliases, lifecycle state, supported variants and
-capabilities, optional pricing metadata, and field-level evidence references. No record-level
-confidence may silently strengthen a weaker field.
+A ModelRecord carries display identity, aliases, lifecycle state, typed edges, supported variants
+and capabilities, optional pricing metadata, and field-level evidence references. No record-level
+confidence may silently strengthen a weaker field. Optional pricing is a dated source fact; it is
+not an economic recommendation.
 
 The independent state dimensions are configured, effective, observed, discoverable, entitled,
 policy allowed, routable, lifecycle, and recommended. Each is `true`, `false`, or `unknown` where
@@ -88,9 +89,10 @@ binding even after an effective concrete target is resolved.
 
 ### CatalogSource
 
-A source identifies its host or provider, local or online collection mode, source/schema version,
-capture time, non-identifying scope fingerprint, status, completeness, and diagnostics. Status is
-one of `complete`, `partial`, `stale`, `unavailable`, `unsupported`, or `unsupported-schema`.
+A source identifies its owner and owner type, file/command/index transport, `never`/`local`/
+`explicit` network policy, local or online collection mode, source/schema version, capture time,
+non-identifying scope fingerprint, status, completeness, and diagnostics. Status is one of
+`complete`, `partial`, `stale`, `unavailable`, `unsupported`, or `unsupported-schema`.
 
 ### CatalogSnapshot
 
@@ -123,9 +125,13 @@ Intelligence. This context can preserve and invalidate those imported claims but
 ### ModelChange
 
 A change names its kind, subject, before/after values, severity, scope, and evidence. Additions,
-visibility, alias, lifecycle, capability, reasoning, context, and digest changes require comparable
-same-scope evidence. Removal additionally requires an authoritative signal or two consecutive
-complete same-scope absences.
+visibility, alias, lifecycle, capability, reasoning, context, other variant, optional pricing,
+typed-edge, and digest changes require comparable same-scope evidence. Alias and digest continuity
+pair one model lineage before evaluating fields. Removal additionally requires an authoritative
+signal or two consecutive complete same-scope absences.
+
+Lifecycle, pricing, and edge comparison uses semantic fields and ignores evidence-reference ids and
+capture timestamps. A refresh that restates the same fact with new evidence does not create churn.
 
 ### SwapPlan
 
@@ -133,6 +139,17 @@ A SwapPlan is a read-only impact report. Each item links a source binding to aff
 routes, projections, Agentic QE/Ruflo consumers, compatibility blockers, and evidence that becomes
 stale. When expressible, it supplies a copyable `ak host pick --route ...` command. It has no apply
 operation.
+
+Unknown catalogue discovery blocks planning unless a structured successful observation proves the
+exact target path; that exception remains an explicit warning. `discoverable: false` always blocks.
+OpenCode selectors retain both axes as `opencode:provider/model`.
+
+### RouteIntelligenceFeed
+
+The feed to issue #109 contains mechanically eligible candidates and audit-preserving invalidation
+markers for lifecycle, alias, capability, digest, reasoning, context, variant, and pricing changes.
+It can carry optional source-attributed pricing but sets quality and economics claims to false.
+Route Intelligence owns any later evidence-backed equivalence or cost conclusion.
 
 ## Evidence rules
 
@@ -166,23 +183,31 @@ requires completeness and stable scope.
 
 ## Discovery contract
 
-The collector selects catalogue observability descriptors and invokes a bounded source adapter.
-The command layer never switches on a hard-coded host id. Descriptors authorize no arbitrary code:
-built-in adapters own parsing and external hosts without a supported descriptor report
-`unsupported`.
+The collector selects immutable model-discovery descriptors and invokes a bounded built-in source
+adapter. Each descriptor establishes owner, transport, network policy, schema, and scope. The
+command layer does not keep a parallel host switch, and descriptors authorize no arbitrary code.
+An external host receives no inferred catalogue capability without an admitted descriptor and
+matching adapter.
+
+Claude collection reads user settings and the platform-managed settings path. It accepts only
+`ANTHROPIC_MODEL` and `ANTHROPIC_DEFAULT_{SONNET,OPUS,HAIKU}_MODEL` from the process environment;
+credentials, endpoints, and unrelated environment values remain outside the collector.
 
 Local refresh reads configuration, local caches/protocols, and observed evidence. Online refresh is
 separate and explicit. Neither path invokes a model or sends a prompt.
 
 ## Privacy and delivery
 
-Snapshots exclude credentials, raw provider configuration, prompts, reasoning traces, and raw
-private deployment identities. An owner-only per-install secret keys scope and private-identity
-fingerprints. Snapshot replacement is atomic and owner-only. Native inputs have size, timeout,
-schema, and enum bounds.
+Snapshots exclude credentials, raw provider configuration, prompts, reasoning traces, endpoints,
+and raw account/profile/project identities. The atomic owner-only cache may retain bounded exact
+configured model or deployment identifiers for an explicit local CLI read. An owner-only
+per-install secret keys scope fingerprints and the separate Dashboard projection.
 
-CLI status and Dashboard reads are cache-only. The Dashboard receives sanitized read models behind
-its existing loopback, session-token, origin, CSP, and `no-store` boundary and cannot apply a plan.
+CLI status and Dashboard reads are cache-only. CLI reads are deliberate exact local disclosure. The
+Dashboard receives `keyed-v1` pseudonyms for model/provider/digest/alias/replacement/edge/binding/
+evidence/scope/history identifiers while controlled built-in source and diagnostic vocabulary stays
+named. Missing key material fails closed without creating state. Delivery remains behind the
+loopback, session-token, origin, CSP, and `no-store` boundary and cannot apply a plan.
 
 ## Invariants
 
@@ -195,4 +220,5 @@ its existing loopback, session-token, origin, CSP, and `no-store` boundary and c
 7. First-party migration is not a quality or economic recommendation.
 8. Route Intelligence evidence stays visible but stale after invalidation.
 9. Ordinary reads make no network request and consume no inference tokens.
-10. Private configuration and transcript content never enter snapshots or aggregate APIs.
+10. `ak sync` does not execute model refresh or model-plan advisories.
+11. Private configuration and transcript content never enter snapshots or aggregate APIs.
