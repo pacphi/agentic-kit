@@ -234,8 +234,8 @@ The decision may be marked Implemented only when:
 The implementation branch was validated on 2026-08-25 with the following exact-head evidence:
 
 - `pnpm run check` passed TypeScript checking, ESLint, Markdown lint, packaging, CLI-load checks,
-  and the full unit/integration suite. Native instrumented coverage was 86.51% lines, 80.11%
-  branches, and 83.99% functions against 70% repository floors.
+  and the full unit/integration suite. Native instrumented coverage was 86.85% lines, 80.24%
+  branches, and 84.50% functions against 70% repository floors.
 - `pnpm run test:ui` passed the 305-check deterministic browser matrix, including lazy Models
   loading, paired evidence filters, clickable ascending/descending column sorting, snapshot-bound
   pagination with safe reset, append retry without row loss, keyboard movement in the bounded
