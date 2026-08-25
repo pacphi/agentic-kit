@@ -31,6 +31,14 @@ test('run() never throws on a command that exits non-zero', async () => {
   assert.equal(r.code, 3);
 });
 
+test('run() honors a caller-requested bounded output cap', async () => {
+  const r = await run(process.execPath, ['-e', 'process.stdout.write("x".repeat(4096))'], {
+    maxBuffer: 1024,
+  });
+  assert.notEqual(r.code, 0);
+  assert.match(r.stderr, /maxBuffer|stdout/i);
+});
+
 test('run() passes args as an argv array, not shell-joined — a metacharacter-laden arg is inert', async () => {
   // If args were ever shell-joined again, this argument would break out into
   // a second command; run() must pass it through as one literal argv string.

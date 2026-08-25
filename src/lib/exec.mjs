@@ -17,6 +17,7 @@ import path from 'node:path';
 import { isWindows } from './paths.mjs';
 
 const pexecFile = promisify(execFile);
+const MAX_EXEC_BUFFER = 16 * 1024 * 1024;
 
 const CMD_SHIMS = new Set(['npm', 'npx', 'claude', 'codex', 'opencode', 'ruflo', 'aqe', 'claude-flow']);
 
@@ -88,7 +89,8 @@ export async function run(cmd, args = [], opts = {}) {
       encoding: 'utf8',
       timeout: opts.timeout ?? 120_000,
       signal: opts.signal,
-      maxBuffer: 16 * 1024 * 1024,
+      maxBuffer: Number.isFinite(opts.maxBuffer) && opts.maxBuffer > 0
+        ? Math.min(Math.floor(opts.maxBuffer), MAX_EXEC_BUFFER) : MAX_EXEC_BUFFER,
       cwd: opts.cwd,
       env,
       shell: false,
@@ -98,7 +100,7 @@ export async function run(cmd, args = [], opts = {}) {
     return {
       code: typeof err.code === 'number' ? err.code : 1,
       stdout: err.stdout ?? '',
-      stderr: err.stderr ?? String(err.message ?? err),
+      stderr: err.stderr || String(err.message ?? err),
     };
   }
 }
