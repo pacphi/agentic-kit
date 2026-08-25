@@ -44,6 +44,76 @@ test('OpenCode accepts current object selectors and optional configured variants
   assert.deepEqual(result.models.find((model) => model.identity.modelId === 'gpt-5.6-sol').variant.configuredVariants, ['high']);
 });
 
+test('OpenCode accepts current OpenRouter tilde selectors', () => {
+  const result = discoverOpenCode({
+    raw: 'openrouter/~anthropic/claude-sonnet-latest\n', scopeKey: SCOPE_KEY,
+  });
+  assert.equal(result.status, 'complete');
+  assert.equal(result.diagnostics.length, 0);
+  assert.deepEqual(result.models.map((model) => [model.identity.provider, model.identity.modelId]), [
+    ['openrouter', '~anthropic/claude-sonnet-latest'],
+  ]);
+});
+
+test('OpenCode parses verbose catalog metadata into bounded public fields only', () => {
+  const result = discoverOpenCode({
+    raw: fixture('opencode', 'models-verbose.txt'), scopeKey: SCOPE_KEY,
+  });
+  assert.equal(result.status, 'complete');
+  assert.equal(result.models.length, 3);
+  const claude = result.models.find((model) => model.identity.modelId === '~anthropic/claude-sonnet-latest');
+  assert.equal(claude.displayName, 'Anthropic Claude Sonnet Latest');
+  assert.deepEqual(claude.variant.catalog, {
+    source: 'opencode',
+    public: true,
+    servingProvider: 'openrouter',
+    publisher: 'anthropic',
+    family: 'claude-sonnet',
+    selector: 'openrouter/~anthropic/claude-sonnet-latest',
+    releaseDate: '2026-04-27',
+    status: 'active',
+    links: { catalog: 'https://models.dev/models/anthropic/claude-sonnet-latest/' },
+  });
+  assert.deepEqual(claude.variant.availableVariants, ['high', 'low']);
+  assert.deepEqual(claude.capabilities, {
+    temperature: false,
+    reasoning: true,
+    attachment: true,
+    toolcall: true,
+    input: { text: true, audio: false, image: true, video: false, pdf: true },
+    output: { text: true, audio: false, image: false, video: false, pdf: false },
+    interleaved: false,
+    contextLimit: 1000000,
+    outputLimit: 128000,
+  });
+  assert.deepEqual({
+    basis: claude.pricing.basis,
+    input: claude.pricing.input,
+    output: claude.pricing.output,
+    currency: claude.pricing.currency,
+    effectiveAt: claude.pricing.effectiveAt,
+  }, {
+    basis: 'per-million-tokens', input: 2, output: 10, currency: 'USD', effectiveAt: null,
+  });
+  const custom = result.models.find((model) => model.identity.provider === 'private-gateway');
+  assert.deepEqual(custom.variant.catalog, {
+    source: 'opencode',
+    public: false,
+    servingProvider: 'private-gateway',
+    publisher: null,
+    family: 'private-family',
+    selector: 'private-gateway/deployment-42',
+    releaseDate: null,
+    status: 'active',
+  });
+  const serialized = JSON.stringify(result);
+  for (const secret of ['private-gateway.example', 'must-not-persist', 'internal.example',
+    'never-persist-this', 'private-tenant', '"api":', '"headers":', '"options":']) {
+    assert.equal(serialized.includes(secret), false);
+  }
+  assert.doesNotThrow(() => result.models.map(normalizeModelRecord));
+});
+
 test('OpenCode uses literal argv and refresh is the only online boundary', async () => {
   const calls = [];
   const runner = async (command, args, options) => {
@@ -52,8 +122,8 @@ test('OpenCode uses literal argv and refresh is the only online boundary', async
   };
   await collectOpenCode({ runner, online: false, provider: 'x; touch /tmp/nope', scopeKey: SCOPE_KEY });
   await collectOpenCode({ runner, online: true, provider: 'anthropic', scopeKey: SCOPE_KEY });
-  assert.deepEqual(calls[0].args, ['models', 'x; touch /tmp/nope']);
-  assert.deepEqual(calls[1].args, ['models', 'anthropic', '--refresh']);
+  assert.deepEqual(calls[0].args, ['models', 'x; touch /tmp/nope', '--verbose']);
+  assert.deepEqual(calls[1].args, ['models', 'anthropic', '--verbose', '--refresh']);
   assert.equal(calls.every((call) => call.options.shell === false), true);
 });
 
