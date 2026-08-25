@@ -61,7 +61,12 @@ function printJson(value) { console.log(JSON.stringify(value, null, 2)); }
 
 function visibleSnapshot(snapshot, host) {
   if (!snapshot || !host) return snapshot;
-  return { ...snapshot, models: snapshot.models.filter((model) => model.key.host === host) };
+  return {
+    ...snapshot,
+    sources: snapshot.sources.filter((source) => source.owner === host),
+    models: snapshot.models.filter((model) => model.key.host === host),
+    bindings: snapshot.bindings.filter((binding) => binding.host === host),
+  };
 }
 
 function selectedPair(store, positionals, flags) {
@@ -130,6 +135,10 @@ export async function run({ flags, positionals, deps = {} }) {
   if (!latest) return noSnapshot(flags, cacheFile);
 
   if (action === 'status') {
+    if (flags.host && !ALL_OWNERS.includes(flags.host)) {
+      warn(`unsupported model host: ${flags.host}`);
+      return 2;
+    }
     const snapshot = visibleSnapshot(latest, flags.host);
     const since = flags.since ? Date.parse(flags.since) : null;
     const history = store.snapshots.filter((entry) => entry.scope.fingerprint === latest.scope.fingerprint

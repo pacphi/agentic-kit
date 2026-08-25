@@ -6,7 +6,7 @@ const capturedAt = '2026-08-25T13:00:00.000Z';
 const snapshot = {
   schemaVersion: 1, snapshotId: 'models:test', capturedAt,
   scope: { fingerprint: 'scope:test', hosts: ['codex'] },
-  sources: [{ id: 'codex-cache', status: 'complete', complete: true, capturedAt, scopeFingerprint: 'scope:test' }],
+  sources: [{ id: 'codex-cache', owner: 'codex', status: 'complete', complete: true, capturedAt, scopeFingerprint: 'scope:test' }],
   models: [{
     key: { host: 'codex', provider: 'openai', modelId: 'gpt-x', scopeId: 'scope:host' },
     displayName: 'gpt-x', aliases: [], visibility: 'visible', variant: {},
@@ -38,6 +38,25 @@ test('models status is a cache-only read', async () => {
   assert.equal(result.code, 0);
   assert.equal(collected, 0);
   assert.equal(JSON.parse(result.output).inventory.snapshotId, 'models:test');
+});
+
+test('models status host filter rejects unknown owners and narrows evidence', async () => {
+  const invalid = await capture(() => run({
+    flags: { json: true, host: 'unknown' }, positionals: ['status'],
+    deps: { loadConfig: () => cfg, readStore: () => store },
+  }));
+  assert.equal(invalid.code, 2);
+
+  const mixed = structuredClone(snapshot);
+  mixed.sources.push({ ...mixed.sources[0], id: 'claude-config', owner: 'claude' });
+  mixed.models.push({ ...mixed.models[0], key: { ...mixed.models[0].key, host: 'claude' } });
+  const filtered = await capture(() => run({
+    flags: { json: true, host: 'codex' }, positionals: ['status'],
+    deps: { loadConfig: () => cfg, readStore: () => ({ ...store, snapshots: [mixed] }) },
+  }));
+  const value = JSON.parse(filtered.output);
+  assert.deepEqual(value.inventory.sources.map(({ id }) => id), ['codex-cache']);
+  assert.deepEqual(value.inventory.models.map(({ key }) => key.host), ['codex']);
 });
 
 test('models refresh dry-run contacts nothing and writes nothing', async () => {
