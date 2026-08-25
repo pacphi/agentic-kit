@@ -179,7 +179,11 @@ function localBase(value) {
 
 async function fetchJson(fetchFn, url, options, timeout) {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeout);
+  let timedOut = false;
+  const timer = setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, timeout);
   try {
     const response = await fetchFn(url, { ...options, signal: controller.signal });
     if (!response?.ok) throw new Error(`HTTP ${response?.status ?? 'failure'}`);
@@ -188,6 +192,9 @@ async function fetchJson(fetchFn, url, options, timeout) {
     const body = await response.arrayBuffer();
     if (body.byteLength > MAX_COMMAND_BYTES) throw new Error('response-too-large');
     return JSON.parse(Buffer.from(body).toString('utf8'));
+  } catch (error) {
+    if (timedOut) throw new Error('refresh-timeout', { cause: error });
+    throw error;
   } finally { clearTimeout(timer); }
 }
 
@@ -241,7 +248,7 @@ export async function collectOllama({
     // Compatibility fallback keeps installed names visible when an older daemon exposes
     // only the CLI. It is deliberately partial because runtime facts were not checked.
     const fallbackTimeout = remaining();
-    if (fallbackTimeout <= 0) {
+    if (apiError.message === 'refresh-timeout' || fallbackTimeout <= 0) {
       const source = sourceRecord({ id: 'ollama-catalog', owner: 'ollama', scope, scopeKey, capturedAt,
         complete: false, status: 'unsupported', schema: 'ollama-api-v1', diagnostics: ['refresh-timeout'] });
       return { status: 'unsupported', source, models: [], diagnostics: [diagnostic('refresh-timeout', 'Ollama refresh exhausted its time budget')] };
