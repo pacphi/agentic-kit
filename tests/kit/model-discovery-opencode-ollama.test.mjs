@@ -113,6 +113,7 @@ test('OpenCode parses verbose catalog metadata into bounded public fields only',
   }, {
     basis: 'per-million-tokens', input: 2, output: 10, currency: 'USD', effectiveAt: null,
   });
+  assert.equal(claude.lifecycle.state, 'active');
   const custom = result.models.find((model) => model.identity.provider === 'private-gateway');
   assert.deepEqual(custom.variant.catalog, {
     source: 'opencode',
@@ -155,6 +156,37 @@ test('OpenCode bounds invalid-line diagnostics and accepts bounded custom string
   assert.equal(result.models.some(({ identity }) => identity.modelId === 'model with spaces ✓'), true);
 });
 
+test('OpenCode accepts a production-sized verbose listing within byte and record bounds', () => {
+  const raw = Array.from({ length: 402 }, (_, index) => {
+    const id = `lab/model-${index}`;
+    return [
+      `openrouter/${id}`,
+      JSON.stringify({
+        id,
+        providerID: 'openrouter',
+        name: `Model ${index}`,
+        status: 'active',
+        capabilities: {
+          temperature: true,
+          reasoning: true,
+          attachment: true,
+          toolcall: true,
+          input: { text: true, audio: false, image: true, video: false, pdf: true },
+          output: { text: true, audio: false, image: false, video: false, pdf: false },
+        },
+        limit: { context: 200_000, output: 100_000 },
+      }, null, 2),
+    ].join('\n');
+  }).join('\n');
+  assert.ok(raw.split(/\r?\n/).length > 8_192);
+  assert.ok(Buffer.byteLength(raw) < 2 * 1024 * 1024);
+
+  const result = discoverOpenCode({ raw, scopeKey: SCOPE_KEY });
+  assert.equal(result.status, 'complete');
+  assert.equal(result.models.length, 402);
+  assert.equal(result.models.at(-1).identity.modelId, 'lab/model-401');
+});
+
 test('OpenCode uses literal argv and refresh is the only online boundary', async () => {
   const calls = [];
   const runner = async (command, args, options) => {
@@ -173,6 +205,31 @@ test('OpenCode uses literal argv and refresh is the only online boundary', async
   assert.deepEqual(calls[1].args, ['models', 'anthropic', '--refresh']);
   assert.deepEqual(calls[2].args, ['models', 'anthropic', '--verbose']);
   assert.equal(calls.every((call) => call.options.shell === false), true);
+});
+
+test('OpenCode reports malformed and unsupported HTTP-200 catalogues as partial proof', async () => {
+  for (const catalogBody of [
+    '<html>not json</html>',
+    JSON.stringify({ openrouter: { id: 'renamed-provider', models: {} } }),
+  ]) {
+    const runner = async (_command, args) => ({
+      code: 0,
+      stdout: args.includes('--verbose') ? fixture('opencode', 'models-verbose.txt') : '',
+      stderr: '',
+    });
+    const result = await collectOpenCode({
+      runner,
+      fetchFn: async () => new Response(catalogBody, {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      }),
+      online: true,
+      configRaw: '{}',
+      scopeKey: SCOPE_KEY,
+    });
+    assert.equal(result.status, 'partial');
+    assert.equal(result.diagnostics.some(({ code }) => code === 'catalog-proof-invalid'), true);
+  }
 });
 
 test('Ollama parses local names and digests without claiming entitlement', () => {

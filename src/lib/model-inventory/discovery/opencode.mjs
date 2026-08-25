@@ -8,7 +8,6 @@ const CATALOG_TOKEN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
 const CATALOG_STATUSES = new Set(['active', 'alpha', 'beta', 'deprecated']);
 const MODALITIES = ['text', 'audio', 'image', 'video', 'pdf'];
 const MAX_DIAGNOSTICS = 64;
-const MAX_OUTPUT_LINES = 8_192;
 const MAX_CATALOG_BYTES = 8 * 1024 * 1024;
 const MODELS_DEV_URL = 'https://models.dev/api.json';
 
@@ -49,11 +48,22 @@ function selectorParts(value) {
 
 function catalogDocument(raw) {
   if (raw == null || raw === '') return null;
-  const text = typeof raw === 'string' ? raw : JSON.stringify(raw);
-  if (Buffer.byteLength(text) > MAX_CATALOG_BYTES) return null;
   try {
+    const text = typeof raw === 'string' ? raw : JSON.stringify(raw);
+    if (Buffer.byteLength(text) > MAX_CATALOG_BYTES) return null;
     const value = typeof raw === 'string' ? JSON.parse(raw) : structuredClone(raw);
-    return plain(value) ? value : null;
+    if (!plain(value)) return null;
+    const providers = Object.entries(value);
+    if (providers.length === 0) return null;
+    let modelCount = 0;
+    for (const [providerId, provider] of providers) {
+      if (!plain(provider) || provider.id !== providerId || !plain(provider.models)) return null;
+      for (const [modelId, model] of Object.entries(provider.models)) {
+        if (!plain(model) || model.id !== modelId) return null;
+        modelCount += 1;
+      }
+    }
+    return modelCount > 0 ? value : null;
   } catch { return null; }
 }
 
@@ -177,7 +187,8 @@ function metadataFor(selector, raw, catalogDocumentValue) {
   const { provider, modelId } = parts;
   const proof = catalogEntry(catalogDocumentValue, provider, modelId);
   const metadata = proof ?? value;
-  const statusValue = boundedText(metadata.status, 32)?.toLowerCase() ?? null;
+  const statusValue = proof && metadata.status === undefined
+    ? 'active' : boundedText(metadata.status, 32)?.toLowerCase() ?? null;
   const status = statusValue && CATALOG_STATUSES.has(statusValue) ? statusValue : null;
   const familyValue = boundedText(metadata.family, 128);
   const family = familyValue && CATALOG_TOKEN.test(familyValue) ? familyValue : null;
@@ -241,10 +252,7 @@ function outputRows(text, diagnostics, catalog) {
   const lines = text.split(/\r?\n/);
   const rows = [];
   const seen = new Set();
-  if (lines.length > MAX_OUTPUT_LINES) {
-    addDiagnostic(diagnostics, diagnostic('output-lines-truncated', `output exceeds ${MAX_OUTPUT_LINES} lines`));
-  }
-  for (let index = 0; index < Math.min(lines.length, MAX_OUTPUT_LINES); index += 1) {
+  for (let index = 0; index < lines.length; index += 1) {
     const selector = lines[index].trim();
     if (!selector) continue;
     if (!selectorParts(selector)) {
@@ -382,9 +390,13 @@ export async function collectOpenCode({
     if (catalogRaw === undefined) {
       try {
         catalogRaw = await fetchCatalog(fetchFn, timeout);
-      } catch {
+        if (!catalogDocument(catalogRaw)) throw new TypeError('catalog-invalid');
+      } catch (error) {
+        const invalid = error instanceof TypeError && error.message === 'catalog-invalid';
         addDiagnostic(initialDiagnostics,
-          diagnostic('catalog-proof-unavailable', 'Models.dev identity proof unavailable'));
+          diagnostic(invalid ? 'catalog-proof-invalid' : 'catalog-proof-unavailable',
+            invalid ? 'Models.dev identity proof is malformed or unsupported'
+              : 'Models.dev identity proof unavailable'));
       }
     }
   }
