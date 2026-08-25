@@ -2,6 +2,7 @@ import { createHmac } from 'node:crypto';
 import { immutable } from '../adapters/schema.mjs';
 import { ACTIVITIES } from '../routing.mjs';
 import { normalizeSnapshot } from './contracts.mjs';
+import { dashboardModelView } from './dashboard-query.mjs';
 
 /** @param {any} snapshotValue @param {{changes?: any[]|{changes?: any[]}}} [options] */
 export function createModelReadModel(snapshotValue, options = {}) {
@@ -118,11 +119,117 @@ function sanitizeEvidence(entry, key) {
   };
 }
 
-function sanitizeModel(model, key) {
+const TRUSTED_MODEL_LINK_HOSTS = new Set([
+  'developers.openai.com', 'huggingface.co', 'models.dev', 'ollama.com',
+  'opencode.ai', 'openrouter.ai', 'platform.claude.com',
+]);
+const PUBLIC_CATALOG_METADATA_SOURCES = new Set(['models.dev', 'opencode']);
+const OFFICIAL_CLAUDE_ID = /^claude-(?:haiku|sonnet|opus|fable|mythos)-[a-z0-9]+(?:-[a-z0-9]+)*$/;
+
+function boundedPublicText(value, max = 256) {
+  return typeof value === 'string' && value.length > 0 && value.length <= max
+    && ![...value].some((char) => char.codePointAt(0) < 32 || char.codePointAt(0) === 127)
+    ? value : null;
+}
+
+function trustedModelLinks(value) {
+  const labels = {
+    catalog: 'Models.dev', documentation: 'Documentation', provider: 'Provider',
+    weights: 'Hugging Face', library: 'Model library',
+  };
+  const entries = Array.isArray(value) ? value : value && typeof value === 'object'
+    ? Object.entries(value).flatMap(([kind, url]) => labels[kind] && typeof url === 'string'
+      ? [{ kind, label: labels[kind], url }] : []) : [];
+  return entries.slice(0, 16).flatMap((entry) => {
+    if (!entry || typeof entry !== 'object') return [];
+    const kind = boundedPublicText(entry.kind, 64);
+    const label = boundedPublicText(entry.label, 128);
+    const raw = boundedPublicText(entry.url, 2_048);
+    if (!kind || !label || !raw) return [];
+    try {
+      const url = new URL(raw);
+      if (url.protocol !== 'https:' || url.username || url.password || url.port
+        || !TRUSTED_MODEL_LINK_HOSTS.has(url.hostname)) return [];
+      return [{ kind, label, url: url.href }];
+    } catch { return []; }
+  });
+}
+
+function hasEvidence(model, predicate) {
+  return model.evidence.some((entry) => predicate(entry));
+}
+
+function hasCatalogDiscovery(model, source) {
+  const refs = new Set(model.dimensions.discoverable?.evidenceRefs ?? []);
+  return model.dimensions.discoverable?.value === true && hasEvidence(model, (entry) => (
+    refs.has(entry.id) && entry.source === source && ['catalog', 'first-party'].includes(entry.class)
+  ));
+}
+
+function claudeHumanName(modelId) {
+  const parts = modelId.split('-').slice(1);
+  const family = parts.shift();
+  let date = null;
+  if (/^\d{8}$/.test(parts.at(-1) ?? '')) {
+    const raw = parts.pop();
+    const candidate = `${raw.slice(0, 4)}-${raw.slice(4, 6)}-${raw.slice(6, 8)}`;
+    const parsed = new Date(`${candidate}T00:00:00.000Z`);
+    if (!Number.isNaN(parsed.valueOf()) && parsed.toISOString().slice(0, 10) === candidate) date = candidate;
+  }
+  const version = /^\d{1,2}$/.test(parts[0] ?? '') && /^\d{1,2}$/.test(parts[1] ?? '')
+    ? `${parts.shift()}.${parts.shift()}` : null;
+  const title = (value) => value ? `${value[0].toUpperCase()}${value.slice(1)}` : '';
+  return ['Claude', title(family), version, ...parts.map(title)].filter(Boolean).join(' ')
+    + (date ? ` (${date})` : '');
+}
+
+/** Public identity is fail-closed: local/custom rows need an explicit catalog-public marker. */
+function publicModelIdentity(model) {
+  if (model.key.host === 'codex' && hasCatalogDiscovery(model, 'codex-cache')) {
+    return {
+      humanName: boundedPublicText(model.displayName) ?? model.key.modelId,
+      selector: model.key.modelId, servingProvider: null, publisher: 'OpenAI',
+      family: boundedPublicText(model.variant?.family),
+      links: [{ kind: 'documentation', label: 'Codex models', url: 'https://developers.openai.com/codex/models/' }],
+    };
+  }
+  if (model.key.host === 'claude' && OFFICIAL_CLAUDE_ID.test(model.key.modelId)
+    && hasEvidence(model, (entry) => entry.source === 'claude-config'
+      && ['configured', 'first-party'].includes(entry.class))) {
+    return {
+      humanName: claudeHumanName(model.key.modelId), selector: model.key.modelId,
+      servingProvider: model.key.provider === 'anthropic' ? 'anthropic' : null,
+      publisher: 'Anthropic', family: model.key.modelId.split('-')[1],
+      links: [{ kind: 'documentation', label: 'Claude models', url: 'https://platform.claude.com/docs/en/about-claude/models/overview' }],
+    };
+  }
+  const catalog = model.variant?.catalog;
+  if (!catalog || catalog.public !== true || !PUBLIC_CATALOG_METADATA_SOURCES.has(catalog.source)
+    || !hasEvidence(model, (entry) => entry.field === 'variant.catalog'
+      && entry.source === 'opencode-models'
+      && ['catalog', 'first-party'].includes(entry.class))) return null;
+  const humanName = boundedPublicText(model.displayName);
+  const selector = boundedPublicText(catalog.selector);
+  if (!humanName || !selector) return null;
+  return {
+    humanName, selector,
+    servingProvider: boundedPublicText(catalog.servingProvider),
+    publisher: boundedPublicText(catalog.publisher), family: boundedPublicText(catalog.family),
+    links: trustedModelLinks(catalog.links),
+  };
+}
+
+function sanitizeModel(model, key, publicModels = new Map()) {
   const evidenceIds = new Map(model.evidence.map(({ id }) => [id, privateLabel('evidence', id, key)]));
   const evidenceRefs = (refs = []) => refs.map((ref) => evidenceIds.get(ref)
     ?? privateLabel('evidence', ref, key));
   const modelLabel = privateLabel('model', model.key.modelId, key);
+  const publicIdentity = publicModelIdentity(model);
+  const lifecycleEvidence = new Set(model.lifecycle.evidenceRefs ?? []);
+  const replacementIdentity = model.lifecycle.replacement
+    && hasEvidence(model, (entry) => lifecycleEvidence.has(entry.id) && entry.class === 'first-party')
+    ? publicModels.get(`${model.key.host}\0${model.lifecycle.replacement}`) ?? null : null;
+  const { catalog: _catalog, ...privateVariant } = model.variant ?? {};
   return {
     ...model,
     key: {
@@ -133,17 +240,39 @@ function sanitizeModel(model, key) {
       digest: privateLabel('digest', model.key.digest, key),
     },
     identity: privateLabel('identity', model.identity, key),
-    displayName: modelLabel,
+    displayName: publicIdentity?.humanName ?? modelLabel,
+    humanName: publicIdentity?.humanName ?? null,
+    host: publicHost(model.key.host, key),
+    servingProvider: publicIdentity?.servingProvider ?? null,
+    publisher: publicIdentity?.publisher ?? null,
+    family: publicIdentity?.family ?? null,
+    selector: publicIdentity?.selector ?? null,
+    privacyClass: publicIdentity ? 'public-catalog' : 'private',
+    links: publicIdentity?.links ?? [],
     aliases: model.aliases.map((alias) => ({
       ...alias,
       name: privateLabel('alias', alias.name, key),
       resolvesTo: privateLabel('model', alias.resolvesTo, key),
       evidenceRefs: evidenceRefs(alias.evidenceRefs),
     })),
-    variant: sanitizeVariant(model.variant, key),
+    variant: {
+      ...sanitizeVariant(privateVariant, key),
+      ...(publicIdentity && model.variant?.catalog ? { catalog: {
+        source: model.variant.catalog.source,
+        public: true,
+        servingProvider: publicIdentity.servingProvider,
+        publisher: publicIdentity.publisher,
+        family: publicIdentity.family,
+        selector: publicIdentity.selector,
+        links: publicIdentity.links,
+      } } : {}),
+    },
     lifecycle: {
       ...model.lifecycle,
-      replacement: privateLabel('model', model.lifecycle.replacement, key),
+      replacement: replacementIdentity?.selector
+        ?? privateLabel('model', model.lifecycle.replacement, key),
+      replacementName: replacementIdentity?.humanName ?? null,
+      replacementSelector: replacementIdentity?.selector ?? null,
       notice: model.lifecycle.notice ? 'Lifecycle notice available in explicit CLI evidence.' : null,
       evidenceRefs: evidenceRefs(model.lifecycle.evidenceRefs),
     },
@@ -244,7 +373,17 @@ export function createDashboardModelReadModel(snapshotValue, options = {}) {
     scopeFingerprint: privateLabel('scope', source.scopeFingerprint, key),
     diagnostics: source.diagnostics.map((item) => publicDiagnostic(item, key)),
   }));
-  const models = exact.models.map((model) => sanitizeModel(model, key));
+  const publicModels = new Map();
+  const ambiguousPublicModels = new Set();
+  for (const model of exact.models) {
+    const identity = publicModelIdentity(model);
+    if (!identity) continue;
+    const indexKey = `${model.key.host}\0${model.key.modelId}`;
+    if (publicModels.has(indexKey)) ambiguousPublicModels.add(indexKey);
+    else publicModels.set(indexKey, identity);
+  }
+  for (const indexKey of ambiguousPublicModels) publicModels.delete(indexKey);
+  const models = exact.models.map((model) => sanitizeModel(model, key, publicModels));
   const bindings = exact.bindings.map((binding) => sanitizeBinding(binding, key));
   const changes = exact.changes.map((change) => sanitizeChange(change, key));
   const modelByIdentity = new Map(exact.models.map((model, index) => [model.identity, models[index]]));
@@ -307,4 +446,13 @@ export function createDashboardModelPayload(value, { key } = {}) {
         .map((item) => privateLabel('diagnostic', item, privateKey)),
     } : undefined,
   });
+}
+
+/**
+ * Additive Dashboard query views. The legacy/default view retains the complete
+ * `/api/models` contract; summary and inventory make the large model list lazy.
+ */
+/** @param {any} value @param {{key?: string, query?: URLSearchParams|string}} [options] */
+export function createDashboardModelViewPayload(value, { key, query } = {}) {
+  return dashboardModelView(createDashboardModelPayload(value, { key }), query);
 }

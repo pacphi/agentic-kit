@@ -1398,7 +1398,7 @@ export function startDashboard({
           sendJson(res, 200, payload);
           return;
         }
-        const [{ readModelScopeKey }, { createDashboardModelPayload }] = await Promise.all([
+        const [{ readModelScopeKey }, { createDashboardModelViewPayload }] = await Promise.all([
           import('./model-inventory/store.mjs'), import('./model-inventory/read-model.mjs'),
         ]);
         const key = modelScopeKey === undefined ? readModelScopeKey() : modelScopeKey;
@@ -1406,10 +1406,12 @@ export function startDashboard({
           sendJson(res, 503, { error: 'model dashboard privacy key unavailable' });
           return;
         }
-        sendJson(res, 200, createDashboardModelPayload(payload, { key }));
-      } catch {
+        sendJson(res, 200, createDashboardModelViewPayload(payload, { key, query }));
+      } catch (error) {
         // Do not echo native parser/provider errors: they may contain a private identifier.
-        sendJson(res, 500, { error: 'model dashboard evidence unavailable' });
+        sendJson(res, error?.code === 'INVALID_MODEL_INVENTORY_QUERY' ? 400 : 500,
+          { error: error?.code === 'INVALID_MODEL_INVENTORY_QUERY'
+            ? 'invalid model inventory query' : 'model dashboard evidence unavailable' });
       }
       return;
     }
