@@ -188,12 +188,22 @@ effective, observed, discoverable, entitled, policy-allowed, and routable states
 labels missing evidence `unknown`. Attention, same-scope changes, bindings, swap impact, and source
 freshness all come from the normalized private snapshot.
 
-The model table keeps Host/model and each independent state in a separately scoped column. Every
-state and lifecycle value expands to its source, class, capture time, freshness, completeness, and
-scope; source cards keep status, capture time, completeness, and scope visible. The horizontally
-scrollable table region is labelled and keyboard-focusable, with a caption, column scopes,
-`aria-busy` loading state, and an `aria-live` status. Model-specific foreground/background pairs meet
-WCAG AA in both themes, and the same table remains operable at narrow widths.
+The view fetches a compact summary first, then a 50-row relevant inventory page. Search and filters
+for host, serving provider, publisher, relevance, lifecycle, and evidence request fresh bounded
+pages; **Load 50 more** appends the next page. Every column header is a keyboard-operable sort button
+that toggles ascending and descending order, exposes `aria-sort`, and leaves unknown values last.
+
+The inventory region is height-bounded and scrolls internally in both axes, so change history and
+consumer panels remain nearby. Its header stays sticky. The region is labelled and
+keyboard-focusable, with a caption, column scopes, `aria-busy` loading state, result and load
+announcements, visible focus, and an explicit load control in addition to lazy fetching.
+
+Source-proven public catalogue records show readable names and trusted source links while private
+deployments remain keyed pseudonyms. Host, serving provider, publisher, model selector, catalogue
+source, and entitlement remain independent. Each state and lifecycle value expands to its source,
+class, capture time, freshness, completeness, scope, or a field-specific explanation of missing
+evidence. Model-specific foreground/background pairs meet WCAG AA in both themes, and the same table
+remains operable at narrow widths.
 
 The Overview Model lifecycle summary links to `#usage/models`. The view has no mutation control.
 It points to the read-only `ak models plan` command, which can emit a copyable canonical
@@ -356,10 +366,12 @@ delivery as every other route.
 
 Models adds a second privacy boundary. The explicit local CLI can show exact model evidence, while
 `/api/models` requires the already-existing private model scope key and returns
-`privacy.projection: keyed-v1`. Model/provider/digest/alias/replacement/edge/binding/evidence/scope/
-history identifiers are stable keyed pseudonyms. Controlled built-in source metadata and diagnostic
-codes remain named; unknown source metadata is pseudonymized. Missing key material returns a generic
-503, and opening the Dashboard never creates the key.
+`privacy.projection: keyed-v1`. Source-proven public catalogue identity may retain a human name,
+publisher, public selector, and allowlisted HTTPS links. Private model/provider/digest/alias/
+replacement/edge/binding/evidence/scope/history identifiers remain stable keyed pseudonyms.
+Filtering and sorting run only after that projection. Controlled built-in source metadata and
+diagnostic codes remain named; unknown source metadata is pseudonymized. Missing key material
+returns a generic 503, and opening the Dashboard never creates the key.
 
 What System reads is a short, fixed list: directory entries and file `stat` results; your
 `.git/config` origin remote (so a project can link to its repository page — the kit never fetches

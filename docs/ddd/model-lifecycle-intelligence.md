@@ -1,8 +1,8 @@
 # Model Lifecycle Intelligence Domain
 
 This document defines the bounded context accepted by
-[ADR-0032](../adr/0032-model-lifecycle-intelligence.md). The implementation is complete on the issue
-branch; ADR-0032 remains Accepted until exact-head release proof is recorded.
+[ADR-0032](../adr/0032-model-lifecycle-intelligence.md). The implementation and exact-head release
+proof are recorded by ADR-0032, whose status is Implemented.
 
 ## Purpose
 
@@ -67,6 +67,16 @@ not an economic recommendation.
 The independent state dimensions are configured, effective, observed, discoverable, entitled,
 policy allowed, routable, lifecycle, and recommended. Each is `true`, `false`, or `unknown` where
 applicable and names the evidence that established it.
+
+### CatalogIdentityProjection
+
+The Dashboard projection separates the execution host, serving provider, publisher/lab, human
+name, exact public selector, and catalogue source. These axes cannot be derived from one another.
+A controlled source may mark an identity public only when its bounded parser established that
+catalogue metadata. Codex cache display names and narrowly recognized official Claude ids are
+public product vocabulary; a custom provider, gateway deployment, local tag, or observed-only id
+remains a keyed pseudonym. Trusted documentation and catalogue links are server-produced HTTPS
+links on a fixed host allowlist. The browser never guesses a link from a model-name substring.
 
 ### ModelBinding
 
@@ -193,8 +203,12 @@ Claude collection reads user settings and the platform-managed settings path. It
 `ANTHROPIC_MODEL` and `ANTHROPIC_DEFAULT_{SONNET,OPUS,HAIKU}_MODEL` from the process environment;
 credentials, endpoints, and unrelated environment values remain outside the collector.
 
-Local refresh reads configuration, local caches/protocols, and observed evidence. Online refresh is
-separate and explicit. Neither path invokes a model or sends a prompt.
+Local refresh reads configuration, local caches/protocols, and observed evidence. OpenCode
+collection requests its verbose, Models.dev-backed local view so display name, family,
+capabilities, limits, lifecycle, and pricing can be normalized without retaining API URLs,
+headers, or provider options. Its selector grammar includes current OpenRouter
+`~publisher/model` namespaces. Online refresh is separate and explicit. Neither path invokes a
+model or sends a prompt.
 
 ## Privacy and delivery
 
@@ -204,10 +218,13 @@ configured model or deployment identifiers for an explicit local CLI read. An ow
 per-install secret keys scope fingerprints and the separate Dashboard projection.
 
 CLI status and Dashboard reads are cache-only. CLI reads are deliberate exact local disclosure. The
-Dashboard receives `keyed-v1` pseudonyms for model/provider/digest/alias/replacement/edge/binding/
-evidence/scope/history identifiers while controlled built-in source and diagnostic vocabulary stays
-named. Missing key material fails closed without creating state. Delivery remains behind the
-loopback, session-token, origin, CSP, and `no-store` boundary and cannot apply a plan.
+Dashboard receives `keyed-v1` pseudonyms for private model/provider/digest/alias/replacement/edge/
+binding/evidence/scope/history identifiers. Source-proven public catalogue identity may retain its
+human name, selector, publisher, and trusted links; public identity never makes entitlement or
+routability known. The summary projection omits the large model array, and the inventory projection
+filters, sorts, and pages only the already-sanitized rows. Missing key material fails closed without
+creating state. Delivery remains behind the loopback, session-token, origin, CSP, and `no-store`
+boundary and cannot apply a plan.
 
 ## Invariants
 
@@ -222,3 +239,4 @@ loopback, session-token, origin, CSP, and `no-store` boundary and cannot apply a
 9. Ordinary reads make no network request and consume no inference tokens.
 10. `ak sync` does not execute model refresh or model-plan advisories.
 11. Private configuration and transcript content never enter snapshots or aggregate APIs.
+12. Inventory search, filtering, and sorting operate after privacy projection.

@@ -54,7 +54,7 @@ The initial source adapters are:
 - Claude user settings, platform managed policy, model aliases, and a model-only environment
   allowlist;
 - the Codex model cache plus top-level `config.toml` model selection;
-- OpenCode's project/provider-scoped `models` output plus `opencode.json` selection;
+- OpenCode's project/provider-scoped verbose `models` output plus `opencode.json` selection;
 - the local Ollama catalogue and immutable model digest; and
 - sanitized model ids from the existing local usage index.
 
@@ -82,9 +82,14 @@ The lookup contracts were checked against current first-party documentation in A
 
 - Claude accepts the `sonnet` and `opus` aliases or a full model name through its documented model
   selection surfaces ([Claude Code CLI reference](https://docs.anthropic.com/en/docs/claude-code/cli-usage)).
-- OpenCode exposes `opencode models [provider]`; `--refresh` refreshes its Models.dev-backed cache
-  ([OpenCode CLI](https://opencode.ai/docs/cli/)). Its configuration accepts `provider/model`, an
-  optional `#variant`, or the expanded selector object.
+- OpenCode exposes `opencode models [provider] --verbose`; `--refresh` refreshes its
+  Models.dev-backed cache ([OpenCode models](https://opencode.ai/docs/models/)). Its configuration
+  accepts `provider/model`, an optional `#variant`, or the expanded selector object. Current
+  OpenRouter catalogue selectors may contain `~publisher/model`; these are valid ids, not parser
+  errors.
+- Models.dev publishes provider-independent human names, labs, serving providers, limits,
+  capabilities, pricing, release dates, and explicit weight links through JSON endpoints
+  ([Models.dev](https://models.dev/)). Catalogue presence proves discovery, not account access.
 - Ollama's current local catalogue command is `ollama ls`; immutable digests are also part of the
   documented list-models response ([Ollama CLI](https://docs.ollama.com/cli),
   [Ollama list models API](https://docs.ollama.com/api/tags)).
@@ -158,22 +163,34 @@ Open `ak dashboard`, then choose **Usage → Models**. The view includes:
 - read-only swap-impact guidance; and
 - evidence source status and capture time.
 
-The compact Model lifecycle item on Overview links to this view. Exact model, provider, digest,
-alias, replacement, edge, binding, scope, snapshot, history, and evidence identifiers remain
-available only through an explicit local CLI read. Before `/api/models` responds, it replaces those
-identifiers with stable keyed pseudonyms derived from the existing private scope key; lifecycle
-notices become an availability disclosure rather than verbatim private text. Controlled built-in
-source ids, owners, transport, network policy, collection mode, schemas, and diagnostic codes stay
-named so evidence remains actionable; unknown/private source metadata is pseudonymized. A missing or
-invalid key fails the API closed and an ordinary Dashboard read never creates one. The route also
-keeps the Dashboard's loopback, session-token, CSP/origin, `no-store`, and no-egress protections.
+The host inventory loads only when Models opens. It first fetches the small summary and then the
+first 50 relevant rows; catalogue-only rows load in explicit pages. Search and host, serving
+provider, publisher, relevance, lifecycle, and evidence filters reset pagination. Every column
+header sorts ascending and descending with unknown values last. The table is height-bounded,
+scrolls internally in both axes, keeps its header sticky, and retains an explicit **Load 50 more**
+control.
+
+Source-proven public catalogue records show a human name, host, publisher, serving provider when
+that independent fact is known, exact public selector, and trusted documentation/catalogue links.
+Codex cache identity, official Claude ids, and conservatively recognized Models.dev/OpenRouter rows
+can qualify. Hugging Face and Ollama links appear only when source metadata supplies or verifies the
+exact repository/library identity. Custom providers, private deployments, local tags, observed-only
+ids, digests, aliases, bindings, scopes, history, and evidence ids remain stable keyed pseudonyms.
+The browser never derives provider or publisher from a name and never invents an external link.
+
+An `unknown` cell explains which evidence is absent. Discovery does not establish entitlement;
+configuration does not establish successful use; and a model id never establishes the serving
+provider. A missing or invalid key fails the API closed, an ordinary Dashboard read never creates
+one, and all reads retain loopback, session-token, CSP/origin, `no-store`, and no-egress
+protections.
 
 ## Privacy and recovery
 
 Snapshots contain no credentials, prompts, reasoning traces, transcript text, private endpoints,
 or raw account/profile/project identifiers. Because the owner-only cache supports explicit local
-CLI evidence, it can retain bounded exact configured model or deployment identifiers; the
-Dashboard never receives those exact values. A corrupt cache degrades to an empty readable store;
+CLI evidence, it can retain bounded exact configured model or deployment identifiers. The
+Dashboard receives exact identity only for a source-proven public catalogue record; private exact
+values never cross that boundary. A corrupt cache degrades to an empty readable store;
 run `ak models refresh` to rebuild it. A source schema failure is isolated to that source and shown
 as `unsupported-schema` rather than converted to an empty catalogue.
 

@@ -80,7 +80,9 @@ release proof is pending.
 | Consumer impact | Read-only link from a lifecycle fact to affected routes, projections, Agentic QE/Ruflo consumers, or Route Intelligence evidence |
 | Swap plan | Read-only impact report and copyable canonical route action; never an independent routing policy or apply operation |
 | Route Intelligence feed | Mechanical candidates plus audit-preserving lifecycle invalidations; quality and economics claims are explicitly absent |
-| Keyed model projection | Dashboard-only stable pseudonyms derived from the existing private scope key; distinct from exact explicit CLI evidence |
+| Public catalogue identity | Human-readable model name, publisher, public selector, and trusted links retained only when bounded source evidence establishes that the identity is public |
+| Private model reference | Deployment, gateway, local tag, observed-only id, or other model identity without public-catalogue proof; the Dashboard exposes only its keyed projection |
+| Keyed model projection | Dashboard-only stable pseudonyms derived from the existing private scope key; distinct from exact explicit CLI evidence and source-proven public catalogue identity |
 
 Configured, effective, observed, discoverable, entitled, policy allowed, routable, lifecycle, and
 recommended are separate model-state dimensions. `Unknown` in one dimension cannot be filled from
@@ -176,6 +178,11 @@ runtime state is a chip word, never a prose word. See
 - Qualify **adapter** as integration adapter or source adapter when ambiguity is possible.
 - Say **catalogue source** for model discovery evidence and **catalog snapshot** for the normalized,
   sanitized local record; neither is canonical routing policy.
+- Keep **execution host**, **serving provider**, **publisher**, and **public model selector** separate;
+  none can be inferred from another or from a human-readable model name.
+- Say **public catalogue identity** only when a bounded source proves it. Say **private model
+  reference** when public identity is absent or ambiguous; do not expose its exact value in the
+  Dashboard.
 - Say **compatible candidate** only when required mechanical facts are established. Reserve
   **cheaper equivalent** and **premium justified** for Route Intelligence evidence.
 - Do not infer an inference provider from a transcript host alone.

@@ -5,8 +5,9 @@
 - **Updated:** 2026-08-25
 - **Update note:** Implemented and release-proved the bounded inventory, descriptor-selected source
   adapters, conservative snapshot diff, read-only CLI/status/Dashboard surfaces, consumer impact,
-  and keyed Dashboard privacy projection. Exact-head project, feature-specific Agentic QE,
-  privacy, security, accessibility, packaging, and dependency-audit evidence is recorded below.
+  privacy-projected public catalogue identity, and lazy paginated inventory controls. Exact-head
+  project, feature-specific Agentic QE, privacy, security, accessibility, packaging, and
+  dependency-audit evidence is recorded below.
 - **Deciders:** agentic-kit maintainers
 - **Related:** [issue #110](https://github.com/pacphi/agentic-kit/issues/110),
   [implementation PR #179](https://github.com/pacphi/agentic-kit/pull/179),
@@ -97,6 +98,12 @@ The initial adapter set covers:
 - OpenCode's project/provider-scoped model list and separately authorized online refresh; and
 - Ollama catalogue, digest, and runtime evidence through the same normalized contract.
 
+OpenCode collection uses its bounded verbose output. Current `~publisher/model` selectors are valid;
+human name, family, capabilities, limits, lifecycle, and pricing are allowlisted while API URLs,
+headers, options, and custom provider details are discarded. A public Models.dev identity marker is
+reserved for a conservatively recognized catalogue namespace; ambiguous custom providers remain
+private.
+
 Interactive picker scraping and inference probes are excluded. All subprocess calls use literal
 argument arrays, bounded timeouts, output-size limits, and no shell interpolation.
 
@@ -166,19 +173,23 @@ under Usage plus a compact Overview summary. The Models destination presents att
 inventory, change history, consumers, swap impact, and evidence disclosure.
 
 Normal status and Dashboard reads never refresh a catalogue or invoke a model. The Dashboard cannot
-apply a plan. All model counts, badges, and warnings link to their evidence state, freshness,
-completeness, and scope.
+apply a plan. It fetches a compact summary before a first 50-row relevant inventory page. Search,
+faceted filters, server-side sorting, and later pages operate on the sanitized projection. The
+height-bounded inventory scrolls internally with a sticky header, so history and consumer panels do
+not move behind the full catalogue. All model counts, badges, and warnings link to their evidence
+state, freshness, completeness, and scope.
 
 ### 8. Protect private scope and configuration facts
 
 Credentials, auth tokens, prompts, reasoning traces, raw private provider configuration, endpoints,
 and raw account/profile/project identities never enter snapshots or Dashboard payloads. The
 owner-only cache may retain bounded exact configured model or deployment identifiers so an explicit
-local CLI read can explain them. The Dashboard never receives those exact values: `/api/models`
-requires the existing owner-only per-install secret and projects model, provider, digest, alias,
-replacement, edge, binding, evidence, scope, and history identifiers to stable keyed pseudonyms.
-Controlled built-in source ids, owners, modes, and diagnostic codes remain named so evidence stays
-operable. A missing or invalid key fails closed and an ordinary read never creates one.
+local CLI read can explain them. `/api/models` requires the existing owner-only per-install secret.
+Source-proven public catalogue identity may retain its human name, publisher, exact public selector,
+and trusted allowlisted HTTPS links. Private model/provider/digest/alias/replacement/edge/binding/
+evidence/scope/history identifiers remain stable keyed pseudonyms. Public identity does not prove
+serving provider, entitlement, policy, routability, or quality. Filtering and sorting run after
+privacy projection, a missing or invalid key fails closed, and an ordinary read never creates one.
 
 Snapshot files are owner-only and atomically replaced. Native cache/protocol data is untrusted and
 subject to byte, schema, enum, and timeout bounds. Dashboard delivery retains loopback binding,
@@ -197,6 +208,8 @@ session-token authorization, CSP/origin protections, `no-store`, and secret scan
   privacy documentation must account for.
 - Supporting a new host catalogue requires a descriptor, an anti-corruption adapter, fixtures, and
   explicit evidence semantics; host identity alone grants nothing.
+- Public catalogue identity makes the local ledger readable without weakening private deployment
+  protection; unsupported or ambiguous identity remains pseudonymous.
 
 ## Acceptance conditions
 
@@ -221,16 +234,17 @@ The implementation branch was validated on 2026-08-25 with the following exact-h
 - `pnpm run check` passed TypeScript checking, ESLint, Markdown lint, packaging, CLI-load checks,
   and the full unit/integration suite. Native instrumented coverage was 86.51% lines, 80.11%
   branches, and 83.99% functions against 70% repository floors.
-- `pnpm run test:ui` passed the 287-check deterministic browser matrix, including the Models view,
-  keyboard table scrolling, tab navigation, evidence disclosure, responsive behavior, and
-  network-silent page loading.
+- `pnpm run test:ui` passed the 301-check deterministic browser matrix, including lazy Models
+  loading, paired evidence filters, server-side sorting, pagination, keyboard table scrolling, tab
+  navigation, evidence disclosure, responsive behavior, and network-silent page loading.
 - Agentic QE coverage analysis passed its configured 70% feature threshold; its SAST scan reported
   zero vulnerabilities. Its generic `aqe quality --gate` shortcut rejected its retained aggregate
   evidence as stale even after the analyzers ran, so that unavailable aggregate was recorded rather
   than silently replaced with invented metrics.
 - Privacy and security tests proved owner-only atomic snapshots, bounded subprocess output,
-  cache-only reads, explicit no-write/no-network online dry runs, keyed Dashboard pseudonyms,
-  fail-closed missing-key behavior, and absence of raw private identifiers from `/api/models`.
+  cache-only reads, explicit no-write/no-network online dry runs, source-proven public identity,
+  keyed private Dashboard pseudonyms, fail-closed missing-key behavior, and absence of raw private
+  identifiers from `/api/models`.
 - `pnpm audit --prod` reported no known vulnerabilities. No runtime dependency was introduced;
   the implementation uses Node's built-in filesystem and cryptography APIs.
 - The package dry run included this ADR, the DDD model, and `docs/MODELS.md`; internal Markdown
