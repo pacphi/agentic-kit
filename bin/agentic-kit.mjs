@@ -22,6 +22,7 @@ const PORCELAIN = Object.assign(Object.create(null), {
   dashboard: () => import('../src/commands/x/dashboard.mjs'),
   admin: () => import('../src/commands/x/admin.mjs'),
   usage: () => import('../src/commands/usage.mjs'),
+  models: () => import('../src/commands/models.mjs'),
   system: () => import('../src/commands/system.mjs'),
   about: () => import('../src/commands/about.mjs'),
   run: () => import('../src/commands/run.mjs'),
@@ -52,6 +53,7 @@ Usage (ak = alias of agentic-kit):
   ak dashboard       open the local web dashboard (localhost; auto-opens browser)  [--port N] [--no-open]
   ak admin           maintainer-only telemetry admin (localhost; GitHub/npm egress)  [--port N] [--no-open]
   ak usage           inspect/refresh offline provider analytics  [status|refresh openrouter]
+  ak models          inspect/refresh model lifecycle evidence  [status|refresh|diff|explain|plan]
   ak system          what this stack occupies on your machine   [--deep] [--json]
   ak about           what agentic-kit installs and configures, and why  [--category N]
   ak run             execute a host-neutral activity pipeline  [template "task"] [--dry-run]
@@ -177,7 +179,7 @@ async function main() {
   // setup and host own complete mutation/reporting flows. Running the generic
   // nudge after a declined trust preflight could write version-cache state and
   // violate their "before any changes" boundary.
-  if (!values.json && !values['dry-run'] && !['sync', 'usage', 'setup', 'host', 'ruflo-mcp'].includes(cmd)) {
+  if (!values.json && !values['dry-run'] && !['sync', 'usage', 'models', 'setup', 'host', 'ruflo-mcp'].includes(cmd)) {
     try {
       const { driftReport } = await import('../src/lib/versions.mjs');
       for (const r of await driftReport()) {
