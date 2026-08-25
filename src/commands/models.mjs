@@ -3,9 +3,9 @@ import { loadKitConfig } from '../lib/config.mjs';
 import { aqeRouterFile } from '../lib/providers.mjs';
 import { readJson } from '../lib/settings.mjs';
 import {
-  appendModelSnapshot, baselineFor, collectModelSnapshot, createModelReadModel,
-  diffSnapshots, explainModel, latestSnapshot, modelInventoryPath, planModelChange,
-  readModelStore, snapshotById, summarizeModelHealth,
+  appendModelSnapshot, collectModelSnapshot, createModelReadModel,
+  diffSnapshotHistory, explainModel, latestSnapshot, modelInventoryPath, planModelChange,
+  previousSnapshot, readModelStore, snapshotById, summarizeModelHealth,
 } from '../lib/model-inventory/index.mjs';
 
 export const options = {
@@ -34,7 +34,14 @@ Usage:
   ak models plan --activity ACTIVITY [--from HOST:MODEL] --to HOST:MODEL [--json]
 
 The plan command is read-only. It may print a copyable canonical routing command,
-but never changes routing, AQE, Ruflo, or provider configuration.`;
+but never changes routing, AQE, Ruflo, or provider configuration.
+
+Examples:
+  ak models refresh --all
+  ak models status --host codex --json
+  ak models diff models:before models:after
+  ak models explain codex:gpt-5.6-terra
+  ak models plan --activity testing --to codex:gpt-5.6-terra`;
 
 const ALL_OWNERS = Object.freeze(['claude', 'codex', 'opencode', 'ollama']);
 
@@ -62,7 +69,7 @@ function selectedPair(store, positionals, flags) {
   const toId = flags.to ?? positionals[2];
   const after = toId ? snapshotById(store, toId) : latestSnapshot(store);
   const before = fromId ? snapshotById(store, fromId)
-    : after ? baselineFor(store, after.scope.fingerprint) : null;
+    : previousSnapshot(store, after);
   return { before, after, fromId, toId };
 }
 
@@ -148,7 +155,7 @@ export async function run({ flags, positionals, deps = {} }) {
       else warn(`Cannot diff: ${missing} not found.`);
       return 1;
     }
-    const result = diffSnapshots(before, after);
+    const result = diffSnapshotHistory(before, after, store.snapshots);
     if (flags.json) printJson(result);
     else {
       heading(`ak models diff — ${before.snapshotId} → ${after.snapshotId}`);

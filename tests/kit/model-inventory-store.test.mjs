@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import {
-  MAX_MODEL_SNAPSHOTS, appendModelSnapshot, baselineFor, latestSnapshot, readModelStore,
+  MAX_MODEL_SNAPSHOTS, appendModelSnapshot, baselineFor, latestSnapshot, previousSnapshot, readModelStore,
   readOrCreateModelScopeKey,
 } from '../../src/lib/model-inventory/store.mjs';
 
@@ -36,6 +36,19 @@ test('append writes atomically with private permissions and advances a complete 
   assert.equal(fs.readdirSync(sb.dir).some((name) => name.endsWith('.tmp')), false);
   if (process.platform !== 'win32') assert.equal(fs.statSync(sb.file).mode & 0o777, 0o600);
   fs.rmSync(sb.dir, { recursive: true, force: true });
+});
+
+test('previous snapshot is the prior complete capture in the same scope', () => {
+  const current = snapshot('current', NOW);
+  const store = {
+    snapshots: [
+      snapshot('other-scope', NOW - 3_000, { scope: 'scope-b' }),
+      snapshot('complete-before', NOW - 2_000),
+      snapshot('partial-before', NOW - 1_000, { status: 'partial' }),
+      current,
+    ],
+  };
+  assert.equal(previousSnapshot(store, current).snapshotId, 'complete-before');
 });
 
 test('partial snapshot is retained but cannot replace the complete baseline', () => {

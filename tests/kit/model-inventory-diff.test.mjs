@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { diffSnapshots } from '../../src/lib/model-inventory/diff.mjs';
+import { diffSnapshotHistory, diffSnapshots } from '../../src/lib/model-inventory/diff.mjs';
 import { modelIdentityKey } from '../../src/lib/model-inventory/contracts.mjs';
 
 const AT = '2026-08-25T12:00:00.000Z';
@@ -21,6 +21,8 @@ function snapshot(id, models, { scope = 'scope-a', status = 'complete' } = {}) {
     models, bindings: [], changes: [], opportunities: [], diagnostics: [],
   };
 }
+
+function at(value, capturedAt) { return { ...value, capturedAt, sources: value.sources.map((source) => ({ ...source, capturedAt })) }; }
 
 test('identical same-scope snapshots produce no lifecycle changes', () => {
   const before = snapshot('before', [model('gpt-a')]);
@@ -43,6 +45,16 @@ test('complete same-scope snapshots require repeated absence before removal', ()
   );
   assert.deepEqual(result.changes.map(({ kind }) => kind).sort(), ['model-added', 'model-removed']);
   assert.equal(result.changes.every(({ provisional }) => provisional === false), true);
+});
+
+test('retained history confirms removal after two complete consecutive absences', () => {
+  const present = at(snapshot('present', [model('gpt-a')]), '2026-08-23T12:00:00.000Z');
+  const firstMissing = at(snapshot('missing-1', []), '2026-08-24T12:00:00.000Z');
+  const secondMissing = at(snapshot('missing-2', []), '2026-08-25T12:00:00.000Z');
+  const result = diffSnapshotHistory(firstMissing, secondMissing, [present, firstMissing, secondMissing]);
+  assert.deepEqual(result.changes.map(({ kind }) => kind), ['model-removed']);
+  assert.equal(result.changes[0].subject, modelIdentityKey(present.models[0].key));
+  assert.equal(result.changes[0].provisional, false);
 });
 
 test('partial or stale evidence suppresses removals', () => {

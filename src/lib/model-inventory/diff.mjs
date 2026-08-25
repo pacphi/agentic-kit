@@ -122,3 +122,55 @@ export function diffSnapshots(beforeValue, afterValue, {
     diagnostics: [...new Set(diagnostics)],
   };
 }
+
+/**
+ * Compare two snapshots while carrying repeated-absence evidence across the
+ * retained same-scope history. This lets a second complete absence become a
+ * removal even though the immediately previous snapshot no longer contains the
+ * model record.
+ */
+export function diffSnapshotHistory(beforeValue, afterValue, snapshots = [], options = {}) {
+  const before = normalizeSnapshot(beforeValue);
+  const after = normalizeSnapshot(afterValue);
+  const result = diffSnapshots(before, after, options);
+  if (!result.comparable || !isCompleteStableSnapshot(after)) return result;
+
+  const ordered = snapshots
+    .map((value, index) => ({ snapshot: normalizeSnapshot(value), index }))
+    .filter(({ snapshot }) => snapshot.scope.fingerprint === after.scope.fingerprint
+      && isCompleteStableSnapshot(snapshot)
+      && Date.parse(snapshot.capturedAt) <= Date.parse(after.capturedAt))
+    .sort((a, b) => Date.parse(a.snapshot.capturedAt) - Date.parse(b.snapshot.capturedAt)
+      || a.index - b.index)
+    .map(({ snapshot }) => snapshot);
+  if (!ordered.some(({ snapshotId }) => snapshotId === after.snapshotId)) ordered.push(after);
+
+  const identities = new Set(ordered.flatMap((snapshot) => snapshot.models.map((model) => model.identity)));
+  const afterIds = new Set(after.models.map((model) => model.identity));
+  const removalThreshold = Number(options.removalThreshold ?? 2);
+  const authoritative = new Set(options.authoritativeRemovals ?? []);
+
+  for (const identity of identities) {
+    if (afterIds.has(identity)) continue;
+    let lastKnown = null;
+    let absenceCount = 0;
+    for (const snapshot of ordered) {
+      const present = snapshot.models.find((model) => model.identity === identity);
+      if (present) {
+        lastKnown = present;
+        absenceCount = 0;
+      } else if (lastKnown) absenceCount++;
+    }
+    if (!lastKnown || (!authoritative.has(identity) && absenceCount < removalThreshold)) continue;
+    const existing = result.changes.findIndex((entry) => entry.subject === identity
+      && (entry.kind === 'model-missing' || entry.kind === 'model-removed'));
+    const removal = change('model-removed', lastKnown, lastKnown.key, null,
+      { severity: 'warn', field: 'key', provisional: false });
+    if (existing >= 0) result.changes.splice(existing, 1, removal);
+    else result.changes.push(removal);
+  }
+  if (!result.changes.some(({ kind }) => kind === 'model-missing')) {
+    result.diagnostics = result.diagnostics.filter((message) => !message.startsWith('model absence is provisional'));
+  }
+  return result;
+}

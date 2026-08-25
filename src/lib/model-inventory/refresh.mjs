@@ -106,7 +106,7 @@ function mergeModels(records) {
 
 export function composeModelSnapshot(collection, {
   scope = {}, scopeKey, capturedAt = collection?.generatedAt ?? new Date().toISOString(),
-} = {}) {
+} = /** @type {any} */ ({})) {
   const discoveryResults = Object.values(collection?.discovery?.results ?? {});
   const profileFingerprints = Object.fromEntries(discoveryResults
     .filter((result) => result?.source?.scopeFingerprint)
@@ -136,6 +136,7 @@ export function composeModelSnapshot(collection, {
   });
 }
 
+/** @param {any} options */
 export async function collectModelSnapshot(options = {}) {
   const scopeKey = options.scopeKey ?? readOrCreateModelScopeKey();
   const capturedAt = options.discoveryOptions?.capturedAt ?? new Date().toISOString();

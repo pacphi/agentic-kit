@@ -130,6 +130,20 @@ export function baselineFor(store, scopeFingerprint) {
   return id ? snapshotById(store, id) : null;
 }
 
+/** Return the most recent earlier baseline-eligible snapshot in the same scope. */
+export function previousSnapshot(store, snapshot) {
+  if (!snapshot) return null;
+  const snapshots = store?.snapshots ?? [];
+  const targetIndex = snapshots.findIndex(({ snapshotId }) => snapshotId === snapshot.snapshotId);
+  const capturedAt = Date.parse(snapshot.capturedAt);
+  return snapshots
+    .filter((entry, index) => entry.snapshotId !== snapshot.snapshotId
+      && entry.scope.fingerprint === snapshot.scope.fingerprint
+      && isCompleteStableSnapshot(entry)
+      && (targetIndex >= 0 ? index < targetIndex : Date.parse(entry.capturedAt) < capturedAt))
+    .at(-1) ?? null;
+}
+
 /** @param {any} store @param {{scopeFingerprint?: string}} [options] */
 export function latestSnapshot(store, options = {}) {
   const { scopeFingerprint } = options;

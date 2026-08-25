@@ -688,15 +688,16 @@ export function startDashboard({
   // Cache-only and lazy: model discovery is exclusively owned by
   // `ak models refresh`; opening the dashboard never contacts a host/catalog.
   const provideModels = typeof models === 'function' ? models : models ? async () => models : async () => {
-    const [{ readModelStore, latestSnapshot, baselineFor }, { diffSnapshots }, { createModelReadModel }] = await Promise.all([
+    const [{ readModelStore, latestSnapshot, previousSnapshot }, { diffSnapshotHistory }, { createModelReadModel }] = await Promise.all([
       import('./model-inventory/store.mjs'), import('./model-inventory/diff.mjs'),
       import('./model-inventory/read-model.mjs'),
     ]);
     const store = readModelStore();
     const snapshot = latestSnapshot(store);
     if (!snapshot) return { status: 'empty', snapshot: null, history: [], hint: 'ak models refresh' };
-    const baseline = baselineFor(store, snapshot.scope.fingerprint);
-    const diff = baseline ? diffSnapshots(baseline, snapshot) : { changes: [], diagnostics: [] };
+    const baseline = previousSnapshot(store, snapshot);
+    const diff = baseline ? diffSnapshotHistory(baseline, snapshot, store.snapshots)
+      : { changes: [], diagnostics: [] };
     return {
       status: 'cached', snapshot: createModelReadModel(snapshot, { changes: diff }),
       history: store.snapshots.filter((entry) => entry.scope.fingerprint === snapshot.scope.fingerprint)

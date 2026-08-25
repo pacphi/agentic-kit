@@ -5,7 +5,7 @@ const bounded = (value) => typeof value === 'string' && value.length > 0 && valu
 
 export async function collectObservedModels({
   readIndexFn = readIndex, indexOptions = {}, scope = {}, scopeKey, days = 365,
-} = {}) {
+} = /** @type {any} */ ({})) {
   let aggregate;
   try { aggregate = await readIndexFn({ days, ...indexOptions }); } catch (error) {
     const capturedAt = new Date().toISOString();
