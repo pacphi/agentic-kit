@@ -149,6 +149,20 @@ export async function bootstrapHostAdapters({
   cfg, env = process.env, readManifest = defaultReadManifest, consent,
 } = {}) {
   if (env?.AK_EXPERIMENTAL_HOST_ADAPTERS !== '1') return { active: false, admitted: [], warnings: [] };
+
+  // The AQE provider bridge is an exact snapshot of THIS bootstrap pass.
+  // Clear it before every flag-on early return as well as before rebuilding:
+  // removing the final adapter or losing access to the consent store must not
+  // leave a provider from a prior in-process bootstrap live. Flag-off remains
+  // a true zero-import no-op above.
+  let aqeProviderBridge;
+  try {
+    aqeProviderBridge = await import('./aqe-provider.mjs');
+    aqeProviderBridge.resetAdmittedAqeProviders();
+  } catch {
+    aqeProviderBridge = null;
+  }
+
   const entries = Array.isArray(cfg?.hostAdapters) ? cfg.hostAdapters : [];
   if (entries.length === 0) return { active: false, admitted: [], warnings: [] };
 
@@ -180,18 +194,6 @@ export async function bootstrapHostAdapters({
   const admitted = results.filter((result) => result.admitted);
   const warnings = results.filter((result) => !result.admitted)
     .map(({ name, reason, detail }) => ({ name, reason, detail }));
-
-  // The AQE provider bridge is an exact snapshot of THIS bootstrap pass.
-  // Clear it before rebuilding so a second in-process bootstrap cannot leave
-  // a formerly-admitted/granted provider live after consent, enablement, or
-  // configuration changes. Flag-off remains a true zero-import no-op above.
-  let aqeProviderBridge;
-  try {
-    aqeProviderBridge = await import('./aqe-provider.mjs');
-    aqeProviderBridge.resetAdmittedAqeProviders();
-  } catch {
-    aqeProviderBridge = null;
-  }
 
   if (admitted.length) {
     const { applyAdmitted } = await import('./admitted.mjs');

@@ -20,6 +20,11 @@ const AQE_BUILTIN_OR_RESERVED_TYPES = new Set([
   'openrouter', 'azure-openai', 'bedrock', 'cognitum', 'ollama', 'onnx',
 ]);
 const AQE_BILLING_MODES = Object.freeze(['subscription', 'metered-api', 'metered-capped', 'local']);
+const MAX_AQE_PROVIDER_MODELS = 128;
+const MAX_AQE_MODEL_BYTES = 256;
+const MAX_AQE_DISPLAY_NAME_BYTES = 128;
+const MAX_AQE_PROVIDER_CONCURRENCY = 64;
+const MAX_AQE_PROVIDER_TIMEOUT_MS = 24 * 60 * 60 * 1000;
 const AQE_BRIDGE_ENV = new Set(['PATH', 'HOME', 'XDG_CONFIG_HOME', 'APPDATA', 'AK_EXPERIMENTAL_HOST_ADAPTERS']);
 const ENV_CODE_INJECTION = new Set([
   'NODE_OPTIONS', 'BASH_ENV', 'ENV', 'PYTHONPATH', 'PYTHONHOME', 'RUBYOPT',
@@ -43,6 +48,14 @@ export class ManifestRejected extends TypeError {
     this.name = 'ManifestRejected';
     this.reason = reason;
   }
+}
+
+function hasUnsafeControl(value) {
+  return [...value].some((character) => {
+    const code = character.codePointAt(0);
+    return code <= 0x1f || (code >= 0x7f && code <= 0x9f)
+      || (code >= 0x202a && code <= 0x202e) || (code >= 0x2066 && code <= 0x2069);
+  });
 }
 
 // ── strict allowlists (Wave 4 security remediation, P0-A) ──────────────────
@@ -262,8 +275,12 @@ function validateAqe(value, host, driving, execution) {
     throw new ManifestRejected('invalid-aqe-provider', error.message);
   }
   if (provider.hook.timeoutMs !== undefined
-    && (!Number.isInteger(provider.hook.timeoutMs) || provider.hook.timeoutMs <= 0)) {
-    throw new ManifestRejected('invalid-aqe-provider', 'aqe.provider.hook.timeoutMs must be a positive integer');
+    && (!Number.isInteger(provider.hook.timeoutMs) || provider.hook.timeoutMs <= 0
+      || provider.hook.timeoutMs > MAX_AQE_PROVIDER_TIMEOUT_MS)) {
+    throw new ManifestRejected(
+      'invalid-aqe-provider',
+      `aqe.provider.hook.timeoutMs must be a positive integer <= ${MAX_AQE_PROVIDER_TIMEOUT_MS}`,
+    );
   }
   validateHookFiles(provider.hook.files, 'aqe.provider.hook.files', 'invalid-aqe-provider');
   const passEnv = validateEnvNames(provider.hook.passEnv, 'aqe.provider.hook.passEnv');
@@ -295,6 +312,19 @@ function validateAqe(value, host, driving, execution) {
     } catch (error) {
       throw new ManifestRejected('invalid-aqe-provider', error.message);
     }
+    if (provider.models.length > MAX_AQE_PROVIDER_MODELS) {
+      throw new ManifestRejected(
+        'invalid-aqe-provider',
+        `aqe.provider.models may contain at most ${MAX_AQE_PROVIDER_MODELS} entries`,
+      );
+    }
+    const oversized = provider.models.find((model) => Buffer.byteLength(model, 'utf8') > MAX_AQE_MODEL_BYTES);
+    if (oversized !== undefined) {
+      throw new ManifestRejected(
+        'invalid-aqe-provider',
+        `aqe.provider.models entries may be at most ${MAX_AQE_MODEL_BYTES} UTF-8 bytes`,
+      );
+    }
     models = [...provider.models];
   }
   const defaultModel = provider.defaultModel ?? models[0];
@@ -307,12 +337,21 @@ function validateAqe(value, host, driving, execution) {
     }
   }
   if (provider.maxConcurrency !== undefined
-    && (!Number.isInteger(provider.maxConcurrency) || provider.maxConcurrency <= 0)) {
-    throw new ManifestRejected('invalid-aqe-provider', 'aqe.provider.maxConcurrency must be a positive integer');
+    && (!Number.isInteger(provider.maxConcurrency) || provider.maxConcurrency <= 0
+      || provider.maxConcurrency > MAX_AQE_PROVIDER_CONCURRENCY)) {
+    throw new ManifestRejected(
+      'invalid-aqe-provider',
+      `aqe.provider.maxConcurrency must be a positive integer <= ${MAX_AQE_PROVIDER_CONCURRENCY}`,
+    );
   }
   if (provider.displayName !== undefined
-    && (typeof provider.displayName !== 'string' || !provider.displayName.trim())) {
-    throw new ManifestRejected('invalid-aqe-provider', 'aqe.provider.displayName must be a non-empty string');
+    && (typeof provider.displayName !== 'string' || !provider.displayName.trim()
+      || Buffer.byteLength(provider.displayName, 'utf8') > MAX_AQE_DISPLAY_NAME_BYTES
+      || hasUnsafeControl(provider.displayName))) {
+    throw new ManifestRejected(
+      'invalid-aqe-provider',
+      `aqe.provider.displayName must be non-empty, control-free, and <= ${MAX_AQE_DISPLAY_NAME_BYTES} UTF-8 bytes`,
+    );
   }
 
   return {

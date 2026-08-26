@@ -133,6 +133,28 @@ test('aqe.provider is strict, host-derived, normalized candidate data', () => {
     () => validateAdapterManifest(rawManifest('hermes', { stripEnv: ['PATH'] })),
     (error) => error.reason === 'invalid-aqe-provider',
   );
+  assert.throws(
+    () => validateAdapterManifest(rawManifest('hermes', { maxConcurrency: 65 })),
+    (error) => error.reason === 'invalid-aqe-provider' && /<= 64/.test(error.message),
+  );
+  const tooSlow = rawManifest();
+  tooSlow.aqe.provider.hook.timeoutMs = 86_400_001;
+  assert.throws(
+    () => validateAdapterManifest(tooSlow),
+    (error) => error.reason === 'invalid-aqe-provider' && /<= 86400000/.test(error.message),
+  );
+  assert.throws(
+    () => validateAdapterManifest(rawManifest('hermes', { models: Array.from({ length: 129 }, (_, i) => `model-${i}`) })),
+    (error) => error.reason === 'invalid-aqe-provider' && /at most 128/.test(error.message),
+  );
+  assert.throws(
+    () => validateAdapterManifest(rawManifest('hermes', { models: ['x'.repeat(257)] })),
+    (error) => error.reason === 'invalid-aqe-provider' && /256 UTF-8 bytes/.test(error.message),
+  );
+  assert.throws(
+    () => validateAdapterManifest(rawManifest('hermes', { displayName: 'unsafe\u001b[31mname' })),
+    (error) => error.reason === 'invalid-aqe-provider' && /control-free/.test(error.message),
+  );
   const noCli = rawManifest();
   noCli.driving.surfaces = ['mcp'];
   assert.throws(
@@ -221,6 +243,21 @@ test('bootstrap activates only an admitted, enabled, hash-current aqeProvider gr
   });
   assert.equal(active.admitted.length, 1);
   assert.equal(active.warnings.length, 0);
+  assert.equal(admittedAqeProviderFor('hermes')?.contentHash, integrity.hash);
+
+  await bootstrapHostAdapters({
+    cfg: { hostAdapters: [] },
+    env: { AK_EXPERIMENTAL_HOST_ADAPTERS: '1' },
+    readManifest: async () => manifest, consent,
+  });
+  assert.equal(admittedAqeProviderFor('hermes'), null,
+    'removing the final configured adapter clears the prior in-process provider snapshot');
+
+  await bootstrapHostAdapters({
+    cfg,
+    env: { AK_EXPERIMENTAL_HOST_ADAPTERS: '1' },
+    readManifest: async () => manifest, consent,
+  });
   assert.equal(admittedAqeProviderFor('hermes')?.contentHash, integrity.hash);
 
   await bootstrapHostAdapters({

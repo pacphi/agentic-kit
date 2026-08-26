@@ -186,6 +186,9 @@ stdout. Exit `77`/`78`, timeout, auth failure, and any other error produce no st
 3.13.12 treats non-empty stdout as a completion even when a CLI exits non-zero. The bridge forwards
 only declared environment variables, protects its own `AK_AQE_*` control variables, rechecks the
 content hash before spawn, and keeps the hook in a supervised subprocess.
+Candidate metadata is bounded before admission: at most 128 model ids of 256 UTF-8 bytes each, a
+control-free display name of at most 128 bytes, concurrency from 1 through 64, and a provider-hook
+timeout no longer than 24 hours.
 
 Graduation has two destinations: a **blessed external adapter** stays out-of-tree holding exactly
 the capabilities its tiers earned, or a maintainer **promotes it to a built-in** by adopting its

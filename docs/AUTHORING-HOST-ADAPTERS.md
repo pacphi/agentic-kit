@@ -167,6 +167,9 @@ protected `AK_AQE_*` variables; only names in `passEnv` cross from the parent en
 print partial output before success: the bridge intentionally suppresses stdout for refusal, auth,
 timeout, and failure because AQE treats non-empty stdout as a completion even on a non-zero exit.
 Billing mode is declared provenance, not a verified charge or vendor fact.
+The boundary is deliberately finite: at most 128 model ids (256 UTF-8 bytes each), a control-free
+128-byte display name, `maxConcurrency` from 1 through 64, and a provider-hook timeout no longer
+than 24 hours. Oversized declarations are refused before consent or projection.
 
 ### One structural coupling worth knowing
 
