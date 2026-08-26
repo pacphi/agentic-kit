@@ -13,6 +13,7 @@ npm install -g @pacphi/agentic-kit@next   # alpha channel until 4.0.0 GA
 ak setup            # once per machine; run inside a git repo to set that project up too
 ak setup --codex    # …or bring up Claude + Codex together in one shot
 ak setup --opencode # …and wire ruflo + ruvnet-brain into opencode (third host)
+ak setup --with-deja-vu # optional local transcript search, MCP mode by default
 ```
 
 > [!IMPORTANT]
@@ -36,6 +37,7 @@ container for you. See [docs/DEVCONTAINERS.md](docs/DEVCONTAINERS.md).
 
 - **One command** installs + heals + *proves* ruflo & agentic-qe — native SQLite, memory, security, statusline (past npm's `allow-scripts` gate).
 - **Source-grounded knowledge:** *RuvNet Brain* — an offline knowledge base over the rUv stack — powers the `search_ruvnet` MCP tool, so answers about ruflo/AgentDB/RVF/SPARC cite real source instead of stale training priors.
+- **Local transcript recall (optional):** [deja-vu](docs/DEJA-VU.md) indexes coding-agent histories for MCP search or host-native automatic recall. It is off by default because the derived plaintext index has its own privacy and retention boundary.
 - **Multi-host execution (optional):** Claude, Codex, and opt-in OpenCode can share one activity policy; `ak run` is the canonical executor, while `ak setup --codex` enables the subscription-backed Claude/Codex defaults.
 - **Self-healing:** `ak sync` re-converges after every upgrade; `ak status` and a local dashboard show what's *actually* on — never assumed.
 - **Honest by construction:** every guard traces to a filed upstream issue, and `ak x verify` proves the paths end-to-end against real CLIs.
@@ -79,7 +81,9 @@ in [docs/archive/](docs/archive/).
 ```text
 ak              status + one suggested next action
 ak setup        first-time setup — machine and/or the project you're standing in
-                [--codex] [--opencode] [--primary-host claude|codex] [--project] [--minimal] [--yes] [--no-aqe] [--no-security] [--reconfigure]
+                [--codex] [--opencode] [--primary-host claude|codex] [--with-deja-vu]
+                [--deja-vu-mode mcp|auto] [--no-deja-vu] [--project] [--minimal]
+                [--yes] [--no-aqe] [--no-security] [--reconfigure]
 ak status       read-only dashboard: what's true, what's drifted   [--json] [--deep]
 ak sync         converge to good: upgrade + heal + verify          [--dry-run] [--no-upgrade]
 ak dashboard    open the local web dashboard (auto-opens your browser)
@@ -97,12 +101,18 @@ ak host         manage execution hosts, routing, and provider bindings
                 status | pick | refresh | off
 ak run          execute a host-neutral activity pipeline (including explicit OpenCode routes)
                 <template> "<task>"  [--dry-run] [--route ...] [--max-concurrent N] [--timeout ms] [--json]
-ak uninstall    leave cleanly                [--dry-run] [--this-project] [--remove-ruflo] [--remove-aqe] [--purge] [--yes]
+ak uninstall    leave cleanly                [--dry-run] [--this-project] [--remove-ruflo]
+                [--remove-aqe] [--remove-deja-vu] [--purge-deja-vu-data] [--purge] [--yes]
 ```
 
 > [!TIP]
 > **When in doubt: `ak sync`.** Every mutating command takes `--dry-run` and
 > prints its plan with reasons — you always see the impact before anything changes.
+
+deja-vu is a separately opted-in companion, not another curated memory store. Read the
+[deja-vu runbook](docs/DEJA-VU.md) before enabling it: the guide covers MCP versus auto events,
+the plaintext derived index, untrusted recall, Codex plugin coexistence, health checks, and the
+independent package/data removal scopes.
 
 `ak` is the daily-driver alias; the full `agentic-kit` command is identical.
 (Heads-up if you also use AutoKitteh: its CLI is also named `ak` — the full

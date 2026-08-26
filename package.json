@@ -20,6 +20,7 @@
     "!claude/**/.claude/**",
     "!claude/**/.agentic-qe/**",
     "!claude/**/.claude-flow/**",
+    "docs/DEJA-VU.md",
     "docs/HOST-SUPPORT.md",
     "docs/INSTALLATION.md",
     "docs/MODELS.md",
