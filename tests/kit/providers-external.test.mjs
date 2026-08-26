@@ -250,6 +250,43 @@ test('empty fallback intent retires the managed chain and its derived default', 
   assert.equal(fs.statSync(file).mtimeMs, beforeMtime);
 });
 
+test('fallback retirement preserves a user-selected replacement from the old chain', () => {
+  fakeAqe('3.13.12'); registerHermes();
+  const dir = project();
+  assert.equal(applyAqeRouter(cfg({
+    provider: null,
+    chain: [
+      { provider: 'hermes', models: ['default'] },
+      { provider: 'ollama', models: ['qwen'] },
+    ],
+    routes: {},
+  }), dir).ok, true);
+
+  const file = aqeRouterFile(dir);
+  const edited = JSON.parse(fs.readFileSync(file, 'utf8'));
+  edited.defaultProvider = 'ollama';
+  fs.writeFileSync(file, JSON.stringify(edited, null, 2) + '\n');
+
+  const cleared = applyAqeRouter(cfg({ provider: null, chain: [], routes: {} }), dir);
+  const disk = JSON.parse(fs.readFileSync(file, 'utf8'));
+  assert.equal(cleared.ok, true, cleared.detail);
+  assert.equal(disk.fallbackChain, undefined, 'the tagged fallback is retired');
+  assert.equal(disk.defaultProvider, 'ollama', 'chain membership alone cannot claim a user replacement');
+  assert.equal(disk._agenticKit.fallbackDefaultProvider, undefined, 'the stale fallback receipt is retired');
+  assert.equal(disk._agenticKit.externalDefaultProvider, undefined, 'the stale external receipt is retired');
+  assert.ok(disk.externalProviders.hermes, 'the admitted declaration remains available');
+  assert.deepEqual(disk.providers.hermes, { enabled: true }, 'the activation remains available');
+
+  const bytes = fs.readFileSync(file, 'utf8');
+  const old = new Date('2001-01-01T00:00:00.000Z');
+  fs.utimesSync(file, old, old);
+  const beforeMtime = fs.statSync(file).mtimeMs;
+  const converged = applyAqeRouter(cfg({ provider: null, chain: [], routes: {} }), dir);
+  assert.equal(converged.changed, false, converged.detail);
+  assert.equal(fs.readFileSync(file, 'utf8'), bytes);
+  assert.equal(fs.statSync(file).mtimeMs, beforeMtime);
+});
+
 test('malformed ownership receipts are relinquished without deleting user values or throwing', () => {
   fakeAqe('3.13.12');
   const dir = project();
@@ -257,7 +294,12 @@ test('malformed ownership receipts are relinquished without deleting user values
   const userDeclaration = { kind: 'cli', command: ['user-provider'] };
   fs.writeFileSync(aqeRouterFile(dir), JSON.stringify({
     _managedBy: 'agentic-kit',
-    _agenticKit: { externalProviders: { dead: null } },
+    _agenticKit: {
+      externalProviders: { dead: null },
+      externalDefaultProvider: null,
+      fallbackDefaultProvider: 'not-a-receipt',
+    },
+    defaultProvider: 'ollama',
     externalProviders: { dead: userDeclaration },
     providers: { dead: { enabled: true, source: 'user' } },
   }));
@@ -267,6 +309,7 @@ test('malformed ownership receipts are relinquished without deleting user values
   assert.equal(result.ok, true, result.detail);
   assert.deepEqual(disk.externalProviders.dead, userDeclaration);
   assert.deepEqual(disk.providers.dead, { enabled: true, source: 'user' });
+  assert.equal(disk.defaultProvider, 'ollama', 'malformed receipts cannot authorize deleting a user default');
   assert.equal(disk._agenticKit, undefined, 'a malformed receipt proves no ownership and is dropped');
 });
 

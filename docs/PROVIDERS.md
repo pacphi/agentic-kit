@@ -381,7 +381,9 @@ Agentic-QE **3.13.12 or newer** is required for an external id. The same admitte
 default, a fallback rung, or the provider projected from an explicit external-host activity route.
 Agentic-kit merges `externalProviders` without replacing foreign declarations and also writes the
 minimal compatibility activation AQE 3.13.12's MCP bootstrap requires:
-`providers[id] = { "enabled": true }`. Both values have exact ownership receipts. A same-id foreign
+`providers[id] = { "enabled": true }`. Both values have exact ownership receipts. Fallback-derived
+defaults carry a separate exact receipt, so removing a managed chain preserves any user-selected
+replacement even when that provider was another rung in the old chain. A same-id foreign
 or user-edited declaration is preserved and reported as a conflict; an explicit foreign
 `enabled:false` is refused rather than overridden. When a grant is revoked, a host is disabled, or
 declared content changes, sync removes only a stale declaration/activation that still exactly

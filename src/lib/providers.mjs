@@ -443,27 +443,38 @@ function plainRecord(value) {
   return value && typeof value === 'object' && !Array.isArray(value) ? value : null;
 }
 
-function exactlyOwnedExternalDefault(config) {
+function exactlyOwnedDefault(config, receiptKey) {
   const provider = config?.defaultProvider;
-  const receipt = plainRecord(config?.[AQE_OWNERSHIP_KEY]?.externalDefaultProvider);
+  const receipt = plainRecord(config?.[AQE_OWNERSHIP_KEY]?.[receiptKey]);
   return typeof provider === 'string' && receipt?.provider === provider
     && receipt.writtenHash === declarationHash(provider)
     ? provider
     : null;
 }
 
-function setExternalDefaultOwnership(config, provider) {
+function setDefaultOwnership(config, receiptKey, provider) {
   const ownership = { ...(plainRecord(config[AQE_OWNERSHIP_KEY]) ?? {}) };
-  ownership.externalDefaultProvider = { provider, writtenHash: declarationHash(provider) };
+  ownership[receiptKey] = { provider, writtenHash: declarationHash(provider) };
   config[AQE_OWNERSHIP_KEY] = ownership;
 }
 
-function clearExternalDefaultOwnership(config) {
+function clearDefaultOwnership(config, receiptKey) {
   const ownership = { ...(plainRecord(config[AQE_OWNERSHIP_KEY]) ?? {}) };
-  delete ownership.externalDefaultProvider;
+  delete ownership[receiptKey];
   if (Object.keys(ownership).length) config[AQE_OWNERSHIP_KEY] = ownership;
   else delete config[AQE_OWNERSHIP_KEY];
 }
+
+const exactlyOwnedExternalDefault = (config) => exactlyOwnedDefault(config, 'externalDefaultProvider');
+const exactlyOwnedFallbackDefault = (config) => exactlyOwnedDefault(config, 'fallbackDefaultProvider');
+const setExternalDefaultOwnership = (config, provider) =>
+  setDefaultOwnership(config, 'externalDefaultProvider', provider);
+const setFallbackDefaultOwnership = (config, provider) =>
+  setDefaultOwnership(config, 'fallbackDefaultProvider', provider);
+const clearExternalDefaultOwnership = (config) =>
+  clearDefaultOwnership(config, 'externalDefaultProvider');
+const clearFallbackDefaultOwnership = (config) =>
+  clearDefaultOwnership(config, 'fallbackDefaultProvider');
 
 function admittedProviderRecord(id) {
   const records = admittedAqeProviders();
@@ -648,23 +659,21 @@ export function applyAqeRouter(cfg, cwd = process.cwd()) {
   const file = aqeRouterFile(root);
   const existing = readJson(file, {}) ?? {};
   const ownedExternalDefault = exactlyOwnedExternalDefault(existing);
+  const ownedFallbackDefault = exactlyOwnedFallbackDefault(existing);
   const desiredExternal = aqeExternalProviders({ projectRoot: root });
   const hasExternal = Object.keys(desiredExternal).length > 0;
   const hasOwnedExternal = Object.keys(existing[AQE_OWNERSHIP_KEY]?.externalProviders ?? {}).length > 0;
-  const hasExternalDefaultReceipt = plainRecord(
-    existing[AQE_OWNERSHIP_KEY]?.externalDefaultProvider,
-  ) !== null;
+  const existingOwnership = plainRecord(existing[AQE_OWNERSHIP_KEY]) ?? {};
+  const hasExternalDefaultReceipt = Object.hasOwn(existingOwnership, 'externalDefaultProvider');
+  const hasFallbackDefaultReceipt = Object.hasOwn(existingOwnership, 'fallbackDefaultProvider');
   const hasManagedFallback = existing.fallbackChain?.id === AQE_MANAGED_TAG;
-  const managedFallbackOwnedDefault = hasManagedFallback
-    && Array.isArray(existing.fallbackChain?.entries)
-    && existing.fallbackChain.entries.some((entry) => entry?.provider === existing.defaultProvider);
   const priorOverrides = existing.agentOverrides ?? {};
   let projected = configuredPolicyToAgentOverrides(policy);
   const managedOverrideKeys = new Set(Object.keys(AGENT_ACTIVITY_MAP));
   let staleOverrides = Object.keys(priorOverrides)
     .filter((agent) => managedOverrideKeys.has(agent) && !(agent in projected));
   if (!hasChain && !hasPolicy && !hasExternal && !hasOwnedExternal && !hasManagedFallback
-    && !hasExternalDefaultReceipt && staleOverrides.length === 0) {
+    && !hasExternalDefaultReceipt && !hasFallbackDefaultReceipt && staleOverrides.length === 0) {
     return { ok: true, changed: false, detail: 'no aqe router config to apply' };
   }
   const next = { ...existing };
@@ -673,6 +682,12 @@ export function applyAqeRouter(cfg, cwd = process.cwd()) {
   // back later is still a user write and cannot resurrect this receipt.
   if (hasExternalDefaultReceipt && !ownedExternalDefault) {
     clearExternalDefaultOwnership(next);
+  }
+  // A fallback-derived default is owned only while its exact receipt matches.
+  // Membership in the old chain is not provenance: a user may deliberately
+  // replace the default with another rung before retiring the chain.
+  if (hasFallbackDefaultReceipt && (!ownedFallbackDefault || !hasManagedFallback)) {
+    clearFallbackDefaultOwnership(next);
   }
   const details = [];
   let wrote = false;
@@ -721,9 +736,10 @@ export function applyAqeRouter(cfg, cwd = process.cwd()) {
       if (next.fallbackChain.entries.length === 0) delete next.fallbackChain;
     }
     if (unavailableExternal.has(next.defaultProvider)
-      && (managedFallbackOwnedDefault || ownedExternalDefault === next.defaultProvider)) {
+      && (ownedFallbackDefault === next.defaultProvider || ownedExternalDefault === next.defaultProvider)) {
       delete next.defaultProvider;
       clearExternalDefaultOwnership(next);
+      clearFallbackDefaultOwnership(next);
     }
     wrote = reconciled.added.length > 0 || reconciled.pruned.length > 0
       || reconciled.activationsAdded.length > 0 || reconciled.activationsPruned.length > 0
@@ -744,10 +760,11 @@ export function applyAqeRouter(cfg, cwd = process.cwd()) {
   // for explicit selection, routes, or a future chain.
   if (!hasChain && hasManagedFallback) {
     delete next.fallbackChain;
-    if (managedFallbackOwnedDefault) {
+    if (ownedFallbackDefault) {
       delete next.defaultProvider;
       if (ownedExternalDefault) clearExternalDefaultOwnership(next);
     }
+    clearFallbackDefaultOwnership(next);
     details.push('chain: managed fallback retired');
     wrote = true;
   }
@@ -778,6 +795,7 @@ export function applyAqeRouter(cfg, cwd = process.cwd()) {
       const requestedDefault = cfg.providers.aqeProvider;
       const requestedUnavailable = requestedDefault in desiredExternal && !externalActive.has(requestedDefault);
       next.defaultProvider = requestedUnavailable ? valid[0].provider : requestedDefault ?? valid[0].provider;
+      setFallbackDefaultOwnership(next, next.defaultProvider);
       next.providers = { ...(next.providers ?? existing.providers ?? {}) };
       for (const e of valid) {
         if (!(e.provider in desiredExternal)) next.providers[e.provider] = { ...(existing.providers?.[e.provider] ?? {}), enabled: true };
