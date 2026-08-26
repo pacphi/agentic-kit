@@ -162,8 +162,9 @@ or package ownership and can change after partially successful upstream operatio
 plugin presence is likewise not ownership.
 
 Externally installed npm, Homebrew, Go, native binary, and host-plugin integrations remain visible
-and unowned. Agentic-kit may report them, but does not update, adopt, rewrite, or remove them without
-an explicit ownership transition.
+and unowned. Agentic-kit may report and use a compatible external package after opt-in, but never
+adopts, updates, or removes that package. Any new target wiring it creates receives its own receipt;
+pre-existing external wiring remains external.
 
 v0.19.0 plugin coexistence must be observed rather than assumed. In particular, the Codex plugin
 provides session-start, per-prompt, and pre-compaction hooks, while `codex-auto` supplies
@@ -199,9 +200,9 @@ Normalized companion facts distinguish:
 - doctor schema/availability, source qualifiers, and index missing/stale/healthy/unknown; and
 - usable-but-degraded versus failed operations.
 
-`ak sync` repairs only receipt-owned or explicitly adopted state and recollects facts to prove
-convergence. Repeated sync is a no-op. No drift surface prints content or converts doctor exit zero
-into a healthy verdict.
+`ak sync` repairs only receipt-owned state or new wiring explicitly requested by managed intent,
+then recollects facts to prove convergence. Repeated sync is a no-op. No drift surface prints
+content or converts doctor exit zero into a healthy verdict.
 
 ## Consequences
 
@@ -215,8 +216,9 @@ into a healthy verdict.
   capabilities rather than parsing human output as an open-ended API.
 - Default uninstall leaves user history intact. Purge is deliberately harder because a broad cache
   deletion can destroy imported evidence or privacy state.
-- External installations remain useful but cannot converge through `ak sync` until explicitly
-  adopted.
+- Compatible external packages remain useful after opt-in, but their package drift stays outside
+  Agentic Kit ownership; only newly requested, receipted target wiring can converge through
+  `ak sync`.
 
 ## Rejected alternatives
 

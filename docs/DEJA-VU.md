@@ -175,8 +175,8 @@ for later repair and removal.
 - A compatible package installed by you, another package manager, or a native installer is
   reported as external. Agentic Kit can use it after opt-in but does not adopt its update or
   removal lifecycle.
-- Matching pre-existing host wiring remains external unless the lifecycle explicitly records a
-  safe adoption. Foreign and user-edited values are preserved.
+- Matching pre-existing host wiring remains external. Agentic Kit does not adopt it; foreign and
+  user-edited values are preserved.
 - Partial repair retains the receipts for operations that still need recovery. It never reports a
   failed repair as green merely because an older executable remains usable.
 
@@ -201,6 +201,10 @@ The scopes are deliberately independent:
 `--yes` can satisfy the ordinary uninstall confirmation, but destructive index removal remains a
 separately disclosed scope. A rejected or unsafe path is not deleted. No Agentic Kit removal path
 deletes Claude, Codex, OpenCode, or another harness's source transcripts.
+
+The derived index can be the only copy of imported-only material. Explicitly purging `index.db`
+deletes that indexed copy and its tombstone mirror even though Agentic Kit preserves primary notes,
+policy, peers, configuration, and source histories.
 
 To keep the integration disabled after teardown, record the choice with `ak setup --no-deja-vu`
 or leave `integrations.tools.dejaVu.enabled` false in Agentic Kit's configuration.

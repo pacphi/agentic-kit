@@ -92,7 +92,8 @@ presence:
    facts. Doctor exit zero alone is not health, and unknown additive fields remain compatible.
 6. **Removal has three scopes.** Wiring removal is ordinary; owned package removal is explicit;
    data purge is separately previewed and confirmed. Source transcripts and primary notes,
-   exclusions, tombstones, policy, peers, and imported history are preserved by default.
+   exclusions, tombstones, policy, peers, and imported history are preserved by default. An
+   explicit index purge can still destroy imported-only material whose sole copy is in that index.
 
 ## Where each piece lives
 
