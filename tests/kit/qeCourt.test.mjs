@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import {
   vendorOf, panelFromRouting, validatePanel, validateCourtConfig,
-  qeCourtConfigPath, readQeCourtConfig,
+  qeCourtConfigPath, readQeCourtConfig, qeCourtReadiness,
 } from '../../src/lib/qeCourt.mjs';
 
 // vendorOf — ported from qe-court's referee.ts
@@ -224,4 +224,57 @@ test('readQeCourtConfig reads an existing config.json', () => {
   const cfg = readQeCourtConfig(dir);
   assert.equal(cfg.routing.jury.provider, 'cognitum-high');
   fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test('qeCourtReadiness fails closed when consumer artifacts are not self-contained', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'kit-qecourt-'));
+  try {
+    for (const hostDir of ['.claude', '.agents']) {
+      const skill = path.join(dir, hostDir, 'skills', 'qe-court');
+      fs.mkdirSync(path.join(skill, 'schemas'), { recursive: true });
+      fs.mkdirSync(path.join(skill, 'scripts'), { recursive: true });
+      fs.mkdirSync(path.join(skill, 'evals'), { recursive: true });
+      fs.writeFileSync(path.join(skill, 'SKILL.md'), '# qe-court\n');
+      fs.writeFileSync(path.join(skill, 'config.json'), JSON.stringify({
+        $schema: './config-schema.json',
+        routing: { defense: { provider: 'claude-code' }, jury: { provider: 'codex' } },
+      }));
+      fs.writeFileSync(path.join(skill, 'schemas', 'output.json'), '{}');
+      fs.writeFileSync(path.join(skill, 'scripts', 'validate-config.json'), '{}');
+      fs.writeFileSync(path.join(skill, 'evals', 'qe-court.yaml'), 'name: qe-court\n');
+    }
+
+    const readiness = qeCourtReadiness(dir);
+    assert.equal(readiness.ready, false);
+    assert.deepEqual(readiness.routingViolations, []);
+    assert.ok(readiness.artifactIssues.some((issue) => issue.includes('config-schema.json')));
+    assert.ok(readiness.artifactIssues.some((issue) => issue.includes('referee implementation')));
+    assert.ok(readiness.artifactIssues.some((issue) => issue.includes('referee oracle')));
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('qeCourtReadiness requires matching Claude and Codex projections', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'kit-qecourt-'));
+  try {
+    for (const [hostDir, jury] of [['.claude', 'codex'], ['.agents', 'cognitum-high']]) {
+      const skill = path.join(dir, hostDir, 'skills', 'qe-court');
+      fs.mkdirSync(path.join(skill, 'schemas'), { recursive: true });
+      fs.mkdirSync(path.join(skill, 'scripts'), { recursive: true });
+      fs.mkdirSync(path.join(skill, 'evals'), { recursive: true });
+      for (const rel of ['SKILL.md', 'config-schema.json', 'schemas/output.json', 'scripts/validate-config.json', 'evals/qe-court.yaml']) {
+        fs.writeFileSync(path.join(skill, rel), '{}');
+      }
+      fs.writeFileSync(path.join(skill, 'config.json'), JSON.stringify({
+        routing: { defense: { provider: 'claude-code' }, jury: { provider: jury } },
+      }));
+    }
+    fs.mkdirSync(path.join(dir, 'src', 'skills', 'qe-court'), { recursive: true });
+    fs.mkdirSync(path.join(dir, 'tests', 'unit', 'skills', 'qe-court'), { recursive: true });
+    fs.writeFileSync(path.join(dir, 'src', 'skills', 'qe-court', 'referee.ts'), 'export {};');
+    fs.writeFileSync(path.join(dir, 'tests', 'unit', 'skills', 'qe-court', 'referee.test.ts'), 'export {};');
+
+    const readiness = qeCourtReadiness(dir);
+    assert.equal(readiness.ready, false);
+    assert.ok(readiness.artifactIssues.includes('Claude and Codex qe-court config projections differ'));
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });

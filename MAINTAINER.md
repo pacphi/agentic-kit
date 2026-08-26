@@ -95,7 +95,9 @@ docs/
 `docs/INSTALLATION.md`, `docs/MODELS.md`, `docs/PROVIDERS.md`, `docs/SETUP.md`,
 `docs/TROUBLESHOOTING.md`, `docs/UPGRADING.md`, `docs/CODEX-STATUSLINE.md`,
 `docs/adr/0015-managed-codex-native-statusline.md`,
-`docs/adr/0032-model-lifecycle-intelligence.md`, and
+`docs/adr/0032-model-lifecycle-intelligence.md`,
+`docs/adr/0033-retire-codex-mcp-and-bound-qe-court-participants.md`,
+`tests/live/qe-court-participant-transport.test.mjs`, and
 `docs/ddd/model-lifecycle-intelligence.md`. Generated workspace state under
 the shipped source trees is explicitly excluded. Nothing else ships — verify with
 `npm pack --dry-run` before a release if you touch `files`.
@@ -105,7 +107,8 @@ split between `integrations.hosts` (which hosts are enabled) and top-level `rout
 (`version`, `primaryHost`, and the per-activity `routes`). `routing.mjs` is pure
 (defaults, primary-host mirroring, validation, and projections to AQE
 `agentOverrides` and `ak run`); `providers.mjs` does the I/O (host/auth detection,
-environment wiring, both MCP-bridge directions, AQE router file). Seeded/healed by
+environment wiring, Codex's independent Ruflo integration, legacy MCP retirement, and the AQE
+router file). Seeded/healed by
 `setup` + `sync` + `x host pick`, surfaced by `status` + `dashboard`. Design records:
 ADRs [0001–0006](docs/adr/); user guide: `docs/PROVIDERS.md`.
 

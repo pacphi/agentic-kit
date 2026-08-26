@@ -9,10 +9,9 @@
 
 ## Ambidextrous dual-host mode (claude + codex)
 
-Both frontier CLIs are enabled, so `ak` runs **ambidextrous**: the same tools, memory,
-and quality gates are available whichever agent is in the driver's seat, and each host can
-reach the other. Work flows complementarily — Claude and Codex are peers, not primary and
-fallback.
+Both frontier CLIs are enabled, so `ak` runs **ambidextrous**: the same Ruflo/AQE tools,
+memory, and quality gates are available whichever agent is in the driver's seat. Work flows
+complementarily — Claude and Codex are peers, not primary and fallback.
 
 ### `ak run` — canonical activity pipelines
 
@@ -37,17 +36,21 @@ ak run refactor "extract the payment module" --dry-run
 - **`--json`** — emit machine-readable output while executing; combine it with
   `--dry-run` for a machine-readable preview.
 
-### The Claude ↔ Codex bridge (bidirectional MCP)
+### Cross-host integration
 
-The two hosts see each other as MCP servers, so either can delegate to the other mid-task:
+Managed cross-host work uses one bounded path:
 
-- **Claude → Codex** — Codex is exposed as an MCP server (`codex mcp-server`); Claude
-  reaches it through the **`mcp__codex__codex`** tool to hand a subtask to Codex.
-- **Codex → ruflo** — Codex registers ruflo's MCP via `[mcp_servers.ruflo]` in
+- **Claude-led or Codex-led execution** — use `ak run`; every worker has one absolute
+  deadline and process-tree cleanup.
+- **Codex → Ruflo/AQE tools** — Codex registers Ruflo's MCP via `[mcp_servers.ruflo]` in
   `~/.codex/config.toml`, so Codex-driven sessions get the same memory, routing, and swarm
-  tools Claude has.
+  tools Claude has. Agentic-QE owns its separate Codex MCP/platform integration.
+- **Optional Claude → Codex interactive delegation** — OpenAI's Claude Code plugin uses
+  Codex App Server and remains user-owned. Agentic-kit never silently installs it.
 
-Register (or repair) both directions with `ak sync`; inspect with `ak status`.
+OpenAI deprecated `codex mcp-server` on 2026-08-24. `ak sync` removes only the legacy
+project registration that agentic-kit owns; user-owned entries are preserved and warned.
+Inspect the effective topology with `ak status`.
 
 ### Per-activity routing + escalation ladders
 
@@ -68,6 +71,8 @@ ambidextrous experience with the roles flipped. `ak status` marks the primary an
 Two enabled hosts do not by themselves prove two inference vendors. qe-court diversity must be
 grounded in the providers that actually serve the selected roles. Prefer independently evidenced
 providers for review/security activities and treat configured host/model routes as intent, not
-vendor proof.
+vendor proof. `primaryHost` mirrors `ak run` activity routes; it does not reverse QE-Court seats.
+Until Agentic-QE ships a host-neutral court runner and complete Codex projection, the reciprocal
+live check is a **participant-transport regression**, not a court verdict.
 
 <!-- END ruflo-dual-mode-reference -->

@@ -2,7 +2,7 @@
 //
 // One policy (kit.json `routing.routes`) is the single source of truth for
 // "which host + model runs which activity", and is PROJECTED into downstream
-// artifacts (aqe agentOverrides, host-neutral run plans, codex MCP). This module is pure
+// artifacts (AQE agentOverrides and host-neutral run plans). This module is pure
 // (no I/O) so the projectors and defaults are unit-testable in isolation; the
 // writers/UX that consume it live in providers.mjs / the commands.
 import { vendorOf } from './qeCourt.mjs';

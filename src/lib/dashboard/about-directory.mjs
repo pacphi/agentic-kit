@@ -278,12 +278,12 @@ const ENTRIES = Object.freeze([
   Object.freeze({
     id: 'dual-host-routing',
     category: 'configured',
-    name: 'Dual-host routing & bridge',
+    name: 'Dual-host routing & shared tools',
     tagline: 'Each kind of work goes to the better host.',
     paragraph:
       'With Claude Code and Codex both enabled, ak records which host handles which kind '
-      + 'of work — coding, testing, review, security — and wires each one to reach the '
-      + 'other as a tool, so a job can be handed across mid-flight. You pick the table and '
+      + 'of work — coding, testing, review, security — and gives both hosts the same '
+      + 'Ruflo/AQE tools. Bounded `ak run` workers hand work across hosts. You pick the table and '
       + 'which host leads: `ak host pick`.',
     links: Object.freeze([]),
     icon: MONOGRAM('R', '--info'),

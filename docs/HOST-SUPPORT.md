@@ -53,7 +53,7 @@ served it. See [Providers and hosts](PROVIDERS.md) for those axes in detail.
 | agentic-kit standing | Default-enabled; primary-eligible | Opt-in; primary-eligible | Opt-in; explicitly non-primary |
 | `ak run` execution | Native CLI adapter | Native CLI adapter | Managed supervised-server adapter |
 | Automatic activity routes | Yes | Yes | No; explicit routes only |
-| Ruflo support | Reference/native surface | Strong, with bridge and parity gaps | Managed compatibility layer |
+| Ruflo support | Reference/native surface | Strong, with integration and parity gaps | Managed compatibility layer |
 | AQE support | Default and fullest path | Strong platform path; one direct-provider gap in `ak` | Upstream platform assets, not an AQE inference provider |
 | RuvNet Brain | Native plugin, hooks, MCP, console | Native plugin, hooks, MCP, skills | Managed search MCP and guidance; no native Brain plugin |
 | Managed command status line | Yes | No; Codex's native built-in fields only | No |
@@ -106,14 +106,15 @@ Official extension references: [Claude hooks](https://code.claude.com/docs/en/ho
 
 | Ruflo capability | Claude Code | Codex | OpenCode |
 | --- | --- | --- | --- |
-| Upstream host orientation | **Native:** primary/reference CLI surface | **Native + managed:** upstream backend/plugin pieces plus agentic-kit bridge | **Managed:** no equivalent upstream backend flag |
+| Upstream host orientation | **Native:** primary/reference CLI surface | **Native + managed:** upstream backend/plugin pieces plus agentic-kit integration | **Managed:** no equivalent upstream backend flag |
 | Ruflo MCP tools | Native registration | Managed Ruflo MCP registration | Connected managed MCP; compact lazy `ak_ruflo_*` provider projection |
 | Shared Ruflo memory | Same project store | Same project store | Same project store when pointed at the same Ruflo server |
 | Agents and skills | Upstream Claude assets | Codex-compatible skills/plugin assets and generated guidance | Receipt-owned lazy profile catalogue through one stock `ak-specialist`; stock skills loaded on demand |
 | Lifecycle hooks | Native Claude hooks | Codex hooks/plugin surfaces | OpenCode events translated by `ruflo-hooks.js` |
 | Inference-backend flag | `ENABLE_CLAUDE_CODE` | `ENABLE_CODEX` | None |
-| Cross-host bridge | Claude can call the Codex MCP server | Codex can call Ruflo MCP | No equivalent peer bridge |
-| Upgrade convergence | `ak sync` heals managed assets | `ak sync` heals bridge/guidance | `ak sync` regenerates the embedded catalogue and repairs exact-receipted plugins/config |
+| Cross-host execution | `ak run` can lead bounded Codex workers | `ak run` can lead bounded Claude workers | Explicit `ak run` routes only |
+| Interactive peer path | Optional user-owned OpenAI Codex plugin/App Server | No supported inverse Claude plugin | None |
+| Upgrade convergence | `ak sync` heals managed assets | `ak sync` heals Ruflo/AQE access and retires owned legacy MCP | `ak sync` regenerates the embedded catalogue and repairs exact-receipted plugins/config |
 | Teardown | Managed blocks and registrations | Receipt-based managed teardown | Value- and hash-receipt teardown; user-owned values survive |
 
 Ruflo MCP access and Ruflo-backed inference are different contracts. In

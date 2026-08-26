@@ -8,7 +8,7 @@ import { loadRing, detectRegression } from '../lib/health-history.mjs';
 import * as paths from '../lib/paths.mjs';
 import { nativesStatus, rufloRuntimeNatives, dbPathPinStatus, aidefencePresent, securityPresent } from '../lib/natives.mjs';
 import { scanNpxStale } from '../lib/npx.mjs';
-import { registrationStatus, codexMcpStatus, rufloCodexMcpStatus, ruvectorRegistered } from '../lib/mcp.mjs';
+import { registrationStatus, codexMcpStatus, codexMcpTopology, rufloCodexMcpStatus, ruvectorRegistered } from '../lib/mcp.mjs';
 import {
   opencodeMcpStatus, catalogSource, createOpencodeLifecycleAdapter,
   opencodeArtifactReceiptState,
@@ -27,7 +27,7 @@ import { HOSTS, settingsTarget, isDefault, managedEnv, MANAGED_ENV_KEYS, hostIns
 import { hostsWithLifecycle, isBuiltinHost, lifecycleExecutionEnabled } from '../lib/adapters/lifecycle-registry.mjs';
 import { PROVIDER_REGISTRY } from '../lib/adapters/index.mjs';
 import { configuredPolicyToAgentOverrides, agentOverridesDrift, routingSummary, divergedRoutes } from '../lib/routing.mjs';
-import { qeCourtShipped, readQeCourtConfig, validateCourtConfig } from '../lib/qeCourt.mjs';
+import { qeCourtShipped, readQeCourtConfig, validateCourtConfig, qeCourtReadiness } from '../lib/qeCourt.mjs';
 import { drift as ruvectorDrift } from '../lib/ruvector.mjs';
 import { statuslineDrift } from '../lib/codex-statusline.mjs';
 import { inspectCodexPlugins } from '../lib/codex-plugins.mjs';
@@ -544,28 +544,24 @@ export async function collect({ pkgRoot, cwd = process.cwd() }) {
     rows.push(row('mcp', 'warn', "legacy 'ruflo'-keyed MCP registration present", 'sync migrates it to claude-flow'));
   }
 
-  // codex MCP backend (mcp__codex__codex) — the dual-host swarm's inline Claude→Codex
-  // path (ADR-0001 projection #3). Only surfaces when the codex host is enabled;
-  // setup/sync register it project-scoped via ensureCodexMcp. Spawn-free: reads the
-  // project .mcp.json (== `claude mcp get codex`) plus the kit.json ownership marker.
+  // Retired Claude→Codex `codex mcp-server` projection (ADR-0033). Its absence
+  // is healthy; setup/sync remove only the prior agentic-kit-owned entry.
+  // User-owned entries are preserved and receive an explicit manual remedy.
   if (cfg.integrations?.hosts?.codex) {
     try {
       const { registered, owned } = codexMcpStatus(cfg, cwd);
       if (registered) {
-        rows.push(row('codex-mcp', 'ok',
-          `codex MCP registered (mcp__codex__codex)${owned ? '' : ' — pre-existing (not ak-managed)'}`));
-      } else if (await have('codex')) {
-        rows.push(row('codex-mcp', 'warn', 'codex enabled but codex MCP not registered',
-          'sync registers the codex MCP server'));
+        rows.push(row('codex-mcp', 'warn',
+          `deprecated codex mcp-server registered${owned ? ' — agentic-kit-owned' : ' — user-owned; preserved'}`,
+          owned ? 'sync retires the legacy MCP entry' : 'remove manually: claude mcp remove codex -s project'));
       } else {
-        rows.push(row('codex-mcp', 'warn', 'codex enabled but codex CLI not installed',
-          'sync installs codex, then registers the codex MCP'));
+        rows.push(row('codex-mcp', 'ok', 'legacy codex mcp-server absent; supervised cross-host execution uses ak run'));
       }
     } catch (e) {
       rows.push(row('codex-mcp', 'warn', `codex MCP check unavailable: ${e.message}`));
     }
-    // reverse bridge: ruflo MCP → codex (a codex-driven session reaches ruflo's
-    // tools). The mirror of the claude→codex row above; makes the bridge two-way.
+    // Independent Ruflo MCP integration lets a Codex-driven session reach the
+    // same routing, swarm, and memory tools as Claude.
     try {
       const { registered, owned, command, args } = rufloCodexMcpStatus(cfg);
       const workspacePinned = command === 'ak'
@@ -583,6 +579,32 @@ export async function collect({ pkgRoot, cwd = process.cwd() }) {
       }
     } catch (e) {
       rows.push(row('codex-mcp', 'warn', `ruflo→codex MCP check unavailable: ${e.message}`));
+    }
+
+    // Effective project+user topology. These checks are independent of the
+    // agentic-kit ownership receipt because recursive/duplicate transports can
+    // stall a Codex-driven worker even when another tool created them.
+    try {
+      const topology = codexMcpTopology({ cwd });
+      if (topology.selfRegistrations.length) {
+        const scopes = topology.selfRegistrations.map((entry) => entry.scope).join(', ');
+        rows.push(row('codex-mcp', 'fail',
+          `recursive codex → codex mcp-server registration detected (${scopes})`,
+          'remove the [mcp_servers.codex] table from the reported Codex config before live multi-host runs'));
+      }
+      if (!topology.agenticQeRegistrations.length) {
+        rows.push(row('codex-mcp', 'warn', 'agentic-qe MCP is not concretely registered in Codex',
+          'run: aqe platform setup codex --overwrite --with-ruflo'));
+      } else {
+        rows.push(row('codex-mcp', 'ok', 'agentic-qe MCP concretely registered in Codex'));
+      }
+      if (topology.duplicateRuflo) {
+        rows.push(row('codex-mcp', 'warn',
+          `duplicate Ruflo MCP registrations in Codex: ${topology.rufloRegistrations.map((entry) => entry.name).join(', ')}`,
+          'keep the workspace-aware [mcp_servers.ruflo] entry and remove legacy duplicates after reviewing ownership'));
+      }
+    } catch (e) {
+      rows.push(row('codex-mcp', 'warn', `Codex MCP topology check unavailable: ${e.message}`));
     }
   }
 
@@ -923,7 +945,13 @@ export async function collect({ pkgRoot, cwd = process.cwd() }) {
         rows.push(row('qe-court', 'warn',
           `qe-court panel invalid: ${violations.join(', ')} — regenerate with agentic-qe >=3.13.3 or choose different defense/jury vendors`));
       } else {
-        rows.push(row('qe-court', 'ok', 'qe-court panel valid (vendor-diverse, jury independent of writer)'));
+        const readiness = qeCourtReadiness(qcRoot);
+        if (readiness.ready) {
+          rows.push(row('qe-court', 'ok', 'qe-court routing and consumer artifacts are ready; provider-seat readiness still requires a live proof'));
+        } else {
+          rows.push(row('qe-court', 'warn',
+            `qe-court routing config passes the local anti-collusion check, but executability is not proven (${readiness.artifactIssues.join('; ')})`));
+        }
       }
     }
   }

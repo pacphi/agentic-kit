@@ -74,8 +74,9 @@ versions. The table below describes the current contract.
 | Project `AGENTS.md` | Arbitrary project content is preserved. Agentic-kit only reconciles its own sentinel-delimited managed blocks, including removing stale blocks that no longer apply. | Created only when a selected integration needs managed guidance. |
 
 Project setup also reapplies enabled host/provider wiring and seeds the default
-per-activity routing policy in dual-host mode. With Codex enabled, it repairs
-both directions of the Claude/Codex–Ruflo bridge.
+per-activity routing policy in dual-host mode. With Codex enabled, it registers
+the workspace-aware Ruflo MCP in Codex and retires only agentic-kit-owned legacy
+`codex mcp-server` project entries.
 
 ## Setup trust manifest
 
@@ -117,10 +118,13 @@ is removed and setup fails instead of silently expanding project trust.
 
 ### Codex and OpenCode
 
-Codex does not need an agentic-kit auto-approve list. The manifest instead names
-the project Claude-to-Codex MCP bridge, the user-scope Codex-to-Ruflo MCP
-registration, and the AQE Codex integration that project setup will create.
+Codex does not need an agentic-kit auto-approve list. The manifest names the
+user-scope Codex-to-Ruflo MCP registration and the AQE Codex integration that
+project setup will create.
 Agentic-kit does not alter Codex's sandbox or approval policy.
+
+OpenAI's Claude Code plugin for Codex is an optional App Server-based interactive
+path. It is user-owned: setup and sync never install, enable, update, or remove it.
 
 Codex also retains exclusive ownership of third-party plugins. Agentic-kit never
 installs or enables a Codex plugin (including `security-guidance`), and setup/sync

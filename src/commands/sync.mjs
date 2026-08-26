@@ -13,7 +13,7 @@ import { hostsWithLifecycle, lifecycleAdapterFor, lifecycleExecutionEnabled, det
 import { renderApplyReport } from '../lib/adapters/lifecycle-render.mjs';
 import { listDaemons, staleDaemons, reap } from '../lib/daemons.mjs';
 import { loadKitConfig, saveKitConfig } from '../lib/config.mjs';
-import { commandHosts, applyHosts, applyProviders, hostInstallState, installHost, applyAqeRouter, seedActivityRoutesIfMultiHost, migrateRetiredRoutesInConfig, ensureCodexMcp, ensureRufloMcpInCodex, bothHostsEnabled } from '../lib/providers.mjs';
+import { commandHosts, applyHosts, applyProviders, hostInstallState, installHost, applyAqeRouter, seedActivityRoutesIfMultiHost, migrateRetiredRoutesInConfig, retireCodexMcp, ensureRufloMcpInCodex, bothHostsEnabled } from '../lib/providers.mjs';
 import { driftReport, selfDrift } from '../lib/versions.mjs';
 import { RUVECTOR_PKG, managed as ruvectorManaged } from '../lib/ruvector.mjs';
 import { pruneNpxStale } from '../lib/npx.mjs';
@@ -267,10 +267,10 @@ export async function run({ flags, pkgRoot, fetchLatest }) {
     }
     const router = applyAqeRouter(cfg, cwd);
     if (router.changed || !router.ok) report('aqe router', router);
-    const mcp = await ensureCodexMcp(cfg, cwd);
+    const mcp = await retireCodexMcp(cfg, cwd);
     if (mcp.changed) saveKitConfig(cfg);
-    if (mcp.changed || !mcp.ok) report('codex MCP', mcp);
-    // reverse bridge: register ruflo MCP into codex (codex→ruflo half)
+    if (mcp.changed || !mcp.ok) report('legacy codex MCP', mcp);
+    // Independent Ruflo integration for Codex-driven sessions.
     const rmcp = await ensureRufloMcpInCodex(cfg, cwd);
     if (rmcp.changed) saveKitConfig(cfg);
     if (rmcp.changed || !rmcp.ok) report('ruflo→codex MCP', rmcp);

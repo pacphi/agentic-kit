@@ -182,7 +182,7 @@ test('--dry-run reports what --codex/--primary-host WOULD do without enabling th
   assertUnchanged(before, HOME, '`ak setup --codex --dry-run` must not touch the filesystem');
 });
 
-test('--codex project dry-run discloses registrations while preserving Codex policy', async () => {
+test('--codex project dry-run discloses current registrations while preserving Codex policy', async () => {
   seedHome();
   const project = sandboxProject('ak-setup-codex-trust');
   const cwd = process.cwd();
@@ -192,7 +192,7 @@ test('--codex project dry-run discloses registrations while preserving Codex pol
       setup.run({ flags: FLAGS({ 'dry-run': true, codex: true }), pkgRoot: PKG_ROOT }));
     assert.equal(result, 0);
     assert.match(out, /OpenAI Codex — approval\/sandbox policy unchanged/);
-    assert.match(out, /\[project\] mcp-registration: codex mcp-server/);
+    assert.doesNotMatch(out, /codex mcp-server|mcp__codex__codex/);
     assert.match(out, /\[user\] mcp-registration: ak x ruflo-mcp/);
   } finally { process.chdir(cwd); rmrf(project); }
 });

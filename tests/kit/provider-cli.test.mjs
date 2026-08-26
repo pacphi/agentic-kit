@@ -323,7 +323,7 @@ test('pick --primary-host opencode is rejected; the prior primary is left unchan
   }
 });
 
-test('a provider retune preserves every ownership marker (codex MCP bridges + opencode wiring)', () => {
+test('a provider retune retires stale legacy Codex MCP while preserving current ownership', () => {
   const sb = pickSandbox({
     hosts: { claude: true, codex: false, opencode: false },
     ownership: {
@@ -335,7 +335,7 @@ test('a provider retune preserves every ownership marker (codex MCP bridges + op
     const r = akPick(['x', 'host', 'pick', '--aqe-provider', 'openai', '--yes'], sb);
     assert.equal(r.status, 0, r.stderr);
     const cfg = kitJson(sb.home);
-    assert.equal(cfg.integrations.ownership.codex.mcp, 'ak', 'codex MCP marker survives a rewrite');
+    assert.equal(cfg.integrations.ownership.codex.mcp, null, 'stale legacy codex MCP receipt is retired');
     assert.equal(cfg.integrations.ownership.codex.reverseMcp, 'ak', 'reverse MCP marker survives a rewrite');
     assert.equal(cfg.integrations.ownership.opencode.catalogDir, '/custom/catalog', 'catalog override survives a rewrite');
     assert.equal(cfg.providers.aqeProvider, 'openai', 'the actual retune landed');
@@ -365,7 +365,7 @@ test('host off clears the OpenCode catalog override after a successful teardown'
   }
 });
 
-test('excluding codex tears down only owned bridges and removes disabled routes', () => {
+test('excluding codex tears down only owned integrations and removes disabled routes', () => {
   const sb = pickSandbox({
     hosts: { claude: true, codex: true, opencode: false },
     ownership: { codex: { mcp: 'ak', reverseMcp: 'ak' } },
@@ -392,7 +392,7 @@ test('excluding codex tears down only owned bridges and removes disabled routes'
   }
 });
 
-test('excluding claude keeps codex-owned bridges while pruning claude routes', () => {
+test('excluding claude keeps Ruflo-in-Codex while retiring legacy MCP and pruning claude routes', () => {
   const sb = pickSandbox({
     hosts: { claude: true, codex: true, opencode: false },
     ownership: { codex: { mcp: 'ak', reverseMcp: 'ak' } },
@@ -405,7 +405,7 @@ test('excluding claude keeps codex-owned bridges while pruning claude routes', (
     assert.equal(r.status, 0, r.stderr);
     const cfg = kitJson(sb.home);
     assert.equal(cfg.routing.routes.review, undefined);
-    assert.equal(cfg.integrations.ownership.codex.mcp, 'ak');
+    assert.equal(cfg.integrations.ownership.codex.mcp, null);
     assert.equal(cfg.integrations.ownership.codex.reverseMcp, 'ak');
   } finally {
     rm(sb.home, sb.project);

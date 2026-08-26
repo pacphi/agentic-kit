@@ -59,7 +59,7 @@ About (no secondary rail — one scrolling page with category anchors):
   Knowledge RuvNet Brain — the offline KB that grounds answers about this stack.
   The kit   agentic-kit itself — the caretaker that installs, heals, and explains the rest.
   Configured for you   Non-package surfaces: MCP registrations, guidance blocks,
-            statuslines, dual-host routing & bridge, background daemon, permission
+            statuslines, dual-host routing & shared tools, background daemon, permission
             allowlists — each with "configured by setup/sync · yours to change".
 ```
 
@@ -159,7 +159,7 @@ The draft left three points open. All three are decided; this section is the rec
    usage scorecard and `ak system` already follow. It also answers the question in the place the
    question is usually asked — right after `ak setup` finishes printing.
 3. **Six separate "Configured for you" cards, not one card with a list.** Each configured
-   surface — MCP registrations, guidance blocks, statuslines, dual-host routing and bridge, the
+   surface — MCP registrations, guidance blocks, statuslines, dual-host routing and shared tools, the
    background daemon, permission allowlists — has its own state chip and its own managing
    command. Collapsing them into one card would force a single chip to summarize six independent
    health facts, which is exactly the kind of averaging the honest-degradation contract forbids,

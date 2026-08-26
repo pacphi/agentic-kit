@@ -20,7 +20,7 @@ RoutingPolicy
                 provenance
                 escalation rungs[]
 
-RoutingPolicy -> eligible configuration projections -> AQE / MCP surfaces
+RoutingPolicy -> eligible configuration projections -> AQE / host guidance
 RoutingPolicy + template + task -> materialized workers -> ak run
 ```
 
@@ -84,11 +84,14 @@ change the persisted base route.
 ladder. Pure projectors materialize that policy into:
 
 - AQE `agentOverrides` for AQE-eligible Claude/Codex routes;
-- `ak run`'s host-neutral worker plan;
-- Codex MCP availability/configuration.
+- `ak run`'s host-neutral worker plan.
 
 These are configuration projections, not independent routing policies. Native surfaces must not
 be edited back into domain truth without an explicit import or reconciliation design.
+
+Codex's Ruflo/AQE MCP registrations are independent host integrations, not routing projections.
+OpenAI deprecated the former Claude→Codex `codex mcp-server` projection; bounded cross-host work
+uses `ak run`.
 
 ## Canonical execution
 

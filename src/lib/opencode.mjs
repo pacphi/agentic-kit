@@ -3,7 +3,7 @@
 // why: opencode (opencode.ai) consumes the same rUv stack as claude/codex but
 // through different surfaces. This module owns every ak-managed byte on those
 // surfaces, backup-first + merge-not-clobber + ownership-marked, mirroring the
-// claude (settings.mjs / mcp.mjs) and codex (providers.mjs reverse bridge)
+// claude (settings.mjs / mcp.mjs) and codex (providers.mjs Ruflo integration)
 // contracts:
 //
 //   ~/.config/opencode/opencode.json   mcp.claude-flow + mcp.agentic-qe +

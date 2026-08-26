@@ -261,7 +261,14 @@ export function createSubprocessExecutionAdapter({
       if (invocation.resolved === false) {
         throw new Error(`${host} command has no safe Windows invocation`);
       }
-      const child = spawnFn(invocation.command, invocation.args, { cwd: state.cwd, env: process.env, stdio: ['ignore', 'pipe', 'pipe'] });
+      const child = spawnFn(invocation.command, invocation.args, {
+        cwd: state.cwd,
+        env: process.env,
+        stdio: ['ignore', 'pipe', 'pipe'],
+        // POSIX process groups let timeout/cancel reach host-spawned MCP
+        // descendants. Windows uses taskkill /T in signalProcessTree.
+        detached: process.platform !== 'win32',
+      });
       if (!child?.once) throw new Error(`${host} process did not expose child lifecycle events`);
       // Register the acquired child on runner-owned state before any future
       // await so a launch deadline can still cancel and clean it up.

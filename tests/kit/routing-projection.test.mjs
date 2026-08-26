@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { applyAqeRouter, aqeRouterFile, undoAqeRouter, ensureCodexMcp, ensureRufloMcpInCodex, undoCodexMcp, undoRufloMcpInCodex } from '../../src/lib/providers.mjs';
+import { applyAqeRouter, aqeRouterFile, undoAqeRouter, retireCodexMcp, ensureRufloMcpInCodex, undoCodexMcp, undoRufloMcpInCodex } from '../../src/lib/providers.mjs';
 import { seedActivityRoutes } from '../../src/lib/routing.mjs';
 import { _setGlobalRootForTest } from '../../src/lib/paths.mjs';
 
@@ -146,18 +146,65 @@ test('an invalid fallback chain does not block the agentOverrides projection (M3
   rm(dir); rm(groot);
 });
 
-test('codex MCP teardown is a no-op unless ak owns it (H2), and never shells when codex is off', async () => {
+test('codex MCP teardown is a no-op unless ak owns it (H2)', async () => {
   const off = await undoCodexMcp(process.cwd(), { managed: false });
   assert.equal(off.changed, false);
   assert.match(off.detail, /left as-is/);
-  const ensure = await ensureCodexMcp({
-    integrations: { hosts: { claude: true, codex: false } },
-  });
-  assert.equal(ensure.changed, false);
-  assert.match(ensure.detail, /not enabled/);
 });
 
-test('owned bridge teardown sends the precise safe argv on every platform', async () => {
+test('legacy codex MCP retirement removes and confirms only ak-owned state', async () => {
+  const calls = [];
+  const cfg = { integrations: { ownership: { codex: { mcp: 'ak', reverseMcp: 'ak' } } } };
+  const observations = [
+    { registered: true, owned: true },
+    { registered: false, owned: true },
+  ];
+  const result = await retireCodexMcp(cfg, '/work/project', {
+    runner: async (cmd, args, opts) => {
+      calls.push({ cmd, args, opts });
+      return { code: 0, stdout: '', stderr: '' };
+    },
+    inspect: () => observations.shift(),
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.changed, true);
+  assert.deepEqual(calls, [
+    { cmd: 'claude', args: ['mcp', 'remove', 'codex', '-s', 'project'], opts: { cwd: '/work/project' } },
+  ]);
+  assert.equal(cfg.integrations.ownership.codex.mcp, null);
+  assert.equal(cfg.integrations.ownership.codex.reverseMcp, 'ak', 'independent Ruflo receipt survives');
+});
+
+test('legacy codex MCP retirement preserves an unowned registration and gives a manual remedy', async () => {
+  const cfg = { integrations: { ownership: { codex: { mcp: null } } } };
+  let called = false;
+  const result = await retireCodexMcp(cfg, '/work/project', {
+    runner: async () => { called = true; return { code: 0, stdout: '', stderr: '' }; },
+    inspect: () => ({ registered: true, owned: false }),
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.changed, false);
+  assert.equal(called, false);
+  assert.match(result.detail, /user-owned/);
+  assert.match(result.detail, /claude mcp remove codex -s project/);
+});
+
+test('legacy codex MCP retirement keeps its ownership receipt when removal cannot be confirmed', async () => {
+  const cfg = { integrations: { ownership: { codex: { mcp: 'ak' } } } };
+  const result = await retireCodexMcp(cfg, '/work/project', {
+    runner: async () => ({ code: 0, stdout: '', stderr: '' }),
+    inspect: () => ({ registered: true, owned: true }),
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.changed, false);
+  assert.equal(cfg.integrations.ownership.codex.mcp, 'ak');
+  assert.match(result.detail, /could not be confirmed/);
+});
+
+test('owned integration teardown sends the precise safe argv on every platform', async () => {
   const calls = [];
   const runner = async (cmd, args, opts) => {
     calls.push({ cmd, args, opts });
@@ -176,7 +223,21 @@ test('owned bridge teardown sends the precise safe argv on every platform', asyn
   ]);
 });
 
-test('codex reverse bridge uses the workspace-aware memory launcher and migrates only ak-owned state', async () => {
+test('failed owned MCP teardown is explicit so callers retain ownership receipts', async () => {
+  const runner = async () => ({ code: 7, stdout: '', stderr: 'permission denied' });
+  const codex = await undoCodexMcp('/work/project', { managed: true, runner });
+  const ruflo = await undoRufloMcpInCodex('/work/project', {
+    managed: true, runner, haveFn: async () => true,
+  });
+  assert.equal(codex.ok, false);
+  assert.equal(codex.changed, false);
+  assert.match(codex.detail, /permission denied/);
+  assert.equal(ruflo.ok, false);
+  assert.equal(ruflo.changed, false);
+  assert.match(ruflo.detail, /permission denied/);
+});
+
+test('Codex Ruflo integration uses the workspace-aware memory launcher and migrates only ak-owned state', async () => {
   const calls = [];
   const runner = async (cmd, args, opts) => {
     calls.push({ cmd, args, opts });

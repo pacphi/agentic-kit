@@ -83,7 +83,7 @@ open in other terminals, here is what can actually reach them, worst first:
 What does **not** break, by design: running binaries keep executing their old code
 (replaced files don't affect a running process's open inodes). Agentic-kit's managed
 settings and guidance writers are atomic and fail closed when the one-time backup cannot
-be created or validated. Settings env keys, `~/.codex/config.toml` edits (MCP bridge,
+be created or validated. Settings env keys, `~/.codex/config.toml` edits (Ruflo/AQE MCP,
 `[tui]` status line), OpenCode wiring, `.agentic-qe/llm-config.json`, and the managed
 guidance blocks are all **read at session start** — a live session simply doesn't see
 them until its next launch. The kit's own self-update runs last and applies from the next
@@ -158,6 +158,11 @@ an agentic-qe or `ak` upgrade. If `ak status` reports `writerIsNeverJuror`, rege
 config with agentic-qe 3.13.3+ or change `routing.defense.provider` from `cognitum-low` to
 `claude-code`. `ak` reports this state read-only; `ak sync` no longer changes QE-Court roles.
 
+The local anti-collusion check is not a runtime-readiness proof. Current consumer projections can
+reference source-only referee/oracle assets, and `primaryHost` does not reverse court seats. Use
+`pnpm test:qe-court-live` in a source checkout for one bounded Claude-led and one bounded
+Codex-led **participant-transport** trial; do not record it as a court verdict.
+
 If you already have `ak` working, you almost never need `ak setup` again — it's the
 installer. Enabling a shipped-but-opt-in host feature is a `host pick` (or an `x mcp pick`,
 etc.), not a re-`setup`. Project setup calls `ruflo init --full --force`, so review the
@@ -184,7 +189,8 @@ ak host status                 # 3. verify: hosts "enabled, wired" + routing tab
 Step 1 gets the newer code onto disk. Step 2 is what actually turns dual-host on — it
 records `codex` in `kit.json` and does the wiring: writes `ENABLE_CODEX` into
 `.claude/settings.local.json`, seeds the per-activity routing policy, registers the
-Codex↔ruflo MCP bridge both ways, and generates the dual-host guidance.
+workspace-aware Ruflo MCP in Codex, retires any agentic-kit-owned legacy `codex mcp-server`
+project entry, and generates the dual-host guidance.
 Add `--primary-host codex` if you want Codex to lead (Claude becomes the alternate).
 
 > [!NOTE]
@@ -208,12 +214,12 @@ Every `ak` command ends with a best-effort, never-blocking drift nudge. It has t
 - **Version drift** (npm-managed tools; TTL-cached network check):
   `↑ ruflo 4.1.0 available (installed 4.0.0) — run: ak sync`
 - **Local artifact drift** (spawn-light file compares, evaluated on every run):
-  `↻ drifted: 2 CLAUDE.md block(s) · codex MCP unregistered — run: ak sync`
+  `↻ drifted: 2 CLAUDE.md block(s) · deprecated codex MCP registered — run: ak sync`
 
 The second half covers the artifacts `ak` *renders*: managed guidance blocks in the
 machine-wide guidance files (`~/.claude/CLAUDE.md`, and `~/.codex/AGENTS.md` on codex
-machines), the Claude↔Codex MCP bridge (both
-directions), and the statusline footer. These can drift with **no version change at all** —
+machines), Codex's independent Ruflo/AQE access, legacy MCP retirement, and the statusline
+footer. These can drift with **no version change at all** —
 a kit update (or, on an npm-linked dev checkout, merely merging a PR that edits a
 `claude/*.md` template) revises the source of truth, and the rendered copies lag until the
 next `ak sync`. The nudge closes that window, using the exact drift definitions `ak status` uses (the two

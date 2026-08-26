@@ -53,6 +53,8 @@ test('Claude adapter uses bounded print/stream-json mode without a permission by
     '--print', '--output-format', 'stream-json', '--verbose',
     '--model', 'model-1', 'Do the work.',
   ]);
+  assert.equal(calls[0].options.detached, process.platform !== 'win32',
+    'POSIX workers lead a process group so cancellation reaches MCP descendants');
   assert.ok(!calls[0].args.some((arg) => arg.includes('dangerously') || arg.includes('bypass')));
 });
 

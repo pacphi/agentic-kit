@@ -1,8 +1,8 @@
 // Host-adapter core — the host-neutral spine of ak's ambidextrous experience.
 //
 // why: ak models two frontier hosts (claude, codex) but the *experience* used to
-// be claude-shaped (guidance → CLAUDE.md, statusline = claude's, MCP bridge one
-// way). This module makes "which host is driving" a first-class, detected axis and
+// be claude-shaped (guidance → CLAUDE.md, statusline = claude's). This module
+// makes "which host is driving" a first-class, detected axis and
 // puts every host-specific artifact behind a per-host descriptor, so the commands
 // become host-loops instead of claude-hardcoded paths.
 //
@@ -12,10 +12,9 @@
 // versions) lives in providers.mjs, which imports THIS (one direction only).
 //
 // Grounded:
-//   - codex is exposed as an MCP server via `codex mcp-server` (stdio JSON-RPC,
-//     tools codex/codex-reply) and consumes servers via `[mcp_servers.*]` in
-//     ~/.codex/config.toml (TOML). Claude Code uses settings.json (JSON) +
-//     `claude mcp add`.
+//   - codex consumes servers via `[mcp_servers.*]` in ~/.codex/config.toml
+//     (TOML). OpenAI deprecated its former `codex mcp-server` mode; managed
+//     cross-host execution uses `ak run` (ADR-0033).
 //   - codex statusline is a fixed built-in enum (`tui.status_line`); a
 //     command-backed footer like Claude Code's is an unimplemented upstream
 //     request (openai/codex #16921/#17827/#20140/#20244).
@@ -142,10 +141,9 @@ export function hostAsymmetryNote(hostIdOrEntry, { registry = effectiveHostRegis
   if (!host?.capabilities?.canDriveSession) return '';
   const notes = [];
 
-  // F-25: this host is registered as callable FROM another host via MCP — a
-  // real bridge capability, read off the trust manifest rather than an id
-  // check ('expose <label> to <other> as mcp__x__x' is the manifest's own
-  // wording for that grant, e.g. codex's claude-to-codex-mcp change).
+  // F-25: a host registered as callable FROM another host may declare that
+  // bridge here. OpenAI deprecated the former Codex MCP projection, so Codex
+  // no longer has such a grant; `ak run` owns managed cross-host execution.
   const bridge = host.trust?.changes?.find((change) =>
     change.kind === 'mcp-registration' && /^expose /i.test(change.effect));
   if (bridge) notes.push(bridge.effect);

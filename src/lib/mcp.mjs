@@ -52,12 +52,10 @@ export function ruvectorRegistered() {
 }
 
 /**
- * Project-scoped codex MCP (mcp__codex__codex) registration state. `ensureCodexMcp`
- * registers it via `claude mcp add codex -s project`, which persists to `.mcp.json`
- * at the repo root — so reading that file is the spawn-free equivalent of
- * `claude mcp get codex` (deterministic + testable, matching `registrationStatus`'s
- * file-read approach). `owned` reflects kit.json's ak-ownership marker
- * (`integrations.ownership.codex.mcp === 'ak'`), which gates teardown.
+ * Retired project-scoped `codex mcp-server` registration state. Older agentic-kit
+ * versions persisted it to `.mcp.json`; reading that file is the spawn-free
+ * equivalent of `claude mcp get codex`. `owned` reflects the legacy kit.json
+ * receipt (`integrations.ownership.codex.mcp === 'ak'`), which gates retirement.
  * @returns {{ registered: boolean, owned: boolean }}
  */
 export function codexMcpStatus(cfg, cwd = process.cwd()) {
@@ -66,11 +64,68 @@ export function codexMcpStatus(cfg, cwd = process.cwd()) {
   return { registered: 'codex' in servers, owned: cfg?.integrations?.ownership?.codex?.mcp === 'ak' };
 }
 
+function tomlString(value) {
+  if (!value) return null;
+  try { return JSON.parse(value); } catch { return null; }
+}
+
+function tomlStringArray(value) {
+  if (!value) return null;
+  try {
+    const parsed = JSON.parse(value);
+    return Array.isArray(parsed) && parsed.every((entry) => typeof entry === 'string') ? parsed : null;
+  } catch { return null; }
+}
+
+/** Read only Codex MCP table identity/command/argv facts. This deliberately is
+ * not a general TOML parser: status needs a spawn-free, fail-closed topology
+ * check and never rewrites these host-owned files. */
+function codexMcpRegistrations(file, scope) {
+  let source;
+  try { source = fs.readFileSync(file, 'utf8'); } catch { return []; }
+  const headers = [...source.matchAll(/^\s*\[mcp_servers\.(?:"([^"\n]+)"|([A-Za-z0-9_-]+))\]\s*$/gm)];
+  return headers.map((header, index) => {
+    const bodyStart = header.index + header[0].length;
+    const bodyEnd = headers[index + 1]?.index ?? source.length;
+    const body = source.slice(bodyStart, bodyEnd);
+    const command = tomlString(/^\s*command\s*=\s*("(?:[^"\\]|\\.)*")\s*$/m.exec(body)?.[1]);
+    const args = tomlStringArray(/^\s*args\s*=\s*(\[[^\n]*\])\s*$/m.exec(body)?.[1]);
+    return { name: header[1] ?? header[2], scope, file, command, args };
+  });
+}
+
+/** Effective Codex MCP topology across project and user configuration.
+ * Reports stall-prone recursive Codex registration, concrete AQE registration,
+ * and redundant Ruflo transports without mutating any user-owned config. */
+export function codexMcpTopology({ cwd = process.cwd(), home = os.homedir() } = {}) {
+  const root = repoRoot(cwd) ?? cwd;
+  const files = [path.join(root, '.codex', 'config.toml'), path.join(home, '.codex', 'config.toml')];
+  const registrations = [
+    ...codexMcpRegistrations(files[0], 'project'),
+    ...codexMcpRegistrations(files[1], 'user'),
+  ];
+  const selfRegistrations = registrations.filter((entry) =>
+    entry.name === 'codex' && entry.command === 'codex' && entry.args?.includes('mcp-server'));
+  const agenticQeRegistrations = registrations.filter((entry) => entry.name === 'agentic-qe');
+  const rufloRegistrations = registrations.filter((entry) =>
+    entry.name === 'ruflo' || entry.name === 'claude-flow'
+    || entry.command === 'ruflo'
+    || (entry.command === 'ak' && JSON.stringify(entry.args) === JSON.stringify(['x', 'ruflo-mcp'])));
+  return {
+    files,
+    registrations,
+    selfRegistrations,
+    agenticQeRegistrations,
+    rufloRegistrations,
+    duplicateRuflo: rufloRegistrations.length > 1,
+  };
+}
+
 /**
- * Reverse-bridge state: is the ruflo MCP registered INTO Codex? `ensureRufloMcpInCodex`
+ * Integration state: is the Ruflo MCP registered INTO Codex? `ensureRufloMcpInCodex`
  * runs `codex mcp add ruflo …`, which writes a `[mcp_servers.ruflo]` table into
  * ~/.codex/config.toml — so a spawn-free presence check reads that file (mirrors
- * codexMcpStatus's file-read approach). The command and args facts let sync
+ * codexMcpStatus's spawn-free approach). The command and args facts let sync
  * migrate only an ak-owned legacy registration to the workspace-aware launcher.
  * `owned` reflects kit.json's ak-ownership marker
  * (`integrations.ownership.codex.reverseMcp === 'ak'`).

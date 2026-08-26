@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { codexMcpStatus } from '../../src/lib/mcp.mjs';
+import { codexMcpStatus, codexMcpTopology } from '../../src/lib/mcp.mjs';
 
 // A tmp dir with a .git marker → repoRoot() resolves to it, so codexMcpStatus reads
 // the .mcp.json we write here (not the real repo's).
@@ -64,4 +64,55 @@ test('malformed .mcp.json degrades to not-registered (no throw)', () => {
     fs.writeFileSync(path.join(dir, '.mcp.json'), '{ not valid json');
     assert.deepEqual(codexMcpStatus({}, dir), { registered: false, owned: false });
   } finally { rm(dir); }
+});
+
+test('Codex MCP topology detects recursive self-registration, duplicate Ruflo, and AQE readiness', () => {
+  const dir = tmpProject();
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'kit-codexmcp-home-'));
+  try {
+    fs.mkdirSync(path.join(dir, '.codex'), { recursive: true });
+    fs.mkdirSync(path.join(home, '.codex'), { recursive: true });
+    fs.writeFileSync(path.join(dir, '.codex', 'config.toml'), [
+      '[mcp_servers.codex]',
+      'command = "codex"',
+      'args = ["mcp-server"]',
+      '',
+      '[mcp_servers.agentic-qe]',
+      'command = "aqe-mcp"',
+    ].join('\n'));
+    fs.writeFileSync(path.join(home, '.codex', 'config.toml'), [
+      '[mcp_servers.claude-flow]',
+      'command = "ruflo"',
+      'args = ["mcp", "start"]',
+      '',
+      '[mcp_servers.ruflo]',
+      'command = "ak"',
+      'args = ["x", "ruflo-mcp"]',
+    ].join('\n'));
+
+    const topology = codexMcpTopology({ cwd: dir, home });
+    assert.equal(topology.selfRegistrations.length, 1);
+    assert.equal(topology.selfRegistrations[0].scope, 'project');
+    assert.equal(topology.agenticQeRegistrations.length, 1);
+    assert.equal(topology.agenticQeRegistrations[0].command, 'aqe-mcp');
+    assert.equal(topology.rufloRegistrations.length, 2);
+    assert.equal(topology.duplicateRuflo, true);
+  } finally { rm(dir); rm(home); }
+});
+
+test('Codex MCP topology treats absent and malformed files as empty', () => {
+  const dir = tmpProject();
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'kit-codexmcp-home-'));
+  try {
+    fs.mkdirSync(path.join(dir, '.codex'), { recursive: true });
+    fs.writeFileSync(path.join(dir, '.codex', 'config.toml'), '[broken');
+    assert.deepEqual(codexMcpTopology({ cwd: dir, home }), {
+      files: [path.join(dir, '.codex', 'config.toml'), path.join(home, '.codex', 'config.toml')],
+      registrations: [],
+      selfRegistrations: [],
+      agenticQeRegistrations: [],
+      rufloRegistrations: [],
+      duplicateRuflo: false,
+    });
+  } finally { rm(dir); rm(home); }
 });

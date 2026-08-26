@@ -72,7 +72,7 @@ test('ak host status renders capability-derived tier text and asymmetry notes fo
   const text = result.stdout;
   assert.match(text, /^ {2}claude {4}.*· drives sessions · can lead$/m);
   assert.match(text, /^ {2}codex {5}.*· drives sessions · can lead$/m);
-  assert.match(text, /^ {4}expose Codex to Claude Code as mcp__codex__codex in this project$/m);
+  assert.doesNotMatch(text, /mcp__codex__codex|codex mcp-server/);
   assert.match(text, /^ {2}opencode {2}.*· routing only · supervised · not AQE$/m);
   assert.match(text, /^ {4}consent boundary — a run can block on a permission event \(never auto-approved\); no ruflo backend env flag$/m);
   assert.doesNotMatch(text, /routing host/, 'old hardcoded tier text must be fully replaced');
