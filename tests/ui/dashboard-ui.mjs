@@ -725,13 +725,25 @@ const MODELS_STUB = {
         provenance: 'first-party', scopeFingerprint: 'scope:ui-private', evidenceRefs: ['ui-private-evidence'] }],
       dimensions: { configured: { value: true, evidenceRefs: ['ui-private-evidence'] },
         effective: { value: true, evidenceRefs: ['ui-private-evidence'] },
-        discoverable: { value: true, evidenceRefs: ['ui-private-evidence'] } },
+        observed: { value: true, evidenceRefs: ['ui-usage-observed'] },
+        discoverable: { value: true, evidenceRefs: ['ui-private-evidence'] },
+        entitled: { value: true, evidenceRefs: ['ui-usage-entitled'] },
+        policyAllowed: { value: true, evidenceRefs: ['ui-usage-policy'] },
+        routable: { value: true, evidenceRefs: ['ui-usage-routable'] } },
       evidence: [{ id: 'ui-private-evidence', field: 'catalog', source: 'codex-cache', class: 'catalog',
         capturedAt: MODEL_AT, freshness: 'fresh', completeness: 'complete',
         scopeFingerprint: 'scope:ui-private', refs: [] },
       { id: 'ui-lifecycle-notice', field: 'lifecycle', source: 'codex-cache', class: 'first-party',
         capturedAt: MODEL_AT, freshness: 'fresh', completeness: 'complete',
-        scopeFingerprint: 'scope:ui-private', refs: [] }],
+        scopeFingerprint: 'scope:ui-private', refs: [] },
+      ...[
+        ['ui-usage-observed', 'dimensions.observed'],
+        ['ui-usage-entitled', 'dimensions.entitled'],
+        ['ui-usage-policy', 'dimensions.policyAllowed'],
+        ['ui-usage-routable', 'dimensions.routable'],
+      ].map(([id, field]) => ({ id, field, source: 'usage-index', class: 'observed',
+        capturedAt: MODEL_AT, freshness: 'fresh', completeness: 'complete',
+        scopeFingerprint: 'scope:ui-private', refs: [] }))],
     }, ...Array.from({ length: 60 }, (_, i) => ({
       key: { host: i % 3 === 0 ? 'claude' : i % 3 === 1 ? 'codex' : 'opencode',
         provider: i % 2 === 0 ? 'ui-private-provider-a' : 'ui-private-provider-b',
@@ -2426,6 +2438,18 @@ async function main() {
       initialInventory.overflowY === 'auto' && initialInventory.maxHeight !== 'none'
         && initialInventory.headPosition === 'sticky',
       `inventory geometry styles were ${JSON.stringify(initialInventory)}`);
+    await page.fill('#mli-search', 'UI Private Deployment');
+    await page.waitForFunction(() => document.querySelectorAll('#mli-models tr').length === 1
+      && document.getElementById('mli-result-count')?.textContent !== 'Loading models…');
+    await page.click('#mli-models .mli-detail-open');
+    const evidenceRows = await page.locator('#mli-detail .mli-proof-row').allInnerTexts();
+    check('model details de-duplicate identical evidence summaries without changing field evidence',
+      evidenceRows.filter((row) => row.startsWith('usage-index · observed')).length === 1,
+      `model detail evidence rows were ${JSON.stringify(evidenceRows)}`);
+    await page.click('#mli-detail-close');
+    await page.click('#mli-reset');
+    await page.waitForFunction(() => document.activeElement?.id === 'mli-search'
+      && document.querySelectorAll('#mli-models tr').length === 50);
     await page.selectOption('#mli-evidence-field', 'observed');
     await page.waitForFunction(() => !document.getElementById('mli-evidence-value')?.disabled);
     check('evidence filtering enables its dependent value without sending a half-formed query',

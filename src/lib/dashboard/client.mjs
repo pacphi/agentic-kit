@@ -1851,6 +1851,12 @@ export const JS = `
   function mliEvidence(model,refs,fallback){
     var wanted=new Set(refs||[]),rows=(model&&model.evidence||[]).filter(function(row){return wanted.has(row.id);});
     if(!rows.length)return '<span class="mli-proof-row">'+esc(fallback||"No accepted source established this field.")+'</span>';
+    var seen=new Set();
+    rows=rows.filter(function(row){
+      var summary=JSON.stringify([row.source,row.class,row.capturedAt||"capture unknown",row.freshness,row.completeness]);
+      if(seen.has(summary))return false;
+      seen.add(summary);return true;
+    });
     return rows.map(function(row){return '<span class="mli-proof-row"><b>'+esc(row.source)+'</b> · '+esc(row.class)
       +' · '+esc(row.capturedAt||"capture unknown")+' · '+esc(row.freshness)+' · '+esc(row.completeness)
       +'</span>';}).join("");

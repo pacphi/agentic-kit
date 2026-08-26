@@ -6,8 +6,10 @@
 - **Update note:** The bounded inventory, descriptor-selected source adapters, conservative snapshot
   diff, and read-only CLI/status surfaces are implemented. The operator-first Dashboard separates
   configured routes, aggregate model use in the selected 7/14/30-day window, and a progressive
-  catalogue explorer. Ollama refresh now uses bounded loopback `/api/tags`, `/api/show`, and `/api/ps`
-  evidence with a partial CLI fallback. Credentials, endpoints, scopes, digests, aliases, evidence
+  catalogue explorer. Its model detail summary collapses identical displayed provenance without
+  removing independent field-level evidence references. Ollama refresh now uses bounded loopback
+  `/api/tags`, `/api/show`, and `/api/ps` evidence with a partial CLI fallback. Credentials,
+  endpoints, scopes, digests, aliases, evidence
   references, session identity, and history identifiers remain protected. Cited lifecycle alerts now
   name affected routes, current and recommended models, the provider notice, and a concrete planning
   action. The acceptance conditions and exact-head release proof are complete.
@@ -241,7 +243,7 @@ The implementation branch was validated on 2026-08-25 with the following exact-h
 - `pnpm run check` passed TypeScript checking, ESLint, Markdown lint, packaging, CLI-load checks,
   and the full unit/integration suite. Native instrumented coverage was 86.97% lines, 79.93%
   branches, and 84.58% functions against 70% repository floors.
-- `pnpm run test:ui` passed the 327-check deterministic browser matrix, including Models-only panel
+- `pnpm run test:ui` passed the 330-check deterministic browser matrix, including Models-only panel
   ownership across every Usage submenu, readable Ollama build/runtime detail, lazy Models
   loading, paired evidence filters, clickable ascending/descending column sorting, snapshot-bound
   pagination with safe reset, append retry without row loss, keyboard movement in the bounded

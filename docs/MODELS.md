@@ -198,7 +198,10 @@ browser never derives a provider or publisher from a name and never invents an e
 An `unknown` cell explains which evidence is absent. A local refresh now resolves OpenCode's
 effective configuration, removing unknowns caused only by ignored global, JSONC, agent, or command
 layers. Discovery still does not establish entitlement; configuration does not establish successful
-use; and a model id never establishes the serving provider. A missing or invalid key fails the API
+use; and a model id never establishes the serving provider. Catalog Explorer model details show an
+identical source, class, capture time, freshness, and completeness summary once even when that source
+establishes several fields. The independent field evidence references remain intact and each state
+cell still discloses its own evidence. A missing or invalid key fails the API
 closed, an ordinary Dashboard read never creates one, and all reads retain loopback, session-token,
 CSP/origin, `no-store`, and no-egress protections.
 
