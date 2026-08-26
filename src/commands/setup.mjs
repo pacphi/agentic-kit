@@ -17,7 +17,7 @@ import { runLifecycle } from '../lib/adapters/lifecycle.mjs';
 import { hostsWithLifecycle, lifecycleAdapterFor, lifecycleExecutionEnabled, detectionBinFor } from '../lib/adapters/lifecycle-registry.mjs';
 import { renderApplyReport } from '../lib/adapters/lifecycle-render.mjs';
 import { loadKitConfig, saveKitConfig } from '../lib/config.mjs';
-import { HOSTS, applyHosts, applyProviders, hostInstallState, installHost, applyAqeRouter, seedActivityRoutesIfMultiHost, printActivityRoutingTable, aqeSupportsAgentOverrides, ensureCodexMcp, ensureRufloMcpInCodex, applySetupHostFlags, bothHostsEnabled } from '../lib/providers.mjs';
+import { HOSTS, applyHosts, applyProviders, hostInstallState, installHost, applyAqeRouter, seedActivityRoutesIfMultiHost, printActivityRoutingTable, aqeSupportsAgentOverrides, retireCodexMcp, ensureRufloMcpInCodex, applySetupHostFlags, bothHostsEnabled } from '../lib/providers.mjs';
 import { installedVersion } from '../lib/versions.mjs';
 import * as rb from '../lib/ruvnet-brain.mjs';
 import * as adb from '../lib/agentdb.mjs';
@@ -74,8 +74,8 @@ Options:
   --no-security    skip the security-surface verification
   --codex          enable + install the OpenAI Codex host during setup (dual-mode;
                      default is claude-only, codex opt-in). Installs @openai/codex
-                     if absent (prompted; external installs untouched) and wires
-                     the Claude↔Codex bridges + per-activity routing.
+                     if absent (prompted; external installs untouched), wires
+                     shared Ruflo/AQE access, and seeds per-activity routing.
   --opencode       enable the opencode host during setup: wires opencode.json
                      (claude-flow + ruvnet-brain MCP, skills paths, permissions),
                      deploys the lifecycle plugin + platform skill, and converts
@@ -351,7 +351,7 @@ export async function run_project({ flags, cfg, trustDisclosed = false }) {
   }
 
   // 7. Write-verification (store → actual on-disk row, then clean up). Native
-  // bridges may select agentdb-memory.db beside the pinned compatibility DB.
+  // Native memory integrations may select agentdb-memory.db beside the pinned compatibility DB.
   const probeKey = `_setup/verify-${process.pid}-${Date.now()}`;
   const stored = (await runCmd('ruflo', ['memory', 'store', '-k', probeKey, '--value', 'setup-verify', '-n', '_setup'], { cwd: root, env })).code === 0;
   const landed = stored ? findMemoryEntry(root, '_setup', probeKey) : null;
@@ -407,11 +407,10 @@ export async function run_project({ flags, cfg, trustDisclosed = false }) {
   if (rt.changed) (rt.ok ? ok : warn)(`aqe router: ${rt.detail}`);
   if (Object.keys(cfg.routing?.routes ?? {}).length) printActivityRoutingTable(cfg);
   if (cfg.integrations?.hosts?.codex) {
-    const mcp = await ensureCodexMcp(cfg, root);
-    if (mcp.changed) saveKitConfig(cfg); // persist the codexMcp ownership marker
-    if (mcp.changed || !mcp.ok) (mcp.ok ? ok : warn)(`codex MCP: ${mcp.detail}`);
-    // reverse bridge: register ruflo MCP into codex (codex→ruflo) so the bridge is
-    // two-way — parity with `ak sync` / `ak host pick`.
+    const mcp = await retireCodexMcp(cfg, root);
+    if (mcp.changed) saveKitConfig(cfg);
+    if (mcp.changed || !mcp.ok) (mcp.ok ? ok : warn)(`legacy codex MCP: ${mcp.detail}`);
+    // Independently register Ruflo in Codex for shared routing/swarm/memory tools.
     const rmcp = await ensureRufloMcpInCodex(cfg, root);
     if (rmcp.changed) saveKitConfig(cfg); // persist reverse MCP ownership
     if (rmcp.changed || !rmcp.ok) (rmcp.ok ? ok : warn)(`ruflo→codex MCP: ${rmcp.detail}`);
@@ -504,7 +503,7 @@ export async function run({ flags, pkgRoot, confirm = ask }) {
     info('not inside a project (no .git here) — run `ak setup` from a repo to set one up');
   }
   // Final reconcile pass — deliberately AFTER the hosts branch (which installs
-  // the claude/codex/opencode CLIs) and the project phase (whose codex bridge
+  // the claude/codex/opencode CLIs) and the project phase (whose Codex integration
   // creates ~/.codex): the user-scope MCP registration needs the claude CLI on
   // disk, and several guidance blocks gate on freshly-installed hosts
   // (command:codex, flag:dualMode). Shares blocks.mjs reconcileGuidance with

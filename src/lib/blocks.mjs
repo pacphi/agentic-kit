@@ -97,7 +97,7 @@ export const BUILTIN_BLOCKS = [
     // so it lands in the two MACHINE-scoped guidance files — ~/.claude/CLAUDE.md
     // (claude) and ~/.codex/AGENTS.md (agents-user) — never a repo's checked-in
     // AGENTS.md, which would leak machine truths into shared git history (ADR-0008).
-    // Documents `ak run`, the Claude↔Codex bridge, and per-activity routing.
+    // Documents `ak run`, shared Ruflo/AQE access, and per-activity routing.
     slug: 'ruflo-dual-mode-reference',
     template: 'dual-mode-reference.md',
     position: 'append',

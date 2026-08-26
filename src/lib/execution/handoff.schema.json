@@ -1,0 +1,12 @@
+{
+  "title": "AK worker handoff",
+  "type": "object",
+  "properties": {
+    "outcome": { "type": "string" },
+    "artifacts": { "type": "array", "items": { "type": "string" } },
+    "decisions": { "type": "array", "items": { "type": "string" } },
+    "risks": { "type": "array", "items": { "type": "string" } }
+  },
+  "required": ["outcome", "artifacts", "decisions", "risks"],
+  "additionalProperties": false
+}

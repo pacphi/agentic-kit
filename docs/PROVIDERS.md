@@ -266,7 +266,7 @@ An interactive picker (or flags for scripts). Enable `codex` and `ak`:
 
 - installs it if it's missing (`npm i -g @openai/codex`) — but leaves an existing
   mise/brew/native install alone,
-- maintains the Claude↔Codex bridge and generated host guidance,
+- maintains shared Ruflo/AQE access and generated host guidance,
 - writes `ENABLE_CLAUDE_CODE` / `ENABLE_CODEX` into `.claude/settings.local.json`.
 
 > [!NOTE]
@@ -383,12 +383,29 @@ is aborted and reported as `permission_required`; `ak` never auto-approves it. O
 not written to AQE `agentOverrides`, cannot become `primaryHost`, and do not count as a separate
 AQE vendor. `ak run` is the only execution surface for an OpenCode route.
 
-**QE-Court validation stays upstream-owned.** `agentic-qe` 3.13.3 corrected its shipped
-QE-Court panel and now enforces the configured anti-collusion policy before convening.
-`ak status` and `ak host status` surface that result read-only; `ak sync` never rewrites
+**QE-Court validation stays upstream-owned.** Agentic-kit's local check proves only configured
+vendor diversity and writer/jury separation; it does not prove that provider seats or the court
+runtime are executable. `ak status` and `ak host status` state that boundary explicitly, and
+`ak sync` never rewrites
 `.claude/skills/qe-court/config.json`. If a config created by 3.13.2 or earlier still
 seats both `defense` and `jury` on Cognitum tiers, regenerate it with 3.13.3+ or change
 `defense` to `claude-code` so the jury and defense use distinct vendors.
+
+`primaryHost` controls the mirrored `ak run` activity policy, not QE-Court roles. The source-tree
+live regression exercises bounded participant transport from both directions without claiming a
+court verdict:
+
+```bash
+pnpm test:qe-court-live                    # one Claude-led + one Codex-led trial
+AK_QE_COURT_TRIALS=5 pnpm test:qe-court-live  # POSIX soak
+```
+
+Each seat performs an MCP-native Ruflo memory store→retrieve round trip, emits the exact returned
+value in a validated bounded handoff, and must terminate within its absolute deadline. The check
+independently confirms the stored project-memory value and fails on repository mutation or
+orphaned state.
+Full court parity remains blocked until Agentic-QE ships a supported host-neutral runner and a
+self-contained Codex QE-Court projection.
 
 Defaults (all overridable; your edits are marked `custom` and never re-seeded):
 
@@ -447,9 +464,9 @@ weigh, cleared with `ak x host refresh` if you want the newer default.
 set as authoritative. Excluding a routing host removes it from persisted routes and escalation
 ladders before AQE is reprojected; seeded entries are removed silently, while a user-pinned route
 prints a warning naming the disabled host. It also removes stale agentic-kit-curated AQE overrides
-while preserving foreign override keys. Excluding Codex additionally retires only the two
-marker-owned Codex MCP bridges; user-registered MCP servers are left alone. Re-enabling Codex
-converges those bridges again.
+while preserving foreign override keys. Excluding Codex retires only marker-owned integrations;
+user-registered MCP servers are left alone. The deprecated Claude→Codex MCP projection is retired
+even while Codex remains enabled, while the independent Ruflo-in-Codex registration converges.
 
 `routing.routes` intentionally names a host and model, not an inference provider. Provider resolution
 is a separate binding lookup; absent grounded evidence remains unknown or explicitly inferred.
@@ -467,7 +484,7 @@ The native config stores each knob below lives in — and their precedence — a
 
 | You want to…                         | `ak` way                          | The raw ruflo/aqe way it maps to                    |
 | ------------------------------------ | --------------------------------- | --------------------------------------------------- |
-| Enable claude/codex hosts            | `ak host pick`              | `ENABLE_CLAUDE_CODE` / `ENABLE_CODEX` env + managed bridge/guidance |
+| Enable claude/codex hosts            | `ak host pick`              | `ENABLE_CLAUDE_CODE` / `ENABLE_CODEX` env + shared Ruflo/AQE access and guidance |
 | Register a Ruflo LLM provider        | `--provider ollama:qwen3.6:27b`   | `ruflo providers configure -p ollama -m qwen3.6:27b -e http://127.0.0.1:11434` |
 | Select a direct Ruflo provider       | per-agent/raw setting             | agent `--provider` or `RUFLO_PROVIDER=ollama` / `openrouter` |
 | Set which LLM runs QE                | `--aqe-provider gemini`           | `AQE_LLM_PROVIDER=gemini` (env)                     |

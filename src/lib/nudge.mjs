@@ -54,10 +54,11 @@ export async function localDrift({ pkgRoot, cwd = process.cwd(), cfg, targets } 
     }
   } catch { /* best-effort */ }
 
-  // Claude↔Codex MCP bridge (both directions; spawn-free file reads)
+  // Cross-host integration (spawn-free file reads). The retired Claude→Codex
+  // MCP is drift only when still present; Ruflo-in-Codex remains required.
   try {
     if (cfg.integrations?.hosts?.codex) {
-      if (!codexMcpStatus(cfg, cwd).registered) lines.push('codex MCP unregistered');
+      if (codexMcpStatus(cfg, cwd).registered) lines.push('deprecated codex MCP registered');
       if (!rufloCodexMcpStatus(cfg).registered) lines.push('ruflo→codex MCP unregistered');
     }
   } catch { /* best-effort */ }

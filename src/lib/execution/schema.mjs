@@ -17,6 +17,13 @@ const REQUIRED_METHODS = Object.freeze([
   'readiness', 'prepare', 'launch', 'observe', 'interpret', 'summarize', 'cancel', 'cleanup',
 ]);
 
+// Optional per-adapter hooks (ADR-0034). `handoffRequestFor(worker)` lets an
+// adapter supply the handoff instruction matching its transport (schema-native
+// hosts ask for the bare JSON object); absent, the runner appends the generic
+// tagged-block request. Optional and validated only when present, so existing
+// adapters — including externally-admitted ones — keep their exact shape.
+const OPTIONAL_METHODS = Object.freeze(['handoffRequestFor']);
+
 /** Validate the host-neutral execution-adapter shape without invoking it. */
 export function validateExecutionAdapter(value) {
   assertRecord(value, 'executionAdapter');
@@ -26,7 +33,19 @@ export function validateExecutionAdapter(value) {
       throw new TypeError(`executionAdapter.${method} must be a function`);
     }
   }
-  return immutable({ id: value.id, ...Object.fromEntries(REQUIRED_METHODS.map((method) => [method, value[method]])) });
+  const optional = {};
+  for (const method of OPTIONAL_METHODS) {
+    if (value[method] === undefined) continue;
+    if (typeof value[method] !== 'function') {
+      throw new TypeError(`executionAdapter.${method} must be a function when present`);
+    }
+    optional[method] = value[method];
+  }
+  return immutable({
+    id: value.id,
+    ...Object.fromEntries(REQUIRED_METHODS.map((method) => [method, value[method]])),
+    ...optional,
+  });
 }
 
 /** Validate the privacy-safe, normalized terminal result every adapter returns. */

@@ -211,11 +211,8 @@ test('hostAsymmetryNote: claude has nothing asymmetric to state', () => {
   assert.equal(hostAsymmetryNote('claude'), '');
 });
 
-test('hostAsymmetryNote: codex states the MCP bridge grant, read off its own trust manifest', () => {
-  assert.equal(
-    hostAsymmetryNote('codex'),
-    'expose Codex to Claude Code as mcp__codex__codex in this project',
-  );
+test('hostAsymmetryNote: codex has no legacy MCP bridge grant', () => {
+  assert.equal(hostAsymmetryNote('codex'), '');
 });
 
 test('hostAsymmetryNote: opencode states its consent boundary and the absent ruflo backend flag', () => {

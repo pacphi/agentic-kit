@@ -108,7 +108,7 @@ test('a missing agentic-qe is only a WARN (it is optional)', async () => {
   paths._setGlobalRootForTest(fakeGlobalRoot(HOME, { ruflo: '9.9.9', 'agentic-qe': '9.9.9' }));
 });
 
-test('agentic-qe 3.13.3 qe-court config is valid and offers no heal', async () => {
+test('a structurally valid qe-court route does not overclaim runtime readiness', async () => {
   seedHome();
   writeQeCourtConfig({
     routing: {
@@ -124,7 +124,9 @@ test('agentic-qe 3.13.3 qe-court config is valid and offers no heal', async () =
   try {
     const before = snapshot(path.dirname(qeCourtFile));
     const qc = one(await collect(), 'qe-court');
-    assert.equal(qc.level, 'ok');
+    assert.equal(qc.level, 'warn');
+    assert.match(qc.message, /routing config passes/);
+    assert.match(qc.message, /executability is not proven/);
     assert.equal(qc.fix, null);
     assertUnchanged(before, path.dirname(qeCourtFile), 'status must not rewrite a valid upstream config');
   } finally {
@@ -276,6 +278,36 @@ test('owned Codex statusline reports independently without enabling Codex MCP ro
   assert.equal(one(rows, 'codex-statusline').level, 'ok');
   assert.equal(rowsFor(rows, 'codex-mcp').length, 0,
     'statusline ownership must not imply Codex is enabled as a routed host');
+});
+
+test('Codex MCP topology fails recursive self-registration and reports missing AQE plus duplicate Ruflo', async () => {
+  seedHome(offlineKitConfig({
+    integrations: { version: 2, hosts: { claude: true, codex: true, opencode: false }, bindings: [], ownership: {} },
+  }));
+  fs.mkdirSync(path.join(PROJECT, '.codex'), { recursive: true });
+  fs.writeFileSync(path.join(PROJECT, '.codex', 'config.toml'), [
+    '[mcp_servers.codex]',
+    'command = "codex"',
+    'args = ["mcp-server"]',
+  ].join('\n'));
+  fs.mkdirSync(paths.codexDir(), { recursive: true });
+  fs.writeFileSync(paths.codexConfigPath(), [
+    '[mcp_servers.claude-flow]',
+    'command = "ruflo"',
+    'args = ["mcp", "start"]',
+    '',
+    '[mcp_servers.ruflo]',
+    'command = "ak"',
+    'args = ["x", "ruflo-mcp"]',
+  ].join('\n'));
+  try {
+    const rows = rowsFor(await collect(), 'codex-mcp');
+    assert.equal(rows.find((r) => /recursive codex/.test(r.message))?.level, 'fail');
+    assert.equal(rows.find((r) => /agentic-qe MCP is not concretely/.test(r.message))?.level, 'warn');
+    assert.equal(rows.find((r) => /duplicate Ruflo/.test(r.message))?.level, 'warn');
+  } finally {
+    rmrf(path.join(PROJECT, '.codex'));
+  }
 });
 
 test('an initialized project reports its learned-pattern count', async () => {

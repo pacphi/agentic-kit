@@ -37,7 +37,7 @@ import {
 } from './adapters/index.mjs';
 import { CURRENT_INTEGRATIONS_VERSION, validateEndpoint } from './adapters/config.mjs';
 import { opencodeMcpStatus } from './opencode.mjs';
-import { rufloCodexMcpStatus } from './mcp.mjs';
+import { codexMcpStatus, rufloCodexMcpStatus } from './mcp.mjs';
 import {
   DEFAULT_PRIMARY_HOST,
   ROUTING_SCHEMA_VERSION,
@@ -75,6 +75,16 @@ export const AQE_PROVIDER_TYPES = [
   'claude-code', 'claude', 'openai', 'gemini', 'openrouter',
   'azure-openai', 'bedrock', 'cognitum', 'ollama', 'onnx',
 ];
+
+// Chain-rung gate: everything above PLUS `codex`. Grounded in installed aqe
+// 3.13.12 (dist/shared/llm/router/config-store.js): BUILTIN_CONSTRUCTIBLE_
+// PROVIDERS includes codex, PROVIDER_ENV_KEYS.codex = [] (ChatGPT-subscription
+// via the codex binary — no env key), and provider REACHABILITY requires a
+// fallbackChain entry: aqe's FALLBACK_PRIORITY contains neither codex nor
+// claude-code, so an enabled codex provider is inert unless chained (#108
+// phase 3). AQE_PROVIDER_TYPES itself stays narrow — it also gates
+// AQE_LLM_PROVIDER, whose accepted values are aqe's separate ADR-123 list.
+export const AQE_CHAIN_PROVIDER_TYPES = [...AQE_PROVIDER_TYPES, 'codex'];
 
 /** Credential descriptor per AQE_PROVIDER_TYPES member — the missing half of the
  *  chain validation: a rung whose provider has no usable credential is inert, and
@@ -436,7 +446,7 @@ export function applyAqeRouter(cfg, cwd = process.cwd()) {
 
   let chainError = null;
   if (hasChain) {
-    const valid = chain.filter((e) => e?.provider && AQE_PROVIDER_TYPES.includes(e.provider));
+    const valid = chain.filter((e) => e?.provider && AQE_CHAIN_PROVIDER_TYPES.includes(e.provider));
     if (valid.length === 0) {
       // A bad chain must NOT block the independent agentOverrides projection — the
       // Activity routing is validated separately. Record it and carry on.
@@ -466,7 +476,21 @@ export function applyAqeRouter(cfg, cwd = process.cwd()) {
     next.agentOverrides = { ...priorOverrides };
     for (const agent of staleOverrides) delete next.agentOverrides[agent];
     Object.assign(next.agentOverrides, projected);
+    // An override naming a provider is inert until that provider is ENABLED in
+    // this same file: aqe enables from env keys or the `providers` map, and a
+    // subscription host-CLI provider (codex, claude-code) has no env key at
+    // all — so ak-projected codex overrides sat dead and warned on every aqe
+    // startup (#108 phase 3). Enable exactly the providers the projection
+    // references — merge-not-clobber, writing nothing beyond `enabled`.
+    const referenced = [...new Set(Object.values(projected).map((entry) => entry.provider))];
+    if (referenced.length) {
+      next.providers = { ...(next.providers ?? existing.providers ?? {}) };
+      for (const provider of referenced) {
+        next.providers[provider] = { ...(next.providers[provider] ?? {}), enabled: true };
+      }
+    }
     details.push(`agentOverrides: ${Object.keys(projected).length} agents`
+      + (referenced.length ? ` (providers enabled: ${referenced.join(', ')})` : '')
       + (staleOverrides.length ? ` (${staleOverrides.length} stale ak entries pruned)` : ''));
     wrote = true;
   } else if (hasPolicy) {
@@ -612,31 +636,46 @@ export function printActivityRoutingTable(cfg) {
   if (t) console.log(t);
 }
 
-// ── codex MCP backend (mcp__codex__codex) ───────────────────────────────────
-// Register `codex mcp-server` (stdio) as a project-scoped Claude Code MCP server
-// so a Claude orchestrator can call Codex inline via the mcp__codex__codex tool
-// (the dual-host swarm's MCP path, ADR-0001 projection #3). Reversible via
-// undoCodexMcp. Best-effort: a failure here never fails the caller.
-// Ownership: a `codex` MCP server that PRE-EXISTS ak's registration is the user's
-// and must never be torn down (there's no `_managedBy` on an MCP entry). ak only
-// removes a server it actually added, tracked by
-// `integrations.ownership.codex.mcp === 'ak'` in
-// kit.json. On mutation ak sets the marker; the caller persists cfg.
-export async function ensureCodexMcp(cfg, cwd = process.cwd()) {
-  if (!cfg.integrations?.hosts?.codex) return { ok: true, changed: false, detail: 'codex not enabled — codex MCP unmanaged' };
-  if (!(await have('codex'))) return { ok: true, changed: false, detail: 'codex CLI not installed' };
-  const r = await run('claude', ['mcp', 'add', 'codex', '-s', 'project', '--', 'codex', 'mcp-server'], { cwd });
-  if (r.code === 0) {
-    cfg.integrations.ownership ??= {};
-    cfg.integrations.ownership.codex ??= {};
-    cfg.integrations.ownership.codex.mcp = 'ak';
-    return { ok: true, changed: true, detail: 'codex MCP registered (mcp__codex__codex)' };
+// ── retired Claude → Codex MCP backend ──────────────────────────────────────
+// OpenAI deprecated `codex mcp-server` on 2026-08-24. `ak run` is the managed,
+// deadline-bounded cross-host path (ADR-0018/0020/0033); OpenAI's Claude Code
+// plugin is an optional user-owned interactive path. Reconciliation therefore
+// removes ONLY the project MCP entry that agentic-kit previously registered.
+// A pre-existing/user-owned entry is preserved and reported with an explicit
+// manual remedy. The ownership receipt is cleared only after absence is proven.
+function clearLegacyCodexMcpReceipt(cfg) {
+  cfg.integrations ??= {};
+  cfg.integrations.ownership ??= {};
+  cfg.integrations.ownership.codex ??= {};
+  cfg.integrations.ownership.codex.mcp = null;
+}
+
+export async function retireCodexMcp(cfg, cwd = process.cwd(), {
+  runner = run, inspect = codexMcpStatus,
+} = {}) {
+  const current = inspect(cfg, cwd);
+  if (!current.registered) {
+    if (current.owned) {
+      clearLegacyCodexMcpReceipt(cfg);
+      return { ok: true, changed: true, detail: 'stale legacy codex MCP ownership receipt cleared' };
+    }
+    return { ok: true, changed: false, detail: 'legacy codex MCP absent (retired)' };
   }
-  if (/already exists|already configured/i.test(`${r.stderr}${r.stdout}`)) {
-    // pre-existing: leave ownership as-is (only a prior ak run would have set it)
-    return { ok: true, changed: false, detail: 'codex MCP already registered' };
+  if (!current.owned) {
+    return {
+      ok: false,
+      changed: false,
+      detail: 'deprecated user-owned codex MCP preserved — remove manually: claude mcp remove codex -s project',
+    };
   }
-  return { ok: false, changed: false, detail: `codex MCP registration failed: ${(r.stderr || r.stdout || '').split('\n')[0].slice(0, 120)}` };
+
+  const removed = await undoCodexMcp(cwd, { managed: true, runner });
+  if (!removed.ok) return { ...removed, detail: `legacy codex MCP retirement failed: ${removed.detail}` };
+  if (inspect(cfg, cwd).registered) {
+    return { ok: false, changed: false, detail: 'legacy codex MCP removal could not be confirmed; ownership receipt retained' };
+  }
+  clearLegacyCodexMcpReceipt(cfg);
+  return { ok: true, changed: true, detail: 'legacy codex MCP removed; supervised cross-host execution uses ak run' };
 }
 
 /** Remove the project-scoped codex MCP server — ONLY when ak registered it
@@ -644,14 +683,15 @@ export async function ensureCodexMcp(cfg, cwd = process.cwd()) {
 export async function undoCodexMcp(cwd = process.cwd(), { managed = false, runner = run } = {}) {
   if (!managed) return { ok: true, changed: false, detail: 'codex MCP left as-is (not ak-registered)' };
   const r = await runner('claude', ['mcp', 'remove', 'codex', '-s', 'project'], { cwd });
-  return { ok: true, changed: r.code === 0, detail: r.code === 0 ? 'codex MCP removed' : 'codex MCP not registered' };
+  return r.code === 0
+    ? { ok: true, changed: true, detail: 'codex MCP removed' }
+    : { ok: false, changed: false, detail: `codex MCP removal failed: ${(r.stderr || r.stdout || `exit ${r.code}`).split('\n')[0].slice(0, 120)}` };
 }
 
-// ── reverse MCP bridge: ruflo MCP → Codex ───────────────────────────────────
-// ensureCodexMcp above wires claude→codex (Claude calls Codex via mcp__codex__codex).
-// This is the MIRROR: register the ruflo MCP server INTO Codex so a Codex-driven
-// session can reach ruflo's tools — the codex→ruflo half that makes the bridge
-// bidirectional (ambidextrous parity). The reverse bridge intentionally uses:
+// ── Ruflo MCP → Codex ───────────────────────────────────────────────────────
+// Register the Ruflo MCP server INTO Codex so a Codex-driven session can reach
+// the same routing, swarm, and memory tools as Claude. This is an independent
+// host integration, not the reverse half of a peer-to-peer MCP bridge. It uses:
 // `codex mcp add ruflo -- ak x ruflo-mcp` writes a [mcp_servers.ruflo] table into
 // ~/.codex/config.toml; the launcher pins memory from each runtime workspace.
 // aqe's own codex MCP is handled by `aqe init --with-codex`
@@ -698,7 +738,9 @@ export async function undoRufloMcpInCodex(cwd = process.cwd(), { managed = false
   if (!managed) return { ok: true, changed: false, detail: 'ruflo→codex MCP left as-is (not ak-registered)' };
   if (!(await haveFn('codex'))) return { ok: true, changed: false, detail: 'codex CLI not installed' };
   const r = await runner('codex', ['mcp', 'remove', 'ruflo'], { cwd });
-  return { ok: true, changed: r.code === 0, detail: r.code === 0 ? 'ruflo MCP removed from codex' : 'ruflo→codex MCP not registered' };
+  return r.code === 0
+    ? { ok: true, changed: true, detail: 'ruflo MCP removed from codex' }
+    : { ok: false, changed: false, detail: `ruflo→codex MCP removal failed: ${(r.stderr || r.stdout || `exit ${r.code}`).split('\n')[0].slice(0, 120)}` };
 }
 
 /** The exact env this config wants written. `AQE_LLM_PROVIDER` is written only

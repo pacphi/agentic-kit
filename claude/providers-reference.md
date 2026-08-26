@@ -62,17 +62,17 @@ ak host off      # reset to claude-only default; strip managed env keys
 
 `pick` persists your choice to `kit.json` and applies it: it writes the ruflo backend flags
 (`ENABLE_CLAUDE_CODE` / `ENABLE_CODEX`) and `AQE_LLM_PROVIDER` into
-`.claude/settings.local.json` `env` (merge-not-clobber, backup-first), maintains the
-Claude↔Codex bridge when both hosts are enabled, and registers any API-key providers with ruflo.
+`.claude/settings.local.json` `env` (merge-not-clobber, backup-first), maintains Codex's
+independent Ruflo integration, and registers any API-key providers with ruflo.
 `ak sync` reapplies the same choice idempotently; `ak status` shows **hosts** and
 **providers** rows and flags drift. At the claude-only default nothing is written — behavior
 is unchanged until you opt in.
 
-When **both** hosts are enabled, `ak` also seeds a **per-activity routing policy** and wires a
-**two-way Claude↔Codex MCP bridge** (Claude reaches Codex via `mcp__codex__codex`; Codex reaches
-ruflo via `[mcp_servers.ruflo]`). `--primary-host claude|codex` chooses which host leads. See the
-ambidextrous dual-host reference block and `docs/PROVIDERS.md` §3.5 for the routing table and
-canonical `ak run` execution.
+When **both** hosts are enabled, `ak` also seeds a **per-activity routing policy** and gives Codex
+Ruflo access via `[mcp_servers.ruflo]`. `--primary-host claude|codex` chooses which host leads
+bounded `ak run` pipelines. OpenAI deprecated the former Claude→`codex mcp-server` projection;
+its Claude Code plugin is an optional user-owned interactive path. See the ambidextrous dual-host
+reference block and `docs/PROVIDERS.md` §3.5.
 
 ### Install & update (install-method-aware)
 

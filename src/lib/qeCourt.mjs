@@ -23,6 +23,7 @@
 //     actually different vendors.
 // Net effect: ak is never looser than a model where every unrecognized id
 // shared one 'unknown' vendor — it may flag stricter, but never the reverse.
+import fs from 'node:fs';
 import path from 'node:path';
 import { readJson } from './settings.mjs';
 import { installedVersion, cmpVersions } from './versions.mjs';
@@ -104,4 +105,54 @@ export function qeCourtConfigPath(root) {
  *  (auto-created by the skill on its first run — ak never creates it). */
 export function readQeCourtConfig(root) {
   return readJson(qeCourtConfigPath(root), null);
+}
+
+function anyExists(files) {
+  return files.some((file) => fs.existsSync(file));
+}
+
+/** Fail-closed consumer readiness for the upstream-owned court skill. This does
+ * not implement or execute the court. It proves only that both host projections
+ * are present, agree, and carry the schema/referee/oracle assets their own
+ * metadata and evals reference. Provider-seat readiness is a separate live
+ * proof. */
+export function qeCourtReadiness(root) {
+  const projections = [
+    { host: 'Claude', dir: path.join(root, '.claude', 'skills', 'qe-court') },
+    { host: 'Codex', dir: path.join(root, '.agents', 'skills', 'qe-court') },
+  ];
+  const artifactIssues = [];
+  const configs = [];
+  const required = [
+    'SKILL.md', 'config.json', 'schemas/output.json',
+    'scripts/validate-config.json', 'evals/qe-court.yaml',
+  ];
+  for (const projection of projections) {
+    for (const rel of required) {
+      if (!fs.existsSync(path.join(projection.dir, rel))) {
+        artifactIssues.push(`${projection.host} projection missing ${rel}`);
+      }
+    }
+    const config = readJson(path.join(projection.dir, 'config.json'), null);
+    configs.push(config);
+    const schemaRef = typeof config?.$schema === 'string' ? config.$schema : null;
+    if (schemaRef && !fs.existsSync(path.resolve(projection.dir, schemaRef))) {
+      artifactIssues.push(`${projection.host} projection missing referenced ${schemaRef.replace(/^\.\//, '')}`);
+    }
+  }
+  if (configs.every(Boolean) && JSON.stringify(configs[0]) !== JSON.stringify(configs[1])) {
+    artifactIssues.push('Claude and Codex qe-court config projections differ');
+  }
+  if (!anyExists(['.ts', '.js', '.mjs'].map((ext) => path.join(root, 'src', 'skills', 'qe-court', `referee${ext}`)))) {
+    artifactIssues.push('consumer is missing the referenced qe-court referee implementation');
+  }
+  if (!anyExists(['.ts', '.js', '.mjs'].map((ext) => path.join(root, 'tests', 'unit', 'skills', 'qe-court', `referee.test${ext}`)))) {
+    artifactIssues.push('consumer is missing the referenced qe-court referee oracle');
+  }
+  const routingViolations = configs[0] ? validateCourtConfig(configs[0]) : ['missing-config'];
+  return {
+    ready: routingViolations.length === 0 && artifactIssues.length === 0,
+    routingViolations,
+    artifactIssues,
+  };
 }

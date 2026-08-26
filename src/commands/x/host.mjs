@@ -6,11 +6,11 @@
 // Two independent axes: ruflo host CLIs (claude/codex) and the LLM the routers use.
 import readline from 'node:readline/promises';
 import {
-  HOSTS, API_PROVIDERS, AQE_PROVIDER_TYPES, detectHosts,
+  HOSTS, API_PROVIDERS, AQE_PROVIDER_TYPES, AQE_CHAIN_PROVIDER_TYPES, detectHosts,
   settingsTarget, isDefault, applyHosts, applyProviders,
   undoProviders, hostInstallState, hostAuthState, installHost, applyAqeRouter, undoAqeRouter,
   bothHostsEnabled, DUAL_ROLE_TIP, JUDGE_BIAS_TIP, QE_COURT_TIP, suggestedFallbackFor,
-  seedActivityRoutesIfMultiHost, printActivityRoutingTable, ensureCodexMcp, undoCodexMcp,
+  seedActivityRoutesIfMultiHost, printActivityRoutingTable, retireCodexMcp, undoCodexMcp,
   ensureRufloMcpInCodex, undoRufloMcpInCodex, detectAqeProviders, aqeProviderCredential, credentialGaps, fallbackSource,
   collectIntegrationFacts,
 } from '../../lib/providers.mjs';
@@ -296,7 +296,7 @@ function printQeCourtStatus(cwd) {
     console.log(`  ${role.padEnd(28)} ${provider ?? dim('(unset)')}`);
   }
   if (violations.length) warn(`qe-court panel invalid: ${violations.join(', ')}`);
-  else ok('qe-court panel valid (vendor-diverse, jury independent of writer)');
+  else ok('qe-court routing config passes the local anti-collusion check (runtime court readiness not proven)');
 }
 
 /** Opt-in, per-activity re-seed of routes whose seeded pin diverges from the
@@ -370,12 +370,6 @@ async function off({ cwd, pkgRoot }) {
   cfg.integrations.hosts = defaultHostMap();
   cfg.routing.primaryHost = DEFAULT_PRIMARY_HOST;
   cfg.routing.routes = {};
-  cfg.integrations.ownership ??= {};
-  cfg.integrations.ownership.codex = {
-    ...(cfg.integrations.ownership.codex ?? {}),
-    mcp: null,
-    reverseMcp: null,
-  };
   if (ret.ok && cfg.integrations.ownership.opencode) {
     delete cfg.integrations.ownership.opencode.catalogDir;
   }
@@ -386,10 +380,18 @@ async function off({ cwd, pkgRoot }) {
   const router = undoAqeRouter(cwd);
   const mcp = await undoCodexMcp(cwd, { managed: codexMcpManaged });
   const rmcp = await undoRufloMcpInCodex(cwd, { managed: rufloCodexManaged });
+  cfg.integrations.ownership ??= {};
+  cfg.integrations.ownership.codex = {
+    ...(cfg.integrations.ownership.codex ?? {}),
+    ...(mcp.ok ? { mcp: null } : {}),
+    ...(rmcp.ok ? { reverseMcp: null } : {}),
+  };
+  saveKitConfig(cfg);
   const ocLine = ret.ok ? `opencode: ${ret.undo.detail}; ${ret.artifacts.detail}`
     : `opencode teardown incomplete — ${ret.undo.detail}`;
-  (ret.ok ? ok : warn)(`reset to claude-only default — ${env.detail}; ${router.detail}; ${mcp.detail}; ${rmcp.detail}; ${ocLine}`);
-  return ret.ok ? 0 : 1;
+  const complete = ret.ok && mcp.ok && rmcp.ok;
+  (complete ? ok : warn)(`reset to claude-only default${complete ? '' : ' with teardown receipts retained'} — ${env.detail}; ${router.detail}; ${mcp.detail}; ${rmcp.detail}; ${ocLine}`);
+  return complete ? 0 : 1;
 }
 
 export const parseModels = (csv) => csv.split(',').map((s) => s.trim()).filter(Boolean).map((tok) => {
@@ -551,11 +553,11 @@ async function pick({ flags, cwd, pkgRoot }) {
     if (AQE_PROVIDER_TYPES.includes(norm)) aqeProvider = norm;
     else { warn(`unknown aqe provider '${aqeProvider}' — leaving aqe on its default (valid: ${AQE_PROVIDER_TYPES.join(', ')})`); aqeProvider = null; }
   }
-  // validate fallback chain providers
+  // validate fallback chain providers (chain gate admits codex — #108 phase 3)
   aqeFallback = aqeFallback
     .map((e) => ({ ...e, provider: e.provider === 'anthropic' ? 'claude' : e.provider }))
     .filter((e) => {
-      const okp = AQE_PROVIDER_TYPES.includes(e.provider);
+      const okp = AQE_CHAIN_PROVIDER_TYPES.includes(e.provider);
       if (!okp) warn(`dropping unknown fallback provider '${e.provider}'`);
       else if (!e.models.length) warn(`fallback entry '${e.provider}' has no models — aqe may skip it; add e.g. ${e.provider}:<model-id>`);
       return okp;
@@ -618,8 +620,9 @@ async function pick({ flags, cwd, pkgRoot }) {
     }
   }
 
-  // Codex owns two directional MCP bridges. Disable only the marker-owned
-  // bridges, matching OpenCode's receipt-based teardown semantics.
+  // Disable only marker-owned integrations, matching OpenCode's receipt-based
+  // teardown semantics. The legacy Claude→Codex MCP receipt may still exist on
+  // machines upgrading across ADR-0033.
   let codexRetired = null;
   if (prevCodex && !cfg.integrations.hosts.codex) {
     const mcp = await undoCodexMcp(cwd, { managed: codexMcpManaged });
@@ -627,8 +630,8 @@ async function pick({ flags, cwd, pkgRoot }) {
     cfg.integrations.ownership ??= {};
     cfg.integrations.ownership.codex = {
       ...(cfg.integrations.ownership.codex ?? {}),
-      mcp: null,
-      reverseMcp: null,
+      ...(mcp.ok ? { mcp: null } : {}),
+      ...(rmcp.ok ? { reverseMcp: null } : {}),
     };
     codexRetired = { mcp, rmcp };
   }
@@ -695,7 +698,10 @@ async function pick({ flags, cwd, pkgRoot }) {
 
   const h = applyHosts(cfg, cwd);
   (h.ok ? ok : fail)(`hosts: ${h.detail}`);
-  if (codexRetired) ok(`codex disabled: ${codexRetired.mcp.detail}; ${codexRetired.rmcp.detail}`);
+  if (codexRetired) {
+    const complete = codexRetired.mcp.ok && codexRetired.rmcp.ok;
+    (complete ? ok : warn)(`codex disabled${complete ? '' : ' with teardown receipts retained'}: ${codexRetired.mcp.detail}; ${codexRetired.rmcp.detail}`);
+  }
   if (primaryHost !== DEFAULT_PRIMARY_HOST) {
     const alt = routing.filter((e) => e !== primaryHost).join(', ') || 'none';
     ok(`primary host: ${primaryHost} (alternate: ${alt})`);
@@ -703,11 +709,11 @@ async function pick({ flags, cwd, pkgRoot }) {
   if (aqeProvider) ok(`aqe provider: AQE_LLM_PROVIDER=${aqeProvider}`);
   const router = applyAqeRouter(cfg, cwd);
   if (router.changed || !router.ok) (router.ok ? ok : warn)(`aqe router: ${router.detail}`);
-  const mcp = await ensureCodexMcp(cfg, cwd);
-  if (mcp.changed) saveKitConfig(cfg); // persist forward MCP ownership
-  if (mcp.changed || !mcp.ok) (mcp.ok ? ok : warn)(`codex MCP: ${mcp.detail}`);
-  // reverse bridge — register ruflo MCP into codex (codex→ruflo) so the bridge is
-  // two-way. aqe's codex MCP is handled by `aqe init --with-codex` (setup runs it).
+  const mcp = await retireCodexMcp(cfg, cwd);
+  if (mcp.changed) saveKitConfig(cfg);
+  if (mcp.changed || !mcp.ok) (mcp.ok ? ok : warn)(`legacy codex MCP: ${mcp.detail}`);
+  // Register Ruflo independently in Codex. Agentic-QE's Codex integration is
+  // handled by `aqe init --with-codex` during setup.
   const rmcp = await ensureRufloMcpInCodex(cfg, cwd);
   if (rmcp.changed) saveKitConfig(cfg); // persist reverse MCP ownership
   if (rmcp.changed || !rmcp.ok) (rmcp.ok ? ok : warn)(`ruflo→codex MCP: ${rmcp.detail}`);

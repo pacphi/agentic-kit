@@ -118,7 +118,7 @@ under the dashboard's CSP.
 ### Configured surfaces
 
 Non-package things ak sets up — MCP registrations, managed guidance blocks
-(CLAUDE.md/AGENTS.md), statuslines, the dual-host routing policy and Claude↔Codex bridge, the
+(CLAUDE.md/AGENTS.md), statuslines, the dual-host routing policy and shared Ruflo/AQE access, the
 background daemon, permission allowlists — are directory entries too, in the `configured`
 category. Their chip reads `configured` (joined from the relevant status subsystem row), their
 paragraph explains what was configured and why it helps, and each names the command that

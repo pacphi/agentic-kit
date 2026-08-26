@@ -4,7 +4,10 @@ import assert from 'node:assert/strict';
 import { createClaudeExecutionAdapter as createRealClaudeExecutionAdapter } from '../../src/lib/execution/claude.mjs';
 import { createCodexExecutionAdapter as createRealCodexExecutionAdapter } from '../../src/lib/execution/codex.mjs';
 import { executeWorker } from '../../src/lib/execution/runner.mjs';
-import { HANDOFF_END, HANDOFF_START } from '../../src/lib/execution/handoff.mjs';
+import {
+  HANDOFF_END, HANDOFF_REQUEST_JSON, HANDOFF_REQUEST_STRUCTURED,
+  HANDOFF_SCHEMA_PATH, HANDOFF_SCHEMA_TEXT, HANDOFF_START,
+} from '../../src/lib/execution/handoff.mjs';
 import { createPlainTextSummaryCapture } from '../../src/lib/execution/subprocess.mjs';
 
 const passthroughResolve = (command, args) => ({ command, args, resolved: true });
@@ -53,6 +56,8 @@ test('Claude adapter uses bounded print/stream-json mode without a permission by
     '--print', '--output-format', 'stream-json', '--verbose',
     '--model', 'model-1', 'Do the work.',
   ]);
+  assert.equal(calls[0].options.detached, process.platform !== 'win32',
+    'POSIX workers lead a process group so cancellation reaches MCP descendants');
   assert.ok(!calls[0].args.some((arg) => arg.includes('dangerously') || arg.includes('bypass')));
 });
 
@@ -289,6 +294,124 @@ test('a subprocess surviving TERM and KILL is reported as orphaned, never timed 
   assert.equal(terminal.exitCategory, 'orphaned');
   assert.match(terminal.failure.reason, /did not terminate/);
   assert.deepEqual(result.signals.slice(0, 2), ['SIGTERM', 'SIGKILL']);
+});
+
+// ── schema-native handoff transport + hermetic seats (ADR-0034, #108) ────────
+
+test('a handoff-bearing worker gets the schema flag on each host; a plain worker does not', async () => {
+  const argv = { claude: [], codex: [] };
+  for (const [host, factory] of [['claude', createClaudeExecutionAdapter], ['codex', createCodexExecutionAdapter]]) {
+    const adapter = factory({
+      haveFn: async () => true, clock,
+      spawnFn: (_command, args) => { argv[host].push(args); return child(); },
+    });
+    await executeWorker({ ...worker(host), requiresHandoff: true }, adapter, { cwd: '/workspace/fixture', clock });
+    await executeWorker(worker(host), adapter, { cwd: '/workspace/fixture', clock });
+  }
+  const claudeSchema = argv.claude[0].indexOf('--json-schema');
+  assert.ok(claudeSchema > 0 && argv.claude[0][claudeSchema + 1] === HANDOFF_SCHEMA_TEXT);
+  assert.ok(!argv.claude[1].includes('--json-schema'));
+  const codexSchema = argv.codex[0].indexOf('--output-schema');
+  assert.ok(codexSchema > 0 && argv.codex[0][codexSchema + 1] === HANDOFF_SCHEMA_PATH);
+  assert.ok(!argv.codex[1].includes('--output-schema'));
+  for (const host of ['claude', 'codex']) {
+    assert.equal(argv[host][0].at(-1), 'Do the work.', `${host}: prompt stays the final argv element`);
+  }
+});
+
+test('hermetic seats isolate what each host allows, without any permission bypass', async () => {
+  const argv = { claude: [], codex: [] };
+  for (const [host, factory] of [['claude', createClaudeExecutionAdapter], ['codex', createCodexExecutionAdapter]]) {
+    const adapter = factory({
+      haveFn: async () => true, clock,
+      spawnFn: (_command, args) => { argv[host].push(args); return child(); },
+    });
+    await executeWorker({ ...worker(host), hermetic: true }, adapter, { cwd: '/workspace/fixture', clock });
+    await executeWorker(worker(host), adapter, { cwd: '/workspace/fixture', clock });
+  }
+  // Claude: hooks off (plugin receipt mandates included), exactly one MCP
+  // server, and a self-carried permission — no dependence on machine settings.
+  const claudeArgs = argv.claude[0];
+  const settings = claudeArgs.indexOf('--settings');
+  assert.ok(settings > 0 && claudeArgs[settings + 1] === '{"disableAllHooks":true}');
+  assert.ok(claudeArgs.includes('--strict-mcp-config'));
+  const mcp = claudeArgs.indexOf('--mcp-config');
+  assert.match(claudeArgs[mcp + 1], /"ruflo"/);
+  const allowed = claudeArgs.indexOf('--allowedTools');
+  assert.equal(claudeArgs[allowed + 1], 'mcp__ruflo');
+  assert.ok(!claudeArgs.includes('--bare'), 'bare mode would silently switch billing off the subscription');
+  // Variadic-swallow guard (observed live): --mcp-config/--allowedTools are
+  // variadic, so each must be followed by a flag token, and the element
+  // before the prompt must be the value of single-value --settings.
+  assert.equal(claudeArgs[claudeArgs.indexOf('--allowedTools') + 2][0], '-',
+    'a flag token must follow the variadic --allowedTools value');
+  assert.equal(claudeArgs.at(-1), 'Do the work.');
+  assert.equal(claudeArgs.at(-3), '--settings', 'single-value --settings guards the prompt');
+  // Codex: bounded trims only (roster control is not available per-invocation).
+  const codexArgs = argv.codex[0];
+  assert.ok(codexArgs.includes('--ephemeral'));
+  assert.ok(codexArgs.includes('model_reasoning_effort="medium"'));
+  assert.ok(codexArgs.includes('project_doc_max_bytes=0'));
+  for (const host of ['claude', 'codex']) {
+    assert.ok(!argv[host][0].some((arg) => arg.includes('dangerously') || arg.includes('bypass')));
+    assert.deepEqual(argv[host][1].includes('--ephemeral') || argv[host][1].includes('--settings'), false,
+      `${host}: a plain worker keeps the pre-ADR-0034 argv`);
+  }
+});
+
+test('each adapter asks for the handoff in its own schema mechanism\'s terms', () => {
+  // codex --output-schema constrains the final message → bare-object request.
+  const codex = createCodexExecutionAdapter({ haveFn: async () => true });
+  assert.equal(codex.handoffRequestFor(worker('codex')), HANDOFF_REQUEST_JSON);
+  // claude --json-schema derives structured_output out of band → the model is
+  // told what to REPORT, never how to shape its final message (a bare-object
+  // demand was obeyed live as "not applicable", refusing the task).
+  const claude = createClaudeExecutionAdapter({ haveFn: async () => true });
+  assert.equal(claude.handoffRequestFor(worker('claude')), HANDOFF_REQUEST_STRUCTURED);
+  assert.match(HANDOFF_REQUEST_STRUCTURED, /structured output/);
+  assert.doesNotMatch(HANDOFF_REQUEST_STRUCTURED, /final message/i);
+  assert.doesNotMatch(HANDOFF_REQUEST_STRUCTURED, /AK_HANDOFF_V1/);
+});
+
+test('claude summarize prefers structured_output; both hosts parse a bare-JSON final message', async () => {
+  const handoff = { outcome: 'schema-native', artifacts: [], decisions: [], risks: [] };
+  const claude = createClaudeExecutionAdapter({
+    haveFn: async () => true, clock,
+    spawnFn: () => child({
+      stdout: JSON.stringify({
+        type: 'result', subtype: 'success', result: 'human-facing text', structured_output: handoff,
+      }),
+    }),
+  });
+  const cs = await claude.launch(await claude.prepare({ worker: worker('claude'), cwd: process.cwd() }));
+  assert.equal(claude.summarize(cs, await claude.observe(cs)).outcome, 'schema-native');
+
+  const codex = createCodexExecutionAdapter({
+    haveFn: async () => true, clock,
+    spawnFn: () => child({
+      stdout: JSON.stringify({
+        type: 'item.completed',
+        item: { type: 'agent_message', text: `${JSON.stringify(handoff)}\n🧠 RuvNet Brain jumped in · guidance only, no source read · v4.2.2-dev` },
+      }),
+    }),
+  });
+  const xs = await codex.launch(await codex.prepare({ worker: worker('codex'), cwd: process.cwd() }));
+  assert.equal(codex.summarize(xs, await codex.observe(xs)).outcome, 'schema-native');
+});
+
+test('a duplicated tagged block in the final message still fails closed', async () => {
+  const codex = createCodexExecutionAdapter({
+    haveFn: async () => true, clock,
+    spawnFn: () => child({
+      stdout: JSON.stringify({
+        type: 'item.completed',
+        item: { type: 'agent_message', text: `${tagged('one')}${tagged('two')}` },
+      }),
+    }),
+  });
+  const xs = await codex.launch(await codex.prepare({ worker: worker('codex'), cwd: process.cwd() }));
+  const observation = await codex.observe(xs);
+  assert.throws(() => codex.summarize(xs, observation), /malformed or duplicate/);
 });
 
 // ── plain-text summary capture (Hermes-class hosts) ──────────────────────────

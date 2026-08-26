@@ -160,7 +160,7 @@ transcript and never substitute for each other. See [Machine footprint](machine-
 | Monogram tile | The honest icon for a component with no official mark: initials on a category-hued tile |
 | Register contract | The editorial writing rules (one ~50-word paragraph, plain language, active voice, no runtime claims, no superlatives) |
 | Parity gate | The test asserting managed-tools registry ↔ directory completeness in both directions |
-| Configured surface | A non-package thing ak sets up — MCP registrations, guidance blocks, statuslines, routing and bridge, the daemon, permission allowlists — carrying a managing command instead of package links |
+| Configured surface | A non-package thing ak sets up — MCP registrations, guidance blocks, statuslines, routing and shared tool access, the daemon, permission allowlists — carrying a managing command instead of package links |
 
 Editorial content states purpose and reads true on a machine where the component is absent;
 runtime state is a chip word, never a prose word. See

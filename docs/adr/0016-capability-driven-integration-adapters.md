@@ -34,6 +34,10 @@
   project-memory pin is now projected through host-specific launch context:
   Claude project env, Codex's workspace-aware MCP launcher, and OpenCode's
   project-aware MCP/lifecycle processes.
+  2026-08-25: [ADR-0033](0033-retire-codex-mcp-and-bound-qe-court-participants.md)
+  retires the deprecated Claude→Codex MCP projection while retaining this ADR's
+  value-precise ownership boundary. OpenAI's Claude Code plugin remains external and
+  user-owned; Ruflo and Agentic-QE registrations are independent Codex integrations.
 - **Deciders:** agentic-kit maintainers
 - **Related:** [ADR-0001](0001-one-routing-policy-many-projections.md),
   [ADR-0003](0003-auto-seed-dual-host-provenance.md),

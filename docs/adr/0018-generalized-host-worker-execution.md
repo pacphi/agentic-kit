@@ -1,11 +1,13 @@
 # ADR-0018 — Generalized host-worker execution; `ak run` canonical
 
-- **Status:** Accepted; compatibility retention superseded by
+- **Status:** Implemented; compatibility retention superseded by
   [ADR-0020](0020-ga-stable-surfaces.md)
 - **Date:** 2026-07-29
-- **Updated:** 2026-07-30
+- **Updated:** 2026-08-25
 - **Update note:** Added private bounded dependency handoffs and one absolute lifecycle deadline
   per attempt; removed the temporary command, adapter, and persisted-schema compatibility clauses.
+  ADR-0033 extends cleanup to POSIX process groups so host-spawned MCP descendants share the
+  worker's bounded termination contract.
 - **Deciders:** agentic-kit maintainers
 
 > **GA amendment:** the host-neutral lifecycle, `ak run`, and OpenCode safety decisions remain.

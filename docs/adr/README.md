@@ -16,7 +16,7 @@ Consequences**, and cites the grounded source it rests on where relevant.
 | [0005](0005-dashboard-in-page-routing-reveal.md) | Dashboard surfaces routing via in-page reveal | Implemented |
 | [0006](0006-primary-host-and-ambidextrous-mirroring.md) | Primary host & ambidextrous mirroring (which host leads) | Amended by 0020 |
 | [0007](0007-maintainer-admin-local-telemetry.md) | Maintainer admin: a loopback telemetry page with deliberate egress | Accepted |
-| [0008](0008-guidance-target-scope-split.md) | Machine-scoped guidance blocks land in machine files, not a repo's AGENTS.md | Accepted |
+| [0008](0008-guidance-target-scope-split.md) | Machine-scoped guidance blocks land in machine files, not a repo's AGENTS.md | Implemented |
 | [0009](0009-usage-scorecard-local-transcript-analytics.md) | Usage scorecard: local transcript analytics with graded evidence | Implemented |
 | [0010](0010-provider-mediated-quota-reads.md) | Provider-mediated quota reads (the only honest denominators) | Accepted |
 | [0011](0011-local-model-provenance-zero-cost-and-transcript-fidelity.md) | Local models: provenance out-of-band, $0 per model, stated transcript fidelity | Proposed |
@@ -26,7 +26,7 @@ Consequences**, and cites the grounded source it rests on where relevant.
 | [0015](0015-managed-codex-native-statusline.md) | Manage Codex's native user-wide status line without claiming rich-renderer parity | Accepted |
 | [0016](0016-capability-driven-integration-adapters.md) | Capability-driven host, provider, binding, projection, and observability adapters | Accepted; compatibility amended; closed-registry clause superseded by 0029 |
 | [0017](0017-opencode-host.md) | OpenCode as a managed, observable host through native surfaces | Accepted; compatibility amended |
-| [0018](0018-generalized-host-worker-execution.md) | Generalized host-worker execution; `ak run` canonical | Accepted; compatibility amended |
+| [0018](0018-generalized-host-worker-execution.md) | Generalized host-worker execution; `ak run` canonical | Implemented; compatibility amended |
 | [0019](0019-escalation-in-ak-run.md) | Bounded per-worker escalation in `ak run` | Accepted; historical context closed |
 | [0020](0020-ga-stable-surfaces.md) | One stable GA surface per capability | Implemented |
 | [0021](0021-inference-provider-provenance.md) | Inference-provider provenance for live sessions | Accepted |
@@ -40,6 +40,8 @@ Consequences**, and cites the grounded source it rests on where relevant.
 | [0029](0029-host-adapter-extension-point.md) | External host adapters: declarative manifest, subprocess hooks | Accepted (experimental contract) |
 | [0031](0031-capability-graduation-and-upstream-requests.md) | Capability graduation: earned parity for external adapters, and the upstream request path | Accepted (governance; implementation staged) |
 | [0032](0032-model-lifecycle-intelligence.md) | Model lifecycle intelligence from provenance-aware local evidence | Implemented |
+| [0033](0033-retire-codex-mcp-and-bound-qe-court-participants.md) | Retire Codex MCP; bound reciprocal QE-Court participant transport | Implemented; handoff transport amended by 0034 |
+| [0034](0034-schema-native-handoffs-and-hermetic-seats.md) | Schema-native worker handoffs and hermetic qe-court seats | Implemented |
 
 Theme: ADRs **0001–0006** define **dual-host LLM routing and leadership** — how `ak` lets ruflo route
 each development activity (architecture, implementation, testing, review, …) to the right host (Claude

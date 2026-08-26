@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { applyAqeRouter, aqeRouterFile, undoAqeRouter, ensureCodexMcp, ensureRufloMcpInCodex, undoCodexMcp, undoRufloMcpInCodex } from '../../src/lib/providers.mjs';
+import { applyAqeRouter, aqeRouterFile, undoAqeRouter, retireCodexMcp, ensureRufloMcpInCodex, undoCodexMcp, undoRufloMcpInCodex } from '../../src/lib/providers.mjs';
 import { seedActivityRoutes } from '../../src/lib/routing.mjs';
 import { _setGlobalRootForTest } from '../../src/lib/paths.mjs';
 
@@ -94,6 +94,54 @@ test('chain and agentOverrides are written together and never persist apiKey', (
   rm(dir); rm(groot);
 });
 
+// #108 phase 3: aqe reaches a provider only through defaultProvider, the
+// fallbackChain, or its FALLBACK_PRIORITY list — which contains neither codex
+// nor claude-code. A codex CHAIN RUNG is therefore the sanctioned way to make
+// the subscription Codex CLI provider live, and ak's chain gate must admit it.
+test('a codex chain rung is admitted, enabled, and keeps its order (chain gate)', () => {
+  const groot = fakeAqe('3.13.1');
+  const dir = tmpProject();
+  const res = applyAqeRouter(cfgWith({
+    aqeProvider: 'claude-code',
+    aqeFallback: [
+      { provider: 'claude-code', models: ['claude-opus-5'] },
+      { provider: 'codex', models: ['gpt-5.6-terra'] },
+      { provider: 'openrouter', models: ['z-ai/glm-5.2'] },
+    ],
+    routes: seedActivityRoutes(),
+  }), dir);
+
+  const disk = readDisk(dir);
+  assert.match(res.detail, /chain: claude-code → codex → openrouter/);
+  assert.equal(disk.fallbackChain.entries[1].provider, 'codex');
+  assert.deepEqual(disk.fallbackChain.entries[1].models, ['gpt-5.6-terra']);
+  assert.equal(disk.providers.codex.enabled, true, 'chain rung enables the provider');
+  rm(dir); rm(groot);
+});
+
+// #108 phase 3: an override naming a provider aqe must construct is inert
+// until that provider is enabled in this same file — subscription host-CLI
+// providers (codex, claude-code) have no env key to auto-enable them.
+test('the overrides projection enables exactly the providers it references', () => {
+  const groot = fakeAqe('3.13.1');
+  const dir = tmpProject();
+  fs.mkdirSync(path.dirname(aqeRouterFile(dir)), { recursive: true });
+  fs.writeFileSync(aqeRouterFile(dir), JSON.stringify({
+    _managedBy: 'agentic-kit',
+    providers: { openrouter: { enabled: true, custom: 'kept' }, codex: { note: 'foreign config survives' } },
+  }));
+  const res = applyAqeRouter(cfgWith({ routes: seedActivityRoutes() }), dir);
+
+  const disk = readDisk(dir);
+  assert.match(res.detail, /providers enabled: .*codex/);
+  assert.equal(disk.providers.codex.enabled, true, 'codex override provider enabled');
+  assert.equal(disk.providers.codex.note, 'foreign config survives', 'merge, not clobber');
+  assert.equal(disk.providers['claude-code'].enabled, true, 'claude-code override provider enabled');
+  assert.deepEqual(disk.providers.openrouter, { enabled: true, custom: 'kept' }, 'unreferenced provider untouched');
+  assert.equal(JSON.stringify(disk).includes('apiKey'), false);
+  rm(dir); rm(groot);
+});
+
 test('agentOverrides MERGES — a foreign entry survives (H1: never clobbered)', () => {
   const groot = fakeAqe('3.13.1');
   const dir = tmpProject();
@@ -146,18 +194,65 @@ test('an invalid fallback chain does not block the agentOverrides projection (M3
   rm(dir); rm(groot);
 });
 
-test('codex MCP teardown is a no-op unless ak owns it (H2), and never shells when codex is off', async () => {
+test('codex MCP teardown is a no-op unless ak owns it (H2)', async () => {
   const off = await undoCodexMcp(process.cwd(), { managed: false });
   assert.equal(off.changed, false);
   assert.match(off.detail, /left as-is/);
-  const ensure = await ensureCodexMcp({
-    integrations: { hosts: { claude: true, codex: false } },
-  });
-  assert.equal(ensure.changed, false);
-  assert.match(ensure.detail, /not enabled/);
 });
 
-test('owned bridge teardown sends the precise safe argv on every platform', async () => {
+test('legacy codex MCP retirement removes and confirms only ak-owned state', async () => {
+  const calls = [];
+  const cfg = { integrations: { ownership: { codex: { mcp: 'ak', reverseMcp: 'ak' } } } };
+  const observations = [
+    { registered: true, owned: true },
+    { registered: false, owned: true },
+  ];
+  const result = await retireCodexMcp(cfg, '/work/project', {
+    runner: async (cmd, args, opts) => {
+      calls.push({ cmd, args, opts });
+      return { code: 0, stdout: '', stderr: '' };
+    },
+    inspect: () => observations.shift(),
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.changed, true);
+  assert.deepEqual(calls, [
+    { cmd: 'claude', args: ['mcp', 'remove', 'codex', '-s', 'project'], opts: { cwd: '/work/project' } },
+  ]);
+  assert.equal(cfg.integrations.ownership.codex.mcp, null);
+  assert.equal(cfg.integrations.ownership.codex.reverseMcp, 'ak', 'independent Ruflo receipt survives');
+});
+
+test('legacy codex MCP retirement preserves an unowned registration and gives a manual remedy', async () => {
+  const cfg = { integrations: { ownership: { codex: { mcp: null } } } };
+  let called = false;
+  const result = await retireCodexMcp(cfg, '/work/project', {
+    runner: async () => { called = true; return { code: 0, stdout: '', stderr: '' }; },
+    inspect: () => ({ registered: true, owned: false }),
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.changed, false);
+  assert.equal(called, false);
+  assert.match(result.detail, /user-owned/);
+  assert.match(result.detail, /claude mcp remove codex -s project/);
+});
+
+test('legacy codex MCP retirement keeps its ownership receipt when removal cannot be confirmed', async () => {
+  const cfg = { integrations: { ownership: { codex: { mcp: 'ak' } } } };
+  const result = await retireCodexMcp(cfg, '/work/project', {
+    runner: async () => ({ code: 0, stdout: '', stderr: '' }),
+    inspect: () => ({ registered: true, owned: true }),
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.changed, false);
+  assert.equal(cfg.integrations.ownership.codex.mcp, 'ak');
+  assert.match(result.detail, /could not be confirmed/);
+});
+
+test('owned integration teardown sends the precise safe argv on every platform', async () => {
   const calls = [];
   const runner = async (cmd, args, opts) => {
     calls.push({ cmd, args, opts });
@@ -176,7 +271,21 @@ test('owned bridge teardown sends the precise safe argv on every platform', asyn
   ]);
 });
 
-test('codex reverse bridge uses the workspace-aware memory launcher and migrates only ak-owned state', async () => {
+test('failed owned MCP teardown is explicit so callers retain ownership receipts', async () => {
+  const runner = async () => ({ code: 7, stdout: '', stderr: 'permission denied' });
+  const codex = await undoCodexMcp('/work/project', { managed: true, runner });
+  const ruflo = await undoRufloMcpInCodex('/work/project', {
+    managed: true, runner, haveFn: async () => true,
+  });
+  assert.equal(codex.ok, false);
+  assert.equal(codex.changed, false);
+  assert.match(codex.detail, /permission denied/);
+  assert.equal(ruflo.ok, false);
+  assert.equal(ruflo.changed, false);
+  assert.match(ruflo.detail, /permission denied/);
+});
+
+test('Codex Ruflo integration uses the workspace-aware memory launcher and migrates only ak-owned state', async () => {
   const calls = [];
   const runner = async (cmd, args, opts) => {
     calls.push({ cmd, args, opts });
