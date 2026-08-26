@@ -7,6 +7,21 @@ export const HANDOFF_END = '</AK_HANDOFF_V1>';
 export const HANDOFF_MAX_BYTES = 2 * 1024;
 export const HANDOFF_AGGREGATE_MAX_BYTES = 8 * 1024;
 
+// RuvNet Brain machine guidance requires one final receipt line. A supervised
+// worker therefore cannot make the handoff closing tag the final bytes without
+// violating a higher-priority instruction. Admit only the documented receipt
+// grammar (optionally wrapped in the plugin's <sub> presentation); arbitrary
+// trailing prose remains a protocol error.
+const BRAIN_RECEIPT = /^🧠 RuvNet Brain jumped in · (?:cited [A-Za-z0-9][A-Za-z0-9_./#-]*|guidance only, no source read) · v\d+\.\d+\.\d+(?:-[A-Za-z0-9.-]+)?$/;
+
+function isBrainReceipt(value) {
+  const opens = value.startsWith('<sub>');
+  const closes = value.endsWith('</sub>');
+  if (opens !== closes) return false;
+  const body = opens ? value.slice('<sub>'.length, -'</sub>'.length) : value;
+  return BRAIN_RECEIPT.test(body);
+}
+
 const FIELDS = Object.freeze(['outcome', 'artifacts', 'decisions', 'risks']);
 // eslint-disable-next-line no-control-regex
 const CONTROL_CHARS = /[\u0000-\u001f\u007f-\u009f\u202a-\u202e\u2066-\u2069]/g;
@@ -21,7 +36,9 @@ ${HANDOFF_START}
 {"outcome":"concise result","artifacts":["paths or outputs"],"decisions":["important choices"],"risks":["remaining risks"]}
 ${HANDOFF_END}
 All four fields are required. Keep the JSON concise and valid. This block is
-runtime coordination data and will not be included in the public run result.`;
+runtime coordination data and will not be included in the public run result.
+Output nothing after the closing tag unless higher-priority RuvNet Brain guidance
+requires its one-line receipt; in that case append only that receipt.`;
 
 function bytes(value) {
   return Buffer.byteLength(value, 'utf8');
@@ -96,11 +113,12 @@ export function extractHandoff(raw) {
   if (typeof raw !== 'string') return null;
   const firstStart = raw.indexOf(HANDOFF_START);
   const firstEnd = raw.indexOf(HANDOFF_END);
+  const trailing = firstEnd < 0 ? '' : raw.slice(firstEnd + HANDOFF_END.length).trim();
   if (firstStart === -1 && firstEnd === -1) return null;
   if (firstStart === -1 || firstEnd === -1 || firstEnd < firstStart
     || raw.indexOf(HANDOFF_START, firstStart + HANDOFF_START.length) !== -1
     || raw.indexOf(HANDOFF_END, firstEnd + HANDOFF_END.length) !== -1
-    || raw.slice(firstEnd + HANDOFF_END.length).trim() !== '') {
+    || (trailing !== '' && !isBrainReceipt(trailing))) {
     throw new TypeError('worker emitted a malformed or duplicate handoff block');
   }
   const body = raw.slice(firstStart + HANDOFF_START.length, firstEnd).trim();

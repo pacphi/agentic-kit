@@ -59,9 +59,10 @@ seats. A successful Claude/Codex transport check therefore cannot be called a co
 
    A lower level never claims a higher one.
 7. The opt-in reciprocal live harness is named a **QE-Court participant-transport regression**.
-   It runs bounded Claude-led and Codex-led direct-host DAGs, requires private Ruflo-memory proofs
-   in validated handoffs, rejects repository mutation and orphaned state, and never substitutes for
-   Agentic-QE's court protocol.
+   It runs bounded Claude-led and Codex-led direct-host DAGs, requires MCP-native Ruflo memory
+   store→retrieve proofs in validated handoffs, independently confirms the project-memory values,
+   rejects repository mutation and orphaned state, and never substitutes for Agentic-QE's court
+   protocol.
 
 ## Consequences
 

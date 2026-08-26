@@ -5,8 +5,10 @@ import { randomBytes } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { DatabaseSync } from 'node:sqlite';
 import { executionAdapterFor } from '../../src/lib/execution/adapters.mjs';
 import { executeRunPlan } from '../../src/lib/execution/runner.mjs';
+import { findMemoryEntry } from '../../src/lib/project-memory.mjs';
 import { projectMemoryEnv } from '../../src/lib/ruflo-memory.mjs';
 
 const cwd = process.cwd();
@@ -49,8 +51,6 @@ function profile(leader, trial, namespace, evidence) {
     const key = `${trial}-${role}`;
     const value = `proof-${randomBytes(12).toString('hex')}`;
     evidence.set(id, { key, value });
-    const stored = memory(['store', '-k', key, '--value', value, '-n', namespace]);
-    assert.equal(stored.status, 0, stored.stderr || stored.stdout);
     return {
       id,
       role,
@@ -62,8 +62,9 @@ function profile(leader, trial, namespace, evidence) {
       prompt: [
         `Read-only qe-court participant transport probe ${trial}; seat=${role}; leader=${leader}.`,
         'Do not edit files, install packages, run builds, delegate, or invoke another host.',
-        `Use exactly one Ruflo memory lookup available in this host to retrieve key "${key}" from namespace "${namespace}".`,
-        'Put the exact retrieved value in the handoff outcome. A missing value is a failure.',
+        'Use MCP tools only, not a shell command. Make exactly two Ruflo memory calls:',
+        `store key "${key}" with value "${value}" in namespace "${namespace}", then retrieve that exact key.`,
+        'Put the exact value returned by the retrieve call in the handoff outcome. A missing or different value is a failure.',
       ].join(' '),
     };
   });
@@ -127,6 +128,18 @@ test('Claude-led and Codex-led qe-court participant transports terminate cleanly
             assert.ok(handoff, `${workerId} did not produce a validated handoff`);
             assert.match(handoff.outcome, new RegExp(expected.value),
               `${workerId} did not retrieve its private Ruflo proof value`);
+            const landed = findMemoryEntry(cwd, namespace, expected.key);
+            assert.ok(landed, `${workerId} reported a proof that did not land in project memory`);
+            const db = new DatabaseSync(landed.file, { readOnly: true });
+            try {
+              const columns = new Set(db.prepare('PRAGMA table_info(memory_entries)').all().map((column) => column.name));
+              const payloadColumn = columns.has('content') ? 'content' : columns.has('value') ? 'value' : null;
+              assert.ok(payloadColumn, `${workerId} landed in an unsupported memory_entries schema`);
+              const row = db.prepare(
+                `SELECT ${payloadColumn} AS payload FROM memory_entries WHERE namespace = ? AND key = ? LIMIT 1`,
+              ).get(namespace, expected.key);
+              assert.equal(row?.payload, expected.value, `${workerId} project-memory value differs from its proof`);
+            } finally { db.close(); }
           }
         } finally {
           memory(['purge', '--namespace', namespace, '--force']);

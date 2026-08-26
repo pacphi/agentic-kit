@@ -35,6 +35,21 @@ test('extractHandoff accepts exactly one final tagged JSON block and never falls
   );
 });
 
+test('extractHandoff permits only the machine-required RuvNet Brain receipt after the block', () => {
+  const wire = `${HANDOFF_START}${JSON.stringify(summary())}${HANDOFF_END}`;
+  for (const receipt of [
+    '🧠 RuvNet Brain jumped in · cited agentic-qe/kb/capability-cards.md#agentic-qe · v4.2.2-dev',
+    '<sub>🧠 RuvNet Brain jumped in · cited ruflo/kb/capability-cards.md#ruflo · v4.2.2-dev</sub>',
+    '🧠 RuvNet Brain jumped in · guidance only, no source read · v4.2.2-dev',
+  ]) {
+    assert.deepEqual(extractHandoff(`${wire}\n${receipt}`), summary());
+  }
+  assert.throws(
+    () => extractHandoff(`${wire}\n<sub>🧠 RuvNet Brain jumped in · cited ../../secret · v4.2.2-dev</sub>`),
+    /malformed or duplicate/,
+  );
+});
+
 test('normalization is strict, removes controls, and caps UTF-8 bytes per dependency', () => {
   const value = normalizeHandoff({
     outcome: `done\u0000\u202e ${'🧠'.repeat(2_000)}`,

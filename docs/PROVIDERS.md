@@ -400,8 +400,10 @@ pnpm test:qe-court-live                    # one Claude-led + one Codex-led tria
 AK_QE_COURT_TRIALS=5 pnpm test:qe-court-live  # POSIX soak
 ```
 
-Each seat retrieves a private Ruflo-memory proof, emits a validated bounded handoff, and must
-terminate within its absolute deadline. The check fails on repository mutation or orphaned state.
+Each seat performs an MCP-native Ruflo memory store→retrieve round trip, emits the exact returned
+value in a validated bounded handoff, and must terminate within its absolute deadline. The check
+independently confirms the stored project-memory value and fails on repository mutation or
+orphaned state.
 Full court parity remains blocked until Agentic-QE ships a supported host-neutral runner and a
 self-contained Codex QE-Court projection.
 
