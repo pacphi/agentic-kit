@@ -224,6 +224,32 @@ test('explicit deselection retires only the exactly owned external default', () 
   assert.equal(converged.changed, false, converged.detail);
 });
 
+test('empty fallback intent retires the managed chain and its derived default', () => {
+  fakeAqe('3.13.12'); registerHermes();
+  const dir = project();
+  assert.equal(applyAqeRouter(cfg({ provider: null, routes: {} }), dir).ok, true);
+
+  const cleared = applyAqeRouter(cfg({ provider: null, chain: [], routes: {} }), dir);
+  const file = aqeRouterFile(dir);
+  const disk = JSON.parse(fs.readFileSync(file, 'utf8'));
+  assert.equal(cleared.ok, true, cleared.detail);
+  assert.equal(cleared.changed, true);
+  assert.equal(disk.fallbackChain, undefined, 'the managed fallback is retired');
+  assert.equal(disk.defaultProvider, undefined, 'the fallback-derived default is retired');
+  assert.equal(disk._agenticKit.externalDefaultProvider, undefined, 'the derived default receipt is retired');
+  assert.ok(disk.externalProviders.hermes, 'the admitted declaration remains available');
+  assert.deepEqual(disk.providers.hermes, { enabled: true }, 'the activation remains available');
+
+  const bytes = fs.readFileSync(file, 'utf8');
+  const old = new Date('2001-01-01T00:00:00.000Z');
+  fs.utimesSync(file, old, old);
+  const beforeMtime = fs.statSync(file).mtimeMs;
+  const converged = applyAqeRouter(cfg({ provider: null, chain: [], routes: {} }), dir);
+  assert.equal(converged.changed, false, converged.detail);
+  assert.equal(fs.readFileSync(file, 'utf8'), bytes);
+  assert.equal(fs.statSync(file).mtimeMs, beforeMtime);
+});
+
 test('malformed ownership receipts are relinquished without deleting user values or throwing', () => {
   fakeAqe('3.13.12');
   const dir = project();

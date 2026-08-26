@@ -654,12 +654,16 @@ export function applyAqeRouter(cfg, cwd = process.cwd()) {
   const hasExternalDefaultReceipt = plainRecord(
     existing[AQE_OWNERSHIP_KEY]?.externalDefaultProvider,
   ) !== null;
+  const hasManagedFallback = existing.fallbackChain?.id === AQE_MANAGED_TAG;
+  const managedFallbackOwnedDefault = hasManagedFallback
+    && Array.isArray(existing.fallbackChain?.entries)
+    && existing.fallbackChain.entries.some((entry) => entry?.provider === existing.defaultProvider);
   const priorOverrides = existing.agentOverrides ?? {};
   let projected = configuredPolicyToAgentOverrides(policy);
   const managedOverrideKeys = new Set(Object.keys(AGENT_ACTIVITY_MAP));
   let staleOverrides = Object.keys(priorOverrides)
     .filter((agent) => managedOverrideKeys.has(agent) && !(agent in projected));
-  if (!hasChain && !hasPolicy && !hasExternal && !hasOwnedExternal
+  if (!hasChain && !hasPolicy && !hasExternal && !hasOwnedExternal && !hasManagedFallback
     && !hasExternalDefaultReceipt && staleOverrides.length === 0) {
     return { ok: true, changed: false, detail: 'no aqe router config to apply' };
   }
@@ -709,11 +713,7 @@ export function applyAqeRouter(cfg, cwd = process.cwd()) {
       details.push(`externalProviders: disabled (${externalError})`);
     }
     const unavailableExternal = new Set([...reconciled.unavailable, ...reconciled.retired]);
-    const fallbackIsManaged = next.fallbackChain?.id === AQE_MANAGED_TAG;
-    const managedFallbackOwnedDefault = fallbackIsManaged && next.fallbackChain?.entries?.some(
-      (entry) => entry.provider === next.defaultProvider,
-    );
-    if (fallbackIsManaged && next.fallbackChain?.entries) {
+    if (hasManagedFallback && next.fallbackChain?.entries) {
       next.fallbackChain = {
         ...next.fallbackChain,
         entries: next.fallbackChain.entries.filter((entry) => !unavailableExternal.has(entry.provider)),
@@ -737,6 +737,20 @@ export function applyAqeRouter(cfg, cwd = process.cwd()) {
   // the safe projection so ak-owned overrides never retain an unusable id.
   staleOverrides = Object.keys(priorOverrides)
     .filter((agent) => managedOverrideKeys.has(agent) && !(agent in projected));
+
+  // An empty canonical fallback intent retires the tagged chain ak previously
+  // wrote. Its derived default belongs to the same projection and must not
+  // survive independently; provider declarations/activations remain available
+  // for explicit selection, routes, or a future chain.
+  if (!hasChain && hasManagedFallback) {
+    delete next.fallbackChain;
+    if (managedFallbackOwnedDefault) {
+      delete next.defaultProvider;
+      if (ownedExternalDefault) clearExternalDefaultOwnership(next);
+    }
+    details.push('chain: managed fallback retired');
+    wrote = true;
+  }
 
   // `aqeProvider: null` is an explicit deselection. Retire only an exact
   // external default that ak previously wrote, while leaving the admitted

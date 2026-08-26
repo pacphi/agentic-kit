@@ -467,6 +467,22 @@ test('pick --aqe-provider none retires the owned external default without disabl
     assert.ok(router.externalProviders.hermes, 'the admitted declaration remains projected');
     assert.equal(router.providers.hermes.enabled, true, 'the MCP activation remains projected');
     assertRepeatIsStable(['x', 'host', 'pick', '--aqe-provider', 'none', '--yes'], 'deselection');
+
+    const withFallback = akPick([
+      'x', 'host', 'pick', '--aqe-provider', 'none', '--aqe-fallback', 'hermes:default', '--yes',
+    ], sb, { env });
+    assert.equal(withFallback.status, 0,
+      `fallback selection failed\nstdout: ${withFallback.stdout}\nstderr: ${withFallback.stderr}`);
+    const clearedFallback = akPick(['x', 'host', 'pick', '--aqe-fallback', 'none', '--yes'], sb, { env });
+    assert.equal(clearedFallback.status, 0,
+      `fallback removal failed\nstdout: ${clearedFallback.stdout}\nstderr: ${clearedFallback.stderr}`);
+    assert.deepEqual(kitJson(sb.home).providers.aqeFallback, [], 'kit intent records an empty fallback');
+    const afterFallback = JSON.parse(fs.readFileSync(routerFile, 'utf8'));
+    assert.equal(afterFallback.fallbackChain, undefined, 'the managed fallback is retired immediately');
+    assert.equal(afterFallback.defaultProvider, undefined, 'the fallback-derived default is retired');
+    assert.ok(afterFallback.externalProviders.hermes, 'the declaration survives fallback removal');
+    assert.equal(afterFallback.providers.hermes.enabled, true, 'the activation survives fallback removal');
+    assertRepeatIsStable(['x', 'host', 'pick', '--aqe-fallback', 'none', '--yes'], 'fallback removal');
   } finally {
     rm(sb.home, sb.project);
   }
