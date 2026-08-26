@@ -21,7 +21,7 @@ import { runLifecycle } from '../../lib/adapters/lifecycle.mjs';
 import { lifecycleAdapterFor } from '../../lib/adapters/lifecycle-registry.mjs';
 import { hostTierLabel, hostAsymmetryNote } from '../../lib/hosts.mjs';
 import {
-  routableHostIds, defaultHostMap, validateBinding, HOST_REGISTRY, PROVIDER_REGISTRY,
+  routableHostIds, effectiveRoutableHostIds, defaultHostMap, validateBinding, HOST_REGISTRY, PROVIDER_REGISTRY,
 } from '../../lib/adapters/index.mjs';
 import {
   newlyEnabledHostTrustManifest, trustManifestLines,
@@ -459,7 +459,13 @@ async function pick({ flags, cwd, pkgRoot }) {
   // primary/AQE host because those are separate registry capabilities.
   // --host is the complete desired enabled-host set on BOTH tiers; excluding an
   // enabled host disables it (ak-managed wiring stripped, user config kept).
+  // Keep primary-host selection on the built-in routing set, but admit an
+  // explicitly named external host when the live adapter overlay proves it is
+  // routable. Provider-only retunes also carry already-enabled external ids
+  // through unchanged instead of mistaking them for unknown host tokens.
   const ROUTING = new Set(routableHostIds());
+  const EFFECTIVE_ROUTING = new Set(effectiveRoutableHostIds());
+  const MANAGED_HOSTS = new Set(HOSTS.map((host) => host.id));
   const prevOpencode = !!cfg.integrations?.hosts?.opencode
     || cfg.integrations?.ownership?.opencode?.mcp === 'ak';
   let enabled;
@@ -528,7 +534,7 @@ async function pick({ flags, cwd, pkgRoot }) {
   // validate hosts against the two tiers. An unknown token is a hard error,
   // never a silent drop: `--host claude,opencdoe` must not "succeed" as
   // claude-only and destructively tear the opencode host down (codex-review r3).
-  const known = new Set(HOSTS.map((h) => h.id));
+  const known = new Set([...MANAGED_HOSTS, ...EFFECTIVE_ROUTING]);
   const unknown = enabled.filter((h) => !known.has(h));
   if (unknown.length) {
     fail(`unknown host(s): ${unknown.join(', ')} (valid: ${[...known].join(', ')}) — nothing changed`);
@@ -537,8 +543,11 @@ async function pick({ flags, cwd, pkgRoot }) {
   // The routing set needs at least one primary-capable member; OpenCode remains
   // routable but cannot satisfy that primary-host invariant on its own.
   const routing = enabled.filter((h) => ROUTING.has(h));
-  if (!routing.some((h) => PRIMARY_HOSTS.includes(h))) routing.unshift('claude');
-  enabled = [...new Set(routing)];
+  if (!routing.some((h) => PRIMARY_HOSTS.includes(h))) {
+    routing.unshift('claude');
+    enabled.unshift('claude');
+  }
+  enabled = [...new Set(enabled)];
   // primary host — which host leads (default claude); must be a ROUTING host.
   let primaryHost = prevPrimary;
   if (flags['primary-host'] !== undefined) {
@@ -585,11 +594,19 @@ async function pick({ flags, cwd, pkgRoot }) {
     models,
     maxBudgetUsd: cfg.providers.maxBudgetUsd ?? null,
   };
-  cfg.integrations.hosts = {
+  const hostIntent = {
     claude: routing.includes('claude'),
     codex: routing.includes('codex'),
     opencode: enabled.includes('opencode'),
   };
+  // External host ids are not primary candidates, but they are first-class
+  // integration intent. Retain every live admitted external id as an explicit
+  // boolean so a provider-only pick cannot deactivate its own bridge; an
+  // explicit --host set can still disable it by omission.
+  for (const id of EFFECTIVE_ROUTING) {
+    if (!MANAGED_HOSTS.has(id)) hostIntent[id] = enabled.includes(id);
+  }
+  cfg.integrations.hosts = hostIntent;
   cfg.routing.primaryHost = primaryHost;
   cfg.routing.routes = reseedForPrimary ? {} : { ...oldPolicy };
   // Multi-host: seed per-activity routing from defaults (only when the policy is

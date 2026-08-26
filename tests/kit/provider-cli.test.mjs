@@ -15,6 +15,10 @@ import path from 'node:path';
 import { DUAL_ROLE_TIP, JUDGE_BIAS_TIP } from '../../src/lib/providers.mjs';
 import { parseFallback, parseModels } from '../../src/commands/x/host.mjs';
 import { defaultHostMap } from '../../src/lib/adapters/index.mjs';
+import { validateAdapterManifest } from '../../src/lib/adapters/manifest.mjs';
+import { hashAdapterContent } from '../../src/lib/adapters/integrity.mjs';
+import { recordConsent } from '../../src/lib/adapters/consent.mjs';
+import { grantCapability, recordTierResult } from '../../src/lib/adapters/grants.mjs';
 
 // Tripwire (#137): a spawned `ak x host pick` whose cwd falls back to the test
 // process's cwd writes PROJECT-scoped config (.claude/settings.local.json,
@@ -224,6 +228,43 @@ const kitJson = (home) => JSON.parse(fs.readFileSync(path.join(home, '.config', 
 const ocJsonPath = (home) => path.join(home, '.config', 'opencode', 'opencode.json');
 const ocJson = (home) => JSON.parse(fs.readFileSync(ocJsonPath(home), 'utf8'));
 
+function configureExternalAqeProvider({ home, project }) {
+  const adapterDir = path.join(project, 'hermes-adapter');
+  fs.mkdirSync(adapterDir, { recursive: true });
+  const command = [process.execPath, '-e', 'process.stdin.pipe(process.stdout)'];
+  const manifest = validateAdapterManifest({
+    name: 'hermes', version: '1.0.0', contract: 1,
+    host: {
+      id: 'hermes', label: 'Hermes',
+      install: { bin: 'node', externalInstallPolicy: 'detect-never-overwrite' },
+      capabilities: {
+        canDriveSession: false, canBePrimary: false, canRouteActivities: true,
+        commandStatusline: false, transcripts: false, usage: false,
+        nativeMcpConfig: false, nativeGuidance: false,
+      },
+      trust: { approvalPolicy: 'unchanged', changes: [] },
+      enabledByDefault: false, configProjection: 'ruflo', observability: [],
+    },
+    detection: { bin: 'node' },
+    driving: { surfaces: ['cli-subprocess'] },
+    execution: { run: { hook: { command } } },
+    aqe: { provider: { hook: { command }, models: ['default'], defaultModel: 'default' } },
+    trust: { changes: [] },
+  });
+  const manifestFile = path.join(adapterDir, 'manifest.json');
+  fs.writeFileSync(manifestFile, `${JSON.stringify(manifest, null, 2)}\n`);
+  const hash = hashAdapterContent(manifest, { baseDir: adapterDir }).hash;
+  const configDir = path.join(home, '.config', 'agentic-kit');
+  const cfg = kitJson(home);
+  cfg.hostAdapters = [{ name: 'hermes', source: manifestFile, contract: 1 }];
+  cfg.integrations.hosts.hermes = true;
+  fs.writeFileSync(path.join(configDir, 'kit.json'), `${JSON.stringify(cfg, null, 2)}\n`);
+  recordConsent('hermes', hash, { file: path.join(configDir, 'adapter-consent.json') });
+  const grantsFile = path.join(configDir, 'adapter-grants.json');
+  recordTierResult('hermes', 'aqe-provider', { hash, evidence: 'provider CLI regression' }, { file: grantsFile });
+  grantCapability('hermes', 'aqeProvider', { hash }, { file: grantsFile });
+}
+
 test('pick --host claude,opencode enables + wires opencode (config, plugin, agents, skill), preserving user config', () => {
   const sb = pickSandbox({ hosts: { claude: true, codex: false } });
   try {
@@ -339,6 +380,32 @@ test('a provider retune retires stale legacy Codex MCP while preserving current 
     assert.equal(cfg.integrations.ownership.codex.reverseMcp, 'ak', 'reverse MCP marker survives a rewrite');
     assert.equal(cfg.integrations.ownership.opencode.catalogDir, '/custom/catalog', 'catalog override survives a rewrite');
     assert.equal(cfg.providers.aqeProvider, 'openai', 'the actual retune landed');
+  } finally {
+    rm(sb.home, sb.project);
+  }
+});
+
+test('external provider selection accepts the effective host and provider-only retunes preserve its enablement', () => {
+  const sb = pickSandbox({ hosts: { claude: true, codex: false, opencode: false } });
+  try {
+    configureExternalAqeProvider(sb);
+    const env = { AK_EXPERIMENTAL_HOST_ADAPTERS: '1' };
+
+    const explicit = akPick(['x', 'host', 'pick', '--host', 'claude,hermes', '--yes'], sb, { env });
+    assert.equal(explicit.status, 0, `explicit external host failed\nstdout: ${explicit.stdout}\nstderr: ${explicit.stderr}`);
+    assert.doesNotMatch(explicit.stdout + explicit.stderr, /unknown host\(s\): hermes/);
+    assert.equal(kitJson(sb.home).integrations.hosts.hermes, true,
+      'an admitted external host is valid in an explicit complete host set');
+
+    const providerOnly = akPick(['x', 'host', 'pick', '--aqe-provider', 'hermes', '--yes'], sb, { env });
+    assert.equal(providerOnly.status, 0,
+      `provider-only external selection failed\nstdout: ${providerOnly.stdout}\nstderr: ${providerOnly.stderr}`);
+    assert.doesNotMatch(providerOnly.stdout + providerOnly.stderr, /unknown host\(s\): hermes/);
+    const cfg = kitJson(sb.home);
+    assert.equal(cfg.providers.aqeProvider, 'hermes', 'external provider selection is persisted');
+    assert.equal(cfg.integrations.hosts.hermes, true,
+      'provider-only selection does not deactivate the bridge that makes the external provider live');
+    assert.equal(cfg.routing.primaryHost, 'claude', 'external host admission does not broaden primary-host selection');
   } finally {
     rm(sb.home, sb.project);
   }
