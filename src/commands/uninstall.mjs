@@ -12,7 +12,9 @@ import { unregister } from '../lib/mcp.mjs';
 import { loadKitConfig, saveKitConfig } from '../lib/config.mjs';
 import { runLifecycle } from '../lib/adapters/lifecycle.mjs';
 import { hostsWithLifecycle, lifecycleAdapterFor, lifecycleExecutionEnabled, isBuiltinHost } from '../lib/adapters/lifecycle-registry.mjs';
+import { companionLifecycleFor } from '../lib/adapters/companion-lifecycle-registry.mjs';
 import { renderUndoReport } from '../lib/adapters/lifecycle-render.mjs';
+import { parseDejaVuDoctor, validateDejaVuIndexPath } from '../lib/deja-vu.mjs';
 import { present as rbPresent } from '../lib/ruvnet-brain.mjs';
 import * as paths from '../lib/paths.mjs';
 import { ok, warn, fail, info } from '../lib/output.mjs';
@@ -36,6 +38,8 @@ export const options = {
   'this-project': { type: 'boolean', default: false },
   'remove-ruflo': { type: 'boolean', default: false },
   'remove-aqe': { type: 'boolean', default: false },
+  'remove-deja-vu': { type: 'boolean', default: false },
+  'purge-deja-vu-data': { type: 'boolean', default: false },
   purge: { type: 'boolean', default: false },
   yes: { type: 'boolean', default: false },
 };
@@ -53,7 +57,9 @@ Options:
   --this-project   also remove this project's patches (settings, .claude-flow)
   --remove-ruflo   uninstall the global ruflo package (confirmed)
   --remove-aqe     uninstall the global agentic-qe package (confirmed)
-  --purge          remove everything: kit footprint + both global packages
+  --remove-deja-vu uninstall the Kit-owned deja-vu package (confirmed)
+  --purge-deja-vu-data delete only the derived deja-vu index (confirmed)
+  --purge          remove Kit footprint + ruflo/aqe; preserve deja-vu package/data
   --yes            skip confirmation prompts
   --dry-run        print what would be removed; change nothing
 
@@ -71,7 +77,110 @@ const confirm = async (q, yes) => {
   return a.startsWith('y');
 };
 
-export async function run({ flags }) {
+const plain = (value) => value !== null && typeof value === 'object' && !Array.isArray(value);
+
+function dejaVuOwnership(cfg) {
+  const own = cfg?.integrations?.ownership?.dejaVu;
+  return plain(own) ? own : null;
+}
+
+function hasDejaVuOwnership(cfg) {
+  const own = dejaVuOwnership(cfg);
+  return !!own && (!!own.install || (plain(own.targets) && Object.keys(own.targets).length > 0));
+}
+
+function protectedDejaVuRoots(homeDir, env) {
+  const absolute = (value) => typeof value === 'string' && path.isAbsolute(value);
+  const configBases = [path.join(homeDir, '.config'), env.XDG_CONFIG_HOME, env.APPDATA]
+    .filter(absolute);
+  const dataBases = [path.join(homeDir, '.local', 'share'), env.XDG_DATA_HOME]
+    .filter(absolute);
+  return {
+    sourceRoots: [
+      path.join(homeDir, '.claude', 'projects'),
+      path.join(homeDir, '.codex', 'sessions'),
+      ...dataBases.map((base) => path.join(base, 'opencode')),
+    ],
+    configRoots: configBases.flatMap((base) => [
+      path.join(base, 'deja'), path.join(base, 'opencode'), path.join(base, 'agentic-kit'),
+    ]),
+  };
+}
+
+/**
+ * Delete only the v0.19 doctor-reported derived index. Raw doctor output and
+ * the validated path stay inside this function; callers receive reason codes.
+ */
+export async function purgeDejaVuIndex({
+  runner = runCmd,
+  homeDir = paths.home,
+  env = process.env,
+  dryRun = false,
+} = {}) {
+  let result;
+  try {
+    result = await runner('deja', ['doctor', '--json', '--offline'], { timeout: 60_000 });
+  } catch {
+    return { ok: false, changed: false, reason: 'doctor-command-failed' };
+  }
+  if (result?.code !== 0) return { ok: false, changed: false, reason: 'doctor-command-failed' };
+  const parsed = parseDejaVuDoctor(result.stdout);
+  if (parsed.state !== 'ok' || parsed.facts?.schemaVersion !== 2) {
+    return { ok: false, changed: false, reason: `doctor-${parsed.reason ?? 'invalid'}` };
+  }
+
+  let raw;
+  try { raw = JSON.parse(result.stdout); } catch {
+    return { ok: false, changed: false, reason: 'doctor-json-malformed' };
+  }
+  const allowedRoots = [path.join(homeDir, '.cache', 'deja')];
+  if (typeof env.DEJA_INDEX_DIR === 'string' && path.isAbsolute(env.DEJA_INDEX_DIR)) {
+    const override = path.resolve(env.DEJA_INDEX_DIR);
+    // Upstream treats this as an index-location override across releases;
+    // tolerate either a parent directory or the exact index.db directory while
+    // retaining the validator's requirement that deletion occur below a root.
+    allowedRoots.push(path.basename(override) === 'index.db' ? path.dirname(override) : override);
+  }
+  const protectedRoots = protectedDejaVuRoots(homeDir, env);
+  const candidate = raw?.index?.path;
+  const validated = validateDejaVuIndexPath(candidate, {
+    homeDir,
+    allowedRoots,
+    sourceRoots: protectedRoots.sourceRoots,
+    configRoots: protectedRoots.configRoots,
+  });
+  if (!validated.ok) return { ok: false, changed: false, reason: validated.reason };
+
+  try {
+    let stat;
+    try { stat = fs.lstatSync(candidate); } catch {
+      if (!fs.existsSync(candidate)) return { ok: true, changed: false, reason: 'index-missing' };
+      return { ok: false, changed: false, reason: 'index-inspect-failed' };
+    }
+    if (stat.isSymbolicLink()) return { ok: false, changed: false, reason: 'path-symlink' };
+    if (!stat.isDirectory()) return { ok: false, changed: false, reason: 'path-not-directory' };
+    // Revalidate immediately before deletion to narrow the filesystem race.
+    const revalidated = validateDejaVuIndexPath(candidate, {
+      homeDir,
+      allowedRoots,
+      sourceRoots: protectedRoots.sourceRoots,
+      configRoots: protectedRoots.configRoots,
+    });
+    if (!revalidated.ok || revalidated.path !== validated.path) {
+      return { ok: false, changed: false, reason: 'path-changed' };
+    }
+    if (dryRun) return { ok: true, changed: false, reason: 'dry-run' };
+    fs.rmSync(validated.path, { recursive: true, force: false });
+    return { ok: true, changed: true, reason: null };
+  } catch {
+    return { ok: false, changed: false, reason: 'index-delete-failed' };
+  }
+}
+
+/** @typedef {{dejaAdapter?:any,purgeDejaVuIndex?:typeof purgeDejaVuIndex}} UninstallDeps */
+
+/** @param {{flags:Record<string,boolean>,deps?:UninstallDeps}} request */
+export async function run({ flags, deps = {} }) {
   const dry = flags['dry-run'];
   const act = (msg, fn) => { if (dry) info(`[dry-run] ${msg}`); else { fn(); ok(msg); } };
   // Ownership markers are read ONCE up front: the purge path removes kit.json
@@ -80,6 +189,7 @@ export async function run({ flags }) {
   const cfg = loadKitConfig();
   const kitCfg = cfg;
   let ownershipTeardownOk = true;
+  let dejaVuTeardownOk = true;
 
   // 0. User-scoped Codex line: only values recorded as ours are candidates.
   if (kitCfg.statusline?.codex) {
@@ -136,6 +246,101 @@ export async function run({ flags }) {
       });
     }
   }
+
+  // 2c. Companion teardown is receipt-gated and precedes any kit.json purge.
+  // The sequence is load-bearing: targets first, then the optional derived
+  // index while `deja doctor` still exists, and only then the optional package.
+  const dejaOwn = dejaVuOwnership(cfg);
+  const ownsDeja = hasDejaVuOwnership(cfg);
+  const ownedTargetCount = plain(dejaOwn?.targets) ? Object.keys(dejaOwn.targets).length : 0;
+  const dejaAdapter = deps.dejaAdapter ?? companionLifecycleFor('deja-vu');
+  let removePackageApproved = false;
+  let purgeDataApproved = dry && flags['purge-deja-vu-data'];
+  if (!dry && flags['remove-deja-vu'] && dejaOwn?.install) {
+    removePackageApproved = await confirm(
+      'Remove the Kit-owned global deja-vu package for ALL projects on this machine?',
+      flags.yes,
+    );
+    if (!removePackageApproved) info('kept deja-vu package');
+  }
+  if (!dry && flags['purge-deja-vu-data']) {
+    purgeDataApproved = await confirm(
+      'Delete the derived deja-vu index? Notes, policy, peers, config, and source transcripts stay.',
+      flags.yes,
+    );
+    if (!purgeDataApproved) info('kept deja-vu derived index');
+  }
+
+  const undoDejaVu = async (removePackage) => {
+    try {
+      const retired = await runLifecycle({
+        adapter: dejaAdapter,
+        action: 'undo',
+        cfg,
+        options: { removePackage },
+      });
+      if (retired?.configChanged) saveKitConfig(cfg);
+      return retired;
+    } catch {
+      return { ok: false, changed: false, configChanged: false };
+    }
+  };
+
+  // Phase 1: default uninstall always attempts only Kit-owned target receipts.
+  if (ownsDeja && dry) {
+    if (ownedTargetCount > 0) info('[dry-run] remove Kit-owned deja-vu target wiring');
+  } else if (ownsDeja) {
+    if (!dejaAdapter) {
+      warn('deja-vu teardown unavailable — ownership receipt retained');
+      dejaVuTeardownOk = false;
+    } else {
+      const retired = await undoDejaVu(false);
+      dejaVuTeardownOk = retired?.ok === true;
+      if (dejaVuTeardownOk) {
+        if (retired?.changed) ok('deja-vu: Kit-owned target wiring teardown complete');
+      } else {
+        warn('deja-vu teardown incomplete — recovery ownership receipts retained');
+      }
+    }
+  }
+
+  // Phase 2: data has a separate destructive scope and is validated through a
+  // single offline doctor call. Dry-run performs the validation but no delete.
+  if (purgeDataApproved) {
+    if (!dry && !dejaVuTeardownOk) {
+      warn('deja-vu derived index retained because ownership teardown is incomplete');
+    } else {
+      const purge = deps.purgeDejaVuIndex ?? purgeDejaVuIndex;
+      const removed = await purge({ homeDir: paths.home, dryRun: dry });
+      if (removed?.ok) {
+        if (dry) info('[dry-run] validated deja-vu derived index; would delete it (path withheld)');
+        else (removed.changed ? ok : info)(removed.changed
+          ? 'deja-vu derived index deleted (path withheld)'
+          : 'deja-vu derived index was already absent');
+      } else {
+        warn(`${dry ? '[dry-run] ' : ''}deja-vu derived index refused — validation or doctor check failed (path withheld)`);
+        dejaVuTeardownOk = false;
+      }
+    }
+  }
+
+  // Phase 3: package removal is possible only after target teardown and any
+  // requested data purge succeeded. A data failure retains the CLI for retry.
+  if (flags['remove-deja-vu']) {
+    if (!ownsDeja || !dejaOwn?.install) {
+      info('deja-vu package preserved — no Kit ownership receipt');
+    } else if (dry) {
+      info('[dry-run] uninstall Kit-owned deja-vu package after target/data teardown');
+    } else if (removePackageApproved && !dejaVuTeardownOk) {
+      warn('deja-vu package retained because target/data teardown is incomplete');
+    } else if (removePackageApproved) {
+      const retired = await undoDejaVu(true);
+      dejaVuTeardownOk = retired?.ok === true;
+      if (dejaVuTeardownOk && retired?.changed) ok('deja-vu: Kit-owned package removed');
+      else if (!dejaVuTeardownOk) warn('deja-vu package removal incomplete — ownership receipt retained');
+    }
+  }
+  ownershipTeardownOk = ownershipTeardownOk && dejaVuTeardownOk;
   // Registry-driven host lifecycle teardown — reached by id, never by name
   // (mirrors x/host.mjs's off(), which does its undo the same way). cfg comes
   // from the top of run() (read before any purge of kit.json); --purge
@@ -185,7 +390,9 @@ export async function run({ flags }) {
   }
   if (flags.purge && fs.existsSync(paths.kitConfigPath())) {
     if (ownershipTeardownOk) act('removed kit.json', () => fs.rmSync(paths.kitConfigPath()));
-    else warn('kit.json retained because OpenCode teardown is incomplete; it contains the recovery ownership receipt');
+    else if (!dejaVuTeardownOk) {
+      warn('kit.json retained because deja-vu teardown is incomplete; it contains recovery ownership receipts');
+    } else warn('kit.json retained because OpenCode teardown is incomplete; it contains the recovery ownership receipt');
   }
 
   // 3. MCP registration + deny rules
