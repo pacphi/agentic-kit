@@ -12,7 +12,10 @@
   satisfied [#628](https://github.com/proffesor-for-testing/agentic-qe/issues/628) with
   `externalProviders`. The manifest may now carry non-authoritative `aqe.provider` candidate data;
   the `host.legacy.aqeProvider` self-claim remains forbidden, while a passed `aqe-provider` tier and
-  explicit hash-pinned grant activate the projection.
+  explicit hash-pinned grant activate the projection. The production bridge copies verified
+  command/relative-import bytes into a private per-call snapshot and rechecks host intent, consent,
+  and the exact-hash grant immediately before spawn. This is byte pinning, not an OS sandbox;
+  absolute file access by consented hook code remains outside the snapshot boundary.
 - **Deciders:** agentic-kit maintainers
 - **Related:** [ADR-0016](0016-capability-driven-integration-adapters.md) (closed-registry clause
   superseded — see [Supersession](#supersession-of-adr-0016s-closed-registry-clause)),
@@ -354,7 +357,7 @@ implemented and tested in this worktree.
 | Subprocess hook-runner (`cli-subprocess` surface) | **Working** | `src/lib/adapters/hook-runner.mjs`; bounded real-subprocess tests. |
 | Hash-pinned consent + edit-invalidation | **Working** | `src/lib/adapters/integrity.mjs`; manifest + declared hook-file digests, pre-spawn recheck, integrity tests. |
 | Capability-cap schema absence (§3) | **Working** | Schema refusal tests and maintainer-only grant allow-list. |
-| AQE external-provider candidate + projection | **Working** | Strict `aqe.provider` validation; six-tier conformance includes a real `aqe-provider` probe; hash-pinned `aqeProvider` grants; Agentic-QE 3.13.12 gate; project-only default/fallback/agentOverrides projection; receipt-owned `externalProviders[id]` plus the minimal `providers[id].enabled=true` MCP-bootstrap activation; foreign-entry preservation, explicit-disable conflict refusal, and exact-value stale pruning. |
+| AQE external-provider candidate + projection | **Working** | Strict `aqe.provider` validation; six-tier conformance includes a real `aqe-provider` probe; live pre-spawn host/consent/grant reauthorization; private verified-byte execution snapshots for declared command paths and relative imports; Agentic-QE 3.13.12 gate; project-only default/fallback/agentOverrides projection; independent exact ownership receipts for declarations, activations, and external defaults; foreign-entry preservation, explicit-disable/conflict refusal, and same-command stale-reference pruning. |
 | Gate item 1 — import-time invariant | **Working** | `assertBuiltinAdaptersRoutable`, one-directional since W1-B (`src/lib/execution/adapters.mjs`). |
 | Gate item 2 — uninstall-through-undo | **Working** | Registry-driven `hostsWithLifecycle()` teardown loop (`src/commands/uninstall.mjs`). |
 | Gate item 3 — permission authorization by host | **Working** | `projectPermissionManifest` union-across-enabled-hosts, F-04 (`src/commands/setup.mjs`). |
