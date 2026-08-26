@@ -228,7 +228,7 @@ const kitJson = (home) => JSON.parse(fs.readFileSync(path.join(home, '.config', 
 const ocJsonPath = (home) => path.join(home, '.config', 'opencode', 'opencode.json');
 const ocJson = (home) => JSON.parse(fs.readFileSync(ocJsonPath(home), 'utf8'));
 
-function configureExternalAqeProvider({ home, project }) {
+function configureExternalAqeProvider({ home, project }, { enabled = true } = {}) {
   const adapterDir = path.join(project, 'hermes-adapter');
   fs.mkdirSync(adapterDir, { recursive: true });
   const command = [process.execPath, '-e', 'process.stdin.pipe(process.stdout)'];
@@ -257,12 +257,25 @@ function configureExternalAqeProvider({ home, project }) {
   const configDir = path.join(home, '.config', 'agentic-kit');
   const cfg = kitJson(home);
   cfg.hostAdapters = [{ name: 'hermes', source: manifestFile, contract: 1 }];
-  cfg.integrations.hosts.hermes = true;
+  cfg.integrations.hosts.hermes = enabled;
   fs.writeFileSync(path.join(configDir, 'kit.json'), `${JSON.stringify(cfg, null, 2)}\n`);
   recordConsent('hermes', hash, { file: path.join(configDir, 'adapter-consent.json') });
   const grantsFile = path.join(configDir, 'adapter-grants.json');
   recordTierResult('hermes', 'aqe-provider', { hash, evidence: 'provider CLI regression' }, { file: grantsFile });
   grantCapability('hermes', 'aqeProvider', { hash }, { file: grantsFile });
+}
+
+function fakeAqeInstall(home, version = '3.13.12') {
+  const prefix = path.join(home, 'npm-prefix');
+  // npm's global tree is prefix/lib/node_modules on POSIX and
+  // prefix/node_modules on Windows. Materialize both so the fixture also works
+  // when npm itself is absent and globalRoot() takes its spawn-free fallback.
+  for (const root of [path.join(prefix, 'lib', 'node_modules'), path.join(prefix, 'node_modules')]) {
+    const pkg = path.join(root, 'agentic-qe');
+    fs.mkdirSync(pkg, { recursive: true });
+    fs.writeFileSync(path.join(pkg, 'package.json'), JSON.stringify({ name: 'agentic-qe', version }));
+  }
+  return prefix;
 }
 
 test('pick --host claude,opencode enables + wires opencode (config, plugin, agents, skill), preserving user config', () => {
@@ -406,6 +419,82 @@ test('external provider selection accepts the effective host and provider-only r
     assert.equal(cfg.integrations.hosts.hermes, true,
       'provider-only selection does not deactivate the bridge that makes the external provider live');
     assert.equal(cfg.routing.primaryHost, 'claude', 'external host admission does not broaden primary-host selection');
+  } finally {
+    rm(sb.home, sb.project);
+  }
+});
+
+test('one pick can enable a disabled admitted provider and select it atomically', () => {
+  const sb = pickSandbox({ hosts: { claude: true, codex: false, opencode: false } });
+  try {
+    configureExternalAqeProvider(sb, { enabled: false });
+    const env = {
+      AK_EXPERIMENTAL_HOST_ADAPTERS: '1',
+      npm_config_prefix: fakeAqeInstall(sb.home),
+    };
+
+    const result = akPick([
+      'x', 'host', 'pick', '--host', 'claude,hermes', '--aqe-provider', 'hermes', '--yes',
+    ], sb, { env });
+    assert.equal(result.status, 0,
+      `atomic external selection failed\nstdout: ${result.stdout}\nstderr: ${result.stderr}`);
+    assert.doesNotMatch(result.stdout + result.stderr, /unknown aqe provider 'hermes'/);
+
+    const cfg = kitJson(sb.home);
+    assert.equal(cfg.integrations.hosts.hermes, true, 'the external host is enabled');
+    assert.equal(cfg.providers.aqeProvider, 'hermes', 'the newly enabled provider is selected');
+    assert.equal(cfg.routing.primaryHost, 'claude', 'external admission does not broaden primary selection');
+
+    const router = JSON.parse(fs.readFileSync(
+      path.join(sb.project, '.agentic-qe', 'llm-config.json'), 'utf8',
+    ));
+    assert.ok(router.externalProviders.hermes, 'the provider declaration is projected in the same command');
+    assert.equal(router.providers.hermes.enabled, true, 'the provider activation is projected in the same command');
+    assert.equal(router.defaultProvider, 'hermes', 'the external default is projected in the same command');
+  } finally {
+    rm(sb.home, sb.project);
+  }
+});
+
+test('one pick disabling an external host prunes every owned AQE reference', () => {
+  const sb = pickSandbox({ hosts: { claude: true, codex: false, opencode: false } });
+  try {
+    configureExternalAqeProvider(sb);
+    const env = {
+      AK_EXPERIMENTAL_HOST_ADAPTERS: '1',
+      npm_config_prefix: fakeAqeInstall(sb.home),
+    };
+
+    const selected = akPick([
+      'x', 'host', 'pick', '--aqe-provider', 'hermes',
+      '--aqe-fallback', 'hermes:default', '--route', 'testing:hermes:default', '--yes',
+    ], sb, { env });
+    assert.equal(selected.status, 0,
+      `external projection failed\nstdout: ${selected.stdout}\nstderr: ${selected.stderr}`);
+    const before = JSON.parse(fs.readFileSync(
+      path.join(sb.project, '.agentic-qe', 'llm-config.json'), 'utf8',
+    ));
+    assert.ok(before.externalProviders.hermes, 'precondition: declaration projected');
+    assert.equal(before.providers.hermes.enabled, true, 'precondition: activation projected');
+    assert.equal(before.defaultProvider, 'hermes', 'precondition: external default projected');
+    assert.equal(before.fallbackChain.entries[0].provider, 'hermes', 'precondition: fallback projected');
+    assert.ok(Object.values(before.agentOverrides).some((entry) => entry.provider === 'hermes'),
+      'precondition: external agent override projected');
+
+    const disabled = akPick(['x', 'host', 'pick', '--host', 'claude', '--yes'], sb, { env });
+    assert.equal(disabled.status, 0,
+      `external disable failed\nstdout: ${disabled.stdout}\nstderr: ${disabled.stderr}`);
+    assert.equal(kitJson(sb.home).integrations.hosts.hermes, false, 'host intent is disabled');
+
+    const after = JSON.parse(fs.readFileSync(
+      path.join(sb.project, '.agentic-qe', 'llm-config.json'), 'utf8',
+    ));
+    assert.equal(after.externalProviders?.hermes, undefined, 'owned declaration is pruned');
+    assert.equal(after.providers?.hermes, undefined, 'owned activation is pruned');
+    assert.equal(after.defaultProvider, undefined, 'owned external default is pruned');
+    assert.equal(after.fallbackChain, undefined, 'owned external fallback is pruned');
+    assert.equal(Object.values(after.agentOverrides ?? {}).some((entry) => entry.provider === 'hermes'), false,
+      'owned external agent overrides are pruned');
   } finally {
     rm(sb.home, sb.project);
   }

@@ -19,6 +19,7 @@ import { loadKitConfig, saveKitConfig } from '../../lib/config.mjs';
 import { reconcileOpencodeGuidance } from '../../lib/opencode.mjs';
 import { runLifecycle } from '../../lib/adapters/lifecycle.mjs';
 import { lifecycleAdapterFor } from '../../lib/adapters/lifecycle-registry.mjs';
+import { bootstrapHostAdapters } from '../../lib/adapters/admission.mjs';
 import { hostTierLabel, hostAsymmetryNote } from '../../lib/hosts.mjs';
 import {
   routableHostIds, effectiveRoutableHostIds, defaultHostMap, validateBinding, HOST_REGISTRY, PROVIDER_REGISTRY,
@@ -449,8 +450,8 @@ async function maybeWriteQeCourtDefaults({ nonInteractive, cwd, enabled, aqeProv
 }
 
 async function pick({ flags, cwd, pkgRoot }) {
-  const aqeProviderTypes = aqeSelectableProviderTypes();
-  const aqeChainProviderTypes = aqeSelectableChainProviderTypes();
+  let aqeProviderTypes = aqeSelectableProviderTypes();
+  let aqeChainProviderTypes = aqeSelectableChainProviderTypes();
   const cfg = loadKitConfig();
   const trustBaseline = structuredClone(cfg);
   const hosts = await detectHosts(cwd);
@@ -561,6 +562,35 @@ async function pick({ flags, cwd, pkgRoot }) {
   const policyAllSeeded = Object.keys(oldPolicy).length > 0
     && Object.values(oldPolicy).every((r) => r.provenance === 'seeded');
   const reseedForPrimary = primaryHost !== prevPrimary && policyAllSeeded;
+
+  const hostIntent = {
+    claude: routing.includes('claude'),
+    codex: routing.includes('codex'),
+    opencode: enabled.includes('opencode'),
+  };
+  // External host ids are not primary candidates, but they are first-class
+  // integration intent. Retain every live admitted external id as an explicit
+  // boolean so a provider-only pick cannot deactivate its own bridge; an
+  // explicit --host set can still disable it by omission.
+  for (const id of EFFECTIVE_ROUTING) {
+    if (!MANAGED_HOSTS.has(id)) hostIntent[id] = enabled.includes(id);
+  }
+  cfg.integrations.hosts = hostIntent;
+
+  // Admission ran once at process bootstrap against the persisted pre-pick
+  // config. Re-run it against the final in-memory host intent before provider
+  // validation/projection: an admitted+granted provider can then be enabled
+  // and selected atomically, while a provider disabled by this command is
+  // removed from the AQE bridge before applyAqeRouter computes its projection.
+  if (process.env.AK_EXPERIMENTAL_HOST_ADAPTERS === '1') {
+    const refreshed = await bootstrapHostAdapters({ cfg, env: process.env });
+    for (const entry of refreshed.warnings) {
+      warn(`host adapter '${entry.name}' refresh refused (${entry.reason}): ${entry.detail}`);
+    }
+    aqeProviderTypes = aqeSelectableProviderTypes();
+    aqeChainProviderTypes = aqeSelectableChainProviderTypes();
+  }
+
   // validate aqe primary provider
   if (aqeProvider && !aqeProviderTypes.includes(aqeProvider)) {
     const norm = aqeProvider === 'anthropic' ? 'claude' : aqeProvider;
@@ -594,19 +624,6 @@ async function pick({ flags, cwd, pkgRoot }) {
     models,
     maxBudgetUsd: cfg.providers.maxBudgetUsd ?? null,
   };
-  const hostIntent = {
-    claude: routing.includes('claude'),
-    codex: routing.includes('codex'),
-    opencode: enabled.includes('opencode'),
-  };
-  // External host ids are not primary candidates, but they are first-class
-  // integration intent. Retain every live admitted external id as an explicit
-  // boolean so a provider-only pick cannot deactivate its own bridge; an
-  // explicit --host set can still disable it by omission.
-  for (const id of EFFECTIVE_ROUTING) {
-    if (!MANAGED_HOSTS.has(id)) hostIntent[id] = enabled.includes(id);
-  }
-  cfg.integrations.hosts = hostIntent;
   cfg.routing.primaryHost = primaryHost;
   cfg.routing.routes = reseedForPrimary ? {} : { ...oldPolicy };
   // Multi-host: seed per-activity routing from defaults (only when the policy is
