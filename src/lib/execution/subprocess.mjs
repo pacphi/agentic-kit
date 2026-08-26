@@ -220,14 +220,18 @@ async function terminate(state, { terminationGraceMs, forceGraceMs, signalFn }) 
 /** Build a lifecycle adapter for one host's structured non-interactive CLI.
  * `argumentsFor` must return a fixed argv vector; prompts never pass through a
  * shell. Permission modes are deliberately absent from this generic layer.
+ * `handoffRequestFor` (optional, ADR-0034) supplies the runner's handoff
+ * instruction when this host's transport enforces the schema on the final
+ * message; absent, the runner appends the generic tagged-block request.
  * @param {{id:string, host:string, command:string, argumentsFor:(worker:any, cwd:string)=>string[],
  *   summaryFor:(observation:any,summaryText:string|null)=>any,
  *   summaryCaptureFor?:()=>{write:(chunk:string)=>void,read:()=>string|null},
+ *   handoffRequestFor?:(worker:any)=>string,
  *   spawnFn?:typeof nodeSpawn, haveFn?:typeof have, resolveFn?:typeof resolveShim,
  *   signalFn?:typeof signalProcessTree,
  *   clock?:()=>string, terminationGraceMs?:number, forceGraceMs?:number}} options */
 export function createSubprocessExecutionAdapter({
-  id, host, command, argumentsFor, summaryFor, summaryCaptureFor,
+  id, host, command, argumentsFor, summaryFor, summaryCaptureFor, handoffRequestFor,
   spawnFn = nodeSpawn, haveFn = have,
   resolveFn = resolveShim, signalFn = signalProcessTree,
   clock = nowIso, terminationGraceMs = 1_500, forceGraceMs = 1_500,
@@ -291,6 +295,7 @@ export function createSubprocessExecutionAdapter({
     summarize(state, observation) { return summaryFor(observation, state.summaryCapture?.read() ?? null); },
     async cancel(state) { return terminate(state, { terminationGraceMs, forceGraceMs, signalFn }); },
     async cleanup(state) { return terminate(state, { terminationGraceMs, forceGraceMs, signalFn }); },
+    ...(typeof handoffRequestFor === 'function' ? { handoffRequestFor } : {}),
   };
   return validateExecutionAdapter(adapter);
 }

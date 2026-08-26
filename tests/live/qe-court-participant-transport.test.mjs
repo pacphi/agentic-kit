@@ -1,8 +1,14 @@
 // Opt-in live regression for qe-court PARTICIPANT TRANSPORT, not a court
 // verdict. This uses the same bounded direct-host supervisor as `ak run` and
 // deliberately avoids the deprecated nested `codex mcp-server` path.
+// Seats run hermetic (ADR-0034) and hand off over the schema-native transport;
+// a protocol failure persists its redacted raw final-message tail so the next
+// #108-class defect arrives with evidence, not just a category.
 import { randomBytes } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
+import { appendFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { DatabaseSync } from 'node:sqlite';
@@ -14,6 +20,7 @@ import { projectMemoryEnv } from '../../src/lib/ruflo-memory.mjs';
 const cwd = process.cwd();
 const timeoutMs = Number(process.env.AK_QE_COURT_SEAT_TIMEOUT_MS ?? 120_000);
 const trials = Number(process.env.AK_QE_COURT_TRIALS ?? 1);
+const debugLog = join(tmpdir(), `ak-qe-court-debug-${process.pid}.jsonl`);
 
 function checkedPositiveInteger(value, label) {
   if (!Number.isInteger(value) || value < 1) throw new TypeError(`${label} must be a positive integer`);
@@ -58,6 +65,7 @@ function profile(leader, trial, namespace, evidence) {
       host,
       configuredModel: null,
       maxTurns: 4,
+      hermetic: true,
       dependsOn: index === 0 ? [] : [`${leader}-${seats[index - 1][0]}`],
       prompt: [
         `Read-only qe-court participant transport probe ${trial}; seat=${role}; leader=${leader}.`,
@@ -75,22 +83,43 @@ function profile(leader, trial, namespace, evidence) {
     host: leader,
     configuredModel: null,
     maxTurns: 2,
+    hermetic: true,
     dependsOn: [`${leader}-overturn-reviewer`],
     prompt: 'Read the dependency handoff only. Make no tool calls and no file changes. Reply: transport evidence received.',
   });
   return { template: 'qe-court-participant-transport', task: `trial ${trial}`, workers };
 }
 
-function capturingAdapters(captured) {
+function capturingAdapters(captured, evidence) {
   return new Map(['claude', 'codex'].map((host) => {
     const base = executionAdapterFor(host);
     assert.ok(base, `missing ${host} execution adapter`);
     return [host, {
       ...base,
       summarize(state, observation) {
-        const handoff = base.summarize(state, observation);
-        if (handoff) captured.set(state.worker.id, handoff);
-        return handoff;
+        try {
+          const handoff = base.summarize(state, observation);
+          if (handoff) captured.set(state.worker.id, handoff);
+          return handoff;
+        } catch (error) {
+          // #108 evidence gap: persist the redacted raw tail of the final
+          // message that failed the protocol, so a recurrence is diagnosable.
+          let raw;
+          try { raw = state.summaryCapture?.read() ?? null; } catch (readError) {
+            raw = `<final message unreadable: ${readError?.message}>`;
+          }
+          let tail = String(raw ?? '').slice(-2048);
+          for (const { value } of evidence.values()) tail = tail.split(value).join('<proof>');
+          appendFileSync(debugLog, `${JSON.stringify({
+            at: new Date().toISOString(),
+            workerId: state.worker.id,
+            host,
+            error: String(error?.message ?? error),
+            rawTail: tail,
+          })}\n`);
+          error.message = `${error.message} [raw tail: ${debugLog}]`;
+          throw error;
+        }
       },
     }];
   }));
@@ -111,7 +140,7 @@ test('Claude-led and Codex-led qe-court participant transports terminate cleanly
         try {
           const plan = profile(leader, trial, namespace, evidence);
           const results = await executeRunPlan(plan, {
-            adapters: capturingAdapters(captured),
+            adapters: capturingAdapters(captured, evidence),
             cwd,
             timeoutMs,
             maxConcurrent: 1,

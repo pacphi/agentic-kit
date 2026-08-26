@@ -6,7 +6,7 @@
 // Two independent axes: ruflo host CLIs (claude/codex) and the LLM the routers use.
 import readline from 'node:readline/promises';
 import {
-  HOSTS, API_PROVIDERS, AQE_PROVIDER_TYPES, detectHosts,
+  HOSTS, API_PROVIDERS, AQE_PROVIDER_TYPES, AQE_CHAIN_PROVIDER_TYPES, detectHosts,
   settingsTarget, isDefault, applyHosts, applyProviders,
   undoProviders, hostInstallState, hostAuthState, installHost, applyAqeRouter, undoAqeRouter,
   bothHostsEnabled, DUAL_ROLE_TIP, JUDGE_BIAS_TIP, QE_COURT_TIP, suggestedFallbackFor,
@@ -553,11 +553,11 @@ async function pick({ flags, cwd, pkgRoot }) {
     if (AQE_PROVIDER_TYPES.includes(norm)) aqeProvider = norm;
     else { warn(`unknown aqe provider '${aqeProvider}' — leaving aqe on its default (valid: ${AQE_PROVIDER_TYPES.join(', ')})`); aqeProvider = null; }
   }
-  // validate fallback chain providers
+  // validate fallback chain providers (chain gate admits codex — #108 phase 3)
   aqeFallback = aqeFallback
     .map((e) => ({ ...e, provider: e.provider === 'anthropic' ? 'claude' : e.provider }))
     .filter((e) => {
-      const okp = AQE_PROVIDER_TYPES.includes(e.provider);
+      const okp = AQE_CHAIN_PROVIDER_TYPES.includes(e.provider);
       if (!okp) warn(`dropping unknown fallback provider '${e.provider}'`);
       else if (!e.models.length) warn(`fallback entry '${e.provider}' has no models — aqe may skip it; add e.g. ${e.provider}:<model-id>`);
       return okp;

@@ -1,26 +1,23 @@
 // Runtime-only worker handoffs (#76). These summaries are an internal
 // coordination channel: they never enter WorkerResult, dry-run materialization,
 // or `ak run --json`.
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 
 export const HANDOFF_START = '<AK_HANDOFF_V1>';
 export const HANDOFF_END = '</AK_HANDOFF_V1>';
 export const HANDOFF_MAX_BYTES = 2 * 1024;
 export const HANDOFF_AGGREGATE_MAX_BYTES = 8 * 1024;
 
-// RuvNet Brain machine guidance requires one final receipt line. A supervised
-// worker therefore cannot make the handoff closing tag the final bytes without
-// violating a higher-priority instruction. Admit only the documented receipt
-// grammar (optionally wrapped in the plugin's <sub> presentation); arbitrary
-// trailing prose remains a protocol error.
-const BRAIN_RECEIPT = /^🧠 RuvNet Brain jumped in · (?:cited [A-Za-z0-9][A-Za-z0-9_./#-]*|guidance only, no source read) · v\d+\.\d+\.\d+(?:-[A-Za-z0-9.-]+)?$/;
-
-function isBrainReceipt(value) {
-  const opens = value.startsWith('<sub>');
-  const closes = value.endsWith('</sub>');
-  if (opens !== closes) return false;
-  const body = opens ? value.slice('<sub>'.length, -'</sub>'.length) : value;
-  return BRAIN_RECEIPT.test(body);
-}
+// Schema-native transport (ADR-0034): hosts whose CLIs can enforce a JSON
+// Schema on the final message (`claude --json-schema`, `codex exec
+// --output-schema`) carry the handoff as that bare object instead of a
+// tag-delimited block. One schema document serves both flags; the keyword set
+// deliberately stays inside OpenAI's structured-output subset (no minLength —
+// normalizeHandoff enforces non-empty), and normalizeHandoff remains the only
+// authority on what is accepted.
+export const HANDOFF_SCHEMA_PATH = fileURLToPath(new URL('./handoff.schema.json', import.meta.url));
+export const HANDOFF_SCHEMA_TEXT = JSON.stringify(JSON.parse(readFileSync(HANDOFF_SCHEMA_PATH, 'utf8')));
 
 const FIELDS = Object.freeze(['outcome', 'artifacts', 'decisions', 'risks']);
 // eslint-disable-next-line no-control-regex
@@ -37,8 +34,40 @@ ${HANDOFF_START}
 ${HANDOFF_END}
 All four fields are required. Keep the JSON concise and valid. This block is
 runtime coordination data and will not be included in the public run result.
-Output nothing after the closing tag unless higher-priority RuvNet Brain guidance
-requires its one-line receipt; in that case append only that receipt.`;
+Emit the block exactly once.`;
+
+// Schema-native variants (ADR-0034). parseHandoffText accepts every form on
+// every host, so a cross-host escalation rung never strands an instruction.
+//
+// JSON variant: for hosts whose schema flag constrains the FINAL MESSAGE
+// itself (codex --output-schema) — the model is asked for the bare object.
+export const HANDOFF_REQUEST_JSON = `
+
+Internal dependency handoff required.
+This summary may be forwarded to a different host or inference vendor. Never
+include secrets, credentials, tokens, raw logs, or transcript excerpts.
+Your final message must be exactly one JSON object of this shape and nothing else:
+{"outcome":"concise result","artifacts":["paths or outputs"],"decisions":["important choices"],"risks":["remaining risks"]}
+All four fields are required; the arrays may be empty. No prose, no code
+fences, no text before or after the object. This object is runtime
+coordination data and will not be included in the public run result.`;
+
+// Structured variant: for hosts where the schema is enforced OUT OF BAND of
+// the message text (claude --json-schema derives structured_output from the
+// turn). Telling that model its "final message must be the bare object" is a
+// contradiction it may obey by refusing the task (observed live: an outcome
+// of "not applicable — this turn required a raw JSON handoff object"). So the
+// model is told what to REPORT, never how to shape its message.
+export const HANDOFF_REQUEST_STRUCTURED = `
+
+Internal dependency handoff required.
+After completing the work above, report the handoff in your structured output:
+outcome (concise result), artifacts (paths or outputs), decisions (important
+choices), risks (remaining risks). All four fields are required; the arrays
+may be empty. This summary may be forwarded to a different host or inference
+vendor — never include secrets, credentials, tokens, raw logs, or transcript
+excerpts. It is runtime coordination data and will not be included in the
+public run result.`;
 
 function bytes(value) {
   return Buffer.byteLength(value, 'utf8');
@@ -108,23 +137,49 @@ export function normalizeHandoff(value, { maxBytes = HANDOFF_MAX_BYTES } = {}) {
   return compact(value, maxBytes);
 }
 
-/** Extract exactly one tagged JSON handoff. Raw host output is never a fallback. */
+/** Extract exactly one tagged JSON handoff. Raw host output is never a
+ * fallback. Text before or after the single block is tolerated (ADR-0034):
+ * a full agent session carries standing instructions ak does not control
+ * (machine guidance, plugin receipts), and hard-failing on benign trailing
+ * prose was issue #108's stochastic protocol_error. Duplicate delimiters stay
+ * fatal — a second block is the shadowing/injection-suspicious case. */
 export function extractHandoff(raw) {
   if (typeof raw !== 'string') return null;
   const firstStart = raw.indexOf(HANDOFF_START);
   const firstEnd = raw.indexOf(HANDOFF_END);
-  const trailing = firstEnd < 0 ? '' : raw.slice(firstEnd + HANDOFF_END.length).trim();
   if (firstStart === -1 && firstEnd === -1) return null;
   if (firstStart === -1 || firstEnd === -1 || firstEnd < firstStart
     || raw.indexOf(HANDOFF_START, firstStart + HANDOFF_START.length) !== -1
-    || raw.indexOf(HANDOFF_END, firstEnd + HANDOFF_END.length) !== -1
-    || (trailing !== '' && !isBrainReceipt(trailing))) {
+    || raw.indexOf(HANDOFF_END, firstEnd + HANDOFF_END.length) !== -1) {
     throw new TypeError('worker emitted a malformed or duplicate handoff block');
   }
   const body = raw.slice(firstStart + HANDOFF_START.length, firstEnd).trim();
   let value;
   try { value = JSON.parse(body); } catch { throw new TypeError('worker handoff block was not valid JSON'); }
   return normalizeHandoff(value);
+}
+
+/** Parse a final message under the schema-native transport (ADR-0034):
+ * tagged block if the delimiters appear (strict, above); otherwise the bare
+ * JSON object the host's schema flag enforced — accepted whole, or as the
+ * outermost brace span when benign wrapping (a code fence, an appended
+ * receipt line) surrounds it. A parsed non-object candidate is not a handoff
+ * (null); a parsed object with the wrong shape IS protocol evidence and
+ * throws via normalizeHandoff. Raw prose is never a fallback. */
+export function parseHandoffText(raw) {
+  if (typeof raw !== 'string' || !raw.trim()) return null;
+  if (raw.includes(HANDOFF_START) || raw.includes(HANDOFF_END)) return extractHandoff(raw);
+  const trimmed = raw.trim();
+  const candidates = [trimmed];
+  const open = trimmed.indexOf('{');
+  const close = trimmed.lastIndexOf('}');
+  if (open !== -1 && close > open) candidates.push(trimmed.slice(open, close + 1));
+  for (const candidate of candidates) {
+    let value;
+    try { value = JSON.parse(candidate); } catch { continue; }
+    if (value && typeof value === 'object' && !Array.isArray(value)) return normalizeHandoff(value);
+  }
+  return null;
 }
 
 /** Remove the private protocol payload before host diagnostics reach a public

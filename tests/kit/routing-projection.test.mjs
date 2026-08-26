@@ -94,6 +94,54 @@ test('chain and agentOverrides are written together and never persist apiKey', (
   rm(dir); rm(groot);
 });
 
+// #108 phase 3: aqe reaches a provider only through defaultProvider, the
+// fallbackChain, or its FALLBACK_PRIORITY list — which contains neither codex
+// nor claude-code. A codex CHAIN RUNG is therefore the sanctioned way to make
+// the subscription Codex CLI provider live, and ak's chain gate must admit it.
+test('a codex chain rung is admitted, enabled, and keeps its order (chain gate)', () => {
+  const groot = fakeAqe('3.13.1');
+  const dir = tmpProject();
+  const res = applyAqeRouter(cfgWith({
+    aqeProvider: 'claude-code',
+    aqeFallback: [
+      { provider: 'claude-code', models: ['claude-opus-5'] },
+      { provider: 'codex', models: ['gpt-5.6-terra'] },
+      { provider: 'openrouter', models: ['z-ai/glm-5.2'] },
+    ],
+    routes: seedActivityRoutes(),
+  }), dir);
+
+  const disk = readDisk(dir);
+  assert.match(res.detail, /chain: claude-code → codex → openrouter/);
+  assert.equal(disk.fallbackChain.entries[1].provider, 'codex');
+  assert.deepEqual(disk.fallbackChain.entries[1].models, ['gpt-5.6-terra']);
+  assert.equal(disk.providers.codex.enabled, true, 'chain rung enables the provider');
+  rm(dir); rm(groot);
+});
+
+// #108 phase 3: an override naming a provider aqe must construct is inert
+// until that provider is enabled in this same file — subscription host-CLI
+// providers (codex, claude-code) have no env key to auto-enable them.
+test('the overrides projection enables exactly the providers it references', () => {
+  const groot = fakeAqe('3.13.1');
+  const dir = tmpProject();
+  fs.mkdirSync(path.dirname(aqeRouterFile(dir)), { recursive: true });
+  fs.writeFileSync(aqeRouterFile(dir), JSON.stringify({
+    _managedBy: 'agentic-kit',
+    providers: { openrouter: { enabled: true, custom: 'kept' }, codex: { note: 'foreign config survives' } },
+  }));
+  const res = applyAqeRouter(cfgWith({ routes: seedActivityRoutes() }), dir);
+
+  const disk = readDisk(dir);
+  assert.match(res.detail, /providers enabled: .*codex/);
+  assert.equal(disk.providers.codex.enabled, true, 'codex override provider enabled');
+  assert.equal(disk.providers.codex.note, 'foreign config survives', 'merge, not clobber');
+  assert.equal(disk.providers['claude-code'].enabled, true, 'claude-code override provider enabled');
+  assert.deepEqual(disk.providers.openrouter, { enabled: true, custom: 'kept' }, 'unreferenced provider untouched');
+  assert.equal(JSON.stringify(disk).includes('apiKey'), false);
+  rm(dir); rm(groot);
+});
+
 test('agentOverrides MERGES — a foreign entry survives (H1: never clobbered)', () => {
   const groot = fakeAqe('3.13.1');
   const dir = tmpProject();

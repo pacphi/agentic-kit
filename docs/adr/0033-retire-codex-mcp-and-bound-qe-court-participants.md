@@ -1,11 +1,14 @@
 # ADR-0033 — Retire Codex MCP and bound QE-Court participant transport
 
-- **Status:** Implemented
+- **Status:** Implemented; handoff transport amended by
+  [ADR-0034](0034-schema-native-handoffs-and-hermetic-seats.md)
 - **Date:** 2026-08-25
-- **Updated:** 2026-08-25
+- **Updated:** 2026-08-26
 - **Update note:** Initial implementation retires only receipt-owned legacy MCP state,
   diagnoses effective Codex MCP topology, extends POSIX cleanup to process groups, and adds
   fail-closed QE-Court readiness plus a reciprocal live participant-transport regression.
+  2026-08-26: the soak exposed the free-text handoff as the weak link; ADR-0034 moves
+  handoff-bearing seats to schema-native output and hermetic isolation.
 - **Deciders:** agentic-kit maintainers
 - **Related:** [ADR-0001](0001-one-routing-policy-many-projections.md),
   [ADR-0006](0006-primary-host-and-ambidextrous-mirroring.md),

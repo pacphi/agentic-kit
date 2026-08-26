@@ -76,6 +76,16 @@ export const AQE_PROVIDER_TYPES = [
   'azure-openai', 'bedrock', 'cognitum', 'ollama', 'onnx',
 ];
 
+// Chain-rung gate: everything above PLUS `codex`. Grounded in installed aqe
+// 3.13.12 (dist/shared/llm/router/config-store.js): BUILTIN_CONSTRUCTIBLE_
+// PROVIDERS includes codex, PROVIDER_ENV_KEYS.codex = [] (ChatGPT-subscription
+// via the codex binary — no env key), and provider REACHABILITY requires a
+// fallbackChain entry: aqe's FALLBACK_PRIORITY contains neither codex nor
+// claude-code, so an enabled codex provider is inert unless chained (#108
+// phase 3). AQE_PROVIDER_TYPES itself stays narrow — it also gates
+// AQE_LLM_PROVIDER, whose accepted values are aqe's separate ADR-123 list.
+export const AQE_CHAIN_PROVIDER_TYPES = [...AQE_PROVIDER_TYPES, 'codex'];
+
 /** Credential descriptor per AQE_PROVIDER_TYPES member — the missing half of the
  *  chain validation: a rung whose provider has no usable credential is inert, and
  *  a type/shape check can't see that (#54). Env names are GROUNDED in aqe's own
@@ -436,7 +446,7 @@ export function applyAqeRouter(cfg, cwd = process.cwd()) {
 
   let chainError = null;
   if (hasChain) {
-    const valid = chain.filter((e) => e?.provider && AQE_PROVIDER_TYPES.includes(e.provider));
+    const valid = chain.filter((e) => e?.provider && AQE_CHAIN_PROVIDER_TYPES.includes(e.provider));
     if (valid.length === 0) {
       // A bad chain must NOT block the independent agentOverrides projection — the
       // Activity routing is validated separately. Record it and carry on.
@@ -466,7 +476,21 @@ export function applyAqeRouter(cfg, cwd = process.cwd()) {
     next.agentOverrides = { ...priorOverrides };
     for (const agent of staleOverrides) delete next.agentOverrides[agent];
     Object.assign(next.agentOverrides, projected);
+    // An override naming a provider is inert until that provider is ENABLED in
+    // this same file: aqe enables from env keys or the `providers` map, and a
+    // subscription host-CLI provider (codex, claude-code) has no env key at
+    // all — so ak-projected codex overrides sat dead and warned on every aqe
+    // startup (#108 phase 3). Enable exactly the providers the projection
+    // references — merge-not-clobber, writing nothing beyond `enabled`.
+    const referenced = [...new Set(Object.values(projected).map((entry) => entry.provider))];
+    if (referenced.length) {
+      next.providers = { ...(next.providers ?? existing.providers ?? {}) };
+      for (const provider of referenced) {
+        next.providers[provider] = { ...(next.providers[provider] ?? {}), enabled: true };
+      }
+    }
     details.push(`agentOverrides: ${Object.keys(projected).length} agents`
+      + (referenced.length ? ` (providers enabled: ${referenced.join(', ')})` : '')
       + (staleOverrides.length ? ` (${staleOverrides.length} stale ak entries pruned)` : ''));
     wrote = true;
   } else if (hasPolicy) {

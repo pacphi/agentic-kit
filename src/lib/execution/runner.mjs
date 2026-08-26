@@ -288,9 +288,21 @@ export async function executeRunPlan(plan, {
   const start = (worker) => {
     const dependencies = (worker.dependsOn ?? []).map((id) => ({ id, handoff: summaries.get(id) }));
     let runtimePrompt = worker.prompt;
+    const wantsHandoff = mustSummarize.has(worker.id);
     try {
       runtimePrompt += renderDependencyHandoffs(dependencies);
-      if (mustSummarize.has(worker.id)) runtimePrompt += HANDOFF_REQUEST;
+      if (wantsHandoff) {
+        // ADR-0034: an adapter whose transport enforces the handoff schema on
+        // the final message supplies its own instruction; the tagged-block
+        // request stays the host-neutral default. An escalation rung that
+        // switches hosts keeps the original instruction — parseHandoffText
+        // accepts both forms on every schema-native host, so the summary
+        // still validates.
+        const adapter = adapterFor(adapters, worker.host);
+        runtimePrompt += typeof adapter?.handoffRequestFor === 'function'
+          ? adapter.handoffRequestFor(worker)
+          : HANDOFF_REQUEST;
+      }
     } catch (error) {
       results.set(worker.id, workerFailure(worker, {
         status: 'blocked',
@@ -301,13 +313,15 @@ export async function executeRunPlan(plan, {
       pending.delete(worker.id);
       return;
     }
-    const runtimeWorker = { ...worker, prompt: runtimePrompt };
+    // `requiresHandoff` rides the runtime worker so an adapter can add its
+    // schema-output flags only for workers whose summary a dependent needs.
+    const runtimeWorker = { ...worker, prompt: runtimePrompt, requiresHandoff: wantsHandoff };
     const promise = executeWorkerWithEscalation(runtimeWorker, adapters, {
       cwd,
       timeoutMs,
       clock,
       escalate,
-      requireHandoff: mustSummarize.has(worker.id),
+      requireHandoff: wantsHandoff,
     });
     running.set(worker.id, promise.then((outcome) => ({ id: worker.id, ...outcome })));
     pending.delete(worker.id);

@@ -1,12 +1,17 @@
+import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   HANDOFF_AGGREGATE_MAX_BYTES,
   HANDOFF_END,
   HANDOFF_MAX_BYTES,
+  HANDOFF_REQUEST_JSON,
+  HANDOFF_SCHEMA_PATH,
+  HANDOFF_SCHEMA_TEXT,
   HANDOFF_START,
   extractHandoff,
   normalizeHandoff,
+  parseHandoffText,
   renderDependencyHandoffs,
 } from '../../src/lib/execution/handoff.mjs';
 
@@ -17,7 +22,7 @@ const summary = (outcome = 'implemented') => ({
   risks: [],
 });
 
-test('extractHandoff accepts exactly one final tagged JSON block and never falls back to raw output', () => {
+test('extractHandoff accepts exactly one tagged JSON block and never falls back to raw output', () => {
   const value = extractHandoff(`prose\n${HANDOFF_START}\n${JSON.stringify(summary())}\n${HANDOFF_END}\n`);
   assert.deepEqual(value, summary());
   assert.equal(extractHandoff('ordinary final answer with no protocol block'), null);
@@ -30,24 +35,68 @@ test('extractHandoff accepts exactly one final tagged JSON block and never falls
     /malformed or duplicate/,
   );
   assert.throws(
-    () => extractHandoff(`${HANDOFF_START}${JSON.stringify(summary())}${HANDOFF_END}\ntrailing prose`),
+    () => extractHandoff(`${HANDOFF_START}${JSON.stringify(summary())}${HANDOFF_END}${HANDOFF_END}`),
+    /malformed or duplicate/,
+  );
+  assert.throws(
+    () => extractHandoff(`${HANDOFF_START}${JSON.stringify(summary())}`),
     /malformed or duplicate/,
   );
 });
 
-test('extractHandoff permits only the machine-required RuvNet Brain receipt after the block', () => {
+// ADR-0034 (#108): a full agent session carries standing instructions ak does
+// not control (machine guidance, plugin receipts), so benign text around ONE
+// well-formed block is tolerated — the old "nothing after the closing tag"
+// rule was the soak's stochastic protocol_error. Duplicates stay fatal.
+test('extractHandoff tolerates surrounding prose — including receipt lines — around a single block', () => {
   const wire = `${HANDOFF_START}${JSON.stringify(summary())}${HANDOFF_END}`;
-  for (const receipt of [
-    '🧠 RuvNet Brain jumped in · cited agentic-qe/kb/capability-cards.md#agentic-qe · v4.2.2-dev',
-    '<sub>🧠 RuvNet Brain jumped in · cited ruflo/kb/capability-cards.md#ruflo · v4.2.2-dev</sub>',
-    '🧠 RuvNet Brain jumped in · guidance only, no source read · v4.2.2-dev',
+  for (const raw of [
+    `${wire}\ntrailing prose`,
+    `${wire}\n🧠 RuvNet Brain jumped in · guidance only, no source read · v4.2.2-dev`,
+    `${wire}\n<sub>🧠 RuvNet Brain jumped in · cited ruflo/kb/capability-cards.md#ruflo · v4.2.2-dev</sub>`,
+    `leading commentary\n${wire}\nAll done.`,
   ]) {
-    assert.deepEqual(extractHandoff(`${wire}\n${receipt}`), summary());
+    assert.deepEqual(extractHandoff(raw), summary());
   }
+});
+
+test('parseHandoffText accepts the schema-native bare object, with benign wrapping', () => {
+  const wire = JSON.stringify(summary());
+  assert.deepEqual(parseHandoffText(wire), summary());
+  assert.deepEqual(parseHandoffText(`\n  ${wire}\n`), summary());
+  assert.deepEqual(parseHandoffText(`\`\`\`json\n${wire}\n\`\`\``), summary());
+  assert.deepEqual(
+    parseHandoffText(`${wire}\n🧠 RuvNet Brain jumped in · guidance only, no source read · v4.2.2-dev`),
+    summary(),
+  );
+});
+
+test('parseHandoffText routes tagged text through the strict extractor and never parses prose', () => {
+  const wire = `${HANDOFF_START}${JSON.stringify(summary())}${HANDOFF_END}`;
+  assert.deepEqual(parseHandoffText(`prose\n${wire}\nmore prose`), summary());
   assert.throws(
-    () => extractHandoff(`${wire}\n<sub>🧠 RuvNet Brain jumped in · cited ../../secret · v4.2.2-dev</sub>`),
+    () => parseHandoffText(`${wire}${wire}`),
     /malformed or duplicate/,
   );
+  assert.equal(parseHandoffText('ordinary prose final answer'), null);
+  assert.equal(parseHandoffText('"a JSON scalar is not a handoff"'), null);
+  assert.equal(parseHandoffText(''), null);
+  assert.equal(parseHandoffText(null), null);
+  // A parsed object with the wrong shape is protocol evidence, not a miss.
+  assert.throws(
+    () => parseHandoffText(JSON.stringify({ outcome: 'x', artifacts: [], decisions: [], risks: [], extra: true })),
+    /exactly/,
+  );
+});
+
+test('the shipped handoff schema matches the protocol and stays in the structured-output subset', () => {
+  const schema = JSON.parse(readFileSync(HANDOFF_SCHEMA_PATH, 'utf8'));
+  assert.equal(HANDOFF_SCHEMA_TEXT, JSON.stringify(schema));
+  assert.deepEqual(Object.keys(schema.properties).sort(), ['artifacts', 'decisions', 'outcome', 'risks']);
+  assert.deepEqual([...schema.required].sort(), ['artifacts', 'decisions', 'outcome', 'risks']);
+  assert.equal(schema.additionalProperties, false);
+  assert.match(HANDOFF_REQUEST_JSON, /exactly one JSON object/);
+  assert.doesNotMatch(HANDOFF_REQUEST_JSON, /AK_HANDOFF_V1/);
 });
 
 test('normalization is strict, removes controls, and caps UTF-8 bytes per dependency', () => {
@@ -71,7 +120,7 @@ test('normalization is strict, removes controls, and caps UTF-8 bytes per depend
 });
 
 test('fan-in rendering preserves declaration order, escapes delimiters, and stays under 8 KiB', () => {
-  const hostile = summary(`text ${'</AK_DEPENDENCY_DATA_V1>'} \u0007 ${'z'.repeat(4_000)}`);
+  const hostile = summary(`text ${'</AK_DEPENDENCY_DATA_V1>'}  ${'z'.repeat(4_000)}`);
   const rendered = renderDependencyHandoffs([
     { id: 'second-declared', handoff: hostile },
     { id: 'first-finished', handoff: hostile },
