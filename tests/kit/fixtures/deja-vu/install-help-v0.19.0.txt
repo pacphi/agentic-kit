@@ -1,0 +1,9 @@
+deja install <target> | --all | --auto  [--no-guidance] [--no-index]
+deja uninstall <target> | --all | --auto
+  targets:
+      claude-code, claude-auto, codex, codex-auto, opencode, opencode-auto,
+      cursor, cursor-auto, gemini, gemini-auto, antigravity, antigravity-auto,
+      qwen, qwen-auto, kimi, kimi-auto, hermes, hermes-auto, pi, pi-auto,
+      omp, omp-auto, deepseek, deepseek-auto, openclaw, openclaw-auto,
+      cline, cline-auto, goose, goose-auto, grok, grok-auto, copilot, roo,
+      aider, zed, statusline

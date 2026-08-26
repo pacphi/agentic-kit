@@ -3,7 +3,7 @@
 // 4.0.0-alpha.1 vs 4.0.0-alpha.0 compare equal and self-update impossible.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { cmpVersions } from '../../src/lib/versions.mjs';
+import { cmpVersions, isValidSemver, latestVersion } from '../../src/lib/versions.mjs';
 
 const newer = (a, b) => cmpVersions(a, b) > 0;
 
@@ -49,4 +49,30 @@ test('shorter prerelease list ranks below a longer prefix-equal one', () => {
 
 test('higher core wins regardless of prerelease', () => {
   assert.equal(newer('4.0.1-alpha.0', '4.0.0'), true);
+});
+
+test('command-boundary SemVer validation accepts only strict SemVer 2.0 values', () => {
+  for (const value of ['0.19.0', '1.2.3-rc.1', '1.2.3+build.7', '1.2.3-0']) {
+    assert.equal(isValidSemver(value), true, value);
+  }
+  for (const value of [
+    '', 'v0.19.0', '1.2', '1.2.3.4', '01.2.3', '1.02.3', '1.2.03',
+    '1.2.3-01', '1.2.3-', '1.2.3+bad!', '1.2.3\n--unsafe', null,
+  ]) assert.equal(isValidSemver(value), false, String(value));
+});
+
+test('latestVersion uses literal npm argv, honors its deadline, and rejects unsafe output', async () => {
+  const calls = [];
+  const runner = async (command, args, options) => {
+    calls.push({ command, args, options });
+    return { code: 0, stdout: '0.20.0 --unsafe\n', stderr: '' };
+  };
+  assert.equal(await latestVersion('@vshulcz/deja-vu', 'latest', {
+    runner, timeout: 5_000,
+  }), null);
+  assert.deepEqual(calls, [{
+    command: 'npm',
+    args: ['view', '@vshulcz/deja-vu@latest', 'version'],
+    options: { timeout: 5_000 },
+  }]);
 });

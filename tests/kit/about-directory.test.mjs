@@ -147,6 +147,26 @@ test('every managed tool has exactly one directory entry (registry → directory
   assert.deepEqual(duplicated, [], 'a managed tool must map to exactly ONE card');
 });
 
+test('deja-vu is an authored package card without machine paths or raw history content', () => {
+  const entry = entryById('deja-vu');
+  assert.ok(entry, 'the managed deja-vu companion needs an About card');
+  assert.equal(entry.category, 'engine-memory');
+  assert.equal(entry.detectionKey, 'deja-vu');
+  assert.equal(entry.npmPackage, '@vshulcz/deja-vu');
+  assert.deepEqual(entry.icon, { kind: 'monogram', ref: 'dv', hue: '--hue-engine' });
+
+  // About owns timeless editorial identity only. Runtime facts come from the
+  // bounded status join, so neither an upstream store path nor history text has
+  // any reason to become release-authored card data.
+  const serialized = JSON.stringify(entry);
+  assert.doesNotMatch(serialized,
+    /SENTINEL|\.jsonl\b|index\.db\b|wiring\.json\b|[/\\](?:Users|home|private)[/\\]|[A-Za-z]:\\/,
+    'the card must not bake in a transcript, index/config path, or fixture content');
+  for (const field of ['path', 'query', 'transcript', 'raw', 'doctor']) {
+    assert.equal(Object.hasOwn(entry, field), false, `${field} is runtime evidence, not card data`);
+  }
+});
+
 test('the managed-tools contract names no tool the directory omits', () => {
   const index = identityIndex();
   const rows = managedToolsDocRows();

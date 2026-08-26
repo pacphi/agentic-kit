@@ -6,7 +6,9 @@ import path from 'node:path';
 import { kitConfigPath, legacyKitConfigPath } from './paths.mjs';
 import {
   CURRENT_INTEGRATIONS_VERSION,
+  DEFAULT_DEJA_VU_INTENT,
   migrateIntegrationConfig,
+  validateDejaVuIntent,
 } from './adapters/config.mjs';
 import { defaultHostMap } from './adapters/registries.mjs';
 import {
@@ -28,6 +30,9 @@ const DEFAULTS = {
     version: CURRENT_INTEGRATIONS_VERSION,
     hosts: defaultHostMap(),
     bindings: [],
+    tools: {
+      dejaVu: structuredClone(DEFAULT_DEJA_VU_INTENT),
+    },
   },
   routing: {
     version: ROUTING_SCHEMA_VERSION,
@@ -96,6 +101,10 @@ function assertLoadableEnvelopes(config) {
   if (!Array.isArray(config.integrations.bindings)) {
     throw new TypeError('integrations.bindings must be an array');
   }
+  if (!plain(config.integrations.tools)) {
+    throw new TypeError('integrations.tools must be an object');
+  }
+  validateDejaVuIntent(config.integrations.tools.dejaVu);
   if (config.integrations.ownership !== undefined && !plain(config.integrations.ownership)) {
     throw new TypeError('integrations.ownership must be an object');
   }
@@ -133,6 +142,14 @@ function withDefaults(config) {
       ...structuredClone(DEFAULTS.integrations),
       ...config.integrations,
       hosts: { ...DEFAULTS.integrations.hosts, ...config.integrations.hosts },
+      tools: {
+        ...structuredClone(DEFAULTS.integrations.tools),
+        ...config.integrations.tools,
+        dejaVu: {
+          ...structuredClone(DEFAULTS.integrations.tools.dejaVu),
+          ...config.integrations.tools.dejaVu,
+        },
+      },
     }
     : config.integrations;
   const routing = config.routing?.version === ROUTING_SCHEMA_VERSION

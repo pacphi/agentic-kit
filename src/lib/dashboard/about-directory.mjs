@@ -150,6 +150,25 @@ const ENTRIES = Object.freeze([
     npmPackage: 'agentdb',
   }),
   Object.freeze({
+    id: 'deja-vu',
+    category: 'engine-memory',
+    name: 'deja-vu',
+    tagline: 'Searchable local history for your coding agents.',
+    paragraph:
+      'Session histories from supported coding agents become a local, searchable archive through '
+      + 'deja-vu. It helps you find earlier decisions, revisit approaches, and carry context '
+      + 'between tools without treating that archive as curated project memory. Agentic-kit '
+      + 'keeps the integration opt-in and separates its index from the source histories it reads.',
+    links: Object.freeze([
+      link('github', 'GitHub', 'https://github.com/vshulcz/deja-vu'),
+      link('npm', 'npm', 'https://www.npmjs.com/package/@vshulcz/deja-vu'),
+      link('docs', 'Docs', 'https://github.com/vshulcz/deja-vu/tree/v0.19.0/docs'),
+    ]),
+    icon: MONOGRAM('dv', '--hue-engine'),
+    detectionKey: 'deja-vu',
+    npmPackage: '@vshulcz/deja-vu',
+  }),
+  Object.freeze({
     id: 'agentic-qe',
     category: 'quality',
     name: 'agentic-qe',

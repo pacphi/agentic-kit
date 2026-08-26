@@ -2398,6 +2398,7 @@ export const JS = `
     "hosts.opencode":{host:"opencode"},
     "ruflo":{versions:"ruflo"},
     "agentdb":{subs:["agentdb"]},
+    "deja-vu":{subs:["deja-vu"]},
     "agentic-qe":{subs:["aqe"],versions:"agentic-qe"},
     "security":{subs:["security"]},
     "ruvnet-brain":{subs:["ruvnet-brain"]},

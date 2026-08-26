@@ -26,7 +26,8 @@ Installing the package is low impact: agentic-kit has zero runtime dependencies 
 publishes its CLI, source/templates, and selected documentation. Running `ak setup`
 is intentionally broader. It can install Ruflo, AQE, AgentDB, and enabled host CLIs
 globally; install the user-level RuvNet Brain; update current-user guidance and MCP
-configuration; and initialize the current project.
+configuration; optionally install the deja-vu transcript companion after an explicit
+`--with-deja-vu`; and initialize the current project.
 
 ## `npm install` versus `npm install -g`
 
@@ -220,6 +221,7 @@ against Node and npm. They are not the supported machine-management contract.
 | Claude/Codex/OpenCode user guidance | None | Managed sentinel blocks reconciled | Project guidance/assets may be created or refreshed |
 | Ruflo MCP registration | None | Offered at user scope | Conflicting project-local Ruflo registration is removed |
 | RuvNet Brain | None | Shared current-user KB/plugin installation; approximately 2 GB | No per-project Brain copy |
+| deja-vu transcript companion | None | Disabled by default; explicit opt-in can install the npm package, wire enabled hosts, and build one user-level plaintext derived index | No per-project index copy; host-native hooks may act in project sessions |
 | Repository files | Local npm install can alter `package.json`, lockfile, and `node_modules` | None by package scope alone | Ruflo/AQE initialization can replace generated/config files |
 | Other users | None unless they share the local tree | Only users sharing the same system prefix see packages; home-directory configuration remains user-specific | Only users of the changed repository see committed changes |
 | Other projects | Global binary becomes available, but projects are not initialized | Global upgrades and user configuration can affect sessions in other projects | Only the current directory is initialized; shared global daemons/packages can still affect live sessions elsewhere |
@@ -237,7 +239,8 @@ workspace when that identity can be established.
 
 - Prefer one user-writable npm prefix per OS account.
 - Each user runs `ak setup` under their own account so guidance, credentials, MCP
-  registration, Brain data, and `kit.json` do not land under another user's home.
+  registration, Brain data, optional deja-vu index, and `kit.json` do not land
+  under another user's home.
 - Runtime process discovery is scoped to the numeric UID running `ak dashboard`.
   Separate OS accounts are outside the normal survey; people sharing one login
   also share one UID and are therefore inside the same discovery boundary. This
@@ -252,7 +255,8 @@ workspace when that identity can be established.
 - Pin an exact agentic-kit version.
 - Prefer a project devDependency, a verified tarball, or explicit `npm exec`.
 - Use `ak setup --dry-run` before authorizing machine/project mutation.
-- Cache npm and the Brain only when the cache's size and trust model are acceptable.
+- Cache npm, the Brain, and an opted-in deja-vu index only when their size,
+  plaintext content, retention, and trust models are acceptable.
 - Avoid `ak sync` self-update in a lockfile-controlled job; use `--no-upgrade`.
 - Never persist provider credentials in the repository or image layer.
 - HOME, XDG, and npm-prefix isolation protects files but does not isolate the
@@ -284,12 +288,20 @@ existing project, commit or back up first and review the exact mutation contract
 | Remove the global runner only | `npm uninstall -g @pacphi/agentic-kit` | Active npm prefix; leaves setup-created state |
 | Remove managed integration state | `ak uninstall` | User/project state selected by its flags |
 | Remove model inventory and scope key | `ak uninstall --purge` | Current-user Agentic Kit configuration |
+| Remove an Agentic Kit-owned deja-vu package | `ak uninstall --remove-deja-vu` | Active npm prefix; external installations and all data remain |
+| Remove deja-vu's derived index | `ak uninstall --purge-deja-vu-data` | Separately confirmed, validated `index.db`; source histories remain |
 | Preview teardown | `ak uninstall --dry-run` | No changes |
 
 Removing the npm package is not equivalent to `ak uninstall`. The package manager
 does not know which guidance blocks, MCP entries, Brain files, project assets, or
 downstream global tools were created by `ak`. Run `ak uninstall` first when the goal
 is a managed teardown, then remove the runner package.
+
+The ordinary `ak uninstall --purge` scope does not remove the deja-vu package or any
+deja-vu data. Those require the independent `--remove-deja-vu` and
+`--purge-deja-vu-data` flags. The data flag removes only the validated derived index,
+never Claude, Codex, OpenCode, or another harness's source histories. See the
+[deja-vu removal matrix](DEJA-VU.md#disable-and-remove-it).
 
 ## Recommended choices
 

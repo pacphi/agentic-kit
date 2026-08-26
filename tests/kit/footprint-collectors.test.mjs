@@ -28,6 +28,7 @@ import {
 import { collectCatalog, tomlTableNames } from '../../src/lib/footprint/catalog.mjs';
 import { collectConsumers } from '../../src/lib/footprint/consumers.mjs';
 import { npmPackageRoot, managedTools } from '../../src/lib/footprint/install.mjs';
+import { MANAGED_COMPANION_REGISTRY } from '../../src/lib/adapters/index.mjs';
 
 const DAY = 86_400_000;
 
@@ -1154,4 +1155,26 @@ test('managedTools resolves every real registry entry without throwing when a gl
   // the guard did not regress the populated-pkg path.
   const ruflo = tools.find((tool) => tool.id === 'ruflo');
   assert.equal(ruflo.root, path.join('/opt/npm/global/node_modules', 'ruflo'));
+});
+
+test('managedTools derives npm-only companion footprints from the companion registry', () => {
+  const globalRootDir = '/opt/npm/global/node_modules';
+  const tools = managedTools({ globalRootDir });
+
+  for (const companion of MANAGED_COMPANION_REGISTRY) {
+    const tool = tools.find((candidate) => candidate.id === companion.id);
+    assert.deepEqual(tool, {
+      id: companion.id,
+      label: companion.label,
+      pkg: companion.install.npmPackage,
+      bin: companion.install.bin,
+      kind: 'npm',
+      root: path.join(globalRootDir, companion.install.npmPackage),
+    });
+  }
+
+  const dejaVu = tools.find((tool) => tool.id === 'deja-vu');
+  assert.doesNotMatch(JSON.stringify(dejaVu),
+    /\.cache[/\\]deja|\.claude|\.codex|\.jsonl\b|index\.db\b/,
+    'the footprint measures the npm tree, never deja-vu data or source histories');
 });

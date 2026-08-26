@@ -13,7 +13,7 @@ import {
   sandboxHome, assertSandboxed, snapshot, assertUnchanged, captureLog, rmrf,
   sandboxProject, writeKitConfig, offlineKitConfig, fakeGlobalRoot,
 } from './helpers/home-sandbox.mjs';
-import { HOST_REGISTRY } from '../../src/lib/adapters/index.mjs';
+import { HOST_REGISTRY } from '../../src/lib/adapters/registries.mjs';
 
 const HOME = sandboxHome('ak-setup');
 const paths = await import('../../src/lib/paths.mjs');
@@ -25,8 +25,44 @@ const PKG_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../
 const FLAGS = (over = {}) => ({
   'dry-run': false, yes: false, minimal: false, project: false,
   'no-aqe': false, 'no-ruvnet-brain': false, 'no-security': false,
-  codex: false, opencode: false, reconfigure: false, ...over,
+  codex: false, opencode: false, reconfigure: false,
+  'with-deja-vu': false, 'deja-vu-mode': undefined, 'no-deja-vu': false, ...over,
 });
+
+const dejaVuPlan = ({ mode = 'mcp', hosts = ['claude'] } = {}) => ({
+  changed: true,
+  warnings: [],
+  operations: [
+    {
+      id: 'package-install', kind: 'package-install', command: 'npm', version: '0.19.0',
+      args: ['install', '-g', '@vshulcz/deja-vu@0.19.0', '--no-audit', '--no-fund'],
+    },
+    ...hosts.map((host) => ({
+      id: `target-install-${host}`, kind: 'target-install', command: 'deja', host, mode,
+      args: ['install', ({ claude: { mcp: 'claude-code', auto: 'claude-auto' }, codex: { mcp: 'codex', auto: 'codex-auto' }, opencode: { mcp: 'opencode', auto: 'opencode-auto' } })[host][mode], '--no-guidance', '--no-index'],
+    })),
+    { id: 'index', kind: 'index', command: 'deja', args: ['index'] },
+  ],
+});
+
+function fakeDejaVu(events = [], { mode = 'mcp', hosts = ['claude'], applyResult } = {}) {
+  const facts = {
+    desired: { enabled: true, mode, hosts, indexOnSetup: true },
+    install: { version: null },
+  };
+  const plan = dejaVuPlan({ mode, hosts });
+  return {
+    id: 'deja-vu',
+    async detect() { events.push('detect'); return facts; },
+    async plan() { events.push('plan'); return plan; },
+    async apply({ cfg }) {
+      events.push('apply');
+      cfg.integrations.ownership ??= {};
+      cfg.integrations.ownership.dejaVu = { install: { owner: 'agentic-kit', written: { version: '0.19.0' } } };
+      return applyResult ?? { ok: true, actions: plan.operations, warnings: [], errors: [] };
+    },
+  };
+}
 
 function seedHome(cfg = offlineKitConfig()) {
   rmrf(paths.claudeDir(), paths.configDir(), path.join(HOME, '.config', 'opencode'));
@@ -170,6 +206,202 @@ test('ak setup --dry-run does not rewrite an EXISTING kit.json', async () => {
     'a previewed setup must leave the user\'s saved preferences byte-identical');
 });
 
+test('deja-vu flags validate before config mutation or companion probing', async () => {
+  seedHome();
+  const before = snapshot(HOME);
+  const events = [];
+  const adapter = fakeDejaVu(events);
+  for (const flags of [
+    FLAGS({ 'with-deja-vu': true, 'no-deja-vu': true, minimal: true }),
+    FLAGS({ 'with-deja-vu': true, 'deja-vu-mode': 'ambient', minimal: true }),
+    FLAGS({ 'deja-vu-mode': 'auto', minimal: true }),
+  ]) {
+    const { result } = await captureLog(() => setup.run({ flags, pkgRoot: PKG_ROOT, dejaVuLifecycle: adapter }));
+    assert.equal(result, 2);
+  }
+  assert.deepEqual(events, []);
+  assertUnchanged(before, HOME, 'invalid deja-vu flags must precede every mutation and probe');
+});
+
+test('default and --no-deja-vu setup perform zero companion probes', async () => {
+  for (const extra of [{}, { 'no-deja-vu': true }]) {
+    seedHome();
+    const events = [];
+    const { result } = await captureLog(() => setup.run({
+      flags: FLAGS({ 'dry-run': true, minimal: true, ...extra }), pkgRoot: PKG_ROOT,
+      dejaVuLifecycle: fakeDejaVu(events),
+    }));
+    assert.equal(result, 0);
+    assert.deepEqual(events, []);
+  }
+});
+
+test('deja-vu opt-in snapshots only explicitly enabled Kit hosts after host flags', () => {
+  seedHome();
+  const cfg = loadKitConfig();
+  cfg.integrations.hosts = { claude: true, codex: true, opencode: false };
+  const changed = setup.applySetupDejaVuFlags(cfg, FLAGS({
+    'with-deja-vu': true, 'deja-vu-mode': 'auto',
+  }));
+  assert.equal(changed.changed, true);
+  assert.deepEqual(cfg.integrations.tools.dejaVu, {
+    enabled: true, mode: 'auto', hosts: ['claude', 'codex'], indexOnSetup: true,
+  });
+});
+
+test('deja-vu trust is disclosed after bounded detection/plan and before any mutation', async () => {
+  seedHome();
+  const before = snapshot(HOME);
+  const events = [];
+  const adapter = fakeDejaVu(events, { mode: 'auto' });
+  const { result, out } = await captureLog(() => setup.run({
+    flags: FLAGS({ minimal: true, 'with-deja-vu': true, 'deja-vu-mode': 'auto' }),
+    pkgRoot: PKG_ROOT,
+    dejaVuLifecycle: adapter,
+    confirm: async () => {
+      events.push('confirm');
+      assertUnchanged(before, HOME, 'trust confirmation must precede every setup mutation');
+      return false;
+    },
+  }));
+  assert.equal(result, 0);
+  assert.deepEqual(events, ['detect', 'plan', 'confirm']);
+  assert.match(out, /@vshulcz\/deja-vu@0\.19\.0/);
+  assert.match(out, /companion-target: claude-auto/);
+  assert.match(out, /PreToolUse command\/edit/);
+  assert.match(out, /plaintext global deja-vu index with best-effort redaction/);
+  assert.match(out, /deja doctor --json --offline \(schema v2\)/);
+  assert.doesNotMatch(out, /\/Users\//);
+  assertUnchanged(before, HOME, 'declined companion consent must write nothing');
+});
+
+test('deja-vu dry-run detects and plans exact bounded operations but applies and writes nothing', async () => {
+  seedHome();
+  const before = snapshot(HOME);
+  const events = [];
+  const { result, out } = await captureLog(() => setup.run({
+    flags: FLAGS({ 'dry-run': true, minimal: true, 'with-deja-vu': true }),
+    pkgRoot: PKG_ROOT, dejaVuLifecycle: fakeDejaVu(events),
+  }));
+  assert.equal(result, 0);
+  assert.deepEqual(events, ['detect', 'plan']);
+  assert.match(out, /package-install, target-install, index/);
+  assert.doesNotMatch(out, /deja warmup|deja update|--all|--auto\b/);
+  assertUnchanged(before, HOME, 'companion dry-run must not persist intent or mutate files');
+});
+
+test('partial deja-vu apply failure persists explicit intent and ownership receipt', async () => {
+  seedHome();
+  const cfg = loadKitConfig();
+  setup.applySetupDejaVuFlags(cfg, FLAGS({ 'with-deja-vu': true }));
+  const events = [];
+  const adapter = fakeDejaVu(events, {
+    applyResult: { ok: false, actions: [{ id: 'package-install', status: 'ok' }], warnings: [], errors: ['target-install-failed'] },
+  });
+  const preflight = await setup.preflightSetupDejaVu(cfg, adapter);
+  const { result, out } = await captureLog(() => setup.applySetupDejaVu(cfg, preflight, adapter));
+  assert.equal(result, false);
+  assert.match(out, /saved intent\/ownership for safe retry/);
+  const saved = loadKitConfig();
+  assert.equal(saved.integrations.tools.dejaVu.enabled, true);
+  assert.equal(saved.integrations.ownership.dejaVu.install.written.version, '0.19.0');
+});
+
+test('post-host preflight is fresh and adds wiring for a host installed during machine setup', async () => {
+  seedHome();
+  const cfg = loadKitConfig();
+  setup.applySetupDejaVuFlags(cfg, FLAGS({ 'with-deja-vu': true }));
+  let detections = 0;
+  let appliedPlan;
+  const adapter = {
+    id: 'deja-vu',
+    async detect() {
+      detections += 1;
+      return { install: { version: '0.19.0' }, hostPresent: detections > 1 };
+    },
+    async plan({ facts }) {
+      return {
+        changed: facts.hostPresent,
+        warnings: [],
+        operations: facts.hostPresent ? [{
+          id: 'target-install-claude', kind: 'target-install', command: 'deja',
+          host: 'claude', mode: 'mcp', args: ['install', 'claude-code', '--no-guidance', '--no-index'],
+        }] : [],
+      };
+    },
+    async apply({ plan }) {
+      appliedPlan = plan;
+      return { ok: true, actions: plan.operations, warnings: [], errors: [] };
+    },
+  };
+  const initial = await setup.preflightSetupDejaVu(cfg, adapter);
+  assert.deepEqual(initial.plan.operations, []);
+  const result = await setup.finishSetupDejaVu(cfg, initial, adapter);
+  assert.equal(result, true);
+  assert.equal(detections, 2);
+  assert.equal(appliedPlan.operations[0].args[1], 'claude-code');
+});
+
+test('--no-deja-vu previews removal of only receipt-owned target wiring', async () => {
+  seedHome(offlineKitConfig({
+    integrations: {
+      version: 1,
+      hosts: { claude: true, codex: false, opencode: false }, bindings: [],
+      tools: { dejaVu: { enabled: true, mode: 'mcp', hosts: ['claude'], indexOnSetup: true } },
+      ownership: { dejaVu: { targets: { claude: { owner: 'agentic-kit', mode: 'mcp' } } } },
+    },
+  }));
+  const before = snapshot(HOME);
+  const events = [];
+  const removal = {
+    id: 'deja-vu',
+    async detect() { events.push('detect'); return { install: { version: '0.19.0' } }; },
+    async plan() {
+      events.push('plan');
+      return { changed: true, warnings: [], operations: [{
+        id: 'target-remove-claude', kind: 'target-remove', command: 'deja',
+        host: 'claude', mode: 'mcp', args: ['uninstall', 'claude-code', '--no-guidance', '--no-index'],
+      }] };
+    },
+    async apply() { events.push('apply'); return { ok: true, actions: [], warnings: [], errors: [] }; },
+  };
+  const { result, out } = await captureLog(() => setup.run({
+    flags: FLAGS({ 'dry-run': true, minimal: true, 'no-deja-vu': true }),
+    pkgRoot: PKG_ROOT, dejaVuLifecycle: removal,
+  }));
+  assert.equal(result, 0);
+  assert.deepEqual(events, ['detect', 'plan']);
+  assert.match(out, /companion-target-removal: claude-code/);
+  assert.match(out, /preserve the npm package, transcripts, and index/);
+  assert.doesNotMatch(out, /npm-package|history-index/);
+  assertUnchanged(before, HOME, 'removal dry-run must remain read-only');
+});
+
+test('post-host replan failure persists intent and refuses companion apply', async () => {
+  seedHome();
+  const cfg = loadKitConfig();
+  setup.applySetupDejaVuFlags(cfg, FLAGS({ 'with-deja-vu': true }));
+  let plans = 0;
+  let applies = 0;
+  const adapter = {
+    id: 'deja-vu',
+    async detect() { return { install: { version: '0.19.0' } }; },
+    async plan() {
+      plans += 1;
+      return plans === 1
+        ? { changed: false, operations: [], warnings: [] }
+        : { changed: false, operations: [], warnings: [], error: 'doctor-schema-invalid' };
+    },
+    async apply() { applies += 1; return { ok: true, actions: [], warnings: [], errors: [] }; },
+  };
+  const initial = await setup.preflightSetupDejaVu(cfg, adapter);
+  const { result, out } = await captureLog(() => setup.finishSetupDejaVu(cfg, initial, adapter));
+  assert.equal(result, false);
+  assert.equal(applies, 0);
+  assert.match(out, /saved intent\/ownership for safe retry/);
+  assert.equal(loadKitConfig().integrations.tools.dejaVu.enabled, true);
+});
+
 test('--dry-run reports what --codex/--primary-host WOULD do without enabling them', async () => {
   seedHome();
   const before = snapshot(HOME);
@@ -244,7 +476,8 @@ test('--project forces project scope outside a git repo', async () => {
 
 test('every documented flag is declared in the parser options', () => {
   for (const flag of ['dry-run', 'yes', 'minimal', 'project', 'no-aqe', 'no-ruvnet-brain',
-    'no-security', 'codex', 'opencode', 'primary-host', 'reconfigure']) {
+    'no-security', 'codex', 'opencode', 'with-deja-vu', 'deja-vu-mode', 'no-deja-vu',
+    'primary-host', 'reconfigure']) {
     assert.ok(flag in setup.options, `--${flag} is documented in help but not parseable`);
     assert.match(setup.help, new RegExp(`--${flag}\\b`), `--${flag} is parseable but undocumented`);
   }

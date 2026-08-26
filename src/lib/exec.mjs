@@ -1,7 +1,7 @@
 // Subprocess helpers. Rule (binding, from the plan): NOTHING goes through a
 // shell string — execFile with argv arrays only, shell ALWAYS false.
 //
-// npm/npx/claude/ruflo/aqe/claude-flow are .cmd shims on Windows, and
+// npm/npx/claude/deja/ruflo/aqe/claude-flow are .cmd shims on Windows, and
 // Windows' CreateProcess cannot launch a .cmd directly — that historically
 // forced `shell:true`, which hands Node's own cmd+args JOIN of the whole
 // command line to cmd.exe as ONE string (CVE-class: any arg with `&`/`|`/`^`
@@ -19,7 +19,9 @@ import { isWindows } from './paths.mjs';
 const pexecFile = promisify(execFile);
 const MAX_EXEC_BUFFER = 16 * 1024 * 1024;
 
-const CMD_SHIMS = new Set(['npm', 'npx', 'claude', 'codex', 'opencode', 'ruflo', 'aqe', 'claude-flow']);
+const CMD_SHIMS = new Set([
+  'npm', 'npx', 'claude', 'codex', 'opencode', 'deja', 'ruflo', 'aqe', 'claude-flow',
+]);
 
 /** Build a shell-free invocation for `cmd`, trying Windows' shim extensions in
  *  PATHEXT order. A native executable is launched directly; a .cmd shim is
@@ -79,8 +81,9 @@ export function resolveShim(cmd, args = [], { windows = isWindows, env = process
 export async function run(cmd, args = [], opts = {}) {
   try {
     const env = opts.env ? { ...process.env, ...opts.env } : process.env;
+    const windows = opts.windows ?? isWindows;
     const invocation = CMD_SHIMS.has(cmd)
-      ? resolveShim(cmd, args, { env })
+      ? resolveShim(cmd, args, { windows, env })
       : { command: cmd, args };
     if (invocation.resolved === false) {
       return { code: 1, stdout: '', stderr: `No safe Windows invocation found for ${cmd}` };

@@ -5,10 +5,11 @@
 //
 // The managed-tool list is DERIVED, not hand-maintained. There is no single
 // upstream array of "everything ak manages": HOST_REGISTRY owns the frontier
-// CLIs, ruflo/agentic-qe are npm globals named in versions.mjs, the brain KB is
-// a filesystem install with its own module, and the kit is its own package. A
-// fourth hand-written list would drift the moment a host is added, so this
-// module composes those four authorities instead.
+// CLIs, MANAGED_COMPANION_REGISTRY owns companion npm tools, ruflo/agentic-qe
+// are npm globals named in versions.mjs, the brain KB is a filesystem install
+// with its own module, and the kit is its own package. Another hand-written
+// list would drift the moment a host or companion is added, so this module
+// composes those authorities instead.
 //
 // Install METHOD granularity did not exist before this module: hostInstallState
 // answers npm / external / absent only. Attribution here is a pure filesystem
@@ -22,6 +23,7 @@
 // version/name fields. No tool's source or data is ever read.
 import fs from 'node:fs';
 import path from 'node:path';
+import { MANAGED_COMPANION_REGISTRY } from '../adapters/companion-registry.mjs';
 import { HOST_REGISTRY } from '../adapters/registries.mjs';
 import {
   home, isWindows, globalRoot, npxCacheDir, claudeDir, codexPluginCacheDir,
@@ -176,6 +178,16 @@ export function managedTools({ pkgRoot = null, globalRootDir = null } = {}) {
       kind: 'npm', root: npmRoot('agentic-qe'),
     },
   ];
+  for (const companion of MANAGED_COMPANION_REGISTRY) {
+    tools.push({
+      id: companion.id,
+      label: companion.label,
+      pkg: companion.install.npmPackage,
+      bin: companion.install.bin,
+      kind: 'npm',
+      root: npmRoot(companion.install.npmPackage),
+    });
+  }
   for (const host of HOST_REGISTRY) {
     tools.push({
       id: host.id,

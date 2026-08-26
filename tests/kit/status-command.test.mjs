@@ -51,6 +51,231 @@ const one = (rows, subsystem) => {
   return hit[0];
 };
 
+const dejaIntent = (overrides = {}) => ({
+  enabled: true, mode: 'mcp', hosts: ['claude'], indexOnSetup: true, ...overrides,
+});
+const dejaConfig = (intent = dejaIntent(), ownership = undefined) => ({
+  integrations: {
+    tools: { dejaVu: intent },
+    ...(ownership === undefined ? {} : { ownership: { dejaVu: ownership } }),
+  },
+});
+const dejaTargets = (claude = {}) => ({
+  claude: {
+    selected: true, hostPresent: true, desiredTarget: 'claude-code',
+    direct: { mcp: false, auto: false }, plugin: { present: false, auto: false },
+    receiptState: 'missing', ownership: 'none', satisfied: false, conflict: null,
+    ...claude,
+  },
+  codex: { selected: false },
+  opencode: { selected: false },
+});
+const dejaFacts = (overrides = {}) => ({
+  desired: dejaIntent(),
+  install: {
+    binaryPresent: true, npmPresent: true, version: '0.19.0', supported: true,
+    ownership: 'external', receiptState: 'missing',
+  },
+  doctor: { state: 'ok', reason: null, schemaVersion: 2 },
+  index: { state: 'ok', staleStores: 0 },
+  targets: dejaTargets(),
+  ...overrides,
+});
+
+function dejaAdapter(facts, plan = { changed: false, operations: [], warnings: [] }) {
+  const calls = [];
+  return {
+    calls,
+    adapter: {
+      id: 'deja-vu',
+      async detect() { calls.push('detect'); return structuredClone(facts); },
+      async plan() { calls.push('plan'); return structuredClone(plan); },
+      async apply() { throw new Error('status must not apply'); },
+      async verify() { throw new Error('status must not verify'); },
+      async undo() { throw new Error('status must not undo'); },
+    },
+  };
+}
+
+test('disabled and unowned deja-vu status is informational and calls no adapter probe', async () => {
+  const calls = [];
+  const adapter = Object.fromEntries(['detect', 'plan', 'apply', 'verify', 'undo']
+    .map((verb) => [verb, async () => { calls.push(verb); throw new Error('SENTINEL private'); }]));
+  adapter.id = 'deja-vu';
+  const rows = await status.collectDejaVuRows({
+    cfg: dejaConfig(dejaIntent({ enabled: false, hosts: [] })), adapter,
+  });
+  assert.deepEqual(calls, []);
+  assert.deepEqual(rows, [{
+    subsystem: 'deja-vu', level: 'info',
+    message: 'deja-vu disabled — package, host wiring, and history remain unprobed', fix: null,
+  }]);
+  assert.doesNotMatch(JSON.stringify(rows), /SENTINEL|\/Users\//);
+});
+
+test('full status collection does not invoke the companion adapter while deja-vu is disabled and unowned', async () => {
+  seedHome();
+  const calls = [];
+  const adapter = { id: 'deja-vu' };
+  for (const verb of ['detect', 'plan', 'apply', 'verify', 'undo']) {
+    adapter[verb] = async () => { calls.push(verb); throw new Error('must not probe'); };
+  }
+  const rows = await status.collect({
+    pkgRoot: PKG_ROOT, cwd: PROJECT, dejaVuAdapter: adapter,
+  });
+  assert.deepEqual(calls, []);
+  assert.equal(one(rows, 'deja-vu').level, 'info');
+});
+
+test('deja-vu status distinguishes external health without leaking adapter content or offering takeover', async () => {
+  const facts = dejaFacts({
+    transcriptPath: '/SENTINEL/private/session.jsonl',
+    targets: dejaTargets({
+      direct: { mcp: true, auto: false }, satisfied: true, ownership: 'external',
+      signature: 'SENTINEL-secret-signature',
+    }),
+  });
+  const fixture = dejaAdapter(facts);
+  const rows = await status.collectDejaVuRows({ cfg: dejaConfig(), adapter: fixture.adapter });
+  assert.deepEqual(fixture.calls, ['detect', 'plan']);
+  assert.ok(rows.some((entry) => /external deja-vu 0\.19\.0 package/.test(entry.message)));
+  assert.ok(rows.some((entry) => /claude-code target active via external wiring/.test(entry.message)));
+  assert.ok(rows.every((entry) => entry.fix === null));
+  assert.doesNotMatch(JSON.stringify(rows), /SENTINEL|session\.jsonl|signature/);
+});
+
+test('deja-vu status offers only exact operations from the lifecycle plan', async () => {
+  const missing = dejaFacts({
+    install: {
+      binaryPresent: false, npmPresent: false, version: null, supported: null,
+      ownership: 'none', receiptState: 'missing',
+    },
+    doctor: { state: 'skipped', reason: 'binary-missing', schemaVersion: null },
+    index: { state: 'missing', staleStores: 0 },
+  });
+  const fixture = dejaAdapter(missing, {
+    changed: true,
+    operations: [
+      { kind: 'package-install' },
+      { kind: 'target-install', host: 'claude' },
+      { kind: 'index' },
+    ],
+    warnings: [],
+  });
+  const rows = await status.collectDejaVuRows({ cfg: dejaConfig(), adapter: fixture.adapter });
+  assert.equal(rows.filter((entry) => entry.fix).length, 3);
+  assert.ok(rows.some((entry) => /managed npm companion/.test(entry.fix ?? '')));
+  assert.ok(rows.some((entry) => /exact claude target/.test(entry.fix ?? '')));
+  assert.ok(rows.some((entry) => /one bounded deja index/.test(entry.fix ?? '')));
+  assert.doesNotMatch(JSON.stringify(rows), /warmup|deja update|--all|--auto/);
+
+  const conflict = dejaAdapter(dejaFacts({
+    targets: dejaTargets({
+      direct: { mcp: true, auto: true },
+      plugin: { present: true, auto: true },
+      ownership: 'external', conflict: 'external-auto-active',
+    }),
+  }));
+  const conflictRows = await status.collectDejaVuRows({
+    cfg: dejaConfig(), adapter: conflict.adapter,
+  });
+  assert.ok(conflictRows.some((entry) => /external automatic recall conflicts/.test(entry.message)));
+  assert.ok(conflictRows.every((entry) => entry.fix === null));
+
+  const transitionOwnership = {
+    targets: { claude: { owner: 'agentic-kit', mode: 'auto', target: 'claude-auto' } },
+  };
+  const transition = dejaAdapter(dejaFacts({
+    targets: dejaTargets({
+      direct: { mcp: true, auto: true }, receiptState: 'current',
+      ownership: 'agentic-kit', conflict: 'external-auto-active',
+    }),
+  }), {
+    changed: true,
+    operations: [
+      { kind: 'target-remove', host: 'claude' },
+      { kind: 'target-install', host: 'claude' },
+    ],
+    warnings: [],
+  });
+  const transitionRows = await status.collectDejaVuRows({
+    cfg: dejaConfig(dejaIntent(), transitionOwnership), adapter: transition.adapter,
+  });
+  assert.ok(transitionRows.some((entry) => /exact claude target/.test(entry.fix ?? '')),
+    'a receipt-owned auto-to-MCP transition remains actionable');
+});
+
+test('deja-vu status distinguishes healthy receipts from ownership drift', async () => {
+  const ownership = {
+    install: { owner: 'agentic-kit' },
+    targets: { claude: { owner: 'agentic-kit' } },
+  };
+  const healthy = dejaAdapter(dejaFacts({
+    install: {
+      binaryPresent: true, npmPresent: true, version: '0.19.0', supported: true,
+      ownership: 'agentic-kit', receiptState: 'current',
+    },
+    targets: dejaTargets({
+      direct: { mcp: true, auto: false }, receiptState: 'current',
+      ownership: 'agentic-kit', satisfied: true,
+    }),
+  }));
+  const healthyRows = await status.collectDejaVuRows({
+    cfg: dejaConfig(dejaIntent(), ownership), adapter: healthy.adapter,
+  });
+  assert.ok(healthyRows.some((entry) => /package is present/.test(entry.message)
+    && entry.level === 'ok'));
+  assert.ok(healthyRows.some((entry) => /receipt-owned/.test(entry.message)
+    && entry.level === 'ok'));
+
+  const drift = dejaAdapter(dejaFacts({
+    install: {
+      binaryPresent: true, npmPresent: true, version: '0.19.0', supported: true,
+      ownership: 'external', receiptState: 'drifted',
+    },
+    targets: dejaTargets({
+      direct: { mcp: true, auto: false }, receiptState: 'drifted',
+      ownership: 'external', satisfied: false, conflict: 'ownership-drift',
+    }),
+  }));
+  const driftRows = await status.collectDejaVuRows({
+    cfg: dejaConfig(dejaIntent(), ownership), adapter: drift.adapter,
+  });
+  assert.ok(driftRows.some((entry) => /package ownership receipt drifted/.test(entry.message)));
+  assert.ok(driftRows.some((entry) => /target ownership drifted/.test(entry.message)));
+  assert.ok(driftRows.every((entry) => entry.fix === null));
+});
+
+test('deja-vu doctor schema failure is bounded, fail-closed, and non-actionable', async () => {
+  const fixture = dejaAdapter({
+    ...dejaFacts(),
+    error: 'deja-doctor-schema-unsupported',
+    doctor: { state: 'degraded', reason: 'schema-unsupported', schemaVersion: null },
+  }, {
+    changed: false, operations: [], warnings: [], error: 'deja-doctor-schema-unsupported',
+  });
+  const rows = await status.collectDejaVuRows({ cfg: dejaConfig(), adapter: fixture.adapter });
+  assert.ok(rows.some((entry) => entry.level === 'fail'
+    && /schema-unsupported/.test(entry.message)));
+  assert.ok(rows.every((entry) => entry.fix === null));
+});
+
+test('deja-vu status warns for recognized component degradation and stale-readonly index', async () => {
+  const fixture = dejaAdapter(dejaFacts({
+    doctor: {
+      state: 'ok', reason: null, schemaVersion: 2,
+      health: { state: 'degraded', storeIssues: 2, sqlite: 'missing', policy: 'unreadable', sync: 'ok' },
+    },
+    index: { state: 'stale-readonly', staleStores: 1 },
+  }));
+  const rows = await status.collectDejaVuRows({ cfg: dejaConfig(), adapter: fixture.adapter });
+  assert.ok(rows.some((entry) => entry.level === 'warn'
+    && /component health is degraded \(2 bounded store issues\)/.test(entry.message)));
+  assert.ok(rows.some((entry) => entry.level === 'warn'
+    && /stale-readonly; automatic repair is unsafe/.test(entry.message)));
+  assert.ok(!rows.some((entry) => entry.level === 'ok' && /doctor schema/.test(entry.message)));
+});
+
 test('collect() writes nothing to HOME or the project', async () => {
   seedHome();
   const beforeHome = snapshot(HOME);

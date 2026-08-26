@@ -1,4 +1,5 @@
-// x verify [learning|memory|security|aqe|all] — the deep proofs (slow, spawn real
+// x verify [learning|memory|security|aqe|deja-vu|all] — deep proofs. deja-vu is
+// intentionally structural: it must never retrieve or inspect indexed content.
 // CLIs). Ports of ruflo-learning-verify, ruflo-security-verify's defend
 // exercise, and ruflo-verify-aqe's live checks.
 import fs from 'node:fs';
@@ -14,6 +15,8 @@ import { loadKitConfig } from '../../lib/config.mjs';
 import { HOSTS, collectIntegrationFacts, aqeRouterFile } from '../../lib/providers.mjs';
 import { readJson } from '../../lib/settings.mjs';
 import { runHarvest } from '../../lib/harvest.mjs';
+import { runLifecycle } from '../../lib/adapters/lifecycle.mjs';
+import { companionLifecycleFor } from '../../lib/adapters/companion-lifecycle-registry.mjs';
 import { ok, warn, fail, heading } from '../../lib/output.mjs';
 
 export const options = { json: { type: 'boolean', default: false } };
@@ -32,6 +35,7 @@ Suites:
   aqe         RVF store healthy; aqe status has no FsyncFailed
   providers   kit config matches installed CLIs; ruflo/aqe see the wiring
   harvest     seed real episodes, run the write path, assert real skills come back
+  deja-vu     content-free structural proof of CLI, doctor, wiring, and index
   all         (default) run every suite
 
 Examples:
@@ -211,11 +215,111 @@ async function verifyHarvest() {
   }
 }
 
+const plain = (value) => value !== null && typeof value === 'object' && !Array.isArray(value);
+const SAFE_TARGETS = new Set([
+  'claude-code', 'claude-auto', 'codex', 'codex-auto', 'opencode', 'opencode-auto',
+]);
+const EXPECTED_TARGETS = Object.freeze({
+  claude: Object.freeze({ mcp: 'claude-code', auto: 'claude-auto' }),
+  codex: Object.freeze({ mcp: 'codex', auto: 'codex-auto' }),
+  opencode: Object.freeze({ mcp: 'opencode', auto: 'opencode-auto' }),
+});
+const SAFE_INDEX_STATES = new Set(['missing', 'ok', 'stale', 'stale-readonly', 'unknown']);
+const SAFE_OWNERSHIP = new Set(['agentic-kit', 'external', 'none']);
+const SAFE_VERSION = /^v?\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/;
+
+function hasDejaVuOwnership(cfg) {
+  const own = cfg?.integrations?.ownership?.dejaVu;
+  return plain(own) && (!!own.install || (plain(own.targets) && Object.keys(own.targets).length > 0));
+}
+
+/**
+ * A bounded, content-free deja-vu proof. Its lifecycle adapter may run only
+ * presence/version checks, direct wiring observations, and
+ * `deja doctor --json --offline`; no search/recall command belongs here.
+ */
+export async function verifyDejaVu({
+  cfg = loadKitConfig(),
+  adapter = companionLifecycleFor('deja-vu'),
+} = {}) {
+  heading('deja-vu — content-free structural companion proof');
+  const enabled = cfg?.integrations?.tools?.dejaVu?.enabled === true;
+  if (!enabled && !hasDejaVuOwnership(cfg)) {
+    warn('deja-vu disabled and unowned — skipped');
+    return true;
+  }
+  if (!adapter) {
+    fail('deja-vu lifecycle adapter unavailable');
+    return false;
+  }
+
+  let result;
+  try {
+    result = await runLifecycle({ adapter, action: 'verify', cfg });
+  } catch {
+    fail('deja-vu structural verification could not run (details redacted)');
+    return false;
+  }
+  const facts = plain(result?.facts) ? result.facts : {};
+  const install = plain(facts.install) ? facts.install : {};
+  const version = typeof install.version === 'string' && SAFE_VERSION.test(install.version)
+    ? install.version.replace(/^v/, '') : 'unavailable';
+  const packageGood = install.binaryPresent === true && install.supported === true;
+  const owner = SAFE_OWNERSHIP.has(install.ownership) ? install.ownership : 'unknown';
+  (packageGood ? ok : fail)(`CLI/package ${version === 'unavailable' ? version : `v${version}`}: ${packageGood ? 'compatible' : 'incompatible or unavailable'} (${owner})`);
+
+  const doctor = plain(facts.doctor) ? facts.doctor : {};
+  const doctorGood = doctor.state === 'ok' && doctor.schemaVersion === 2
+    && doctor.health?.state !== 'degraded';
+  (doctorGood ? ok : fail)(doctorGood
+    ? 'doctor schema v2 and bounded component health: ok'
+    : doctor.state === 'ok' && doctor.schemaVersion === 2
+      ? 'doctor schema v2 accepted but bounded component health is degraded'
+      : 'doctor schema incompatible or unavailable');
+
+  const index = plain(facts.index) ? facts.index : {};
+  const indexState = SAFE_INDEX_STATES.has(index.state) ? index.state : 'unknown';
+  const indexGood = !enabled || indexState === 'ok'
+    || (indexState === 'missing' && facts.desired?.indexOnSetup === false);
+  (indexGood ? ok : fail)(`index state: ${indexState}`);
+
+  let targetsGood = true;
+  const desiredHosts = enabled && Array.isArray(facts.desired?.hosts) ? facts.desired.hosts : [];
+  const mode = facts.desired?.mode === 'auto' ? 'auto' : 'mcp';
+  for (const host of desiredHosts.filter((value) => Object.hasOwn(EXPECTED_TARGETS, value))) {
+    const target = plain(facts.targets) ? facts.targets[host] : null;
+    const expected = EXPECTED_TARGETS[host][mode];
+    const targetName = SAFE_TARGETS.has(expected) ? expected : `${host}-target`;
+    const wired = target?.selected === true && target?.desiredTarget === expected
+      && target?.satisfied === true;
+    (wired ? ok : fail)(`${targetName}: ${wired ? 'wired' : 'not satisfied'}`);
+    targetsGood = wired && targetsGood;
+  }
+
+  const good = result?.ok === true && packageGood && doctorGood && indexGood && targetsGood;
+  if (!result?.ok) {
+    const count = Array.isArray(result?.errors) ? Math.min(result.errors.length, 99) : 1;
+    fail(`structural checks reported ${count} failure(s); details redacted`);
+  }
+  return good;
+}
+
 export async function run({ positionals }) {
   const which = positionals[0] ?? 'all';
-  const suites = { learning: verifyLearning, memory: verifyMemory, security: verifySecurity, aqe: verifyAqe, providers: verifyProviders, harvest: verifyHarvest };
+  const suites = {
+    learning: verifyLearning,
+    memory: verifyMemory,
+    security: verifySecurity,
+    aqe: verifyAqe,
+    providers: verifyProviders,
+    harvest: verifyHarvest,
+    'deja-vu': verifyDejaVu,
+  };
   const selected = which === 'all' ? Object.entries(suites) : [[which, suites[which]]];
-  if (!selected.every(([, fn]) => fn)) { fail(`unknown suite: ${which} (learning|memory|security|aqe|providers|harvest|all)`); return 2; }
+  if (!selected.every(([, fn]) => fn)) {
+    fail(`unknown suite: ${which} (learning|memory|security|aqe|providers|harvest|deja-vu|all)`);
+    return 2;
+  }
   let allGood = true;
   for (const [, fn] of selected) allGood = (await fn()) && allGood;
   console.log('');

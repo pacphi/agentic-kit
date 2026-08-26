@@ -77,6 +77,7 @@ tests/
   kit/*.test.mjs         # node:test unit suites
   statusline-segments.test.cjs      # statusline renderer suite
 docs/
+  DEJA-VU.md             # managed companion lifecycle and privacy runbook (shipped)
   HOST-SUPPORT.md        # canonical host/Ruflo/AQE/Brain compatibility matrix (shipped)
   INSTALLATION.md        # package scope versus machine/user/project effects (shipped)
   MODELS.md              # model lifecycle inventory and read-only planning guide (shipped)
@@ -91,7 +92,7 @@ docs/
 ```
 
 **Published tarball** = the `files` whitelist in `package.json`:
-`bin/agentic-kit.mjs`, `src/`, `claude/`, `docs/HOST-SUPPORT.md`,
+`bin/agentic-kit.mjs`, `src/`, `claude/`, `docs/DEJA-VU.md`, `docs/HOST-SUPPORT.md`,
 `docs/INSTALLATION.md`, `docs/MODELS.md`, `docs/PROVIDERS.md`, `docs/SETUP.md`,
 `docs/TROUBLESHOOTING.md`, `docs/UPGRADING.md`, `docs/CODEX-STATUSLINE.md`,
 `docs/adr/0015-managed-codex-native-statusline.md`,

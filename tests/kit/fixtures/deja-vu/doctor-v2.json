@@ -1,0 +1,55 @@
+{
+  "schema_version": 2,
+  "stores": [
+    {
+      "name": "claude",
+      "state": "ok",
+      "paths": ["/private/SENTINEL/transcripts"],
+      "files": 12,
+      "indexed_sessions": 9
+    },
+    {
+      "name": "codex",
+      "state": "denied",
+      "paths": ["/private/SENTINEL/codex"],
+      "files": 3,
+      "indexed_sessions": 1,
+      "denied": "/private/SENTINEL/codex/secret.jsonl",
+      "partial": true
+    }
+  ],
+  "index": {
+    "state": "stale",
+    "path": "/private/SENTINEL/cache/deja/index.db",
+    "stale_stores": 1
+  },
+  "mcp": [
+    {"name": "claude-code", "state": "wired", "path": "/private/SENTINEL/.claude.json"},
+    {"name": "private-SENTINEL-harness", "state": "not-wired", "path": "/private/SENTINEL/other.json"}
+  ],
+  "sqlite3": {"state": "ok", "path": "/private/SENTINEL/sqlite3"},
+  "version": {"state": "offline", "current": "0.19.0"},
+  "policy": {
+    "state": "unreadable",
+    "path": "/private/SENTINEL/policy.json",
+    "error": "SENTINEL policy details",
+    "indexed_sessions": 10,
+    "activations": {
+      "search": {"rule": "allow all SENTINEL", "withheld": 0},
+      "mcp": {"rule": "allow all SENTINEL", "withheld": 0},
+      "auto": {"rule": "deny SENTINEL", "withheld": 3}
+    }
+  },
+  "sync": {
+    "state": "unreadable",
+    "error": "SENTINEL peer file",
+    "peers": [
+      {
+        "host": "SENTINEL-private-host",
+        "sessions_from_there": 4,
+        "last_error": "SENTINEL ssh failure",
+        "stamped_ahead": true
+      }
+    ]
+  }
+}

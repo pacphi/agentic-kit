@@ -10,6 +10,7 @@ import { reconcileGuidance } from '../lib/blocks.mjs';
 import { register as mcpRegister, applyExclusions } from '../lib/mcp.mjs';
 import { runLifecycle } from '../lib/adapters/lifecycle.mjs';
 import { hostsWithLifecycle, lifecycleAdapterFor, lifecycleExecutionEnabled, detectionBinFor } from '../lib/adapters/lifecycle-registry.mjs';
+import { companionLifecycleFor } from '../lib/adapters/companion-lifecycle-registry.mjs';
 import { renderApplyReport } from '../lib/adapters/lifecycle-render.mjs';
 import { listDaemons, staleDaemons, reap } from '../lib/daemons.mjs';
 import { loadKitConfig, saveKitConfig } from '../lib/config.mjs';
@@ -60,8 +61,15 @@ Examples:
   ak sync --dry-run       preview the plan
   ak sync --no-upgrade    re-heal without touching versions`;
 
-export async function run({ flags, pkgRoot, fetchLatest }) {
+export async function run({
+  flags,
+  pkgRoot,
+  fetchLatest,
+  dejaVuAdapter = companionLifecycleFor('deja-vu'),
+  collectFn = collect,
+}) {
   const cwd = process.cwd();
+  const dejaVuPlanOptions = { allowUpgrade: !flags['no-upgrade'] };
   // #134: draw the plan from CURRENT drift, not the TTL cache — a cache
   // stamped before an upstream release claims "all current" and the upgrade
   // never reaches the plan (the old force at apply time sat behind the very
@@ -71,7 +79,7 @@ export async function run({ flags, pkgRoot, fetchLatest }) {
   if (!flags['dry-run'] && !flags['no-upgrade']) {
     await driftReport({ force: true, ...(fetchLatest ? { fetchLatest } : {}) });
   }
-  const rows = await collect({ pkgRoot, cwd });
+  const rows = await collectFn({ pkgRoot, cwd, dejaVuAdapter, dejaVuPlanOptions });
   const plan = rows.filter((r) => r.fix)
     // Model lifecycle actions are explicit advisory commands. `ak status` must
     // name them, but sync neither refreshes catalogs nor applies model plans.
@@ -88,6 +96,7 @@ export async function run({ flags, pkgRoot, fetchLatest }) {
   const cfg = loadKitConfig();
   const subsystems = new Set(plan.map((p) => p.subsystem));
   const report = reportOutcome;
+  let dejaVuApplyFailed = false;
   // Run a managed heal under a live elapsed-time ticker, then print its result.
   // Keeps every slow tool (npm upgrades, brain KB download, native rebuild)
   // visibly alive instead of freezing the prompt; fast/local steps clear in <1s.
@@ -194,6 +203,23 @@ export async function run({ flags, pkgRoot, fetchLatest }) {
       if ((await hostInstallState(h)).method !== 'absent') continue;
       await step(`install ${h.id}`, () => installHost(h.id));
     }
+  }
+  // Managed companion convergence is independent from host lifecycle
+  // adapters. The adapter owns exact package/target/index ordering and mutates
+  // only its in-memory ownership ledger; this command owns persistence. Save a
+  // changed ledger even after a partial failure so a later sync or uninstall
+  // retains the proof for every operation that did verify successfully.
+  if (subsystems.has('deja-vu') && dejaVuAdapter) {
+    const lifecycle = await withProgress('deja-vu', () => runLifecycle({
+      adapter: dejaVuAdapter,
+      action: 'apply',
+      cfg,
+      options: { pkgRoot, allowUpgrade: !flags['no-upgrade'] },
+    }));
+    if (lifecycle.configChanged) saveKitConfig(cfg);
+    dejaVuApplyFailed = lifecycle.ok === false;
+    const applyReport = renderApplyReport('deja-vu', lifecycle);
+    for (const line of applyReport.lines) printReportLine(line);
   }
   // opencode host wiring: connected MCPs, compact lazy gateway, lifecycle
   // bridge, specialist dispatcher, and platform skill. Runs AFTER
@@ -309,7 +335,7 @@ export async function run({ flags, pkgRoot, fetchLatest }) {
 
   // converge proof
   console.log('');
-  const after = await collect({ pkgRoot, cwd });
+  const after = await collectFn({ pkgRoot, cwd, dejaVuAdapter, dejaVuPlanOptions });
 
   // health-history: append one post-heal snapshot so `status` can flag backslides
   // (learning shrank, native slots dropped, drift/security regressed) across syncs.
@@ -338,7 +364,11 @@ export async function run({ flags, pkgRoot, fetchLatest }) {
     saveKitConfig(cfg);
   } catch { /* health snapshot is best-effort — never fail a sync over it */ }
 
-  const remaining = after.filter((r) => r.level === 'fail');
+  const remaining = after.filter((r) => r.level === 'fail'
+    || (r.subsystem === 'deja-vu' && r.fix !== null));
+  if (dejaVuApplyFailed && !remaining.some((r) => r.subsystem === 'deja-vu')) {
+    remaining.push({ subsystem: 'deja-vu', message: 'companion lifecycle apply failed' });
+  }
   if (remaining.length === 0) {
     ok(bold('converged — no failing subsystems'));
     info(dim('📊 dashboard: run `ak dashboard` → opens http://127.0.0.1:7431 (local, read-only)'));

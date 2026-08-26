@@ -2,7 +2,9 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   CURRENT_INTEGRATIONS_VERSION,
+  DEFAULT_DEJA_VU_INTENT,
   migrateIntegrationConfig,
+  validateDejaVuIntent,
   validateEndpoint,
 } from '../../src/lib/adapters/config.mjs';
 import { migrateConfig } from '../../src/lib/adapters/migration.mjs';
@@ -28,8 +30,8 @@ test('integration migration is versioned, deterministic, and idempotent', () => 
   const input = structuredClone(legacyDual);
   const first = migrateIntegrationConfig(input);
   const second = migrateIntegrationConfig(structuredClone(first));
-  assert.equal(CURRENT_INTEGRATIONS_VERSION, 2,
-    'v2 distinguishes completed GA cutover from additive v1 snapshots');
+  assert.equal(CURRENT_INTEGRATIONS_VERSION, 3,
+    'v3 adds managed companion intent without inferring opt-in');
   assert.equal(first.integrations.version, CURRENT_INTEGRATIONS_VERSION);
   assert.deepEqual(second, first);
   assert.deepEqual(input, legacyDual, 'migration must not mutate its input');
@@ -38,6 +40,77 @@ test('integration migration is versioned, deterministic, and idempotent', () => 
   assert.equal(Object.hasOwn(first.providers, 'hosts'), false);
   assert.deepEqual(first.providers.dualRouting, legacyDual.providers.dualRouting,
     'the independent routing migration still owns this field');
+});
+
+test('v2 migration adds disabled deja-vu defaults without inferring opt-in', () => {
+  const migrated = migrateIntegrationConfig({
+    integrations: {
+      version: 2,
+      hosts: { claude: true, codex: true, opencode: false },
+      bindings: [],
+    },
+  });
+
+  assert.equal(migrated.integrations.version, 3);
+  assert.deepEqual(migrated.integrations.tools.dejaVu, DEFAULT_DEJA_VU_INTENT);
+  assert.equal(migrated.integrations.tools.dejaVu.enabled, false);
+  assert.deepEqual(migrated.integrations.tools.dejaVu.hosts, []);
+});
+
+test('migration preserves explicit pre-release deja-vu intent and unrelated tools', () => {
+  const migrated = migrateIntegrationConfig({
+    integrations: {
+      version: 2,
+      hosts: { claude: true, codex: true, opencode: false },
+      bindings: [],
+      tools: {
+        dejaVu: { enabled: true, mode: 'auto', hosts: ['codex'], indexOnSetup: false },
+        futureCompanion: { preserve: true },
+      },
+    },
+  });
+
+  assert.deepEqual(migrated.integrations.tools, {
+    dejaVu: { enabled: true, mode: 'auto', hosts: ['codex'], indexOnSetup: false },
+    futureCompanion: { preserve: true },
+  });
+  assert.deepEqual(migrateIntegrationConfig(structuredClone(migrated)), migrated);
+});
+
+test('deja-vu intent validation accepts only complete bounded intent', () => {
+  assert.deepEqual(validateDejaVuIntent({
+    enabled: true,
+    mode: 'mcp',
+    hosts: ['claude', 'codex'],
+    indexOnSetup: true,
+  }), {
+    enabled: true,
+    mode: 'mcp',
+    hosts: ['claude', 'codex'],
+    indexOnSetup: true,
+  });
+
+  for (const [intent, message] of [
+    [{ enabled: 'yes', mode: 'mcp', hosts: [], indexOnSetup: true }, /enabled must be boolean/],
+    [{ enabled: true, mode: 'automatic', hosts: [], indexOnSetup: true }, /mode must be one of/],
+    [{ enabled: true, mode: 'mcp', hosts: ['claude', 'claude'], indexOnSetup: true }, /contains duplicates/],
+    [{ enabled: true, mode: 'mcp', hosts: ['unknown'], indexOnSetup: true }, /unknown host/],
+    [{ enabled: true, mode: 'mcp', hosts: [], indexOnSetup: 'yes' }, /indexOnSetup must be boolean/],
+  ]) {
+    assert.throws(() => validateDejaVuIntent(intent), message);
+  }
+});
+
+test('future integration schema preserves deja-vu content opaquely', () => {
+  const future = {
+    integrations: {
+      version: CURRENT_INTEGRATIONS_VERSION + 1,
+      tools: {
+        dejaVu: { futureMode: 'ambient', hosts: { futureShape: true } },
+      },
+    },
+  };
+  assert.deepEqual(migrateIntegrationConfig(structuredClone(future)), future);
 });
 
 test('top-level migration retires routing compatibility fields but keeps provider-axis state', () => {
