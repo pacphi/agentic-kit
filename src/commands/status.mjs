@@ -150,7 +150,15 @@ export async function collectDejaVuRows(options = {}) {
     }
 
     if (facts?.doctor?.state === 'ok') {
-      rows.push(row('deja-vu', 'ok', 'deja-vu doctor schema v2 accepted'));
+      if (facts.doctor.health?.state === 'degraded') {
+        const issueCount = Number.isSafeInteger(facts.doctor.health.storeIssues)
+          ? Math.min(facts.doctor.health.storeIssues, 999) : 0;
+        rows.push(row('deja-vu', 'warn',
+          `deja-vu doctor schema v2 accepted but component health is degraded${issueCount > 0
+            ? ` (${issueCount} bounded store issue${issueCount === 1 ? '' : 's'})` : ''}`));
+      } else {
+        rows.push(row('deja-vu', 'ok', 'deja-vu doctor schema v2 accepted'));
+      }
     }
 
     for (const host of DEJA_HOSTS) {
@@ -193,9 +201,17 @@ export async function collectDejaVuRows(options = {}) {
           `deja-vu derived index is ${['missing', 'stale'].includes(facts?.index?.state)
             ? facts.index.state : 'not ready'}`,
           'sync runs one bounded deja index after target convergence'));
+      } else if (facts?.index?.state === 'stale-readonly') {
+        rows.push(row('deja-vu', 'warn',
+          'deja-vu derived index is stale-readonly; automatic repair is unsafe'));
       } else if (facts?.index?.state !== undefined) {
         rows.push(row('deja-vu', 'info', 'deja-vu derived index health is unknown'));
       }
+    }
+
+    if (plan?.warnings?.includes('deja-package-latest-unavailable')) {
+      rows.push(row('deja-vu', 'warn',
+        'managed deja-vu package is usable, but npm latest-version drift could not be verified'));
     }
 
     return rows.length ? rows : [row('deja-vu', 'info', 'deja-vu state is unobserved')];

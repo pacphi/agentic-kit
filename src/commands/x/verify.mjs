@@ -269,10 +269,13 @@ export async function verifyDejaVu({
   (packageGood ? ok : fail)(`CLI/package ${version === 'unavailable' ? version : `v${version}`}: ${packageGood ? 'compatible' : 'incompatible or unavailable'} (${owner})`);
 
   const doctor = plain(facts.doctor) ? facts.doctor : {};
-  const doctorGood = doctor.state === 'ok' && doctor.schemaVersion === 2;
+  const doctorGood = doctor.state === 'ok' && doctor.schemaVersion === 2
+    && doctor.health?.state !== 'degraded';
   (doctorGood ? ok : fail)(doctorGood
-    ? 'doctor schema v2: ok'
-    : 'doctor schema incompatible or unavailable');
+    ? 'doctor schema v2 and bounded component health: ok'
+    : doctor.state === 'ok' && doctor.schemaVersion === 2
+      ? 'doctor schema v2 accepted but bounded component health is degraded'
+      : 'doctor schema incompatible or unavailable');
 
   const index = plain(facts.index) ? facts.index : {};
   const indexState = SAFE_INDEX_STATES.has(index.state) ? index.state : 'unknown';

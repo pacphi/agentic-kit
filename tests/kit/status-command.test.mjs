@@ -260,6 +260,22 @@ test('deja-vu doctor schema failure is bounded, fail-closed, and non-actionable'
   assert.ok(rows.every((entry) => entry.fix === null));
 });
 
+test('deja-vu status warns for recognized component degradation and stale-readonly index', async () => {
+  const fixture = dejaAdapter(dejaFacts({
+    doctor: {
+      state: 'ok', reason: null, schemaVersion: 2,
+      health: { state: 'degraded', storeIssues: 2, sqlite: 'missing', policy: 'unreadable', sync: 'ok' },
+    },
+    index: { state: 'stale-readonly', staleStores: 1 },
+  }));
+  const rows = await status.collectDejaVuRows({ cfg: dejaConfig(), adapter: fixture.adapter });
+  assert.ok(rows.some((entry) => entry.level === 'warn'
+    && /component health is degraded \(2 bounded store issues\)/.test(entry.message)));
+  assert.ok(rows.some((entry) => entry.level === 'warn'
+    && /stale-readonly; automatic repair is unsafe/.test(entry.message)));
+  assert.ok(!rows.some((entry) => entry.level === 'ok' && /doctor schema/.test(entry.message)));
+});
+
 test('collect() writes nothing to HOME or the project', async () => {
   seedHome();
   const beforeHome = snapshot(HOME);

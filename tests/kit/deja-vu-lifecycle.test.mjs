@@ -31,9 +31,9 @@ function fakeEnvironment({ binary = false, npmVersion = null, doctor = baseDocto
   const state = {
     binary, npmVersion, doctor: structuredClone(doctor),
     targets: {
-      claude: { direct: { mcp: false, auto: false }, plugin: { present: false, auto: false } },
-      codex: { direct: { mcp: false, auto: false }, plugin: { present: false, auto: false } },
-      opencode: { direct: { mcp: false, auto: false }, plugin: { present: false, auto: false } },
+      claude: { direct: { mcp: false, auto: false }, projection: { mcp: null, auto: null }, plugin: { present: false, auto: false } },
+      codex: { direct: { mcp: false, auto: false }, projection: { mcp: null, auto: null }, plugin: { present: false, auto: false } },
+      opencode: { direct: { mcp: false, auto: false }, projection: { mcp: null, auto: null }, plugin: { present: false, auto: false } },
     },
   };
   const calls = [];
@@ -58,6 +58,8 @@ function fakeEnvironment({ binary = false, npmVersion = null, doctor = baseDocto
         : target.startsWith('codex') ? 'codex' : 'opencode';
       state.targets[host].direct.mcp = true;
       state.targets[host].direct.auto = target.endsWith('-auto');
+      state.targets[host].projection.mcp = 'a'.repeat(64);
+      state.targets[host].projection.auto = target.endsWith('-auto') ? 'b'.repeat(64) : null;
       return { code: 0, stdout: 'SENTINEL private path', stderr: '' };
     }
     if (command === 'deja' && args[0] === 'uninstall') {
@@ -66,6 +68,8 @@ function fakeEnvironment({ binary = false, npmVersion = null, doctor = baseDocto
         : target.startsWith('codex') ? 'codex' : 'opencode';
       state.targets[host].direct.mcp = false;
       state.targets[host].direct.auto = false;
+      state.targets[host].projection.mcp = null;
+      state.targets[host].projection.auto = null;
       return { code: 0, stdout: '', stderr: 'SENTINEL private path' };
     }
     if (command === 'deja' && args[0] === 'index') {
@@ -168,6 +172,39 @@ test('structural verify reuses the lifecycle observation and runs doctor once', 
   assert.equal(env.calls.filter((call) => call[0] === 'deja' && call[1] === 'doctor').length, 1);
 });
 
+test('exit-zero doctor degradation fails verification and uses a dashboard-safe deadline', async () => {
+  const unhealthy = baseDoctor();
+  unhealthy.index.state = 'ok';
+  unhealthy.stores = [{
+    name: 'claude', state: 'denied', files: 1, indexed_sessions: 0,
+  }];
+  unhealthy.sqlite3.state = 'missing';
+  const calls = [];
+  const adapter = createDejaVuLifecycleAdapter({
+    runner: async (command, args, options) => {
+      calls.push([command, ...args, options.timeout]);
+      return { code: 0, stdout: JSON.stringify(unhealthy), stderr: '' };
+    },
+    haveFn: async (bin) => bin === 'deja' || bin === 'claude',
+    packageVersionFn: async () => '0.19.0',
+    targetObserver: async () => ({
+      claude: {
+        direct: { mcp: true, auto: false },
+        projection: { mcp: 'a'.repeat(64), auto: null },
+        plugin: { present: false, auto: false },
+      },
+      codex: { direct: { mcp: false, auto: false }, plugin: { present: false, auto: false } },
+      opencode: { direct: { mcp: false, auto: false }, plugin: { present: false, auto: false } },
+    }),
+  });
+  const result = await runLifecycle({ adapter, action: 'verify', cfg: config() });
+  assert.equal(result.ok, false);
+  assert.ok(result.errors.includes('deja-doctor-components-degraded'));
+  assert.equal(result.facts.doctor.health.state, 'degraded');
+  assert.equal(result.facts.doctor.health.storeIssues, 1);
+  assert.deepEqual(calls, [['deja', 'doctor', '--json', '--offline', 10_000]]);
+});
+
 test('unknown doctor schema fails closed before any mutation', async () => {
   const bad = baseDoctor();
   bad.schema_version = 999;
@@ -207,6 +244,19 @@ test('receipt drift refuses collateral uninstall and preserves ownership', async
   assert.ok(cfg.integrations.ownership.dejaVu.targets.claude);
   assert.equal(env.calls.slice(start).some((call) => call[1] === 'uninstall'), false);
   assert.ok(result.warnings.includes('claude-ownership-drift-preserved'));
+});
+
+test('same-presence value drift refuses collateral uninstall', async () => {
+  const env = fakeEnvironment();
+  const cfg = config();
+  assert.equal((await runLifecycle({ adapter: env.adapter, action: 'apply', cfg })).ok, true);
+  env.state.targets.claude.projection.mcp = 'c'.repeat(64);
+  cfg.integrations.tools.dejaVu.enabled = false;
+  const start = env.calls.length;
+  const result = await runLifecycle({ adapter: env.adapter, action: 'undo', cfg });
+  assert.equal(result.ok, false);
+  assert.ok(result.errors.includes('claude-collateral-uninstall-refused'));
+  assert.equal(env.calls.slice(start).some((call) => call[1] === 'uninstall'), false);
 });
 
 test('malformed target receipt cannot authorize uninstall even when the wiring signature matches', async () => {

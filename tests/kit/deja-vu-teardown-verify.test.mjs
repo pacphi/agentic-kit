@@ -99,12 +99,33 @@ test('deja-vu verify emits only bounded structural facts and never raw upstream 
   const { result, out } = await captureLog(() => verify.verifyDejaVu({ cfg: cfg(), adapter }));
   assert.equal(result, true);
   assert.deepEqual(calls.map(([name]) => name), ['detect', 'verify']);
-  assert.match(out, /doctor schema v2: ok/);
+  assert.match(out, /doctor schema v2 and bounded component health: ok/);
   assert.match(out, /index state: ok/);
   assert.match(out, /claude-auto: wired/);
   assert.doesNotMatch(out, /SECRET|\/Users\/alice|session\.jsonl/);
   assert.doesNotMatch(out, /search|recall|query|notes/i,
     'the structural proof must not claim or invite content retrieval');
+});
+
+test('deja-vu verify fails recognized unhealthy doctor components despite exit-zero schema', async () => {
+  const facts = {
+    desired: { enabled: true, mode: 'mcp', hosts: ['claude'], indexOnSetup: true },
+    install: { binaryPresent: true, version: '0.19.0', supported: true, ownership: 'external' },
+    doctor: {
+      state: 'ok', reason: null, schemaVersion: 2,
+      health: { state: 'degraded', storeIssues: 1, sqlite: 'missing', policy: 'unreadable', sync: 'ok' },
+    },
+    index: { state: 'ok', staleStores: 0 },
+    targets: { claude: { selected: true, satisfied: true, desiredTarget: 'claude-code' } },
+  };
+  const { adapter } = lifecycleAdapter({ facts });
+  adapter.verify = async () => ({
+    ok: false, changed: false, facts, errors: ['deja-doctor-components-degraded'],
+  });
+  const { result, out } = await captureLog(() => verify.verifyDejaVu({ cfg: cfg(), adapter }));
+  assert.equal(result, false);
+  assert.match(out, /bounded component health is degraded/);
+  assert.doesNotMatch(out, /sqlite|policy|private|path/);
 });
 
 test('deja-vu verify fails closed on incompatible schema or unhealthy index without leaking errors', async () => {
@@ -357,7 +378,10 @@ test('combined removal orders real lifecycle target undo, one purge doctor, then
   fs.mkdirSync(index, { recursive: true });
   fs.writeFileSync(path.join(index, 'derived.sqlite'), 'derived');
   const signature = createHash('sha256')
-    .update(JSON.stringify({ mcp: true, auto: false })).digest('hex');
+    .update(JSON.stringify({
+      mcp: true, auto: false,
+      mcpProjection: 'a'.repeat(64), autoProjection: null,
+    })).digest('hex');
   const ownership = {
     install: {
       owner: 'agentic-kit', method: 'npm', package: '@vshulcz/deja-vu',
@@ -367,7 +391,10 @@ test('combined removal orders real lifecycle target undo, one purge doctor, then
       claude: {
         owner: 'agentic-kit', host: 'claude', target: 'claude-code', mode: 'mcp',
         prior: { state: 'absent' },
-        written: { state: 'wired', mode: 'mcp', mechanism: 'direct-cli', signature },
+        written: {
+          state: 'wired', mode: 'mcp', mechanism: 'direct-cli',
+          precision: 'projection-sha256-v1', signature,
+        },
       },
     },
   };
@@ -399,9 +426,9 @@ test('combined removal orders real lifecycle target undo, one purge doctor, then
     haveFn: async (bin) => bin === 'deja' ? state.binary : bin === 'claude',
     packageVersionFn: async () => state.npmVersion,
     targetObserver: async () => ({
-      claude: { direct: { mcp: state.target, auto: false }, plugin: { present: false, auto: false } },
-      codex: { direct: { mcp: false, auto: false }, plugin: { present: false, auto: false } },
-      opencode: { direct: { mcp: false, auto: false }, plugin: { present: false, auto: false } },
+      claude: { direct: { mcp: state.target, auto: false }, projection: { mcp: state.target ? 'a'.repeat(64) : null, auto: null }, plugin: { present: false, auto: false } },
+      codex: { direct: { mcp: false, auto: false }, projection: { mcp: null, auto: null }, plugin: { present: false, auto: false } },
+      opencode: { direct: { mcp: false, auto: false }, projection: { mcp: null, auto: null }, plugin: { present: false, auto: false } },
     }),
   });
   const purge = (options) => uninstall.purgeDejaVuIndex({

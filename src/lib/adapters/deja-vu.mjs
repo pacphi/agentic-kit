@@ -14,13 +14,18 @@ import {
 
 const HOST_BINS = Object.freeze({ claude: 'claude', codex: 'codex', opencode: 'opencode' });
 const MODES = Object.freeze(['mcp', 'auto']);
+const DOCTOR_TIMEOUT_MS = 10_000;
 const plain = (value) => value !== null && typeof value === 'object' && !Array.isArray(value);
 const boolOrNull = (value) => typeof value === 'boolean' ? value : null;
+const hashOrNull = (value) => typeof value === 'string' && /^[a-f0-9]{64}$/.test(value)
+  ? value : null;
 
 function targetSignature(observed) {
   const bounded = {
     mcp: boolOrNull(observed?.direct?.mcp),
     auto: boolOrNull(observed?.direct?.auto),
+    mcpProjection: hashOrNull(observed?.projection?.mcp),
+    autoProjection: hashOrNull(observed?.projection?.auto),
   };
   return createHash('sha256').update(JSON.stringify(bounded)).digest('hex');
 }
@@ -35,6 +40,7 @@ function defaultTargetObserver({ doctor }) {
       auto: direct[host].direct.auto ?? (targets[names.auto] === 'wired' ? true
         : targets[names.auto] === 'not-wired' || targets[names.auto] === 'config-missing' ? false : null),
     },
+    projection: direct[host].projection,
     plugin: direct[host].plugin,
   }]));
 }
@@ -96,6 +102,10 @@ function boundedObservation(value) {
       present: boolOrNull(value?.plugin?.present),
       auto: boolOrNull(value?.plugin?.auto),
     },
+    projection: {
+      mcp: hashOrNull(value?.projection?.mcp),
+      auto: hashOrNull(value?.projection?.auto),
+    },
   };
 }
 
@@ -128,6 +138,22 @@ function disabledFacts(desired) {
   };
 }
 
+function doctorHealth(facts) {
+  if (!facts) return { state: 'unknown', storeIssues: 0, sqlite: 'unknown', policy: 'unknown', sync: 'unknown' };
+  const unhealthyStoreStates = [
+    'unreadable', 'parsed-zero', 'denied', 'needs-sqlite3', 'needs-zstd',
+  ];
+  const storeIssues = unhealthyStoreStates.reduce(
+    (total, state) => total + (facts.stores?.states?.[state] ?? 0), 0)
+    + (facts.stores?.partial ?? 0) + (facts.stores?.unchecked ?? 0);
+  const sqlite = facts.sqlite3?.state ?? 'unknown';
+  const policy = facts.policy?.state ?? 'unknown';
+  const sync = facts.sync?.state ?? 'unknown';
+  const degraded = storeIssues > 0 || sqlite !== 'ok'
+    || policy === 'unreadable' || sync === 'unreadable';
+  return { state: degraded ? 'degraded' : 'ok', storeIssues, sqlite, policy, sync };
+}
+
 function commandOperation(id, kind, built, extra = {}) {
   return { id, kind, command: built.command, args: [...built.args], ...extra };
 }
@@ -140,8 +166,14 @@ function receiptMatches(receipt, host, signature) {
     && receipt.written?.state === 'wired'
     && receipt.written?.mode === receipt.mode
     && receipt.written?.mechanism === 'direct-cli'
+    && receipt.written?.precision === 'projection-sha256-v1'
     && typeof receipt.written?.signature === 'string'
     && receipt.written.signature === signature;
+}
+
+function targetProjectionPrecise(observed) {
+  return (observed.direct.mcp !== true || observed.projection.mcp !== null)
+    && (observed.direct.auto !== true || observed.projection.auto !== null);
 }
 
 function targetAbsent(observed) {
@@ -189,7 +221,9 @@ export function createDejaVuLifecycleAdapter(defaults = {}) {
     ]);
     let doctor = { state: 'skipped', reason: 'binary-missing', facts: null };
     if (binaryPresent) {
-      const result = await runner(DEJA_VU_BIN, ['doctor', '--json', '--offline'], { timeout: 60_000 });
+      const result = await runner(DEJA_VU_BIN, ['doctor', '--json', '--offline'], {
+        timeout: DOCTOR_TIMEOUT_MS,
+      });
       doctor = parseDejaVuDoctor(result.stdout);
       if (result.code !== 0 && doctor.state === 'ok') {
         doctor = { state: 'degraded', reason: 'doctor-command-failed', facts: doctor.facts };
@@ -213,6 +247,7 @@ export function createDejaVuLifecycleAdapter(defaults = {}) {
         hostPresent: hostPresence[index] === true,
         desiredTarget: selected ? DEJA_VU_TARGETS[host][desired.mode] : null,
         direct: observed.direct,
+        projection: observed.projection,
         plugin: observed.plugin,
         signature,
         receiptState,
@@ -236,7 +271,12 @@ export function createDejaVuLifecycleAdapter(defaults = {}) {
           ? 'agentic-kit' : binaryPresent || npmVersion ? 'external' : 'none',
         receiptState: installState,
       },
-      doctor: { state: doctor.state, reason: doctor.reason, schemaVersion: doctor.facts?.schemaVersion ?? null },
+      doctor: {
+        state: doctor.state,
+        reason: doctor.reason,
+        schemaVersion: doctor.facts?.schemaVersion ?? null,
+        health: doctorHealth(doctor.facts),
+      },
       index: doctor.facts?.index ?? { state: 'unknown', staleStores: 0 },
       targets: hosts,
     };
@@ -388,11 +428,18 @@ export function createDejaVuLifecycleAdapter(defaults = {}) {
           errors.push(`${operation.host}-target-install-unverified`);
           break;
         }
+        if (!targetProjectionPrecise(fact)) {
+          errors.push(`${operation.host}-target-observation-imprecise`);
+          break;
+        }
         mutableOwnership(cfg).targets[operation.host] = {
           owner: 'agentic-kit', host: operation.host,
           target: DEJA_VU_TARGETS[operation.host][operation.mode], mode: operation.mode,
           prior: { state: 'absent' },
-          written: { state: 'wired', mode: operation.mode, mechanism: 'direct-cli', signature: fact.signature },
+          written: {
+            state: 'wired', mode: operation.mode, mechanism: 'direct-cli',
+            precision: 'projection-sha256-v1', signature: fact.signature,
+          },
           recordedAt: clock(),
         };
       } else if (operation.kind === 'index') {
@@ -437,6 +484,7 @@ export function createDejaVuLifecycleAdapter(defaults = {}) {
       const facts = request.facts ?? await detect(request);
       const errors = [];
       if (facts.error) errors.push(facts.error);
+      if (facts.doctor?.health?.state === 'degraded') errors.push('deja-doctor-components-degraded');
       if (facts.desired.enabled && !facts.install.binaryPresent) errors.push('deja-binary-missing');
       for (const [host, fact] of Object.entries(facts.targets)) {
         if (fact.selected && fact.hostPresent && !fact.satisfied) errors.push(`${host}-target-unsatisfied`);

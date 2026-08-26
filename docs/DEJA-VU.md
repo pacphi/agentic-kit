@@ -64,10 +64,13 @@ observed surface instead of calling every `auto` installation equivalent.
 Codex plugins are user-owned. Agentic Kit never installs, enables, updates, disables, or removes
 the deja-vu plugin.
 
-If that plugin is already enabled, it may provide automatic recall even when Agentic Kit records
-MCP mode. `ak status` reports this as effective, external auto behavior. `ak sync` does not offer a
-fix because changing the plugin would cross the ownership boundary. Disable or remove the plugin
-through Codex if MCP-only behavior is required.
+If that plugin is already enabled and Codex has recorded trust for its recall hooks, it may provide
+automatic recall even when Agentic Kit records MCP mode. `ak status` reports this as effective,
+external auto behavior. A configured plugin without the bounded trust evidence remains MCP-capable
+but is not reported as healthy automatic recall; Agentic Kit never treats `trusted_hash` as a
+reproducible cryptographic match. `ak sync` does not offer a plugin fix because changing it would
+cross the ownership boundary. Disable or remove the plugin through Codex if MCP-only behavior is
+required.
 
 In auto mode, CLI-installed Codex hooks and the plugin expose different events. The plugin's
 stand-down rule prevents duplicate injection, but it can also mean that the active event set is
@@ -161,15 +164,17 @@ deja-vu 0.19.0 added `schema_version: 2` to object-shaped JSON responses. Agenti
 schema 2 for doctor facts, accepts additive fields within it, and fails closed on a missing,
 malformed, or future schema. That state appears as degraded rather than as a healthy or absent
 installation. The offline doctor reports the installed version without contacting the release
-service; npm version drift uses Agentic Kit's normal cached npm checks.
+service; owned npm version drift uses one bounded `npm view` probe and preserves the current package
+when registry metadata is unavailable or invalid.
 
 Doctor is diagnostic: many unhealthy states still exit zero. Agentic Kit reads the reported
 component states instead of treating exit zero as proof of health.
 
 ## Ownership and external installations
 
-Agentic Kit records exact package and wiring values that it creates. That receipt is the authority
-for later repair and removal.
+Agentic Kit records exact package values and SHA-256 projections of the wiring values that it
+creates. Raw commands and private paths do not enter the receipt. A changed projection is ownership
+drift and refuses later removal.
 
 - An npm package installed by Agentic Kit can be updated or removed by Agentic Kit.
 - A compatible package installed by you, another package manager, or a native installer is
