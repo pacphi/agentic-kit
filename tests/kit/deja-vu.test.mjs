@@ -302,6 +302,21 @@ test('derived index validation accepts only canonical index.db below an allowed 
     assert.equal(acceptedOverride.ok, true);
     assert.equal(path.basename(acceptedOverride.path), 'index.db');
 
+    const arbitraryOverride = path.join(root, 'private-index', 'custom-name');
+    const acceptedArbitrary = validateDejaVuIndexPath(arbitraryOverride, {
+      homeDir: home,
+      allowedRoots: [path.dirname(arbitraryOverride)],
+      exactIndexPaths: [arbitraryOverride],
+    });
+    assert.equal(acceptedArbitrary.ok, true);
+    assert.equal(acceptedArbitrary.path,
+      path.join(fs.realpathSync.native(root), 'private-index', 'custom-name'));
+    assert.equal(validateDejaVuIndexPath(path.join(root, 'private-index', 'sibling'), {
+      homeDir: home,
+      allowedRoots: [path.dirname(arbitraryOverride)],
+      exactIndexPaths: [arbitraryOverride],
+    }).ok, false);
+
     const rejected = [
       home,
       '.',

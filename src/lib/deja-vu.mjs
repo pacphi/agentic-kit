@@ -525,7 +525,7 @@ function canonicalPath(candidate, pathImpl, realpathFn) {
  * default allow-root deliberately follows deja-vu, not XDG_CACHE_HOME.
  * Rejections return controlled reason codes and never echo the candidate.
  * @param {unknown} candidate
- * @param {{homeDir?:string,allowedRoots?:string[],sourceRoots?:string[],configRoots?:string[],pathImpl?:typeof path,realpathFn?:(value:string)=>string}} options
+ * @param {{homeDir?:string,allowedRoots?:string[],exactIndexPaths?:string[],sourceRoots?:string[],configRoots?:string[],pathImpl?:typeof path,realpathFn?:(value:string)=>string}} options
  */
 export function validateDejaVuIndexPath(candidate, options = {}) {
   const pathImpl = options.pathImpl ?? path;
@@ -536,7 +536,16 @@ export function validateDejaVuIndexPath(candidate, options = {}) {
     || !pathImpl.isAbsolute(candidate)) return reject('path-not-absolute');
   const home = canonicalPath(options.homeDir, pathImpl, realpathFn);
   const indexPath = canonicalPath(candidate, pathImpl, realpathFn);
-  if (pathImpl.basename(indexPath) !== 'index.db') return reject('path-not-index');
+  const requestedExact = options.exactIndexPaths ?? [];
+  if (!Array.isArray(requestedExact)
+    || requestedExact.some((value) => typeof value !== 'string' || !pathImpl.isAbsolute(value))) {
+    return reject('exact-path-invalid');
+  }
+  const exactIndexPaths = requestedExact
+    .map((value) => canonicalPath(value, pathImpl, realpathFn));
+  if (pathImpl.basename(indexPath) !== 'index.db' && !exactIndexPaths.includes(indexPath)) {
+    return reject('path-not-index');
+  }
 
   const requestedRoots = options.allowedRoots ?? [pathImpl.join(options.homeDir, '.cache', 'deja')];
   if (!Array.isArray(requestedRoots) || requestedRoots.length === 0

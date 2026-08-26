@@ -134,18 +134,21 @@ export async function purgeDejaVuIndex({
     return { ok: false, changed: false, reason: 'doctor-json-malformed' };
   }
   const allowedRoots = [path.join(homeDir, '.cache', 'deja')];
+  const exactIndexPaths = [];
   if (typeof env.DEJA_INDEX_DIR === 'string' && path.isAbsolute(env.DEJA_INDEX_DIR)) {
     const override = path.resolve(env.DEJA_INDEX_DIR);
-    // Upstream treats this as an index-location override across releases;
-    // tolerate either a parent directory or the exact index.db directory while
-    // retaining the validator's requirement that deletion occur below a root.
-    allowedRoots.push(path.basename(override) === 'index.db' ? path.dirname(override) : override);
+    // v0.19 treats DEJA_INDEX_DIR as the exact directory, and it need not be
+    // named index.db. Admit only that exact doctor-reported path below its
+    // parent; a sibling or broader parent can never inherit the exception.
+    allowedRoots.push(path.dirname(override));
+    exactIndexPaths.push(override);
   }
   const protectedRoots = protectedDejaVuRoots(homeDir, env);
   const candidate = raw?.index?.path;
   const validated = validateDejaVuIndexPath(candidate, {
     homeDir,
     allowedRoots,
+    exactIndexPaths,
     sourceRoots: protectedRoots.sourceRoots,
     configRoots: protectedRoots.configRoots,
   });
@@ -163,6 +166,7 @@ export async function purgeDejaVuIndex({
     const revalidated = validateDejaVuIndexPath(candidate, {
       homeDir,
       allowedRoots,
+      exactIndexPaths,
       sourceRoots: protectedRoots.sourceRoots,
       configRoots: protectedRoots.configRoots,
     });

@@ -243,6 +243,24 @@ test('derived-index purge dry-run validates but changes nothing', async () => {
   rmrf(index);
 });
 
+test('derived-index purge accepts only the exact v0.19 DEJA_INDEX_DIR override', async () => {
+  const parent = path.join(HOME, 'private-indexes');
+  const index = path.join(parent, 'custom-name');
+  const sibling = path.join(parent, 'keep-me');
+  fs.mkdirSync(index, { recursive: true });
+  fs.mkdirSync(sibling, { recursive: true });
+  fs.writeFileSync(path.join(index, 'derived.sqlite'), 'derived');
+  fs.writeFileSync(path.join(sibling, 'user.txt'), 'preserved');
+  const result = await uninstall.purgeDejaVuIndex({
+    homeDir: HOME,
+    env: { DEJA_INDEX_DIR: index },
+    runner: async () => ({ code: 0, stdout: JSON.stringify(doctor(index)), stderr: '' }),
+  });
+  assert.deepEqual(result, { ok: true, changed: true, reason: null });
+  assert.equal(fs.existsSync(index), false);
+  assert.equal(fs.readFileSync(path.join(sibling, 'user.txt'), 'utf8'), 'preserved');
+});
+
 test('derived-index purge refuses a regular file even when it is named index.db', async () => {
   const index = path.join(HOME, '.cache', 'deja', 'index.db');
   fs.mkdirSync(path.dirname(index), { recursive: true });
