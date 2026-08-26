@@ -4,6 +4,9 @@ import { ACTIVITIES } from '../routing.mjs';
 import { PRICES_AS_OF, priceFor } from '../pricing.mjs';
 import { normalizeSnapshot } from './contracts.mjs';
 import { dashboardModelView } from './dashboard-query.mjs';
+import {
+  ANTHROPIC_MODELS_URL, ANTHROPIC_OFFICIAL_MODEL_IDS, ANTHROPIC_PRICING_URL,
+} from './discovery/anthropic-catalog.mjs';
 
 /** @param {any} snapshotValue @param {{changes?: any[]|{changes?: any[]}}} [options] */
 export function createModelReadModel(snapshotValue, options = {}) {
@@ -13,7 +16,9 @@ export function createModelReadModel(snapshotValue, options = {}) {
     : Array.isArray(changes?.changes) ? changes.changes : snapshot.changes;
   const configuredBindings = snapshot.bindings.filter(({ configured }) => configured != null);
   const observed = snapshot.models.filter(({ dimensions }) => dimensions.observed.value === true);
-  const migrations = snapshot.models.filter(hasPublishedLifecycleMigration);
+  const migrations = snapshot.models.filter((model) => (
+    isLocallyRelevant(model) && hasPublishedLifecycleMigration(model)
+  ));
   const aliasChanges = changeRows.filter(({ kind }) => kind === 'alias-target-changed');
   const staleSources = snapshot.sources.filter(({ status }) => status !== 'complete');
   const driftedConsumers = snapshot.bindings.filter(({ drift }) => drift);
@@ -67,6 +72,11 @@ function hasPublishedLifecycleMigration(model) {
   return model.evidence.some((entry) => entry.field === 'lifecycle' && entry.class === 'first-party');
 }
 
+function isLocallyRelevant(model) {
+  return ['configured', 'effective', 'observed']
+    .some((name) => model.dimensions?.[name]?.value === true);
+}
+
 export function summarizeModelHealth(snapshotValue, options = {}) {
   const model = createModelReadModel(snapshotValue, options);
   const level = model.attention.some(({ severity }) => severity === 'fail') ? 'fail'
@@ -87,13 +97,17 @@ export function summarizeModelHealth(snapshotValue, options = {}) {
 const PUBLIC_HOSTS = new Set(['claude', 'codex', 'opencode', 'ollama', 'unknown']);
 const PUBLIC_ACTIVITIES = new Set(ACTIVITIES);
 const PUBLIC_SOURCES = new Set([
-  'claude-config', 'codex-cache', 'opencode-models', 'ollama-catalog', 'usage-index',
+  'anthropic-docs', 'claude-config', 'codex-cache', 'opencode-models', 'ollama-catalog',
+  'usage-index',
 ]);
 const PUBLIC_SOURCE_SCHEMAS = new Set([
-  'claude-settings-v1', 'codex-model-cache-v1', 'opencode-models-lines-v1',
-  'ollama-ls-v1', 'ollama-api-v1', 'usage-models-v1', 'usage-index-v6',
+  'anthropic-public-models-v1', 'claude-settings-v1', 'codex-model-cache-v1',
+  'opencode-models-lines-v1', 'ollama-ls-v1', 'ollama-api-v1', 'usage-models-v1',
+  'usage-index-v6',
 ]);
-const PUBLIC_SOURCE_OWNERS = new Set(['claude', 'codex', 'opencode', 'ollama', 'usage']);
+const PUBLIC_SOURCE_OWNERS = new Set([
+  'anthropic', 'claude', 'codex', 'opencode', 'ollama', 'usage',
+]);
 
 function dashboardKey(key) {
   if (typeof key !== 'string' || !/^[a-f0-9]{64}$/i.test(key)) {
@@ -123,11 +137,13 @@ const SAFE_VARIANT_FIELDS = new Set([
   'configuredVariants', 'availableVariants', 'modalities', 'input', 'output',
   'text', 'audio', 'image', 'video', 'pdf', 'sizeBytes', 'modifiedAt', 'format',
   'family', 'families', 'parameterSize', 'quantizationLevel', 'loaded', 'memoryBytes',
-  'vramBytes', 'expiresAt', 'licenseSummary', 'advertisedCapabilities',
+  'vramBytes', 'expiresAt', 'licenseSummary', 'advertisedCapabilities', 'lifecycleScope',
+  'availability', 'retirementNotBefore', 'retiredAt',
 ]);
 const OWNER_VISIBLE_VARIANT_TEXT_FIELDS = new Set([
   'modifiedAt', 'format', 'family', 'families', 'parameterSize',
   'quantizationLevel', 'expiresAt', 'licenseSummary', 'advertisedCapabilities',
+  'lifecycleScope', 'availability', 'retirementNotBefore', 'retiredAt',
 ]);
 
 function sanitizeVariant(value, key, field = '', depth = 0) {
@@ -159,17 +175,7 @@ const TRUSTED_MODEL_LINK_HOSTS = new Set([
 const PUBLIC_CATALOG_METADATA_SOURCES = new Set(['models.dev']);
 // Maintained from Anthropic's Models overview and Model deprecations tables.
 // IDs and pre-4.6 aliases are exact: the documented grammar is not publication proof.
-const OFFICIAL_CLAUDE_IDS = new Set([
-  'claude-fable-5', 'claude-mythos-5', 'claude-mythos-preview',
-  'claude-opus-5', 'claude-opus-4-8', 'claude-opus-4-7', 'claude-opus-4-6',
-  'claude-opus-4-5', 'claude-opus-4-5-20251101',
-  'claude-opus-4-1', 'claude-opus-4-1-20250805',
-  'claude-opus-4-0', 'claude-opus-4-20250514',
-  'claude-sonnet-5', 'claude-sonnet-4-6',
-  'claude-sonnet-4-5', 'claude-sonnet-4-5-20250929',
-  'claude-sonnet-4-0', 'claude-sonnet-4-20250514',
-  'claude-haiku-4-5', 'claude-haiku-4-5-20251001',
-]);
+const OFFICIAL_CLAUDE_IDS = new Set(ANTHROPIC_OFFICIAL_MODEL_IDS);
 const OPENAI_MODEL_DOCUMENTATION = new Map([
   ['gpt-5.6-sol', 'https://developers.openai.com/api/docs/models/gpt-5.6-sol'],
   ['gpt-5.6-terra', 'https://developers.openai.com/api/docs/models/gpt-5.6-terra'],
@@ -218,11 +224,16 @@ function ownerVisiblePricing(model) {
   if (pricing && ['per-token', 'per-million-tokens', 'zero', 'local-compute'].includes(pricing.basis)
     && (Number.isFinite(pricing.input) || Number.isFinite(pricing.output))
     && /^[A-Z]{3}$/.test(pricing.currency ?? '')) {
+    const refs = new Set(pricing.evidenceRefs ?? []);
+    const anthropicDocs = model.evidence.some((entry) => refs.has(entry.id)
+      && entry.source === 'anthropic-docs' && entry.class === 'first-party');
     return {
       basis: pricing.basis, input: pricing.input, output: pricing.output, currency: pricing.currency,
       effectiveAt: pricing.effectiveAt,
-      source: pricing.basis === 'local-compute' ? 'local installation evidence' : 'catalogue evidence',
-      asOf: null, matched: true,
+      source: pricing.basis === 'local-compute' ? 'local installation evidence'
+        : anthropicDocs ? 'Anthropic Models and pricing' : 'catalogue evidence',
+      sourceUrl: anthropicDocs ? ANTHROPIC_PRICING_URL : null,
+      asOf: anthropicDocs ? PRICES_AS_OF : null, matched: true,
     };
   }
   const published = priceFor(model.key.modelId, model.key.provider);
@@ -299,14 +310,20 @@ function publicModelIdentity(model) {
     };
   }
   if (model.key.host === 'claude' && OFFICIAL_CLAUDE_IDS.has(model.key.modelId)
-    && hasEvidence(model, (entry) => (entry.source === 'claude-config'
+    && hasEvidence(model, (entry) => (entry.source === 'anthropic-docs'
+      && entry.class === 'first-party') || (entry.source === 'claude-config'
       && ['configured', 'first-party'].includes(entry.class))
       || (entry.source === 'usage-index' && entry.class === 'observed'))) {
+    const catalogPublic = hasEvidence(model, (entry) => entry.source === 'anthropic-docs'
+      && entry.class === 'first-party');
     return {
-      humanName: claudeHumanName(model.key.modelId), selector: model.key.modelId,
+      humanName: catalogPublic
+        ? boundedPublicText(model.displayName) ?? claudeHumanName(model.key.modelId)
+        : claudeHumanName(model.key.modelId),
+      selector: model.key.modelId,
       servingProvider: 'anthropic',
       publisher: 'Anthropic', family: model.key.modelId.split('-')[1],
-      links: [{ kind: 'documentation', label: 'Claude models', url: 'https://platform.claude.com/docs/en/about-claude/models/overview' }],
+      links: [{ kind: 'documentation', label: 'Anthropic Models', url: ANTHROPIC_MODELS_URL }],
     };
   }
   const catalog = model.variant?.catalog;
@@ -621,7 +638,8 @@ export function createDashboardModelReadModel(snapshotValue, options = {}) {
       : PUBLIC_SOURCE_OWNERS.has(source.owner) ? source.owner : privateLabel('owner', source.owner, key),
     schema: publicSchema(source.schema),
     schemaVersion: typeof source.schemaVersion === 'string' ? publicSchema(source.schemaVersion) : null,
-    sourceVersion: typeof source.sourceVersion === 'string' && /^v?\d+(?:\.\d+){0,3}$/.test(source.sourceVersion)
+    sourceVersion: typeof source.sourceVersion === 'string'
+      && /^(?:v?\d+(?:\.\d+){0,3}|20\d{2}-\d{2}-\d{2})$/.test(source.sourceVersion)
       ? source.sourceVersion : null,
     scopeFingerprint: privateLabel('scope', source.scopeFingerprint, key),
     diagnostics: source.diagnostics.map((item) => publicDiagnostic(item, key)),

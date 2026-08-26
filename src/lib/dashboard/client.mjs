@@ -1214,7 +1214,7 @@ export const JS = `
   function setUsageView(v,session){
     usageView=v;
     if(session!==undefined)usageSession=session;
-    var headings={score:["Usage scorecard","Token consumption, API-equivalent cost, efficiency, and trends."],limits:["Provider limits","Current provider windows, reset timing, and available capacity."],findings:["Usage findings","Actionable anomalies, efficiency opportunities, and evidence-backed recommendations."],sessions:["Session usage","Browse retained sessions by project, category, duration, tokens, and cost."],models:["Models","Observed models in this window, configured routes, and the separate available catalogue."],transcript:["Transcript detail","Inspect the selected session's locally retained, server-masked evidence."]},heading=headings[v]||headings.score;
+    var headings={score:["Usage scorecard","Token consumption, API-equivalent cost, efficiency, and trends."],limits:["Provider limits","Current provider windows, reset timing, and available capacity."],findings:["Usage findings","Actionable anomalies, efficiency opportunities, and evidence-backed recommendations."],sessions:["Session usage","Browse retained sessions by project, category, duration, tokens, and cost."],models:["Models","Observed models in this window, configured routes, and the separate provider/local catalogue."],transcript:["Transcript detail","Inspect the selected session's locally retained, server-masked evidence."]},heading=headings[v]||headings.score;
     document.getElementById("usage-view-title").textContent=heading[0];document.getElementById("usage-view-description").textContent=heading[1];
     var btns=document.querySelectorAll("#usage-seg [data-view]");
     for(var i=0;i<btns.length;i++){var on=btns[i].getAttribute("data-view")===v;btns[i].setAttribute("aria-selected",on?"true":"false");btns[i].tabIndex=on?0:-1;}
@@ -1866,7 +1866,7 @@ export const JS = `
     configured:"No active route or configuration evidence established this field.",
     effective:"No active route or configuration evidence established this field.",
     observed:"No retained successful-use evidence established this field.",
-    discoverable:"The source did not establish catalog visibility.",
+    discoverable:"No accepted provider or local catalogue source established publication or discovery.",
     entitled:"Catalog visibility does not prove account access.",
     policyAllowed:"No policy source established this field.",
     routable:"No complete host, provider, and authentication path evidence established this field."
@@ -1942,7 +1942,7 @@ export const JS = `
     }
     var cited=esc(source);
     if(pricing&&pricing.sourceUrl){
-      try{var sourceUrl=new URL(String(pricing.sourceUrl));if(sourceUrl.protocol==="https:"&&sourceUrl.hostname==="developers.openai.com")cited='<a href="'+esc(sourceUrl.href)+'" target="_blank" rel="noopener noreferrer">'+esc(source)+'</a>';}catch(e){}
+      try{var sourceUrl=new URL(String(pricing.sourceUrl));if(sourceUrl.protocol==="https:"&&["developers.openai.com","platform.claude.com"].indexOf(sourceUrl.hostname)>=0)cited='<a href="'+esc(sourceUrl.href)+'" target="_blank" rel="noopener noreferrer">'+esc(source)+'</a>';}catch(e){}
     }
     return '<span class="mli-rate"><b>'+esc(rate)+'</b><small>'+cited+' · '+esc(mliPlanUse(host))+'</small></span>';
   }
@@ -1954,7 +1954,8 @@ export const JS = `
     if(cap.embedding)names.push('Embeddings');
     if(cap.input&&cap.input.image)names.push('Vision');
     if(cap.structuredOutput)names.push('Structured output');
-    if(cap.contextLimit)names.push('Context '+cap.contextLimit);
+    if(cap.contextLimit)names.push('Context '+fmtNum(cap.contextLimit));
+    if(cap.outputLimit)names.push('Output '+fmtNum(cap.outputLimit));
     return names.length?names.join(' · '):'No capability metadata recorded';
   }
 
@@ -2049,7 +2050,18 @@ export const JS = `
   function mliDetail(model){
     var detail=document.getElementById('mli-detail'),body=document.getElementById('mli-detail-body'),title=document.getElementById('mli-detail-title');
     if(!detail||!body||!title||!model)return;
-    var id=mliIdentity(model),life=model.lifecycle||{},variants=model.variant||{},observed=model.dimensions&&model.dimensions.observed;
+    var id=mliIdentity(model),life=model.lifecycle||{},variants=model.variant||{},dimensions=model.dimensions||{},observed=dimensions.observed||{};
+    var published=dimensions.discoverable||{},entitled=dimensions.entitled||{},routable=dimensions.routable||{},configured=dimensions.configured||{};
+    var publishedText=published.value===true?'Published by an accepted source':published.value===false?'Not published by the accepted source':'Not established';
+    var accessText=entitled.value===true?'Established for the observed account and path':entitled.value===false?'Not entitled in the accepted evidence':'Not established; public metadata is not account access';
+    var routableText=routable.value===true?'Observed working on this exact path':routable.value===false?'Not routable in the accepted evidence':'Not established on this host/provider/account path';
+    var nextStep=routable.value===true?'No evidence step needed; this exact path was observed working at capture time.'
+      :(configured.value===true?'Complete one successful invocation on this exact path, then run ak models refresh.'
+        :'Configure the exact model on an intended route, authenticate its serving provider, complete one successful invocation, then run ak models refresh.');
+    var lifecycleScope=variants.lifecycleScope?'<div><dt>Lifecycle scope</dt><dd>'+esc(variants.lifecycleScope)+'</dd></div>':'';
+    var availability=variants.availability?'<div><dt>Published availability</dt><dd>'+esc(variants.availability)+'</dd></div>':'';
+    var retirement=variants.retiredAt?'<div><dt>Retired</dt><dd>'+esc(variants.retiredAt)+'</dd></div>'
+      :(variants.retirementNotBefore?'<div><dt>Retirement commitment</dt><dd>Not before '+esc(variants.retirementNotBefore)+'</dd></div>':'');
     var local=id.provider==='ollama'?'<div><dt>Local installation</dt><dd>Installed'+(variants.modifiedAt?' · updated '+esc(variants.modifiedAt):'')+'</dd></div>'
       +'<div><dt>Loaded now</dt><dd>'+esc(variants.loaded?'Yes':'No')+(variants.expiresAt?' · expires '+esc(variants.expiresAt):'')+'</dd></div>'
       +'<div><dt>Local model build</dt><dd>'+esc([variants.parameterSize,variants.quantizationLevel,variants.format].filter(Boolean).join(' · ')||'Not exposed')+'</dd></div>'
@@ -2060,8 +2072,13 @@ export const JS = `
       +'<div><dt>Model provider</dt><dd>'+esc(id.provider||'Not recorded')+'</dd></div>'
       +'<div><dt>Publisher</dt><dd>'+esc(id.publisher||'Not independently proven')+'</dd></div>'
       +'<div><dt>Lifecycle</dt><dd>'+esc(life.state||'unknown')+(life.replacementName?' → '+esc(life.replacementName):'')+'</dd></div>'
+      +lifecycleScope+availability+retirement
       +'<div><dt>Observed use</dt><dd>'+esc(observed&&observed.value===true?'Observed locally':'Not observed')+'</dd></div>'
-      +'<div><dt>Context limit</dt><dd>'+esc(variants.contextWindow||model.capabilities&&model.capabilities.contextLimit||'Not exposed')+'</dd></div>'
+      +'<div><dt>Published / discovered</dt><dd>'+esc(publishedText)+'</dd></div>'
+      +'<div><dt>Account access</dt><dd>'+esc(accessText)+'</dd></div>'
+      +'<div><dt>Local routability</dt><dd>'+esc(routableText)+'</dd></div>'
+      +'<div><dt>What you need to do</dt><dd>'+esc(nextStep)+'</dd></div>'
+      +'<div><dt>Context limit</dt><dd>'+esc(variants.contextWindow||model.capabilities&&model.capabilities.contextLimit||'Not established by accepted sources')+'</dd></div>'
       +'<div><dt>Capabilities</dt><dd>'+esc(mliCapabilities(model))+'</dd></div>'
       +'<div><dt>API rate / plan use</dt><dd>'+mliPrice(model.pricing,id.host)+'</dd></div>'
       +local
@@ -2137,7 +2154,7 @@ export const JS = `
     options("mli-host","All hosts",values("hosts",function(id){return id.host;}));
     options("mli-provider","All providers",values("providers",function(id){return id.provider;}));
     options("mli-lifecycle","Any lifecycle",values("lifecycles",function(){return null;}));
-    var dimensions=facets.dimensions||{},labels={configured:'Configured',effective:'Effective',observed:'Observed',discoverable:'Available',entitled:'Entitled',policyAllowed:'Policy',routable:'Routable'};
+    var dimensions=facets.dimensions||{},labels={configured:'Configured',effective:'Effective',observed:'Observed',discoverable:'Catalogued',entitled:'Entitled',policyAllowed:'Policy',routable:'Routable'};
     var fields=Object.keys(labels).filter(function(name){return Array.isArray(dimensions[name])&&dimensions[name].length>=2;});
     var field=document.getElementById('mli-evidence-field'),selected=field&&field.value;
     if(field){

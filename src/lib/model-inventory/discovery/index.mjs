@@ -17,16 +17,17 @@ export function scopeFingerprint(owner, scope = {}, key) {
 
 export function sourceRecord({
   id, owner, ownerType = null, transport = null, network = null, mode = 'local', scope, scopeKey,
-  capturedAt, complete, schema, freshness = 'current', status = null, diagnostics = [],
+  capturedAt, complete, schema, sourceVersion = null, freshness = 'current', status = null,
+  diagnostics = [], evidenceClass = null, refs = [],
 }) {
   const fingerprint = scopeFingerprint(owner, scope, scopeKey);
   return {
-    id, owner, ownerType, transport, network, mode, schema, schemaVersion: schema, sourceVersion: null,
+    id, owner, ownerType, transport, network, mode, schema, schemaVersion: schema, sourceVersion,
     capturedAt: capturedAt ?? new Date().toISOString(),
     scopeId: fingerprint, scopeFingerprint: fingerprint,
     complete: Boolean(complete), freshness,
     status: status ?? (complete ? (freshness === 'stale' ? 'stale' : 'complete') : 'partial'),
-    diagnostics,
+    diagnostics, evidenceClass, refs,
   };
 }
 
@@ -53,7 +54,8 @@ export function modelRecord({ host, provider = null, modelId, scopeId, displayNa
     evidence.push({
       id, field, source: source.id, class: klass, capturedAt: source.capturedAt,
       freshness: source.freshness === 'stale' ? 'stale' : 'fresh',
-      completeness: source.complete ? 'complete' : 'partial', scopeFingerprint: scopeId, refs: [],
+      completeness: source.complete ? 'complete' : 'partial', scopeFingerprint: scopeId,
+      refs: Array.isArray(source.refs) ? source.refs : [],
     });
     return id;
   };
@@ -80,7 +82,8 @@ export function modelRecord({ host, provider = null, modelId, scopeId, displayNa
   const edges = [
     ...normalizedAliases.filter(({ resolvesTo }) => resolvesTo).map((alias) => ({
       kind: 'resolves-to', from: alias.name, to: alias.resolvesTo,
-      provenance: 'configured', scopeFingerprint: scopeId, evidenceRefs: alias.evidenceRefs,
+      provenance: evidenceClass === 'first-party' ? 'first-party' : 'configured',
+      scopeFingerprint: scopeId, evidenceRefs: alias.evidenceRefs,
     })),
     ...(replacement ? [{
       kind: 'first-party-migration', from: modelId, to: replacement,

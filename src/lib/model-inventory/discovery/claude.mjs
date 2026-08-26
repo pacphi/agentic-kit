@@ -1,6 +1,7 @@
 import {
   MAX_CONFIG_BYTES, MAX_MODELS, diagnostic, modelRecord, sourceRecord,
 } from './index.mjs';
+import { discoverAnthropicPublicCatalog } from './anthropic-catalog.mjs';
 
 const ALIAS_ENV = Object.freeze({
   sonnet: 'ANTHROPIC_DEFAULT_SONNET_MODEL',
@@ -25,6 +26,7 @@ const boundedModel = (value) => typeof value === 'string' && value.length > 0 &&
 export function discoverClaude({
   settingsRaw, managedSettingsRaw, capturedAt, scope = {}, scopeKey, environment = {},
 } = /** @type {any} */ ({})) {
+  const publicCatalog = discoverAnthropicPublicCatalog({ capturedAt, scope, scopeKey });
   let settings;
   let managed;
   try {
@@ -32,7 +34,10 @@ export function discoverClaude({
     managed = parseSettings(managedSettingsRaw, 'managed-settings');
   } catch (error) {
     const source = sourceRecord({ id: 'claude-config', owner: 'claude', scope, scopeKey, capturedAt, complete: false, status: 'unsupported-schema', schema: 'claude-settings-v1', diagnostics: ['unsupported-schema'] });
-    return { status: 'unsupported-schema', source, models: [], diagnostics: [diagnostic('unsupported-schema', error.message)] };
+    return {
+      status: 'partial', source, sources: [publicCatalog.source], models: publicCatalog.models,
+      diagnostics: [diagnostic('unsupported-schema', error.message)],
+    };
   }
 
   const env = { ...(settings.env && typeof settings.env === 'object' ? settings.env : {}), ...environment };
@@ -42,10 +47,15 @@ export function discoverClaude({
     ? managed.availableModels.filter(boundedModel).slice(0, MAX_MODELS) : [];
   const complete = !Array.isArray(managed.availableModels) || managed.availableModels.length <= MAX_MODELS;
   const source = sourceRecord({ id: 'claude-config', owner: 'claude', scope, scopeKey, capturedAt, complete, schema: 'claude-settings-v1' });
+  const publicAliasTargets = new Map(publicCatalog.models.flatMap((model) => (
+    model.aliases.map(({ name, resolvesTo }) => [name, resolvesTo])
+  )));
+  const canonicalTarget = (reference) => publicAliasTargets.get(reference) ?? reference;
   const records = new Map();
   const add = (reference, states = {}) => {
     const alias = Object.hasOwn(ALIAS_ENV, reference) ? reference : null;
-    const target = alias ? boundedModel(env[ALIAS_ENV[alias]]) ?? reference : reference;
+    const configuredTarget = alias ? boundedModel(env[ALIAS_ENV[alias]]) ?? reference : reference;
+    const target = canonicalTarget(configuredTarget);
     if (!boundedModel(target)) return;
     const prior = records.get(target);
     const aliases = prior?.aliases ?? [];
@@ -59,10 +69,14 @@ export function discoverClaude({
   };
   for (const model of allowed) add(model, { policyAllowed: true, discoverable: true });
   if (configured) add(configured, { configured: true, effective: true,
-    policyAllowed: allowed.length ? allowed.includes(configured) || allowed.includes(records.get(configured)?.aliases?.[0]?.name) : 'unknown' });
+    policyAllowed: allowed.length
+      ? allowed.some((reference) => canonicalTarget(reference) === canonicalTarget(configured))
+      : 'unknown' });
 
   return {
-    status: complete ? 'complete' : 'partial', source, models: [...records.values()],
+    status: complete && publicCatalog.source.status === 'complete' ? 'complete' : 'partial',
+    source, sources: [publicCatalog.source],
+    models: [...records.values(), ...publicCatalog.models],
     diagnostics: complete ? [] : [diagnostic('model-cap', `availableModels exceeds ${MAX_MODELS}`)],
   };
 }

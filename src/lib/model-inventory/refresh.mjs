@@ -12,13 +12,18 @@ import { modelRecord, scopeFingerprint } from './discovery/index.mjs';
 import { MODEL_DISCOVERY_REGISTRY } from '../adapters/registries.mjs';
 
 const CONTACT = Object.freeze({
-  'claude-config': 'Claude local settings', 'codex-cache': 'Codex local model cache',
+  'claude-config': 'Claude local settings and bundled Anthropic public model record',
+  'codex-cache': 'Codex local model cache',
   'opencode-models': 'opencode catalog', 'ollama-catalog': 'local Ollama daemon',
 });
 const MODEL_ENV = Object.freeze([
   'ANTHROPIC_MODEL', 'ANTHROPIC_DEFAULT_SONNET_MODEL',
   'ANTHROPIC_DEFAULT_OPUS_MODEL', 'ANTHROPIC_DEFAULT_HAIKU_MODEL',
 ]);
+const FIRST_PARTY_PROVIDER_BY_HOST = Object.freeze({
+  claude: 'anthropic',
+  codex: 'openai',
+});
 
 function readOptional(file, readFileFn) {
   if (!file) return undefined;
@@ -106,9 +111,31 @@ export async function collectModelInventory({
   };
 }
 
-function mergeModels(records) {
+function joinFirstPartyProviderEvidence(records) {
+  const established = new Set(records.flatMap((record) => {
+    const provider = FIRST_PARTY_PROVIDER_BY_HOST[record.key.host];
+    return provider && record.key.provider === provider
+      ? [modelIdentityKey({ ...record.key, provider: null })] : [];
+  }));
+  return records.map((record) => {
+    const provider = FIRST_PARTY_PROVIDER_BY_HOST[record.key.host];
+    if (!provider || record.key.provider != null
+      || !established.has(modelIdentityKey(record.key))) return record;
+    // The host-owned catalogue did not establish a serving provider. Once a
+    // separate source establishes this exact host/model/scope/digest as the
+    // host's first-party provider, attach the neutral facts to that identity.
+    // Never apply this join to a custom/gateway provider.
+    return {
+      ...record,
+      key: { ...record.key, provider },
+      identity: { ...record.identity, provider },
+    };
+  });
+}
+
+function mergeModels(inputRecords) {
   const merged = new Map();
-  for (const record of records) {
+  for (const record of joinFirstPartyProviderEvidence(inputRecords)) {
     const identity = modelIdentityKey(record.key);
     const prior = merged.get(identity);
     if (!prior) { merged.set(identity, structuredClone(record)); continue; }
@@ -124,15 +151,23 @@ function mergeModels(records) {
         evidenceRefs: [...new Set(values.flatMap((entry) => entry?.evidenceRefs ?? []))],
       };
     }
+    const displayName = record.displayName && record.displayName !== record.key.modelId
+      ? record.displayName : prior.displayName;
+    const edges = [...(prior.edges ?? []), ...(record.edges ?? [])]
+      .filter((entry, index, all) => all.findIndex((candidate) =>
+        ['kind', 'from', 'to', 'provenance'].every((field) => candidate[field] === entry[field])) === index);
     merged.set(identity, {
       ...prior,
-      displayName: prior.displayName || record.displayName,
+      displayName: displayName || record.displayName,
       aliases: [...prior.aliases, ...record.aliases]
         .filter((entry, index, all) => all.findIndex(({ name, resolvesTo }) => name === entry.name && resolvesTo === entry.resolvesTo) === index),
       variant: { ...prior.variant, ...record.variant },
       lifecycle: record.lifecycle?.state !== 'unknown' ? record.lifecycle : prior.lifecycle,
       capabilities: { ...prior.capabilities, ...record.capabilities },
-      dimensions, evidence,
+      pricing: record.pricing ?? prior.pricing,
+      visibility: dimensions.discoverable.value === true ? 'visible'
+        : dimensions.discoverable.value === false ? 'hidden' : 'unknown',
+      edges, dimensions, evidence,
     });
   }
   return [...merged.values()];
@@ -219,7 +254,10 @@ export function composeModelSnapshot(collection, {
     .map((result) => [result.source.owner ?? result.source.id, result.source.scopeFingerprint]));
   const hosts = Object.keys(collection?.discovery?.results ?? {}).sort();
   const fingerprint = scopeFingerprint('inventory', { ...scope, hosts: hosts.join(',') }, scopeKey);
-  const sources = [...discoveryResults.map(({ source }) => source), collection?.observed?.source]
+  const sources = [
+    ...discoveryResults.flatMap(({ source, sources: additional = [] }) => [source, ...additional]),
+    collection?.observed?.source,
+  ]
     .filter(Boolean)
     .map((source) => ({ ...source, scopeFingerprint: fingerprint, scopeId: fingerprint }));
   const discoveredAndObserved = mergeModels([

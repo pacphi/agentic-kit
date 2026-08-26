@@ -202,6 +202,12 @@ OpenCode, or local models therefore do not disappear merely because they are not
 The collapsed catalogue separately answers what is installed or discoverable; catalogue presence
 does not claim use.
 
+Claude refresh also reads a dated first-party record bundled with Agentic Kit from Anthropic's
+public model overview and deprecation tables. It can establish published model identity,
+specifications, lifecycle, and pricing without an API key. It cannot establish access for a Claude
+Code plan, Anthropic API account, Bedrock/Vertex deployment, or OpenRouter route. Upgrade Agentic Kit
+to receive a newer public record, then run `ak models refresh --host claude`.
+
 The view fetches a compact, windowed summary first, then a 50-row relevant inventory page. Search
 and facet-counted filters for host, model provider, relevance, lifecycle, and evidence request fresh
 bounded pages; controls with fewer than two meaningful choices are suppressed. **Load 50 more**
@@ -226,12 +232,19 @@ online refresh; selector syntax or verbose metadata alone never makes a row publ
 provider, publisher, model selector, catalogue source, and entitlement remain independent. Each
 state and lifecycle value expands to its source,
 class, capture time, freshness, completeness, scope, or a field-specific explanation of missing
-evidence. Model-specific foreground/background pairs meet WCAG AA in both themes, and the same table
+evidence. The discovery column is labelled **Catalogued**; details separately state account access,
+local routability, and the next step. To establish routability, configure the exact host/provider/
+model path, authenticate the serving provider, complete one successful invocation, and refresh.
+Model-specific foreground/background pairs meet WCAG AA in both themes, and the same table
 remains operable at narrow widths.
 
 The Overview Model lifecycle summary links to `#usage/models`. The view has no mutation control.
 It points to the read-only `ak models plan` command, which can emit a copyable canonical
 `ak host pick` action but cannot execute it. See [Model lifecycle intelligence](MODELS.md).
+
+The lifecycle payload is separate from the Usage session/transcript and Observability live/history
+payloads. Public catalogue enrichment cannot rename, re-price, add, or remove a retained session or
+transcript model record.
 
 The Scorecard view also shows a host-neutral **telemetry coverage** panel for Claude, Codex
 transcript evidence, and OpenCode. It reports parsed units and observed prompt/response totals, plus

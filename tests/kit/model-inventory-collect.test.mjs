@@ -119,6 +119,59 @@ test('snapshot composition emits a normalized same-scope stable baseline', async
   assert.equal(snapshot.sources.every((source) => source.scopeFingerprint === snapshot.scope.fingerprint), true);
 });
 
+test('Codex cache facts join an independently observed OpenAI path without duplicate casing rows', async () => {
+  const collection = await collectModelInventory({
+    discoveryOptions: {
+      owners: ['codex'], scopeKey: SCOPE_KEY, capturedAt: '2026-08-25T13:00:00.000Z',
+      inputs: { codex: { cacheRaw: JSON.stringify({ models: [{
+        slug: 'gpt-5.6-terra', display_name: 'GPT-5.6-Terra', visibility: 'list',
+      }] }), configRaw: '' } },
+    },
+    readIndexFn: async () => ({
+      generatedAt: '2026-08-25T13:00:00.000Z',
+      sessions: [{ host: 'codex', provider: 'openai', models: ['gpt-5.6-terra'] }],
+    }),
+    scopeKey: SCOPE_KEY,
+  });
+  const snapshot = composeModelSnapshot(collection, {
+    scopeKey: SCOPE_KEY, capturedAt: '2026-08-25T13:00:00.000Z',
+  });
+  const matches = snapshot.models.filter(({ key }) => key.modelId === 'gpt-5.6-terra');
+  assert.equal(matches.length, 1);
+  assert.deepEqual({
+    provider: matches[0].key.provider,
+    displayName: matches[0].displayName,
+    observed: matches[0].dimensions.observed.value,
+    discoverable: matches[0].dimensions.discoverable.value,
+  }, {
+    provider: 'openai', displayName: 'GPT-5.6-Terra', observed: true, discoverable: true,
+  });
+  assert.deepEqual(new Set(matches[0].evidence.map(({ source }) => source)),
+    new Set(['codex-cache', 'usage-index']));
+});
+
+test('provider-neutral Codex catalogue facts do not collapse a custom provider path', async () => {
+  const collection = await collectModelInventory({
+    discoveryOptions: {
+      owners: ['codex'], scopeKey: SCOPE_KEY, capturedAt: '2026-08-25T13:00:00.000Z',
+      inputs: { codex: { cacheRaw: JSON.stringify({ models: [{
+        slug: 'gpt-custom', display_name: 'GPT Custom', visibility: 'list',
+      }] }), configRaw: '' } },
+    },
+    readIndexFn: async () => ({
+      generatedAt: '2026-08-25T13:00:00.000Z',
+      sessions: [{ host: 'codex', provider: 'custom-gateway', models: ['gpt-custom'] }],
+    }),
+    scopeKey: SCOPE_KEY,
+  });
+  const snapshot = composeModelSnapshot(collection, {
+    scopeKey: SCOPE_KEY, capturedAt: '2026-08-25T13:00:00.000Z',
+  });
+  assert.deepEqual(snapshot.models.filter(({ key }) => key.modelId === 'gpt-custom')
+    .map(({ key }) => key.provider).sort((a, b) => (a ?? '').localeCompare(b ?? '')),
+  [null, 'custom-gateway']);
+});
+
 test('Claude descriptor reads managed policy and only whitelisted process model environment', async () => {
   const reads = [];
   const result = await refreshModelDiscovery({
@@ -138,4 +191,61 @@ test('Claude descriptor reads managed policy and only whitelisted process model 
   assert.equal(result.results.claude.models[0].key.modelId, 'claude-sonnet-managed');
   assert.equal(JSON.stringify(result).includes('must-not-cross'), false);
   assert.deepEqual([result.results.claude.source.owner, result.results.claude.source.mode], ['claude', 'local']);
+});
+
+test('Claude snapshot merges public facts while preserving field-specific access evidence', async () => {
+  const collection = await collectModelInventory({
+    discoveryOptions: {
+      owners: ['claude'], scopeKey: SCOPE_KEY, capturedAt: '2026-08-25T13:00:00.000Z',
+      inputs: { claude: { settingsRaw: JSON.stringify({ model: 'claude-fable-5' }) } },
+    },
+    readIndexFn: async () => ({
+      generatedAt: '2026-08-25T13:00:00.000Z',
+      sessions: [{ host: 'claude', provider: 'anthropic', models: ['claude-fable-5'] }],
+    }),
+    scopeKey: SCOPE_KEY,
+  });
+  const snapshot = composeModelSnapshot(collection, {
+    scopeKey: SCOPE_KEY, capturedAt: '2026-08-25T13:00:00.000Z',
+  });
+  const fable = snapshot.models.find(({ key }) => key.modelId === 'claude-fable-5');
+  assert.deepEqual({
+    displayName: fable.displayName,
+    provider: fable.key.provider,
+    configured: fable.dimensions.configured.value,
+    observed: fable.dimensions.observed.value,
+    discoverable: fable.dimensions.discoverable.value,
+    entitled: fable.dimensions.entitled.value,
+    routable: fable.dimensions.routable.value,
+    lifecycle: fable.lifecycle.state,
+  }, {
+    displayName: 'Claude Fable 5', provider: 'anthropic', configured: true, observed: true, discoverable: true,
+    entitled: true, routable: true, lifecycle: 'active',
+  });
+  assert.equal(fable.pricing.input, 10);
+  assert.equal(fable.pricing.output, 50);
+  assert.deepEqual(new Set(fable.evidence.map(({ source }) => source)),
+    new Set(['anthropic-docs', 'claude-config', 'usage-index']));
+  assert.deepEqual(new Set(snapshot.sources.map(({ id }) => id)),
+    new Set(['anthropic-docs', 'claude-config', 'usage-index']));
+});
+
+test('Claude public aliases merge into one configured canonical model record', async () => {
+  const collection = await collectModelInventory({
+    discoveryOptions: {
+      owners: ['claude'], scopeKey: SCOPE_KEY, capturedAt: '2026-08-25T13:00:00.000Z',
+      inputs: { claude: { settingsRaw: JSON.stringify({ model: 'claude-opus-4-5' }) } },
+    },
+    readIndexFn: async () => ({ generatedAt: '2026-08-25T13:00:00.000Z', sessions: [] }),
+    scopeKey: SCOPE_KEY,
+  });
+  const snapshot = composeModelSnapshot(collection, {
+    scopeKey: SCOPE_KEY, capturedAt: '2026-08-25T13:00:00.000Z',
+  });
+  assert.equal(snapshot.models.some(({ key }) => key.modelId === 'claude-opus-4-5'), false);
+  const opus = snapshot.models.find(({ key }) => key.modelId === 'claude-opus-4-5-20251101');
+  assert.equal(opus.dimensions.configured.value, true);
+  assert.equal(opus.lifecycle.state, 'active');
+  assert.equal(opus.capabilities.contextLimit, 200_000);
+  assert.equal(opus.aliases.some(({ name }) => name === 'claude-opus-4-5'), true);
 });

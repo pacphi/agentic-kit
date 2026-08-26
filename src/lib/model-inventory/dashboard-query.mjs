@@ -100,7 +100,8 @@ function parseQuery(raw) {
 
 function isRelevant(model) {
   return ['configured', 'effective', 'observed'].some((name) => model.dimensions[name]?.value === true)
-    || ['removed', 'retiring', 'deprecated', 'hidden'].includes(model.lifecycle.state);
+    || (model.dimensions.discoverable?.value === true
+      && ['retiring', 'deprecated', 'hidden'].includes(model.lifecycle.state));
 }
 
 function matchesDimension(model, name, filter) {

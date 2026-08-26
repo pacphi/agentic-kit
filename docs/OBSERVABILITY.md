@@ -36,7 +36,9 @@ request. Stopping the dashboard closes the live service and all clients.
 
 Model lifecycle is a separate read model under **Usage → Models**. It may consume bounded model ids
 already derived by the historical usage index, but it never consumes live transcript content
-or changes Observability state. Catalogue collection remains explicit through `ak models refresh`;
+or changes Observability state. Public catalogue enrichment cannot rename, add, remove, or alter
+model attribution in either the Live or History view. Catalogue collection remains explicit through
+`ak models refresh`;
 see [Model lifecycle intelligence](MODELS.md).
 
 ## Read Observability in 30 seconds

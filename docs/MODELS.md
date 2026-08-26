@@ -13,6 +13,8 @@ canonical routing surfaces.
 
 ```bash
 ak models refresh
+# After upgrading Agentic Kit, refresh only Claude evidence if that is all you need:
+ak models refresh --host claude
 ak models status
 ak models diff
 ak models explain codex:gpt-5.6-terra
@@ -25,7 +27,8 @@ the `ak status` models row, and the Dashboard's **Usage → Models** view read t
 Use `--json` with any command for the normalized evidence contract. Use `--host HOST` to select
 one source, `--all` for Claude, Codex, OpenCode, and Ollama, and `refresh --online` to permit
 OpenCode's explicit catalogue refresh. Ordinary refresh does not opt into an online catalogue
-request.
+request. Claude refresh includes Agentic Kit's dated, bundled transcription of Anthropic's public
+model and deprecation records; it does not require an Anthropic API key or make a network request.
 
 ## What each state means
 
@@ -49,10 +52,11 @@ completeness.
 
 ## Sources and scope
 
-The initial source adapters are:
+The source adapters are:
 
-- Claude user settings, platform managed policy, model aliases, and a model-only environment
-  allowlist;
+- Claude user settings, platform managed policy, model aliases, a model-only environment allowlist,
+  and a dated first-party public record transcribed from Anthropic's model overview and model
+  deprecation tables;
 - the Codex model cache plus top-level `config.toml` model selection;
 - OpenCode's project/provider-scoped verbose `models` output plus its resolved `debug config` view;
 - the local Ollama `/api/tags`, bounded `/api/show`, and `/api/ps` catalogue/runtime facts; and
@@ -80,6 +84,19 @@ probes are excluded.
 
 The lookup contracts were checked against current first-party documentation in August 2026:
 
+- Anthropic's [Models overview](https://platform.claude.com/docs/en/about-claude/models/overview)
+  establishes current API ids, aliases, published availability, input/output modalities, context
+  and output limits, thinking support, and list prices. Its
+  [Model deprecations](https://platform.claude.com/docs/en/about-claude/model-deprecations) page
+  establishes lifecycle terms, retirement commitments or dates, and recommended replacements.
+  Lifecycle dates apply to Anthropic-operated platforms; Amazon Bedrock and Google Cloud can use
+  different schedules. Agentic Kit dates this bundled source and marks it stale after 90 days, so
+  updating Agentic Kit—not repeatedly refreshing the same installed version—is how public facts are
+  renewed.
+- Anthropic's authenticated [List Models API](https://platform.claude.com/docs/en/api/models/list)
+  can identify models available to one Anthropic API account and returns limits and capabilities.
+  Agentic Kit does not silently call it: an API-key-scoped result cannot prove Claude Code plan
+  access or partner/OpenRouter availability, and credentials never enter the inventory.
 - Claude accepts the `sonnet` and `opus` aliases or a full model name through its documented model
   selection surfaces ([Claude Code CLI reference](https://docs.anthropic.com/en/docs/claude-code/cli-usage)).
 - OpenCode exposes `opencode models [provider] --verbose`; `--refresh` refreshes its
@@ -109,10 +126,24 @@ HMAC-fingerprinted with a private per-install key; raw scope values do not enter
 private cache and key live under the Agentic Kit configuration directory with owner-only
 permissions.
 
+A host-owned first-party catalogue can omit provider identity even when usage evidence names it.
+For the same host, model id, scope, and digest, Agentic Kit joins provider-neutral Claude/Codex
+catalogue facts only when an independent record establishes the expected `anthropic`/`openai`
+provider path. This prevents duplicate title-case and lowercase rows without inferring that a
+custom gateway or other provider is the same deployment; those paths remain separate records.
+
 Known fields have field-specific evidence references. A configured route can prove `configured`, a
 structured successful invocation can prove the exact observed path's `observed`, `entitled`,
 `policyAllowed`, and `routable` facts at capture time, and a catalogue can prove `discoverable`.
 None of those facts silently strengthens another path or establishes catalogue completeness.
+
+For a current public Claude model, the bundled first-party record can therefore make publication,
+lifecycle, recommended status, context/output limits, supported modalities/tools/thinking, and a
+dated API list price known. `configured`, `entitled`, `policyAllowed`, and `routable` remain unknown
+until local evidence establishes each one. To establish the path in Agentic Kit, configure the exact
+model and serving provider on an intended route, authenticate that provider, complete one successful
+invocation, and run `ak models refresh` again. A Claude model published by Anthropic is not thereby
+proved routable through OpenRouter, Bedrock, Vertex, or a particular Claude subscription.
 
 ## Snapshots and diffs
 
@@ -176,14 +207,17 @@ pages. Search, access host, model provider, view, lifecycle, and evidence filter
 pagination. Every sortable catalogue column keeps unknown values last, and its bounded table
 scrolls internally with a sticky header and an explicit **Load 50 more** control.
 
-A lifecycle migration becomes an alert only when the snapshot includes a direct first-party
-withdrawal-notice URL and matching first-party lifecycle evidence. A local host cache's `upgrade`
-hint or a preferred successor remains a discovery detail, never a retirement claim or route rewrite.
+A lifecycle migration becomes an alert only when the model is configured/effective or observed
+locally and the snapshot includes a direct first-party withdrawal-notice URL with matching
+first-party lifecycle evidence. Provider history remains available in the full catalogue but does
+not flood the in-use view or create local migration warnings. A local host cache's `upgrade` hint or
+a preferred successor remains a discovery detail, never a retirement claim or route rewrite.
 
 Source-proven public catalogue records show a human name, host, publisher when proven, serving
-provider when known, exact public selector, and trusted documentation/catalogue links. Codex cache
-identity and exact documented Claude ids or aliases from the maintained allowlist can qualify
-locally. OpenCode identity qualifies
+provider when known, exact public selector, and trusted documentation/catalogue links. The bundled
+Anthropic record supplies first-party public identity, specifications, lifecycle scope, and
+publication status for its exact documented Claude ids and aliases. Codex cache identity can
+qualify locally. OpenCode identity qualifies
 only after `refresh --online` exact-joins the selector to the independently fetched, size-bounded
 Models.dev catalogue; provider syntax or verbose metadata alone is not proof. The Models.dev source
 link remains generic unless that source supplies an exact canonical page. Hugging Face and Ollama
@@ -195,7 +229,10 @@ and endpoints remain hidden transport joins only. Change history uses the same o
 model identity as the route and catalogue views, but never exposes the underlying identity join. The
 browser never derives a provider or publisher from a name and never invents an external link.
 
-An `unknown` cell explains which evidence is absent. A local refresh now resolves OpenCode's
+An `unknown` cell explains which evidence is absent. Model details separately name published or
+discovered status, account access, local routability, and the operator's next evidence step. The
+table labels the discovery dimension **Catalogued**, not **Available**, so provider publication or
+local discovery cannot be mistaken for account entitlement. A local refresh now resolves OpenCode's
 effective configuration, removing unknowns caused only by ignored global, JSONC, agent, or command
 layers. Discovery still does not establish entitlement; configuration does not establish successful
 use; and a model id never establishes the serving provider. Catalog Explorer model details show an
@@ -215,6 +252,10 @@ endpoints, scope, digests, aliases, and evidence identifiers never cross that bo
 cache degrades to an empty readable store;
 run `ak models refresh` to rebuild it. A source schema failure is isolated to that source and shown
 as `unsupported-schema` rather than converted to an empty catalogue.
+
+This enrichment never rewrites Historical Usage sessions, prices, transcript model attribution, or
+Observability live/history records. Those contexts remain source owners; Model lifecycle consumes
+only their bounded aggregate host/provider/model facts and publishes a separate cache/read model.
 
 For common failures, see [Troubleshooting](TROUBLESHOOTING.md). The domain and decision records are
 [Model lifecycle intelligence](ddd/model-lifecycle-intelligence.md) and

@@ -227,8 +227,8 @@ tracked capability requests with honest interim behaviour rather than pretended 
 a governance decision; the machinery (the trust CLI, external execution, tiered conformance, the
 grant store) is staged and self-graded in the ADR's implementation-status table.
 
-**0032** accepts Model lifecycle intelligence as a new bounded context. Its implementation is
-complete on the issue branch, with exact-head release proof still pending. It keeps configured,
+**0032** accepts Model lifecycle intelligence as a new bounded context. Its implementation and
+exact-head release proof are recorded in the decision. It keeps configured,
 effective, observed, discoverable, entitled, policy-allowed,
 routable, lifecycle, and recommended state independent; normalizes host/provider catalogues through
 bounded descriptor-driven source adapters; and persists sanitized same-scope snapshots whose

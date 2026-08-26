@@ -44,6 +44,11 @@ are cache-only. Discovery does not prove quality or mutate provider/routing conf
 `refresh --online` is the only permitted online-catalogue boundary. See [Model lifecycle
 intelligence](MODELS.md).
 
+Claude refresh includes a network-silent, dated Anthropic public record. It proves Anthropic's
+published model facts, not that OpenRouter or another serving provider vends that model to this
+account. OpenRouter routability still requires an exact OpenRouter/OpenCode selector plus local
+configuration, authentication, policy, and successful-use evidence for that path.
+
 The model inventory may feed mechanically eligible candidates and stale-evidence markers to Route
 Intelligence, but it explicitly makes no quality or economic claim. Status can recommend an
 explicit model command; `ak sync` never executes model refresh or model-plan actions.

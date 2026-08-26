@@ -519,8 +519,9 @@ export function renderPage({ name, version }) {
     <section class="view" id="v-models" role="tabpanel" aria-labelledby="usage-tab-models" aria-busy="false" hidden>
       <div class="sr-only" id="mli-load-status" role="status" aria-live="polite" aria-atomic="true"></div>
       <div class="note"><span class="i">&#8505;</span><span>This is a <b>read-only operator view</b>.
-        It shows the routes you use first and keeps catalogue availability, account access, and observed use as separate evidence.
-        Unknown stays unknown; refresh is the only operation that contacts model sources.</span></div>
+        It shows the routes you use first and keeps provider publication, account access, and observed use as separate evidence.
+        To establish local routability, configure the exact path, authenticate its serving provider, complete one successful invocation,
+        then run <code>ak models refresh</code>. Unknown stays unknown; refresh is the only operation that contacts model sources.</span></div>
       <div class="mli-attention" id="mli-attention" role="status" aria-live="polite"></div>
       <section class="strip" id="mli-observed-panel">
         <div class="sh"><h2>Observed in this window</h2><span class="n mono" id="mli-observed-note"></span></div>
@@ -547,16 +548,16 @@ export function renderPage({ name, version }) {
         </table></div>
       </section>
       <details class="strip mli-ledger" id="mli-catalog-explorer">
-        <summary><span class="mli-ledger-title"><span class="chev" aria-hidden="true">&rsaquo;</span><span><b>Catalog explorer</b><small>Available and catalogue-only models are separate from your routes.</small></span></span><span class="n mono">catalogue-only models</span></summary>
+        <summary><span class="mli-ledger-title"><span class="chev" aria-hidden="true">&rsaquo;</span><span><b>Catalog explorer</b><small>Provider-published and local-catalogue models are separate from your routes.</small></span></span><span class="n mono">catalogue-only models</span></summary>
         <div class="mli-catalog-body">
         <div class="sh"><h2>Explore catalog</h2><span class="n mono">public metadata is not entitlement</span></div>
         <form class="mli-filters" id="mli-filters" role="search">
           <label class="mli-filter mli-filter-search" for="mli-search"><span>Search</span><input id="mli-search" name="search" type="search" autocomplete="off" placeholder="Name or selector"></label>
           <label class="mli-filter" for="mli-host"><span>Access host</span><select id="mli-host" name="host"><option value="">All hosts</option></select></label>
           <label class="mli-filter" for="mli-provider"><span>Model provider</span><select id="mli-provider" name="provider"><option value="">All providers</option></select></label>
-          <label class="mli-filter" for="mli-relevance"><span>View</span><select id="mli-relevance" name="relevance"><option value="relevant">In use</option><option value="catalog">Available</option><option value="all">All</option></select></label>
+          <label class="mli-filter" for="mli-relevance"><span>View</span><select id="mli-relevance" name="relevance"><option value="relevant">In use</option><option value="catalog">Catalog only</option><option value="all">All</option></select></label>
           <label class="mli-filter" for="mli-lifecycle"><span>Lifecycle</span><select id="mli-lifecycle" name="lifecycle"><option value="">Any lifecycle</option><option value="removed">Removed</option><option value="retiring">Retiring</option><option value="deprecated">Deprecated</option><option value="hidden">Hidden</option><option value="preview">Preview</option><option value="active">Active</option><option value="unknown">Unknown</option></select></label>
-          <label class="mli-filter" for="mli-evidence-field"><span>Evidence state</span><select id="mli-evidence-field" name="evidenceField"><option value="">Any evidence</option><option value="configured">Configured</option><option value="effective">Effective</option><option value="observed">Observed</option><option value="discoverable">Available</option><option value="entitled">Entitled</option><option value="policyAllowed">Policy</option><option value="routable">Routable</option></select></label>
+          <label class="mli-filter" for="mli-evidence-field"><span>Evidence state</span><select id="mli-evidence-field" name="evidenceField"><option value="">Any evidence</option><option value="configured">Configured</option><option value="effective">Effective</option><option value="observed">Observed</option><option value="discoverable">Catalogued</option><option value="entitled">Entitled</option><option value="policyAllowed">Policy</option><option value="routable">Routable</option></select></label>
           <label class="mli-filter" for="mli-evidence-value"><span>Evidence value</span><select id="mli-evidence-value" name="evidenceValue" disabled><option value="">Any value</option><option value="yes">Yes</option><option value="no">No</option><option value="unknown">Unknown</option></select></label>
           <button class="mli-reset" id="mli-reset" type="reset">Reset</button>
         </form>
@@ -567,7 +568,7 @@ export function renderPage({ name, version }) {
             <th scope="col" aria-sort="none"><button type="button" data-mli-sort="host">Model <span aria-hidden="true">↕</span></button></th>
             <th scope="col" aria-sort="none"><button type="button" data-mli-sort="configured">Configured <span aria-hidden="true">↕</span></button></th>
             <th scope="col" aria-sort="none"><button type="button" data-mli-sort="observed">Observed <span aria-hidden="true">↕</span></button></th>
-            <th scope="col" aria-sort="none"><button type="button" data-mli-sort="discoverable">Available <span aria-hidden="true">↕</span></button></th>
+            <th scope="col" aria-sort="none"><button type="button" data-mli-sort="discoverable">Catalogued <span aria-hidden="true">↕</span></button></th>
             <th scope="col" aria-sort="ascending"><button type="button" data-mli-sort="lifecycle">Lifecycle <span aria-hidden="true">↑</span></button></th>
             <th scope="col">Details</th>
           </tr></thead>

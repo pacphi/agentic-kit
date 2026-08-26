@@ -7,7 +7,10 @@
   diff, and read-only CLI/status surfaces are implemented. The operator-first Dashboard separates
   configured routes, aggregate model use in the selected 7/14/30-day window, and a progressive
   catalogue explorer. Its model detail summary collapses identical displayed provenance without
-  removing independent field-level evidence references. Ollama refresh now uses bounded loopback
+  removing independent field-level evidence references. Claude refresh combines local
+  configuration with a dated bundled transcription of Anthropic's first-party model and
+  deprecation records. It fills public identity, lifecycle, limits, capabilities, availability,
+  and pricing without claiming account access or partner/OpenRouter routability. Ollama refresh uses bounded loopback
   `/api/tags`, `/api/show`, and `/api/ps` evidence with a partial CLI fallback. Credentials,
   endpoints, scopes, digests, aliases, evidence
   references, session identity, and history identifiers remain protected. Cited lifecycle alerts now
@@ -47,6 +50,10 @@ The existing boundaries remain load-bearing:
 - native evidence crosses source-specific anti-corruption adapters;
 - unknown and degraded evidence remain visible rather than becoming false or zero; and
 - the Dashboard is local, protected, read-only, and network-silent on ordinary reads.
+
+When a host-owned Claude or Codex catalogue omits provider identity, its neutral facts may join an
+independently established matching first-party `anthropic` or `openai` path. This is an exact
+host/model/scope/digest join, not provider inference: custom and gateway providers remain separate.
 
 ## Decision
 
@@ -98,7 +105,9 @@ not receive an inferred capability.
 The initial adapter set covers:
 
 - Claude user settings, platform-managed settings, a model-only environment allowlist, aliases,
-  overrides, and policy allowlists while leaving unsupported entitlement unknown;
+  overrides, and policy allowlists, plus a dated bundled first-party Anthropic model/lifecycle
+  record. The public record is network-silent and account-neutral; it leaves account, Claude Code
+  plan, partner-platform, and OpenRouter entitlement/routability unknown;
 - Codex's host-owned model cache or stable model-list protocol behind schema/version guards;
 - OpenCode's project/provider-scoped model list and separately authorized online refresh; and
 - Ollama installed catalogue, digest, safe model detail, and loaded runtime evidence from its
@@ -188,6 +197,11 @@ height-bounded inventory scrolls internally with a sticky header, so history and
 not move behind the full catalogue. All model counts, badges, and warnings link to their evidence
 state, freshness, completeness, and scope.
 
+Provider history does not become local attention merely because it is public. A cited lifecycle
+migration enters attention only when that model is configured/effective or observed in this scope.
+Retired catalog-only records remain inspectable in the full catalogue and do not flood the in-use
+view.
+
 ### 8. Protect private scope and configuration facts
 
 Credentials, auth tokens, prompts, reasoning traces, raw private provider configuration, endpoints,
@@ -219,6 +233,10 @@ session-token authorization, CSP/origin protections, `no-store`, and secret scan
   explicit evidence semantics; host identity alone grants nothing.
 - Exact owner-visible model identity makes the local ledger operational without weakening credential,
   endpoint, account, scope, or configuration-value protection.
+- First-party public facts remove avoidable Claude lifecycle/specification unknowns while preserving
+  `unknown` for local configuration, entitlement, policy, and routability.
+- Catalogue enrichment cannot rewrite Historical Usage sessions/transcripts or Observability
+  live/history records; those contexts remain upstream owners of their data.
 
 ## Acceptance conditions
 
@@ -241,24 +259,24 @@ The decision may be marked Implemented only when:
 The implementation branch was validated on 2026-08-25 with the following exact-head evidence:
 
 - `pnpm run check` passed TypeScript checking, ESLint, Markdown lint, packaging, CLI-load checks,
-  and the full unit/integration suite. Native instrumented coverage was 86.97% lines, 79.93%
-  branches, and 84.58% functions against 70% repository floors.
-- `pnpm run test:ui` passed the 330-check deterministic browser matrix, including Models-only panel
+  and the full unit/integration suite. Native instrumented coverage was 87.15% lines, 80.15%
+  branches, and 85.19% functions against 70% repository floors.
+- `pnpm run test:ui` passed the 331-check deterministic browser matrix, including Models-only panel
   ownership across every Usage submenu, readable Ollama build/runtime detail, lazy Models
   loading, paired evidence filters, clickable ascending/descending column sorting, snapshot-bound
   pagination with safe reset, append retry without row loss, keyboard movement in the bounded
-  scrolling table, tab navigation, evidence disclosure, responsive behavior, and network-silent
-  page loading.
+  scrolling table, Claude public-fact/access/routability disclosure, tab navigation, evidence
+  disclosure, responsive behavior, and network-silent page loading.
 - A production-sized OpenCode 1.18.23 fixture yielded all 402 models without truncation. Exact
   Models.dev proof normalized the catalogue's omitted active status, while malformed successful
   responses degraded to partial evidence rather than public identity.
-- Agentic QE's native Node-test execution passed 13/13 focused projection/API tests, its heuristic
-  coverage analysis reported the configured 70% feature threshold met, and its SAST scan reported
-  zero vulnerabilities. The tool does not ingest this repository's native instrumented coverage or
-  carry the successful test run into a later process: `aqe quality --gate` therefore reported missing
-  measured `criticalBugs` evidence, while `aqe prove` explicitly marked tests and coverage unchecked.
-  Its emitted 30/100 partial attestation is not treated as a repository score or silently inflated;
-  this tool-state limitation prevented a valid 98/100 Agentic-QE aggregate.
+- Agentic QE 3.13.12's native Node-test execution passed 16/16 focused Dashboard projection/API
+  tests. Its SAST scanner inspected all 16 model-inventory files and all 13 Dashboard files and
+  reported no vulnerabilities. The repository's native coverage report remains the coverage
+  authority; no Agentic QE score was inferred from separate process-local evidence.
+- A 179-test boundary suite covering Usage indexing, OpenCode/OpenRouter usage, live sessions,
+  selected transcripts, and Observability identity passed. It proves public catalogue enrichment
+  does not change those live or historical projections.
 - Privacy and security tests proved owner-only atomic snapshots, bounded subprocess output,
   cache-only reads, explicit no-write/no-network online dry runs, source-proven public identity,
   keyed private Dashboard pseudonyms, fail-closed missing-key behavior, and absence of raw private

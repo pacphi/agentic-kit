@@ -7,6 +7,7 @@ import {
   createDashboardModelPayload, createDashboardModelViewPayload,
 } from '../../src/lib/model-inventory/read-model.mjs';
 import { modelIdentityKey } from '../../src/lib/model-inventory/contracts.mjs';
+import { discoverAnthropicPublicCatalog } from '../../src/lib/model-inventory/discovery/anthropic-catalog.mjs';
 import { startDashboard } from '../../src/lib/dashboard-server.mjs';
 
 const AT = '2026-08-25T12:00:00.000Z';
@@ -250,6 +251,35 @@ test('migration attention names affected routes, replacement, action, and first-
   });
 });
 
+test('public lifecycle history stays in the catalogue without creating local migration alerts', () => {
+  const input = payload();
+  const retired = model({
+    host: 'claude', provider: null, id: 'claude-opus-4-1-20250805',
+    name: 'Claude Opus 4.1 (2025-08-05)', source: 'anthropic-docs',
+    values: { discoverable: false }, lifecycle: 'removed', replacement: 'claude-opus-4-8',
+  });
+  retired.lifecycle.notice = 'https://platform.claude.com/docs/en/about-claude/model-deprecations';
+  for (const row of retired.evidence) row.class = 'first-party';
+  input.snapshot.models.push(retired);
+
+  const full = createDashboardModelPayload(input, { key: KEY });
+  assert.equal(full.snapshot.counts.migrations, 0);
+  assert.equal(full.snapshot.attention.some(({ kind }) => kind === 'migration'), false);
+
+  const relevant = createDashboardModelViewPayload(input, {
+    key: KEY, query: new URLSearchParams('view=inventory'),
+  });
+  assert.equal(relevant.inventory.items.some(({ selector }) => (
+    selector === 'claude-opus-4-1-20250805'
+  )), false);
+  const catalogue = createDashboardModelViewPayload(input, {
+    key: KEY, query: new URLSearchParams('view=inventory&relevance=all'),
+  });
+  assert.equal(catalogue.inventory.items.some(({ selector }) => (
+    selector === 'claude-opus-4-1-20250805'
+  )), true);
+});
+
 test('owner-visible change history names the model and change without exposing transport joins', () => {
   const input = payload();
   const target = input.snapshot.models[0];
@@ -333,6 +363,34 @@ test('an exact official Claude id observed by the Claude host establishes Anthro
   assert.deepEqual({
     name: projected.displayName, provider: projected.servingProvider, publisher: projected.publisher,
   }, { name: 'Claude Opus 4.8', provider: 'anthropic', publisher: 'Anthropic' });
+});
+
+test('Anthropic public facts survive the owner-visible Dashboard projection without claiming access', () => {
+  const catalog = discoverAnthropicPublicCatalog({
+    capturedAt: AT, scopeKey: '0123456789abcdef0123456789abcdef',
+  });
+  const input = payload();
+  input.snapshot.sources = [catalog.source];
+  input.snapshot.models = catalog.models;
+  input.snapshot.bindings = [];
+  const result = createDashboardModelPayload(input, { key: KEY });
+  const fable = result.snapshot.models.find(({ selector }) => selector === 'claude-fable-5');
+  assert.deepEqual({
+    name: fable.displayName, provider: fable.servingProvider, publisher: fable.publisher,
+    lifecycle: fable.lifecycle.state, scope: fable.variant.lifecycleScope,
+    availability: fable.variant.availability, context: fable.capabilities.contextLimit,
+    output: fable.capabilities.outputLimit, discoverable: fable.dimensions.discoverable.value,
+    entitled: fable.dimensions.entitled.value, routable: fable.dimensions.routable.value,
+  }, {
+    name: 'Claude Fable 5', provider: 'anthropic', publisher: 'Anthropic', lifecycle: 'active',
+    scope: 'Anthropic-operated platforms', availability: 'general', context: 1_000_000,
+    output: 128_000, discoverable: true, entitled: null, routable: null,
+  });
+  assert.equal(fable.links.some(({ url }) => (
+    url === 'https://platform.claude.com/docs/en/about-claude/models/overview'
+  )), true);
+  assert.equal(fable.pricing.source, 'Anthropic Models and pricing');
+  assert.equal(result.snapshot.counts.migrations, 0);
 });
 
 test('summary mode omits only the large model inventory and reports inventory counts', () => {

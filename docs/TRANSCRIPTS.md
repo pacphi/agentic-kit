@@ -247,6 +247,8 @@ the exact path was observed, entitled, policy-allowed, and routable at capture t
 make the host catalogue complete, prove another path, or claim quality equivalence. When catalogue
 discovery for that exact path is unknown, a mechanical plan may proceed only with an explicit
 catalogue-unknown warning.
+Public catalogue enrichment flows in the opposite direction only into the lifecycle read model: it
+never renames a retained session model, changes historical token pricing, or rewrites a transcript.
 
 ### 4.3 Mask, then truncate — both marked, differently
 

@@ -712,7 +712,11 @@ const MODELS_STUB = {
       schema: 'codex-model-cache-v1', scopeFingerprint: 'scope:ui-private' },
     { id: 'ollama-catalog', owner: 'ollama', ownerType: 'provider', transport: 'http', network: 'local',
       mode: 'local', status: 'complete', complete: true, capturedAt: MODEL_AT,
-      schema: 'ollama-api-v1', scopeFingerprint: 'scope:ui-private' }],
+      schema: 'ollama-api-v1', scopeFingerprint: 'scope:ui-private' },
+    { id: 'anthropic-docs', owner: 'anthropic', ownerType: 'provider', transport: 'index', network: 'never',
+      mode: 'local', status: 'complete', complete: true, capturedAt: MODEL_AT,
+      sourceVersion: '2026-08-25', schema: 'anthropic-public-models-v1',
+      scopeFingerprint: 'scope:ui-private' }],
     models: [{
       key: { host: 'opencode', provider: 'ui-private-provider', modelId: 'ui-private-deployment',
         scopeId: 'scope:ui-private', digest: 'ui-private-digest' },
@@ -744,7 +748,32 @@ const MODELS_STUB = {
       ].map(([id, field]) => ({ id, field, source: 'usage-index', class: 'observed',
         capturedAt: MODEL_AT, freshness: 'fresh', completeness: 'complete',
         scopeFingerprint: 'scope:ui-private', refs: [] }))],
-    }, ...Array.from({ length: 60 }, (_, i) => ({
+    }, {
+      key: { host: 'claude', provider: null, modelId: 'claude-fable-5',
+        scopeId: 'scope:ui-private', digest: null },
+      displayName: 'Claude Fable 5', aliases: [], visibility: 'visible',
+      variant: { lifecycleScope: 'Anthropic-operated platforms', availability: 'general',
+        contextWindow: 1_000_000, retirementNotBefore: '2027-06-09' },
+      capabilities: { tools: true, reasoning: true, contextLimit: 1_000_000, outputLimit: 128_000,
+        input: { text: true, image: true }, output: { text: true } },
+      pricing: { basis: 'per-million-tokens', input: 10, output: 50, currency: 'USD',
+        evidenceRefs: ['ui-anthropic-evidence'] },
+      lifecycle: { state: 'active', replacement: null,
+        notice: 'https://platform.claude.com/docs/en/about-claude/model-deprecations',
+        evidenceRefs: ['ui-anthropic-evidence'] }, edges: [],
+      dimensions: { configured: { value: true, evidenceRefs: ['ui-private-evidence'] },
+        effective: { value: true, evidenceRefs: ['ui-private-evidence'] },
+        observed: { value: null, evidenceRefs: [] },
+        discoverable: { value: true, evidenceRefs: ['ui-anthropic-evidence'] },
+        entitled: { value: null, evidenceRefs: [] }, policyAllowed: { value: null, evidenceRefs: [] },
+        routable: { value: null, evidenceRefs: [] }, recommended: { value: true, evidenceRefs: ['ui-anthropic-evidence'] } },
+      evidence: [{ id: 'ui-anthropic-evidence', field: 'dimensions.discoverable',
+        source: 'anthropic-docs', class: 'first-party', capturedAt: MODEL_AT,
+        freshness: 'fresh', completeness: 'complete', scopeFingerprint: 'scope:ui-private', refs: [] },
+      { id: 'ui-private-evidence', field: 'dimensions.configured', source: 'claude-config',
+        class: 'configured', capturedAt: MODEL_AT, freshness: 'fresh', completeness: 'complete',
+        scopeFingerprint: 'scope:ui-private', refs: [] }],
+    }, ...Array.from({ length: 59 }, (_, i) => ({
       key: { host: i % 3 === 0 ? 'claude' : i % 3 === 1 ? 'codex' : 'opencode',
         provider: i % 2 === 0 ? 'ui-private-provider-a' : 'ui-private-provider-b',
         modelId: `catalog-model-${String(i + 2).padStart(2, '0')}`,
@@ -2446,6 +2475,22 @@ async function main() {
     check('model details de-duplicate identical evidence summaries without changing field evidence',
       evidenceRows.filter((row) => row.startsWith('usage-index · observed')).length === 1,
       `model detail evidence rows were ${JSON.stringify(evidenceRows)}`);
+    await page.click('#mli-detail-close');
+    await page.fill('#mli-search', 'Claude Fable 5');
+    await page.waitForFunction(() => document.querySelectorAll('#mli-models tr').length === 1
+      && /Claude Fable 5/.test(document.querySelector('#mli-models tr')?.textContent || '')
+      && document.getElementById('mli-result-count')?.textContent !== 'Loading models…');
+    await page.click('#mli-models .mli-detail-open');
+    const claudeDetail = await visibleText(page, '#mli-detail');
+    check('Claude details separate public facts from account access and give the operator a proof step',
+      /Lifecycle scope\s+Anthropic-operated platforms/i.test(claudeDetail)
+        && /Published availability\s+general/i.test(claudeDetail)
+        && /Published \/ discovered\s+Published by an accepted source/i.test(claudeDetail)
+        && /Account access\s+Not established; public metadata is not account access/i.test(claudeDetail)
+        && /Local routability\s+Not established on this host\/provider\/account path/i.test(claudeDetail)
+        && /What you need to do\s+Complete one successful invocation on this exact path, then run ak models refresh/i.test(claudeDetail)
+        && /Context\s+1,000,000/i.test(claudeDetail) && /Output\s+128,000/i.test(claudeDetail),
+      `Claude detail was ${JSON.stringify(claudeDetail)}`);
     await page.click('#mli-detail-close');
     await page.click('#mli-reset');
     await page.waitForFunction(() => document.activeElement?.id === 'mli-search'

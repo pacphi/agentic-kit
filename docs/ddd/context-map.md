@@ -80,8 +80,8 @@ Configuration Intent, integration descriptors, source-adapted native catalogues,
 observed facts from Historical Usage and Observability. It does not own transcripts, route
 mutation, model quality, or downstream router policy.
 
-See [Model lifecycle intelligence](model-lifecycle-intelligence.md). The context is implemented on
-the issue branch; ADR-0032 remains Accepted until exact-head release proof is recorded.
+See [Model lifecycle intelligence](model-lifecycle-intelligence.md). The context and exact-head
+release proof are recorded by implemented ADR-0032.
 
 ### Workspace snapshot cache
 

@@ -36,6 +36,12 @@ Model lifecycle intelligence consumes facts from four neighboring contexts:
 - Historical Usage and Observability supply structured observed host/provider/model facts without
   surrendering ownership of transcripts, sessions, or live events.
 
+The Claude adapter combines two independent sources: local Claude configuration/policy and a
+dated, bundled transcription of Anthropic's first-party public model and deprecation records. The
+public supplement is network-silent and account-neutral. It can establish publication, public
+specifications, and lifecycle only; it cannot establish Claude Code plan entitlement, API-key
+availability, partner-platform availability, or an OpenRouter path.
+
 Its outputs are advisory inputs to Routing and Orchestration, Dashboard Delivery, Agentic QE/Ruflo
 diagnostics, and Route Intelligence.
 
@@ -57,6 +63,12 @@ accounts, projects, gateways, or local model bytes. `digest` participates only w
 establishes a mutable local artifact digest. Reasoning effort and service tier belong to a binding
 or execution variant, not to the base identity.
 
+Host-owned Claude and Codex catalogues may be provider-neutral. If independent evidence establishes
+the exact same host/model/scope/digest under the host's expected first-party provider (`anthropic`
+or `openai`), the neutral catalogue fields join that provider-qualified record. The join never
+targets a custom or gateway provider, so equal model strings on distinct serving paths remain
+distinct identities.
+
 ### ModelRecord
 
 A ModelRecord carries display identity, aliases, lifecycle state, typed edges, supported variants
@@ -73,9 +85,10 @@ applicable and names the evidence that established it.
 The Dashboard projection separates the execution host, serving provider, publisher/lab, human
 name, exact public selector, and catalogue source. These axes cannot be derived from one another.
 A controlled source may mark an identity public only when its bounded parser established that
-catalogue metadata. Codex cache display names and narrowly recognized official Claude ids are
-public product vocabulary only when the exact id or alias appears in the maintained documented
-allowlist. OpenCode identity becomes public only after an exact provider/model-key join with the
+catalogue metadata. The bundled Anthropic public record makes its exact documented Claude ids and
+aliases public product vocabulary and carries first-party specifications/lifecycle evidence. Codex
+cache display names qualify only through host-owned discovery evidence. OpenCode identity becomes
+public only after an exact provider/model-key join with the
 bounded Models.dev catalogue; provider syntax does not establish proof. A custom
 provider, configured variant, gateway deployment, local tag, or observed-only id remains a keyed
 pseudonym. Trusted documentation and catalogue links are server-produced HTTPS links on a fixed
@@ -106,6 +119,9 @@ A source identifies its owner and owner type, file/command/HTTP/index transport,
 `explicit` network policy, local or online collection mode, source/schema version, capture time,
 non-identifying scope fingerprint, status, completeness, and diagnostics. Status is one of
 `complete`, `partial`, `stale`, `unavailable`, `unsupported`, or `unsupported-schema`.
+Bundled public sources also carry a verification date. The Anthropic source becomes `stale` after
+90 days; an operator must upgrade Agentic Kit to receive revised public facts before refreshing the
+snapshot.
 
 ### CatalogSnapshot
 
