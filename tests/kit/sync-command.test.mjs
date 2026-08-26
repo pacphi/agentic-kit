@@ -18,6 +18,8 @@ import {
 const HOME = sandboxHome('ak-sync');
 const paths = await import('../../src/lib/paths.mjs');
 const sync = await import('../../src/commands/sync.mjs');
+const status = await import('../../src/commands/status.mjs');
+const { loadKitConfig } = await import('../../src/lib/config.mjs');
 assertSandboxed(paths, HOME);
 
 const PKG_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
@@ -40,6 +42,178 @@ async function dryRun(over = {}) {
     return await captureLog(() => sync.run({ flags: FLAGS({ 'dry-run': true, ...over }), pkgRoot: PKG_ROOT }));
   } finally { process.chdir(cwd); }
 }
+
+function dejaSyncConfig() {
+  return offlineKitConfig({
+    security: false,
+    agentdb: false,
+    mcp: { register: false, excludeFamilies: [] },
+    integrations: {
+      version: 3,
+      hosts: { claude: false, codex: false, opencode: false },
+      bindings: [],
+      tools: {
+        dejaVu: { enabled: true, mode: 'mcp', hosts: ['claude'], indexOnSetup: true },
+      },
+      ownership: {
+        dejaVu: {
+          install: {
+            owner: 'agentic-kit', method: 'npm', package: '@vshulcz/deja-vu',
+            written: { version: '0.19.0' },
+          },
+        },
+      },
+    },
+    routing: { version: 1, primaryHost: 'claude', routes: {} },
+    providers: {},
+  });
+}
+
+function fakeDejaLifecycle({ target = false, index = 'stale', outdated = true, partial = false } = {}) {
+  const state = { target, index, outdated };
+  const calls = { detect: 0, plan: [], apply: 0, operations: [] };
+  const adapter = {
+    id: 'deja-vu',
+    async detect({ cfg }) {
+      calls.detect++;
+      const receipt = cfg.integrations?.ownership?.dejaVu?.targets?.claude;
+      return {
+        desired: { enabled: true, mode: 'mcp', hosts: ['claude'], indexOnSetup: true },
+        install: {
+          binaryPresent: true, npmPresent: true, version: '0.19.0', supported: true,
+          ownership: 'agentic-kit', receiptState: 'current',
+        },
+        doctor: { state: 'ok', reason: null, schemaVersion: 2 },
+        index: { state: state.index, staleStores: state.index === 'stale' ? 1 : 0 },
+        targets: {
+          claude: {
+            selected: true, hostPresent: true, desiredTarget: 'claude-code',
+            direct: { mcp: state.target, auto: false }, plugin: { present: false, auto: false },
+            receiptState: receipt ? 'current' : 'missing',
+            ownership: receipt ? 'agentic-kit' : 'none',
+            satisfied: state.target, conflict: null,
+          },
+          codex: { selected: false },
+          opencode: { selected: false },
+        },
+      };
+    },
+    async plan({ options = {} }) {
+      const allowUpgrade = options.allowUpgrade !== false;
+      calls.plan.push(allowUpgrade);
+      const operations = [];
+      if (state.outdated && allowUpgrade) operations.push({ id: 'package-upgrade', kind: 'package-upgrade' });
+      if (!state.target) operations.push({ id: 'target-install-claude', kind: 'target-install', host: 'claude' });
+      if (state.index !== 'ok') operations.push({ id: 'index', kind: 'index' });
+      return { changed: operations.length > 0, operations, warnings: [] };
+    },
+    async apply({ cfg, plan }) {
+      calls.apply++;
+      calls.operations.push(...plan.operations.map(({ kind }) => kind));
+      if (plan.operations.some(({ kind }) => kind === 'package-upgrade')) state.outdated = false;
+      if (plan.operations.some(({ kind }) => kind === 'target-install')) {
+        state.target = true;
+        cfg.integrations.ownership.dejaVu.targets = {
+          claude: { owner: 'agentic-kit', mode: 'mcp', target: 'claude-code' },
+        };
+      }
+      if (plan.operations.some(({ kind }) => kind === 'index')) state.index = 'ok';
+      return {
+        ok: !partial,
+        changed: plan.operations.length > 0,
+        configChanged: plan.operations.some(({ kind }) => kind === 'target-install'),
+        actions: plan.operations.map(({ id }) => ({ id, status: 'ok', changed: true })),
+        warnings: [],
+        errors: partial ? ['target-install-failed'] : [],
+      };
+    },
+    async verify() { return { ok: true, changed: false, errors: [] }; },
+    async undo() { return { ok: true, changed: false, errors: [] }; },
+  };
+  return { state, calls, adapter };
+}
+
+async function collectOnlyDejaVu({ dejaVuAdapter, dejaVuPlanOptions }) {
+  return status.collectDejaVuRows({
+    cfg: loadKitConfig(), adapter: dejaVuAdapter, planOptions: dejaVuPlanOptions,
+  });
+}
+
+async function isolatedDejaSync(adapter, flags = FLAGS()) {
+  const cwd = process.cwd();
+  process.chdir(PROJECT);
+  try {
+    return await captureLog(() => sync.run({
+      flags, pkgRoot: PKG_ROOT, dejaVuAdapter: adapter, collectFn: collectOnlyDejaVu,
+    }));
+  } finally { process.chdir(cwd); }
+}
+
+test('deja-vu --no-upgrade suppresses only package upgrade and still converges target plus index', async () => {
+  seedHome(dejaSyncConfig(), { ruflo: '9.9.9', 'agentic-qe': '9.9.9' });
+  const fixture = fakeDejaLifecycle();
+  const first = await isolatedDejaSync(fixture.adapter, FLAGS({ 'no-upgrade': true }));
+  assert.equal(first.result, 0, first.out);
+  assert.equal(fixture.calls.apply, 1);
+  assert.deepEqual(fixture.calls.operations, ['target-install', 'index']);
+  assert.ok(fixture.calls.plan.every((allowUpgrade) => allowUpgrade === false));
+  assert.doesNotMatch(first.out, /warmup|deja update|--all|--auto/);
+  assert.ok(loadKitConfig().integrations.ownership.dejaVu.targets.claude,
+    'sync persisted the adapter-mutated ownership receipt');
+
+  const second = await isolatedDejaSync(fixture.adapter, FLAGS({ 'no-upgrade': true }));
+  assert.equal(second.result, 0, second.out);
+  assert.match(second.out, /nothing to do/);
+  assert.equal(fixture.calls.apply, 1, 'a converged second sync never calls apply');
+});
+
+test('deja-vu sync persists configChanged even when lifecycle apply is partial and fails', async () => {
+  seedHome(dejaSyncConfig(), { ruflo: '9.9.9', 'agentic-qe': '9.9.9' });
+  const fixture = fakeDejaLifecycle({ index: 'ok', outdated: false, partial: true });
+  const result = await isolatedDejaSync(fixture.adapter);
+  assert.equal(result.result, 1, result.out);
+  assert.ok(loadKitConfig().integrations.ownership.dejaVu.targets.claude,
+    'partial verified ownership proof must survive for retry/teardown');
+  assert.match(result.out, /deja-vu.*apply failed|still failing: \[deja-vu\]/);
+});
+
+test('deja-vu sync never applies an already-healthy external package and wiring', async () => {
+  const cfg = dejaSyncConfig();
+  delete cfg.integrations.ownership;
+  seedHome(cfg, { ruflo: '9.9.9', 'agentic-qe': '9.9.9' });
+  let applies = 0;
+  const adapter = {
+    id: 'deja-vu',
+    async detect() {
+      return {
+        desired: { enabled: true, mode: 'mcp', hosts: ['claude'], indexOnSetup: true },
+        install: {
+          binaryPresent: true, npmPresent: true, version: '0.19.0', supported: true,
+          ownership: 'external', receiptState: 'missing',
+        },
+        doctor: { state: 'ok', reason: null, schemaVersion: 2 },
+        index: { state: 'ok', staleStores: 0 },
+        targets: {
+          claude: {
+            selected: true, hostPresent: true, desiredTarget: 'claude-code',
+            direct: { mcp: true, auto: false }, plugin: { present: false, auto: false },
+            receiptState: 'missing', ownership: 'external', satisfied: true, conflict: null,
+          },
+          codex: { selected: false }, opencode: { selected: false },
+        },
+      };
+    },
+    async plan() { return { changed: false, operations: [], warnings: [] }; },
+    async apply() { applies++; throw new Error('external state must not be applied'); },
+    async verify() { return { ok: true, changed: false, errors: [] }; },
+    async undo() { return { ok: true, changed: false, errors: [] }; },
+  };
+  const result = await isolatedDejaSync(adapter);
+  assert.equal(result.result, 0, result.out);
+  assert.match(result.out, /nothing to do/);
+  assert.equal(applies, 0);
+  assert.equal(loadKitConfig().integrations.ownership?.dejaVu, undefined);
+});
 
 test('--dry-run prints a plan and then changes nothing at all', async () => {
   seedHome();

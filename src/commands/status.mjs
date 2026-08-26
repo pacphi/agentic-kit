@@ -25,6 +25,7 @@ import { readJson } from '../lib/settings.mjs';
 import { have } from '../lib/exec.mjs';
 import { HOSTS, settingsTarget, isDefault, managedEnv, MANAGED_ENV_KEYS, hostInstallState, hostAuthState, bothHostsEnabled, aqeRouterFile, aqeSupportsAgentOverrides, credentialGaps, collectIntegrationFacts, MIN_RUFLO_PERSISTED_PROVIDER_VERSION } from '../lib/providers.mjs';
 import { hostsWithLifecycle, isBuiltinHost, lifecycleExecutionEnabled } from '../lib/adapters/lifecycle-registry.mjs';
+import { companionLifecycleFor } from '../lib/adapters/companion-lifecycle-registry.mjs';
 import { PROVIDER_REGISTRY } from '../lib/adapters/index.mjs';
 import { configuredPolicyToAgentOverrides, agentOverridesDrift, routingSummary, divergedRoutes } from '../lib/routing.mjs';
 import { qeCourtShipped, readQeCourtConfig, validateCourtConfig, qeCourtReadiness } from '../lib/qeCourt.mjs';
@@ -59,6 +60,149 @@ Examples:
   ak status --json    machine-readable rows`;
 
 const row = (subsystem, level, message, fix = null) => ({ subsystem, level, message, fix });
+const DEJA_HOSTS = Object.freeze(['claude', 'codex', 'opencode']);
+const SAFE_VERSION = /^v?\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/;
+
+function hasDejaVuOwnership(cfg) {
+  const ownership = cfg?.integrations?.ownership?.dejaVu;
+  return !!ownership?.install
+    || (!!ownership?.targets && typeof ownership.targets === 'object'
+      && Object.keys(ownership.targets).length > 0);
+}
+
+function safeDejaCode(value) {
+  return typeof value === 'string' && /^[a-z0-9-]{1,80}$/.test(value)
+    ? value : 'unavailable';
+}
+
+function safeDejaVersion(value) {
+  return typeof value === 'string' && SAFE_VERSION.test(value) ? value : 'unknown';
+}
+
+/**
+ * Render the managed companion from its bounded lifecycle facts. No upstream
+ * path, command output, signature, transcript metadata, or plugin payload is
+ * copied into a row. A fix is attached only when the same adapter plan contains
+ * an operation that can perform it.
+ * @param {{cfg?:any,adapter?:any,planOptions?:Record<string,any>}} [options]
+ */
+export async function collectDejaVuRows(options = {}) {
+  const {
+    cfg,
+    adapter = companionLifecycleFor('deja-vu'),
+    planOptions = {},
+  } = options;
+  const desired = cfg?.integrations?.tools?.dejaVu;
+  const enabled = desired?.enabled === true;
+  const owned = hasDejaVuOwnership(cfg);
+  if (!enabled && !owned) {
+    return [row('deja-vu', 'info',
+      'deja-vu disabled — package, host wiring, and history remain unprobed')];
+  }
+  if (!adapter) {
+    return [row('deja-vu', 'warn', 'deja-vu lifecycle adapter unavailable')];
+  }
+
+  try {
+    const facts = await adapter.detect({ cfg });
+    const plan = await adapter.plan({ cfg, facts, options: planOptions });
+    const operations = Array.isArray(plan?.operations) ? plan.operations : [];
+    const actionable = !facts?.error && !plan?.error;
+    const hasOperation = (kind, host = null) => actionable && operations.some((operation) =>
+      operation?.kind === kind && (host === null || operation.host === host));
+    const rows = [];
+
+    if (facts?.error || plan?.error) {
+      const code = safeDejaCode(facts?.error ?? plan?.error);
+      const external = code === 'deja-external-version-unsupported'
+        || code === 'deja-external-install-unusable';
+      rows.push(row('deja-vu', external ? 'warn' : 'fail', external
+        ? `external deja-vu installation is not safely manageable (${code}); preserved`
+        : `deja-vu health contract failed closed (${code})`));
+    }
+
+    const install = facts?.install ?? {};
+    if (install.binaryPresent === false) {
+      if (enabled && hasOperation('package-install')) {
+        rows.push(row('deja-vu', 'warn', 'deja-vu package missing',
+          'sync installs the managed npm companion'));
+      } else if (install.ownership === 'external') {
+        rows.push(row('deja-vu', 'warn', 'external deja-vu package is unavailable; preserved'));
+      } else {
+        rows.push(row('deja-vu', 'info', 'deja-vu package absent'));
+      }
+    } else if (install.binaryPresent === true) {
+      const version = safeDejaVersion(install.version);
+      if (hasOperation('package-upgrade')) {
+        rows.push(row('deja-vu', 'warn',
+          `managed deja-vu ${version} has an available package upgrade`,
+          'sync upgrades the owned npm companion'));
+      } else if (install.receiptState === 'drifted' || install.receiptState === 'malformed') {
+        rows.push(row('deja-vu', 'warn',
+          `deja-vu ${version} package ownership receipt drifted; current installation preserved`));
+      } else if (install.ownership === 'agentic-kit') {
+        rows.push(row('deja-vu', install.supported === false ? 'warn' : 'ok',
+          `managed deja-vu ${version} package${install.supported === false ? ' is below v0.19.0' : ' is present'}`));
+      } else {
+        rows.push(row('deja-vu', 'info',
+          `external deja-vu ${version} package detected; installation remains user-owned`));
+      }
+    }
+
+    if (facts?.doctor?.state === 'ok') {
+      rows.push(row('deja-vu', 'ok', 'deja-vu doctor schema v2 accepted'));
+    }
+
+    for (const host of DEJA_HOSTS) {
+      const target = facts?.targets?.[host];
+      const receipt = cfg?.integrations?.ownership?.dejaVu?.targets?.[host];
+      const receiptPresent = !!receipt;
+      if (!target || (!target.selected && !receiptPresent)) continue;
+      const hasTargetOperation = hasOperation('target-remove', host)
+        || hasOperation('target-install', host);
+      const managedTransition = hasTargetOperation && receipt?.mode
+        && receipt.mode !== facts?.desired?.mode;
+      if (target.receiptState === 'drifted') {
+        rows.push(row('deja-vu', 'warn',
+          `${host}: managed target ownership drifted; current wiring preserved`));
+      } else if (target.conflict === 'external-auto-active' && !managedTransition) {
+        rows.push(row('deja-vu', 'warn',
+          `${host}: external automatic recall conflicts with MCP-only intent; external state preserved`));
+      } else if (target.satisfied) {
+        rows.push(row('deja-vu', target.ownership === 'agentic-kit' ? 'ok' : 'info',
+          `${host}: ${target.desiredTarget ?? 'deja-vu'} target active`
+          + (target.ownership === 'agentic-kit' ? ' and receipt-owned' : ' via external wiring')));
+      } else if (hasTargetOperation) {
+        rows.push(row('deja-vu', 'warn',
+          `${host}: managed deja-vu target requires convergence`,
+          `sync converges the exact ${host} target`));
+      } else if (target.hostPresent === false) {
+        rows.push(row('deja-vu', 'warn',
+          `${host}: selected host is unavailable; companion wiring skipped`));
+      } else {
+        rows.push(row('deja-vu', 'warn',
+          `${host}: desired deja-vu target is not proven; external state preserved`));
+      }
+    }
+
+    if (enabled && facts?.desired?.indexOnSetup) {
+      if (facts?.index?.state === 'ok') {
+        rows.push(row('deja-vu', 'ok', 'deja-vu derived index is healthy'));
+      } else if (hasOperation('index')) {
+        rows.push(row('deja-vu', 'warn',
+          `deja-vu derived index is ${['missing', 'stale'].includes(facts?.index?.state)
+            ? facts.index.state : 'not ready'}`,
+          'sync runs one bounded deja index after target convergence'));
+      } else if (facts?.index?.state !== undefined) {
+        rows.push(row('deja-vu', 'info', 'deja-vu derived index health is unknown'));
+      }
+    }
+
+    return rows.length ? rows : [row('deja-vu', 'info', 'deja-vu state is unobserved')];
+  } catch {
+    return [row('deja-vu', 'warn', 'deja-vu status unavailable')];
+  }
+}
 
 // Per-host status DETAIL rows — beyond the generic install/auth rows the
 // `hosts` loop in collect() already renders from facts for every host alike.
@@ -243,7 +387,12 @@ function admittedLifecycleFallbackRows(cfg, renderers = HOST_DETAIL_RENDERERS) {
   return rows;
 }
 
-export async function collect({ pkgRoot, cwd = process.cwd() }) {
+export async function collect({
+  pkgRoot,
+  cwd = process.cwd(),
+  dejaVuAdapter = companionLifecycleFor('deja-vu'),
+  dejaVuPlanOptions = {},
+}) {
   const rows = [];
   const cfg = loadKitConfig();
   const integrationFacts = await collectIntegrationFacts({ cwd, cfg });
@@ -626,6 +775,10 @@ export async function collect({ pkgRoot, cwd = process.cwd() }) {
   } catch (e) {
     rows.push(row('codex-plugins', 'warn', `Codex plugin check unavailable: ${e.message}`));
   }
+
+  rows.push(...(await collectDejaVuRows({
+    cfg, adapter: dejaVuAdapter, planOptions: dejaVuPlanOptions,
+  })));
 
   // Per-host status DETAIL rows (opencode.json wiring, lifecycle bridge,
   // converted agents, platform skill, …) — the host-neutral counterpart of
