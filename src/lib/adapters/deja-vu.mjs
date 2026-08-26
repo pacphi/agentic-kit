@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { run, have } from '../exec.mjs';
-import { installedVersion, cmpVersions } from '../versions.mjs';
+import { installedVersion, latestVersion, cmpVersions, isValidSemver } from '../versions.mjs';
 import {
   DEJA_VU_BIN,
   DEJA_VU_MIN_VERSION,
@@ -93,8 +93,8 @@ function boundedObservation(value) {
       auto: boolOrNull(value?.direct?.auto),
     },
     plugin: {
-      present: !!value?.plugin?.present,
-      auto: !!value?.plugin?.auto,
+      present: boolOrNull(value?.plugin?.present),
+      auto: boolOrNull(value?.plugin?.auto),
     },
   };
 }
@@ -149,8 +149,9 @@ function targetAbsent(observed) {
 }
 
 function targetSatisfied(observed, mode) {
-  if (mode === 'auto') return observed.direct.auto === true;
-  return observed.direct.mcp === true && observed.direct.auto !== true && observed.plugin.auto !== true;
+  if (mode === 'auto') return observed.direct.auto === true || observed.plugin.auto === true;
+  const mcpActive = observed.direct.mcp === true || observed.plugin.present === true;
+  return mcpActive && observed.direct.auto !== true && observed.plugin.auto !== true;
 }
 
 function packageInstallCommand(version) {
@@ -171,7 +172,7 @@ export function createDejaVuLifecycleAdapter(defaults = {}) {
   const runner = defaults.runner ?? run;
   const haveFn = defaults.haveFn ?? have;
   const packageVersionFn = defaults.packageVersionFn ?? installedVersion;
-  const latestVersionFn = defaults.latestVersionFn ?? (async () => DEJA_VU_MIN_VERSION);
+  const latestVersionFn = defaults.latestVersionFn ?? latestVersion;
   const compareVersions = defaults.compareVersions ?? cmpVersions;
   const observer = defaults.targetObserver ?? defaultTargetObserver;
   const clock = defaults.clock ?? (() => new Date().toISOString());
@@ -260,9 +261,20 @@ export function createDejaVuLifecycleAdapter(defaults = {}) {
       && facts.install.ownership !== 'external';
     const needsUpgradeVersion = facts.desired.enabled && allowUpgrade
       && facts.install.receiptState === 'current';
-    const latest = needsInstallVersion || needsUpgradeVersion
-      ? await latestVersionFn(DEJA_VU_PACKAGE) ?? DEJA_VU_MIN_VERSION
-      : null;
+    let latest = null;
+    if (needsInstallVersion || needsUpgradeVersion) {
+      let candidate = null;
+      try { candidate = await latestVersionFn(DEJA_VU_PACKAGE); } catch { /* bounded fallback below */ }
+      if (isValidSemver(candidate)
+        && compareVersions(candidate, DEJA_VU_MIN_VERSION) >= 0) {
+        latest = candidate;
+      } else if (needsInstallVersion || facts.install.supported === false) {
+        latest = DEJA_VU_MIN_VERSION;
+        warnings.push('deja-package-latest-unavailable-baseline-used');
+      } else {
+        warnings.push('deja-package-latest-unavailable');
+      }
+    }
     if (facts.desired.enabled && !facts.install.binaryPresent) {
       if (facts.install.ownership === 'external') {
         return { changed: false, operations, warnings, error: 'deja-external-install-unusable' };

@@ -256,6 +256,77 @@ test('allowUpgrade false suppresses package upgrade but still heals target and i
   assert.ok(env.calls.some((call) => call[0] === 'deja' && call[1] === 'index'));
 });
 
+test('owned npm companion upgrades to a strictly validated registry version', async () => {
+  const env = fakeEnvironment({ binary: true, npmVersion: '0.19.0' });
+  env.state.doctor.index.state = 'ok';
+  env.state.targets.claude.direct.mcp = true;
+  const cfg = config();
+  cfg.integrations.ownership = { dejaVu: {
+    install: {
+      owner: 'agentic-kit', method: 'npm', package: '@vshulcz/deja-vu',
+      written: { version: '0.19.0' },
+    },
+    targets: {},
+  } };
+  // Rebuild the fixture adapter with only the registry seam changed.
+  const upgraded = createDejaVuLifecycleAdapter({
+    runner: async (command, args) => {
+      env.calls.push([command, ...args]);
+      if (command === 'npm') {
+        env.state.npmVersion = '0.20.0';
+        return { code: 0, stdout: '', stderr: '' };
+      }
+      if (command === 'deja' && args[0] === 'doctor') {
+        env.state.doctor.version.current = env.state.npmVersion;
+        return { code: 0, stdout: JSON.stringify(env.state.doctor), stderr: '' };
+      }
+      return { code: 0, stdout: '', stderr: '' };
+    },
+    haveFn: async (bin) => bin === 'deja' || bin === 'claude',
+    packageVersionFn: async () => env.state.npmVersion,
+    latestVersionFn: async () => '0.20.0',
+    targetObserver: async () => structuredClone(env.state.targets),
+  });
+  const result = await runLifecycle({ adapter: upgraded, action: 'apply', cfg });
+  assert.equal(result.ok, true);
+  assert.ok(env.calls.some((call) => call.join(' ') ===
+    'npm install -g @vshulcz/deja-vu@0.20.0 --no-audit --no-fund'));
+  assert.equal(cfg.integrations.ownership.dejaVu.install.written.version, '0.20.0');
+});
+
+test('unavailable or unsafe latest metadata never enters a package command', async () => {
+  for (const latest of [null, '0.18.9', '0.20.0 --unsafe']) {
+    const env = fakeEnvironment({ binary: true, npmVersion: '0.19.0' });
+    env.state.doctor.index.state = 'ok';
+    env.state.targets.claude.direct.mcp = true;
+    const cfg = config();
+    cfg.integrations.ownership = { dejaVu: {
+      install: {
+        owner: 'agentic-kit', method: 'npm', package: '@vshulcz/deja-vu',
+        written: { version: '0.19.0' },
+      }, targets: {},
+    } };
+    const adapter = createDejaVuLifecycleAdapter({
+      runner: async (command, args) => {
+        env.calls.push([command, ...args]);
+        if (command === 'deja' && args[0] === 'doctor') {
+          return { code: 0, stdout: JSON.stringify(env.state.doctor), stderr: '' };
+        }
+        return { code: 1, stdout: '', stderr: '' };
+      },
+      haveFn: async (bin) => bin === 'deja' || bin === 'claude',
+      packageVersionFn: async () => env.state.npmVersion,
+      latestVersionFn: async () => latest,
+      targetObserver: async () => structuredClone(env.state.targets),
+    });
+    const facts = await adapter.detect({ cfg });
+    const plan = await adapter.plan({ cfg, facts });
+    assert.equal(plan.operations.some(({ command }) => command === 'npm'), false);
+    assert.ok(plan.warnings.includes('deja-package-latest-unavailable'));
+    assert.doesNotMatch(JSON.stringify(plan), /--unsafe/);
+  }
+});
+
 test('undo removes verified target before exact owned npm package and never touches index', async () => {
   const env = fakeEnvironment();
   const cfg = config();

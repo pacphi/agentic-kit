@@ -16,9 +16,19 @@ export function installedVersion(pkg) {
   }
 }
 
+// Strict SemVer 2.0.0 validation for values that cross a command boundary.
+// cmpVersions intentionally remains permissive for old cached/config values;
+// registry output must be safe before it becomes part of an npm coordinate.
+const SEMVER = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*))*))?(?:\+([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?$/;
+
+export function isValidSemver(value) {
+  return typeof value === 'string' && SEMVER.test(value);
+}
+
 export async function latestVersion(pkg, tag = 'latest') {
   const r = await run('npm', ['view', `${pkg}@${tag}`, 'version'], { timeout: 20_000 });
-  return r.code === 0 ? r.stdout.trim() : null;
+  const value = r.code === 0 ? r.stdout.trim() : null;
+  return isValidSemver(value) ? value : null;
 }
 
 /** Semver compare, prerelease-aware (4.0.0 > 4.0.0-alpha.1 > 4.0.0-alpha.0).

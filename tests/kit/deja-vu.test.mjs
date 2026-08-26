@@ -159,7 +159,7 @@ test('command construction uses one explicit target and suppresses guidance and 
 test('direct target observation is content-free and distinguishes MCP from auto wiring', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-deja-observe-'));
   const files = Object.fromEntries([
-    'claudeMcp', 'claudeHooks', 'codexMcp', 'codexHooks', 'opencodeMcp', 'opencodePlugin',
+    'claudeMcp', 'claudeHooks', 'claudePlugins', 'codexMcp', 'codexHooks', 'opencodeMcp', 'opencodePlugin',
   ].map((name) => [name, path.join(root, `${name}.json`)]));
   try {
     fs.writeFileSync(files.claudeMcp, JSON.stringify({
@@ -185,6 +185,46 @@ test('direct target observation is content-free and distinguishes MCP from auto 
       opencode: { direct: { mcp: true, auto: true }, plugin: { present: true, auto: true } },
     });
     assert.doesNotMatch(JSON.stringify(observed), /SENTINEL|deja\.json|\.mcp/);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('host-owned Claude and Codex plugin state is bounded and trust-aware', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-deja-plugins-'));
+  const files = Object.fromEntries([
+    'claudeMcp', 'claudeHooks', 'claudePlugins', 'codexMcp', 'codexHooks', 'opencodeMcp', 'opencodePlugin',
+  ].map((name) => [name, path.join(root, `${name}.json`)]));
+  try {
+    fs.writeFileSync(files.claudeHooks, JSON.stringify({
+      enabledPlugins: { 'deja-vu@deja-vu': true },
+    }));
+    fs.writeFileSync(files.claudePlugins, JSON.stringify({
+      version: 2,
+      plugins: { 'deja-vu@deja-vu': [{ scope: 'project', projectPath: root, installPath: '/SENTINEL' }] },
+    }));
+    fs.writeFileSync(files.codexMcp, [
+      '[plugins."deja-vu@deja-vu"]',
+      'enabled = true',
+      '[hooks.state."deja-vu@deja-vu:hooks/hooks.json:session_start:0:0"]',
+      'trusted_hash = "sha256:SENTINEL"',
+      '[hooks.state."deja-vu@deja-vu:hooks/hooks.json:user_prompt_submit:0:0"]',
+      'trusted_hash = "sha256:SENTINEL"',
+    ].join('\n'));
+
+    const observed = observeDejaVuTargets({ cwd: root, paths: files });
+    assert.deepEqual(observed.claude.plugin, { present: true, auto: true });
+    assert.deepEqual(observed.codex.plugin, { present: true, auto: true });
+    assert.doesNotMatch(JSON.stringify(observed), /SENTINEL|installPath|trusted_hash/);
+
+    fs.writeFileSync(files.codexMcp, [
+      '[plugins."deja-vu@deja-vu"]',
+      'enabled = true',
+      '[hooks.state."deja-vu@deja-vu:hooks/hooks.json:session_start:0:0"]',
+      'trusted_hash = "sha256:SENTINEL"',
+    ].join('\n'));
+    assert.deepEqual(observeDejaVuTargets({ cwd: root, paths: files }).codex.plugin,
+      { present: true, auto: false });
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
