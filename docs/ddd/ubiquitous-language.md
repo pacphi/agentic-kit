@@ -20,6 +20,11 @@ contradictory meaning.
 | Capability | Explicit behavior supported by an adapter; identity alone never implies it |
 | Integration intent | Desired, persisted host and binding configuration |
 | Integration facts | Immutable normalized observations about hosts, providers, and bindings |
+| Managed companion | Opt-in tool that projects a bounded service into enabled hosts without becoming a host, provider, binding, routing target, or memory authority |
+| Companion intent | Persisted enablement, selected-host, and per-host service/injection choice for a managed companion |
+| Companion fact | Content-free observation of companion package ownership, target wiring, plugin/trust state, schema compatibility, and data health |
+| Companion projection | Exact host-native wiring by which a companion exposes MCP or consented automatic events to one enabled host |
+| Auto-recall | Explicitly consented injection of untrusted historical context at a named host event; not a uniform session-start capability |
 
 ## State and evidence language
 
@@ -37,6 +42,7 @@ contradictory meaning.
 | Unknown | The available evidence cannot establish a value; it does not mean false, zero, free, absent, or unreachable |
 | Ownership receipt | Exact record of a value written by `ak`, permitting narrow undo only while that value is unchanged |
 | Drift | Current state differs from the last value written or expected by `ak` |
+| Companion data | User-owned index, notes, privacy state, imports, and source transcripts; invoking a managed companion does not transfer ownership to `ak` |
 
 Billing is a fact about a credentialed access path or observed execution, not an immutable vendor
 identity. A vendor may support subscription-backed host login and metered API-key use. Local
@@ -186,6 +192,8 @@ runtime state is a chip word, never a prose word. See
 - Say **compatible candidate** only when required mechanical facts are established. Reserve
   **cheaper equivalent** and **premium justified** for Route Intelligence evidence.
 - Do not infer an inference provider from a transcript host alone.
+- Do not call a managed companion a host, memory authority, or observability source. Name the exact
+  companion projection or automatic event when injection behavior matters.
 - Do not replace an unknown fact with a convenient default.
 - Say **System** for the dashboard area and the command; say **Machine footprint** only for the
   bounded context and its module directory. No user-facing string says "footprint".

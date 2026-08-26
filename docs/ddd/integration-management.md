@@ -1,7 +1,9 @@
 # Integration Management Domain
 
 This document describes the integration model implemented by
-[ADR-0016](../adr/0016-capability-driven-integration-adapters.md) and `src/lib/adapters/`.
+[ADR-0016](../adr/0016-capability-driven-integration-adapters.md), extended with the managed
+companion boundary accepted by [ADR-0035](../adr/0035-managed-deja-vu-companion.md), and
+`src/lib/adapters/`.
 
 ## Purpose
 
@@ -25,6 +27,13 @@ Host -------- ProviderBinding -------- InferenceProvider
   +-- ConfigurationProjection
   +-- ObservabilitySource(s)
   +-- host capabilities
+
+ManagedCompanion ---- consumes enabled Host ids
+       |
+       +-- independently owned package
+       +-- per-host companion projection
+       +-- content-free health facts
+       +-- user-owned companion data
 ```
 
 The four built-in adapter registries are validated code. ADR-0029 additionally admits an
@@ -56,6 +65,18 @@ returns a binding only when the supplied criteria identify exactly one candidate
 Endpoints reject embedded credentials, fragments, secret-bearing query parameters, unsupported
 protocols, and non-loopback plaintext HTTP.
 
+### Managed companion
+
+A managed companion is an opt-in, independently packaged tool that projects a bounded service into
+enabled hosts. It consumes host identity and capabilities without becoming a host, provider,
+provider binding, routing target, or observability authority. deja-vu is the first companion: it
+provides a local historical-evidence archive beside Ruflo/AgentDB's curated operational memory.
+
+Companion intent records enablement, selected hosts, and per-host service/injection choice.
+Companion facts keep package presence and ownership, explicit target wiring, external plugin
+coexistence, trust, schema compatibility, and data health separate. User history and companion data
+never become agentic-kit-owned because ak invoked the indexer.
+
 ## Capability rules
 
 - Primary and activity-routing capabilities require session-driving capability.
@@ -70,6 +91,8 @@ protocols, and non-loopback plaintext HTTP.
   Model lifecycle collector selects model-discovery descriptors and dispatches only to explicit
   built-in source adapters. External hosts without a supported catalogue descriptor remain
   `unsupported`.
+- A managed companion consumes only enabled hosts and explicit target capabilities. It gains no
+  host, provider, routing, or memory-promotion authority from that relationship.
 
 ## Integration facts
 
@@ -80,6 +103,7 @@ HostFact       = present + enabled + version + auth/wiring evidence
 ProviderFact   = configured + reachable + billing + credential presence
 BindingFact    = host + provider + model + billing + provenance + reachability
 ExecutionFact  = observed host + provider + model + transport + billing
+CompanionFact  = intent + package/ownership + per-host target/events + plugin/trust + data health
 ```
 
 Presence, enablement, authentication, configuration, and reachability are independent. Missing
@@ -123,6 +147,21 @@ detect -> plan -> apply -> verify -> undo
 Malformed, unavailable, or unsupported surfaces yield diagnostics and unknown facts rather than
 guessed success.
 
+### Companion lifecycle specialization
+
+A companion reuses the same lifecycle with four extra boundaries:
+
+- history access and initial indexing require opt-in consent before mutation;
+- package, per-host projection, plugin, and data ownership are independent;
+- host scope is an explicit target map, never delegated to upstream machine-wide discovery; and
+- verification combines a versioned machine contract with independent, content-free host
+  observations because one source does not prove all hook, trust, and integrity facts.
+
+For deja-vu v0.19.0, normal diagnosis is `deja doctor --json --offline` with JSON schema version 2.
+Target application uses `--no-guidance --no-index`, followed when required by one bounded
+`deja index`; `deja warmup` is excluded because it also writes deja-owned CLI guidance, and
+`index --rebuild` is reserved for diagnosed corruption.
+
 ## Ownership and drift
 
 Presence is not ownership. External installations and pre-existing configuration remain usable but
@@ -132,6 +171,11 @@ User or external drift is preserved.
 
 Receipts never authorize deletion of sibling keys, containing tables, external executables, or
 credential values.
+
+For a companion, an upstream wiring ledger is observation rather than an ak receipt. Ordinary undo
+removes exact receipt-owned projections; package removal is a separate scope; data purge is a third,
+destructive scope. External packages/plugins and user-owned index, notes, policy, privacy state,
+imports, and source transcripts are preserved unless narrower consent explicitly says otherwise.
 
 ## Configuration migration
 
@@ -171,3 +215,6 @@ envelopes and never reads the retired paths.
 11. Catalogue descriptor identity alone executes nothing and proves neither entitlement nor
     routability.
 12. Model lifecycle collection cannot mutate integration intent or native projections.
+13. A managed companion cannot become a host, provider, binding, routing target, observability
+    authority, or curated-memory promotion authority.
+14. Companion health and teardown never expose or infer ownership of transcript content.

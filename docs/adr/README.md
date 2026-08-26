@@ -42,6 +42,7 @@ Consequences**, and cites the grounded source it rests on where relevant.
 | [0032](0032-model-lifecycle-intelligence.md) | Model lifecycle intelligence from provenance-aware local evidence | Implemented |
 | [0033](0033-retire-codex-mcp-and-bound-qe-court-participants.md) | Retire Codex MCP; bound reciprocal QE-Court participant transport | Implemented; handoff transport amended by 0034 |
 | [0034](0034-schema-native-handoffs-and-hermetic-seats.md) | Schema-native worker handoffs and hermetic qe-court seats | Implemented |
+| [0035](0035-managed-deja-vu-companion.md) | Manage deja-vu as an opt-in session-history companion | Accepted; implementation tracked by issue #114 |
 
 Theme: ADRs **0001–0006** define **dual-host LLM routing and leadership** — how `ak` lets ruflo route
 each development activity (architecture, implementation, testing, review, …) to the right host (Claude
@@ -239,3 +240,12 @@ read-only. Canonical route mutation remains `ak host pick`, first-party migratio
 from quality, and only Route Intelligence may claim evidence-backed equivalence. The feature adds
 `ak models`, a cache-only status row, an Overview summary, and Models beneath Usage
 without changing the Dashboard's five primary areas.
+
+**0035** accepts deja-vu v0.19.0 as an opt-in managed companion for local cross-host session
+history. It keeps Ruflo/AgentDB authoritative for curated operational memory, defaults recall to
+MCP, requires separate per-host consent for automatic injection, and applies the shared
+detect/plan/apply/verify/undo lifecycle without making the companion a host, provider, binding,
+routing target, or observability authority. Package, target, plugin, and data ownership stay
+separate; normal diagnosis parses offline doctor schema version 2; indexing uses bounded
+`deja index` rather than guidance-writing `deja warmup`; teardown preserves external installs and
+user data unless a separately previewed purge is confirmed.

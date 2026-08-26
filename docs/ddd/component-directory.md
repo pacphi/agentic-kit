@@ -4,7 +4,8 @@ This document specifies the domain decided by
 [ADR-0026](../adr/0026-about-component-directory.md) and implemented in
 `src/lib/dashboard/about-directory.mjs`. Its terms are merged into
 [Ubiquitous language](ubiquitous-language.md) and the context is on the
-[context map](context-map.md).
+[context map](context-map.md). [ADR-0035](../adr/0035-managed-deja-vu-companion.md) adds the first
+managed companion to the directory's parity boundary.
 
 ## Purpose
 
@@ -26,9 +27,9 @@ The neighboring contexts each own a different kind of fact about the same compon
 owns the only kind none of them can: **editorial identity**.
 
 - **[Integration management](integration-management.md)** owns capability registries, bindings,
-  and ownership — what a component *can do* and what ak *manages about it*. It has no voice: no
-  value proposition, no links for a human, no reading order. The directory borrows its registry
-  as a parity gate (every managed tool must have an entry) and borrows nothing else.
+  companions, and ownership — what a component *can do* and what ak *manages about it*. It has no
+  voice: no value proposition, no links for a human, no reading order. The directory borrows its
+  registry as a parity gate (every managed tool must have an entry) and borrows nothing else.
 - **Overview / status** owns health verdicts. The directory renders a version chip from the
   same detection facts, but a card is an introduction, not a verdict — About never says
   "degraded," it says what the thing is for and where to read more.
@@ -125,6 +126,12 @@ paragraph explains what was configured and why it helps, and each names the comm
 manages it (`ak host`, `ak sync`, `ak x mcp pick`) so "yours to change" is actionable, not a
 platitude.
 
+A managed companion receives one packaged-tool entry even though its service spans several hosts.
+Its prose states purpose and the curated-memory boundary; it never claims that history is indexed,
+wiring is trusted, or automatic recall is active. Those remain independently joined detection
+chips. External/plugin-only presence may render as unowned, but it does not create a second card or
+authorize the directory to adopt it.
+
 ## Delivery
 
 No new endpoint. The directory module is imported by the page/client the same way `groups.mjs`
@@ -161,12 +168,11 @@ takes the worst of the pair, so the quieter one's health cannot hide behind the 
    no endpoint, and a failed status join degrades chips to `unknown` without hiding cards.
 3. **Prose never claims runtime state.** Installed/version/configured render exclusively as
    chips fed by detection; the paragraph reads true on any machine.
-4. **Registry↔directory parity is a test, scoped to built-in adapters.** Every managed tool
-   shipped in the built-in registry has exactly one entry; no entry exists for something ak
-   neither installs nor configures. There is no dynamic or third-party host concept yet, so
-   today "built-in" and "the registry" are the same set; an externally-admitted adapter is
-   exempt from this parity gate until the wave-4 adapter-extension contract graduates it to a
-   card-carrying citizen.
+4. **Registry↔directory parity is a test, scoped to built-in adapters and companions.** Every
+   managed tool shipped in the built-in registries has exactly one entry; no entry exists for
+   something ak neither installs nor configures. An experimental externally admitted adapter is
+   exempt from this parity gate until the adapter-extension contract graduates it to a
+   card-carrying citizen; external companion plugins remain observations, not directory entries.
 5. **Links are `https`, named-host, user-initiated**; the kit fetches none of them; all are
    covered by the nightly external link sweep.
 6. **Official marks only where genuinely official and already shipped**; everything else is an
@@ -199,11 +205,13 @@ normative and this table restates it for readers of this document.
 | Register contract | The editorial writing rules (one ~50-word paragraph, plain language, no runtime claims, no superlatives) |
 | Parity gate | The test asserting managed-tools registry ↔ directory completeness in both directions |
 | Configured surface | A non-package thing ak sets up, carrying a managing command instead of package links |
+| Managed companion entry | One packaged-tool entry whose chips may join package, wiring, plugin/trust, and data-health facts without exposing content |
 
 ## References
 
 - [ADR-0026](../adr/0026-about-component-directory.md) — the decision record this domain implements
 - [Integration management](integration-management.md) — the registry this stays in parity with
+- [ADR-0035](../adr/0035-managed-deja-vu-companion.md) — the managed companion boundary
 - [Machine footprint](machine-footprint.md) — the measurement context this deliberately isn't
 - [Context map](context-map.md) — where this context sits
 - [Dashboard guide](../DASHBOARD.md)

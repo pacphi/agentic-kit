@@ -1,10 +1,11 @@
 # ADR-0023 — Fail-closed mutations and explicit degraded operation evidence
 
 - **Status:** Implemented
-- **Updated:** 2026-08-24 — issue #170 parser-yield diagnostics distinguish readable Codex roots from
-  readable roots whose transcript schema produces no normalized responses
+- **Updated:** 2026-08-26 — ADR-0035 applies fail-closed preflight, bounded evidence, and
+  content-free degradation to the opt-in deja-vu companion
 - **Date:** 2026-08-04
-- **Previous update:** 2026-08-06
+- **Previous updates:** 2026-08-24 — issue #170 parser-yield diagnostics distinguish readable Codex
+  roots from readable roots whose transcript schema produces no normalized responses; 2026-08-06
 - **Update note:** Generalized setup preflight into a required host-adapter trust contract, added
   Codex registration/OpenCode approval disclosure, documented current-UID installation-mode
   boundaries, and surfaced usage-source health in the dashboard UI. Closed a parity gap §7 left
@@ -23,7 +24,9 @@
   [ADR-0012](0012-observability.md),
   [ADR-0014](0014-dashboard-auth-and-remediation.md),
   [ADR-0016](0016-capability-driven-integration-adapters.md), and
-  [ADR-0017](0017-opencode-host.md)
+  [ADR-0017](0017-opencode-host.md),
+  [ADR-0035](0035-managed-deja-vu-companion.md), and
+  [issue #114](https://github.com/pacphi/agentic-kit/issues/114)
 
 ## Context
 
@@ -117,6 +120,19 @@ init. Any new rule outside the disclosed manifest is removed and setup fails; pr
 rules survive. OpenCode discloses its user-scope wildcard approvals, MCP registrations, lifecycle
 plugin, and managed host assets. Codex discloses MCP/AQE registrations while explicitly retaining
 its sandbox and approval policy.
+
+#### 6.1 Sensitive companion reads and injections require their own consent
+
+ADR-0035 applies the same boundary to deja-vu before the first transcript scan or index write, not
+only before host configuration changes. Consent names the stores read, the unencrypted derived
+index, each explicit host target, and the automatic event set. MCP-only recall is the opt-in
+default. Auto-recall is a second per-host consent because v0.19.0 can inject untrusted history at
+prompt, compaction, command, and edit boundaries rather than only at session start.
+
+Companion diagnosis stays offline, bounded, schema-checked, and content-free. A zero exit from
+`deja doctor --json --offline` does not upgrade a reported fault to healthy; missing auto-hook,
+plugin-coexistence, Codex-trust, or index-integrity evidence remains unknown. A destructive data
+purge is planned and confirmed separately from wiring or package removal.
 
 ### 7. Usage source degradation is visible in the dashboard, for all four local sources
 
@@ -221,6 +237,8 @@ unexplained.
   argv; shared logins and host-PID containers remain same-UID boundaries, not separate users.
 - `ak setup` makes each enabled host's trust changes inspectable before acceptance and detects
   undisclosed Claude project grants introduced by upstream initializers.
+- Enabling deja-vu discloses the history read and index write before either occurs; automatic
+  injection and destructive data purge require separate, narrower consent.
 - Some formerly best-effort writes now fail. This is deliberate: when ak promises a backup, mutation
   without one is a correctness failure.
 - An unreadable `~/.claude/projects` or `~/.codex/sessions` (permissions, a corrupt filesystem entry,

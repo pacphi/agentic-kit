@@ -9,7 +9,7 @@ The **host** rows here mean execution drivers such as Claude Code, Codex CLI, an
 Inference **providers** such as OpenRouter and Ollama are not install-owned hosts. Provider intent
 may use a **binding** and native configuration **projection**, while transcripts and catalogues
 remain separate **observability** evidence. The shared lifecycle and value-precise ownership
-design is Proposed in [ADR-0016](adr/0016-capability-driven-integration-adapters.md).
+design is Accepted in [ADR-0016](adr/0016-capability-driven-integration-adapters.md).
 
 Each invariant traces to a live failure it prevents — the appendix records
 them.
@@ -62,12 +62,37 @@ them.
 | **hosts** (Claude, Codex, OpenCode; OpenCode routes explicitly through `ak run`) | npm `@latest` — only when npm-managed | `ak sync` if npm-installed; **explicitly disowned** if brew/mise/native | disk: global `package.json`, else `--version` probe | npm latest for npm-managed only; external → `outdated:false` | row ✓ (version + method) / n/a / card + banner (npm-managed only) ✓ |
 | **agentdb** | npm, **pinned to ruflo's bundled version** — deliberately not latest | `ak sync` (repins on core skew) | disk: global `package.json` | ruflo's **bundled** copy (coherence), not npm latest — by design | row ✓ / n/a / card ✓; banner excluded (its authority isn't "latest") |
 | **ruvnet-brain** | npm `ruvnet-brain@latest` + `--version v<tag>` pin (never `github:` HEAD) | `ak sync`; the installer's own nightly self-updater is suppressed at install (`--no-nightly-prompt`) and disabled by sync if found (`ruvnet-brain-nightly` subsystem) | disk: KB `SOURCE.json → releaseTag`, falling back to ak's kit.json stamp for pre-stamping bundles | GitHub `releases/latest` tag (TTL-cached) | row ✓ / `V<tag>` chip ✓ / card + banner ✓ |
+| **deja-vu** (opt-in companion) | npm `@vshulcz/deja-vu@latest`; v0.19.0 is the accepted contract baseline | `ak sync` only for an ak-receipted npm install; external binary/plugin installs are disowned | disk: global package plus bounded `deja version`; plugin or binary presence does not prove ownership | npm latest for owned npm; external → installed-only | content-free row / n/a / card + banner for owned npm drift |
 | **kit (self)** | npm, **pinned to the exact version drift saw** (`@pacphi/agentic-kit@<v>`) | `ak sync` (runs last — npm replaces the running code) | disk: running copy's `package.json` | npm `latest` (+ `next` for prereleases, TTL-cached) | row ✓ / n/a / header version + card + banner ✓ |
 
 Statusline "n/a" cells are by design: the footer decorates the activation rows
 it renders (ruflo / Agentic QE / brain) — hosts, agentdb, and the kit have no
 footer row to decorate, and their versions live in `ak status` and the
 dashboard.
+
+## Managed companion lifecycle boundary
+
+[ADR-0035](adr/0035-managed-deja-vu-companion.md) applies this contract to deja-vu without making
+it a host, provider, routing target, or AgentDB replacement. Its lifecycle is narrower than package
+presence:
+
+1. **Opt-in intent precedes history access.** Detection may report an external install, but no
+   transcript scan, index build, host wiring, or plugin adoption follows without consent.
+2. **Package, target, plugin, and data ownership stay separate.** Ak updates or removes only its
+   receipted npm package and exact per-host targets. Upstream `wiring.json`, binary presence, and
+   host-plugin presence are observations, not ownership receipts.
+3. **Enabled hosts select explicit targets.** Ak never delegates scope to deja-vu's `--all` or
+   aggregate `--auto` discovery. MCP is the default; automatic event injection is a second,
+   per-host consent.
+4. **Indexing preserves guidance ownership.** Target installs use `--no-guidance --no-index`, then
+   ak runs one bounded `deja index` when required. It does not call `deja warmup`, which also writes
+   deja's CLI skill, and uses `index --rebuild` only for diagnosed corruption.
+5. **Verification is schema- and evidence-driven.** Normal status parses
+   `deja doctor --json --offline` schema version 2 and independently observes host wiring/plugin
+   facts. Doctor exit zero alone is not health, and unknown additive fields remain compatible.
+6. **Removal has three scopes.** Wiring removal is ordinary; owned package removal is explicit;
+   data purge is separately previewed and confirmed. Source transcripts and primary notes,
+   exclusions, tombstones, policy, peers, and imported history are preserved by default.
 
 ## Where each piece lives
 
@@ -81,6 +106,9 @@ dashboard.
   `latestVersion`, `classifyDrift`, `drift`, nightly-agent detection), heals
   `installRuvnetBrain` / `disableRuvnetBrainNightly`. Full background on its
   three version namespaces and the installer's `--yes` gotcha: MAINTAINER.md.
+- **deja-vu companion** — lifecycle and upstream-version boundary in
+  [ADR-0035](adr/0035-managed-deja-vu-companion.md); implementation follows the common adapter and
+  managed-version seams rather than adding a host/provider registry member.
 - **display surfaces** — `src/commands/status.mjs` (rows),
   `src/templates/statusline-footer.cjs` (chips),
   `src/lib/dashboard-server.mjs` (cards from the same rows; banner =

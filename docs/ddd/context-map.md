@@ -7,7 +7,8 @@ identify who owns each decision and where translation is required.
 Configuration Intent
         |
         +----> Integration Management ----> Native Configuration Surfaces
-        |                 |
+        |                 |       |
+        |                 |       +----> Managed Companion Surfaces
         |                 +----> Routing and Orchestration
         |
 Native Evidence ----> Evidence Acquisition ----> Canonical Evidence
@@ -39,8 +40,10 @@ does not prove that an executable, credential, or endpoint is usable.
 ### Integration management
 
 Owns the registries, capabilities, binding validation, normalized integration facts, managed
-projection lifecycle, config migration, and value-precise ownership. Native JSON, TOML, environment,
-and CLI surfaces are downstream representations.
+projection lifecycle, companion lifecycle specialization, config migration, and value-precise
+ownership. Native JSON, TOML, environment, CLI, and companion surfaces are downstream
+representations. A managed companion consumes enabled-host identity but gains no host, provider,
+routing, observability, or curated-memory authority.
 
 See [Integration management](integration-management.md).
 
@@ -147,6 +150,7 @@ and credential policy is distinct from the offline-first dashboard and integrati
 |----------|------------|--------------|
 | Configuration intent | Integration management | Desired state; detection and verification remain independent |
 | Integration management | Native surfaces | Configuration projections with ownership receipts |
+| Integration management | Managed companion surfaces | Opt-in package and explicit per-host projections; plugin/data ownership stays separate |
 | Integration management | Routing and orchestration | Capability-qualified host and binding facts |
 | Native evidence | Evidence acquisition | Source-specific anti-corruption adapters |
 | Evidence acquisition | Observability | Versioned canonical events |
@@ -211,3 +215,6 @@ observed before the split was made explicit.
 - Component directory authors identity, it does not observe it. Editorial prose never asserts
   runtime state; installed, version, and configured render exclusively as chips fed by detection
   facts borrowed from existing collectors.
+- Managed companion surfaces stay downstream of Integration management. Their ability to read host
+  history or inject recalled context does not make them hosts, evidence owners, or policy
+  authorities; consent, content-free observation, and ownership-safe teardown remain upstream.

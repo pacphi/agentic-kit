@@ -4,7 +4,7 @@
   [ADR-0020](0020-ga-stable-surfaces.md); closed-registry clause superseded by
   [ADR-0029](0029-host-adapter-extension-point.md)
 - **Date:** 2026-07-28
-- **Updated:** 2026-08-25
+- **Updated:** 2026-08-26
 - **Update note:** Added read-only Codex plugin-hook compatibility facts,
   runtime-selected Ruflo project-memory store proofs, and the non-correlatable
   OpenRouter account-analytics boundary; removed the pre-GA compatibility command,
@@ -38,6 +38,10 @@
   retires the deprecated Claude→Codex MCP projection while retaining this ADR's
   value-precise ownership boundary. OpenAI's Claude Code plugin remains external and
   user-owned; Ruflo and Agentic-QE registrations are independent Codex integrations.
+  2026-08-26: [ADR-0035](0035-managed-deja-vu-companion.md) applies this lifecycle and
+  ownership model to an opt-in managed companion. A companion consumes host capabilities and
+  projects its own service into enabled hosts, but does not become a fifth adapter axis, a host,
+  a provider, a binding, or an observability authority.
 - **Deciders:** agentic-kit maintainers
 - **Related:** [ADR-0001](0001-one-routing-policy-many-projections.md),
   [ADR-0003](0003-auto-seed-dual-host-provenance.md),
@@ -48,8 +52,10 @@
   [ADR-0011](0011-local-model-provenance-zero-cost-and-transcript-fidelity.md),
   [ADR-0012](0012-observability.md),
   [ADR-0015](0015-managed-codex-native-statusline.md),
+  [ADR-0035](0035-managed-deja-vu-companion.md),
   [issue #59](https://github.com/pacphi/agentic-kit/issues/59),
-  [issue #71](https://github.com/pacphi/agentic-kit/issues/71)
+  [issue #71](https://github.com/pacphi/agentic-kit/issues/71), and
+  [issue #114](https://github.com/pacphi/agentic-kit/issues/114)
 
 > **GA amendment:** the capability axes and lifecycle contracts remain authoritative. Sections
 > that preserve compatibility exports, commands, or persisted fields are historical after 4.0.
@@ -155,6 +161,14 @@ described by environment-variable name, never by its value.
 Host and provider namespaces are typed. An ID appearing on the provider axis can never satisfy a
 host reference, and vice versa. Compatibility exports may derive the old arrays and maps from the
 registries during migration, but they are not independent sources of truth.
+
+#### Managed companions remain outside the adapter axes
+
+ADR-0035 introduces a managed companion tool without adding an adapter axis. A companion consumes
+the enabled-host set and reuses the managed projection lifecycle to place an independently packaged
+service into those hosts. It cannot drive a session, receive a route, establish inference identity,
+or become a source of canonical observability merely because it can read host artifacts. Its
+package, per-host wiring, plugin coexistence, and user data carry separate facts and receipts.
 
 ### 2. Derive choices from capability, not identity
 
@@ -514,6 +528,7 @@ but less truthful.
 | API keys are never persisted | Section 7 and serialization tests |
 | Dry-run/idempotence/undo/no-clobber are shared and tested | Sections 3 and 4; conformance suite |
 | External plugin hooks and runtime-selected memory are truthful | Section 4; read-only plugin diagnostics and isolated memory round-trip |
+| Managed companions reuse lifecycle without becoming hosts/providers | Section 1; ADR-0035 |
 | Issue #59 can consume the abstraction without being subsumed | Sections 5 and 8 |
 | Documentation uses one vocabulary | Section 9 |
 
