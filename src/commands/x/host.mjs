@@ -354,7 +354,7 @@ async function refresh({ flags, cwd }) {
   const router = applyAqeRouter(cfg, cwd);
   (router.ok ? ok : warn)(`aqe router: ${router.detail}`);
   printActivityRoutingTable(cfg);
-  return 0;
+  return router.ok ? 0 : 1;
 }
 
 async function off({ cwd, pkgRoot }) {
@@ -745,9 +745,13 @@ async function pick({ flags, cwd, pkgRoot }) {
     const alt = routing.filter((e) => e !== primaryHost).join(', ') || 'none';
     ok(`primary host: ${primaryHost} (alternate: ${alt})`);
   }
-  if (aqeProvider) ok(`aqe provider: AQE_LLM_PROVIDER=${aqeProvider}`);
   const router = applyAqeRouter(cfg, cwd);
   if (router.changed || !router.ok) (router.ok ? ok : warn)(`aqe router: ${router.detail}`);
+  if (aqeProvider) {
+    (router.ok ? ok : warn)(router.ok
+      ? `aqe provider: AQE_LLM_PROVIDER=${aqeProvider}`
+      : `aqe provider intent not active: ${aqeProvider} (router projection incomplete)`);
+  }
   const mcp = await retireCodexMcp(cfg, cwd);
   if (mcp.changed) saveKitConfig(cfg);
   if (mcp.changed || !mcp.ok) (mcp.ok ? ok : warn)(`legacy codex MCP: ${mcp.detail}`);
@@ -758,10 +762,11 @@ async function pick({ flags, cwd, pkgRoot }) {
   if (rmcp.changed || !rmcp.ok) (rmcp.ok ? ok : warn)(`ruflo→codex MCP: ${rmcp.detail}`);
   const prov = await applyProviders(cfg, cwd);
   (prov.status === 'degraded' ? warn : prov.ok ? (prov.changed ? ok : info) : warn)(`ruflo providers: ${prov.detail}`);
-  ok('saved to kit.json — reapplied on every `ak sync`; undo with `ak host off`');
+  if (router.ok) ok('saved to kit.json — reapplied on every `ak sync`; undo with `ak host off`');
+  else warn('saved intent to kit.json, but AQE routing is incomplete — fix the warning above and re-run `ak sync`');
   if (seed.seeded) ok(`per-activity routing seeded — ${seed.count} activities (dual-host defaults; tune with --route or edit kit.json)`);
   printActivityRoutingTable(cfg);
   await maybeWriteQeCourtDefaults({ nonInteractive, cwd, enabled, aqeProvider });
   printDualHostTips(cfg);
-  return incompleteTeardown ? 1 : 0;
+  return incompleteTeardown || !router.ok ? 1 : 0;
 }

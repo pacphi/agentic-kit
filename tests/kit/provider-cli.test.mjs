@@ -454,6 +454,35 @@ test('pick --aqe-provider none retires the owned external default without disabl
   }
 });
 
+test('pick fails honestly when installed AQE cannot project the requested external provider', () => {
+  const sb = pickSandbox({ hosts: { claude: true, codex: false, opencode: false } });
+  try {
+    configureExternalAqeProvider(sb);
+    const env = {
+      AK_EXPERIMENTAL_HOST_ADAPTERS: '1',
+      npm_config_prefix: fakeAqeInstall(sb.home, '3.13.11'),
+    };
+
+    const result = akPick(['x', 'host', 'pick', '--aqe-provider', 'hermes', '--yes'], sb, { env });
+    assert.equal(result.status, 1,
+      `unsupported external selection must fail\nstdout: ${result.stdout}\nstderr: ${result.stderr}`);
+    assert.match(result.stdout, /external providers need agentic-qe >=3\.13\.12/);
+    assert.match(result.stdout, /aqe provider intent not active: hermes/);
+    assert.match(result.stdout, /saved intent to kit\.json, but AQE routing is incomplete/);
+    assert.doesNotMatch(result.stdout, /✓ aqe provider:/, 'the command must not claim the provider is active');
+    assert.doesNotMatch(result.stdout, /✓ saved to kit\.json/, 'the command must not claim full convergence');
+    assert.equal(kitJson(sb.home).providers.aqeProvider, 'hermes',
+      'declarative intent remains available for upgrade plus sync');
+    assert.equal(fs.existsSync(path.join(sb.project, '.agentic-qe', 'llm-config.json')), false,
+      'unsupported AQE receives no unusable external declaration');
+
+    const status = akPick(['status', '--json'], sb, { env });
+    assert.equal(status.status, 1, 'immediate status must also report the incomplete projection');
+  } finally {
+    rm(sb.home, sb.project);
+  }
+});
+
 test('one pick can enable a disabled admitted provider and select it atomically', () => {
   const sb = pickSandbox({ hosts: { claude: true, codex: false, opencode: false } });
   try {
