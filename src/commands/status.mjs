@@ -17,13 +17,13 @@ import { listDaemons, staleDaemons } from '../lib/daemons.mjs';
 import { scanRvf } from '../lib/rvf.mjs';
 import { registry, syncBlocks, blocksForTarget, retiredForTarget, guidanceTargets } from '../lib/blocks.mjs';
 import { loadKitConfig } from '../lib/config.mjs';
-import { driftReport, selfDrift } from '../lib/versions.mjs';
+import { driftReport, selfDrift, installedVersion, cmpVersions } from '../lib/versions.mjs';
 import { upstreamCveCounterFabricated, fixStatusline, helperStampStale } from '../lib/statusline.mjs';
 import { drift as ruvnetBrainDrift, nightlyAgentPresent as rbNightlyPresent, NIGHTLY_LABEL as RB_NIGHTLY_LABEL } from '../lib/ruvnet-brain.mjs';
 import { coherence as adbCoherence } from '../lib/agentdb.mjs';
 import { readJson } from '../lib/settings.mjs';
 import { have } from '../lib/exec.mjs';
-import { HOSTS, settingsTarget, isDefault, managedEnv, MANAGED_ENV_KEYS, hostInstallState, hostAuthState, bothHostsEnabled, aqeRouterFile, aqeSupportsAgentOverrides, credentialGaps, collectIntegrationFacts } from '../lib/providers.mjs';
+import { HOSTS, settingsTarget, isDefault, managedEnv, MANAGED_ENV_KEYS, hostInstallState, hostAuthState, bothHostsEnabled, aqeRouterFile, aqeSupportsAgentOverrides, credentialGaps, collectIntegrationFacts, MIN_RUFLO_PERSISTED_PROVIDER_VERSION } from '../lib/providers.mjs';
 import { hostsWithLifecycle, isBuiltinHost, lifecycleExecutionEnabled } from '../lib/adapters/lifecycle-registry.mjs';
 import { PROVIDER_REGISTRY } from '../lib/adapters/index.mjs';
 import { configuredPolicyToAgentOverrides, agentOverridesDrift, routingSummary, divergedRoutes } from '../lib/routing.mjs';
@@ -684,6 +684,39 @@ export async function collect({ pkgRoot, cwd = process.cwd() }) {
         } else {
           rows.push(row('providers', 'ok', `aqe chain: ${chain.length}/${chain.length} rungs have credentials`));
         }
+      }
+    }
+    // A kit.json provider/model entry is registration intent. Ruflo >=3.38.8
+    // can honor explicit OpenRouter/Ollama provider+model selection, but the
+    // registry does not retarget every agent and it is not execution evidence.
+    // Keep that distinction in the status rows the dashboard consumes.
+    const rufloModels = cfg.providers?.models ?? [];
+    if (rufloModels.length) {
+      const intent = rufloModels
+        .filter((entry) => entry?.id)
+        .map((entry) => `${entry.id}${entry.model ? `:${entry.model}` : ''}`)
+        .join(', ');
+      const rufloVersion = installedVersion('ruflo');
+      const affected = !!rufloVersion
+        && cmpVersions(rufloVersion, MIN_RUFLO_PERSISTED_PROVIDER_VERSION) < 0;
+      const missingOpenRouterKey = rufloModels.some((entry) => entry?.id === 'openrouter')
+        && !integrationFacts.providers?.openrouter?.credentialPresent;
+      const directIds = new Set(['ollama', 'openrouter']);
+      const registryOnly = [...new Set(rufloModels
+        .map((entry) => entry?.id)
+        .filter((id) => id && !directIds.has(id)))];
+      if (affected) {
+        rows.push(row('providers', 'warn',
+          `ruflo provider intent: ${intent} — ruflo ${rufloVersion} cannot honor persisted provider/model execution; needs >=${MIN_RUFLO_PERSISTED_PROVIDER_VERSION}`));
+      } else if (missingOpenRouterKey) {
+        rows.push(row('providers', 'warn',
+          `ruflo provider intent: ${intent} — direct agents must select provider + model; openrouter needs OPENROUTER_API_KEY in the Ruflo/MCP process`));
+      } else {
+        const unsupported = registryOnly.length
+          ? `; no direct-agent execution branch for ${registryOnly.join(', ')}`
+          : '';
+        rows.push(row('providers', 'info',
+          `ruflo provider intent: ${intent} — direct agents must select provider + model; Usage proves served execution${unsupported}`));
       }
     }
     // ADR-0028 F-29: local-openai is a local ($0) provider deliberately NOT

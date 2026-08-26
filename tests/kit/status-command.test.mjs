@@ -74,6 +74,18 @@ test('every row carries the documented shape', async () => {
   }
 });
 
+test('ruflo provider intent never claims registration alone is routed execution', async () => {
+  seedHome(offlineKitConfig({
+    providers: { models: [{ id: 'openrouter', model: 'z-ai/glm-5.2' }] },
+  }));
+  const providerRows = rowsFor(await collect(), 'providers');
+  const intent = providerRows.find((r) => r.message.startsWith('ruflo provider intent:'));
+  assert.ok(intent, `expected a ruflo intent row: ${providerRows.map((r) => r.message)}`);
+  assert.match(intent.message, /openrouter:z-ai\/glm-5\.2/);
+  assert.match(intent.message, /direct agents must select provider \+ model/);
+  assert.doesNotMatch(intent.message, /routable|executed successfully/);
+});
+
 test('a missing global ruflo is a FAIL with a fix; a present one is ok', async () => {
   seedHome();
   const withRuflo = await collect();

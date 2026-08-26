@@ -334,6 +334,11 @@ export function renderPage({ name, version }) {
       <h2>Inference providers</h2>
       <p>Provider bindings, availability, provenance, and configuration health.</p>
     </header>
+    <div class="note"><span class="i">&#8505;</span><span>A registered provider is eligible configuration,
+      not proof that it was selected or served a request. Direct Ruflo agents must select
+      <b>OpenRouter</b> or <b>Ollama</b> together with a provider-native model; long-lived Ruflo/MCP
+      processes must inherit the required credential environment. See <b>Usage &rarr; Scorecard</b>
+      for independently observed provider and model evidence.</span></div>
     <div id="cards-providers"></div>
   </section>
 

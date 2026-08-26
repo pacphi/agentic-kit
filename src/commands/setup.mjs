@@ -415,11 +415,13 @@ export async function run_project({ flags, cfg, trustDisclosed = false }) {
     const rmcp = await ensureRufloMcpInCodex(cfg, root);
     if (rmcp.changed) saveKitConfig(cfg); // persist reverse MCP ownership
     if (rmcp.changed || !rmcp.ok) (rmcp.ok ? ok : warn)(`ruflo→codex MCP: ${rmcp.detail}`);
-    const prov = await applyProviders(cfg, root);
-    if (prov.changed) (prov.ok ? ok : warn)(`providers: ${prov.detail}`);
   } else if (await have('codex')) {
     info('codex CLI detected — enable dual-host with: ak host pick');
   }
+  // Provider routing is independent of the enabled execution-host set. Apply
+  // persisted Ruflo providers for Claude-only setups too (#128 / ruflo#2962).
+  const prov = await applyProviders(cfg, root);
+  if (prov.changed || !prov.ok || prov.status === 'degraded') reportOutcome('providers', prov);
 
   // 10. statusline footer — LAST, after ruflo + aqe have settled the helper.
   //     A still-missing footer is a WARN (not silent info): it means the AQE /

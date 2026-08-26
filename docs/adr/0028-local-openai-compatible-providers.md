@@ -2,11 +2,13 @@
 
 - **Status:** Accepted
 - **Date:** 2026-08-11
-- **Updated:** 2026-08-14
+- **Updated:** 2026-08-25
 - **Update note:** Accepted with corrections after review of PR #131: the quoted Hermes
   `api_mode: openai` value is annotated as invalid rather than reproduced as valid (F-30), and the
   AQE-projection asymmetry between `ollama` and `local-openai` is now stated explicitly as
   intentional (F-29). Implemented with in-tree projections `['ruflo', 'codex', 'opencode']`.
+  Reconciled after ruvnet/ruflo#2962: projection is configuration eligibility, not proof that
+  Ruflo's direct `agent_execute` dispatcher implements an arbitrary provider id.
 - **Deciders:** agentic-kit maintainers
 - **Related:** [ADR-0011](0011-local-model-provenance-zero-cost-and-transcript-fidelity.md),
   [ADR-0016](0016-capability-driven-integration-adapters.md),
@@ -128,12 +130,20 @@ deliberate:
   because AQE does not. `ak status`'s provider surface reflects this distinction; surfacing it
   clearly is a sibling work package's scope, not this ADR's.
 
+`'ruflo'` has the same bounded meaning as every projection in this domain: the relationship can be
+represented on Ruflo's provider-configuration surface. It does **not** claim that Ruflo's direct
+agent executor dispatches an arbitrary provider name. Ruflo 3.38.8 fixed persisted provider
+selection for its implemented Ollama and OpenRouter branches (ruvnet/ruflo#2962); it did not add a
+generic `local-openai` branch. Therefore a `local-openai` binding is not direct-agent-execution
+evidence, and agentic-kit must not present registration as successful selection or execution.
+
 ## Consequences
 
 - A machine serving models from MLX, LM Studio, llama.cpp, vLLM, or anything else speaking
   OpenAI-compatible HTTP on loopback can be described to ak without a new ADR per vendor, and
   without inventing a provider id the user did not choose.
-- Every host that can be pointed at an OpenAI-compatible base URL gains a nameable local provider.
+- Every host with a concrete OpenAI-compatible projection can gain a nameable local provider; a
+  registry projection alone does not make another tool's direct executor support that provider id.
 - The generic row deliberately supports **less** than `ollama`: no catalogue, no runtime probe, no
   digest. Surfaces that show local-model detail for Ollama will show less for `local-openai`, and
   that gap is the honest reading of the evidence, not a defect to paper over.

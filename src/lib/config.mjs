@@ -40,7 +40,7 @@ const DEFAULTS = {
   providers: {
     aqeProvider: null,                      // AQE_LLM_PROVIDER (claude-code|openai|gemini|…); null = aqe default
     aqeFallback: [],                        // [{ provider, models:[...] }] — ordered aqe fallback chain (.agentic-qe/llm-config.json)
-    models: [],                             // [{ id:'openai', model:'gpt-5.6' }] — ruflo API-key providers
+    models: [],                             // [{ id:'ollama', model:'qwen3.6:27b', endpoint?:'http://127.0.0.1:11434' }] — ruflo providers
     maxBudgetUsd: null,                     // → AQE_MAX_BUDGET_USD when set
   },
   statusline: { codex: null }, // {preset,lastProjection}: explicit ownership of Codex [tui] keys
