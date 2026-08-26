@@ -647,6 +647,7 @@ export function applyAqeRouter(cfg, cwd = process.cwd()) {
   if (!root) return { ok: true, changed: false, detail: 'not a project — aqe router unmanaged' };
   const file = aqeRouterFile(root);
   const existing = readJson(file, {}) ?? {};
+  const ownedExternalDefault = exactlyOwnedExternalDefault(existing);
   const desiredExternal = aqeExternalProviders({ projectRoot: root });
   const hasExternal = Object.keys(desiredExternal).length > 0;
   const hasOwnedExternal = Object.keys(existing[AQE_OWNERSHIP_KEY]?.externalProviders ?? {}).length > 0;
@@ -666,7 +667,7 @@ export function applyAqeRouter(cfg, cwd = process.cwd()) {
   // Exact receipts never regain authority. If a user changes the default away
   // from the value ak wrote, relinquish ownership immediately; changing it
   // back later is still a user write and cannot resurrect this receipt.
-  if (hasExternalDefaultReceipt && !exactlyOwnedExternalDefault(existing)) {
+  if (hasExternalDefaultReceipt && !ownedExternalDefault) {
     clearExternalDefaultOwnership(next);
   }
   const details = [];
@@ -689,7 +690,7 @@ export function applyAqeRouter(cfg, cwd = process.cwd()) {
     if (Object.keys(reconciled.providers).length) next.providers = reconciled.providers;
     else delete next.providers;
     const ownership = { ...(plainRecord(next[AQE_OWNERSHIP_KEY]) ?? {}) };
-    if (!exactlyOwnedExternalDefault(existing)) delete ownership.externalDefaultProvider;
+    if (!ownedExternalDefault) delete ownership.externalDefaultProvider;
     if (Object.keys(reconciled.receipts).length) ownership.externalProviders = reconciled.receipts;
     else delete ownership.externalProviders;
     if (Object.keys(ownership).length) next[AQE_OWNERSHIP_KEY] = ownership;
@@ -720,7 +721,7 @@ export function applyAqeRouter(cfg, cwd = process.cwd()) {
       if (next.fallbackChain.entries.length === 0) delete next.fallbackChain;
     }
     if (unavailableExternal.has(next.defaultProvider)
-      && (managedFallbackOwnedDefault || exactlyOwnedExternalDefault(existing) === next.defaultProvider)) {
+      && (managedFallbackOwnedDefault || ownedExternalDefault === next.defaultProvider)) {
       delete next.defaultProvider;
       clearExternalDefaultOwnership(next);
     }
@@ -736,6 +737,18 @@ export function applyAqeRouter(cfg, cwd = process.cwd()) {
   // the safe projection so ak-owned overrides never retain an unusable id.
   staleOverrides = Object.keys(priorOverrides)
     .filter((agent) => managedOverrideKeys.has(agent) && !(agent in projected));
+
+  // `aqeProvider: null` is an explicit deselection. Retire only an exact
+  // external default that ak previously wrote, while leaving the admitted
+  // declaration and MCP activation intact for routes or future selection.
+  // A configured fallback chain owns default selection independently and is
+  // handled below; it must not be erased by primary-provider deselection.
+  if (!hasChain && selectedProvider === null && ownedExternalDefault) {
+    delete next.defaultProvider;
+    clearExternalDefaultOwnership(next);
+    details.push(`defaultProvider: ${ownedExternalDefault} retired`);
+    wrote = true;
+  }
 
   let chainError = null;
   if (hasChain) {
@@ -758,7 +771,7 @@ export function applyAqeRouter(cfg, cwd = process.cwd()) {
       next.fallbackChain = buildChain(valid);
       if (next.defaultProvider in desiredExternal && externalActive.has(next.defaultProvider)) {
         setExternalDefaultOwnership(next, next.defaultProvider);
-      } else if (exactlyOwnedExternalDefault(existing)) {
+      } else if (ownedExternalDefault) {
         clearExternalDefaultOwnership(next);
       }
       const emptyModels = valid.filter((e) => !e.models || e.models.length === 0).map((e) => e.provider);

@@ -206,6 +206,24 @@ test('an external-default receipt cannot reacquire ownership after user drift', 
   assert.deepEqual(disk.externalProviders.hermes.command, ['/tmp/user-edited-provider']);
 });
 
+test('explicit deselection retires only the exactly owned external default', () => {
+  fakeAqe('3.13.12'); registerHermes();
+  const dir = project();
+  assert.equal(applyAqeRouter(cfg({ chain: [], routes: {} }), dir).ok, true);
+
+  const deselected = applyAqeRouter(cfg({ provider: null, chain: [], routes: {} }), dir);
+  const disk = JSON.parse(fs.readFileSync(aqeRouterFile(dir), 'utf8'));
+  assert.equal(deselected.ok, true, deselected.detail);
+  assert.equal(deselected.changed, true);
+  assert.equal(disk.defaultProvider, undefined, 'the previously selected external default is retired');
+  assert.equal(disk._agenticKit.externalDefaultProvider, undefined, 'its exact ownership receipt is retired');
+  assert.ok(disk.externalProviders.hermes, 'the admitted declaration remains available');
+  assert.deepEqual(disk.providers.hermes, { enabled: true }, 'the MCP activation remains available');
+
+  const converged = applyAqeRouter(cfg({ provider: null, chain: [], routes: {} }), dir);
+  assert.equal(converged.changed, false, converged.detail);
+});
+
 test('malformed ownership receipts are relinquished without deleting user values or throwing', () => {
   fakeAqe('3.13.12');
   const dir = project();

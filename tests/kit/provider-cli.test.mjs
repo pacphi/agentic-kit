@@ -424,6 +424,36 @@ test('external provider selection accepts the effective host and provider-only r
   }
 });
 
+test('pick --aqe-provider none retires the owned external default without disabling admission', () => {
+  const sb = pickSandbox({ hosts: { claude: true, codex: false, opencode: false } });
+  try {
+    configureExternalAqeProvider(sb);
+    const env = {
+      AK_EXPERIMENTAL_HOST_ADAPTERS: '1',
+      npm_config_prefix: fakeAqeInstall(sb.home),
+    };
+
+    const selected = akPick(['x', 'host', 'pick', '--aqe-provider', 'hermes', '--yes'], sb, { env });
+    assert.equal(selected.status, 0,
+      `external selection failed\nstdout: ${selected.stdout}\nstderr: ${selected.stderr}`);
+
+    const deselected = akPick(['x', 'host', 'pick', '--aqe-provider', 'none', '--yes'], sb, { env });
+    assert.equal(deselected.status, 0,
+      `external deselection failed\nstdout: ${deselected.stdout}\nstderr: ${deselected.stderr}`);
+    assert.equal(kitJson(sb.home).providers.aqeProvider, null, 'kit intent records explicit deselection');
+
+    const router = JSON.parse(fs.readFileSync(
+      path.join(sb.project, '.agentic-qe', 'llm-config.json'), 'utf8',
+    ));
+    assert.equal(router.defaultProvider, undefined, 'AQE no longer defaults to the deselected provider');
+    assert.equal(router._agenticKit.externalDefaultProvider, undefined, 'the exact default receipt is retired');
+    assert.ok(router.externalProviders.hermes, 'the admitted declaration remains projected');
+    assert.equal(router.providers.hermes.enabled, true, 'the MCP activation remains projected');
+  } finally {
+    rm(sb.home, sb.project);
+  }
+});
+
 test('one pick can enable a disabled admitted provider and select it atomically', () => {
   const sb = pickSandbox({ hosts: { claude: true, codex: false, opencode: false } });
   try {
