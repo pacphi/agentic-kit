@@ -419,7 +419,10 @@ export function createDejaVuLifecycleAdapter(defaults = {}) {
       return execute(request, planned);
     },
     async verify(request = {}) {
-      const facts = await detect(request);
+      // runLifecycle already performs detect before dispatching verify. Reuse
+      // that immutable observation so structural verification executes the
+      // offline doctor exactly once and cannot compare two different moments.
+      const facts = request.facts ?? await detect(request);
       const errors = [];
       if (facts.error) errors.push(facts.error);
       if (facts.desired.enabled && !facts.install.binaryPresent) errors.push('deja-binary-missing');

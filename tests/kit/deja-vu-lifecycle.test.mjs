@@ -159,6 +159,15 @@ test('supported external install and exact external wiring are preserved without
   assert.equal(env.calls.some((call) => call[0] === 'npm'), false);
 });
 
+test('structural verify reuses the lifecycle observation and runs doctor once', async () => {
+  const env = fakeEnvironment({ binary: true, npmVersion: '0.19.0' });
+  env.state.doctor.index.state = 'ok';
+  env.state.targets.claude.direct.mcp = true;
+  const result = await runLifecycle({ adapter: env.adapter, action: 'verify', cfg: config() });
+  assert.equal(result.ok, true);
+  assert.equal(env.calls.filter((call) => call[0] === 'deja' && call[1] === 'doctor').length, 1);
+});
+
 test('unknown doctor schema fails closed before any mutation', async () => {
   const bad = baseDoctor();
   bad.schema_version = 999;
