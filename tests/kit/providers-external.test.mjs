@@ -61,6 +61,7 @@ function registerHermes() {
   });
   const integrity = hashAdapterContent(manifest, { baseDir });
   registerAdmittedAqeProvider(manifest, { baseDir, integrity, contentHash: integrity.hash });
+  return { baseDir, manifest, integrity };
 }
 
 function project() {
@@ -99,6 +100,34 @@ test('AQE 3.13.12 projection writes a project-only default and ownership receipt
   assert.equal(managedEnv(cfg()).AQE_LLM_PROVIDER, undefined, 'external default never leaks into settings env');
 });
 
+test('an owned declaration refreshes atomically when admitted provider content changes', () => {
+  fakeAqe('3.13.12');
+  const admitted = registerHermes();
+  const dir = project();
+  assert.equal(applyAqeRouter(cfg(), dir).ok, true);
+  const before = JSON.parse(fs.readFileSync(aqeRouterFile(dir), 'utf8'));
+  const beforeCommand = before.externalProviders.hermes.command;
+  const beforeReceipt = before._agenticKit.externalProviders.hermes;
+
+  fs.appendFileSync(path.join(admitted.baseDir, 'provider.mjs'), '\n// admitted provider update\n');
+  const nextIntegrity = hashAdapterContent(admitted.manifest, { baseDir: admitted.baseDir });
+  registerAdmittedAqeProvider(admitted.manifest, {
+    baseDir: admitted.baseDir,
+    integrity: nextIntegrity,
+    contentHash: nextIntegrity.hash,
+  });
+  const result = applyAqeRouter(cfg(), dir);
+  const after = JSON.parse(fs.readFileSync(aqeRouterFile(dir), 'utf8'));
+  const afterCommand = after.externalProviders.hermes.command;
+  const afterReceipt = after._agenticKit.externalProviders.hermes;
+
+  assert.equal(result.ok, true, result.detail);
+  assert.notDeepEqual(afterCommand, beforeCommand);
+  assert.equal(afterCommand[afterCommand.indexOf('--expect-hash') + 1], nextIntegrity.hash);
+  assert.equal(afterReceipt.contentHash, nextIntegrity.hash);
+  assert.notEqual(afterReceipt.writtenHash, beforeReceipt.writtenHash);
+});
+
 test('foreign same-id declarations are preserved and refused', () => {
   fakeAqe('3.13.12'); registerHermes();
   const dir = project();
@@ -129,11 +158,21 @@ test('stale owned declarations are pruned but edited declarations become user-ow
   disk = JSON.parse(fs.readFileSync(aqeRouterFile(dir), 'utf8'));
   disk.externalProviders.hermes.displayName = 'User override';
   fs.writeFileSync(aqeRouterFile(dir), JSON.stringify(disk));
+
+  result = applyAqeRouter(cfg(), dir);
+  disk = JSON.parse(fs.readFileSync(aqeRouterFile(dir), 'utf8'));
+  assert.equal(result.ok, false);
+  assert.equal(disk.externalProviders.hermes.displayName, 'User override');
+  assert.deepEqual(Object.keys(disk._agenticKit.externalProviders.hermes), ['providerWrittenHash'],
+    'declaration ownership is relinquished while exact activation ownership remains');
+
   resetAdmittedAqeProviders();
   result = applyAqeRouter({ ...cfg(), routing: { routes: {} }, providers: { aqeProvider: null, aqeFallback: [] } }, dir);
   disk = JSON.parse(fs.readFileSync(aqeRouterFile(dir), 'utf8'));
   assert.equal(result.ok, true);
   assert.equal(disk.externalProviders.hermes.displayName, 'User override');
+  assert.equal(disk.providers?.hermes, undefined,
+    'the unchanged ak-created activation is pruned independently of the edited declaration');
   assert.equal(disk._agenticKit, undefined, 'receipt relinquished after user edit');
 });
 
@@ -157,6 +196,8 @@ test('user-owned provider activation is preserved and explicit disablement is re
   disk = JSON.parse(fs.readFileSync(aqeRouterFile(dir), 'utf8'));
   assert.equal(result.ok, false);
   assert.equal(disk.providers.hermes.enabled, false);
+  assert.equal(disk.agentOverrides?.['qe-test-architect'], undefined,
+    'an inactive external provider is pruned from ak-managed agent overrides');
   assert.match(result.detail, /enabled is not true/);
 });
 
@@ -191,5 +232,7 @@ test('AQE downgrade prunes only unchanged owned declarations and dangling refere
   assert.equal(disk.providers, undefined);
   assert.equal(disk.defaultProvider, undefined);
   assert.equal(disk.fallbackChain, undefined);
+  assert.equal(disk.agentOverrides?.['qe-test-architect'], undefined,
+    'downgrade prunes ak-managed overrides that reference the unavailable provider');
   assert.equal(disk._agenticKit, undefined);
 });

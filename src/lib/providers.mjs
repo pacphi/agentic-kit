@@ -466,9 +466,17 @@ function reconcileExternalProviders(existing, desired = aqeExternalProviders()) 
     const currentHash = currentDeclaration === undefined ? null : declarationHash(currentDeclaration);
     if (currentDeclaration !== undefined && (!prior || currentHash !== prior.writtenHash)) {
       conflicts.push(id);
-      // A changed ak entry becomes user-owned at the point of drift; keeping a
-      // stale receipt would allow a later sync to delete it accidentally.
-      delete receipts[id];
+      // A changed declaration becomes user-owned immediately. Its activation
+      // has independent ownership, though: retain only an exact activation
+      // receipt so a later revoke can remove the minimal record ak created
+      // without ever deleting the edited declaration.
+      const currentActivation = currentProviders[id];
+      if (prior?.providerWrittenHash && currentActivation !== undefined
+        && declarationHash(currentActivation) === prior.providerWrittenHash) {
+        receipts[id] = { providerWrittenHash: prior.providerWrittenHash };
+      } else {
+        delete receipts[id];
+      }
       continue;
     }
     current[id] = declaration;
@@ -607,7 +615,7 @@ export function applyAqeRouter(cfg, cwd = process.cwd()) {
   const priorOverrides = existing.agentOverrides ?? {};
   let projected = configuredPolicyToAgentOverrides(policy);
   const managedOverrideKeys = new Set(Object.keys(AGENT_ACTIVITY_MAP));
-  const staleOverrides = Object.keys(priorOverrides)
+  let staleOverrides = Object.keys(priorOverrides)
     .filter((agent) => managedOverrideKeys.has(agent) && !(agent in projected));
   if (!hasChain && !hasPolicy && !hasExternal && !hasOwnedExternal && staleOverrides.length === 0) {
     return { ok: true, changed: false, detail: 'no aqe router config to apply' };
@@ -665,6 +673,11 @@ export function applyAqeRouter(cfg, cwd = process.cwd()) {
   }
   projected = Object.fromEntries(Object.entries(projected).filter(([, entry]) =>
     !(entry.provider in desiredExternal) || externalActive.has(entry.provider)));
+  // Admission/version/conflict filtering can make a previously projected
+  // external route inactive after the first stale calculation. Recompute from
+  // the safe projection so ak-owned overrides never retain an unusable id.
+  staleOverrides = Object.keys(priorOverrides)
+    .filter((agent) => managedOverrideKeys.has(agent) && !(agent in projected));
 
   let chainError = null;
   if (hasChain) {
