@@ -113,7 +113,7 @@ Options (pick, all optional — omit for interactive):
                                  (metered providers work too, e.g. add
                                  'openrouter:z-ai/glm-5.2' — GLM via OpenRouter,
                                  needs OPENROUTER_API_KEY in the env)
-  --provider <csv>             register ruflo API providers (e.g. openai:gpt-5.6)
+  --provider <csv>             register ruflo providers (e.g. ollama:qwen3.6:27b)
   --route 'act:host[:model]'   override one activity's routing (repeatable), e.g.
                                  --route 'implementation:claude:claude-opus-5'
                                  activities: specification, architecture, design,
@@ -148,9 +148,11 @@ Examples:
 const stamp = (source) => (entries) => entries.map((e) => ({ ...e, source }));
 
 /** Parse 'claude-code:m1,m2; openai:gpt-5.6' → [{provider, models:[…]}, …]. */
-const parseFallback = (str) => str.split(';').map((s) => s.trim()).filter(Boolean).map((tok) => {
-  const [provider, models] = tok.split(':');
-  return { provider: provider.trim().toLowerCase(), models: (models ?? '').split(',').map((m) => m.trim()).filter(Boolean) };
+export const parseFallback = (str) => str.split(';').map((s) => s.trim()).filter(Boolean).map((tok) => {
+  const delimiter = tok.indexOf(':');
+  const provider = delimiter < 0 ? tok : tok.slice(0, delimiter);
+  const models = delimiter < 0 ? '' : tok.slice(delimiter + 1);
+  return { provider: provider.trim().toLowerCase(), models: models.split(',').map((m) => m.trim()).filter(Boolean) };
 });
 
 export async function run({ flags, positionals, pkgRoot }) {
@@ -255,12 +257,12 @@ async function status({ flags, cwd }) {
   }
 
   const cm = cfg.providers.models ?? [];
-  console.log(bold('\nruflo LLM API providers') + dim('  (ruflo router; keys read from env)'));
+  console.log(bold('\nruflo LLM providers') + dim('  (registered intent; direct agents select provider + model)'));
   for (const p of API_PROVIDERS) {
     const cfgEntry = cm.find((m) => m.id === p.id);
     const key = p.keyEnv.length
       ? (providers[p.id]?.credentialPresent ? 'key present' : 'no key') : 'local';
-    const conf = cfgEntry ? `configured${cfgEntry.model ? ` (${cfgEntry.model})` : ''}` : dim('not configured');
+    const conf = cfgEntry ? `registered${cfgEntry.model ? ` (${cfgEntry.model})` : ''}` : dim('not registered');
     console.log(`  ${p.id.padEnd(10)} ${key.padEnd(12)} ${conf}`);
   }
 
@@ -390,8 +392,11 @@ async function off({ cwd, pkgRoot }) {
   return ret.ok ? 0 : 1;
 }
 
-const parseModels = (csv) => csv.split(',').map((s) => s.trim()).filter(Boolean).map((tok) => {
-  const [id, model] = tok.split(':');
+export const parseModels = (csv) => csv.split(',').map((s) => s.trim()).filter(Boolean).map((tok) => {
+  const delimiter = tok.indexOf(':');
+  if (delimiter < 0) return { id: tok };
+  const id = tok.slice(0, delimiter);
+  const model = tok.slice(delimiter + 1);
   return model ? { id, model } : { id };
 });
 
@@ -508,7 +513,7 @@ async function pick({ flags, cwd, pkgRoot }) {
     aqeFallback = fAns
       ? stamp('user')(parseFallback(fAns))
       : (suggestion ? stamp('suggested')(parseFallback(suggestion.toLowerCase())) : []);
-    const provAns = (await rl.question('ruflo API-key providers to register (e.g. openai:gpt-5.6, blank to skip): ')).trim();
+    const provAns = (await rl.question('ruflo providers to register (e.g. ollama:qwen3.6:27b, blank to skip): ')).trim();
     if (provAns) models = parseModels(provAns);
     rl.close();
   }
@@ -707,7 +712,7 @@ async function pick({ flags, cwd, pkgRoot }) {
   if (rmcp.changed) saveKitConfig(cfg); // persist reverse MCP ownership
   if (rmcp.changed || !rmcp.ok) (rmcp.ok ? ok : warn)(`ruflo→codex MCP: ${rmcp.detail}`);
   const prov = await applyProviders(cfg, cwd);
-  (prov.ok ? (prov.changed ? ok : info) : warn)(`ruflo providers: ${prov.detail}`);
+  (prov.status === 'degraded' ? warn : prov.ok ? (prov.changed ? ok : info) : warn)(`ruflo providers: ${prov.detail}`);
   ok('saved to kit.json — reapplied on every `ak sync`; undo with `ak host off`');
   if (seed.seeded) ok(`per-activity routing seeded — ${seed.count} activities (dual-host defaults; tune with --route or edit kit.json)`);
   printActivityRoutingTable(cfg);

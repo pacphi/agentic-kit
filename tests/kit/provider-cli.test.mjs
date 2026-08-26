@@ -13,6 +13,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { DUAL_ROLE_TIP, JUDGE_BIAS_TIP } from '../../src/lib/providers.mjs';
+import { parseFallback, parseModels } from '../../src/commands/x/host.mjs';
 import { defaultHostMap } from '../../src/lib/adapters/index.mjs';
 
 // Tripwire (#137): a spawned `ak x host pick` whose cwd falls back to the test
@@ -32,6 +33,20 @@ after(() => {
 });
 
 const BIN = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../bin/agentic-kit.mjs');
+
+test('provider CLI parsing splits only the provider delimiter', () => {
+  assert.deepEqual(parseModels('ollama:qwen3.6:27b, openrouter:z-ai/glm-5.2'), [
+    { id: 'ollama', model: 'qwen3.6:27b' },
+    { id: 'openrouter', model: 'z-ai/glm-5.2' },
+  ]);
+});
+
+test('AQE fallback parsing also preserves provider-native model delimiters', () => {
+  assert.deepEqual(parseFallback('ollama:qwen3.6:27b; openrouter:z-ai/glm-5.2'), [
+    { provider: 'ollama', models: ['qwen3.6:27b'] },
+    { provider: 'openrouter', models: ['z-ai/glm-5.2'] },
+  ]);
+});
 
 function sandbox({ hosts }) {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'kit-prov-cli-home-'));

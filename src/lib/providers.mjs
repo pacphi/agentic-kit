@@ -5,8 +5,9 @@
 //   - ruflo ADR-034 "Optional MCP Backends" (ACCEPTED): Claude Code / Gemini / OpenAI
 //     Codex backends are enabled via env vars ENABLE_CLAUDE_CODE / ENABLE_CODEX /
 //     ENABLE_GEMINI_MCP.
-//   - `ruflo providers configure -p <id> -m <model>` persists API-key providers
-//     (anthropic/openai/google/ollama) to ruflo's config.
+//   - `ruflo providers configure -p <id> -m <model> [-e <endpoint>]` persists
+//     provider records to ruflo's project config. Ruflo >=3.38.8's direct
+//     agent_execute path consumes persisted Ollama/OpenRouter entries (#2962).
 //   - agentic-qe LLM selector `AQE_LLM_PROVIDER=<type>` (ADR-123,
 //     dist/shared/llm/router/config-store.js) force-selects ANY provider in
 //     ALL_PROVIDER_TYPES — claude-code (subscription), claude/openai/gemini/
@@ -18,7 +19,7 @@
 // Two independent axes:
 //   host axis     — which agent CLI executes a managed worker (claude, codex,
 //                   opencode).
-//   provider axis — which LLM the *routers* use: ruflo's API-key providers
+//   provider axis — which LLM the *routers* use: ruflo's persisted providers
 //                   (`ruflo providers configure`) and aqe's `AQE_LLM_PROVIDER`.
 //                   Independent of the host axis; keys live in the env, never kit.json.
 import fs from 'node:fs';
@@ -34,7 +35,7 @@ import { HOST_ADAPTERS } from './hosts.mjs';
 import {
   HOST_REGISTRY, PROVIDER_REGISTRY, normalizeIntegrationFacts, defaultHostMap,
 } from './adapters/index.mjs';
-import { CURRENT_INTEGRATIONS_VERSION } from './adapters/config.mjs';
+import { CURRENT_INTEGRATIONS_VERSION, validateEndpoint } from './adapters/config.mjs';
 import { opencodeMcpStatus } from './opencode.mjs';
 import { rufloCodexMcpStatus } from './mcp.mjs';
 import {
@@ -61,6 +62,7 @@ const apiProvider = (id, keyEnv) => {
 export const API_PROVIDERS = [
   apiProvider('anthropic', ['ANTHROPIC_API_KEY']),
   apiProvider('openai', ['OPENAI_API_KEY']),
+  apiProvider('openrouter', ['OPENROUTER_API_KEY']),
   { id: 'google', keyEnv: ['GOOGLE_API_KEY', 'GEMINI_API_KEY'] },
   apiProvider('ollama', []), // local; presence = reachable daemon (not checked here)
 ];
@@ -735,8 +737,8 @@ export function applyHosts(cfg, cwd = process.cwd()) {
   return { ok: true, changed, detail: `hosts=${on} (${scope}${changed ? ', written' : ', in sync'})` };
 }
 
-// id/model reach a real subprocess argv (`ruflo providers configure -p <id>
-// -m <model>`). exec.mjs's shell:false + resolved-argv fix is the real
+// id/model/endpoint reach a real subprocess argv (`ruflo providers configure
+// -p <id> -m <model> -e <endpoint>`). exec.mjs's shell:false + resolved-argv fix is the real
 // injection defense (no shell ever parses these), but kit.json is user-edited
 // and `--provider` is a CLI flag with no upstream allowlist — this grammar is
 // defense-in-depth so a malformed value fails fast and visibly here rather
@@ -744,28 +746,86 @@ export function applyHosts(cfg, cwd = process.cwd()) {
 // API_PROVIDERS (a narrower, unrelated list — the api-key-only providers this
 // module can check env keys for): ruflo's own provider set is broader
 // (openrouter, azure-openai, bedrock, cognitum, …) and ruflo validates the id
-// itself; this only rejects shapes no real provider/model id has.
-export const PROVIDER_TOKEN_RE = /^[A-Za-z0-9._-]{1,128}$/;
+// itself; this only rejects shapes no real provider/model id has. Provider ids
+// and model ids deliberately use different grammars: tagged Ollama models and
+// vendor-qualified OpenRouter slugs contain ':' and '/' respectively.
+export const PROVIDER_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
+export const PROVIDER_MODEL_RE = /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,255}$/;
+export const MIN_RUFLO_PERSISTED_PROVIDER_VERSION = '3.38.8';
+export const DEFAULT_OLLAMA_ENDPOINT = 'http://127.0.0.1:11434';
 
-/** Register configured API-key providers with ruflo (keys read from env, never
- *  passed here). Idempotent — ruflo upserts. Returns {ok, detail}. */
-export async function applyProviders(cfg, cwd = process.cwd()) {
+/** Read the same cwd-scoped provider entry Ruflo's ConfigFileManager will use.
+ * This is read-only preservation logic: when a user already set a custom
+ * baseUrl directly with Ruflo, ak omits `-e` so Ruflo's upsert keeps it. */
+export function persistedRufloProvider(cwd, providerId, { env = process.env } = {}) {
+  const projectFiles = [
+    path.resolve(cwd, 'claude-flow.config.json'),
+    path.resolve(cwd, '.claude-flow', 'config.json'),
+  ];
+  const envFile = env.CLAUDE_FLOW_CONFIG ? path.resolve(cwd, env.CLAUDE_FLOW_CONFIG) : null;
+  const file = [...projectFiles, envFile].find((candidate) => candidate && fs.existsSync(candidate));
+  if (!file) return null;
+  const providers = readJson(file)?.agents?.providers;
+  if (!Array.isArray(providers)) return null;
+  return providers.find((entry) => typeof entry?.name === 'string'
+    && entry.name.toLowerCase() === providerId.toLowerCase()) ?? null;
+}
+
+/** Register configured providers with Ruflo (keys read from env, never passed
+ * here). Idempotent — Ruflo upserts. A fresh Ollama entry receives its standard
+ * loopback endpoint; a pre-existing custom Ruflo endpoint is preserved. */
+export async function applyProviders(cfg, cwd = process.cwd(), {
+  haveFn = have,
+  runner = run,
+  versionFn = installedVersion,
+  env = process.env,
+} = {}) {
   const models = cfg.providers?.models ?? [];
-  if (models.length === 0) return { ok: true, changed: false, detail: 'no API-key providers configured' };
-  if (!(await have('ruflo'))) return { ok: false, detail: 'ruflo not on PATH' };
+  if (models.length === 0) return { ok: true, changed: false, status: 'ok', detail: 'no providers configured' };
+  if (!(await haveFn('ruflo'))) return { ok: false, changed: false, status: 'failed', detail: 'ruflo not on PATH' };
+  const rufloVersion = versionFn('ruflo');
+  const providerSelectionSupported = !rufloVersion
+    || cmpVersions(rufloVersion, MIN_RUFLO_PERSISTED_PROVIDER_VERSION) >= 0;
   const done = [];
+  let attempted = 0;
   for (const m of models) {
     if (!m?.id) continue;
-    if (!PROVIDER_TOKEN_RE.test(m.id) || (m.model && !PROVIDER_TOKEN_RE.test(m.model))) {
+    if (typeof m.id !== 'string' || !PROVIDER_ID_RE.test(m.id)
+      || (m.model && (typeof m.model !== 'string' || !PROVIDER_MODEL_RE.test(m.model)))) {
       done.push(`${m.id}(invalid)`);
       continue;
     }
     const args = ['providers', 'configure', '-p', m.id];
     if (m.model) args.push('-m', m.model);
-    const r = await run('ruflo', args, { cwd, timeout: 60_000 });
+    const existing = persistedRufloProvider(cwd, m.id, { env });
+    let endpoint = m.endpoint;
+    if (endpoint === undefined && m.id.toLowerCase() === 'ollama' && !existing?.baseUrl
+      && !env.OLLAMA_BASE_URL && !env.OLLAMA_API_KEY) {
+      endpoint = DEFAULT_OLLAMA_ENDPOINT;
+    }
+    if (endpoint !== undefined) {
+      const validation = typeof endpoint === 'string'
+        ? validateEndpoint(endpoint)
+        : { ok: false, reason: 'invalid-url' };
+      if (!validation.ok) {
+        done.push(`${m.id}(invalid endpoint: ${validation.reason})`);
+        continue;
+      }
+      args.push('-e', validation.normalized);
+    }
+    attempted += 1;
+    const r = await runner('ruflo', args, { cwd, timeout: 60_000 });
     done.push(`${m.id}${r.code === 0 ? '' : '(failed)'}`);
   }
-  return { ok: done.every((d) => !d.includes('failed') && !d.includes('invalid')), changed: true, detail: `configured: ${done.join(', ')}` };
+  const ok = done.every((d) => !d.includes('failed') && !d.includes('invalid'));
+  const compatibility = providerSelectionSupported ? ''
+    : `; ruflo ${rufloVersion} registers providers but agent_execute needs >=${MIN_RUFLO_PERSISTED_PROVIDER_VERSION} to select persisted config`;
+  return {
+    ok,
+    changed: attempted > 0,
+    status: !ok ? 'failed' : providerSelectionSupported ? 'ok' : 'degraded',
+    detail: `registered: ${done.join(', ')}${compatibility}`,
+  };
 }
 
 /** Reversible teardown: strip every managed env key from the target file. */

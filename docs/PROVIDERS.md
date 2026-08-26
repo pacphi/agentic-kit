@@ -74,6 +74,12 @@ however the endpoint is served. `local-openai` is not an AQE provider type — `
 credentials, fragments, or secret-bearing query parameters. See
 [ADR-0028](adr/0028-local-openai-compatible-providers.md).
 
+A binding declares a compatible relationship; it does not add a new execution branch inside an
+upstream tool. In particular, Ruflo's direct `agent_execute` path currently dispatches persisted
+provider configuration through its explicit Ollama and OpenRouter branches. A `local-openai`
+binding remains valid for Codex/OpenCode configuration without implying that Ruflo can select the
+literal provider id `local-openai` for direct execution.
+
 ## External host adapters (experimental)
 
 Want `ak` to manage a host CLI it doesn't ship in-tree — driving local models through something
@@ -161,23 +167,70 @@ for you:
 ℹ codex CLI detected — run `ak host pick` to let ruflo use both claude and codex
 ```
 
-## Two configs, one front door
+## Native configs, one front door
 
-A question that trips people up: **do ruflo and agentic-qe read the same config?** No.
-They are two independent routing subsystems, each with its **own config store and its own
-escalation machinery**. There is no shared file they both read. What unifies them is `ak`:
+A question that trips people up: **do Ruflo and agentic-qe read the same config?** No.
+They are independent routing subsystems, each with its **own config store**. There is no shared
+file they both read. What unifies them is `ak`:
 it takes your intent once (in `kit.json`) and writes **each tool's own native config** —
 converging, proving, and able to undo. `ak` is a facilitator, not a config layer the tools
 depend on.
 
-| | **agentic-qe** (`HybridRouter`) | **ruflo** (provider router) |
+| | **agentic-qe** (`HybridRouter`) | **Ruflo direct agent execution** |
 |---|---|---|
-| **Config store** | `.agentic-qe/llm-config.json` (per project) + env | `~/.agentic-flow/router.config.json` (or `--router-config`) + env |
-| **Precedence** (highest wins) | explicit override → env (`AQE_LLM_*`, API keys) → disk file → built-in defaults | file (`defaultProvider`, `fallbackChain`) + CLI overrides |
+| **Config store** | `.agentic-qe/llm-config.json` (per project) + env | `claude-flow.config.json` or `.claude-flow/config.json` (per project), `CLAUDE_FLOW_CONFIG`, and env |
+| **Precedence** (highest wins) | explicit override → env (`AQE_LLM_*`, API keys) → disk file → built-in defaults | per-agent provider → `RUFLO_PROVIDER` → credential env → persisted `agents.providers` → inference/default |
 | **Change the provider** | `AQE_LLM_PROVIDER=<type>` (env) — a provider whose API key is in the env is auto-enabled | `ruflo providers configure -p <id> -m <model>` |
-| **Change the model** | per-provider `models` in the chain; per-activity `agentOverrides` (aqe ≥ 3.13.1) | `models.{default,fast,advanced}` per provider in the file |
-| **Escalation / fallback** | ordered `fallbackChain` + circuit breaker + retry/backoff | `fallbackChain` + `routing.mode` (cost/quality/perf/rule-based) + circuit breaker |
+| **Change the model** | per-provider `models` in the chain; per-activity `agentOverrides` (aqe ≥ 3.13.1) | agent model first; then the selected persisted provider's `model` |
+| **Escalation / fallback** | ordered `fallbackChain` + circuit breaker + retry/backoff | provider selection for this path; not the enhanced router fallback chain |
 | **The `ak` way** | `--aqe-provider` / `--aqe-fallback` / `--route` | `--provider <id>:<model>` |
+
+Ruflo also bundles agentic-flow's enhanced model router, whose separate store is
+`~/.agentic-flow/router.config.json` (or `--router-config`). `ak --provider` does not write that
+router's `defaultProvider`, `fallbackChain`, or routing modes; it maps specifically to
+`ruflo providers configure` and the project-scoped `agents.providers` registry.
+
+Ruflo 3.38.8 fixed direct agent execution so it can consume that persisted registry
+([upstream #2962](https://github.com/ruvnet/ruflo/issues/2962)). Registration and selection remain
+different operations: `--provider` registers an eligible provider/model; an explicit per-agent
+provider or `RUFLO_PROVIDER` still outranks it. OpenRouter registered by `ak` also needs
+`OPENROUTER_API_KEY` in the environment. For a fresh keyless Ollama entry with no endpoint env,
+`ak` supplies `http://127.0.0.1:11434`; it preserves an existing Ruflo `baseUrl`, and an explicit
+`endpoint` on the `kit.json` model entry wins. `OLLAMA_API_KEY` keeps Ruflo's cloud behavior, while
+`OLLAMA_BASE_URL` remains the environment override. `ak` surfaces a degraded warning when the
+installed Ruflo is older than 3.38.8.
+
+For a direct Ruflo agent using an OpenRouter-vended model, the complete user path is:
+
+```bash
+# Export this where the long-lived Ruflo/MCP process will inherit it, then restart that process.
+export OPENROUTER_API_KEY=...
+
+# Persist eligible provider/model intent. `ak sync` reapplies it later.
+ak host pick --provider 'openrouter:z-ai/glm-5.2'
+
+# Select the provider and model for the direct agent that will execute.
+ruflo agent spawn --type coder --provider openrouter --model z-ai/glm-5.2
+```
+
+Execute the returned agent id through Ruflo's `agent_execute` MCP tool or a Ruflo workflow. Spawning
+an agent, even with `--task`, is registration rather than execution. Treat the response's served
+model/provider evidence as the proof that routing occurred. Omitting the provider/model flags does
+not mean the `ak`-registered model becomes every agent's default. `RUFLO_PROVIDER=openrouter` can
+force the provider for the whole Ruflo process, but explicit per-agent selection is narrower and
+reproducible.
+
+`ak run` is a separate host-execution path: it invokes Claude, Codex, or OpenCode adapters and does
+not dispatch through Ruflo's direct-provider registry. To use an OpenRouter model in an `ak run`
+pipeline, route an OpenCode activity to its provider-qualified model, for example:
+
+```bash
+ak run feature "implement the change" \
+  --route 'implementation:opencode:openrouter/z-ai/glm-5.2'
+```
+
+That path requires OpenCode's OpenRouter authentication/configuration; the Ruflo provider entry is
+not a substitute for the host adapter's own credentials.
 
 Two axes cut across both (see the intro): **hosts** (which agent CLI runs the ruflo loop —
 `ENABLE_CLAUDE_CODE` / `ENABLE_CODEX`) are separate from **providers** (which LLM the routers
@@ -395,13 +448,14 @@ is the tool's own native config, and you can set it by hand — or let `ak` and 
 coexist. `ak` merges-not-clobbers and backs up first, mirroring how rUv itself layers config
 (`mergeWithDefaults(config, defaults)` — sensible defaults, override with your partial).
 
-The two config stores each knob below lives in — and their precedence — are summarized in
-[Two configs, one front door](#two-configs-one-front-door) above.
+The native config stores each knob below lives in — and their precedence — are summarized in
+[Native configs, one front door](#native-configs-one-front-door) above.
 
 | You want to…                         | `ak` way                          | The raw ruflo/aqe way it maps to                    |
 | ------------------------------------ | --------------------------------- | --------------------------------------------------- |
 | Enable claude/codex hosts            | `ak host pick`              | `ENABLE_CLAUDE_CODE` / `ENABLE_CODEX` env + managed bridge/guidance |
-| Register a ruflo LLM provider        | `--provider openai:gpt-5.6`       | `ruflo providers configure -p openai -m gpt-5.6`    |
+| Register a Ruflo LLM provider        | `--provider ollama:qwen3.6:27b`   | `ruflo providers configure -p ollama -m qwen3.6:27b -e http://127.0.0.1:11434` |
+| Select a direct Ruflo provider       | per-agent/raw setting             | agent `--provider` or `RUFLO_PROVIDER=ollama` / `openrouter` |
 | Set which LLM runs QE                | `--aqe-provider gemini`           | `AQE_LLM_PROVIDER=gemini` (env)                     |
 | Order QE's fallback chain            | `--aqe-fallback '…'`              | edit `.agentic-qe/llm-config.json` / `aqe llm-router config` |
 | Cap QE spend                         | (kit.json `maxBudgetUsd`)         | `AQE_MAX_BUDGET_USD` / `--max-budget-usd`           |
