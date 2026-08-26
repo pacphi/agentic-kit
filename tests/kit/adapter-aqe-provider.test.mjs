@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { validateAdapterManifest } from '../../src/lib/adapters/manifest.mjs';
 import { bootstrapHostAdapters } from '../../src/lib/adapters/admission.mjs';
 import { resetAdmitted } from '../../src/lib/adapters/admitted.mjs';
-import { grantCapability, recordTierResult } from '../../src/lib/adapters/grants.mjs';
+import { grantCapability, recordTierResult, revokeCapability } from '../../src/lib/adapters/grants.mjs';
 import { hashAdapterContent } from '../../src/lib/adapters/integrity.mjs';
 import {
   admittedAqeProviderFor,
@@ -154,6 +154,10 @@ test('aqe.provider is strict, host-derived, normalized candidate data', () => {
     (error) => error.reason === 'invalid-aqe-provider',
   );
   assert.throws(
+    () => validateAdapterManifest(rawManifest('hermes', { stripEnv: ['openai_api_key'] })),
+    (error) => error.reason === 'invalid-aqe-provider' && /canonical uppercase/.test(error.message),
+  );
+  assert.throws(
     () => validateAdapterManifest(rawManifest('hermes', { maxConcurrency: 65 })),
     (error) => error.reason === 'invalid-aqe-provider' && /<= 64/.test(error.message),
   );
@@ -225,6 +229,12 @@ test('live provider receipts are immutable and projection exposes no manifest in
     assert.equal(projected.hermes.modelFlag, '--model');
     assert.equal(projected.hermes.timeoutMs, 7500);
     assert.deepEqual(projected.hermes.stripEnv, ['OPENAI_API_KEY']);
+
+    const mixedCaseEnv = projectedAqeExternalProviders({
+      projectRoot: process.cwd(), env: { OpenAi_Api_Key: 'must-not-reach-trampoline' },
+    });
+    assert.deepEqual(mixedCaseEnv.hermes.stripEnv, ['OPENAI_API_KEY', 'OpenAi_Api_Key'],
+      'projection includes the exact observed spelling for AQE 3.13.12 exact-key deletion');
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
@@ -334,6 +344,46 @@ process.stdout.write(value);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test('provider rechecks live host, consent, and grant authority immediately before spawn', async (t) => {
+  const priorXdg = process.env.XDG_CONFIG_HOME;
+  const grantHome = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-aqe-provider-live-grant-'));
+  process.env.XDG_CONFIG_HOME = grantHome;
+  const { dir, manifest, integrity } = fixture();
+  const manifestFile = path.join(dir, 'manifest.json');
+  fs.writeFileSync(manifestFile, JSON.stringify(manifest));
+  const cfg = {
+    hostAdapters: [{ name: 'hermes', source: manifestFile }],
+    integrations: { hosts: { hermes: true } },
+  };
+  const consent = {
+    recordedHashFor: () => integrity.hash,
+    isTrusted: (_name, hash) => hash === integrity.hash,
+  };
+  t.after(() => {
+    process.env.XDG_CONFIG_HOME = priorXdg;
+    fs.rmSync(grantHome, { recursive: true, force: true });
+    fs.rmSync(dir, { recursive: true, force: true });
+    resetAdmittedAqeProviders();
+    resetAdmitted();
+  });
+
+  recordTierResult('hermes', 'aqe-provider', {
+    hash: integrity.hash, evidence: 'real AQE stdin/stdout provider probe returned OK',
+  });
+  grantCapability('hermes', 'aqeProvider', { hash: integrity.hash });
+  await bootstrapHostAdapters({
+    cfg, env: { AK_EXPERIMENTAL_HOST_ADAPTERS: '1' },
+    readManifest: async () => manifest, consent, currentConfig: () => cfg,
+  });
+  assert.equal(revokeCapability('hermes', 'aqeProvider'), true);
+  const result = await runAdmittedAqeProvider('hermes', {
+    stdin: 'must not execute', model: 'default', projectRoot: dir,
+  });
+  assert.equal(result.ok, false);
+  assert.equal(result.stdoutText, '');
+  assert.match(result.detail, /authorization is no longer current/);
 });
 
 test('provider failure redacts forwarded secret values from stderr and detail', async () => {

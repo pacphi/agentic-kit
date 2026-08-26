@@ -168,14 +168,20 @@ print partial output before success: the bridge intentionally suppresses stdout 
 timeout, and failure because AQE treats non-empty stdout as a completion even on a non-zero exit.
 Billing mode is declared provenance, not a verified charge or vendor fact.
 On every call the bridge re-verifies and copies all declared adapter-owned hook files into a private
-execution snapshot. Relative imports therefore resolve to the verified copies, not mutable source
-files. List every adapter-owned imported file in `hook.files`; interpreter and other absolute- or
-PATH-resolved native binaries are external system trust and are not covered by the adapter hash.
+execution snapshot. Declared command paths and relative imports therefore resolve to the verified
+copies, not mutable source files. This is not an OS sandbox: do not use absolute paths to reach the
+adapter bundle from hook code. List every adapter-owned imported file in `hook.files`; interpreter
+and other absolute- or PATH-resolved native binaries are external system trust and are not covered
+by the adapter hash. The bridge also rechecks live host intent, consent, and the hash-pinned grant
+immediately before spawn.
 Forwarded secret values are redacted from failure diagnostics. Output over the supervised bound is
 discarded and reported as failure, never accepted as a partial completion.
 The boundary is deliberately finite: at most 128 model ids (256 UTF-8 bytes each), a control-free
-128-byte display name, `maxConcurrency` from 1 through 64, and a provider-hook timeout no longer
-than 24 hours. Oversized declarations are refused before consent or projection.
+128-byte display name, `maxConcurrency` from 1 through 64, a provider-hook timeout no longer than
+24 hours, and canonical uppercase `stripEnv` names. Oversized or case-ambiguous declarations are
+refused before consent or projection. On Windows, projection adds the matching spelling observed
+in the parent environment because AQE 3.13.12 deletes exact object keys; the adapter hook's own
+environment remains minimal and allowlisted regardless.
 
 ### One structural coupling worth knowing
 

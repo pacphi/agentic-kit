@@ -186,15 +186,22 @@ stdout. Exit `77`/`78`, timeout, auth failure, and any other error produce no st
 3.13.12 treats non-empty stdout as a completion even when a CLI exits non-zero. The bridge forwards
 only declared environment variables, protects its own `AK_AQE_*` control variables, rechecks the
 content hash before spawn, and keeps the hook in a supervised subprocess. Each invocation copies
-the verified bytes of every declared adapter-owned hook file into a private execution snapshot,
-closing the verify-to-spawn rewrite race while preserving relative imports among declared files.
-The interpreter and other absolute/PATH-resolved native binaries remain externally managed system
-trust, not part of the adapter content hash. Declare every adapter-owned imported file. Forwarded
+the verified bytes of every declared adapter-owned hook file into a private execution snapshot;
+declared command-file arguments and relative imports resolve to those copies. This is byte pinning,
+not an OS sandbox: a consented hook can still deliberately access an absolute path, so adapter-owned
+imports must be relative. The interpreter and other absolute/PATH-resolved native binaries remain
+externally managed system trust, not part of the adapter content hash. Declare every adapter-owned
+imported file. The bridge re-reads host enablement, consent, and the exact-hash grant immediately
+before spawn, so revocation while it waits for a prompt fails closed. Forwarded
 secret values are redacted from bridge diagnostics, and a completion that exceeds the supervised
 output bound fails closed instead of returning a truncated success.
 Candidate metadata is bounded before admission: at most 128 model ids of 256 UTF-8 bytes each, a
 control-free display name of at most 128 bytes, concurrency from 1 through 64, and a provider-hook
-timeout no longer than 24 hours.
+timeout no longer than 24 hours. `stripEnv` names must use canonical uppercase spelling; this keeps
+the contract unambiguous, and projection also includes the exact spelling observed in the current
+parent environment for AQE 3.13.12's exact-key deletion on Windows. Independently of that
+defense-in-depth filter, the stable trampoline forwards only explicitly allowlisted variables to
+the adapter hook.
 
 Graduation has two destinations: a **blessed external adapter** stays out-of-tree holding exactly
 the capabilities its tiers earned, or a maintainer **promotes it to a built-in** by adopting its

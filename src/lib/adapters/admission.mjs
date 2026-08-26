@@ -143,10 +143,11 @@ async function defaultReadManifest(source) {
  * for tests; production relies on the defaults (a plain fs+JSON.parse reader,
  * and a dynamic import of the sibling consent store in ./consent.mjs).
  * @param {{ cfg?: any, env?: NodeJS.ProcessEnv, readManifest?: (source: string) => Promise<any>,
- *   consent?: { recordedHashFor(name: string): string|null, isTrusted(name: string, hash: string): boolean } }} [args]
+ *   consent?: { recordedHashFor(name: string): string|null, isTrusted(name: string, hash: string): boolean },
+ *   currentConfig?:()=>any|Promise<any> }} [args]
  */
 export async function bootstrapHostAdapters({
-  cfg, env = process.env, readManifest = defaultReadManifest, consent,
+  cfg, env = process.env, readManifest = defaultReadManifest, consent, currentConfig,
 } = {}) {
   if (env?.AK_EXPERIMENTAL_HOST_ADAPTERS !== '1') return { active: false, admitted: [], warnings: [] };
 
@@ -211,8 +212,10 @@ export async function bootstrapHostAdapters({
     // both the validated manifest and any declared hook bytes, so a file edit
     // cannot leave a capability grant live under the old content hash.
     let grantsByName;
+    let grantedCapabilitiesForCurrentHash;
     try {
       const { grantedCapabilitiesFor } = await import('./grants.mjs');
+      grantedCapabilitiesForCurrentHash = grantedCapabilitiesFor;
       // Object.create(null), not {} (F-6): admitted host ids come from
       // consented adapter names, which are attacker-influenceable in
       // principle — a plain object literal's prototype chain would make
@@ -262,6 +265,25 @@ export async function bootstrapHostAdapters({
             baseDir: baseDirForSource(sourceByName.get(result.name)),
             integrity: result.integrity,
             contentHash: result.contentHash,
+            // Bootstrap admission is a snapshot; execution authority is not.
+            // The hidden AQE trampoline may wait on stdin while another
+            // process revokes consent/grant or disables the host. Re-read all
+            // three gates after prompt collection and snapshot capture,
+            // immediately before spawn. Any read/shape failure denies.
+            authorize: async () => {
+              try {
+                const liveCfg = currentConfig
+                  ? await currentConfig()
+                  : (await import('../config.mjs')).loadKitConfig();
+                if (liveCfg?.integrations?.hosts?.[result.name] !== true) return false;
+                const liveHash = result.contentHash;
+                if (consentStore.recordedHashFor(result.name) !== liveHash
+                  || !consentStore.isTrusted(result.name, liveHash)) return false;
+                return grantedCapabilitiesForCurrentHash(result.name, liveHash)?.aqeProvider === true;
+              } catch {
+                return false;
+              }
+            },
           });
         } catch (error) {
           warnings.push({

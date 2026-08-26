@@ -58,6 +58,12 @@ function providerMetadata(id, provider) {
   };
 }
 
+function projectedStripEnv(declared, env) {
+  const canonical = new Set(declared.map((name) => name.toUpperCase()));
+  const observed = Object.keys(env ?? {}).filter((name) => canonical.has(name.toUpperCase()));
+  return [...new Set([...declared, ...observed])];
+}
+
 function publicRecord(record) {
   return immutable({
     id: record.id,
@@ -91,11 +97,12 @@ function snapshotCommand(command, baseDir, snapshotDir, inventory) {
   });
 }
 
-/** Copy the exact verified bytes into a private execution
- * snapshot. Relative imports and declared file arguments resolve here, so a
- * rename/write after verification cannot change the bytes this invocation
- * executes. Interpreter and host binaries remain externally-managed system
- * trust; the adapter-owned files are the snapshot boundary. */
+/** Copy the exact verified bytes into a private execution snapshot. Declared
+ * command-file arguments and relative imports resolve here, so a rename/write
+ * after verification cannot change those bytes for this invocation. This is
+ * byte pinning, not an OS sandbox: a consented hook can still deliberately
+ * access an absolute path. Interpreter and host binaries remain externally
+ * managed system trust. */
 function materializeHookSnapshot(record) {
   const declared = record.integrity.hookFiles ?? [];
   if (declared.length === 0) return null;
@@ -154,9 +161,10 @@ function redactForwardedSecrets(value, env) {
  * content immediately so a file edit between admission and registration
  * cannot create a live bridge.
  * @param {any} manifest
- * @param {{baseDir?:string|null, integrity?:any, contentHash?:string}} [options] */
+ * @param {{baseDir?:string|null, integrity?:any, contentHash?:string,
+ *   authorize?:()=>boolean|Promise<boolean>}} [options] */
 export function registerAdmittedAqeProvider(manifest, {
-  baseDir = null, integrity, contentHash,
+  baseDir = null, integrity, contentHash, authorize,
 } = {}) {
   const { id, provider } = requireManifest(manifest);
   if (!integrity || typeof integrity.hash !== 'string' || !integrity.hash) {
@@ -171,9 +179,13 @@ export function registerAdmittedAqeProvider(manifest, {
   if (baseDir == null && (argv0.includes('/') || argv0.includes('\\')) && !path.isAbsolute(argv0)) {
     throw new TypeError(`AQE provider '${id}' has a relative hook command but no retained adapter directory`);
   }
+  if (authorize !== undefined && typeof authorize !== 'function') {
+    throw new TypeError(`AQE provider '${id}' authorization check must be a function`);
+  }
   const record = {
     id, manifest, provider, baseDir,
     integrity: immutable(structuredClone(integrity)), contentHash: expectedHash,
+    authorize: authorize ?? null,
   };
   providers.set(id, record);
   return publicRecord(record);
@@ -196,7 +208,7 @@ export function admittedAqeProviderFor(id) {
 }
 
 /** AQE v3.13.12 externalProviders declarations for the currently-live set. */
-export function projectedAqeExternalProviders({ projectRoot = process.cwd() } = {}) {
+export function projectedAqeExternalProviders({ projectRoot = process.cwd(), env = process.env } = {}) {
   if (typeof projectRoot !== 'string' || !path.isAbsolute(projectRoot)) {
     throw new TypeError('AQE external-provider projection requires an absolute project root');
   }
@@ -218,7 +230,12 @@ export function projectedAqeExternalProviders({ projectRoot = process.cwd() } = 
       defaultModel: meta.defaultModel,
       modelFlag: '--model',
       maxConcurrency: meta.maxConcurrency,
-      stripEnv: [...meta.stripEnv],
+      // AQE 3.13.12 deletes exact object keys. Include the actual spelling
+      // observed in this parent as well as the contract's canonical uppercase
+      // name so Windows mixed-case environment storage is removed before the
+      // stable trampoline starts. The trampoline independently forwards only
+      // allowlisted variables to the untrusted adapter hook.
+      stripEnv: projectedStripEnv(meta.stripEnv, env),
       displayName: meta.displayName,
       ...(meta.timeoutMs === undefined ? {} : { timeoutMs: meta.timeoutMs }),
     };
@@ -280,6 +297,20 @@ async function executeRecord(record, {
   }
   let result;
   try {
+    if (record.authorize) {
+      let authorized = false;
+      try {
+        authorized = await record.authorize();
+      } catch {
+        authorized = false;
+      }
+      if (authorized !== true) {
+        return {
+          ok: false, stdoutText: '', stderrText: '', exitCode: null,
+          detail: `AQE provider '${record.id}' authorization is no longer current`,
+        };
+      }
+    }
     result = await runAdapterHook({
       hook: snapshot?.hook ?? record.provider.hook,
       hostId: record.id,
@@ -288,8 +319,9 @@ async function executeRecord(record, {
       timeoutMs,
       env: selectedEnv,
       cwd: snapshot?.dir ?? record.baseDir ?? projectRoot,
-      // The snapshot hashes and copies the exact bytes it executes. Hooks
-      // without adapter-owned files retain the generic immediate verifier.
+      // The snapshot hashes/copies the command and relative-import bytes it
+      // executes. Hooks without adapter-owned files retain the immediate
+      // generic verifier.
       ...(snapshot ? {} : {
         manifest: record.manifest,
         integrity: record.integrity,

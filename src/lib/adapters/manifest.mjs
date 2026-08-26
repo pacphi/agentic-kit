@@ -292,6 +292,13 @@ function validateAqe(value, host, driving, execution) {
   validateHookFiles(provider.hook.files, 'aqe.provider.hook.files', 'invalid-aqe-provider');
   const passEnv = validateEnvNames(provider.hook.passEnv, 'aqe.provider.hook.passEnv');
   const stripEnv = validateEnvNames(provider.stripEnv, 'aqe.provider.stripEnv');
+  const nonCanonicalStrip = stripEnv?.find((name) => name !== name.toUpperCase());
+  if (nonCanonicalStrip) {
+    throw new ManifestRejected(
+      'invalid-aqe-provider',
+      `aqe.provider.stripEnv must use canonical uppercase environment names (found '${nonCanonicalStrip}')`,
+    );
+  }
   const unsafePass = passEnv?.find((name) => {
     const canonical = name.toUpperCase();
     return AQE_BRIDGE_ENV.has(canonical)
