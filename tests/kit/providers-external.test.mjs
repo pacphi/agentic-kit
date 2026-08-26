@@ -70,11 +70,15 @@ function project() {
   return dir;
 }
 
-const cfg = () => ({
+const cfg = ({
+  provider = 'hermes',
+  chain = [{ provider: 'hermes', models: ['default'] }],
+  routes = { testing: { host: 'hermes', model: 'default', provenance: 'user' } },
+} = {}) => ({
   aqe: true,
   integrations: { hosts: { claude: true, codex: false } },
-  routing: { routes: { testing: { host: 'hermes', model: 'default', provenance: 'user' } } },
-  providers: { aqeProvider: 'hermes', aqeFallback: [{ provider: 'hermes', models: ['default'] }] },
+  routing: { routes },
+  providers: { aqeProvider: provider, aqeFallback: chain },
 });
 
 test('admitted providers become lazily selectable and project host routes', () => {
@@ -97,6 +101,8 @@ test('AQE 3.13.12 projection writes a project-only default and ownership receipt
   assert.deepEqual(disk.providers.hermes, { enabled: true });
   assert.match(disk._agenticKit.externalProviders.hermes.writtenHash, /^[a-f0-9]{64}$/);
   assert.match(disk._agenticKit.externalProviders.hermes.providerWrittenHash, /^[a-f0-9]{64}$/);
+  assert.equal(disk._agenticKit.externalDefaultProvider.provider, 'hermes');
+  assert.match(disk._agenticKit.externalDefaultProvider.writtenHash, /^[a-f0-9]{64}$/);
   assert.equal(managedEnv(cfg()).AQE_LLM_PROVIDER, undefined, 'external default never leaks into settings env');
 });
 
@@ -133,12 +139,67 @@ test('foreign same-id declarations are preserved and refused', () => {
   const dir = project();
   fs.mkdirSync(path.dirname(aqeRouterFile(dir)), { recursive: true });
   const foreign = { kind: 'cli', command: ['foreign-provider'] };
-  fs.writeFileSync(aqeRouterFile(dir), JSON.stringify({ externalProviders: { hermes: foreign } }));
+  const userChain = { id: 'user-chain', entries: [{ provider: 'hermes', enabled: true }] };
+  fs.writeFileSync(aqeRouterFile(dir), JSON.stringify({
+    externalProviders: { hermes: foreign },
+    providers: { hermes: { enabled: true, source: 'user' } },
+    defaultProvider: 'hermes',
+    fallbackChain: userChain,
+  }));
   const result = applyAqeRouter(cfg(), dir);
   const disk = JSON.parse(fs.readFileSync(aqeRouterFile(dir), 'utf8'));
   assert.equal(result.ok, false);
   assert.deepEqual(disk.externalProviders.hermes, foreign);
+  assert.equal(disk.defaultProvider, 'hermes');
+  assert.deepEqual(disk.fallbackChain, userChain);
+  assert.deepEqual(disk.providers.hermes, { enabled: true, source: 'user' });
   assert.match(result.detail, /conflicts preserved/);
+});
+
+test('an external-default receipt cannot reacquire ownership after user drift', () => {
+  fakeAqe('3.13.12'); registerHermes();
+  const dir = project();
+  assert.equal(applyAqeRouter(cfg({ chain: [] }), dir).ok, true);
+  const file = aqeRouterFile(dir);
+  let disk = JSON.parse(fs.readFileSync(file, 'utf8'));
+  assert.equal(disk._agenticKit.externalDefaultProvider.provider, 'hermes');
+
+  disk.defaultProvider = 'openai';
+  fs.writeFileSync(file, JSON.stringify(disk));
+  assert.equal(applyAqeRouter(cfg({ provider: null, chain: [] }), dir).ok, true);
+  disk = JSON.parse(fs.readFileSync(file, 'utf8'));
+  assert.equal(disk.defaultProvider, 'openai');
+  assert.equal(disk._agenticKit?.externalDefaultProvider, undefined,
+    'user drift relinquishes external-default ownership immediately');
+
+  disk.defaultProvider = 'hermes';
+  disk.externalProviders.hermes.command = ['/tmp/user-edited-provider'];
+  fs.writeFileSync(file, JSON.stringify(disk));
+  const conflict = applyAqeRouter(cfg({ provider: null, chain: [] }), dir);
+  disk = JSON.parse(fs.readFileSync(file, 'utf8'));
+  assert.equal(conflict.ok, false);
+  assert.equal(disk.defaultProvider, 'hermes', 'returning to the old value is still user-owned');
+  assert.deepEqual(disk.externalProviders.hermes.command, ['/tmp/user-edited-provider']);
+});
+
+test('malformed ownership receipts are relinquished without deleting user values or throwing', () => {
+  fakeAqe('3.13.12');
+  const dir = project();
+  fs.mkdirSync(path.dirname(aqeRouterFile(dir)), { recursive: true });
+  const userDeclaration = { kind: 'cli', command: ['user-provider'] };
+  fs.writeFileSync(aqeRouterFile(dir), JSON.stringify({
+    _managedBy: 'agentic-kit',
+    _agenticKit: { externalProviders: { dead: null } },
+    externalProviders: { dead: userDeclaration },
+    providers: { dead: { enabled: true, source: 'user' } },
+  }));
+
+  const result = applyAqeRouter({ providers: {}, routing: { routes: {} } }, dir);
+  const disk = JSON.parse(fs.readFileSync(aqeRouterFile(dir), 'utf8'));
+  assert.equal(result.ok, true, result.detail);
+  assert.deepEqual(disk.externalProviders.dead, userDeclaration);
+  assert.deepEqual(disk.providers.dead, { enabled: true, source: 'user' });
+  assert.equal(disk._agenticKit, undefined, 'a malformed receipt proves no ownership and is dropped');
 });
 
 test('stale owned declarations are pruned but edited declarations become user-owned', () => {
@@ -163,6 +224,12 @@ test('stale owned declarations are pruned but edited declarations become user-ow
   disk = JSON.parse(fs.readFileSync(aqeRouterFile(dir), 'utf8'));
   assert.equal(result.ok, false);
   assert.equal(disk.externalProviders.hermes.displayName, 'User override');
+  assert.equal(disk.defaultProvider, undefined,
+    'the ak-managed default cannot keep selecting a refused edited declaration');
+  assert.equal(disk.fallbackChain, undefined,
+    'the ak-managed fallback cannot keep selecting a refused edited declaration');
+  assert.deepEqual(disk.providers.hermes, { enabled: true },
+    'the exact activation receipt remains until revoke while routing references are withdrawn');
   assert.deepEqual(Object.keys(disk._agenticKit.externalProviders.hermes), ['providerWrittenHash'],
     'declaration ownership is relinquished while exact activation ownership remains');
 
@@ -223,7 +290,7 @@ test('AQE downgrade prunes only unchanged owned declarations and dangling refere
   fakeAqe('3.13.12'); registerHermes();
   const dir = project();
   assert.equal(applyAqeRouter(cfg(), dir).ok, true);
-  fakeAqe('3.13.11');
+  fakeAqe('3.13.0');
   const result = applyAqeRouter(cfg(), dir);
   const disk = JSON.parse(fs.readFileSync(aqeRouterFile(dir), 'utf8'));
   assert.equal(result.ok, false);
@@ -233,6 +300,6 @@ test('AQE downgrade prunes only unchanged owned declarations and dangling refere
   assert.equal(disk.defaultProvider, undefined);
   assert.equal(disk.fallbackChain, undefined);
   assert.equal(disk.agentOverrides?.['qe-test-architect'], undefined,
-    'downgrade prunes ak-managed overrides that reference the unavailable provider');
+    'downgrade below agentOverrides support still prunes ak-managed external references');
   assert.equal(disk._agenticKit, undefined);
 });
