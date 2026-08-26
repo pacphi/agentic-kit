@@ -106,6 +106,30 @@ test('AQE 3.13.12 projection writes a project-only default and ownership receipt
   assert.equal(managedEnv(cfg()).AQE_LLM_PROVIDER, undefined, 'external default never leaks into settings env');
 });
 
+test('a converged external projection is byte- and mtime-idempotent', () => {
+  fakeAqe('3.13.12'); registerHermes();
+  for (const desired of [
+    cfg({ chain: [], routes: {} }),
+    cfg(),
+  ]) {
+    const dir = project();
+    const first = applyAqeRouter(desired, dir);
+    const file = aqeRouterFile(dir);
+    const bytes = fs.readFileSync(file, 'utf8');
+    const old = new Date('2001-01-01T00:00:00.000Z');
+    fs.utimesSync(file, old, old);
+    const beforeMtime = fs.statSync(file).mtimeMs;
+
+    const second = applyAqeRouter(desired, dir);
+
+    assert.equal(first.changed, true);
+    assert.equal(second.ok, true, second.detail);
+    assert.equal(second.changed, false, second.detail);
+    assert.equal(fs.readFileSync(file, 'utf8'), bytes);
+    assert.equal(fs.statSync(file).mtimeMs, beforeMtime, 'converged projection must not rewrite the file');
+  }
+});
+
 test('an owned declaration refreshes atomically when admitted provider content changes', () => {
   fakeAqe('3.13.12');
   const admitted = registerHermes();

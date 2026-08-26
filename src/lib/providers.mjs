@@ -824,6 +824,14 @@ export function applyAqeRouter(cfg, cwd = process.cwd()) {
   wrote ||= JSON.stringify(stableValue(next)) !== JSON.stringify(stableValue(existing));
   if (!wrote) return { ok: !chainError && !externalError, changed: false, detail: details.join('; ') || 'nothing to apply' };
   next._managedBy = AQE_MANAGED_TAG;
+  // `wrote` means this invocation owns at least one projection surface; it
+  // does not by itself mean the artifact changed. Compare the complete
+  // managed value (including the ownership tag) before touching disk so a
+  // converged external default/fallback/override remains byte- and
+  // mtime-stable across repeated syncs.
+  if (JSON.stringify(stableValue(next)) === JSON.stringify(stableValue(existing))) {
+    return { ok: !chainError && !externalError, changed: false, detail: details.join('; ') || 'nothing to apply' };
+  }
   fs.mkdirSync(path.dirname(file), { recursive: true });
   writeJsonWithBackup(file, next);
   return { ok: !chainError && !externalError, changed: true, detail: details.join('; ') };
