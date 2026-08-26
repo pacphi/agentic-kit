@@ -5,7 +5,10 @@ import os from 'node:os';
 import path from 'node:path';
 import { applySetupHostFlags } from '../../src/lib/providers.mjs';
 import { loadKitConfig, saveKitConfig } from '../../src/lib/config.mjs';
-import { defaultHostMap } from '../../src/lib/adapters/index.mjs';
+import {
+  CURRENT_INTEGRATIONS_VERSION,
+  defaultHostMap,
+} from '../../src/lib/adapters/index.mjs';
 
 const freshCfg = () => ({
   integrations: {
@@ -94,7 +97,7 @@ test('an empty config gets complete canonical envelopes and survives persistence
     primaryHost: 'claude',
     routes: {},
   });
-  assert.equal(cfg.integrations.version, 2);
+  assert.equal(cfg.integrations.version, CURRENT_INTEGRATIONS_VERSION);
   assert.deepEqual(cfg.integrations.hosts, { ...defaultHostMap(), codex: true });
 
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-setup-empty-'));

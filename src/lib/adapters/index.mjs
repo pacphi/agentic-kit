@@ -1,5 +1,6 @@
 export * from './schema.mjs';
 export * from './registries.mjs';
+export * from './companion-registry.mjs';
 export * from './bindings.mjs';
 export * from './facts.mjs';
 export * from './migration.mjs';
