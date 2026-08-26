@@ -1,7 +1,6 @@
 # ADR-0035 — Manage deja-vu as an opt-in session-history companion
 
-- **Status:** Accepted; implementation tracked by
-  [issue #114](https://github.com/pacphi/agentic-kit/issues/114)
+- **Status:** Implemented for [issue #114](https://github.com/pacphi/agentic-kit/issues/114)
 - **Date:** 2026-08-26
 - **Deciders:** agentic-kit maintainers
 - **Related:** [ADR-0016](0016-capability-driven-integration-adapters.md),
