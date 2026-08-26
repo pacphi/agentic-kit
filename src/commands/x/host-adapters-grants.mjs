@@ -16,6 +16,9 @@ import {
   CONFORMANCE_TIERS, TIER_GRANTS, recordTierGate, grantCapability, revokeGrants, revokeCapability,
   grantsFor, grantedCapabilitiesFor, gatedTiersFor,
 } from '../../lib/adapters/grants.mjs';
+import { bootstrapHostAdapters } from '../../lib/adapters/admission.mjs';
+import { loadKitConfig, saveKitConfig } from '../../lib/config.mjs';
+import { applyAqeRouter } from '../../lib/providers.mjs';
 import { ok, warn, fail, info, bold } from '../../lib/output.mjs';
 import {
   findEntry, loadAndHash, stripControl, hookCommandsFor,
@@ -280,7 +283,92 @@ export async function status({
 // revoking because they no longer TRUST the recorded evidence (not just
 // withdrawing the grant) wants the whole-record form.
 
-export function revokeGrant({ name, capability, grantsFile }) {
+function retireAqeProviderIntent(cfg, name) {
+  let changed = false;
+  const retired = { selected: false, fallback: 0, routes: 0, escalations: 0 };
+  cfg.providers ??= {};
+  if (cfg.providers.aqeProvider === name) {
+    cfg.providers.aqeProvider = null;
+    retired.selected = true;
+    changed = true;
+  }
+  if (Array.isArray(cfg.providers.aqeFallback)) {
+    const kept = cfg.providers.aqeFallback.filter((entry) => entry?.provider !== name);
+    retired.fallback = cfg.providers.aqeFallback.length - kept.length;
+    if (retired.fallback) {
+      cfg.providers.aqeFallback = kept;
+      changed = true;
+    }
+  }
+  const routes = cfg.routing?.routes;
+  if (routes && typeof routes === 'object' && !Array.isArray(routes)) {
+    for (const [activity, route] of Object.entries(routes)) {
+      if (!route || typeof route !== 'object') continue;
+      if (route.host === name) {
+        delete routes[activity];
+        retired.routes += 1;
+        changed = true;
+        continue;
+      }
+      if (Array.isArray(route.escalation)) {
+        const kept = route.escalation.filter((rung) => rung?.host !== name);
+        const removed = route.escalation.length - kept.length;
+        if (removed) {
+          retired.escalations += removed;
+          if (kept.length) route.escalation = kept;
+          else delete route.escalation;
+          changed = true;
+        }
+      }
+    }
+  }
+  return { changed, retired };
+}
+
+async function reconcileRevokedAqeProvider({
+  name, cfg, env, cwd, saveConfig, bootstrapAdapters, applyRouter,
+}) {
+  const resolvedCfg = cfg ?? loadKitConfig();
+  const { changed, retired } = retireAqeProviderIntent(resolvedCfg, name);
+  const configured = Array.isArray(resolvedCfg.hostAdapters)
+    && resolvedCfg.hostAdapters.some((entry) => entry?.name === name);
+  if (changed) {
+    saveConfig(resolvedCfg);
+    ok(`retired AQE intent for '${stripControl(name)}': `
+      + `${retired.selected ? 'default, ' : ''}${retired.fallback} fallback, `
+      + `${retired.routes} route, ${retired.escalations} escalation reference(s)`);
+  }
+  // A custom/unit grants store with no configured adapter has no project
+  // projection to reconcile. Production entries and every changed config do.
+  if (!changed && !configured) return 0;
+
+  const refreshEnv = env ?? process.env;
+  if (refreshEnv.AK_EXPERIMENTAL_HOST_ADAPTERS === '1') {
+    try {
+      // Preserve every other admitted provider by rebuilding the full overlay
+      // after the grant-store write. Flag-off revoke deliberately skips this:
+      // a fresh flag-off CLI process has no admitted registry, and withdrawing
+      // authority must not silently re-read sources the operator disabled.
+      const refreshed = await bootstrapAdapters({ cfg: resolvedCfg, env: refreshEnv });
+      for (const entry of refreshed.warnings ?? []) {
+        warn(`host adapter '${entry.name}' refresh refused (${entry.reason}): ${entry.detail ?? ''}`.trimEnd());
+      }
+    } catch (error) {
+      fail(`AQE provider authority was revoked, but the live registry could not be refreshed: ${error?.message ?? String(error)}`);
+      return 1;
+    }
+  }
+  const router = applyRouter(resolvedCfg, cwd);
+  if (router.changed || !router.ok) (router.ok ? ok : fail)(`aqe router: ${router.detail}`);
+  return router.ok ? 0 : 1;
+}
+
+export async function revokeGrant({
+  name, capability, grantsFile, cfg, env, cwd = process.cwd(),
+  saveConfig = saveKitConfig,
+  bootstrapAdapters = bootstrapHostAdapters,
+  applyRouter = applyAqeRouter,
+}) {
   if (typeof name !== 'string' || !name) { fail('usage: ak host adapters revoke-grant <name> [capability]'); return 2; }
   const safeName = stripControl(name);
 
@@ -291,13 +379,36 @@ export function revokeGrant({ name, capability, grantsFile }) {
       return 1;
     }
     const existed = revokeCapability(name, capability, { file: grantsFile });
-    if (existed) { ok(`revoked capability '${safeCapability}' for '${safeName}' — other tiers and capabilities are untouched`); return 0; }
+    if (existed) {
+      ok(`revoked capability '${safeCapability}' for '${safeName}' — other tiers and capabilities are untouched`);
+      if (capability === 'aqeProvider') {
+        return reconcileRevokedAqeProvider({
+          name, cfg, env, cwd, saveConfig, bootstrapAdapters, applyRouter,
+        });
+      }
+      return 0;
+    }
     info(`no recorded '${safeCapability}' grant for '${safeName}'`);
+    // Idempotent cleanup: a prior/manual grant-store edit can leave dependent
+    // intent behind even though there is no capability record left to remove.
+    if (capability === 'aqeProvider') {
+      return reconcileRevokedAqeProvider({
+        name, cfg, env, cwd, saveConfig, bootstrapAdapters, applyRouter,
+      });
+    }
     return 0;
   }
 
   const existed = revokeGrants(name, { file: grantsFile });
-  if (existed) { ok(`revoked all conformance evidence and grants for '${safeName}'`); return 0; }
-  info(`no recorded grants for '${safeName}'`);
-  return 0;
+  if (existed) {
+    ok(`revoked all conformance evidence and grants for '${safeName}'`);
+  } else {
+    info(`no recorded grants for '${safeName}'`);
+  }
+  // Whole-record revoke is also the idempotent authority-withdrawal command:
+  // a manually edited/missing grant store must not strand the same dependent
+  // intent that a recorded aqeProvider grant would retire.
+  return reconcileRevokedAqeProvider({
+    name, cfg, env, cwd, saveConfig, bootstrapAdapters, applyRouter,
+  });
 }

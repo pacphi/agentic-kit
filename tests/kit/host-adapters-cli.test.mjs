@@ -1605,6 +1605,133 @@ test('revoke-grant <name> aqeProvider withdraws only the provider grant and leav
   assert.equal(grantsFor('hermes', { file: grantsFile }).tiers['aqe-provider'].status, 'passed');
 });
 
+test('aqeProvider revocation retires only dependent config and refreshes the router for specific and whole-record forms', async () => {
+  for (const wholeRecord of [false, true]) {
+    const grantsFile = tmpGrantsFile();
+    const hash = 'b'.repeat(64);
+    recordTierResult('hermes', 'aqe-provider', { hash, evidence: 'real provider response' }, { file: grantsFile });
+    grantCapability('hermes', 'aqeProvider', { hash }, { file: grantsFile });
+    recordTierResult('hermes', 'primary-eligible', { hash, evidence: 'independent lead evidence' }, { file: grantsFile });
+    grantCapability('hermes', 'canBePrimary', { hash }, { file: grantsFile });
+    const cfg = {
+      hostAdapters: [{ name: 'hermes', source: 'mem://hermes' }],
+      integrations: { hosts: { claude: true, codex: true, hermes: true } },
+      providers: {
+        aqeProvider: 'hermes', maxBudgetUsd: 7,
+        aqeFallback: [
+          { provider: 'hermes', models: ['default'], source: 'user' },
+          { provider: 'openai', models: ['gpt-5.6'], source: 'user' },
+        ],
+        models: [{ id: 'ollama', model: 'qwen' }],
+      },
+      routing: { routes: {
+        testing: { host: 'hermes', model: 'default', provenance: 'user' },
+        review: {
+          host: 'claude', model: 'claude-sonnet-5', provenance: 'user',
+          escalation: [{ host: 'hermes', model: 'default' }, { host: 'codex', model: 'gpt-5.6' }],
+        },
+        implementation: { host: 'codex', model: 'gpt-5.6', provenance: 'user' },
+      } },
+      userValue: { keep: true },
+    };
+    let saved = null;
+    let refreshed = 0;
+    let applied = 0;
+    const cap = capture();
+    let code;
+    try {
+      code = await run({
+        positionals: wholeRecord
+          ? ['revoke-grant', 'hermes']
+          : ['revoke-grant', 'hermes', 'aqeProvider'],
+        env: ON_ENV, cfg, grantsFile, flags: {}, cwd: '/sandbox/project',
+        saveConfig: (next) => { saved = structuredClone(next); },
+        bootstrapAdapters: async ({ cfg: next, env }) => {
+          refreshed += 1;
+          assert.equal(next, cfg);
+          assert.equal(env.AK_EXPERIMENTAL_HOST_ADAPTERS, '1');
+          return { warnings: [] };
+        },
+        applyRouter: (next, cwd) => {
+          applied += 1;
+          assert.equal(next, cfg);
+          assert.equal(cwd, '/sandbox/project');
+          return { ok: true, changed: true, detail: 'owned Hermes projection pruned' };
+        },
+      });
+    } finally { cap.restore(); }
+
+    assert.equal(code, 0, cap.text());
+    assert.equal(refreshed, 1);
+    assert.equal(applied, 1);
+    assert.deepEqual(saved, cfg, 'the exact retired intent is what persistence receives');
+    assert.equal(cfg.integrations.hosts.hermes, true, 'host enablement is independent and preserved');
+    assert.equal(cfg.providers.aqeProvider, null);
+    assert.deepEqual(cfg.providers.aqeFallback, [
+      { provider: 'openai', models: ['gpt-5.6'], source: 'user' },
+    ]);
+    assert.equal(cfg.providers.maxBudgetUsd, 7);
+    assert.deepEqual(cfg.providers.models, [{ id: 'ollama', model: 'qwen' }]);
+    assert.equal(cfg.routing.routes.testing, undefined);
+    assert.deepEqual(cfg.routing.routes.review.escalation, [{ host: 'codex', model: 'gpt-5.6' }]);
+    assert.deepEqual(cfg.routing.routes.implementation,
+      { host: 'codex', model: 'gpt-5.6', provenance: 'user' });
+    assert.deepEqual(cfg.userValue, { keep: true });
+    if (!wholeRecord) {
+      assert.deepEqual(grantedCapabilitiesFor('hermes', hash, { file: grantsFile }), { canBePrimary: true });
+    } else {
+      assert.equal(grantsFor('hermes', { file: grantsFile }), null);
+    }
+  }
+});
+
+test('whole-record revoke repairs stale AQE intent even when the record or capability was already removed', async () => {
+  for (const recordWithoutCapability of [false, true]) {
+    const grantsFile = tmpGrantsFile();
+    if (recordWithoutCapability) {
+      recordTierResult('hermes', 'admission', {
+        hash: 'c'.repeat(64), evidence: 'non-provider evidence remains',
+      }, { file: grantsFile });
+    }
+    const cfg = {
+      integrations: { hosts: { claude: true, hermes: true } },
+      providers: {
+        aqeProvider: 'hermes',
+        aqeFallback: [{ provider: 'hermes', models: ['default'], source: 'user' }],
+        models: [{ id: 'openrouter', model: 'user-model' }],
+      },
+      routing: { routes: {
+        testing: { host: 'hermes', model: 'default', provenance: 'user' },
+        review: { host: 'claude', model: 'kept', provenance: 'user' },
+      } },
+    };
+    let saves = 0;
+    let refreshes = 0;
+    let applies = 0;
+    const cap = capture();
+    let code;
+    try {
+      code = await run({
+        positionals: ['revoke-grant', 'hermes'], env: OFF_ENV, cfg, grantsFile,
+        flags: {}, cwd: '/sandbox/project',
+        saveConfig: () => { saves += 1; },
+        bootstrapAdapters: async () => { refreshes += 1; return { warnings: [] }; },
+        applyRouter: () => { applies += 1; return { ok: true, changed: true, detail: 'pruned' }; },
+      });
+    } finally { cap.restore(); }
+    assert.equal(code, 0, cap.text());
+    assert.equal(saves, 1);
+    assert.equal(refreshes, 0, 'flag-off authority withdrawal never re-reads configured adapter sources');
+    assert.equal(applies, 1);
+    assert.equal(cfg.providers.aqeProvider, null);
+    assert.deepEqual(cfg.providers.aqeFallback, []);
+    assert.deepEqual(cfg.providers.models, [{ id: 'openrouter', model: 'user-model' }]);
+    assert.equal(cfg.routing.routes.testing, undefined);
+    assert.deepEqual(cfg.routing.routes.review, { host: 'claude', model: 'kept', provenance: 'user' });
+    assert.equal(cfg.integrations.hosts.hermes, true);
+  }
+});
+
 test('revoke-grant <name> <capability> works even when the experimental flag is off (fail-safe, same as the whole-record form)', async () => {
   const grantsFile = tmpGrantsFile();
   const raw = validManifest();

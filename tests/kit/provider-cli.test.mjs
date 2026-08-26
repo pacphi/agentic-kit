@@ -500,6 +500,51 @@ test('one pick disabling an external host prunes every owned AQE reference', () 
   }
 });
 
+test('revoking an AQE provider grant atomically retires dependent intent and projection', () => {
+  const sb = pickSandbox({ hosts: { claude: true, codex: false, opencode: false } });
+  try {
+    configureExternalAqeProvider(sb);
+    const prefix = fakeAqeInstall(sb.home);
+    const selected = akPick([
+      'x', 'host', 'pick', '--aqe-provider', 'hermes',
+      '--aqe-fallback', 'hermes:default;ollama:qwen',
+      '--route', 'testing:hermes:default',
+      '--route', 'review:claude:claude-sonnet-5', '--yes',
+    ], sb, { env: { AK_EXPERIMENTAL_HOST_ADAPTERS: '1', npm_config_prefix: prefix } });
+    assert.equal(selected.status, 0,
+      `external projection failed\nstdout: ${selected.stdout}\nstderr: ${selected.stderr}`);
+
+    // Revocation remains reachable with the experimental flag off. The
+    // command internally performs the bounded refresh needed for cleanup.
+    const revoked = akPick([
+      'x', 'host', 'adapters', 'revoke-grant', 'hermes', 'aqeProvider',
+    ], sb, { env: { npm_config_prefix: prefix } });
+    assert.equal(revoked.status, 0,
+      `grant revoke failed\nstdout: ${revoked.stdout}\nstderr: ${revoked.stderr}`);
+    assert.match(revoked.stdout, /retired AQE intent for 'hermes'/);
+
+    const cfg = kitJson(sb.home);
+    assert.equal(cfg.integrations.hosts.hermes, true, 'provider revocation does not disable the execution host');
+    assert.equal(cfg.providers.aqeProvider, null);
+    assert.deepEqual(cfg.providers.aqeFallback.map((entry) => entry.provider), ['ollama']);
+    assert.equal(cfg.routing.routes.testing, undefined, 'dependent external route is retired');
+    assert.equal(cfg.routing.routes.review.host, 'claude', 'unrelated user route survives');
+
+    const disk = JSON.parse(fs.readFileSync(
+      path.join(sb.project, '.agentic-qe', 'llm-config.json'), 'utf8',
+    ));
+    assert.equal(disk.externalProviders?.hermes, undefined, 'owned declaration pruned immediately');
+    assert.equal(disk.providers?.hermes, undefined, 'owned activation pruned immediately');
+    assert.equal(disk.defaultProvider, 'ollama', 'remaining fallback becomes the usable default');
+    assert.deepEqual(disk.fallbackChain.entries.map((entry) => entry.provider), ['ollama']);
+    assert.equal(Object.values(disk.agentOverrides ?? {}).some((entry) => entry.provider === 'hermes'), false);
+    assert.ok(Object.values(disk.agentOverrides ?? {}).some((entry) => entry.provider === 'claude-code'),
+      'unrelated user route projection survives');
+  } finally {
+    rm(sb.home, sb.project);
+  }
+});
+
 test('host off clears the OpenCode catalog override after a successful teardown', () => {
   const sb = pickSandbox({
     hosts: { claude: true, codex: false, opencode: false },
