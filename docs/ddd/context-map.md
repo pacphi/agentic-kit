@@ -13,12 +13,12 @@ Configuration Intent
 Native Evidence ----> Evidence Acquisition ----> Canonical Evidence
                                                    |
                          +-------------------------+----------------------+
-                         |                                                |
-                         v                                                v
-                  Observability                                  Historical Usage
-                    |         |                                           |
-                    |         +----> Workspace Snapshot Cache             |
-                    |                       |                              |
+                         |                         |                      |
+                         v                         v                      v
+                  Observability        Model Lifecycle Intelligence  Historical Usage
+                    |         |                    |                      |
+                    |         +----> Workspace     +----------------------+
+                    |                Snapshot Cache                       |
                     +-----------------------+----> Dashboard Delivery <----+
                                                           ^
 Project State (.claude-flow/*) ----> Project Intelligence-+
@@ -70,6 +70,18 @@ See [Observability](observability.md).
 Owns transcript indexing, session history, token and cost aggregation, classification, and usage
 findings. It may share a host-qualified session identity with Observability, but its aggregate and
 cache are separate from the live event store.
+
+### Model lifecycle intelligence
+
+Owns the normalized inventory of configured, effective, observed, discoverable, entitled,
+policy-allowed, routable, and lifecycle model facts; sanitized same-scope snapshots; trustworthy
+diffs; lifecycle and compatibility edges; and read-only consumer impact plans. It consumes
+Configuration Intent, integration descriptors, source-adapted native catalogues, and structured
+observed facts from Historical Usage and Observability. It does not own transcripts, route
+mutation, model quality, or downstream router policy.
+
+See [Model lifecycle intelligence](model-lifecycle-intelligence.md). The context and exact-head
+release proof are recorded by implemented ADR-0032.
 
 ### Workspace snapshot cache
 
@@ -139,6 +151,13 @@ and credential policy is distinct from the offline-first dashboard and integrati
 | Native evidence | Evidence acquisition | Source-specific anti-corruption adapters |
 | Evidence acquisition | Observability | Versioned canonical events |
 | Evidence acquisition | Historical usage | Normalized transcript and provider evidence |
+| Configuration intent | Model lifecycle intelligence | Canonical route, escalation, binding, and projection references |
+| Integration management | Model lifecycle intelligence | Capability and catalogue descriptors plus bounded host/provider facts |
+| Evidence acquisition | Model lifecycle intelligence | Source-adapted catalogue, policy, lifecycle, and runtime evidence |
+| Historical usage | Model lifecycle intelligence | Structured observed host/provider/model facts; transcript ownership stays upstream |
+| Observability | Model lifecycle intelligence | Structured recent execution identity; live-event ownership stays upstream |
+| Model lifecycle intelligence | Routing and orchestration | Read-only lifecycle diagnostics, mechanical candidate/invalidation feed, and copyable canonical route actions; no quality/economics claim |
+| Model lifecycle intelligence | Dashboard delivery | Sanitized cache-only inventory, changes, consumers, and plan read models |
 | Observability | Dashboard delivery | Read-model snapshots, deltas, and selected evidence |
 | Observability | Workspace snapshot cache | Last safe metadata-only session workspace capture |
 | Workspace snapshot cache | Dashboard delivery | Inert last-recorded History context after restart |
@@ -175,6 +194,10 @@ observed before the split was made explicit.
 - User intent does not establish observed reality.
 - A host observation does not establish inference-provider identity.
 - Dashboard presentation cannot upgrade provenance.
+- Model lifecycle inventory cannot turn discovery into entitlement, compatibility into quality, or
+  a read-only plan into route mutation.
+- Snapshot comparison requires stable scope and sufficient source completeness; degraded evidence
+  never creates removal.
 - Historical usage and live topology share identifiers, not aggregate ownership.
 - Network egress occurs only in commands and contexts whose contract explicitly permits it.
 - Every project count is rendered with the scope that produced it; two contexts may report

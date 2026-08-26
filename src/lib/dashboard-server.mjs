@@ -672,7 +672,7 @@ function lazyLive(liveOptions = {}) {
  *           intelClientBuffer?: number, intelMaxClients?: number,
  *           discoverProjects?: () => Array<{ path: string, label: string, source?: string }>,
  *           machineWideIntel?: (projects: Array<any>) => any,
- *           system?: any, systemOptions?: any }} [opts]
+ *           models?: any, modelScopeKey?: string, system?: any, systemOptions?: any }} [opts]
  * @returns {Promise<{ url: string, urlWithToken: string, port: number, token: string, close: () => Promise<void> }>}
  */
 export function startDashboard({
@@ -681,10 +681,31 @@ export function startDashboard({
   liveOptions = {}, liveIdleMs = 30_000, transcripts, transcriptOptions = {},
   transcriptClientBuffer = 64, transcriptMaxClients = 16,
   intelWatch, intelClientBuffer = 256, intelMaxClients = 32,
-  discoverProjects, machineWideIntel, system, systemOptions = {},
+  discoverProjects, machineWideIntel, models, modelScopeKey, system, systemOptions = {},
 } = {}) {
   const provide = fetchStatus || shellOutStatus(cwd);
   const usageApi = usage || lazyUsage();
+  // Cache-only and lazy: model discovery is exclusively owned by
+  // `ak models refresh`; opening the dashboard never contacts a host/catalog.
+  const provideModels = typeof models === 'function' ? models : models ? async () => models : async () => {
+    const [{ readModelStore, latestSnapshot, previousSnapshot }, { diffSnapshotHistory }, { createModelReadModel }] = await Promise.all([
+      import('./model-inventory/store.mjs'), import('./model-inventory/diff.mjs'),
+      import('./model-inventory/read-model.mjs'),
+    ]);
+    const store = readModelStore();
+    const snapshot = latestSnapshot(store);
+    if (!snapshot) return { status: 'empty', snapshot: null, history: [], hint: 'ak models refresh' };
+    const baseline = previousSnapshot(store, snapshot);
+    const diff = baseline ? diffSnapshotHistory(baseline, snapshot, store.snapshots)
+      : { changes: [], diagnostics: [] };
+    return {
+      status: 'cached', snapshot: createModelReadModel(snapshot, { changes: diff }),
+      history: store.snapshots.filter((entry) => entry.scope.fingerprint === snapshot.scope.fingerprint)
+        .map(({ snapshotId, capturedAt }) => ({ snapshotId, capturedAt })),
+      comparison: { baseline: baseline?.snapshotId ?? null, latest: snapshot.snapshotId,
+        comparable: diff.comparable ?? false, diagnostics: diff.diagnostics ?? [] },
+    };
+  };
   // Injectable like `usage`: tests must never spawn a real codex or read the
   // real ~/.config through this route. Lazy for the same reason lazyUsage is.
   // enabledHosts drives quota.mjs's F-10 labeling (any OTHER enabled host with
@@ -1369,6 +1390,42 @@ export function startDashboard({
     }
 
     // ── Usage (ADR-0009). Lazy: nothing below runs until the tab is opened. ──
+
+    if (url === '/api/models') {
+      try {
+        const payload = await provideModels();
+        if (!payload || payload.status === 'empty' || !payload.snapshot) {
+          const { createDashboardModelViewPayload } = await import('./model-inventory/read-model.mjs');
+          sendJson(res, 200, createDashboardModelViewPayload(payload, { query }));
+          return;
+        }
+        const [{ readModelScopeKey }, { createDashboardModelViewPayload }] = await Promise.all([
+          import('./model-inventory/store.mjs'), import('./model-inventory/read-model.mjs'),
+        ]);
+        const key = modelScopeKey === undefined ? readModelScopeKey() : modelScopeKey;
+        if (!key) {
+          sendJson(res, 503, { error: 'model dashboard privacy key unavailable' });
+          return;
+        }
+        const days = clampDays(query.get('days'));
+        let usage = null;
+        if (query.get('view') === 'summary' && typeof usageApi.readIndex === 'function') {
+          try { usage = await usageApi.readIndex({ days }); }
+          catch { usage = { unavailable: true, sessions: [] }; }
+        }
+        sendJson(res, 200, createDashboardModelViewPayload(payload, {
+          key, query, ...(usage ? { usage, days } : {}),
+        }));
+      } catch (error) {
+        // Do not echo native parser/provider errors: they may contain a private identifier.
+        const invalid = error?.code === 'INVALID_MODEL_INVENTORY_QUERY';
+        const changed = error?.code === 'MODEL_INVENTORY_SNAPSHOT_CHANGED';
+        sendJson(res, invalid ? 400 : changed ? 409 : 500,
+          { error: invalid ? 'invalid model inventory query'
+            : changed ? 'model inventory changed; retry' : 'model dashboard evidence unavailable' });
+      }
+      return;
+    }
 
     // Rollups only. Dropping the top-level sessions[] is NOT sufficient on its
     // own: projectTree[].rows holds the SAME object references, so every session

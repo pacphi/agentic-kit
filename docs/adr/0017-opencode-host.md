@@ -3,8 +3,11 @@
 - **Status:** Accepted; compatibility references amended by
   [ADR-0020](0020-ga-stable-surfaces.md)
 - **Date:** 2026-07-28
-- **Updated:** 2026-08-17
-- **Update note:** Clarified that the AQE boundary applies to inference-provider routing, not
+- **Updated:** 2026-08-25
+- **Update note:** ADR-0032 implements project/provider-scoped OpenCode model discovery through a
+  bounded descriptor-driven source adapter and an explicit online refresh; release proof remains
+  pending. That reader does not change OpenCode's opt-in, non-primary, non-AQE routing boundary.
+  Clarified that the AQE boundary applies to inference-provider routing, not
   AQE's upstream OpenCode platform assets, and recorded the implemented OpenCode transcript,
   token, observed-cost, and provider-id analytics path. ADR-0023 adds classified SQLite source
   health, preserves last-good OpenCode usage when a present store is temporarily unreadable,
@@ -19,6 +22,12 @@
 > routing. AQE may still provision OpenCode platform agents, skills, permissions, and MCP
 > configuration. Historical references to the removed compatibility executor do not describe a
 > supported 4.0 surface.
+
+**Model-lifecycle amendment (2026-08-25):** OpenCode's configured model references,
+project/provider-scoped `models` output, and explicitly refreshed catalogue are evidence sources
+under ADR-0032. Public discovery does not prove current-project entitlement, and ordinary
+status or Dashboard reads will not invoke OpenCode or perform network refresh.
+Provider-qualified CLI selectors preserve both axes as `opencode:provider/model`.
 
 ## Context
 

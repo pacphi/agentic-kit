@@ -34,6 +34,7 @@ import os from 'node:os';
 import { chromium } from 'playwright';
 import { startDashboard } from '../../src/lib/dashboard-server.mjs';
 import { readIndex, readSession, maskSecrets } from '../../src/lib/usage-index.mjs';
+import { modelIdentityKey } from '../../src/lib/model-inventory/contracts.mjs';
 // The About area's directory is authored DATA, not a renderer — importing it
 // here asserts the real contract ("one card per directory entry") instead of a
 // hardcoded 15 that rots the day an entry is added. This is not the thing the
@@ -265,6 +266,7 @@ const USAGE_VIEWS = [
   ['score', '#v-score'],
   ['limits', '#v-limits'],
   ['findings', '#v-findings'],
+  ['models', '#v-models'],
   ['sessions', '#v-sessions'],
   ['transcript', '#v-transcript'],
 ];
@@ -699,6 +701,159 @@ const TRANSCRIPT_STUB = {
   },
   close() {},
 };
+const MODEL_AT = '2026-08-25T13:00:00.000Z';
+const MODELS_STUB = {
+  status: 'cached',
+  snapshot: {
+    schemaVersion: 1, snapshotId: 'models:ui-private', capturedAt: MODEL_AT,
+    scope: { fingerprint: 'scope:ui-private', hosts: ['codex'], profileFingerprints: {} },
+    sources: [{ id: 'codex-cache', owner: 'codex', ownerType: 'host', transport: 'file', network: 'never',
+      mode: 'local', status: 'complete', complete: true, capturedAt: MODEL_AT,
+      schema: 'codex-model-cache-v1', scopeFingerprint: 'scope:ui-private' },
+    { id: 'ollama-catalog', owner: 'ollama', ownerType: 'provider', transport: 'http', network: 'local',
+      mode: 'local', status: 'complete', complete: true, capturedAt: MODEL_AT,
+      schema: 'ollama-api-v1', scopeFingerprint: 'scope:ui-private' },
+    { id: 'anthropic-docs', owner: 'anthropic', ownerType: 'provider', transport: 'index', network: 'never',
+      mode: 'local', status: 'complete', complete: true, capturedAt: MODEL_AT,
+      sourceVersion: '2026-08-25', schema: 'anthropic-public-models-v1',
+      scopeFingerprint: 'scope:ui-private' }],
+    models: [{
+      key: { host: 'opencode', provider: 'ui-private-provider', modelId: 'ui-private-deployment',
+        scopeId: 'scope:ui-private', digest: 'ui-private-digest' },
+      displayName: 'UI Private Deployment', aliases: [{ name: 'ui-private-alias',
+        resolvesTo: 'ui-private-deployment', observedAt: MODEL_AT, evidenceRefs: ['ui-private-evidence'] }],
+      variant: { reasoningEffort: 'high' }, visibility: 'visible', capabilities: { tools: true }, pricing: null,
+      lifecycle: { state: 'retiring', replacement: 'ui-private-replacement',
+        notice: 'https://developers.openai.com/api/docs/deprecations/', evidenceRefs: ['ui-lifecycle-notice'] },
+      edges: [{ kind: 'first-party-migration', from: 'ui-private-deployment', to: 'ui-private-replacement',
+        provenance: 'first-party', scopeFingerprint: 'scope:ui-private', evidenceRefs: ['ui-private-evidence'] }],
+      dimensions: { configured: { value: true, evidenceRefs: ['ui-private-evidence'] },
+        effective: { value: true, evidenceRefs: ['ui-private-evidence'] },
+        observed: { value: true, evidenceRefs: ['ui-usage-observed'] },
+        discoverable: { value: true, evidenceRefs: ['ui-private-evidence'] },
+        entitled: { value: true, evidenceRefs: ['ui-usage-entitled'] },
+        policyAllowed: { value: true, evidenceRefs: ['ui-usage-policy'] },
+        routable: { value: true, evidenceRefs: ['ui-usage-routable'] } },
+      evidence: [{ id: 'ui-private-evidence', field: 'catalog', source: 'codex-cache', class: 'catalog',
+        capturedAt: MODEL_AT, freshness: 'fresh', completeness: 'complete',
+        scopeFingerprint: 'scope:ui-private', refs: [] },
+      { id: 'ui-lifecycle-notice', field: 'lifecycle', source: 'codex-cache', class: 'first-party',
+        capturedAt: MODEL_AT, freshness: 'fresh', completeness: 'complete',
+        scopeFingerprint: 'scope:ui-private', refs: [] },
+      ...[
+        ['ui-usage-observed', 'dimensions.observed'],
+        ['ui-usage-entitled', 'dimensions.entitled'],
+        ['ui-usage-policy', 'dimensions.policyAllowed'],
+        ['ui-usage-routable', 'dimensions.routable'],
+      ].map(([id, field]) => ({ id, field, source: 'usage-index', class: 'observed',
+        capturedAt: MODEL_AT, freshness: 'fresh', completeness: 'complete',
+        scopeFingerprint: 'scope:ui-private', refs: [] }))],
+    }, {
+      key: { host: 'claude', provider: null, modelId: 'claude-fable-5',
+        scopeId: 'scope:ui-private', digest: null },
+      displayName: 'Claude Fable 5', aliases: [], visibility: 'visible',
+      variant: { lifecycleScope: 'Anthropic-operated platforms', availability: 'general',
+        contextWindow: 1_000_000, retirementNotBefore: '2027-06-09' },
+      capabilities: { tools: true, reasoning: true, contextLimit: 1_000_000, outputLimit: 128_000,
+        input: { text: true, image: true }, output: { text: true } },
+      pricing: { basis: 'per-million-tokens', input: 10, output: 50, currency: 'USD',
+        evidenceRefs: ['ui-anthropic-evidence'] },
+      lifecycle: { state: 'active', replacement: null,
+        notice: 'https://platform.claude.com/docs/en/about-claude/model-deprecations',
+        evidenceRefs: ['ui-anthropic-evidence'] }, edges: [],
+      dimensions: { configured: { value: true, evidenceRefs: ['ui-private-evidence'] },
+        effective: { value: true, evidenceRefs: ['ui-private-evidence'] },
+        observed: { value: null, evidenceRefs: [] },
+        discoverable: { value: true, evidenceRefs: ['ui-anthropic-evidence'] },
+        entitled: { value: null, evidenceRefs: [] }, policyAllowed: { value: null, evidenceRefs: [] },
+        routable: { value: null, evidenceRefs: [] }, recommended: { value: true, evidenceRefs: ['ui-anthropic-evidence'] } },
+      evidence: [{ id: 'ui-anthropic-evidence', field: 'dimensions.discoverable',
+        source: 'anthropic-docs', class: 'first-party', capturedAt: MODEL_AT,
+        freshness: 'fresh', completeness: 'complete', scopeFingerprint: 'scope:ui-private', refs: [] },
+      { id: 'ui-private-evidence', field: 'dimensions.configured', source: 'claude-config',
+        class: 'configured', capturedAt: MODEL_AT, freshness: 'fresh', completeness: 'complete',
+        scopeFingerprint: 'scope:ui-private', refs: [] }],
+    }, ...Array.from({ length: 59 }, (_, i) => ({
+      key: { host: i % 3 === 0 ? 'claude' : i % 3 === 1 ? 'codex' : 'opencode',
+        provider: i % 2 === 0 ? 'ui-private-provider-a' : 'ui-private-provider-b',
+        modelId: `catalog-model-${String(i + 2).padStart(2, '0')}`,
+        scopeId: 'scope:ui-private', digest: `catalog-digest-${i + 2}` },
+      displayName: `Catalog Model ${i + 2}`,
+      publisher: i % 2 === 0 ? 'Catalog Lab A' : 'Catalog Lab B',
+      selector: `catalog-provider/catalog-model-${i + 2}`,
+      visibility: 'visible', capabilities: { tools: i % 2 === 0 }, pricing: i === 0
+        ? { basis: 'per-million-tokens', input: 5, output: 15, currency: 'USD', evidenceRefs: [] }
+        : i === 1 ? { basis: 'per-million-tokens', input: 1, output: 3, currency: 'USD', evidenceRefs: [] }
+          : i === 2 ? { basis: 'per-million-tokens', input: 3, output: 9, currency: 'USD', evidenceRefs: [] }
+            : null,
+      lifecycle: { state: i % 11 === 0 ? 'retiring' : 'active', replacement: null,
+        evidenceRefs: ['ui-private-evidence'] },
+      dimensions: {
+        configured: { value: true, evidenceRefs: ['ui-private-evidence'] },
+        effective: { value: i % 4 === 0 ? null : true, evidenceRefs: ['ui-private-evidence'] },
+        observed: { value: i % 5 === 0 ? true : null, evidenceRefs: ['ui-private-evidence'] },
+        discoverable: { value: true, evidenceRefs: ['ui-private-evidence'] },
+        entitled: { value: i % 7 === 0 ? false : null, evidenceRefs: ['ui-private-evidence'] },
+        policyAllowed: { value: null, evidenceRefs: ['ui-private-evidence'] },
+        routable: { value: null, evidenceRefs: ['ui-private-evidence'] },
+      },
+      evidence: [{ id: 'ui-private-evidence', field: 'catalog', source: 'codex-cache', class: 'catalog',
+        capturedAt: MODEL_AT, freshness: 'fresh', completeness: 'complete',
+        scopeFingerprint: 'scope:ui-private', refs: [] }],
+    })), {
+      key: { host: 'ollama', provider: 'ollama', modelId: 'qwen3-coder:30b',
+        scopeId: 'scope:ui-private', digest: 'sha256:9e3f6a12abcd' },
+      displayName: 'qwen3-coder:30b', aliases: [], visibility: 'visible',
+      variant: { modifiedAt: '2026-08-24T10:00:00.000Z', parameterSize: '30.5B',
+        quantizationLevel: 'Q4_K_M', format: 'gguf', family: 'qwen3', families: ['qwen3'],
+        loaded: true, memoryBytes: 18_000_000_000, vramBytes: 12_000_000_000,
+        expiresAt: '2026-08-25T14:00:00.000Z', contextWindow: 32_768,
+        licenseSummary: 'Apache-2.0', advertisedCapabilities: ['completion', 'tools'] },
+      capabilities: { toolcall: true, contextLimit: 32_768 },
+      pricing: { basis: 'local-compute', input: 0, output: 0, currency: 'USD', evidenceRefs: [] },
+      lifecycle: { state: 'unknown', replacement: null, evidenceRefs: [] }, edges: [],
+      dimensions: { configured: { value: null, evidenceRefs: [] },
+        effective: { value: null, evidenceRefs: [] }, observed: { value: null, evidenceRefs: [] },
+        discoverable: { value: true, evidenceRefs: ['ui-ollama-evidence'] },
+        entitled: { value: null, evidenceRefs: [] }, policyAllowed: { value: null, evidenceRefs: [] },
+        routable: { value: null, evidenceRefs: [] } },
+      evidence: [{ id: 'ui-ollama-evidence', field: 'variant.loaded', source: 'ollama-catalog', class: 'runtime',
+        capturedAt: MODEL_AT, freshness: 'fresh', completeness: 'complete',
+        scopeFingerprint: 'scope:ui-private', refs: [] }],
+    }],
+    bindings: [{ id: 'ui-private-binding', consumer: 'route:implementation', activity: 'implementation',
+      host: 'opencode', provider: 'ui-private-provider', configured: 'ui-private-deployment',
+      effective: 'ui-private-deployment', provenance: 'configured', consumerState: 'configured',
+      evidenceRefs: ['ui-private-evidence'] },
+    { id: 'ui-route-architecture', consumer: 'route:architecture', activity: 'architecture',
+      host: 'claude', provider: 'ui-private-provider-a', configured: 'catalog-model-02',
+      effective: 'catalog-model-02', provenance: 'configured', consumerState: 'configured',
+      evidenceRefs: ['ui-private-evidence'] },
+    { id: 'ui-route-design', consumer: 'route:design', activity: 'design',
+      host: 'codex', provider: 'ui-private-provider-b', configured: 'catalog-model-03',
+      effective: 'catalog-model-03', provenance: 'configured', consumerState: 'configured',
+      evidenceRefs: ['ui-private-evidence'] },
+    { id: 'ui-route-testing', consumer: 'route:testing', activity: 'testing',
+      host: 'opencode', provider: 'ui-private-provider-a', configured: 'catalog-model-04',
+      effective: 'catalog-model-04', provenance: 'configured', consumerState: 'configured',
+      evidenceRefs: ['ui-private-evidence'] }],
+    changes: Array.from({ length: 12 }, (_, i) => {
+      const offset = i + 2;
+      const key = {
+        host: i % 3 === 0 ? 'claude' : i % 3 === 1 ? 'codex' : 'opencode',
+        provider: i % 2 === 0 ? 'ui-private-provider-a' : 'ui-private-provider-b',
+        modelId: `catalog-model-${String(offset).padStart(2, '0')}`,
+        scopeId: 'scope:ui-private', digest: `catalog-digest-${offset}`,
+      };
+      return {
+        kind: 'model-added', subject: modelIdentityKey(key), before: null, after: key,
+        severity: 'info', provisional: false, evidenceRefs: ['ui-private-evidence'],
+      };
+    }), opportunities: [], diagnostics: [],
+  },
+  history: [{ snapshotId: 'models:ui-private', capturedAt: MODEL_AT }],
+  comparison: { baseline: null, latest: 'models:ui-private', comparable: false, diagnostics: [] },
+};
 
 async function main() {
   // The usage API is injected rather than reaching for the real stores, so the
@@ -720,9 +875,18 @@ async function main() {
     limits: LIMITS_STUB,
     live: LIVE_STUB,
     transcripts: TRANSCRIPT_STUB,
+    models: MODELS_STUB,
+    modelScopeKey: 'ab'.repeat(32),
     system: SYSTEM_STUB,
   });
   const ORIGIN = new URL(srv.url).origin;
+  const modelHeaders = { 'x-dash-token': srv.token };
+  const modelSummaryFixture = await fetch(`${ORIGIN}/api/models?view=summary`, { headers: modelHeaders })
+    .then((response) => response.json());
+  const modelSnapshotId = modelSummaryFixture.snapshot.snapshotId;
+  const modelInventoryFixture = await fetch(`${ORIGIN}/api/models?view=inventory&offset=0&limit=50`
+    + `&sort=lifecycle&direction=asc&relevance=relevant&snapshotId=${encodeURIComponent(modelSnapshotId)}`,
+  { headers: modelHeaders }).then((response) => response.json());
 
   const browser = await chromium.launch({ channel: 'chrome', headless: !HEADED });
   const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
@@ -731,6 +895,7 @@ async function main() {
   // collected globally so a failure in one view is not silently swallowed.
   const consoleErrors = [];
   const failedRequests = [];
+  const modelRequests = [];
   // Capture the LOCATION too. A bare "Failed to load resource" is
   // undiagnosable, and a console listener that records only the message makes
   // the harness's own failures impossible to act on.
@@ -748,6 +913,7 @@ async function main() {
   const offOriginRequests = [];
   page.on('request', (r) => {
     const u = r.url();
+    if (/\/api\/models(?:\?|$)/.test(u)) modelRequests.push(u);
     if (u.startsWith(ORIGIN) || /^(data|blob|about|chrome-extension):/.test(u)) return;
     offOriginRequests.push(`${r.resourceType()} ${u}`);
   });
@@ -2044,6 +2210,19 @@ async function main() {
     // ── every Usage sub-view ──
     await page.click('[data-tab="usage"]');
     await page.waitForTimeout(800);
+    check('model inventory stays network-lazy until its tab opens', modelRequests.length === 0,
+      `Models made ${modelRequests.length} request(s) before its tab opened: ${modelRequests.join(', ')}`);
+    const usageSubmenu = await page.evaluate(() => [...document.querySelectorAll('#usage-seg [data-view]')]
+      .map((button) => button.dataset.view));
+    check('Usage submenu puts Models before Sessions',
+      JSON.stringify(usageSubmenu) === JSON.stringify(['score', 'limits', 'findings', 'models', 'sessions', 'transcript']),
+      `Usage submenu was ${JSON.stringify(usageSubmenu)}`);
+    const modelPanelOwnership = await page.evaluate(() => [
+      '#mli-observed-panel', '.mli-routes-panel', '#mli-catalog-explorer', '#mli-history', '#mli-consumers', '#mli-impact',
+    ].map((selector) => ({ selector, owner: document.querySelector(selector)?.closest('.view')?.id ?? null })));
+    check('every Models-only panel is structurally owned by the Models view',
+      modelPanelOwnership.every(({ owner }) => owner === 'v-models'),
+      `Models panel ownership was ${JSON.stringify(modelPanelOwnership)}`);
     for (const [view, sel] of USAGE_VIEWS) {
       await page.click(`[data-view="${view}"]`).catch(() => {});
       await page.waitForSelector(`${sel}:not([hidden])`, { timeout: 8000 }).catch(() => {});
@@ -2062,7 +2241,422 @@ async function main() {
       const arts = artifactsIn(text);
       check(`usage/${view} is free of rendering artifacts`, arts.length === 0,
         `found ${arts.join(', ')} — this is the class of bug unit tests cannot see`);
+      if (view !== 'models') {
+        const modelBoundary = await page.evaluate(() => {
+          const models = document.getElementById('v-models');
+          const active = document.getElementById(`v-${document.querySelector('#usage-seg [aria-selected="true"]')?.dataset.view}`);
+          return {
+            modelsHidden: models?.hidden === true,
+            modelsDisplay: models ? getComputedStyle(models).display : null,
+            modelsDisplayPriority: models?.style.getPropertyPriority('display'),
+            modelsInert: models?.hasAttribute('inert') === true,
+            modelPanelsInActiveView: active?.querySelectorAll('[id^="mli-"]').length ?? null,
+            modelOnlyPanelsVisible: [...document.querySelectorAll(
+              '#mli-observed-panel, .mli-routes-panel, #mli-catalog-explorer, #mli-history, #mli-consumers, #mli-impact',
+            )].filter((node) => node.getClientRects().length > 0).length,
+          };
+        });
+        check(`usage/${view} excludes Model lifecycle panels`,
+          modelBoundary.modelsHidden && modelBoundary.modelsDisplay === 'none'
+            && modelBoundary.modelsDisplayPriority === 'important' && modelBoundary.modelsInert
+            && modelBoundary.modelPanelsInActiveView === 0 && modelBoundary.modelOnlyPanelsVisible === 0,
+          `model boundary was ${JSON.stringify(modelBoundary)}`);
+      }
     }
+
+    // ── Models privacy, evidence disclosure, keyboard and narrow layout ──
+    await page.click('[data-view="models"]');
+    await page.waitForFunction(() => document.getElementById('mli-load-status')?.textContent?.includes('loaded'));
+    check('Models loads summary before its first bounded inventory page',
+      modelRequests.length >= 2
+        && new URL(modelRequests[0]).searchParams.get('view') === 'summary'
+        && new URL(modelRequests[0]).searchParams.get('days') === '14'
+        && new URL(modelRequests[1]).searchParams.get('view') === 'inventory'
+        && new URL(modelRequests[1]).searchParams.get('offset') === '0'
+        && new URL(modelRequests[1]).searchParams.get('limit') === '50'
+        && new URL(modelRequests[1]).searchParams.get('snapshotId') === modelSnapshotId
+        && new URL(modelRequests[1]).searchParams.get('relevance') === 'relevant',
+      `Models requests were ${JSON.stringify(modelRequests)}`);
+    check('Models keeps the shared 7/14/30-day selector visible',
+      await page.locator('#usage-days').isVisible(),
+      'Models hid the window selector used by its observed-use evidence');
+    check('Models renders aggregate observed-use evidence for the selected window',
+      /^14 days · \d+ models?$/.test((await page.locator('#mli-observed-note').innerText()).trim())
+        && await page.locator('#mli-observed tr').count() > 0,
+      `observed note was ${JSON.stringify(await page.locator('#mli-observed-note').innerText())}`);
+    const beforeThirtyDayModels = modelRequests.length;
+    await page.click('#usage-days [data-days="30"]');
+    await page.waitForFunction(() => document.getElementById('mli-observed-note')?.textContent?.startsWith('30 days'));
+    check('changing the Models window refetches its observed-use summary only for that window',
+      modelRequests.slice(beforeThirtyDayModels).some((url) => {
+        const parsed = new URL(url);
+        return parsed.searchParams.get('view') === 'summary' && parsed.searchParams.get('days') === '30';
+      }), `Models requests were ${JSON.stringify(modelRequests.slice(beforeThirtyDayModels))}`);
+    await page.click('#usage-days [data-days="14"]');
+    await page.waitForFunction(() => document.getElementById('mli-observed-note')?.textContent?.startsWith('14 days'));
+    const modelView = await visibleText(page, '#v-models');
+    check('usage/models shows exact configured model names without opaque identifiers',
+      /Your routes/.test(modelView) && /ui-private-deployment/.test(modelView)
+        && /ui-private-provider/.test(modelView)
+        && !/model-[a-f0-9]{12}|provider-[a-f0-9]{12}|scope-[a-f0-9]{12}/.test(modelView),
+      `Models privacy projection was ${JSON.stringify(modelView.slice(0, 400))}`);
+    const attentionView = await visibleText(page, '#mli-attention');
+    check('Models attention names the route, current model, replacement, action, and cited notice',
+      /implementation · primary/.test(attentionView)
+        && /UI Private Deployment/.test(attentionView)
+        && /ui-private-replacement/.test(attentionView)
+        && /ak models plan --activity implementation --to opencode:ui-private-replacement/.test(attentionView)
+        && await page.getAttribute('#mli-attention a', 'href') === 'https://developers.openai.com/api/docs/deprecations/',
+      `attention panel was ${JSON.stringify(attentionView)}`);
+    check('catalog explorer stays collapsed until requested',
+      await page.getAttribute('#mli-catalog-explorer', 'open') === null,
+      'catalog explorer should not compete with the operating routes');
+    const catalogChevron = page.locator('#mli-catalog-explorer > summary .chev');
+    check('catalog explorer uses the shared chevron affordance before opening',
+      await catalogChevron.textContent() === '›' && await catalogChevron.getAttribute('aria-hidden') === 'true',
+      'catalog explorer did not expose the shared directional chevron');
+    await page.locator('#mli-catalog-explorer > summary').click();
+    await page.waitForTimeout(250);
+    check('catalog explorer rotates its chevron when open',
+      await page.getAttribute('#mli-catalog-explorer', 'open') !== null
+        && await catalogChevron.evaluate((node) => getComputedStyle(node).transform !== 'none'),
+      'catalog chevron did not communicate its expanded state');
+    const catalogView = await visibleText(page, '#mli-catalog-explorer');
+    check('catalog explorer is available without leaking opaque implementation identifiers',
+      /Explore catalog/.test(catalogView)
+        && /UI Private Deployment/.test(catalogView)
+        && !/model-[a-f0-9]{12}|provider-[a-f0-9]{12}|scope-[a-f0-9]{12}/.test(catalogView),
+      `Models privacy projection was ${JSON.stringify(modelView.slice(0, 400))}`);
+    const consumerPanel = await page.evaluate(() => {
+      const panel = document.querySelector('#mli-consumers .mli-consumer-scroll');
+      return panel ? { overflowY: getComputedStyle(panel).overflowY, maxHeight: getComputedStyle(panel).maxHeight } : null;
+    });
+    check('Models consumers are a bounded, scrollable operator panel',
+      !!consumerPanel && /(auto|scroll)/.test(consumerPanel.overflowY) && consumerPanel.maxHeight !== 'none',
+      `consumer panel was ${JSON.stringify(consumerPanel)}`);
+    check('Models consumers contain named routes rather than opaque or unclassified bindings',
+      /implementation · primary/.test(await visibleText(page, '#mli-consumers'))
+        && !/Configured consumer|activity-[a-f0-9]{12}|binding-[a-f0-9]{12}/.test(await visibleText(page, '#mli-consumers')),
+      `consumer panel was ${JSON.stringify((await visibleText(page, '#mli-consumers')).slice(0, 500))}`);
+    const historyPanel = await page.evaluate(() => {
+      const panel = document.querySelector('#mli-history .mli-history-scroll');
+      const table = panel?.querySelector('table');
+      return panel ? {
+        overflowY: getComputedStyle(panel).overflowY,
+        maxHeight: getComputedStyle(panel).maxHeight,
+        scrollHeight: panel.scrollHeight,
+        clientHeight: panel.clientHeight,
+        region: panel.getAttribute('role'),
+        label: panel.getAttribute('aria-label'),
+        tabindex: panel.getAttribute('tabindex'),
+        columns: table?.querySelectorAll('thead th').length ?? 0,
+        rows: table?.querySelectorAll('tbody tr').length ?? 0,
+      } : null;
+    });
+    check('Models change history is a bounded, internally scrollable semantic table',
+      !!historyPanel && /(auto|scroll)/.test(historyPanel.overflowY)
+        && historyPanel.maxHeight !== 'none'
+        && historyPanel.scrollHeight > historyPanel.clientHeight
+        && historyPanel.region === 'region' && !!historyPanel.label && historyPanel.tabindex === '0'
+        && historyPanel.columns === 6 && historyPanel.rows === 12,
+      `change history panel was ${JSON.stringify(historyPanel)}`);
+    const historyText = await visibleText(page, '#mli-history');
+    check('Models change history uses exact human model facts instead of identity hashes or enum labels',
+      /Model added/.test(historyText) && /Catalog Model 2/.test(historyText)
+        && /ui-private-provider-a/.test(historyText) && /Claude/.test(historyText)
+        && /Appeared in the latest inventory/.test(historyText) && /Confirmed/.test(historyText)
+        && !/model-added|identity-[a-f0-9]{12}/.test(historyText)
+        && /12 changes · 1 retained snapshot/.test(await visibleText(page, '#mli-history-note')),
+      `change history was ${JSON.stringify(historyText.slice(0, 700))}`);
+    check('Models removes low-value source coverage from the live surface',
+      await page.locator('#mli-sources').count() === 0,
+      'source coverage should remain documented rather than occupy the operator view');
+    check('usage/models has a polite load status and settled busy state',
+      await page.getAttribute('#mli-load-status', 'role') === 'status'
+        && await page.getAttribute('#mli-load-status', 'aria-live') === 'polite'
+        && await page.getAttribute('#v-models', 'aria-busy') === 'false',
+      'Models loading state was not exposed to assistive technology');
+    const proof = page.locator('#mli-models details.mli-proof').first();
+    await proof.locator('summary').click();
+    check('usage/models state disclosure names source, class, capture, freshness, and completeness',
+      /codex-cache/.test(await visibleText(page, '#mli-models'))
+        && /catalog/.test(await visibleText(page, '#mli-models'))
+        && /2026-08-25/.test(await visibleText(page, '#mli-models'))
+        && /fresh/.test(await visibleText(page, '#mli-models'))
+        && /complete/.test(await visibleText(page, '#mli-models'))
+        && !/scope-[a-f0-9]{12}/.test(await visibleText(page, '#mli-models')),
+      'Expanded state did not disclose its complete evidence chain');
+    check('usage/models table is an explicitly labelled keyboard region',
+      await page.getAttribute('.mli-table-wrap', 'role') === 'region'
+        && !!await page.getAttribute('.mli-table-wrap', 'aria-label')
+        && await page.getAttribute('.mli-table-wrap', 'tabindex') === '0',
+      'responsive table region lacked keyboard semantics');
+    const inventoryControls = await page.evaluate(() => ({
+      form: !!document.getElementById('mli-filters'),
+      search: document.getElementById('mli-search')?.getAttribute('type'),
+      labels: [...document.querySelectorAll('#mli-filters label')].map((node) => node.innerText.trim()),
+      reset: document.getElementById('mli-reset')?.textContent?.trim(),
+      countRole: document.getElementById('mli-result-count')?.getAttribute('role'),
+      countLive: document.getElementById('mli-result-count')?.getAttribute('aria-live'),
+      loadMore: document.getElementById('mli-load-more')?.textContent?.trim(),
+      evidenceValueDisabled: document.getElementById('mli-evidence-value')?.disabled,
+      headerButtons: document.querySelectorAll('.mli-ledger .mli-table thead [data-mli-sort]').length,
+      ariaSort: [...document.querySelectorAll('.mli-ledger .mli-table thead th')].map((node) => node.getAttribute('aria-sort')),
+    }));
+    check('Models exposes labelled search, host, provider, relevance, lifecycle and evidence filters',
+      inventoryControls.form && inventoryControls.search === 'search'
+        && ['Search', 'Access host', 'Model provider', 'View', 'Lifecycle', 'Evidence state', 'Evidence value']
+          .every((label) => inventoryControls.labels.some((actual) => actual.toLowerCase().startsWith(label.toLowerCase()))),
+      `inventory controls were ${JSON.stringify(inventoryControls)}`);
+    check('Models has Reset, result-status and explicit Load 50 more controls',
+      inventoryControls.reset === 'Reset'
+        && inventoryControls.countRole === 'status' && inventoryControls.countLive === 'polite'
+        && inventoryControls.loadMore === 'Load 50 more' && inventoryControls.evidenceValueDisabled,
+      `inventory controls were ${JSON.stringify(inventoryControls)}`);
+    check('every Models column header is a sortable button with one semantic sort owner',
+      inventoryControls.headerButtons === 5
+        && inventoryControls.ariaSort.filter((value) => value && value !== 'none').length === 1,
+      `header controls were ${JSON.stringify(inventoryControls)}`);
+    const routeSortControls = await page.evaluate(() => ({
+      buttons: [...document.querySelectorAll('.mli-routes-table [data-mli-route-sort]')]
+        .map((button) => button.getAttribute('data-mli-route-sort')),
+      active: document.querySelector('.mli-routes-table th[aria-sort="ascending"] [data-mli-route-sort]')?.getAttribute('data-mli-route-sort'),
+    }));
+    check('every route column is an accessible sortable button with Model ascending by default',
+      JSON.stringify(routeSortControls.buttons) === JSON.stringify(['model', 'provider', 'used', 'lastUsed', 'rate'])
+        && routeSortControls.active === 'model',
+      `route sort controls were ${JSON.stringify(routeSortControls)}`);
+    const sortableRouteModel = page.locator('[data-mli-route-sort="model"]');
+    await sortableRouteModel.click();
+    await page.waitForFunction(() => document.querySelector('[data-mli-route-sort="model"]')?.closest('th')?.getAttribute('aria-sort') === 'descending');
+    check('route Model descending reorders rows in the rendered dashboard',
+      await page.locator('#mli-routes tr').first().locator('th b').innerText() === 'UI Private Deployment',
+      `route rows were ${JSON.stringify(await page.locator('#mli-routes tr th b').allInnerTexts())}`);
+    await sortableRouteModel.click();
+    await page.waitForFunction(() => document.querySelector('[data-mli-route-sort="model"]')?.closest('th')?.getAttribute('aria-sort') === 'ascending');
+    for (const field of ['provider', 'used', 'lastUsed', 'rate']) {
+      const control = page.locator(`[data-mli-route-sort="${field}"]`);
+      await control.click();
+      await page.waitForFunction((name) => document.querySelector(`[data-mli-route-sort="${name}"]`)?.closest('th')?.getAttribute('aria-sort') === 'ascending', field);
+      if (field === 'rate') {
+        check('route rate ascending uses published input rate and keeps unknown rate last',
+          JSON.stringify(await page.locator('#mli-routes tr th b').allInnerTexts())
+            === JSON.stringify(['Catalog Model 3', 'Catalog Model 4', 'Catalog Model 2', 'UI Private Deployment']),
+          `ascending rate rows were ${JSON.stringify(await page.locator('#mli-routes tr th b').allInnerTexts())}`);
+      }
+      await control.click();
+      await page.waitForFunction((name) => document.querySelector(`[data-mli-route-sort="${name}"]`)?.closest('th')?.getAttribute('aria-sort') === 'descending', field);
+    }
+    check('route column buttons toggle ascending then descending without reloading the inventory',
+      await page.evaluate(() => document.querySelector('.mli-routes-table th[aria-sort="descending"] [data-mli-route-sort]')?.getAttribute('data-mli-route-sort')) === 'rate',
+      'route headers did not retain their descending sort state');
+    const initialInventory = await page.evaluate(() => ({
+      rows: document.querySelectorAll('#mli-models tr').length,
+      count: document.getElementById('mli-result-count')?.textContent?.trim(),
+      overflowY: getComputedStyle(document.querySelector('.mli-table-wrap')).overflowY,
+      maxHeight: getComputedStyle(document.querySelector('.mli-table-wrap')).maxHeight,
+      headPosition: getComputedStyle(document.querySelector('.mli-table thead')).position,
+    }));
+    check('Models renders only its first 50 relevant rows and states the total',
+      initialInventory.rows === 50 && /50/.test(initialInventory.count) && /62/.test(initialInventory.count),
+      `initial inventory was ${JSON.stringify(initialInventory)}`);
+    check('each model identity is the semantic row header for its evidence cells',
+      await page.locator('#mli-models tr > th[scope="row"]').count() === 50,
+      'model identity cells were not row headers');
+    check('host inventory is height-bounded, vertically scrollable and keeps its header sticky',
+      initialInventory.overflowY === 'auto' && initialInventory.maxHeight !== 'none'
+        && initialInventory.headPosition === 'sticky',
+      `inventory geometry styles were ${JSON.stringify(initialInventory)}`);
+    await page.fill('#mli-search', 'UI Private Deployment');
+    await page.waitForFunction(() => document.querySelectorAll('#mli-models tr').length === 1
+      && document.getElementById('mli-result-count')?.textContent !== 'Loading models…');
+    await page.click('#mli-models .mli-detail-open');
+    const evidenceRows = await page.locator('#mli-detail .mli-proof-row').allInnerTexts();
+    check('model details de-duplicate identical evidence summaries without changing field evidence',
+      evidenceRows.filter((row) => row.startsWith('usage-index · observed')).length === 1,
+      `model detail evidence rows were ${JSON.stringify(evidenceRows)}`);
+    await page.click('#mli-detail-close');
+    await page.fill('#mli-search', 'Claude Fable 5');
+    await page.waitForFunction(() => document.querySelectorAll('#mli-models tr').length === 1
+      && /Claude Fable 5/.test(document.querySelector('#mli-models tr')?.textContent || '')
+      && document.getElementById('mli-result-count')?.textContent !== 'Loading models…');
+    await page.click('#mli-models .mli-detail-open');
+    const claudeDetail = await visibleText(page, '#mli-detail');
+    check('Claude details separate public facts from account access and give the operator a proof step',
+      /Lifecycle scope\s+Anthropic-operated platforms/i.test(claudeDetail)
+        && /Published availability\s+general/i.test(claudeDetail)
+        && /Published \/ discovered\s+Published by an accepted source/i.test(claudeDetail)
+        && /Account access\s+Not established; public metadata is not account access/i.test(claudeDetail)
+        && /Local routability\s+Not established on this host\/provider\/account path/i.test(claudeDetail)
+        && /What you need to do\s+Complete one successful invocation on this exact path, then run ak models refresh/i.test(claudeDetail)
+        && /Context\s+1,000,000/i.test(claudeDetail) && /Output\s+128,000/i.test(claudeDetail),
+      `Claude detail was ${JSON.stringify(claudeDetail)}`);
+    await page.click('#mli-detail-close');
+    await page.click('#mli-reset');
+    await page.waitForFunction(() => document.activeElement?.id === 'mli-search'
+      && document.querySelectorAll('#mli-models tr').length === 50);
+    await page.selectOption('#mli-evidence-field', 'observed');
+    await page.waitForFunction(() => !document.getElementById('mli-evidence-value')?.disabled);
+    check('evidence filtering enables its dependent value without sending a half-formed query',
+      !modelRequests.some((url) => new URL(url).searchParams.has('evidenceField')
+        !== new URL(url).searchParams.has('evidenceValue')),
+      `Models requests were ${JSON.stringify(modelRequests)}`);
+    await page.selectOption('#mli-evidence-value', 'unknown');
+    await page.waitForFunction(() => document.getElementById('mli-result-count')?.textContent !== 'Loading models…');
+    check('evidence field and value travel together as one filter',
+      modelRequests.some((url) => new URL(url).searchParams.get('evidenceField') === 'observed'
+        && new URL(url).searchParams.get('evidenceValue') === 'unknown'),
+      `Models requests were ${JSON.stringify(modelRequests)}`);
+    await page.click('#mli-reset');
+    await page.waitForFunction(() => document.activeElement?.id === 'mli-search'
+      && document.getElementById('mli-evidence-value')?.disabled);
+    const sortableHost = page.locator('[data-mli-sort="host"]');
+    await sortableHost.click();
+    await page.waitForFunction(() => document.querySelector('[data-mli-sort="host"]')?.closest('th')?.getAttribute('aria-sort') === 'ascending');
+    await sortableHost.click();
+    await page.waitForFunction(() => document.querySelector('[data-mli-sort="host"]')?.closest('th')?.getAttribute('aria-sort') === 'descending');
+    check('column buttons toggle ascending then descending and request server ordering',
+      modelRequests.some((url) => new URL(url).searchParams.get('sort') === 'host'
+        && new URL(url).searchParams.get('direction') === 'desc'),
+      `Models requests were ${JSON.stringify(modelRequests)}`);
+    await page.fill('#mli-search', 'deployment');
+    await page.waitForTimeout(350);
+    check('search resets inventory pagination and travels as a filter parameter',
+      modelRequests.some((url) => new URL(url).searchParams.get('search') === 'deployment'
+        && new URL(url).searchParams.get('offset') === '0'),
+      `Models requests were ${JSON.stringify(modelRequests)}`);
+    await page.click('#mli-reset');
+    await page.waitForFunction(() => document.activeElement?.id === 'mli-search'
+      && document.getElementById('mli-relevance')?.value === 'relevant');
+    check('Reset restores the relevance-first filter set and keyboard focus',
+      await page.inputValue('#mli-search') === ''
+        && await page.inputValue('#mli-relevance') === 'relevant'
+        && await page.evaluate(() => document.activeElement?.id) === 'mli-search',
+      'Reset did not restore the default filter state or return focus to Search');
+    await page.selectOption('#mli-relevance', 'catalog');
+    await page.waitForFunction(() => document.getElementById('mli-result-count')?.textContent !== 'Loading models…');
+    await page.fill('#mli-search', 'qwen3-coder:30b');
+    await page.waitForFunction(() => document.querySelectorAll('#mli-models tr').length === 1
+      && document.getElementById('mli-result-count')?.textContent !== 'Loading models…');
+    await page.click('#mli-models .mli-detail-open');
+    const localDetail = await visibleText(page, '#mli-detail');
+    check('Ollama details show human build and runtime metadata rather than opaque hashes',
+      /30\.5B · Q4_K_M · gguf/.test(localDetail)
+        && /Loaded now\s+Yes/i.test(localDetail)
+        && /Context limit\s+32768/i.test(localDetail)
+        && !/variant-[a-f0-9]{12}/.test(localDetail),
+      `Ollama detail was ${JSON.stringify(localDetail)}`);
+    await page.click('#mli-detail-close');
+    await page.click('#mli-reset');
+    await page.waitForFunction(() => document.querySelectorAll('#mli-models tr').length === 50);
+    const replacementSnapshotId = `${modelSnapshotId}-replacement`;
+    const replacementSummary = structuredClone(modelSummaryFixture);
+    replacementSummary.snapshot.snapshotId = replacementSnapshotId;
+    replacementSummary.snapshot.capturedAt = '2026-08-25T14:00:00.000Z';
+    replacementSummary.snapshot.sources[0].id = 'replacement-source';
+    replacementSummary.history = [{ snapshotId: replacementSnapshotId,
+      capturedAt: replacementSummary.snapshot.capturedAt }];
+    const replacementInventory = structuredClone(modelInventoryFixture);
+    replacementInventory.snapshot.snapshotId = replacementSnapshotId;
+    replacementInventory.snapshot.capturedAt = replacementSummary.snapshot.capturedAt;
+    replacementInventory.inventory.items = replacementInventory.inventory.items.slice(0, 12);
+    replacementInventory.inventory.total = 12;
+    replacementInventory.inventory.filteredTotal = 12;
+    replacementInventory.inventory.relevantTotal = 12;
+    replacementInventory.inventory.offset = 0;
+    replacementInventory.inventory.nextOffset = null;
+    replacementInventory.inventory.hasMore = false;
+    let stalePhase = 'append';
+    const stalePageHandler = async (route) => {
+      const requestUrl = new URL(route.request().url());
+      const view = requestUrl.searchParams.get('view');
+      if (stalePhase === 'append' && requestUrl.searchParams.get('offset') === '50') {
+        stalePhase = 'summary';
+        await route.fulfill({ status: 409, contentType: 'application/json',
+          body: JSON.stringify({ error: 'model inventory changed; retry' }) });
+      } else if (stalePhase === 'summary' && view === 'summary') {
+        stalePhase = 'inventory';
+        await route.fulfill({ status: 200, contentType: 'application/json',
+          body: JSON.stringify(replacementSummary) });
+      } else if (stalePhase === 'inventory' && view === 'inventory'
+        && requestUrl.searchParams.get('offset') === '0') {
+        stalePhase = 'done';
+        await route.fulfill({ status: 200, contentType: 'application/json',
+          body: JSON.stringify(replacementInventory) });
+      } else await route.continue();
+    };
+    await page.route(/\/api\/models\?/, stalePageHandler);
+    const requestsBeforeStalePage = modelRequests.length;
+    await page.click('#mli-load-more');
+    await page.waitForFunction(() => document.getElementById('mli-load-status')?.textContent?.includes('loaded'));
+    const staleRequests = modelRequests.slice(requestsBeforeStalePage);
+    const replacementFocus = await page.evaluate(() => ({
+      rowHeader: document.activeElement?.matches('#mli-models tr > th[scope="row"]'),
+      visible: document.activeElement?.offsetParent !== null,
+      text: document.activeElement?.textContent?.trim(),
+    }));
+    check('a changed snapshot resets pagination instead of mixing inventory pages',
+      staleRequests.some((url) => new URL(url).searchParams.get('offset') === '50'
+        && new URL(url).searchParams.has('snapshotId'))
+        && staleRequests.some((url) => new URL(url).searchParams.get('view') === 'summary')
+        && staleRequests.some((url) => new URL(url).searchParams.get('offset') === '0'
+          && new URL(url).searchParams.get('snapshotId') === replacementSnapshotId)
+        && await page.locator('#mli-models tr').count() === 12,
+      `Models requests were ${JSON.stringify(staleRequests)}`);
+    check('snapshot recovery focuses a visible replacement row when no next page exists',
+      replacementFocus.rowHeader && replacementFocus.visible,
+      `replacement focus was ${JSON.stringify(replacementFocus)}`);
+    const expectedConflict = consoleErrors.findIndex((message) => /status of 409/.test(message)
+      && /\/api\/models\?/.test(message));
+    if (expectedConflict >= 0) consoleErrors.splice(expectedConflict, 1);
+    await page.unroute(/\/api\/models\?/, stalePageHandler);
+
+    let failPage = true;
+    const failPageHandler = async (route) => {
+      const requestUrl = new URL(route.request().url());
+      if (failPage && requestUrl.searchParams.get('offset') === '50') {
+        failPage = false;
+        await route.fulfill({ status: 500, contentType: 'application/json',
+          body: JSON.stringify({ error: 'temporarily unavailable' }) });
+      } else await route.continue();
+    };
+    await page.route(/\/api\/models\?/, failPageHandler);
+    await page.click('#mli-load-more');
+    await page.waitForFunction(() => document.getElementById('mli-load-status')?.textContent?.includes('unavailable'));
+    check('a failed later page preserves prior rows and leaves an explicit retry',
+      await page.locator('#mli-models tr').count() === 50
+        && await page.isVisible('#mli-load-more')
+        && /Retry/.test(await page.textContent('#mli-load-more')),
+      'a failed append discarded rows or hid its retry');
+    const expectedFailure = consoleErrors.findIndex((message) => /status of 500/.test(message)
+      && /\/api\/models\?/.test(message));
+    if (expectedFailure >= 0) consoleErrors.splice(expectedFailure, 1);
+    await page.unroute(/\/api\/models\?/, failPageHandler);
+    await page.click('#mli-load-more');
+    await page.waitForFunction(() => document.querySelectorAll('#mli-models tr').length === 61);
+    check('Load 50 more appends the remaining page without replacing the first page',
+      await page.locator('#mli-models tr').count() === 61
+        && await page.isHidden('#mli-load-more')
+        && await page.evaluate(() => document.activeElement === document.querySelectorAll('#mli-models tr > th[scope="row"]')[50]),
+      'the second page did not append to the first or the exhausted control stayed visible');
+    await page.setViewportSize({ width: 640, height: 900 });
+    await page.focus('.mli-table-wrap');
+    await page.keyboard.press('ArrowRight');
+    await page.waitForTimeout(150);
+    const horizontal = await page.$eval('.mli-table-wrap', (node) => ({
+      left: node.scrollLeft, client: node.clientWidth, scroll: node.scrollWidth,
+    }));
+    check('usage/models narrow table scrolls from keyboard focus',
+      horizontal.scroll > horizontal.client && horizontal.left > 0,
+      `table scroll state was ${JSON.stringify(horizontal)}`);
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.click('#usage-tab-findings');
+    await page.focus('#usage-tab-findings');
+    await page.keyboard.press('ArrowRight');
+    check('usage/models follows Findings in arrow-key tab navigation',
+      await page.getAttribute('#usage-tab-models', 'aria-selected') === 'true'
+        && await page.evaluate(() => document.activeElement?.id) === 'usage-tab-models',
+      'Models tab did not receive selection and focus after ArrowRight');
 
     // ── the specific zeros that were silently wrong ──
     await page.click('[data-view="sessions"]');

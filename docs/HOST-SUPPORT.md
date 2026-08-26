@@ -300,6 +300,10 @@ self-declaring them.
 
 - Use `ak status` for installed/wired truth and `ak run --dry-run` for the exact
   worker plan.
+- Use `ak models refresh` to capture host-scoped model evidence, then
+  `ak models status|diff|explain|plan` for offline lifecycle and swap analysis. Claude, Codex,
+  OpenCode, and Ollama have registry-selected explicit source adapters; an external host receives no
+  inferred catalogue capability without an admitted descriptor and matching adapter.
 - Use Claude or Codex as primary. Choose based on which should lead the mirrored
   activity defaults, not on MCP availability alone.
 - Route OpenCode explicitly for bounded work whose `provider/model` and repository

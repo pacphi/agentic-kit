@@ -2,9 +2,10 @@
 
 - **Status:** Amended by [ADR-0020](0020-ga-stable-surfaces.md)
 - **Date:** 2026-07-23
-- **Updated:** 2026-08-07
+- **Updated:** 2026-08-25
 - **Update note:** Preserved subscription-safe seeding and provenance while moving intent to the
-  canonical routing envelope; separated model **retirement** from route **divergence** (2026-08-07).
+  canonical routing envelope; retirement now requires a direct first-party withdrawal notice, not a
+  cache upgrade hint or a preferred successor (2026-08-25).
 - **Deciders:** agentic-kit maintainers
 
 > **GA amendment:** subscription-safe seeding and user-intent preservation remain. The persisted
@@ -44,8 +45,9 @@ Every `ActivityRoute` carries **provenance**: `source: 'default' | 'seeded' | 'u
 
 Provenance answers "may ak change this value?". It does **not** answer "does this value still work?",
 and one case needs both: a model the host has **withdrawn**. A route naming one is not a stale
-preference, it is a scheduled hard failure — `gpt-5.4` and `gpt-5.4-mini` stop answering in Codex on
-2026-08-31, and `gpt-5.3-codex` already has.
+preference, it is a scheduled hard failure. As of 2026-08-25, no Codex model is in this category:
+the OpenAI API catalog still publishes GPT-5.4 and GPT-5.4 mini, and no cited withdrawal notice
+establishes the previously claimed dates.
 
 So retirement is separated from divergence, and the two are handled differently:
 

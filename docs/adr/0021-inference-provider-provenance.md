@@ -2,11 +2,12 @@
 
 - **Status:** Accepted
 - **Date:** 2026-07-31
-- **Updated:** 2026-08-03
+- **Updated:** 2026-08-25
 - **Update note:** Claude provider resolution now covers runtime leases as well as transcript
   discovery, while stronger observed identity remains authoritative; OpenCode runtime presence is
   acknowledged without manufacturing provider identity. The user-facing surface is now named
-  Observability; Live remains one navigation scope within it.
+  Observability; Live remains one navigation scope within it. ADR-0032 reuses only independently
+  evidenced host/provider/model facts and never infers provider identity from a host or model name.
 - **Deciders:** agentic-kit maintainers
 - **Related:** [ADR-0012](0012-observability.md)
 
@@ -60,6 +61,9 @@ configured | inferred | unknown`, populated from field-level evidence. Only emit
 - **Presentation** names the new values (AWS Bedrock, Google Vertex AI, Microsoft Foundry,
   Custom gateway) and continues to render "Provider not established" only when no evidence of any
   grade exists.
+- **Model lifecycle reuse** consumes the independently evidenced host, provider, and model fields
+  without upgrading provenance or inferring provider identity from a host/model string. A structured
+  successful observation proves only that exact path at capture time.
 
 ## Consequences
 

@@ -216,6 +216,7 @@ against Node and npm. They are not the supported machine-management contract.
 | Ruflo, AQE, AgentDB | None | Installed/repaired in the active npm global prefix | Project assets initialized from those versions |
 | Claude/Codex/OpenCode CLI | None | Missing enabled hosts may be installed globally; external installs are reused | Host-specific project wiring may be generated |
 | `~/.config/agentic-kit/kit.json` | None | Created/updated for the current OS user | Choices are read and project routing may be materialized |
+| Model inventory and private scope key | None | Created only by an explicit `ak models refresh` | Scope is stored as a keyed non-identifying fingerprint; the owner-only cache can retain exact model ids for explicit CLI evidence, while the Dashboard receives keyed pseudonyms |
 | Claude/Codex/OpenCode user guidance | None | Managed sentinel blocks reconciled | Project guidance/assets may be created or refreshed |
 | Ruflo MCP registration | None | Offered at user scope | Conflicting project-local Ruflo registration is removed |
 | RuvNet Brain | None | Shared current-user KB/plugin installation; approximately 2 GB | No per-project Brain copy |
@@ -282,6 +283,7 @@ existing project, commit or back up first and review the exact mutation contract
 | Remove a local dependency | `npm uninstall @pacphi/agentic-kit` | Current package/workspace |
 | Remove the global runner only | `npm uninstall -g @pacphi/agentic-kit` | Active npm prefix; leaves setup-created state |
 | Remove managed integration state | `ak uninstall` | User/project state selected by its flags |
+| Remove model inventory and scope key | `ak uninstall --purge` | Current-user Agentic Kit configuration |
 | Preview teardown | `ak uninstall --dry-run` | No changes |
 
 Removing the npm package is not equivalent to `ak uninstall`. The package manager

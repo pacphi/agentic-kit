@@ -101,6 +101,27 @@ two Ollama bindings do not create two Ollama providers, and configured host/mode
 prove which inference vendor served a session. OpenCode runs only through `ak run` after its host
 adapter declares the required capability.
 
+## Model lifecycle boundary
+
+ADR-0032 accepts a separate Model lifecycle intelligence context. It may read canonical routes,
+escalation rungs, and generated projections to diagnose affected consumers. Its `SwapPlan` is a
+read-only projection and may emit a copyable `ak host pick --route ...` action; it cannot apply that
+action or become another routing policy.
+
+The curated `RETIRED_MODELS` behavior described above remains the implemented routing rule until a
+separate implementation deliberately changes it. Catalogue discovery does not feed that automatic
+substitution path merely because a model is hidden, missing, stale, or deprecated.
+Inventory lifecycle facts diagnose and plan; only authoritative evidence under an implemented
+contract may justify changing dispatch behavior.
+
+First-party migration and mechanical compatibility are not quality claims. Only imported Route
+Intelligence evidence can call a candidate equivalent, cheaper, or worth a premium. Alias or
+capability changes mark that evidence stale while preserving its audit history.
+
+Model lifecycle exports mechanically eligible candidates and audit-preserving invalidations to
+Route Intelligence, with quality and economics claims explicitly false. `ak status` may recommend a
+model refresh or diff, but `ak sync` excludes every model advisory from its executable plan.
+
 ## Cost safety
 
 Automatic seeding targets only known subscription-backed or local execution paths. Metered
@@ -121,3 +142,5 @@ must distinguish per-token price from measured or expected per-task cost.
 6. Escalation is explicit, ordered, and per route.
 7. Automatic seeding cannot introduce a metered provider path.
 8. `ak run` is the sole executor for materialized activity plans.
+9. Model lifecycle inventory may diagnose routes but cannot mutate or execute them.
+10. Catalogue absence never enters the curated retirement substitution path by inference.

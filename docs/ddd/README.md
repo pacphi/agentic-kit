@@ -11,6 +11,7 @@ describe the current system unless a section is explicitly marked as future work
 | [Context map](context-map.md) | Bounded contexts, ownership, and relationships |
 | [Integration management](integration-management.md) | Hosts, inference providers, bindings, capabilities, lifecycle, facts, and ownership |
 | [Routing and orchestration](routing-and-orchestration.md) | Activities, routes, leadership, escalation, projections, and canonical `ak run` execution |
+| [Model lifecycle intelligence](model-lifecycle-intelligence.md) | Model identities, evidence dimensions, catalogue snapshots, lifecycle diff, and read-only impact plans |
 | [Observability](observability.md) | Evidence acquisition, observed-session aggregates, replay, and dashboard delivery |
 | [Project intelligence](project-intelligence.md) | Pattern store, learning counters, reasoning-graph size, and live delivery for Overview's Intelligence view |
 
@@ -31,6 +32,10 @@ A change that introduces or changes a domain concept should:
 3. preserve the context's invariants, or add an ADR explaining the change;
 4. add executable coverage for new invariants; and
 5. update operational documentation when user-visible behavior changes.
+
+An Accepted ADR may define a target contract before its implementation exists. Such a domain
+document must label planned commands, collectors, or read models explicitly and must not present
+them as shipped behavior.
 
 The GA model keeps host enablement under `integrations.hosts`, integration ownership under
 `integrations`, and activity intent under top-level `routing`. These persisted locations do not

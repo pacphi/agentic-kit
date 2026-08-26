@@ -634,6 +634,88 @@ async function main() {
     await usageSrv.close();
   }
 
+  // ── /api/models (#110): authenticated, no-store, injected cache-only read ──
+  let modelReads = 0;
+  const modelKey = 'ab'.repeat(32);
+  const modelPayload = {
+    status: 'cached',
+    snapshot: {
+      schemaVersion: 1, snapshotId: 'models:private-snapshot', capturedAt: '2026-08-25T13:00:00.000Z',
+      scope: { fingerprint: 'scope:private-project', hosts: ['codex'], profileFingerprints: { codex: 'scope:private-profile' } },
+      counts: { models: 1, configured: 1, observed: 1, migrations: 0, aliasChanges: 0, staleSources: 0, driftedConsumers: 0 },
+      sources: [{ id: 'private-codex-cache', status: 'complete', complete: true,
+        owner: 'private-owner', ownerType: 'host', transport: 'file', network: 'never', mode: 'local',
+        schema: 'private-schema', capturedAt: '2026-08-25T13:00:00.000Z', scopeFingerprint: 'scope:private-project' }],
+      models: [{
+        key: { host: 'codex', provider: 'private-provider', modelId: 'private-deployment',
+          scopeId: 'scope:private-project', digest: 'private-digest' },
+        displayName: 'Private Deployment', aliases: [{ name: 'private-alias', resolvesTo: 'private-deployment',
+          observedAt: '2026-08-25T13:00:00.000Z', evidenceRefs: ['private-evidence'] }],
+        variant: { digest: 'private-digest', reasoningEffort: 'high' }, visibility: 'visible', capabilities: { tools: true },
+        lifecycle: { state: 'retiring', replacement: 'private-replacement', evidenceRefs: ['private-evidence'] },
+        pricing: { basis: 'private-basis', input: 1, output: 2, currency: 'USD', evidenceRefs: ['private-evidence'] },
+        edges: [{ kind: 'first-party-migration', from: 'private-deployment', to: 'private-replacement',
+          provenance: 'first-party', scopeFingerprint: 'scope:private-project', evidenceRefs: ['private-evidence'] }],
+        dimensions: { configured: { value: true, evidenceRefs: ['private-evidence'] } },
+        evidence: [{ id: 'private-evidence', field: 'catalog', source: 'private-codex-cache', class: 'catalog',
+          capturedAt: '2026-08-25T13:00:00.000Z', freshness: 'fresh', completeness: 'complete',
+          scopeFingerprint: 'scope:private-project', refs: ['private-reference'] }],
+      }],
+      bindings: [{ id: 'private-binding', consumer: 'ruflo:provider:private-provider', activity: 'implementation',
+        host: 'codex', provider: 'private-provider', configured: 'private-deployment', effective: 'private-deployment',
+        provenance: 'configured', consumerState: 'reported', evidenceRefs: ['private-evidence'] }],
+      changes: [{ kind: 'alias-target-changed', subject: 'private-identity',
+        before: { name: 'private-alias', resolvesTo: 'private-old' },
+        after: { name: 'private-alias', resolvesTo: 'private-deployment' }, severity: 'warn', provisional: false,
+        evidenceRefs: ['private-evidence'] }], opportunities: [], diagnostics: ['private diagnostic detail'],
+    },
+    history: [{ snapshotId: 'models:private-snapshot', capturedAt: '2026-08-25T13:00:00.000Z' }],
+    comparison: { baseline: 'models:private-before', latest: 'models:private-snapshot', comparable: true,
+      diagnostics: ['private-comparison-diagnostic'] },
+  };
+  const modelSrv = await startDashboard({
+    port: 0, cwd: fixture, fetchStatus: async () => STUB_STATUS, usage: spyUsage().api,
+    models: async () => { modelReads++; return modelPayload; }, modelScopeKey: modelKey,
+  });
+  try {
+    await test('GET /api/models is authenticated, no-store, and reads only its injected cache provider', async () => {
+      const denied = await get(modelSrv.url + 'api/models');
+      assert(denied.status === 401, 'missing dashboard token must be rejected');
+      assert(modelReads === 0, 'authentication must run before the model provider');
+      const r = await get(modelSrv.url + 'api/models', modelSrv.token);
+      assert(r.status === 200, 'expected 200, got ' + r.status);
+      assert(r.headers['cache-control'] === 'no-store', 'model evidence must never be browser-cached');
+      const body = JSON.parse(r.body);
+      assert(body.snapshot.privacy.projection === 'owner-visible-v2', 'Dashboard projection must identify owner-visible model identity');
+      assert(body.snapshot.models[0].key.modelId === 'private-deployment', 'exact configured model id must be visible to the owner');
+      assert(body.snapshot.models[0].key.provider === 'private-provider', 'exact configured provider must be visible to the owner');
+      assert(/^source-[a-f0-9]{12}$/.test(body.snapshot.models[0].evidence[0].source), 'evidence source must be pseudonymous');
+      for (const secret of ['private-alias', 'private-binding', 'private-evidence', 'private-reference', 'private-digest',
+        'private-basis', 'private-owner', 'private-schema', 'private-snapshot', 'private-project',
+        'private-profile', 'private diagnostic detail']) {
+        assert(!r.body.includes(secret), 'Dashboard model payload leaked ' + secret);
+      }
+      assert(modelReads === 1, 'the provider is called exactly once for the explicit route');
+    });
+  } finally {
+    await modelSrv.close();
+  }
+
+  const noModelKeySrv = await startDashboard({
+    port: 0, cwd: fixture, fetchStatus: async () => STUB_STATUS, usage: spyUsage().api,
+    models: modelPayload, modelScopeKey: null,
+  });
+  try {
+    await test('GET /api/models fails closed without creating or exposing a privacy key', async () => {
+      const r = await get(noModelKeySrv.url + 'api/models', noModelKeySrv.token);
+      assert(r.status === 503, 'missing existing privacy key must return 503');
+      assert(r.body === '{"error":"model dashboard privacy key unavailable"}', 'failure must be generic');
+      assert(!r.body.includes('private-'), 'failure must not echo model evidence');
+    });
+  } finally {
+    await noModelKeySrv.close();
+  }
+
   // ── /api/limits (ADR-0010): injected provider, insights computed server-side ──
   const limitsSrv = await startDashboard({
     port: 0, cwd: fixture, fetchStatus: async () => STUB_STATUS, usage: spyUsage().api,
@@ -1018,18 +1100,41 @@ async function main() {
     await srv3.close();
   }
 
-  // ── the served page: three primary areas, hierarchical views, poll control ──
+  // ── the served page: five primary areas, hierarchical views, poll control ──
   const uiSrv = await startDashboard({ port: 0, cwd: fixture, fetchStatus: async () => STUB_STATUS, usage: spyUsage().api });
   try {
-    await test('served HTML carries the Usage primary area and its five sub-views', async () => {
+    await test('served HTML carries the Usage primary area and its six accessible sub-views', async () => {
       const r = await get(uiSrv.url);
       contains(r.body, 'data-tab="usage"');
       contains(r.body, '>Usage<');
       contains(r.body, 'id="panel-usage"');
-      for (const v of ['score', 'limits', 'findings', 'sessions', 'transcript']) {
+      for (const v of ['score', 'limits', 'findings', 'sessions', 'models', 'transcript']) {
         contains(r.body, 'id="v-' + v + '"');
         contains(r.body, 'data-view="' + v + '"');
+        contains(r.body, 'aria-controls="v-' + v + '"');
+        contains(r.body, 'aria-labelledby="usage-tab-' + v + '"');
       }
+      contains(r.body, 'id="mli-models"');
+      contains(r.body, 'mli-history-scroll');
+      contains(r.body, 'mli-history-table');
+      contains(r.body, 'mli-consumer-scroll');
+      contains(r.body, '</details>\n      <div class="two">');
+      assert(!r.body.includes('id="mli-sources"'), 'removed source-coverage panel must not ship unused UI');
+      contains(r.body, 'function renderModelLifecycle');
+      contains(r.body, 'modelJson("/api/models?view=summary&days="+usageDays)');
+      contains(r.body, 'view:"inventory"');
+      contains(r.body, 'limit:String(MODEL_LIMIT)');
+      for (const id of ['mli-filters', 'mli-search', 'mli-host', 'mli-provider',
+        'mli-relevance', 'mli-lifecycle', 'mli-evidence-field', 'mli-evidence-value',
+        'mli-result-count', 'mli-reset', 'mli-load-more']) contains(r.body, 'id="' + id + '"');
+      for (const field of ['host', 'configured', 'observed', 'discoverable', 'lifecycle']) {
+        contains(r.body, 'data-mli-sort="' + field + '"');
+      }
+      for (const field of ['model', 'provider', 'used', 'lastUsed', 'rate']) {
+        contains(r.body, 'data-mli-route-sort="' + field + '"');
+      }
+      contains(r.body, 'aria-sort="ascending"');
+      contains(r.body, 'unknown values sort last');
       contains(r.body, 'id="u-openrouter"');
       contains(r.body, 'id="u-source-health"');
       contains(r.body, 'function renderSourceHealth');
@@ -1841,7 +1946,7 @@ async function main() {
   // is the suite where it matters most — the traversal-guard and credential-
   // leak tests live here and were the reviewer's cited example of a block
   // that could silently vanish with the old harness never noticing.
-  const EXPECTED = 73;
+  const EXPECTED = 75;
   if (passed + failed !== EXPECTED) {
     console.error(`\nPLAN MISMATCH: expected ${EXPECTED} tests, ran ${passed + failed}`);
     process.exit(1);

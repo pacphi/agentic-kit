@@ -27,8 +27,10 @@ Host -------- ProviderBinding -------- InferenceProvider
   +-- host capabilities
 ```
 
-The four adapter registries are closed, validated, built-in code. A provider binding is persisted
-relationship data, not a fifth executable adapter family.
+The four built-in adapter registries are validated code. ADR-0029 additionally admits an
+experimental, hash-consented, subprocess-only external host overlay; it does not turn provider,
+projection, or observability descriptors into arbitrary in-process plugins. A provider binding is
+persisted relationship data, not a fifth executable adapter family.
 
 ### Host
 
@@ -64,6 +66,10 @@ protocols, and non-loopback plaintext HTTP.
 - Adding OpenRouter does not make it a host.
 - Provider claims are rendered only when the provider declares and evidence supports them.
 - Compatibility collections are derived from registries.
+- A model-discovery descriptor grants no executable behavior by itself. Under ADR-0032, the bounded
+  Model lifecycle collector selects model-discovery descriptors and dispatches only to explicit
+  built-in source adapters. External hosts without a supported catalogue descriptor remain
+  `unsupported`.
 
 ## Integration facts
 
@@ -87,6 +93,17 @@ provider-specific evidence, such as response metadata or a bounded local runtime
 Billing follows the access path. Anthropic or OpenAI host login may be subscription-backed, while
 their API keys are metered. Ollama is local and may be priced at exact zero only after provider
 identity is established.
+
+## Model catalogue evidence
+
+ADR-0032 implements a narrow, read-only use of integration model-discovery descriptors. Catalogue
+descriptors identify source ownership, evidence fields, local/online mode, and host/provider scope.
+They remain declarative. The Model lifecycle bounded context owns collector dispatch, native-schema
+translation, completeness, freshness, and snapshot policy.
+
+This reader does not widen the managed projection lifecycle: catalogue refresh never calls
+`apply`, never invokes a model, and never changes a binding. Online discovery is separately
+authorized by `ak models refresh --online`; normal status and Dashboard reads remain cache-only.
 
 ## Managed projection lifecycle
 
@@ -151,3 +168,6 @@ envelopes and never reads the retired paths.
 8. Undo cannot overwrite drift.
 9. Existing and future configuration survives additive migration.
 10. Status, setup, sync, verify, and uninstall consume the same normalized model.
+11. Catalogue descriptor identity alone executes nothing and proves neither entitlement nor
+    routability.
+12. Model lifecycle collection cannot mutate integration intent or native projections.

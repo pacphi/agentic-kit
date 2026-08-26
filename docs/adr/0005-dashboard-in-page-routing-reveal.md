@@ -2,9 +2,12 @@
 
 - **Status:** Implemented
 - **Date:** 2026-07-23
-- **Updated:** 2026-08-04
-- **Update note:** Kept the read-only routing reveal and canonical GA configuration while
-  consolidating the dashboard into three primary areas with one shared secondary navigation rail.
+- **Updated:** 2026-08-25
+- **Update note:** Reconciled the implemented five-area shell introduced by ADR-0025 and ADR-0026.
+  ADR-0032 adds Models as a secondary Usage destination and a compact Overview summary while
+  preserving read-only, network-silent ordinary Dashboard reads. Model identifiers use a fail-closed
+  keyed Dashboard projection, and the semantic table has a labelled focusable scroll region plus
+  field-evidence disclosures. ADR-0032 release proof remains pending.
 - **Deciders:** agentic-kit maintainers
 
 > **GA amendment:** the read-only dashboard decision remains. References below to compatibility
@@ -18,18 +21,22 @@ At the time of this decision, `ak dashboard` was a single-page, poll-every-5s,
 grid grouped by subsystem, a `#history` strip — all fed by shelling `ak status --json`
 (`src/lib/dashboard-server.mjs`). It is health/status oriented.
 
-> **Current implementation note (2026-08-04):** the read-only and loopback boundaries remain. The
-> page now has three primary areas—Overview, Usage, and Observability—and one fixed, left-aligned
+> **Current implementation note (2026-08-25):** the read-only and loopback boundaries remain. The
+> page now has five primary areas—About, Overview, Usage, Observability, and System—and one fixed,
+> left-aligned
 > secondary rail. It also has user-configurable status polling, lazy Usage reads, and an SSE-driven
 > Observability view. Page, styles, browser client, Observability, and request/session security live
 > under `src/lib/dashboard/`; `dashboard-server.mjs` is the HTTP composition root.
 
-**2026-08-04 information-architecture amendment:** Overview absorbs the former health-oriented
+**2026-08-25 information-architecture amendment:** About supplies the component directory and
+System supplies machine-footprint views under ADR-0026 and ADR-0025. Overview absorbs the former
+health-oriented
 peer tabs as **Summary**, **Hosts & Routing**, **Providers**, **Runtime**, and **Intelligence**.
 Usage owns **Scorecard**, **Limits**, **Findings**, **Sessions**, and **Transcript**. Observability
-owns **Live** and **History**. The secondary row remains in one stable location across all three
-areas. Canonical hashes are `#overview/{view}`, `#usage/{view-or-session-id}`, and
-`#observability/{live,history}`. Every destination has a visible heading and description. Primary
+owns **Live** and **History**. System and About retain the secondary destinations documented by
+their governing ADRs. The secondary row remains in one stable location across all five areas.
+Canonical hashes are rooted at `#about`, `#overview`, `#usage`, `#observability`, and `#system`.
+Every destination has a visible heading and description. Primary
 and secondary tab lists use roving focus: Left/Right activates the adjacent tab with wrapping, and
 Home/End activates the first/last tab.
 
@@ -55,7 +62,7 @@ Surface routing via **in-page reveal**, not a new page or tab:
 
 - Preserves the single-page, health-first idiom; routing is an enhancement reached by an intuitive in-page
   link, not a replacement.
-- Presents only three stable primary choices while keeping Overview's status domains one keyboard
+- Preserves five stable primary choices while keeping Overview's status domains one keyboard
   action away in the shared secondary rail.
 - Provides durable, hierarchical deep-link vocabulary without adding routes, servers, or a second
   navigation component per area.
@@ -67,7 +74,7 @@ Surface routing via **in-page reveal**, not a new page or tab:
 ## References
 
 - `src/lib/dashboard-server.mjs` (`renderPage`, `#cards`, `#history`/`renderHistory`, `PREF`, `shellOutStatus`)
-- `src/lib/dashboard/page.mjs` and `src/lib/dashboard/client.mjs` (three-area shell, shared secondary
+- `src/lib/dashboard/page.mjs` and `src/lib/dashboard/client.mjs` (five-area shell, shared secondary
   rail, canonical hashes, headings, and keyboard semantics)
 - [Dashboard user guide](../DASHBOARD.md)
 - Mockup: ak dashboard — Routing panel; ADR-0001, ADR-0003

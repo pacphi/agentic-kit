@@ -81,6 +81,38 @@ export function validateObservabilityAdapter(value) {
   return immutable(structuredClone(value));
 }
 
+export function validateModelDiscoveryAdapter(value) {
+  assertRecord(value, 'modelDiscovery');
+  const allowed = new Set(['id', 'ownerType', 'ownerId', 'transport', 'command', 'endpoint', 'network', 'schema', 'scope']);
+  for (const key of Object.keys(value)) {
+    if (!allowed.has(key)) throw new TypeError(`modelDiscovery has unknown field ${key}`);
+  }
+  assertId(value.id, 'modelDiscovery.id');
+  assertEnum(value.ownerType, ['host', 'provider'], 'modelDiscovery.ownerType');
+  assertId(value.ownerId, 'modelDiscovery.ownerId');
+  assertEnum(value.transport, ['file', 'command', 'http'], 'modelDiscovery.transport');
+  assertEnum(value.network, ['never', 'local', 'explicit'], 'modelDiscovery.network');
+  assertEnum(value.scope ?? 'profile', ['profile', 'project', 'local'], 'modelDiscovery.scope');
+  if (typeof value.schema !== 'string' || !value.schema) throw new TypeError('modelDiscovery.schema is required');
+  if (value.transport === 'command') {
+    if (typeof value.command !== 'string' || !/^[A-Za-z0-9._-]+$/.test(value.command)) {
+      throw new TypeError('modelDiscovery.command must be an executable name');
+    }
+  } else if (value.command !== undefined) {
+    throw new TypeError('non-command modelDiscovery cannot declare command');
+  }
+  if (value.transport === 'http') {
+    let endpoint;
+    try { endpoint = new URL(value.endpoint); } catch { throw new TypeError('HTTP modelDiscovery.endpoint must be a URL'); }
+    if (endpoint.protocol !== 'http:' || !['127.0.0.1', 'localhost', '[::1]'].includes(endpoint.hostname)) {
+      throw new TypeError('HTTP modelDiscovery.endpoint must be loopback HTTP');
+    }
+  } else if (value.endpoint !== undefined) {
+    throw new TypeError('non-HTTP modelDiscovery cannot declare endpoint');
+  }
+  return immutable(structuredClone(value));
+}
+
 export function validateHostAdapter(value, {
   projections, observability,
 } = /** @type {any} */ ({})) {
@@ -151,6 +183,13 @@ const OBSERVABILITY_MAP = registryFrom([
   { id: 'ollama-runtime', kind: 'runtime', evidence: ['provider', 'endpoint'] },
   { id: 'openrouter-metadata', kind: 'usage', evidence: ['provider', 'model', 'billing'] },
 ], validateObservabilityAdapter, 'observability');
+
+const MODEL_DISCOVERY_MAP = registryFrom([
+  { id: 'claude-config', ownerType: 'host', ownerId: 'claude', transport: 'file', network: 'never', scope: 'profile', schema: 'claude-settings-v1' },
+  { id: 'codex-cache', ownerType: 'host', ownerId: 'codex', transport: 'file', network: 'never', scope: 'profile', schema: 'codex-model-cache-v1' },
+  { id: 'opencode-models', ownerType: 'host', ownerId: 'opencode', transport: 'command', command: 'opencode', network: 'explicit', scope: 'project', schema: 'opencode-models-lines-v1' },
+  { id: 'ollama-catalog', ownerType: 'provider', ownerId: 'ollama', transport: 'http', endpoint: 'http://127.0.0.1:11434', network: 'local', scope: 'local', schema: 'ollama-api-v1' },
+], validateModelDiscoveryAdapter, 'model discovery');
 
 const hostEntries = [
   {
@@ -332,6 +371,7 @@ export const PROJECTION_REGISTRY = immutable(Object.values(PROJECTION_MAP));
 // are cross-checked against this set) — deliberately NOT a dispatch surface;
 // no collector loop maps an observability id to a live collector (F-12).
 export const OBSERVABILITY_REGISTRY = immutable(Object.values(OBSERVABILITY_MAP));
+export const MODEL_DISCOVERY_REGISTRY = immutable(Object.values(MODEL_DISCOVERY_MAP));
 export const HOST_REGISTRY = immutable(Object.values(HOST_MAP));
 export const PROVIDER_REGISTRY = immutable(Object.values(PROVIDER_MAP));
 
@@ -346,6 +386,7 @@ const registryErrors = validateRegistries({
   providers: Object.values(PROVIDER_MAP),
   projections: Object.values(PROJECTION_MAP),
   observability: Object.values(OBSERVABILITY_MAP),
+  modelDiscovery: Object.values(MODEL_DISCOVERY_MAP),
 });
 if (registryErrors.length) {
   throw new Error(`adapter registries invalid: ${registryErrors.map((e) => `${e.path} (${e.code})`).join('; ')}`);
@@ -406,7 +447,7 @@ export function validateActivityHost(id, hosts = HOST_REGISTRY) {
 
 export function validateRegistries(registries) {
   const errors = [];
-  const axes = ['hosts', 'providers', 'projections', 'observability'];
+  const axes = ['hosts', 'providers', 'projections', 'observability', 'modelDiscovery'];
   for (const axis of axes) {
     const seen = new Set();
     for (const [index, entry] of (registries?.[axis] ?? []).entries()) {
@@ -450,6 +491,14 @@ export function validateRegistries(registries) {
         path: `providers[${index}].credentials.names[${nameIndex}]`, code: 'invalid-env-name', value: name,
       });
     }
+  }
+  const hosts = new Set((registries?.hosts ?? []).map((entry) => entry.id));
+  const providers = new Set((registries?.providers ?? []).map((entry) => entry.id));
+  for (const [index, descriptor] of (registries?.modelDiscovery ?? []).entries()) {
+    const owners = descriptor.ownerType === 'host' ? hosts : providers;
+    if (!owners.has(descriptor.ownerId)) errors.push({
+      path: `modelDiscovery[${index}].ownerId`, code: `unknown-${descriptor.ownerType}`, value: descriptor.ownerId,
+    });
   }
   return errors;
 }

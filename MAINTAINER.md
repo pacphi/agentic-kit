@@ -66,6 +66,7 @@ src/
     admin-view.mjs       # admin browser controller (embedded into the page; not node-imported)
     browser.mjs          # openInBrowser — shared by dashboard + admin
     usage-index.mjs      # canonical usage aggregation by host, provider, model, project, and category
+    model-inventory/     # model evidence contracts, source adapters, snapshots, diffs, impact, read models
     npx.mjs              # stale npx-cache detection/prune
     mcp.mjs  settings.mjs  config.mjs  paths.mjs  statusline.mjs
     rvf.mjs  daemons.mjs  exec.mjs  output.mjs
@@ -78,6 +79,7 @@ tests/
 docs/
   HOST-SUPPORT.md        # canonical host/Ruflo/AQE/Brain compatibility matrix (shipped)
   INSTALLATION.md        # package scope versus machine/user/project effects (shipped)
+  MODELS.md              # model lifecycle inventory and read-only planning guide (shipped)
   PROVIDERS.md           # provider and routing guide (shipped)
   SETUP.md               # setup mutation contract (shipped)
   TROUBLESHOOTING.md     # symptom-to-fix runbook (shipped)
@@ -90,9 +92,11 @@ docs/
 
 **Published tarball** = the `files` whitelist in `package.json`:
 `bin/agentic-kit.mjs`, `src/`, `claude/`, `docs/HOST-SUPPORT.md`,
-`docs/INSTALLATION.md`, `docs/PROVIDERS.md`, `docs/SETUP.md`,
-`docs/TROUBLESHOOTING.md`, `docs/UPGRADING.md`, `docs/CODEX-STATUSLINE.md`, and
-`docs/adr/0015-managed-codex-native-statusline.md`. Generated workspace state under
+`docs/INSTALLATION.md`, `docs/MODELS.md`, `docs/PROVIDERS.md`, `docs/SETUP.md`,
+`docs/TROUBLESHOOTING.md`, `docs/UPGRADING.md`, `docs/CODEX-STATUSLINE.md`,
+`docs/adr/0015-managed-codex-native-statusline.md`,
+`docs/adr/0032-model-lifecycle-intelligence.md`, and
+`docs/ddd/model-lifecycle-intelligence.md`. Generated workspace state under
 the shipped source trees is explicitly excluded. Nothing else ships — verify with
 `npm pack --dry-run` before a release if you touch `files`.
 

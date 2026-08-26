@@ -240,6 +240,16 @@ carry — `prompts`, `responses`, `exceptions`, `sidechain`, `threadSource`,
 `models`, `tools`, `skill`/`plugin`, worktree — plus a `cost` priced from the
 same per-model usage rows `aggregate()` uses.
 
+Model lifecycle intelligence reuses only the aggregate session's execution host, independently
+evidenced inference provider, and bounded model ids. It does not copy session ids, titles, prompts,
+turns, tools, paths, or transcript text into the model snapshot. Observed use proves only that
+the exact path was observed, entitled, policy-allowed, and routable at capture time; it does not
+make the host catalogue complete, prove another path, or claim quality equivalence. When catalogue
+discovery for that exact path is unknown, a mechanical plan may proceed only with an explicit
+catalogue-unknown warning.
+Public catalogue enrichment flows in the opposite direction only into the lifecycle read model: it
+never renames a retained session model, changes historical token pricing, or rewrites a transcript.
+
 ### 4.3 Mask, then truncate — both marked, differently
 
 Every turn body is passed through `maskSecrets` (`usage-index.mjs:208` — the

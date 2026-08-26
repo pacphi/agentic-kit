@@ -38,6 +38,21 @@ read only that cache. Because the management response has no local host/session/
 correlation key, its rows appear only as provider account analytics and never alter transcript
 totals or prove which host executed a request.
 
+**Model lifecycle evidence is separate from both.** `ak models refresh` inventories host-scoped
+configuration, catalogues, and sanitized observed model ids. `ak models status|diff|explain|plan`
+are cache-only. Discovery does not prove quality or mutate provider/routing configuration, and
+`refresh --online` is the only permitted online-catalogue boundary. See [Model lifecycle
+intelligence](MODELS.md).
+
+Claude refresh includes a network-silent, dated Anthropic public record. It proves Anthropic's
+published model facts, not that OpenRouter or another serving provider vends that model to this
+account. OpenRouter routability still requires an exact OpenRouter/OpenCode selector plus local
+configuration, authentication, policy, and successful-use evidence for that path.
+
+The model inventory may feed mechanically eligible candidates and stale-evidence markers to Route
+Intelligence, but it explicitly makes no quality or economic claim. Status can recommend an
+explicit model command; `ak sync` never executes model refresh or model-plan actions.
+
 This capability model is
 [ADR-0016](adr/0016-capability-driven-integration-adapters.md) (Accepted); the controls below
 implement it. `ak host` owns execution-host lifecycle and selection (`status`, `pick`, `refresh`,
@@ -386,12 +401,11 @@ Defaults (all overridable; your edits are marked `custom` and never re-seeded):
 
 *(packaging & release are `ak`-added — ruflo ships templates for feature/security/refactor only.)*
 
-**Retired codex models.** `gpt-5.4` and `gpt-5.4-mini` retire from Codex on **2026-08-31**, and
-`gpt-5.3-codex` is already withdrawn for ChatGPT sign-in
-([Codex models](https://developers.openai.com/codex/models)) — which is why the execution defaults
-above moved to the 5.6 line. `ak` substitutes a retired model at read time, so no run dispatches to
-one even if your `kit.json` still names it, and `ak sync` rewrites `seeded` routes that do. A `user`
-pin is reported but never rewritten on disk (see
+**Retired Codex models.** `ak` has no automatic Codex retirement substitutions as of 2026-08-25.
+The current [OpenAI API model catalog](https://developers.openai.com/api/docs/models/all) still lists
+GPT-5.4 and GPT-5.4 mini, and no first-party withdrawal notice supports the former automatic
+replacement claims. `ak` only adds a retirement rule when it can cite the host's direct notice; a
+newer default remains a recommendation, not a route rewrite (see
 [ADR-0003](adr/0003-auto-seed-dual-host-provenance.md)).
 
 `claude-opus-4-8` is **not** retired — it carries no deprecation notice and stays pinnable. It is

@@ -41,6 +41,7 @@ permanent.
 | Usage | Limits | `#usage/limits` | Provider limits | Current provider windows, reset timing, and available capacity |
 | Usage | Findings | `#usage/findings` | Usage findings | Actionable anomalies, efficiency opportunities, and evidence-backed recommendations |
 | Usage | Sessions | `#usage/sessions` | Session usage | Retained sessions grouped by project, category, duration, tokens, and cost |
+| Usage | Models | `#usage/models` | Model lifecycle | Host inventory, lifecycle changes, consumers, swap impact, and evidence sources |
 | Usage | Transcript | `#usage/transcript` | Transcript detail | The selected session's locally retained, server-masked evidence |
 | Observability | Live | `#observability/live` | Observability · Live | Projects and roots with current presence or fresh meaningful activity |
 | Observability | History | `#observability/history` | Observability · History | Retained roots that are not currently Live |
@@ -157,7 +158,7 @@ Each count carries the sentence explaining what it counted; on Intelligence it i
 
 ## Usage
 
-Usage loads lazily when first opened. Scorecard, Limits, Findings, Sessions, and Transcript share the
+Usage loads lazily when first opened. Scorecard, Limits, Findings, Sessions, Models, and Transcript share the
 same secondary rail; the 7/14/30-day filters remain aligned to its right.
 
 ### Reading a session row
@@ -189,6 +190,61 @@ Usage transcript masking happens on the server. Redaction is marked, there is no
 control, and the original masked value never reaches the browser. See
 [ADR-0009](adr/0009-usage-scorecard-local-transcript-analytics.md) for the full evidence and pricing
 contract.
+
+### Models
+
+Models is a cache-only lifecycle evidence view backed by `/api/models`. It never performs discovery
+or invokes a model; `ak models refresh` owns collection. The first panels answer two different
+questions: **Observed in this window** aggregates actual retained transcript evidence for the same
+7/14/30-day selector used by Usage, while **Your routes** names configured primary and fallback
+models and joins their actual last-use timestamp when one exists in that window. GPT, Claude,
+OpenCode, or local models therefore do not disappear merely because they are not pinned to a route.
+The collapsed catalogue separately answers what is installed or discoverable; catalogue presence
+does not claim use.
+
+Claude refresh also reads a dated first-party record bundled with Agentic Kit from Anthropic's
+public model overview and deprecation tables. It can establish published model identity,
+specifications, lifecycle, and pricing without an API key. It cannot establish access for a Claude
+Code plan, Anthropic API account, Bedrock/Vertex deployment, or OpenRouter route. Upgrade Agentic Kit
+to receive a newer public record, then run `ak models refresh --host claude`.
+
+The view fetches a compact, windowed summary first, then a 50-row relevant inventory page. Search
+and facet-counted filters for host, model provider, relevance, lifecycle, and evidence request fresh
+bounded pages; controls with fewer than two meaningful choices are suppressed. **Load 50 more**
+appends the next page. Every meaningful column header is a keyboard-operable sort button
+that toggles ascending and descending order, exposes `aria-sort`, and leaves unknown values last.
+Later pages carry the privacy-projected snapshot id; if refresh replaces the snapshot, the browser
+reloads page one instead of mixing two inventories. A failed later page preserves the rows already
+shown and leaves a focused retry control.
+
+The inventory region is height-bounded and scrolls internally in both axes. Change history is also a
+bounded, internally scrollable table; it names the exact model, provider, host, plain-language change,
+evidence status, and detection time instead of exposing an opaque identity join. The route-consumer
+panel remains bounded beside it. These lifecycle panels are structurally owned by Usage → Models and
+are never rendered in Scorecard, Limits, Findings, Sessions, or Transcript.
+Its header stays sticky. The region is labelled and keyboard-focusable, with a caption, column
+scopes, `aria-busy` loading state, result and load
+announcements, visible focus, and an explicit load control in addition to lazy fetching.
+
+Source-proven public catalogue records show readable names and trusted source links while private
+deployments remain keyed pseudonyms. OpenCode rows need an exact Models.dev join from explicit
+online refresh; selector syntax or verbose metadata alone never makes a row public. Host, serving
+provider, publisher, model selector, catalogue source, and entitlement remain independent. Each
+state and lifecycle value expands to its source,
+class, capture time, freshness, completeness, scope, or a field-specific explanation of missing
+evidence. The discovery column is labelled **Catalogued**; details separately state account access,
+local routability, and the next step. To establish routability, configure the exact host/provider/
+model path, authenticate the serving provider, complete one successful invocation, and refresh.
+Model-specific foreground/background pairs meet WCAG AA in both themes, and the same table
+remains operable at narrow widths.
+
+The Overview Model lifecycle summary links to `#usage/models`. The view has no mutation control.
+It points to the read-only `ak models plan` command, which can emit a copyable canonical
+`ak host pick` action but cannot execute it. See [Model lifecycle intelligence](MODELS.md).
+
+The lifecycle payload is separate from the Usage session/transcript and Observability live/history
+payloads. Public catalogue enrichment cannot rename, re-price, add, or remove a retained session or
+transcript model record.
 
 The Scorecard view also shows a host-neutral **telemetry coverage** panel for Claude, Codex
 transcript evidence, and OpenCode. It reports parsed units and observed prompt/response totals, plus
@@ -339,11 +395,21 @@ Canonical hashes make views linkable without putting the dashboard token in the 
 string.
 
 The launch token initially arrives in the URL fragment and is then stored locally for authenticated
-API requests. The dashboard remains localhost-only and offline-first. Usage, Observability, and
+API requests. The dashboard remains localhost-only and offline-first. Usage, Models, Observability, and
 System may show sensitive local project, transcript, or filesystem-path information; use them only
 where that local information may be viewed. System deliberately shows absolute paths — a storage
 breakdown that hides where the bytes live answers nothing — behind the same token-gated loopback
 delivery as every other route.
+
+Models adds a second privacy boundary. The explicit local CLI can show exact model evidence, while
+`/api/models` requires the already-existing private model scope key and returns
+`privacy.projection: owner-visible-v2`. The loopback, token-gated operator view shows bounded exact
+model names, selectors, and recorded providers; source-proven catalogue identity may additionally
+show a publisher and allowlisted HTTPS links. Credentials, endpoints, scopes, digests, aliases,
+binding/evidence/history identifiers, and arbitrary configuration remain keyed pseudonyms. Filtering
+and sorting run only after that projection. Controlled built-in source metadata and diagnostic codes
+remain named; unknown source metadata is pseudonymized. Missing key material returns a generic 503,
+and opening the Dashboard never creates the key.
 
 What System reads is a short, fixed list: directory entries and file `stat` results; your
 `.git/config` origin remote (so a project can link to its repository page — the kit never fetches

@@ -60,6 +60,34 @@ missing price.
 `Dual-host` describes two enabled peer hosts, not an execution command and not evidence that two
 inference vendors served a workflow. Generalized execution belongs to `ak run`.
 
+## Model lifecycle language
+
+These terms define ADR-0032's implemented contract. ADR status remains Accepted while exact-head
+release proof is pending.
+
+| Term | Meaning |
+|------|---------|
+| Model identity | Host-, provider-, model-id-, and scope-qualified inference target, plus a digest when local bytes are mutable and evidenced |
+| Model scope | Non-identifying account/profile/project/source boundary within which catalogue snapshots are comparable |
+| Execution variant | Binding- or execution-level reasoning effort, service tier, modality, or similar setting; not a separate base model identity |
+| Model binding | One consumer's configured reference and, when established, effective concrete model identity with provenance |
+| Catalog source | Host/provider-native configuration, cache, protocol, or catalogue input with owner, transport, network policy, collection mode, schema/version, scope, freshness, completeness, and diagnostics |
+| Catalog snapshot | Sanitized immutable inventory of source states, model records, bindings, scope, and diagnostics at one capture time |
+| Baseline-eligible snapshot | Sufficiently complete same-scope snapshot permitted to replace the prior lifecycle comparison baseline |
+| Model change | Evidence-backed difference between comparable snapshots; removal needs authoritative evidence or repeated complete absence |
+| Lifecycle edge | Typed alias resolution, first-party migration, or same-family-newer relationship with provenance and scope |
+| Compatibility edge | Typed mechanical swap relationship; it is not a quality or economic recommendation |
+| Consumer impact | Read-only link from a lifecycle fact to affected routes, projections, Agentic QE/Ruflo consumers, or Route Intelligence evidence |
+| Swap plan | Read-only impact report and copyable canonical route action; never an independent routing policy or apply operation |
+| Route Intelligence feed | Mechanical candidates plus audit-preserving lifecycle invalidations; quality and economics claims are explicitly absent |
+| Public catalogue identity | Human-readable model name, publisher, public selector, and trusted links retained only when bounded source evidence establishes that the identity is public |
+| Private model reference | Deployment, gateway, local tag, observed-only id, or other model identity without public-catalogue proof; the Dashboard exposes only its keyed projection |
+| Keyed model projection | Dashboard-only stable pseudonyms derived from the existing private scope key; distinct from exact explicit CLI evidence and source-proven public catalogue identity |
+
+Configured, effective, observed, discoverable, entitled, policy allowed, routable, lifecycle, and
+recommended are separate model-state dimensions. `Unknown` in one dimension cannot be filled from
+another. A first-party migration is a supported lifecycle edge, not proof of equivalence.
+
 ## Project intelligence language
 
 | Term | Meaning |
@@ -148,6 +176,15 @@ runtime state is a chip word, never a prose word. See
 - Qualify **projection** as configuration projection or read-model projection when ambiguity is
   possible.
 - Qualify **adapter** as integration adapter or source adapter when ambiguity is possible.
+- Say **catalogue source** for model discovery evidence and **catalog snapshot** for the normalized,
+  sanitized local record; neither is canonical routing policy.
+- Keep **execution host**, **serving provider**, **publisher**, and **public model selector** separate;
+  none can be inferred from another or from a human-readable model name.
+- Say **public catalogue identity** only when a bounded source proves it. Say **private model
+  reference** when public identity is absent or ambiguous; do not expose its exact value in the
+  Dashboard.
+- Say **compatible candidate** only when required mechanical facts are established. Reserve
+  **cheaper equivalent** and **premium justified** for Route Intelligence evidence.
 - Do not infer an inference provider from a transcript host alone.
 - Do not replace an unknown fact with a convenient default.
 - Say **System** for the dashboard area and the command; say **Machine footprint** only for the
@@ -161,6 +198,8 @@ runtime state is a chip word, never a prose word. See
   providers.
 - `ak system [--deep] [--json]` renders the Machine footprint collector; `ak about [--category]
   [--json]` renders the Component directory. Both are read-only twins of a dashboard area.
+- `ak models` is the read-only model inventory, refresh, diff, explain, and plan family. Route
+  mutation remains `ak host pick`; there is no accepted `ak models apply`.
 - `kit.json.integrations.hosts` records enabled hosts. Top-level `routing` records `version`,
   `primaryHost`, and per-activity `routes`; route entries use `provenance` and `escalation`.
 - Derived exports in `hosts.mjs`, `providers.mjs`, and `routing.mjs` are views, not independent

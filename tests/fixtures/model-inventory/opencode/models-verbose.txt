@@ -1,0 +1,123 @@
+openrouter/~anthropic/claude-sonnet-latest
+{
+  "id": "~anthropic/claude-sonnet-latest",
+  "providerID": "openrouter",
+  "name": "Anthropic Claude Sonnet Latest",
+  "family": "claude-sonnet",
+  "api": {
+    "id": "~anthropic/claude-sonnet-latest",
+    "url": "https://private-gateway.example/v1",
+    "npm": "@openrouter/ai-sdk-provider"
+  },
+  "status": "active",
+  "headers": {
+    "Authorization": "Bearer must-not-persist"
+  },
+  "options": {
+    "secret": "must-not-persist"
+  },
+  "cost": {
+    "input": 2,
+    "output": 10,
+    "cache": {
+      "read": 0.2,
+      "write": 2.5
+    }
+  },
+  "limit": {
+    "context": 1000000,
+    "output": 128000
+  },
+  "capabilities": {
+    "temperature": false,
+    "reasoning": true,
+    "attachment": true,
+    "toolcall": true,
+    "input": {
+      "text": true,
+      "audio": false,
+      "image": true,
+      "video": false,
+      "pdf": true
+    },
+    "output": {
+      "text": true,
+      "audio": false,
+      "image": false,
+      "video": false,
+      "pdf": false
+    },
+    "interleaved": false
+  },
+  "release_date": "2026-04-27",
+  "variants": {
+    "low": {
+      "reasoning": {
+        "effort": "low"
+      }
+    },
+    "high": {
+      "reasoning": {
+        "effort": "high"
+      }
+    }
+  }
+}
+openrouter/z-ai/glm-5
+{
+  "id": "z-ai/glm-5",
+  "providerID": "openrouter",
+  "name": "GLM-5",
+  "family": "glm",
+  "status": "active",
+  "cost": {
+    "input": 0.6,
+    "output": 1.92
+  },
+  "limit": {
+    "context": 204800,
+    "output": 128000
+  },
+  "capabilities": {
+    "temperature": true,
+    "reasoning": true,
+    "attachment": false,
+    "toolcall": true,
+    "input": {
+      "text": true,
+      "audio": false,
+      "image": false,
+      "video": false,
+      "pdf": false
+    },
+    "output": {
+      "text": true,
+      "audio": false,
+      "image": false,
+      "video": false,
+      "pdf": false
+    },
+    "interleaved": {
+      "field": "reasoning_content"
+    }
+  },
+  "release_date": "2026-02-12",
+  "variants": {}
+}
+private-gateway/deployment-42
+{
+  "id": "deployment-42",
+  "providerID": "private-gateway",
+  "name": "Internal Finance Assistant",
+  "family": "private-family",
+  "status": "active",
+  "api": {
+    "url": "https://internal.example/v1"
+  },
+  "headers": {
+    "X-Internal-Key": "never-persist-this"
+  },
+  "options": {
+    "tenant": "private-tenant"
+  }
+}

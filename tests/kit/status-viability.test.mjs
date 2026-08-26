@@ -24,6 +24,7 @@ const HOME = sandboxHome('ak-viability');
 const paths = await import('../../src/lib/paths.mjs');
 const status = await import('../../src/commands/status.mjs');
 const sync = await import('../../src/commands/sync.mjs');
+const { appendModelSnapshot } = await import('../../src/lib/model-inventory/store.mjs');
 const { AQE_PROVIDER_CREDENTIALS, aqeProviderCredential, credentialGaps } = await import('../../src/lib/providers.mjs');
 const { DEFAULT_ROUTES, ACTIVITIES, seedActivityRoutes, divergedRoutes } = await import('../../src/lib/routing.mjs');
 assertSandboxed(paths, HOME);
@@ -280,6 +281,28 @@ test('ak sync never plans a routing refresh for a diverged policy', async () => 
   const planned = out.split('\n').filter((l) => l.trim().startsWith('•'));
   assert.ok(!planned.some((l) => /refresh|diverge/i.test(l)),
     `sync must not plan a refresh, got: ${planned.join(' | ')}`);
+});
+
+test('model refresh and diff hints remain advisory and never enter syncs executable plan', async () => {
+  seedHome(routeConfig());
+  appendModelSnapshot({
+    schemaVersion: 1, snapshotId: 'models-stale', capturedAt: '2026-08-25T12:00:00.000Z',
+    scope: { fingerprint: 'scope-models', hosts: ['codex'] },
+    sources: [{ id: 'codex-cache', status: 'stale', capturedAt: '2026-08-25T12:00:00.000Z',
+      scopeFingerprint: 'scope-models' }],
+    models: [], bindings: [], changes: [], opportunities: [], diagnostics: [],
+  });
+  const modelRow = rowsFor(await collect(), 'models')[0];
+  assert.match(modelRow.fix, /ak models refresh/, 'status keeps the explicit advisory action');
+  const cwd = process.cwd();
+  process.chdir(PROJECT);
+  let out;
+  try {
+    ({ out } = await captureLog(() => sync.run({
+      flags: { 'dry-run': true, 'no-upgrade': true, json: false }, pkgRoot: PKG_ROOT,
+    })));
+  } finally { process.chdir(cwd); }
+  assert.doesNotMatch(out, /\[models\]/, 'sync must not claim it will execute advisory model actions');
 });
 
 test('a dry-run sync leaves the diverged policy byte-identical on disk', async () => {

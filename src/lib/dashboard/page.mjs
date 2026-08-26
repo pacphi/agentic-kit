@@ -156,11 +156,12 @@ export function renderPage({ name, version }) {
     </div>
     <div class="secondary-group" id="secondary-usage" hidden>
       <div class="seg subseg" role="tablist" aria-label="Usage views" id="usage-seg">
-        <button class="seg-btn" role="tab" data-view="score" aria-selected="true" type="button">Scorecard</button>
-        <button class="seg-btn" role="tab" data-view="limits" aria-selected="false" type="button">Limits</button>
-        <button class="seg-btn" role="tab" data-view="findings" aria-selected="false" type="button">Findings<span class="segbadge" id="u-findings-n" hidden></span></button>
-        <button class="seg-btn" role="tab" data-view="sessions" aria-selected="false" type="button">Sessions<span class="mono seg-n" id="u-sessions-n"></span></button>
-        <button class="seg-btn" role="tab" data-view="transcript" aria-selected="false" type="button">Transcript</button>
+        <button class="seg-btn" role="tab" id="usage-tab-score" data-view="score" aria-selected="true" aria-controls="v-score" type="button">Scorecard</button>
+        <button class="seg-btn" role="tab" id="usage-tab-limits" data-view="limits" aria-selected="false" aria-controls="v-limits" tabindex="-1" type="button">Limits</button>
+        <button class="seg-btn" role="tab" id="usage-tab-findings" data-view="findings" aria-selected="false" aria-controls="v-findings" tabindex="-1" type="button">Findings<span class="segbadge" id="u-findings-n" hidden></span></button>
+        <button class="seg-btn" role="tab" id="usage-tab-models" data-view="models" aria-selected="false" aria-controls="v-models" tabindex="-1" type="button">Models<span class="segbadge" id="mli-attention-n" hidden></span></button>
+        <button class="seg-btn" role="tab" id="usage-tab-sessions" data-view="sessions" aria-selected="false" aria-controls="v-sessions" tabindex="-1" type="button">Sessions<span class="mono seg-n" id="u-sessions-n"></span></button>
+        <button class="seg-btn" role="tab" id="usage-tab-transcript" data-view="transcript" aria-selected="false" aria-controls="v-transcript" tabindex="-1" type="button">Transcript</button>
       </div>
       <div class="filters secondary-actions" id="usage-days" role="group" aria-label="Usage window">
         <button class="chipf" type="button" data-days="7">7d</button>
@@ -277,6 +278,10 @@ export function renderPage({ name, version }) {
          theme preferences. It renders BELOW the triage summary so a failing
          subsystem is never displaced by an introduction. -->
     <div class="summary" id="summary" hidden></div>
+    <a class="mli-summary" id="mli-summary" data-model-lifecycle href="#usage/models">
+      <span><b>Model lifecycle</b><small id="mli-summary-copy">No cached inventory yet</small></span>
+      <span class="pill" id="mli-summary-state" data-level="warn"><span class="dot" data-level="warn"></span>refresh</span>
+    </a>
     <div class="ab-nudge" id="about-nudge" hidden>
       <span class="i" aria-hidden="true">&#9432;</span>
       <span>New here? <b>About</b> explains every tool agentic-kit installed on this machine, in
@@ -419,7 +424,7 @@ export function renderPage({ name, version }) {
       <p id="usage-view-description">Token consumption, API-equivalent cost, efficiency, and trends.</p>
     </header>
 
-    <section class="view" id="v-score">
+    <section class="view" id="v-score" role="tabpanel" aria-labelledby="usage-tab-score">
       <div class="hero" id="u-hero"></div>
       <div class="note"><span class="i">&#8505;</span><span>Dollar figures are <b>API list-price equivalents</b> &mdash;
         what these tokens would cost metered. On a Max/Pro subscription you are not billed this.
@@ -477,7 +482,7 @@ export function renderPage({ name, version }) {
       </section>
     </section>
 
-    <section class="view" id="v-limits" hidden>
+    <section class="view" id="v-limits" role="tabpanel" aria-labelledby="usage-tab-limits" hidden>
       <div class="note"><span class="i">&#8505;</span><span>Utilization here is <b>vendor-reported</b> &mdash;
         the plan&rsquo;s own percentages, a denominator local transcripts cannot compute.
         Claude&rsquo;s numbers arrive via the managed statusLine while a session runs; Codex&rsquo;s come from
@@ -497,21 +502,91 @@ export function renderPage({ name, version }) {
         stale data is labelled stale, not hidden</div>
     </section>
 
-    <section class="view" id="v-findings" hidden>
+    <section class="view" id="v-findings" role="tabpanel" aria-labelledby="usage-tab-findings" hidden>
       <div class="note"><span class="i">&#8505;</span><span id="u-findings-note"></span></div>
       <div class="ins-grid" id="u-insights"></div>
       <div class="foot">grounded in local measurement first; vendor benchmarks are labelled as such &middot;
         third-party &ldquo;model X vs Y&rdquo; blog comparisons are deliberately not used as evidence</div>
     </section>
 
-    <section class="view" id="v-sessions" hidden>
+    <section class="view" id="v-sessions" role="tabpanel" aria-labelledby="usage-tab-sessions" hidden>
       <div class="note"><span class="i">&#8505;</span><span>Grouped by project, aggregate first.
         Expand a project to see its sessions. Open a row&rsquo;s chevron for execution host, independently evidenced provider, model, and usage details; click <b>&#9707;</b> to read its transcript. &ldquo;Not recorded&rdquo; means the source did not establish that fact.</span></div>
       <div class="ptree" id="u-tree"></div>
       <div class="foot">durations are session span (first&rarr;last event), not exclusive wall-clock</div>
     </section>
 
-    <section class="view" id="v-transcript" hidden>
+    <section class="view" id="v-models" role="tabpanel" aria-labelledby="usage-tab-models" aria-busy="false" hidden>
+      <div class="sr-only" id="mli-load-status" role="status" aria-live="polite" aria-atomic="true"></div>
+      <div class="note"><span class="i">&#8505;</span><span>This is a <b>read-only operator view</b>.
+        It shows the routes you use first and keeps provider publication, account access, and observed use as separate evidence.
+        To establish local routability, configure the exact path, authenticate its serving provider, complete one successful invocation,
+        then run <code>ak models refresh</code>. Unknown stays unknown; refresh is the only operation that contacts model sources.</span></div>
+      <div class="mli-attention" id="mli-attention" role="status" aria-live="polite"></div>
+      <section class="strip" id="mli-observed-panel">
+        <div class="sh"><h2>Observed in this window</h2><span class="n mono" id="mli-observed-note"></span></div>
+        <p class="mli-copy">Successful local transcript evidence for the selected Usage window. This is actual use, whether or not the model is pinned to a route.</p>
+        <div class="mli-table-wrap" role="region" aria-label="Models observed in the selected Usage window" tabindex="0"><table class="mli-table mli-observed-table">
+          <caption class="sr-only">Models observed in retained sessions for the selected Usage window.</caption>
+          <thead><tr><th scope="col">Model</th><th scope="col">Model provider</th><th scope="col">Used via</th><th scope="col">Sessions</th><th scope="col">Last used</th></tr></thead>
+          <tbody id="mli-observed"></tbody>
+        </table></div>
+      </section>
+      <section class="strip mli-routes-panel">
+        <div class="sh"><h2>Your routes</h2><span class="n mono" id="mli-asof"></span></div>
+        <p class="mli-copy">Configured routes and fallbacks. Last used comes from the selected Usage window; catalogue-only models are kept below.</p>
+        <div class="mli-table-wrap" role="region" aria-label="Your model routes; scroll in either direction for every route" tabindex="0"><table class="mli-table mli-routes-table">
+          <caption class="sr-only">Configured model routes, providers, observed use, and API-equivalent pricing.</caption>
+          <thead><tr>
+            <th scope="col" aria-sort="ascending"><button type="button" data-mli-route-sort="model">Model <span aria-hidden="true">↑</span></button></th>
+            <th scope="col" aria-sort="none"><button type="button" data-mli-route-sort="provider">Model provider <span aria-hidden="true">↕</span></button></th>
+            <th scope="col" aria-sort="none"><button type="button" data-mli-route-sort="used">Used for <span aria-hidden="true">↕</span></button></th>
+            <th scope="col" aria-sort="none"><button type="button" data-mli-route-sort="lastUsed">Last used <span aria-hidden="true">↕</span></button></th>
+            <th scope="col" aria-sort="none"><button type="button" data-mli-route-sort="rate">API rate / plan use <span aria-hidden="true">↕</span></button></th>
+          </tr></thead>
+          <tbody id="mli-routes"></tbody>
+        </table></div>
+      </section>
+      <details class="strip mli-ledger" id="mli-catalog-explorer">
+        <summary><span class="mli-ledger-title"><span class="chev" aria-hidden="true">&rsaquo;</span><span><b>Catalog explorer</b><small>Provider-published and local-catalogue models are separate from your routes.</small></span></span><span class="n mono">catalogue-only models</span></summary>
+        <div class="mli-catalog-body">
+        <div class="sh"><h2>Explore catalog</h2><span class="n mono">public metadata is not entitlement</span></div>
+        <form class="mli-filters" id="mli-filters" role="search">
+          <label class="mli-filter mli-filter-search" for="mli-search"><span>Search</span><input id="mli-search" name="search" type="search" autocomplete="off" placeholder="Name or selector"></label>
+          <label class="mli-filter" for="mli-host"><span>Access host</span><select id="mli-host" name="host"><option value="">All hosts</option></select></label>
+          <label class="mli-filter" for="mli-provider"><span>Model provider</span><select id="mli-provider" name="provider"><option value="">All providers</option></select></label>
+          <label class="mli-filter" for="mli-relevance"><span>View</span><select id="mli-relevance" name="relevance"><option value="relevant">In use</option><option value="catalog">Catalog only</option><option value="all">All</option></select></label>
+          <label class="mli-filter" for="mli-lifecycle"><span>Lifecycle</span><select id="mli-lifecycle" name="lifecycle"><option value="">Any lifecycle</option><option value="removed">Removed</option><option value="retiring">Retiring</option><option value="deprecated">Deprecated</option><option value="hidden">Hidden</option><option value="preview">Preview</option><option value="active">Active</option><option value="unknown">Unknown</option></select></label>
+          <label class="mli-filter" for="mli-evidence-field"><span>Evidence state</span><select id="mli-evidence-field" name="evidenceField"><option value="">Any evidence</option><option value="configured">Configured</option><option value="effective">Effective</option><option value="observed">Observed</option><option value="discoverable">Catalogued</option><option value="entitled">Entitled</option><option value="policyAllowed">Policy</option><option value="routable">Routable</option></select></label>
+          <label class="mli-filter" for="mli-evidence-value"><span>Evidence value</span><select id="mli-evidence-value" name="evidenceValue" disabled><option value="">Any value</option><option value="yes">Yes</option><option value="no">No</option><option value="unknown">Unknown</option></select></label>
+          <button class="mli-reset" id="mli-reset" type="reset">Reset</button>
+        </form>
+        <div class="mli-results"><span id="mli-result-count" role="status" aria-live="polite" aria-atomic="true">Loading inventory…</span><span class="mono">unknown values sort last</span></div>
+        <div class="mli-table-wrap" role="region" aria-label="Host model evidence table; scroll in either direction for every model and state" aria-describedby="mli-result-count" tabindex="0"><table class="mli-table">
+          <caption class="sr-only">Catalogue model lifecycle facts. Open Details to inspect evidence.</caption>
+          <thead><tr>
+            <th scope="col" aria-sort="none"><button type="button" data-mli-sort="host">Model <span aria-hidden="true">↕</span></button></th>
+            <th scope="col" aria-sort="none"><button type="button" data-mli-sort="configured">Configured <span aria-hidden="true">↕</span></button></th>
+            <th scope="col" aria-sort="none"><button type="button" data-mli-sort="observed">Observed <span aria-hidden="true">↕</span></button></th>
+            <th scope="col" aria-sort="none"><button type="button" data-mli-sort="discoverable">Catalogued <span aria-hidden="true">↕</span></button></th>
+            <th scope="col" aria-sort="ascending"><button type="button" data-mli-sort="lifecycle">Lifecycle <span aria-hidden="true">↑</span></button></th>
+            <th scope="col">Details</th>
+          </tr></thead>
+          <tbody id="mli-models"></tbody>
+        </table></div>
+        <div class="mli-pager"><button class="mli-load-more" id="mli-load-more" type="button" hidden>Load 50 more</button></div>
+        </div>
+      </details>
+      <div class="two">
+        <section class="strip" aria-labelledby="mli-history-title"><div class="sh"><h2 id="mli-history-title">change history</h2><span class="n mono" id="mli-history-note"></span></div><div id="mli-history"></div></section>
+        <section class="strip"><div class="sh"><h2>consumers</h2><span class="n mono">configured / reported evidence</span></div><div id="mli-consumers"></div></section>
+      </div>
+      <section class="strip"><div class="sh"><h2>swap impact</h2><span class="n mono">read-only canonical-policy preview</span></div><div id="mli-impact"></div></section>
+      <div class="foot">swap analysis is available with <b>ak models plan</b> &middot; the dashboard never changes a route</div>
+      <dialog class="mli-detail-dialog" id="mli-detail" aria-labelledby="mli-detail-title"><div class="mli-detail-head"><h2 id="mli-detail-title">Model details</h2><button type="button" id="mli-detail-close" aria-label="Close model details">Close</button></div><div id="mli-detail-body"></div></dialog>
+    </section>
+
+    <section class="view" id="v-transcript" role="tabpanel" aria-labelledby="usage-tab-transcript" hidden>
       <div class="tcrumb" id="u-crumb"></div>
       <section class="strip" id="u-turns"></section>
       <div class="foot">secret-shaped strings are masked server-side &mdash; the original never reaches this page &middot; no export button by design</div>

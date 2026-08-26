@@ -33,6 +33,7 @@ import { statuslineDrift } from '../lib/codex-statusline.mjs';
 import { inspectCodexPlugins } from '../lib/codex-plugins.mjs';
 import { projectMemoryStatus } from '../lib/project-memory.mjs';
 import { removedAgentGaps, upstreamFixAvailable } from '../lib/scaffold.mjs';
+import { latestSnapshot, readModelStore, summarizeModelHealth } from '../lib/model-inventory/index.mjs';
 
 export const options = {
   json: { type: 'boolean', default: false },
@@ -246,6 +247,19 @@ export async function collect({ pkgRoot, cwd = process.cwd() }) {
   const rows = [];
   const cfg = loadKitConfig();
   const integrationFacts = await collectIntegrationFacts({ cwd, cfg });
+
+  // Cache-only model lifecycle summary. Discovery and network access belong
+  // exclusively to `ak models refresh`.
+  try {
+    const snapshot = latestSnapshot(readModelStore());
+    if (!snapshot) rows.push(row('models', 'info', 'no local model inventory yet; run `ak models refresh` explicitly'));
+    else {
+      const health = summarizeModelHealth(snapshot);
+      rows.push(row('models', health.level, health.message, health.fix));
+    }
+  } catch (error) {
+    rows.push(row('models', 'warn', `model inventory unavailable: ${error.message}; run \`ak models refresh\` explicitly`));
+  }
 
   // versions
   try {
