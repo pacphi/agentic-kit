@@ -210,9 +210,11 @@ valid Hermes value.
 for an in-process ESM module loaded by `import()`, this ADR accepts a declarative manifest driving
 a fixed set of consented, subprocess-only hooks — no third-party code ever runs inside the `ak`
 process, gated behind `AK_EXPERIMENTAL_HOST_ADAPTERS=1`, admitted only after a hash-pinned consent
-that invalidates the moment the manifest's content changes. `canBePrimary`, `aqeProvider`, and
-`commandStatusline` are not fields the manifest schema accepts at all, so those three obligations
-stay first-party by construction rather than by an adapter's own promise. It formally supersedes
+that invalidates the moment the manifest's content changes. `canBePrimary`,
+`commandStatusline`, and `host.legacy.aqeProvider` are not claims the manifest schema accepts, so
+authority stays outside an adapter's own promise. Since the 2026-08-26 amendment, `aqe.provider`
+may carry non-authoritative Agentic-QE 3.13.12+ candidate data; a real conformance tier and explicit
+grant activate it. It formally supersedes
 ADR-0016's closed-registry clause, folds in the maintainer's full PR #131 gate list (import-time
 routable-host invariant, uninstall-through-undo, permission authorization by host, attribution
 surfaces policy, and kit.json's unknown-key warning — landed in wave 1 and Phase 0; registry↔directory
@@ -220,13 +222,14 @@ test pins remain wave 3), and stays experimental until a real external adapter c
 conformance kit and a release of soak.
 
 **0031** amends 0029 on one point and adds the governance around it. The three capability caps
-(`canBePrimary`, `aqeProvider`, `commandStatusline`) stay *inexpressible* in the manifest — that
-block on self-declaration is permanent — but the capability itself becomes *earnable*: passing a
+(`canBePrimary`, `host.legacy.aqeProvider`, `commandStatusline`) stay *inexpressible* as capability
+self-claims — that block is permanent — but capability becomes *earnable*: passing a
 conformance tier plus an explicit maintainer grant (hash-pinned, outside the manifest) confers it,
 up to and including promotion to a first-party built-in with full parity. It also records the
-upstream-request path: some ceilings are not `ak`'s to lift (being an AQE provider type is
-agentic-qe's closed enum; being a native ruflo backend is ruflo's `ENABLE_*` model), so those become
-tracked capability requests with honest interim behaviour rather than pretended support. Accepted as
+upstream-request path. Its AQE ceiling was satisfied by Agentic-QE 3.13.12 `externalProviders` on
+2026-08-26: the six-tier ladder now includes `aqe-provider`, and a grant activates project-scoped
+default/fallback/agentOverride projection. Native ruflo backend status remains upstream-owned.
+Accepted as
 a governance decision; the machinery (the trust CLI, external execution, tiered conformance, the
 grant store) is staged and self-graded in the ADR's implementation-status table.
 

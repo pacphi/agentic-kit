@@ -14,13 +14,13 @@ that extend this set with a host not shipped in-tree — see
 external host picks up the same capability-driven treatment described here, but it
 is not one of the three built-ins this reference compares. It can never
 **self-declare** primary-host, AQE-provider, or status-line status — that ban is
-permanent — while `canBePrimary` and `commandStatusline` are **earnable** through
-a passed conformance tier plus an explicit maintainer grant. `aqeProvider` stays
-upstream-owned and is never `ak`-grantable. See
+permanent — while `canBePrimary`, `aqeProvider`, and `commandStatusline` are
+**earnable** through a passed conformance tier plus an explicit maintainer grant.
+The AQE path requires Agentic-QE 3.13.12 or newer. See
 [External host adapters](#external-host-adapters) below for what a grant does and
 does not buy today.
 
-Evidence cutoff: **2026-08-04**. The comparison was checked against agentic-kit
+Evidence cutoff: **2026-08-26**. The comparison was checked against agentic-kit
 `4.0.0-alpha.36`, Ruflo `3.34.0`, agentic-qe `3.13.x`, RuvNet Brain `4.0.7`,
 Claude Code `2.1.222`, Codex CLI `0.146.0`, and OpenCode `1.18.x`. Host and
 upstream behavior changes quickly; open issues below are a risk snapshot, not a
@@ -54,7 +54,7 @@ served it. See [Providers and hosts](PROVIDERS.md) for those axes in detail.
 | `ak run` execution | Native CLI adapter | Native CLI adapter | Managed supervised-server adapter |
 | Automatic activity routes | Yes | Yes | No; explicit routes only |
 | Ruflo support | Reference/native surface | Strong, with integration and parity gaps | Managed compatibility layer |
-| AQE support | Default and fullest path | Strong platform path; one direct-provider gap in `ak` | Upstream platform assets, not an AQE inference provider |
+| AQE support | Default and fullest path | Strong platform path; direct provider supported | Upstream platform assets; no built-in OpenCode provider |
 | RuvNet Brain | Native plugin, hooks, MCP, console | Native plugin, hooks, MCP, skills | Managed search MCP and guidance; no native Brain plugin |
 | Managed command status line | Yes | No; Codex's native built-in fields only | No |
 | Local transcript analytics | Yes | Yes | Yes |
@@ -144,23 +144,22 @@ Current cross-host Ruflo risks include:
 | Agents and skills | Native/default assets | Native Codex-compatible assets | Upstream OpenCode agent/skill assets when that platform is initialized |
 | MCP server | Supported | Supported | Supported upstream |
 | Subscription inference provider | `claude-code` | AQE upstream includes `codex` | None |
-| Direct `ak --aqe-provider` selection | `claude-code` | Not currently accepted by agentic-kit | Not applicable |
+| Direct `ak --aqe-provider` selection | `claude-code` | `codex` | No built-in id; an admitted external adapter may earn its own id |
 | Activity `agentOverrides` | Yes | Yes | No |
 | Default route projection | Yes | Yes | No |
 | QE-Court routed seat | Full routed role | Supported, with the integrated stall risk below | May call QE tools, but cannot be an AQE provider-backed seat |
 | Subscription-provider embeddings | Not supported | Not supported | Not applicable |
 
 The OpenCode boundary is precise: AQE can provision OpenCode agents, skills, MCP,
-and permissions, but OpenCode is not an AQE LLM-provider type. Agentic-kit
-therefore does not infer an AQE provider from an OpenCode host/model route and
-does not write that route into `agentOverrides`.
+and permissions, but OpenCode is not a built-in AQE LLM-provider type. Agentic-kit
+therefore does not infer an AQE provider from the built-in OpenCode host/model route.
+An independently admitted adapter may declare a separate candidate under its own
+`host.id`, pass the `aqe-provider` tier, and receive an `aqeProvider` grant; that is
+earned provider support, not inference from the OpenCode name.
 
-Codex has the reverse limitation. Current AQE includes a subscription-backed
-`codex` provider, and agentic-kit can project Codex activity routes into AQE.
-However, agentic-kit's direct provider allow-list still rejects
-`ak host pick --aqe-provider codex`; use per-activity routing rather than claiming
-that direct selector works. This is a documented implementation gap, not a host
-or billing distinction.
+Current AQE includes a subscription-backed `codex` provider. Agentic-kit accepts
+`ak host pick --aqe-provider codex`, admits Codex fallback rungs, enables Codex
+providers referenced by `agentOverrides`, and projects Codex activity routes.
 
 AQE risks relevant across hosts include its
 [MCP entrypoint double-spawn](https://github.com/proffesor-for-testing/agentic-qe/issues/528),
@@ -223,8 +222,9 @@ MCP/plugin changes and keep generated guidance concise.
 
 ### OpenCode
 
-OpenCode remains non-primary, is never automatically routed, cannot be an AQE
-provider, and has no native Brain plugin or managed status line. Operational risks
+Built-in OpenCode remains non-primary, is never automatically routed, has no AQE
+provider identity, and has no native Brain plugin or managed status line. A separately admitted
+adapter may earn its own external provider id; that does not change the built-in descriptor. Operational risks
 include local MCP servers dropping during `serve`
 ([opencode #38266](https://github.com/anomalyco/opencode/issues/38266)), nested
 permission prompts hanging ([#13715](https://github.com/anomalyco/opencode/issues/13715)),
@@ -246,9 +246,10 @@ waits on a real external adapter clearing the conformance kit and soaking.
 | Tier | Status today | Gates | Why |
 | --- | --- | --- | --- |
 | `admission` | Genuinely passes | — | Manifest validation and consent are built |
-| `activity-routing` | Genuinely passes | — | Real supervised subprocess worker via `ak run` |
-| `primary-eligible` | Genuinely passes | `canBePrimary` | Observes a real escalation |
 | `session-driving` | **Gated** | — | Being a native Ruflo backend is upstream's to grant |
+| `activity-routing` | Genuinely passes | — | Real supervised subprocess worker via `ak run` |
+| `aqe-provider` | Genuinely passes | `aqeProvider` | Real admitted stdin/stdout hook; projects through AQE 3.13.12+ |
+| `primary-eligible` | Genuinely passes | `canBePrimary` | Observes a real escalation |
 | `statusline` | **Gated** | `commandStatusline` | `ak` has no render surface for it yet |
 
 The two gated tiers are honest ceilings, not failures — they report `gated` or
@@ -274,15 +275,13 @@ entry — an ordinary pull request, not a command.
 These are intentionally visible rather than hidden behind an over-broad “supported”
 label:
 
-1. AQE upstream supports a `codex` subscription provider, while agentic-kit's
-   direct `--aqe-provider` allow-list does not. Codex activity projection works;
-   direct selection does not.
-2. OpenCode transcript, token, observed-cost, and provider-id parsing exists in
+1. OpenCode transcript, token, observed-cost, and provider-id parsing exists in
    `usage-opencode.mjs`, while the integration registry still advertises
    `usage:false`. The dashboard analytics are real; the capability declaration is
    stale.
-3. “OpenCode is outside AQE” means outside **AQE inference-provider routing**.
-   It does not mean AQE lacks OpenCode platform agents, skills, or MCP support.
+2. “OpenCode is outside AQE” means the built-in OpenCode descriptor has no AQE
+   provider identity. It does not mean AQE lacks OpenCode platform agents, skills,
+   or MCP support, or that a separately admitted adapter cannot earn an external id.
 
 The governing decisions currently stand as follows: ADR-0017 and ADR-0018 are
 **Accepted** and were amended on 2026-08-04 and 2026-07-30 respectively;

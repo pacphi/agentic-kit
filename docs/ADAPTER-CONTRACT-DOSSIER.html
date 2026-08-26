@@ -205,8 +205,9 @@ did not materialize on the designed timeline — frames every lesson below.</p>
     <td>Every load-bearing adapter fact holds unchanged. New: a native ACP server (third driving
     surface), a <code>--tui</code> statusline, three-tier hooks with consent allowlists. PyPI is
     stale; the npm bridge now ships three bins.</td></tr>
-  <tr><td>agentic-qe</td><td>agentic-qe 3.13.10 (local = latest published)</td>
-    <td>Provider set closed at every layer; its real plugin system reaches QE domains only; the
+  <tr><td>agentic-qe</td><td>agentic-qe 3.13.12 (external-provider contract from ADR-127)</td>
+    <td>Built-in providers remain upstream-owned, while admitted CLI subprocess providers can
+    now be projected through <code>externalProviders</code>; plugin domains remain separate; the
     <code>vendorOf</code> mirror is in sync; quality-gate anchors are a content-authoring task,
     not a flag.</td></tr>
 </table></div>
@@ -270,13 +271,14 @@ pass/fail — the contract's graduation evidence.</p>
 
 <h2 id="constraints">4 · Hard constraints the design inherits</h2>
 <ul>
-  <li><strong>AQE's provider set is closed at every layer</strong> — 11 declared types, 10
-  constructible (<code>onnx</code> is declared-but-unconstructible); its real plugin system
-  (<code>aqe plugin install</code>) reaches QE domains only. No adapter may ever project into
-  any AQE surface. Phase 1's asymmetry decision already encodes this.</li>
+  <li><strong>AQE's built-in provider set remains upstream-owned</strong> — 3.13.12 adds the
+  ADR-127 <code>externalProviders</code> contract for CLI subprocess providers without making
+  plugin domains into provider extensions. Agentic-kit may project only an admitted, hash-pinned
+  adapter through that public contract; it must not mutate AQE's built-in provider definitions.</li>
   <li><strong>Two AQE "host" surfaces exist and must not be conflated</strong>: LLM-execution
-  binding (spawns <code>claude</code>/<code>codex</code>; closed) vs. platform/MCP installers
-  (8 hardcoded; closed). ak's extension point extends neither — it extends ak's own host axis.</li>
+  binding (built-ins plus declared external CLI providers) vs. platform/MCP installers
+  (8 hardcoded). Agentic-kit's extension point projects only into the former after admission;
+  it does not extend AQE's platform installer catalog.</li>
   <li><strong>Driving surfaces are plural now.</strong> Hermes ships a native ACP
   (Agent Client Protocol) server alongside CLI oneshot — the contract must express <em>how</em>
   a host is driven (cli-subprocess, ACP, MCP) as declared capability data, not assume
@@ -607,9 +609,11 @@ consent allowlists, is the shape a Hermes-class adapter naturally wants.</p>
   consent time, re-consented on change, executed with ak supervising (timeout, captured output,
   independent verify after).</li>
   <li><strong>Capability caps are structural, not runtime:</strong> the adapter manifest
-  <em>schema</em> cannot express <code>canBePrimary</code>, <code>aqeProvider</code>, or
+  <em>schema</em> cannot self-claim <code>canBePrimary</code>, <code>host.legacy.aqeProvider</code>, or
   managed-statusline claims — a cap enforced by shape is stronger than any runtime check, and
-  is precisely where ruflo's honor-system caps failed.</li>
+  is precisely where ruflo's honor-system caps failed. Since Agentic-QE 3.13.12, separate
+  <code>aqe.provider</code> candidate data may be declared, but it gains no authority until a real
+  <code>aqe-provider</code> tier and explicit hash-pinned grant both exist.</li>
   <li><strong>Fail-closed admission, isolated failure:</strong> a manifest that fails
   validation, hash check, or contract version is refused with a message naming adapter and
   reason; a refused or broken adapter never affects built-ins or other adapters (the F-01 merge

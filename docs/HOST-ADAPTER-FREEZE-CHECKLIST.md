@@ -79,8 +79,10 @@ design and are recorded as gated, not as failures:
 
 - `session-driving` until ruflo ships a backend-registration surface (filed:
   [ruvnet/ruflo#3046](https://github.com/ruvnet/ruflo/issues/3046)).
-- An `aqeProvider` identity until agentic-qe ships a provider-plugin API (filed:
-  [proffesor-for-testing/agentic-qe#628](https://github.com/proffesor-for-testing/agentic-qe/issues/628)).
+- `aqeProvider` is no longer an upstream freeze ceiling: Agentic-QE 3.13.12 shipped
+  `externalProviders` for [#628](https://github.com/proffesor-for-testing/agentic-qe/issues/628).
+  An adapter still must declare `aqe.provider`, pass the real `aqe-provider` tier at its current
+  content hash, and receive an explicit `aqeProvider` grant.
 - `statusline` runtime rendering (no `ak` render surface for a third-party TUI yet).
 - Grant *consumption* last-mile: selecting an external host as primary, and a `commandStatusline`
   runtime reader.
