@@ -10,3 +10,4 @@ export * from './ownership.mjs';
 export * from './manifest.mjs';
 export * from './admission.mjs';
 export * from './admitted.mjs';
+export * from './aqe-provider.mjs';

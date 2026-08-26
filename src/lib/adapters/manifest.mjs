@@ -13,6 +13,18 @@ import { validateHostAdapter, HOST_REGISTRY, PROJECTION_REGISTRY, OBSERVABILITY_
 import { LIFECYCLE_OPERATIONS } from './lifecycle.mjs';
 
 const SEMVER_RE = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z-.]+)?(?:\+[0-9A-Za-z-.]+)?$/;
+const AQE_PROVIDER_TYPE_RE = /^[a-z0-9][a-z0-9-]{0,62}$/;
+const ENV_NAME_RE = /^[A-Za-z_][A-Za-z0-9_]*$/;
+const AQE_BUILTIN_OR_RESERVED_TYPES = new Set([
+  'anthropic', 'claude-code', 'claude', 'codex', 'openai', 'gemini',
+  'openrouter', 'azure-openai', 'bedrock', 'cognitum', 'ollama', 'onnx',
+]);
+const AQE_BILLING_MODES = Object.freeze(['subscription', 'metered-api', 'metered-capped', 'local']);
+const AQE_BRIDGE_ENV = new Set(['PATH', 'HOME', 'XDG_CONFIG_HOME', 'APPDATA', 'AK_EXPERIMENTAL_HOST_ADAPTERS']);
+const ENV_CODE_INJECTION = new Set([
+  'NODE_OPTIONS', 'BASH_ENV', 'ENV', 'PYTHONPATH', 'PYTHONHOME', 'RUBYOPT',
+  'PERL5OPT', 'LD_PRELOAD', 'DYLD_INSERT_LIBRARIES',
+]);
 
 export const DRIVING_SURFACES = Object.freeze(['cli-subprocess', 'acp', 'mcp']);
 
@@ -52,7 +64,7 @@ export class ManifestRejected extends TypeError {
 // validateHostAdapter, src/lib/hosts.mjs, src/lib/providers.mjs) consume —
 // widen them only alongside a new legitimate consumer, never speculatively.
 const MANIFEST_ALLOWED_KEYS = Object.freeze([
-  'name', 'version', 'contract', 'host', 'detection', 'driving', 'lifecycle', 'trust', 'execution',
+  'name', 'version', 'contract', 'host', 'detection', 'driving', 'lifecycle', 'trust', 'execution', 'aqe',
 ]);
 // Everything validateHostAdapter itself reads (id, label, install,
 // capabilities, trust, enabledByDefault, configProjection, observability)
@@ -196,6 +208,129 @@ function validateExecution(value) {
   }
   validateHookFiles(value.run.hook.files, 'execution.run.hook.files', 'invalid-execution');
   return structuredClone(value);
+}
+
+function validateEnvNames(value, field) {
+  if (value === undefined) return undefined;
+  try {
+    assertStringArray(value, field);
+  } catch (error) {
+    throw new ManifestRejected('invalid-aqe-provider', error.message);
+  }
+  const invalid = value.find((name) => !ENV_NAME_RE.test(name));
+  if (invalid !== undefined) {
+    throw new ManifestRejected('invalid-aqe-provider', `${field} contains invalid environment name '${invalid}'`);
+  }
+  return [...value];
+}
+
+/** Validate candidate data; host.id fixes identity and grants activation. */
+function validateAqe(value, host, driving, execution) {
+  assertRecord(value, 'aqe');
+  assertNoUnknownKeys(value, ['provider'], 'aqe');
+  assertRecord(value.provider, 'aqe.provider');
+  assertNoUnknownKeys(value.provider, [
+    'hook', 'billingMode', 'models', 'defaultModel', 'maxConcurrency', 'stripEnv', 'displayName',
+  ], 'aqe.provider');
+
+  const type = host.id;
+  if (!AQE_PROVIDER_TYPE_RE.test(type)) {
+    throw new ManifestRejected(
+      'invalid-aqe-provider-type',
+      `host.id '${type}' must match ${AQE_PROVIDER_TYPE_RE.source} to be an AQE provider identity`,
+    );
+  }
+  if (AQE_BUILTIN_OR_RESERVED_TYPES.has(type)) {
+    throw new ManifestRejected('aqe-provider-collision', `host.id '${type}' is built in or reserved by agentic-qe`);
+  }
+  if (!driving.surfaces.includes('cli-subprocess')) {
+    throw new ManifestRejected('aqe-provider-surface', 'manifest.aqe requires driving.surfaces to include cli-subprocess');
+  }
+  if (host.capabilities.canRouteActivities !== true || !execution?.run?.hook) {
+    throw new ManifestRejected(
+      'aqe-provider-routing',
+      'manifest.aqe requires host.capabilities.canRouteActivities:true and manifest.execution.run.hook',
+    );
+  }
+
+  const provider = value.provider;
+  assertRecord(provider.hook, 'aqe.provider.hook');
+  assertNoUnknownKeys(provider.hook, ['command', 'timeoutMs', 'files', 'passEnv'], 'aqe.provider.hook');
+  try {
+    assertStringArray(provider.hook.command, 'aqe.provider.hook.command', { allowEmpty: false });
+  } catch (error) {
+    throw new ManifestRejected('invalid-aqe-provider', error.message);
+  }
+  if (provider.hook.timeoutMs !== undefined
+    && (!Number.isInteger(provider.hook.timeoutMs) || provider.hook.timeoutMs <= 0)) {
+    throw new ManifestRejected('invalid-aqe-provider', 'aqe.provider.hook.timeoutMs must be a positive integer');
+  }
+  validateHookFiles(provider.hook.files, 'aqe.provider.hook.files', 'invalid-aqe-provider');
+  const passEnv = validateEnvNames(provider.hook.passEnv, 'aqe.provider.hook.passEnv');
+  const stripEnv = validateEnvNames(provider.stripEnv, 'aqe.provider.stripEnv');
+  const unsafePass = passEnv?.find((name) => AQE_BRIDGE_ENV.has(name)
+    || ENV_CODE_INJECTION.has(name) || name.startsWith('AK_AQE_'));
+  if (unsafePass) {
+    throw new ManifestRejected('invalid-aqe-provider', `aqe.provider.hook.passEnv may not forward bridge/runtime variable '${unsafePass}'`);
+  }
+  const unsafeStrip = stripEnv?.find((name) => AQE_BRIDGE_ENV.has(name));
+  if (unsafeStrip) {
+    throw new ManifestRejected('invalid-aqe-provider', `aqe.provider.stripEnv may not remove bridge runtime variable '${unsafeStrip}'`);
+  }
+  const conflict = passEnv?.find((name) => stripEnv?.includes(name));
+  if (conflict) {
+    throw new ManifestRejected('invalid-aqe-provider', `environment '${conflict}' cannot appear in both passEnv and stripEnv`);
+  }
+
+  if (provider.billingMode !== undefined && !AQE_BILLING_MODES.includes(provider.billingMode)) {
+    throw new ManifestRejected(
+      'invalid-aqe-provider',
+      `aqe.provider.billingMode must be one of ${AQE_BILLING_MODES.join(', ')}`,
+    );
+  }
+  let models = ['default'];
+  if (provider.models !== undefined) {
+    try {
+      assertStringArray(provider.models, 'aqe.provider.models', { allowEmpty: false });
+    } catch (error) {
+      throw new ManifestRejected('invalid-aqe-provider', error.message);
+    }
+    models = [...provider.models];
+  }
+  const defaultModel = provider.defaultModel ?? models[0];
+  if (provider.defaultModel !== undefined) {
+    if (typeof provider.defaultModel !== 'string' || !provider.defaultModel) {
+      throw new ManifestRejected('invalid-aqe-provider', 'aqe.provider.defaultModel must be a non-empty string');
+    }
+    if (!models.includes(provider.defaultModel)) {
+      throw new ManifestRejected('invalid-aqe-provider', 'aqe.provider.defaultModel must be present in aqe.provider.models');
+    }
+  }
+  if (provider.maxConcurrency !== undefined
+    && (!Number.isInteger(provider.maxConcurrency) || provider.maxConcurrency <= 0)) {
+    throw new ManifestRejected('invalid-aqe-provider', 'aqe.provider.maxConcurrency must be a positive integer');
+  }
+  if (provider.displayName !== undefined
+    && (typeof provider.displayName !== 'string' || !provider.displayName.trim())) {
+    throw new ManifestRejected('invalid-aqe-provider', 'aqe.provider.displayName must be a non-empty string');
+  }
+
+  return {
+    provider: {
+      hook: {
+        command: [...provider.hook.command],
+        ...(provider.hook.timeoutMs === undefined ? {} : { timeoutMs: provider.hook.timeoutMs }),
+        ...(provider.hook.files === undefined ? {} : { files: [...provider.hook.files] }),
+        ...(passEnv === undefined ? {} : { passEnv }),
+      },
+      ...(provider.billingMode === undefined ? {} : { billingMode: provider.billingMode }),
+      models,
+      defaultModel,
+      ...(provider.maxConcurrency === undefined ? {} : { maxConcurrency: provider.maxConcurrency }),
+      ...(stripEnv === undefined ? {} : { stripEnv }),
+      ...(provider.displayName === undefined ? {} : { displayName: provider.displayName }),
+    },
+  };
 }
 
 /** Hook file inventories are portable paths relative to the manifest's own
@@ -348,6 +483,7 @@ export function validateAdapterManifest(value, { projections = projectionMap, ob
   const lifecycle = value.lifecycle === undefined ? undefined : validateManifestLifecycle(value.lifecycle);
   const trust = validateManifestTrust(value.trust);
   const execution = value.execution === undefined ? undefined : validateExecution(value.execution);
+  const aqe = value.aqe === undefined ? undefined : validateAqe(value.aqe, host, driving, execution);
 
   return immutable({
     name: value.name,
@@ -362,6 +498,7 @@ export function validateAdapterManifest(value, { projections = projectionMap, ob
     // execution block changes consent's covered hash automatically — no
     // separate hashing path to keep in sync.
     ...(execution === undefined ? {} : { execution }),
+    ...(aqe === undefined ? {} : { aqe }),
     trust,
   });
 }

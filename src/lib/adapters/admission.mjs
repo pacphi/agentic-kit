@@ -181,6 +181,18 @@ export async function bootstrapHostAdapters({
   const warnings = results.filter((result) => !result.admitted)
     .map(({ name, reason, detail }) => ({ name, reason, detail }));
 
+  // The AQE provider bridge is an exact snapshot of THIS bootstrap pass.
+  // Clear it before rebuilding so a second in-process bootstrap cannot leave
+  // a formerly-admitted/granted provider live after consent, enablement, or
+  // configuration changes. Flag-off remains a true zero-import no-op above.
+  let aqeProviderBridge;
+  try {
+    aqeProviderBridge = await import('./aqe-provider.mjs');
+    aqeProviderBridge.resetAdmittedAqeProviders();
+  } catch {
+    aqeProviderBridge = null;
+  }
+
   if (admitted.length) {
     const { applyAdmitted } = await import('./admitted.mjs');
 
@@ -228,6 +240,36 @@ export async function bootstrapHostAdapters({
     // second copy — so a caller correcting F-1 in one place can't drift from
     // the other.
     const sourceByName = new Map(entries.map((entry) => [entry?.name, entry?.source]));
+
+    // AQE ADR-127 / issue #628: a manifest's aqe.provider block is only a
+    // candidate. It becomes a live trampoline target after ALL local gates:
+    // admission above, explicit host enablement, and a hash-current
+    // aqeProvider grant. The dedicated registry keeps this non-boolean
+    // identity out of applyAdmitted's deliberately narrow host-capability
+    // overlay. One bad provider is isolated to one warning.
+    if (aqeProviderBridge) {
+      const aqeCandidates = admitted.filter((result) => (
+        !!result.manifest?.aqe?.provider
+        && cfg.integrations?.hosts?.[result.name] === true
+        && grantsByName && Object.hasOwn(grantsByName, result.name)
+        && grantsByName[result.name]?.aqeProvider === true
+      ));
+      for (const result of aqeCandidates) {
+        try {
+          aqeProviderBridge.registerAdmittedAqeProvider(result.manifest, {
+            baseDir: baseDirForSource(sourceByName.get(result.name)),
+            integrity: result.integrity,
+            contentHash: result.contentHash,
+          });
+        } catch (error) {
+          warnings.push({
+            name: result.name,
+            reason: error?.reason ?? 'aqe-provider-registration-failed',
+            detail: error?.message ?? String(error),
+          });
+        }
+      }
+    }
 
     // P2 (ADR-0031): an admitted manifest declaring both an execution block
     // and host.capabilities.canRouteActivities gets its execution adapter

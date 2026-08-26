@@ -908,7 +908,7 @@ test('conformance: the banner reports "nothing will be spawned" for a manifest d
 
   const text = cap.text();
   assert.match(text, /SELF-TEST \(ADR-0031 §5\)/);
-  assert.match(text, /declares no lifecycle\/execution hooks — nothing will be spawned/);
+  assert.match(text, /declares no lifecycle, execution, or AQE-provider hooks — nothing will be spawned/);
 });
 
 test('conformance: the banner falls back to a generic warning when the manifest cannot be pre-disclosed, and the harness still runs and reports the real failure', async () => {
@@ -1140,8 +1140,11 @@ test('grant: REFUSED when the gating tier is not recorded passed — exit 1, not
   assert.deepEqual(grantedCapabilitiesFor('hermes', hash, { file: grantsFile }), {});
 });
 
-test("grant: 'aqeProvider' is rejected as never ak-grantable (ADR-0031 §4), before any manifest read", async () => {
+test("grant: 'aqeProvider' is refused when the current manifest has no AQE provider candidate", async () => {
   const grantsFile = tmpGrantsFile();
+  const raw = validManifest();
+  const hash = hashManifest(validateAdapterManifest(raw));
+  recordTierResult('hermes', 'aqe-provider', { hash, evidence: 'synthetic stale evidence' }, { file: grantsFile });
   const cfg = cfgWith([{ name: 'hermes', source: 'mem://hermes' }]);
 
   const cap = capture();
@@ -1149,13 +1152,48 @@ test("grant: 'aqeProvider' is rejected as never ak-grantable (ADR-0031 §4), bef
   try {
     code = await run({
       positionals: ['grant', 'hermes', 'aqeProvider'], env: ON_ENV, cfg,
-      reader: neverCalled('reader'), ask: neverCalled('ask'), isTTY: true, grantsFile, flags: { yes: true },
+      reader: async () => raw, ask: neverCalled('ask'), isTTY: true, grantsFile, flags: { yes: true },
+      consent: fileConsent(tmpConsentFile()),
     });
   } finally { cap.restore(); }
 
   assert.equal(code, 1);
-  assert.match(cap.text(), /upstream-owned/);
-  assert.match(cap.text(), /ADR-0031 §4/);
+  assert.match(cap.text(), /does not declare manifest\.aqe\.provider/);
+  assert.deepEqual(grantedCapabilitiesFor('hermes', hash, { file: grantsFile }), {});
+});
+
+test("grant: 'aqeProvider' becomes live only after same-hash aqe-provider evidence and explicit confirmation", async () => {
+  const grantsFile = tmpGrantsFile();
+  const raw = validManifest({
+    driving: { surfaces: ['cli-subprocess'] },
+    execution: { run: { hook: { command: ['hermes', 'run'] } } },
+    aqe: {
+      provider: {
+        hook: { command: ['hermes', 'aqe'] },
+        billingMode: 'subscription',
+        models: ['hermes-default'],
+        defaultModel: 'hermes-default',
+      },
+    },
+  });
+  const hash = hashManifest(validateAdapterManifest(raw));
+  recordTierResult('hermes', 'aqe-provider', { hash, evidence: 'real AQE stdin/stdout probe returned OK' }, { file: grantsFile });
+  const cfg = cfgWith([{ name: 'hermes', source: 'mem://hermes' }]);
+
+  const cap = capture();
+  let code;
+  try {
+    code = await run({
+      positionals: ['grant', 'hermes', 'aqeProvider'], env: ON_ENV, cfg,
+      reader: async () => raw, ask: async () => true, isTTY: true, grantsFile, flags: {},
+      consent: fileConsent(tmpConsentFile()),
+    });
+  } finally { cap.restore(); }
+
+  assert.equal(code, 0, cap.text());
+  assert.match(cap.text(), /aqeProvider is live/);
+  assert.match(cap.text(), /Agentic-QE 3\.13\.12 externalProviders/);
+  assert.deepEqual(grantedCapabilitiesFor('hermes', hash, { file: grantsFile }), { aqeProvider: true });
 });
 
 test('grant: any other non-TIER_GRANTS capability is rejected, before any manifest read', async () => {
@@ -1532,7 +1570,7 @@ test('revoke-grant <name> <capability>: an invalid/non-grantable capability is r
   recordTierResult('hermes', 'primary-eligible', { hash, evidence: 'leads a run' }, { file: grantsFile });
   grantCapability('hermes', 'canBePrimary', { hash }, { file: grantsFile });
 
-  for (const bogus of ['aqeProvider', 'transcripts']) {
+  for (const bogus of ['transcripts']) {
     const cap = capture();
     let code;
     try {
@@ -1545,6 +1583,26 @@ test('revoke-grant <name> <capability>: an invalid/non-grantable capability is r
   }
   // Nothing touched by the rejected attempts.
   assert.deepEqual(grantedCapabilitiesFor('hermes', hash, { file: grantsFile }), { canBePrimary: true });
+});
+
+test('revoke-grant <name> aqeProvider withdraws only the provider grant and leaves its passed tier evidence', async () => {
+  const grantsFile = tmpGrantsFile();
+  const hash = 'a'.repeat(64);
+  recordTierResult('hermes', 'aqe-provider', { hash, evidence: 'real AQE provider probe returned OK' }, { file: grantsFile });
+  grantCapability('hermes', 'aqeProvider', { hash }, { file: grantsFile });
+
+  const cap = capture();
+  let code;
+  try {
+    code = await run({
+      positionals: ['revoke-grant', 'hermes', 'aqeProvider'], env: OFF_ENV, cfg: cfgWith([]), grantsFile, flags: {},
+    });
+  } finally { cap.restore(); }
+
+  assert.equal(code, 0, cap.text());
+  assert.match(cap.text(), /revoked capability 'aqeProvider'/);
+  assert.deepEqual(grantedCapabilitiesFor('hermes', hash, { file: grantsFile }), {});
+  assert.equal(grantsFor('hermes', { file: grantsFile }).tiers['aqe-provider'].status, 'passed');
 });
 
 test('revoke-grant <name> <capability> works even when the experimental flag is off (fail-safe, same as the whole-record form)', async () => {

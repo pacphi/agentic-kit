@@ -317,6 +317,9 @@ export function hookCommandsFor(manifest) {
   if (manifest.execution?.run?.hook?.command) {
     hooks.push(`execution.run: ${JSON.stringify(manifest.execution.run.hook.command)}`);
   }
+  if (manifest.aqe?.provider?.hook?.command) {
+    hooks.push(`aqe.provider: ${JSON.stringify(manifest.aqe.provider.hook.command)}`);
+  }
   return hooks;
 }
 
@@ -341,7 +344,7 @@ async function warnAboutHooks(name, entry, rawReader) {
   }
   const hooks = hookCommandsFor(manifest);
   if (!hooks.length) {
-    info(`  '${name}' declares no lifecycle/execution hooks — nothing will be spawned.`);
+    info(`  '${name}' declares no lifecycle, execution, or AQE-provider hooks — nothing will be spawned.`);
     return;
   }
   warn('  the following hooks will run as REAL subprocesses:');

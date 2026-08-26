@@ -20,15 +20,18 @@ function tempFile() {
 const HASH_A = 'a'.repeat(64);
 const HASH_B = 'b'.repeat(64);
 
-test('exports the five conformance tiers in graduation order', () => {
+test('exports the six conformance tiers in graduation order', () => {
   assert.deepEqual(CONFORMANCE_TIERS, [
-    'admission', 'session-driving', 'activity-routing', 'primary-eligible', 'statusline',
+    'admission', 'session-driving', 'activity-routing', 'aqe-provider', 'primary-eligible', 'statusline',
   ]);
 });
 
-test('TIER_GRANTS only maps primary-eligible and statusline; aqeProvider never appears', () => {
-  assert.deepEqual(TIER_GRANTS, { 'primary-eligible': 'canBePrimary', statusline: 'commandStatusline' });
-  assert.ok(!Object.values(TIER_GRANTS).includes('aqeProvider'));
+test('TIER_GRANTS maps aqe-provider evidence to the external AQE provider capability', () => {
+  assert.deepEqual(TIER_GRANTS, {
+    'aqe-provider': 'aqeProvider',
+    'primary-eligible': 'canBePrimary',
+    statusline: 'commandStatusline',
+  });
 });
 
 test('record -> grant happy path: passed tier at the same hash grants the capability', () => {
@@ -66,10 +69,12 @@ test('grantCapability refused: tier passed but at a DIFFERENT hash', () => {
   assert.deepEqual(grantedCapabilitiesFor('acme', HASH_A, { file }), {});
 });
 
-test('grantCapability refused: aqeProvider is never a grantable capability', () => {
+test('aqeProvider grant requires and consumes same-hash aqe-provider evidence', () => {
   const file = tempFile();
-  recordTierResult('acme', 'primary-eligible', { hash: HASH_A, evidence: 'led a run' }, { file });
-  assert.throws(() => grantCapability('acme', 'aqeProvider', { hash: HASH_A }, { file }), TypeError);
+  assert.throws(() => grantCapability('acme', 'aqeProvider', { hash: HASH_A }, { file }), /aqe-provider/);
+  recordTierResult('acme', 'aqe-provider', { hash: HASH_A, evidence: 'real AQE provider probe returned OK' }, { file });
+  grantCapability('acme', 'aqeProvider', { hash: HASH_A }, { file });
+  assert.deepEqual(grantedCapabilitiesFor('acme', HASH_A, { file }), { aqeProvider: true });
 });
 
 test('grantedCapabilitiesFor returns {} on hash mismatch', () => {
@@ -231,7 +236,7 @@ test('gatedTiersFor: currentHash mismatch voids gated-tier records, same as gran
   assert.deepEqual(gatedTiersFor('acme', { file, currentHash: HASH_B }), []);
 });
 
-// ── Finding 11: a grant-bearing tier ('primary-eligible', 'statusline')
+// ── Finding 11: every grant-bearing tier
 // must never be recorded 'passed' with empty evidence — a grant must always
 // trace back to real conformance evidence (ADR-0031 §1). ──────────────────
 
@@ -240,6 +245,7 @@ test('recordTierResult on a grant-bearing tier requires non-empty evidence', () 
   assert.throws(() => recordTierResult('acme', 'primary-eligible', { hash: HASH_A }, { file }), TypeError);
   assert.throws(() => recordTierResult('acme', 'primary-eligible', { hash: HASH_A, evidence: '' }, { file }), TypeError);
   assert.throws(() => recordTierResult('acme', 'primary-eligible', { hash: HASH_A, evidence: '   ' }, { file }), TypeError);
+  assert.throws(() => recordTierResult('acme', 'aqe-provider', { hash: HASH_A, evidence: '' }, { file }), TypeError);
   assert.throws(() => recordTierResult('acme', 'statusline', { hash: HASH_A, evidence: '' }, { file }), TypeError);
   // nothing was recorded by any of the rejected attempts
   assert.equal(grantsFor('acme', { file }), null);
@@ -276,12 +282,12 @@ test('F-1: grantedCapabilitiesFor rejects a forged capability that has no matchi
   );
 });
 
-test("F-1: grantedCapabilitiesFor rejects a forged 'aqeProvider' key even though it is present in the raw store", () => {
+test("F-1: grantedCapabilitiesFor rejects a forged 'aqeProvider' key with no passed aqe-provider tier", () => {
   const file = tempFile();
   recordTierResult('acme', 'primary-eligible', { hash: HASH_A, evidence: 'led a run' }, { file });
   grantCapability('acme', 'canBePrimary', { hash: HASH_A }, { file });
   const store = JSON.parse(fs.readFileSync(file, 'utf8'));
-  store.acme.capabilities.aqeProvider = true; // forged — never written by grantCapability
+  store.acme.capabilities.aqeProvider = true; // forged — lacks its own passed tier
   fs.writeFileSync(file, JSON.stringify(store, null, 2), 'utf8');
 
   const granted = grantedCapabilitiesFor('acme', HASH_A, { file });
@@ -431,11 +437,13 @@ test('revokeCapability returns false when the capability was never granted, or t
   assert.equal(revokeCapability('acme', 'canBePrimary', { file }), false);
 });
 
-test('revokeCapability rejects a non-grantable capability, including a forged aqeProvider key', () => {
+test('revokeCapability accepts aqeProvider and still rejects unknown capabilities', () => {
   const file = tempFile();
   recordTierResult('acme', 'primary-eligible', { hash: HASH_A, evidence: 'led a run' }, { file });
   grantCapability('acme', 'canBePrimary', { hash: HASH_A }, { file });
-  assert.throws(() => revokeCapability('acme', 'aqeProvider', { file }), TypeError);
+  recordTierResult('acme', 'aqe-provider', { hash: HASH_A, evidence: 'real AQE provider probe returned OK' }, { file });
+  grantCapability('acme', 'aqeProvider', { hash: HASH_A }, { file });
+  assert.equal(revokeCapability('acme', 'aqeProvider', { file }), true);
   assert.throws(() => revokeCapability('acme', 'transcripts', { file }), TypeError);
   // Nothing was touched by the rejected attempts.
   assert.deepEqual(grantedCapabilitiesFor('acme', HASH_A, { file }), { canBePrimary: true });

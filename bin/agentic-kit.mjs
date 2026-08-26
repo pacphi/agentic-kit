@@ -32,6 +32,7 @@ const PORCELAIN = Object.assign(Object.create(null), {
 
 const PLUMBING = Object.assign(Object.create(null), {
   'admin': () => import('../src/commands/x/admin.mjs'),
+  'aqe-provider': () => import('../src/commands/x/aqe-provider.mjs'),
   'daemon-gc': () => import('../src/commands/x/daemon-gc.mjs'),
   'dashboard': () => import('../src/commands/x/dashboard.mjs'),
   'harvest': () => import('../src/commands/x/harvest.mjs'),
@@ -179,7 +180,7 @@ async function main() {
   // setup and host own complete mutation/reporting flows. Running the generic
   // nudge after a declined trust preflight could write version-cache state and
   // violate their "before any changes" boundary.
-  if (!values.json && !values['dry-run'] && !['sync', 'usage', 'models', 'setup', 'host', 'ruflo-mcp'].includes(cmd)) {
+  if (!values.json && !values['dry-run'] && !['sync', 'usage', 'models', 'setup', 'host', 'ruflo-mcp', 'aqe-provider'].includes(cmd)) {
     try {
       const { driftReport } = await import('../src/lib/versions.mjs');
       for (const r of await driftReport()) {

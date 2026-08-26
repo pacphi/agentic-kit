@@ -28,9 +28,7 @@ import {
 // alias), not a built-in promotion — promoting to a built-in is a manual
 // registry PR (§3), not this command.
 
-/** TIER_GRANTS' values are the only capabilities `ak` can ever grant —
- * critically this excludes 'aqeProvider', an upstream-owned enumeration
- * (ADR-0031 §4) that must never appear grantable here. */
+/** TIER_GRANTS' values are the only capabilities `ak` can ever grant. */
 function grantableCapability(capability) {
   return Object.values(TIER_GRANTS).includes(capability);
 }
@@ -49,16 +47,21 @@ function gatingTierFor(capability) {
  * production path SELECTS an external host as primary today (`ak host pick
  * --primary-host` only accepts claude|codex — built-in-scoped), so a
  * granted canBePrimary is visible/eligible but not yet auto-consumed.
- * commandStatusline reaches the same overlay but has NO runtime reader
+ * aqeProvider activates the admitted provider projection consumed by AQE's
+ * external-provider registry. commandStatusline reaches the same overlay but has NO runtime reader
  * anywhere in src/ (grep-verified) — its statusline render path is a later
  * wave, so it is currently inert. F-5: this is also the one-sentence
  * distinction between the two grantable caps the disclosure owes the
  * maintainer, so both call sites (pre-confirm disclosure, post-grant
  * success) share this single source of truth rather than drifting. */
 function capabilityStatusNote(capability) {
-  return capability === 'canBePrimary'
-    ? "canBePrimary is live: from the next ak invocation this host's tier label shows 'can lead' and it joins effectivePrimaryHostIds() — but no production path yet SELECTS an external host as primary ('ak host pick' stays built-in-scoped), so this is visible/eligible, not yet auto-consumed."
-    : 'commandStatusline is currently inert: it reaches the effective host registry, but no runtime path reads it anywhere yet — the statusline render path is a later wave.';
+  if (capability === 'canBePrimary') {
+    return "canBePrimary is live: from the next ak invocation this host's tier label shows 'can lead' and it joins effectivePrimaryHostIds() — but no production path yet SELECTS an external host as primary ('ak host pick' stays built-in-scoped), so this is visible/eligible, not yet auto-consumed.";
+  }
+  if (capability === 'aqeProvider') {
+    return 'aqeProvider is live: from the next flagged ak invocation, this exact admitted adapter-content hash can be projected through Agentic-QE 3.13.12 externalProviders; disabling the host, revoking this grant, or editing declared content voids it.';
+  }
+  return 'commandStatusline is currently inert: it reaches the effective host registry, but no runtime path reads it anywhere yet — the statusline render path is a later wave.';
 }
 
 export async function grant({
@@ -70,7 +73,7 @@ export async function grant({
   }
   const safeCapability = stripControl(capability);
   if (!grantableCapability(capability)) {
-    fail(`'${safeCapability}' is not a grantable capability — ak can only grant ${Object.values(TIER_GRANTS).join(', ')}. 'aqeProvider' in particular is an upstream-owned identity (agentic-qe's own provider enumeration) and is never ak-grantable — see ADR-0031 §4.`);
+    fail(`'${safeCapability}' is not a grantable capability — ak can only grant ${Object.values(TIER_GRANTS).join(', ')}.`);
     return 1;
   }
   const safeName = stripControl(name);
@@ -83,6 +86,10 @@ export async function grant({
     return 1;
   }
   const { manifest, hash } = loaded;
+  if (capability === 'aqeProvider' && !manifest.aqe?.provider) {
+    fail(`grant refused: '${safeName}' does not declare manifest.aqe.provider at this adapter-content hash`);
+    return 1;
+  }
   const tier = gatingTierFor(capability);
   const safeTier = stripControl(tier);
 
@@ -119,7 +126,7 @@ export async function grant({
     trustState = `manifest error (consent-error: ${error?.message ?? String(error)})`;
   }
   console.log(`  manifest trust state: ${trustState}`);
-  info('this grant pins the MANIFEST content (its hash), not the hook script bytes it references — see ADR-0031 §2 for that boundary.');
+  info('this grant pins the combined adapter content identity: validated manifest plus every declared hook-file digest.');
   info("granting a capability is a trust act, same posture as 'trust': it takes effect in the effective host registry from the next ak invocation.");
   info(capabilityStatusNote(capability));
 
