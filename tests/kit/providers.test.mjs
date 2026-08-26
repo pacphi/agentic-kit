@@ -10,7 +10,7 @@ import {
   HOSTS, installHost, applyAqeRouter, undoAqeRouter, aqeRouterFile,
   AQE_PROVIDER_TYPES,
   bothHostsEnabled, DUAL_ROLE_TIP, suggestedFallbackFor, AQE_FALLBACK_CODEX_SUGGESTION,
-  PROVIDER_TOKEN_RE, seedActivityRoutesIfMultiHost,
+  PROVIDER_ID_RE, PROVIDER_MODEL_RE, applyProviders, seedActivityRoutesIfMultiHost,
 } from '../../src/lib/providers.mjs';
 import * as paths from '../../src/lib/paths.mjs';
 import { managedHostIds, routableHostIds, HOST_REGISTRY } from '../../src/lib/adapters/index.mjs';
@@ -21,17 +21,146 @@ import { managedHostIds, routableHostIds, HOST_REGISTRY } from '../../src/lib/ad
 // that rejects a hostile/malformed kit.json entry before it ever reaches
 // run('ruflo', …) — pinned directly since applyProviders itself needs a real
 // `ruflo` binary on PATH to exercise end-to-end.
-test('PROVIDER_TOKEN_RE accepts real-shaped provider/model ids', () => {
-  for (const ok of ['openai', 'claude-opus-5', 'gpt-5.6', 'azure-openai', 'z-ai/glm-5.2'.split('/')[1]]) {
-    assert.ok(PROVIDER_TOKEN_RE.test(ok), `expected to accept ${JSON.stringify(ok)}`);
+test('provider id/model grammars accept real Ruflo shapes without conflating the two', () => {
+  for (const ok of ['openai', 'openrouter', 'azure-openai']) {
+    assert.ok(PROVIDER_ID_RE.test(ok), `expected provider id ${JSON.stringify(ok)}`);
+  }
+  for (const ok of ['claude-opus-5', 'gpt-5.6', 'qwen3.6:27b', 'z-ai/glm-5.2']) {
+    assert.ok(PROVIDER_MODEL_RE.test(ok), `expected model id ${JSON.stringify(ok)}`);
   }
 });
-test('PROVIDER_TOKEN_RE rejects shell metacharacters and whitespace', () => {
+test('provider id/model grammars reject shell metacharacters and whitespace', () => {
   for (const bad of [
     'gpt-5.6 & calc.exe', 'openai; rm -rf /', 'model`whoami`', 'a|b', 'a$(b)',
-    'has space', '', 'x'.repeat(129),
+    'has space', '',
   ]) {
-    assert.ok(!PROVIDER_TOKEN_RE.test(bad), `expected to reject ${JSON.stringify(bad)}`);
+    assert.ok(!PROVIDER_ID_RE.test(bad), `provider id accepted ${JSON.stringify(bad)}`);
+    assert.ok(!PROVIDER_MODEL_RE.test(bad), `model id accepted ${JSON.stringify(bad)}`);
+  }
+  assert.ok(!PROVIDER_ID_RE.test('x'.repeat(129)), 'provider id length is bounded');
+  assert.ok(!PROVIDER_MODEL_RE.test('x'.repeat(257)), 'model id length is bounded');
+  assert.ok(!PROVIDER_ID_RE.test('z-ai/glm-5.2'), 'provider ids cannot contain model separators');
+});
+
+test('applyProviders preserves tagged and vendor-qualified model ids', async () => {
+  const cwd = tmpProject();
+  const calls = [];
+  try {
+    const cfg = defaultCfg();
+    cfg.providers.models = [
+      { id: 'ollama', model: 'qwen3.6:27b' },
+      { id: 'openrouter', model: 'z-ai/glm-5.2' },
+    ];
+    const result = await applyProviders(cfg, cwd, {
+      haveFn: async () => true,
+      runner: async (bin, args, opts) => { calls.push({ bin, args, opts }); return { code: 0 }; },
+      versionFn: () => '3.38.20',
+    });
+    assert.equal(result.ok, true);
+    assert.equal(result.status, 'ok');
+    assert.deepEqual(calls.map(({ args }) => args), [
+      ['providers', 'configure', '-p', 'ollama', '-m', 'qwen3.6:27b', '-e', 'http://127.0.0.1:11434'],
+      ['providers', 'configure', '-p', 'openrouter', '-m', 'z-ai/glm-5.2'],
+    ]);
+  } finally {
+    rm(cwd);
+  }
+});
+
+test('applyProviders preserves an existing Ruflo endpoint unless kit.json owns one', async () => {
+  const cwd = tmpProject();
+  const calls = [];
+  try {
+    fs.writeFileSync(path.join(cwd, 'claude-flow.config.json'), JSON.stringify({
+      agents: { providers: [{ name: 'ollama', enabled: true, baseUrl: 'http://localhost:22434' }] },
+    }));
+    const cfg = defaultCfg();
+    cfg.providers.models = [{ id: 'ollama', model: 'qwen3.6:27b' }];
+    await applyProviders(cfg, cwd, {
+      haveFn: async () => true,
+      runner: async (_bin, args) => { calls.push(args); return { code: 0 }; },
+      versionFn: () => '3.38.20',
+    });
+    assert.deepEqual(calls[0], ['providers', 'configure', '-p', 'ollama', '-m', 'qwen3.6:27b']);
+
+    cfg.providers.models[0].endpoint = 'http://127.0.0.1:33434';
+    await applyProviders(cfg, cwd, {
+      haveFn: async () => true,
+      runner: async (_bin, args) => { calls.push(args); return { code: 0 }; },
+      versionFn: () => '3.38.20',
+    });
+    assert.deepEqual(calls[1], [
+      'providers', 'configure', '-p', 'ollama', '-m', 'qwen3.6:27b', '-e', 'http://127.0.0.1:33434',
+    ]);
+  } finally {
+    rm(cwd);
+  }
+});
+
+test('applyProviders does not replace Ollama Cloud or env endpoint selection with loopback', async () => {
+  const cwd = tmpProject();
+  const calls = [];
+  try {
+    const cfg = defaultCfg();
+    cfg.providers.models = [{ id: 'ollama', model: 'gpt-oss:120b-cloud' }];
+    for (const env of [
+      { OLLAMA_API_KEY: 'present' },
+      { OLLAMA_BASE_URL: 'http://127.0.0.1:22434' },
+    ]) {
+      await applyProviders(cfg, cwd, {
+        env,
+        haveFn: async () => true,
+        runner: async (_bin, args) => { calls.push(args); return { code: 0 }; },
+        versionFn: () => '3.38.20',
+      });
+    }
+    assert.deepEqual(calls, [
+      ['providers', 'configure', '-p', 'ollama', '-m', 'gpt-oss:120b-cloud'],
+      ['providers', 'configure', '-p', 'ollama', '-m', 'gpt-oss:120b-cloud'],
+    ]);
+  } finally {
+    rm(cwd);
+  }
+});
+
+test('applyProviders rejects unsafe endpoints before invoking Ruflo', async () => {
+  const cwd = tmpProject();
+  let called = false;
+  try {
+    const cfg = defaultCfg();
+    cfg.providers.models = [{
+      id: 'ollama', model: 'qwen3.6:27b', endpoint: 'http://example.com:11434',
+    }];
+    const result = await applyProviders(cfg, cwd, {
+      haveFn: async () => true,
+      runner: async () => { called = true; return { code: 0 }; },
+      versionFn: () => '3.38.20',
+    });
+    assert.equal(called, false);
+    assert.equal(result.ok, false);
+    assert.equal(result.status, 'failed');
+    assert.match(result.detail, /ollama\(invalid endpoint: remote-http\)/);
+  } finally {
+    rm(cwd);
+  }
+});
+
+test('applyProviders warns when persisted provider selection predates Ruflo 3.38.8', async () => {
+  const cwd = tmpProject();
+  try {
+    const cfg = defaultCfg();
+    cfg.providers.models = [{ id: 'openrouter', model: 'z-ai/glm-5.2' }];
+    const result = await applyProviders(cfg, cwd, {
+      haveFn: async () => true,
+      runner: async () => ({ code: 0 }),
+      versionFn: () => '3.38.7',
+    });
+    assert.equal(result.ok, true, 'registration still succeeds');
+    assert.equal(result.status, 'degraded');
+    assert.match(result.detail, /ruflo 3\.38\.7/);
+    assert.match(result.detail, />=3\.38\.8/);
+  } finally {
+    rm(cwd);
   }
 });
 

@@ -43,7 +43,9 @@ participate in other workflows.
 
 An inference provider describes credentials, transports, projections, observability sources, and
 bounded capabilities such as discovery, quota, pricing, and cache accounting. Provider identity
-does not imply a host or routing capability.
+does not imply a host or routing capability. A projection declares that configuration can be
+represented on a native surface; it does not manufacture an execution branch in that tool.
+Registration, selection, and observed execution remain separate facts.
 
 ### Provider binding
 

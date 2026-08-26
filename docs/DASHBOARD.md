@@ -111,7 +111,11 @@ Overview keeps status and routing in one health-first area:
 - **Hosts & Routing** presents execution-host health, the primary-host policy, per-activity routes,
   escalation paths, and routed host models. A configured route is assignment intent, not evidence
   of which inference provider served a particular session.
-- **Providers** presents inference-provider bindings and their configuration provenance.
+- **Providers** presents inference-provider bindings and their configuration provenance. A
+  registered provider is eligible configuration, not evidence that a request selected or used it.
+  Direct Ruflo agents must explicitly select OpenRouter or Ollama together with a provider-native
+  model, and the Ruflo/MCP process must inherit the required credential environment. Served-provider
+  and served-model claims come from **Usage → Scorecard** evidence instead.
 - **Runtime** presents operational services, processes, and MCP readiness.
 - **Intelligence** presents memory, learning, and quality-improvement signals machine-wide: an
   always-visible rollup folded across every project on this machine where memory or intelligence has
@@ -174,6 +178,13 @@ provider from a host name or model string. Codex `session_meta.model_provider` a
 the serving provider, so a historical row may honestly show **Not recorded**. That is missing
 evidence, not a claim that Claude Code was served by Anthropic or by any provider inferred from its
 model.
+
+This distinction also applies to Ruflo's project-scoped `agents.providers` registry. Ruflo 3.38.8+
+can execute an explicitly spawned `--provider openrouter --model z-ai/glm-5.2` agent through
+OpenRouter, but registration by `ak host pick --provider openrouter:z-ai/glm-5.2` does not retarget
+every direct agent. `RUFLO_PROVIDER=openrouter` is a process-wide override; explicit per-agent
+provider and model selection is the reproducible path. Restart a long-lived Ruflo/MCP process after
+adding `OPENROUTER_API_KEY`, because it inherits environment variables only when it starts.
 
 Usage transcript masking happens on the server. Redaction is marked, there is no reveal or export
 control, and the original masked value never reaches the browser. See

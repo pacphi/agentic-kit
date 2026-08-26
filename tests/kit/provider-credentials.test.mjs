@@ -13,7 +13,7 @@ import path from 'node:path';
 import { loadKitConfig } from '../../src/lib/config.mjs';
 import { AQE_CONSTRUCTIBLE_PROVIDERS } from '../../src/lib/routing.mjs';
 import {
-  AQE_PROVIDER_TYPES, AQE_PROVIDER_CREDENTIALS, aqeProviderCredential,
+  API_PROVIDERS, AQE_PROVIDER_TYPES, AQE_PROVIDER_CREDENTIALS, aqeProviderCredential,
   credentialGaps, detectAqeProviders, fallbackSource,
   applyAqeRouter, aqeRouterFile, collectIntegrationFacts,
 } from '../../src/lib/providers.mjs';
@@ -99,9 +99,9 @@ test('every credential descriptor declares exactly one credential mechanism', ()
 });
 
 test('openrouter — the one credentialed provider on the reported machine — has a descriptor', () => {
-  // It was absent from API_PROVIDERS entirely, so the only live key on the box
-  // was invisible to every ak surface while keyless `openai` displayed as configured.
   assert.ok(AQE_PROVIDER_CREDENTIALS.openrouter?.keyEnv?.includes('OPENROUTER_API_KEY'));
+  assert.ok(API_PROVIDERS.some((provider) => provider.id === 'openrouter'),
+    'Ruflo provider status must not hide the upstream direct-execution provider');
 });
 
 // ── aqeProviderCredential ───────────────────────────────────────────────────
