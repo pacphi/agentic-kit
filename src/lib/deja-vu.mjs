@@ -397,15 +397,20 @@ function codexPluginState(configFile) {
  * or null for unreadable/ambiguous files and never include paths or config
  * values. Package-native plugin caches are deliberately not classified as
  * direct wiring; callers may layer separately observed plugin facts on top.
- * @param {{cwd?:string,paths?:Partial<Record<'claudeMcp'|'claudeHooks'|'claudePlugins'|'codexMcp'|'codexHooks'|'opencodeMcp'|'opencodePlugin',string>>}} [options]
+ * @param {{cwd?:string,env?:Record<string,string|undefined>,paths?:Partial<Record<'claudeMcp'|'claudeHooks'|'claudePlugins'|'codexMcp'|'codexHooks'|'opencodeMcp'|'opencodePlugin',string>>}} [options]
  */
 export function observeDejaVuTargets(options = {}) {
+  const env = options.env ?? process.env;
+  const claudeRoot = env.CLAUDE_CONFIG_DIR || claudeDir();
+  const codexRoot = env.CODEX_HOME || codexDir();
   const files = {
-    claudeMcp: claudeUserMcpPath(),
-    claudeHooks: claudeSettingsPath(),
-    claudePlugins: path.join(claudeDir(), 'plugins', 'installed_plugins.json'),
-    codexMcp: codexConfigPath(),
-    codexHooks: path.join(codexDir(), 'hooks.json'),
+    claudeMcp: env.CLAUDE_CONFIG_DIR
+      ? path.join(claudeRoot, '.claude.json') : claudeUserMcpPath(),
+    claudeHooks: env.CLAUDE_CONFIG_DIR
+      ? path.join(claudeRoot, 'settings.json') : claudeSettingsPath(),
+    claudePlugins: path.join(claudeRoot, 'plugins', 'installed_plugins.json'),
+    codexMcp: env.CODEX_HOME ? path.join(codexRoot, 'config.toml') : codexConfigPath(),
+    codexHooks: path.join(codexRoot, 'hooks.json'),
     opencodeMcp: opencodeConfigPath(),
     opencodePlugin: path.join(opencodePluginsDir(), 'deja.js'),
     ...options.paths,

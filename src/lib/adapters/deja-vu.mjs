@@ -15,6 +15,7 @@ import {
 const HOST_BINS = Object.freeze({ claude: 'claude', codex: 'codex', opencode: 'opencode' });
 const MODES = Object.freeze(['mcp', 'auto']);
 const DOCTOR_TIMEOUT_MS = 10_000;
+const LATEST_TIMEOUT_MS = 5_000;
 const plain = (value) => value !== null && typeof value === 'object' && !Array.isArray(value);
 const boolOrNull = (value) => typeof value === 'boolean' ? value : null;
 const hashOrNull = (value) => typeof value === 'string' && /^[a-f0-9]{64}$/.test(value)
@@ -204,7 +205,8 @@ export function createDejaVuLifecycleAdapter(defaults = {}) {
   const runner = defaults.runner ?? run;
   const haveFn = defaults.haveFn ?? have;
   const packageVersionFn = defaults.packageVersionFn ?? installedVersion;
-  const latestVersionFn = defaults.latestVersionFn ?? latestVersion;
+  const latestVersionFn = defaults.latestVersionFn
+    ?? ((pkg) => latestVersion(pkg, 'latest', { timeout: LATEST_TIMEOUT_MS }));
   const compareVersions = defaults.compareVersions ?? cmpVersions;
   const observer = defaults.targetObserver ?? defaultTargetObserver;
   const clock = defaults.clock ?? (() => new Date().toISOString());

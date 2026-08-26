@@ -238,6 +238,46 @@ test('host-owned Claude and Codex plugin state is bounded and trust-aware', () =
   }
 });
 
+test('observation follows the active upstream Claude and Codex profile roots', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-deja-profiles-'));
+  const claudeRoot = path.join(root, 'claude-profile');
+  const codexRoot = path.join(root, 'codex-profile');
+  fs.mkdirSync(claudeRoot, { recursive: true });
+  fs.mkdirSync(codexRoot, { recursive: true });
+  try {
+    fs.writeFileSync(path.join(claudeRoot, '.claude.json'), JSON.stringify({
+      mcpServers: { deja: { command: '/SENTINEL/deja', args: ['mcp'] } },
+    }));
+    fs.writeFileSync(path.join(claudeRoot, 'settings.json'), JSON.stringify({ hooks: {
+      SessionStart: [{ hooks: [{ type: 'command', command: '/SENTINEL/deja hook-context' }] }],
+      UserPromptSubmit: [{ hooks: [{ type: 'command', command: '/SENTINEL/deja hook-prompt' }] }],
+      PreCompact: [{ matcher: 'manual|auto', hooks: [{ type: 'command', command: '/SENTINEL/deja hook-precompact' }] }],
+      PreToolUse: [{ matcher: 'Bash|Edit|Write|MultiEdit|NotebookEdit', hooks: [{ type: 'command', command: '/SENTINEL/deja hook-tool' }] }],
+      PostToolUse: [{ matcher: 'Bash', hooks: [{ type: 'command', command: '/SENTINEL/deja hook-tool-after' }] }],
+    } }));
+    fs.writeFileSync(path.join(codexRoot, 'config.toml'),
+      '[mcp_servers.deja]\ncommand = "/SENTINEL/deja"\nargs = ["mcp"]\n');
+    fs.writeFileSync(path.join(codexRoot, 'hooks.json'), JSON.stringify({ hooks: {
+      SessionStart: [{ matcher: 'startup|resume', hooks: [{ type: 'command', command: '/SENTINEL/deja hook-context' }] }],
+      PreToolUse: [{ matcher: 'Bash|apply_patch', hooks: [{ type: 'command', command: '/SENTINEL/deja hook-tool' }] }],
+      PostToolUse: [{ matcher: 'Bash', hooks: [{ type: 'command', command: '/SENTINEL/deja hook-tool-after' }] }],
+    } }));
+    const missing = path.join(root, 'missing');
+    const observed = observeDejaVuTargets({
+      env: { CLAUDE_CONFIG_DIR: claudeRoot, CODEX_HOME: codexRoot },
+      paths: { opencodeMcp: missing, opencodePlugin: missing },
+    });
+    for (const host of ['claude', 'codex']) {
+      assert.deepEqual(observed[host].direct, { mcp: true, auto: true });
+      assert.equal(observed[host].projection.mcp.length, 64);
+      assert.equal(observed[host].projection.auto.length, 64);
+    }
+    assert.doesNotMatch(JSON.stringify(observed), /SENTINEL|profile|hooks\.json/);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('derived index validation accepts only canonical index.db below an allowed data root', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-deja-path-'));
   const home = path.join(root, 'home');

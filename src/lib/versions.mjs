@@ -25,8 +25,8 @@ export function isValidSemver(value) {
   return typeof value === 'string' && SEMVER.test(value);
 }
 
-export async function latestVersion(pkg, tag = 'latest') {
-  const r = await run('npm', ['view', `${pkg}@${tag}`, 'version'], { timeout: 20_000 });
+export async function latestVersion(pkg, tag = 'latest', { runner = run, timeout = 20_000 } = {}) {
+  const r = await runner('npm', ['view', `${pkg}@${tag}`, 'version'], { timeout });
   const value = r.code === 0 ? r.stdout.trim() : null;
   return isValidSemver(value) ? value : null;
 }
