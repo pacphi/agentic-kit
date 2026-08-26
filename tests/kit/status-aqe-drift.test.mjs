@@ -154,3 +154,34 @@ test('REAL drift is still caught: a configured policy with no file yet warns', a
   assert.equal(row.level, 'warn', 'missing file in a managed project is drift a sync will fix');
   assert.equal(row.fix, 'sync re-applies agentOverrides');
 });
+
+test('unavailable external intent names a manual remedy instead of an impossible sync loop', async () => {
+  const project = sandboxProject('ak-drift-revoked-external');
+  seedHome(offlineKitConfig({
+    // Deliberately mismatched/stale entry name: the external host id in
+    // integration intent remains the actionable cleanup identity.
+    hostAdapters: [{ name: 'adapter-package-name', source: 'mem://hermes', contract: 1 }],
+    integrations: {
+      version: 2, hosts: { claude: true, codex: false, opencode: false, hermes: true },
+      bindings: [], ownership: {},
+    },
+    routing: { version: 1, primaryHost: 'claude', routes: {
+      testing: { host: 'hermes', model: 'default', provenance: 'user' },
+    } },
+    providers: {
+      aqeProvider: 'hermes',
+      aqeFallback: [{ provider: 'hermes', models: ['default'], source: 'user' }],
+      models: [], maxBudgetUsd: null,
+    },
+  }));
+  neutralizeEnvDrift(project);
+
+  const providerRows = rowsFor(await collect(project), 'providers');
+  const unavailable = providerRows.find((entry) => /external AQE intent is unavailable \(hermes\)/.test(entry.message));
+  assert.ok(unavailable, providerRows.map((entry) => entry.message).join('\n'));
+  assert.equal(unavailable.level, 'warn');
+  assert.equal(unavailable.fix, null, 'sync cannot restore an absent grant, so this is not a sync plan item');
+  assert.match(unavailable.message, /revoke-grant hermes aqeProvider/);
+  assert.equal(providerRows.some((entry) => entry.fix === 'sync re-applies provider env + aqe router'), false,
+    'a clean disk plus unavailable intent must not prescribe the non-converging sync loop');
+});
