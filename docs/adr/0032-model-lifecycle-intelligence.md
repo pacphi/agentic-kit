@@ -74,7 +74,9 @@ A model identity is scoped by execution host, inference provider, concrete model
 non-identifying scope id. A mutable local digest participates when the provider exposes one.
 Reasoning effort and service tier belong to a route binding or observed execution variant; the
 model record may state which variants it supports, but those settings do not create unrelated base
-model identities.
+model identities. Claude Code's documented `[1m]` extended-context suffix is a selector variant,
+so the inventory preserves it as configuration evidence while joining to the suffix-free model
+identity.
 
 The following dimensions remain independent:
 
@@ -259,7 +261,7 @@ The decision may be marked Implemented only when:
 The implementation branch was validated on 2026-08-25 with the following exact-head evidence:
 
 - `pnpm run check` passed TypeScript checking, ESLint, Markdown lint, packaging, CLI-load checks,
-  and the full unit/integration suite. Native instrumented coverage was 87.15% lines, 80.15%
+  and the full unit/integration suite. Native instrumented coverage was 87.13% lines, 80.11%
   branches, and 85.19% functions against 70% repository floors.
 - `pnpm run test:ui` passed the 331-check deterministic browser matrix, including Models-only panel
   ownership across every Usage submenu, readable Ollama build/runtime detail, lazy Models

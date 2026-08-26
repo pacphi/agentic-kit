@@ -61,7 +61,8 @@ ModelIdentity
 Identity is host- and scope-qualified because equal strings can name different deployments,
 accounts, projects, gateways, or local model bytes. `digest` participates only where a source
 establishes a mutable local artifact digest. Reasoning effort and service tier belong to a binding
-or execution variant, not to the base identity.
+or execution variant, not to the base identity. Claude Code's documented `[1m]` selector suffix is
+likewise retained as configured variant/selector evidence and removed from the base model id.
 
 Host-owned Claude and Codex catalogues may be provider-neutral. If independent evidence establishes
 the exact same host/model/scope/digest under the host's expected first-party provider (`anthropic`

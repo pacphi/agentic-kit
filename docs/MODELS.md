@@ -97,8 +97,12 @@ The lookup contracts were checked against current first-party documentation in A
   can identify models available to one Anthropic API account and returns limits and capabilities.
   Agentic Kit does not silently call it: an API-key-scoped result cannot prove Claude Code plan
   access or partner/OpenRouter availability, and credentials never enter the inventory.
-- Claude accepts the `sonnet` and `opus` aliases or a full model name through its documented model
-  selection surfaces ([Claude Code CLI reference](https://docs.anthropic.com/en/docs/claude-code/cli-usage)).
+- Claude accepts aliases or a full model name through its documented model selection surfaces. Its
+  `[1m]` suffix selects an extended-context variant and is stripped before Claude Code sends the
+  base model id to the provider
+  ([Claude Code model configuration](https://code.claude.com/docs/en/model-config)). Agentic Kit
+  therefore retains the full selector as configuration/alias evidence while joining its facts to
+  the base model identity.
 - OpenCode exposes `opencode models [provider] --verbose`; `--refresh` refreshes its
   Models.dev-backed cache ([OpenCode models](https://opencode.ai/docs/models/)). Agentic Kit runs
   refresh separately from the verbose list so OpenCode's success banner cannot degrade the list.

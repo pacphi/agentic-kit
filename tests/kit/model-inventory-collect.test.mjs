@@ -197,7 +197,7 @@ test('Claude snapshot merges public facts while preserving field-specific access
   const collection = await collectModelInventory({
     discoveryOptions: {
       owners: ['claude'], scopeKey: SCOPE_KEY, capturedAt: '2026-08-25T13:00:00.000Z',
-      inputs: { claude: { settingsRaw: JSON.stringify({ model: 'claude-fable-5' }) } },
+      inputs: { claude: { settingsRaw: JSON.stringify({ model: 'claude-fable-5[1m]' }) } },
     },
     readIndexFn: async () => ({
       generatedAt: '2026-08-25T13:00:00.000Z',
@@ -208,6 +208,7 @@ test('Claude snapshot merges public facts while preserving field-specific access
   const snapshot = composeModelSnapshot(collection, {
     scopeKey: SCOPE_KEY, capturedAt: '2026-08-25T13:00:00.000Z',
   });
+  assert.equal(snapshot.models.some(({ key }) => key.modelId === 'claude-fable-5[1m]'), false);
   const fable = snapshot.models.find(({ key }) => key.modelId === 'claude-fable-5');
   assert.deepEqual({
     displayName: fable.displayName,
@@ -224,6 +225,8 @@ test('Claude snapshot merges public facts while preserving field-specific access
   });
   assert.equal(fable.pricing.input, 10);
   assert.equal(fable.pricing.output, 50);
+  assert.equal(fable.variant.contextWindow, 1_000_000);
+  assert.equal(fable.aliases.some(({ name }) => name === 'claude-fable-5[1m]'), true);
   assert.deepEqual(new Set(fable.evidence.map(({ source }) => source)),
     new Set(['anthropic-docs', 'claude-config', 'usage-index']));
   assert.deepEqual(new Set(snapshot.sources.map(({ id }) => id)),

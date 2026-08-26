@@ -8,6 +8,8 @@ const ALIAS_ENV = Object.freeze({
   opus: 'ANTHROPIC_DEFAULT_OPUS_MODEL',
   haiku: 'ANTHROPIC_DEFAULT_HAIKU_MODEL',
 });
+const CLAUDE_MODEL_CONFIG_URL = 'https://code.claude.com/docs/en/model-config';
+const EXTENDED_CONTEXT_SUFFIX = '[1m]';
 
 function parseSettings(raw, field) {
   if (raw === undefined || raw === null || raw === '') return {};
@@ -22,6 +24,15 @@ function parseSettings(raw, field) {
 
 const boundedModel = (value) => typeof value === 'string' && value.length > 0 && value.length <= 256
   ? value : null;
+
+function parseModelReference(reference) {
+  const extended = reference.endsWith(EXTENDED_CONTEXT_SUFFIX);
+  const modelId = extended ? reference.slice(0, -EXTENDED_CONTEXT_SUFFIX.length) : reference;
+  return {
+    modelId,
+    variant: extended ? { contextWindow: 1_000_000 } : {},
+  };
+}
 
 export function discoverClaude({
   settingsRaw, managedSettingsRaw, capturedAt, scope = {}, scopeKey, environment = {},
@@ -46,25 +57,39 @@ export function discoverClaude({
   const allowed = Array.isArray(managed.availableModels)
     ? managed.availableModels.filter(boundedModel).slice(0, MAX_MODELS) : [];
   const complete = !Array.isArray(managed.availableModels) || managed.availableModels.length <= MAX_MODELS;
-  const source = sourceRecord({ id: 'claude-config', owner: 'claude', scope, scopeKey, capturedAt, complete, schema: 'claude-settings-v1' });
+  const source = sourceRecord({
+    id: 'claude-config', owner: 'claude', scope, scopeKey, capturedAt, complete,
+    schema: 'claude-settings-v1', refs: [CLAUDE_MODEL_CONFIG_URL],
+  });
   const publicAliasTargets = new Map(publicCatalog.models.flatMap((model) => (
     model.aliases.map(({ name, resolvesTo }) => [name, resolvesTo])
   )));
-  const canonicalTarget = (reference) => publicAliasTargets.get(reference) ?? reference;
+  const canonicalTarget = (reference) => {
+    const { modelId } = parseModelReference(reference);
+    return publicAliasTargets.get(modelId) ?? modelId;
+  };
   const records = new Map();
   const add = (reference, states = {}) => {
-    const alias = Object.hasOwn(ALIAS_ENV, reference) ? reference : null;
-    const configuredTarget = alias ? boundedModel(env[ALIAS_ENV[alias]]) ?? reference : reference;
-    const target = canonicalTarget(configuredTarget);
+    const selected = parseModelReference(reference);
+    const alias = Object.hasOwn(ALIAS_ENV, selected.modelId) ? selected.modelId : null;
+    const configuredReference = alias
+      ? boundedModel(env[ALIAS_ENV[alias]]) ?? selected.modelId : selected.modelId;
+    const configuredTarget = parseModelReference(configuredReference);
+    const target = canonicalTarget(configuredTarget.modelId);
     if (!boundedModel(target)) return;
     const prior = records.get(target);
-    const aliases = prior?.aliases ?? [];
-    if (alias && !aliases.some((entry) => entry.name === alias)) {
-      aliases.push({ name: alias, resolvesTo: target, provenance: 'configured', observedAt: source.capturedAt });
+    const aliases = [...(prior?.aliases ?? [])];
+    const selector = reference !== target ? reference : null;
+    if (selector && !aliases.some((entry) => entry.name === selector)) {
+      aliases.push({
+        name: selector, resolvesTo: target, provenance: 'configured', observedAt: source.capturedAt,
+      });
     }
     records.set(target, modelRecord({
       host: 'claude', provider: null, modelId: target, scopeId: source.scopeId,
-      aliases, source, states: { ...(prior?.states ?? {}), ...states, entitled: 'unknown' },
+      aliases, source,
+      variant: { ...(prior?.variant ?? {}), ...configuredTarget.variant, ...selected.variant },
+      states: { ...(prior?.states ?? {}), ...states, entitled: 'unknown' },
     }));
   };
   for (const model of allowed) add(model, { policyAllowed: true, discoverable: true });

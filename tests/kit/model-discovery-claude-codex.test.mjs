@@ -36,6 +36,22 @@ test('Claude preserves alias and concrete resolution while entitlement stays unk
   assert.doesNotThrow(() => normalizeSourceResult(result.source));
 });
 
+test('Claude keeps the 1M selector as a variant instead of a duplicate base model', () => {
+  const result = discoverClaude({
+    settingsRaw: JSON.stringify({ model: 'claude-fable-5[1m]' }),
+    capturedAt: '2026-08-25T13:00:00.000Z', scopeKey: SCOPE_KEY,
+  });
+  assert.equal(result.models.some(({ key }) => key.modelId.endsWith('[1m]')), false);
+  const configured = result.models.find((model) =>
+    model.key.modelId === 'claude-fable-5' && model.dimensions.configured.value === true);
+  assert.equal(configured.variant.contextWindow, 1_000_000);
+  assert.equal(configured.aliases.some(({ name, resolvesTo }) =>
+    name === 'claude-fable-5[1m]' && resolvesTo === 'claude-fable-5'), true);
+  assert.equal(configured.evidence.every(({ refs }) => refs.includes(
+    'https://code.claude.com/docs/en/model-config')), true);
+  assert.doesNotThrow(() => result.models.map(normalizeModelRecord));
+});
+
 test('Claude public facts retain first-party lifecycle, discovery, limits, and scope', () => {
   const result = discoverAnthropicPublicCatalog({
     capturedAt: '2026-08-25T13:00:00.000Z', scope: { profile: 'default' }, scopeKey: SCOPE_KEY,
