@@ -437,6 +437,23 @@ test('pick --aqe-provider none retires the owned external default without disabl
     assert.equal(selected.status, 0,
       `external selection failed\nstdout: ${selected.stdout}\nstderr: ${selected.stderr}`);
 
+    const configFile = path.join(sb.home, '.config', 'agentic-kit', 'kit.json');
+    const routerFile = path.join(sb.project, '.agentic-qe', 'llm-config.json');
+    const assertRepeatIsStable = (args, label) => {
+      const beforeBytes = [configFile, routerFile].map((file) => fs.readFileSync(file, 'utf8'));
+      const old = new Date('2001-01-01T00:00:00.000Z');
+      for (const file of [configFile, routerFile]) fs.utimesSync(file, old, old);
+      const beforeMtimes = [configFile, routerFile].map((file) => fs.statSync(file).mtimeMs);
+      const repeated = akPick(args, sb, { env });
+      assert.equal(repeated.status, 0,
+        `${label} repeat failed\nstdout: ${repeated.stdout}\nstderr: ${repeated.stderr}`);
+      assert.deepEqual([configFile, routerFile].map((file) => fs.readFileSync(file, 'utf8')), beforeBytes,
+        `${label} repeat changed durable bytes`);
+      assert.deepEqual([configFile, routerFile].map((file) => fs.statSync(file).mtimeMs), beforeMtimes,
+        `${label} repeat rewrote a converged artifact`);
+    };
+    assertRepeatIsStable(['x', 'host', 'pick', '--aqe-provider', 'hermes', '--yes'], 'selection');
+
     const deselected = akPick(['x', 'host', 'pick', '--aqe-provider', 'none', '--yes'], sb, { env });
     assert.equal(deselected.status, 0,
       `external deselection failed\nstdout: ${deselected.stdout}\nstderr: ${deselected.stderr}`);
@@ -449,6 +466,7 @@ test('pick --aqe-provider none retires the owned external default without disabl
     assert.equal(router._agenticKit.externalDefaultProvider, undefined, 'the exact default receipt is retired');
     assert.ok(router.externalProviders.hermes, 'the admitted declaration remains projected');
     assert.equal(router.providers.hermes.enabled, true, 'the MCP activation remains projected');
+    assertRepeatIsStable(['x', 'host', 'pick', '--aqe-provider', 'none', '--yes'], 'deselection');
   } finally {
     rm(sb.home, sb.project);
   }
