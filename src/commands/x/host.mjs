@@ -6,13 +6,13 @@
 // Two independent axes: ruflo host CLIs (claude/codex) and the LLM the routers use.
 import readline from 'node:readline/promises';
 import {
-  HOSTS, API_PROVIDERS, AQE_PROVIDER_TYPES, AQE_CHAIN_PROVIDER_TYPES, detectHosts,
+  HOSTS, API_PROVIDERS, AQE_PROVIDER_TYPES, detectHosts,
   settingsTarget, isDefault, applyHosts, applyProviders,
   undoProviders, hostInstallState, hostAuthState, installHost, applyAqeRouter, undoAqeRouter,
   bothHostsEnabled, DUAL_ROLE_TIP, JUDGE_BIAS_TIP, QE_COURT_TIP, suggestedFallbackFor,
   seedActivityRoutesIfMultiHost, printActivityRoutingTable, retireCodexMcp, undoCodexMcp,
   ensureRufloMcpInCodex, undoRufloMcpInCodex, detectAqeProviders, aqeProviderCredential, credentialGaps, fallbackSource,
-  collectIntegrationFacts,
+  collectIntegrationFacts, aqeSelectableProviderTypes, aqeSelectableChainProviderTypes,
 } from '../../lib/providers.mjs';
 import { parseRouteSpecs, formatModelHelp, PRIMARY_HOSTS, DEFAULT_PRIMARY_HOST, divergedRoutes, refreshSeededRoutes, pruneRoutesForHosts, modelNote, ACTIVITIES } from '../../lib/routing.mjs';
 import { loadKitConfig, saveKitConfig } from '../../lib/config.mjs';
@@ -60,7 +60,7 @@ export const options = {
 /** Billing is the non-obvious axis of the aqe provider list. Three categories,
  *  and claude-code is the ONLY same-vendor subscription alternative to a metered
  *  key (codex/gemini OAuth live on the host axis, not as aqe provider types). */
-export const AQE_BILLING_HINT = 'billing: claude-code = your Claude subscription ($0), ollama/onnx = local ($0), all others = metered API key';
+export const AQE_BILLING_HINT = 'billing: claude-code/codex = host subscription, ollama/onnx = local, built-in APIs = metered; external billing is adapter-declared and unverified';
 
 export const help = `ak host — frontier-host + LLM-provider detection and wiring
 
@@ -107,7 +107,8 @@ Options (pick, all optional — omit for interactive):
                                  alternate
   --aqe-provider <type>        set aqe's primary LLM (or 'none' to unset)
                                  billing: claude-code = Claude sub ($0),
-                                 ollama/onnx = local ($0), all others = metered key
+                                 ollama/onnx = local ($0); external billing is
+                                 adapter-declared and shown as unverified
   --aqe-fallback '<chain>'     ordered aqe chain, e.g.
                                  'claude-code:claude-opus-5; openai:gpt-5.6'
                                  (metered providers work too, e.g. add
@@ -226,15 +227,15 @@ async function status({ flags, cwd }) {
 
   // agentic-qe LLM provider (AQE_LLM_PROVIDER) + fallback chain
   const ap = cfg.providers.aqeProvider;
-  console.log(bold('\nagentic-qe LLM provider') + dim('  (AQE_LLM_PROVIDER)'));
-  console.log(`  ${(ap ?? dim('aqe default (unset)')).padEnd(24)} ${dim(`supported: ${AQE_PROVIDER_TYPES.join(', ')}`)}`);
+  console.log(bold('\nagentic-qe LLM provider') + dim('  (built-ins: env; external: project llm-config)'));
+  console.log(`  ${(ap ?? dim('aqe default (unset)')).padEnd(24)} ${dim(`supported: ${aqeSelectableProviderTypes().join(', ')}`)}`);
   console.log(`  ${dim(AQE_BILLING_HINT)}`);
   const chain = cfg.providers.aqeFallback ?? [];
   if (chain.length) {
     const rendered = chain.map((e) => {
       const cred = aqeProviderCredential(e.provider);
       const models = e.models?.length ? `(${e.models.join(',')})` : dim('(no models)');
-      return `${e.provider}${models}${cred.present ? '' : yellow(' ⚠ no credential')}`;
+      return `${e.provider}${models}${cred.known && !cred.present ? yellow(' ⚠ no credential') : ''}`;
     }).join(' → ');
     console.log(`  ${dim('fallback chain:')} ${rendered} ${dim('· .agentic-qe/llm-config.json')}`);
     for (const g of credentialGaps(chain)) {
@@ -249,10 +250,12 @@ async function status({ flags, cwd }) {
   // uncredentialed one is displayed as a configured fallback (#54).
   const creds = detectAqeProviders();
   console.log(bold('\naqe provider credentials') + dim('  (keys read from env; never persisted)'));
-  for (const p of AQE_PROVIDER_TYPES) {
+  for (const p of aqeSelectableProviderTypes()) {
     const c = creds[p];
-    const state = c.present ? (c.billing === 'local' ? 'local' : c.billing === 'subscription' ? 'subscription' : 'key present')
-      : `no key ${dim(`(${c.missing.join(', ')})`)}`;
+    const state = !c.known
+      ? `admitted · credential not introspectable · billing ${c.billing} (declared/unverified)`
+      : c.present ? (c.billing === 'local' ? 'local' : c.billing === 'subscription' ? 'subscription' : 'key present')
+        : `no key ${dim(`(${c.missing.join(', ')})`)}`;
     console.log(`  ${p.padEnd(14)} ${state}${c.source && c.present && c.billing === 'metered' ? dim(`  · ${c.source}`) : ''}`);
   }
 
@@ -446,6 +449,8 @@ async function maybeWriteQeCourtDefaults({ nonInteractive, cwd, enabled, aqeProv
 }
 
 async function pick({ flags, cwd, pkgRoot }) {
+  const aqeProviderTypes = aqeSelectableProviderTypes();
+  const aqeChainProviderTypes = aqeSelectableChainProviderTypes();
   const cfg = loadKitConfig();
   const trustBaseline = structuredClone(cfg);
   const hosts = await detectHosts(cwd);
@@ -506,7 +511,7 @@ async function pick({ flags, cwd, pkgRoot }) {
     const hAns = (await rl.question(`Enable which ruflo host(s)? (comma-separated) [${dflt.join(',')}]: `)).trim();
     enabled = (hAns || dflt.join(',')).split(',').map((s) => s.trim()).filter(Boolean);
     console.log(dim(`  ${AQE_BILLING_HINT}`));
-    const aAns = (await rl.question(`agentic-qe primary LLM provider — ${AQE_PROVIDER_TYPES.join('/')} (blank = leave aqe default): `)).trim().toLowerCase();
+    const aAns = (await rl.question(`agentic-qe primary LLM provider — ${aqeProviderTypes.join('/')} (blank = leave aqe default): `)).trim().toLowerCase();
     aqeProvider = aAns ? aAns : null;
     const suggestion = suggestedFallbackFor(enabled);
     const fAns = (await rl.question(
@@ -548,16 +553,16 @@ async function pick({ flags, cwd, pkgRoot }) {
     && Object.values(oldPolicy).every((r) => r.provenance === 'seeded');
   const reseedForPrimary = primaryHost !== prevPrimary && policyAllSeeded;
   // validate aqe primary provider
-  if (aqeProvider && !AQE_PROVIDER_TYPES.includes(aqeProvider)) {
+  if (aqeProvider && !aqeProviderTypes.includes(aqeProvider)) {
     const norm = aqeProvider === 'anthropic' ? 'claude' : aqeProvider;
-    if (AQE_PROVIDER_TYPES.includes(norm)) aqeProvider = norm;
-    else { warn(`unknown aqe provider '${aqeProvider}' — leaving aqe on its default (valid: ${AQE_PROVIDER_TYPES.join(', ')})`); aqeProvider = null; }
+    if (aqeProviderTypes.includes(norm)) aqeProvider = norm;
+    else { warn(`unknown aqe provider '${aqeProvider}' — leaving aqe on its default (valid: ${aqeProviderTypes.join(', ')})`); aqeProvider = null; }
   }
   // validate fallback chain providers (chain gate admits codex — #108 phase 3)
   aqeFallback = aqeFallback
     .map((e) => ({ ...e, provider: e.provider === 'anthropic' ? 'claude' : e.provider }))
     .filter((e) => {
-      const okp = AQE_CHAIN_PROVIDER_TYPES.includes(e.provider);
+      const okp = aqeChainProviderTypes.includes(e.provider);
       if (!okp) warn(`dropping unknown fallback provider '${e.provider}'`);
       else if (!e.models.length) warn(`fallback entry '${e.provider}' has no models — aqe may skip it; add e.g. ${e.provider}:<model-id>`);
       return okp;

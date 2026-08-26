@@ -9,6 +9,7 @@ import { vendorOf } from './qeCourt.mjs';
 import {
   routableHostIds, primaryHostIds, validateActivityHost, effectiveHostRegistry, effectiveRoutableHostIds,
 } from './adapters/index.mjs';
+import { admittedAqeProviders } from './adapters/aqe-provider.mjs';
 
 // ── Vocabulary ───────────────────────────────────────────────────────────────
 // Canonical development activities ak routes (ADR-0002). Array order = display order.
@@ -26,6 +27,17 @@ export const AK_ORIGINATED = new Set(['packaging', 'release']);
 // host or silently projected into AQE's separate provider vocabulary. An
 // admitted external host (P2, ADR-0031) gets no entry either, same reasoning.
 export const HOST_PROVIDER = { claude: 'claude-code', codex: 'codex' };
+
+/** Live host -> AQE provider mapping. Built-ins are stable; external mappings
+ * are read from the admitted registry for every call so an adapter loaded after
+ * this module was imported is selectable without restarting the process. */
+export function aqeProviderForHost(host) {
+  if (HOST_PROVIDER[host]) return HOST_PROVIDER[host];
+  const providers = admittedAqeProviders();
+  const records = Array.isArray(providers) ? providers : Object.values(providers ?? {});
+  const record = records.find((entry) => (entry.hostId ?? entry.host ?? entry.manifestId) === host);
+  return record?.id ?? record?.providerId ?? record?.type ?? null;
+}
 // Frozen at import time — built-ins only. Display strings and built-in
 // listings ONLY (formatModelHelp, model catalogs below): every VALIDATION
 // path (isRoutableHost, validateRoute, materializeRunPlan) consults the lazy
@@ -41,6 +53,16 @@ export const AQE_CONSTRUCTIBLE_PROVIDERS = [
   'claude', 'claude-code', 'codex', 'openai', 'ollama',
   'openrouter', 'gemini', 'azure-openai', 'bedrock', 'cognitum',
 ];
+
+/** Runtime-constructible provider ids, including admitted external CLI
+ * providers. This is intentionally a function rather than an import-time list. */
+export function aqeConstructibleProviderTypes() {
+  const records = admittedAqeProviders();
+  const external = (Array.isArray(records) ? records : Object.values(records ?? {}))
+    .map((entry) => entry.id ?? entry.providerId ?? entry.type)
+    .filter(Boolean);
+  return [...new Set([...AQE_CONSTRUCTIBLE_PROVIDERS, ...external])];
+}
 
 // Subscription/local providers — the ONLY targets auto-seed may use (ADR-0003
 // cost safety: seeding must never route work to a metered provider).
@@ -482,8 +504,8 @@ export function policyToAgentOverrides(policy = {}, { agentMap = AGENT_ACTIVITY_
   for (const [agent, act] of Object.entries(agentMap)) {
     const r = routes[act];
     if (!r) continue;
-    const provider = HOST_PROVIDER[r.host];
-    if (!AQE_CONSTRUCTIBLE_PROVIDERS.includes(provider)) continue;
+    const provider = aqeProviderForHost(r.host);
+    if (!aqeConstructibleProviderTypes().includes(provider)) continue;
     overrides[agent] = { provider, model: r.model };
   }
   return overrides;
@@ -497,8 +519,8 @@ export function configuredPolicyToAgentOverrides(policy = {}, { agentMap = AGENT
   for (const [agent, act] of Object.entries(agentMap)) {
     const route = policy[act];
     if (!route) continue;
-    const provider = HOST_PROVIDER[route.host];
-    if (!AQE_CONSTRUCTIBLE_PROVIDERS.includes(provider)) continue;
+    const provider = aqeProviderForHost(route.host);
+    if (!aqeConstructibleProviderTypes().includes(provider)) continue;
     overrides[agent] = { provider, model: route.model };
   }
   return overrides;
@@ -638,7 +660,7 @@ export function materializeRunPlan(policy = {}, { template = 'feature', task = '
 export function routedVendors(policy = {}) {
   const routes = resolveRoutes(policy);
   return new Set(Object.values(routes)
-    .map((r) => HOST_PROVIDER[r.host])
+    .map((r) => aqeProviderForHost(r.host))
     .filter(Boolean)
     .map((provider) => vendorOf(provider))
     .filter(Boolean));
@@ -667,7 +689,7 @@ export function validateRoute(route = {}) {
   const { host, model } = route;
   const errs = [];
   if (!isRoutableHost(host)) errs.push(`unknown host "${host}" (expected: ${effectiveRoutableHostIds().join('|')})`);
-  else if (HOST_PROVIDER[host] && !AQE_CONSTRUCTIBLE_PROVIDERS.includes(HOST_PROVIDER[host])) errs.push(`host "${host}" maps to a non-constructible provider`);
+  else if (aqeProviderForHost(host) && !aqeConstructibleProviderTypes().includes(aqeProviderForHost(host))) errs.push(`host "${host}" maps to a non-constructible provider`);
   if (model != null && (typeof model !== 'string' || model.trim() === '')) errs.push('model must be a non-empty string');
   return errs;
 }

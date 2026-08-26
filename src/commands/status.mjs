@@ -23,7 +23,7 @@ import { drift as ruvnetBrainDrift, nightlyAgentPresent as rbNightlyPresent, NIG
 import { coherence as adbCoherence } from '../lib/agentdb.mjs';
 import { readJson } from '../lib/settings.mjs';
 import { have } from '../lib/exec.mjs';
-import { HOSTS, settingsTarget, isDefault, managedEnv, MANAGED_ENV_KEYS, hostInstallState, hostAuthState, bothHostsEnabled, aqeRouterFile, aqeSupportsAgentOverrides, credentialGaps, collectIntegrationFacts, MIN_RUFLO_PERSISTED_PROVIDER_VERSION } from '../lib/providers.mjs';
+import { HOSTS, settingsTarget, isDefault, managedEnv, MANAGED_ENV_KEYS, hostInstallState, hostAuthState, bothHostsEnabled, aqeRouterFile, aqeSupportsAgentOverrides, aqeExternalProviderState, credentialGaps, collectIntegrationFacts, MIN_RUFLO_PERSISTED_PROVIDER_VERSION, EXTERNAL_PROVIDERS_MIN_AQE } from '../lib/providers.mjs';
 import { hostsWithLifecycle, isBuiltinHost, lifecycleExecutionEnabled } from '../lib/adapters/lifecycle-registry.mjs';
 import { companionLifecycleFor } from '../lib/adapters/companion-lifecycle-registry.mjs';
 import { PROVIDER_REGISTRY } from '../lib/adapters/index.mjs';
@@ -888,6 +888,30 @@ export async function collect({
             + `(${gaps.map((g) => `${g.provider}: needs ${g.missing.join(', ')}`).join('; ')})`));
         } else {
           rows.push(row('providers', 'ok', `aqe chain: ${chain.length}/${chain.length} rungs have credentials`));
+        }
+      }
+    }
+    const externalRoot = paths.repoRoot(cwd);
+    if (externalRoot) {
+      const externalDisk = readJson(aqeRouterFile(externalRoot), {}) ?? {};
+      const external = aqeExternalProviderState(externalDisk, { projectRoot: externalRoot });
+      if (external.desired.length || external.stale.length) {
+        const defaultDrift = external.desired.includes(cfg.providers?.aqeProvider)
+          && externalDisk.defaultProvider !== cfg.providers.aqeProvider;
+        if (!external.supported) {
+          rows.push(row('providers', 'warn',
+            `external AQE providers admitted but installed agentic-qe needs >=${EXTERNAL_PROVIDERS_MIN_AQE}`));
+        } else if (!external.ok || defaultDrift) {
+          const facts = [
+            external.missing.length ? `missing ${external.missing.join(', ')}` : '',
+            external.drifted.length ? `drifted/conflicting ${external.drifted.join(', ')}` : '',
+            external.stale.length ? `stale owned ${external.stale.join(', ')}` : '',
+            defaultDrift ? `default is not ${cfg.providers.aqeProvider}` : '',
+          ].filter(Boolean).join('; ');
+          rows.push(row('providers', 'warn', `external AQE projection out of sync (${facts})`, 'sync reconciles only ak-owned entries'));
+        } else {
+          rows.push(row('providers', 'ok',
+            `external AQE providers projected: ${external.desired.join(', ')} (declared/admitted; served inference not yet proven)`));
         }
       }
     }
