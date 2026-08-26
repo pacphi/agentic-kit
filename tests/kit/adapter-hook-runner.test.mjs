@@ -85,6 +85,8 @@ test('combined stdout+stderr output is capped at 256KB with a truncation marker'
     hostId: 'claude', verb: 'discover',
   });
   assert.equal(result.ok, true);
+  assert.equal(result.stdoutTruncated, true);
+  assert.equal(result.stderrTruncated, false);
   assert.ok(Buffer.byteLength(result.stdout, 'utf8') <= 256 * 1024 + 200);
   assert.ok(/truncated/i.test(result.stdout));
 });

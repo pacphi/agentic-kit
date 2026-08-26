@@ -8,10 +8,13 @@
 // through runAdapterHook's integrity, cwd, environment, timeout, output-cap,
 // and process-group controls.
 import path from 'node:path';
+import fs from 'node:fs';
+import os from 'node:os';
+import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { runAdapterHook } from './hook-runner.mjs';
 import { immutable } from './schema.mjs';
-import { verifyAdapterContent } from './integrity.mjs';
+import { AdapterIntegrityError, verifyAdapterContent } from './integrity.mjs';
 
 const DEFAULT_MODEL = 'default';
 const DEFAULT_MAX_CONCURRENCY = 2;
@@ -65,6 +68,86 @@ function publicRecord(record) {
   });
 }
 
+function snapshotRelative(tokenValue, baseDir, inventory) {
+  if (!tokenValue || tokenValue.startsWith('-')) return null;
+  let relative;
+  if (path.isAbsolute(tokenValue)) {
+    const outside = path.relative(baseDir, tokenValue);
+    if (outside === '..' || outside.startsWith(`..${path.sep}`) || path.isAbsolute(outside)) return null;
+    relative = outside.replaceAll(path.sep, '/');
+  } else {
+    relative = path.posix.normalize(tokenValue.replaceAll('\\', '/')).replace(/^\.\//, '');
+  }
+  return inventory.has(relative) ? relative : null;
+}
+
+function snapshotCommand(command, baseDir, snapshotDir, inventory) {
+  return command.map((token) => {
+    const equals = token.indexOf('=');
+    const prefix = equals >= 0 ? token.slice(0, equals + 1) : '';
+    const value = equals >= 0 ? token.slice(equals + 1) : token;
+    const relative = snapshotRelative(value, baseDir, inventory);
+    return relative ? `${prefix}${path.join(snapshotDir, ...relative.split('/'))}` : token;
+  });
+}
+
+/** Copy the exact verified bytes into a private execution
+ * snapshot. Relative imports and declared file arguments resolve here, so a
+ * rename/write after verification cannot change the bytes this invocation
+ * executes. Interpreter and host binaries remain externally-managed system
+ * trust; the adapter-owned files are the snapshot boundary. */
+function materializeHookSnapshot(record) {
+  const declared = record.integrity.hookFiles ?? [];
+  if (declared.length === 0) return null;
+  if (typeof record.baseDir !== 'string' || !path.isAbsolute(record.baseDir)) {
+    throw new AdapterIntegrityError('hook-files-unavailable', 'AQE provider snapshot requires an absolute adapter directory');
+  }
+  const snapshotDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-aqe-provider-snapshot-'));
+  try {
+    for (const file of declared) {
+      const source = path.resolve(record.baseDir, ...file.path.split('/'));
+      const outside = path.relative(record.baseDir, source);
+      if (outside === '..' || outside.startsWith(`..${path.sep}`) || path.isAbsolute(outside)) {
+        throw new AdapterIntegrityError('invalid-hook-file', `'${file.path}' escapes the adapter directory`);
+      }
+      const stat = fs.lstatSync(source);
+      if (!stat.isFile()) {
+        throw new AdapterIntegrityError('hook-file-not-regular', `'${file.path}' is not a regular file`);
+      }
+      const bytes = fs.readFileSync(source);
+      const digest = createHash('sha256').update(bytes).digest('hex');
+      if (digest !== file.sha256) {
+        throw new AdapterIntegrityError(
+          'hook-content-changed',
+          `declared hook content changed after consent (file '${file.path}')`,
+        );
+      }
+      const target = path.join(snapshotDir, ...file.path.split('/'));
+      fs.mkdirSync(path.dirname(target), { recursive: true, mode: 0o700 });
+      fs.writeFileSync(target, bytes, { flag: 'wx', mode: stat.mode & 0o777 });
+    }
+    const inventory = new Set(declared.map((file) => file.path));
+    return {
+      dir: snapshotDir,
+      hook: {
+        ...record.provider.hook,
+        command: snapshotCommand(record.provider.hook.command, record.baseDir, snapshotDir, inventory),
+      },
+    };
+  } catch (error) {
+    fs.rmSync(snapshotDir, { recursive: true, force: true });
+    throw error;
+  }
+}
+
+function redactForwardedSecrets(value, env) {
+  let text = String(value ?? '');
+  const secrets = [...new Set(Object.values(env).filter((entry) => typeof entry === 'string' && entry.length > 0))]
+    .sort((a, b) => b.length - a.length);
+  for (const secret of secrets) text = text.split(secret).join('<redacted>');
+  return text;
+}
+
 /** Register one already-admitted, currently-granted provider. This function
  * cannot perform admission or grant lookup itself; its sole production caller
  * is bootstrapHostAdapters, which owns those gates. It does re-verify the
@@ -89,7 +172,8 @@ export function registerAdmittedAqeProvider(manifest, {
     throw new TypeError(`AQE provider '${id}' has a relative hook command but no retained adapter directory`);
   }
   const record = {
-    id, manifest, provider, baseDir, integrity, contentHash: expectedHash,
+    id, manifest, provider, baseDir,
+    integrity: immutable(structuredClone(integrity)), contentHash: expectedHash,
   };
   providers.set(id, record);
   return publicRecord(record);
@@ -181,31 +265,61 @@ async function executeRecord(record, {
     stdin, model, projectRoot, expectedHash,
   });
   if (problem) return { ok: false, stdoutText: '', stderrText: '', exitCode: null, detail: problem };
-  const result = await runAdapterHook({
-    hook: record.provider.hook,
-    hostId: record.id,
-    verb: 'aqe-provider',
-    stdin,
-    timeoutMs,
-    env: selectedEnvironment(record, env, { model, projectRoot }),
-    cwd: record.baseDir ?? projectRoot,
-    manifest: record.manifest,
-    integrity: record.integrity,
-    baseDir: record.baseDir,
-  });
+  const selectedEnv = selectedEnvironment(record, env, { model, projectRoot });
+  const secretEnv = Object.fromEntries((record.provider.hook.passEnv ?? [])
+    .filter((name) => typeof env?.[name] === 'string')
+    .map((name) => [name, env[name]]));
+  let snapshot;
+  try {
+    snapshot = materializeHookSnapshot(record);
+  } catch (error) {
+    return {
+      ok: false, stdoutText: '', stderrText: '', exitCode: null,
+      detail: `AQE provider '${record.id}' snapshot failed: ${error?.message ?? String(error)}`,
+    };
+  }
+  let result;
+  try {
+    result = await runAdapterHook({
+      hook: snapshot?.hook ?? record.provider.hook,
+      hostId: record.id,
+      verb: 'aqe-provider',
+      stdin,
+      timeoutMs,
+      env: selectedEnv,
+      cwd: snapshot?.dir ?? record.baseDir ?? projectRoot,
+      // The snapshot hashes and copies the exact bytes it executes. Hooks
+      // without adapter-owned files retain the generic immediate verifier.
+      ...(snapshot ? {} : {
+        manifest: record.manifest,
+        integrity: record.integrity,
+        baseDir: record.baseDir,
+      }),
+    });
+  } finally {
+    if (snapshot) fs.rmSync(snapshot.dir, { recursive: true, force: true });
+  }
+  const stderrText = redactForwardedSecrets(result.stderrText, secretEnv);
+  const detail = redactForwardedSecrets(result.detail, secretEnv);
+  if (result.stdoutTruncated) {
+    return {
+      ok: false, stdoutText: '', stderrText, exitCode: null,
+      detail: `AQE provider '${record.id}' completion exceeded the supervised output limit`,
+    };
+  }
   if (!result.ok) {
     return {
       ok: false,
       stdoutText: '',
-      stderrText: result.stderrText ?? '',
+      stderrText,
       exitCode: result.exitCode,
-      detail: (result.stderrText ?? '').trim() || result.detail || `AQE provider '${record.id}' failed`,
+      detail: stderrText.trim() || detail || `AQE provider '${record.id}' failed`,
     };
   }
   return {
     ok: true,
     stdoutText: result.stdoutText ?? '',
-    stderrText: result.stderrText ?? '',
+    stderrText,
     exitCode: result.exitCode,
     detail: null,
   };

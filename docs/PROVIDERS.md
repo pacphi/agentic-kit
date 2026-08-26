@@ -185,7 +185,13 @@ built-in/reserved provider. The hook receives the prompt on stdin and writes onl
 stdout. Exit `77`/`78`, timeout, auth failure, and any other error produce no stdout because AQE
 3.13.12 treats non-empty stdout as a completion even when a CLI exits non-zero. The bridge forwards
 only declared environment variables, protects its own `AK_AQE_*` control variables, rechecks the
-content hash before spawn, and keeps the hook in a supervised subprocess.
+content hash before spawn, and keeps the hook in a supervised subprocess. Each invocation copies
+the verified bytes of every declared adapter-owned hook file into a private execution snapshot,
+closing the verify-to-spawn rewrite race while preserving relative imports among declared files.
+The interpreter and other absolute/PATH-resolved native binaries remain externally managed system
+trust, not part of the adapter content hash. Declare every adapter-owned imported file. Forwarded
+secret values are redacted from bridge diagnostics, and a completion that exceeds the supervised
+output bound fails closed instead of returning a truncated success.
 Candidate metadata is bounded before admission: at most 128 model ids of 256 UTF-8 bytes each, a
 control-free display name of at most 128 bytes, concurrency from 1 through 64, and a provider-hook
 timeout no longer than 24 hours.

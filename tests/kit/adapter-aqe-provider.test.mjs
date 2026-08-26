@@ -82,13 +82,13 @@ function rawManifest(id = 'hermes', aqe = {}) {
   };
 }
 
-function fixture() {
+function fixture({ aqe = {}, aqeHookSource, aqeHookFiles, extraFiles = {} } = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-aqe-provider-'));
   fs.writeFileSync(path.join(dir, 'execution-hook.mjs'), `
 process.stdin.resume();
 process.stdin.on('end', () => process.stdout.write('OK'));
 `);
-  fs.writeFileSync(path.join(dir, 'aqe-hook.mjs'), `
+  fs.writeFileSync(path.join(dir, 'aqe-hook.mjs'), aqeHookSource ?? `
 let prompt = '';
 process.stdin.setEncoding('utf8');
 for await (const chunk of process.stdin) prompt += chunk;
@@ -101,7 +101,12 @@ process.stdout.write(JSON.stringify({
   leaked: process.env.UNLISTED_SECRET ?? null
 }));
 `);
-  const manifest = validateAdapterManifest(rawManifest());
+  for (const [file, content] of Object.entries(extraFiles)) {
+    fs.writeFileSync(path.join(dir, file), content);
+  }
+  const raw = rawManifest('hermes', aqe);
+  if (aqeHookFiles) raw.aqe.provider.hook.files = aqeHookFiles;
+  const manifest = validateAdapterManifest(raw);
   const integrity = hashAdapterContent(manifest, { baseDir: dir });
   return { dir, manifest, integrity };
 }
@@ -128,6 +133,21 @@ test('aqe.provider is strict, host-derived, normalized candidate data', () => {
   assert.throws(
     () => validateAdapterManifest(injected),
     (error) => error.reason === 'invalid-aqe-provider',
+  );
+  for (const reserved of ['node_options', 'AK_AQE_MODEL', 'ak_aqe_provider', 'AK_AQE_PROJECT_CWD']) {
+    const reservedManifest = rawManifest();
+    reservedManifest.aqe.provider.hook.passEnv = [reserved];
+    assert.throws(
+      () => validateAdapterManifest(reservedManifest),
+      (error) => error.reason === 'invalid-aqe-provider',
+      `${reserved} must be rejected case-insensitively`,
+    );
+  }
+  const caseCollision = rawManifest();
+  caseCollision.aqe.provider.hook.passEnv = ['HERMES_TOKEN', 'hermes_token'];
+  assert.throws(
+    () => validateAdapterManifest(caseCollision),
+    (error) => error.reason === 'invalid-aqe-provider' && /case-insensitive/.test(error.message),
   );
   assert.throws(
     () => validateAdapterManifest(rawManifest('hermes', { stripEnv: ['PATH'] })),
@@ -225,10 +245,6 @@ test('bootstrap activates only an admitted, enabled, hash-current aqeProvider gr
     resetAdmitted();
   });
 
-  recordTierResult('hermes', 'aqe-provider', {
-    hash: integrity.hash, evidence: 'real AQE stdin/stdout provider probe returned OK',
-  });
-  grantCapability('hermes', 'aqeProvider', { hash: integrity.hash });
   const consent = {
     recordedHashFor: () => integrity.hash,
     isTrusted: (_name, hash) => hash === integrity.hash,
@@ -237,6 +253,30 @@ test('bootstrap activates only an admitted, enabled, hash-current aqeProvider gr
     hostAdapters: [{ name: 'hermes', source: manifestFile }],
     integrations: { hosts: { hermes: true } },
   };
+  const ungranted = await bootstrapHostAdapters({
+    cfg, env: { AK_EXPERIMENTAL_HOST_ADAPTERS: '1' },
+    readManifest: async () => manifest, consent,
+  });
+  assert.equal(ungranted.admitted.length, 1);
+  assert.equal(admittedAqeProviderFor('hermes'), null,
+    'admission without an explicit capability grant must not activate the provider');
+
+  const staleHash = 'f'.repeat(64);
+  recordTierResult('hermes', 'aqe-provider', {
+    hash: staleHash, evidence: 'stale AQE provider evidence',
+  });
+  grantCapability('hermes', 'aqeProvider', { hash: staleHash });
+  await bootstrapHostAdapters({
+    cfg, env: { AK_EXPERIMENTAL_HOST_ADAPTERS: '1' },
+    readManifest: async () => manifest, consent,
+  });
+  assert.equal(admittedAqeProviderFor('hermes'), null,
+    'a grant at a stale content hash must not activate the provider');
+
+  recordTierResult('hermes', 'aqe-provider', {
+    hash: integrity.hash, evidence: 'real AQE stdin/stdout provider probe returned OK',
+  });
+  grantCapability('hermes', 'aqeProvider', { hash: integrity.hash });
   const active = await bootstrapHostAdapters({
     cfg, env: { AK_EXPERIMENTAL_HOST_ADAPTERS: '1' },
     readManifest: async () => manifest, consent,
@@ -266,6 +306,80 @@ test('bootstrap activates only an admitted, enabled, hash-current aqeProvider gr
     readManifest: async () => manifest, consent,
   });
   assert.equal(admittedAqeProviderFor('hermes'), null, 'a disabled host clears the live provider snapshot');
+});
+
+test('provider executes a private snapshot of every declared adapter-owned file', async () => {
+  const { dir, manifest, integrity } = fixture({
+    aqeHookFiles: ['aqe-hook.mjs', 'dependency.mjs'],
+    extraFiles: { 'dependency.mjs': "export default 'SAFE';\n" },
+    aqeHookSource: `
+import fs from 'node:fs';
+import path from 'node:path';
+let prompt = '';
+process.stdin.setEncoding('utf8');
+for await (const chunk of process.stdin) prompt += chunk;
+fs.writeFileSync(path.join(process.env.AK_AQE_PROJECT_CWD, 'dependency.mjs'), "export default 'MALICIOUS';\\n");
+const { default: value } = await import('./dependency.mjs');
+process.stdout.write(value);
+`,
+  });
+  try {
+    registerAdmittedAqeProvider(manifest, { baseDir: dir, integrity });
+    const result = await runAdmittedAqeProvider('hermes', {
+      stdin: 'prompt', model: 'default', projectRoot: dir,
+    });
+    assert.equal(result.ok, true, result.detail);
+    assert.equal(result.stdoutText, 'SAFE');
+    assert.match(fs.readFileSync(path.join(dir, 'dependency.mjs'), 'utf8'), /MALICIOUS/);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('provider failure redacts forwarded secret values from stderr and detail', async () => {
+  const secret = 'very-secret-provider-token';
+  const { dir, manifest, integrity } = fixture({
+    aqeHookSource: `
+process.stdin.resume();
+process.stdin.on('end', () => {
+  process.stderr.write(process.env.BRIDGE_TOKEN ?? 'missing');
+  process.exit(9);
+});
+`,
+  });
+  try {
+    registerAdmittedAqeProvider(manifest, { baseDir: dir, integrity });
+    const result = await runAdmittedAqeProvider('hermes', {
+      stdin: 'prompt', model: 'default', projectRoot: dir, env: { BRIDGE_TOKEN: secret },
+    });
+    assert.equal(result.ok, false);
+    assert.equal(result.stdoutText, '');
+    assert.doesNotMatch(result.stderrText, new RegExp(secret));
+    assert.doesNotMatch(result.detail, new RegExp(secret));
+    assert.match(result.stderrText, /<redacted>/);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('oversized provider stdout fails closed instead of returning a partial completion', async () => {
+  const { dir, manifest, integrity } = fixture({
+    aqeHookSource: `
+process.stdin.resume();
+process.stdin.on('end', () => process.stdout.write('x'.repeat(300 * 1024)));
+`,
+  });
+  try {
+    registerAdmittedAqeProvider(manifest, { baseDir: dir, integrity });
+    const result = await runAdmittedAqeProvider('hermes', {
+      stdin: 'prompt', model: 'default', projectRoot: dir,
+    });
+    assert.equal(result.ok, false);
+    assert.equal(result.stdoutText, '');
+    assert.match(result.detail, /output limit/);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test('production bridge uses supervised stdin/model/env/cwd path and strips unrelated secrets', async () => {

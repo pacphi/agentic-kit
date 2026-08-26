@@ -234,6 +234,13 @@ function validateEnvNames(value, field) {
   if (invalid !== undefined) {
     throw new ManifestRejected('invalid-aqe-provider', `${field} contains invalid environment name '${invalid}'`);
   }
+  const canonical = value.map((name) => name.toUpperCase());
+  if (new Set(canonical).size !== canonical.length) {
+    throw new ManifestRejected(
+      'invalid-aqe-provider',
+      `${field} contains names that collide on case-insensitive environments`,
+    );
+  }
   return [...value];
 }
 
@@ -285,16 +292,20 @@ function validateAqe(value, host, driving, execution) {
   validateHookFiles(provider.hook.files, 'aqe.provider.hook.files', 'invalid-aqe-provider');
   const passEnv = validateEnvNames(provider.hook.passEnv, 'aqe.provider.hook.passEnv');
   const stripEnv = validateEnvNames(provider.stripEnv, 'aqe.provider.stripEnv');
-  const unsafePass = passEnv?.find((name) => AQE_BRIDGE_ENV.has(name)
-    || ENV_CODE_INJECTION.has(name) || name.startsWith('AK_AQE_'));
+  const unsafePass = passEnv?.find((name) => {
+    const canonical = name.toUpperCase();
+    return AQE_BRIDGE_ENV.has(canonical)
+      || ENV_CODE_INJECTION.has(canonical) || canonical.startsWith('AK_AQE_');
+  });
   if (unsafePass) {
     throw new ManifestRejected('invalid-aqe-provider', `aqe.provider.hook.passEnv may not forward bridge/runtime variable '${unsafePass}'`);
   }
-  const unsafeStrip = stripEnv?.find((name) => AQE_BRIDGE_ENV.has(name));
+  const unsafeStrip = stripEnv?.find((name) => AQE_BRIDGE_ENV.has(name.toUpperCase()));
   if (unsafeStrip) {
     throw new ManifestRejected('invalid-aqe-provider', `aqe.provider.stripEnv may not remove bridge runtime variable '${unsafeStrip}'`);
   }
-  const conflict = passEnv?.find((name) => stripEnv?.includes(name));
+  const stripped = new Set(stripEnv?.map((name) => name.toUpperCase()));
+  const conflict = passEnv?.find((name) => stripped.has(name.toUpperCase()));
   if (conflict) {
     throw new ManifestRejected('invalid-aqe-provider', `environment '${conflict}' cannot appear in both passEnv and stripEnv`);
   }
