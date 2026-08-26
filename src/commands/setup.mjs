@@ -15,7 +15,10 @@ import { register as mcpRegister, applyExclusions } from '../lib/mcp.mjs';
 import { reconcileOpencodeGuidance } from '../lib/opencode.mjs';
 import { runLifecycle } from '../lib/adapters/lifecycle.mjs';
 import { hostsWithLifecycle, lifecycleAdapterFor, lifecycleExecutionEnabled, detectionBinFor } from '../lib/adapters/lifecycle-registry.mjs';
+import { companionLifecycleFor } from '../lib/adapters/companion-lifecycle-registry.mjs';
+import { managedCompanionFor } from '../lib/adapters/companion-registry.mjs';
 import { renderApplyReport } from '../lib/adapters/lifecycle-render.mjs';
+import { DEJA_VU_TARGETS } from '../lib/deja-vu.mjs';
 import { loadKitConfig, saveKitConfig } from '../lib/config.mjs';
 import { HOSTS, applyHosts, applyProviders, hostInstallState, installHost, applyAqeRouter, seedActivityRoutesIfMultiHost, printActivityRoutingTable, aqeSupportsAgentOverrides, retireCodexMcp, ensureRufloMcpInCodex, applySetupHostFlags, bothHostsEnabled } from '../lib/providers.mjs';
 import { installedVersion } from '../lib/versions.mjs';
@@ -30,6 +33,9 @@ import {
 } from '../lib/trust-manifest.mjs';
 import * as paths from '../lib/paths.mjs';
 import { ok, warn, fail, info, heading, bold, dim, reportOutcome } from '../lib/output.mjs';
+
+const DEJA_VU = managedCompanionFor('deja-vu');
+const DEFAULT_DEJA_VU_LIFECYCLE = companionLifecycleFor('deja-vu');
 
 /** Prints one lifecycle-render.mjs report line at its own level — 'fail'
  *  (F5, Wave C security review) reaches `fail()`, not a fallback `info()`,
@@ -52,6 +58,9 @@ export const options = {
   'no-security': { type: 'boolean', default: false },
   codex: { type: 'boolean', default: false },
   opencode: { type: 'boolean', default: false },
+  'with-deja-vu': { type: 'boolean', default: false },
+  'deja-vu-mode': { type: 'string' },
+  'no-deja-vu': { type: 'boolean', default: false },
   'primary-host': { type: 'string' },
   reconfigure: { type: 'boolean', default: false },
 };
@@ -81,6 +90,11 @@ Options:
                      deploys the lifecycle plugin + platform skill, and converts
                      the ruflo agent set into opencode subagents. Already set up?
                      Use: ak host pick --host claude,opencode
+  --with-deja-vu   explicitly install/manage deja-vu 0.19+ for enabled Kit hosts;
+                     default mode is MCP and setup runs one bounded \`deja index\`
+  --deja-vu-mode <m>  companion mode: mcp|auto; auto is a second consent for
+                     automatic recalls, including action-time events where supported
+  --no-deja-vu     keep the optional companion disabled (the setup default)
   --primary-host <h>  which host leads: claude|codex (default claude). Passing
                      codex implies --codex and mirrors the routing defaults so
                      codex drives with claude as the alternate.
@@ -93,6 +107,7 @@ Examples:
   ak setup                    machine + project (when inside a git repo)
   ak setup --minimal          machine only
   ak setup --codex --yes      install everything incl. codex, non-interactive
+  ak setup --with-deja-vu --deja-vu-mode mcp
   ak setup --primary-host codex --yes   dual-host with codex leading
   ak setup --project --yes    force project setup, no prompts`;
 
@@ -126,12 +141,132 @@ export function projectPermissionManifest(cfg, /** @type {{hosts?: any[]}} */ { 
 // driven path as projectPermissionManifest rather than hardcoded to claude.
 export const PROJECT_PERMISSION_MANIFEST = Object.freeze(projectPermissionManifest({}));
 
-export function discloseSetupTrust(cfg, { project = false } = {}) {
-  const manifest = setupTrustManifest(cfg, { project });
+/** @param {any} cfg
+ * @param {{project?: boolean, companionPreflight?: any}} [options] */
+export function discloseSetupTrust(cfg, { project = false, companionPreflight } = {}) {
+  const manifest = setupTrustManifest(cfg, { project, companionPreflight });
   if (!manifest.length) return manifest;
   info('setup trust manifest (evaluated before any machine, user, or project changes):');
   for (const line of trustManifestLines(manifest)) console.log(`  ${line}`);
   return manifest;
+}
+
+export function validateDejaVuSetupFlags(flags = {}) {
+  if (flags['with-deja-vu'] && flags['no-deja-vu']) {
+    return { ok: false, error: '--with-deja-vu and --no-deja-vu are mutually exclusive' };
+  }
+  if (flags['deja-vu-mode'] !== undefined && !DEJA_VU.modes.includes(flags['deja-vu-mode'])) {
+    return { ok: false, error: '--deja-vu-mode must be one of: mcp, auto' };
+  }
+  if (flags['deja-vu-mode'] !== undefined && !flags['with-deja-vu']) {
+    return { ok: false, error: '--deja-vu-mode requires --with-deja-vu' };
+  }
+  return { ok: true };
+}
+
+export function applySetupDejaVuFlags(cfg, flags = {}) {
+  const intent = cfg.integrations.tools.dejaVu;
+  if (flags['no-deja-vu']) {
+    const changed = intent.enabled || intent.hosts.length > 0;
+    intent.enabled = false;
+    intent.hosts = [];
+    return { changed };
+  }
+  if (!flags['with-deja-vu']) return { changed: false };
+  const hosts = DEJA_VU.hosts.filter((host) => cfg.integrations.hosts[host] === true);
+  const mode = flags['deja-vu-mode'] ?? 'mcp';
+  const changed = !intent.enabled || intent.mode !== mode || intent.indexOnSetup !== true
+    || JSON.stringify(intent.hosts) !== JSON.stringify(hosts);
+  Object.assign(intent, { enabled: true, mode, hosts, indexOnSetup: true });
+  return { changed };
+}
+
+function safeCompanionCode(value) {
+  return String(value ?? 'unknown').replace(/[^a-zA-Z0-9_-]/g, '-').slice(0, 80);
+}
+
+function validDejaVuPlan(plan) {
+  if (!plan || !Array.isArray(plan.operations)) return false;
+  return plan.operations.every((operation) => {
+    if (!['package-install', 'package-upgrade', 'target-install', 'target-remove', 'index'].includes(operation.kind)) return false;
+    if (operation.command === 'deja') {
+      if (operation.kind === 'index') {
+        return operation.args?.[0] === 'index' && operation.args.length === 1;
+      }
+      const verb = operation.kind === 'target-install' ? 'install'
+        : operation.kind === 'target-remove' ? 'uninstall' : null;
+      if (!verb || operation.args?.[0] !== verb) return false;
+      return operation.args.length === 4
+        && DEJA_VU_TARGETS[operation.host]?.[operation.mode] === operation.args[1]
+        && operation.args[2] === '--no-guidance' && operation.args[3] === '--no-index';
+    }
+    return operation.command === 'npm'
+      && ['package-install', 'package-upgrade'].includes(operation.kind)
+      && typeof operation.version === 'string'
+      && /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/.test(operation.version)
+      && operation.args?.[0] === 'install' && operation.args?.[1] === '-g'
+      && operation.args?.[2] === `${DEJA_VU.install.npmPackage}@${operation.version}`
+      && operation.args?.length === 5
+      && operation.args?.[3] === '--no-audit' && operation.args?.[4] === '--no-fund';
+  });
+}
+
+function hasDejaVuOwnership(cfg) {
+  const ownership = cfg.integrations?.ownership?.dejaVu;
+  return !!ownership?.install || Object.keys(ownership?.targets ?? {}).length > 0;
+}
+
+export async function preflightSetupDejaVu(cfg, companion = DEFAULT_DEJA_VU_LIFECYCLE, {
+  removeRequested = false,
+} = {}) {
+  if (cfg.integrations.tools.dejaVu.enabled !== true
+    && !(removeRequested && hasDejaVuOwnership(cfg))) return null;
+  const facts = await companion.detect({ cfg });
+  const plan = await companion.plan({ cfg, facts });
+  if (!validDejaVuPlan(plan)) return { facts, plan, error: 'deja-vu-unbounded-plan-refused' };
+  return { facts, plan, error: plan.error ?? null };
+}
+
+export async function applySetupDejaVu(cfg, preflight, companion = DEFAULT_DEJA_VU_LIFECYCLE) {
+  const result = await companion.apply({ cfg, facts: preflight.facts, plan: preflight.plan });
+  // Persist unconditionally: explicit intent and any receipts produced before a
+  // partial adapter failure must survive so later repair/removal remains safe.
+  saveKitConfig(cfg);
+  for (const warning of result.warnings ?? []) warn(`deja-vu: ${safeCompanionCode(warning)}`);
+  if (!result.ok) {
+    const codes = (result.errors ?? ['unknown']).map(safeCompanionCode).join(', ');
+    fail(`deja-vu companion setup failed (${codes}); saved intent/ownership for safe retry`);
+    return false;
+  }
+  ok(`deja-vu companion ready (${result.actions?.length ?? 0} bounded operation(s))`);
+  return true;
+}
+
+export async function finishSetupDejaVu(cfg, initialPreflight,
+  companion = DEFAULT_DEJA_VU_LIFECYCLE, { removeRequested = false } = {}) {
+  let fresh;
+  try {
+    fresh = await preflightSetupDejaVu(cfg, companion, { removeRequested });
+  } catch {
+    saveKitConfig(cfg);
+    fail('deja-vu post-host preflight failed; saved intent/ownership for safe retry');
+    return false;
+  }
+  if (!fresh || fresh.error) {
+    saveKitConfig(cfg);
+    fail(`deja-vu post-host plan refused (${safeCompanionCode(fresh?.error ?? 'missing-plan')}); saved intent/ownership for safe retry`);
+    return false;
+  }
+  const initiallyResolved = initialPreflight?.plan?.operations?.find((entry) =>
+    ['package-install', 'package-upgrade'].includes(entry.kind))?.version;
+  const freshlyResolved = fresh.plan.operations.find((entry) =>
+    ['package-install', 'package-upgrade'].includes(entry.kind))?.version;
+  if (freshlyResolved && (!initiallyResolved || initiallyResolved !== freshlyResolved)) {
+    saveKitConfig(cfg);
+    fail('deja-vu resolved version changed after consent; saved intent and refused undisclosed package mutation');
+    return false;
+  }
+  return applySetupDejaVu(cfg, fresh, companion);
 }
 
 const allowRules = (file) => {
@@ -447,7 +582,12 @@ ruflo swarm init --topology hierarchical --max-agents 15 --strategy specialized
 \`\`\`
 `;
 
-export async function run({ flags, pkgRoot, confirm = ask }) {
+export async function run({ flags, pkgRoot, confirm = ask, dejaVuLifecycle = DEFAULT_DEJA_VU_LIFECYCLE }) {
+  const dejaVuFlags = validateDejaVuSetupFlags(flags);
+  if (!dejaVuFlags.ok) {
+    fail(dejaVuFlags.error);
+    return 2;
+  }
   const cfg = loadKitConfig();
   if (flags['no-aqe']) cfg.aqe = false;
   if (flags['no-ruvnet-brain']) cfg.ruvnetBrain = false;
@@ -461,7 +601,23 @@ export async function run({ flags, pkgRoot, confirm = ask }) {
   // describes this invocation, including a newly requested host. Dry-run never
   // persists this object; a declined confirmation returns before saveKitConfig.
   const hostFlags = applySetupHostFlags(cfg, flags);
-  const trustManifest = discloseSetupTrust(cfg, { project: willConfigureProject });
+  const dejaVuFlagsResult = applySetupDejaVuFlags(cfg, flags);
+  let companionPreflight;
+  try {
+    companionPreflight = await preflightSetupDejaVu(cfg, dejaVuLifecycle, {
+      removeRequested: flags['no-deja-vu'],
+    });
+  } catch {
+    fail('deja-vu preflight failed before any setup mutation');
+    return 1;
+  }
+  const trustManifest = discloseSetupTrust(cfg, {
+    project: willConfigureProject, companionPreflight,
+  });
+  if (companionPreflight?.error) {
+    fail(`deja-vu preflight refused the plan (${safeCompanionCode(companionPreflight.error)})`);
+    return 1;
+  }
   if (trustManifest.length) {
     if (!flags['dry-run'] && !(await confirm(
       'Proceed with setup and these trust changes?', false, flags.yes))) {
@@ -478,6 +634,12 @@ export async function run({ flags, pkgRoot, confirm = ask }) {
   if (flags['dry-run']) {
     if (flags.codex || flags['primary-host']) info('dry-run: --codex/--primary-host would enable + install the codex host and wire dual-mode (no changes made)');
     if (flags.opencode) info('dry-run: --opencode would enable the opencode host and wire it (no changes made)');
+    if (companionPreflight) {
+      const kinds = companionPreflight.plan.operations.map((entry) => entry.kind).join(', ') || 'none';
+      info(`dry-run: deja-vu would apply bounded operations: ${kinds} (no changes made)`);
+    } else if (dejaVuFlagsResult.changed) {
+      info('dry-run: deja-vu would remain disabled (no probes or changes)');
+    }
   } else {
     for (const w of hostFlags.warnings) warn(w);
     if (hostFlags.changed) {
@@ -491,6 +653,15 @@ export async function run({ flags, pkgRoot, confirm = ask }) {
   }
 
   if (!(await run_machine({ flags, pkgRoot, cfg }))) return 1;
+  // Companion execution is deliberately sequenced after every enabled host is
+  // installed and its lifecycle wiring has converged. It never uses upstream
+  // aggregate/warmup/update commands; the preflight accepts only exact targets
+  // and one bounded `deja index` operation.
+  if (!flags['dry-run'] && companionPreflight) {
+    if (!(await finishSetupDejaVu(cfg, companionPreflight, dejaVuLifecycle, {
+      removeRequested: flags['no-deja-vu'],
+    }))) return 1;
+  }
   // "--dry-run: print the plan; change nothing" — an unconditional save once
   // CREATED ~/.config/agentic-kit/kit.json on a previewed setup. The effective
   // config may be changed in memory above so the plan is truthful; never write

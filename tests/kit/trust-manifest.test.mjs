@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { HOST_REGISTRY, validateHostAdapter } from '../../src/lib/adapters/index.mjs';
 import {
   setupTrustManifest, trustManifestForOperation, newlyEnabledHostTrustManifest,
-  autoApproveValues,
+  autoApproveValues, trustManifestLines,
 } from '../../src/lib/trust-manifest.mjs';
 import { validHost } from './helpers/integration-builders.mjs';
 
@@ -18,6 +18,87 @@ test('every host adapter must declare an explicit setup trust posture', () => {
       features: ['unknown-feature'],
     }],
   } })), /host\.trust\.changes\[0\]\.features must be one of/);
+});
+
+test('deja-vu setup disclosure is a companion group with exact v0.19 boundaries', () => {
+  const cfg = {
+    integrations: {
+      hosts: { claude: true, codex: true, opencode: true },
+      tools: { dejaVu: { enabled: true, mode: 'auto', hosts: ['claude', 'codex', 'opencode'], indexOnSetup: true } },
+    },
+  };
+  const preflight = {
+    facts: { install: { version: null } },
+    plan: { operations: [{ kind: 'package-install', version: '0.19.0' }] },
+  };
+  const companion = setupTrustManifest(cfg, { hosts: [], companionPreflight: preflight })[0];
+  assert.equal(companion.companionId, 'deja-vu');
+  assert.equal(companion.hostId, undefined, 'managed companion must not masquerade as a host');
+  assert.equal(companion.approvalPolicy, 'explicit-opt-in');
+  const rendered = trustManifestLines([companion]).join('\n');
+  for (const value of [
+    '@vshulcz/deja-vu@0.19.0', 'claude-auto', 'codex-auto', 'opencode-auto',
+    'PreToolUse command/edit', 'PreToolUse Bash/apply_patch',
+    'no action-time PreToolUse', 'plaintext global deja-vu index with best-effort redaction',
+    'deja doctor --json --offline (schema v2)',
+  ]) assert.ok(rendered.includes(value), `missing companion trust fact: ${value}`);
+  assert.doesNotMatch(rendered, /deja warmup|deja update|--all|\/Users\//);
+});
+
+test('deja-vu trust rendering bounds an untrusted installed-version observation', () => {
+  const cfg = {
+    integrations: {
+      hosts: { claude: true },
+      tools: { dejaVu: { enabled: true, mode: 'mcp', hosts: ['claude'], indexOnSetup: false } },
+    },
+  };
+  const malicious = '0.19.0\n\u001b[31m/Users/alice/private/transcript';
+  const manifest = setupTrustManifest(cfg, {
+    hosts: [], companionPreflight: {
+      facts: { install: { version: malicious } }, plan: { operations: [] },
+    },
+  });
+  const rendered = trustManifestLines(manifest).join('\n');
+  assert.match(rendered, /@vshulcz\/deja-vu@unknown/);
+  assert.doesNotMatch(rendered, /alice|private|0\.19\.0/);
+  assert.equal(rendered.includes('\u001b'), false);
+});
+
+test('deja-vu trust observes but never adopts a compatible external npm install', () => {
+  const cfg = {
+    integrations: {
+      hosts: { claude: true },
+      tools: { dejaVu: { enabled: true, mode: 'mcp', hosts: ['claude'], indexOnSetup: false } },
+    },
+  };
+  const manifest = setupTrustManifest(cfg, {
+    hosts: [], companionPreflight: {
+      facts: { install: { version: '0.19.0', ownership: 'external', receiptState: 'missing' } },
+      plan: { operations: [] },
+    },
+  });
+  const packageFact = manifest[0].changes[0];
+  assert.equal(packageFact.kind, 'npm-package-observation');
+  assert.equal(packageFact.owner, 'user/external');
+  assert.match(packageFact.effect, /without adopting, updating, or removing/);
+});
+
+test('deja-vu mode changes disclose the exact receipt-owned prior target removal', () => {
+  const cfg = {
+    integrations: {
+      hosts: { claude: true },
+      tools: { dejaVu: { enabled: true, mode: 'mcp', hosts: ['claude'], indexOnSetup: false } },
+    },
+  };
+  const manifest = setupTrustManifest(cfg, {
+    hosts: [], companionPreflight: {
+      facts: { install: { version: '0.19.0', ownership: 'agentic-kit' } },
+      plan: { operations: [{ kind: 'target-remove', host: 'claude', mode: 'auto' }] },
+    },
+  });
+  const removal = manifest[0].changes.find((change) => change.kind === 'companion-target-removal');
+  assert.equal(removal.value, 'claude-auto');
+  assert.match(removal.effect, /receipt-owned prior claude wiring/);
 });
 
 test('host-pick preflight includes only newly enabled hosts and its own operations', () => {
