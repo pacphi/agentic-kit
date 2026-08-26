@@ -125,18 +125,25 @@ test('resolveShim builds safe native and PowerShell invocations in PATHEXT order
 test('run() routes the deja npm binary through safe Windows shim resolution', async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-deja-shim-'));
   const bin = path.join(root, 'bin');
-  const shim = path.join(bin, 'deja.exe');
   const hostile = ['install', 'claude-code', 'hello & whoami', '$(echo pwned)'];
   fs.mkdirSync(bin);
   try {
-    fs.writeFileSync(
-      shim,
-      `#!${process.execPath}\nprocess.stdout.write(JSON.stringify(process.argv.slice(2)));\n`,
-      { mode: 0o755 },
-    );
+    if (process.platform === 'win32') {
+      fs.writeFileSync(path.join(bin, 'deja.cmd'), '@echo off\r\n');
+      fs.writeFileSync(
+        path.join(bin, 'deja.ps1'),
+        '[Console]::Out.Write(($args | ConvertTo-Json -Compress))\n',
+      );
+    } else {
+      fs.writeFileSync(
+        path.join(bin, 'deja.exe'),
+        `#!${process.execPath}\nprocess.stdout.write(JSON.stringify(process.argv.slice(2)));\n`,
+        { mode: 0o755 },
+      );
+    }
     const result = await run('deja', hostile, {
       windows: true,
-      env: { PATH: bin, PATHEXT: '.EXE' },
+      env: { PATH: bin, PATHEXT: process.platform === 'win32' ? '.CMD' : '.EXE' },
     });
     assert.equal(result.code, 0, result.stderr);
     assert.deepEqual(JSON.parse(result.stdout), hostile);
