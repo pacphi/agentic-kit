@@ -503,6 +503,188 @@ async function checkGrantGatedTier({
   };
 }
 
+// ── runTieredConformance decomposition helpers ──────────────────────────
+// The orchestrator below evaluates CONFORMANCE_TIERS' six tiers in their
+// fixed graduation order (ADR-0031 §2) regardless of the caller's own
+// `tiers` array ordering — matching the original inline if-per-tier
+// sequence. These helpers exist purely to keep the orchestrator's own
+// cyclomatic complexity low: each closure it drives is one line, and the
+// actual branching lives in a small, independently-testable function.
+
+/** True when any of `ids` is present in the caller's requested `tiers`. */
+function wantsAnyOf(tiers, ids) {
+  return ids.some((id) => tiers.includes(id));
+}
+
+/** F1 (Wave C): baseDir must be resolved before checkAdmission so it can
+ * thread into registerAdmittedLifecycle for the detect-hook check — the
+ * same anchoring the execution tier already needed. */
+function resolveBaseDir(baseDir, manifestSource) {
+  return baseDir !== undefined ? baseDir : baseDirForSource(manifestSource);
+}
+
+/**
+ * F2 (Wave C, BLOCKER): every post-admission tier must gate on the WHOLE
+ * admission tier passing — not just manifest schema-validation succeeding —
+ * or a manifest that schema-validated but whose REAL admission
+ * (admitAdapters — the consent/contract/builtin-shadow gate) was refused
+ * (e.g. stale or missing consent) would still have its execution.run hook
+ * spawned for real and its result recorded 'passed' into grantsFile (which
+ * defaults to the operator's REAL adapter-grants.json). A manifest whose
+ * admission failed is treated identically to one that never validated at
+ * all, for every downstream tier.
+ */
+function resolveEffectiveManifest(admission) {
+  const admissionPassed = admission.checks.length > 0 && admission.checks.every((c) => c.ok);
+  return { admissionPassed, effectiveManifest: admissionPassed ? admission.manifest : null };
+}
+
+/** adrianco#131 #1: an explicit override always wins; otherwise honor the
+ * manifest's own declared execution.run.hook.timeoutMs (if any) as the
+ * OUTER runner budget too, so a manifest that already declares a longer one
+ * (e.g. a local-model host) isn't silently capped at the runner's 120s
+ * default before the hook's own tighter-of-the-two ever applies. */
+function resolveEffectiveTimeoutMs(timeoutMs, effectiveManifest) {
+  if (timeoutMs !== undefined) return timeoutMs;
+  return effectiveManifest?.execution?.run?.hook?.timeoutMs;
+}
+
+/**
+ * primary-eligible and aqe-provider both require activity-routing to have
+ * genuinely passed THIS run — not merely to have been requested. Computed
+ * once, whenever either tier needs it, so a caller asking for
+ * `tiers: ['primary-eligible']` alone still gets the real dependency check
+ * rather than an unconditioned pass/skip.
+ */
+async function computeActivityRoutingResult(tiers, params) {
+  if (!wantsAnyOf(tiers, ['activity-routing', 'aqe-provider', 'primary-eligible'])) return null;
+  return checkActivityRouting(params);
+}
+
+/** Reset every overlay a conformance run can touch (F7, Wave C security
+ * review: the host overlay, the execution overlay, and the lifecycle
+ * registration checkAdmission's detect-hook check creates via
+ * registerAdmittedLifecycle — all three, together, since resetting only the
+ * first two left an already-registered lifecycle adapter live for a host id
+ * this run's own admission may have just refused) and best-effort clean up
+ * any temp directories this run created. */
+function cleanupConformanceRun(tempDir, workerCwdTempDir) {
+  resetAdmitted();
+  resetAdmittedExecution();
+  resetAdmittedLifecycle();
+  resetAdmittedAqeProviders();
+  if (tempDir) { try { fs.rmSync(tempDir, { recursive: true, force: true }); } catch { /* best-effort cleanup */ } }
+  if (workerCwdTempDir) { try { fs.rmSync(workerCwdTempDir, { recursive: true, force: true }); } catch { /* best-effort cleanup */ } }
+}
+
+/**
+ * Shared skip-gate for aqe-provider and primary-eligible: both require
+ * admission AND a genuinely-passed activity-routing result THIS RUN before
+ * their own real exercise can run. Identical shape for both tiers in the
+ * pre-decomposition code (two copy-pasted if/else-if/else blocks with
+ * matching detail strings) — factored out rather than duplicated.
+ */
+async function runActivityRoutingDependentTier(effectiveManifest, activityRoutingResult, exercise) {
+  if (!effectiveManifest) {
+    return { status: 'skipped', checks: [{ name: 'admission prerequisite', ok: false, detail: 'admission tier did not pass — cannot evaluate' }] };
+  }
+  if (activityRoutingResult?.status !== 'passed') {
+    return {
+      status: 'skipped',
+      checks: [{ name: 'activity-routing prerequisite', ok: false, detail: 'activity-routing did not pass — cannot evaluate' }],
+    };
+  }
+  return exercise();
+}
+
+/** Resolve a usable consent-store file, creating (and returning for cleanup)
+ * a throwaway temp one when the caller didn't supply their own. */
+function resolveConsentFile(consentFile) {
+  if (consentFile) return { consentFileUsed: consentFile, tempDir: null };
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-adapter-conformance-tiers-'));
+  return { consentFileUsed: path.join(tempDir, 'adapter-consent.json'), tempDir };
+}
+
+/** adrianco#131 #2: a live, often auto-approving worker must never land in
+ * the operator's own $PWD by accident — resolve (and return for cleanup) a
+ * throwaway scratch directory unless the caller supplies its own. */
+function resolveWorkerCwd(cwd) {
+  if (cwd) return { workerCwd: cwd, workerCwdTempDir: null };
+  const workerCwdTempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-adapter-conformance-cwd-'));
+  return { workerCwd: workerCwdTempDir, workerCwdTempDir };
+}
+
+/**
+ * Persist each tier's outcome per ADR-0031 §1/§2 (see runTieredConformance's
+ * own doc comment for the full recording contract). Extracted verbatim from
+ * the orchestrator's body so it carries its own (small) CC budget instead of
+ * the orchestrator's.
+ */
+function persistTierResults(tierResults, { resolvedName, hash, grantsFile }) {
+  for (const tierResult of tierResults) {
+    try {
+      if (tierResult.status === 'passed') {
+        const evidence = tierResult.evidence ?? evidenceFromChecks(tierResult.checks) ?? tierResult.tier;
+        recordTierResult(resolvedName, tierResult.tier, { hash, evidence: evidence || tierResult.tier }, { file: grantsFile });
+      } else if (tierResult.status === 'gated' && tierResult.gatedBy) {
+        recordTierGate(resolvedName, tierResult.tier, { hash, gatedBy: tierResult.gatedBy }, { file: grantsFile });
+      } else if (tierResult.status === 'failed' && Object.hasOwn(TIER_GRANTS, tierResult.tier)) {
+        // N-1 (security-review follow-up): a grant-bearing tier that
+        // RE-RUNS 'failed' at the SAME (unchanged) hash means evidence a
+        // live capability rests on was just shown non-reproducible — void
+        // the stored tier and the capability together (grants.mjs's
+        // recordTierFailure), mirroring recordTierGate's downgrade for
+        // 'gated' immediately above. Deliberately NOT triggered by
+        // 'skipped': a skipped tier (e.g. primary-eligible
+        // short-circuiting because its own prerequisite — activity-
+        // routing — didn't run/pass THIS run) means the tier was never
+        // actually EVALUATED this run, which is ambiguous, not disproven
+        // — downgrading on an ambiguous non-evaluation would void a live
+        // capability on evidence that says nothing about whether it
+        // still holds.
+        recordTierFailure(resolvedName, tierResult.tier, { hash }, { file: grantsFile });
+      }
+    } catch (error) {
+      tierResult.recordError = error?.message ?? String(error);
+    }
+  }
+}
+
+/**
+ * Build the six tier evaluators as thin closures over this call's resolved
+ * context. Each closure is a single call/expression — the actual per-tier
+ * branching lives in checkAdmission/checkSessionDriving/checkActivityRouting/
+ * checkAqeProvider/checkPrimaryEligible/checkGrantGatedTier (and the shared
+ * runActivityRoutingDependentTier gate above), never inline here.
+ */
+function buildTierRunners({
+  admission, admissionPassed, effectiveManifest, activityRoutingResult, resolvedName, derivedBaseDir,
+  integrity, hash, haveFn, clock, workerCwd, effectiveTimeoutMs, sessionDrivingUpstreamRef, grantsFile,
+  exerciseStatusline,
+}) {
+  return {
+    admission: () => ({ status: admissionPassed ? 'passed' : 'failed', checks: admission.checks }),
+    'session-driving': () => checkSessionDriving({ manifest: effectiveManifest, upstreamRef: sessionDrivingUpstreamRef }),
+    'activity-routing': () => activityRoutingResult,
+    'aqe-provider': () => runActivityRoutingDependentTier(effectiveManifest, activityRoutingResult, () => checkAqeProvider({
+      manifest: effectiveManifest, name: resolvedName, baseDir: derivedBaseDir, integrity, hash, cwd: workerCwd,
+    })),
+    'primary-eligible': () => runActivityRoutingDependentTier(effectiveManifest, activityRoutingResult, () => checkPrimaryEligible({
+      manifest: effectiveManifest, name: resolvedName, baseDir: derivedBaseDir, integrity, haveFn, clock,
+      cwd: workerCwd, timeoutMs: effectiveTimeoutMs,
+    })),
+    statusline: () => checkGrantGatedTier({
+      capability: 'commandStatusline',
+      manifest: effectiveManifest,
+      name: resolvedName,
+      hash,
+      grantsFile,
+      exercise: exerciseStatusline,
+      exerciseLabel: 'renders and refreshes a command-backed footer',
+    }),
+  };
+}
+
 /**
  * Run the ADR-0031 §2 tiered conformance sequence against one adapter
  * manifest and return a structured, per-tier report. Self-contained: builds
@@ -595,192 +777,54 @@ export async function runTieredConformance({
     throw new TypeError('runTieredConformance requires fixtureRoot or manifestSource');
   }
 
-  let tempDir = null;
-  let consentFileUsed = consentFile;
-  if (!consentFileUsed) {
-    tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-adapter-conformance-tiers-'));
-    consentFileUsed = path.join(tempDir, 'adapter-consent.json');
-  }
-
-  // adrianco#131 #2: a live, often auto-approving worker must never land in
-  // the operator's own $PWD by accident — a throwaway scratch directory,
-  // never process.cwd(), unless a caller (tests) supplies its own.
-  let workerCwdTempDir = null;
-  let workerCwd = cwd;
-  if (!workerCwd) {
-    workerCwdTempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-adapter-conformance-cwd-'));
-    workerCwd = workerCwdTempDir;
-  }
+  const { consentFileUsed, tempDir } = resolveConsentFile(consentFile);
+  const { workerCwd, workerCwdTempDir } = resolveWorkerCwd(cwd);
 
   try {
-    // F1 (Wave C): baseDir is computed BEFORE checkAdmission so it can thread
-    // straight into registerAdmittedLifecycle for the detect-hook check —
-    // the same anchoring the execution tier already needed, just derived
-    // earlier now that admission needs it too.
-    const derivedBaseDir = baseDir !== undefined ? baseDir : baseDirForSource(manifestSource);
+    const derivedBaseDir = resolveBaseDir(baseDir, manifestSource);
     const admission = await checkAdmission({
       name, source: manifestSource, readManifest, consentFile: consentFileUsed, baseDir: derivedBaseDir,
     });
     const resolvedName = name ?? admission.manifest?.host?.id ?? '(unknown)';
     const { hash, integrity } = admission;
-    // F2 (Wave C, BLOCKER): every post-admission tier gated on manifest
-    // validity alone (`admission.manifest != null`) would still exercise a
-    // manifest that schema-validated but whose REAL admission (admitAdapters
-    // — the consent/contract/builtin-shadow gate) was refused: e.g. stale or
-    // missing consent. That let a refused adapter's execution.run hook be
-    // spawned for real and its result recorded 'passed' into grantsFile
-    // (which defaults to the operator's REAL adapter-grants.json). Gating on
-    // the WHOLE admission tier passing — not just the manifest parsing —
-    // closes that: a manifest whose admission failed is treated identically
-    // to one that never validated at all, for every downstream tier.
-    const admissionPassed = admission.checks.length > 0 && admission.checks.every((c) => c.ok);
-    const effectiveManifest = admissionPassed ? admission.manifest : null;
+    const { admissionPassed, effectiveManifest } = resolveEffectiveManifest(admission);
     const wantTier = (tier) => tiers.includes(tier);
+    const effectiveTimeoutMs = resolveEffectiveTimeoutMs(timeoutMs, effectiveManifest);
 
-    // adrianco#131 #1: an explicit override always wins; otherwise honor the
-    // manifest's own declared execution.run.hook.timeoutMs (if any) as the
-    // OUTER runner budget too, so a manifest that already declares a longer
-    // one (e.g. a local-model host) isn't silently capped at the runner's
-    // 120s default before the hook's own tighter-of-the-two ever applies.
-    const effectiveTimeoutMs = timeoutMs !== undefined
-      ? timeoutMs
-      : effectiveManifest?.execution?.run?.hook?.timeoutMs;
+    const activityRoutingResult = await computeActivityRoutingResult(tiers, {
+      manifest: effectiveManifest, name: resolvedName, baseDir: derivedBaseDir, integrity, haveFn, clock,
+      cwd: workerCwd, timeoutMs: effectiveTimeoutMs,
+    });
 
+    // F-1 (security review): primary-eligible is NOT checkGrantGatedTier —
+    // that would gate the exercise on an already-existing canBePrimary
+    // grant, which deadlocks against grantCapability's own requirement of an
+    // already-'passed' tier (see checkPrimaryEligible's header comment).
+    // checkPrimaryEligible runs the real exercise unconditionally once its
+    // own prerequisites (admission, activity-routing) are met — evidence
+    // first, grant second, per ADR-0031 §1/§2. Both it and aqe-provider
+    // share the identical prerequisite short-circuit, factored into
+    // runActivityRoutingDependentTier above.
+    const tierRunners = buildTierRunners({
+      admission, admissionPassed, effectiveManifest, activityRoutingResult, resolvedName, derivedBaseDir,
+      integrity, hash, haveFn, clock, workerCwd, effectiveTimeoutMs, sessionDrivingUpstreamRef, grantsFile,
+      exerciseStatusline,
+    });
+
+    // CONFORMANCE_TIERS is the fixed graduation order (ADR-0031 §2) — tier
+    // results are always pushed in this order, independent of `tiers`' own
+    // element order, matching the original inline if-per-tier sequence.
     const tierResults = [];
-
-    if (wantTier('admission')) {
-      tierResults.push({
-        tier: 'admission',
-        status: admissionPassed ? 'passed' : 'failed',
-        checks: admission.checks,
-      });
-    }
-
-    if (wantTier('session-driving')) {
-      tierResults.push({ tier: 'session-driving', ...checkSessionDriving({ manifest: effectiveManifest, upstreamRef: sessionDrivingUpstreamRef }) });
-    }
-
-    // primary-eligible and aqe-provider both require activity-routing to have
-    // genuinely passed THIS run — not merely to have been requested.
-    // Computed here, once, whenever either tier needs it, so a caller asking
-    // for `tiers: ['primary-eligible']` alone still gets the real dependency
-    // check rather than an unconditioned pass/skip.
-    let activityRoutingResult = null;
-    if (wantTier('activity-routing') || wantTier('aqe-provider') || wantTier('primary-eligible')) {
-      activityRoutingResult = await checkActivityRouting({
-        manifest: effectiveManifest, name: resolvedName, baseDir: derivedBaseDir, integrity, haveFn, clock,
-        cwd: workerCwd, timeoutMs: effectiveTimeoutMs,
-      });
-      if (wantTier('activity-routing')) {
-        tierResults.push({ tier: 'activity-routing', ...activityRoutingResult });
-      }
-    }
-
-    if (wantTier('aqe-provider')) {
-      let result;
-      if (!effectiveManifest) {
-        result = { status: 'skipped', checks: [{ name: 'admission prerequisite', ok: false, detail: 'admission tier did not pass — cannot evaluate' }] };
-      } else if (activityRoutingResult?.status !== 'passed') {
-        result = {
-          status: 'skipped',
-          checks: [{ name: 'activity-routing prerequisite', ok: false, detail: 'activity-routing did not pass — cannot evaluate' }],
-        };
-      } else {
-        result = await checkAqeProvider({
-          manifest: effectiveManifest, name: resolvedName, baseDir: derivedBaseDir,
-          integrity, hash, cwd: workerCwd,
-        });
-      }
-      tierResults.push({ tier: 'aqe-provider', ...result });
-    }
-
-    if (wantTier('primary-eligible')) {
-      // F-1 (security review): NOT checkGrantGatedTier — that gates the
-      // exercise on an already-existing canBePrimary grant, which deadlocks
-      // against grantCapability's own requirement of an already-'passed'
-      // tier (see checkPrimaryEligible's header comment). checkPrimaryEligible
-      // runs the real exercise unconditionally once its own prerequisites
-      // (admission, activity-routing) are met — evidence first, grant second,
-      // per ADR-0031 §1/§2.
-      let result;
-      if (!effectiveManifest) {
-        result = { status: 'skipped', checks: [{ name: 'admission prerequisite', ok: false, detail: 'admission tier did not pass — cannot evaluate' }] };
-      } else if (activityRoutingResult?.status !== 'passed') {
-        // Mirrors the admission short-circuit above: when admission passed
-        // but activity-routing (this tier's own real prerequisite) did not,
-        // report the SAME 'skipped' shape with a distinct reason, rather
-        // than attempting an exercise the host cannot actually support yet.
-        result = {
-          status: 'skipped',
-          checks: [{ name: 'activity-routing prerequisite', ok: false, detail: 'activity-routing did not pass — cannot evaluate' }],
-        };
-      } else {
-        result = await checkPrimaryEligible({
-          manifest: effectiveManifest, name: resolvedName, baseDir: derivedBaseDir, integrity, haveFn, clock,
-          cwd: workerCwd, timeoutMs: effectiveTimeoutMs,
-        });
-      }
-      tierResults.push({ tier: 'primary-eligible', ...result });
-    }
-
-    if (wantTier('statusline')) {
-      const result = await checkGrantGatedTier({
-        capability: 'commandStatusline',
-        manifest: effectiveManifest,
-        name: resolvedName,
-        hash,
-        grantsFile,
-        exercise: exerciseStatusline,
-        exerciseLabel: 'renders and refreshes a command-backed footer',
-      });
-      tierResults.push({ tier: 'statusline', ...result });
+    for (const tier of CONFORMANCE_TIERS.filter(wantTier)) {
+      tierResults.push({ tier, ...(await tierRunners[tier]()) });
     }
 
     if (persist && hash) {
-      for (const tierResult of tierResults) {
-        try {
-          if (tierResult.status === 'passed') {
-            const evidence = tierResult.evidence ?? evidenceFromChecks(tierResult.checks) ?? tierResult.tier;
-            recordTierResult(resolvedName, tierResult.tier, { hash, evidence: evidence || tierResult.tier }, { file: grantsFile });
-          } else if (tierResult.status === 'gated' && tierResult.gatedBy) {
-            recordTierGate(resolvedName, tierResult.tier, { hash, gatedBy: tierResult.gatedBy }, { file: grantsFile });
-          } else if (tierResult.status === 'failed' && Object.hasOwn(TIER_GRANTS, tierResult.tier)) {
-            // N-1 (security-review follow-up): a grant-bearing tier that
-            // RE-RUNS 'failed' at the SAME (unchanged) hash means evidence a
-            // live capability rests on was just shown non-reproducible — void
-            // the stored tier and the capability together (grants.mjs's
-            // recordTierFailure), mirroring recordTierGate's downgrade for
-            // 'gated' immediately above. Deliberately NOT triggered by
-            // 'skipped': a skipped tier (e.g. primary-eligible
-            // short-circuiting because its own prerequisite — activity-
-            // routing — didn't run/pass THIS run) means the tier was never
-            // actually EVALUATED this run, which is ambiguous, not disproven
-            // — downgrading on an ambiguous non-evaluation would void a live
-            // capability on evidence that says nothing about whether it
-            // still holds.
-            recordTierFailure(resolvedName, tierResult.tier, { hash }, { file: grantsFile });
-          }
-        } catch (error) {
-          tierResult.recordError = error?.message ?? String(error);
-        }
-      }
+      persistTierResults(tierResults, { resolvedName, hash, grantsFile });
     }
 
     return { name: resolvedName, hash, tiers: tierResults };
   } finally {
-    // F7 (Wave C security review): all THREE overlays a conformance run can
-    // touch — the host overlay, the execution overlay, and the lifecycle
-    // registration checkAdmission's detect-hook check creates via
-    // registerAdmittedLifecycle — must reset together. Resetting only the
-    // first two (as before) left an already-registered lifecycle adapter
-    // live for a host id this run's own admission may have just refused,
-    // the same live-edge class F-9 (execution/admitted.mjs's
-    // resetAllAdmitted) already closed for the other two overlays.
-    resetAdmitted();
-    resetAdmittedExecution();
-    resetAdmittedLifecycle();
-    resetAdmittedAqeProviders();
-    if (tempDir) { try { fs.rmSync(tempDir, { recursive: true, force: true }); } catch { /* best-effort cleanup */ } }
-    if (workerCwdTempDir) { try { fs.rmSync(workerCwdTempDir, { recursive: true, force: true }); } catch { /* best-effort cleanup */ } }
+    cleanupConformanceRun(tempDir, workerCwdTempDir);
   }
 }
