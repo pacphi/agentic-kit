@@ -136,21 +136,24 @@ async function killGroup(child) {
   }
 }
 
-/**
- * Run one adapter hook as a supervised subprocess and report what happened.
- * Never throws for process failures (ENOENT, timeout, non-zero exit) — those
- * are reported via `ok:false` and `detail`. Only malformed call arguments
- * (missing/invalid `hook`, `hostId`, or `verb`) throw synchronously.
- *
- * @param {{hook:{command:string[], timeoutMs?:number}, hostId:string,
- *   verb:string, timeoutMs?:number, env?:Record<string,string>, stdin?:string,
- *   cwd?:string, manifest?:object, integrity?:{hash:string}, baseDir?:string|null}} options
- * @returns {Promise<{ok:boolean, stdout:string, stdoutText:string, stderrText:string,
- *   stdoutTruncated:boolean, stderrTruncated:boolean, exitCode:number|null, detail:string|null}>}
- */
-export async function runAdapterHook({
-  hook, hostId, verb, timeoutMs, env, stdin, cwd, manifest, integrity, baseDir,
-} = /** @type {any} */ ({})) {
+// ── runAdapterHook decomposition ─────────────────────────────────────────
+// Each helper below reproduces one slice of the original sequential body
+// verbatim, in the same order, so runAdapterHook itself just sequences
+// them and its own complexity stays with the orchestration, not the
+// process-lifecycle mechanics.
+
+/** Every early-failure result shares this shape (no output was ever
+ * captured, or none survives to report) — extracted so the three call
+ * sites that used to spell it out stay byte-identical by construction. */
+const EMPTY_HOOK_RESULT = Object.freeze({
+  stdout: '', stdoutText: '', stderrText: '', stdoutTruncated: false, stderrTruncated: false,
+});
+
+/** Throws synchronously for malformed call arguments only — never for a
+ * process-level failure (that's what `ok:false` + `detail` is for). */
+function assertRunAdapterHookArgs({
+  hook, hostId, verb, cwd,
+}) {
   if (!hook || !Array.isArray(hook.command) || hook.command.length === 0
     || !hook.command.every((part) => typeof part === 'string' && part.length > 0)) {
     throw new TypeError('runAdapterHook requires hook.command as a non-empty array of non-empty strings');
@@ -164,33 +167,37 @@ export async function runAdapterHook({
   if (cwd !== undefined && (typeof cwd !== 'string' || !cwd || !pathIsAbsolute(cwd))) {
     throw new TypeError('runAdapterHook requires cwd to be an absolute path when provided');
   }
+}
 
-  const effectiveTimeoutMs = resolveTimeout(timeoutMs, hook.timeoutMs);
-  const [argv0, ...args] = hook.command;
-  const childEnv = minimalEnv(env);
-
-  // Adrian's trust-gap finding: the manifest-only hash is not enough when a hook
-  // points at mutable files. Re-read the declared bytes immediately before
-  // spawn and fail closed if the content identity no longer matches the
-  // admitted/consented identity. The check is optional for direct unit-level
-  // callers that do not represent an admitted adapter; production registration
-  // always supplies all three values.
-  if (manifest || integrity) {
-    try {
-      verifyAdapterContent(manifest, integrity, { baseDir });
-    } catch (error) {
-      return {
-        ok: false, stdout: '', stdoutText: '', stderrText: '',
-        stdoutTruncated: false, stderrTruncated: false, exitCode: null,
-        detail: `${hostId}:${verb} adapter hook integrity check failed: ${error?.message ?? String(error)}`,
-      };
-    }
-  }
-
-  const wantsStdin = typeof stdin === 'string';
-  let child;
+/**
+ * Adrian's trust-gap finding: the manifest-only hash is not enough when a
+ * hook points at mutable files. Re-read the declared bytes immediately
+ * before spawn and fail closed if the content identity no longer matches
+ * the admitted/consented identity. The check is optional for direct
+ * unit-level callers that do not represent an admitted adapter; production
+ * registration always supplies all three values. Returns a failure result,
+ * or null when there's nothing to verify or verification passes.
+ */
+function verifyHookIntegrityOrFailure(manifest, integrity, baseDir, hostId, verb) {
+  if (!manifest && !integrity) return null;
   try {
-    child = nodeSpawn(argv0, args, {
+    verifyAdapterContent(manifest, integrity, { baseDir });
+    return null;
+  } catch (error) {
+    return {
+      ok: false, ...EMPTY_HOOK_RESULT, exitCode: null,
+      detail: `${hostId}:${verb} adapter hook integrity check failed: ${error?.message ?? String(error)}`,
+    };
+  }
+}
+
+/** Spawn the child, isolated so a synchronous spawn throw (ENOENT-class)
+ * becomes the same `{failure}` shape a later async 'error' event does. */
+function spawnAdapterChild({
+  argv0, args, childEnv, cwd, wantsStdin, hostId, verb,
+}) {
+  try {
+    const child = nodeSpawn(argv0, args, {
       env: childEnv,
       shell: false,
       stdio: [wantsStdin ? 'pipe' : 'ignore', 'pipe', 'pipe'],
@@ -200,34 +207,33 @@ export async function runAdapterHook({
       // yet (B2 threads the real adapter-base-dir cwd through this wave).
       ...(cwd === undefined ? {} : { cwd }),
     });
+    return { child };
   } catch (error) {
-    return {
-      ok: false, stdout: '', stdoutText: '', stderrText: '',
-      stdoutTruncated: false, stderrTruncated: false,
-      exitCode: null, detail: describeFailure(hostId, verb, error),
-    };
+    return { failure: { ok: false, ...EMPTY_HOOK_RESULT, exitCode: null, detail: describeFailure(hostId, verb, error) } };
   }
+}
 
-  const stdoutCollector = boundedCollector(OUTPUT_CAP_BYTES);
-  const stderrCollector = boundedCollector(OUTPUT_CAP_BYTES);
-  child.stdout?.on('data', (chunk) => stdoutCollector.write(chunk));
-  child.stderr?.on('data', (chunk) => stderrCollector.write(chunk));
-
-  if (wantsStdin) {
-    // A child that exits before (or without) reading stdin makes the pipe
-    // write EPIPE — that is a normal outcome (the process's own exit code
-    // already reports what happened), never a reason to crash or reject
-    // runAdapterHook's promise. The 'close' handler below still fires and
-    // resolves the race normally regardless of whether this write lands.
-    child.stdin?.on('error', () => {});
-    try {
-      child.stdin?.end(stdin);
-    } catch {
-      // Synchronous throw from an already-closed stream — same non-fatal
-      // treatment as the async 'error' event above.
-    }
+/** Write `stdin` (when the caller declared one) and swallow both the async
+ * EPIPE-class error and any synchronous throw from an already-closed
+ * stream — a child that exits before (or without) reading stdin is a
+ * normal outcome (the process's own exit code already reports what
+ * happened), never a reason to crash or reject runAdapterHook's promise. */
+function wireAdapterStdin(child, wantsStdin, stdin) {
+  if (!wantsStdin) return;
+  child.stdin?.on('error', () => {});
+  try {
+    child.stdin?.end(stdin);
+  } catch {
+    // Synchronous throw from an already-closed stream — same non-fatal
+    // treatment as the async 'error' event above.
   }
+}
 
+/** Race the child's close against the timeout budget. Returns
+ * `{closeResult, getSpawnError}` — `getSpawnError()` reads the 'error'-event
+ * value (if any); only meaningful to call once `closeResult` (or the
+ * timeout race over it) has settled. */
+function awaitAdapterClose(child) {
   let settled = false;
   let spawnError = null;
   const closeResult = new Promise((resolve) => {
@@ -239,39 +245,37 @@ export async function runAdapterHook({
       if (!settled) { settled = true; resolve({ code, signal }); }
     });
   });
+  return { closeResult, getSpawnError: () => spawnError };
+}
 
-  const raced = await raceTimeout(closeResult, effectiveTimeoutMs);
-  if (raced === TIMEOUT_SENTINEL) {
-    await killGroup(child);
-    await raceTimeout(closeResult, KILL_GRACE_MS); // best-effort; result unused
-    const stdoutCaptured = { text: stdoutCollector.text(), truncated: stdoutCollector.wasTruncated() };
-    const stderrCaptured = { text: stderrCollector.text(), truncated: stderrCollector.wasTruncated() };
-    return {
-      ok: false,
-      exitCode: null,
-      stdout: mergeCapture(stdoutCaptured, stderrCaptured),
-      stdoutText: boundedText(stdoutCaptured),
-      stderrText: boundedText(stderrCaptured),
-      stdoutTruncated: stdoutCaptured.truncated,
-      stderrTruncated: stderrCaptured.truncated,
-      detail: `${hostId}:${verb} adapter hook timed out after ${effectiveTimeoutMs}ms and was killed`,
-    };
-  }
+/** The timed-out-and-killed result shape, capturing whatever output had
+ * already accumulated before the kill. */
+async function buildAdapterTimeoutResult({
+  child, effectiveTimeoutMs, stdoutCollector, stderrCollector, closeResult, hostId, verb,
+}) {
+  await killGroup(child);
+  await raceTimeout(closeResult, KILL_GRACE_MS); // best-effort; result unused
+  const stdoutCaptured = { text: stdoutCollector.text(), truncated: stdoutCollector.wasTruncated() };
+  const stderrCaptured = { text: stderrCollector.text(), truncated: stderrCollector.wasTruncated() };
+  return {
+    ok: false,
+    exitCode: null,
+    stdout: mergeCapture(stdoutCaptured, stderrCaptured),
+    stdoutText: boundedText(stdoutCaptured),
+    stderrText: boundedText(stderrCaptured),
+    stdoutTruncated: stdoutCaptured.truncated,
+    stderrTruncated: stderrCaptured.truncated,
+    detail: `${hostId}:${verb} adapter hook timed out after ${effectiveTimeoutMs}ms and was killed`,
+  };
+}
 
-  if (spawnError) {
-    return {
-      ok: false, stdout: '', stdoutText: '', stderrText: '',
-      stdoutTruncated: false, stderrTruncated: false,
-      exitCode: null, detail: describeFailure(hostId, verb, spawnError),
-    };
-  }
-
-  const { code } = raced;
-  // F-4/R-1: stdout stays the combined stream for diagnostics/back-compat,
-  // but a caller parsing stdout as a structured payload (the admitted
-  // execution adapter) must read stdoutText instead — stdout has stderr
-  // folded in after a separator, which breaks JSON.parse the instant the
-  // hook writes anything to stderr at all. stderrText is diagnostics-only.
+/** The normal-completion result shape (child closed before the timeout).
+ * F-4/R-1: stdout stays the combined stream for diagnostics/back-compat,
+ * but a caller parsing stdout as a structured payload (the admitted
+ * execution adapter) must read stdoutText instead — stdout has stderr
+ * folded in after a separator, which breaks JSON.parse the instant the
+ * hook writes anything to stderr at all. stderrText is diagnostics-only. */
+function buildAdapterCloseResult(code, stdoutCollector, stderrCollector, hostId, verb) {
   const stdoutCaptured = { text: stdoutCollector.text(), truncated: stdoutCollector.wasTruncated() };
   const stderrCaptured = { text: stderrCollector.text(), truncated: stderrCollector.wasTruncated() };
   const stdout = mergeCapture(stdoutCaptured, stderrCaptured);
@@ -290,4 +294,60 @@ export async function runAdapterHook({
       stderrTruncated: stderrCaptured.truncated,
       exitCode: code, detail: `${hostId}:${verb} adapter hook exited with code ${code}`,
     };
+}
+
+/**
+ * Run one adapter hook as a supervised subprocess and report what happened.
+ * Never throws for process failures (ENOENT, timeout, non-zero exit) — those
+ * are reported via `ok:false` and `detail`. Only malformed call arguments
+ * (missing/invalid `hook`, `hostId`, or `verb`) throw synchronously.
+ *
+ * @param {{hook:{command:string[], timeoutMs?:number}, hostId:string,
+ *   verb:string, timeoutMs?:number, env?:Record<string,string>, stdin?:string,
+ *   cwd?:string, manifest?:object, integrity?:{hash:string}, baseDir?:string|null}} options
+ * @returns {Promise<{ok:boolean, stdout:string, stdoutText:string, stderrText:string,
+ *   stdoutTruncated:boolean, stderrTruncated:boolean, exitCode:number|null, detail:string|null}>}
+ */
+export async function runAdapterHook({
+  hook, hostId, verb, timeoutMs, env, stdin, cwd, manifest, integrity, baseDir,
+} = /** @type {any} */ ({})) {
+  assertRunAdapterHookArgs({
+    hook, hostId, verb, cwd,
+  });
+
+  const effectiveTimeoutMs = resolveTimeout(timeoutMs, hook.timeoutMs);
+  const [argv0, ...args] = hook.command;
+  const childEnv = minimalEnv(env);
+
+  const integrityFailure = verifyHookIntegrityOrFailure(manifest, integrity, baseDir, hostId, verb);
+  if (integrityFailure) return integrityFailure;
+
+  const wantsStdin = typeof stdin === 'string';
+  const spawned = spawnAdapterChild({
+    argv0, args, childEnv, cwd, wantsStdin, hostId, verb,
+  });
+  if (spawned.failure) return spawned.failure;
+  const { child } = spawned;
+
+  const stdoutCollector = boundedCollector(OUTPUT_CAP_BYTES);
+  const stderrCollector = boundedCollector(OUTPUT_CAP_BYTES);
+  child.stdout?.on('data', (chunk) => stdoutCollector.write(chunk));
+  child.stderr?.on('data', (chunk) => stderrCollector.write(chunk));
+
+  wireAdapterStdin(child, wantsStdin, stdin);
+
+  const { closeResult, getSpawnError } = awaitAdapterClose(child);
+  const raced = await raceTimeout(closeResult, effectiveTimeoutMs);
+  if (raced === TIMEOUT_SENTINEL) {
+    return buildAdapterTimeoutResult({
+      child, effectiveTimeoutMs, stdoutCollector, stderrCollector, closeResult, hostId, verb,
+    });
+  }
+
+  const spawnError = getSpawnError();
+  if (spawnError) {
+    return { ok: false, ...EMPTY_HOOK_RESULT, exitCode: null, detail: describeFailure(hostId, verb, spawnError) };
+  }
+
+  return buildAdapterCloseResult(raced.code, stdoutCollector, stderrCollector, hostId, verb);
 }
