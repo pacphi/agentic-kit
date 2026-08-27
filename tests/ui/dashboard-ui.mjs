@@ -3401,12 +3401,16 @@ async function main() {
     // ── nothing errored anywhere along the way ──
     // A 404 from /api/session/<id> is CORRECT behaviour for a session that does
     // not exist — the route was changed to stop answering 200-with-a-null-body.
-    // Everything else is a defect.
-    const realErrors = consoleErrors.filter((e) => !/\/api\/session\//.test(e));
+    // A 503 from /api/live/intelligence is CORRECT on a machine with no
+    // ruflo-initialized project (CI runners): the endpoint refuses the stream,
+    // the pane stays in its empty state, and the browser's resource log line is
+    // the only trace. Everything else is a defect.
+    const realErrors = consoleErrors.filter((e) => !/\/api\/session\//.test(e)
+      && !(/status of 503/.test(e) && /\/api\/live\/intelligence/.test(e)));
     check('no console errors across the whole run', realErrors.length === 0,
       realErrors.slice(0, 3).join(' | '));
     if (realErrors.length !== consoleErrors.length) {
-      console.log(`      (ignored ${consoleErrors.length - realErrors.length} expected /api/session 404s)`);
+      console.log(`      (ignored ${consoleErrors.length - realErrors.length} expected lines: /api/session 404s, intelligence 503s)`);
     }
     check('no failed network requests', failedRequests.length === 0,
       failedRequests.slice(0, 3).join(' | '));

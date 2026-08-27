@@ -148,22 +148,11 @@ test('ak host pick reports (but never rewrites) a user pin on a retired model', 
 });
 
 /** Exit-0 shims for `ruflo`/`claude`, the only two binaries run_project()'s
- *  non-dry-run path spawns before reaching the 9.5 provider-wiring block. */
-async function withProjectCli(fn) {
-  const bin = path.join(HOME, `fake-proj-bin-${Math.random().toString(36).slice(2, 8)}`);
-  fs.mkdirSync(bin, { recursive: true });
-  for (const name of ['ruflo', 'claude']) {
-    fs.writeFileSync(path.join(bin, name), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
-  }
-  const prev = process.env.PATH;
-  process.env.PATH = [bin, '/usr/bin', '/bin'].join(path.delimiter);
-  try {
-    return await fn();
-  } finally {
-    process.env.PATH = prev;
-    rmrf(bin);
-  }
-}
+ *  non-dry-run path spawns before reaching the 9.5 provider-wiring block.
+ *  Delegates to withFakePath so the shims carry their .cmd/.ps1 twins — a
+ *  bare `#!/bin/sh` shim can't spawn on Windows, which fails `ruflo init`
+ *  and aborts run_project() before the step under test. */
+const withProjectCli = (fn) => withFakePath(['ruflo', 'claude'], fn);
 
 test('ak setup --project heals a retired seeded route instead of leaving it for the next sync', async () => {
   const project = sandboxProject('ak-setup-retirement');
