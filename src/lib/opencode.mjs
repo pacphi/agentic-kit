@@ -188,6 +188,40 @@ export function opencodeMcpStatus(cfg, { configFile = paths.opencodeConfigPath()
   };
 }
 
+/** mcp.<name> reasons: missing entirely, or present but drifted from desired. */
+function mcpConvergenceReasons(doc, entries) {
+  const reasons = [];
+  for (const [name, want] of Object.entries(entries)) {
+    if (!(name in (doc.mcp ?? {}))) reasons.push(`${name} missing`);
+    else if (!deepEqual(doc.mcp[name], want)) reasons.push(`${name} drifted`);
+  }
+  return reasons;
+}
+
+/** A previously-owned key that fell out of the desired set but still equals
+ *  what ak wrote is stale — shared shape for managed.mcp and
+ *  managed.permissions convergence reasons. */
+function staleOwnedReasons(records, desiredKeys, currentValues, label) {
+  const reasons = [];
+  for (const [key, rec] of Object.entries(records)) {
+    if (desiredKeys.has(key) || rec.written == null) continue;
+    if (deepEqual(currentValues?.[key], rec.written)) reasons.push(label(key));
+  }
+  return reasons;
+}
+
+function skillPathReasons(doc, skillPaths) {
+  return skillPaths
+    .filter((p) => !(doc.skills?.paths ?? []).includes(p))
+    .map((p) => `skills path missing: ${p}`);
+}
+
+function permissionAllowReasons(doc, permissionKeys) {
+  return permissionKeys
+    .filter((k) => doc.permission?.[k] !== 'allow')
+    .map((k) => `permission ${k} not allowed`);
+}
+
 /** Convergence check — deeper than key existence (codex-review #16): the MCP
  *  entries must EQUAL today's desired values (command/env/timeout drift when
  *  the user edits them or a kit upgrade changes the template), desired skills
@@ -206,32 +240,20 @@ export async function opencodeConverged(cfg, { configFile = paths.opencodeConfig
     };
   }
   const doc = readJsonStrict(configFile).doc;
-  const reasons = [];
   const entries = await mcpEntriesFor({ brainShim, includeAqe: cfg.aqe !== false });
-  for (const [name, want] of Object.entries(entries)) {
-    if (!(name in (doc.mcp ?? {}))) reasons.push(`${name} missing`);
-    else if (!deepEqual(doc.mcp[name], want)) reasons.push(`${name} drifted`);
-  }
   const managed = normalizeManaged(opencodeOwnership(cfg).managed);
   const ownedEntries = Object.fromEntries(Object.entries(entries).filter(
     ([name]) => managed.mcp[name]?.written != null,
   ));
   const permissionKeys = permissionKeysFor(ownedEntries);
-  for (const [name, rec] of Object.entries(managed.mcp)) {
-    if (name in entries || rec.written == null) continue;
-    if (deepEqual(doc.mcp?.[name], rec.written)) reasons.push(`${name} stale (no longer desired)`);
-  }
   const source = catalogSource({ override: opencodeOwnership(cfg).catalogDir });
-  for (const p of skillPathsFor(source)) {
-    if (!(doc.skills?.paths ?? []).includes(p)) reasons.push(`skills path missing: ${p}`);
-  }
-  for (const k of permissionKeys) {
-    if (doc.permission?.[k] !== 'allow') reasons.push(`permission ${k} not allowed`);
-  }
-  for (const [key, rec] of Object.entries(managed.permissions)) {
-    if (permissionKeys.includes(key) || rec.written == null) continue;
-    if (deepEqual(doc.permission?.[key], rec.written)) reasons.push(`permission ${key} stale (no longer desired)`);
-  }
+  const reasons = [
+    ...mcpConvergenceReasons(doc, entries),
+    ...staleOwnedReasons(managed.mcp, new Set(Object.keys(entries)), doc.mcp, (name) => `${name} stale (no longer desired)`),
+    ...skillPathReasons(doc, skillPathsFor(source)),
+    ...permissionAllowReasons(doc, permissionKeys),
+    ...staleOwnedReasons(managed.permissions, new Set(permissionKeys), doc.permission, (key) => `permission ${key} stale (no longer desired)`),
+  ];
   return { converged: reasons.length === 0, reasons };
 }
 
@@ -255,35 +277,27 @@ const receiptMatches = (text, receipt) =>
  *  tolerating the legacy names-only shape from the first shipped version
  *  (legacy entries have unknown prior/written → treated conservatively: prior
  *  null, written null → never auto-deleted, only re-recorded on next apply). */
-function normalizeManaged(m) {
-  const out = {
-    mcp: {}, paths: [], permissions: {}, permissionScalar: null,
-    artifacts: { plugin: null, gateway: null, agents: {}, agentStamp: null, skill: null },
-    artifactState: {
-      containerMalformed: false, agentsMalformed: false,
-      rawContainer: null,
-    },
-  };
-  if (!m || typeof m !== 'object') return out;
-  const legacyNames = Array.isArray(m.mcp) ? m.mcp : Object.keys(m.mcp ?? {});
-  for (const n of legacyNames) {
-    const rec = Array.isArray(m.mcp) ? null : m.mcp[n];
-    out.mcp[n] = rec && typeof rec === 'object' && 'written' in rec ? rec : { prior: null, written: null };
+/** Normalize a legacy-tolerant names-or-{prior,written}-records collection
+ *  (used identically for both m.mcp and m.permissions). */
+function normalizeOwnedRecordMap(source) {
+  const names = Array.isArray(source) ? source : Object.keys(source ?? {});
+  const out = {};
+  for (const n of names) {
+    const rec = Array.isArray(source) ? null : source[n];
+    out[n] = rec && typeof rec === 'object' && 'written' in rec ? rec : { prior: null, written: null };
   }
-  out.paths = Array.isArray(m.paths) ? [...m.paths] : [];
-  const permKeys = Array.isArray(m.permissions) ? m.permissions : Object.keys(m.permissions ?? {});
-  for (const k of permKeys) {
-    const rec = Array.isArray(m.permissions) ? null : m.permissions[k];
-    out.permissions[k] = rec && typeof rec === 'object' && 'written' in rec ? rec : { prior: null, written: null };
-  }
-  out.permissionScalar = typeof m.permissionScalar === 'string' ? m.permissionScalar : null;
+  return out;
+}
+
+/** Normalize the artifacts sub-container into `out.artifacts`/`out.artifactState`. */
+function normalizeManagedArtifacts(m, out) {
   if (hasReceiptValue(m.artifacts)) {
     out.artifactState.rawContainer = structuredClone(m.artifacts);
   }
   if (hasReceiptValue(m.artifacts)
       && (typeof m.artifacts !== 'object' || Array.isArray(m.artifacts))) {
     out.artifactState.containerMalformed = true;
-    return out;
+    return;
   }
   const artifacts = m.artifacts ?? {};
   out.artifacts.plugin = hasReceiptValue(artifacts.plugin) ? artifacts.plugin : null;
@@ -298,6 +312,23 @@ function normalizeManaged(m) {
       Object.entries(artifacts.agents).filter(([, hash]) => hasReceiptValue(hash)),
     );
   }
+}
+
+function normalizeManaged(m) {
+  const out = {
+    mcp: {}, paths: [], permissions: {}, permissionScalar: null,
+    artifacts: { plugin: null, gateway: null, agents: {}, agentStamp: null, skill: null },
+    artifactState: {
+      containerMalformed: false, agentsMalformed: false,
+      rawContainer: null,
+    },
+  };
+  if (!m || typeof m !== 'object') return out;
+  out.mcp = normalizeOwnedRecordMap(m.mcp);
+  out.paths = Array.isArray(m.paths) ? [...m.paths] : [];
+  out.permissions = normalizeOwnedRecordMap(m.permissions);
+  out.permissionScalar = typeof m.permissionScalar === 'string' ? m.permissionScalar : null;
+  normalizeManagedArtifacts(m, out);
   return out;
 }
 
@@ -579,6 +610,39 @@ export async function applyOpencode(cfg, { dryRun = false, configFile = paths.op
  *  but a prior '*' wildcard exists. Deployed artifacts are removed separately
  *  (removeArtifacts).
  *  @param {any} cfg @param {{ configFile?: string }} [opts] */
+/** Remove ak-managed paths that fell out of the desired set from
+ *  doc.skills.paths, pruning the now-empty container(s) too. Returns whether
+ *  anything changed. */
+function restoreSkillPaths(doc, managedPaths) {
+  if (!doc.skills?.paths || !managedPaths.length) return false;
+  const drop = new Set(managedPaths);
+  const keptPaths = doc.skills.paths.filter((p) => !drop.has(p));
+  if (keptPaths.length === doc.skills.paths.length) return false;
+  if (keptPaths.length) doc.skills.paths = keptPaths;
+  else {
+    delete doc.skills.paths;
+    if (Object.keys(doc.skills).length === 0) delete doc.skills;
+  }
+  return true;
+}
+
+/** Drop an emptied permission object, or collapse it back to the scalar
+ *  shorthand ak lifted from (only when scalar was the ORIGIN). Returns
+ *  whether anything changed. */
+function collapsePermissionScalar(doc, scalarOrigin) {
+  if (doc.permission && Object.keys(doc.permission).length === 0) {
+    delete doc.permission;
+    return false;
+  }
+  if (doc.permission && scalarOrigin != null && Object.keys(doc.permission).length === 1 && doc.permission['*'] != null) {
+    // restore the scalar shorthand we lifted (only when scalar was the ORIGIN;
+    // the current '*' value is what collapses back — '*' is never ak-managed)
+    doc.permission = doc.permission['*'];
+    return true;
+  }
+  return false;
+}
+
 export function undoOpencode(cfg, { configFile = paths.opencodeConfigPath() } = {}) {
   if (opencodeOwnership(cfg).mcp !== 'ak') {
     return { ok: true, changed: false, detail: 'opencode.json left as-is (not ak-managed)' };
@@ -619,25 +683,11 @@ export function undoOpencode(cfg, { configFile = paths.opencodeConfigPath() } = 
   for (const [name, rec] of Object.entries(managed.mcp)) restore(doc.mcp, name, rec, `mcp.${name}`);
   if (doc.mcp && Object.keys(doc.mcp).length === 0) delete doc.mcp;
 
-  if (doc.skills?.paths && managed.paths.length) {
-    const drop = new Set(managed.paths);
-    const keptPaths = doc.skills.paths.filter((p) => !drop.has(p));
-    if (keptPaths.length !== doc.skills.paths.length) {
-      changed = true;
-      if (keptPaths.length) doc.skills.paths = keptPaths;
-      else { delete doc.skills.paths; if (Object.keys(doc.skills).length === 0) delete doc.skills; }
-    }
-  }
+  if (restoreSkillPaths(doc, managed.paths)) changed = true;
 
   const scalarOrigin = managed.permissionScalar ?? null;
   for (const [k, rec] of Object.entries(managed.permissions)) restore(doc.permission, k, rec, `permission.${k}`);
-  if (doc.permission && Object.keys(doc.permission).length === 0) delete doc.permission;
-  else if (doc.permission && scalarOrigin != null && Object.keys(doc.permission).length === 1 && doc.permission['*'] != null) {
-    // restore the scalar shorthand we lifted (only when scalar was the ORIGIN;
-    // the current '*' value is what collapses back — '*' is never ak-managed)
-    doc.permission = doc.permission['*'];
-    changed = true;
-  }
+  if (collapsePermissionScalar(doc, scalarOrigin)) changed = true;
 
   if (changed) writeJsonWithBackup(configFile, doc);
   const ownership = mutableOpencodeOwnership(cfg);
@@ -1562,6 +1612,30 @@ export function skillStatus({
   };
 }
 
+/** Remove `file` only when it exists and its content hash exactly matches
+ *  `receipt` (provable ak ownership); push `label` onto `removed` when given.
+ *  Returns whether the file was removed. */
+function removeIfReceiptOwned(file, receipt, label, removed) {
+  if (!fs.existsSync(file) || !receipt) return false;
+  if (contentHash(fs.readFileSync(file, 'utf8')) !== receipt) return false;
+  fs.rmSync(file, { force: true });
+  if (label) removed.push(label);
+  return true;
+}
+
+/** Remove receipt-owned generated agent files + the stamp file, pushing a
+ *  single summary label for the count of agents removed. */
+function removeGeneratedAgents(agentsDir, receipts, removed) {
+  if (!fs.existsSync(agentsDir)) return;
+  let n = 0;
+  for (const f of fs.readdirSync(agentsDir)) {
+    const p = path.join(agentsDir, f);
+    if (f === STAMP_FILE) { removeIfReceiptOwned(p, receipts.agentStamp, null, removed); continue; }
+    if (f.endsWith('.md') && removeIfReceiptOwned(p, receipts.agents?.[f], null, removed)) n++;
+  }
+  if (n) removed.push(`${n} generated agents`);
+}
+
 /** Remove ak-deployed artifacts (marker-gated — user files are never touched):
  *  the lifecycle plugin, generated agents (+ stamp), the platform skill's
  *  SKILL.md. Directories are pruned only when EMPTY after the managed files
@@ -1575,41 +1649,12 @@ export function removeArtifacts({
   const rmdirIfEmpty = (dir) => {
     try { if (fs.readdirSync(dir).length === 0) fs.rmdirSync(dir); } catch { /* absent or not empty */ }
   };
-  const plugin = path.join(pluginsDir, PLUGIN_NAME);
-  if (fs.existsSync(plugin) && receipts.plugin
-      && contentHash(fs.readFileSync(plugin, 'utf8')) === receipts.plugin) {
-    fs.rmSync(plugin, { force: true });
-    removed.push('plugin ruflo-hooks.js');
-  }
-  const gateway = path.join(pluginsDir, GATEWAY_PLUGIN_NAME);
-  if (fs.existsSync(gateway) && receipts.gateway
-      && contentHash(fs.readFileSync(gateway, 'utf8')) === receipts.gateway) {
-    fs.rmSync(gateway, { force: true });
-    removed.push('plugin ruflo-gateway.js');
-  }
-  if (fs.existsSync(agentsDir)) {
-    let n = 0;
-    for (const f of fs.readdirSync(agentsDir)) {
-      const p = path.join(agentsDir, f);
-      if (f === STAMP_FILE && receipts.agentStamp
-          && contentHash(fs.readFileSync(p, 'utf8')) === receipts.agentStamp) {
-        fs.rmSync(p, { force: true }); continue;
-      }
-      if (f.endsWith('.md') && receipts.agents?.[f]
-          && contentHash(fs.readFileSync(p, 'utf8')) === receipts.agents[f]) {
-        fs.rmSync(p, { force: true });
-        n++;
-      }
-    }
-    if (n) removed.push(`${n} generated agents`);
-  }
+  removeIfReceiptOwned(path.join(pluginsDir, PLUGIN_NAME), receipts.plugin, 'plugin ruflo-hooks.js', removed);
+  removeIfReceiptOwned(path.join(pluginsDir, GATEWAY_PLUGIN_NAME), receipts.gateway, 'plugin ruflo-gateway.js', removed);
+  removeGeneratedAgents(agentsDir, receipts, removed);
   const skillDir = path.join(skillsDir, 'ruflo');
-  const skill = path.join(skillDir, 'SKILL.md');
-  if (fs.existsSync(skill) && receipts.skill
-      && contentHash(fs.readFileSync(skill, 'utf8')) === receipts.skill) {
-    fs.rmSync(skill, { force: true });
+  if (removeIfReceiptOwned(path.join(skillDir, 'SKILL.md'), receipts.skill, 'platform skill', removed)) {
     rmdirIfEmpty(skillDir);
-    removed.push('platform skill');
   }
   return { ok: true, changed: removed.length > 0, detail: removed.length ? `removed: ${removed.join(', ')}` : 'no ak-deployed artifacts found' };
 }
