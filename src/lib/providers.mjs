@@ -639,71 +639,54 @@ function buildChain(entries) {
   };
 }
 
-/** Write ak's managed router config into `.agentic-qe/llm-config.json`, merged
- *  into any existing file (backup-first, never persisting apiKey):
- *    - the ordered fallback chain + enabled set + default provider (from
- *      `aqeFallback`), and
- *    - the per-activity `agentOverrides` map projected from `routing.routes`
- *      (issue #568; only when installed aqe ≥ 3.13.1).
- *  No-op unless at least one of those is configured and we are in a project.
- *  Returns {ok, changed, detail}. */
-export function applyAqeRouter(cfg, cwd = process.cwd()) {
-  const chain = cfg.providers?.aqeFallback ?? [];
-  const policy = cfg.routing?.routes ?? {};
-  const selectedProvider = cfg.providers?.aqeProvider ?? null;
-  const hasChain = chain.length > 0;
-  const hasPolicy = Object.keys(policy).length > 0;
-  // Same repo-root resolution as settingsTarget — the three scope gates must
-  // never disagree about what "in a project" means (see paths.repoRoot).
-  const root = paths.repoRoot(cwd);
-  if (!root) return { ok: true, changed: false, detail: 'not a project — aqe router unmanaged' };
-  const file = aqeRouterFile(root);
-  const existing = readJson(file, {}) ?? {};
-  const ownedExternalDefault = exactlyOwnedExternalDefault(existing);
-  const ownedFallbackDefault = exactlyOwnedFallbackDefault(existing);
-  const desiredExternal = aqeExternalProviders({ projectRoot: root });
-  const hasExternal = Object.keys(desiredExternal).length > 0;
-  const hasOwnedExternal = Object.keys(existing[AQE_OWNERSHIP_KEY]?.externalProviders ?? {}).length > 0;
-  const existingOwnership = plainRecord(existing[AQE_OWNERSHIP_KEY]) ?? {};
-  const hasExternalDefaultReceipt = Object.hasOwn(existingOwnership, 'externalDefaultProvider');
-  const hasFallbackDefaultReceipt = Object.hasOwn(existingOwnership, 'fallbackDefaultProvider');
-  const hasManagedFallback = existing.fallbackChain?.id === AQE_MANAGED_TAG;
-  const priorOverrides = existing.agentOverrides ?? {};
-  let projected = configuredPolicyToAgentOverrides(policy);
-  const managedOverrideKeys = new Set(Object.keys(AGENT_ACTIVITY_MAP));
-  let staleOverrides = Object.keys(priorOverrides)
-    .filter((agent) => managedOverrideKeys.has(agent) && !(agent in projected));
-  if (!hasChain && !hasPolicy && !hasExternal && !hasOwnedExternal && !hasManagedFallback
-    && !hasExternalDefaultReceipt && !hasFallbackDefaultReceipt && staleOverrides.length === 0) {
-    return { ok: true, changed: false, detail: 'no aqe router config to apply' };
-  }
-  const next = { ...existing };
-  // Exact receipts never regain authority. If a user changes the default away
-  // from the value ak wrote, relinquish ownership immediately; changing it
-  // back later is still a user write and cannot resurrect this receipt.
-  if (hasExternalDefaultReceipt && !ownedExternalDefault) {
-    clearExternalDefaultOwnership(next);
-  }
-  // A fallback-derived default is owned only while its exact receipt matches.
-  // Membership in the old chain is not provenance: a user may deliberately
-  // replace the default with another rung before retiring the chain.
-  if (hasFallbackDefaultReceipt && (!ownedFallbackDefault || !hasManagedFallback)) {
-    clearFallbackDefaultOwnership(next);
-  }
-  const details = [];
-  let wrote = false;
-  let externalError = null;
-  let externalActive = new Set();
+// ── applyAqeRouter: ordered surface reconcilers ─────────────────────────────
+// Five surfaces used to be braided together in one function, sharing mutable
+// accumulators with implicit cross-surface feedback: `externalActive`
+// (computed while reconciling external providers) constrained what the
+// fallback-chain/default-provider/agentOverrides surfaces below it could
+// safely reference, and `projected`/`staleOverrides` had to be recomputed
+// after that same fact became known. Each surface below is a
+// `(next, ctx) => {detail, error, changed, ctx?}` step, folded left-to-right
+// over one shared `next` draft; a surface returns an optional `ctx` PATCH
+// (applied before the next surface runs) instead of closing over an outer
+// `let` — the one real cross-surface dependency (externalActive -> the
+// refined `projected`/`staleOverrides`) is the only patch actually used, so
+// it stays a single, explicit, ordered hand-off rather than several loose
+// mutable accumulators.
 
-  const externalSupported = aqeSupportsExternalProviders();
+/** The externalProviders surface's own detail line — split out only to keep
+ *  that surface's branch count (five independent `?  : ''` clauses) legible
+ *  and under the reconciler's own complexity budget. */
+function formatExternalProvidersDetail(externalActive, reconciled) {
+  return `externalProviders: ${externalActive.size} managed`
+    + (reconciled.added.length ? ` (${reconciled.added.length} added)` : '')
+    + (reconciled.pruned.length ? ` (${reconciled.pruned.length} stale owned pruned)` : '')
+    + (reconciled.activationsAdded.length ? ` (${reconciled.activationsAdded.length} MCP activation added)` : '')
+    + (reconciled.activationsPruned.length ? ` (${reconciled.activationsPruned.length} stale activation pruned)` : '')
+    + (reconciled.conflicts.length ? ` (⚠ conflicts preserved: ${reconciled.conflicts.join(', ')})` : '');
+}
+
+/** Surface 1/4: reconcile admitted external-provider declarations/activations
+ *  against the live file, prune anything that became unavailable from the
+ *  fallback chain/defaultProvider, and refine `projected`/`staleOverrides` for
+ *  the surfaces after it (their safe-to-reference set depends on which
+ *  external ids ended up active here). */
+function reconcileExternalProvidersSurface(next, ctx) {
+  const {
+    existing, desiredExternal, hasExternal, hasOwnedExternal, externalSupported,
+    hasManagedFallback, ownedFallbackDefault, ownedExternalDefault,
+    priorOverrides, managedOverrideKeys, projected: priorProjected,
+  } = ctx;
+  let externalActive = new Set();
+  let error = null;
+  let changed = false;
+  const detail = [];
+
   if (hasExternal || hasOwnedExternal) {
     // A downgrade must remove only unchanged entries we previously wrote,
     // plus their dangling references. Keeping declarations that this AQE
     // version cannot understand would strand every router startup on drift.
-    const reconciled = reconcileExternalProviders(
-      existing,
-      externalSupported ? desiredExternal : {},
-    );
+    const reconciled = reconcileExternalProviders(existing, externalSupported ? desiredExternal : {});
     externalActive = reconciled.active;
     if (Object.keys(reconciled.externalProviders).length) next.externalProviders = reconciled.externalProviders;
     else delete next.externalProviders;
@@ -716,17 +699,12 @@ export function applyAqeRouter(cfg, cwd = process.cwd()) {
     if (Object.keys(ownership).length) next[AQE_OWNERSHIP_KEY] = ownership;
     else delete next[AQE_OWNERSHIP_KEY];
     if (reconciled.conflicts.length) {
-      externalError = `refused conflicting foreign/user-edited external provider ids: ${reconciled.conflicts.join(', ')}`;
+      error = `refused conflicting foreign/user-edited external provider ids: ${reconciled.conflicts.join(', ')}`;
     }
-    details.push(`externalProviders: ${externalActive.size} managed`
-      + (reconciled.added.length ? ` (${reconciled.added.length} added)` : '')
-      + (reconciled.pruned.length ? ` (${reconciled.pruned.length} stale owned pruned)` : '')
-      + (reconciled.activationsAdded.length ? ` (${reconciled.activationsAdded.length} MCP activation added)` : '')
-      + (reconciled.activationsPruned.length ? ` (${reconciled.activationsPruned.length} stale activation pruned)` : '')
-      + (reconciled.conflicts.length ? ` (⚠ conflicts preserved: ${reconciled.conflicts.join(', ')})` : ''));
+    detail.push(formatExternalProvidersDetail(externalActive, reconciled));
     if (hasExternal && !externalSupported) {
-      externalError = `external providers need agentic-qe >=${EXTERNAL_PROVIDERS_MIN_AQE}`;
-      details.push(`externalProviders: disabled (${externalError})`);
+      error = `external providers need agentic-qe >=${EXTERNAL_PROVIDERS_MIN_AQE}`;
+      detail.push(`externalProviders: disabled (${error})`);
     }
     const unavailableExternal = new Set([...reconciled.unavailable, ...reconciled.retired]);
     if (hasManagedFallback && next.fallbackChain?.entries) {
@@ -742,33 +720,58 @@ export function applyAqeRouter(cfg, cwd = process.cwd()) {
       clearExternalDefaultOwnership(next);
       clearFallbackDefaultOwnership(next);
     }
-    wrote = reconciled.added.length > 0 || reconciled.pruned.length > 0
+    changed = reconciled.added.length > 0 || reconciled.pruned.length > 0
       || reconciled.activationsAdded.length > 0 || reconciled.activationsPruned.length > 0
       || Object.keys(desiredExternal).some((id) => existing.externalProviders?.[id]
         && declarationHash(existing.externalProviders[id]) !== declarationHash(desiredExternal[id]));
   }
-  projected = Object.fromEntries(Object.entries(projected).filter(([, entry]) =>
-    !(entry.provider in desiredExternal) || externalActive.has(entry.provider)));
+
   // Admission/version/conflict filtering can make a previously projected
-  // external route inactive after the first stale calculation. Recompute from
-  // the safe projection so ak-owned overrides never retain an unusable id.
-  staleOverrides = Object.keys(priorOverrides)
+  // external route inactive. Recompute from the safe projection so ak-owned
+  // overrides never retain an unusable id — this runs regardless of whether
+  // the branch above executed (externalActive then defaults to empty).
+  const projected = Object.fromEntries(Object.entries(priorProjected).filter(([, entry]) =>
+    !(entry.provider in desiredExternal) || externalActive.has(entry.provider)));
+  const staleOverrides = Object.keys(priorOverrides)
     .filter((agent) => managedOverrideKeys.has(agent) && !(agent in projected));
 
+  return {
+    detail, error, changed, ctx: { externalActive, projected, staleOverrides },
+  };
+}
+
+/** Surface 2/4: retire a previously-written managed fallback chain (and its
+ *  derived default) once the canonical `aqeFallback` intent goes empty. */
+function reconcileFallbackRetirementSurface(next, ctx) {
+  const {
+    hasChain, hasManagedFallback, ownedFallbackDefault, ownedExternalDefault,
+  } = ctx;
+  if (hasChain || !hasManagedFallback) return null;
   // An empty canonical fallback intent retires the tagged chain ak previously
   // wrote. Its derived default belongs to the same projection and must not
   // survive independently; provider declarations/activations remain available
   // for explicit selection, routes, or a future chain.
-  if (!hasChain && hasManagedFallback) {
-    delete next.fallbackChain;
-    if (ownedFallbackDefault) {
-      delete next.defaultProvider;
-      if (ownedExternalDefault) clearExternalDefaultOwnership(next);
-    }
-    clearFallbackDefaultOwnership(next);
-    details.push('chain: managed fallback retired');
-    wrote = true;
+  delete next.fallbackChain;
+  if (ownedFallbackDefault) {
+    delete next.defaultProvider;
+    if (ownedExternalDefault) clearExternalDefaultOwnership(next);
   }
+  clearFallbackDefaultOwnership(next);
+  return { detail: 'chain: managed fallback retired', changed: true };
+}
+
+/** Surface 3/4: decide `defaultProvider` and which of the two ownership
+ *  receipts (external vs. fallback-chain-derived) it carries, across the
+ *  three ways it can change: explicit deselection, chain-derived assignment
+ *  (which also builds/validates the active chain itself), and an explicit
+ *  project-local external selection. */
+function reconcileDefaultProviderSurface(next, ctx) {
+  const {
+    cfg, existing, chain, selectedProvider, hasChain, desiredExternal, externalActive, ownedExternalDefault,
+  } = ctx;
+  const detail = [];
+  let error = null;
+  let changed = false;
 
   // `aqeProvider: null` is an explicit deselection. Retire only an exact
   // external default that ak previously wrote, while leaving the admitted
@@ -778,11 +781,10 @@ export function applyAqeRouter(cfg, cwd = process.cwd()) {
   if (!hasChain && selectedProvider === null && ownedExternalDefault) {
     delete next.defaultProvider;
     clearExternalDefaultOwnership(next);
-    details.push(`defaultProvider: ${ownedExternalDefault} retired`);
-    wrote = true;
+    detail.push(`defaultProvider: ${ownedExternalDefault} retired`);
+    changed = true;
   }
 
-  let chainError = null;
   if (hasChain) {
     const selectable = new Set(aqeSelectableChainProviderTypes());
     const valid = chain.filter((e) => e?.provider && selectable.has(e.provider)
@@ -790,8 +792,8 @@ export function applyAqeRouter(cfg, cwd = process.cwd()) {
     if (valid.length === 0) {
       // A bad chain must NOT block the independent agentOverrides projection — the
       // Activity routing is validated separately. Record it and carry on.
-      chainError = 'no valid providers in fallback chain';
-      details.push(`chain: ⚠ ${chainError}`);
+      error = 'no valid providers in fallback chain';
+      detail.push(`chain: ⚠ ${error}`);
     } else {
       const requestedDefault = cfg.providers.aqeProvider;
       const requestedUnavailable = requestedDefault in desiredExternal && !externalActive.has(requestedDefault);
@@ -811,10 +813,10 @@ export function applyAqeRouter(cfg, cwd = process.cwd()) {
       // Warn, never refuse: the user may export the key later, and silently
       // dropping a rung is worse than writing one that is currently inert (#54).
       const gaps = credentialGaps(valid);
-      details.push(`chain: ${valid.map((e) => e.provider).join(' → ')}`
+      detail.push(`chain: ${valid.map((e) => e.provider).join(' → ')}`
         + (emptyModels.length ? ` (⚠ no models for: ${emptyModels.join(', ')})` : '')
         + (gaps.length ? ` (⚠ no credential for: ${gaps.map((g) => `${g.provider} — needs ${g.missing.join(', ')}`).join('; ')})` : ''));
-      wrote = true;
+      changed = true;
     }
   }
 
@@ -825,14 +827,24 @@ export function applyAqeRouter(cfg, cwd = process.cwd()) {
     if (externalActive.has(selectedProvider)) {
       next.defaultProvider = selectedProvider;
       setExternalDefaultOwnership(next, selectedProvider);
-      details.push(`defaultProvider: ${selectedProvider} (project-local external)`);
-      wrote = true;
+      detail.push(`defaultProvider: ${selectedProvider} (project-local external)`);
+      changed = true;
     } else {
-      externalError ??= `external default '${selectedProvider}' is not safely managed`;
+      error ??= `external default '${selectedProvider}' is not safely managed`;
     }
   }
 
-  const agentOverridesSupported = aqeSupportsAgentOverrides();
+  return { detail, error, changed };
+}
+
+/** Surface 4/4: project `routing.routes` into aqe's `agentOverrides`, merged
+ *  with (not replacing) foreign entries, pruning only the ak-owned entries
+ *  the current projection no longer names (`ctx.staleOverrides`, refined by
+ *  surface 1 against the final external-availability set). */
+function reconcileAgentOverridesSurface(next, ctx) {
+  const {
+    existing, desiredExternal, priorOverrides, projected, staleOverrides, hasPolicy, agentOverridesSupported,
+  } = ctx;
   if ((agentOverridesSupported && Object.keys(projected).length) || staleOverrides.length) {
     // MERGE, don't replace: ak owns only the curated agent-types it projects;
     // preserve foreign entries (aqe's own defaults or a hand-added agent). The
@@ -856,31 +868,163 @@ export function applyAqeRouter(cfg, cwd = process.cwd()) {
         if (!(provider in desiredExternal)) next.providers[provider] = { ...(next.providers[provider] ?? {}), enabled: true };
       }
     }
-    details.push(`agentOverrides: ${agentOverridesSupported ? Object.keys(projected).length : 0} agents`
-      + (referenced.length ? ` (providers enabled: ${referenced.join(', ')})` : '')
-      + (staleOverrides.length ? ` (${staleOverrides.length} stale ak entries pruned)` : '')
-      + (!agentOverridesSupported ? ' (new projection skipped; needs agentic-qe ≥ 3.13.1)' : ''));
-    wrote = true;
-  } else if (hasPolicy && !agentOverridesSupported) {
-    details.push('agentOverrides: skipped (needs agentic-qe ≥ 3.13.1)');
-  } else if (hasPolicy && Object.keys(projected).length === 0) {
-    details.push('agentOverrides: skipped (no safely constructible providers)');
+    return {
+      changed: true,
+      detail: `agentOverrides: ${agentOverridesSupported ? Object.keys(projected).length : 0} agents`
+        + (referenced.length ? ` (providers enabled: ${referenced.join(', ')})` : '')
+        + (staleOverrides.length ? ` (${staleOverrides.length} stale ak entries pruned)` : '')
+        + (!agentOverridesSupported ? ' (new projection skipped; needs agentic-qe ≥ 3.13.1)' : ''),
+    };
+  }
+  if (hasPolicy && !agentOverridesSupported) return { detail: 'agentOverrides: skipped (needs agentic-qe ≥ 3.13.1)' };
+  if (hasPolicy && Object.keys(projected).length === 0) return { detail: 'agentOverrides: skipped (no safely constructible providers)' };
+  return null;
+}
+
+const AQE_ROUTER_SURFACES = [
+  reconcileExternalProvidersSurface,
+  reconcileFallbackRetirementSurface,
+  reconcileDefaultProviderSurface,
+  reconcileAgentOverridesSurface,
+];
+
+/** Fold an ordered list of `(draft, ctx) => {detail, error, changed, ctx?}`
+ *  surface reconcilers over one draft, left to right. A surface's own `ctx`
+ *  patch (if any) is applied before the next surface runs — the only
+ *  sanctioned channel for one surface's output to inform a later one (see the
+ *  section comment above AQE_ROUTER_SURFACES). `draft`/`ctx` are mutated in
+ *  place as usual; returns the accumulated {details, changed, error}. */
+function foldSurfaces(surfaces, draft, ctx) {
+  const details = [];
+  let changed = false;
+  let error = null;
+  for (const reconcile of surfaces) {
+    const result = reconcile(draft, ctx);
+    if (!result) continue;
+    if (result.detail) {
+      if (Array.isArray(result.detail)) details.push(...result.detail);
+      else details.push(result.detail);
+    }
+    if (result.changed) changed = true;
+    if (result.error) error ??= result.error;
+    if (result.ctx) Object.assign(ctx, result.ctx);
+  }
+  return { details, changed, error };
+}
+
+/** True when nothing in `cfg`/the on-disk file requires any router surface to
+ *  run — the router file is left untouched (and unread beyond this check). */
+function aqeRouterHasNothingToApply({
+  hasChain, hasPolicy, hasExternal, hasOwnedExternal, hasManagedFallback,
+  hasExternalDefaultReceipt, hasFallbackDefaultReceipt, staleOverrides,
+}) {
+  return !hasChain && !hasPolicy && !hasExternal && !hasOwnedExternal && !hasManagedFallback
+    && !hasExternalDefaultReceipt && !hasFallbackDefaultReceipt && staleOverrides.length === 0;
+}
+
+/** Exact receipts never regain authority. If a user changes the default away
+ *  from the value ak wrote (external default), or the managed fallback chain
+ *  that derived a default is gone or no longer owned, relinquish that receipt
+ *  immediately — changing it back later is still a user write and cannot
+ *  resurrect it. Runs before any surface, on the initial draft. */
+function clearStaleDefaultReceipts(next, {
+  hasExternalDefaultReceipt, ownedExternalDefault, hasFallbackDefaultReceipt, ownedFallbackDefault, hasManagedFallback,
+}) {
+  if (hasExternalDefaultReceipt && !ownedExternalDefault) clearExternalDefaultOwnership(next);
+  if (hasFallbackDefaultReceipt && (!ownedFallbackDefault || !hasManagedFallback)) clearFallbackDefaultOwnership(next);
+}
+
+/** Write ak's managed router config into `.agentic-qe/llm-config.json`, merged
+ *  into any existing file (backup-first, never persisting apiKey):
+ *    - the ordered fallback chain + enabled set + default provider (from
+ *      `aqeFallback`), and
+ *    - the per-activity `agentOverrides` map projected from `routing.routes`
+ *      (issue #568; only when installed aqe ≥ 3.13.1).
+ *  No-op unless at least one of those is configured and we are in a project.
+ *  Folds AQE_ROUTER_SURFACES over one draft (see the section comment above);
+ *  this function is the setup (context + initial draft), the fold, and the
+ *  final change-detect-and-write.
+ *  Returns {ok, changed, detail}. */
+export function applyAqeRouter(cfg, cwd = process.cwd()) {
+  const chain = cfg.providers?.aqeFallback ?? [];
+  const policy = cfg.routing?.routes ?? {};
+  const selectedProvider = cfg.providers?.aqeProvider ?? null;
+  const hasChain = chain.length > 0;
+  const hasPolicy = Object.keys(policy).length > 0;
+  // Same repo-root resolution as settingsTarget — the three scope gates must
+  // never disagree about what "in a project" means (see paths.repoRoot).
+  const root = paths.repoRoot(cwd);
+  if (!root) return { ok: true, changed: false, detail: 'not a project — aqe router unmanaged' };
+  const file = aqeRouterFile(root);
+  const existing = readJson(file, {}) ?? {};
+  const ownedExternalDefault = exactlyOwnedExternalDefault(existing);
+  const ownedFallbackDefault = exactlyOwnedFallbackDefault(existing);
+  const desiredExternal = aqeExternalProviders({ projectRoot: root });
+  const hasExternal = Object.keys(desiredExternal).length > 0;
+  const hasOwnedExternal = Object.keys(existing[AQE_OWNERSHIP_KEY]?.externalProviders ?? {}).length > 0;
+  const existingOwnership = plainRecord(existing[AQE_OWNERSHIP_KEY]) ?? {};
+  const hasExternalDefaultReceipt = Object.hasOwn(existingOwnership, 'externalDefaultProvider');
+  const hasFallbackDefaultReceipt = Object.hasOwn(existingOwnership, 'fallbackDefaultProvider');
+  const hasManagedFallback = existing.fallbackChain?.id === AQE_MANAGED_TAG;
+  const priorOverrides = existing.agentOverrides ?? {};
+  const projected = configuredPolicyToAgentOverrides(policy);
+  const managedOverrideKeys = new Set(Object.keys(AGENT_ACTIVITY_MAP));
+  const staleOverrides = Object.keys(priorOverrides)
+    .filter((agent) => managedOverrideKeys.has(agent) && !(agent in projected));
+
+  const facts = {
+    hasChain, hasPolicy, hasExternal, hasOwnedExternal, hasManagedFallback,
+    hasExternalDefaultReceipt, hasFallbackDefaultReceipt, staleOverrides,
+  };
+  if (aqeRouterHasNothingToApply(facts)) {
+    return { ok: true, changed: false, detail: 'no aqe router config to apply' };
   }
 
-  wrote ||= JSON.stringify(stableValue(next)) !== JSON.stringify(stableValue(existing));
-  if (!wrote) return { ok: !chainError && !externalError, changed: false, detail: details.join('; ') || 'nothing to apply' };
+  const next = { ...existing };
+  clearStaleDefaultReceipts(next, {
+    hasExternalDefaultReceipt, ownedExternalDefault, hasFallbackDefaultReceipt, ownedFallbackDefault, hasManagedFallback,
+  });
+
+  const ctx = {
+    cfg,
+    existing,
+    chain,
+    selectedProvider,
+    hasChain,
+    hasPolicy,
+    desiredExternal,
+    hasExternal,
+    hasOwnedExternal,
+    hasManagedFallback,
+    ownedExternalDefault,
+    ownedFallbackDefault,
+    priorOverrides,
+    managedOverrideKeys,
+    projected,
+    staleOverrides,
+    externalActive: new Set(),
+    externalSupported: aqeSupportsExternalProviders(),
+    agentOverridesSupported: aqeSupportsAgentOverrides(),
+  };
+  const { details, changed: surfacesChanged, error } = foldSurfaces(AQE_ROUTER_SURFACES, next, ctx);
+
+  // One exact compare, reused for both phases below (the prior version
+  // stringified `existing` twice for the same never-mutated object).
+  const existingSnapshot = JSON.stringify(stableValue(existing));
+  const changed = surfacesChanged || JSON.stringify(stableValue(next)) !== existingSnapshot;
+  if (!changed) return { ok: !error, changed: false, detail: details.join('; ') || 'nothing to apply' };
   next._managedBy = AQE_MANAGED_TAG;
-  // `wrote` means this invocation owns at least one projection surface; it
-  // does not by itself mean the artifact changed. Compare the complete
-  // managed value (including the ownership tag) before touching disk so a
-  // converged external default/fallback/override remains byte- and
-  // mtime-stable across repeated syncs.
-  if (JSON.stringify(stableValue(next)) === JSON.stringify(stableValue(existing))) {
-    return { ok: !chainError && !externalError, changed: false, detail: details.join('; ') || 'nothing to apply' };
+  // A surface reporting `changed: true` means this invocation owns at least
+  // one projection surface; it does not by itself mean the artifact changed.
+  // Compare the complete managed value (including the ownership tag) before
+  // touching disk so a converged external default/fallback/override remains
+  // byte- and mtime-stable across repeated syncs.
+  if (JSON.stringify(stableValue(next)) === existingSnapshot) {
+    return { ok: !error, changed: false, detail: details.join('; ') || 'nothing to apply' };
   }
   fs.mkdirSync(path.dirname(file), { recursive: true });
   writeJsonWithBackup(file, next);
-  return { ok: !chainError && !externalError, changed: true, detail: details.join('; ') };
+  return { ok: !error, changed: true, detail: details.join('; ') };
 }
 
 /** Reversible teardown of ak's router management. Restores the pre-ak file from
