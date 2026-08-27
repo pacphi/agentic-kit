@@ -333,7 +333,12 @@ import { renderUsage } from './usage-orchestrators.mjs';
     }).join("");
   }
 
-  export function renderScore(d){
+  // renderScore was one CC-41 function writing ~10 independent scorecard
+  // regions (hero KPIs, cost-per-day bars, host cards, token bar/legend,
+  // punchcard, models, OpenRouter, projects, categories) in sequence. Split
+  // by region; each keeps its original logic verbatim, so the rendered DOM
+  // and its ordering are unchanged.
+  function renderScoreHero(d){
     var t=d.totals||{};
     var cacheShare=pct(t.cacheRead,t.tokens);
     document.getElementById("u-hero").innerHTML=
@@ -346,6 +351,9 @@ import { renderUsage } from './usage-orchestrators.mjs';
       +kpi("cache read",cacheShare.toFixed(1)+"%","priced at 0.1&times; input","warnv");
     document.getElementById("u-asof").textContent=d.pricesAsOf?("rates as of "+d.pricesAsOf):"";
 
+  }
+
+  function renderScoreDayBars(d){
     // cost per day
     var days=[],k;
     for(k in (d.byDay||{}))days.push({day:k,v:d.byDay[k]});
@@ -362,6 +370,10 @@ import { renderUsage } from './usage-orchestrators.mjs';
     }).join(""):'<div class="empty">no days in window.</div>';
     renderTelemetryCoverage(d.sourceHealth);
 
+  }
+
+  function renderScoreHosts(d){
+    var k;
     // Host and inference-provider are independent canonical axes. All three
     // supported hosts always render (idle/grayed-out when a host has no
     // sessions in this window) rather than appearing/disappearing based on
@@ -384,6 +396,10 @@ import { renderUsage } from './usage-orchestrators.mjs';
     var hostsNoteEl=document.getElementById("u-hosts-note");
     if(hostsNoteEl)hostsNoteEl.textContent=activeHosts+" active of "+order.length;
 
+  }
+
+  function renderScoreTokBar(d){
+    var t=d.totals||{};
     var segs=[["cache read",t.cacheRead,"var(--warn)"],["cache write",t.cacheWrite,"var(--purple)"],
       ["output",t.output,"var(--accent)"],["input",t.input,"var(--ok)"]];
     document.getElementById("u-tokbar").innerHTML=segs.map(function(sg){
@@ -393,6 +409,9 @@ import { renderUsage } from './usage-orchestrators.mjs';
       return '<span class="lg"><i style="background:'+sg[2]+'"></i>'+esc(sg[0])+" <b>"+esc(fmtTok(sg[1]))+"</b></span>";
     }).join("");
 
+  }
+
+  function renderScorePunchcard(d){
     // punchcard — dow 0 = Mon
     var DOW=["Mon","Tue","Wed","Thu","Fri","Sat","Sun"], pcMax=0, key;
     for(key in (d.punchcard||{}))pcMax=Math.max(pcMax,Number(d.punchcard[key])||0);
@@ -412,6 +431,10 @@ import { renderUsage } from './usage-orchestrators.mjs';
     pcHtml+="</div>";
     document.getElementById("u-punch").innerHTML=pcMax?pcHtml:'<div class="empty">no responses in window.</div>';
 
+  }
+
+  function renderScoreModels(d){
+    var t=d.totals||{};
     // models + projects
     var models=entries(d.byModel), mMax=models.length?models[0].cost:0;
     document.getElementById("u-models").innerHTML=models.length?models.map(function(m){
@@ -427,6 +450,9 @@ import { renderUsage } from './usage-orchestrators.mjs';
     var exc=fld(t,"exceptions");
     document.getElementById("u-models-note").textContent=exc?(fmtNum(exc)+" dropped/errored turn"+(exc===1?"":"s")+" excluded"):"";
 
+  }
+
+  function renderScoreOpenRouter(d){
     // Account analytics is explicitly fetched and cached by ak usage.
     // OpenRouter does not provide session/host/project correlation here, so
     // these numbers remain a separate block and never alter t/byHost/byModel.
@@ -456,6 +482,9 @@ import { renderUsage } from './usage-orchestrators.mjs';
       document.getElementById("u-openrouter").innerHTML=cards+'<div class="provider-analytics-models">'+modelRows+"</div>";
     }
 
+  }
+
+  function renderScoreProjects(d){
     var projects=entries(d.byProject), pMax=projects.length?projects[0].cost:0;
     var shown=projects.slice(0,8);
     document.getElementById("u-projects-note").textContent=
@@ -465,6 +494,9 @@ import { renderUsage } from './usage-orchestrators.mjs';
         pct(pr.cost,pMax),true);
     }).join(""):'<div class="empty">no projects in window.</div>';
 
+  }
+
+  function renderScoreCategories(d){
     // categories — confidence is DISPLAYED, and Unclassified is never hidden.
     var cats=entries(d.byCategory), cMax=cats.length?cats[0].cost:0;
     document.getElementById("u-cats").innerHTML=cats.length?cats.map(function(c){
@@ -478,6 +510,18 @@ import { renderUsage } from './usage-orchestrators.mjs';
         +'<span class="mval mono">'+esc(fmtUsd(c.cost))+"</span>"
         +'<span class="msub mono">'+esc(fmtNum(fld(c.v,"sessions"))+" sess · "+fmtUsd(c.cost/sess)+"/sess")+"</span></button>";
     }).join(""):'<div class="empty">nothing classified in window.</div>';
+  }
+
+  export function renderScore(d){
+    renderScoreHero(d);
+    renderScoreDayBars(d);
+    renderScoreHosts(d);
+    renderScoreTokBar(d);
+    renderScorePunchcard(d);
+    renderScoreModels(d);
+    renderScoreOpenRouter(d);
+    renderScoreProjects(d);
+    renderScoreCategories(d);
   }
 
   // ══ Limits view (ADR-0010) ═════════════════════════════════════════════════
@@ -522,13 +566,11 @@ import { renderUsage } from './usage-orchestrators.mjs';
       +'<span class="msub mono">'+esc(sub||resetTxt(resetSec))+"</span></div>";
   }
 
-  function renderLimits(){
+  // renderLimits was one CC-28 function mixing the Claude window, the Codex
+  // lane, and the insights panel. Split by region; each keeps its original
+  // logic verbatim, so the rendered DOM is unchanged.
+  function renderLimitsClaude(){
     var claudeEl=document.getElementById("u-lim-claude");
-    var codexEl=document.getElementById("u-lim-codex");
-    if(!claudeEl||!codexEl)return;
-    if(!LIMITS){claudeEl.innerHTML='<div class="empty">loading&hellip;</div>'; codexEl.innerHTML='<div class="empty">loading&hellip;</div>'; return;}
-    if(LIMITS.error){claudeEl.innerHTML='<div class="empty">'+esc(LIMITS.error)+"</div>"; codexEl.innerHTML=""; return;}
-
     var c=LIMITS.claude;
     var cn=document.getElementById("u-lim-claude-note");
     if(c&&c.windows&&c.windows.length){
@@ -544,6 +586,10 @@ import { renderUsage } from './usage-orchestrators.mjs';
         +"with the kit's managed statusline (Pro/Max plans only). Run one session, then revisit.</div>";
     }
 
+  }
+
+  function renderLimitsCodex(){
+    var codexEl=document.getElementById("u-lim-codex");
     var x=LIMITS.codex;
     var xn=document.getElementById("u-lim-codex-note");
     if(x&&x.lanes&&x.lanes.length){
@@ -570,10 +616,25 @@ import { renderUsage } from './usage-orchestrators.mjs';
         +"or app-server did not answer.</div>";
     }
 
+  }
+
+  function renderLimitsInsights(){
     var ins=Array.isArray(LIMITS.insights)?LIMITS.insights:[];
     document.getElementById("u-lim-insights").innerHTML=ins.length
       ?ins.map(insightCard).join("")
       :'<div class="empty">no limit findings &mdash; nothing is ahead of pace and no arbitrage is open.</div>';
+  }
+
+  function renderLimits(){
+    var claudeEl=document.getElementById("u-lim-claude");
+    var codexEl=document.getElementById("u-lim-codex");
+    if(!claudeEl||!codexEl)return;
+    if(!LIMITS){claudeEl.innerHTML='<div class="empty">loading&hellip;</div>'; codexEl.innerHTML='<div class="empty">loading&hellip;</div>'; return;}
+    if(LIMITS.error){claudeEl.innerHTML='<div class="empty">'+esc(LIMITS.error)+"</div>"; codexEl.innerHTML=""; return;}
+
+    renderLimitsClaude();
+    renderLimitsCodex();
+    renderLimitsInsights();
   }
 
   export function renderFindings(d){
