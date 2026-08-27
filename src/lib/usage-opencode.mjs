@@ -121,6 +121,125 @@ function projectFromDirectory(directory) {
   return { project: base && base !== '.' ? base : 'unknown', worktree: null };
 }
 
+/** Group a session's `part` rows by their owning message id. */
+function buildPartsIndex(partRows) {
+  const partsByMessage = new Map();
+  for (const p of partRows) {
+    const data = parseJson(p.data);
+    if (!data) continue;
+    if (!partsByMessage.has(p.message_id)) partsByMessage.set(p.message_id, []);
+    partsByMessage.get(p.message_id).push(data);
+  }
+  return partsByMessage;
+}
+
+/** Joined text of a message's parts whose `type` is one of `types`. */
+function messagePartsText(partsByMessage, rowId, types) {
+  return (partsByMessage.get(rowId) ?? [])
+    .filter((p) => types.includes(p.type) && typeof p.text === 'string')
+    .map((p) => p.text).join('\n');
+}
+
+/** Extend a session record's span/stamps with one message's timestamp. */
+function noteStamp(rec, at) {
+  if (!at) return;
+  rec.stamps.push(at);
+  if (rec.start === null || at < rec.start) rec.start = at;
+  if (rec.end === null || at > rec.end) rec.end = at;
+}
+
+function recordUserMessage(rec, turns, { rowId, at, withTurns, partsByMessage }) {
+  rec.prompts++;
+  if (!withTurns) return;
+  const text = messagePartsText(partsByMessage, rowId, ['text']);
+  turns.push({ role: 'user', at: new Date(at).toISOString(), text, prompt: true, kind: 'prompt' });
+}
+
+/** Model/provider/token-usage bookkeeping for one assistant message. Returns
+ *  the model id, for the caller's turn row. */
+function recordAssistantUsage(rec, data, at) {
+  const model = typeof data.modelID === 'string' && data.modelID ? data.modelID : 'unknown';
+  if (!rec.models.includes(model)) rec.models.push(model);
+  if (typeof data.providerID === 'string' && data.providerID) {
+    rec.inferenceProvider = data.providerID;
+    rec.providerProvenance = 'observed';
+  }
+  const t = data.tokens ?? {};
+  const cache = t.cache ?? {};
+  const day = localDay(at || Date.now());
+  const usageRow = addUsage(rec, day, model, {
+    input: num(t.input), output: num(t.output),
+    cacheRead: num(cache.read), cacheWrite: num(cache.write), responses: 1,
+  });
+  // opencode's OWN metered cost for this message — observed truth, summed
+  // per (day, model) row. Rows where NO message carried a cost stay null
+  // (the field is always present, unlike an absent key, so a consumer
+  // checking `costObserved != null` never needs to guess whether this row
+  // was ever priced), so the aggregate falls back to the pricing table
+  // rather than misreporting a fabricated $0.
+  usageRow.costObserved ??= null;
+  if (Number.isFinite(Number(data.cost))) usageRow.costObserved = (usageRow.costObserved ?? 0) + Number(data.cost);
+  rec.reasoningOutput += num(t.reasoning);
+  return model;
+}
+
+/** Turn row + tool tally for one assistant message, when withTurns. */
+function recordAssistantTurn(rec, turns, { rowId, at, model, partsByMessage }) {
+  const parts = partsByMessage.get(rowId) ?? [];
+  const tools = parts.filter((p) => p.type === 'tool' && typeof p.tool === 'string').map((p) => p.tool);
+  for (const name of tools) rec.tools[name] = (rec.tools[name] ?? 0) + 1;
+  const text = messagePartsText(partsByMessage, rowId, ['text', 'reasoning']);
+  turns.push({ role: 'assistant', at: new Date(at).toISOString(), model, text, tools });
+}
+
+function recordAssistantMessage(rec, turns, { data, rowId, at, withTurns, partsByMessage }) {
+  rec.responses++;
+  if (at) { const pk = punchKey(at); rec.punchcard[pk] = (rec.punchcard[pk] ?? 0) + 1; }
+  const model = recordAssistantUsage(rec, data, at);
+  if (withTurns) recordAssistantTurn(rec, turns, { rowId, at, model, partsByMessage });
+}
+
+/** One `message` row: malformed rows are skipped, never fatal. */
+function processMessageRow(rec, turns, row, { withTurns, partsByMessage }) {
+  const data = parseJson(row.data);
+  if (!data || typeof data.role !== 'string') return;
+  const at = num(data.time?.created) || num(row.time_created);
+  noteStamp(rec, at);
+  if (data.role === 'user') {
+    recordUserMessage(rec, turns, { rowId: row.id, at, withTurns, partsByMessage });
+    return;
+  }
+  if (data.role !== 'assistant') return;
+  recordAssistantMessage(rec, turns, { data, rowId: row.id, at, withTurns, partsByMessage });
+}
+
+/** Tool counts without the full turn payload: one lean query on the scan path. */
+function collectScanToolCounts(db, id, rec) {
+  const toolRows = db.prepare(`
+    SELECT p.data AS data FROM part p JOIN message m ON m.id = p.message_id
+    WHERE m.session_id = ? AND json_extract(p.data, '$.type') = 'tool'
+  `).all(id);
+  for (const p of toolRows) {
+    const data = parseJson(p.data);
+    const name = typeof data?.tool === 'string' ? data.tool : null;
+    if (name) rec.tools[name] = (rec.tools[name] ?? 0) + 1;
+  }
+}
+
+/** The session record's opencode-specific fields, before its messages are walked. */
+function initSessionRecord(srow) {
+  const { project, worktree } = projectFromDirectory(srow.directory);
+  // blankSession's default host/provider ('opencode' for both) already
+  // matches this source; only the opencode-specific fields are overridden.
+  const rec = blankSession(srow.id, 'opencode');
+  rec.title = clip(srow.title) || '(untitled)';
+  rec.project = project;
+  rec.sidechain = !!srow.parent_id;
+  rec.threadSource = srow.parent_id ? 'subagent' : null;
+  if (worktree) rec.worktree = worktree;
+  return rec;
+}
+
 /** Parse ONE opencode session into the index's per-session record shape,
  *  built from the SAME blankSession/addUsage parseClaude and parseCodex use.
  *  Returns { session, turns }; null when the session is gone or unreadable.
@@ -138,92 +257,13 @@ export function parseSession({ dbFile, id, withTurns = false }) {
           WHERE m.session_id = ? ORDER BY p.rowid ASC
         `).all(id)
       : [];
-    const partsByMessage = new Map();
-    for (const p of partRows) {
-      const data = parseJson(p.data);
-      if (!data) continue;
-      if (!partsByMessage.has(p.message_id)) partsByMessage.set(p.message_id, []);
-      partsByMessage.get(p.message_id).push(data);
-    }
+    const partsByMessage = buildPartsIndex(partRows);
 
-    const { project, worktree } = projectFromDirectory(srow.directory);
-    // blankSession's default host/provider ('opencode' for both) already
-    // matches this source; only the opencode-specific fields are overridden.
-    const rec = blankSession(srow.id, 'opencode');
-    rec.title = clip(srow.title) || '(untitled)';
-    rec.project = project;
-    rec.sidechain = !!srow.parent_id;
-    rec.threadSource = srow.parent_id ? 'subagent' : null;
-    if (worktree) rec.worktree = worktree;
+    const rec = initSessionRecord(srow);
     const turns = [];
-    let lastProviderId = null;
+    for (const row of msgRows) processMessageRow(rec, turns, row, { withTurns, partsByMessage });
+    if (!withTurns) collectScanToolCounts(db, id, rec);
 
-    for (const row of msgRows) {
-      const data = parseJson(row.data);
-      if (!data || typeof data.role !== 'string') continue; // malformed row: skipped, never fatal
-      const at = num(data.time?.created) || num(row.time_created);
-      if (at) { rec.stamps.push(at); if (rec.start === null || at < rec.start) rec.start = at; if (rec.end === null || at > rec.end) rec.end = at; }
-
-      if (data.role === 'user') {
-        rec.prompts++;
-        if (withTurns) {
-          const text = (partsByMessage.get(row.id) ?? [])
-            .filter((p) => p.type === 'text' && typeof p.text === 'string')
-            .map((p) => p.text).join('\n');
-          turns.push({ role: 'user', at: new Date(at).toISOString(), text, prompt: true, kind: 'prompt' });
-        }
-        continue;
-      }
-      if (data.role !== 'assistant') continue;
-
-      rec.responses++;
-      if (at) { const pk = punchKey(at); rec.punchcard[pk] = (rec.punchcard[pk] ?? 0) + 1; }
-      const model = typeof data.modelID === 'string' && data.modelID ? data.modelID : 'unknown';
-      if (!rec.models.includes(model)) rec.models.push(model);
-      if (typeof data.providerID === 'string' && data.providerID) lastProviderId = data.providerID;
-
-      const t = data.tokens ?? {};
-      const cache = t.cache ?? {};
-      const day = localDay(at || Date.now());
-      const usageRow = addUsage(rec, day, model, {
-        input: num(t.input), output: num(t.output),
-        cacheRead: num(cache.read), cacheWrite: num(cache.write), responses: 1,
-      });
-      // opencode's OWN metered cost for this message — observed truth, summed
-      // per (day, model) row. Rows where NO message carried a cost stay null
-      // (the field is always present, unlike an absent key, so a consumer
-      // checking `costObserved != null` never needs to guess whether this row
-      // was ever priced), so the aggregate falls back to the pricing table
-      // rather than misreporting a fabricated $0.
-      usageRow.costObserved ??= null;
-      if (Number.isFinite(Number(data.cost))) usageRow.costObserved = (usageRow.costObserved ?? 0) + Number(data.cost);
-      rec.reasoningOutput += num(t.reasoning);
-
-      if (withTurns) {
-        const parts = partsByMessage.get(row.id) ?? [];
-        const tools = parts.filter((p) => p.type === 'tool' && typeof p.tool === 'string').map((p) => p.tool);
-        for (const name of tools) rec.tools[name] = (rec.tools[name] ?? 0) + 1;
-        const text = parts
-          .filter((p) => (p.type === 'text' || p.type === 'reasoning') && typeof p.text === 'string')
-          .map((p) => p.text).join('\n');
-        turns.push({ role: 'assistant', at: new Date(at).toISOString(), model, text, tools });
-      }
-    }
-
-    // Tool counts without the full turn payload: one lean query on the scan path.
-    if (!withTurns) {
-      const toolRows = db.prepare(`
-        SELECT p.data AS data FROM part p JOIN message m ON m.id = p.message_id
-        WHERE m.session_id = ? AND json_extract(p.data, '$.type') = 'tool'
-      `).all(id);
-      for (const p of toolRows) {
-        const data = parseJson(p.data);
-        const name = typeof data?.tool === 'string' ? data.tool : null;
-        if (name) rec.tools[name] = (rec.tools[name] ?? 0) + 1;
-      }
-    }
-
-    if (lastProviderId) { rec.inferenceProvider = lastProviderId; rec.providerProvenance = 'observed'; }
     if (!rec.title) rec.title = '(untitled)';
     rec.active = activeIntervals(rec.stamps);
     delete rec.stamps;
