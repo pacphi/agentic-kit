@@ -88,3 +88,21 @@ repository's sanctioned structures:
   emitted `src/templates/opencode-ruflo-gateway.js` template (`config` 28) is under
   the gate. `opencode.mjs` (1,573 lines) was also split into five files, each under
   1,000 lines (`opencode.mjs` is now a re-export barrel; see ADR-0017 §2).
+- **Wave 2 closure (2026-08-27):** the whole residual backlog above is cleared —
+  seven parallel tracks brought `uninstall run()` (100→5), the adapters family
+  (conformance 60→19, admission 55, four validators 45–49 → all <25), footprint
+  (`collectProjects` 59→16, `storage.mjs` split three ways), model-inventory
+  (`discoverOllamaApi` 65→13), the telemetry residuals (`adaptCodexLedger` 65→20,
+  `parseCodex` 53→11, `usage-index.mjs` split into index-I/O plus
+  `usage-parsers.mjs` and `usage-aggregate.mjs`, removing a latent circular
+  import), the AQE-router
+  machinery out of `providers.mjs` into `aqe-router.mjs`, and every over-25
+  dashboard client function (worst `renderSysStorage` 88 → an orchestrator of ≤22
+  helpers) under the gate. One real defect was found and fixed along the way — a
+  literal NUL byte in the Models "Used for" sort key (`mliRouteValue`), a live sort
+  bug. **Repo-wide there is now no function over CC 50**, and that ceiling is
+  enforced as an ERROR (`pnpm run lint:cc`, wired into `check` and CI's quality
+  job); the warn-25 tier stays advisory with ~30 functions in the 26–49 band, led
+  by `createLiveEvent` (49), which stays as the deliberate validation-boundary
+  exemption. Remaining advisory residuals live in the lint output, not in this
+  document.

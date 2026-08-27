@@ -76,6 +76,11 @@ jobs:
         run: pnpm run typecheck
       - name: Lint (eslint)
         run: pnpm run lint
+      # Hard complexity ceiling earned by the 2026-08 complexity program
+      # (ADR-0037): no function over CC 50, enforced as an error. The
+      # advisory warn-25 tier lives in eslint.config.mjs.
+      - name: Complexity ceiling (CC ≤ 50, error)
+        run: pnpm run lint:cc
       - name: Markdown lint
         run: pnpm run lint:md
       - name: Build (packaging + load validation)
