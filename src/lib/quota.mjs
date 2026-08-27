@@ -166,14 +166,18 @@ export function normalizeCodexLimits(resp, { fetchedAt = null } = {}) {
  * One JSON-RPC exchange with `codex app-server`: initialize, then
  * account/rateLimits/read, then kill the child (it does not exit on EOF —
  * verified live — so the timeout and the kill are both load-bearing).
- * Read-only, untrusted sandbox flags; codex handles its own auth and refresh.
- * Resolves the raw response object, or null on any failure.
+ * Read-only sandbox, `never` for approval — this call issues no commands, so
+ * it must never block on a prompt; `-a untrusted` was removed upstream
+ * (codex-cli now only accepts `on-request`/`never` — confirmed against
+ * codex-cli 0.150.1, which hard-errors on `untrusted` and silently starved
+ * the cache for 10 days before this fix). Resolves the raw response object,
+ * or null on any failure.
  */
 export function codexAppServerRateLimits({ timeoutMs = 15_000, spawnImpl = spawn, bin = 'codex' } = {}) {
   return new Promise((resolve) => {
     let child;
     try {
-      child = spawnImpl(bin, ['-s', 'read-only', '-a', 'untrusted', 'app-server'],
+      child = spawnImpl(bin, ['-s', 'read-only', '-a', 'never', 'app-server'],
         { stdio: ['pipe', 'pipe', 'ignore'] });
     } catch { resolve(null); return; }
     let buf = '';
