@@ -161,7 +161,7 @@ import { MODEL_PAGE, fmtNum, modelFilters, modelRows, modelsBusy } from './usage
   function mliRouteValue(binding,field){
     if(field==="model")return binding.modelName||binding.selector||binding.configured||null;
     if(field==="provider")return binding.modelProvider||binding.provider||null;
-    if(field==="used")return (binding.activity||"")+" "+(binding.role||"");
+    if(field==="used")return (binding.activity||"")+" "+(binding.role||"");
     if(field==="lastUsed"){
       var when=Date.parse(String(binding.lastUsed||""));return Number.isFinite(when)?when:null;
     }
