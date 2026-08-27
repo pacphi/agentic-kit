@@ -212,5 +212,6 @@ the experimental flag. This table is the source of truth for what is real.
   [ruvnet/ruflo#3046](https://github.com/ruvnet/ruflo/issues/3046), each inviting the maintainer to
   close-as-satisfied if the current source already provides the surface.
 - Companion explainer for consumers and implementers:
-  [`docs/HOST-EXTENSIBILITY-EXPLAINER.html`](../HOST-EXTENSIBILITY-EXPLAINER.html); design dossier:
-  [`docs/ADAPTER-CONTRACT-DOSSIER.html`](../ADAPTER-CONTRACT-DOSSIER.html).
+  [`docs/archive/2026-08-16-artifact-host-extensibility-explainer.html`](../archive/2026-08-16-artifact-host-extensibility-explainer.html);
+  design dossier:
+  [`docs/archive/2026-08-14-artifact-adapter-contract-dossier.html`](../archive/2026-08-14-artifact-adapter-contract-dossier.html).
