@@ -31,7 +31,9 @@ import { readJson, writeJsonWithBackup } from './settings.mjs';
 import { saveKitConfig } from './config.mjs';
 import { installedVersion, cmpVersions } from './versions.mjs';
 import * as paths from './paths.mjs';
-import { bold, dim, cyan } from './output.mjs';
+import {
+  bold, dim, cyan, reportOutcome,
+} from './output.mjs';
 import { configuredPolicyToAgentOverrides, seedActivityRoutes, resolveRoutes, routingSummary, divergedRoutes, migrateRetiredRoutes, ACTIVITIES, AGENT_ACTIVITY_MAP, PRIMARY_HOSTS } from './routing.mjs';
 import { HOST_ADAPTERS } from './hosts.mjs';
 import {
@@ -1091,6 +1093,22 @@ export function migrateRetiredRoutesInConfig(cfg) {
   const rewritten = changes.filter((c) => c.rewritten);
   if (rewritten.length > 0) cfg.routing.routes = next;
   return { changed: rewritten.length > 0, changes };
+}
+
+/** Print one line per retired-route change — the identical loop `ak sync`,
+ *  `ak host pick`, and `ak setup` each ran inline in their
+ *  convergeProviderStack 'routing-retired' reporter, shared here so the
+ *  wording can never drift between the three. A rewritten (seeded) change
+ *  reports what changed; a `provenance: 'user'` change reports the pin kept
+ *  and what ak actually runs instead, per migrateRetiredRoutesInConfig's
+ *  {activity, field, from, to, retiresOn, rewritten} shape. */
+export function reportRetiredRouteChanges(changes) {
+  for (const c of changes) {
+    const when = c.retiresOn ? `retires ${c.retiresOn}` : 'already withdrawn';
+    reportOutcome('routing', c.rewritten
+      ? { ok: true, changed: true, detail: `${c.activity} ${c.field}: ${c.from} → ${c.to} (${when})` }
+      : { ok: true, changed: false, detail: `${c.activity} ${c.field} pins ${c.from} (${when}) — user pin kept; ak runs ${c.to}` });
+  }
 }
 
 /** Apply `ak setup` host flags to a kit.json cfg IN PLACE (before setup's

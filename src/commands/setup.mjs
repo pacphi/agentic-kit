@@ -20,7 +20,7 @@ import { managedCompanionFor } from '../lib/adapters/companion-registry.mjs';
 import { renderApplyReport } from '../lib/adapters/lifecycle-render.mjs';
 import { DEJA_VU_TARGETS } from '../lib/deja-vu.mjs';
 import { loadKitConfig, saveKitConfig } from '../lib/config.mjs';
-import { HOSTS, hostInstallState, installHost, migrateRetiredRoutesInConfig, printActivityRoutingTable, aqeSupportsAgentOverrides, convergeProviderStack, applySetupHostFlags, guidanceContext } from '../lib/providers.mjs';
+import { HOSTS, hostInstallState, installHost, migrateRetiredRoutesInConfig, printActivityRoutingTable, aqeSupportsAgentOverrides, convergeProviderStack, applySetupHostFlags, guidanceContext, reportRetiredRouteChanges } from '../lib/providers.mjs';
 import { installedVersion } from '../lib/versions.mjs';
 import * as rb from '../lib/ruvnet-brain.mjs';
 import * as adb from '../lib/agentdb.mjs';
@@ -571,6 +571,28 @@ async function initProjectAgenticQe(root, cfg, flags, permCtx) {
   return true;
 }
 
+/** The 'aqe-router' step's own report, plus the activity-routing table print
+ *  that always follows it here (regardless of whether the router itself
+ *  changed) — split out purely to keep applyProjectProviderStack's
+ *  reporter's own branch count legible. */
+function reportProjectAqeRouterStep(cfg, result) {
+  if (result.changed) (result.ok ? ok : warn)(`aqe router: ${result.detail}`);
+  if (Object.keys(cfg.routing?.routes ?? {}).length) printActivityRoutingTable(cfg);
+}
+
+/** The 'ruflo-codex-mcp' step's own report — when codexMcp:false skipped it
+ *  (`result` is null), print the "codex CLI detected" hint instead, in the
+ *  same position the whole codex block used to occupy. */
+async function reportProjectRufloCodexMcpStep(result) {
+  if (result) {
+    if (result.changed || !result.ok) (result.ok ? ok : warn)(`ruflo→codex MCP: ${result.detail}`);
+    return;
+  }
+  if (await have('codex')) {
+    info('codex CLI detected — enable dual-host with: ak host pick');
+  }
+}
+
 /** Step 9.5: frontier host/provider wiring — reapply kit.json prefs (no-op
  *  at the claude-only default, so existing repos see zero change). When
  *  codex is enabled: write ENABLE_* env and register providers. The shared
@@ -597,33 +619,14 @@ async function applyProjectProviderStack(cfg, root, migrateRoutes) {
     // persist a route naming a model the host has withdrawn, left for the
     // next sync to repair. Only seeded entries are rewritten; a user pin is
     // reported and kept.
-    if (step === 'routing-retired') {
-      for (const c of result.changes) {
-        const when = c.retiresOn ? `retires ${c.retiresOn}` : 'already withdrawn';
-        reportOutcome('routing', c.rewritten
-          ? { ok: true, changed: true, detail: `${c.activity} ${c.field}: ${c.from} → ${c.to} (${when})` }
-          : { ok: true, changed: false, detail: `${c.activity} ${c.field} pins ${c.from} (${when}) — user pin kept; ak runs ${c.to}` });
-      }
-      return;
-    }
-    if (step === 'aqe-router') {
-      if (result.changed) (result.ok ? ok : warn)(`aqe router: ${result.detail}`);
-      if (Object.keys(cfg.routing?.routes ?? {}).length) printActivityRoutingTable(cfg);
-      return;
-    }
+    if (step === 'routing-retired') { reportRetiredRouteChanges(result.changes); return; }
+    if (step === 'aqe-router') { reportProjectAqeRouterStep(cfg, result); return; }
     if (step === 'legacy-codex-mcp') {
       if (result && (result.changed || !result.ok)) (result.ok ? ok : warn)(`legacy codex MCP: ${result.detail}`);
       return;
     }
     // Independently register Ruflo in Codex for shared routing/swarm/memory tools.
-    if (step === 'ruflo-codex-mcp') {
-      if (result) {
-        if (result.changed || !result.ok) (result.ok ? ok : warn)(`ruflo→codex MCP: ${result.detail}`);
-      } else if (await have('codex')) {
-        info('codex CLI detected — enable dual-host with: ak host pick');
-      }
-      return;
-    }
+    if (step === 'ruflo-codex-mcp') { await reportProjectRufloCodexMcpStep(result); return; }
     // Provider routing is independent of the enabled execution-host set.
     // Apply persisted Ruflo providers for Claude-only setups too (#128 /
     // ruflo#2962).

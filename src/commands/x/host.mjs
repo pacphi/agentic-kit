@@ -10,7 +10,7 @@ import {
   settingsTarget, isDefault,
   undoProviders, hostInstallState, hostAuthState, installHost, applyAqeRouter, undoAqeRouter,
   bothHostsEnabled, DUAL_ROLE_TIP, JUDGE_BIAS_TIP, QE_COURT_TIP, suggestedFallbackFor,
-  seedActivityRoutesIfMultiHost, migrateRetiredRoutesInConfig, printActivityRoutingTable, convergeProviderStack, undoCodexMcp,
+  seedActivityRoutesIfMultiHost, migrateRetiredRoutesInConfig, printActivityRoutingTable, convergeProviderStack, reportRetiredRouteChanges, undoCodexMcp,
   undoRufloMcpInCodex, detectAqeProviders, aqeProviderCredential, credentialGaps, fallbackSource,
   collectIntegrationFacts, aqeSelectableProviderTypes, aqeSelectableChainProviderTypes,
 } from '../../lib/providers.mjs';
@@ -29,7 +29,7 @@ import {
 } from '../../lib/trust-manifest.mjs';
 import { have } from '../../lib/exec.mjs';
 import {
-  ok, warn, fail, info, dim, bold, yellow, reportOutcome,
+  ok, warn, fail, info, dim, bold, yellow,
 } from '../../lib/output.mjs';
 import { repoRoot } from '../../lib/paths.mjs';
 import { writeJsonWithBackup } from '../../lib/settings.mjs';
@@ -848,15 +848,7 @@ async function applyPickProviderStack(cfg, cwd, {
     // persist a route naming a model the host has withdrawn, left for the
     // next sync to repair. Only seeded entries are rewritten; a user pin is
     // reported and kept.
-    if (step === 'routing-retired') {
-      for (const c of result.changes) {
-        const when = c.retiresOn ? `retires ${c.retiresOn}` : 'already withdrawn';
-        reportOutcome('routing', c.rewritten
-          ? { ok: true, changed: true, detail: `${c.activity} ${c.field}: ${c.from} → ${c.to} (${when})` }
-          : { ok: true, changed: false, detail: `${c.activity} ${c.field} pins ${c.from} (${when}) — user pin kept; ak runs ${c.to}` });
-      }
-      return;
-    }
+    if (step === 'routing-retired') { reportRetiredRouteChanges(result.changes); return; }
     if (step === 'aqe-router') { reportPickAqeRouterStep(result, aqeProvider); return; }
     if (step === 'legacy-codex-mcp') {
       if (result.changed || !result.ok) (result.ok ? ok : warn)(`legacy codex MCP: ${result.detail}`);

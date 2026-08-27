@@ -14,7 +14,7 @@ import { companionLifecycleFor } from '../lib/adapters/companion-lifecycle-regis
 import { renderApplyReport } from '../lib/adapters/lifecycle-render.mjs';
 import { listDaemons, staleDaemons, reap } from '../lib/daemons.mjs';
 import { loadKitConfig, saveKitConfig } from '../lib/config.mjs';
-import { commandHosts, hostInstallState, installHost, convergeProviderStack, guidanceContext } from '../lib/providers.mjs';
+import { commandHosts, hostInstallState, installHost, convergeProviderStack, guidanceContext, reportRetiredRouteChanges } from '../lib/providers.mjs';
 import { driftReport, selfDrift } from '../lib/versions.mjs';
 import { RUVECTOR_PKG, managed as ruvectorManaged } from '../lib/ruvector.mjs';
 import { pruneNpxStale } from '../lib/npx.mjs';
@@ -323,15 +323,7 @@ export const SYNC_STEPS = [
         // retired model stops answering, so leaving it named on disk is a
         // scheduled failure. Only seeded entries are rewritten; a user pin is
         // reported and left alone.
-        if (step === 'routing-retired') {
-          for (const c of result.changes) {
-            const when = c.retiresOn ? `retires ${c.retiresOn}` : 'already withdrawn';
-            ctx.report('routing', c.rewritten
-              ? { ok: true, changed: true, detail: `${c.activity} ${c.field}: ${c.from} → ${c.to} (${when})` }
-              : { ok: true, changed: false, detail: `${c.activity} ${c.field} pins ${c.from} (${when}) — user pin kept; ak runs ${c.to}` });
-          }
-          return;
-        }
+        if (step === 'routing-retired') { reportRetiredRouteChanges(result.changes); return; }
         if (step === 'aqe-router') {
           if (result.changed || !result.ok) ctx.report('aqe router', result);
           if (!result.ok) ctx.state.aqeRouterApplyFailure = result.detail || 'AQE router apply failed';
