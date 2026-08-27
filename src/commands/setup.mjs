@@ -20,7 +20,7 @@ import { managedCompanionFor } from '../lib/adapters/companion-registry.mjs';
 import { renderApplyReport } from '../lib/adapters/lifecycle-render.mjs';
 import { DEJA_VU_TARGETS } from '../lib/deja-vu.mjs';
 import { loadKitConfig, saveKitConfig } from '../lib/config.mjs';
-import { HOSTS, hostInstallState, installHost, migrateRetiredRoutesInConfig, printActivityRoutingTable, aqeSupportsAgentOverrides, convergeProviderStack, applySetupHostFlags, bothHostsEnabled } from '../lib/providers.mjs';
+import { HOSTS, hostInstallState, installHost, migrateRetiredRoutesInConfig, printActivityRoutingTable, aqeSupportsAgentOverrides, convergeProviderStack, applySetupHostFlags, guidanceContext } from '../lib/providers.mjs';
 import { installedVersion } from '../lib/versions.mjs';
 import * as rb from '../lib/ruvnet-brain.mjs';
 import * as adb from '../lib/agentdb.mjs';
@@ -284,11 +284,9 @@ export function removeUndisclosedPermissions(file, before, authorized) {
   return unexpected;
 }
 
-export async function run_machine({ flags, pkgRoot, cfg }) {
-  heading('machine setup');
-  if (flags['dry-run']) { info('dry-run: would ensure packages (incl. ruvnet-brain), deploy skill (blocks + MCP land in the final pass)'); return true; }
-
-  // 1. global packages
+/** Step 1: global packages (ruflo/agentic-qe/agentdb/ruvnet-brain). Returns
+ *  false only when the mandatory ruflo install itself fails. */
+async function installMachinePackages(cfg, flags) {
   if (!installedVersion('ruflo')) {
     info('installing ruflo globally (native build scripts allowed)…');
     const r = await heal.upgradePackage('ruflo');
@@ -322,16 +320,22 @@ export async function run_machine({ flags, pkgRoot, cfg }) {
       } else warn('ruvnet-brain skipped — install later with `ak sync` (or `ak setup --no-ruvnet-brain` to stop asking)');
     } else ok('ruvnet-brain present (refresh to the latest release with `ak sync`)');
   }
+  return true;
+}
 
-  // 2. heal natives + the #2670 aidefence gap up front. The aidefence heal is
-  // the security surface — it honors `--no-security` (cfg.security=false),
-  // which was previously write-only: documented, persisted, read by nothing.
+/** Step 2: heal natives + the #2670 aidefence gap up front. The aidefence
+ *  heal is the security surface — it honors `--no-security`
+ *  (cfg.security=false), which was previously write-only: documented,
+ *  persisted, read by nothing. */
+async function healMachineSecuritySurface(cfg) {
   reportOutcome('natives', await heal.healNatives());
   if (cfg.security !== false) reportOutcome('aidefence', await heal.healAidefence());
   else info('security surface skipped (kit.json security:false — re-enable by removing the key)');
   if (cfg.aqe) reportOutcome('aqe solver', await heal.healAqeSolver());
+}
 
-  // 3. token-audit skill → ~/.claude/skills
+/** Step 3: token-audit skill → ~/.claude/skills. */
+function deployTokenAuditSkill(pkgRoot) {
   const skillSrc = path.join(pkgRoot, 'claude', 'skills', 'ruflo-token-audit');
   if (fs.existsSync(skillSrc)) {
     const dst = path.join(paths.claudeSkillsDir(), 'ruflo-token-audit');
@@ -339,15 +343,14 @@ export async function run_machine({ flags, pkgRoot, cfg }) {
     fs.cpSync(skillSrc, dst, { recursive: true });
     ok('skill deployed: ruflo-token-audit');
   }
+}
 
-  // 4+5. CLAUDE.md guidance blocks + user-scope MCP registration moved to the
-  //      FINAL pass in run(): both depend on host CLIs that step 6 below is
-  //      about to install (mcp needs `claude` on disk; several block detectors
-  //      key on `codex` being on PATH / dual-mode enablement). Running them
-  //      here warned + drifted on genuinely bare machines.
-
-  // 6. frontier hosts — install any ENABLED host that is entirely absent (default
-  //    enables claude only). External installs (mise/native/brew) are left alone.
+/** Step 6: frontier hosts — install any ENABLED host that is entirely absent
+ *  (default enables claude only). External installs (mise/native/brew) are
+ *  left alone. Shares HOSTS/hostInstallState/installHost with `ak sync`'s
+ *  and `ak host pick`'s own host-install loops; the interactive confirmation
+ *  here (vs. their unconditional install) is this command's own UX. */
+async function installEnabledAbsentHosts(cfg, flags) {
   for (const h of HOSTS) {
     if (!cfg.integrations?.hosts?.[h.id]) continue;
     const st = await hostInstallState(h);
@@ -360,24 +363,27 @@ export async function run_machine({ flags, pkgRoot, cfg }) {
       ok(`${h.id} ${st.version ?? ''} present (${st.method}${st.method === 'external' ? ' — self-managed' : ''})`);
     }
   }
+}
 
-  // 6b. host lifecycle wiring — connected MCPs, compact lazy gateway,
-  //     lifecycle plugin, converted agents, specialist dispatcher, and
-  //     platform skill (each adapter owns its own surfaces — opencode.mjs for
-  //     opencode; a subprocess hook for an admitted external, see
-  //     lifecycle-registry.mjs's buildAdmittedLifecycleAdapter).
-  //     Registry-driven: loops hostsWithLifecycle() (built-ins + admitted,
-  //     ADR-0031 P3) rather than naming opencode, so a second lifecycle host
-  //     — built-in or admitted — needs no new branch here. lifecycleExecutionEnabled
-  //     gates each host: a built-in only needs cfg enablement (unchanged); an
-  //     admitted external ALSO needs the experimental flag — an admitted host
-  //     is opt-in exactly like opencode, and this never auto-enables anything.
-  //     Only when the CLI is actually present: a declined/failed install must
-  //     not leave a freshly-created config home behind (codex-review #4).
-  //     lifecycle-render.mjs's renderApplyReport dispatches on the runLifecycle
-  //     result's own shape (opencode's rich per-surface shape — including the
-  //     compact gateway — vs. an admitted host's generic lifecycleResult), so
-  //     this loop body never destructures a host-specific result directly.
+/** Step 6b: host lifecycle wiring — connected MCPs, compact lazy gateway,
+ *  lifecycle plugin, converted agents, specialist dispatcher, and platform
+ *  skill (each adapter owns its own surfaces — opencode.mjs for opencode; a
+ *  subprocess hook for an admitted external, see lifecycle-registry.mjs's
+ *  buildAdmittedLifecycleAdapter). Registry-driven: loops
+ *  hostsWithLifecycle() (built-ins + admitted, ADR-0031 P3) rather than
+ *  naming opencode, so a second lifecycle host — built-in or admitted —
+ *  needs no new branch here. lifecycleExecutionEnabled gates each host: a
+ *  built-in only needs cfg enablement (unchanged); an admitted external
+ *  ALSO needs the experimental flag — an admitted host is opt-in exactly
+ *  like opencode, and this never auto-enables anything. Only when the CLI
+ *  is actually present: a declined/failed install must not leave a
+ *  freshly-created config home behind (codex-review #4).
+ *  lifecycle-render.mjs's renderApplyReport dispatches on the runLifecycle
+ *  result's own shape (opencode's rich per-surface shape — including the
+ *  compact gateway — vs. an admitted host's generic lifecycleResult), so
+ *  this loop body never destructures a host-specific result directly.
+ *  Returns false only when a report demands run_machine abort. */
+async function applyMachineHostLifecycles(cfg, pkgRoot) {
   for (const hostId of hostsWithLifecycle()) {
     if (!lifecycleExecutionEnabled(hostId, cfg)) continue;
     if (!(await have(detectionBinFor(hostId)))) {
@@ -405,46 +411,62 @@ export async function run_machine({ flags, pkgRoot, cfg }) {
       info('restart opencode to load the Agentic Kit hooks, compact gateway, and MCP connections (loaded once at startup)');
     }
   }
-
-  // 7. frontier host hint — codex detected but not enabled (opt-in via `ak host pick`)
-  if (!cfg.integrations?.hosts?.codex && await have('codex')) {
-    info('codex CLI detected — run `ak host pick` to let ruflo use both claude and codex');
-  }
-  // opencode hint — detected but not enabled (post-install opt-in via provider pick)
-  if (!cfg.integrations?.hosts?.opencode && await have('opencode')) {
-    info('opencode CLI detected — wire ruflo + ruvnet-brain into it with: ak host pick --host claude,opencode');
-  }
   return true;
 }
 
-export async function run_project({
-  flags, cfg, trustDisclosed = false, migrateRoutes = migrateRetiredRoutesInConfig,
-}) {
-  const root = process.cwd();
-  heading(`project setup — ${root}`);
-  if (!trustDisclosed) discloseSetupTrust(cfg, { project: true });
-  if (flags['dry-run']) { info('dry-run: would init, sanitize, pin DB path, activate memory/swarm/daemon, verify'); return true; }
+/** Step 7: frontier host hints — detected but not enabled (opt-in via
+ *  `ak host pick`). */
+async function printUndetectedHostHints(cfg) {
+  if (!cfg.integrations?.hosts?.codex && await have('codex')) {
+    info('codex CLI detected — run `ak host pick` to let ruflo use both claude and codex');
+  }
+  if (!cfg.integrations?.hosts?.opencode && await have('opencode')) {
+    info('opencode CLI detected — wire ruflo + ruvnet-brain into it with: ak host pick --host claude,opencode');
+  }
+}
 
-  const permissionsFile = paths.projectSettings(root);
-  const permissionsBefore = new Set(allowRules(permissionsFile));
-  const authorizedPermissions = new Set(projectPermissionManifest(cfg).map((entry) => entry.rule));
+export async function run_machine({ flags, pkgRoot, cfg }) {
+  heading('machine setup');
+  if (flags['dry-run']) { info('dry-run: would ensure packages (incl. ruvnet-brain), deploy skill (blocks + MCP land in the final pass)'); return true; }
 
-  // 1. ruflo init (--force regenerates; CLAUDE.md backed up upstream, #2208)
+  if (!(await installMachinePackages(cfg, flags))) return false;
+  await healMachineSecuritySurface(cfg);
+  // Steps 4+5 (CLAUDE.md guidance blocks + user-scope MCP registration) moved
+  // to the FINAL pass in run(): both depend on host CLIs step 6 below is
+  // about to install (mcp needs `claude` on disk; several block detectors
+  // key on `codex` being on PATH / dual-mode enablement). Running them here
+  // warned + drifted on genuinely bare machines.
+  deployTokenAuditSkill(pkgRoot);
+  await installEnabledAbsentHosts(cfg, flags);
+  if (!(await applyMachineHostLifecycles(cfg, pkgRoot))) return false;
+  await printUndetectedHostHints(cfg);
+  return true;
+}
+
+/** Step 1: `ruflo init --full --force` (--force regenerates; CLAUDE.md
+ *  backed up upstream, #2208), then verify it introduced no undisclosed
+ *  auto-approve rules. Returns false when run_project must abort. */
+async function rufloProjectInit(root, permCtx) {
   const init = await runCmd('ruflo', ['init', '--full', '--force'], { cwd: root, timeout: 300_000 });
   (init.code === 0 ? ok : fail)('ruflo init --full');
   if (init.code !== 0) return false;
-  const rufloUnexpected = removeUndisclosedPermissions(permissionsFile, permissionsBefore, authorizedPermissions);
+  const rufloUnexpected = removeUndisclosedPermissions(
+    permCtx.permissionsFile, permCtx.permissionsBefore, permCtx.authorizedPermissions,
+  );
   if (rufloUnexpected.length) {
     fail(`ruflo init introduced undisclosed auto-approve rules; removed: ${rufloUnexpected.join(', ')}`);
     return false;
   }
+  return true;
+}
 
-  // 2. statusline heal is DEFERRED to the end of project setup (see step 10):
-  //    fixStatusline is a no-op until ruflo/aqe have finished writing
-  //    .claude/helpers/statusline.cjs, so injecting the footer here can silently
-  //    miss (helper not settled) — running it last guarantees convergence.
-
-  // 3. strip committed MCP cruft (keep any agentic-qe entry)
+/** Step 3: strip committed MCP cruft (keep any agentic-qe entry), and remove
+ *  any local-scope `ruflo` MCP server `ruflo init` may have registered.
+ *  Step 2 (statusline heal) is DEFERRED to the end of project setup (see
+ *  healProjectStatusline): fixStatusline is a no-op until ruflo/aqe have
+ *  finished writing .claude/helpers/statusline.cjs, so injecting the footer
+ *  before that can silently miss — running it last guarantees convergence. */
+async function sanitizeProjectMcpConfig(root) {
   const mcpJson = path.join(root, '.mcp.json');
   const mcpCfg = readJson(mcpJson);
   if (mcpCfg?.mcpServers) {
@@ -457,28 +479,34 @@ export async function run_project({
     ok('.mcp.json sanitized (no committed ruflo/ruv-swarm/flow-nexus entries)');
   }
   await runCmd('claude', ['mcp', 'remove', 'ruflo', '-s', 'local'], { cwd: root });
+}
 
-  // 4. pin ABSOLUTE CLAUDE_FLOW_DB_PATH (Claude Code doesn't expand ${CLAUDE_PROJECT_DIR})
+/** Step 4: pin ABSOLUTE CLAUDE_FLOW_DB_PATH (Claude Code doesn't expand
+ *  ${CLAUDE_PROJECT_DIR}). */
+function pinProjectMemoryDbPath(root) {
   const dbPath = paths.projectMemoryDb(fs.realpathSync(root));
   const localFile = paths.projectSettingsLocal(root);
   const local = readJson(localFile, {}) ?? {};
   local.env = { ...local.env, CLAUDE_FLOW_DB_PATH: dbPath };
   writeJsonWithBackup(localFile, local);
   ok(`CLAUDE_FLOW_DB_PATH pinned → ${dbPath}`);
+}
 
-  // 5. activate memory + swarm with the pin exported
-  const env = projectMemoryEnv(root);
+/** Step 5: activate memory + swarm with the pin exported. */
+async function activateProjectMemoryAndSwarm(root, env) {
   (await runCmd('ruflo', ['memory', 'init'], { cwd: root, env })).code === 0
     ? ok('memory initialized') : warn('ruflo memory init failed');
   (await runCmd('ruflo', ['swarm', 'init', '--v3-mode'], { cwd: root, env })).code === 0
     ? ok('swarm initialized (v3-mode)') : warn('ruflo swarm init failed');
+}
 
-  // 6. daemon: default-on, local-only workers (AI workers stay opt-in upstream)
+/** Step 6: daemon — default-on, local-only workers (AI workers stay opt-in
+ *  upstream); defensive: never let Claude Code auto-restart it (issue #3 RC3). */
+async function startProjectDaemon(root) {
   const d = await runCmd('ruflo', ['daemon', 'start'], { cwd: root, timeout: 60_000 });
   if (d.code === 0) {
     ok('daemon started (local-only workers; 12h TTL; AI workers opt-in: RUFLO_DAEMON_AI_WORKERS=1)');
   } else warn('daemon failed to start — try: ruflo daemon start');
-  // defensive: never let Claude Code auto-restart it (issue #3 RC3)
   const projSettingsFile = paths.projectSettings(root);
   const ps = readJson(projSettingsFile);
   if (ps?.claudeFlow?.daemon?.autoStart === true) {
@@ -486,9 +514,12 @@ export async function run_project({
     writeJsonWithBackup(projSettingsFile, ps);
     ok('claudeFlow.daemon.autoStart → false (explicit start only)');
   }
+}
 
-  // 7. Write-verification (store → actual on-disk row, then clean up). Native
-  // Native memory integrations may select agentdb-memory.db beside the pinned compatibility DB.
+/** Step 7: write-verification (store → actual on-disk row, then clean up).
+ *  Native memory integrations may select agentdb-memory.db beside the pinned
+ *  compatibility DB. */
+async function verifyProjectMemoryWrite(root, env) {
   const probeKey = `_setup/verify-${process.pid}-${Date.now()}`;
   const stored = (await runCmd('ruflo', ['memory', 'store', '-k', probeKey, '--value', 'setup-verify', '-n', '_setup'], { cwd: root, env })).code === 0;
   const landed = stored ? findMemoryEntry(root, '_setup', probeKey) : null;
@@ -505,42 +536,52 @@ export async function run_project({
   } else {
     fail('memory write verification FAILED — run: ak status / ruflo doctor -c memory');
   }
+}
 
-  // 8. lean project CLAUDE.md (generic guidance lives machine-wide)
+/** Step 8: lean project CLAUDE.md (generic guidance lives machine-wide). */
+function writeLeanProjectClaudeMd(root, flags) {
   const projectMd = path.join(root, 'CLAUDE.md');
   if (fs.existsSync(projectMd) && !flags.minimal) {
     fs.writeFileSync(projectMd, leanStub(path.basename(root)));
     ok('project CLAUDE.md → lean stub (machine-wide reference carries the rest)');
   }
+}
 
-  // 9. agentic-qe in this repo (sentinel first so aqe init skips duplicate guidance)
-  if (cfg.aqe && !flags['no-aqe'] && await have('aqe')) {
-    const md = fs.existsSync(projectMd) ? fs.readFileSync(projectMd, 'utf8') : '';
-    if (!md.includes('## Agentic QE v3')) {
-      fs.appendFileSync(projectMd, '\n## Agentic QE v3\n<!-- managed by agentic-kit — aqe init skips regeneration when this sentinel is present -->\n');
-    }
-    heal.healRvf(paths.projectAqeDir(root));
-    // aqe ≥ 3.13.1 with codex enabled → install the Codex-native QE skills too.
-    const withCodex = !!cfg.integrations?.hosts?.codex && aqeSupportsAgentOverrides();
-    const aqe = await runCmd('aqe', ['init', '--auto', ...(withCodex ? ['--with-codex'] : [])], { cwd: root, timeout: 300_000 });
-    (aqe.code === 0 ? ok : warn)(`agentic-qe initialized${withCodex ? ' (+ codex skills)' : ''}`);
-    const aqeUnexpected = removeUndisclosedPermissions(permissionsFile, permissionsBefore, authorizedPermissions);
-    if (aqeUnexpected.length) {
-      fail(`agentic-qe init introduced undisclosed auto-approve rules; removed: ${aqeUnexpected.join(', ')}`);
-      return false;
-    }
+/** Step 9: agentic-qe in this repo (sentinel first so aqe init skips
+ *  duplicate guidance). Returns false when run_project must abort. */
+async function initProjectAgenticQe(root, cfg, flags, permCtx) {
+  if (!(cfg.aqe && !flags['no-aqe'] && await have('aqe'))) return true;
+  const projectMd = path.join(root, 'CLAUDE.md');
+  const md = fs.existsSync(projectMd) ? fs.readFileSync(projectMd, 'utf8') : '';
+  if (!md.includes('## Agentic QE v3')) {
+    fs.appendFileSync(projectMd, '\n## Agentic QE v3\n<!-- managed by agentic-kit — aqe init skips regeneration when this sentinel is present -->\n');
   }
+  heal.healRvf(paths.projectAqeDir(root));
+  // aqe ≥ 3.13.1 with codex enabled → install the Codex-native QE skills too.
+  const withCodex = !!cfg.integrations?.hosts?.codex && aqeSupportsAgentOverrides();
+  const aqe = await runCmd('aqe', ['init', '--auto', ...(withCodex ? ['--with-codex'] : [])], { cwd: root, timeout: 300_000 });
+  (aqe.code === 0 ? ok : warn)(`agentic-qe initialized${withCodex ? ' (+ codex skills)' : ''}`);
+  const aqeUnexpected = removeUndisclosedPermissions(
+    permCtx.permissionsFile, permCtx.permissionsBefore, permCtx.authorizedPermissions,
+  );
+  if (aqeUnexpected.length) {
+    fail(`agentic-qe init introduced undisclosed auto-approve rules; removed: ${aqeUnexpected.join(', ')}`);
+    return false;
+  }
+  return true;
+}
 
-  // 9.5 frontier host/provider wiring — reapply kit.json prefs (no-op at the
-  //     claude-only default, so existing repos see zero change). When codex is
-  //     enabled: write ENABLE_* env and register providers.
-  // Apply step: the shared pipeline (providers.mjs's convergeProviderStack)
-  // computes and persists every step; this reporter only decides what to
-  // print and how, preserving setup's exact wording/gating/ordering per step.
-  // codexMcp gates the legacy/reverse Codex MCP steps to run only while codex
-  // is enabled — matching this command's pre-existing behavior (sync and pick
-  // always run them; the deprecated-backend cleanup is independent of
-  // enablement there — see retireCodexMcp).
+/** Step 9.5: frontier host/provider wiring — reapply kit.json prefs (no-op
+ *  at the claude-only default, so existing repos see zero change). When
+ *  codex is enabled: write ENABLE_* env and register providers. The shared
+ *  pipeline (providers.mjs's convergeProviderStack) computes and persists
+ *  every step; this reporter only decides what to print and how, preserving
+ *  setup's exact wording/gating/ordering per step. codexMcp gates the
+ *  legacy/reverse Codex MCP steps to run only while codex is enabled —
+ *  matching this command's pre-existing behavior (sync and pick always run
+ *  them; the deprecated-backend cleanup is independent of enablement there —
+ *  see retireCodexMcp). */
+async function applyProjectProviderStack(cfg, root, migrateRoutes) {
   const codexEnabled = !!cfg.integrations?.hosts?.codex;
   const projectReporter = async (step, result) => {
     if (step === 'hosts') { if (result.changed) ok(`providers: ${result.detail}`); return; }
@@ -593,14 +634,44 @@ export async function run_project({
   await convergeProviderStack(cfg, root, {
     reporter: projectReporter, migrateRoutes, codexMcp: codexEnabled,
   });
+}
 
-  // 10. statusline footer — LAST, after ruflo + aqe have settled the helper.
-  //     A still-missing footer is a WARN (not silent info): it means the AQE /
-  //     SONA segments won't render and `ak sync` is needed to heal it.
+/** Step 10: statusline footer — LAST, after ruflo + aqe have settled the
+ *  helper. A still-missing footer is a WARN (not silent info): it means the
+ *  AQE/SONA segments won't render and `ak sync` is needed to heal it. */
+function healProjectStatusline(root) {
   const sl = fixStatusline(root);
   if (sl.applied) ok(`statusline: footer injected (v${sl.version})`);
   else if (sl.reason) warn(`statusline: ${sl.reason} — run \`ak sync\` to re-inject`);
   else ok('statusline: footer in sync');
+}
+
+export async function run_project({
+  flags, cfg, trustDisclosed = false, migrateRoutes = migrateRetiredRoutesInConfig,
+}) {
+  const root = process.cwd();
+  heading(`project setup — ${root}`);
+  if (!trustDisclosed) discloseSetupTrust(cfg, { project: true });
+  if (flags['dry-run']) { info('dry-run: would init, sanitize, pin DB path, activate memory/swarm/daemon, verify'); return true; }
+
+  const permissionsFile = paths.projectSettings(root);
+  const permCtx = {
+    permissionsFile,
+    permissionsBefore: new Set(allowRules(permissionsFile)),
+    authorizedPermissions: new Set(projectPermissionManifest(cfg).map((entry) => entry.rule)),
+  };
+
+  if (!(await rufloProjectInit(root, permCtx))) return false;
+  await sanitizeProjectMcpConfig(root);
+  pinProjectMemoryDbPath(root);
+  const env = projectMemoryEnv(root);
+  await activateProjectMemoryAndSwarm(root, env);
+  await startProjectDaemon(root);
+  await verifyProjectMemoryWrite(root, env);
+  writeLeanProjectClaudeMd(root, flags);
+  if (!(await initProjectAgenticQe(root, cfg, flags, permCtx))) return false;
+  await applyProjectProviderStack(cfg, root, migrateRoutes);
+  healProjectStatusline(root);
   return true;
 }
 
@@ -618,6 +689,86 @@ const leanStub = (name) => `<!-- Full ruflo reference: machine-wide ~/.claude/CL
 ruflo swarm init --topology hierarchical --max-agents 15 --strategy specialized
 \`\`\`
 `;
+
+/** Preflight the deja-vu companion and disclose the full setup trust
+ *  manifest (host + project + companion changes), honoring a declined
+ *  confirmation. Returns `{code}` when `run()` must return immediately, or
+ *  `{companionPreflight}` to continue. */
+async function resolveSetupTrust(cfg, flags, dejaVuLifecycle, confirm, willConfigureProject) {
+  let companionPreflight;
+  try {
+    companionPreflight = await preflightSetupDejaVu(cfg, dejaVuLifecycle, {
+      removeRequested: flags['no-deja-vu'],
+    });
+  } catch {
+    fail('deja-vu preflight failed before any setup mutation');
+    return { code: 1 };
+  }
+  const trustManifest = discloseSetupTrust(cfg, {
+    project: willConfigureProject, companionPreflight,
+  });
+  if (companionPreflight?.error) {
+    fail(`deja-vu preflight refused the plan (${safeCompanionCode(companionPreflight.error)})`);
+    return { code: 1 };
+  }
+  if (trustManifest.length && !flags['dry-run']
+    && !(await confirm('Proceed with setup and these trust changes?', false, flags.yes))) {
+    info('setup cancelled before machine, user, or project changes');
+    return { code: 0 };
+  }
+  return { companionPreflight };
+}
+
+/** --codex / --primary-host / --opencode / deja-vu: preview (dry-run) or
+ *  announce (real run) what the host/companion flags will do. Opting codex
+ *  in happens BEFORE run_machine's host-install loop and run_project's dual
+ *  wiring (applySetupHostFlags already ran, in `run()`, so the existing
+ *  gated/prompted/external-safe paths install + wire codex); dry-run applies
+ *  these choices in memory for an accurate preview but never persists them. */
+function printSetupHostFlagPreview({
+  flags, cfg, hostFlags, companionPreflight, dejaVuFlagsResult,
+}) {
+  if (flags['dry-run']) {
+    if (flags.codex || flags['primary-host']) info('dry-run: --codex/--primary-host would enable + install the codex host and wire dual-mode (no changes made)');
+    if (flags.opencode) info('dry-run: --opencode would enable the opencode host and wire it (no changes made)');
+    if (companionPreflight) {
+      const kinds = companionPreflight.plan.operations.map((entry) => entry.kind).join(', ') || 'none';
+      info(`dry-run: deja-vu would apply bounded operations: ${kinds} (no changes made)`);
+    } else if (dejaVuFlagsResult.changed) {
+      info('dry-run: deja-vu would remain disabled (no probes or changes)');
+    }
+    return;
+  }
+  for (const w of hostFlags.warnings) warn(w);
+  if (hostFlags.changed) {
+    if (flags.codex || flags['primary-host'] === 'codex') {
+      const primary = cfg.routing?.primaryHost && cfg.routing.primaryHost !== 'claude'
+        ? ` (primary: ${cfg.routing.primaryHost})` : '';
+      info(`codex host enabled${primary} — will install + wire dual-mode`);
+    }
+    if (flags.opencode) info('opencode host enabled — will wire opencode.json and deploy plugin/agents/skills');
+  }
+}
+
+/** Final reconcile pass — deliberately AFTER the hosts branch (which installs
+ *  the claude/codex/opencode CLIs) and the project phase (whose Codex
+ *  integration creates ~/.codex): the user-scope MCP registration needs the
+ *  claude CLI on disk, and several guidance blocks gate on freshly-installed
+ *  hosts (command:codex, flag:dualMode). Shares blocks.mjs reconcileGuidance
+ *  (via providers.mjs's guidanceContext) with `ak sync` so setup and sync
+ *  converge guidance identically. */
+async function finalizeSetupGuidanceAndMcp(cfg, pkgRoot, flags) {
+  for (const t of await reconcileGuidance({ cwd: process.cwd(), cfg, pkgRoot, context: guidanceContext(cfg) })) {
+    if (t.name === 'claude' || t.changed) ok(`blocks(${t.label}): ${t.changed || 'in sync'}`);
+  }
+  const wantMcp = cfg.mcp.register && (flags.reconfigure || !(readJson(paths.claudeUserMcpPath(), {})?.mcpServers?.['claude-flow']));
+  if (wantMcp && await ask('Register the ruflo MCP server at user scope (schemas load on demand)?', true, flags.yes)) {
+    if (await mcpRegister()) {
+      const { denied } = applyExclusions(cfg.mcp.excludeFamilies ?? []);
+      ok(`MCP registered${denied ? ` (${denied} tool(s) denied per kit.json)` : ''} — exclude families anytime: ak x mcp pick`);
+    } else warn('claude mcp add failed — run: ak x mcp pick');
+  }
+}
 
 export async function run({ flags, pkgRoot, confirm = ask, dejaVuLifecycle = DEFAULT_DEJA_VU_LIFECYCLE }) {
   const dejaVuFlags = validateDejaVuSetupFlags(flags);
@@ -639,55 +790,13 @@ export async function run({ flags, pkgRoot, confirm = ask, dejaVuLifecycle = DEF
   // persists this object; a declined confirmation returns before saveKitConfig.
   const hostFlags = applySetupHostFlags(cfg, flags);
   const dejaVuFlagsResult = applySetupDejaVuFlags(cfg, flags);
-  let companionPreflight;
-  try {
-    companionPreflight = await preflightSetupDejaVu(cfg, dejaVuLifecycle, {
-      removeRequested: flags['no-deja-vu'],
-    });
-  } catch {
-    fail('deja-vu preflight failed before any setup mutation');
-    return 1;
-  }
-  const trustManifest = discloseSetupTrust(cfg, {
-    project: willConfigureProject, companionPreflight,
-  });
-  if (companionPreflight?.error) {
-    fail(`deja-vu preflight refused the plan (${safeCompanionCode(companionPreflight.error)})`);
-    return 1;
-  }
-  if (trustManifest.length) {
-    if (!flags['dry-run'] && !(await confirm(
-      'Proceed with setup and these trust changes?', false, flags.yes))) {
-      info('setup cancelled before machine, user, or project changes');
-      return 0;
-    }
-  }
+  const trust = await resolveSetupTrust(cfg, flags, dejaVuLifecycle, confirm, willConfigureProject);
+  if (trust.code !== undefined) return trust.code;
+  const { companionPreflight } = trust;
 
-  // --codex / --primary-host: opt codex in BEFORE run_machine's host-install loop
-  // and run_project's dual wiring, so the existing gated/prompted/external-safe
-  // paths install + wire codex. No-op (claude-only) when neither flag is passed.
-  // Dry-run applies these choices in memory for an accurate plan, but never
-  // persists the resulting config.
-  if (flags['dry-run']) {
-    if (flags.codex || flags['primary-host']) info('dry-run: --codex/--primary-host would enable + install the codex host and wire dual-mode (no changes made)');
-    if (flags.opencode) info('dry-run: --opencode would enable the opencode host and wire it (no changes made)');
-    if (companionPreflight) {
-      const kinds = companionPreflight.plan.operations.map((entry) => entry.kind).join(', ') || 'none';
-      info(`dry-run: deja-vu would apply bounded operations: ${kinds} (no changes made)`);
-    } else if (dejaVuFlagsResult.changed) {
-      info('dry-run: deja-vu would remain disabled (no probes or changes)');
-    }
-  } else {
-    for (const w of hostFlags.warnings) warn(w);
-    if (hostFlags.changed) {
-      if (flags.codex || flags['primary-host'] === 'codex') {
-        const primary = cfg.routing?.primaryHost && cfg.routing.primaryHost !== 'claude'
-          ? ` (primary: ${cfg.routing.primaryHost})` : '';
-        info(`codex host enabled${primary} — will install + wire dual-mode`);
-      }
-      if (flags.opencode) info('opencode host enabled — will wire opencode.json and deploy plugin/agents/skills');
-    }
-  }
+  printSetupHostFlagPreview({
+    flags, cfg, hostFlags, companionPreflight, dejaVuFlagsResult,
+  });
 
   if (!(await run_machine({ flags, pkgRoot, cfg }))) return 1;
   // Companion execution is deliberately sequenced after every enabled host is
@@ -710,25 +819,7 @@ export async function run({ flags, pkgRoot, confirm = ask, dejaVuLifecycle = DEF
   } else if (!flags.minimal) {
     info('not inside a project (no .git here) — run `ak setup` from a repo to set one up');
   }
-  // Final reconcile pass — deliberately AFTER the hosts branch (which installs
-  // the claude/codex/opencode CLIs) and the project phase (whose Codex integration
-  // creates ~/.codex): the user-scope MCP registration needs the claude CLI on
-  // disk, and several guidance blocks gate on freshly-installed hosts
-  // (command:codex, flag:dualMode). Shares blocks.mjs reconcileGuidance with
-  // `ak sync` so setup and sync converge guidance identically.
-  if (!flags['dry-run']) {
-    const ctx = { flags: { dualMode: bothHostsEnabled(cfg), opencodeEnabled: !!cfg.integrations?.hosts?.opencode } };
-    for (const t of await reconcileGuidance({ cwd: process.cwd(), cfg, pkgRoot, context: ctx })) {
-      if (t.name === 'claude' || t.changed) ok(`blocks(${t.label}): ${t.changed || 'in sync'}`);
-    }
-    const wantMcp = cfg.mcp.register && (flags.reconfigure || !(readJson(paths.claudeUserMcpPath(), {})?.mcpServers?.['claude-flow']));
-    if (wantMcp && await ask('Register the ruflo MCP server at user scope (schemas load on demand)?', true, flags.yes)) {
-      if (await mcpRegister()) {
-        const { denied } = applyExclusions(cfg.mcp.excludeFamilies ?? []);
-        ok(`MCP registered${denied ? ` (${denied} tool(s) denied per kit.json)` : ''} — exclude families anytime: ak x mcp pick`);
-      } else warn('claude mcp add failed — run: ak x mcp pick');
-    }
-  }
+  if (!flags['dry-run']) await finalizeSetupGuidanceAndMcp(cfg, pkgRoot, flags);
 
   console.log('');
   ok(bold('setup complete — `agentic-kit` anytime for status, `ak sync` after upgrades'));

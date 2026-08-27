@@ -14,7 +14,7 @@ import { companionLifecycleFor } from '../lib/adapters/companion-lifecycle-regis
 import { renderApplyReport } from '../lib/adapters/lifecycle-render.mjs';
 import { listDaemons, staleDaemons, reap } from '../lib/daemons.mjs';
 import { loadKitConfig, saveKitConfig } from '../lib/config.mjs';
-import { commandHosts, hostInstallState, installHost, convergeProviderStack, bothHostsEnabled } from '../lib/providers.mjs';
+import { commandHosts, hostInstallState, installHost, convergeProviderStack, guidanceContext } from '../lib/providers.mjs';
 import { driftReport, selfDrift } from '../lib/versions.mjs';
 import { RUVECTOR_PKG, managed as ruvectorManaged } from '../lib/ruvector.mjs';
 import { pruneNpxStale } from '../lib/npx.mjs';
@@ -291,15 +291,10 @@ export const SYNC_STEPS = [
       // The reconcile loop itself (targets, retired-row strips, dual-mode/
       // opencode flag gating) lives in blocks.mjs reconcileGuidance — shared
       // with setup's final pass so the two commands cannot drift (ADR-0008 on
-      // target scoping).
-      const guidanceCtx = {
-        flags: {
-          dualMode: bothHostsEnabled(ctx.cfg),
-          opencodeEnabled: !!ctx.cfg.integrations?.hosts?.opencode,
-        },
-      };
+      // target scoping; providers.mjs's guidanceContext is the shared ctx
+      // shape both commands build).
       for (const t of await reconcileGuidance({
-        cwd: ctx.cwd, cfg: ctx.cfg, pkgRoot: ctx.pkgRoot, context: guidanceCtx,
+        cwd: ctx.cwd, cfg: ctx.cfg, pkgRoot: ctx.pkgRoot, context: guidanceContext(ctx.cfg),
       })) {
         // stay quiet on the agents targets unless they actually changed
         // (single-host leaves them unmanaged); always report the claude target.

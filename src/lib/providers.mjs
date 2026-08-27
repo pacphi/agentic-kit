@@ -382,6 +382,14 @@ export function isDefault(cfg) {
  *  guidance below: only relevant once both are actually opted in. */
 export const bothHostsEnabled = (cfg) => !!cfg.integrations?.hosts?.claude && !!cfg.integrations?.hosts?.codex;
 
+/** The context blocks.mjs's reconcileGuidance needs to gate dual-mode/
+ *  opencode-specific guidance targets — shared by `ak sync` and `ak setup`'s
+ *  final reconcile pass so the two commands cannot drift (ADR-0008 on target
+ *  scoping). */
+export function guidanceContext(cfg) {
+  return { flags: { dualMode: bothHostsEnabled(cfg), opencodeEnabled: !!cfg.integrations?.hosts?.opencode } };
+}
+
 /** Guidance printed once both hosts are enabled:
  *   - ak run executes role-based activity pipelines through the configured hosts.
  *   - judge-vendor-bias: a same-vendor LLM judge scores ~8-10pp inflated versus
