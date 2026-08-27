@@ -862,6 +862,47 @@ export function persistedRufloProvider(cwd, providerId, { env = process.env } = 
     && entry.name.toLowerCase() === providerId.toLowerCase()) ?? null;
 }
 
+/** A provider entry's id/model grammar is valid: id always required, model
+ *  only when present (a provider entry may name a bare provider, no model). */
+function validProviderEntry(m) {
+  return typeof m.id === 'string' && PROVIDER_ID_RE.test(m.id)
+    && (!m.model || (typeof m.model === 'string' && PROVIDER_MODEL_RE.test(m.model)));
+}
+
+/** The `-e <endpoint>` args for one provider entry, when any apply: explicit,
+ *  or Ollama's standard loopback endpoint on a fresh entry with no existing
+ *  Ruflo-persisted baseUrl or env override. `ok: false` on an invalid
+ *  explicit endpoint — the caller must not proceed to invoke ruflo. */
+function resolveProviderEndpointArgs(m, cwd, env) {
+  const existing = persistedRufloProvider(cwd, m.id, { env });
+  let endpoint = m.endpoint;
+  if (endpoint === undefined && m.id.toLowerCase() === 'ollama' && !existing?.baseUrl
+    && !env.OLLAMA_BASE_URL && !env.OLLAMA_API_KEY) {
+    endpoint = DEFAULT_OLLAMA_ENDPOINT;
+  }
+  if (endpoint === undefined) return { ok: true, args: [] };
+  const validation = typeof endpoint === 'string'
+    ? validateEndpoint(endpoint)
+    : { ok: false, reason: 'invalid-url' };
+  if (!validation.ok) return { ok: false, reason: validation.reason };
+  return { ok: true, args: ['-e', validation.normalized] };
+}
+
+/** Register one provider entry with ruflo. Returns the done-list label
+ *  (`id`, `id(invalid)`, `id(invalid endpoint: …)`, `id(failed)`) and whether
+ *  a ruflo invocation was actually attempted (never true for an id/model or
+ *  endpoint that failed validation — those never reach ruflo at all). */
+async function applyOneProvider(m, cwd, env, runner) {
+  if (!validProviderEntry(m)) return { label: `${m.id}(invalid)`, attempted: false };
+  const args = ['providers', 'configure', '-p', m.id];
+  if (m.model) args.push('-m', m.model);
+  const endpoint = resolveProviderEndpointArgs(m, cwd, env);
+  if (!endpoint.ok) return { label: `${m.id}(invalid endpoint: ${endpoint.reason})`, attempted: false };
+  args.push(...endpoint.args);
+  const r = await runner('ruflo', args, { cwd, timeout: 60_000 });
+  return { label: `${m.id}${r.code === 0 ? '' : '(failed)'}`, attempted: true };
+}
+
 /** Register configured providers with Ruflo (keys read from env, never passed
  * here). Idempotent — Ruflo upserts. A fresh Ollama entry receives its standard
  * loopback endpoint; a pre-existing custom Ruflo endpoint is preserved. */
@@ -881,32 +922,9 @@ export async function applyProviders(cfg, cwd = process.cwd(), {
   let attempted = 0;
   for (const m of models) {
     if (!m?.id) continue;
-    if (typeof m.id !== 'string' || !PROVIDER_ID_RE.test(m.id)
-      || (m.model && (typeof m.model !== 'string' || !PROVIDER_MODEL_RE.test(m.model)))) {
-      done.push(`${m.id}(invalid)`);
-      continue;
-    }
-    const args = ['providers', 'configure', '-p', m.id];
-    if (m.model) args.push('-m', m.model);
-    const existing = persistedRufloProvider(cwd, m.id, { env });
-    let endpoint = m.endpoint;
-    if (endpoint === undefined && m.id.toLowerCase() === 'ollama' && !existing?.baseUrl
-      && !env.OLLAMA_BASE_URL && !env.OLLAMA_API_KEY) {
-      endpoint = DEFAULT_OLLAMA_ENDPOINT;
-    }
-    if (endpoint !== undefined) {
-      const validation = typeof endpoint === 'string'
-        ? validateEndpoint(endpoint)
-        : { ok: false, reason: 'invalid-url' };
-      if (!validation.ok) {
-        done.push(`${m.id}(invalid endpoint: ${validation.reason})`);
-        continue;
-      }
-      args.push('-e', validation.normalized);
-    }
-    attempted += 1;
-    const r = await runner('ruflo', args, { cwd, timeout: 60_000 });
-    done.push(`${m.id}${r.code === 0 ? '' : '(failed)'}`);
+    const result = await applyOneProvider(m, cwd, env, runner);
+    done.push(result.label);
+    if (result.attempted) attempted += 1;
   }
   const ok = done.every((d) => !d.includes('failed') && !d.includes('invalid'));
   const compatibility = providerSelectionSupported ? ''
