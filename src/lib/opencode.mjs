@@ -272,6 +272,12 @@ const hasReceiptValue = (value) => value !== null && value !== undefined;
 const receiptMatches = (text, receipt) =>
   typeof receipt === 'string' && contentHash(text) === receipt;
 
+/** Tolerate a legacy/malformed `receipts` value (array, non-object) by
+ *  treating it as an empty ledger — shared by syncAgents and agentsStatus. */
+const asReceiptMap = (receipts) => (
+  receipts && typeof receipts === 'object' && !Array.isArray(receipts) ? receipts : {}
+);
+
 /** Normalize an opencodeManaged record — the current precise shape
  *  { mcp: {name:{prior,written}}, paths: [], permissions: {key:{prior,written}} },
  *  tolerating the legacy names-only shape from the first shipped version
@@ -709,50 +715,33 @@ export function undoOpencode(cfg, { configFile = paths.opencodeConfigPath() } = 
 // CALLER (applyOpencode/undoOpencode mutate the ownership markers; the command
 // decides when saveKitConfig runs).
 
-/** Enable path: wire opencode.json, deploy the lifecycle and lazy-catalogue
- *  plugins, convert the agent set, deploy the platform skill. Callers gate on the CLI being present
- *  first (have('opencode')) — this never fabricates the config home for an
- *  absent host. Returns each step's result for the caller's own formatting,
- *  plus `markersChanged`: applyOpencode re-records the ownership markers on
- *  EVERY run (a converged file with stale/missing markers in kit.json still
- *  needs persisting, or the next teardown cannot prove ownership) — callers
- *  must save cfg when `oc.changed || markersChanged`, not on `oc.changed`
- *  alone (codex-review r3).
- *  The destination seams exist for TESTS ONLY — production callers pass none
- *  and get the real config home; a test that forgets them writes to the
- *  developer's real machine (codex-review r4).
- *  @param {any} cfg @param {{ pkgRoot: string, configFile?: string, brainShim?: string, pluginsDir?: string, agentsDir?: string, skillsDir?: string }} opts */
-export async function opencodeStack(cfg, { pkgRoot, configFile, brainShim, pluginsDir, agentsDir, skillsDir }) {
-  const before = JSON.stringify([
-    opencodeOwnership(cfg).mcp ?? null,
-    opencodeOwnership(cfg).managed ?? null,
-  ]);
-  const oc = await applyOpencode(cfg, { ...(configFile ? { configFile } : {}), ...(brainShim ? { brainShim } : {}) });
-  if (oc.fatal) {
-    const skipped = { ok: false, changed: false, detail: 'skipped because opencode.json did not converge' };
-    return {
-      oc, plugin: skipped, gateway: skipped, agents: skipped, skill: skipped,
-      source: null, markersChanged: false,
-    };
-  }
-  const receiptState = opencodeArtifactReceiptState(opencodeOwnership(cfg).managed);
-  const { receipts, adoptionBlocked } = receiptState;
-  const source = catalogSource({ override: opencodeOwnership(cfg).catalogDir });
-  if (adoptionBlocked) {
-    const detail = 'skipped because the artifact receipt ledger is malformed';
-    const plugin = { ok: false, changed: false, receipt: receipts.plugin, adoptionBlocked: true, detail };
-    const gateway = { ok: false, changed: false, receipt: receipts.gateway, adoptionBlocked: true, detail };
-    const agents = {
+/** Snapshot of the ownership markers used to compute `markersChanged`
+ *  (applyOpencode re-records them on every run, so callers must compare
+ *  before/after rather than trust `oc.changed` alone). */
+function ownershipMarkersSnapshot(cfg) {
+  return JSON.stringify([opencodeOwnership(cfg).mcp ?? null, opencodeOwnership(cfg).managed ?? null]);
+}
+
+/** The shape returned for every artifact surface when the receipt ledger is
+ *  malformed — adoption is blocked fleet-wide until it's repaired by hand. */
+function blockedArtifactResults(receipts) {
+  const detail = 'skipped because the artifact receipt ledger is malformed';
+  return {
+    plugin: { ok: false, changed: false, receipt: receipts.plugin, adoptionBlocked: true, detail },
+    gateway: { ok: false, changed: false, receipt: receipts.gateway, adoptionBlocked: true, detail },
+    agents: {
       ok: false, changed: false, receipts: receipts.agents,
       stampReceipt: receipts.agentStamp, adopted: 0, adoptionBlocked: true, detail,
-    };
-    const skill = { ok: false, changed: false, receipt: receipts.skill, adoptionBlocked: true, detail };
-    const markersChanged = JSON.stringify([
-      opencodeOwnership(cfg).mcp ?? null,
-      opencodeOwnership(cfg).managed ?? null,
-    ]) !== before;
-    return { oc, plugin, gateway, agents, skill, source, markersChanged };
-  }
+    },
+    skill: { ok: false, changed: false, receipt: receipts.skill, adoptionBlocked: true, detail },
+  };
+}
+
+/** Deploy/converge the plugin, lazy gateway, agent set, and platform skill —
+ *  the non-blocked body of opencodeStack's enable path.
+ *  @param {{ cfg: any, pkgRoot: string, source: CatalogSource|null, receiptState: any, configFile?: string, pluginsDir?: string, agentsDir?: string, skillsDir?: string }} args */
+function deployOpencodeArtifacts({ cfg, pkgRoot, source, receiptState, configFile, pluginsDir, agentsDir, skillsDir }) {
+  const { receipts, adoptionBlocked } = receiptState;
   const managedMcp = managedGatewayMcp(cfg, { ...(configFile ? { configFile } : {}) });
   const dispatcher = specialistDispatcherState({
     destDir: agentsDir ?? paths.opencodeAgentsDir(),
@@ -801,6 +790,44 @@ export async function opencodeStack(cfg, { pkgRoot, configFile, brainShim, plugi
     source, receipt: receipts.skill, adoptionBlocked,
     ...(skillsDir ? { skillsDir } : {}),
   });
+  return { plugin, gateway, agents, skill, gatewayRequired };
+}
+
+/** Enable path: wire opencode.json, deploy the lifecycle and lazy-catalogue
+ *  plugins, convert the agent set, deploy the platform skill. Callers gate on the CLI being present
+ *  first (have('opencode')) — this never fabricates the config home for an
+ *  absent host. Returns each step's result for the caller's own formatting,
+ *  plus `markersChanged`: applyOpencode re-records the ownership markers on
+ *  EVERY run (a converged file with stale/missing markers in kit.json still
+ *  needs persisting, or the next teardown cannot prove ownership) — callers
+ *  must save cfg when `oc.changed || markersChanged`, not on `oc.changed`
+ *  alone (codex-review r3).
+ *  The destination seams exist for TESTS ONLY — production callers pass none
+ *  and get the real config home; a test that forgets them writes to the
+ *  developer's real machine (codex-review r4).
+ *  @param {any} cfg @param {{ pkgRoot: string, configFile?: string, brainShim?: string, pluginsDir?: string, agentsDir?: string, skillsDir?: string }} opts */
+export async function opencodeStack(cfg, { pkgRoot, configFile, brainShim, pluginsDir, agentsDir, skillsDir }) {
+  const before = ownershipMarkersSnapshot(cfg);
+  const oc = await applyOpencode(cfg, { ...(configFile ? { configFile } : {}), ...(brainShim ? { brainShim } : {}) });
+  if (oc.fatal) {
+    const skipped = { ok: false, changed: false, detail: 'skipped because opencode.json did not converge' };
+    return {
+      oc, plugin: skipped, gateway: skipped, agents: skipped, skill: skipped,
+      source: null, markersChanged: false,
+    };
+  }
+  const receiptState = opencodeArtifactReceiptState(opencodeOwnership(cfg).managed);
+  const { receipts, adoptionBlocked } = receiptState;
+  const source = catalogSource({ override: opencodeOwnership(cfg).catalogDir });
+  if (adoptionBlocked) {
+    return {
+      oc, ...blockedArtifactResults(receipts), source,
+      markersChanged: ownershipMarkersSnapshot(cfg) !== before,
+    };
+  }
+  const { plugin, gateway, agents, skill, gatewayRequired } = deployOpencodeArtifacts({
+    cfg, pkgRoot, source, receiptState, configFile, pluginsDir, agentsDir, skillsDir,
+  });
   if (!adoptionBlocked) {
     mutableOpencodeOwnership(cfg).managed.artifacts = {
       plugin: plugin.receipt ?? receipts.plugin ?? null,
@@ -812,11 +839,7 @@ export async function opencodeStack(cfg, { pkgRoot, configFile, brainShim, plugi
       skill: skill.receipt ?? receipts.skill ?? null,
     };
   }
-  const markersChanged = JSON.stringify([
-    opencodeOwnership(cfg).mcp ?? null,
-    opencodeOwnership(cfg).managed ?? null,
-  ]) !== before;
-  return { oc, plugin, gateway, agents, skill, source, markersChanged };
+  return { oc, plugin, gateway, agents, skill, source, markersChanged: ownershipMarkersSnapshot(cfg) !== before };
 }
 
 /** Retire path: strip the ak-managed opencode.json wiring (user priors
@@ -1199,28 +1222,10 @@ function gatewayAgentCatalog(source) {
 
 const isGeneratedContent = (text) => AGENT_MARKERS.some((m) => text.includes(m));
 
-/** Reconcile the converted agent set into the dest dir: rewrite generated
- *  files, remove stale generated ones (either marker), NEVER overwrite a file
- *  that carries no generated marker (a user-owned agent with a colliding name
- *  is preserved and reported). The stamp records the source id + the exact
- *  generated file list and is only rewritten when the set actually changed
- *  (no per-run timestamp churn — idempotent-write semantics).
- *  @param {{ source: CatalogSource|null, destDir?: string, dryRun?: boolean, receipts?:Record<string,string>, stampReceipt?:string|null, adoptionBlocked?:boolean, gatewayCapabilities?:{ruflo?:boolean,aqe?:boolean}, lazyCatalog?:boolean }} opts */
-export function syncAgents({
-  source, destDir = paths.opencodeAgentsDir(), dryRun = false, receipts = {}, stampReceipt = null,
-  adoptionBlocked = false, gatewayCapabilities = {}, lazyCatalog = false,
-}) {
-  if (!source) return { ok: false, changed: false, detail: 'no ruflo catalog source (marketplace clone or @claude-flow/cli) found' };
-  const receiptMap = receipts && typeof receipts === 'object' && !Array.isArray(receipts)
-    ? receipts
-    : {};
-  const { agents, scanned, skipped, renamed } = desiredAgentSet(
-    source, gatewayCapabilities, lazyCatalog,
-  );
-  if (!dryRun) fs.mkdirSync(destDir, { recursive: true });
-  let removed = 0, userOwned = 0, adopted = 0;
-  const removedFiles = new Set();
-  let written = 0;
+/** Write/adopt each desired agent file, skipping any user-owned collision.
+ *  Returns per-run counts plus the exact list of files actually deployed. */
+function deployDesiredAgents(agents, destDir, { dryRun, receiptMap, adoptionBlocked }) {
+  let userOwned = 0, adopted = 0, written = 0;
   const deployed = [];
   for (const a of agents) {
     const file = `${a.name}.md`;
@@ -1238,9 +1243,16 @@ export function syncAgents({
       if (!dryRun) fs.writeFileSync(p, a.content);
     }
   }
-  // Deploy/adopt the dispatcher or complete direct set before retiring any
-  // receipt-owned predecessor. A write failure therefore preserves the last
-  // known-good eager catalogue instead of leaving no executable agent path.
+  return { userOwned, adopted, written, deployed };
+}
+
+/** Remove receipt-owned generated agent files that are no longer desired.
+ *  Deploy/adopt the dispatcher or complete direct set BEFORE retiring any
+ *  receipt-owned predecessor. A write failure therefore preserves the last
+ *  known-good eager catalogue instead of leaving no executable agent path. */
+function retireStaleGeneratedAgents(destDir, agents, receiptMap, { dryRun, lazyCatalog, deployed }) {
+  let removed = 0;
+  const removedFiles = new Set();
   if ((!lazyCatalog || deployed.includes('ak-specialist.md')) && fs.existsSync(destDir)) {
     for (const f of fs.readdirSync(destDir).filter((f) => f.endsWith('.md'))) {
       const p = path.join(destDir, f);
@@ -1254,20 +1266,17 @@ export function syncAgents({
       }
     }
   }
-  const changed = written > 0 || removed > 0;
-  // The stamp records what was ACTUALLY deployed (a user-owned file occupying
-  // a slot is never in it) — otherwise status would diverge forever.
-  // Preserve a non-null mismatched receipt while its file still exists. If it
-  // were dropped, a later pass could mistake the resulting absence for a
-  // pre-receipts install and launder an edited file back into ak ownership.
-  const nextReceipts = Object.fromEntries(Object.entries(receiptMap).filter(([f]) => (
-    !removedFiles.has(f) && fs.existsSync(path.join(destDir, f))
-  )));
+  return { removed, removedFiles };
+}
+
+/** Compute + (when ownable) write the agent-set stamp file, returning the
+ *  per-file content hashes and the stamp's own receipt for the caller's
+ *  managed-artifacts ledger. */
+function writeAgentStamp({ destDir, dryRun, source, gatewayCapabilities, lazyCatalog, deployed, agents, stampReceipt, adoptionBlocked }) {
   const deployedHashes = Object.fromEntries(deployed.map((f) => {
     const agent = agents.find((a) => `${a.name}.md` === f);
     return [f, contentHash(agent.content)];
   }));
-  Object.assign(nextReceipts, deployedHashes);
   const gateway = { ruflo: !!gatewayCapabilities.ruflo, aqe: !!gatewayCapabilities.aqe };
   const stamp = {
     source: source.id, gateway, lazyCatalog: !!lazyCatalog,
@@ -1291,13 +1300,146 @@ export function syncAgents({
   if (!dryRun && mayWriteStamp && priorStampText !== stampText) {
     fs.writeFileSync(stampPath, stampText);
   }
+  return { deployedHashes, stampReceipt: mayWriteStamp ? contentHash(stampText) : stampReceipt };
+}
+
+/** Reconcile the converted agent set into the dest dir: rewrite generated
+ *  files, remove stale generated ones (either marker), NEVER overwrite a file
+ *  that carries no generated marker (a user-owned agent with a colliding name
+ *  is preserved and reported). The stamp records the source id + the exact
+ *  generated file list and is only rewritten when the set actually changed
+ *  (no per-run timestamp churn — idempotent-write semantics).
+ *  @param {{ source: CatalogSource|null, destDir?: string, dryRun?: boolean, receipts?:Record<string,string>, stampReceipt?:string|null, adoptionBlocked?:boolean, gatewayCapabilities?:{ruflo?:boolean,aqe?:boolean}, lazyCatalog?:boolean }} opts */
+export function syncAgents({
+  source, destDir = paths.opencodeAgentsDir(), dryRun = false, receipts = {}, stampReceipt = null,
+  adoptionBlocked = false, gatewayCapabilities = {}, lazyCatalog = false,
+}) {
+  if (!source) return { ok: false, changed: false, detail: 'no ruflo catalog source (marketplace clone or @claude-flow/cli) found' };
+  const receiptMap = asReceiptMap(receipts);
+  const { agents, scanned, skipped, renamed } = desiredAgentSet(
+    source, gatewayCapabilities, lazyCatalog,
+  );
+  if (!dryRun) fs.mkdirSync(destDir, { recursive: true });
+  const { userOwned, adopted, written, deployed } = deployDesiredAgents(
+    agents, destDir, { dryRun, receiptMap, adoptionBlocked },
+  );
+  const { removed, removedFiles } = retireStaleGeneratedAgents(
+    destDir, agents, receiptMap, { dryRun, lazyCatalog, deployed },
+  );
+  const changed = written > 0 || removed > 0;
+  // The stamp records what was ACTUALLY deployed (a user-owned file occupying
+  // a slot is never in it) — otherwise status would diverge forever.
+  // Preserve a non-null mismatched receipt while its file still exists. If it
+  // were dropped, a later pass could mistake the resulting absence for a
+  // pre-receipts install and launder an edited file back into ak ownership.
+  const nextReceipts = Object.fromEntries(Object.entries(receiptMap).filter(([f]) => (
+    !removedFiles.has(f) && fs.existsSync(path.join(destDir, f))
+  )));
+  const { deployedHashes, stampReceipt: nextStampReceipt } = writeAgentStamp({
+    destDir, dryRun, source, gatewayCapabilities, lazyCatalog, deployed, agents, stampReceipt, adoptionBlocked,
+  });
+  Object.assign(nextReceipts, deployedHashes);
   return {
     ok: !lazyCatalog || deployed.includes('ak-specialist.md'),
     changed,
     receipts: nextReceipts,
-    stampReceipt: mayWriteStamp ? contentHash(stampText) : stampReceipt,
+    stampReceipt: nextStampReceipt,
     adopted,
     detail: `${agents.length} ${lazyCatalog ? 'lazy dispatcher agent' : 'agents'} from ${source.id} (${written} written, ${removed} removed, ${skipped} skipped, ${renamed} collision-renamed${adopted ? `, ${adopted} adopted` : ''}${userOwned ? `, ${userOwned} user-owned preserved` : ''}; scanned ${scanned})`,
+  };
+}
+
+function readAgentStamp(destDir) {
+  const stampPath = path.join(destDir, STAMP_FILE);
+  return {
+    stamp: readJson(stampPath, null),
+    stampText: fs.existsSync(stampPath) ? fs.readFileSync(stampPath, 'utf8') : null,
+  };
+}
+
+function countGeneratedAgentFiles(destDir) {
+  if (!fs.existsSync(destDir)) return 0;
+  let count = 0;
+  for (const f of fs.readdirSync(destDir).filter((f) => f.endsWith('.md'))) {
+    try { if (isGeneratedContent(fs.readFileSync(path.join(destDir, f), 'utf8'))) count++; } catch { /* skip */ }
+  }
+  return count;
+}
+
+/** The on-disk generated (receipt-owned or adoptable) agent file list,
+ *  sorted. Adoptable files (exact marker-bearing desired bytes, no prior
+ *  receipt) are appended to `adoptableFiles` as a side effect. */
+function onDiskAgentFiles(destDir, desired, { hasReceiptLedger, receiptMap, adoptionBlocked, adoptableFiles }) {
+  if (!fs.existsSync(destDir)) return [];
+  return fs.readdirSync(destDir).filter((f) => {
+    if (!f.endsWith('.md')) return false;
+    try {
+      const text = fs.readFileSync(path.join(destDir, f), 'utf8');
+      if (hasReceiptLedger) {
+        const hasReceipt = adoptionBlocked || hasReceiptValue(receiptMap[f]);
+        const receiptOwned = receiptMatches(text, receiptMap[f]);
+        const adoptable = !hasReceipt && isGeneratedContent(text) && desired.get(f) === text;
+        if (adoptable) adoptableFiles.push(f);
+        return receiptOwned || adoptable;
+      }
+      return isGeneratedContent(text);
+    } catch { return false; }
+  }).sort();
+}
+
+function agentContentDiverged(destDir, onDisk, stamp) {
+  return !!stamp?.hashes && onDisk.some((f) => {
+    try { return contentHash(fs.readFileSync(path.join(destDir, f), 'utf8')) !== stamp.hashes[f]; } catch { return true; }
+  });
+}
+
+/** The stamp bytes syncAgents would write for today's on-disk generated set,
+ *  or null when there's no source or the on-disk set doesn't fully match
+ *  desired — used only for stamp-only adoption detection. */
+function expectedAgentStampText(source, onDisk, desired, gatewayCapabilities, lazyCatalog) {
+  if (!source || onDisk.length === 0 || !onDisk.every((f) => desired.has(f))) return null;
+  return `${JSON.stringify({
+    source: source.id,
+    gateway: { ruflo: !!gatewayCapabilities.ruflo, aqe: !!gatewayCapabilities.aqe },
+    lazyCatalog: !!lazyCatalog,
+    count: onDisk.length,
+    files: onDisk,
+    // syncAgents hashes in converter declaration order, then sorts only
+    // the separate files list. Preserve that byte order for exact
+    // stamp-only adoption detection.
+    hashes: Object.fromEntries([...desired.entries()]
+      .filter(([f]) => onDisk.includes(f))
+      .map(([f, text]) => [f, contentHash(text)])),
+  }, null, 2)}\n`;
+}
+
+function agentReceiptDivergence(destDir, receiptMap) {
+  if (!fs.existsSync(destDir)) return false;
+  return fs.readdirSync(destDir).filter((f) => f.endsWith('.md')).some((f) => {
+    try {
+      return hasReceiptValue(receiptMap[f])
+        && !receiptMatches(fs.readFileSync(path.join(destDir, f), 'utf8'), receiptMap[f]);
+    } catch { return true; }
+  });
+}
+
+/** Assemble agentsStatus's final result object from its computed signals. */
+function agentsStatusResult({
+  generatedCount, stamp, source, adoptionBlocked, adoptableFiles, stampAdoptable,
+  contentDiverged, hasReceiptLedger, destDir, receiptMap, filesDiverged, lazyCatalog, gatewayCapabilities,
+}) {
+  return {
+    count: generatedCount,
+    stampedId: stamp?.source ?? null,
+    currentId: source?.id ?? null,
+    adoptable: !adoptionBlocked && (adoptableFiles.length > 0 || stampAdoptable),
+    adoptionBlocked,
+    modified: contentDiverged || (hasReceiptLedger && agentReceiptDivergence(destDir, receiptMap)),
+    stale: !stamp || stamp.source !== (source?.id ?? null) || filesDiverged
+      || !!stamp.lazyCatalog !== !!lazyCatalog
+      || !deepEqual(stamp.gateway ?? { ruflo: false, aqe: false }, {
+        ruflo: !!gatewayCapabilities.ruflo, aqe: !!gatewayCapabilities.aqe,
+      }),
   };
 }
 
@@ -1311,81 +1453,26 @@ export function agentsStatus({
   source, destDir = paths.opencodeAgentsDir(), receipts = null, stampReceipt = null,
   adoptionBlocked = false, gatewayCapabilities = {}, lazyCatalog = false,
 } = {}) {
-  const stampPath = path.join(destDir, STAMP_FILE);
-  const stamp = readJson(stampPath, null);
-  const stampText = fs.existsSync(stampPath) ? fs.readFileSync(stampPath, 'utf8') : null;
+  const { stamp, stampText } = readAgentStamp(destDir);
   const hasReceiptLedger = receipts !== null;
-  const receiptMap = receipts && typeof receipts === 'object' && !Array.isArray(receipts)
-    ? receipts
-    : {};
+  const receiptMap = asReceiptMap(receipts);
   const desired = source
     ? new Map(desiredAgentSet(source, gatewayCapabilities, lazyCatalog)
       .agents.map((a) => [`${a.name}.md`, a.content]))
     : new Map();
+  const generatedCount = countGeneratedAgentFiles(destDir);
   const adoptableFiles = [];
-  let generatedCount = 0;
-  if (fs.existsSync(destDir)) {
-    for (const f of fs.readdirSync(destDir).filter((f) => f.endsWith('.md'))) {
-      try { if (isGeneratedContent(fs.readFileSync(path.join(destDir, f), 'utf8'))) generatedCount++; } catch { /* skip */ }
-    }
-  }
-  const onDisk = fs.existsSync(destDir)
-    ? fs.readdirSync(destDir).filter((f) => {
-        if (!f.endsWith('.md')) return false;
-        try {
-          const text = fs.readFileSync(path.join(destDir, f), 'utf8');
-          if (hasReceiptLedger) {
-            const hasReceipt = adoptionBlocked || hasReceiptValue(receiptMap[f]);
-            const receiptOwned = receiptMatches(text, receiptMap[f]);
-            const adoptable = !hasReceipt && isGeneratedContent(text) && desired.get(f) === text;
-            if (adoptable) adoptableFiles.push(f);
-            return receiptOwned || adoptable;
-          }
-          return isGeneratedContent(text);
-        } catch { return false; }
-      }).sort()
-    : [];
+  const onDisk = onDiskAgentFiles(destDir, desired, { hasReceiptLedger, receiptMap, adoptionBlocked, adoptableFiles });
   const stampFiles = Array.isArray(stamp?.files) ? [...stamp.files].sort() : null;
   const filesDiverged = stampFiles != null && JSON.stringify(stampFiles) !== JSON.stringify(onDisk);
-  const contentDiverged = !!stamp?.hashes && onDisk.some((f) => {
-    try { return contentHash(fs.readFileSync(path.join(destDir, f), 'utf8')) !== stamp.hashes[f]; } catch { return true; }
-  });
-  const expectedStamp = source && onDisk.length > 0 && onDisk.every((f) => desired.has(f))
-    ? `${JSON.stringify({
-      source: source.id,
-      gateway: { ruflo: !!gatewayCapabilities.ruflo, aqe: !!gatewayCapabilities.aqe },
-        lazyCatalog: !!lazyCatalog,
-        count: onDisk.length,
-        files: onDisk,
-        // syncAgents hashes in converter declaration order, then sorts only
-        // the separate files list. Preserve that byte order for exact
-        // stamp-only adoption detection.
-        hashes: Object.fromEntries([...desired.entries()]
-          .filter(([f]) => onDisk.includes(f))
-          .map(([f, text]) => [f, contentHash(text)])),
-      }, null, 2)}\n`
-    : null;
+  const contentDiverged = agentContentDiverged(destDir, onDisk, stamp);
+  const expectedStamp = expectedAgentStampText(source, onDisk, desired, gatewayCapabilities, lazyCatalog);
   const stampAdoptable = hasReceiptLedger && !adoptionBlocked && !hasReceiptValue(stampReceipt)
     && expectedStamp !== null && stampText === expectedStamp;
-  return {
-    count: generatedCount,
-    stampedId: stamp?.source ?? null,
-    currentId: source?.id ?? null,
-    adoptable: !adoptionBlocked && (adoptableFiles.length > 0 || stampAdoptable),
-    adoptionBlocked,
-    modified: contentDiverged || (hasReceiptLedger && fs.existsSync(destDir)
-      && fs.readdirSync(destDir).filter((f) => f.endsWith('.md')).some((f) => {
-        try {
-          return hasReceiptValue(receiptMap[f])
-            && !receiptMatches(fs.readFileSync(path.join(destDir, f), 'utf8'), receiptMap[f]);
-        } catch { return true; }
-      })),
-    stale: !stamp || stamp.source !== (source?.id ?? null) || filesDiverged
-      || !!stamp.lazyCatalog !== !!lazyCatalog
-      || !deepEqual(stamp.gateway ?? { ruflo: false, aqe: false }, {
-        ruflo: !!gatewayCapabilities.ruflo, aqe: !!gatewayCapabilities.aqe,
-      }),
-  };
+  return agentsStatusResult({
+    generatedCount, stamp, source, adoptionBlocked, adoptableFiles, stampAdoptable,
+    contentDiverged, hasReceiptLedger, destDir, receiptMap, filesDiverged, lazyCatalog, gatewayCapabilities,
+  });
 }
 
 // ── plugin (lifecycle bridge) ────────────────────────────────────────────────
