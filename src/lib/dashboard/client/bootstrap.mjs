@@ -169,12 +169,11 @@ import { loadUsage } from './usage.mjs';
     }
     if(!skipHash&&activeTab==="system")syncHash();
   }
-  export function setTab(id,focus,skipHash){
-    if(TABS.indexOf(id)<0)return;
-    if(activeTab==="observability"&&id!=="observability"&&window.AKLive)window.AKLive.deactivate();
-    activeTab=id;
-    try{localStorage.setItem(LS_TAB,id);}catch(e){}
-    if(!skipHash)syncHash();
+  // setTab was one CC-26 function mixing lazy per-tab data loads, the tab
+  // button/area/secondary-rail paint loop, and sub-view/scroll bookkeeping.
+  // Split the first two out (same call order as before); each keeps its
+  // original logic verbatim, so behavior is unchanged.
+  function tabLazyLoad(id){
     // Usage is LAZY (ADR-0009 §2): the index is only read once the tab is
     // actually opened, never on the shared status poll.
     if(id==="usage"&&!usageLoaded)loadUsage();
@@ -183,6 +182,9 @@ import { loadUsage } from './usage.mjs';
     // tier only (ADR-0025 §3). It never triggers a deep scan — a multi-second
     // walk on tab-open is exactly the hang the tiering exists to prevent.
     if(id==="system"&&!SYSTEM&&!systemBusy)loadSystem();
+  }
+
+  function paintTabButtons(id,focus){
     for(var i=0;i<TABS.length;i++){
       var t=TABS[i], on=(t===id);
       var btn=document.querySelector('[data-tab="'+t+'"]');
@@ -192,6 +194,16 @@ import { loadUsage } from './usage.mjs';
       var secondary=document.getElementById("secondary-"+t);
       if(secondary)secondary.hidden=!on;
     }
+  }
+
+  export function setTab(id,focus,skipHash){
+    if(TABS.indexOf(id)<0)return;
+    if(activeTab==="observability"&&id!=="observability"&&window.AKLive)window.AKLive.deactivate();
+    activeTab=id;
+    try{localStorage.setItem(LS_TAB,id);}catch(e){}
+    if(!skipHash)syncHash();
+    tabLazyLoad(id);
+    paintTabButtons(id,focus);
     if(id==="overview")setOverviewView(overviewView,false,true);
     if(id==="system")setSystemView(systemView,false,true);
     // Deliberately NOT scrolling here: at boot this runs before the directory

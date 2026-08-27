@@ -124,11 +124,13 @@ import { fmtNum } from './usage.mjs';
   }
   function flat(msg){return '<div class="empty" style="padding:14px 0">'+esc(msg)+"</div>";}
 
-  export function renderHistory(data){
-    var strip=document.getElementById("history");
-    var note=document.getElementById("strip-note");
-    var series=[];
-    if(data.health&&data.health.length){series=data.health;}
+  // renderHistory was one CC-63 function mixing four independent data-shaping
+  // computations (patterns/deltas, pattern-store series, graph series, curve
+  // values -- each dense with ternaries/&&/||, which is what drove the count)
+  // with five independent sparkline renders. Split by concern; every
+  // computation and every render keeps its original logic verbatim, so the
+  // rendered DOM is unchanged.
+  function historySeriesAndDeltas(data,series){
     var pats=[],deltas=[];
     for(var i=0;i<series.length;i++){
       var s=series[i];
@@ -139,6 +141,10 @@ import { fmtNum } from './usage.mjs';
     // fall back to a single improvement snapshot for the Δpp spark
     if(!deltas.length&&data.improvement&&typeof data.improvement.deltaPP==="number"){deltas=[data.improvement.deltaPP];}
 
+    return {pats:pats,deltas:deltas};
+  }
+
+  function historyPatternStoreSeries(data){
     // ── neural pattern store: entries CURRENTLY on disk
     // (.claude-flow/neural/patterns.json), shipped un-bucketed — bucketed and
     // summed by day-of-creation here. A point-in-time inventory of the
@@ -156,6 +162,10 @@ import { fmtNum } from './usage.mjs';
     var storeSeries=[],storeTotal=0;
     for(var d=0;d<days.length;d++){storeTotal+=byDay[days[d]];storeSeries.push(storeTotal);}
 
+    return {storeSeries:storeSeries,storeTotal:storeTotal};
+  }
+
+  function historyGraphSeries(data){
     // ── reasoning graph: point-in-time size samples
     // (.claude-flow/data/intelligence-snapshot.json) — a structural-growth
     // series independent of the pattern-count metrics above.
@@ -163,12 +173,62 @@ import { fmtNum } from './usage.mjs';
     var nodesSeries=graphArr.map(function(g){return Number(g&&g.nodes)||0;});
     var lastGraph=graphArr.length?graphArr[graphArr.length-1]:null;
 
-    // ── improvement eval: within-run learning curve (cold→warm accuracy at
-    // each k-step checkpoint) — a different view of the SAME eval run the
-    // Δpp scalar below summarizes; this is the trajectory that produced it.
-    var imp=data.improvement||null;
+    return {nodesSeries:nodesSeries,lastGraph:lastGraph};
+  }
+
+  function historyCurveValues(imp){
     var curveArr=(imp&&Array.isArray(imp.curve))?imp.curve:[];
     var curveVals=curveArr.map(function(c){return Number(c&&c.acc)||0;});
+    return curveVals;
+  }
+
+  function renderPatternsSpark(pats){
+    document.getElementById("spark-patterns").innerHTML=pats.length>1?sparkline(pats):flat(pats.length?String(pats[0])+" (one sample)":"no data");
+  }
+
+  function renderPatternStoreSpark(storeSeries,storeTotal){
+    document.getElementById("spark-pattern-store").innerHTML=storeSeries.length>1?sparkline(storeSeries):flat(storeSeries.length?String(storeTotal)+" entries (one day)":"no data");
+  }
+
+  function renderGraphSpark(nodesSeries,lastGraph){
+    document.getElementById("spark-graph").innerHTML=nodesSeries.length>1?sparkline(nodesSeries):flat(nodesSeries.length?String(nodesSeries[0])+" nodes (one sample)":"no data");
+    var graphMeta=document.getElementById("graph-meta");
+    if(graphMeta)graphMeta.textContent=lastGraph?("latest: "+fmtNum(lastGraph.nodes)+" nodes · "+fmtNum(lastGraph.edges)+" edges"):"";
+  }
+
+  function renderDeltaSpark(deltas,imp){
+    document.getElementById("spark-delta").innerHTML=deltas.length>1?sparkline(deltas):flat(deltas.length?(deltas[0]>=0?"+":"")+deltas[0]+"pp (one sample)":"no data");
+    var deltaMeta=document.getElementById("delta-meta");
+    if(deltaMeta){
+      var verdict=imp&&typeof imp.verdict==="string"?imp.verdict:null;
+      var pVal=imp&&typeof imp.pValue==="number"?imp.pValue:null;
+      var dVal=imp&&typeof imp.cohensD==="number"?imp.cohensD:null;
+      if(!verdict&&pVal==null&&dVal==null){deltaMeta.hidden=true;deltaMeta.innerHTML="";}
+      else{
+        var lvl=verdict==="PASS"?"ok":"warn";
+        var pTxt=pVal==null?"—":(pVal<0.001?"<.001":"="+pVal);
+        var dTxt=dVal==null?"—":dVal.toFixed(2);
+        deltaMeta.hidden=false;
+        deltaMeta.innerHTML=(verdict?'<span class="pill" data-level="'+lvl+'"><span class="dot" data-level="'+lvl+'"></span><b>'+esc(verdict)+"</b></span>":"")
+          +'<span class="mono" style="margin-left:8px;color:var(--ink-dim)">p'+esc(pTxt)+" · d="+esc(dTxt)+"</span>";
+      }
+    }
+  }
+
+  function renderCurveSpark(curveVals){
+    document.getElementById("spark-curve").innerHTML=curveVals.length>1?sparkline(curveVals):flat(curveVals.length?(curveVals[0]*100).toFixed(0)+"% (one sample)":"no data");
+  }
+
+  export function renderHistory(data){
+    var strip=document.getElementById("history");
+    var note=document.getElementById("strip-note");
+    var series=[];
+    if(data.health&&data.health.length){series=data.health;}
+    var sd=historySeriesAndDeltas(data,series),pats=sd.pats,deltas=sd.deltas;
+    var ps=historyPatternStoreSeries(data),storeSeries=ps.storeSeries,storeTotal=ps.storeTotal;
+    var gs=historyGraphSeries(data),nodesSeries=gs.nodesSeries,lastGraph=gs.lastGraph;
+    var imp=data.improvement||null;
+    var curveVals=historyCurveValues(imp);
 
     // The project PICKER lives in this strip's head, so the strip itself must
     // stay visible even when the selected project has nothing to chart —
@@ -186,31 +246,10 @@ import { fmtNum } from './usage.mjs';
     if(nothing){note.textContent="";return;}
     note.textContent=(series.length?series.length+" samples":"snapshot")+(intelSource?" · live":"");
 
-    document.getElementById("spark-patterns").innerHTML=pats.length>1?sparkline(pats):flat(pats.length?String(pats[0])+" (one sample)":"no data");
-
-    document.getElementById("spark-pattern-store").innerHTML=storeSeries.length>1?sparkline(storeSeries):flat(storeSeries.length?String(storeTotal)+" entries (one day)":"no data");
-
-    document.getElementById("spark-graph").innerHTML=nodesSeries.length>1?sparkline(nodesSeries):flat(nodesSeries.length?String(nodesSeries[0])+" nodes (one sample)":"no data");
-    var graphMeta=document.getElementById("graph-meta");
-    if(graphMeta)graphMeta.textContent=lastGraph?("latest: "+fmtNum(lastGraph.nodes)+" nodes · "+fmtNum(lastGraph.edges)+" edges"):"";
-
-    document.getElementById("spark-delta").innerHTML=deltas.length>1?sparkline(deltas):flat(deltas.length?(deltas[0]>=0?"+":"")+deltas[0]+"pp (one sample)":"no data");
-    var deltaMeta=document.getElementById("delta-meta");
-    if(deltaMeta){
-      var verdict=imp&&typeof imp.verdict==="string"?imp.verdict:null;
-      var pVal=imp&&typeof imp.pValue==="number"?imp.pValue:null;
-      var dVal=imp&&typeof imp.cohensD==="number"?imp.cohensD:null;
-      if(!verdict&&pVal==null&&dVal==null){deltaMeta.hidden=true;deltaMeta.innerHTML="";}
-      else{
-        var lvl=verdict==="PASS"?"ok":"warn";
-        var pTxt=pVal==null?"—":(pVal<0.001?"<.001":"="+pVal);
-        var dTxt=dVal==null?"—":dVal.toFixed(2);
-        deltaMeta.hidden=false;
-        deltaMeta.innerHTML=(verdict?'<span class="pill" data-level="'+lvl+'"><span class="dot" data-level="'+lvl+'"></span><b>'+esc(verdict)+"</b></span>":"")
-          +'<span class="mono" style="margin-left:8px;color:var(--ink-dim)">p'+esc(pTxt)+" · d="+esc(dTxt)+"</span>";
-      }
-    }
-
-    document.getElementById("spark-curve").innerHTML=curveVals.length>1?sparkline(curveVals):flat(curveVals.length?(curveVals[0]*100).toFixed(0)+"% (one sample)":"no data");
+    renderPatternsSpark(pats);
+    renderPatternStoreSpark(storeSeries,storeTotal);
+    renderGraphSpark(nodesSeries,lastGraph);
+    renderDeltaSpark(deltas,imp);
+    renderCurveSpark(curveVals);
   }
 

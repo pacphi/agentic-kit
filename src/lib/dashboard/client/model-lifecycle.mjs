@@ -161,7 +161,7 @@ import { MODEL_PAGE, fmtNum, modelFilters, modelRows, modelsBusy } from './usage
   function mliRouteValue(binding,field){
     if(field==="model")return binding.modelName||binding.selector||binding.configured||null;
     if(field==="provider")return binding.modelProvider||binding.provider||null;
-    if(field==="used")return (binding.activity||"")+" "+(binding.role||"");
+    if(field==="used")return (binding.activity||"")+" "+(binding.role||"");
     if(field==="lastUsed"){
       var when=Date.parse(String(binding.lastUsed||""));return Number.isFinite(when)?when:null;
     }
@@ -214,10 +214,13 @@ import { MODEL_PAGE, fmtNum, modelFilters, modelRows, modelsBusy } from './usage
     }).join('')||'<tr><td colspan="5"><div class="empty">No model use was observed in this window. This does not mean no models are installed or available.</div></td></tr>';
   }
 
-  export function mliDetail(model){
-    var detail=document.getElementById('mli-detail'),body=document.getElementById('mli-detail-body'),title=document.getElementById('mli-detail-title');
-    if(!detail||!body||!title||!model)return;
-    var id=mliIdentity(model),life=model.lifecycle||{},variants=model.variant||{},dimensions=model.dimensions||{},observed=dimensions.observed||{};
+  // mliDetail was one CC-44 function computing several dense ternary-chain
+  // text fields (published/access/routable/next-step status text, the
+  // lifecycle-scope/availability/retirement fields, and the ollama-only
+  // "local install" block) and then building the whole detail-panel DOM in
+  // one shot. Split the pure text/HTML computations out; each keeps its
+  // original logic verbatim, so the rendered DOM is unchanged.
+  function mliDetailStatusText(dimensions){
     var published=dimensions.discoverable||{},entitled=dimensions.entitled||{},routable=dimensions.routable||{},configured=dimensions.configured||{};
     var publishedText=published.value===true?'Published by an accepted source':published.value===false?'Not published by the accepted source':'Not established';
     var accessText=entitled.value===true?'Established for the observed account and path':entitled.value===false?'Not entitled in the accepted evidence':'Not established; public metadata is not account access';
@@ -225,26 +228,43 @@ import { MODEL_PAGE, fmtNum, modelFilters, modelRows, modelsBusy } from './usage
     var nextStep=routable.value===true?'No evidence step needed; this exact path was observed working at capture time.'
       :(configured.value===true?'Complete one successful invocation on this exact path, then run ak models refresh.'
         :'Configure the exact model on an intended route, authenticate its serving provider, complete one successful invocation, then run ak models refresh.');
+    return {publishedText:publishedText,accessText:accessText,routableText:routableText,nextStep:nextStep};
+  }
+
+  function mliDetailVariantFields(variants){
     var lifecycleScope=variants.lifecycleScope?'<div><dt>Lifecycle scope</dt><dd>'+esc(variants.lifecycleScope)+'</dd></div>':'';
     var availability=variants.availability?'<div><dt>Published availability</dt><dd>'+esc(variants.availability)+'</dd></div>':'';
     var retirement=variants.retiredAt?'<div><dt>Retired</dt><dd>'+esc(variants.retiredAt)+'</dd></div>'
       :(variants.retirementNotBefore?'<div><dt>Retirement commitment</dt><dd>Not before '+esc(variants.retirementNotBefore)+'</dd></div>':'');
-    var local=id.provider==='ollama'?'<div><dt>Local installation</dt><dd>Installed'+(variants.modifiedAt?' · updated '+esc(variants.modifiedAt):'')+'</dd></div>'
+    return {lifecycleScope:lifecycleScope,availability:availability,retirement:retirement};
+  }
+
+  function mliDetailLocalBlock(id,variants){
+    return id.provider==='ollama'?'<div><dt>Local installation</dt><dd>Installed'+(variants.modifiedAt?' · updated '+esc(variants.modifiedAt):'')+'</dd></div>'
       +'<div><dt>Loaded now</dt><dd>'+esc(variants.loaded?'Yes':'No')+(variants.expiresAt?' · expires '+esc(variants.expiresAt):'')+'</dd></div>'
       +'<div><dt>Local model build</dt><dd>'+esc([variants.parameterSize,variants.quantizationLevel,variants.format].filter(Boolean).join(' · ')||'Not exposed')+'</dd></div>'
       +'<div><dt>Local memory</dt><dd>'+esc(variants.memoryBytes!=null?fmtBytes(variants.memoryBytes)+(variants.vramBytes!=null?' · VRAM '+fmtBytes(variants.vramBytes):''):'Not loaded')+'</dd></div>':'';
+  }
+
+  export function mliDetail(model){
+    var detail=document.getElementById('mli-detail'),body=document.getElementById('mli-detail-body'),title=document.getElementById('mli-detail-title');
+    if(!detail||!body||!title||!model)return;
+    var id=mliIdentity(model),life=model.lifecycle||{},variants=model.variant||{},dimensions=model.dimensions||{},observed=dimensions.observed||{};
+    var status=mliDetailStatusText(dimensions);
+    var fields=mliDetailVariantFields(variants);
+    var local=mliDetailLocalBlock(id,variants);
     title.textContent=id.name;
     body.innerHTML='<dl class="mli-detail-grid">'
       +'<div><dt>Exact selector</dt><dd>'+esc(id.selector||'Not recorded')+'</dd></div>'
       +'<div><dt>Model provider</dt><dd>'+esc(id.provider||'Not recorded')+'</dd></div>'
       +'<div><dt>Publisher</dt><dd>'+esc(id.publisher||'Not independently proven')+'</dd></div>'
       +'<div><dt>Lifecycle</dt><dd>'+esc(life.state||'unknown')+(life.replacementName?' → '+esc(life.replacementName):'')+'</dd></div>'
-      +lifecycleScope+availability+retirement
+      +fields.lifecycleScope+fields.availability+fields.retirement
       +'<div><dt>Observed use</dt><dd>'+esc(observed&&observed.value===true?'Observed locally':'Not observed')+'</dd></div>'
-      +'<div><dt>Published / discovered</dt><dd>'+esc(publishedText)+'</dd></div>'
-      +'<div><dt>Account access</dt><dd>'+esc(accessText)+'</dd></div>'
-      +'<div><dt>Local routability</dt><dd>'+esc(routableText)+'</dd></div>'
-      +'<div><dt>What you need to do</dt><dd>'+esc(nextStep)+'</dd></div>'
+      +'<div><dt>Published / discovered</dt><dd>'+esc(status.publishedText)+'</dd></div>'
+      +'<div><dt>Account access</dt><dd>'+esc(status.accessText)+'</dd></div>'
+      +'<div><dt>Local routability</dt><dd>'+esc(status.routableText)+'</dd></div>'
+      +'<div><dt>What you need to do</dt><dd>'+esc(status.nextStep)+'</dd></div>'
       +'<div><dt>Context limit</dt><dd>'+esc(variants.contextWindow||model.capabilities&&model.capabilities.contextLimit||'Not established by accepted sources')+'</dd></div>'
       +'<div><dt>Capabilities</dt><dd>'+esc(mliCapabilities(model))+'</dd></div>'
       +'<div><dt>API rate / plan use</dt><dd>'+mliPrice(model.pricing,id.host)+'</dd></div>'
@@ -339,13 +359,17 @@ import { MODEL_PAGE, fmtNum, modelFilters, modelRows, modelsBusy } from './usage
     }
   }
 
-  export function renderModelLifecycle(){
-    if(!MODELS)return;
-    var empty=MODELS.error||MODELS.status==="empty"||!MODELS.snapshot;
-    var snap=MODELS.snapshot||{},attention=snap.attention||[],bindings=snap.bindings||[];
+  // renderModelLifecycle was one CC-27 function writing to ~10 unrelated DOM
+  // targets (badge/asof, attention list, routes+observed, history, consumers+
+  // impact) in sequence. Split by target group; each keeps its original logic
+  // verbatim, so the rendered DOM and its ordering are unchanged.
+  function mliRenderBadgeAndAsof(empty,snap,attention){
     var badge=document.getElementById("mli-attention-n");
     if(badge){badge.hidden=!attention.length;badge.textContent=attention.length?String(attention.length):"";}
     document.getElementById("mli-asof").textContent=empty?"not captured":("captured "+String(snap.capturedAt||"").replace("T"," ").replace(".000Z","Z"));
+  }
+
+  function mliRenderAttention(empty,attention){
     document.getElementById("mli-attention").innerHTML=empty
       ?'<div class="empty">'+esc(MODELS.error||"No model inventory yet. Run ak models refresh explicitly.")+"</div>"
       :attention.map(function(item){
@@ -360,22 +384,42 @@ import { MODEL_PAGE, fmtNum, modelFilters, modelRows, modelsBusy } from './usage
           : '<span>'+esc(item.reason||'Evidence needs review')+'. Run <span class="mono">ak models refresh --all</span> for current evidence.</span>';
         return '<div class="mli-alert" data-level="'+esc(item.severity||"warn")+'"><b>'+esc(title)+'</b><br>'+detail+'</div>';
       }).join("");
+  }
+
+  function mliRenderRoutesAndObserved(bindings){
     document.getElementById('mli-routes').innerHTML=mliRouteRows(bindings);
     var observed=MODELS.observedWindow||{days:usageDays,models:[]};
     document.getElementById('mli-observed').innerHTML=mliObservedRows(observed);
     document.getElementById('mli-observed-note').textContent=observed.status==='unavailable'
       ? String(observed.days||usageDays)+' days · use unavailable'
       : String(observed.days||usageDays)+' days · '+String((observed.models||[]).length)+' model'+((observed.models||[]).length===1?'':'s');
-    renderModelRouteSort();
-    renderModelInventory();
+  }
+
+  function mliRenderHistory(snap){
     var changes=snap.changes||[];
     var snapshotCount=(MODELS.history||[]).length;
     document.getElementById("mli-history-note").textContent=changes.length+" change"+(changes.length===1?"":"s")+' · '+snapshotCount+" retained snapshot"+(snapshotCount===1?"":"s");
     document.getElementById("mli-history").innerHTML=mliChangeRows(changes);
+  }
+
+  function mliRenderConsumersAndImpact(bindings){
     var routeBindings=bindings.filter(function(binding){return binding.role&&binding.role!=="Configured consumer";});
     document.getElementById("mli-consumers").innerHTML='<div class="mli-consumer-scroll"><div class="mli-list">'+(routeBindings.map(function(binding){var model=binding.modelName||binding.configured||'Model not pinned';return '<div class="mli-row"><span><b>'+esc(binding.consumer)+'</b><br><small>'+esc(model)+' · '+esc(mliProviderName(binding.modelProvider||binding.provider))+'</small></span><small>'+esc(binding.lastUsed?'last used '+String(binding.lastUsed).replace('T',' ').replace('.000Z','Z'):'not observed in this window')+'</small></div>';}).join("")||'<div class="empty">No configured model routes.</div>')+"</div></div>";
     document.getElementById("mli-impact").innerHTML=routeBindings.length
       ?'<div class="note"><span class="i">→</span><span><b>'+routeBindings.length+' route consumer'+(routeBindings.length===1?"":"s")+'</b> may be affected by a concrete model swap. Run <span class="mono">ak models plan --activity ACTIVITY --to HOST:MODEL</span> for evidence-backed compatibility and a copyable action.</span></div>'
       :'<div class="empty">No bound consumers to assess. A plan will remain read-only and report the missing binding.</div>';
+  }
+
+  export function renderModelLifecycle(){
+    if(!MODELS)return;
+    var empty=MODELS.error||MODELS.status==="empty"||!MODELS.snapshot;
+    var snap=MODELS.snapshot||{},attention=snap.attention||[],bindings=snap.bindings||[];
+    mliRenderBadgeAndAsof(empty,snap,attention);
+    mliRenderAttention(empty,attention);
+    mliRenderRoutesAndObserved(bindings);
+    renderModelRouteSort();
+    renderModelInventory();
+    mliRenderHistory(snap);
+    mliRenderConsumersAndImpact(bindings);
   }
 

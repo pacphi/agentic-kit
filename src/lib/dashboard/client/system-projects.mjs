@@ -12,10 +12,14 @@ import { fmtNum, fmtTok, limAge, pct } from './usage.mjs';
   // for in the panel's footnote rather than dropped silently.
   var REAL_HOSTS={claude:true,codex:true,opencode:true};
 
-  function renderSysStorage(d){
-    var s=d.storage,i,j;
-
-    // ── learning stores, lifted out of the shared charts ──
+  // renderSysStorage was one CC-88 function mixing five independent DOM
+  // regions (learning stores, donut, per-host split, growth sparks, top
+  // sessions) plus a call into renderSysReclaim. Split one function per
+  // region -- each keeps its own element-null guard and reads straight off
+  // the storage payload `s`, so the rendered DOM is unchanged; only the
+  // per-region branching no longer inflates one shared complexity count.
+  function renderSysLearning(s){
+    var i;
     var learn=document.getElementById("sys-learning");
     if(learn){
       if(!s){learn.innerHTML=sysEmpty(NOT_SCANNED);}
@@ -39,6 +43,10 @@ import { fmtNum, fmtTok, limAge, pct } from './usage.mjs';
       }
     }
 
+  }
+
+  function renderSysDonut(s){
+    var i;
     var donut=document.getElementById("sys-donut");
     if(donut){
       if(!s){donut.innerHTML=sysEmpty(NOT_SCANNED);}
@@ -62,61 +70,66 @@ import { fmtNum, fmtTok, limAge, pct } from './usage.mjs';
           :sysEmpty("no storage category could be measured.");
       }
     }
+  }
+
+  function renderSysHostSplit(s){
+    var i,j;
     var split=document.getElementById("sys-hostsplit");
-    if(split){
-      if(!s){split.innerHTML=sysEmpty(NOT_SCANNED);}
-      else{
-        var byHost={},order=[],cats=s.categories||[],otherBytes=0,otherKeys={};
-        for(i=0;i<cats.length;i++){
-          var kids=cats[i].children||[];
-          for(j=0;j<kids.length;j++){
-            var b=mval(kids[j].bytes);
-            if(b==null)continue;
-            // Everything not a real host is summed into the footnote instead of
-            // being dropped: the panel must still account for the whole donut.
-            if(!REAL_HOSTS[kids[j].key]){
-              if(!CHART_EXCLUDED_CATEGORIES[cats[i].key]){otherBytes+=b;otherKeys[kids[j].key]=true;}
-              continue;
-            }
-            if(CHART_EXCLUDED_CATEGORIES[cats[i].key])continue;
-            if(!byHost[kids[j].key]){byHost[kids[j].key]={key:kids[j].key,parts:[],total:0};order.push(kids[j].key);}
-            byHost[kids[j].key].parts.push({color:catColor(cats[i].key),bytes:b,
-              label:kids[j].key+" \u00b7 "+cats[i].label+" "+fmtBytes(b)});
-            byHost[kids[j].key].total+=b;
-          }
+    if(!split)return;
+    if(!s){split.innerHTML=sysEmpty(NOT_SCANNED);return;}
+    var byHost={},order=[],cats=s.categories||[],otherBytes=0,otherKeys={};
+    for(i=0;i<cats.length;i++){
+      var kids=cats[i].children||[];
+      for(j=0;j<kids.length;j++){
+        var b=mval(kids[j].bytes);
+        if(b==null)continue;
+        // Everything not a real host is summed into the footnote instead of
+        // being dropped: the panel must still account for the whole donut.
+        if(!REAL_HOSTS[kids[j].key]){
+          if(!CHART_EXCLUDED_CATEGORIES[cats[i].key]){otherBytes+=b;otherKeys[kids[j].key]=true;}
+          continue;
         }
-        order.sort(function(a,b2){return byHost[b2].total-byHost[a].total;});
-        var scale=order.length?byHost[order[0]].total:0,rowsHtml="";
-        for(i=0;i<order.length;i++){
-          var row=byHost[order[i]],seg="";
-          for(j=0;j<row.parts.length;j++){
-            seg+='<i class="sy-fill" style="width:'+(scale>0?(row.parts[j].bytes/scale)*100:0).toFixed(2)
-              +"%;background:"+row.parts[j].color+'" title="'+esc(row.parts[j].label)+'"></i>';
-          }
-          rowsHtml+='<div class="sy-bar"><span class="n">'+esc(row.key)+"</span>"
-            +'<div class="sy-track tall">'+seg+"</div>"
-            +'<span class="v">'+esc(fmtBytes(row.total))+"</span></div>";
-        }
-        var catLegend="";
-        for(i=0;i<cats.length;i++){
-          if(CHART_EXCLUDED_CATEGORIES[cats[i].key])continue;
-          catLegend+='<span><i style="background:'+catColor(cats[i].key)+'"></i>'+esc(cats[i].label)+"</span>";
-        }
-        // Name what is NOT in the rows, with its figure. Dropping the non-host
-        // rows silently would leave the bars failing to add up to the donut
-        // beside them, with nothing on screen explaining the gap.
-        var otherNames=[];
-        for(var ok in otherKeys)if(Object.prototype.hasOwnProperty.call(otherKeys,ok))otherNames.push(ok);
-        otherNames.sort();
-        var footnote=otherNames.length
-          ?'<p class="sy-liner">Hosts only. A further <b>'+esc(fmtBytes(otherBytes))+"</b> belongs to "
-            +esc(otherNames.join(" and "))+" &mdash; ak's own state, not a host's. Learning stores are on their own card.</p>"
-          :'<p class="sy-liner">Learning stores are on their own card, not counted here.</p>';
-        split.innerHTML=order.length
-          ?('<div class="sy-bars">'+rowsHtml+'</div><div class="sy-legend" style="margin-top:10px">'+catLegend+"</div>"+footnote)
-          :sysEmpty("no per-host storage node could be measured.");
+        if(CHART_EXCLUDED_CATEGORIES[cats[i].key])continue;
+        if(!byHost[kids[j].key]){byHost[kids[j].key]={key:kids[j].key,parts:[],total:0};order.push(kids[j].key);}
+        byHost[kids[j].key].parts.push({color:catColor(cats[i].key),bytes:b,
+          label:kids[j].key+" \u00b7 "+cats[i].label+" "+fmtBytes(b)});
+        byHost[kids[j].key].total+=b;
       }
     }
+    order.sort(function(a,b2){return byHost[b2].total-byHost[a].total;});
+    var scale=order.length?byHost[order[0]].total:0,rowsHtml="";
+    for(i=0;i<order.length;i++){
+      var row=byHost[order[i]],seg="";
+      for(j=0;j<row.parts.length;j++){
+        seg+='<i class="sy-fill" style="width:'+(scale>0?(row.parts[j].bytes/scale)*100:0).toFixed(2)
+          +"%;background:"+row.parts[j].color+'" title="'+esc(row.parts[j].label)+'"></i>';
+      }
+      rowsHtml+='<div class="sy-bar"><span class="n">'+esc(row.key)+"</span>"
+        +'<div class="sy-track tall">'+seg+"</div>"
+        +'<span class="v">'+esc(fmtBytes(row.total))+"</span></div>";
+    }
+    var catLegend="";
+    for(i=0;i<cats.length;i++){
+      if(CHART_EXCLUDED_CATEGORIES[cats[i].key])continue;
+      catLegend+='<span><i style="background:'+catColor(cats[i].key)+'"></i>'+esc(cats[i].label)+"</span>";
+    }
+    // Name what is NOT in the rows, with its figure. Dropping the non-host
+    // rows silently would leave the bars failing to add up to the donut
+    // beside them, with nothing on screen explaining the gap.
+    var otherNames=[];
+    for(var ok in otherKeys)if(Object.prototype.hasOwnProperty.call(otherKeys,ok))otherNames.push(ok);
+    otherNames.sort();
+    var footnote=otherNames.length
+      ?'<p class="sy-liner">Hosts only. A further <b>'+esc(fmtBytes(otherBytes))+"</b> belongs to "
+        +esc(otherNames.join(" and "))+" &mdash; ak's own state, not a host's. Learning stores are on their own card.</p>"
+      :'<p class="sy-liner">Learning stores are on their own card, not counted here.</p>';
+    split.innerHTML=order.length
+      ?('<div class="sy-bars">'+rowsHtml+'</div><div class="sy-legend" style="margin-top:10px">'+catLegend+"</div>"+footnote)
+      :sysEmpty("no per-host storage node could be measured.");
+  }
+
+  function renderSysGrowth(s){
+    var i;
     var growth=document.getElementById("sys-growth");
     if(growth){
       var g=s&&s.growth;
@@ -146,73 +159,89 @@ import { fmtNum, fmtTok, limAge, pct } from './usage.mjs';
           +esc(String(g.basis||"file mtime and size only"))+"</span></div>";
       }
     }
-    renderSysReclaim(s);
-    var top=document.getElementById("sys-topsessions");
-    if(top){
-      var sess=(s&&s.topSessions)||null;
-      if(!s){top.innerHTML=sysEmpty(NOT_SCANNED);}
-      else if(!sess||!sess.length){top.innerHTML=sysEmpty("no session files were measured.");}
-      else{
-        // Attributable rows only. A row whose project cannot be named is not a
-        // useful entry in a list whose whole job is "which project is holding
-        // these bytes" — the unattributable ones are counted in the liner
-        // instead, so they are excluded rather than hidden.
-        var attributable=[],unattributable=0;
-        for(i=0;i<sess.length;i++){
-          if(sess[i]&&sess[i].project)attributable.push(sess[i]);else unattributable++;
-        }
-        if(!attributable.length){
-          top.innerHTML=sysEmpty("no session file could be attributed to a project.");
-        }else{
-        var hostTotals=storageHostTotals(s),body="";
-        for(i=0;i<attributable.length;i++){
-          var x=attributable[i],ht=hostTotals[x.host],share=ht>0?(x.bytes/ht)*100:null;
-          // Link to the transcript the same way Usage does, through the public
-          // bridge it already exposes. The id has to be normalised first:
-          // Storage's session is the FILE BASENAME, while /api/session wants
-          // Usage's form. A row we cannot address renders as plain text — a
-          // dead link is worse than no link.
-          var sid=transcriptIdOf(x);
-          // Strip the extension rather than truncating mid-id: a uuid cut at 34
-          // characters reads as a corrupted value.
-          var sname=String(x.session||"");
-          if(sname.slice(-6)===".jsonl")sname=sname.slice(0,-6);
-          var cell=esc(sname);
-          body+="<tr>"
-            +'<td class="mono" title="'+esc(x.path||"")+'">'
-            +(sid?'<button class="sy-link" type="button" data-transcript="'+esc(sid)+'" title="open transcript">'+cell+"</button>":cell)
-            +"</td>"
-            +'<td><span class="sy-dot" style="background:'+hostColor(x.host)+'"></span>'+esc(x.host||"\u2014")+"</td>"
-            // An undecoded name says WHICH reason. "deleted project" is a
-            // claim, and on Windows it would be a false one for every row: the
-            // encoding there carries a drive prefix that the decoder refuses by
-            // design, so nothing is decodable and nothing has been deleted.
-            +"<td>"+(x.projectResolved===false
-              ?'<span class="sy-unk" title="'+esc(x.projectReason==="encoding"
-                ? "this name is not a POSIX-rooted transcript directory, so it cannot be decoded to a project path: "+String(x.project||"")
-                : "this project directory no longer exists, so its name cannot be decoded from "+String(x.project||""))
-                +'">'+(x.projectReason==="encoding"?"name not decodable":"deleted project")+"</span>"
-              :esc(x.projectLabel||x.project))+"</td>"
-            +'<td class="num">'+esc(fmtBytes(x.bytes))+"</td>"
-            +"<td>"+(share==null
-              ?unkHtml("this host's retained total was not measured",false)
-              :('<div class="sy-inbar" title="'+share.toFixed(1)+'% of '+esc(x.host)+' retained bytes"><i class="sy-fill" style="width:'
-                +Math.max(1,Math.min(100,share)).toFixed(1)+"%;background:"+hostColor(x.host)+'"></i></div>'))
-            +"</td></tr>";
-        }
-        top.innerHTML='<div class="sy-tblwrap"><table class="sy-table"><thead><tr><th>Session</th><th>Host</th>'
-          +'<th>Project</th><th style="text-align:right">Size</th><th>Share of host</th></tr></thead><tbody>'
-          +body+"</tbody></table></div>"
-          +(unattributable?'<div class="sy-liner">'+esc(fmtNum(unattributable))
-            +" larger session file"+(unattributable===1?"":"s")+" could not be attributed to a project "
-            +"and "+(unattributable===1?"is":"are")+" not listed.</div>":"");
-        }
-      }
-    }
   }
 
-  function renderSysRuntime(d){
-    var rt=d.runtime||{},i;
+  function sysTopSessionsAttributable(sess){
+    var attributable=[],unattributable=0,i;
+    for(i=0;i<sess.length;i++){
+      if(sess[i]&&sess[i].project)attributable.push(sess[i]);else unattributable++;
+    }
+    return {attributable:attributable,unattributable:unattributable};
+  }
+
+  function sysTopSessionRowHtml(x,hostTotals){
+    var ht=hostTotals[x.host],share=ht>0?(x.bytes/ht)*100:null;
+    // Link to the transcript the same way Usage does, through the public
+    // bridge it already exposes. The id has to be normalised first:
+    // Storage's session is the FILE BASENAME, while /api/session wants
+    // Usage's form. A row we cannot address renders as plain text — a
+    // dead link is worse than no link.
+    var sid=transcriptIdOf(x);
+    // Strip the extension rather than truncating mid-id: a uuid cut at 34
+    // characters reads as a corrupted value.
+    var sname=String(x.session||"");
+    if(sname.slice(-6)===".jsonl")sname=sname.slice(0,-6);
+    var cell=esc(sname);
+    return "<tr>"
+      +'<td class="mono" title="'+esc(x.path||"")+'">'
+      +(sid?'<button class="sy-link" type="button" data-transcript="'+esc(sid)+'" title="open transcript">'+cell+"</button>":cell)
+      +"</td>"
+      +'<td><span class="sy-dot" style="background:'+hostColor(x.host)+'"></span>'+esc(x.host||"\u2014")+"</td>"
+      // An undecoded name says WHICH reason. "deleted project" is a
+      // claim, and on Windows it would be a false one for every row: the
+      // encoding there carries a drive prefix that the decoder refuses by
+      // design, so nothing is decodable and nothing has been deleted.
+      +"<td>"+(x.projectResolved===false
+        ?'<span class="sy-unk" title="'+esc(x.projectReason==="encoding"
+          ? "this name is not a POSIX-rooted transcript directory, so it cannot be decoded to a project path: "+String(x.project||"")
+          : "this project directory no longer exists, so its name cannot be decoded from "+String(x.project||""))
+          +'">'+(x.projectReason==="encoding"?"name not decodable":"deleted project")+"</span>"
+        :esc(x.projectLabel||x.project))+"</td>"
+      +'<td class="num">'+esc(fmtBytes(x.bytes))+"</td>"
+      +"<td>"+(share==null
+        ?unkHtml("this host's retained total was not measured",false)
+        :('<div class="sy-inbar" title="'+share.toFixed(1)+'% of '+esc(x.host)+' retained bytes"><i class="sy-fill" style="width:'
+          +Math.max(1,Math.min(100,share)).toFixed(1)+"%;background:"+hostColor(x.host)+'"></i></div>'))
+      +"</td></tr>";
+  }
+
+  function renderSysTopSessions(s){
+    var top=document.getElementById("sys-topsessions");
+    if(!top)return;
+    var sess=(s&&s.topSessions)||null;
+    if(!s){top.innerHTML=sysEmpty(NOT_SCANNED);return;}
+    if(!sess||!sess.length){top.innerHTML=sysEmpty("no session files were measured.");return;}
+    var attr=sysTopSessionsAttributable(sess),attributable=attr.attributable,unattributable=attr.unattributable;
+    if(!attributable.length){
+      top.innerHTML=sysEmpty("no session file could be attributed to a project.");
+      return;
+    }
+    var hostTotals=storageHostTotals(s);
+    var body=attributable.map(function(x){return sysTopSessionRowHtml(x,hostTotals);}).join("");
+    top.innerHTML='<div class="sy-tblwrap"><table class="sy-table"><thead><tr><th>Session</th><th>Host</th>'
+      +'<th>Project</th><th style="text-align:right">Size</th><th>Share of host</th></tr></thead><tbody>'
+      +body+"</tbody></table></div>"
+      +(unattributable?'<div class="sy-liner">'+esc(fmtNum(unattributable))
+        +" larger session file"+(unattributable===1?"":"s")+" could not be attributed to a project "
+        +"and "+(unattributable===1?"is":"are")+" not listed.</div>":"");
+  }
+
+  function renderSysStorage(d){
+    var s=d.storage;
+    renderSysLearning(s);
+    renderSysDonut(s);
+    renderSysHostSplit(s);
+    renderSysGrowth(s);
+    renderSysReclaim(s);
+    renderSysTopSessions(s);
+  }
+
+  // renderSysRuntime was one CC-39 function mixing three independent DOM
+  // regions (process table, memory band, daemon tiles). Split one function
+  // per region; each keeps its own element-null guard and reads off the
+  // runtime payload `rt`, so the rendered DOM is unchanged.
+  function renderSysProcs(rt){
+    var i;
     var procs=document.getElementById("sys-procs");
     if(procs){
       var pm=rt.processes;
@@ -249,6 +278,9 @@ import { fmtNum, fmtTok, limAge, pct } from './usage.mjs';
           +"<th>RSS</th></tr></thead><tbody>"+body+"</tbody></table></div>";
       }
     }
+  }
+
+  function renderSysMem(rt){
     var mem=document.getElementById("sys-mem");
     if(mem){
       var tot=rt.totals||{},mach=rt.machine||{};
@@ -265,6 +297,9 @@ import { fmtNum, fmtTok, limAge, pct } from './usage.mjs';
           :'<div style="font-size:11.5px;color:var(--ink-2)">'+unkHtml("the physical-memory denominator was not reported",false)
             +" \u2014 no share of memory can be stated</div>");
     }
+  }
+
+  function renderSysDaemons(rt){
     var dae=document.getElementById("sys-daemons");
     if(dae){
       var dm=rt.daemons||{},ttl=Number(dm.ttlSecs)||0,oldest=mval(dm.oldestAgeSecs);
@@ -287,8 +322,54 @@ import { fmtNum, fmtTok, limAge, pct } from './usage.mjs';
     }
   }
 
+  function renderSysRuntime(d){
+    var rt=d.runtime||{};
+    renderSysProcs(rt);
+    renderSysMem(rt);
+    renderSysDaemons(rt);
+  }
+
+  function renderSysRadar(c){
+    var radar=document.getElementById("sys-radar");
+    if(!radar)return;
+    var kinds=c.kinds||[],hosts=c.hosts||[],i,j;
+    var axes=[],series=[];
+    for(j=0;j<kinds.length;j++){
+      var max=0;
+      for(i=0;i<hosts.length;i++){
+        var v=mval(c.perHost&&c.perHost[hosts[i]]&&c.perHost[hosts[i]][kinds[j]]);
+        if(v!=null&&v>max)max=v;
+      }
+      axes.push({label:KIND_LABEL[kinds[j]]||kinds[j],max:max});
+    }
+    for(i=0;i<hosts.length&&i<3;i++){
+      var vals=[],tip=hosts[i];
+      for(j=0;j<kinds.length;j++){
+        var pv=mval(c.perHost&&c.perHost[hosts[i]]&&c.perHost[hosts[i]][kinds[j]]);
+        vals.push(pv);
+        tip+=" \u00b7 "+(pv==null?"unmeasured":pv)+" "+(KIND_PLURAL[kinds[j]]||kinds[j]);
+      }
+      series.push({color:SERIES[i]||"var(--dim)",values:vals,tip:tip});
+    }
+    var legend="";
+    for(i=0;i<series.length;i++)legend+='<span><i style="background:'+series[i].color+'"></i>'+esc(hosts[i])+"</span>";
+    radar.innerHTML=svgRadar(axes,series)+'<div class="sy-legend">'+legend+"</div>";
+  }
+
+  function renderSysCatCounts(c){
+    var countsEl=document.getElementById("sys-catcounts");
+    if(!countsEl)return;
+    var kinds=c.kinds||[],j;
+    var tiles="";
+    for(j=0;j<kinds.length;j++){
+      tiles+='<div class="sy-tile"><div class="t-v">'+mhtml(c.counts&&c.counts[kinds[j]])+"</div>"
+        +'<div class="t-l">unique '+esc(KIND_PLURAL[kinds[j]]||kinds[j])+"</div></div>";
+    }
+    countsEl.innerHTML='<div class="sy-tiles">'+tiles+"</div>";
+  }
+
   function renderSysCatalog(d){
-    var c=d.catalog,i,j;
+    var c=d.catalog;
     var radar=document.getElementById("sys-radar");
     var countsEl=document.getElementById("sys-catcounts");
     var matrix=document.getElementById("sys-matrix");
@@ -298,38 +379,8 @@ import { fmtNum, fmtTok, limAge, pct } from './usage.mjs';
       if(matrix)matrix.innerHTML="";
       return;
     }
-    var kinds=c.kinds||[],hosts=c.hosts||[];
-    if(radar){
-      var axes=[],series=[];
-      for(j=0;j<kinds.length;j++){
-        var max=0;
-        for(i=0;i<hosts.length;i++){
-          var v=mval(c.perHost&&c.perHost[hosts[i]]&&c.perHost[hosts[i]][kinds[j]]);
-          if(v!=null&&v>max)max=v;
-        }
-        axes.push({label:KIND_LABEL[kinds[j]]||kinds[j],max:max});
-      }
-      for(i=0;i<hosts.length&&i<3;i++){
-        var vals=[],tip=hosts[i];
-        for(j=0;j<kinds.length;j++){
-          var pv=mval(c.perHost&&c.perHost[hosts[i]]&&c.perHost[hosts[i]][kinds[j]]);
-          vals.push(pv);
-          tip+=" \u00b7 "+(pv==null?"unmeasured":pv)+" "+(KIND_PLURAL[kinds[j]]||kinds[j]);
-        }
-        series.push({color:SERIES[i]||"var(--dim)",values:vals,tip:tip});
-      }
-      var legend="";
-      for(i=0;i<series.length;i++)legend+='<span><i style="background:'+series[i].color+'"></i>'+esc(hosts[i])+"</span>";
-      radar.innerHTML=svgRadar(axes,series)+'<div class="sy-legend">'+legend+"</div>";
-    }
-    if(countsEl){
-      var tiles="";
-      for(j=0;j<kinds.length;j++){
-        tiles+='<div class="sy-tile"><div class="t-v">'+mhtml(c.counts&&c.counts[kinds[j]])+"</div>"
-          +'<div class="t-l">unique '+esc(KIND_PLURAL[kinds[j]]||kinds[j])+"</div></div>";
-      }
-      countsEl.innerHTML='<div class="sy-tiles">'+tiles+"</div>";
-    }
+    renderSysRadar(c);
+    renderSysCatCounts(c);
     if(matrix){
       // The kind heading rows are gone: they told you what you were looking at
       // but gave you no way to look at less of it, and on a 318-row inventory
@@ -560,6 +611,60 @@ import { fmtNum, fmtTok, limAge, pct } from './usage.mjs';
       +"</span></button></th>";
   }
 
+  // renderSysProjects was one CC-33 function mixing eligibility filtering,
+  // per-row HTML building, and final table+liner assembly. Split by concern;
+  // each keeps the exact original logic unchanged. (The row builder also
+  // drops a dead `_diskBar` computation that was built but never read in the
+  // original -- a no-op removal, not a behavior change.)
+  function sysProjectsEligible(all){
+    var list=[],excluded=0;
+    for(var f=0;f<all.length;f++){
+      var cand=all[f],crem=cand.remote||null;
+      var linked=!!(crem&&crem.webUrl&&/^https:/.test(String(crem.webUrl)));
+      var hosted=!Array.isArray(cand.hosts)||cand.hosts.length>0;
+      if(linked&&hosted)list.push(cand);else excluded++;
+    }
+    return {list:list,excluded:excluded};
+  }
+
+  function sysProjectNameCell(pr){
+    var rem=pr.remote||null,name;
+    if(rem&&rem.status==="linked"&&/^https:/.test(String(rem.webUrl||""))){
+      name='<a href="'+esc(rem.webUrl)+'" target="_blank" rel="noreferrer noopener" title="'+esc(rem.raw||"")+'">'
+        +esc(pr.label)+"&#8239;&#8599;</a>";
+    }else{
+      name=esc(pr.label);
+    }
+    return name;
+  }
+
+  function sysProjectRowHtml(pr){
+    var name=sysProjectNameCell(pr);
+    var last=mval(pr.lastActivity);
+    return "<tr><td>"+name+"</td>"
+      +'<td class="num">'+mhtml(pr.loc&&pr.loc.total,function(v){return "~"+fmtTok(v);})+"</td>"
+      +"<td>"+langCell(pr.loc)+"</td>"
+      +'<td class="num">'+mhtml(pr.totalBytes,fmtBytes)+"</td>"
+      +'<td class="num">'+(last==null?unkHtml((pr.lastActivity&&pr.lastActivity.reason)||"no readable entry",false)
+        :esc(ago(Math.max(0,Math.round((Date.now()-last)/1000)))))+"</td></tr>";
+  }
+
+  function sysProjectsLinerHtml(p,list,excluded){
+    return '<div class="sy-liner">'
+      +(p.everSeen
+        ?mhtml(p.everSeen)+" projects ever seen across all hosts, "
+          +(p.onDisk?mhtml(p.onDisk):"some")+" still on disk"
+        :mhtml(p.count)+" projects measured (this snapshot predates the ever-seen count)")
+      +", "+esc(fmtNum(list.length))+" listed here."
+      +(excluded
+        ? " Excluded "+esc(fmtNum(excluded))+" measured director"+(excluded===1?"y":"ies")
+          +" with no remote or no recorded session \u2014 agent worktrees, sub-folders of a "
+          +"repository already listed, and repositories with no remote."
+        : "")
+      +" Line counts are approximate: extension-bucketed, with node_modules and vendored "
+      +"trees excluded. Disk is the whole project directory, .git and node_modules included.</div>";
+  }
+
   export function renderSysProjects(d){
     var el=document.getElementById("sys-projects");
     if(!el)return;
@@ -588,54 +693,14 @@ import { fmtNum, fmtTok, limAge, pct } from './usage.mjs';
     //
     // A genuine local-only repository is excluded too. That is the cost of the
     // rule, and it is why the count is stated below rather than left implied.
-    var list=[],excluded=0;
-    for(var f=0;f<all.length;f++){
-      var cand=all[f],crem=cand.remote||null;
-      var linked=!!(crem&&crem.webUrl&&/^https:/.test(String(crem.webUrl)));
-      var hosted=!Array.isArray(cand.hosts)||cand.hosts.length>0;
-      if(linked&&hosted)list.push(cand);else excluded++;
-    }
+    var elig=sysProjectsEligible(all),list=elig.list,excluded=elig.excluded;
     if(!list.length){
       el.innerHTML=sysEmpty("no project with a remote and a recorded session was measured \u2014 "
         +fmtNum(excluded)+" measured director"+(excluded===1?"y was":"ies were")+" excluded.");
       return;
     }
     list=sortProjects(list,projSort.key,projSort.dir);
-    var body="",i;
-    for(i=0;i<list.length;i++){
-      var pr=list[i];
-      var tree=mval(pr.treeBytes),git=mval(pr.gitBytes),nm=mval(pr.nodeModulesBytes);
-      var diskTotal=mval(pr.totalBytes),_diskBar="";
-      if(diskTotal>0){
-        // One entity's ranked parts — shades of ONE hue, darkest for the part
-        // the user wrote, faintest for the reinstallable overhead.
-        if(tree!=null)_diskBar+='<i class="sy-fill" style="width:'+pct(tree,diskTotal).toFixed(1)
-          +'%;background:var(--s1)" title="'+esc("working tree \u00b7 "+fmtBytes(tree))+'"></i>';
-        if(git!=null)_diskBar+='<i class="sy-fill" style="width:'+pct(git,diskTotal).toFixed(1)
-          +'%;background:var(--s1);opacity:.55" title="'+esc(".git \u00b7 "+fmtBytes(git))+'"></i>';
-        if(nm!=null)_diskBar+='<i class="sy-fill" style="width:'+pct(nm,diskTotal).toFixed(1)
-          +'%;background:var(--s1);opacity:.28" title="'+esc("node_modules \u00b7 "+fmtBytes(nm))+'"></i>';
-      }
-      // The remote sub-line and the stack chips are gone: this table answers
-      // "how big is each project and what is it written in". A forge slug and a
-      // row of presence-only chips answered neither, and between them they owned
-      // half the row's height. The project still LINKS to its remote when it has
-      // an https one — the affordance was worth keeping, the metadata was not.
-      var rem=pr.remote||null,name;
-      if(rem&&rem.status==="linked"&&/^https:/.test(String(rem.webUrl||""))){
-        name='<a href="'+esc(rem.webUrl)+'" target="_blank" rel="noreferrer noopener" title="'+esc(rem.raw||"")+'">'
-          +esc(pr.label)+"&#8239;&#8599;</a>";
-      }else{
-        name=esc(pr.label);
-      }
-      var last=mval(pr.lastActivity);
-      body+="<tr><td>"+name+"</td>"
-        +'<td class="num">'+mhtml(pr.loc&&pr.loc.total,function(v){return "~"+fmtTok(v);})+"</td>"
-        +"<td>"+langCell(pr.loc)+"</td>"
-        +'<td class="num">'+mhtml(pr.totalBytes,fmtBytes)+"</td>"
-        +'<td class="num">'+(last==null?unkHtml((pr.lastActivity&&pr.lastActivity.reason)||"no readable entry",false)
-          :esc(ago(Math.max(0,Math.round((Date.now()-last)/1000)))))+"</td></tr>";
-    }
+    var body=list.map(sysProjectRowHtml).join("");
     // Legend covers only what still renders: the language ramp. The disk column
     // is a single figure now, and there are no chips left to explain.
     el.innerHTML='<div class="sy-legend" style="margin-bottom:4px">'
@@ -654,24 +719,9 @@ import { fmtNum, fmtTok, limAge, pct } from './usage.mjs';
       // Three numbers now, and the gap between the last two is a filter rather
       // than a fact about the machine — so it is named. Leaving the reader to
       // subtract 25 from 16 and guess is the silent exclusion ADR-0023 forbids.
-      +'<div class="sy-liner">'
-      +(p.everSeen
-        ?mhtml(p.everSeen)+" projects ever seen across all hosts, "
-          +(p.onDisk?mhtml(p.onDisk):"some")+" still on disk"
-        :mhtml(p.count)+" projects measured (this snapshot predates the ever-seen count)")
-      +", "+esc(fmtNum(list.length))+" listed here."
-      +(excluded
-        ? " Excluded "+esc(fmtNum(excluded))+" measured director"+(excluded===1?"y":"ies")
-          +" with no remote or no recorded session \u2014 agent worktrees, sub-folders of a "
-          +"repository already listed, and repositories with no remote."
-        : "")
-      +" Line counts are approximate: extension-bucketed, with node_modules and vendored "
-      +"trees excluded. Disk is the whole project directory, .git and node_modules included.</div>";
+      +sysProjectsLinerHtml(p,list,excluded);
   }
 
-  // Freshness is a contract, not a caption (ADR-0025 §3): every deep figure on
-  // this page was measured at ONE moment, and the label says which. Past the
-  // staleness horizon it nudges — but it still never scans on its own.
   export function renderSystemFreshness(){
     var el=document.getElementById("sys-asof"),btn=document.getElementById("sys-rescan");
     if(!el)return;
