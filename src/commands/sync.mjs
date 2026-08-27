@@ -97,6 +97,7 @@ export async function run({
   const subsystems = new Set(plan.map((p) => p.subsystem));
   const report = reportOutcome;
   let dejaVuApplyFailed = false;
+  let aqeRouterApplyFailure = null;
   // Run a managed heal under a live elapsed-time ticker, then print its result.
   // Keeps every slow tool (npm upgrades, brain KB download, native rebuild)
   // visibly alive instead of freezing the prompt; fast/local steps clear in <1s.
@@ -293,6 +294,7 @@ export async function run({
     }
     const router = applyAqeRouter(cfg, cwd);
     if (router.changed || !router.ok) report('aqe router', router);
+    if (!router.ok) aqeRouterApplyFailure = router.detail || 'AQE router apply failed';
     const mcp = await retireCodexMcp(cfg, cwd);
     if (mcp.changed) saveKitConfig(cfg);
     if (mcp.changed || !mcp.ok) report('legacy codex MCP', mcp);
@@ -366,6 +368,13 @@ export async function run({
 
   const remaining = after.filter((r) => r.level === 'fail'
     || (r.subsystem === 'deja-vu' && r.fix !== null));
+  // Collector rows describe persisted state after the heal, but they cannot
+  // erase an apply failure from this run. In particular, an unavailable
+  // external fallback can leave only a warning row; claiming convergence
+  // after applyAqeRouter returned !ok is a false success and retry loop.
+  if (aqeRouterApplyFailure && !remaining.some((r) => r.subsystem === 'providers')) {
+    remaining.push({ subsystem: 'providers', message: `AQE router apply failed: ${aqeRouterApplyFailure}` });
+  }
   if (dejaVuApplyFailed && !remaining.some((r) => r.subsystem === 'deja-vu')) {
     remaining.push({ subsystem: 'deja-vu', message: 'companion lifecycle apply failed' });
   }

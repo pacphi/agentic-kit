@@ -330,16 +330,18 @@
       <td>Primary, AQE provider, statusline, vendor-diversity credit, usage/quota/live-session attribution</td>
     </tr>
     <tr>
-      <td class="nowrap"><b>External execution host</b> <span class="chip ext">proposed</span></td>
+      <td class="nowrap"><b>External execution host</b> <span class="chip ext">experimental</span></td>
       <td class="nowrap">hermes (ADR-0030)</td>
       <td>Route activities via an externally maintained adapter; host-declared usage sidecar</td>
-      <td>Everything tier 2 cannot, <em>plus</em> no interceptable permission event — <code>hermes&nbsp;-z</code> auto-approves by its own headless contract (disclosed, verified)</td>
+      <td>Cannot self-claim primary/AQE/statusline authority. Those are earned by tier + grant; AQE provider projection is live on 3.13.12+. No interceptable permission event — <code>hermes&nbsp;-z</code> auto-approves by its own headless contract (disclosed, verified)</td>
     </tr>
   </table></div>
   <p>
-    ADR-0020 already mandates tier 2's shape for OpenCode ("explicit, supervised, non-primary,
-    outside AQE provider routing, absent from vendor-diversity facts"). ADR-0029's capability
-    caps reproduce that shape for external hosts — tested policy, not new policy. What is
+    ADR-0020 already mandates tier 2's shape for built-in OpenCode ("explicit, supervised,
+    non-primary, outside AQE provider routing, absent from vendor-diversity facts"). ADR-0029's
+    self-claim caps reproduce that safe starting point for external hosts. The 2026-08-26
+    Agentic-QE #628 integration adds an earned path: <code>aqe.provider</code> candidate, real
+    conformance tier, explicit hash-pinned grant. What is
     missing is the <em>vocabulary</em>: no surface tells the user which tier a host is in or why
     a capability is absent (see D-2).
   </p>

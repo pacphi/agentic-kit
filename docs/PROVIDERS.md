@@ -29,7 +29,9 @@ A **binding** connects a host to a provider through a projection and transport. 
 provider can therefore have independent `ollama-via-claude` and `ollama-via-codex` bindings.
 OpenRouter is a provider behind a host, never automatically a third host. OpenCode is an opt-in
 activity-routing host through `ak run`, while remaining ineligible as a primary host or AQE
-provider. Its configured selector does not establish provider, billing, or vendor-diversity facts.
+provider unless an independently admitted adapter for that host declares and earns the separate
+AQE-provider capability. A configured selector alone never establishes provider, billing, or
+vendor-diversity facts.
 
 **Account analytics is separate from routing evidence.** `ak usage refresh openrouter` explicitly
 fetches OpenRouter's supported 30-completed-UTC-day activity view with
@@ -125,19 +127,20 @@ is reported and skipped; it never takes down the hosts that already work.
 
 An external adapter can never **self-declare** that it is the primary host, an AQE provider, or
 the status-line owner. That ban is permanent — it is the safety invariant the whole extension
-point rests on. But `canBePrimary` and `commandStatusline` are **earnable**: passing the gating
+point rests on. `canBePrimary`, `aqeProvider`, and `commandStatusline` are **earnable**: passing the gating
 conformance tier is evidence, and `ak host adapters grant <name> <capability>` (alias `bless`) is
 a maintainer's explicit grant, refused unless that tier is recorded passed at the adapter's
-current manifest hash. `aqeProvider` stays upstream-owned and is never `ak`-grantable.
+current combined content hash.
 
 `ak host adapters conformance <name>` runs the tiered black-box kit:
 
 | Tier | Status today | Gates |
 | --- | --- | --- |
 | `admission` | Genuinely passes against a real adapter | — |
-| `activity-routing` | Genuinely passes — real supervised subprocess worker | — |
-| `primary-eligible` | Genuinely passes — observes a real escalation | `canBePrimary` |
 | `session-driving` | **Gated** — a native Ruflo backend is upstream's to grant | — |
+| `activity-routing` | Genuinely passes — real supervised subprocess worker | — |
+| `aqe-provider` | Genuinely passes — real stdin/stdout provider hook through the admitted bridge | `aqeProvider` |
+| `primary-eligible` | Genuinely passes — observes a real escalation | `canBePrimary` |
 | `statusline` | **Gated** — `ak` has no render surface for it yet | `commandStatusline` |
 
 The two gated tiers are honest ceilings, not failures: they report `gated`/`skipped` and never
@@ -147,9 +150,58 @@ alongside granted capabilities, and `revoke-grant <name> [capability]` withdraws
 
 Be precise about what a grant buys **today**. A granted capability goes live in the effective host
 registry from the next flagged invocation — the host's tier label reflects it and it joins
-primary-eligibility. But no path yet *selects* an external host as primary (`ak host pick` stays
-built-in-scoped), and `commandStatusline` has no runtime reader. So a granted `canBePrimary` is
-visible and eligible, while a granted `commandStatusline` is currently inert.
+primary-eligibility. A granted `aqeProvider` also becomes a live, project-scoped Agentic-QE
+3.13.12+ external provider: its declaration is written to `.agentic-qe/llm-config.json`, and its
+host routes may populate `agentOverrides`. No path yet *selects* an external host as primary
+(`ak host pick` stays built-in-scoped), and `commandStatusline` has no runtime reader.
+
+The manifest candidate is data, not authority. It uses `aqe.provider` (never
+`host.legacy.aqeProvider`) and requires `cli-subprocess`, activity routing, and both an execution
+hook and a dedicated provider hook:
+
+```json
+{
+  "aqe": {
+    "provider": {
+      "hook": {
+        "command": ["node", "aqe-provider.mjs"],
+        "files": ["aqe-provider.mjs"],
+        "timeoutMs": 180000,
+        "passEnv": ["HERMES_API_KEY"]
+      },
+      "billingMode": "subscription",
+      "models": ["default"],
+      "defaultModel": "default",
+      "maxConcurrency": 2,
+      "stripEnv": ["OPENAI_API_KEY"],
+      "displayName": "Hermes subscription"
+    }
+  }
+}
+```
+
+`host.id` is the provider id. It must satisfy AQE's external-id grammar and cannot collide with a
+built-in/reserved provider. The hook receives the prompt on stdin and writes only the completion to
+stdout. Exit `77`/`78`, timeout, auth failure, and any other error produce no stdout because AQE
+3.13.12 treats non-empty stdout as a completion even when a CLI exits non-zero. The bridge forwards
+only declared environment variables, protects its own `AK_AQE_*` control variables, rechecks the
+content hash before spawn, and keeps the hook in a supervised subprocess. Each invocation copies
+the verified bytes of every declared adapter-owned hook file into a private execution snapshot;
+declared command-file arguments and relative imports resolve to those copies. This is byte pinning,
+not an OS sandbox: a consented hook can still deliberately access an absolute path, so adapter-owned
+imports must be relative. The interpreter and other absolute/PATH-resolved native binaries remain
+externally managed system trust, not part of the adapter content hash. Declare every adapter-owned
+imported file. The bridge re-reads host enablement, consent, and the exact-hash grant immediately
+before spawn, so revocation while it waits for a prompt fails closed. Forwarded
+secret values are redacted from bridge diagnostics, and a completion that exceeds the supervised
+output bound fails closed instead of returning a truncated success.
+Candidate metadata is bounded before admission: at most 128 model ids of 256 UTF-8 bytes each, a
+control-free display name of at most 128 bytes, concurrency from 1 through 64, and a provider-hook
+timeout no longer than 24 hours. `stripEnv` names must use canonical uppercase spelling; this keeps
+the contract unambiguous, and projection also includes the exact spelling observed in the current
+parent environment for AQE 3.13.12's exact-key deletion on Windows. Independently of that
+defense-in-depth filter, the stable trampoline forwards only explicitly allowlisted variables to
+the adapter hook.
 
 Graduation has two destinations: a **blessed external adapter** stays out-of-tree holding exactly
 the capabilities its tiers earned, or a maintainer **promotes it to a built-in** by adopting its
@@ -299,18 +351,15 @@ and `onnx` are local, and the API-provider spellings bill their corresponding
 credentials. There is no `openai`-subscription or `gemini`-subscription alias:
 `openai` and `gemini` remain API-metered provider types.
 
-> [!IMPORTANT]
-> agentic-kit does not yet expose AQE's direct `codex` provider through
-> `--aqe-provider`; that allow-list currently rejects it. Codex activity routes
-> can still project into AQE `agentOverrides`, so per-activity Claude/Codex
-> routing works. This is a documented agentic-kit integration gap, not evidence
-> that AQE itself lacks a Codex subscription provider.
-
 ```bash
 ak host pick --aqe-provider claude-code    # run QE on your subscription, no API bill
+ak host pick --aqe-provider codex          # direct Codex subscription provider
 ```
 
-`ak` writes `AQE_LLM_PROVIDER` for you. Add `OPENAI_API_KEY` to your env and agentic-qe's
+For built-ins, `ak` writes `AQE_LLM_PROVIDER` for you. An admitted external id is selectable by
+the same flag, but its default is written only to the project `.agentic-qe/llm-config.json` — never
+to user or project host-settings environment. This prevents a project-scoped adapter identity from
+leaking into unrelated repositories. Add `OPENAI_API_KEY` to your env and agentic-qe's
 router will **auto-enable** OpenAI as a fallback on its own — you don't have to list it.
 
 ## Level 3 — a deterministic fallback chain
@@ -327,6 +376,50 @@ ak host pick \
 Each `provider:model,model` becomes an ordered chain entry (first = highest priority). `ak`
 writes a complete, schema-correct chain, tags it `_managedBy: agentic-kit`, and **never**
 writes your API keys.
+
+Agentic-QE **3.13.12 or newer** is required for an external id. The same admitted id may be the
+default, a fallback rung, or the provider projected from an explicit external-host activity route.
+Agentic-kit merges `externalProviders` without replacing foreign declarations and also writes the
+minimal compatibility activation AQE 3.13.12's MCP bootstrap requires:
+`providers[id] = { "enabled": true }`. Both values have exact ownership receipts. Fallback-derived
+defaults carry a separate exact receipt, so removing a managed chain preserves any user-selected
+replacement even when that provider was another rung in the old chain. A same-id foreign
+or user-edited declaration is preserved and reported as a conflict; an explicit foreign
+`enabled:false` is refused rather than overridden. When a grant is revoked, a host is disabled, or
+declared content changes, sync removes only a stale declaration/activation that still exactly
+matches its receipt. A user-edited value is preserved and becomes user-owned.
+
+### External-provider release proof
+
+Three checks establish different facts; do not collapse them:
+
+1. `ak host adapters conformance <name>` must pass the real `aqe-provider` tier at the current
+   content hash, then `ak host adapters grant <name> aqeProvider` must succeed.
+2. `ak x verify providers` proves admission plus the exact project declaration, ownership receipt,
+   default, fallback, and override projection. It deliberately warns that this is not a served
+   model response.
+3. Release proof starts fresh AQE CLI and MCP processes, lists the external id through
+   `aqe llm providers --json`, invokes the real `test_generate_enhanced` MCP tool, and requires the
+   served completion to carry the fixture's provider and model markers:
+
+   ```bash
+   pnpm test:aqe-external-provider-live
+   ```
+
+   The generated command may also be exercised directly as a transport diagnostic:
+
+   ```bash
+   printf 'Reply with exactly: OK' | agentic-kit x aqe-provider hermes \
+     --model default --expect-hash <sha256> --project-root "$PWD"
+   ```
+
+The live fixture sets `AQE_LLM_PROVIDER` only in its child-process environment for deterministic
+selection; agentic-kit never persists an external id into managed machine/user host settings. The
+direct trampoline proves bounded stdin/stdout execution; it does not replace the fresh-process AQE
+CLI/MCP proof. Neither configured `billingMode` nor a host name proves vendor diversity or a
+bill. External billing is adapter-declared and reported as unverified; vendor identity requires
+observed or independently configured provider evidence. QE-Court must not count two hosts as two
+vendors without that evidence.
 
 > Model IDs above are examples current as of July 2026 (Claude Opus 5, OpenAI GPT-5.6 —
 > or `gpt-5.3-codex` for agentic coding — Google Gemini 3.5 Flash). Use whatever IDs your
@@ -488,12 +581,15 @@ The native config stores each knob below lives in — and their precedence — a
 | Register a Ruflo LLM provider        | `--provider ollama:qwen3.6:27b`   | `ruflo providers configure -p ollama -m qwen3.6:27b -e http://127.0.0.1:11434` |
 | Select a direct Ruflo provider       | per-agent/raw setting             | agent `--provider` or `RUFLO_PROVIDER=ollama` / `openrouter` |
 | Set which LLM runs QE                | `--aqe-provider gemini`           | `AQE_LLM_PROVIDER=gemini` (env)                     |
+| Select an admitted external AQE provider | `--aqe-provider hermes`        | project `llm-config.json` `externalProviders` + `defaultProvider` |
 | Order QE's fallback chain            | `--aqe-fallback '…'`              | edit `.agentic-qe/llm-config.json` / `aqe llm-router config` |
 | Cap QE spend                         | (kit.json `maxBudgetUsd`)         | `AQE_MAX_BUDGET_USD` / `--max-budget-usd`           |
 
-If you hand-edit `.agentic-qe/llm-config.json` yourself and *don't* use `ak`'s
-`--aqe-fallback`, `ak` leaves your file alone — it only manages a chain it owns (the
-`_managedBy` tag). Keys always stay in the environment; neither `ak` nor aqe persists them.
+If you hand-edit `.agentic-qe/llm-config.json`, agentic-kit preserves foreign entries. It manages
+its fallback chain and curated overrides under `_managedBy`, and each external declaration under
+an exact-value ownership receipt. A same-id foreign or edited external declaration is preserved and
+reported as a conflict rather than overwritten or pruned. Keys always stay in the environment;
+neither agentic-kit nor AQE persists them.
 
 ## Undo, always
 

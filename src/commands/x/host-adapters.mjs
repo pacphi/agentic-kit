@@ -317,6 +317,9 @@ export function hookCommandsFor(manifest) {
   if (manifest.execution?.run?.hook?.command) {
     hooks.push(`execution.run: ${JSON.stringify(manifest.execution.run.hook.command)}`);
   }
+  if (manifest.aqe?.provider?.hook?.command) {
+    hooks.push(`aqe.provider: ${JSON.stringify(manifest.aqe.provider.hook.command)}`);
+  }
   return hooks;
 }
 
@@ -341,7 +344,7 @@ async function warnAboutHooks(name, entry, rawReader) {
   }
   const hooks = hookCommandsFor(manifest);
   if (!hooks.length) {
-    info(`  '${name}' declares no lifecycle/execution hooks — nothing will be spawned.`);
+    info(`  '${name}' declares no lifecycle, execution, or AQE-provider hooks — nothing will be spawned.`);
     return;
   }
   warn('  the following hooks will run as REAL subprocesses:');
@@ -417,13 +420,18 @@ async function conformance({
  *   consent?: { recordedHashFor(name:string): string|null, recordConsent(name:string, hash:string): void, revokeConsent(name:string): boolean },
  *   reader?: (source: string) => Promise<any>, ask?: (question: string) => Promise<boolean>,
  *   isTTY?: boolean, cfg?: any, runTieredConformance?: (options: any) => Promise<any>,
- *   consentFile?: string, grantsFile?: string }} [args]
+ *   consentFile?: string, grantsFile?: string, cwd?: string,
+ *   saveConfig?: (cfg:any)=>void,
+ *   bootstrapAdapters?: typeof import('../../lib/adapters/admission.mjs').bootstrapHostAdapters,
+ *   applyRouter?: typeof import('../../lib/providers.mjs').applyAqeRouter }} [args]
  */
 export async function run({
   positionals = [], flags = {}, env = process.env,
   consent = consentStore, reader = defaultReader, ask = defaultAsk,
   isTTY = process.stdin.isTTY === true, cfg,
   runTieredConformance = defaultRunTieredConformance, consentFile, grantsFile,
+  cwd = process.cwd(),
+  saveConfig, bootstrapAdapters, applyRouter,
 } = {}) {
   const sub = positionals[0] ?? 'list';
   const name = positionals[1];
@@ -435,7 +443,14 @@ export async function run({
   // `conformance`/`grant`/`gate`/`status` stay gated — they're the surface
   // that reads/records new trust, evidence, or capability.
   if (sub === 'revoke') return revoke({ name, consent });
-  if (sub === 'revoke-grant') return revokeGrant({ name, capability: positionals[2], grantsFile });
+  if (sub === 'revoke-grant') {
+    return revokeGrant({
+      name, capability: positionals[2], grantsFile, cfg, env, cwd,
+      ...(saveConfig ? { saveConfig } : {}),
+      ...(bootstrapAdapters ? { bootstrapAdapters } : {}),
+      ...(applyRouter ? { applyRouter } : {}),
+    });
+  }
 
   if (!flagEnabled(env)) {
     fail(`experimental host-adapter surface is disabled — set ${FLAG_ENV_VAR}=1`);

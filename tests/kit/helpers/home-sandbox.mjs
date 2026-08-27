@@ -41,6 +41,32 @@ export function sandboxHome(prefix) {
   return home;
 }
 
+/**
+ * Redirect only the platform config base for a single test. paths.mjs reads
+ * XDG_CONFIG_HOME on POSIX and APPDATA on Windows, so setting just one leaves
+ * the other platform writing to the runner's real user config directory.
+ * @param {import('node:test').TestContext} testContext
+ * @param {string} prefix
+ * @returns {string} the temporary config base
+ */
+export function sandboxConfigBase(testContext, prefix) {
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), `${prefix}-`));
+  const previous = {
+    XDG_CONFIG_HOME: process.env.XDG_CONFIG_HOME,
+    APPDATA: process.env.APPDATA,
+  };
+  process.env.XDG_CONFIG_HOME = base;
+  process.env.APPDATA = base;
+  testContext.after(() => {
+    for (const [key, value] of Object.entries(previous)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+    fs.rmSync(base, { recursive: true, force: true });
+  });
+  return base;
+}
+
 /** Fail loudly (rather than mutating the developer's machine) if the redirect
  *  above did not take — call once per test file, right after the kit modules
  *  are imported. */

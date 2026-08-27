@@ -32,6 +32,7 @@
     "docs/adr/0015-managed-codex-native-statusline.md",
     "docs/adr/0032-model-lifecycle-intelligence.md",
     "docs/adr/0033-retire-codex-mcp-and-bound-qe-court-participants.md",
+    "tests/live/aqe-external-provider-transport.test.mjs",
     "tests/live/qe-court-participant-transport.test.mjs",
     "docs/ddd/model-lifecycle-intelligence.md"
   ],
@@ -39,6 +40,7 @@
     "test": "node --test --experimental-test-coverage --test-coverage-lines=70 --test-coverage-branches=70 --test-coverage-functions=70 \"tests/kit/*.test.mjs\" && node tests/statusline-segments.test.cjs && node tests/statusline-brain.test.cjs && node tests/agentdb.test.cjs && node tests/health-history.test.cjs && node tests/harvest.test.cjs && node tests/dashboard.test.cjs && node tests/admin-model.test.cjs && node tests/admin.test.cjs",
     "test:ui": "node tests/ui/dashboard-ui.mjs",
     "test:surface": "node --test tests/kit/dispatch-surface.test.mjs",
+    "test:aqe-external-provider-live": "node --test tests/live/aqe-external-provider-transport.test.mjs",
     "test:qe-court-live": "node --test tests/live/qe-court-participant-transport.test.mjs",
     "typecheck": "tsc -p tsconfig.json",
     "lint": "eslint .",

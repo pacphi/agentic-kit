@@ -278,6 +278,38 @@ test('--dry-run stops before the apply phase (no heal results, no convergence re
   assert.ok(!/^\s*✓ (natives|aidefence|npx|blocks|statusline):/m.test(out), 'no heal ran');
 });
 
+test('an AQE router apply failure survives collection and prevents a false converged verdict', async () => {
+  seedHome(offlineKitConfig({
+    security: false, agentdb: false, mcp: { register: false, excludeFamilies: [] },
+    integrations: {
+      version: 2, hosts: { claude: true, codex: false, opencode: false },
+      bindings: [], ownership: {},
+    },
+    routing: { version: 1, primaryHost: 'claude', routes: {} },
+    providers: {
+      aqeProvider: null,
+      aqeFallback: [{ provider: 'missing-external', models: ['default'], source: 'user' }],
+      models: [], maxBudgetUsd: null,
+    },
+  }), { ruflo: '9.9.9', 'agentic-qe': '9.9.9' });
+  const collectProviders = async () => [{
+    subsystem: 'providers', level: 'warn', message: 'router needs repair',
+    fix: 'sync re-applies provider env + aqe router',
+  }];
+  const prior = process.cwd();
+  process.chdir(PROJECT);
+  let result;
+  try {
+    result = await captureLog(() => sync.run({
+      flags: FLAGS({ 'no-upgrade': true }), pkgRoot: PKG_ROOT, collectFn: collectProviders,
+    }));
+  } finally { process.chdir(prior); }
+  assert.equal(result.result, 1, result.out);
+  assert.match(result.out, /aqe router:.*no valid providers in fallback chain/);
+  assert.match(result.out, /still failing: \[providers\] AQE router apply failed/);
+  assert.doesNotMatch(result.out, /converged — no failing subsystems/);
+});
+
 test('an oversized RVF store is planned as a quarantine', async () => {
   seedHome();
   const aqeDir = paths.projectAqeDir(PROJECT);

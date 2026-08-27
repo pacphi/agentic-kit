@@ -146,7 +146,7 @@ async function killGroup(child) {
  *   verb:string, timeoutMs?:number, env?:Record<string,string>, stdin?:string,
  *   cwd?:string, manifest?:object, integrity?:{hash:string}, baseDir?:string|null}} options
  * @returns {Promise<{ok:boolean, stdout:string, stdoutText:string, stderrText:string,
- *   exitCode:number|null, detail:string|null}>}
+ *   stdoutTruncated:boolean, stderrTruncated:boolean, exitCode:number|null, detail:string|null}>}
  */
 export async function runAdapterHook({
   hook, hostId, verb, timeoutMs, env, stdin, cwd, manifest, integrity, baseDir,
@@ -180,7 +180,8 @@ export async function runAdapterHook({
       verifyAdapterContent(manifest, integrity, { baseDir });
     } catch (error) {
       return {
-        ok: false, stdout: '', stdoutText: '', stderrText: '', exitCode: null,
+        ok: false, stdout: '', stdoutText: '', stderrText: '',
+        stdoutTruncated: false, stderrTruncated: false, exitCode: null,
         detail: `${hostId}:${verb} adapter hook integrity check failed: ${error?.message ?? String(error)}`,
       };
     }
@@ -201,7 +202,9 @@ export async function runAdapterHook({
     });
   } catch (error) {
     return {
-      ok: false, stdout: '', stdoutText: '', stderrText: '', exitCode: null, detail: describeFailure(hostId, verb, error),
+      ok: false, stdout: '', stdoutText: '', stderrText: '',
+      stdoutTruncated: false, stderrTruncated: false,
+      exitCode: null, detail: describeFailure(hostId, verb, error),
     };
   }
 
@@ -249,13 +252,17 @@ export async function runAdapterHook({
       stdout: mergeCapture(stdoutCaptured, stderrCaptured),
       stdoutText: boundedText(stdoutCaptured),
       stderrText: boundedText(stderrCaptured),
+      stdoutTruncated: stdoutCaptured.truncated,
+      stderrTruncated: stderrCaptured.truncated,
       detail: `${hostId}:${verb} adapter hook timed out after ${effectiveTimeoutMs}ms and was killed`,
     };
   }
 
   if (spawnError) {
     return {
-      ok: false, stdout: '', stdoutText: '', stderrText: '', exitCode: null, detail: describeFailure(hostId, verb, spawnError),
+      ok: false, stdout: '', stdoutText: '', stderrText: '',
+      stdoutTruncated: false, stderrTruncated: false,
+      exitCode: null, detail: describeFailure(hostId, verb, spawnError),
     };
   }
 
@@ -272,9 +279,15 @@ export async function runAdapterHook({
   const stderrText = boundedText(stderrCaptured);
   return code === 0
     ? {
-      ok: true, stdout, stdoutText, stderrText, exitCode: 0, detail: null,
+      ok: true, stdout, stdoutText, stderrText,
+      stdoutTruncated: stdoutCaptured.truncated,
+      stderrTruncated: stderrCaptured.truncated,
+      exitCode: 0, detail: null,
     }
     : {
-      ok: false, stdout, stdoutText, stderrText, exitCode: code, detail: `${hostId}:${verb} adapter hook exited with code ${code}`,
+      ok: false, stdout, stdoutText, stderrText,
+      stdoutTruncated: stdoutCaptured.truncated,
+      stderrTruncated: stderrCaptured.truncated,
+      exitCode: code, detail: `${hostId}:${verb} adapter hook exited with code ${code}`,
     };
 }

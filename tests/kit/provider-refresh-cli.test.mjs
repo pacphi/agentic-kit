@@ -188,6 +188,19 @@ test('x host refresh --yes re-seeds every diverged route and converges', () => {
   rm(home, project);
 });
 
+test('x host refresh propagates an AQE router failure to automation', () => {
+  const { home, project } = sandbox({
+    ...divergedProviders(),
+    aqeFallback: [{ provider: 'not-a-provider', models: ['model'] }],
+  });
+  const r = ak(['x', 'host', 'refresh', '--activity', 'architecture'], { cwd: project, home });
+  assert.equal(r.status, 1, `router failure must survive the command boundary\n${r.all}`);
+  assert.match(r.all, /aqe router:.*no valid providers in fallback chain/);
+  assert.equal(readKit(home).routing.routes.architecture.model, DEFAULT_ROUTES.architecture.model,
+    'the requested route intent is saved for a corrected follow-up sync');
+  rm(home, project);
+});
+
 test('x host refresh prints the cost-per-task trade for BOTH models, not just ids', () => {
   // The whole point of the neutral framing: the user is being handed a decision
   // that genuinely goes both ways, so both sides need their characteristic.

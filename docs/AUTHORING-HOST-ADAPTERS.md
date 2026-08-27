@@ -101,6 +101,7 @@ Field by field:
 | `detection` | How `ak` proves your CLI is present: the binary, the version arguments, and a regular-expression source for the version. |
 | `driving.surfaces` | Declare `cli-subprocess`. See below. |
 | `lifecycle` / `execution` | Your hooks ([section 3](#3-write-the-hooks)). Both are optional; a manifest with neither is a pure description. A file-backed hook must list its adapter-owned files in `hook.files`. |
+| `aqe.provider` | Optional Agentic-QE 3.13.12+ external-provider candidate. Requires `cli-subprocess`, activity routing, and both `execution.run.hook` and `aqe.provider.hook`; activation still requires the passed tier and grant. |
 
 > **Capabilities describe what the adapter *delivers through `ak`*, not what your host can do in
 > principle.** A real Hermes adapter's first draft declared `nativeMcpConfig: true` and
@@ -127,12 +128,60 @@ one with a working implementation.** Declare an `execution` block without `cli-s
   `cap-command-statusline`). You cannot write down the claim; you **earn** the capability through a
   conformance tier plus an explicit maintainer grant, recorded outside your manifest entirely
   (ADR-0031 §1).
-- `host.legacy.aqeProvider` must be absent — `cap-aqe-provider` refuses any value. This one is not
-  earnable at all through `ak`: agentic-qe's provider set is a closed upstream enumeration, so being
-  an AQE provider type is upstream's to grant. See [section 9](#9-the-freeze-and-why-you-matter).
+- `host.legacy.aqeProvider` must be absent — `cap-aqe-provider` refuses any value. Candidate data
+  belongs under `aqe.provider`; it becomes live only after the real `aqe-provider` tier passes at
+  the current content hash and a maintainer grants `aqeProvider`.
 
 Self-declaration is the attack surface, so it stays closed permanently. The *capability* is a ladder;
 the *declaration* is a wall.
+
+### The AQE provider hook
+
+Agentic-QE 3.13.12 added `externalProviders`. A candidate adapter may describe the safe subset that
+agentic-kit projects:
+
+```json
+{
+  "aqe": {
+    "provider": {
+      "hook": {
+        "command": ["node", "aqe-provider.mjs"],
+        "files": ["aqe-provider.mjs"],
+        "timeoutMs": 180000,
+        "passEnv": ["HERMES_API_KEY"]
+      },
+      "billingMode": "subscription",
+      "models": ["default", "fast"],
+      "defaultModel": "default",
+      "maxConcurrency": 2,
+      "stripEnv": ["OPENAI_API_KEY"],
+      "displayName": "Hermes subscription"
+    }
+  }
+}
+```
+
+The provider id is always `host.id`; adapters cannot choose a built-in/reserved id. The hook reads
+one prompt from stdin and writes only the completion to stdout. Model and project identity arrive in
+protected `AK_AQE_*` variables; only names in `passEnv` cross from the parent environment. Do not
+print partial output before success: the bridge intentionally suppresses stdout for refusal, auth,
+timeout, and failure because AQE treats non-empty stdout as a completion even on a non-zero exit.
+Billing mode is declared provenance, not a verified charge or vendor fact.
+On every call the bridge re-verifies and copies all declared adapter-owned hook files into a private
+execution snapshot. Declared command paths and relative imports therefore resolve to the verified
+copies, not mutable source files. This is not an OS sandbox: do not use absolute paths to reach the
+adapter bundle from hook code. List every adapter-owned imported file in `hook.files`; interpreter
+and other absolute- or PATH-resolved native binaries are external system trust and are not covered
+by the adapter hash. The bridge also rechecks live host intent, consent, and the hash-pinned grant
+immediately before spawn.
+Forwarded secret values are redacted from failure diagnostics. Output over the supervised bound is
+discarded and reported as failure, never accepted as a partial completion.
+The boundary is deliberately finite: at most 128 model ids (256 UTF-8 bytes each), a control-free
+128-byte display name, `maxConcurrency` from 1 through 64, a provider-hook timeout no longer than
+24 hours, and canonical uppercase `stripEnv` names. Oversized or case-ambiguous declarations are
+refused before consent or projection. On Windows, projection adds the matching spelling observed
+in the parent environment because AQE 3.13.12 deletes exact object keys; the adapter hook's own
+environment remains minimal and allowlisted regardless.
 
 ### One structural coupling worth knowing
 
@@ -309,6 +358,7 @@ host adapter conformance — acme  (56fa107674d2)
 admission          passed   host id 'acme', contract 1
 session-driving    skipped  not declared — nothing to prove
 activity-routing   passed   registered for 'acme'
+aqe-provider        passed   admitted provider hook returned the expected bounded probe
 primary-eligible   passed   'acme' completed a direct (non-escalated) run to a succeeded result, and…
 statusline         gated    ak-local: awaiting maintainer grant for 'commandStatusline' (not an…
 ```
@@ -322,6 +372,7 @@ What each tier means for you:
 | `admission` | Your manifest validates, admits through the fail-closed gate, joins the registry, and your `detect` hook runs as a real subprocess. | **Can genuinely pass.** A failure here short-circuits every downstream tier, so nothing gets laundered. |
 | `session-driving` | Gates `canDriveSession`. | `skipped` if you don't declare it. **`gated` if you do** — `ak` has no external session-driving path, and being a native ruflo backend is upstream-owned. |
 | `activity-routing` | Gates `canRouteActivities`. A real one-worker `ak run` routed to your host returns a succeeded `WorkerResult`. | **Can genuinely pass.** |
+| `aqe-provider` | Earns `aqeProvider`. The harness runs the real admitted stdin/stdout hook with its declared model and requires the bounded probe response. | **Can genuinely pass** when `aqe.provider` is declared; then a maintainer may grant `aqeProvider`. |
 | `primary-eligible` | Earns `canBePrimary`. Your host anchors a real run *and* receives a genuine ADR-0019 escalation onto itself — a second real subprocess. | **Can genuinely pass**, with no pre-existing grant. |
 | `statusline` | Earns `commandStatusline`. | **`gated`.** There is no admitted-host footer-render path yet, so even a granted capability has nothing real to drive. |
 
@@ -399,19 +450,23 @@ Be clear-eyed about this, because the machinery is ahead of its consumers:
   admitted host's command-backed footer. The grant records what you earned; nothing renders it yet.
 
 Both gaps are disclosed at grant time, and both are `ak`-local work rather than upstream ceilings —
-they will light up without needing anything from you. What works end-to-end today is
-`activity-routing`: a real `ak run` worker on your host, supervised, with a structured result.
+they will light up without needing anything from you. What works end-to-end today includes
+`activity-routing` and, on Agentic-QE 3.13.12+, an earned `aqeProvider`: a real provider hook,
+project-only declaration/default, fallback and activity-route projection, plus precise ownership
+receipts. `ak x verify providers` proves that configuration but honestly does not claim a served
+model response; release proof must also exercise a fresh AQE CLI/MCP process.
 
 ## 9. The freeze, and why you matter
 
-Two ceilings are genuinely not `ak`'s to lift:
+One ceiling is genuinely not `ak`'s to lift:
 
 - **Native ruflo backend** (`session-driving`). ruflo's backend enablement is per-host and defined
   inside ruflo, not through an outside registration surface. *Interim:* your host runs through `ak`'s
   own supervised execution — just not as a ruflo-native backend.
-- **agentic-qe provider type** (`aqeProvider`). agentic-qe's provider set is a closed upstream
-  enumeration, extended only by an upstream code change. *Interim:* quality still runs through the
-  model provider underneath your host, so QE isn't blocked — only your host's own AQE identity is.
+
+Agentic-QE provider identity is no longer an upstream ceiling on AQE 3.13.12+. Issue #628 supplied
+the external-provider registry. The remaining boundary is local and evidence-based: candidate data,
+a passed `aqe-provider` tier, explicit grant, and current content hash.
 
 Neither is faked, hidden, or shimmed. Each gets a tracked capability request and an honest interim
 behaviour ([ADR-0031 §4](adr/0031-capability-graduation-and-upstream-requests.md)).

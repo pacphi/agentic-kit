@@ -56,6 +56,8 @@ function hookEntries(manifest) {
   }
   const executionHook = manifest?.execution?.run?.hook;
   if (executionHook) entries.push({ label: 'execution.run', hook: executionHook });
+  const aqeProviderHook = manifest?.aqe?.provider?.hook;
+  if (aqeProviderHook) entries.push({ label: 'aqe.provider', hook: aqeProviderHook });
   return entries;
 }
 

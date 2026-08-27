@@ -23,7 +23,7 @@ import { drift as ruvnetBrainDrift, nightlyAgentPresent as rbNightlyPresent, NIG
 import { coherence as adbCoherence } from '../lib/agentdb.mjs';
 import { readJson } from '../lib/settings.mjs';
 import { have } from '../lib/exec.mjs';
-import { HOSTS, settingsTarget, isDefault, managedEnv, MANAGED_ENV_KEYS, hostInstallState, hostAuthState, bothHostsEnabled, aqeRouterFile, aqeSupportsAgentOverrides, credentialGaps, collectIntegrationFacts, MIN_RUFLO_PERSISTED_PROVIDER_VERSION } from '../lib/providers.mjs';
+import { HOSTS, settingsTarget, isDefault, managedEnv, MANAGED_ENV_KEYS, hostInstallState, hostAuthState, bothHostsEnabled, aqeRouterFile, aqeSupportsAgentOverrides, aqeExternalProviderState, credentialGaps, collectIntegrationFacts, MIN_RUFLO_PERSISTED_PROVIDER_VERSION, EXTERNAL_PROVIDERS_MIN_AQE } from '../lib/providers.mjs';
 import { hostsWithLifecycle, isBuiltinHost, lifecycleExecutionEnabled } from '../lib/adapters/lifecycle-registry.mjs';
 import { companionLifecycleFor } from '../lib/adapters/companion-lifecycle-registry.mjs';
 import { PROVIDER_REGISTRY } from '../lib/adapters/index.mjs';
@@ -843,6 +843,31 @@ export async function collect({
   try {
     const { file, scope } = settingsTarget(cwd);
     const env = readJson(file, {})?.env ?? {};
+    const externalRoot = paths.repoRoot(cwd);
+    const externalDisk = externalRoot ? (readJson(aqeRouterFile(externalRoot), {}) ?? {}) : {};
+    const external = externalRoot
+      ? aqeExternalProviderState(externalDisk, { projectRoot: externalRoot })
+      : null;
+    const configuredAdapterIds = new Set((cfg.hostAdapters ?? [])
+      .map((entry) => entry?.name).filter((name) => typeof name === 'string' && name));
+    const builtinHostIds = new Set(HOSTS.map((host) => host.id));
+    for (const id of Object.keys(cfg.integrations?.hosts ?? {})) {
+      if (!builtinHostIds.has(id)) configuredAdapterIds.add(id);
+    }
+    const externalIntent = new Set();
+    if (configuredAdapterIds.has(cfg.providers?.aqeProvider)) externalIntent.add(cfg.providers.aqeProvider);
+    for (const entry of cfg.providers?.aqeFallback ?? []) {
+      if (configuredAdapterIds.has(entry?.provider)) externalIntent.add(entry.provider);
+    }
+    for (const route of Object.values(cfg.routing?.routes ?? {})) {
+      if (configuredAdapterIds.has(route?.host)) externalIntent.add(route.host);
+      for (const rung of route?.escalation ?? []) {
+        if (configuredAdapterIds.has(rung?.host)) externalIntent.add(rung.host);
+      }
+    }
+    const liveExternal = new Set(external?.desired ?? []);
+    const unavailableExternalIntent = [...externalIntent].filter((id) => !liveExternal.has(id));
+    const unavailableExternalSet = new Set(unavailableExternalIntent);
     if (isDefault(cfg)) {
       // advisory only (no fix): opting codex in is a deliberate `ak host pick`
       if (await have('codex')) {
@@ -867,7 +892,11 @@ export async function collect({
       if (chain.length && chainRoot) {
         const disk = readJson(aqeRouterFile(chainRoot));
         const diskOrder = (disk?.fallbackChain?.entries ?? []).map((e) => e.provider).join('→');
-        routerDrift = disk?._managedBy !== 'agentic-kit' || diskOrder !== chain.map((e) => e.provider).join('→');
+        const liveOrder = chain.filter((entry) => !unavailableExternalSet.has(entry?.provider))
+          .map((entry) => entry.provider).join('→');
+        routerDrift = liveOrder
+          ? disk?._managedBy !== 'agentic-kit' || diskOrder !== liveOrder
+          : diskOrder !== '';
       }
       const on = HOSTS.filter((h) => cfg.integrations.hosts[h.id]).map((h) => h.id).join('+') || 'none';
       const chainStr = chain.length ? `; aqe chain ${chain.map((e) => e.provider).join('→')}` : '';
@@ -880,14 +909,41 @@ export async function collect({
       // order whose rungs have no credential fails over into nothing (#54). Warn,
       // not fail — the primary rung still works — and no `fix`, since only the
       // user can supply a key.
-      if (chain.length) {
-        const gaps = credentialGaps(chain);
+      const credentialChain = chain.filter((entry) => !unavailableExternalSet.has(entry?.provider));
+      if (credentialChain.length) {
+        const gaps = credentialGaps(credentialChain);
         if (gaps.length) {
           rows.push(row('providers', 'warn',
-            `aqe chain: ${chain.length - gaps.length}/${chain.length} rungs have credentials `
+            `aqe chain: ${credentialChain.length - gaps.length}/${credentialChain.length} rungs have credentials `
             + `(${gaps.map((g) => `${g.provider}: needs ${g.missing.join(', ')}`).join('; ')})`));
         } else {
-          rows.push(row('providers', 'ok', `aqe chain: ${chain.length}/${chain.length} rungs have credentials`));
+          rows.push(row('providers', 'ok', `aqe chain: ${credentialChain.length}/${credentialChain.length} rungs have credentials`));
+        }
+      }
+    }
+    if (unavailableExternalIntent.length) {
+      rows.push(row('providers', 'warn',
+        `external AQE intent is unavailable (${unavailableExternalIntent.join(', ')}) — restore its admission/host/grant, or retire only its dependent intent with `
+        + `\`ak host adapters revoke-grant ${unavailableExternalIntent[0]} aqeProvider\``));
+    }
+    if (externalRoot && external) {
+      if (external.desired.length || external.stale.length) {
+        const defaultDrift = external.desired.includes(cfg.providers?.aqeProvider)
+          && externalDisk.defaultProvider !== cfg.providers.aqeProvider;
+        if (!external.supported) {
+          rows.push(row('providers', 'warn',
+            `external AQE providers admitted but installed agentic-qe needs >=${EXTERNAL_PROVIDERS_MIN_AQE}`));
+        } else if (!external.ok || defaultDrift) {
+          const facts = [
+            external.missing.length ? `missing ${external.missing.join(', ')}` : '',
+            external.drifted.length ? `drifted/conflicting ${external.drifted.join(', ')}` : '',
+            external.stale.length ? `stale owned ${external.stale.join(', ')}` : '',
+            defaultDrift ? `default is not ${cfg.providers.aqeProvider}` : '',
+          ].filter(Boolean).join('; ');
+          rows.push(row('providers', 'warn', `external AQE projection out of sync (${facts})`, 'sync reconciles only ak-owned entries'));
+        } else {
+          rows.push(row('providers', 'ok',
+            `external AQE providers projected: ${external.desired.join(', ')} (declared/admitted; served inference not yet proven)`));
         }
       }
     }

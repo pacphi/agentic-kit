@@ -6,22 +6,23 @@
 // Two independent axes: ruflo host CLIs (claude/codex) and the LLM the routers use.
 import readline from 'node:readline/promises';
 import {
-  HOSTS, API_PROVIDERS, AQE_PROVIDER_TYPES, AQE_CHAIN_PROVIDER_TYPES, detectHosts,
+  HOSTS, API_PROVIDERS, AQE_PROVIDER_TYPES, detectHosts,
   settingsTarget, isDefault, applyHosts, applyProviders,
   undoProviders, hostInstallState, hostAuthState, installHost, applyAqeRouter, undoAqeRouter,
   bothHostsEnabled, DUAL_ROLE_TIP, JUDGE_BIAS_TIP, QE_COURT_TIP, suggestedFallbackFor,
   seedActivityRoutesIfMultiHost, printActivityRoutingTable, retireCodexMcp, undoCodexMcp,
   ensureRufloMcpInCodex, undoRufloMcpInCodex, detectAqeProviders, aqeProviderCredential, credentialGaps, fallbackSource,
-  collectIntegrationFacts,
+  collectIntegrationFacts, aqeSelectableProviderTypes, aqeSelectableChainProviderTypes,
 } from '../../lib/providers.mjs';
 import { parseRouteSpecs, formatModelHelp, PRIMARY_HOSTS, DEFAULT_PRIMARY_HOST, divergedRoutes, refreshSeededRoutes, pruneRoutesForHosts, modelNote, ACTIVITIES } from '../../lib/routing.mjs';
 import { loadKitConfig, saveKitConfig } from '../../lib/config.mjs';
 import { reconcileOpencodeGuidance } from '../../lib/opencode.mjs';
 import { runLifecycle } from '../../lib/adapters/lifecycle.mjs';
 import { lifecycleAdapterFor } from '../../lib/adapters/lifecycle-registry.mjs';
+import { bootstrapHostAdapters } from '../../lib/adapters/admission.mjs';
 import { hostTierLabel, hostAsymmetryNote } from '../../lib/hosts.mjs';
 import {
-  routableHostIds, defaultHostMap, validateBinding, HOST_REGISTRY, PROVIDER_REGISTRY,
+  routableHostIds, effectiveRoutableHostIds, defaultHostMap, validateBinding, HOST_REGISTRY, PROVIDER_REGISTRY,
 } from '../../lib/adapters/index.mjs';
 import {
   newlyEnabledHostTrustManifest, trustManifestLines,
@@ -60,7 +61,7 @@ export const options = {
 /** Billing is the non-obvious axis of the aqe provider list. Three categories,
  *  and claude-code is the ONLY same-vendor subscription alternative to a metered
  *  key (codex/gemini OAuth live on the host axis, not as aqe provider types). */
-export const AQE_BILLING_HINT = 'billing: claude-code = your Claude subscription ($0), ollama/onnx = local ($0), all others = metered API key';
+export const AQE_BILLING_HINT = 'billing: claude-code/codex = host subscription, ollama/onnx = local, built-in APIs = metered; external billing is adapter-declared and unverified';
 
 export const help = `ak host — frontier-host + LLM-provider detection and wiring
 
@@ -107,7 +108,8 @@ Options (pick, all optional — omit for interactive):
                                  alternate
   --aqe-provider <type>        set aqe's primary LLM (or 'none' to unset)
                                  billing: claude-code = Claude sub ($0),
-                                 ollama/onnx = local ($0), all others = metered key
+                                 ollama/onnx = local ($0); external billing is
+                                 adapter-declared and shown as unverified
   --aqe-fallback '<chain>'     ordered aqe chain, e.g.
                                  'claude-code:claude-opus-5; openai:gpt-5.6'
                                  (metered providers work too, e.g. add
@@ -226,15 +228,15 @@ async function status({ flags, cwd }) {
 
   // agentic-qe LLM provider (AQE_LLM_PROVIDER) + fallback chain
   const ap = cfg.providers.aqeProvider;
-  console.log(bold('\nagentic-qe LLM provider') + dim('  (AQE_LLM_PROVIDER)'));
-  console.log(`  ${(ap ?? dim('aqe default (unset)')).padEnd(24)} ${dim(`supported: ${AQE_PROVIDER_TYPES.join(', ')}`)}`);
+  console.log(bold('\nagentic-qe LLM provider') + dim('  (built-ins: env; external: project llm-config)'));
+  console.log(`  ${(ap ?? dim('aqe default (unset)')).padEnd(24)} ${dim(`supported: ${aqeSelectableProviderTypes().join(', ')}`)}`);
   console.log(`  ${dim(AQE_BILLING_HINT)}`);
   const chain = cfg.providers.aqeFallback ?? [];
   if (chain.length) {
     const rendered = chain.map((e) => {
       const cred = aqeProviderCredential(e.provider);
       const models = e.models?.length ? `(${e.models.join(',')})` : dim('(no models)');
-      return `${e.provider}${models}${cred.present ? '' : yellow(' ⚠ no credential')}`;
+      return `${e.provider}${models}${cred.known && !cred.present ? yellow(' ⚠ no credential') : ''}`;
     }).join(' → ');
     console.log(`  ${dim('fallback chain:')} ${rendered} ${dim('· .agentic-qe/llm-config.json')}`);
     for (const g of credentialGaps(chain)) {
@@ -249,10 +251,12 @@ async function status({ flags, cwd }) {
   // uncredentialed one is displayed as a configured fallback (#54).
   const creds = detectAqeProviders();
   console.log(bold('\naqe provider credentials') + dim('  (keys read from env; never persisted)'));
-  for (const p of AQE_PROVIDER_TYPES) {
+  for (const p of aqeSelectableProviderTypes()) {
     const c = creds[p];
-    const state = c.present ? (c.billing === 'local' ? 'local' : c.billing === 'subscription' ? 'subscription' : 'key present')
-      : `no key ${dim(`(${c.missing.join(', ')})`)}`;
+    const state = !c.known
+      ? `admitted · credential not introspectable · billing ${c.billing} (declared/unverified)`
+      : c.present ? (c.billing === 'local' ? 'local' : c.billing === 'subscription' ? 'subscription' : 'key present')
+        : `no key ${dim(`(${c.missing.join(', ')})`)}`;
     console.log(`  ${p.padEnd(14)} ${state}${c.source && c.present && c.billing === 'metered' ? dim(`  · ${c.source}`) : ''}`);
   }
 
@@ -350,7 +354,7 @@ async function refresh({ flags, cwd }) {
   const router = applyAqeRouter(cfg, cwd);
   (router.ok ? ok : warn)(`aqe router: ${router.detail}`);
   printActivityRoutingTable(cfg);
-  return 0;
+  return router.ok ? 0 : 1;
 }
 
 async function off({ cwd, pkgRoot }) {
@@ -446,6 +450,8 @@ async function maybeWriteQeCourtDefaults({ nonInteractive, cwd, enabled, aqeProv
 }
 
 async function pick({ flags, cwd, pkgRoot }) {
+  let aqeProviderTypes = aqeSelectableProviderTypes();
+  let aqeChainProviderTypes = aqeSelectableChainProviderTypes();
   const cfg = loadKitConfig();
   const trustBaseline = structuredClone(cfg);
   const hosts = await detectHosts(cwd);
@@ -454,7 +460,13 @@ async function pick({ flags, cwd, pkgRoot }) {
   // primary/AQE host because those are separate registry capabilities.
   // --host is the complete desired enabled-host set on BOTH tiers; excluding an
   // enabled host disables it (ak-managed wiring stripped, user config kept).
+  // Keep primary-host selection on the built-in routing set, but admit an
+  // explicitly named external host when the live adapter overlay proves it is
+  // routable. Provider-only retunes also carry already-enabled external ids
+  // through unchanged instead of mistaking them for unknown host tokens.
   const ROUTING = new Set(routableHostIds());
+  const EFFECTIVE_ROUTING = new Set(effectiveRoutableHostIds());
+  const MANAGED_HOSTS = new Set(HOSTS.map((host) => host.id));
   const prevOpencode = !!cfg.integrations?.hosts?.opencode
     || cfg.integrations?.ownership?.opencode?.mcp === 'ak';
   let enabled;
@@ -506,7 +518,7 @@ async function pick({ flags, cwd, pkgRoot }) {
     const hAns = (await rl.question(`Enable which ruflo host(s)? (comma-separated) [${dflt.join(',')}]: `)).trim();
     enabled = (hAns || dflt.join(',')).split(',').map((s) => s.trim()).filter(Boolean);
     console.log(dim(`  ${AQE_BILLING_HINT}`));
-    const aAns = (await rl.question(`agentic-qe primary LLM provider — ${AQE_PROVIDER_TYPES.join('/')} (blank = leave aqe default): `)).trim().toLowerCase();
+    const aAns = (await rl.question(`agentic-qe primary LLM provider — ${aqeProviderTypes.join('/')} (blank = leave aqe default): `)).trim().toLowerCase();
     aqeProvider = aAns ? aAns : null;
     const suggestion = suggestedFallbackFor(enabled);
     const fAns = (await rl.question(
@@ -523,7 +535,7 @@ async function pick({ flags, cwd, pkgRoot }) {
   // validate hosts against the two tiers. An unknown token is a hard error,
   // never a silent drop: `--host claude,opencdoe` must not "succeed" as
   // claude-only and destructively tear the opencode host down (codex-review r3).
-  const known = new Set(HOSTS.map((h) => h.id));
+  const known = new Set([...MANAGED_HOSTS, ...EFFECTIVE_ROUTING]);
   const unknown = enabled.filter((h) => !known.has(h));
   if (unknown.length) {
     fail(`unknown host(s): ${unknown.join(', ')} (valid: ${[...known].join(', ')}) — nothing changed`);
@@ -532,8 +544,11 @@ async function pick({ flags, cwd, pkgRoot }) {
   // The routing set needs at least one primary-capable member; OpenCode remains
   // routable but cannot satisfy that primary-host invariant on its own.
   const routing = enabled.filter((h) => ROUTING.has(h));
-  if (!routing.some((h) => PRIMARY_HOSTS.includes(h))) routing.unshift('claude');
-  enabled = [...new Set(routing)];
+  if (!routing.some((h) => PRIMARY_HOSTS.includes(h))) {
+    routing.unshift('claude');
+    enabled.unshift('claude');
+  }
+  enabled = [...new Set(enabled)];
   // primary host — which host leads (default claude); must be a ROUTING host.
   let primaryHost = prevPrimary;
   if (flags['primary-host'] !== undefined) {
@@ -547,17 +562,46 @@ async function pick({ flags, cwd, pkgRoot }) {
   const policyAllSeeded = Object.keys(oldPolicy).length > 0
     && Object.values(oldPolicy).every((r) => r.provenance === 'seeded');
   const reseedForPrimary = primaryHost !== prevPrimary && policyAllSeeded;
+
+  const hostIntent = {
+    claude: routing.includes('claude'),
+    codex: routing.includes('codex'),
+    opencode: enabled.includes('opencode'),
+  };
+  // External host ids are not primary candidates, but they are first-class
+  // integration intent. Retain every live admitted external id as an explicit
+  // boolean so a provider-only pick cannot deactivate its own bridge; an
+  // explicit --host set can still disable it by omission.
+  for (const id of EFFECTIVE_ROUTING) {
+    if (!MANAGED_HOSTS.has(id)) hostIntent[id] = enabled.includes(id);
+  }
+  cfg.integrations.hosts = hostIntent;
+
+  // Admission ran once at process bootstrap against the persisted pre-pick
+  // config. Re-run it against the final in-memory host intent before provider
+  // validation/projection: an admitted+granted provider can then be enabled
+  // and selected atomically, while a provider disabled by this command is
+  // removed from the AQE bridge before applyAqeRouter computes its projection.
+  if (process.env.AK_EXPERIMENTAL_HOST_ADAPTERS === '1') {
+    const refreshed = await bootstrapHostAdapters({ cfg, env: process.env });
+    for (const entry of refreshed.warnings) {
+      warn(`host adapter '${entry.name}' refresh refused (${entry.reason}): ${entry.detail}`);
+    }
+    aqeProviderTypes = aqeSelectableProviderTypes();
+    aqeChainProviderTypes = aqeSelectableChainProviderTypes();
+  }
+
   // validate aqe primary provider
-  if (aqeProvider && !AQE_PROVIDER_TYPES.includes(aqeProvider)) {
+  if (aqeProvider && !aqeProviderTypes.includes(aqeProvider)) {
     const norm = aqeProvider === 'anthropic' ? 'claude' : aqeProvider;
-    if (AQE_PROVIDER_TYPES.includes(norm)) aqeProvider = norm;
-    else { warn(`unknown aqe provider '${aqeProvider}' — leaving aqe on its default (valid: ${AQE_PROVIDER_TYPES.join(', ')})`); aqeProvider = null; }
+    if (aqeProviderTypes.includes(norm)) aqeProvider = norm;
+    else { warn(`unknown aqe provider '${aqeProvider}' — leaving aqe on its default (valid: ${aqeProviderTypes.join(', ')})`); aqeProvider = null; }
   }
   // validate fallback chain providers (chain gate admits codex — #108 phase 3)
   aqeFallback = aqeFallback
     .map((e) => ({ ...e, provider: e.provider === 'anthropic' ? 'claude' : e.provider }))
     .filter((e) => {
-      const okp = AQE_CHAIN_PROVIDER_TYPES.includes(e.provider);
+      const okp = aqeChainProviderTypes.includes(e.provider);
       if (!okp) warn(`dropping unknown fallback provider '${e.provider}'`);
       else if (!e.models.length) warn(`fallback entry '${e.provider}' has no models — aqe may skip it; add e.g. ${e.provider}:<model-id>`);
       return okp;
@@ -579,11 +623,6 @@ async function pick({ flags, cwd, pkgRoot }) {
     aqeFallback,
     models,
     maxBudgetUsd: cfg.providers.maxBudgetUsd ?? null,
-  };
-  cfg.integrations.hosts = {
-    claude: routing.includes('claude'),
-    codex: routing.includes('codex'),
-    opencode: enabled.includes('opencode'),
   };
   cfg.routing.primaryHost = primaryHost;
   cfg.routing.routes = reseedForPrimary ? {} : { ...oldPolicy };
@@ -706,9 +745,13 @@ async function pick({ flags, cwd, pkgRoot }) {
     const alt = routing.filter((e) => e !== primaryHost).join(', ') || 'none';
     ok(`primary host: ${primaryHost} (alternate: ${alt})`);
   }
-  if (aqeProvider) ok(`aqe provider: AQE_LLM_PROVIDER=${aqeProvider}`);
   const router = applyAqeRouter(cfg, cwd);
   if (router.changed || !router.ok) (router.ok ? ok : warn)(`aqe router: ${router.detail}`);
+  if (aqeProvider) {
+    (router.ok ? ok : warn)(router.ok
+      ? `aqe provider: AQE_LLM_PROVIDER=${aqeProvider}`
+      : `aqe provider intent not active: ${aqeProvider} (router projection incomplete)`);
+  }
   const mcp = await retireCodexMcp(cfg, cwd);
   if (mcp.changed) saveKitConfig(cfg);
   if (mcp.changed || !mcp.ok) (mcp.ok ? ok : warn)(`legacy codex MCP: ${mcp.detail}`);
@@ -719,10 +762,11 @@ async function pick({ flags, cwd, pkgRoot }) {
   if (rmcp.changed || !rmcp.ok) (rmcp.ok ? ok : warn)(`ruflo→codex MCP: ${rmcp.detail}`);
   const prov = await applyProviders(cfg, cwd);
   (prov.status === 'degraded' ? warn : prov.ok ? (prov.changed ? ok : info) : warn)(`ruflo providers: ${prov.detail}`);
-  ok('saved to kit.json — reapplied on every `ak sync`; undo with `ak host off`');
+  if (router.ok) ok('saved to kit.json — reapplied on every `ak sync`; undo with `ak host off`');
+  else warn('saved intent to kit.json, but AQE routing is incomplete — fix the warning above and re-run `ak sync`');
   if (seed.seeded) ok(`per-activity routing seeded — ${seed.count} activities (dual-host defaults; tune with --route or edit kit.json)`);
   printActivityRoutingTable(cfg);
   await maybeWriteQeCourtDefaults({ nonInteractive, cwd, enabled, aqeProvider });
   printDualHostTips(cfg);
-  return incompleteTeardown ? 1 : 0;
+  return incompleteTeardown || !router.ok ? 1 : 0;
 }

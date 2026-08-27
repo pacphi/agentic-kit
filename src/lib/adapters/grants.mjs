@@ -25,25 +25,26 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { configDir } from '../paths.mjs';
 
-/** The five conformance tiers, in graduation order (ADR-0031 §2). */
+/** The six conformance tiers, in graduation order (ADR-0031 §2). */
 export const CONFORMANCE_TIERS = Object.freeze([
-  'admission', 'session-driving', 'activity-routing', 'primary-eligible', 'statusline',
+  'admission', 'session-driving', 'activity-routing', 'aqe-provider', 'primary-eligible', 'statusline',
 ]);
 
 /** The only capabilities `ak` can grant. `session-driving` and
  * `activity-routing` gate capabilities a manifest may already express
  * (canDriveSession, canRouteActivities) — their tier records are evidence,
- * not grants, so they have no entry here. `aqeProvider` is never grantable by
- * `ak` at all (upstream-owned enumeration, ADR-0031 §4) and MUST NOT appear
- * in this map. */
+ * not grants, so they have no entry here. Agentic-QE 3.13.12's external
+ * provider registry makes `aqeProvider` earnable: the adapter must first pass
+ * the real `aqe-provider` transport exercise, then a maintainer grants the
+ * hash-pinned capability exactly like the other privileged surfaces. */
 export const TIER_GRANTS = Object.freeze({
+  'aqe-provider': 'aqeProvider',
   'primary-eligible': 'canBePrimary',
   statusline: 'commandStatusline',
 });
 
 /** Reverse of TIER_GRANTS: capability -> its gating tier, or undefined if
- * `capability` is not one `ak` can actually grant (e.g. a forged/legacy
- * 'aqeProvider' key sitting in a hand-edited or merged store). Shared by
+ * `capability` is not one `ak` can actually grant. Shared by
  * grantCapability (write-time check) and grantedCapabilitiesFor (read-time
  * re-check — F-1: the write-time gate alone does not protect a flat JSON
  * file an operator can edit directly). */
@@ -283,10 +284,9 @@ export function revokeGrants(name, { file = adapterGrantsPath() } = {}) {
  * revokeGrants above which wipes the whole record. Refuses (throws
  * TypeError) any `capability` that is not one of TIER_GRANTS' values —
  * matches grantCapability's own allow-list, so this can never be asked to
- * remove a forged/legacy key (e.g. 'aqeProvider') that grantCapability could
- * never have written in the first place. Returns whether the capability
- * existed beforehand; false (never throws) for a missing/never-recorded
- * `name`. */
+ * remove a forged/legacy key that grantCapability could never have written
+ * in the first place. Returns whether the capability existed beforehand;
+ * false (never throws) for a missing/never-recorded `name`. */
 export function revokeCapability(name, capability, { file = adapterGrantsPath() } = {}) {
   if (typeof name !== 'string' || !name) return false;
   if (!Object.values(TIER_GRANTS).includes(capability)) {
@@ -341,11 +341,10 @@ export function grantsFor(name, { file = adapterGrantsPath(), currentHash } = {}
  * record.capabilities verbatim. adapter-grants.json is a flat JSON file an
  * operator (or a bad merge) can hand-edit directly — grantCapability's
  * write-time gate does not protect against that. A capability is only ever
- * returned when it (a) is a real TIER_GRANTS value — never e.g. a forged
- * 'aqeProvider' key — AND (b) its gating tier is recorded 'passed' at this
- * exact hash. This raises store forgery from "add one key" to "also forge a
- * matching passed tier", and makes aqeProvider unreturnable even if present
- * in the raw file. */
+ * returned when it (a) is a real TIER_GRANTS value AND (b) its gating tier is
+ * recorded 'passed' at this exact hash. This raises store forgery from "add
+ * one key" to "also forge a matching passed tier"; `aqeProvider` is now a
+ * legitimate value only when backed by a passed `aqe-provider` exercise. */
 export function grantedCapabilitiesFor(name, currentHash, { file = adapterGrantsPath() } = {}) {
   try {
     const record = grantsFor(name, { file });

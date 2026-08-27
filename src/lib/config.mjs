@@ -204,6 +204,12 @@ export function loadKitConfig(file = kitConfigPath()) {
 }
 
 export function saveKitConfig(cfg, file = kitConfigPath()) {
+  const serialized = JSON.stringify(migrateKitConfig(cfg), null, 2) + '\n';
+  try {
+    if (fs.readFileSync(file, 'utf8') === serialized) return;
+  } catch (error) {
+    if (error?.code !== 'ENOENT') throw error;
+  }
   fs.mkdirSync(path.dirname(file), { recursive: true });
-  fs.writeFileSync(file, JSON.stringify(migrateKitConfig(cfg), null, 2) + '\n');
+  fs.writeFileSync(file, serialized);
 }

@@ -1,7 +1,8 @@
 // Tiered conformance harness (ADR-0031 §2, §5) — generalizes the single
 // admission-tier black-box report (tests/kit/adapter-conformance.test.mjs's
-// runConformanceReport) into the five graduation tiers named there: admission,
-// session-driving, activity-routing, primary-eligible, statusline. Each tier
+// runConformanceReport) into the six graduation tiers named there: admission,
+// session-driving, activity-routing, aqe-provider, primary-eligible,
+// statusline. Each tier
 // is a black-box check against a REAL installed adapter layout — real
 // manifest, real admission, real subprocess hooks — no third-party code ever
 // runs in-process, matching every other module under adapters/.
@@ -36,6 +37,7 @@ import {
 } from './consent.mjs';
 import { registerAdmittedLifecycle, resetAdmittedLifecycle } from './lifecycle-registry.mjs';
 import { registerAdmittedExecution, resetAdmittedExecution } from '../execution/admitted.mjs';
+import { resetAdmittedAqeProviders } from './aqe-provider.mjs';
 import { executeRunPlan } from '../execution/runner.mjs';
 import { have } from '../exec.mjs';
 import {
@@ -53,6 +55,7 @@ const nowIso = () => new Date().toISOString();
 // of a transport check). Directive and bounded so every tier's exercise
 // tests wiring, not the model's ambition.
 const CONFORMANCE_PROBE_PROMPT = 'Reply with exactly: OK';
+const AQE_PROVIDER_PROBE_RESPONSE = 'OK';
 
 /** admitAdapters' readManifest contract: `(source) => Promise<any>` — a real
  * resolve, matching admission.mjs's own default (dynamic import so this
@@ -401,6 +404,61 @@ async function checkPrimaryEligible({
   return { status: 'failed', checks: [{ name: exerciseLabel, ok: false, detail: outcome.detail }] };
 }
 
+// ── aqe-provider tier: real external-provider transport exercise ────────
+// Agentic-QE 3.13.12 makes an external provider identity possible, but the
+// adapter still has to earn agentic-kit's privileged projection. This probe
+// registers the already-admitted candidate ONLY in the conformance process,
+// invokes the same public runtime API production uses, and requires an exact
+// stdin -> stdout response. It deliberately does not inspect or require an
+// existing aqeProvider grant: evidence must exist before grantCapability can
+// confer that capability, exactly like primary-eligible's evidence-first
+// exercise above.
+async function checkAqeProvider({
+  manifest, name, baseDir, integrity, hash, cwd,
+}) {
+  if (!manifest?.aqe?.provider) {
+    return {
+      status: 'skipped',
+      checks: [{ name: 'aqe.provider candidate declared', ok: true, detail: 'not declared — nothing to prove' }],
+    };
+  }
+
+  const label = 'AQE external-provider stdin/stdout round trip';
+  let runtime;
+  try {
+    runtime = await import('./aqe-provider.mjs');
+  } catch (error) {
+    const detail = `AQE provider runtime unavailable: ${error?.message ?? String(error)}`;
+    return { status: 'failed', checks: [{ name: label, ok: false, detail }] };
+  }
+
+  try {
+    const model = manifest.aqe.provider.defaultModel ?? manifest.aqe.provider.models?.[0] ?? 'default';
+    const result = await runtime.runAdmittedAqeProviderProbe({
+      manifest,
+      baseDir,
+      integrity,
+      projectRoot: cwd,
+    });
+    const completion = typeof result?.stdoutText === 'string'
+      ? result.stdoutText.trim()
+      : typeof result?.completion === 'string'
+        ? result.completion.trim()
+        : '';
+    if (result?.ok !== true || completion !== AQE_PROVIDER_PROBE_RESPONSE) {
+      const detail = result?.detail
+        ?? `expected exact '${AQE_PROVIDER_PROBE_RESPONSE}' completion, got ${JSON.stringify(completion)}`;
+      return { status: 'failed', checks: [{ name: label, ok: false, detail }] };
+    }
+    const evidence = `provider '${name}' completed the real AQE candidate hook through runAdmittedAqeProviderProbe `
+      + `(model=${model}, exact response=${AQE_PROVIDER_PROBE_RESPONSE}, contentHash=${hash})`;
+    return { status: 'passed', checks: [{ name: label, ok: true, detail: evidence }], evidence };
+  } catch (error) {
+    const detail = `AQE provider exercise threw: ${error?.message ?? String(error)}`;
+    return { status: 'failed', checks: [{ name: label, ok: false, detail }] };
+  }
+}
+
 // ── statusline tier ─────────────────────────────────────────────────────
 // Gates a capability the manifest can NEVER declare (commandStatusline is
 // inexpressible in the schema — ADR-0029/0031). Cannot be exercised
@@ -482,6 +540,12 @@ async function checkGrantGatedTier({
  * than the operator's `process.cwd()` — an auto-approving agentic worker has
  * no business landing in whatever directory the operator happened to run
  * `ak host adapters conformance` from.
+ *
+ * aqe-provider likewise has no caller-injectable exercise: once admission
+ * and activity-routing pass, it registers the candidate in the conformance
+ * process and calls the public admitted-AQE-provider runtime with an exact
+ * stdin/stdout probe. The production registration path remains grant-gated;
+ * this evidence-only registration cannot leak past the harness reset.
  *
  * primary-eligible has no caller-injectable exercise (unlike statusline,
  * still a placeholder this wave): it always runs runPrimaryEligibleExercise,
@@ -596,14 +660,13 @@ export async function runTieredConformance({
       tierResults.push({ tier: 'session-driving', ...checkSessionDriving({ manifest: effectiveManifest, upstreamRef: sessionDrivingUpstreamRef }) });
     }
 
-    // primary-eligible's real exercise runs actual workers through the
-    // admitted host's derived execution adapter, so it needs activity-routing
-    // to have genuinely passed THIS run — not merely to have been requested.
+    // primary-eligible and aqe-provider both require activity-routing to have
+    // genuinely passed THIS run — not merely to have been requested.
     // Computed here, once, whenever either tier needs it, so a caller asking
     // for `tiers: ['primary-eligible']` alone still gets the real dependency
     // check rather than an unconditioned pass/skip.
     let activityRoutingResult = null;
-    if (wantTier('activity-routing') || wantTier('primary-eligible')) {
+    if (wantTier('activity-routing') || wantTier('aqe-provider') || wantTier('primary-eligible')) {
       activityRoutingResult = await checkActivityRouting({
         manifest: effectiveManifest, name: resolvedName, baseDir: derivedBaseDir, integrity, haveFn, clock,
         cwd: workerCwd, timeoutMs: effectiveTimeoutMs,
@@ -611,6 +674,24 @@ export async function runTieredConformance({
       if (wantTier('activity-routing')) {
         tierResults.push({ tier: 'activity-routing', ...activityRoutingResult });
       }
+    }
+
+    if (wantTier('aqe-provider')) {
+      let result;
+      if (!effectiveManifest) {
+        result = { status: 'skipped', checks: [{ name: 'admission prerequisite', ok: false, detail: 'admission tier did not pass — cannot evaluate' }] };
+      } else if (activityRoutingResult?.status !== 'passed') {
+        result = {
+          status: 'skipped',
+          checks: [{ name: 'activity-routing prerequisite', ok: false, detail: 'activity-routing did not pass — cannot evaluate' }],
+        };
+      } else {
+        result = await checkAqeProvider({
+          manifest: effectiveManifest, name: resolvedName, baseDir: derivedBaseDir,
+          integrity, hash, cwd: workerCwd,
+        });
+      }
+      tierResults.push({ tier: 'aqe-provider', ...result });
     }
 
     if (wantTier('primary-eligible')) {
@@ -698,6 +779,7 @@ export async function runTieredConformance({
     resetAdmitted();
     resetAdmittedExecution();
     resetAdmittedLifecycle();
+    resetAdmittedAqeProviders();
     if (tempDir) { try { fs.rmSync(tempDir, { recursive: true, force: true }); } catch { /* best-effort cleanup */ } }
     if (workerCwdTempDir) { try { fs.rmSync(workerCwdTempDir, { recursive: true, force: true }); } catch { /* best-effort cleanup */ } }
   }

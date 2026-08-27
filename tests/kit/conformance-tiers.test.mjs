@@ -58,7 +58,9 @@ function rawAcmeManifest(overrides = {}) {
  * test can supply its own `run-hook.mjs` body to observe exactly what the
  * activity-routing tier's real worker receives (prompt, AK_WORKER_CWD).
  */
-function writeProbeAdapter(tempDir, { runHookSource, hookTimeoutMs = 5000 } = {}) {
+function writeProbeAdapter(tempDir, {
+  runHookSource, hookTimeoutMs = 5000, aqeHookSource, aqeHookTimeoutMs = 5000,
+} = {}) {
   const manifest = {
     name: 'probe',
     version: '1.0.0',
@@ -85,6 +87,18 @@ function writeProbeAdapter(tempDir, { runHookSource, hookTimeoutMs = 5000 } = {}
     detection: { bin: 'probe', versionArgs: ['--version'], versionPattern: '\\d+\\.\\d+\\.\\d+' },
     driving: { surfaces: ['cli-subprocess'] },
     execution: { run: { hook: { command: ['node', 'run-hook.mjs'], files: ['run-hook.mjs'], timeoutMs: hookTimeoutMs } } },
+    ...(aqeHookSource ? {
+      aqe: {
+        provider: {
+          hook: { command: ['node', 'aqe-hook.mjs'], files: ['aqe-hook.mjs'], timeoutMs: aqeHookTimeoutMs },
+          billingMode: 'local',
+          models: ['probe-model'],
+          defaultModel: 'probe-model',
+          maxConcurrency: 1,
+          displayName: 'Probe AQE provider',
+        },
+      },
+    } : {}),
     trust: {
       changes: [{
         id: 'probe-subprocess-hooks',
@@ -98,6 +112,7 @@ function writeProbeAdapter(tempDir, { runHookSource, hookTimeoutMs = 5000 } = {}
   };
   fs.writeFileSync(path.join(tempDir, 'manifest.json'), JSON.stringify(manifest, null, 2));
   fs.writeFileSync(path.join(tempDir, 'run-hook.mjs'), runHookSource);
+  if (aqeHookSource) fs.writeFileSync(path.join(tempDir, 'aqe-hook.mjs'), aqeHookSource);
   return path.join(tempDir, 'manifest.json');
 }
 
@@ -105,9 +120,9 @@ const readManifestFromTempFile = async (source) => JSON.parse(fs.readFileSync(so
 
 // ── exports sanity ───────────────────────────────────────────────────────
 
-test('re-exports the five ADR-0031 §2 conformance tiers in graduation order', () => {
+test('re-exports the six ADR-0031 §2 conformance tiers in graduation order', () => {
   assert.deepEqual(CONFORMANCE_TIERS, [
-    'admission', 'session-driving', 'activity-routing', 'primary-eligible', 'statusline',
+    'admission', 'session-driving', 'activity-routing', 'aqe-provider', 'primary-eligible', 'statusline',
   ]);
 });
 
@@ -166,7 +181,7 @@ test('F2: a manifest that schema-validates but fails real admission (name-mismat
     manifestSource: VALID_MANIFEST_PATH,
     readManifest: readManifestFromFile,
     name: 'not-acme', // disagrees with the fixture manifest's own host.id ('acme') -> admitOne refuses 'name-mismatch'
-    tiers: ['admission', 'activity-routing', 'session-driving', 'primary-eligible', 'statusline'],
+    tiers: ['admission', 'activity-routing', 'session-driving', 'aqe-provider', 'primary-eligible', 'statusline'],
     grantsFile,
     haveFn: async () => true,
   });
@@ -175,7 +190,7 @@ test('F2: a manifest that schema-validates but fails real admission (name-mismat
   assert.equal(admissionTier.status, 'failed', JSON.stringify(admissionTier.checks, null, 2));
   assert.match(admissionTier.checks.find((c) => !c.ok)?.detail ?? '', /does not match manifest host id/);
 
-  for (const tierName of ['activity-routing', 'session-driving', 'primary-eligible', 'statusline']) {
+  for (const tierName of ['activity-routing', 'session-driving', 'aqe-provider', 'primary-eligible', 'statusline']) {
     const tier = report.tiers.find((t) => t.tier === tierName);
     assert.equal(tier.status, 'skipped', `${tierName}: ${JSON.stringify(tier.checks)}`);
     assert.match(tier.checks[0].detail, /admission tier did not pass/);
@@ -316,6 +331,79 @@ test("with no explicit override, the outer runner honors the manifest's own decl
   const [tier] = report.tiers;
   assert.equal(tier.status, 'failed', JSON.stringify(tier.checks, null, 2));
   assert.ok(elapsedMs < 2500, `expected the manifest's declared 300ms hook timeout to bound the run, took ${elapsedMs}ms`);
+});
+
+// ── aqe-provider tier: evidence first, grant second ───────────────────────
+
+test('aqe-provider is skipped when no candidate is declared, even though its activity-routing prerequisite passes', async () => {
+  const grantsFile = tempGrantsFile();
+  const report = await runTieredConformance({
+    manifestSource: VALID_MANIFEST_PATH,
+    readManifest: readManifestFromFile,
+    tiers: ['aqe-provider'],
+    grantsFile,
+    haveFn: async () => true,
+  });
+  const [tier] = report.tiers;
+  assert.equal(tier.status, 'skipped');
+  assert.match(tier.checks[0].detail, /not declared/);
+  assert.equal(grantsFor('acme', { file: grantsFile }), null);
+});
+
+test('aqe-provider genuinely passes a non-injectable public-runtime stdin/stdout probe before its explicit grant', async () => {
+  const grantsFile = tempGrantsFile();
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-conformance-aqe-provider-'));
+  const manifestSource = writeProbeAdapter(tempDir, {
+    runHookSource: 'process.stdin.resume(); process.stdin.on(\'end\', () => process.stdout.write(JSON.stringify({ summary: \'activity OK\', provider: \'probe\' })));\n',
+    aqeHookSource: 'let input = \'\'; process.stdin.setEncoding(\'utf8\'); process.stdin.on(\'data\', (chunk) => { input += chunk; }); process.stdin.on(\'end\', () => { if (input !== \'Reply with exactly: OK\' || process.env.AK_AQE_PROVIDER !== \'probe\' || process.env.AK_AQE_MODEL !== \'probe-model\' || !process.env.AK_AQE_PROJECT_CWD) { process.stderr.write(\'bad AQE provider probe contract\'); process.exit(3); return; } process.stdout.write(\'OK\'); });\n',
+  });
+
+  const report = await runTieredConformance({
+    manifestSource,
+    readManifest: readManifestFromTempFile,
+    tiers: ['aqe-provider'],
+    grantsFile,
+    haveFn: async () => true,
+  });
+  const [tier] = report.tiers;
+  assert.equal(tier.status, 'passed', JSON.stringify(tier.checks, null, 2));
+  assert.match(tier.evidence, /runAdmittedAqeProvider/);
+  assert.match(tier.evidence, /contentHash=/);
+
+  assert.deepEqual(
+    grantedCapabilitiesFor('probe', report.hash, { file: grantsFile }),
+    {},
+    'passing records evidence; it never self-grants',
+  );
+  const record = grantsFor('probe', { file: grantsFile });
+  assert.equal(record.tiers['aqe-provider'].status, 'passed');
+  grantCapability('probe', 'aqeProvider', { hash: report.hash }, { file: grantsFile });
+  assert.deepEqual(
+    grantedCapabilitiesFor('probe', report.hash, { file: grantsFile }),
+    { aqeProvider: true },
+  );
+});
+
+test('aqe-provider fails honestly and records no pass when the real hook violates the stdout protocol', async () => {
+  const grantsFile = tempGrantsFile();
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-conformance-aqe-provider-bad-output-'));
+  const manifestSource = writeProbeAdapter(tempDir, {
+    runHookSource: 'process.stdin.resume(); process.stdin.on(\'end\', () => process.stdout.write(JSON.stringify({ summary: \'activity OK\', provider: \'probe\' })));\n',
+    aqeHookSource: 'process.stdin.resume(); process.stdin.on(\'end\', () => process.stdout.write(\'WRONG\'));\n',
+  });
+
+  const report = await runTieredConformance({
+    manifestSource,
+    readManifest: readManifestFromTempFile,
+    tiers: ['aqe-provider'],
+    grantsFile,
+    haveFn: async () => true,
+  });
+  const [tier] = report.tiers;
+  assert.equal(tier.status, 'failed', JSON.stringify(tier.checks, null, 2));
+  const record = grantsFor('probe', { file: grantsFile });
+  assert.equal(record.tiers['aqe-provider'].status, 'failed');
+  assert.deepEqual(grantedCapabilitiesFor('probe', report.hash, { file: grantsFile }), {});
 });
 
 // ── session-driving tier: honest skipped/gated, never faked ────────────────
@@ -667,7 +755,7 @@ test('statusline tier is skipped/gated (never passed) when the admission prerequ
 
 // ── full sequence + persistence summary ─────────────────────────────────
 
-test('running all five tiers together against acme yields three genuinely-passed tiers (admission, activity-routing, primary-eligible) plus an honestly gated statusline, with nothing faked', async () => {
+test('running all six tiers together against acme yields three genuinely-passed tiers, an absent-candidate AQE skip, and an honestly gated statusline', async () => {
   const grantsFile = tempGrantsFile();
   const report = await runTieredConformance({
     manifestSource: VALID_MANIFEST_PATH,
@@ -675,11 +763,12 @@ test('running all five tiers together against acme yields three genuinely-passed
     grantsFile,
     haveFn: async () => true,
   });
-  assert.equal(report.tiers.length, 5);
+  assert.equal(report.tiers.length, 6);
   const byTier = Object.fromEntries(report.tiers.map((t) => [t.tier, t.status]));
   assert.equal(byTier.admission, 'passed');
   assert.equal(byTier['session-driving'], 'skipped'); // acme declares canDriveSession:false
   assert.equal(byTier['activity-routing'], 'passed');
+  assert.equal(byTier['aqe-provider'], 'skipped'); // acme has no AQE provider candidate
   // primary-eligible now genuinely passes in the same run (F-1 fix): its
   // real exercise is unconditional, not gated on a pre-existing grant — no
   // grant was seeded anywhere in this test.

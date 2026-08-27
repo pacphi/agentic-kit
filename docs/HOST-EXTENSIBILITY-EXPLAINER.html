@@ -471,7 +471,7 @@ timeout and a minimal environment. Nothing from an adapter runs inside the kit.<
 <div class="tablewrap"><table>
   <tr><th>Question</th><th>Built-in host</th><th>External adapter</th></tr>
   <tr><td>Can it lead a session (be primary)?</td><td><span class="yes">yes*</span></td><td><span class="no">not by self-declaring — earned only</span></td></tr>
-  <tr><td>Can it claim a billing / quota provider?</td><td><span class="yes">yes*</span></td><td><span class="no">not by self-declaring</span></td></tr>
+  <tr><td>Can it claim a billing / quota provider?</td><td><span class="yes">yes*</span></td><td><span class="no">candidate data only; tier + grant required</span></td></tr>
   <tr><td>Can it claim a custom status line?</td><td><span class="yes">yes*</span></td><td><span class="no">not by self-declaring</span></td></tr>
   <tr><td>Does any of its code run inside the kit?</td><td class="no">it <em>is</em> the kit</td><td><span class="no">no — subprocess only</span></td></tr>
   <tr><td>Can it install software silently?</td><td class="no">only disclosed steps</td><td><span class="no">no — may not even name a package</span></td></tr>
@@ -960,9 +960,9 @@ that lights up in the kit once it ships.</p>
     <rect x="510" y="300" width="330" height="104" rx="11" fill="none" stroke-width="1.6" stroke="currentColor"/>
     <text x="675" y="326" text-anchor="middle" font-weight="700">agentic-qe — quality substrate</text>
     <text x="675" y="345" text-anchor="middle" font-size="10.5" class="lg">test gen · coverage · quality court</text>
-    <text x="675" y="362" text-anchor="middle" font-size="10.5" class="lg">the provider list is a closed upstream</text>
-    <text x="675" y="377" text-anchor="middle" font-size="10.5" class="lg">enum — a host can't self-add as one</text>
-    <text x="675" y="394" text-anchor="middle" font-size="10" style="fill:var(--future)">ask: a provider-plugin API</text>
+    <text x="675" y="362" text-anchor="middle" font-size="10.5" class="lg">3.13.12 ships externalProviders</text>
+    <text x="675" y="377" text-anchor="middle" font-size="10.5" class="lg">candidate → real tier → explicit grant</text>
+    <text x="675" y="394" text-anchor="middle" font-size="10" style="fill:var(--ok)">#628 satisfied · integration live</text>
 
     <!-- request down (gold dashed) : ruflo -->
     <path d="M320 186 C 250 224, 210 256, 195 296" fill="none" stroke-width="1.5" stroke-dasharray="6 4" style="stroke:var(--future)" marker-end="url(#s1f)"/>
@@ -993,8 +993,8 @@ the upstream release lands. The dashed gold arrows are the ask; the green arrows
       <td><strong style="color:var(--ok)">agentic-kit</strong></td>
       <td>The kit's to fix — a normal kit PR. This is the on-ramp work, no one to wait on.</td></tr>
   <tr><td>Host wants to be a recognized <em>AQE provider type</em></td>
-      <td><strong style="color:var(--gov)">agentic-qe</strong></td>
-      <td>Upstream — the provider list is a closed enum. Request a provider-plugin API. <em>Interim:</em> QE works through the model provider underneath the host, so quality isn't blocked, only the host's own AQE identity is.</td></tr>
+      <td><strong style="color:var(--ok)">agentic-kit + Agentic-QE 3.13.12+</strong></td>
+      <td>#628 supplied <code>externalProviders</code>. Declare <code>aqe.provider</code>, pass the real <code>aqe-provider</code> tier, then receive an explicit hash-pinned grant. Billing remains declared/unverified; vendor credit requires independent evidence.</td></tr>
   <tr><td>Host wants to be a native ruflo <em>backend</em> (drive the loop, an ENABLE_* target)</td>
       <td><strong style="color:var(--gov)">ruflo</strong></td>
       <td>Upstream — backends are defined in ruflo. Request a documented backend-registration path. <em>Interim:</em> the host runs through the kit's own supervised execution, just not as a ruflo-native backend.</td></tr>
@@ -1042,8 +1042,9 @@ useful part — <em>who owns each gap</em>. It's the whole three-layer story in 
       supervised host.</span></li>
       <li><strong>agentic-qe tools/skills aren't projected in</strong> (unlike Claude &amp; Codex) —
       <span class="quiet">ak's choice; ak could run aqe's OpenCode installer and doesn't yet.</span></li>
-      <li><strong>It isn't an AQE provider type</strong> (analysis can't run <em>on</em> it) —
-      <span class="quiet">upstream; agentic-qe's provider list is a closed enum.</span></li>
+      <li><strong>Its built-in descriptor has no AQE provider identity</strong> —
+      <span class="quiet">a separate adapter may earn its own id through Agentic-QE 3.13.12+;
+      host name alone proves nothing.</span></li>
       <li><strong>No command status-line footer, no quota surface, no cross-host bridge</strong> —
       <span class="quiet">by design.</span></li>
     </ul>
@@ -1053,12 +1054,10 @@ useful part — <em>who owns each gap</em>. It's the whole three-layer story in 
 <div class="panel">
   <div class="ptitle">The pattern, in one host</div>
   <p style="margin-bottom:0">OpenCode is a <strong>first-class ruflo + brain host</strong>, a
-  <strong>supervised (never-leading) execution host</strong>, and largely <strong>outside the
-  agentic-qe layer</strong> — and that last gap splits cleanly the way
-  <a href="#upstream">section&nbsp;8</a> describes: "no aqe tools projected in" is <em>ak's</em> to
-  close (a normal kit change), while "can't be an AQE provider type" is an <em>upstream</em> request
-  to agentic-qe. That's the entire model — host layer, lead vs. supervised, and the ak-vs-upstream
-  split — visible in a single assistant available today.</p>
+  <strong>supervised (never-leading) execution host</strong>, and its built-in descriptor has no AQE
+  provider identity. A separately admitted adapter can now earn its own external identity through
+  Agentic-QE 3.13.12's supported registry. That does not infer provider, billing, or vendor from the
+  OpenCode host name.</p>
 </div>
 
 <hr class="soft">
@@ -1067,9 +1066,10 @@ point and its safety model are ADR-0029 (which supersedes ADR-0016's original "c
 stance, narrowly — nothing under a manifest is ever loaded into the kit's process). The graduation
 ladder — experimental external adapter, earned capabilities via conformance tiers, promotion to
 built-in, and the upstream capability-request path to ruflo and agentic-qe — is ADR-0031, accepted as
-a governance decision with its machinery staged and its own implementation-status table. Upstream facts (agentic-qe's closed provider
-enum; ruflo's ENABLE_* backend model) are grounded in a source-cited research sweep of
-<code>agentic-qe@3.13.10</code> and <code>ruvnet/ruflo@45e65b5</code>. Hermes and Gemini CLI are named
+a governance decision with its machinery staged and its own implementation-status table. The AQE
+fact was historical for <code>agentic-qe@3.13.10</code>; 3.13.12 satisfied #628 on 2026-08-26.
+Ruflo's <code>ENABLE_*</code> backend model remains grounded against
+<code>ruvnet/ruflo@45e65b5</code>. Hermes and Gemini CLI are named
 here as illustrative candidates for the external door, not as hosts the kit supports today.</p>
 
 </main>

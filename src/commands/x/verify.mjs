@@ -12,7 +12,7 @@ import { projectAqeDir } from '../../lib/paths.mjs';
 import { findMemoryEntry } from '../../lib/project-memory.mjs';
 import { projectMemoryEnv } from '../../lib/ruflo-memory.mjs';
 import { loadKitConfig } from '../../lib/config.mjs';
-import { HOSTS, collectIntegrationFacts, aqeRouterFile } from '../../lib/providers.mjs';
+import { HOSTS, collectIntegrationFacts, aqeRouterFile, aqeExternalProviderState, EXTERNAL_PROVIDERS_MIN_AQE } from '../../lib/providers.mjs';
 import { readJson } from '../../lib/settings.mjs';
 import { runHarvest } from '../../lib/harvest.mjs';
 import { runLifecycle } from '../../lib/adapters/lifecycle.mjs';
@@ -174,6 +174,33 @@ async function verifyProviders() {
     const want = chain.map((e) => e.provider).join(' → ');
     if (disk?._managedBy === 'agentic-kit' && diskOrder === want) ok(`aqe fallback chain on disk matches kit.json (${want})`);
     else { fail(`aqe fallback chain drift — disk="${diskOrder}" want="${want}" (run: ak sync)`); good = false; }
+  }
+  const disk = readJson(aqeRouterFile(process.cwd()), {}) ?? {};
+  const external = aqeExternalProviderState(disk, { projectRoot: process.cwd() });
+  if (external.desired.length || external.stale.length) {
+    if (!external.supported) {
+      fail(`external AQE providers require agentic-qe >=${EXTERNAL_PROVIDERS_MIN_AQE}`);
+      good = false;
+    } else if (!external.ok) {
+      const detail = [
+        external.missing.length ? `missing=${external.missing.join(',')}` : '',
+        external.drifted.length ? `drifted=${external.drifted.join(',')}` : '',
+        external.stale.length ? `stale=${external.stale.join(',')}` : '',
+      ].filter(Boolean).join(' ');
+      fail(`external AQE provider projection is not exact (${detail}; run: ak sync)`);
+      good = false;
+    } else {
+      ok(`external AQE declarations and ownership receipts match (${external.desired.join(', ')})`);
+    }
+    if (external.desired.includes(cfg.providers?.aqeProvider)) {
+      if (disk.defaultProvider === cfg.providers.aqeProvider) {
+        ok(`external AQE default is project-local (${cfg.providers.aqeProvider})`);
+      } else {
+        fail(`external AQE default drift — disk=${disk.defaultProvider ?? '(unset)'} want=${cfg.providers.aqeProvider}`);
+        good = false;
+      }
+    }
+    warn('external provider verification proves admission + exact AQE projection, not a served model response');
   }
   return good;
 }

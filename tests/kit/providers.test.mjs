@@ -201,7 +201,7 @@ test('managedEnv leaves AQE_LLM_PROVIDER unset when no aqe provider is pinned', 
 });
 
 test('managedEnv writes AQE_LLM_PROVIDER for any supported provider (not just claude-code)', () => {
-  for (const provider of ['claude-code', 'openai', 'gemini', 'ollama']) {
+  for (const provider of ['claude-code', 'codex', 'openai', 'gemini', 'ollama']) {
     const cfg = defaultCfg();
     cfg.providers.aqeProvider = provider;
     assert.equal(managedEnv(cfg).AQE_LLM_PROVIDER, provider, `${provider} wired`);
@@ -388,7 +388,7 @@ test('AQE_PROVIDER_TYPES mirrors aqe ALL_PROVIDER_TYPES (incl. local onnx)', () 
   // Guards against drift from aqe's dist/shared/llm/router/types.js. Order-
   // independent set comparison; the point is coverage, not sequence.
   const expected = [
-    'claude', 'claude-code', 'openai', 'ollama', 'openrouter',
+    'claude', 'claude-code', 'codex', 'openai', 'ollama', 'openrouter',
     'gemini', 'azure-openai', 'bedrock', 'cognitum', 'onnx',
   ];
   assert.deepEqual([...AQE_PROVIDER_TYPES].sort(), [...expected].sort());

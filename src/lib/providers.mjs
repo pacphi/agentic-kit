@@ -25,6 +25,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { createHash } from 'node:crypto';
 import { run, have } from './exec.mjs';
 import { readJson, writeJsonWithBackup } from './settings.mjs';
 import { installedVersion, cmpVersions } from './versions.mjs';
@@ -38,6 +39,7 @@ import {
 import { CURRENT_INTEGRATIONS_VERSION, validateEndpoint } from './adapters/config.mjs';
 import { opencodeMcpStatus } from './opencode.mjs';
 import { codexMcpStatus, rufloCodexMcpStatus } from './mcp.mjs';
+import { admittedAqeProviders, projectedAqeExternalProviders } from './adapters/aqe-provider.mjs';
 import {
   DEFAULT_PRIMARY_HOST,
   ROUTING_SCHEMA_VERSION,
@@ -51,7 +53,7 @@ export const HOSTS = HOST_REGISTRY
   .map((host) => ({
     id: host.id, bin: host.install.bin, pkg: host.install.npmPackage,
     enableEnv: host.legacy?.enableEnv ?? null,
-    aqe: host.id === 'claude' ? host.legacy?.aqeProvider : null,
+    aqe: host.legacy?.aqeProvider ?? (host.id === 'codex' ? 'codex' : null),
   }));
 
 /** API-key LLM providers ruflo's router understands (`ruflo providers`). */
@@ -69,22 +71,40 @@ export const API_PROVIDERS = [
 
 /** Valid `AQE_LLM_PROVIDER` values (grounded: aqe ALL_PROVIDER_TYPES in
  *  dist/shared/llm/router/types.js). aqe force-selects any of these for its QE
- *  analysis, independent of ruflo's host. `claude-code` = Claude subscription;
- *  `ollama`/`onnx` = local ($0); the rest metered. Keep in sync with aqe's list. */
+ *  analysis, independent of ruflo's host. `claude-code`/`codex` = host
+ *  subscriptions; `ollama`/`onnx` = local ($0); the rest metered. Keep in sync
+ *  with aqe's list. */
 export const AQE_PROVIDER_TYPES = [
-  'claude-code', 'claude', 'openai', 'gemini', 'openrouter',
+  'claude-code', 'codex', 'claude', 'openai', 'gemini', 'openrouter',
   'azure-openai', 'bedrock', 'cognitum', 'ollama', 'onnx',
 ];
 
-// Chain-rung gate: everything above PLUS `codex`. Grounded in installed aqe
+// `codex` is a first-class direct selection and chain rung. Grounded in aqe
 // 3.13.12 (dist/shared/llm/router/config-store.js): BUILTIN_CONSTRUCTIBLE_
 // PROVIDERS includes codex, PROVIDER_ENV_KEYS.codex = [] (ChatGPT-subscription
 // via the codex binary — no env key), and provider REACHABILITY requires a
 // fallbackChain entry: aqe's FALLBACK_PRIORITY contains neither codex nor
 // claude-code, so an enabled codex provider is inert unless chained (#108
-// phase 3). AQE_PROVIDER_TYPES itself stays narrow — it also gates
-// AQE_LLM_PROVIDER, whose accepted values are aqe's separate ADR-123 list.
-export const AQE_CHAIN_PROVIDER_TYPES = [...AQE_PROVIDER_TYPES, 'codex'];
+// phase 3). AQE 3.13.12 also admits external ids registered from llm-config;
+// those are exposed lazily by aqeSelectableProviderTypes().
+export const AQE_CHAIN_PROVIDER_TYPES = [...AQE_PROVIDER_TYPES];
+
+/** Admitted external provider declarations currently projected by the runtime.
+ * Re-read on each call so providers registered after this module loaded become
+ * immediately selectable. */
+export function aqeExternalProviders({ projectRoot = path.resolve(process.cwd()) } = {}) {
+  return projectedAqeExternalProviders({ projectRoot }) ?? {};
+}
+
+/** Provider ids accepted by the interactive/non-interactive CLI right now. */
+export function aqeSelectableProviderTypes() {
+  return [...new Set([...AQE_PROVIDER_TYPES, ...Object.keys(aqeExternalProviders())])];
+}
+
+/** Provider ids accepted in fallback chains right now. */
+export function aqeSelectableChainProviderTypes() {
+  return aqeSelectableProviderTypes();
+}
 
 /** Credential descriptor per AQE_PROVIDER_TYPES member — the missing half of the
  *  chain validation: a rung whose provider has no usable credential is inert, and
@@ -105,11 +125,8 @@ const registryCredential = (id) => {
 };
 export const AQE_PROVIDER_CREDENTIALS = {
   'claude-code': { host: 'claude', billing: 'subscription' },
-  // `codex` is deliberately absent from AQE_PROVIDER_TYPES (that list also gates
-  // AQE_LLM_PROVIDER validation, so widening it is a separate behavior change) —
-  // but routing's AQE_CONSTRUCTIBLE_PROVIDERS includes it and
-  // policyToAgentOverrides emits `provider: 'codex'`, so it needs a descriptor or
-  // those projected entries would be unverifiable.
+  // AQE 3.13.12 promotes `codex` to a built-in, directly selectable provider.
+  // It is authenticated by the Codex host login rather than an API-key env var.
   codex: { host: 'codex', billing: 'subscription' },
   claude: { keyEnv: ['ANTHROPIC_API_KEY'], billing: 'metered' },
   openai: { keyEnv: ['OPENAI_API_KEY'], billing: 'metered' },
@@ -128,7 +145,19 @@ export const AQE_PROVIDER_CREDENTIALS = {
  *  except for the injected env. */
 export function aqeProviderCredential(provider, { env = process.env, hostAuth = hostAuthState } = {}) {
   const d = AQE_PROVIDER_CREDENTIALS[provider];
-  if (!d) return { known: false, present: false, billing: 'unknown', source: null, missing: [] };
+  if (!d) {
+    const declaration = aqeExternalProviders()[provider];
+    if (!declaration) return { known: false, present: false, billing: 'unknown', source: null, missing: [] };
+    // Admission proves the executable declaration was trusted and is current;
+    // it does not prove the provider's downstream login/account is usable.
+    return {
+      known: false,
+      present: false,
+      billing: declaration.billingMode ?? 'metered-api',
+      source: 'admitted external adapter (credential not introspectable)',
+      missing: [],
+    };
+  }
   if (d.host) {
     const auth = hostAuth(d.host, { env });
     return { known: true, present: auth.mode !== 'none', billing: d.billing, source: auth.source, missing: auth.mode === 'none' ? [`${d.host} login`] : [] };
@@ -166,7 +195,7 @@ export function credentialGaps(chain = [], { env = process.env, hostAuth } = {})
 /** Credential state for every aqe provider type — what `ak x host status`
  *  renders, so a credentialed provider (e.g. openrouter) is never invisible. */
 export function detectAqeProviders({ env = process.env } = {}) {
-  return Object.fromEntries(AQE_PROVIDER_TYPES.map((p) => [p, aqeProviderCredential(p, { env })]));
+  return Object.fromEntries(aqeSelectableProviderTypes().map((p) => [p, aqeProviderCredential(p, { env })]));
 }
 
 /** Provenance for an aqeFallback entry. A legacy entry written before stamping
@@ -391,6 +420,203 @@ export function aqeSupportsAgentOverrides() {
   return !!v && cmpVersions(v, AGENT_OVERRIDES_MIN_AQE) >= 0;
 }
 
+// agentic-qe #628 shipped external CLI providers in 3.13.12. Earlier versions
+// ignore/reject this surface, so never write a declaration that cannot run.
+export const EXTERNAL_PROVIDERS_MIN_AQE = '3.13.12';
+export function aqeSupportsExternalProviders(version = installedVersion('agentic-qe')) {
+  return !!version && cmpVersions(version, EXTERNAL_PROVIDERS_MIN_AQE) >= 0;
+}
+
+const AQE_OWNERSHIP_KEY = '_agenticKit';
+
+function stableValue(value) {
+  if (Array.isArray(value)) return value.map(stableValue);
+  if (!value || typeof value !== 'object') return value;
+  return Object.fromEntries(Object.keys(value).sort().map((key) => [key, stableValue(value[key])]));
+}
+
+function declarationHash(value) {
+  return createHash('sha256').update(JSON.stringify(stableValue(value))).digest('hex');
+}
+
+function plainRecord(value) {
+  return value && typeof value === 'object' && !Array.isArray(value) ? value : null;
+}
+
+function exactlyOwnedDefault(config, receiptKey) {
+  const provider = config?.defaultProvider;
+  const receipt = plainRecord(config?.[AQE_OWNERSHIP_KEY]?.[receiptKey]);
+  return typeof provider === 'string' && receipt?.provider === provider
+    && receipt.writtenHash === declarationHash(provider)
+    ? provider
+    : null;
+}
+
+function setDefaultOwnership(config, receiptKey, provider) {
+  const ownership = { ...(plainRecord(config[AQE_OWNERSHIP_KEY]) ?? {}) };
+  ownership[receiptKey] = { provider, writtenHash: declarationHash(provider) };
+  config[AQE_OWNERSHIP_KEY] = ownership;
+}
+
+function clearDefaultOwnership(config, receiptKey) {
+  const ownership = { ...(plainRecord(config[AQE_OWNERSHIP_KEY]) ?? {}) };
+  delete ownership[receiptKey];
+  if (Object.keys(ownership).length) config[AQE_OWNERSHIP_KEY] = ownership;
+  else delete config[AQE_OWNERSHIP_KEY];
+}
+
+const exactlyOwnedExternalDefault = (config) => exactlyOwnedDefault(config, 'externalDefaultProvider');
+const exactlyOwnedFallbackDefault = (config) => exactlyOwnedDefault(config, 'fallbackDefaultProvider');
+const setExternalDefaultOwnership = (config, provider) =>
+  setDefaultOwnership(config, 'externalDefaultProvider', provider);
+const setFallbackDefaultOwnership = (config, provider) =>
+  setDefaultOwnership(config, 'fallbackDefaultProvider', provider);
+const clearExternalDefaultOwnership = (config) =>
+  clearDefaultOwnership(config, 'externalDefaultProvider');
+const clearFallbackDefaultOwnership = (config) =>
+  clearDefaultOwnership(config, 'fallbackDefaultProvider');
+
+function admittedProviderRecord(id) {
+  const records = admittedAqeProviders();
+  return (Array.isArray(records) ? records : Object.values(records ?? {}))
+    .find((entry) => (entry.id ?? entry.providerId ?? entry.type) === id) ?? null;
+}
+
+/** Compare the live admitted declarations with the exact values ak previously
+ * wrote. Foreign entries and user-edited owned entries are never overwritten or
+ * removed. Returned `active` ids are safe to reference from defaults/chains. */
+function reconcileExternalProviders(existing, desired = aqeExternalProviders()) {
+  const current = { ...(existing.externalProviders ?? {}) };
+  const currentProviders = { ...(existing.providers ?? {}) };
+  // Ownership metadata is advisory proof, never trusted input. A null/array/
+  // primitive receipt proves nothing and must be dropped rather than crashing
+  // sync or authorizing deletion of user values.
+  const rawReceipts = plainRecord(existing[AQE_OWNERSHIP_KEY]?.externalProviders) ?? {};
+  const priorReceipts = Object.fromEntries(Object.entries(rawReceipts)
+    .filter(([, receipt]) => plainRecord(receipt)));
+  const receipts = { ...priorReceipts };
+  const active = new Set();
+  const conflicts = [];
+  const unavailable = new Set();
+  const retired = [];
+  const pruned = [];
+  const added = [];
+  const activationsAdded = [];
+  const activationsPruned = [];
+
+  for (const [id, declaration] of Object.entries(desired)) {
+    const prior = priorReceipts[id];
+    const currentDeclaration = current[id];
+    const currentHash = currentDeclaration === undefined ? null : declarationHash(currentDeclaration);
+    if (currentDeclaration !== undefined && (!prior || currentHash !== prior.writtenHash)) {
+      conflicts.push(id);
+      unavailable.add(id);
+      // A changed declaration becomes user-owned immediately. Its activation
+      // has independent ownership, though: retain only an exact activation
+      // receipt so a later revoke can remove the minimal record ak created
+      // without ever deleting the edited declaration.
+      const currentActivation = currentProviders[id];
+      if (prior?.providerWrittenHash && currentActivation !== undefined
+        && declarationHash(currentActivation) === prior.providerWrittenHash) {
+        receipts[id] = { providerWrittenHash: prior.providerWrittenHash };
+      } else {
+        delete receipts[id];
+      }
+      continue;
+    }
+    current[id] = declaration;
+    const record = admittedProviderRecord(id);
+    const nextReceipt = {
+      hostId: record?.hostId ?? record?.host ?? record?.manifestId ?? null,
+      contentHash: record?.contentHash ?? record?.integrity ?? null,
+      writtenHash: declarationHash(declaration),
+    };
+    if (currentDeclaration === undefined) added.push(id);
+
+    // AQE 3.13.12's MCP router asks whether any providers are enabled BEFORE
+    // it loads externalProviders (the load is what registers them). A minimal
+    // providers[id].enabled record breaks that bootstrap cycle. Own only a
+    // record we created from absence; a user-owned record is preserved and is
+    // usable only when the user already enabled it explicitly.
+    const currentActivation = currentProviders[id];
+    const priorActivationHash = prior?.providerWrittenHash;
+    const activationHash = currentActivation === undefined ? null : declarationHash(currentActivation);
+    if (currentActivation === undefined) {
+      currentProviders[id] = { enabled: true };
+      nextReceipt.providerWrittenHash = declarationHash(currentProviders[id]);
+      activationsAdded.push(id);
+      active.add(id);
+    } else if (currentActivation?.enabled === true) {
+      if (priorActivationHash && activationHash === priorActivationHash) {
+        nextReceipt.providerWrittenHash = priorActivationHash;
+      }
+      active.add(id);
+    } else {
+      conflicts.push(`${id} (providers.${id}.enabled is not true)`);
+      unavailable.add(id);
+    }
+    receipts[id] = nextReceipt;
+  }
+
+  for (const [id, receipt] of Object.entries(priorReceipts)) {
+    if (id in desired) continue;
+    retired.push(id);
+    const currentDeclaration = current[id];
+    if (currentDeclaration !== undefined && declarationHash(currentDeclaration) === receipt.writtenHash) {
+      delete current[id];
+      pruned.push(id);
+    }
+    const currentActivation = currentProviders[id];
+    if (receipt.providerWrittenHash && currentActivation !== undefined
+      && declarationHash(currentActivation) === receipt.providerWrittenHash) {
+      delete currentProviders[id];
+      activationsPruned.push(id);
+    }
+    // If it changed, relinquish ownership and preserve it.
+    delete receipts[id];
+  }
+
+  return {
+    externalProviders: current,
+    providers: currentProviders,
+    receipts,
+    active,
+    conflicts,
+    unavailable: [...unavailable],
+    retired,
+    pruned,
+    added,
+    activationsAdded,
+    activationsPruned,
+  };
+}
+
+/** Honest, non-mutating projection state for status/verify. */
+export function aqeExternalProviderState(disk = {}, { projectRoot = path.resolve(process.cwd()) } = {}) {
+  const desired = aqeExternalProviders({ projectRoot });
+  const receipts = disk[AQE_OWNERSHIP_KEY]?.externalProviders ?? {};
+  const missing = [];
+  const drifted = [];
+  const stale = [];
+  for (const [id, declaration] of Object.entries(desired)) {
+    if (!(id in (disk.externalProviders ?? {}))) missing.push(id);
+    else if (declarationHash(disk.externalProviders[id]) !== declarationHash(declaration)
+      || receipts[id]?.writtenHash !== declarationHash(declaration)) drifted.push(id);
+    const activation = disk.providers?.[id];
+    if (activation === undefined) missing.push(`${id} activation`);
+    else if (activation.enabled !== true
+      || (receipts[id]?.providerWrittenHash
+        && declarationHash(activation) !== receipts[id].providerWrittenHash)) {
+      drifted.push(`${id} activation`);
+    }
+  }
+  for (const id of Object.keys(receipts)) if (!(id in desired)) stale.push(id);
+  return {
+    supported: aqeSupportsExternalProviders(), desired: Object.keys(desired), missing, drifted, stale,
+    ok: aqeSupportsExternalProviders() && missing.length === 0 && drifted.length === 0 && stale.length === 0,
+  };
+}
+
 export function aqeRouterFile(cwd = process.cwd()) {
   return path.join(paths.projectAqeDir(cwd), 'llm-config.json');
 }
@@ -423,6 +649,7 @@ function buildChain(entries) {
 export function applyAqeRouter(cfg, cwd = process.cwd()) {
   const chain = cfg.providers?.aqeFallback ?? [];
   const policy = cfg.routing?.routes ?? {};
+  const selectedProvider = cfg.providers?.aqeProvider ?? null;
   const hasChain = chain.length > 0;
   const hasPolicy = Object.keys(policy).length > 0;
   // Same repo-root resolution as settingsTarget — the three scope gates must
@@ -431,32 +658,154 @@ export function applyAqeRouter(cfg, cwd = process.cwd()) {
   if (!root) return { ok: true, changed: false, detail: 'not a project — aqe router unmanaged' };
   const file = aqeRouterFile(root);
   const existing = readJson(file, {}) ?? {};
+  const ownedExternalDefault = exactlyOwnedExternalDefault(existing);
+  const ownedFallbackDefault = exactlyOwnedFallbackDefault(existing);
+  const desiredExternal = aqeExternalProviders({ projectRoot: root });
+  const hasExternal = Object.keys(desiredExternal).length > 0;
+  const hasOwnedExternal = Object.keys(existing[AQE_OWNERSHIP_KEY]?.externalProviders ?? {}).length > 0;
+  const existingOwnership = plainRecord(existing[AQE_OWNERSHIP_KEY]) ?? {};
+  const hasExternalDefaultReceipt = Object.hasOwn(existingOwnership, 'externalDefaultProvider');
+  const hasFallbackDefaultReceipt = Object.hasOwn(existingOwnership, 'fallbackDefaultProvider');
+  const hasManagedFallback = existing.fallbackChain?.id === AQE_MANAGED_TAG;
   const priorOverrides = existing.agentOverrides ?? {};
-  const projected = configuredPolicyToAgentOverrides(policy);
+  let projected = configuredPolicyToAgentOverrides(policy);
   const managedOverrideKeys = new Set(Object.keys(AGENT_ACTIVITY_MAP));
-  const staleOverrides = Object.keys(priorOverrides)
+  let staleOverrides = Object.keys(priorOverrides)
     .filter((agent) => managedOverrideKeys.has(agent) && !(agent in projected));
-  if (!hasChain && !hasPolicy && staleOverrides.length === 0) {
+  if (!hasChain && !hasPolicy && !hasExternal && !hasOwnedExternal && !hasManagedFallback
+    && !hasExternalDefaultReceipt && !hasFallbackDefaultReceipt && staleOverrides.length === 0) {
     return { ok: true, changed: false, detail: 'no aqe router config to apply' };
   }
   const next = { ...existing };
-  next._managedBy = AQE_MANAGED_TAG;
+  // Exact receipts never regain authority. If a user changes the default away
+  // from the value ak wrote, relinquish ownership immediately; changing it
+  // back later is still a user write and cannot resurrect this receipt.
+  if (hasExternalDefaultReceipt && !ownedExternalDefault) {
+    clearExternalDefaultOwnership(next);
+  }
+  // A fallback-derived default is owned only while its exact receipt matches.
+  // Membership in the old chain is not provenance: a user may deliberately
+  // replace the default with another rung before retiring the chain.
+  if (hasFallbackDefaultReceipt && (!ownedFallbackDefault || !hasManagedFallback)) {
+    clearFallbackDefaultOwnership(next);
+  }
   const details = [];
   let wrote = false;
+  let externalError = null;
+  let externalActive = new Set();
+
+  const externalSupported = aqeSupportsExternalProviders();
+  if (hasExternal || hasOwnedExternal) {
+    // A downgrade must remove only unchanged entries we previously wrote,
+    // plus their dangling references. Keeping declarations that this AQE
+    // version cannot understand would strand every router startup on drift.
+    const reconciled = reconcileExternalProviders(
+      existing,
+      externalSupported ? desiredExternal : {},
+    );
+    externalActive = reconciled.active;
+    if (Object.keys(reconciled.externalProviders).length) next.externalProviders = reconciled.externalProviders;
+    else delete next.externalProviders;
+    if (Object.keys(reconciled.providers).length) next.providers = reconciled.providers;
+    else delete next.providers;
+    const ownership = { ...(plainRecord(next[AQE_OWNERSHIP_KEY]) ?? {}) };
+    if (!ownedExternalDefault) delete ownership.externalDefaultProvider;
+    if (Object.keys(reconciled.receipts).length) ownership.externalProviders = reconciled.receipts;
+    else delete ownership.externalProviders;
+    if (Object.keys(ownership).length) next[AQE_OWNERSHIP_KEY] = ownership;
+    else delete next[AQE_OWNERSHIP_KEY];
+    if (reconciled.conflicts.length) {
+      externalError = `refused conflicting foreign/user-edited external provider ids: ${reconciled.conflicts.join(', ')}`;
+    }
+    details.push(`externalProviders: ${externalActive.size} managed`
+      + (reconciled.added.length ? ` (${reconciled.added.length} added)` : '')
+      + (reconciled.pruned.length ? ` (${reconciled.pruned.length} stale owned pruned)` : '')
+      + (reconciled.activationsAdded.length ? ` (${reconciled.activationsAdded.length} MCP activation added)` : '')
+      + (reconciled.activationsPruned.length ? ` (${reconciled.activationsPruned.length} stale activation pruned)` : '')
+      + (reconciled.conflicts.length ? ` (⚠ conflicts preserved: ${reconciled.conflicts.join(', ')})` : ''));
+    if (hasExternal && !externalSupported) {
+      externalError = `external providers need agentic-qe >=${EXTERNAL_PROVIDERS_MIN_AQE}`;
+      details.push(`externalProviders: disabled (${externalError})`);
+    }
+    const unavailableExternal = new Set([...reconciled.unavailable, ...reconciled.retired]);
+    if (hasManagedFallback && next.fallbackChain?.entries) {
+      next.fallbackChain = {
+        ...next.fallbackChain,
+        entries: next.fallbackChain.entries.filter((entry) => !unavailableExternal.has(entry.provider)),
+      };
+      if (next.fallbackChain.entries.length === 0) delete next.fallbackChain;
+    }
+    if (unavailableExternal.has(next.defaultProvider)
+      && (ownedFallbackDefault === next.defaultProvider || ownedExternalDefault === next.defaultProvider)) {
+      delete next.defaultProvider;
+      clearExternalDefaultOwnership(next);
+      clearFallbackDefaultOwnership(next);
+    }
+    wrote = reconciled.added.length > 0 || reconciled.pruned.length > 0
+      || reconciled.activationsAdded.length > 0 || reconciled.activationsPruned.length > 0
+      || Object.keys(desiredExternal).some((id) => existing.externalProviders?.[id]
+        && declarationHash(existing.externalProviders[id]) !== declarationHash(desiredExternal[id]));
+  }
+  projected = Object.fromEntries(Object.entries(projected).filter(([, entry]) =>
+    !(entry.provider in desiredExternal) || externalActive.has(entry.provider)));
+  // Admission/version/conflict filtering can make a previously projected
+  // external route inactive after the first stale calculation. Recompute from
+  // the safe projection so ak-owned overrides never retain an unusable id.
+  staleOverrides = Object.keys(priorOverrides)
+    .filter((agent) => managedOverrideKeys.has(agent) && !(agent in projected));
+
+  // An empty canonical fallback intent retires the tagged chain ak previously
+  // wrote. Its derived default belongs to the same projection and must not
+  // survive independently; provider declarations/activations remain available
+  // for explicit selection, routes, or a future chain.
+  if (!hasChain && hasManagedFallback) {
+    delete next.fallbackChain;
+    if (ownedFallbackDefault) {
+      delete next.defaultProvider;
+      if (ownedExternalDefault) clearExternalDefaultOwnership(next);
+    }
+    clearFallbackDefaultOwnership(next);
+    details.push('chain: managed fallback retired');
+    wrote = true;
+  }
+
+  // `aqeProvider: null` is an explicit deselection. Retire only an exact
+  // external default that ak previously wrote, while leaving the admitted
+  // declaration and MCP activation intact for routes or future selection.
+  // A configured fallback chain owns default selection independently and is
+  // handled below; it must not be erased by primary-provider deselection.
+  if (!hasChain && selectedProvider === null && ownedExternalDefault) {
+    delete next.defaultProvider;
+    clearExternalDefaultOwnership(next);
+    details.push(`defaultProvider: ${ownedExternalDefault} retired`);
+    wrote = true;
+  }
 
   let chainError = null;
   if (hasChain) {
-    const valid = chain.filter((e) => e?.provider && AQE_CHAIN_PROVIDER_TYPES.includes(e.provider));
+    const selectable = new Set(aqeSelectableChainProviderTypes());
+    const valid = chain.filter((e) => e?.provider && selectable.has(e.provider)
+      && (!(e.provider in desiredExternal) || externalActive.has(e.provider)));
     if (valid.length === 0) {
       // A bad chain must NOT block the independent agentOverrides projection — the
       // Activity routing is validated separately. Record it and carry on.
       chainError = 'no valid providers in fallback chain';
       details.push(`chain: ⚠ ${chainError}`);
     } else {
-      next.defaultProvider = cfg.providers.aqeProvider ?? valid[0].provider;
-      next.providers = { ...(existing.providers ?? {}) };
-      for (const e of valid) next.providers[e.provider] = { ...(existing.providers?.[e.provider] ?? {}), enabled: true };
+      const requestedDefault = cfg.providers.aqeProvider;
+      const requestedUnavailable = requestedDefault in desiredExternal && !externalActive.has(requestedDefault);
+      next.defaultProvider = requestedUnavailable ? valid[0].provider : requestedDefault ?? valid[0].provider;
+      setFallbackDefaultOwnership(next, next.defaultProvider);
+      next.providers = { ...(next.providers ?? existing.providers ?? {}) };
+      for (const e of valid) {
+        if (!(e.provider in desiredExternal)) next.providers[e.provider] = { ...(existing.providers?.[e.provider] ?? {}), enabled: true };
+      }
       next.fallbackChain = buildChain(valid);
+      if (next.defaultProvider in desiredExternal && externalActive.has(next.defaultProvider)) {
+        setExternalDefaultOwnership(next, next.defaultProvider);
+      } else if (ownedExternalDefault) {
+        clearExternalDefaultOwnership(next);
+      }
       const emptyModels = valid.filter((e) => !e.models || e.models.length === 0).map((e) => e.provider);
       // Warn, never refuse: the user may export the key later, and silently
       // dropping a rung is worse than writing one that is currently inert (#54).
@@ -468,39 +817,69 @@ export function applyAqeRouter(cfg, cwd = process.cwd()) {
     }
   }
 
-  if ((hasPolicy || staleOverrides.length) && aqeSupportsAgentOverrides()) {
+  // External provider selection is project-local by contract: AQE discovers it
+  // from this file only. managedEnv deliberately never exports an external id
+  // into project or user host settings.
+  if (selectedProvider && selectedProvider in desiredExternal) {
+    if (externalActive.has(selectedProvider)) {
+      next.defaultProvider = selectedProvider;
+      setExternalDefaultOwnership(next, selectedProvider);
+      details.push(`defaultProvider: ${selectedProvider} (project-local external)`);
+      wrote = true;
+    } else {
+      externalError ??= `external default '${selectedProvider}' is not safely managed`;
+    }
+  }
+
+  const agentOverridesSupported = aqeSupportsAgentOverrides();
+  if ((agentOverridesSupported && Object.keys(projected).length) || staleOverrides.length) {
     // MERGE, don't replace: ak owns only the curated agent-types it projects;
     // preserve foreign entries (aqe's own defaults or a hand-added agent). The
     // projector drops non-constructible providers (mirrors sanitizeAgentOverrides)
     // and only ever emits {provider, model} — no apiKey.
     next.agentOverrides = { ...priorOverrides };
     for (const agent of staleOverrides) delete next.agentOverrides[agent];
-    Object.assign(next.agentOverrides, projected);
+    if (agentOverridesSupported) Object.assign(next.agentOverrides, projected);
     // An override naming a provider is inert until that provider is ENABLED in
     // this same file: aqe enables from env keys or the `providers` map, and a
     // subscription host-CLI provider (codex, claude-code) has no env key at
     // all — so ak-projected codex overrides sat dead and warned on every aqe
     // startup (#108 phase 3). Enable exactly the providers the projection
     // references — merge-not-clobber, writing nothing beyond `enabled`.
-    const referenced = [...new Set(Object.values(projected).map((entry) => entry.provider))];
+    const referenced = agentOverridesSupported
+      ? [...new Set(Object.values(projected).map((entry) => entry.provider))]
+      : [];
     if (referenced.length) {
       next.providers = { ...(next.providers ?? existing.providers ?? {}) };
       for (const provider of referenced) {
-        next.providers[provider] = { ...(next.providers[provider] ?? {}), enabled: true };
+        if (!(provider in desiredExternal)) next.providers[provider] = { ...(next.providers[provider] ?? {}), enabled: true };
       }
     }
-    details.push(`agentOverrides: ${Object.keys(projected).length} agents`
+    details.push(`agentOverrides: ${agentOverridesSupported ? Object.keys(projected).length : 0} agents`
       + (referenced.length ? ` (providers enabled: ${referenced.join(', ')})` : '')
-      + (staleOverrides.length ? ` (${staleOverrides.length} stale ak entries pruned)` : ''));
+      + (staleOverrides.length ? ` (${staleOverrides.length} stale ak entries pruned)` : '')
+      + (!agentOverridesSupported ? ' (new projection skipped; needs agentic-qe ≥ 3.13.1)' : ''));
     wrote = true;
-  } else if (hasPolicy) {
+  } else if (hasPolicy && !agentOverridesSupported) {
     details.push('agentOverrides: skipped (needs agentic-qe ≥ 3.13.1)');
+  } else if (hasPolicy && Object.keys(projected).length === 0) {
+    details.push('agentOverrides: skipped (no safely constructible providers)');
   }
 
-  if (!wrote) return { ok: !chainError, changed: false, detail: details.join('; ') || 'nothing to apply' };
+  wrote ||= JSON.stringify(stableValue(next)) !== JSON.stringify(stableValue(existing));
+  if (!wrote) return { ok: !chainError && !externalError, changed: false, detail: details.join('; ') || 'nothing to apply' };
+  next._managedBy = AQE_MANAGED_TAG;
+  // `wrote` means this invocation owns at least one projection surface; it
+  // does not by itself mean the artifact changed. Compare the complete
+  // managed value (including the ownership tag) before touching disk so a
+  // converged external default/fallback/override remains byte- and
+  // mtime-stable across repeated syncs.
+  if (JSON.stringify(stableValue(next)) === JSON.stringify(stableValue(existing))) {
+    return { ok: !chainError && !externalError, changed: false, detail: details.join('; ') || 'nothing to apply' };
+  }
   fs.mkdirSync(path.dirname(file), { recursive: true });
   writeJsonWithBackup(file, next);
-  return { ok: !chainError, changed: true, detail: details.join('; ') };
+  return { ok: !chainError && !externalError, changed: true, detail: details.join('; ') };
 }
 
 /** Reversible teardown of ak's router management. Restores the pre-ak file from

@@ -908,7 +908,7 @@ test('conformance: the banner reports "nothing will be spawned" for a manifest d
 
   const text = cap.text();
   assert.match(text, /SELF-TEST \(ADR-0031 §5\)/);
-  assert.match(text, /declares no lifecycle\/execution hooks — nothing will be spawned/);
+  assert.match(text, /declares no lifecycle, execution, or AQE-provider hooks — nothing will be spawned/);
 });
 
 test('conformance: the banner falls back to a generic warning when the manifest cannot be pre-disclosed, and the harness still runs and reports the real failure', async () => {
@@ -1140,8 +1140,11 @@ test('grant: REFUSED when the gating tier is not recorded passed — exit 1, not
   assert.deepEqual(grantedCapabilitiesFor('hermes', hash, { file: grantsFile }), {});
 });
 
-test("grant: 'aqeProvider' is rejected as never ak-grantable (ADR-0031 §4), before any manifest read", async () => {
+test("grant: 'aqeProvider' is refused when the current manifest has no AQE provider candidate", async () => {
   const grantsFile = tmpGrantsFile();
+  const raw = validManifest();
+  const hash = hashManifest(validateAdapterManifest(raw));
+  recordTierResult('hermes', 'aqe-provider', { hash, evidence: 'synthetic stale evidence' }, { file: grantsFile });
   const cfg = cfgWith([{ name: 'hermes', source: 'mem://hermes' }]);
 
   const cap = capture();
@@ -1149,13 +1152,48 @@ test("grant: 'aqeProvider' is rejected as never ak-grantable (ADR-0031 §4), bef
   try {
     code = await run({
       positionals: ['grant', 'hermes', 'aqeProvider'], env: ON_ENV, cfg,
-      reader: neverCalled('reader'), ask: neverCalled('ask'), isTTY: true, grantsFile, flags: { yes: true },
+      reader: async () => raw, ask: neverCalled('ask'), isTTY: true, grantsFile, flags: { yes: true },
+      consent: fileConsent(tmpConsentFile()),
     });
   } finally { cap.restore(); }
 
   assert.equal(code, 1);
-  assert.match(cap.text(), /upstream-owned/);
-  assert.match(cap.text(), /ADR-0031 §4/);
+  assert.match(cap.text(), /does not declare manifest\.aqe\.provider/);
+  assert.deepEqual(grantedCapabilitiesFor('hermes', hash, { file: grantsFile }), {});
+});
+
+test("grant: 'aqeProvider' becomes live only after same-hash aqe-provider evidence and explicit confirmation", async () => {
+  const grantsFile = tmpGrantsFile();
+  const raw = validManifest({
+    driving: { surfaces: ['cli-subprocess'] },
+    execution: { run: { hook: { command: ['hermes', 'run'] } } },
+    aqe: {
+      provider: {
+        hook: { command: ['hermes', 'aqe'] },
+        billingMode: 'subscription',
+        models: ['hermes-default'],
+        defaultModel: 'hermes-default',
+      },
+    },
+  });
+  const hash = hashManifest(validateAdapterManifest(raw));
+  recordTierResult('hermes', 'aqe-provider', { hash, evidence: 'real AQE stdin/stdout probe returned OK' }, { file: grantsFile });
+  const cfg = cfgWith([{ name: 'hermes', source: 'mem://hermes' }]);
+
+  const cap = capture();
+  let code;
+  try {
+    code = await run({
+      positionals: ['grant', 'hermes', 'aqeProvider'], env: ON_ENV, cfg,
+      reader: async () => raw, ask: async () => true, isTTY: true, grantsFile, flags: {},
+      consent: fileConsent(tmpConsentFile()),
+    });
+  } finally { cap.restore(); }
+
+  assert.equal(code, 0, cap.text());
+  assert.match(cap.text(), /aqeProvider is live/);
+  assert.match(cap.text(), /Agentic-QE 3\.13\.12 externalProviders/);
+  assert.deepEqual(grantedCapabilitiesFor('hermes', hash, { file: grantsFile }), { aqeProvider: true });
 });
 
 test('grant: any other non-TIER_GRANTS capability is rejected, before any manifest read', async () => {
@@ -1532,7 +1570,7 @@ test('revoke-grant <name> <capability>: an invalid/non-grantable capability is r
   recordTierResult('hermes', 'primary-eligible', { hash, evidence: 'leads a run' }, { file: grantsFile });
   grantCapability('hermes', 'canBePrimary', { hash }, { file: grantsFile });
 
-  for (const bogus of ['aqeProvider', 'transcripts']) {
+  for (const bogus of ['transcripts']) {
     const cap = capture();
     let code;
     try {
@@ -1545,6 +1583,153 @@ test('revoke-grant <name> <capability>: an invalid/non-grantable capability is r
   }
   // Nothing touched by the rejected attempts.
   assert.deepEqual(grantedCapabilitiesFor('hermes', hash, { file: grantsFile }), { canBePrimary: true });
+});
+
+test('revoke-grant <name> aqeProvider withdraws only the provider grant and leaves its passed tier evidence', async () => {
+  const grantsFile = tmpGrantsFile();
+  const hash = 'a'.repeat(64);
+  recordTierResult('hermes', 'aqe-provider', { hash, evidence: 'real AQE provider probe returned OK' }, { file: grantsFile });
+  grantCapability('hermes', 'aqeProvider', { hash }, { file: grantsFile });
+
+  const cap = capture();
+  let code;
+  try {
+    code = await run({
+      positionals: ['revoke-grant', 'hermes', 'aqeProvider'], env: OFF_ENV, cfg: cfgWith([]), grantsFile, flags: {},
+    });
+  } finally { cap.restore(); }
+
+  assert.equal(code, 0, cap.text());
+  assert.match(cap.text(), /revoked capability 'aqeProvider'/);
+  assert.deepEqual(grantedCapabilitiesFor('hermes', hash, { file: grantsFile }), {});
+  assert.equal(grantsFor('hermes', { file: grantsFile }).tiers['aqe-provider'].status, 'passed');
+});
+
+test('aqeProvider revocation retires only dependent config and refreshes the router for specific and whole-record forms', async () => {
+  for (const wholeRecord of [false, true]) {
+    const grantsFile = tmpGrantsFile();
+    const hash = 'b'.repeat(64);
+    recordTierResult('hermes', 'aqe-provider', { hash, evidence: 'real provider response' }, { file: grantsFile });
+    grantCapability('hermes', 'aqeProvider', { hash }, { file: grantsFile });
+    recordTierResult('hermes', 'primary-eligible', { hash, evidence: 'independent lead evidence' }, { file: grantsFile });
+    grantCapability('hermes', 'canBePrimary', { hash }, { file: grantsFile });
+    const cfg = {
+      hostAdapters: [{ name: 'hermes', source: 'mem://hermes' }],
+      integrations: { hosts: { claude: true, codex: true, hermes: true } },
+      providers: {
+        aqeProvider: 'hermes', maxBudgetUsd: 7,
+        aqeFallback: [
+          { provider: 'hermes', models: ['default'], source: 'user' },
+          { provider: 'openai', models: ['gpt-5.6'], source: 'user' },
+        ],
+        models: [{ id: 'ollama', model: 'qwen' }],
+      },
+      routing: { routes: {
+        testing: { host: 'hermes', model: 'default', provenance: 'user' },
+        review: {
+          host: 'claude', model: 'claude-sonnet-5', provenance: 'user',
+          escalation: [{ host: 'hermes', model: 'default' }, { host: 'codex', model: 'gpt-5.6' }],
+        },
+        implementation: { host: 'codex', model: 'gpt-5.6', provenance: 'user' },
+      } },
+      userValue: { keep: true },
+    };
+    let saved = null;
+    let refreshed = 0;
+    let applied = 0;
+    const cap = capture();
+    let code;
+    try {
+      code = await run({
+        positionals: wholeRecord
+          ? ['revoke-grant', 'hermes']
+          : ['revoke-grant', 'hermes', 'aqeProvider'],
+        env: ON_ENV, cfg, grantsFile, flags: {}, cwd: '/sandbox/project',
+        saveConfig: (next) => { saved = structuredClone(next); },
+        bootstrapAdapters: async ({ cfg: next, env }) => {
+          refreshed += 1;
+          assert.equal(next, cfg);
+          assert.equal(env.AK_EXPERIMENTAL_HOST_ADAPTERS, '1');
+          return { warnings: [] };
+        },
+        applyRouter: (next, cwd) => {
+          applied += 1;
+          assert.equal(next, cfg);
+          assert.equal(cwd, '/sandbox/project');
+          return { ok: true, changed: true, detail: 'owned Hermes projection pruned' };
+        },
+      });
+    } finally { cap.restore(); }
+
+    assert.equal(code, 0, cap.text());
+    assert.equal(refreshed, 1);
+    assert.equal(applied, 1);
+    assert.deepEqual(saved, cfg, 'the exact retired intent is what persistence receives');
+    assert.equal(cfg.integrations.hosts.hermes, true, 'host enablement is independent and preserved');
+    assert.equal(cfg.providers.aqeProvider, null);
+    assert.deepEqual(cfg.providers.aqeFallback, [
+      { provider: 'openai', models: ['gpt-5.6'], source: 'user' },
+    ]);
+    assert.equal(cfg.providers.maxBudgetUsd, 7);
+    assert.deepEqual(cfg.providers.models, [{ id: 'ollama', model: 'qwen' }]);
+    assert.equal(cfg.routing.routes.testing, undefined);
+    assert.deepEqual(cfg.routing.routes.review.escalation, [{ host: 'codex', model: 'gpt-5.6' }]);
+    assert.deepEqual(cfg.routing.routes.implementation,
+      { host: 'codex', model: 'gpt-5.6', provenance: 'user' });
+    assert.deepEqual(cfg.userValue, { keep: true });
+    if (!wholeRecord) {
+      assert.deepEqual(grantedCapabilitiesFor('hermes', hash, { file: grantsFile }), { canBePrimary: true });
+    } else {
+      assert.equal(grantsFor('hermes', { file: grantsFile }), null);
+    }
+  }
+});
+
+test('whole-record revoke repairs stale AQE intent even when the record or capability was already removed', async () => {
+  for (const recordWithoutCapability of [false, true]) {
+    const grantsFile = tmpGrantsFile();
+    if (recordWithoutCapability) {
+      recordTierResult('hermes', 'admission', {
+        hash: 'c'.repeat(64), evidence: 'non-provider evidence remains',
+      }, { file: grantsFile });
+    }
+    const cfg = {
+      integrations: { hosts: { claude: true, hermes: true } },
+      providers: {
+        aqeProvider: 'hermes',
+        aqeFallback: [{ provider: 'hermes', models: ['default'], source: 'user' }],
+        models: [{ id: 'openrouter', model: 'user-model' }],
+      },
+      routing: { routes: {
+        testing: { host: 'hermes', model: 'default', provenance: 'user' },
+        review: { host: 'claude', model: 'kept', provenance: 'user' },
+      } },
+    };
+    let saves = 0;
+    let refreshes = 0;
+    let applies = 0;
+    const cap = capture();
+    let code;
+    try {
+      code = await run({
+        positionals: ['revoke-grant', 'hermes'], env: OFF_ENV, cfg, grantsFile,
+        flags: {}, cwd: '/sandbox/project',
+        saveConfig: () => { saves += 1; },
+        bootstrapAdapters: async () => { refreshes += 1; return { warnings: [] }; },
+        applyRouter: () => { applies += 1; return { ok: true, changed: true, detail: 'pruned' }; },
+      });
+    } finally { cap.restore(); }
+    assert.equal(code, 0, cap.text());
+    assert.equal(saves, 1);
+    assert.equal(refreshes, 0, 'flag-off authority withdrawal never re-reads configured adapter sources');
+    assert.equal(applies, 1);
+    assert.equal(cfg.providers.aqeProvider, null);
+    assert.deepEqual(cfg.providers.aqeFallback, []);
+    assert.deepEqual(cfg.providers.models, [{ id: 'openrouter', model: 'user-model' }]);
+    assert.equal(cfg.routing.routes.testing, undefined);
+    assert.deepEqual(cfg.routing.routes.review, { host: 'claude', model: 'kept', provenance: 'user' });
+    assert.equal(cfg.integrations.hosts.hermes, true);
+  }
 });
 
 test('revoke-grant <name> <capability> works even when the experimental flag is off (fail-safe, same as the whole-record form)', async () => {

@@ -98,6 +98,26 @@ test('loadKitConfig returns defaults when file missing and round-trips saves', (
   fs.rmSync(tmp, { recursive: true, force: true });
 });
 
+test('saveKitConfig preserves bytes and mtime when durable intent is unchanged', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'kit-cfg-idempotent-'));
+  const f = tmpFile(tmp, 'kit.json');
+  const cfg = loadKitConfig(f);
+  saveKitConfig(cfg, f);
+  const bytes = fs.readFileSync(f, 'utf8');
+  const old = new Date('2001-01-01T00:00:00.000Z');
+  fs.utimesSync(f, old, old);
+  const beforeMtime = fs.statSync(f).mtimeMs;
+
+  saveKitConfig(cfg, f);
+  assert.equal(fs.readFileSync(f, 'utf8'), bytes);
+  assert.equal(fs.statSync(f).mtimeMs, beforeMtime);
+
+  cfg.providers.aqeProvider = 'openai';
+  saveKitConfig(cfg, f);
+  assert.notEqual(fs.statSync(f).mtimeMs, beforeMtime);
+  fs.rmSync(tmp, { recursive: true, force: true });
+});
+
 test('loadKitConfig rejects invalid deja-vu companion intent', () => {
   const cases = [
     [{ enabled: true, mode: 'ambient', hosts: [], indexOnSetup: true }, /mode must be one of/],

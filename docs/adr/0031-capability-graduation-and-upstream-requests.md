@@ -2,7 +2,15 @@
 
 - **Status:** Accepted (governance decision; implementation active)
 - **Date:** 2026-08-16
-- **Updated:** 2026-08-24
+- **Updated:** 2026-08-26
+- **Update note:** Agentic-QE 3.13.12 satisfied the provider-registration request in
+  [#628](https://github.com/proffesor-for-testing/agentic-qe/issues/628). The six-tier ladder now
+  includes a real `aqe-provider` transport exercise, and a passed tier plus explicit hash-pinned
+  `aqeProvider` grant activates project-scoped `externalProviders` projection. This supersedes the
+  closed-enum ceiling below without weakening the permanent ban on manifest self-claims. The
+  bridge reauthorizes host intent, consent, and grant immediately before each spawn; projection
+  owns declaration, activation, and external-default values independently so conflict, disable,
+  revocation, or downgrade cannot leave an agentic-kit route pointing at an unavailable bridge.
 - **Deciders:** agentic-kit maintainers
 - **Related:** [ADR-0016](0016-capability-driven-integration-adapters.md),
   [ADR-0018](0018-generalized-host-worker-execution.md),
@@ -17,9 +25,10 @@
 
 [ADR-0029](0029-host-adapter-extension-point.md) admitted external host adapters as a declarative
 manifest plus consented, subprocess-only hooks, behind `AK_EXPERIMENTAL_HOST_ADAPTERS=1`. To make
-the door safe, three capabilities were made **inexpressible** in the manifest schema —
-`canBePrimary`, `aqeProvider`, and `commandStatusline` — and ADR-0029 described that block as
-permanent.
+the door safe, three capability self-claims were made **inexpressible** in the manifest schema —
+`canBePrimary`, `host.legacy.aqeProvider`, and `commandStatusline` — and ADR-0029 described that
+block as permanent. The 2026-08-26 amendment preserves that ban while allowing separate
+`aqe.provider` candidate data with no authority on its own.
 
 Two things push past that framing:
 
@@ -63,6 +72,7 @@ host, assert the real behaviour, against an installed layout — that gates one 
 | `admission` | Registration through the fail-closed gate (ADR-0029, shipped) | manifest validates, admits, hooks run |
 | `session-driving` | `canDriveSession` — the host actually drives an interactive/oneshot session | a real session completes and is observed |
 | `activity-routing` | `canRouteActivities` — the host runs a supervised `ak run` worker to a structured result | a worker completes under the runner's contract (ADR-0018) |
+| `aqe-provider` | Grants `aqeProvider` — the candidate runs through AQE's external CLI transport | the real admitted stdin/stdout hook returns the bounded probe with its declared model |
 | `primary-eligible` | Grants `canBePrimary` — the host can *lead*: anchor routing, be escalated toward | leads a run and receives an escalation, per ADR-0019 |
 | `statusline` | Grants `commandStatusline` — renders a command-backed footer through supervised hooks | a footer renders and refreshes |
 
@@ -98,13 +108,11 @@ When a conformance tier cannot be met, the first question is **whose capability 
 
 - **`ak`-local** (run execution, the trust CLI, remote manifest sources, quality-gate anchors) — the
   project's to build. A normal `ak` change; no one to wait on.
-- **Upstream — agentic-qe** — being a recognized **AQE provider type** is not `ak`'s to grant.
-  agentic-qe's provider set is a closed, upstream-defined enumeration (verified against
-  `agentic-qe@3.13.10`: `ALL_PROVIDER_TYPES` plus a `createProvider` switch, extended only by an
-  upstream code change). The path: file a concrete capability request against agentic-qe (a
-  provider-plugin API), record the tier as `gated: agentic-qe#NNN`, and light it up when the upstream
-  release ships. *Interim:* quality still runs through the model provider underneath the host, so QE
-  is not blocked — only the host's own AQE identity is.
+- **Upstream — agentic-qe (historical ceiling, satisfied 2026-08-26).** Against 3.13.10, being a
+  recognized provider required changing AQE's closed enum and factory, so #628 was correctly tracked
+  as upstream-gated. Agentic-QE 3.13.12 shipped `externalProviders`; agentic-kit now consumes that
+  supported surface. The current gate is local evidence and authority: `aqe.provider` candidate,
+  passed `aqe-provider` tier, explicit grant, current content hash, enabled host, and project scope.
 - **Upstream — ruflo** — being a native ruflo **backend** (an `ENABLE_*` target that drives the loop)
   is defined inside ruflo (grounded against `ruvnet/ruflo@45e65b5`: backend enablement is per-host
   `ENABLE_CLAUDE_CODE` / `ENABLE_CODEX` / `ENABLE_GEMINI_MCP`, not an outside registration). The path:
@@ -167,9 +175,10 @@ the experimental flag. This table is the source of truth for what is real.
 | `ak host adapters trust` CLI (records consent/grants) | **Working** (2026-08-16, wave A) | `list`/`trust`/`revoke` + `--expect-hash` pinning; disclosure prints the full validated manifest (control-char-safe); mirrors every pre-hash admission refusal; `revoke` works with the flag off (fail-safe) |
 | External execution (`ak run` drives an admitted host) | **Working** (2026-08-16, wave B; integrity tightened 2026-08-24) | Manifest `execution.run` hook (coupled to `canRouteActivities`, else refused `execution-not-routable`); derived subprocess adapter behind `executionAdapterFor`; routing is overlay-aware via a lazy `effectiveRoutableHostIds()`. Security-hardened (adversarial review): hooks spawn with `cwd` pinned to the adapter's own resolved directory; remote path-backed hooks are refused before admission because no bundle is retained; declared local hook files are rechecked immediately before spawn; an unresolved-launch cancellation reports `orphaned` (non-escalating), never an escalatable `timed_out`; handoff data is redacted from public results; stderr is never promoted into a downstream prompt; reserved hook exit codes `77`/`78` express `permission_required`/`auth_required` boundaries; a self-declared `provider` is stamped `inferred`, never `observed` |
 | External lifecycle execution wired into setup/sync/uninstall | **Working** (2026-08-16, wave C) | The loops iterate `hostsWithLifecycle()` (built-ins + admitted) through a shape-agnostic renderer; an admitted host's lifecycle runs only when explicitly enabled in `kit.json` **and** the flag is set. Admitted lifecycle hooks are cwd-anchored to the adapter's own directory (per-verb `lifecycle-unanchored` refusal for a relative hook on a remote source), the same F-1 protection as execution. `setup`, `uninstall`, **and now `sync`** are fully live: `status.mjs`'s collector emits a subsystem-tagged row for an enabled admitted lifecycle host, so `sync`'s convergence plan reaches its admitted-host branch (wave D4 closed the earlier `sync`-only reachability gap) |
-| Tiered conformance harness (`session-driving` … `statusline`) | **Working** (2026-08-16, waves C+D2) | `runTieredConformance` + `ak host adapters conformance`: `admission`, `activity-routing`, and now `primary-eligible` genuinely pass black-box against a real fixture — `primary-eligible` drives a real `executeRunPlan` where the host anchors a run and receives a genuine ADR-0019 escalation onto itself (a real second subprocess), recorded with no pre-existing grant. `session-driving`/`statusline` stay honestly `gated`/`skipped` (external session driving and the statusline render path are not built) — the harness never fabricates a pass, and there is no injection seam through which a caller could substitute one. A failed `admission` tier short-circuits every downstream tier so no evidence is laundered. A grant-bearing tier that re-runs `failed` under the same adapter-content hash now auto-voids the stored tier **and** the live granted capability (wave D4, N-1) — the un-earn path mirrors the gated-downgrade; a `skipped` result never voids (prerequisite not evaluated ≠ disproof). Capabilities can also be withdrawn per-capability with `ak host adapters revoke-grant <name> [capability]`. The content identity covers the validated manifest plus declared hook-file bytes; the explicit inventory and immediate pre-spawn recheck are the remaining contract-v1 boundary. `statusline` un-earn lands with its render path |
+| Six-tier conformance harness (`admission` … `statusline`) | **Working** (updated 2026-08-26) | `admission`, `activity-routing`, `aqe-provider`, and `primary-eligible` genuinely pass black-box against real fixtures. `aqe-provider` invokes the admitted hook with a bounded prompt and declared model without requiring a pre-existing grant. `session-driving`/`statusline` stay honestly `gated`/`skipped`. A failed admission short-circuits downstream tiers; a failed grant-bearing re-run at the same content hash voids its evidence and live capability, while `skipped` never does. |
 | Hook-file integrity and development conformance mode | **Working** (2026-08-24, PR #131 follow-up) | `hook.files` validates an explicit relative inventory; `hashAdapterContent` adds per-path SHA-256 digests; admission, consent, grants, and pre-spawn execution use the combined identity; `ak host adapters conformance <name> --dev` runs real probes without persisting evidence or grants. |
-| Capability-grant store + promotion command | **Working** (2026-08-16, waves D+D2) | `grants.mjs` (hash-pinned, evidence-gated, edit-invalidated like consent — the earned capability is enforced at **read** time, not only at grant time) plus `ak host adapters grant`/`bless`: the maintainer's explicit grant of a tier-earned capability, refused unless the gating tier is recorded `passed` at the current adapter-content hash. **Wave D2 makes a grant live:** at bootstrap the admitted-host overlay reads `grantedCapabilitiesFor` at the fresh current content hash and raises `canBePrimary`/`commandStatusline` on the effective-registry entry (through a local allow-list that can raise only those two, never `aqeProvider` or any other key), so `hostTierLabel` and `effectivePrimaryHostIds()` reflect it. Two consumption gaps remain, honestly disclosed at grant time: no path yet *selects* an external host as primary (`ak host pick` stays built-in-scoped), and `commandStatusline` has no runtime reader yet (its render path is a later wave) |
+| Capability-grant store + promotion command | **Working** (updated 2026-08-26) | `grants.mjs` keeps consent, tier evidence, and `canBePrimary`/`aqeProvider`/`commandStatusline` grants hash-pinned and edit-invalidated. Bootstrap registers an AQE provider only when the adapter is admitted, enabled, current, and holds a live `aqeProvider` grant; the production bridge re-reads all three authorization gates immediately before spawn, so revocation during prompt collection fails closed. Primary selection and statusline rendering remain separate consumption gaps; AQE projection is live. |
+| Agentic-QE #628 projection | **Working** (2026-08-26) | Requires Agentic-QE >=3.13.12; supports direct `codex` plus admitted external ids in project default, fallback chain, and agent overrides; writes independently receipt-owned `externalProviders[id]`, `providers[id].enabled=true`, and external default values; never persists an external default to user settings; preserves foreign entries, refuses same-id/explicit-disable conflicts, and prunes exact owned references in the same enable/disable/conflict/downgrade operation. Status/verify distinguish configuration proof from served inference, billing, and vendor evidence. |
 | Remote manifest sources (npm / URL) + resolve→hash ordering | **Working** (2026-08-16, wave A; tightened 2026-08-24) | file / https (no redirects, bounded time+bytes) / `npm:` (`npm pack --ignore-scripts` + `tar -xzOf` stdout-only — nothing extracted to disk, package scripts never run); resolver runs before hashing, and remote sources with script-like hook paths are refused because no bundle is retained. |
 | Upstream request tracking (`gated: <repo>#NNN` against a tier) | **Working** (2026-08-16, wave D) | `ak host adapters gate <name> <tier> <ref>` records a ref-format-validated upstream gate; `ak host adapters status` surfaces per-tier passed/gated state (stale-marked on a manifest edit) and the granted capabilities |
 | A real external adapter (Hermes) clearing the kit → contract freeze | **Not started** | Freeze criterion (§6) |
@@ -185,20 +194,19 @@ the experimental flag. This table is the source of truth for what is real.
   avoid. Self-declaration stays inexpressible; capability comes from earned evidence plus an explicit
   grant.
 - **Treat every ceiling as `ak`-local and build around upstream.** Rejected as dishonest and
-  unmaintainable: agentic-qe's provider enum and ruflo's backend model are upstream facts. Faking a
-  local shim (e.g. projecting an unknown host into agentic-qe's config) would fabricate an identity
-  the upstream tool never declared it understands. The upstream-request path (§4) is the honest
-  alternative.
+  unmaintainable when decided: AQE 3.13.10 did not understand external ids. The 2026-08-26
+  implementation is different because AQE 3.13.12 now declares the `externalProviders` contract;
+  agentic-kit consumes that upstream surface rather than fabricating one.
 
 ## References
 
 - ADR-0029 (the extension point, schema, admission, consent, hook runner) and its amendment above.
 - ADR-0018 (supervised worker contract), ADR-0019 (bounded escalation) — the substance of the
   `activity-routing` and `primary-eligible` tiers.
-- Upstream facts grounded in a source-cited research sweep: `agentic-qe@3.13.10`
-  (`ALL_PROVIDER_TYPES`, the `createProvider` switch, the closed provider enum) and
+- Historical upstream facts were grounded against `agentic-qe@3.13.10`
+  (`ALL_PROVIDER_TYPES`, the `createProvider` switch, and its then-closed provider enum) and
   `ruvnet/ruflo@45e65b5` (`ENABLE_*` backend model). The two §4 capability requests have been filed —
-  the AQE provider-plugin request as
+  the AQE provider request as
   [proffesor-for-testing/agentic-qe#628](https://github.com/proffesor-for-testing/agentic-qe/issues/628)
   and the ruflo backend-registration request as
   [ruvnet/ruflo#3046](https://github.com/ruvnet/ruflo/issues/3046), each inviting the maintainer to

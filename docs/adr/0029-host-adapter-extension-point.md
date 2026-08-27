@@ -2,13 +2,20 @@
 
 - **Status:** Accepted (experimental contract)
 - **Date:** 2026-08-15
-- **Updated:** 2026-08-24
+- **Updated:** 2026-08-26
 - **Update note:** [ADR-0031](0031-capability-graduation-and-upstream-requests.md) amends this ADR's
   "permanent caps" framing. The block on *self-declaring* `canBePrimary` / `aqeProvider` /
   `commandStatusline` in the manifest is permanent (the safety invariant here), but the *capability*
   is earnable through a conformance tier plus a maintainer grant recorded outside the manifest — up
   to promotion to a first-party built-in. The schema, admission gate, consent model, and hook runner
-  now also pin declared hook-file bytes as described in §6.
+  now also pin declared hook-file bytes as described in §6. **2026-08-26:** Agentic-QE 3.13.12
+  satisfied [#628](https://github.com/proffesor-for-testing/agentic-qe/issues/628) with
+  `externalProviders`. The manifest may now carry non-authoritative `aqe.provider` candidate data;
+  the `host.legacy.aqeProvider` self-claim remains forbidden, while a passed `aqe-provider` tier and
+  explicit hash-pinned grant activate the projection. The production bridge copies verified
+  command/relative-import bytes into a private per-call snapshot and rechecks host intent, consent,
+  and the exact-hash grant immediately before spawn. This is byte pinning, not an OS sandbox;
+  absolute file access by consented hook code remains outside the snapshot boundary.
 - **Deciders:** agentic-kit maintainers
 - **Related:** [ADR-0016](0016-capability-driven-integration-adapters.md) (closed-registry clause
   superseded — see [Supersession](#supersession-of-adr-0016s-closed-registry-clause)),
@@ -122,6 +129,13 @@ it. There is no function-valued field anywhere in the manifest — every value i
 which is itself part of the safety property: a manifest that cannot express a closure cannot smuggle
 one in.
 
+The 2026-08-26 amendment adds optional `aqe.provider` candidate data. Its provider identity is fixed
+to `host.id`; the block may declare a supervised stdin/stdout hook, billing mode, models, default
+model, concurrency, environment allow/strip lists, and display name. It requires
+`cli-subprocess`, `canRouteActivities: true`, and `execution.run.hook`. Candidate data does not
+activate itself: the `aqe-provider` tier must pass and a maintainer must grant `aqeProvider` at the
+same combined content hash before bootstrap exposes it to Agentic-QE 3.13.12+.
+
 ### 2. Driving-surface vocabulary: `cli-subprocess` / `acp` / `mcp`
 
 Every declared hook names the driving surface that invokes it. Contract v1 recognizes three surface
@@ -173,16 +187,20 @@ external-execution row, after an adversarial review of the surface):
   `provider` in hook stdout is stamped `inferred`, never `observed`; stderr is never promoted into
   a downstream worker's prompt; and handoff data is redacted from public `WorkerResult`s.
 
-### 3. Capability caps are schema-structural, not runtime-checked
+### 3. Capability self-claims are schema-structural, not runtime-checked
 
-`canBePrimary`, `aqeProvider`, and `commandStatusline` are not fields the external-adapter manifest
-schema accepts, at any value. An adapter author cannot express the claim "I am primary-eligible" —
+`canBePrimary`, `host.legacy.aqeProvider`, and `commandStatusline` are not claims the
+external-adapter manifest schema accepts. An adapter author cannot express the claim "I am
+primary-eligible" —
 not because `ak` reads and rejects `true`, but because the accepted JSON Schema has no place to put
 it. This is the direct fix for the gap identified in "Why the mechanism changed" above: a capability
 cap enforced by field-absence cannot be bypassed by anything the adapter's own code does, because
 there is no code — only a document a schema either accepts or rejects before anything runs.
-`canRouteActivities` remains expressible; it is the one capability an external adapter may claim,
-matching the shape OpenCode already occupies as a non-primary, non-AQE, routable host.
+`canRouteActivities` remains expressible. Since the 2026-08-26 amendment, `aqe.provider` may also
+describe a candidate external CLI provider, but it is data rather than capability: it requires
+`cli-subprocess`, activity routing, an execution hook, a dedicated provider hook, a passed real
+`aqe-provider` tier, and an explicit maintainer grant at the same content hash before bootstrap
+registers it.
 
 ### 4. Admission: fail-closed, per-adapter isolated, behind an experimental flag
 
@@ -291,11 +309,11 @@ A matching one-line update-note has been added to ADR-0016 itself, pointing here
   of adapter-supplied code is not a bootstrapping restriction to be lifted once the mechanism
   matures; it is the property "Why the mechanism changed" argues for. A future contract version may
   add driving surfaces (`acp`, `mcp`) or hook verbs; it may not add in-process code execution.
-- **No AQE projection, ever.** An admitted external host cannot become an `aqeProvider` at any
-  contract version — that field is schema-absent for the same reason `canBePrimary` and
-  `commandStatusline` are (§3), and AQE's own provider set is upstream's enumeration, not one `ak`
-  extends by admitting a host ([ADR-0028](0028-local-openai-compatible-providers.md) draws the
-  identical line for `local-openai`).
+- **Historical decision — no AQE projection (superseded 2026-08-26).** The original contract
+  permanently excluded external AQE providers because AQE had no safe registration surface. AQE
+  3.13.12's `externalProviders` implementation for #628 removes that upstream premise. The current
+  decision admits `aqe.provider` candidate data but preserves the original trust goal: admission
+  alone grants nothing; only a passed transport tier plus a maintainer grant activates it.
 - **No automatic routing or seeding.** An admitted host is never auto-seeded into `routing.routes`;
   it must be explicitly routed, matching [ADR-0018](0018-generalized-host-worker-execution.md)'s
   existing rule that automatic seeding stays Claude/Codex subscription-only.
@@ -320,17 +338,17 @@ A matching one-line update-note has been added to ADR-0016 itself, pointing here
 - `AK_EXPERIMENTAL_HOST_ADAPTERS` being unset is the default, and the default behavior of every
   existing command is unchanged: an unset flag makes the whole surface inert, and a `hostAdapters`
   key with the flag unset round-trips through `kit.json` untouched.
-- A capability an external adapter cannot express (`canBePrimary`, `aqeProvider`,
-  `commandStatusline`) is a permanent property of contract v1, not a temporary restriction lifted at
-  graduation — graduation (below) freezes the *contract*, not the caps.
+- Capability self-claims remain inexpressible. `aqeProvider` is now earned outside the manifest from
+  `aqe.provider` candidate data; `canBePrimary` and `commandStatusline` remain earned the same way.
+  Graduation freezes the contract, not the right to bypass evidence or grants.
 
 ## Self-graded implementation status
 
-Dated 2026-08-24, after the PR #131 follow-up implementation. Rows already covered by the amended
+Dated 2026-08-26, after the Agentic-QE #628 integration. Rows already covered by the amended
 gate list are not repeated; this table grades the mechanism this ADR newly decides. **Working** means
 implemented and tested in this worktree.
 
-| Mechanism | Grade (2026-08-24) | Evidence |
+| Mechanism | Grade (2026-08-26) | Evidence |
 |---|---|---|
 | Manifest schema (contract: 1) | **Working** | `src/lib/adapters/manifest.mjs`; strict hook `files` inventory validation; manifest tests. |
 | Admission gate (fail-closed, per-adapter isolated) | **Working** | `src/lib/adapters/admission.mjs`; admission and integrity tests. |
@@ -339,6 +357,7 @@ implemented and tested in this worktree.
 | Subprocess hook-runner (`cli-subprocess` surface) | **Working** | `src/lib/adapters/hook-runner.mjs`; bounded real-subprocess tests. |
 | Hash-pinned consent + edit-invalidation | **Working** | `src/lib/adapters/integrity.mjs`; manifest + declared hook-file digests, pre-spawn recheck, integrity tests. |
 | Capability-cap schema absence (§3) | **Working** | Schema refusal tests and maintainer-only grant allow-list. |
+| AQE external-provider candidate + projection | **Working** | Strict `aqe.provider` validation; six-tier conformance includes a real `aqe-provider` probe; live pre-spawn host/consent/grant reauthorization; private verified-byte execution snapshots for declared command paths and relative imports; Agentic-QE 3.13.12 gate; project-only default/fallback/agentOverrides projection; independent exact ownership receipts for declarations, activations, external defaults, and fallback-derived defaults; foreign-entry preservation, explicit-disable/conflict refusal, and same-command stale-reference pruning. |
 | Gate item 1 — import-time invariant | **Working** | `assertBuiltinAdaptersRoutable`, one-directional since W1-B (`src/lib/execution/adapters.mjs`). |
 | Gate item 2 — uninstall-through-undo | **Working** | Registry-driven `hostsWithLifecycle()` teardown loop (`src/commands/uninstall.mjs`). |
 | Gate item 3 — permission authorization by host | **Working** | `projectPermissionManifest` union-across-enabled-hosts, F-04 (`src/commands/setup.mjs`). |

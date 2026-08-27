@@ -138,8 +138,8 @@ must distinguish per-token price from measured or expected per-task cost.
 
 1. Only capability-qualified hosts receive activity routes.
 2. Routing host and inference provider are separate axes.
-3. One canonical policy feeds all eligible downstream projections; ineligible OpenCode routes are
-   never fabricated into AQE.
+3. One canonical policy feeds all eligible downstream projections; a built-in OpenCode route with
+   no earned provider identity is never fabricated into AQE.
 4. User-pinned routes are not overwritten by default refresh.
 5. Primary-host selection changes leadership defaults, not host enablement symmetry.
 6. Escalation is explicit, ordered, and per route.

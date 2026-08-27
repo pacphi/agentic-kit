@@ -143,12 +143,27 @@ async function defaultReadManifest(source) {
  * for tests; production relies on the defaults (a plain fs+JSON.parse reader,
  * and a dynamic import of the sibling consent store in ./consent.mjs).
  * @param {{ cfg?: any, env?: NodeJS.ProcessEnv, readManifest?: (source: string) => Promise<any>,
- *   consent?: { recordedHashFor(name: string): string|null, isTrusted(name: string, hash: string): boolean } }} [args]
+ *   consent?: { recordedHashFor(name: string): string|null, isTrusted(name: string, hash: string): boolean },
+ *   currentConfig?:()=>any|Promise<any> }} [args]
  */
 export async function bootstrapHostAdapters({
-  cfg, env = process.env, readManifest = defaultReadManifest, consent,
+  cfg, env = process.env, readManifest = defaultReadManifest, consent, currentConfig,
 } = {}) {
   if (env?.AK_EXPERIMENTAL_HOST_ADAPTERS !== '1') return { active: false, admitted: [], warnings: [] };
+
+  // The AQE provider bridge is an exact snapshot of THIS bootstrap pass.
+  // Clear it before every flag-on early return as well as before rebuilding:
+  // removing the final adapter or losing access to the consent store must not
+  // leave a provider from a prior in-process bootstrap live. Flag-off remains
+  // a true zero-import no-op above.
+  let aqeProviderBridge;
+  try {
+    aqeProviderBridge = await import('./aqe-provider.mjs');
+    aqeProviderBridge.resetAdmittedAqeProviders();
+  } catch {
+    aqeProviderBridge = null;
+  }
+
   const entries = Array.isArray(cfg?.hostAdapters) ? cfg.hostAdapters : [];
   if (entries.length === 0) return { active: false, admitted: [], warnings: [] };
 
@@ -197,8 +212,10 @@ export async function bootstrapHostAdapters({
     // both the validated manifest and any declared hook bytes, so a file edit
     // cannot leave a capability grant live under the old content hash.
     let grantsByName;
+    let grantedCapabilitiesForCurrentHash;
     try {
       const { grantedCapabilitiesFor } = await import('./grants.mjs');
+      grantedCapabilitiesForCurrentHash = grantedCapabilitiesFor;
       // Object.create(null), not {} (F-6): admitted host ids come from
       // consented adapter names, which are attacker-influenceable in
       // principle — a plain object literal's prototype chain would make
@@ -228,6 +245,55 @@ export async function bootstrapHostAdapters({
     // second copy — so a caller correcting F-1 in one place can't drift from
     // the other.
     const sourceByName = new Map(entries.map((entry) => [entry?.name, entry?.source]));
+
+    // AQE ADR-127 / issue #628: a manifest's aqe.provider block is only a
+    // candidate. It becomes a live trampoline target after ALL local gates:
+    // admission above, explicit host enablement, and a hash-current
+    // aqeProvider grant. The dedicated registry keeps this non-boolean
+    // identity out of applyAdmitted's deliberately narrow host-capability
+    // overlay. One bad provider is isolated to one warning.
+    if (aqeProviderBridge) {
+      const aqeCandidates = admitted.filter((result) => (
+        !!result.manifest?.aqe?.provider
+        && cfg.integrations?.hosts?.[result.name] === true
+        && grantsByName && Object.hasOwn(grantsByName, result.name)
+        && grantsByName[result.name]?.aqeProvider === true
+      ));
+      for (const result of aqeCandidates) {
+        try {
+          aqeProviderBridge.registerAdmittedAqeProvider(result.manifest, {
+            baseDir: baseDirForSource(sourceByName.get(result.name)),
+            integrity: result.integrity,
+            contentHash: result.contentHash,
+            // Bootstrap admission is a snapshot; execution authority is not.
+            // The hidden AQE trampoline may wait on stdin while another
+            // process revokes consent/grant or disables the host. Re-read all
+            // three gates after prompt collection and snapshot capture,
+            // immediately before spawn. Any read/shape failure denies.
+            authorize: async () => {
+              try {
+                const liveCfg = currentConfig
+                  ? await currentConfig()
+                  : (await import('../config.mjs')).loadKitConfig();
+                if (liveCfg?.integrations?.hosts?.[result.name] !== true) return false;
+                const liveHash = result.contentHash;
+                if (consentStore.recordedHashFor(result.name) !== liveHash
+                  || !consentStore.isTrusted(result.name, liveHash)) return false;
+                return grantedCapabilitiesForCurrentHash(result.name, liveHash)?.aqeProvider === true;
+              } catch {
+                return false;
+              }
+            },
+          });
+        } catch (error) {
+          warnings.push({
+            name: result.name,
+            reason: error?.reason ?? 'aqe-provider-registration-failed',
+            detail: error?.message ?? String(error),
+          });
+        }
+      }
+    }
 
     // P2 (ADR-0031): an admitted manifest declaring both an execution block
     // and host.capabilities.canRouteActivities gets its execution adapter
