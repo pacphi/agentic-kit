@@ -15,7 +15,10 @@
   lifecycle plugin, and managed host assets. The 2026-08-15 amendment keeps Ruflo and Agentic QE
   connected in stock OpenCode while blacklisting their eager tool catalogues from model requests
   and projecting a compact, lazy Agentic Kit gateway instead. The 2026-08-17 amendment adds a
-  bounded cross-assistant-message repeated-tool guard to the managed lifecycle plugin.
+  bounded cross-assistant-message repeated-tool guard to the managed lifecycle plugin. The
+  2026-08-26 complexity-program wave 2 split the owner module's implementation across
+  `opencode-core.mjs`/`opencode-agents.mjs`/`opencode-artifacts.mjs`/`opencode-lifecycle.mjs`
+  (ADR-0037's file-size gate); `opencode.mjs` is now a re-export barrel, not a behavior change.
 - **Deciders:** agentic-kit maintainers
 
 > **GA amendment:** OpenCode remains opt-in, non-primary, and outside AQE inference-provider
@@ -150,7 +153,13 @@ routes; it does not make OpenCode primary or an AQE provider.
 ### 2. One owner module: `src/lib/opencode.mjs`
 
 Every ak-managed byte on opencode's surfaces lives behind one module, following the
-`settings.mjs`/`mcp.mjs` contracts (backup-first, merge-not-clobber, idempotent):
+`settings.mjs`/`mcp.mjs` contracts (backup-first, merge-not-clobber, idempotent).
+`src/lib/opencode.mjs` is the single import path every consumer uses; since 2026-08-26 its
+implementation is split by size (not by ownership) across `opencode-core.mjs` (config-wiring),
+`opencode-agents.mjs` (catalog + agent conversion/sync/status), `opencode-artifacts.mjs`
+(plugin + skill deployment/teardown), and `opencode-lifecycle.mjs` (the stack composition below)
+— `opencode.mjs` itself re-exports their combined public surface, so this remains one owner
+module from every caller's point of view:
 
 - **`opencode.json` wiring** (`applyOpencode`): `mcp.claude-flow` (command
   `claude-flow-mcp` when the dedicated stdio bin is present — it answers `initialize`
@@ -346,8 +355,10 @@ discrepancy until reconciled.
 
 - ADR-0016 defines the registry, lifecycle, ownership, and normalized-fact contracts
   implemented here. ADR-0018 records the generalized execution contract implemented by #82.
-- `src/lib/opencode.mjs` (the owner module: `opencodeStack`, `retireOpencode`,
-  `reconcileOpencodeGuidance`), `src/lib/hosts.mjs` (adapter),
+- `src/lib/opencode.mjs` (the owner module's public entry point, re-exporting
+  `opencodeStack`/`retireOpencode`/`reconcileOpencodeGuidance` from
+  `src/lib/opencode-lifecycle.mjs`, plus `src/lib/opencode-core.mjs`,
+  `src/lib/opencode-agents.mjs`, and `src/lib/opencode-artifacts.mjs`), `src/lib/hosts.mjs` (adapter),
   `src/lib/providers.mjs` (registry-derived managed host projection,
   `--opencode` flag handling, `hostAuthState` home seam),
   `src/lib/blocks.mjs` (`agents-opencode` target, new registry rows),
