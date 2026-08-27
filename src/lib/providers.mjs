@@ -28,6 +28,7 @@ import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { run, have } from './exec.mjs';
 import { readJson, writeJsonWithBackup } from './settings.mjs';
+import { saveKitConfig } from './config.mjs';
 import { installedVersion, cmpVersions } from './versions.mjs';
 import * as paths from './paths.mjs';
 import { bold, dim, cyan } from './output.mjs';
@@ -1246,6 +1247,103 @@ export async function applyProviders(cfg, cwd = process.cwd(), {
     changed: attempted > 0,
     status: !ok ? 'failed' : providerSelectionSupported ? 'ok' : 'degraded',
     detail: `registered: ${done.join(', ')}${compatibility}`,
+  };
+}
+
+// ── the shared provider-convergence pipeline ─────────────────────────────────
+// `ak sync`, `ak host pick`, and `ak setup --project` each apply the SAME
+// ordered sequence of provider/routing surfaces after hosts/routing intent is
+// settled: applyHosts -> seedActivityRoutesIfMultiHost ->
+// migrateRetiredRoutesInConfig -> applyAqeRouter -> retireCodexMcp ->
+// ensureRufloMcpInCodex -> applyProviders. This was pasted 3x with only sync
+// calling migrateRetiredRoutesInConfig, so pick/setup could persist a route
+// naming a withdrawn model until the next sync repaired it (fixed above).
+// convergeProviderStack is the ONE place that pipeline is defined; the three
+// call sites supply only report/save policy via `reporter`/`save`.
+
+/** Run the shared provider-convergence pipeline against `cfg`. Mutates (and,
+ *  for a cfg-mutating step that reports a change, persists via `save`) `cfg`
+ *  in place; never mutates the caller's on-disk kit.json beyond that.
+ *
+ *  `reporter(step, result)` fires once per step, UNCONDITIONALLY (`await`ed,
+ *  so an async reporter still runs in strict pipeline order), in pipeline
+ *  order — a caller decides whether/how to print from `result`, so each of
+ *  the three call sites can keep its own exact wording and gating (e.g. "only
+ *  print when changed or failed"). Step ids, in order: 'hosts', 'routing-
+ *  seed', 'routing-retired', 'aqe-router', 'legacy-codex-mcp',
+ *  'ruflo-codex-mcp', 'providers-api'.
+ *
+ *  `seedRoutes: false` skips the seed step for a caller that already seeded
+ *  earlier in its own flow (`ak host pick` seeds before route pruning, well
+ *  before this pipeline runs) — seeding twice would be a harmless no-op
+ *  (seedActivityRoutesIfMultiHost is idempotent once routes exist), but
+ *  skipping it keeps the 'routing-seed' step's reporter call meaningful only
+ *  where seeding actually happens here.
+ *
+ *  `codexMcp: false` skips the legacy-codex-mcp/ruflo-codex-mcp steps
+ *  entirely (their reporter calls still fire, with `result: null`) — `ak
+ *  setup --project` only runs them while codex is enabled, whereas `ak sync`
+ *  and `ak host pick` always run them (the deprecated-backend cleanup is
+ *  independent of current enablement by design; see retireCodexMcp).
+ *
+ *  `runProviders` lets a caller wrap the terminal applyProviders call (sync
+ *  shows a progress ticker around it); it defaults to a plain call.
+ *
+ *  Returns every step's raw result, for a caller that needs more than the
+ *  reporter callback (e.g. sync's `aqeRouterApplyFailure` bookkeeping).
+ * @param {any} cfg
+ * @param {string} [cwd]
+ * @param {{
+ *   reporter?: (step: string, result: any) => any,
+ *   save?: (cfg: any) => void,
+ *   seedRoutes?: boolean,
+ *   seed?: (cfg: any) => {seeded: boolean, count: number},
+ *   migrateRoutes?: (cfg: any) => {changed: boolean, changes: any[]},
+ *   codexMcp?: boolean,
+ *   runProviders?: (fn: () => Promise<any>) => Promise<any>,
+ * }} [options] */
+export async function convergeProviderStack(cfg, cwd = process.cwd(), {
+  reporter = () => {},
+  save = saveKitConfig,
+  seedRoutes = true,
+  seed: seedFn = seedActivityRoutesIfMultiHost,
+  migrateRoutes = migrateRetiredRoutesInConfig,
+  codexMcp = true,
+  runProviders = (fn) => fn(),
+} = {}) {
+  const hosts = applyHosts(cfg, cwd);
+  await reporter('hosts', hosts);
+
+  const seed = seedRoutes ? seedFn(cfg) : { seeded: false, count: 0 };
+  if (seed.seeded) save(cfg);
+  await reporter('routing-seed', seed);
+
+  const retired = migrateRoutes(cfg);
+  if (retired.changed) save(cfg);
+  await reporter('routing-retired', retired);
+
+  const router = applyAqeRouter(cfg, cwd);
+  await reporter('aqe-router', router);
+
+  let mcp = null;
+  if (codexMcp) {
+    mcp = await retireCodexMcp(cfg, cwd);
+    if (mcp.changed) save(cfg);
+  }
+  await reporter('legacy-codex-mcp', mcp);
+
+  let rmcp = null;
+  if (codexMcp) {
+    rmcp = await ensureRufloMcpInCodex(cfg, cwd);
+    if (rmcp.changed) save(cfg);
+  }
+  await reporter('ruflo-codex-mcp', rmcp);
+
+  const providers = await runProviders(() => applyProviders(cfg, cwd));
+  await reporter('providers-api', providers);
+
+  return {
+    hosts, seed, retired, router, mcp, rmcp, providers,
   };
 }
 

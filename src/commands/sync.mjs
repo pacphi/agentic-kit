@@ -14,7 +14,7 @@ import { companionLifecycleFor } from '../lib/adapters/companion-lifecycle-regis
 import { renderApplyReport } from '../lib/adapters/lifecycle-render.mjs';
 import { listDaemons, staleDaemons, reap } from '../lib/daemons.mjs';
 import { loadKitConfig, saveKitConfig } from '../lib/config.mjs';
-import { commandHosts, applyHosts, applyProviders, hostInstallState, installHost, applyAqeRouter, seedActivityRoutesIfMultiHost, migrateRetiredRoutesInConfig, retireCodexMcp, ensureRufloMcpInCodex, bothHostsEnabled } from '../lib/providers.mjs';
+import { commandHosts, hostInstallState, installHost, convergeProviderStack, bothHostsEnabled } from '../lib/providers.mjs';
 import { driftReport, selfDrift } from '../lib/versions.mjs';
 import { RUVECTOR_PKG, managed as ruvectorManaged } from '../lib/ruvector.mjs';
 import { pruneNpxStale } from '../lib/npx.mjs';
@@ -273,37 +273,52 @@ export async function run({
     }
   }
   if (subsystems.has('providers') || subsystems.has('routing') || subsystems.has('codex-mcp')) {
-    report('providers', applyHosts(cfg, cwd));
-    // heal per-activity routing: seed from defaults if dual-host only just became
-    // eligible (e.g. aqe upgraded ≥3.13.1 since enablement), before materializing.
-    const seed = seedActivityRoutesIfMultiHost(cfg);
-    if (seed.seeded) { saveKitConfig(cfg); report('routing', { ok: true, changed: true, detail: `seeded ${seed.count} activities` }); }
-    // Retire withdrawn models from the persisted policy. Distinct from divergence
-    // (which stays an explicit `ak x host refresh` decision): a retired model
-    // stops answering, so leaving it named on disk is a scheduled failure. Only
-    // seeded entries are rewritten; a user pin is reported and left alone.
-    const retired = migrateRetiredRoutesInConfig(cfg);
-    if (retired.changes.length > 0) {
-      if (retired.changed) saveKitConfig(cfg);
-      for (const c of retired.changes) {
-        const when = c.retiresOn ? `retires ${c.retiresOn}` : 'already withdrawn';
-        report('routing', c.rewritten
-          ? { ok: true, changed: true, detail: `${c.activity} ${c.field}: ${c.from} → ${c.to} (${when})` }
-          : { ok: true, changed: false, detail: `${c.activity} ${c.field} pins ${c.from} (${when}) — user pin kept; ak runs ${c.to}` });
+    // The shared pipeline (providers.mjs's convergeProviderStack) computes and
+    // persists every step; this reporter only decides what to print and how,
+    // preserving sync's exact wording/gating per step.
+    const reporter = (step, result) => {
+      if (step === 'hosts') { report('providers', result); return; }
+      // heal per-activity routing: seed from defaults if dual-host only just
+      // became eligible (e.g. aqe upgraded ≥3.13.1 since enablement), before
+      // materializing.
+      if (step === 'routing-seed') {
+        if (result.seeded) report('routing', { ok: true, changed: true, detail: `seeded ${result.count} activities` });
+        return;
       }
-    }
-    const router = applyAqeRouter(cfg, cwd);
-    if (router.changed || !router.ok) report('aqe router', router);
-    if (!router.ok) aqeRouterApplyFailure = router.detail || 'AQE router apply failed';
-    const mcp = await retireCodexMcp(cfg, cwd);
-    if (mcp.changed) saveKitConfig(cfg);
-    if (mcp.changed || !mcp.ok) report('legacy codex MCP', mcp);
-    // Independent Ruflo integration for Codex-driven sessions.
-    const rmcp = await ensureRufloMcpInCodex(cfg, cwd);
-    if (rmcp.changed) saveKitConfig(cfg);
-    if (rmcp.changed || !rmcp.ok) report('ruflo→codex MCP', rmcp);
-    const prov = await withProgress('providers (api)', () => applyProviders(cfg, cwd));
-    if (prov.changed || !prov.ok) report('providers (api)', prov);
+      // Retire withdrawn models from the persisted policy. Distinct from
+      // divergence (which stays an explicit `ak x host refresh` decision): a
+      // retired model stops answering, so leaving it named on disk is a
+      // scheduled failure. Only seeded entries are rewritten; a user pin is
+      // reported and left alone.
+      if (step === 'routing-retired') {
+        for (const c of result.changes) {
+          const when = c.retiresOn ? `retires ${c.retiresOn}` : 'already withdrawn';
+          report('routing', c.rewritten
+            ? { ok: true, changed: true, detail: `${c.activity} ${c.field}: ${c.from} → ${c.to} (${when})` }
+            : { ok: true, changed: false, detail: `${c.activity} ${c.field} pins ${c.from} (${when}) — user pin kept; ak runs ${c.to}` });
+        }
+        return;
+      }
+      if (step === 'aqe-router') {
+        if (result.changed || !result.ok) report('aqe router', result);
+        if (!result.ok) aqeRouterApplyFailure = result.detail || 'AQE router apply failed';
+        return;
+      }
+      if (step === 'legacy-codex-mcp') {
+        if (result.changed || !result.ok) report('legacy codex MCP', result);
+        return;
+      }
+      // Independent Ruflo integration for Codex-driven sessions.
+      if (step === 'ruflo-codex-mcp') {
+        if (result.changed || !result.ok) report('ruflo→codex MCP', result);
+        return;
+      }
+      if (step === 'providers-api' && (result.changed || !result.ok)) report('providers (api)', result);
+    };
+    await convergeProviderStack(cfg, cwd, {
+      reporter,
+      runProviders: (fn) => withProgress('providers (api)', fn),
+    });
   }
   // Gate includes 'providers': applyProviders runs ruflo CLI commands, and any
   // ruflo command is a potential helper-refresh wiper — so a providers-only

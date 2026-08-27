@@ -7,11 +7,11 @@
 import readline from 'node:readline/promises';
 import {
   HOSTS, API_PROVIDERS, AQE_PROVIDER_TYPES, detectHosts,
-  settingsTarget, isDefault, applyHosts, applyProviders,
+  settingsTarget, isDefault,
   undoProviders, hostInstallState, hostAuthState, installHost, applyAqeRouter, undoAqeRouter,
   bothHostsEnabled, DUAL_ROLE_TIP, JUDGE_BIAS_TIP, QE_COURT_TIP, suggestedFallbackFor,
-  seedActivityRoutesIfMultiHost, migrateRetiredRoutesInConfig, printActivityRoutingTable, retireCodexMcp, undoCodexMcp,
-  ensureRufloMcpInCodex, undoRufloMcpInCodex, detectAqeProviders, aqeProviderCredential, credentialGaps, fallbackSource,
+  seedActivityRoutesIfMultiHost, migrateRetiredRoutesInConfig, printActivityRoutingTable, convergeProviderStack, undoCodexMcp,
+  undoRufloMcpInCodex, detectAqeProviders, aqeProviderCredential, credentialGaps, fallbackSource,
   collectIntegrationFacts, aqeSelectableProviderTypes, aqeSelectableChainProviderTypes,
 } from '../../lib/providers.mjs';
 import { parseRouteSpecs, formatModelHelp, PRIMARY_HOSTS, DEFAULT_PRIMARY_HOST, divergedRoutes, refreshSeededRoutes, pruneRoutesForHosts, modelNote, ACTIVITIES } from '../../lib/routing.mjs';
@@ -737,47 +737,65 @@ export async function pick({ flags, cwd, pkgRoot, migrateRoutes = migrateRetired
     if (guidance.changed) ok(`opencode ${guidance.detail}`);
   }
 
-  const h = applyHosts(cfg, cwd);
-  (h.ok ? ok : fail)(`hosts: ${h.detail}`);
-  if (codexRetired) {
-    const complete = codexRetired.mcp.ok && codexRetired.rmcp.ok;
-    (complete ? ok : warn)(`codex disabled${complete ? '' : ' with teardown receipts retained'}: ${codexRetired.mcp.detail}; ${codexRetired.rmcp.detail}`);
-  }
-  if (primaryHost !== DEFAULT_PRIMARY_HOST) {
-    const alt = routing.filter((e) => e !== primaryHost).join(', ') || 'none';
-    ok(`primary host: ${primaryHost} (alternate: ${alt})`);
-  }
-  // Retire withdrawn models from the persisted policy — the same heal `ak
-  // sync` already runs (sync.mjs). Without this, `ak host pick` could persist
-  // a route naming a model the host has withdrawn, left for the next sync to
-  // repair. Only seeded entries are rewritten; a user pin is reported and kept.
-  const retired = migrateRoutes(cfg);
-  if (retired.changes.length > 0) {
-    if (retired.changed) saveKitConfig(cfg);
-    for (const c of retired.changes) {
-      const when = c.retiresOn ? `retires ${c.retiresOn}` : 'already withdrawn';
-      reportOutcome('routing', c.rewritten
-        ? { ok: true, changed: true, detail: `${c.activity} ${c.field}: ${c.from} → ${c.to} (${when})` }
-        : { ok: true, changed: false, detail: `${c.activity} ${c.field} pins ${c.from} (${when}) — user pin kept; ak runs ${c.to}` });
+  // Apply step: the shared pipeline (providers.mjs's convergeProviderStack)
+  // computes and persists every step; this reporter only decides what to
+  // print and how, preserving pick's exact wording/gating/ordering per step.
+  // seedRoutes:false — routes were already seeded above (before pruning);
+  // re-seeding here would be a no-op anyway, but the reporter stays silent
+  // for it since the "seeded" message prints later, from the earlier `seed`.
+  const pickReporter = (step, result) => {
+    if (step === 'hosts') {
+      (result.ok ? ok : fail)(`hosts: ${result.detail}`);
+      if (codexRetired) {
+        const complete = codexRetired.mcp.ok && codexRetired.rmcp.ok;
+        (complete ? ok : warn)(`codex disabled${complete ? '' : ' with teardown receipts retained'}: ${codexRetired.mcp.detail}; ${codexRetired.rmcp.detail}`);
+      }
+      if (primaryHost !== DEFAULT_PRIMARY_HOST) {
+        const alt = routing.filter((e) => e !== primaryHost).join(', ') || 'none';
+        ok(`primary host: ${primaryHost} (alternate: ${alt})`);
+      }
+      return;
     }
-  }
-  const router = applyAqeRouter(cfg, cwd);
-  if (router.changed || !router.ok) (router.ok ? ok : warn)(`aqe router: ${router.detail}`);
-  if (aqeProvider) {
-    (router.ok ? ok : warn)(router.ok
-      ? `aqe provider: AQE_LLM_PROVIDER=${aqeProvider}`
-      : `aqe provider intent not active: ${aqeProvider} (router projection incomplete)`);
-  }
-  const mcp = await retireCodexMcp(cfg, cwd);
-  if (mcp.changed) saveKitConfig(cfg);
-  if (mcp.changed || !mcp.ok) (mcp.ok ? ok : warn)(`legacy codex MCP: ${mcp.detail}`);
-  // Register Ruflo independently in Codex. Agentic-QE's Codex integration is
-  // handled by `aqe init --with-codex` during setup.
-  const rmcp = await ensureRufloMcpInCodex(cfg, cwd);
-  if (rmcp.changed) saveKitConfig(cfg); // persist reverse MCP ownership
-  if (rmcp.changed || !rmcp.ok) (rmcp.ok ? ok : warn)(`ruflo→codex MCP: ${rmcp.detail}`);
-  const prov = await applyProviders(cfg, cwd);
-  (prov.status === 'degraded' ? warn : prov.ok ? (prov.changed ? ok : info) : warn)(`ruflo providers: ${prov.detail}`);
+    // Retire withdrawn models from the persisted policy — the same heal `ak
+    // sync` already runs (sync.mjs). Without this, `ak host pick` could
+    // persist a route naming a model the host has withdrawn, left for the
+    // next sync to repair. Only seeded entries are rewritten; a user pin is
+    // reported and kept.
+    if (step === 'routing-retired') {
+      for (const c of result.changes) {
+        const when = c.retiresOn ? `retires ${c.retiresOn}` : 'already withdrawn';
+        reportOutcome('routing', c.rewritten
+          ? { ok: true, changed: true, detail: `${c.activity} ${c.field}: ${c.from} → ${c.to} (${when})` }
+          : { ok: true, changed: false, detail: `${c.activity} ${c.field} pins ${c.from} (${when}) — user pin kept; ak runs ${c.to}` });
+      }
+      return;
+    }
+    if (step === 'aqe-router') {
+      if (result.changed || !result.ok) (result.ok ? ok : warn)(`aqe router: ${result.detail}`);
+      if (aqeProvider) {
+        (result.ok ? ok : warn)(result.ok
+          ? `aqe provider: AQE_LLM_PROVIDER=${aqeProvider}`
+          : `aqe provider intent not active: ${aqeProvider} (router projection incomplete)`);
+      }
+      return;
+    }
+    if (step === 'legacy-codex-mcp') {
+      if (result.changed || !result.ok) (result.ok ? ok : warn)(`legacy codex MCP: ${result.detail}`);
+      return;
+    }
+    // Register Ruflo independently in Codex. Agentic-QE's Codex integration is
+    // handled by `aqe init --with-codex` during setup.
+    if (step === 'ruflo-codex-mcp') {
+      if (result.changed || !result.ok) (result.ok ? ok : warn)(`ruflo→codex MCP: ${result.detail}`);
+      return;
+    }
+    if (step === 'providers-api') {
+      (result.status === 'degraded' ? warn : result.ok ? (result.changed ? ok : info) : warn)(`ruflo providers: ${result.detail}`);
+    }
+  };
+  const { router } = await convergeProviderStack(cfg, cwd, {
+    reporter: pickReporter, seedRoutes: false, migrateRoutes,
+  });
   if (router.ok) ok('saved to kit.json — reapplied on every `ak sync`; undo with `ak host off`');
   else warn('saved intent to kit.json, but AQE routing is incomplete — fix the warning above and re-run `ak sync`');
   if (seed.seeded) ok(`per-activity routing seeded — ${seed.count} activities (dual-host defaults; tune with --route or edit kit.json)`);
