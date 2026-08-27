@@ -95,6 +95,78 @@ function decodeCodexMessage(payload) {
   };
 }
 
+/** `session_meta` → the authoritative session id, cwd, and thread_source (a
+ *  `"subagent"` value marks a thread_spawn replay whose tokens the batch
+ *  parser excludes from aggregation). */
+function decodeSessionMeta(payload) {
+  return {
+    type: 'meta',
+    sessionId: payload.id,
+    cwd: payload.cwd,
+    threadSource: payload.thread_source,
+    provider: resolveCodexProvider(payload),
+    model: payload.model,
+  };
+}
+
+/** `turn_context` → the model id in effect from this point on. */
+function decodeTurnContext(payload) {
+  return {
+    type: 'turnContext',
+    cwd: payload.cwd,
+    provider: resolveCodexProvider(payload),
+    model: payload.model,
+  };
+}
+
+/** `event_msg` → `token_count`: a CUMULATIVE usage snapshot, so only the last
+ *  one a caller sees should be kept. */
+function decodeTokenCount(payload) {
+  return {
+    type: 'tokenCount',
+    usage: {
+      total: payload.info?.total_token_usage && typeof payload.info.total_token_usage === 'object'
+        ? payload.info.total_token_usage : null,
+      rateLimits: payload.rate_limits && typeof payload.rate_limits === 'object'
+        ? payload.rate_limits : null,
+    },
+  };
+}
+
+/** `event_msg` → everything but `token_count`: a message (legacy or
+ *  item_completed), a lifecycle event, or unrecognized. */
+function decodeEventMsg(payload) {
+  if (payload.type === 'token_count') return decodeTokenCount(payload);
+  const message = decodeCodexMessage(payload);
+  if (message) {
+    return message.role
+      ? { type: 'message', role: message.role, text: message.text, generation: message.generation }
+      : { type: null, generation: message.generation, unknownItemType: message.unknownItemType };
+  }
+  if (['task_complete', 'turn_aborted'].includes(payload.type)) {
+    return { type: 'lifecycle', status: payload.type === 'turn_aborted' ? 'cancelled' : 'completed' };
+  }
+  return { type: null };
+}
+
+/** `response_item` → a tool call or its result. */
+function decodeResponseItem(payload) {
+  if (['function_call', 'custom_tool_call'].includes(payload.type)) {
+    return { type: 'toolCall', callId: payload.call_id ?? payload.id, toolName: payload.name };
+  }
+  if (['function_call_output', 'custom_tool_call_output'].includes(payload.type)) {
+    return { type: 'toolResult', callId: payload.call_id ?? payload.id };
+  }
+  return { type: null };
+}
+
+const CODEX_RECORD_DECODERS = {
+  session_meta: decodeSessionMeta,
+  turn_context: decodeTurnContext,
+  event_msg: decodeEventMsg,
+  response_item: decodeResponseItem,
+};
+
 /**
  * Decode one raw Codex rollout JSONL record (`{type, payload, timestamp}`)
  * into a normalized description of what it is. Fields are raw pass-throughs
@@ -111,62 +183,44 @@ function decodeCodexMessage(payload) {
  */
 export function decodeCodexRecord(record) {
   const payload = record?.payload && typeof record.payload === 'object' ? record.payload : {};
+  const decoder = CODEX_RECORD_DECODERS[record?.type];
+  return decoder ? decoder(payload) : { type: null };
+}
 
-  if (record?.type === 'session_meta') {
-    return {
-      type: 'meta',
-      sessionId: payload.id,
-      cwd: payload.cwd,
-      threadSource: payload.thread_source,
-      provider: resolveCodexProvider(payload),
-      model: payload.model,
-    };
+/** Partition a Claude content-block array into its tool_use/tool_result
+ *  blocks — the two block kinds any consumer here treats as structured
+ *  rather than display text. */
+function splitClaudeBlocks(blocks) {
+  const toolUses = [];
+  const toolResults = [];
+  for (const block of blocks) {
+    if (!block || typeof block !== 'object') continue;
+    if (block.type === 'tool_use') toolUses.push({ id: block.id, name: block.name });
+    else if (block.type === 'tool_result') toolResults.push({ id: block.tool_use_id, isError: block.is_error === true });
   }
+  return { toolUses, toolResults };
+}
 
-  if (record?.type === 'turn_context') {
-    return {
-      type: 'turnContext',
-      cwd: payload.cwd,
-      provider: resolveCodexProvider(payload),
-      model: payload.model,
-    };
-  }
+/** `user`/`assistant`/`null` — any other `record.type` (tool results, meta
+ *  rows) is not a message role this module normalizes. */
+function claudeRole(record) {
+  if (record?.type === 'user') return 'user';
+  if (record?.type === 'assistant') return 'assistant';
+  return null;
+}
 
-  if (record?.type === 'event_msg') {
-    if (payload.type === 'token_count') {
-      return {
-        type: 'tokenCount',
-        usage: {
-          total: payload.info?.total_token_usage && typeof payload.info.total_token_usage === 'object'
-            ? payload.info.total_token_usage : null,
-          rateLimits: payload.rate_limits && typeof payload.rate_limits === 'object'
-            ? payload.rate_limits : null,
-        },
-      };
-    }
-    const message = decodeCodexMessage(payload);
-    if (message) {
-      return message.role
-        ? { type: 'message', role: message.role, text: message.text, generation: message.generation }
-        : { type: null, generation: message.generation, unknownItemType: message.unknownItemType };
-    }
-    if (['task_complete', 'turn_aborted'].includes(payload.type)) {
-      return { type: 'lifecycle', status: payload.type === 'turn_aborted' ? 'cancelled' : 'completed' };
-    }
-    return { type: null };
-  }
-
-  if (record?.type === 'response_item') {
-    if (['function_call', 'custom_tool_call'].includes(payload.type)) {
-      return { type: 'toolCall', callId: payload.call_id ?? payload.id, toolName: payload.name };
-    }
-    if (['function_call_output', 'custom_tool_call_output'].includes(payload.type)) {
-      return { type: 'toolResult', callId: payload.call_id ?? payload.id };
-    }
-    return { type: null };
-  }
-
-  return { type: null };
+/** Claude's four token-usage fields, normalized to zero rather than NaN.
+ *  `cache_read_input_tokens`/`cache_creation_input_tokens` are separate
+ *  fields the API already reports, kept apart rather than folded into
+ *  `input_tokens` (which would double them into gross input). */
+function claudeUsage(record) {
+  const usage = record?.message?.usage ?? {};
+  return {
+    input: Number(usage.input_tokens) || 0,
+    output: Number(usage.output_tokens) || 0,
+    cacheRead: Number(usage.cache_read_input_tokens) || 0,
+    cacheWrite: Number(usage.cache_creation_input_tokens) || 0,
+  };
 }
 
 /**
@@ -182,16 +236,9 @@ export function decodeCodexRecord(record) {
 export function decodeClaudeRecord(record) {
   const content = record?.message?.content;
   const blocks = Array.isArray(content) ? content : [];
-  const toolUses = [];
-  const toolResults = [];
-  for (const block of blocks) {
-    if (!block || typeof block !== 'object') continue;
-    if (block.type === 'tool_use') toolUses.push({ id: block.id, name: block.name });
-    else if (block.type === 'tool_result') toolResults.push({ id: block.tool_use_id, isError: block.is_error === true });
-  }
-  const usage = record?.message?.usage ?? {};
+  const { toolUses, toolResults } = splitClaudeBlocks(blocks);
   return {
-    role: record?.type === 'user' ? 'user' : record?.type === 'assistant' ? 'assistant' : null,
+    role: claudeRole(record),
     sessionId: record?.sessionId,
     agentId: record?.agentId,
     isSidechain: record?.isSidechain === true,
@@ -200,11 +247,6 @@ export function decodeClaudeRecord(record) {
     text: claudeText(content),
     toolUses,
     toolResults,
-    usage: {
-      input: Number(usage.input_tokens) || 0,
-      output: Number(usage.output_tokens) || 0,
-      cacheRead: Number(usage.cache_read_input_tokens) || 0,
-      cacheWrite: Number(usage.cache_creation_input_tokens) || 0,
-    },
+    usage: claudeUsage(record),
   };
 }
