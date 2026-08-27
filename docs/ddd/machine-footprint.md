@@ -68,7 +68,7 @@ read not on this list is a defect, and adding one is an amendment to this docume
 |------|-----------|---------------|---------------------|
 | Directory entries and `lstat` | `walk.mjs`, every collector | name, kind, size, mtime, block count | anything inside a file |
 | `.git/config` | `projects.mjs` | the origin remote URL | every other config key |
-| `.git/worktrees/<name>/gitdir` | `storage.mjs` | one filesystem path, bounded to 4 KB | — |
+| `.git/worktrees/<name>/gitdir` | `storage-reclaim-detectors.mjs` (re-exported from `storage.mjs`) | one filesystem path, bounded to 4 KB | — |
 | A transcript's **head** | `project-sources.mjs` | the session's `cwd` **field** | every message, prompt, tool call, tool result and model output in the file |
 | OpenCode's session store | `project-sources.mjs` | the `directory` column, read-only | every other column, and every message row |
 | A project's own manifests | `stack-detect.mjs` | dependency **keys** (and, for `path:`/`workspace:` entries, enough of the value to reject them) | manifest values, scripts, and anything executable |
