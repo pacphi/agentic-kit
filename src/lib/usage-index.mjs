@@ -1295,6 +1295,152 @@ export async function buildIndex(o = {}) {
   try { return await p; } finally { _inflight.delete(key); }
 }
 
+/** opencode transcript source (one SQLite store, per-session cache keys).
+ *  Same hermeticity rule as the codex ledger below: overridden roots imply
+ *  the REAL store is the wrong one — only default-root scans (or an explicit
+ *  roots.opencode path) read it. Unlike the claude/codex file-tree sources,
+ *  opencode's health is a BYPRODUCT of listing (a single SQLite read can fail
+ *  in ways a directory walk cannot), so discovery and health are resolved
+ *  together here rather than the rootHealth()-then-list() order the other
+ *  two sources use. `rawRoots` is the caller's OWN `roots` option, unmerged
+ *  with defaults — its mere presence (vs `undefined`) is what makes an
+ *  override hermetic; see the codex ledger comment below. */
+function discoverOpencodeSource(rawRoots, cutoff) {
+  const ocDb = rawRoots === undefined ? defaultOpencodeDbPath() : (rawRoots?.opencode ?? null);
+  if (!ocDb || !fs.existsSync(ocDb)) return { health: { status: 'absent', reason: null }, candidates: [], ocDb };
+  const listed = listOpencodeSessionsResult({ dbFile: ocDb, cutoffMs: cutoff });
+  if (!listed.ok) {
+    const health = listed.error.kind === 'absent'
+      ? { status: 'absent', reason: 'absent' } : { status: 'degraded', reason: listed.error.kind };
+    return { health, candidates: [], ocDb };
+  }
+  const candidates = listed.value.map((e) => ({
+    file: `opencode://${e.id}`, provider: 'opencode', id: e.id, dbFile: ocDb,
+    stat: { mtimeMs: e.mtimeMs, size: e.size },
+  }));
+  return { health: { status: 'ok', reason: null }, candidates, ocDb };
+}
+
+/** Parse (or reuse the cached parse of) one scan candidate, updating the
+ *  common cross-host telemetry diagnostics and codex's extra per-file
+ *  diagnostics as side effects. Pulled out of scan()'s loop so the per-file
+ *  bookkeeping — which is genuinely provider-specific (codex tracks file
+ *  counts and yield diagnostics no other source has) — is not inlined into
+ *  the generic scan loop's own complexity. */
+function processCandidate(c, cache, commonDiagnostics, codexDiagnostics) {
+  const key = { mtime: c.stat.mtimeMs, size: c.stat.size };
+  const hit = cache?.entries?.[c.file];
+  const cacheHit = !!(hit && hit.mtime === key.mtime && hit.size === key.size
+    && (c.provider !== 'codex' || hit.parseStats));
+  let session = cacheHit ? hit.session : null;
+  let parseStats = cacheHit ? hit.parseStats : null;
+  if (!session) {
+    const parsed = parseFile(c);
+    session = parsed ? parsed.session : null;
+    parseStats = parsed?.parseStats ?? null;
+  }
+  if (commonDiagnostics[c.provider]) {
+    recordTelemetryUnit(commonDiagnostics[c.provider], session);
+    if (c.provider === 'codex') {
+      addTelemetryDiagnostics(commonDiagnostics.codex, {
+        unknownKinds: parseStats?.unknownItemTypes,
+        unknownKindOverflow: parseStats?.unknownItemTypeOverflow,
+      });
+    }
+  }
+  if (c.provider === 'codex') {
+    codexDiagnostics.files++;
+    if (cacheHit) codexDiagnostics.cachedFiles++;
+    if (session) addCodexParseDiagnostics(codexDiagnostics, parseStats);
+    else codexDiagnostics.unparsedFiles++;
+  }
+  return { key, session, parseStats };
+}
+
+/** Carry forward cached entries outside the window whose source still exists,
+ *  so widening the window later does not force a full re-parse. Bounded at
+ *  KEEP_MS: dashboard-server.mjs's clampDays caps every queryable window at
+ *  365 days, so an entry whose last activity is older than that can never be
+ *  reached by ANY query — carrying it forever was pure dead weight the cache
+ *  (and readCache's now-memoized parse) paid for on every scan.
+ *
+ *  claude/codex existence is a plain file stat; opencode pseudo-keys are not
+ *  files, so existence means "row still in the store" — checked against the
+ *  SQLite source directly. A degraded opencode store can't tell existence
+ *  apart from absence, so every carried opencode entry is kept rather than
+ *  guessed away, and (unlike claude/codex, whose carried entries stay
+ *  cache-only) is pushed back into `records` when still within the window,
+ *  since a store read that regains health later has no other way to notice.
+ *
+ *  Mutates `entries` and `records` in place; returns the possibly-updated
+ *  opencode health (a degraded existence check discovered mid-loop must
+ *  still be visible to the NEXT entry's check and to the final report). */
+function carryForwardCachedEntries(cache, entries, records, { now, cutoff, ocDb, opencodeHealth }) {
+  if (!cache?.entries) return opencodeHealth;
+  for (const [file, e] of Object.entries(cache.entries)) {
+    if (entries[file] || !e?.session) continue;
+    const lastActivity = e.session.end ?? e.session.start;
+    // No timestamp at all → can't judge age; keep it rather than guess.
+    if (lastActivity != null && now - lastActivity > KEEP_MS) continue;
+    if (!file.startsWith('opencode://')) {
+      if (statSafe(file)) entries[file] = e;
+      continue;
+    }
+    const result = carryForwardOpencodeEntry(file, e, opencodeHealth, ocDb);
+    if (!result) continue;
+    entries[file] = result.entry;
+    opencodeHealth = result.health;
+    if (result.pushRecord && (lastActivity == null || lastActivity >= cutoff)) records.push(e.session);
+  }
+  return opencodeHealth;
+}
+
+/** The opencode half of carryForwardCachedEntries — split out to keep both
+ *  functions individually under the project's complexity threshold. Returns
+ *  `null` to drop the entry, or `{ entry, health, pushRecord }` for the
+ *  caller to apply; see carryForwardCachedEntries for why a kept entry is
+ *  pushed back into `records` (unlike claude/codex's carry-forward). */
+function carryForwardOpencodeEntry(file, e, opencodeHealth, ocDb) {
+  const dbFile = e.dbFile ?? ocDb;
+  const exists = opencodeHealth.status === 'degraded'
+    ? null
+    : (dbFile ? opencodeSessionExistsResult({ dbFile, id: file.slice('opencode://'.length) }) : null);
+  if (opencodeHealth.status === 'degraded' || (exists?.ok && exists.value)) {
+    return { entry: { ...e, dbFile }, health: opencodeHealth, pushRecord: true };
+  }
+  if (exists && !exists.ok && exists.error.kind !== 'absent') {
+    return {
+      entry: { ...e, dbFile },
+      health: { status: 'degraded', reason: exists.error.kind },
+      pushRecord: true,
+    };
+  }
+  return null;
+}
+
+/** Codex's own thread ledger outranks the rollout heuristic (`undefined` →
+ *  read the real db; tests pass an object, or null to skip). Overridden roots
+ *  (tests, sandboxes) imply the REAL ~/.codex ledger is the wrong ledger for
+ *  these records — reading it would break test hermeticity and mis-attribute
+ *  fixture sessions. Only default roots read the real db. `rawRoots` is the
+ *  caller's OWN `roots` option, unmerged with defaults (same reason as
+ *  discoverOpencodeSource's).
+ *  @param {IndexOptions} o */
+function resolveCodexLedger(o, rawRoots) {
+  if (o.codexState !== undefined) {
+    return { ledger: o.codexState, health: { status: o.codexState ? 'ok' : 'absent', reason: null } };
+  }
+  if (rawRoots?.codex) {
+    return { ledger: null, health: { status: 'not-read', reason: 'sandboxed-roots' } };
+  }
+  const observed = readCodexStateResult();
+  const ledger = observed.ok ? observed.value : null;
+  const health = observed.ok
+    ? (observed.value ? { status: 'ok', reason: null } : { status: 'degraded', reason: 'schema' })
+    : { status: observed.error.kind === 'absent' ? 'absent' : 'degraded', reason: observed.error.kind };
+  return { ledger, health };
+}
+
 /** @param {IndexOptions} [o] */
 async function scan(o = {}) {
   const {
@@ -1309,33 +1455,14 @@ async function scan(o = {}) {
   // recursive per-file walk listClaude/listCodex still do below).
   const claudeHealth = rootHealth(r.claude);
   const codexHealth = rootHealth(r.codex);
-
   const candidates = [...listClaude(r.claude), ...listCodex(r.codex)]
     .map((e) => ({ ...e, stat: statSafe(e.file) }))
     .filter((e) => e.stat && e.stat.mtimeMs >= cutoff);
 
-  // opencode transcript source (one SQLite store, per-session cache keys).
-  // Same hermeticity rule as the codex ledger below: overridden roots imply
-  // the REAL store is the wrong one — only default-root scans (or an explicit
-  // roots.opencode path) read it.
-  const ocDb = o.roots === undefined ? defaultOpencodeDbPath() : (roots?.opencode ?? null);
-  let opencodeHealth = { status: 'absent', reason: null };
-  if (ocDb && fs.existsSync(ocDb)) {
-    const listed = listOpencodeSessionsResult({ dbFile: ocDb, cutoffMs: cutoff });
-    if (listed.ok) {
-      opencodeHealth = { status: 'ok', reason: null };
-      for (const e of listed.value) {
-        candidates.push({
-          file: `opencode://${e.id}`, provider: 'opencode', id: e.id, dbFile: ocDb,
-          stat: { mtimeMs: e.mtimeMs, size: e.size },
-        });
-      }
-    } else {
-      opencodeHealth = listed.error.kind === 'absent'
-        ? { status: 'absent', reason: 'absent' }
-        : { status: 'degraded', reason: listed.error.kind };
-    }
-  }
+  const opencodeSource = discoverOpencodeSource(roots, cutoff);
+  let opencodeHealth = opencodeSource.health;
+  const ocDb = opencodeSource.ocDb;
+  candidates.push(...opencodeSource.candidates);
 
   const cache = force ? null : readCache(cacheFile);
   const entries = {};
@@ -1351,32 +1478,7 @@ async function scan(o = {}) {
 
   notify(onProgress, { scanned: 0, total, phase: 'scan' });
   for (const c of candidates) {
-    const key = { mtime: c.stat.mtimeMs, size: c.stat.size };
-    const hit = cache?.entries?.[c.file];
-    const cacheHit = !!(hit && hit.mtime === key.mtime && hit.size === key.size
-      && (c.provider !== 'codex' || hit.parseStats));
-    let session = cacheHit ? hit.session : null;
-    let parseStats = cacheHit ? hit.parseStats : null;
-    if (!session) {
-      const parsed = parseFile(c);
-      session = parsed ? parsed.session : null;
-      parseStats = parsed?.parseStats ?? null;
-    }
-    if (commonDiagnostics[c.provider]) {
-      recordTelemetryUnit(commonDiagnostics[c.provider], session);
-      if (c.provider === 'codex') {
-        addTelemetryDiagnostics(commonDiagnostics.codex, {
-          unknownKinds: parseStats?.unknownItemTypes,
-          unknownKindOverflow: parseStats?.unknownItemTypeOverflow,
-        });
-      }
-    }
-    if (c.provider === 'codex') {
-      codexDiagnostics.files++;
-      if (cacheHit) codexDiagnostics.cachedFiles++;
-      if (session) addCodexParseDiagnostics(codexDiagnostics, parseStats);
-      else codexDiagnostics.unparsedFiles++;
-    }
+    const { key, session, parseStats } = processCandidate(c, cache, commonDiagnostics, codexDiagnostics);
     if (session) {
       entries[c.file] = {
         ...key, session,
@@ -1389,63 +1491,17 @@ async function scan(o = {}) {
     if (scanned % 100 === 0) notify(onProgress, { scanned, total, phase: 'scan' });
   }
 
-  // Carry forward cached entries outside the window whose file still exists, so
-  // widening the window later does not force a full re-parse. Bounded at
-  // KEEP_MS: dashboard-server.mjs's clampDays caps every queryable window at
-  // 365 days, so an entry whose last activity is older than that can never be
-  // reached by ANY query — carrying it forever was pure dead weight the cache
-  // (and readCache's now-memoized parse) paid for on every scan.
-  if (cache?.entries) {
-    for (const [file, e] of Object.entries(cache.entries)) {
-      if (entries[file] || !e?.session) continue;
-      const lastActivity = e.session.end ?? e.session.start;
-      // No timestamp at all → can't judge age; keep it rather than guess.
-      if (lastActivity != null && now - lastActivity > KEEP_MS) continue;
-      // opencode pseudo-keys are not files: existence means "row still in the store".
-      if (file.startsWith('opencode://')) {
-        const dbFile = e.dbFile ?? ocDb;
-        const exists = opencodeHealth.status === 'degraded'
-          ? null
-          : (dbFile ? opencodeSessionExistsResult({ dbFile, id: file.slice('opencode://'.length) }) : null);
-        if (opencodeHealth.status === 'degraded' || (exists?.ok && exists.value)) {
-          entries[file] = { ...e, dbFile };
-          if (lastActivity == null || lastActivity >= cutoff) records.push(e.session);
-        } else if (exists && !exists.ok && exists.error.kind !== 'absent') {
-          opencodeHealth = { status: 'degraded', reason: exists.error.kind };
-          entries[file] = { ...e, dbFile };
-          if (lastActivity == null || lastActivity >= cutoff) records.push(e.session);
-        }
-      } else if (statSafe(file)) entries[file] = e;
-    }
-  }
+  opencodeHealth = carryForwardCachedEntries(cache, entries, records, {
+    now, cutoff, ocDb, opencodeHealth,
+  });
   writeCache(cacheFile, { schemaVersion: SCHEMA_VERSION, updatedAt: new Date(now).toISOString(), entries });
   notify(onProgress, { scanned: total, total, phase: 'aggregate' });
 
-  // Codex's own thread ledger outranks the rollout heuristic (`undefined` →
-  // read the real db; tests pass an object, or null to skip). Applied AFTER the
-  // cache write, on copies: the cache stores what the FILE said, the aggregate
-  // reflects what Codex's ledger knows — a ledger that arrives later (or gets
-  // repaired) corrects old sessions without a cache invalidation.
-  // Overridden roots (tests, sandboxes) imply the REAL ~/.codex ledger is the
-  // wrong ledger for these records — reading it would break test hermeticity
-  // and mis-attribute fixture sessions. Only default roots read the real db.
-  let ledger;
-  let codexLedgerHealth;
-  if (o.codexState !== undefined) {
-    ledger = o.codexState;
-    codexLedgerHealth = { status: ledger ? 'ok' : 'absent', reason: null };
-  } else if (roots?.codex) {
-    ledger = null;
-    codexLedgerHealth = { status: 'not-read', reason: 'sandboxed-roots' };
-  } else {
-    const observed = readCodexStateResult();
-    ledger = observed.ok ? observed.value : null;
-    codexLedgerHealth = observed.ok
-      ? (observed.value
-        ? { status: 'ok', reason: null }
-        : { status: 'degraded', reason: 'schema' })
-      : { status: observed.error.kind === 'absent' ? 'absent' : 'degraded', reason: observed.error.kind };
-  }
+  // Applied AFTER the cache write, on copies: the cache stores what the FILE
+  // said, the aggregate reflects what Codex's ledger knows — a ledger that
+  // arrives later (or gets repaired) corrects old sessions without a cache
+  // invalidation.
+  const { ledger, health: codexLedgerHealth } = resolveCodexLedger(o, roots);
   const result = aggregate(applyCodexLedger(records, ledger), { days, now, cutoff, deps });
   const codexSourceHealth = finalizeCodexHealth(codexHealth, codexDiagnostics);
   addTelemetryDiagnostics(commonDiagnostics.codex, {

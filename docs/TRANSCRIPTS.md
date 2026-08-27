@@ -256,7 +256,7 @@ Every turn body is passed through `maskSecrets` (`usage-index.mjs:208` — the
 23 secret shapes) **server-side, before
 serialization**, then length-capped at `MAX_TURN_CHARS` (40,000,
 `usage-index.mjs:89`) with the marker appended
-(`usage-index.mjs:1668-1678`). Two invariants:
+(`usage-index.mjs:1724-1734`). Two invariants:
 
 * **Presence is the signal.** `truncated`/`originalChars` are emitted only
   when the slice fired, so a complete turn cannot be misread as abridged.
@@ -412,7 +412,7 @@ was wrong before, for the curious.
   assembled `meta` left `cost` undefined, and `fmtUsd(undefined)` renders the
   truthy string `"$0.00"` — a fixed-looking zero on a panel whose whole
   subject is cost. `meta.cost` is now priced via `sessionCost()` from the
-  same per-model usage rows `aggregate()` uses (`usage-index.mjs:1658`).
+  same per-model usage rows `aggregate()` uses (`usage-index.mjs:1696`).
 * **Aggregate-side incidents** (the v4/v5 cache bumps, the Codex parsing
   defects) are recorded in `USAGE-SCORECARD-METRICS.md` Appendix A.
 
