@@ -40,6 +40,7 @@ import {
   addTelemetryDiagnostics, emptyTelemetryDiagnostics, finalizeTelemetryDiagnostics,
   MAX_TELEMETRY_UNKNOWN_KINDS, recordTelemetryUnit, telemetryCapabilities,
 } from './usage-telemetry.mjs';
+import { decodeClaudeRecord, decodeCodexRecord } from './telemetry-records.mjs';
 
 /** Bump to invalidate every cached entry wholesale.
  *  v2: cached records carry `active` sub-intervals for the idle-gap split.
@@ -466,27 +467,6 @@ export function addUsage(rec, day, model, u) {
   return row;
 }
 
-/** Flatten a Claude content array into display text, dropping binary payloads
- *  (a pasted screenshot is megabytes of base64 nobody wants to render). */
-function claudeText(content) {
-  if (typeof content === 'string') return content;
-  if (!Array.isArray(content)) return '';
-  const out = [];
-  for (const b of content) {
-    if (!b || typeof b !== 'object') continue;
-    if (b.type === 'text' && typeof b.text === 'string') out.push(b.text);
-    else if (b.type === 'image') out.push('[image]');
-    else if (b.type === 'thinking' && typeof b.thinking === 'string') out.push(b.thinking);
-    else if (b.type === 'tool_result') {
-      const c = b.content;
-      out.push(`[tool result] ${typeof c === 'string' ? c : claudeText(c)}`);
-    } else if (b.type === 'tool_use') {
-      out.push(`[tool: ${b.name}]`);
-    }
-  }
-  return out.join('\n');
-}
-
 /**
  * Harness-output envelopes: user-role entries whose text the HARNESS wrote —
  * background-task notifications, command stdout/stderr dumps, local-command
@@ -558,24 +538,24 @@ function parseClaude(raw, { id, dirName, withTurns = false }) {
     if (e.type === 'ai-title') { if (typeof e.aiTitle === 'string') aiTitle = e.aiTitle; continue; }
     if (typeof e.attributionSkill === 'string' && !rec.skill) rec.skill = e.attributionSkill;
     if (typeof e.attributionPlugin === 'string' && !rec.plugin) rec.plugin = e.attributionPlugin;
-    if (e.isSidechain === true) rec.sidechain = true;
+    const decoded = decodeClaudeRecord(e);
+    if (decoded.isSidechain) rec.sidechain = true;
     if (rec.project === 'unknown' && typeof e.cwd === 'string') applyProject(rec, projectLabel(e.cwd, dirName, repoRootOf(e.cwd)));
 
-    if (e.type === 'user') {
+    if (decoded.role === 'user') {
       noteSpan(rec, ms);
       const human = isHumanPrompt(e);
       if (human) {
         rec.prompts++;
-        if (!firstPrompt) firstPrompt = claudeText(e.message?.content);
+        if (!firstPrompt) firstPrompt = decoded.text;
       }
-      if (withTurns) {
-        const text = claudeText(e.message?.content);
-        if (text) turns.push({ role: 'user', at: new Date(ms).toISOString(), text, prompt: human, kind: userTurnKind(e) });
+      if (withTurns && decoded.text) {
+        turns.push({ role: 'user', at: new Date(ms).toISOString(), text: decoded.text, prompt: human, kind: userTurnKind(e) });
       }
       continue;
     }
 
-    if (e.type !== 'assistant' || !e.message) continue;
+    if (decoded.role !== 'assistant' || !e.message) continue;
     noteSpan(rec, ms);
     rec.responses++;
     const at = Number.isFinite(ms) ? ms : (rec.start ?? Date.now());
@@ -592,40 +572,33 @@ function parseClaude(raw, { id, dirName, withTurns = false }) {
     // reliably set on every build that emits this placeholder, so the literal
     // model marker is checked directly too — it's the one part of the shape
     // that's never varied in observed transcripts.
-    if (e.isApiErrorMessage === true || e.message.model === '<synthetic>') {
+    if (decoded.isApiError) {
       rec.exceptions++;
       if (withTurns) {
         turns.push({
           role: 'assistant', at: new Date(at).toISOString(), model: 'exception',
-          text: claudeText(e.message.content), tools: [], exception: true,
+          text: decoded.text, tools: [], exception: true,
         });
       }
       continue;
     }
 
-    const model = typeof e.message.model === 'string' ? e.message.model : 'unknown';
+    const model = typeof decoded.model === 'string' ? decoded.model : 'unknown';
     if (!rec.models.includes(model)) rec.models.push(model);
 
-    const u = e.message.usage ?? {};
-    addUsage(rec, localDay(at), model, {
-      input: Number(u.input_tokens) || 0,
-      output: Number(u.output_tokens) || 0,
-      cacheRead: Number(u.cache_read_input_tokens) || 0,
-      cacheWrite: Number(u.cache_creation_input_tokens) || 0,
-      responses: 1,
-    });
+    addUsage(rec, localDay(at), model, { ...decoded.usage, responses: 1 });
 
     const tools = [];
-    for (const b of Array.isArray(e.message.content) ? e.message.content : []) {
-      if (b?.type === 'tool_use' && typeof b.name === 'string') {
-        tools.push(b.name);
-        rec.tools[b.name] = (rec.tools[b.name] ?? 0) + 1;
+    for (const use of decoded.toolUses) {
+      if (typeof use.name === 'string') {
+        tools.push(use.name);
+        rec.tools[use.name] = (rec.tools[use.name] ?? 0) + 1;
       }
     }
     if (withTurns) {
       turns.push({
         role: 'assistant', at: new Date(at).toISOString(), model,
-        text: claudeText(e.message.content), tools,
+        text: decoded.text, tools,
       });
     }
   }
@@ -633,21 +606,6 @@ function parseClaude(raw, { id, dirName, withTurns = false }) {
   rec.title = maskSecrets(aiTitle || clip(firstPrompt)) || '(untitled)';
   if (rec.project === 'unknown') applyProject(rec, projectLabel(null, dirName));
   return { session: seal(rec), turns };
-}
-
-/** Newer Codex rollouts wrap messages in `item_completed` and use a different
- * content-block discriminator for each message role (`Text` for agent output,
- * `text` for user input). Keep that wire detail at the parser boundary so the
- * rest of the scorecard consumes the same prompt/response model for both
- * generations. */
-function codexItemText(item) {
-  if (typeof item?.text === 'string') return item.text;
-  if (typeof item?.message === 'string') return item.message;
-  if (!Array.isArray(item?.content)) return '';
-  return item.content
-    .filter((block) => (block?.type === 'Text' || block?.type === 'text') && typeof block.text === 'string')
-    .map((block) => block.text)
-    .join('\n');
 }
 
 function codexParseStats() {
@@ -665,27 +623,6 @@ function recordCodexUnknownType(stats, type) {
   } else {
     stats.unknownItemTypeOverflow++;
   }
-}
-
-function codexEvent(payload, stats) {
-  if (payload?.type === 'user_message') {
-    stats.legacyEvents++;
-    return { kind: 'prompt', text: typeof payload.message === 'string' ? payload.message : '' };
-  }
-  if (payload?.type === 'agent_message') {
-    stats.legacyEvents++;
-    return { kind: 'response', text: typeof payload.message === 'string' ? payload.message : '' };
-  }
-  if (payload?.type !== 'item_completed') return null;
-
-  stats.itemCompletedEvents++;
-  const item = payload.item;
-  if (item?.type === 'UserMessage') return { kind: 'prompt', text: codexItemText(item) };
-  if (item?.type === 'AgentMessage') return { kind: 'response', text: codexItemText(item) };
-
-  const type = typeof item?.type === 'string' ? item.type : '<unknown>';
-  recordCodexUnknownType(stats, type);
-  return null;
 }
 
 /**
@@ -714,40 +651,40 @@ function parseCodex(raw, { id, withTurns = false }) {
   for (const e of jsonLines(raw)) {
     const ms = toMs(e.timestamp);
     noteSpan(rec, ms);
-    const p = e.payload ?? {};
+    const decoded = decodeCodexRecord(e);
 
-    if (e.type === 'session_meta') {
-      if (typeof p.id === 'string' && p.id) rec.id = p.id;
-      if (typeof p.cwd === 'string') applyProject(rec, projectLabel(p.cwd, null, repoRootOf(p.cwd)));
-      if (typeof p.thread_source === 'string') rec.threadSource = p.thread_source;
-      if (typeof p.model_provider === 'string' && p.model_provider) {
-        rec.inferenceProvider = p.model_provider;
+    if (decoded.type === 'meta') {
+      if (typeof decoded.sessionId === 'string' && decoded.sessionId) rec.id = decoded.sessionId;
+      if (typeof decoded.cwd === 'string') applyProject(rec, projectLabel(decoded.cwd, null, repoRootOf(decoded.cwd)));
+      if (typeof decoded.threadSource === 'string') rec.threadSource = decoded.threadSource;
+      if (decoded.provider) {
+        rec.inferenceProvider = decoded.provider;
         rec.providerProvenance = 'observed';
       }
       continue;
     }
-    if (e.type === 'turn_context') {
-      if (typeof p.model === 'string' && !rec.models.includes(p.model)) rec.models.push(p.model);
-      if (typeof p.model_provider === 'string' && p.model_provider) {
-        rec.inferenceProvider = p.model_provider;
+    if (decoded.type === 'turnContext') {
+      if (typeof decoded.model === 'string' && !rec.models.includes(decoded.model)) rec.models.push(decoded.model);
+      if (decoded.provider) {
+        rec.inferenceProvider = decoded.provider;
         rec.providerProvenance = 'observed';
       }
-      if (rec.project === 'unknown' && typeof p.cwd === 'string') applyProject(rec, projectLabel(p.cwd, null, repoRootOf(p.cwd)));
+      if (rec.project === 'unknown' && typeof decoded.cwd === 'string') applyProject(rec, projectLabel(decoded.cwd, null, repoRootOf(decoded.cwd)));
       continue;
     }
     if (e.type !== 'event_msg') continue;
 
-    if (p.type === 'token_count') {
+    if (decoded.type === 'tokenCount') {
       stats.tokenCountEvents++;
-      const t = p.info?.total_token_usage;
-      if (t && typeof t === 'object') { lastUsage = t; lastUsageAt = ms; }
+      const t = decoded.usage.total;
+      if (t) { lastUsage = t; lastUsageAt = ms; }
       // Every token_count also carries a live rate-limit snapshot — keep the
       // LAST one, normalized. Field names are a trap upstream: `primary` is
       // whichever window the server listed first, NOT reliably the 5-hour one
       // (observed live: primary = the 10080-minute weekly). So windows are
       // kept as a flat list keyed by window_minutes and never by field name.
-      const rl = p.rate_limits;
-      if (rl && typeof rl === 'object') {
+      const rl = decoded.usage.rateLimits;
+      if (rl) {
         const windows = [];
         for (const w of [rl.primary, rl.secondary]) {
           if (!w || typeof w !== 'object') continue;
@@ -770,12 +707,16 @@ function parseCodex(raw, { id, withTurns = false }) {
       }
       continue;
     }
-    const event = codexEvent(p, stats);
-    if (!event) continue;
-    if (event.kind === 'prompt') {
+
+    if (decoded.generation === 'legacy') stats.legacyEvents++;
+    else if (decoded.generation === 'item') stats.itemCompletedEvents++;
+    if (decoded.unknownItemType) recordCodexUnknownType(stats, decoded.unknownItemType);
+    if (decoded.type !== 'message') continue;
+
+    if (decoded.role === 'user') {
       rec.prompts++;
       stats.prompts++;
-      const text = event.text;
+      const text = decoded.text;
       if (!firstPrompt) firstPrompt = text;
       // Codex rollouts record only real prompts as user_message events — tool
       // output travels in other event types that are not surfaced as turns —
@@ -783,19 +724,17 @@ function parseCodex(raw, { id, withTurns = false }) {
       if (withTurns && text) turns.push({ role: 'user', at: new Date(ms).toISOString(), text, prompt: true, kind: 'prompt' });
       continue;
     }
-    if (event.kind === 'response') {
-      rec.responses++;
-      stats.responses++;
-      const at = Number.isFinite(ms) ? ms : (rec.start ?? Date.now());
-      const pk = punchKey(at);
-      rec.punchcard[pk] = (rec.punchcard[pk] ?? 0) + 1;
-      if (withTurns) {
-        turns.push({
-          role: 'assistant', at: new Date(at).toISOString(),
-          model: rec.models[rec.models.length - 1] ?? 'unknown',
-          text: event.text, tools: [],
-        });
-      }
+    rec.responses++;
+    stats.responses++;
+    const at = Number.isFinite(ms) ? ms : (rec.start ?? Date.now());
+    const pk = punchKey(at);
+    rec.punchcard[pk] = (rec.punchcard[pk] ?? 0) + 1;
+    if (withTurns) {
+      turns.push({
+        role: 'assistant', at: new Date(at).toISOString(),
+        model: rec.models[rec.models.length - 1] ?? 'unknown',
+        text: decoded.text, tools: [],
+      });
     }
   }
 

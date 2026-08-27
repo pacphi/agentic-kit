@@ -1,16 +1,15 @@
 import { createLiveEvent } from './event-schema.mjs';
 import { classifyToolName } from './tool-classify.mjs';
-
-const artifact = (value) => typeof value === 'string'
-  ? value.replaceAll('\\', '/').split('/').pop()?.slice(0, 256) ?? null : null;
+import { artifactName, decodeClaudeRecord } from '../telemetry-records.mjs';
 
 /** Translate one Claude transcript record into privacy-safe metadata events. */
 export function adaptClaudeRecord(record, context = {}) {
   if (!record || typeof record !== 'object') return [];
-  const sessionId = record.sessionId ?? context.sessionId;
+  const decoded = decodeClaudeRecord(record);
+  const sessionId = decoded.sessionId ?? context.sessionId;
   if (typeof sessionId !== 'string' || !sessionId) return [];
-  const actorId = record.agentId ?? context.agentId ?? sessionId;
-  const isSidechain = record.isSidechain === true || actorId !== sessionId;
+  const actorId = decoded.agentId ?? context.agentId ?? sessionId;
+  const isSidechain = decoded.isSidechain || actorId !== sessionId;
   const base = {
     sessionId, host: 'claude', surface: 'native',
     project: context.project, projectKey: context.projectKey, observedAt: context.observedAt,
@@ -20,11 +19,11 @@ export function adaptClaudeRecord(record, context = {}) {
       id: actorId, kind: isSidechain ? 'subagent' : 'session',
       role: isSidechain ? 'worker' : 'primary',
       provider: record.provider ?? context.provider,
-      model: record.message?.model ?? context.model,
+      model: decoded.model ?? context.model,
     },
     source: {
-      adapter: 'claude-transcript', artifact: artifact(context.artifact),
-      confidence: isSidechain && !record.agentId ? 'inferred' : 'observed',
+      adapter: 'claude-transcript', artifact: artifactName(context.artifact),
+      confidence: isSidechain && !decoded.agentId ? 'inferred' : 'observed',
       fields: {
         project: context.project ? 'observed' : null,
         // A provider on the record itself is observed evidence; one resolved
@@ -32,9 +31,9 @@ export function adaptClaudeRecord(record, context = {}) {
         // provenance (configured/inferred) and must not be upgraded.
         provider: record.provider ? 'observed'
           : (context.provider ? context.providerProvenance ?? 'configured' : null),
-        model: record.message?.model || context.model ? 'observed' : null,
+        model: decoded.model || context.model ? 'observed' : null,
         status: 'observed',
-        hierarchy: isSidechain ? (record.agentId ? 'observed' : 'inferred') : 'observed',
+        hierarchy: isSidechain ? (decoded.agentId ? 'observed' : 'inferred') : 'observed',
         workspace: context.workspace ? context.workspace.confidence ?? 'observed' : null,
       },
     },
@@ -50,45 +49,44 @@ export function adaptClaudeRecord(record, context = {}) {
       actor: {
         id: sessionId, kind: 'session', role: 'primary',
         provider: record.provider ?? context.provider,
-        model: record.message?.model ?? context.model,
+        model: decoded.model ?? context.model,
       },
       action: 'contains', status: 'unknown',
       signal: { kind: 'relationship', phase: 'observed' },
       target: { id: actorId, kind: 'subagent', role: 'worker' },
       source: {
         ...base.source,
-        confidence: record.agentId ? 'observed' : 'inferred',
+        confidence: decoded.agentId ? 'observed' : 'inferred',
         fields: { ...base.source.fields,
-          hierarchy: record.agentId ? 'observed' : 'inferred' },
+          hierarchy: decoded.agentId ? 'observed' : 'inferred' },
       },
     });
   }
-  if (context.bootstrap && (record.type === 'user' || record.type === 'assistant')) {
+  if (context.bootstrap && (decoded.role === 'user' || decoded.role === 'assistant')) {
     out.push(createLiveEvent({ ...base, action: 'session.discovered', status: 'unknown' }));
     if (containment) out.push(containment);
     return out;
-  } else if (record.type === 'user' || record.type === 'assistant') {
+  } else if (decoded.role === 'user' || decoded.role === 'assistant') {
     out.push(createLiveEvent({
-      ...base, action: record.type === 'user' ? 'session.input' : 'agent.output',
+      ...base, action: decoded.role === 'user' ? 'session.input' : 'agent.output',
       status: 'running',
     }));
   }
-  const blocks = Array.isArray(record.message?.content) ? record.message.content : [];
-  for (const block of blocks) {
-    if (block?.type !== 'tool_use' || typeof block.id !== 'string') continue;
-    const typed = classifyToolName(block.name);
+  for (const use of decoded.toolUses) {
+    if (typeof use.id !== 'string') continue;
+    const typed = classifyToolName(use.name);
     out.push(createLiveEvent({
       ...base, action: 'tool.started', status: 'running',
-      target: { id: block.id, kind: typed.kind, label: typed.category },
-      attributes: { toolCategory: typed.category, toolName: block.name },
+      target: { id: use.id, kind: typed.kind, label: typed.category },
+      attributes: { toolCategory: typed.category, toolName: use.name },
     }));
   }
-  for (const block of blocks) {
-    if (block?.type !== 'tool_result' || typeof block.tool_use_id !== 'string') continue;
+  for (const result of decoded.toolResults) {
+    if (typeof result.id !== 'string') continue;
     out.push(createLiveEvent({
       ...base, action: 'tool.completed',
-      status: block.is_error === true ? 'failed' : 'completed',
-      target: { id: block.tool_use_id, kind: 'tool' },
+      status: result.isError ? 'failed' : 'completed',
+      target: { id: result.id, kind: 'tool' },
     }));
   }
   if (containment) out.push(containment);
