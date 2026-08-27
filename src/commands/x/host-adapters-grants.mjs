@@ -67,44 +67,69 @@ function capabilityStatusNote(capability) {
   return 'commandStatusline is currently inert: it reaches the effective host registry, but no runtime path reads it anywhere yet — the statusline render path is a later wave.';
 }
 
-export async function grant({
-  name, capability, cfg, consent, reader, ask, isTTY, yes, grantsFile,
-}) {
+/** Validate the request and resolve the manifest, returning either
+ * {ok:false, code, message} (already-safe text, ready for `fail()`) or
+ * {ok:true, safeName, safeCapability, manifest, hash}. */
+async function resolveGrantSubject({ name, capability, cfg, reader }) {
   if (typeof name !== 'string' || !name || typeof capability !== 'string' || !capability) {
-    fail('usage: ak host adapters grant <name> <capability>');
-    return 2;
+    return { ok: false, code: 2, message: 'usage: ak host adapters grant <name> <capability>' };
   }
   const safeCapability = stripControl(capability);
   if (!grantableCapability(capability)) {
-    fail(`'${safeCapability}' is not a grantable capability — ak can only grant ${Object.values(TIER_GRANTS).join(', ')}.`);
-    return 1;
+    return {
+      ok: false, code: 1,
+      message: `'${safeCapability}' is not a grantable capability — ak can only grant ${Object.values(TIER_GRANTS).join(', ')}.`,
+    };
   }
   const safeName = stripControl(name);
   const entry = findEntry(cfg, name);
-  if (!entry) { fail(`no host adapter named '${safeName}' in kit.json hostAdapters`); return 1; }
+  if (!entry) return { ok: false, code: 1, message: `no host adapter named '${safeName}' in kit.json hostAdapters` };
 
   const loaded = await loadAndHash(entry, { reader });
   if (!loaded.ok) {
-    fail(`'${safeName}' manifest refused: ${stripControl(loaded.reason)} — ${stripControl(loaded.detail)}`);
-    return 1;
+    return {
+      ok: false, code: 1,
+      message: `'${safeName}' manifest refused: ${stripControl(loaded.reason)} — ${stripControl(loaded.detail)}`,
+    };
   }
   const { manifest, hash } = loaded;
   if (capability === 'aqeProvider' && !manifest.aqe?.provider) {
-    fail(`grant refused: '${safeName}' does not declare manifest.aqe.provider at this adapter-content hash`);
-    return 1;
+    return {
+      ok: false, code: 1,
+      message: `grant refused: '${safeName}' does not declare manifest.aqe.provider at this adapter-content hash`,
+    };
   }
-  const tier = gatingTierFor(capability);
-  const safeTier = stripControl(tier);
+  return {
+    ok: true, safeName, safeCapability, manifest, hash,
+  };
+}
 
-  // F-3 (security review): this is the highest-privilege act in the model —
-  // a hex hash alone told the operator nothing about what they were actually
-  // converting to a live capability. Disclose the ACTUAL evidence backing
-  // the gating tier, the manifest's declared hooks, and the manifest's trust
-  // state, all BEFORE the confirmation prompt.
-  const record = grantsFor(name, { file: grantsFile, currentHash: hash });
-  const tierEntry = record?.tiers?.[tier];
-  const evidence = tierEntry?.status === 'passed' ? tierEntry.evidence : undefined;
+/** N-1 (security re-review): derive trust state from the hash the caller
+ * ALREADY resolved — never re-resolve the manifest source (stateFor would
+ * call loadAndHash a second time). On a mutable remote source (https:/npm:)
+ * a second resolve can return different bytes than the first, which would
+ * (a) disclose a trust state describing content that isn't what's actually
+ * being granted, and (b) double the fetch cost (an npm: source runs `npm
+ * pack` twice). Same three-state logic as stateFor, just computed from data
+ * already in hand. */
+function resolveGrantTrustState(consent, name, hash) {
+  try {
+    const recordedHash = consent.recordedHashFor(name);
+    if (recordedHash === null || recordedHash === undefined) return 'not consented';
+    return recordedHash === hash ? 'trusted' : 'consent-stale';
+  } catch (error) {
+    return `manifest error (consent-error: ${error?.message ?? String(error)})`;
+  }
+}
 
+/** F-3 (security review): this is the highest-privilege act in the model —
+ * a hex hash alone told the operator nothing about what they were actually
+ * converting to a live capability. Disclose the ACTUAL evidence backing the
+ * gating tier, the manifest's declared hooks, and the manifest's trust
+ * state, all BEFORE the confirmation prompt. */
+function discloseGrant({
+  safeCapability, safeName, safeTier, hash, evidence, manifest, trustState, capability,
+}) {
   console.log(bold(`grant '${safeCapability}' to '${safeName}'`));
   console.log(`  gating tier:   ${safeTier}`);
   console.log(`  content hash (manifest + hook files): ${hash}`);
@@ -112,26 +137,33 @@ export async function grant({
   const hooks = hookCommandsFor(manifest);
   console.log(`  manifest hooks:${hooks.length ? '' : ' (none)'}`);
   for (const line of hooks) console.log(`    ${stripControl(line)}`);
-  // N-1 (security re-review): derive trust state from the hash this call
-  // ALREADY resolved above — never re-resolve the manifest source (stateFor
-  // would call loadAndHash a second time). On a mutable remote source
-  // (https:/npm:) a second resolve can return different bytes than the
-  // first, which would (a) disclose a trust state describing content that
-  // isn't what's actually being granted, and (b) double the fetch cost (an
-  // npm: source runs `npm pack` twice). Same three-state logic as stateFor,
-  // just computed from data already in hand.
-  let trustState;
-  try {
-    const recordedHash = consent.recordedHashFor(name);
-    if (recordedHash === null || recordedHash === undefined) trustState = 'not consented';
-    else trustState = recordedHash === hash ? 'trusted' : 'consent-stale';
-  } catch (error) {
-    trustState = `manifest error (consent-error: ${error?.message ?? String(error)})`;
-  }
   console.log(`  manifest trust state: ${trustState}`);
   info('this grant pins the combined adapter content identity: validated manifest plus every declared hook-file digest.');
   info("granting a capability is a trust act, same posture as 'trust': it takes effect in the effective host registry from the next ak invocation.");
   info(capabilityStatusNote(capability));
+}
+
+export async function grant({
+  name, capability, cfg, consent, reader, ask, isTTY, yes, grantsFile,
+}) {
+  const subject = await resolveGrantSubject({
+    name, capability, cfg, reader,
+  });
+  if (!subject.ok) { fail(subject.message); return subject.code; }
+  const {
+    safeName, safeCapability, manifest, hash,
+  } = subject;
+  const tier = gatingTierFor(capability);
+  const safeTier = stripControl(tier);
+
+  const record = grantsFor(name, { file: grantsFile, currentHash: hash });
+  const tierEntry = record?.tiers?.[tier];
+  const evidence = tierEntry?.status === 'passed' ? tierEntry.evidence : undefined;
+  const trustState = resolveGrantTrustState(consent, name, hash);
+
+  discloseGrant({
+    safeCapability, safeName, safeTier, hash, evidence, manifest, trustState, capability,
+  });
 
   if (!yes) {
     if (!isTTY) {
