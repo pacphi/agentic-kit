@@ -26,11 +26,10 @@
 // double-count rule does not apply (different storage semantics).
 import { withDb } from './sqlite.mjs';
 // Shared record shape/accumulator with parseClaude/parseCodex — see their
-// definitions in usage-index.mjs. usage-index.mjs imports FROM this module
-// (defaultOpencodeDbPath, parseSession, …), so this is a circular import; it
-// is safe because both imports here are hoisted `function` declarations,
-// resolved before either module's top-level body runs.
-import { addUsage, blankSession } from './usage-index.mjs';
+// definitions in usage-parsers.mjs. usage-index.mjs imports FROM this module
+// (defaultOpencodeDbPath, parseSession, …), but that is no longer a cycle:
+// this module depends only on usage-parsers.mjs, not on usage-index.mjs.
+import { addUsage, blankSession } from './usage-parsers.mjs';
 
 /** The live opencode store. Overridable via roots in tests. */
 export function defaultOpencodeDbPath() {
