@@ -488,6 +488,57 @@ class RufloGatewayClient {
   }
 }
 
+function pruneUnavailableTools(plugin, available) {
+  if (!available.ruflo) {
+    delete plugin.tool.ak_ruflo_search
+    delete plugin.tool.ak_ruflo_call
+  }
+  if (!available.aqe) {
+    delete plugin.tool.ak_aqe_search
+    delete plugin.tool.ak_aqe_call
+  }
+  if (!available.agents) {
+    delete plugin.tool.ak_agent_search
+    delete plugin.tool.ak_agent_load
+  }
+}
+
+function projectGatewayTools(cfg, available) {
+  // Blacklist direct catalogue exposure. The gateway tools below remain
+  // explicit and small; custom user policy for them is preserved.
+  return {
+    ...(cfg.tools || {}),
+    ...(available.ruflo ? { "claude-flow_*": false, "claude_flow_*": false } : {}),
+    ...(available.aqe ? { "agentic-qe_*": false, "agentic_qe_*": false } : {}),
+  }
+}
+
+function projectGatewayPermissions(cfg, available) {
+  const permission = {
+    ...(cfg.permission || {}),
+    ...(available.ruflo ? {
+      ak_ruflo_search: cfg.permission?.ak_ruflo_search ?? "allow",
+      ak_ruflo_call: projectGatewayCallPolicy(
+        cfg, "ak_ruflo_call", ["claude-flow_", "claude_flow_"],
+      ),
+    } : {}),
+    ...(available.aqe ? {
+      ak_aqe_search: cfg.permission?.ak_aqe_search ?? "allow",
+      ak_aqe_call: projectGatewayCallPolicy(
+        cfg, "ak_aqe_call", ["agentic-qe_", "agentic_qe_"],
+      ),
+    } : {}),
+    ak_skill_search: cfg.permission?.ak_skill_search ?? "allow",
+    ...(available.agents ? {
+      ak_agent_search: cfg.permission?.ak_agent_search ?? "allow",
+      ak_agent_load: cfg.permission?.ak_agent_load ?? "allow",
+    } : {}),
+  }
+  if (available.ruflo) hideDirectFamily(permission, ["claude-flow_*", "claude_flow_*"])
+  if (available.aqe) hideDirectFamily(permission, ["agentic-qe_*", "agentic_qe_*"])
+  return permission
+}
+
 function renderToolResult(result, errorPrefix) {
   const blocks = Array.isArray(result?.content) ? result.content : []
   const text = blocks
@@ -507,69 +558,32 @@ export default async function rufloGateway({ directory = process.cwd() } = {}) {
   const aqeClient = new RufloGatewayClient("Agentic QE", directory)
   const skillCatalogs = new Map()
   let available = { ruflo: false, aqe: false, brain: false, agents: false }
+  function computeAvailability(cfg) {
+    const rufloEntry = managedEntry(
+      cfg, RUFLO_SERVER_NAME,
+      ["claude-flow_*", "claude_flow_*"],
+      ["claude-flow_*", "claude_flow_*"],
+    )
+    const aqeEntry = managedEntry(
+      cfg, AQE_SERVER_NAME,
+      ["agentic-qe_*", "agentic_qe_*"],
+      ["agentic-qe_*", "agentic_qe_*"],
+    )
+    return {
+      ruflo: rufloClient.configure(rufloEntry),
+      aqe: aqeClient.configure(aqeEntry),
+      brain: validLocalMcp(cfg.mcp?.["ruvnet-brain"]),
+      agents: AK_MANAGED_AGENTS.length > 0
+        && typeof cfg.agent?.[SPECIALIST_AGENT_NAME]?.prompt === "string"
+        && cfg.agent[SPECIALIST_AGENT_NAME].prompt.trim() === AK_SPECIALIST_PROMPT.trim(),
+    }
+  }
   const plugin = {
     config(cfg) {
-      const rufloEntry = managedEntry(
-        cfg, RUFLO_SERVER_NAME,
-        ["claude-flow_*", "claude_flow_*"],
-        ["claude-flow_*", "claude_flow_*"],
-      )
-      const aqeEntry = managedEntry(
-        cfg, AQE_SERVER_NAME,
-        ["agentic-qe_*", "agentic_qe_*"],
-        ["agentic-qe_*", "agentic_qe_*"],
-      )
-      available = {
-        ruflo: rufloClient.configure(rufloEntry),
-        aqe: aqeClient.configure(aqeEntry),
-        brain: validLocalMcp(cfg.mcp?.["ruvnet-brain"]),
-        agents: AK_MANAGED_AGENTS.length > 0
-          && typeof cfg.agent?.[SPECIALIST_AGENT_NAME]?.prompt === "string"
-          && cfg.agent[SPECIALIST_AGENT_NAME].prompt.trim() === AK_SPECIALIST_PROMPT.trim(),
-      }
-      if (!available.ruflo) {
-        delete plugin.tool.ak_ruflo_search
-        delete plugin.tool.ak_ruflo_call
-      }
-      if (!available.aqe) {
-        delete plugin.tool.ak_aqe_search
-        delete plugin.tool.ak_aqe_call
-      }
-      if (!available.agents) {
-        delete plugin.tool.ak_agent_search
-        delete plugin.tool.ak_agent_load
-      }
-
-      // Blacklist direct catalogue exposure. The gateway tools below remain
-      // explicit and small; custom user policy for them is preserved.
-      cfg.tools = {
-        ...(cfg.tools || {}),
-        ...(available.ruflo ? { "claude-flow_*": false, "claude_flow_*": false } : {}),
-        ...(available.aqe ? { "agentic-qe_*": false, "agentic_qe_*": false } : {}),
-      }
-      const permission = {
-        ...(cfg.permission || {}),
-        ...(available.ruflo ? {
-          ak_ruflo_search: cfg.permission?.ak_ruflo_search ?? "allow",
-          ak_ruflo_call: projectGatewayCallPolicy(
-            cfg, "ak_ruflo_call", ["claude-flow_", "claude_flow_"],
-          ),
-        } : {}),
-        ...(available.aqe ? {
-          ak_aqe_search: cfg.permission?.ak_aqe_search ?? "allow",
-          ak_aqe_call: projectGatewayCallPolicy(
-            cfg, "ak_aqe_call", ["agentic-qe_", "agentic_qe_"],
-          ),
-        } : {}),
-        ak_skill_search: cfg.permission?.ak_skill_search ?? "allow",
-        ...(available.agents ? {
-          ak_agent_search: cfg.permission?.ak_agent_search ?? "allow",
-          ak_agent_load: cfg.permission?.ak_agent_load ?? "allow",
-        } : {}),
-      }
-      if (available.ruflo) hideDirectFamily(permission, ["claude-flow_*", "claude_flow_*"])
-      if (available.aqe) hideDirectFamily(permission, ["agentic-qe_*", "agentic_qe_*"])
-      cfg.permission = permission
+      available = computeAvailability(cfg)
+      pruneUnavailableTools(plugin, available)
+      cfg.tools = projectGatewayTools(cfg, available)
+      cfg.permission = projectGatewayPermissions(cfg, available)
     },
     event: async ({ event }) => {
       if (event?.type === "session.deleted") {
