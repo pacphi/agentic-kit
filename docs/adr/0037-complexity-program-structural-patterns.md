@@ -74,8 +74,17 @@ repository's sanctioned structures:
   functions became visible to ESLint for the first time — the denominator became
   honest; per-function severity dropped sharply.
 - Known residual backlog (deliberately not part of this program): `uninstall run()`
-  (CC 100), `opencode.mjs` receipt-reconciliation family (`applyOpencode` 71 — the
-  audit's `reconcileOwnedMap` recommendation), `model-inventory` discovery and
-  `footprint`/`adapters` functions in the 50–65 band, and the newly visible client
-  functions (`system-projects` 88, `overview` 63). `providers.mjs` sits just over
-  the 1,000-line warning; a future `aqe-router.mjs` split would clear it.
+  (CC 100), `model-inventory` discovery and `footprint`/`adapters` functions in the
+  50–65 band, and the newly visible client functions (`system-projects` 88,
+  `overview` 63). `providers.mjs` sits just over the 1,000-line warning; a future
+  `aqe-router.mjs` split would clear it.
+- **Wave 2 update (2026-08-26):** the `opencode.mjs` receipt-reconciliation family
+  named above is done — `reconcileOwnedMap` (+ a `reconcileFamilyPermissions`
+  family-atomicity wrapper for the permission block) now backs `applyOpencode`
+  (71→21), and every other named function over CC 25 in `opencode.mjs`
+  (`normalizeManaged` 32, `opencodeConverged` 28, `undoOpencode` 26, `opencodeStack`
+  44, `syncAgents` 50, `agentsStatus` 46, `removeArtifacts` 26), in
+  `src/lib/execution/opencode.mjs` (`terminalResult` 30, `launch` 36), and in the
+  emitted `src/templates/opencode-ruflo-gateway.js` template (`config` 28) is under
+  the gate. `opencode.mjs` (1,573 lines) was also split into five files, each under
+  1,000 lines (`opencode.mjs` is now a re-export barrel; see ADR-0017 §2).
