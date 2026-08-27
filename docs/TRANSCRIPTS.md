@@ -37,7 +37,7 @@ rewritten; rule 3 of the module header, `usage-index.mjs:22-29`):
 | Host | Store | Discovered by |
 |---|---|---|
 | Claude Code | `~/.claude/projects/<encoded-project-dir>/<sessionId>.jsonl` | `listClaude` (`usage-index.mjs:916-926`) — exactly one level of project directories |
-| Codex CLI | `~/.codex/sessions/<yyyy>/<mm>/<dd>/rollout-<ts>-<uuid>.jsonl` | `listCodex` (`usage-index.mjs:891-904`) — the `yyyy/mm/dd` tree walk |
+| Codex CLI | `~/.codex/sessions/<yyyy>/<mm>/<dd>/rollout-<ts>-<uuid>.jsonl` | `listCodex` (`usage-index.mjs:878-891`) — the `yyyy/mm/dd` tree walk |
 
 Roots come from `defaultRoots()` (`usage-index.mjs:908-912`) and are injectable
 for tests. A malformed line is skipped, never fatal (`jsonLines`,
@@ -65,7 +65,7 @@ An assistant entry with `isApiErrorMessage: true` is a **local placeholder**
 Claude Code writes when a request dies before a real completion (connection
 drop, rate limit, auth failure — `model: "<synthetic>"`, all-zero usage). It
 is real engaged time but not a model attempt: counted as an *exception*, never
-pushed into `models` or priced (`usage-index.mjs:551-570`; the full story is
+pushed into `models` or priced (`usage-index.mjs:595-606`; the full story is
 [`USAGE-SCORECARD-METRICS.md`](USAGE-SCORECARD-METRICS.md) §10).
 
 ### 1.2 Codex entry vocabulary
@@ -200,7 +200,7 @@ Two deliberate subtleties:
 * **`tool-result` outranks `context`**: a `tool_result` block on an `isMeta`
   entry is still tool feedback.
 
-Codex user turns are `kind: 'prompt'` by construction (`usage-index.mjs:767-775`)
+Codex user turns are `kind: 'prompt'` by construction (`usage-index.mjs:716-725`)
 — rollouts only record real prompts as `user_message` events (§1.2).
 
 Coverage: `tests/kit/usage-index.test.mjs` — "user-role turns carry a kind"
@@ -211,7 +211,7 @@ and image-only pastes get the right kind" (the two edges).
 
 ## 4. The `readSession` pipeline — how one session becomes a payload
 
-`readSession(id, opts)` (`usage-index.mjs:1566-1621`) is the only way
+`readSession(id, opts)` (`usage-index.mjs:1573-1629`) is the only way
 transcript content leaves the module, and every step is a gate:
 
 ### 4.1 Locate, contain, bound
@@ -256,7 +256,7 @@ Every turn body is passed through `maskSecrets` (`usage-index.mjs:208` — the
 23 secret shapes) **server-side, before
 serialization**, then length-capped at `MAX_TURN_CHARS` (40,000,
 `usage-index.mjs:89`) with the marker appended
-(`usage-index.mjs:1721-1729`). Two invariants:
+(`usage-index.mjs:1724-1734`). Two invariants:
 
 * **Presence is the signal.** `truncated`/`originalChars` are emitted only
   when the slice fired, so a complete turn cannot be misread as abridged.
@@ -412,7 +412,7 @@ was wrong before, for the curious.
   assembled `meta` left `cost` undefined, and `fmtUsd(undefined)` renders the
   truthy string `"$0.00"` — a fixed-looking zero on a panel whose whole
   subject is cost. `meta.cost` is now priced via `sessionCost()` from the
-  same per-model usage rows `aggregate()` uses (`usage-index.mjs:1691`).
+  same per-model usage rows `aggregate()` uses (`usage-index.mjs:1696`).
 * **Aggregate-side incidents** (the v4/v5 cache bumps, the Codex parsing
   defects) are recorded in `USAGE-SCORECARD-METRICS.md` Appendix A.
 

@@ -213,15 +213,399 @@ function entriesByCost(map) {
  */
 
 /**
+ * @typedef {{id:string, kind:'coach'|'trend', severity:'warn'|'info'|'ok',
+ *   title:string, finding:string, evidence:string, action:string,
+ *   command:string|null, impact:number|null, sources?:Array<{label:string,url:string}>}} Insight
+ */
+
+function withDefaults(insight) {
+  return { command: null, impact: null, ...insight };
+}
+
+// ── The 13 detectInsights heuristics ─────────────────────────────────────────
+// Each detector is independent, sharing only the `ctx` prelude detectInsights
+// computes once (a/totals/sessions/windowCost/sessionCount). `detect(ctx)`
+// returns zero or one insight, wrapped in an array so DETECTORS.flatMap below
+// can stay a flat pass with no per-site branching.
+
+// 1 ── context-tax. Every session re-pays a fixed startup cache write before any
+// work happens. Priced from the window's own $/unit, so no rate table is assumed.
+function detectContextTax({ totals, sessions, windowCost }) {
+  const units = billableUnits(totals);
+  if (!sessions.length || windowCost <= 0 || units <= 0) return [];
+  const medCacheWrite = median(sessions.map((s) => num(s.cacheWrite)));
+  const costPerUnit = windowCost / units;
+  const tax = medCacheWrite * sessions.length * CACHE_WRITE_MULT * costPerUnit;
+  const share = windowCost > 0 ? tax / windowCost : 0;
+  if (share < THRESHOLDS.contextTaxMinShare) return [];
+  const cwShare = (num(totals.cacheWrite) * CACHE_WRITE_MULT) / units;
+  return [withDefaults({
+    id: 'context-tax', kind: 'coach',
+    severity: share >= THRESHOLDS.contextTaxWarnShare ? 'warn' : 'info',
+    title: 'Every session re-pays a fixed context tax',
+    finding: `The median session writes ${kTok(medCacheWrite)} tokens to cache before any work `
+      + `happens. Across ${count(sessions.length)} sessions that is about ${usd(tax)} of this `
+      + `window's ${usd(windowCost)} (${pct(share)}).`,
+    evidence: `Cache writes are ${pct(cwShare)} of the window's billable volume and bill at `
+      + `${CACHE_WRITE_MULT}× input. A finished session never re-reads that prefix — a new one `
+      + 'always re-writes it.',
+    action: 'Trim the always-on guidance blocks, or move rarely-used reference material behind '
+      + 'a skill so it loads on demand instead of into every session.',
+    command: 'ak x blocks audit',
+    impact: round2(tax),
+  })];
+}
+
+// 2 ── premium-on-routine. Frontier reasoning on short, shallow sessions. Fires
+// only when the projected saving clears a SHARE of the window (rule 2): $1k of
+// saving is decisive in a $10k window and noise in a $200k one.
+function detectPremiumOnRoutine({ sessions, windowCost }) {
+  const routinePremium = sessions.filter((s) => modelIds(s).some(isPremiumModel)
+    && num(s.responses) <= THRESHOLDS.premiumMaxResponses
+    && num(s.minutes) <= THRESHOLDS.premiumMaxMinutes);
+  if (!routinePremium.length || windowCost <= 0) return [];
+  const spend = sumBy(routinePremium, 'cost');
+  const saving = spend * TIER_SAVING_RATIO;
+  if (saving / windowCost < THRESHOLDS.premiumMinSavingShare) return [];
+  return [withDefaults({
+    id: 'premium-on-routine', kind: 'coach', severity: 'warn',
+    title: 'Premium models are doing short, shallow sessions',
+    finding: `${count(routinePremium.length)} sessions ran on an Opus/Fable-tier model but `
+      + `lasted ≤${THRESHOLDS.premiumMaxMinutes} minutes with ≤${THRESHOLDS.premiumMaxResponses} `
+      + `responses, costing ${usd(spend)} — ${pct(spend / windowCost)} of the window.`,
+    evidence: 'Short sessions are lookups, small edits and quick reviews; they rarely exercise '
+      + `frontier reasoning. The balanced tier prices at ${Math.round((1 - TIER_SAVING_RATIO) * 100)}% `
+      + 'of premium, so the saving is the measured spend on those sessions times '
+      + `${TIER_SAVING_RATIO}.`,
+    action: 'Route quick and mechanical activities to the balanced tier in your per-activity '
+      + 'policy. Reasoning-heavy activities stay where they are.',
+    command: 'ak host pick',
+    impact: round2(saving),
+  })];
+}
+
+// 3 ── churn. Sessions abandoned before they produced anything still paid a full
+// context load. Floored on a share of window spend, not on a dollar amount.
+function detectChurn({ sessions, windowCost }) {
+  const churned = sessions.filter((s) => num(s.prompts) <= THRESHOLDS.churnMaxPrompts
+    && num(s.minutes) < THRESHOLDS.churnMaxMinutes);
+  if (!churned.length || windowCost <= 0) return [];
+  const spend = sumBy(churned, 'cost');
+  if (spend / windowCost < THRESHOLDS.churnMinShare) return [];
+  return [withDefaults({
+    id: 'churn', kind: 'coach', severity: 'info',
+    title: 'Abandoned sessions still cost a full context load',
+    finding: `${count(churned.length)} sessions `
+      + `(${pct(churned.length / Math.max(sessions.length, 1))} of the window) took `
+      + `≤${THRESHOLDS.churnMaxPrompts} prompt and ran under ${THRESHOLDS.churnMaxMinutes} `
+      + `minutes, costing ${usd(spend)}.`,
+    evidence: 'That is the shape of a /clear-and-restart cycle or a mistaken launch. Each one '
+      + 'still pays the startup cache write in full before being thrown away.',
+    action: 'Prefer continuing a session over clearing it when the topic is related — the '
+      + 'cached prefix has already been paid for.',
+    impact: round2(spend),
+  })];
+}
+
+// 4 ── overnight. Sustained small-hours activity is the signature of unattended
+// loops, not of a person. No dollar claim: this is a "confirm it is intended"
+// finding, and the cost of unintended automation is not knowable from here.
+function detectOvernight({ a }) {
+  const punch = a.punchcard && typeof a.punchcard === 'object' ? a.punchcard : {};
+  const punchEntries = Object.entries(punch);
+  if (!punchEntries.length) return [];
+  const nightHours = new Set(THRESHOLDS.overnightHours);
+  let night = 0; let allResponses = 0;
+  for (const [key, value] of punchEntries) {
+    const responses = num(value);
+    allResponses += responses;
+    const hour = Number(String(key).split('-')[1]);
+    if (nightHours.has(hour)) night += responses;
+  }
+  const share = allResponses > 0 ? night / allResponses : 0;
+  if (share <= THRESHOLDS.overnightMinShare) return [];
+  const [lo] = THRESHOLDS.overnightHours;
+  const hi = THRESHOLDS.overnightHours[THRESHOLDS.overnightHours.length - 1];
+  return [withDefaults({
+    id: 'overnight', kind: 'trend', severity: 'warn',
+    title: 'A meaningful share of activity happens overnight',
+    finding: `${pct(share)} of assistant responses (${count(night)}) land between `
+      + `${String(lo).padStart(2, '0')}:00 and ${String(hi).padStart(2, '0')}:59 local time.`,
+    evidence: 'Sustained small-hours activity is the signature of unattended loops, daemons, '
+      + 'or scheduled jobs rather than interactive work.',
+    action: 'Confirm this is intended automation. If not, reap stale daemons and check whether '
+      + 'a loop is still firing.',
+    command: 'ak x daemon-gc',
+  })];
+}
+
+// 5 ── spend-trend. Direction of travel over the window's own days.
+function detectSpendTrend({ a }) {
+  const dayEntries = Object.entries(a.byDay && typeof a.byDay === 'object' ? a.byDay : {})
+    .sort((x, y) => (x[0] < y[0] ? -1 : 1));
+  if (dayEntries.length < 2) return [];
+  const half = Math.floor(dayEntries.length / 2);
+  const older = dayEntries.slice(0, half).map(([, v]) => v);
+  const recent = dayEntries.slice(-half).map(([, v]) => v);
+  const oldAvg = mean(older, 'cost');
+  const recentAvg = mean(recent, 'cost');
+  if (oldAvg <= 0) return [];
+  const delta = (recentAvg - oldAvg) / oldAvg;
+  if (Math.abs(delta) < THRESHOLDS.trendMinDelta) return [];
+  const up = delta > 0;
+  return [withDefaults({
+    id: 'spend-trend', kind: 'trend', severity: up ? 'warn' : 'ok',
+    title: up ? 'Daily spend is accelerating' : 'Daily spend is falling',
+    finding: `The last ${count(half)} days averaged ${usd(recentAvg)}/day against `
+      + `${usd(oldAvg)}/day over the ${count(half)} days before — ${up ? 'up' : 'down'} `
+      + `${pct(Math.abs(delta))}.`,
+    evidence: `Sessions per day went ${mean(older, 'sessions').toFixed(0)} → `
+      + `${mean(recent, 'sessions').toFixed(0)} across the same split.`,
+    action: up
+      ? 'Check whether a new automation, loop, or scheduled job started in the recent half.'
+      : 'Whatever changed is working — keep it.',
+  })];
+}
+
+// 6 ── project-concentration. Where effort is pooled is where a fix multiplies.
+function detectProjectConcentration({ a, windowCost }) {
+  const projects = entriesByCost(a.byProject);
+  if (!projects.length || windowCost <= 0) return [];
+  const [topName, topValue] = projects[0];
+  const share = num(topValue.cost) / windowCost;
+  if (share <= THRESHOLDS.concentrationMinShare) return [];
+  const runnerUp = projects[1];
+  return [withDefaults({
+    id: 'project-concentration', kind: 'coach', severity: 'info',
+    title: `${topName} dominates your usage`,
+    finding: `${pct(share)} of API-equivalent spend (${usd(num(topValue.cost))}) and `
+      + `${count(num(topValue.sessions))} sessions went to one project.`,
+    evidence: runnerUp
+      ? `The next largest is ${runnerUp[0]} at ${usd(num(runnerUp[1].cost))}.`
+      : 'It is the only project in this window.',
+    action: 'Worth a dedicated per-activity routing policy and a tighter project CLAUDE.md — '
+      + 'savings there multiply across every session.',
+  })];
+}
+
+// 7 ── classify-coverage. Honesty about our own confidence: an unclassified
+// residue is reported, never force-fitted to reach 100% coverage.
+function detectClassifyCoverage({ a, sessionCount }) {
+  const categories = a.byCategory && typeof a.byCategory === 'object' ? a.byCategory : {};
+  const unclassified = num(categories.Unclassified?.sessions);
+  if (unclassified <= 0 || sessionCount <= 0) return [];
+  const share = unclassified / sessionCount;
+  if (share <= THRESHOLDS.unclassifiedMinShare) return [];
+  return [withDefaults({
+    id: 'classify-coverage', kind: 'coach', severity: 'info',
+    title: 'A large share of sessions could not be categorised',
+    finding: `${count(unclassified)} of ${count(sessionCount)} sessions (${pct(share)}) fall `
+      + 'below the classifier confidence floor.',
+    evidence: 'Categories come from session provenance, titles and tool mix; short or '
+      + 'generically-titled sessions carry little signal, and a forced label would make the '
+      + 'other categories untrustworthy too.',
+    // No command: the optional LLM-labelling pass (ADR-0009 §5 Layer 3) is
+    // designed but not shipped, and a dead command in a diagnostic is worse
+    // than none.
+    action: 'Short or generically-titled sessions are the usual cause — descriptive first '
+      + 'prompts and skill-invoked sessions classify well. An optional LLM labelling pass '
+      + 'is planned but not yet available.',
+  })];
+}
+
+// 8 ── model-routing. DELIBERATELY NOT an upgrade nudge (rule 3, ADR-0009 §6).
+// A first-pass detector saw prev-gen spend and recommended upgrading. Grounding
+// reversed it: the vendor benchmark measures HARD tasks, a local controlled A/B
+// on a ROUTINE task measured the newer model taking 3.4× the steps and 3.7× the
+// cost for identical output, and the overthinking-tax literature reconciles the
+// two. So this fires to say "your mix is defensible" and recommends routing by
+// complexity — including, on many corpora, changing nothing.
+function detectModelRouting({ a, sessions, windowCost }) {
+  const prevGenCost = Object.entries(a.byModel && typeof a.byModel === 'object' ? a.byModel : {})
+    .filter(([id]) => isPrevGenOpus(id))
+    .reduce((acc, [, v]) => acc + num(v?.cost), 0);
+  if (prevGenCost <= 0 || windowCost <= 0) return [];
+  const share = prevGenCost / windowCost;
+  if (share < THRESHOLDS.prevGenMinShare) return [];
+  const routine = sessions.filter((s) => num(s.responses) <= THRESHOLDS.premiumMaxResponses
+    && num(s.minutes) <= THRESHOLDS.premiumMaxMinutes);
+  const routineShare = sessions.length ? routine.length / sessions.length : 0;
+  return [withDefaults({
+    id: 'model-routing', kind: 'coach', severity: 'ok',
+    title: 'Your model mix is defensible — route by complexity, not by recency',
+    finding: `${pct(share)} of spend (${usd(prevGenCost)}) sits on a previous-generation Opus `
+      + `model${sessions.length ? `, and ${pct(routineShare)} of your sessions are routine `
+        + `(≤${THRESHOLDS.premiumMaxResponses} responses, ≤${THRESHOLDS.premiumMaxMinutes} min)` : ''}. `
+      + 'On routine work the newer model is measurably more expensive, not less.',
+    evidence: 'Anthropic reports Opus 5 more than doubling Opus 4.8 per task on a hard-task, '
+      + 'vendor-reported benchmark; a local controlled A/B on a routine task measured Opus 5 '
+      + 'taking 3.4× the steps and 3.7× the cost for the same output. Both hold — capability '
+      + 'gains land on hard tasks, overthinking overhead lands on easy ones.',
+    action: 'Route by task complexity: keep routine activities on the cheaper tier and reserve '
+      + 'the newest model for genuinely hard work. Confirm against your own workload before '
+      + 'changing anything.',
+    command: 'ak host pick',
+    sources: MODEL_ROUTING_SOURCES,
+  })];
+}
+
+// 9 ── cost-per-session-spread. Names where leverage actually is. `Unclassified`
+// is excluded (it is a confidence bucket, not a kind of work) and thin categories
+// are excluded (a handful of sessions is an anecdote, not a rate).
+function detectCostPerSessionSpread({ a, sessionCount, windowCost }) {
+  const categories = a.byCategory && typeof a.byCategory === 'object' ? a.byCategory : {};
+  const rated = Object.entries(categories)
+    .filter(([name, v]) => name !== 'Unclassified' && v && typeof v === 'object'
+      && num(v.sessions) >= THRESHOLDS.spreadMinCategorySessions)
+    .map(([name, v]) => ({ name, value: v, per: num(v.cost) / num(v.sessions) }))
+    .sort((x, y) => y.per - x.per);
+  if (rated.length < 2) return [];
+  const hi = rated[0];
+  const lo = rated[rated.length - 1];
+  if (!(hi.per > 0 && lo.per > 0 && hi.per / lo.per >= THRESHOLDS.spreadMinRatio)) return [];
+  const ratio = hi.per / lo.per;
+  return [withDefaults({
+    id: 'cost-per-session-spread', kind: 'coach', severity: 'info',
+    title: `${hi.name} costs ${Math.round(ratio)}× more per session than ${lo.name}`,
+    finding: `${hi.name}: ${count(num(hi.value.sessions))} sessions at ${usd2(hi.per)} each. `
+      + `${lo.name}: ${count(num(lo.value.sessions))} sessions at ${usd2(lo.per)} each.`,
+    evidence: sessionCount > 0 && windowCost > 0
+      ? `${hi.name} is ${pct(num(hi.value.sessions) / sessionCount)} of sessions but `
+        + `${pct(num(hi.value.cost) / windowCost)} of spend.`
+      : `${hi.name} carries ${usd(num(hi.value.cost))} across ${count(num(hi.value.sessions))} sessions.`,
+    action: `Your leverage is in ${hi.name}, not in trimming the cheap categories — a 10% `
+      + `improvement there is worth more than eliminating ${lo.name} entirely.`,
+  })];
+}
+
+// 10 ── high-volume-automation. High count + low unit cost + short duration is
+// the shape of a scheduled or hook-driven job. "Low cost" is measured against
+// the window's OWN mean session cost, so the rule travels between corpora.
+// Only the highest-volume qualifying category is reported, keeping ids unique.
+function detectHighVolumeAutomation({ a, sessionCount, windowCost }) {
+  const categories = a.byCategory && typeof a.byCategory === 'object' ? a.byCategory : {};
+  const windowMeanSession = sessionCount > 0 ? windowCost / sessionCount : 0;
+  if (windowMeanSession <= 0) return [];
+  const ceiling = windowMeanSession * THRESHOLDS.automationMaxAvgShare;
+  const candidates = Object.entries(categories)
+    .filter(([name, v]) => name !== 'Unclassified' && v && typeof v === 'object'
+      && num(v.sessions) >= THRESHOLDS.automationMinSessions
+      && num(v.cost) / num(v.sessions) < ceiling)
+    .sort((x, y) => num(y[1].sessions) - num(x[1].sessions));
+  if (!candidates.length) return [];
+  const [name, value] = candidates[0];
+  const runs = num(value.sessions);
+  const avgCost = num(value.cost) / runs;
+  const avgMinutes = num(value.minutes) / runs;
+  return [withDefaults({
+    id: 'high-volume-automation', kind: 'trend', severity: 'info',
+    title: `${count(runs)} short ${name} sessions look automated`,
+    finding: `${name} ran ${count(runs)} times`
+      + `${sessionCount > 0 ? ` (${pct(runs / sessionCount)} of all sessions)` : ''}, averaging `
+      + `${usd2(avgCost)} and ${avgMinutes.toFixed(1)} minutes each.`,
+    evidence: `That is ${pct(avgCost / windowMeanSession)} of this window's mean session cost `
+      + `(${usd2(windowMeanSession)}). High count, low unit cost and short duration is the shape `
+      + 'of a scheduled or hook-driven job rather than interactive work.',
+    action: 'Cheap individually, but confirm the cadence is intended — and that its findings '
+      + 'are actually being read, or it is pure overhead.',
+  })];
+}
+
+// 11 ── parallel-sessions. Summed span ÷ union span = mean concurrency while
+// anything was open. Every parallel session draws on the SAME plan limit
+// (Claude Code's own /usage panel makes the same point), so sustained
+// parallelism is how a week's allowance disappears in two days. No dollar
+// claim: parallelism shifts WHEN tokens are spent, not directly how many.
+function detectParallelSessions({ totals, sessionCount }) {
+  const spanSum = num(totals.spanMinutes) * 60;
+  const spanUnion = num(totals.spanUnionSeconds);
+  if (spanUnion <= 0 || sessionCount < 2) return [];
+  const factor = spanSum / spanUnion;
+  if (factor < THRESHOLDS.parallelMinFactor) return [];
+  return [withDefaults({
+    id: 'parallel-sessions', kind: 'trend', severity: 'info',
+    title: `Sessions ran ~${factor.toFixed(1)}× in parallel`,
+    finding: `Summed session time is ${Math.round(spanSum / 3600)}h against ${Math.round(spanUnion / 3600)}h `
+      + `of wall-clock with anything open — on average ${factor.toFixed(1)} sessions at once.`,
+    evidence: 'All sessions on a subscription share one rate-limit pool, so parallel work '
+      + 'consumes the same allowance faster; queueing spreads it more evenly.',
+    action: 'Keep parallelism for genuinely independent work; queue the rest, or route some '
+      + 'lanes to the other host so the two pools share the load.',
+    command: 'ak host pick',
+  })];
+}
+
+// 12 ── subagent-share. Sidechain/subagent transcripts as a share of spend —
+// the local computation of the "subagent-heavy sessions" characteristic
+// Claude Code's /usage panel reports. The dollar figure is measured, but NOT
+// claimed as impact: subagent work is not waste, it is a composition fact.
+function detectSubagentShare({ sessions, windowCost }) {
+  const side = sessions.filter((s) => s.sidechain === true || s.threadSource === 'subagent');
+  if (!side.length || windowCost <= 0) return [];
+  const spend = sumBy(side, 'cost');
+  const share = spend / windowCost;
+  if (share < THRESHOLDS.sidechainMinShare) return [];
+  return [withDefaults({
+    id: 'subagent-share', kind: 'trend', severity: 'info',
+    title: `Subagent transcripts carry ${pct(share)} of spend`,
+    finding: `${count(side.length)} sidechain/subagent transcripts account for ${usd(spend)} of `
+      + `this window's ${usd(windowCost)}.`,
+    evidence: 'Each spawned agent runs its own requests with its own context load, so '
+      + 'delegation multiplies token volume even when the main thread stays small.',
+    action: 'Be deliberate about fan-out: fewer, better-briefed subagents — and a cheaper '
+      + 'model for mechanical subagent roles — keep the leverage without the volume.',
+  })];
+}
+
+// 13 ── long-session-share. Sessions spanning 8+ hours are usually loops,
+// daemons, or forgotten terminals rather than a sitting; their spend share
+// says how much of the window rides on unattended context.
+function detectLongSessionShare({ sessions, windowCost }) {
+  const long = sessions.filter((s) => num(s.minutes) >= THRESHOLDS.longSessionMinutes);
+  if (!long.length || windowCost <= 0) return [];
+  const spend = sumBy(long, 'cost');
+  const share = spend / windowCost;
+  if (share < THRESHOLDS.longSessionMinShare) return [];
+  return [withDefaults({
+    id: 'long-session-share', kind: 'trend', severity: 'info',
+    title: `${pct(share)} of spend sits in 8h+ sessions`,
+    finding: `${count(long.length)} sessions spanned ${Math.round(THRESHOLDS.longSessionMinutes / 60)}+ hours `
+      + `and carried ${usd(spend)} (${pct(share)}) of the window.`,
+    evidence: 'Very long spans are the signature of background loops and left-open sessions; '
+      + 'long-lived context is also the expensive kind — every turn re-reads it.',
+    action: 'Confirm the long-runners are intentional; close or /clear sessions that have '
+      + 'become idle context holders.',
+    command: 'ak x daemon-gc',
+  })];
+}
+
+/** @type {Array<{id: string, detect: (ctx: object) => Insight[]}>} */
+const DETECTORS = [
+  { id: 'context-tax', detect: detectContextTax },
+  { id: 'premium-on-routine', detect: detectPremiumOnRoutine },
+  { id: 'churn', detect: detectChurn },
+  { id: 'overnight', detect: detectOvernight },
+  { id: 'spend-trend', detect: detectSpendTrend },
+  { id: 'project-concentration', detect: detectProjectConcentration },
+  { id: 'classify-coverage', detect: detectClassifyCoverage },
+  { id: 'model-routing', detect: detectModelRouting },
+  { id: 'cost-per-session-spread', detect: detectCostPerSessionSpread },
+  { id: 'high-volume-automation', detect: detectHighVolumeAutomation },
+  { id: 'parallel-sessions', detect: detectParallelSessions },
+  { id: 'subagent-share', detect: detectSubagentShare },
+  { id: 'long-session-share', detect: detectLongSessionShare },
+];
+
+/** Exposed only for direct per-detector unit tests; not part of the public API. */
+export const _detectors = Object.fromEntries(DETECTORS.map((d) => [d.id, d.detect]));
+
+/**
  * Rank findings over a usage aggregate.
  *
  * @param {UsageAggregate} [agg] Aggregate from `usage-index.mjs` (see spec §5).
  *   Partial or missing input is tolerated: a detector with no evidence stays silent.
- * @returns {Array<{id:string, kind:'coach'|'trend', severity:'warn'|'info'|'ok',
- *   title:string, finding:string, evidence:string, action:string,
- *   command:string|null, impact:number|null, sources?:Array<{label:string,url:string}>}>}
- *   Ranked most-impactful first: computed-impact findings descending, then
- *   $-free findings by severity.
+ * @returns {Insight[]} Ranked most-impactful first: computed-impact findings
+ *   descending, then $-free findings by severity.
  */
 export function detectInsights(agg) {
   const a = agg && typeof agg === 'object' ? agg : {};
@@ -229,359 +613,9 @@ export function detectInsights(agg) {
   const sessions = Array.isArray(a.sessions) ? a.sessions : [];
   const windowCost = num(totals.cost);
   const sessionCount = Number.isFinite(totals.sessions) ? totals.sessions : sessions.length;
+  const ctx = { a, totals, sessions, windowCost, sessionCount };
 
-  const found = [];
-  const push = (insight) => found.push({ command: null, impact: null, ...insight });
-
-  // 1 ── context-tax. Every session re-pays a fixed startup cache write before any
-  // work happens. Priced from the window's own $/unit, so no rate table is assumed.
-  const units = billableUnits(totals);
-  if (sessions.length && windowCost > 0 && units > 0) {
-    const medCacheWrite = median(sessions.map((s) => num(s.cacheWrite)));
-    const costPerUnit = windowCost / units;
-    const tax = medCacheWrite * sessions.length * CACHE_WRITE_MULT * costPerUnit;
-    const share = windowCost > 0 ? tax / windowCost : 0;
-    if (share >= THRESHOLDS.contextTaxMinShare) {
-      const cwShare = (num(totals.cacheWrite) * CACHE_WRITE_MULT) / units;
-      push({
-        id: 'context-tax', kind: 'coach',
-        severity: share >= THRESHOLDS.contextTaxWarnShare ? 'warn' : 'info',
-        title: 'Every session re-pays a fixed context tax',
-        finding: `The median session writes ${kTok(medCacheWrite)} tokens to cache before any work `
-          + `happens. Across ${count(sessions.length)} sessions that is about ${usd(tax)} of this `
-          + `window's ${usd(windowCost)} (${pct(share)}).`,
-        evidence: `Cache writes are ${pct(cwShare)} of the window's billable volume and bill at `
-          + `${CACHE_WRITE_MULT}× input. A finished session never re-reads that prefix — a new one `
-          + 'always re-writes it.',
-        action: 'Trim the always-on guidance blocks, or move rarely-used reference material behind '
-          + 'a skill so it loads on demand instead of into every session.',
-        command: 'ak x blocks audit',
-        impact: round2(tax),
-      });
-    }
-  }
-
-  // 2 ── premium-on-routine. Frontier reasoning on short, shallow sessions. Fires
-  // only when the projected saving clears a SHARE of the window (rule 2): $1k of
-  // saving is decisive in a $10k window and noise in a $200k one.
-  const routinePremium = sessions.filter((s) => modelIds(s).some(isPremiumModel)
-    && num(s.responses) <= THRESHOLDS.premiumMaxResponses
-    && num(s.minutes) <= THRESHOLDS.premiumMaxMinutes);
-  if (routinePremium.length && windowCost > 0) {
-    const spend = sumBy(routinePremium, 'cost');
-    const saving = spend * TIER_SAVING_RATIO;
-    if (saving / windowCost >= THRESHOLDS.premiumMinSavingShare) {
-      push({
-        id: 'premium-on-routine', kind: 'coach', severity: 'warn',
-        title: 'Premium models are doing short, shallow sessions',
-        finding: `${count(routinePremium.length)} sessions ran on an Opus/Fable-tier model but `
-          + `lasted ≤${THRESHOLDS.premiumMaxMinutes} minutes with ≤${THRESHOLDS.premiumMaxResponses} `
-          + `responses, costing ${usd(spend)} — ${pct(spend / windowCost)} of the window.`,
-        evidence: 'Short sessions are lookups, small edits and quick reviews; they rarely exercise '
-          + `frontier reasoning. The balanced tier prices at ${Math.round((1 - TIER_SAVING_RATIO) * 100)}% `
-          + 'of premium, so the saving is the measured spend on those sessions times '
-          + `${TIER_SAVING_RATIO}.`,
-        action: 'Route quick and mechanical activities to the balanced tier in your per-activity '
-          + 'policy. Reasoning-heavy activities stay where they are.',
-        command: 'ak host pick',
-        impact: round2(saving),
-      });
-    }
-  }
-
-  // 3 ── churn. Sessions abandoned before they produced anything still paid a full
-  // context load. Floored on a share of window spend, not on a dollar amount.
-  const churned = sessions.filter((s) => num(s.prompts) <= THRESHOLDS.churnMaxPrompts
-    && num(s.minutes) < THRESHOLDS.churnMaxMinutes);
-  if (churned.length && windowCost > 0) {
-    const spend = sumBy(churned, 'cost');
-    if (spend / windowCost >= THRESHOLDS.churnMinShare) {
-      push({
-        id: 'churn', kind: 'coach', severity: 'info',
-        title: 'Abandoned sessions still cost a full context load',
-        finding: `${count(churned.length)} sessions `
-          + `(${pct(churned.length / Math.max(sessions.length, 1))} of the window) took `
-          + `≤${THRESHOLDS.churnMaxPrompts} prompt and ran under ${THRESHOLDS.churnMaxMinutes} `
-          + `minutes, costing ${usd(spend)}.`,
-        evidence: 'That is the shape of a /clear-and-restart cycle or a mistaken launch. Each one '
-          + 'still pays the startup cache write in full before being thrown away.',
-        action: 'Prefer continuing a session over clearing it when the topic is related — the '
-          + 'cached prefix has already been paid for.',
-        impact: round2(spend),
-      });
-    }
-  }
-
-  // 4 ── overnight. Sustained small-hours activity is the signature of unattended
-  // loops, not of a person. No dollar claim: this is a "confirm it is intended"
-  // finding, and the cost of unintended automation is not knowable from here.
-  const punch = a.punchcard && typeof a.punchcard === 'object' ? a.punchcard : {};
-  const punchEntries = Object.entries(punch);
-  if (punchEntries.length) {
-    const nightHours = new Set(THRESHOLDS.overnightHours);
-    let night = 0; let allResponses = 0;
-    for (const [key, value] of punchEntries) {
-      const responses = num(value);
-      allResponses += responses;
-      const hour = Number(String(key).split('-')[1]);
-      if (nightHours.has(hour)) night += responses;
-    }
-    const share = allResponses > 0 ? night / allResponses : 0;
-    if (share > THRESHOLDS.overnightMinShare) {
-      const [lo] = THRESHOLDS.overnightHours;
-      const hi = THRESHOLDS.overnightHours[THRESHOLDS.overnightHours.length - 1];
-      push({
-        id: 'overnight', kind: 'trend', severity: 'warn',
-        title: 'A meaningful share of activity happens overnight',
-        finding: `${pct(share)} of assistant responses (${count(night)}) land between `
-          + `${String(lo).padStart(2, '0')}:00 and ${String(hi).padStart(2, '0')}:59 local time.`,
-        evidence: 'Sustained small-hours activity is the signature of unattended loops, daemons, '
-          + 'or scheduled jobs rather than interactive work.',
-        action: 'Confirm this is intended automation. If not, reap stale daemons and check whether '
-          + 'a loop is still firing.',
-        command: 'ak x daemon-gc',
-      });
-    }
-  }
-
-  // 5 ── spend-trend. Direction of travel over the window's own days.
-  const dayEntries = Object.entries(a.byDay && typeof a.byDay === 'object' ? a.byDay : {})
-    .sort((x, y) => (x[0] < y[0] ? -1 : 1));
-  if (dayEntries.length >= 2) {
-    const half = Math.floor(dayEntries.length / 2);
-    const older = dayEntries.slice(0, half).map(([, v]) => v);
-    const recent = dayEntries.slice(-half).map(([, v]) => v);
-    const oldAvg = mean(older, 'cost');
-    const recentAvg = mean(recent, 'cost');
-    if (oldAvg > 0) {
-      const delta = (recentAvg - oldAvg) / oldAvg;
-      if (Math.abs(delta) >= THRESHOLDS.trendMinDelta) {
-        const up = delta > 0;
-        push({
-          id: 'spend-trend', kind: 'trend', severity: up ? 'warn' : 'ok',
-          title: up ? 'Daily spend is accelerating' : 'Daily spend is falling',
-          finding: `The last ${count(half)} days averaged ${usd(recentAvg)}/day against `
-            + `${usd(oldAvg)}/day over the ${count(half)} days before — ${up ? 'up' : 'down'} `
-            + `${pct(Math.abs(delta))}.`,
-          evidence: `Sessions per day went ${mean(older, 'sessions').toFixed(0)} → `
-            + `${mean(recent, 'sessions').toFixed(0)} across the same split.`,
-          action: up
-            ? 'Check whether a new automation, loop, or scheduled job started in the recent half.'
-            : 'Whatever changed is working — keep it.',
-        });
-      }
-    }
-  }
-
-  // 6 ── project-concentration. Where effort is pooled is where a fix multiplies.
-  const projects = entriesByCost(a.byProject);
-  if (projects.length && windowCost > 0) {
-    const [topName, topValue] = projects[0];
-    const share = num(topValue.cost) / windowCost;
-    if (share > THRESHOLDS.concentrationMinShare) {
-      const runnerUp = projects[1];
-      push({
-        id: 'project-concentration', kind: 'coach', severity: 'info',
-        title: `${topName} dominates your usage`,
-        finding: `${pct(share)} of API-equivalent spend (${usd(num(topValue.cost))}) and `
-          + `${count(num(topValue.sessions))} sessions went to one project.`,
-        evidence: runnerUp
-          ? `The next largest is ${runnerUp[0]} at ${usd(num(runnerUp[1].cost))}.`
-          : 'It is the only project in this window.',
-        action: 'Worth a dedicated per-activity routing policy and a tighter project CLAUDE.md — '
-          + 'savings there multiply across every session.',
-      });
-    }
-  }
-
-  // 7 ── classify-coverage. Honesty about our own confidence: an unclassified
-  // residue is reported, never force-fitted to reach 100% coverage.
-  const categories = a.byCategory && typeof a.byCategory === 'object' ? a.byCategory : {};
-  const unclassified = num(categories.Unclassified?.sessions);
-  if (unclassified > 0 && sessionCount > 0) {
-    const share = unclassified / sessionCount;
-    if (share > THRESHOLDS.unclassifiedMinShare) {
-      push({
-        id: 'classify-coverage', kind: 'coach', severity: 'info',
-        title: 'A large share of sessions could not be categorised',
-        finding: `${count(unclassified)} of ${count(sessionCount)} sessions (${pct(share)}) fall `
-          + 'below the classifier confidence floor.',
-        evidence: 'Categories come from session provenance, titles and tool mix; short or '
-          + 'generically-titled sessions carry little signal, and a forced label would make the '
-          + 'other categories untrustworthy too.',
-        // No command: the optional LLM-labelling pass (ADR-0009 §5 Layer 3) is
-        // designed but not shipped, and a dead command in a diagnostic is worse
-        // than none.
-        action: 'Short or generically-titled sessions are the usual cause — descriptive first '
-          + 'prompts and skill-invoked sessions classify well. An optional LLM labelling pass '
-          + 'is planned but not yet available.',
-      });
-    }
-  }
-
-  // 8 ── model-routing. DELIBERATELY NOT an upgrade nudge (rule 3, ADR-0009 §6).
-  // A first-pass detector saw prev-gen spend and recommended upgrading. Grounding
-  // reversed it: the vendor benchmark measures HARD tasks, a local controlled A/B
-  // on a ROUTINE task measured the newer model taking 3.4× the steps and 3.7× the
-  // cost for identical output, and the overthinking-tax literature reconciles the
-  // two. So this fires to say "your mix is defensible" and recommends routing by
-  // complexity — including, on many corpora, changing nothing.
-  const prevGenCost = Object.entries(a.byModel && typeof a.byModel === 'object' ? a.byModel : {})
-    .filter(([id]) => isPrevGenOpus(id))
-    .reduce((acc, [, v]) => acc + num(v?.cost), 0);
-  if (prevGenCost > 0 && windowCost > 0) {
-    const share = prevGenCost / windowCost;
-    if (share >= THRESHOLDS.prevGenMinShare) {
-      const routine = sessions.filter((s) => num(s.responses) <= THRESHOLDS.premiumMaxResponses
-        && num(s.minutes) <= THRESHOLDS.premiumMaxMinutes);
-      const routineShare = sessions.length ? routine.length / sessions.length : 0;
-      push({
-        id: 'model-routing', kind: 'coach', severity: 'ok',
-        title: 'Your model mix is defensible — route by complexity, not by recency',
-        finding: `${pct(share)} of spend (${usd(prevGenCost)}) sits on a previous-generation Opus `
-          + `model${sessions.length ? `, and ${pct(routineShare)} of your sessions are routine `
-            + `(≤${THRESHOLDS.premiumMaxResponses} responses, ≤${THRESHOLDS.premiumMaxMinutes} min)` : ''}. `
-          + 'On routine work the newer model is measurably more expensive, not less.',
-        evidence: 'Anthropic reports Opus 5 more than doubling Opus 4.8 per task on a hard-task, '
-          + 'vendor-reported benchmark; a local controlled A/B on a routine task measured Opus 5 '
-          + 'taking 3.4× the steps and 3.7× the cost for the same output. Both hold — capability '
-          + 'gains land on hard tasks, overthinking overhead lands on easy ones.',
-        action: 'Route by task complexity: keep routine activities on the cheaper tier and reserve '
-          + 'the newest model for genuinely hard work. Confirm against your own workload before '
-          + 'changing anything.',
-        command: 'ak host pick',
-        sources: MODEL_ROUTING_SOURCES,
-      });
-    }
-  }
-
-  // 9 ── cost-per-session-spread. Names where leverage actually is. `Unclassified`
-  // is excluded (it is a confidence bucket, not a kind of work) and thin categories
-  // are excluded (a handful of sessions is an anecdote, not a rate).
-  const rated = Object.entries(categories)
-    .filter(([name, v]) => name !== 'Unclassified' && v && typeof v === 'object'
-      && num(v.sessions) >= THRESHOLDS.spreadMinCategorySessions)
-    .map(([name, v]) => ({ name, value: v, per: num(v.cost) / num(v.sessions) }))
-    .sort((x, y) => y.per - x.per);
-  if (rated.length >= 2) {
-    const hi = rated[0];
-    const lo = rated[rated.length - 1];
-    if (hi.per > 0 && lo.per > 0 && hi.per / lo.per >= THRESHOLDS.spreadMinRatio) {
-      const ratio = hi.per / lo.per;
-      push({
-        id: 'cost-per-session-spread', kind: 'coach', severity: 'info',
-        title: `${hi.name} costs ${Math.round(ratio)}× more per session than ${lo.name}`,
-        finding: `${hi.name}: ${count(num(hi.value.sessions))} sessions at ${usd2(hi.per)} each. `
-          + `${lo.name}: ${count(num(lo.value.sessions))} sessions at ${usd2(lo.per)} each.`,
-        evidence: sessionCount > 0 && windowCost > 0
-          ? `${hi.name} is ${pct(num(hi.value.sessions) / sessionCount)} of sessions but `
-            + `${pct(num(hi.value.cost) / windowCost)} of spend.`
-          : `${hi.name} carries ${usd(num(hi.value.cost))} across ${count(num(hi.value.sessions))} sessions.`,
-        action: `Your leverage is in ${hi.name}, not in trimming the cheap categories — a 10% `
-          + `improvement there is worth more than eliminating ${lo.name} entirely.`,
-      });
-    }
-  }
-
-  // 10 ── high-volume-automation. High count + low unit cost + short duration is
-  // the shape of a scheduled or hook-driven job. "Low cost" is measured against
-  // the window's OWN mean session cost, so the rule travels between corpora.
-  // Only the highest-volume qualifying category is reported, keeping ids unique.
-  const windowMeanSession = sessionCount > 0 ? windowCost / sessionCount : 0;
-  if (windowMeanSession > 0) {
-    const ceiling = windowMeanSession * THRESHOLDS.automationMaxAvgShare;
-    const candidates = Object.entries(categories)
-      .filter(([name, v]) => name !== 'Unclassified' && v && typeof v === 'object'
-        && num(v.sessions) >= THRESHOLDS.automationMinSessions
-        && num(v.cost) / num(v.sessions) < ceiling)
-      .sort((x, y) => num(y[1].sessions) - num(x[1].sessions));
-    if (candidates.length) {
-      const [name, value] = candidates[0];
-      const runs = num(value.sessions);
-      const avgCost = num(value.cost) / runs;
-      const avgMinutes = num(value.minutes) / runs;
-      push({
-        id: 'high-volume-automation', kind: 'trend', severity: 'info',
-        title: `${count(runs)} short ${name} sessions look automated`,
-        finding: `${name} ran ${count(runs)} times`
-          + `${sessionCount > 0 ? ` (${pct(runs / sessionCount)} of all sessions)` : ''}, averaging `
-          + `${usd2(avgCost)} and ${avgMinutes.toFixed(1)} minutes each.`,
-        evidence: `That is ${pct(avgCost / windowMeanSession)} of this window's mean session cost `
-          + `(${usd2(windowMeanSession)}). High count, low unit cost and short duration is the shape `
-          + 'of a scheduled or hook-driven job rather than interactive work.',
-        action: 'Cheap individually, but confirm the cadence is intended — and that its findings '
-          + 'are actually being read, or it is pure overhead.',
-      });
-    }
-  }
-
-  // 11 ── parallel-sessions. Summed span ÷ union span = mean concurrency while
-  // anything was open. Every parallel session draws on the SAME plan limit
-  // (Claude Code's own /usage panel makes the same point), so sustained
-  // parallelism is how a week's allowance disappears in two days. No dollar
-  // claim: parallelism shifts WHEN tokens are spent, not directly how many.
-  const spanSum = num(totals.spanMinutes) * 60;
-  const spanUnion = num(totals.spanUnionSeconds);
-  if (spanUnion > 0 && sessionCount >= 2) {
-    const factor = spanSum / spanUnion;
-    if (factor >= THRESHOLDS.parallelMinFactor) {
-      push({
-        id: 'parallel-sessions', kind: 'trend', severity: 'info',
-        title: `Sessions ran ~${factor.toFixed(1)}× in parallel`,
-        finding: `Summed session time is ${Math.round(spanSum / 3600)}h against ${Math.round(spanUnion / 3600)}h `
-          + `of wall-clock with anything open — on average ${factor.toFixed(1)} sessions at once.`,
-        evidence: 'All sessions on a subscription share one rate-limit pool, so parallel work '
-          + 'consumes the same allowance faster; queueing spreads it more evenly.',
-        action: 'Keep parallelism for genuinely independent work; queue the rest, or route some '
-          + 'lanes to the other host so the two pools share the load.',
-        command: 'ak host pick',
-      });
-    }
-  }
-
-  // 12 ── subagent-share. Sidechain/subagent transcripts as a share of spend —
-  // the local computation of the "subagent-heavy sessions" characteristic
-  // Claude Code's /usage panel reports. The dollar figure is measured, but NOT
-  // claimed as impact: subagent work is not waste, it is a composition fact.
-  const side = sessions.filter((s) => s.sidechain === true || s.threadSource === 'subagent');
-  if (side.length && windowCost > 0) {
-    const spend = sumBy(side, 'cost');
-    const share = spend / windowCost;
-    if (share >= THRESHOLDS.sidechainMinShare) {
-      push({
-        id: 'subagent-share', kind: 'trend', severity: 'info',
-        title: `Subagent transcripts carry ${pct(share)} of spend`,
-        finding: `${count(side.length)} sidechain/subagent transcripts account for ${usd(spend)} of `
-          + `this window's ${usd(windowCost)}.`,
-        evidence: 'Each spawned agent runs its own requests with its own context load, so '
-          + 'delegation multiplies token volume even when the main thread stays small.',
-        action: 'Be deliberate about fan-out: fewer, better-briefed subagents — and a cheaper '
-          + 'model for mechanical subagent roles — keep the leverage without the volume.',
-      });
-    }
-  }
-
-  // 13 ── long-session-share. Sessions spanning 8+ hours are usually loops,
-  // daemons, or forgotten terminals rather than a sitting; their spend share
-  // says how much of the window rides on unattended context.
-  const long = sessions.filter((s) => num(s.minutes) >= THRESHOLDS.longSessionMinutes);
-  if (long.length && windowCost > 0) {
-    const spend = sumBy(long, 'cost');
-    const share = spend / windowCost;
-    if (share >= THRESHOLDS.longSessionMinShare) {
-      push({
-        id: 'long-session-share', kind: 'trend', severity: 'info',
-        title: `${pct(share)} of spend sits in 8h+ sessions`,
-        finding: `${count(long.length)} sessions spanned ${Math.round(THRESHOLDS.longSessionMinutes / 60)}+ hours `
-          + `and carried ${usd(spend)} (${pct(share)}) of the window.`,
-        evidence: 'Very long spans are the signature of background loops and left-open sessions; '
-          + 'long-lived context is also the expensive kind — every turn re-reads it.',
-        action: 'Confirm the long-runners are intentional; close or /clear sessions that have '
-          + 'become idle context holders.',
-        command: 'ak x daemon-gc',
-      });
-    }
-  }
+  const found = DETECTORS.flatMap(({ detect }) => detect(ctx));
 
   // Ranked: measured dollars first (descending), then $-free findings by severity.
   // `Array.prototype.sort` is stable, so detector order breaks remaining ties.

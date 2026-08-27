@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  THRESHOLDS as T, MODEL_ROUTING_SOURCES, detectInsights,
+  THRESHOLDS as T, MODEL_ROUTING_SOURCES, detectInsights, _detectors,
 } from '../../src/lib/usage-insights.mjs';
 
 // ── Fixtures ─────────────────────────────────────────────────────────────────
@@ -597,4 +597,107 @@ test('every insight satisfies the Insight contract', () => {
 test('the kitchen-sink fixture fires each detector at most once', () => {
   const list = detectInsights(kitchenSink());
   assert.equal(new Set(list.map((i) => i.id)).size, list.length);
+});
+
+// ── Direct per-detector unit tests ───────────────────────────────────────────
+// detectInsights composes these 13 detect() functions from a shared `ctx`
+// prelude (a/totals/sessions/windowCost/sessionCount). Calling each one
+// directly — bypassing detectInsights's flatMap+sort — proves the extraction
+// preserved firing behavior in isolation, independent of the other 12.
+
+function ctxFrom(agg) {
+  const a = agg && typeof agg === 'object' ? agg : {};
+  const totals = a.totals && typeof a.totals === 'object' ? a.totals : {};
+  const sessions = Array.isArray(a.sessions) ? a.sessions : [];
+  const windowCost = Number.isFinite(totals.cost) ? totals.cost : 0;
+  const sessionCount = Number.isFinite(totals.sessions) ? totals.sessions : sessions.length;
+  return { a, totals, sessions, windowCost, sessionCount };
+}
+
+test('_detectors[context-tax] fires/does not fire directly, matching detectInsights', () => {
+  assert.equal(_detectors['context-tax'](ctxFrom(taxAgg(8_000))).length, 0);
+  assert.equal(_detectors['context-tax'](ctxFrom(taxAgg(8_200))).length, 1);
+});
+
+test('_detectors[premium-on-routine] fires/does not fire directly, matching detectInsights', () => {
+  assert.equal(_detectors['premium-on-routine'](ctxFrom(premiumAgg(2_400))).length, 0);
+  assert.equal(_detectors['premium-on-routine'](ctxFrom(premiumAgg(2_600))).length, 1);
+});
+
+test('_detectors[churn] fires/does not fire directly, matching detectInsights', () => {
+  assert.equal(_detectors.churn(ctxFrom(churnAgg(40))).length, 0);
+  assert.equal(_detectors.churn(ctxFrom(churnAgg(60))).length, 1);
+});
+
+test('_detectors[overnight] fires/does not fire directly, matching detectInsights', () => {
+  assert.equal(_detectors.overnight(ctxFrom(nightAgg(8, 92))).length, 0);
+  assert.equal(_detectors.overnight(ctxFrom(nightAgg(9, 91))).length, 1);
+});
+
+test('_detectors[spend-trend] fires/does not fire directly, matching detectInsights', () => {
+  assert.equal(_detectors['spend-trend'](ctxFrom(trendAgg(120))).length, 0);
+  assert.equal(_detectors['spend-trend'](ctxFrom(trendAgg(130))).length, 1);
+});
+
+test('_detectors[project-concentration] fires/does not fire directly, matching detectInsights', () => {
+  assert.equal(_detectors['project-concentration'](ctxFrom(projectAgg(21))).length, 0);
+  assert.equal(_detectors['project-concentration'](ctxFrom(projectAgg(23))).length, 1);
+});
+
+test('_detectors[classify-coverage] fires/does not fire directly, matching detectInsights', () => {
+  assert.equal(_detectors['classify-coverage'](ctxFrom(classifyAgg(25))).length, 0);
+  assert.equal(_detectors['classify-coverage'](ctxFrom(classifyAgg(26))).length, 1);
+});
+
+test('_detectors[model-routing] fires directly and carries its grounded sources', () => {
+  const [insight] = _detectors['model-routing'](ctxFrom(routingAgg(40, 60)));
+  assert.ok(insight);
+  assert.equal(insight.sources, MODEL_ROUTING_SOURCES);
+});
+
+test('_detectors[cost-per-session-spread] fires/does not fire directly, matching detectInsights', () => {
+  assert.equal(_detectors['cost-per-session-spread'](ctxFrom(spreadAgg(495))).length, 0);
+  assert.equal(_detectors['cost-per-session-spread'](ctxFrom(spreadAgg(500))).length, 1);
+});
+
+test('_detectors[high-volume-automation] fires/does not fire directly, matching detectInsights', () => {
+  assert.equal(_detectors['high-volume-automation'](ctxFrom(automationAgg(100, 500))).length, 0);
+  assert.equal(_detectors['high-volume-automation'](ctxFrom(automationAgg(100, 490))).length, 1);
+});
+
+// parallel-sessions, subagent-share and long-session-share had no dedicated
+// coverage before this extraction (only the kitchen-sink fixture touched
+// them indirectly) — these fixtures are new.
+const parallelAgg = (spanMinutes, spanUnionSeconds) => makeAgg({
+  sessions: [session({ cost: 10 }), session({ cost: 10 })],
+  totals: { sessions: 2, spanMinutes, spanUnionSeconds },
+});
+
+test('_detectors[parallel-sessions] fires/does not fire directly on summed-vs-union span', () => {
+  assert.equal(_detectors['parallel-sessions'](ctxFrom(parallelAgg(2, 300))).length, 0);
+  assert.equal(_detectors['parallel-sessions'](ctxFrom(parallelAgg(20, 300))).length, 1);
+});
+
+const subagentAgg = (sideCost, totalCost) => makeAgg({
+  sessions: [
+    session({ cost: sideCost, sidechain: true }),
+    session({ cost: totalCost - sideCost }),
+  ],
+});
+
+test('_detectors[subagent-share] fires/does not fire directly on sidechain spend share', () => {
+  assert.equal(_detectors['subagent-share'](ctxFrom(subagentAgg(20, 100))).length, 0);
+  assert.equal(_detectors['subagent-share'](ctxFrom(subagentAgg(30, 100))).length, 1);
+});
+
+const longSessionAgg = (longCost, totalCost) => makeAgg({
+  sessions: [
+    session({ cost: longCost, minutes: 500 }),
+    session({ cost: totalCost - longCost, minutes: 30 }),
+  ],
+});
+
+test('_detectors[long-session-share] fires/does not fire directly on 8h+ session spend share', () => {
+  assert.equal(_detectors['long-session-share'](ctxFrom(longSessionAgg(20, 100))).length, 0);
+  assert.equal(_detectors['long-session-share'](ctxFrom(longSessionAgg(30, 100))).length, 1);
 });
