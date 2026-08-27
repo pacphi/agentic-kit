@@ -444,7 +444,16 @@ export function validateActivityHost(id, hosts = HOST_REGISTRY) {
     ? { ok: true } : { ok: false, reason: 'capability-canRouteActivities-required' };
 }
 
-export function validateRegistries(registries) {
+// ── validateRegistries decomposition ─────────────────────────────────────
+// Each cross-axis invariant below is a rule `(registries) => Error[]` —
+// independent of the others (none consumes another's output), so a
+// registry of small check functions replaces the single sequential body.
+// REGISTRY_INVARIANT_CHECKS runs them in the SAME order the original body
+// evaluated its blocks in, and each function's own internal loop order is
+// unchanged — both matter because tests assert the exact returned array
+// (deepEqual is order-sensitive), not just its membership.
+
+function checkDuplicateIds(registries) {
   const errors = [];
   const axes = ['hosts', 'providers', 'projections', 'observability', 'modelDiscovery'];
   for (const axis of axes) {
@@ -454,6 +463,15 @@ export function validateRegistries(registries) {
       seen.add(entry.id);
     }
   }
+  return errors;
+}
+
+/** configProjection/observability referential integrity plus the
+ * canDriveSession -> canBePrimary/canRouteActivities dependency, per host —
+ * kept as one function (not three) so a host violating more than one
+ * invariant still reports them in the original interleaved per-host order. */
+function checkHostInvariants(registries) {
+  const errors = [];
   const projections = new Set((registries?.projections ?? []).map((entry) => entry.id));
   const observability = new Set((registries?.observability ?? []).map((entry) => entry.id));
   for (const [index, host] of (registries?.hosts ?? []).entries()) {
@@ -473,6 +491,12 @@ export function validateRegistries(registries) {
       }
     }
   }
+  return errors;
+}
+
+/** Billing/credential consistency plus credential-name shape, per provider. */
+function checkProviderInvariants(registries) {
+  const errors = [];
   const envName = /^[A-Z][A-Z0-9_]*$/;
   for (const [index, provider] of (registries?.providers ?? []).entries()) {
     const kind = provider.credentials?.kind;
@@ -491,6 +515,11 @@ export function validateRegistries(registries) {
       });
     }
   }
+  return errors;
+}
+
+function checkModelDiscoveryOwners(registries) {
+  const errors = [];
   const hosts = new Set((registries?.hosts ?? []).map((entry) => entry.id));
   const providers = new Set((registries?.providers ?? []).map((entry) => entry.id));
   for (const [index, descriptor] of (registries?.modelDiscovery ?? []).entries()) {
@@ -500,4 +529,16 @@ export function validateRegistries(registries) {
     });
   }
   return errors;
+}
+
+export function validateRegistries(registries) {
+  // Array built fresh per call (not a module-level const): validateRegistries
+  // itself runs once at MODULE LOAD time (the construction-time self-check
+  // below, before this line is ever reached in top-to-bottom evaluation) —
+  // a top-level `const` here would still be in its temporal dead zone at
+  // that first call. The four functions are plain hoisted declarations, so
+  // referencing them is safe from anywhere in the module regardless of call
+  // time; only the array literal itself needs to be per-call.
+  const checks = [checkDuplicateIds, checkHostInvariants, checkProviderInvariants, checkModelDiscoveryOwners];
+  return checks.flatMap((check) => check(registries));
 }
