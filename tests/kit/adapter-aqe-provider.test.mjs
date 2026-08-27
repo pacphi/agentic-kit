@@ -8,7 +8,9 @@ import { fileURLToPath } from 'node:url';
 import { validateAdapterManifest } from '../../src/lib/adapters/manifest.mjs';
 import { bootstrapHostAdapters } from '../../src/lib/adapters/admission.mjs';
 import { resetAdmitted } from '../../src/lib/adapters/admitted.mjs';
-import { grantCapability, recordTierResult, revokeCapability } from '../../src/lib/adapters/grants.mjs';
+import {
+  adapterGrantsPath, grantCapability, recordTierResult, revokeCapability,
+} from '../../src/lib/adapters/grants.mjs';
 import { hashAdapterContent } from '../../src/lib/adapters/integrity.mjs';
 import {
   admittedAqeProviderFor,
@@ -19,6 +21,7 @@ import {
   runAdmittedAqeProvider,
   runAdmittedAqeProviderProbe,
 } from '../../src/lib/adapters/aqe-provider.mjs';
+import { sandboxConfigBase } from './helpers/home-sandbox.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 
@@ -241,15 +244,12 @@ test('live provider receipts are immutable and projection exposes no manifest in
 });
 
 test('bootstrap activates only an admitted, enabled, hash-current aqeProvider grant', async (t) => {
-  const priorXdg = process.env.XDG_CONFIG_HOME;
-  const grantHome = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-aqe-provider-grant-'));
-  process.env.XDG_CONFIG_HOME = grantHome;
+  const grantBase = sandboxConfigBase(t, 'ak-aqe-provider-grant');
+  assert.equal(adapterGrantsPath(), path.join(grantBase, 'agentic-kit', 'adapter-grants.json'));
   const { dir, manifest, integrity } = fixture();
   const manifestFile = path.join(dir, 'manifest.json');
   fs.writeFileSync(manifestFile, JSON.stringify(manifest));
   t.after(() => {
-    process.env.XDG_CONFIG_HOME = priorXdg;
-    fs.rmSync(grantHome, { recursive: true, force: true });
     fs.rmSync(dir, { recursive: true, force: true });
     resetAdmittedAqeProviders();
     resetAdmitted();
@@ -347,9 +347,7 @@ process.stdout.write(value);
 });
 
 test('provider rechecks live host, consent, and grant authority immediately before spawn', async (t) => {
-  const priorXdg = process.env.XDG_CONFIG_HOME;
-  const grantHome = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-aqe-provider-live-grant-'));
-  process.env.XDG_CONFIG_HOME = grantHome;
+  sandboxConfigBase(t, 'ak-aqe-provider-live-grant');
   const { dir, manifest, integrity } = fixture();
   const manifestFile = path.join(dir, 'manifest.json');
   fs.writeFileSync(manifestFile, JSON.stringify(manifest));
@@ -362,8 +360,6 @@ test('provider rechecks live host, consent, and grant authority immediately befo
     isTrusted: (_name, hash) => hash === integrity.hash,
   };
   t.after(() => {
-    process.env.XDG_CONFIG_HOME = priorXdg;
-    fs.rmSync(grantHome, { recursive: true, force: true });
     fs.rmSync(dir, { recursive: true, force: true });
     resetAdmittedAqeProviders();
     resetAdmitted();

@@ -23,6 +23,7 @@ import {
   buildAdmittedLifecycleAdapter, registerAdmittedLifecycle, lifecycleAdapterFor,
 } from '../../src/lib/adapters/lifecycle-registry.mjs';
 import { HOST_REGISTRY } from '../../src/lib/adapters/registries.mjs';
+import { sandboxConfigBase } from './helpers/home-sandbox.mjs';
 
 beforeEach(() => resetAdmitted());
 
@@ -245,15 +246,11 @@ test('flag-on with a trusted entry admits it and applies the overlay', async () 
 // grantsByName directly to test applyAdmitted's own guarantee in isolation),
 // these two exercise the actual bootstrap -> grantedCapabilitiesFor(name,
 // freshly-computed hash) -> applyAdmitted wiring end to end, against the
-// REAL grants.mjs file store — redirected via XDG_CONFIG_HOME to a throwaway
-// directory so they never touch the developer's real
-// ~/.config/agentic-kit/adapter-grants.json.
+// REAL grants.mjs file store — redirected via XDG_CONFIG_HOME and APPDATA to a
+// throwaway directory so no platform touches the developer's real config.
 
 test('bootstrapHostAdapters: a real, currently-hashed grant for primary-eligible makes canBePrimary live in effectiveHostRegistry()', async (t) => {
-  const prevXdg = process.env.XDG_CONFIG_HOME;
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-d2-grant-live-'));
-  process.env.XDG_CONFIG_HOME = dir;
-  t.after(() => { process.env.XDG_CONFIG_HOME = prevXdg; fs.rmSync(dir, { recursive: true, force: true }); });
+  sandboxConfigBase(t, 'ak-d2-grant-live');
 
   const name = 'hermes-grant-live';
   const manifest = validateAdapterManifest(validManifest({ name, host: validHost({ id: name }) }));
@@ -274,10 +271,7 @@ test('bootstrapHostAdapters: a real, currently-hashed grant for primary-eligible
 });
 
 test('bootstrapHostAdapters: a grant recorded against a STALE manifest hash never lights up (edit-invalidation)', async (t) => {
-  const prevXdg = process.env.XDG_CONFIG_HOME;
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-d2-grant-stale-'));
-  process.env.XDG_CONFIG_HOME = dir;
-  t.after(() => { process.env.XDG_CONFIG_HOME = prevXdg; fs.rmSync(dir, { recursive: true, force: true }); });
+  sandboxConfigBase(t, 'ak-d2-grant-stale');
 
   const name = 'hermes-grant-stale';
   const oldManifest = validateAdapterManifest(validManifest({ name, host: validHost({ id: name }) }));
@@ -306,10 +300,7 @@ test('bootstrapHostAdapters: a grant recorded against a STALE manifest hash neve
 });
 
 test('bootstrapHostAdapters: with no grant recorded at all, an admitted host stays at the manifest floor (canBePrimary false)', async (t) => {
-  const prevXdg = process.env.XDG_CONFIG_HOME;
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-d2-grant-none-'));
-  process.env.XDG_CONFIG_HOME = dir;
-  t.after(() => { process.env.XDG_CONFIG_HOME = prevXdg; fs.rmSync(dir, { recursive: true, force: true }); });
+  sandboxConfigBase(t, 'ak-d2-grant-none');
 
   const name = 'hermes-grant-none';
   const manifest = validateAdapterManifest(validManifest({ name, host: validHost({ id: name }) }));

@@ -241,6 +241,7 @@ test('Agentic-QE 3.13.12+ serves an admitted provider through CLI and MCP', {
   const xdg = path.join(temp, 'xdg');
   const home = path.join(temp, 'home');
   const priorXdg = process.env.XDG_CONFIG_HOME;
+  const priorAppdata = process.env.APPDATA;
   fs.mkdirSync(path.join(projectRoot, '.git'), { recursive: true });
   fs.mkdirSync(home, { recursive: true });
   const validated = writeFixture(adapterDir);
@@ -252,6 +253,8 @@ test('Agentic-QE 3.13.12+ serves an admitted provider through CLI and MCP', {
   t.after(() => {
     if (priorXdg === undefined) delete process.env.XDG_CONFIG_HOME;
     else process.env.XDG_CONFIG_HOME = priorXdg;
+    if (priorAppdata === undefined) delete process.env.APPDATA;
+    else process.env.APPDATA = priorAppdata;
     resetAdmittedAqeProviders();
     resetAdmitted();
     fs.rmSync(temp, { recursive: true, force: true });
@@ -271,6 +274,7 @@ test('Agentic-QE 3.13.12+ serves an admitted provider through CLI and MCP', {
   grantCapability(PROVIDER_ID, 'aqeProvider', { hash: integrity.hash }, { file: grantsFile });
 
   process.env.XDG_CONFIG_HOME = xdg;
+  process.env.APPDATA = xdg;
   const bootstrap = await bootstrapHostAdapters({
     cfg,
     env: { ...process.env, AK_EXPERIMENTAL_HOST_ADAPTERS: '1' },
@@ -288,6 +292,7 @@ test('Agentic-QE 3.13.12+ serves an admitted provider through CLI and MCP', {
     ...process.env,
     HOME: home,
     XDG_CONFIG_HOME: xdg,
+    APPDATA: xdg,
     AK_EXPERIMENTAL_HOST_ADAPTERS: '1',
     AQE_CONFIG_ROOT: projectRoot,
     AQE_PROJECT_ROOT: projectRoot,
@@ -303,5 +308,5 @@ test('Agentic-QE 3.13.12+ serves an admitted provider through CLI and MCP', {
   assert.match(mcpText, new RegExp(COMPLETION), mcp.stderr);
   assert.match(mcpText, new RegExp(`provider=${PROVIDER_ID}`));
   assert.match(mcpText, new RegExp(`model=${MODEL_ID}`));
-  assert.equal(adapterGrantsPath().startsWith(xdg), true);
+  assert.equal(adapterGrantsPath(), grantsFile);
 });
