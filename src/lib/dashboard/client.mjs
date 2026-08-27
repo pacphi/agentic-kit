@@ -52,7 +52,10 @@ function readSplit(name) {
   // files are never node-imported, so nothing in them should be typechecked
   // against node's lib) and the cross-file `import`/`export` machinery.
   src = src.replace(/^\/\/ @ts-nocheck.*\n(\/\/ .*\n)*/, '');
-  src = src.replace(/^import \{[^}]*\} from '\.\/[^']+\.mjs';\n/gm, '');
+  // \r?\n: a CRLF checkout (git on Windows without eol pinning) must strip the
+  // same lines, or a surviving `import` breaks the served classic-script bundle
+  // (mirrors admin-server.mjs's stripModelImport, whose `\s*$` already tolerates \r).
+  src = src.replace(/^import \{[^}]*\} from '\.\/[^']+\.mjs';\r?\n/gm, '');
   src = src.replace(/^(\s*)export (?=(function|var)\b)/gm, '$1');
   return src;
 }

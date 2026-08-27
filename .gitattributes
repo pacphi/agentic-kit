@@ -1,0 +1,7 @@
+# Source files are read as TEXT at runtime in places (the dashboard client
+# collector concatenates ./client/*.mjs; admin-server inlines admin-view.mjs;
+# Function.prototype.toString sources are interpolated into served bundles), so
+# a CRLF checkout must never diverge from what CI's LF platforms exercise.
+*.mjs text eol=lf
+*.cjs text eol=lf
+*.js text eol=lf
