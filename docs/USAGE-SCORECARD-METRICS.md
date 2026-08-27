@@ -335,7 +335,7 @@ numbers as percentages of `t.tokens` (`dashboard/client.mjs`,
 **What "input" excludes.** For both providers, the `input` counter recorded
 per row is **gross input minus cached input** — Claude's parser reads
 `cache_read_input_tokens` and `cache_creation_input_tokens` as separate fields
-the provider already reports separately (`telemetry-records.mjs:209-212`); Codex's
+the provider already reports separately (`telemetry-records.mjs:216-224`); Codex's
 parser subtracts `cached_input_tokens` from `input_tokens` explicitly
 (`usage-index.mjs:741-750`, `input: Math.max(0, gross - cacheRead)`) because
 Codex's own `input_tokens` field **includes** cached tokens and would
@@ -1023,7 +1023,7 @@ at face value (correctly avoiding the separate naive-summing bug **[C5]**
 documents, since it already used last-event-only logic — see §4's worked
 example) but performed **no de-duplication** against a parent session a
 subagent file might be replaying. **Fix:** the parser now reads
-`session_meta.thread_source` (`telemetry-records.mjs:117-122`, confirmed as a real
+`session_meta.thread_source` (`telemetry-records.mjs:101-110`, confirmed as a real
 Codex rollout field by **[C7]**) and skips the `addUsage()` call entirely
 when its value is `'subagent'` (`usage-index.mjs:741`, guard condition
 `rec.threadSource !== 'subagent'`). The session record itself is **not**
