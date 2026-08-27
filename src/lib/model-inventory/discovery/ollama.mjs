@@ -53,6 +53,128 @@ function runtimeByName(value) {
   }));
 }
 
+function parseOllamaTags(tagsRaw) {
+  try { return { tags: json(tagsRaw, 'tags') }; } catch (error) { return { error }; }
+}
+
+function parseOllamaRuntime(psRaw) {
+  try { return { runtime: runtimeByName(json(psRaw, 'ps')) }; }
+  catch (error) { return { runtime: new Map(), diagnostic: diagnostic(error.message, 'Ollama runtime response is invalid') }; }
+}
+
+function resolveOllamaShow(showByModel, modelId, index) {
+  const shown = showByModel instanceof Map ? showByModel.get(modelId) : showByModel?.[modelId];
+  try {
+    return { shown: shown == null ? {} : json(shown, 'show') };
+  } catch (error) {
+    return { shown: {}, diagnostic: diagnostic(error.message, `Ollama show response for row ${index + 1} is invalid`) };
+  }
+}
+
+function ollamaFamilies(details) {
+  return Array.isArray(details.families)
+    ? details.families.map((item) => text(item, 64)).filter(Boolean).slice(0, 16) : [];
+}
+
+function ollamaAdvertisedCapabilities(shown) {
+  return Array.isArray(shown.capabilities)
+    ? [...new Set(shown.capabilities.map((item) => text(item, 64)).filter((item) => CAPABILITIES.has(item)))] : [];
+}
+
+/** `value` when it is not null/undefined (0 is a real, present size/window — keep it). */
+function whenPresent(key, value) {
+  return value != null ? { [key]: value } : {};
+}
+
+/** `value` when it is truthy (an empty string/array means "nothing to report"). */
+function whenTruthy(key, value) {
+  return value ? { [key]: value } : {};
+}
+
+function ollamaVariant({
+  digest, row, shown, details, families, advertised, context, loaded,
+}) {
+  const showDetails = shown.details && typeof shown.details === 'object' ? shown.details : {};
+  return {
+    digest,
+    ...whenPresent('sizeBytes', positive(row.size)),
+    ...whenTruthy('modifiedAt', iso(row.modified_at)),
+    ...whenTruthy('format', text(details.format, 64)),
+    ...whenTruthy('family', text(details.family ?? showDetails.family, 64)),
+    ...whenTruthy('families', families.length ? families : null),
+    ...whenTruthy('parameterSize', text(details.parameter_size ?? showDetails.parameter_size, 64)),
+    ...whenTruthy('quantizationLevel', text(details.quantization_level ?? showDetails.quantization_level, 64)),
+    loaded: Boolean(loaded),
+    ...whenPresent('memoryBytes', positive(loaded?.size)),
+    ...whenPresent('vramBytes', positive(loaded?.size_vram)),
+    ...whenTruthy('expiresAt', iso(loaded?.expires_at)),
+    ...whenPresent('contextWindow', context),
+    ...whenTruthy('licenseSummary', licenseSummary(shown.license)),
+    ...whenTruthy('advertisedCapabilities', advertised.length ? advertised : null),
+  };
+}
+
+function ollamaCapabilities(advertised, context) {
+  return {
+    ...(context != null ? { contextLimit: context } : {}),
+    ...(advertised.includes('tools') ? { toolcall: true } : {}),
+    ...(advertised.includes('thinking') ? { reasoning: true } : {}),
+    ...(advertised.includes('vision') ? { input: { text: true, image: true } } : {}),
+    ...(advertised.includes('embedding') ? { embedding: true } : {}),
+  };
+}
+
+/** Evidence for runtime-observed variant fields (loaded/memory/vram/expiry/context) is
+ *  distinct from the catalog evidence class the rest of the record carries. */
+function markOllamaRuntimeEvidence(record) {
+  for (const evidence of record.evidence) {
+    if (/^variant\.(?:loaded|memoryBytes|vramBytes|expiresAt|contextWindow)$/.test(evidence.field)) evidence.class = 'runtime';
+  }
+}
+
+/** Build one model record from a /api/tags row, joining bounded /api/show detail and
+ *  /api/ps runtime state. Returns `{ diagnostic }` only for an invalid or unreadable row. */
+function ollamaModelFromRow({
+  row, index, runtime, showByModel, source,
+}) {
+  const modelId = text(row?.name ?? row?.model);
+  const digest = text(row?.digest);
+  if (!modelId || !TOKEN.test(modelId) || !digest || !DIGEST.test(digest)) {
+    return { diagnostic: diagnostic('invalid-model-row', `Ollama tags row ${index + 1} is invalid`) };
+  }
+  const loaded = runtime.get(modelId) ?? null;
+  const { shown, diagnostic: showDiagnostic } = resolveOllamaShow(showByModel, modelId, index);
+  const details = row.details && typeof row.details === 'object' ? row.details : {};
+  const families = ollamaFamilies(details);
+  const advertised = ollamaAdvertisedCapabilities(shown);
+  const context = positive(loaded?.context_length) ?? contextWindow(shown.model_info);
+  const variant = ollamaVariant({
+    digest, row, shown, details, families, advertised, context, loaded,
+  });
+  const record = modelRecord({
+    host: 'ollama', provider: 'ollama', modelId, scopeId: source.scopeId, source,
+    displayName: modelId, digest, variant, capabilities: ollamaCapabilities(advertised, context),
+    pricing: { basis: 'local-compute', input: 0, output: 0, currency: 'USD', effectiveAt: null },
+    states: { discoverable: true },
+  });
+  markOllamaRuntimeEvidence(record);
+  return { record, diagnostic: showDiagnostic };
+}
+
+function ollamaModelsFromRows(rows, { runtime, showByModel, source }) {
+  const models = [];
+  const diagnostics = [];
+  for (const [index, row] of rows.entries()) {
+    if (models.length >= MAX_MODELS) break;
+    const { record, diagnostic: rowDiagnostic } = ollamaModelFromRow({
+      row, index, runtime, showByModel, source,
+    });
+    if (record) models.push(record);
+    if (rowDiagnostic) diagnostics.push(rowDiagnostic);
+  }
+  return { models, diagnostics };
+}
+
 /** Normalize bounded /api/tags, /api/show and /api/ps responses. */
 export function discoverOllamaApi({
   tagsRaw, psRaw = { models: [] }, showByModel = {}, capturedAt, scope = {}, scopeKey,
@@ -61,76 +183,19 @@ export function discoverOllamaApi({
     id: 'ollama-catalog', owner: 'ollama', ownerType: 'provider', transport: 'http', network: 'local',
     scope, scopeKey, capturedAt, complete: true, schema: 'ollama-api-v1',
   });
-  const diagnostics = [];
-  let tags;
-  let runtime;
-  try { tags = json(tagsRaw, 'tags'); } catch (error) {
-    source.complete = false; source.status = 'unsupported'; source.diagnostics = [error.message];
-    return { status: 'unsupported', source, models: [], diagnostics: [diagnostic(error.message, 'Ollama tags response is invalid')] };
-  }
-  try { runtime = runtimeByName(json(psRaw, 'ps')); } catch (error) {
-    runtime = new Map(); diagnostics.push(diagnostic(error.message, 'Ollama runtime response is invalid'));
+  const { tags, error: tagsError } = parseOllamaTags(tagsRaw);
+  if (tagsError) {
+    source.complete = false; source.status = 'unsupported'; source.diagnostics = [tagsError.message];
+    return { status: 'unsupported', source, models: [], diagnostics: [diagnostic(tagsError.message, 'Ollama tags response is invalid')] };
   }
   const rows = Array.isArray(tags?.models) ? tags.models : null;
   if (!rows) {
     source.complete = false; source.status = 'unsupported-schema'; source.diagnostics = ['tags-schema-unsupported'];
     return { status: 'unsupported', source, models: [], diagnostics: [diagnostic('tags-schema-unsupported', 'Ollama tags response has no models array')] };
   }
-  const models = [];
-  for (const [index, row] of rows.entries()) {
-    if (models.length >= MAX_MODELS) break;
-    const modelId = text(row?.name ?? row?.model);
-    const digest = text(row?.digest);
-    if (!modelId || !TOKEN.test(modelId) || !digest || !DIGEST.test(digest)) {
-      diagnostics.push(diagnostic('invalid-model-row', `Ollama tags row ${index + 1} is invalid`));
-      continue;
-    }
-    const loaded = runtime.get(modelId) ?? null;
-    let shown = showByModel instanceof Map ? showByModel.get(modelId) : showByModel?.[modelId];
-    try { shown = shown == null ? {} : json(shown, 'show'); } catch (error) {
-      shown = {}; diagnostics.push(diagnostic(error.message, `Ollama show response for row ${index + 1} is invalid`));
-    }
-    const details = row.details && typeof row.details === 'object' ? row.details : {};
-    const showDetails = shown.details && typeof shown.details === 'object' ? shown.details : {};
-    const families = Array.isArray(details.families) ? details.families.map((item) => text(item, 64)).filter(Boolean).slice(0, 16) : [];
-    const advertised = Array.isArray(shown.capabilities)
-      ? [...new Set(shown.capabilities.map((item) => text(item, 64)).filter((item) => CAPABILITIES.has(item)))] : [];
-    const context = positive(loaded?.context_length) ?? contextWindow(shown.model_info);
-    const variant = {
-      digest,
-      ...(positive(row.size) != null ? { sizeBytes: row.size } : {}),
-      ...(iso(row.modified_at) ? { modifiedAt: iso(row.modified_at) } : {}),
-      ...(text(details.format, 64) ? { format: text(details.format, 64) } : {}),
-      ...(text(details.family ?? showDetails.family, 64) ? { family: text(details.family ?? showDetails.family, 64) } : {}),
-      ...(families.length ? { families } : {}),
-      ...(text(details.parameter_size ?? showDetails.parameter_size, 64) ? { parameterSize: text(details.parameter_size ?? showDetails.parameter_size, 64) } : {}),
-      ...(text(details.quantization_level ?? showDetails.quantization_level, 64) ? { quantizationLevel: text(details.quantization_level ?? showDetails.quantization_level, 64) } : {}),
-      loaded: Boolean(loaded),
-      ...(positive(loaded?.size) != null ? { memoryBytes: loaded.size } : {}),
-      ...(positive(loaded?.size_vram) != null ? { vramBytes: loaded.size_vram } : {}),
-      ...(iso(loaded?.expires_at) ? { expiresAt: iso(loaded.expires_at) } : {}),
-      ...(context != null ? { contextWindow: context } : {}),
-      ...(licenseSummary(shown.license) ? { licenseSummary: licenseSummary(shown.license) } : {}),
-      ...(advertised.length ? { advertisedCapabilities: advertised } : {}),
-    };
-    const capabilities = {
-      ...(context != null ? { contextLimit: context } : {}),
-      ...(advertised.includes('tools') ? { toolcall: true } : {}),
-      ...(advertised.includes('thinking') ? { reasoning: true } : {}),
-      ...(advertised.includes('vision') ? { input: { text: true, image: true } } : {}),
-      ...(advertised.includes('embedding') ? { embedding: true } : {}),
-    };
-    const record = modelRecord({
-      host: 'ollama', provider: 'ollama', modelId, scopeId: source.scopeId, source,
-      displayName: modelId, digest, variant, capabilities,
-      pricing: { basis: 'local-compute', input: 0, output: 0, currency: 'USD', effectiveAt: null },
-      states: { discoverable: true },
-    });
-    for (const evidence of record.evidence) {
-      if (/^variant\.(?:loaded|memoryBytes|vramBytes|expiresAt|contextWindow)$/.test(evidence.field)) evidence.class = 'runtime';
-    }
-    models.push(record);
-  }
+  const { runtime, diagnostic: runtimeDiagnostic } = parseOllamaRuntime(psRaw);
+  const { models, diagnostics: rowDiagnostics } = ollamaModelsFromRows(rows, { runtime, showByModel, source });
+  const diagnostics = [...(runtimeDiagnostic ? [runtimeDiagnostic] : []), ...rowDiagnostics];
   if (rows.length > MAX_MODELS) diagnostics.push(diagnostic('models-truncated', `Ollama returned more than ${MAX_MODELS} models`));
   const complete = diagnostics.length === 0 && rows.length <= MAX_MODELS;
   source.complete = complete; source.status = complete ? 'complete' : 'partial';
