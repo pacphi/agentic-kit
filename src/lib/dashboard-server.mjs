@@ -47,7 +47,6 @@
 // startDashboard() NEVER detaches — the caller runs it foreground and calls
 // close() on SIGINT.
 import http from 'node:http';
-import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -61,7 +60,9 @@ import { loadKitConfig } from './config.mjs';
 import { resolveRoutes, routingSummary, divergedRoutes, retirementOf, ACTIVITIES } from './routing.mjs';
 import { renderPage } from './dashboard/page.mjs';
 import { requestRejection } from './dashboard/request-security.mjs';
-import { tokenMatches } from './admin-server.mjs';
+import {
+  readJsonSafe, mintToken, tokenMatches, sendJson, sendUnauthorized, sendNotFound, listenLoopback,
+} from './loopback-server.mjs';
 import { sseRoute } from './dashboard/sse.mjs';
 // readHealthRing itself was moved (not duplicated) into intel-history.mjs —
 // dashboard-server.mjs no longer defines it locally. It isn't called directly
@@ -101,10 +102,6 @@ const DASH_CSP = [
   "form-action 'none'",
   "frame-ancestors 'none'",
 ].join('; ');
-
-function readJsonSafe(file) {
-  try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return null; }
-}
 
 /** Default status provider: shell out to the installed CLI and parse its JSON.
  *  Resilient — a spawn/parse failure resolves to an honest empty payload rather
@@ -557,11 +554,6 @@ function windowToSinceMs(raw, now = Date.now()) {
   return now - days * 86_400_000;
 }
 
-function sendJson(res, status, payload) {
-  res.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store', 'x-content-type-options': 'nosniff' });
-  res.end(JSON.stringify(payload));
-}
-
 const PRIVATE_LIVE_FIELDS = new Set([
   'prompt', 'response', 'arguments', 'args', 'result', 'toolarguments',
   'toolresult', 'content', 'body', 'text', 'transcript',
@@ -941,7 +933,7 @@ export function startDashboard({
   // a strictly more sensitive payload than admin's GitHub/npm stats, which
   // already required one. EventSource cannot send headers, so its two routes
   // also accept the token as a query param (see client.mjs's dashSseUrl).
-  const token = crypto.randomBytes(32).toString('base64url');
+  const token = mintToken();
   const checkToken = (req, query) => tokenMatches(req.headers['x-dash-token'] || query.get('token'), token);
 
   const server = http.createServer(async (req, res) => {
@@ -972,8 +964,7 @@ export function startDashboard({
     // Every route below serves data — none of it is safe to hand to any
     // process that can merely reach this loopback port (Security Finding 1).
     if (url.startsWith('/api/') && !checkToken(req, query)) {
-      res.writeHead(401, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store', 'x-content-type-options': 'nosniff' });
-      res.end(JSON.stringify({ error: 'Wrong or missing dashboard token.' }));
+      sendUnauthorized(res, 'Wrong or missing dashboard token.');
       return;
     }
 
@@ -1530,40 +1521,29 @@ export function startDashboard({
       if (match) { await handler(req, res, query, match); return; }
     }
 
-    res.writeHead(404, { 'content-type': 'text/plain; charset=utf-8' });
-    res.end('not found');
+    sendNotFound(res);
   });
 
-  return new Promise((resolve, reject) => {
-    server.on('error', reject);
-    // Loopback ONLY — never expose the panel beyond this machine.
-    server.listen(port, '127.0.0.1', () => {
-      const addr = server.address();
-      const actual = addr && typeof addr === 'object' ? addr.port : port;
-      resolve({
-        url: `http://127.0.0.1:${actual}/`,
-        urlWithToken: `http://127.0.0.1:${actual}/#token=${token}`,
-        port: actual,
-        token,
-        close: async () => {
-          shuttingDown = true;
-          cancelLiveIdle();
-          for (const cleanup of [...liveClients]) cleanup(true);
-          for (const cleanup of [...transcriptClients]) cleanup(true);
-          for (const cleanup of [...intelClients]) cleanup(true);
-          await new Promise((res) => server.close(() => res(undefined)));
-          await stopLive({ force: true });
-          try { await (await transcriptServicePromise)?.close?.(); } catch {}
-          // Backstop: each intel client's own cleanup above already stops +
-          // deletes its pool entry the instant its last writer disconnects,
-          // so this is normally a no-op — but stop every REMAINING entry
-          // (e.g. one still mid-start with zero writers) rather than assume
-          // that cascade always wins the race, so every pool watcher is
-          // stopped on shutdown, not just one.
-          for (const entry of [...intelPool.values()]) { try { await entry.stop(); } catch {} }
-          intelPool.clear();
-        },
-      });
-    });
+  // Loopback ONLY — never expose the panel beyond this machine.
+  return listenLoopback(server, {
+    port, token,
+    close: async () => {
+      shuttingDown = true;
+      cancelLiveIdle();
+      for (const cleanup of [...liveClients]) cleanup(true);
+      for (const cleanup of [...transcriptClients]) cleanup(true);
+      for (const cleanup of [...intelClients]) cleanup(true);
+      await new Promise((res) => server.close(() => res(undefined)));
+      await stopLive({ force: true });
+      try { await (await transcriptServicePromise)?.close?.(); } catch {}
+      // Backstop: each intel client's own cleanup above already stops +
+      // deletes its pool entry the instant its last writer disconnects,
+      // so this is normally a no-op — but stop every REMAINING entry
+      // (e.g. one still mid-start with zero writers) rather than assume
+      // that cascade always wins the race, so every pool watcher is
+      // stopped on shutdown, not just one.
+      for (const entry of [...intelPool.values()]) { try { await entry.stop(); } catch {} }
+      intelPool.clear();
+    },
   });
 }
