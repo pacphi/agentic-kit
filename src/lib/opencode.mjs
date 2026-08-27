@@ -338,6 +338,133 @@ export function managedGatewayMcp(cfg, { configFile = paths.opencodeConfigPath()
     .map(([name]) => [name, structuredClone(managed.mcp[name].written)]));
 }
 
+/** Generic receipt-owned key→value map reconciler: prune-stale-owned →
+ *  collision-detect → adopt/own with {prior, written} records. This is the
+ *  ONE algorithm behind applyOpencode's mcp block and (behind the
+ *  family-atomicity wrapper below) its permission block — previously
+ *  hand-instantiated per surface (the audit's `reconcileOwnedMap` finding).
+ *  Mutates `obj` in place; returns the new {prior,written} ledger for every
+ *  key in `desiredEntries`.
+ *  @param {Record<string, any>} obj @param {[string, any][]} desiredEntries
+ *  @param {Record<string, {prior:any, written:any}>} prevRecords
+ *  @param {{ collisions: string[], pruned: string[], pruneLabel: (key:string) => string, collisionLabel: (key:string) => string }} opts */
+function reconcileOwnedMap(obj, desiredEntries, prevRecords, { collisions, pruned, pruneLabel, collisionLabel }) {
+  const desiredKeys = new Set(desiredEntries.map(([key]) => key));
+  for (const [key, rec] of Object.entries(prevRecords)) {
+    if (desiredKeys.has(key) || !(key in obj)) continue;
+    if (rec.written && deepEqual(obj[key], rec.written)) {
+      // RESTORE the prior when there was one (a user entry that happened to
+      // equal the old desired value is a user value, not ak's to delete);
+      // delete only what ak itself created (codex-review r2).
+      if (rec.prior != null) { obj[key] = rec.prior; pruned.push(`${pruneLabel(key)} (prior restored)`); }
+      else { delete obj[key]; pruned.push(pruneLabel(key)); }
+    } // else: user edited (or legacy record) → leave it, keep no ownership
+  }
+  const managed = {};
+  for (const [key, want] of desiredEntries) {
+    const cur = obj[key];
+    const priorRec = prevRecords[key];
+    if (cur !== undefined && !deepEqual(cur, want) && !(priorRec?.written && deepEqual(cur, priorRec.written))) {
+      collisions.push(collisionLabel(key));
+      managed[key] = { prior: cur, written: null }; // tracked but NOT ak-owned
+      continue;
+    }
+    // A previously-colliding (never ak-authored) value the USER has since
+    // aligned to the desired one stays unmanaged: adopting it with the stale
+    // pre-collision prior would make undo overwrite the user's own later
+    // choice (codex-review r2). Noted, not owned.
+    if (priorRec && priorRec.written == null && cur !== undefined && deepEqual(cur, want)) {
+      managed[key] = { prior: priorRec.prior, written: null };
+      continue;
+    }
+    // prior is the ORIGINAL pre-ak value (kept across reapplies), never the
+    // ak-written value currently in place.
+    managed[key] = { prior: priorRec ? priorRec.prior : (cur ?? null), written: want };
+    obj[key] = want;
+  }
+  return managed;
+}
+
+/** Family-atomicity wrapper for permissions: a family's members (both
+ *  claude-flow_* and claude_flow_* spellings) must ALL be free of collision
+ *  before ANY of them join this run's desired permission set — a
+ *  same-name MCP collision must never let AK add broad `allow` on the
+ *  sibling spelling. A blocked family's present members are recorded
+ *  {prior, written:null} (never applied via reconcileOwnedMap) and reported
+ *  as a collision when their value isn't already the desired 'allow'.
+ *  @param {Record<string, any>} ownedEntries @param {Record<string, any>} current
+ *  @param {Record<string, {prior:any, written:any}>} prevRecords
+ *  @param {{ collisions: string[] }} opts
+ *  @returns {{ desiredKeys: string[], managed: Record<string, {prior:any, written:any}> }} */
+function reconcileFamilyPermissions(ownedEntries, current, prevRecords, { collisions }) {
+  const desiredKeys = [];
+  const managed = {};
+  for (const keys of permissionFamiliesFor(ownedEntries)) {
+    const blocked = keys.some((key) => {
+      const cur = current[key];
+      const priorRec = prevRecords[key];
+      const conflicts = cur !== undefined && cur !== 'allow'
+        && !(priorRec?.written && deepEqual(cur, priorRec.written));
+      const previouslyUnowned = cur !== undefined && priorRec && priorRec.written == null;
+      return conflicts || previouslyUnowned;
+    });
+    if (!blocked) {
+      desiredKeys.push(...keys);
+      continue;
+    }
+    for (const key of keys) {
+      const cur = current[key];
+      const priorRec = prevRecords[key];
+      if (cur !== undefined && cur !== 'allow'
+          && !(priorRec?.written && deepEqual(cur, priorRec.written))) {
+        collisions.push(`permission.${key}`);
+      }
+      if (cur !== undefined) {
+        managed[key] = { prior: priorRec ? priorRec.prior : cur, written: null };
+      }
+    }
+  }
+  return { desiredKeys, managed };
+}
+
+/** Reconcile ak's desired skills.paths membership: prune previously-ak-added
+ *  paths that fell out of the desired set, then add newly desired paths not
+ *  already present. No collision concept applies — path membership isn't
+ *  exclusively owned the way a single mcp/permission value is.
+ *  @param {any} next @param {string[]} skillPaths
+ *  @param {{paths:string[]}} prevManaged @param {string[]} pruned
+ *  @returns {string[]} the new managed paths list */
+function reconcileSkillPaths(next, skillPaths, prevManaged, pruned) {
+  if (next.skills?.paths && prevManaged.paths.length) {
+    const stale = new Set(prevManaged.paths.filter((p) => !skillPaths.includes(p)));
+    next.skills.paths = next.skills.paths.filter((p) => !stale.has(p));
+    if (stale.size) pruned.push(`${stale.size} stale skills path(s)`);
+  }
+  if (!skillPaths.length) return [];
+  next.skills = { ...(next.skills ?? {}) };
+  const cur = new Set(next.skills.paths ?? []);
+  const newlyAdded = skillPaths.filter((p) => !cur.has(p));
+  // ownership = previously-recorded ak paths that are still desired + newly
+  // added ones (a re-apply must not erase the record of what ak added).
+  const managedPaths = [...new Set([...prevManaged.paths.filter((p) => skillPaths.includes(p)), ...newlyAdded])];
+  next.skills.paths = [...cur, ...newlyAdded];
+  return managedPaths;
+}
+
+/** Build applyOpencode's human-readable result summary from its accumulated
+ *  notes (wired/in-sync headline, pruned keys, preserved collisions). */
+function applyOpencodeSummary({ changed, entries, skillPaths, permissionKeys, source, pruned, collisions }) {
+  const aqe = entries['agentic-qe'] ? ' + agentic-qe' : '';
+  const brain = entries['ruvnet-brain'] ? ' + ruvnet-brain' : ' (brain shim absent)';
+  const notes = [
+    changed ? `opencode.json wired: claude-flow (${entries['claude-flow'].command.join(' ')})${aqe}${brain}, ${skillPaths.length} skills path(s), ${permissionKeys.length} permission pattern(s)`
+      : `opencode.json in sync${source ? '' : ' — ⚠ no ruflo catalog source found for skills.paths'}`,
+  ];
+  if (pruned.length) notes.push(`pruned: ${pruned.join(', ')}`);
+  if (collisions.length) notes.push(`⚠ collisions preserved (user-owned, untouched): ${collisions.join(', ')}`);
+  return notes.join(' — ');
+}
+
 /** Reconcile opencode.json: ak's MCP servers, skills.paths, and permission
  *  patterns merged into whatever is already there. The ownership contract is
  *  VALUE-PRECISE, not name-precise:
@@ -382,61 +509,21 @@ export async function applyOpencode(cfg, { dryRun = false, configFile = paths.op
 
   // ── mcp: prune stale ak entries, then merge desired with collision refusal ──
   next.mcp = { ...(next.mcp ?? {}) };
-  for (const [name, rec] of Object.entries(prevManaged.mcp)) {
-    if (name in entries) continue;
-    if (!(name in next.mcp)) continue;
-    if (rec.written && deepEqual(next.mcp[name], rec.written)) {
-      // RESTORE the prior when there was one (a user entry that happened to
-      // equal the old desired value is a user value, not ak's to delete);
-      // delete only what ak itself created (codex-review r2).
-      if (rec.prior != null) { next.mcp[name] = rec.prior; pruned.push(`${name} (prior restored)`); }
-      else { delete next.mcp[name]; pruned.push(name); }
-    } // else: user edited (or legacy record) → leave it, keep no ownership
-  }
   const managed = {
-    mcp: {}, paths: [], permissions: {}, permissionScalar: null,
+    mcp: reconcileOwnedMap(next.mcp, Object.entries(entries), prevManaged.mcp, {
+      collisions, pruned,
+      pruneLabel: (name) => name,
+      collisionLabel: (name) => `mcp.${name}`,
+    }),
+    paths: [], permissions: {}, permissionScalar: null,
     artifacts: (prevManaged.artifactState.containerMalformed
       || prevManaged.artifactState.agentsMalformed)
       ? structuredClone(prevManaged.artifactState.rawContainer)
       : structuredClone(prevManaged.artifacts),
   };
-  for (const [name, want] of Object.entries(entries)) {
-    const cur = next.mcp[name];
-    const priorRec = prevManaged.mcp[name];
-    if (cur !== undefined && !deepEqual(cur, want) && !(priorRec?.written && deepEqual(cur, priorRec.written))) {
-      collisions.push(`mcp.${name}`);
-      managed.mcp[name] = { prior: cur, written: null }; // tracked but NOT ak-owned
-      continue;
-    }
-    // A previously-colliding (never ak-authored) value the USER has since
-    // aligned to the desired one stays unmanaged: adopting it with the stale
-    // pre-collision prior would make undo overwrite the user's own later
-    // choice (codex-review r2). Noted, not owned.
-    if (priorRec && priorRec.written == null && cur !== undefined && deepEqual(cur, want)) {
-      managed.mcp[name] = { prior: priorRec.prior, written: null };
-      continue;
-    }
-    // prior is the ORIGINAL pre-ak value (kept across reapplies), never the
-    // ak-written value currently in place.
-    managed.mcp[name] = { prior: priorRec ? priorRec.prior : (cur ?? null), written: want };
-    next.mcp[name] = want;
-  }
 
   // ── skills.paths: remove stale ak-added paths, add desired ──
-  if (next.skills?.paths && prevManaged.paths.length) {
-    const stale = new Set(prevManaged.paths.filter((p) => !skillPaths.includes(p)));
-    next.skills.paths = next.skills.paths.filter((p) => !stale.has(p));
-    if (stale.size) pruned.push(`${stale.size} stale skills path(s)`);
-  }
-  if (skillPaths.length) {
-    next.skills = { ...(next.skills ?? {}) };
-    const cur = new Set(next.skills.paths ?? []);
-    const newlyAdded = skillPaths.filter((p) => !cur.has(p));
-    // ownership = previously-recorded ak paths that are still desired + newly
-    // added ones (a re-apply must not erase the record of what ak added).
-    managed.paths = [...new Set([...prevManaged.paths.filter((p) => skillPaths.includes(p)), ...newlyAdded])];
-    next.skills.paths = [...cur, ...newlyAdded];
-  }
+  managed.paths = reconcileSkillPaths(next, skillPaths, prevManaged, pruned);
 
   // ── permission: lift scalar shorthand, prune stale, merge desired ──
   // Record scalar ORIGIN explicitly (codex-review r2): undo restores the
@@ -454,54 +541,17 @@ export async function applyOpencode(cfg, { dryRun = false, configFile = paths.op
   const ownedEntries = Object.fromEntries(Object.entries(entries).filter(
     ([name]) => managed.mcp[name]?.written != null,
   ));
-  const permissionKeys = [];
-  for (const keys of permissionFamiliesFor(ownedEntries)) {
-    const blocked = keys.some((key) => {
-      const cur = next.permission[key];
-      const priorRec = prevManaged.permissions[key];
-      const conflicts = cur !== undefined && cur !== 'allow'
-        && !(priorRec?.written && deepEqual(cur, priorRec.written));
-      const previouslyUnowned = cur !== undefined && priorRec && priorRec.written == null;
-      return conflicts || previouslyUnowned;
-    });
-    if (!blocked) {
-      permissionKeys.push(...keys);
-      continue;
-    }
-    for (const key of keys) {
-      const cur = next.permission[key];
-      const priorRec = prevManaged.permissions[key];
-      if (cur !== undefined && cur !== 'allow'
-          && !(priorRec?.written && deepEqual(cur, priorRec.written))) {
-        collisions.push(`permission.${key}`);
-      }
-      if (cur !== undefined) {
-        managed.permissions[key] = {
-          prior: priorRec ? priorRec.prior : cur,
-          written: null,
-        };
-      }
-    }
-  }
-  for (const [k, rec] of Object.entries(prevManaged.permissions)) {
-    if (permissionKeys.includes(k)) continue;
-    if (!(k in next.permission)) continue;
-    if (rec.written && deepEqual(next.permission[k], rec.written)) {
-      if (rec.prior != null) {
-        next.permission[k] = rec.prior;
-        pruned.push(`permission.${k} (prior restored)`);
-      } else {
-        delete next.permission[k];
-        pruned.push(`permission.${k}`);
-      }
-    }
-  }
-  for (const k of permissionKeys) {
-    const cur = next.permission[k];
-    const priorRec = prevManaged.permissions[k];
-    managed.permissions[k] = { prior: priorRec ? priorRec.prior : (cur ?? null), written: 'allow' };
-    next.permission[k] = 'allow';
-  }
+  const { desiredKeys: permissionKeys, managed: blockedPermissions } =
+    reconcileFamilyPermissions(ownedEntries, next.permission, prevManaged.permissions, { collisions });
+  Object.assign(managed.permissions, blockedPermissions);
+  Object.assign(managed.permissions, reconcileOwnedMap(
+    next.permission, permissionKeys.map((k) => [k, 'allow']), prevManaged.permissions,
+    {
+      collisions, pruned,
+      pruneLabel: (k) => `permission.${k}`,
+      collisionLabel: (k) => `permission.${k}`,
+    },
+  ));
 
   const changed = JSON.stringify(next) !== JSON.stringify(doc);
   if (!dryRun) {
@@ -510,20 +560,12 @@ export async function applyOpencode(cfg, { dryRun = false, configFile = paths.op
     ownership.managed = managed;
   }
   if (changed && !dryRun) writeJsonWithBackup(configFile, next);
-  const aqe = entries['agentic-qe'] ? ' + agentic-qe' : '';
-  const brain = entries['ruvnet-brain'] ? ' + ruvnet-brain' : ' (brain shim absent)';
-  const notes = [
-    changed ? `opencode.json wired: claude-flow (${entries['claude-flow'].command.join(' ')})${aqe}${brain}, ${skillPaths.length} skills path(s), ${permissionKeys.length} permission pattern(s)`
-      : `opencode.json in sync${source ? '' : ' — ⚠ no ruflo catalog source found for skills.paths'}`,
-  ];
-  if (pruned.length) notes.push(`pruned: ${pruned.join(', ')}`);
-  if (collisions.length) notes.push(`⚠ collisions preserved (user-owned, untouched): ${collisions.join(', ')}`);
   return {
     ok: collisions.length === 0,
     fatal: false,
     changed,
     collisions,
-    detail: notes.join(' — '),
+    detail: applyOpencodeSummary({ changed, entries, skillPaths, permissionKeys, source, pruned, collisions }),
   };
 }
 
