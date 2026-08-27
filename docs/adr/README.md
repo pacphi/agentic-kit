@@ -44,6 +44,7 @@ Consequences**, and cites the grounded source it rests on where relevant.
 | [0034](0034-schema-native-handoffs-and-hermetic-seats.md) | Schema-native worker handoffs and hermetic qe-court seats | Implemented |
 | [0035](0035-managed-deja-vu-companion.md) | Manage deja-vu as an opt-in session-history companion | Accepted; implementation tracked by issue #114 |
 | [0036](0036-dashboard-client-modularization-and-shared-loopback-server.md) | Dashboard client modularization and shared loopback server | Implemented |
+| [0037](0037-complexity-program-structural-patterns.md) | Complexity program: structural patterns and gates | Implemented |
 
 Theme: ADRs **0001–0006** define **dual-host LLM routing and leadership** — how `ak` lets ruflo route
 each development activity (architecture, implementation, testing, review, …) to the right host (Claude
@@ -264,3 +265,13 @@ from the former. `dashboard/client.mjs`'s 4,044-line inline-script string and
 `dashboard/styles.mjs`'s 1,309-line inline stylesheet are rebuilt as small collectors over real,
 individually lintable modules, generalizing the readFileSync-concat pattern ADR-0007's admin page
 already used. The served page, its routes, and its CSP are unchanged.
+
+**0037** is the program-level record of the same 2026-08 complexity audit: five file-disjoint
+refactor tracks that removed every function over CC 100 and fixed the five behavioral
+divergences duplication had caused. Its durable content is the set of sanctioned structures —
+the `ak status` section registry pinned by a golden snapshot, `convergeProviderStack()` as the
+one provider pipeline with ordered surface reconcilers, writer-owned drift comparators with a
+status/writer parity test (closing the issue #129 class), the `telemetry-records.mjs` decode
+layer shared by batch and live telemetry, statusline segment providers, and the complexity
+lint warnings (25/5/1000 over `src`+`bin`) that ratchet to errors as areas come clean — plus
+the honestly-stated residual backlog it did not take on.
