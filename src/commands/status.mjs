@@ -9,10 +9,6 @@ import * as paths from '../lib/paths.mjs';
 import { nativesStatus, rufloRuntimeNatives, dbPathPinStatus, aidefencePresent, securityPresent } from '../lib/natives.mjs';
 import { scanNpxStale } from '../lib/npx.mjs';
 import { registrationStatus, codexMcpStatus, codexMcpTopology, rufloCodexMcpStatus, ruvectorRegistered } from '../lib/mcp.mjs';
-import {
-  opencodeMcpStatus, catalogSource, createOpencodeLifecycleAdapter,
-  opencodeArtifactReceiptState,
-} from '../lib/opencode.mjs';
 import { listDaemons, staleDaemons } from '../lib/daemons.mjs';
 import { scanRvf } from '../lib/rvf.mjs';
 import { registry, syncBlocks, blocksForTarget, retiredForTarget, guidanceTargets } from '../lib/blocks.mjs';
@@ -24,7 +20,6 @@ import { coherence as adbCoherence } from '../lib/agentdb.mjs';
 import { readJson } from '../lib/settings.mjs';
 import { have } from '../lib/exec.mjs';
 import { HOSTS, settingsTarget, isDefault, managedEnv, MANAGED_ENV_KEYS, hostInstallState, hostAuthState, bothHostsEnabled, aqeRouterFile, aqeSupportsAgentOverrides, aqeExternalProviderState, credentialGaps, collectIntegrationFacts, MIN_RUFLO_PERSISTED_PROVIDER_VERSION, EXTERNAL_PROVIDERS_MIN_AQE } from '../lib/providers.mjs';
-import { hostsWithLifecycle, isBuiltinHost, lifecycleExecutionEnabled } from '../lib/adapters/lifecycle-registry.mjs';
 import { companionLifecycleFor } from '../lib/adapters/companion-lifecycle-registry.mjs';
 import { PROVIDER_REGISTRY } from '../lib/adapters/index.mjs';
 import { configuredPolicyToAgentOverrides, agentOverridesDrift, routingSummary, divergedRoutes } from '../lib/routing.mjs';
@@ -35,6 +30,10 @@ import { inspectCodexPlugins } from '../lib/codex-plugins.mjs';
 import { projectMemoryStatus } from '../lib/project-memory.mjs';
 import { removedAgentGaps, upstreamFixAvailable } from '../lib/scaffold.mjs';
 import { latestSnapshot, readModelStore, summarizeModelHealth } from '../lib/model-inventory/index.mjs';
+import { row } from './status/row.mjs';
+import { renderHostDetailRows, admittedLifecycleFallbackRows } from './status/host-detail.mjs';
+
+export { renderHostDetailRows };
 
 export const options = {
   json: { type: 'boolean', default: false },
@@ -59,7 +58,6 @@ Examples:
   ak status --deep    thorough check
   ak status --json    machine-readable rows`;
 
-const row = (subsystem, level, message, fix = null) => ({ subsystem, level, message, fix });
 const DEJA_HOSTS = Object.freeze(['claude', 'codex', 'opencode']);
 const SAFE_VERSION = /^v?\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/;
 
@@ -218,189 +216,6 @@ export async function collectDejaVuRows(options = {}) {
   } catch {
     return [row('deja-vu', 'warn', 'deja-vu status unavailable')];
   }
-}
-
-// Per-host status DETAIL rows — beyond the generic install/auth rows the
-// `hosts` loop in collect() already renders from facts for every host alike.
-// A detail renderer owns everything specific to how ONE host proves itself
-// wired (config files, lifecycle bridges, converted artifacts, …); the
-// opencode-specific PROBES/MESSAGES live in the renderer below and in
-// lib/opencode.mjs, never in the dispatch loop itself. Adding a fourth host
-// means adding (or not adding) a table entry here — the loop that walks this
-// table never changes.
-// The loop also passes `hostId`; this renderer doesn't need it (it IS the
-// opencode renderer) but the signature admits it so the dispatch call site
-// typechecks for every renderer uniformly.
-async function opencodeDetailRows({ cfg, pkgRoot, facts, hostId: _hostId = 'opencode' } = /** @type {any} */ ({})) {
-  const rows = [];
-  try {
-    if (!facts.hosts?.opencode?.present) {
-      rows.push(row('opencode', 'warn', 'enabled but opencode CLI not installed', 'sync installs opencode-ai (hosts step)'));
-    } else {
-      const source = catalogSource({ override: cfg.integrations?.ownership?.opencode?.catalogDir });
-      const st = opencodeMcpStatus(cfg);
-      const lifecycle = await createOpencodeLifecycleAdapter({ pkgRoot }).detect({ cfg });
-      const conv = st.parseError ? null : lifecycle.convergence;
-      if (st.parseError) {
-        rows.push(row('opencode', 'warn',
-          'opencode.json is not plain JSON (JSONC comments?) — ak refuses to touch it',
-          'merge the ak wiring manually'));
-      } else if (!st.exists || !st.claudeFlow) {
-        rows.push(row('opencode', 'warn',
-          `opencode.json wiring incomplete (${[!st.exists ? 'no config file' : null, !st.claudeFlow ? 'claude-flow MCP missing' : null].filter(Boolean).join(', ')})`,
-          'sync writes the opencode wiring'));
-      } else if (!conv?.converged) {
-        rows.push(row('opencode', 'warn',
-          `opencode.json wiring drifted (${(conv?.reasons ?? []).slice(0, 3).join('; ')}${(conv?.reasons?.length ?? 0) > 3 ? '…' : ''})`,
-          'sync re-applies the opencode wiring'));
-      } else {
-        rows.push(row('opencode', 'ok',
-          `opencode.json converged (claude-flow${st.aqe ? ' + agentic-qe' : ''}${st.brain ? ' + ruvnet-brain' : ''} MCP, ${st.paths?.length ?? 0} skills path(s))${st.owned ? '' : ' — pre-existing (not ak-managed)'}`));
-      }
-      const receiptState = opencodeArtifactReceiptState(cfg.integrations?.ownership?.opencode?.managed);
-      if (receiptState.adoptionBlocked) {
-        rows.push(row('opencode', 'warn',
-          'artifact receipt ledger is malformed — ownership adoption blocked; artifacts left untouched',
-          'repair integrations.ownership.opencode.managed.artifacts in kit.json or restore it from backup'));
-      }
-      const plug = lifecycle.plugin;
-      if (!receiptState.adoptionBlocked && plug.adoptable) {
-        rows.push(row('opencode', 'warn',
-          'lifecycle plugin is exact and marker-bearing but lacks an ownership receipt',
-          'sync adopts it into the receipt ledger without rewriting it'));
-      } else if (!receiptState.adoptionBlocked && plug.foreign) {
-        rows.push(row('opencode', 'info', 'lifecycle plugin slot occupied by a user-owned ruflo-hooks.js — ak leaves it alone'));
-      } else if (!receiptState.adoptionBlocked && !plug.present) {
-        rows.push(row('opencode', 'warn', 'lifecycle plugin (ruflo-hooks.js) not deployed', 'sync deploys it'));
-      } else if (!receiptState.adoptionBlocked && !plug.current) {
-        rows.push(row('opencode', 'warn', 'lifecycle plugin out of date', 'sync rewrites it'));
-      }
-      const gateway = lifecycle.gateway;
-      if (!receiptState.adoptionBlocked && gateway.adoptable) {
-        rows.push(row('opencode', 'warn',
-          'lazy rUv gateway is exact and marker-bearing but lacks an ownership receipt',
-          'sync adopts it into the receipt ledger without rewriting it'));
-      } else if (!receiptState.adoptionBlocked && gateway.foreign) {
-        rows.push(row('opencode', 'info',
-          'lazy rUv gateway slot is user-owned — direct MCP exposure is preserved'));
-      } else if (!receiptState.adoptionBlocked && gateway.required && !gateway.present) {
-        rows.push(row('opencode', 'warn', 'lazy rUv gateway not deployed', 'sync deploys it'));
-      } else if (!receiptState.adoptionBlocked && gateway.required && !gateway.current) {
-        rows.push(row('opencode', 'warn', 'lazy rUv gateway out of date', 'sync rewrites it'));
-      } else if (!receiptState.adoptionBlocked && !gateway.required && gateway.present) {
-        rows.push(row('opencode', 'warn', 'lazy rUv gateway is no longer required', 'sync retires it'));
-      } else if (!receiptState.adoptionBlocked && gateway.required && gateway.current) {
-        rows.push(row('opencode', 'ok',
-          'Ruflo and Agentic QE connected; compact ak_* gateway projection active'));
-      }
-      const ag = lifecycle.agents;
-      const lazyAgents = gateway.required && gateway.current && ag.count === 1;
-      if (!receiptState.adoptionBlocked && ag.adoptable) {
-        rows.push(row('opencode', 'warn',
-          `${ag.count} exact marker-bearing agent projection or stamp lacks ownership receipts`,
-          'sync adopts them into the receipt ledger without rewriting them'));
-      } else if (!receiptState.adoptionBlocked && ag.count === 0 && !source) {
-        rows.push(row('opencode', 'warn', 'no ruflo catalog source (marketplace clone or @claude-flow/cli)', 'install ruflo (or claude marketplace) for the agent catalog'));
-      } else if (!receiptState.adoptionBlocked && ag.count === 0) {
-        rows.push(row('opencode', 'warn', 'no Agentic Kit specialist projection', 'sync deploys the specialist dispatcher'));
-      } else if (!receiptState.adoptionBlocked && ag.modified) {
-        rows.push(row('opencode', 'info',
-          `${ag.count} agent projection files include user edits — ak leaves those files alone`));
-      } else if (!receiptState.adoptionBlocked && ag.stale) {
-        rows.push(row('opencode', 'warn',
-          `${ag.count} agent projection files from ${ag.stampedId ?? 'unknown source'}, current source is ${ag.currentId ?? 'none'}`,
-          'sync refreshes the agent projection'));
-      } else if (!receiptState.adoptionBlocked) {
-        rows.push(row('opencode', 'ok', lazyAgents
-          ? `lazy specialist dispatcher current (${ag.currentId})`
-          : `${ag.count} converted agents (${ag.currentId})`));
-      }
-      const sk = lifecycle.skill;
-      if (!receiptState.adoptionBlocked && sk.adoptable) {
-        rows.push(row('opencode', 'warn',
-          'platform skill is exact and marker-bearing but lacks an ownership receipt',
-          'sync adopts it into the receipt ledger without rewriting it'));
-      } else if (!receiptState.adoptionBlocked && sk.foreign) {
-        rows.push(row('opencode', 'info', 'skills/ruflo/SKILL.md is user-owned — ak leaves it alone'));
-      } else if (!receiptState.adoptionBlocked && source?.hasPlatformSkill && !sk.present) {
-        rows.push(row('opencode', 'warn', 'platform skill (skills/ruflo/SKILL.md) not deployed', 'sync deploys it'));
-      } else if (!receiptState.adoptionBlocked && source?.hasPlatformSkill && !sk.current) {
-        rows.push(row('opencode', 'warn', 'platform skill out of date', 'sync re-deploys it'));
-      }
-    }
-  } catch (e) {
-    rows.push(row('opencode', 'warn', `opencode check unavailable: ${e.message}`));
-  }
-  return rows;
-}
-
-// Dispatch table: host id → detail renderer. CONTRACT: a renderer must catch
-// its own errors and degrade to a warn row — the dispatch loop deliberately
-// has no catch, so an uncaught throw would take down ALL of collect(), not
-// just this host. A host absent from this table
-// gets no detail rows here (its install/auth state still comes from the
-// `hosts` loop, which is already host-neutral). This is the ONLY place a new
-// host's status detail wiring gets registered.
-const HOST_DETAIL_RENDERERS = { opencode: opencodeDetailRows };
-
-/** Host-neutral dispatch loop: walks `renderers` (defaults to the table
- *  above) and, for each host enabled in cfg, calls its renderer with the
- *  shared facts snapshot. Exported (not just used internally) so a test can
- *  prove a synthetic host renders through this exact loop — with no host-id
- *  branching anywhere in the loop body — by injecting its own renderers map
- *  instead of reaching into module internals. */
-export async function renderHostDetailRows({ cfg, pkgRoot, facts, renderers = HOST_DETAIL_RENDERERS }) {
-  const rows = [];
-  for (const [hostId, renderer] of Object.entries(renderers)) {
-    if (!cfg.integrations?.hosts?.[hostId]) continue;
-    rows.push(...(await renderer({ cfg, pkgRoot, facts, hostId })));
-  }
-  return rows;
-}
-
-/** Sync reachability gap (ADR-0031 P3 known limitation): setup.mjs and
- *  uninstall.mjs's admitted-host lifecycle loops (ADR-0031 P3) already iterate
- *  hostsWithLifecycle() and run for real; sync.mjs's twin loop is gated on
- *  BOTH lifecycleExecutionEnabled(hostId, cfg) AND `subsystems.has(hostId)`,
- *  where subsystems is `new Set(plan.map(p => p.subsystem))` derived straight
- *  from THIS collector's rows (sync.mjs). An admitted host with no
- *  HOST_DETAIL_RENDERERS entry (only opencode has one) produced no row at
- *  all, so its subsystem could never appear in the plan and sync's branch was
- *  unreachable for a real admitted host — even fully enabled, flag on, CLI
- *  present. This closes that gap: any admitted (never built-in) lifecycle
- *  host that lifecycleExecutionEnabled() actually gates IN for this run gets
- *  exactly one subsystem-tagged row, `subsystem === hostId` — deliberately
- *  the same identity opencode's own renderer uses (subsystem 'opencode' ===
- *  HOST_DETAIL_RENDERERS key 'opencode'), so sync's `subsystems.has(hostId)`
- *  finds it.
- *
- *  Deliberately lean, not a per-surface renderer like opencodeDetailRows: an
- *  arbitrary admitted host's only introspection surface is its own declared
- *  detect/verify hooks (a subprocess spawn), which this read-only, cheap
- *  collector does not invoke — so the row cannot report real drift and always
- *  carries a `fix` while the gate holds. Convergence is left to the adapter's
- *  own apply, which lifecycle.mjs's contract requires to be idempotent.
- *  Excludes built-in hosts (opencode already has a bespoke renderer above;
- *  a future built-in lifecycle host with no renderer is a gap for its own
- *  renderer to close, not this fallback) and any host already present in
- *  `renderers` (never double-reports one host under two mechanisms). Isolated
- *  per host, mirroring the per-renderer try/catch contract above — one
- *  admitted host's failure must not take down collect() or any other host's
- *  row. */
-function admittedLifecycleFallbackRows(cfg, renderers = HOST_DETAIL_RENDERERS) {
-  const rows = [];
-  for (const hostId of hostsWithLifecycle()) {
-    if (isBuiltinHost(hostId) || hostId in renderers) continue;
-    try {
-      if (!lifecycleExecutionEnabled(hostId, cfg)) continue;
-      rows.push(row(hostId, 'warn',
-        `${hostId}: external lifecycle host, enabled — sync will converge its hooks`,
-        `sync applies the ${hostId} lifecycle adapter`));
-    } catch (e) {
-      rows.push(row(hostId, 'warn', `${hostId} lifecycle status unavailable: ${e.message}`));
-    }
-  }
-  return rows;
 }
 
 export async function collect({
