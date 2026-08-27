@@ -76,48 +76,50 @@ export function findEntry(cfg, name) {
   return (Array.isArray(cfg?.hostAdapters) ? cfg.hostAdapters : []).find((e) => e?.name === name) ?? null;
 }
 
-/** Read + validate + hash one adapter entry. Never throws — reports
- * {ok:false, reason, detail} on any failure, the same per-entry isolation
- * posture admission.mjs's admitOne holds. `reader` may return either the
- * sources.mjs `{raw, origin}` shape or a bare raw document (tests are free
- * to stub either). */
-export async function loadAndHash(entry, { reader }) {
-  let raw;
-  // Fail-closed, not fail-open: a bare-raw reader result (no {raw,origin}
-  // wrapper — including one whose `origin` is missing/malformed) is
-  // 'unknown', never assumed to be 'file'. Defaulting to 'file' would let
-  // --yes silently skip the --expect-hash pin (finding 8) for a source that
-  // was never actually proven local; only an explicit origin:'file' counts.
-  let origin = 'unknown';
+/** Resolve one entry's raw manifest document. Fail-closed, not fail-open: a
+ * bare-raw reader result (no {raw,origin} wrapper — including one whose
+ * `origin` is missing/malformed) is 'unknown', never assumed to be 'file'.
+ * Defaulting to 'file' would let --yes silently skip the --expect-hash pin
+ * (finding 8) for a source that was never actually proven local; only an
+ * explicit origin:'file' counts. */
+async function resolveManifestRaw(entry, reader) {
   try {
     const resolved = await reader(entry.source);
     if (resolved && typeof resolved === 'object' && 'raw' in resolved) {
-      raw = resolved.raw;
-      origin = typeof resolved.origin === 'string' && resolved.origin ? resolved.origin : 'unknown';
-    } else {
-      raw = resolved;
+      const origin = typeof resolved.origin === 'string' && resolved.origin ? resolved.origin : 'unknown';
+      return { ok: true, raw: resolved.raw, origin };
     }
+    return { ok: true, raw: resolved, origin: 'unknown' };
   } catch (error) {
     return { ok: false, reason: error?.reason ?? 'manifest-unreadable', detail: error?.message ?? String(error) };
   }
+}
 
-  // Same distinct failure admitOne draws: cfg's pinned contract disagreeing
-  // with the manifest's self-declared one means the file changed underneath
-  // the operator, not merely "unsupported version".
+/** Same distinct failure admitOne draws: cfg's pinned contract disagreeing
+ * with the manifest's self-declared one means the file changed underneath
+ * the operator, not merely "unsupported version". */
+function checkManifestContractMatch(entry, raw) {
   if (entry.contract !== undefined && raw?.contract !== undefined && entry.contract !== raw.contract) {
     return {
       ok: false, reason: 'contract-mismatch',
       detail: `cfg declares contract ${entry.contract}, manifest declares ${raw.contract}`,
     };
   }
+  return { ok: true };
+}
 
+/** Validate shape + contract version + name match + built-in shadowing.
+ * Same check order admitOne applies before ever computing a hash: a manifest
+ * whose host id collides with a built-in can never actually be admitted, so
+ * trusting it would record a standing consent for content admission that
+ * will always refuse — misleading UX for nothing gained. */
+function validateManifestShape(entry, raw) {
   let manifest;
   try {
     manifest = validateAdapterManifest(raw);
   } catch (error) {
     return { ok: false, reason: error?.reason ?? 'manifest-invalid', detail: error?.message ?? String(error) };
   }
-
   if (manifest.contract !== SUPPORTED_CONTRACT) {
     return { ok: false, reason: 'contract-version', detail: `unsupported contract ${manifest.contract}` };
   }
@@ -127,13 +129,28 @@ export async function loadAndHash(entry, { reader }) {
       detail: `cfg entry '${entry.name}' does not match manifest host id '${manifest.host.id}'`,
     };
   }
-  // Same check admitOne applies before ever computing a hash: a manifest
-  // whose host id collides with a built-in can never actually be admitted,
-  // so trusting it would record a standing consent for content admission
-  // will always refuse — misleading UX for nothing gained.
   if (HOST_REGISTRY.some((host) => host.id === manifest.host.id)) {
     return { ok: false, reason: 'builtin-shadow', detail: `'${manifest.host.id}' is a built-in host id` };
   }
+  return { ok: true, manifest };
+}
+
+/** Read + validate + hash one adapter entry. Never throws — reports
+ * {ok:false, reason, detail} on any failure, the same per-entry isolation
+ * posture admission.mjs's admitOne holds. `reader` may return either the
+ * sources.mjs `{raw, origin}` shape or a bare raw document (tests are free
+ * to stub either). */
+export async function loadAndHash(entry, { reader }) {
+  const resolved = await resolveManifestRaw(entry, reader);
+  if (!resolved.ok) return resolved;
+  const { raw, origin } = resolved;
+
+  const contractMatch = checkManifestContractMatch(entry, raw);
+  if (!contractMatch.ok) return contractMatch;
+
+  const validated = validateManifestShape(entry, raw);
+  if (!validated.ok) return validated;
+  const { manifest } = validated;
 
   let integrity;
   try {
@@ -415,6 +432,50 @@ async function conformance({
   return anyFailed ? 1 : 0;
 }
 
+// Revocation is fail-safe and stays reachable regardless of the experimental
+// flag: an operator who turns the flag OFF must still be able to withdraw a
+// standing consent or grant record, or it silently reactivates the next time
+// the flag is turned back on.
+const FAIL_SAFE_HANDLERS = {
+  revoke: (ctx) => revoke({ name: ctx.name, consent: ctx.consent }),
+  'revoke-grant': (ctx) => revokeGrant({
+    name: ctx.name, capability: ctx.positionals[2], grantsFile: ctx.grantsFile, cfg: ctx.cfg, env: ctx.env, cwd: ctx.cwd,
+    ...(ctx.saveConfig ? { saveConfig: ctx.saveConfig } : {}),
+    ...(ctx.bootstrapAdapters ? { bootstrapAdapters: ctx.bootstrapAdapters } : {}),
+    ...(ctx.applyRouter ? { applyRouter: ctx.applyRouter } : {}),
+  }),
+};
+
+// `list`/`trust`/`conformance`/`grant`/`gate`/`status` stay gated behind the
+// experimental flag — they're the surface that reads/records new trust,
+// evidence, or capability. `resolvedCfg` is populated by run() only once the
+// flag check passes (below).
+const grantHandler = (ctx) => grantCap({
+  name: ctx.name, capability: ctx.positionals[2], cfg: ctx.resolvedCfg, consent: ctx.consent, reader: ctx.reader,
+  ask: ctx.ask, isTTY: ctx.isTTY, yes: !!ctx.flags.yes, grantsFile: ctx.grantsFile,
+});
+const GATED_HANDLERS = {
+  list: (ctx) => list({ cfg: ctx.resolvedCfg, consent: ctx.consent, reader: ctx.reader }),
+  trust: (ctx) => trust({
+    name: ctx.name, cfg: ctx.resolvedCfg, consent: ctx.consent, reader: ctx.reader, ask: ctx.ask, isTTY: ctx.isTTY,
+    yes: !!ctx.flags.yes, expectHash: ctx.flags['expect-hash'],
+  }),
+  conformance: (ctx) => conformance({
+    name: ctx.name, cfg: ctx.resolvedCfg, reader: ctx.reader, runTiered: ctx.runTieredConformance,
+    consentFile: ctx.consentFile, grantsFile: ctx.grantsFile, flags: ctx.flags,
+  }),
+  // F-8 (security review, ADR-0031-accurate naming): `bless` is the alias —
+  // §3 calls this exact out-of-tree grant path a "Blessed external adapter";
+  // "Promoted built-in" is the separate manual registry PR this command does
+  // NOT do. `grant` stays the primary spelling; `promote` was dropped.
+  grant: grantHandler,
+  bless: grantHandler,
+  gate: (ctx) => gateTier({
+    name: ctx.name, tier: ctx.positionals[2], ref: ctx.positionals[3], cfg: ctx.resolvedCfg, reader: ctx.reader, grantsFile: ctx.grantsFile,
+  }),
+  status: (ctx) => statusReport({ name: ctx.name, cfg: ctx.resolvedCfg, reader: ctx.reader, grantsFile: ctx.grantsFile }),
+};
+
 /**
  * @param {{ positionals?: string[], flags?: any, env?: NodeJS.ProcessEnv,
  *   consent?: { recordedHashFor(name:string): string|null, recordConsent(name:string, hash:string): void, revokeConsent(name:string): boolean },
@@ -434,59 +495,24 @@ export async function run({
   saveConfig, bootstrapAdapters, applyRouter,
 } = {}) {
   const sub = positionals[0] ?? 'list';
-  const name = positionals[1];
+  const ctx = {
+    positionals, flags, env, consent, reader, ask, isTTY, cfg, runTieredConformance,
+    consentFile, grantsFile, cwd, saveConfig, bootstrapAdapters, applyRouter,
+    name: positionals[1],
+  };
 
-  // Revocation is fail-safe and stays reachable regardless of the
-  // experimental flag: an operator who turns the flag OFF must still be
-  // able to withdraw a standing consent or grant record, or it silently
-  // reactivates the next time the flag is turned back on. `list`/`trust`/
-  // `conformance`/`grant`/`gate`/`status` stay gated — they're the surface
-  // that reads/records new trust, evidence, or capability.
-  if (sub === 'revoke') return revoke({ name, consent });
-  if (sub === 'revoke-grant') {
-    return revokeGrant({
-      name, capability: positionals[2], grantsFile, cfg, env, cwd,
-      ...(saveConfig ? { saveConfig } : {}),
-      ...(bootstrapAdapters ? { bootstrapAdapters } : {}),
-      ...(applyRouter ? { applyRouter } : {}),
-    });
-  }
+  const failSafe = FAIL_SAFE_HANDLERS[sub];
+  if (failSafe) return failSafe(ctx);
 
   if (!flagEnabled(env)) {
     fail(`experimental host-adapter surface is disabled — set ${FLAG_ENV_VAR}=1`);
     return 2;
   }
 
-  const resolvedCfg = cfg ?? loadKitConfig();
+  ctx.resolvedCfg = cfg ?? loadKitConfig();
 
-  if (sub === 'list') return list({ cfg: resolvedCfg, consent, reader });
-  if (sub === 'trust') {
-    return trust({
-      name, cfg: resolvedCfg, consent, reader, ask, isTTY,
-      yes: !!flags.yes, expectHash: flags['expect-hash'],
-    });
-  }
-  if (sub === 'conformance') {
-    return conformance({
-      name, cfg: resolvedCfg, reader, runTiered: runTieredConformance, consentFile, grantsFile, flags,
-    });
-  }
-  // F-8 (security review, ADR-0031-accurate naming): `bless` is the alias —
-  // §3 calls this exact out-of-tree grant path a "Blessed external adapter";
-  // "Promoted built-in" is the separate manual registry PR this command does
-  // NOT do. `grant` stays the primary spelling; `promote` was dropped.
-  if (sub === 'grant' || sub === 'bless') {
-    return grantCap({
-      name, capability: positionals[2], cfg: resolvedCfg, consent, reader, ask, isTTY,
-      yes: !!flags.yes, grantsFile,
-    });
-  }
-  if (sub === 'gate') {
-    return gateTier({
-      name, tier: positionals[2], ref: positionals[3], cfg: resolvedCfg, reader, grantsFile,
-    });
-  }
-  if (sub === 'status') return statusReport({ name, cfg: resolvedCfg, reader, grantsFile });
+  const gated = GATED_HANDLERS[sub];
+  if (gated) return gated(ctx);
 
   fail(`unknown host adapters subcommand: ${sub} (list|trust|revoke|conformance|grant|bless|gate|status|revoke-grant)`);
   return 2;

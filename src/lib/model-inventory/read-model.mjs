@@ -199,43 +199,70 @@ function ownerVisibleModelText(value, max = 512) {
   return boundedPublicText(value, max);
 }
 
-function ownerVisibleCapabilities(value) {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+const BOOLEAN_CAPABILITY_FIELDS = [
+  'tools', 'toolcall', 'reasoning', 'structuredOutput', 'temperature', 'attachment', 'interleaved', 'embedding',
+];
+const LIMIT_CAPABILITY_FIELDS = ['contextLimit', 'outputLimit'];
+const MODALITY_FIELDS = ['text', 'audio', 'image', 'video', 'pdf'];
+
+function booleanCapabilityFields(value) {
   const result = {};
-  for (const name of ['tools', 'toolcall', 'reasoning', 'structuredOutput', 'temperature', 'attachment', 'interleaved', 'embedding']) {
-    if (typeof value[name] === 'boolean') result[name] = value[name];
-  }
-  for (const name of ['contextLimit', 'outputLimit']) {
+  for (const name of BOOLEAN_CAPABILITY_FIELDS) if (typeof value[name] === 'boolean') result[name] = value[name];
+  return result;
+}
+
+function limitCapabilityFields(value) {
+  const result = {};
+  for (const name of LIMIT_CAPABILITY_FIELDS) {
     if (Number.isSafeInteger(value[name]) && value[name] > 0) result[name] = value[name];
-  }
-  for (const direction of ['input', 'output']) {
-    if (!value[direction] || typeof value[direction] !== 'object' || Array.isArray(value[direction])) continue;
-    const modalities = {};
-    for (const name of ['text', 'audio', 'image', 'video', 'pdf']) {
-      if (typeof value[direction][name] === 'boolean') modalities[name] = value[direction][name];
-    }
-    if (Object.keys(modalities).length) result[direction] = modalities;
   }
   return result;
 }
 
-function ownerVisiblePricing(model) {
-  const pricing = model.pricing;
-  if (pricing && ['per-token', 'per-million-tokens', 'zero', 'local-compute'].includes(pricing.basis)
-    && (Number.isFinite(pricing.input) || Number.isFinite(pricing.output))
-    && /^[A-Z]{3}$/.test(pricing.currency ?? '')) {
-    const refs = new Set(pricing.evidenceRefs ?? []);
-    const anthropicDocs = model.evidence.some((entry) => refs.has(entry.id)
-      && entry.source === 'anthropic-docs' && entry.class === 'first-party');
-    return {
-      basis: pricing.basis, input: pricing.input, output: pricing.output, currency: pricing.currency,
-      effectiveAt: pricing.effectiveAt,
-      source: pricing.basis === 'local-compute' ? 'local installation evidence'
-        : anthropicDocs ? 'Anthropic Models and pricing' : 'catalogue evidence',
-      sourceUrl: anthropicDocs ? ANTHROPIC_PRICING_URL : null,
-      asOf: anthropicDocs ? PRICES_AS_OF : null, matched: true,
-    };
+function capabilityModalities(directionValue) {
+  if (!directionValue || typeof directionValue !== 'object' || Array.isArray(directionValue)) return null;
+  const result = {};
+  for (const name of MODALITY_FIELDS) if (typeof directionValue[name] === 'boolean') result[name] = directionValue[name];
+  return Object.keys(result).length ? result : null;
+}
+
+function directionalCapabilityFields(value) {
+  const result = {};
+  for (const direction of ['input', 'output']) {
+    const modalities = capabilityModalities(value[direction]);
+    if (modalities) result[direction] = modalities;
   }
+  return result;
+}
+
+function ownerVisibleCapabilities(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+  return { ...booleanCapabilityFields(value), ...limitCapabilityFields(value), ...directionalCapabilityFields(value) };
+}
+
+function isValidPricingRecord(pricing) {
+  return Boolean(pricing) && ['per-token', 'per-million-tokens', 'zero', 'local-compute'].includes(pricing.basis)
+    && (Number.isFinite(pricing.input) || Number.isFinite(pricing.output))
+    && /^[A-Z]{3}$/.test(pricing.currency ?? '');
+}
+
+function evidencedPricing(model) {
+  const pricing = model.pricing;
+  if (!isValidPricingRecord(pricing)) return null;
+  const refs = new Set(pricing.evidenceRefs ?? []);
+  const anthropicDocs = model.evidence.some((entry) => refs.has(entry.id)
+    && entry.source === 'anthropic-docs' && entry.class === 'first-party');
+  return {
+    basis: pricing.basis, input: pricing.input, output: pricing.output, currency: pricing.currency,
+    effectiveAt: pricing.effectiveAt,
+    source: pricing.basis === 'local-compute' ? 'local installation evidence'
+      : anthropicDocs ? 'Anthropic Models and pricing' : 'catalogue evidence',
+    sourceUrl: anthropicDocs ? ANTHROPIC_PRICING_URL : null,
+    asOf: anthropicDocs ? PRICES_AS_OF : null, matched: true,
+  };
+}
+
+function publishedPricing(model) {
   const published = priceFor(model.key.modelId, model.key.provider);
   if (!published.matched) return null;
   const sourceUrl = published.provider === 'openai' ? openAiModelDocumentation(model.key.modelId) : null;
@@ -246,6 +273,24 @@ function ownerVisiblePricing(model) {
   };
 }
 
+function ownerVisiblePricing(model) {
+  return evidencedPricing(model) ?? publishedPricing(model);
+}
+
+function trustedModelLink(entry, labels) {
+  if (!entry || typeof entry !== 'object') return null;
+  const kind = boundedPublicText(entry.kind, 64);
+  const label = labels[kind] ?? null;
+  const raw = boundedPublicText(entry.url, 2_048);
+  if (!kind || !label || !raw) return null;
+  try {
+    const url = new URL(raw);
+    if (url.protocol !== 'https:' || url.username || url.password || url.port
+      || !TRUSTED_MODEL_LINK_HOSTS.has(url.hostname)) return null;
+    return { kind, label, url: url.href };
+  } catch { return null; }
+}
+
 function trustedModelLinks(value) {
   const labels = {
     catalog: 'Models.dev', documentation: 'Documentation', provider: 'Provider',
@@ -254,19 +299,7 @@ function trustedModelLinks(value) {
   const entries = Array.isArray(value) ? value : value && typeof value === 'object'
     ? Object.entries(value).flatMap(([kind, url]) => labels[kind] && typeof url === 'string'
       ? [{ kind, label: labels[kind], url }] : []) : [];
-  return entries.slice(0, 16).flatMap((entry) => {
-    if (!entry || typeof entry !== 'object') return [];
-    const kind = boundedPublicText(entry.kind, 64);
-    const label = labels[kind] ?? null;
-    const raw = boundedPublicText(entry.url, 2_048);
-    if (!kind || !label || !raw) return [];
-    try {
-      const url = new URL(raw);
-      if (url.protocol !== 'https:' || url.username || url.password || url.port
-        || !TRUSTED_MODEL_LINK_HOSTS.has(url.hostname)) return [];
-      return [{ kind, label, url: url.href }];
-    } catch { return []; }
-  });
+  return entries.slice(0, 16).map((entry) => trustedModelLink(entry, labels)).filter(Boolean);
 }
 
 function hasEvidence(model, predicate) {
@@ -297,35 +330,42 @@ function claudeHumanName(modelId) {
     + (date ? ` (${date})` : '');
 }
 
-/** Public identity is fail-closed: local/custom rows need an explicit catalog-public marker. */
-function publicModelIdentity(model) {
-  if (model.key.host === 'codex' && hasCatalogDiscovery(model, 'codex-cache')) {
-    const modelDocumentation = openAiModelDocumentation(model.key.modelId);
-    return {
-      humanName: boundedPublicText(model.displayName) ?? model.key.modelId,
-      selector: model.key.modelId, servingProvider: 'openai', publisher: 'OpenAI',
-      family: boundedPublicText(model.variant?.family),
-      links: [{ kind: 'documentation', label: modelDocumentation ? 'OpenAI API model page' : 'Codex models',
-        url: modelDocumentation ?? 'https://developers.openai.com/codex/models/' }],
-    };
-  }
-  if (model.key.host === 'claude' && OFFICIAL_CLAUDE_IDS.has(model.key.modelId)
+function codexPublicIdentity(model) {
+  if (model.key.host !== 'codex' || !hasCatalogDiscovery(model, 'codex-cache')) return null;
+  const modelDocumentation = openAiModelDocumentation(model.key.modelId);
+  return {
+    humanName: boundedPublicText(model.displayName) ?? model.key.modelId,
+    selector: model.key.modelId, servingProvider: 'openai', publisher: 'OpenAI',
+    family: boundedPublicText(model.variant?.family),
+    links: [{ kind: 'documentation', label: modelDocumentation ? 'OpenAI API model page' : 'Codex models',
+      url: modelDocumentation ?? 'https://developers.openai.com/codex/models/' }],
+  };
+}
+
+function isOfficialClaudeIdentity(model) {
+  return model.key.host === 'claude' && OFFICIAL_CLAUDE_IDS.has(model.key.modelId)
     && hasEvidence(model, (entry) => (entry.source === 'anthropic-docs'
       && entry.class === 'first-party') || (entry.source === 'claude-config'
       && ['configured', 'first-party'].includes(entry.class))
-      || (entry.source === 'usage-index' && entry.class === 'observed'))) {
-    const catalogPublic = hasEvidence(model, (entry) => entry.source === 'anthropic-docs'
-      && entry.class === 'first-party');
-    return {
-      humanName: catalogPublic
-        ? boundedPublicText(model.displayName) ?? claudeHumanName(model.key.modelId)
-        : claudeHumanName(model.key.modelId),
-      selector: model.key.modelId,
-      servingProvider: 'anthropic',
-      publisher: 'Anthropic', family: model.key.modelId.split('-')[1],
-      links: [{ kind: 'documentation', label: 'Anthropic Models', url: ANTHROPIC_MODELS_URL }],
-    };
-  }
+      || (entry.source === 'usage-index' && entry.class === 'observed'));
+}
+
+function claudePublicIdentity(model) {
+  if (!isOfficialClaudeIdentity(model)) return null;
+  const catalogPublic = hasEvidence(model, (entry) => entry.source === 'anthropic-docs'
+    && entry.class === 'first-party');
+  return {
+    humanName: catalogPublic
+      ? boundedPublicText(model.displayName) ?? claudeHumanName(model.key.modelId)
+      : claudeHumanName(model.key.modelId),
+    selector: model.key.modelId,
+    servingProvider: 'anthropic',
+    publisher: 'Anthropic', family: model.key.modelId.split('-')[1],
+    links: [{ kind: 'documentation', label: 'Anthropic Models', url: ANTHROPIC_MODELS_URL }],
+  };
+}
+
+function catalogPublicIdentity(model) {
   const catalog = model.variant?.catalog;
   if (!catalog || catalog.public !== true || !PUBLIC_CATALOG_METADATA_SOURCES.has(catalog.source)
     || !hasEvidence(model, (entry) => entry.field === 'variant.catalog'
@@ -340,6 +380,77 @@ function publicModelIdentity(model) {
     publisher: boundedPublicText(catalog.publisher), family: boundedPublicText(catalog.family),
     links: trustedModelLinks(catalog.links),
   };
+}
+
+/** Public identity is fail-closed: local/custom rows need an explicit catalog-public marker. */
+function publicModelIdentity(model) {
+  return codexPublicIdentity(model) ?? claudePublicIdentity(model) ?? catalogPublicIdentity(model);
+}
+
+function sanitizedIdentity(model, publicIdentity) {
+  return {
+    displayName: publicIdentity?.humanName
+      ?? ownerVisibleModelText(model.displayName) ?? ownerVisibleModelText(model.key.modelId) ?? 'Model not recorded',
+    humanName: publicIdentity?.humanName
+      ?? ownerVisibleModelText(model.displayName) ?? ownerVisibleModelText(model.key.modelId),
+    servingProvider: ownerVisibleModelText(model.key.provider) ?? publicIdentity?.servingProvider ?? null,
+    publisher: publicIdentity?.publisher ?? null,
+    family: publicIdentity?.family ?? null,
+    selector: ownerVisibleModelText(model.key.modelId) ?? publicIdentity?.selector ?? null,
+    privacyClass: publicIdentity ? 'public-catalog' : 'owner-visible',
+    links: publicIdentity?.links ?? [],
+  };
+}
+
+function sanitizedAliases(model, key, evidenceRefs) {
+  return model.aliases.map((alias) => ({
+    ...alias,
+    name: privateLabel('alias', alias.name, key),
+    resolvesTo: privateLabel('model', alias.resolvesTo, key),
+    evidenceRefs: evidenceRefs(alias.evidenceRefs),
+  }));
+}
+
+function sanitizedVariantBlock(model, key, publicIdentity, privateVariant) {
+  return {
+    ...sanitizeVariant(privateVariant, key),
+    ...(publicIdentity && model.variant?.catalog ? { catalog: {
+      source: model.variant.catalog.source,
+      public: true,
+      servingProvider: publicIdentity.servingProvider,
+      publisher: publicIdentity.publisher,
+      family: publicIdentity.family,
+      selector: publicIdentity.selector,
+      links: publicIdentity.links,
+    } } : {}),
+  };
+}
+
+function sanitizedLifecycle(model, evidenceRefs) {
+  return {
+    ...model.lifecycle,
+    replacement: ownerVisibleModelText(model.lifecycle.replacement),
+    replacementName: ownerVisibleModelText(model.lifecycle.replacement),
+    replacementSelector: ownerVisibleModelText(model.lifecycle.replacement),
+    notice: model.lifecycle.notice ? 'Lifecycle notice available in explicit CLI evidence.' : null,
+    evidenceRefs: evidenceRefs(model.lifecycle.evidenceRefs),
+  };
+}
+
+function sanitizedEdges(model, key, evidenceRefs) {
+  return (model.edges ?? []).map((edge) => ({
+    ...edge,
+    from: privateLabel(edge.kind === 'resolves-to' ? 'alias' : 'model', edge.from, key),
+    to: privateLabel('model', edge.to, key),
+    scopeFingerprint: privateLabel('scope', edge.scopeFingerprint, key),
+    evidenceRefs: evidenceRefs(edge.evidenceRefs),
+  }));
+}
+
+function sanitizedDimensions(model, evidenceRefs) {
+  return Object.fromEntries(Object.entries(model.dimensions).map(([name, dimension]) => [name, {
+    ...dimension, evidenceRefs: evidenceRefs(dimension.evidenceRefs),
+  }]));
 }
 
 function sanitizeModel(model, key) {
@@ -358,69 +469,43 @@ function sanitizeModel(model, key) {
       digest: privateLabel('digest', model.key.digest, key),
     },
     identity: privateLabel('identity', model.identity, key),
-    displayName: publicIdentity?.humanName
-      ?? ownerVisibleModelText(model.displayName) ?? ownerVisibleModelText(model.key.modelId) ?? 'Model not recorded',
-    humanName: publicIdentity?.humanName
-      ?? ownerVisibleModelText(model.displayName) ?? ownerVisibleModelText(model.key.modelId),
+    ...sanitizedIdentity(model, publicIdentity),
     host: publicHost(model.key.host, key),
-    servingProvider: ownerVisibleModelText(model.key.provider) ?? publicIdentity?.servingProvider ?? null,
-    publisher: publicIdentity?.publisher ?? null,
-    family: publicIdentity?.family ?? null,
-    selector: ownerVisibleModelText(model.key.modelId) ?? publicIdentity?.selector ?? null,
-    privacyClass: publicIdentity ? 'public-catalog' : 'owner-visible',
-    links: publicIdentity?.links ?? [],
-    aliases: model.aliases.map((alias) => ({
-      ...alias,
-      name: privateLabel('alias', alias.name, key),
-      resolvesTo: privateLabel('model', alias.resolvesTo, key),
-      evidenceRefs: evidenceRefs(alias.evidenceRefs),
-    })),
-    variant: {
-      ...sanitizeVariant(privateVariant, key),
-      ...(publicIdentity && model.variant?.catalog ? { catalog: {
-        source: model.variant.catalog.source,
-        public: true,
-        servingProvider: publicIdentity.servingProvider,
-        publisher: publicIdentity.publisher,
-        family: publicIdentity.family,
-        selector: publicIdentity.selector,
-        links: publicIdentity.links,
-      } } : {}),
-    },
-    lifecycle: {
-      ...model.lifecycle,
-      replacement: ownerVisibleModelText(model.lifecycle.replacement),
-      replacementName: ownerVisibleModelText(model.lifecycle.replacement),
-      replacementSelector: ownerVisibleModelText(model.lifecycle.replacement),
-      notice: model.lifecycle.notice ? 'Lifecycle notice available in explicit CLI evidence.' : null,
-      evidenceRefs: evidenceRefs(model.lifecycle.evidenceRefs),
-    },
+    aliases: sanitizedAliases(model, key, evidenceRefs),
+    variant: sanitizedVariantBlock(model, key, publicIdentity, privateVariant),
+    lifecycle: sanitizedLifecycle(model, evidenceRefs),
     capabilities: ownerVisibleCapabilities(model.capabilities),
     pricing: ownerVisiblePricing(model),
-    edges: (model.edges ?? []).map((edge) => ({
-      ...edge,
-      from: privateLabel(edge.kind === 'resolves-to' ? 'alias' : 'model', edge.from, key),
-      to: privateLabel('model', edge.to, key),
-      scopeFingerprint: privateLabel('scope', edge.scopeFingerprint, key),
-      evidenceRefs: evidenceRefs(edge.evidenceRefs),
-    })),
-    dimensions: Object.fromEntries(Object.entries(model.dimensions).map(([name, dimension]) => [name, {
-      ...dimension, evidenceRefs: evidenceRefs(dimension.evidenceRefs),
-    }])),
+    edges: sanitizedEdges(model, key, evidenceRefs),
+    dimensions: sanitizedDimensions(model, evidenceRefs),
     evidence: model.evidence.map((entry) => sanitizeEvidence(entry, key)),
   };
 }
 
+function routeConsumerLabel(text, key) {
+  const route = /^route:([^:]+)(?::escalation:(\d+))?$/.exec(text);
+  if (!route) return null;
+  return `${publicActivity(route[1], key) ?? 'Route'} · ${route[2] == null ? 'primary' : `fallback ${Number(route[2]) + 1}`}`;
+}
+
+function ordinalConsumerLabel(text, pattern, prefix) {
+  return pattern.test(text) ? `${prefix} ${Number(text.split(':').at(-1)) + 1}` : null;
+}
+
+function agentOverrideConsumerLabel(text, key) {
+  return text.startsWith('aqe:agent:')
+    ? `Agentic QE · ${publicActivity(text.slice('aqe:agent:'.length), key) ?? 'override'}` : null;
+}
+
 function consumerLabel(value, key) {
   const text = String(value ?? 'consumer');
-  const route = /^route:([^:]+)(?::escalation:(\d+))?$/.exec(text);
-  if (route) return `${publicActivity(route[1], key) ?? 'Route'} · ${route[2] == null ? 'primary' : `fallback ${Number(route[2]) + 1}`}`;
-  if (text === 'aqe:default') return 'Agentic QE · default';
-  if (/^aqe:fallback:\d+$/.test(text)) return `Agentic QE · fallback ${Number(text.split(':').at(-1)) + 1}`;
-  if (text.startsWith('aqe:agent:')) return `Agentic QE · ${publicActivity(text.slice('aqe:agent:'.length), key) ?? 'override'}`;
-  if (/^ruflo:candidate:\d+$/.test(text)) return `Ruflo · candidate ${Number(text.split(':').at(-1)) + 1}`;
-  if (/^integration:\d+$/.test(text)) return `Integration · binding ${Number(text.split(':').at(-1)) + 1}`;
-  return 'Configured consumer';
+  return routeConsumerLabel(text, key)
+    ?? (text === 'aqe:default' ? 'Agentic QE · default' : null)
+    ?? ordinalConsumerLabel(text, /^aqe:fallback:\d+$/, 'Agentic QE · fallback')
+    ?? agentOverrideConsumerLabel(text, key)
+    ?? ordinalConsumerLabel(text, /^ruflo:candidate:\d+$/, 'Ruflo · candidate')
+    ?? ordinalConsumerLabel(text, /^integration:\d+$/, 'Integration · binding')
+    ?? 'Configured consumer';
 }
 
 function bindingRole(consumer) {
@@ -429,15 +514,22 @@ function bindingRole(consumer) {
   return route[1] == null ? 'primary' : `fallback ${Number(route[1]) + 1}`;
 }
 
+function bindingPublishedPricing(configured, effective, provider, linkedModel) {
+  if (linkedModel || !(configured || effective)) return null;
+  const published = priceFor(configured ?? effective, provider);
+  if (!published.matched) return null;
+  const sourceUrl = published.provider === 'openai' ? openAiModelDocumentation(configured ?? effective) : null;
+  return {
+    basis: 'per-million-tokens', input: published.in, output: published.out, currency: 'USD',
+    effectiveAt: null, source: sourceUrl ? 'OpenAI API model documentation' : 'published API list-price table',
+    sourceUrl, asOf: PRICES_AS_OF, matched: true,
+  };
+}
+
 function sanitizeBinding(binding, key, linkedModel) {
   const configured = ownerVisibleModelText(binding.configured);
   const effective = ownerVisibleModelText(binding.effective);
-  const modelName = linkedModel?.displayName ?? configured ?? effective ?? 'Model not pinned';
   const provider = linkedModel?.servingProvider ?? ownerVisibleModelText(binding.provider);
-  const published = !linkedModel && (configured || effective)
-    ? priceFor(configured ?? effective, provider) : null;
-  const publishedModel = configured ?? effective;
-  const sourceUrl = published?.provider === 'openai' ? openAiModelDocumentation(publishedModel) : null;
   return {
     ...binding,
     id: privateLabel('binding', binding.id, key),
@@ -448,17 +540,13 @@ function sanitizeBinding(binding, key, linkedModel) {
     configured,
     effective,
     evidenceRefs: (binding.evidenceRefs ?? []).map((ref) => privateLabel('evidence', ref, key)),
-    modelName,
+    modelName: linkedModel?.displayName ?? configured ?? effective ?? 'Model not pinned',
     selector: linkedModel?.selector ?? configured ?? effective,
     modelProvider: provider,
     role: bindingRole(binding.consumer),
     lifecycle: linkedModel?.lifecycle?.state ?? 'unknown',
     capabilities: linkedModel?.capabilities ?? {},
-    pricing: linkedModel?.pricing ?? (published?.matched ? {
-      basis: 'per-million-tokens', input: published.in, output: published.out, currency: 'USD',
-      effectiveAt: null, source: sourceUrl ? 'OpenAI API model documentation' : 'published API list-price table',
-      sourceUrl, asOf: PRICES_AS_OF, matched: true,
-    } : null),
+    pricing: linkedModel?.pricing ?? bindingPublishedPricing(configured, effective, provider, linkedModel),
     // Snapshot evidence says that use was observed, but its capturedAt is the
     // refresh time—not the invocation time. Windowed usage joins the actual
     // session timestamp onto summary bindings below.
@@ -482,52 +570,71 @@ function sessionRange(session) {
   };
 }
 
+function matchModelForSession(exact, projected, host, modelId, provider) {
+  const candidates = exact.models.map((model, index) => ({ model, projected: projected.models[index] }))
+    .filter(({ model }) => model.key.host === host && model.key.modelId === modelId);
+  return candidates.find(({ projected: item }) => item?.privacyClass === 'public-catalog')
+    ?? candidates.find(({ model }) => model.key.provider === provider)
+    ?? candidates[0];
+}
+
+function newObservedGroupRow(host, provider, modelId, visible) {
+  return {
+    host: PUBLIC_HOSTS.has(host) ? host : 'unknown',
+    modelName: visible?.humanName ?? visible?.displayName ?? modelId,
+    selector: visible?.selector ?? modelId,
+    modelProvider: provider ?? visible?.servingProvider ?? visible?.publisher ?? null,
+    sessions: 0, responses: 0, tokens: 0, apiEquivalentCost: 0,
+    firstUsed: null, lastUsed: null,
+  };
+}
+
+function observedGroupRow(groups, exact, projected, host, provider, modelId) {
+  const groupKey = `${host}\0${provider ?? ''}\0${modelId}`;
+  let row = groups.get(groupKey);
+  if (!row) {
+    const match = matchModelForSession(exact, projected, host, modelId, provider);
+    row = newObservedGroupRow(host, provider, modelId, match?.projected);
+    groups.set(groupKey, row);
+  }
+  return row;
+}
+
+function accumulateSession(row, session, range) {
+  row.sessions++;
+  row.responses += finite(session.responses);
+  row.tokens += finite(session.tokens);
+  row.apiEquivalentCost += finite(session.cost);
+  if (range.firstUsed && (!row.firstUsed || range.firstUsed < row.firstUsed)) row.firstUsed = range.firstUsed;
+  if (range.lastUsed && (!row.lastUsed || range.lastUsed > row.lastUsed)) row.lastUsed = range.lastUsed;
+}
+
+function foldSessionIntoGroups(groups, exact, projected, session) {
+  const host = boundedPublicText(session?.host, 64);
+  const provider = boundedPublicText(session?.provider, 128);
+  if (!host || !Array.isArray(session?.models)) return;
+  const range = sessionRange(session);
+  for (const rawModelId of session.models) {
+    const modelId = ownerVisibleModelText(rawModelId);
+    if (!modelId) continue;
+    accumulateSession(observedGroupRow(groups, exact, projected, host, provider, modelId), session, range);
+  }
+}
+
+function sortObservedGroups(a, b) {
+  return String(b.lastUsed ?? '').localeCompare(String(a.lastUsed ?? ''))
+    || String(a.modelName).localeCompare(String(b.modelName), 'en-US', { sensitivity: 'base' });
+}
+
 /** Project only aggregate model-use facts; session ids, titles and projects never cross this boundary. */
 function observedWindow(exact, projected, usage, days) {
   const sessions = Array.isArray(usage?.sessions) ? usage.sessions : [];
   const groups = new Map();
-  for (const session of sessions) {
-    const host = boundedPublicText(session?.host, 64);
-    const provider = boundedPublicText(session?.provider, 128);
-    if (!host || !Array.isArray(session?.models)) continue;
-    const range = sessionRange(session);
-    for (const rawModelId of session.models) {
-      const modelId = ownerVisibleModelText(rawModelId);
-      if (!modelId) continue;
-      const groupKey = `${host}\0${provider ?? ''}\0${modelId}`;
-      let row = groups.get(groupKey);
-      if (!row) {
-        const candidates = exact.models.map((model, index) => ({ model, projected: projected.models[index] }))
-          .filter(({ model }) => model.key.host === host && model.key.modelId === modelId);
-        const match = candidates.find(({ projected: item }) => item?.privacyClass === 'public-catalog')
-          ?? candidates.find(({ model }) => model.key.provider === provider)
-          ?? candidates[0];
-        const visible = match?.projected;
-        row = {
-          host: PUBLIC_HOSTS.has(host) ? host : 'unknown',
-          modelName: visible?.humanName ?? visible?.displayName ?? modelId,
-          selector: visible?.selector ?? modelId,
-          modelProvider: provider ?? visible?.servingProvider ?? visible?.publisher ?? null,
-          sessions: 0, responses: 0, tokens: 0, apiEquivalentCost: 0,
-          firstUsed: null, lastUsed: null,
-        };
-        groups.set(groupKey, row);
-      }
-      row.sessions++;
-      row.responses += finite(session.responses);
-      row.tokens += finite(session.tokens);
-      row.apiEquivalentCost += finite(session.cost);
-      if (range.firstUsed && (!row.firstUsed || range.firstUsed < row.firstUsed)) row.firstUsed = range.firstUsed;
-      if (range.lastUsed && (!row.lastUsed || range.lastUsed > row.lastUsed)) row.lastUsed = range.lastUsed;
-    }
-  }
+  for (const session of sessions) foldSessionIntoGroups(groups, exact, projected, session);
   return {
     days, status: usage?.unavailable === true ? 'unavailable' : 'complete',
     generatedAt: typeof usage?.generatedAt === 'string' ? usage.generatedAt : null,
-    models: [...groups.values()].sort((a, b) => (
-      String(b.lastUsed ?? '').localeCompare(String(a.lastUsed ?? ''))
-      || String(a.modelName).localeCompare(String(b.modelName), 'en-US', { sensitivity: 'base' })
-    )),
+    models: [...groups.values()].sort(sortObservedGroups),
   };
 }
 
@@ -574,53 +681,123 @@ function humanField(value) {
   return safeState(value).replace(/([a-z0-9])([A-Z])/g, '$1 $2').replaceAll('-', ' ').toLowerCase();
 }
 
+function changeDetailLifecycle(change) {
+  const before = safeState(change.before?.state);
+  const after = safeState(change.after?.state);
+  const replacement = ownerVisibleModelText(change.after?.replacement);
+  return `Lifecycle ${before} → ${after}${replacement ? `; replacement ${replacement}` : ''}.`;
+}
+
+function changeDetailVisibility(change) {
+  return `Catalog visibility ${safeState(change.before)} → ${safeState(change.after)}.`;
+}
+
+function changeDetailCapability(change) {
+  const field = humanField(change.after?.field ?? change.before?.field);
+  return `${field === 'unknown' ? 'A reported capability' : `Reported ${field} support`} changed.`;
+}
+
+function changeDetailVariant(change) {
+  const field = humanField(change.after?.field ?? change.before?.field);
+  return `${field === 'unknown' ? 'Reported model metadata' : `Reported ${field}`} changed.`;
+}
+
+/** One formatter per change `kind`, mirroring CHANGE_LABELS' lookup-table shape above. */
+const CHANGE_DETAIL_BY_KIND = Object.freeze({
+  'model-added': () => 'Appeared in the latest inventory.',
+  'model-missing': () => 'Not reported by the latest complete source; confirmation is pending.',
+  'model-removed': () => 'No longer reported after repeated complete refreshes.',
+  'lifecycle-changed': changeDetailLifecycle,
+  'visibility-changed': changeDetailVisibility,
+  'alias-target-changed': () => 'A configured alias now resolves to a different model.',
+  'capability-changed': changeDetailCapability,
+  'reasoning-changed': () => 'The reported reasoning options changed.',
+  'context-changed': () => 'The reported context window changed.',
+  'variant-changed': changeDetailVariant,
+  'digest-changed': () => 'The installed model build changed; private digests remain hidden.',
+  'pricing-changed': () => 'The published API rate changed.',
+  'edges-changed': () => 'Compatibility or migration guidance changed.',
+});
+
 function changeDetail(change) {
-  if (change.kind === 'model-added') return 'Appeared in the latest inventory.';
-  if (change.kind === 'model-missing') return 'Not reported by the latest complete source; confirmation is pending.';
-  if (change.kind === 'model-removed') return 'No longer reported after repeated complete refreshes.';
-  if (change.kind === 'lifecycle-changed') {
-    const before = safeState(change.before?.state);
-    const after = safeState(change.after?.state);
-    const replacement = ownerVisibleModelText(change.after?.replacement);
-    return `Lifecycle ${before} → ${after}${replacement ? `; replacement ${replacement}` : ''}.`;
-  }
-  if (change.kind === 'visibility-changed') {
-    return `Catalog visibility ${safeState(change.before)} → ${safeState(change.after)}.`;
-  }
-  if (change.kind === 'alias-target-changed') return 'A configured alias now resolves to a different model.';
-  if (change.kind === 'capability-changed') {
-    const field = humanField(change.after?.field ?? change.before?.field);
-    return `${field === 'unknown' ? 'A reported capability' : `Reported ${field} support`} changed.`;
-  }
-  if (change.kind === 'reasoning-changed') return 'The reported reasoning options changed.';
-  if (change.kind === 'context-changed') return 'The reported context window changed.';
-  if (change.kind === 'variant-changed') {
-    const field = humanField(change.after?.field ?? change.before?.field);
-    return `${field === 'unknown' ? 'Reported model metadata' : `Reported ${field}`} changed.`;
-  }
-  if (change.kind === 'digest-changed') return 'The installed model build changed; private digests remain hidden.';
-  if (change.kind === 'pricing-changed') return 'The published API rate changed.';
-  if (change.kind === 'edges-changed') return 'Compatibility or migration guidance changed.';
-  return 'A model inventory fact changed.';
+  const formatter = CHANGE_DETAIL_BY_KIND[change.kind];
+  return formatter ? formatter(change) : 'A model inventory fact changed.';
+}
+
+function changeRawSubject(change) {
+  return [change.after, change.before].find((value) => value && typeof value === 'object'
+    && typeof value.modelId === 'string');
 }
 
 function sanitizeChange(change, key, linkedModel, detectedAt) {
-  const rawKey = [change.after, change.before].find((value) => value && typeof value === 'object'
-    && typeof value.modelId === 'string');
-  const selector = linkedModel?.selector ?? ownerVisibleModelText(rawKey?.modelId);
-  const modelName = linkedModel?.displayName ?? selector ?? 'Model not recorded';
+  const rawSubject = changeRawSubject(change);
+  const selector = linkedModel?.selector ?? ownerVisibleModelText(rawSubject?.modelId);
   return {
     kind: change.kind,
     label: changeLabel(change.kind),
-    modelName,
+    modelName: linkedModel?.displayName ?? selector ?? 'Model not recorded',
     selector,
-    modelProvider: linkedModel?.servingProvider ?? ownerVisibleModelText(rawKey?.provider),
-    host: linkedModel?.host ?? publicHost(rawKey?.host, key),
+    modelProvider: linkedModel?.servingProvider ?? ownerVisibleModelText(rawSubject?.provider),
+    host: linkedModel?.host ?? publicHost(rawSubject?.host, key),
     detail: changeDetail(change),
     severity: change.severity,
     provisional: change.provisional === true,
     detectedAt,
   };
+}
+
+function sanitizedSourceAttention(item, sourceById, key) {
+  return { ...item, subject: sourceById.get(item.subject)?.id ?? privateLabel('source', item.subject, key) };
+}
+
+function affectedRoutesFor(exactModel, exactBindings, bindingById) {
+  if (!exactModel) return [];
+  return exactBindings.filter((binding) => binding.host === exactModel.key.host
+    && [binding.effective, binding.configured].includes(exactModel.key.modelId))
+    .map((binding) => bindingById.get(binding.id)).filter(Boolean)
+    .map((binding) => ({ activity: binding.activity, consumer: binding.consumer, role: binding.role }));
+}
+
+function migrationAction(activity, host, replacement) {
+  return activity && PUBLIC_ACTIVITIES.has(activity) && PUBLIC_HOSTS.has(host)
+    ? `ak models plan --activity ${activity} --to ${host}:${replacement}` : 'ak models plan';
+}
+
+function sanitizedMigrationAttention(item, ctx) {
+  const {
+    modelByIdentity, exactModelByIdentity, exact, bindingById, key,
+  } = ctx;
+  const model = modelByIdentity.get(item.subject);
+  const exactModel = exactModelByIdentity.get(item.subject);
+  const affectedRoutes = affectedRoutesFor(exactModel, exact.bindings, bindingById);
+  const activity = affectedRoutes[0]?.activity;
+  const replacement = model?.lifecycle.replacementName ?? 'replacement not recorded';
+  const host = model?.host;
+  return {
+    ...item,
+    subject: model?.identity ?? privateLabel('identity', item.subject, key),
+    currentModel: model?.displayName ?? model?.selector ?? 'Model not recorded',
+    replacementModel: replacement,
+    affectedRoutes,
+    documentationUrl: lifecycleNoticeUrl(exactModel?.lifecycle.notice),
+    action: migrationAction(activity, host, replacement),
+    reason: `${model?.displayName ?? model?.selector ?? 'Model'} is ${model?.lifecycle.state ?? 'unknown'}; recommended replacement ${replacement}`,
+  };
+}
+
+function sanitizedConsumerAttention(item, bindingById, key) {
+  return { ...item, subject: bindingById.get(item.subject)?.id ?? privateLabel('binding', item.subject, key) };
+}
+
+function sanitizedAliasAttention(item, changeBySubject, key) {
+  return { ...item, subject: changeBySubject.get(item.subject)?.modelName ?? privateLabel('identity', item.subject, key) };
+}
+
+function sanitizeAttentionItem(item, ctx) {
+  if (item.kind === 'source') return sanitizedSourceAttention(item, ctx.sourceById, ctx.key);
+  if (item.kind === 'migration') return sanitizedMigrationAttention(item, ctx);
+  if (item.kind === 'consumer') return sanitizedConsumerAttention(item, ctx.bindingById, ctx.key);
+  return sanitizedAliasAttention(item, ctx.changeBySubject, ctx.key);
 }
 
 /**
@@ -658,41 +835,10 @@ export function createDashboardModelReadModel(snapshotValue, options = {}) {
   const bindingById = new Map(exact.bindings.map((binding, index) => [binding.id, bindings[index]]));
   const sourceById = new Map(exact.sources.map((source, index) => [source.id, sources[index]]));
   const changeBySubject = new Map(exact.changes.map((change, index) => [change.subject, changes[index]]));
-  const attention = exact.attention.map((item) => {
-    if (item.kind === 'source') {
-      return { ...item, subject: sourceById.get(item.subject)?.id ?? privateLabel('source', item.subject, key) };
-    }
-    if (item.kind === 'migration') {
-      const model = modelByIdentity.get(item.subject);
-      const exactModel = exactModelByIdentity.get(item.subject);
-      const affectedRoutes = exact.bindings.filter((binding) => exactModel
-        && binding.host === exactModel.key.host
-        && [binding.effective, binding.configured].includes(exactModel.key.modelId))
-        .map((binding) => bindingById.get(binding.id)).filter(Boolean)
-        .map((binding) => ({
-          activity: binding.activity, consumer: binding.consumer, role: binding.role,
-        }));
-      const activity = affectedRoutes[0]?.activity;
-      const replacement = model?.lifecycle.replacementName ?? 'replacement not recorded';
-      const host = model?.host;
-      return {
-        ...item,
-        subject: model?.identity ?? privateLabel('identity', item.subject, key),
-        currentModel: model?.displayName ?? model?.selector ?? 'Model not recorded',
-        replacementModel: replacement,
-        affectedRoutes,
-        documentationUrl: lifecycleNoticeUrl(exactModel?.lifecycle.notice),
-        action: activity && PUBLIC_ACTIVITIES.has(activity) && PUBLIC_HOSTS.has(host)
-          ? `ak models plan --activity ${activity} --to ${host}:${replacement}` : 'ak models plan',
-        reason: `${model?.displayName ?? model?.selector ?? 'Model'} is ${model?.lifecycle.state ?? 'unknown'}; recommended replacement ${replacement}`,
-      };
-    }
-    if (item.kind === 'consumer') {
-      return { ...item, subject: bindingById.get(item.subject)?.id ?? privateLabel('binding', item.subject, key) };
-    }
-    return { ...item, subject: changeBySubject.get(item.subject)?.modelName
-      ?? privateLabel('identity', item.subject, key) };
-  });
+  const attentionCtx = {
+    modelByIdentity, exactModelByIdentity, exact, bindingById, sourceById, changeBySubject, key,
+  };
+  const attention = exact.attention.map((item) => sanitizeAttentionItem(item, attentionCtx));
   return immutable({
     ...exact,
     snapshotId: privateLabel('snapshot', exact.snapshotId, key),
@@ -710,6 +856,31 @@ export function createDashboardModelReadModel(snapshotValue, options = {}) {
   });
 }
 
+function timestampIso(entry) {
+  if (typeof entry !== 'string') return null;
+  const parsed = Date.parse(entry);
+  return Number.isFinite(parsed) ? new Date(parsed).toISOString() : null;
+}
+
+function dashboardHistoryEntries(history, privateKey) {
+  return (Array.isArray(history) ? history : []).slice(0, 32).flatMap((entry) => {
+    const capturedAt = timestampIso(entry?.capturedAt);
+    const snapshotId = privateLabel('snapshot', entry?.snapshotId, privateKey);
+    return capturedAt && snapshotId ? [{ snapshotId, capturedAt }] : [];
+  });
+}
+
+function dashboardComparisonBlock(comparison, privateKey) {
+  if (!comparison) return undefined;
+  return {
+    baseline: privateLabel('snapshot', comparison.baseline, privateKey),
+    latest: privateLabel('snapshot', comparison.latest, privateKey),
+    comparable: comparison.comparable === true,
+    diagnostics: (Array.isArray(comparison.diagnostics) ? comparison.diagnostics : [])
+      .slice(0, 32).map((item) => privateLabel('diagnostic', item, privateKey)),
+  };
+}
+
 /**
  * Sanitize a complete `/api/models` payload, including history identifiers.
  * @param {any} value
@@ -725,27 +896,11 @@ export function createDashboardModelPayload(value, { key, usage, days = 14 } = {
   let snapshot = createDashboardModelReadModel(exact, { key, changes });
   const window = observedWindow(exact, snapshot, usage, days);
   if (usage) snapshot = joinWindowedRouteUse(snapshot, window);
-  const timestamp = (entry) => {
-    if (typeof entry !== 'string') return null;
-    const parsed = Date.parse(entry);
-    return Number.isFinite(parsed) ? new Date(parsed).toISOString() : null;
-  };
   return immutable({
     status: ['cached', 'complete', 'partial', 'stale'].includes(value.status) ? value.status : 'cached',
     snapshot, ...(usage ? { observedWindow: window } : {}),
-    history: (Array.isArray(value.history) ? value.history : []).slice(0, 32)
-      .flatMap((entry) => {
-        const capturedAt = timestamp(entry?.capturedAt);
-        const snapshotId = privateLabel('snapshot', entry?.snapshotId, privateKey);
-        return capturedAt && snapshotId ? [{ snapshotId, capturedAt }] : [];
-      }),
-    comparison: value.comparison ? {
-      baseline: privateLabel('snapshot', value.comparison.baseline, privateKey),
-      latest: privateLabel('snapshot', value.comparison.latest, privateKey),
-      comparable: value.comparison.comparable === true,
-      diagnostics: (Array.isArray(value.comparison.diagnostics) ? value.comparison.diagnostics : [])
-        .slice(0, 32).map((item) => privateLabel('diagnostic', item, privateKey)),
-    } : undefined,
+    history: dashboardHistoryEntries(value.history, privateKey),
+    comparison: dashboardComparisonBlock(value.comparison, privateKey),
   });
 }
 

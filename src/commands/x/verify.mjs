@@ -260,6 +260,68 @@ function hasDejaVuOwnership(cfg) {
   return plain(own) && (!!own.install || (plain(own.targets) && Object.keys(own.targets).length > 0));
 }
 
+/** Package/CLI presence check — prints its verdict and returns whether it passed. */
+function checkDejaVuPackage(install) {
+  const version = typeof install.version === 'string' && SAFE_VERSION.test(install.version)
+    ? install.version.replace(/^v/, '') : 'unavailable';
+  const packageGood = install.binaryPresent === true && install.supported === true;
+  const owner = SAFE_OWNERSHIP.has(install.ownership) ? install.ownership : 'unknown';
+  (packageGood ? ok : fail)(`CLI/package ${version === 'unavailable' ? version : `v${version}`}: ${packageGood ? 'compatible' : 'incompatible or unavailable'} (${owner})`);
+  return packageGood;
+}
+
+/** `deja doctor` schema + bounded component health check. */
+function checkDejaVuDoctor(doctor) {
+  const doctorGood = doctor.state === 'ok' && doctor.schemaVersion === 2
+    && doctor.health?.state !== 'degraded';
+  (doctorGood ? ok : fail)(doctorGood
+    ? 'doctor schema v2 and bounded component health: ok'
+    : doctor.state === 'ok' && doctor.schemaVersion === 2
+      ? 'doctor schema v2 accepted but bounded component health is degraded'
+      : 'doctor schema incompatible or unavailable');
+  return doctorGood;
+}
+
+/** Derived-index state check — a missing index is fine when disabled or
+ *  never desired on setup. */
+function checkDejaVuIndex(index, enabled, facts) {
+  const indexState = SAFE_INDEX_STATES.has(index.state) ? index.state : 'unknown';
+  const indexGood = !enabled || indexState === 'ok'
+    || (indexState === 'missing' && facts.desired?.indexOnSetup === false);
+  (indexGood ? ok : fail)(`index state: ${indexState}`);
+  return indexGood;
+}
+
+/** Per-host wiring check across every desired target (claude/codex/opencode
+ *  × mcp/auto), printing one line per target and folding to a single verdict. */
+function checkDejaVuTargets(facts, enabled) {
+  let targetsGood = true;
+  const desiredHosts = enabled && Array.isArray(facts.desired?.hosts) ? facts.desired.hosts : [];
+  const mode = facts.desired?.mode === 'auto' ? 'auto' : 'mcp';
+  for (const host of desiredHosts.filter((value) => Object.hasOwn(EXPECTED_TARGETS, value))) {
+    const target = plain(facts.targets) ? facts.targets[host] : null;
+    const expected = EXPECTED_TARGETS[host][mode];
+    const targetName = SAFE_TARGETS.has(expected) ? expected : `${host}-target`;
+    const wired = target?.selected === true && target?.desiredTarget === expected
+      && target?.satisfied === true;
+    (wired ? ok : fail)(`${targetName}: ${wired ? 'wired' : 'not satisfied'}`);
+    targetsGood = wired && targetsGood;
+  }
+  return targetsGood;
+}
+
+/** Fold the four per-surface verdicts into one, reporting the lifecycle
+ *  adapter's own failure count (never its raw errors — see the module
+ *  header) when it did not report ok. */
+function finalizeDejaVuVerdict(result, packageGood, doctorGood, indexGood, targetsGood) {
+  const good = result?.ok === true && packageGood && doctorGood && indexGood && targetsGood;
+  if (!result?.ok) {
+    const count = Array.isArray(result?.errors) ? Math.min(result.errors.length, 99) : 1;
+    fail(`structural checks reported ${count} failure(s); details redacted`);
+  }
+  return good;
+}
+
 /**
  * A bounded, content-free deja-vu proof. Its lifecycle adapter may run only
  * presence/version checks, direct wiring observations, and
@@ -288,47 +350,12 @@ export async function verifyDejaVu({
     return false;
   }
   const facts = plain(result?.facts) ? result.facts : {};
-  const install = plain(facts.install) ? facts.install : {};
-  const version = typeof install.version === 'string' && SAFE_VERSION.test(install.version)
-    ? install.version.replace(/^v/, '') : 'unavailable';
-  const packageGood = install.binaryPresent === true && install.supported === true;
-  const owner = SAFE_OWNERSHIP.has(install.ownership) ? install.ownership : 'unknown';
-  (packageGood ? ok : fail)(`CLI/package ${version === 'unavailable' ? version : `v${version}`}: ${packageGood ? 'compatible' : 'incompatible or unavailable'} (${owner})`);
+  const packageGood = checkDejaVuPackage(plain(facts.install) ? facts.install : {});
+  const doctorGood = checkDejaVuDoctor(plain(facts.doctor) ? facts.doctor : {});
+  const indexGood = checkDejaVuIndex(plain(facts.index) ? facts.index : {}, enabled, facts);
+  const targetsGood = checkDejaVuTargets(facts, enabled);
 
-  const doctor = plain(facts.doctor) ? facts.doctor : {};
-  const doctorGood = doctor.state === 'ok' && doctor.schemaVersion === 2
-    && doctor.health?.state !== 'degraded';
-  (doctorGood ? ok : fail)(doctorGood
-    ? 'doctor schema v2 and bounded component health: ok'
-    : doctor.state === 'ok' && doctor.schemaVersion === 2
-      ? 'doctor schema v2 accepted but bounded component health is degraded'
-      : 'doctor schema incompatible or unavailable');
-
-  const index = plain(facts.index) ? facts.index : {};
-  const indexState = SAFE_INDEX_STATES.has(index.state) ? index.state : 'unknown';
-  const indexGood = !enabled || indexState === 'ok'
-    || (indexState === 'missing' && facts.desired?.indexOnSetup === false);
-  (indexGood ? ok : fail)(`index state: ${indexState}`);
-
-  let targetsGood = true;
-  const desiredHosts = enabled && Array.isArray(facts.desired?.hosts) ? facts.desired.hosts : [];
-  const mode = facts.desired?.mode === 'auto' ? 'auto' : 'mcp';
-  for (const host of desiredHosts.filter((value) => Object.hasOwn(EXPECTED_TARGETS, value))) {
-    const target = plain(facts.targets) ? facts.targets[host] : null;
-    const expected = EXPECTED_TARGETS[host][mode];
-    const targetName = SAFE_TARGETS.has(expected) ? expected : `${host}-target`;
-    const wired = target?.selected === true && target?.desiredTarget === expected
-      && target?.satisfied === true;
-    (wired ? ok : fail)(`${targetName}: ${wired ? 'wired' : 'not satisfied'}`);
-    targetsGood = wired && targetsGood;
-  }
-
-  const good = result?.ok === true && packageGood && doctorGood && indexGood && targetsGood;
-  if (!result?.ok) {
-    const count = Array.isArray(result?.errors) ? Math.min(result.errors.length, 99) : 1;
-    fail(`structural checks reported ${count} failure(s); details redacted`);
-  }
-  return good;
+  return finalizeDejaVuVerdict(result, packageGood, doctorGood, indexGood, targetsGood);
 }
 
 export async function run({ positionals }) {

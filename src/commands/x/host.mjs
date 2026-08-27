@@ -186,6 +186,107 @@ export function bindingWarnings(cfg) {
       `kit.json integrations.bindings[${index}].${error.path.replace(/^binding\./, '')}: ${error.code} (${JSON.stringify(error.value)})`));
 }
 
+/** 'ruflo agent hosts' section — detected CLIs, enabled/wired state, tier,
+ *  and the auth/billing axis, one line per managed host. */
+function printHostsSection({ cfg, hosts, scope }) {
+  const dflt = isDefault(cfg);
+  console.log(bold('ruflo agent hosts') + dim(`  (wiring scope: ${scope})`));
+  for (const h of HOSTS) {
+    const d = hosts[h.id];
+    const enabled = !!cfg.integrations.hosts[h.id];
+    const state = !d.present ? dim('not installed')
+      : !enabled ? 'installed, disabled'
+      : dflt ? 'enabled (default — ruflo default-on, no env written)'
+      : d.wired ? 'enabled, wired'
+      : 'enabled, not wired → ak sync';
+    const tier = dim(`  · ${hostTierLabel(h.id)}`);
+    // auth/billing axis — subscription ($0) vs metered key, per host.
+    const auth = d.present ? hostAuthState(h.id, { present: true }) : null;
+    const authStr = auth ? dim(`  ${auth.mode}/${auth.billing === 'subscription' ? '$0' : auth.billing}`) : '';
+    console.log(`  ${h.id.padEnd(9)} ${(d.version ? `v${d.version}` : '—').padEnd(12)} ${state}${authStr}${tier}`);
+    const note = hostAsymmetryNote(h.id);
+    if (note) console.log(`    ${dim(note)}`);
+  }
+}
+
+/** 'agentic-qe LLM provider' section — primary provider + fallback chain,
+ *  flagging any rung with no discoverable credential. */
+function printAqeProviderSection({ cfg }) {
+  const ap = cfg.providers.aqeProvider;
+  console.log(bold('\nagentic-qe LLM provider') + dim('  (built-ins: env; external: project llm-config)'));
+  console.log(`  ${(ap ?? dim('aqe default (unset)')).padEnd(24)} ${dim(`supported: ${aqeSelectableProviderTypes().join(', ')}`)}`);
+  console.log(`  ${dim(AQE_BILLING_HINT)}`);
+  const chain = cfg.providers.aqeFallback ?? [];
+  if (chain.length) {
+    const rendered = chain.map((e) => {
+      const cred = aqeProviderCredential(e.provider);
+      const models = e.models?.length ? `(${e.models.join(',')})` : dim('(no models)');
+      return `${e.provider}${models}${cred.known && !cred.present ? yellow(' ⚠ no credential') : ''}`;
+    }).join(' → ');
+    console.log(`  ${dim('fallback chain:')} ${rendered} ${dim('· .agentic-qe/llm-config.json')}`);
+    for (const g of credentialGaps(chain)) {
+      warn(`fallback rung '${g.provider}' has no credential — needs ${g.missing.join(', ')} in the env; it will fail over into nothing`);
+    }
+  } else {
+    console.log(`  ${dim('fallback chain: none (aqe auto-enables keyed providers)')}`);
+  }
+}
+
+/** 'aqe provider credentials' section — credential state for EVERY aqe
+ *  provider type, so a provider that is credentialed on this machine
+ *  (openrouter, say) is never invisible while an uncredentialed one is
+ *  displayed as a configured fallback (#54). */
+function printAqeCredentialsSection() {
+  const creds = detectAqeProviders();
+  console.log(bold('\naqe provider credentials') + dim('  (keys read from env; never persisted)'));
+  for (const p of aqeSelectableProviderTypes()) {
+    const c = creds[p];
+    const state = !c.known
+      ? `admitted · credential not introspectable · billing ${c.billing} (declared/unverified)`
+      : c.present ? (c.billing === 'local' ? 'local' : c.billing === 'subscription' ? 'subscription' : 'key present')
+        : `no key ${dim(`(${c.missing.join(', ')})`)}`;
+    console.log(`  ${p.padEnd(14)} ${state}${c.source && c.present && c.billing === 'metered' ? dim(`  · ${c.source}`) : ''}`);
+  }
+}
+
+/** 'ruflo LLM providers' section — registered intent per API provider. */
+function printRufloProvidersSection({ cfg, providers }) {
+  const cm = cfg.providers.models ?? [];
+  console.log(bold('\nruflo LLM providers') + dim('  (registered intent; direct agents select provider + model)'));
+  for (const p of API_PROVIDERS) {
+    const cfgEntry = cm.find((m) => m.id === p.id);
+    const key = p.keyEnv.length
+      ? (providers[p.id]?.credentialPresent ? 'key present' : 'no key') : 'local';
+    const conf = cfgEntry ? `registered${cfgEntry.model ? ` (${cfgEntry.model})` : ''}` : dim('not registered');
+    console.log(`  ${p.id.padEnd(10)} ${key.padEnd(12)} ${conf}`);
+  }
+}
+
+/** Closing summary — idle-but-installed hosts, and the dual-host tips. */
+function printHostSummarySection({ cfg, hosts }) {
+  const codexIdle = hosts.codex.present && !cfg.integrations.hosts.codex;
+  const ocIdle = hosts.opencode.present && !cfg.integrations.hosts.opencode;
+  console.log('');
+  if (codexIdle) info('codex is installed but disabled — enable it with: ak host pick');
+  if (ocIdle) info('opencode is installed but disabled — enable it with: ak host pick --host claude,opencode');
+  if (!codexIdle && !ocIdle) ok('host/provider config reflects installed CLIs');
+  printDualHostTips(cfg);
+}
+
+// Human-readable `status()` renders as an ordered array of section printers
+// over one shared ctx ({cfg, hosts, providers, scope, cwd}) — mirrors the
+// house section-registry idiom (ADR-0037) so a future section is one array
+// entry, not a new branch threaded through a growing function.
+const STATUS_SECTIONS = [
+  printHostsSection,
+  printAqeProviderSection,
+  printAqeCredentialsSection,
+  printRufloProvidersSection,
+  ({ cfg }) => printActivityRoutingTable(cfg),
+  ({ cwd }) => printQeCourtStatus(cwd),
+  printHostSummarySection,
+];
+
 async function status({ flags, cwd }) {
   const cfg = loadKitConfig();
   const facts = await collectIntegrationFacts({ cwd, cfg });
@@ -209,79 +310,8 @@ async function status({ flags, cwd }) {
 
   for (const message of bindingWarnings(cfg)) warn(message);
 
-  const dflt = isDefault(cfg);
-  console.log(bold('ruflo agent hosts') + dim(`  (wiring scope: ${scope})`));
-  for (const h of HOSTS) {
-    const d = hosts[h.id];
-    const enabled = !!cfg.integrations.hosts[h.id];
-    const state = !d.present ? dim('not installed')
-      : !enabled ? 'installed, disabled'
-      : dflt ? 'enabled (default — ruflo default-on, no env written)'
-      : d.wired ? 'enabled, wired'
-      : 'enabled, not wired → ak sync';
-    const tier = dim(`  · ${hostTierLabel(h.id)}`);
-    // auth/billing axis — subscription ($0) vs metered key, per host.
-    const auth = d.present ? hostAuthState(h.id, { present: true }) : null;
-    const authStr = auth ? dim(`  ${auth.mode}/${auth.billing === 'subscription' ? '$0' : auth.billing}`) : '';
-    console.log(`  ${h.id.padEnd(9)} ${(d.version ? `v${d.version}` : '—').padEnd(12)} ${state}${authStr}${tier}`);
-    const note = hostAsymmetryNote(h.id);
-    if (note) console.log(`    ${dim(note)}`);
-  }
-
-  // agentic-qe LLM provider (AQE_LLM_PROVIDER) + fallback chain
-  const ap = cfg.providers.aqeProvider;
-  console.log(bold('\nagentic-qe LLM provider') + dim('  (built-ins: env; external: project llm-config)'));
-  console.log(`  ${(ap ?? dim('aqe default (unset)')).padEnd(24)} ${dim(`supported: ${aqeSelectableProviderTypes().join(', ')}`)}`);
-  console.log(`  ${dim(AQE_BILLING_HINT)}`);
-  const chain = cfg.providers.aqeFallback ?? [];
-  if (chain.length) {
-    const rendered = chain.map((e) => {
-      const cred = aqeProviderCredential(e.provider);
-      const models = e.models?.length ? `(${e.models.join(',')})` : dim('(no models)');
-      return `${e.provider}${models}${cred.known && !cred.present ? yellow(' ⚠ no credential') : ''}`;
-    }).join(' → ');
-    console.log(`  ${dim('fallback chain:')} ${rendered} ${dim('· .agentic-qe/llm-config.json')}`);
-    for (const g of credentialGaps(chain)) {
-      warn(`fallback rung '${g.provider}' has no credential — needs ${g.missing.join(', ')} in the env; it will fail over into nothing`);
-    }
-  } else {
-    console.log(`  ${dim('fallback chain: none (aqe auto-enables keyed providers)')}`);
-  }
-
-  // Credential state for EVERY aqe provider type, so a provider that is
-  // credentialed on this machine (openrouter, say) is never invisible while an
-  // uncredentialed one is displayed as a configured fallback (#54).
-  const creds = detectAqeProviders();
-  console.log(bold('\naqe provider credentials') + dim('  (keys read from env; never persisted)'));
-  for (const p of aqeSelectableProviderTypes()) {
-    const c = creds[p];
-    const state = !c.known
-      ? `admitted · credential not introspectable · billing ${c.billing} (declared/unverified)`
-      : c.present ? (c.billing === 'local' ? 'local' : c.billing === 'subscription' ? 'subscription' : 'key present')
-        : `no key ${dim(`(${c.missing.join(', ')})`)}`;
-    console.log(`  ${p.padEnd(14)} ${state}${c.source && c.present && c.billing === 'metered' ? dim(`  · ${c.source}`) : ''}`);
-  }
-
-  const cm = cfg.providers.models ?? [];
-  console.log(bold('\nruflo LLM providers') + dim('  (registered intent; direct agents select provider + model)'));
-  for (const p of API_PROVIDERS) {
-    const cfgEntry = cm.find((m) => m.id === p.id);
-    const key = p.keyEnv.length
-      ? (providers[p.id]?.credentialPresent ? 'key present' : 'no key') : 'local';
-    const conf = cfgEntry ? `registered${cfgEntry.model ? ` (${cfgEntry.model})` : ''}` : dim('not registered');
-    console.log(`  ${p.id.padEnd(10)} ${key.padEnd(12)} ${conf}`);
-  }
-
-  printActivityRoutingTable(cfg);
-  printQeCourtStatus(cwd);
-
-  const codexIdle = hosts.codex.present && !cfg.integrations.hosts.codex;
-  const ocIdle = hosts.opencode.present && !cfg.integrations.hosts.opencode;
-  console.log('');
-  if (codexIdle) info('codex is installed but disabled — enable it with: ak host pick');
-  if (ocIdle) info('opencode is installed but disabled — enable it with: ak host pick --host claude,opencode');
-  if (!codexIdle && !ocIdle) ok('host/provider config reflects installed CLIs');
-  printDualHostTips(cfg);
+  const ctx = { cfg, hosts, providers, scope, cwd };
+  for (const section of STATUS_SECTIONS) section(ctx);
   return 0;
 }
 

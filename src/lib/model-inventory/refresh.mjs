@@ -245,39 +245,70 @@ function applyBindings(models, bindings, capturedAt, fingerprint) {
   return result;
 }
 
+function discoveryProfileFingerprints(discoveryResults) {
+  return Object.fromEntries(discoveryResults
+    .filter((result) => result?.source?.scopeFingerprint)
+    .map((result) => [result.source.owner ?? result.source.id, result.source.scopeFingerprint]));
+}
+
+function snapshotSources(discoveryResults, observedSource, fingerprint) {
+  return [
+    ...discoveryResults.flatMap(({ source, sources: additional = [] }) => [source, ...additional]),
+    observedSource,
+  ]
+    .filter(Boolean)
+    .map((source) => ({ ...source, scopeFingerprint: fingerprint, scopeId: fingerprint }));
+}
+
+function discoveredAndObservedModels(discoveryResults, observedModels, fingerprint) {
+  return mergeModels([
+    ...discoveryResults.flatMap(({ models }) => models ?? []),
+    ...(observedModels ?? []),
+  ].map((record) => rescopeRecord(record, fingerprint)));
+}
+
+function snapshotDiagnosticCodes(discoveryResults, collection) {
+  const diagnostics = [
+    ...discoveryResults.flatMap(({ diagnostics: entryDiagnostics }) => entryDiagnostics ?? []),
+    ...(collection?.observed?.diagnostics ?? []),
+    ...(collection?.bindings?.diagnostics ?? []),
+  ].map((entry) => (typeof entry === 'string' ? entry : entry.code)).filter(Boolean);
+  return [...new Set(diagnostics)];
+}
+
+function modelSnapshotId({
+  capturedAt, fingerprint, sources, models, bindings,
+}) {
+  const digestInput = JSON.stringify({
+    capturedAt, fingerprint, sources, models, bindings,
+  });
+  return `models:${createHash('sha256').update(digestInput).digest('hex').slice(0, 20)}`;
+}
+
 export function composeModelSnapshot(collection, {
   scope = {}, scopeKey, capturedAt = collection?.generatedAt ?? new Date().toISOString(),
 } = /** @type {any} */ ({})) {
   const discoveryResults = Object.values(collection?.discovery?.results ?? {});
-  const profileFingerprints = Object.fromEntries(discoveryResults
-    .filter((result) => result?.source?.scopeFingerprint)
-    .map((result) => [result.source.owner ?? result.source.id, result.source.scopeFingerprint]));
+  const profileFingerprints = discoveryProfileFingerprints(discoveryResults);
   const hosts = Object.keys(collection?.discovery?.results ?? {}).sort();
   const fingerprint = scopeFingerprint('inventory', { ...scope, hosts: hosts.join(',') }, scopeKey);
-  const sources = [
-    ...discoveryResults.flatMap(({ source, sources: additional = [] }) => [source, ...additional]),
-    collection?.observed?.source,
-  ]
-    .filter(Boolean)
-    .map((source) => ({ ...source, scopeFingerprint: fingerprint, scopeId: fingerprint }));
-  const discoveredAndObserved = mergeModels([
-    ...discoveryResults.flatMap(({ models }) => models ?? []),
-    ...(collection?.observed?.models ?? []),
-  ].map((record) => rescopeRecord(record, fingerprint)));
+  const sources = snapshotSources(discoveryResults, collection?.observed?.source, fingerprint);
+  const discoveredAndObserved = discoveredAndObservedModels(
+    discoveryResults, collection?.observed?.models, fingerprint,
+  );
   const bindings = collection?.bindings?.bindings ?? [];
   const models = applyBindings(discoveredAndObserved, bindings, capturedAt, fingerprint);
-  const diagnostics = [
-    ...discoveryResults.flatMap(({ diagnostics }) => diagnostics ?? []),
-    ...(collection?.observed?.diagnostics ?? []),
-    ...(collection?.bindings?.diagnostics ?? []),
-  ].map((entry) => typeof entry === 'string' ? entry : entry.code).filter(Boolean);
-  const digestInput = JSON.stringify({ capturedAt, fingerprint, sources, models, bindings });
+  const diagnostics = snapshotDiagnosticCodes(discoveryResults, collection);
   return normalizeSnapshot({
     schemaVersion: MODEL_INVENTORY_SCHEMA_VERSION,
-    snapshotId: `models:${createHash('sha256').update(digestInput).digest('hex').slice(0, 20)}`,
+    snapshotId: modelSnapshotId({
+      capturedAt, fingerprint, sources, models, bindings,
+    }),
     capturedAt,
-    scope: { fingerprint, machine: null, project: null, hosts, profileFingerprints },
-    sources, models, bindings, changes: [], opportunities: [], diagnostics: [...new Set(diagnostics)],
+    scope: {
+      fingerprint, machine: null, project: null, hosts, profileFingerprints,
+    },
+    sources, models, bindings, changes: [], opportunities: [], diagnostics,
   });
 }
 

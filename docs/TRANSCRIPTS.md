@@ -36,12 +36,12 @@ rewritten; rule 3 of the module header, `usage-index.mjs:22-29`):
 
 | Host | Store | Discovered by |
 |---|---|---|
-| Claude Code | `~/.claude/projects/<encoded-project-dir>/<sessionId>.jsonl` | `listClaude` (`usage-index.mjs:916-926`) — exactly one level of project directories |
-| Codex CLI | `~/.codex/sessions/<yyyy>/<mm>/<dd>/rollout-<ts>-<uuid>.jsonl` | `listCodex` (`usage-index.mjs:878-891`) — the `yyyy/mm/dd` tree walk |
+| Claude Code | `~/.claude/projects/<encoded-project-dir>/<sessionId>.jsonl` | `listClaude` (`usage-index.mjs:206-218`) — exactly one level of project directories |
+| Codex CLI | `~/.codex/sessions/<yyyy>/<mm>/<dd>/rollout-<ts>-<uuid>.jsonl` | `listCodex` (`usage-index.mjs:221-240`) — the `yyyy/mm/dd` tree walk |
 
-Roots come from `defaultRoots()` (`usage-index.mjs:908-912`) and are injectable
+Roots come from `defaultRoots()` (`usage-index.mjs:198-203`) and are injectable
 for tests. A malformed line is skipped, never fatal (`jsonLines`,
-`usage-index.mjs:381-387` — one corrupt line must not cost a whole file).
+`usage-parsers.mjs:167-173` — one corrupt line must not cost a whole file).
 
 Host evidence is not inference-provider proof. A Claude transcript may describe Anthropic-,
 OpenRouter-, or Ollama-served inference. ADR-0016 defines separate
@@ -52,32 +52,32 @@ transcript host/parser identity unless other evidence grounds the inference prov
 ### 1.1 Claude entry vocabulary
 
 Each line has a top-level `type`. The parser (`parseClaude`,
-`usage-index.mjs:480-563`) reads:
+`usage-parsers.mjs:376-401`) reads:
 
 | `type` | What the parser takes from it |
 |---|---|
-| `ai-title` | The model-written session title (`usage-index.mjs:488`) — preferred over the first-prompt fallback |
+| `ai-title` | The model-written session title (`usage-parsers.mjs:383`) — preferred over the first-prompt fallback |
 | `user` | A user-**role** turn — which is *not* the same as "the human"; see §3 |
-| `assistant` | A model turn: `model` id, per-turn `usage` token counts, `tool_use` blocks (`usage-index.mjs:508-551`) |
-| any | Side-band fields read regardless of type: `attributionSkill`/`attributionPlugin` (`usage-index.mjs:489-490`), `isSidechain` (`usage-index.mjs:491`), `cwd` for project derivation |
+| `assistant` | A model turn: `model` id, per-turn `usage` token counts, `tool_use` blocks (`usage-parsers.mjs:329-368`) |
+| any | Side-band fields read regardless of type: `attributionSkill`/`attributionPlugin` (`usage-parsers.mjs:384-385`), `isSidechain` (`usage-parsers.mjs:387`), `cwd` for project derivation |
 
 An assistant entry with `isApiErrorMessage: true` is a **local placeholder**
 Claude Code writes when a request dies before a real completion (connection
 drop, rate limit, auth failure — `model: "<synthetic>"`, all-zero usage). It
 is real engaged time but not a model attempt: counted as an *exception*, never
-pushed into `models` or priced (`usage-index.mjs:595-606`; the full story is
+pushed into `models` or priced (`usage-parsers.mjs:345-353`; the full story is
 [`USAGE-SCORECARD-METRICS.md`](USAGE-SCORECARD-METRICS.md) §10).
 
 ### 1.2 Codex entry vocabulary
 
 Codex rollout lines carry `type` + `payload`. The parser (`parseCodex`,
-`usage-index.mjs:580-681`) reads:
+`usage-parsers.mjs:578-593`) reads:
 
 | `type` / `payload.type` | What the parser takes from it |
 |---|---|
-| `session_meta` | Authoritative session id, `cwd`, and `thread_source` (`usage-index.mjs:592-597`) — `"subagent"` marks a thread_spawn replay whose tokens are excluded from aggregation (`usage-index.mjs:662`; `USAGE-SCORECARD-METRICS.md` Appendix A, Bug B) |
-| `turn_context` | The model id in effect from this point on (`usage-index.mjs:598`) |
-| `event_msg` → `token_count` | A **cumulative** usage snapshot; only the last one is kept (`usage-index.mjs:662-664`) |
+| `session_meta` | Authoritative session id, `cwd`, and `thread_source` (`usage-parsers.mjs:421-428`) — `"subagent"` marks a thread_spawn replay whose tokens are excluded from aggregation (`usage-parsers.mjs:546`; `USAGE-SCORECARD-METRICS.md` Appendix A, Bug B) |
+| `turn_context` | The model id in effect from this point on (`usage-parsers.mjs:431-437`) |
+| `event_msg` → `token_count` | A **cumulative** usage snapshot; only the last one is kept (`usage-parsers.mjs:474-480`) |
 | `event_msg` → `user_message` | A legacy-format real human prompt — Codex does not route tool output through this event |
 | `event_msg` → `agent_message` | A legacy-format model response |
 | `event_msg` → `item_completed` → `UserMessage` | A current-format real human prompt; text blocks use the observed lowercase `text` discriminator |
@@ -131,8 +131,8 @@ The same parsers serve two very different callers, switched by `withTurns`:
 
 | Path | Entry point | `withTurns` | Message bodies | Cached? |
 |---|---|---|---|---|
-| **Scan** — the aggregate index behind the Scorecard/Findings/Sessions views | `buildIndex` → `parseFile` (`usage-index.mjs:925`) | `false` | never held — holding them would balloon memory across 3,000+ files (`usage-index.mjs:490-493`) | yes: per-file derived records in `~/.config/agentic-kit/usage-index.json`, keyed `(path, mtime, size)`, invalidated wholesale by `SCHEMA_VERSION` (`usage-index.mjs:77`) |
-| **Reader** — one transcript for the Transcript view | `readSession` (`usage-index.mjs:1566`) | `true` | full turn list built | **never** — every call re-reads and re-parses the one file |
+| **Scan** — the aggregate index behind the Scorecard/Findings/Sessions views | `buildIndex` → `parseFile` (`usage-index.mjs:255`) | `false` | never held — holding them would balloon memory across 3,000+ files (`usage-parsers.mjs:371-375`) | yes: per-file derived records in `~/.config/agentic-kit/usage-index.json`, keyed `(path, mtime, size)`, invalidated wholesale by `SCHEMA_VERSION` (`usage-index.mjs:92`) |
+| **Reader** — one transcript for the Transcript view | `readSession` (`usage-index.mjs:715`) | `true` | full turn list built | **never** — every call re-reads and re-parses the one file |
 
 ![Figure: one parser, two read paths — the scan path (withTurns false) caches per-file records keyed by path, mtime and size; the reader path (withTurns true) builds full turns and is never cached](assets/transcript-read-paths.svg)
 
@@ -140,7 +140,7 @@ The reader path being cache-free is load-bearing for maintainers: **turn-shape
 changes (like the `kind` field, §3) need no `SCHEMA_VERSION` bump**, because
 no turn is ever served from cache — whereas *session-record* fields (like
 `exceptions`) do, since stale cached records would otherwise sum `undefined`
-into totals (`usage-index.mjs:40-50`; the incidents behind that rule are
+into totals (`usage-index.mjs:59-65`; the incidents behind that rule are
 recorded in `USAGE-SCORECARD-METRICS.md` Appendix A).
 
 ---
@@ -153,11 +153,11 @@ recorded in `USAGE-SCORECARD-METRICS.md` Appendix A).
 |---|---|---|
 | `role` | all | `"user"` or `"assistant"` — the **Messages-API role**, not the author (see below) |
 | `at` | all | ISO timestamp |
-| `text` | all | Flattened display text (`claudeText`, `usage-index.mjs:459-479` — binary payloads dropped: a pasted screenshot renders as `[image]`, a tool result is prefixed `[tool result]`) |
-| `model` | assistant | The model id; the literal string `exception` for an API-error placeholder turn (`usage-index.mjs:526`) |
+| `text` | all | Flattened display text (`claudeText`, `telemetry-records.mjs:38-55` — binary payloads dropped: a pasted screenshot renders as `[image]`, a tool result is prefixed `[tool result]`) |
+| `model` | assistant | The model id; the literal string `exception` for an API-error placeholder turn (`usage-parsers.mjs:350`) |
 | `tools` | assistant | Tool names invoked in the turn |
-| `prompt` | user | `isHumanPrompt`'s verdict (`usage-index.mjs:441-450`) — drives the **prompt counts** |
-| `kind` | user | `'prompt'` \| `'tool-result'` \| `'context'` — drives the **attribution label** (`userTurnKind`, `usage-index.mjs:468-479`) |
+| `prompt` | user | `isHumanPrompt`'s verdict (`usage-parsers.mjs:262-271`) — drives the **prompt counts** |
+| `kind` | user | `'prompt'` \| `'tool-result'` \| `'context'` — drives the **attribution label** (`userTurnKind`, `usage-parsers.mjs:290-294`) |
 | `exception` | assistant | `true` on API-error placeholder turns |
 | `truncated`, `originalChars` | any | Present **only** when the turn was abridged (§4.3) |
 
@@ -177,7 +177,7 @@ story is [Appendix A](#appendix-a--fix-history).)
 
 ### 3.2 `kind` — the attribution field
 
-`userTurnKind` (`usage-index.mjs:523-528`) classifies every user-role turn:
+`userTurnKind` (`usage-parsers.mjs:290-294`) classifies every user-role turn:
 
 | `kind` | Test | Meaning |
 |---|---|---|
@@ -195,12 +195,12 @@ Two deliberate subtleties:
 * **Harness-output envelopes are excluded from the prompt *count* too.**
   `isHumanPrompt` shares `HARNESS_OUTPUT_RE`, so a session's `prompts` figure
   never counts stdout dumps or task notifications as things the person said
-  (`SCHEMA_VERSION` 5, `usage-index.mjs:47-51`; the correction this shipped
+  (`SCHEMA_VERSION` 5, `usage-index.mjs:66-69`; the correction this shipped
   with is in [Appendix A](#appendix-a--fix-history)).
 * **`tool-result` outranks `context`**: a `tool_result` block on an `isMeta`
   entry is still tool feedback.
 
-Codex user turns are `kind: 'prompt'` by construction (`usage-index.mjs:716-725`)
+Codex user turns are `kind: 'prompt'` by construction (`usage-parsers.mjs:486-492`)
 — rollouts only record real prompts as `user_message` events (§1.2).
 
 Coverage: `tests/kit/usage-index.test.mjs` — "user-role turns carry a kind"
@@ -211,31 +211,31 @@ and image-only pastes get the right kind" (the two edges).
 
 ## 4. The `readSession` pipeline — how one session becomes a payload
 
-`readSession(id, opts)` (`usage-index.mjs:1573-1629`) is the only way
+`readSession(id, opts)` (`usage-index.mjs:715-770`) is the only way
 transcript content leaves the module, and every step is a gate:
 
 ### 4.1 Locate, contain, bound
 
 1. **Id grammar before any filesystem access** — `VALID_ID`
    (`/^[A-Za-z0-9._-]{1,128}$/`, `usage-index.mjs:95`) rejects traversal
-   shapes with `ERR_INVALID_SESSION_ID` (`usage-index.mjs:1568-1572`).
-2. **Locate by id** across both roots (`locate`, `usage-index.mjs:1578`),
+   shapes with `ERR_INVALID_SESSION_ID` (`usage-index.mjs:657-662`).
+2. **Locate by id** across both roots (`locate`, `usage-index.mjs:667`),
    consulting the scan cache when present but never requiring it —
    `readSession` works with no prior `buildIndex`.
-3. **Realpath containment** (`usage-index.mjs:1587-1601`) — the resolved file
+3. **Realpath containment** (`usage-index.mjs:736-748`) — the resolved file
    must live under a transcript root *after* `realpathSync` collapses
    symlinks; a symlink planted inside a root pointing at `/etc/anything`
    passes a lexical `startsWith` but fails this. Roots are realpath'd too so
    a symlinked dotfiles setup still works.
-4. **Size cap** — `MAX_SESSION_BYTES` (64 MB, `usage-index.mjs:90`): a
+4. **Size cap** — `MAX_SESSION_BYTES` (64 MB, `usage-index.mjs:102`): a
    transcript is read whole and JSON-expands ~5×, so an unbounded read is a
    memory-amplification primitive. Oversized reads as unavailable, not risky.
 
 ### 4.2 Parse and price
 
 The file is parsed with `withTurns: true` by the provider's parser
-(`usage-index.mjs:1614-1618`), and `meta` is assembled
-(`usage-index.mjs:1624-1653`) with the same fields the Sessions view rows
+(`usage-index.mjs:762-766`), and `meta` is assembled
+(`usage-aggregate.mjs:477-495`) with the same fields the Sessions view rows
 carry — `prompts`, `responses`, `exceptions`, `sidechain`, `threadSource`,
 `models`, `tools`, `skill`/`plugin`, worktree — plus a `cost` priced from the
 same per-model usage rows `aggregate()` uses.
@@ -252,11 +252,11 @@ never renames a retained session model, changes historical token pricing, or rew
 
 ### 4.3 Mask, then truncate — both marked, differently
 
-Every turn body is passed through `maskSecrets` (`usage-index.mjs:208` — the
+Every turn body is passed through `maskSecrets` (`usage-aggregate.mjs:133-138` — the
 23 secret shapes) **server-side, before
 serialization**, then length-capped at `MAX_TURN_CHARS` (40,000,
-`usage-index.mjs:89`) with the marker appended
-(`usage-index.mjs:1724-1734`). Two invariants:
+`usage-aggregate.mjs:63`) with the marker appended
+(`usage-aggregate.mjs:502-511`). Two invariants:
 
 * **Presence is the signal.** `truncated`/`originalChars` are emitted only
   when the slice fired, so a complete turn cannot be misread as abridged.
@@ -404,7 +404,7 @@ was wrong before, for the curious.
   `isHumanPrompt` once counted `harness-output` envelopes as human prompts —
   32 claimed vs 20 real on the reference session. Cached session records
   carried the inflated counts, hence the wholesale `SCHEMA_VERSION` 5 cache
-  invalidation (`usage-index.mjs:48-51`).
+  invalidation (`usage-index.mjs:66-69`).
 * **Session expander fields shipped but unrendered.** The per-session fields
   §6.1's expander now renders (classification `basis` + confidence, the
   token split, flags) once travelled on the wire and rendered nowhere.
@@ -412,7 +412,7 @@ was wrong before, for the curious.
   assembled `meta` left `cost` undefined, and `fmtUsd(undefined)` renders the
   truthy string `"$0.00"` — a fixed-looking zero on a panel whose whole
   subject is cost. `meta.cost` is now priced via `sessionCost()` from the
-  same per-model usage rows `aggregate()` uses (`usage-index.mjs:1696`).
+  same per-model usage rows `aggregate()` uses (`usage-aggregate.mjs:494`).
 * **Aggregate-side incidents** (the v4/v5 cache bumps, the Codex parsing
   defects) are recorded in `USAGE-SCORECARD-METRICS.md` Appendix A.
 

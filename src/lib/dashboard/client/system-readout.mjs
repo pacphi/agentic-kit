@@ -384,7 +384,10 @@ import { fmtNum, fmtTok } from './usage.mjs';
     if(p.truncated)note+=" The measured list is capped, so fewer rows than on-disk projects.";
     return note;
   }
-  export function renderSysSummary(d){
+  // renderSysSummary was one CC-28 function mixing the KPI band, the disk
+  // gauge band, and a call into renderSysConsumers. Split by region; each
+  // keeps its original logic verbatim, so the rendered DOM is unchanged.
+  function renderSysKpis(d){
     var install=d.install,storage=d.storage,catalog=d.catalog,projects=d.projects;
     var rt=d.runtime||{},totals=rt.totals||{};
     var kpis=document.getElementById("sys-kpis");
@@ -414,6 +417,10 @@ import { fmtNum, fmtTok } from './usage.mjs';
     var kpiNote=document.getElementById("sys-kpis-note");
     if(kpiNote)kpiNote.innerHTML=projectsLiner(projects);
 
+  }
+
+  function renderSysGaugeBand(d){
+    var install=d.install,storage=d.storage;
     var band=document.getElementById("sys-gauge");
     if(band){
       var disk=(install&&install.disk)||null;
@@ -426,6 +433,11 @@ import { fmtNum, fmtTok } from './usage.mjs';
         band.innerHTML=diskBand(used,data,total==null?0:total,free);
       }
     }
+  }
+
+  export function renderSysSummary(d){
+    renderSysKpis(d);
+    renderSysGaugeBand(d);
     renderSysConsumers(d);
   }
 

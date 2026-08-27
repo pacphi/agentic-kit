@@ -53,49 +53,66 @@ function dimensionFilter(value) {
   return value;
 }
 
-function parseQuery(raw) {
-  const query = raw instanceof URLSearchParams ? raw : new URLSearchParams(raw ?? '');
-  for (const key of query.keys()) if (!QUERY_KEYS.has(key)) throw invalidQuery();
-  const view = one(query, 'view') ?? 'full';
-  if (!['full', 'summary', 'inventory'].includes(view)) throw invalidQuery();
-  if (view !== 'inventory') {
-    for (const key of query.keys()) if (!['view', 'token', 'days'].includes(key)) throw invalidQuery();
-    const rawDays = one(query, 'days');
-    if (view !== 'summary' && rawDays != null) throw invalidQuery();
-    if (rawDays != null && (!/^\d+$/.test(rawDays) || Number(rawDays) < 1 || Number(rawDays) > 365)) {
-      throw invalidQuery();
-    }
-    return { view, days: rawDays == null ? null : Number(rawDays) };
+function parseNonInventoryQuery(query, view) {
+  for (const key of query.keys()) if (!['view', 'token', 'days'].includes(key)) throw invalidQuery();
+  const rawDays = one(query, 'days');
+  if (view !== 'summary' && rawDays != null) throw invalidQuery();
+  if (rawDays != null && (!/^\d+$/.test(rawDays) || Number(rawDays) < 1 || Number(rawDays) > 365)) {
+    throw invalidQuery();
   }
-  if (one(query, 'days') != null) throw invalidQuery();
-  const integer = (name, fallback) => {
-    const rawValue = one(query, name);
-    if (rawValue == null || rawValue === '') return fallback;
-    if (!/^\d+$/.test(rawValue)) throw invalidQuery();
-    const value = Number(rawValue);
-    if (!Number.isSafeInteger(value) || value > 10_000_000) throw invalidQuery();
-    return value;
-  };
+  return { view, days: rawDays == null ? null : Number(rawDays) };
+}
+
+function queryInteger(query, name, fallback) {
+  const rawValue = one(query, name);
+  if (rawValue == null || rawValue === '') return fallback;
+  if (!/^\d+$/.test(rawValue)) throw invalidQuery();
+  const value = Number(rawValue);
+  if (!Number.isSafeInteger(value) || value > 10_000_000) throw invalidQuery();
+  return value;
+}
+
+function inventorySortSelection(query) {
   const sort = one(query, 'sort') ?? 'displayName';
   const direction = one(query, 'direction') ?? 'asc';
   const relevance = one(query, 'relevance') ?? 'relevant';
   if (!SORTS.has(sort) || !['asc', 'desc'].includes(direction)
     || !['relevant', 'catalog', 'all'].includes(relevance)) throw invalidQuery();
+  return { sort, direction, relevance };
+}
+
+function inventoryEvidenceFilter(query) {
   const evidenceField = one(query, 'evidenceField');
   const evidenceValue = dimensionFilter(one(query, 'evidenceValue'));
   if ((evidenceField == null) !== (evidenceValue == null)
     || (evidenceField != null && !DIMENSIONS.includes(evidenceField))) throw invalidQuery();
+  return { evidenceField, evidenceValue };
+}
+
+function parseInventoryQuery(query, view) {
+  if (one(query, 'days') != null) throw invalidQuery();
+  const { sort, direction, relevance } = inventorySortSelection(query);
+  const { evidenceField, evidenceValue } = inventoryEvidenceFilter(query);
   const dimensions = Object.fromEntries(DIMENSIONS.map((name) => (
     [name, dimensionFilter(one(query, name))]
   )));
   return {
-    view, offset: integer('offset', 0), limit: Math.min(100, Math.max(1, integer('limit', 50))),
+    view, offset: queryInteger(query, 'offset', 0),
+    limit: Math.min(100, Math.max(1, queryInteger(query, 'limit', 50))),
     sort, direction, relevance, search: queryText(query, 'search'),
     host: queryText(query, 'host'), provider: queryText(query, 'provider'),
     publisher: queryText(query, 'publisher'), lifecycle: queryText(query, 'lifecycle', 64),
     snapshotId: queryText(query, 'snapshotId', 128),
     evidenceField, evidenceValue, dimensions,
   };
+}
+
+function parseQuery(raw) {
+  const query = raw instanceof URLSearchParams ? raw : new URLSearchParams(raw ?? '');
+  for (const key of query.keys()) if (!QUERY_KEYS.has(key)) throw invalidQuery();
+  const view = one(query, 'view') ?? 'full';
+  if (!['full', 'summary', 'inventory'].includes(view)) throw invalidQuery();
+  return view === 'inventory' ? parseInventoryQuery(query, view) : parseNonInventoryQuery(query, view);
 }
 
 function isRelevant(model) {

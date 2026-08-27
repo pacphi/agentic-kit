@@ -44,6 +44,7 @@
     "test:qe-court-live": "node --test tests/live/qe-court-participant-transport.test.mjs",
     "typecheck": "tsc -p tsconfig.json",
     "lint": "eslint .",
+    "lint:cc": "eslint src bin --rule 'complexity: [2, 50]'",
     "lint:fix": "eslint . --fix",
     "lint:md": "markdownlint-cli2",
     "lint:md:fix": "markdownlint-cli2 --fix",
@@ -54,7 +55,7 @@
     "audit:fix": "pnpm audit --fix=override",
     "outdated": "pnpm outdated",
     "upgrade": "pnpm up",
-    "check": "pnpm run typecheck && pnpm run lint && pnpm run lint:md && pnpm run build && pnpm test"
+    "check": "pnpm run typecheck && pnpm run lint && pnpm run lint:cc && pnpm run lint:md && pnpm run build && pnpm test"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

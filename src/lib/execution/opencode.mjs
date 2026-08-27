@@ -365,28 +365,42 @@ function errorCategory(error) {
   return 'worker_error';
 }
 
+/** Map a terminal observation to {status, exitCategory, failure} — the
+ *  branching heart of terminalResult, split out so the surrounding function's
+ *  own complexity is just the field-mapping ternaries/optional-chains. */
+function classifyObservation(observation, assistant) {
+  if (observation.type === 'permission') {
+    return { status: 'blocked', exitCategory: 'permission_required', failure: { permission: observation.permission?.id ?? null } };
+  }
+  if (observation.type === 'timeout') {
+    return { status: 'timed_out', exitCategory: 'timeout', failure: { reason: observation.reason ?? 'timeout' } };
+  }
+  if (observation.type === 'cancelled') {
+    return { status: 'cancelled', exitCategory: 'cancelled', failure: { reason: 'cancelled' } };
+  }
+  if (observation.type === 'orphaned') {
+    return { status: 'failed', exitCategory: 'orphaned', failure: { reason: 'owned OpenCode server did not terminate' } };
+  }
+  if (observation.type === 'error' || assistant?.error) {
+    const error = observation.error ?? assistant?.error ?? null;
+    return { status: 'failed', exitCategory: errorCategory(error), failure: error ?? { reason: 'OpenCode session failed' } };
+  }
+  if (observation.type !== 'idle') {
+    return { status: 'failed', exitCategory: 'protocol_error', failure: { reason: 'unknown terminal event' } };
+  }
+  return { status: 'succeeded', exitCategory: 'success', failure: null };
+}
+
+const terminalResultUsage = (assistant) => (
+  assistant?.tokens ? { tokens: assistant.tokens, cost: assistant.cost ?? null } : null
+);
+
 function terminalResult(state, observation, clock) {
   const endedAt = clock();
   const startedAt = state.startedAt;
   const durationMs = Math.max(0, Date.parse(endedAt) - Date.parse(startedAt));
   const assistant = observation.assistant?.info ?? null;
-  let status = 'succeeded';
-  let exitCategory = 'success';
-  let failure = null;
-  if (observation.type === 'permission') {
-    status = 'blocked'; exitCategory = 'permission_required'; failure = { permission: observation.permission?.id ?? null };
-  } else if (observation.type === 'timeout') {
-    status = 'timed_out'; exitCategory = 'timeout'; failure = { reason: observation.reason ?? 'timeout' };
-  } else if (observation.type === 'cancelled') {
-    status = 'cancelled'; exitCategory = 'cancelled'; failure = { reason: 'cancelled' };
-  } else if (observation.type === 'orphaned') {
-    status = 'failed'; exitCategory = 'orphaned'; failure = { reason: 'owned OpenCode server did not terminate' };
-  } else if (observation.type === 'error' || assistant?.error) {
-    const error = observation.error ?? assistant?.error ?? null;
-    status = 'failed'; exitCategory = errorCategory(error); failure = error ?? { reason: 'OpenCode session failed' };
-  } else if (observation.type !== 'idle') {
-    status = 'failed'; exitCategory = 'protocol_error'; failure = { reason: 'unknown terminal event' };
-  }
+  const { status, exitCategory, failure } = classifyObservation(observation, assistant);
   return validateWorkerResult({
     workerId: state.worker.id, activity: state.worker.activity, role: state.worker.role, host: 'opencode',
     status, exitCategory, startedAt, endedAt, durationMs,
@@ -396,7 +410,7 @@ function terminalResult(state, observation, clock) {
     observedModel: assistant?.modelID ?? null,
     sessionId: state.sessionId ?? null,
     transcriptRefs: state.sessionId ? [`opencode://session/${state.sessionId}`] : [],
-    failure, usage: assistant?.tokens ? { tokens: assistant.tokens, cost: assistant.cost ?? null } : null,
+    failure, usage: terminalResultUsage(assistant),
   });
 }
 
@@ -415,6 +429,81 @@ export function createOpenCodeExecutionAdapter({
   if (!Number.isInteger(terminationGraceMs) || terminationGraceMs < 1) throw new TypeError('terminationGraceMs must be a positive integer');
   if (!Number.isInteger(forceGraceMs) || forceGraceMs < 1) throw new TypeError('forceGraceMs must be a positive integer');
   if (!Number.isInteger(teardownTimeoutMs) || teardownTimeoutMs < 1) throw new TypeError('teardownTimeoutMs must be a positive integer');
+
+  /** Spawn the OpenCode server child and acquire its OS-assigned port
+   *  (stdout-reported, falling back to reservePort for injected children
+   *  with no readable stdout — tests). On failure, stops the child it just
+   *  spawned before rethrowing. */
+  async function spawnServerChild(state, { signal }) {
+    // Port assignment WITHOUT the probe-bind-release race (S2): the child
+    // binds :0 itself and reports the OS-assigned port on stdout, so a
+    // squatter can never win a freed port against us (a rogue server would
+    // not know the ephemeral password anyway — but prompts/credentials must
+    // never reach a server we did not spawn). reservePort remains the
+    // fallback for injected children with no readable stdout (tests).
+    const invocation = resolveFn('opencode', ['serve', '--hostname', LOOPBACK, '--port', '0']);
+    if (typeof invocation?.command !== 'string' || !Array.isArray(invocation.args)) {
+      throw new TypeError('OpenCode command resolver returned an invalid invocation');
+    }
+    if (invocation.resolved === false) {
+      throw new Error('OpenCode command has no safe Windows invocation');
+    }
+    const child = spawnFn(invocation.command, invocation.args, {
+      cwd: state.cwd,
+      env: { ...process.env, OPENCODE_SERVER_USERNAME: USERNAME, OPENCODE_SERVER_PASSWORD: state.password },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    // Progressive registration: the runner owns this state and can cancel
+    // every resource acquired before any later launch await.
+    state.child = child;
+    try {
+      const port = child?.stdout && typeof child.stdout.on === 'function'
+        ? await boundPortFromStdout(child, { signal })
+        : await reservePort({ signal });
+      return { child, port };
+    } catch (error) {
+      if (!signal?.aborted) {
+        const stopped = await stopChild(child, { terminationGraceMs, forceGraceMs, signalFn });
+        if (stopped.stopped) state.child = null;
+      }
+      throw error;
+    }
+  }
+
+  /** Health-check, open a session, start listening for its terminal event,
+   *  and post the prompt. Mutates `state` (sessionId/eventAbort/terminal) as
+   *  each step completes so a mid-flight failure leaves accurate teardown
+   *  state for the caller's own catch block. */
+  async function startSession(state, { endpoint, password, timeoutMs, signal, child }) {
+    await waitForHealth(fetchFn, endpoint, password, { wait, child, signal });
+    signal?.throwIfAborted?.();
+    const session = await requestJson(fetchFn, endpoint, password, '/session', {
+      method: 'POST', body: { title: `agentic-kit ${state.worker.id}` }, signal,
+    });
+    if (typeof session?.id !== 'string' || !session.id) throw new Error('OpenCode created a session without an id');
+    state.sessionId = session.id;
+    signal?.throwIfAborted?.();
+    const headers = basicHeaders(password);
+    const eventAbort = new AbortController();
+    state.eventAbort = eventAbort;
+    const eventSignal = signal ? AbortSignal.any([signal, eventAbort.signal]) : eventAbort.signal;
+    const eventResponse = await fetchFn(`${endpoint}/global/event`, { headers, signal: eventSignal });
+    signal?.throwIfAborted?.();
+    const terminal = waitForTerminalEvent(eventResponse, session.id, { signal: eventSignal });
+    state.terminal = terminal;
+    // Every path that abandons this promise without observe() consuming it
+    // (a prompt post that throws, cancel/cleanup teardown) would otherwise
+    // leave its socket-close rejection unhandled — Node's default turns
+    // that into a process crash AFTER the run verdict. A no-op second
+    // consumer keeps teardown honest; observe() still sees the rejection.
+    terminal.catch(() => {});
+    const model = serveModelFor(state.worker.configuredModel);
+    await requestWithin(fetchFn, endpoint, password, `/session/${encodeURIComponent(session.id)}/prompt_async`, {
+      body: { agent: 'build', ...(model ? { model } : {}), parts: [{ type: 'text', text: state.prompt }] },
+    }, timeoutMs, signal);
+    signal?.throwIfAborted?.();
+  }
+
   const adapter = {
     id: 'opencode-server',
     async readiness({ signal, timeoutMs } = /** @type {{signal?:AbortSignal,timeoutMs?:number}} */ ({})) {
@@ -432,72 +521,14 @@ export function createOpenCodeExecutionAdapter({
       timeoutMs = 120_000, signal,
     } = /** @type {{timeoutMs?:number,signal?:AbortSignal}} */ ({})) {
       signal?.throwIfAborted?.();
-      const password = secret();
-      state.password = password;
-      // Port assignment WITHOUT the probe-bind-release race (S2): the child
-      // binds :0 itself and reports the OS-assigned port on stdout, so a
-      // squatter can never win a freed port against us (a rogue server would
-      // not know the ephemeral password anyway — but prompts/credentials must
-      // never reach a server we did not spawn). reservePort remains the
-      // fallback for injected children with no readable stdout (tests).
-      const invocation = resolveFn('opencode', ['serve', '--hostname', LOOPBACK, '--port', '0']);
-      if (typeof invocation?.command !== 'string' || !Array.isArray(invocation.args)) {
-        throw new TypeError('OpenCode command resolver returned an invalid invocation');
-      }
-      if (invocation.resolved === false) {
-        throw new Error('OpenCode command has no safe Windows invocation');
-      }
-      const child = spawnFn(invocation.command, invocation.args, {
-        cwd: state.cwd,
-        env: { ...process.env, OPENCODE_SERVER_USERNAME: USERNAME, OPENCODE_SERVER_PASSWORD: password },
-        stdio: ['ignore', 'pipe', 'pipe'],
-      });
-      // Progressive registration: the runner owns this state and can cancel
-      // every resource acquired before any later launch await.
-      state.child = child;
-      let port;
-      try {
-        port = child?.stdout && typeof child.stdout.on === 'function'
-          ? await boundPortFromStdout(child, { signal })
-          : await reservePort({ signal });
-      } catch (error) {
-        if (!signal?.aborted) {
-          const stopped = await stopChild(child, { terminationGraceMs, forceGraceMs, signalFn });
-          if (stopped.stopped) state.child = null;
-        }
-        throw error;
-      }
+      state.password = secret();
+      const { child, port } = await spawnServerChild(state, { signal });
       signal?.throwIfAborted?.();
-      const endpoint = `http://${LOOPBACK}:${port}`;
-      state.endpoint = endpoint;
+      state.endpoint = `http://${LOOPBACK}:${port}`;
       try {
-        await waitForHealth(fetchFn, endpoint, password, { wait, child, signal });
-        signal?.throwIfAborted?.();
-        const session = await requestJson(fetchFn, endpoint, password, '/session', {
-          method: 'POST', body: { title: `agentic-kit ${state.worker.id}` }, signal,
+        await startSession(state, {
+          endpoint: state.endpoint, password: state.password, timeoutMs, signal, child,
         });
-        if (typeof session?.id !== 'string' || !session.id) throw new Error('OpenCode created a session without an id');
-        state.sessionId = session.id;
-        signal?.throwIfAborted?.();
-        const headers = basicHeaders(password);
-        const eventAbort = new AbortController();
-        state.eventAbort = eventAbort;
-        const eventSignal = signal ? AbortSignal.any([signal, eventAbort.signal]) : eventAbort.signal;
-        const eventResponse = await fetchFn(`${endpoint}/global/event`, { headers, signal: eventSignal });
-        signal?.throwIfAborted?.();
-        const terminal = waitForTerminalEvent(eventResponse, session.id, { signal: eventSignal });
-        state.terminal = terminal;
-        // Every path that abandons this promise without observe() consuming it
-        // (a prompt post that throws, cancel/cleanup teardown) would otherwise
-        // leave its socket-close rejection unhandled — Node's default turns
-        // that into a process crash AFTER the run verdict. A no-op second
-        // consumer keeps teardown honest; observe() still sees the rejection.
-        terminal.catch(() => {});
-        const model = serveModelFor(state.worker.configuredModel);
-        await requestWithin(fetchFn, endpoint, password, `/session/${encodeURIComponent(session.id)}/prompt_async`, {
-          body: { agent: 'build', ...(model ? { model } : {}), parts: [{ type: 'text', text: state.prompt }] },
-        }, timeoutMs, signal);
-        signal?.throwIfAborted?.();
         return state;
       } catch (error) {
         if (!signal?.aborted) {
