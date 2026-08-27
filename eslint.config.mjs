@@ -83,4 +83,63 @@ export default [
       'prefer-const': 'off',
     },
   },
+  {
+    // src/lib/dashboard/client/**: the dashboard's browser bundle, split out of
+    // the former single 4,066-line client.mjs template literal (2026-08
+    // complexity audit, Finding 2) into real, individually lintable browser
+    // modules. Never node-imported — client.mjs (the collector) reads each
+    // file as TEXT, strips its cross-file `import`/`export` lines (concatenation
+    // collapses the module graph into one flat classic-script scope, exactly
+    // as the pre-split bundle already was), and serves the result inline
+    // (ADR-0036). Real `import`/`export` between these files exists purely
+    // so node --check/eslint can verify the actual cross-file dependency graph
+    // — see each file's own header comment.
+    //
+    // `var` throughout (not `let`/`const`) is DELIBERATE, not legacy debt: every
+    // file becomes one flat scope once concatenated, so two files each using
+    // `let`/`const` for a same-named local (e.g. a loop index) would collide
+    // with a hard SyntaxError at the CONCATENATED scope — `var`'s redeclare
+    // tolerance is exactly what makes that safe. Converting away from it is a
+    // cross-file, whole-bundle change, not a per-file cleanup.
+    files: ['src/lib/dashboard/client/**/*.mjs'],
+    languageOptions: {
+      globals: {
+        ...globals.browser,
+        // Cross-file MUTABLE state: each name below is declared+exported by
+        // exactly one file but REASSIGNED (not just read) from others. Real
+        // ES import bindings are read-only from the importing side (no-import-
+        // assign) — declaring these as globals instead of importing them
+        // documents the same "owned by one file" contract (see that file's
+        // own `export var` declaration) without fighting the language's own
+        // live-binding rules. Every name here is read-only FROM THIS LIST's
+        // point of view only in the sense that eslint won't flag reassignment
+        // — the actual single-owner discipline is enforced by code review,
+        // same as any other shared-mutable-global codebase.
+        aboutScrollPending: 'writable', consMode: 'writable', inflight: 'writable',
+        intelProjects: 'writable', intelRequestSeq: 'writable', LAST: 'writable',
+        lastAttempt: 'writable', lastUpdated: 'writable', LIMITS: 'writable',
+        modelDirection: 'writable', modelRouteDirection: 'writable', modelRouteSort: 'writable',
+        MODELS: 'writable', modelSearchTimer: 'writable', modelSnapshotId: 'writable',
+        modelSort: 'writable', projSort: 'writable', selectedProjectKey: 'writable',
+        selectedProjectLabel: 'writable', SYSTEM: 'writable', systemBusy: 'writable',
+        systemPollTimer: 'writable', usageDays: 'writable', usageLoaded: 'writable',
+        usageSession: 'writable', usageView: 'writable',
+      },
+    },
+    rules: {
+      'no-var': 'off',
+      'no-redeclare': 'off',
+      // Old-school defensive style throughout this bundle: `try{...}catch(e){}`
+      // swallows a localStorage/URL/DOM quirk without needing the error value.
+      // Never linted before this split (the audit's own Finding 2) — the
+      // pattern itself isn't new, only its visibility to ESLint is.
+      'no-unused-vars': ['error', { argsIgnorePattern: '^_', varsIgnorePattern: '^_', caughtErrors: 'none' }],
+      // Same rationale as the statusline-footer override below: pre-existing,
+      // harmless "assigned, then unconditionally reassigned before use" spots
+      // (e.g. a switch-like if/else-if/else chain that always overwrites its
+      // seed value) that a first-time lint pass surfaces but changing would be
+      // a behavior-adjacent edit this split does not make.
+      'no-useless-assignment': 'off',
+    },
+  },
 ];

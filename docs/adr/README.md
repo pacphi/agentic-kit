@@ -43,6 +43,7 @@ Consequences**, and cites the grounded source it rests on where relevant.
 | [0033](0033-retire-codex-mcp-and-bound-qe-court-participants.md) | Retire Codex MCP; bound reciprocal QE-Court participant transport | Implemented; handoff transport amended by 0034 |
 | [0034](0034-schema-native-handoffs-and-hermetic-seats.md) | Schema-native worker handoffs and hermetic qe-court seats | Implemented |
 | [0035](0035-managed-deja-vu-companion.md) | Manage deja-vu as an opt-in session-history companion | Accepted; implementation tracked by issue #114 |
+| [0036](0036-dashboard-client-modularization-and-shared-loopback-server.md) | Dashboard client modularization and shared loopback server | Implemented |
 
 Theme: ADRs **0001–0006** define **dual-host LLM routing and leadership** — how `ak` lets ruflo route
 each development activity (architecture, implementation, testing, review, …) to the right host (Claude
@@ -252,3 +253,14 @@ routing target, or observability authority. Package, target, plugin, and data ow
 separate; normal diagnosis parses offline doctor schema version 2; indexing uses bounded
 `deja index` rather than guidance-writing `deja warmup`; teardown preserves external installs and
 user data unless a separately previewed purge is confirmed.
+
+**0036** answers a 2026-08 complexity audit of the dashboard/admin implementation, not a
+user-facing change. `dashboard-server.mjs`'s 15-route request handler becomes a route table plus
+one `sseRoute()` lifecycle contract in `dashboard/sse.mjs` for the three SSE routes' shared
+reserve-slot/early-close/channel-open scaffolding. New `loopback-server.mjs` gives token
+mint/compare, `readJsonSafe`, and the listen/response boilerplate one home shared by both
+`dashboard-server.mjs` and `admin-server.mjs`, ending the latter importing a security primitive
+from the former. `dashboard/client.mjs`'s 4,044-line inline-script string and
+`dashboard/styles.mjs`'s 1,309-line inline stylesheet are rebuilt as small collectors over real,
+individually lintable modules, generalizing the readFileSync-concat pattern ADR-0007's admin page
+already used. The served page, its routes, and its CSP are unchanged.

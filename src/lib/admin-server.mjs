@@ -15,7 +15,6 @@
 //                          (constant-time, length-guarded). 401 JSON on mismatch,
 //                          carrying no data fields.
 import http from 'node:http';
-import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -23,23 +22,19 @@ import { parseRepoSlug, defaultCollect } from './admin-collect.mjs';
 import { ADMIN_CSS } from './admin-styles.mjs';
 import { ADMIN_THEME_JS } from './admin-theme.mjs';
 import { requestRejection } from './dashboard/request-security.mjs';
+import {
+  readJsonSafe, mintToken, tokenMatches, sendJson, sendUnauthorized, sendNotFound, listenLoopback,
+} from './loopback-server.mjs';
+
+// tokenMatches is now homed in loopback-server.mjs (a security primitive
+// belongs to neither server specifically — dashboard-server.mjs used to
+// import it from here); re-exported here so this file's own public surface
+// (and tests/admin.test.cjs, which imports admin-server.mjs directly) keep
+// working unchanged.
+export { tokenMatches };
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const PKG_ROOT = path.resolve(HERE, '..', '..');
-
-function readJsonSafe(file) {
-  try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return null; }
-}
-
-/** Constant-time token compare with a length guard. timingSafeEqual THROWS on
- *  unequal length, which is itself a length/timing oracle — the guard turns
- *  unequal length into a plain `false`. No secret ⇒ never open (fail-closed). */
-export function tokenMatches(given, expected) {
-  if (!expected) return false;
-  const a = Buffer.from(String(given ?? ''));
-  const b = Buffer.from(String(expected));
-  return a.length === b.length && crypto.timingSafeEqual(a, b);
-}
 
 // The page makes ZERO external fetches; the browser enforces it via this header.
 const CSP = [
@@ -79,7 +74,7 @@ export function startAdmin({ port = 7432, collect, resolveToken, pkg: injectedPk
 
   // Per-session auth secret (FR-3): 256-bit, fresh each start, URL-safe so it
   // rides cleanly in the launch URL's # fragment. There is no unauth mode.
-  const token = crypto.randomBytes(32).toString('base64url');
+  const token = mintToken();
 
   // Assemble the ONE self-contained document once (NFR-2, AC-5). Only first-party
   // source (theme + model + view + CSS) is interpolated — no third-party data reaches the
@@ -127,35 +122,21 @@ export function startAdmin({ port = 7432, collect, resolveToken, pkg: injectedPk
       if (!tokenMatches(req.headers['x-admin-token'], token)) {
         // 401 body carries NO data fields (AC-1). nosniff so a browser cannot be
         // coaxed into re-interpreting the JSON body as another content type.
-        res.writeHead(401, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store', 'x-content-type-options': 'nosniff' });
-        res.end(JSON.stringify({ error: 'Wrong or missing admin token.' }));
+        sendUnauthorized(res, 'Wrong or missing admin token.');
         return;
       }
       let payload;
       try { payload = await provide(); }
       catch (e) { payload = { generatedAt: new Date().toISOString(), error: String((e && e.message) || e) }; }
-      res.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store', 'x-content-type-options': 'nosniff' });
-      res.end(JSON.stringify(payload));
+      sendJson(res, 200, payload);
       return;
     }
 
-    res.writeHead(404, { 'content-type': 'text/plain; charset=utf-8' });
-    res.end('not found');
+    sendNotFound(res);
   });
 
-  return new Promise((resolve, reject) => {
-    server.on('error', reject); // EADDRINUSE bubbles to the caller (EC-5)
-    server.listen(port, '127.0.0.1', () => { // loopback literal ONLY (NFR-2)
-      const addr = server.address();
-      const actual = addr && typeof addr === 'object' ? addr.port : port;
-      resolve({
-        url: `http://127.0.0.1:${actual}/`,
-        urlWithToken: `http://127.0.0.1:${actual}/#token=${token}`, // FR-3 fragment bootstrap
-        port: actual,
-        token,
-        close: () => new Promise((r) => server.close(() => r())),
-      });
-    });
+  return listenLoopback(server, {
+    port, token, close: () => new Promise((r) => server.close(() => r())),
   });
 }
 
