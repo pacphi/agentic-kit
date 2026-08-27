@@ -397,6 +397,48 @@ function unmeasured(reason, asOf) {
   };
 }
 
+/** Read every queued manifest after the walk, folding each declared dependency
+ *  name into either the registry-matched stack or the unrecognized-dependencies
+ *  tail. Split out of `detectStack` (2026-08 complexity program) purely to give
+ *  this loop its own complexity budget; the matching rules are unchanged. */
+function readQueuedManifests(manifestFiles, fsImpl) {
+  const manifestRows = [];
+  const stack = new Map();
+  const unrecognizedDeps = new Map();
+  for (const { file, kind, bytes } of manifestFiles) {
+    const reading = readManifest(file, kind, bytes, fsImpl);
+    manifestRows.push({
+      path: reading.path, kind: reading.kind, status: reading.status, reason: reading.reason,
+    });
+    for (const name of reading.names) {
+      const entry = dependencyEntry(kind, name);
+      if (entry) {
+        if (!stack.has(entry.id)) stack.set(entry.id, { entry, via: kind });
+        continue;
+      }
+      const key = `${kind} ${name.toLowerCase()}`;
+      if (!unrecognizedDeps.has(key)) unrecognizedDeps.set(key, { name, manifest: kind });
+    }
+  }
+  return { manifestRows, stack, unrecognizedDeps };
+}
+
+/** Signature-based stack matches (a shallow file, directory, or filename prefix
+ *  seen during the walk), added on top of whatever the manifests already
+ *  matched — a manifest match always wins, so a signature never overrides a
+ *  dependency-derived one. Mutates `stack` in place. */
+function matchSignatures(stack, { seenFiles, seenPaths, seenDirs }) {
+  for (const entry of signatureEntries()) {
+    const { files: names, dirs, filePrefixes } = entry.match;
+    const hit = names.find((name) => seenFiles.has(name) || seenPaths.has(name))
+      ?? dirs.find((dir) => seenDirs.has(dir))
+      ?? (filePrefixes.length
+        ? [...seenFiles].find((name) => filePrefixes.some((prefix) => name.startsWith(prefix)))
+        : undefined);
+    if (hit !== undefined && !stack.has(entry.id)) stack.set(entry.id, { entry, via: hit });
+  }
+}
+
 /**
  * Detect the stack of one project directory.
  *
@@ -501,34 +543,8 @@ export function detectStack(root, {
 
   // Manifests are read after the walk: the traversal stays a pure metadata pass,
   // and a slow read cannot hold the walker's entry budget open.
-  const manifestRows = [];
-  const stack = new Map();
-  const unrecognizedDeps = new Map();
-  for (const { file, kind, bytes } of manifestFiles) {
-    const reading = readManifest(file, kind, bytes, fsImpl);
-    manifestRows.push({
-      path: reading.path, kind: reading.kind, status: reading.status, reason: reading.reason,
-    });
-    for (const name of reading.names) {
-      const entry = dependencyEntry(kind, name);
-      if (entry) {
-        if (!stack.has(entry.id)) stack.set(entry.id, { entry, via: kind });
-        continue;
-      }
-      const key = `${kind} ${name.toLowerCase()}`;
-      if (!unrecognizedDeps.has(key)) unrecognizedDeps.set(key, { name, manifest: kind });
-    }
-  }
-
-  for (const entry of signatureEntries()) {
-    const { files: names, dirs, filePrefixes } = entry.match;
-    const hit = names.find((name) => seenFiles.has(name) || seenPaths.has(name))
-      ?? dirs.find((dir) => seenDirs.has(dir))
-      ?? (filePrefixes.length
-        ? [...seenFiles].find((name) => filePrefixes.some((prefix) => name.startsWith(prefix)))
-        : undefined);
-    if (hit !== undefined && !stack.has(entry.id)) stack.set(entry.id, { entry, via: hit });
-  }
+  const { manifestRows, stack, unrecognizedDeps } = readQueuedManifests(manifestFiles, fsImpl);
+  matchSignatures(stack, { seenFiles, seenPaths, seenDirs });
 
   const languages = [...lines.values()]
     .map(({ entry, lines: count, files: fileCount }) => ({
