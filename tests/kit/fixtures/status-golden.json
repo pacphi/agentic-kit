@@ -1,0 +1,116 @@
+[
+  {
+    "subsystem": "models",
+    "level": "info",
+    "message": "no local model inventory yet; run `ak models refresh` explicitly",
+    "fix": null
+  },
+  {
+    "subsystem": "versions",
+    "level": "ok",
+    "message": "ruflo 9.9.9 (latest)",
+    "fix": null
+  },
+  {
+    "subsystem": "versions",
+    "level": "ok",
+    "message": "agentic-qe 9.9.9 (latest)",
+    "fix": null
+  },
+  {
+    "subsystem": "self",
+    "level": "ok",
+    "message": "kit <self-version> (latest)",
+    "fix": null
+  },
+  {
+    "subsystem": "natives",
+    "level": "warn",
+    "message": "no agentdb locations found under global ruflo",
+    "fix": "setup/sync installs ruflo"
+  },
+  {
+    "subsystem": "natives",
+    "level": "fail",
+    "message": "agentic-qe better-sqlite3 not native",
+    "fix": "sync repairs it"
+  },
+  {
+    "subsystem": "memory",
+    "level": "info",
+    "message": "no project memory store yet (run setup here to initialize)",
+    "fix": null
+  },
+  {
+    "subsystem": "npx",
+    "level": "ok",
+    "message": "npx cache holds no stale ruflo-family envs",
+    "fix": null
+  },
+  {
+    "subsystem": "security",
+    "level": "warn",
+    "message": "@claude-flow/security not found under global ruflo",
+    "fix": null
+  },
+  {
+    "subsystem": "learning",
+    "level": "info",
+    "message": "no learning state in this project (run setup here to activate)",
+    "fix": null
+  },
+  {
+    "subsystem": "aqe",
+    "level": "info",
+    "message": "agentic-qe not initialized in this project",
+    "fix": null
+  },
+  {
+    "subsystem": "agentdb",
+    "level": "warn",
+    "message": "agentdb CLI not installed (harvest write path unavailable)",
+    "fix": "setup/sync installs it (pinned to ruflo's bundled agentdb)"
+  },
+  {
+    "subsystem": "mcp",
+    "level": "warn",
+    "message": "ruflo MCP not registered",
+    "fix": "setup/sync registers claude-flow at user scope"
+  },
+  {
+    "subsystem": "deja-vu",
+    "level": "info",
+    "message": "deja-vu disabled — package, host wiring, and history remain unprobed",
+    "fix": null
+  },
+  {
+    "subsystem": "hosts",
+    "level": "fail",
+    "message": "claude enabled but not installed (primary)",
+    "fix": "sync installs @anthropic-ai/claude-code"
+  },
+  {
+    "subsystem": "providers",
+    "level": "info",
+    "message": "claude-only (default host)",
+    "fix": null
+  },
+  {
+    "subsystem": "daemons",
+    "level": "ok",
+    "message": "none running",
+    "fix": null
+  },
+  {
+    "subsystem": "blocks",
+    "level": "warn",
+    "message": "2 CLAUDE.md block(s) drifted: ruflo-preamble→upserted, ruflo-reference→upserted",
+    "fix": "sync reconciles blocks"
+  },
+  {
+    "subsystem": "statusline",
+    "level": "info",
+    "message": "no project statusline here (created by setup)",
+    "fix": null
+  }
+]

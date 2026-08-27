@@ -83,6 +83,25 @@ jobs:
       - name: Dependency audit
         run: pnpm run audit
 
+  # Rendering verification: the route suites prove the server returns correct
+  # JSON; only this proves the page RENDERS it (no `undefined`/`NaN`/
+  # `[object Object]` in visible text). Drives the SYSTEM Chrome — ubuntu
+  # runners ship it, nothing is downloaded.
+  ui:
+    name: ui (dashboard rendering, system Chrome)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+      - name: Install devDependencies
+        run: pnpm install --frozen-lockfile
+      - name: Dashboard UI (Playwright, fixture corpus)
+        run: pnpm run test:ui
+
   # Internal/relative links only (fast, deterministic). External links run in
   # nightly — network + rate-limits make them flaky per-PR.
   links:

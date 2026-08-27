@@ -46,6 +46,19 @@ export default [
     languageOptions: { sourceType: 'commonjs' },
   },
   {
+    // Complexity visibility for shipped code (src/bin only — tests are long by
+    // nature). Warnings, not errors: the 2026-08 complexity audit found 399
+    // functions over CC 10 (worst CC 250), so an error gate would be
+    // unpayable today. Thresholds ratchet down per-directory as the refactor
+    // tracks land; new code should stay under them from the start.
+    files: ['src/**/*.{mjs,js,cjs}', 'bin/**/*.mjs'],
+    rules: {
+      complexity: ['warn', 25],
+      'max-depth': ['warn', 5],
+      'max-lines': ['warn', { max: 1000, skipBlankLines: true, skipComments: true }],
+    },
+  },
+  {
     // admin-view.mjs is BROWSER code — never node-imported, only read as text and
     // embedded into the served admin page (ADR-0007 §5). It legitimately uses DOM
     // globals (document, localStorage, location, fetch, history, setInterval).
