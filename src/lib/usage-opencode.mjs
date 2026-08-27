@@ -25,6 +25,12 @@
 // record their OWN messages, not a replay of the parent's — the codex
 // double-count rule does not apply (different storage semantics).
 import { withDb } from './sqlite.mjs';
+// Shared record shape/accumulator with parseClaude/parseCodex — see their
+// definitions in usage-index.mjs. usage-index.mjs imports FROM this module
+// (defaultOpencodeDbPath, parseSession, …), so this is a circular import; it
+// is safe because both imports here are hoisted `function` declarations,
+// resolved before either module's top-level body runs.
+import { addUsage, blankSession } from './usage-index.mjs';
 
 /** The live opencode store. Overridable via roots in tests. */
 export function defaultOpencodeDbPath() {
@@ -115,10 +121,10 @@ function projectFromDirectory(directory) {
   return { project: base && base !== '.' ? base : 'unknown', worktree: null };
 }
 
-/** Parse ONE opencode session into the index's per-session record shape.
- *  Returns { session, turns } mirroring parseClaude/parseCodex exactly;
- *  null when the session is gone or unreadable. withTurns emits the
- *  transcript-view turn rows alongside the record.
+/** Parse ONE opencode session into the index's per-session record shape,
+ *  built from the SAME blankSession/addUsage parseClaude and parseCodex use.
+ *  Returns { session, turns }; null when the session is gone or unreadable.
+ *  withTurns emits the transcript-view turn rows alongside the record.
  *  @param {{ dbFile: string, id: string, withTurns?: boolean }} opts */
 export function parseSession({ dbFile, id, withTurns = false }) {
   const result = withDb(dbFile, (db) => {
@@ -141,16 +147,13 @@ export function parseSession({ dbFile, id, withTurns = false }) {
     }
 
     const { project, worktree } = projectFromDirectory(srow.directory);
-    const rec = {
-      id: srow.id, provider: 'opencode', host: 'opencode',
-      inferenceProvider: null, providerProvenance: 'unknown',
-      title: clip(srow.title) || '(untitled)', project, start: null, end: null,
-      prompts: 0, responses: 0, exceptions: 0, sidechain: !!srow.parent_id,
-      threadSource: srow.parent_id ? 'subagent' : null,
-      models: [], tools: {}, skill: null, plugin: null,
-      worktree: worktree ?? null, usage: [], punchcard: {}, active: [], stamps: [],
-      reasoningOutput: 0, rateLimits: null,
-    };
+    // blankSession's default host/provider ('opencode' for both) already
+    // matches this source; only the opencode-specific fields are overridden.
+    const rec = blankSession(srow.id, 'opencode');
+    rec.title = clip(srow.title) || '(untitled)';
+    rec.project = project;
+    rec.sidechain = !!srow.parent_id;
+    rec.threadSource = srow.parent_id ? 'subagent' : null;
     if (worktree) rec.worktree = worktree;
     const turns = [];
     let lastProviderId = null;
@@ -182,20 +185,17 @@ export function parseSession({ dbFile, id, withTurns = false }) {
       const t = data.tokens ?? {};
       const cache = t.cache ?? {};
       const day = localDay(at || Date.now());
-      let usageRow = rec.usage.find((r) => r.day === day && r.model === model);
-      if (!usageRow) {
-        usageRow = { day, model, input: 0, output: 0, cacheRead: 0, cacheWrite: 0, responses: 0, costObserved: null };
-        rec.usage.push(usageRow);
-      }
-      usageRow.input += num(t.input);
-      usageRow.output += num(t.output);
-      usageRow.cacheRead += num(cache.read);
-      usageRow.cacheWrite += num(cache.write);
-      usageRow.responses += 1;
+      const usageRow = addUsage(rec, day, model, {
+        input: num(t.input), output: num(t.output),
+        cacheRead: num(cache.read), cacheWrite: num(cache.write), responses: 1,
+      });
       // opencode's OWN metered cost for this message — observed truth, summed
-      // per (day, model) row. Rows where NO message carried a cost stay null,
-      // so the aggregate falls back to the pricing table rather than
-      // misreporting a fabricated $0.
+      // per (day, model) row. Rows where NO message carried a cost stay null
+      // (the field is always present, unlike an absent key, so a consumer
+      // checking `costObserved != null` never needs to guess whether this row
+      // was ever priced), so the aggregate falls back to the pricing table
+      // rather than misreporting a fabricated $0.
+      usageRow.costObserved ??= null;
       if (Number.isFinite(Number(data.cost))) usageRow.costObserved = (usageRow.costObserved ?? 0) + Number(data.cost);
       rec.reasoningOutput += num(t.reasoning);
 

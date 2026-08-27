@@ -47,7 +47,6 @@
 // startDashboard() NEVER detaches — the caller runs it foreground and calls
 // close() on SIGINT.
 import http from 'node:http';
-import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -61,8 +60,10 @@ import { loadKitConfig } from './config.mjs';
 import { resolveRoutes, routingSummary, divergedRoutes, retirementOf, ACTIVITIES } from './routing.mjs';
 import { renderPage } from './dashboard/page.mjs';
 import { requestRejection } from './dashboard/request-security.mjs';
-import { tokenMatches } from './admin-server.mjs';
-import { sseChannel, reserveClientSlot, clientGone } from './dashboard/sse.mjs';
+import {
+  readJsonSafe, mintToken, tokenMatches, sendJson, sendUnauthorized, sendNotFound, listenLoopback,
+} from './loopback-server.mjs';
+import { sseRoute } from './dashboard/sse.mjs';
 // readHealthRing itself was moved (not duplicated) into intel-history.mjs —
 // dashboard-server.mjs no longer defines it locally. It isn't called directly
 // here because readIntelHistory() already composes it (as `.healthRing`,
@@ -101,10 +102,6 @@ const DASH_CSP = [
   "form-action 'none'",
   "frame-ancestors 'none'",
 ].join('; ');
-
-function readJsonSafe(file) {
-  try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return null; }
-}
 
 /** Default status provider: shell out to the installed CLI and parse its JSON.
  *  Resilient — a spawn/parse failure resolves to an honest empty payload rather
@@ -557,11 +554,6 @@ function windowToSinceMs(raw, now = Date.now()) {
   return now - days * 86_400_000;
 }
 
-function sendJson(res, status, payload) {
-  res.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store', 'x-content-type-options': 'nosniff' });
-  res.end(JSON.stringify(payload));
-}
-
 const PRIVATE_LIVE_FIELDS = new Set([
   'prompt', 'response', 'arguments', 'args', 'result', 'toolarguments',
   'toolresult', 'content', 'body', 'text', 'transcript',
@@ -619,6 +611,51 @@ function transcriptSseFrame(name, data, id) {
   if (name) lines.push(`event: ${name}`);
   for (const line of JSON.stringify(data).split('\n')) lines.push(`data: ${line}`);
   return `${lines.join('\n')}\n\n`;
+}
+
+/** The dedup/delivery pass for /api/live/events' init: reconcile events that
+ *  arrived via replay(snapshot.cursor) ("after") against events buffered
+ *  while snapshot()/replay() were in flight ("pending") so nothing is
+ *  delivered twice and nothing from the gap between them is dropped. Moved
+ *  out of handleLiveEvents verbatim (2026-08 complexity audit, Finding 1) —
+ *  including the ORDERING, which is load-bearing: reading `postSnapshot`'s
+ *  `events` (below) can itself synchronously re-enter the subscription
+ *  callback (a service may publish from a getter, as the race regression
+ *  test does), so `pending` must not be buffer-snapshotted — and `initAt`
+ *  must not flip to "live" — until AFTER that read, with no `await` between
+ *  the snapshot and the flip (nothing can dispatch a callback in that gap). */
+function deliverLiveInit({ write, replay, snapshot, postSnapshot, pending, snapshotPendingCount, markInitialized }) {
+  // Inspect replay while callbacks still buffer. A custom/async service may
+  // publish while materializing this result even though replay() itself has
+  // resolved.
+  const after = !postSnapshot?.reset && Array.isArray(postSnapshot?.events)
+    ? postSnapshot.events : [];
+  if (!replay?.reset) {
+    for (const event of Array.isArray(replay?.events) ? replay.events : []) {
+      write(sseFrame('delta', event, event?.eventId));
+    }
+  }
+  write(sseFrame('init', { reset: !!replay?.reset, snapshot }));
+  const afterIds = new Set(after.map((event) => event?.eventId).filter(Boolean));
+  const emitted = new Set();
+  const buffered = [...pending];
+  // Take the final buffer snapshot and flip modes without an await between
+  // them. JavaScript cannot dispatch a subscription callback in that gap:
+  // every later event therefore goes directly to the response.
+  markInitialized();
+  for (const [index, event] of [...after, ...buffered].entries()) {
+    const id = event?.eventId;
+    const pendingIndex = index - after.length;
+    // Events buffered after snapshot() resolved cannot be represented by
+    // that immutable snapshot. Deliver them even if replay() captured its
+    // result before they arrived. Earlier identified events absent from
+    // replay(snapshot.cursor) are already represented by the snapshot.
+    if (id && !afterIds.has(id)
+      && (pendingIndex < 0 || pendingIndex < snapshotPendingCount)) continue;
+    if (id && emitted.has(id)) continue;
+    if (id) emitted.add(id);
+    write(sseFrame('delta', event, id));
+  }
 }
 
 function sendTranscriptJson(res, status, payload) {
@@ -896,7 +933,7 @@ export function startDashboard({
   // a strictly more sensitive payload than admin's GitHub/npm stats, which
   // already required one. EventSource cannot send headers, so its two routes
   // also accept the token as a query param (see client.mjs's dashSseUrl).
-  const token = crypto.randomBytes(32).toString('base64url');
+  const token = mintToken();
   const checkToken = (req, query) => tokenMatches(req.headers['x-dash-token'] || query.get('token'), token);
 
   const server = http.createServer(async (req, res) => {
@@ -927,12 +964,11 @@ export function startDashboard({
     // Every route below serves data — none of it is safe to hand to any
     // process that can merely reach this loopback port (Security Finding 1).
     if (url.startsWith('/api/') && !checkToken(req, query)) {
-      res.writeHead(401, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store', 'x-content-type-options': 'nosniff' });
-      res.end(JSON.stringify({ error: 'Wrong or missing dashboard token.' }));
+      sendUnauthorized(res, 'Wrong or missing dashboard token.');
       return;
     }
 
-    if (url === '/api/status') {
+    async function handleStatus(req, res, query) {
       let payload;
       try {
         payload = await collectData({
@@ -960,7 +996,7 @@ export function startDashboard({
       return;
     }
 
-    if (url === '/api/live') {
+    async function handleLiveSnapshot(req, res, _query) {
       try {
         const service = await getLive();
         sendJson(res, 200, publicLivePayload(await service.snapshot()));
@@ -972,7 +1008,7 @@ export function startDashboard({
       return;
     }
 
-    if (url === '/api/live/history') {
+    async function handleLiveHistory(req, res, query) {
       // On-demand, not part of the SSE stream: a fresh scan per request, same
       // privacy scrubbing (publicLivePayload) as every other live surface.
       try {
@@ -1002,245 +1038,151 @@ export function startDashboard({
       return;
     }
 
-    if (url === '/api/live/events') {
-      // Reserve the client-cap slot BEFORE the first await (getLive() may do a
-      // dynamic import() + service.start()). Concurrent requests arriving
-      // during that gap must not all observe the same pre-reservation size and
-      // all pass the cap — that TOCTOU is what made the cap decorative
-      // (code-quality Finding 1).
-      const maxClients = Math.max(1, Math.min(256, Number(liveMaxClients) || 32));
-      const slot = reserveClientSlot(liveClients, maxClients);
-      if (!slot) {
-        sendJson(res, 503, { error: 'too many live telemetry clients' });
-        return;
-      }
-      // Forwards to the real cleanup once it exists below; if the client goes
-      // away DURING the awaits between here and that point (before
-      // req.once('close', …) can attach to catch it), `earlyClosed` remembers
-      // it so the real cleanup runs immediately once constructed instead of
-      // leaking the reservation and the subscription wired up after it.
-      let earlyClosed = false;
-      let realCleanup = null;
-      const cleanup = (terminate) => {
-        if (realCleanup) { realCleanup(terminate); return; }
-        earlyClosed = true;
-      };
-      req.once('close', cleanup);
-      res.once('close', cleanup);
-
+    async function handleLiveEvents(req, res, _query) {
       let service;
-      try { service = await getLive(); } catch {
-        liveClients.delete(slot);
-        sendJson(res, 503, { error: 'live telemetry unavailable' });
-        return;
-      }
-      if (earlyClosed || clientGone(req, res)) { liveClients.delete(slot); return; }
-
-      res.writeHead(200, {
-        'content-type': 'text/event-stream; charset=utf-8',
-        'cache-control': 'no-store',
-        connection: 'keep-alive',
-        'x-accel-buffering': 'no',
+      await sseRoute({
+        req, res, clients: liveClients,
+        maxClients: Math.max(1, Math.min(256, Number(liveMaxClients) || 32)),
+        tooManyPayload: { error: 'too many live telemetry clients' },
+        limit: Math.max(1, Math.min(4096, Number(liveClientBuffer) || 256)),
+        heartbeatMs: liveHeartbeatMs,
+        // getLive() may do a dynamic import() + service.start(); sseRoute
+        // reserves the cap slot before this runs (TOCTOU fix, Finding 1).
+        setup: async () => {
+          try { service = await getLive(); } catch {
+            sendJson(res, 503, { error: 'live telemetry unavailable' });
+            return null;
+          }
+          return { onOverflow: async () => sseFrame('init', { reset: true, snapshot: await service.snapshot() }) };
+        },
+        afterOpen: async ({ channel, write, cleanup, isGone, activate, setOnClose }) => {
+          const cursorHeader = req.headers['last-event-id'];
+          const cursor = typeof cursorHeader === 'string' && cursorHeader.length <= 256
+            ? cursorHeader : null;
+          let replay = { reset: false, events: [] };
+          if (cursorHeader != null && cursor == null) replay = { reset: true, events: [] };
+          else if (cursor != null && cursor !== '') {
+            try { replay = await service.replay(String(cursor)); } catch { replay = { reset: true, events: [] }; }
+          }
+          if (isGone()) { cleanup(false); return; }
+          // Subscribe before taking the snapshot. Events published while the
+          // initial state is assembled are buffered and reconciled below,
+          // closing the snapshot→subscribe loss window.
+          let initializing = true;
+          const pending = [];
+          const onEvent = (event) => {
+            if (initializing) pending.push(event);
+            else {
+              try { write(sseFrame('delta', event, event?.eventId)); } catch { cleanup(true); }
+            }
+          };
+          let unsubscribe;
+          try { unsubscribe = service.subscribe(onEvent); } catch {
+            cleanup(false);
+            res.end();
+            scheduleLiveIdle();
+            return;
+          }
+          setOnClose(() => {
+            if (typeof unsubscribe === 'function') unsubscribe();
+            else if (unsubscribe && typeof unsubscribe.unsubscribe === 'function') unsubscribe.unsubscribe();
+            scheduleLiveIdle();
+          });
+          activate();
+          if (isGone()) { cleanup(true); return; }
+          let snapshot;
+          let postSnapshot = { reset: false, events: [] };
+          let snapshotPendingCount;
+          try {
+            snapshot = await service.snapshot();
+            snapshotPendingCount = pending.length;
+            if (snapshot?.cursor) postSnapshot = await service.replay(String(snapshot.cursor));
+          } catch {
+            cleanup(true);
+            return;
+          }
+          if (channel.isClosed()) return;
+          deliverLiveInit({
+            write, replay, snapshot, postSnapshot, pending, snapshotPendingCount,
+            markInitialized: () => { initializing = false; },
+          });
+          channel.startHeartbeat();
+        },
       });
-      res.flushHeaders?.();
-
-      const limit = Math.max(1, Math.min(4096, Number(liveClientBuffer) || 256));
-      const channel = sseChannel(res, {
-        limit, heartbeatMs: liveHeartbeatMs,
-        onOverflow: async () => sseFrame('init', { reset: true, snapshot: await service.snapshot() }),
-      });
-      const write = channel.write;
-
-      const cursorHeader = req.headers['last-event-id'];
-      const cursor = typeof cursorHeader === 'string' && cursorHeader.length <= 256
-        ? cursorHeader : null;
-      let replay = { reset: false, events: [] };
-      if (cursorHeader != null && cursor == null) replay = { reset: true, events: [] };
-      else if (cursor != null && cursor !== '') {
-        try { replay = await service.replay(String(cursor)); } catch { replay = { reset: true, events: [] }; }
-      }
-      if (earlyClosed || clientGone(req, res)) { liveClients.delete(slot); channel.cleanup(); return; }
-      // Subscribe before taking the snapshot. Events published while the
-      // initial state is assembled are buffered and reconciled below, closing
-      // the snapshot→subscribe loss window.
-      let initializing = true;
-      const pending = [];
-      const onEvent = (event) => {
-        if (initializing) pending.push(event);
-        else {
-          try { write(sseFrame('delta', event, event?.eventId)); } catch { cleanup(true); }
-        }
-      };
-      let unsubscribe;
-      try { unsubscribe = service.subscribe(onEvent); } catch {
-        liveClients.delete(slot);
-        channel.cleanup();
-        res.end();
-        scheduleLiveIdle();
-        return;
-      }
-      realCleanup = (terminate = false) => {
-        if (channel.isClosed()) return;
-        channel.cleanup(terminate);
-        if (typeof unsubscribe === 'function') unsubscribe();
-        else if (unsubscribe && typeof unsubscribe.unsubscribe === 'function') unsubscribe.unsubscribe();
-        liveClients.delete(slot);
-        liveClients.delete(cleanup);
-        scheduleLiveIdle();
-      };
-      liveClients.delete(slot);
-      liveClients.add(cleanup);
-      if (earlyClosed) { cleanup(true); return; }
-      let snapshot;
-      let postSnapshot = { reset: false, events: [] };
-      let snapshotPendingCount;
-      try {
-        snapshot = await service.snapshot();
-        snapshotPendingCount = pending.length;
-        if (snapshot?.cursor) postSnapshot = await service.replay(String(snapshot.cursor));
-      } catch {
-        cleanup(true);
-        return;
-      }
-      if (channel.isClosed()) return;
-      // Inspect replay while callbacks still buffer. A custom/async service may
-      // publish while materializing this result even though replay() itself has
-      // resolved.
-      const after = !postSnapshot?.reset && Array.isArray(postSnapshot?.events)
-        ? postSnapshot.events : [];
-      if (!replay?.reset) {
-        for (const event of Array.isArray(replay?.events) ? replay.events : []) {
-          write(sseFrame('delta', event, event?.eventId));
-        }
-      }
-      write(sseFrame('init', { reset: !!replay?.reset, snapshot }));
-      const afterIds = new Set(after.map((event) => event?.eventId).filter(Boolean));
-      const emitted = new Set();
-      const buffered = [...pending];
-      // Take the final buffer snapshot and flip modes without an await between
-      // them. JavaScript cannot dispatch a subscription callback in that gap:
-      // every later event therefore goes directly to the response.
-      initializing = false;
-      for (const [index, event] of [...after, ...buffered].entries()) {
-        const id = event?.eventId;
-        const pendingIndex = index - after.length;
-        // Events buffered after snapshot() resolved cannot be represented by
-        // that immutable snapshot. Deliver them even if replay() captured its
-        // result before they arrived. Earlier identified events absent from
-        // replay(snapshot.cursor) are already represented by the snapshot.
-        if (id && !afterIds.has(id)
-          && (pendingIndex < 0 || pendingIndex < snapshotPendingCount)) continue;
-        if (id && emitted.has(id)) continue;
-        if (id) emitted.add(id);
-        write(sseFrame('delta', event, id));
-      }
-      channel.startHeartbeat();
-      return;
     }
 
-    if (url === '/api/live/intelligence') {
-      // Same reservation-before-await discipline as /api/live/events above
-      // (sse.mjs's reserveClientSlot doc comment): resolving + starting a
-      // project's pool entry may await a dynamic import() + watch.start() on
-      // that project's very first connection, and concurrent requests
-      // arriving during that gap must not all observe the same
-      // pre-reservation size and all pass the cap.
-      const maxClients = Math.max(1, Math.min(256, Number(intelMaxClients) || 32));
-      const slot = reserveClientSlot(intelClients, maxClients);
-      if (!slot) {
-        sendJson(res, 503, { error: 'too many intelligence clients' });
-        return;
-      }
-      // Same forwarding-cleanup pattern as /api/live/events and the transcript
-      // route: catches a close that fires during the awaits below, before the
-      // real cleanup (which needs the channel/write) can be constructed.
-      let earlyClosed = false;
-      let realCleanup = null;
-      const cleanup = (terminate) => {
-        if (realCleanup) { realCleanup(terminate); return; }
-        earlyClosed = true;
-      };
-      req.once('close', cleanup);
-      res.once('close', cleanup);
+    async function handleLiveIntelligence(req, res, query) {
+      let selected;
+      let poolEntry;
+      await sseRoute({
+        req, res, clients: intelClients,
+        maxClients: Math.max(1, Math.min(256, Number(intelMaxClients) || 32)),
+        tooManyPayload: { error: 'too many intelligence clients' },
+        limit: Math.max(1, Math.min(4096, Number(intelClientBuffer) || 256)),
+        heartbeatMs: liveHeartbeatMs,
+        // Same reservation-before-await discipline sseRoute applies to every
+        // caller: resolving + starting a project's pool entry may await a
+        // dynamic import() + watch.start() on that project's very first
+        // connection.
+        setup: async () => {
+          // Same ?project=<key> resolution as /api/status, off the SAME
+          // cached discovery snapshot — the two endpoints can never disagree
+          // about which project an absent/unresolvable key defaults to.
+          const { projects } = getProjectSnapshot();
+          selected = resolveSelectedProject(projects, query.get('project'));
+          if (!selected) {
+            sendJson(res, 503, { error: 'no ruflo-initialized project found on this machine' });
+            return null;
+          }
+          poolEntry = getOrCreateIntelPoolEntry(selected.path);
+          try { await poolEntry.getWatch(); } catch {
+            // Nobody else is (yet) watching this path — don't leave a dead
+            // entry behind for the next request to trip over.
+            if (poolEntry.writers.size === 0) intelPool.delete(selected.path);
+            sendJson(res, 503, { error: 'intelligence telemetry unavailable' });
+            return null;
+          }
+          return {
+            // Reuses transcriptSseFrame (plain id/event/data lines, no
+            // publicLivePayload redaction) rather than sseFrame — this
+            // payload is aggregate learning metrics, not live
+            // session/transcript content, so the session-privacy scrubbing
+            // sseFrame applies is not the right tool here.
+            onOverflow: () => transcriptSseFrame('init', readIntelHistory(selected.path)),
+            onClose: () => { if (poolEntry.writers.size === 0) intelPool.delete(selected.path); },
+          };
+        },
+        afterOpen: async ({ channel, write, cleanup, isGone, activate, setOnClose }) => {
+          setOnClose(() => {
+            poolEntry.writers.delete(write);
+            // Last writer for this project gone — stop its watcher and forget
+            // the pool entry entirely, so an unwatched project's watcher does
+            // not run forever (the exact leak this pool replaces the old
+            // singleton to avoid).
+            if (poolEntry.writers.size === 0) {
+              intelPool.delete(selected.path);
+              void poolEntry.stop();
+            }
+          });
+          activate();
+          poolEntry.writers.add(write);
+          if (isGone()) { cleanup(true); return; }
 
-      // Same ?project=<key> resolution as /api/status, off the SAME cached
-      // discovery snapshot — the two endpoints can never disagree about
-      // which project an absent/unresolvable key defaults to.
-      const { projects } = getProjectSnapshot();
-      const selected = resolveSelectedProject(projects, query.get('project'));
-      if (!selected) {
-        intelClients.delete(slot);
-        sendJson(res, 503, { error: 'no ruflo-initialized project found on this machine' });
-        return;
-      }
-      const poolEntry = getOrCreateIntelPoolEntry(selected.path);
-
-      try { await poolEntry.getWatch(); } catch {
-        intelClients.delete(slot);
-        // Nobody else is (yet) watching this path — don't leave a dead entry
-        // behind for the next request to trip over.
-        if (poolEntry.writers.size === 0) intelPool.delete(selected.path);
-        sendJson(res, 503, { error: 'intelligence telemetry unavailable' });
-        return;
-      }
-      if (earlyClosed || clientGone(req, res)) {
-        intelClients.delete(slot);
-        if (poolEntry.writers.size === 0) intelPool.delete(selected.path);
-        return;
-      }
-
-      res.writeHead(200, {
-        'content-type': 'text/event-stream; charset=utf-8',
-        'cache-control': 'no-store',
-        connection: 'keep-alive',
-        'x-accel-buffering': 'no',
+          // One initial frame with the current combined read for the
+          // SELECTED project so a fresh page load doesn't have to wait out
+          // the watcher's own debounce window; every frame after this is
+          // pushed by that project's IntelligenceWatch onUpdate, fanned out
+          // to every writer currently watching this same path (and only this
+          // path).
+          write(transcriptSseFrame('init', readIntelHistory(selected.path)));
+          channel.startHeartbeat();
+        },
       });
-      res.flushHeaders?.();
-
-      const limit = Math.max(1, Math.min(4096, Number(intelClientBuffer) || 256));
-      // Reuses transcriptSseFrame (plain id/event/data lines, no publicLivePayload
-      // redaction) rather than sseFrame — this payload is aggregate learning
-      // metrics, not live session/transcript content, so the session-privacy
-      // scrubbing sseFrame applies is not the right tool here.
-      const channel = sseChannel(res, {
-        limit, heartbeatMs: liveHeartbeatMs,
-        onOverflow: () => transcriptSseFrame('init', readIntelHistory(selected.path)),
-      });
-      const write = channel.write;
-
-      realCleanup = (terminate = false) => {
-        if (channel.isClosed()) return;
-        channel.cleanup(terminate);
-        poolEntry.writers.delete(write);
-        intelClients.delete(cleanup);
-        // Last writer for this project gone — stop its watcher and forget
-        // the pool entry entirely, so an unwatched project's watcher does
-        // not run forever (the exact leak this pool replaces the old
-        // singleton to avoid).
-        if (poolEntry.writers.size === 0) {
-          intelPool.delete(selected.path);
-          void poolEntry.stop();
-        }
-      };
-      intelClients.delete(slot);
-      intelClients.add(cleanup);
-      poolEntry.writers.add(write);
-      if (earlyClosed) { cleanup(true); return; }
-
-      // One initial frame with the current combined read for the SELECTED
-      // project so a fresh page load doesn't have to wait out the watcher's
-      // own debounce window; every frame after this is pushed by that
-      // project's IntelligenceWatch onUpdate, fanned out to every writer
-      // currently watching this same path (and only this path).
-      write(transcriptSseFrame('init', readIntelHistory(selected.path)));
-      channel.startHeartbeat();
-      return;
     }
 
-    const playbackMatch = /^\/api\/live\/playback\/([^/]+)\/([^/]+)$/.exec(url);
-    if (playbackMatch) {
-      const host = playbackMatch[1];
-      const id = parseSessionId(playbackMatch[2]);
+    async function handlePlayback(req, res, query, match) {
+      const host = match[1];
+      const id = parseSessionId(match[2]);
       const rawAt = query.get('at');
       const atMs = rawAt == null || rawAt === '' ? null : Number(rawAt);
       if (!['claude', 'codex'].includes(host) || !id
@@ -1274,124 +1216,92 @@ export function startDashboard({
       return;
     }
 
-    const transcriptMatch = /^\/api\/live\/transcripts\/([^/]+)\/([^/]+)\/events$/.exec(url);
-    if (transcriptMatch) {
-      const host = transcriptMatch[1];
-      const id = parseSessionId(transcriptMatch[2]);
+    async function handleTranscriptEvents(req, res, query, match) {
+      const host = match[1];
+      const id = parseSessionId(match[2]);
       if (!['claude', 'codex'].includes(host) || !id) {
         sendJson(res, 400, { error: 'invalid transcript target' });
         return;
       }
-      const maxClients = Math.max(1, Math.min(64, Number(transcriptMaxClients) || 16));
-      const slot = reserveClientSlot(transcriptClients, maxClients);
-      if (!slot) {
-        sendJson(res, 503, { error: 'too many transcript clients' });
-        return;
-      }
-      // Same forwarding-cleanup pattern as /api/live/events: catches a close
-      // that fires during the awaits below, before the real cleanup (which
-      // needs transcriptService/host/id) can be constructed.
-      let earlyClosed = false;
-      let realCleanup = null;
-      const cleanup = (terminate) => {
-        if (realCleanup) { realCleanup(terminate); return; }
-        earlyClosed = true;
-      };
-      req.once('close', cleanup);
-      res.once('close', cleanup);
-
       let stream;
       let transcriptService;
-      try {
-        transcriptService = await getTranscripts();
-        stream = transcriptService.open(host, id);
-      } catch (error) {
-        transcriptClients.delete(slot);
-        const message = String(error?.message ?? '');
-        const status = /invalid/.test(message) ? 400 : (/not found|outside/.test(message) ? 404 : 503);
-        sendJson(res, status, { error: status === 404 ? 'transcript not found' : 'transcript unavailable' });
-        return;
-      }
-      if (earlyClosed || clientGone(req, res)) {
-        transcriptClients.delete(slot);
-        transcriptService?.release?.(host, id);
-        return;
-      }
-
-      res.writeHead(200, {
-        'content-type': 'text/event-stream; charset=utf-8',
-        'cache-control': 'no-store',
-        connection: 'keep-alive',
-        'x-accel-buffering': 'no',
-        'x-content-type-options': 'nosniff',
-        'cross-origin-resource-policy': 'same-origin',
-        'referrer-policy': 'no-referrer',
-      });
-      res.flushHeaders?.();
-
-      const limit = Math.max(1, Math.min(512, Number(transcriptClientBuffer) || 64));
-      const channel = sseChannel(res, {
-        limit, heartbeatMs: Math.max(1_000, liveHeartbeatMs),
-        onOverflow: () => transcriptSseFrame('gap', { sessionKey: `${host}:${id}`, reason: 'client-overflow' }),
-      });
-      const write = channel.write;
-
-      let initializing = true;
-      const pending = [];
-      const onEvent = (event) => {
-        if (initializing) pending.push(event);
-        else write(transcriptSseFrame('delta', event, event?.eventId));
-      };
-      let unsubscribe;
-      try { unsubscribe = stream.subscribe(onEvent); } catch {
-        transcriptClients.delete(slot);
-        channel.cleanup();
-        transcriptService?.release?.(host, id);
-        res.end();
-        return;
-      }
-      realCleanup = (terminate = false) => {
-        if (channel.isClosed()) return;
-        channel.cleanup(terminate);
-        if (typeof unsubscribe === 'function') unsubscribe();
-        transcriptClients.delete(slot);
-        transcriptClients.delete(cleanup);
-        transcriptService?.release?.(host, id);
-      };
-      transcriptClients.delete(slot);
-      transcriptClients.add(cleanup);
-      if (earlyClosed) { cleanup(true); return; }
-
-      const header = req.headers['last-event-id'];
-      const cursor = typeof header === 'string' && header.length <= 256 ? header : null;
-      let replay = { reset: header != null && cursor == null, events: [] };
-      try {
-        if (cursor) replay = stream.replay(cursor);
-        const snapshot = stream.snapshot();
-        if (!replay.reset) {
-          for (const event of replay.events ?? []) {
-            write(transcriptSseFrame('delta', event, event?.eventId));
+      await sseRoute({
+        req, res, clients: transcriptClients,
+        maxClients: Math.max(1, Math.min(64, Number(transcriptMaxClients) || 16)),
+        tooManyPayload: { error: 'too many transcript clients' },
+        limit: Math.max(1, Math.min(512, Number(transcriptClientBuffer) || 64)),
+        heartbeatMs: Math.max(1_000, liveHeartbeatMs),
+        setup: async () => {
+          try {
+            transcriptService = await getTranscripts();
+            stream = transcriptService.open(host, id);
+          } catch (error) {
+            const message = String(error?.message ?? '');
+            const status = /invalid/.test(message) ? 400 : (/not found|outside/.test(message) ? 404 : 503);
+            sendJson(res, status, { error: status === 404 ? 'transcript not found' : 'transcript unavailable' });
+            return null;
           }
-        }
-        write(transcriptSseFrame('init', { reset: !!replay.reset, snapshot }));
-      } catch {
-        cleanup(true);
-        return;
-      }
-      const emitted = new Set((replay.events ?? []).map((event) => event?.eventId));
-      for (const event of pending) {
-        if (!event?.eventId || !emitted.has(event.eventId)) {
-          write(transcriptSseFrame('delta', event, event?.eventId));
-        }
-      }
-      initializing = false;
-      channel.startHeartbeat();
-      return;
+          return {
+            headers: {
+              'x-content-type-options': 'nosniff',
+              'cross-origin-resource-policy': 'same-origin',
+              'referrer-policy': 'no-referrer',
+            },
+            onOverflow: () => transcriptSseFrame('gap', { sessionKey: `${host}:${id}`, reason: 'client-overflow' }),
+            onClose: () => { transcriptService?.release?.(host, id); },
+          };
+        },
+        afterOpen: async ({ channel, write, cleanup, isGone, activate, setOnClose }) => {
+          let initializing = true;
+          const pending = [];
+          const onEvent = (event) => {
+            if (initializing) pending.push(event);
+            else write(transcriptSseFrame('delta', event, event?.eventId));
+          };
+          let unsubscribe;
+          try { unsubscribe = stream.subscribe(onEvent); } catch {
+            cleanup(false);
+            res.end();
+            return;
+          }
+          setOnClose(() => {
+            if (typeof unsubscribe === 'function') unsubscribe();
+            transcriptService?.release?.(host, id);
+          });
+          activate();
+          if (isGone()) { cleanup(true); return; }
+
+          const header = req.headers['last-event-id'];
+          const cursor = typeof header === 'string' && header.length <= 256 ? header : null;
+          let replay = { reset: header != null && cursor == null, events: [] };
+          try {
+            if (cursor) replay = stream.replay(cursor);
+            const snapshot = stream.snapshot();
+            if (!replay.reset) {
+              for (const event of replay.events ?? []) {
+                write(transcriptSseFrame('delta', event, event?.eventId));
+              }
+            }
+            write(transcriptSseFrame('init', { reset: !!replay.reset, snapshot }));
+          } catch {
+            cleanup(true);
+            return;
+          }
+          const emitted = new Set((replay.events ?? []).map((event) => event?.eventId));
+          for (const event of pending) {
+            if (!event?.eventId || !emitted.has(event.eventId)) {
+              write(transcriptSseFrame('delta', event, event?.eventId));
+            }
+          }
+          initializing = false;
+          channel.startHeartbeat();
+        },
+      });
     }
 
     // ── Usage (ADR-0009). Lazy: nothing below runs until the tab is opened. ──
 
-    if (url === '/api/models') {
+    async function handleModels(req, res, query) {
       try {
         const payload = await provideModels();
         if (!payload || payload.status === 'empty' || !payload.snapshot) {
@@ -1433,7 +1343,7 @@ export function startDashboard({
     // The tree preview is therefore trimmed to what the client actually renders
     // (USAGE_TREE_PREVIEW rows per project), with rowsTotal kept so the "load
     // all" control still knows the true count and calls /api/sessions for the rest.
-    if (url === '/api/usage') {
+    async function handleUsage(req, res, query) {
       try {
         const [agg, providerAnalytics] = await Promise.all([
           usageApi.readIndex({ days: clampDays(query.get('days')) }),
@@ -1464,7 +1374,7 @@ export function startDashboard({
     // statusline tee); Codex side may spawn ONE vendor subprocess (`codex
     // app-server`), TTL-cached — the same shell-out trust model as
     // `ak status --json` above. No vendor credential is ever read here.
-    if (url === '/api/limits') {
+    async function handleLimits(req, res, query) {
       try {
         const agg = await usageApi.readIndex({ days: clampDays(query.get('days')) }).catch(() => null);
         const payload = await provideLimits();
@@ -1489,7 +1399,7 @@ export function startDashboard({
     // only), so no transcript, prompt, or tool payload can reach this route to
     // leak. Delivery protections are otherwise identical to every route above
     // — loopback bind, per-session token auth, no-store, nosniff, zero egress.
-    if (url === '/api/system') {
+    async function handleSystem(req, res, query) {
       try {
         const collector = await getSystem();
         // ORDER IS LOAD-BEARING: assemble the payload BEFORE starting a scan.
@@ -1525,7 +1435,7 @@ export function startDashboard({
       return;
     }
 
-    if (url === '/api/sessions') {
+    async function handleSessions(req, res, query) {
       try {
         const agg = await usageApi.readIndex({ days: clampDays(query.get('days')) });
         const project = query.get('project') || '';
@@ -1542,10 +1452,10 @@ export function startDashboard({
       return;
     }
 
-    if (url.startsWith('/api/session/')) {
+    async function handleSession(req, res, query, match) {
       // Validate BEFORE touching the index — a rejected id must never reach a
       // filesystem call, so the 400 happens here and nowhere deeper.
-      const id = parseSessionId(url.slice('/api/session/'.length));
+      const id = parseSessionId(match[1]);
       if (!id || !TRANSCRIPT_ROOTS.some((r) => resolvesInsideRoot(r, id))) {
         sendJson(res, 400, { error: 'invalid session id' });
         return;
@@ -1575,40 +1485,65 @@ export function startDashboard({
       return;
     }
 
-    res.writeHead(404, { 'content-type': 'text/plain; charset=utf-8' });
-    res.end('not found');
+    // Exact-path routes (O(1) lookup) win first, then the parametrized ones —
+    // mirrors the original if-chain's ordering, though none of these patterns
+    // can collide with an exact path above. Splitting the 15-route if-chain
+    // (formerly one closure, CC=194) into a handler per route plus this table
+    // is the mechanical half of the dashboard refactor (ADR-0036); the SSE
+    // routes' shared reserve-slot/early-close/channel lifecycle is factored
+    // out separately into sse.mjs's sseRoute().
+    const ROUTES = {
+      '/api/status': handleStatus,
+      '/api/live': handleLiveSnapshot,
+      '/api/live/history': handleLiveHistory,
+      '/api/live/events': handleLiveEvents,
+      '/api/live/intelligence': handleLiveIntelligence,
+      '/api/models': handleModels,
+      '/api/usage': handleUsage,
+      '/api/limits': handleLimits,
+      '/api/system': handleSystem,
+      '/api/sessions': handleSessions,
+    };
+    /** @type {Array<[RegExp, (req: any, res: any, query: any, match: RegExpExecArray) => Promise<void>]>} */
+    const PARAM_ROUTES = [
+      [/^\/api\/live\/playback\/([^/]+)\/([^/]+)$/, handlePlayback],
+      [/^\/api\/live\/transcripts\/([^/]+)\/([^/]+)\/events$/, handleTranscriptEvents],
+      // (.*) not (.+): the original startsWith('/api/session/') matched a
+      // bare trailing slash too (empty id), relying on parseSessionId/
+      // handleSession's own validation to fail it closed with 400 — a
+      // one-or-more-chars pattern here would 404 that case instead.
+      [/^\/api\/session\/(.*)$/, handleSession],
+    ];
+    const exactHandler = ROUTES[url];
+    if (exactHandler) { await exactHandler(req, res, query); return; }
+    for (const [pattern, handler] of PARAM_ROUTES) {
+      const match = pattern.exec(url);
+      if (match) { await handler(req, res, query, match); return; }
+    }
+
+    sendNotFound(res);
   });
 
-  return new Promise((resolve, reject) => {
-    server.on('error', reject);
-    // Loopback ONLY — never expose the panel beyond this machine.
-    server.listen(port, '127.0.0.1', () => {
-      const addr = server.address();
-      const actual = addr && typeof addr === 'object' ? addr.port : port;
-      resolve({
-        url: `http://127.0.0.1:${actual}/`,
-        urlWithToken: `http://127.0.0.1:${actual}/#token=${token}`,
-        port: actual,
-        token,
-        close: async () => {
-          shuttingDown = true;
-          cancelLiveIdle();
-          for (const cleanup of [...liveClients]) cleanup(true);
-          for (const cleanup of [...transcriptClients]) cleanup(true);
-          for (const cleanup of [...intelClients]) cleanup(true);
-          await new Promise((res) => server.close(() => res(undefined)));
-          await stopLive({ force: true });
-          try { await (await transcriptServicePromise)?.close?.(); } catch {}
-          // Backstop: each intel client's own cleanup above already stops +
-          // deletes its pool entry the instant its last writer disconnects,
-          // so this is normally a no-op — but stop every REMAINING entry
-          // (e.g. one still mid-start with zero writers) rather than assume
-          // that cascade always wins the race, so every pool watcher is
-          // stopped on shutdown, not just one.
-          for (const entry of [...intelPool.values()]) { try { await entry.stop(); } catch {} }
-          intelPool.clear();
-        },
-      });
-    });
+  // Loopback ONLY — never expose the panel beyond this machine.
+  return listenLoopback(server, {
+    port, token,
+    close: async () => {
+      shuttingDown = true;
+      cancelLiveIdle();
+      for (const cleanup of [...liveClients]) cleanup(true);
+      for (const cleanup of [...transcriptClients]) cleanup(true);
+      for (const cleanup of [...intelClients]) cleanup(true);
+      await new Promise((res) => server.close(() => res(undefined)));
+      await stopLive({ force: true });
+      try { await (await transcriptServicePromise)?.close?.(); } catch {}
+      // Backstop: each intel client's own cleanup above already stops +
+      // deletes its pool entry the instant its last writer disconnects,
+      // so this is normally a no-op — but stop every REMAINING entry
+      // (e.g. one still mid-start with zero writers) rather than assume
+      // that cascade always wins the race, so every pool watcher is
+      // stopped on shutdown, not just one.
+      for (const entry of [...intelPool.values()]) { try { await entry.stop(); } catch {} }
+      intelPool.clear();
+    },
   });
 }

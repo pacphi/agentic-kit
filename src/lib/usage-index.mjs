@@ -40,6 +40,7 @@ import {
   addTelemetryDiagnostics, emptyTelemetryDiagnostics, finalizeTelemetryDiagnostics,
   MAX_TELEMETRY_UNKNOWN_KINDS, recordTelemetryUnit, telemetryCapabilities,
 } from './usage-telemetry.mjs';
+import { decodeClaudeRecord, decodeCodexRecord } from './telemetry-records.mjs';
 
 /** Bump to invalidate every cached entry wholesale.
  *  v2: cached records carry `active` sub-intervals for the idle-gap split.
@@ -401,8 +402,10 @@ function* jsonLines(raw) {
 }
 
 /** A blank per-session record; `usage` rows are (day, model) buckets so byDay
- *  and byModel can both be derived without re-reading the transcript. */
-function blankSession(id, provider) {
+ *  and byModel can both be derived without re-reading the transcript. Exported
+ *  so other transcript-source parsers (usage-opencode.mjs) build the SAME
+ *  record shape instead of hand-mirroring it. */
+export function blankSession(id, provider) {
   return {
     id, provider, host: provider, inferenceProvider: null, providerProvenance: 'unknown',
     title: '', project: 'unknown', start: null, end: null,
@@ -450,33 +453,18 @@ function seal(rec) {
   return rec;
 }
 
-function addUsage(rec, day, model, u) {
+/** Add usage to a session's (day, model) bucket, creating it on first touch.
+ *  Returns the row so a caller with a per-source extra field (opencode's
+ *  observed `costObserved`) can set it without a second find(). Exported for
+ *  the same reason as blankSession — one definition of "how a usage row
+ *  accumulates", shared across transcript-source parsers. */
+export function addUsage(rec, day, model, u) {
   let row = rec.usage.find((r) => r.day === day && r.model === model);
   if (!row) { row = { day, model, input: 0, output: 0, cacheRead: 0, cacheWrite: 0, responses: 0 }; rec.usage.push(row); }
   row.input += u.input; row.output += u.output;
   row.cacheRead += u.cacheRead; row.cacheWrite += u.cacheWrite;
   row.responses += u.responses ?? 0;
-}
-
-/** Flatten a Claude content array into display text, dropping binary payloads
- *  (a pasted screenshot is megabytes of base64 nobody wants to render). */
-function claudeText(content) {
-  if (typeof content === 'string') return content;
-  if (!Array.isArray(content)) return '';
-  const out = [];
-  for (const b of content) {
-    if (!b || typeof b !== 'object') continue;
-    if (b.type === 'text' && typeof b.text === 'string') out.push(b.text);
-    else if (b.type === 'image') out.push('[image]');
-    else if (b.type === 'thinking' && typeof b.thinking === 'string') out.push(b.thinking);
-    else if (b.type === 'tool_result') {
-      const c = b.content;
-      out.push(`[tool result] ${typeof c === 'string' ? c : claudeText(c)}`);
-    } else if (b.type === 'tool_use') {
-      out.push(`[tool: ${b.name}]`);
-    }
-  }
-  return out.join('\n');
+  return row;
 }
 
 /**
@@ -550,24 +538,24 @@ function parseClaude(raw, { id, dirName, withTurns = false }) {
     if (e.type === 'ai-title') { if (typeof e.aiTitle === 'string') aiTitle = e.aiTitle; continue; }
     if (typeof e.attributionSkill === 'string' && !rec.skill) rec.skill = e.attributionSkill;
     if (typeof e.attributionPlugin === 'string' && !rec.plugin) rec.plugin = e.attributionPlugin;
-    if (e.isSidechain === true) rec.sidechain = true;
+    const decoded = decodeClaudeRecord(e);
+    if (decoded.isSidechain) rec.sidechain = true;
     if (rec.project === 'unknown' && typeof e.cwd === 'string') applyProject(rec, projectLabel(e.cwd, dirName, repoRootOf(e.cwd)));
 
-    if (e.type === 'user') {
+    if (decoded.role === 'user') {
       noteSpan(rec, ms);
       const human = isHumanPrompt(e);
       if (human) {
         rec.prompts++;
-        if (!firstPrompt) firstPrompt = claudeText(e.message?.content);
+        if (!firstPrompt) firstPrompt = decoded.text;
       }
-      if (withTurns) {
-        const text = claudeText(e.message?.content);
-        if (text) turns.push({ role: 'user', at: new Date(ms).toISOString(), text, prompt: human, kind: userTurnKind(e) });
+      if (withTurns && decoded.text) {
+        turns.push({ role: 'user', at: new Date(ms).toISOString(), text: decoded.text, prompt: human, kind: userTurnKind(e) });
       }
       continue;
     }
 
-    if (e.type !== 'assistant' || !e.message) continue;
+    if (decoded.role !== 'assistant' || !e.message) continue;
     noteSpan(rec, ms);
     rec.responses++;
     const at = Number.isFinite(ms) ? ms : (rec.start ?? Date.now());
@@ -584,40 +572,33 @@ function parseClaude(raw, { id, dirName, withTurns = false }) {
     // reliably set on every build that emits this placeholder, so the literal
     // model marker is checked directly too — it's the one part of the shape
     // that's never varied in observed transcripts.
-    if (e.isApiErrorMessage === true || e.message.model === '<synthetic>') {
+    if (decoded.isApiError) {
       rec.exceptions++;
       if (withTurns) {
         turns.push({
           role: 'assistant', at: new Date(at).toISOString(), model: 'exception',
-          text: claudeText(e.message.content), tools: [], exception: true,
+          text: decoded.text, tools: [], exception: true,
         });
       }
       continue;
     }
 
-    const model = typeof e.message.model === 'string' ? e.message.model : 'unknown';
+    const model = typeof decoded.model === 'string' ? decoded.model : 'unknown';
     if (!rec.models.includes(model)) rec.models.push(model);
 
-    const u = e.message.usage ?? {};
-    addUsage(rec, localDay(at), model, {
-      input: Number(u.input_tokens) || 0,
-      output: Number(u.output_tokens) || 0,
-      cacheRead: Number(u.cache_read_input_tokens) || 0,
-      cacheWrite: Number(u.cache_creation_input_tokens) || 0,
-      responses: 1,
-    });
+    addUsage(rec, localDay(at), model, { ...decoded.usage, responses: 1 });
 
     const tools = [];
-    for (const b of Array.isArray(e.message.content) ? e.message.content : []) {
-      if (b?.type === 'tool_use' && typeof b.name === 'string') {
-        tools.push(b.name);
-        rec.tools[b.name] = (rec.tools[b.name] ?? 0) + 1;
+    for (const use of decoded.toolUses) {
+      if (typeof use.name === 'string') {
+        tools.push(use.name);
+        rec.tools[use.name] = (rec.tools[use.name] ?? 0) + 1;
       }
     }
     if (withTurns) {
       turns.push({
         role: 'assistant', at: new Date(at).toISOString(), model,
-        text: claudeText(e.message.content), tools,
+        text: decoded.text, tools,
       });
     }
   }
@@ -625,21 +606,6 @@ function parseClaude(raw, { id, dirName, withTurns = false }) {
   rec.title = maskSecrets(aiTitle || clip(firstPrompt)) || '(untitled)';
   if (rec.project === 'unknown') applyProject(rec, projectLabel(null, dirName));
   return { session: seal(rec), turns };
-}
-
-/** Newer Codex rollouts wrap messages in `item_completed` and use a different
- * content-block discriminator for each message role (`Text` for agent output,
- * `text` for user input). Keep that wire detail at the parser boundary so the
- * rest of the scorecard consumes the same prompt/response model for both
- * generations. */
-function codexItemText(item) {
-  if (typeof item?.text === 'string') return item.text;
-  if (typeof item?.message === 'string') return item.message;
-  if (!Array.isArray(item?.content)) return '';
-  return item.content
-    .filter((block) => (block?.type === 'Text' || block?.type === 'text') && typeof block.text === 'string')
-    .map((block) => block.text)
-    .join('\n');
 }
 
 function codexParseStats() {
@@ -657,27 +623,6 @@ function recordCodexUnknownType(stats, type) {
   } else {
     stats.unknownItemTypeOverflow++;
   }
-}
-
-function codexEvent(payload, stats) {
-  if (payload?.type === 'user_message') {
-    stats.legacyEvents++;
-    return { kind: 'prompt', text: typeof payload.message === 'string' ? payload.message : '' };
-  }
-  if (payload?.type === 'agent_message') {
-    stats.legacyEvents++;
-    return { kind: 'response', text: typeof payload.message === 'string' ? payload.message : '' };
-  }
-  if (payload?.type !== 'item_completed') return null;
-
-  stats.itemCompletedEvents++;
-  const item = payload.item;
-  if (item?.type === 'UserMessage') return { kind: 'prompt', text: codexItemText(item) };
-  if (item?.type === 'AgentMessage') return { kind: 'response', text: codexItemText(item) };
-
-  const type = typeof item?.type === 'string' ? item.type : '<unknown>';
-  recordCodexUnknownType(stats, type);
-  return null;
 }
 
 /**
@@ -706,40 +651,40 @@ function parseCodex(raw, { id, withTurns = false }) {
   for (const e of jsonLines(raw)) {
     const ms = toMs(e.timestamp);
     noteSpan(rec, ms);
-    const p = e.payload ?? {};
+    const decoded = decodeCodexRecord(e);
 
-    if (e.type === 'session_meta') {
-      if (typeof p.id === 'string' && p.id) rec.id = p.id;
-      if (typeof p.cwd === 'string') applyProject(rec, projectLabel(p.cwd, null, repoRootOf(p.cwd)));
-      if (typeof p.thread_source === 'string') rec.threadSource = p.thread_source;
-      if (typeof p.model_provider === 'string' && p.model_provider) {
-        rec.inferenceProvider = p.model_provider;
+    if (decoded.type === 'meta') {
+      if (typeof decoded.sessionId === 'string' && decoded.sessionId) rec.id = decoded.sessionId;
+      if (typeof decoded.cwd === 'string') applyProject(rec, projectLabel(decoded.cwd, null, repoRootOf(decoded.cwd)));
+      if (typeof decoded.threadSource === 'string') rec.threadSource = decoded.threadSource;
+      if (decoded.provider) {
+        rec.inferenceProvider = decoded.provider;
         rec.providerProvenance = 'observed';
       }
       continue;
     }
-    if (e.type === 'turn_context') {
-      if (typeof p.model === 'string' && !rec.models.includes(p.model)) rec.models.push(p.model);
-      if (typeof p.model_provider === 'string' && p.model_provider) {
-        rec.inferenceProvider = p.model_provider;
+    if (decoded.type === 'turnContext') {
+      if (typeof decoded.model === 'string' && !rec.models.includes(decoded.model)) rec.models.push(decoded.model);
+      if (decoded.provider) {
+        rec.inferenceProvider = decoded.provider;
         rec.providerProvenance = 'observed';
       }
-      if (rec.project === 'unknown' && typeof p.cwd === 'string') applyProject(rec, projectLabel(p.cwd, null, repoRootOf(p.cwd)));
+      if (rec.project === 'unknown' && typeof decoded.cwd === 'string') applyProject(rec, projectLabel(decoded.cwd, null, repoRootOf(decoded.cwd)));
       continue;
     }
     if (e.type !== 'event_msg') continue;
 
-    if (p.type === 'token_count') {
+    if (decoded.type === 'tokenCount') {
       stats.tokenCountEvents++;
-      const t = p.info?.total_token_usage;
-      if (t && typeof t === 'object') { lastUsage = t; lastUsageAt = ms; }
+      const t = decoded.usage.total;
+      if (t) { lastUsage = t; lastUsageAt = ms; }
       // Every token_count also carries a live rate-limit snapshot — keep the
       // LAST one, normalized. Field names are a trap upstream: `primary` is
       // whichever window the server listed first, NOT reliably the 5-hour one
       // (observed live: primary = the 10080-minute weekly). So windows are
       // kept as a flat list keyed by window_minutes and never by field name.
-      const rl = p.rate_limits;
-      if (rl && typeof rl === 'object') {
+      const rl = decoded.usage.rateLimits;
+      if (rl) {
         const windows = [];
         for (const w of [rl.primary, rl.secondary]) {
           if (!w || typeof w !== 'object') continue;
@@ -762,12 +707,16 @@ function parseCodex(raw, { id, withTurns = false }) {
       }
       continue;
     }
-    const event = codexEvent(p, stats);
-    if (!event) continue;
-    if (event.kind === 'prompt') {
+
+    if (decoded.generation === 'legacy') stats.legacyEvents++;
+    else if (decoded.generation === 'item') stats.itemCompletedEvents++;
+    if (decoded.unknownItemType) recordCodexUnknownType(stats, decoded.unknownItemType);
+    if (decoded.type !== 'message') continue;
+
+    if (decoded.role === 'user') {
       rec.prompts++;
       stats.prompts++;
-      const text = event.text;
+      const text = decoded.text;
       if (!firstPrompt) firstPrompt = text;
       // Codex rollouts record only real prompts as user_message events — tool
       // output travels in other event types that are not surfaced as turns —
@@ -775,19 +724,17 @@ function parseCodex(raw, { id, withTurns = false }) {
       if (withTurns && text) turns.push({ role: 'user', at: new Date(ms).toISOString(), text, prompt: true, kind: 'prompt' });
       continue;
     }
-    if (event.kind === 'response') {
-      rec.responses++;
-      stats.responses++;
-      const at = Number.isFinite(ms) ? ms : (rec.start ?? Date.now());
-      const pk = punchKey(at);
-      rec.punchcard[pk] = (rec.punchcard[pk] ?? 0) + 1;
-      if (withTurns) {
-        turns.push({
-          role: 'assistant', at: new Date(at).toISOString(),
-          model: rec.models[rec.models.length - 1] ?? 'unknown',
-          text: event.text, tools: [],
-        });
-      }
+    rec.responses++;
+    stats.responses++;
+    const at = Number.isFinite(ms) ? ms : (rec.start ?? Date.now());
+    const pk = punchKey(at);
+    rec.punchcard[pk] = (rec.punchcard[pk] ?? 0) + 1;
+    if (withTurns) {
+      turns.push({
+        role: 'assistant', at: new Date(at).toISOString(),
+        model: rec.models[rec.models.length - 1] ?? 'unknown',
+        text: decoded.text, tools: [],
+      });
     }
   }
 
@@ -1348,6 +1295,152 @@ export async function buildIndex(o = {}) {
   try { return await p; } finally { _inflight.delete(key); }
 }
 
+/** opencode transcript source (one SQLite store, per-session cache keys).
+ *  Same hermeticity rule as the codex ledger below: overridden roots imply
+ *  the REAL store is the wrong one — only default-root scans (or an explicit
+ *  roots.opencode path) read it. Unlike the claude/codex file-tree sources,
+ *  opencode's health is a BYPRODUCT of listing (a single SQLite read can fail
+ *  in ways a directory walk cannot), so discovery and health are resolved
+ *  together here rather than the rootHealth()-then-list() order the other
+ *  two sources use. `rawRoots` is the caller's OWN `roots` option, unmerged
+ *  with defaults — its mere presence (vs `undefined`) is what makes an
+ *  override hermetic; see the codex ledger comment below. */
+function discoverOpencodeSource(rawRoots, cutoff) {
+  const ocDb = rawRoots === undefined ? defaultOpencodeDbPath() : (rawRoots?.opencode ?? null);
+  if (!ocDb || !fs.existsSync(ocDb)) return { health: { status: 'absent', reason: null }, candidates: [], ocDb };
+  const listed = listOpencodeSessionsResult({ dbFile: ocDb, cutoffMs: cutoff });
+  if (!listed.ok) {
+    const health = listed.error.kind === 'absent'
+      ? { status: 'absent', reason: 'absent' } : { status: 'degraded', reason: listed.error.kind };
+    return { health, candidates: [], ocDb };
+  }
+  const candidates = listed.value.map((e) => ({
+    file: `opencode://${e.id}`, provider: 'opencode', id: e.id, dbFile: ocDb,
+    stat: { mtimeMs: e.mtimeMs, size: e.size },
+  }));
+  return { health: { status: 'ok', reason: null }, candidates, ocDb };
+}
+
+/** Parse (or reuse the cached parse of) one scan candidate, updating the
+ *  common cross-host telemetry diagnostics and codex's extra per-file
+ *  diagnostics as side effects. Pulled out of scan()'s loop so the per-file
+ *  bookkeeping — which is genuinely provider-specific (codex tracks file
+ *  counts and yield diagnostics no other source has) — is not inlined into
+ *  the generic scan loop's own complexity. */
+function processCandidate(c, cache, commonDiagnostics, codexDiagnostics) {
+  const key = { mtime: c.stat.mtimeMs, size: c.stat.size };
+  const hit = cache?.entries?.[c.file];
+  const cacheHit = !!(hit && hit.mtime === key.mtime && hit.size === key.size
+    && (c.provider !== 'codex' || hit.parseStats));
+  let session = cacheHit ? hit.session : null;
+  let parseStats = cacheHit ? hit.parseStats : null;
+  if (!session) {
+    const parsed = parseFile(c);
+    session = parsed ? parsed.session : null;
+    parseStats = parsed?.parseStats ?? null;
+  }
+  if (commonDiagnostics[c.provider]) {
+    recordTelemetryUnit(commonDiagnostics[c.provider], session);
+    if (c.provider === 'codex') {
+      addTelemetryDiagnostics(commonDiagnostics.codex, {
+        unknownKinds: parseStats?.unknownItemTypes,
+        unknownKindOverflow: parseStats?.unknownItemTypeOverflow,
+      });
+    }
+  }
+  if (c.provider === 'codex') {
+    codexDiagnostics.files++;
+    if (cacheHit) codexDiagnostics.cachedFiles++;
+    if (session) addCodexParseDiagnostics(codexDiagnostics, parseStats);
+    else codexDiagnostics.unparsedFiles++;
+  }
+  return { key, session, parseStats };
+}
+
+/** Carry forward cached entries outside the window whose source still exists,
+ *  so widening the window later does not force a full re-parse. Bounded at
+ *  KEEP_MS: dashboard-server.mjs's clampDays caps every queryable window at
+ *  365 days, so an entry whose last activity is older than that can never be
+ *  reached by ANY query — carrying it forever was pure dead weight the cache
+ *  (and readCache's now-memoized parse) paid for on every scan.
+ *
+ *  claude/codex existence is a plain file stat; opencode pseudo-keys are not
+ *  files, so existence means "row still in the store" — checked against the
+ *  SQLite source directly. A degraded opencode store can't tell existence
+ *  apart from absence, so every carried opencode entry is kept rather than
+ *  guessed away, and (unlike claude/codex, whose carried entries stay
+ *  cache-only) is pushed back into `records` when still within the window,
+ *  since a store read that regains health later has no other way to notice.
+ *
+ *  Mutates `entries` and `records` in place; returns the possibly-updated
+ *  opencode health (a degraded existence check discovered mid-loop must
+ *  still be visible to the NEXT entry's check and to the final report). */
+function carryForwardCachedEntries(cache, entries, records, { now, cutoff, ocDb, opencodeHealth }) {
+  if (!cache?.entries) return opencodeHealth;
+  for (const [file, e] of Object.entries(cache.entries)) {
+    if (entries[file] || !e?.session) continue;
+    const lastActivity = e.session.end ?? e.session.start;
+    // No timestamp at all → can't judge age; keep it rather than guess.
+    if (lastActivity != null && now - lastActivity > KEEP_MS) continue;
+    if (!file.startsWith('opencode://')) {
+      if (statSafe(file)) entries[file] = e;
+      continue;
+    }
+    const result = carryForwardOpencodeEntry(file, e, opencodeHealth, ocDb);
+    if (!result) continue;
+    entries[file] = result.entry;
+    opencodeHealth = result.health;
+    if (result.pushRecord && (lastActivity == null || lastActivity >= cutoff)) records.push(e.session);
+  }
+  return opencodeHealth;
+}
+
+/** The opencode half of carryForwardCachedEntries — split out to keep both
+ *  functions individually under the project's complexity threshold. Returns
+ *  `null` to drop the entry, or `{ entry, health, pushRecord }` for the
+ *  caller to apply; see carryForwardCachedEntries for why a kept entry is
+ *  pushed back into `records` (unlike claude/codex's carry-forward). */
+function carryForwardOpencodeEntry(file, e, opencodeHealth, ocDb) {
+  const dbFile = e.dbFile ?? ocDb;
+  const exists = opencodeHealth.status === 'degraded'
+    ? null
+    : (dbFile ? opencodeSessionExistsResult({ dbFile, id: file.slice('opencode://'.length) }) : null);
+  if (opencodeHealth.status === 'degraded' || (exists?.ok && exists.value)) {
+    return { entry: { ...e, dbFile }, health: opencodeHealth, pushRecord: true };
+  }
+  if (exists && !exists.ok && exists.error.kind !== 'absent') {
+    return {
+      entry: { ...e, dbFile },
+      health: { status: 'degraded', reason: exists.error.kind },
+      pushRecord: true,
+    };
+  }
+  return null;
+}
+
+/** Codex's own thread ledger outranks the rollout heuristic (`undefined` →
+ *  read the real db; tests pass an object, or null to skip). Overridden roots
+ *  (tests, sandboxes) imply the REAL ~/.codex ledger is the wrong ledger for
+ *  these records — reading it would break test hermeticity and mis-attribute
+ *  fixture sessions. Only default roots read the real db. `rawRoots` is the
+ *  caller's OWN `roots` option, unmerged with defaults (same reason as
+ *  discoverOpencodeSource's).
+ *  @param {IndexOptions} o */
+function resolveCodexLedger(o, rawRoots) {
+  if (o.codexState !== undefined) {
+    return { ledger: o.codexState, health: { status: o.codexState ? 'ok' : 'absent', reason: null } };
+  }
+  if (rawRoots?.codex) {
+    return { ledger: null, health: { status: 'not-read', reason: 'sandboxed-roots' } };
+  }
+  const observed = readCodexStateResult();
+  const ledger = observed.ok ? observed.value : null;
+  const health = observed.ok
+    ? (observed.value ? { status: 'ok', reason: null } : { status: 'degraded', reason: 'schema' })
+    : { status: observed.error.kind === 'absent' ? 'absent' : 'degraded', reason: observed.error.kind };
+  return { ledger, health };
+}
+
 /** @param {IndexOptions} [o] */
 async function scan(o = {}) {
   const {
@@ -1362,33 +1455,14 @@ async function scan(o = {}) {
   // recursive per-file walk listClaude/listCodex still do below).
   const claudeHealth = rootHealth(r.claude);
   const codexHealth = rootHealth(r.codex);
-
   const candidates = [...listClaude(r.claude), ...listCodex(r.codex)]
     .map((e) => ({ ...e, stat: statSafe(e.file) }))
     .filter((e) => e.stat && e.stat.mtimeMs >= cutoff);
 
-  // opencode transcript source (one SQLite store, per-session cache keys).
-  // Same hermeticity rule as the codex ledger below: overridden roots imply
-  // the REAL store is the wrong one — only default-root scans (or an explicit
-  // roots.opencode path) read it.
-  const ocDb = o.roots === undefined ? defaultOpencodeDbPath() : (roots?.opencode ?? null);
-  let opencodeHealth = { status: 'absent', reason: null };
-  if (ocDb && fs.existsSync(ocDb)) {
-    const listed = listOpencodeSessionsResult({ dbFile: ocDb, cutoffMs: cutoff });
-    if (listed.ok) {
-      opencodeHealth = { status: 'ok', reason: null };
-      for (const e of listed.value) {
-        candidates.push({
-          file: `opencode://${e.id}`, provider: 'opencode', id: e.id, dbFile: ocDb,
-          stat: { mtimeMs: e.mtimeMs, size: e.size },
-        });
-      }
-    } else {
-      opencodeHealth = listed.error.kind === 'absent'
-        ? { status: 'absent', reason: 'absent' }
-        : { status: 'degraded', reason: listed.error.kind };
-    }
-  }
+  const opencodeSource = discoverOpencodeSource(roots, cutoff);
+  let opencodeHealth = opencodeSource.health;
+  const ocDb = opencodeSource.ocDb;
+  candidates.push(...opencodeSource.candidates);
 
   const cache = force ? null : readCache(cacheFile);
   const entries = {};
@@ -1404,32 +1478,7 @@ async function scan(o = {}) {
 
   notify(onProgress, { scanned: 0, total, phase: 'scan' });
   for (const c of candidates) {
-    const key = { mtime: c.stat.mtimeMs, size: c.stat.size };
-    const hit = cache?.entries?.[c.file];
-    const cacheHit = !!(hit && hit.mtime === key.mtime && hit.size === key.size
-      && (c.provider !== 'codex' || hit.parseStats));
-    let session = cacheHit ? hit.session : null;
-    let parseStats = cacheHit ? hit.parseStats : null;
-    if (!session) {
-      const parsed = parseFile(c);
-      session = parsed ? parsed.session : null;
-      parseStats = parsed?.parseStats ?? null;
-    }
-    if (commonDiagnostics[c.provider]) {
-      recordTelemetryUnit(commonDiagnostics[c.provider], session);
-      if (c.provider === 'codex') {
-        addTelemetryDiagnostics(commonDiagnostics.codex, {
-          unknownKinds: parseStats?.unknownItemTypes,
-          unknownKindOverflow: parseStats?.unknownItemTypeOverflow,
-        });
-      }
-    }
-    if (c.provider === 'codex') {
-      codexDiagnostics.files++;
-      if (cacheHit) codexDiagnostics.cachedFiles++;
-      if (session) addCodexParseDiagnostics(codexDiagnostics, parseStats);
-      else codexDiagnostics.unparsedFiles++;
-    }
+    const { key, session, parseStats } = processCandidate(c, cache, commonDiagnostics, codexDiagnostics);
     if (session) {
       entries[c.file] = {
         ...key, session,
@@ -1442,63 +1491,17 @@ async function scan(o = {}) {
     if (scanned % 100 === 0) notify(onProgress, { scanned, total, phase: 'scan' });
   }
 
-  // Carry forward cached entries outside the window whose file still exists, so
-  // widening the window later does not force a full re-parse. Bounded at
-  // KEEP_MS: dashboard-server.mjs's clampDays caps every queryable window at
-  // 365 days, so an entry whose last activity is older than that can never be
-  // reached by ANY query — carrying it forever was pure dead weight the cache
-  // (and readCache's now-memoized parse) paid for on every scan.
-  if (cache?.entries) {
-    for (const [file, e] of Object.entries(cache.entries)) {
-      if (entries[file] || !e?.session) continue;
-      const lastActivity = e.session.end ?? e.session.start;
-      // No timestamp at all → can't judge age; keep it rather than guess.
-      if (lastActivity != null && now - lastActivity > KEEP_MS) continue;
-      // opencode pseudo-keys are not files: existence means "row still in the store".
-      if (file.startsWith('opencode://')) {
-        const dbFile = e.dbFile ?? ocDb;
-        const exists = opencodeHealth.status === 'degraded'
-          ? null
-          : (dbFile ? opencodeSessionExistsResult({ dbFile, id: file.slice('opencode://'.length) }) : null);
-        if (opencodeHealth.status === 'degraded' || (exists?.ok && exists.value)) {
-          entries[file] = { ...e, dbFile };
-          if (lastActivity == null || lastActivity >= cutoff) records.push(e.session);
-        } else if (exists && !exists.ok && exists.error.kind !== 'absent') {
-          opencodeHealth = { status: 'degraded', reason: exists.error.kind };
-          entries[file] = { ...e, dbFile };
-          if (lastActivity == null || lastActivity >= cutoff) records.push(e.session);
-        }
-      } else if (statSafe(file)) entries[file] = e;
-    }
-  }
+  opencodeHealth = carryForwardCachedEntries(cache, entries, records, {
+    now, cutoff, ocDb, opencodeHealth,
+  });
   writeCache(cacheFile, { schemaVersion: SCHEMA_VERSION, updatedAt: new Date(now).toISOString(), entries });
   notify(onProgress, { scanned: total, total, phase: 'aggregate' });
 
-  // Codex's own thread ledger outranks the rollout heuristic (`undefined` →
-  // read the real db; tests pass an object, or null to skip). Applied AFTER the
-  // cache write, on copies: the cache stores what the FILE said, the aggregate
-  // reflects what Codex's ledger knows — a ledger that arrives later (or gets
-  // repaired) corrects old sessions without a cache invalidation.
-  // Overridden roots (tests, sandboxes) imply the REAL ~/.codex ledger is the
-  // wrong ledger for these records — reading it would break test hermeticity
-  // and mis-attribute fixture sessions. Only default roots read the real db.
-  let ledger;
-  let codexLedgerHealth;
-  if (o.codexState !== undefined) {
-    ledger = o.codexState;
-    codexLedgerHealth = { status: ledger ? 'ok' : 'absent', reason: null };
-  } else if (roots?.codex) {
-    ledger = null;
-    codexLedgerHealth = { status: 'not-read', reason: 'sandboxed-roots' };
-  } else {
-    const observed = readCodexStateResult();
-    ledger = observed.ok ? observed.value : null;
-    codexLedgerHealth = observed.ok
-      ? (observed.value
-        ? { status: 'ok', reason: null }
-        : { status: 'degraded', reason: 'schema' })
-      : { status: observed.error.kind === 'absent' ? 'absent' : 'degraded', reason: observed.error.kind };
-  }
+  // Applied AFTER the cache write, on copies: the cache stores what the FILE
+  // said, the aggregate reflects what Codex's ledger knows — a ledger that
+  // arrives later (or gets repaired) corrects old sessions without a cache
+  // invalidation.
+  const { ledger, health: codexLedgerHealth } = resolveCodexLedger(o, roots);
   const result = aggregate(applyCodexLedger(records, ledger), { days, now, cutoff, deps });
   const codexSourceHealth = finalizeCodexHealth(codexHealth, codexDiagnostics);
   addTelemetryDiagnostics(commonDiagnostics.codex, {

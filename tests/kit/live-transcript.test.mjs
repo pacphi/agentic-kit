@@ -101,6 +101,35 @@ test('Codex transcript adapter excludes encrypted reasoning and preserves local 
   assert.equal(delegated[0].relation, 'delegates');
 });
 
+test('Codex transcript adapter recognizes the newer item_completed generation, not just legacy user/agent_message', () => {
+  const input = adaptCodexTranscriptRecord({
+    type: 'event_msg', timestamp: '2026-07-27T12:00:00Z',
+    payload: { id: 'ic-1', type: 'item_completed', item: { type: 'UserMessage', text: 'hello codex' } },
+  }, { sessionId: 's1' });
+  assert.equal(input.length, 1);
+  assert.equal(input[0].kind, 'message');
+  assert.equal(input[0].actor.role, 'user');
+  assert.equal(input[0].text, 'hello codex');
+
+  const output = adaptCodexTranscriptRecord({
+    type: 'event_msg', timestamp: '2026-07-27T12:00:01Z',
+    payload: {
+      id: 'ic-2', type: 'item_completed',
+      item: { type: 'AgentMessage', content: [{ type: 'Text', text: 'reply text' }] },
+    },
+  }, { sessionId: 's1' });
+  assert.equal(output.length, 1);
+  assert.equal(output[0].kind, 'message');
+  assert.equal(output[0].actor.role, 'assistant');
+  assert.equal(output[0].text, 'reply text');
+
+  const unknown = adaptCodexTranscriptRecord({
+    type: 'event_msg', timestamp: '2026-07-27T12:00:02Z',
+    payload: { id: 'ic-3', type: 'item_completed', item: { type: 'Reasoning', text: 'internal' } },
+  }, { sessionId: 's1' });
+  assert.deepEqual(unknown, []);
+});
+
 test('Codex transcript stream suppresses the duplicated event/response message pair', () => {
   const sb = sandbox();
   fs.writeFileSync(path.join(sb.codex, 'rollout-2026-07-27T12-00-00-s1.jsonl'), [

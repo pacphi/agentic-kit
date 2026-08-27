@@ -1,4 +1,5 @@
 import { classifyToolName } from './tool-classify.mjs';
+import { decodeCodexRecord } from '../telemetry-records.mjs';
 
 const iso = (value) => {
   const ms = Date.parse(value);
@@ -129,6 +130,25 @@ export function adaptCodexTranscriptRecord(record, context = {}) {
         ...common(role), kind: 'message', text,
         key: valueText(payload.id) ? `codex:message:${payload.id}:${index}` : null,
       }));
+    }
+    // Newer Codex rollouts wrap messages in `item_completed` instead of the
+    // legacy user_message/agent_message pair above — the exact generation
+    // gap codex-adapter.mjs's item_completed fix addressed for the status
+    // plane. decodeCodexRecord is the one place that wire shape is decoded
+    // (including the newer item's Text/text content-block discriminator), so
+    // this content-plane adapter reuses it rather than re-deriving the
+    // UserMessage/AgentMessage dispatch locally. Its `text` is already
+    // joined into one string, so this yields at most one message here where
+    // the legacy branch above can yield several (one per content block) —
+    // codexMessageText's block-splitting is preserved for the legacy shape,
+    // which is unaffected by this addition.
+    if (payload.type === 'item_completed') {
+      const decoded = decodeCodexRecord(record);
+      if (decoded.type !== 'message' || !decoded.text) return [];
+      return [{
+        ...common(decoded.role), kind: 'message', text: decoded.text,
+        key: valueText(payload.id) ? `codex:message:${payload.id}:0` : null,
+      }];
     }
     if (['task_started', 'task_complete', 'turn_aborted', 'context_compacted',
       'sub_agent_activity', 'patch_apply_end', 'mcp_tool_call_end',

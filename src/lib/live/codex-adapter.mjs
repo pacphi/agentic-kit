@@ -1,16 +1,18 @@
 import { createLiveEvent } from './event-schema.mjs';
 import { classifyToolName } from './tool-classify.mjs';
-
-const artifact = (value) => typeof value === 'string'
-  ? value.replaceAll('\\', '/').split('/').pop()?.slice(0, 256) ?? null : null;
+import { artifactName, decodeCodexRecord, resolveCodexProvider } from '../telemetry-records.mjs';
 
 export function adaptCodexRecord(record, context = {}) {
   if (!record || typeof record !== 'object') return [];
   const payload = record.payload && typeof record.payload === 'object' ? record.payload : {};
+  const decoded = decodeCodexRecord(record);
   const meta = record.type === 'session_meta' ? payload : context.meta ?? {};
   // codex spells this model_provider in rollout session_meta; bare provider is
-  // legacy tolerance only.
-  const metaProvider = meta.model_provider ?? meta.provider;
+  // legacy tolerance only. `decoded.provider` already applies that same
+  // lookup (resolveCodexProvider) to THIS record; a carried-forward meta from
+  // an earlier session_meta needs the identical lookup applied directly,
+  // since decodeCodexRecord only ever sees one record at a time.
+  const metaProvider = decoded.type === 'meta' ? decoded.provider : resolveCodexProvider(meta);
   const sessionId = meta.id ?? context.sessionId;
   if (typeof sessionId !== 'string' || !sessionId) return [];
   const subagent = meta.thread_source === 'subagent' || context.threadSource === 'subagent';
@@ -26,15 +28,15 @@ export function adaptCodexRecord(record, context = {}) {
       role: meta.agent_role ?? context.agentRole ?? (subagent ? 'worker' : 'primary'),
       provider: metaProvider ?? context.provider,
       model: record.type === 'turn_context'
-        ? payload.model ?? context.model : meta.model ?? context.model,
+        ? decoded.model ?? context.model : meta.model ?? context.model,
     },
     source: {
-      adapter: 'codex-rollout', artifact: artifact(context.artifact),
+      adapter: 'codex-rollout', artifact: artifactName(context.artifact),
       confidence: subagent && meta.thread_source !== 'subagent' ? 'correlated' : 'observed',
       fields: {
         project: context.project ? 'observed' : null,
         provider: metaProvider || context.provider ? 'observed' : null,
-        model: (record.type === 'turn_context' ? payload.model : meta.model) || context.model
+        model: (record.type === 'turn_context' ? decoded.model : meta.model) || context.model
           ? 'observed' : null,
         status: 'observed',
         hierarchy: subagent ? (meta.thread_source === 'subagent' ? 'observed' : 'correlated') : 'observed',
@@ -42,48 +44,44 @@ export function adaptCodexRecord(record, context = {}) {
       },
     },
   };
-  if (record.type === 'session_meta') {
+  if (decoded.type === 'meta') {
     return [createLiveEvent({
       ...base,
       action: context.bootstrap ? 'session.discovered' : 'session.started',
       status: context.bootstrap ? 'unknown' : 'running',
     })];
   }
-  if (record.type === 'turn_context' && (payload.model || payload.cwd)) {
+  if (decoded.type === 'turnContext' && (decoded.model || decoded.cwd)) {
     return [createLiveEvent({
       ...base, action: 'session.metadata',
       status: context.bootstrap ? 'unknown' : 'running',
     })];
   }
-  if (record.type === 'event_msg' && ['user_message', 'agent_message'].includes(payload.type)) {
+  if (decoded.type === 'message') {
     return [createLiveEvent({
-      ...base, action: payload.type === 'user_message' ? 'session.input' : 'agent.output',
+      ...base, action: decoded.role === 'user' ? 'session.input' : 'agent.output',
       status: 'running',
     })];
   }
-  if (record.type === 'response_item' && ['function_call', 'custom_tool_call'].includes(payload.type)) {
-    const callId = payload.call_id ?? payload.id;
-    if (typeof callId !== 'string') return [];
-    const typed = classifyToolName(payload.name);
+  if (decoded.type === 'toolCall') {
+    if (typeof decoded.callId !== 'string') return [];
+    const typed = classifyToolName(decoded.toolName);
     return [createLiveEvent({
       ...base, action: 'tool.started', status: 'running',
-      target: { id: callId, kind: typed.kind, label: typed.category },
-      attributes: { toolCategory: typed.category, toolName: payload.name },
+      target: { id: decoded.callId, kind: typed.kind, label: typed.category },
+      attributes: { toolCategory: typed.category, toolName: decoded.toolName },
     })];
   }
-  if (record.type === 'response_item'
-    && ['function_call_output', 'custom_tool_call_output'].includes(payload.type)) {
-    const callId = payload.call_id ?? payload.id;
-    if (typeof callId !== 'string') return [];
+  if (decoded.type === 'toolResult') {
+    if (typeof decoded.callId !== 'string') return [];
     return [createLiveEvent({
       ...base, action: 'tool.completed', status: 'completed',
-      target: { id: callId, kind: 'tool' },
+      target: { id: decoded.callId, kind: 'tool' },
     })];
   }
-  if (record.type === 'event_msg' && ['task_complete', 'turn_aborted'].includes(payload.type)) {
+  if (decoded.type === 'lifecycle') {
     return [createLiveEvent({
-      ...base, action: 'session.completed',
-      status: payload.type === 'turn_aborted' ? 'cancelled' : 'completed',
+      ...base, action: 'session.completed', status: decoded.status,
     })];
   }
   return [];
@@ -148,7 +146,7 @@ export function adaptCodexLedger(ledger, context = {}) {
         label: child?.agentNickname, role: child?.agentRole,
       },
       source: {
-        adapter: 'codex-state', artifact: artifact(context.artifact),
+        adapter: 'codex-state', artifact: artifactName(context.artifact),
         confidence: 'observed',
         fields: {
           project: project && project !== 'unknown' ? 'observed' : null,

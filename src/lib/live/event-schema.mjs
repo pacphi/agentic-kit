@@ -88,7 +88,7 @@ function safeWorkspace(value) {
   };
 }
 
-function inferredSignal(action, status) {
+export function inferredSignal(action, status) {
   if (action === 'session.heartbeat' || action === 'session.rebound') {
     return { kind: 'presence', phase: status === 'quiescent' ? 'quiescent' : 'observed' };
   }
