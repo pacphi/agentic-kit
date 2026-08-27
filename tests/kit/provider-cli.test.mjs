@@ -402,7 +402,10 @@ test('external provider selection accepts the effective host and provider-only r
   const sb = pickSandbox({ hosts: { claude: true, codex: false, opencode: false } });
   try {
     configureExternalAqeProvider(sb);
-    const env = { AK_EXPERIMENTAL_HOST_ADAPTERS: '1' };
+    const env = {
+      AK_EXPERIMENTAL_HOST_ADAPTERS: '1',
+      npm_config_prefix: fakeAqeInstall(sb.home),
+    };
 
     const explicit = akPick(['x', 'host', 'pick', '--host', 'claude,hermes', '--yes'], sb, { env });
     assert.equal(explicit.status, 0, `explicit external host failed\nstdout: ${explicit.stdout}\nstderr: ${explicit.stderr}`);
