@@ -6,16 +6,16 @@
 // swallow the external-intent, external-projection, ruflo-models, and
 // local-bindings rows in the sibling sections below.
 //
-// TODO(complexity-program): re-home onto providers.mjs drift comparators
-// post-integration — this duplicates write-side logic in src/lib/providers.mjs.
-import * as paths from '../../../lib/paths.mjs';
-import { readJson } from '../../../lib/settings.mjs';
+// Drift itself is judged by src/lib/providers.mjs's own comparators
+// (providerEnvDrift, aqeRouterDrift) — the same dry-run computation the
+// writer (applyHosts/applyAqeRouter) executes, so this section can never
+// silently diverge from what `ak sync` would actually do (#129).
 import { have } from '../../../lib/exec.mjs';
 import {
-  HOSTS, settingsTarget, isDefault, managedEnv, MANAGED_ENV_KEYS, aqeRouterFile, credentialGaps,
+  HOSTS, settingsTarget, isDefault, providerEnvDrift, aqeRouterDrift, credentialGaps, providerExternalState,
 } from '../../../lib/providers.mjs';
+import { readJson } from '../../../lib/settings.mjs';
 import { row } from '../row.mjs';
-import { computeProviderExternalState } from './_providers-external.mjs';
 
 async function defaultHostRows(cfg) {
   const rows = [];
@@ -31,26 +31,10 @@ async function defaultHostRows(cfg) {
   return rows;
 }
 
-function driftRow(cfg, cwd, env, scope, unavailableExternalSet) {
-  const desired = managedEnv(cfg);
-  const envDrift = MANAGED_ENV_KEYS.some((k) => (k in desired ? env[k] !== desired[k] : k in env));
-  // aqe fallback chain: on-disk llm-config.json must match kit.json order.
-  // Same scope gate as the writer (#129): applyAqeRouter anchors the file at
-  // repoRoot and declines outside a project, so the check must read the root
-  // and stay silent where sync would decline — a warn here would recommend a
-  // sync that cannot repair it.
+function driftRow(cfg, cwd, env, scope) {
+  const envDrift = providerEnvDrift(cfg, env);
+  const { drift: routerDrift } = aqeRouterDrift(cfg, cwd);
   const chain = cfg.providers.aqeFallback ?? [];
-  const chainRoot = paths.repoRoot(cwd);
-  let routerDrift = false;
-  if (chain.length && chainRoot) {
-    const disk = readJson(aqeRouterFile(chainRoot));
-    const diskOrder = (disk?.fallbackChain?.entries ?? []).map((e) => e.provider).join('→');
-    const liveOrder = chain.filter((entry) => !unavailableExternalSet.has(entry?.provider))
-      .map((entry) => entry.provider).join('→');
-    routerDrift = liveOrder
-      ? disk?._managedBy !== 'agentic-kit' || diskOrder !== liveOrder
-      : diskOrder !== '';
-  }
   const on = HOSTS.filter((h) => cfg.integrations.hosts[h.id]).map((h) => h.id).join('+') || 'none';
   const chainStr = chain.length ? `; aqe chain ${chain.map((e) => e.provider).join('→')}` : '';
   return (envDrift || routerDrift)
@@ -82,12 +66,12 @@ export default {
     try {
       const { file, scope } = settingsTarget(cwd);
       const env = readJson(file, {})?.env ?? {};
-      const { unavailableExternalSet } = computeProviderExternalState(cfg, cwd);
+      const { unavailableIntentSet } = providerExternalState(cfg, cwd);
       if (isDefault(cfg)) {
         rows.push(...(await defaultHostRows(cfg)));
       } else {
-        rows.push(driftRow(cfg, cwd, env, scope, unavailableExternalSet));
-        const credRow = credentialChainRow(cfg, unavailableExternalSet);
+        rows.push(driftRow(cfg, cwd, env, scope));
+        const credRow = credentialChainRow(cfg, unavailableIntentSet);
         if (credRow) rows.push(credRow);
       }
     } catch (e) {

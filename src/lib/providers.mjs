@@ -632,6 +632,57 @@ export function aqeRouterFile(cwd = process.cwd()) {
   return path.join(paths.projectAqeDir(cwd), 'llm-config.json');
 }
 
+/** Host-adapter ids kit.json configures — either declared in `hostAdapters`, or
+ *  named in `integrations.hosts` without being one of the built-in HOSTS. The
+ *  status/verify surface that needs to know which non-builtin ids a config
+ *  intends to be an aqe-external provider (relocated from status/sections —
+ *  #129-shaped: this must read the config the same way the config is written,
+ *  never a re-guessed shape). */
+export function configuredAdapterIds(cfg) {
+  const ids = new Set((cfg.hostAdapters ?? [])
+    .map((entry) => entry?.name).filter((name) => typeof name === 'string' && name));
+  const builtinHostIds = new Set(HOSTS.map((host) => host.id));
+  for (const id of Object.keys(cfg.integrations?.hosts ?? {})) {
+    if (!builtinHostIds.has(id)) ids.add(id);
+  }
+  return ids;
+}
+
+/** Which configured-adapter ids are actually REFERENCED by provider/routing
+ *  intent (aqeProvider, aqeFallback, or a routing route/escalation host) —
+ *  regardless of whether that id is currently admitted/live. */
+export function externalProviderIntent(cfg, adapterIds = configuredAdapterIds(cfg)) {
+  const intent = new Set();
+  if (adapterIds.has(cfg.providers?.aqeProvider)) intent.add(cfg.providers.aqeProvider);
+  for (const entry of cfg.providers?.aqeFallback ?? []) {
+    if (adapterIds.has(entry?.provider)) intent.add(entry.provider);
+  }
+  for (const route of Object.values(cfg.routing?.routes ?? {})) {
+    if (adapterIds.has(route?.host)) intent.add(route.host);
+    for (const rung of route?.escalation ?? []) {
+      if (adapterIds.has(rung?.host)) intent.add(rung.host);
+    }
+  }
+  return intent;
+}
+
+/** One honest read of the external-AQE-provider world for status/verify: the
+ *  live projection state (aqeExternalProviderState) plus which configured
+ *  intent (aqeProvider/aqeFallback/routing) names an id that isn't actually
+ *  live right now. The single home for this derivation (#129) — every status
+ *  section that needs it consumes this instead of re-deriving its own view. */
+export function providerExternalState(cfg, cwd = process.cwd()) {
+  const root = paths.repoRoot(cwd);
+  const disk = root ? (readJson(aqeRouterFile(root), {}) ?? {}) : {};
+  const state = root ? aqeExternalProviderState(disk, { projectRoot: root }) : null;
+  const intent = externalProviderIntent(cfg);
+  const live = new Set(state?.desired ?? []);
+  const unavailableIntent = [...intent].filter((id) => !live.has(id));
+  return {
+    root, disk, state, unavailableIntent, unavailableIntentSet: new Set(unavailableIntent),
+  };
+}
+
 /** Map kit.json `aqeFallback` entries → a complete aqe FallbackChain. Priority
  *  descends by list order (first = highest). Entries carry provider + models. */
 function buildChain(entries) {
@@ -944,27 +995,21 @@ function clearStaleDefaultReceipts(next, {
   if (hasFallbackDefaultReceipt && (!ownedFallbackDefault || !hasManagedFallback)) clearFallbackDefaultOwnership(next);
 }
 
-/** Write ak's managed router config into `.agentic-qe/llm-config.json`, merged
- *  into any existing file (backup-first, never persisting apiKey):
- *    - the ordered fallback chain + enabled set + default provider (from
- *      `aqeFallback`), and
- *    - the per-activity `agentOverrides` map projected from `routing.routes`
- *      (issue #568; only when installed aqe ≥ 3.13.1).
- *  No-op unless at least one of those is configured and we are in a project.
- *  Folds AQE_ROUTER_SURFACES over one draft (see the section comment above);
- *  this function is the setup (context + initial draft), the fold, and the
- *  final change-detect-and-write.
- *  Returns {ok, changed, detail}. */
-export function applyAqeRouter(cfg, cwd = process.cwd()) {
+/** Build the read-only context the AQE-router fold needs: repo-root resolution
+ *  (same gate as settingsTarget — the scope gates must never disagree about
+ *  what "in a project" means), the on-disk router file, and every derived
+ *  fact/flag the surfaces consume. Returns null outside a project. Split out
+ *  of applyAqeRouter so a read-only comparator (aqeRouterDrift) can ask "what
+ *  would the writer converge this to" without ever touching disk (#129) —
+ *  the ONE construction of this context, shared by the writer and the reader. */
+function buildAqeRouterContext(cfg, cwd) {
   const chain = cfg.providers?.aqeFallback ?? [];
   const policy = cfg.routing?.routes ?? {};
   const selectedProvider = cfg.providers?.aqeProvider ?? null;
   const hasChain = chain.length > 0;
   const hasPolicy = Object.keys(policy).length > 0;
-  // Same repo-root resolution as settingsTarget — the three scope gates must
-  // never disagree about what "in a project" means (see paths.repoRoot).
   const root = paths.repoRoot(cwd);
-  if (!root) return { ok: true, changed: false, detail: 'not a project — aqe router unmanaged' };
+  if (!root) return null;
   const file = aqeRouterFile(root);
   const existing = readJson(file, {}) ?? {};
   const ownedExternalDefault = exactlyOwnedExternalDefault(existing);
@@ -986,15 +1031,6 @@ export function applyAqeRouter(cfg, cwd = process.cwd()) {
     hasChain, hasPolicy, hasExternal, hasOwnedExternal, hasManagedFallback,
     hasExternalDefaultReceipt, hasFallbackDefaultReceipt, staleOverrides,
   };
-  if (aqeRouterHasNothingToApply(facts)) {
-    return { ok: true, changed: false, detail: 'no aqe router config to apply' };
-  }
-
-  const next = { ...existing };
-  clearStaleDefaultReceipts(next, {
-    hasExternalDefaultReceipt, ownedExternalDefault, hasFallbackDefaultReceipt, ownedFallbackDefault, hasManagedFallback,
-  });
-
   const ctx = {
     cfg,
     existing,
@@ -1016,7 +1052,51 @@ export function applyAqeRouter(cfg, cwd = process.cwd()) {
     externalSupported: aqeSupportsExternalProviders(),
     agentOverridesSupported: aqeSupportsAgentOverrides(),
   };
-  const { details, changed: surfacesChanged, error } = foldSurfaces(AQE_ROUTER_SURFACES, next, ctx);
+  return {
+    root, file, existing, facts, ctx,
+  };
+}
+
+/** Run the ordered AQE_ROUTER_SURFACES fold over a fresh draft cloned from
+ *  `existing` — mutates neither `existing` nor disk. This is the pure "what
+ *  would the writer converge this to" computation shared by applyAqeRouter
+ *  (which persists the result when it differs) and aqeRouterDrift (which only
+ *  needs to know what the writer WOULD produce). */
+function runAqeRouterFold({ existing, facts, ctx }) {
+  const next = { ...existing };
+  clearStaleDefaultReceipts(next, {
+    hasExternalDefaultReceipt: facts.hasExternalDefaultReceipt,
+    ownedExternalDefault: ctx.ownedExternalDefault,
+    hasFallbackDefaultReceipt: facts.hasFallbackDefaultReceipt,
+    ownedFallbackDefault: ctx.ownedFallbackDefault,
+    hasManagedFallback: facts.hasManagedFallback,
+  });
+  const { details, changed, error } = foldSurfaces(AQE_ROUTER_SURFACES, next, ctx);
+  return {
+    next, details, changed, error,
+  };
+}
+
+/** Write ak's managed router config into `.agentic-qe/llm-config.json`, merged
+ *  into any existing file (backup-first, never persisting apiKey):
+ *    - the ordered fallback chain + enabled set + default provider (from
+ *      `aqeFallback`), and
+ *    - the per-activity `agentOverrides` map projected from `routing.routes`
+ *      (issue #568; only when installed aqe ≥ 3.13.1).
+ *  No-op unless at least one of those is configured and we are in a project.
+ *  Folds AQE_ROUTER_SURFACES over one draft (see the section comment above);
+ *  this function is the setup (context + initial draft), the fold, and the
+ *  final change-detect-and-write.
+ *  Returns {ok, changed, detail}. */
+export function applyAqeRouter(cfg, cwd = process.cwd()) {
+  const built = buildAqeRouterContext(cfg, cwd);
+  if (!built) return { ok: true, changed: false, detail: 'not a project — aqe router unmanaged' };
+  const { file, existing, facts } = built;
+  if (aqeRouterHasNothingToApply(facts)) {
+    return { ok: true, changed: false, detail: 'no aqe router config to apply' };
+  }
+
+  const { next, details, changed: surfacesChanged, error } = runAqeRouterFold(built);
 
   // One exact compare, reused for both phases below (the prior version
   // stringified `existing` twice for the same never-mutated object).
@@ -1035,6 +1115,30 @@ export function applyAqeRouter(cfg, cwd = process.cwd()) {
   fs.mkdirSync(path.dirname(file), { recursive: true });
   writeJsonWithBackup(file, next);
   return { ok: !error, changed: true, detail: details.join('; ') };
+}
+
+/** Read-only: does the persisted fallback-chain order in
+ *  `.agentic-qe/llm-config.json` differ from what applyAqeRouter would
+ *  converge it to right now? Runs the SAME dry-run fold the writer runs
+ *  (buildAqeRouterContext + runAqeRouterFold) and reads only the
+ *  fallback-chain slice of the result — the writer's own chain-validity
+ *  filter (reconcileDefaultProviderSurface's `valid`), not a re-derived
+ *  approximation, so the two can never disagree (#129). Scoped to chain order
+ *  only, same as before: agentOverrides/external-provider drift are each a
+ *  sibling status section's own concern.
+ *  `applicable: false` means there is no chain to compare (nothing configured,
+ *  or outside the project scope applyAqeRouter itself declines to manage). */
+export function aqeRouterDrift(cfg, cwd = process.cwd()) {
+  const chain = cfg.providers?.aqeFallback ?? [];
+  if (chain.length === 0) return { applicable: false, drift: false, order: '' };
+  const built = buildAqeRouterContext(cfg, cwd);
+  if (!built) return { applicable: false, drift: false, order: '' };
+  const { existing } = built;
+  const { next } = runAqeRouterFold(built);
+  const order = (next.fallbackChain?.entries ?? []).map((e) => e.provider).join('→');
+  const diskOrder = (existing.fallbackChain?.entries ?? []).map((e) => e.provider).join('→');
+  const drift = order ? (existing._managedBy !== AQE_MANAGED_TAG || diskOrder !== order) : diskOrder !== '';
+  return { applicable: true, drift, order };
 }
 
 /** Reversible teardown of ak's router management. Restores the pre-ak file from
@@ -1310,6 +1414,15 @@ export function managedEnv(cfg) {
   return e;
 }
 
+/** Read-only: does `env` (the persisted settings.json env block) differ from
+ *  what `managedEnv(cfg)` wants written? The exact predicate applyHosts uses to
+ *  decide whether to write — the single source for both the writer and any
+ *  drift-reporting caller (status), so the two can never diverge (#129). */
+export function providerEnvDrift(cfg, env = process.env) {
+  const desired = managedEnv(cfg);
+  return MANAGED_ENV_KEYS.some((k) => (k in desired ? env[k] !== desired[k] : k in env));
+}
+
 /** Reconcile the managed env keys in the target settings file to match `cfg`.
  *  Idempotent, backup-first, merge-not-clobber. Returns {ok, detail, changed}. */
 export function applyHosts(cfg, cwd = process.cwd()) {
@@ -1318,13 +1431,14 @@ export function applyHosts(cfg, cwd = process.cwd()) {
   const desired = managedEnv(cfg);
   const s = readJson(file, {}) ?? {};
   s.env ??= {};
-  let changed = false;
-  for (const k of MANAGED_ENV_KEYS) {
-    if (k in desired) {
-      if (s.env[k] !== desired[k]) { s.env[k] = desired[k]; changed = true; }
-    } else if (k in s.env) { delete s.env[k]; changed = true; }
+  const changed = providerEnvDrift(cfg, s.env);
+  if (changed) {
+    for (const k of MANAGED_ENV_KEYS) {
+      if (k in desired) s.env[k] = desired[k];
+      else delete s.env[k];
+    }
+    writeJsonWithBackup(file, s);
   }
-  if (changed) writeJsonWithBackup(file, s);
   const on = HOSTS.filter((h) => cfg.integrations?.hosts?.[h.id]).map((h) => h.id).join('+') || 'none';
   return { ok: true, changed, detail: `hosts=${on} (${scope}${changed ? ', written' : ', in sync'})` };
 }
