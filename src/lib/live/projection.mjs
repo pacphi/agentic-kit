@@ -73,34 +73,33 @@ export function emptyLiveProjection() {
   return { schemaVersion: 2, cursor: null, sessions: new Map(), seenEventIds: new Set() };
 }
 
-/** Immutable reducer so snapshot readers never observe a half-applied event. */
-export function reduceLiveEvent(projection, event, {
-  maxSessions = 100, maxNodesPerSession = 1000,
-} = {}) {
-  if (event.eventId && projection.seenEventIds?.has(event.eventId)) return projection;
-  const sessions = new Map(projection.sessions);
-  const sessionKey = event.sessionKey ?? canonicalSessionKey(event.host, event.sessionId);
-  const prior = sessions.get(sessionKey);
+/** Get the session this event belongs to — a deep-enough clone of the prior
+ *  one (nodes/edges get their own Map so snapshot readers never observe a
+ *  half-applied event), or a fresh one seeded from the event itself. */
+function cloneOrCreateSession(prior, sessionKey, event) {
+  if (prior) return { ...prior, nodes: new Map(prior.nodes), edges: new Map(prior.edges) };
   const metadataOnly = ['session.discovered', 'session.metadata'].includes(event.action);
   const initialUpdatedAt = metadataOnly
     ? event.sourceTimestamp ?? '1970-01-01T00:00:00.000Z' : event.observedAt;
-  const session = prior
-    ? { ...prior, nodes: new Map(prior.nodes), edges: new Map(prior.edges) }
-    : {
-        id: event.sessionId, key: sessionKey, parentSessionId: event.parentSessionId,
-        project: event.project, projectKey: event.projectKey ?? stableProjectKey(event.project),
-        host: event.host, status: 'unknown',
-        presence: { state: 'unknown', lastObservedAt: null, evidence: 'unknown' },
-        activity: {
-          state: 'unknown', lastActivityAt: null, currentOperationId: null, evidence: 'unknown',
-        },
-        workspace: null,
-        nodes: new Map(), edges: new Map(), updatedAt: initialUpdatedAt,
-      };
-  // Discovery sources can observe a thread before the authoritative state
-  // ledger exposes its parent. Reconcile that later evidence instead of
-  // leaving the thread permanently presented as a top-level session.
-  if (event.parentSessionId) session.parentSessionId = event.parentSessionId;
+  return {
+    id: event.sessionId, key: sessionKey, parentSessionId: event.parentSessionId,
+    project: event.project, projectKey: event.projectKey ?? stableProjectKey(event.project),
+    host: event.host, status: 'unknown',
+    presence: { state: 'unknown', lastObservedAt: null, evidence: 'unknown' },
+    activity: {
+      state: 'unknown', lastActivityAt: null, currentOperationId: null, evidence: 'unknown',
+    },
+    workspace: null,
+    nodes: new Map(), edges: new Map(), updatedAt: initialUpdatedAt,
+  };
+}
+
+/** Merge this event's actor into the session's node map: preserve identity
+ *  evidence (label/role/provider/model) a later event doesn't repeat, refuse
+ *  to let a heartbeat masquerade as semantic work, and never let a target
+ *  completion, an unknown-status event, or a state ledger regress a node out
+ *  of its terminal status. Mutates session.nodes. */
+function mergeActorNode(session, event) {
   const priorNode = session.nodes.get(event.actor.id);
   const actorNode = nodeFrom(event.actor, event);
   if (priorNode) {
@@ -134,11 +133,6 @@ export function reduceLiveEvent(projection, event, {
       actorNode.lastSignal = priorNode.lastSignal;
     }
   }
-  const presence = presenceFrom(event);
-  if (presence) session.presence = presence;
-  const activity = activityFrom(event);
-  if (activity && event.source.adapter !== 'codex-state') session.activity = activity;
-  session.workspace = mergeWorkspace(session.workspace, event.workspace);
   if (event.target && event.action.endsWith('.completed')) {
     actorNode.status = priorNode?.status ?? 'running';
   }
@@ -147,6 +141,19 @@ export function reduceLiveEvent(projection, event, {
     actorNode.status = priorNode.status;
   }
   session.nodes.set(event.actor.id, actorNode);
+}
+
+/** Update session-level status evidence: presence, activity, workspace,
+ *  project identity, accumulated field-evidence, and session status. Reads
+ *  only `event` and the session's own prior status — independent of
+ *  mergeActorNode/applyTarget, which own nodes/edges, so their relative
+ *  order does not affect the result. */
+function applyStatus(session, event) {
+  const presence = presenceFrom(event);
+  if (presence) session.presence = presence;
+  const activity = activityFrom(event);
+  if (activity && event.source.adapter !== 'codex-state') session.activity = activity;
+  session.workspace = mergeWorkspace(session.workspace, event.workspace);
   if (event.project && event.project !== 'unknown') {
     session.project = event.project;
     session.projectKey = event.projectKey ?? stableProjectKey(event.project);
@@ -160,43 +167,60 @@ export function reduceLiveEvent(projection, event, {
     && !(TERMINAL.has(session.status) && !TERMINAL.has(event.status))) {
     session.status = event.status;
   }
-  if (event.target) {
-    const targetPrior = session.nodes.get(event.target.id);
-    if (!targetPrior) {
-      session.nodes.set(event.target.id, nodeFrom({
-        id: event.target.id, kind: event.target.kind,
-        label: event.target.label ?? event.attributes.toolCategory,
-        role: event.target.role, host: event.target.host, provider: null, model: null,
-      }, {
-        ...event,
-        status: event.action.endsWith('.completed') ? event.status
-          : (event.signal?.kind === 'operation' && event.signal.phase === 'started'
-              ? 'running' : 'unknown'),
-      }));
-    } else if (event.action.endsWith('.completed')) {
-      session.nodes.set(event.target.id, {
-        ...targetPrior,
-        label: event.target.label ?? event.attributes.toolCategory ?? targetPrior.label,
-        role: event.target.role ?? targetPrior.role,
-        status: event.status,
-        observedAt: event.observedAt,
-        lastEventId: event.eventId ?? targetPrior.lastEventId,
-        lastAction: event.action,
-        sourceAdapter: event.source.adapter,
-        confidence: event.source.confidence,
-        lastSignal: event.signal ?? targetPrior.lastSignal,
-        durationMs: event.attributes.durationMs ?? targetPrior.durationMs,
-        toolName: event.attributes.toolName ?? targetPrior.toolName,
-      });
-    }
-    const edgeId = `${event.actor.id}|${event.action}|${event.target.id}`;
-    session.edges.set(edgeId, {
-      id: edgeId, source: event.actor.id, target: event.target.id,
-      action: event.action, confidence: event.source.confidence,
-      lastEventId: event.eventId ?? null, observedAt: event.observedAt,
-      signal: event.signal ?? null, status: event.status,
+}
+
+/** Create or update the event's target node (a tool/skill/subagent/etc.) and
+ *  the actor->target relationship edge it implies. No-op when the event
+ *  carries no target. Runs after mergeActorNode: a target lookup that
+ *  happens to collide with the actor's own id sees the node mergeActorNode
+ *  just wrote, matching the original inline ordering. */
+function applyTarget(session, event) {
+  if (!event.target) return;
+  const targetPrior = session.nodes.get(event.target.id);
+  if (!targetPrior) {
+    session.nodes.set(event.target.id, nodeFrom({
+      id: event.target.id, kind: event.target.kind,
+      label: event.target.label ?? event.attributes.toolCategory,
+      role: event.target.role, host: event.target.host, provider: null, model: null,
+    }, {
+      ...event,
+      status: event.action.endsWith('.completed') ? event.status
+        : (event.signal?.kind === 'operation' && event.signal.phase === 'started'
+            ? 'running' : 'unknown'),
+    }));
+  } else if (event.action.endsWith('.completed')) {
+    session.nodes.set(event.target.id, {
+      ...targetPrior,
+      label: event.target.label ?? event.attributes.toolCategory ?? targetPrior.label,
+      role: event.target.role ?? targetPrior.role,
+      status: event.status,
+      observedAt: event.observedAt,
+      lastEventId: event.eventId ?? targetPrior.lastEventId,
+      lastAction: event.action,
+      sourceAdapter: event.source.adapter,
+      confidence: event.source.confidence,
+      lastSignal: event.signal ?? targetPrior.lastSignal,
+      durationMs: event.attributes.durationMs ?? targetPrior.durationMs,
+      toolName: event.attributes.toolName ?? targetPrior.toolName,
     });
   }
+  const edgeId = `${event.actor.id}|${event.action}|${event.target.id}`;
+  session.edges.set(edgeId, {
+    id: edgeId, source: event.actor.id, target: event.target.id,
+    action: event.action, confidence: event.source.confidence,
+    lastEventId: event.eventId ?? null, observedAt: event.observedAt,
+    signal: event.signal ?? null, status: event.status,
+  });
+}
+
+/** A source-timed event (a state ledger, or metadata/relationship/discovery
+ *  evidence) is dated by ITS OWN evidence, not by when this process observed
+ *  it — a replayed or backfilled record must not appear newer than a
+ *  session's real last activity. Everything else is dated by observedAt.
+ *  Never regresses: a later-arriving but older-dated event keeps the
+ *  session's existing updatedAt. `prior` is the session BEFORE cloning —
+ *  identical to session.updatedAt at this point, but named for clarity. */
+function resolveUpdatedAt(session, event, prior) {
   const sourceTimed = event.source.adapter === 'codex-state'
     || ['metadata', 'relationship'].includes(signalKind(event))
     || ['session.discovered', 'session.metadata'].includes(event.action);
@@ -205,9 +229,12 @@ export function reduceLiveEvent(projection, event, {
     : event.observedAt;
   session.updatedAt = prior && Date.parse(prior.updatedAt) > Date.parse(candidateUpdatedAt)
     ? prior.updatedAt : candidateUpdatedAt;
-  // A state ledger proves identity/topology, but not that a process is live
-  // now. Only fresh execution evidence with an explicit running status may
-  // activate a session. Unknown/bootstrap evidence remains reviewable history.
+}
+
+/** A state ledger proves identity/topology, but not that a process is live
+ *  now. Only fresh execution evidence with an explicit running status may
+ *  activate a session. Unknown/bootstrap evidence remains reviewable history. */
+function applyLifecycle(session, event) {
   if (event.status === 'running' && event.source.adapter !== 'codex-state') {
     session.lifecycle = 'active';
   } else if (event.status === 'quiescent') {
@@ -215,6 +242,33 @@ export function reduceLiveEvent(projection, event, {
   } else {
     session.lifecycle ??= 'historical';
   }
+}
+
+/** Immutable reducer so snapshot readers never observe a half-applied event.
+ *  Each phase below owns a disjoint slice of the session it mutates — actor
+ *  nodes, session-level status, the target node/edge, updatedAt, lifecycle —
+ *  so their order matters only where a later phase reads an earlier one's
+ *  output (applyTarget after mergeActorNode; resolveUpdatedAt/applyLifecycle
+ *  last, since both read status/timestamps the earlier phases finalize). */
+export function reduceLiveEvent(projection, event, {
+  maxSessions = 100, maxNodesPerSession = 1000,
+} = {}) {
+  if (event.eventId && projection.seenEventIds?.has(event.eventId)) return projection;
+  const sessions = new Map(projection.sessions);
+  const sessionKey = event.sessionKey ?? canonicalSessionKey(event.host, event.sessionId);
+  const prior = sessions.get(sessionKey);
+  const session = cloneOrCreateSession(prior, sessionKey, event);
+  // Discovery sources can observe a thread before the authoritative state
+  // ledger exposes its parent. Reconcile that later evidence instead of
+  // leaving the thread permanently presented as a top-level session.
+  if (event.parentSessionId) session.parentSessionId = event.parentSessionId;
+
+  mergeActorNode(session, event);
+  applyStatus(session, event);
+  applyTarget(session, event);
+  resolveUpdatedAt(session, event, prior);
+  applyLifecycle(session, event);
+
   boundNodes(session, Math.max(1, maxNodesPerSession));
   sessions.set(sessionKey, session);
   boundSessions(sessions, Math.max(1, maxSessions), sessionKey);
