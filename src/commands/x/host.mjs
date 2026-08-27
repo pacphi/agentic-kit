@@ -451,88 +451,153 @@ async function maybeWriteQeCourtDefaults({ nonInteractive, cwd, enabled, aqeProv
   ok(`qe-court routing updated: ${changes.map(([role, p]) => `${role}→${p}`).join(', ')}`);
 }
 
-export async function pick({ flags, cwd, pkgRoot, migrateRoutes = migrateRetiredRoutesInConfig }) {
-  let aqeProviderTypes = aqeSelectableProviderTypes();
-  let aqeChainProviderTypes = aqeSelectableChainProviderTypes();
-  const cfg = loadKitConfig();
-  const trustBaseline = structuredClone(cfg);
-  const hosts = await detectHosts(cwd);
-  // Routing eligibility is capability-derived. OpenCode retains its independent
-  // lifecycle wiring even though it is now an execution host; it is never a
-  // primary/AQE host because those are separate registry capabilities.
-  // --host is the complete desired enabled-host set on BOTH tiers; excluding an
-  // enabled host disables it (ak-managed wiring stripped, user config kept).
-  // Keep primary-host selection on the built-in routing set, but admit an
-  // explicitly named external host when the live adapter overlay proves it is
-  // routable. Provider-only retunes also carry already-enabled external ids
-  // through unchanged instead of mistaking them for unknown host tokens.
-  const ROUTING = new Set(routableHostIds());
-  const EFFECTIVE_ROUTING = new Set(effectiveRoutableHostIds());
-  const MANAGED_HOSTS = new Set(HOSTS.map((host) => host.id));
-  const prevOpencode = !!cfg.integrations?.hosts?.opencode
-    || cfg.integrations?.ownership?.opencode?.mcp === 'ak';
-  let enabled;
+// ── pick(): three stages ─────────────────────────────────────────────────────
+// 1. parsePickInput      — raw {enabled, aqeProvider, aqeFallback, models}
+//                          intent, from flags or an interactive prompt.
+// 2. resolvePickDecision — validate + resolve that intent into the actual
+//                          cfg.integrations.hosts/providers/routing writes
+//                          (host validation, primary-host resolution, admission
+//                          refresh, aqe selection validation, route policy).
+// 3. the apply step      — install/wire/converge (uses convergeProviderStack).
+// pick() itself is the sequencing of these three stages plus the handful of
+// pick-specific side effects (trust confirmation, codex-disable teardown,
+// opencode lifecycle) that sit between them.
+
+/** The non-interactive half of stage 1: flags fully determine the intent. */
+function parsePickInputFromFlags(flags, cfg) {
+  const enabled = flags.host !== undefined
+    ? flags.host.split(',').map((s) => s.trim()).filter(Boolean)
+    : Object.entries(cfg.integrations.hosts).filter(([, v]) => v).map(([k]) => k);
   let aqeProvider = cfg.providers.aqeProvider ?? null;
+  if (flags['aqe-provider'] !== undefined) {
+    const v = flags['aqe-provider'].trim().toLowerCase();
+    aqeProvider = (v === 'none' || v === '') ? null : v;
+  }
   // A legacy chain written before provenance existed reads as 'user': we cannot
   // tell whether it was typed or accepted, so it must never be auto-touched.
   let aqeFallback = (cfg.providers.aqeFallback ?? []).map((e) => ({ ...e, source: fallbackSource(e) }));
-  let models = cfg.providers.models ?? [];
-  const prevPrimary = cfg.routing?.primaryHost ?? DEFAULT_PRIMARY_HOST;
-  const oldPolicy = cfg.routing?.routes ?? {};
-  const prevCodex = !!cfg.integrations?.hosts?.codex;
-  const codexMcpManaged = cfg.integrations?.ownership?.codex?.mcp === 'ak';
-  const rufloCodexManaged = cfg.integrations?.ownership?.codex?.reverseMcp === 'ak';
+  if (flags['aqe-fallback'] !== undefined) {
+    const v = flags['aqe-fallback'].trim().toLowerCase();
+    aqeFallback = (v === 'none' || v === '') ? [] : stamp('user')(parseFallback(v));
+  }
+  const models = flags.provider !== undefined ? parseModels(flags.provider) : (cfg.providers.models ?? []);
+  return {
+    enabled, aqeProvider, aqeFallback, models,
+  };
+}
 
+/** The interactive half of stage 1: prompt for enable/provider/fallback/
+ *  models via readline. Returns `{code}` when no frontier CLI is detected
+ *  at all. */
+async function promptPickInputInteractively(cfg, hosts, registries, aqeProviderTypes) {
+  const installedRouting = HOSTS.filter((h) => hosts[h.id].present && registries.ROUTING.has(h.id)
+    && (h.id !== 'opencode' || cfg.integrations.hosts.opencode)).map((h) => h.id);
+  const installedOpenCode = hosts.opencode?.present && !cfg.integrations.hosts.opencode;
+  if (installedRouting.length === 0 && !installedOpenCode) { fail('no frontier CLI (claude/codex/opencode) found on PATH'); return { code: 1 }; }
+  console.log(`Installed hosts: ${installedRouting.join(', ') || 'none'}${installedOpenCode ? dim('  (opencode is available; type it to opt in)') : ''}`);
+  // Default: every currently ENABLED host (even one temporarily absent from
+  // PATH — a bare enter must never tear down an enabled host it simply can't
+  // see right now) ∪ newly detected routing hosts. An installed-but-disabled
+  // OpenCode host remains opt-in by typing it — a bare enter must not opt a
+  // third host's config home in sight unseen either.
+  const enabledHosts = HOSTS.filter((h) => cfg.integrations.hosts[h.id]).map((h) => h.id);
+  const dflt = [...new Set([...enabledHosts, ...installedRouting])];
+  const absentEnabled = enabledHosts.filter((h) => !hosts[h].present);
+  if (absentEnabled.length) {
+    console.log(dim(`  enabled but not detected right now: ${absentEnabled.join(', ')} (kept enabled on Enter)`));
+  }
+  const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+  const hAns = (await rl.question(`Enable which ruflo host(s)? (comma-separated) [${dflt.join(',')}]: `)).trim();
+  const enabled = (hAns || dflt.join(',')).split(',').map((s) => s.trim()).filter(Boolean);
+  console.log(dim(`  ${AQE_BILLING_HINT}`));
+  const aAns = (await rl.question(`agentic-qe primary LLM provider — ${aqeProviderTypes.join('/')} (blank = leave aqe default): `)).trim().toLowerCase();
+  const aqeProvider = aAns ? aAns : null;
+  const suggestion = suggestedFallbackFor(enabled);
+  const fAns = (await rl.question(
+    `aqe fallback chain, ordered (e.g. "claude-code:claude-opus-5; openai:gpt-5.6"${suggestion ? `, blank = use suggested [${suggestion}]` : ', blank = none'}): `,
+  )).trim().toLowerCase();
+  const aqeFallback = fAns
+    ? stamp('user')(parseFallback(fAns))
+    : (suggestion ? stamp('suggested')(parseFallback(suggestion.toLowerCase())) : []);
+  const provAns = (await rl.question('ruflo providers to register (e.g. ollama:qwen3.6:27b, blank to skip): ')).trim();
+  const models = provAns ? parseModels(provAns) : (cfg.providers.models ?? []);
+  rl.close();
+  return {
+    enabled, aqeProvider, aqeFallback, models,
+  };
+}
+
+/** Stage 1/3: resolve the raw enable/provider intent — from flags
+ *  (non-interactive) or a readline prompt sequence. Returns `{code}` when
+ *  pick() must return immediately (no frontier CLI detected on an
+ *  interactive run), else the parsed intent plus `nonInteractive` (used
+ *  later to gate the qe-court defaults prompt). */
+async function parsePickInput({
+  flags, cfg, hosts, registries, aqeProviderTypes,
+}) {
   const nonInteractive = flags.host !== undefined || flags['aqe-provider'] !== undefined
     || flags['aqe-fallback'] !== undefined || flags.provider !== undefined
     || flags['primary-host'] !== undefined;
-  if (nonInteractive) {
-    enabled = flags.host !== undefined
-      ? flags.host.split(',').map((s) => s.trim()).filter(Boolean)
-      : Object.entries(cfg.integrations.hosts).filter(([, v]) => v).map(([k]) => k);
-    if (flags['aqe-provider'] !== undefined) {
-      const v = flags['aqe-provider'].trim().toLowerCase();
-      aqeProvider = (v === 'none' || v === '') ? null : v;
-    }
-    if (flags['aqe-fallback'] !== undefined) {
-      const v = flags['aqe-fallback'].trim().toLowerCase();
-      aqeFallback = (v === 'none' || v === '') ? [] : stamp('user')(parseFallback(v));
-    }
-    if (flags.provider !== undefined) models = parseModels(flags.provider);
-  } else {
-    const installedRouting = HOSTS.filter((h) => hosts[h.id].present && ROUTING.has(h.id)
-      && (h.id !== 'opencode' || cfg.integrations.hosts.opencode)).map((h) => h.id);
-    const installedOpenCode = hosts.opencode?.present && !cfg.integrations.hosts.opencode;
-    if (installedRouting.length === 0 && !installedOpenCode) { fail('no frontier CLI (claude/codex/opencode) found on PATH'); return 1; }
-    console.log(`Installed hosts: ${installedRouting.join(', ') || 'none'}${installedOpenCode ? dim('  (opencode is available; type it to opt in)') : ''}`);
-    // Default: every currently ENABLED host (even one temporarily absent from
-    // PATH — a bare enter must never tear down an enabled host it simply can't
-    // see right now) ∪ newly detected routing hosts. An installed-but-disabled
-    // OpenCode host remains opt-in by typing it — a bare enter must not opt a
-    // third host's config home in sight unseen either.
-    const enabledHosts = HOSTS.filter((h) => cfg.integrations.hosts[h.id]).map((h) => h.id);
-    const dflt = [...new Set([...enabledHosts, ...installedRouting])];
-    const absentEnabled = enabledHosts.filter((h) => !hosts[h].present);
-    if (absentEnabled.length) {
-      console.log(dim(`  enabled but not detected right now: ${absentEnabled.join(', ')} (kept enabled on Enter)`));
-    }
-    const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
-    const hAns = (await rl.question(`Enable which ruflo host(s)? (comma-separated) [${dflt.join(',')}]: `)).trim();
-    enabled = (hAns || dflt.join(',')).split(',').map((s) => s.trim()).filter(Boolean);
-    console.log(dim(`  ${AQE_BILLING_HINT}`));
-    const aAns = (await rl.question(`agentic-qe primary LLM provider — ${aqeProviderTypes.join('/')} (blank = leave aqe default): `)).trim().toLowerCase();
-    aqeProvider = aAns ? aAns : null;
-    const suggestion = suggestedFallbackFor(enabled);
-    const fAns = (await rl.question(
-      `aqe fallback chain, ordered (e.g. "claude-code:claude-opus-5; openai:gpt-5.6"${suggestion ? `, blank = use suggested [${suggestion}]` : ', blank = none'}): `,
-    )).trim().toLowerCase();
-    aqeFallback = fAns
-      ? stamp('user')(parseFallback(fAns))
-      : (suggestion ? stamp('suggested')(parseFallback(suggestion.toLowerCase())) : []);
-    const provAns = (await rl.question('ruflo providers to register (e.g. ollama:qwen3.6:27b, blank to skip): ')).trim();
-    if (provAns) models = parseModels(provAns);
-    rl.close();
+  const parsed = nonInteractive
+    ? parsePickInputFromFlags(flags, cfg)
+    : await promptPickInputInteractively(cfg, hosts, registries, aqeProviderTypes);
+  if (parsed.code !== undefined) return parsed;
+  return { ...parsed, nonInteractive };
+}
+
+/** Validate the aqe primary-provider and fallback-chain selections against
+ *  the (possibly admission-refreshed) selectable sets, warning about —
+ *  rather than silently keeping — anything unusable. Returns the validated
+ *  {aqeProvider, aqeFallback}. */
+function validatePickAqeSelections({
+  aqeProvider, aqeFallback, aqeProviderTypes, aqeChainProviderTypes,
+}) {
+  // validate aqe primary provider
+  let provider = aqeProvider;
+  if (provider && !aqeProviderTypes.includes(provider)) {
+    const norm = provider === 'anthropic' ? 'claude' : provider;
+    if (aqeProviderTypes.includes(norm)) provider = norm;
+    else { warn(`unknown aqe provider '${provider}' — leaving aqe on its default (valid: ${aqeProviderTypes.join(', ')})`); provider = null; }
   }
+  // validate fallback chain providers (chain gate admits codex — #108 phase 3)
+  const fallback = aqeFallback
+    .map((e) => ({ ...e, provider: e.provider === 'anthropic' ? 'claude' : e.provider }))
+    .filter((e) => {
+      const okp = aqeChainProviderTypes.includes(e.provider);
+      if (!okp) warn(`dropping unknown fallback provider '${e.provider}'`);
+      else if (!e.models.length) warn(`fallback entry '${e.provider}' has no models — aqe may skip it; add e.g. ${e.provider}:<model-id>`);
+      return okp;
+    });
+  // Tell the user AT ENTRY TIME that a rung is inert, and name what it needs —
+  // the failure otherwise surfaces at QE-run time, far from the config (#54).
+  const gaps = credentialGaps(fallback);
+  for (const g of gaps) {
+    warn(`${g.provider}: no ${g.missing.join(' / ')} in env — this rung will fail over into nothing`);
+  }
+  if (gaps.length) {
+    const live = AQE_PROVIDER_TYPES.filter((p) => aqeProviderCredential(p).present
+      && !fallback.some((e) => e.provider === p));
+    if (live.length) info(`credentialed alternatives available now: ${live.join(', ')}`);
+  }
+  return { aqeProvider: provider, aqeFallback: fallback };
+}
+
+/** Stage 2/3: validate the enabled-host set, resolve primary-host + routing
+ *  intent, refresh host-adapter admission against that final intent,
+ *  validate the aqe provider/fallback selections against the (possibly
+ *  refreshed) selectable sets, and build the resulting providers/routing
+ *  policy. Mutates `cfg` in place (integrations.hosts, providers, routing) —
+ *  this is the decision, not yet the apply step (see applyPickProviderStack).
+ *  Returns `{code}` when pick() must return immediately (unknown host
+ *  token), else the resolved decision. */
+async function resolvePickDecision(cfg, {
+  enabled: rawEnabled, aqeProvider: rawAqeProvider, aqeFallback: rawAqeFallback, models,
+  flags, registries, prevPrimary, oldPolicy, aqeProviderTypes: initialAqeProviderTypes, aqeChainProviderTypes: initialAqeChainProviderTypes,
+}) {
+  const { ROUTING, EFFECTIVE_ROUTING, MANAGED_HOSTS } = registries;
+  let enabled = rawEnabled;
+  let aqeProvider = rawAqeProvider;
+  let aqeFallback = rawAqeFallback;
 
   // validate hosts against the two tiers. An unknown token is a hard error,
   // never a silent drop: `--host claude,opencdoe` must not "succeed" as
@@ -541,7 +606,7 @@ export async function pick({ flags, cwd, pkgRoot, migrateRoutes = migrateRetired
   const unknown = enabled.filter((h) => !known.has(h));
   if (unknown.length) {
     fail(`unknown host(s): ${unknown.join(', ')} (valid: ${[...known].join(', ')}) — nothing changed`);
-    return 2;
+    return { code: 2 };
   }
   // The routing set needs at least one primary-capable member; OpenCode remains
   // routable but cannot satisfy that primary-host invariant on its own.
@@ -584,6 +649,8 @@ export async function pick({ flags, cwd, pkgRoot, migrateRoutes = migrateRetired
   // validation/projection: an admitted+granted provider can then be enabled
   // and selected atomically, while a provider disabled by this command is
   // removed from the AQE bridge before applyAqeRouter computes its projection.
+  let aqeProviderTypes = initialAqeProviderTypes;
+  let aqeChainProviderTypes = initialAqeChainProviderTypes;
   if (process.env.AK_EXPERIMENTAL_HOST_ADAPTERS === '1') {
     const refreshed = await bootstrapHostAdapters({ cfg, env: process.env });
     for (const entry of refreshed.warnings) {
@@ -593,32 +660,9 @@ export async function pick({ flags, cwd, pkgRoot, migrateRoutes = migrateRetired
     aqeChainProviderTypes = aqeSelectableChainProviderTypes();
   }
 
-  // validate aqe primary provider
-  if (aqeProvider && !aqeProviderTypes.includes(aqeProvider)) {
-    const norm = aqeProvider === 'anthropic' ? 'claude' : aqeProvider;
-    if (aqeProviderTypes.includes(norm)) aqeProvider = norm;
-    else { warn(`unknown aqe provider '${aqeProvider}' — leaving aqe on its default (valid: ${aqeProviderTypes.join(', ')})`); aqeProvider = null; }
-  }
-  // validate fallback chain providers (chain gate admits codex — #108 phase 3)
-  aqeFallback = aqeFallback
-    .map((e) => ({ ...e, provider: e.provider === 'anthropic' ? 'claude' : e.provider }))
-    .filter((e) => {
-      const okp = aqeChainProviderTypes.includes(e.provider);
-      if (!okp) warn(`dropping unknown fallback provider '${e.provider}'`);
-      else if (!e.models.length) warn(`fallback entry '${e.provider}' has no models — aqe may skip it; add e.g. ${e.provider}:<model-id>`);
-      return okp;
-    });
-  // Tell the user AT ENTRY TIME that a rung is inert, and name what it needs —
-  // the failure otherwise surfaces at QE-run time, far from the config (#54).
-  const gaps = credentialGaps(aqeFallback);
-  for (const g of gaps) {
-    warn(`${g.provider}: no ${g.missing.join(' / ')} in env — this rung will fail over into nothing`);
-  }
-  if (gaps.length) {
-    const live = AQE_PROVIDER_TYPES.filter((p) => aqeProviderCredential(p).present
-      && !aqeFallback.some((e) => e.provider === p));
-    if (live.length) info(`credentialed alternatives available now: ${live.join(', ')}`);
-  }
+  ({ aqeProvider, aqeFallback } = validatePickAqeSelections({
+    aqeProvider, aqeFallback, aqeProviderTypes, aqeChainProviderTypes,
+  }));
 
   cfg.providers = {
     aqeProvider,
@@ -641,44 +685,54 @@ export async function pick({ flags, cwd, pkgRoot, migrateRoutes = migrateRetired
   cfg.routing.routes = prunedRoutes.policy;
   for (const message of prunedRoutes.warnings) warn(message);
 
-  const trustManifest = newlyEnabledHostTrustManifest(trustBaseline, enabled);
-  if (trustManifest.length) {
-    info('host trust manifest (evaluated before user or project changes):');
-    for (const line of trustManifestLines(trustManifest)) console.log(`  ${line}`);
-    if (!flags.yes) {
-      if (!process.stdin.isTTY) {
-        fail('host enablement needs trust confirmation; re-run with --yes after reviewing the manifest');
-        return 2;
-      }
-      const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
-      const answer = (await rl.question('Enable these hosts and apply these trust changes? [y/N] '))
-        .trim().toLowerCase();
-      rl.close();
-      if (!answer.startsWith('y')) {
-        info('host selection cancelled before user or project changes');
-        return 0;
-      }
-    }
-  }
+  return {
+    enabled, routing, primaryHost, aqeProvider, seed,
+  };
+}
 
-  // Disable only marker-owned integrations, matching OpenCode's receipt-based
-  // teardown semantics. The legacy Claude→Codex MCP receipt may still exist on
-  // machines upgrading across ADR-0033.
-  let codexRetired = null;
-  if (prevCodex && !cfg.integrations.hosts.codex) {
-    const mcp = await undoCodexMcp(cwd, { managed: codexMcpManaged });
-    const rmcp = await undoRufloMcpInCodex(cwd, { managed: rufloCodexManaged });
-    cfg.integrations.ownership ??= {};
-    cfg.integrations.ownership.codex = {
-      ...(cfg.integrations.ownership.codex ?? {}),
-      ...(mcp.ok ? { mcp: null } : {}),
-      ...(rmcp.ok ? { reverseMcp: null } : {}),
-    };
-    codexRetired = { mcp, rmcp };
+/** Print the host trust manifest (if any newly-enabled host carries one) and
+ *  confirm before any user/project mutation. Returns a numeric exit code
+ *  when pick() must return immediately, else undefined. */
+async function confirmPickTrustManifest(trustManifest, flags) {
+  if (!trustManifest.length) return undefined;
+  info('host trust manifest (evaluated before user or project changes):');
+  for (const line of trustManifestLines(trustManifest)) console.log(`  ${line}`);
+  if (flags.yes) return undefined;
+  if (!process.stdin.isTTY) {
+    fail('host enablement needs trust confirmation; re-run with --yes after reviewing the manifest');
+    return 2;
   }
-  saveKitConfig(cfg);
+  const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+  const answer = (await rl.question('Enable these hosts and apply these trust changes? [y/N] '))
+    .trim().toLowerCase();
+  rl.close();
+  if (!answer.startsWith('y')) {
+    info('host selection cancelled before user or project changes');
+    return 0;
+  }
+  return undefined;
+}
 
-  // install any enabled host that is entirely absent (external installs untouched)
+/** Disable only marker-owned codex integrations, matching OpenCode's
+ *  receipt-based teardown semantics. The legacy Claude→Codex MCP receipt may
+ *  still exist on machines upgrading across ADR-0033. Mutates
+ *  cfg.integrations.ownership.codex. */
+async function retireCodexOnDisable(cfg, cwd, { codexMcpManaged, rufloCodexManaged }) {
+  const mcp = await undoCodexMcp(cwd, { managed: codexMcpManaged });
+  const rmcp = await undoRufloMcpInCodex(cwd, { managed: rufloCodexManaged });
+  cfg.integrations.ownership ??= {};
+  cfg.integrations.ownership.codex = {
+    ...(cfg.integrations.ownership.codex ?? {}),
+    ...(mcp.ok ? { mcp: null } : {}),
+    ...(rmcp.ok ? { reverseMcp: null } : {}),
+  };
+  return { mcp, rmcp };
+}
+
+/** Install any enabled host that is entirely absent (external installs
+ *  untouched). Unlike setup's install loop, pick never prompts first — the
+ *  user already confirmed the trust manifest for this exact enable. */
+async function installPickAbsentHosts(cfg) {
   for (const h of HOSTS) {
     if (!cfg.integrations.hosts[h.id]) continue;
     if ((await hostInstallState(h)).method !== 'absent') continue;
@@ -686,76 +740,109 @@ export async function pick({ flags, cwd, pkgRoot, migrateRoutes = migrateRetired
     const r = await installHost(h.id);
     (r.ok ? ok : warn)(`${h.id}: ${r.detail}`);
   }
+}
 
-  // opencode (integration host): apply the same owner-module stack setup/sync
-  // use — connected MCPs, compact lazy gateway, lifecycle plugin, specialist
-  // dispatcher, and platform skill — then converge guidance the same way ("wired +
-  // guided" is one contract, not two).
-  // CLI-gated: an enabled-but-absent CLI never fabricates the config home.
-  let incompleteTeardown = false;
-  if (cfg.integrations.hosts.opencode) {
-    if (!(await have('opencode'))) {
-      warn('opencode: enabled but CLI not installed — wiring skipped (re-run `ak sync` after installing opencode-ai)');
-    } else {
-      const lifecycle = await runLifecycle({
-        adapter: lifecycleAdapterFor('opencode'), action: 'apply', cfg, options: { pkgRoot },
-      });
-      const stack = lifecycle.result;
-      // persist the markers on ANY refresh (converged file + stale markers is
-      // exactly the stranded-teardown case), not only on file changes.
-      if (stack.oc.changed || stack.markersChanged) saveKitConfig(cfg);
-      if (stack.oc.changed || !stack.oc.ok) (stack.oc.ok ? ok : warn)(`opencode: ${stack.oc.detail}`);
-      if (stack.plugin.changed || !stack.plugin.ok) (stack.plugin.ok ? ok : warn)(`opencode plugin: ${stack.plugin.detail}`);
-      if (stack.gateway.changed || !stack.gateway.ok) (stack.gateway.ok ? ok : warn)(`opencode gateway: ${stack.gateway.detail}`);
-      if (stack.agents.changed || !stack.agents.ok) (stack.agents.ok ? ok : warn)(`opencode agent projection: ${stack.agents.detail}`);
-      if (stack.skill.changed || !stack.skill.ok) (stack.skill.ok ? ok : warn)(`opencode skill: ${stack.skill.detail}`);
-      const guidance = await reconcileOpencodeGuidance({ pkgRoot, cfg, cwd, enabled: true });
-      if (guidance.changed) ok(`opencode ${guidance.detail}`);
-      // opencode loads config/plugins/MCP/agents once at startup — say so now,
-      // or the user files "hooks don't work" issues (observed live).
-      if (stack.oc.changed || stack.plugin.changed || stack.gateway.changed
-          || stack.agents.changed || stack.skill.changed) {
-        info('restart opencode to load the Agentic Kit hooks, compact gateway, and MCP connections (loaded once at startup)');
-      }
-    }
-  } else if (prevOpencode) {
-    // Excluded from the desired set while previously enabled/managed → disable:
-    // strip ONLY ak-managed wiring/artifacts (priors restored, marker-gated),
-    // never the user's own opencode config. A teardown that cannot complete
-    // (e.g. a JSONC config) is reported honestly — markers stay for the retry
-    // and "disabled" is never claimed over still-active wiring.
-    const retired = await runLifecycle({ adapter: lifecycleAdapterFor('opencode'), action: 'undo', cfg });
-    const ret = retired.result;
-    saveKitConfig(cfg); // persist markers (nulled on success, retained on failure)
-    if (ret.ok) ok(`opencode disabled: ${ret.undo.detail}; ${ret.artifacts.detail}`);
-    else {
-      incompleteTeardown = true;
-      warn(`opencode disable incomplete — ${ret.undo.detail} (artifacts: ${ret.artifacts.detail})`);
-    }
-    // enablement-gated guidance strips regardless (user content preserved).
-    const guidance = await reconcileOpencodeGuidance({ pkgRoot, cfg, cwd, enabled: false });
-    if (guidance.changed) ok(`opencode ${guidance.detail}`);
+/** opencode enable half: apply the same owner-module stack setup/sync use —
+ *  connected MCPs, compact lazy gateway, lifecycle plugin, specialist
+ *  dispatcher, and platform skill — then converge guidance the same way
+ *  ("wired + guided" is one contract, not two). CLI-gated: an
+ *  enabled-but-absent CLI never fabricates the config home. */
+async function enablePickOpencodeLifecycle(cfg, { pkgRoot, cwd }) {
+  if (!(await have('opencode'))) {
+    warn('opencode: enabled but CLI not installed — wiring skipped (re-run `ak sync` after installing opencode-ai)');
+    return;
   }
+  const lifecycle = await runLifecycle({
+    adapter: lifecycleAdapterFor('opencode'), action: 'apply', cfg, options: { pkgRoot },
+  });
+  const stack = lifecycle.result;
+  // persist the markers on ANY refresh (converged file + stale markers is
+  // exactly the stranded-teardown case), not only on file changes.
+  if (stack.oc.changed || stack.markersChanged) saveKitConfig(cfg);
+  if (stack.oc.changed || !stack.oc.ok) (stack.oc.ok ? ok : warn)(`opencode: ${stack.oc.detail}`);
+  if (stack.plugin.changed || !stack.plugin.ok) (stack.plugin.ok ? ok : warn)(`opencode plugin: ${stack.plugin.detail}`);
+  if (stack.gateway.changed || !stack.gateway.ok) (stack.gateway.ok ? ok : warn)(`opencode gateway: ${stack.gateway.detail}`);
+  if (stack.agents.changed || !stack.agents.ok) (stack.agents.ok ? ok : warn)(`opencode agent projection: ${stack.agents.detail}`);
+  if (stack.skill.changed || !stack.skill.ok) (stack.skill.ok ? ok : warn)(`opencode skill: ${stack.skill.detail}`);
+  const guidance = await reconcileOpencodeGuidance({ pkgRoot, cfg, cwd, enabled: true });
+  if (guidance.changed) ok(`opencode ${guidance.detail}`);
+  // opencode loads config/plugins/MCP/agents once at startup — say so now,
+  // or the user files "hooks don't work" issues (observed live).
+  if (stack.oc.changed || stack.plugin.changed || stack.gateway.changed
+      || stack.agents.changed || stack.skill.changed) {
+    info('restart opencode to load the Agentic Kit hooks, compact gateway, and MCP connections (loaded once at startup)');
+  }
+}
 
-  // Apply step: the shared pipeline (providers.mjs's convergeProviderStack)
-  // computes and persists every step; this reporter only decides what to
-  // print and how, preserving pick's exact wording/gating/ordering per step.
-  // seedRoutes:false — routes were already seeded above (before pruning);
-  // re-seeding here would be a no-op anyway, but the reporter stays silent
-  // for it since the "seeded" message prints later, from the earlier `seed`.
+/** opencode disable half: excluded from the desired set while previously
+ *  enabled/managed → strip ONLY ak-managed wiring/artifacts (priors
+ *  restored, marker-gated), never the user's own opencode config. A
+ *  teardown that cannot complete (e.g. a JSONC config) is reported honestly
+ *  — markers stay for the retry and "disabled" is never claimed over
+ *  still-active wiring. Returns {incompleteTeardown}. */
+async function disablePickOpencodeLifecycle(cfg, { pkgRoot, cwd }) {
+  const retired = await runLifecycle({ adapter: lifecycleAdapterFor('opencode'), action: 'undo', cfg });
+  const ret = retired.result;
+  saveKitConfig(cfg); // persist markers (nulled on success, retained on failure)
+  let incompleteTeardown = false;
+  if (ret.ok) ok(`opencode disabled: ${ret.undo.detail}; ${ret.artifacts.detail}`);
+  else {
+    incompleteTeardown = true;
+    warn(`opencode disable incomplete — ${ret.undo.detail} (artifacts: ${ret.artifacts.detail})`);
+  }
+  // enablement-gated guidance strips regardless (user content preserved).
+  const guidance = await reconcileOpencodeGuidance({ pkgRoot, cfg, cwd, enabled: false });
+  if (guidance.changed) ok(`opencode ${guidance.detail}`);
+  return { incompleteTeardown };
+}
+
+async function applyPickOpencodeLifecycle(cfg, { pkgRoot, cwd, prevOpencode }) {
+  if (cfg.integrations.hosts.opencode) {
+    await enablePickOpencodeLifecycle(cfg, { pkgRoot, cwd });
+    return { incompleteTeardown: false };
+  }
+  if (prevOpencode) return disablePickOpencodeLifecycle(cfg, { pkgRoot, cwd });
+  return { incompleteTeardown: false };
+}
+
+/** Stage 3/3 (apply): the shared pipeline (providers.mjs's
+ *  convergeProviderStack) computes and persists every step; this reporter
+ *  only decides what to print and how, preserving pick's exact
+ *  wording/gating/ordering per step. seedRoutes:false — routes were already
+ *  seeded during resolvePickDecision (before pruning); re-seeding here would
+ *  be a no-op anyway, but the reporter stays silent for it since the
+ *  "seeded" message prints later, from that earlier `seed`. */
+/** The 'hosts' step's own report: the hosts-apply result, plus (only on this
+ *  step) the codex-disabled and primary-host messages — split out purely to
+ *  keep applyPickProviderStack's reporter's own branch count legible. */
+function reportPickHostsStep(result, { codexRetired, primaryHost, routing }) {
+  (result.ok ? ok : fail)(`hosts: ${result.detail}`);
+  if (codexRetired) {
+    const complete = codexRetired.mcp.ok && codexRetired.rmcp.ok;
+    (complete ? ok : warn)(`codex disabled${complete ? '' : ' with teardown receipts retained'}: ${codexRetired.mcp.detail}; ${codexRetired.rmcp.detail}`);
+  }
+  if (primaryHost !== DEFAULT_PRIMARY_HOST) {
+    const alt = routing.filter((e) => e !== primaryHost).join(', ') || 'none';
+    ok(`primary host: ${primaryHost} (alternate: ${alt})`);
+  }
+}
+
+/** The 'aqe-router' step's own report: the router-apply result, plus (only
+ *  when a primary provider is selected) whether it actually took effect. */
+function reportPickAqeRouterStep(result, aqeProvider) {
+  if (result.changed || !result.ok) (result.ok ? ok : warn)(`aqe router: ${result.detail}`);
+  if (aqeProvider) {
+    (result.ok ? ok : warn)(result.ok
+      ? `aqe provider: AQE_LLM_PROVIDER=${aqeProvider}`
+      : `aqe provider intent not active: ${aqeProvider} (router projection incomplete)`);
+  }
+}
+
+async function applyPickProviderStack(cfg, cwd, {
+  codexRetired, primaryHost, routing, aqeProvider, migrateRoutes,
+}) {
   const pickReporter = (step, result) => {
-    if (step === 'hosts') {
-      (result.ok ? ok : fail)(`hosts: ${result.detail}`);
-      if (codexRetired) {
-        const complete = codexRetired.mcp.ok && codexRetired.rmcp.ok;
-        (complete ? ok : warn)(`codex disabled${complete ? '' : ' with teardown receipts retained'}: ${codexRetired.mcp.detail}; ${codexRetired.rmcp.detail}`);
-      }
-      if (primaryHost !== DEFAULT_PRIMARY_HOST) {
-        const alt = routing.filter((e) => e !== primaryHost).join(', ') || 'none';
-        ok(`primary host: ${primaryHost} (alternate: ${alt})`);
-      }
-      return;
-    }
+    if (step === 'hosts') { reportPickHostsStep(result, { codexRetired, primaryHost, routing }); return; }
     // Retire withdrawn models from the persisted policy — the same heal `ak
     // sync` already runs (sync.mjs). Without this, `ak host pick` could
     // persist a route naming a model the host has withdrawn, left for the
@@ -770,15 +857,7 @@ export async function pick({ flags, cwd, pkgRoot, migrateRoutes = migrateRetired
       }
       return;
     }
-    if (step === 'aqe-router') {
-      if (result.changed || !result.ok) (result.ok ? ok : warn)(`aqe router: ${result.detail}`);
-      if (aqeProvider) {
-        (result.ok ? ok : warn)(result.ok
-          ? `aqe provider: AQE_LLM_PROVIDER=${aqeProvider}`
-          : `aqe provider intent not active: ${aqeProvider} (router projection incomplete)`);
-      }
-      return;
-    }
+    if (step === 'aqe-router') { reportPickAqeRouterStep(result, aqeProvider); return; }
     if (step === 'legacy-codex-mcp') {
       if (result.changed || !result.ok) (result.ok ? ok : warn)(`legacy codex MCP: ${result.detail}`);
       return;
@@ -793,14 +872,91 @@ export async function pick({ flags, cwd, pkgRoot, migrateRoutes = migrateRetired
       (result.status === 'degraded' ? warn : result.ok ? (result.changed ? ok : info) : warn)(`ruflo providers: ${result.detail}`);
     }
   };
-  const { router } = await convergeProviderStack(cfg, cwd, {
+  return convergeProviderStack(cfg, cwd, {
     reporter: pickReporter, seedRoutes: false, migrateRoutes,
+  });
+}
+
+/** The pre-pick facts pick() needs to detect a transition (host being newly
+ *  disabled, primary changing, etc.) — read once, before any mutation. */
+function readPickPriorState(cfg) {
+  return {
+    prevOpencode: !!cfg.integrations?.hosts?.opencode || cfg.integrations?.ownership?.opencode?.mcp === 'ak',
+    prevPrimary: cfg.routing?.primaryHost ?? DEFAULT_PRIMARY_HOST,
+    oldPolicy: cfg.routing?.routes ?? {},
+    prevCodex: !!cfg.integrations?.hosts?.codex,
+    codexMcpManaged: cfg.integrations?.ownership?.codex?.mcp === 'ak',
+    rufloCodexManaged: cfg.integrations?.ownership?.codex?.reverseMcp === 'ak',
+  };
+}
+
+export async function pick({ flags, cwd, pkgRoot, migrateRoutes = migrateRetiredRoutesInConfig }) {
+  const aqeProviderTypes = aqeSelectableProviderTypes();
+  const aqeChainProviderTypes = aqeSelectableChainProviderTypes();
+  const cfg = loadKitConfig();
+  const trustBaseline = structuredClone(cfg);
+  const hosts = await detectHosts(cwd);
+  // Routing eligibility is capability-derived. OpenCode retains its independent
+  // lifecycle wiring even though it is now an execution host; it is never a
+  // primary/AQE host because those are separate registry capabilities.
+  // --host is the complete desired enabled-host set on BOTH tiers; excluding an
+  // enabled host disables it (ak-managed wiring stripped, user config kept).
+  // Keep primary-host selection on the built-in routing set, but admit an
+  // explicitly named external host when the live adapter overlay proves it is
+  // routable. Provider-only retunes also carry already-enabled external ids
+  // through unchanged instead of mistaking them for unknown host tokens.
+  const registries = {
+    ROUTING: new Set(routableHostIds()),
+    EFFECTIVE_ROUTING: new Set(effectiveRoutableHostIds()),
+    MANAGED_HOSTS: new Set(HOSTS.map((host) => host.id)),
+  };
+  const {
+    prevOpencode, prevPrimary, oldPolicy, prevCodex, codexMcpManaged, rufloCodexManaged,
+  } = readPickPriorState(cfg);
+
+  const input = await parsePickInput({
+    flags, cfg, hosts, registries, aqeProviderTypes,
+  });
+  if (input.code !== undefined) return input.code;
+
+  const decision = await resolvePickDecision(cfg, {
+    enabled: input.enabled,
+    aqeProvider: input.aqeProvider,
+    aqeFallback: input.aqeFallback,
+    models: input.models,
+    flags,
+    registries,
+    prevPrimary,
+    oldPolicy,
+    aqeProviderTypes,
+    aqeChainProviderTypes,
+  });
+  if (decision.code !== undefined) return decision.code;
+  const {
+    enabled, routing, primaryHost, aqeProvider, seed,
+  } = decision;
+
+  const trustManifest = newlyEnabledHostTrustManifest(trustBaseline, enabled);
+  const trustCode = await confirmPickTrustManifest(trustManifest, flags);
+  if (trustCode !== undefined) return trustCode;
+
+  let codexRetired = null;
+  if (prevCodex && !cfg.integrations.hosts.codex) {
+    codexRetired = await retireCodexOnDisable(cfg, cwd, { codexMcpManaged, rufloCodexManaged });
+  }
+  saveKitConfig(cfg);
+
+  await installPickAbsentHosts(cfg);
+  const { incompleteTeardown } = await applyPickOpencodeLifecycle(cfg, { pkgRoot, cwd, prevOpencode });
+
+  const { router } = await applyPickProviderStack(cfg, cwd, {
+    codexRetired, primaryHost, routing, aqeProvider, migrateRoutes,
   });
   if (router.ok) ok('saved to kit.json — reapplied on every `ak sync`; undo with `ak host off`');
   else warn('saved intent to kit.json, but AQE routing is incomplete — fix the warning above and re-run `ak sync`');
   if (seed.seeded) ok(`per-activity routing seeded — ${seed.count} activities (dual-host defaults; tune with --route or edit kit.json)`);
   printActivityRoutingTable(cfg);
-  await maybeWriteQeCourtDefaults({ nonInteractive, cwd, enabled, aqeProvider });
+  await maybeWriteQeCourtDefaults({ nonInteractive: input.nonInteractive, cwd, enabled, aqeProvider });
   printDualHostTips(cfg);
   return incompleteTeardown || !router.ok ? 1 : 0;
 }
