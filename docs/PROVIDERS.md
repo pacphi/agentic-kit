@@ -516,7 +516,9 @@ The current [OpenAI API model catalog](https://developers.openai.com/api/docs/mo
 GPT-5.4 and GPT-5.4 mini, and no first-party withdrawal notice supports the former automatic
 replacement claims. `ak` only adds a retirement rule when it can cite the host's direct notice; a
 newer default remains a recommendation, not a route rewrite (see
-[ADR-0003](adr/0003-auto-seed-dual-host-provenance.md)).
+[ADR-0003](adr/0003-auto-seed-dual-host-provenance.md)). Once a citation-backed rule exists,
+`ak host pick`, `ak setup`, and `ak sync` all rewrite a seeded route naming the withdrawn model —
+a user-pinned route is reported, never rewritten (still routed to the replacement at run time).
 
 `claude-opus-4-8` is **not** retired — it carries no deprecation notice and stays pinnable. It is
 merely no longer the default, which `ak status` reports as routing *divergence*: a trade for you to
