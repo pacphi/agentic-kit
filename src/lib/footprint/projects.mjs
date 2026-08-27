@@ -557,6 +557,93 @@ function aggregateUnrecognized(rows) {
 }
 
 /**
+ * Resolve the project catalog `collectProjects` will measure, plus the
+ * ever-seen / on-disk / git-repo counts that ride alongside it.
+ *
+ * Discovery is a candidate-path source; if it cannot run, this reports an empty
+ * catalog with a reason rather than taking the rest of the snapshot down with
+ * it. `projects` takes EITHER shape: an explicit catalog ARRAY, whose rows are
+ * measured exactly as given because the caller — not discovery — chose them and
+ * the on-disk filter therefore does not apply; or a discovery PAYLOAD, which is
+ * read exactly as `sources` is, on-disk filter and KPI counts included.
+ */
+function resolveProjectCatalog({ projects, sources, discover, fsImpl }) {
+  if (Array.isArray(projects)) {
+    return { catalog: projects, counts: summarizeCatalog(projects, fsImpl), discoveryReason: null };
+  }
+  try {
+    const payload = (isSourcesPayload(projects) ? projects : sources) ?? discover({ fsImpl });
+    // Only projects that still exist can be walked, so only they become rows —
+    // the vanished ones survive in `everSeen`, not as unmeasurable table rows.
+    const catalog = (payload?.projects ?? []).filter((project) => project?.exists);
+    return {
+      catalog,
+      counts: {
+        everSeen: payload?.everSeen ?? 0,
+        onDisk: payload?.onDisk ?? 0,
+        gitRepos: payload?.gitRepos ?? 0,
+        unresolved: payload?.unresolved ?? 0,
+        complete: payload?.complete !== false,
+        method: payload?.method ?? null,
+        sources: payload?.sources ?? null,
+      },
+      discoveryReason: null,
+    };
+  } catch (error) {
+    return { catalog: [], counts: null, discoveryReason: error?.code ?? 'discovery failed' };
+  }
+}
+
+/** Measure every selected project, reporting progress the same way the scan
+ *  always has: one `project` callback per row, one `done` callback at the end. */
+function measureSelectedProjects(selected, { walk, limits, detect, loc, asOf, fsImpl, onProgress }) {
+  const out = [];
+  for (const project of selected) {
+    if (!project?.path) continue;
+    notify(onProgress, { scanned: out.length, total: selected.length, phase: 'project', path: project.path });
+    out.push(measureProject(project, { walk, limits, detect, loc, asOf, fsImpl }));
+  }
+  notify(onProgress, { scanned: out.length, total: selected.length, phase: 'done', path: null });
+  return out;
+}
+
+/** Assemble the ProjectFootprint section from a completed measurement pass. */
+function buildProjectsSection({ asOf, out, rows, selected, counts, discoveryReason, loc }) {
+  // A count whose sweep hit an unreadable transcript or an unrecoverable project
+  // directory is a FLOOR, not a total — `partial` is what makes a surface render
+  // it as "≥ N" instead of quietly overstating certainty.
+  const partial = counts ? counts.complete === false : false;
+  const kpi = (value) => (discoveryReason ? unknown(discoveryReason) : measured(value, { asOf, partial }));
+
+  return {
+    asOf,
+    projects: out,
+    // Retained under its original name for existing consumers; it has always
+    // meant "how many projects discovery found", which is now everSeen.
+    count: kpi(counts?.everSeen ?? 0),
+    everSeen: kpi(counts?.everSeen ?? 0),
+    onDisk: kpi(counts?.onDisk ?? 0),
+    gitRepos: kpi(counts?.gitRepos ?? 0),
+    unresolved: counts?.unresolved ?? 0,
+    method: counts?.method ?? null,
+    sources: counts?.sources ?? null,
+    scanned: out.length,
+    truncated: selected.length < rows.length,
+    locMeasured: loc,
+    // Which catalog produced the language and stack facts in every row above. A
+    // figure that moves between releases can then be explained by the registry
+    // that changed rather than by the machine that did not.
+    registryVersion: STACK_REGISTRY_VERSION,
+    // The machine-wide to-do list: what the registry saw and could not name.
+    // Stated as `null` when nothing was scanned, because an empty tail from an
+    // unmeasured scan would read as "the registry knows everything here".
+    unrecognized: loc ? aggregateUnrecognized(out) : null,
+    complete: !discoveryReason && !partial && selected.length === rows.length
+      && out.every((row) => row.complete),
+  };
+}
+
+/**
  * ProjectFootprint rows for every project that still exists on disk, plus the
  * ever-seen / on-disk / git-repo counts the Summary KPI states together.
  *
@@ -592,75 +679,9 @@ export function collectProjects({
   fsImpl = fs,
 } = {}) {
   const asOf = now();
-  // Discovery is a candidate-path source; if it cannot run, this section reports
-  // nothing rather than taking the rest of the snapshot down with it.
-  let discoveryReason = null;
-  let catalog;
-  let counts;
-  if (Array.isArray(projects)) {
-    catalog = projects;
-    counts = summarizeCatalog(projects, fsImpl);
-  } else {
-    try {
-      const payload = (isSourcesPayload(projects) ? projects : sources) ?? discover({ fsImpl });
-      // Only projects that still exist can be walked, so only they become rows —
-      // the vanished ones survive in `everSeen`, not as unmeasurable table rows.
-      catalog = (payload?.projects ?? []).filter((project) => project?.exists);
-      counts = {
-        everSeen: payload?.everSeen ?? 0,
-        onDisk: payload?.onDisk ?? 0,
-        gitRepos: payload?.gitRepos ?? 0,
-        unresolved: payload?.unresolved ?? 0,
-        complete: payload?.complete !== false,
-        method: payload?.method ?? null,
-        sources: payload?.sources ?? null,
-      };
-    } catch (error) {
-      catalog = [];
-      discoveryReason = error?.code ?? 'discovery failed';
-    }
-  }
+  const { catalog, counts, discoveryReason } = resolveProjectCatalog({ projects, sources, discover, fsImpl });
   const rows = Array.isArray(catalog) ? catalog : [];
   const selected = typeof limit === 'number' && limit >= 0 ? rows.slice(0, limit) : rows;
-
-  const out = [];
-  for (const project of selected) {
-    if (!project?.path) continue;
-    notify(onProgress, { scanned: out.length, total: selected.length, phase: 'project', path: project.path });
-    out.push(measureProject(project, { walk, limits, detect, loc, asOf, fsImpl }));
-  }
-  notify(onProgress, { scanned: out.length, total: selected.length, phase: 'done', path: null });
-
-  // A count whose sweep hit an unreadable transcript or an unrecoverable project
-  // directory is a FLOOR, not a total — `partial` is what makes a surface render
-  // it as "≥ N" instead of quietly overstating certainty.
-  const partial = counts ? counts.complete === false : false;
-  const kpi = (value) => (discoveryReason ? unknown(discoveryReason) : measured(value, { asOf, partial }));
-
-  return {
-    asOf,
-    projects: out,
-    // Retained under its original name for existing consumers; it has always
-    // meant "how many projects discovery found", which is now everSeen.
-    count: kpi(counts?.everSeen ?? 0),
-    everSeen: kpi(counts?.everSeen ?? 0),
-    onDisk: kpi(counts?.onDisk ?? 0),
-    gitRepos: kpi(counts?.gitRepos ?? 0),
-    unresolved: counts?.unresolved ?? 0,
-    method: counts?.method ?? null,
-    sources: counts?.sources ?? null,
-    scanned: out.length,
-    truncated: selected.length < rows.length,
-    locMeasured: loc,
-    // Which catalog produced the language and stack facts in every row above. A
-    // figure that moves between releases can then be explained by the registry
-    // that changed rather than by the machine that did not.
-    registryVersion: STACK_REGISTRY_VERSION,
-    // The machine-wide to-do list: what the registry saw and could not name.
-    // Stated as `null` when nothing was scanned, because an empty tail from an
-    // unmeasured scan would read as "the registry knows everything here".
-    unrecognized: loc ? aggregateUnrecognized(out) : null,
-    complete: !discoveryReason && !partial && selected.length === rows.length
-      && out.every((row) => row.complete),
-  };
+  const out = measureSelectedProjects(selected, { walk, limits, detect, loc, asOf, fsImpl, onProgress });
+  return buildProjectsSection({ asOf, out, rows, selected, counts, discoveryReason, loc });
 }

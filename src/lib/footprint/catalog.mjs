@@ -384,6 +384,122 @@ export function collectConfigSurface({
 const itemKey = (kind, name) => `${kind}::${name.trim().toLowerCase()}`;
 
 /**
+ * Additional catalog specs contributed by installed plugins' own cache
+ * directories, discovered from the plugin manifests themselves (Claude's
+ * `installed_plugins.json`, codex's inspected plugin cache) rather than
+ * hardcoded. A codex read failure is that host's problem, not this catalog's —
+ * it must never take the rest of the specs down with it.
+ */
+function pluginSurfaceSpecs({ claudeRoot, codexConfigFile, inspectCodexPlugins: inspect, io }) {
+  const specs = [];
+  const claudePlugins = readClaudePlugins(path.join(claudeRoot, 'plugins', 'installed_plugins.json'), io);
+  for (const { id, root } of claudePlugins.roots) {
+    specs.push(...pluginSubSurfaces('claude', id, root, 'claude-plugin', io));
+  }
+  let codexPlugins = { configPresent: false, plugins: [] };
+  try { codexPlugins = inspect({ configFile: codexConfigFile }) ?? codexPlugins; }
+  catch { codexPlugins = { configPresent: false, plugins: [] }; }
+  for (const plugin of codexPlugins.plugins ?? []) {
+    if (!plugin?.root || !plugin?.ref) continue;
+    const id = plugin.ref.includes('@') ? plugin.ref.slice(0, plugin.ref.lastIndexOf('@')) : plugin.ref;
+    specs.push(...pluginSubSurfaces('codex', id, plugin.root, 'codex-plugin', io));
+  }
+  // Codex's enabled refs ARE that host's plugin inventory.
+  const enabled = (codexPlugins.plugins ?? []).map((plugin) => plugin?.ref).filter(Boolean);
+  specs.push({
+    id: 'codex-plugins', host: 'codex', kind: 'plugin', path: codexConfigFile,
+    read: () => (codexPlugins.configPresent === false
+      ? emptyReading('absent', 'ENOENT')
+      : { status: 'ok', reason: null, names: enabled, partial: false, truncated: false }),
+  });
+  return specs;
+}
+
+/** Add one spec's names to the deduplicated CatalogItem map. A plugin-sourced
+ *  name carries its plugin's namespace prefix, exactly as the surface declared. */
+function mergeCatalogItem(items, spec, raw) {
+  const name = spec.prefix ? `${spec.prefix}:${raw}` : raw;
+  const key = itemKey(spec.kind, name);
+  let item = items.get(key);
+  if (!item) {
+    item = { key, kind: spec.kind, name, hosts: [], presence: [] };
+    items.set(key, item);
+  }
+  if (!item.hosts.includes(spec.host)) item.hosts.push(spec.host);
+  item.presence.push({ host: spec.host, surface: spec.id, path: spec.path });
+}
+
+/** Read every spec once, folding hits into deduplicated CatalogItems and
+ *  per-surface status rows in the same pass. */
+function readCatalogSurfaces(specs) {
+  const items = new Map();
+  const surfaces = [];
+  for (const spec of specs) {
+    const reading = spec.read(spec.path);
+    surfaces.push({
+      id: spec.id,
+      host: spec.host,
+      kind: spec.kind,
+      path: spec.path,
+      status: reading.status,
+      reason: reading.reason ?? null,
+      partial: Boolean(reading.partial),
+      truncated: Boolean(reading.truncated),
+      // A degraded surface has NO count: we did not look, so there is no number.
+      count: reading.status === 'degraded' ? null : reading.names.length,
+    });
+    if (reading.status === 'degraded') continue;
+    for (const raw of reading.names) mergeCatalogItem(items, spec, raw);
+  }
+  return { items, surfaces };
+}
+
+/** Which kinds — overall, and per host — a degraded or capped surface touched.
+ *  Feeds the `partial` flag on each count below, never a silent omission. */
+function trackIncompleteness(surfaces) {
+  const incomplete = new Set();
+  const incompleteByHost = new Set();
+  for (const surface of surfaces) {
+    if (surface.status !== 'degraded' && !surface.partial) continue;
+    incomplete.add(surface.kind);
+    incompleteByHost.add(`${surface.host}::${surface.kind}`);
+  }
+  return { incomplete, incompleteByHost };
+}
+
+/** Deduplicated items, ranked by kind (in the documented CATALOG_KINDS order)
+ *  then by name. */
+function sortCatalogItems(items) {
+  return [...items.values()].sort((a, b) => (a.kind === b.kind
+    ? a.name.localeCompare(b.name)
+    : CATALOG_KINDS.indexOf(a.kind) - CATALOG_KINDS.indexOf(b.kind)));
+}
+
+/** Total count per kind, `partial` when any surface feeding that kind was
+ *  unreadable or capped. */
+function tallyCatalogCounts(list, asOf, incomplete) {
+  const counts = {};
+  for (const kind of CATALOG_KINDS) {
+    const value = list.filter((item) => item.kind === kind).length;
+    counts[kind] = measured(value, { asOf, partial: incomplete.has(kind) });
+  }
+  return counts;
+}
+
+/** The same tally, sliced per host. */
+function tallyCatalogPerHost(list, asOf, incompleteByHost) {
+  const perHost = {};
+  for (const host of CATALOG_HOSTS) {
+    perHost[host] = {};
+    for (const kind of CATALOG_KINDS) {
+      const value = list.filter((item) => item.kind === kind && item.hosts.includes(host)).length;
+      perHost[host][kind] = measured(value, { asOf, partial: incompleteByHost.has(`${host}::${kind}`) });
+    }
+  }
+  return perHost;
+}
+
+/**
  * Read every host catalog surface and fold it into deduplicated CatalogItems.
  *
  * A count is `partial` when any surface feeding it was unreadable or capped: the
@@ -421,90 +537,15 @@ export function collectCatalog({
   const roots = { claudeRoot, claudeMcpFile, codexRoot, codexConfigFile, opencodeRoot, opencodeConfigFile,
     cwd, projects };
   const specs = surfaceSpecs(roots, io);
-
-  // Plugin sub-surfaces are discovered from the plugin manifests themselves, so
-  // they are appended after the base specs rather than hardcoded.
   if (includePluginSurfaces) {
-    const claudePlugins = readClaudePlugins(path.join(claudeRoot, 'plugins', 'installed_plugins.json'), io);
-    for (const { id, root } of claudePlugins.roots) {
-      specs.push(...pluginSubSurfaces('claude', id, root, 'claude-plugin', io));
-    }
-    let codexPlugins = { configPresent: false, plugins: [] };
-    // Codex owns config.toml and its plugin cache; an unreadable one is not this
-    // kit's failure to fix, and it must not take the rest of the catalog with it.
-    try { codexPlugins = inspectCodexPluginsImpl({ configFile: codexConfigFile }) ?? codexPlugins; }
-    catch { codexPlugins = { configPresent: false, plugins: [] }; }
-    for (const plugin of codexPlugins.plugins ?? []) {
-      if (!plugin?.root || !plugin?.ref) continue;
-      const id = plugin.ref.includes('@') ? plugin.ref.slice(0, plugin.ref.lastIndexOf('@')) : plugin.ref;
-      specs.push(...pluginSubSurfaces('codex', id, plugin.root, 'codex-plugin', io));
-    }
-    // Codex's enabled refs ARE that host's plugin inventory.
-    const enabled = (codexPlugins.plugins ?? []).map((plugin) => plugin?.ref).filter(Boolean);
-    specs.push({
-      id: 'codex-plugins', host: 'codex', kind: 'plugin', path: codexConfigFile,
-      read: () => (codexPlugins.configPresent === false
-        ? emptyReading('absent', 'ENOENT')
-        : { status: 'ok', reason: null, names: enabled, partial: false, truncated: false }),
-    });
+    specs.push(...pluginSurfaceSpecs({ claudeRoot, codexConfigFile, inspectCodexPlugins: inspectCodexPluginsImpl, io }));
   }
 
-  const items = new Map();
-  const surfaces = [];
-  for (const spec of specs) {
-    const reading = spec.read(spec.path);
-    surfaces.push({
-      id: spec.id,
-      host: spec.host,
-      kind: spec.kind,
-      path: spec.path,
-      status: reading.status,
-      reason: reading.reason ?? null,
-      partial: Boolean(reading.partial),
-      truncated: Boolean(reading.truncated),
-      // A degraded surface has NO count: we did not look, so there is no number.
-      count: reading.status === 'degraded' ? null : reading.names.length,
-    });
-    if (reading.status === 'degraded') continue;
-    for (const raw of reading.names) {
-      const name = spec.prefix ? `${spec.prefix}:${raw}` : raw;
-      const key = itemKey(spec.kind, name);
-      let item = items.get(key);
-      if (!item) {
-        item = { key, kind: spec.kind, name, hosts: [], presence: [] };
-        items.set(key, item);
-      }
-      if (!item.hosts.includes(spec.host)) item.hosts.push(spec.host);
-      item.presence.push({ host: spec.host, surface: spec.id, path: spec.path });
-    }
-  }
-
-  const incomplete = new Set();
-  const incompleteByHost = new Set();
-  for (const surface of surfaces) {
-    if (surface.status !== 'degraded' && !surface.partial) continue;
-    incomplete.add(surface.kind);
-    incompleteByHost.add(`${surface.host}::${surface.kind}`);
-  }
-
-  const list = [...items.values()].sort((a, b) => (a.kind === b.kind
-    ? a.name.localeCompare(b.name)
-    : CATALOG_KINDS.indexOf(a.kind) - CATALOG_KINDS.indexOf(b.kind)));
-
-  const counts = {};
-  const perHost = {};
-  for (const kind of CATALOG_KINDS) {
-    const value = list.filter((item) => item.kind === kind).length;
-    counts[kind] = measured(value, { asOf, partial: incomplete.has(kind) });
-  }
-  for (const host of CATALOG_HOSTS) {
-    perHost[host] = {};
-    for (const kind of CATALOG_KINDS) {
-      const value = list.filter((item) => item.kind === kind && item.hosts.includes(host)).length;
-      perHost[host][kind] = measured(value, { asOf, partial: incompleteByHost.has(`${host}::${kind}`) });
-    }
-  }
-
+  const { items, surfaces } = readCatalogSurfaces(specs);
+  const { incomplete, incompleteByHost } = trackIncompleteness(surfaces);
+  const list = sortCatalogItems(items);
+  const counts = tallyCatalogCounts(list, asOf, incomplete);
+  const perHost = tallyCatalogPerHost(list, asOf, incompleteByHost);
   const degraded = surfaces.filter((surface) => surface.status === 'degraded').map((surface) => surface.id);
   const truncated = surfaces.filter((surface) => surface.truncated).map((surface) => surface.id);
 
