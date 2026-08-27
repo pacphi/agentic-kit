@@ -37,7 +37,7 @@ rewritten; rule 3 of the module header, `usage-index.mjs:22-29`):
 | Host | Store | Discovered by |
 |---|---|---|
 | Claude Code | `~/.claude/projects/<encoded-project-dir>/<sessionId>.jsonl` | `listClaude` (`usage-index.mjs:916-926`) — exactly one level of project directories |
-| Codex CLI | `~/.codex/sessions/<yyyy>/<mm>/<dd>/rollout-<ts>-<uuid>.jsonl` | `listCodex` (`usage-index.mjs:891-904`) — the `yyyy/mm/dd` tree walk |
+| Codex CLI | `~/.codex/sessions/<yyyy>/<mm>/<dd>/rollout-<ts>-<uuid>.jsonl` | `listCodex` (`usage-index.mjs:939-952`) — the `yyyy/mm/dd` tree walk |
 
 Roots come from `defaultRoots()` (`usage-index.mjs:908-912`) and are injectable
 for tests. A malformed line is skipped, never fatal (`jsonLines`,
@@ -65,7 +65,7 @@ An assistant entry with `isApiErrorMessage: true` is a **local placeholder**
 Claude Code writes when a request dies before a real completion (connection
 drop, rate limit, auth failure — `model: "<synthetic>"`, all-zero usage). It
 is real engaged time but not a model attempt: counted as an *exception*, never
-pushed into `models` or priced (`usage-index.mjs:551-570`; the full story is
+pushed into `models` or priced (`usage-index.mjs:595-606`; the full story is
 [`USAGE-SCORECARD-METRICS.md`](USAGE-SCORECARD-METRICS.md) §10).
 
 ### 1.2 Codex entry vocabulary
@@ -211,7 +211,7 @@ and image-only pastes get the right kind" (the two edges).
 
 ## 4. The `readSession` pipeline — how one session becomes a payload
 
-`readSession(id, opts)` (`usage-index.mjs:1566-1621`) is the only way
+`readSession(id, opts)` (`usage-index.mjs:1634-1690`) is the only way
 transcript content leaves the module, and every step is a gate:
 
 ### 4.1 Locate, contain, bound

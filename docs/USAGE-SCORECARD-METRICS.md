@@ -158,8 +158,8 @@ responses = Σ over included sessions of session.responses
   last activity falls outside the requested window is dropped too
   (`usage-index.mjs:1124`).
 - `responses` accumulation: Claude increments per assistant message
-(`usage-index.mjs:568-571`); Codex increments per `agent_message` event
-(`usage-index.mjs:653-662`).
+(`usage-index.mjs:579-582`); Codex increments per `agent_message` event
+(`usage-index.mjs:786-791`).
 - Totals: `totals.responses += s.responses` per included session
 (`usage-index.mjs:1175`).
 - Render: `kpi("sessions", fmtNum(t.sessions), fmtNum(t.responses)+" assistant
@@ -335,9 +335,9 @@ numbers as percentages of `t.tokens` (`dashboard/client.mjs`,
 **What "input" excludes.** For both providers, the `input` counter recorded
 per row is **gross input minus cached input** — Claude's parser reads
 `cache_read_input_tokens` and `cache_creation_input_tokens` as separate fields
-the provider already reports separately (`usage-index.mjs:598-599`); Codex's
+the provider already reports separately (`usage-index.mjs:613-614`); Codex's
 parser subtracts `cached_input_tokens` from `input_tokens` explicitly
-(`usage-index.mjs:780-789`, `input: Math.max(0, gross - cacheRead)`) because
+(`usage-index.mjs:802-811`, `input: Math.max(0, gross - cacheRead)`) because
 Codex's own `input_tokens` field **includes** cached tokens and would
 double-count them against the separately-reported `cacheRead` figure if left
 as-is. This is asserted by test:
@@ -434,7 +434,7 @@ session data, and each needs its own fix:
 - `activeIntervals()` (`usage-index.mjs:427-438`) — splits one session's
   sorted timestamp list into sub-intervals wherever a gap exceeds
   `IDLE_GAP_MS`; "a run of one timestamp yields a zero-length interval and so
-  contributes nothing" (comment, `usage-index.mjs:399-403`).
+  contributes nothing" (comment, `usage-index.mjs:427-431`).
 - Aggregation: `totals.engagedSeconds = mergeIntervals(sessions.flatMap(s =>
   s._active))` (`usage-index.mjs:1219`); `totals.spanUnionSeconds =
   mergeIntervals(sessions.map(s => s._span))` (`usage-index.mjs:1218`);
@@ -523,7 +523,7 @@ renders "no sessions in window" instead of zeroed figures
 
 **Formula:** identical aggregation to every other bucket
 (`byProvider[s.provider]`, populated via `addTo()`, `usage-index.mjs:942-951`,
-  called once per session at `usage-index.mjs:1084`), keyed by the literal string
+  called once per session at `usage-index.mjs:1097`), keyed by the literal string
 `"claude"` or `"codex"` assigned at parse time
 (`blankSession(id, 'claude')` / `blankSession(id, 'codex')`,
 `usage-index.mjs:398-408`, `parseClaude`/`parseCodex` entry points).
@@ -562,8 +562,8 @@ punchcard[dow + "-" + hour] += 1   per assistant/agent_message response, at its 
 ```
 
 **Source:** incremented once per Claude assistant turn
-(`usage-index.mjs:568-571`, keyed by `punchKey(at)`) and once per Codex
-`agent_message` (`usage-index.mjs:653-662`), merged into the window-level
+(`usage-index.mjs:579-582`, keyed by `punchKey(at)`) and once per Codex
+`agent_message` (`usage-index.mjs:786-791`), merged into the window-level
 `punchcard` object per session (`usage-index.mjs:1197`). Cell intensity is
 linear against the single busiest cell in the window:
 `v = pcMax ? n/pcMax : 0` (`dashboard/client.mjs`) — this is a
@@ -630,7 +630,7 @@ distinct underlying causes, one placeholder shape).
 
 The parser branches on `isApiErrorMessage === true`
 (`usage-index.mjs:522-531`): the turn still increments `rec.responses`
-and the punchcard (`usage-index.mjs:510-513`) — it *is* real engaged
+and the punchcard (`usage-index.mjs:579-582`) — it *is* real engaged
 time, someone was genuinely waiting on it — but it is never pushed into
 `rec.models` and `addUsage()` is never called for it, so it can no longer
 create a `byModel` row of any kind. It increments a separate

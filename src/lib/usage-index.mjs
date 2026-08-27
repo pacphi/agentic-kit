@@ -401,8 +401,10 @@ function* jsonLines(raw) {
 }
 
 /** A blank per-session record; `usage` rows are (day, model) buckets so byDay
- *  and byModel can both be derived without re-reading the transcript. */
-function blankSession(id, provider) {
+ *  and byModel can both be derived without re-reading the transcript. Exported
+ *  so other transcript-source parsers (usage-opencode.mjs) build the SAME
+ *  record shape instead of hand-mirroring it. */
+export function blankSession(id, provider) {
   return {
     id, provider, host: provider, inferenceProvider: null, providerProvenance: 'unknown',
     title: '', project: 'unknown', start: null, end: null,
@@ -450,12 +452,18 @@ function seal(rec) {
   return rec;
 }
 
-function addUsage(rec, day, model, u) {
+/** Add usage to a session's (day, model) bucket, creating it on first touch.
+ *  Returns the row so a caller with a per-source extra field (opencode's
+ *  observed `costObserved`) can set it without a second find(). Exported for
+ *  the same reason as blankSession — one definition of "how a usage row
+ *  accumulates", shared across transcript-source parsers. */
+export function addUsage(rec, day, model, u) {
   let row = rec.usage.find((r) => r.day === day && r.model === model);
   if (!row) { row = { day, model, input: 0, output: 0, cacheRead: 0, cacheWrite: 0, responses: 0 }; rec.usage.push(row); }
   row.input += u.input; row.output += u.output;
   row.cacheRead += u.cacheRead; row.cacheWrite += u.cacheWrite;
   row.responses += u.responses ?? 0;
+  return row;
 }
 
 /** Flatten a Claude content array into display text, dropping binary payloads
