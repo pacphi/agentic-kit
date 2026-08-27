@@ -244,15 +244,16 @@ function validateEnvNames(value, field) {
   return [...value];
 }
 
-/** Validate candidate data; host.id fixes identity and grants activation. */
-function validateAqe(value, host, driving, execution) {
-  assertRecord(value, 'aqe');
-  assertNoUnknownKeys(value, ['provider'], 'aqe');
-  assertRecord(value.provider, 'aqe.provider');
-  assertNoUnknownKeys(value.provider, [
-    'hook', 'billingMode', 'models', 'defaultModel', 'maxConcurrency', 'stripEnv', 'displayName',
-  ], 'aqe.provider');
+// ── validateAqe decomposition ────────────────────────────────────────────
+// Each helper below reproduces one slice of the original sequential body
+// verbatim — same reasons, same messages, same order — so validateAqe
+// itself just sequences them (order matters: it IS the throw-precedence
+// for a manifest with more than one violation).
 
+/** host.id becomes the AQE provider "type" identity — must be a safe slug,
+ * not built-in/reserved, on a cli-subprocess-driving host that can already
+ * route activities via a declared execution.run hook. */
+function checkAqeProviderEligibility(host, driving, execution) {
   const type = host.id;
   if (!AQE_PROVIDER_TYPE_RE.test(type)) {
     throw new ManifestRejected(
@@ -272,24 +273,30 @@ function validateAqe(value, host, driving, execution) {
       'manifest.aqe requires host.capabilities.canRouteActivities:true and manifest.execution.run.hook',
     );
   }
+}
 
-  const provider = value.provider;
-  assertRecord(provider.hook, 'aqe.provider.hook');
-  assertNoUnknownKeys(provider.hook, ['command', 'timeoutMs', 'files', 'passEnv'], 'aqe.provider.hook');
+/** aqe.provider.hook's command/timeoutMs/files, mirroring
+ * validateExecution/validateManifestLifecycle's own hook-shape checks. */
+function validateAqeProviderHook(hook) {
   try {
-    assertStringArray(provider.hook.command, 'aqe.provider.hook.command', { allowEmpty: false });
+    assertStringArray(hook.command, 'aqe.provider.hook.command', { allowEmpty: false });
   } catch (error) {
     throw new ManifestRejected('invalid-aqe-provider', error.message);
   }
-  if (provider.hook.timeoutMs !== undefined
-    && (!Number.isInteger(provider.hook.timeoutMs) || provider.hook.timeoutMs <= 0
-      || provider.hook.timeoutMs > MAX_AQE_PROVIDER_TIMEOUT_MS)) {
+  if (hook.timeoutMs !== undefined
+    && (!Number.isInteger(hook.timeoutMs) || hook.timeoutMs <= 0 || hook.timeoutMs > MAX_AQE_PROVIDER_TIMEOUT_MS)) {
     throw new ManifestRejected(
       'invalid-aqe-provider',
       `aqe.provider.hook.timeoutMs must be a positive integer <= ${MAX_AQE_PROVIDER_TIMEOUT_MS}`,
     );
   }
-  validateHookFiles(provider.hook.files, 'aqe.provider.hook.files', 'invalid-aqe-provider');
+  validateHookFiles(hook.files, 'aqe.provider.hook.files', 'invalid-aqe-provider');
+}
+
+/** passEnv/stripEnv mutual exclusion and bridge/runtime-variable safety —
+ * an aqe provider hook may neither forward nor strip a variable the ak
+ * bridge itself relies on, and the two lists may not collide. */
+function validateAqeProviderEnvPolicy(provider) {
   const passEnv = validateEnvNames(provider.hook.passEnv, 'aqe.provider.hook.passEnv');
   const stripEnv = validateEnvNames(provider.stripEnv, 'aqe.provider.stripEnv');
   const nonCanonicalStrip = stripEnv?.find((name) => name !== name.toUpperCase());
@@ -316,13 +323,12 @@ function validateAqe(value, host, driving, execution) {
   if (conflict) {
     throw new ManifestRejected('invalid-aqe-provider', `environment '${conflict}' cannot appear in both passEnv and stripEnv`);
   }
+  return { passEnv, stripEnv };
+}
 
-  if (provider.billingMode !== undefined && !AQE_BILLING_MODES.includes(provider.billingMode)) {
-    throw new ManifestRejected(
-      'invalid-aqe-provider',
-      `aqe.provider.billingMode must be one of ${AQE_BILLING_MODES.join(', ')}`,
-    );
-  }
+/** aqe.provider.models/defaultModel: an optional allowlist (default
+ * ['default']) and an optional default that must be a member of it. */
+function validateAqeProviderModels(provider) {
   let models = ['default'];
   if (provider.models !== undefined) {
     try {
@@ -354,6 +360,12 @@ function validateAqe(value, host, driving, execution) {
       throw new ManifestRejected('invalid-aqe-provider', 'aqe.provider.defaultModel must be present in aqe.provider.models');
     }
   }
+  return { models, defaultModel };
+}
+
+/** aqe.provider.maxConcurrency/displayName: independent optional-scalar
+ * bounds checks, evaluated last (same order as the original body). */
+function validateAqeProviderLimits(provider) {
   if (provider.maxConcurrency !== undefined
     && (!Number.isInteger(provider.maxConcurrency) || provider.maxConcurrency <= 0
       || provider.maxConcurrency > MAX_AQE_PROVIDER_CONCURRENCY)) {
@@ -371,7 +383,14 @@ function validateAqe(value, host, driving, execution) {
       `aqe.provider.displayName must be non-empty, control-free, and <= ${MAX_AQE_DISPLAY_NAME_BYTES} UTF-8 bytes`,
     );
   }
+}
 
+/** Assemble the validated, independent aqe.provider record — every optional
+ * field spread in only when the input actually declared it, never a
+ * fabricated default riding along undeclared. */
+function buildAqeProviderRecord(provider, {
+  passEnv, stripEnv, models, defaultModel,
+}) {
   return {
     provider: {
       hook: {
@@ -388,6 +407,39 @@ function validateAqe(value, host, driving, execution) {
       ...(provider.displayName === undefined ? {} : { displayName: provider.displayName }),
     },
   };
+}
+
+/** Validate candidate data; host.id fixes identity and grants activation. */
+function validateAqe(value, host, driving, execution) {
+  assertRecord(value, 'aqe');
+  assertNoUnknownKeys(value, ['provider'], 'aqe');
+  assertRecord(value.provider, 'aqe.provider');
+  assertNoUnknownKeys(value.provider, [
+    'hook', 'billingMode', 'models', 'defaultModel', 'maxConcurrency', 'stripEnv', 'displayName',
+  ], 'aqe.provider');
+
+  checkAqeProviderEligibility(host, driving, execution);
+
+  const { provider } = value;
+  assertRecord(provider.hook, 'aqe.provider.hook');
+  assertNoUnknownKeys(provider.hook, ['command', 'timeoutMs', 'files', 'passEnv'], 'aqe.provider.hook');
+  validateAqeProviderHook(provider.hook);
+  const { passEnv, stripEnv } = validateAqeProviderEnvPolicy(provider);
+
+  // Order matters (throw precedence, unchanged from the original body):
+  // billingMode, then models/defaultModel, then maxConcurrency/displayName.
+  if (provider.billingMode !== undefined && !AQE_BILLING_MODES.includes(provider.billingMode)) {
+    throw new ManifestRejected(
+      'invalid-aqe-provider',
+      `aqe.provider.billingMode must be one of ${AQE_BILLING_MODES.join(', ')}`,
+    );
+  }
+  const { models, defaultModel } = validateAqeProviderModels(provider);
+  validateAqeProviderLimits(provider);
+
+  return buildAqeProviderRecord(provider, {
+    passEnv, stripEnv, models, defaultModel,
+  });
 }
 
 /** Hook file inventories are portable paths relative to the manifest's own
@@ -450,65 +502,66 @@ function validateManifestTrust(value) {
   return structuredClone(value);
 }
 
-/**
- * Validate one adapter manifest document. Throws ManifestRejected (a named
- * `.reason`) on any structural or capability-cap violation; returns a frozen,
- * fully independent copy on success. `projections`/`observability` are
- * injectable for tests, defaulting to the real built-in registries.
- */
-export function validateAdapterManifest(value, { projections = projectionMap, observability = observabilityMap } = {}) {
-  assertRecord(value, 'manifest');
-  assertNoUnknownKeys(value, MANIFEST_ALLOWED_KEYS, '');
+// ── validateAdapterManifest decomposition ────────────────────────────────
+// Each helper reproduces one slice of the original sequential body
+// verbatim, in the same order, so validateAdapterManifest itself just
+// sequences them (order is the throw-precedence for a manifest with more
+// than one violation).
 
+function validateManifestIdentity(value) {
   try {
     assertId(value.name, 'manifest.name');
   } catch (error) {
     throw new ManifestRejected('invalid-id', error.message);
   }
-
   if (typeof value.version !== 'string' || !SEMVER_RE.test(value.version)) {
     throw new ManifestRejected('invalid-version', 'manifest.version must be semver (e.g. 1.2.3)');
   }
-
   if (!Number.isInteger(value.contract) || value.contract < 1) {
     throw new ManifestRejected('invalid-contract', 'manifest.contract must be a positive integer');
   }
+}
 
-  // ── host-layer allowlist wrapper, BEFORE validateHostAdapter runs ──────
-  // validateHostAdapter is shared with the built-in registry (registries.mjs)
-  // and must keep structuredClone-ing whatever it's handed — so the
-  // allowlisting happens here, at the manifest (external-adapter-only) layer,
-  // never inside that shared validator.
-  if (value.host && typeof value.host === 'object' && !Array.isArray(value.host)) {
-    assertNoUnknownKeys(value.host, HOST_ALLOWED_KEYS, 'host');
-    if (value.host.install && typeof value.host.install === 'object' && !Array.isArray(value.host.install)) {
-      assertNoUnknownKeys(value.host.install, HOST_INSTALL_ALLOWED_KEYS, 'host.install');
-      if (value.host.install.npmPackage != null) {
-        throw new ManifestRejected('external-npm-package', 'external adapters may not declare host.install.npmPackage — detect-never-overwrite only');
-      }
-      try {
-        assertId(value.host.install.bin, 'host.install.bin');
-      } catch (error) {
-        throw new ManifestRejected('invalid-install-bin', error.message);
-      }
+/**
+ * Host-layer allowlist wrapper, BEFORE validateHostAdapter runs.
+ * validateHostAdapter is shared with the built-in registry (registries.mjs)
+ * and must keep structuredClone-ing whatever it's handed — so the
+ * allowlisting happens here, at the manifest (external-adapter-only) layer,
+ * never inside that shared validator.
+ */
+function assertHostAllowedKeys(hostValue) {
+  if (!hostValue || typeof hostValue !== 'object' || Array.isArray(hostValue)) return;
+  assertNoUnknownKeys(hostValue, HOST_ALLOWED_KEYS, 'host');
+  if (hostValue.install && typeof hostValue.install === 'object' && !Array.isArray(hostValue.install)) {
+    assertNoUnknownKeys(hostValue.install, HOST_INSTALL_ALLOWED_KEYS, 'host.install');
+    if (hostValue.install.npmPackage != null) {
+      throw new ManifestRejected('external-npm-package', 'external adapters may not declare host.install.npmPackage — detect-never-overwrite only');
     }
-    assertNoUnknownKeys(value.host.legacy, HOST_LEGACY_ALLOWED_KEYS, 'host.legacy');
-    // Capability keys are allowlisted to the canonical set too, so a
-    // differently-cased or extra key ('CanBePrimary', 'ADMIN') can't ride
-    // along inert — the cap-bypass surface is provably closed, not merely
-    // harmless because consumers happen to read the exact lowercase flag.
-    assertNoUnknownKeys(value.host.capabilities, HOST_CAPABILITY_KEYS, 'host.capabilities');
+    try {
+      assertId(hostValue.install.bin, 'host.install.bin');
+    } catch (error) {
+      throw new ManifestRejected('invalid-install-bin', error.message);
+    }
   }
+  assertNoUnknownKeys(hostValue.legacy, HOST_LEGACY_ALLOWED_KEYS, 'host.legacy');
+  // Capability keys are allowlisted to the canonical set too, so a
+  // differently-cased or extra key ('CanBePrimary', 'ADMIN') can't ride
+  // along inert — the cap-bypass surface is provably closed, not merely
+  // harmless because consumers happen to read the exact lowercase flag.
+  assertNoUnknownKeys(hostValue.capabilities, HOST_CAPABILITY_KEYS, 'host.capabilities');
+}
 
-  let host;
+function parseHostAdapter(hostValue, projections, observability) {
   try {
-    host = validateHostAdapter(value.host, { projections, observability });
+    return validateHostAdapter(hostValue, { projections, observability });
   } catch (error) {
     throw new ManifestRejected('invalid-host', error.message);
   }
+}
 
-  // ── structural caps: these claims must be INEXPRESSIBLE, not merely
-  // refused at runtime — an external manifest can never assert them true. ──
+/** Structural caps: these claims must be INEXPRESSIBLE, not merely refused
+ * at runtime — an external manifest can never assert them true. */
+function enforceHostCapabilityCaps(host) {
   if (host.capabilities.canBePrimary === true) {
     throw new ManifestRejected('cap-can-be-primary', 'external adapters may not claim host.capabilities.canBePrimary');
   }
@@ -527,13 +580,33 @@ export function validateAdapterManifest(value, { projections = projectionMap, ob
       throw new ManifestRejected('invalid-guidance-file', error.message);
     }
   }
-  // P2 structural coupling (ADR-0031): an execution hook on a host that
-  // cannot route activities is a contradiction the schema refuses outright,
-  // never silently ignores. The converse — routable, no execution block — is
-  // legal and degrades honestly at run time (cli_unavailable).
-  if (value.execution !== undefined && host.capabilities.canRouteActivities !== true) {
+}
+
+/** P2 structural coupling (ADR-0031): an execution hook on a host that
+ * cannot route activities is a contradiction the schema refuses outright,
+ * never silently ignores. The converse — routable, no execution block — is
+ * legal and degrades honestly at run time (cli_unavailable). */
+function checkExecutionRoutable(executionValue, host) {
+  if (executionValue !== undefined && host.capabilities.canRouteActivities !== true) {
     throw new ManifestRejected('execution-not-routable', 'manifest.execution requires host.capabilities.canRouteActivities: true');
   }
+}
+
+/**
+ * Validate one adapter manifest document. Throws ManifestRejected (a named
+ * `.reason`) on any structural or capability-cap violation; returns a frozen,
+ * fully independent copy on success. `projections`/`observability` are
+ * injectable for tests, defaulting to the real built-in registries.
+ */
+export function validateAdapterManifest(value, { projections = projectionMap, observability = observabilityMap } = {}) {
+  assertRecord(value, 'manifest');
+  assertNoUnknownKeys(value, MANIFEST_ALLOWED_KEYS, '');
+
+  validateManifestIdentity(value);
+  assertHostAllowedKeys(value.host);
+  const host = parseHostAdapter(value.host, projections, observability);
+  enforceHostCapabilityCaps(host);
+  checkExecutionRoutable(value.execution, host);
 
   const detection = validateDetection(value.detection);
   const driving = validateDriving(value.driving);

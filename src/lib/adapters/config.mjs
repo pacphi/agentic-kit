@@ -104,39 +104,48 @@ export function validateEndpoint(endpoint) {
   return { ok: true, normalized: endpoint };
 }
 
-export function migrateIntegrationConfig(config = {}, _options = {}) {
-  const out = structuredClone(plain(config) ? config : {});
-  if (out.integrations !== undefined && !plain(out.integrations)) return immutable(out);
-  const existing = out.integrations ?? {};
-  if (Number.isInteger(existing.version) && existing.version > CURRENT_INTEGRATIONS_VERSION) {
-    return immutable(out);
-  }
-  if (Object.hasOwn(existing, 'bindings') && !Array.isArray(existing.bindings)) {
-    return immutable(out);
-  }
-  if (Object.hasOwn(existing, 'hosts') && !plain(existing.hosts)) return immutable(out);
-  if (Object.hasOwn(existing, 'tools') && !plain(existing.tools)) return immutable(out);
-  if (Object.hasOwn(existing, 'ownership') && !plain(existing.ownership)) return immutable(out);
+// ── migrateIntegrationConfig decomposition ───────────────────────────────
+// Each helper reproduces one slice of the original sequential body
+// verbatim, in the same order, so migrateIntegrationConfig itself just
+// sequences them. The shape-guard checks all produce the identical
+// `immutable(out)` bail-out, so they're grouped into two predicate
+// functions (existing-shaped vs providers-shaped) rather than a
+// (input)->error|null rule list — nothing here is a distinct error to
+// report, just "is this still safely migratable".
 
-  const providers = plain(out.providers) ? out.providers : {};
-  if (own(providers, 'hosts') && !plain(providers.hosts)) return immutable(out);
-  if (own(providers, 'bindings') && !Array.isArray(providers.bindings)) return immutable(out);
+/** Any of these existing.* shape violations means migration must leave
+ * `out` untouched (returned as-is) rather than guess at a shape it can't
+ * safely interpret. */
+function hasUnmigratableIntegrationsShape(existing) {
+  if (Number.isInteger(existing.version) && existing.version > CURRENT_INTEGRATIONS_VERSION) return true;
+  if (Object.hasOwn(existing, 'bindings') && !Array.isArray(existing.bindings)) return true;
+  if (Object.hasOwn(existing, 'hosts') && !plain(existing.hosts)) return true;
+  if (Object.hasOwn(existing, 'tools') && !plain(existing.tools)) return true;
+  if (Object.hasOwn(existing, 'ownership') && !plain(existing.ownership)) return true;
+  return false;
+}
 
-  // The alpha writer's host set deliberately wins once at cutover over an
-  // older additive integrations.hosts snapshot.
-  const hosts = own(providers, 'hosts')
+/** Same bail-out discipline as hasUnmigratableIntegrationsShape, for the
+ * legacy providers.* fields this migration also reads. */
+function hasUnmigratableProvidersShape(providers) {
+  if (own(providers, 'hosts') && !plain(providers.hosts)) return true;
+  if (own(providers, 'bindings') && !Array.isArray(providers.bindings)) return true;
+  return false;
+}
+
+/** The alpha writer's host set deliberately wins once at cutover over an
+ * older additive integrations.hosts snapshot. */
+function resolveMigratedHosts(providers, existing) {
+  return own(providers, 'hosts')
     ? structuredClone(providers.hosts)
     : structuredClone(existing.hosts ?? {});
-  const enabled = Object.entries(hosts).filter(([, on]) => on).map(([host]) => host);
-  const priorBindings = mergeBindings(
-    Array.isArray(existing.bindings) ? existing.bindings : [],
-    Array.isArray(providers.bindings) ? providers.bindings : [],
-  );
-  const seenHosts = new Set(priorBindings.map((binding) => binding.host));
-  // A host with no registered native provider (F-13) gets no inferred
-  // binding at all — nothing is restamped on any load, and it stays that
-  // way until a real binding is declared for it.
-  const inferred = enabled
+}
+
+/** A host with no registered native provider (F-13) gets no inferred
+ * binding at all — nothing is restamped on any load, and it stays that
+ * way until a real binding is declared for it. */
+function deriveInferredBindings(enabled, seenHosts) {
+  return enabled
     .filter((host) => !seenHosts.has(host))
     .map((host) => {
       const provider = NATIVE_PROVIDER_BY_HOST.get(host);
@@ -152,39 +161,85 @@ export function migrateIntegrationConfig(config = {}, _options = {}) {
       } : null;
     })
     .filter((binding) => binding !== null);
-  const ownership = structuredClone(existing.ownership ?? {});
+}
+
+function resolveMigratedTools(existing) {
   const tools = structuredClone(existing.tools ?? {});
   tools.dejaVu = plain(tools.dejaVu)
     ? { ...structuredClone(DEFAULT_DEJA_VU_INTENT), ...tools.dejaVu }
     : Object.hasOwn(tools, 'dejaVu')
       ? tools.dejaVu
       : structuredClone(DEFAULT_DEJA_VU_INTENT);
-  const reverseMarker = 'rufloCodexMcp';
+  return tools;
+}
+
+/** Legacy providers.codexMcp / providers[reverseMarker] -> integrations.
+ * ownership.codex, preserving whatever the new home doesn't already own.
+ * Mutates `ownership` in place, and only when a legacy field is actually
+ * present — never invents an empty codex ownership record. */
+function applyLegacyCodexOwnership(ownership, providers, reverseMarker) {
   const hasLegacyCodex = (own(providers, 'codexMcp') && providers.codexMcp != null)
     || (own(providers, reverseMarker) && providers[reverseMarker] != null);
-  if (hasLegacyCodex) {
-    ownership.codex = {
-      source: 'legacy-providers',
-      ...(plain(ownership.codex) ? ownership.codex : {}),
-      ...(own(providers, 'codexMcp') ? { mcp: structuredClone(providers.codexMcp) } : {}),
-      ...(own(providers, reverseMarker)
-        ? { reverseMcp: structuredClone(providers[reverseMarker]) } : {}),
-    };
-  }
+  if (!hasLegacyCodex) return;
+  ownership.codex = {
+    source: 'legacy-providers',
+    ...(plain(ownership.codex) ? ownership.codex : {}),
+    ...(own(providers, 'codexMcp') ? { mcp: structuredClone(providers.codexMcp) } : {}),
+    ...(own(providers, reverseMarker)
+      ? { reverseMcp: structuredClone(providers[reverseMarker]) } : {}),
+  };
+}
+
+/** Same discipline as applyLegacyCodexOwnership, for the three legacy
+ * OpenCode provider fields. */
+function applyLegacyOpenCodeOwnership(ownership, providers) {
   const hasLegacyOpenCode = ['opencodeMcp', 'opencodeManaged', 'opencodeCatalogDir']
     .some((key) => own(providers, key) && providers[key] != null);
-  if (hasLegacyOpenCode) {
-    ownership.opencode = {
-      source: 'legacy-providers',
-      ...(plain(ownership.opencode) ? ownership.opencode : {}),
-      ...(own(providers, 'opencodeMcp')
-        ? { mcp: structuredClone(providers.opencodeMcp) } : {}),
-      ...(own(providers, 'opencodeManaged')
-        ? { managed: structuredClone(providers.opencodeManaged) } : {}),
-      ...(own(providers, 'opencodeCatalogDir')
-        ? { catalogDir: structuredClone(providers.opencodeCatalogDir) } : {}),
-    };
-  }
+  if (!hasLegacyOpenCode) return;
+  ownership.opencode = {
+    source: 'legacy-providers',
+    ...(plain(ownership.opencode) ? ownership.opencode : {}),
+    ...(own(providers, 'opencodeMcp')
+      ? { mcp: structuredClone(providers.opencodeMcp) } : {}),
+    ...(own(providers, 'opencodeManaged')
+      ? { managed: structuredClone(providers.opencodeManaged) } : {}),
+    ...(own(providers, 'opencodeCatalogDir')
+      ? { catalogDir: structuredClone(providers.opencodeCatalogDir) } : {}),
+  };
+}
+
+function pruneLegacyProviderKeys(out, reverseMarker) {
+  if (!plain(out.providers)) return;
+  for (const key of [
+    'hosts', 'bindings', 'codexMcp', reverseMarker,
+    'opencodeMcp', 'opencodeManaged', 'opencodeCatalogDir',
+  ]) delete out.providers[key];
+}
+
+export function migrateIntegrationConfig(config = {}, _options = {}) {
+  const out = structuredClone(plain(config) ? config : {});
+  if (out.integrations !== undefined && !plain(out.integrations)) return immutable(out);
+  const existing = out.integrations ?? {};
+  if (hasUnmigratableIntegrationsShape(existing)) return immutable(out);
+
+  const providers = plain(out.providers) ? out.providers : {};
+  if (hasUnmigratableProvidersShape(providers)) return immutable(out);
+
+  const hosts = resolveMigratedHosts(providers, existing);
+  const enabled = Object.entries(hosts).filter(([, on]) => on).map(([host]) => host);
+  const priorBindings = mergeBindings(
+    Array.isArray(existing.bindings) ? existing.bindings : [],
+    Array.isArray(providers.bindings) ? providers.bindings : [],
+  );
+  const seenHosts = new Set(priorBindings.map((binding) => binding.host));
+  const inferred = deriveInferredBindings(enabled, seenHosts);
+
+  const ownership = structuredClone(existing.ownership ?? {});
+  const tools = resolveMigratedTools(existing);
+  const reverseMarker = 'rufloCodexMcp';
+  applyLegacyCodexOwnership(ownership, providers, reverseMarker);
+  applyLegacyOpenCodeOwnership(ownership, providers);
+
   out.integrations = {
     ...existing,
     version: CURRENT_INTEGRATIONS_VERSION,
@@ -194,11 +249,6 @@ export function migrateIntegrationConfig(config = {}, _options = {}) {
     ...(Object.keys(ownership).length ? { ownership } : {}),
   };
   delete out.integrations.schemaVersion;
-  if (plain(out.providers)) {
-    for (const key of [
-      'hosts', 'bindings', 'codexMcp', reverseMarker,
-      'opencodeMcp', 'opencodeManaged', 'opencodeCatalogDir',
-    ]) delete out.providers[key];
-  }
+  pruneLegacyProviderKeys(out, reverseMarker);
   return immutable(out);
 }

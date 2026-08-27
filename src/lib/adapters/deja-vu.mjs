@@ -201,6 +201,180 @@ const indexCommand = (rebuild = false) => ({
   command: DEJA_VU_BIN, args: ['index', ...(rebuild ? ['--rebuild'] : [])],
 });
 
+// ── detect() decomposition ───────────────────────────────────────────────
+// Extracted verbatim from the detect closure's body (same computed values,
+// same shapes) so detect() itself just sequences these, keeping its own
+// complexity low while each stage carries its own (small) CC budget.
+
+/** Runs the offline doctor probe only when the binary is present, and folds
+ * a non-zero exit over an otherwise-'ok' parse into 'degraded' — the same
+ * bounded, non-fatal posture detect() always had. */
+async function resolveDoctorState(binaryPresent, runner) {
+  if (!binaryPresent) return { state: 'skipped', reason: 'binary-missing', facts: null };
+  const result = await runner(DEJA_VU_BIN, ['doctor', '--json', '--offline'], { timeout: DOCTOR_TIMEOUT_MS });
+  const doctor = parseDejaVuDoctor(result.stdout);
+  if (result.code !== 0 && doctor.state === 'ok') {
+    return { state: 'degraded', reason: 'doctor-command-failed', facts: doctor.facts };
+  }
+  return doctor;
+}
+
+/** One host's target fact: bounded observation, receipt/ownership state,
+ * selection/activity, and the mode-conflict check — the detect() loop's
+ * per-iteration body, unchanged. */
+function buildHostFact(host, hostPresent, observedRaw, ownership, desired) {
+  const observed = boundedObservation(observedRaw?.[host]);
+  const signature = targetSignature(observed);
+  const receipt = ownership.targets?.[host] ?? null;
+  const receiptState = !receipt ? 'missing'
+    : receiptMatches(receipt, host, signature) ? 'current' : 'drifted';
+  const selected = desired.enabled && desired.hosts.includes(host);
+  const active = selected && hostPresent === true;
+  const conflict = desired.mode === 'mcp' && (observed.direct.auto || observed.plugin.auto)
+    ? 'external-auto-active'
+    : receipt && receiptState !== 'current' ? 'ownership-drift' : null;
+  return {
+    selected,
+    hostPresent: hostPresent === true,
+    desiredTarget: selected ? DEJA_VU_TARGETS[host][desired.mode] : null,
+    direct: observed.direct,
+    projection: observed.projection,
+    plugin: observed.plugin,
+    signature,
+    receiptState,
+    ownership: receiptState === 'current' ? 'agentic-kit'
+      : (observed.direct.mcp || observed.direct.auto || observed.plugin.present) ? 'external' : 'none',
+    satisfied: active && targetSatisfied(observed, desired.mode),
+    conflict,
+  };
+}
+
+/** Install-facts assembly for detect(): the receipt-vs-live-version
+ * comparison (installReceiptState), the effective installed version
+ * (doctor's own report, falling back to the npm-registry read), and
+ * whether an owned-but-behind install can self-repair via upgrade. */
+function buildInstallFacts(ownership, binaryPresent, npmVersion, doctor, compareVersions) {
+  const installState = installReceiptState(ownership.install, npmVersion);
+  const version = doctor.facts?.version?.current ?? npmVersion;
+  const install = {
+    binaryPresent,
+    npmPresent: npmVersion !== null,
+    version: typeof version === 'string' ? version : null,
+    supported: typeof version === 'string'
+      ? compareVersions(version, DEJA_VU_MIN_VERSION) >= 0 : null,
+    ownership: installState === 'current' || installState === 'absent'
+      ? 'agentic-kit' : binaryPresent || npmVersion ? 'external' : 'none',
+    receiptState: installState,
+  };
+  const ownedUpgradeCanRepair = installState === 'current' && npmVersion !== null
+    && compareVersions(npmVersion, DEJA_VU_MIN_VERSION) < 0;
+  return { install, ownedUpgradeCanRepair };
+}
+
+/** detect()'s error surface: an unhealthy doctor with no owned-upgrade
+ * self-repair path in flight is the only thing that fails detect() closed. */
+function computeDetectError(binaryPresent, doctor, ownedUpgradeCanRepair) {
+  if (binaryPresent && doctor.state !== 'ok' && !ownedUpgradeCanRepair) {
+    return `deja-doctor-${doctor.reason}`;
+  }
+  return null;
+}
+
+// ── plan() decomposition ─────────────────────────────────────────────────
+// Same discipline as detect() above: each stage extracted verbatim, plan()
+// itself just sequences them.
+
+/** Resolve `latest` — the target install/upgrade version — from the
+ * registry, with the same bounded fallback ladder plan() always had: an
+ * unreachable/invalid registry read falls back to DEJA_VU_MIN_VERSION only
+ * when a version is actually needed to install or repair an unsupported
+ * install; otherwise it just warns and leaves `latest` null. */
+async function resolveLatestVersion({
+  needsInstallVersion, needsUpgradeVersion, facts, latestVersionFn, compareVersions, warnings,
+}) {
+  if (!needsInstallVersion && !needsUpgradeVersion) return null;
+  let candidate = null;
+  try { candidate = await latestVersionFn(DEJA_VU_PACKAGE); } catch { /* bounded fallback below */ }
+  if (isValidSemver(candidate) && compareVersions(candidate, DEJA_VU_MIN_VERSION) >= 0) {
+    return candidate;
+  }
+  if (needsInstallVersion || facts.install.supported === false) {
+    warnings.push('deja-package-latest-unavailable-baseline-used');
+    return DEJA_VU_MIN_VERSION;
+  }
+  warnings.push('deja-package-latest-unavailable');
+  return null;
+}
+
+/**
+ * Decide the package install/upgrade operation (or an early-return error),
+ * per the desired/install-facts state machine plan() used to inline as an
+ * if/else-if/else chain. Each branch below still returns immediately, so
+ * only the first matching condition ever fires — identical priority order
+ * to the original chain. Returns `{error}` (plan() must return that error),
+ * `{operation}` (plan() should push it), or `{}` (nothing to do — a warning
+ * may already have been pushed).
+ */
+function planPackageOperation({
+  facts, allowUpgrade, latest, compareVersions, warnings,
+}) {
+  if (facts.desired.enabled && !facts.install.binaryPresent) {
+    if (facts.install.ownership === 'external') return { error: 'deja-external-install-unusable' };
+    return { operation: commandOperation('package-install', 'package-install', packageInstallCommand(latest), { version: latest }) };
+  }
+  if (facts.desired.enabled && facts.install.supported === false) {
+    if (facts.install.receiptState !== 'current') return { error: 'deja-external-version-unsupported' };
+    if (!allowUpgrade) {
+      warnings.push('deja-package-upgrade-suppressed');
+      return {};
+    }
+    return { operation: commandOperation('package-upgrade', 'package-upgrade', packageInstallCommand(latest), { version: latest }) };
+  }
+  if (facts.desired.enabled && allowUpgrade && facts.install.receiptState === 'current'
+    && latest && facts.install.version && compareVersions(latest, facts.install.version) > 0) {
+    return { operation: commandOperation('package-upgrade', 'package-upgrade', packageInstallCommand(latest), { version: latest }) };
+  }
+  return {};
+}
+
+/** One host's target operations: the plan() loop's per-iteration body,
+ * unchanged — pushes onto the shared `operations`/`warnings` arrays and
+ * returns early (mirroring the original loop's `continue`s) once a host is
+ * unselected, absent, or in an unowned conflict. */
+function planHostOperations(host, fact, ownership, desired, operations, warnings) {
+  const receipt = ownership.targets?.[host];
+  const shouldRemove = receipt && (!fact.selected || receipt.mode !== desired.mode);
+  if (shouldRemove) {
+    if (fact.receiptState !== 'current') {
+      warnings.push(`${host}-ownership-drift-preserved`);
+    } else {
+      operations.push(commandOperation(
+        `target-remove-${host}`, 'target-remove',
+        buildDejaVuUninstallCommand(host, receipt.mode),
+        { host, mode: receipt.mode, signature: fact.signature },
+      ));
+    }
+  }
+  if (!fact.selected) return;
+  if (!fact.hostPresent) { warnings.push(`${host}-host-missing`); return; }
+  if (fact.conflict && !receipt) { warnings.push(`${host}-${fact.conflict}`); return; }
+  if (!fact.satisfied && !(receipt && shouldRemove && fact.receiptState !== 'current')) {
+    operations.push(commandOperation(
+      `target-install-${host}`, 'target-install',
+      buildDejaVuInstallCommand(host, desired.mode),
+      { host, mode: desired.mode },
+    ));
+  }
+}
+
+/** Whether plan() needs to queue an index rebuild: enabled, opted in via
+ * indexOnSetup, and either the index is missing/stale or the binary itself
+ * isn't installed yet (so a freshly-installed binary always indexes). */
+function needsIndexOperation(facts) {
+  return facts.desired.enabled && facts.desired.indexOnSetup
+    && (['missing', 'stale'].includes(facts.index.state) || !facts.install.binaryPresent);
+}
+
 export function createDejaVuLifecycleAdapter(defaults = {}) {
   const runner = defaults.runner ?? run;
   const haveFn = defaults.haveFn ?? have;
@@ -221,58 +395,16 @@ export function createDejaVuLifecycleAdapter(defaults = {}) {
       packageVersionFn(DEJA_VU_PACKAGE),
       ...Object.values(HOST_BINS).map((bin) => haveFn(bin)),
     ]);
-    let doctor = { state: 'skipped', reason: 'binary-missing', facts: null };
-    if (binaryPresent) {
-      const result = await runner(DEJA_VU_BIN, ['doctor', '--json', '--offline'], {
-        timeout: DOCTOR_TIMEOUT_MS,
-      });
-      doctor = parseDejaVuDoctor(result.stdout);
-      if (result.code !== 0 && doctor.state === 'ok') {
-        doctor = { state: 'degraded', reason: 'doctor-command-failed', facts: doctor.facts };
-      }
-    }
+    const doctor = await resolveDoctorState(binaryPresent, runner);
     const observedRaw = await observer({ cfg, doctor, binaryPresent });
     const hosts = {};
     for (const [index, host] of Object.keys(HOST_BINS).entries()) {
-      const observed = boundedObservation(observedRaw?.[host]);
-      const signature = targetSignature(observed);
-      const receipt = ownership.targets?.[host] ?? null;
-      const receiptState = !receipt ? 'missing'
-        : receiptMatches(receipt, host, signature) ? 'current' : 'drifted';
-      const selected = desired.enabled && desired.hosts.includes(host);
-      const active = selected && hostPresence[index] === true;
-      const conflict = desired.mode === 'mcp' && (observed.direct.auto || observed.plugin.auto)
-        ? 'external-auto-active'
-        : receipt && receiptState !== 'current' ? 'ownership-drift' : null;
-      hosts[host] = {
-        selected,
-        hostPresent: hostPresence[index] === true,
-        desiredTarget: selected ? DEJA_VU_TARGETS[host][desired.mode] : null,
-        direct: observed.direct,
-        projection: observed.projection,
-        plugin: observed.plugin,
-        signature,
-        receiptState,
-        ownership: receiptState === 'current' ? 'agentic-kit'
-          : (observed.direct.mcp || observed.direct.auto || observed.plugin.present) ? 'external' : 'none',
-        satisfied: active && targetSatisfied(observed, desired.mode),
-        conflict,
-      };
+      hosts[host] = buildHostFact(host, hostPresence[index], observedRaw, ownership, desired);
     }
-    const installState = installReceiptState(ownership.install, npmVersion);
-    const version = doctor.facts?.version?.current ?? npmVersion;
+    const { install, ownedUpgradeCanRepair } = buildInstallFacts(ownership, binaryPresent, npmVersion, doctor, compareVersions);
     const facts = {
       desired,
-      install: {
-        binaryPresent,
-        npmPresent: npmVersion !== null,
-        version: typeof version === 'string' ? version : null,
-        supported: typeof version === 'string'
-          ? compareVersions(version, DEJA_VU_MIN_VERSION) >= 0 : null,
-        ownership: installState === 'current' || installState === 'absent'
-          ? 'agentic-kit' : binaryPresent || npmVersion ? 'external' : 'none',
-        receiptState: installState,
-      },
+      install,
       doctor: {
         state: doctor.state,
         reason: doctor.reason,
@@ -282,11 +414,8 @@ export function createDejaVuLifecycleAdapter(defaults = {}) {
       index: doctor.facts?.index ?? { state: 'unknown', staleStores: 0 },
       targets: hosts,
     };
-    const ownedUpgradeCanRepair = installState === 'current' && npmVersion !== null
-      && compareVersions(npmVersion, DEJA_VU_MIN_VERSION) < 0;
-    if (binaryPresent && doctor.state !== 'ok' && !ownedUpgradeCanRepair) {
-      facts.error = `deja-doctor-${doctor.reason}`;
-    }
+    const error = computeDetectError(binaryPresent, doctor, ownedUpgradeCanRepair);
+    if (error) facts.error = error;
     return facts;
   };
 
@@ -303,73 +432,20 @@ export function createDejaVuLifecycleAdapter(defaults = {}) {
       && facts.install.ownership !== 'external';
     const needsUpgradeVersion = facts.desired.enabled && allowUpgrade
       && facts.install.receiptState === 'current';
-    let latest = null;
-    if (needsInstallVersion || needsUpgradeVersion) {
-      let candidate = null;
-      try { candidate = await latestVersionFn(DEJA_VU_PACKAGE); } catch { /* bounded fallback below */ }
-      if (isValidSemver(candidate)
-        && compareVersions(candidate, DEJA_VU_MIN_VERSION) >= 0) {
-        latest = candidate;
-      } else if (needsInstallVersion || facts.install.supported === false) {
-        latest = DEJA_VU_MIN_VERSION;
-        warnings.push('deja-package-latest-unavailable-baseline-used');
-      } else {
-        warnings.push('deja-package-latest-unavailable');
-      }
-    }
-    if (facts.desired.enabled && !facts.install.binaryPresent) {
-      if (facts.install.ownership === 'external') {
-        return { changed: false, operations, warnings, error: 'deja-external-install-unusable' };
-      }
-      operations.push(commandOperation('package-install', 'package-install', packageInstallCommand(latest), {
-        version: latest,
-      }));
-    } else if (facts.desired.enabled && facts.install.supported === false) {
-      if (facts.install.receiptState === 'current') {
-        if (allowUpgrade) {
-          operations.push(commandOperation('package-upgrade', 'package-upgrade', packageInstallCommand(latest), {
-            version: latest,
-          }));
-        } else {
-          warnings.push('deja-package-upgrade-suppressed');
-        }
-      } else {
-        return { changed: false, operations, warnings, error: 'deja-external-version-unsupported' };
-      }
-    } else if (facts.desired.enabled && allowUpgrade && facts.install.receiptState === 'current'
-      && latest && facts.install.version && compareVersions(latest, facts.install.version) > 0) {
-      operations.push(commandOperation('package-upgrade', 'package-upgrade', packageInstallCommand(latest), {
-        version: latest,
-      }));
-    }
+    const latest = await resolveLatestVersion({
+      needsInstallVersion, needsUpgradeVersion, facts, latestVersionFn, compareVersions, warnings,
+    });
+
+    const packageDecision = planPackageOperation({
+      facts, allowUpgrade, latest, compareVersions, warnings,
+    });
+    if (packageDecision.error) return { changed: false, operations, warnings, error: packageDecision.error };
+    if (packageDecision.operation) operations.push(packageDecision.operation);
 
     for (const [host, fact] of Object.entries(facts.targets)) {
-      const receipt = ownership.targets?.[host];
-      const shouldRemove = receipt && (!fact.selected || receipt.mode !== facts.desired.mode);
-      if (shouldRemove) {
-        if (fact.receiptState !== 'current') {
-          warnings.push(`${host}-ownership-drift-preserved`);
-        } else {
-          operations.push(commandOperation(
-            `target-remove-${host}`, 'target-remove',
-            buildDejaVuUninstallCommand(host, receipt.mode),
-            { host, mode: receipt.mode, signature: fact.signature },
-          ));
-        }
-      }
-      if (!fact.selected) continue;
-      if (!fact.hostPresent) { warnings.push(`${host}-host-missing`); continue; }
-      if (fact.conflict && !receipt) { warnings.push(`${host}-${fact.conflict}`); continue; }
-      if (!fact.satisfied && !(receipt && shouldRemove && fact.receiptState !== 'current')) {
-        operations.push(commandOperation(
-          `target-install-${host}`, 'target-install',
-          buildDejaVuInstallCommand(host, facts.desired.mode),
-          { host, mode: facts.desired.mode },
-        ));
-      }
+      planHostOperations(host, fact, ownership, facts.desired, operations, warnings);
     }
-    if (facts.desired.enabled && facts.desired.indexOnSetup
-      && (['missing', 'stale'].includes(facts.index.state) || !facts.install.binaryPresent)) {
+    if (needsIndexOperation(facts)) {
       operations.push(commandOperation('index', 'index', indexCommand(false)));
     }
     return { changed: operations.length > 0, operations, warnings };
