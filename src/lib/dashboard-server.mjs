@@ -1489,7 +1489,7 @@ export function startDashboard({
     // mirrors the original if-chain's ordering, though none of these patterns
     // can collide with an exact path above. Splitting the 15-route if-chain
     // (formerly one closure, CC=194) into a handler per route plus this table
-    // is the mechanical half of the dashboard refactor (ADR pending); the SSE
+    // is the mechanical half of the dashboard refactor (ADR-0036); the SSE
     // routes' shared reserve-slot/early-close/channel lifecycle is factored
     // out separately into sse.mjs's sseRoute().
     const ROUTES = {

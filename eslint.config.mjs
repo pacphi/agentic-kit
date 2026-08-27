@@ -91,7 +91,7 @@ export default [
     // file as TEXT, strips its cross-file `import`/`export` lines (concatenation
     // collapses the module graph into one flat classic-script scope, exactly
     // as the pre-split bundle already was), and serves the result inline
-    // (ADR pending). Real `import`/`export` between these files exists purely
+    // (ADR-0036). Real `import`/`export` between these files exists purely
     // so node --check/eslint can verify the actual cross-file dependency graph
     // — see each file's own header comment.
     //
