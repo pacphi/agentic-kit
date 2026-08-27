@@ -183,81 +183,83 @@ export async function purgeDejaVuIndex({
 
 /** @typedef {{dejaAdapter?:any,purgeDejaVuIndex?:typeof purgeDejaVuIndex}} UninstallDeps */
 
-/** @param {{flags:Record<string,boolean>,deps?:UninstallDeps}} request */
-export async function run({ flags, deps = {} }) {
-  const dry = flags['dry-run'];
-  const act = (msg, fn) => { if (dry) info(`[dry-run] ${msg}`); else { fn(); ok(msg); } };
-  // Ownership markers are read ONCE up front: the purge path removes kit.json
-  // below, and teardown decisions (opencode undo) must still see what ak owned
-  // (codex-review — purge ordering must not strand managed opencode.json keys).
-  const cfg = loadKitConfig();
-  const kitCfg = cfg;
-  let ownershipTeardownOk = true;
-  let dejaVuTeardownOk = true;
-
-  // 0. User-scoped Codex line: only values recorded as ours are candidates.
-  if (kitCfg.statusline?.codex) {
-    if (dry) info('[dry-run] release managed Codex status line (preserving user-modified keys)');
-    else {
-      let r;
-      try { r = removeCodexStatusline(kitCfg.statusline.codex.lastProjection); }
-      catch (error) {
-        warn(`Codex config was not changed; status-line ownership retained: ${error.message}`);
-        r = null;
-      }
-      if (r) {
-        kitCfg.statusline.codex = null;
-        if (!flags.purge) saveKitConfig(kitCfg);
-        ok(`Codex status-line ownership released${r.changed ? ' (unchanged managed keys removed)' : ' (user-modified keys preserved)'}`);
-      }
-    }
+// ── the uninstall step registry ──────────────────────────────────────────
+// Mirrors sync.mjs's SYNC_STEPS idiom (ADR-0037): every teardown phase used to
+// be inlined sequentially into `run()`, with real ordering invariants (the
+// CLAUDE.md/skill/opencode strips before kit.json purge reads ownership;
+// deja-vu targets before its data purge before its package removal; the
+// registry-driven host-lifecycle loop before kit.json is ever deleted) proven
+// only by source order. Each step below is `{id, when(ctx), run(ctx)}`;
+// UNINSTALL_STEPS's array order *is* the ordering invariant. `ctx` is the
+// shared per-invocation context built in `run()`: {flags, dry, deps, cfg,
+// act, state}. `state` carries the two cross-step signals
+// (`ownershipTeardownOk`, `dejaVuTeardownOk`) later steps (the kit.json purge
+// decision) still need to read.
+function stepCodexStatusline(ctx) {
+  const { dry, cfg, flags } = ctx;
+  if (dry) { info('[dry-run] release managed Codex status line (preserving user-modified keys)'); return; }
+  let r;
+  try { r = removeCodexStatusline(cfg.statusline.codex.lastProjection); }
+  catch (error) {
+    warn(`Codex config was not changed; status-line ownership retained: ${error.message}`);
+    r = null;
   }
+  if (r) {
+    cfg.statusline.codex = null;
+    if (!flags.purge) saveKitConfig(cfg);
+    ok(`Codex status-line ownership released${r.changed ? ' (unchanged managed keys removed)' : ' (user-modified keys preserved)'}`);
+  }
+}
 
-  // 1. CLAUDE.md managed blocks: every built-in slug (registry-driven, so
-  // non-ruflo blocks like ruvnet-brain-reference are covered), the legacy
-  // ruflo-* pattern as a catch-all, plus any custom slugs from kit.json.
+// 1. CLAUDE.md managed blocks: every built-in slug (registry-driven, so
+// non-ruflo blocks like ruvnet-brain-reference are covered), the legacy
+// ruflo-* pattern as a catch-all, plus any custom slugs from kit.json.
+function stepClaudeMdBlocks(ctx) {
   const md = paths.claudeMdPath();
-  if (fs.existsSync(md)) {
-    let content = fs.readFileSync(md, 'utf8');
-    const slugs = new Set([...content.matchAll(/<!-- BEGIN (ruflo-[\w-]+) -->/g)].map((m) => m[1]));
-    for (const b of BUILTIN_BLOCKS) if (content.includes(BEGIN(b.slug))) slugs.add(b.slug);
-    for (const b of kitCfg.customBlocks) if (content.includes(BEGIN(b.slug))) slugs.add(b.slug);
-    if (slugs.size) {
-      act(`stripped ${slugs.size} managed block(s) from ~/.claude/CLAUDE.md (backup written)`, () => {
-        fs.copyFileSync(md, `${md}.bak.${Date.now()}`);
-        for (const s of slugs) content = stripBlock(content, s);
-        fs.writeFileSync(md, content);
-      });
-    }
-  }
+  if (!fs.existsSync(md)) return;
+  let content = fs.readFileSync(md, 'utf8');
+  const slugs = new Set([...content.matchAll(/<!-- BEGIN (ruflo-[\w-]+) -->/g)].map((m) => m[1]));
+  for (const b of BUILTIN_BLOCKS) if (content.includes(BEGIN(b.slug))) slugs.add(b.slug);
+  for (const b of ctx.cfg.customBlocks) if (content.includes(BEGIN(b.slug))) slugs.add(b.slug);
+  if (!slugs.size) return;
+  ctx.act(`stripped ${slugs.size} managed block(s) from ~/.claude/CLAUDE.md (backup written)`, () => {
+    fs.copyFileSync(md, `${md}.bak.${Date.now()}`);
+    for (const s of slugs) content = stripBlock(content, s);
+    fs.writeFileSync(md, content);
+  });
+}
 
-  // 2. deployed skill. kit.json is purged only after all receipt-dependent
-  // teardown succeeds; otherwise it remains the recovery proof.
+// 2. deployed skill. kit.json is purged only after all receipt-dependent
+// teardown succeeds; otherwise it remains the recovery proof.
+function stepSkill(ctx) {
   const skill = path.join(paths.claudeSkillsDir(), 'ruflo-token-audit');
-  if (fs.existsSync(skill)) act('removed skill ruflo-token-audit', () => fs.rmSync(skill, { recursive: true }));
+  if (fs.existsSync(skill)) ctx.act('removed skill ruflo-token-audit', () => fs.rmSync(skill, { recursive: true }));
+}
 
-  // 2b. opencode host footprint (when ak managed it): strip the guidance blocks
-  // from opencode's AGENTS.md, the opencode.json wiring, and deployed artifacts.
+// 2b. opencode host footprint (when ak managed it): strip the guidance
+// blocks from opencode's AGENTS.md. (The opencode.json wiring and deployed
+// artifacts are handled by the registry-driven host-lifecycle loop below.)
+function stepOpencodeAgentsMd(ctx) {
   const ocMd = paths.opencodeAgentsMdPath();
-  if (fs.existsSync(ocMd)) {
-    let content = fs.readFileSync(ocMd, 'utf8');
-    const slugs = new Set([...content.matchAll(/<!-- BEGIN (ruflo-[\w-]+|ruvnet-[\w-]+) -->/g)].map((m) => m[1]));
-    if (slugs.size) {
-      act(`stripped ${slugs.size} managed block(s) from opencode AGENTS.md (backup written)`, () => {
-        fs.copyFileSync(ocMd, `${ocMd}.bak.${Date.now()}`);
-        for (const s of slugs) content = stripBlock(content, s);
-        fs.writeFileSync(ocMd, content);
-      });
-    }
-  }
+  if (!fs.existsSync(ocMd)) return;
+  let content = fs.readFileSync(ocMd, 'utf8');
+  const slugs = new Set([...content.matchAll(/<!-- BEGIN (ruflo-[\w-]+|ruvnet-[\w-]+) -->/g)].map((m) => m[1]));
+  if (!slugs.size) return;
+  ctx.act(`stripped ${slugs.size} managed block(s) from opencode AGENTS.md (backup written)`, () => {
+    fs.copyFileSync(ocMd, `${ocMd}.bak.${Date.now()}`);
+    for (const s of slugs) content = stripBlock(content, s);
+    fs.writeFileSync(ocMd, content);
+  });
+}
 
-  // 2c. Companion teardown is receipt-gated and precedes any kit.json purge.
-  // The sequence is load-bearing: targets first, then the optional derived
-  // index while `deja doctor` still exists, and only then the optional package.
+/** Approvals + derived facts for the deja-vu teardown phases below, computed
+ * once so target/data/package phases share one confirm pass. */
+async function computeDejaVuPlan(ctx) {
+  const { cfg, dry, flags } = ctx;
   const dejaOwn = dejaVuOwnership(cfg);
   const ownsDeja = hasDejaVuOwnership(cfg);
   const ownedTargetCount = plain(dejaOwn?.targets) ? Object.keys(dejaOwn.targets).length : 0;
-  const dejaAdapter = deps.dejaAdapter ?? companionLifecycleFor('deja-vu');
+  const dejaAdapter = ctx.deps.dejaAdapter ?? companionLifecycleFor('deja-vu');
   let removePackageApproved = false;
   let purgeDataApproved = dry && flags['purge-deja-vu-data'];
   if (!dry && flags['remove-deja-vu'] && dejaOwn?.install) {
@@ -274,96 +276,122 @@ export async function run({ flags, deps = {} }) {
     );
     if (!purgeDataApproved) info('kept deja-vu derived index');
   }
-
-  const undoDejaVu = async (removePackage) => {
-    try {
-      const retired = await runLifecycle({
-        adapter: dejaAdapter,
-        action: 'undo',
-        cfg,
-        options: { removePackage },
-      });
-      if (retired?.configChanged) saveKitConfig(cfg);
-      return retired;
-    } catch {
-      return { ok: false, changed: false, configChanged: false };
-    }
+  return {
+    dejaOwn, ownsDeja, ownedTargetCount, dejaAdapter, removePackageApproved, purgeDataApproved,
   };
+}
 
-  // Phase 1: default uninstall always attempts only Kit-owned target receipts.
-  if (ownsDeja && dry) {
+async function undoDejaVu(ctx, removePackage) {
+  try {
+    const retired = await runLifecycle({
+      adapter: ctx.plan.dejaAdapter,
+      action: 'undo',
+      cfg: ctx.cfg,
+      options: { removePackage },
+    });
+    if (retired?.configChanged) saveKitConfig(ctx.cfg);
+    return retired;
+  } catch {
+    return { ok: false, changed: false, configChanged: false };
+  }
+}
+
+// Phase 1: default uninstall always attempts only Kit-owned target receipts.
+async function dejaVuTargetTeardown(ctx) {
+  const { ownsDeja, ownedTargetCount, dejaAdapter } = ctx.plan;
+  if (ownsDeja && ctx.dry) {
     if (ownedTargetCount > 0) info('[dry-run] remove Kit-owned deja-vu target wiring');
-  } else if (ownsDeja) {
-    if (!dejaAdapter) {
-      warn('deja-vu teardown unavailable — ownership receipt retained');
-      dejaVuTeardownOk = false;
-    } else {
-      const retired = await undoDejaVu(false);
-      dejaVuTeardownOk = retired?.ok === true;
-      if (dejaVuTeardownOk) {
-        if (retired?.changed) ok('deja-vu: Kit-owned target wiring teardown complete');
-      } else {
-        warn('deja-vu teardown incomplete — recovery ownership receipts retained');
-      }
-    }
+    return;
   }
+  if (!ownsDeja) return;
+  if (!dejaAdapter) {
+    warn('deja-vu teardown unavailable — ownership receipt retained');
+    ctx.state.dejaVuTeardownOk = false;
+    return;
+  }
+  const retired = await undoDejaVu(ctx, false);
+  ctx.state.dejaVuTeardownOk = retired?.ok === true;
+  if (ctx.state.dejaVuTeardownOk) {
+    if (retired?.changed) ok('deja-vu: Kit-owned target wiring teardown complete');
+  } else {
+    warn('deja-vu teardown incomplete — recovery ownership receipts retained');
+  }
+}
 
-  // Phase 2: data has a separate destructive scope and is validated through a
-  // single offline doctor call. Dry-run performs the validation but no delete.
-  if (purgeDataApproved) {
-    if (!dry && !dejaVuTeardownOk) {
-      warn('deja-vu derived index retained because ownership teardown is incomplete');
-    } else {
-      const purge = deps.purgeDejaVuIndex ?? purgeDejaVuIndex;
-      const removed = await purge({ homeDir: paths.home, dryRun: dry });
-      if (removed?.ok) {
-        if (dry) info('[dry-run] validated deja-vu derived index; would delete it (path withheld)');
-        else (removed.changed ? ok : info)(removed.changed
-          ? 'deja-vu derived index deleted (path withheld)'
-          : 'deja-vu derived index was already absent');
-      } else {
-        warn(`${dry ? '[dry-run] ' : ''}deja-vu derived index refused — validation or doctor check failed (path withheld)`);
-        dejaVuTeardownOk = false;
-      }
-    }
+// Phase 2: data has a separate destructive scope and is validated through a
+// single offline doctor call. Dry-run performs the validation but no delete.
+async function dejaVuDataPurge(ctx) {
+  if (!ctx.plan.purgeDataApproved) return;
+  const { dry } = ctx;
+  if (!dry && !ctx.state.dejaVuTeardownOk) {
+    warn('deja-vu derived index retained because ownership teardown is incomplete');
+    return;
   }
+  const purge = ctx.deps.purgeDejaVuIndex ?? purgeDejaVuIndex;
+  const removed = await purge({ homeDir: paths.home, dryRun: dry });
+  if (removed?.ok) {
+    if (dry) info('[dry-run] validated deja-vu derived index; would delete it (path withheld)');
+    else (removed.changed ? ok : info)(removed.changed
+      ? 'deja-vu derived index deleted (path withheld)'
+      : 'deja-vu derived index was already absent');
+  } else {
+    warn(`${dry ? '[dry-run] ' : ''}deja-vu derived index refused — validation or doctor check failed (path withheld)`);
+    ctx.state.dejaVuTeardownOk = false;
+  }
+}
 
-  // Phase 3: package removal is possible only after target teardown and any
-  // requested data purge succeeded. A data failure retains the CLI for retry.
-  if (flags['remove-deja-vu']) {
-    if (!ownsDeja || !dejaOwn?.install) {
-      info('deja-vu package preserved — no Kit ownership receipt');
-    } else if (dry) {
-      info('[dry-run] uninstall Kit-owned deja-vu package after target/data teardown');
-    } else if (removePackageApproved && !dejaVuTeardownOk) {
-      warn('deja-vu package retained because target/data teardown is incomplete');
-    } else if (removePackageApproved) {
-      const retired = await undoDejaVu(true);
-      dejaVuTeardownOk = retired?.ok === true;
-      if (dejaVuTeardownOk && retired?.changed) ok('deja-vu: Kit-owned package removed');
-      else if (!dejaVuTeardownOk) warn('deja-vu package removal incomplete — ownership receipt retained');
-    }
+// Phase 3: package removal is possible only after target teardown and any
+// requested data purge succeeded. A data failure retains the CLI for retry.
+async function dejaVuPackageRemoval(ctx) {
+  if (!ctx.flags['remove-deja-vu']) return;
+  const { dry } = ctx;
+  const { ownsDeja, dejaOwn, removePackageApproved } = ctx.plan;
+  if (!ownsDeja || !dejaOwn?.install) {
+    info('deja-vu package preserved — no Kit ownership receipt');
+  } else if (dry) {
+    info('[dry-run] uninstall Kit-owned deja-vu package after target/data teardown');
+  } else if (removePackageApproved && !ctx.state.dejaVuTeardownOk) {
+    warn('deja-vu package retained because target/data teardown is incomplete');
+  } else if (removePackageApproved) {
+    const retired = await undoDejaVu(ctx, true);
+    ctx.state.dejaVuTeardownOk = retired?.ok === true;
+    if (ctx.state.dejaVuTeardownOk && retired?.changed) ok('deja-vu: Kit-owned package removed');
+    else if (!ctx.state.dejaVuTeardownOk) warn('deja-vu package removal incomplete — ownership receipt retained');
   }
-  ownershipTeardownOk = ownershipTeardownOk && dejaVuTeardownOk;
-  // Registry-driven host lifecycle teardown — reached by id, never by name
-  // (mirrors x/host.mjs's off(), which does its undo the same way). cfg comes
-  // from the top of run() (read before any purge of kit.json); --purge
-  // removes kit.json below, so persisting cfg here would recreate it. Each
-  // adapter's own undo() already honors ownership/receipts (opencode's
-  // undoOpencode no-ops when it never held mcp:'ak', and marker-gates
-  // artifact removal independent of that), so a BUILT-IN's call is
-  // unconditional per host, same as before ADR-0031 P3 — the only kit-side
-  // gate is "did anything actually happen", to avoid a no-op teardown line
-  // (and a needless kit.json rewrite) on a host that was never enabled. An
-  // ADMITTED external host is different: there is no "always safe, always
-  // idempotent" guarantee for an arbitrary third-party hook the way there is
-  // for opencode's own undo, so an admitted host's teardown is gated by
-  // lifecycleExecutionEnabled (cfg enablement AND the experimental flag) —
-  // an admitted host that was never enabled/consented for this run is never
-  // invoked. hostsWithLifecycle() (built-ins + admitted, ADR-0031 P3) is safe
-  // to loop unconditionally now: lifecycle-render.mjs's renderUndoReport
-  // dispatches on the runLifecycle result's own shape, so this loop body
-  // never destructures a host-specific result directly.
+}
+
+// 2c. Companion teardown is receipt-gated and precedes any kit.json purge.
+// The sequence is load-bearing: targets first, then the optional derived
+// index while `deja doctor` still exists, and only then the optional package.
+async function stepDejaVu(ctx) {
+  ctx.plan = await computeDejaVuPlan(ctx);
+  await dejaVuTargetTeardown(ctx);
+  await dejaVuDataPurge(ctx);
+  await dejaVuPackageRemoval(ctx);
+  ctx.state.ownershipTeardownOk = ctx.state.ownershipTeardownOk && ctx.state.dejaVuTeardownOk;
+}
+
+// Registry-driven host lifecycle teardown — reached by id, never by name
+// (mirrors x/host.mjs's off(), which does its undo the same way). cfg comes
+// from the top of run() (read before any purge of kit.json); --purge
+// removes kit.json below, so persisting cfg here would recreate it. Each
+// adapter's own undo() already honors ownership/receipts (opencode's
+// undoOpencode no-ops when it never held mcp:'ak', and marker-gates
+// artifact removal independent of that), so a BUILT-IN's call is
+// unconditional per host, same as before ADR-0031 P3 — the only kit-side
+// gate is "did anything actually happen", to avoid a no-op teardown line
+// (and a needless kit.json rewrite) on a host that was never enabled. An
+// ADMITTED external host is different: there is no "always safe, always
+// idempotent" guarantee for an arbitrary third-party hook the way there is
+// for opencode's own undo, so an admitted host's teardown is gated by
+// lifecycleExecutionEnabled (cfg enablement AND the experimental flag) —
+// an admitted host that was never enabled/consented for this run is never
+// invoked. hostsWithLifecycle() (built-ins + admitted, ADR-0031 P3) is safe
+// to loop unconditionally now: lifecycle-render.mjs's renderUndoReport
+// dispatches on the runLifecycle result's own shape, so this loop body
+// never destructures a host-specific result directly.
+async function stepHostLifecycles(ctx) {
+  const { cfg, dry, flags } = ctx;
   for (const hostId of hostsWithLifecycle()) {
     if (!isBuiltinHost(hostId) && !lifecycleExecutionEnabled(hostId, cfg)) continue;
     const adapter = lifecycleAdapterFor(hostId);
@@ -375,7 +403,7 @@ export async function run({ flags, deps = {} }) {
     }
     const retired = await runLifecycle({ adapter, action: 'undo', cfg });
     const undoReport = renderUndoReport(hostId, retired);
-    ownershipTeardownOk = ownershipTeardownOk && undoReport.ok;
+    ctx.state.ownershipTeardownOk = ctx.state.ownershipTeardownOk && undoReport.ok;
     // Persist markers unconditionally, exactly like x/host.mjs's off()/pick():
     // undo() mutates cfg's ownership markers in memory even when it rewrote
     // no file (`undo.changed` measures the FILE, not cfg), so gating the save
@@ -385,30 +413,38 @@ export async function run({ flags, deps = {} }) {
     if (!flags.purge) saveKitConfig(cfg);
     for (const line of undoReport.lines) printReportLine(line);
   }
-  if (flags.purge) {
-    for (const [label, file] of [
-      ['model inventory cache', modelInventoryPath()], ['model scope key', modelScopeKeyPath()],
-    ]) {
-      if (fs.existsSync(file)) act(`removed ${label}`, () => fs.rmSync(file));
-    }
-  }
-  if (flags.purge && fs.existsSync(paths.kitConfigPath())) {
-    if (ownershipTeardownOk) act('removed kit.json', () => fs.rmSync(paths.kitConfigPath()));
-    else if (!dejaVuTeardownOk) {
-      warn('kit.json retained because deja-vu teardown is incomplete; it contains recovery ownership receipts');
-    } else warn('kit.json retained because OpenCode teardown is incomplete; it contains the recovery ownership receipt');
-  }
+}
 
-  // 3. MCP registration + deny rules
-  if (dry) info('[dry-run] unregister claude-flow/ruflo MCP + clean deny rules');
-  else { const removed = await unregister(); ok(`MCP unregistered (deny rules cleaned: ${removed})`); }
+function stepPurgeArtifacts(ctx) {
+  for (const [label, file] of [
+    ['model inventory cache', modelInventoryPath()], ['model scope key', modelScopeKeyPath()],
+  ]) {
+    if (fs.existsSync(file)) ctx.act(`removed ${label}`, () => fs.rmSync(file));
+  }
+}
 
-  // 4. legacy shell-kit remnants
+function stepPurgeKitConfig(ctx) {
+  if (ctx.state.ownershipTeardownOk) {
+    ctx.act('removed kit.json', () => fs.rmSync(paths.kitConfigPath()));
+  } else if (!ctx.state.dejaVuTeardownOk) {
+    warn('kit.json retained because deja-vu teardown is incomplete; it contains recovery ownership receipts');
+  } else warn('kit.json retained because OpenCode teardown is incomplete; it contains the recovery ownership receipt');
+}
+
+// 3. MCP registration + deny rules
+async function stepMcp(ctx) {
+  if (ctx.dry) { info('[dry-run] unregister claude-flow/ruflo MCP + clean deny rules'); return; }
+  const removed = await unregister();
+  ok(`MCP unregistered (deny rules cleaned: ${removed})`);
+}
+
+// 4. legacy shell-kit remnants
+function stepLegacyShellKit(ctx) {
   for (const rc of ['.zshrc', '.bashrc'].map((f) => path.join(paths.home, f))) {
     if (!fs.existsSync(rc)) continue;
     const txt = fs.readFileSync(rc, 'utf8');
     if (txt.includes('ruflo-functions.sh')) {
-      act(`removed shell-kit source line from ${rc}`, () => {
+      ctx.act(`removed shell-kit source line from ${rc}`, () => {
         fs.copyFileSync(rc, `${rc}.bak`);
         fs.writeFileSync(rc, txt.split('\n').filter((l) => !l.includes('ruflo-functions.sh')).join('\n'));
       });
@@ -418,31 +454,33 @@ export async function run({ flags, deps = {} }) {
   if (fs.existsSync(localBin)) {
     // every ruflo-* here is shell-kit era (the npm kit's bins live in npm's global bin)
     for (const f of fs.readdirSync(localBin).filter((f) => f.startsWith('ruflo-'))) {
-      act(`removed legacy ${path.join(localBin, f)}`, () => fs.rmSync(path.join(localBin, f)));
+      ctx.act(`removed legacy ${path.join(localBin, f)}`, () => fs.rmSync(path.join(localBin, f)));
     }
   }
   const cfgDir = paths.legacyConfigDir(); // shell-kit files lived in ~/.config/ruflo
   if (fs.existsSync(cfgDir)) {
     for (const f of fs.readdirSync(cfgDir).filter((f) => f.endsWith('.sh') || f.endsWith('-template.md') || f === 'ruflo-reference-full.md')) {
-      act(`removed legacy ${path.join(cfgDir, f)}`, () => fs.rmSync(path.join(cfgDir, f)));
+      ctx.act(`removed legacy ${path.join(cfgDir, f)}`, () => fs.rmSync(path.join(cfgDir, f)));
     }
   }
+}
 
-  // 5. per-project revert
-  if (flags['this-project']) {
-    const sl = paths.projectStatusline(process.cwd());
-    if (fs.existsSync(sl)) {
-      act('reverted statusline footer in this project', () => {
-        fs.copyFileSync(sl, `${sl}.bak`);
-        let s = fs.readFileSync(sl, 'utf8');
-        s = s.replace(/\/\* ruflo-seg:BEGIN \*\/[\s\S]*?\/\* ruflo-seg:END \*\/\n?/, '');
-        s = s.replace(/ \+ rufloActivationSegments\(process\.cwd\(\)\)/g, '');
-        fs.writeFileSync(sl, s);
-      });
-    }
-  }
+// 5. per-project revert
+function stepThisProject(ctx) {
+  const sl = paths.projectStatusline(process.cwd());
+  if (!fs.existsSync(sl)) return;
+  ctx.act('reverted statusline footer in this project', () => {
+    fs.copyFileSync(sl, `${sl}.bak`);
+    let s = fs.readFileSync(sl, 'utf8');
+    s = s.replace(/\/\* ruflo-seg:BEGIN \*\/[\s\S]*?\/\* ruflo-seg:END \*\/\n?/, '');
+    s = s.replace(/ \+ rufloActivationSegments\(process\.cwd\(\)\)/g, '');
+    fs.writeFileSync(sl, s);
+  });
+}
 
-  // 6. global packages (machine-wide — confirmed individually)
+// 6. global packages (machine-wide — confirmed individually)
+async function stepGlobalPackages(ctx) {
+  const { flags, dry } = ctx;
   const removals = [];
   if (flags['remove-ruflo'] || flags.purge) removals.push('ruflo');
   if (flags['remove-aqe'] || flags.purge) removals.push('agentic-qe');
@@ -454,13 +492,57 @@ export async function run({ flags, deps = {} }) {
       (r.code === 0 ? ok : warn)(`${pkg}: ${r.code === 0 ? 'removed' : 'could not remove'}`);
     } else info(`kept ${pkg}`);
   }
+}
 
-  // RuvNet Brain: a user-scope plugin + a large (~512 MB) KB cache — left in
-  // place (like ruflo/aqe) rather than force-deleted. Point at the manual path.
+// RuvNet Brain: a user-scope plugin + a large (~512 MB) KB cache — left in
+// place (like ruflo/aqe) rather than force-deleted. Point at the manual path.
+function stepRuvnetBrainNotice() {
   if (rbPresent()) {
     info('RuvNet Brain left installed — remove manually: `claude plugin uninstall ruvnet-brain@ruvnet-brain` + `rm -rf ~/.cache/ruvnet-brain`');
   }
+}
+
+export const UNINSTALL_STEPS = [
+  { id: 'codex-statusline', when: (ctx) => !!ctx.cfg.statusline?.codex, run: stepCodexStatusline },
+  { id: 'claude-md-blocks', when: () => true, run: stepClaudeMdBlocks },
+  { id: 'skill', when: () => true, run: stepSkill },
+  { id: 'opencode-agents-md', when: () => true, run: stepOpencodeAgentsMd },
+  { id: 'deja-vu', when: () => true, run: stepDejaVu },
+  { id: 'host-lifecycles', when: () => true, run: stepHostLifecycles },
+  { id: 'purge-artifacts', when: (ctx) => ctx.flags.purge, run: stepPurgeArtifacts },
+  {
+    id: 'purge-kit-config',
+    when: (ctx) => ctx.flags.purge && fs.existsSync(paths.kitConfigPath()),
+    run: stepPurgeKitConfig,
+  },
+  { id: 'mcp', when: () => true, run: stepMcp },
+  { id: 'legacy-shell-kit', when: () => true, run: stepLegacyShellKit },
+  { id: 'this-project', when: (ctx) => ctx.flags['this-project'], run: stepThisProject },
+  { id: 'global-packages', when: () => true, run: stepGlobalPackages },
+  { id: 'ruvnet-brain-notice', when: () => true, run: stepRuvnetBrainNotice },
+];
+
+/** @param {{flags:Record<string,boolean>,deps?:UninstallDeps}} request */
+export async function run({ flags, deps = {} }) {
+  const dry = flags['dry-run'];
+  const act = (msg, fn) => { if (dry) info(`[dry-run] ${msg}`); else { fn(); ok(msg); } };
+  // Ownership markers are read ONCE up front: the purge path removes kit.json
+  // below, and teardown decisions (opencode undo) must still see what ak owned
+  // (codex-review — purge ordering must not strand managed opencode.json keys).
+  const cfg = loadKitConfig();
+  const ctx = {
+    flags,
+    dry,
+    deps,
+    cfg,
+    act,
+    state: { ownershipTeardownOk: true, dejaVuTeardownOk: true },
+  };
+
+  for (const step of UNINSTALL_STEPS) {
+    if (step.when(ctx)) await step.run(ctx);
+  }
 
   ok('uninstall complete — project data (.swarm/.claude-flow/.agentic-qe) untouched');
-  return ownershipTeardownOk ? 0 : 1;
+  return ctx.state.ownershipTeardownOk ? 0 : 1;
 }
