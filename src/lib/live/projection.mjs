@@ -18,9 +18,13 @@ const PROVIDER_EVIDENCE_RANK = new Map([
 const MAX_SEEN_EVENT_IDS = 10_000;
 const RESOURCE_KINDS = new Set(['tool', 'skill', 'plugin', 'mcp']);
 
-const signalKind = (event) => event.signal?.kind
-  ?? (event.action === 'session.heartbeat' || event.action === 'session.rebound'
-    ? 'presence' : event.action?.startsWith('tool.') ? 'operation' : 'metadata');
+// Falls back to the SAME inference createLiveEvent uses to stamp signal.kind
+// in the first place (event-schema.mjs's inferredSignal) — not a second,
+// independently-maintained guess. createLiveEvent always stamps signal.kind
+// today, so this fallback is a defensive no-op in practice; it exists so an
+// event that somehow arrives unstamped still gets the right answer instead of
+// a hardcoded 'metadata'.
+const signalKind = (event) => event.signal?.kind ?? inferredSignal(event.action, event.status).kind;
 
 function presenceFrom(event) {
   if (signalKind(event) !== 'presence') return null;
@@ -451,3 +455,4 @@ function projectCatalog(sessions) {
   ));
 }
 import { canonicalSessionKey, stableProjectKey } from './project-label.mjs';
+import { inferredSignal } from './event-schema.mjs';

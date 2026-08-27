@@ -345,6 +345,19 @@ test('projection adds typed nodes and stable relationship edges immutably', () =
   assert.equal(json.sessions[0].edges[0].confidence, 'observed');
 });
 
+test('reduceLiveEvent falls back to event-schema\'s inferredSignal, not a separate hardcoded guess', () => {
+  // createLiveEvent always stamps `signal`, so this simulates the one case the
+  // fallback exists for: an event that somehow reaches the reducer unstamped.
+  // A hardcoded 'metadata' fallback (the old duplicate) would leave activity
+  // at 'unknown'; reusing event-schema's inferredSignal correctly reads
+  // session.input as 'activity', which activityFrom() reports as working.
+  const stamped = createLiveEvent(base({ action: 'session.input' }));
+  const { signal: _signal, ...unstamped } = stamped;
+  const projection = reduceLiveEvent(emptyLiveProjection(), unstamped);
+  const session = projection.sessions.get(stamped.sessionKey);
+  assert.equal(session.activity.state, 'working');
+});
+
 test('started operations remain visibly in flight in a fresh snapshot', () => {
   const event = {
     ...createLiveEvent(base({
