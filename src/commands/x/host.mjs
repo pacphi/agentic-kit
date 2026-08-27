@@ -10,7 +10,7 @@ import {
   settingsTarget, isDefault, applyHosts, applyProviders,
   undoProviders, hostInstallState, hostAuthState, installHost, applyAqeRouter, undoAqeRouter,
   bothHostsEnabled, DUAL_ROLE_TIP, JUDGE_BIAS_TIP, QE_COURT_TIP, suggestedFallbackFor,
-  seedActivityRoutesIfMultiHost, printActivityRoutingTable, retireCodexMcp, undoCodexMcp,
+  seedActivityRoutesIfMultiHost, migrateRetiredRoutesInConfig, printActivityRoutingTable, retireCodexMcp, undoCodexMcp,
   ensureRufloMcpInCodex, undoRufloMcpInCodex, detectAqeProviders, aqeProviderCredential, credentialGaps, fallbackSource,
   collectIntegrationFacts, aqeSelectableProviderTypes, aqeSelectableChainProviderTypes,
 } from '../../lib/providers.mjs';
@@ -28,7 +28,9 @@ import {
   newlyEnabledHostTrustManifest, trustManifestLines,
 } from '../../lib/trust-manifest.mjs';
 import { have } from '../../lib/exec.mjs';
-import { ok, warn, fail, info, dim, bold, yellow } from '../../lib/output.mjs';
+import {
+  ok, warn, fail, info, dim, bold, yellow, reportOutcome,
+} from '../../lib/output.mjs';
 import { repoRoot } from '../../lib/paths.mjs';
 import { writeJsonWithBackup } from '../../lib/settings.mjs';
 import { panelFromRouting, validateCourtConfig, readQeCourtConfig, qeCourtConfigPath, vendorOf, qeCourtShipped } from '../../lib/qeCourt.mjs';
@@ -449,7 +451,7 @@ async function maybeWriteQeCourtDefaults({ nonInteractive, cwd, enabled, aqeProv
   ok(`qe-court routing updated: ${changes.map(([role, p]) => `${role}→${p}`).join(', ')}`);
 }
 
-async function pick({ flags, cwd, pkgRoot }) {
+export async function pick({ flags, cwd, pkgRoot, migrateRoutes = migrateRetiredRoutesInConfig }) {
   let aqeProviderTypes = aqeSelectableProviderTypes();
   let aqeChainProviderTypes = aqeSelectableChainProviderTypes();
   const cfg = loadKitConfig();
@@ -744,6 +746,20 @@ async function pick({ flags, cwd, pkgRoot }) {
   if (primaryHost !== DEFAULT_PRIMARY_HOST) {
     const alt = routing.filter((e) => e !== primaryHost).join(', ') || 'none';
     ok(`primary host: ${primaryHost} (alternate: ${alt})`);
+  }
+  // Retire withdrawn models from the persisted policy — the same heal `ak
+  // sync` already runs (sync.mjs). Without this, `ak host pick` could persist
+  // a route naming a model the host has withdrawn, left for the next sync to
+  // repair. Only seeded entries are rewritten; a user pin is reported and kept.
+  const retired = migrateRoutes(cfg);
+  if (retired.changes.length > 0) {
+    if (retired.changed) saveKitConfig(cfg);
+    for (const c of retired.changes) {
+      const when = c.retiresOn ? `retires ${c.retiresOn}` : 'already withdrawn';
+      reportOutcome('routing', c.rewritten
+        ? { ok: true, changed: true, detail: `${c.activity} ${c.field}: ${c.from} → ${c.to} (${when})` }
+        : { ok: true, changed: false, detail: `${c.activity} ${c.field} pins ${c.from} (${when}) — user pin kept; ak runs ${c.to}` });
+    }
   }
   const router = applyAqeRouter(cfg, cwd);
   if (router.changed || !router.ok) (router.ok ? ok : warn)(`aqe router: ${router.detail}`);

@@ -20,7 +20,7 @@ import { managedCompanionFor } from '../lib/adapters/companion-registry.mjs';
 import { renderApplyReport } from '../lib/adapters/lifecycle-render.mjs';
 import { DEJA_VU_TARGETS } from '../lib/deja-vu.mjs';
 import { loadKitConfig, saveKitConfig } from '../lib/config.mjs';
-import { HOSTS, applyHosts, applyProviders, hostInstallState, installHost, applyAqeRouter, seedActivityRoutesIfMultiHost, printActivityRoutingTable, aqeSupportsAgentOverrides, retireCodexMcp, ensureRufloMcpInCodex, applySetupHostFlags, bothHostsEnabled } from '../lib/providers.mjs';
+import { HOSTS, applyHosts, applyProviders, hostInstallState, installHost, applyAqeRouter, seedActivityRoutesIfMultiHost, migrateRetiredRoutesInConfig, printActivityRoutingTable, aqeSupportsAgentOverrides, retireCodexMcp, ensureRufloMcpInCodex, applySetupHostFlags, bothHostsEnabled } from '../lib/providers.mjs';
 import { installedVersion } from '../lib/versions.mjs';
 import * as rb from '../lib/ruvnet-brain.mjs';
 import * as adb from '../lib/agentdb.mjs';
@@ -417,7 +417,9 @@ export async function run_machine({ flags, pkgRoot, cfg }) {
   return true;
 }
 
-export async function run_project({ flags, cfg, trustDisclosed = false }) {
+export async function run_project({
+  flags, cfg, trustDisclosed = false, migrateRoutes = migrateRetiredRoutesInConfig,
+}) {
   const root = process.cwd();
   heading(`project setup — ${root}`);
   if (!trustDisclosed) discloseSetupTrust(cfg, { project: true });
@@ -538,6 +540,20 @@ export async function run_project({ flags, cfg, trustDisclosed = false }) {
   // so the router materialization below writes agentOverrides). No-op single-host.
   const seed = seedActivityRoutesIfMultiHost(cfg);
   if (seed.seeded) { saveKitConfig(cfg); ok(`per-activity routing seeded — ${seed.count} activities (dual-host defaults)`); }
+  // Retire withdrawn models from the persisted policy — the same heal `ak
+  // sync` already runs (sync.mjs). Without this, project setup could persist
+  // a route naming a model the host has withdrawn, left for the next sync to
+  // repair. Only seeded entries are rewritten; a user pin is reported and kept.
+  const retired = migrateRoutes(cfg);
+  if (retired.changes.length > 0) {
+    if (retired.changed) saveKitConfig(cfg);
+    for (const c of retired.changes) {
+      const when = c.retiresOn ? `retires ${c.retiresOn}` : 'already withdrawn';
+      reportOutcome('routing', c.rewritten
+        ? { ok: true, changed: true, detail: `${c.activity} ${c.field}: ${c.from} → ${c.to} (${when})` }
+        : { ok: true, changed: false, detail: `${c.activity} ${c.field} pins ${c.from} (${when}) — user pin kept; ak runs ${c.to}` });
+    }
+  }
   const rt = applyAqeRouter(cfg, root);
   if (rt.changed) (rt.ok ? ok : warn)(`aqe router: ${rt.detail}`);
   if (Object.keys(cfg.routing?.routes ?? {}).length) printActivityRoutingTable(cfg);
