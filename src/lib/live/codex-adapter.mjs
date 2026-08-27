@@ -4,6 +4,22 @@ import { classifyToolName } from './tool-classify.mjs';
 const artifact = (value) => typeof value === 'string'
   ? value.replaceAll('\\', '/').split('/').pop()?.slice(0, 256) ?? null : null;
 
+/** Same generation-detection the batch parser uses (usage-index.mjs's
+ * codexEvent): legacy `user_message`/`agent_message` events, or the newer
+ * `item_completed` envelope wrapping a `UserMessage`/`AgentMessage` item.
+ * Newer Codex rollouts emit ONLY the wrapped form — without this a fresh
+ * rollout produces zero session.input/agent.output events and the session
+ * looks dead in the live view while the batch scan still counts it. */
+function codexMessageKind(payload) {
+  if (payload?.type === 'user_message') return 'input';
+  if (payload?.type === 'agent_message') return 'output';
+  if (payload?.type !== 'item_completed') return null;
+  const itemType = payload.item?.type;
+  if (itemType === 'UserMessage') return 'input';
+  if (itemType === 'AgentMessage') return 'output';
+  return null;
+}
+
 export function adaptCodexRecord(record, context = {}) {
   if (!record || typeof record !== 'object') return [];
   const payload = record.payload && typeof record.payload === 'object' ? record.payload : {};
@@ -55,11 +71,14 @@ export function adaptCodexRecord(record, context = {}) {
       status: context.bootstrap ? 'unknown' : 'running',
     })];
   }
-  if (record.type === 'event_msg' && ['user_message', 'agent_message'].includes(payload.type)) {
-    return [createLiveEvent({
-      ...base, action: payload.type === 'user_message' ? 'session.input' : 'agent.output',
-      status: 'running',
-    })];
+  if (record.type === 'event_msg') {
+    const kind = codexMessageKind(payload);
+    if (kind) {
+      return [createLiveEvent({
+        ...base, action: kind === 'input' ? 'session.input' : 'agent.output',
+        status: 'running',
+      })];
+    }
   }
   if (record.type === 'response_item' && ['function_call', 'custom_tool_call'].includes(payload.type)) {
     const callId = payload.call_id ?? payload.id;

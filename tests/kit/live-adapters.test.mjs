@@ -72,6 +72,33 @@ test('Codex adapter handles session, tool call and tool result fixture shapes', 
   assert.ok(!JSON.stringify(done).includes('private'));
 });
 
+test('Codex adapter recognizes the newer item_completed generation, not just legacy user/agent_message', () => {
+  const [input] = adaptCodexRecord({
+    type: 'event_msg', timestamp: now,
+    payload: { type: 'item_completed', item: { type: 'UserMessage', text: 'hello codex' } },
+  }, { sessionId: 'x1', observedAt: now });
+  assert.equal(input.action, 'session.input');
+  assert.equal(input.status, 'running');
+  assert.ok(!JSON.stringify(input).includes('hello codex'));
+
+  const [output] = adaptCodexRecord({
+    type: 'event_msg', timestamp: now,
+    payload: {
+      type: 'item_completed',
+      item: { type: 'AgentMessage', content: [{ type: 'Text', text: 'reply text' }] },
+    },
+  }, { sessionId: 'x1', observedAt: now });
+  assert.equal(output.action, 'agent.output');
+  assert.equal(output.status, 'running');
+  assert.ok(!JSON.stringify(output).includes('reply text'));
+
+  const unknown = adaptCodexRecord({
+    type: 'event_msg', timestamp: now,
+    payload: { type: 'item_completed', item: { type: 'Reasoning', text: 'internal' } },
+  }, { sessionId: 'x1', observedAt: now });
+  assert.deepEqual(unknown, []);
+});
+
 test('Codex session_meta model_provider becomes an observed provider claim', () => {
   const [started] = adaptCodexRecord({
     type: 'session_meta', timestamp: now,
