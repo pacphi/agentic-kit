@@ -54,13 +54,15 @@ const userMsg = (id, sessionId, at, text = null) => ({
   id, sessionId, at,
   data: { role: 'user', time: { created: at }, agent: 'build', ...(text ? { text } : {}) },
 });
-const assistantMsg = (id, sessionId, at, { model = 'kimi-k3', provider = 'opencode', tokens = {}, cost = null } = {}) => ({
+const assistantMsg = (id, sessionId, at, { model = 'kimi-k3', provider = 'opencode', tokens = {}, cost = null, mode = null, error = null } = {}) => ({
   id, sessionId, at,
   data: {
     role: 'assistant', agent: 'build', path: { cwd: '/x', root: '/' },
     modelID: model, providerID: provider,
     tokens: { total: 0, input: 100, output: 20, reasoning: 5, cache: { read: 40, write: 3 }, ...tokens },
     ...(cost != null ? { cost } : {}),
+    ...(mode != null ? { mode } : {}),
+    ...(error != null ? { error } : {}),
     time: { created: at, completed: at + 1000 }, finish: 'stop',
   },
 });
@@ -194,6 +196,25 @@ test('withTurns emits user/assistant turn rows with text and tool names; tool co
   // and without turns, tool counts still land
   const lean = parseSession({ dbFile, id: 'ses_1' });
   assert.equal(lean.session.tools.bash, 1);
+  rm(d);
+});
+
+test('assistant messages: mode (last wins), user→assistant latency gap, error → exception, ctxLastTokens', () => {
+  const d = tmp();
+  const dbFile = buildDb(path.join(d, 'opencode.db'), {
+    sessions: [{ id: 'ses_1', directory: '/x', title: 't', timeCreated: T }],
+    messages: [
+      userMsg('u1', 'ses_1', T, 'fix the auth flow'),
+      assistantMsg('a1', 'ses_1', T + 4_000, { mode: 'build', tokens: { input: 900, cache: { read: 20000 }, output: 10 } }),
+      assistantMsg('a2', 'ses_1', T + 8_000, { error: { name: 'ProviderAuthError' } }),
+    ],
+  });
+  const { session } = parseSession({ dbFile, id: 'ses_1' });
+  assert.equal(session.mode, 'auto-edit');
+  assert.equal(session.modeRaw, 'build');
+  assert.equal(session.latHist[1], 1);        // 4s → 2-5s bucket
+  assert.equal(session.exceptions, 1);
+  assert.equal(session.ctxLastTokens, 20900);
   rm(d);
 });
 

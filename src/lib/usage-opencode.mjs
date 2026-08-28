@@ -29,7 +29,8 @@ import { withDb } from './sqlite.mjs';
 // definitions in usage-parsers.mjs. usage-index.mjs imports FROM this module
 // (defaultOpencodeDbPath, parseSession, …), but that is no longer a cycle:
 // this module depends only on usage-parsers.mjs, not on usage-index.mjs.
-import { addUsage, blankSession } from './usage-parsers.mjs';
+import { addUsage, blankSession, noteLatencySample } from './usage-parsers.mjs';
+import { normalizeMode } from './usage-modes.mjs';
 
 /** The live opencode store. Overridable via roots in tests. */
 export function defaultOpencodeDbPath() {
@@ -76,6 +77,12 @@ function activeIntervals(stamps) {
 
 const num = (v) => (Number.isFinite(Number(v)) ? Number(v) : 0);
 const parseJson = (raw) => { try { return JSON.parse(raw); } catch { return null; } };
+
+/** A prompt-to-response gap longer than this is an idle resume, not a real
+ *  wait for a reply — excluded from latency sampling (mirrors usage-parsers'
+ *  own MAX_LATENCY_SAMPLE_SECONDS, private there, so redeclared here rather
+ *  than exported cross-module for a single constant). */
+const MAX_LATENCY_SAMPLE_SECONDS = 3600;
 
 /** Incremental candidates: sessions whose latest message lands at/after
  *  cutoffMs. `mtimeMs` (latest message time) + `size` (message count) are the
@@ -149,6 +156,9 @@ function noteStamp(rec, at) {
 
 function recordUserMessage(rec, turns, { rowId, at, withTurns, partsByMessage }) {
   rec.prompts++;
+  // Opens the prompt→assistant-message latency window; closed by the next
+  // recordAssistantMessage (mirrors parseClaude/parseCodex's latState).
+  rec.pendingPromptMs = at;
   if (!withTurns) return;
   const text = messagePartsText(partsByMessage, rowId, ['text']);
   turns.push({ role: 'user', at: new Date(at).toISOString(), text, prompt: true, kind: 'prompt' });
@@ -179,6 +189,10 @@ function recordAssistantUsage(rec, data, at) {
   usageRow.costObserved ??= null;
   if (Number.isFinite(Number(data.cost))) usageRow.costObserved = (usageRow.costObserved ?? 0) + Number(data.cost);
   rec.reasoningOutput += num(t.reasoning);
+  // Context pressure for THIS turn — overwritten every message so the field
+  // always reflects the LAST completion, not a running total (mirrors
+  // parseClaude's ctxLastTokens).
+  rec.ctxLastTokens = num(t.input) + num(cache.read);
   return model;
 }
 
@@ -194,6 +208,25 @@ function recordAssistantTurn(rec, turns, { rowId, at, model, partsByMessage }) {
 function recordAssistantMessage(rec, turns, { data, rowId, at, withTurns, partsByMessage }) {
   rec.responses++;
   if (at) { const pk = punchKey(at); rec.punchcard[pk] = (rec.punchcard[pk] ?? 0) + 1; }
+  if (data.error != null) {
+    // A provider/auth/network failure: no real completion behind it, so —
+    // like parseClaude's isApiError placeholder — it never claims a model,
+    // usage, ctx window, or mode. It IS an exception, but never a latency
+    // SAMPLE (an unanswered prompt is not a measured response time); the
+    // pending prompt is still consumed here (unlike parseClaude, which
+    // leaves it open for the next real completion) so a later, unrelated
+    // assistant message is never mis-sampled against a stale prompt.
+    rec.exceptions++;
+    rec.pendingPromptMs = null;
+    return;
+  }
+  if (rec.pendingPromptMs !== null && rec.pendingPromptMs !== undefined) {
+    const gapSeconds = (at - rec.pendingPromptMs) / 1000;
+    if (gapSeconds <= MAX_LATENCY_SAMPLE_SECONDS) noteLatencySample(rec, gapSeconds);
+    rec.pendingPromptMs = null;
+  }
+  const m = normalizeMode({ host: 'opencode', opencodeMode: data.mode });
+  if (m.raw) { rec.mode = m.mode; rec.modeRaw = m.raw; }
   const model = recordAssistantUsage(rec, data, at);
   if (withTurns) recordAssistantTurn(rec, turns, { rowId, at, model, partsByMessage });
 }
@@ -236,6 +269,10 @@ function initSessionRecord(srow) {
   rec.sidechain = !!srow.parent_id;
   rec.threadSource = srow.parent_id ? 'subagent' : null;
   if (worktree) rec.worktree = worktree;
+  // Transient parse-time state (the open prompt→assistant latency window,
+  // see recordUserMessage/recordAssistantMessage) — deleted before return in
+  // parseSession, never part of the returned session shape.
+  rec.pendingPromptMs = null;
   return rec;
 }
 
@@ -267,6 +304,7 @@ export function parseSession({ dbFile, id, withTurns = false }) {
     rec.active = activeIntervals(rec.stamps);
     rec.lenSeconds = Math.round(rec.active.reduce((n, [a, b]) => n + (b - a), 0) / 1000);
     delete rec.stamps;
+    delete rec.pendingPromptMs;
     return { session: rec, turns };
   });
   return result.ok ? result.value : null;
