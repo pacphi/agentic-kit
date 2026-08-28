@@ -356,7 +356,7 @@ export const USAGE_CSS = `
    which is silent: the row still renders, it just renders the wrong data under
    each heading. */
 .srow{
-  display:grid; grid-template-columns:18px 82px minmax(150px,2.1fr) minmax(90px,1fr) 106px 46px 60px 62px 68px 20px;
+  display:grid; grid-template-columns:18px 82px minmax(150px,2.1fr) minmax(90px,1fr) minmax(84px,.9fr) 106px 46px 60px 62px 68px 20px;
   gap:10px; align-items:center; padding:9px 13px; background:var(--panel); font-size:12.5px; cursor:pointer;
 }
 .srow:hover{background:var(--panel-2)}
@@ -364,6 +364,22 @@ export const USAGE_CSS = `
 .s-claude{color:var(--warn); background:color-mix(in srgb,var(--warn) 12%,transparent); border-color:color-mix(in srgb,var(--warn) 30%,transparent)}
 .s-codex{color:var(--accent); background:var(--accent-soft); border-color:color-mix(in srgb,var(--accent) 35%,transparent)}
 .s-title{overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+/* Per-session evidence chips, in their OWN column rather than crowded into
+   .s-title — the title is the row's identifier and must not be truncated to
+   make room for its annotations. Each chip renders only when the transcript
+   established that fact, so an absent chip is the signal that it was never
+   recorded; the cell overflows hidden rather than wrapping, which would give
+   this row a second line and halve the list's density. */
+.s-chips{display:flex; gap:4px; overflow:hidden; min-width:0}
+.s-chip{
+  font-family:var(--mono); font-size:9.5px; color:var(--ink-dim); white-space:nowrap; flex:none;
+  border:1px solid var(--line); border-radius:100px; padding:1px 6px; background:var(--panel-2);
+}
+/* The posture chip always spells the posture out, so its tint is a second
+   channel and never the only one carrying "this session had a wide mandate". */
+.s-chip.s-mode{color:var(--ink-2)}
+.s-chip.s-mode[data-mode="plan"]{color:var(--purple); border-color:color-mix(in srgb,var(--purple) 32%,transparent)}
+.s-chip.s-mode[data-mode="unrestricted"]{color:var(--warn); border-color:color-mix(in srgb,var(--warn) 32%,transparent)}
 .s-proj,.s-when,.s-dur,.s-turns,.s-tok{color:var(--ink-2); font-size:11.5px}
 .s-cost{text-align:right; color:var(--ink); font-size:12px}
 .s-tx{background:transparent; border:0; color:var(--ink-dim); font-size:14px; cursor:pointer; padding:0; border-radius:5px}
@@ -483,9 +499,13 @@ export const USAGE_CSS = `
      in the 20px glyph column and were clipped, and the transcript glyph wrapped
      onto a line of its own. Five columns for five cells is what makes the
      arithmetic close. The category is still reachable — it is on the project
-     header chips and on the Scorecard's category rows. */
+     header chips and on the Scorecard's category rows.
+     .s-chips joins the hidden set for the same arithmetic reason: it is an
+     ELEVENTH desktop column, and leaving it visible here would put six cells
+     into five tracks. Nothing it carries is lost — the row's detail strip
+     spells posture and rhythm out in full. */
   .srow{grid-template-columns:18px 58px 1fr 68px 20px}
-  .srow .s-proj,.srow .s-when,.srow .s-dur,.srow .s-turns,.srow .s-tok,.srow .cat{display:none}
+  .srow .s-proj,.srow .s-when,.srow .s-dur,.srow .s-turns,.srow .s-tok,.srow .cat,.srow .s-chips{display:none}
   .phead{grid-template-columns:16px 1fr 58px 66px}
   .phead .pchips,.phead .p-h,.phead .p-tok{display:none}
 }

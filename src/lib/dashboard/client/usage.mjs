@@ -4,7 +4,7 @@
 import { VIEWS, authHeaders, esc, setTab, syncHash } from './bootstrap.mjs';
 import { ago } from './intelligence.mjs';
 import { renderModelFacets, renderModelInventory, renderModelLifecycle } from './model-lifecycle.mjs';
-import { bucketPositionPct, deltaChip, donut2, histogram, rankedRows, sparklineSvg, stackedDays } from './usage-rhythm.mjs';
+import { bucketPercentile, bucketPositionPct, deltaChip, donut2, histogram, rankedRows, sparklineSvg, stackedDays } from './usage-rhythm.mjs';
 import { renderUsage } from './usage-orchestrators.mjs';
 
   // ══ Usage tab ══════════════════════════════════════════════════════════════
@@ -1124,6 +1124,57 @@ import { renderUsage } from './usage-orchestrators.mjs';
   function reportedIdentity(v){v=String(v==null?"":v).trim();return v&&!/^unknown$/i.test(v)?v:null;}
   function identityName(v){var raw=reportedIdentity(v);if(!raw)return"Not recorded";return{claude:"Claude Code",codex:"Codex",opencode:"OpenCode",anthropic:"Anthropic",openai:"OpenAI",openrouter:"OpenRouter",bedrock:"AWS Bedrock",vertex:"Google Vertex AI",foundry:"Microsoft Foundry",gateway:"Custom gateway",ollama:"Ollama",lmstudio:"LM Studio"}[raw.toLowerCase()]||raw;}
 
+  // ── per-session chips ─────────────────────────────────────────────────────
+  // Evidence the row already carries, shown only where the transcript
+  // established it. An ABSENT chip is itself the signal that the fact was
+  // never recorded — a chip that appeared with a guessed value would be
+  // indistinguishable from one that was measured.
+  var LAT_CHIP_TIP="This session's median response latency, interpolated from its own latency "
+    +"histogram — the same bucket math the window's rhythm panel uses.\ncodex host-measured · "
+    +"claude/opencode derived from event gaps — not streaming TTFT.\nA value in the last bucket "
+    +"has no upper edge and is printed with ≥.";
+  function sessionP50(sx){
+    return Array.isArray(sx.latHist)?bucketPercentile(sx.latHist,LAT_EDGES,0.5):null;
+  }
+  // The posture the transcript recorded, and NOTHING when it recorded none: an
+  // unobserved or unmapped raw value is not a posture, and a badge that guessed
+  // one would read exactly like an observed one. `modeRaw` is the host's own
+  // spelling and rides in the tooltip when the payload carries it — the
+  // aggregate does not project that field today, so the tooltip says the raw
+  // form was not recorded rather than inventing one.
+  function modeBadge(sx){
+    var mode=reportedIdentity(sx.mode);
+    if(!mode)return "";
+    var raw=reportedIdentity(sx.modeRaw);
+    return '<span class="s-chip s-mode" data-mode="'+esc(mode)+'" title="'
+      +esc("permission posture: "+mode
+        +(raw?" · recorded by the host as \""+raw+"\"":" · the host's own spelling was not recorded"))
+      +'">'+esc(mode)+"</span>";
+  }
+  // Context fill, and only when BOTH halves were observed: the last turn's
+  // context tokens AND that model's window. Codex records a window; claude and
+  // opencode do not, and this page carries no published-window table to fall
+  // back on — so the chip is omitted rather than divided by a guessed
+  // denominator, which would be a fabricated percentage.
+  function ctxChip(sx){
+    var used=Number(sx.ctxLastTokens),win=Number(sx.ctxWindow);
+    if(!isFinite(used)||!isFinite(win)||used<=0||win<=0)return "";
+    return '<span class="s-chip" title="'
+      +esc("context at the last turn: "+fmtTok(used)+" of "+fmtTok(win)
+        +" tokens — both recorded by the transcript")
+      +'">ctx '+esc(Math.min(100,used/win*100).toFixed(0))+"%</span>";
+  }
+  function sessionChips(sx){
+    var out="",len=Number(sx.lenSeconds)||0,p50=sessionP50(sx);
+    if(len>0)out+='<span class="s-chip" title="'
+      +esc("engaged length — this session's active sub-intervals unioned, split at 15-minute "
+        +"silences; not its first-to-last span, which the duration column shows")
+      +'">'+esc(fmtSecs(len))+"</span>";
+    if(p50!=null)out+='<span class="s-chip" title="'+esc(LAT_CHIP_TIP)+'">p50 '
+      +esc(fmtAtLeast(p50,60,fmtSecs))+"</span>";
+    return out+modeBadge(sx)+ctxChip(sx);
+  }
+
   /* The ten fields that shipped on the wire and rendered nowhere. Everything
      here comes from the row the browser already holds — no route, no fetch. */
   function sdetail(sx){
@@ -1149,7 +1200,22 @@ import { renderUsage } from './usage-orchestrators.mjs';
     var flags="skill "+dash(sx.skill)+" · plugin "+dash(sx.plugin)
       +" · sidechain "+(sx.sidechain==null?"—":(sx.sidechain?"yes":"no"))
       +" · worktree "+dash(sx.worktree);
-    var rows=[["execution host",esc(identityName(sx.host))],["inference provider",esc(provider)+" <span class='sd-conf'>("+esc(providerContext)+")</span>"],["models",esc(models)],["basis",esc(basis)+conf],["tokens",esc(toks)],
+    // Posture and rhythm are the row's own v11 evidence, spelled out here
+    // where the chips only had room for a badge. Both follow this strip's
+    // never-omit-a-line rule: a fact that was measured and found absent reads
+    // "Not recorded"/"—", not silence, which would teach the reader the field
+    // does not exist (ADR-0009 §5).
+    var modeRaw=reportedIdentity(sx.modeRaw),modeName=reportedIdentity(sx.mode);
+    var posture=modeName
+      ? esc(modeName)+" <span class='sd-conf'>("
+        +esc(modeRaw?"recorded by the host as \""+modeRaw+"\"":"host spelling not recorded")+")</span>"
+      : "Not recorded <span class='sd-conf'>(no posture evidence in this transcript)</span>";
+    var p50=sessionP50(sx);
+    var rhythm="engaged "+((Number(sx.lenSeconds)||0)>0?fmtSecs(sx.lenSeconds):"—")
+      +" · p50 "+(p50==null?"—":fmtAtLeast(p50,60,fmtSecs))
+      +" · latency samples "+fmtNum(Number(sx.latCount)||0)
+      +" · aborts "+fmtNum(Number(sx.aborts)||0);
+    var rows=[["execution host",esc(identityName(sx.host))],["inference provider",esc(provider)+" <span class='sd-conf'>("+esc(providerContext)+")</span>"],["models",esc(models)],["posture",posture],["rhythm",esc(rhythm)],["basis",esc(basis)+conf],["tokens",esc(toks)],
       ["tools",esc(tools)],["flags",esc(flags)]];
     return '<div class="sdetail" id="sd-'+esc(sx.id)+'" hidden>'
       +rows.map(function(r){
@@ -1184,6 +1250,7 @@ import { renderUsage } from './usage-orchestrators.mjs';
       +'<span class="s-host s-'+esc(host)+'" title="'+esc(identityTip)+'" aria-label="Execution host: '+esc(identityName(host))+'">'+esc(identityName(host))+"</span>"
       +'<span class="s-title">'+esc(sx.title||"(untitled)")+wt+"</span>"
       +'<span class="cat'+(uncl?" uncl":"")+'" data-w="'+weak+'">'+esc(cat)+"</span>"
+      +'<span class="s-chips">'+sessionChips(sx)+"</span>"
       +'<span class="s-when mono">'+esc(whenTxt)+"</span>"
       +'<span class="s-dur mono">'+esc(fmtMins(sx.minutes))+"</span>"
       +'<span class="s-turns mono">'+esc((sx.prompts||0)+"/"+(sx.responses||0))+"</span>"

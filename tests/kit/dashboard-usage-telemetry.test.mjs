@@ -445,6 +445,58 @@ test('reliability says why there is no per-day line rather than drawing an inven
   assert.doesNotMatch(JS, /sparklineSvg\([^)]*exception/i, 'no exceptions series is charted');
 });
 
+test('session chips render only what the transcript established, and nothing else', () => {
+  // Engaged length and the session's own p50 come from fields the row already
+  // carries; the p50 reuses the SAME bucket math the window's rhythm panel and
+  // the server both use, rather than a second, unpinned copy.
+  assert.match(JS, /bucketPercentile\(sx\.latHist,LAT_EDGES,0\.5\)/);
+  assert.match(JS, /Array\.isArray\(sx\.latHist\)\?bucketPercentile/, 'no histogram means no p50 chip');
+  assert.match(JS, /if\(len>0\)out\+=/, 'a session with no engaged seconds gets no length chip');
+  assert.match(JS, /fmtAtLeast\(p50,60,fmtSecs\)/, 'a p50 in the overflow bucket still reads ≥');
+});
+
+test('the mode badge is absent when no posture was observed, never a guessed one', () => {
+  assert.match(JS, /function modeBadge\(sx\)\{\s*var mode=reportedIdentity\(sx\.mode\);\s*if\(!mode\)return "";/);
+  assert.match(JS, /recorded by the host as/, 'modeRaw rides in the tooltip when the payload carries it');
+  assert.match(JS, /the host's own spelling was not recorded/, 'and says so when it does not');
+  assert.match(CSS, /\.s-chip\.s-mode\[data-mode="unrestricted"\]/);
+});
+
+test('the context chip requires BOTH halves, and is omitted rather than divided by a guess', () => {
+  assert.match(JS, /var used=Number\(sx\.ctxLastTokens\),win=Number\(sx\.ctxWindow\)/);
+  assert.match(JS, /if\(!isFinite\(used\)\|\|!isFinite\(win\)\|\|used<=0\|\|win<=0\)return ""/);
+  assert.match(JS, /both recorded by the transcript/);
+  // The window is only ever READ. No `||` or `??` fallback stands behind it,
+  // which is what a guessed denominator would have to look like.
+  assert.doesNotMatch(JS, /ctxWindow\s*(\|\||\?\?)/);
+  assert.doesNotMatch(JS, /CONTEXT_WINDOWS|DEFAULT_CTX_WINDOW/, 'no published-window lookup table');
+});
+
+test('the session detail strip spells out posture and rhythm, and never omits the line', () => {
+  assert.match(JS, /\["posture",posture\],\["rhythm",esc\(rhythm\)\]/);
+  assert.match(JS, /Not recorded <span class='sd-conf'>\(no posture evidence in this transcript\)/);
+  assert.match(JS, /latency samples/);
+  assert.match(JS, /aborts/);
+});
+
+test('the chips column keeps the .srow grid arithmetic closed on both breakpoints', () => {
+  // The row is a fixed grid: a column added to the desktop track list and
+  // forgotten in the mobile one shifts every cell by one, which renders
+  // perfectly while putting the wrong data under each heading.
+  const desktop = /\.srow\{\s*display:grid; grid-template-columns:([^;]+);/.exec(CSS);
+  assert.ok(desktop, 'the desktop .srow track list must be findable');
+  assert.equal(desktop[1].trim().split(/\s+/).length, 11, 'eleven desktop tracks for eleven cells');
+
+  const mobile = /@media\s*\(max-width:720px\)\{[\s\S]*?\.srow\{grid-template-columns:([^}]+)\}/.exec(CSS);
+  assert.ok(mobile, 'the mobile .srow track list must be findable');
+  assert.equal(mobile[1].trim().split(/\s+/).length, 5, 'five mobile tracks');
+  assert.match(CSS, /\.srow \.cat,\.srow \.s-chips\{display:none\}/, 'chips join the hidden set, keeping 5 cells over 5 tracks');
+
+  // Source order is what actually aligns a cell with its track: chips sit
+  // between the category and the timestamp in both the markup and the CSS.
+  assert.match(JS, /esc\(cat\)\+"<\/span>"\s*\+'<span class="s-chips">'\+sessionChips\(sx\)\+"<\/span>"\s*\+'<span class="s-when mono">/);
+});
+
 test('the scorecard panel grafts are idempotent — a re-render reuses its container', () => {
   // renderScore runs on every poll. ensureBlock returns the existing node
   // instead of inserting a second one; without that the scorecard would grow
