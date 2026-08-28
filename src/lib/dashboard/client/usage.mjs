@@ -4,7 +4,7 @@
 import { VIEWS, authHeaders, esc, setTab, syncHash } from './bootstrap.mjs';
 import { ago } from './intelligence.mjs';
 import { renderModelFacets, renderModelInventory, renderModelLifecycle } from './model-lifecycle.mjs';
-import { deltaChip, sparklineSvg } from './usage-rhythm.mjs';
+import { bucketPositionPct, deltaChip, donut2, histogram, rankedRows, sparklineSvg, stackedDays } from './usage-rhythm.mjs';
 import { renderUsage } from './usage-orchestrators.mjs';
 
   // ══ Usage tab ══════════════════════════════════════════════════════════════
@@ -363,6 +363,26 @@ import { renderUsage } from './usage-orchestrators.mjs';
     anchor.parentNode.insertBefore(node,anchor.nextSibling);
     return document.getElementById(probeId);
   }
+  // The same heading grammar the served markup uses, so an inserted panel is
+  // indistinguishable from a static one. `note` is escaped: every caller
+  // passes a literal caption, and a panel's live figures belong in its body
+  // (rewritten each render) rather than in a header this builds once.
+  function stripHtml(bodyId,heading,note){
+    return '<section class="strip"><div class="sh"><h2>'+esc(heading)+"</h2>"
+      +'<span class="n mono">'+esc(note)+"</span></div>"
+      +'<div id="'+esc(bodyId)+'"></div></section>';
+  }
+  // A legend the chart primitives do not draw for themselves. Reuses the
+  // scorecard's own .legend/.lg grammar so an external legend is the same
+  // object here as it is under the token bar. The label is always spelled out
+  // beside the swatch — the hue is a hint, never the only way to read a series.
+  function chartLegend(items){
+    return '<div class="legend">'+items.map(function(it){
+      return '<span class="lg"><i style="background:'+esc(it.color)+'"></i>'+esc(it.label)
+        +' <b class="tnum">'+esc(it.value)+"</b></span>";
+    }).join("")+"</div>";
+  }
+
   // byDay ascending. Shared by the day-bar strip and every per-day series
   // below, so they cannot disagree about which days are in the window.
   function dayRows(d){
@@ -384,6 +404,24 @@ import { renderUsage } from './usage-orchestrators.mjs';
   function fmtRatio(n){
     if(n==null||!isFinite(n))return "—";
     return Math.abs(n)>=10?String(Math.round(n)):n.toFixed(1);
+  }
+  // Durations that span four orders of magnitude (a 1.4s reply, a 3h session)
+  // in one compact token. A whole number of hours prints as "2h", not "2.0h":
+  // the extra digit claims a precision a bucket floor does not have.
+  function fmtSecs(sec){
+    sec=Number(sec)||0;
+    if(sec<60)return (sec<10?Math.round(sec*10)/10:Math.round(sec))+"s";
+    if(sec<5400)return Math.round(sec/60)+"m";
+    var h=Math.round(sec/360)/10;
+    return (h%1===0?String(h):h.toFixed(1))+"h";
+  }
+  // A value from a histogram's OVERFLOW bucket has no upper edge to
+  // interpolate towards, so the percentile reports that bucket's FLOOR.
+  // Printing it bare would state a figure the counts cannot support, so it is
+  // prefixed and reads "at least this". `lastEdge` is that floor.
+  function fmtAtLeast(v,lastEdge,fmt){
+    if(v==null||!isFinite(v))return "—";
+    return (v>=lastEdge?"≥":"")+fmt(v);
   }
   // renderScore was one CC-41 function writing ~10 independent scorecard
   // regions (hero KPIs, cost-per-day bars, host cards, token bar/legend,
@@ -497,6 +535,126 @@ import { renderUsage } from './usage-orchestrators.mjs';
     if(!body)return;
     var days=dayRows(d).map(function(x){return x.day;});
     body.innerHTML=cadenceCells(d.totals||{},days.length,activeStreak(days));
+  }
+
+  // ── rhythm: how long sessions run, how long replies take ──────────────────
+  // The edges are restated from usage-aggregate.mjs's exported
+  // LAT_BUCKET_EDGES/LEN_BUCKET_EDGES: the payload ships the COUNTS, never the
+  // edges they were binned on, and this file is read as text into a browser
+  // bundle that cannot import that module. A test pins the copies equal, so a
+  // change to either goes red instead of silently re-labelling every bucket.
+  var LAT_EDGES=[2,5,10,30,60];
+  var LAT_LABELS=["≤2s","≤5s","≤10s","≤30s","≤60s","＞60s"];
+  var LEN_EDGES=[300,900,2700,7200];
+  var LEN_LABELS=["≤5m","≤15m","≤45m","≤2h","＞2h"];
+  var LAT_TIP="Wall-clock gap between a prompt and the response that answered it.\n"
+    +"codex host-measured · claude/opencode derived from event gaps — not streaming TTFT.\n"
+    +"The last bucket has no upper edge, so a percentile landing in it reports that bucket's "
+    +"floor: printed with ≥, read as \"at least this\".";
+  var LEN_TIP="Engaged length of one session — the union of its active sub-intervals, split at "
+    +"15-minute silences, not its first-to-last span.\nThe last bucket has no upper edge, so a "
+    +"percentile landing in it is printed with ≥.";
+
+  function histMarker(value,edges,label){
+    var at=bucketPositionPct(edges,value);
+    return at==null?null:{atPct:at,label:label};
+  }
+  function histCard(o){
+    var counts=Array.isArray(o.counts)?o.counts:[];
+    var total=counts.reduce(function(a,n){return a+(Number(n)||0);},0);
+    return '<div class="rcard" title="'+esc(o.tip)+'">'
+      +'<div class="rcard-h"><span class="rcard-t">'+esc(o.title)+"</span>"
+      +'<span class="rcard-n mono">'+esc(total?o.note:"not measured")+"</span></div>"
+      +(total?histogram({counts:counts,labels:o.labels,
+        markers:(o.markers||[]).filter(Boolean)})
+        :'<div class="empty">'+esc(o.emptyText)+"</div>")+"</div>";
+  }
+  function lengthCard(r){
+    var med=r.lenMedianSeconds,p90=r.lenP90Seconds;
+    var medTxt=fmtAtLeast(med,7200,fmtSecs),p90Txt=fmtAtLeast(p90,7200,fmtSecs);
+    return histCard({title:"session length",counts:r.lenHist,labels:LEN_LABELS,
+      markers:[histMarker(med,LEN_EDGES,"median "+medTxt),histMarker(p90,LEN_EDGES,"P90 "+p90Txt)],
+      note:"median "+medTxt+" · P90 "+p90Txt,tip:LEN_TIP,
+      emptyText:"no session lengths in window."});
+  }
+  function latencyCard(r){
+    var p50=r.latP50,p95=r.latP95,n=Number(r.latCount)||0;
+    var p50Txt=fmtAtLeast(p50,60,fmtSecs),p95Txt=fmtAtLeast(p95,60,fmtSecs);
+    return histCard({title:"response latency",counts:r.latHist,labels:LAT_LABELS,
+      markers:[histMarker(p50,LAT_EDGES,"p50 "+p50Txt),histMarker(p95,LAT_EDGES,"p95 "+p95Txt)],
+      note:"p50 "+p50Txt+" · p95 "+p95Txt+" · n "+fmtNum(n),tip:LAT_TIP,
+      emptyText:"no response latency measured in window."});
+  }
+  function renderScoreRhythm(d){
+    var body=ensureBlock("u-rhythm",
+      stripHtml("u-rhythm","your rhythm","session length · response latency"),"u-daybars");
+    if(!body)return;
+    var r=d.rhythm||{};
+    body.innerHTML='<div class="rhythm-grid">'+lengthCard(r)+latencyCard(r)+"</div>";
+  }
+
+  // ── how you run: posture, who drove, who served ───────────────────────────
+  // ADR-0038's closed posture vocabulary, ordered least to most permissive so
+  // the stack reads bottom-up as "how much rope was given", with the
+  // unobserved bucket at the base. Every color is a token AND is named in the
+  // legend beside the chart — the hue is a hint, never the only way to read it.
+  // 'not-recorded' is forced to the de-emphasis ink by the primitive itself,
+  // so it deliberately has no palette entry here.
+  var MODE_ORDER=["not-recorded","plan","guarded","auto-edit","unrestricted"];
+  var MODE_COLOR={plan:"var(--purple)",guarded:"var(--ok)","auto-edit":"var(--accent)",
+    unrestricted:"var(--fail)"};
+
+  function modeChart(d){
+    var byMode=d.byMode||{};
+    var present=MODE_ORDER.filter(function(k){
+      return Object.prototype.hasOwnProperty.call(byMode,k);
+    });
+    if(!present.length)return '<div class="hr-t">posture, by day</div>'
+      +'<div class="empty">no permission posture recorded in window.</div>';
+    var days=dayRows(d).map(function(x){return {day:x.day,parts:(x.v&&x.v.byMode)||{}};});
+    // Legend order is the stack read TOP-down, which is the reverse of the
+    // bottom-up paint order — so the entry your eye reaches first names the
+    // band your eye reaches first.
+    var legend=present.slice().reverse().map(function(k){
+      return {color:k==="not-recorded"?"var(--ink-dim)":(MODE_COLOR[k]||"var(--ink-dim)"),
+        label:k,value:fmtUsd(fld(byMode[k],"cost"))};
+    });
+    return '<div class="hr-t">posture, by day</div>'
+      +stackedDays({days:days,order:present,palette:MODE_COLOR})
+      +chartLegend(legend)
+      +'<p class="hr-note">Api-equivalent cost, stacked by the permission posture the transcript '
+      +'recorded. <b>not-recorded</b> is spend from a session that carried no posture evidence — '
+      +"held apart rather than folded into a real posture.</p>";
+  }
+  function sourceDonut(d){
+    var src=d.bySource||{};
+    var main=fld(src.main,"cost"),sub=fld(src.subagent,"cost"),total=main+sub;
+    return '<div class="hr-block"><div class="hr-t">main vs subagent</div>'
+      +(total?donut2({aValue:main,bValue:sub,aText:fmtUsd(main),bText:fmtUsd(sub),
+        aLabel:"main thread",bLabel:"subagent",centerLabel:Math.round(main/total*100)+"%"})
+        :'<div class="empty">no priced work in window.</div>')
+      +'<p class="hr-note">Share of api-equivalent cost; the ring reads main-thread. Subagent work '
+      +"is Claude's sidechain flag or Codex's ledger-backed thread source — either way, not a "
+      +"session a human was driving.</p></div>";
+  }
+  function providerRows(d){
+    var list=entries(d.byInferenceProvider);
+    var max=list.length?list[0].cost:0;
+    return '<div class="hr-block"><div class="hr-t">inference provider</div>'
+      +(list.length?rankedRows(list.map(function(x){
+        return {label:x.name==="not-recorded"?"Not recorded":identityName(x.name),
+          value:fmtUsd(x.cost),share:pct(x.cost,max),dim:x.name==="not-recorded"};
+      })):'<div class="empty">no provider evidence in window.</div>')
+      +'<p class="hr-note">A transcript host does not prove which vendor served the tokens, so '
+      +"spend whose provenance was never observed keys to <b>Not recorded</b> instead of being "
+      +"attributed to an assumption.</p></div>";
+  }
+  function renderScoreHowRun(d){
+    var body=ensureBlock("u-howrun",
+      stripHtml("u-howrun","how you run","permission posture · who drove · who served"),"u-rhythm");
+    if(!body)return;
+    body.innerHTML='<div class="howrun"><div class="hr-block hr-chart">'+modeChart(d)+"</div>"
+      +'<div class="hr-side">'+sourceDonut(d)+providerRows(d)+"</div></div>";
   }
 
   function renderScoreDayBars(d){
@@ -660,6 +818,11 @@ import { renderUsage } from './usage-orchestrators.mjs';
     renderScoreHero(d);
     renderScoreCadence(d);
     renderScoreDayBars(d);
+    // Order is load-bearing here and nowhere else in this list: how-you-run
+    // anchors its container to the rhythm strip, which renderScoreRhythm has
+    // to have inserted first.
+    renderScoreRhythm(d);
+    renderScoreHowRun(d);
     renderScoreHosts(d);
     renderScoreTokBar(d);
     renderScorePunchcard(d);

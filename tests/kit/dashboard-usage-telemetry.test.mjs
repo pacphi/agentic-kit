@@ -348,6 +348,62 @@ test('the cadence row is built once, after the hero, from totals the payload alr
   assert.match(JS, /a day worked but never billed is not counted/, 'the streak says what breaks it');
 });
 
+test('donut2 draws the arc from the raw value while the legend prints the caller-formatted text', () => {
+  const html = donut2({
+    aValue: 12.3456, bValue: 4.1, aText: '$12.35', bText: '$4.10',
+    aLabel: 'main thread', bLabel: 'subagent', centerLabel: '75%',
+  });
+  assert.match(html, /\$12\.35/, 'the legend prints the formatted money, not the float');
+  assert.doesNotMatch(html, /12\.3456/, 'the unformatted value never reaches the legend');
+  assert.match(html, /conic-gradient/, 'the arc is still drawn');
+  // Without aText/bText the raw number is the label, as before.
+  assert.match(donut2({ aValue: 3, bValue: 1, aLabel: 'a', bLabel: 'b' }), /<b class="tnum">3<\/b>/);
+});
+
+test('the rhythm panel labels buckets on the same edges the server binned them with', () => {
+  // The payload ships COUNTS, never the edges. A drift here would relabel
+  // every bar without changing a single number, which is the silent failure
+  // this pin exists to make loud.
+  assert.match(JS, new RegExp(`var LAT_EDGES=\\[${LAT_BUCKET_EDGES.join(',')}\\]`));
+  assert.match(JS, new RegExp(`var LEN_EDGES=\\[${LEN_BUCKET_EDGES.join(',')}\\]`));
+  assert.match(JS, /var LAT_LABELS=\["≤2s","≤5s","≤10s","≤30s","≤60s","＞60s"\]/);
+  assert.match(JS, /var LEN_LABELS=\["≤5m","≤15m","≤45m","≤2h","＞2h"\]/);
+});
+
+test('an overflow-bucket percentile is printed with a ≥ prefix, never as a bare figure', () => {
+  // The overflow bucket has no upper edge, so its percentile is the FLOOR:
+  // latP95 === 60 must read "≥60s" and lenP90Seconds === 7200 must read "≥2h".
+  assert.match(JS, /function fmtAtLeast\(v,lastEdge,fmt\)\{[\s\S]{0,120}v>=lastEdge\?"≥":""/);
+  assert.match(JS, /fmtAtLeast\(p95,60,fmtSecs\)/, 'latency percentiles carry the 60s overflow floor');
+  assert.match(JS, /fmtAtLeast\(p90,7200,fmtSecs\)/, 'session-length percentiles carry the 2h overflow floor');
+});
+
+test('the latency card states how latency was measured, on the card itself', () => {
+  assert.match(JS, /codex host-measured · claude\/opencode derived from event gaps — not streaming TTFT/);
+  assert.match(JS, /latP50/);
+  assert.match(JS, /latP95/);
+  assert.match(JS, /latCount/, 'the card says how many gaps it measured');
+  assert.match(JS, /no response latency measured in window/, 'nothing measured renders an empty state, not a zero');
+});
+
+test('the posture stack ships its own legend, because stackedDays draws none', () => {
+  assert.match(JS, /stackedDays\(\{days:days,order:present,palette:MODE_COLOR\}\)/);
+  assert.match(JS, /\+chartLegend\(legend\)/, 'the stacked chart is followed by an external legend');
+  assert.match(JS, /function chartLegend\(items\)/);
+  // The unobserved bucket is de-emphasis ink, never a posture color — so it
+  // deliberately has no palette entry of its own.
+  assert.match(JS, /var MODE_COLOR=\{plan:"var\(--purple\)",guarded:"var\(--ok\)","auto-edit":"var\(--accent\)",\s*unrestricted:"var\(--fail\)"\}/);
+  assert.doesNotMatch(JS, /MODE_COLOR=\{[^}]*not-recorded/);
+});
+
+test('how-you-run splits source and provider without attributing unobserved spend', () => {
+  assert.match(JS, /aValue:main,bValue:sub/, 'the donut is main vs subagent cost');
+  assert.match(JS, /d\.bySource/);
+  assert.match(JS, /entries\(d\.byInferenceProvider\)/);
+  assert.match(JS, /dim:x\.name==="not-recorded"/, 'unobserved provenance renders dim, never as a provider');
+  assert.match(JS, /attributed to an assumption/, 'the panel says why unobserved spend is held apart');
+});
+
 test('the scorecard panel grafts are idempotent — a re-render reuses its container', () => {
   // renderScore runs on every poll. ensureBlock returns the existing node
   // instead of inserting a second one; without that the scorecard would grow

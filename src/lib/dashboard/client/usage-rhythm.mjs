@@ -220,18 +220,25 @@ function donutGradient(aPct) {
 // sibling, not a descendant, of the masked element, so it is never itself
 // clipped. Side labels always carry both the series name and its value —
 // the swatch color is a hint, not the only way to tell A from B.
+//
+// `aValue`/`bValue` are the RAW numbers that set the geometry; `aText`/`bText`
+// are what the legend prints, defaulting to those numbers. The split exists
+// because the two are not interchangeable for money: the arc has to be drawn
+// from 12.3456 while the label has to read "$12.35", and re-deriving one from
+// the other would either round the arc or print an unformatted float.
 export function donut2(opts) {
   var o = opts || {};
   var a = Number(o.aValue) || 0, b = Number(o.bValue) || 0, total = a + b;
   var aPct = total ? (a / total) * 100 : 50;
+  var aText = o.aText == null ? a : o.aText, bText = o.bText == null ? b : o.bText;
   return '<div class="donut2-wrap"><div class="donut2">'
     + '<i class="donut2-ring" style="background:' + donutGradient(aPct) + '"></i>'
     + '<b class="donut2-center">' + esc(o.centerLabel) + '</b></div>'
     + '<div class="donut2-legend">'
     + '<span class="donut2-item"><i style="background:var(--accent)"></i>' + esc(o.aLabel)
-    + ' <b class="tnum">' + esc(a) + '</b></span>'
+    + ' <b class="tnum">' + esc(aText) + '</b></span>'
     + '<span class="donut2-item"><i style="background:var(--purple)"></i>' + esc(o.bLabel)
-    + ' <b class="tnum">' + esc(b) + '</b></span>'
+    + ' <b class="tnum">' + esc(bText) + '</b></span>'
     + '</div></div>';
 }
 

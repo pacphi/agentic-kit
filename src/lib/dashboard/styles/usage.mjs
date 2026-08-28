@@ -573,4 +573,30 @@ export const USAGE_CSS = `
 .rrow-fill.dim{background:var(--ink-dim)}
 .rrow-val{font-size:12px; color:var(--ink); text-align:right}
 
+/* rhythm panel — two histogram cards side by side */
+.rhythm-grid{display:grid; gap:16px; grid-template-columns:repeat(auto-fit,minmax(280px,1fr))}
+.rcard{min-width:0; border:1px solid var(--line); border-radius:var(--r-sm); background:var(--panel-2); padding:12px 14px 13px}
+.rcard-h{display:flex; align-items:baseline; justify-content:space-between; gap:10px; margin-bottom:8px}
+.rcard-t{font-size:12px; font-weight:600; color:var(--ink)}
+.rcard-n{font-size:10.5px; color:var(--ink-dim)}
+/* A marker's label is drawn ABOVE the plot box (top:-14px) so a tall bar can
+   never cover it — which means the card has to reserve that strip, or the
+   label is clipped by the card instead. Two markers close together would
+   collide on one line, so the second sits a row higher; the reserved strip is
+   tall enough for both. */
+.rcard .hist{padding-top:30px}
+.rcard .hist-marker+.hist-marker .hist-marker-lab{top:-27px}
+
+/* how-you-run panel — the by-day posture chart beside the two small readouts */
+.howrun{display:grid; gap:18px; grid-template-columns:minmax(0,1.35fr) minmax(0,1fr)}
+.hr-block{min-width:0}
+.hr-side{display:flex; flex-direction:column; gap:16px; min-width:0}
+.hr-t{font-size:11px; font-weight:600; letter-spacing:.06em; text-transform:uppercase; color:var(--ink-dim); margin-bottom:10px}
+/* Every chart in this panel carries a sentence saying what its buckets mean
+   and what the de-emphasised bucket is holding — the charts split spend by
+   things ("posture", "provider") whose absence is itself a finding. */
+.hr-note{margin:10px 0 0; font-size:11px; line-height:1.5; color:var(--ink-dim)}
+.hr-note b{color:var(--ink-2); font-weight:600}
+@media(max-width:820px){ .howrun{grid-template-columns:1fr} }
+
 `;
