@@ -1558,10 +1558,32 @@ test("buildIndex({ days, lookbackDays }) widens discovery/parse; unset stays exa
   assert.equal(byId(undefinedLookback, 'old-session'), undefined, 'lookbackDays: undefined must not widen the window either');
   assert.deepEqual(undefinedLookback.totals, plain.totals, 'unset lookbackDays is identical to omitting it entirely');
 
+  // Task 7 (2026-08-28-scorecard-matrix-a SDD) ruling B: lookbackDays alone
+  // no longer widens what the CURRENT window's sessions/totals contain — only
+  // discovery/parse/cache. `aggregate` is always called with the DISPLAY
+  // cutoff (now - days*DAY_MS), so a `previous: true`-less caller must see
+  // exactly the same current-window sessions as the plain 7-day scan; the
+  // widened read is only observable via the on-disk cache (proving discovery/
+  // parse actually reached the file) or via `previous` below.
   _resetForTest();
   const widened = await buildIndex(opts(sb, { days: 7, lookbackDays: 14 }));
-  assert.ok(byId(widened, 'old-session'), 'lookbackDays: 14 widens discovery/parse so it is returned');
+  assert.equal(byId(widened, 'old-session'), undefined,
+    'lookbackDays alone must not leak the old session into the CURRENT window — that is the bug this ruling fixes');
+  assert.deepEqual(widened.totals, plain.totals, 'the current window is byte-identical to the plain 7-day scan');
   assert.equal(widened.windowDays, 7, 'the nominal window label still reports `days` unchanged');
+  const cache = JSON.parse(fs.readFileSync(sb.cachePath, 'utf8'));
+  assert.equal(cache.entries[file]?.session?.id, 'old-session',
+    'discovery/parse DID reach the old file — it is cached even though the current window excludes it');
+
+  // Paired with `previous: true`, the widened read is what makes the old
+  // session reachable at all — via the previous-window projection, not by
+  // hand-splitting a widened sessions[].
+  _resetForTest();
+  const withPrevious = await buildIndex(opts(sb, { days: 7, lookbackDays: 14, previous: true }));
+  assert.equal(byId(withPrevious, 'old-session'), undefined, 'still excluded from the current window');
+  assert.equal(withPrevious.totals.sessions, 0, 'the current 7-day window has no sessions at all');
+  assert.equal(withPrevious.previous.totals.sessions, 1,
+    'the 10-day-old session lands in the previous [14d, 7d) window instead');
 });
 
 // F-08-style regression guard (see the scanKey test above): lookbackDays now

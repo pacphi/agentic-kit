@@ -1345,8 +1345,15 @@ export function startDashboard({
     // all" control still knows the true count and calls /api/sessions for the rest.
     async function handleUsage(req, res, query) {
       try {
+        const days = clampDays(query.get('days'));
         const [agg, providerAnalytics] = await Promise.all([
-          usageApi.readIndex({ days: clampDays(query.get('days')) }),
+          // lookbackDays widens what usage-index.mjs reads off disk so records
+          // from the window BEFORE this one survive to be aggregated;
+          // previous:true is what actually turns those into agg.previous
+          // (totals + rhythm) — this window's own totals/sessions stay
+          // exactly `days` wide either way (usage-index.mjs's own display-
+          // cutoff guarantee).
+          usageApi.readIndex({ days, lookbackDays: days * 2, previous: true }),
           typeof usageApi.readProviderAnalytics === 'function'
             ? Promise.resolve(usageApi.readProviderAnalytics())
               .catch(() => ({ openrouter: null }))

@@ -392,14 +392,21 @@ function notify(onProgress, payload) {
 /**
  * @typedef {object} IndexOptions
  * @property {number} [days]        window size in days (default 14)
- * @property {number} [lookbackDays] widen the discovery/parse cutoff (and the
- *           cutoff `aggregate` filters `sessions` against) to this many days
- *           back instead of `days` — a caller computing a delta between two
- *           `days`-sized windows can pass e.g. `lookbackDays: days * 2` and
- *           get both windows' sessions back from one scan; `windowDays` in
- *           the result still reports `days` — splitting the wider `sessions`
- *           list back into windows is the caller's job. Undefined (default)
- *           behaves exactly as `days` alone: no widening.
+ * @property {number} [lookbackDays] widen the discovery/parse/cache cutoff to
+ *           this many days back instead of `days`, so records older than the
+ *           DISPLAYED window are still read off disk and handed to
+ *           `aggregate`. The `aggregate` call itself always filters the
+ *           CURRENT window's `sessions`/`totals` at the display cutoff
+ *           (`now - days * DAY_MS`), never the widened one — a caller must
+ *           pair this with `previous: true` (below) to actually get the
+ *           older records back out, via `previous.totals`/`previous.rhythm`,
+ *           rather than by hand-splitting a widened `sessions[]`. Undefined
+ *           (default) behaves exactly as `days` alone: no widening.
+ * @property {boolean} [previous]   also have `aggregate` project the
+ *           equal-length window immediately before the displayed one (see
+ *           usage-aggregate.mjs's `previousWindow`); needs `lookbackDays` set
+ *           wide enough for those older records to have been read at all.
+ *           Forwarded to `aggregate`'s own `previous` option unchanged.
  * @property {boolean} [force]      ignore cached per-file entries
  * @property {Function} [onProgress] called with { scanned, total, phase }
  * @property {{claude?: string, codex?: string, opencode?: string}} [roots] override transcript roots (tests; opencode = the SQLite store path)
@@ -577,17 +584,19 @@ function resolveCodexLedger(o, rawRoots) {
 async function scan(o = {}) {
   const {
     days = 14, lookbackDays, force = false, onProgress, roots, cachePath, now = Date.now(), deps: injected,
+    previous = false,
   } = o;
   const deps = await loadDeps(injected);
   const r = { ...defaultRoots(), ...(roots ?? {}) };
   const cacheFile = cachePath ?? defaultCachePath();
-  // Widened when the caller passes lookbackDays (a server computing a delta
-  // between two `days`-sized windows, e.g.) — every discovery/parse use below
-  // (candidates, opencode listing, carry-forward, and the cutoff `aggregate`
-  // filters `sessions` against) shares this ONE value, so widening it here is
-  // the entire effect. `windowDays` in the returned aggregate still reports
-  // `days` unchanged; bucketing the wider `sessions` list back into windows
-  // is the caller's job. Unset, `lookbackDays ?? days` is exactly `days` —
+  // Widened when the caller passes lookbackDays (a server wanting a
+  // `previous`-window projection, e.g.) — every DISCOVERY/parse use below
+  // (candidates, opencode listing, carry-forward) shares this ONE value, so
+  // widening it here is the entire discovery-side effect. It does NOT reach
+  // `aggregate`'s own cutoff below — see displayCutoff — so the CURRENT
+  // window's `sessions`/`totals` never silently widen with it; only
+  // `aggregate`'s `previous` projection (when requested) reads the extra
+  // records this pulls in. Unset, `lookbackDays ?? days` is exactly `days` —
   // today's behavior, unchanged.
   const cutoff = now - (lookbackDays ?? days) * DAY_MS;
 
@@ -642,7 +651,16 @@ async function scan(o = {}) {
   // arrives later (or gets repaired) corrects old sessions without a cache
   // invalidation.
   const { ledger, health: codexLedgerHealth } = resolveCodexLedger(o, roots);
-  const result = aggregate(applyCodexLedger(records, ledger), { days, now, cutoff, deps });
+  // DISPLAY cutoff, deliberately distinct from the (possibly lookback-
+  // widened) discovery `cutoff` above: `records` may span further back than
+  // `days` so `previous` below has something to project from, but the
+  // CURRENT window's own sessions/totals must stay exactly `days` wide, or a
+  // `previous: true` caller would find its "current" totals silently
+  // absorbing what should have been the previous window (the bug this fixes).
+  const displayCutoff = now - days * DAY_MS;
+  const result = aggregate(applyCodexLedger(records, ledger), {
+    days, now, cutoff: displayCutoff, deps, previous,
+  });
   const codexSourceHealth = finalizeCodexHealth(codexHealth, codexDiagnostics);
   addTelemetryDiagnostics(commonDiagnostics.codex, {
     warnings: codexSourceHealth.diagnostics.warnings,
