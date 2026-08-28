@@ -18,6 +18,16 @@ import { renderUsage } from './usage-orchestrators.mjs';
     if(n>=10)return "$"+n.toFixed(0);
     return "$"+n.toFixed(2);
   }
+  // A POSITIVE figure that rounds away at two decimals is not $0.00 — printing
+  // it that way beside a caption about excluding $0-by-construction sessions
+  // reads as "the median session was free", which is a different claim from
+  // "the median session cost less than a cent". The threshold is derived from
+  // fmtUsd's own output rather than restating its rounding rule, so the two
+  // cannot disagree. A true zero is left alone: it is not less than a cent.
+  function fmtUsdMin(n){
+    var v=Number(n)||0,txt=fmtUsd(v);
+    return (v>0&&txt==="$0.00")?"<$0.01":txt;
+  }
   export function fmtNum(n){return (Number(n)||0).toLocaleString();}
   export function fmtTok(n){
     n=Number(n)||0;
@@ -452,8 +462,12 @@ import { renderUsage } from './usage-orchestrators.mjs';
   }
   var CACHE_TIP="Share of this window's tokens that were cache reads. Higher is cheaper, so a rise "
     +"is the good direction.\nsaved ≈ prices the same cache-read tokens as fresh input and takes the "
-    +"gap, at each day's own rate.\nNo trend line: /api/usage's per-day rows carry tokens, cost and "
-    +"sessions — cache reads are not broken out per day, so a daily share cannot be computed here.";
+    +"gap, at each day's own rate.\nThe trend is that share recomputed per day. A day that billed no "
+    +"tokens has no share to compute, so the line breaks across it rather than carrying a neighbour's "
+    +"value forward.";
+  // Engaged time is the ONE hero trend drawn from a different day set. Said on
+  // the tile, because the tiles otherwise look directly comparable and are not.
+  var ENGAGED_TREND_NOTE="\ntrend covers days you worked; the other tiles' trends cover billed days.";
 
   function renderScoreHero(d){
     var t=d.totals||{},p=(d.previous&&d.previous.totals)||{};
@@ -474,13 +488,22 @@ import { renderUsage } from './usage-orchestrators.mjs';
         esc(fmtMins(t.spanMinutes))+" summed"
         +'<span class="d-note">sessions overlap</span>'
         +kpiFoot(deltaChip(t.engagedSeconds,p.engagedSeconds,{}),
-          sparklineSvg(mapRows(d.engagedByDay).map(function(x){return Number(x.v)||0;}),{})),"",ladder(t))
+          sparklineSvg(mapRows(d.engagedByDay).map(function(x){return Number(x.v)||0;}),{})),
+        "",ladder(t)+ENGAGED_TREND_NOTE)
       // Cache share is up-good, unlike the cost tile beside it: cache reads
       // bill at 0.1× input, so a bigger share of them is a cheaper window.
       // The delta is in percentage POINTS — a percent-of-a-percent would be
       // read as a share change and is not what moved.
+      // A day that billed no tokens has no share to compute. It keeps its slot
+      // in the series as a null, which sparklineSvg draws as a BREAK — never a
+      // carried-forward value, which would state a figure for a day that has
+      // none, and never a dropped point, which would squeeze the time axis.
       +kpi("cache read",cacheShare.toFixed(1)+"%",cacheSubtitle(t)
-        +kpiFoot(deltaChip(cacheShare,prevCacheShare,{unit:" pp"}),""),"warnv",CACHE_TIP);
+        +kpiFoot(deltaChip(cacheShare,prevCacheShare,{unit:" pp"}),
+          spark(function(x){
+            var tok=fld(x.v,"tokens");
+            return tok?pct(fld(x.v,"cacheRead"),tok):null;
+          })),"warnv",CACHE_TIP);
     document.getElementById("u-asof").textContent=d.pricesAsOf?("rates as of "+d.pricesAsOf):"";
 
   }
@@ -496,7 +519,8 @@ import { renderUsage } from './usage-orchestrators.mjs';
   var TIP_PER_SESSION="Median api-equivalent cost of one session, and the 90th percentile of the same "
     +"set.\nSessions with NO token evidence at all are excluded: they are structurally $0 (a Codex "
     +"subagent rollout whose tokens were stripped as a double-count, say), not cheap, and folding "
-    +"them in would drag the median toward zero for a reason that is not about spend.";
+    +"them in would drag the median toward zero for a reason that is not about spend.\n<$0.01 means "
+    +"a real, positive figure smaller than a cent — not zero.";
   var TIP_PER_HOUR="Api-equivalent cost ÷ engaged hours.\nEngaged time unions active sub-intervals "
     +"split at 15-minute silences — not wall clock, and not the sum of session spans, which "
     +"double-counts overlap.\n— when no engaged time was measured.";
@@ -526,10 +550,10 @@ import { renderUsage } from './usage-orchestrators.mjs';
         auto==null?"no prompts you typed in window"
           :(touch==null?"touch rate not recorded"
             :esc(fmtRatio(touch))+" prompts / engaged hour"),"",TIP_AUTONOMY)
-      +kpi("cost / session",med==null?"—":fmtUsd(med),
+      +kpi("cost / session",med==null?"—":fmtUsdMin(med),
         med==null?"no priced sessions in window"
           :"median &middot; excludes $0-by-construction"
-            +'<span class="d-note">P90 '+esc(p90==null?"—":fmtUsd(p90))+"</span>","",TIP_PER_SESSION)
+            +'<span class="d-note">P90 '+esc(p90==null?"—":fmtUsdMin(p90))+"</span>","",TIP_PER_SESSION)
       +kpi("cost / engaged hour",perHour==null?"—":fmtUsd(perHour),
         perHour==null?"no engaged time measured":"engaged time, not wall clock","",TIP_PER_HOUR);
   }
@@ -829,9 +853,13 @@ import { renderUsage } from './usage-orchestrators.mjs';
     +"to) and surfaced here instead of vanishing.\nRate is exceptions ÷ responses × 1000.";
   var ABORT_TIP="Turns the transcript recorded as interrupted — the answer was stopped mid-flight. "
     +"Counted apart from exceptions: an abort is a choice, not a failure.";
-  var REL_ABSENT="No per-day line: /api/usage's per-day rows carry tokens, cost and sessions, so "
-    +"exceptions exist only as a window total. A daily trend would have to be invented rather than "
-    +"read, so none is drawn.";
+  // The per-day series rides the SAME first-billed-day attribution the session
+  // count uses, which is not the moment a turn dropped: a session that spans
+  // midnight lands all of its exceptions on one day. Said on the panel, because
+  // a reader will otherwise take a peak as "something broke that afternoon".
+  var REL_TREND_NOTE="Attributed to the day each session first billed — not the moment a turn "
+    +"dropped, so a session spanning midnight lands all of its exceptions on one day. A session that "
+    +"never billed has no day to attribute to and appears in neither this line nor the counts above.";
 
   function relRate(t){
     var r=Number(t&&t.responses)||0;
@@ -854,6 +882,30 @@ import { renderUsage } from './usage-orchestrators.mjs';
       +'<span class="rel-v tnum">'+esc(o.value)+"</span>"
       +'<span class="rel-sub">'+esc(o.sub)+"</span>"+(o.flag||"")+"</div>";
   }
+  // The single worst day, named. "Worst" is a fact the counts already carry —
+  // no threshold is invented to decide what counts as a spike, because any
+  // constant this file picked would be a judgement the data never made.
+  function relWorstDay(rows){
+    var worst=null;
+    for(var i=0;i<rows.length;i++){
+      var n=fld(rows[i].v,"exceptions");
+      if(n>0&&(!worst||n>worst.n))worst={day:rows[i].day,n:n};
+    }
+    return worst;
+  }
+  function relTrend(d){
+    var rows=dayRows(d),series=rows.map(function(x){return fld(x.v,"exceptions");});
+    var total=series.reduce(function(a,n){return a+n;},0);
+    if(!total)return '<div class="rel-trend"><div class="hr-t">exceptions by day</div>'
+      +'<div class="empty">no exceptions on any day in this window.</div></div>';
+    var worst=relWorstDay(rows);
+    // Icon, words and color together — the day is named in text, so the flag
+    // survives a reader who cannot separate the status tokens.
+    var flag=worst?'<span class="rel-flag" data-sev="warn"><i aria-hidden="true">▲</i>worst day '
+      +esc(worst.day.slice(5))+" &middot; "+esc(fmtNum(worst.n))+" of "+esc(fmtNum(total))+"</span>":"";
+    return '<div class="rel-trend"><div class="hr-t">exceptions by day</div>'
+      +sparklineSvg(series,{w:640,h:44})+flag+"</div>";
+  }
   function renderScoreReliability(d){
     var body=ensureBlock("u-reliability",
       stripHtml("u-reliability","reliability","turns that never landed"),"u-models");
@@ -866,7 +918,7 @@ import { renderUsage } from './usage-orchestrators.mjs';
         flag:relFlag(cur,p?relRate(p):null)})
       +relStat({label:"aborted turns",value:fmtNum(ab),
         sub:resp?fmtRatio(ab/resp*1000)+" per 1k responses":"no responses in window",tip:ABORT_TIP})
-      +"</div><p class=\"hr-note\">"+esc(REL_ABSENT)+"</p>";
+      +"</div>"+relTrend(d)+'<p class="hr-note">'+esc(REL_TREND_NOTE)+"</p>";
   }
 
   function renderScoreModels(d){
@@ -1175,6 +1227,18 @@ import { renderUsage } from './usage-orchestrators.mjs';
   function sessionP50(sx){
     return Array.isArray(sx.latHist)?bucketPercentile(sx.latHist,LAT_EDGES,0.5):null;
   }
+  // A raw spelling carrying "[object Object]" is not a spelling — it is a
+  // failed toString, and printing it would put this dashboard's own
+  // rendering-artifact sentinel inside a tooltip. Rejected as not-recorded,
+  // which is what a stringification failure actually leaves behind. Observed
+  // on every Codex row in a live window: usage-modes.mjs joins Codex's
+  // sandboxPolicy into the raw string and that field is an OBJECT in real
+  // rollouts, so the value never was a spelling. Fixing the join is upstream's
+  // to make; refusing to render the wreckage is this file's.
+  function rawSpelling(v){
+    var s=reportedIdentity(v);
+    return (s&&s.indexOf("[object ")<0)?s:null;
+  }
   // The posture the transcript recorded, and NOTHING when it recorded none: an
   // unobserved or unmapped raw value is not a posture, and a badge that guessed
   // one would read exactly like an observed one. `modeRaw` is the host's own
@@ -1184,7 +1248,7 @@ import { renderUsage } from './usage-orchestrators.mjs';
   function modeBadge(sx){
     var mode=reportedIdentity(sx.mode);
     if(!mode)return "";
-    var raw=reportedIdentity(sx.modeRaw);
+    var raw=rawSpelling(sx.modeRaw);
     return '<span class="s-chip s-mode" data-mode="'+esc(mode)+'" title="'
       +esc("permission posture: "+mode
         +(raw?" · recorded by the host as \""+raw+"\"":" · the host's own spelling was not recorded"))
@@ -1244,7 +1308,7 @@ import { renderUsage } from './usage-orchestrators.mjs';
     // never-omit-a-line rule: a fact that was measured and found absent reads
     // "Not recorded"/"—", not silence, which would teach the reader the field
     // does not exist (ADR-0009 §5).
-    var modeRaw=reportedIdentity(sx.modeRaw),modeName=reportedIdentity(sx.mode);
+    var modeRaw=rawSpelling(sx.modeRaw),modeName=reportedIdentity(sx.mode);
     var posture=modeName
       ? esc(modeName)+" <span class='sd-conf'>("
         +esc(modeRaw?"recorded by the host as \""+modeRaw+"\"":"host spelling not recorded")+")</span>"

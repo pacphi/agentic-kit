@@ -55,20 +55,36 @@ export function deltaChip(curr, prev, opts) {
 // '' when fewer than 2 finite points remain. No axes, no gridlines — a
 // de-emphasis-ink trend line with one accent dot at the most recent point,
 // meant to sit inline next to a KPI rather than stand alone as a chart.
+//
+// A non-finite entry is a GAP, not a dropped point: it keeps its slot on the
+// x axis and the line BREAKS across it, emitting one polyline per run of
+// consecutive finite points. Compacting it away instead would silently
+// squeeze the time axis — three missing days would render as one step — and
+// carrying a neighbour's value forward would state a figure for a day that
+// has none. A visible break says "no measurement here", which is the truth.
 export function sparklineSvg(series, opts) {
   var o = opts || {}, w = o.w || 130, h = o.h || 24;
-  var pts = (Array.isArray(series) ? series : []).filter(Number.isFinite);
+  var raw = Array.isArray(series) ? series : [];
+  var pts = raw.filter(Number.isFinite);
   if (pts.length < 2) return '';
   var pad = 2, innerW = w - pad * 2, innerH = h - pad * 2;
   var min = Math.min.apply(null, pts), max = Math.max.apply(null, pts), span = (max - min) || 1;
-  var coords = pts.map(function (v, i) {
-    return [pad + (i / (pts.length - 1)) * innerW, pad + innerH - ((v - min) / span) * innerH];
+  var span2 = raw.length > 1 ? raw.length - 1 : 1;
+  // One run per unbroken stretch of measured points; a lone point between two
+  // gaps has no segment to draw and is skipped by the length check below.
+  var runs = [], run = [], last = null;
+  raw.forEach(function (v, i) {
+    if (!Number.isFinite(v)) { if (run.length) runs.push(run); run = []; return; }
+    var p = [pad + (i / span2) * innerW, pad + innerH - ((v - min) / span) * innerH];
+    run.push(p); last = p;
   });
-  var last = coords[coords.length - 1];
-  var poly = coords.map(function (p) { return p[0].toFixed(1) + ',' + p[1].toFixed(1); }).join(' ');
+  if (run.length) runs.push(run);
+  var lines = runs.filter(function (r) { return r.length > 1; }).map(function (r) {
+    return '<polyline class="spark-line" fill="none" points="'
+      + esc(r.map(function (p) { return p[0].toFixed(1) + ',' + p[1].toFixed(1); }).join(' ')) + '"/>';
+  }).join('');
   return '<svg class="spark" viewBox="0 0 ' + w + ' ' + h + '" width="' + w + '" height="' + h
-    + '" focusable="false" aria-hidden="true">'
-    + '<polyline class="spark-line" fill="none" points="' + esc(poly) + '"/>'
+    + '" focusable="false" aria-hidden="true">' + lines
     + '<circle class="spark-dot" cx="' + last[0].toFixed(1) + '" cy="' + last[1].toFixed(1) + '" r="2.2"/>'
     + '</svg>';
 }

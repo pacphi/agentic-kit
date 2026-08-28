@@ -456,13 +456,63 @@ test('reliability states a rate with its denominator, and flags direction in wor
   assert.match(CSS, /\.rel-flag\[data-sev="warn"\]\{color:var\(--warn\)\}/);
 });
 
-test('reliability says why there is no per-day line rather than drawing an invented one', () => {
-  // byDay rows carry tokens/cost/sessions only — exceptions exist as a window
-  // total, so a daily trend cannot be read from this payload.
-  assert.match(JS, /No per-day line/);
-  assert.match(JS, /A daily trend would have to be invented rather than /);
-  assert.match(JS, /exceptions exist only as a window total/);
-  assert.doesNotMatch(JS, /sparklineSvg\([^)]*exception/i, 'no exceptions series is charted');
+test('reliability draws the per-day line and names its worst day without inventing a threshold', () => {
+  // byDay carries exceptions as of the upstream v11 projection, so the line is
+  // read rather than invented. "Worst" is a fact the counts already carry — no
+  // constant decides what counts as a spike, because any constant this file
+  // picked would be a judgement the data never made.
+  assert.match(JS, /function relTrend\(d\)/);
+  assert.match(JS, /rows\.map\(function\(x\)\{return fld\(x\.v,"exceptions"\);\}\)/);
+  assert.match(JS, /sparklineSvg\(series,\{w:640,h:44\}\)/);
+  assert.match(JS, /function relWorstDay\(rows\)/);
+  assert.match(JS, /no exceptions on any day in this window/, 'an all-zero window draws no line');
+  // Icon + words + color, and the day is named in text.
+  assert.match(JS, /rel-flag" data-sev="warn"><i aria-hidden="true">▲<\/i>worst day /);
+  // The attribution caveat is the point: a peak is not "the day it broke".
+  assert.match(JS, /Attributed to the day each session first billed/);
+  assert.match(JS, /spanning midnight lands all of its exceptions on one day/);
+});
+
+test('sparklineSvg breaks across a gap rather than dropping the point or carrying one forward', () => {
+  // Dropping would squeeze the time axis (three missing days rendering as one
+  // step); carrying forward would state a figure for a day that has none.
+  assert.equal((sparklineSvg([1, 2, 3]).match(/<polyline/g) || []).length, 1);
+  assert.equal((sparklineSvg([1, 2, null, 4, 5]).match(/<polyline/g) || []).length, 2, 'one run each side of the gap');
+  assert.equal((sparklineSvg([1, 2, null, 4, null, 6, 7]).match(/<polyline/g) || []).length, 2, 'the lone point between two gaps has no segment');
+  assert.match(sparklineSvg([1, 2, 3, null]), /circle/, 'the dot marks the last MEASURED point');
+  // The gap keeps its slot: with 3 slots the run ends at the same x it would
+  // have had with no gap at all.
+  const gapped = /points="([^"]+)"/.exec(sparklineSvg([1, 2, null, 4]));
+  assert.ok(gapped, 'a 4-point series with one gap still draws its leading run');
+  // Unchanged for callers that pass only finite points.
+  assert.equal(sparklineSvg([1]), '');
+  assert.equal(sparklineSvg([1, NaN]), '');
+});
+
+test('the cache tile trends its share per day, nulling a day that billed no tokens', () => {
+  assert.match(JS, /var tok=fld\(x\.v,"tokens"\);\s*return tok\?pct\(fld\(x\.v,"cacheRead"\),tok\):null;/);
+  assert.match(JS, /the line breaks across it rather than carrying a neighbour's/);
+});
+
+test('the engaged tile says its trend covers a different day set than the others', () => {
+  // engagedByDay is keyed on days WORKED; every other hero trend is keyed on
+  // days BILLED. The tiles look directly comparable and are not.
+  assert.match(JS, /trend covers days you worked; the other tiles' trends cover billed days/);
+  assert.match(JS, /ladder\(t\)\+ENGAGED_TREND_NOTE/);
+  // And the .kpi-foot comment no longer claims the row shares a baseline. (The
+  // phrase is scoped tightly: styles/system.mjs has its own, unrelated "compared
+  // at a glance" about a different layout.)
+  assert.doesNotMatch(CSS, /trend lines across a row of tiles share a baseline/);
+  assert.match(CSS, /not a row to compare across/);
+});
+
+test('a positive figure under a cent reads <$0.01; a true zero does not', () => {
+  // "$0.00 median" beside "excludes $0-by-construction" reads as "the median
+  // session was free", which is a different claim from "under a cent".
+  assert.match(JS, /function fmtUsdMin\(n\)\{\s*var v=Number\(n\)\|\|0,txt=fmtUsd\(v\);\s*return \(v>0&&txt==="\$0\.00"\)\?"<\$0\.01":txt;/);
+  assert.match(JS, /med==null\?"—":fmtUsdMin\(med\)/);
+  assert.match(JS, /fmtUsdMin\(p90\)/);
+  assert.match(JS, /means \\na real, positive figure smaller than a cent|a real, positive figure smaller than a cent/);
 });
 
 test('session chips render only what the transcript established, and nothing else', () => {
@@ -480,6 +530,35 @@ test('the mode badge is absent when no posture was observed, never a guessed one
   assert.match(JS, /recorded by the host as/, 'modeRaw rides in the tooltip when the payload carries it');
   assert.match(JS, /the host's own spelling was not recorded/, 'and says so when it does not');
   assert.match(CSS, /\.s-chip\.s-mode\[data-mode="unrestricted"\]/);
+});
+
+test('the fields the chips read are actually projected onto the session row', () => {
+  // The chip branches were written against a payload that did not yet carry
+  // these; upstream now projects them. This asserts the two halves meet, so a
+  // regression on either side goes red rather than silently rendering nothing.
+  const rec = usageRecord('ctx', {
+    end: NOW - 2 * DAY_MS,
+    mode: 'auto-edit',
+    usageRows: [{ day: '2026-08-18', model: 'claude-opus-5', input: 10, output: 5, cacheRead: 0, cacheWrite: 0, responses: 1 }],
+  });
+  Object.assign(rec, { modeRaw: 'acceptEdits', ctxWindow: 200_000, ctxLastTokens: 151_000 });
+  const agg = aggregate([rec], { days: 7, now: NOW, cutoff: NOW - 7 * DAY_MS, deps: FIXTURE_DEPS });
+  const row = agg.sessions[0];
+  assert.equal(row.modeRaw, 'acceptEdits', 'the badge tooltip has a raw spelling to print');
+  assert.equal(row.ctxWindow, 200_000, 'the ctx chip has a denominator');
+  assert.equal(row.ctxLastTokens, 151_000, 'the ctx chip has a numerator');
+  // …and the client reads exactly those names.
+  assert.match(JS, /rawSpelling\(sx\.modeRaw\)/);
+  assert.match(JS, /Number\(sx\.ctxLastTokens\),win=Number\(sx\.ctxWindow\)/);
+});
+
+test('a raw spelling that is a failed toString is refused, not printed into a tooltip', () => {
+  // Live data: every Codex row carries modeRaw "never/[object Object]" —
+  // usage-modes.mjs joins Codex's sandboxPolicy into the string and that field
+  // is an object. Printing it would put the dashboard's own rendering-artifact
+  // sentinel inside a tooltip, so it is treated as not-recorded.
+  assert.match(JS, /function rawSpelling\(v\)\{\s*var s=reportedIdentity\(v\);\s*return \(s&&s\.indexOf\("\[object "\)<0\)\?s:null;/);
+  assert.doesNotMatch(JS, /reportedIdentity\(sx\.modeRaw\)/, 'the unguarded read must not survive anywhere');
 });
 
 test('the context chip requires BOTH halves, and is omitted rather than divided by a guess', () => {

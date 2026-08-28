@@ -128,12 +128,21 @@ export const USAGE_CSS = `
 .kpi.accent .v{color:var(--accent)}
 .kpi.warnv .v{color:var(--warn)}
 /* The tile footer carries the change against the previous equal-length window
-   and the per-day trend for the same figure. space-between rather than a gap:
-   the sparkline anchors to the tile's right edge, so the trend lines across a
-   row of tiles share a baseline and can be compared at a glance. Both halves
+   and the per-day trend for the same figure. space-between rather than a gap,
+   so the chip stays left and the sparkline anchors to the tile's right edge
+   instead of drifting with the chip's width. Each line is scaled to its OWN
+   min/max and the tiles do not all cover the same day set (Engaged time is
+   drawn from days worked, the rest from days billed), so these are shape
+   readings one tile at a time — not a row to compare across. Both halves
    self-suppress when their data is absent, and the row is omitted entirely
    when neither renders — so a tile never grows an empty band. */
 .kpi-foot{display:flex; align-items:center; justify-content:space-between; gap:10px; margin-top:9px; min-height:24px}
+/* The chip is the reading; the line is the shape. So the chip never shrinks or
+   wraps — a unit-suffixed delta ("0 pp") broke across two lines once the cache
+   tile gained a trend to share the row with — and the sparkline gives up width
+   instead, scaling inside its own viewBox. */
+.kpi-foot .dchip{flex:none; white-space:nowrap}
+.kpi-foot .spark{flex:0 1 auto; min-width:0; max-width:100%}
 /* The second KPI row is a continuation of the hero, not a new section: same
    grid, pulled up so the two read as one block, and quieter numbers because
    these are derived rates rather than the measured totals above them. */
@@ -639,6 +648,14 @@ export const USAGE_CSS = `
 .rel-flag[data-sev="warn"]{color:var(--warn)}
 .rel-flag[data-sev="ok"]{color:var(--ok)}
 .rel-flag[data-sev="flat"]{color:var(--ink-dim)}
+/* The per-day exceptions line sits below the two stat cards at full strip
+   width, not inside the .rel grid — a third auto-fit cell would have squeezed
+   it to a third of the row, which is not enough horizontal room for one point
+   per day to read as a shape. max-width keeps it from stretching thin on a
+   wide window; the line never scales, so its stroke stays 1.6px everywhere. */
+.rel-trend{margin-top:14px}
+.rel-trend .spark{display:block; max-width:100%}
+.rel-trend .rel-flag{margin-top:2px}
 
 /* limits pace tick — where the window's own clock is, so a meter reads as
    "ahead of pace" or "behind" rather than only as a level. Scoped to .lim so
