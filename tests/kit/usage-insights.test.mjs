@@ -600,10 +600,10 @@ test('the kitchen-sink fixture fires each detector at most once', () => {
 });
 
 // ── Direct per-detector unit tests ───────────────────────────────────────────
-// detectInsights composes these 13 detect() functions from a shared `ctx`
+// detectInsights composes these 15 detect() functions from a shared `ctx`
 // prelude (a/totals/sessions/windowCost/sessionCount). Calling each one
-// directly — bypassing detectInsights's flatMap+sort — proves the extraction
-// preserved firing behavior in isolation, independent of the other 12.
+// directly — bypassing detectInsights's flatMap+sort — proves each one's
+// firing behavior holds in isolation, independent of the other 14.
 
 function ctxFrom(agg) {
   const a = agg && typeof agg === 'object' ? agg : {};
@@ -700,4 +700,118 @@ const longSessionAgg = (longCost, totalCost) => makeAgg({
 test('_detectors[long-session-share] fires/does not fire directly on 8h+ session spend share', () => {
   assert.equal(_detectors['long-session-share'](ctxFrom(longSessionAgg(20, 100))).length, 0);
   assert.equal(_detectors['long-session-share'](ctxFrom(longSessionAgg(30, 100))).length, 1);
+});
+
+// ── latency-regression / unrestricted-mode ───────────────────────────────────
+// Brand new detectors, not extractions — so both the boundary-style and the
+// direct _detectors[] coverage are written together, same as everything above.
+
+// Session end time is start + minutes (see sessionEndMs in the source), so
+// each fixture gets a distinct `start` to make the half-split unambiguous.
+// latHist buckets: [0]<2s [1]2-5s [2]5-10s [3]10-30s [4]30-60s [5]60s+
+// (LAT_BUCKET_EDGES = [2, 5, 10, 30, 60] — pinned equal to the source's copy
+// by usage-index.test.mjs, not re-pinned here).
+const latSession = (start, latHist, latCount) => session({ start, minutes: 10, latHist, latCount });
+
+// First half: two sessions merging to [0,0,30,0,0,0] → bucket-interpolated
+// p50 7.5s. Second half: two sessions merging to [0,0,16,20,0,0] → p50 12s.
+// +4.5s absolute and +60% relative clear both floors.
+const latencyFiresAgg = () => makeAgg({
+  sessions: [
+    latSession('2026-07-01T00:00:00.000Z', [0, 0, 15, 0, 0, 0], 15),
+    latSession('2026-07-02T00:00:00.000Z', [0, 0, 15, 0, 0, 0], 15),
+    latSession('2026-07-20T00:00:00.000Z', [0, 0, 8, 10, 0, 0], 18),
+    latSession('2026-07-21T00:00:00.000Z', [0, 0, 8, 10, 0, 0], 18),
+  ],
+});
+
+// First half: 20 samples — under the 30-sample floor. Second half: 40
+// samples all in the 10-30s bucket (p50 20s), a jump that would clear both
+// the relative and absolute floors on delta alone if the sample gate did not
+// suppress it first.
+const latencyInsufficientAgg = () => makeAgg({
+  sessions: [
+    latSession('2026-05-01T00:00:00.000Z', [0, 0, 20, 0, 0, 0], 20),
+    latSession('2026-05-20T00:00:00.000Z', [0, 0, 0, 40, 0, 0], 40),
+  ],
+});
+
+// p50 15s -> 16s: +1s absolute (<2s) and +6.7% relative (<25%) — fails both
+// floors, not just one.
+const latencyModestAgg = () => makeAgg({
+  sessions: [
+    latSession('2026-06-01T00:00:00.000Z', [0, 0, 10, 20, 0, 0], 30),
+    latSession('2026-06-20T00:00:00.000Z', [0, 0, 10, 25, 0, 0], 35),
+  ],
+});
+
+test('latency-regression fires when the second half is both 25%+ and 2s+ slower', () => {
+  const ins = byId(detectInsights(latencyFiresAgg()), 'latency-regression');
+  assert.ok(ins);
+  assert.equal(ins.kind, 'trend');
+  assert.equal(ins.severity, 'warn');
+  assert.equal(ins.impact, null);
+  assert.match(ins.finding, /7\.5s/);
+  assert.match(ins.finding, /12s/);
+  assert.match(ins.evidence, /30/);
+  assert.match(ins.evidence, /36/);
+});
+
+test('latency-regression does not fire when either half has fewer than 30 samples', () => {
+  assert.equal(fired(latencyInsufficientAgg(), 'latency-regression'), false);
+});
+
+test('latency-regression does not fire on a modest increase that fails both thresholds', () => {
+  assert.equal(fired(latencyModestAgg(), 'latency-regression'), false);
+});
+
+test('latency-regression does not fire when sessions carry no latency histogram', () => {
+  const agg = makeAgg({
+    sessions: [
+      latSession('2026-04-01T00:00:00.000Z', null, 0),
+      latSession('2026-04-20T00:00:00.000Z', null, 0),
+    ],
+  });
+  assert.equal(fired(agg, 'latency-regression'), false);
+});
+
+test('_detectors[latency-regression] fires/does not fire directly, matching detectInsights', () => {
+  assert.equal(_detectors['latency-regression'](ctxFrom(latencyInsufficientAgg())).length, 0);
+  assert.equal(_detectors['latency-regression'](ctxFrom(latencyFiresAgg())).length, 1);
+});
+
+// unrestricted-mode
+const unrestrictedAgg = () => makeAgg({
+  sessions: [
+    session({ mode: 'unrestricted', cost: 42, project: 'alpha' }),
+    session({ mode: 'guarded', cost: 58, project: 'beta' }),
+  ],
+});
+
+test('unrestricted-mode fires on a recorded unrestricted session, naming count/cost/project', () => {
+  const ins = byId(detectInsights(unrestrictedAgg()), 'unrestricted-mode');
+  assert.ok(ins);
+  assert.equal(ins.kind, 'coach');
+  assert.equal(ins.severity, 'info');
+  assert.equal(ins.impact, null);
+  assert.match(ins.finding, /1 session/);
+  assert.match(ins.finding, /1 project/);
+  assert.match(ins.finding, /\$42/);
+});
+
+test('unrestricted-mode does not fire on null or not-recorded modes', () => {
+  const agg = makeAgg({
+    sessions: [
+      session({ mode: null, cost: 10 }),
+      session({ mode: 'not-recorded', cost: 10 }),
+      session({ cost: 10 }),   // no mode key observed at all
+    ],
+  });
+  assert.equal(fired(agg, 'unrestricted-mode'), false);
+});
+
+test('_detectors[unrestricted-mode] fires/does not fire directly, matching detectInsights', () => {
+  const none = makeAgg({ sessions: [session({ mode: 'guarded', cost: 10 })] });
+  assert.equal(_detectors['unrestricted-mode'](ctxFrom(none)).length, 0);
+  assert.equal(_detectors['unrestricted-mode'](ctxFrom(unrestrictedAgg())).length, 1);
 });

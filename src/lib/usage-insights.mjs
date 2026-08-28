@@ -19,6 +19,11 @@
 //      A diagnostic panel that nudges toward the newest model by default is an
 //      advertisement, not a diagnostic.
 
+// Bucket-percentile math is shared with the window-level rhythm this same
+// histogram data feeds (usage-aggregate.mjs's buildRhythm) — reused here, not
+// reimplemented, so the two never drift on what "p50" means.
+import { percentileFromBuckets, LAT_BUCKET_EDGES } from './usage-aggregate.mjs';
+
 // ── Pricing structure (multipliers, not rates) ───────────────────────────────
 // `pricing.mjs` owns the per-model $ rates. What we need here is only the SHAPE
 // of the formula, so a token mix can be converted into billable "units" and the
@@ -109,6 +114,17 @@ export const THRESHOLDS = {
   // the high mark while the other host has a lane under the low mark.
   arbitrageHighPercent: 75,
   arbitrageLowPercent: 25,
+
+  // latency-regression: each half of the window needs this many latency
+  // samples before a p50 means anything, and the second half's bucket-merged
+  // p50 must clear BOTH a relative and an absolute floor over the first's.
+  latencyRegressionMinSamples: 30,
+  latencyRegressionMinRelative: 0.25,
+  latencyRegressionMinSeconds: 2,
+
+  // unrestricted-mode: an approval-posture nudge, not a spend-share one — it
+  // fires on any recorded use, so the only floor is "at least one".
+  unrestrictedMinSessions: 1,
 };
 
 // ── Grounding for `model-routing` (ADR-0009 §6) ──────────────────────────────
@@ -222,7 +238,7 @@ function withDefaults(insight) {
   return { command: null, impact: null, ...insight };
 }
 
-// ── The 13 detectInsights heuristics ─────────────────────────────────────────
+// ── The 15 detectInsights heuristics ─────────────────────────────────────────
 // Each detector is independent, sharing only the `ctx` prelude detectInsights
 // computes once (a/totals/sessions/windowCost/sessionCount). `detect(ctx)`
 // returns zero or one insight, wrapped in an array so DETECTORS.flatMap below
@@ -579,6 +595,97 @@ function detectLongSessionShare({ sessions, windowCost }) {
   })];
 }
 
+// Latest end time a session's own data supports: start (parsed) plus its
+// measured duration. Sessions carry no `end` field by the time they reach
+// this module — usage-aggregate.mjs strips the working `_span` once the
+// window totals are folded — so this reconstructs it instead of adding a
+// clock read anywhere near this file.
+function sessionEndMs(s) {
+  const startMs = Date.parse(s.start);
+  return Number.isFinite(startMs) ? startMs + num(s.minutes) * 60_000 : NaN;
+}
+
+// Slot-wise sum of a group of sessions' latHist arrays — the same fold
+// buildRhythm does for the whole window, scoped to half of it here. A
+// session that never observed a latency (`latHist` absent) contributes
+// nothing, the same honest-absent handling buildRhythm uses.
+function mergeLatHist(rows) {
+  const hist = new Array(LAT_BUCKET_EDGES.length + 1).fill(0);
+  let samples = 0;
+  for (const s of rows) {
+    if (!Array.isArray(s.latHist)) continue;
+    for (let i = 0; i < hist.length; i++) hist[i] += num(s.latHist[i]);
+    samples += num(s.latCount);
+  }
+  return { hist, samples };
+}
+
+// 14 ── latency-regression. Splits the window's OWN sessions into an earlier
+// and later half by end time (never a live clock) and compares their
+// bucket-merged p50s. A relative AND an absolute floor must clear together,
+// so neither a big swing on a fast baseline nor a small percentage on an
+// already-slow one reads as a regression on its own — and each half needs
+// enough samples for a p50 to mean anything. No finding when the data does
+// not support one; this detector never reports "latency looks fine".
+function detectLatencyRegression({ sessions }) {
+  const ordered = sessions
+    .map((s) => ({ s, end: sessionEndMs(s) }))
+    .filter((r) => Number.isFinite(r.end))
+    .sort((x, y) => x.end - y.end)
+    .map((r) => r.s);
+  const half = Math.floor(ordered.length / 2);
+  if (half < 1) return [];
+  const first = mergeLatHist(ordered.slice(0, half));
+  const second = mergeLatHist(ordered.slice(-half));
+  if (first.samples < THRESHOLDS.latencyRegressionMinSamples
+    || second.samples < THRESHOLDS.latencyRegressionMinSamples) return [];
+  const p50First = percentileFromBuckets(first.hist, LAT_BUCKET_EDGES, 0.5);
+  const p50Second = percentileFromBuckets(second.hist, LAT_BUCKET_EDGES, 0.5);
+  if (p50First === null || p50Second === null || p50First <= 0) return [];
+  const deltaAbs = p50Second - p50First;
+  const deltaShare = deltaAbs / p50First;
+  if (deltaShare < THRESHOLDS.latencyRegressionMinRelative
+    || deltaAbs < THRESHOLDS.latencyRegressionMinSeconds) return [];
+  return [withDefaults({
+    id: 'latency-regression', kind: 'trend', severity: 'warn',
+    title: 'Response latency is trending up',
+    finding: `The second half of this window's sessions had a ${p50Second}s median response `
+      + `time, up from ${p50First}s in the first half — a ${pct(deltaShare)} increase.`,
+    evidence: `${count(first.samples)} latency samples in the earlier half, `
+      + `${count(second.samples)} in the later half.`,
+    action: 'Confirm this is not a provider-side or network slowdown before assuming a local '
+      + 'change is responsible.',
+  })];
+}
+
+// 15 ── unrestricted-mode. Sessions the harness itself recorded running in
+// its most permissive approval posture (Claude's bypassPermissions, Codex's
+// never-approve + full-access sandbox — see usage-modes.mjs). An approval-
+// posture nudge, not a spend-share one: rule 2 floors dollar thresholds
+// against the window, but there is no dollar floor to apply here, so this
+// fires on any recorded use. `not-recorded` — a transcript that never
+// observed a posture — is a different, honest-absent value and never counts.
+function detectUnrestrictedMode({ sessions, windowCost }) {
+  const unrestricted = sessions.filter((s) => s.mode === 'unrestricted');
+  if (unrestricted.length < THRESHOLDS.unrestrictedMinSessions) return [];
+  const spend = sumBy(unrestricted, 'cost');
+  const projects = new Set(unrestricted.map((s) => s.project)).size;
+  const n = unrestricted.length;
+  return [withDefaults({
+    id: 'unrestricted-mode', kind: 'coach', severity: 'info',
+    title: `${count(n)} session${n === 1 ? '' : 's'} ran in unrestricted mode`,
+    finding: `${count(n)} session${n === 1 ? '' : 's'} across ${count(projects)} `
+      + `project${projects === 1 ? '' : 's'} recorded the harness's unrestricted approval `
+      + `posture, costing ${usd(spend)}${windowCost > 0 ? ` of this window's ${usd(windowCost)}` : ''}. `
+      + 'See the Sessions view to review which ones.',
+    evidence: 'Based only on the approval posture each session itself recorded (`mode`); a '
+      + 'session that never reported a posture is not counted here, so this is a floor, not a '
+      + 'full census.',
+    action: 'Confirm unrestricted sessions were intentional — reserve that posture for scoped, '
+      + 'trusted work rather than as a default.',
+  })];
+}
+
 /** @type {Array<{id: string, detect: (ctx: object) => Insight[]}>} */
 const DETECTORS = [
   { id: 'context-tax', detect: detectContextTax },
@@ -594,6 +701,8 @@ const DETECTORS = [
   { id: 'parallel-sessions', detect: detectParallelSessions },
   { id: 'subagent-share', detect: detectSubagentShare },
   { id: 'long-session-share', detect: detectLongSessionShare },
+  { id: 'latency-regression', detect: detectLatencyRegression },
+  { id: 'unrestricted-mode', detect: detectUnrestrictedMode },
 ];
 
 /** Exposed only for direct per-detector unit tests; not part of the public API. */
