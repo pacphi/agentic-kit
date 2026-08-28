@@ -427,7 +427,10 @@ async function main() {
   // testable without a 1.3 GB transcript corpus on disk, and the traversal tests
   // need a spy that PROVES no file read was attempted.
   // ══════════════════════════════════════════════════════════════════════════
-  const { parseSessionId, resolvesInsideRoot, maskTurns } = await import('file://' + MOD);
+  const {
+    parseSessionId, resolvesInsideRoot, maskTurns,
+    parseNamespacedSessionId, resolvesNamespacedInsideRoot,
+  } = await import('file://' + MOD);
 
   // ── the guard, as pure functions (no server, no I/O) ──
   await test('parseSessionId accepts a plain session id and decodes percent-encoding', async () => {
@@ -456,6 +459,41 @@ async function main() {
     assert(resolvesInsideRoot(root, '../abc') === false, 'a parent hop escapes the root');
     assert(resolvesInsideRoot(root, path.join('sub', 'abc')) === false, 'a nested path is not a bare id');
     assert(resolvesInsideRoot(root, path.resolve(path.sep, 'etc', 'passwd')) === false, 'an absolute path escapes the root');
+  });
+
+  // ── namespaced subagent session ids (Task 5 round 2) ──
+  await test('parseNamespacedSessionId accepts <parentId>/<stem>, decodes percent-encoding, and parses named subagents', async () => {
+    const r = parseNamespacedSessionId('fc8c05e0-c311-456e-a226-6dac4279199b/agent-a2fc4593254cc01b9');
+    assert(r && r.parentId === 'fc8c05e0-c311-456e-a226-6dac4279199b' && r.stem === 'agent-a2fc4593254cc01b9',
+      'a well-formed namespaced id must parse into its two segments');
+    const encoded = parseNamespacedSessionId('%66oo/agent-1');
+    assert(encoded && encoded.parentId === 'foo', 'percent-encoding is decoded BEFORE validation, never after');
+    // Most real subagent stems on this machine's corpus carry a Task-tool
+    // name, not just a bare hex tail — a hex-only pattern would leave most
+    // subagent sessions still unopenable.
+    const named = parseNamespacedSessionId('foo/agent-acourt-brutal_honesty-fb47a0cb49087a58');
+    assert(named && named.stem === 'agent-acourt-brutal_honesty-fb47a0cb49087a58', 'a named subagent stem must parse');
+  });
+
+  await test('parseNamespacedSessionId rejects traversal, backslash, extra slashes, absolutes, and a non-agent-* child', async () => {
+    const bad = [
+      '../etc/agent-1', '..%2fagent-1', 'foo/..', 'foo/../agent-1',
+      'foo\\bar/agent-1', 'foo/agent-1\\..\\..\\etc', 'a/b/agent-1', 'a//agent-1',
+      '/agent-1', 'foo/', '/foo/agent-1', 'C:%5CWindows/agent-1',
+      'foo/notanagent', 'foo/Agent-1', 'foo/agent-', 'foo/agent',
+      'foo/agent-1/extra', '', 'foo', 'agent-1', '..',
+    ];
+    for (const b of bad) {
+      assert(parseNamespacedSessionId(b) === null,
+        'must reject ' + JSON.stringify(b) + ', got ' + JSON.stringify(parseNamespacedSessionId(b)));
+    }
+  });
+
+  await test('resolvesNamespacedInsideRoot pins both segments to the transcript root, exactly as plain ids do', async () => {
+    const root = path.join(os.tmpdir(), 'ak-usage-root');
+    assert(resolvesNamespacedInsideRoot(root, 'abc', 'agent-1') === true, 'a well-formed pair resolves inside the root');
+    assert(resolvesNamespacedInsideRoot(root, '../abc', 'agent-1') === false, 'a parent-hop parent segment escapes the root');
+    assert(resolvesNamespacedInsideRoot(root, path.join('sub', 'abc'), 'agent-1') === false, 'a nested parent segment is not a bare id');
   });
 
   await test('maskTurns runs every turn body through the masker (and fails closed without one)', async () => {
@@ -661,6 +699,39 @@ async function main() {
       }
       assert(spy.calls.readSession.length === before,
         'readSession must NOT be called for any hostile id — got ' + (spy.calls.readSession.length - before) + ' call(s)');
+    });
+
+    // ── namespaced subagent session ids reach readSession end-to-end (Task 5 round 2) ──
+    await test('GET /api/session/:parentId/:stem → a namespaced subagent id reaches readSession end-to-end', async () => {
+      const before = spy.calls.readSession.length;
+      const r = await get(usageSrv.url + 'api/session/parent-uuid/agent-a2fc4593254cc01b9', usageSrv.token);
+      assert(r.status === 200, 'expected 200, got ' + r.status);
+      const j = JSON.parse(r.body);
+      assert(j.meta && j.meta.id === 'parent-uuid/agent-a2fc4593254cc01b9', 'meta must carry the namespaced id');
+      assert(spy.calls.readSession.length === before + 1
+        && spy.calls.readSession[spy.calls.readSession.length - 1] === 'parent-uuid/agent-a2fc4593254cc01b9',
+        'readSession must be called with the full namespaced id, unmangled');
+    });
+
+    await test('GET /api/session/:id traversal via a namespaced-shaped id → 400 and readSession is never reached', async () => {
+      const before = spy.calls.readSession.length;
+      const hostile = [
+        '/api/session/parent/../../../etc/passwd',
+        '/api/session/parent%2f..%2f..%2fetc%2fpasswd',
+        '/api/session/' + encodeURIComponent(path.resolve(path.sep, 'etc', 'passwd')) + '/agent-1',
+        '/api/session/parent/agent-1/extra',
+        '/api/session/parent/notanagent',
+        '/api/session/parent/Agent-1',
+        '/api/session/' + 'x'.repeat(129) + '/agent-1',
+      ];
+      for (const p of hostile) {
+        const r = await getRaw(usageSrv.port, p, usageSrv.token);
+        assert(r.status === 400, 'expected 400 for ' + p + ', got ' + r.status);
+        assert(!/root:|passwd/i.test(r.body), 'a rejected request must not echo file content: ' + p);
+      }
+      assert(spy.calls.readSession.length === before,
+        'readSession must NOT be called for any hostile namespaced-shaped id — got '
+        + (spy.calls.readSession.length - before) + ' call(s)');
     });
   } finally {
     await usageSrv.close();
@@ -1978,7 +2049,7 @@ async function main() {
   // is the suite where it matters most — the traversal-guard and credential-
   // leak tests live here and were the reviewer's cited example of a block
   // that could silently vanish with the old harness never noticing.
-  const EXPECTED = 77;
+  const EXPECTED = 82;
   if (passed + failed !== EXPECTED) {
     console.error(`\nPLAN MISMATCH: expected ${EXPECTED} tests, ran ${passed + failed}`);
     process.exit(1);

@@ -108,6 +108,19 @@ const KEEP_MS = 366 * DAY_MS;
  *  unavailable rather than risking the panel's process. */
 const MAX_SESSION_BYTES = 64 * 1024 * 1024;
 const VALID_ID = /^[A-Za-z0-9._-]{1,128}$/;
+/** A nested Claude subagent transcript's id: EXACTLY `<parentId>/<stem>`,
+ *  one slash. The parent segment reuses VALID_ID's own charset (capture
+ *  group 1) — a namespaced id's parent half can never be more permissive
+ *  than a plain id already is. The child segment (group 2) matches the REAL
+ *  on-disk shape Claude Code writes every subagent transcript with:
+ *  `agent-<hex>` when the Task tool call carried no name, or
+ *  `agent-<name>-<hex>` when it did (the name is the Agent tool's own
+ *  `name` parameter, charset [A-Za-z0-9_-]). Surveyed on this machine's real
+ *  corpus (404 files, 2026-08-28): most stems carry a name — a hex-only
+ *  pattern would leave most subagent sessions still unopenable, defeating
+ *  the point of this fix. Neither capture group's charset contains '/', '.',
+ *  or '\', so this is a strict allowlist, not merely "not a plain id". */
+const VALID_SUBAGENT_ID = /^([A-Za-z0-9._-]{1,128})\/(agent-[A-Za-z0-9_-]{1,100})$/;
 
 // ── file discovery ──────────────────────────────────────────────────────────
 
@@ -746,9 +759,44 @@ function invalidId(id) {
   return err;
 }
 
+/** The project directory name for a resolved claude FILE — one level up for
+ *  a plain `<project>/<id>.jsonl`, three levels up for a nested subagent
+ *  transcript `<project>/<parentId>/subagents/<stem>.jsonl` (the extra
+ *  `subagents` and `<parentId>` levels a namespaced id resolves through).
+ *  Shared by locate()'s cache-hit path and its own nested-id fallback scan
+ *  below, so both agree on what "the project" means for the same file
+ *  shape — a cache-hit that instead reported the literal `subagents`
+ *  directory as the project would only ever surface when a transcript
+ *  carries no `cwd` at all (parseClaude's fallback path), but it would still
+ *  be wrong, so this file shape is resolved to the real project everywhere
+ *  a dirName is derived from a FILE, not just on the fresh-parse path. */
+function claudeDirNameFor(file) {
+  const parentDir = path.dirname(file);
+  return path.basename(parentDir) === 'subagents'
+    ? path.basename(path.dirname(path.dirname(parentDir)))
+    : path.basename(parentDir);
+}
+
+/** locate()'s namespaced-id branch, pulled out to keep locate() itself under
+ *  the project's complexity ceiling — the same reason listClaudeSubagents was
+ *  split out of listClaude on the discovery side. Resolves ONLY to a nested
+ *  Claude subagent transcript, constructing the candidate path from the two
+ *  VALIDATED capture groups `locate` already extracted — never by joining raw
+ *  request input. Returns `null` (not "fall through") on a miss: a namespaced
+ *  id is never a plain id too, so there is nothing else for locate to try. */
+function locateSubagent(parentId, stem, claudeRoot, id) {
+  for (const d of readDirSafe(claudeRoot)) {
+    if (!d.isDirectory()) continue;
+    const file = path.join(claudeRoot, d.name, parentId, 'subagents', `${stem}.jsonl`);
+    if (statSafe(file)) return { file, provider: 'claude', id, dirName: d.name };
+  }
+  return null;
+}
+
 /** Resolve an id to exactly one transcript file. Consults the index cache
  *  first; otherwise matches on FILE NAMES only — never opens a transcript it is
- *  not going to return. */
+ *  not going to return. A namespaced id (VALID_SUBAGENT_ID) resolves via
+ *  locateSubagent only — see there. */
 function locate(id, r, cacheFile) {
   const cache = readCache(cacheFile);
   const hitFile = idIndexFor(cache).get(id);
@@ -761,9 +809,12 @@ function locate(id, r, cacheFile) {
     // instead of silently rewriting the provider to claude.
     const provider = e?.session?.provider;
     if ((provider === 'claude' || provider === 'codex') && e.session.id === id && statSafe(hitFile)) {
-      return { file: hitFile, provider, id, dirName: provider === 'claude' ? path.basename(path.dirname(hitFile)) : null };
+      return { file: hitFile, provider, id, dirName: provider === 'claude' ? claudeDirNameFor(hitFile) : null };
     }
   }
+
+  const nested = VALID_SUBAGENT_ID.exec(id);
+  if (nested) return locateSubagent(nested[1], nested[2], r.claude, id);
 
   for (const d of readDirSafe(r.claude)) {
     if (!d.isDirectory()) continue;
@@ -791,14 +842,16 @@ function locate(id, r, cacheFile) {
 /**
  * Read ONE session by id — never a corpus scan. Returns `{ meta, turns }` with
  * every text body run through `maskSecrets`, or `null` when no such session.
- * Throws `ERR_INVALID_SESSION_ID` for an id that fails the id grammar (the
- * path-traversal guard), before any filesystem access.
+ * Throws `ERR_INVALID_SESSION_ID` for an id that fails EITHER id grammar — a
+ * plain id (VALID_ID) or a namespaced Claude subagent id (VALID_SUBAGENT_ID,
+ * `<parentId>/<stem>`) — before any filesystem access. Both are the same
+ * path-traversal guard; the namespaced grammar is just as strict, not looser.
  *
  * @param {string} id
  * @param {IndexOptions} [o]
  */
 export async function readSession(id, o = {}) {
-  if (typeof id !== 'string' || !VALID_ID.test(id)) throw invalidId(id);
+  if (typeof id !== 'string' || (!VALID_ID.test(id) && !VALID_SUBAGENT_ID.test(id))) throw invalidId(id);
   const r = { ...defaultRoots(), ...(o.roots ?? {}) };
 
   // opencode sessions live in the SQLite store, not a JSONL file — resolve

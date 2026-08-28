@@ -77,9 +77,14 @@ import {
   maskTurns,
   parseSessionId,
   resolvesInsideRoot,
+  parseNamespacedSessionId,
+  resolvesNamespacedInsideRoot,
 } from './dashboard/session-security.mjs';
 
-export { maskMeta, maskTurns, parseSessionId, resolvesInsideRoot };
+export {
+  maskMeta, maskTurns, parseSessionId, resolvesInsideRoot,
+  parseNamespacedSessionId, resolvesNamespacedInsideRoot,
+};
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const PKG_ROOT = path.resolve(HERE, '..', '..');
@@ -1461,15 +1466,26 @@ export function startDashboard({
 
     async function handleSession(req, res, query, match) {
       // Validate BEFORE touching the index — a rejected id must never reach a
-      // filesystem call, so the 400 happens here and nowhere deeper.
+      // filesystem call, so the 400 happens here and nowhere deeper. Two
+      // shapes are accepted: a plain id (unchanged — parseSessionId/
+      // resolvesInsideRoot, exactly as before), or a namespaced
+      // `<parentId>/<stem>` Claude subagent id (Task 5 round 2), gated by
+      // its own dedicated parse+containment pair rather than loosening
+      // parseSessionId/resolvesInsideRoot — those two also gate the
+      // live-playback/SSE routes, which this fix does not touch.
       const id = parseSessionId(match[1]);
-      if (!id || !TRANSCRIPT_ROOTS.some((r) => resolvesInsideRoot(r, id))) {
+      const plainOk = !!id && TRANSCRIPT_ROOTS.some((r) => resolvesInsideRoot(r, id));
+      const nested = plainOk ? null : parseNamespacedSessionId(match[1]);
+      const nestedOk = !!nested
+        && TRANSCRIPT_ROOTS.some((r) => resolvesNamespacedInsideRoot(r, nested.parentId, nested.stem));
+      if (!plainOk && !nestedOk) {
         sendJson(res, 400, { error: 'invalid session id' });
         return;
       }
+      const effectiveId = plainOk ? id : `${nested.parentId}/${nested.stem}`;
       try {
         const maskFn = typeof usageApi.masker === 'function' ? await usageApi.masker() : usageApi.maskSecrets;
-        const found = await usageApi.readSession(id);
+        const found = await usageApi.readSession(effectiveId);
         // A well-formed id that matches no file is 404, not 200-with-a-null-body.
         // Returning 200 here made every nonexistent session look like an empty
         // one, and turned the route into a mild existence oracle.

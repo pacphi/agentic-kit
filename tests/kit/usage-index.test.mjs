@@ -2195,3 +2195,84 @@ test('an unreadable subagents dir degrades silently — the parent session is un
   assert.ok(byId(agg, mainId), 'the main session still parses despite its unreadable subagents dir');
   assert.equal(agg.sourceHealth.claude.status, 'ok', 'one bad nested subagents dir must not degrade the whole claude source');
 });
+
+// ── namespaced subagent ids reach readSession (Lane-P round 2) ─────────────
+//
+// Round 1 ingested the transcripts (buildIndex/scan); round 2 makes them
+// OPENABLE by id — readSession/locate previously rejected any id containing
+// '/' (VALID_ID's charset excludes it), so every subagent row was a dead
+// link. VALID_SUBAGENT_ID accepts EXACTLY `<parentId>/<stem>` — the parent
+// segment reuses VALID_ID's own charset, the child segment matches the real
+// on-disk `agent-<hex>` / `agent-<name>-<hex>` shape — and locate()
+// constructs the resolved path from the validated capture groups only,
+// never by joining raw request input.
+
+test('readSession rejects hostile namespaced-shaped ids without ever resolving to a file', async () => {
+  const sb = soloSandbox();
+  const hostile = [
+    '../etc/agent-1', 'foo/..', 'foo/../agent-1', 'foo\\bar/agent-1',
+    'foo/agent-1\\..\\..\\etc', 'a/b/agent-1', 'a//agent-1', '/agent-1',
+    'foo/', '/foo/agent-1', 'foo/notanagent', 'foo/Agent-1', 'foo/agent-',
+    'foo/agent-1/extra',
+    // 'agent-1' and '..' (bare, no slash) are deliberately NOT here — both
+    // are syntactically valid PLAIN ids under VALID_ID's own pre-existing
+    // charset (VALID_ID, unlike session-security.mjs's parseSessionId, has
+    // no extra '.'/'..' exclusion — out of THIS fix's scope, which is the
+    // namespaced grammar, not auditing the plain-id one). They resolve to
+    // null (no such file), never throw. Only the NAMESPACED shape — a
+    // string that actually contains a slash — is this test's concern.
+  ];
+  for (const id of hostile) {
+    await assert.rejects(
+      () => readSession(id, { roots: sb.roots, cachePath: sb.cachePath }),
+      { code: 'ERR_INVALID_SESSION_ID' },
+      `must reject ${JSON.stringify(id)}`,
+    );
+  }
+});
+
+test('a well-formed namespaced id round-trips to the right nested subagent transcript (cold cache, fallback scan)', async () => {
+  _resetForTest();
+  const sb = soloSandbox();
+  const mainId = 'parent-session';
+  writeSubagentTranscript(sb, mainId, 'agent-a2fc4593254cc01b9', { input_tokens: 10, output_tokens: 5 });
+
+  const found = await readSession(`${mainId}/agent-a2fc4593254cc01b9`, { roots: sb.roots, cachePath: sb.cachePath });
+  assert.ok(found, 'a valid namespaced id must resolve');
+  assert.equal(found.meta.id, `${mainId}/agent-a2fc4593254cc01b9`);
+  assert.equal(found.meta.sidechain, true, 'the resolved session must carry the sidechain evidence its own entries recorded');
+});
+
+test('a namespaced id also round-trips once the index cache already has it, resolving the REAL project (not "subagents")', async () => {
+  _resetForTest();
+  const sb = soloSandbox();
+  const mainId = 'parent-no-cwd';
+  const subDir = path.join(sb.claude, mainId, 'subagents');
+  fs.mkdirSync(subDir, { recursive: true });
+  const T0 = '2026-08-20T10:00:00.000Z';
+  // No `cwd` on either entry: parseClaude can only learn the project from
+  // the FALLBACK dirName locate() computes for the resolved file — this is
+  // what proves the cache-hit path's dirName is the real project directory,
+  // not the literal "subagents" directory that sits between the parent id
+  // and the stem on disk.
+  fs.writeFileSync(path.join(subDir, 'agent-nocwd00000000001.jsonl'), `${[
+    JSON.stringify({ type: 'user', sessionId: mainId, isSidechain: true, timestamp: T0, message: { role: 'user', content: 'subtask' } }),
+    JSON.stringify({
+      type: 'assistant', sessionId: mainId, isSidechain: true, timestamp: T0,
+      message: { role: 'assistant', model: 'claude-opus-5', usage: { input_tokens: 1, output_tokens: 1 }, content: [] },
+    }),
+  ].join('\n')}\n`);
+
+  await buildIndex(opts(sb)); // populates the id→file cache, exactly like a normal dashboard poll
+  const found = await readSession(`${mainId}/agent-nocwd00000000001`, opts(sb));
+  assert.ok(found, 'a cache-hit namespaced id must still resolve');
+  assert.equal(found.meta.project, 'proj', 'the real project, decoded from the project dir name — never the literal "subagents" placeholder');
+});
+
+test('a plain id is byte-identical to before namespaced ids existed', async () => {
+  _resetForTest();
+  const sb = sandbox();
+  const found = await readSession('aaaa1111', opts(sb));
+  assert.equal(found.meta.id, 'aaaa1111');
+  assert.equal(found.meta.host, 'claude');
+});
