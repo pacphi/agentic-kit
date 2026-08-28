@@ -189,10 +189,15 @@ function recordAssistantUsage(rec, data, at) {
   usageRow.costObserved ??= null;
   if (Number.isFinite(Number(data.cost))) usageRow.costObserved = (usageRow.costObserved ?? 0) + Number(data.cost);
   rec.reasoningOutput += num(t.reasoning);
-  // Context pressure for THIS turn — overwritten every message so the field
-  // always reflects the LAST completion, not a running total (mirrors
-  // parseClaude's ctxLastTokens).
-  rec.ctxLastTokens = num(t.input) + num(cache.read);
+  // Context pressure for THIS turn, evidence-gated: only a row that actually
+  // carries a tokens object can claim one — a token-less row (error or not)
+  // must never overwrite a real prior value with a fabricated 0 (mirrors
+  // parseClaude, which only ever reaches this line for a real usage entry).
+  // Overwritten every qualifying message so the field reflects the LAST
+  // completion, not a running total.
+  if (data.tokens !== null && typeof data.tokens === 'object') {
+    rec.ctxLastTokens = num(t.input) + num(cache.read);
+  }
   return model;
 }
 
@@ -208,19 +213,18 @@ function recordAssistantTurn(rec, turns, { rowId, at, model, partsByMessage }) {
 function recordAssistantMessage(rec, turns, { data, rowId, at, withTurns, partsByMessage }) {
   rec.responses++;
   if (at) { const pk = punchKey(at); rec.punchcard[pk] = (rec.punchcard[pk] ?? 0) + 1; }
+  // A provider/auth/network failure is a REAL logged row here — unlike
+  // parseClaude's synthetic all-zero placeholder, it still carries whatever
+  // mode/model/usage/cost evidence it has, and that evidence is kept. Only
+  // two effects are error-specific: it counts as an exception, and it can
+  // never BE a latency sample (an unanswered prompt is not a measured
+  // response time) — though the pending prompt is still consumed here so a
+  // later, unrelated assistant message is never mis-sampled against a stale
+  // prompt.
   if (data.error != null) {
-    // A provider/auth/network failure: no real completion behind it, so —
-    // like parseClaude's isApiError placeholder — it never claims a model,
-    // usage, ctx window, or mode. It IS an exception, but never a latency
-    // SAMPLE (an unanswered prompt is not a measured response time); the
-    // pending prompt is still consumed here (unlike parseClaude, which
-    // leaves it open for the next real completion) so a later, unrelated
-    // assistant message is never mis-sampled against a stale prompt.
     rec.exceptions++;
     rec.pendingPromptMs = null;
-    return;
-  }
-  if (rec.pendingPromptMs !== null && rec.pendingPromptMs !== undefined) {
+  } else if (rec.pendingPromptMs !== null && rec.pendingPromptMs !== undefined) {
     const gapSeconds = (at - rec.pendingPromptMs) / 1000;
     if (gapSeconds <= MAX_LATENCY_SAMPLE_SECONDS) noteLatencySample(rec, gapSeconds);
     rec.pendingPromptMs = null;
