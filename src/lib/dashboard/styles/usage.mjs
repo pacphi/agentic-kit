@@ -599,4 +599,19 @@ export const USAGE_CSS = `
 .hr-note b{color:var(--ink-2); font-weight:600}
 @media(max-width:820px){ .howrun{grid-template-columns:1fr} }
 
+/* reliability strip — a failure rate is a claim about the whole window, so it
+   is stated as a figure with its own denominator beside it, not as a gauge. */
+.rel{display:grid; gap:12px; grid-template-columns:repeat(auto-fit,minmax(240px,1fr))}
+.rel-stat{min-width:0; border:1px solid var(--line); border-radius:var(--r-sm); background:var(--panel-2); padding:12px 14px}
+.rel-k{display:block; font-size:10px; font-weight:600; letter-spacing:.07em; text-transform:uppercase; color:var(--ink-dim)}
+.rel-v{display:block; font-size:23px; font-weight:700; letter-spacing:-.02em; color:var(--ink); margin-top:5px}
+.rel-sub{display:block; font-size:11px; color:var(--ink-2); margin-top:4px}
+/* Direction is carried by the glyph and the wording as well as the color: a
+   reader who cannot separate --warn from --ok still gets the whole finding. */
+.rel-flag{display:inline-flex; align-items:center; gap:5px; margin-top:9px; font-size:11px; font-weight:600}
+.rel-flag i{font-style:normal}
+.rel-flag[data-sev="warn"]{color:var(--warn)}
+.rel-flag[data-sev="ok"]{color:var(--ok)}
+.rel-flag[data-sev="flat"]{color:var(--ink-dim)}
+
 `;

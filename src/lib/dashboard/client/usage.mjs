@@ -735,6 +735,137 @@ import { renderUsage } from './usage-orchestrators.mjs';
 
   }
 
+  // ── tool mix and model mix over time ──────────────────────────────────────
+  var TOOL_TOP=8;
+  function toolRows(d){
+    var map=d.byTool||{},list=[],k;
+    for(k in map)list.push({name:k,n:Number(map[k])||0});
+    list.sort(function(a,b){return b.n-a.n;});
+    if(!list.length)return '<div class="empty">no tool calls recorded in window.</div>';
+    var top=list.slice(0,TOOL_TOP),tail=list.slice(TOOL_TOP);
+    var other=tail.reduce(function(s,x){return s+x.n;},0),max=top[0].n;
+    var rows=top.map(function(x){
+      return {label:x.name,value:fmtNum(x.n),share:pct(x.n,max),dim:false};
+    });
+    // The tail is FOLDED, never dropped: those calls happened, and a top-8
+    // list that quietly loses the rest misstates the total every share above
+    // it is read against. Dim, because Other is a residue, not a tool.
+    if(other>0)rows.push({label:"Other ("+tail.length+" tool"+(tail.length===1?"":"s")+")",
+      value:fmtNum(other),share:pct(other,max),dim:true});
+    return rankedRows(rows);
+  }
+
+  // Four series is the most a stacked day column can carry and still be read
+  // apart at this size; the rest fold into one de-emphasised band. Colors are
+  // assigned BY RANK, so the palette is deterministic rather than dependent on
+  // key order, and every band is named in the legend beside the chart.
+  var FAMILY_PALETTE=["var(--accent)","var(--purple)","var(--ok)","var(--warn)"];
+  var FAMILY_TOP=4;
+  function familyTotals(rows){
+    var tot={},i,k;
+    for(i=0;i<rows.length;i++){
+      var parts=(rows[i].v&&rows[i].v.byModelFamily)||{};
+      for(k in parts)tot[k]=(tot[k]||0)+(Number(parts[k])||0);
+    }
+    return tot;
+  }
+  function topFamilies(tot){
+    var list=[],k;
+    // modelFamily()'s own 'other' catch-all never competes for a top slot — it
+    // is the residue bucket, so it belongs in the fold no matter how big it is.
+    for(k in tot)if(k!=="other")list.push({name:k,cost:tot[k]});
+    list.sort(function(a,b){return b.cost-a.cost;});
+    return list.slice(0,FAMILY_TOP).map(function(x){return x.name;});
+  }
+  function foldFamilies(parts,keep){
+    var out={other:0},k;
+    for(k in parts){
+      var v=Number(parts[k])||0;
+      if(keep.indexOf(k)>=0)out[k]=(out[k]||0)+v; else out.other+=v;
+    }
+    return out;
+  }
+  function modelMix(d){
+    var rows=dayRows(d),tot=familyTotals(rows),keep=topFamilies(tot);
+    if(!keep.length&&!(tot.other>0))return '<div class="empty">no model spend in window.</div>';
+    var palette={};
+    keep.forEach(function(name,i){palette[name]=FAMILY_PALETTE[i%FAMILY_PALETTE.length];});
+    var days=rows.map(function(x){
+      return {day:x.day,parts:foldFamilies((x.v&&x.v.byModelFamily)||{},keep)};
+    });
+    var otherTotal=days.reduce(function(s,x){return s+(x.parts.other||0);},0);
+    var legend=keep.map(function(name){
+      return {color:palette[name],label:name,value:fmtUsd(tot[name])};
+    });
+    if(otherTotal>0)legend.push({color:"var(--ink-dim)",label:"other",value:fmtUsd(otherTotal)});
+    // Bottom-up: the fold sits at the base and the biggest family paints on
+    // top, so the legend read top-down is the stack read top-down.
+    return stackedDays({days:days,order:["other"].concat(keep.slice().reverse()),palette:palette})
+      +chartLegend(legend)
+      +'<p class="hr-note">Model ids are folded to a coarse family (<b>opus</b>, <b>gpt-5</b>, …). '
+      +"An id the fold does not recognise lands in <b>other</b> — never a guessed family, and never "
+      +"dropped, because its spend still has to land somewhere.</p>";
+  }
+  function renderScoreMix(d){
+    var pair=ensureBlock("u-toolmix",'<div class="two">'
+      +stripHtml("u-toolmix","tool mix","invocations · top 8, tail folded")
+      +stripHtml("u-modelmix","model mix over time","api-equivalent cost by model family")
+      +"</div>","u-punch");
+    if(!pair)return;
+    pair.innerHTML=toolRows(d)
+      +'<p class="hr-note">Invocations as each host recorded them. A host that does not report tool '
+      +"calls contributes nothing here rather than a zero — telemetry coverage above says which "
+      +"hosts report them at all.</p>";
+    var mix=document.getElementById("u-modelmix");
+    if(mix)mix.innerHTML=modelMix(d);
+  }
+
+  // ── reliability ───────────────────────────────────────────────────────────
+  var REL_TIP="Turns that never resolved to a model — a dropped connection, a rate-limit rejection, "
+    +"an auth failure. They are excluded from the model list (there is no model to attribute them "
+    +"to) and surfaced here instead of vanishing.\nRate is exceptions ÷ responses × 1000.";
+  var ABORT_TIP="Turns the transcript recorded as interrupted — the answer was stopped mid-flight. "
+    +"Counted apart from exceptions: an abort is a choice, not a failure.";
+  var REL_ABSENT="No per-day line: /api/usage's per-day rows carry tokens, cost and sessions, so "
+    +"exceptions exist only as a window total. A daily trend would have to be invented rather than "
+    +"read, so none is drawn.";
+
+  function relRate(t){
+    var r=Number(t&&t.responses)||0;
+    return r?(Number(t.exceptions)||0)/r*1000:null;
+  }
+  // Direction is stated in WORDS and in a glyph as well as in color — a
+  // reader who cannot separate the warn and ok tokens still gets the finding.
+  function relFlag(cur,prev){
+    if(cur==null||prev==null)return "";
+    if(cur>prev)return '<span class="rel-flag" data-sev="warn"><i aria-hidden="true">▲</i>'
+      +"higher than the previous window</span>";
+    if(cur<prev)return '<span class="rel-flag" data-sev="ok"><i aria-hidden="true">▼</i>'
+      +"lower than the previous window</span>";
+    return '<span class="rel-flag" data-sev="flat"><i aria-hidden="true">•</i>'
+      +"unchanged from the previous window</span>";
+  }
+  function relStat(o){
+    return '<div class="rel-stat" title="'+esc(o.tip)+'">'
+      +'<span class="rel-k">'+esc(o.label)+"</span>"
+      +'<span class="rel-v tnum">'+esc(o.value)+"</span>"
+      +'<span class="rel-sub">'+esc(o.sub)+"</span>"+(o.flag||"")+"</div>";
+  }
+  function renderScoreReliability(d){
+    var body=ensureBlock("u-reliability",
+      stripHtml("u-reliability","reliability","turns that never landed"),"u-models");
+    if(!body)return;
+    var t=d.totals||{},p=(d.previous&&d.previous.totals)||null;
+    var cur=relRate(t),exc=Number(t.exceptions)||0,ab=Number(t.aborts)||0,resp=Number(t.responses)||0;
+    body.innerHTML='<div class="rel">'
+      +relStat({label:"exceptions / 1k responses",value:cur==null?"—":cur.toFixed(1),
+        sub:fmtNum(exc)+" of "+fmtNum(resp)+" responses",tip:REL_TIP,
+        flag:relFlag(cur,p?relRate(p):null)})
+      +relStat({label:"aborted turns",value:fmtNum(ab),
+        sub:resp?fmtRatio(ab/resp*1000)+" per 1k responses":"no responses in window",tip:ABORT_TIP})
+      +"</div><p class=\"hr-note\">"+esc(REL_ABSENT)+"</p>";
+  }
+
   function renderScoreModels(d){
     var t=d.totals||{};
     // models + projects
@@ -826,7 +957,9 @@ import { renderUsage } from './usage-orchestrators.mjs';
     renderScoreHosts(d);
     renderScoreTokBar(d);
     renderScorePunchcard(d);
+    renderScoreMix(d);
     renderScoreModels(d);
+    renderScoreReliability(d);
     renderScoreOpenRouter(d);
     renderScoreProjects(d);
     renderScoreCategories(d);

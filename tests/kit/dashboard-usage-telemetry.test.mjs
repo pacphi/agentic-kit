@@ -404,6 +404,47 @@ test('how-you-run splits source and provider without attributing unobserved spen
   assert.match(JS, /attributed to an assumption/, 'the panel says why unobserved spend is held apart');
 });
 
+test('the tool list folds its tail into a dim Other instead of dropping it', () => {
+  // A top-8 list that silently loses the rest misstates the total every share
+  // above it is read against, so the tail is summed and labelled.
+  assert.match(JS, /var TOOL_TOP=8/);
+  assert.match(JS, /list\.slice\(TOOL_TOP\)/, 'the tail is kept, not discarded');
+  assert.match(JS, /label:"Other \("\+tail\.length\+" tool"/);
+  assert.match(JS, /share:pct\(other,max\),dim:true/, 'Other is a residue, drawn dim');
+});
+
+test('model mix keeps four named families and folds the rest into one dim band', () => {
+  assert.match(JS, /var FAMILY_TOP=4/);
+  assert.match(JS, /byModelFamily/);
+  assert.match(JS, /function foldFamilies\(parts,keep\)/);
+  assert.match(JS, /order:\["other"\]\.concat\(keep\.slice\(\)\.reverse\(\)\)/, 'the fold sits at the base of the stack');
+  assert.match(JS, /\+chartLegend\(legend\)/, 'the stack is named by an external legend');
+  // modelFamily()'s own catch-all never competes for a top slot — it IS the
+  // residue bucket, whatever its size.
+  assert.match(JS, /for\(k in tot\)if\(k!=="other"\)/);
+});
+
+test('reliability states a rate with its denominator, and flags direction in words not only color', () => {
+  assert.match(JS, /exceptions \/ 1k responses/);
+  assert.match(JS, /\(Number\(t\.exceptions\)\|\|0\)\/r\*1000/);
+  assert.match(JS, /aborted turns/, 'aborts are counted apart from exceptions');
+  assert.match(JS, /an abort is a choice, not a failure/);
+  // Icon + words + color, never color alone.
+  assert.match(JS, /rel-flag" data-sev="warn"><i aria-hidden="true">▲<\/i>/);
+  assert.match(JS, /higher than the previous window/);
+  assert.match(JS, /lower than the previous window/);
+  assert.match(CSS, /\.rel-flag\[data-sev="warn"\]\{color:var\(--warn\)\}/);
+});
+
+test('reliability says why there is no per-day line rather than drawing an invented one', () => {
+  // byDay rows carry tokens/cost/sessions only — exceptions exist as a window
+  // total, so a daily trend cannot be read from this payload.
+  assert.match(JS, /No per-day line/);
+  assert.match(JS, /A daily trend would have to be invented rather than /);
+  assert.match(JS, /exceptions exist only as a window total/);
+  assert.doesNotMatch(JS, /sparklineSvg\([^)]*exception/i, 'no exceptions series is charted');
+});
+
 test('the scorecard panel grafts are idempotent — a re-render reuses its container', () => {
   // renderScore runs on every poll. ensureBlock returns the existing node
   // instead of inserting a second one; without that the scorecard would grow
