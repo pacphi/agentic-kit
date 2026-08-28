@@ -495,13 +495,17 @@ function handleCodexMeta(rec, decoded) {
   }
 }
 
-function handleCodexTurnContext(rec, decoded) {
+function handleCodexTurnContext(rec, decoded, payload) {
   if (typeof decoded.model === 'string' && !rec.models.includes(decoded.model)) rec.models.push(decoded.model);
   if (decoded.provider) {
     rec.inferenceProvider = decoded.provider;
     rec.providerProvenance = 'observed';
   }
   if (rec.project === 'unknown' && typeof decoded.cwd === 'string') applyProject(rec, projectLabel(decoded.cwd, null, repoRootOf(decoded.cwd)));
+  // v11: cross-host permission posture — last turn_context with evidence
+  // wins, since a session may renegotiate approval/sandbox policy mid-run.
+  const m = normalizeMode({ host: 'codex', approvalPolicy: payload.approval_policy, sandboxPolicy: payload.sandbox_policy });
+  if (m.raw) { rec.mode = m.mode; rec.modeRaw = m.raw; }
 }
 
 /** Normalize one token_count event's rate-limit windows (primary/secondary),
@@ -546,24 +550,62 @@ function handleCodexTokenCount(rec, stats, usageState, decoded, ms) {
   if (rl) applyCodexRateLimit(rec, rl, ms);
 }
 
+/** `event_msg` → `task_started`: the model's context window in effect for
+ *  this turn (last wins — a session may renegotiate mid-run) and the turn's
+ *  start time, remembered so `task_complete` can tell whether a prompt→
+ *  agent-message gap already sampled this turn before falling back to its
+ *  own host-measured duration (see handleCodexTaskComplete). */
+function handleCodexTaskStarted(rec, latState, payload) {
+  const w = Number(payload.model_context_window);
+  if (Number.isFinite(w)) rec.ctxWindow = w;
+  const startedMs = toMs(payload.started_at);
+  latState.turnStartedAt = Number.isFinite(startedMs) ? startedMs : null;
+}
+
+/** `event_msg` → `task_complete`: Codex's own host-measured wall-clock
+ *  duration for the turn, used as a latency sample ONLY when no prompt→
+ *  agent-message gap already covered this turn (`latState.turnStartedAt` is
+ *  cleared the moment such a gap fires — see handleCodexAssistantMessage —
+ *  so a turn is never double-sampled). A non-null `error` counts as an
+ *  exception regardless of whether the fallback sample fires. */
+function handleCodexTaskComplete(rec, latState, payload) {
+  const duration = Number(payload.duration_ms);
+  if (latState.turnStartedAt !== null && Number.isFinite(duration)) {
+    noteLatencySample(rec, duration / 1000);
+  }
+  latState.turnStartedAt = null;
+  if (payload.error != null) rec.exceptions++;
+}
+
 /** `event_msg` → a `user_message`/`item_completed` user turn. Codex rollouts
  *  record only real prompts as user_message events — tool output travels in
  *  other event types that are not surfaced as turns — so every normalized
  *  Codex user turn is kind 'prompt' by construction. */
-function handleCodexUserMessage(rec, turns, stats, titleState, decoded, ms, withTurns) {
+function handleCodexUserMessage(rec, turns, stats, titleState, latState, decoded, ms, withTurns) {
   rec.prompts++;
   stats.prompts++;
   const text = decoded.text;
   if (!titleState.firstPrompt) titleState.firstPrompt = text;
+  // Opens the prompt→agent-message latency window; closed by the first
+  // following handleCodexAssistantMessage (mirrors Claude's latState, Task 3).
+  latState.pendingPromptMs = ms;
   if (withTurns && text) turns.push({ role: 'user', at: new Date(ms).toISOString(), text, prompt: true, kind: 'prompt' });
 }
 
-function handleCodexAssistantMessage(rec, turns, stats, decoded, ms, withTurns) {
+function handleCodexAssistantMessage(rec, turns, stats, latState, decoded, ms, withTurns) {
   rec.responses++;
   stats.responses++;
   const at = Number.isFinite(ms) ? ms : (rec.start ?? Date.now());
   const pk = punchKey(at);
   rec.punchcard[pk] = (rec.punchcard[pk] ?? 0) + 1;
+  if (latState.pendingPromptMs !== null) {
+    const gapSeconds = (ms - latState.pendingPromptMs) / 1000;
+    if (gapSeconds <= MAX_LATENCY_SAMPLE_SECONDS) noteLatencySample(rec, gapSeconds);
+    latState.pendingPromptMs = null;
+    // This turn now has a prompt-gap sample — task_complete's duration_ms
+    // fallback must not also fire for it (see handleCodexTaskComplete).
+    latState.turnStartedAt = null;
+  }
   if (withTurns) {
     turns.push({
       role: 'assistant', at: new Date(at).toISOString(),
@@ -575,33 +617,60 @@ function handleCodexAssistantMessage(rec, turns, stats, decoded, ms, withTurns) 
 
 /** `event_msg` → a decoded `message` (user or assistant), after generation/
  *  unknown-type bookkeeping already ran in handleCodexEventMsg. */
-function handleCodexEventMessage(rec, turns, stats, titleState, decoded, ms, withTurns) {
+function handleCodexEventMessage(rec, turns, stats, titleState, latState, decoded, ms, withTurns) {
   if (decoded.role === 'user') {
-    handleCodexUserMessage(rec, turns, stats, titleState, decoded, ms, withTurns);
+    handleCodexUserMessage(rec, turns, stats, titleState, latState, decoded, ms, withTurns);
     return;
   }
-  handleCodexAssistantMessage(rec, turns, stats, decoded, ms, withTurns);
+  handleCodexAssistantMessage(rec, turns, stats, latState, decoded, ms, withTurns);
 }
 
-/** One `event_msg` record: token_count, a message, or lifecycle/unknown
- *  (generation/unknown-item-type diagnostics apply to every non-token_count
- *  shape, so they run before the message/non-message split). */
-function handleCodexEventMsg(rec, turns, stats, titleState, usageState, decoded, ms, withTurns) {
+/** The four Codex `item_completed` item types this parser tallies into
+ *  `rec.tools`, keyed by the item's OWN type name — never renamed to Claude
+ *  tool names. Codex's tool vocabulary is host-specific and the UI ranks
+ *  names as-is. Every other item type (including UserMessage/AgentMessage,
+ *  already handled as messages) is left to the unknownItemType diagnostic
+ *  only, not tallied as a tool. */
+const CODEX_TOOL_ITEM_TYPES = new Set(['CommandExecution', 'McpToolCall', 'FileChange', 'CollabAgentToolCall']);
+
+/** One `event_msg` record: token_count, a lifecycle event (task_started/
+ *  task_complete/turn_aborted), a message, or unknown (generation/unknown-
+ *  item-type diagnostics apply to every non-token_count/non-lifecycle shape,
+ *  so they run before the message/non-message split). */
+function handleCodexEventMsg(rec, turns, stats, titleState, usageState, latState, decoded, payload, ms, withTurns) {
   if (decoded.type === 'tokenCount') { handleCodexTokenCount(rec, stats, usageState, decoded, ms); return; }
+  if (payload.type === 'task_started') { handleCodexTaskStarted(rec, latState, payload); return; }
+  if (payload.type === 'task_complete') { handleCodexTaskComplete(rec, latState, payload); return; }
+  if (payload.type === 'turn_aborted') { rec.aborts++; return; }
   if (decoded.generation === 'legacy') stats.legacyEvents++;
   else if (decoded.generation === 'item') stats.itemCompletedEvents++;
-  if (decoded.unknownItemType) recordCodexUnknownType(stats, decoded.unknownItemType);
+  if (decoded.unknownItemType) {
+    recordCodexUnknownType(stats, decoded.unknownItemType);
+    if (CODEX_TOOL_ITEM_TYPES.has(decoded.unknownItemType)) {
+      rec.tools[decoded.unknownItemType] = (rec.tools[decoded.unknownItemType] ?? 0) + 1;
+    }
+  }
   if (decoded.type !== 'message') return;
-  handleCodexEventMessage(rec, turns, stats, titleState, decoded, ms, withTurns);
+  handleCodexEventMessage(rec, turns, stats, titleState, latState, decoded, ms, withTurns);
+}
+
+/** Raw payload of one rollout line, defensively defaulted — mirrors
+ *  decodeCodexRecord's own guard. Read directly here (rather than threading
+ *  new fields through telemetry-records.mjs's decode) for the same reason
+ *  recordClaudeUserTurn reads `e.permissionMode` straight off the raw Claude
+ *  entry: a field only one caller needs, not a shape every consumer of the
+ *  decoded record should carry. */
+function rawPayload(e) {
+  return e?.payload && typeof e.payload === 'object' ? e.payload : {};
 }
 
 /** One line of a Codex rollout, dispatched on its decoded type. */
-function processCodexLine(rec, turns, stats, titleState, usageState, e, ms, withTurns) {
+function processCodexLine(rec, turns, stats, titleState, usageState, latState, e, ms, withTurns) {
   const decoded = decodeCodexRecord(e);
   if (decoded.type === 'meta') { handleCodexMeta(rec, decoded); return; }
-  if (decoded.type === 'turnContext') { handleCodexTurnContext(rec, decoded); return; }
+  if (decoded.type === 'turnContext') { handleCodexTurnContext(rec, decoded, rawPayload(e)); return; }
   if (e.type !== 'event_msg') return;
-  handleCodexEventMsg(rec, turns, stats, titleState, usageState, decoded, ms, withTurns);
+  handleCodexEventMsg(rec, turns, stats, titleState, usageState, latState, decoded, rawPayload(e), ms, withTurns);
 }
 
 /** The session-total usage row, derived from the LAST token_count event seen
@@ -648,11 +717,16 @@ export function parseCodex(raw, { id, withTurns = false }) {
   const stats = codexParseStats();
   const usageState = { lastUsage: null, lastUsageAt: null };
   const titleState = { firstPrompt: '' };
+  // Opened by task_started (turn start remembered), closed either by a
+  // prompt→agent-message gap sample or by task_complete's own duration_ms
+  // fallback — see handleCodexTaskStarted/handleCodexAssistantMessage/
+  // handleCodexTaskComplete.
+  const latState = { pendingPromptMs: null, turnStartedAt: null };
 
   for (const e of jsonLines(raw)) {
     const ms = toMs(e.timestamp);
     noteSpan(rec, ms);
-    processCodexLine(rec, turns, stats, titleState, usageState, e, ms, withTurns);
+    processCodexLine(rec, turns, stats, titleState, usageState, latState, e, ms, withTurns);
   }
 
   finalizeCodexUsage(rec, usageState);

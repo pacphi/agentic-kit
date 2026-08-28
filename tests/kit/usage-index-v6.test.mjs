@@ -8,6 +8,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { buildIndex, readSession, _resetForTest } from '../../src/lib/usage-index.mjs';
+import { parseCodex } from '../../src/lib/usage-parsers.mjs';
 
 const NOW = Date.parse('2026-07-25T12:00:00.000Z');
 const T0 = '2026-07-24T09:00:00.000Z';
@@ -260,4 +261,27 @@ test('buildIndex applies an injected Codex ledger: subagent stripped without a r
   _resetForTest();
   const without = await buildIndex(opts(sb, { force: true, codexState: null }));
   assert.equal(without.sessions.find((x) => x.id === 'dddd4444').tokens, 604000);
+});
+
+test('parseCodex v11: mode, duration, aborts, ctx window, typed tools', () => {
+  const plusSec = (t, s) => new Date(Date.parse(t) + s * 1000).toISOString();
+  const lines = [
+    JSON.stringify({ type: 'session_meta', payload: { id: 'cx1', cwd: '/tmp/p', thread_source: 'user' }, timestamp: T0 }),
+    JSON.stringify({ type: 'turn_context', payload: { model: 'gpt-5.6', approval_policy: 'never', sandbox_policy: 'workspace-write' }, timestamp: T0 }),
+    JSON.stringify({ type: 'event_msg', payload: { type: 'task_started', started_at: T0, model_context_window: 272000, turn_id: 't1' }, timestamp: T0 }),
+    JSON.stringify({ type: 'event_msg', payload: { type: 'user_message', message: 'go' }, timestamp: T0 }),
+    JSON.stringify({ type: 'event_msg', payload: { type: 'agent_message', message: 'done' }, timestamp: plusSec(T0, 6) }),
+    JSON.stringify({ type: 'event_msg', payload: { type: 'item_completed', item: { type: 'CommandExecution' } }, timestamp: plusSec(T0, 7) }),
+    JSON.stringify({ type: 'event_msg', payload: { type: 'task_complete', duration_ms: 9000, error: null, turn_id: 't1' }, timestamp: plusSec(T0, 9) }),
+    JSON.stringify({ type: 'event_msg', payload: { type: 'turn_aborted', reason: 'user_interrupt', turn_id: 't2' }, timestamp: plusSec(T0, 20) }),
+    JSON.stringify({ type: 'event_msg', payload: { type: 'token_count', info: { total_token_usage: { input_tokens: 5000, cached_input_tokens: 4000, output_tokens: 300 } } }, timestamp: plusSec(T0, 21) }),
+  ].join('\n');
+  const { session: rec } = parseCodex(lines, { id: 'cx1' });
+  assert.equal(rec.mode, 'auto-edit');
+  assert.equal(rec.modeRaw, 'never/workspace-write');
+  assert.equal(rec.latCount, 1);
+  assert.equal(rec.latHist[2], 1);           // 6s prompt→agent gap
+  assert.equal(rec.aborts, 1);
+  assert.equal(rec.ctxWindow, 272000);
+  assert.equal(rec.tools.CommandExecution, 1);
 });
