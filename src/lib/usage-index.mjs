@@ -88,8 +88,15 @@ export { MAX_TURN_CHARS, mergeIntervals, maskSecrets, normalizeSessionIdentity, 
  *      re-derived or the placeholder keeps showing as a real "model in play".
  *  v10: Codex rollout messages can arrive in the `item_completed` envelope;
  *       v9-cached records parsed from those files have token rows but zero
- *       prompts/responses, so every Codex record must be re-derived. */
-export const SCHEMA_VERSION = 10;
+ *       prompts/responses, so every Codex record must be re-derived.
+ *  v11: session records grow `mode`/`modeRaw` (cross-host permission
+ *       posture), `latHist`/`latCount` (response-latency histogram),
+ *       `lenSeconds` (this session's own engaged seconds), `ctxWindow`/
+ *       `ctxLastTokens` (model context-window detail), and `aborts`
+ *       (codex's explicit user-abort count). A v10-cached record carries
+ *       none of these, so every session must be re-derived or the new
+ *       fields silently read as undefined. */
+export const SCHEMA_VERSION = 11;
 
 const DAY_MS = 86_400_000;
 // One day of slack past dashboard-server.mjs's 365-day clampDays ceiling —

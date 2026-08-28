@@ -8,6 +8,7 @@ import {
   buildIndex, readIndex, readSession, mergeIntervals, maskSecrets, projectLabel,
   SCHEMA_VERSION, IDLE_GAP_MS, _resetForTest,
 } from '../../src/lib/usage-index.mjs';
+import { blankSession, noteLatencySample } from '../../src/lib/usage-parsers.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const FIXTURES = path.join(HERE, '..', 'fixtures', 'usage');
@@ -1419,4 +1420,20 @@ test('worktree detection is separator-agnostic (Windows CI carries POSIX fixture
 
   assert.equal(projectLabel('C:\\Users\\x\\ai\\agentic-kit').project, 'agentic-kit',
     'a plain backslash checkout must not return the whole string as the project');
+});
+
+test('noteLatencySample buckets on the shared edges', () => {
+  const rec = blankSession('s1', 'claude');
+  noteLatencySample(rec, 1.2);   // bucket 0 (<2s)
+  noteLatencySample(rec, 8.4);   // bucket 2 (5-10s)
+  noteLatencySample(rec, 700);   // bucket 5 (>60s)
+  assert.deepEqual(rec.latHist, [1, 0, 1, 0, 0, 1]);
+  assert.equal(rec.latCount, 3);
+});
+
+test('blankSession v11 fields default honest-absent', () => {
+  const rec = blankSession('s1', 'codex');
+  assert.equal(rec.mode, null);
+  assert.equal(rec.ctxWindow, null);
+  assert.equal(rec.aborts, 0);
 });

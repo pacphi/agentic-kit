@@ -187,7 +187,43 @@ export function blankSession(id, provider) {
     // rate-limit snapshot the rollout carried. Claude sessions keep the zero
     // and the null — absent, not unknown.
     reasoningOutput: 0, rateLimits: null,
+    // v11: cross-host permission posture (usage-modes.normalizeMode), a
+    // response-latency histogram, THIS session's own engaged seconds, model
+    // context-window detail, and codex's explicit-abort count. Every field
+    // here defaults honest-absent (null/0) until a parser observes evidence
+    // for it — never a guess.
+    mode: null, modeRaw: null,
+    latHist: null, latCount: 0,
+    lenSeconds: 0,
+    ctxWindow: null, ctxLastTokens: null,
+    aborts: 0,
   };
+}
+
+/** Response-latency histogram edges, in seconds; the 6th bucket (index 5)
+ *  catches everything over 60s. */
+export const LAT_BUCKET_EDGES = [2, 5, 10, 30, 60];
+/** Session-length histogram edges, in seconds; the 5th bucket (index 4)
+ *  catches everything over 2h. */
+export const LEN_BUCKET_EDGES = [300, 900, 2700, 7200];
+
+/** First bucket `i` whose edge `v` does not exceed, else the overflow bucket
+ *  (`edges.length`). Shared by every histogram built from these edges, so a
+ *  bucket boundary is defined in exactly one place. */
+export function bucketIndex(edges, v) {
+  for (let i = 0; i < edges.length; i++) if (v <= edges[i]) return i;
+  return edges.length;
+}
+
+/** Record one response-latency sample onto `rec.latHist`, allocating the
+ *  histogram lazily so a session that never observes a latency (older
+ *  transcripts, a source that carries no turn timing) keeps `latHist` null —
+ *  absent, not a fabricated all-zero histogram. */
+export function noteLatencySample(rec, seconds) {
+  if (!Number.isFinite(seconds) || seconds < 0) return;
+  rec.latHist ??= new Array(LAT_BUCKET_EDGES.length + 1).fill(0);
+  rec.latHist[bucketIndex(LAT_BUCKET_EDGES, seconds)]++;
+  rec.latCount++;
 }
 
 function noteSpan(rec, ms) {
@@ -217,10 +253,12 @@ function activeIntervals(stamps) {
   return out;
 }
 
-/** Finish a parsed record: derive active intervals, drop the raw timestamps
- *  (thousands per session, and never needed again once collapsed). */
+/** Finish a parsed record: derive active intervals and this session's own
+ *  engaged seconds from them, then drop the raw timestamps (thousands per
+ *  session, and never needed again once collapsed). */
 function seal(rec) {
   rec.active = activeIntervals(rec.stamps);
+  rec.lenSeconds = Math.round(rec.active.reduce((n, [a, b]) => n + (b - a), 0) / 1000);
   delete rec.stamps;
   return rec;
 }

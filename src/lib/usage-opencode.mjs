@@ -265,6 +265,7 @@ export function parseSession({ dbFile, id, withTurns = false }) {
 
     if (!rec.title) rec.title = '(untitled)';
     rec.active = activeIntervals(rec.stamps);
+    rec.lenSeconds = Math.round(rec.active.reduce((n, [a, b]) => n + (b - a), 0) / 1000);
     delete rec.stamps;
     return { session: rec, turns };
   });
