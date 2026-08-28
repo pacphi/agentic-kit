@@ -209,7 +209,40 @@ function defaultRoots() {
   };
 }
 
-/** Claude transcripts: exactly one level of project directories. */
+/** `<projectDir>/<sessionId>/subagents/*.jsonl` — a session's own subagent
+ *  (sidechain) transcripts, real cost-bearing Claude work that otherwise
+ *  never enters the index: parseClaude already prices these bytes and marks
+ *  them `sidechain` from their own entries (isSidechain), so discovery was
+ *  the entire gap. Bounded to exactly this one nested shape — not a generic
+ *  recursive walk — so a directory entry that ISN'T a session-id dir with a
+ *  subagents child (e.g. Claude Code's own `memory` dir) just contributes
+ *  nothing, harmlessly.
+ *
+ *  The id is namespaced `<sessionId>/<stem>`: Claude Code names every
+ *  subagent file `agent-<hash>.jsonl`, and that stem is NOT guaranteed
+ *  unique across two different parent sessions, so an unnamespaced id could
+ *  silently collide two unrelated subagent records into one.
+ *
+ *  An unreadable (or absent — most sessions have none) subagents dir
+ *  degrades silently via readDirSafe, exactly like every other per-directory
+ *  read in this file: one bad nested entry must not abort the whole scan,
+ *  and this draws no new health signal — same convention, not a new one. */
+function listClaudeSubagents(projectDir, sessionId, projectDirName) {
+  const out = [];
+  const subDir = path.join(projectDir, sessionId, 'subagents');
+  for (const f of readDirSafe(subDir)) {
+    if (f.isFile() && f.name.endsWith('.jsonl')) {
+      out.push({
+        file: path.join(subDir, f.name), provider: 'claude', dirName: projectDirName,
+        id: `${sessionId}/${f.name.slice(0, -6)}`,
+      });
+    }
+  }
+  return out;
+}
+
+/** Claude transcripts: one level of project directories, plus each session's
+ *  own nested subagents/ (see listClaudeSubagents). */
 function listClaude(root) {
   const out = [];
   for (const d of readDirSafe(root)) {
@@ -218,6 +251,8 @@ function listClaude(root) {
     for (const f of readDirSafe(dir)) {
       if (f.isFile() && f.name.endsWith('.jsonl')) {
         out.push({ file: path.join(dir, f.name), provider: 'claude', dirName: d.name, id: f.name.slice(0, -6) });
+      } else if (f.isDirectory()) {
+        out.push(...listClaudeSubagents(dir, f.name, d.name));
       }
     }
   }

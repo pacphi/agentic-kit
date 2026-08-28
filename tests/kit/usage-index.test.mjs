@@ -2096,3 +2096,102 @@ test('previous is null unless the caller asks for it', () => {
   const a = aggregate([record('cur')], aggOpts());
   assert.equal(a.previous, null, 'null is "not requested" — an empty totals object would read as "measured nothing"');
 });
+
+// ── nested Claude subagent transcripts (Lane-P) ─────────────────────────────
+//
+// Claude Code writes sidechain/subagent transcripts one level below the main
+// session file, at <project>/<sessionId>/subagents/agent-*.jsonl — a shape
+// listClaude never walked into, so this cost-bearing work was invisible to
+// every index/aggregate consumer. parseClaude already prices these bytes
+// correctly and marks them sidechain from their own entries (isSidechain);
+// the gap was purely in discovery.
+
+/** Write a nested `<parentId>/subagents/<stem>.jsonl` transcript under a
+ *  soloSandbox()'s claude project dir — one prompt + one priced reply, both
+ *  entries carrying `isSidechain: true` exactly as Claude Code's real
+ *  on-disk format does. */
+function writeSubagentTranscript(sb, parentId, stem, usage) {
+  const subDir = path.join(sb.claude, parentId, 'subagents');
+  fs.mkdirSync(subDir, { recursive: true });
+  const T0 = '2026-08-20T10:00:00.000Z';
+  fs.writeFileSync(path.join(subDir, `${stem}.jsonl`), `${[
+    JSON.stringify({
+      type: 'user', sessionId: parentId, cwd: '/Users/me/proj', isSidechain: true,
+      timestamp: T0, message: { role: 'user', content: 'subtask' },
+    }),
+    JSON.stringify({
+      type: 'assistant', sessionId: parentId, cwd: '/Users/me/proj', isSidechain: true,
+      timestamp: T0, message: { role: 'assistant', model: 'claude-opus-5', usage, content: [] },
+    }),
+  ].join('\n')}\n`);
+}
+
+test('nested subagent transcripts get parent-namespaced ids — no collision across two parents', async () => {
+  _resetForTest();
+  const sb = soloSandbox();
+  const usage = { input_tokens: 10, output_tokens: 5 };
+  writeSubagentTranscript(sb, 'parent-a', 'agent-001', usage);
+  writeSubagentTranscript(sb, 'parent-b', 'agent-001', usage);
+
+  const agg = await buildIndex(opts(sb));
+  const ids = agg.sessions.map((s) => s.id).sort();
+  assert.deepEqual(ids, ['parent-a/agent-001', 'parent-b/agent-001'],
+    'the same agent-001 stem under two different parents must yield two distinct records, never one overwriting the other');
+});
+
+test('a nested subagent transcript is discovered, priced, and folded into bySource.subagent', async () => {
+  _resetForTest();
+  const sb = soloSandbox();
+  const T0 = '2026-08-20T10:00:00.000Z';
+  const mainId = 'main-session';
+
+  // The main, non-sidechain session.
+  fs.writeFileSync(path.join(sb.claude, `${mainId}.jsonl`), `${[
+    JSON.stringify({ type: 'user', sessionId: mainId, cwd: '/Users/me/proj', timestamp: T0, message: { role: 'user', content: 'do the thing' } }),
+    JSON.stringify({ type: 'assistant', sessionId: mainId, cwd: '/Users/me/proj', timestamp: T0, message: { role: 'assistant', model: 'claude-opus-5', usage: { input_tokens: 100, output_tokens: 20 }, content: [] } }),
+  ].join('\n')}\n`);
+
+  // Its own subagent transcript — real, cost-bearing work.
+  writeSubagentTranscript(sb, mainId, 'agent-001', { input_tokens: 1000, output_tokens: 200 });
+
+  const agg = await buildIndex(opts(sb));
+
+  assert.equal(agg.totals.sessions, 2, 'both the main session and its subagent transcript are counted');
+  assert.ok(byId(agg, mainId), 'the main session is present');
+  const sub = agg.sessions.find((s) => s.id === `${mainId}/agent-001`);
+  assert.ok(sub, 'the nested subagent session is present, namespaced under its parent');
+  assert.equal(sub.sidechain, true, 'parseClaude marks it sidechain from its own isSidechain entries');
+
+  assert.equal(agg.bySource.main.sessions, 1);
+  assert.equal(agg.bySource.subagent.sessions, 1);
+  assert.equal(agg.bySource.main.cost, 0.12);
+  assert.equal(agg.bySource.subagent.cost, 1.2, "the subagent transcript's own usage prices as real, nonzero cost — not swallowed as $0");
+  assert.equal(agg.totals.cost, 1.32, 'totals include the subagent cost alongside the main session');
+  // The codex ledger-strip path (applyCodexLedger) is untouched by this fix —
+  // this fixture has no codex candidates at all, so its absence here is the
+  // most direct evidence; the full existing codex-ledger test coverage
+  // elsewhere in this suite is unaffected (see the green-bar run).
+});
+
+test('an unreadable subagents dir degrades silently — the parent session is unaffected, no new health field invented', async () => {
+  _resetForTest();
+  const sb = soloSandbox();
+  const T0 = '2026-08-20T10:00:00.000Z';
+  const mainId = 'main-with-bad-subagents';
+
+  fs.writeFileSync(path.join(sb.claude, `${mainId}.jsonl`), `${JSON.stringify({
+    type: 'assistant', sessionId: mainId, cwd: '/Users/me/proj', timestamp: T0,
+    message: { role: 'assistant', model: 'claude-opus-5', usage: { input_tokens: 1, output_tokens: 1 }, content: [] },
+  })}\n`);
+
+  fs.mkdirSync(path.join(sb.claude, mainId));
+  // A FILE where the subagents directory is expected — readdirSync on this
+  // throws ENOTDIR, exactly like the pre-existing "unreadable root" test
+  // above (F-08 section). readDirSafe swallows it the same way it already
+  // swallows a bad nested project dir: no exception, no new health field.
+  fs.writeFileSync(path.join(sb.claude, mainId, 'subagents'), 'not a directory');
+
+  const agg = await buildIndex(opts(sb));
+  assert.ok(byId(agg, mainId), 'the main session still parses despite its unreadable subagents dir');
+  assert.equal(agg.sourceHealth.claude.status, 'ok', 'one bad nested subagents dir must not degrade the whole claude source');
+});
