@@ -8,6 +8,9 @@ import { startDashboard } from '../../src/lib/dashboard-server.mjs';
 import { aggregate } from '../../src/lib/usage-aggregate.mjs';
 import { blankSession, addUsage } from '../../src/lib/usage-parsers.mjs';
 import { MODES } from '../../src/lib/usage-modes.mjs';
+import {
+  deltaChip, sparklineSvg, histogram, stackedDays, donut2, rankedRows,
+} from '../../src/lib/dashboard/client/usage-rhythm.mjs';
 
 const PAGE = renderPage({ name: 'agentic-kit', version: 'test' });
 
@@ -138,4 +141,109 @@ test('/api/usage payload carries rhythm, mode, provider and a previous-window pr
   } finally {
     await srv.close();
   }
+});
+
+// ── usage-rhythm.mjs: rhythm/mode chart primitives (Task 8) ────────────────
+//
+// These are pure string builders, imported directly here — real ESM on disk,
+// not read through the concatenated client.mjs bundle (that concatenation is
+// exercised separately, above, via the `JS` import). Task 9 wires these
+// exports into usage.mjs's panels.
+
+test('deltaChip renders an up arrow and a rounded percent for a positive change', () => {
+  const html = deltaChip(584, 540, {});
+  assert.match(html, /▲/);
+  assert.match(html, /8/);
+});
+
+test('deltaChip returns empty string when there is no previous window', () => {
+  assert.equal(deltaChip(5, null, {}), '');
+  assert.equal(deltaChip(5, undefined, {}), '');
+  assert.equal(deltaChip(5, 0, {}), '', 'a zero previous value carries no meaning either — no window to compare against');
+});
+
+test('deltaChip tones a downIsGood decrease as good, and neutral forces flat styling', () => {
+  const good = deltaChip(90, 100, { downIsGood: true });
+  assert.match(good, /data-tone="good"/);
+  assert.match(good, /▼/);
+  const neutral = deltaChip(584, 540, { neutral: true });
+  assert.match(neutral, /data-tone="flat"/);
+});
+
+test('deltaChip renders a unit-suffixed absolute delta instead of a percent when unit is given', () => {
+  const html = deltaChip(120, 90, { unit: 'ms' });
+  assert.match(html, /30ms/);
+  assert.doesNotMatch(html, /%/);
+});
+
+test('sparklineSvg draws a polyline with an accent endpoint dot for 2+ finite points', () => {
+  const html = sparklineSvg([1, 2, 3]);
+  assert.match(html, /<svg/);
+  assert.match(html, /polyline/);
+  assert.match(html, /circle/);
+});
+
+test('sparklineSvg returns empty string for fewer than 2 finite points', () => {
+  assert.equal(sparklineSvg([1]), '');
+  assert.equal(sparklineSvg([]), '');
+  assert.equal(sparklineSvg([1, NaN]), '', 'NaN is not a finite point, so only one point remains');
+});
+
+test('histogram renders a marker and its label, emitted before the bars so bars paint over the marker line', () => {
+  const html = histogram({ counts: [1, 5, 2], labels: ['<1s', '1-3s', '3s+'], markers: [{ atPct: 50, label: 'p50' }] });
+  assert.match(html, /p50/);
+  assert.match(html, /hist-marker/);
+  const markersIdx = html.indexOf('hist-markers');
+  const barsIdx = html.indexOf('hist-bars');
+  assert.ok(markersIdx >= 0 && barsIdx > markersIdx, 'markers must be emitted before bars so bars paint over them');
+});
+
+test('stackedDays maps not-recorded and other to the de-emphasis token, never a series color', () => {
+  const html = stackedDays({
+    days: [{ day: '2026-08-18', parts: { 'auto-edit': 4, 'not-recorded': 1, other: 2 } }],
+    order: ['not-recorded', 'other', 'auto-edit'],
+    palette: { 'auto-edit': 'var(--accent)', 'not-recorded': 'var(--fail)', other: 'var(--purple)' },
+  });
+  // The palette's own (wrong) colors for the two special keys must never appear.
+  assert.doesNotMatch(html, /var\(--fail\)/);
+  assert.doesNotMatch(html, /var\(--purple\)/);
+  assert.match(html, /var\(--ink-dim\)/);
+});
+
+test('donut2 renders both side labels and the center label', () => {
+  const html = donut2({ aLabel: 'Claude', aValue: 584, bLabel: 'Codex', bValue: 212, centerLabel: '73%' });
+  assert.match(html, /Claude/);
+  assert.match(html, /Codex/);
+  assert.match(html, /73%/);
+});
+
+test('rankedRows renders a dim row with the de-emphasis fill class', () => {
+  const html = rankedRows([{ label: 'Unclassified', value: '12', share: 40, dim: true }]);
+  assert.match(html, /rrow-fill dim/);
+});
+
+test('every chart primitive with a free-text field escapes an injected <script> label', () => {
+  // sparklineSvg is excluded — its only input is a plain number series, with
+  // no free-text field for a caller to inject through.
+  assert.doesNotMatch(deltaChip(120, 90, { unit: '<script>' }), /<script>/);
+  assert.doesNotMatch(
+    histogram({ counts: [1], labels: ['<script>'], markers: [{ atPct: 1, label: '<script>' }] }),
+    /<script>/,
+  );
+  assert.doesNotMatch(
+    stackedDays({ days: [{ day: '<script>', parts: { a: 1 } }], order: ['a'], palette: { a: '<script>' } }),
+    /<script>/,
+  );
+  assert.doesNotMatch(
+    donut2({ aLabel: '<script>', aValue: 1, bLabel: '<script>', bValue: 1, centerLabel: '<script>' }),
+    /<script>/,
+  );
+  assert.doesNotMatch(rankedRows([{ label: '<script>', value: '<script>', share: 50 }]), /<script>/);
+});
+
+test('usage styles append the rhythm/mode chart primitive classes with the mark-rule geometry', () => {
+  assert.match(CSS, /\.hist-fill\{[^}]*border-radius:4px 4px 0 0/, 'histogram bars get a 4px top radius');
+  assert.match(CSS, /\.sday-bar\{[^}]*gap:2px/, 'stacked-day segments get a 2px gap');
+  assert.match(CSS, /\.spark-line\{[^}]*stroke:var\(--ink-dim\)/, 'sparkline stroke is the de-emphasis ink');
+  assert.match(CSS, /\.spark-dot\{[^}]*fill:var\(--accent\)/, 'sparkline endpoint dot is the accent color');
 });

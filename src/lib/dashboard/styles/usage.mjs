@@ -477,4 +477,83 @@ export const USAGE_CSS = `
   .phead .pchips,.phead .p-h,.phead .p-tok{display:none}
 }
 
+/* rhythm/mode chart primitives (usage-rhythm.mjs) — a small, self-contained
+   component family for the rhythm/mode panels: delta chips, sparklines, a
+   latency histogram, a stacked-by-day bar, a two-slice donut, and ranked
+   rows. Every numeric figure here carries .tnum (tabular-nums) explicitly,
+   same spirit as .mono elsewhere in this file — inherited font-variant-numeric
+   from body is not something a reader can see in the markup, so state it. */
+.tnum{font-variant-numeric:tabular-nums}
+
+/* delta chip */
+.dchip{display:inline-flex; align-items:center; gap:4px; font-size:12px; font-weight:600}
+.dchip-arrow{font-style:normal}
+.dchip[data-tone="good"]{color:var(--ok)}
+.dchip[data-tone="bad"]{color:var(--fail)}
+.dchip[data-tone="flat"]{color:var(--ink-dim)}
+
+/* sparkline */
+.spark{overflow:visible; vertical-align:middle}
+.spark-line{fill:none; stroke:var(--ink-dim); stroke-width:1.6}
+.spark-dot{fill:var(--accent)}
+
+/* histogram — sequential single hue; markers render BEFORE bars in DOM
+   order so a bar always paints over a marker line where they cross; the
+   marker's own label sits above the plot box instead, so it is never itself
+   covered. */
+.hist-plot{position:relative}
+.hist-markers{position:absolute; inset:0; pointer-events:none}
+.hist-marker{position:absolute; top:0; bottom:0}
+.hist-marker-line{position:absolute; top:0; bottom:0; border-left:1px dashed var(--ink-dim)}
+.hist-marker-lab{position:absolute; top:-14px; left:3px; font-style:normal; font-size:9px; font-weight:600; color:var(--ink-dim); white-space:nowrap}
+.hist-bars{display:flex; align-items:flex-end; gap:6px}
+.hist-bar{flex:1; min-width:0; display:flex; flex-direction:column; align-items:center; justify-content:flex-end}
+.hist-val{font-size:9.5px; color:var(--ink-2); margin-bottom:3px}
+.hist-fill{display:block; width:100%; border-radius:4px 4px 0 0; background:var(--accent)}
+.hist-labs{display:flex; gap:6px; margin-top:6px}
+.hist-lab{flex:1; min-width:0; text-align:center; font-size:9.5px; color:var(--ink-dim); overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+
+/* stacked days — order is bottom-up; segments render in a column-reverse
+   flex with a 2px gap, so the LAST key in order paints at the top of the
+   stack. not-recorded/other are forced to --ink-dim in JS (never a series
+   color), same "the uncategorized bucket is de-emphasis, not a hue" rule
+   renderScoreCategories already applies to Unclassified above. */
+.stackdays{display:flex; align-items:flex-end; gap:6px}
+.sday-col{flex:1; min-width:0; display:flex; flex-direction:column; align-items:center}
+.sday-bar{width:100%; display:flex; flex-direction:column-reverse; gap:2px}
+.sday-seg{display:block; width:100%}
+.sday-seg.top{border-radius:4px 4px 0 0}
+.sday-lab{margin-top:6px; font-family:var(--mono); font-size:9.5px; color:var(--ink-dim)}
+
+/* two-slice donut — a mask on the RING punches the hole; the center label is
+   a sibling, not a descendant, of the masked element, so it is never itself
+   clipped. Seams between slices are --line, not bare transparent, so a small
+   gap reads as a deliberate seam rather than a rendering gap. */
+.donut2-wrap{display:flex; align-items:center; gap:16px}
+.donut2{position:relative; width:88px; height:88px; flex:none}
+.donut2-ring{
+  display:block; width:100%; height:100%; border-radius:50%;
+  -webkit-mask:radial-gradient(farthest-side,transparent 61%,#000 62%);
+  mask:radial-gradient(farthest-side,transparent 61%,#000 62%);
+}
+.donut2-center{
+  position:absolute; inset:0; display:grid; place-items:center;
+  font-style:normal; font-size:13px; font-weight:700; color:var(--ink); text-align:center;
+}
+.donut2-legend{display:flex; flex-direction:column; gap:8px}
+.donut2-item{display:flex; align-items:center; gap:6px; font-size:12.5px; color:var(--ink-2)}
+.donut2-item i{width:8px; height:8px; border-radius:2px; display:inline-block; flex:none}
+.donut2-item b{color:var(--ink); font-weight:600}
+
+/* ranked rows — the same label/track/value grammar as .mrow above, kept as
+   its own small component so this file's chart primitives can evolve
+   independently of the scorecard's magnitude rows. */
+.rrows{display:flex; flex-direction:column; gap:7px}
+.rrow{display:grid; grid-template-columns:minmax(90px,1.2fr) 2fr auto; gap:10px; align-items:center}
+.rrow-label{font-size:12px; color:var(--ink); overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+.rrow-track{height:7px; border-radius:4px; background:var(--panel-2); overflow:hidden}
+.rrow-fill{display:block; height:100%; border-radius:4px; background:var(--accent)}
+.rrow-fill.dim{background:var(--ink-dim)}
+.rrow-val{font-size:12px; color:var(--ink); text-align:right}
+
 `;
