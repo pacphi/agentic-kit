@@ -8,7 +8,7 @@ import {
   buildIndex, readIndex, readSession, mergeIntervals, maskSecrets, projectLabel,
   SCHEMA_VERSION, IDLE_GAP_MS, _resetForTest,
 } from '../../src/lib/usage-index.mjs';
-import { blankSession, noteLatencySample } from '../../src/lib/usage-parsers.mjs';
+import { blankSession, noteLatencySample, parseClaude } from '../../src/lib/usage-parsers.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const FIXTURES = path.join(HERE, '..', 'fixtures', 'usage');
@@ -1436,4 +1436,19 @@ test('blankSession v11 fields default honest-absent', () => {
   assert.equal(rec.mode, null);
   assert.equal(rec.ctxWindow, null);
   assert.equal(rec.aborts, 0);
+});
+
+test('parseClaude derives latency, mode, ctx from entries', () => {
+  const T0 = '2026-08-20T10:00:00.000Z';
+  const plusSec = (t, s) => new Date(Date.parse(t) + s * 1000).toISOString();
+  const lines = [
+    JSON.stringify({ type: 'user', timestamp: T0, permissionMode: 'acceptEdits', message: { role: 'user', content: 'do it' } }),
+    JSON.stringify({ type: 'assistant', timestamp: plusSec(T0, 8), message: { role: 'assistant', model: 'claude-opus-5', usage: { input_tokens: 1000, cache_read_input_tokens: 150000, output_tokens: 50 }, content: [] } }),
+  ].join('\n');
+  const { session: rec } = parseClaude(lines, { id: 'sess-lat' });
+  assert.equal(rec.mode, 'auto-edit');
+  assert.equal(rec.modeRaw, 'acceptEdits');
+  assert.equal(rec.latCount, 1);
+  assert.equal(rec.latHist[2], 1);            // 8s → 5-10s bucket
+  assert.equal(rec.ctxLastTokens, 151000);    // input + cacheRead of last turn
 });

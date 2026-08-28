@@ -13,6 +13,7 @@ import { repoRoot } from './paths.mjs';
 import { MAX_TELEMETRY_UNKNOWN_KINDS } from './usage-telemetry.mjs';
 import { decodeClaudeRecord, decodeCodexRecord } from './telemetry-records.mjs';
 import { toMs, maskSecrets } from './usage-aggregate.mjs';
+import { normalizeMode } from './usage-modes.mjs';
 
 /** Silence longer than this ends a stretch of engagement. A session is split
  *  into active sub-intervals at gaps ABOVE this bound (exactly this much is not
@@ -226,6 +227,12 @@ export function noteLatencySample(rec, seconds) {
   rec.latCount++;
 }
 
+/** A prompt-to-response gap longer than this is an idle resume (the person
+ *  walked away and came back), not a real wait for a reply — so it is
+ *  excluded from latency sampling entirely, rather than merely landing in
+ *  noteLatencySample's own overflow bucket alongside genuinely slow turns. */
+const MAX_LATENCY_SAMPLE_SECONDS = 3600;
+
 function noteSpan(rec, ms) {
   if (!Number.isFinite(ms)) return;
   if (rec.start === null || ms < rec.start) rec.start = ms;
@@ -335,13 +342,19 @@ function userTurnKind(entry) {
 /** A `user`-role Claude entry: span/prompt-count bookkeeping, plus its turn
  *  row when withTurns. `titleState.firstPrompt` is set from the first HUMAN
  *  prompt whose text is non-empty (mutated in place: later entries only fill
- *  it in while it is still empty). */
-function recordClaudeUserTurn(rec, turns, titleState, e, ms, decoded, withTurns) {
+ *  it in while it is still empty). A human prompt also opens the latency
+ *  window (`latState.pendingMs`, closed by the next real assistant turn) and
+ *  is the only place `permissionMode` is read — a tool-result or harness-
+ *  injected "user" entry never carries the human's own posture. */
+function recordClaudeUserTurn(rec, turns, titleState, latState, e, ms, decoded, withTurns) {
   noteSpan(rec, ms);
   const human = isHumanPrompt(e);
   if (human) {
     rec.prompts++;
     if (!titleState.firstPrompt) titleState.firstPrompt = decoded.text;
+    latState.pendingMs = ms;
+    const m = normalizeMode({ host: 'claude', permissionMode: e.permissionMode });
+    if (m.raw) { rec.mode = m.mode; rec.modeRaw = m.raw; }
   }
   if (withTurns && decoded.text) {
     turns.push({ role: 'user', at: new Date(ms).toISOString(), text: decoded.text, prompt: human, kind: userTurnKind(e) });
@@ -363,8 +376,8 @@ function collectClaudeToolNames(rec, toolUses) {
 
 /** An `assistant`-role Claude entry (caller has already confirmed `e.message`
  *  exists): span/response-count bookkeeping, the API-error placeholder path,
- *  and otherwise model/usage/tool accounting plus its turn row. */
-function recordClaudeAssistantTurn(rec, turns, ms, decoded, withTurns) {
+ *  and otherwise latency/model/usage/tool accounting plus its turn row. */
+function recordClaudeAssistantTurn(rec, turns, latState, ms, decoded, withTurns) {
   noteSpan(rec, ms);
   rec.responses++;
   const at = Number.isFinite(ms) ? ms : (rec.start ?? Date.now());
@@ -380,7 +393,9 @@ function recordClaudeAssistantTurn(rec, turns, ms, decoded, withTurns) {
   // it stays visible rather than silently vanishing. isApiErrorMessage isn't
   // reliably set on every build that emits this placeholder, so the literal
   // model marker is checked directly too — it's the one part of the shape
-  // that's never varied in observed transcripts.
+  // that's never varied in observed transcripts. A dropped request is also
+  // never a latency SAMPLE — `latState.pendingMs` is deliberately left set so
+  // the FIRST real completion that eventually follows is what gets timed.
   if (decoded.isApiError) {
     rec.exceptions++;
     if (withTurns) {
@@ -392,10 +407,21 @@ function recordClaudeAssistantTurn(rec, turns, ms, decoded, withTurns) {
     return;
   }
 
+  if (latState.pendingMs !== null) {
+    const gapSeconds = (ms - latState.pendingMs) / 1000;
+    if (gapSeconds <= MAX_LATENCY_SAMPLE_SECONDS) noteLatencySample(rec, gapSeconds);
+    latState.pendingMs = null;
+  }
+
   const model = typeof decoded.model === 'string' ? decoded.model : 'unknown';
   if (!rec.models.includes(model)) rec.models.push(model);
 
   addUsage(rec, localDay(at), model, { ...decoded.usage, responses: 1 });
+  // Context pressure: the tokens actually IN the model's window for this
+  // turn (fresh input plus what got served from cache) — overwritten every
+  // turn so the field always reflects the LAST completion, not a running
+  // total across the session.
+  rec.ctxLastTokens = decoded.usage.input + decoded.usage.cacheRead;
 
   const tools = collectClaudeToolNames(rec, decoded.toolUses);
   if (withTurns) {
@@ -415,6 +441,9 @@ export function parseClaude(raw, { id, dirName, withTurns = false }) {
   const rec = blankSession(id, 'claude');
   const turns = [];
   const titleState = { firstPrompt: '', aiTitle: '' };
+  // Open by the most recent human prompt, closed by the first real assistant
+  // turn that follows it — see recordClaudeUserTurn/recordClaudeAssistantTurn.
+  const latState = { pendingMs: null };
 
   for (const e of jsonLines(raw)) {
     const ms = toMs(e.timestamp);
@@ -426,12 +455,12 @@ export function parseClaude(raw, { id, dirName, withTurns = false }) {
     if (rec.project === 'unknown' && typeof e.cwd === 'string') applyProject(rec, projectLabel(e.cwd, dirName, repoRootOf(e.cwd)));
 
     if (decoded.role === 'user') {
-      recordClaudeUserTurn(rec, turns, titleState, e, ms, decoded, withTurns);
+      recordClaudeUserTurn(rec, turns, titleState, latState, e, ms, decoded, withTurns);
       continue;
     }
 
     if (decoded.role !== 'assistant' || !e.message) continue;
-    recordClaudeAssistantTurn(rec, turns, ms, decoded, withTurns);
+    recordClaudeAssistantTurn(rec, turns, latState, ms, decoded, withTurns);
   }
 
   rec.title = maskSecrets(titleState.aiTitle || clip(titleState.firstPrompt)) || '(untitled)';
