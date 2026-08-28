@@ -159,6 +159,90 @@ export function normalizeSessionIdentity(record = {}) {
 
 const round = (n, p = 6) => Math.round(n * 10 ** p) / 10 ** p;
 
+/** Local calendar day, `YYYY-MM-DD`. Local because "what did I spend today" is
+ *  a question about the user's clock, not UTC's. Restated from
+ *  usage-parsers.mjs (which keys its usage rows on the same convention)
+ *  because THAT module imports from THIS one — see the header note on the
+ *  one-way dependency. */
+function localDay(ms) {
+  const d = new Date(ms);
+  const p = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+}
+
+// ── histograms & percentiles ────────────────────────────────────────────────
+
+/** Response-latency histogram edges, in seconds; the 6th bucket (index 5)
+ *  catches everything over 60s. */
+export const LAT_BUCKET_EDGES = [2, 5, 10, 30, 60];
+/** Session-length histogram edges, in seconds; the 5th bucket (index 4)
+ *  catches everything over 2h. */
+export const LEN_BUCKET_EDGES = [300, 900, 2700, 7200];
+// These are the SAME edges usage-parsers.mjs fills each session's `latHist` on,
+// restated here for the one-way-import reason above. A test pins the two copies
+// equal, so a change to either goes red rather than silently re-labelling every
+// bucket in the panel.
+
+/** First bucket `i` whose edge `v` does not exceed, else the overflow bucket. */
+function bucketIndex(edges, v) {
+  for (let i = 0; i < edges.length; i++) if (v <= edges[i]) return i;
+  return edges.length;
+}
+
+/**
+ * The `q`th percentile of a bucketed distribution, in the buckets' own unit.
+ * Interpolates LINEARLY inside the bucket the percentile lands in: the samples'
+ * exact values are gone, and a uniform spread across the bucket is the only
+ * assumption the counts still support.
+ *
+ * Two deliberately honest edges:
+ *   - an empty histogram is `null`, never 0 — "nothing was measured" and
+ *     "measured zero" are different claims, and only one of them is true here;
+ *   - the overflow bucket has no upper edge to interpolate towards, so it
+ *     reports its FLOOR. That understates by an unknown amount rather than
+ *     inventing a ceiling; read it as "at least this".
+ * Pure — exported for test.
+ */
+export function percentileFromBuckets(counts, edges, q) {
+  if (!Array.isArray(counts) || !Array.isArray(edges)) return null;
+  const total = counts.reduce((a, n) => a + (Number(n) || 0), 0);
+  if (total <= 0) return null;
+  const target = total * q;
+  let cum = 0;
+  for (let i = 0; i < counts.length; i++) {
+    const n = Number(counts[i]) || 0;
+    if (n <= 0) continue;
+    if (cum + n >= target) {
+      const lo = i === 0 ? 0 : edges[i - 1];
+      if (i >= edges.length) return round(lo, 2);
+      return round(lo + (edges[i] - lo) * ((target - cum) / n), 2);
+    }
+    cum += n;
+  }
+  return round(edges[edges.length - 1], 2);
+}
+
+/** Family names that appear INSIDE an Anthropic model id. Matched by
+ *  containment rather than position because the id shape has moved over time
+ *  (`claude-3-5-sonnet-…` puts the family last, `claude-opus-5-…` puts it
+ *  second) and both spellings still show up in real transcripts. */
+const CLAUDE_FAMILIES = ['opus', 'sonnet', 'haiku', 'fable', 'mythos'];
+
+/**
+ * Fold a model id to the coarse family a stacked chart can carry — `opus`,
+ * `sonnet`, `gpt-5`, … An id this fold does not recognise is `'other'`: never a
+ * guessed family, and never dropped, because its spend still has to land
+ * somewhere. Pure — exported for test.
+ */
+export function modelFamily(id) {
+  const s = typeof id === 'string' ? id.toLowerCase() : '';
+  if (!s) return 'other';
+  const tail = s.slice(s.lastIndexOf('/') + 1);   // openrouter/anthropic/claude-… → claude-…
+  for (const f of CLAUDE_FAMILIES) if (tail.includes(f)) return f;
+  const gpt = /gpt-(\d+)/.exec(tail);
+  return gpt ? `gpt-${gpt[1]}` : 'other';
+}
+
 /** Sum a record's per-model usage rows into one API-equivalent cost. Rows with
  *  an observed transcript cost (opencode) use it — same preference as aggregate. */
 function sessionCost(rec, deps) {
@@ -220,6 +304,47 @@ function sealBuckets(...maps) {
   }
 }
 
+/** One day's row, created on first touch. Shared by the usage-row fold and the
+ *  engaged-time fold below so both agree on the shape: a day reached by only
+ *  one of them still carries every field, zeroed, instead of a ragged row the
+ *  UI has to guess at. */
+function dayBucket(byDay, day) {
+  if (!byDay[day]) {
+    byDay[day] = {
+      tokens: 0, cost: 0, sessions: 0, sessionsActive: 0, engagedSeconds: 0,
+      byMode: Object.create(null), byModelFamily: Object.create(null),
+    };
+  }
+  return byDay[day];
+}
+
+/** Accumulate one cost into a keyed cost map, rounding as it goes (the same
+ *  treatment byDay.cost gets, so the parts still add up to the whole). */
+function addCost(map, key, v) {
+  map[key] = round((map[key] ?? 0) + v);
+}
+
+/**
+ * What the prompt cache actually saved on one usage row. Cache reads meter at a
+ * TENTH of the input rate (pricing.mjs CACHE_READ_MULTIPLIER), so the avoided
+ * spend is the other 0.9 of what those tokens would have cost as fresh input.
+ *
+ * The rate is asked OF THE INJECTED PRICER rather than looked up separately: a
+ * 1M input-token probe at this row's own model/provider/day returns exactly
+ * that day's input rate, because cost is linear in each token class. That keeps
+ * this figure priced from the same table, at the same date, as the cost sitting
+ * beside it — a savings number quoted at today's rate for August's tokens would
+ * be a different claim than the one the panel makes everywhere else.
+ */
+function cacheSavedFor(row, rec, deps) {
+  if (!(row.cacheRead > 0)) return 0;
+  const rateIn = deps.costOf({
+    model: row.model, provider: rec.provider, day: row.day,
+    input: 1e6, output: 0, cacheRead: 0, cacheWrite: 0,
+  }) || 0;
+  return (0.9 * row.cacheRead * rateIn) / 1e6;
+}
+
 /** Price one usage row (observed opencode cost wins over the pricing table —
  *  `day` prices it at the rate in effect WHEN THOSE TOKENS WERE SPENT, not
  *  today's) and fold it into a session's running sums plus the shared
@@ -232,11 +357,17 @@ function foldSessionUsageRow(row, rec, deps, acc, byDay, byModel, activeDays) {
   acc.input += row.input; acc.output += row.output;
   acc.cacheRead += row.cacheRead; acc.cacheWrite += row.cacheWrite;
   acc.cost += rowCost;
+  acc.cacheSaved += cacheSavedFor(row, rec, deps);
 
   const rowTokens = row.input + row.output + row.cacheRead + row.cacheWrite;
-  if (!byDay[row.day]) byDay[row.day] = { tokens: 0, cost: 0, sessions: 0, sessionsActive: 0 };
-  byDay[row.day].tokens += rowTokens;
-  byDay[row.day].cost = round(byDay[row.day].cost + rowCost);
+  const d = dayBucket(byDay, row.day);
+  d.tokens += rowTokens;
+  d.cost = round(d.cost + rowCost);
+  // Cost by posture and by model family, per day: the two stacked series the
+  // day chart draws. Both live here rather than in the session pass because
+  // only a usage ROW knows which day its dollars landed on.
+  addCost(d.byMode, rec.mode ?? 'not-recorded', rowCost);
+  addCost(d.byModelFamily, modelFamily(row.model), rowCost);
   activeDays.add(row.day);
 
   const m = bucket(byModel, row.model);
@@ -251,7 +382,7 @@ function foldSessionUsageRow(row, rec, deps, acc, byDay, byModel, activeDays) {
  *  sum(byDay.sessions) === totals.sessions (a session's start day is not
  *  usable: it can open at 23:58 and only bill after midnight). */
 function foldSessionUsageRows(rec, deps, byDay, byModel) {
-  const acc = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0 };
+  const acc = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, cacheSaved: 0 };
   let firstDay = null;
   const activeDays = new Set();
   for (const row of rec.usage) {
@@ -265,7 +396,7 @@ function foldSessionUsageRows(rec, deps, byDay, byModel) {
 /** One aggregate session row from a parsed record, its folded usage sums,
  *  and its classifier verdict. */
 function buildSessionRow(rec, usage, verdict) {
-  const { input, output, cacheRead, cacheWrite, cost, firstDay } = usage;
+  const { input, output, cacheRead, cacheWrite, cost, cacheSaved, firstDay } = usage;
   return {
     id: rec.id, host: rec.host ?? rec.provider,
     provider: rec.inferenceProvider ?? null,
@@ -281,6 +412,9 @@ function buildSessionRow(rec, usage, verdict) {
     input, output, cacheRead, cacheWrite,
     tokens: input + output + cacheRead + cacheWrite,
     cost: round(cost),
+    // What the cache avoided for THIS session, so the window total is
+    // auditable a row at a time rather than only in aggregate.
+    cacheSavedUsd: round(cacheSaved),
     tools: { ...rec.tools },
     category: verdict.category ?? 'Unclassified',
     confidence: verdict.confidence ?? 0,
@@ -290,6 +424,16 @@ function buildSessionRow(rec, usage, verdict) {
     // records (the schema bump re-derives those).
     reasoningOutput: rec.reasoningOutput ?? 0,
     rateLimits: rec.rateLimits ?? null,
+    // v11 posture and rhythm (ADR-0038). Carried on the row, not folded away,
+    // because every one of them is a per-session fact the transcript actually
+    // recorded — and the window's histograms have to be traceable back to the
+    // sessions that built them. `mode` and `latHist` stay honest-absent (null)
+    // when nothing observed them.
+    mode: rec.mode ?? null,
+    latHist: Array.isArray(rec.latHist) ? rec.latHist.slice() : null,
+    latCount: rec.latCount ?? 0,
+    lenSeconds: rec.lenSeconds ?? 0,
+    aborts: rec.aborts ?? 0,
     _span: [rec.start ?? rec.end, rec.end],
     // Pre-v2 cache entries have no `active`; fall back to the whole span so a
     // stale record degrades to the old figure instead of vanishing.
@@ -300,12 +444,17 @@ function buildSessionRow(rec, usage, verdict) {
 }
 
 /** Records → aggregate session rows, folding usage into the shared byDay/
- *  byModel buckets as a side effect. */
-function buildSessionRows(records, { cutoff, deps, byDay, byModel }) {
+ *  byModel buckets as a side effect. `endMs` is the EXCLUSIVE upper bound the
+ *  previous-window pass needs; leaving it unset means "everything since
+ *  cutoff", which is what the current window wants. Exclusive on purpose: a
+ *  session ending exactly at the cutoff belongs to the current window, and
+ *  must not also be counted in the one before it. */
+function buildSessionRows(records, { cutoff, endMs = null, deps, byDay, byModel }) {
   const sessions = [];
   for (const rec of records) {
     if (!rec || !rec.responses) continue;                 // no assistant turn → not a session
     if (rec.end === null || rec.end < cutoff) continue;    // outside the window
+    if (endMs != null && rec.end >= endMs) continue;       // ... or after the window asked for
     const usage = foldSessionUsageRows(rec, deps, byDay, byModel);
     const verdict = deps.classify({
       title: rec.title, skill: rec.skill, plugin: rec.plugin,
@@ -338,40 +487,201 @@ function foldSessionIntoTree(tree, s) {
   node.rows.push(s);
 }
 
+/** The bucket key for a session's INFERENCE provider — and only when that
+ *  identity was actually observed. A transcript host (`claude`, `codex`) does
+ *  not prove which vendor served the tokens, so an unobserved provenance keys
+ *  to `'not-recorded'` even when a provider string is present: that string is
+ *  an assumption, and spend is not bucketed under assumptions. The ungated
+ *  `byProvider` map still exists beside this one for callers that want the
+ *  string as-recorded. */
+function providerKey(s) {
+  return s.providerProvenance === 'observed' && s.provider ? s.provider : 'not-recorded';
+}
+
+/** Subagent work is either Claude's sidechain flag or Codex's ledger-backed
+ *  thread source; both mean "not a session a human was driving". */
+function sourceKey(s) {
+  return s.sidechain || s.threadSource === 'subagent' ? 'subagent' : 'main';
+}
+
 /** Second pass over the (now sorted) session rows: totals, the by-host/
- *  provider/project/category/model buckets, the punchcard, and the project
- *  tree. `byModel` is the SAME object buildSessionRows already populated
- *  from usage rows — this pass adds its session/minutes/confidence fields. */
+ *  provider/mode/source/project/category/model buckets, the tool tally, the
+ *  punchcard, and the project tree. `byModel` is the SAME object
+ *  buildSessionRows already populated from usage rows — this pass adds its
+ *  session/minutes/confidence fields. */
 function foldSessionTotals(sessions, byDay, byModel) {
   const totals = {
-    sessions: sessions.length, responses: 0, exceptions: 0, input: 0, output: 0,
-    cacheRead: 0, cacheWrite: 0, tokens: 0, cost: 0,
-    spanMinutes: 0, spanUnionSeconds: 0, engagedSeconds: 0,
+    sessions: sessions.length, prompts: 0, responses: 0, exceptions: 0, aborts: 0,
+    input: 0, output: 0, cacheRead: 0, cacheWrite: 0, tokens: 0, cost: 0,
+    cacheSavedUsd: 0, spanMinutes: 0, spanUnionSeconds: 0, engagedSeconds: 0,
   };
   const byHost = Object.create(null), byProvider = Object.create(null);
+  const byMode = Object.create(null), byInferenceProvider = Object.create(null);
+  const bySource = Object.create(null), byTool = Object.create(null);
   const byProject = Object.create(null);
   const byCategory = Object.create(null), punchcard = Object.create(null);
   const tree = new Map();
+  const costs = [];
   let spanMs = 0;
+  // Both source rows always exist: "no subagent sessions" is a fact worth
+  // rendering as a zero, not a row the UI silently drops.
+  bucket(bySource, 'main'); bucket(bySource, 'subagent');
 
   for (const s of sessions) {
-    totals.responses += s.responses; totals.exceptions += s.exceptions;
+    totals.prompts += s.prompts; totals.responses += s.responses;
+    totals.exceptions += s.exceptions; totals.aborts += Number(s.aborts) || 0;
     totals.input += s.input; totals.output += s.output;
     totals.cacheRead += s.cacheRead; totals.cacheWrite += s.cacheWrite;
     totals.tokens += s.tokens; totals.cost += s.cost;
+    totals.cacheSavedUsd += Number(s.cacheSavedUsd) || 0;
+    costs.push(s.cost);
     spanMs += s._span[1] - s._span[0];
 
     addTo(bucket(byHost, s.host ?? 'unknown'), s);
     addTo(bucket(byProvider, s.provider ?? 'unknown'), s);
+    // 'not-recorded' is a first-class key, not a display fallback: a transcript
+    // that carried no mode evidence must not be folded into a real posture.
+    addTo(bucket(byMode, s.mode ?? 'not-recorded'), s);
+    addTo(bucket(byInferenceProvider, providerKey(s)), s);
+    addTo(bucket(bySource, sourceKey(s)), s);
     addTo(bucket(byProject, s.project), s);
     addTo(bucket(byCategory, s.category), s);
     foldSessionByModel(byModel, s);
     if (s._day && byDay[s._day]) byDay[s._day].sessions++;
     for (const [k, n] of Object.entries(s._punchcard)) punchcard[k] = (punchcard[k] ?? 0) + n;
+    for (const [k, n] of Object.entries(s.tools)) byTool[k] = (byTool[k] ?? 0) + n;
     foldSessionIntoTree(tree, s);
   }
 
-  return { totals, byHost, byProvider, byProject, byCategory, punchcard, tree, spanMs };
+  return {
+    totals, byHost, byProvider, byMode, byInferenceProvider, bySource, byTool,
+    byProject, byCategory, punchcard, tree, spanMs, costs,
+  };
+}
+
+/** Exact median of a numeric list — the mean of the two middles on an even
+ *  count — and `null` when there is nothing to take a median of. Sorts a copy:
+ *  the caller's array is the order sessions were folded in. */
+function median(values) {
+  if (!values.length) return null;
+  const v = values.slice().sort((a, b) => a - b);
+  const mid = v.length >> 1;
+  return round(v.length % 2 ? v[mid] : (v[mid - 1] + v[mid]) / 2);
+}
+
+/**
+ * The derived half of `totals`: the three time tiers, then the rates and the
+ * median that only mean anything once every session has been folded. Split out
+ * so the previous-window projection derives them the SAME way instead of a
+ * second, drifting way.
+ *
+ * The three tiers, each honest about a different thing:
+ *   engagedSeconds   — union of ACTIVE intervals: time actually worked
+ *   spanUnionSeconds — union of whole spans: wall-clock with a session open
+ *   spanMinutes      — sum of spans: the double-counting figure, kept as the
+ *                      clearly-labelled secondary the ADR asks the UI to show
+ *
+ * A rate whose denominator is zero is `null`, never 0: no engaged time means
+ * the rate was never measured, which is not the claim "zero per hour" makes.
+ */
+function finishTotals(totals, sessions, { spanMs, costs }) {
+  totals.cost = round(totals.cost);
+  totals.cacheSavedUsd = round(totals.cacheSavedUsd);
+  totals.spanMinutes = Math.round((spanMs / 60_000) * 10) / 10;
+  totals.spanUnionSeconds = mergeIntervals(sessions.map((s) => s._span));
+  totals.engagedSeconds = mergeIntervals(sessions.flatMap((s) => s._active));
+
+  const hours = totals.engagedSeconds / 3600;
+  totals.humanPromptsPerHour = hours ? round(totals.prompts / hours) : null;
+  totals.responsesPerPrompt = totals.prompts ? round(totals.responses / totals.prompts) : null;
+  totals.costPerEngagedHour = hours ? round(totals.cost / hours) : null;
+  totals.costPerSessionMedian = median(costs);
+}
+
+/** The window's response-latency and session-length distributions. Latency
+ *  histograms are merged slot-wise from the ones the parsers recorded — a
+ *  session that never observed a latency carries `null` and contributes
+ *  nothing, because absent is not a row of zeroes — while lengths are bucketed
+ *  here from each session's own engaged seconds. */
+function buildRhythm(sessions) {
+  const latHist = new Array(LAT_BUCKET_EDGES.length + 1).fill(0);
+  const lenHist = new Array(LEN_BUCKET_EDGES.length + 1).fill(0);
+  let latCount = 0;
+  for (const s of sessions) {
+    if (Array.isArray(s.latHist)) {
+      for (let i = 0; i < latHist.length; i++) latHist[i] += Number(s.latHist[i]) || 0;
+      latCount += Number(s.latCount) || 0;
+    }
+    lenHist[bucketIndex(LEN_BUCKET_EDGES, Number(s.lenSeconds) || 0)]++;
+  }
+  return {
+    latHist,
+    latCount,
+    latP50: percentileFromBuckets(latHist, LAT_BUCKET_EDGES, 0.5),
+    latP95: percentileFromBuckets(latHist, LAT_BUCKET_EDGES, 0.95),
+    lenHist,
+    lenMedianSeconds: percentileFromBuckets(lenHist, LEN_BUCKET_EDGES, 0.5),
+    lenP90Seconds: percentileFromBuckets(lenHist, LEN_BUCKET_EDGES, 0.9),
+  };
+}
+
+/** Start of the LOCAL day after `ms`. Derived through Date rather than by
+ *  adding 24h so a DST transition lands on the real midnight. */
+function nextLocalMidnight(ms) {
+  const d = new Date(ms);
+  d.setHours(24, 0, 0, 0);
+  return d.getTime();
+}
+
+/** Cut one active interval at every local midnight it crosses and file each
+ *  piece under the day it was actually worked, so a session running past
+ *  midnight gives the next day its real minutes instead of handing all of them
+ *  to the day it started on. Mutates `out`. */
+function splitAtLocalMidnight(start, end, out) {
+  let s = start;
+  while (s < end) {
+    const next = nextLocalMidnight(s);
+    const e = next > s ? Math.min(end, next) : end;   // never fail to advance
+    (out[localDay(s)] ??= []).push([s, e]);
+    s = e;
+  }
+}
+
+/** Per-day engaged seconds: the UNION of that day's active intervals, so two
+ *  sessions worked in parallel spend the minute once — the rule
+ *  totals.engagedSeconds follows, applied a day at a time. */
+function foldEngagedByDay(sessions, byDay) {
+  const perDay = Object.create(null);
+  for (const s of sessions) {
+    for (const [a, b] of s._active) splitAtLocalMidnight(a, b, perDay);
+  }
+  for (const day of Object.keys(perDay)) {
+    dayBucket(byDay, day).engagedSeconds = mergeIntervals(perDay[day]);
+  }
+}
+
+const DAY_MS = 86_400_000;
+
+/**
+ * Totals + rhythm for the equal-length window immediately BEFORE `cutoff` —
+ * the baseline any "vs. previous period" delta is measured against.
+ * Deliberately a projection rather than a second whole Aggregate: nothing
+ * downstream compares project trees or punchcards across windows, and shipping
+ * the full shape twice would double the payload for fields nobody reads.
+ *
+ * Records older than `cutoff` only reach this module when the index was built
+ * with a lookback (`buildIndex({ lookbackDays })`), so an un-widened corpus
+ * yields a visibly ZEROED previous window rather than a wrong one.
+ */
+function previousWindow(records, { days, cutoff, deps }) {
+  const byDay = Object.create(null);
+  const byModel = Object.create(null);
+  const sessions = buildSessionRows(records, {
+    cutoff: cutoff - days * DAY_MS, endMs: cutoff, deps, byDay, byModel,
+  });
+  const folded = foldSessionTotals(sessions, byDay, byModel);
+  finishTotals(folded.totals, sessions, folded);
+  return { totals: folded.totals, rhythm: buildRhythm(sessions) };
 }
 
 function buildProjectTree(tree) {
@@ -396,31 +706,30 @@ function buildCodexRateLimits(sessions) {
     .sort((x, y) => x.at - y.at);
 }
 
-/** Turn cached per-file records into the Aggregate the UI and detectors read. */
-export function aggregate(records, { days, now, cutoff, deps }) {
+/** Turn cached per-file records into the Aggregate the UI and detectors read.
+ *  `previous: true` additionally projects the equal-length window before
+ *  `cutoff` (see previousWindow); left off, `agg.previous` is `null` — "not
+ *  requested", which a zeroed totals object would misreport as "measured
+ *  nothing". */
+export function aggregate(records, { days, now, cutoff, deps, previous = false }) {
   // Null-prototype: these are keyed by transcript-derived strings (day, model id,
-  // provider, project, category), so `__proto__` as a key must be an ordinary
-  // bucket, not a prototype write that silently discards the data.
+  // provider, project, category, tool name), so `__proto__` as a key must be an
+  // ordinary bucket, not a prototype write that silently discards the data.
   const byDay = Object.create(null);
   const byModel = Object.create(null);
 
   const sessions = buildSessionRows(records, { cutoff, deps, byDay, byModel });
   sessions.sort((a, b) => b.cost - a.cost || Date.parse(b.start) - Date.parse(a.start));
 
-  const { totals, byHost, byProvider, byProject, byCategory, punchcard, tree, spanMs } =
-    foldSessionTotals(sessions, byDay, byModel);
+  const folded = foldSessionTotals(sessions, byDay, byModel);
+  const { totals, byHost, byProvider, byMode, byInferenceProvider, bySource, byTool,
+    byProject, byCategory, punchcard, tree } = folded;
 
-  totals.cost = round(totals.cost);
-  // Three tiers, each honest about a different thing:
-  //   engagedSeconds   — union of ACTIVE intervals: time actually worked
-  //   spanUnionSeconds — union of whole spans: wall-clock with a session open
-  //   spanMinutes      — sum of spans: the double-counting figure, kept as the
-  //                      clearly-labelled secondary the ADR asks the UI to show
-  sealBuckets(byHost, byProvider, byProject, byCategory, byModel);
-
-  totals.spanMinutes = Math.round((spanMs / 60_000) * 10) / 10;
-  totals.spanUnionSeconds = mergeIntervals(sessions.map((s) => s._span));
-  totals.engagedSeconds = mergeIntervals(sessions.flatMap((s) => s._active));
+  sealBuckets(byHost, byProvider, byProject, byCategory, byModel,
+    byMode, byInferenceProvider, bySource);
+  finishTotals(totals, sessions, folded);
+  foldEngagedByDay(sessions, byDay);
+  const rhythm = buildRhythm(sessions);
 
   const projectTree = buildProjectTree(tree);
   for (const s of sessions) { delete s._span; delete s._active; delete s._punchcard; delete s._day; }
@@ -431,8 +740,11 @@ export function aggregate(records, { days, now, cutoff, deps }) {
     windowDays: days,
     pricesAsOf: deps.pricesAsOf ?? null,
     totals, byDay, byModel, byHost, byProvider,
+    byMode, byInferenceProvider, bySource, byTool,
     byProject, byCategory,
-    punchcard, projectTree, sessions, codexRateLimits, insights: [],
+    punchcard, projectTree, sessions, codexRateLimits, rhythm,
+    previous: previous ? previousWindow(records, { days, cutoff, deps }) : null,
+    insights: [],
   };
   agg.insights = deps.detectInsights(agg) ?? [];
   return agg;

@@ -8,7 +8,14 @@ import {
   buildIndex, readIndex, readSession, mergeIntervals, maskSecrets, projectLabel,
   SCHEMA_VERSION, IDLE_GAP_MS, _resetForTest,
 } from '../../src/lib/usage-index.mjs';
-import { blankSession, noteLatencySample, parseClaude } from '../../src/lib/usage-parsers.mjs';
+import {
+  addUsage, blankSession, noteLatencySample, parseClaude,
+  LAT_BUCKET_EDGES, LEN_BUCKET_EDGES,
+} from '../../src/lib/usage-parsers.mjs';
+import {
+  aggregate, percentileFromBuckets, modelFamily,
+  LAT_BUCKET_EDGES as AGG_LAT_EDGES, LEN_BUCKET_EDGES as AGG_LEN_EDGES,
+} from '../../src/lib/usage-aggregate.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const FIXTURES = path.join(HERE, '..', 'fixtures', 'usage');
@@ -1571,4 +1578,269 @@ test('scanKey distinguishes calls that differ only by lookbackDays', async () =>
   const [aggA, aggB] = await Promise.all([a, b]);
   assert.notEqual(aggA, aggB,
     'a call with lookbackDays set must not collide with one that omits it — they must not share the in-flight promise / result object');
+});
+
+// ── aggregate: buckets, rhythm, per-day engaged, previous window (Task 6) ───
+//
+// These suites drive `aggregate()` directly instead of through buildIndex: the
+// previous-window projection reads records OLDER than the cutoff, which only
+// reach the aggregate when the index was built with a lookback, and the mode /
+// provenance / latency permutations they pin are cheaper to state as records
+// than as transcripts. Fixtures are still built from the parsers' own
+// blankSession/addUsage (never a hand-mirrored record literal), so they go
+// stale loudly if the record contract moves.
+
+const DAY = 86_400_000;
+
+const usageRow = (day, model, u = {}) =>
+  ({ day, model, input: 0, output: 0, cacheRead: 0, cacheWrite: 0, responses: 1, ...u });
+
+/** One parsed record. `end` is what the window filter reads; `active` defaults
+ *  to the whole span and `lenSeconds` is derived from it the way `seal()` does,
+ *  so a fixture cannot claim a length its intervals do not support. */
+function record(id, { start, end = NOW - DAY, usage = [], active, ...over } = {}) {
+  const rec = blankSession(id, over.provider ?? 'claude');
+  const from = start ?? end - 30 * MIN;
+  Object.assign(rec, { title: id, project: 'proj', prompts: 1, responses: 1, ...over, start: from, end });
+  rec.active = active ?? [[from, end]];
+  for (const u of usage) addUsage(rec, u.day, u.model, u);
+  if (!rec.models.length) rec.models = [...new Set(usage.map((u) => u.model))];
+  rec.lenSeconds = over.lenSeconds
+    ?? Math.round(rec.active.reduce((n, [a, b]) => n + (b - a), 0) / 1000);
+  return rec;
+}
+
+const aggOpts = (extra = {}) => ({ days: 14, now: NOW, cutoff: NOW - 14 * DAY, deps: deps(), ...extra });
+
+/** Rates in $/1M tokens, and a pricer shaped like the real one (cache reads
+ *  meter at a tenth of the input rate) so `cacheSavedUsd` can be hand-worked. */
+const RATE_IN = 3;
+const RATE_OUT = 15;
+const pricedDeps = () => ({
+  ...deps(),
+  costOf: ({ input = 0, output = 0, cacheRead = 0, cacheWrite = 0 }) =>
+    ((input + cacheWrite * 1.25 + cacheRead * 0.1) * RATE_IN + output * RATE_OUT) / 1e6,
+});
+
+test('percentileFromBuckets interpolates inside the bucket and is null when empty', () => {
+  assert.equal(percentileFromBuckets([0, 0, 0, 0, 0, 0], LAT_BUCKET_EDGES, 0.5), null,
+    'nothing measured is null, never 0 — they are different claims');
+  // 10 samples all in the 5–10s bucket: p50 sits exactly mid-bucket.
+  const p = percentileFromBuckets([0, 0, 10, 0, 0, 0], LAT_BUCKET_EDGES, 0.5);
+  assert.ok(p > 5 && p <= 10, `p50 must land inside the 5–10s bucket, got ${p}`);
+  assert.equal(p, 7.5);
+  // The overflow bucket has no upper bound to interpolate towards, so it
+  // reports its floor: "at least 60s", never an invented ceiling.
+  assert.equal(percentileFromBuckets([0, 0, 0, 0, 0, 4], LAT_BUCKET_EDGES, 0.5), 60);
+  assert.equal(percentileFromBuckets(null, LAT_BUCKET_EDGES, 0.5), null);
+});
+
+test('modelFamily folds an id to its family and never guesses', () => {
+  assert.equal(modelFamily('claude-opus-5-20260115'), 'opus');
+  assert.equal(modelFamily('gpt-5.6-sol'), 'gpt-5');
+  assert.equal(modelFamily('claude-haiku-4-5-20251001'), 'haiku');
+  assert.equal(modelFamily('anthropic/claude-sonnet-5'), 'sonnet');
+  assert.equal(modelFamily('gpt-4o-mini'), 'gpt-4');
+  assert.equal(modelFamily('unknown'), 'other', 'the parsers\' own placeholder is not a family');
+  assert.equal(modelFamily('gemini-3.5-flash'), 'other');
+  assert.equal(modelFamily(null), 'other');
+});
+
+test('the aggregate buckets on the same histogram edges the parsers fill', () => {
+  // usage-aggregate.mjs cannot import usage-parsers.mjs (the dependency is
+  // one-way, by design), so the edges are restated there. This is the pin that
+  // makes the restatement safe.
+  assert.deepEqual(AGG_LAT_EDGES, LAT_BUCKET_EDGES);
+  assert.deepEqual(AGG_LEN_EDGES, LEN_BUCKET_EDGES);
+});
+
+test('byMode, byInferenceProvider, bySource and byTool bucket honestly', () => {
+  const records = [
+    record('m1', { mode: 'auto-edit', inferenceProvider: 'openai', providerProvenance: 'observed', tools: { Edit: 2 } }),
+    record('m2', { mode: null, tools: { Read: 1 } }),
+    record('m3', { mode: null, inferenceProvider: 'anthropic', providerProvenance: 'unknown', sidechain: true, tools: { Edit: 1 } }),
+  ];
+  const a = aggregate(records, aggOpts());
+
+  assert.equal(a.byMode['auto-edit'].sessions, 1);
+  assert.equal(a.byMode['not-recorded'].sessions, 2, 'no mode evidence is its own bucket, never folded into a real mode');
+  assert.equal(a.byInferenceProvider.openai.sessions, 1);
+  assert.equal(a.byInferenceProvider['not-recorded'].sessions, 2,
+    'a provider string without observed provenance is an assumption, not an attribution');
+  // The contrast that makes the new bucket worth having: byProvider still
+  // trusts the string it was handed.
+  assert.equal(a.byProvider.anthropic.sessions, 1);
+  assert.equal(a.bySource.main.sessions, 2);
+  assert.equal(a.bySource.subagent.sessions, 1);
+  assert.deepEqual({ ...a.byTool }, { Edit: 3, Read: 1 });
+});
+
+test('bySource always carries both rows, even with no subagent work', () => {
+  const a = aggregate([record('solo')], aggOpts());
+  assert.equal(a.bySource.main.sessions, 1);
+  assert.equal(a.bySource.subagent.sessions, 0, '"no subagents" is a zero worth rendering, not a missing row');
+});
+
+test('a Codex thread_source of subagent counts as subagent work too', () => {
+  const a = aggregate([record('sub', { provider: 'codex', threadSource: 'subagent' })], aggOpts());
+  assert.equal(a.bySource.subagent.sessions, 1);
+});
+
+test('rhythm merges the per-session latency histograms and buckets session lengths', () => {
+  const end = (d) => NOW - d * DAY;
+  const records = [
+    record('r1', { end: end(3), start: end(3) - 120_000, latHist: [0, 0, 2, 0, 0, 0], latCount: 2 }),
+    record('r2', { end: end(2), start: end(2) - 1_800_000, latHist: [1, 0, 0, 0, 0, 1], latCount: 2 }),
+    record('r3', { end: end(1), start: end(1) - 5_400_000, latHist: null, latCount: 0 }),
+  ];
+  const a = aggregate(records, aggOpts());
+
+  assert.deepEqual(a.rhythm.latHist, [1, 0, 2, 0, 0, 1]);
+  assert.equal(a.rhythm.latCount, 4, 'the session that observed no latency contributes nothing, not a row of zeroes');
+  assert.equal(a.rhythm.latP50, 7.5);
+  assert.equal(a.rhythm.latP95, 60, 'the >60s bucket reports its floor');
+  // 120s → ≤300 bucket, 1800s → ≤2700 bucket, 5400s → ≤7200 bucket.
+  assert.deepEqual(a.rhythm.lenHist, [1, 0, 1, 1, 0]);
+  assert.equal(a.rhythm.lenMedianSeconds, 1800);
+  assert.equal(a.rhythm.lenP90Seconds, 5850);
+});
+
+test('a session past the last length edge lands in the overflow bucket', () => {
+  const end = NOW - DAY;
+  const a = aggregate([record('long', { end, start: end - 3 * 3600_000 })], aggOpts());
+  assert.deepEqual(a.rhythm.lenHist, [0, 0, 0, 0, 1], 'three hours is past the 2h edge');
+  assert.equal(a.rhythm.lenMedianSeconds, 7200, 'an unbounded bucket reports its floor, not a made-up ceiling');
+});
+
+test('rhythm is a zeroed histogram, not a fabricated one, when nothing was measured', () => {
+  const a = aggregate([], aggOpts());
+  assert.deepEqual(a.rhythm.latHist, [0, 0, 0, 0, 0, 0], 'always six slots, even empty');
+  assert.equal(a.rhythm.latCount, 0);
+  assert.equal(a.rhythm.latP50, null);
+  assert.equal(a.rhythm.latP95, null);
+  assert.deepEqual(a.rhythm.lenHist, [0, 0, 0, 0, 0]);
+  assert.equal(a.rhythm.lenMedianSeconds, null);
+});
+
+test('totals carry aborts and the per-hour / per-prompt / median rates', () => {
+  const end = (d) => NOW - d * DAY;
+  const records = [
+    record('t1', {
+      end: end(3), start: end(3) - 1_800_000, prompts: 3, responses: 4, aborts: 2,
+      usage: [usageRow('2026-07-22', 'claude-opus-5', { input: 1000 })],
+    }),
+    record('t2', {
+      end: end(2), start: end(2) - 1_800_000, prompts: 1, responses: 2, aborts: 0,
+      usage: [usageRow('2026-07-23', 'claude-opus-5', { input: 3000 })],
+    }),
+  ];
+  const a = aggregate(records, aggOpts());
+
+  assert.equal(a.totals.engagedSeconds, 3600, 'two disjoint half-hours = one engaged hour');
+  assert.equal(a.totals.aborts, 2);
+  assert.equal(a.totals.humanPromptsPerHour, 4, '4 prompts in one engaged hour');
+  assert.equal(a.totals.responsesPerPrompt, 1.5, '6 responses / 4 prompts');
+  assert.equal(a.totals.costPerEngagedHour, 4, '$4 of spend in one engaged hour');
+  assert.equal(a.totals.costPerSessionMedian, 2, 'the exact median of [1, 3]');
+});
+
+test('a rate with no engaged time is null, not zero', () => {
+  // A single-instant session: real, but it has no duration to divide by.
+  const at = NOW - DAY;
+  const a = aggregate([record('instant', { start: at, end: at, active: [[at, at]] })], aggOpts());
+  assert.equal(a.totals.engagedSeconds, 0);
+  assert.equal(a.totals.humanPromptsPerHour, null, '"not measured" is not "zero per hour"');
+  assert.equal(a.totals.costPerEngagedHour, null);
+});
+
+test('cacheSavedUsd is the 0.9 of the input rate a cache read did not pay', () => {
+  // 1M cache-read tokens at $3/1M input: charged 0.1 × $3 = $0.30, so $2.70 of
+  // the $3.00 they would have cost as fresh input was avoided.
+  const a = aggregate([record('c1', {
+    usage: [usageRow('2026-07-24', 'claude-opus-5', { cacheRead: 1e6 })],
+  })], aggOpts({ deps: pricedDeps() }));
+
+  assert.equal(a.totals.cost, 0.3);
+  assert.equal(a.totals.cacheSavedUsd, 2.7);
+  assert.equal(a.sessions[0].cacheSavedUsd, 2.7, 'the total is auditable per session');
+  assert.equal(
+    Math.round((a.totals.cost + a.totals.cacheSavedUsd) * 1e6) / 1e6, 3,
+    'charged + saved = what those tokens would have cost as fresh input',
+  );
+});
+
+test('a session with no cache reads saved nothing', () => {
+  const a = aggregate([record('c2', {
+    usage: [usageRow('2026-07-24', 'claude-opus-5', { input: 1000 })],
+  })], aggOpts({ deps: pricedDeps() }));
+  assert.equal(a.totals.cacheSavedUsd, 0);
+});
+
+test('byDay.engagedSeconds splits an over-midnight session at LOCAL midnight', () => {
+  // 23:30 → 00:30 local: half an hour belongs to each day, not a whole hour to
+  // the day it started on.
+  const start = new Date(2026, 6, 23, 23, 30).getTime();
+  const end = new Date(2026, 6, 24, 0, 30).getTime();
+  const a = aggregate([record('mid', {
+    start, end, usage: [usageRow('2026-07-23', 'claude-opus-5', { input: 100 })],
+  })], aggOpts());
+
+  assert.equal(a.byDay['2026-07-23'].engagedSeconds, 1800);
+  assert.equal(a.byDay['2026-07-24'].engagedSeconds, 1800,
+    'the day the session ran into exists even though no tokens were billed to it');
+  assert.equal(a.byDay['2026-07-24'].tokens, 0);
+  assert.equal(a.totals.engagedSeconds, 3600, 'the window-wide union is unchanged by the split');
+});
+
+test('byDay.engagedSeconds unions overlapping sessions instead of summing them', () => {
+  const base = new Date(2026, 6, 22, 10, 0).getTime();
+  const a = aggregate([
+    record('p1', { start: base, end: base + 60 * MIN }),
+    record('p2', { start: base + 30 * MIN, end: base + 90 * MIN }),
+  ], aggOpts());
+  assert.equal(a.byDay['2026-07-22'].engagedSeconds, 90 * 60,
+    'parallel sessions do not let a day claim more minutes than it had');
+});
+
+test('byDay carries cost by mode and by model family', () => {
+  const a = aggregate([
+    record('d1', { mode: 'auto-edit', usage: [usageRow('2026-07-24', 'claude-opus-5-20260115', { input: 2000 })] }),
+    record('d2', { mode: null, usage: [usageRow('2026-07-24', 'gpt-5.6-sol', { input: 1000 })] }),
+  ], aggOpts());
+
+  assert.deepEqual({ ...a.byDay['2026-07-24'].byMode }, { 'auto-edit': 2, 'not-recorded': 1 });
+  assert.deepEqual({ ...a.byDay['2026-07-24'].byModelFamily }, { opus: 2, 'gpt-5': 1 });
+});
+
+test('previous window aggregates the prior equal span only', () => {
+  const days = 7;
+  const cutoff = NOW - days * DAY;
+  const end = (d) => NOW - d * DAY;
+  const records = [
+    record('cur1', { end: end(2), start: end(2) - 30 * MIN }),
+    record('prev1', { end: end(8), start: end(8) - 30 * MIN }),
+    record('prev2', { end: end(13), start: end(13) - 30 * MIN }),
+    record('older', { end: end(20), start: end(20) - 30 * MIN }),
+  ];
+  const a = aggregate(records, { days, now: NOW, cutoff, deps: deps(), previous: true });
+
+  assert.equal(a.totals.sessions, 1, 'the current window is untouched by asking for the previous one');
+  assert.equal(a.previous.totals.sessions, 2, 'only the two sessions aged 7–14 days');
+  assert.deepEqual(Object.keys(a.previous).sort(), ['rhythm', 'totals'],
+    'a totals+rhythm projection — nothing downstream compares project trees across windows');
+  assert.equal(a.previous.rhythm.lenHist.reduce((x, y) => x + y, 0), 2);
+});
+
+test('a session ending exactly at the cutoff belongs to the current window, never both', () => {
+  const days = 7;
+  const cutoff = NOW - days * DAY;
+  const a = aggregate([record('edge', { end: cutoff, start: cutoff - 30 * MIN })],
+    { days, now: NOW, cutoff, deps: deps(), previous: true });
+  assert.equal(a.totals.sessions, 1);
+  assert.equal(a.previous.totals.sessions, 0, 'the previous window\'s upper bound is exclusive');
+});
+
+test('previous is null unless the caller asks for it', () => {
+  const a = aggregate([record('cur')], aggOpts());
+  assert.equal(a.previous, null, 'null is "not requested" — an empty totals object would read as "measured nothing"');
 });
