@@ -16,6 +16,10 @@ function codexMode(approval, sandbox) {
   return null;
 }
 
+/**
+ * @param {{ host?: string, permissionMode?: string, approvalPolicy?: string, sandboxPolicy?: string, opencodeMode?: string }} [opts]
+ * @returns {{ mode: string|null, raw: string|null }}
+ */
 export function normalizeMode({ host, permissionMode, approvalPolicy, sandboxPolicy, opencodeMode } = {}) {
   if (host === 'claude' && typeof permissionMode === 'string') {
     return { mode: CC[permissionMode] ?? null, raw: permissionMode };
