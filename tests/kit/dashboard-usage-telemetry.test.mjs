@@ -10,7 +10,11 @@ import { blankSession, addUsage } from '../../src/lib/usage-parsers.mjs';
 import { MODES } from '../../src/lib/usage-modes.mjs';
 import {
   deltaChip, sparklineSvg, histogram, stackedDays, donut2, rankedRows,
+  bucketPercentile, bucketPositionPct,
 } from '../../src/lib/dashboard/client/usage-rhythm.mjs';
+import {
+  percentileFromBuckets, LAT_BUCKET_EDGES, LEN_BUCKET_EDGES,
+} from '../../src/lib/usage-aggregate.mjs';
 
 const PAGE = renderPage({ name: 'agentic-kit', version: 'test' });
 
@@ -259,4 +263,94 @@ test('usage styles append the rhythm/mode chart primitive classes with the mark-
   // histogram test) is the other half. This can't observe rendered paint
   // order itself; it only guards the CSS declaration that makes it possible.
   assert.match(CSS, /\.hist-bars\{[^}]*position:relative/, 'hist-bars must be positioned to paint over the positioned marker overlay');
+});
+
+// ── Task 9: the panels that consume all of the above ──────────────────────
+
+test('usage-rhythm.mjs reaches the served bundle, with exactly one escaper in it', () => {
+  // Without this splice every panel below throws ReferenceError in the browser
+  // while every test that imports the module directly stays green — so the
+  // bundle, not the module, is what this asserts against.
+  assert.match(JS, /function deltaChip\(/, 'the rhythm primitives must be in the served bundle');
+  assert.match(JS, /function bucketPercentile\(/);
+  assert.match(JS, /function stackedDays\(/);
+  // The module carries its own `esc` on disk (the direct-import tests above
+  // depend on it). Two `function esc` declarations would share one bundle
+  // scope and the later one would silently replace the injected groups.mjs
+  // escaper with a copy free to drift from it, so client.mjs strips it.
+  assert.equal((JS.match(/function esc\(/g) || []).length, 1, 'the bundle must declare exactly one esc');
+  assert.doesNotMatch(JS, /^export function/m, 'no export survives into the classic-script bundle');
+});
+
+test('bucketPercentile reproduces the server percentile it is printed beside', () => {
+  const cases = [
+    [[0, 0, 0, 0, 0, 0], LAT_BUCKET_EDGES],
+    [[10, 0, 0, 0, 0, 0], LAT_BUCKET_EDGES],
+    [[3, 7, 11, 2, 1, 4], LAT_BUCKET_EDGES],
+    [[0, 0, 0, 0, 0, 9], LAT_BUCKET_EDGES],
+    [[1, 1, 1, 1, 1], LEN_BUCKET_EDGES],
+    [[0, 0, 0, 0, 6], LEN_BUCKET_EDGES],
+  ];
+  for (const [counts, edges] of cases) {
+    for (const q of [0.5, 0.9, 0.95]) {
+      assert.equal(
+        bucketPercentile(counts, edges, q),
+        percentileFromBuckets(counts, edges, q),
+        `client and server disagree on p${q * 100} of ${JSON.stringify(counts)}`,
+      );
+    }
+  }
+});
+
+test('bucketPercentile reports the overflow bucket floor, never an invented ceiling', () => {
+  assert.equal(bucketPercentile([0, 0, 0, 0, 0, 5], LAT_BUCKET_EDGES, 0.95), 60);
+  assert.equal(bucketPercentile([0, 0, 0, 0, 5], LEN_BUCKET_EDGES, 0.9), 7200);
+  assert.equal(bucketPercentile([], LAT_BUCKET_EDGES, 0.5), null, 'an empty histogram is null, not 0');
+});
+
+test('bucketPositionPct lands a value inside the slot its own bucket occupies', () => {
+  // 6 slots for 5 edges: slot i spans [i/6,(i+1)/6] of the plot.
+  assert.equal(bucketPositionPct(LAT_BUCKET_EDGES, 0), 0, 'the low end of the first slot');
+  assert.ok(Math.abs(bucketPositionPct(LAT_BUCKET_EDGES, 1) - (0.5 / 6) * 100) < 0.001, 'halfway through slot 0');
+  assert.ok(Math.abs(bucketPositionPct(LAT_BUCKET_EDGES, 60) - (5 / 6) * 100) < 0.001, 'the 60s edge is the overflow boundary');
+  assert.ok(bucketPositionPct(LAT_BUCKET_EDGES, 900) <= 100, 'an overflow value never runs off the plot');
+  assert.equal(bucketPositionPct(LAT_BUCKET_EDGES, null), null, 'a missing percentile places no marker');
+});
+
+test('hero tiles carry a windowed delta and a per-day trend, with cost read down-is-good', () => {
+  assert.match(JS, /deltaChip\(t\.cost,p\.cost,\{downIsGood:true\}\)/, 'a cheaper window is the good direction');
+  assert.match(JS, /deltaChip\(t\.tokens,p\.tokens,\{neutral:true\}\)/, 'more tokens is neither good nor bad on its own');
+  assert.match(JS, /deltaChip\(t\.sessions,p\.sessions,\{\}\)/);
+  assert.match(JS, /deltaChip\(t\.engagedSeconds,p\.engagedSeconds,\{\}\)/);
+  // Cache SHARE is up-good (cache reads bill at 0.1x input) and its delta is
+  // in percentage points — a percent-of-a-percent would name the wrong move.
+  assert.match(JS, /deltaChip\(cacheShare,prevCacheShare,\{unit:" pp"\}\)/);
+  assert.match(JS, /saved &asymp; /, 'the cache tile states what the cache avoided');
+  assert.match(JS, /cacheSavedUsd/);
+  // engagedByDay is a sibling map with its own day set, not a byDay field.
+  assert.match(JS, /mapRows\(d\.engagedByDay\)/);
+});
+
+test('the cadence row is built once, after the hero, from totals the payload already carries', () => {
+  assert.match(JS, /ensureBlock\("u-cadence",/, 'the row creates its own container — page.mjs has none');
+  assert.match(JS, /"u-hero"\)/, 'anchored to the hero it continues');
+  assert.match(JS, /responsesPerPrompt/);
+  assert.match(JS, /humanPromptsPerHour/);
+  assert.match(JS, /costPerSessionMedian/);
+  assert.match(JS, /costPerSessionP90/);
+  assert.match(JS, /costPerEngagedHour/);
+  // Every new KPI states its formula AND its caveat, since each is a derived
+  // rate rather than a measured total.
+  assert.match(JS, /MAIN-THREAD only/, 'autonomy says whose prompts count');
+  assert.match(JS, /structurally \$0/, 'the median says what it excludes');
+  assert.match(JS, /15-minute silences/, 'cost-per-hour says which hours');
+  assert.match(JS, /Streak counts consecutive active days/, 'the streak says what it counts');
+  assert.match(JS, /a day worked but never billed is not counted/, 'the streak says what breaks it');
+});
+
+test('the scorecard panel grafts are idempotent — a re-render reuses its container', () => {
+  // renderScore runs on every poll. ensureBlock returns the existing node
+  // instead of inserting a second one; without that the scorecard would grow
+  // a duplicate panel every few seconds.
+  assert.match(JS, /function ensureBlock\(probeId,html,afterId\)\{\s*var existing=document\.getElementById\(probeId\);\s*if\(existing\)return existing;/);
 });

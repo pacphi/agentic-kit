@@ -4,6 +4,7 @@
 import { VIEWS, authHeaders, esc, setTab, syncHash } from './bootstrap.mjs';
 import { ago } from './intelligence.mjs';
 import { renderModelFacets, renderModelInventory, renderModelLifecycle } from './model-lifecycle.mjs';
+import { deltaChip, sparklineSvg } from './usage-rhythm.mjs';
 import { renderUsage } from './usage-orchestrators.mjs';
 
   // ══ Usage tab ══════════════════════════════════════════════════════════════
@@ -333,31 +334,174 @@ import { renderUsage } from './usage-orchestrators.mjs';
     }).join("");
   }
 
+  // ── panels grafted onto the served scorecard markup ───────────────────────
+  // page.mjs renders the scorecard's containers. The panels below arrived
+  // after that markup shipped and build their own container instead of growing
+  // the served template with ids it has no other reason to know about. Every
+  // one is IDEMPOTENT: renderScore runs on each poll, so a second call finds
+  // the container the first call built rather than stacking a duplicate.
+  //
+  // scoreBlock walks up to the direct child of #v-score that owns `id`, which
+  // is the granularity the scorecard's own layout uses (a .strip, a .two pair,
+  // the .hero grid) — so an inserted panel lands between whole sections, never
+  // inside one.
+  function scoreBlock(id){
+    var el=document.getElementById(id),view=document.getElementById("v-score");
+    if(!el||!view)return null;
+    while(el&&el.parentNode&&el.parentNode!==view)el=el.parentNode;
+    return (el&&el.parentNode===view)?el:null;
+  }
+  function ensureBlock(probeId,html,afterId){
+    var existing=document.getElementById(probeId);
+    if(existing)return existing;
+    var anchor=scoreBlock(afterId);
+    if(!anchor)return null;
+    var host=document.createElement("div");
+    host.innerHTML=html;
+    var node=host.firstElementChild;
+    if(!node)return null;
+    anchor.parentNode.insertBefore(node,anchor.nextSibling);
+    return document.getElementById(probeId);
+  }
+  // byDay ascending. Shared by the day-bar strip and every per-day series
+  // below, so they cannot disagree about which days are in the window.
+  function dayRows(d){
+    var out=[],k;
+    for(k in (d.byDay||{}))out.push({day:k,v:d.byDay[k]});
+    out.sort(function(a,b){return a.day<b.day?-1:1;});
+    return out;
+  }
+  // engagedByDay is a SIBLING map with its own key set, not a byDay field:
+  // byDay's presence contract is billed days only, and a day worked but never
+  // billed still has engaged time. Sorting it separately keeps that day in the
+  // trend instead of dropping it to match a different question's day set.
+  function mapRows(map){
+    var out=[],k;
+    for(k in (map||{}))out.push({day:k,v:map[k]});
+    out.sort(function(a,b){return a.day<b.day?-1:1;});
+    return out;
+  }
+  function fmtRatio(n){
+    if(n==null||!isFinite(n))return "—";
+    return Math.abs(n)>=10?String(Math.round(n)):n.toFixed(1);
+  }
   // renderScore was one CC-41 function writing ~10 independent scorecard
   // regions (hero KPIs, cost-per-day bars, host cards, token bar/legend,
   // punchcard, models, OpenRouter, projects, categories) in sequence. Split
   // by region; each keeps its original logic verbatim, so the rendered DOM
   // and its ordering are unchanged.
+
+  // A hero tile's footer: the change against the previous equal-length window,
+  // and a per-day trend for the same figure. Both self-suppress when the data
+  // cannot support them (deltaChip is '' with no previous window, sparklineSvg
+  // is '' below two points), so a tile with neither renders exactly as it did
+  // before this row existed.
+  function kpiFoot(chip,spark){
+    return (chip||spark)?'<div class="kpi-foot">'+chip+spark+"</div>":"";
+  }
+  // The cache tile's own dollar claim. cacheSavedUsd is computed server-side
+  // as a DIFFERENCE — the same tokens priced as fresh input minus priced as
+  // cache reads, at the rate in effect on the day they were spent — so it
+  // cannot drift out of step with the pricing table the way a hardcoded
+  // discount factor would. Rendered only when there is a figure to render.
+  function cacheSubtitle(t){
+    var saved=Number(t.cacheSavedUsd)||0;
+    return "priced at 0.1&times; input"
+      +(saved>0?'<span class="d-note">saved &asymp; '+esc(fmtUsd(saved))+" vs uncached</span>":"");
+  }
+  var CACHE_TIP="Share of this window's tokens that were cache reads. Higher is cheaper, so a rise "
+    +"is the good direction.\nsaved ≈ prices the same cache-read tokens as fresh input and takes the "
+    +"gap, at each day's own rate.\nNo trend line: /api/usage's per-day rows carry tokens, cost and "
+    +"sessions — cache reads are not broken out per day, so a daily share cannot be computed here.";
+
   function renderScoreHero(d){
-    var t=d.totals||{};
-    var cacheShare=pct(t.cacheRead,t.tokens);
+    var t=d.totals||{},p=(d.previous&&d.previous.totals)||{};
+    var rows=dayRows(d);
+    var cacheShare=pct(t.cacheRead,t.tokens),prevCacheShare=pct(p.cacheRead,p.tokens);
+    function spark(pick){return sparklineSvg(rows.map(pick),{});}
     document.getElementById("u-hero").innerHTML=
-      kpi("sessions",fmtNum(t.sessions),esc(fmtNum(t.responses))+" assistant turns","")
-      +kpi("api-equivalent",fmtUsd(t.cost),"list price &middot; not plan billing","accent")
-      +kpi("tokens",fmtTok(t.tokens),esc(fmtTok(t.output))+" out &middot; "+esc(fmtTok(t.cacheRead))+" cached","")
+      kpi("sessions",fmtNum(t.sessions),esc(fmtNum(t.responses))+" assistant turns"
+        +kpiFoot(deltaChip(t.sessions,p.sessions,{}),
+          spark(function(x){return fld(x.v,"sessions");})),"")
+      +kpi("api-equivalent",fmtUsd(t.cost),"list price &middot; not plan billing"
+        +kpiFoot(deltaChip(t.cost,p.cost,{downIsGood:true}),
+          spark(function(x){return fld(x.v,"cost");})),"accent")
+      +kpi("tokens",fmtTok(t.tokens),esc(fmtTok(t.output))+" out &middot; "+esc(fmtTok(t.cacheRead))+" cached"
+        +kpiFoot(deltaChip(t.tokens,p.tokens,{neutral:true}),
+          spark(function(x){return fld(x.v,"tokens");})),"")
       +kpi("engaged time",fmtHours(t.engagedSeconds),
         esc(fmtMins(t.spanMinutes))+" summed"
-        +'<span class="d-note">sessions overlap</span>',"",ladder(t))
-      +kpi("cache read",cacheShare.toFixed(1)+"%","priced at 0.1&times; input","warnv");
+        +'<span class="d-note">sessions overlap</span>'
+        +kpiFoot(deltaChip(t.engagedSeconds,p.engagedSeconds,{}),
+          sparklineSvg(mapRows(d.engagedByDay).map(function(x){return Number(x.v)||0;}),{})),"",ladder(t))
+      // Cache share is up-good, unlike the cost tile beside it: cache reads
+      // bill at 0.1× input, so a bigger share of them is a cheaper window.
+      // The delta is in percentage POINTS — a percent-of-a-percent would be
+      // read as a share change and is not what moved.
+      +kpi("cache read",cacheShare.toFixed(1)+"%",cacheSubtitle(t)
+        +kpiFoot(deltaChip(cacheShare,prevCacheShare,{unit:" pp"}),""),"warnv",CACHE_TIP);
     document.getElementById("u-asof").textContent=d.pricesAsOf?("rates as of "+d.pricesAsOf):"";
 
   }
 
+  // ── second KPI row: cadence, autonomy, unit economics ─────────────────────
+  var TIP_PER_DAY="Sessions ÷ active days.\nAn ACTIVE day is one this window actually billed tokens "
+    +"on — that is byDay's own contract, so a day worked but never billed is not counted and breaks "
+    +"the streak.\nStreak counts consecutive active days ending at the most recent one.";
+  var TIP_AUTONOMY="Assistant responses ÷ prompts you typed — how far each prompt travels.\n"
+    +"Prompts are MAIN-THREAD only: a subagent's prompts are written by the harness, not by you, so "
+    +"counting them would inflate the denominator with work nobody asked for by hand.\nTouch rate is "
+    +"those same prompts per engaged hour.";
+  var TIP_PER_SESSION="Median api-equivalent cost of one session, and the 90th percentile of the same "
+    +"set.\nSessions with NO token evidence at all are excluded: they are structurally $0 (a Codex "
+    +"subagent rollout whose tokens were stripped as a double-count, say), not cheap, and folding "
+    +"them in would drag the median toward zero for a reason that is not about spend.";
+  var TIP_PER_HOUR="Api-equivalent cost ÷ engaged hours.\nEngaged time unions active sub-intervals "
+    +"split at 15-minute silences — not wall clock, and not the sum of session spans, which "
+    +"double-counts overlap.\n— when no engaged time was measured.";
+
+  function dayBefore(day){
+    var t=Date.parse(String(day)+"T00:00:00Z");
+    if(!isFinite(t))return null;
+    return new Date(t-86400000).toISOString().slice(0,10);
+  }
+  function activeStreak(days){
+    if(!days.length)return 0;
+    var n=1;
+    for(var i=days.length-1;i>0;i--){
+      if(dayBefore(days[i])!==days[i-1])break;
+      n++;
+    }
+    return n;
+  }
+  function cadenceCells(t,active,streak){
+    var perDay=active?(Number(t.sessions)||0)/active:null;
+    var auto=t.responsesPerPrompt,touch=t.humanPromptsPerHour;
+    var med=t.costPerSessionMedian,p90=t.costPerSessionP90,perHour=t.costPerEngagedHour;
+    return kpi("sessions / active day",fmtRatio(perDay),
+      esc(fmtNum(active))+" active day"+(active===1?"":"s")
+      +'<span class="d-note">streak '+esc(String(streak))+" day"+(streak===1?"":"s")+"</span>","",TIP_PER_DAY)
+      +kpi("autonomy",auto==null?"—":fmtRatio(auto)+"×",
+        auto==null?"no prompts you typed in window"
+          :(touch==null?"touch rate not recorded"
+            :esc(fmtRatio(touch))+" prompts / engaged hour"),"",TIP_AUTONOMY)
+      +kpi("cost / session",med==null?"—":fmtUsd(med),
+        med==null?"no priced sessions in window"
+          :"median &middot; excludes $0-by-construction"
+            +'<span class="d-note">P90 '+esc(p90==null?"—":fmtUsd(p90))+"</span>","",TIP_PER_SESSION)
+      +kpi("cost / engaged hour",perHour==null?"—":fmtUsd(perHour),
+        perHour==null?"no engaged time measured":"engaged time, not wall clock","",TIP_PER_HOUR);
+  }
+  function renderScoreCadence(d){
+    var body=ensureBlock("u-cadence",'<div class="hero hero-2" id="u-cadence"></div>',"u-hero");
+    if(!body)return;
+    var days=dayRows(d).map(function(x){return x.day;});
+    body.innerHTML=cadenceCells(d.totals||{},days.length,activeStreak(days));
+  }
+
   function renderScoreDayBars(d){
     // cost per day
-    var days=[],k;
-    for(k in (d.byDay||{}))days.push({day:k,v:d.byDay[k]});
-    days.sort(function(a,b){return a.day<b.day?-1:1;});
+    var days=dayRows(d);
     var maxDay=0;
     for(var i=0;i<days.length;i++)maxDay=Math.max(maxDay,fld(days[i].v,"cost"));
     document.getElementById("u-days-note").textContent="api-equivalent · "+usageDays+"-day window";
@@ -514,6 +658,7 @@ import { renderUsage } from './usage-orchestrators.mjs';
 
   export function renderScore(d){
     renderScoreHero(d);
+    renderScoreCadence(d);
     renderScoreDayBars(d);
     renderScoreHosts(d);
     renderScoreTokBar(d);

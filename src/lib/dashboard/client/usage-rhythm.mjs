@@ -70,6 +70,58 @@ export function sparklineSvg(series, opts) {
     + '</svg>';
 }
 
+// The `q`th percentile of a bucketed distribution, in the buckets' own unit —
+// the SAME linear-interpolation rule usage-aggregate.mjs's
+// percentileFromBuckets applies server-side, restated here because this file
+// is read as text into a browser bundle that cannot import a node module. A
+// test pins the two implementations to identical output, so a divergence goes
+// red instead of quietly disagreeing with the server-computed number printed
+// beside it.
+//
+// Two honest edges, both inherited on purpose:
+//   - an empty histogram is null, never 0 — "nothing was measured" and
+//     "measured zero" are different claims;
+//   - the overflow bucket has no upper edge to interpolate towards, so it
+//     reports its FLOOR. Read that as "at least this", which is why every
+//     caller prefixes such a value with "≥" rather than printing it bare.
+export function bucketPercentile(counts, edges, q) {
+  if (!Array.isArray(counts) || !Array.isArray(edges)) return null;
+  var total = counts.reduce(function (a, n) { return a + (Number(n) || 0); }, 0);
+  if (total <= 0) return null;
+  // 2dp, the same rounding the server applies before putting its own
+  // percentiles on the wire — so the two implementations are comparable by
+  // strict equality rather than by an epsilon a test would have to choose.
+  var r2 = function (v) { return Math.round(v * 100) / 100; };
+  var target = total * q, cum = 0;
+  for (var i = 0; i < counts.length; i++) {
+    var n = Number(counts[i]) || 0;
+    if (n <= 0) continue;
+    if (cum + n >= target) {
+      var lo = i === 0 ? 0 : edges[i - 1];
+      if (i >= edges.length) return r2(lo);
+      return r2(lo + (edges[i] - lo) * ((target - cum) / n));
+    }
+    cum += n;
+  }
+  return r2(edges[edges.length - 1]);
+}
+
+// Where a bucketed VALUE sits along the histogram's axis, as 0-100. That axis
+// is BUCKET SLOTS, not values: slot i spans [i/n,(i+1)/n] and the value is
+// placed inside its own slot by the same linear rule that produced it, so a
+// marker drawn here always lands in the bucket its percentile came from.
+// Deliberately ignores the 6px inter-bar gap — a sub-4px offset on a dashed
+// rule that carries its own printed label, against the alternative of teaching
+// this pure function the CSS's box metrics.
+export function bucketPositionPct(edges, value) {
+  if (!Array.isArray(edges) || !edges.length || !Number.isFinite(value)) return null;
+  var slots = edges.length + 1, i = edges.length;
+  for (var e = 0; e < edges.length; e++) { if (value <= edges[e]) { i = e; break; } }
+  var lo = i === 0 ? 0 : edges[i - 1];
+  var frac = i >= edges.length ? 0 : ((edges[i] > lo) ? (value - lo) / (edges[i] - lo) : 0);
+  return Math.max(0, Math.min(100, ((i + frac) / slots) * 100));
+}
+
 // Bars are one sequential hue (accent) — a magnitude series, not a category
 // split, so there is nothing for a second color to distinguish. Markers are
 // emitted BEFORE the bars in DOM order and absolutely overlay the same box

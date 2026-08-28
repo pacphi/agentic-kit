@@ -127,6 +127,19 @@ export const USAGE_CSS = `
 .kpi .d-note{display:block; color:var(--ink-dim); font-size:11px; margin-top:2px}
 .kpi.accent .v{color:var(--accent)}
 .kpi.warnv .v{color:var(--warn)}
+/* The tile footer carries the change against the previous equal-length window
+   and the per-day trend for the same figure. space-between rather than a gap:
+   the sparkline anchors to the tile's right edge, so the trend lines across a
+   row of tiles share a baseline and can be compared at a glance. Both halves
+   self-suppress when their data is absent, and the row is omitted entirely
+   when neither renders — so a tile never grows an empty band. */
+.kpi-foot{display:flex; align-items:center; justify-content:space-between; gap:10px; margin-top:9px; min-height:24px}
+/* The second KPI row is a continuation of the hero, not a new section: same
+   grid, pulled up so the two read as one block, and quieter numbers because
+   these are derived rates rather than the measured totals above them. */
+.hero-2{margin-top:-4px}
+.hero-2 .kpi{background:var(--panel-2); box-shadow:none}
+.hero-2 .kpi .v{font-size:22px}
 .note{
   display:flex; gap:9px; padding:10px 14px; margin-bottom:16px; border-radius:var(--r-sm);
   background:var(--accent-soft); color:var(--ink-2); font-size:12.5px; align-items:baseline;

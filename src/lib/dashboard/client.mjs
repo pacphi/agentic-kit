@@ -89,6 +89,22 @@ aboutSrc = inject(aboutSrc, 'var ABOUT = []; // PLACEHOLDER:ABOUT_JS', `var ABOU
 
 const intelligenceSrc = readSplit('intelligence.mjs');
 const pollSrc = readSplit('poll.mjs');
+// usage-rhythm.mjs declares its OWN `esc` on disk, and its comment says why:
+// the tests import it as real ESM, where bootstrap.mjs's `esc` is still the
+// build-time stub. In the concatenated bundle every file shares ONE scope, so
+// shipping that copy would declare `esc` twice — and a later function
+// declaration wins, silently replacing the injected groups.mjs escaper with a
+// hand copy free to drift from it. Strip it here for exactly the reason the
+// cross-file `import` lines are stripped: it exists for the on-disk view only.
+const RHYTHM_ESC = `function esc(s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+    return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+  });
+}`;
+let usageRhythmSrc = readSplit('usage-rhythm.mjs');
+usageRhythmSrc = inject(usageRhythmSrc, RHYTHM_ESC,
+  '// esc: the bundle\'s single injected groups.mjs escaper (client.mjs strips\n'
+  + "// this file's on-disk copy — see RHYTHM_ESC there).");
 const usageSrc = readSplit('usage.mjs');
 const modelLifecycleSrc = readSplit('model-lifecycle.mjs');
 const usageOrchestratorsSrc = readSplit('usage-orchestrators.mjs');
@@ -103,5 +119,5 @@ const bootSrc = readSplit('boot.mjs');
 // sequence) running in the same relative order it always has.
 export const JS = `
 (function(){
-${bootstrapSrc}${overviewSrc}${intelligenceSrc}${pollSrc}${usageSrc}${modelLifecycleSrc}${usageOrchestratorsSrc}${aboutSrc}${systemReadoutSrc}${systemProjectsSrc}${bootSrc}})();
+${bootstrapSrc}${overviewSrc}${intelligenceSrc}${pollSrc}${usageRhythmSrc}${usageSrc}${modelLifecycleSrc}${usageOrchestratorsSrc}${aboutSrc}${systemReadoutSrc}${systemProjectsSrc}${bootSrc}})();
 `;
