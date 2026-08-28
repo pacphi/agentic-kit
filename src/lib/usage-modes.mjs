@@ -10,6 +10,8 @@ function codexMode(approval, sandbox) {
   if (sandbox === 'read-only') return 'plan';
   if (approval === 'never' && sandbox === 'danger-full-access') return 'unrestricted';
   if (approval === 'never' && sandbox === 'workspace-write') return 'auto-edit';
+  // Approval evidence alone is sufficient for 'guarded' — human-in-the-loop is the posture;
+  // sandbox evidence is not required (ADR-0038 ruling).
   if (['on-request', 'on-failure', 'untrusted'].includes(approval)) return 'guarded';
   return null;
 }
