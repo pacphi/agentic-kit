@@ -374,11 +374,16 @@ let _memo = null;
  *  case still changes the key instead of colliding with every other scan. */
 function scanKey(o = {}) {
   const roots = Object.entries(o.roots || {}).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
-  // lookbackDays changes the RESULT (it widens what scan() parses/returns —
-  // see scan() below) exactly like days/force/roots/cachePath already do, so
-  // it must be folded into the single-flight/memo identity too: two calls
-  // differing only by lookbackDays must never coalesce into one answer.
-  return JSON.stringify([Number(o.days) || 14, Number(o.lookbackDays) || 0, !!o.force, roots, o.cachePath || '']);
+  // lookbackDays and previous both change the RESULT — lookbackDays widens
+  // what scan() parses/returns, previous turns on aggregate's previous-window
+  // projection (agg.previous) — exactly like days/force/roots/cachePath
+  // already do, so both must be folded into the single-flight/memo identity
+  // too: two calls differing only by one of these must never coalesce into
+  // one answer (a {previous:true} caller must never be served a memoized
+  // {previous:false} answer, or vice versa).
+  return JSON.stringify([
+    Number(o.days) || 14, Number(o.lookbackDays) || 0, !!o.previous, !!o.force, roots, o.cachePath || '',
+  ]);
 }
 
 /** Drop process-level state (single-flight promises, read memo, lazy deps). */

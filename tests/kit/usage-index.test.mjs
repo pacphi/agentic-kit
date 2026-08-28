@@ -1602,6 +1602,21 @@ test('scanKey distinguishes calls that differ only by lookbackDays', async () =>
     'a call with lookbackDays set must not collide with one that omits it — they must not share the in-flight promise / result object');
 });
 
+// Task 7 fix round 1: the same F-08-style regression guard as the lookbackDays
+// test above, now for `previous` — added after review flagged that scanKey
+// folded lookbackDays into its identity but not previous, so a {previous:true}
+// caller (e.g. /api/usage) racing a {previous:false} caller (e.g. the Models
+// tab) with otherwise-identical options could have shared one memoized answer.
+test('scanKey distinguishes calls that differ only by previous', async () => {
+  _resetForTest();
+  const sb = sandbox();
+  const a = buildIndex(opts(sb, { previous: false }));
+  const b = buildIndex(opts(sb, { previous: true }));
+  const [aggA, aggB] = await Promise.all([a, b]);
+  assert.notEqual(aggA, aggB,
+    'a call with previous:true must not collide with one that omits it — they must not share the in-flight promise / result object');
+});
+
 // ── aggregate: buckets, rhythm, per-day engaged, previous window (Task 6) ───
 //
 // These suites drive `aggregate()` directly instead of through buildIndex: the
