@@ -337,10 +337,13 @@ function addCost(map, key, v) {
  * from the same table, at the same date, as the cost sitting beside it — a
  * savings number quoted at today's rate for August's tokens would be a
  * different claim than the one the panel makes everywhere else. Memoised per
- * (model, provider, day) because a window has few of those and many rows.
+ * (model, provider, day) because a window has few of those and many rows; the
+ * key joins on \x1f (ASCII unit separator), which cannot occur in a model id,
+ * provider or day — and unlike NUL does not make grep read this file as
+ * binary and silently report no matches.
  */
 function cacheSavingPerMillion(model, provider, day, deps, rates) {
-  const key = `${model} ${provider} ${day}`;
+  const key = `${model}\x1f${provider}\x1f${day}`;
   if (rates.has(key)) return rates.get(key);
   const base = { model, provider, day, input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
   const asInput = deps.costOf({ ...base, input: 1e6 }) || 0;
