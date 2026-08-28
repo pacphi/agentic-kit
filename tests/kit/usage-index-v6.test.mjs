@@ -285,3 +285,15 @@ test('parseCodex v11: mode, duration, aborts, ctx window, typed tools', () => {
   assert.equal(rec.ctxWindow, 272000);
   assert.equal(rec.tools.CommandExecution, 1);
 });
+
+test('parseCodex v11: turn_aborted clears pending latency state so a later agent_message is not mis-sampled', () => {
+  const plusSec = (t, s) => new Date(Date.parse(t) + s * 1000).toISOString();
+  const lines = [
+    JSON.stringify({ type: 'session_meta', payload: { id: 'cx2', cwd: '/tmp/p', thread_source: 'user' }, timestamp: T0 }),
+    JSON.stringify({ type: 'event_msg', payload: { type: 'user_message', message: 'go' }, timestamp: T0 }),
+    JSON.stringify({ type: 'event_msg', payload: { type: 'turn_aborted', reason: 'user_interrupt', turn_id: 't1' }, timestamp: plusSec(T0, 3) }),
+    JSON.stringify({ type: 'event_msg', payload: { type: 'agent_message', message: 'unrelated' }, timestamp: plusSec(T0, 120) }),
+  ].join('\n');
+  const { session: rec } = parseCodex(lines, { id: 'cx2' });
+  assert.equal(rec.latCount, 0);
+});

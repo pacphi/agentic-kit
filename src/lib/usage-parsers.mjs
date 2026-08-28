@@ -641,7 +641,17 @@ function handleCodexEventMsg(rec, turns, stats, titleState, usageState, latState
   if (decoded.type === 'tokenCount') { handleCodexTokenCount(rec, stats, usageState, decoded, ms); return; }
   if (payload.type === 'task_started') { handleCodexTaskStarted(rec, latState, payload); return; }
   if (payload.type === 'task_complete') { handleCodexTaskComplete(rec, latState, payload); return; }
-  if (payload.type === 'turn_aborted') { rec.aborts++; return; }
+  if (payload.type === 'turn_aborted') {
+    rec.aborts++;
+    // An interrupted turn leaves no valid latency evidence behind it: a
+    // pending prompt was never answered, so it must never be mistaken for
+    // one a LATER, unrelated agent_message answered; and the turn-started
+    // gate must not misfire a task_complete fallback for a turn that never
+    // completed.
+    latState.pendingPromptMs = null;
+    latState.turnStartedAt = null;
+    return;
+  }
   if (decoded.generation === 'legacy') stats.legacyEvents++;
   else if (decoded.generation === 'item') stats.itemCompletedEvents++;
   if (decoded.unknownItemType) {
