@@ -1452,3 +1452,123 @@ test('parseClaude derives latency, mode, ctx from entries', () => {
   assert.equal(rec.latHist[2], 1);            // 8s → 5-10s bucket
   assert.equal(rec.ctxLastTokens, 151000);    // input + cacheRead of last turn
 });
+
+// ── v11 index carry-through + lookback (Task 5) ─────────────────────────────
+
+test('cached session entries round-trip the v11 fields across a cache hit', async () => {
+  _resetForTest();
+  const sb = soloSandbox();
+  const T0 = '2026-08-20T10:00:00.000Z';
+  const plusSec = (t, s) => new Date(Date.parse(t) + s * 1000).toISOString();
+
+  // "Evidence" session: the same shape as the parseClaude unit test above (a
+  // permissionMode-carrying prompt, a cache-heavy reply) so mode/modeRaw/
+  // latHist/latCount/lenSeconds/ctxLastTokens land on real, non-default
+  // values to round-trip through the cache.
+  const evidenceFile = path.join(sb.claude, 'sess-evidence.jsonl');
+  fs.writeFileSync(evidenceFile, `${[
+    JSON.stringify({
+      type: 'user', sessionId: 'sess-evidence', cwd: '/Users/me/proj',
+      timestamp: T0, permissionMode: 'acceptEdits',
+      message: { role: 'user', content: 'do it' },
+    }),
+    JSON.stringify({
+      type: 'assistant', sessionId: 'sess-evidence', cwd: '/Users/me/proj',
+      timestamp: plusSec(T0, 8),
+      message: {
+        role: 'assistant', model: 'claude-opus-5',
+        usage: { input_tokens: 1000, cache_read_input_tokens: 150000, output_tokens: 50 },
+        content: [],
+      },
+    }),
+  ].join('\n')}\n`);
+
+  // "Blank" session: a prompt with no assistant reply at all — no mode
+  // signal, no latency sample, no context-window turn — so every v11 field
+  // must stay at blankSession's honest-absent default. Proves absent
+  // evidence round-trips as absent, never fabricated by the cache cycle.
+  const blankFile = path.join(sb.claude, 'sess-blank.jsonl');
+  fs.writeFileSync(blankFile, `${JSON.stringify({
+    type: 'user', sessionId: 'sess-blank', cwd: '/Users/me/proj', timestamp: T0,
+    message: { role: 'user', content: 'hi' },
+  })}\n`);
+
+  const assertBoth = () => {
+    const cache = JSON.parse(fs.readFileSync(sb.cachePath, 'utf8'));
+    const evidence = cache.entries[evidenceFile].session;
+    assert.equal(evidence.mode, 'auto-edit');
+    assert.equal(evidence.modeRaw, 'acceptEdits');
+    assert.equal(evidence.latCount, 1);
+    assert.deepEqual(evidence.latHist, [0, 0, 1, 0, 0, 0]); // 8s -> 5-10s bucket
+    assert.equal(evidence.lenSeconds, 8);
+    assert.equal(evidence.ctxLastTokens, 151000);           // input + cacheRead of last turn
+    assert.equal(evidence.ctxWindow, null, 'ctxWindow is codex-only evidence');
+    assert.equal(evidence.aborts, 0, 'aborts is codex-only evidence');
+
+    const blank = cache.entries[blankFile].session;
+    assert.equal(blank.mode, null);
+    assert.equal(blank.modeRaw, null);
+    assert.equal(blank.latHist, null);
+    assert.equal(blank.latCount, 0);
+    assert.equal(blank.lenSeconds, 0);
+    assert.equal(blank.ctxWindow, null);
+    assert.equal(blank.ctxLastTokens, null);
+    assert.equal(blank.aborts, 0);
+  };
+
+  await buildIndex(opts(sb));
+  assertBoth(); // fresh parse
+
+  _resetForTest(); // clears the in-process single-flight/memo, NOT the on-disk cache
+  await buildIndex(opts(sb)); // same (path, mtime, size) on both files — must hit the cache
+  assertBoth(); // cache-hit read: identical values prove the round trip
+});
+
+// ── lookback (Task 5) ────────────────────────────────────────────────────────
+
+test("buildIndex({ days, lookbackDays }) widens discovery/parse; unset stays exactly today's behavior", async () => {
+  _resetForTest();
+  const sb = soloSandbox();
+  const DAY = 86_400_000;
+  const tenDaysAgo = NOW - 10 * DAY;
+
+  const file = path.join(sb.claude, 'old-session.jsonl');
+  fs.writeFileSync(file, `${JSON.stringify({
+    type: 'assistant', sessionId: 'old-session', cwd: '/Users/me/proj',
+    timestamp: new Date(tenDaysAgo).toISOString(),
+    message: { role: 'assistant', model: 'claude-opus-5', usage: { input_tokens: 1, output_tokens: 1 }, content: [] },
+  })}\n`);
+  // Backdate the file's REAL mtime to match its content: a genuinely 10-day-
+  // old transcript, not just an old timestamp inside a freshly-written file —
+  // so this exercises the candidates mtime filter too, not only aggregate's.
+  fs.utimesSync(file, new Date(tenDaysAgo), new Date(tenDaysAgo));
+
+  const plain = await buildIndex(opts(sb, { days: 7 }));
+  assert.equal(byId(plain, 'old-session'), undefined, 'a 10-day-old session is outside a plain 7-day window');
+
+  _resetForTest();
+  const undefinedLookback = await buildIndex(opts(sb, { days: 7, lookbackDays: undefined }));
+  assert.equal(byId(undefinedLookback, 'old-session'), undefined, 'lookbackDays: undefined must not widen the window either');
+  assert.deepEqual(undefinedLookback.totals, plain.totals, 'unset lookbackDays is identical to omitting it entirely');
+
+  _resetForTest();
+  const widened = await buildIndex(opts(sb, { days: 7, lookbackDays: 14 }));
+  assert.ok(byId(widened, 'old-session'), 'lookbackDays: 14 widens discovery/parse so it is returned');
+  assert.equal(widened.windowDays, 7, 'the nominal window label still reports `days` unchanged');
+});
+
+// F-08-style regression guard (see the scanKey test above): lookbackDays now
+// changes scan()'s RESULT the same way days/force/roots/cachePath already do,
+// so it must be folded into the single-flight/memo identity too — concurrent
+// calls differing only by lookbackDays must not collapse into one answer and
+// serve a { days: 7 } caller the { days: 7, lookbackDays: 14 } aggregate (or
+// vice versa).
+test('scanKey distinguishes calls that differ only by lookbackDays', async () => {
+  _resetForTest();
+  const sb = sandbox();
+  const a = buildIndex(opts(sb, { lookbackDays: undefined }));
+  const b = buildIndex(opts(sb, { lookbackDays: 28 }));
+  const [aggA, aggB] = await Promise.all([a, b]);
+  assert.notEqual(aggA, aggB,
+    'a call with lookbackDays set must not collide with one that omits it — they must not share the in-flight promise / result object');
+});

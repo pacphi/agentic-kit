@@ -374,7 +374,11 @@ let _memo = null;
  *  case still changes the key instead of colliding with every other scan. */
 function scanKey(o = {}) {
   const roots = Object.entries(o.roots || {}).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
-  return JSON.stringify([Number(o.days) || 14, !!o.force, roots, o.cachePath || '']);
+  // lookbackDays changes the RESULT (it widens what scan() parses/returns —
+  // see scan() below) exactly like days/force/roots/cachePath already do, so
+  // it must be folded into the single-flight/memo identity too: two calls
+  // differing only by lookbackDays must never coalesce into one answer.
+  return JSON.stringify([Number(o.days) || 14, Number(o.lookbackDays) || 0, !!o.force, roots, o.cachePath || '']);
 }
 
 /** Drop process-level state (single-flight promises, read memo, lazy deps). */
@@ -388,6 +392,14 @@ function notify(onProgress, payload) {
 /**
  * @typedef {object} IndexOptions
  * @property {number} [days]        window size in days (default 14)
+ * @property {number} [lookbackDays] widen the discovery/parse cutoff (and the
+ *           cutoff `aggregate` filters `sessions` against) to this many days
+ *           back instead of `days` — a caller computing a delta between two
+ *           `days`-sized windows can pass e.g. `lookbackDays: days * 2` and
+ *           get both windows' sessions back from one scan; `windowDays` in
+ *           the result still reports `days` — splitting the wider `sessions`
+ *           list back into windows is the caller's job. Undefined (default)
+ *           behaves exactly as `days` alone: no widening.
  * @property {boolean} [force]      ignore cached per-file entries
  * @property {Function} [onProgress] called with { scanned, total, phase }
  * @property {{claude?: string, codex?: string, opencode?: string}} [roots] override transcript roots (tests; opencode = the SQLite store path)
@@ -564,12 +576,20 @@ function resolveCodexLedger(o, rawRoots) {
 /** @param {IndexOptions} [o] */
 async function scan(o = {}) {
   const {
-    days = 14, force = false, onProgress, roots, cachePath, now = Date.now(), deps: injected,
+    days = 14, lookbackDays, force = false, onProgress, roots, cachePath, now = Date.now(), deps: injected,
   } = o;
   const deps = await loadDeps(injected);
   const r = { ...defaultRoots(), ...(roots ?? {}) };
   const cacheFile = cachePath ?? defaultCachePath();
-  const cutoff = now - days * DAY_MS;
+  // Widened when the caller passes lookbackDays (a server computing a delta
+  // between two `days`-sized windows, e.g.) — every discovery/parse use below
+  // (candidates, opencode listing, carry-forward, and the cutoff `aggregate`
+  // filters `sessions` against) shares this ONE value, so widening it here is
+  // the entire effect. `windowDays` in the returned aggregate still reports
+  // `days` unchanged; bucketing the wider `sessions` list back into windows
+  // is the caller's job. Unset, `lookbackDays ?? days` is exactly `days` —
+  // today's behavior, unchanged.
+  const cutoff = now - (lookbackDays ?? days) * DAY_MS;
 
   // Primary transcript roots: read once at root level (cheap — not the
   // recursive per-file walk listClaude/listCodex still do below).
