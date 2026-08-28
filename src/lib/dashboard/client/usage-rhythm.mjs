@@ -38,12 +38,15 @@ export function deltaChip(curr, prev, opts) {
   var downIsGood = !!o.downIsGood, neutral = !!o.neutral, unit = o.unit || '';
   if (prev == null || prev === 0) return '';
   var c = Number(curr) || 0, p = Number(prev) || 0, delta = c - p;
-  var dir = delta > 0 ? 'up' : delta < 0 ? 'down' : 'flat';
+  var magTxt = unit ? fmtDeltaNumber(Math.abs(delta)) : String(Math.round(Math.abs(delta / p * 100)));
+  // A change that ROUNDS AWAY is not a direction this chip can claim. "▲0%"
+  // and "▲0 pp" both draw an arrow for a move the printed number says did not
+  // happen, which reads as a rendering bug at best and as a trend at worst —
+  // so a zero magnitude falls back to the flat mark whatever the raw sign was.
+  var dir = Number(magTxt) === 0 ? 'flat' : (delta > 0 ? 'up' : delta < 0 ? 'down' : 'flat');
   var arrow = dir === 'up' ? '▲' : dir === 'down' ? '▼' : '•';
   var tone = (neutral || dir === 'flat') ? 'flat' : (((dir === 'up') !== downIsGood) ? 'good' : 'bad');
-  var valueTxt = unit
-    ? fmtDeltaNumber(Math.abs(delta)) + esc(unit)
-    : Math.round(Math.abs(delta / p * 100)) + '%';
+  var valueTxt = unit ? magTxt + esc(unit) : magTxt + '%';
   return '<span class="dchip" data-tone="' + tone + '">'
     + '<i class="dchip-arrow" aria-hidden="true">' + arrow + '</i>'
     + '<b class="dchip-val tnum">' + valueTxt + '</b></span>';

@@ -356,7 +356,7 @@ export const USAGE_CSS = `
    which is silent: the row still renders, it just renders the wrong data under
    each heading. */
 .srow{
-  display:grid; grid-template-columns:18px 82px minmax(150px,2.1fr) minmax(90px,1fr) minmax(84px,.9fr) 106px 46px 60px 62px 68px 20px;
+  display:grid; grid-template-columns:18px 82px minmax(150px,2fr) minmax(80px,.55fr) minmax(155px,1.35fr) 106px 46px 60px 62px 68px 20px;
   gap:10px; align-items:center; padding:9px 13px; background:var(--panel); font-size:12.5px; cursor:pointer;
 }
 .srow:hover{background:var(--panel-2)}
@@ -369,7 +369,13 @@ export const USAGE_CSS = `
    make room for its annotations. Each chip renders only when the transcript
    established that fact, so an absent chip is the signal that it was never
    recorded; the cell overflows hidden rather than wrapping, which would give
-   this row a second line and halve the list's density. */
+   this row a second line and halve the list's density.
+   The track is sized (155px floor) from the widest chip set measured across a
+   real 100-row corpus, which was 170px — so the common row does not truncate
+   at all. The rarer wider set still has to degrade somehow, and .s-mode is the
+   one chip that shrinks: the numbers beside it are short and must stay whole,
+   while a posture ellipsised to "unrestric…" is the same treatment .cat and
+   .s-title already get in this table, with the full value in its tooltip. */
 .s-chips{display:flex; gap:4px; overflow:hidden; min-width:0}
 .s-chip{
   font-family:var(--mono); font-size:9.5px; color:var(--ink-dim); white-space:nowrap; flex:none;
@@ -377,7 +383,7 @@ export const USAGE_CSS = `
 }
 /* The posture chip always spells the posture out, so its tint is a second
    channel and never the only one carrying "this session had a wide mandate". */
-.s-chip.s-mode{color:var(--ink-2)}
+.s-chip.s-mode{color:var(--ink-2); flex:0 1 auto; min-width:0; overflow:hidden; text-overflow:ellipsis}
 .s-chip.s-mode[data-mode="plan"]{color:var(--purple); border-color:color-mix(in srgb,var(--purple) 32%,transparent)}
 .s-chip.s-mode[data-mode="unrestricted"]{color:var(--warn); border-color:color-mix(in srgb,var(--warn) 32%,transparent)}
 .s-proj,.s-when,.s-dur,.s-turns,.s-tok{color:var(--ink-2); font-size:11.5px}

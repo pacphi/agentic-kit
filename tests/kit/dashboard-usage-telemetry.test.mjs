@@ -348,6 +348,26 @@ test('the cadence row is built once, after the hero, from totals the payload alr
   assert.match(JS, /a day worked but never billed is not counted/, 'the streak says what breaks it');
 });
 
+test('deltaChip refuses to draw a direction for a change that rounds away', () => {
+  // "▲0%" and "▲0 pp" both put an arrow on a move the printed number says did
+  // not happen. Real data hit this: cache share moved 0.04pp between windows.
+  const tiny = deltaChip(96.84, 96.80, { unit: ' pp' });
+  assert.match(tiny, /data-tone="flat"/);
+  assert.match(tiny, /•/);
+  assert.doesNotMatch(tiny, /▲|▼/);
+  assert.match(deltaChip(1004, 1000, {}), /data-tone="flat"/, 'a 0.4% move rounds to 0% and is flat too');
+  // A change that survives rounding still gets its arrow and its tone.
+  assert.match(deltaChip(584, 540, {}), /▲/);
+  assert.match(deltaChip(50, 100, { downIsGood: true }), /data-tone="good"/);
+});
+
+test('60 seconds reads as 60s, so the overflow prefix names the bucket edge on the axis', () => {
+  // fmtSecs rolled 60 up to "1m", which made the ruled "≥60s" render "≥1m" —
+  // a percentile labelled with a boundary that appears nowhere on the axis.
+  assert.match(JS, /if\(sec<=60\)return/);
+  assert.match(JS, /var LAT_LABELS=\["≤2s","≤5s","≤10s","≤30s","≤60s",">60s"\]/);
+});
+
 test('donut2 draws the arc from the raw value while the legend prints the caller-formatted text', () => {
   const html = donut2({
     aValue: 12.3456, bValue: 4.1, aText: '$12.35', bText: '$4.10',
@@ -366,8 +386,8 @@ test('the rhythm panel labels buckets on the same edges the server binned them w
   // this pin exists to make loud.
   assert.match(JS, new RegExp(`var LAT_EDGES=\\[${LAT_BUCKET_EDGES.join(',')}\\]`));
   assert.match(JS, new RegExp(`var LEN_EDGES=\\[${LEN_BUCKET_EDGES.join(',')}\\]`));
-  assert.match(JS, /var LAT_LABELS=\["≤2s","≤5s","≤10s","≤30s","≤60s","＞60s"\]/);
-  assert.match(JS, /var LEN_LABELS=\["≤5m","≤15m","≤45m","≤2h","＞2h"\]/);
+  assert.match(JS, /var LAT_LABELS=\["≤2s","≤5s","≤10s","≤30s","≤60s",">60s"\]/);
+  assert.match(JS, /var LEN_LABELS=\["≤5m","≤15m","≤45m","≤2h",">2h"\]/);
 });
 
 test('an overflow-bucket percentile is printed with a ≥ prefix, never as a bare figure', () => {

@@ -410,7 +410,10 @@ import { renderUsage } from './usage-orchestrators.mjs';
   // the extra digit claims a precision a bucket floor does not have.
   function fmtSecs(sec){
     sec=Number(sec)||0;
-    if(sec<60)return (sec<10?Math.round(sec*10)/10:Math.round(sec))+"s";
+    // <=60, not <60: the latency histogram's overflow bucket floor IS 60s, and
+    // that value has to read "60s" so "≥60s" names the bucket edge the reader
+    // can see on the axis. Rolling it up to "1m" renamed the boundary.
+    if(sec<=60)return (sec<10?Math.round(sec*10)/10:Math.round(sec))+"s";
     if(sec<5400)return Math.round(sec/60)+"m";
     var h=Math.round(sec/360)/10;
     return (h%1===0?String(h):h.toFixed(1))+"h";
@@ -544,9 +547,9 @@ import { renderUsage } from './usage-orchestrators.mjs';
   // bundle that cannot import that module. A test pins the copies equal, so a
   // change to either goes red instead of silently re-labelling every bucket.
   var LAT_EDGES=[2,5,10,30,60];
-  var LAT_LABELS=["≤2s","≤5s","≤10s","≤30s","≤60s","＞60s"];
+  var LAT_LABELS=["≤2s","≤5s","≤10s","≤30s","≤60s",">60s"];
   var LEN_EDGES=[300,900,2700,7200];
-  var LEN_LABELS=["≤5m","≤15m","≤45m","≤2h","＞2h"];
+  var LEN_LABELS=["≤5m","≤15m","≤45m","≤2h",">2h"];
   var LAT_TIP="Wall-clock gap between a prompt and the response that answered it.\n"
     +"codex host-measured · claude/opencode derived from event gaps — not streaming TTFT.\n"
     +"The last bucket has no upper edge, so a percentile landing in it reports that bucket's "
