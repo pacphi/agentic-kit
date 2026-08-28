@@ -1977,6 +1977,61 @@ test('the midnight split follows the local clock across a DST transition', () =>
   }
 });
 
+test('the session row projects the v11 posture and context-window evidence', () => {
+  const a = aggregate([record('ctx', {
+    mode: 'auto-edit', modeRaw: 'acceptEdits', ctxWindow: 200_000, ctxLastTokens: 151_000,
+    usage: [usageRow('2026-07-24', 'claude-opus-5', { input: 1000 })],
+  })], aggOpts());
+  const s = a.sessions[0];
+
+  assert.equal(s.mode, 'auto-edit');
+  assert.equal(s.modeRaw, 'acceptEdits', 'the raw string the transcript carried, beside the normalized one');
+  assert.equal(s.ctxWindow, 200_000);
+  assert.equal(s.ctxLastTokens, 151_000);
+});
+
+test('the v11 projection stays honest-absent when the transcript recorded nothing', () => {
+  // blankSession's defaults: a source that carries no posture or context
+  // evidence must project null, never a zero that reads as a measurement.
+  const a = aggregate([record('bare')], aggOpts());
+  const s = a.sessions[0];
+
+  assert.equal(s.modeRaw, null);
+  assert.equal(s.ctxWindow, null);
+  assert.equal(s.ctxLastTokens, null);
+});
+
+test('byDay carries exceptions and cacheRead for the reliability and cache trends', () => {
+  // `busted` bills on the 22nd and carries 2 exceptions; `clean` bills on the
+  // 23rd with none. Exceptions follow the first-billed-day convention the
+  // session count already uses.
+  const end = (d) => NOW - d * DAY;
+  const a = aggregate([
+    record('busted', {
+      end: end(3), start: end(3) - 30 * MIN, exceptions: 2,
+      usage: [
+        usageRow('2026-07-22', 'claude-opus-5', { input: 100, cacheRead: 900 }),
+        usageRow('2026-07-22', 'claude-sonnet-5', { input: 50, cacheRead: 150 }),
+      ],
+    }),
+    record('clean', {
+      end: end(2), start: end(2) - 30 * MIN, exceptions: 0,
+      usage: [usageRow('2026-07-23', 'claude-opus-5', { input: 400 })],
+    }),
+  ], aggOpts());
+
+  assert.equal(a.byDay['2026-07-22'].exceptions, 2, 'attributed to the day the session first billed');
+  assert.equal(a.byDay['2026-07-22'].cacheRead, 1050, 'summed across every usage row of the day');
+  assert.equal(a.byDay['2026-07-22'].tokens, 1200, 'cacheRead is a slice of tokens, not an addition to it');
+
+  // A day that saw neither an exception nor a cache read still carries both
+  // fields at zero — a chart reading `undefined` would render a gap where the
+  // truth is a measured zero.
+  assert.equal(a.byDay['2026-07-23'].exceptions, 0);
+  assert.equal(a.byDay['2026-07-23'].cacheRead, 0);
+  assert.equal(a.totals.exceptions, 2, 'the window total is unchanged by the per-day split');
+});
+
 test('byDay carries cost by mode and by model family', () => {
   const a = aggregate([
     record('d1', { mode: 'auto-edit', usage: [usageRow('2026-07-24', 'claude-opus-5-20260115', { input: 2000 })] }),

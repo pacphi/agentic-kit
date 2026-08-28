@@ -312,7 +312,7 @@ function sealBuckets(...maps) {
 function dayBucket(byDay, day) {
   if (!byDay[day]) {
     byDay[day] = {
-      tokens: 0, cost: 0, sessions: 0, sessionsActive: 0,
+      tokens: 0, cost: 0, cacheRead: 0, sessions: 0, sessionsActive: 0, exceptions: 0,
       byMode: Object.create(null), byModelFamily: Object.create(null),
     };
   }
@@ -376,6 +376,9 @@ function foldSessionUsageRow(row, rec, deps, acc, byDay, byModel, activeDays) {
   const rowTokens = row.input + row.output + row.cacheRead + row.cacheWrite;
   const d = dayBucket(byDay, row.day);
   d.tokens += rowTokens;
+  // Kept alongside `tokens` so the day's cache share is readable without
+  // re-deriving it from the session rows.
+  d.cacheRead += row.cacheRead;
   d.cost = round(d.cost + rowCost);
   // Cost by posture and by model family, per day: the two stacked series the
   // day chart draws. Both live here rather than in the session pass because
@@ -406,6 +409,31 @@ function foldSessionUsageRows(rec, deps, byDay, byModel, rates) {
   }
   for (const day of activeDays) byDay[day].sessionsActive++;
   return { ...acc, firstDay };
+}
+
+/**
+ * The v11 posture, rhythm and context-window facts a session recorded (ADR-0038)
+ * — every one a straight null-safe copy off the record. Carried on the row
+ * rather than folded away because each is a per-session fact the transcript
+ * actually observed, and the window's histograms have to be traceable back to
+ * the sessions that built them. `mode`/`modeRaw`/`latHist`/`ctx*` stay
+ * honest-absent (null) when nothing observed them; a zero there would read as a
+ * measurement. `modeRaw` rides beside the normalized `mode` because the
+ * taxonomy is a judgment call, and a reader checking it needs the evidence it
+ * was made from. Split out of buildSessionRow to keep that projection under the
+ * repo's complexity ceiling.
+ */
+function v11Projection(rec) {
+  return {
+    mode: rec.mode ?? null,
+    modeRaw: rec.modeRaw ?? null,
+    latHist: Array.isArray(rec.latHist) ? rec.latHist.slice() : null,
+    latCount: rec.latCount ?? 0,
+    lenSeconds: rec.lenSeconds ?? 0,
+    ctxWindow: rec.ctxWindow ?? null,
+    ctxLastTokens: rec.ctxLastTokens ?? null,
+    aborts: rec.aborts ?? 0,
+  };
 }
 
 /** One aggregate session row from a parsed record, its folded usage sums,
@@ -439,16 +467,7 @@ function buildSessionRow(rec, usage, verdict) {
     // records (the schema bump re-derives those).
     reasoningOutput: rec.reasoningOutput ?? 0,
     rateLimits: rec.rateLimits ?? null,
-    // v11 posture and rhythm (ADR-0038). Carried on the row, not folded away,
-    // because every one of them is a per-session fact the transcript actually
-    // recorded — and the window's histograms have to be traceable back to the
-    // sessions that built them. `mode` and `latHist` stay honest-absent (null)
-    // when nothing observed them.
-    mode: rec.mode ?? null,
-    latHist: Array.isArray(rec.latHist) ? rec.latHist.slice() : null,
-    latCount: rec.latCount ?? 0,
-    lenSeconds: rec.lenSeconds ?? 0,
-    aborts: rec.aborts ?? 0,
+    ...v11Projection(rec),
     _span: [rec.start ?? rec.end, rec.end],
     // Did this session carry ANY token evidence? A session with no usage rows
     // costs $0 structurally — nothing was measured — rather than because the
@@ -575,7 +594,14 @@ function foldSessionTotals(sessions, byDay, byModel) {
     addTo(bucket(byProject, s.project), s);
     addTo(bucket(byCategory, s.category), s);
     foldSessionByModel(byModel, s);
-    if (s._day && byDay[s._day]) byDay[s._day].sessions++;
+    // Exceptions ride the SAME first-billed-day attribution as the session
+    // count, so the reliability trend and the session trend are drawn from one
+    // convention. A session that never billed has no day to attribute to and
+    // contributes to neither — the same silence, not a different one.
+    if (s._day && byDay[s._day]) {
+      byDay[s._day].sessions++;
+      byDay[s._day].exceptions += s.exceptions;
+    }
     for (const [k, n] of Object.entries(s._punchcard)) punchcard[k] = (punchcard[k] ?? 0) + n;
     for (const [k, n] of Object.entries(s.tools)) byTool[k] = (byTool[k] ?? 0) + n;
     foldSessionIntoTree(tree, s);
