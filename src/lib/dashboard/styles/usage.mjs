@@ -497,16 +497,20 @@ export const USAGE_CSS = `
 .spark-line{fill:none; stroke:var(--ink-dim); stroke-width:1.6}
 .spark-dot{fill:var(--accent)}
 
-/* histogram — sequential single hue; markers render BEFORE bars in DOM
-   order so a bar always paints over a marker line where they cross; the
-   marker's own label sits above the plot box instead, so it is never itself
-   covered. */
+/* histogram — sequential single hue; a positioned element always paints
+   above a non-positioned one regardless of DOM order (DOM order only breaks
+   ties WITHIN the same paint layer), so .hist-bars must ALSO be positioned —
+   not just come after .hist-markers in the markup — for it to paint over the
+   dashed marker lines. With both positioned (z-index:auto), DOM order then
+   correctly decides between them: markers first, bars second, so bars win.
+   The marker's own label sits above the plot box instead, so it is never
+   itself covered by a bar. */
 .hist-plot{position:relative}
 .hist-markers{position:absolute; inset:0; pointer-events:none}
 .hist-marker{position:absolute; top:0; bottom:0}
 .hist-marker-line{position:absolute; top:0; bottom:0; border-left:1px dashed var(--ink-dim)}
 .hist-marker-lab{position:absolute; top:-14px; left:3px; font-style:normal; font-size:9px; font-weight:600; color:var(--ink-dim); white-space:nowrap}
-.hist-bars{display:flex; align-items:flex-end; gap:6px}
+.hist-bars{position:relative; display:flex; align-items:flex-end; gap:6px}
 .hist-bar{flex:1; min-width:0; display:flex; flex-direction:column; align-items:center; justify-content:flex-end}
 .hist-val{font-size:9.5px; color:var(--ink-2); margin-bottom:3px}
 .hist-fill{display:block; width:100%; border-radius:4px 4px 0 0; background:var(--accent)}

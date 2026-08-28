@@ -189,13 +189,19 @@ test('sparklineSvg returns empty string for fewer than 2 finite points', () => {
   assert.equal(sparklineSvg([1, NaN]), '', 'NaN is not a finite point, so only one point remains');
 });
 
-test('histogram renders a marker and its label, emitted before the bars so bars paint over the marker line', () => {
+test('histogram renders a marker and its label, with the bars emitted after the markers in DOM order', () => {
+  // DOM order alone does not prove paint order (a positioned element paints
+  // above a non-positioned one regardless of DOM order — see the mark-rule
+  // geometry test below for the CSS half of this: .hist-bars must ALSO be
+  // positioned for "markers first" to actually put bars on top). This only
+  // asserts the half a string test can honestly observe: markup order.
+  // Task 9's screenshot verification is what confirms the rendered result.
   const html = histogram({ counts: [1, 5, 2], labels: ['<1s', '1-3s', '3s+'], markers: [{ atPct: 50, label: 'p50' }] });
   assert.match(html, /p50/);
   assert.match(html, /hist-marker/);
   const markersIdx = html.indexOf('hist-markers');
   const barsIdx = html.indexOf('hist-bars');
-  assert.ok(markersIdx >= 0 && barsIdx > markersIdx, 'markers must be emitted before bars so bars paint over them');
+  assert.ok(markersIdx >= 0 && barsIdx > markersIdx, 'markers must be emitted before bars in the markup');
 });
 
 test('stackedDays maps not-recorded and other to the de-emphasis token, never a series color', () => {
@@ -246,4 +252,11 @@ test('usage styles append the rhythm/mode chart primitive classes with the mark-
   assert.match(CSS, /\.sday-bar\{[^}]*gap:2px/, 'stacked-day segments get a 2px gap');
   assert.match(CSS, /\.spark-line\{[^}]*stroke:var\(--ink-dim\)/, 'sparkline stroke is the de-emphasis ink');
   assert.match(CSS, /\.spark-dot\{[^}]*fill:var\(--accent\)/, 'sparkline endpoint dot is the accent color');
+  // Structural half of "bars paint over marker lines": a positioned element
+  // paints above a non-positioned one regardless of DOM order, so .hist-bars
+  // must carry position:relative to even be eligible to win against the
+  // positioned .hist-markers overlay — DOM order (asserted above, in the
+  // histogram test) is the other half. This can't observe rendered paint
+  // order itself; it only guards the CSS declaration that makes it possible.
+  assert.match(CSS, /\.hist-bars\{[^}]*position:relative/, 'hist-bars must be positioned to paint over the positioned marker overlay');
 });

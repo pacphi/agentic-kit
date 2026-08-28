@@ -73,9 +73,13 @@ export function sparklineSvg(series, opts) {
 // Bars are one sequential hue (accent) — a magnitude series, not a category
 // split, so there is nothing for a second color to distinguish. Markers are
 // emitted BEFORE the bars in DOM order and absolutely overlay the same box
-// (see .hist-markers/.hist-plot in styles/usage.mjs), so a bar always paints
-// over a marker line where they cross; the marker's own label sits above the
-// whole plot instead, so it is never itself covered by a tall bar.
+// (see .hist-markers/.hist-plot in styles/usage.mjs) — but DOM order alone
+// only decides paint order WITHIN one stacking layer. .hist-bars is also
+// given position:relative in that CSS, so it joins .hist-markers' positioned
+// layer instead of losing to it outright; only then does "markers first,
+// bars second" in the markup make the bars paint over the marker lines
+// where they cross. The marker's own label sits above the whole plot
+// instead, so it is never itself covered by a tall bar.
 export function histogram(opts) {
   var o = opts || {};
   var counts = Array.isArray(o.counts) ? o.counts : [];
