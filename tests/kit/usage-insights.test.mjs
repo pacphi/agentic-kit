@@ -780,6 +780,60 @@ test('_detectors[latency-regression] fires/does not fire directly, matching dete
   assert.equal(_detectors['latency-regression'](ctxFrom(latencyFiresAgg())).length, 1);
 });
 
+// ── AND-gate pinning ─────────────────────────────────────────────────────────
+// The two floors (relative and absolute) are combined with AND, not OR — each
+// of the next two fixtures clears exactly one floor and must still not fire.
+// p50s are placed by exact bucket arithmetic (verified against the real
+// percentileFromBuckets before being written here), not eyeballed.
+
+// Bucket [2,5): lo=2, hi=5. All 30 samples in that one bucket → cum=0, n=30,
+// frac=(N/2-cum)/n=0.5 → p50 = 2 + 3*0.5 = 3.5.
+// Bucket [5,10): lo=5, hi=10, cum=23 (bucket [2,5)), n=25 (bucket [5,10)),
+// N=48 → frac=(24-23)/25=0.04 → p50 = 5 + 5*0.04 = 5.2.
+// Delta: +1.7s absolute (<2s floor — FAILS), +48.6% relative (>=25% floor —
+// PASSES). Percent passes, absolute fails: must not fire.
+const latencyPercentOnlyAgg = () => makeAgg({
+  sessions: [
+    latSession('2026-03-01T00:00:00.000Z', [0, 30, 0, 0, 0, 0], 30),
+    latSession('2026-03-20T00:00:00.000Z', [0, 23, 25, 0, 0, 0], 48),
+  ],
+});
+
+test('latency-regression does not fire when only the relative floor clears (percent passes, absolute fails)', () => {
+  assert.equal(fired(latencyPercentOnlyAgg(), 'latency-regression'), false);
+});
+
+// Bucket [30,60): lo=30, hi=60. First half: cum=10 (bucket [10,30)), n=30
+// (bucket [30,60)), N=40 → frac=(20-10)/30=0.3333 → p50 = 30 + 30*0.3333 = 40.
+// Second half: cum=2, n=30, N=32 → frac=(16-2)/30=0.4667 → p50 = 30 + 30*0.4667 = 44.
+// Delta: +4s absolute (>=2s floor — PASSES), +10% relative (<25% floor —
+// FAILS). Absolute passes, percent fails: must not fire.
+const latencyAbsoluteOnlyAgg = () => makeAgg({
+  sessions: [
+    latSession('2026-02-01T00:00:00.000Z', [0, 0, 0, 10, 30, 0], 40),
+    latSession('2026-02-20T00:00:00.000Z', [0, 0, 0, 2, 30, 0], 32),
+  ],
+});
+
+test('latency-regression does not fire when only the absolute floor clears (absolute passes, percent fails)', () => {
+  assert.equal(fired(latencyAbsoluteOnlyAgg(), 'latency-regression'), false);
+});
+
+// Reuses the fires-fixture's own bucket shapes (p50 7.5s -> 12s: +4.5s
+// absolute and +60% relative, both comfortably clearing) but drops the first
+// half to 29 samples — one under the 30-sample floor. Both delta floors pass;
+// the sample floor alone must still suppress the finding.
+const latencySampleFloorAgg = () => makeAgg({
+  sessions: [
+    latSession('2026-01-01T00:00:00.000Z', [0, 0, 29, 0, 0, 0], 29),
+    latSession('2026-01-20T00:00:00.000Z', [0, 0, 16, 20, 0, 0], 36),
+  ],
+});
+
+test('latency-regression does not fire at 29 samples even when both delta floors would otherwise pass', () => {
+  assert.equal(fired(latencySampleFloorAgg(), 'latency-regression'), false);
+});
+
 // unrestricted-mode
 const unrestrictedAgg = () => makeAgg({
   sessions: [
@@ -797,6 +851,7 @@ test('unrestricted-mode fires on a recorded unrestricted session, naming count/c
   assert.match(ins.finding, /1 session/);
   assert.match(ins.finding, /1 project/);
   assert.match(ins.finding, /\$42/);
+  assert.match(ins.evidence, /post-ledger/);
 });
 
 test('unrestricted-mode does not fire on null or not-recorded modes', () => {

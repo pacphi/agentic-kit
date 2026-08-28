@@ -680,7 +680,8 @@ function detectUnrestrictedMode({ sessions, windowCost }) {
       + 'See the Sessions view to review which ones.',
     evidence: 'Based only on the approval posture each session itself recorded (`mode`); a '
       + 'session that never reported a posture is not counted here, so this is a floor, not a '
-      + 'full census.',
+      + 'full census. Cost is each session\'s post-ledger figure — a Codex subagent replay is '
+      + '$0 by design, so this can undercount.',
     action: 'Confirm unrestricted sessions were intentional — reserve that posture for scoped, '
       + 'trusted work rather than as a default.',
   })];
