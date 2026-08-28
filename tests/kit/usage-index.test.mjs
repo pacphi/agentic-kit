@@ -1738,10 +1738,61 @@ test('totals carry aborts and the per-hour / per-prompt / median rates', () => {
 
   assert.equal(a.totals.engagedSeconds, 3600, 'two disjoint half-hours = one engaged hour');
   assert.equal(a.totals.aborts, 2);
+  assert.equal(a.totals.humanPrompts, 4, 'both sessions are main-thread here');
   assert.equal(a.totals.humanPromptsPerHour, 4, '4 prompts in one engaged hour');
-  assert.equal(a.totals.responsesPerPrompt, 1.5, '6 responses / 4 prompts');
+  assert.equal(a.totals.responsesPerPrompt, 1.5, '6 responses / 4 human prompts');
   assert.equal(a.totals.costPerEngagedHour, 4, '$4 of spend in one engaged hour');
   assert.equal(a.totals.costPerSessionMedian, 2, 'the exact median of [1, 3]');
+});
+
+test('a subagent\'s prompts never inflate the per-prompt denominators', () => {
+  // The subagent's 9 prompts were written by the harness, not typed by a
+  // person: counting them would report 10 prompts an hour where a human typed 1.
+  const end = (d) => NOW - d * DAY;
+  const records = [
+    record('main1', {
+      end: end(3), start: end(3) - 3_600_000, prompts: 1, responses: 2,
+      usage: [usageRow('2026-07-22', 'claude-opus-5', { input: 1000 })],
+    }),
+    record('side1', {
+      end: end(3) - 1_800_000, start: end(3) - 3_600_000, sidechain: true,
+      prompts: 9, responses: 4,
+      usage: [usageRow('2026-07-22', 'claude-opus-5', { input: 1000 })],
+    }),
+  ];
+  const a = aggregate(records, aggOpts());
+
+  assert.equal(a.totals.prompts, 10, 'the raw count still records every prompt');
+  assert.equal(a.totals.humanPrompts, 1, 'only the main thread had a person typing');
+  assert.equal(a.totals.engagedSeconds, 3600, 'the sidechain runs inside the main session');
+  assert.equal(a.totals.humanPromptsPerHour, 1, 'one human prompt in one engaged hour');
+  assert.equal(a.totals.responsesPerPrompt, 6, '6 responses / 1 human prompt');
+});
+
+test('a structurally-$0 session does not drag the cost median or P90 down', () => {
+  // `zero` has no usage rows at all — a stripped Codex subagent or a session
+  // that never billed. Its $0 is missing evidence, not cheap work, so the
+  // distribution must be taken over the three priced sessions alone.
+  const end = (d) => NOW - d * DAY;
+  const priced = (id, d, input) => record(id, {
+    end: end(d), start: end(d) - 30 * MIN,
+    usage: [usageRow('2026-07-22', 'claude-opus-5', { input })],
+  });
+  const a = aggregate([
+    priced('p1', 2, 2000), priced('p2', 3, 4000), priced('p3', 4, 6000),
+    record('zero', { end: end(5), start: end(5) - 30 * MIN, provider: 'codex', threadSource: 'subagent' }),
+  ], aggOpts());
+
+  assert.equal(a.totals.sessions, 4, 'the unpriced session is still a session');
+  assert.equal(a.totals.costPerSessionMedian, 4, 'the median of [2, 4, 6], not of [0, 2, 4, 6]');
+  assert.equal(a.totals.costPerSessionP90, 6);
+});
+
+test('an all-unpriced window reports no cost distribution rather than $0', () => {
+  const a = aggregate([record('nousage')], aggOpts());
+  assert.equal(a.totals.costPerSessionMedian, null,
+    '"we measured nothing" is not "the typical session cost nothing"');
+  assert.equal(a.totals.costPerSessionP90, null);
 });
 
 test('a rate with no engaged time is null, not zero', () => {
@@ -1753,7 +1804,7 @@ test('a rate with no engaged time is null, not zero', () => {
   assert.equal(a.totals.costPerEngagedHour, null);
 });
 
-test('cacheSavedUsd is the 0.9 of the input rate a cache read did not pay', () => {
+test('cacheSavedUsd is the spend a cache read did not pay', () => {
   // 1M cache-read tokens at $3/1M input: charged 0.1 × $3 = $0.30, so $2.70 of
   // the $3.00 they would have cost as fresh input was avoided.
   const a = aggregate([record('c1', {
@@ -1769,6 +1820,33 @@ test('cacheSavedUsd is the 0.9 of the input rate a cache read did not pay', () =
   );
 });
 
+test('the cache discount comes from the pricer, not a constant baked in here', () => {
+  // Same 1M cache reads under a pricer that charges HALF the input rate for
+  // them instead of a tenth. A hardcoded "0.9 × input rate" would still answer
+  // $2.70; differencing the pricer's own two answers gives the true $1.50.
+  const half = () => ({
+    ...deps(),
+    costOf: ({ input = 0, cacheRead = 0 }) => ((input + cacheRead * 0.5) * RATE_IN) / 1e6,
+  });
+  const a = aggregate([record('c3', {
+    usage: [usageRow('2026-07-24', 'claude-opus-5', { cacheRead: 1e6 })],
+  })], aggOpts({ deps: half() }));
+
+  assert.equal(a.totals.cost, 1.5);
+  assert.equal(a.totals.cacheSavedUsd, 1.5, 'half of $3, because this pricer discounts by half');
+});
+
+test('a pricer with no cache discount at all reports no saving', () => {
+  const flat = () => ({
+    ...deps(),
+    costOf: ({ input = 0, cacheRead = 0 }) => ((input + cacheRead) * RATE_IN) / 1e6,
+  });
+  const a = aggregate([record('c4', {
+    usage: [usageRow('2026-07-24', 'claude-opus-5', { cacheRead: 1e6 })],
+  })], aggOpts({ deps: flat() }));
+  assert.equal(a.totals.cacheSavedUsd, 0, 'nothing was avoided, so nothing is claimed');
+});
+
 test('a session with no cache reads saved nothing', () => {
   const a = aggregate([record('c2', {
     usage: [usageRow('2026-07-24', 'claude-opus-5', { input: 1000 })],
@@ -1776,7 +1854,7 @@ test('a session with no cache reads saved nothing', () => {
   assert.equal(a.totals.cacheSavedUsd, 0);
 });
 
-test('byDay.engagedSeconds splits an over-midnight session at LOCAL midnight', () => {
+test('engagedByDay splits an over-midnight session at LOCAL midnight', () => {
   // 23:30 → 00:30 local: half an hour belongs to each day, not a whole hour to
   // the day it started on.
   const start = new Date(2026, 6, 23, 23, 30).getTime();
@@ -1785,21 +1863,81 @@ test('byDay.engagedSeconds splits an over-midnight session at LOCAL midnight', (
     start, end, usage: [usageRow('2026-07-23', 'claude-opus-5', { input: 100 })],
   })], aggOpts());
 
-  assert.equal(a.byDay['2026-07-23'].engagedSeconds, 1800);
-  assert.equal(a.byDay['2026-07-24'].engagedSeconds, 1800,
-    'the day the session ran into exists even though no tokens were billed to it');
-  assert.equal(a.byDay['2026-07-24'].tokens, 0);
+  assert.equal(a.engagedByDay['2026-07-23'], 1800);
+  assert.equal(a.engagedByDay['2026-07-24'], 1800, 'the day it ran into gets its real minutes');
   assert.equal(a.totals.engagedSeconds, 3600, 'the window-wide union is unchanged by the split');
 });
 
-test('byDay.engagedSeconds unions overlapping sessions instead of summing them', () => {
+test('engagedByDay is a sibling map — byDay keeps its billed-days-only contract', () => {
+  // The same over-midnight session. Work happened on two days; tokens billed on
+  // one. byDay must show exactly the billed day, with no synthetic zero-token
+  // row for the day that was only worked — the insight detectors count active
+  // days from those keys.
+  const start = new Date(2026, 6, 23, 23, 30).getTime();
+  const end = new Date(2026, 6, 24, 0, 30).getTime();
+  const a = aggregate([record('mid2', {
+    start, end, usage: [usageRow('2026-07-23', 'claude-opus-5', { input: 100 })],
+  })], aggOpts());
+
+  assert.deepEqual(Object.keys(a.byDay), ['2026-07-23'], 'only the billed day');
+  assert.equal(a.byDay['2026-07-24'], undefined, 'no invented zero-token row');
+  assert.equal('engagedSeconds' in a.byDay['2026-07-23'], false,
+    'engaged time is not a byDay field — detectors see byDay unchanged');
+  assert.deepEqual(Object.keys(a.engagedByDay).sort(), ['2026-07-23', '2026-07-24']);
+});
+
+test('engagedByDay unions overlapping sessions instead of summing them', () => {
   const base = new Date(2026, 6, 22, 10, 0).getTime();
   const a = aggregate([
     record('p1', { start: base, end: base + 60 * MIN }),
     record('p2', { start: base + 30 * MIN, end: base + 90 * MIN }),
   ], aggOpts());
-  assert.equal(a.byDay['2026-07-22'].engagedSeconds, 90 * 60,
+  assert.equal(a.engagedByDay['2026-07-22'], 90 * 60,
     'parallel sessions do not let a day claim more minutes than it had');
+});
+
+test('engagedByDay sums to totals.engagedSeconds, with no phantom day at an exact midnight', () => {
+  // One session ends exactly at midnight and another spans it, so the day
+  // boundary is hit both ways in the same window.
+  const d22 = new Date(2026, 6, 22, 22, 0).getTime();
+  const midnight = new Date(2026, 6, 23, 0, 0).getTime();
+  const a = aggregate([
+    record('ends-at-midnight', { start: d22, end: midnight }),
+    record('crosses', { start: midnight - 30 * MIN, end: midnight + 30 * MIN }),
+  ], aggOpts());
+
+  const summed = Object.values(a.engagedByDay).reduce((x, y) => x + y, 0);
+  assert.equal(summed, a.totals.engagedSeconds, 'the per-day unions partition the window union');
+  assert.deepEqual(Object.keys(a.engagedByDay).sort(), ['2026-07-22', '2026-07-23'],
+    'an interval ending exactly at midnight creates no next-day entry');
+  assert.equal(a.engagedByDay['2026-07-22'], 2 * 3600, '22:00 → 00:00, the overlap counted once');
+  assert.equal(a.engagedByDay['2026-07-23'], 30 * 60);
+});
+
+test('the midnight split follows the local clock across a DST transition', () => {
+  // America/New_York, 2026-03-08: the clocks jump 02:00 → 03:00, so that local
+  // day is 23 hours long. A session running 03-07 23:00 → 03-09 00:00 local
+  // must give the short day its real 23 hours, not a nominal 24.
+  const saved = process.env.TZ;
+  process.env.TZ = 'America/New_York';
+  try {
+    const start = Date.parse('2026-03-08T04:00:00Z');   // 2026-03-07 23:00 EST
+    const end = Date.parse('2026-03-09T04:00:00Z');     // 2026-03-09 00:00 EDT
+    const now = Date.parse('2026-03-10T12:00:00Z');
+    const a = aggregate([record('dst', { start, end })],
+      { days: 14, now, cutoff: now - 14 * DAY, deps: deps() });
+
+    assert.equal(a.engagedByDay['2026-03-07'], 3600, '23:00 → local midnight');
+    assert.equal(a.engagedByDay['2026-03-08'], 23 * 3600, 'the 23-hour day, not a nominal 24');
+    assert.equal(a.engagedByDay['2026-03-09'], undefined, 'it ended exactly at midnight');
+    assert.equal(a.totals.engagedSeconds, 24 * 3600, 'wall-clock elapsed is still 24 hours');
+    assert.equal(
+      Object.values(a.engagedByDay).reduce((x, y) => x + y, 0), a.totals.engagedSeconds,
+      'the invariant survives a day that is not 86400 seconds long',
+    );
+  } finally {
+    if (saved === undefined) delete process.env.TZ; else process.env.TZ = saved;
+  }
 });
 
 test('byDay carries cost by mode and by model family', () => {
@@ -1831,13 +1969,35 @@ test('previous window aggregates the prior equal span only', () => {
   assert.equal(a.previous.rhythm.lenHist.reduce((x, y) => x + y, 0), 2);
 });
 
-test('a session ending exactly at the cutoff belongs to the current window, never both', () => {
+test('a session ending exactly at the window start belongs to the current window, never both', () => {
   const days = 7;
   const cutoff = NOW - days * DAY;
   const a = aggregate([record('edge', { end: cutoff, start: cutoff - 30 * MIN })],
     { days, now: NOW, cutoff, deps: deps(), previous: true });
   assert.equal(a.totals.sessions, 1);
   assert.equal(a.previous.totals.sessions, 0, 'the previous window\'s upper bound is exclusive');
+});
+
+test('the previous window tracks the DISPLAYED span, not however far the cutoff was widened', () => {
+  // The caller widened `cutoff` to 21 days so older records survive to be
+  // compared against. The baseline must still be the 7 days before the
+  // displayed 7 — a delta measured against a silently-21-day window is not a
+  // delta against "last week".
+  const days = 7;
+  const end = (d) => NOW - d * DAY;
+  const records = [
+    record('cur', { end: end(3), start: end(3) - 30 * MIN }),      // displayed window
+    record('prevA', { end: end(9), start: end(9) - 30 * MIN }),    // the window before it
+    record('prevB', { end: end(12), start: end(12) - 30 * MIN }),  // still that window
+    record('older', { end: end(17), start: end(17) - 30 * MIN }),  // two windows back
+  ];
+  const a = aggregate(records, {
+    days, now: NOW, cutoff: NOW - 21 * DAY, deps: deps(), previous: true,
+  });
+
+  assert.equal(a.totals.sessions, 4, 'the widened cutoff is what the current window honours');
+  assert.equal(a.previous.totals.sessions, 2, 'exactly [now − 14d, now − 7d): prevA and prevB');
+  assert.equal(a.previous.rhythm.lenHist.reduce((x, y) => x + y, 0), 2);
 });
 
 test('previous is null unless the caller asks for it', () => {

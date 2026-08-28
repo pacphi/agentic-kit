@@ -219,7 +219,7 @@ export function percentileFromBuckets(counts, edges, q) {
     }
     cum += n;
   }
-  return round(edges[edges.length - 1], 2);
+  return round(edges[edges.length - 1], 2);   // unreachable but for float drift in `target`
 }
 
 /** Family names that appear INSIDE an Anthropic model id. Matched by
@@ -304,14 +304,15 @@ function sealBuckets(...maps) {
   }
 }
 
-/** One day's row, created on first touch. Shared by the usage-row fold and the
- *  engaged-time fold below so both agree on the shape: a day reached by only
- *  one of them still carries every field, zeroed, instead of a ragged row the
- *  UI has to guess at. */
+/** One day's row, created on first touch. `byDay`'s presence contract is
+ *  BILLED DAYS ONLY: a key exists exactly when tokens landed on that day, which
+ *  is what the insight detectors count active days from. Engaged time therefore
+ *  lives in its own sibling map (see buildEngagedByDay) rather than here, where
+ *  a day worked but never billed would have had to invent a zero-token row. */
 function dayBucket(byDay, day) {
   if (!byDay[day]) {
     byDay[day] = {
-      tokens: 0, cost: 0, sessions: 0, sessionsActive: 0, engagedSeconds: 0,
+      tokens: 0, cost: 0, sessions: 0, sessionsActive: 0,
       byMode: Object.create(null), byModelFamily: Object.create(null),
     };
   }
@@ -325,24 +326,35 @@ function addCost(map, key, v) {
 }
 
 /**
- * What the prompt cache actually saved on one usage row. Cache reads meter at a
- * TENTH of the input rate (pricing.mjs CACHE_READ_MULTIPLIER), so the avoided
- * spend is the other 0.9 of what those tokens would have cost as fresh input.
+ * What the prompt cache saved per 1M cache-read tokens, asked of the injected
+ * pricer as a DIFFERENCE rather than derived from a discount factor: price 1M
+ * tokens as fresh input, price the same 1M as cache reads, and the gap is the
+ * spend that was avoided. Nothing here knows what the cache multiplier is, so
+ * this figure cannot drift out of step with pricing.mjs the way a hardcoded
+ * "0.9 of the input rate" would the day that multiplier changes.
  *
- * The rate is asked OF THE INJECTED PRICER rather than looked up separately: a
- * 1M input-token probe at this row's own model/provider/day returns exactly
- * that day's input rate, because cost is linear in each token class. That keeps
- * this figure priced from the same table, at the same date, as the cost sitting
- * beside it — a savings number quoted at today's rate for August's tokens would
- * be a different claim than the one the panel makes everywhere else.
+ * Both probes carry the row's own model/provider/DAY, so the saving is priced
+ * from the same table, at the same date, as the cost sitting beside it — a
+ * savings number quoted at today's rate for August's tokens would be a
+ * different claim than the one the panel makes everywhere else. Memoised per
+ * (model, provider, day) because a window has few of those and many rows.
  */
-function cacheSavedFor(row, rec, deps) {
+function cacheSavingPerMillion(model, provider, day, deps, rates) {
+  const key = `${model} ${provider} ${day}`;
+  if (rates.has(key)) return rates.get(key);
+  const base = { model, provider, day, input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
+  const asInput = deps.costOf({ ...base, input: 1e6 }) || 0;
+  const asCacheRead = deps.costOf({ ...base, cacheRead: 1e6 }) || 0;
+  const saved = asInput - asCacheRead;
+  rates.set(key, saved);
+  return saved;
+}
+
+/** What the prompt cache actually saved on one usage row: the per-million gap
+ *  above, scaled to the tokens this row actually read from cache. */
+function cacheSavedFor(row, rec, deps, rates) {
   if (!(row.cacheRead > 0)) return 0;
-  const rateIn = deps.costOf({
-    model: row.model, provider: rec.provider, day: row.day,
-    input: 1e6, output: 0, cacheRead: 0, cacheWrite: 0,
-  }) || 0;
-  return (0.9 * row.cacheRead * rateIn) / 1e6;
+  return (cacheSavingPerMillion(row.model, rec.provider, row.day, deps, rates) * row.cacheRead) / 1e6;
 }
 
 /** Price one usage row (observed opencode cost wins over the pricing table —
@@ -357,7 +369,6 @@ function foldSessionUsageRow(row, rec, deps, acc, byDay, byModel, activeDays) {
   acc.input += row.input; acc.output += row.output;
   acc.cacheRead += row.cacheRead; acc.cacheWrite += row.cacheWrite;
   acc.cost += rowCost;
-  acc.cacheSaved += cacheSavedFor(row, rec, deps);
 
   const rowTokens = row.input + row.output + row.cacheRead + row.cacheWrite;
   const d = dayBucket(byDay, row.day);
@@ -381,12 +392,13 @@ function foldSessionUsageRow(row, rec, deps, acc, byDay, byModel, activeDays) {
  *  this session's tokens FIRST landed on — always a key of byDay, which keeps
  *  sum(byDay.sessions) === totals.sessions (a session's start day is not
  *  usable: it can open at 23:58 and only bill after midnight). */
-function foldSessionUsageRows(rec, deps, byDay, byModel) {
+function foldSessionUsageRows(rec, deps, byDay, byModel, rates) {
   const acc = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, cacheSaved: 0 };
   let firstDay = null;
   const activeDays = new Set();
   for (const row of rec.usage) {
     if (firstDay === null || row.day < firstDay) firstDay = row.day;
+    acc.cacheSaved += cacheSavedFor(row, rec, deps, rates);
     foldSessionUsageRow(row, rec, deps, acc, byDay, byModel, activeDays);
   }
   for (const day of activeDays) byDay[day].sessionsActive++;
@@ -435,6 +447,13 @@ function buildSessionRow(rec, usage, verdict) {
     lenSeconds: rec.lenSeconds ?? 0,
     aborts: rec.aborts ?? 0,
     _span: [rec.start ?? rec.end, rec.end],
+    // Did this session carry ANY token evidence? A session with no usage rows
+    // costs $0 structurally — nothing was measured — rather than because the
+    // work was cheap. Codex subagent rollouts are the common case: their tokens
+    // are stripped as a double-count (applyCodexLedger), leaving a real session
+    // with an empty ledger. The cost distribution excludes them; see
+    // finishTotals.
+    _priced: (rec.usage?.length ?? 0) > 0,
     // Pre-v2 cache entries have no `active`; fall back to the whole span so a
     // stale record degrades to the old figure instead of vanishing.
     _active: Array.isArray(rec.active) && rec.active.length ? rec.active : [[rec.start ?? rec.end, rec.end]],
@@ -449,13 +468,13 @@ function buildSessionRow(rec, usage, verdict) {
  *  cutoff", which is what the current window wants. Exclusive on purpose: a
  *  session ending exactly at the cutoff belongs to the current window, and
  *  must not also be counted in the one before it. */
-function buildSessionRows(records, { cutoff, endMs = null, deps, byDay, byModel }) {
+function buildSessionRows(records, { cutoff, endMs = null, deps, byDay, byModel, rates }) {
   const sessions = [];
   for (const rec of records) {
     if (!rec || !rec.responses) continue;                 // no assistant turn → not a session
     if (rec.end === null || rec.end < cutoff) continue;    // outside the window
     if (endMs != null && rec.end >= endMs) continue;       // ... or after the window asked for
-    const usage = foldSessionUsageRows(rec, deps, byDay, byModel);
+    const usage = foldSessionUsageRows(rec, deps, byDay, byModel, rates);
     const verdict = deps.classify({
       title: rec.title, skill: rec.skill, plugin: rec.plugin,
       tools: rec.tools, prompts: rec.prompts, responses: rec.responses,
@@ -511,7 +530,8 @@ function sourceKey(s) {
  *  session/minutes/confidence fields. */
 function foldSessionTotals(sessions, byDay, byModel) {
   const totals = {
-    sessions: sessions.length, prompts: 0, responses: 0, exceptions: 0, aborts: 0,
+    sessions: sessions.length, prompts: 0, humanPrompts: 0, responses: 0,
+    exceptions: 0, aborts: 0,
     input: 0, output: 0, cacheRead: 0, cacheWrite: 0, tokens: 0, cost: 0,
     cacheSavedUsd: 0, spanMinutes: 0, spanUnionSeconds: 0, engagedSeconds: 0,
   };
@@ -521,20 +541,25 @@ function foldSessionTotals(sessions, byDay, byModel) {
   const byProject = Object.create(null);
   const byCategory = Object.create(null), punchcard = Object.create(null);
   const tree = new Map();
-  const costs = [];
+  const pricedCosts = [];
   let spanMs = 0;
   // Both source rows always exist: "no subagent sessions" is a fact worth
   // rendering as a zero, not a row the UI silently drops.
   bucket(bySource, 'main'); bucket(bySource, 'subagent');
 
   for (const s of sessions) {
+    const source = sourceKey(s);
     totals.prompts += s.prompts; totals.responses += s.responses;
+    // Only a MAIN-thread prompt is a human typing. A subagent's prompts are
+    // written by the harness, so counting them would inflate every
+    // per-prompt denominator with work nobody asked for by hand.
+    if (source === 'main') totals.humanPrompts += s.prompts;
     totals.exceptions += s.exceptions; totals.aborts += Number(s.aborts) || 0;
     totals.input += s.input; totals.output += s.output;
     totals.cacheRead += s.cacheRead; totals.cacheWrite += s.cacheWrite;
     totals.tokens += s.tokens; totals.cost += s.cost;
     totals.cacheSavedUsd += Number(s.cacheSavedUsd) || 0;
-    costs.push(s.cost);
+    if (s._priced) pricedCosts.push(s.cost);
     spanMs += s._span[1] - s._span[0];
 
     addTo(bucket(byHost, s.host ?? 'unknown'), s);
@@ -543,7 +568,7 @@ function foldSessionTotals(sessions, byDay, byModel) {
     // that carried no mode evidence must not be folded into a real posture.
     addTo(bucket(byMode, s.mode ?? 'not-recorded'), s);
     addTo(bucket(byInferenceProvider, providerKey(s)), s);
-    addTo(bucket(bySource, sourceKey(s)), s);
+    addTo(bucket(bySource, source), s);
     addTo(bucket(byProject, s.project), s);
     addTo(bucket(byCategory, s.category), s);
     foldSessionByModel(byModel, s);
@@ -555,7 +580,7 @@ function foldSessionTotals(sessions, byDay, byModel) {
 
   return {
     totals, byHost, byProvider, byMode, byInferenceProvider, bySource, byTool,
-    byProject, byCategory, punchcard, tree, spanMs, costs,
+    byProject, byCategory, punchcard, tree, spanMs, pricedCosts,
   };
 }
 
@@ -567,6 +592,16 @@ function median(values) {
   const v = values.slice().sort((a, b) => a - b);
   const mid = v.length >> 1;
   return round(v.length % 2 ? v[mid] : (v[mid - 1] + v[mid]) / 2);
+}
+
+/** Nearest-rank `q`th percentile of a numeric list, `null` when empty. Exact
+ *  values (unlike percentileFromBuckets, which only has counts to work from),
+ *  so no interpolation is needed or honest here. */
+function percentile(values, q) {
+  if (!values.length) return null;
+  const v = values.slice().sort((a, b) => a - b);
+  const i = Math.min(v.length - 1, Math.max(0, Math.ceil(q * v.length) - 1));
+  return round(v[i]);
 }
 
 /**
@@ -583,8 +618,18 @@ function median(values) {
  *
  * A rate whose denominator is zero is `null`, never 0: no engaged time means
  * the rate was never measured, which is not the claim "zero per hour" makes.
+ *
+ * Two denominators are narrower than they look, deliberately:
+ *   - both per-prompt figures divide by HUMAN prompts (main-thread only). A
+ *     subagent's prompts are written by the harness, so counting them would
+ *     report a person as typing work they never typed;
+ *   - the cost median and P90 are taken over PRICED sessions only. A session
+ *     with no usage rows is $0 structurally — no tokens were ever recorded for
+ *     it (a stripped Codex subagent, or a session that never billed) — and
+ *     letting those into the distribution reports "the typical session cost
+ *     nothing" when the truth is "we did not measure the typical session".
  */
-function finishTotals(totals, sessions, { spanMs, costs }) {
+function finishTotals(totals, sessions, { spanMs, pricedCosts }) {
   totals.cost = round(totals.cost);
   totals.cacheSavedUsd = round(totals.cacheSavedUsd);
   totals.spanMinutes = Math.round((spanMs / 60_000) * 10) / 10;
@@ -592,10 +637,12 @@ function finishTotals(totals, sessions, { spanMs, costs }) {
   totals.engagedSeconds = mergeIntervals(sessions.flatMap((s) => s._active));
 
   const hours = totals.engagedSeconds / 3600;
-  totals.humanPromptsPerHour = hours ? round(totals.prompts / hours) : null;
-  totals.responsesPerPrompt = totals.prompts ? round(totals.responses / totals.prompts) : null;
+  totals.humanPromptsPerHour = hours ? round(totals.humanPrompts / hours) : null;
+  totals.responsesPerPrompt = totals.humanPrompts
+    ? round(totals.responses / totals.humanPrompts) : null;
   totals.costPerEngagedHour = hours ? round(totals.cost / hours) : null;
-  totals.costPerSessionMedian = median(costs);
+  totals.costPerSessionMedian = median(pricedCosts);
+  totals.costPerSessionP90 = percentile(pricedCosts, 0.9);
 }
 
 /** The window's response-latency and session-length distributions. Latency
@@ -647,37 +694,50 @@ function splitAtLocalMidnight(start, end, out) {
   }
 }
 
-/** Per-day engaged seconds: the UNION of that day's active intervals, so two
- *  sessions worked in parallel spend the minute once — the rule
- *  totals.engagedSeconds follows, applied a day at a time. */
-function foldEngagedByDay(sessions, byDay) {
+/**
+ * Engaged seconds per LOCAL day: the UNION of that day's active intervals, so
+ * two sessions worked in parallel spend the minute once — the rule
+ * totals.engagedSeconds follows, applied a day at a time. Summing this map
+ * therefore reproduces totals.engagedSeconds exactly.
+ *
+ * A SIBLING of byDay, not a field on it: engaged time is keyed by the days work
+ * happened on, byDay by the days tokens BILLED on, and those sets genuinely
+ * differ (a session that runs past midnight, a day spent reading). Folding one
+ * into the other would have meant either inventing zero-token byDay rows or
+ * dropping real worked time.
+ */
+function buildEngagedByDay(sessions) {
   const perDay = Object.create(null);
   for (const s of sessions) {
     for (const [a, b] of s._active) splitAtLocalMidnight(a, b, perDay);
   }
-  for (const day of Object.keys(perDay)) {
-    dayBucket(byDay, day).engagedSeconds = mergeIntervals(perDay[day]);
-  }
+  const out = Object.create(null);
+  for (const day of Object.keys(perDay)) out[day] = mergeIntervals(perDay[day]);
+  return out;
 }
 
 const DAY_MS = 86_400_000;
 
 /**
- * Totals + rhythm for the equal-length window immediately BEFORE `cutoff` —
- * the baseline any "vs. previous period" delta is measured against.
+ * Totals + rhythm for the equal-length window immediately before the DISPLAYED
+ * one — the baseline any "vs. previous period" delta is measured against.
  * Deliberately a projection rather than a second whole Aggregate: nothing
  * downstream compares project trees or punchcards across windows, and shipping
  * the full shape twice would double the payload for fields nobody reads.
  *
- * Records older than `cutoff` only reach this module when the index was built
- * with a lookback (`buildIndex({ lookbackDays })`), so an un-widened corpus
- * yields a visibly ZEROED previous window rather than a wrong one.
+ * Both bounds come from `now` and `days` — the window the UI is SHOWING — and
+ * never from `cutoff`. The caller widens `cutoff` (via `buildIndex`'s
+ * `lookbackDays`) precisely so records older than the displayed window survive
+ * to be aggregated here; deriving the comparison from that widened bound would
+ * make the baseline silently stretch to whatever lookback the caller happened
+ * to ask for, and a delta against an unknown-length window is not a delta.
  */
-function previousWindow(records, { days, cutoff, deps }) {
+function previousWindow(records, { days, now, deps, rates }) {
+  const windowStart = now - days * DAY_MS;
   const byDay = Object.create(null);
   const byModel = Object.create(null);
   const sessions = buildSessionRows(records, {
-    cutoff: cutoff - days * DAY_MS, endMs: cutoff, deps, byDay, byModel,
+    cutoff: windowStart - days * DAY_MS, endMs: windowStart, deps, byDay, byModel, rates,
   });
   const folded = foldSessionTotals(sessions, byDay, byModel);
   finishTotals(folded.totals, sessions, folded);
@@ -707,9 +767,10 @@ function buildCodexRateLimits(sessions) {
 }
 
 /** Turn cached per-file records into the Aggregate the UI and detectors read.
- *  `previous: true` additionally projects the equal-length window before
- *  `cutoff` (see previousWindow); left off, `agg.previous` is `null` — "not
- *  requested", which a zeroed totals object would misreport as "measured
+ *  `previous: true` additionally projects the equal-length window before the
+ *  DISPLAYED one — `[now − 2·days, now − days)`, derived from `now`/`days` and
+ *  not from `cutoff` (see previousWindow). Left off, `agg.previous` is `null` —
+ *  "not requested", which a zeroed totals object would misreport as "measured
  *  nothing". */
 export function aggregate(records, { days, now, cutoff, deps, previous = false }) {
   // Null-prototype: these are keyed by transcript-derived strings (day, model id,
@@ -717,8 +778,12 @@ export function aggregate(records, { days, now, cutoff, deps, previous = false }
   // ordinary bucket, not a prototype write that silently discards the data.
   const byDay = Object.create(null);
   const byModel = Object.create(null);
+  // One pricing-probe memo for the whole run, shared with the previous window:
+  // both price the same models on the same days, and the rates cannot move
+  // between them.
+  const rates = new Map();
 
-  const sessions = buildSessionRows(records, { cutoff, deps, byDay, byModel });
+  const sessions = buildSessionRows(records, { cutoff, deps, byDay, byModel, rates });
   sessions.sort((a, b) => b.cost - a.cost || Date.parse(b.start) - Date.parse(a.start));
 
   const folded = foldSessionTotals(sessions, byDay, byModel);
@@ -728,22 +793,24 @@ export function aggregate(records, { days, now, cutoff, deps, previous = false }
   sealBuckets(byHost, byProvider, byProject, byCategory, byModel,
     byMode, byInferenceProvider, bySource);
   finishTotals(totals, sessions, folded);
-  foldEngagedByDay(sessions, byDay);
+  const engagedByDay = buildEngagedByDay(sessions);
   const rhythm = buildRhythm(sessions);
 
   const projectTree = buildProjectTree(tree);
-  for (const s of sessions) { delete s._span; delete s._active; delete s._punchcard; delete s._day; }
+  for (const s of sessions) {
+    delete s._span; delete s._active; delete s._punchcard; delete s._day; delete s._priced;
+  }
   const codexRateLimits = buildCodexRateLimits(sessions);
 
   const agg = {
     generatedAt: new Date(now).toISOString(),
     windowDays: days,
     pricesAsOf: deps.pricesAsOf ?? null,
-    totals, byDay, byModel, byHost, byProvider,
+    totals, byDay, engagedByDay, byModel, byHost, byProvider,
     byMode, byInferenceProvider, bySource, byTool,
     byProject, byCategory,
     punchcard, projectTree, sessions, codexRateLimits, rhythm,
-    previous: previous ? previousWindow(records, { days, cutoff, deps }) : null,
+    previous: previous ? previousWindow(records, { days, now, deps, rates }) : null,
     insights: [],
   };
   agg.insights = deps.detectInsights(agg) ?? [];
