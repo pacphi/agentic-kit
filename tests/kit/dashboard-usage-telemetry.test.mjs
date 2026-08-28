@@ -497,6 +497,32 @@ test('the chips column keeps the .srow grid arithmetic closed on both breakpoint
   assert.match(JS, /esc\(cat\)\+"<\/span>"\s*\+'<span class="s-chips">'\+sessionChips\(sx\)\+"<\/span>"\s*\+'<span class="s-when mono">/);
 });
 
+test('a limit meter carries a pace tick derived from the window it is already reading', () => {
+  // resetsAt (epoch seconds) + windowMinutes are both on the limits payload,
+  // so elapsed = duration - remaining. Nothing is fetched, and no window
+  // length is assumed.
+  assert.match(JS, /function paceShare\(resetSec,windowMinutes\)/);
+  assert.match(JS, /var total=mins\*60000,elapsed=total-\(resetSec\*1000-Date\.now\(\)\)/);
+  assert.match(JS, /w\.usedPercent,w\.resetsAt,null,w\.windowMinutes/, 'both claude and codex rows pass the window length');
+  assert.match(JS, /class="pace" style="left:/);
+  assert.match(CSS, /\.lim \.mbar i\.pace\{/);
+  // Scoped to .lim: the scorecard's magnitude rows share .mbar and must not
+  // start positioning or un-clipping themselves.
+  assert.match(CSS, /\.lim \.mbar\{position:relative; overflow:visible\}/);
+  assert.doesNotMatch(CSS, /^\.mbar\{[^}]*position:relative/m);
+});
+
+test('a pace tick that cannot be computed is omitted, never pinned to an edge', () => {
+  // A snapshot older than its own window, or a browser clock that disagrees
+  // with the vendor's, puts elapsed outside [0,duration]. 0% or 100% would
+  // state a position; null admits there is none to state.
+  assert.match(JS, /if\(!isFinite\(elapsed\)\|\|elapsed<0\|\|elapsed>total\)return null/);
+  assert.match(JS, /if\(at==null\)return ""/);
+  // And the key is only printed when a tick actually rendered.
+  assert.match(JS, /\(paced\?PACE_LEGEND:""\)/);
+  assert.match(JS, /if\(paced\)html\+=PACE_LEGEND/);
+});
+
 test('the scorecard panel grafts are idempotent — a re-render reuses its container', () => {
   // renderScore runs on every poll. ensureBlock returns the existing node
   // instead of inserting a second one; without that the scorecard would grow

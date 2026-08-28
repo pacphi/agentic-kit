@@ -634,4 +634,19 @@ export const USAGE_CSS = `
 .rel-flag[data-sev="ok"]{color:var(--ok)}
 .rel-flag[data-sev="flat"]{color:var(--ink-dim)}
 
+/* limits pace tick — where the window's own clock is, so a meter reads as
+   "ahead of pace" or "behind" rather than only as a level. Scoped to .lim so
+   the same .mbar the scorecard's magnitude rows use is untouched: the track
+   joins the positioned layer only here, and only here does it stop clipping,
+   which lets the tick stand 3px proud of a 7px bar instead of being lost
+   inside it. The fill already carries its own radius, so nothing else changes.
+   The tick overrides .mbar i's block/height/background by carrying a class
+   (0,2,1 beats 0,1,1). */
+.lim .mbar{position:relative; overflow:visible}
+.lim .mbar i.pace{
+  position:absolute; top:-3px; bottom:-3px; left:0; width:2px; height:auto;
+  border-radius:1px; background:var(--ink-2); transform:translateX(-1px);
+}
+.lim .legend .pace-key{width:2px; height:11px; border-radius:1px; background:var(--ink-2)}
+
 `;

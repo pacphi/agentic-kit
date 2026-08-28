@@ -996,13 +996,45 @@ import { renderUsage } from './usage-orchestrators.mjs';
     if(isNaN(d))return "";
     return "resets "+d.toLocaleString(undefined,{month:"short",day:"numeric",hour:"2-digit",minute:"2-digit"});
   }
+  // Where this window's own CLOCK is, as a share of its duration — the mark a
+  // straight-line burn would be sitting on right now, which is what turns a
+  // level into "ahead of pace" or "behind". Both halves come from the limits
+  // payload the meter already reads: `resetsAt` (epoch seconds) says when the
+  // window ends, `windowMinutes` how long it runs, so elapsed = duration −
+  // remaining. Nothing is fetched and nothing is assumed about window length.
+  //
+  // null — not a clamp — whenever the arithmetic falls outside [0, duration]:
+  // the snapshot is then older than its own window (it has already reset) or
+  // the browser clock disagrees with the vendor's, and a tick pinned to 0% or
+  // 100% would state a position instead of admitting it cannot compute one.
+  function paceShare(resetSec,windowMinutes){
+    var mins=Number(windowMinutes);
+    if(!resetSec||!isFinite(resetSec)||!isFinite(mins)||mins<=0)return null;
+    var total=mins*60000,elapsed=total-(resetSec*1000-Date.now());
+    if(!isFinite(elapsed)||elapsed<0||elapsed>total)return null;
+    return elapsed/total*100;
+  }
+  function paceTick(resetSec,windowMinutes){
+    var at=paceShare(resetSec,windowMinutes);
+    if(at==null)return "";
+    return '<i class="pace" style="left:'+at.toFixed(1)+'%" title="'
+      +esc(at.toFixed(0)+"% of this window's time has elapsed — a steady burn would sit here")
+      +'"></i>';
+  }
+  // Rendered only when at least one row actually carries a tick, so the key
+  // never explains a mark that is not on screen.
+  var PACE_LEGEND='<div class="legend" style="margin-top:11px"><span class="lg">'
+    +'<i class="pace-key"></i>tick = share of the window&rsquo;s time elapsed &middot; '
+    +"fill past it is ahead of a steady burn</span></div>";
+
   // One utilization row on the shared .mrow grid; fill color says how close to
   // the cap this window is (ok <70, warn ≥70, fail ≥90).
-  function limRow(label,usedPercent,resetSec,sub){
+  function limRow(label,usedPercent,resetSec,sub,windowMinutes){
     var p=Math.max(0,Math.min(100,Number(usedPercent)||0));
     var col=p>=90?"var(--fail)":(p>=70?"var(--warn)":"var(--ok)");
     return '<div class="mrow"><span class="mname">'+esc(label)+"</span>"
-      +'<span class="mbar"><i style="width:'+p.toFixed(1)+"%;background:"+col+'"></i></span>'
+      +'<span class="mbar"><i style="width:'+p.toFixed(1)+"%;background:"+col+'"></i>'
+      +paceTick(resetSec,windowMinutes)+"</span>"
       +'<span class="mval mono">'+p.toFixed(0)+"%</span>"
       +'<span class="msub mono">'+esc(sub||resetTxt(resetSec))+"</span></div>";
   }
@@ -1018,9 +1050,11 @@ import { renderUsage } from './usage-orchestrators.mjs';
       // Claude's tee is push-only: FRESH means a session wrote it in the last
       // 10 minutes; anything older gets the stale badge rather than silence.
       if(cn)cn.textContent="statusline tee · "+limAge(c.fetchedAt)+(limStale(c.fetchedAt,600000)?" · stale":"");
+      var paced=false;
       claudeEl.innerHTML=c.windows.map(function(w){
-        return limRow("claude · "+(w.label||w.id),w.usedPercent,w.resetsAt);
-      }).join("");
+        if(paceShare(w.resetsAt,w.windowMinutes)!=null)paced=true;
+        return limRow("claude · "+(w.label||w.id),w.usedPercent,w.resetsAt,null,w.windowMinutes);
+      }).join("")+(paced?PACE_LEGEND:"");
     }else{
       if(cn)cn.textContent="no data";
       claudeEl.innerHTML='<div class="empty">no Claude limit data yet &mdash; it arrives while a Claude Code session runs '
@@ -1035,15 +1069,17 @@ import { renderUsage } from './usage-orchestrators.mjs';
     var xn=document.getElementById("u-lim-codex-note");
     if(x&&x.lanes&&x.lanes.length){
       if(xn)xn.textContent=(x.planType?("plan "+x.planType+" · "):"")+"app-server · "+limAge(x.fetchedAt);
-      var html="";
+      var html="",paced=false;
       for(var i=0;i<x.lanes.length;i++){
         var lane=x.lanes[i];
         for(var j=0;j<(lane.windows||[]).length;j++){
           var w=lane.windows[j];
-          html+=limRow(lane.name+" · "+(w.label||""),w.usedPercent,w.resetsAt);
+          if(paceShare(w.resetsAt,w.windowMinutes)!=null)paced=true;
+          html+=limRow(lane.name+" · "+(w.label||""),w.usedPercent,w.resetsAt,null,w.windowMinutes);
         }
         if(!(lane.windows||[]).length)html+=limRow(lane.name,0,null,"no window reported");
       }
+      if(paced)html+=PACE_LEGEND;
       var rc=x.resetCredits;
       if(rc&&rc.availableCount>0){
         html+='<div class="legend" style="margin-top:11px"><span class="lg"><i style="background:var(--ok)"></i>'
