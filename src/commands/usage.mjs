@@ -8,13 +8,15 @@ import { heading, info, ok, warn, dim } from '../lib/output.mjs';
 import { configDir } from '../lib/paths.mjs';
 import { readIndex, SCHEMA_VERSION } from '../lib/usage-index.mjs';
 import {
-  BASELINE_TRAILING_DAYS, LAT_BUCKET_EDGES, LEN_BUCKET_EDGES, TAP_MAX_TOKENS,
+  BASELINE_TRAILING_DAYS, LAT_BUCKET_EDGES, LEN_BUCKET_EDGES, TAP_MAX_TOKENS, maskSecrets,
 } from '../lib/usage-aggregate.mjs';
+import { parseClaude, parseCodex, promptFingerprint } from '../lib/usage-parsers.mjs';
+import { parseSession as parseOpencodeSession } from '../lib/usage-opencode.mjs';
 import {
   crossSessionClusters, nearDupClusters, reAskPairs, tapStats,
 } from '../lib/usage-prompt-patterns.mjs';
 import { labelFor } from '../lib/usage-prompt-vocabulary.mjs';
-import { PROVENANCE_TAGS } from '../lib/usage-provenance.mjs';
+import { PROVENANCE_TAGS, provenanceOf } from '../lib/usage-provenance.mjs';
 import { MODES } from '../lib/usage-modes.mjs';
 import {
   openRouterActivityFile,
@@ -29,6 +31,7 @@ export const options = {
   // days vs all history — patterns are lifetime phenomena), and a default here
   // would make "the user asked for 14" indistinguishable from "nobody asked".
   window: { type: 'string' },
+  deep: { type: 'boolean', default: false },
 };
 
 export const help = `ak usage — provider account analytics cache + offline scorecard summary
@@ -43,7 +46,15 @@ Usage:
   ak usage status
   ak usage refresh openrouter
   ak usage score [--window 7|14|30] [--json]
-  ak usage prompts [--window 7|14|30|all] [--json]
+  ak usage prompts [--window 7|14|30|all] [--deep] [--json]
+
+\`ak usage prompts\` reads the prompt FINGERPRINTS the transcript scan already
+stores — a hash, a token count, a bounded token-hash sketch, and who wrote the
+turn. No prompt text is stored by it and none is printed. \`--deep\` is the
+exception, and is opt-in for exactly that reason: it re-reads the transcripts
+to print the text behind each finding. That text goes to your terminal and is
+written nowhere — but with --json it is in the payload, so redirect that to a
+file only if you mean to.
 
 Environment:
   OPENROUTER_MANAGEMENT_KEY   required only for refresh; an inference key is
@@ -55,6 +66,10 @@ Options:
   --window N  score: 7, 14, or 30 days (default 14)
               prompts: 7, 14, 30, or all (default all — patterns are lifetime
               phenomena, so the whole retained corpus is the honest default)
+  --deep      prompts only: re-read transcripts to print the verbatim prompts
+              behind each finding. Costs a few seconds; the report states how
+              many it opened and how long it took. With --json the exemplars
+              (which CONTAIN PROMPT TEXT) ride under an \`exemplars\` key.
 
 Examples:
   ak usage status                    inspect the offline cache; no network
@@ -63,7 +78,8 @@ Examples:
   ak usage score                     offline scorecard summary, last 14 days
   ak usage score --window 30 --json  machine-readable scorecard projection
   ak usage prompts                   what you type, over all retained history
-  ak usage prompts --window 30       the same report, last 30 days only`;
+  ak usage prompts --window 30       the same report, last 30 days only
+  ak usage prompts --deep            the same report plus the verbatim exemplars`;
 
 function summary(value) {
   if (!value) return null;
@@ -405,14 +421,21 @@ function parsePromptWindow(raw) {
 
 function promptCacheFile() { return path.join(configDir(), 'usage-index.json'); }
 
-/** Parsed session records from the index cache, or `[]` for any reason at all
- *  (absent, corrupt, or written by a different schema). An empty corpus is a
- *  reportable state here — "nothing was measured" — not an error. */
-function readPromptRecords(cacheFile) {
+/** Parsed session records from the index cache, each with the SOURCE it was
+ *  parsed from — the cache is keyed by transcript path, which is what lets the
+ *  deep pass re-read a specific session without re-implementing file
+ *  discovery. `[]` for any reason at all (absent, corrupt, or written by a
+ *  different schema): an empty corpus is a reportable state here — "nothing
+ *  was measured" — not an error.
+ *
+ *  @returns {Array<{ file: string, dbFile: string|null, rec: any }>} */
+function readPromptEntries(cacheFile) {
   try {
     const raw = JSON.parse(fs.readFileSync(cacheFile, 'utf8'));
     if (raw?.schemaVersion !== SCHEMA_VERSION || !raw.entries) return [];
-    return Object.values(raw.entries).map((e) => e?.session).filter(Boolean);
+    return Object.entries(raw.entries)
+      .filter(([, e]) => e?.session)
+      .map(([file, e]) => ({ file, dbFile: e.dbFile ?? null, rec: e.session }));
   } catch {
     return [];
   }
@@ -446,11 +469,10 @@ function firstBilledDay(rec) {
  * session; `rec.end < cutoff` is outside the window), so the counts here and
  * the counts the aggregate publishes are taken over the same population.
  */
-function decoratedFingerprints(records, cutoffMs) {
+function decoratedFingerprints(entries, cutoffMs) {
   const out = [];
-  for (const rec of records) {
-    if (!rec?.responses || !Array.isArray(rec.promptFPs)) continue;
-    if (rec.end == null || rec.end < cutoffMs) continue;
+  for (const { rec } of entries) {
+    if (!inWindow(rec, cutoffMs)) continue;
     const day = firstBilledDay(rec);
     const host = rec.host ?? rec.provider ?? 'unknown';
     for (const fp of rec.promptFPs) {
@@ -458,6 +480,12 @@ function decoratedFingerprints(records, cutoffMs) {
     }
   }
   return out;
+}
+
+/** The record gate, shared by the fingerprint fold and the deep pass so the
+ *  two never read different populations. */
+function inWindow(rec, cutoffMs) {
+  return !!rec?.responses && Array.isArray(rec.promptFPs) && rec.end != null && rec.end >= cutoffMs;
 }
 
 // ── prompt formatters ───────────────────────────────────────────────────────
@@ -708,8 +736,297 @@ function promptReport(agg, fps, win) {
     taps: tapStats(typed, { maxTokens: TAP_MAX_TOKENS }),
     tapLengths: tapLengthRows(typed, TAP_MAX_TOKENS),
     clusters: clusters.map(clusterRow),
+    rawClusters: clusters.slice(0, TOP_CLUSTERS),
     reAsks,
     headless: headlessShare(agg.sessions),
+  };
+}
+
+// ── the deep pass: exemplar TEXT, re-read on demand ────────────────────────
+// Spec §2.3's F2 pass and the CLI half of the privacy split. The aggregate
+// tier above knows THAT a request was retyped in 22 sessions; it cannot say
+// what the request was, because the text was never stored. This pass re-reads
+// the transcripts to answer that — through the same per-host parsers the scan
+// path uses, so a turn re-fingerprints to the identical `h` and joins back to
+// the findings exactly.
+//
+// THE BOUNDARY, which is the whole point of it being opt-in: the text goes to
+// stdout and nowhere else. Nothing here writes a file, and every exemplar is
+// run through `maskSecrets` before it is printed or serialized — the join is
+// computed on the raw text so the hash still matches, and only the rendering
+// is masked.
+
+const DEEP_TOP_SHORT = 30;
+const DEEP_TOP_REASKS = 20;
+const DEEP_TOP_PERSONAS = 20;
+/** Re-ask pairs below this length are menu picks and approvals ("1", "yes")
+ *  re-picked, which the research separates from the substantive re-asks that
+ *  are the actual evidence (findings §5.1). Both are counted at the aggregate
+ *  tier; only the substantive ones are worth printing verbatim. */
+const REASK_MIN_TOKENS = 5;
+/** Same ceiling readSession applies, for the same reason: a transcript is read
+ *  whole and JSON-expands at roughly 5x, so an unbounded read is a memory
+ *  amplification. Above it the session contributes no exemplar — and the
+ *  selection below falls through to the next session holding the same text,
+ *  which is why the ceiling costs nothing in practice. Two Codex rollouts on
+ *  the reference corpus (79 MB and 93 MB) sit above it today. */
+const MAX_DEEP_FILE_BYTES = 64 * 1024 * 1024;
+
+/** Hard stop on how many transcripts one deep pass will open, so a corpus that
+ *  somehow needs a new file per exemplar still finishes. Well clear of the ~50
+ *  the reference corpus opens for a full table. */
+const MAX_DEEP_TRANSCRIPTS = 400;
+
+/** Prompt-kind turns a PERSON typed, in transcript order, each re-fingerprinted
+ *  so it can be joined to the aggregate tier's findings by hash. Both gates are
+ *  the scan path's own: `kind === 'prompt'` is what decides a fingerprint is
+ *  written at all, and `provenanceOf` on the same text is what decides its
+ *  tag — so this list is exactly the session's `human` fingerprints, in the
+ *  same order. */
+function humanPromptTurns(turns) {
+  const out = [];
+  for (const t of turns ?? []) {
+    if (t?.kind !== 'prompt' || typeof t.text !== 'string') continue;
+    if (provenanceOf(t.text, { kind: 'prompt' }) !== 'human') continue;
+    out.push({ h: promptFingerprint(t.text).h, text: t.text, at: Date.parse(t.at) });
+  }
+  return out;
+}
+
+/** Re-parse one cached session's transcript WITH turns, through the parser its
+ *  own provider owns. `dirName` only feeds project labelling, which this pass
+ *  never reads, so the parent directory is sufficient. Returns `null` for
+ *  anything unreadable — a vanished or oversized transcript costs its own
+ *  exemplar and nothing else. */
+function reReadTurns({ file, dbFile, rec }) {
+  if (file.startsWith('opencode://')) {
+    if (!dbFile) return null;
+    try { return parseOpencodeSession({ dbFile, id: rec.id, withTurns: true })?.turns ?? null; } catch { return null; }
+  }
+  let raw;
+  try {
+    if (fs.statSync(file).size > MAX_DEEP_FILE_BYTES) return null;
+    raw = fs.readFileSync(file, 'utf8');
+  } catch { return null; }
+  try {
+    return rec.provider === 'codex'
+      ? parseCodex(raw, { id: rec.id, withTurns: true }).turns
+      : parseClaude(raw, { id: rec.id, dirName: path.basename(path.dirname(file)), withTurns: true }).turns;
+  } catch { return null; }
+}
+
+/** Exact-text groups among the SHORT typed prompts, biggest first — the
+ *  "top 30 short prompts" table (findings §2.2). `h` is never sketched, so
+ *  these counts are exact however long the corpus is. */
+function shortPromptGroups(typed, maxTokens) {
+  const groups = new Map();
+  for (const fp of typed) {
+    if (!(Number(fp.t) <= maxTokens)) continue;
+    const g = groups.get(fp.h) ?? { h: fp.h, tokens: fp.t, prompts: 0, sessions: new Set(), days: new Set(), hosts: new Set() };
+    g.prompts++;
+    if (fp.sessionId) g.sessions.add(fp.sessionId);
+    if (fp.day) g.days.add(fp.day);
+    if (fp.host) g.hosts.add(fp.host);
+    groups.set(fp.h, g);
+  }
+  return [...groups.values()]
+    .sort((a, b) => b.prompts - a.prompts || (a.h < b.h ? -1 : 1))
+    .slice(0, DEEP_TOP_SHORT);
+}
+
+/** Persona-flagged typed prompts, grouped by exact text, longest first — the
+ *  role-scaffolding list (findings §5.3). Tokens stand in for size because
+ *  that is what a fingerprint carries; the deep pass adds real characters
+ *  once it has the text. */
+function personaGroups(typed) {
+  const groups = new Map();
+  for (const fp of typed) {
+    if (fp.o !== true) continue;
+    const g = groups.get(fp.h) ?? { h: fp.h, tokens: fp.t, prompts: 0, sessions: new Set(), hosts: new Set() };
+    g.prompts++;
+    if (fp.sessionId) g.sessions.add(fp.sessionId);
+    if (fp.host) g.hosts.add(fp.host);
+    groups.set(fp.h, g);
+  }
+  return [...groups.values()]
+    .sort((a, b) => b.tokens - a.tokens || (a.h < b.h ? -1 : 1))
+    .slice(0, DEEP_TOP_PERSONAS);
+}
+
+/**
+ * Sessions that could supply the wanted exemplars, most useful first: a
+ * session holding four of them is opened before one holding a single hash, and
+ * ties break on the id so the same corpus always opens the same files.
+ *
+ * A LIST rather than one pick per hash, which is what makes this robust. The
+ * first version staked each hash on a single session and lost the exemplar
+ * outright when that transcript could not be read — measured on this corpus,
+ * two Codex rollouts of 79 MB and 93 MB sit above the read ceiling and between
+ * them were the sole source for nine of the top thirty short prompts, every
+ * one of which rendered "transcript unavailable" beside a perfectly good
+ * count. The same text exists in a dozen smaller transcripts; the pass just
+ * has to be willing to look in the next one.
+ */
+function exemplarCandidates(typed, wanted) {
+  const bySession = new Map();
+  for (const fp of typed) {
+    if (!wanted.has(fp.h) || !fp.sessionId) continue;
+    let hashes = bySession.get(fp.sessionId);
+    if (!hashes) bySession.set(fp.sessionId, (hashes = new Set()));
+    hashes.add(fp.h);
+  }
+  return [...bySession.entries()]
+    .map(([sessionId, hashes]) => ({ sessionId, hashes }))
+    .sort((a, b) => b.hashes.size - a.hashes.size || (a.sessionId < b.sessionId ? -1 : 1));
+}
+
+/** The most frequent member of a cluster: the phrasing worth printing when a
+ *  cluster holds eleven of them. */
+function clusterExemplarHash(cluster, counts) {
+  let best = null;
+  for (const h of cluster.hashes) {
+    if (best === null || (counts.get(h) ?? 0) > (counts.get(best) ?? 0)) best = h;
+  }
+  return best;
+}
+
+/** Minutes between the two asks of one pair, located by walking the session's
+ *  own prompt order for the (a, b) hashes exactly `gap` apart — the same index
+ *  space `reAskPairs` counted in. `null` when they cannot be located, which is
+ *  what a session past MAX_PROMPT_FPS looks like. */
+function reAskMinutes(turns, pair) {
+  for (let i = 0; i + pair.gap < turns.length; i++) {
+    if (turns[i].h !== pair.a || turns[i + pair.gap].h !== pair.b) continue;
+    const delta = turns[i + pair.gap].at - turns[i].at;
+    return {
+      minutes: Number.isFinite(delta) ? delta / 60_000 : null,
+      ask: turns[i].text,
+      reAsk: turns[i + pair.gap].text,
+    };
+  }
+  return null;
+}
+
+/**
+ * Opens transcripts until every wanted exemplar is resolved, and no more than
+ * that. Re-ask sessions are opened unconditionally (the pair's timing can only
+ * come from the session it happened in); the rest are opened only while they
+ * still hold a hash nothing has answered yet, so a corpus where one big
+ * session covers most of the table costs a handful of files.
+ */
+function collectExemplars({ entries, cutoffMs, candidates, reAskSessions, wanted }) {
+  const byId = new Map();
+  for (const entry of entries) if (inWindow(entry.rec, cutoffMs)) byId.set(entry.rec.id, entry);
+  const text = new Map();            // hash → first verbatim text seen for it
+  const bySession = new Map();       // session id → its ordered human prompt turns
+  const attempted = new Set();
+  const cost = { transcripts: 0, unreadable: 0 };
+
+  const open = (id) => {
+    attempted.add(id);
+    const entry = byId.get(id);
+    if (!entry) return;
+    cost.transcripts++;
+    const reRead = reReadTurns(entry);
+    if (!reRead) { cost.unreadable++; return; }
+    const turns = humanPromptTurns(reRead);
+    bySession.set(id, turns);
+    for (const t of turns) if (wanted.has(t.h) && !text.has(t.h)) text.set(t.h, t.text);
+  };
+
+  for (const id of reAskSessions) open(id);
+  for (const c of candidates) {
+    if (cost.transcripts >= MAX_DEEP_TRANSCRIPTS) break;
+    if (attempted.has(c.sessionId)) continue;
+    if (![...c.hashes].some((h) => !text.has(h))) continue;
+    open(c.sessionId);
+  }
+  return { text, bySession, cost };
+}
+
+/** The pairs worth printing verbatim, and the token count each was measured at
+ *  (which the fingerprints carry and the pair itself does not). */
+function substantiveReAsks(report) {
+  const tokensOf = new Map();
+  for (const fp of report.typed) if (!tokensOf.has(fp.h)) tokensOf.set(fp.h, fp.t);
+  return report.reAsks.pairs
+    .map((p) => ({ ...p, tokens: tokensOf.get(p.a) ?? 0 }))
+    .filter((p) => p.tokens >= REASK_MIN_TOKENS)
+    .sort((a, b) => a.gap - b.gap || b.tokens - a.tokens)
+    .slice(0, DEEP_TOP_REASKS);
+}
+
+/**
+ * Join exemplar text to the aggregate tier's findings, opening only the
+ * transcripts that owe one. Returns the four exemplar tables plus the MEASURED
+ * cost of having produced them — measured, because "this took about four
+ * seconds" is a claim about someone else's machine.
+ */
+function deepPass(entries, report, cutoffMs) {
+  const started = Date.now();
+  const counts = new Map();
+  for (const fp of report.typed) counts.set(fp.h, (counts.get(fp.h) ?? 0) + 1);
+  const shorts = shortPromptGroups(report.typed, TAP_MAX_TOKENS);
+  const personas = personaGroups(report.typed);
+  const pairs = substantiveReAsks(report);
+  const clusterHash = new Map(
+    report.rawClusters.map((c) => [c.key, clusterExemplarHash(c, counts)]).filter(([, h]) => h),
+  );
+  const wanted = new Set([
+    ...shorts.map((g) => g.h), ...personas.map((g) => g.h), ...clusterHash.values(),
+  ]);
+  const { text, bySession, cost } = collectExemplars({
+    entries, cutoffMs, wanted,
+    candidates: exemplarCandidates(report.typed, wanted),
+    reAskSessions: new Set(pairs.map((p) => p.sessionId)),
+  });
+
+  return {
+    shortPrompts: shorts.map((g) => ({
+      h: g.h, tokens: g.tokens, prompts: g.prompts,
+      sessions: g.sessions.size, days: g.days.size, hosts: [...g.hosts].sort(),
+      text: exemplarText(text, g.h),
+    })),
+    reAsks: pairs.map((p) => deepReAskRow(p, bySession.get(p.sessionId), text)),
+    clusters: report.clusters.slice(0, TOP_CLUSTERS).map((row) => ({
+      key: row.key, name: row.name, size: row.size, sessions: row.sessions,
+      text: exemplarText(text, clusterHash.get(row.key)),
+    })),
+    personas: personas.map((g) => {
+      const body = text.get(g.h) ?? null;
+      return {
+        h: g.h, tokens: g.tokens, prompts: g.prompts, sessions: g.sessions.size,
+        hosts: [...g.hosts].sort(),
+        chars: body === null ? null : body.length,
+        opener: exemplarText(text, g.h),
+      };
+    }),
+    cost: {
+      ...cost,
+      seconds: Math.round((Date.now() - started) / 100) / 10,
+      wanted: wanted.size,
+      resolved: text.size,
+    },
+  };
+}
+
+/** A resolved exemplar, masked — or the honest absence when the transcript
+ *  that held it is gone. Masking happens HERE, after the hash join, so a
+ *  secret-bearing prompt still matches its fingerprint and still never
+ *  reaches the terminal in the clear. */
+function exemplarText(text, h) {
+  const body = h ? text.get(h) : undefined;
+  return body === undefined ? null : maskSecrets(body);
+}
+
+function deepReAskRow(pair, turns, text) {
+  const located = turns ? reAskMinutes(turns, pair) : null;
+  return {
+    sessionId: pair.sessionId, gap: pair.gap, host: pair.host ?? null, day: pair.day ?? null,
+    tokens: pair.tokens, jaccard: Math.round(pair.jaccard * 100) / 100,
+    minutes: located?.minutes == null ? null : Math.round(located.minutes * 10) / 10,
+    ask: located ? maskSecrets(located.ask) : exemplarText(text, pair.a),
+    reAsk: located ? maskSecrets(located.reAsk) : exemplarText(text, pair.b),
   };
 }
 
@@ -757,6 +1074,77 @@ function printPromptReport(agg, r) {
   printHeadless(r.headless);
 }
 
+// ── deep-pass printers ──────────────────────────────────────────────────────
+
+/** One-line rendering of a prompt: whitespace collapsed so a pasted paragraph
+ *  stays one row, clipped, and 'transcript unavailable' rather than blank when
+ *  the file that held it could not be re-read. */
+function clipText(text, max) {
+  if (text == null) return 'transcript unavailable';
+  const one = String(text).replace(/\s+/g, ' ').trim();
+  return one.length > max ? `${one.slice(0, max - 1)}…` : one;
+}
+
+function printShortPrompts(rows) {
+  heading('Top short prompts');
+  info(dim(`  every typed prompt of ${TAP_MAX_TOKENS} normalized tokens or fewer, by exact text`));
+  if (!rows.length) return info(dim('  no samples'));
+  info(dim(tableRow([['n', 4, true], ['sess', 5, true], ['days', 5, true], ['hosts', 14], ['prompt', 60]])));
+  for (const r of rows) {
+    info(tableRow([[fmtNum(r.prompts), 4, true], [fmtNum(r.sessions), 5, true], [fmtNum(r.days), 5, true],
+      [r.hosts.join('+') || '—', 14], [clipText(r.text, 60), 60]]));
+  }
+}
+
+function printReAskPairs(rows) {
+  heading('Re-ask pairs');
+  info(dim(`  substantive pairs only (${REASK_MIN_TOKENS}+ tokens) — menu picks and approvals are counted above, not printed`));
+  if (!rows.length) return info(dim('  no samples'));
+  for (const r of rows) {
+    const when = r.minutes == null ? 'timing not located' : `${r.minutes} min apart`;
+    info(tableRow([[`gap ${r.gap}`, 7], [when, 20], [`${r.tokens} tok`, 8], [r.host ?? '—', 8], [r.sessionId.slice(0, 12), 13]]));
+    info(dim(`    ask   ${clipText(r.ask, 92)}`));
+    info(dim(`    again ${clipText(r.reAsk, 92)}`));
+  }
+}
+
+function printClusterExemplars(rows) {
+  heading('Cluster exemplars');
+  info(dim('  one phrasing per recurring cluster — the most frequent member of each'));
+  if (!rows.length) return info(dim('  no samples'));
+  for (const r of rows) {
+    info(tableRow([[`${r.name}`, 42], [`${fmtNum(r.size)}×`, 6, true], [`${fmtNum(r.sessions)} sess`, 9, true]]));
+    info(dim(`    ${clipText(r.text, 96)}`));
+  }
+}
+
+function printPersonas(rows) {
+  heading('Persona scaffolding');
+  info(dim('  role assignments typed by hand — the text a managed prompt-fragment library would hold'));
+  if (!rows.length) return info(dim('  no samples'));
+  info(dim(tableRow([['chars', 7, true], ['tok', 6, true], ['n', 3, true], ['hosts', 14], ['opener', 60]])));
+  for (const r of rows) {
+    info(tableRow([[fmtMaybe(r.chars), 7, true], [fmtNum(r.tokens), 6, true], [fmtNum(r.prompts), 3, true],
+      [r.hosts.join('+') || '—', 14], [clipText(r.opener, 60), 60]]));
+  }
+}
+
+function printDeepPass(deep) {
+  const c = deep.cost;
+  heading(`Deep pass — verbatim exemplars (deep pass: ${fmtNum(c.transcripts)} `
+    + `transcript${c.transcripts === 1 ? '' : 's'}, ${c.seconds.toFixed(1)}s)`);
+  info(dim('re-read from the transcripts on demand. This text is printed here and written nowhere.'));
+  if (c.unreadable > 0 || c.resolved < c.wanted) {
+    info(dim(`  ${fmtNum(c.resolved)} of ${fmtNum(c.wanted)} exemplars resolved · `
+      + `${fmtNum(c.unreadable)} transcript${c.unreadable === 1 ? '' : 's'} could not be re-read `
+      + `(missing, or past the ${Math.round(MAX_DEEP_FILE_BYTES / 1024 / 1024)} MB read ceiling)`));
+  }
+  printShortPrompts(deep.shortPrompts);
+  printReAskPairs(deep.reAsks);
+  printClusterExemplars(deep.clusters);
+  printPersonas(deep.personas);
+}
+
 async function runPrompts({ flags, deps }) {
   const win = parsePromptWindow(flags.window);
   if (win == null) {
@@ -782,13 +1170,16 @@ async function runPrompts({ flags, deps }) {
   const cutoffMs = Date.parse(agg.generatedAt) - win.days * 86_400_000;
   // NOT `deps.cacheFile` — that name is already taken by the OpenRouter
   // activity cache this command also manages, and they are different files.
-  const fps = decoratedFingerprints(readPromptRecords(deps.indexCacheFile ?? promptCacheFile()), cutoffMs);
-  const report = promptReport(agg, fps, win);
+  const entries = readPromptEntries(deps.indexCacheFile ?? promptCacheFile());
+  const report = promptReport(agg, decoratedFingerprints(entries, cutoffMs), win);
+  const deep = flags.deep ? deepPass(entries, report, cutoffMs) : null;
   if (flags.json) {
-    console.log(JSON.stringify(promptProjection(agg, report), null, 2));
+    const projection = promptProjection(agg, report);
+    console.log(JSON.stringify(deep ? { ...projection, exemplars: deep } : projection, null, 2));
     return 0;
   }
   printPromptReport(agg, report);
+  if (deep) printDeepPass(deep);
   return 0;
 }
 

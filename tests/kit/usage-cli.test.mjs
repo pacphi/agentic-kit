@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -148,7 +149,29 @@ function writePromptsCorpus(sb) {
     promptTurn('prompts-reask', reAskAt + 20_000, `${reAsk} again`),
     replyTurn('prompts-reask', reAskAt + 30_000),
   ]);
-  return { projectDir, reAsk };
+  // One hand-typed role assignment — the shape the persona flag exists for.
+  const personaAt = Date.now() - 3_600_000;
+  const persona = 'You are a senior release engineer reviewing a changelog for accuracy';
+  write('prompts-persona', [
+    promptTurn('prompts-persona', personaAt, persona),
+    replyTurn('prompts-persona', personaAt + 10_000),
+  ]);
+  return { projectDir, reAsk, persona };
+}
+
+/** Every file under `dir`, with a hash of its bytes — the shape a "this
+ *  changed nothing" assertion needs. */
+function treeDigest(dir) {
+  const out = new Map();
+  const walk = (d) => {
+    for (const e of fs.readdirSync(d, { withFileTypes: true })) {
+      const full = path.join(d, e.name);
+      if (e.isDirectory()) walk(full);
+      else if (e.isFile()) out.set(full, createHash('sha256').update(fs.readFileSync(full)).digest('hex'));
+    }
+  };
+  walk(dir);
+  return out;
 }
 
 function ak(args, sb, extra = {}) {
@@ -413,5 +436,66 @@ test('ak usage prompts says no samples rather than zero when nothing was fingerp
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stdout, /no samples/,
     'an empty corpus must report no samples, never a measured zero');
+  fs.rmSync(sb.home, { recursive: true, force: true });
+});
+
+// ── prompts --deep: the exemplar tables ─────────────────────────────────────
+
+test('ak usage prompts --deep joins verbatim text to the fingerprint findings', () => {
+  const sb = sandbox();
+  const { reAsk, persona } = writePromptsCorpus(sb);
+  const result = ak(['usage', 'prompts', '--deep'], sb);
+  assert.equal(result.status, 0, result.stderr);
+  for (const heading of [
+    'Top short prompts',
+    'Re-ask pairs',
+    'Cluster exemplars',
+    'Persona scaffolding',
+  ]) assert.ok(result.stdout.includes(heading), `missing deep section ${JSON.stringify(heading)}`);
+  assert.match(result.stdout, /deep pass: \d+ transcripts?, \d+\.\d+s/,
+    'the deep pass must state what it cost, measured rather than estimated');
+  assert.ok(result.stdout.includes(reAsk.slice(0, 40)), 're-ask exemplars must be verbatim');
+  assert.ok(result.stdout.includes(persona.slice(0, 40)), 'the persona opener must be verbatim');
+  assert.ok(result.stdout.includes('yes'), 'the top short prompt must be verbatim');
+  fs.rmSync(sb.home, { recursive: true, force: true });
+});
+
+// The deep pass reads transcripts and prints their text to the terminal. That
+// is the whole privacy boundary: nothing it reads may be written anywhere.
+test('ak usage prompts --deep writes nothing and mutates nothing', () => {
+  const sb = sandbox();
+  writePromptsCorpus(sb);
+  // Warm the index first, so the cache the aggregate tier rewrites is already
+  // present and the comparison below isolates what the DEEP pass does.
+  assert.equal(ak(['usage', 'prompts'], sb).status, 0);
+  const before = treeDigest(sb.home);
+  const result = ak(['usage', 'prompts', '--deep'], sb);
+  assert.equal(result.status, 0, result.stderr);
+  const after = treeDigest(sb.home);
+  assert.deepEqual([...after.keys()].sort(), [...before.keys()].sort(),
+    'the deep pass must create no file anywhere under HOME');
+  const cache = path.join(sb.cfg, 'agentic-kit', 'usage-index.json');
+  for (const [file, digest] of before) {
+    if (file === cache) continue;   // readIndex rewrites its own cache; that is the aggregate tier's write, not the deep pass's
+    assert.equal(after.get(file), digest, `the deep pass modified ${file}`);
+  }
+  fs.rmSync(sb.home, { recursive: true, force: true });
+});
+
+test('ak usage prompts --deep --json carries exemplars under an explicit key', () => {
+  const sb = sandbox();
+  const { reAsk } = writePromptsCorpus(sb);
+  const shallow = ak(['usage', 'prompts', '--json'], sb);
+  assert.equal(shallow.status, 0, shallow.stderr);
+  assert.equal(Object.hasOwn(JSON.parse(shallow.stdout), 'exemplars'), false,
+    'the aggregate tier must never carry text, so it must not carry an exemplars key either');
+  const deep = ak(['usage', 'prompts', '--deep', '--json'], sb);
+  assert.equal(deep.status, 0, deep.stderr);
+  const value = JSON.parse(deep.stdout);
+  assert.deepEqual(Object.keys(value.exemplars).sort(),
+    ['clusters', 'cost', 'personas', 'reAsks', 'shortPrompts']);
+  assert.ok(value.exemplars.reAsks.some((p) => p.ask.includes(reAsk.slice(0, 40))),
+    're-ask text must reach --json at this tier, which is why the help says so');
+  assert.ok(value.exemplars.cost.transcripts >= 1, 'the measured cost travels with the payload');
   fs.rmSync(sb.home, { recursive: true, force: true });
 });
