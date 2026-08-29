@@ -492,29 +492,40 @@ function recordCodexUnknownType(stats, type) {
 
 /** `session_meta` → the session's stable identity: which file this is, and
  *  whether it is a genuine user thread or a subagent's delegated one. The
- *  FIRST meta wins for identity fields (id, threadSource, cwd/project) — a
+ *  FIRST session_meta line wins for ALL of it — `id`, `threadSource`,
+ *  `cwd`/project, AND `inferenceProvider`/`providerProvenance` — because a
  *  subagent rollout replays its PARENT thread's entire prior history before
  *  its own new turns (see parseCodex's own doc comment), including the
- *  parent's OWN session_meta line further down the file. Letting a later
- *  meta win relabeled 155 of 318 observed subagent rollouts back to 'user'
- *  and re-keyed their id to the parent's, which let their (parent-
- *  duplicating) cumulative token totals escape finalizeCodexUsage's subagent
- *  guard entirely — exactly the ccusage#950 double-count mechanism that
- *  guard exists to prevent. `cwd`/project latches first for the same reason,
- *  matching handleCodexTurnContext's own treatment of the identical field
- *  (only a fallback while project is still 'unknown' — never an overwrite of
- *  an already-resolved one). `provider` stays last-wins, deliberately not
- *  gated here: handleCodexTurnContext already treats the identical field as
- *  progressive (fires on every turn_context, latest observed value wins), so
- *  gating it only in the meta path would be inconsistent with that AND
- *  ineffective — a later turn_context would still overwrite it regardless. */
+ *  parent's OWN session_meta line further down the file, and a replayed
+ *  parent line is not an observation about THIS record, for provider any
+ *  more than for identity. Letting a later meta win relabeled 155 of 318
+ *  observed subagent rollouts back to 'user' and re-keyed their id to the
+ *  parent's, which let their (parent-duplicating) cumulative token totals
+ *  escape finalizeCodexUsage's subagent guard entirely — exactly the
+ *  ccusage#950 double-count mechanism that guard exists to prevent.
+ *  `inferenceProvider`/`providerProvenance` join this SAME latch for the
+ *  same reason, even though the identical field read off `turn_context`
+ *  stays independently progressive (`handleCodexTurnContext`, last observed
+ *  value wins on every turn_context line) — that is a separate, unrelated
+ *  design choice this latch does not touch or depend on.
+ *
+ *  The gate is META-LEVEL (`!metaState.seen`), not per-field: if the first
+ *  meta omits a field, no LATER meta backfills it either. Each field has its
+ *  own fallback for exactly that case, and none of them is another
+ *  session_meta line: `threadSource` defaults to `null` and falls back to
+ *  the codex ledger at aggregation time (`rec.threadSource ?? ledger ??
+ *  fromEdges`, usage-aggregate.mjs); `id` falls back to the caller's
+ *  filename-derived id, already correct for the file (blankSession's
+ *  constructor argument, usage-index.mjs); `cwd`/project falls back to
+ *  `handleCodexTurnContext`'s own `rec.project === 'unknown'` check — a
+ *  DIFFERENT gate that coincides with this one in the common case but is
+ *  not "the same rule" as this latch. */
 function handleCodexMeta(rec, metaState, decoded) {
-  if (!metaState.seen) {
-    metaState.seen = true;
-    if (typeof decoded.sessionId === 'string' && decoded.sessionId) rec.id = decoded.sessionId;
-    if (typeof decoded.cwd === 'string') applyProject(rec, projectLabel(decoded.cwd, null, repoRootOf(decoded.cwd)));
-    if (typeof decoded.threadSource === 'string') rec.threadSource = decoded.threadSource;
-  }
+  if (metaState.seen) return;
+  metaState.seen = true;
+  if (typeof decoded.sessionId === 'string' && decoded.sessionId) rec.id = decoded.sessionId;
+  if (typeof decoded.cwd === 'string') applyProject(rec, projectLabel(decoded.cwd, null, repoRootOf(decoded.cwd)));
+  if (typeof decoded.threadSource === 'string') rec.threadSource = decoded.threadSource;
   if (decoded.provider) {
     rec.inferenceProvider = decoded.provider;
     rec.providerProvenance = 'observed';

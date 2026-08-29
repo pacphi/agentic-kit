@@ -91,7 +91,7 @@ reader opens the session, building the candidate path from the two validated
 capture groups rather than from raw request input.
 
 The parsers are `parseClaude` (`usage-parsers.mjs:440-469`) and `parseCodex`
-(`usage-parsers.mjs:788-810`). Both are pure functions over the raw file bytes —
+(`usage-parsers.mjs:799-817`). Both are pure functions over the raw file bytes —
 no network, no clock dependency beyond the transcript's own timestamps — so
 every downstream number traces back to bytes already on the user's disk.
 Nothing in this transcript pipeline calls a provider API or a billing endpoint; **no transcript
@@ -184,7 +184,7 @@ responses = Σ over included sessions of session.responses
   (`usage-aggregate.mjs:497`).
 - `responses` accumulation: Claude increments per assistant message
 (`usage-parsers.mjs:380-385`); Codex increments per `agent_message` event
-(`usage-parsers.mjs:666-670`).
+(`usage-parsers.mjs:677-682`).
 - Totals: `totals.responses += s.responses` per included session
 (`usage-aggregate.mjs:563`).
 - Render: `kpi("sessions", fmtNum(t.sessions), fmtNum(t.responses)+" assistant
@@ -209,7 +209,10 @@ human prompts and no longer count as such on Claude (`isHumanPrompt` +
 [`TRANSCRIPTS.md`](TRANSCRIPTS.md) §3.2). A `! command` the person typed
 (`bash-input`) still counts. Codex has no discipline of its own for the same
 distinction — a `user_message`/`item_completed` `UserMessage` event is gated
-the same way before it counts (`isCodexHumanMessage`, reusing
+for machine markers before it counts (`isCodexHumanMessage`), but not for the
+full set Claude's `isHumanPrompt` checks: Claude's gate additionally excludes
+`isMeta` entries, entries carrying a `tool_result` block, and empty text,
+none of which `isCodexHumanMessage` inspects — it is markers-only. Reuses
 `HARNESS_OUTPUT_RE` plus two Codex-specific markers for mirrored cross-host
 envelopes: a `<teammate-message` wrapper and the literal `"Another Claude
 session sent a message:"` prefix — see [`TRANSCRIPTS.md`](TRANSCRIPTS.md)
@@ -369,7 +372,7 @@ per row is **gross input minus cached input** — Claude's parser reads
 `cache_read_input_tokens` and `cache_creation_input_tokens` as separate fields
 the provider already reports separately (`telemetry-records.mjs:216-224`); Codex's
 parser subtracts `cached_input_tokens` from `input_tokens` explicitly
-(`usage-parsers.mjs:769-785`, `input: Math.max(0, gross - cacheRead)`) because
+(`usage-parsers.mjs:780-796`, `input: Math.max(0, gross - cacheRead)`) because
 Codex's own `input_tokens` field **includes** cached tokens and would
 double-count them against the separately-reported `cacheRead` figure if left
 as-is. This is asserted by test:
@@ -522,7 +525,7 @@ byDay[day].sessionsActive = count of distinct sessions with any usage row that d
 
 **Source:** the day key is the row's own `row.day`, computed once at parse
 time as **local calendar day**, not UTC
-(`usage-parsers.mjs:419`/`usage-parsers.mjs:775` call `localDay(at)`) — so a
+(`usage-parsers.mjs:419`/`usage-parsers.mjs:786` call `localDay(at)`) — so a
 session that runs from 23:58 local to 00:05 local is billed to the day its
 *first* row landed on (test:
 `tests/kit/usage-index.test.mjs:651`, "a session that opens before midnight
@@ -558,7 +561,7 @@ renders "no sessions in window" instead of zeroed figures
   called once per session at `usage-aggregate.mjs:576`), keyed by the literal string
 `"claude"` or `"codex"` assigned at parse time
 (`blankSession(id, 'claude')` / `blankSession(id, 'codex')`,
-`usage-parsers.mjs:441`, `:804`, `parseClaude`/`parseCodex` entry points).
+`usage-parsers.mjs:441`, `:815`, `parseClaude`/`parseCodex` entry points).
 OpenCode's SQLite reader builds the same record shape and contributes a third
 host key.
 
@@ -618,7 +621,7 @@ punchcard[dow + "-" + hour] += 1   per assistant/agent_message response, at its 
 
 **Source:** incremented once per Claude assistant turn
 (`usage-parsers.mjs:383-385`, keyed by `punchKey(at)`) and once per Codex
-`agent_message` (`usage-parsers.mjs:666-670`), merged into the window-level
+`agent_message` (`usage-parsers.mjs:677-682`), merged into the window-level
 `punchcard` object per session (`usage-aggregate.mjs:593`). Cell intensity is
 linear against the single busiest cell in the window:
 `v = pcMax ? n/pcMax : 0` (`dashboard/client.mjs`) — this is a
@@ -1030,7 +1033,7 @@ both credential-free for ak:
 `windowDurationMins: 10080` (the weekly). Windows are therefore keyed and
 labelled by duration (`windowLabel`, `quota.mjs:51`), never by slot name. The
 same rule applies to the historical snapshots parsed out of rollouts: the
-normalizer at `usage-parsers.mjs:553-566` keeps a flat `windows` list keyed by
+normalizer at `usage-parsers.mjs:564-577` keeps a flat `windows` list keyed by
 `window_minutes`.
 
 **Freshness is part of the number.** Both sides carry `fetchedAt`; the view
@@ -1058,10 +1061,20 @@ globs and takes the newest). `readCodexState` (`:62`) reads per-thread
 `applyCodexLedger` (`usage-aggregate.mjs:850-862`) overlays that onto parsed
 sessions: a ledger-identified subagent has its token usage stripped — its
 rollout replays the parent's entire token history (ccusage/ccusage#950
-measured up to 91× inflation) — while the session record stays visible. The
-rollout's own `session_meta.thread_source` sniff remains as the fallback when
-the ledger is absent or migrated beyond recognition. Codex sessions also carry
-`reasoningOutput` (`usage-parsers.mjs:785`) — reasoning tokens are a **subset**
+measured up to 91× inflation) — while the session record stays visible.
+**The parser is primary, the ledger is the fallback**: `rec.threadSource ??
+t?.threadSource ?? fromEdges` (`usage-aggregate.mjs:860`) reads the rollout's
+own `session_meta.thread_source` first, and only consults the ledger when
+that line is missing entirely. This is sound because `thread_source` is now
+the FIRST session_meta line's value (§1.2) rather than whichever meta
+happened to be last — identity read off the rollout's own first-written line
+is a fact about that specific file, while the ledger's coverage depends on
+the Codex build (`state_N.sqlite` first shipped in ≥0.140) and which
+migration generation its `N` reflects; a rollout the ledger cannot resolve
+(an older Codex build, a migrated-beyond-recognition state file) still gets
+a correct `threadSource` straight from its own transcript rather than
+falling through unclassified. Codex sessions also carry
+`reasoningOutput` (`usage-parsers.mjs:796`) — reasoning tokens are a **subset**
 of output tokens and are annotation only, never added to any sum.
 
 ## 14. Known limitations, restated as a single checklist
@@ -1194,8 +1207,8 @@ same way, and the panel says so rather than implying a single clock:
 
 | Host | How a latency sample is produced |
 |---|---|
-| codex | **Host-measured.** `task_started` remembers the turn's start (`usage-parsers.mjs:594-598`) and `task_complete` samples Codex's own `duration_ms` (`usage-parsers.mjs:571-586`) — but only if no prompt-gap already covered that turn (so a turn is never sampled twice) and only within the same 3600 s cap the derived paths apply. |
-| codex | Also derives a prompt-gap when one is available: a `user_message` opens the window (`usage-parsers.mjs:591`) and the next `agent_message` closes it, clearing `turnStartedAt` so the `duration_ms` fallback cannot double-fire (`usage-parsers.mjs:601-608`). |
+| codex | **Host-measured.** `task_started` remembers the turn's start (`usage-parsers.mjs:605-610`) and `task_complete` samples Codex's own `duration_ms` (`usage-parsers.mjs:612-630`) — but only if no prompt-gap already covered that turn (so a turn is never sampled twice) and only within the same 3600 s cap the derived paths apply. |
+| codex | Also derives a prompt-gap when one is available: a `user_message` opens the window (`usage-parsers.mjs:670`) and the next `agent_message` closes it, clearing `turnStartedAt` so the `duration_ms` fallback cannot double-fire (`usage-parsers.mjs:683-689`). |
 | claude | **Derived from event gaps.** A human prompt sets `latState.pendingMs` (`usage-parsers.mjs:355`); the first real assistant turn closes that gap into a `noteLatencySample` call (`usage-parsers.mjs:410-414`). |
 | opencode | Derived the same way from its message stream — `rec.pendingPromptMs`, closed by `noteLatencySample` (`usage-opencode.mjs:227-231`). |
 
@@ -1213,7 +1226,7 @@ reference corpus before the fix: 12 of 835 durations exceeded the cap, the
 largest 94,079,450 ms ≈ 26.1 hours, all of them landing in the `≥60s` overflow
 bucket and dragging `latP95` into it.
 An interrupted turn contributes nothing at all — `turn_aborted` clears both
-pending states (`usage-parsers.mjs:715-723`), so a prompt that was never
+pending states (`usage-parsers.mjs:726-734`), so a prompt that was never
 answered can never be timed against a later, unrelated reply. A dropped API
 turn is likewise never a sample: the error branch returns before the latency
 block and deliberately leaves `pendingMs` set, so the first real completion
@@ -1295,7 +1308,7 @@ which day its dollars landed on. The window bucket is
 The evidence each parser reads: Claude's `permissionMode`, off the human prompt
 only (`usage-parsers.mjs:356-357`); Codex's `approval_policy`/`sandbox_policy`
 off each `turn_context`, last one wins since a session may renegotiate mid-run
-(`usage-parsers.mjs:505-508`); OpenCode's `mode` off each assistant message
+(`usage-parsers.mjs:535-540`); OpenCode's `mode` off each assistant message
 (`usage-opencode.mjs:232-233`). Render is `modeChart` in
 `src/lib/dashboard/client/usage.mjs`; the CLI table is `printScoreModeTable`
 (`src/commands/usage.mjs:234-236`).
@@ -1327,7 +1340,7 @@ or `{"type":"workspace-write", …}` with sibling fields such as
 `network_access` — never the bare string the taxonomy is written against. A
 survey of this machine's rollouts (400 files, 2026-08-28) found 1,110 object
 occurrences and **zero** string ones. `handleCodexTurnContext`
-(`usage-parsers.mjs:505-519`) therefore reads `sandbox_policy.type` and passes
+(`usage-parsers.mjs:541-554`) therefore reads `sandbox_policy.type` and passes
 that to `normalizeMode`, which is unchanged and still accepts the string form.
 Before this extraction the object reached `normalizeMode` intact, matched no
 rule, and stringified into `modeRaw` as `"never/[object Object]"`: the `plan`,
@@ -1393,7 +1406,7 @@ not delegated work that was free.
 **Codex — structurally `$0`, by ledger design.** A ledger-identified subagent
 has its usage rows removed outright (`applyCodexLedger`,
 `usage-aggregate.mjs:857-860`) and `finalizeCodexUsage` never writes one in the
-first place (`usage-parsers.mjs:769`), because a subagent rollout replays its
+first place (`usage-parsers.mjs:780`), because a subagent rollout replays its
 parent's entire cumulative token history and keeping it would bill the parent
 twice (§13c, **[C7]**). The record stays visible and auditable; its cost is zero
 because nothing was measured for it, not because the work was cheap — which is
@@ -1619,8 +1632,8 @@ model, and each host signals that differently:
 | Host | What is counted, and where |
 |---|---|
 | claude | The API-error placeholder — Claude Code synthesizes a local turn with no completion behind it when a connection drops, a rate limit rejects, or auth fails. The decoder sets `isApiError` from either `isApiErrorMessage` or the literal `<synthetic>` model marker (`telemetry-records.mjs:246`), because the flag is not set on every build that emits the placeholder; the parser counts it and returns before any model or usage attribution (`usage-parsers.mjs:399-408`). |
-| codex | A `task_complete` event carrying a non-null `error` (`usage-parsers.mjs:577`). |
-| codex | `turn_aborted` is counted **separately**, into `rec.aborts` (`usage-parsers.mjs:715-723`) — not into exceptions. |
+| codex | A `task_complete` event carrying a non-null `error` (`usage-parsers.mjs:629`). |
+| codex | `turn_aborted` is counted **separately**, into `rec.aborts` (`usage-parsers.mjs:726-734`) — not into exceptions. |
 | opencode | An assistant message carrying a non-null `error` (`usage-opencode.mjs:224-226`). |
 
 **Aborts are held apart from exceptions on purpose.** An aborted turn is a
@@ -1701,7 +1714,7 @@ row knows its day. Render is `toolRows`/`modelMix` in
 the `tool_use` block's own `name` (`collectClaudeToolNames`,
 `usage-parsers.mjs:366-375`). Codex's four tallied item types —
 `CommandExecution`, `McpToolCall`, `FileChange`, `CollabAgentToolCall`
-(`CODEX_TOOL_ITEM_TYPES`, `usage-parsers.mjs:705`, tallied at `:736-737`) —
+(`CODEX_TOOL_ITEM_TYPES`, `usage-parsers.mjs:716`, tallied at `:747-748`) —
 keep those exact spellings in the ranking. Mapping `CommandExecution` onto
 `Bash`, or `FileChange` onto `Edit`, would be a claim about equivalence that
 neither host makes: the vocabularies are host-specific, the semantics do not

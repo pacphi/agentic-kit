@@ -434,6 +434,29 @@ test('parseCodex: FIRST session_meta wins identity — a replayed parent meta ca
   assert.equal(user.usage.length, 1, 'a genuine single-meta user rollout still bills normally');
 });
 
+// M1 ruling (review round 2): provider/provenance join the SAME identity
+// latch as id/threadSource/cwd — a replayed parent's session_meta line is
+// not an observation about THIS record, for provider any more than for
+// identity. This is deliberately independent of handleCodexTurnContext's
+// own provider handling, which stays progressive (unrelated design choice).
+test('parseCodex: FIRST session_meta wins provider/provenance too — a replayed parent meta does not overwrite them', () => {
+  const subagentThenParentDifferentProvider = [
+    JSON.stringify({ type: 'session_meta', payload: { id: 'subP', cwd: '/tmp/p', thread_source: 'subagent', model_provider: 'openai' }, timestamp: T0 }),
+    JSON.stringify({ type: 'session_meta', payload: { id: 'parentP', cwd: '/tmp/p', thread_source: 'user', model_provider: 'azure' }, timestamp: T1 }),
+  ].join('\n');
+  const { session: sub } = parseCodex(subagentThenParentDifferentProvider, { id: 'subP' });
+  assert.equal(sub.inferenceProvider, 'openai', "the file's own provider, not the replayed parent's");
+  assert.equal(sub.providerProvenance, 'observed');
+
+  // Inverse control: an ordinary single-meta record is unaffected.
+  const singleMeta = [
+    JSON.stringify({ type: 'session_meta', payload: { id: 'userQ', cwd: '/tmp/p', thread_source: 'user', model_provider: 'openai' }, timestamp: T0 }),
+  ].join('\n');
+  const { session: user } = parseCodex(singleMeta, { id: 'userQ' });
+  assert.equal(user.inferenceProvider, 'openai');
+  assert.equal(user.providerProvenance, 'observed');
+});
+
 // Codex has no discipline of its own for distinguishing a typed prompt from
 // harness output or a mirrored cross-host envelope (Claude has isHumanPrompt
 // + HARNESS_OUTPUT_RE since schema v5). Measured on the reference corpus: 596
