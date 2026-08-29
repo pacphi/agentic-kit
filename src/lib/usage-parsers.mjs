@@ -490,10 +490,31 @@ function recordCodexUnknownType(stats, type) {
   }
 }
 
-function handleCodexMeta(rec, decoded) {
-  if (typeof decoded.sessionId === 'string' && decoded.sessionId) rec.id = decoded.sessionId;
-  if (typeof decoded.cwd === 'string') applyProject(rec, projectLabel(decoded.cwd, null, repoRootOf(decoded.cwd)));
-  if (typeof decoded.threadSource === 'string') rec.threadSource = decoded.threadSource;
+/** `session_meta` → the session's stable identity: which file this is, and
+ *  whether it is a genuine user thread or a subagent's delegated one. The
+ *  FIRST meta wins for identity fields (id, threadSource, cwd/project) — a
+ *  subagent rollout replays its PARENT thread's entire prior history before
+ *  its own new turns (see parseCodex's own doc comment), including the
+ *  parent's OWN session_meta line further down the file. Letting a later
+ *  meta win relabeled 155 of 318 observed subagent rollouts back to 'user'
+ *  and re-keyed their id to the parent's, which let their (parent-
+ *  duplicating) cumulative token totals escape finalizeCodexUsage's subagent
+ *  guard entirely — exactly the ccusage#950 double-count mechanism that
+ *  guard exists to prevent. `cwd`/project latches first for the same reason,
+ *  matching handleCodexTurnContext's own treatment of the identical field
+ *  (only a fallback while project is still 'unknown' — never an overwrite of
+ *  an already-resolved one). `provider` stays last-wins, deliberately not
+ *  gated here: handleCodexTurnContext already treats the identical field as
+ *  progressive (fires on every turn_context, latest observed value wins), so
+ *  gating it only in the meta path would be inconsistent with that AND
+ *  ineffective — a later turn_context would still overwrite it regardless. */
+function handleCodexMeta(rec, metaState, decoded) {
+  if (!metaState.seen) {
+    metaState.seen = true;
+    if (typeof decoded.sessionId === 'string' && decoded.sessionId) rec.id = decoded.sessionId;
+    if (typeof decoded.cwd === 'string') applyProject(rec, projectLabel(decoded.cwd, null, repoRootOf(decoded.cwd)));
+    if (typeof decoded.threadSource === 'string') rec.threadSource = decoded.threadSource;
+  }
   if (decoded.provider) {
     rec.inferenceProvider = decoded.provider;
     rec.providerProvenance = 'observed';
@@ -703,9 +724,9 @@ function rawPayload(e) {
 }
 
 /** One line of a Codex rollout, dispatched on its decoded type. */
-function processCodexLine(rec, turns, stats, titleState, usageState, latState, e, ms, withTurns) {
+function processCodexLine(rec, turns, stats, titleState, usageState, latState, metaState, e, ms, withTurns) {
   const decoded = decodeCodexRecord(e);
-  if (decoded.type === 'meta') { handleCodexMeta(rec, decoded); return; }
+  if (decoded.type === 'meta') { handleCodexMeta(rec, metaState, decoded); return; }
   if (decoded.type === 'turnContext') { handleCodexTurnContext(rec, decoded, rawPayload(e)); return; }
   if (e.type !== 'event_msg') return;
   handleCodexEventMsg(rec, turns, stats, titleState, usageState, latState, decoded, rawPayload(e), ms, withTurns);
@@ -760,11 +781,15 @@ export function parseCodex(raw, { id, withTurns = false }) {
   // fallback — see handleCodexTaskStarted/handleCodexAssistantMessage/
   // handleCodexTaskComplete.
   const latState = { pendingPromptMs: null, turnStartedAt: null };
+  // Latches TRUE on the first session_meta line this parse observes — see
+  // handleCodexMeta's own doc comment for why identity fields must not
+  // follow a later (possibly replayed-parent) meta.
+  const metaState = { seen: false };
 
   for (const e of jsonLines(raw)) {
     const ms = toMs(e.timestamp);
     noteSpan(rec, ms);
-    processCodexLine(rec, turns, stats, titleState, usageState, latState, e, ms, withTurns);
+    processCodexLine(rec, turns, stats, titleState, usageState, latState, metaState, e, ms, withTurns);
   }
 
   finalizeCodexUsage(rec, usageState);

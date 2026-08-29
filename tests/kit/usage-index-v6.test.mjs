@@ -400,3 +400,36 @@ test('parseCodex v11: turn_aborted clears pending latency state so a later agent
   const { session: rec } = parseCodex(lines, { id: 'cx2' });
   assert.equal(rec.latCount, 0);
 });
+
+// Sub-agent rollouts replay their PARENT thread's entire prior history before
+// their own new turns (openai/codex thread_spawn behavior — see parseCodex's
+// own doc comment), including the parent's OWN session_meta line further down
+// the file. handleCodexMeta was last-wins, so that replayed parent meta
+// relabeled rec.threadSource subagent→user and re-keyed rec.id to the
+// parent's — letting the subagent's (parent-duplicating) token totals escape
+// finalizeCodexUsage's guard entirely. Measured on the reference corpus: 155
+// of 318 subagent-first rollouts relabeled this way.
+test('parseCodex: FIRST session_meta wins identity — a replayed parent meta cannot relabel a subagent rollout', () => {
+  const subagentThenParentReplay = [
+    JSON.stringify({ type: 'session_meta', payload: { id: 'subA', cwd: '/tmp/p', thread_source: 'subagent' }, timestamp: T0 }),
+    JSON.stringify({ type: 'event_msg', payload: { type: 'user_message', message: 'delegated task' }, timestamp: T0 }),
+    JSON.stringify({ type: 'event_msg', payload: { type: 'token_count', info: { total_token_usage: { input_tokens: 900000, cached_input_tokens: 800000, output_tokens: 9000, total_tokens: 909000 } } }, timestamp: T0 }),
+    // The thread_spawn replay: the PARENT's own session_meta line, later in the same file.
+    JSON.stringify({ type: 'session_meta', payload: { id: 'parentB', cwd: '/tmp/p', thread_source: 'user' }, timestamp: T1 }),
+  ].join('\n');
+  const { session: sub } = parseCodex(subagentThenParentReplay, { id: 'subA' });
+  assert.equal(sub.id, 'subA', "the file's own id, not the replayed parent's");
+  assert.equal(sub.threadSource, 'subagent', "the file's own identity — not relabeled by the replay");
+  assert.deepEqual(sub.usage, [], 'subagent usage stays stripped, not billed to the parent a second time');
+
+  // Inverse control: an ordinary single-meta user rollout is unaffected.
+  const singleMeta = [
+    JSON.stringify({ type: 'session_meta', payload: { id: 'userC', cwd: '/tmp/p', thread_source: 'user' }, timestamp: T0 }),
+    JSON.stringify({ type: 'event_msg', payload: { type: 'user_message', message: 'go' }, timestamp: T0 }),
+    JSON.stringify({ type: 'event_msg', payload: { type: 'token_count', info: { total_token_usage: { input_tokens: 100, cached_input_tokens: 40, output_tokens: 20, total_tokens: 120 } } }, timestamp: T0 }),
+  ].join('\n');
+  const { session: user } = parseCodex(singleMeta, { id: 'userC' });
+  assert.equal(user.id, 'userC');
+  assert.equal(user.threadSource, 'user');
+  assert.equal(user.usage.length, 1, 'a genuine single-meta user rollout still bills normally');
+});

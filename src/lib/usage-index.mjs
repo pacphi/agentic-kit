@@ -101,8 +101,23 @@ export { MAX_TURN_CHARS, mergeIntervals, maskSecrets, normalizeSessionIdentity, 
  *       `mode` for every Codex session — the taxonomy's plan/auto-edit/
  *       unrestricted arms could not fire at all. The parser now extracts
  *       `.type`, so every Codex record must be re-derived rather than left
- *       carrying the failed stringification and its missing posture. */
-export const SCHEMA_VERSION = 12;
+ *       carrying the failed stringification and its missing posture.
+ *  v13: two parseCodex defects corrected together, both inflating persisted
+ *       counts/identities. (a) `session_meta` was last-wins; a subagent
+ *       rollout replays its parent thread's history, including the parent's
+ *       OWN session_meta line, so a later meta relabeled `threadSource`
+ *       subagent→user and re-keyed `id` to the parent's — letting up to 155
+ *       of 318 observed subagent rollouts escape the finalizeCodexUsage
+ *       guard and double-bill the parent. The FIRST session_meta now wins
+ *       for identity (id/threadSource/cwd). (b) every `user_message`/
+ *       `UserMessage` counted toward `prompts` regardless of origin; Codex
+ *       carried no equivalent of the harness/mirror gate v5 already applies
+ *       to Claude, so harness output and mirrored cross-host envelopes
+ *       (task notifications, command stdout, teammate-message/cross-session
+ *       deliveries) inflated Codex prompt counts. A v12-cached Codex record
+ *       carries the old (possibly relabeled, possibly inflated) figures and
+ *       must be re-derived rather than trusted as-is. */
+export const SCHEMA_VERSION = 13;
 
 const DAY_MS = 86_400_000;
 // One day of slack past dashboard-server.mjs's 365-day clampDays ceiling —
