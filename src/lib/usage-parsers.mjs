@@ -376,14 +376,25 @@ export function addUsage(rec, day, model, u) {
 /**
  * Harness-output envelopes: user-role entries whose text the HARNESS wrote —
  * background-task notifications, command stdout/stderr dumps, local-command
- * caveats. They carry neither `isMeta` nor a tool_result block, so text shape
- * is the only signal. Measured on the real corpus (envelope at start of user
- * text): task-notification 550, bash-stdout 85, local-command-stdout 60,
- * local-command-caveat 183; the stderr variants are the symmetric error-path
- * siblings. NOT here: bash-input (the person typed that `! cmd`) and the
- * command-name/-message/-args triple (the person invoked that slash command).
+ * caveats, and the ambient browser-state block. They carry neither `isMeta` nor
+ * a tool_result block, so text shape is the only signal. Measured on the real
+ * corpus (envelope at start of user text): task-notification 831,
+ * local-command-stdout 132, local-command-caveat 87, bash-stdout 53; the stderr
+ * variants are the symmetric error-path siblings. NOT here: bash-input (the
+ * person typed that `! cmd`) and the command-name/-message triple (the person
+ * invoked that slash command).
+ *
+ * `in-app-browser-context` joined the list once the provenance work measured it:
+ * 33 such turns reached kind 'prompt' (all on codex; 0 on claude today, but the
+ * regex is shared so both hosts are covered), where they inflated `prompts` and
+ * were then tagged 'human' by provenanceOf — the harness writing in the
+ * operator's name. It is also the ONLY one of these names that carries
+ * attributes (`source="ambient-ui-state"`), which is why the terminator is
+ * `[\s>]` rather than `>`. That relaxation is behaviour-preserving on measured
+ * data: across 1,103 occurrences of the other five names, ZERO carried an
+ * attribute, and `[\s>]` still refuses a longer name (`<task-notification-x>`).
  */
-const HARNESS_OUTPUT_RE = /^\s*<(task-notification|bash-stdout|bash-stderr|local-command-stdout|local-command-stderr|local-command-caveat)>/;
+const HARNESS_OUTPUT_RE = /^\s*<(task-notification|bash-stdout|bash-stderr|local-command-stdout|local-command-stderr|local-command-caveat|in-app-browser-context)[\s>]/;
 
 function entryText(entry) {
   const content = entry?.message?.content;
@@ -450,6 +461,11 @@ function recordClaudeUserTurn(rec, turns, titleState, latState, e, ms, decoded, 
   // interrupt, a slash-command record and a bash-input are all prompt-kind
   // turns the person initiated, and provenanceOf is what separates them from
   // typed instructions.
+  // I1: the fingerprinted POPULATION is not identical across hosts — claude
+  // fingerprints everything userTurnKind calls 'prompt', while codex sits
+  // additionally behind CODEX_MACHINE_ENVELOPE_RE, so agent-delivered turns are
+  // visible as `p: 'agent'` here and simply absent there. Cross-host prompt
+  // counts must be compared per tag, not in total.
   const kind = userTurnKind(e);
   if (kind === 'prompt') notePromptFingerprint(rec, decoded.text, kind);
   if (withTurns && decoded.text) {
@@ -767,6 +783,9 @@ function handleCodexUserMessage(rec, turns, stats, titleState, latState, decoded
     // Codex's kind is exactly this gate's verdict (see the turn row below), so
     // a gated message contributes no fingerprint — the layer sits behind the
     // harness/mirror gate rather than re-litigating it.
+    // I1: that makes codex's fingerprinted population NARROWER than claude's —
+    // CODEX_MACHINE_ENVELOPE_RE removes agent deliveries here, whereas claude
+    // records them as `p: 'agent'`. Compare hosts per tag, never in total.
     notePromptFingerprint(rec, text, 'prompt');
   }
   if (withTurns && text) {

@@ -123,8 +123,16 @@ export { MAX_TURN_CHARS, mergeIntervals, maskSecrets, normalizeSessionIdentity, 
  *       `promptFPOverflow`. A v13-cached record carries neither, so the
  *       Prompts view would read an empty corpus for exactly the sessions
  *       already on disk. Prompt TEXT is not part of this (or any) bump — see
- *       usage-parsers.promptFingerprint. */
-export const SCHEMA_VERSION = 14;
+ *       usage-parsers.promptFingerprint.
+ *  v15: `in-app-browser-context` joins HARNESS_OUTPUT_RE. Measured: 33 such
+ *       turns reached kind 'prompt', so a v14 record counts them in `prompts`
+ *       (the harness writing in the operator's name) AND carries a `human`
+ *       fingerprint for each. Both figures change for an affected session, so
+ *       every record must be re-derived rather than corrected in place. The
+ *       provenance rules move with it — session-continuation prose is now
+ *       `control`, and the unevidenced `<command-args>` opener is gone — which
+ *       also re-tags cached fingerprints. */
+export const SCHEMA_VERSION = 15;
 
 const DAY_MS = 86_400_000;
 // One day of slack past dashboard-server.mjs's 365-day clampDays ceiling —

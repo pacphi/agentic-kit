@@ -162,6 +162,10 @@ function recordUserMessage(rec, turns, { rowId, at, withTurns, partsByMessage })
   // Every opencode user message IS a prompt-kind turn (this source carries no
   // harness-injected user rows), so it always fingerprints — on BOTH paths,
   // which is why the scan path now loads user text parts (see loadTextParts).
+  // I1: that makes this the WIDEST of the three fingerprinted populations —
+  // claude gates on userTurnKind, codex additionally on
+  // CODEX_MACHINE_ENVELOPE_RE, opencode on nothing. Compare per provenance tag,
+  // never in total.
   const text = messagePartsText(partsByMessage, rowId, ['text']);
   notePromptFingerprint(rec, text, 'prompt');
   if (!withTurns) return;
@@ -257,7 +261,18 @@ function processMessageRow(rec, turns, row, { withTurns, partsByMessage }) {
  *  reasoning, for both roles) to build turn rows; the scan path wants only the
  *  USER text parts, which is all a prompt fingerprint reads — the assistant
  *  bodies it would otherwise pull in are the bulk of the store and are never
- *  looked at there. */
+ *  looked at there.
+ *
+ *  This is the one place the scan path reads message BODIES at all, so its cost
+ *  was measured rather than assumed. The live store on this machine is too
+ *  small to time (2 sessions, 2 parts; ~5 µs/session, where the two
+ *  `json_extract` predicates cannot pay for themselves because there is nothing
+ *  to exclude). Benchmarked instead against a synthetic store at realistic scale
+ *  — 300 sessions, 18k messages, 63k parts, 75 MB — the filtered query runs
+ *  **45 µs/session and materializes 0.6 MB**, against 125 µs/session and 61 MB
+ *  for the unfiltered join the reader path uses: 2.8x faster, and ~100x less
+ *  text pulled into memory. Only the fingerprints are retained; the text itself
+ *  is discarded with the row. */
 function loadTextParts(db, id, withTurns) {
   if (withTurns) {
     return db.prepare(`

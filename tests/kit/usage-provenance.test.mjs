@@ -45,6 +45,33 @@ test('control: person-initiated turns that are not typed instructions', () => {
   assert.equal(provenanceOf('[Request interrupted by user for tool use]'), 'control');
   assert.equal(provenanceOf('<bash-input>git checkout main && git pull</bash-input>'), 'control');
   assert.equal(provenanceOf('[Image #1]'), 'control');
+  // Resuming a compacted session: the person asked for it, the sentence is the
+  // harness's. 17 such turns reach kind 'prompt' on the reference corpus.
+  assert.equal(
+    provenanceOf('This session is being continued from a previous conversation that ran out of context.'),
+    'control',
+  );
+});
+
+// The evidence standard, pinned as behaviour: a shape measured at ZERO gets no
+// rule, even when it looks like a sibling of one that does. `<command-args>`
+// never opens a turn (it only ever follows command-name/-message inside one,
+// which the anchored rule above already covers), so it must fall through — the
+// same standard that kept the two unobserved qe-court patterns out.
+test('an unevidenced sibling shape is NOT special-cased', () => {
+  assert.equal(provenanceOf('<command-args>--force</command-args>'), 'human');
+  assert.equal(
+    provenanceOf('<command-name>/loop</command-name>\n<command-args>5m</command-args>'),
+    'control',
+    'the real shape is still caught by its opener',
+  );
+});
+
+// Measured ZERO reaching kind 'prompt', so deliberately not rules. Pinned so a
+// future reader sees the omission is a decision, not an oversight.
+test('shapes measured at zero stay human rather than being guessed at', () => {
+  assert.equal(provenanceOf('<system-reminder>do not forget</system-reminder>'), 'human');
+  assert.equal(provenanceOf('Please continue the conversation from where we left it off'), 'human');
 });
 
 test('an attachment-only prompt turn is control, but only when the KIND says it was a prompt', () => {

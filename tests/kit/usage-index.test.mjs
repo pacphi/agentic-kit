@@ -1603,6 +1603,33 @@ test('promptFPs are bounded per session, with the drop counted rather than silen
   assert.equal(rec.promptFPOverflow, 1);
 });
 
+// v15. The ambient browser-state block is harness output, but it carries
+// ATTRIBUTES (`source="ambient-ui-state"`), which the old `>` terminator could
+// not match — so 33 measured turns counted toward `prompts` and were then
+// fingerprinted as `human`: the harness writing in the operator's name. Both
+// effects have to disappear, which is why this asserts the count as well as the
+// fingerprint.
+test('parseClaude: an in-app-browser-context block is harness output, not a prompt', () => {
+  const T0 = '2026-08-20T10:00:00.000Z';
+  const at = (s) => new Date(Date.parse(T0) + s * 1000).toISOString();
+  const user = (t, text) => JSON.stringify({ type: 'user', timestamp: at(t), message: { role: 'user', content: text } });
+  const lines = [
+    user(0, 'why is the build failing?'),
+    user(1, ' <in-app-browser-context source="ambient-ui-state">\nThis block is automatic.\n</in-app-browser-context>'),
+    // The attribute-less form must gate too — the terminator accepts both.
+    user(2, '<in-app-browser-context>bare</in-app-browser-context>'),
+    // Session-continuation prose still reaches kind 'prompt'; it is the person
+    // resuming, so it fingerprints — as control, never as something they typed.
+    user(3, 'This session is being continued from a previous conversation that ran out of context.'),
+  ].join('\n');
+  const { session: rec, turns } = parseClaude(lines, { id: 'sess-browser-ctx', withTurns: true });
+  assert.equal(rec.prompts, 2, 'neither browser-context block counts as a prompt');
+  assert.deepEqual(turns.filter((t) => t.role === 'user').map((t) => t.kind),
+    ['prompt', 'context', 'context', 'prompt']);
+  assert.deepEqual(rec.promptFPs.map((f) => f.p), ['human', 'control'],
+    'the gated blocks contribute no fingerprint at all');
+});
+
 test('blankSession v14 fingerprint fields default honest-empty', () => {
   const rec = blankSession('s1', 'claude');
   assert.deepEqual(rec.promptFPs, []);

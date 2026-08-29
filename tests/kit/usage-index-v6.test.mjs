@@ -524,3 +524,26 @@ test('a prompt fingerprints identically whichever host recorded it', () => {
   assert.deepEqual(codex.promptFPs, claude.promptFPs);
   assert.deepEqual(codex.promptFPs, [{ ...promptFingerprint(text), p: 'human' }]);
 });
+
+// v15. The ambient browser-state block is harness output, but it carries
+// ATTRIBUTES (`source="ambient-ui-state"`), which the old `>` terminator could
+// not match. All 33 measured occurrences are on this host, where they counted
+// toward `prompts` and were then fingerprinted as `human` — the harness writing
+// in the operator's name. Both effects have to disappear, which is why this
+// asserts the count as well as the fingerprint. The regex is shared, so
+// parseClaude has the mirror of this test.
+test('parseCodex: an in-app-browser-context block is harness output, not a prompt', () => {
+  const msg = (text) => JSON.stringify({ type: 'event_msg', payload: { type: 'user_message', message: text }, timestamp: T0 });
+  const lines = [
+    JSON.stringify({ type: 'session_meta', payload: { id: 'cxbc', cwd: '/tmp/p', thread_source: 'user' }, timestamp: T0 }),
+    msg('run the tests'),
+    msg(' <in-app-browser-context source="ambient-ui-state">\nambient state\n</in-app-browser-context>'),
+    msg('<in-app-browser-context>bare</in-app-browser-context>'),
+    // Session-continuation prose still reaches kind 'prompt' — it is the person
+    // resuming — so it fingerprints, as control rather than as something typed.
+    msg('This session is being continued from a previous conversation that ran out of context.'),
+  ].join('\n');
+  const { session: rec } = parseCodex(lines, { id: 'cxbc' });
+  assert.equal(rec.prompts, 2, 'neither browser-context block counts as a prompt');
+  assert.deepEqual(rec.promptFPs.map((f) => f.p), ['human', 'control']);
+});

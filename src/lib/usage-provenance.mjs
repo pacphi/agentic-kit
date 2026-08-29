@@ -54,15 +54,26 @@ const RULES = [
   // The interrupt record ("[Request interrupted by user]" and its "for tool
   // use" variant; 162).
   ['control', /^\s*\[Request interrupted by user/],
-  // The slash-command RECORD triple Claude Code writes for an invoked command
-  // (name/message/args, in either order; 76). The person picked the command —
-  // they did not type this XML.
-  ['control', /^\s*<command-(?:name|message|args)>/],
+  // The slash-command RECORD Claude Code writes for an invoked command, in
+  // either order (name 107, message 52). The person picked the command — they
+  // did not type this XML. `<command-args>` is deliberately NOT here: zero
+  // turns open with it anywhere in the measured corpus — it only ever follows
+  // one of these two inside the same turn, which the anchor already covers —
+  // and an unevidenced pattern is what this module refuses to carry.
+  ['control', /^\s*<command-(?:name|message)>/],
   // Bash mode (`! cmd`): the person ran a command, they did not instruct the
   // model (32).
   ['control', /^\s*<bash-input>/],
   // A pasted-image reference with nothing else in the turn (12).
   ['control', /^\s*\[Image #\d+\]\s*$/],
+  // Resuming a compacted or continued session. The person asked for that (a
+  // `/compact`, a `--continue`); the sentence itself is the harness's, so it is
+  // not a typed instruction. Measured 17 turns reaching kind 'prompt' — claude
+  // 8, codex 9 — which is the ENTIRE residue once `in-app-browser-context`
+  // joined the harness gate. Sibling shapes stay out on the same evidence
+  // standard: `<system-reminder`, "Please continue the conversation…" and the
+  // "Caveat:" prose each measured ZERO here (the latter two are `isMeta`).
+  ['control', /^\s*This session is being continued from a previous conversation/],
 ];
 
 /**
