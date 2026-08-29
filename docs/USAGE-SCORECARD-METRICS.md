@@ -1883,6 +1883,91 @@ the full id.
 
 ---
 
+## 20. Prompt patterns (`ak usage prompts`)
+
+**Displayed as:** a terminal-only report in six sections — `Typed prompts`
+(count, provenance split, questions, persona openers), `Supervision taps`
+(count, share, and a by-token-length table), `Host interplay` (per-host typed /
+taps / tap share / p90 typed tokens / personas / the operator's own trailing
+p75, then a per-host monthly tap-share series), `Recurring clusters`,
+`Re-asks`, and `Headless share`. `--deep` appends four exemplar tables that
+carry verbatim prompt text. `--json` emits the same numbers; `--deep --json`
+adds an `exemplars` key that **contains prompt text**.
+
+**Formula:**
+
+```text
+typedShare      = |{fp : fp.p = 'human'}| / |fingerprints|
+tapLength[t]    = |{fp : fp.p = 'human' ∧ fp.t = t}|             for t ≤ TAP_MAX_TOKENS
+monthTap[h][m]  = Σ promptStatsByDay[d].byHost[h].taps / Σ …typed   over d in month m
+clusters        = crossSessionClusters(nearDupClusters(typed, J ≥ 0.6))
+reAsks          = reAskPairs(typed, J ≥ 0.8, window ≤ 6 turns)
+headlessShare   = Σ responses[typedPrompts = 0] / Σ responses[typedPrompts ≠ null]
+```
+
+**Source:** the window is parsed by `parsePromptWindow`, where all history means
+`ALL_WINDOW_DAYS` (`src/commands/usage.mjs:397`) — 365 days, which is all the
+index can hold, since `KEEP_MS` prunes a cache entry at 366
+(`usage-index.mjs:146`). The fingerprints come from the index CACHE
+(`readPromptEntries`, `src/commands/usage.mjs:432`) because the aggregate
+publishes prompt counts but not the fingerprint layer itself; the command calls
+`readIndex` first, which rewrites that cache before aggregating, so the two
+never disagree. `decoratedFingerprints` (`:472`) attaches session, day and host
+and converts the stored numeric `q`/`o` flags to the booleans
+`usage-prompt-patterns.mjs` reads. The section arithmetic is `provenanceSplit`
+(`:521`), `tapLengthRows` (`:553`), `monthlyTapShare` (`:590`), `clusterRow`
+(`:650`), `headlessShare` (`:704`), assembled in `promptReport` (`:728`).
+Clustering runs at `CLUSTER_JACCARD` (`:403`) and re-asks at `REASK_JACCARD`
+(`:408`).
+
+The deep pass re-reads transcripts through the same per-host parsers the scan
+path uses (`reReadTurns`, `:801`) and re-derives each turn's hash under the
+scan path's own two gates — `kind === 'prompt'` and `provenanceOf` on the same
+text (`humanPromptTurns`, `:786`) — which is what makes the join exact.
+`exemplarCandidates` (`:870`) orders sessions by how many wanted exemplars each
+covers and `collectExemplars` (`:917`) opens them only while something is still
+unresolved, falling through to a smaller sibling transcript when one is past
+`MAX_DEEP_FILE_BYTES` (`:773`).
+
+**Worked example:** on the reference corpus at the all-history window, 5,681
+fingerprinted prompt turns carry 2,656 tagged `human` — a typed share of 46.8%
+— of which 322 run to `TAP_MAX_TOKENS` (4) tokens or fewer, a 12.1% tap share.
+Per host that is 11.6% on Claude against 12.3% on Codex, and the monthly series
+separates them: Claude 14.6% → 10.9% across 2026-07 → 2026-08 while Codex runs
+7.7% → 15.5%. A `--deep` run over the same corpus opened 48 transcripts in
+0.6 s and resolved 59 of the 60 exemplars it wanted; the one it did not, and
+why, is printed rather than left blank.
+
+**What this does not model:**
+
+- **The typed share here is not the research's 27.6%.** That figure was
+  measured over every parser-visible user-role turn; a fingerprint exists only
+  for a turn the parsers already classed `kind: 'prompt'`, so this denominator
+  excludes tool results and harness envelopes before the provenance split even
+  runs. The two answer different questions and must not be compared.
+- **Provenance error is one-directional by design** (spec §2.1): an
+  unrecognized machine template counts as `human`, so the typed figure is an
+  over-statement, never an under-statement.
+- **The personal baseline is `n/a` at the all-history window**, not zero and not
+  missing: a trailing 90-day baseline needs a window before the displayed one,
+  and all history has none. At a bounded window it is still `null` until the
+  corpus carries `BASELINE_MIN_ACTIVE_DAYS` (30) days of typed prompts in that
+  trailing span — measured here, this machine has 22, so the honest answer is
+  that there is not yet a personal normal to compare against.
+- **Cluster names are provisional.** A seed is a shape predicate, not a
+  reading of the text, so two different clusters can resolve to the same seed
+  name; `source` on each row says whether the name came from a seed or from
+  `characterize`, and a characterized row asserts only what its own counts say.
+- **`--deep` prints whatever was typed.** Exemplars are run through
+  `maskSecrets`, which catches key-shaped strings and not everything a person
+  might have pasted — an address or a file path typed into a prompt is printed
+  as typed. It is opt-in for that reason, it writes nothing, and with `--json`
+  the text is in the payload.
+- **The deep pass cost is measured, not estimated.** The header states the
+  transcripts opened and the wall time for that run; another corpus will differ.
+
+---
+
 ## Appendix A — Fix history
 
 The main body describes only current behavior; this appendix records what
