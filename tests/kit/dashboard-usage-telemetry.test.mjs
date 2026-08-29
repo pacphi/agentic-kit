@@ -30,6 +30,19 @@ test('the scorecard no longer ships a telemetry coverage panel', () => {
   assert.doesNotMatch(CSS, /\.telemetry-(card|grid)/);
 });
 
+// The tabbar pills outlived the panel, and they must not carry its leftovers:
+// a read of a field nothing populates renders nothing, but it reads as though
+// the payload still carries a capability matrix. Their real input is
+// status/reason (plus the counted diagnostics), asserted here alongside.
+test('the source-health pills read status and reason, never a capability field', () => {
+  assert.doesNotMatch(JS, /item\.capabilities/);
+  assert.doesNotMatch(JS, /pt\.capabilities/);
+  assert.doesNotMatch(JS, /caps\.toolCalls/);
+  assert.match(JS, /status:String\(item\.status\|\|"not-read"\),reason:item\.reason/);
+  assert.match(JS, /pt\.status\+\(pt\.reason\?" · "\+pt\.reason:""\)/);
+  assert.match(JS, /sp-status/, 'the pill still renders the lead status');
+});
+
 // ── /api/usage payload: rhythm, mode, provider, previous window ────────────
 //
 // The dashboard-server route delegates its entire aggregation to an

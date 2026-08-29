@@ -91,7 +91,7 @@ import { renderUsage } from './usage-orchestrators.mjs';
       var grp=SOURCE_HEALTH_GROUPS[g],present=[];
       for(var p=0; p<grp.parts.length; p++){
         var part=grp.parts[p],item=health[part.key];
-        if(item) present.push({status:String(item.status||"not-read"),reason:item.reason,diagnostics:item.diagnostics,capabilities:item.capabilities,sub:part.sub});
+        if(item) present.push({status:String(item.status||"not-read"),reason:item.reason,diagnostics:item.diagnostics,sub:part.sub});
       }
       if(!present.length)continue;
       var lead=present.slice().sort(function(a,b){
@@ -103,8 +103,6 @@ import { renderUsage } from './usage-orchestrators.mjs';
         if(q&&q.files) d+=" · "+fmtNum(q.responses)+" responses / "+fmtNum(q.files)+" files";
         if(q&&q.warnings&&q.warnings.length) d+=" · "+q.warnings.join(", ");
         if(q&&q.common) d+=" · "+fmtNum(q.common.unitsParsed)+"/"+fmtNum(q.common.unitsSeen)+" parsed · "+fmtNum(q.common.prompts)+" prompts / "+fmtNum(q.common.responses)+" responses";
-        var caps=pt.capabilities;
-        if(caps) d+=" · tools "+String(caps.toolCalls||"unavailable");
         return pt.sub?pt.sub+": "+d:d;
       }).join(" · ");
       pills.push('<span class="source-pill" data-status="'+esc(lead.status)+'">'
