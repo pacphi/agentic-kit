@@ -286,6 +286,35 @@ test('parseCodex v11: mode, duration, aborts, ctx window, typed tools', () => {
   assert.equal(rec.tools.CommandExecution, 1);
 });
 
+// Codex's duration_ms is host-measured turn wall-clock and INCLUDES time the
+// turn spent blocked on an approval prompt, so a turn left awaiting approval
+// overnight is recorded as a multi-hour "response". The prompt-gap path
+// discards exactly that; the fallback must too, or the same wait becomes a
+// latency sample. Real corpus max: 94,079,450 ms ≈ 26.1 h.
+test('parseCodex: an idle-resume duration_ms is excluded from latency sampling, like the other two paths', () => {
+  const plusSec = (t, s) => new Date(Date.parse(t) + s * 1000).toISOString();
+  const lines = [
+    JSON.stringify({ type: 'session_meta', payload: { id: 'cx3', cwd: '/tmp/p', thread_source: 'user' }, timestamp: T0 }),
+    JSON.stringify({ type: 'event_msg', payload: { type: 'task_started', started_at: T0, model_context_window: 272000, turn_id: 't1' }, timestamp: T0 }),
+    JSON.stringify({ type: 'event_msg', payload: { type: 'task_complete', duration_ms: 94_079_450, error: null, turn_id: 't1' }, timestamp: plusSec(T0, 94_079) }),
+  ].join('\n');
+  const { session: rec } = parseCodex(lines, { id: 'cx3' });
+  assert.equal(rec.latCount, 0, '26.1 h is an idle resume / blocked approval, not a response latency');
+  assert.equal(rec.latHist, null, 'no sample at all — not an overflow-bucket entry beside genuinely slow turns');
+});
+
+test('parseCodex: a duration_ms inside the cap still samples through the fallback', () => {
+  const plusSec = (t, s) => new Date(Date.parse(t) + s * 1000).toISOString();
+  const lines = [
+    JSON.stringify({ type: 'session_meta', payload: { id: 'cx4', cwd: '/tmp/p', thread_source: 'user' }, timestamp: T0 }),
+    JSON.stringify({ type: 'event_msg', payload: { type: 'task_started', started_at: T0, model_context_window: 272000, turn_id: 't1' }, timestamp: T0 }),
+    JSON.stringify({ type: 'event_msg', payload: { type: 'task_complete', duration_ms: 45_000, error: null, turn_id: 't1' }, timestamp: plusSec(T0, 45) }),
+  ].join('\n');
+  const { session: rec } = parseCodex(lines, { id: 'cx4' });
+  assert.equal(rec.latCount, 1, 'the fallback is not disabled, only bounded');
+  assert.equal(rec.latHist[4], 1, '45s lands in the (30,60] bucket');
+});
+
 test('parseCodex v11: turn_aborted clears pending latency state so a later agent_message is not mis-sampled', () => {
   const plusSec = (t, s) => new Date(Date.parse(t) + s * 1000).toISOString();
   const lines = [

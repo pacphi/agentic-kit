@@ -566,11 +566,16 @@ function handleCodexTaskStarted(rec, latState, payload) {
  *  duration for the turn, used as a latency sample ONLY when no prompt→
  *  agent-message gap already covered this turn (`latState.turnStartedAt` is
  *  cleared the moment such a gap fires — see handleCodexAssistantMessage —
- *  so a turn is never double-sampled). A non-null `error` counts as an
+ *  so a turn is never double-sampled). MAX_LATENCY_SAMPLE_SECONDS applies here
+ *  exactly as it does to the other two sampling paths: duration_ms is turn
+ *  wall-clock and includes time blocked on an approval prompt, so a turn left
+ *  awaiting approval overnight arrives as a multi-hour "response" that the
+ *  prompt-gap path would have discarded. A non-null `error` counts as an
  *  exception regardless of whether the fallback sample fires. */
 function handleCodexTaskComplete(rec, latState, payload) {
   const duration = Number(payload.duration_ms);
-  if (latState.turnStartedAt !== null && Number.isFinite(duration)) {
+  if (latState.turnStartedAt !== null && Number.isFinite(duration)
+    && duration / 1000 <= MAX_LATENCY_SAMPLE_SECONDS) {
     noteLatencySample(rec, duration / 1000);
   }
   latState.turnStartedAt = null;
