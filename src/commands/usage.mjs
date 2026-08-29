@@ -187,7 +187,7 @@ function printScoreHero(agg, windowDays) {
 function printScoreCadence(agg) {
   const t = agg.totals ?? {};
   const active = Object.keys(agg.byDay ?? {}).length;
-  heading('cadence');
+  heading('Cadence');
   const perDay = active ? (Number(t.sessions) || 0) / active : null;
   // byDay's presence contract is BILLED days, which is why the aggregate keeps
   // a separate engagedByDay map — the two sets genuinely differ. The browser
@@ -211,15 +211,15 @@ function printScoreCadence(agg) {
 
 function printScoreRhythm(agg) {
   const r = agg.rhythm ?? {};
-  heading('your rhythm — session length · response latency');
+  heading('Your rhythm — session length · response latency');
   info(`SESSION LENGTH          median ${fmtAtLeast(r.lenMedianSeconds, LEN_OVERFLOW)}  `
     + dim(`P90 ${fmtAtLeast(r.lenP90Seconds, LEN_OVERFLOW)}`));
   info(`RESPONSE LATENCY        p50 ${fmtAtLeast(r.latP50, LAT_OVERFLOW)}  `
     + dim(`p95 ${fmtAtLeast(r.latP95, LAT_OVERFLOW)} · n ${fmtNum(r.latCount)}`));
 }
 
-/** Shared renderer for the mode/served-by tables: `keys` decides the row set
- *  and order, defaulting an absent bucket to zero — so a table always shows
+/** Shared renderer for the posture table: `keys` decides the row set and
+ *  order, defaulting an absent bucket to zero — so a table always shows
  *  every row the caller asks for (including 'not-recorded'), never only the
  *  rows that happened to have data. */
 function printBucketTable(title, map, keys) {
@@ -232,11 +232,11 @@ function printBucketTable(title, map, keys) {
 }
 
 function printScoreModeTable(agg) {
-  printBucketTable('mode — permission posture', agg.byMode ?? {}, [...MODES, 'not-recorded']);
+  printBucketTable('Mode — permission posture', agg.byMode ?? {}, [...MODES, 'not-recorded']);
 }
 
 function printScoreReliability(agg) {
-  heading('reliability — turns that never landed');
+  heading('Reliability — turns that never landed');
   const t = agg.totals ?? {};
   const responses = Number(t.responses) || 0;
   const exceptions = Number(t.exceptions) || 0;

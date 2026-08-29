@@ -147,6 +147,25 @@ test('ak usage score prints the offline scorecard summary', () => {
   fs.rmSync(sb.home, { recursive: true, force: true });
 });
 
+// Section headings are Sentence case, the same tier and the same argument as
+// the dashboard panel titles they mirror. The command banner is not a section
+// heading and keeps the CLI's own spelling.
+test('ak usage score section headings are sentence-cased; the command banner is not', () => {
+  const sb = sandbox();
+  writeScoreSession(sb, 'score-fixture-headings');
+  const result = ak(['usage', 'score'], sb);
+  assert.equal(result.status, 0, result.stderr);
+  for (const heading of [
+    'Cadence',
+    'Your rhythm — session length',
+    'Mode — permission posture',
+    'Reliability — turns that never landed',
+  ]) assert.ok(result.stdout.includes(heading), `missing heading ${JSON.stringify(heading)}`);
+  assert.match(result.stdout, /ak usage — scorecard \(last \d+d\)/,
+    'the command banner keeps its own spelling');
+  fs.rmSync(sb.home, { recursive: true, force: true });
+});
+
 test('ak usage score --json emits the aggregate projection verbatim', () => {
   const sb = sandbox();
   writeScoreSession(sb, 'score-fixture-2');

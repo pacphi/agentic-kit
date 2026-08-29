@@ -1267,7 +1267,7 @@ Neither transcript store records it, so no panel here may borrow the name.
 drove`. Two panels: `posture, by day` (api-equivalent cost stacked by posture,
 one column per day) and `main vs subagent` (a two-slice donut whose centre reads
 the main-thread share). `ak usage score` prints the matching
-`mode — permission posture` table.
+`Mode — permission posture` table.
 
 ### 16.1 Permission posture
 
@@ -1442,7 +1442,7 @@ own record is attributed to `subagent`.
 $0-by-construction`, note `P90 $…`), and `cost / engaged hour`. Each of the
 five KPI tiles above them additionally carries a footer: a delta chip against
 the previous window and a per-day sparkline. `ak usage score` prints the same
-four under `cadence`.
+four under `Cadence`.
 
 **Formulas:**
 
@@ -1587,8 +1587,8 @@ Two stats — `exceptions / 1k responses` (subtitle `N of M responses`, plus a
 worded flag comparing it to the previous window) and `aborted turns` (subtitle
 `X per 1k codex responses`, or an em dash when the window holds no Codex
 session) — over an `exceptions by day` sparkline that names the single worst
-day. `ak usage score` prints both under its own
-`reliability — turns that never landed` heading, colouring the exception
+day. `ak usage score` prints both under its
+`Reliability — turns that never landed` heading, colouring the exception
 line by whether any fired.
 
 **Formula:**
