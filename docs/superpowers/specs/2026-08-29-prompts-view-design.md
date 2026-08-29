@@ -11,13 +11,35 @@ A new **Usage → Prompts** secondary view (plus three Findings detectors and a 
 
 ### 2.1 Provenance filter (load-bearing)
 
-The 2026-08-29 research measured that **only 27.6% of parser-visible user-role turns were typed by the human** (1,524 of 5,527); the rest is agent-to-agent traffic, harness envelopes, and agentic-kit's own headless spawns. Every metric in this view therefore computes over provenance-filtered prompts only. Provenance classes: `human`, `human-control` (slash records, interrupts, bash-input, image-only), `agent-injected`, `ak-adapter`, `harness`. The classification rules ship in the docs and their residual risk is one-directional by design: an unrecognized machine template counts as human (over-statement, never under-statement).
+The 2026-08-29 research measured that **only 27.6% of parser-visible user-role turns were typed by the human** (1,524 of 5,527); the rest is agent-to-agent traffic, harness envelopes, and agentic-kit's own headless spawns. Every metric in this view therefore computes over provenance-filtered prompts only. The classification rules ship in the docs and their residual risk is one-directional by design: an unrecognized machine template counts as human (over-statement, never under-statement).
+
+**As shipped (schema 15), the vocabulary is four tags, not the research's five.** The research's `harness` class folds in UPSTREAM rather than becoming a tag: the parsers' own gate already routes harness envelopes to `kind: 'context'`, so they never reach the fingerprint layer to be tagged. The remaining four are `human`, `control` (slash records, interrupts, bash-input, image-only, session-continuation prose), `agent` (cross-session and teammate deliveries), and `adapter` (tool-authored headless templates). Two harness shapes that *were* leaking past the gate were fixed at their source rather than tagged: `<in-app-browser-context>` joined `HARNESS_OUTPUT_RE` (33 turns, which had also been inflating `prompts`), and session-continuation prose became `control` (18 turns). Measured residual is now zero — which is not the same as zero: an unseen machine template still counts as human.
+
+Rules are admitted on measurement, not plausibility. Three shapes that look like siblings of admitted rules — `<command-args>`, `<system-reminder>`, "Please continue the conversation…" — each measured zero turns reaching `kind: 'prompt'` and are deliberately absent, as are two qe-court patterns the research proposed but the corpus never showed.
+
+The fingerprinted **population differs per host** and must be compared per tag, never in total: opencode gates on nothing, claude on `userTurnKind`, codex additionally on `CODEX_MACHINE_ENVELOPE_RE` (which is why `agent` fingerprints appear on claude and never on codex).
 
 Prerequisite parser fixes (in flight on PR #186 at spec time): `parseCodex` first-`session_meta`-wins (155/318 subagent rollouts escaped the replay guard) and the codex harness/mirror envelope gate for prompt counting. The view must not build on pre-fix numbers.
 
 ### 2.2 Fingerprints, not text (the F1 layer)
 
-On the existing scan path, each `kind === 'prompt'` turn contributes `{ sha256(normalizedText).slice(0,16), tokenCount, provenanceTag, sortedTokenHashes[8B each] }` persisted on the session record (≈220 KB for this machine's corpus). **Prompt text is never persisted in the index and never crosses a wire.** Exact repeats, near-duplicate clustering (token-set Jaccard over token hashes), tap detection, and length stats all compute from fingerprints alone.
+On the existing scan path, each `kind === 'prompt'` turn contributes `{ h, t, th, p }` to the session record — `sha256(normalizedText)[0..16)`, the token count, a sorted set of **4-byte** token hashes (`sha256(token)[0..8)`), and the provenance tag. **Prompt text is never persisted in the index and never crosses a wire.** Exact repeats, near-duplicate clustering (token-set Jaccard over token hashes), tap detection, and length stats all compute from fingerprints alone.
+
+**Two bounds, both counted rather than silent:** 2,000 fingerprints per session (`promptFPOverflow` carries the excess), and **64 token hashes per fingerprint**. The second was added on measurement during the build. Unique-token counts are heavy-tailed (p50 60, p95 1,035, max 7,873), so an unbounded `th` measured **15 MB against a 2.1 MB index** — capping only the entry count would have been no bound at all, since one pasted document outweighs a hundred real instructions. Because the hashes are sorted and a hash is uniform with respect to its token, the kept 64 are a **bottom-k sketch**: a deterministic, unbiased sample and the standard input to a similarity estimate, not a truncation of the first 64 words.
+
+| k | `th` storage | prompts sketched | Jaccard s.e. at J≈0.6 |
+|---|---|---|---|
+| unbounded | 15.0 MB | 0% | exact |
+| 256 | 6.3 MB | 23% | 0.031 |
+| 128 | 4.1 MB | 34% | 0.043 |
+| **64 (shipped)** | **2.5 MB** | **49%** | **0.061** |
+| 32 | 1.5 MB | 60% | 0.087 |
+
+**Measured size, correcting this spec's original ≈220 KB estimate:** for a 60-day window — 2,173 sessions, 5,635 fingerprints — the layer costs **2.8 MB**, taking the index from 2.1 MB to **5.1 MB**. The original estimate was low by roughly 13x even after bounding, and by 68x unbounded. `MAX_TOKEN_HASHES` is a single named export if a different tradeoff is wanted; changing it requires a re-scan.
+
+`h` is exact and never sketched, so equality questions ("is this the same prompt?") are unaffected by the bound; only similarity between two *long* prompts is estimated.
+
+**The title-clip boundary.** One text field predates this work and is unchanged by it: `session.title` is the model-written title, or failing that the first 100 characters of the session's first prompt, secret-masked (`maskSecrets`) and written to the index at 0600. It is disclosed here because it is the single place prompt-derived text reaches the index — the fingerprint layer adds no second one, and the acceptance criterion in §10 is about the fingerprint layer, not a claim that the title changed.
 
 ### 2.3 Privacy split
 
@@ -136,7 +158,7 @@ Cross-host mirror dedup (exact-twin prompts counted once) remains a recorded fol
 
 ## 10. Acceptance criteria (sketch)
 
-- Zero prompt text in any index file or HTTP payload (test-pinned, same tier as the live-snapshot field tests).
+- Zero prompt text added to any index file or HTTP payload by this work (test-pinned, same tier as the live-snapshot field tests). The pre-existing masked 100-char `session.title` is the one prompt-derived text field and is explicitly out of scope — §2.2. Shipped: a parsed record serialized to JSON contains no fixture prompt string, and every fingerprint entry carries exactly the keys `{h,t,th,p}`, verified structurally across the whole corpus.
 - Every rendered figure reproducible by an exported script over the same corpus; every threshold printable with its baseline.
 - A rescan with unchanged corpus reproduces identical metrics AND identical evidence hashes (determinism pin).
 - Coaching cards regenerate only on hash change; dismissal persistence survives rescans and schema bumps.

@@ -76,7 +76,7 @@ schema change — `src/lib/usage-index.mjs:10`, `:135`):
 | Codex CLI | `~/.codex/sessions/<yyyy>/<mm>/<dd>/rollout-<ts>-<sessionId>.jsonl` | one JSON object per line: `session_meta`, `turn_context`, and `event_msg` records; the latter carry **cumulative** `token_count` snapshots plus legacy messages or newer `item_completed` envelopes |
 
 Discovery is **one level of project directories plus that one nested shape**,
-not a recursive walk: `listClaude` (`usage-index.mjs:274-288`) descends into a
+not a recursive walk: `listClaude` (`usage-index.mjs:331-345`) descends into a
 session-id directory only through `listClaudeSubagents`
 (`usage-index.mjs:306-311`), which reads exactly
 `<projectDir>/<sessionId>/subagents/*.jsonl`. A directory that is not a
