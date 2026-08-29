@@ -124,9 +124,37 @@ const VALID_ID = /^[A-Za-z0-9._-]{1,128}$/;
  *  `name` parameter, charset [A-Za-z0-9_-]). Surveyed on this machine's real
  *  corpus (404 files, 2026-08-28): most stems carry a name — a hex-only
  *  pattern would leave most subagent sessions still unopenable, defeating
- *  the point of this fix. Neither capture group's charset contains '/', '.',
- *  or '\', so this is a strict allowlist, not merely "not a plain id". */
+ *  the point of this fix.
+ *
+ *  This regex is NOT the whole grammar: '.' IS in the parent charset, so
+ *  `.` and `..` match it. Use matchSubagentId(), never this constant
+ *  directly. */
 const VALID_SUBAGENT_ID = /^([A-Za-z0-9._-]{1,128})\/(agent-[A-Za-z0-9_-]{1,100})$/;
+
+/** The namespaced-id grammar, complete: VALID_SUBAGENT_ID's charsets PLUS
+ *  the dot-segment rejection, so this is character-for-character the rule
+ *  session-security.mjs's parseNamespacedSessionId applies at the HTTP tier
+ *  (PLAIN_ID_RE + `parentId === '.' || parentId === '..'` + SUBAGENT_STEM_RE).
+ *  The two tiers are kept as separate functions on purpose — the route's also
+ *  owns percent-decoding, which a library caller passing an already-decoded
+ *  id must not get — but they now accept exactly the same id set.
+ *
+ *  The dot check is what the charset cannot do and what matters most here:
+ *  the parent is the only place in this module where caller-shaped text
+ *  becomes a path SEGMENT rather than a filename stem, and path.join
+ *  collapses `..`. `readSession('../agent-x')` used to probe
+ *  `<claudeRoot>/subagents/agent-x.jsonl` — still inside the transcript root,
+ *  so the realpath containment check below could not catch it: containment
+ *  answers "did we leave the root?", not "did we leave the shape?".
+ *
+ *  @returns {{ parentId: string, stem: string }|null} */
+function matchSubagentId(id) {
+  const m = typeof id === 'string' ? VALID_SUBAGENT_ID.exec(id) : null;
+  if (!m) return null;
+  const [, parentId, stem] = m;
+  if (parentId === '.' || parentId === '..') return null;
+  return { parentId, stem };
+}
 
 // ── file discovery ──────────────────────────────────────────────────────────
 
@@ -250,12 +278,21 @@ function listClaudeSubagents(projectDir, sessionId, projectDirName) {
   const out = [];
   const subDir = path.join(projectDir, sessionId, 'subagents');
   for (const f of readDirSafe(subDir)) {
-    if (f.isFile() && f.name.endsWith('.jsonl')) {
-      out.push({
-        file: path.join(subDir, f.name), provider: 'claude', dirName: projectDirName,
-        id: `${sessionId}/${f.name.slice(0, -6)}`,
-      });
-    }
+    if (!f.isFile() || !f.name.endsWith('.jsonl')) continue;
+    const id = `${sessionId}/${f.name.slice(0, -6)}`;
+    // Discovery and resolution share ONE grammar. Without this, any other
+    // file appearing in a subagents/ dir (a summary, an index, a renamed
+    // stem) — or a parent dir name outside the plain-id charset — became a
+    // session row that answers 400 when clicked: a row disclosing title,
+    // project, tokens, cost and timing for a transcript the id grammar has
+    // decided is not addressable. Surveyed 2026-08-28: 411 files, 0 rejected,
+    // so this drops nothing today; it keeps the two sides from disagreeing
+    // when the on-disk shape next changes, at the point of discovery rather
+    // than as a 400 far from its cause.
+    if (!matchSubagentId(id)) continue;
+    out.push({
+      file: path.join(subDir, f.name), provider: 'claude', dirName: projectDirName, id,
+    });
   }
   return out;
 }
@@ -819,8 +856,8 @@ function locate(id, r, cacheFile) {
     }
   }
 
-  const nested = VALID_SUBAGENT_ID.exec(id);
-  if (nested) return locateSubagent(nested[1], nested[2], r.claude, id);
+  const nested = matchSubagentId(id);
+  if (nested) return locateSubagent(nested.parentId, nested.stem, r.claude, id);
 
   for (const d of readDirSafe(r.claude)) {
     if (!d.isDirectory()) continue;
@@ -849,15 +886,28 @@ function locate(id, r, cacheFile) {
  * Read ONE session by id — never a corpus scan. Returns `{ meta, turns }` with
  * every text body run through `maskSecrets`, or `null` when no such session.
  * Throws `ERR_INVALID_SESSION_ID` for an id that fails EITHER id grammar — a
- * plain id (VALID_ID) or a namespaced Claude subagent id (VALID_SUBAGENT_ID,
- * `<parentId>/<stem>`) — before any filesystem access. Both are the same
- * path-traversal guard; the namespaced grammar is just as strict, not looser.
+ * plain id (VALID_ID) or a namespaced Claude subagent id (matchSubagentId,
+ * `<parentId>/<stem>`) — before any filesystem access.
+ *
+ * The namespaced grammar accepts exactly the id set session-security.mjs's
+ * parseNamespacedSessionId accepts at the HTTP tier, dot-segment rejection
+ * included — so this guard is sound on its own and a caller reaching
+ * readSession from outside the route (a CLI, an MCP tool) inherits the same
+ * protection. That parity is enforced by matchSubagentId, not by these two
+ * grammars being kept in step by hand: the parity claim that used to stand
+ * here was false, because '.' is inside the parent charset.
+ *
+ * The plain grammar is deliberately NOT identical to parseSessionId's: it
+ * has no '.'/'..' exclusion, because a plain id is only ever used as a
+ * filename STEM (`${id}.jsonl`), where '..' yields the literal '...jsonl'.
+ * Only the namespaced parent becomes a path segment, which is why only it
+ * needs the check.
  *
  * @param {string} id
  * @param {IndexOptions} [o]
  */
 export async function readSession(id, o = {}) {
-  if (typeof id !== 'string' || (!VALID_ID.test(id) && !VALID_SUBAGENT_ID.test(id))) throw invalidId(id);
+  if (typeof id !== 'string' || (!VALID_ID.test(id) && !matchSubagentId(id))) throw invalidId(id);
   const r = { ...defaultRoots(), ...(o.roots ?? {}) };
 
   // opencode sessions live in the SQLite store, not a JSONL file — resolve

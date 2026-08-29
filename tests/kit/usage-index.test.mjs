@@ -2214,6 +2214,16 @@ test('readSession rejects hostile namespaced-shaped ids without ever resolving t
     'foo/agent-1\\..\\..\\etc', 'a/b/agent-1', 'a//agent-1', '/agent-1',
     'foo/', '/foo/agent-1', 'foo/notanagent', 'foo/Agent-1', 'foo/agent-',
     'foo/agent-1/extra',
+    // Dot-only PARENT segments. These are the cases the charset alone does
+    // not catch ('.' and '-' are both inside it), and the parent is the one
+    // place in this module where request-shaped text becomes a path SEGMENT
+    // rather than a filename stem — path.join collapses it, so '../agent-x'
+    // resolved to <claudeRoot>/subagents/agent-x.jsonl: still inside the
+    // root (so the realpath containment check cannot catch it) but outside
+    // the <project>/<session>/subagents shape the grammar exists to enforce.
+    // The route tier rejects these; this tier must too, or the doc claim of
+    // parity above readSession is false.
+    '../agent-x', './agent-x',
     // 'agent-1' and '..' (bare, no slash) are deliberately NOT here — both
     // are syntactically valid PLAIN ids under VALID_ID's own pre-existing
     // charset (VALID_ID, unlike session-security.mjs's parseSessionId, has

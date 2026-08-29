@@ -545,6 +545,18 @@ function clampInt(raw, fallback, min, max) {
   return Math.min(max, Math.max(min, n));
 }
 
+/** A 500 that discloses nothing about the filesystem. Node's fs errors embed
+ *  the absolute path ("EACCES: permission denied, open
+ *  '/Users/<user>/.claude/projects/<project-slug>/<uuid>.jsonl'"), and project
+ *  slugs are derived from real working directories — so reflecting the raw
+ *  message hands a client the username, the directory layout, and the names of
+ *  projects worked on. The operator still gets the whole error on stderr, where
+ *  it belongs. */
+function serverFault(res, where, e, message) {
+  console.error(`[dashboard] ${where} failed:`, e);
+  sendJson(res, 500, { error: message });
+}
+
 // Observability History's window control — day-count approximations (a
 // calendar "month" is treated as 30 days, matching clampDays' own plain-day
 // semantics rather than adding calendar-aware month math for a browse filter).
@@ -1377,7 +1389,7 @@ export function startDashboard({
           })),
         });
       } catch (e) {
-        sendJson(res, 500, { error: String(e && e.message || e) });
+        serverFault(res, '/api/usage', e, 'usage index unavailable');
       }
       return;
     }
@@ -1393,7 +1405,7 @@ export function startDashboard({
         const { detectLimitInsights } = await import('./usage-insights.mjs');
         sendJson(res, 200, { ...payload, insights: detectLimitInsights(payload, agg) ?? [] });
       } catch (e) {
-        sendJson(res, 500, { error: String(e && e.message || e) });
+        serverFault(res, '/api/limits', e, 'plan limits unavailable');
       }
       return;
     }
@@ -1459,7 +1471,7 @@ export function startDashboard({
         ));
         sendJson(res, 200, { sessions: all.slice(offset, offset + limit), total: all.length, offset, limit });
       } catch (e) {
-        sendJson(res, 500, { error: String(e && e.message || e) });
+        serverFault(res, '/api/sessions', e, 'usage index unavailable');
       }
       return;
     }
@@ -1503,7 +1515,7 @@ export function startDashboard({
         });
       } catch (e) {
         // Includes the fail-closed path: no masker → no transcript, ever.
-        sendJson(res, 500, { error: String(e && e.message || e) });
+        serverFault(res, '/api/session/:id', e, 'session transcript unavailable');
       }
       return;
     }

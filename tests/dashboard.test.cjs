@@ -856,7 +856,13 @@ async function main() {
       try {
         const r = await get(broken.url + 'api/limits', broken.token);
         assert(r.status === 500, 'expected 500, got ' + r.status);
-        contains(r.body, 'quota backend down');
+        // The body is a STABLE, non-reflective string. Node's fs errors embed
+        // the absolute path, and project slugs come from real working
+        // directories, so reflecting e.message hands the client the username,
+        // the directory layout, and project names. The operator gets the real
+        // error on stderr instead.
+        contains(r.body, 'plan limits unavailable');
+        assert(!r.body.includes('quota backend down'), 'the raw exception message must not be reflected');
       } finally { await broken.close(); }
     });
   } finally {

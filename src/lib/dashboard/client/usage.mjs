@@ -717,8 +717,13 @@ import { renderUsage } from './usage-orchestrators.mjs';
       var v=prov[name], cost=fld(v,"cost"), sess=fld(v,"sessions"), tok=fld(v,"tokens");
       var idle=!sess&&!cost;
       if(!idle)activeHosts++;
+      // hasOwnProperty, not a bare lookup: `name` comes from byHost's keys,
+      // which the loop above deliberately widens beyond the three known
+      // hosts, so `constructor`/`__proto__` would otherwise reach a
+      // prototype value and land unescaped inside a class attribute.
+      var dot=Object.prototype.hasOwnProperty.call(PDOT_CLASS,name)?PDOT_CLASS[name]:"c";
       return '<div class="pcard'+(idle?" idle":"")+'"><div class="ph"><span class="pdot '
-        +(PDOT_CLASS[name]||"c")+'"></span>'+esc(name)+"</div>"
+        +esc(dot)+'"></span>'+esc(name)+"</div>"
         +'<div class="pv mono">'+esc(fmtUsd(cost))+"</div>"
         +'<div class="pl">'+(idle?"no sessions in window":esc(fmtNum(sess))+" sessions &middot; "+esc(fmtTok(tok))+" tokens")+"</div></div>";
     }).join("");
@@ -1331,8 +1336,14 @@ import { renderUsage } from './usage-orchestrators.mjs';
     var weak=(typeof sx.confidence==="number"&&sx.confidence<0.6)?"0":"1";
     var when=sx.start?new Date(sx.start):null;
     var whenTxt=when&&!isNaN(when)?when.toLocaleString(undefined,{month:"short",day:"numeric",hour:"2-digit",minute:"2-digit"}):"—";
-    // Session ids are validated against [A-Za-z0-9._-]{1,128} by parseSessionId
-    // before they are ever indexed, so they are safe AND unique as DOM ids.
+    // Ids are derived from raw filesystem names (usage-index.mjs listClaude /
+    // listClaudeSubagents), NOT validated at index time — parseSessionId is a
+    // request-path validator that never runs here — and a namespaced subagent
+    // id contains '/', which the charset once claimed for them does not.
+    // POSIX filenames permit '"', '<' and '>', so esc() is LOAD-BEARING, not
+    // belt-and-braces: every render of sx.id must keep it, or a project
+    // directory named with a quote breaks out of these attributes and, under
+    // this page's script-src 'unsafe-inline', executes.
     var sid=esc(sx.id);
     var wt=sx.worktree!=null?'<span class="s-wt" title="git worktree — the repo is the project">⑂'+esc(sx.worktree)+"</span>":"";
     return '<div class="srow" data-id="'+sid+'" title="open transcript">'

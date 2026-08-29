@@ -180,9 +180,18 @@ export function histogram(opts) {
 // same "the uncategorized bucket is de-emphasis, not a hue" rule
 // renderScoreCategories already applies to Unclassified (var(--ink-dim)
 // instead of var(--accent)) elsewhere in this bundle.
+// The return value lands in a CSS declaration, where the dangerous
+// metacharacters are ';', ':' and '}' — none of which esc() (an HTML escaper:
+// & < > " ') touches. So the value is constrained to a CSS colour vocabulary
+// here rather than escaped at the call site: a var() token or a hex literal,
+// anything else de-emphasised. Both callers build palettes from fixed
+// constants today, so this changes no rendered colour; it means a palette
+// that ever becomes data-derived cannot inject a declaration.
+var CSS_COLOR_RE = /^(var\(--[a-z0-9-]+\)|#[0-9a-fA-F]{3,8})$/;
 function segColor(key, palette) {
   if (key === 'not-recorded' || key === 'other') return 'var(--ink-dim)';
-  return (palette && palette[key]) || 'var(--ink-dim)';
+  var c = (palette && Object.prototype.hasOwnProperty.call(palette, key)) ? palette[key] : null;
+  return CSS_COLOR_RE.test(String(c)) ? String(c) : 'var(--ink-dim)';
 }
 
 // order is bottom-up; segments render in that same sequence inside a
