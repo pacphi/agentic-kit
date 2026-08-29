@@ -2253,6 +2253,249 @@ test('the midnight split follows the local clock across a DST transition', () =>
   }
 });
 
+// ── aggregate: prompt stats, per-day series, personal baselines (v16) ───────
+//
+// Fixtures build fingerprints through the parsers' OWN hasher and shape rules
+// (`fp` below), never as record literals, so a fixture cannot claim a token
+// count or a shape the real pipeline would not produce.
+
+/** Local calendar day of an instant — the same convention `addUsage` keys
+ *  usage rows on, restated here because it is not exported. */
+const dayOf = (ms) => {
+  const d = new Date(ms);
+  const p = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+};
+
+const fp = (text, p = 'human') => ({ ...promptFingerprint(text), p, ...promptShape(text) });
+
+/** One promptStatsByDay row with its null-prototype maps flattened, so a
+ *  deepEqual against an object literal compares the DATA and not the fact that
+ *  the aggregate builds `__proto__`-safe buckets. */
+const dayRow = (a, day) => {
+  const d = a.promptStatsByDay[day];
+  return d && { ...d, byHost: { ...d.byHost } };
+};
+
+/** A four-token prompt is the tap boundary; five tokens is an instruction. */
+const TAP = 'yes go ahead now';                 // 4 tokens
+const INSTRUCTION = 'run the whole check twice';  // 5 tokens
+
+test('promptStatsByDay folds typed prompts and taps, per day and per host', () => {
+  const a = aggregate([
+    record('c1', {
+      usage: [usageRow('2026-07-24', 'claude-opus-5', { input: 10 })],
+      promptFPs: [fp(TAP), fp(TAP), fp(INSTRUCTION)],
+    }),
+    record('x1', {
+      provider: 'codex', host: 'codex',
+      usage: [usageRow('2026-07-24', 'gpt-5.6', { input: 10 })],
+      promptFPs: [fp(TAP), fp(INSTRUCTION), fp(INSTRUCTION)],
+    }),
+    record('c2', {
+      end: NOW - 2 * DAY,
+      usage: [usageRow('2026-07-23', 'claude-opus-5', { input: 10 })],
+      promptFPs: [fp(INSTRUCTION)],
+    }),
+  ], aggOpts());
+
+  assert.deepEqual(a.promptStatsByDay['2026-07-24'].byHost.claude, { typed: 3, taps: 2 });
+  assert.deepEqual(a.promptStatsByDay['2026-07-24'].byHost.codex, { typed: 3, taps: 1 });
+  assert.equal(a.promptStatsByDay['2026-07-24'].typed, 6, 'the day row is the sum of its hosts');
+  assert.equal(a.promptStatsByDay['2026-07-24'].taps, 3);
+  assert.deepEqual(dayRow(a, '2026-07-23'), {
+    typed: 1, taps: 0, byHost: { claude: { typed: 1, taps: 0 } },
+  });
+});
+
+test('only human-typed fingerprints reach the prompt stats', () => {
+  // Provenance filtering is the load-bearing gate (spec §2.1): agent
+  // deliveries, adapter templates and control records all reach kind 'prompt'
+  // and would otherwise be counted as things the operator asked for.
+  const a = aggregate([record('mixed', {
+    usage: [usageRow('2026-07-24', 'claude-opus-5', { input: 10 })],
+    promptFPs: [
+      fp(TAP), fp(TAP, 'agent'), fp(TAP, 'adapter'), fp(TAP, 'control'),
+      fp(INSTRUCTION, 'agent'),
+    ],
+  })], aggOpts());
+
+  assert.equal(a.totals.typedPrompts, 1, 'four of the five were written by a machine');
+  assert.equal(a.totals.tapCount, 1);
+  assert.deepEqual(a.promptStatsByDay['2026-07-24'].byHost.claude, { typed: 1, taps: 1 });
+});
+
+test('prompt stats attribute a session to its FIRST BILLED day, like sessions and exceptions', () => {
+  // Fingerprints carry no timestamp, so per-prompt day attribution does not
+  // exist to be had. A session that ran across midnight files ALL of its
+  // prompts on the day its tokens first billed — coarse, documented, and the
+  // same convention byDay.sessions and byDay.exceptions already follow.
+  const start = new Date(2026, 6, 23, 23, 30).getTime();
+  const end = new Date(2026, 6, 24, 0, 30).getTime();
+  const a = aggregate([record('mid', {
+    start, end,
+    usage: [
+      usageRow('2026-07-24', 'claude-opus-5', { input: 10 }),
+      usageRow('2026-07-23', 'claude-opus-5', { input: 10 }),
+    ],
+    promptFPs: [fp(TAP), fp(INSTRUCTION)],
+  })], aggOpts());
+
+  assert.deepEqual(Object.keys(a.promptStatsByDay), ['2026-07-23'],
+    'the earlier billed day takes the whole session, including prompts typed after midnight');
+  assert.equal(a.promptStatsByDay['2026-07-23'].typed, 2);
+});
+
+test('a session with the fingerprint layer but no typed prompts is a measured zero', () => {
+  const a = aggregate([record('headless', {
+    usage: [usageRow('2026-07-24', 'claude-opus-5', { input: 10 })],
+    promptFPs: [fp(INSTRUCTION, 'adapter')],
+  })], aggOpts());
+
+  assert.deepEqual(dayRow(a, '2026-07-24'), {
+    typed: 0, taps: 0, byHost: { claude: { typed: 0, taps: 0 } },
+  }, 'the day was measured and had no typed prompts — that is not the same as an absent day');
+  assert.equal(a.sessions[0].typedPrompts, 0);
+});
+
+test('a record with no fingerprint layer at all reads absent, never zero', () => {
+  const rec = record('legacy', { usage: [usageRow('2026-07-24', 'claude-opus-5', { input: 10 })] });
+  delete rec.promptFPs;                       // a hand-built or pre-v16 record
+  const a = aggregate([rec], aggOpts());
+
+  assert.equal(a.sessions[0].typedPrompts, null);
+  assert.equal(a.sessions[0].tapPrompts, null);
+  assert.deepEqual(Object.keys(a.promptStatsByDay), [], 'it contributes no day row to disagree with');
+  assert.equal(a.totals.tapShare, null, 'and no share, because nothing was measured');
+});
+
+test('totals and promptsByHost carry the window\'s typed/tap/shape figures', () => {
+  const a = aggregate([
+    record('c', {
+      usage: [usageRow('2026-07-24', 'claude-opus-5', { input: 10 })],
+      promptFPs: [
+        fp(TAP), fp('why is the build failing on macos?'),
+        fp('You are a senior release engineer. Cut the tag.'),
+        fp(INSTRUCTION),
+      ],
+    }),
+    record('x', {
+      provider: 'codex', host: 'codex',
+      usage: [usageRow('2026-07-24', 'gpt-5.6', { input: 10 })],
+      promptFPs: [fp(INSTRUCTION), fp(INSTRUCTION)],
+    }),
+  ], aggOpts());
+
+  assert.equal(a.totals.typedPrompts, 6);
+  assert.equal(a.totals.tapCount, 1);
+  assert.equal(a.totals.tapShare, 0.166667, 'rounded to six places, like every other share here');
+
+  assert.equal(a.promptsByHost.claude.typed, 4);
+  assert.equal(a.promptsByHost.claude.taps, 1);
+  assert.equal(a.promptsByHost.claude.tapShare, 0.25);
+  assert.equal(a.promptsByHost.claude.personaOpeners, 1);
+  assert.equal(a.promptsByHost.claude.questionShare, 0.25);
+  assert.equal(a.promptsByHost.codex.tapShare, 0);
+  assert.equal(a.promptsByHost.codex.personaOpeners, 0);
+  assert.equal(a.promptsByHost.codex.questionShare, 0);
+});
+
+test('p90TypedTokens is per host, over typed prompts only, and null with none', () => {
+  // Ten typed prompts of 1..10 tokens: nearest-rank p90 is the 9th smallest.
+  const lengths = Array.from({ length: 10 }, (_, i) => Array.from({ length: i + 1 }, (_, k) => `w${k}`).join(' '));
+  const a = aggregate([
+    record('c', {
+      usage: [usageRow('2026-07-24', 'claude-opus-5', { input: 10 })],
+      promptFPs: [
+        ...lengths.map((t) => fp(t)),
+        fp('a machine wrote this much longer template than any of them', 'adapter'),
+      ],
+    }),
+    record('x', {
+      provider: 'codex', host: 'codex',
+      usage: [usageRow('2026-07-24', 'gpt-5.6', { input: 10 })],
+      promptFPs: [fp(INSTRUCTION, 'agent')],
+    }),
+  ], aggOpts());
+
+  assert.equal(a.promptsByHost.claude.p90TypedTokens, 9);
+  assert.equal(a.promptsByHost.codex.p90TypedTokens, null,
+    'a host with no typed prompt has no length to report — never a 0');
+  assert.equal(a.promptsByHost.codex.tapShare, null);
+});
+
+/** One session per day in the trailing baseline window (older than the display
+ *  window), each with four typed prompts of which `tapDays` days carry one tap. */
+function baselineRecords(nDays, tapDays) {
+  return Array.from({ length: nDays }, (_, i) => {
+    const end = NOW - (15 + i) * DAY;
+    const taps = i < tapDays ? 1 : 0;
+    return record(`b${i}`, {
+      end,
+      usage: [usageRow(dayOf(end), 'claude-opus-5', { input: 10 })],
+      promptFPs: [
+        ...Array.from({ length: taps }, () => fp(TAP)),
+        ...Array.from({ length: 4 - taps }, () => fp(INSTRUCTION)),
+      ],
+    });
+  });
+}
+
+test('promptBaselines is null until the operator has enough history to have one', () => {
+  const thin = aggregate(baselineRecords(29, 12), aggOpts());
+  assert.equal(thin.promptBaselines.claude.tapShareP75_trailing90d, null,
+    '29 active days is not a personal normal — an invented threshold is worse than none');
+
+  const enough = aggregate(baselineRecords(30, 12), aggOpts());
+  assert.notEqual(enough.promptBaselines.claude.tapShareP75_trailing90d, null);
+});
+
+test('promptBaselines takes the p75 of the TRAILING window, not the displayed one', () => {
+  // 32 trailing days: 12 at a 0.25 tap share, 20 at 0. Nearest-rank p75 over
+  // 32 sorted values is the 24th smallest, which sits in the 0.25 block.
+  const current = record('now', {
+    usage: [usageRow('2026-07-24', 'claude-opus-5', { input: 10 })],
+    promptFPs: [fp(TAP), fp(TAP), fp(TAP), fp(TAP)],   // a 1.00 share, in-window
+  });
+  const a = aggregate([...baselineRecords(32, 12), current], aggOpts());
+
+  assert.equal(a.promptBaselines.claude.tapShareP75_trailing90d, 0.25);
+  assert.equal(a.promptsByHost.claude.tapShare, 1,
+    'the current window is what the baseline is compared AGAINST — it never feeds it');
+});
+
+test('the prompt slices are deterministic across two runs of the same corpus', () => {
+  const records = () => [
+    ...baselineRecords(31, 9),
+    record('c', {
+      usage: [usageRow('2026-07-24', 'claude-opus-5', { input: 10 })],
+      promptFPs: [fp(TAP), fp('why did that fail?'), fp(INSTRUCTION)],
+    }),
+  ];
+  const a = aggregate(records(), aggOpts());
+  const b = aggregate(records(), aggOpts());
+
+  assert.equal(typeof a.promptBaselines.claude.tapShareP75_trailing90d, 'number',
+    'the fixture really produced a baseline — the comparisons below are not two nulls');
+  assert.deepEqual(a.promptStatsByDay, b.promptStatsByDay);
+  assert.deepEqual(a.promptsByHost, b.promptsByHost);
+  assert.deepEqual(a.promptBaselines, b.promptBaselines);
+  assert.equal(a.totals.tapShare, b.totals.tapShare);
+});
+
+test('the previous-window projection derives its prompt totals the same way', () => {
+  const inPrev = record('prev', {
+    end: NOW - 20 * DAY,
+    usage: [usageRow(dayOf(NOW - 20 * DAY), 'claude-opus-5', { input: 10 })],
+    promptFPs: [fp(TAP), fp(INSTRUCTION)],
+  });
+  const a = aggregate([inPrev], aggOpts({ previous: true }));
+
+  assert.equal(a.totals.typedPrompts, 0, 'it is outside the displayed window');
+  assert.equal(a.previous.totals.typedPrompts, 2);
+  assert.equal(a.previous.totals.tapShare, 0.5);
+});
+
 test('the session row projects the v11 posture and context-window evidence', () => {
   const a = aggregate([record('ctx', {
     mode: 'auto-edit', modeRaw: 'acceptEdits', ctxWindow: 200_000, ctxLastTokens: 151_000,

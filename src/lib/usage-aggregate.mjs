@@ -243,6 +243,171 @@ export function modelFamily(id) {
   return gpt ? `gpt-${gpt[1]}` : 'other';
 }
 
+// ── prompt fingerprints: taps, shapes, and the operator's own baseline ──────
+
+/** Tokens at or below which a typed prompt reads as a supervision TAP — "yes",
+ *  "go ahead", "lgtm ship it" — rather than an instruction (spec §3.1). Named
+ *  so the detector, the CLI and the view all quote ONE number. What it does not
+ *  model: whether the tap was necessary. Some taps are legitimate approvals. */
+export const TAP_MAX_TOKENS = 4;
+
+/** How far back the personal baseline looks, and how many days with at least
+ *  one typed prompt it needs before it will claim a normal. Under the floor the
+ *  baseline is `null` and the detector falls back to an absolute threshold: an
+ *  invented personal normal is worse than admitting there isn't one yet. */
+export const BASELINE_TRAILING_DAYS = 90;
+export const BASELINE_MIN_ACTIVE_DAYS = 30;
+
+/** The provenance gate every figure in the Prompts view sits behind (spec
+ *  §2.1): agent deliveries, adapter templates and control records all reach
+ *  kind 'prompt', and counting them would report the operator as having asked
+ *  for work nobody typed. */
+const isTypedFP = (fp) => fp?.p === 'human';
+/** ...and short enough to be a tap. `t` is the honest token count including
+ *  repeats, so this is a length question, never a similarity one. */
+const isTapFP = (fp) => (Number(fp?.t) || 0) <= TAP_MAX_TOKENS;
+
+/** The day a record's tokens FIRST billed on — the attribution `byDay.sessions`
+ *  and `byDay.exceptions` already use, and (for want of any per-fingerprint
+ *  timestamp) the one the prompt series uses too. `null` when the record never
+ *  billed: no day to attribute to, so it contributes to nothing. */
+function firstBilledDay(rec) {
+  let first = null;
+  for (const row of rec.usage ?? []) if (first === null || row.day < first) first = row.day;
+  return first;
+}
+
+/**
+ * The v16 prompt-fingerprint projection for one record: what the operator
+ * typed, how much of it was a tap, and the raw material the per-host figures
+ * need (typed lengths, question count, persona-opener count).
+ *
+ * `typedPrompts`/`tapPrompts` are `null` — not 0 — when the record carries no
+ * fingerprint layer at all. "Nothing was measured" and "measured nothing" are
+ * different claims, and only the second supports a headless reading of the
+ * session.
+ *
+ * `personaOpeners` counts only TYPED persona openers. The shape flag itself is
+ * provenance-blind (a tool's own template still carries `o`), but the coaching
+ * move it feeds — lift the role text into a managed library — is about what the
+ * operator retypes by hand; a tool's template is already a managed artifact.
+ */
+function v16Projection(rec) {
+  const fps = rec.promptFPs;
+  if (!Array.isArray(fps)) {
+    return { typedPrompts: null, tapPrompts: null, _typedTokens: [], _questions: 0, _personas: 0 };
+  }
+  const out = { typedPrompts: 0, tapPrompts: 0, _typedTokens: [], _questions: 0, _personas: 0 };
+  for (const fp of fps) {
+    if (!isTypedFP(fp)) continue;
+    out.typedPrompts++;
+    if (isTapFP(fp)) out.tapPrompts++;
+    out._typedTokens.push(Number(fp.t) || 0);
+    if (fp.q === 1) out._questions++;
+    if (fp.o === 1) out._personas++;
+  }
+  return out;
+}
+
+/** One host's running prompt bucket. Same null-prototype reasoning as
+ *  `bucket()`: the key is a transcript-derived host name. */
+function promptHostBucket(map, key) {
+  if (!Object.prototype.hasOwnProperty.call(map, key)) {
+    map[key] = { typed: 0, taps: 0, questions: 0, personaOpeners: 0, typedTokens: [] };
+  }
+  return map[key];
+}
+
+/** One day's prompt row and the per-host row inside it, both created on first
+ *  touch. Unlike `byDay` (billed days only) a key here means "a session
+ *  attributed to this day carried the fingerprint layer" — so a zero is a
+ *  measurement, not a missing day. */
+function promptDayRows(byDay, day, host) {
+  const d = (byDay[day] ??= { typed: 0, taps: 0, byHost: Object.create(null) });
+  const h = (d.byHost[host] ??= { typed: 0, taps: 0 });
+  return [d, h];
+}
+
+/** Fold one session row's already-projected prompt counts into the window
+ *  totals, the per-host buckets and the per-day series. Pure summation — the
+ *  fingerprint rules live in v16Projection and are not restated here. */
+function foldSessionPrompts(s, totals, promptsByHost, promptStatsByDay) {
+  if (s.typedPrompts === null) return;          // no fingerprint layer: absent, not zero
+  const host = s.host ?? 'unknown';
+  const h = promptHostBucket(promptsByHost, host);
+  totals.typedPrompts += s.typedPrompts;
+  totals.tapCount += s.tapPrompts;
+  h.typed += s.typedPrompts; h.taps += s.tapPrompts;
+  h.questions += s._questions; h.personaOpeners += s._personas;
+  for (const t of s._typedTokens) h.typedTokens.push(t);
+  if (!s._day) return;
+  const [d, dh] = promptDayRows(promptStatsByDay, s._day, host);
+  d.typed += s.typedPrompts; d.taps += s.tapPrompts;
+  dh.typed += s.typedPrompts; dh.taps += s.tapPrompts;
+}
+
+/** Turn the running per-host buckets into the published shape. Every share is
+ *  `null` rather than 0 when its denominator is empty, and `p90TypedTokens`
+ *  likewise: a host with no typed prompt has no length to report. */
+function sealPromptHosts(map) {
+  for (const host of Object.keys(map)) {
+    const b = map[host];
+    map[host] = {
+      typed: b.typed,
+      taps: b.taps,
+      tapShare: b.typed ? round(b.taps / b.typed) : null,
+      p90TypedTokens: percentile(b.typedTokens, 0.9),
+      personaOpeners: b.personaOpeners,
+      questionShare: b.typed ? round(b.questions / b.typed) : null,
+    };
+  }
+}
+
+/**
+ * The operator's own tap-share normal, per host: the p75 of the DAILY tap
+ * shares over the BASELINE_TRAILING_DAYS immediately before the displayed
+ * window. Deliberately excludes the displayed window — that is what the
+ * baseline is compared against, and a window that fed its own threshold could
+ * never look unusual.
+ *
+ * Pure, and computed from `records` rather than from the window's session rows,
+ * because those are filtered at the display cutoff. It therefore only sees the
+ * history the caller's `lookbackDays` actually pulled in; a host with no
+ * trailing record simply has no entry, which reads the same as `null` to a
+ * detector and is the honest shape for "never measured".
+ *
+ * Under BASELINE_MIN_ACTIVE_DAYS days of history the value is `null`: a p75
+ * over a handful of days is a number, not a normal.
+ */
+function buildPromptBaselines(records, { days, now }) {
+  const startDay = localDay(now - (days + BASELINE_TRAILING_DAYS) * DAY_MS);
+  const endDay = localDay(now - days * DAY_MS);
+  const perHost = Object.create(null);
+  for (const rec of records) {
+    if (!rec || !Array.isArray(rec.promptFPs)) continue;
+    const day = firstBilledDay(rec);
+    if (day === null || day < startDay || day >= endDay) continue;
+    const byDay = (perHost[rec.host ?? rec.provider ?? 'unknown'] ??= Object.create(null));
+    const row = (byDay[day] ??= { typed: 0, taps: 0 });
+    for (const fp of rec.promptFPs) {
+      if (!isTypedFP(fp)) continue;
+      row.typed++;
+      if (isTapFP(fp)) row.taps++;
+    }
+  }
+  const out = Object.create(null);
+  for (const host of Object.keys(perHost)) {
+    const shares = Object.values(perHost[host])
+      .filter((r) => r.typed > 0)
+      .map((r) => r.taps / r.typed);
+    out[host] = {
+      tapShareP75_trailing90d:
+        shares.length >= BASELINE_MIN_ACTIVE_DAYS ? percentile(shares, 0.75) : null,
+    };
+  }
+  return out;
+}
+
 /** Sum a record's per-model usage rows into one API-equivalent cost. Rows with
  *  an observed transcript cost (opencode) use it — same preference as aggregate. */
 function sessionCost(rec, deps) {
@@ -400,15 +565,13 @@ function foldSessionUsageRow(row, rec, deps, acc, byDay, byModel, activeDays) {
  *  usable: it can open at 23:58 and only bill after midnight). */
 function foldSessionUsageRows(rec, deps, byDay, byModel, rates) {
   const acc = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, cacheSaved: 0 };
-  let firstDay = null;
   const activeDays = new Set();
   for (const row of rec.usage) {
-    if (firstDay === null || row.day < firstDay) firstDay = row.day;
     acc.cacheSaved += cacheSavedFor(row, rec, deps, rates);
     foldSessionUsageRow(row, rec, deps, acc, byDay, byModel, activeDays);
   }
   for (const day of activeDays) byDay[day].sessionsActive++;
-  return { ...acc, firstDay };
+  return { ...acc, firstDay: firstBilledDay(rec) };
 }
 
 /**
@@ -468,6 +631,10 @@ function buildSessionRow(rec, usage, verdict) {
     reasoningOutput: rec.reasoningOutput ?? 0,
     rateLimits: rec.rateLimits ?? null,
     ...v11Projection(rec),
+    // v16: what this session's operator actually typed. The underscore-prefixed
+    // members are working material for the window fold (per-host lengths and
+    // shape counts) and are stripped alongside `_span` once it is done.
+    ...v16Projection(rec),
     _span: [rec.start ?? rec.end, rec.end],
     // Did this session carry ANY token evidence? A session with no usage rows
     // costs $0 structurally — nothing was measured — rather than because the
@@ -545,12 +712,18 @@ function foldSessionTotals(sessions, byDay, byModel) {
     exceptions: 0, aborts: 0,
     input: 0, output: 0, cacheRead: 0, cacheWrite: 0, tokens: 0, cost: 0,
     cacheSavedUsd: 0, spanMinutes: 0, spanUnionSeconds: 0, engagedSeconds: 0,
+    // v16. `humanPrompts` above is main-thread PROMPT COUNTS; these two are the
+    // narrower fingerprint-derived figures — turns whose provenance says a
+    // person typed them, and the short ones among those. They are different
+    // denominators on purpose and neither replaces the other.
+    typedPrompts: 0, tapCount: 0,
   };
   const byHost = Object.create(null), byProvider = Object.create(null);
   const byMode = Object.create(null);
   const bySource = Object.create(null), byTool = Object.create(null);
   const byProject = Object.create(null);
   const byCategory = Object.create(null), punchcard = Object.create(null);
+  const promptsByHost = Object.create(null), promptStatsByDay = Object.create(null);
   const tree = new Map();
   const pricedCosts = [];
   let spanMs = 0;
@@ -590,14 +763,17 @@ function foldSessionTotals(sessions, byDay, byModel) {
       byDay[s._day].sessions++;
       byDay[s._day].exceptions += s.exceptions;
     }
+    foldSessionPrompts(s, totals, promptsByHost, promptStatsByDay);
     for (const [k, n] of Object.entries(s._punchcard)) punchcard[k] = (punchcard[k] ?? 0) + n;
     for (const [k, n] of Object.entries(s.tools)) byTool[k] = (byTool[k] ?? 0) + n;
     foldSessionIntoTree(tree, s);
   }
+  sealPromptHosts(promptsByHost);
 
   return {
     totals, byHost, byProvider, byMode, bySource, byTool,
-    byProject, byCategory, punchcard, tree, spanMs, pricedCosts,
+    byProject, byCategory, punchcard, promptsByHost, promptStatsByDay,
+    tree, spanMs, pricedCosts,
   };
 }
 
@@ -660,6 +836,10 @@ function finishTotals(totals, sessions, { spanMs, pricedCosts }) {
   totals.costPerEngagedHour = hours ? round(totals.cost / hours) : null;
   totals.costPerSessionMedian = median(pricedCosts);
   totals.costPerSessionP90 = percentile(pricedCosts, 0.9);
+  // Null, not 0, when nothing was typed: a window with no typed prompt has no
+  // tap share to report, and "0% of your prompts were taps" is a claim the
+  // absence of data does not support.
+  totals.tapShare = totals.typedPrompts ? round(totals.tapCount / totals.typedPrompts) : null;
 }
 
 /** The window's response-latency and session-length distributions. Latency
@@ -805,7 +985,7 @@ export function aggregate(records, { days, now, cutoff, deps, previous = false }
 
   const folded = foldSessionTotals(sessions, byDay, byModel);
   const { totals, byHost, byProvider, byMode, bySource, byTool,
-    byProject, byCategory, punchcard, tree } = folded;
+    byProject, byCategory, punchcard, promptsByHost, promptStatsByDay, tree } = folded;
 
   sealBuckets(byHost, byProvider, byProject, byCategory, byModel,
     byMode, bySource);
@@ -816,6 +996,7 @@ export function aggregate(records, { days, now, cutoff, deps, previous = false }
   const projectTree = buildProjectTree(tree);
   for (const s of sessions) {
     delete s._span; delete s._active; delete s._punchcard; delete s._day; delete s._priced;
+    delete s._typedTokens; delete s._questions; delete s._personas;
   }
   const codexRateLimits = buildCodexRateLimits(sessions);
 
@@ -826,6 +1007,14 @@ export function aggregate(records, { days, now, cutoff, deps, previous = false }
     totals, byDay, engagedByDay, byModel, byHost, byProvider,
     byMode, bySource, byTool,
     byProject, byCategory,
+    // v16 prompt layer. `promptStatsByDay` is a SIBLING of byDay for the same
+    // reason engagedByDay is: byDay's keys are billed days, and a prompt series
+    // keyed on them would have to invent zero-token rows or drop real prompts.
+    // `promptBaselines` reads `records` rather than `sessions` — it is about the
+    // history BEFORE this window, which the display cutoff has already filtered
+    // out of the rows.
+    promptsByHost, promptStatsByDay,
+    promptBaselines: buildPromptBaselines(records, { days, now }),
     punchcard, projectTree, sessions, codexRateLimits, rhythm,
     previous: previous ? previousWindow(records, { days, now, deps, rates }) : null,
     insights: [],
