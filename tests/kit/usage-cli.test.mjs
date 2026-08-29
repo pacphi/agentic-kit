@@ -90,6 +90,67 @@ function writeHistorySessions(sb, { from, to }) {
   }
 }
 
+/** The prompt corpus the pattern sections are built to find: a request retyped
+ *  in six wordings across six sessions and three days (a recurring cluster),
+ *  one session that asks the same thing twice one turn apart (a re-ask pair),
+ *  and a handful of one-token approvals (supervision taps). Every prompt here
+ *  is written by hand into the user turn, so all of it reads as `human`
+ *  provenance; the tool-authored template is the one deliberate exception.
+ *
+ *  Sessions are minutes old, so they sit inside every supported window. The
+ *  DAY spread the cluster needs comes from the assistant turn's timestamp,
+ *  which is what the index attributes a session to (first billed day). */
+const RELEASE_PHRASINGS = [
+  'Help me release and deploy the next semantic version of agentic-kit',
+  'Help me release and deploy the next semantic version of agentic-kit please',
+  'Help me release and deploy the next semantic release of agentic-kit',
+  'Help me release and deploy the next semantic version of the agentic-kit',
+  'Please help me release and deploy the next semantic version of agentic-kit',
+  'Help me release and deploy the next semantic version of agentic-kit now',
+];
+
+function promptTurn(id, at, text) {
+  return JSON.stringify({
+    type: 'user', sessionId: id, cwd: '/tmp/prompts-fixture',
+    timestamp: new Date(at).toISOString(),
+    message: { role: 'user', content: [{ type: 'text', text }] },
+  });
+}
+
+function replyTurn(id, at) {
+  return JSON.stringify({
+    type: 'assistant', sessionId: id, cwd: '/tmp/prompts-fixture',
+    timestamp: new Date(at).toISOString(),
+    message: {
+      role: 'assistant', model: 'claude-opus-5',
+      usage: { input_tokens: 120, output_tokens: 40 },
+      content: [{ type: 'text', text: 'on it' }],
+    },
+  });
+}
+
+function writePromptsCorpus(sb) {
+  const projectDir = path.join(sb.home, '.claude', 'projects', '-tmp-prompts-fixture');
+  fs.mkdirSync(projectDir, { recursive: true });
+  const write = (id, lines) => fs.writeFileSync(path.join(projectDir, `${id}.jsonl`), lines.join('\n') + '\n');
+  RELEASE_PHRASINGS.forEach((text, i) => {
+    // Three distinct billed days across the six sessions, all recent.
+    const at = Date.now() - (i % 3) * 86_400_000 - 3_600_000;
+    const id = `prompts-release-${i}`;
+    write(id, [promptTurn(id, at, text), replyTurn(id, at + 30_000), promptTurn(id, at + 60_000, 'yes'), replyTurn(id, at + 90_000)]);
+  });
+  // One session that asks the same substantive thing twice, one turn apart.
+  const reAskAt = Date.now() - 2 * 3_600_000;
+  const reAsk = 'Please run the whole verification suite and report which checks failed';
+  write('prompts-reask', [
+    promptTurn('prompts-reask', reAskAt, reAsk),
+    replyTurn('prompts-reask', reAskAt + 10_000),
+    promptTurn('prompts-reask', reAskAt + 20_000, `${reAsk} again`),
+    replyTurn('prompts-reask', reAskAt + 30_000),
+  ]);
+  return { projectDir, reAsk };
+}
+
 function ak(args, sb, extra = {}) {
   return spawnSync(process.execPath, [BIN, ...args], {
     encoding: 'utf8',
@@ -100,6 +161,13 @@ function ak(args, sb, extra = {}) {
       USERPROFILE: sb.home,
       XDG_CONFIG_HOME: sb.cfg,
       APPDATA: sb.cfg,
+      // The opencode transcript store is found at `$XDG_DATA_HOME/opencode/`
+      // and only falls back to `$HOME/.local/share` when that variable is
+      // UNSET (usage-opencode.defaultOpencodeDbPath). Sandboxing HOME alone
+      // therefore leaks the real store into every assertion on a machine that
+      // exports XDG_DATA_HOME — the fixture's counts would silently absorb
+      // whatever the developer had actually typed into opencode.
+      XDG_DATA_HOME: path.join(sb.home, '.local', 'share'),
       PATH: `${sb.bin}${path.delimiter}${process.env.PATH ?? ''}`,
       OPENROUTER_MANAGEMENT_KEY: '',
       ...extra,
@@ -274,4 +342,76 @@ test('formatCostMin ("<$0.01" boundary) — true zero is never rendered as sub-c
   assert.equal(__test.fmtUsdMin(0), '$0.00', 'a true zero is not "less than a cent" — it is nothing');
   assert.equal(__test.fmtUsdMin(0.00003), '<$0.01', 'a real positive figure under a cent is not $0.00');
   assert.equal(__test.fmtUsdMin(0.02), '$0.02', 'a figure that does not round away renders normally');
+});
+
+// ── prompts: the fingerprint-derived pattern report ─────────────────────────
+
+test('ak usage prompts reports every section from fingerprints alone', () => {
+  const sb = sandbox();
+  writePromptsCorpus(sb);
+  const result = ak(['usage', 'prompts'], sb);
+  assert.equal(result.status, 0, result.stderr);
+  for (const heading of [
+    'Typed prompts',
+    'Supervision taps',
+    'Host interplay',
+    'Recurring clusters',
+    'Re-asks',
+    'Headless share',
+  ]) assert.ok(result.stdout.includes(heading), `missing section ${JSON.stringify(heading)}`);
+  assert.match(result.stdout, /ak usage — prompts \(all history\)/,
+    'the default window is all history — patterns are lifetime phenomena');
+  assert.equal(fs.existsSync(sb.sentinel), false, 'prompts must never execute npm — offline only');
+  fs.rmSync(sb.home, { recursive: true, force: true });
+});
+
+test('ak usage prompts --json is fingerprint-derived and carries no prompt text', () => {
+  const sb = sandbox();
+  writePromptsCorpus(sb);
+  const result = ak(['usage', 'prompts', '--json'], sb);
+  assert.equal(result.status, 0, result.stderr);
+  const value = JSON.parse(result.stdout);
+  assert.deepEqual(Object.keys(value),
+    ['window', 'windowDays', 'generatedAt', 'corpus', 'typed', 'taps', 'hosts', 'clusters', 'reAsks', 'headless']);
+  assert.equal(value.window, 'all');
+  // The six release phrasings differ by one token each, so they cluster at the
+  // panel's loose threshold and span six sessions — recurring on both arms of
+  // the disjunction, not just one.
+  const release = value.clusters.find((c) => c.size >= 6);
+  assert.ok(release, `no recurring cluster found in ${JSON.stringify(value.clusters)}`);
+  assert.equal(release.sessions, 6);
+  assert.ok(release.days >= 3, 'the fixture spreads the cluster over three billed days');
+  assert.equal(value.reAsks.pairs, 1, 'the fixture asks one thing twice, one turn apart');
+  assert.equal(value.reAsks.gaps['1'], 1, 'and the gap is one turn');
+  // The privacy contract, asserted on the payload rather than argued for: this
+  // projection is built from hashes, counts and token counts only.
+  assert.equal(result.stdout.includes('semantic version'), false, 'cluster text must never reach --json');
+  assert.equal(result.stdout.includes('verification suite'), false, 're-ask text must never reach --json');
+  fs.rmSync(sb.home, { recursive: true, force: true });
+});
+
+test('ak usage prompts --window accepts 7/14/30/all and rejects anything else', () => {
+  const sb = sandbox();
+  writePromptsCorpus(sb);
+  for (const w of ['7', '14', '30', 'all']) {
+    const okResult = ak(['usage', 'prompts', '--window', w, '--json'], sb);
+    assert.equal(okResult.status, 0, `--window ${w} must be accepted: ${okResult.stderr}`);
+    assert.equal(JSON.parse(okResult.stdout).window, w === 'all' ? 'all' : Number(w));
+  }
+  const bad = ak(['usage', 'prompts', '--window', '9'], sb);
+  assert.notEqual(bad.status, 0);
+  assert.match(bad.stdout, /--window/);
+  assert.match(bad.stdout, /all/, 'the error must name the all-history option');
+  fs.rmSync(sb.home, { recursive: true, force: true });
+});
+
+// An empty corpus has measured nothing, which is a different claim from
+// "measured zero" — the report says so rather than printing a table of 0s.
+test('ak usage prompts says no samples rather than zero when nothing was fingerprinted', () => {
+  const sb = sandbox();
+  const result = ak(['usage', 'prompts'], sb);
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /no samples/,
+    'an empty corpus must report no samples, never a measured zero');
+  fs.rmSync(sb.home, { recursive: true, force: true });
 });
