@@ -216,7 +216,7 @@ cannot drift out of step with the pricing table the day that multiplier changes.
 the row's own model, provider, and **day**, so a saving is priced from the same table at the same
 date as the cost sitting beside it; the result is memoised per `(model, provider, day)`.
 
-### 11. Schema v11 (then v12), and nested subagent transcripts are ingested
+### 11. Schema v11 (then v12, then v13), and nested subagent transcripts are ingested
 
 `SCHEMA_VERSION` moves to 11 in one bump, adding `mode`/`modeRaw`, `latHist`/`latCount`,
 `lenSeconds`, `ctxWindow`/`ctxLastTokens`, and `aborts` to every session record. A v10-cached record
@@ -228,6 +228,15 @@ A second bump to **v12** lands before merge, for a *wrong* cached value rather t
 v11 records persisted `modeRaw: "never/[object Object]"` and a null `mode` for every Codex session
 (decision 1). Re-deriving is the only thing that clears them, and the one-time re-parse cost is
 accepted for the same reason every earlier bump accepted it.
+
+A third bump to **v13** corrects two more parseCodex defects, both inflating persisted figures
+rather than merely missing them: `session_meta` was last-wins, so a subagent rollout's replayed
+parent meta relabeled its `threadSource` and re-keyed its `id`, letting up to 155 of 318 observed
+subagent rollouts escape the finalizeCodexUsage guard and double-bill the parent; and `prompts`
+counted every `user_message`/`UserMessage` regardless of origin, with no Codex-side equivalent of
+the harness/mirror gate Claude has had since v5. Both are corrected in `parseCodex`
+(`usage-parsers.mjs:493-513`, `:637-638`); the schema bump forces every cached Codex record to
+re-derive rather than keep the inflated counts.
 
 Discovery gains exactly one nested shape: `listClaudeSubagents` reads
 `<projectDir>/<sessionId>/subagents/*.jsonl` and nothing else. It is deliberately not a recursive
@@ -338,6 +347,13 @@ session id touches the transcript reader's path-traversal guard, so the gate is 
   Parked as a latent trap rather than a live bug — production never injects `deps`, and tests
   sandbox `roots`/`cachePath` per test — with the comment at `readIndex` corrected to state the
   omission instead of implying it was fixed.
+- **Exact-twin cross-host mirror dedup.** The v13 human-prompt gate (decision 11) excludes clear
+  machine envelopes from Codex `prompts`, but deliberately does not attempt the harder claim: some
+  Codex rollouts replay an entire Claude conversation's `user_message` stream in one sub-second flush,
+  so a genuinely human prompt is counted once under Codex AND again, verbatim, under Claude. Detecting
+  that requires a flush-timestamp/exact-text-twin heuristic across BOTH hosts' sessions at aggregation
+  time, not a per-parser gate, and is deliberately out of scope for a fix that only touches
+  `parseCodex`. Left as a recorded follow-up rather than attempted here.
 
 ## Verification
 

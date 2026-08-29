@@ -37,7 +37,7 @@ rewritten; rule 3 of the module header, `usage-index.mjs:22`):
 | Host | Store | Discovered by |
 |---|---|---|
 | Claude Code | `~/.claude/projects/<encoded-project-dir>/<sessionId>.jsonl` | `listClaude` (`usage-index.mjs:259-273`) — exactly one level of project directories |
-| Claude Code (subagent) | `~/.claude/projects/<encoded-project-dir>/<sessionId>/subagents/agent-<hash>.jsonl` | `listClaudeSubagents` (`usage-index.mjs:243-255`) — the one nested shape `listClaude` descends into |
+| Claude Code (subagent) | `~/.claude/projects/<encoded-project-dir>/<sessionId>/subagents/agent-<hash>.jsonl` | `listClaudeSubagents` (`usage-index.mjs:291-296`) — the one nested shape `listClaude` descends into |
 | Codex CLI | `~/.codex/sessions/<yyyy>/<mm>/<dd>/rollout-<ts>-<uuid>.jsonl` | `listCodex` (`usage-index.mjs:276-296`) — the `yyyy/mm/dd` tree walk |
 
 Roots come from `defaultRoots()` (`usage-index.mjs:252-257`) and are injectable
@@ -49,7 +49,7 @@ the parent under `<sessionId>/subagents/`. Discovery is that one nested shape
 and no more — not a recursive walk — so a directory that is not a session-id
 directory with a `subagents` child contributes nothing rather than being
 crawled. Each such record takes a **namespaced** id, `<sessionId>/<stem>`
-(`usage-index.mjs:250`), because Claude Code names every subagent file
+(`usage-index.mjs:296`), because Claude Code names every subagent file
 `agent-<hash>.jsonl` and that stem is not unique across two parent sessions; an
 unnamespaced id would silently collide two unrelated records into one. §4.1
 covers how a namespaced id is validated and resolved back to its file.
@@ -100,16 +100,17 @@ Codex rollout lines carry `type` + `payload`. The parser (`parseCodex`,
 
 | `type` / `payload.type` | What the parser takes from it |
 |---|---|
-| `session_meta` | Authoritative session id, `cwd`, and `thread_source` (`usage-parsers.mjs:488-497`) — `"subagent"` marks a thread_spawn replay whose tokens are excluded from aggregation (`usage-parsers.mjs:692`; `USAGE-SCORECARD-METRICS.md` Appendix A, Bug B) |
+| `session_meta` | Authoritative session id, `cwd`, and `thread_source` — the FIRST such line in the file wins for all three (`usage-parsers.mjs:511-513`); a subagent rollout replays its PARENT thread's own session_meta line later in the same file, and a later-wins rule let that relabel the record `subagent`→`user` and re-key its id to the parent's (`usage-parsers.mjs:493-510`) — `"subagent"` marks a thread_spawn replay whose tokens are excluded from aggregation (`usage-parsers.mjs:771`; `USAGE-SCORECARD-METRICS.md` Appendix A, Bug B) |
 | `turn_context` | The model id in effect from this point on, plus `approval_policy` (a string) and `sandbox_policy` (an **object** keyed `.type`, e.g. `{"type":"danger-full-access"}`) — the permission posture, last evidence winning, since a session may renegotiate mid-run (`usage-parsers.mjs:498-520`) |
 | `event_msg` → `token_count` | A **cumulative** usage snapshot; only the last one is kept (`usage-parsers.mjs:543-552`) |
 | `event_msg` → `task_started` | `model_context_window` — the context-window denominator, which no other host records — and the turn's start time (`usage-parsers.mjs:558-563`) |
 | `event_msg` → `task_complete` | The host's own `duration_ms` for the turn, taken as a latency sample only when no prompt-to-response gap already covered it; a non-null `error` counts as an exception (`usage-parsers.mjs:571-578`) |
 | `event_msg` → `turn_aborted` | An explicit interrupt: counted in `aborts`, and it clears both latency states so an unanswered prompt is never timed against a later, unrelated response (`usage-parsers.mjs:644-654`) |
-| `event_msg` → `user_message` | A legacy-format real human prompt — Codex does not route tool output through this event |
+| `event_msg` → `user_message` | A legacy-format prompt CANDIDATE — Codex does not route tool output through this event, but the text still needs the human-prompt gate below before it counts |
 | `event_msg` → `agent_message` | A legacy-format model response |
-| `event_msg` → `item_completed` → `UserMessage` | A current-format real human prompt; text blocks use the observed lowercase `text` discriminator |
+| `event_msg` → `item_completed` → `UserMessage` | A current-format prompt candidate; text blocks use the observed lowercase `text` discriminator; also gated below |
 | `event_msg` → `item_completed` → `AgentMessage` | A current-format model response; text blocks use the observed uppercase `Text` discriminator |
+| Human-prompt gate (`isCodexHumanMessage`, `usage-parsers.mjs:637-638`) | Codex carries no discipline of its own for telling a typed prompt apart from harness output or a mirrored cross-host envelope replayed into the rollout rather than typed there. Reuses `HARNESS_OUTPUT_RE` verbatim (Claude's own envelope markers reproduce byte-for-byte inside a mirrored rollout) plus two Codex-specific machine markers (`CODEX_MACHINE_ENVELOPE_RE`, `usage-parsers.mjs:635`): a `<teammate-message` wrapper and the literal `"Another Claude session sent a message:"` prefix cross-session delivery uses. Only a message that passes the gate counts toward `rec.prompts`, sets the session title, or opens the prompt→agent-message latency window; every `user_message`/`UserMessage` still gets a turn row either way, `kind: 'context'` instead of `'prompt'` when gated out — mirroring how a Claude harness-origin `user` entry is kept, not dropped (§3.2). Deliberately narrow: exact-twin cross-host dedup by flush timestamp is a recorded follow-up, not attempted here |
 | `event_msg` → `item_completed` → `CommandExecution`, `McpToolCall`, `FileChange`, `CollabAgentToolCall` | The four item kinds tallied as tool invocations, keyed by their own Codex names (`CODEX_TOOL_ITEM_TYPES`, `usage-parsers.mjs:634`, tallied at `:659-661`) |
 
 The parser normalizes both message generations into the same prompt/response
@@ -178,7 +179,7 @@ The same parsers serve two very different callers, switched by `withTurns`:
 
 | Path | Entry point | `withTurns` | Message bodies | Cached? |
 |---|---|---|---|---|
-| **Scan** — the aggregate index behind the Scorecard/Findings/Sessions views | `buildIndex` → `parseFile` (`usage-index.mjs:310`) | `false` | never held — holding them would balloon memory across 3,000+ files (`usage-parsers.mjs:435-438`) | yes: per-file derived records in `~/.config/agentic-kit/usage-index.json`, keyed `(path, mtime, size)`, invalidated wholesale by `SCHEMA_VERSION` (`usage-index.mjs:99`) |
+| **Scan** — the aggregate index behind the Scorecard/Findings/Sessions views | `buildIndex` → `parseFile` (`usage-index.mjs:310`) | `false` | never held — holding them would balloon memory across 3,000+ files (`usage-parsers.mjs:435-438`) | yes: per-file derived records in `~/.config/agentic-kit/usage-index.json`, keyed `(path, mtime, size)`, invalidated wholesale by `SCHEMA_VERSION` (`usage-index.mjs:120`) |
 | **Reader** — one transcript for the Transcript view | `readSession` (`usage-index.mjs:853`) | `true` | full turn list built | **never** — every call re-reads and re-parses the one file |
 
 ![Figure: one parser, two read paths — the scan path (withTurns false) caches per-file records keyed by path, mtime and size; the reader path (withTurns true) builds full turns and is never cached](assets/transcript-read-paths.svg)
@@ -274,7 +275,7 @@ transcript content leaves the module, and every step is a gate:
 1. **Id grammar before any filesystem access** — an id must match one of
    exactly two shapes, or it is rejected with `ERR_INVALID_SESSION_ID`
    (`invalidId`, `usage-index.mjs:919`) before any read happens:
-   * `VALID_ID` (`/^[A-Za-z0-9._-]{1,128}$/`, `usage-index.mjs:110`) — a plain
+   * `VALID_ID` (`/^[A-Za-z0-9._-]{1,128}$/`, `usage-index.mjs:131`) — a plain
      session id;
    * `VALID_SUBAGENT_ID` (`usage-index.mjs:123`) — a namespaced nested
      subagent id, EXACTLY `<parentId>/<stem>` with one slash, where the parent
@@ -293,7 +294,7 @@ transcript content leaves the module, and every step is a gate:
    symlinks; a symlink planted inside a root pointing at `/etc/anything`
    passes a lexical `startsWith` but fails this. Roots are realpath'd too so
    a symlinked dotfiles setup still works.
-4. **Size cap** — `MAX_SESSION_BYTES` (64 MB, `usage-index.mjs:109`): a
+4. **Size cap** — `MAX_SESSION_BYTES` (64 MB, `usage-index.mjs:130`): a
    transcript is read whole and JSON-expands ~5×, so an unbounded read is a
    memory-amplification primitive. Oversized reads as unavailable, not risky.
 
