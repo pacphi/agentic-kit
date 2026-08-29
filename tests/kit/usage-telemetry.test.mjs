@@ -1,29 +1,24 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import * as telemetry from '../../src/lib/usage-telemetry.mjs';
 import {
-  HOST_TELEMETRY_CAPABILITIES, MAX_TELEMETRY_UNKNOWN_KINDS, TELEMETRY_CATEGORIES,
+  MAX_TELEMETRY_UNKNOWN_KINDS,
   addTelemetryDiagnostics, emptyTelemetryDiagnostics,
-  finalizeTelemetryDiagnostics, recordTelemetryUnit, telemetryCapabilities,
+  finalizeTelemetryDiagnostics, recordTelemetryUnit,
 } from '../../src/lib/usage-telemetry.mjs';
 
-test('the host matrix uses shared meanings and never maps Codex wire items to tool calls', () => {
-  assert.deepEqual(Object.keys(HOST_TELEMETRY_CAPABILITIES), ['claude', 'codex', 'opencode']);
-  assert.deepEqual(TELEMETRY_CATEGORIES, [
-    'prompts', 'responses', 'toolCalls', 'commandExecutions',
-    'fileChanges', 'mcpCalls', 'collaboration',
+// The module is counted evidence only. A static per-host capability matrix
+// once lived here and was rendered as its own panel; it declared what a parser
+// COULD report rather than what it did, so it was removed. Pinning the export
+// surface keeps that declaration from reappearing beside the real counters.
+test('the module exports the diagnostics envelope and nothing that declares capability', () => {
+  assert.deepEqual(Object.keys(telemetry).sort(), [
+    'MAX_TELEMETRY_UNKNOWN_KINDS',
+    'addTelemetryDiagnostics',
+    'emptyTelemetryDiagnostics',
+    'finalizeTelemetryDiagnostics',
+    'recordTelemetryUnit',
   ]);
-  assert.equal(HOST_TELEMETRY_CAPABILITIES.claude.toolCalls, 'supported');
-  assert.equal(HOST_TELEMETRY_CAPABILITIES.opencode.toolCalls, 'supported');
-  assert.equal(HOST_TELEMETRY_CAPABILITIES.codex.toolCalls, 'unsupported');
-});
-
-test('supported categories become unavailable when the source is not readable', () => {
-  assert.equal(telemetryCapabilities('claude', 'ok').prompts, 'supported');
-  assert.equal(telemetryCapabilities('claude', 'ok').toolCalls, 'supported');
-  assert.equal(telemetryCapabilities('claude', 'absent').prompts, 'unavailable');
-  assert.equal(telemetryCapabilities('claude', 'degraded').toolCalls, 'unavailable');
-  assert.equal(telemetryCapabilities('claude', 'absent').commandExecutions, 'unsupported');
-  assert.equal(telemetryCapabilities('unknown-host', 'ok').responses, 'unavailable');
 });
 
 test('common diagnostics distinguish observed zero from an unavailable source', () => {

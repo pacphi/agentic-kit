@@ -44,7 +44,7 @@ import {
 } from './usage-opencode.mjs';
 import {
   addTelemetryDiagnostics, emptyTelemetryDiagnostics, finalizeTelemetryDiagnostics,
-  MAX_TELEMETRY_UNKNOWN_KINDS, recordTelemetryUnit, telemetryCapabilities,
+  MAX_TELEMETRY_UNKNOWN_KINDS, recordTelemetryUnit,
 } from './usage-telemetry.mjs';
 import { parseClaude, parseCodex } from './usage-parsers.mjs';
 import { maskSecrets, applyCodexLedger, aggregate, sessionPayload } from './usage-aggregate.mjs';
@@ -234,14 +234,13 @@ function finalizeCodexHealth(root, diagnostics) {
   return { ...root, status, reason, diagnostics };
 }
 
-/** Attach the additive host-neutral telemetry contract to source health.
+/** Attach the additive host-neutral telemetry counters to source health.
  * Existing status/reason and Codex diagnostic keys remain where consumers
- * already find them; `diagnostics.common` and `capabilities` are the new
- * cross-host surface. */
-function attachTelemetryHealth(host, health, common, diagnostics = health.diagnostics) {
+ * already find them; `diagnostics.common` is the cross-host surface. It
+ * reports what was read — never a per-host claim about what could be read. */
+function attachTelemetryHealth(health, common, diagnostics = health.diagnostics) {
   return {
     ...health,
-    capabilities: telemetryCapabilities(host, health.status),
     diagnostics: {
       ...(diagnostics ?? {}),
       common: finalizeTelemetryDiagnostics(common),
@@ -762,9 +761,9 @@ async function scan(o = {}) {
     warnings: codexSourceHealth.diagnostics.warnings,
   });
   result.sourceHealth = {
-    claude: attachTelemetryHealth('claude', claudeHealth, commonDiagnostics.claude),
-    codex: attachTelemetryHealth('codex', codexSourceHealth, commonDiagnostics.codex),
-    opencode: attachTelemetryHealth('opencode', opencodeHealth, commonDiagnostics.opencode),
+    claude: attachTelemetryHealth(claudeHealth, commonDiagnostics.claude),
+    codex: attachTelemetryHealth(codexSourceHealth, commonDiagnostics.codex),
+    opencode: attachTelemetryHealth(opencodeHealth, commonDiagnostics.opencode),
     codexLedger: codexLedgerHealth,
   };
   return result;

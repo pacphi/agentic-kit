@@ -130,11 +130,10 @@ empty or complete usage.
 The additive `sourceHealth.<host>.diagnostics.common` envelope makes coverage
 comparable without pretending the hosts have the same wire format: it reports
 discovered and parsed units, units with usage/prompts/responses, observed prompt
-and response totals, warnings, and unknown kinds. The companion
-`sourceHealth.<host>.capabilities` matrix distinguishes `supported`,
-`unsupported`, and `unavailable`. This is intentionally the historical adapter
-contract, not a claim that the hosts lack richer public APIs: Claude documents
-tool hooks and OpenTelemetry tool spans ([hooks](https://code.claude.com/docs/en/hooks),
+and response totals, warnings, and unknown kinds. Every field is counted — the
+envelope reports what was read, never what a parser could read in principle.
+That is narrower than what the hosts publish: Claude documents tool hooks and
+OpenTelemetry tool spans ([hooks](https://code.claude.com/docs/en/hooks),
 [monitoring](https://code.claude.com/docs/en/monitoring-usage)); Codex documents
 typed command, file-change, MCP, and collaboration items in app-server
 ([protocol](https://github.com/openai/codex/blob/main/codex-rs/app-server/README.md));

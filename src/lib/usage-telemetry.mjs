@@ -1,49 +1,12 @@
-// usage-telemetry.mjs — the host-neutral evidence contract for the usage
-// scorecard. This module describes what a source can report; it does not
-// reinterpret host wire events as a different kind of activity.
-//
-// The first implementation deliberately stops at prompts, responses, and
-// parser coverage. Claude and OpenCode can expose normalized tool calls, but
-// Codex's current rollout item families do not map one-to-one to that existing
-// contract. Activity categories therefore remain explicit capabilities rather
-// than being filled with host-specific guesses.
-
-export const TELEMETRY_CAPABILITY_STATES = Object.freeze([
-  'supported', 'unsupported', 'unavailable',
-]);
-
-/** Categories whose meanings are shared across transcript hosts. */
-export const TELEMETRY_CATEGORIES = Object.freeze([
-  'prompts', 'responses', 'toolCalls', 'commandExecutions',
-  'fileChanges', 'mcpCalls', 'collaboration',
-]);
+// usage-telemetry.mjs — the host-neutral diagnostics envelope for the usage
+// scorecard. Everything here is COUNTED: units discovered, units parsed, and
+// the prompt/response evidence those units carried. Nothing here interprets a
+// host's wire events as a different kind of activity, and nothing declares
+// what a parser could report in principle — an unclaimed activity category
+// contributes no counter rather than a matrix entry saying it is unclaimed.
 
 /** Keep future wire-kind growth from becoming an unbounded diagnostics payload. */
 export const MAX_TELEMETRY_UNKNOWN_KINDS = 32;
-
-/**
- * Static capability matrix. `supported` means the source format carries
- * enough evidence for this category under the current parser contract;
- * `unsupported` means the category is intentionally not claimed. Runtime
- * source health can turn a supported category into `unavailable`.
- */
-export const HOST_TELEMETRY_CAPABILITIES = Object.freeze({
-  claude: Object.freeze({
-    prompts: 'supported', responses: 'supported', toolCalls: 'supported',
-    commandExecutions: 'unsupported', fileChanges: 'unsupported',
-    mcpCalls: 'unsupported', collaboration: 'unsupported',
-  }),
-  codex: Object.freeze({
-    prompts: 'supported', responses: 'supported', toolCalls: 'unsupported',
-    commandExecutions: 'unsupported', fileChanges: 'unsupported',
-    mcpCalls: 'unsupported', collaboration: 'unsupported',
-  }),
-  opencode: Object.freeze({
-    prompts: 'supported', responses: 'supported', toolCalls: 'supported',
-    commandExecutions: 'unsupported', fileChanges: 'unsupported',
-    mcpCalls: 'unsupported', collaboration: 'unsupported',
-  }),
-});
 
 /** Empty host-neutral parser diagnostics. */
 export function emptyTelemetryDiagnostics() {
@@ -123,18 +86,4 @@ export function finalizeTelemetryDiagnostics(value) {
   }
   out.unknownKindOverflow += Math.max(0, Number(value.unknownKindOverflow) || 0);
   return out;
-}
-
-/**
- * Resolve the runtime capability state for one host/source. A source that is
- * absent, unreadable, or partially degraded cannot claim a measured zero for
- * a category the parser supports; it is `unavailable` instead.
- */
-export function telemetryCapabilities(host, sourceStatus = 'unavailable') {
-  const base = HOST_TELEMETRY_CAPABILITIES[host];
-  if (!base) return Object.fromEntries(TELEMETRY_CATEGORIES.map((key) => [key, 'unavailable']));
-  return Object.fromEntries(TELEMETRY_CATEGORIES.map((key) => [
-    key,
-    base[key] === 'supported' && sourceStatus !== 'ok' ? 'unavailable' : base[key],
-  ]));
 }

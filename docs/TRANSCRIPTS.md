@@ -122,17 +122,19 @@ an equivalence neither host makes — while their bodies still travel in events
 the parser does not render. Codex tool *output* therefore remains outside the
 turn list: a fidelity gap, not an attribution bug.
 
-### 1.3 Cross-host telemetry capability contract
+### 1.3 What these readers normalize, and what the hosts publish
 
-The public host APIs are richer than the historical readers in this module, and
-they are not interchangeable transcript schemas. This distinction is verified
-against the public surfaces available on **2026-08-24**:
+The public host APIs are richer than the readers in this module, and they are
+not interchangeable transcript schemas. What each reader normalizes is
+therefore narrower than what its host offers — a fidelity gap, stated here so a
+missing category is never read as an observed zero. Verified against the public
+surfaces available on **2026-08-24**:
 
-| Host | Public evidence | Historical adapter contract in this repository |
+| Host | Public evidence | What this repository's reader normalizes |
 |---|---|---|
-| Claude Code | Hooks expose `transcript_path`, `tool_name`, tool input/results, and `tool_use_id`; its monitoring surface also documents `claude_code.tool` spans and tool-result events ([hooks reference](https://code.claude.com/docs/en/hooks), [monitoring](https://code.claude.com/docs/en/monitoring-usage)) | `prompts`, `responses`, and normalized `toolCalls` are supported; command/file/MCP/collaboration subcategories remain unclaimed until their cross-host semantics are specified |
-| Codex | The public `codex app-server` protocol documents typed `userMessage`, `agentMessage`, `commandExecution`, `fileChange`, `mcpToolCall`, and `collabToolCall` items ([app-server protocol](https://github.com/openai/codex/blob/main/codex-rs/app-server/README.md)) | Only prompt/response items are normalized into turns. The rollout parser records unknown item kinds diagnostically and tallies four of them onto the session's `tools` map (§1.2) — but `toolCalls` here stays `unsupported`, because a name-and-count tally is not the normalized tool-call record this category claims. Codex activity categories are `unsupported` in this historical adapter, not measured zero |
-| OpenCode | The public SDK returns session messages with `parts`, and its public message model includes tool invocation parts ([SDK](https://github.com/anomalyco/opencode/blob/dev/packages/web/src/content/docs/sdk.mdx), [message model](https://github.com/anomalyco/opencode/blob/dev/packages/opencode/src/session/message.ts)) | `prompts`, `responses`, and persisted `toolCalls` are supported; command/file/MCP/collaboration subcategories remain unclaimed |
+| Claude Code | Hooks expose `transcript_path`, `tool_name`, tool input/results, and `tool_use_id`; its monitoring surface also documents `claude_code.tool` spans and tool-result events ([hooks reference](https://code.claude.com/docs/en/hooks), [monitoring](https://code.claude.com/docs/en/monitoring-usage)) | Prompts, responses, and normalized tool calls. Command, file-change, MCP, and collaboration activity are not normalized until their cross-host semantics are specified |
+| Codex | The public `codex app-server` protocol documents typed `userMessage`, `agentMessage`, `commandExecution`, `fileChange`, `mcpToolCall`, and `collabToolCall` items ([app-server protocol](https://github.com/openai/codex/blob/main/codex-rs/app-server/README.md)) | Only prompt/response items become turns. The rollout parser records unknown item kinds diagnostically and tallies four of them onto the session's `tools` map under their own Codex names (§1.2) — a name-and-count tally, not the normalized tool-call record Claude and OpenCode produce, which is why the two are never added together |
+| OpenCode | The public SDK returns session messages with `parts`, and its public message model includes tool invocation parts ([SDK](https://github.com/anomalyco/opencode/blob/dev/packages/web/src/content/docs/sdk.mdx), [message model](https://github.com/anomalyco/opencode/blob/dev/packages/opencode/src/session/message.ts)) | Prompts, responses, and persisted tool calls. Command, file-change, MCP, and collaboration activity are not normalized |
 
 Three per-session axes are read on all three hosts, but from **different
 evidence of different strength**, which is why each is reported with its own
@@ -151,25 +153,22 @@ and a context-fill percentage is simply omitted where the denominator was never
 recorded rather than divided by an assumed window.
 
 `sourceHealth.<host>.diagnostics.common` is the additive, host-neutral
-coverage envelope. `unitsSeen` counts discovered session candidates in the
-requested window; `unitsParsed` counts candidates parsed successfully;
-`unitsWithUsage`, `unitsWithPrompts`, and `unitsWithResponses` count parsed
-units carrying each kind of evidence; `prompts` and `responses` are observed
-totals. `sourceHealth.<host>.capabilities` uses three states:
+coverage envelope, and every field in it is counted rather than declared.
+`unitsSeen` counts discovered session candidates in the requested window;
+`unitsParsed` counts candidates parsed successfully; `unitsWithUsage`,
+`unitsWithPrompts`, and `unitsWithResponses` count parsed units carrying each
+kind of evidence; `prompts` and `responses` are observed totals.
 
 `unknownKinds` is capped at 32 distinct wire kinds; additional occurrences are
 retained in `unknownKindOverflow` so future schema growth cannot expand the
 diagnostics payload without limit.
 
-* `supported` means this historical adapter can produce the category;
-* `unsupported` means the category is intentionally not claimed by this adapter;
-* `unavailable` means the adapter supports the category in principle, but the
-  source is absent or degraded for this scan.
-
-Therefore a supported source with zero observations is different from an
-absent/degraded source, and neither is silently converted into a host-specific
-metric. Existing status/reason fields and Codex diagnostic keys remain in place
-for compatibility; the common envelope and capability matrix are additive.
+A readable source with zero observations is therefore distinguishable from an
+absent or degraded one — the counters read zero in the first case, and the
+source's own `status`/`reason` says so in the second — and neither is silently
+converted into a host-specific metric. Existing status/reason fields and Codex
+diagnostic keys remain in place for compatibility; the common envelope is
+additive.
 
 ---
 

@@ -853,7 +853,6 @@ test('an empty corpus yields a zeroed Aggregate rather than throwing', async () 
   // "zero sessions" and "we never found the directory" must stay distinguishable.
   assert.equal(agg.sourceHealth.claude.status, 'absent');
   assert.equal(agg.sourceHealth.claude.reason, null);
-  assert.equal(agg.sourceHealth.claude.capabilities.prompts, 'unavailable');
   assert.equal(agg.sourceHealth.claude.diagnostics.common.unitsSeen, 0);
   assert.equal(agg.sourceHealth.codex.status, 'absent');
   assert.equal(agg.sourceHealth.codex.reason, null);
@@ -866,7 +865,10 @@ test('buildIndex reports ok claude/codex root health when the transcript roots e
   const agg = await buildIndex(opts(sb));
   assert.equal(agg.sourceHealth.claude.status, 'ok');
   assert.equal(agg.sourceHealth.claude.reason, null);
-  assert.equal(agg.sourceHealth.claude.capabilities.prompts, 'supported');
+  // Source health reports what was READ, never what the parser could report:
+  // the old per-host capability matrix is not part of this payload.
+  assert.ok(!Object.hasOwn(agg.sourceHealth.claude, 'capabilities'),
+    'sourceHealth must not carry a capability matrix');
   assert.equal(agg.sourceHealth.claude.diagnostics.common.unitsParsed, 3);
   assert.equal(agg.sourceHealth.claude.diagnostics.common.prompts, 4);
   assert.equal(agg.sourceHealth.claude.diagnostics.common.responses, 5);

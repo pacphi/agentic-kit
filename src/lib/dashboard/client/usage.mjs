@@ -301,49 +301,6 @@ import { renderUsage } from './usage-orchestrators.mjs';
       +"open unions whole session spans; summed double-counts overlap.";
   }
 
-  // Host-neutral telemetry is deliberately separate from the scorecard's
-  // measured totals. A missing common envelope means an older API response,
-  // not zero observations; the UI says so rather than backfilling a claim.
-  var TELEMETRY_HOSTS=[
-    {key:"claude",label:"Claude"},
-    {key:"codex",label:"Codex transcript"},
-    {key:"opencode",label:"OpenCode"}
-  ];
-  var TELEMETRY_CATEGORIES=[
-    ["prompts","prompts"],["responses","responses"],["toolCalls","tools"],
-    ["commandExecutions","commands"],["fileChanges","file changes"],
-    ["mcpCalls","MCP"],["collaboration","collaboration"]
-  ];
-  function renderTelemetryCoverage(health){
-    var el=document.getElementById("u-telemetry-grid");
-    if(!el)return;
-    health=health||{};
-    el.innerHTML=TELEMETRY_HOSTS.map(function(host){
-      var source=health[host.key]||{},status=String(source.status||"not-read");
-      var common=source.diagnostics&&source.diagnostics.common;
-      var counts;
-      if(!common){
-        counts="coverage not reported by this API";
-      }else if(status==="ok"){
-        counts=fmtNum(common.unitsParsed)+"/"+fmtNum(common.unitsSeen)+" parsed · "+fmtNum(common.prompts)+" prompts · "+fmtNum(common.responses)+" responses";
-      }else if(common.unitsSeen>0){
-        counts=fmtNum(common.unitsParsed)+"/"+fmtNum(common.unitsSeen)+" parsed · "+fmtNum(common.prompts)+" prompts · "+fmtNum(common.responses)+" responses · partial coverage";
-      }else{
-        counts="coverage unavailable"+(source.reason?" · "+String(source.reason):"");
-      }
-      if(common&&common.warnings&&common.warnings.length) counts+=" · "+common.warnings.join(", ");
-      var capabilities=source.capabilities||{};
-      var caps=TELEMETRY_CATEGORIES.map(function(item){
-        var state=String(capabilities[item[0]]||"unavailable");
-        return '<span class="tc-cap" data-state="'+esc(state)+'" title="'+esc(item[1]+" capability: "+state)+'">'+esc(item[1])+" "+esc(state)+"</span>";
-      }).join("");
-      return '<article class="telemetry-card" data-status="'+esc(status)+'">'
-        +'<div class="tc-head"><span>'+esc(host.label)+"</span><span class=\"tc-status\">"+esc(status)+"</span></div>"
-        +'<div class="tc-counts">'+esc(counts)+"</div>"
-        +'<div class="tc-caps">'+caps+"</div></article>";
-    }).join("");
-  }
-
   // ── panels grafted onto the served scorecard markup ───────────────────────
   // page.mjs renders the scorecard's containers. The panels below arrived
   // after that markup shipped and build their own container instead of growing
@@ -701,8 +658,6 @@ import { renderUsage } from './usage-orchestrators.mjs';
       return '<div class="daybar" title="'+esc(tip)+'"><div class="db-fill" style="height:'+h.toFixed(1)+'%"></div>'
         +'<span class="db-lab">'+esc(x.day.slice(8))+"</span></div>";
     }).join(""):'<div class="empty">no days in window.</div>';
-    renderTelemetryCoverage(d.sourceHealth);
-
   }
 
   function renderScoreHosts(d){
@@ -854,9 +809,10 @@ import { renderUsage } from './usage-orchestrators.mjs';
       +"</div>","u-punch");
     if(!pair)return;
     pair.innerHTML=toolRows(d)
-      +'<p class="hr-note">Invocations as each host recorded them. A host that does not report tool '
-      +"calls contributes nothing here rather than a zero — telemetry coverage above says which "
-      +"hosts report them at all.</p>";
+      +'<p class="hr-note">Invocations as each host recorded them, under each host\'s own tool '
+      +"names — nothing is renamed to make two hosts line up. A host that records no tool calls "
+      +"contributes nothing here rather than a zero, so these totals are not a cross-host "
+      +"comparison of how much tooling each one did.</p>";
     var mix=document.getElementById("u-modelmix");
     if(mix)mix.innerHTML=modelMix(d);
   }

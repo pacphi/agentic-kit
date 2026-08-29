@@ -18,22 +18,16 @@ import {
 
 const PAGE = renderPage({ name: 'agentic-kit', version: 'test' });
 
-test('usage dashboard includes a visible host-neutral telemetry coverage surface', () => {
-  assert.match(PAGE, /id="u-telemetry-grid"/);
-  assert.match(PAGE, />telemetry coverage</);
-  assert.match(JS, /function renderTelemetryCoverage/);
-  assert.match(JS, /coverage not reported by this API/);
-  assert.match(JS, /label:"Codex transcript"/);
-  assert.match(JS, /coverage unavailable/);
-  assert.match(JS, /data-state=/);
-  assert.match(CSS, /\.telemetry-card/);
-});
-
-test('usage dashboard keeps unsupported and unavailable capability states distinct', () => {
-  assert.match(JS, /String\(capabilities\[item\[0\]\]\|\|"unavailable"\)/);
-  assert.match(JS, /data-state=/);
-  assert.match(JS, /source\.diagnostics&&source\.diagnostics\.common/);
-  assert.match(JS, /source\.capabilities\|\|\{\}/);
+// The telemetry-coverage panel is gone: it published a per-host capability
+// matrix — a claim about what a parser could report — beside the scorecard's
+// measured figures, where a reader could not tell the two apart. Source
+// STATUS still reaches the reader, in the tabbar pills, on every tab.
+test('the scorecard no longer ships a telemetry coverage panel', () => {
+  assert.doesNotMatch(PAGE, /u-telemetry/);
+  assert.doesNotMatch(PAGE, /telemetry coverage/i);
+  assert.doesNotMatch(JS, /renderTelemetryCoverage/);
+  assert.doesNotMatch(JS, /telemetry coverage/i);
+  assert.doesNotMatch(CSS, /\.telemetry-(card|grid)/);
 });
 
 // ── /api/usage payload: rhythm, mode, provider, previous window ────────────
