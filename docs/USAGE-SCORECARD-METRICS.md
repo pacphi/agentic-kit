@@ -1139,8 +1139,8 @@ p(q), over N samples, landing in bucket i (count n_i, running total `cum` before
 - Percentiles: `percentileFromBuckets` (`usage-aggregate.mjs:206-223`). The
   browser re-implementation `bucketPercentile` (`usage-rhythm.mjs:106-126`) is
   pinned to byte-identical output, and the browser's edge copies to the server
-  constants, by `tests/kit/dashboard-usage-telemetry.test.mjs:285-298` and
-  `:387-388`.
+  constants, by `tests/kit/dashboard-usage-telemetry.test.mjs:292-310` and
+  `:390-398`.
 - Render: `lengthCard`/`latencyCard` and the `≥` prefix helper `fmtAtLeast` in
   `src/lib/dashboard/client/usage.mjs` (that bundle shares a basename with the
   CLI command module, so its render sites are cited by function name rather
@@ -1580,12 +1580,13 @@ rather than leaving a reader to infer it from a broken streak.
 
 ## 18. Reliability
 
-**Displayed as:** the `reliability` strip, subtitled `turns that never landed`.
+**Displayed as:** the `Reliability` strip, subtitled `turns that never landed`.
 Two stats — `exceptions / 1k responses` (subtitle `N of M responses`, plus a
 worded flag comparing it to the previous window) and `aborted turns` (subtitle
 `X per 1k codex responses`, or an em dash when the window holds no Codex
 session) — over an `exceptions by day` sparkline that names the single worst
-day. `ak usage score` prints both under `reliability`, colouring the exception
+day. `ak usage score` prints both under its own
+`reliability — turns that never landed` heading, colouring the exception
 line by whether any fired.
 
 **Formula:**

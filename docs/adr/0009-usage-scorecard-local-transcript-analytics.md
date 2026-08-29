@@ -40,6 +40,8 @@ The implemented boundary is therefore additive and evidence-graded:
 - `sourceHealth.<host>.capabilities` reports `supported`, `unsupported`, or `unavailable` for
   prompts, responses, tool calls, command executions, file changes, MCP calls, and collaboration.
   A supported source with zero observations is not the same as an absent or degraded source.
+  **[Superseded 2026-08-29: the capabilities matrix was removed with the telemetry-coverage
+  panel — see [ADR-0038](0038-consistent-cross-host-session-metrics.md).]**
 - Existing source status/reason fields and Codex-specific diagnostics remain unchanged for callers;
   the new fields are additive. The Usage dashboard renders the common coverage and capability
   states, including the distinction between unsupported and unavailable.
