@@ -303,9 +303,13 @@ const PERSONA_OPENER_RE = /^(#\s*)?(instructions \(read first\)|you are (a|an|th
  * "not this shape", never a measurement that happened to come out zero.
  *
  * Deliberately shape-only, and deliberately NOT provenance: a machine-authored
- * template that opens with a persona still carries `o`, which is what lets the
- * host-asymmetry detector count role scaffolding per host without reading a
- * word of any prompt.
+ * template that opens with a persona is still RECORDED with `o`. That is a
+ * recording choice, not a counting one — every shipped consumer filters to
+ * `p === 'human'` before counting personas, because spec §2.1 makes provenance
+ * filtering load-bearing for every figure in the Prompts view, so nothing today
+ * reads a non-human `o`. Recording it blind is what would let a future consumer
+ * ask for machine-authored persona counts by reading the raw fingerprints,
+ * instead of needing a re-scan to get a flag that was never written.
  *
  * @param {string} text
  * @returns {{ q?: 1, o?: 1 }}

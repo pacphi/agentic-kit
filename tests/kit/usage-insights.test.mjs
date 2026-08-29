@@ -910,6 +910,11 @@ test('supervision-tap-share fires above the operator\'s OWN baseline, with enoug
   assert.match(ins.evidence, /claude/);
   assert.match(ins.evidence, new RegExp(TAP_COST_CAVEAT.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')),
     'the modelled-cost caveat rides verbatim, never paraphrased');
+  // The finding sentence must describe the comparison the code ACTUALLY made.
+  // Here a real baseline existed, so "your own recent normal" is the truth.
+  assert.match(ins.finding, /your own recent normal/);
+  assert.doesNotMatch(ins.finding, /floor/,
+    'a card that beat a real baseline must not also claim it cleared a fallback floor');
 });
 
 test('supervision-tap-share does not fire AT the baseline — only above it', () => {
@@ -945,6 +950,32 @@ test('with no personal baseline yet, supervision-tap-share falls back to a STATE
   assert.ok(ins);
   assert.match(ins.evidence, /10%/, 'the fallback floor is printed, not silently applied');
   assert.match(ins.evidence, /baseline/i);
+  // The finding must say the same thing the evidence does. Claiming "above your
+  // own recent normal" here would make the card contradict itself in one render
+  // — and with no history loaded this is the ONLY path that runs today.
+  assert.match(ins.finding, /10% floor/);
+  assert.doesNotMatch(ins.finding, /your own recent normal/,
+    'there is no personal normal to be above — the card must not invent one');
+});
+
+test('with a mix of hosts, the finding claims only what every fired host cleared', () => {
+  const mixed = tapAgg({
+    promptsByHost: {
+      claude: hostStats({ typed: 100, taps: 22, tapShare: 0.22 }),   // beat a real baseline
+      codex: hostStats({ typed: 200, taps: 40, tapShare: 0.30 }),    // only cleared the floor
+    },
+    promptBaselines: { claude: { tapShareP75_trailing90d: 0.12 } },
+  });
+  const ins = byId(detectInsights(mixed), 'supervision-tap-share');
+  assert.ok(ins);
+  assert.doesNotMatch(ins.finding, /your own recent normal/,
+    'one host had no baseline, so the summary sentence cannot claim a personal normal for both');
+  assert.doesNotMatch(ins.finding, /10% floor/,
+    'and the other DID have one, so it cannot claim the floor for both either');
+  assert.match(ins.finding, /judged against/, 'it defers to the per-host evidence line instead');
+  // The per-host split still names both rules explicitly.
+  assert.match(ins.evidence, /trailing-90d p75 of 12%/);
+  assert.match(ins.evidence, /10% floor/);
 });
 
 test('an explicit null baseline reads the same as an absent one', () => {

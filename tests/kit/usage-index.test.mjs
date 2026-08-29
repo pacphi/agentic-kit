@@ -1626,9 +1626,11 @@ test('parseClaude records one fingerprint per prompt-kind turn, tagged with its 
 });
 
 // v16, on the Claude read path. The flags are decided by the SHAPE of the turn,
-// independently of who wrote it — a machine-authored persona template still
-// carries `o`, which is exactly what makes the host-asymmetry detector able to
-// say "this host is being handed roles" without reading a word of the text.
+// independently of who wrote it, so a machine-authored persona template is
+// still RECORDED with `o`. Counting is a separate decision made downstream:
+// every shipped consumer filters to `p === 'human'` first, so no non-human `o`
+// is read today. The provenance-blind recording is what would let one be,
+// without a re-scan.
 test('parseClaude carries the v16 shape flags, omitted when the shape is absent', () => {
   const T0 = '2026-08-20T10:00:00.000Z';
   const at = (s) => new Date(Date.parse(T0) + s * 1000).toISOString();
@@ -1714,6 +1716,11 @@ test('blankSession v14 fingerprint fields default honest-empty', () => {
 
 // ── v11 index carry-through + lookback (Task 5) ─────────────────────────────
 
+/** Carries BOTH v16 shape flags: it opens with a persona assignment and it ends
+ *  with a question mark. Shared by the fixture and its assertions so the two
+ *  cannot drift into testing different text. */
+const EVIDENCE_PROMPT = 'You are the release engineer. What changed?';
+
 test('cached session entries round-trip the v11 and v14 fields across a cache hit', async () => {
   _resetForTest();
   const sb = soloSandbox();
@@ -1723,13 +1730,16 @@ test('cached session entries round-trip the v11 and v14 fields across a cache hi
   // "Evidence" session: the same shape as the parseClaude unit test above (a
   // permissionMode-carrying prompt, a cache-heavy reply) so mode/modeRaw/
   // latHist/latCount/lenSeconds/ctxLastTokens land on real, non-default
-  // values to round-trip through the cache.
+  // values to round-trip through the cache. The prompt text is deliberately
+  // BOTH a persona opener and a question, so the v16 flags are actually SET
+  // here — a fixture carrying neither would prove only that absent keys stay
+  // absent, which a serialization bug would also satisfy.
   const evidenceFile = path.join(sb.claude, 'sess-evidence.jsonl');
   fs.writeFileSync(evidenceFile, `${[
     JSON.stringify({
       type: 'user', sessionId: 'sess-evidence', cwd: '/Users/me/proj',
       timestamp: T0, permissionMode: 'acceptEdits',
-      message: { role: 'user', content: 'do it' },
+      message: { role: 'user', content: EVIDENCE_PROMPT },
     }),
     JSON.stringify({
       type: 'assistant', sessionId: 'sess-evidence', cwd: '/Users/me/proj',
@@ -1768,12 +1778,19 @@ test('cached session entries round-trip the v11 and v14 fields across a cache hi
     // reordered by a serialization change.
     assert.equal(evidence.promptFPs.length, 1);
     assertFingerprintKeys(evidence.promptFPs[0]);
-    assert.deepEqual(evidence.promptFPs[0], { ...promptFingerprint('do it'), p: 'human' });
+    // v16: the two shape flags are SET on this fixture, so this pins that a set
+    // flag survives the round trip — not merely that an absent one stays absent.
+    assert.equal(evidence.promptFPs[0].q, 1, 'the question flag survives the cache round trip');
+    assert.equal(evidence.promptFPs[0].o, 1, 'and so does the persona flag');
+    assert.deepEqual(evidence.promptFPs[0],
+      { ...promptFingerprint(EVIDENCE_PROMPT), p: 'human', q: 1, o: 1 });
     assert.equal(evidence.promptFPOverflow, 0);
     // `title` is a separate, pre-existing surface (masked + clipped, and here
     // derived from the first prompt), so the no-text claim is made about the
     // fingerprint layer itself — the thing this schema bump adds.
-    assert.equal(JSON.stringify(evidence.promptFPs).includes('do it'), false);
+    assert.equal(JSON.stringify(evidence.promptFPs).includes(EVIDENCE_PROMPT), false);
+    assert.equal(JSON.stringify(evidence.promptFPs).includes('release engineer'), false,
+      'nor any fragment of it');
 
     const blank = cache.entries[blankFile].session;
     assert.equal(blank.mode, null);

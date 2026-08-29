@@ -753,6 +753,23 @@ function tapRowsOverThreshold(a) {
   return rows.sort((x, y) => y.taps - x.taps);
 }
 
+/** What the finding sentence can honestly say the taps rose above. The evidence
+ *  line already names the rule per host; this is the one-clause summary above
+ *  it, and it must not out-claim that line. A card whose evidence says it used a
+ *  fallback floor cannot tell the reader in the same breath that they exceeded
+ *  their own history — and while no personal baseline is loaded, the floor is
+ *  the ONLY path that runs, so the unconditional phrasing would be wrong every
+ *  time rather than in an edge case. Mixed hosts defer to the split. */
+function tapComparisonClause(rows) {
+  const withBaseline = rows.filter((r) => r.baseline !== null).length;
+  if (withBaseline === rows.length) return 'above your own recent normal';
+  if (withBaseline === 0) {
+    return `above the ${pct(THRESHOLDS.tapAbsoluteFloorShare)} floor used while there is `
+      + 'no personal baseline yet';
+  }
+  return 'above the threshold each was judged against';
+}
+
 // 16 ── supervision-tap-share. Very short prompts ("yes", "go ahead") are the
 // shape of WATCHING a run rather than directing it. There is no universal right
 // number, so the threshold is the operator's own trailing-p75 for that host and
@@ -774,7 +791,7 @@ function detectSupervisionTapShare({ a, sessions }) {
     id: 'supervision-tap-share', kind: 'trend', severity: 'warn',
     title: `Supervision taps are ${pct(lead.share)} of what you type on ${lead.host}`,
     finding: `${count(taps)} of your typed prompts ran to ${TAP_MAX_TOKENS} tokens or fewer — `
-      + `approvals and nudges rather than instructions — which is above your own recent normal on `
+      + `approvals and nudges rather than instructions — which is ${tapComparisonClause(rows)} on `
       + `${rows.length === 1 ? `${lead.host}` : `${count(rows.length)} hosts`}.`,
     evidence: `Per host: ${rows.map(tapRowText).join('; ')}.${modelled}`,
     action: 'Front-load the acceptance criteria so a run can finish unattended: say what "done" '
