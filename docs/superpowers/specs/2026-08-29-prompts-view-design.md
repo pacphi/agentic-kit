@@ -158,7 +158,7 @@ Cross-host mirror dedup (exact-twin prompts counted once) remains a recorded fol
 
 ## 10. Acceptance criteria (sketch)
 
-- Zero prompt text added to any index file or HTTP payload by this work (test-pinned, same tier as the live-snapshot field tests). The pre-existing masked 100-char `session.title` is the one prompt-derived text field and is explicitly out of scope — §2.2. Shipped: a parsed record serialized to JSON contains no fixture prompt string, and every fingerprint entry carries exactly the keys `{h,t,th,p}`, verified structurally across the whole corpus.
+- Zero prompt text added to any index file or HTTP payload by this work (test-pinned, same tier as the live-snapshot field tests). The pre-existing masked 100-char `session.title` is the one prompt-derived text field and is explicitly out of scope — §2.2. Shipped: a parsed record serialized to JSON contains no fixture prompt string, and every fingerprint entry carries only keys from the allowed set `{h,t,th,p,q,o}` (`q`/`o` are the optional question/persona flags added with schema 16; omitted when falsy), verified structurally across the whole corpus.
 - Every rendered figure reproducible by an exported script over the same corpus; every threshold printable with its baseline.
 - A rescan with unchanged corpus reproduces identical metrics AND identical evidence hashes (determinism pin).
 - Coaching cards regenerate only on hash change; dismissal persistence survives rescans and schema bumps.
