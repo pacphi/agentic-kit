@@ -4,7 +4,7 @@
 // arithmetic is redone here; see the score section below for the boundary.
 import { heading, info, ok, warn, dim } from '../lib/output.mjs';
 import { readIndex } from '../lib/usage-index.mjs';
-import { LAT_BUCKET_EDGES, LEN_BUCKET_EDGES } from '../lib/usage-aggregate.mjs';
+import { BASELINE_TRAILING_DAYS, LAT_BUCKET_EDGES, LEN_BUCKET_EDGES } from '../lib/usage-aggregate.mjs';
 import { MODES } from '../lib/usage-modes.mjs';
 import {
   openRouterActivityFile,
@@ -266,7 +266,14 @@ function printScoreReliability(agg) {
 /** The --json shape: an ADDITIVE, credential-free, offline projection of the
  *  same aggregate the text report renders from — verbatim fields, no
  *  reshaping, so a consumer diffing this against the dashboard's /api/usage
- *  payload sees the identical totals/rhythm/byMode/bySource. */
+ *  payload sees the identical totals/rhythm/byMode/bySource.
+ *
+ *  `promptBaselines` is the one field here the TEXT report does not print. It
+ *  is included because it is the only observable evidence that the widened
+ *  lookback below actually reached the trailing history: a baseline is a
+ *  percentile over days that must have been read off disk, so a null one is
+ *  how a too-narrow lookback shows up. Counts and shares only — no hash, no
+ *  session id, no prompt-derived text. */
 function scoreProjection(agg, windowDays) {
   return {
     window: windowDays,
@@ -274,6 +281,7 @@ function scoreProjection(agg, windowDays) {
     rhythm: agg.rhythm,
     byMode: agg.byMode,
     bySource: agg.bySource,
+    promptBaselines: agg.promptBaselines,
     previous: agg.previous,
   };
 }
@@ -287,12 +295,28 @@ async function runScore({ flags, deps }) {
   const readAgg = deps.readIndex ?? readIndex;
   let agg;
   try {
-    // Mirrors dashboard-server.mjs's handleUsage route exactly: lookbackDays
-    // widens what usage-index.mjs reads off disk so records from the window
-    // BEFORE this one survive to be aggregated, and previous:true is what
-    // turns those into agg.previous — this window's own totals/sessions stay
-    // exactly `windowDays` wide either way.
-    agg = await readAgg({ days: windowDays, lookbackDays: windowDays * 2, previous: true });
+    // lookbackDays widens what usage-index.mjs reads off disk so records from
+    // BEFORE this window survive to be aggregated; previous:true is what turns
+    // the nearest of those into agg.previous. This window's own
+    // totals/sessions stay exactly `windowDays` wide either way (the aggregate
+    // filters them at its own display cutoff).
+    //
+    // The width is `windowDays + BASELINE_TRAILING_DAYS`, not `windowDays * 2`.
+    // Two consumers read history here and they need different depths: the
+    // previous-window projection needs one extra window, but the personal
+    // tap-share baseline is a percentile over the 90 days immediately BEFORE
+    // the displayed one (usage-aggregate.buildPromptBaselines), and it needs
+    // BASELINE_MIN_ACTIVE_DAYS of them before it will claim a normal at all.
+    // At `* 2` a 14-day report read 28 days, so the baseline was structurally
+    // null on any corpus — and a detector specified to compare against the
+    // operator's own history silently fell back to an absolute threshold. The
+    // wider figure is a strict superset for every supported window (7/14/30),
+    // so `previous` is unaffected.
+    agg = await readAgg({
+      days: windowDays,
+      lookbackDays: windowDays + BASELINE_TRAILING_DAYS,
+      previous: true,
+    });
   } catch (error) {
     const message = String(error?.message ?? error);
     if (flags.json) console.log(JSON.stringify({ window: windowDays, error: message }, null, 2));

@@ -53,6 +53,43 @@ function writeScoreSession(sb, id) {
   ].join('\n') + '\n');
 }
 
+/** One tiny billed Claude session per day over a contiguous stretch of history,
+ *  each carrying one typed (non-tap) prompt — the raw material a personal
+ *  baseline is a percentile OVER. `daysAgo` runs inclusive from `from` to `to`.
+ *
+ *  Every file is stamped with its OWN historical mtime, which is the whole
+ *  point: the index discovers candidates by `mtimeMs >= cutoff`, so a fixture
+ *  written "now" is found no matter how narrow the lookback and could not tell
+ *  a widened lookback from a narrow one. Backdating the files is what makes the
+ *  discovery cutoff the thing under test. */
+function writeHistorySessions(sb, { from, to }) {
+  const projectDir = path.join(sb.home, '.claude', 'projects', '-tmp-history-fixture');
+  fs.mkdirSync(projectDir, { recursive: true });
+  for (let daysAgo = from; daysAgo <= to; daysAgo++) {
+    const at = Date.now() - daysAgo * 86_400_000;
+    const id = `history-${daysAgo}`;
+    const file = path.join(projectDir, `${id}.jsonl`);
+    fs.writeFileSync(file, [
+      JSON.stringify({
+        type: 'user', sessionId: id, cwd: '/tmp/history-fixture',
+        timestamp: new Date(at).toISOString(),
+        message: { role: 'user', content: [{ type: 'text', text: 'please refactor the parser and add a regression test' }] },
+      }),
+      JSON.stringify({
+        type: 'assistant', sessionId: id, cwd: '/tmp/history-fixture',
+        timestamp: new Date(at + 30_000).toISOString(),
+        message: {
+          role: 'assistant', model: 'claude-opus-5',
+          usage: { input_tokens: 1, output_tokens: 1 },
+          content: [{ type: 'text', text: 'done' }],
+        },
+      }),
+    ].join('\n') + '\n');
+    const stamp = new Date(at);
+    fs.utimesSync(file, stamp, stamp);
+  }
+}
+
 function ak(args, sb, extra = {}) {
   return spawnSync(process.execPath, [BIN, ...args], {
     encoding: 'utf8',
@@ -172,7 +209,8 @@ test('ak usage score --json emits the aggregate projection verbatim', () => {
   const result = ak(['usage', 'score', '--json'], sb);
   assert.equal(result.status, 0, result.stderr);
   const value = JSON.parse(result.stdout);
-  assert.deepEqual(Object.keys(value), ['window', 'totals', 'rhythm', 'byMode', 'bySource', 'previous']);
+  assert.deepEqual(Object.keys(value),
+    ['window', 'totals', 'rhythm', 'byMode', 'bySource', 'promptBaselines', 'previous']);
   assert.equal(value.window, 14, 'default window is 14 days');
   assert.equal(value.totals.sessions, 1);
   // Latency histogram is a FIXED 6-slot shape (5 edges + one overflow bucket) —
@@ -186,6 +224,28 @@ test('ak usage score --json emits the aggregate projection verbatim', () => {
   assert.ok(Object.hasOwn(value.byMode, 'not-recorded'), 'the fixture session carries no mode evidence');
   assert.ok(value.totals.costPerSessionMedian > 0 && value.totals.costPerSessionMedian < 0.01,
     'the fixture session is priced sub-cent');
+  fs.rmSync(sb.home, { recursive: true, force: true });
+});
+
+// The personal baseline is a p75 over the BASELINE_TRAILING_DAYS (90) that
+// precede the DISPLAYED window, so a 14-day report needs 104 days of records
+// read off disk. `lookbackDays: windowDays * 2` read 28 — the previous window
+// and nothing else — so `promptBaselines` was structurally null on every real
+// corpus, and the tap-share detector silently fell back to an absolute
+// threshold it is specified never to use when a personal one exists.
+test('ak usage score reads back far enough to build the personal tap-share baseline', () => {
+  const sb = sandbox();
+  writeScoreSession(sb, 'score-baseline-current');
+  // 32 distinct days, all older than the 14-day display window and inside the
+  // trailing 90 — one more than BASELINE_MIN_ACTIVE_DAYS (30) asks for.
+  writeHistorySessions(sb, { from: 20, to: 51 });
+  const result = ak(['usage', 'score', '--json'], sb);
+  assert.equal(result.status, 0, result.stderr);
+  const value = JSON.parse(result.stdout);
+  const claude = value.promptBaselines?.claude;
+  assert.ok(claude, 'the trailing history is all Claude, so it must have a baseline row');
+  assert.notEqual(claude.tapShareP75_trailing90d, null,
+    'a null baseline over 32 active days means the lookback never read them off disk');
   fs.rmSync(sb.home, { recursive: true, force: true });
 });
 

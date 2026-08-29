@@ -1685,10 +1685,15 @@ before it — the half-open interval `[now − 2d, now − d)`
 (`previousWindow`, `usage-aggregate.mjs:932-942`). Both bounds are derived from
 `now` and `d`, the window the UI is *showing*, and never from the parse cutoff:
 the caller widens that cutoff on purpose so older records survive to be
-aggregated here (`lookbackDays: days * 2` at `src/commands/usage.mjs:295` and
-`src/lib/dashboard-server.mjs:1361`), and deriving the baseline from a widened
-bound would silently stretch it to whatever lookback the caller happened to
-pass. A delta against an unknown-length window is not a delta. The upper bound
+aggregated here, and deriving the baseline from a widened bound would silently
+stretch it to whatever lookback the caller happened to pass. The two callers
+widen it by different amounts, because they read history for different
+reasons: the dashboard route asks for one extra window
+(`lookbackDays: days * 2`, `src/lib/dashboard-server.mjs:1373`), while
+`ak usage score` asks for `windowDays + BASELINE_TRAILING_DAYS`
+(`src/commands/usage.mjs:317`) — the deeper figure the personal tap-share
+baseline needs, and a strict superset of the previous window at every
+supported width. A delta against an unknown-length window is not a delta. The upper bound
 is exclusive so a session ending exactly at the boundary belongs to the current
 window and is not counted in both (`usage-aggregate.mjs:665`). Asking for
 `previous` without widening the lookback yields an all-zero baseline — the
