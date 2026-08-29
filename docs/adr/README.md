@@ -45,6 +45,7 @@ Consequences**, and cites the grounded source it rests on where relevant.
 | [0035](0035-managed-deja-vu-companion.md) | Manage deja-vu as an opt-in session-history companion | Accepted; implementation tracked by issue #114 |
 | [0036](0036-dashboard-client-modularization-and-shared-loopback-server.md) | Dashboard client modularization and shared loopback server | Implemented |
 | [0037](0037-complexity-program-structural-patterns.md) | Complexity program: structural patterns and gates | Implemented |
+| [0038](0038-consistent-cross-host-session-metrics.md) | Consistent cross-host session metrics | Accepted |
 
 Theme: ADRs **0001–0006** define **dual-host LLM routing and leadership** — how `ak` lets ruflo route
 each development activity (architecture, implementation, testing, review, …) to the right host (Claude
@@ -275,3 +276,20 @@ status/writer parity test (closing the issue #129 class), the `telemetry-records
 layer shared by batch and live telemetry, statusline segment providers, and the complexity
 lint warnings (25/5/1000 over `src`+`bin`) that ratchet to errors as areas come clean — plus
 the honestly-stated residual backlog it did not take on.
+
+**0038** extends 0009's scorecard from what a window cost to how it was worked, across three hosts
+that record that evidence asymmetrically. It fixes one closed four-value permission-posture
+vocabulary whose every mapping is a pinned judgment (approval evidence alone suffices for `guarded`,
+and only for `guarded`), makes an unmapped value a first-class `not-recorded` bucket rather than a
+guess or a display fallback, defines response latency as prompt-to-response — never
+time-to-first-token — with Codex's host-measured duration as a fallback only, and derives
+percentiles from bucket histograms whose overflow slot reports a floor rendered `≥`. It keeps
+`byDay`'s billed-days presence contract by putting per-day engaged time in a sibling map, derives
+previous-window deltas from the display window while discovery widens its own cutoff, excludes
+structurally-$0 sessions from the cost distribution, gates `byInferenceProvider` on observed
+provenance (0021's rule applied to spend), keeps host-native tool names, and prices cache savings by
+differencing the pricer instead of a multiplier. Schema v11 carries the new record fields, and
+discovery gains exactly one nested shape — Claude Code's `<sessionId>/subagents/` sidechain
+transcripts, whose absence had made a quarter of the sessions and 39% of the cost in a reference
+window invisible — behind a namespaced id grammar that narrows the traversal guard rather than
+loosening it.
