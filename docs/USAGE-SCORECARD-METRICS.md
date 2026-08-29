@@ -31,9 +31,9 @@ renders in the dashboard and the same figures printed offline by
 `ak usage score`. That is the five hero KPIs (Sessions, API-Equivalent, Tokens,
 Engaged Time, Cache Read); the second KPI row of cadence and unit economics
 (sessions per active day, autonomy, cost per session, cost per engaged hour);
-and the supporting panels — cost per day, by host, token composition bar, your
-rhythm, how you run, when you work, models in play, tool mix, model mix over
-time, reliability, projects, what you worked on. Two adjacent surfaces are
+and the supporting panels — Cost per day, By host, the token composition bar,
+Your rhythm, How you run, When you work, Models in play, Tool mix, Model mix
+over time, Reliability, Projects, What you worked on. Two adjacent surfaces are
 documented here because they answer questions the Scorecard raises: the Limits
 view (§13b) and the Codex thread ledger (§13c). The **Findings**, **Sessions**,
 and **Transcript** tabs are governed by separate rules and are out of scope
@@ -628,10 +628,10 @@ long weekend sessions, only frequent ones.
 
 It also **includes responses from delegated subagent sessions** (§16.2), which
 are machine-driven: a long agentic run dispatching subagents at 3am fills those
-cells even though nobody was typing. The panel is titled `when you work`, and
+cells even though nobody was typing. The panel is titled `When you work`, and
 what it actually charts is when *work happened on your behalf* — on the
 reference corpus, Claude subagent responses (17,863) outnumber main-thread ones
-(11,480). The `how you run` panel carries the main/subagent split; whether the
+(11,480). The `How you run` panel carries the main/subagent split; whether the
 punchcard should filter or split by source is recorded as an open question in
 ADR-0038's deferred list.
 
@@ -1099,7 +1099,7 @@ the same list:
 
 ## 15. Rhythm & responsiveness
 
-**Displayed as:** the `your rhythm` strip — two cards side by side. `session
+**Displayed as:** the `Your rhythm` strip — two cards side by side. `session
 length` heads with `median 9m · P90 ≥2h`; `response latency` with `p50 7.5s ·
 p95 ≥60s · n 12,480`. Each card is a bar histogram with dashed percentile
 markers laid over the bars, and reads `not measured` rather than a row of zero
@@ -1226,14 +1226,14 @@ Neither transcript store records it, so no panel here may borrow the name.
 **What this does not model:**
 
 - **it includes delegated subagent sessions and responses.** The panel is
-  titled `your rhythm`, but both histograms are built from every session in
+  titled `Your rhythm`, but both histograms are built from every session in
   the window — and since nested Claude subagent transcripts began being
   ingested (§16.2), a substantial share of them are harness-driven rather than
   typed by you: on the reference corpus, 178 Claude subagent sessions / 17,863
   responses against 265 main sessions / 11,480. So subagent session lengths
   shape `session length`, and subagent turn gaps are a large part of
   `response latency`. Every number is true as computed; the label is what
-  overclaims. The `how you run` panel carries the main/subagent split.
+  overclaims. The `How you run` panel carries the main/subagent split.
   (Prompt-based denominators are the exception — they use a main-thread-only
   denominator, because a subagent's prompts are written by the harness, §17.)
   Whether rhythm should instead *filter* to main-thread sessions, or show the
@@ -1481,7 +1481,7 @@ per hour" claims.
 window, harness-dispatched subagent transcripts included (§16.2) — on the
 reference corpus those are roughly a quarter of all sessions — so this is the
 run rate of the whole system working on your behalf, not a count of times you
-sat down. The `how you run` panel carries the main/subagent split. The
+sat down. The `How you run` panel carries the main/subagent split. The
 denominator is `byDay`'s key count, and `byDay`'s presence contract is
 **days that billed tokens** — which is why the aggregate keeps a separate
 `engagedByDay` map (§6): the two sets genuinely differ (a session running past
@@ -1667,9 +1667,9 @@ the data never made.
 
 ## 19. Tool mix & model families
 
-**Displayed as:** two panels. `tool mix` (`invocations · top 8, tail folded`)
+**Displayed as:** two panels. `Tool mix` (`invocations · top 8, tail folded`)
 is a ranked row list of tool names by invocation count, with a dimmed
-`Other (N tools)` row folding the tail. `model mix over time`
+`Other (N tools)` row folding the tail. `Model mix over time`
 (`api-equivalent cost by model family`) is a per-day stacked bar of cost by
 coarse model family, top four families coloured and the rest folded into a
 de-emphasised `other` band.

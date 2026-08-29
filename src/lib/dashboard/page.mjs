@@ -431,28 +431,28 @@ export function renderPage({ name, version }) {
         Cache reads bill at 0.1&times; input and cache writes at 1.25&times;; ignoring that would overstate
         a window by roughly <b>10&times;</b>. <span class="mono" id="u-asof"></span></span></div>
       <section class="strip">
-        <div class="sh"><h2>cost per day</h2><span class="n mono" id="u-days-note"></span></div>
+        <div class="sh"><h2>Cost per day</h2><span class="n mono" id="u-days-note"></span></div>
         <div class="days" id="u-daybars"></div>
       </section>
       <div class="two">
         <section class="strip">
-          <div class="sh"><h2>by host</h2><span class="n mono" id="u-hosts-note"></span></div>
+          <div class="sh"><h2>By host</h2><span class="n mono" id="u-hosts-note"></span></div>
           <div class="psplit" id="u-hosts"></div>
           <div class="tokbar" id="u-tokbar"></div>
           <div class="legend" id="u-toklegend"></div>
         </section>
         <section class="strip">
-          <div class="sh"><h2>when you work</h2><span class="n mono">responses &middot; local time</span></div>
+          <div class="sh"><h2>When you work</h2><span class="n mono">responses &middot; local time</span></div>
           <div id="u-punch"></div>
         </section>
       </div>
       <div class="two">
         <section class="strip">
-          <div class="sh"><h2>models in play</h2><span class="n mono">observed in transcripts &middot; by api-equivalent cost<span class="n-sub" id="u-models-note"></span></span></div>
+          <div class="sh"><h2>Models in play</h2><span class="n mono">observed in transcripts &middot; by api-equivalent cost<span class="n-sub" id="u-models-note"></span></span></div>
           <div id="u-models"></div>
         </section>
         <section class="strip">
-          <div class="sh"><h2>projects</h2><span class="n mono" id="u-projects-note"></span></div>
+          <div class="sh"><h2>Projects</h2><span class="n mono" id="u-projects-note"></span></div>
           <div id="u-projects"></div>
         </section>
       </div>
@@ -460,7 +460,7 @@ export function renderPage({ name, version }) {
         <div class="sh">
           <button class="strip-toggle" type="button" aria-expanded="false" aria-controls="u-openrouter-body">
             <span class="chev" aria-hidden="true">&rsaquo;</span>
-            <h2>provider account analytics</h2>
+            <h2>Provider account analytics</h2>
           </button>
           <span class="n mono" id="u-openrouter-note">offline cache &middot; separate from transcript totals</span></div>
         <div class="strip-body" id="u-openrouter-body" hidden>
@@ -468,7 +468,7 @@ export function renderPage({ name, version }) {
         </div>
       </section>
       <section class="strip">
-        <div class="sh"><h2>what you worked on</h2>
+        <div class="sh"><h2>What you worked on</h2>
           <span class="n mono">classified from titles, skills &amp; tool mix &middot; click to filter</span></div>
         <div id="u-cats"></div>
         <div class="legend" style="margin-top:11px">
@@ -485,11 +485,11 @@ export function renderPage({ name, version }) {
         <b>codex app-server</b> using codex&rsquo;s own login. This panel reads no vendor credential.</span></div>
       <div class="two">
         <section class="strip">
-          <div class="sh"><h2>claude plan limits</h2><span class="n mono" id="u-lim-claude-note"></span></div>
+          <div class="sh"><h2>Claude plan limits</h2><span class="n mono" id="u-lim-claude-note"></span></div>
           <div class="lim" id="u-lim-claude"></div>
         </section>
         <section class="strip">
-          <div class="sh"><h2>codex plan limits</h2><span class="n mono" id="u-lim-codex-note"></span></div>
+          <div class="sh"><h2>Codex plan limits</h2><span class="n mono" id="u-lim-codex-note"></span></div>
           <div class="lim" id="u-lim-codex"></div>
         </section>
       </div>
@@ -574,10 +574,10 @@ export function renderPage({ name, version }) {
         </div>
       </details>
       <div class="two">
-        <section class="strip" aria-labelledby="mli-history-title"><div class="sh"><h2 id="mli-history-title">change history</h2><span class="n mono" id="mli-history-note"></span></div><div id="mli-history"></div></section>
-        <section class="strip"><div class="sh"><h2>consumers</h2><span class="n mono">configured / reported evidence</span></div><div id="mli-consumers"></div></section>
+        <section class="strip" aria-labelledby="mli-history-title"><div class="sh"><h2 id="mli-history-title">Change history</h2><span class="n mono" id="mli-history-note"></span></div><div id="mli-history"></div></section>
+        <section class="strip"><div class="sh"><h2>Consumers</h2><span class="n mono">configured / reported evidence</span></div><div id="mli-consumers"></div></section>
       </div>
-      <section class="strip"><div class="sh"><h2>swap impact</h2><span class="n mono">read-only canonical-policy preview</span></div><div id="mli-impact"></div></section>
+      <section class="strip"><div class="sh"><h2>Swap impact</h2><span class="n mono">read-only canonical-policy preview</span></div><div id="mli-impact"></div></section>
       <div class="foot">swap analysis is available with <b>ak models plan</b> &middot; the dashboard never changes a route</div>
       <dialog class="mli-detail-dialog" id="mli-detail" aria-labelledby="mli-detail-title"><div class="mli-detail-head"><h2 id="mli-detail-title">Model details</h2><button type="button" id="mli-detail-close" aria-label="Close model details">Close</button></div><div id="mli-detail-body"></div></dialog>
     </section>

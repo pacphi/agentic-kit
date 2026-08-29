@@ -318,8 +318,8 @@ session id touches the transcript reader's path-traversal guard, so the gate is 
   Claude subagent transcripts were ingested (decision 11), roughly a quarter of the sessions in a
   window — and on the reference corpus a *majority* of Claude responses, 17,863 subagent against
   11,480 main — became harness-driven. They flow into `rhythm.lenHist`, `rhythm.latHist`,
-  `sessions / active day` and the punchcard, all of which sit under labels reading "your rhythm" and
-  "when you work". Every number is true as computed; the labels overclaim. This branch ships
+  `sessions / active day` and the punchcard, all of which sit under labels reading "Your rhythm" and
+  "When you work". Every number is true as computed; the labels overclaim. This branch ships
   **disclosure** — one sentence in §15/§17/§9 and in the matching tooltips — because filtering or
   splitting is a behavior change that deserves its own ruling and its own RED tests, not a late
   patch in a fix wave. Note the asymmetry it leaves: prompt-based denominators already got a

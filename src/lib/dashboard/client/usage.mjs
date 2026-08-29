@@ -575,7 +575,7 @@ import { renderUsage } from './usage-orchestrators.mjs';
   }
   function renderScoreRhythm(d){
     var body=ensureBlock("u-rhythm",
-      stripHtml("u-rhythm","your rhythm","session length · response latency"),"u-daybars");
+      stripHtml("u-rhythm","Your rhythm","session length · response latency"),"u-daybars");
     if(!body)return;
     var r=d.rhythm||{};
     body.innerHTML='<div class="rhythm-grid">'+lengthCard(r)+latencyCard(r)+"</div>";
@@ -627,7 +627,7 @@ import { renderUsage } from './usage-orchestrators.mjs';
   }
   function renderScoreHowRun(d){
     var body=ensureBlock("u-howrun",
-      stripHtml("u-howrun","how you run","permission posture · who drove"),"u-rhythm");
+      stripHtml("u-howrun","How you run","permission posture · who drove"),"u-rhythm");
     if(!body)return;
     body.innerHTML='<div class="howrun"><div class="hr-block hr-chart">'+modeChart(d)+"</div>"
       +'<div class="hr-side">'+sourceDonut(d)+"</div></div>";
@@ -792,8 +792,8 @@ import { renderUsage } from './usage-orchestrators.mjs';
   }
   function renderScoreMix(d){
     var pair=ensureBlock("u-toolmix",'<div class="two">'
-      +stripHtml("u-toolmix","tool mix","invocations · top 8, tail folded")
-      +stripHtml("u-modelmix","model mix over time","api-equivalent cost by model family")
+      +stripHtml("u-toolmix","Tool mix","invocations · top 8, tail folded")
+      +stripHtml("u-modelmix","Model mix over time","api-equivalent cost by model family")
       +"</div>","u-punch");
     if(!pair)return;
     pair.innerHTML=toolRows(d)
@@ -870,7 +870,7 @@ import { renderUsage } from './usage-orchestrators.mjs';
   }
   function renderScoreReliability(d){
     var body=ensureBlock("u-reliability",
-      stripHtml("u-reliability","reliability","turns that never landed"),"u-models");
+      stripHtml("u-reliability","Reliability","turns that never landed"),"u-models");
     if(!body)return;
     var t=d.totals||{},p=(d.previous&&d.previous.totals)||null;
     var cur=relRate(t),exc=Number(t.exceptions)||0,ab=Number(t.aborts)||0,resp=Number(t.responses)||0;

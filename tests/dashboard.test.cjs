@@ -1247,7 +1247,7 @@ async function main() {
       contains(r.body, 'data-status="');
       contains(r.body, 'OpenCode');
       contains(r.body, 'SOURCE_HEALTH_GROUPS'); // Codex + its thread ledger render as one grouped chip
-      contains(r.body, 'provider account analytics');
+      contains(r.body, 'Provider account analytics');
       contains(r.body, 'never merged into transcript totals');
       contains(r.body, 'OpenRouter credits');
       contains(r.body, 'BYOK estimate');
