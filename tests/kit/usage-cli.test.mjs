@@ -499,3 +499,40 @@ test('ak usage prompts --deep --json carries exemplars under an explicit key', (
   assert.ok(value.exemplars.cost.transcripts >= 1, 'the measured cost travels with the payload');
   fs.rmSync(sb.home, { recursive: true, force: true });
 });
+
+// ── the help surface ────────────────────────────────────────────────────────
+
+test('ak usage --help documents prompts, its windows, and what --deep prints', () => {
+  const sb = sandbox();
+  const result = ak(['usage', '--help'], sb);
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /ak usage prompts \[--window 7\|14\|30\|all\] \[--deep\] \[--json\]/);
+  assert.match(result.stdout, /default all/, 'the unusual default has to be stated where it is read');
+  assert.match(result.stdout, /--deep/);
+  // The one thing a reader must not have to discover by accident.
+  assert.match(result.stdout, /CONTAIN PROMPT TEXT/,
+    '--deep --json puts prompt text in the payload; the help must say so before someone redirects it');
+  assert.equal(fs.existsSync(sb.sentinel), false);
+  fs.rmSync(sb.home, { recursive: true, force: true });
+});
+
+test('ak usage <unknown> lists every subcommand it does have', () => {
+  const sb = sandbox();
+  const result = ak(['usage', 'frobnicate'], sb);
+  assert.equal(result.status, 2);
+  for (const sub of ['ak usage status', 'ak usage refresh openrouter', 'ak usage score', 'ak usage prompts']) {
+    assert.ok(result.stdout.includes(sub), `the fallback listing omits ${JSON.stringify(sub)}`);
+  }
+  fs.rmSync(sb.home, { recursive: true, force: true });
+});
+
+test('ak --help advertises the offline reports, not only the provider cache', () => {
+  const sb = sandbox();
+  const result = ak(['--help'], sb);
+  assert.equal(result.status, 0, result.stderr);
+  const line = result.stdout.split('\n').find((l) => l.trim().startsWith('ak usage'));
+  assert.ok(line, 'the top-level help must carry a usage line');
+  assert.match(line, /score/);
+  assert.match(line, /prompts/);
+  fs.rmSync(sb.home, { recursive: true, force: true });
+});

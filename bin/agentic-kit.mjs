@@ -53,7 +53,7 @@ Usage (ak = alias of agentic-kit):
   ak sync            converge to good: upgrade + heal + verify          [--dry-run] [--no-upgrade]
   ak dashboard       open the local web dashboard (localhost; auto-opens browser)  [--port N] [--no-open]
   ak admin           maintainer-only telemetry admin (localhost; GitHub/npm egress)  [--port N] [--no-open]
-  ak usage           inspect/refresh offline provider analytics  [status|refresh openrouter]
+  ak usage           offline scorecard, prompt patterns, provider cache  [status|score|prompts|refresh openrouter]
   ak models          inspect/refresh model lifecycle evidence  [status|refresh|diff|explain|plan]
   ak system          what this stack occupies on your machine   [--deep] [--json]
   ak about           what agentic-kit installs and configures, and why  [--category N]
