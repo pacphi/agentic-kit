@@ -14,6 +14,7 @@ import {
 } from '../../src/lib/dashboard/client/usage-rhythm.mjs';
 import {
   percentileFromBuckets, LAT_BUCKET_EDGES, LEN_BUCKET_EDGES,
+  BASELINE_TRAILING_DAYS, BASELINE_MIN_ACTIVE_DAYS,
 } from '../../src/lib/usage-aggregate.mjs';
 
 const PAGE = renderPage({ name: 'agentic-kit', version: 'test' });
@@ -121,20 +122,38 @@ function get(url, token) {
   });
 }
 
+/**
+ * A fake `readIndex` that behaves like usage-index.mjs's real scan on BOTH
+ * cutoffs, not just the display one:
+ *
+ *   - the DISCOVERY cutoff (`now - (lookbackDays ?? days)`) filters which
+ *     records are visible at all — usage-index.mjs:732 and its candidate
+ *     filter at :740;
+ *   - the DISPLAY cutoff (`now - days`) is what `aggregate` is handed, so the
+ *     current window never widens with the lookback (usage-index.mjs:785-793).
+ *
+ * Honouring the first is what makes an assertion about `lookbackDays` mean
+ * something. A fake that hands every fixture record to `aggregate` regardless
+ * would report a healthy baseline no matter what the server asked for, which
+ * is precisely the regression these tests exist to catch.
+ */
+function spyReadIndex(records, calls) {
+  return async (opts) => {
+    calls.push(opts);
+    const days = opts?.days ?? 14;
+    const discovery = NOW - (opts?.lookbackDays ?? days) * DAY_MS;
+    return aggregate(records.filter((r) => r.end >= discovery), {
+      days, now: NOW, cutoff: NOW - days * DAY_MS, deps: FIXTURE_DEPS, previous: !!opts?.previous,
+    });
+  };
+}
+
 test('/api/usage payload carries rhythm, mode, provider and a previous-window projection', async () => {
   const calls = [];
   // Mirrors usage-index.mjs's corrected buildIndex/scan contract (Task 7
   // ruling B): `aggregate` always sees the DISPLAY cutoff, and `previous`
   // rides through from the caller's own options unchanged.
-  const usage = {
-    readIndex: async (opts) => {
-      calls.push(opts);
-      const days = opts?.days ?? 14;
-      return aggregate(FIXTURE_RECORDS, {
-        days, now: NOW, cutoff: NOW - days * DAY_MS, deps: FIXTURE_DEPS, previous: !!opts?.previous,
-      });
-    },
-  };
+  const usage = { readIndex: spyReadIndex(FIXTURE_RECORDS, calls) };
   const srv = await startDashboard({
     port: 0, fetchStatus: async () => ({ overall: 'ok', rows: [] }), usage,
   });
@@ -163,8 +182,76 @@ test('/api/usage payload carries rhythm, mode, provider and a previous-window pr
 
     const call = calls.find((o) => o && o.days === 7);
     assert.ok(call, `days must reach readIndex, got ${JSON.stringify(calls)}`);
-    assert.equal(call.lookbackDays, 14, 'lookbackDays must widen to 2x the displayed window');
+    assert.equal(call.lookbackDays, 7 + BASELINE_TRAILING_DAYS,
+      'lookbackDays must reach past the window by the full baseline trailing period');
     assert.equal(call.previous, true, 'previous must be requested so agg.previous is populated');
+  } finally {
+    await srv.close();
+  }
+});
+
+// ── the baseline's lookback (spec §6.2) ────────────────────────────────────
+//
+// `promptBaselines` compares the displayed window against the operator's own
+// trailing-90d normal, and it reads `records` rather than the window's session
+// rows — so it can only ever see history the DISCOVERY cutoff actually pulled
+// off disk. At the old `days * 2` lookback a 7-day window reached 14 days
+// back, which is 16 short of BASELINE_MIN_ACTIVE_DAYS before the trailing
+// period has even started: every baseline was structurally null, and every
+// detector keyed on one silently fell back to its absolute threshold.
+//
+// The display cutoff is unaffected — widening discovery never widens the
+// window (usage-index.mjs:785-793), which the sibling assertion on
+// `totals.sessions` below pins.
+const BASELINE_HOST = 'claude';
+
+/** One trailing-history record: a typed human prompt on its own local day,
+ *  billed that same day so `firstBilledDay` attributes it there. */
+function baselineRecord(i, endMs) {
+  const d = new Date(endMs);
+  const p = (n) => String(n).padStart(2, '0');
+  const day = `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+  const rec = blankSession(`base-${i}`, BASELINE_HOST);
+  Object.assign(rec, {
+    title: `base-${i}`, project: 'proj', prompts: 2, responses: 1,
+    start: endMs - 60_000, end: endMs,
+  });
+  rec.active = [[endMs - 60_000, endMs]];
+  addUsage(rec, day, 'claude-opus-5', { input: 10, output: 10, cacheRead: 0, cacheWrite: 0, responses: 1 });
+  rec.models = ['claude-opus-5'];
+  // One instruction and one tap, so the day carries a real tap share rather
+  // than a degenerate 0 or 1.
+  rec.promptFPs = [
+    { h: `h${i}a`, t: 40, th: [`t${i}a`], p: 'human' },
+    { h: `h${i}b`, t: 2, th: [`t${i}b`], p: 'human' },
+  ];
+  return rec;
+}
+
+test('the baseline lookback reaches far enough back for promptBaselines to exist', async () => {
+  // 35 consecutive days of history starting 10 days back — comfortably past
+  // BASELINE_MIN_ACTIVE_DAYS, and every one of them outside the 7-day window.
+  const trailing = Array.from({ length: 35 }, (_v, i) => baselineRecord(i, NOW - (10 + i) * DAY_MS));
+  assert.ok(trailing.length > BASELINE_MIN_ACTIVE_DAYS,
+    'the fixture must clear the minimum-active-days floor, or a null baseline proves nothing');
+
+  const calls = [];
+  const srv = await startDashboard({
+    port: 0, fetchStatus: async () => ({ overall: 'ok', rows: [] }),
+    usage: { readIndex: spyReadIndex(trailing, calls) },
+  });
+  try {
+    const r = await get(`${srv.url}api/usage?days=7`, srv.token);
+    assert.equal(r.status, 200, `expected 200, got ${r.status}`);
+    const payload = JSON.parse(r.body);
+
+    const baseline = payload.promptBaselines?.[BASELINE_HOST];
+    assert.ok(baseline, `promptBaselines must carry the ${BASELINE_HOST} host, got ${JSON.stringify(payload.promptBaselines)}`);
+    assert.ok(Number.isFinite(baseline.tapShareP75_trailing90d),
+      'the trailing p75 must be a number — null here means the lookback never reached the history');
+
+    assert.equal(payload.totals.sessions, 0,
+      'widening discovery must not widen the displayed window: every fixture session is older than 7 days');
   } finally {
     await srv.close();
   }

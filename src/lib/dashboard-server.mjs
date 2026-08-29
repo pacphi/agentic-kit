@@ -59,6 +59,11 @@ import { drift as ruvectorDrift, managed as ruvectorManaged } from './ruvector.m
 import { loadKitConfig } from './config.mjs';
 import { resolveRoutes, routingSummary, divergedRoutes, retirementOf, ACTIVITIES } from './routing.mjs';
 import { renderPage } from './dashboard/page.mjs';
+// One constant, from a module with no imports of its own and no I/O — so this
+// is a static import where usage-index.mjs is deliberately lazy (see
+// lazyUsage): the reason for that laziness is the transcript walk, which this
+// module does not do.
+import { BASELINE_TRAILING_DAYS } from './usage-aggregate.mjs';
 import { requestRejection } from './dashboard/request-security.mjs';
 import {
   readJsonSafe, mintToken, tokenMatches, sendJson, sendUnauthorized, sendNotFound, listenLoopback,
@@ -1370,7 +1375,17 @@ export function startDashboard({
           // (totals + rhythm) — this window's own totals/sessions stay
           // exactly `days` wide either way (usage-index.mjs's own display-
           // cutoff guarantee).
-          usageApi.readIndex({ days, lookbackDays: days * 2, previous: true }),
+          //
+          // The width is the BASELINE's requirement, not the previous window's:
+          // `promptBaselines` reads the trailing BASELINE_TRAILING_DAYS before
+          // the window and needs BASELINE_MIN_ACTIVE_DAYS of it populated
+          // before it will claim a normal. At the old `days * 2` a 7-day
+          // window reached 14 days back and every baseline was structurally
+          // null, so every detector keyed on one fell back to its absolute
+          // threshold without saying so. `days + BASELINE_TRAILING_DAYS` is
+          // wider than `days * 2` for every window this server serves, so the
+          // previous-window projection is unaffected.
+          usageApi.readIndex({ days, lookbackDays: days + BASELINE_TRAILING_DAYS, previous: true }),
           typeof usageApi.readProviderAnalytics === 'function'
             ? Promise.resolve(usageApi.readProviderAnalytics())
               .catch(() => ({ openrouter: null }))
