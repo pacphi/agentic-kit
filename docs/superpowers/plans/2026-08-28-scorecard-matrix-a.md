@@ -8,7 +8,7 @@
 
 **Tech Stack:** Node ESM (`.mjs`), `node --test` (run via `pnpm test`), no new dependencies, hand-rolled dashboard client (no chart lib).
 
-**Spec:** The two research artifacts — Metric Evidence Matrix (https://claude.ai/code/artifact/1682c1ea-2bbd-4970-8cdd-2cc5e17efcdf) and Scorecard Additions mockup (https://claude.ai/code/artifact/36adf798-625a-4d44-a84b-1dba7093e752). Everything an executor needs is restated inline below; the artifacts are reference, not required reading.
+**Spec:** The two research artifacts — Metric Evidence Matrix (<https://claude.ai/code/artifact/1682c1ea-2bbd-4970-8cdd-2cc5e17efcdf>) and Scorecard Additions mockup (<https://claude.ai/code/artifact/36adf798-625a-4d44-a84b-1dba7093e752>). Everything an executor needs is restated inline below; the artifacts are reference, not required reading.
 
 ## Global Constraints
 
@@ -43,10 +43,12 @@ One file has exactly one lane; a lane's tasks run **serially in order**; differe
 ### Task 1: Mode taxonomy module (`usage-modes.mjs`)
 
 **Files:**
+
 - Create: `src/lib/usage-modes.mjs`
 - Test: `tests/kit/usage-modes.test.mjs`
 
 **Interfaces:**
+
 - Produces: `MODES = ['guarded','auto-edit','plan','unrestricted']`; `normalizeMode({ host, permissionMode, approvalPolicy, sandboxPolicy, opencodeMode }) → { mode: string|null, raw: string|null }`. `mode` is `null` whenever evidence is absent **or unrecognized** (never guessed); `raw` preserves the exact wire value(s) for the Sessions detail strip.
 
 The full mapping table (pinned by tests; recorded in ADR-0038):
@@ -148,6 +150,7 @@ export function normalizeMode({ host, permissionMode, approvalPolicy, sandboxPol
 ### Task 2: Session record v11 — shape, histogram helpers, schema bump
 
 **Files:**
+
 - Modify: `src/lib/usage-parsers.mjs` (blankSession ~line 180; add helpers near `noteSpan`)
 - Modify: `src/lib/usage-index.mjs:92` (`SCHEMA_VERSION` 10 → 11)
 - Test: `tests/kit/usage-index.test.mjs` (append)
@@ -218,10 +221,12 @@ In the record-finishing function (the one that derives `active` from `stamps`, `
 ### Task 3: parseClaude — mode, latency, context pressure
 
 **Files:**
+
 - Modify: `src/lib/usage-parsers.mjs` (`parseClaude`, ~lines 376–401 entry loop; assistant handling ~328–368)
 - Test: `tests/kit/usage-index.test.mjs`
 
 **Interfaces:**
+
 - Consumes: T1 `normalizeMode`, T2 helpers.
 - Produces: Claude sessions carry `mode`/`modeRaw` (last human-turn `permissionMode` seen wins), `latHist`/`latCount` (gap human-prompt → next assistant entry), `ctxLastTokens` (last assistant turn's `input + cacheRead`).
 
@@ -256,10 +261,12 @@ test('parseClaude derives latency, mode, ctx from entries', () => {
 ### Task 4: parseCodex — approval mode, host-measured timing, aborts/errors, ctx window, typed-item tools
 
 **Files:**
+
 - Modify: `src/lib/usage-parsers.mjs` (`parseCodex` ~578–681; `turn_context` handling ~431–437; `event_msg` dispatch)
 - Test: `tests/kit/usage-index-v6.test.mjs` (append — this file owns Codex-detail coverage)
 
 **Interfaces:**
+
 - Consumes: T1, T2.
 - Produces: Codex sessions carry `mode`/`modeRaw` (from `turn_context.approval_policy` + `sandbox_policy`, last wins), `latHist` (from `task_started.started_at` → first agent message, else `task_complete.duration_ms` as the whole-turn fallback sample), `aborts` (count of `turn_aborted`), `exceptions` += `task_complete` events whose `error` is non-null, `ctxWindow` (from `task_started.model_context_window`, last wins), and `rec.tools` counts from `item_completed` items, keyed by the item's own type name — `CommandExecution`, `McpToolCall`, `FileChange`, `CollabAgentToolCall`. Tool names are host vocabularies: never rename Codex activity to Claude tool names; the UI ranks names as-is.
 
@@ -299,10 +306,12 @@ test('parseCodex v11: mode, duration, aborts, ctx window, typed tools', () => {
 ### Task 4b: OpenCode — mode/agent, latency, error, ctx derivation input
 
 **Files:**
+
 - Modify: `src/lib/usage-opencode.mjs` (`processMessageRow` / `recordAssistantMessage`, lines ~194–213)
 - Test: `tests/kit/usage-opencode.test.mjs` (append, using its existing in-memory sqlite fixture helpers)
 
 **Interfaces:**
+
 - Consumes: T1, T2.
 - Produces: OpenCode sessions carry `mode`/`modeRaw` (from message `data.mode`, last wins), `latHist` (user message → next assistant message gap), `exceptions` (messages with a non-null `data.error`), `ctxLastTokens` (last assistant `tokens.input + tokens.cache.read`).
 
@@ -326,10 +335,12 @@ assert.equal(session.ctxLastTokens, 20900);
 ### Task 5: Index carry-through + 2× lookback for deltas
 
 **Files:**
+
 - Modify: `src/lib/usage-index.mjs` (`buildIndex` ~402; the cached-entry projection)
 - Test: `tests/kit/usage-index.test.mjs`
 
 **Interfaces:**
+
 - Produces: cached session entries round-trip the v11 fields (they ride the same record object — verify the cache projection does not strip unknown fields; if it whitelists, extend the whitelist). `buildIndex({ days, lookbackDays })`: when `lookbackDays` (default `days * 2`) is passed by the server, sessions are parsed back to the longer cutoff so a previous-window aggregate has data. Aggregation windows stay governed by `aggregate`'s own `cutoff`.
 
 - [ ] **Step 1: Failing test** — round-trip: build an index over a fixture root twice (second run hits cache) and assert `mode`/`latHist` survive the cached read; assert `buildIndex({ days: 7, lookbackDays: 14 })` includes a session 10 days old.
@@ -341,10 +352,12 @@ assert.equal(session.ctxLastTokens, 20900);
 ### Task 6: Aggregate — buckets, histograms, percentiles, per-day engaged, previous window
 
 **Files:**
+
 - Modify: `src/lib/usage-aggregate.mjs` (`aggregate` ~400, `buildSessionRows` ~304, totals block ~346)
 - Test: `tests/kit/usage-index.test.mjs` (aggregate suites live here)
 
 **Interfaces:**
+
 - Consumes: v11 session fields (T2–T5), `MODES` (T1).
 - Produces on the aggregate result:
 
@@ -402,10 +415,12 @@ test('previous window aggregates the prior equal span only', () => {
 ### Task 7: `/api/usage` payload
 
 **Files:**
+
 - Modify: `src/lib/dashboard-server.mjs` (the `/api/usage` route handler — locate `aggregate(` call)
 - Test: `tests/kit/dashboard-usage-telemetry.test.mjs` (append)
 
 **Interfaces:**
+
 - Produces: the JSON payload adds `previous`, `rhythm`, `byMode`, `byInferenceProvider`, and `byDay[*].engagedSeconds`, passing `previous: true` and `lookbackDays: days * 2` down. Nothing existing is renamed; `byProvider` (legacy host identity) is untouched.
 
 - [ ] **Step 1: Failing test** — extend the existing payload test to assert `payload.rhythm.latHist.length === 6`, `payload.byMode` has only keys from `[...MODES, 'not-recorded']`, and `payload.previous.totals` exists when two windows of fixture data are present.
@@ -417,6 +432,7 @@ test('previous window aggregates the prior equal span only', () => {
 ### Task 8: Client render module `usage-rhythm.mjs` + styles
 
 **Files:**
+
 - Create: `src/lib/dashboard/client/usage-rhythm.mjs`
 - Modify: `src/lib/dashboard/styles/usage.mjs` (append component CSS)
 - Test: `tests/kit/dashboard-usage-telemetry.test.mjs` (string-shape smoke tests — these modules are pure string builders)
@@ -443,11 +459,13 @@ Mark rules (from the mockup): bars 4px top radius; 2px gaps between stacked segm
 ### Task 9: Wire the panels — hero deltas, new rows/panels, session chips, limits pace tick
 
 **Files:**
+
 - Modify: `src/lib/dashboard/client/usage.mjs` (hero `kpi(...)` call sites; panel sequence noted at ~line 338), `src/lib/dashboard/client.mjs` (`renderLimits`/`limRow`), `src/lib/dashboard/client/bootstrap.mjs` only if the new module needs registration (follow how `usage-orchestrators.mjs` is included)
 
 **Interfaces:** Consumes T7 payload fields + T8 renderers, exactly as named above.
 
 Deliverables, all per the mockup (artifact 36adf798…):
+
 1. Hero tiles: append `deltaChip` (cost + cache: `downIsGood`/up-good pt; tokens: `neutral: true`) and `sparklineSvg` over `byDay` series (cost/day, sessions/day, tokens/day, engagedSeconds/day, cache-share/day). Cache tile subtitle renders `saved ≈ $N vs uncached` from `totals.cacheSavedUsd` (T6).
 2. Second KPI row: sessions/active-day + streak, autonomy (`responses/prompts`) + touch rate, cost/session median + P90, cost/engaged-hour — all from `totals`.
 3. Rhythm panel: two `histogram(...)` blocks with median/P90 and p50/p95 markers; the latency card's tooltip carries the measurement note ("codex host-measured · claude/opencode derived from event gaps — not streaming TTFT").
@@ -467,10 +485,12 @@ Deliverables, all per the mockup (artifact 36adf798…):
 ### Task 10: CLI — `ak usage score`
 
 **Files:**
+
 - Modify: `src/commands/usage.mjs` (add `score` subcommand; update `help` text — keep `status`/`refresh` untouched)
 - Test: `tests/kit/usage-cli.test.mjs` (append)
 
 **Interfaces:**
+
 - Consumes: `buildIndex` + `aggregate` (same modules the dashboard uses — no new computation in the command).
 - Produces: `ak usage score [--window 7|14|30] [--json]` printing: hero five (+deltas), cadence four, rhythm medians/percentiles, mode/provider tables with `not-recorded` rows, reliability rate. `--json` emits the aggregate projection verbatim (totals, rhythm, byMode, byInferenceProvider, previous) — additive, credential-free, offline.
 
@@ -483,10 +503,12 @@ Deliverables, all per the mockup (artifact 36adf798…):
 ### Task 11: Findings detectors
 
 **Files:**
+
 - Modify: `src/lib/usage-insights.mjs` (two detectors + registry entries at ~584)
 - Test: `tests/kit/usage-insights.test.mjs` (append)
 
 **Interfaces:**
+
 - Produces: `detectLatencyRegression({ sessions })` → id `latency-regression`, kind `trend`, severity `warn` when the second half-window's bucket-merged p50 exceeds the first half's by ≥25% **and** ≥2s absolute (both halves need ≥30 samples; otherwise no finding). `detectUnrestrictedMode({ sessions, windowCost })` → id `unrestricted-mode`, kind `coach`, severity `info` listing count + cost of sessions with `mode === 'unrestricted'` (zero sessions → no finding; `not-recorded` never counts).
 
 - [ ] **Step 1: Failing tests** — fixture sessions with latHists split across halves (30+ samples each; p50 8s → 12s ⇒ finding fires; 8s → 9s ⇒ no finding) and one `unrestricted` session ⇒ finding with `sessions: 1`.
@@ -498,10 +520,12 @@ Deliverables, all per the mockup (artifact 36adf798…):
 ### Task 12: Metrics doc — new sections + the stale-claim corrections
 
 **Files:**
+
 - Modify: `docs/USAGE-SCORECARD-METRICS.md`; `src/lib/pricing.mjs` (comment text only, `UNMODELLED_PRICING_FACTORS` block ~131–150)
 - Test: `tests/kit/doc-citations.test.mjs` (existing — must stay green; it machine-checks every `file:line` citation)
 
 Deliverables:
+
 1. New sections §15–§19 following the house entry shape (**Displayed as / Formula / Source / Worked example / What this does not model**) for: Rhythm & responsiveness (both histograms, the percentile-from-buckets method, the per-host measurement difference, the explicit "never labeled TTFT" rule); How you run (the full mode-mapping table from Task 1, `not-recorded` semantics, provider provenance gate); Cadence & unit economics (autonomy, touch rate, medians — and why median, with the heavy-tail worked example); Reliability (error-turn sources per host, aborts); Deltas & sparklines (previous-window definition, 2× lookback).
 2. **§13.3 correction**: run a one-off census (scratchpad script, not committed) counting non-null `service_tier` / `inference_geo` / `speed` values across the local corpus; replace the "a transcript does not record which endpoint/tier" rationale with the truth: *recorded per turn since ~CLI version X, observed on N% of turns in the verification corpus; deliberately still unpriced pending semantics verification* — and update the matching `pricing.mjs` comment wording. Pricing **behavior** does not change.
 3. **§8 clarification**: one paragraph distinguishing `byProvider` (legacy host identity, unchanged) from the new `byInferenceProvider` (observed-only, `not-recorded` first-class).
@@ -514,6 +538,7 @@ Deliverables:
 ### Task 13: DASHBOARD.md, TRANSCRIPTS.md, ADR-0038
 
 **Files:**
+
 - Modify: `docs/DASHBOARD.md` (Usage section: new panels, chips, pace tick — current-state voice only, no history); `docs/TRANSCRIPTS.md` (§1.1/§1.2 parser-read tables gain the new fields; §1.3 capability matrix rows for latency/mode/ctx)
 - Create: `docs/adr/0038-consistent-cross-host-session-metrics.md` (status Accepted; records: the mode taxonomy judgment table and why unmapped → not-recorded; bucket-histogram percentiles over raw samples; response-latency semantics and the no-TTFT rule; `byInferenceProvider` provenance gate; schema v11; deferral of Claude tee history retention; links both research artifacts)
 - Modify: `docs/adr/README.md` (index line, following its existing format)
