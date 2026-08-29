@@ -189,8 +189,12 @@ function printScoreCadence(agg) {
   const active = Object.keys(agg.byDay ?? {}).length;
   heading('cadence');
   const perDay = active ? (Number(t.sessions) || 0) / active : null;
+  // byDay's presence contract is BILLED days, which is why the aggregate keeps
+  // a separate engagedByDay map — the two sets genuinely differ. The browser
+  // judged that surprising enough for a three-line tooltip; a terminal reader
+  // has nothing to hover, so it goes inline.
   info(`SESSIONS / ACTIVE DAY   ${perDay == null ? '—' : fmtRatio(perDay)}  `
-    + dim(`${fmtNum(active)} active day${active === 1 ? '' : 's'}`));
+    + dim(`${fmtNum(active)} day${active === 1 ? '' : 's'} that billed tokens · includes subagent sessions`));
   const auto = t.responsesPerPrompt ?? null;
   const touch = t.humanPromptsPerHour ?? null;
   const autoNote = auto == null ? 'no prompts you typed in window'

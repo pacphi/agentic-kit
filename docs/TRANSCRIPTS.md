@@ -40,7 +40,7 @@ rewritten; rule 3 of the module header, `usage-index.mjs:22`):
 | Claude Code (subagent) | `~/.claude/projects/<encoded-project-dir>/<sessionId>/subagents/agent-<hash>.jsonl` | `listClaudeSubagents` (`usage-index.mjs:243-255`) — the one nested shape `listClaude` descends into |
 | Codex CLI | `~/.codex/sessions/<yyyy>/<mm>/<dd>/rollout-<ts>-<uuid>.jsonl` | `listCodex` (`usage-index.mjs:276-296`) — the `yyyy/mm/dd` tree walk |
 
-Roots come from `defaultRoots()` (`usage-index.mjs:218-223`) and are injectable
+Roots come from `defaultRoots()` (`usage-index.mjs:252-257`) and are injectable
 for tests. A malformed line is skipped, never fatal (`jsonLines`,
 `usage-parsers.mjs:167-173` — one corrupt line must not cost a whole file).
 
@@ -74,12 +74,15 @@ Each line has a top-level `type`. The parser (`parseClaude`,
 
 A real assistant completion also closes two pieces of per-entry evidence the
 transcript does not state outright. It **closes the latency window** the
-preceding human prompt opened, into one sample of the gap between them
-(`usage-parsers.mjs:410-414`); and it **overwrites `ctxLastTokens`** with the
+preceding human prompt opened, into one `noteLatencySample` call over the gap
+between them (`usage-parsers.mjs:410-414`); and it **conditionally sets `ctxLastTokens`** to the
 tokens actually in the model's window for that turn — fresh input plus what was
 served from cache — so the field always describes the last completion rather
-than a running total (`usage-parsers.mjs:420-424`). Neither is a field Claude
-Code writes; both are derived, per entry, at parse time.
+than a running total (`usage-parsers.mjs:428-429`). That write is
+evidence-gated: an entry whose `message.usage` is absent decodes to all-zeros,
+and a zero is not a measurement of an empty context, so it must not overwrite a
+real prior value. Neither is a field Claude Code writes; both are derived, per
+entry, at parse time.
 
 An assistant entry with `isApiErrorMessage: true` is a **local placeholder**
 Claude Code writes when a request dies before a real completion (connection
@@ -98,7 +101,7 @@ Codex rollout lines carry `type` + `payload`. The parser (`parseCodex`,
 | `type` / `payload.type` | What the parser takes from it |
 |---|---|
 | `session_meta` | Authoritative session id, `cwd`, and `thread_source` (`usage-parsers.mjs:488-497`) — `"subagent"` marks a thread_spawn replay whose tokens are excluded from aggregation (`usage-parsers.mjs:692`; `USAGE-SCORECARD-METRICS.md` Appendix A, Bug B) |
-| `turn_context` | The model id in effect from this point on, plus `approval_policy` and `sandbox_policy` — the permission posture, last evidence winning, since a session may renegotiate mid-run (`usage-parsers.mjs:498-509`) |
+| `turn_context` | The model id in effect from this point on, plus `approval_policy` (a string) and `sandbox_policy` (an **object** keyed `.type`, e.g. `{"type":"danger-full-access"}`) — the permission posture, last evidence winning, since a session may renegotiate mid-run (`usage-parsers.mjs:498-520`) |
 | `event_msg` → `token_count` | A **cumulative** usage snapshot; only the last one is kept (`usage-parsers.mjs:543-552`) |
 | `event_msg` → `task_started` | `model_context_window` — the context-window denominator, which no other host records — and the turn's start time (`usage-parsers.mjs:558-563`) |
 | `event_msg` → `task_complete` | The host's own `duration_ms` for the turn, taken as a latency sample only when no prompt-to-response gap already covered it; a non-null `error` counts as an exception (`usage-parsers.mjs:571-578`) |
@@ -138,7 +141,7 @@ absence rather than folded into one number:
 | Axis | Claude Code | Codex | OpenCode |
 |---|---|---|---|
 | Response latency | derived — the gap from a human prompt to the next real completion (`noteLatencySample`, `usage-parsers.mjs:410-414`) | host-measured `duration_ms` on `task_complete`, used only when no prompt gap covered the turn; the derived gap stays primary (`handleCodexTaskComplete`, `usage-parsers.mjs:571-578`) | derived, same prompt-gap rule as Claude (`noteLatencySample`, `usage-opencode.mjs:227-231`) |
-| Permission posture | `permissionMode`, off the person's own turn (`usage-parsers.mjs:356-357`) | `approval_policy`/`sandbox_policy` off each `turn_context` (`usage-parsers.mjs:505-508`) | `mode` off each assistant message (`normalizeMode`, `usage-opencode.mjs:232-233`) |
+| Permission posture | `permissionMode`, off the person's own turn (`usage-parsers.mjs:356-357`) | `approval_policy` plus `sandbox_policy.type` off each `turn_context` — the sandbox field is an object, and its `.type` is extracted before the taxonomy is consulted (`usage-parsers.mjs:505-519`) | `mode` off each assistant message (`normalizeMode`, `usage-opencode.mjs:232-233`) |
 | Context window | last-turn tokens only; **no window denominator is recorded** | both halves — `model_context_window` on `task_started` and last-turn tokens | last-turn tokens only; no window denominator |
 
 An unmapped or unobserved value on any of these is `not-recorded`, never a
@@ -190,7 +193,11 @@ recorded in `USAGE-SCORECARD-METRICS.md` Appendix A). Schema v11 is that same
 rule applied again: it added `mode`/`modeRaw`, `latHist`/`latCount`,
 `lenSeconds`, `ctxWindow`/`ctxLastTokens` and `aborts` to the record, so every
 session had to be re-derived rather than read back as `undefined`
-(`usage-index.mjs:92-98`).
+(`usage-index.mjs:92-98`). v12 is the rule applied to a *wrong* value rather
+than a missing one: v11 records persisted `modeRaw: "never/[object Object]"`
+and a null `mode` for every Codex session, because `sandbox_policy` is an
+object and was compared against string literals. Re-deriving is what clears
+them (`usage-index.mjs:99-104`).
 
 ---
 
@@ -267,7 +274,7 @@ transcript content leaves the module, and every step is a gate:
 
 1. **Id grammar before any filesystem access** — an id must match one of
    exactly two shapes, or it is rejected with `ERR_INVALID_SESSION_ID`
-   (`invalidId`, `usage-index.mjs:755-761`) before any read happens:
+   (`invalidId`, `usage-index.mjs:919`) before any read happens:
    * `VALID_ID` (`/^[A-Za-z0-9._-]{1,128}$/`, `usage-index.mjs:110`) — a plain
      session id;
    * `VALID_SUBAGENT_ID` (`usage-index.mjs:123`) — a namespaced nested
@@ -276,7 +283,7 @@ transcript content leaves the module, and every step is a gate:
      real on-disk `agent-…` shape. The namespaced grammar is a **narrowing**
      of the plain one, never a loosening: both are the same path-traversal
      guard, and a traversal shape is rejected at either tier.
-2. **Locate by id** across both roots (`locate`, `usage-index.mjs:800`),
+2. **Locate by id** across both roots (`locate`, `usage-index.mjs:852`),
    consulting the scan cache when present but never requiring it —
    `readSession` works with no prior `buildIndex`. A namespaced id resolves
    through `locateSubagent` (`usage-index.mjs:787-795`), which builds the
@@ -438,10 +445,10 @@ Deep links: `#usage/<sessionId>` opens the Transcript view directly
 | Model per assistant turn | per-turn `message.model` | last `turn_context` model in effect |
 | Token usage | per-assistant-turn `usage` object | cumulative `token_count`; last snapshot wins |
 | API-error placeholders | `<synthetic>` / `isApiErrorMessage` → exceptions | none observed |
-| Aborted turns | none recorded | `turn_aborted` → `aborts` |
+| Aborted turns | none recorded — and the surfaces render `—`, not `0`, for a window with no Codex session, since nothing in it could have recorded one | `turn_aborted` → `aborts` |
 | Delegation markers | `isSidechain` → `sidechain` flag; the delegated work is its own nested transcript, discovered and priced like any other | `thread_source: "subagent"` → excluded from aggregation, session kept visible |
-| Permission posture | `permissionMode`, on the person's own turn | `approval_policy`/`sandbox_policy`, per `turn_context` |
-| Response latency | derived from the prompt-to-completion gap | same gap where available, else the host's own `duration_ms` |
+| Permission posture | `permissionMode`, on the person's own turn | `approval_policy` + `sandbox_policy.type` (an object field), per `turn_context` |
+| Response latency | derived from the prompt-to-completion gap | same gap where available, else the host's own `duration_ms` — both capped at 3600 s, since `duration_ms` includes time blocked on an approval prompt |
 | Context window | last-turn tokens only, no denominator | both halves — `model_context_window` and last-turn tokens |
 | Session title | model-written `ai-title`, first-prompt fallback | first prompt clipped |
 

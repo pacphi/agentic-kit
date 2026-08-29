@@ -511,7 +511,9 @@ import { renderUsage } from './usage-orchestrators.mjs';
   // ── second KPI row: cadence, autonomy, unit economics ─────────────────────
   var TIP_PER_DAY="Sessions ÷ active days.\nAn ACTIVE day is one this window actually billed tokens "
     +"on — that is byDay's own contract, so a day worked but never billed is not counted and breaks "
-    +"the streak.\nStreak counts consecutive active days ending at the most recent one.";
+    +"the streak.\nStreak counts consecutive active days ending at the most recent one.\n"
+    +"Sessions INCLUDES delegated subagent sessions, which the harness dispatches rather than you — "
+    +"the how-you-run panel carries the main/subagent split.";
   var TIP_AUTONOMY="Assistant responses ÷ prompts you typed — how far each prompt travels.\n"
     +"Prompts are MAIN-THREAD only: a subagent's prompts are written by the harness, not by you, so "
     +"counting them would inflate the denominator with work nobody asked for by hand.\nTouch rate is "
@@ -577,10 +579,12 @@ import { renderUsage } from './usage-orchestrators.mjs';
   var LAT_TIP="Wall-clock gap between a prompt and the response that answered it.\n"
     +"codex host-measured · claude/opencode derived from event gaps — not streaming TTFT.\n"
     +"The last bucket has no upper edge, so a percentile landing in it reports that bucket's "
-    +"floor: printed with ≥, read as \"at least this\".";
+    +"floor: printed with ≥, read as \"at least this\".\n"
+    +"INCLUDES delegated subagent responses — the how-you-run panel carries the split.";
   var LEN_TIP="Engaged length of one session — the union of its active sub-intervals, split at "
     +"15-minute silences, not its first-to-last span.\nThe last bucket has no upper edge, so a "
-    +"percentile landing in it is printed with ≥.";
+    +"percentile landing in it is printed with ≥.\n"
+    +"INCLUDES delegated subagent sessions — the how-you-run panel carries the split.";
 
   function histMarker(value,edges,label){
     var at=bucketPositionPct(edges,value);
@@ -763,7 +767,12 @@ import { renderUsage } from './usage-orchestrators.mjs';
     pcHtml+='<div class="pc-axis">';
     for(var ax=0;ax<24;ax++)pcHtml+="<span>"+(ax%3===0?ax:"")+"</span>";
     pcHtml+="</div>";
-    document.getElementById("u-punch").innerHTML=pcMax?pcHtml:'<div class="empty">no responses in window.</div>';
+    var PUNCH_NOTE="Counts responses, not elapsed time, and INCLUDES delegated subagent responses "
+      +"— a long agentic run dispatching subagents fills these cells even when nobody was typing. "
+      +"The how-you-run panel carries the main/subagent split.";
+    document.getElementById("u-punch").innerHTML=pcMax
+      ?pcHtml+'<p class="hr-note">'+esc(PUNCH_NOTE)+"</p>"
+      :'<div class="empty">no responses in window.</div>';
 
   }
 

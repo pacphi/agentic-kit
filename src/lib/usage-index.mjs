@@ -780,12 +780,21 @@ async function scan(o = {}) {
 export async function readIndex(o = {}) {
   const { days = 14, maxAgeMs = 15_000, now = Date.now() } = o;
   // code-quality Finding 7: this used to hand-roll a SECOND "what counts as
-  // the same question" key that omitted `force` (and `deps`) — the exact
-  // mistake buildIndex's _inflight keying (scanKey, above) was written to
-  // prevent one layer up. readIndex({ force: true }) within maxAgeMs of a
-  // normal read would silently return the stale memoized aggregate and never
-  // reach buildIndex. Reusing scanKey means there is exactly one definition
-  // of "same question" for both the single-flight map and this memo.
+  // the same question" key that omitted `force` — the exact mistake
+  // buildIndex's _inflight keying (scanKey, above) was written to prevent one
+  // layer up. readIndex({ force: true }) within maxAgeMs of a normal read
+  // would silently return the stale memoized aggregate and never reach
+  // buildIndex. Reusing scanKey means there is exactly one definition of
+  // "same question" for both the single-flight map and this memo.
+  //
+  // scanKey deliberately does NOT fold in `deps` or `codexState`, and this
+  // comment says so rather than implying otherwise: both hold live objects
+  // (functions, Maps) that do not serialize, so keying on them would mean
+  // minting identity tokens through a WeakMap. Two calls differing ONLY by an
+  // injected pricer or ledger would therefore coalesce — a latent trap, not a
+  // live bug: production never injects `deps`, and tests sandbox `roots` and
+  // `cachePath` per test so their keys already differ. Ruled parked with that
+  // reason rather than left implied.
   const key = scanKey({ ...o, days });
   if (_memo && _memo.key === key && now - _memo.at < maxAgeMs) return _memo.agg;
   const agg = await buildIndex({ ...o, days });

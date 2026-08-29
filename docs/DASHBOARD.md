@@ -178,7 +178,9 @@ trends on a different set of days than its neighbours, and says so in its own to
 covers the days you worked, while every other trend covers the days that billed tokens. The second
 row answers unit economics — sessions per active day with its current streak, autonomy (responses
 per prompt you typed, and those same prompts per engaged hour), cost per session, and cost per
-engaged hour. Cost per session is a median over *priced* sessions only; a session with no token
+engaged hour. Session counts, the rhythm histograms and the punchcard all **include delegated
+subagent sessions**, which the harness dispatches rather than you; the how-you-run panel carries the
+main/subagent split, and autonomy is the exception — its denominator is main-thread prompts only. Cost per session is a median over *priced* sessions only; a session with no token
 evidence at all is structurally zero rather than cheap, and folding it in would drag the median
 toward zero for a reason that is not about spend. A real figure under a cent renders `<$0.01`, never
 `$0.00`.
@@ -210,7 +212,9 @@ evidence supports. **Model mix over time** stacks per-day cost by coarse model f
 families coloured and the rest folded into a de-emphasised band.
 
 **Reliability** reports turns that never landed: exceptions per thousand responses, aborted turns,
-and a per-day exceptions sparkline that names the worst single day.
+and a per-day exceptions sparkline that names the worst single day. Aborted turns are **codex-only
+evidence** — no other host records an interrupt — so the count appears only when the window holds a
+codex session, and otherwise reads `—` rather than a zero that would look measured.
 
 `ak usage score` prints the same scorecard figures in a terminal, offline, including the rhythm
 pair, the posture and served-by tables, and the reliability lines.

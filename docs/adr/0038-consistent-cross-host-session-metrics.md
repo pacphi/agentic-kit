@@ -67,6 +67,24 @@ Two of those judgments are load-bearing:
   unknown renders `guarded` rather than not-recorded. Every other Codex mapping still requires both
   fields.
 
+**The taxonomy takes strings; the Codex parser extracts them.** Codex writes `sandbox_policy` as an
+object keyed `.type` — `{"type":"danger-full-access"}`, `{"type":"read-only"}`,
+`{"type":"workspace-write", …}` — and a survey of the reference machine's rollouts (400 files,
+2026-08-28) found 1,110 object occurrences and zero string ones. `normalizeMode` stays a
+string-to-string mapping (one vocabulary, host-shape-agnostic); `handleCodexTurnContext` reads
+`sandbox_policy.type` before calling it. An object carrying no `.type` contributes no sandbox
+evidence rather than a guess.
+
+This was shipped broken and caught by review: passing the object through matched no rule, so on live
+data the `plan`, `auto-edit` and `unrestricted` arms of the Codex mapping could not fire at all —
+only the approval-only `guarded` rule could — and `modeRaw` persisted the failed stringification
+`"never/[object Object]"` into the cache, `/api/usage` and `ak usage score --json`. The consequence
+that made this Important rather than cosmetic: `detectUnrestrictedMode` was blind to Codex's
+riskiest posture, `never` + `danger-full-access`, which is the reference machine's own current
+setting. The degradation direction was at least honest — not-recorded, never a guess. Schema v12
+re-derives the affected records; a client-side band-aid that refused to render any spelling
+containing `"[object "` was removed with the cause.
+
 ### 2. An unmapped value is `not-recorded`, and that is a first-class bucket
 
 Every lookup is `?? null`. A raw value this taxonomy has not been taught — a future
@@ -78,6 +96,14 @@ because the mapping is a judgment and a reader auditing it needs the evidence it
 fold, offered as a row by the CLI table even at zero, and forced to the de-emphasis ink in the UI so
 that spend with no posture evidence can never read as a posture.
 
+**But "unmapped" and "unobserved" are different facts, and the session detail strip now says which
+it is.** Rendering "no posture evidence in this transcript" over a row that carries a `modeRaw` is a
+fabrication in the opposite direction from the usual one — denying data that exists, when the whole
+point of retaining `modeRaw` is that the mapping is a judgment a reader may want to audit. So a row
+with `mode: null` and a `modeRaw` present shows the host's own spelling, labelled *unrecognized* so
+it can never be read as a classified posture. The aggregate still folds both cases into
+`byMode['not-recorded']`; separating them there is a wire-shape change and is deferred below.
+
 ### 3. Response latency means prompt-to-response, and is never called time-to-first-token
 
 The primary sample on every host is the gap between a human prompt and the completion that answered
@@ -88,9 +114,21 @@ latency states, so an unanswered prompt is never timed against a later, unrelate
 API-error placeholder is never a sample — its pending window is deliberately left open so the first
 real completion that follows is what gets timed.
 
-The `MAX_LATENCY_SAMPLE_SECONDS` ceiling of 3600s applies to the **derived prompt-gap path only**.
-A derived gap that large is overwhelmingly a person who walked away, not a model that took an hour;
-a host-measured duration that large is a real turn, and the open-ended top bucket absorbs it.
+The `MAX_LATENCY_SAMPLE_SECONDS` ceiling of 3600s applies to **every** sampling path, the
+host-measured fallback included.
+
+*This reverses an earlier ruling on this same branch,* which exempted the fallback on the grounds
+that a host-measured duration that large is a real turn the open-ended top bucket can absorb. That
+reasoning does not survive contact with what `duration_ms` measures: it is turn wall-clock and
+**includes time blocked on an approval prompt**, so under `approval_policy: on-request` a turn left
+awaiting approval overnight is recorded as a ~26-hour turn. Through the prompt-gap path that same
+wait is discarded; through the fallback it became a latency sample. Measured on the reference
+corpus: 12 of 835 durations exceeded the cap, the largest 94,079,450 ms ≈ 26.1 hours, all of them
+in the `≥60s` overflow bucket and dragging `latP95` into it — enough, on their own, to move
+`detectLatencyRegression`'s relative and absolute gates. The cap's stated purpose ("an idle resume
+is excluded from sampling **entirely**, rather than merely landing in the overflow bucket alongside
+genuinely slow turns") applies with full force to a blocked approval. Cost of the original ruling:
+none shipped — it was caught pre-merge.
 
 This figure is deliberately never labelled TTFT anywhere in the code, the docs, or the UI. No local
 transcript records the arrival of a first token; conflating the two would misname a measurement that
@@ -177,13 +215,18 @@ cannot drift out of step with the pricing table the day that multiplier changes.
 the row's own model, provider, and **day**, so a saving is priced from the same table at the same
 date as the cost sitting beside it; the result is memoised per `(model, provider, day)`.
 
-### 11. Schema v11, and nested subagent transcripts are ingested
+### 11. Schema v11 (then v12), and nested subagent transcripts are ingested
 
 `SCHEMA_VERSION` moves to 11 in one bump, adding `mode`/`modeRaw`, `latHist`/`latCount`,
 `lenSeconds`, `ctxWindow`/`ctxLastTokens`, and `aborts` to every session record. A v10-cached record
 carries none of them, so the whole cache is invalidated rather than letting new fields read back as
 `undefined` and sum into totals as `NaN` — the same rule, and the same reason, as the v4 and v5
 bumps ADR-0009 records.
+
+A second bump to **v12** lands before merge, for a *wrong* cached value rather than a missing one:
+v11 records persisted `modeRaw: "never/[object Object]"` and a null `mode` for every Codex session
+(decision 1). Re-deriving is the only thing that clears them, and the one-time re-parse cost is
+accepted for the same reason every earlier bump accepted it.
 
 Discovery gains exactly one nested shape: `listClaudeSubagents` reads
 `<projectDir>/<sessionId>/subagents/*.jsonl` and nothing else. It is deliberately not a recursive
@@ -197,10 +240,19 @@ unnamespaced id would silently collide two unrelated records into one. Admitting
 session id touches the transcript reader's path-traversal guard, so the gate is designed to
 **narrow, not loosen**:
 
-- `VALID_SUBAGENT_ID` matches exactly `<parentId>/<stem>`, one slash, with the parent half reusing
+- `matchSubagentId` matches exactly `<parentId>/<stem>`, one slash, with the parent half reusing
   `VALID_ID`'s own charset — a namespaced id's parent segment can never be more permissive than a
   plain id already is — and the child half constrained to the real on-disk shape,
-  `agent-[A-Za-z0-9_-]{1,100}`, derived from the corpus rather than invented.
+  `agent-[A-Za-z0-9_-]{1,100}`, derived from the corpus rather than invented. It **also rejects
+  `.` and `..` as the parent segment**, which the charset alone does not: `.` is inside it, and the
+  parent is the only place in that module where caller-shaped text becomes a path *segment* rather
+  than a filename stem, so `readSession('../agent-x')` reached
+  `<claudeRoot>/subagents/agent-x.jsonl` — still inside the transcript root, therefore invisible to
+  the realpath containment check, but outside the shape the grammar exists to enforce. Never
+  reachable over HTTP (the route tier rejected every encoding), but `readSession` is an exported
+  library API whose doc block claimed parity with that tier. The two tiers now accept identical id
+  sets, and discovery applies the same grammar so a transcript the API will not serve is never
+  indexed as a clickable row.
 - Resolution builds the candidate path from the two **already-validated capture groups**, never by
   joining raw request input.
 - Realpath containment, the size cap, masking, and truncation are unchanged and still apply; the new
@@ -257,13 +309,43 @@ session id touches the transcript reader's path-traversal guard, so the gate is 
   rates and its primary-source claim disagree with `pricing.mjs`. It is a pre-existing
   discrepant-docs item, and it is explicitly **not** to be closed by editing one side to match the
   other: the mandate on that follow-up is to establish which is true and correct whichever is wrong.
+- **Whether rhythm and the punchcard should filter or split main vs subagent sessions.** Once nested
+  Claude subagent transcripts were ingested (decision 11), roughly a quarter of the sessions in a
+  window — and on the reference corpus a *majority* of Claude responses, 17,863 subagent against
+  11,480 main — became harness-driven. They flow into `rhythm.lenHist`, `rhythm.latHist`,
+  `sessions / active day` and the punchcard, all of which sit under labels reading "your rhythm" and
+  "when you work". Every number is true as computed; the labels overclaim. This branch ships
+  **disclosure** — one sentence in §15/§17/§9 and in the matching tooltips — because filtering or
+  splitting is a behavior change that deserves its own ruling and its own RED tests, not a late
+  patch in a fix wave. Note the asymmetry it leaves: prompt-based denominators already got a
+  main-thread-only rule (decision 7) on exactly this reasoning, and length/latency/punchcard did
+  not, because the T6 ruling predates the ingestion discovery and was never revisited. Resolving
+  that asymmetry deliberately is the follow-up.
+- **The `unclassified` posture bucket.** An observed-but-unmapped `modeRaw` now renders as such in
+  the session detail strip, but the aggregate still folds it into `byMode['not-recorded']` beside
+  sessions that recorded no posture at all — which overstates how much evidence is missing. A fourth
+  bucket key (`unclassified`) would separate them, at the cost of a wire-shape change rippling
+  through `byMode`'s consumers, the CLI table's key list and the docs. Rendering was fixed here;
+  the bucket split is left to a deliberate data-shape decision.
+- **`scanKey` omits `deps` and `codexState`.** Both hold live objects (functions, Maps) that do not
+  serialize, so keying on them means minting identity tokens through a WeakMap. Two calls differing
+  only by an injected pricer or ledger therefore coalesce in the single-flight map and the memo.
+  Parked as a latent trap rather than a live bug — production never injects `deps`, and tests
+  sandbox `roots`/`cachePath` per test — with the comment at `readIndex` corrected to state the
+  omission instead of implying it was fixed.
 
 ## Verification
 
 Every mapping row in §1 is asserted value-by-value against `normalizeMode`, including the rows the
 first implementation left untested (`dontAsk`, `on-failure`, `untrusted`, and unrecognised Codex and
-OpenCode values), and the raw `approval/sandbox` spelling is pinned because the Sessions detail strip
-renders it. Bucket arithmetic is pinned at every edge and in the overflow slot, with the browser's
+OpenCode values). The Codex arm is pinned a second time **end-to-end through `parseCodex` in the
+real object wire shape**, because unit-testing `normalizeMode` alone is exactly what let the
+`[object Object]` defect ship: the taxonomy was correct and the value reaching it was not. That
+second pin is also what makes the raw `approval/sandbox` spelling a real claim — the Sessions detail
+strip renders it, and before the extraction what it had to render was a failed toString. The latency
+cap is pinned in both directions (a 26.1-hour `duration_ms` takes no sample at all; a 45-second one
+still samples through the fallback), and the id grammar by a `readSession('../agent-x')` rejection
+at the module's own tier. Bucket arithmetic is pinned at every edge and in the overflow slot, with the browser's
 re-implementation asserted byte-identical to the server's. The `engagedByDay` invariant, the
 display-window baseline, the priced-only cost distribution, and the main-thread ratio denominators
 each carry their own regression test. The nested-ingestion change is covered by namespaced-id
