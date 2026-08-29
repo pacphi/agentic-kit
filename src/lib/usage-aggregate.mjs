@@ -856,7 +856,11 @@ export function aggregate(records, { days, now, cutoff, deps, previous = false }
  *   - a session the ledger says is a subagent has its token usage STRIPPED,
  *     mirroring the parse-time exclusion: its rollout replays the parent's
  *     entire token history, so keeping the tokens double-counts the parent
- *     (ccusage/ccusage#950). The record itself stays visible/auditable.
+ *     (ccusage/ccusage#950). `reasoningOutput` goes with them — it is read
+ *     off the SAME cumulative token_count snapshot (finalizeCodexUsage) and
+ *     carries the same inflation, and leaving it made the session detail
+ *     render a replayed "reasoning 412K (in out)" beside an output total the
+ *     strip had just zeroed. The record itself stays visible/auditable.
  * Exported for test.
  */
 export function applyCodexLedger(records, ledger) {
@@ -866,9 +870,10 @@ export function applyCodexLedger(records, ledger) {
     const t = ledger.threads.get(rec.id);
     const fromEdges = ledger.parents instanceof Map && ledger.parents.has(rec.id) ? 'subagent' : null;
     const source = rec.threadSource ?? t?.threadSource ?? fromEdges;
-    if (source === rec.threadSource && (source !== 'subagent' || !rec.usage.length)) return rec;
+    const stripped = !rec.usage.length && !rec.reasoningOutput;
+    if (source === rec.threadSource && (source !== 'subagent' || stripped)) return rec;
     const out = { ...rec, threadSource: source };
-    if (source === 'subagent' && out.usage.length) out.usage = [];
+    if (source === 'subagent') { out.usage = []; out.reasoningOutput = 0; }
     return out;
   });
 }

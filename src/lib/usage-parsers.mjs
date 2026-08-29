@@ -420,8 +420,13 @@ function recordClaudeAssistantTurn(rec, turns, latState, ms, decoded, withTurns)
   // Context pressure: the tokens actually IN the model's window for this
   // turn (fresh input plus what got served from cache) — overwritten every
   // turn so the field always reflects the LAST completion, not a running
-  // total across the session.
-  rec.ctxLastTokens = decoded.usage.input + decoded.usage.cacheRead;
+  // total across the session. Evidence-gated, exactly as the opencode parser
+  // is: decodeClaudeRecord normalizes an ABSENT message.usage to all-zeros,
+  // so writing unconditionally let a token-less entry overwrite real context
+  // pressure with a fabricated 0. A completion with neither fresh input nor a
+  // cache read carried no context evidence to record.
+  const ctxTokens = decoded.usage.input + decoded.usage.cacheRead;
+  if (ctxTokens > 0) rec.ctxLastTokens = ctxTokens;
 
   const tools = collectClaudeToolNames(rec, decoded.toolUses);
   if (withTurns) {
@@ -670,9 +675,17 @@ function handleCodexEventMsg(rec, turns, stats, titleState, usageState, latState
   if (decoded.generation === 'legacy') stats.legacyEvents++;
   else if (decoded.generation === 'item') stats.itemCompletedEvents++;
   if (decoded.unknownItemType) {
-    recordCodexUnknownType(stats, decoded.unknownItemType);
+    // A type this parser tallies is a type it UNDERSTANDS. Recording it as an
+    // unknown kind too made the four tool items simultaneously "tools" in the
+    // scorecard and "unknown kinds" in sourceHealth — raising the
+    // unknown-item-types warning for a shape nothing failed to handle, and
+    // consuming slots in the 32-kind cap that exist to surface genuinely new
+    // shapes. (The field is named unknownItemType because the DECODER, which
+    // has no tool vocabulary, does not normalize these to messages.)
     if (CODEX_TOOL_ITEM_TYPES.has(decoded.unknownItemType)) {
       rec.tools[decoded.unknownItemType] = (rec.tools[decoded.unknownItemType] ?? 0) + 1;
+    } else {
+      recordCodexUnknownType(stats, decoded.unknownItemType);
     }
   }
   if (decoded.type !== 'message') return;

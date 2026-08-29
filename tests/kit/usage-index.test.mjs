@@ -1460,6 +1460,34 @@ test('parseClaude derives latency, mode, ctx from entries', () => {
   assert.equal(rec.ctxLastTokens, 151000);    // input + cacheRead of last turn
 });
 
+// The same evidence gate opencode's parser was ruled to need. decodeClaudeRecord
+// normalizes an ABSENT message.usage to all-zeros, so an unconditional write
+// let a token-less assistant entry overwrite real context pressure with a
+// fabricated 0 — the honest-absent rule inverted.
+test('parseClaude: a token-less assistant entry does not zero a real ctxLastTokens', () => {
+  const T0 = '2026-08-20T10:00:00.000Z';
+  const plusSec = (t, s) => new Date(Date.parse(t) + s * 1000).toISOString();
+  const lines = [
+    JSON.stringify({ type: 'user', timestamp: T0, message: { role: 'user', content: 'do it' } }),
+    JSON.stringify({ type: 'assistant', timestamp: plusSec(T0, 8), message: { role: 'assistant', model: 'claude-opus-5', usage: { input_tokens: 1000, cache_read_input_tokens: 150000, output_tokens: 50 }, content: [] } }),
+    // No `usage` key at all — claudeUsage() reads all four fields as 0.
+    JSON.stringify({ type: 'assistant', timestamp: plusSec(T0, 12), message: { role: 'assistant', model: 'claude-opus-5', content: [] } }),
+  ].join('\n');
+  const { session: rec } = parseClaude(lines, { id: 'sess-ctx-gate' });
+  assert.equal(rec.ctxLastTokens, 151000,
+    'the last turn that actually recorded context wins; a token-less one carries no evidence to overwrite it with');
+});
+
+test('parseClaude: a session whose only assistant entry is token-less records no context at all', () => {
+  const T0 = '2026-08-20T10:00:00.000Z';
+  const lines = [
+    JSON.stringify({ type: 'user', timestamp: T0, message: { role: 'user', content: 'do it' } }),
+    JSON.stringify({ type: 'assistant', timestamp: T0, message: { role: 'assistant', model: 'claude-opus-5', content: [] } }),
+  ].join('\n');
+  const { session: rec } = parseClaude(lines, { id: 'sess-ctx-none' });
+  assert.equal(rec.ctxLastTokens, null, 'honest-absent, not a measured zero');
+});
+
 // ── v11 index carry-through + lookback (Task 5) ─────────────────────────────
 
 test('cached session entries round-trip the v11 fields across a cache hit', async () => {

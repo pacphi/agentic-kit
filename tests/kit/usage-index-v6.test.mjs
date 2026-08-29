@@ -129,17 +129,23 @@ test('parseCodex normalizes current item_completed messages and exposes bounded 
   assert.equal(s.responses, 1);
   assert.equal(s.tokens, 120);
   assert.equal(agg.sourceHealth.codex.status, 'ok');
+  // CommandExecution is TALLIED as a tool, so it is a shape this parser
+  // understands and must not also be reported as an unknown kind: doing both
+  // raised the unknown-item-types warning for a type nothing failed to
+  // handle, and spent one of the 32 diagnostic slots that exist to surface
+  // genuinely new shapes.
+  assert.equal(s.tools.CommandExecution, 1, 'tallied as the tool it is');
   assert.deepEqual(agg.sourceHealth.codex.diagnostics, {
     files: 1, cachedFiles: 0, parsedFiles: 1, unparsedFiles: 0,
     filesWithTokens: 1, filesWithResponses: 1,
     legacyEvents: 0, itemCompletedEvents: 3, tokenCountEvents: 1,
-    prompts: 1, responses: 1, unknownItemTypes: { CommandExecution: 1 }, unknownItemTypeOverflow: 0,
-    warnings: ['unknown-item-types'],
+    prompts: 1, responses: 1, unknownItemTypes: {}, unknownItemTypeOverflow: 0,
+    warnings: [],
     common: {
       unitsSeen: 1, unitsParsed: 1, unitsWithUsage: 1,
       unitsWithPrompts: 1, unitsWithResponses: 1,
       prompts: 1, responses: 1,
-      warnings: ['unknown-item-types'], unknownKinds: { CommandExecution: 1 }, unknownKindOverflow: 0,
+      warnings: [], unknownKinds: {}, unknownKindOverflow: 0,
     },
   });
 
@@ -305,6 +311,21 @@ const codexModeOf = (id, approval, sandbox) => parseCodex([
   JSON.stringify({ type: 'session_meta', payload: { id, cwd: '/tmp/p', thread_source: 'user' }, timestamp: T0 }),
   turnCtx(approval, sandbox),
 ].join('\n'), { id }).session;
+
+test('a genuinely unrecognized item type still reaches the unknown-kind diagnostics', () => {
+  // The other half of the rule: narrowing the diagnostic to types the parser
+  // does NOT tally must not silence it for the shapes it exists to surface.
+  const lines = [
+    JSON.stringify({ type: 'session_meta', payload: { id: 'cxu1', cwd: '/tmp/p', thread_source: 'user' }, timestamp: T0 }),
+    JSON.stringify({ type: 'event_msg', payload: { type: 'item_completed', item: { type: 'CommandExecution' } }, timestamp: T0 }),
+    JSON.stringify({ type: 'event_msg', payload: { type: 'item_completed', item: { type: 'SomeBrandNewThing' } }, timestamp: T0 }),
+  ].join('\n');
+  const { session, parseStats } = parseCodex(lines, { id: 'cxu1' });
+  assert.deepEqual(parseStats.unknownItemTypes, { SomeBrandNewThing: 1 },
+    'the tallied tool type is absent; the genuinely unknown one is present');
+  assert.equal(session.tools.CommandExecution, 1);
+  assert.equal(session.tools.SomeBrandNewThing, undefined, 'an unrecognized item is never tallied as a tool');
+});
 
 test('parseCodex: the object form of sandbox_policy maps to the taxonomy — unrestricted', () => {
   const rec = codexModeOf('cxm1', 'never', { type: 'danger-full-access' });
