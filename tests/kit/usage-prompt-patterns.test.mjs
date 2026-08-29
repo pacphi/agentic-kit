@@ -18,6 +18,14 @@ import {
   reAskPairs,
   tapStats,
 } from '../../src/lib/usage-prompt-patterns.mjs';
+import {
+  TOKEN_BANDS,
+  LABEL_SOURCES,
+  SEED_PATTERNS,
+  tokenBand,
+  characterize,
+  labelFor,
+} from '../../src/lib/usage-prompt-vocabulary.mjs';
 import { MAX_TOKEN_HASHES } from '../../src/lib/usage-parsers.mjs';
 
 // ── fixtures ────────────────────────────────────────────────────────────────
@@ -586,4 +594,185 @@ test('tapStats on an empty corpus reports zero share, not NaN', () => {
 test('tapStats keeps host keys sorted regardless of encounter order', () => {
   const stats = tapStats([fp({ host: 'opencode' }), fp({ host: 'codex' }), fp({ host: 'claude' })]);
   assert.deepEqual(Object.keys(stats.byHost), ['claude', 'codex', 'opencode']);
+});
+
+// ── usage-prompt-vocabulary ─────────────────────────────────────────────────
+//
+// The naming layer. Its whole risk is dishonesty: a curated name asserts the
+// analyst knows what a cluster IS, on evidence that is only a token band and a
+// span. These pins hold it to that — every seed fires only on the shape it was
+// cut from, and the fallback says nothing it cannot count.
+
+/** A cluster as `nearDupClusters` emits one; tests override what they mean. */
+const cluster = (over = {}) => ({
+  key: 'k0', size: 4, hashes: ['k0', 'k1'],
+  sessions: new Set(['s1', 's2', 's3', 's4']),
+  days: new Set(['2026-08-01', '2026-08-02']),
+  hosts: new Set(['claude', 'codex']),
+  tokens: { min: 3, median: 3, max: 4 },
+  questions: 0, instructions: 4, qKnown: 4, personas: 0,
+  class: 'instruction',
+  ...over,
+});
+
+const spanning = (n, prefix) => new Set(Array.from({ length: n }, (_v, i) => `${prefix}${i}`));
+
+test('TOKEN_BANDS and tokenBand cut at the documented boundaries', () => {
+  assert.deepEqual(TOKEN_BANDS, ['tap', 'short', 'medium', 'long', 'xlong']);
+  assert.equal(tokenBand(1), 'tap');
+  assert.equal(tokenBand(4), 'tap');       // the spec's own tap threshold
+  assert.equal(tokenBand(5), 'short');
+  assert.equal(tokenBand(15), 'short');
+  assert.equal(tokenBand(16), 'medium');
+  assert.equal(tokenBand(60), 'medium');   // the corpus's p50 unique-token count
+  assert.equal(tokenBand(61), 'long');
+  assert.equal(tokenBand(250), 'long');
+  assert.equal(tokenBand(251), 'xlong');
+  assert.equal(tokenBand(0), 'tap');
+  assert.equal(tokenBand(undefined), 'tap');
+});
+
+test('SEED_PATTERNS is a small, well-formed, documented registry', () => {
+  assert.ok(SEED_PATTERNS.length >= 4 && SEED_PATTERNS.length <= 12, 'the seed list is curated, not a lexicon');
+  const ids = SEED_PATTERNS.map((s) => s.id);
+  const names = SEED_PATTERNS.map((s) => s.name);
+  assert.equal(new Set(ids).size, ids.length, 'ids are unique');
+  assert.equal(new Set(names).size, names.length, 'display names are unique');
+  for (const seed of SEED_PATTERNS) {
+    assert.equal(typeof seed.match, 'function');
+    assert.ok(seed.basis.length > 20, `${seed.id} must record the evidence it was cut from`);
+  }
+  // The mockup's four names must all still exist — the view renders them.
+  for (const name of ['Release ritual', 'Commit-and-push instruction', 'Progress check-in', 'Persona scaffolding']) {
+    assert.ok(names.includes(name), `missing seed ${name}`);
+  }
+});
+
+test('seed: Persona scaffolding fires on a majority of persona-opening members', () => {
+  const hit = cluster({ size: 5, personas: 3, tokens: { min: 400, median: 530, max: 900 } });
+  assert.equal(labelFor(hit).name, 'Persona scaffolding');
+  // A minority does not: one persona prompt swept into a cluster is not a
+  // persona cluster.
+  assert.notEqual(labelFor(cluster({ size: 5, personas: 2 })).name, 'Persona scaffolding');
+});
+
+test('seed: Persona scaffolding needs no class, because the flag IS the evidence', () => {
+  // The measured family is 41 edited variants that no repetition threshold can
+  // see; only the `o` flag identifies them.
+  const hit = cluster({ size: 3, personas: 3, class: 'unknown', questions: 0, instructions: 0, qKnown: 0 });
+  assert.equal(labelFor(hit).name, 'Persona scaffolding');
+});
+
+test('seed: Release ritual needs an instruction class, a short band and a wide span', () => {
+  const hit = cluster({
+    class: 'instruction', tokens: { min: 8, median: 9, max: 13 },
+    sessions: spanning(13, 's'), days: spanning(9, 'd'), size: 13, instructions: 13, qKnown: 13,
+  });
+  assert.equal(labelFor(hit).name, 'Release ritual');
+  // Same shape, one session: a procedure typed once is not a ritual.
+  assert.notEqual(labelFor({ ...hit, sessions: spanning(1, 's') }).name, 'Release ritual');
+  // Same span, question class: that is someone asking about a release.
+  assert.notEqual(labelFor({ ...hit, class: 'question' }).name, 'Release ritual');
+});
+
+test('seed: Commit-and-push fires on a tap-length instruction spanning days', () => {
+  const hit = cluster({
+    class: 'instruction', tokens: { min: 3, median: 3, max: 4 },
+    sessions: spanning(11, 's'), days: spanning(9, 'd'), size: 13, instructions: 13, qKnown: 13,
+  });
+  assert.equal(labelFor(hit).name, 'Commit-and-push instruction');
+  // One day is a session habit, not standing procedure.
+  assert.notEqual(labelFor({ ...hit, days: spanning(1, 'd') }).name, 'Commit-and-push instruction');
+});
+
+test('seed: Progress check-in is the question-side twin of the same shape', () => {
+  const hit = cluster({
+    class: 'question', tokens: { min: 2, median: 4, max: 6 },
+    sessions: spanning(9, 's'), days: spanning(8, 'd'), size: 9, questions: 9, instructions: 0, qKnown: 9,
+  });
+  assert.equal(labelFor(hit).name, 'Progress check-in');
+  // The band is what separates it from a long question.
+  assert.notEqual(labelFor({ ...hit, tokens: { min: 40, median: 64, max: 90 } }).name, 'Progress check-in');
+});
+
+test('seeds never fire on an unclassified cluster (absent q is not a class)', () => {
+  const undecorated = cluster({
+    class: 'unknown', questions: 0, instructions: 0, qKnown: 0, personas: 0,
+    tokens: { min: 3, median: 3, max: 4 }, sessions: spanning(20, 's'), days: spanning(15, 'd'),
+  });
+  const label = labelFor(undecorated);
+  assert.equal(label.source, 'characterized');
+  assert.match(label.name, /^Recurring 3-token prompt/);
+});
+
+test('characterize speaks only in counts — no host name, id or hash', () => {
+  const c = cluster({
+    size: 21, tokens: { min: 2, median: 3, max: 5 },
+    sessions: spanning(21, 'session-'), hosts: new Set(['claude', 'codex']), class: 'instruction',
+  });
+  assert.equal(characterize(c), 'Recurring 3-token instruction · 21 sessions · both hosts');
+  for (const forbidden of ['claude', 'codex', 'session-0', 'k0', 'k1', '2026-08-01']) {
+    assert.ok(!characterize(c).includes(forbidden), `characterize leaked ${forbidden}`);
+  }
+});
+
+test('characterize pluralizes, names each class honestly, and counts hosts', () => {
+  const base = { key: 'k', size: 1, hashes: ['k'], tokens: { min: 7, median: 7, max: 7 }, days: new Set() };
+  const of = (over) => characterize({ ...base, sessions: new Set(['s1']), hosts: new Set(['claude']), ...over });
+  assert.equal(of({ class: 'question' }), 'Recurring 7-token question · 1 session · 1 host');
+  assert.equal(of({ class: 'mixed' }), 'Recurring 7-token mixed prompt · 1 session · 1 host');
+  assert.equal(of({ class: 'unknown' }), 'Recurring 7-token prompt · 1 session · 1 host');
+  assert.equal(of({ class: 'instruction', hosts: new Set(['a', 'b', 'c']) }), 'Recurring 7-token instruction · 1 session · 3 hosts');
+  // Nothing to count is nothing to say — no "0 sessions" segment.
+  assert.equal(of({ class: 'instruction', sessions: new Set(), hosts: new Set() }), 'Recurring 7-token instruction');
+});
+
+test('characterize survives a cluster with no token stats at all', () => {
+  assert.equal(characterize({ key: 'k' }), 'Recurring 0-token prompt');
+  assert.equal(characterize(undefined), 'Recurring 0-token prompt');
+});
+
+test('labelFor resolves store → seed → characterize, in that order', () => {
+  const hit = cluster({
+    class: 'instruction', tokens: { min: 3, median: 3, max: 4 },
+    sessions: spanning(11, 's'), days: spanning(9, 'd'), size: 13, instructions: 13, qKnown: 13,
+  });
+  // 3. no store, no seed → characterized
+  const plain = cluster({ class: 'unknown', questions: 0, instructions: 0, qKnown: 0, sessions: spanning(2, 's') });
+  assert.equal(labelFor(plain).source, 'characterized');
+  // 2. no store entry, seed matches → seed
+  const seeded = labelFor(hit);
+  assert.equal(seeded.source, 'seed');
+  assert.equal(seeded.name, 'Commit-and-push instruction');
+  assert.equal(seeded.seed, 'commit-and-push');
+  // 1. a store entry outranks the seed, and carries its own provenance
+  const store = { [hit.key]: { name: 'Push ritual (renamed)', source: 'enriched', firstSeen: '2026-08-01' } };
+  assert.deepEqual(labelFor(hit, store), {
+    name: 'Push ritual (renamed)', source: 'enriched', firstSeen: '2026-08-01', seed: null,
+  });
+});
+
+test('labelFor tolerates a missing, empty or malformed store entry', () => {
+  const c = cluster({ class: 'unknown', questions: 0, instructions: 0, qKnown: 0, sessions: spanning(2, 's') });
+  assert.equal(labelFor(c, undefined).source, 'characterized');
+  assert.equal(labelFor(c, {}).source, 'characterized');
+  assert.equal(labelFor(c, { k0: {} }).source, 'characterized');
+  assert.equal(labelFor(c, { k0: { name: '   ' } }).source, 'characterized');
+  // An unrecognized source reads as `curated`: a name in the store was put
+  // there by someone, and the conservative reading is that it was a person.
+  assert.equal(labelFor(c, { k0: { name: 'Hand-named', source: 'whatever' } }).source, 'curated');
+  assert.equal(labelFor(c, { k0: { name: 'Hand-named' } }).firstSeen, null);
+  assert.equal(labelFor(undefined).source, 'characterized');
+});
+
+test('LABEL_SOURCES is the closed vocabulary labelFor can return', () => {
+  assert.deepEqual(LABEL_SOURCES, ['curated', 'enriched', 'seed', 'characterized']);
+  const seen = new Set();
+  const c = cluster({ class: 'unknown', questions: 0, instructions: 0, qKnown: 0 });
+  seen.add(labelFor(c).source);
+  seen.add(labelFor(cluster({ personas: 4 })).source);
+  seen.add(labelFor(c, { k0: { name: 'x', source: 'curated' } }).source);
+  seen.add(labelFor(c, { k0: { name: 'x', source: 'enriched' } }).source);
+  for (const s of seen) assert.ok(LABEL_SOURCES.includes(s), `${s} is outside the vocabulary`);
+  assert.equal(seen.size, 4);
 });
