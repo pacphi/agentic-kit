@@ -116,8 +116,15 @@ export { MAX_TURN_CHARS, mergeIntervals, maskSecrets, normalizeSessionIdentity, 
  *       (task notifications, command stdout, teammate-message/cross-session
  *       deliveries) inflated Codex prompt counts. A v12-cached Codex record
  *       carries the old (possibly relabeled, possibly inflated) figures and
- *       must be re-derived rather than trusted as-is. */
-export const SCHEMA_VERSION = 13;
+ *       must be re-derived rather than trusted as-is.
+ *  v14: every session record grows `promptFPs` (one privacy-preserving
+ *       fingerprint per prompt-kind turn — normalized-text hash, token count,
+ *       bounded token-hash sketch, and a provenance tag saying who WROTE it) and
+ *       `promptFPOverflow`. A v13-cached record carries neither, so the
+ *       Prompts view would read an empty corpus for exactly the sessions
+ *       already on disk. Prompt TEXT is not part of this (or any) bump — see
+ *       usage-parsers.promptFingerprint. */
+export const SCHEMA_VERSION = 14;
 
 const DAY_MS = 86_400_000;
 // One day of slack past dashboard-server.mjs's 365-day clampDays ceiling —

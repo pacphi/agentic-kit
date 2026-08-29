@@ -8,7 +8,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { buildIndex, readSession, _resetForTest } from '../../src/lib/usage-index.mjs';
-import { parseCodex } from '../../src/lib/usage-parsers.mjs';
+import { parseClaude, parseCodex, promptFingerprint } from '../../src/lib/usage-parsers.mjs';
 
 const NOW = Date.parse('2026-07-25T12:00:00.000Z');
 const T0 = '2026-07-24T09:00:00.000Z';
@@ -482,4 +482,45 @@ test('parseCodex: harness output and mirrored cross-host envelopes are excluded 
   ].join('\n');
   const { session: item } = parseCodex(itemLines, { id: 'cxh2' });
   assert.equal(item.prompts, 1);
+});
+
+// ── v14 prompt fingerprints on the Codex path ───────────────────────────────
+
+// Codex's own gate (isCodexHumanMessage) already keeps harness output and
+// mirrored Claude envelopes out of kind 'prompt', so those turns must
+// contribute NO fingerprint — the fingerprint layer sits behind that gate, it
+// does not re-litigate it. What DOES reach it is codex's own share of typed
+// prompts and the ak-authored headless templates its workers are spawned with.
+test('parseCodex fingerprints prompt-kind turns only, and tags their provenance', () => {
+  const lines = [
+    JSON.stringify({ type: 'session_meta', payload: { id: 'cxfp1', cwd: '/tmp/p', thread_source: 'user' }, timestamp: T0 }),
+    JSON.stringify({ type: 'event_msg', payload: { type: 'user_message', message: 'why is the build failing on macos?' }, timestamp: T0 }),
+    JSON.stringify({ type: 'event_msg', payload: { type: 'user_message', message: 'Read the dependency handoff only. Make no tool calls.' }, timestamp: T0 }),
+    JSON.stringify({ type: 'event_msg', payload: { type: 'user_message', message: '<task-notification>background task finished</task-notification>' }, timestamp: T0 }),
+    JSON.stringify({ type: 'event_msg', payload: { type: 'user_message', message: 'Another Claude session sent a message: hello' }, timestamp: T0 }),
+  ].join('\n');
+  const { session: rec } = parseCodex(lines, { id: 'cxfp1' });
+  assert.equal(rec.prompts, 2);
+  assert.deepEqual(rec.promptFPs.map((f) => f.p), ['human', 'adapter']);
+  assert.equal(rec.promptFPs[0].t, 7);
+  assert.equal(rec.promptFPOverflow, 0);
+  assert.equal(JSON.stringify(rec.promptFPs).includes('macos'), false, 'no prompt text on the record');
+});
+
+// The token hashing/normalization is ONE implementation shared by every host —
+// the same sentence typed in Codex and in Claude must fingerprint identically,
+// or cross-host repetition analysis compares two different alphabets.
+test('a prompt fingerprints identically whichever host recorded it', () => {
+  const text = 'Run the full check and report the exit code.';
+  const codexLines = [
+    JSON.stringify({ type: 'session_meta', payload: { id: 'cxfp2', cwd: '/tmp/p', thread_source: 'user' }, timestamp: T0 }),
+    JSON.stringify({ type: 'event_msg', payload: { type: 'user_message', message: text }, timestamp: T0 }),
+  ].join('\n');
+  const { session: codex } = parseCodex(codexLines, { id: 'cxfp2' });
+  const { session: claude } = parseClaude(
+    JSON.stringify({ type: 'user', timestamp: T0, message: { role: 'user', content: text } }),
+    { id: 'clfp2' },
+  );
+  assert.deepEqual(codex.promptFPs, claude.promptFPs);
+  assert.deepEqual(codex.promptFPs, [{ ...promptFingerprint(text), p: 'human' }]);
 });

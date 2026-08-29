@@ -9,11 +9,13 @@
 //
 // A malformed line is skipped, never fatal — one corrupt line must not cost
 // a whole file, and no input here may throw.
+import { createHash } from 'node:crypto';
 import { repoRoot } from './paths.mjs';
 import { MAX_TELEMETRY_UNKNOWN_KINDS } from './usage-telemetry.mjs';
 import { decodeClaudeRecord, decodeCodexRecord } from './telemetry-records.mjs';
 import { toMs, maskSecrets } from './usage-aggregate.mjs';
 import { normalizeMode } from './usage-modes.mjs';
+import { provenanceOf } from './usage-provenance.mjs';
 
 /** Silence longer than this ends a stretch of engagement. A session is split
  *  into active sub-intervals at gaps ABOVE this bound (exactly this much is not
@@ -198,7 +200,94 @@ export function blankSession(id, provider) {
     lenSeconds: 0,
     ctxWindow: null, ctxLastTokens: null,
     aborts: 0,
+    // v14: one fingerprint per prompt-kind turn, and the count of any that
+    // exceeded MAX_PROMPT_FPS. Prompt TEXT is never stored — see
+    // promptFingerprint.
+    promptFPs: [], promptFPOverflow: 0,
   };
+}
+
+// ── prompt fingerprints (Prompts view spec §2.2) ────────────────────────────
+
+/** Per-session cap on stored fingerprints. The corpus's busiest session
+ *  carries a few hundred; 2,000 leaves an order of magnitude of headroom while
+ *  bounding what one pathological transcript can add to the index. Anything
+ *  past it is COUNTED (promptFPOverflow), never silently dropped. */
+export const MAX_PROMPT_FPS = 2000;
+
+/** How many token hashes one fingerprint keeps. Because the hashes are sorted
+ *  and a hash is uniform with respect to its token, the first `k` of them are a
+ *  BOTTOM-K SKETCH: a deterministic, unbiased sample of the token set, and the
+ *  standard estimator for set similarity between two such sketches. Measured on
+ *  this machine's corpus (2026-08-29): unique-token counts run p50 60, p95
+ *  1,035, max 7,873, and storing all of them cost 15 MB — 88% of the whole
+ *  index, against a 2.1 MB index without them. At 64 the median prompt is still
+ *  stored COMPLETE, the tail costs a bounded ~700 bytes instead of ~86 KB, and
+ *  Jaccard over the sketch carries a standard error near 0.06 at J≈0.6 — the
+ *  threshold the clustering is specified at, where the prompt-type filter is
+ *  what supplies precision. Capping the ENTRY count (MAX_PROMPT_FPS) without
+ *  capping this would have been no bound at all: one pasted document outweighs
+ *  a hundred real instructions. */
+export const MAX_TOKEN_HASHES = 64;
+
+/** The form repetition analysis compares on: lowercased, whitespace collapsed,
+ *  trailing punctuation stripped. "Yes." and "yes" are the same instruction
+ *  asked twice, and a view that reported them as two distinct prompts would
+ *  understate every repetition figure it renders. */
+export function normalizePromptText(text) {
+  return String(text ?? '')
+    .toLowerCase()
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(/[.!?,;:\s]+$/, '');
+}
+
+/** Tokens of an ALREADY-normalized prompt: split on everything outside the
+ *  word charset, which deliberately KEEPS the characters that carry meaning in
+ *  this corpus — `#` (issues), `/` (paths, slash commands), `.` `-` `_` `+`
+ *  (filenames, flags, versions). Splitting those apart would make `src/lib/x.mjs`
+ *  four common tokens instead of one distinctive one. */
+function promptTokens(norm) {
+  return norm.split(/[^a-z0-9#/_.+-]+/).filter(Boolean);
+}
+
+const sha = (s, n) => createHash('sha256').update(s).digest('hex').slice(0, n);
+
+/**
+ * The stored form of a prompt: a hash of its normalized text, its token count,
+ * and a bounded sample of its token hashes. This is the whole privacy
+ * contract — exact repeats, near-duplicate clustering (token-set Jaccard over
+ * `th`), tap detection and length stats all compute from these three fields,
+ * so the text itself never has to reach the index or a wire.
+ *
+ * `th` is a SET (deduplicated), sorted, and bounded at MAX_TOKEN_HASHES — see
+ * there for why the bound is a bottom-k sketch rather than a truncation. `t`
+ * keeps repeats, because a prompt that says the same word four times is longer
+ * than one that says it once, and it is the honest length even when `th` is a
+ * sketch of the token set rather than all of it.
+ *
+ * @param {string} text
+ * @returns {{ h: string, t: number, th: string[] }}
+ */
+export function promptFingerprint(text) {
+  const norm = normalizePromptText(text);
+  const tokens = promptTokens(norm);
+  return {
+    h: sha(norm, 16),
+    t: tokens.length,
+    th: [...new Set(tokens.map((tok) => sha(tok, 8)))].sort().slice(0, MAX_TOKEN_HASHES),
+  };
+}
+
+/** Record one prompt-kind turn's fingerprint on a session record, or count it
+ *  as overflow. Exported for the same reason blankSession/addUsage are: shared
+ *  by all three transcript sources so the hashing and normalization have
+ *  exactly ONE implementation — a per-host copy would let the same sentence
+ *  fingerprint differently depending on where it was typed, which is precisely
+ *  the comparison the Prompts view exists to make. */
+export function notePromptFingerprint(rec, text, kind) {
+  if (rec.promptFPs.length >= MAX_PROMPT_FPS) { rec.promptFPOverflow++; return; }
+  rec.promptFPs.push({ ...promptFingerprint(text), p: provenanceOf(text, { kind }) });
 }
 
 /** Response-latency histogram edges, in seconds; the 6th bucket (index 5)
@@ -356,8 +445,15 @@ function recordClaudeUserTurn(rec, turns, titleState, latState, e, ms, decoded, 
     const m = normalizeMode({ host: 'claude', permissionMode: e.permissionMode });
     if (m.raw) { rec.mode = m.mode; rec.modeRaw = m.raw; }
   }
+  // Now computed on BOTH paths, not just withTurns: the fingerprint layer keys
+  // on the turn KIND, which is deliberately broader than isHumanPrompt — an
+  // interrupt, a slash-command record and a bash-input are all prompt-kind
+  // turns the person initiated, and provenanceOf is what separates them from
+  // typed instructions.
+  const kind = userTurnKind(e);
+  if (kind === 'prompt') notePromptFingerprint(rec, decoded.text, kind);
   if (withTurns && decoded.text) {
-    turns.push({ role: 'user', at: new Date(ms).toISOString(), text: decoded.text, prompt: human, kind: userTurnKind(e) });
+    turns.push({ role: 'user', at: new Date(ms).toISOString(), text: decoded.text, prompt: human, kind });
   }
 }
 
@@ -668,6 +764,10 @@ function handleCodexUserMessage(rec, turns, stats, titleState, latState, decoded
     // Opens the prompt→agent-message latency window; closed by the first
     // following handleCodexAssistantMessage (mirrors Claude's latState, Task 3).
     latState.pendingPromptMs = ms;
+    // Codex's kind is exactly this gate's verdict (see the turn row below), so
+    // a gated message contributes no fingerprint — the layer sits behind the
+    // harness/mirror gate rather than re-litigating it.
+    notePromptFingerprint(rec, text, 'prompt');
   }
   if (withTurns && text) {
     turns.push({ role: 'user', at: new Date(ms).toISOString(), text, prompt: human, kind: human ? 'prompt' : 'context' });

@@ -29,7 +29,7 @@ import { withDb } from './sqlite.mjs';
 // definitions in usage-parsers.mjs. usage-index.mjs imports FROM this module
 // (defaultOpencodeDbPath, parseSession, …), but that is no longer a cycle:
 // this module depends only on usage-parsers.mjs, not on usage-index.mjs.
-import { addUsage, blankSession, noteLatencySample } from './usage-parsers.mjs';
+import { addUsage, blankSession, noteLatencySample, notePromptFingerprint } from './usage-parsers.mjs';
 import { normalizeMode } from './usage-modes.mjs';
 
 /** The live opencode store. Overridable via roots in tests. */
@@ -159,8 +159,12 @@ function recordUserMessage(rec, turns, { rowId, at, withTurns, partsByMessage })
   // Opens the prompt→assistant-message latency window; closed by the next
   // recordAssistantMessage (mirrors parseClaude/parseCodex's latState).
   rec.pendingPromptMs = at;
-  if (!withTurns) return;
+  // Every opencode user message IS a prompt-kind turn (this source carries no
+  // harness-injected user rows), so it always fingerprints — on BOTH paths,
+  // which is why the scan path now loads user text parts (see loadTextParts).
   const text = messagePartsText(partsByMessage, rowId, ['text']);
+  notePromptFingerprint(rec, text, 'prompt');
+  if (!withTurns) return;
   turns.push({ role: 'user', at: new Date(at).toISOString(), text, prompt: true, kind: 'prompt' });
 }
 
@@ -249,6 +253,29 @@ function processMessageRow(rec, turns, row, { withTurns, partsByMessage }) {
   recordAssistantMessage(rec, turns, { data, rowId: row.id, at, withTurns, partsByMessage });
 }
 
+/** The `part` rows a parse needs. `withTurns` wants every part (text, tool and
+ *  reasoning, for both roles) to build turn rows; the scan path wants only the
+ *  USER text parts, which is all a prompt fingerprint reads — the assistant
+ *  bodies it would otherwise pull in are the bulk of the store and are never
+ *  looked at there. */
+function loadTextParts(db, id, withTurns) {
+  if (withTurns) {
+    return db.prepare(`
+      SELECT p.message_id AS message_id, p.data AS data
+      FROM part p JOIN message m ON m.id = p.message_id
+      WHERE m.session_id = ? ORDER BY p.rowid ASC
+    `).all(id);
+  }
+  return db.prepare(`
+    SELECT p.message_id AS message_id, p.data AS data
+    FROM part p JOIN message m ON m.id = p.message_id
+    WHERE m.session_id = ?
+      AND json_extract(m.data, '$.role') = 'user'
+      AND json_extract(p.data, '$.type') = 'text'
+    ORDER BY p.rowid ASC
+  `).all(id);
+}
+
 /** Tool counts without the full turn payload: one lean query on the scan path. */
 function collectScanToolCounts(db, id, rec) {
   const toolRows = db.prepare(`
@@ -290,14 +317,7 @@ export function parseSession({ dbFile, id, withTurns = false }) {
     const srow = db.prepare('SELECT * FROM session WHERE id = ?').get(id);
     if (!srow) return null;
     const msgRows = db.prepare('SELECT id, time_created, data FROM message WHERE session_id = ? ORDER BY time_created ASC, id ASC').all(id);
-    const partRows = withTurns
-      ? db.prepare(`
-          SELECT p.message_id AS message_id, p.data AS data
-          FROM part p JOIN message m ON m.id = p.message_id
-          WHERE m.session_id = ? ORDER BY p.rowid ASC
-        `).all(id)
-      : [];
-    const partsByMessage = buildPartsIndex(partRows);
+    const partsByMessage = buildPartsIndex(loadTextParts(db, id, withTurns));
 
     const rec = initSessionRecord(srow);
     const turns = [];

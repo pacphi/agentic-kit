@@ -1,5 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -10,7 +11,8 @@ import {
 } from '../../src/lib/usage-index.mjs';
 import {
   addUsage, blankSession, noteLatencySample, parseClaude,
-  LAT_BUCKET_EDGES, LEN_BUCKET_EDGES,
+  normalizePromptText, promptFingerprint,
+  LAT_BUCKET_EDGES, LEN_BUCKET_EDGES, MAX_PROMPT_FPS, MAX_TOKEN_HASHES,
 } from '../../src/lib/usage-parsers.mjs';
 import {
   aggregate, percentileFromBuckets, modelFamily,
@@ -1490,9 +1492,126 @@ test('parseClaude: a session whose only assistant entry is token-less records no
   assert.equal(rec.ctxLastTokens, null, 'honest-absent, not a measured zero');
 });
 
+// ── v14 prompt fingerprints (Prompts view spec §2.2) ────────────────────────
+
+test('normalizePromptText collapses the differences repetition analysis must ignore', () => {
+  assert.equal(normalizePromptText('Yes.'), 'yes');
+  assert.equal(normalizePromptText('  Do   the\n\tthing.  '), 'do the thing');
+  assert.equal(normalizePromptText('Ship it!!!'), 'ship it');
+  assert.equal(normalizePromptText('why?'), 'why');
+  assert.equal(normalizePromptText(''), '');
+  assert.equal(normalizePromptText(null), '', 'no input is empty text, never the string "null"');
+});
+
+test('promptFingerprint is deterministic across calls and normalization-equivalent variants', () => {
+  const a = promptFingerprint('Run the tests.');
+  const b = promptFingerprint('Run the tests.');
+  assert.deepEqual(a, b, 'the same input must fingerprint identically every time');
+
+  const variant = promptFingerprint('  run   the tests  ');
+  assert.equal(variant.h, a.h, 'case/whitespace/trailing-punctuation variants share one hash');
+  assert.deepEqual(variant.th, a.th);
+
+  assert.equal(promptFingerprint('Yes.').h, promptFingerprint('yes').h);
+  assert.notEqual(promptFingerprint('run the tests').h, promptFingerprint('run the build').h);
+});
+
+test('promptFingerprint shape: 16-hex text hash, token count, sorted unique 8-hex token hashes', () => {
+  const fp = promptFingerprint('Run the tests, run the build.');
+  assert.deepEqual(Object.keys(fp).sort(), ['h', 't', 'th']);
+  assert.match(fp.h, /^[0-9a-f]{16}$/);
+  assert.equal(fp.t, 6, 'token COUNT keeps repeats — "run" and "the" each occur twice');
+  assert.equal(fp.th.length, 4, 'the token-hash SET does not');
+  for (const h of fp.th) assert.match(h, /^[0-9a-f]{8}$/);
+  assert.deepEqual(fp.th, [...fp.th].sort(), 'sorted, so two prompts compare without re-sorting');
+
+  const empty = promptFingerprint('');
+  assert.equal(empty.t, 0);
+  assert.deepEqual(empty.th, []);
+});
+
+test('the token-hash set is a bounded bottom-k sketch, not an unbounded list', () => {
+  const words = Array.from({ length: 400 }, (_, i) => `token${i}`);
+  const fp = promptFingerprint(words.join(' '));
+  assert.equal(fp.t, 400, 'the token COUNT is never sketched — it is the honest length');
+  assert.equal(fp.th.length, MAX_TOKEN_HASHES);
+
+  // Bottom-k, not "the first 64 words": the kept hashes must be the 64
+  // smallest of the whole set, which is what makes the sample unbiased (and
+  // makes two sketches comparable) rather than an arbitrary prefix of the text.
+  const all = [...new Set(words.map((w) => createHash('sha256').update(w).digest('hex').slice(0, 8)))].sort();
+  assert.deepEqual(fp.th, all.slice(0, MAX_TOKEN_HASHES));
+
+  // Order of the text does not change the sketch — a set is a set.
+  assert.deepEqual(promptFingerprint([...words].reverse().join(' ')).th, fp.th);
+  // A prompt whose token set fits under the bound is stored complete.
+  assert.equal(promptFingerprint(words.slice(0, 10).join(' ')).th.length, 10);
+});
+
+test('parseClaude records one fingerprint per prompt-kind turn, tagged with its provenance', () => {
+  const T0 = '2026-08-20T10:00:00.000Z';
+  const at = (s) => new Date(Date.parse(T0) + s * 1000).toISOString();
+  const user = (t, text) => JSON.stringify({ type: 'user', timestamp: at(t), message: { role: 'user', content: text } });
+  const lines = [
+    user(0, 'why is the build failing on macos?'),
+    user(1, 'Another Claude session sent a message: <teammate-message teammate_id="coder">go</teammate-message>'),
+    user(2, 'Review this change for security vulnerabilities.\n\nChanged files:\n- src/a.mjs'),
+    user(3, '<command-name>/clear</command-name>\n<command-message>clear</command-message>'),
+    // Harness output and tool results are NOT prompt-kind turns, so they
+    // contribute no fingerprint at all — the gate the parser already applies.
+    user(4, '<task-notification> <task-id>x</task-id> </task-notification>'),
+    JSON.stringify({ type: 'user', timestamp: at(5), message: { role: 'user', content: [{ type: 'tool_result', content: 'out' }] } }),
+  ].join('\n');
+  const { session: rec } = parseClaude(lines, { id: 'sess-fp-claude' });
+  assert.deepEqual(rec.promptFPs.map((f) => f.p), ['human', 'agent', 'adapter', 'control']);
+  assert.equal(rec.promptFPOverflow, 0);
+  assert.equal(rec.promptFPs[0].t, 7, 'the human prompt tokenizes to its seven words');
+});
+
+test('a parsed session record carries no prompt TEXT — only fingerprints', () => {
+  const T0 = '2026-08-20T10:00:00.000Z';
+  const SECRET = 'zarquon-plinth-flumox';
+  const lines = [
+    // An ai-title so the record's own title is not the first prompt: the title
+    // field is a SEPARATE (masked, clipped) surface with its own contract, and
+    // this test is about the fingerprint layer never adding a second one.
+    JSON.stringify({ type: 'ai-title', aiTitle: 'A titled session' }),
+    JSON.stringify({ type: 'user', timestamp: T0, message: { role: 'user', content: `please handle the ${SECRET} case` } }),
+    JSON.stringify({ type: 'assistant', timestamp: T0, message: { role: 'assistant', model: 'claude-opus-5', usage: { input_tokens: 1, output_tokens: 1 }, content: [] } }),
+  ].join('\n');
+  const { session: rec } = parseClaude(lines, { id: 'sess-fp-privacy' });
+  const serialized = JSON.stringify(rec);
+  assert.equal(serialized.includes(SECRET), false, 'the raw prompt text must not appear anywhere on the record');
+  assert.equal(serialized.includes('plinth'), false, 'nor any fragment of it');
+  assert.equal(rec.promptFPs.length, 1);
+  assert.deepEqual(Object.keys(rec.promptFPs[0]).sort(), ['h', 'p', 't', 'th'],
+    'a fingerprint entry carries EXACTLY the four fields — no text field can be added by accident');
+});
+
+test('promptFPs are bounded per session, with the drop counted rather than silent', () => {
+  const T0 = Date.parse('2026-08-20T10:00:00.000Z');
+  const lines = [];
+  for (let i = 0; i < 2001; i++) {
+    lines.push(JSON.stringify({
+      type: 'user', timestamp: new Date(T0 + i * 1000).toISOString(),
+      message: { role: 'user', content: `prompt number ${i}` },
+    }));
+  }
+  const { session: rec } = parseClaude(lines.join('\n'), { id: 'sess-fp-cap' });
+  assert.equal(rec.prompts, 2001, 'the COUNT is unbounded — only the fingerprint list is capped');
+  assert.equal(rec.promptFPs.length, MAX_PROMPT_FPS);
+  assert.equal(rec.promptFPOverflow, 1);
+});
+
+test('blankSession v14 fingerprint fields default honest-empty', () => {
+  const rec = blankSession('s1', 'claude');
+  assert.deepEqual(rec.promptFPs, []);
+  assert.equal(rec.promptFPOverflow, 0);
+});
+
 // ── v11 index carry-through + lookback (Task 5) ─────────────────────────────
 
-test('cached session entries round-trip the v11 fields across a cache hit', async () => {
+test('cached session entries round-trip the v11 and v14 fields across a cache hit', async () => {
   _resetForTest();
   const sb = soloSandbox();
   const T0 = '2026-08-20T10:00:00.000Z';
@@ -1541,6 +1660,17 @@ test('cached session entries round-trip the v11 fields across a cache hit', asyn
     assert.equal(evidence.ctxLastTokens, 151000);           // input + cacheRead of last turn
     assert.equal(evidence.ctxWindow, null, 'ctxWindow is codex-only evidence');
     assert.equal(evidence.aborts, 0, 'aborts is codex-only evidence');
+    // v14: the fingerprint layer survives the JSON round trip intact — the
+    // token-hash ARRAY included, which is the field most likely to be lost or
+    // reordered by a serialization change.
+    assert.equal(evidence.promptFPs.length, 1);
+    assert.deepEqual(Object.keys(evidence.promptFPs[0]).sort(), ['h', 'p', 't', 'th']);
+    assert.deepEqual(evidence.promptFPs[0], { ...promptFingerprint('do it'), p: 'human' });
+    assert.equal(evidence.promptFPOverflow, 0);
+    // `title` is a separate, pre-existing surface (masked + clipped, and here
+    // derived from the first prompt), so the no-text claim is made about the
+    // fingerprint layer itself — the thing this schema bump adds.
+    assert.equal(JSON.stringify(evidence.promptFPs).includes('do it'), false);
 
     const blank = cache.entries[blankFile].session;
     assert.equal(blank.mode, null);
@@ -1551,6 +1681,9 @@ test('cached session entries round-trip the v11 fields across a cache hit', asyn
     assert.equal(blank.ctxWindow, null);
     assert.equal(blank.ctxLastTokens, null);
     assert.equal(blank.aborts, 0);
+    assert.deepEqual(blank.promptFPs, [{ ...promptFingerprint('hi'), p: 'human' }],
+      'a prompt with no reply still fingerprints — the layer keys on the TURN, not on a completed exchange');
+    assert.equal(blank.promptFPOverflow, 0);
   };
 
   await buildIndex(opts(sb));
