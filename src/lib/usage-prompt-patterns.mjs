@@ -95,6 +95,25 @@ const RARE_SHARE = 0.05;
 
 const isFingerprint = (f) => !!f && typeof f === 'object' && typeof f.h === 'string';
 
+/**
+ * Reject a `k` above the capacity the fingerprints were actually built at.
+ *
+ * This THROWS rather than clamping, because the failure it prevents is silent
+ * and total: at `k = 128` against sketches stored at 64, every sketch looks
+ * "under capacity", so every comparison takes the exact branch and treats a
+ * truncated sample as a complete token set. Nothing errors, no number looks
+ * wrong, and every similarity figure in the view is quietly computed from a
+ * false premise. Clamping would paper over a caller that has misunderstood the
+ * storage contract; the loud failure is the useful one.
+ *
+ * @param {number} k
+ */
+function assertCapacity(k) {
+  if (!Number.isFinite(k) || k < 1 || k > SKETCH_K) {
+    throw new RangeError(`k must be between 1 and the sketch capacity SKETCH_K (${SKETCH_K}); got ${k}`);
+  }
+}
+
 /** Normalize a stored `th` into a sorted, deduplicated array. The scan path
  *  already writes it that way; re-normalizing costs one pass and makes the
  *  estimator correct for any caller that mapped or filtered the array first. */
@@ -124,10 +143,12 @@ function prepare(fp) {
  * covering different slices of the hash range — a 100-token prompt's bottom-64
  * spans most of the range, a 1,000-token prompt's spans a tenth of it — so
  * their raw overlap systematically understates the true overlap. Measured over
- * 50 random pairs at k=64 with sizes differing 1x–6x, the naive reading's mean
- * absolute error is 0.10 against this estimator's 0.04, and its worst case
- * breaches 0.22 where this one peaks at 0.11. (On EQUAL-sized sets the two
- * agree, which is exactly why the mistake survives casual testing.)
+ * 50 random pairs at k=64 with the larger set 2x–6x the smaller, the naive
+ * reading's mean absolute error is 0.095 against this estimator's 0.045, and
+ * its worst case reaches 0.22 where this one peaks at 0.13. (On EQUAL-sized
+ * sets the two agree — which is exactly why the mistake survives casual
+ * testing, and why the pinned fixture excludes that case rather than diluting
+ * the contrast with it.)
  *
  * THE ESTIMATOR (k-minimum-values / bottom-k, the standard set-similarity
  * estimator for this sketch). Take `U`, the k smallest hashes of the two
@@ -155,10 +176,13 @@ function prepare(fp) {
  * @param {string[]} thA
  * @param {string[]} thB
  * @param {{ k?: number }} [opts] `k` is the sketch capacity the fingerprints
- *   were built at; it decides which sketches count as complete.
+ *   were built at; it decides which sketches count as complete. It may not
+ *   exceed SKETCH_K — see `assertCapacity` for why that throws.
  * @returns {number} 0..1; 0 when either side is empty.
+ * @throws {RangeError} if `k` exceeds the sketch capacity.
  */
 export function sketchJaccard(thA, thB, { k = SKETCH_K } = {}) {
+  assertCapacity(k);
   return jaccardOf({ arr: toSketch(thA) }, { arr: toSketch(thB) }, k);
 }
 
@@ -254,9 +278,20 @@ const cmp = (a, b) => (a < b ? -1 : a > b ? 1 : 0);
  *
  * Before either bucket runs, a prompt sharing NO token with any other prompt is
  * dropped outright: its Jaccard with everything is 0, so there is nothing to
- * find. That is an exact filter, and it is what stops a crowd of same-length
- * prompts with nothing in common from turning the length band back into the
- * quadratic loop it exists to avoid.
+ * find. That is what stops a crowd of same-length prompts with nothing in
+ * common from turning the length band back into the quadratic loop it exists to
+ * avoid.
+ *
+ * THE PRECISE CLAIM: that filter is exact with respect to the function this
+ * module computes — `sketchJaccard` scores a hit only when a hash is in BOTH
+ * sketches, so a pair with disjoint sketches scores exactly 0 and can only be
+ * dropped from a set it was never going to enter. Against TRUE Jaccard the loss
+ * is not literally zero, but it is bounded by the sketch's own resolution: for a
+ * pair with true J ≥ 0.8 and a union above the capacity, disjoint sketches
+ * require that none of the union's 64 bottom-k draws lands in an intersection
+ * covering ≥80% of that union — probability ≤ 0.2^64, or about 4e-45. "Exact
+ * with respect to the estimator" is the claim that holds without qualification;
+ * "exact" full stop overstates it by that margin.
  *
  * A cheap arithmetic gate then drops pairs that cannot reach the threshold:
  * Jaccard is bounded above by the ratio of the two set sizes. Sketch sizes are
@@ -369,6 +404,7 @@ function sizeGate(a, b, threshold) {
  *   an evidence hash built from it does not drift when the filesystem walk does.
  */
 export function nearDupClusters(fps, { jaccard = 0.8, k = SKETCH_K, rareShare = RARE_SHARE, minSize = 2 } = {}) {
+  assertCapacity(k);
   const items = (Array.isArray(fps) ? fps : []).filter(isFingerprint).map(prepare);
   if (items.length < minSize) return [];
 
@@ -491,7 +527,18 @@ export function crossSessionClusters(clusters, { minSessions = 3, minDays = 2 } 
  * finding is "the same thing asked twice in one conversation", and without a
  * session there is no conversation to have asked it in. Collecting the
  * undecorated turns under a shared `undefined` key would invent one — and
- * report re-asks in a session that does not exist.
+ * report re-asks in a session that does not exist. An EMPTY-STRING id is
+ * treated the same way, for the same reason: a parser that could not attribute
+ * a turn has told us it does not know, and `''` is not an answer.
+ *
+ * THE SIZE GATE IS NOT OPTIONAL HERE. Every pair is filtered by `sizeGate`
+ * before it is scored, exactly as the clustering path does. Without it this
+ * function is exposed to the small-`kEff` pathology in the one case the
+ * both-complete branch cannot cover — one sketch complete, one truncated. A
+ * 1-token tap against a 400-token prompt gives `kEff = 1`, a single Bernoulli
+ * draw, which returns 1.0 whenever the tap's token happens to be the long
+ * prompt's minimum hash: a fabricated re-ask pair, rendered as "identical".
+ * The gate drops it because a ratio of 1/64 cannot reach any usable threshold.
  *
  * @param {Array<PromptFingerprint>} sessionOrderedFps
  * @param {{ window?: number, jaccard?: number, k?: number }} [opts]
@@ -500,9 +547,10 @@ export function crossSessionClusters(clusters, { minSessions = 3, minDays = 2 } 
  *   gaps: Record<number, number>, sessions: number }}
  */
 export function reAskPairs(sessionOrderedFps, { window = 6, jaccard = 0.8, k = SKETCH_K } = {}) {
+  assertCapacity(k);
   const bySession = new Map();
   for (const fp of Array.isArray(sessionOrderedFps) ? sessionOrderedFps : []) {
-    if (isFingerprint(fp) && typeof fp.sessionId === 'string') push(bySession, fp.sessionId, prepare(fp));
+    if (isFingerprint(fp) && fp.sessionId) push(bySession, fp.sessionId, prepare(fp));
   }
   const pairs = [];
   const gaps = {};
@@ -510,6 +558,7 @@ export function reAskPairs(sessionOrderedFps, { window = 6, jaccard = 0.8, k = S
   for (const [sessionId, turns] of bySession) {
     for (let i = 0; i < turns.length; i++) {
       for (let j = i + 1; j < turns.length && j - i <= window; j++) {
+        if (!sizeGate(turns[i], turns[j], jaccard)) continue;
         const score = jaccardOf(turns[i], turns[j], k);
         if (score < jaccard) continue;
         const gap = j - i;

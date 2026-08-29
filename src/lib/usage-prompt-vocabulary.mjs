@@ -38,13 +38,39 @@
 //
 // ── AND WHY THEY ARE PROVISIONAL ────────────────────────────────────────────
 //
-// A shape predicate is a heuristic. "Instruction, 5-15 tokens, 8+ sessions" is
-// what the release ritual looked like in one corpus; it is not what a release
-// ritual IS. Each seed records the measured cluster it was cut from in its
-// `basis`, and every seed match reports `source: 'seed'` so the view can render
-// it as the provisional reading it is. Layer-3 enrichment overwrites any of
-// them with a real label the moment it produces one — that is the point of the
-// store outranking this list.
+// A shape predicate is a heuristic. "A classified request, 5-15 tokens, 8+
+// sessions" is what the release ritual looked like in one corpus; it is not
+// what a release ritual IS. Each seed records the measured cluster it was cut
+// from in its `basis`, and every seed match reports `source: 'seed'` so the
+// view can render it as the provisional reading it is. Layer-3 enrichment
+// overwrites any of them with a real label the moment it produces one — that is
+// the point of the store outranking this list.
+//
+// ── THE PRECISION-FIRST RULE (governs every seed here) ──────────────────────
+//
+// A SEED MUST BE PRECISE OR SILENT. A wrong curated name on a top row of the
+// panel is worse than no name at all: `characterize` states only what the
+// numbers say and can embarrass nobody, whereas "Commit-and-push instruction"
+// printed over a 24-prompt cluster of the word "Continue" is the analysis
+// asserting something false, on the row the operator is most likely to read.
+// Enrichment supplies real labels later; a gap costs a generic descriptor for
+// one release, a mislabel costs trust in the panel.
+//
+// So a predicate is admitted only if it can be shown NOT to fire on any cluster
+// it would misname. Concretely: every predicate below is probed against the
+// measured cluster tables in the 2026-08-29 research (findings §4.1 exact
+// repeats, §4.2 near-duplicate clusters, §2.2 short prompts), with each
+// cluster's question/instruction class derived from the research's own
+// published rule (§2: ends with `?` → question; opens with a wh-word →
+// question; opens with an auxiliary AND contains `?` → question; opens with an
+// auxiliary, an imperative verb, "let's" or "please" → instruction; otherwise a
+// statement, which carries no `q` flag and so counts toward neither). The probe
+// is pinned as a test — see MEASURED_CLUSTERS in the test file, which asserts
+// the label every one of those clusters resolves to. When a predicate and the
+// evidence disagree, the predicate loses.
+//
+// Two predicates were narrowed on exactly that evidence, and one widened; each
+// says so in its `basis`.
 
 /**
  * Token-count bands. `tap` is the spec's own supervision-tap threshold (§3.1,
@@ -133,19 +159,30 @@ export const SEED_PATTERNS = [
       'Findings §5.2: `Help me release and deploy the next semantic version of agentic-kit?` — 13 '
       + 'prompts, 13 sessions, 9 days, median 9 tokens; the wider family reaches 23 prompts across 22 '
       + 'sessions and 14 days in ELEVEN distinct phrasings. Eleven phrasings for one procedure is the '
-      + 'tell that there is no skill holding it. Cut to that cluster: an instruction, short enough to '
-      + 'be a request rather than a spec, recurring across most of a month.',
-    match: (s) => s.cls === 'instruction' && s.band === 'short' && s.sessions >= 8,
+      + 'tell that there is no skill holding it. WIDENED on the audit: this predicate originally '
+      + 'required an instruction class and could therefore never match its own evidence — the '
+      + 'research rule classifies the exemplar as a QUESTION, because it ends in a question mark, and '
+      + 'the family is spelled both ways, so the cluster can land on question, instruction or mixed '
+      + 'depending on which phrasings it absorbs. It now asks only that the cluster was classified at '
+      + 'all, which keeps statements and undecorated clusters out. On the measured tables the band '
+      + 'plus an 8-session span is enough on its own: exactly one cluster qualifies, and it is this '
+      + 'one.',
+    match: (s) => s.cls !== 'unknown' && s.band === 'short' && s.sessions >= 8,
   },
   {
     id: 'commit-and-push',
     name: 'Commit-and-push instruction',
     basis:
-      'Findings §5.2: `Commit and push.` — 13 prompts, 11 sessions, 9 days, median 3 tokens, plus '
-      + '`Push to remote` at 4/4/4; the commit-or-push family is 24 prompts over 21 sessions, 15 days '
-      + 'and 6 projects in 6 phrasings. Distinguished from the release ritual by band alone (tap vs '
-      + 'short), and from a one-afternoon habit by the day span.',
-    match: (s) => s.cls === 'instruction' && s.band === 'tap' && s.sessions >= 4 && s.days >= 3,
+      'Findings §5.2: `Commit and push.` — 13 prompts, 11 sessions, 9 days, median 3 tokens; the '
+      + 'commit-or-push family is 24 prompts over 21 sessions, 15 days and 6 projects in 6 phrasings. '
+      + 'NARROWED on the audit: at `tap band + 4 sessions + 3 days` this also caught `Continue.` '
+      + '(24 prompts, 16 sessions, 10 days — an imperative verb, so the research rule calls it an '
+      + 'instruction) and `Let\'s go` (4 sessions, 3 days — exactly at both old thresholds), which '
+      + 'would have printed a commit instruction over the corpus\'s second-largest cluster. The '
+      + 'median-token floor separates a real two-word command from a bare acknowledgement, and the '
+      + '6-session floor clears the at-threshold case. The band supplies the upper bound the floor '
+      + 'implies. Cost, accepted: `Push to remote` (4 sessions) is released to the generic descriptor.',
+    match: (s) => s.cls === 'instruction' && s.band === 'tap' && s.tokens >= 3 && s.sessions >= 6,
   },
   {
     id: 'progress-check-in',
@@ -154,8 +191,11 @@ export const SEED_PATTERNS = [
       'Findings §5.2: `How are we doing? Progress?` — 9 prompts, 9 sessions, 8 days, median 4 tokens; '
       + '17 in the wider family across 14 sessions and 11 days. The question-side twin of the '
       + 'commit-and-push shape, and a reporting gap rather than a knowledge gap: the agent has the '
-      + 'answer and is not offering it.',
-    match: (s) => s.cls === 'question' && s.band === 'tap' && s.sessions >= 4 && s.days >= 3,
+      + 'answer and is not offering it. NARROWED on the audit to the same 6-session floor as its '
+      + 'twin: no measured cluster misfired at 4, but the predicate reads as "any recurring short '
+      + 'question", and `Try again?` and `Did we push?` sit two sessions under the old floor with '
+      + 'nothing but their span keeping them out. The measured cluster has 9.',
+    match: (s) => s.cls === 'question' && s.band === 'tap' && s.sessions >= 6,
   },
 ];
 

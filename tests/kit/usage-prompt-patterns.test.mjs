@@ -166,9 +166,13 @@ test('sketchJaccard estimates within 0.2 of exact Jaccard on truncated sketches'
   const PAIRS = 50;
   for (let i = 0; i < PAIRS; i++) {
     // UNEQUAL sizes on purpose: prompts differ in length, and that is exactly
-    // where the naive reading of the sketches falls apart.
+    // where the naive reading of the sketches falls apart. The multiplier starts
+    // at 2 — at `1 + rnd()*6` roughly a seventh of the pairs came out equal, and
+    // equal-sized pairs are the case where the naive reading happens to agree,
+    // so they dilute the very contrast this test exists to measure.
     const sizeA = 80 + Math.floor(rnd() * 200);
-    const sizeB = sizeA * (1 + Math.floor(rnd() * 6));
+    const sizeB = sizeA * (2 + Math.floor(rnd() * 5));
+    assert.ok(sizeB >= sizeA * 2, 'the fixture must actually build unequal-sized sets');
     const target = 0.2 + rnd() * 0.7;
     const shared = Math.min(sizeA, Math.round((target * (sizeA + sizeB)) / (1 + target)));
     const both = new Set();
@@ -543,6 +547,28 @@ test('reAskPairs on an empty corpus returns empty, not NaN', () => {
   assert.deepEqual(reAskPairs(undefined), { pairs: [], gaps: {}, sessions: 0 });
 });
 
+test('reAskPairs gates on sketch size before scoring, so a tap cannot re-ask a paragraph', () => {
+  // The pathology the both-complete branch cannot cover: ONE sketch complete,
+  // one truncated. A 1-token tap against a 400-token prompt gives kEff = 1 — a
+  // single Bernoulli draw — which returns 1.0 whenever the tap's token is the
+  // long prompt's minimum hash. Here it is, by construction.
+  const rnd = mulberry32(31);
+  const shared = '00000000';
+  const long = new Set([shared]);
+  while (long.size < 400) long.add(hex8(rnd).replace(/^0/, '8'));   // every other token sorts above
+  const tap = fp({ h: 'tap', t: 1, th: [shared], sessionId: 's1' });
+  const para = fp({ h: 'para', t: 400, th: sketchOf(long), sessionId: 's1' });
+  assert.equal(para.th.length, SKETCH_K, 'the long prompt must be truncated for this to bite');
+  assert.equal(para.th[0], shared, 'the shared token must be the long prompt\'s minimum hash');
+
+  // The estimator itself is unchanged and still reports 1 — it is answering a
+  // question it has one sample for. The GATE is what keeps that out of a finding.
+  assert.equal(sketchJaccard(tap.th, para.th), 1);
+  assert.deepEqual(reAskPairs([tap, para]), { pairs: [], gaps: {}, sessions: 0 });
+  // The clustering path was never exposed; it is gated the same way.
+  assert.deepEqual(nearDupClusters([tap, para]), []);
+});
+
 test('reAskPairs skips turns with no session rather than inventing one', () => {
   // Grouping undecorated turns under a shared `undefined` key would report
   // re-asks inside a session that does not exist — the one way this function
@@ -560,6 +586,36 @@ test('reAskPairs skips turns with no session rather than inventing one', () => {
   ]);
   assert.equal(mixed.pairs.length, 1);
   assert.equal(mixed.pairs[0].gap, 1);
+});
+
+test('reAskPairs treats an empty-string session id as undecorated, not as a session', () => {
+  // A parser that could not attribute a turn has told us it does not know. `''`
+  // is not an answer, and grouping on it reinstates the pseudo-session bug in
+  // miniature — turns from unrelated conversations re-asking each other.
+  const th = ['t1', 't2', 't3', 't4', 't5'];
+  assert.deepEqual(
+    reAskPairs([{ h: 'a', t: 5, th, sessionId: '' }, { h: 'b', t: 5, th, sessionId: '' }]),
+    { pairs: [], gaps: {}, sessions: 0 },
+  );
+});
+
+test('a k above the sketch capacity throws rather than silently disabling the estimator', () => {
+  // At k=128 against sketches stored at 64 every sketch looks "under capacity",
+  // so every comparison takes the exact branch and reads a truncated sample as a
+  // complete token set. Nothing would error and every figure would be wrong.
+  const th = ['a', 'b', 'c'];
+  const fps = [fp({ h: 'a', th }), fp({ h: 'b', th })];
+  for (const bad of [SKETCH_K + 1, 128, 0, -1, NaN, null]) {
+    assert.throws(() => sketchJaccard(th, th, { k: bad }), RangeError, `k=${bad}`);
+    assert.throws(() => nearDupClusters(fps, { k: bad }), RangeError, `k=${bad}`);
+    assert.throws(() => reAskPairs(fps, { k: bad }), RangeError, `k=${bad}`);
+  }
+  // The capacity itself, and anything under it, is fine.
+  assert.equal(sketchJaccard(th, th, { k: SKETCH_K }), 1);
+  assert.equal(sketchJaccard(th, th, { k: 1 }), 1);
+  // An explicit `undefined` is "not supplied", not a bad value — the parameter
+  // default takes it, which is the language's rule and not worth fighting.
+  assert.equal(sketchJaccard(th, th, { k: undefined }), 1);
 });
 
 // ── tapStats ────────────────────────────────────────────────────────────────
@@ -663,26 +719,43 @@ test('seed: Persona scaffolding needs no class, because the flag IS the evidence
   assert.equal(labelFor(hit).name, 'Persona scaffolding');
 });
 
-test('seed: Release ritual needs an instruction class, a short band and a wide span', () => {
+test('seed: Release ritual needs a classified cluster, a short band and a wide span', () => {
   const hit = cluster({
-    class: 'instruction', tokens: { min: 8, median: 9, max: 13 },
-    sessions: spanning(13, 's'), days: spanning(9, 'd'), size: 13, instructions: 13, qKnown: 13,
+    class: 'question', tokens: { min: 8, median: 9, max: 13 },
+    sessions: spanning(13, 's'), days: spanning(9, 'd'), size: 13, questions: 13, instructions: 0, qKnown: 13,
   });
+  // The class is `question` on purpose: the research rule reads the measured
+  // exemplar ("…of agentic-kit?") as a question because it ends in a question
+  // mark, and the family is spelled both ways. A predicate that demanded
+  // `instruction` could never match its own evidence.
   assert.equal(labelFor(hit).name, 'Release ritual');
+  assert.equal(labelFor({ ...hit, class: 'instruction' }).name, 'Release ritual');
+  assert.equal(labelFor({ ...hit, class: 'mixed' }).name, 'Release ritual');
   // Same shape, one session: a procedure typed once is not a ritual.
   assert.notEqual(labelFor({ ...hit, sessions: spanning(1, 's') }).name, 'Release ritual');
-  // Same span, question class: that is someone asking about a release.
-  assert.notEqual(labelFor({ ...hit, class: 'question' }).name, 'Release ritual');
+  // Unclassified is still out — that is the floor the widening kept.
+  assert.notEqual(labelFor({ ...hit, class: 'unknown' }).name, 'Release ritual');
+  // A tap-band recurring request is not a release ritual.
+  assert.notEqual(labelFor({ ...hit, tokens: { min: 1, median: 2, max: 4 } }).name, 'Release ritual');
 });
 
-test('seed: Commit-and-push fires on a tap-length instruction spanning days', () => {
+test('seed: Commit-and-push refuses bare acknowledgements and at-threshold spans', () => {
   const hit = cluster({
     class: 'instruction', tokens: { min: 3, median: 3, max: 4 },
     sessions: spanning(11, 's'), days: spanning(9, 'd'), size: 13, instructions: 13, qKnown: 13,
   });
   assert.equal(labelFor(hit).name, 'Commit-and-push instruction');
-  // One day is a session habit, not standing procedure.
-  assert.notEqual(labelFor({ ...hit, days: spanning(1, 'd') }).name, 'Commit-and-push instruction');
+  // `Continue.` — an imperative verb, so the research rule calls it an
+  // instruction, and it spans MORE sessions than the real cluster. Only the
+  // median-token floor keeps a commit label off the corpus's second-largest row.
+  const acknowledgement = { ...hit, tokens: { min: 1, median: 1, max: 1 }, sessions: spanning(16, 's'), days: spanning(10, 'd') };
+  assert.notEqual(labelFor(acknowledgement).name, 'Commit-and-push instruction');
+  // `Let's go` — "let's" also reads as an instruction, and it sat exactly at
+  // both of the old thresholds.
+  const atThreshold = { ...hit, sessions: spanning(4, 's'), days: spanning(3, 'd') };
+  assert.notEqual(labelFor(atThreshold).name, 'Commit-and-push instruction');
+  // A question of the same shape is the progress twin's business, not this one's.
+  assert.notEqual(labelFor({ ...hit, class: 'question' }).name, 'Commit-and-push instruction');
 });
 
 test('seed: Progress check-in is the question-side twin of the same shape', () => {
@@ -693,6 +766,9 @@ test('seed: Progress check-in is the question-side twin of the same shape', () =
   assert.equal(labelFor(hit).name, 'Progress check-in');
   // The band is what separates it from a long question.
   assert.notEqual(labelFor({ ...hit, tokens: { min: 40, median: 64, max: 90 } }).name, 'Progress check-in');
+  // `Try again?` and `Did we push?` are two-session questions of exactly this
+  // shape; the span floor is the only thing between them and this name.
+  assert.notEqual(labelFor({ ...hit, sessions: spanning(2, 's'), days: spanning(2, 'd') }).name, 'Progress check-in');
 });
 
 test('seeds never fire on an unclassified cluster (absent q is not a class)', () => {
@@ -775,4 +851,125 @@ test('LABEL_SOURCES is the closed vocabulary labelFor can return', () => {
   seen.add(labelFor(c, { k0: { name: 'x', source: 'enriched' } }).source);
   for (const s of seen) assert.ok(LABEL_SOURCES.includes(s), `${s} is outside the vocabulary`);
   assert.equal(seen.size, 4);
+});
+
+// ── the precision-first audit ───────────────────────────────────────────────
+//
+// The seed registry's governing rule is "precise or silent": a wrong curated
+// name on a top row is worse than a generic descriptor, because it is the
+// analysis asserting something false on the row most likely to be read. This
+// table is the mechanized form of that promise — every cluster the 2026-08-29
+// research actually measured, with the label it must resolve to.
+//
+// Rows are transcribed from findings §4.2 (near-duplicate clusters, top 25 —
+// the shape the seeds actually consume), §4.1 (exact-repeat groups, whose spans
+// are narrower than the clusters that absorb them) and §2.2 (short prompts,
+// scored as if each stood alone, which is the worst case for a tap-band seed).
+//
+// `cls` is derived from the research's OWN published rule (§2): ends with `?` →
+// question; opens with a wh-word → question; opens with an auxiliary AND
+// contains `?` → question; opens with an auxiliary, an imperative verb, "let's"
+// or "please" → instruction; otherwise a statement — which carries no `q` flag,
+// so a cluster of statements is `unknown`, never a class.
+//
+// `expect: null` means the honest generic descriptor. That is a PASS, not a
+// gap: most of this corpus has no curated name and should not be given one.
+
+/** [source, exemplar, { n, sessions, days, hosts, median, cls, personas }, expected] */
+const MEASURED_CLUSTERS = [
+  // findings §4.2 — near-duplicate clusters, top 25
+  ['§4.2', 'Yes.', { n: 31, sessions: 13, days: 11, hosts: 2, median: 1, cls: 'unknown' }, null],
+  ['§4.2', 'Continue.', { n: 24, sessions: 16, days: 10, hosts: 2, median: 1, cls: 'instruction' }, null],
+  ['§4.2', 'Commit and push.', { n: 13, sessions: 11, days: 9, hosts: 2, median: 3, cls: 'instruction' }, 'Commit-and-push instruction'],
+  ['§4.2', 'Help me release and deploy the next semantic version of agentic-kit?', { n: 13, sessions: 13, days: 9, hosts: 2, median: 9, cls: 'question' }, 'Release ritual'],
+  ['§4.2', 'How are we doing? Progress?', { n: 9, sessions: 9, days: 8, hosts: 2, median: 4, cls: 'question' }, 'Progress check-in'],
+  ['§4.2', 'y', { n: 9, sessions: 3, days: 2, hosts: 2, median: 1, cls: 'unknown' }, null],
+  ['§4.2', '1', { n: 6, sessions: 3, days: 3, hosts: 2, median: 1, cls: 'unknown' }, null],
+  ['§4.2', "One thing I feel that's missing is the design…", { n: 6, sessions: 2, days: 1, hosts: 2, median: 45, cls: 'unknown' }, null],
+  ['§4.2', 'Commit our new updates/additions/removals. Push to remote.', { n: 5, sessions: 1, days: 1, hosts: 1, median: 7, cls: 'instruction' }, null],
+  ['§4.2', '/compact', { n: 5, sessions: 5, days: 3, hosts: 1, median: 1, cls: 'unknown' }, null],
+  ['§4.2', "Help me release the next semantic version. See MAINTAINER.md's…", { n: 5, sessions: 4, days: 3, hosts: 2, median: 13, cls: 'instruction' }, null],
+  ['§4.2', 'C', { n: 5, sessions: 3, days: 2, hosts: 1, median: 1, cls: 'unknown' }, null],
+  ['§4.2', 'B', { n: 5, sessions: 1, days: 1, hosts: 1, median: 1, cls: 'unknown' }, null],
+  ['§4.2', 'Push to remote', { n: 4, sessions: 4, days: 4, hosts: 1, median: 3, cls: 'instruction' }, null],
+  ['§4.2', "Let's go", { n: 4, sessions: 4, days: 3, hosts: 1, median: 3, cls: 'instruction' }, null],
+  ['§4.2', 'I would like you to scan the ~/Downloads directory…', { n: 3, sessions: 3, days: 2, hosts: 2, median: 64, cls: 'unknown' }, null],
+  ['§4.2', 'Read no files and run no commands. Reply with exactly: SERVER_OFF_OK', { n: 3, sessions: 3, days: 1, hosts: 1, median: 11, cls: 'instruction' }, null],
+  ['§4.2', 'If you are able use the github api to update the description…', { n: 2, sessions: 2, days: 1, hosts: 1, median: 24, cls: 'unknown' }, null],
+  ['§4.2', 'Try again?', { n: 2, sessions: 2, days: 2, hosts: 2, median: 2, cls: 'question' }, null],
+  ['§4.2', "Let's do that now.", { n: 2, sessions: 2, days: 2, hosts: 2, median: 5, cls: 'instruction' }, null],
+  ['§4.2', '[Image #1] I want to build a homework tracker…', { n: 2, sessions: 2, days: 2, hosts: 2, median: 49, cls: 'unknown' }, null],
+  ['§4.2', "I love how this is coming along. We're nearly there. But…", { n: 2, sessions: 2, days: 2, hosts: 2, median: 120, cls: 'unknown' }, null],
+  ['§4.2', "keep monitoring, let me know when it's done", { n: 2, sessions: 1, days: 1, hosts: 1, median: 9, cls: 'instruction' }, null],
+  ['§4.2', 'Fix the CI? <actions run URL>', { n: 2, sessions: 2, days: 2, hosts: 2, median: 5, cls: 'instruction' }, null],
+  ['§4.2', 'Did we push? Still failing.', { n: 2, sessions: 2, days: 2, hosts: 2, median: 4, cls: 'question' }, null],
+
+  // findings §5.3 — the persona family; only 5 of the 46 cluster at J≥0.6
+  ['§5.3', 'You are a PROSECUTOR in an adversarial code review court…', { n: 5, sessions: 5, days: 4, hosts: 1, median: 530, cls: 'unknown', personas: 5 }, 'Persona scaffolding'],
+
+  // findings §4.1 — exact-repeat groups, whose spans are NARROWER than the
+  // clusters absorbing them; a seed must not fire on the narrower shape either.
+  ['§4.1', 'help me release and deploy the next semantic version', { n: 5, sessions: 5, days: 5, hosts: 2, median: 9, cls: 'instruction' }, null],
+  ['§4.1', 'help me release and deploy the next semantic release', { n: 4, sessions: 4, days: 2, hosts: 2, median: 9, cls: 'instruction' }, null],
+  ['§4.1', 'commit our new updates/additions/removals. push to remote', { n: 5, sessions: 1, days: 1, hosts: 1, median: 7, cls: 'instruction' }, null],
+
+  // findings §2.2 — short prompts, scored standalone (worst case for tap seeds)
+  ['§2.2', 'how are we doing', { n: 8, sessions: 8, days: 7, hosts: 2, median: 4, cls: 'question' }, 'Progress check-in'],
+  ['§2.2', 'commit this and push', { n: 2, sessions: 2, days: 2, hosts: 2, median: 4, cls: 'instruction' }, null],
+  ['§2.2', 'push it', { n: 2, sessions: 2, days: 2, hosts: 1, median: 2, cls: 'instruction' }, null],
+  ['§2.2', 'try to push', { n: 2, sessions: 2, days: 1, hosts: 1, median: 3, cls: 'instruction' }, null],
+  ['§2.2', 'reply ok', { n: 2, sessions: 2, days: 2, hosts: 2, median: 2, cls: 'instruction' }, null],
+  ['§2.2', 'revert', { n: 2, sessions: 2, days: 2, hosts: 2, median: 1, cls: 'instruction' }, null],
+  ['§2.2', 'reply with only: ok', { n: 2, sessions: 2, days: 1, hosts: 2, median: 4, cls: 'instruction' }, null],
+  ['§2.2', 'yes, go ahead', { n: 2, sessions: 2, days: 2, hosts: 1, median: 3, cls: 'unknown' }, null],
+  ['§2.2', 'approved', { n: 2, sessions: 2, days: 1, hosts: 1, median: 1, cls: 'unknown' }, null],
+  ['§2.2', 'subagent-driven', { n: 2, sessions: 2, days: 2, hosts: 2, median: 1, cls: 'unknown' }, null],
+];
+
+/** Build the cluster a measured row describes. `cls` drives the q counts so the
+ *  shape is internally consistent with what `nearDupClusters` would emit. */
+function measured({ n, sessions, days, hosts, median, cls, personas = 0 }) {
+  const q = cls === 'question' ? n : 0;
+  const i = cls === 'instruction' ? n : 0;
+  return {
+    key: 'measured', size: n, hashes: ['measured'],
+    sessions: spanning(sessions, 's'), days: spanning(days, 'd'), hosts: spanning(hosts, 'host'),
+    tokens: { min: median, median, max: median },
+    questions: q, instructions: i, qKnown: q + i, personas,
+    class: cls,
+  };
+}
+
+test('precision-first: no seed mislabels any cluster the research measured', () => {
+  const misses = [];
+  for (const [source, exemplar, shape, expected] of MEASURED_CLUSTERS) {
+    const label = labelFor(measured(shape));
+    const got = label.source === 'seed' ? label.name : null;
+    if (got !== expected) misses.push(`${source} "${exemplar}" → ${got ?? 'generic'} (expected ${expected ?? 'generic'})`);
+  }
+  assert.deepEqual(misses, [], `seed audit failures:\n  ${misses.join('\n  ')}`);
+});
+
+test('precision-first: the audit is not vacuous — every seed is exercised by it', () => {
+  // A table where nothing matches would pass the audit trivially. Each seed must
+  // claim at least one measured cluster, and every named row must come from a
+  // seed rather than from the store or the fallback.
+  const claimed = new Set();
+  for (const [, , shape, expected] of MEASURED_CLUSTERS) {
+    const label = labelFor(measured(shape));
+    if (expected === null) continue;
+    assert.equal(label.source, 'seed');
+    claimed.add(label.seed);
+  }
+  assert.deepEqual([...claimed].sort(), ['commit-and-push', 'persona-scaffolding', 'progress-check-in', 'release-ritual']);
+  assert.equal(claimed.size, SEED_PATTERNS.length, 'every seed must be exercised by the audit table');
+});
+
+test('precision-first: unnamed measured clusters get a descriptor, not silence', () => {
+  // "Silent" means no curated NAME, not no output — the panel still has a row to
+  // render, and it says only what the counts support.
+  const [, , shape] = MEASURED_CLUSTERS.find(([, ex]) => ex === 'Continue.');
+  const label = labelFor(measured(shape));
+  assert.equal(label.source, 'characterized');
+  assert.equal(label.name, 'Recurring 1-token instruction · 16 sessions · both hosts');
 });
