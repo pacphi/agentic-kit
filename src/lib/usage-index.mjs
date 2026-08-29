@@ -95,8 +95,14 @@ export { MAX_TURN_CHARS, mergeIntervals, maskSecrets, normalizeSessionIdentity, 
  *       `ctxLastTokens` (model context-window detail), and `aborts`
  *       (codex's explicit user-abort count). A v10-cached record carries
  *       none of these, so every session must be re-derived or the new
- *       fields silently read as undefined. */
-export const SCHEMA_VERSION = 11;
+ *       fields silently read as undefined.
+ *  v12: Codex writes `sandbox_policy` as an object keyed `.type`, so v11
+ *       records persisted `modeRaw: "never/[object Object]"` and a null
+ *       `mode` for every Codex session — the taxonomy's plan/auto-edit/
+ *       unrestricted arms could not fire at all. The parser now extracts
+ *       `.type`, so every Codex record must be re-derived rather than left
+ *       carrying the failed stringification and its missing posture. */
+export const SCHEMA_VERSION = 12;
 
 const DAY_MS = 86_400_000;
 // One day of slack past dashboard-server.mjs's 365-day clampDays ceiling —

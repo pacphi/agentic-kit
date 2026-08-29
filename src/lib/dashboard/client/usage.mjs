@@ -1227,18 +1227,6 @@ import { renderUsage } from './usage-orchestrators.mjs';
   function sessionP50(sx){
     return Array.isArray(sx.latHist)?bucketPercentile(sx.latHist,LAT_EDGES,0.5):null;
   }
-  // A raw spelling carrying "[object Object]" is not a spelling — it is a
-  // failed toString, and printing it would put this dashboard's own
-  // rendering-artifact sentinel inside a tooltip. Rejected as not-recorded,
-  // which is what a stringification failure actually leaves behind. Observed
-  // on every Codex row in a live window: usage-modes.mjs joins Codex's
-  // sandboxPolicy into the raw string and that field is an OBJECT in real
-  // rollouts, so the value never was a spelling. Fixing the join is upstream's
-  // to make; refusing to render the wreckage is this file's.
-  function rawSpelling(v){
-    var s=reportedIdentity(v);
-    return (s&&s.indexOf("[object ")<0)?s:null;
-  }
   // The posture the transcript recorded, and NOTHING when it recorded none: an
   // unobserved or unmapped raw value is not a posture, and a badge that guessed
   // one would read exactly like an observed one. `modeRaw` is the host's own
@@ -1248,7 +1236,7 @@ import { renderUsage } from './usage-orchestrators.mjs';
   function modeBadge(sx){
     var mode=reportedIdentity(sx.mode);
     if(!mode)return "";
-    var raw=rawSpelling(sx.modeRaw);
+    var raw=reportedIdentity(sx.modeRaw);
     return '<span class="s-chip s-mode" data-mode="'+esc(mode)+'" title="'
       +esc("permission posture: "+mode
         +(raw?" · recorded by the host as \""+raw+"\"":" · the host's own spelling was not recorded"))
@@ -1308,7 +1296,7 @@ import { renderUsage } from './usage-orchestrators.mjs';
     // never-omit-a-line rule: a fact that was measured and found absent reads
     // "Not recorded"/"—", not silence, which would teach the reader the field
     // does not exist (ADR-0009 §5).
-    var modeRaw=rawSpelling(sx.modeRaw),modeName=reportedIdentity(sx.mode);
+    var modeRaw=reportedIdentity(sx.modeRaw),modeName=reportedIdentity(sx.mode);
     var posture=modeName
       ? esc(modeName)+" <span class='sd-conf'>("
         +esc(modeRaw?"recorded by the host as \""+modeRaw+"\"":"host spelling not recorded")+")</span>"

@@ -548,17 +548,19 @@ test('the fields the chips read are actually projected onto the session row', ()
   assert.equal(row.ctxWindow, 200_000, 'the ctx chip has a denominator');
   assert.equal(row.ctxLastTokens, 151_000, 'the ctx chip has a numerator');
   // …and the client reads exactly those names.
-  assert.match(JS, /rawSpelling\(sx\.modeRaw\)/);
+  assert.match(JS, /reportedIdentity\(sx\.modeRaw\)/);
   assert.match(JS, /Number\(sx\.ctxLastTokens\),win=Number\(sx\.ctxWindow\)/);
 });
 
-test('a raw spelling that is a failed toString is refused, not printed into a tooltip', () => {
-  // Live data: every Codex row carries modeRaw "never/[object Object]" —
-  // usage-modes.mjs joins Codex's sandboxPolicy into the string and that field
-  // is an object. Printing it would put the dashboard's own rendering-artifact
-  // sentinel inside a tooltip, so it is treated as not-recorded.
-  assert.match(JS, /function rawSpelling\(v\)\{\s*var s=reportedIdentity\(v\);\s*return \(s&&s\.indexOf\("\[object "\)<0\)\?s:null;/);
-  assert.doesNotMatch(JS, /reportedIdentity\(sx\.modeRaw\)/, 'the unguarded read must not survive anywhere');
+test('the host spelling is rendered, not filtered — the "[object Object]" band-aid is gone', () => {
+  // The client used to refuse any modeRaw containing "[object " because every
+  // live Codex row carried "never/[object Object]": usage-parsers joined
+  // Codex's sandbox_policy OBJECT into the raw string. The parser now extracts
+  // `.type` (pinned end-to-end in usage-index-v6.test.mjs against the real wire
+  // shape), so the wreckage no longer exists to filter and the client renders
+  // the spelling the host actually recorded.
+  assert.doesNotMatch(JS, /rawSpelling/, 'the band-aid and every call to it are removed');
+  assert.doesNotMatch(JS, /indexOf\("\[object "\)/, 'no sentinel-string filtering survives');
 });
 
 test('the context chip requires BOTH halves, and is omitted rather than divided by a guess', () => {

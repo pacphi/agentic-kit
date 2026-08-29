@@ -504,7 +504,17 @@ function handleCodexTurnContext(rec, decoded, payload) {
   if (rec.project === 'unknown' && typeof decoded.cwd === 'string') applyProject(rec, projectLabel(decoded.cwd, null, repoRootOf(decoded.cwd)));
   // v11: cross-host permission posture — last turn_context with evidence
   // wins, since a session may renegotiate approval/sandbox policy mid-run.
-  const m = normalizeMode({ host: 'codex', approvalPolicy: payload.approval_policy, sandboxPolicy: payload.sandbox_policy });
+  // Codex writes sandbox_policy as an OBJECT keyed `.type`
+  // ({"type":"danger-full-access"}, or workspace-write with sibling fields);
+  // the string form the taxonomy is written against does not occur in current
+  // rollouts. Extract before normalizing — passing the object through matched
+  // no rule and stringified to "[object Object]" in modeRaw. An object with no
+  // `.type` yields undefined, which normalizeMode treats as absent sandbox
+  // evidence rather than a guess.
+  const sandbox = (payload.sandbox_policy && typeof payload.sandbox_policy === 'object')
+    ? payload.sandbox_policy.type
+    : payload.sandbox_policy;
+  const m = normalizeMode({ host: 'codex', approvalPolicy: payload.approval_policy, sandboxPolicy: sandbox });
   if (m.raw) { rec.mode = m.mode; rec.modeRaw = m.raw; }
 }
 

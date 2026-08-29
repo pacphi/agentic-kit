@@ -286,6 +286,59 @@ test('parseCodex v11: mode, duration, aborts, ctx window, typed tools', () => {
   assert.equal(rec.tools.CommandExecution, 1);
 });
 
+// The REAL wire shape. Surveyed over this machine's rollouts (2026-08-28,
+// 400 files): `sandbox_policy` is an OBJECT keyed `.type` in 1,110/1,110
+// occurrences — {"type":"danger-full-access"} (1004), {"type":"read-only"}
+// (59), and {"type":"workspace-write", …} with extra fields (47). The string
+// form the taxonomy was written against occurred ZERO times, so before the
+// extraction only the approval-only 'guarded' rule could ever fire for codex:
+// plan/auto-edit/unrestricted were unreachable on live data and modeRaw
+// persisted the failed toString "never/[object Object]".
+// `approval_policy` is a plain string in the same corpus ("never" 1524,
+// "on-request" 39), so only the sandbox half needs extracting.
+const turnCtx = (approval, sandbox) => JSON.stringify({
+  type: 'turn_context',
+  payload: { model: 'gpt-5.6', approval_policy: approval, sandbox_policy: sandbox },
+  timestamp: T0,
+});
+const codexModeOf = (id, approval, sandbox) => parseCodex([
+  JSON.stringify({ type: 'session_meta', payload: { id, cwd: '/tmp/p', thread_source: 'user' }, timestamp: T0 }),
+  turnCtx(approval, sandbox),
+].join('\n'), { id }).session;
+
+test('parseCodex: the object form of sandbox_policy maps to the taxonomy — unrestricted', () => {
+  const rec = codexModeOf('cxm1', 'never', { type: 'danger-full-access' });
+  assert.equal(rec.mode, 'unrestricted', 'codex\'s riskiest posture is no longer invisible to detectUnrestrictedMode');
+  assert.equal(rec.modeRaw, 'never/danger-full-access', 'the host spelling, not "[object Object]"');
+});
+
+test('parseCodex: the object form of sandbox_policy maps to the taxonomy — auto-edit', () => {
+  // The real workspace-write object carries siblings; only `.type` is read.
+  const rec = codexModeOf('cxm2', 'never', {
+    type: 'workspace-write', network_access: false, exclude_tmpdir_env_var: false, exclude_slash_tmp: false,
+  });
+  assert.equal(rec.mode, 'auto-edit');
+  assert.equal(rec.modeRaw, 'never/workspace-write');
+});
+
+test('parseCodex: the object form of sandbox_policy maps to the taxonomy — plan', () => {
+  const rec = codexModeOf('cxm3', 'on-request', { type: 'read-only' });
+  assert.equal(rec.mode, 'plan');
+  assert.equal(rec.modeRaw, 'on-request/read-only');
+});
+
+test('parseCodex: the object form of sandbox_policy maps to the taxonomy — guarded', () => {
+  const rec = codexModeOf('cxm4', 'on-request', { type: 'workspace-write' });
+  assert.equal(rec.mode, 'guarded', 'human-in-the-loop approval is the posture');
+  assert.equal(rec.modeRaw, 'on-request/workspace-write');
+});
+
+test('parseCodex: a sandbox_policy object with no .type contributes no sandbox evidence, never a guess', () => {
+  const rec = codexModeOf('cxm5', 'never', { network_access: true });
+  assert.equal(rec.mode, null, 'approval "never" alone matches no rule — unmapped, not assumed permissive');
+  assert.equal(rec.modeRaw, 'never', 'only the half that was actually observed');
+});
+
 // Codex's duration_ms is host-measured turn wall-clock and INCLUDES time the
 // turn spent blocked on an approval prompt, so a turn left awaiting approval
 // overnight is recorded as a multi-hour "response". The prompt-gap path
