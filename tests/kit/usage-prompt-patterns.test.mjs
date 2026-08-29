@@ -1,0 +1,589 @@
+// usage-prompt-patterns — the clustering library the Prompts view computes on
+// (spec §3.2 panel 3, research findings §4). Everything here operates on
+// FINGERPRINTS: no prompt text exists to test with, which is the point. The
+// two load-bearing pins are (a) the bottom-k Jaccard estimator, checked against
+// exact Jaccard on synthetic full sets, and (b) determinism — the same corpus
+// must produce identical cluster keys and identical ordering on every scan,
+// because the coaching cards hash these outputs (spec §6.2).
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import {
+  SKETCH_K,
+  exactRepeatGroups,
+  sketchJaccard,
+  candidatePairs,
+  nearDupClusters,
+  classifyCluster,
+  crossSessionClusters,
+  reAskPairs,
+  tapStats,
+} from '../../src/lib/usage-prompt-patterns.mjs';
+import { MAX_TOKEN_HASHES } from '../../src/lib/usage-parsers.mjs';
+
+// ── fixtures ────────────────────────────────────────────────────────────────
+
+/** One decorated fingerprint. Defaults are deliberately boring; every test
+ *  overrides only the fields it is about. */
+const fp = (over = {}) => ({
+  h: 'aaaa', t: 1, th: ['00000001'], p: 'human',
+  sessionId: 's1', day: '2026-08-01', host: 'claude',
+  ...over,
+});
+
+/** Deterministic PRNG (mulberry32) — the estimator pins must not flake. */
+function mulberry32(seed) {
+  let a = seed;
+  return function () {
+    a |= 0; a = (a + 0x6d2b79f5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+/** An 8-hex-char token hash, the same width `promptFingerprint` emits. */
+const hex8 = (rnd) => Math.floor(rnd() * 0xffffffff).toString(16).padStart(8, '0');
+
+/** What the scan path stores: the sorted, deduplicated, bounded token set. */
+const sketchOf = (set, k = SKETCH_K) => [...set].sort().slice(0, k);
+
+function exactJaccard(a, b) {
+  let inter = 0;
+  for (const x of a) if (b.has(x)) inter++;
+  return inter / (a.size + b.size - inter);
+}
+
+/** The WRONG estimator this module exists to avoid: |A∩B|/|A∪B| computed over
+ *  the two sketches as if they were the full token sets. */
+function naiveSketchJaccard(A, B) {
+  const sa = new Set(A), sb = new Set(B);
+  let inter = 0;
+  for (const x of sa) if (sb.has(x)) inter++;
+  return inter / (sa.size + sb.size - inter);
+}
+
+/** Structural comparison that survives Sets (assert.deepEqual handles Sets, but
+ *  a stable string is what the determinism pins actually want to compare). */
+function stable(value) {
+  return JSON.stringify(value, (_k, v) => (v instanceof Set ? [...v].sort() : v));
+}
+
+// ── the sketch capacity is not a second opinion ─────────────────────────────
+
+test('SKETCH_K mirrors the scan path\'s MAX_TOKEN_HASHES', () => {
+  // This module takes no runtime dependency on the parsers (it is pure), so the
+  // capacity is restated here. That restatement is only safe if it is pinned:
+  // a sketch read at the wrong k silently stops distinguishing "complete token
+  // set" from "truncated sample", which is the whole basis of the estimator.
+  assert.equal(SKETCH_K, MAX_TOKEN_HASHES);
+});
+
+// ── exactRepeatGroups ───────────────────────────────────────────────────────
+
+test('exactRepeatGroups groups by h with session/day/host spans', () => {
+  const groups = exactRepeatGroups([
+    fp({ h: 'yes', t: 1, sessionId: 's1', day: '2026-08-01', host: 'claude' }),
+    fp({ h: 'yes', t: 1, sessionId: 's2', day: '2026-08-02', host: 'codex' }),
+    fp({ h: 'yes', t: 1, sessionId: 's2', day: '2026-08-02', host: 'codex' }),
+    fp({ h: 'once', t: 9 }),
+  ]);
+  assert.equal(groups.length, 1);
+  const [g] = groups;
+  assert.equal(g.h, 'yes');
+  assert.equal(g.count, 3);
+  assert.equal(g.t, 1);
+  assert.deepEqual([...g.sessions].sort(), ['s1', 's2']);
+  assert.deepEqual([...g.days].sort(), ['2026-08-01', '2026-08-02']);
+  assert.deepEqual([...g.hosts].sort(), ['claude', 'codex']);
+});
+
+test('exactRepeatGroups honours `min` and drops everything under it', () => {
+  const fps = [fp({ h: 'a' }), fp({ h: 'a' }), fp({ h: 'b' })];
+  assert.deepEqual(exactRepeatGroups(fps).map((g) => g.h), []);
+  assert.deepEqual(exactRepeatGroups(fps, { min: 2 }).map((g) => g.h), ['a']);
+  assert.deepEqual(exactRepeatGroups(fps, { min: 1 }).map((g) => g.h), ['a', 'b']);
+});
+
+test('exactRepeatGroups sorts count desc then h asc', () => {
+  const fps = [
+    ...Array.from({ length: 3 }, () => fp({ h: 'zeta' })),
+    ...Array.from({ length: 5 }, () => fp({ h: 'beta' })),
+    ...Array.from({ length: 3 }, () => fp({ h: 'alpha' })),
+  ];
+  assert.deepEqual(exactRepeatGroups(fps).map((g) => [g.h, g.count]), [
+    ['beta', 5], ['alpha', 3], ['zeta', 3],
+  ]);
+});
+
+test('exactRepeatGroups ignores malformed entries rather than throwing', () => {
+  const fps = [fp({ h: 'a' }), fp({ h: 'a' }), fp({ h: 'a' }), null, {}, { h: 42 }];
+  assert.deepEqual(exactRepeatGroups(fps).map((g) => g.count), [3]);
+  assert.deepEqual(exactRepeatGroups(undefined), []);
+});
+
+// ── sketchJaccard ───────────────────────────────────────────────────────────
+
+test('sketchJaccard is EXACT when neither sketch hit the capacity', () => {
+  // Under the cap the stored `th` IS the token set, so there is nothing to
+  // estimate — and estimating anyway would be badly wrong on short prompts,
+  // which is most of this corpus.
+  assert.equal(sketchJaccard(['a', 'b', 'c'], ['b', 'c', 'd']), 0.5);
+  assert.equal(sketchJaccard(['a'], ['a']), 1);
+  assert.equal(sketchJaccard(['a'], ['b']), 0);
+  // The degenerate case the KMV path would get wrong: a 1-token prompt inside a
+  // 3-token one is J = 1/3, not 1.
+  assert.equal(sketchJaccard(['a'], ['a', 'b', 'c']), 1 / 3);
+});
+
+test('sketchJaccard treats an empty or absent sketch as no similarity', () => {
+  assert.equal(sketchJaccard([], ['a']), 0);
+  assert.equal(sketchJaccard(['a'], []), 0);
+  assert.equal(sketchJaccard([], []), 0);
+  assert.equal(sketchJaccard(undefined, ['a']), 0);
+  assert.equal(sketchJaccard(null, null), 0);
+});
+
+test('sketchJaccard is symmetric and tolerates unsorted / duplicated input', () => {
+  assert.equal(sketchJaccard(['c', 'a', 'a', 'b'], ['b', 'c', 'd']), 0.5);
+  assert.equal(sketchJaccard(['b', 'c', 'd'], ['c', 'a', 'a', 'b']), 0.5);
+});
+
+test('sketchJaccard estimates within 0.2 of exact Jaccard on truncated sketches', () => {
+  // 50 random pairs of full token sets larger than the capacity, so both
+  // sketches are genuine bottom-k samples. The spec's s.e. table puts the
+  // standard error near 0.06 at k=64/J≈0.6; 0.2 is a deliberately generous
+  // bound that still fails a wrong estimator.
+  const rnd = mulberry32(20260829);
+  let kmvTotal = 0, naiveTotal = 0, kmvWorst = 0;
+  const PAIRS = 50;
+  for (let i = 0; i < PAIRS; i++) {
+    // UNEQUAL sizes on purpose: prompts differ in length, and that is exactly
+    // where the naive reading of the sketches falls apart.
+    const sizeA = 80 + Math.floor(rnd() * 200);
+    const sizeB = sizeA * (1 + Math.floor(rnd() * 6));
+    const target = 0.2 + rnd() * 0.7;
+    const shared = Math.min(sizeA, Math.round((target * (sizeA + sizeB)) / (1 + target)));
+    const both = new Set();
+    while (both.size < shared) both.add(hex8(rnd));
+    const a = new Set(both), b = new Set(both);
+    while (a.size < sizeA) a.add(hex8(rnd));
+    while (b.size < sizeB) b.add(hex8(rnd));
+
+    const exact = exactJaccard(a, b);
+    const A = sketchOf(a), B = sketchOf(b);
+    assert.equal(A.length, SKETCH_K, 'set A must exceed the capacity for this to test the estimator');
+    assert.equal(B.length, SKETCH_K, 'set B must exceed the capacity for this to test the estimator');
+
+    const kmvErr = Math.abs(sketchJaccard(A, B) - exact);
+    kmvWorst = Math.max(kmvWorst, kmvErr);
+    kmvTotal += kmvErr;
+    naiveTotal += Math.abs(naiveSketchJaccard(A, B) - exact);
+  }
+  const kmvMAE = kmvTotal / PAIRS, naiveMAE = naiveTotal / PAIRS;
+  assert.ok(kmvWorst <= 0.2, `worst KMV error ${kmvWorst.toFixed(3)} exceeded 0.2`);
+  // The claim in the module doc, measured rather than asserted: the naive
+  // estimator is not merely different, it is materially worse here.
+  assert.ok(
+    naiveMAE > kmvMAE * 1.5,
+    `naive MAE ${naiveMAE.toFixed(4)} should be far worse than KMV ${kmvMAE.toFixed(4)}`,
+  );
+});
+
+test('sketchJaccard handles one complete sketch against one truncated sketch', () => {
+  // A 60-token prompt fully contained in a 1,000-token one: true J = 0.06. The
+  // naive reading collapses this toward 0.03 because the long prompt's sketch
+  // only covers the bottom ~6% of the hash range; KMV re-samples the union and
+  // recovers it.
+  const rnd = mulberry32(7);
+  const big = new Set();
+  while (big.size < 1000) big.add(hex8(rnd));
+  const small = new Set([...big].sort().filter((_x, i) => i % 16 === 0).slice(0, 60));
+  const A = sketchOf(small), B = sketchOf(big);
+  assert.ok(A.length < SKETCH_K && B.length === SKETCH_K);
+  const exact = exactJaccard(small, big);
+  assert.ok(Math.abs(sketchJaccard(A, B) - exact) <= 0.2);
+});
+
+// ── candidatePairs (the comparison bound) ───────────────────────────────────
+
+test('candidatePairs bounds the comparison set well under all-pairs', () => {
+  // 300 prompts in 30 families of 10. Each family shares a distinctive token;
+  // nothing else is shared, so a correct bucketing compares within families and
+  // little else. All-pairs would be 44,850.
+  const rnd = mulberry32(11);
+  const fps = [];
+  for (let f = 0; f < 30; f++) {
+    const rare = `rare${String(f).padStart(4, '0')}`;
+    for (let i = 0; i < 10; i++) {
+      fps.push(fp({
+        h: `h${f}-${i}`, t: 8,
+        th: sketchOf(new Set([rare, ...Array.from({ length: 7 }, () => hex8(rnd))])),
+      }));
+    }
+  }
+  const pairs = candidatePairs(fps);
+  assert.ok(pairs.length < 44850 * 0.1, `expected a bounded candidate set, got ${pairs.length}`);
+  assert.ok(pairs.length >= 30 * 45, 'every family must still be compared internally');
+  // Pairs are index pairs, i < j, unique.
+  const seen = new Set();
+  for (const [i, j] of pairs) {
+    assert.ok(i < j, 'pairs are ordered');
+    assert.ok(!seen.has(`${i}:${j}`), 'pairs are deduplicated');
+    seen.add(`${i}:${j}`);
+  }
+});
+
+test('candidatePairs drops prompts that share no token with anything', () => {
+  // 200 same-length prompts with nothing in common. The length band would pair
+  // every one of them (19,900 comparisons) for a guaranteed Jaccard of 0.
+  const rnd = mulberry32(5);
+  const fps = Array.from({ length: 200 }, (_v, i) => fp({
+    h: `iso${i}`, t: 6, th: sketchOf(new Set(Array.from({ length: 6 }, () => hex8(rnd)))),
+  }));
+  assert.equal(candidatePairs(fps).length, 0);
+  // The filter is exact, not a size heuristic: give two of them one token in
+  // common and that pair comes straight back.
+  const joined = [...fps];
+  joined[0] = fp({ h: 'iso0', t: 6, th: sketchOf(new Set(['shared00', ...joined[0].th.slice(1)])) });
+  joined[7] = fp({ h: 'iso7', t: 6, th: sketchOf(new Set(['shared00', ...joined[7].th.slice(1)])) });
+  assert.deepEqual(candidatePairs(joined), [[0, 7]]);
+});
+
+test('candidatePairs falls back to a length band for prompts with no rare token', () => {
+  // Three copies of a one-token prompt: the token is in 100% of the corpus, so
+  // it is not rare and cannot bucket anything. Without the fallback these would
+  // never be compared and the biggest cluster in the corpus (`yes`) would
+  // vanish.
+  const fps = [fp({ h: 'a', t: 1, th: ['ffff0001'] }), fp({ h: 'b', t: 1, th: ['ffff0001'] }), fp({ h: 'c', t: 1, th: ['ffff0001'] })];
+  assert.equal(candidatePairs(fps).length, 3);
+  // …and the band is ±1 token, so a far-longer prompt sharing nothing rare is
+  // still not compared.
+  const wide = [...fps, fp({ h: 'd', t: 40, th: ['ffff0001'] })];
+  for (const [i, j] of candidatePairs(wide)) assert.ok(i < 3 && j < 3, 'the length band must exclude the outlier');
+});
+
+// ── nearDupClusters ─────────────────────────────────────────────────────────
+
+/** Build a fingerprint whose token set is the given tokens. */
+const withTokens = (h, tokens, over = {}) =>
+  fp({ h, t: tokens.length, th: sketchOf(new Set(tokens)), ...over });
+
+test('nearDupClusters joins fingerprints at or above the threshold only', () => {
+  const near = withTokens('bbbb', ['t1', 't2', 't3', 't4', 't5']);
+  const same = withTokens('aaaa', ['t1', 't2', 't3', 't4', 'zz']);   // J = 4/6 ≈ 0.67
+  const twin = withTokens('cccc', ['t1', 't2', 't3', 't4', 't5']);   // J = 1
+  const clusters = nearDupClusters([near, same, twin]);
+  assert.equal(clusters.length, 1);
+  assert.deepEqual(clusters[0].hashes, ['bbbb', 'cccc']);
+  // Loosen the threshold and the 0.67 neighbour joins.
+  const loose = nearDupClusters([near, same, twin], { jaccard: 0.6 });
+  assert.deepEqual(loose[0].hashes, ['aaaa', 'bbbb', 'cccc']);
+});
+
+test('nearDupClusters is transitive (union-find, not pairwise)', () => {
+  // a~b and b~c at 0.8, but a~c is only 0.6 — union-find still yields ONE
+  // cluster, which is what "loose clustering with the type filter supplying
+  // precision" means in the spec.
+  const base = Array.from({ length: 10 }, (_v, i) => `t${i}`);
+  const a = withTokens('a', base);
+  const b = withTokens('b', [...base.slice(1), 'x1']);
+  const c = withTokens('c', [...base.slice(2), 'x1', 'x2']);
+  assert.ok(sketchJaccard(a.th, c.th) < 0.8);
+  const clusters = nearDupClusters([a, b, c], { jaccard: 0.8 });
+  assert.equal(clusters.length, 1);
+  assert.deepEqual(clusters[0].hashes, ['a', 'b', 'c']);
+});
+
+test('nearDupClusters keys on the lexicographic minimum h and drops singletons', () => {
+  const tokens = ['q1', 'q2', 'q3', 'q4'];
+  const clusters = nearDupClusters([
+    withTokens('zzz', tokens), withTokens('mmm', tokens), withTokens('lonely', ['u1', 'u2', 'u3', 'u4']),
+  ]);
+  assert.equal(clusters.length, 1);
+  assert.equal(clusters[0].key, 'mmm');
+  assert.equal(clusters[0].size, 2);
+});
+
+test('nearDupClusters carries spans, token stats and flag counts', () => {
+  const tokens = ['r1', 'r2', 'r3', 'r4'];
+  const clusters = nearDupClusters([
+    withTokens('a', tokens, { sessionId: 's1', day: '2026-08-01', host: 'claude', q: true, o: false }),
+    withTokens('b', tokens, { sessionId: 's2', day: '2026-08-02', host: 'codex', q: true }),
+    withTokens('c', tokens, { sessionId: 's2', day: '2026-08-02', host: 'codex', q: false, o: true }),
+  ]);
+  const [cl] = clusters;
+  assert.equal(cl.size, 3);
+  assert.deepEqual([...cl.sessions].sort(), ['s1', 's2']);
+  assert.deepEqual([...cl.days].sort(), ['2026-08-01', '2026-08-02']);
+  assert.deepEqual([...cl.hosts].sort(), ['claude', 'codex']);
+  assert.deepEqual(cl.tokens, { min: 4, median: 4, max: 4 });
+  assert.equal(cl.questions, 2);
+  assert.equal(cl.instructions, 1);
+  assert.equal(cl.qKnown, 3);
+  assert.equal(cl.personas, 1);
+  assert.equal(cl.class, 'question');
+});
+
+test('nearDupClusters tolerates fingerprints with no q/o flags at all', () => {
+  // The sibling lane that decorates q/o may not have run; absent is absent, and
+  // must never be guessed into a class.
+  const tokens = ['n1', 'n2', 'n3', 'n4'];
+  const [cl] = nearDupClusters([withTokens('a', tokens), withTokens('b', tokens)]);
+  assert.equal(cl.qKnown, 0);
+  assert.equal(cl.questions, 0);
+  assert.equal(cl.instructions, 0);
+  assert.equal(cl.personas, 0);
+  assert.equal(cl.class, 'unknown');
+});
+
+test('nearDupClusters orders by size desc then key asc', () => {
+  const mk = (h, seed) => withTokens(h, Array.from({ length: 6 }, (_v, i) => `${seed}${i}`));
+  const fps = [
+    mk('b1', 'B'), mk('b2', 'B'), mk('b3', 'B'),
+    mk('a1', 'A'), mk('a2', 'A'),
+    mk('c1', 'C'), mk('c2', 'C'),
+  ];
+  assert.deepEqual(nearDupClusters(fps).map((c) => [c.key, c.size]), [
+    ['b1', 3], ['a1', 2], ['c1', 2],
+  ]);
+});
+
+// ── determinism ─────────────────────────────────────────────────────────────
+
+/** A corpus with enough shape to make ordering, keys and spans all observable. */
+function corpus(rnd) {
+  const out = [];
+  for (let f = 0; f < 12; f++) {
+    const fam = Array.from({ length: 6 }, (_v, i) => `f${f}tok${i}`);
+    for (let i = 0; i < 2 + (f % 4); i++) {
+      out.push(withTokens(`h${String(f).padStart(2, '0')}-${i}`, fam, {
+        sessionId: `s${f % 5}`, day: `2026-08-${String(1 + (f % 7)).padStart(2, '0')}`,
+        host: f % 2 ? 'codex' : 'claude', q: i % 2 === 0, o: f === 3,
+      }));
+    }
+  }
+  for (let i = 0; i < 20; i++) {
+    out.push(withTokens(`solo${i}`, Array.from({ length: 5 }, () => hex8(rnd))));
+  }
+  return out;
+}
+
+test('determinism: identical input reproduces identical keys and ordering', () => {
+  const fps = corpus(mulberry32(3));
+  assert.equal(stable(nearDupClusters(fps)), stable(nearDupClusters(fps)));
+  assert.equal(stable(exactRepeatGroups(fps, { min: 1 })), stable(exactRepeatGroups(fps, { min: 1 })));
+  assert.equal(stable(tapStats(fps)), stable(tapStats(fps)));
+});
+
+test('determinism: input order does not move a cluster key or the ordering', () => {
+  // Scan order is an accident of the filesystem walk. If it changed cluster
+  // identity, every coaching card's evidence hash would drift on rescan for no
+  // reason (spec §6.2, §10).
+  const fps = corpus(mulberry32(3));
+  const rnd = mulberry32(99);
+  const shuffled = [...fps];
+  for (let i = shuffled.length - 1; i > 0; i--) {
+    const j = Math.floor(rnd() * (i + 1));
+    [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+  }
+  assert.notEqual(stable(fps), stable(shuffled), 'the shuffle must actually reorder');
+  assert.equal(stable(nearDupClusters(fps)), stable(nearDupClusters(shuffled)));
+  assert.equal(stable(exactRepeatGroups(fps, { min: 1 })), stable(exactRepeatGroups(shuffled, { min: 1 })));
+  assert.equal(stable(tapStats(fps)), stable(tapStats(shuffled)));
+});
+
+// ── privacy (structural) ────────────────────────────────────────────────────
+
+test('privacy: outputs carry only known keys and only input-supplied strings', () => {
+  // The whole contract of the fingerprint layer is that no prompt text exists
+  // to leak. This pins the structural half: nothing this module emits is a
+  // string it did not receive as an id, plus a closed vocabulary of class
+  // names. A field that could carry text would fail here without anyone having
+  // to remember to look for it.
+  const KEYS = new Set([
+    'h', 't', 'count', 'sessions', 'days', 'hosts',
+    'key', 'size', 'hashes', 'tokens', 'min', 'median', 'max',
+    'questions', 'instructions', 'qKnown', 'personas', 'class',
+    'pairs', 'gaps', 'sessionId', 'gap', 'a', 'b', 'jaccard', 'host', 'day',
+    'prompts', 'taps', 'share', 'maxTokens', 'byHost',
+  ]);
+  const fps = corpus(mulberry32(3));
+  const allowed = new Set(['question', 'instruction', 'mixed', 'unknown']);
+  for (const f of fps) {
+    allowed.add(f.h); allowed.add(f.sessionId); allowed.add(f.day); allowed.add(f.host);
+    for (const th of f.th) allowed.add(th);
+  }
+
+  const walk = (node, path) => {
+    if (node instanceof Set) { for (const v of node) walk(v, `${path}[set]`); return; }
+    if (Array.isArray(node)) { node.forEach((v, i) => walk(v, `${path}[${i}]`)); return; }
+    if (node && typeof node === 'object') {
+      for (const [k, v] of Object.entries(node)) {
+        // `byHost` and `gaps` are keyed BY an input id / a count, not by a name
+        // this module invented.
+        const keyed = path.endsWith('.byHost') || path.endsWith('.gaps');
+        if (!keyed) assert.ok(KEYS.has(k), `unexpected output key ${path}.${k}`);
+        else assert.ok(allowed.has(k) || /^\d+$/.test(k), `unexpected map key ${path}.${k}`);
+        walk(v, `${path}.${k}`);
+      }
+      return;
+    }
+    if (typeof node === 'string') assert.ok(allowed.has(node), `unexpected string "${node}" at ${path}`);
+  };
+
+  const clusters = nearDupClusters(fps);
+  walk(clusters, 'nearDupClusters');
+  walk(crossSessionClusters(clusters), 'crossSessionClusters');
+  walk(exactRepeatGroups(fps, { min: 1 }), 'exactRepeatGroups');
+  walk(reAskPairs(fps), 'reAskPairs');
+  walk(tapStats(fps), 'tapStats');
+});
+
+// ── classifyCluster / crossSessionClusters ──────────────────────────────────
+
+test('classifyCluster takes the majority and never guesses an absent one', () => {
+  assert.equal(classifyCluster({ questions: 3, instructions: 1 }), 'question');
+  assert.equal(classifyCluster({ questions: 1, instructions: 3 }), 'instruction');
+  assert.equal(classifyCluster({ questions: 2, instructions: 2 }), 'mixed');
+  assert.equal(classifyCluster({ questions: 0, instructions: 0 }), 'unknown');
+  assert.equal(classifyCluster({}), 'unknown');
+});
+
+test('crossSessionClusters keeps a cluster spanning enough sessions OR days', () => {
+  const cl = (over) => ({ key: 'k', size: 4, sessions: new Set(), days: new Set(), ...over });
+  const threeSessions = cl({ key: 'sess', sessions: new Set(['a', 'b', 'c']), days: new Set(['d1']) });
+  const twoDays = cl({ key: 'days', sessions: new Set(['a']), days: new Set(['d1', 'd2']) });
+  const neither = cl({ key: 'no', sessions: new Set(['a', 'b']), days: new Set(['d1']) });
+  const kept = crossSessionClusters([threeSessions, twoDays, neither]).map((c) => c.key);
+  assert.deepEqual(kept.sort(), ['days', 'sess']);
+});
+
+test('crossSessionClusters honours its thresholds and preserves input order', () => {
+  const cl = (key, s, d) => ({ key, size: 2, sessions: new Set(s), days: new Set(d), questions: 0, instructions: 0 });
+  const all = [cl('x', ['a', 'b', 'c', 'd'], ['d1']), cl('y', ['a'], ['d1', 'd2', 'd3'])];
+  assert.deepEqual(crossSessionClusters(all, { minSessions: 4, minDays: 4 }).map((c) => c.key), ['x']);
+  assert.deepEqual(crossSessionClusters(all, { minSessions: 9, minDays: 3 }).map((c) => c.key), ['y']);
+  assert.deepEqual(crossSessionClusters(all, { minSessions: 9, minDays: 9 }), []);
+});
+
+test('crossSessionClusters attaches a class when the cluster lacks one', () => {
+  const [out] = crossSessionClusters([
+    { key: 'k', size: 3, sessions: new Set(['a', 'b', 'c']), days: new Set(['d']), questions: 0, instructions: 3 },
+  ]);
+  assert.equal(out.class, 'instruction');
+});
+
+// ── reAskPairs ──────────────────────────────────────────────────────────────
+
+test('reAskPairs finds within-session near-duplicates inside the window', () => {
+  const tokens = ['w1', 'w2', 'w3', 'w4', 'w5'];
+  const ask = (h, sessionId) => withTokens(h, tokens, { sessionId });
+  const unrelated = (sessionId) => withTokens('gap', ['z1', 'z2', 'z3', 'z4', 'z5'], { sessionId });
+
+  // An unrelated turn in the SAME session sits between the two asks, so the gap
+  // is two turns.
+  const near = reAskPairs([ask('a1', 's1'), unrelated('s1'), ask('a2', 's1')]);
+  assert.equal(near.pairs.length, 1);
+  assert.equal(near.pairs[0].sessionId, 's1');
+  assert.equal(near.pairs[0].gap, 2);
+  assert.deepEqual(near.gaps, { 2: 1 });
+  assert.equal(near.sessions, 1);
+
+  // A turn belonging to ANOTHER session is not part of this conversation and
+  // must not widen the gap — the corpus interleaves sessions freely.
+  const interleaved = reAskPairs([ask('a1', 's1'), unrelated('s2'), ask('a2', 's1')]);
+  assert.equal(interleaved.pairs[0].gap, 1);
+});
+
+test('reAskPairs never pairs across sessions and respects the window', () => {
+  const tokens = ['x1', 'x2', 'x3', 'x4', 'x5'];
+  const ask = (h, sessionId) => withTokens(h, tokens, { sessionId });
+  assert.equal(reAskPairs([ask('a', 's1'), ask('b', 's2')]).pairs.length, 0);
+
+  const filler = (i) => withTokens(`f${i}`, [`q${i}`, `r${i}`, `s${i}`, `t${i}`, `u${i}`], { sessionId: 's1' });
+  const run = [ask('a', 's1'), ...Array.from({ length: 8 }, (_v, i) => filler(i)), ask('b', 's1')];
+  assert.equal(reAskPairs(run).pairs.length, 0, 'gap 9 is outside the default window of 6');
+  assert.equal(reAskPairs(run, { window: 9 }).pairs.length, 1);
+  assert.equal(reAskPairs(run, { window: 9 }).pairs[0].gap, 9);
+});
+
+test('reAskPairs counts every pair in a repeat run and histograms the gaps', () => {
+  // The corpus's worst episode is the same paragraph pasted five times in four
+  // minutes; every adjacent and near-adjacent pair is real evidence of it.
+  const tokens = ['p1', 'p2', 'p3', 'p4', 'p5'];
+  const run = Array.from({ length: 4 }, (_v, i) => withTokens(`r${i}`, tokens, { sessionId: 's1' }));
+  const { pairs, gaps } = reAskPairs(run);
+  assert.equal(pairs.length, 6);                    // C(4,2), all inside the window
+  assert.deepEqual(gaps, { 1: 3, 2: 2, 3: 1 });
+  assert.equal(pairs[0].a, 'r0');
+  assert.equal(pairs[0].b, 'r1');
+  assert.equal(pairs[0].jaccard, 1);
+});
+
+test('reAskPairs attributes host and day to the RE-ask, not the first ask', () => {
+  const tokens = ['d1', 'd2', 'd3', 'd4', 'd5'];
+  const { pairs } = reAskPairs([
+    withTokens('first', tokens, { sessionId: 's1', host: 'claude', day: '2026-08-01' }),
+    withTokens('again', tokens, { sessionId: 's1', host: 'codex', day: '2026-08-02' }),
+  ]);
+  assert.equal(pairs[0].host, 'codex');
+  assert.equal(pairs[0].day, '2026-08-02');
+});
+
+test('reAskPairs on an empty corpus returns empty, not NaN', () => {
+  assert.deepEqual(reAskPairs([]), { pairs: [], gaps: {}, sessions: 0 });
+  assert.deepEqual(reAskPairs(undefined), { pairs: [], gaps: {}, sessions: 0 });
+});
+
+test('reAskPairs skips turns with no session rather than inventing one', () => {
+  // Grouping undecorated turns under a shared `undefined` key would report
+  // re-asks inside a session that does not exist — the one way this function
+  // can fabricate a finding.
+  const th = ['t1', 't2', 't3', 't4', 't5'];
+  assert.deepEqual(
+    reAskPairs([{ h: 'a', t: 5, th }, { h: 'b', t: 5, th }]),
+    { pairs: [], gaps: {}, sessions: 0 },
+  );
+  // Decorated neighbours in the same corpus are still found.
+  const mixed = reAskPairs([
+    { h: 'a', t: 5, th },
+    { h: 'x', t: 5, th, sessionId: 's1' },
+    { h: 'y', t: 5, th, sessionId: 's1' },
+  ]);
+  assert.equal(mixed.pairs.length, 1);
+  assert.equal(mixed.pairs[0].gap, 1);
+});
+
+// ── tapStats ────────────────────────────────────────────────────────────────
+
+test('tapStats reports share overall and per host', () => {
+  const stats = tapStats([
+    fp({ t: 1, host: 'claude' }), fp({ t: 4, host: 'claude' }), fp({ t: 5, host: 'claude' }),
+    fp({ t: 2, host: 'codex' }), fp({ t: 40, host: 'codex' }),
+  ]);
+  assert.equal(stats.prompts, 5);
+  assert.equal(stats.taps, 3);
+  assert.equal(stats.share, 0.6);
+  assert.equal(stats.maxTokens, 4);
+  assert.deepEqual(Object.keys(stats.byHost), ['claude', 'codex']);
+  assert.deepEqual(stats.byHost.claude, { prompts: 3, taps: 2, share: 2 / 3 });
+  assert.deepEqual(stats.byHost.codex, { prompts: 2, taps: 1, share: 0.5 });
+});
+
+test('tapStats honours a different tap threshold', () => {
+  const fps = [fp({ t: 1 }), fp({ t: 6 }), fp({ t: 20 })];
+  assert.equal(tapStats(fps, { maxTokens: 6 }).taps, 2);
+});
+
+test('tapStats on an empty corpus reports zero share, not NaN', () => {
+  const stats = tapStats([]);
+  assert.equal(stats.prompts, 0);
+  assert.equal(stats.taps, 0);
+  assert.equal(stats.share, 0);
+  assert.deepEqual(stats.byHost, {});
+});
+
+test('tapStats keeps host keys sorted regardless of encounter order', () => {
+  const stats = tapStats([fp({ host: 'opencode' }), fp({ host: 'codex' }), fp({ host: 'claude' })]);
+  assert.deepEqual(Object.keys(stats.byHost), ['claude', 'codex', 'opencode']);
+});
