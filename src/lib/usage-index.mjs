@@ -864,7 +864,11 @@ export async function readSession(id, o = {}) {
     if (parsed) {
       const rec = parsed.session;
       rec.title = maskSecrets(rec.title);
-      return sessionPayload(rec, parsed.turns);
+      // deps is not optional here: an opencode row whose messages carried no
+      // `cost` field keeps costObserved null by design, and sessionCost then
+      // falls back to the pricer. Omitting it threw on exactly the data state
+      // the null is there to represent.
+      return sessionPayload(rec, parsed.turns, await loadDeps(o.deps));
     }
   }
 

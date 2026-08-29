@@ -217,6 +217,48 @@ test('readSession returns the meta + turns payload for an opencode session', asy
   rm(sb.dir);
 });
 
+// The state the pricing fallback exists FOR: opencode's usageRow.costObserved
+// stays null when no assistant message carried a `cost` field (a local model
+// opencode does not price, an interrupted session). sessionCost must then reach
+// the pricer — so readSession's opencode branch has to hand one down, exactly
+// as its claude/codex branch does. Omitting it threw TypeError (costOf of
+// undefined) and surfaced as a 500 with the internal shape in the body.
+test('readSession prices an opencode session whose rows carry NO observed cost', async () => {
+  const at = NOW - DAY;
+  const sb = sandbox({
+    sessions: [{ id: 'ses_oc7', directory: '/x', title: 'uncosted transcript', timeCreated: at }],
+    messages: [
+      userMsg('u1', 'ses_oc7', at),
+      assistantMsg('a1', 'ses_oc7', at + 1000), // no `cost` field at all → costObserved stays null
+    ],
+  });
+  const db = new DatabaseSync(sb.dbFile);
+  const insP = db.prepare('INSERT INTO part (id, message_id, session_id, time_created, time_updated, data) VALUES (?, ?, ?, ?, ?, ?)');
+  insP.run('p1', 'u1', 'ses_oc7', at, at, JSON.stringify({ type: 'text', text: 'run it locally' }));
+  insP.run('p2', 'a1', 'ses_oc7', at + 1000, at + 1000, JSON.stringify({ type: 'text', text: 'done' }));
+  db.close();
+
+  const out = await readSession('ses_oc7', { roots: sb.roots, deps: deps() });
+  assert.ok(out, 'payload returned rather than throwing');
+  assert.equal(out.meta.cost, (1000 + 100 + 200 + 10) / 1000,
+    'the injected pricer priced the row the transcript never costed');
+  rm(sb.dir);
+});
+
+// Same data state with NO injected deps: readSession must load the real pricer
+// rather than handing sessionCost `undefined`.
+test('readSession loads the default pricer for an uncosted opencode session', async () => {
+  const at = NOW - DAY;
+  const sb = sandbox({
+    sessions: [{ id: 'ses_oc8', directory: '/x', title: 'uncosted, real pricer', timeCreated: at }],
+    messages: [userMsg('u1', 'ses_oc8', at), assistantMsg('a1', 'ses_oc8', at + 1000)],
+  });
+  const out = await readSession('ses_oc8', { roots: sb.roots });
+  assert.ok(out, 'payload returned rather than throwing');
+  assert.equal(typeof out.meta.cost, 'number', 'a real number, from the real pricing table');
+  rm(sb.dir);
+});
+
 test('an opencode session with zero assistant responses never reaches the aggregate', async () => {
   const at = NOW - DAY;
   const sb = sandbox({
