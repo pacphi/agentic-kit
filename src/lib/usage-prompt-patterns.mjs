@@ -241,13 +241,28 @@ export function exactRepeatGroups(fps, { min = 3 } = {}) {
     .sort((a, b) => b.count - a.count || cmp(a.h, b.h));
 }
 
+/**
+ * A decoration value that actually identifies something: a non-empty string.
+ *
+ * The empty string is the shape a parser writes when it could NOT attribute a
+ * turn — it has told us it does not know, and `''` is not an answer. Counting
+ * it fabricates a span: an unattributed turn becomes one more session, one more
+ * day or one more host than really exist, and every figure keyed on those
+ * counts (the recurring-cluster filter, the per-host split, the coaching card's
+ * "21 sessions") inherits the invention. Same failure class as the pseudo-session
+ * grouping in `reAskPairs`, which shares this predicate.
+ *
+ * @param {unknown} value
+ */
+const isId = (value) => typeof value === 'string' && value !== '';
+
 /** Record where one fingerprint happened, ignoring absent decoration. */
 /** @param {{ sessions: Set<string>, days: Set<string>, hosts: Set<string> }} target
  *  @param {PromptFingerprint} fp */
 function addSpan(target, fp) {
-  if (typeof fp.sessionId === 'string') target.sessions.add(fp.sessionId);
-  if (typeof fp.day === 'string') target.days.add(fp.day);
-  if (typeof fp.host === 'string') target.hosts.add(fp.host);
+  if (isId(fp.sessionId)) target.sessions.add(fp.sessionId);
+  if (isId(fp.day)) target.days.add(fp.day);
+  if (isId(fp.host)) target.hosts.add(fp.host);
 }
 
 /** A Set whose iteration order is sorted, so anything serialized from it (an
@@ -550,7 +565,7 @@ export function reAskPairs(sessionOrderedFps, { window = 6, jaccard = 0.8, k = S
   assertCapacity(k);
   const bySession = new Map();
   for (const fp of Array.isArray(sessionOrderedFps) ? sessionOrderedFps : []) {
-    if (isFingerprint(fp) && fp.sessionId) push(bySession, fp.sessionId, prepare(fp));
+    if (isFingerprint(fp) && isId(fp.sessionId)) push(bySession, fp.sessionId, prepare(fp));
   }
   const pairs = [];
   const gaps = {};

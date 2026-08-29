@@ -348,6 +348,29 @@ test('nearDupClusters tolerates fingerprints with no q/o flags at all', () => {
   assert.equal(cl.class, 'unknown');
 });
 
+test('addSpan: an empty-string session, day or host does not inflate a span', () => {
+  // Same fabrication class as the pseudo-session grouping in reAskPairs: `''` is
+  // what a parser writes when it could NOT attribute a turn, and counting it
+  // invents one more session (or day, or host) than exist. The spans feed the
+  // recurring-cluster filter and every "21 sessions" a coaching card prints.
+  const tokens = ['e1', 'e2', 'e3', 'e4'];
+  const [cl] = nearDupClusters([
+    withTokens('a', tokens, { sessionId: 's1', day: '2026-08-01', host: 'claude' }),
+    withTokens('b', tokens, { sessionId: '', day: '', host: '' }),
+  ]);
+  assert.deepEqual([...cl.sessions], ['s1']);
+  assert.deepEqual([...cl.days], ['2026-08-01']);
+  assert.deepEqual([...cl.hosts], ['claude']);
+  // The prompt itself still counts — it happened, we just cannot say where.
+  assert.equal(cl.size, 2);
+  // Exact-repeat groups share the same span accounting.
+  const [group] = exactRepeatGroups([
+    fp({ h: 'r', sessionId: 's1' }), fp({ h: 'r', sessionId: '' }), fp({ h: 'r', sessionId: '' }),
+  ], { min: 3 });
+  assert.equal(group.count, 3);
+  assert.deepEqual([...group.sessions], ['s1']);
+});
+
 test('nearDupClusters orders by size desc then key asc', () => {
   const mk = (h, seed) => withTokens(h, Array.from({ length: 6 }, (_v, i) => `${seed}${i}`));
   const fps = [
