@@ -609,14 +609,17 @@ export const USAGE_CSS = `
 .rcard .hist{padding-top:30px}
 .rcard .hist-marker+.hist-marker .hist-marker-lab{top:-27px}
 
-/* how-you-run panel — the by-day posture chart beside the two small readouts */
-.howrun{display:grid; gap:18px; grid-template-columns:minmax(0,1.35fr) minmax(0,1fr)}
+/* how-you-run panel — the by-day posture chart beside the delegation donut.
+   The side column holds one 88px ring and its legend, so the stack takes the
+   larger share: a wider day chart is more days legible, where extra width in
+   the side column would only be padding around a fixed-size ring. */
+.howrun{display:grid; gap:18px; grid-template-columns:minmax(0,2fr) minmax(0,1fr)}
 .hr-block{min-width:0}
 .hr-side{display:flex; flex-direction:column; gap:16px; min-width:0}
 .hr-t{font-size:11px; font-weight:600; letter-spacing:.06em; text-transform:uppercase; color:var(--ink-dim); margin-bottom:10px}
 /* Every chart in this panel carries a sentence saying what its buckets mean
    and what the de-emphasised bucket is holding — the charts split spend by
-   things ("posture", "provider") whose absence is itself a finding. */
+   things (posture, who drove) whose absence is itself a finding. */
 .hr-note{margin:10px 0 0; font-size:11px; line-height:1.5; color:var(--ink-dim)}
 .hr-note b{color:var(--ink-2); font-weight:600}
 @media(max-width:820px){ .howrun{grid-template-columns:1fr} }

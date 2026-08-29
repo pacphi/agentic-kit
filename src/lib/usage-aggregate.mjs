@@ -528,17 +528,6 @@ function foldSessionIntoTree(tree, s) {
   node.rows.push(s);
 }
 
-/** The bucket key for a session's INFERENCE provider — and only when that
- *  identity was actually observed. A transcript host (`claude`, `codex`) does
- *  not prove which vendor served the tokens, so an unobserved provenance keys
- *  to `'not-recorded'` even when a provider string is present: that string is
- *  an assumption, and spend is not bucketed under assumptions. The ungated
- *  `byProvider` map still exists beside this one for callers that want the
- *  string as-recorded. */
-function providerKey(s) {
-  return s.providerProvenance === 'observed' && s.provider ? s.provider : 'not-recorded';
-}
-
 /** Subagent work is either Claude's sidechain flag or Codex's ledger-backed
  *  thread source; both mean "not a session a human was driving". */
 function sourceKey(s) {
@@ -558,7 +547,7 @@ function foldSessionTotals(sessions, byDay, byModel) {
     cacheSavedUsd: 0, spanMinutes: 0, spanUnionSeconds: 0, engagedSeconds: 0,
   };
   const byHost = Object.create(null), byProvider = Object.create(null);
-  const byMode = Object.create(null), byInferenceProvider = Object.create(null);
+  const byMode = Object.create(null);
   const bySource = Object.create(null), byTool = Object.create(null);
   const byProject = Object.create(null);
   const byCategory = Object.create(null), punchcard = Object.create(null);
@@ -589,7 +578,6 @@ function foldSessionTotals(sessions, byDay, byModel) {
     // 'not-recorded' is a first-class key, not a display fallback: a transcript
     // that carried no mode evidence must not be folded into a real posture.
     addTo(bucket(byMode, s.mode ?? 'not-recorded'), s);
-    addTo(bucket(byInferenceProvider, providerKey(s)), s);
     addTo(bucket(bySource, source), s);
     addTo(bucket(byProject, s.project), s);
     addTo(bucket(byCategory, s.category), s);
@@ -608,7 +596,7 @@ function foldSessionTotals(sessions, byDay, byModel) {
   }
 
   return {
-    totals, byHost, byProvider, byMode, byInferenceProvider, bySource, byTool,
+    totals, byHost, byProvider, byMode, bySource, byTool,
     byProject, byCategory, punchcard, tree, spanMs, pricedCosts,
   };
 }
@@ -816,11 +804,11 @@ export function aggregate(records, { days, now, cutoff, deps, previous = false }
   sessions.sort((a, b) => b.cost - a.cost || Date.parse(b.start) - Date.parse(a.start));
 
   const folded = foldSessionTotals(sessions, byDay, byModel);
-  const { totals, byHost, byProvider, byMode, byInferenceProvider, bySource, byTool,
+  const { totals, byHost, byProvider, byMode, bySource, byTool,
     byProject, byCategory, punchcard, tree } = folded;
 
   sealBuckets(byHost, byProvider, byProject, byCategory, byModel,
-    byMode, byInferenceProvider, bySource);
+    byMode, bySource);
   finishTotals(totals, sessions, folded);
   const engagedByDay = buildEngagedByDay(sessions);
   const rhythm = buildRhythm(sessions);
@@ -836,7 +824,7 @@ export function aggregate(records, { days, now, cutoff, deps, previous = false }
     windowDays: days,
     pricesAsOf: deps.pricesAsOf ?? null,
     totals, byDay, engagedByDay, byModel, byHost, byProvider,
-    byMode, byInferenceProvider, bySource, byTool,
+    byMode, bySource, byTool,
     byProject, byCategory,
     punchcard, projectTree, sessions, codexRateLimits, rhythm,
     previous: previous ? previousWindow(records, { days, now, deps, rates }) : null,

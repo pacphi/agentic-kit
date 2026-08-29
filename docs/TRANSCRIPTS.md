@@ -301,7 +301,7 @@ transcript content leaves the module, and every step is a gate:
 
 The file is parsed with `withTurns: true` by the provider's parser
 (`usage-index.mjs:901-906`), and `meta` is assembled by `sessionPayload`
-(`usage-aggregate.mjs:878-905`) with the same fields the Sessions view rows
+(`usage-aggregate.mjs:866-893`) with the same fields the Sessions view rows
 carry — `prompts`, `responses`, `exceptions`, `sidechain`, `threadSource`,
 `models`, `tools`, `skill`/`plugin`, worktree — plus a `cost` priced from the
 same per-model usage rows `aggregate()` uses.
@@ -322,7 +322,7 @@ Every turn body is passed through `maskSecrets` (`usage-aggregate.mjs:133-138` �
 23 secret shapes) **server-side, before
 serialization**, then length-capped at `MAX_TURN_CHARS` (40,000,
 `usage-aggregate.mjs:63`) with the marker appended
-(`usage-aggregate.mjs:913-922`). Two invariants:
+(`usage-aggregate.mjs:901-910`). Two invariants:
 
 * **Presence is the signal.** `truncated`/`originalChars` are emitted only
   when the slice fired, so a complete turn cannot be misread as abridged.
@@ -482,7 +482,7 @@ was wrong before, for the curious.
   assembled `meta` left `cost` undefined, and `fmtUsd(undefined)` renders the
   truthy string `"$0.00"` — a fixed-looking zero on a panel whose whole
   subject is cost. `meta.cost` is now priced via `sessionCost()` from the
-  same per-model usage rows `aggregate()` uses (`usage-aggregate.mjs:903`).
+  same per-model usage rows `aggregate()` uses (`usage-aggregate.mjs:891`).
 * **Aggregate-side incidents** (the v4/v5 cache bumps, the Codex parsing
   defects) are recorded in `USAGE-SCORECARD-METRICS.md` Appendix A.
 

@@ -201,9 +201,9 @@ subagent work, and its two halves are honest in different ways: Claude writes de
 own nested transcript, so that cost is discovered, priced, and included, while a Codex subagent
 rollout reads `$0.00` by ledger design — its tokens replay the parent's and are stripped as a
 double-count, so the sessions stay visible and auditable at zero rather than billing the parent
-twice. Served-by ranks cost by inference provider, and `Not recorded` is always offered as a row:
-a transcript host is not a vendor and a configured provider is not an observed one, so spend is
-never bucketed under an assumption.
+twice. The panel does not rank window cost by inference provider: a transcript host is not a vendor,
+and only Codex transcripts record who served the tokens, so that identity is reported per session on
+the Sessions detail strip — beside the provenance backing it — rather than as a window axis.
 
 **Tool mix** ranks tool invocations, top eight with the tail folded into a dimmed `Other` row rather
 than dropped. Names are the host's own — Codex's `CommandExecution` is not renamed to `Bash` —

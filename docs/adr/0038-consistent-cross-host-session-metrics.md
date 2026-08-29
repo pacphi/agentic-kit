@@ -188,16 +188,17 @@ machine output per human touch — and `humanPromptsPerHour` is those same promp
 `totals.humanPrompts` ships beside `totals.prompts` so the distinction is auditable rather than
 implicit.
 
-### 8. `byInferenceProvider` is gated on observed provenance; `byProvider` stays what it was
+### 8. There is no window bucket for the inference provider
 
-Cost is bucketed under a provider only when that session's provenance was **observed**; otherwise it
-lands in `not-recorded`, which is added to the CLI's key set unconditionally so the honest bucket
-appears even in a window where everything was attributed. This is the ADR-0021 rule applied to
-spend: a transcript host is not a vendor, and a configured route is assignment intent rather than
-evidence of what served a request.
+Window cost is bucketed by execution host, not by the vendor that served the tokens. Only Codex
+transcripts record an inference provider together with the provenance backing it; Claude and
+OpenCode transcripts name none at all. An aggregate axis over that evidence would put most of a
+window's spend in one unattributed row, which a reader takes as a finding about providers rather
+than as what it is — an absence of provider evidence in two of the three formats.
 
-The legacy `byProvider` map is left alone, keyed by transcript host as it always was. Two maps with
-two contracts is clearer than one map that changes meaning.
+Provider identity is therefore per-session evidence, reported on the session row beside its
+provenance, which is where ADR-0021's rule already applies it. The legacy `byProvider` map is left
+alone, keyed by transcript host as it always was.
 
 ### 9. Tool names are the host's own, never translated
 
@@ -292,6 +293,10 @@ session id touches the transcript reader's path-traversal guard, so the gate is 
   browser bundle — because the payload ships bucket *counts* and never the edges they were binned
   on, and the import direction forbids the aggregate importing from the parsers. Equality-pinning
   tests hold the three copies together.
+- An earlier draft of this ADR shipped a provenance-gated `byInferenceProvider` bucket and a
+  "served by" panel over it. The aggregate provider axis was removed on maintainer review before
+  merge (§8): host-level attribution lives in `byHost`, and session-level provider provenance
+  remains on the session rows.
 
 ### Deferred, deliberately
 

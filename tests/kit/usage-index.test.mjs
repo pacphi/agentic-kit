@@ -1721,7 +1721,7 @@ test('the aggregate buckets on the same histogram edges the parsers fill', () =>
   assert.deepEqual(AGG_LEN_EDGES, LEN_BUCKET_EDGES);
 });
 
-test('byMode, byInferenceProvider, bySource and byTool bucket honestly', () => {
+test('byMode, bySource and byTool bucket honestly, and no provider axis is aggregated', () => {
   const records = [
     record('m1', { mode: 'auto-edit', inferenceProvider: 'openai', providerProvenance: 'observed', tools: { Edit: 2 } }),
     record('m2', { mode: null, tools: { Read: 1 } }),
@@ -1731,15 +1731,25 @@ test('byMode, byInferenceProvider, bySource and byTool bucket honestly', () => {
 
   assert.equal(a.byMode['auto-edit'].sessions, 1);
   assert.equal(a.byMode['not-recorded'].sessions, 2, 'no mode evidence is its own bucket, never folded into a real mode');
-  assert.equal(a.byInferenceProvider.openai.sessions, 1);
-  assert.equal(a.byInferenceProvider['not-recorded'].sessions, 2,
-    'a provider string without observed provenance is an assumption, not an attribution');
-  // The contrast that makes the new bucket worth having: byProvider still
-  // trusts the string it was handed.
+  // Inference provider is per-session evidence, not a window axis: a
+  // transcript host does not prove which vendor served the tokens, so there
+  // is no aggregate bucket for it. byProvider — the transcript host identity
+  // this repository has always recorded — is unaffected.
+  assert.ok(!Object.hasOwn(a, 'byInferenceProvider'),
+    'the aggregate must not carry an inference-provider bucket');
   assert.equal(a.byProvider.anthropic.sessions, 1);
   assert.equal(a.bySource.main.sessions, 2);
   assert.equal(a.bySource.subagent.sessions, 1);
   assert.deepEqual({ ...a.byTool }, { Edit: 3, Read: 1 });
+});
+
+test('per-session provider provenance survives even though the aggregate axis is gone', () => {
+  const a = aggregate([
+    record('p1', { inferenceProvider: 'openai', providerProvenance: 'observed' }),
+  ], aggOpts());
+  const row = a.sessions.find((s) => s.id === 'p1');
+  assert.equal(row.provider, 'openai');
+  assert.equal(row.providerProvenance, 'observed');
 });
 
 test('bySource always carries both rows, even with no subagent work', () => {

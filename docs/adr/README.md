@@ -286,9 +286,10 @@ time-to-first-token — with Codex's host-measured duration as a fallback only, 
 percentiles from bucket histograms whose overflow slot reports a floor rendered `≥`. It keeps
 `byDay`'s billed-days presence contract by putting per-day engaged time in a sibling map, derives
 previous-window deltas from the display window while discovery widens its own cutoff, excludes
-structurally-$0 sessions from the cost distribution, gates `byInferenceProvider` on observed
-provenance (0021's rule applied to spend), keeps host-native tool names, and prices cache savings by
-differencing the pricer instead of a multiplier. Schema v11 carries the new record fields, and
+structurally-$0 sessions from the cost distribution, declines to bucket window spend by inference
+provider at all (only one of three transcript formats records one — 0021's rule applied to spend),
+keeps host-native tool names, and prices cache savings by differencing the pricer instead of a
+multiplier. Schema v11 carries the new record fields, and
 discovery gains exactly one nested shape — Claude Code's `<sessionId>/subagents/` sidechain
 transcripts, whose absence had made a quarter of the sessions and 39% of the cost in a reference
 window invisible — behind a namespaced id grammar that narrows the traversal guard rather than

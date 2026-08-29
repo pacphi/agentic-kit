@@ -186,7 +186,7 @@ responses = Σ over included sessions of session.responses
 (`usage-parsers.mjs:380-385`); Codex increments per `agent_message` event
 (`usage-parsers.mjs:615-620`).
 - Totals: `totals.responses += s.responses` per included session
-(`usage-aggregate.mjs:574`).
+(`usage-aggregate.mjs:563`).
 - Render: `kpi("sessions", fmtNum(t.sessions), fmtNum(t.responses)+" assistant
   turns", "")` (`dashboard/client.mjs`).
 
@@ -461,10 +461,10 @@ session data, and each needs its own fix:
   `IDLE_GAP_MS`; "a run of one timestamp yields a zero-length interval and so
   contributes nothing" (comment, `usage-parsers.mjs:243-248`).
 - Aggregation: `totals.engagedSeconds = mergeIntervals(sessions.flatMap(s =>
-  s._active))` (`usage-aggregate.mjs:666`); `totals.spanUnionSeconds =
-  mergeIntervals(sessions.map(s => s._span))` (`usage-aggregate.mjs:665`);
+  s._active))` (`usage-aggregate.mjs:654`); `totals.spanUnionSeconds =
+  mergeIntervals(sessions.map(s => s._span))` (`usage-aggregate.mjs:653`);
   `totals.spanMinutes` is a running sum of `s._span[1] - s._span[0]` across
-  the loop (`usage-aggregate.mjs:585`, finalized `usage-aggregate.mjs:664`).
+  the loop (`usage-aggregate.mjs:574`, finalized `usage-aggregate.mjs:652`).
 - Render: `fmtHours()` (`dashboard/client.mjs`, `≥10h` rounds to the
   nearest hour, else one decimal place) and `fmtMins()`
   (`dashboard/client.mjs`, `≥60min` rounds to hours, else whole
@@ -548,7 +548,7 @@ renders "no sessions in window" instead of zeroed figures
 
 **Formula:** identical aggregation to every other bucket
 (`byHost[s.host]`, populated via `addTo()`, `usage-aggregate.mjs:285-294`,
-  called once per session at `usage-aggregate.mjs:587`), keyed by the literal string
+  called once per session at `usage-aggregate.mjs:576`), keyed by the literal string
 `"claude"` or `"codex"` assigned at parse time
 (`blankSession(id, 'claude')` / `blankSession(id, 'codex')`,
 `usage-parsers.mjs:441`, `:725`, `parseClaude`/`parseCodex` entry points).
@@ -566,10 +566,10 @@ aggregation — never a defect in the aggregation itself, since both hosts
 share it. [Appendix A](#appendix-a--fix-history) documents two real defects
 of exactly that kind, both in `parseCodex`.
 
-**Three identity maps, and why `byProvider` is not `byInferenceProvider`.** The
-aggregate ships three separate bucket maps, and reading one as another is the
-mistake this split exists to prevent (`usage-aggregate.mjs:560-561`,
-`usage-aggregate.mjs:587-592`):
+**Two identity maps, and the axis that is deliberately not one.** The aggregate
+buckets window spend by two identities, and reading one as the other is the
+mistake this split exists to prevent (`usage-aggregate.mjs:549`,
+`usage-aggregate.mjs:576-577`):
 
 - **`byHost`** — the execution host: which CLI wrote the transcript
   (`claude`, `codex`, `opencode`). This is what the two cards above render.
@@ -579,28 +579,21 @@ mistake this split exists to prevent (`usage-aggregate.mjs:560-561`,
   `s.provider ?? 'unknown'`. This map keeps its historical name and its
   historical shape for callers that want the raw string, whatever its
   evidence. A session that recorded no provider keys to `'unknown'`.
-- **`byInferenceProvider`** — the same identity, **provenance-gated**. Its key
-  is the provider only when `s.providerProvenance === 'observed'`; anything
-  else keys to `'not-recorded'` (`providerKey`, `usage-aggregate.mjs:538-540`).
-  This is the map the "inference provider" panel and `ak usage score`'s
-  `served by` table read.
 
-The gate is the whole point: `'not-recorded'` is a first-class key, not a
-display fallback, so spend whose provenance was never observed is held apart
-instead of being attributed to an assumption. A provider string that was
-merely *configured* is an assumption; only an *observed* one is evidence.
-Today the Codex parser is the only source that sets `rec.inferenceProvider`
-and `rec.providerProvenance` together
-(`usage-parsers.mjs:492-495`, `:501-503`); Claude and OpenCode transcripts name
-no provider at all, and so their spend lands in `'not-recorded'` — correctly,
-since neither transcript records who served it.
+There is deliberately **no window bucket for the observed inference provider**.
+Only the Codex parser sets `rec.inferenceProvider` and `rec.providerProvenance`
+together (`usage-parsers.mjs:492-495`, `:501-503`); Claude and OpenCode
+transcripts name no provider at all. A window axis over that evidence would put
+most of its spend in a single unattributed row, which reads as a finding about
+providers rather than what it is — an absence of provider evidence in two of the
+three transcript formats. Provider identity is therefore reported per session,
+on the session row, beside the provenance that backs it (§16).
 
 **What this does not model:** a workflow that hands off between Claude and
 Codex mid-task (e.g. `ak run`) produces two separate session records, one per
 host, each aggregated under its own host rather than blended into one record.
-That API-equivalent estimate is still not proof of the provider that served
-either execution — which is exactly what `byInferenceProvider` declines to
-guess.
+That API-equivalent estimate is still not proof of which provider served either
+execution.
 
 ---
 
@@ -619,7 +612,7 @@ punchcard[dow + "-" + hour] += 1   per assistant/agent_message response, at its 
 **Source:** incremented once per Claude assistant turn
 (`usage-parsers.mjs:383-385`, keyed by `punchKey(at)`) and once per Codex
 `agent_message` (`usage-parsers.mjs:618-620`), merged into the window-level
-`punchcard` object per session (`usage-aggregate.mjs:605`). Cell intensity is
+`punchcard` object per session (`usage-aggregate.mjs:593`). Cell intensity is
 linear against the single busiest cell in the window:
 `v = pcMax ? n/pcMax : 0` (`dashboard/client.mjs`) — this is a
 **relative**, not absolute, scale, so the heatmap's brightest cell is always
@@ -699,7 +692,7 @@ time, someone was genuinely waiting on it — but it is never pushed into
 `rec.models` and `addUsage()` is never called for it, so it can no longer
 create a `byModel` row of any kind. It increments a separate
 `rec.exceptions` counter instead (`usage-parsers.mjs:400`), rolled up into
-`totals.exceptions` (`usage-aggregate.mjs:579`) and surfaced per-session
+`totals.exceptions` (`usage-aggregate.mjs:568`) and surfaced per-session
 (`usage-aggregate.mjs:452-453`, alongside the existing `sidechain`/`threadSource`
 flags — inspectable in the Sessions tab, never hidden). When
 `totals.exceptions > 0`, the panel header shows a small `"· N
@@ -1053,7 +1046,7 @@ Codex ≥0.140 maintains its own SQLite thread ledger (`~/.codex/state_N.sqlite`
 — the `N` is a migration generation, so `codexStateDb` (`codex-state.mjs:41`)
 globs and takes the newest). `readCodexState` (`:62`) reads per-thread
 `thread_source` (`user` vs `subagent`) plus `thread_spawn_edges`, and
-`applyCodexLedger` (`usage-aggregate.mjs:862-874`) overlays that onto parsed
+`applyCodexLedger` (`usage-aggregate.mjs:850-862`) overlays that onto parsed
 sessions: a ledger-identified subagent has its token usage stripped — its
 rollout replays the parent's entire token history (ccusage/ccusage#950
 measured up to 91× inflation) — while the session record stays visible. The
@@ -1088,9 +1081,10 @@ the same list:
   with `≥`, and an unmeasured one is `null` rather than `0` (§15).
 - [x] A latency figure is never called TTFT: it is a prompt-to-answer gap or
   a host-measured turn duration, and neither transcript records TTFT (§15).
-- [x] Permission posture and inference provider both keep `not-recorded` as a
-  first-class bucket — unmapped evidence is never folded into a real posture,
-  and unobserved provenance is never attributed to a vendor (§8, §16).
+- [x] Permission posture keeps `not-recorded` as a first-class bucket —
+  unmapped evidence is never folded into a real posture — and the inference
+  provider gets no window bucket at all, because two of three transcript
+  formats never record one (§8, §16).
 - [x] Autonomy divides by prompts a human typed; the cost-per-session median
   excludes sessions that are `$0` by construction rather than by cheapness
   (§17).
@@ -1140,7 +1134,7 @@ p(q), over N samples, landing in bucket i (count n_i, running total `cum` before
 - Session length: `seal` derives each session's `lenSeconds` from its own
   active intervals (`usage-parsers.mjs:266-271`) — the §6 engaged figure for
   one session, never its first-to-last span.
-- Window merge: `buildRhythm` (`usage-aggregate.mjs:682-702`) adds the
+- Window merge: `buildRhythm` (`usage-aggregate.mjs:670-690`) adds the
   per-session `latHist` slot-wise and buckets each session's `lenSeconds`.
 - Percentiles: `percentileFromBuckets` (`usage-aggregate.mjs:206-223`). The
   browser re-implementation `bucketPercentile` (`usage-rhythm.mjs:106-126`) is
@@ -1267,12 +1261,11 @@ Neither transcript store records it, so no panel here may borrow the name.
 
 ## 16. How you run
 
-**Displayed as:** the `how you run` strip, subtitled `permission posture · who
-drove · who served`. Three panels: `posture, by day` (api-equivalent cost
-stacked by posture, one column per day), `main vs subagent` (a two-slice donut
-whose centre reads the main-thread share), and `inference provider` (ranked
-cost rows). `ak usage score` prints two tables, `mode — permission posture` and
-`served by — inference provider`.
+**Displayed as:** the `How you run` strip, subtitled `permission posture · who
+drove`. Two panels: `posture, by day` (api-equivalent cost stacked by posture,
+one column per day) and `main vs subagent` (a two-slice donut whose centre reads
+the main-thread share). `ak usage score` prints the matching
+`mode — permission posture` table.
 
 ### 16.1 Permission posture
 
@@ -1289,14 +1282,14 @@ mode                      = normalizeMode(host, raw evidence)  or 'not-recorded'
 folding is `addCost(d.byMode, rec.mode ?? 'not-recorded', rowCost)`
 (`usage-aggregate.mjs:386`) — in the usage-row pass, because only a row knows
 which day its dollars landed on. The window bucket is
-`addTo(bucket(byMode, s.mode ?? 'not-recorded'), s)` (`usage-aggregate.mjs:591`).
+`addTo(bucket(byMode, s.mode ?? 'not-recorded'), s)` (`usage-aggregate.mjs:580`).
 The evidence each parser reads: Claude's `permissionMode`, off the human prompt
 only (`usage-parsers.mjs:356-357`); Codex's `approval_policy`/`sandbox_policy`
 off each `turn_context`, last one wins since a session may renegotiate mid-run
 (`usage-parsers.mjs:505-508`); OpenCode's `mode` off each assistant message
 (`usage-opencode.mjs:232-233`). Render is `modeChart` in
 `src/lib/dashboard/client/usage.mjs`; the CLI table is `printScoreModeTable`
-(`src/commands/usage.mjs:230-232`).
+(`src/commands/usage.mjs:234-236`).
 
 **The mapping table**, in full (`usage-modes.mjs:6-17`), pinned value-by-value
 by `normalizeMode` assertions in `tests/kit/usage-modes.test.mjs:9-52`, and the
@@ -1351,8 +1344,8 @@ The raw string is kept beside the normalized one as `modeRaw`
 (`usage-parsers.mjs:196`) precisely because the mapping is a judgement call and
 a reader checking it needs the evidence it was made from. `not-recorded` is a
 first-class bucket key rather than a display fallback
-(`usage-aggregate.mjs:589-591`), it is always offered as a row by the CLI table
-even at zero (`printBucketTable`, `src/commands/usage.mjs:221-228`), and
+(`usage-aggregate.mjs:578-580`), it is always offered as a row by the CLI table
+even at zero (`printBucketTable`, `src/commands/usage.mjs:225-232`), and
 `segColor` forces it to the de-emphasis ink rather than letting a palette give
 it a series colour (`usage-rhythm.mjs:183-186`) — spend with no posture
 evidence must never read as a posture.
@@ -1368,8 +1361,8 @@ bySource[k].cost    = Σ over sessions with that source of session.cost
 centre of the donut = round(main / (main + subagent) × 100) %
 ```
 
-**Source:** `sourceKey` (`usage-aggregate.mjs:544-546`). Both rows are created
-before the fold (`usage-aggregate.mjs:570`) so "no subagent sessions" renders
+**Source:** `sourceKey` (`usage-aggregate.mjs:533-535`). Both rows are created
+before the fold (`usage-aggregate.mjs:559`) so "no subagent sessions" renders
 as a zero rather than a row the UI silently drops. Claude's evidence is the
 `isSidechain` flag on any entry in the file (`usage-parsers.mjs:454`, decoded at
 `telemetry-records.mjs:244`); Codex's is the ledger-backed `thread_source`
@@ -1390,7 +1383,7 @@ not delegated work that was free.
 
 **Codex — structurally `$0`, by ledger design.** A ledger-identified subagent
 has its usage rows removed outright (`applyCodexLedger`,
-`usage-aggregate.mjs:869-872`) and `finalizeCodexUsage` never writes one in the
+`usage-aggregate.mjs:857-860`) and `finalizeCodexUsage` never writes one in the
 first place (`usage-parsers.mjs:718`), because a subagent rollout replays its
 parent's entire cumulative token history and keeping it would bill the parent
 twice (§13c, **[C7]**). The record stays visible and auditable; its cost is zero
@@ -1425,25 +1418,12 @@ sidechain-only (6,924 assistant turns), 150 were main-only (2,738 turns), and
 **none mixed the two** — which is what makes "any `isSidechain` entry marks the
 whole record" safe, since there is no parent's spend in the file to mis-attribute.
 
-### 16.3 Served by — inference provider
-
-**Formula:** `byInferenceProvider[k].cost`, where `k` is the session's provider
-string **only when its provenance was observed**, and `'not-recorded'`
-otherwise (`providerKey`, `usage-aggregate.mjs:538-540`).
-
-**Source:** the bucket is filled at `usage-aggregate.mjs:592`; render is
-`providerRows` in `src/lib/dashboard/client/usage.mjs` (which prints
-`not-recorded` as `Not recorded` and dims the row), and
-`printScoreProviderTable` (`src/commands/usage.mjs:234-240`) adds
-`'not-recorded'` to the CLI key set unconditionally, so the honest bucket
-appears even in a window where every session was attributed.
-
-This is the observed-provenance gate, and §8 states the rule and its
-distinction from the legacy `byProvider` map in full. The short version: a
-transcript host is not a vendor, a configured provider is not an observed one,
-and spend is never bucketed under an assumption.
-
-**What §16 does not model:** posture is the last evidence a session recorded,
+**What §16 does not model:** who served the tokens. There is no window bucket
+for the inference provider — §8 says why: two of the three transcript formats
+record no provider at all, so an aggregate axis over that evidence would read
+as a claim about providers rather than as the absence it is. A session's
+provider and the provenance backing it stay on its own row in the Sessions
+detail strip. Posture is likewise the last evidence a session recorded,
 not a timeline — a session that started in `plan` and ended in `auto-edit`
 reports only the latter, and its whole cost stacks under it. The `main`/
 `subagent` split is per session, so a main-thread session that dispatched
@@ -1475,23 +1455,23 @@ costPerSessionP90    = nearest-rank P90 of the same set
 cacheSavedUsd        = Σ rows  (costOf(1M as input) - costOf(1M as cacheRead)) × cacheRead / 1e6
 ```
 
-**Source:** the derived block is `finishTotals` (`usage-aggregate.mjs:661-675`),
+**Source:** the derived block is `finishTotals` (`usage-aggregate.mjs:649-663`),
 which the previous-window projection calls too so a baseline is never derived a
 second, drifting way. `median` and `percentile` are exact over the values
-(`usage-aggregate.mjs:619-624`, `:629-634`), unlike §15's bucketed percentiles.
+(`usage-aggregate.mjs:607-612`, `:617-622`), unlike §15's bucketed percentiles.
 Active days come from `byDay`'s key count and the streak from `activeStreak` in
 `src/lib/dashboard/client/usage.mjs`; the tiles are `cadenceCells` there, and
 `printScoreCadence` (`src/commands/usage.mjs:187-206`) in the CLI.
 
 **Autonomy divides by prompts a human typed, and only those.** The denominator
 is `totals.humanPrompts`, accumulated under an explicit main-thread guard
-(`usage-aggregate.mjs:578`): a subagent's prompts are written by the harness,
+(`usage-aggregate.mjs:567`): a subagent's prompts are written by the harness,
 so counting them would report a person as having typed work nobody asked for by
 hand — and would grow the denominator exactly in the windows where delegation
 was heaviest, making autonomy fall as automation rose. `totals.prompts` still
-records every prompt beside it (`usage-aggregate.mjs:574`); the two are
+records every prompt beside it (`usage-aggregate.mjs:563`); the two are
 different questions and both are on the wire. Touch rate is those same human
-prompts per engaged hour (`usage-aggregate.mjs:669`), so both per-prompt figures
+prompts per engaged hour (`usage-aggregate.mjs:657`), so both per-prompt figures
 share one denominator. A rate whose denominator is zero is `null`, never `0`
 — no engaged time means the rate was never measured, which is not what "zero
 per hour" claims.
@@ -1513,7 +1493,7 @@ reader has nothing to hover.
 
 **Cost per session is a median over priced sessions only.** A session carries
 `_priced` when it had any usage rows at all (`usage-aggregate.mjs:478`), and
-only those costs enter the distribution (`usage-aggregate.mjs:584`). A session
+only those costs enter the distribution (`usage-aggregate.mjs:573`). A session
 with no usage rows costs `$0` *structurally* — nothing was ever measured for it,
 the common case being a Codex subagent rollout whose tokens were stripped as a
 double-count (§16.2) — and letting those in would report "the typical session
@@ -1548,7 +1528,7 @@ this row              =  $4.50 × 2,000,000 / 1e6       = $9.00
 ```
 
 The window total is the sum of those per-row figures
-(`usage-aggregate.mjs:583`), carried on each session row as `cacheSavedUsd`
+(`usage-aggregate.mjs:572`), carried on each session row as `cacheSavedUsd`
 (`usage-aggregate.mjs:460`) so it is auditable a row at a time rather than only
 in aggregate, and rendered in the cache tile's subtitle as `saved ≈ $X vs
 uncached`.
@@ -1556,10 +1536,10 @@ uncached`.
 **Deltas: what "the previous window" is, exactly.** For a displayed window of
 `d` days ending at `now`, the baseline is the equal-length window immediately
 before it — the half-open interval `[now − 2d, now − d)`
-(`previousWindow`, `usage-aggregate.mjs:764-774`). Both bounds are derived from
+(`previousWindow`, `usage-aggregate.mjs:752-762`). Both bounds are derived from
 `now` and `d`, the window the UI is *showing*, and never from the parse cutoff:
 the caller widens that cutoff on purpose so older records survive to be
-aggregated here (`lookbackDays: days * 2` at `src/commands/usage.mjs:304` and
+aggregated here (`lookbackDays: days * 2` at `src/commands/usage.mjs:295` and
 `src/lib/dashboard-server.mjs:1361`), and deriving the baseline from a widened
 bound would silently stretch it to whatever lookback the caller happened to
 pass. A delta against an unknown-length window is not a delta. The upper bound
@@ -1570,7 +1550,7 @@ older records were never read off disk — and every chip self-suppresses
 against it rather than claiming a change it cannot measure. Leaving `previous`
 off entirely leaves `agg.previous` as `null` — "not requested",
 which a zeroed totals object would misreport as "measured nothing"
-(`usage-aggregate.mjs:842`). A chip self-suppresses when the baseline is null
+(`usage-aggregate.mjs:830`). A chip self-suppresses when the baseline is null
 or zero, and a magnitude that rounds to zero prints flat rather than drawing an
 arrow the printed number does not support (`deltaChip`,
 `usage-rhythm.mjs:36-53`; `fmtDelta`, `src/commands/usage.mjs:152-163`).
@@ -1581,9 +1561,9 @@ landed on that day (`dayBucket`, `usage-aggregate.mjs:307-320`) — and that is
 what the active-day count and the streak above are counted from. Engaged time
 does not share that key set: a session that runs past midnight, or a day spent
 reading, produces worked time on a day that billed nothing. So
-`buildEngagedByDay` (`usage-aggregate.mjs:738-746`) keys its own map, cutting
+`buildEngagedByDay` (`usage-aggregate.mjs:726-734`) keys its own map, cutting
 each active interval at every local midnight it crosses
-(`splitAtLocalMidnight`, `usage-aggregate.mjs:716-724`) and unioning the pieces
+(`splitAtLocalMidnight`, `usage-aggregate.mjs:704-712`) and unioning the pieces
 per day, which makes the map sum exactly to `totals.engagedSeconds`. Folding it
 into `byDay` would have forced one of two lies: inventing zero-token `byDay`
 rows, or dropping real worked time. The consequence is visible on the tiles —
@@ -1618,10 +1598,10 @@ byDay[day].exceptions += session.exceptions   attributed to the session's FIRST 
 ```
 
 **Source:** `totals.exceptions` and `totals.aborts` accumulate together at
-`usage-aggregate.mjs:579`; the per-day series lands on `byDay[s._day].exceptions`
-(`usage-aggregate.mjs:601-604`). Render is
+`usage-aggregate.mjs:568`; the per-day series lands on `byDay[s._day].exceptions`
+(`usage-aggregate.mjs:589-592`). Render is
 `relRate`/`relStat`/`relTrend` in `src/lib/dashboard/client/usage.mjs`;
-`printScoreReliability` (`src/commands/usage.mjs:242-256`) prints the CLI pair.
+`printScoreReliability` (`src/commands/usage.mjs:238-264`) prints the CLI pair.
 
 **Evidence, per host.** An "exception" is a turn that never resolved to a
 model, and each host signals that differently:
@@ -1656,7 +1636,7 @@ treatment `latHist` (§15) and the context chip (§16) already get.
 
 **Exceptions ride the session's first-billed day.** The per-day series uses the
 same attribution as the session count — `byDay[s._day].exceptions += s.exceptions`
-(`usage-aggregate.mjs:601-604`) — which is *not* the moment a turn dropped: a session spanning midnight lands all of its
+(`usage-aggregate.mjs:589-592`) — which is *not* the moment a turn dropped: a session spanning midnight lands all of its
 exceptions on the day its tokens first billed. That keeps the reliability trend
 and the session trend drawn on one convention — the alternative, attributing
 each exception to its own timestamp, would have made the two lines disagree
@@ -1701,7 +1681,7 @@ byTool[name]                  += session.tools[name]      summed across sessions
 byDay[day].byModelFamily[fam] += rowCost                  fam = modelFamily(row.model)
 ```
 
-**Source:** the tool tally is folded into `byTool` at `usage-aggregate.mjs:606`;
+**Source:** the tool tally is folded into `byTool` at `usage-aggregate.mjs:594`;
 the per-day family split is `addCost(d.byModelFamily, modelFamily(row.model),
 rowCost)` (`usage-aggregate.mjs:387`), inside the usage-row pass because only a
 row knows its day. Render is `toolRows`/`modelMix` in

@@ -625,24 +625,12 @@ import { renderUsage } from './usage-orchestrators.mjs';
       +"is Claude's sidechain flag or Codex's ledger-backed thread source — either way, not a "
       +"session a human was driving.</p></div>";
   }
-  function providerRows(d){
-    var list=entries(d.byInferenceProvider);
-    var max=list.length?list[0].cost:0;
-    return '<div class="hr-block"><div class="hr-t">inference provider</div>'
-      +(list.length?rankedRows(list.map(function(x){
-        return {label:x.name==="not-recorded"?"Not recorded":identityName(x.name),
-          value:fmtUsd(x.cost),share:pct(x.cost,max),dim:x.name==="not-recorded"};
-      })):'<div class="empty">no provider evidence in window.</div>')
-      +'<p class="hr-note">A transcript host does not prove which vendor served the tokens, so '
-      +"spend whose provenance was never observed keys to <b>Not recorded</b> instead of being "
-      +"attributed to an assumption.</p></div>";
-  }
   function renderScoreHowRun(d){
     var body=ensureBlock("u-howrun",
-      stripHtml("u-howrun","how you run","permission posture · who drove · who served"),"u-rhythm");
+      stripHtml("u-howrun","how you run","permission posture · who drove"),"u-rhythm");
     if(!body)return;
     body.innerHTML='<div class="howrun"><div class="hr-block hr-chart">'+modeChart(d)+"</div>"
-      +'<div class="hr-side">'+sourceDonut(d)+providerRows(d)+"</div></div>";
+      +'<div class="hr-side">'+sourceDonut(d)+"</div></div>";
   }
 
   function renderScoreDayBars(d){

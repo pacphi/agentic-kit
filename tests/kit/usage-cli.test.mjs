@@ -136,7 +136,9 @@ test('ak usage score prints the offline scorecard summary', () => {
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stdout, /AUTONOMY/, 'cadence must render an autonomy row');
   assert.match(result.stdout, /not-recorded/,
-    'a session with no mode/provider evidence must fold into an explicit not-recorded row');
+    'a session with no mode evidence must fold into an explicit not-recorded row');
+  assert.doesNotMatch(result.stdout, /served by/i,
+    'inference provider is per-session evidence, not one of the window tables');
   assert.match(result.stdout, /list price/i, 'the api-equivalent hero tile must carry the list-price disclaimer');
   assert.match(result.stdout, /not plan billing/, 'the disclaimer must say this is not plan billing');
   assert.match(result.stdout, /<\$0\.01/,
@@ -151,7 +153,7 @@ test('ak usage score --json emits the aggregate projection verbatim', () => {
   const result = ak(['usage', 'score', '--json'], sb);
   assert.equal(result.status, 0, result.stderr);
   const value = JSON.parse(result.stdout);
-  assert.deepEqual(Object.keys(value), ['window', 'totals', 'rhythm', 'byMode', 'byInferenceProvider', 'bySource', 'previous']);
+  assert.deepEqual(Object.keys(value), ['window', 'totals', 'rhythm', 'byMode', 'bySource', 'previous']);
   assert.equal(value.window, 14, 'default window is 14 days');
   assert.equal(value.totals.sessions, 1);
   // Latency histogram is a FIXED 6-slot shape (5 edges + one overflow bucket) —

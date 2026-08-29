@@ -235,14 +235,6 @@ function printScoreModeTable(agg) {
   printBucketTable('mode — permission posture', agg.byMode ?? {}, [...MODES, 'not-recorded']);
 }
 
-function printScoreProviderTable(agg) {
-  const byProv = agg.byInferenceProvider ?? {};
-  const keys = new Set(Object.keys(byProv));
-  keys.add('not-recorded');
-  const ordered = [...keys].sort((a, b) => (Number(byProv[b]?.cost) || 0) - (Number(byProv[a]?.cost) || 0));
-  printBucketTable('served by — inference provider', byProv, ordered);
-}
-
 function printScoreReliability(agg) {
   heading('reliability — turns that never landed');
   const t = agg.totals ?? {};
@@ -274,14 +266,13 @@ function printScoreReliability(agg) {
 /** The --json shape: an ADDITIVE, credential-free, offline projection of the
  *  same aggregate the text report renders from — verbatim fields, no
  *  reshaping, so a consumer diffing this against the dashboard's /api/usage
- *  payload sees the identical totals/rhythm/byMode/byInferenceProvider. */
+ *  payload sees the identical totals/rhythm/byMode/bySource. */
 function scoreProjection(agg, windowDays) {
   return {
     window: windowDays,
     totals: agg.totals,
     rhythm: agg.rhythm,
     byMode: agg.byMode,
-    byInferenceProvider: agg.byInferenceProvider,
     bySource: agg.bySource,
     previous: agg.previous,
   };
@@ -316,7 +307,6 @@ async function runScore({ flags, deps }) {
   printScoreCadence(agg);
   printScoreRhythm(agg);
   printScoreModeTable(agg);
-  printScoreProviderTable(agg);
   printScoreReliability(agg);
   return 0;
 }

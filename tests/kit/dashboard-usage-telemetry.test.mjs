@@ -410,12 +410,16 @@ test('the posture stack ships its own legend, because stackedDays draws none', (
   assert.doesNotMatch(JS, /MODE_COLOR=\{[^}]*not-recorded/);
 });
 
-test('how-you-run splits source and provider without attributing unobserved spend', () => {
+// The panel is posture + delegation. It once carried a third block ranking
+// window spend by inference provider; a transcript host does not prove which
+// vendor served the tokens, so that axis was removed rather than shipped with
+// most of its spend in a "Not recorded" row. Provider identity is still on the
+// session row, where the evidence for it actually lives.
+test('how-you-run is posture and delegation, with no aggregate provider ranking', () => {
   assert.match(JS, /aValue:main,bValue:sub/, 'the donut is main vs subagent cost');
   assert.match(JS, /d\.bySource/);
-  assert.match(JS, /entries\(d\.byInferenceProvider\)/);
-  assert.match(JS, /dim:x\.name==="not-recorded"/, 'unobserved provenance renders dim, never as a provider');
-  assert.match(JS, /attributed to an assumption/, 'the panel says why unobserved spend is held apart');
+  assert.doesNotMatch(JS, /byInferenceProvider/);
+  assert.doesNotMatch(JS, /function providerRows/);
 });
 
 test('the tool list folds its tail into a dim Other instead of dropping it', () => {
