@@ -433,3 +433,30 @@ test('parseCodex: FIRST session_meta wins identity — a replayed parent meta ca
   assert.equal(user.threadSource, 'user');
   assert.equal(user.usage.length, 1, 'a genuine single-meta user rollout still bills normally');
 });
+
+// Codex has no discipline of its own for distinguishing a typed prompt from
+// harness output or a mirrored cross-host envelope (Claude has isHumanPrompt
+// + HARNESS_OUTPUT_RE since schema v5). Measured on the reference corpus: 596
+// harness-shaped rows plus mirrored Claude-host envelopes (teammate
+// deliveries, cross-session messages) landing as Codex user_message events —
+// both distort prompts/humanPrompts/autonomy. Both message generations
+// (legacy user_message and item_completed UserMessage) must be gated.
+test('parseCodex: harness output and mirrored cross-host envelopes are excluded from prompts (both generations)', () => {
+  const legacyLines = [
+    JSON.stringify({ type: 'session_meta', payload: { id: 'cxh1', cwd: '/tmp/p', thread_source: 'user' }, timestamp: T0 }),
+    JSON.stringify({ type: 'event_msg', payload: { type: 'user_message', message: 'do the real thing' }, timestamp: T0 }),
+    JSON.stringify({ type: 'event_msg', payload: { type: 'user_message', message: '<task-notification>background task finished</task-notification>' }, timestamp: T0 }),
+    JSON.stringify({ type: 'event_msg', payload: { type: 'user_message', message: 'Another Claude session sent a message: hello' }, timestamp: T0 }),
+  ].join('\n');
+  const { session: legacy } = parseCodex(legacyLines, { id: 'cxh1' });
+  assert.equal(legacy.prompts, 1);
+
+  const itemLines = [
+    JSON.stringify({ type: 'session_meta', payload: { id: 'cxh2', cwd: '/tmp/p', thread_source: 'user' }, timestamp: T0 }),
+    JSON.stringify({ type: 'event_msg', payload: { type: 'item_completed', item: { type: 'UserMessage', content: [{ type: 'text', text: 'do the real thing' }] } }, timestamp: T0 }),
+    JSON.stringify({ type: 'event_msg', payload: { type: 'item_completed', item: { type: 'UserMessage', content: [{ type: 'text', text: '<task-notification>background task finished</task-notification>' }] } }, timestamp: T0 }),
+    JSON.stringify({ type: 'event_msg', payload: { type: 'item_completed', item: { type: 'UserMessage', content: [{ type: 'text', text: 'Another Claude session sent a message: hello' }] } }, timestamp: T0 }),
+  ].join('\n');
+  const { session: item } = parseCodex(itemLines, { id: 'cxh2' });
+  assert.equal(item.prompts, 1);
+});

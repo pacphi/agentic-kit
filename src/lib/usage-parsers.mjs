@@ -618,19 +618,49 @@ function handleCodexTaskComplete(rec, latState, payload) {
   if (payload.error != null) rec.exceptions++;
 }
 
-/** `event_msg` → a `user_message`/`item_completed` user turn. Codex rollouts
- *  record only real prompts as user_message events — tool output travels in
- *  other event types that are not surfaced as turns — so every normalized
- *  Codex user turn is kind 'prompt' by construction. */
+/** Codex-side counterpart to Claude's `isHumanPrompt`/`HARNESS_OUTPUT_RE`
+ *  gate (schema v5). Codex has no discipline of its own: harness output
+ *  (task notifications, command stdout/stderr) and MIRRORED Claude-host
+ *  envelopes — a teammate delivery or a cross-session message replayed into
+ *  a Codex rollout rather than typed there — can both arrive as
+ *  `user_message`/`UserMessage` events. Reuses HARNESS_OUTPUT_RE verbatim
+ *  (Claude's own envelope markers reproduce byte-for-byte inside a mirrored
+ *  rollout) plus the two clear machine markers usage-research's provenance
+ *  rules validated for cross-host delivery: a `<teammate-message` wrapper
+ *  and the literal "Another Claude session sent a message:" prefix
+ *  cross-session delivery uses. Deliberately narrow — exact-twin cross-host
+ *  dedup by flush timestamp is a recorded follow-up, not attempted here —
+ *  so when unsure this counts a message as human; over-counting is the safe
+ *  direction, same one-directional risk stance the research took. */
+const CODEX_MACHINE_ENVELOPE_RE = /^\s*(?:<teammate-message|Another Claude session sent a message:)/;
+
+function isCodexHumanMessage(text) {
+  return !HARNESS_OUTPUT_RE.test(text) && !CODEX_MACHINE_ENVELOPE_RE.test(text);
+}
+
+/** `event_msg` → a `user_message`/`item_completed` user turn. Every such
+ *  event still gets a turn row (kept visible for audit, exactly as
+ *  parseClaude keeps a harness-origin "user" entry's turn row) — but only a
+ *  genuinely human one (isCodexHumanMessage) counts toward `rec.prompts`,
+ *  sets the session title, or opens the prompt→agent-message latency
+ *  window. `stats.prompts` stays a raw per-event-shape diagnostic,
+ *  deliberately ungated: it answers "how many user_message-shaped events did
+ *  this file carry", which is a different, still-useful question from "how
+ *  many were human". */
 function handleCodexUserMessage(rec, turns, stats, titleState, latState, decoded, ms, withTurns) {
-  rec.prompts++;
   stats.prompts++;
   const text = decoded.text;
-  if (!titleState.firstPrompt) titleState.firstPrompt = text;
-  // Opens the prompt→agent-message latency window; closed by the first
-  // following handleCodexAssistantMessage (mirrors Claude's latState, Task 3).
-  latState.pendingPromptMs = ms;
-  if (withTurns && text) turns.push({ role: 'user', at: new Date(ms).toISOString(), text, prompt: true, kind: 'prompt' });
+  const human = isCodexHumanMessage(text);
+  if (human) {
+    rec.prompts++;
+    if (!titleState.firstPrompt) titleState.firstPrompt = text;
+    // Opens the prompt→agent-message latency window; closed by the first
+    // following handleCodexAssistantMessage (mirrors Claude's latState, Task 3).
+    latState.pendingPromptMs = ms;
+  }
+  if (withTurns && text) {
+    turns.push({ role: 'user', at: new Date(ms).toISOString(), text, prompt: human, kind: human ? 'prompt' : 'context' });
+  }
 }
 
 function handleCodexAssistantMessage(rec, turns, stats, latState, decoded, ms, withTurns) {
