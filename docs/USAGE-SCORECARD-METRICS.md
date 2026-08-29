@@ -72,7 +72,23 @@ schema change — `src/lib/usage-index.mjs:10`, `:99`):
 | Transcript host | Store | Format |
 |---|---|---|
 | Claude Code | `~/.claude/projects/<project>/<sessionId>.jsonl` | one JSON object per line: `user`/`assistant` turns, each assistant turn carrying its own `usage` object |
+| Claude Code (subagent) | `~/.claude/projects/<project>/<sessionId>/subagents/agent-<hash>.jsonl` | the same per-line format. A session's own delegated work, written to its own file beside the parent — cost-bearing, and marked `sidechain` by its own entries |
 | Codex CLI | `~/.codex/sessions/<yyyy>/<mm>/<dd>/rollout-<ts>-<sessionId>.jsonl` | one JSON object per line: `session_meta`, `turn_context`, and `event_msg` records; the latter carry **cumulative** `token_count` snapshots plus legacy messages or newer `item_completed` envelopes |
+
+Discovery is **one level of project directories plus that one nested shape**,
+not a recursive walk: `listClaude` (`usage-index.mjs:259-273`) descends into a
+session-id directory only through `listClaudeSubagents`
+(`usage-index.mjs:243-255`), which reads exactly
+`<projectDir>/<sessionId>/subagents/*.jsonl`. A directory that is not a
+session-id dir with a `subagents` child — Claude Code's own `memory` dir, say —
+contributes nothing rather than being crawled. Each subagent record takes a
+**namespaced** id, `<sessionId>/<stem>` (`usage-index.mjs:250`), because Claude
+Code names every such file `agent-<hash>.jsonl` and that stem is not guaranteed
+unique across two parents; an unnamespaced id would silently collide two
+unrelated subagent records into one. `locateSubagent`
+(`usage-index.mjs:787-795`) resolves that id back to the nested path when a
+reader opens the session, building the candidate path from the two validated
+capture groups rather than from raw request input.
 
 The parsers are `parseClaude` (`usage-parsers.mjs:440-469`) and `parseCodex`
 (`usage-parsers.mjs:724-745`). Both are pure functions over the raw file bytes —
@@ -816,6 +832,13 @@ Every rate lives in the `PRICES` table (`src/lib/pricing.mjs:65-125`) and carrie
 the table's own last-verified date, `PRICES_AS_OF = '2026-08-25'`
 (`pricing.mjs:18`). Each subsection below dates its own source check separately.
 
+**The code is the authority for a rate; this section is a reading of it.** The
+Anthropic transcription in §13.1 matches `pricing.mjs:67-89` value for value.
+The OpenAI transcription in §13.2 does **not** currently match
+`pricing.mjs:112-124`, and the sourcing note there is likewise out of step with
+the file's own comment. Price a row from `pricing.mjs`, not from §13.2's table,
+until the two are reconciled.
+
 ### 13.1 Anthropic — primary source, directly verified
 
 Fetched in full from **[C1]** on 2026-07-25. The table below is Anthropic's
@@ -1201,10 +1224,14 @@ Neither transcript store records it, so no panel here may borrow the name.
   deliberate choice to keep one distribution rather than two thin ones, and it
   means a window dominated by one host is really reporting that host's
   instrument;
-- the parsers' edge constants are a second, independent literal from the
-  aggregate's. The browser copy is pinned to the server's by test; the parser
-  copy is not, so a change made in one place and not the other would re-label
-  buckets silently.
+- the bucketing *function* is implemented twice: the parsers export
+  `bucketIndex` (`usage-parsers.mjs:214-217`) and the aggregate keeps a private
+  copy of the same loop (`usage-aggregate.mjs:187-190`), because the dependency
+  between the two modules is deliberately one-way. The *edges* they run on are
+  pinned equal by test — `AGG_LAT_EDGES` against `LAT_BUCKET_EDGES`
+  (`tests/kit/usage-index.test.mjs:1686-1692`) — but the two function bodies
+  are not, so a boundary rule changed in one and not the other would go
+  unnoticed.
 
 ---
 
@@ -1298,27 +1325,55 @@ as a zero rather than a row the UI silently drops. Claude's evidence is the
 `telemetry-records.mjs:244`); Codex's is the ledger-backed `thread_source`
 (§13c). Render is `sourceDonut` in `src/lib/dashboard/client/usage.mjs`.
 
-**Subagent cost can honestly read `$0`, and that is not a defect.** On the Codex
-side it is the design: a ledger-identified subagent has its usage rows removed
-outright (`applyCodexLedger`, `usage-aggregate.mjs:869-872`) and
-`finalizeCodexUsage` never writes one in the first place
-(`usage-parsers.mjs:692`), because a subagent rollout replays its parent's
-entire cumulative token history and keeping it would bill the parent twice
-(§13c, **[C7]**). The session record stays visible and auditable; its cost is
-structurally zero, and §17 explains why such sessions are also kept out of the
-cost-per-session distribution.
+**The two hosts reach the `subagent` row by different routes, and only one of
+them arrives at `$0`.** They are worth reading apart, because the same donut
+slice is telling two different truths at once.
 
-Whether the *Claude* side contributes any subagent spend is a property of the
-corpus on the machine, not of the code — and on this one it does. In the census
-of §13.3 (the 200 most recently modified local Claude transcripts, measured
-2026-08-28), **50 files were sidechain-only** and carried 6,924 assistant turns
-between them, against 150 main-only files carrying 2,738; **no file mixed the
-two**. That last figure is what makes the rule sound: because Claude writes a
-sidechain session to its own transcript, "any `isSidechain` entry marks the
-whole record" cannot mis-attribute a parent's spend to a subagent. A window
-drawn from that corpus therefore shows a genuinely non-zero subagent slice, and
-a `$0` slice would be the surprising reading — the opposite of the Codex case,
-where `$0` is expected.
+**Claude — real, priced, included.** A session's delegated work is written to
+its own transcript under `<project>/<sessionId>/subagents/`, and those files are
+discovered by `listClaudeSubagents` (`usage-index.mjs:243-255`, §1) and parsed
+like any other. `parseClaude` already prices those bytes and marks the record
+`sidechain` from its own `isSidechain` entries, so the cost is real, is included
+in `totals.cost`, and the session opens in the Sessions tab like a main-thread
+one. A `$0` Claude subagent slice would mean no delegated work in the window,
+not delegated work that was free.
+
+**Codex — structurally `$0`, by ledger design.** A ledger-identified subagent
+has its usage rows removed outright (`applyCodexLedger`,
+`usage-aggregate.mjs:869-872`) and `finalizeCodexUsage` never writes one in the
+first place (`usage-parsers.mjs:692`), because a subagent rollout replays its
+parent's entire cumulative token history and keeping it would bill the parent
+twice (§13c, **[C7]**). The record stays visible and auditable; its cost is zero
+because nothing was measured for it, not because the work was cheap — which is
+also why §17 keeps such sessions out of the cost-per-session distribution.
+
+**Worked example**, one machine's own 14-day window — every figure below taken
+from a single aggregate generated 2026-08-29T00:00Z, so the parts add up. It is
+one corpus, so the *shape* is the point, not the totals:
+
+| Source | Host | Sessions | Api-equivalent cost | Responses |
+|---|---|---|---|---|
+| subagent | claude | 178 | $2,376.13 | 17,863 |
+| subagent | codex | 156 | $0.00 | 1,356 |
+| main | claude | 265 | $2,904.54 | 11,480 |
+| main | codex | 682 | $802.97 | 56,543 |
+
+`bySource` therefore reads `main` 947 sessions / $3,707.50 and `subagent` **334
+sessions / $2,376.13**, which sum exactly to the window's $6,083.63 across 1,281
+sessions. Delegated work is **39.1% of the window's cost, and every dollar of it
+is Claude's.** The Codex row is the honest zero described above: 156 sessions and
+1,356 responses are visible, and their cost is `$0.00` because their tokens were
+stripped as a double-count. Both rows exist because both are pre-created before
+the fold; neither is a row the UI invented. (The four host rows are each rounded
+to the cent independently, so reading them as a column sums a cent high against
+`bySource` — the buckets, not the display, are what the totals are built from.)
+
+That a `subagent` slice is non-zero at all rests on one property of the store:
+Claude writes a sidechain session to its **own** file. Measured over the 200
+most recently modified local Claude transcripts on 2026-08-28, 50 files were
+sidechain-only (6,924 assistant turns), 150 were main-only (2,738 turns), and
+**none mixed the two** — which is what makes "any `isSidechain` entry marks the
+whole record" safe, since there is no parent's spend in the file to mis-attribute.
 
 ### 16.3 Served by — inference provider
 
@@ -1440,7 +1495,7 @@ before it — the half-open interval `[now − 2d, now − d)`
 `now` and `d`, the window the UI is *showing*, and never from the parse cutoff:
 the caller widens that cutoff on purpose so older records survive to be
 aggregated here (`lookbackDays: days * 2` at `src/commands/usage.mjs:288` and
-`src/lib/dashboard-server.mjs:1356`), and deriving the baseline from a widened
+`src/lib/dashboard-server.mjs:1361`), and deriving the baseline from a widened
 bound would silently stretch it to whatever lookback the caller happened to
 pass. A delta against an unknown-length window is not a delta. The upper bound
 is exclusive so a session ending exactly at the boundary belongs to the current
@@ -1662,8 +1717,9 @@ example) but performed **no de-duplication** against a parent session a
 subagent file might be replaying. **Fix:** the parser now reads
 `session_meta.thread_source` (`telemetry-records.mjs:101-110`, confirmed as a real
 Codex rollout field by **[C7]**) and skips the `addUsage()` call entirely
-when its value is `'subagent'` (`usage-parsers.mjs:692`, guard condition
-`rec.threadSource !== 'subagent'`). The session record itself is **not**
+when its value is `'subagent'` — `finalizeCodexUsage` returns early on
+`if (!lastUsage || rec.threadSource === 'subagent')`
+(`usage-parsers.mjs:692`). The session record itself is **not**
 dropped — it remains visible in the Sessions tab with `threadSource`
 surfaced (mirroring the existing `sidechain` flag Claude sessions already
 carry, `usage-parsers.mjs:454`), so a maintainer auditing the raw data can
@@ -1728,8 +1784,9 @@ promise.
   `totals.exceptions: null` and still showed the `<synthetic>` row in
   `byModel` on the first run after the change, purely because the cache
   predated it; every unit test still passed, since tests only exercise a
-  fresh parse. `SCHEMA_VERSION` went to `4` (`usage-index.mjs:99`; since
-  superseded by `5`, above) specifically to force the one-time re-parse.
+  fresh parse. `SCHEMA_VERSION` went to `4` specifically to force the one-time
+  re-parse; the constant now reads `11` (`usage-index.mjs:99`), each bump since
+  having forced its own re-parse the same way.
   Re-querying the same live server after the bump returned
   `totals.exceptions: 20` with `<synthetic>` absent from `byModel` —
   measured, not projected.
