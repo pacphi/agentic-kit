@@ -447,8 +447,21 @@ test('model mix keeps four named families and folds the rest into one dim band',
 test('reliability states a rate with its denominator, and flags direction in words not only color', () => {
   assert.match(JS, /exceptions \/ 1k responses/);
   assert.match(JS, /\(Number\(t\.exceptions\)\|\|0\)\/r\*1000/);
+  // aborts is CODEX-ONLY evidence — turn_aborted is the only interrupt signal
+  // any host writes. These three assertions used to pin the opposite: they
+  // asserted the presence of an unconditional count and of the tooltip
+  // sentence "Turns the transcript recorded as interrupted", which is false
+  // for a claude-only corpus. They now pin the capability gate, so reverting
+  // to the measured-looking zero goes red instead of staying green.
   assert.match(JS, /aborted turns/, 'aborts are counted apart from exceptions');
-  assert.match(JS, /an abort is a choice, not a failure/);
+  assert.match(JS, /value:cxSess\?fmtNum\(ab\):"—"/,
+    'no codex sessions in the window → em dash, never a 0 that reads as "you never interrupted a turn"');
+  assert.match(JS, /ab\/cxResp\*1000\)\+" per 1k codex responses"/,
+    'the rate is over codex responses only — dividing by every host\'s responses dilutes it by host mix');
+  assert.match(JS, /no codex sessions — no other host records interrupts/);
+  assert.match(JS, /CODEX ONLY\./, 'the tooltip states the capability, not just the definition');
+  assert.doesNotMatch(JS, /relStat\(\{label:"aborted turns",value:fmtNum\(ab\)/,
+    'the unconditional count must not come back');
   // Icon + words + color, never color alone.
   assert.match(JS, /rel-flag" data-sev="warn"><i aria-hidden="true">▲<\/i>/);
   assert.match(JS, /higher than the previous window/);
@@ -577,7 +590,37 @@ test('the session detail strip spells out posture and rhythm, and never omits th
   assert.match(JS, /\["posture",posture\],\["rhythm",esc\(rhythm\)\]/);
   assert.match(JS, /Not recorded <span class='sd-conf'>\(no posture evidence in this transcript\)/);
   assert.match(JS, /latency samples/);
-  assert.match(JS, /aborts/);
+  // Per-row, the same capability rule the reliability panel applies: a
+  // claude/opencode row cannot have recorded an interrupt, so it says so
+  // rather than printing a 0 indistinguishable from a measured one.
+  assert.match(JS, /aborts "\+\(sx\.host==="codex"\?fmtNum\(Number\(sx\.aborts\)\|\|0\):"not recorded for this host"\)/);
+});
+
+test('an observed-but-unmapped posture shows the host spelling, never "no posture evidence"', () => {
+  // normalizeMode returns { mode: null, raw: 'yolo/workspace-write' } for a
+  // value outside the taxonomy — evidence preserved, no guess — and
+  // v11Projection ships both onto the session row. Printing "no posture
+  // evidence in this transcript" over a modeRaw sitting on that same row
+  // denies data that exists, which is the honesty rule inverted.
+  assert.match(JS, /return modeRaw\s*\?\s*"Unrecognized <span class='sd-conf'>\(host recorded \\""\+esc\(modeRaw\)\+"\\" — not in this taxonomy\)/,
+    'the unmapped branch is chosen on modeRaw, before the not-recorded fallback, and escapes the host spelling');
+  assert.match(JS, /"Not recorded <span class='sd-conf'>\(no posture evidence in this transcript\)/,
+    'the genuinely-absent state keeps its own wording');
+});
+
+test('the aggregate carries the evidence an unmapped posture is rendered from', () => {
+  // The behavioral half of the same rule, at the level that can be executed:
+  // an unrecognized host spelling must survive to the session row with
+  // mode null, or the client has nothing to render.
+  const rec = usageRecord('unmapped', {
+    end: NOW - 2 * DAY_MS,
+    usageRows: [{ day: '2026-08-18', model: 'claude-opus-5', input: 10, output: 5, cacheRead: 0, cacheWrite: 0, responses: 1 }],
+  });
+  Object.assign(rec, { mode: null, modeRaw: 'yolo/workspace-write' });
+  const agg = aggregate([rec], { days: 7, now: NOW, cutoff: NOW - 7 * DAY_MS, deps: FIXTURE_DEPS });
+  const row = agg.sessions[0];
+  assert.equal(row.mode, null, 'unmapped stays unmapped — never coerced into a real posture');
+  assert.equal(row.modeRaw, 'yolo/workspace-write', 'the evidence the transcript carried survives projection');
 });
 
 test('the chips column keeps the .srow grid arithmetic closed on both breakpoints', () => {

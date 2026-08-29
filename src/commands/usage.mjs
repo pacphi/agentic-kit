@@ -251,8 +251,20 @@ function printScoreReliability(agg) {
   if (rate == null) info(line);
   else if (exceptions > 0) warn(line);
   else ok(line);
-  info(`ABORTED TURNS               ${fmtNum(aborts)}  `
-    + dim('interrupted mid-flight — counted apart from exceptions'));
+  // Codex-only evidence: turn_aborted is the only interrupt signal any host
+  // writes, so a window with no codex sessions has nothing that COULD have
+  // recorded one. Rendering 0 there would read as "you never interrupted a
+  // turn" — the browser carries the same rule, and a terminal reader has no
+  // tooltip to correct it with.
+  const codex = agg.byHost?.codex ?? null;
+  const codexSessions = Number(codex?.sessions) || 0;
+  const codexResponses = Number(codex?.responses) || 0;
+  const abortNote = codexSessions
+    ? (codexResponses
+      ? `interrupted mid-flight — codex only, ${fmtRatio((aborts / codexResponses) * 1000)} per 1k codex responses`
+      : 'interrupted mid-flight — codex only; no codex responses in window')
+    : 'not recorded — only codex transcripts carry an interrupt signal, and this window has none';
+  info(`ABORTED TURNS               ${codexSessions ? fmtNum(aborts) : '—'}  ${dim(abortNote)}`);
 }
 
 /** The --json shape: an ADDITIVE, credential-free, offline projection of the

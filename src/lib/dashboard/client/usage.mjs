@@ -857,7 +857,11 @@ import { renderUsage } from './usage-orchestrators.mjs';
     +"an auth failure. They are excluded from the model list (there is no model to attribute them "
     +"to) and surfaced here instead of vanishing.\nRate is exceptions ÷ responses × 1000.";
   var ABORT_TIP="Turns the transcript recorded as interrupted — the answer was stopped mid-flight. "
-    +"Counted apart from exceptions: an abort is a choice, not a failure.";
+    +"Counted apart from exceptions: an abort is a choice, not a failure.\n"
+    +"CODEX ONLY. Only codex rollouts carry an interrupt signal (turn_aborted); claude and "
+    +"opencode transcripts record nothing when you stop a turn. So the count and its rate are "
+    +"over codex responses alone, and a window with no codex sessions shows — (not 0), because "
+    +"nothing in it could have recorded an interrupt.";
   // The per-day series rides the SAME first-billed-day attribution the session
   // count uses, which is not the moment a turn dropped: a session that spans
   // midnight lands all of its exceptions on one day. Said on the panel, because
@@ -917,12 +921,22 @@ import { renderUsage } from './usage-orchestrators.mjs';
     if(!body)return;
     var t=d.totals||{},p=(d.previous&&d.previous.totals)||null;
     var cur=relRate(t),exc=Number(t.exceptions)||0,ab=Number(t.aborts)||0,resp=Number(t.responses)||0;
+    // aborts is CODEX-ONLY evidence: turn_aborted is the only interrupt signal
+    // any host writes, so a claude-or-opencode window renders "—", not a 0 that
+    // reads as "you never interrupted a turn". The rate's denominator is codex
+    // responses for the same reason — dividing codex aborts by every host's
+    // responses dilutes it by an arbitrary amount that depends on host mix.
+    var cx=(d.byHost&&d.byHost.codex)||null;
+    var cxSess=Number(cx&&cx.sessions)||0,cxResp=Number(cx&&cx.responses)||0;
     body.innerHTML='<div class="rel">'
       +relStat({label:"exceptions / 1k responses",value:cur==null?"—":cur.toFixed(1),
         sub:fmtNum(exc)+" of "+fmtNum(resp)+" responses",tip:REL_TIP,
         flag:relFlag(cur,p?relRate(p):null)})
-      +relStat({label:"aborted turns",value:fmtNum(ab),
-        sub:resp?fmtRatio(ab/resp*1000)+" per 1k responses":"no responses in window",tip:ABORT_TIP})
+      +relStat({label:"aborted turns",value:cxSess?fmtNum(ab):"—",
+        sub:cxSess
+          ?(cxResp?fmtRatio(ab/cxResp*1000)+" per 1k codex responses":"no codex responses in window")
+          :"no codex sessions — no other host records interrupts",
+        tip:ABORT_TIP})
       +"</div>"+relTrend(d)+'<p class="hr-note">'+esc(REL_TREND_NOTE)+"</p>";
   }
 
@@ -1235,9 +1249,9 @@ import { renderUsage } from './usage-orchestrators.mjs';
   // The posture the transcript recorded, and NOTHING when it recorded none: an
   // unobserved or unmapped raw value is not a posture, and a badge that guessed
   // one would read exactly like an observed one. `modeRaw` is the host's own
-  // spelling and rides in the tooltip when the payload carries it — the
-  // aggregate does not project that field today, so the tooltip says the raw
-  // form was not recorded rather than inventing one.
+  // spelling, projected onto the session row by v11Projection, and rides in
+  // this badge's tooltip; the row's detail strip is where an unmapped raw
+  // value is surfaced, since there is no classified name to put on a badge.
   function modeBadge(sx){
     var mode=reportedIdentity(sx.mode);
     if(!mode)return "";
@@ -1271,6 +1285,21 @@ import { renderUsage } from './usage-orchestrators.mjs';
     return out+modeBadge(sx)+ctxChip(sx);
   }
 
+  // THREE states, not two. A transcript that recorded a posture the taxonomy
+  // does not map still recorded a posture: printing "no posture evidence in
+  // this transcript" over a modeRaw sitting on the same row is a fabrication
+  // in the opposite direction from the usual one — denying data that exists.
+  // The host's own spelling is shown instead, labelled unrecognized so it is
+  // never mistaken for a classified posture.
+  function postureLine(sx){
+    var modeRaw=reportedIdentity(sx.modeRaw),modeName=reportedIdentity(sx.mode);
+    if(modeName)return esc(modeName)+" <span class='sd-conf'>("
+      +esc(modeRaw?"recorded by the host as \""+modeRaw+"\"":"host spelling not recorded")+")</span>";
+    return modeRaw
+      ? "Unrecognized <span class='sd-conf'>(host recorded \""+esc(modeRaw)+"\" — not in this taxonomy)</span>"
+      : "Not recorded <span class='sd-conf'>(no posture evidence in this transcript)</span>";
+  }
+
   /* The ten fields that shipped on the wire and rendered nowhere. Everything
      here comes from the row the browser already holds — no route, no fetch. */
   function sdetail(sx){
@@ -1301,16 +1330,15 @@ import { renderUsage } from './usage-orchestrators.mjs';
     // never-omit-a-line rule: a fact that was measured and found absent reads
     // "Not recorded"/"—", not silence, which would teach the reader the field
     // does not exist (ADR-0009 §5).
-    var modeRaw=reportedIdentity(sx.modeRaw),modeName=reportedIdentity(sx.mode);
-    var posture=modeName
-      ? esc(modeName)+" <span class='sd-conf'>("
-        +esc(modeRaw?"recorded by the host as \""+modeRaw+"\"":"host spelling not recorded")+")</span>"
-      : "Not recorded <span class='sd-conf'>(no posture evidence in this transcript)</span>";
+    var posture=postureLine(sx);
     var p50=sessionP50(sx);
     var rhythm="engaged "+((Number(sx.lenSeconds)||0)>0?fmtSecs(sx.lenSeconds):"—")
       +" · p50 "+(p50==null?"—":fmtAtLeast(p50,60,fmtSecs))
       +" · latency samples "+fmtNum(Number(sx.latCount)||0)
-      +" · aborts "+fmtNum(Number(sx.aborts)||0);
+      // Same capability rule as the reliability panel, applied per row: only a
+      // codex transcript can record an interrupt, so a claude/opencode row
+      // reads "not recorded" rather than a measured-looking 0.
+      +" · aborts "+(sx.host==="codex"?fmtNum(Number(sx.aborts)||0):"not recorded for this host");
     var rows=[["execution host",esc(identityName(sx.host))],["inference provider",esc(provider)+" <span class='sd-conf'>("+esc(providerContext)+")</span>"],["models",esc(models)],["posture",posture],["rhythm",esc(rhythm)],["basis",esc(basis)+conf],["tokens",esc(toks)],
       ["tools",esc(tools)],["flags",esc(flags)]];
     return '<div class="sdetail" id="sd-'+esc(sx.id)+'" hidden>'
