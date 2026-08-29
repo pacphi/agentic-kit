@@ -221,7 +221,7 @@ session sent a message:"` prefix — see [`TRANSCRIPTS.md`](TRANSCRIPTS.md)
 §1.2). (The correction this rule shipped with is recorded in
 [Appendix A](#appendix-a--fix-history).)
 
-### 2a. Prompt fingerprints and provenance (SCHEMA_VERSION 14)
+### 2a. Prompt fingerprints and provenance (SCHEMA_VERSION 14, extended in 16)
 
 **Displayed as** — nothing yet. This is a recorded field, not a rendered
 number: the scan path derives it so the planned Usage → Prompts view can
@@ -237,6 +237,8 @@ h     = sha256(norm)[0..16)          16 hex chars
 t     = |tokens(norm)|               token COUNT, repeats kept
 th    = sorted set of sha256(tok)[0..8) for tok in tokens(norm), first 64
 p     = provenanceOf(text, kind)     one of human | control | agent | adapter
+q     = 1 when the turn is question-shaped        key OMITTED when it is not
+o     = 1 when it opens with a persona assignment key OMITTED when it does not
 ```
 
 `tokens` splits `norm` on everything outside `[a-z0-9#/_.+-]`, so a path or a
@@ -253,10 +255,20 @@ been no bound at all, since one pasted document outweighs a hundred real
 instructions. At 64 the median prompt is stored complete and the tail costs a
 bounded ~700 bytes instead of ~86 KB.
 
-**Prompt text is never stored.** `promptFingerprint` returns only the four
-fields above; no parser writes prompt text to a session record, and the index
-cache therefore carries none. (`session.title` is a separate, pre-existing
-surface — masked and clipped — with its own contract, §1.)
+**The two shape flags (v16)** are decided while the text is still in hand,
+because that is the last moment it exists — nothing downstream can re-derive
+them. `q` is set when the turn ends with `?`, opens with a wh-word, or opens
+with an auxiliary *and* contains a `?`; `o` when it opens with
+`you are a|an|the …` or the `# Instructions (read first)` heading. Both keys
+are **omitted when false** rather than written as `0`: an absent key means "not
+that shape", never a measurement that came out zero, and the corpus carries
+5,635 entries where two extra keys each would not be free.
+
+**Prompt text is never stored.** A fingerprint entry's keys are exactly
+`{h, t, th, p}` plus the two optional flags — nothing else, ever. No parser
+writes prompt text to a session record and the index cache therefore carries
+none. (`session.title` is a separate, pre-existing surface — masked and
+clipped — with its own contract, §1.)
 
 **Provenance** answers *who wrote this*, which is not the same question as the
 prompt gate's *did the harness write this*. Measured on the reference corpus
@@ -276,6 +288,9 @@ same sentence fingerprints identically whichever host recorded it:
 
 - `normalizePromptText` — `src/lib/usage-parsers.mjs:237`
 - `promptFingerprint` — `src/lib/usage-parsers.mjs:272`
+- `promptShape` — `src/lib/usage-parsers.mjs:313`, over the anchored rules
+  `QUESTION_WH_RE` / `QUESTION_AUX_RE` — `src/lib/usage-parsers.mjs:287-288` —
+  and `PERSONA_OPENER_RE` — `src/lib/usage-parsers.mjs:294`
 - `notePromptFingerprint` — `src/lib/usage-parsers.mjs:330`, bounded by
   `MAX_PROMPT_FPS` — `src/lib/usage-parsers.mjs:216` — and
   `MAX_TOKEN_HASHES` — `src/lib/usage-parsers.mjs:231`
@@ -317,6 +332,16 @@ same sentence fingerprints identically whichever host recorded it:
 - **The list is capped at 2,000 entries per session**, with the excess counted
   in `promptFPOverflow` rather than silently dropped. The prompt COUNT itself
   is never capped.
+- **The shape flags are grammar, not intent.** `q` does not model a rhetorical
+  question, and an auxiliary opener with no `?` anywhere ("can you run the
+  tests") is read as the politeness form of an instruction rather than a
+  question — deliberately, because that is what it is. `o` requires the article
+  in `you are a|an|the`, so "you are right, revert it" is not a persona; the
+  cost of that narrowness is that an unusual role phrasing goes uncounted, which
+  is the same one-directional error the provenance rules accept.
+- **The flags are provenance-blind.** A tool's own template that opens with a
+  role still carries `o`. A consumer that only wants what the *operator* typed
+  filters on `p === 'human'` itself.
 
 ---
 
@@ -1141,7 +1166,7 @@ ages the moment sessions stop). The `/api/limits` route lives in
 `dashboard-server.mjs`; `renderLimits` and `limRow` in `dashboard/client.mjs`
 render and color each bar by proximity to its cap.
 
-**Limit-aware findings.** `detectLimitInsights` (`usage-insights.mjs:771`)
+**Limit-aware findings.** `detectLimitInsights` (`usage-insights.mjs:949`)
 applies the same evidence rules as every other detector — vendor percentages
 are the user's own data; no dollar impact is ever claimed from a percentage;
 "now" is the payload's `generatedAt`, never a clock. Detectors: pacing
