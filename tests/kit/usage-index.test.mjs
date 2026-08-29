@@ -11,7 +11,7 @@ import {
 } from '../../src/lib/usage-index.mjs';
 import {
   addUsage, blankSession, noteLatencySample, parseClaude,
-  normalizePromptText, promptFingerprint,
+  normalizePromptText, promptFingerprint, promptShape,
   LAT_BUCKET_EDGES, LEN_BUCKET_EDGES, MAX_PROMPT_FPS, MAX_TOKEN_HASHES,
 } from '../../src/lib/usage-parsers.mjs';
 import {
@@ -1548,6 +1548,63 @@ test('the token-hash set is a bounded bottom-k sketch, not an unbounded list', (
   assert.equal(promptFingerprint(words.slice(0, 10).join(' ')).th.length, 10);
 });
 
+// v16. Two shape flags decided at fingerprint time, while the text is still in
+// hand — the only moment they CAN be decided, since the text never reaches the
+// index. Both are omitted when false, so the stored record stays small and an
+// absent key reads as "not this shape" rather than as a missing measurement.
+/** The stored-entry key contract, in ONE place so every pin below moves
+ *  together. `h`/`t`/`th`/`p` are always present; `q`/`o` are the v16 shape
+ *  flags, written only when the shape is there. Nothing else may ever appear —
+ *  which is what keeps a text field from arriving by accident. */
+const FP_REQUIRED_KEYS = ['h', 'p', 't', 'th'];
+const FP_ALLOWED_KEYS = new Set([...FP_REQUIRED_KEYS, 'q', 'o']);
+function assertFingerprintKeys(fp) {
+  const keys = Object.keys(fp);
+  for (const k of FP_REQUIRED_KEYS) {
+    assert.ok(keys.includes(k), `a fingerprint entry must carry ${k}`);
+  }
+  for (const k of keys) {
+    assert.ok(FP_ALLOWED_KEYS.has(k), `unexpected key ${k} on a fingerprint entry`);
+  }
+}
+
+test('promptShape flags question-shaped prompts', () => {
+  const q = (t) => promptShape(t).q;
+  assert.equal(q('does the build pass?'), 1, 'a trailing ? is the plainest question there is');
+  assert.equal(q('why is the build failing on macos'), 1, 'a wh-word opener asks even without the mark');
+  assert.equal(q('How do I wire this up'), 1, 'case does not decide grammar');
+  assert.equal(q('can you check the lockfile, and then tell me what changed?'),
+    1, 'an auxiliary opener counts when the turn actually asks');
+
+  assert.equal(q('run the tests'), undefined, 'a bare imperative is not a question');
+  assert.equal(q('can you run the tests'), undefined,
+    'an auxiliary opener with no ? anywhere is a politeness form of an instruction');
+  assert.equal(q('however you want to do it'), undefined, '"how" inside a word is not a wh-opener');
+  assert.equal(q(''), undefined);
+  assert.equal(q(null), undefined, 'no input is not a question');
+});
+
+test('promptShape flags persona-opening prompts', () => {
+  const o = (t) => promptShape(t).o;
+  assert.equal(o('You are a senior release engineer. Ship the tag.'), 1);
+  assert.equal(o('you are an expert reviewer'), 1);
+  assert.equal(o('You are the operator of this fleet'), 1);
+  assert.equal(o('# Instructions (read first)\n\nDo the thing.'), 1,
+    'the heading form opens the same scaffold; the newline collapses like any whitespace');
+  assert.equal(o('Instructions (read first): do the thing'), 1, 'the heading marker is optional');
+
+  assert.equal(o('you are right, revert it'), undefined,
+    'agreement is not a role assignment — the article is what makes it one');
+  assert.equal(o('remind me what you are running'), undefined, 'mid-sentence never opens');
+  assert.equal(o('run the tests'), undefined);
+});
+
+test('promptShape omits both keys rather than storing zeroes', () => {
+  assert.deepEqual(promptShape('run the tests'), {},
+    'a plain instruction adds NOTHING to the stored record');
+  assert.deepEqual(Object.keys(promptShape('You are a reviewer. What changed?')).sort(), ['o', 'q']);
+});
+
 test('parseClaude records one fingerprint per prompt-kind turn, tagged with its provenance', () => {
   const T0 = '2026-08-20T10:00:00.000Z';
   const at = (s) => new Date(Date.parse(T0) + s * 1000).toISOString();
@@ -1568,6 +1625,26 @@ test('parseClaude records one fingerprint per prompt-kind turn, tagged with its 
   assert.equal(rec.promptFPs[0].t, 7, 'the human prompt tokenizes to its seven words');
 });
 
+// v16, on the Claude read path. The flags are decided by the SHAPE of the turn,
+// independently of who wrote it — a machine-authored persona template still
+// carries `o`, which is exactly what makes the host-asymmetry detector able to
+// say "this host is being handed roles" without reading a word of the text.
+test('parseClaude carries the v16 shape flags, omitted when the shape is absent', () => {
+  const T0 = '2026-08-20T10:00:00.000Z';
+  const at = (s) => new Date(Date.parse(T0) + s * 1000).toISOString();
+  const user = (t, text) => JSON.stringify({ type: 'user', timestamp: at(t), message: { role: 'user', content: text } });
+  const lines = [
+    user(0, 'why is the build failing on macos?'),
+    user(1, 'You are a senior release engineer. Cut the tag.'),
+    user(2, 'run the full check and report the exit code'),
+  ].join('\n');
+  const { session: rec } = parseClaude(lines, { id: 'sess-fp-shape' });
+  assert.deepEqual(rec.promptFPs.map((f) => f.q), [1, undefined, undefined]);
+  assert.deepEqual(rec.promptFPs.map((f) => f.o), [undefined, 1, undefined]);
+  assert.deepEqual(Object.keys(rec.promptFPs[2]).sort(), ['h', 'p', 't', 'th'],
+    'the plain instruction stores no flag keys at all');
+});
+
 test('a parsed session record carries no prompt TEXT — only fingerprints', () => {
   const T0 = '2026-08-20T10:00:00.000Z';
   const SECRET = 'zarquon-plinth-flumox';
@@ -1584,8 +1661,7 @@ test('a parsed session record carries no prompt TEXT — only fingerprints', () 
   assert.equal(serialized.includes(SECRET), false, 'the raw prompt text must not appear anywhere on the record');
   assert.equal(serialized.includes('plinth'), false, 'nor any fragment of it');
   assert.equal(rec.promptFPs.length, 1);
-  assert.deepEqual(Object.keys(rec.promptFPs[0]).sort(), ['h', 'p', 't', 'th'],
-    'a fingerprint entry carries EXACTLY the four fields — no text field can be added by accident');
+  assertFingerprintKeys(rec.promptFPs[0]);
 });
 
 test('promptFPs are bounded per session, with the drop counted rather than silent', () => {
@@ -1691,7 +1767,7 @@ test('cached session entries round-trip the v11 and v14 fields across a cache hi
     // token-hash ARRAY included, which is the field most likely to be lost or
     // reordered by a serialization change.
     assert.equal(evidence.promptFPs.length, 1);
-    assert.deepEqual(Object.keys(evidence.promptFPs[0]).sort(), ['h', 'p', 't', 'th']);
+    assertFingerprintKeys(evidence.promptFPs[0]);
     assert.deepEqual(evidence.promptFPs[0], { ...promptFingerprint('do it'), p: 'human' });
     assert.equal(evidence.promptFPOverflow, 0);
     // `title` is a separate, pre-existing surface (masked + clipped, and here

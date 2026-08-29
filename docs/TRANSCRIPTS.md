@@ -36,11 +36,11 @@ rewritten; rule 3 of the module header, `usage-index.mjs:22`):
 
 | Host | Store | Discovered by |
 |---|---|---|
-| Claude Code | `~/.claude/projects/<encoded-project-dir>/<sessionId>.jsonl` | `listClaude` (`usage-index.mjs:331-345`) — exactly one level of project directories |
-| Claude Code (subagent) | `~/.claude/projects/<encoded-project-dir>/<sessionId>/subagents/agent-<hash>.jsonl` | `listClaudeSubagents` (`usage-index.mjs:306-311`) — the one nested shape `listClaude` descends into |
-| Codex CLI | `~/.codex/sessions/<yyyy>/<mm>/<dd>/rollout-<ts>-<uuid>.jsonl` | `listCodex` (`usage-index.mjs:348-368`) — the `yyyy/mm/dd` tree walk |
+| Claude Code | `~/.claude/projects/<encoded-project-dir>/<sessionId>.jsonl` | `listClaude` (`usage-index.mjs:337-351`) — exactly one level of project directories |
+| Claude Code (subagent) | `~/.claude/projects/<encoded-project-dir>/<sessionId>/subagents/agent-<hash>.jsonl` | `listClaudeSubagents` (`usage-index.mjs:312-317`) — the one nested shape `listClaude` descends into |
+| Codex CLI | `~/.codex/sessions/<yyyy>/<mm>/<dd>/rollout-<ts>-<uuid>.jsonl` | `listCodex` (`usage-index.mjs:354-374`) — the `yyyy/mm/dd` tree walk |
 
-Roots come from `defaultRoots()` (`usage-index.mjs:281-286`) and are injectable
+Roots come from `defaultRoots()` (`usage-index.mjs:287-292`) and are injectable
 for tests. A malformed line is skipped, never fatal (`jsonLines`,
 `usage-parsers.mjs:169-175` — one corrupt line must not cost a whole file).
 
@@ -49,7 +49,7 @@ the parent under `<sessionId>/subagents/`. Discovery is that one nested shape
 and no more — not a recursive walk — so a directory that is not a session-id
 directory with a `subagents` child contributes nothing rather than being
 crawled. Each such record takes a **namespaced** id, `<sessionId>/<stem>`
-(`usage-index.mjs:311`), because Claude Code names every subagent file
+(`usage-index.mjs:317`), because Claude Code names every subagent file
 `agent-<hash>.jsonl` and that stem is not unique across two parent sessions; an
 unnamespaced id would silently collide two unrelated records into one. §4.1
 covers how a namespaced id is validated and resolved back to its file.
@@ -63,22 +63,22 @@ transcript host/parser identity unless other evidence grounds the inference prov
 ### 1.1 Claude entry vocabulary
 
 Each line has a top-level `type`. The parser (`parseClaude`,
-`usage-parsers.mjs:552-581`) reads:
+`usage-parsers.mjs:598-627`) reads:
 
 | `type` | What the parser takes from it |
 |---|---|
-| `ai-title` | The model-written session title (`usage-parsers.mjs:562`) — preferred over the first-prompt fallback |
-| `user` | A user-**role** turn — which is *not* the same as "the human"; see §3. On a turn that passes `isHumanPrompt`, also its `permissionMode` — the session's permission posture, read on the person's own turn only (`usage-parsers.mjs:456-457`) — and the opening of the response-latency window |
-| `assistant` | A model turn: `model` id, per-turn `usage` token counts, `tool_use` blocks (`usage-parsers.mjs:492-545`) |
-| any | Side-band fields read regardless of type: `attributionSkill`/`attributionPlugin` (`usage-parsers.mjs:563-564`), `isSidechain` (`usage-parsers.mjs:566`), `cwd` for project derivation |
+| `ai-title` | The model-written session title (`usage-parsers.mjs:608`) — preferred over the first-prompt fallback |
+| `user` | A user-**role** turn — which is *not* the same as "the human"; see §3. On a turn that passes `isHumanPrompt`, also its `permissionMode` — the session's permission posture, read on the person's own turn only (`usage-parsers.mjs:502-503`) — and the opening of the response-latency window |
+| `assistant` | A model turn: `model` id, per-turn `usage` token counts, `tool_use` blocks (`usage-parsers.mjs:538-591`) |
+| any | Side-band fields read regardless of type: `attributionSkill`/`attributionPlugin` (`usage-parsers.mjs:609-610`), `isSidechain` (`usage-parsers.mjs:612`), `cwd` for project derivation |
 
 A real assistant completion also closes two pieces of per-entry evidence the
 transcript does not state outright. It **closes the latency window** the
 preceding human prompt opened, into one `noteLatencySample` call over the gap
-between them (`usage-parsers.mjs:522-526`); and it **conditionally sets `ctxLastTokens`** to the
+between them (`usage-parsers.mjs:568-572`); and it **conditionally sets `ctxLastTokens`** to the
 tokens actually in the model's window for that turn — fresh input plus what was
 served from cache — so the field always describes the last completion rather
-than a running total (`usage-parsers.mjs:540-541`). That write is
+than a running total (`usage-parsers.mjs:586-587`). That write is
 evidence-gated: an entry whose `message.usage` is absent decodes to all-zeros,
 and a zero is not a measurement of an empty context, so it must not overwrite a
 real prior value. Neither is a field Claude Code writes; both are derived, per
@@ -88,7 +88,7 @@ An assistant entry with `isApiErrorMessage: true` is a **local placeholder**
 Claude Code writes when a request dies before a real completion (connection
 drop, rate limit, auth failure — `model: "<synthetic>"`, all-zero usage). It
 is real engaged time but not a model attempt: counted as an *exception*, never
-pushed into `models` or priced (`usage-parsers.mjs:499-520`; the full story is
+pushed into `models` or priced (`usage-parsers.mjs:545-566`; the full story is
 [`USAGE-SCORECARD-METRICS.md`](USAGE-SCORECARD-METRICS.md) §10). It is not a
 latency sample either — the pending window is deliberately left open, so the
 first *real* completion that eventually follows is what gets timed.
@@ -96,22 +96,22 @@ first *real* completion that eventually follows is what gets timed.
 ### 1.2 Codex entry vocabulary
 
 Codex rollout lines carry `type` + `payload`. The parser (`parseCodex`,
-`usage-parsers.mjs:918-936`) reads:
+`usage-parsers.mjs:964-982`) reads:
 
 | `type` / `payload.type` | What the parser takes from it |
 |---|---|
-| `session_meta` | Authoritative session id, `cwd`, and `thread_source` — the FIRST such line in the file wins for all three, AND for `inferenceProvider`/`providerProvenance` too (`usage-parsers.mjs:635-637`, gate; `:605-634`, why); a subagent rollout replays its PARENT thread's own session_meta line later in the same file, and a later-wins rule let that relabel the record `subagent`→`user` and re-key its id to the parent's — `"subagent"` marks a thread_spawn replay whose tokens are excluded from aggregation (`usage-parsers.mjs:901`; `USAGE-SCORECARD-METRICS.md` Appendix A, Bug B) |
-| `turn_context` | The model id in effect from this point on, plus `approval_policy` (a string) and `sandbox_policy` (an **object** keyed `.type`, e.g. `{"type":"danger-full-access"}`) — the permission posture, last evidence winning, since a session may renegotiate mid-run (`usage-parsers.mjs:647-668`) |
-| `event_msg` → `token_count` | A **cumulative** usage snapshot; only the last one is kept (`usage-parsers.mjs:702-710`) |
-| `event_msg` → `task_started` | `model_context_window` — the context-window denominator, which no other host records — and the turn's start time (`usage-parsers.mjs:717-722`) |
-| `event_msg` → `task_complete` | The host's own `duration_ms` for the turn, taken as a latency sample only when no prompt-to-response gap already covered it; a non-null `error` counts as an exception (`usage-parsers.mjs:734-742`) |
-| `event_msg` → `turn_aborted` | An explicit interrupt: counted in `aborts`, and it clears both latency states so an unanswered prompt is never timed against a later, unrelated response (`usage-parsers.mjs:845-853`) |
+| `session_meta` | Authoritative session id, `cwd`, and `thread_source` — the FIRST such line in the file wins for all three, AND for `inferenceProvider`/`providerProvenance` too (`usage-parsers.mjs:681-683`, gate; `:651-680`, why); a subagent rollout replays its PARENT thread's own session_meta line later in the same file, and a later-wins rule let that relabel the record `subagent`→`user` and re-key its id to the parent's — `"subagent"` marks a thread_spawn replay whose tokens are excluded from aggregation (`usage-parsers.mjs:947`; `USAGE-SCORECARD-METRICS.md` Appendix A, Bug B) |
+| `turn_context` | The model id in effect from this point on, plus `approval_policy` (a string) and `sandbox_policy` (an **object** keyed `.type`, e.g. `{"type":"danger-full-access"}`) — the permission posture, last evidence winning, since a session may renegotiate mid-run (`usage-parsers.mjs:693-714`) |
+| `event_msg` → `token_count` | A **cumulative** usage snapshot; only the last one is kept (`usage-parsers.mjs:748-756`) |
+| `event_msg` → `task_started` | `model_context_window` — the context-window denominator, which no other host records — and the turn's start time (`usage-parsers.mjs:763-768`) |
+| `event_msg` → `task_complete` | The host's own `duration_ms` for the turn, taken as a latency sample only when no prompt-to-response gap already covered it; a non-null `error` counts as an exception (`usage-parsers.mjs:780-788`) |
+| `event_msg` → `turn_aborted` | An explicit interrupt: counted in `aborts`, and it clears both latency states so an unanswered prompt is never timed against a later, unrelated response (`usage-parsers.mjs:891-899`) |
 | `event_msg` → `user_message` | A legacy-format prompt CANDIDATE — Codex does not route tool output through this event, but the text still needs the human-prompt gate below before it counts |
 | `event_msg` → `agent_message` | A legacy-format model response |
 | `event_msg` → `item_completed` → `UserMessage` | A current-format prompt candidate; text blocks use the observed lowercase `text` discriminator; also gated below |
 | `event_msg` → `item_completed` → `AgentMessage` | A current-format model response; text blocks use the observed uppercase `Text` discriminator |
-| Human-prompt gate (`isCodexHumanMessage`, `usage-parsers.mjs:760-762`) | Codex carries no discipline of its own for telling a typed prompt apart from harness output or a mirrored cross-host envelope replayed into the rollout rather than typed there. Reuses `HARNESS_OUTPUT_RE` verbatim (Claude's own envelope markers reproduce byte-for-byte inside a mirrored rollout) plus two Codex-specific machine markers (`CODEX_MACHINE_ENVELOPE_RE`, `usage-parsers.mjs:758`): a `<teammate-message` wrapper and the literal `"Another Claude session sent a message:"` prefix cross-session delivery uses. Only a message that passes the gate counts toward `rec.prompts`, sets the session title, or opens the prompt→agent-message latency window (`usage-parsers.mjs:782`); every `user_message`/`UserMessage` still gets a turn row either way, `kind: 'context'` instead of `'prompt'` when gated out (`:792`) — mirroring how a Claude harness-origin `user` entry is kept, not dropped (§3.2). Deliberately narrow: exact-twin cross-host dedup by flush timestamp is a recorded follow-up, not attempted here |
-| `event_msg` → `item_completed` → `CommandExecution`, `McpToolCall`, `FileChange`, `CollabAgentToolCall` | The four item kinds tallied as tool invocations, keyed by their own Codex names (`CODEX_TOOL_ITEM_TYPES`, `usage-parsers.mjs:835`, tallied at `:866-867`) |
+| Human-prompt gate (`isCodexHumanMessage`, `usage-parsers.mjs:806-808`) | Codex carries no discipline of its own for telling a typed prompt apart from harness output or a mirrored cross-host envelope replayed into the rollout rather than typed there. Reuses `HARNESS_OUTPUT_RE` verbatim (Claude's own envelope markers reproduce byte-for-byte inside a mirrored rollout) plus two Codex-specific machine markers (`CODEX_MACHINE_ENVELOPE_RE`, `usage-parsers.mjs:804`): a `<teammate-message` wrapper and the literal `"Another Claude session sent a message:"` prefix cross-session delivery uses. Only a message that passes the gate counts toward `rec.prompts`, sets the session title, or opens the prompt→agent-message latency window (`usage-parsers.mjs:828`); every `user_message`/`UserMessage` still gets a turn row either way, `kind: 'context'` instead of `'prompt'` when gated out (`:838`) — mirroring how a Claude harness-origin `user` entry is kept, not dropped (§3.2). Deliberately narrow: exact-twin cross-host dedup by flush timestamp is a recorded follow-up, not attempted here |
+| `event_msg` → `item_completed` → `CommandExecution`, `McpToolCall`, `FileChange`, `CollabAgentToolCall` | The four item kinds tallied as tool invocations, keyed by their own Codex names (`CODEX_TOOL_ITEM_TYPES`, `usage-parsers.mjs:881`, tallied at `:912-913`) |
 
 The parser normalizes both message generations into the same prompt/response
 turn model. Unknown `item_completed` item types are ignored for those metrics
@@ -143,8 +143,8 @@ absence rather than folded into one number:
 
 | Axis | Claude Code | Codex | OpenCode |
 |---|---|---|---|
-| Response latency | derived — the gap from a human prompt to the next real completion (`noteLatencySample`, `usage-parsers.mjs:522-526`) | host-measured `duration_ms` on `task_complete`, used only when no prompt gap covered the turn; the derived gap stays primary (`handleCodexTaskComplete`, `usage-parsers.mjs:734-742`) | derived, same prompt-gap rule as Claude (`noteLatencySample`, `usage-opencode.mjs:235-239`) |
-| Permission posture | `permissionMode`, off the person's own turn (`usage-parsers.mjs:456-457`) | `approval_policy` plus `sandbox_policy.type` off each `turn_context` — the sandbox field is an object, and its `.type` is extracted before the taxonomy is consulted (`usage-parsers.mjs:653-666`) | `mode` off each assistant message (`normalizeMode`, `usage-opencode.mjs:240-241`) |
+| Response latency | derived — the gap from a human prompt to the next real completion (`noteLatencySample`, `usage-parsers.mjs:568-572`) | host-measured `duration_ms` on `task_complete`, used only when no prompt gap covered the turn; the derived gap stays primary (`handleCodexTaskComplete`, `usage-parsers.mjs:780-788`) | derived, same prompt-gap rule as Claude (`noteLatencySample`, `usage-opencode.mjs:235-239`) |
+| Permission posture | `permissionMode`, off the person's own turn (`usage-parsers.mjs:502-503`) | `approval_policy` plus `sandbox_policy.type` off each `turn_context` — the sandbox field is an object, and its `.type` is extracted before the taxonomy is consulted (`usage-parsers.mjs:699-712`) | `mode` off each assistant message (`normalizeMode`, `usage-opencode.mjs:240-241`) |
 | Context window | last-turn tokens only; **no window denominator is recorded** | both halves — `model_context_window` on `task_started` and last-turn tokens | last-turn tokens only; no window denominator |
 
 An unmapped or unobserved value on any of these is `not-recorded`, never a
@@ -179,8 +179,8 @@ The same parsers serve two very different callers, switched by `withTurns`:
 
 | Path | Entry point | `withTurns` | Message bodies | Cached? |
 |---|---|---|---|---|
-| **Scan** — the aggregate index behind the Scorecard/Findings/Sessions views | `buildIndex` → `parseFile` (`usage-index.mjs:325`) | `false` | no turn list is built, and no body is retained — holding them would balloon memory across 3,000+ files (`usage-parsers.mjs:547-550`). Since v14 the scan path does *read* one narrow slice: opencode's USER text parts, so a prompt can be fingerprinted (`loadTextParts`, `usage-opencode.mjs:276`). Only the fingerprint is kept; the text is discarded with the row. Measured at 45 µs/session materializing 0.6 MB on a 300-session store, against 125 µs and 61 MB for the reader path's unfiltered join | yes: per-file derived records in `~/.config/agentic-kit/usage-index.json`, keyed `(path, mtime, size)`, invalidated wholesale by `SCHEMA_VERSION` (`usage-index.mjs:135`) |
-| **Reader** — one transcript for the Transcript view | `readSession` (`usage-index.mjs:868`) | `true` | full turn list built | **never** — every call re-reads and re-parses the one file |
+| **Scan** — the aggregate index behind the Scorecard/Findings/Sessions views | `buildIndex` → `parseFile` (`usage-index.mjs:331`) | `false` | no turn list is built, and no body is retained — holding them would balloon memory across 3,000+ files (`usage-parsers.mjs:593-596`). Since v14 the scan path does *read* one narrow slice: opencode's USER text parts, so a prompt can be fingerprinted (`loadTextParts`, `usage-opencode.mjs:276`). Only the fingerprint is kept; the text is discarded with the row. Measured at 45 µs/session materializing 0.6 MB on a 300-session store, against 125 µs and 61 MB for the reader path's unfiltered join | yes: per-file derived records in `~/.config/agentic-kit/usage-index.json`, keyed `(path, mtime, size)`, invalidated wholesale by `SCHEMA_VERSION` (`usage-index.mjs:141`) |
+| **Reader** — one transcript for the Transcript view | `readSession` (`usage-index.mjs:874`) | `true` | full turn list built | **never** — every call re-reads and re-parses the one file |
 
 ![Figure: one parser, two read paths — the scan path (withTurns false) caches per-file records keyed by path, mtime and size; the reader path (withTurns true) builds full turns and is never cached](assets/transcript-read-paths.svg)
 
@@ -213,10 +213,10 @@ would read them as `undefined` for exactly the sessions already on disk
 | `role` | all | `"user"` or `"assistant"` — the **Messages-API role**, not the author (see below) |
 | `at` | all | ISO timestamp |
 | `text` | all | Flattened display text (`claudeText`, `telemetry-records.mjs:38-55` — binary payloads dropped: a pasted screenshot renders as `[image]`, a tool result is prefixed `[tool result]`) |
-| `model` | assistant | The model id; the literal string `exception` for an API-error placeholder turn (`usage-parsers.mjs:515`) |
+| `model` | assistant | The model id; the literal string `exception` for an API-error placeholder turn (`usage-parsers.mjs:561`) |
 | `tools` | assistant | Tool names invoked in the turn |
-| `prompt` | user | `isHumanPrompt`'s verdict (`usage-parsers.mjs:408-417`) — drives the **prompt counts** |
-| `kind` | user | `'prompt'` \| `'tool-result'` \| `'context'` — drives the **attribution label** (`userTurnKind`, `usage-parsers.mjs:435-440`) |
+| `prompt` | user | `isHumanPrompt`'s verdict (`usage-parsers.mjs:454-463`) — drives the **prompt counts** |
+| `kind` | user | `'prompt'` \| `'tool-result'` \| `'context'` — drives the **attribution label** (`userTurnKind`, `usage-parsers.mjs:481-486`) |
 | `exception` | assistant | `true` on API-error placeholder turns |
 | `truncated`, `originalChars` | any | Present **only** when the turn was abridged (§4.3) |
 
@@ -236,7 +236,7 @@ story is [Appendix A](#appendix-a--fix-history).)
 
 ### 3.2 `kind` — the attribution field
 
-`userTurnKind` (`usage-parsers.mjs:435-440`) classifies every user-role turn:
+`userTurnKind` (`usage-parsers.mjs:481-486`) classifies every user-role turn:
 
 | `kind` | Test | Meaning |
 |---|---|---|
@@ -261,7 +261,7 @@ Two deliberate subtleties:
 
 Codex user turns are `kind: 'prompt'` when they pass the human-prompt gate,
 `'context'` when a harness or mirrored envelope gates them out
-(`handleCodexUserMessage`, `usage-parsers.mjs:773-794`, §1.2) — rollouts only
+(`handleCodexUserMessage`, `usage-parsers.mjs:819-840`, §1.2) — rollouts only
 route real prompts AND harness/mirror text through `user_message` events,
 never tool output, so `'tool-result'` never occurs on this host.
 
@@ -273,14 +273,19 @@ and image-only pastes get the right kind" (the two edges).
 
 `kind` used to be computed only when `withTurns`, because only a turn row
 carried it. Since v14 it is derived on **both** paths (`recordClaudeUserTurn`,
-`usage-parsers.mjs:469-470`): every turn it classifies as `'prompt'` also
+`usage-parsers.mjs:515-516`): every turn it classifies as `'prompt'` also
 contributes one entry to the session record's `promptFPs`.
 
 An entry is `{ h, t, th, p }` — a hash of the normalized text, the token count,
 a bounded sorted sample of its token hashes, and a **provenance** tag saying who
 wrote it (`human` \| `control` \| `agent` \| `adapter`,
-`usage-provenance.mjs:20`). **No prompt text is stored**; the formula, the
-taxonomy, and what the tagging deliberately does not model are in
+`usage-provenance.mjs:20`). Since v16 two optional **shape** flags may ride
+alongside: `q` when the turn is question-shaped and `o` when it opens with a
+persona/role assignment (`promptShape`, `usage-parsers.mjs:313`). Both are
+decided at fingerprint time because that is the last moment the text exists,
+and both are **omitted when false** — an absent key means "not that shape",
+never a measurement that came out zero. **No prompt text is stored**; the
+formula, the taxonomy, and what the tagging deliberately does not model are in
 [`USAGE-SCORECARD-METRICS.md`](USAGE-SCORECARD-METRICS.md) §2a.
 
 The layer sits *behind* the gates above, it does not re-litigate them: a
@@ -299,41 +304,41 @@ string.
 
 ## 4. The `readSession` pipeline — how one session becomes a payload
 
-`readSession(id, opts)` (`usage-index.mjs:868-924`) is the only way
+`readSession(id, opts)` (`usage-index.mjs:874-930`) is the only way
 transcript content leaves the module, and every step is a gate:
 
 ### 4.1 Locate, contain, bound
 
 1. **Id grammar before any filesystem access** — an id must match one of
    exactly two shapes, or it is rejected with `ERR_INVALID_SESSION_ID`
-   (`invalidId`, `usage-index.mjs:934`) before any read happens:
-   * `VALID_ID` (`/^[A-Za-z0-9._-]{1,128}$/`, `usage-index.mjs:146`) — a plain
+   (`invalidId`, `usage-index.mjs:940`) before any read happens:
+   * `VALID_ID` (`/^[A-Za-z0-9._-]{1,128}$/`, `usage-index.mjs:152`) — a plain
      session id;
-   * `VALID_SUBAGENT_ID` (`usage-index.mjs:162`) — a namespaced nested
+   * `VALID_SUBAGENT_ID` (`usage-index.mjs:168`) — a namespaced nested
      subagent id, EXACTLY `<parentId>/<stem>` with one slash, where the parent
      half reuses `VALID_ID`'s own charset and the child half must match the
      real on-disk `agent-…` shape. The namespaced grammar is a **narrowing**
      of the plain one, never a loosening: both are the same path-traversal
      guard, and a traversal shape is rejected at either tier.
-2. **Locate by id** across both roots (`locate`, `usage-index.mjs:867`),
+2. **Locate by id** across both roots (`locate`, `usage-index.mjs:873`),
    consulting the scan cache when present but never requiring it —
    `readSession` works with no prior `buildIndex`. A namespaced id resolves
-   through `locateSubagent` (`usage-index.mjs:802-810`), which builds the
+   through `locateSubagent` (`usage-index.mjs:808-816`), which builds the
    nested path from the two **already-validated capture groups** rather than
    from raw request text.
-3. **Realpath containment** (`usage-index.mjs:889-903`) — the resolved file
+3. **Realpath containment** (`usage-index.mjs:895-909`) — the resolved file
    must live under a transcript root *after* `realpathSync` collapses
    symlinks; a symlink planted inside a root pointing at `/etc/anything`
    passes a lexical `startsWith` but fails this. Roots are realpath'd too so
    a symlinked dotfiles setup still works.
-4. **Size cap** — `MAX_SESSION_BYTES` (64 MB, `usage-index.mjs:145`): a
+4. **Size cap** — `MAX_SESSION_BYTES` (64 MB, `usage-index.mjs:151`): a
    transcript is read whole and JSON-expands ~5×, so an unbounded read is a
    memory-amplification primitive. Oversized reads as unavailable, not risky.
 
 ### 4.2 Parse and price
 
 The file is parsed with `withTurns: true` by the provider's parser
-(`usage-index.mjs:916-921`), and `meta` is assembled by `sessionPayload`
+(`usage-index.mjs:922-927`), and `meta` is assembled by `sessionPayload`
 (`usage-aggregate.mjs:866-893`) with the same fields the Sessions view rows
 carry — `prompts`, `responses`, `exceptions`, `sidechain`, `threadSource`,
 `models`, `tools`, `skill`/`plugin`, worktree — plus a `cost` priced from the

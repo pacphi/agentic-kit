@@ -507,6 +507,26 @@ test('parseCodex fingerprints prompt-kind turns only, and tags their provenance'
   assert.equal(JSON.stringify(rec.promptFPs).includes('macos'), false, 'no prompt text on the record');
 });
 
+// v16, on the Codex read path. The shape flags come from the SAME shared
+// implementation the Claude path uses (parseClaude has the mirror of this
+// test), which is the whole point: the Prompts view's host-asymmetry panel
+// compares persona-opener counts BETWEEN hosts, and two per-host copies of the
+// rule would make that comparison meaningless.
+test('parseCodex carries the v16 shape flags, omitted when the shape is absent', () => {
+  const msg = (text) => JSON.stringify({ type: 'event_msg', payload: { type: 'user_message', message: text }, timestamp: T0 });
+  const lines = [
+    JSON.stringify({ type: 'session_meta', payload: { id: 'cxshape', cwd: '/tmp/p', thread_source: 'user' }, timestamp: T0 }),
+    msg('why is the build failing on macos?'),
+    msg('You are a senior release engineer. Cut the tag.'),
+    msg('run the full check and report the exit code'),
+  ].join('\n');
+  const { session: rec } = parseCodex(lines, { id: 'cxshape' });
+  assert.deepEqual(rec.promptFPs.map((f) => f.q), [1, undefined, undefined]);
+  assert.deepEqual(rec.promptFPs.map((f) => f.o), [undefined, 1, undefined]);
+  assert.deepEqual(Object.keys(rec.promptFPs[2]).sort(), ['h', 'p', 't', 'th'],
+    'a plain instruction stores no flag keys at all');
+});
+
 // The token hashing/normalization is ONE implementation shared by every host —
 // the same sentence typed in Codex and in Claude must fingerprint identically,
 // or cross-host repetition analysis compares two different alphabets.

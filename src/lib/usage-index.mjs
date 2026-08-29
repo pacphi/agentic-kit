@@ -131,8 +131,14 @@ export { MAX_TURN_CHARS, mergeIntervals, maskSecrets, normalizeSessionIdentity, 
  *       every record must be re-derived rather than corrected in place. The
  *       provenance rules move with it — session-continuation prose is now
  *       `control`, and the unevidenced `<command-args>` opener is gone — which
- *       also re-tags cached fingerprints. */
-export const SCHEMA_VERSION = 15;
+ *       also re-tags cached fingerprints.
+ *  v16: fingerprints grow two optional SHAPE flags — `q` (question-shaped) and
+ *       `o` (persona opener) — decided from the text at fingerprint time, the
+ *       last moment it exists. A v15 record cannot be corrected in place
+ *       because the text is gone by then; the flags are only derivable on a
+ *       re-parse. Absent keys mean "not that shape" and are omitted rather
+ *       than stored as 0 — see usage-parsers.promptShape. */
+export const SCHEMA_VERSION = 16;
 
 const DAY_MS = 86_400_000;
 // One day of slack past dashboard-server.mjs's 365-day clampDays ceiling —

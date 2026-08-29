@@ -68,8 +68,8 @@ const RULES = [
   ['control', /^\s*\[Image #\d+\]\s*$/],
   // Resuming a compacted or continued session. The person asked for that (a
   // `/compact`, a `--continue`); the sentence itself is the harness's, so it is
-  // not a typed instruction. Measured 17 turns reaching kind 'prompt' — claude
-  // 8, codex 9 — which is the ENTIRE residue once `in-app-browser-context`
+  // not a typed instruction. Measured 18 turns reaching kind 'prompt' across
+  // the full corpus — which is the ENTIRE residue once `in-app-browser-context`
   // joined the harness gate. Sibling shapes stay out on the same evidence
   // standard: `<system-reminder`, "Please continue the conversation…" and the
   // "Caveat:" prose each measured ZERO here (the latter two are `isMeta`).

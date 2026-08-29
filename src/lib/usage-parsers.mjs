@@ -279,15 +279,61 @@ export function promptFingerprint(text) {
   };
 }
 
+/** Question shape, in the two forms the corpus actually carries. The wh-word
+ *  opener is admitted WITHOUT a mark ("why is the build failing") because
+ *  dropping the '?' is ordinary in a chat transcript; the auxiliary opener is
+ *  not, because "can you run the tests" is a politeness form of an instruction
+ *  and only becomes a question when the turn actually asks one. */
+const QUESTION_WH_RE = /^(?:who|whom|whose|what|when|where|why|which|how)\b/;
+const QUESTION_AUX_RE = /^(?:is|are|was|were|am|do|does|did|have|has|had|can|could|shall|should|will|would|may|might|must)\b/;
+
+/** Role-assignment opener — the "you are a senior release engineer" scaffold
+ *  and the "# Instructions (read first)" heading a managed worker template
+ *  starts with. The article in `you are (a|an|the)` is load-bearing: without it
+ *  "you are right, revert it" would read as a persona. */
+const PERSONA_OPENER_RE = /^(#\s*)?(instructions \(read first\)|you are (a|an|the)\b)/i;
+
+/**
+ * The two SHAPE flags a fingerprint carries, decided here because this is the
+ * last moment the text exists — nothing downstream can re-derive them, since
+ * the text never reaches the index (see promptFingerprint).
+ *
+ * Both are omitted when false rather than stored as 0: the flags ride on every
+ * fingerprint in the corpus, and an absent key is both smaller and honest —
+ * "not this shape", never a measurement that happened to come out zero.
+ *
+ * Deliberately shape-only, and deliberately NOT provenance: a machine-authored
+ * template that opens with a persona still carries `o`, which is what lets the
+ * host-asymmetry detector count role scaffolding per host without reading a
+ * word of any prompt.
+ *
+ * @param {string} text
+ * @returns {{ q?: 1, o?: 1 }}
+ */
+export function promptShape(text) {
+  // Whitespace-collapsed but NOT punctuation-stripped: normalizePromptText
+  // removes the trailing '?' that half of this rule keys on.
+  const s = String(text ?? '').replace(/\s+/g, ' ').trim();
+  const lower = s.toLowerCase();
+  const asks = lower.endsWith('?')
+    || QUESTION_WH_RE.test(lower)
+    || (QUESTION_AUX_RE.test(lower) && lower.includes('?'));
+  return { ...(asks ? { q: 1 } : {}), ...(PERSONA_OPENER_RE.test(s) ? { o: 1 } : {}) };
+}
+
 /** Record one prompt-kind turn's fingerprint on a session record, or count it
  *  as overflow. Exported for the same reason blankSession/addUsage are: shared
- *  by all three transcript sources so the hashing and normalization have
- *  exactly ONE implementation — a per-host copy would let the same sentence
- *  fingerprint differently depending on where it was typed, which is precisely
- *  the comparison the Prompts view exists to make. */
+ *  by all three transcript sources so the hashing, normalization and shape
+ *  rules have exactly ONE implementation — a per-host copy would let the same
+ *  sentence fingerprint differently depending on where it was typed, which is
+ *  precisely the comparison the Prompts view exists to make. */
 export function notePromptFingerprint(rec, text, kind) {
   if (rec.promptFPs.length >= MAX_PROMPT_FPS) { rec.promptFPOverflow++; return; }
-  rec.promptFPs.push({ ...promptFingerprint(text), p: provenanceOf(text, { kind }) });
+  rec.promptFPs.push({
+    ...promptFingerprint(text),
+    p: provenanceOf(text, { kind }),
+    ...promptShape(text),
+  });
 }
 
 /** Response-latency histogram edges, in seconds; the 6th bucket (index 5)
@@ -391,7 +437,7 @@ export function addUsage(rec, day, model, u) {
  * operator's name. It is also the ONLY one of these names that carries
  * attributes (`source="ambient-ui-state"`), which is why the terminator is
  * `[\s>]` rather than `>`. That relaxation is behaviour-preserving on measured
- * data: across 1,103 occurrences of the other five names, ZERO carried an
+ * data: across 1,103 occurrences of the other six names, ZERO carried an
  * attribute, and `[\s>]` still refuses a longer name (`<task-notification-x>`).
  */
 const HARNESS_OUTPUT_RE = /^\s*<(task-notification|bash-stdout|bash-stderr|local-command-stdout|local-command-stderr|local-command-caveat|in-app-browser-context)[\s>]/;
