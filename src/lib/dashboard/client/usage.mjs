@@ -1057,7 +1057,7 @@ import { renderUsage } from './usage-orchestrators.mjs';
   function limRow(label,usedPercent,resetSec,sub,windowMinutes){
     var p=Math.max(0,Math.min(100,Number(usedPercent)||0));
     var col=p>=90?"var(--fail)":(p>=70?"var(--warn)":"var(--ok)");
-    return '<div class="mrow"><span class="mname">'+esc(label)+"</span>"
+    return '<div class="mrow"><span class="mname" title="'+esc(label)+'">'+esc(label)+"</span>"
       +'<span class="mbar"><i style="width:'+p.toFixed(1)+"%;background:"+col+'"></i>'
       +paceTick(resetSec,windowMinutes)+"</span>"
       +'<span class="mval mono">'+p.toFixed(0)+"%</span>"

@@ -301,9 +301,21 @@ const LIMITS_STUB = async () => ({
   },
   codex: {
     provider: 'codex', source: 'app-server', fetchedAt: Date.now() - 60_000, planType: 'prolite',
+    // Post-dedup shape (quota.mjs): app-server reports the weekly pool under
+    // BOTH the named lane and the legacy generic `codex` one, and the
+    // normalizer keeps the named copy — so what reaches the browser is a named
+    // lane carrying both windows, never a generic twin. The long pool name is
+    // the point: it is what the label column used to ellipsise.
     lanes: [
-      { id: 'codex', name: 'codex', planType: 'prolite', windows: [{ label: 'weekly', usedPercent: 3, windowMinutes: 10080, resetsAt: Math.round(Date.now() / 1000) + 500000 }] },
-      { id: 'codex_bengalfox', name: 'GPT-5.3-Codex-Spark', planType: 'prolite', windows: [] },
+      {
+        id: 'codex_bengalfox', name: 'GPT-5.3-Codex-Spark', planType: 'prolite',
+        windows: [
+          { label: '5h', usedPercent: 7, windowMinutes: 300, resetsAt: Math.round(Date.now() / 1000) + 9000 },
+          { label: 'weekly', usedPercent: 21, windowMinutes: 10080, resetsAt: Math.round(Date.now() / 1000) + 500000 },
+        ],
+      },
+      // A named pool whose windows are all unusable still gets a row saying so.
+      { id: 'codex_othermodel', name: 'GPT-5.3-Codex-Mini', planType: 'prolite', windows: [] },
     ],
     resetCredits: { availableCount: 2, credits: [{ status: 'available', title: 'Full reset', expiresAt: null }] },
   },
@@ -2241,6 +2253,27 @@ async function main() {
       const arts = artifactsIn(text);
       check(`usage/${view} is free of rendering artifacts`, arts.length === 0,
         `found ${arts.join(', ')} — this is the class of bug unit tests cannot see`);
+      if (view === 'limits') {
+        // Truncation is what hid one pool being reported under two lanes: both
+        // rows ellipsised to the same plausible prefix. Measure the RENDERED
+        // row — a grid template that looks right in the stylesheet is not proof
+        // the string fits. Bars must also share an x, or the panel stops
+        // reading as a stack of comparable meters.
+        const rows = await page.evaluate(() => ({
+          labels: [...document.querySelectorAll('#u-lim-codex .mname, #u-lim-claude .mname')]
+            .map((el) => ({ text: el.textContent, title: el.getAttribute('title'), clipped: el.scrollWidth > el.clientWidth })),
+          barLefts: [...new Set([...document.querySelectorAll('#u-lim-codex .mbar')]
+            .map((el) => Math.round(el.getBoundingClientRect().left)))],
+        }));
+        check('a Codex pool label renders in full at desktop width',
+          rows.labels.length > 0 && rows.labels.every((l) => !l.clipped),
+          `clipped: ${JSON.stringify(rows.labels.filter((l) => l.clipped))}`);
+        check('every limits label carries its full text as a tooltip',
+          rows.labels.every((l) => l.title === l.text),
+          `labels were ${JSON.stringify(rows.labels)}`);
+        check('limits meters all start at the same x',
+          rows.barLefts.length === 1, `bar left edges were ${JSON.stringify(rows.barLefts)}`);
+      }
       if (view !== 'models') {
         const modelBoundary = await page.evaluate(() => {
           const models = document.getElementById('v-models');

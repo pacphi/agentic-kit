@@ -105,10 +105,42 @@ export function readClaudeLimits({ file = claudeLimitsFile() } = {}) {
 
 // ── Codex (app-server) ──────────────────────────────────────────────────────
 
+/** The legacy lane id, from before app-server named its model pools. */
+const GENERIC_CODEX_LANE = 'codex';
+
+/**
+ * app-server reports one pool under BOTH its named lane and the legacy generic
+ * `codex` lane — the same window twice. Left alone, the panel draws two
+ * identical meters and the limit detectors count one pool as two.
+ *
+ * Two windows are the same pool only when duration, reset instant, AND
+ * utilization all match exactly. A difference in any of them means two real
+ * pools and both stay: a percentage guard is what keeps this from folding a
+ * genuinely distinct pool that happens to share a reset clock. Duration and
+ * reset must both be RECORDED — deduping on two absent values would be
+ * dropping a window for want of evidence rather than because of it.
+ *
+ * The named lane wins: "GPT-5.3-Codex-Spark · weekly" says which pool it is
+ * and "codex · weekly" does not. Older builds ship only the generic lane,
+ * which has nothing to dedupe against and comes back untouched.
+ */
+function dedupeGenericLane(lanes) {
+  const generic = lanes.find((l) => l.id === GENERIC_CODEX_LANE);
+  if (!generic || lanes.length < 2) return lanes;
+  const named = lanes.filter((l) => l !== generic).flatMap((l) => l.windows);
+  generic.windows = generic.windows.filter((w) => !(
+    w.windowMinutes !== null && w.resetsAt !== null
+    && named.some((n) => n.windowMinutes === w.windowMinutes
+      && n.resetsAt === w.resetsAt && n.usedPercent === w.usedPercent)
+  ));
+  return generic.windows.length ? lanes : lanes.filter((l) => l !== generic);
+}
+
 /**
  * Normalize a GetAccountRateLimitsResponse. Lanes come from
  * `rateLimitsByLimitId` (per-model pools, e.g. `codex` + `codex_bengalfox`)
- * with the legacy single-bucket `rateLimits` as fallback. Pure.
+ * with the legacy single-bucket `rateLimits` as fallback, and a pool reported
+ * under both a named and the generic lane is kept once. Pure.
  */
 export function normalizeCodexLimits(resp, { fetchedAt = null } = {}) {
   if (!resp || typeof resp !== 'object') return null;
@@ -139,6 +171,7 @@ export function normalizeCodexLimits(resp, { fetchedAt = null } = {}) {
     });
   }
   if (!lanes.length) return null;
+  const deduped = dedupeGenericLane(lanes);
   const rc = resp.rateLimitResetCredits;
   const resetCredits = rc && typeof rc === 'object' && Number.isFinite(Number(rc.availableCount))
     ? {
@@ -156,8 +189,8 @@ export function normalizeCodexLimits(resp, { fetchedAt = null } = {}) {
     provider: 'codex',
     source: 'app-server',
     fetchedAt,
-    planType: lanes.find((l) => l.planType)?.planType ?? null,
-    lanes,
+    planType: deduped.find((l) => l.planType)?.planType ?? null,
+    lanes: deduped,
     resetCredits,
   };
 }

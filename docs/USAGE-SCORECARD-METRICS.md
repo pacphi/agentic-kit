@@ -1011,10 +1011,12 @@ both credential-free for ak:
   `seven_day` / `seven_day_<model>` keys to duration-labelled windows.
 - **Codex** — one `initialize` → `account/rateLimits/read` JSON-RPC exchange
   with a spawned `codex app-server`, implemented by `codexAppServerRateLimits`
-  (`quota.mjs:176`) and TTL-cached (`CODEX_TTL_MS`, `:43`) by
-  `collectCodexLimits` (`:231`). Lanes come from `rateLimitsByLimitId` in
-  `normalizeCodexLimits` (`:113`), including per-model pools and
-  rate-limit reset credits.
+  (`quota.mjs:209`) and TTL-cached (`CODEX_TTL_MS`, `:43`) by
+  `collectCodexLimits` (`:264`). Lanes come from `rateLimitsByLimitId` in
+  `normalizeCodexLimits` (`:145`), including per-model pools and
+  rate-limit reset credits. A pool reported under both a named lane and the
+  legacy generic `codex` lane — same duration, reset instant, and utilization —
+  is kept once, on the named lane (`dedupeGenericLane`, `:127-137`).
 
 **The primary/secondary trap.** Codex's `primary` window is *not* reliably the
 5-hour window — a live `prolite` account reported `primary` with
@@ -1139,8 +1141,8 @@ p(q), over N samples, landing in bucket i (count n_i, running total `cum` before
 - Percentiles: `percentileFromBuckets` (`usage-aggregate.mjs:206-223`). The
   browser re-implementation `bucketPercentile` (`usage-rhythm.mjs:106-126`) is
   pinned to byte-identical output, and the browser's edge copies to the server
-  constants, by `tests/kit/dashboard-usage-telemetry.test.mjs:292-310` and
-  `:390-398`.
+  constants, by `tests/kit/dashboard-usage-telemetry.test.mjs:308-326` and
+  `:406-414`.
 - Render: `lengthCard`/`latencyCard` and the `≥` prefix helper `fmtAtLeast` in
   `src/lib/dashboard/client/usage.mjs` (that bundle shares a basename with the
   CLI command module, so its render sites are cited by function name rather

@@ -655,6 +655,17 @@ export const USAGE_CSS = `
    inside it. The fill already carries its own radius, so nothing else changes.
    The tick overrides .mbar i's block/height/background by carrying a class
    (0,2,1 beats 0,1,1). */
+/* A pool label — "GPT-5.3-Codex-Spark · weekly" — needs ~183px, where the
+   shared magnitude grid gives 137px and ellipsises the rest. Two rows both
+   truncating to something plausible is how one pool reported under two lanes
+   went unnoticed, so the limits label column is widened to fit: measured
+   1000-1600px, the full string fits with no row overflow. The cap is a MAX,
+   not a min — each .mrow is its own grid, so a content-sized track would let
+   every row start its meter at a different x and the panel would stop reading
+   as a stack of comparable bars. A fixed cap that yields under pressure keeps
+   them aligned; below ~950px the ellipsis returns and limRow's title carries
+   the full text. */
+.lim .mrow{grid-template-columns:minmax(0,190px) minmax(60px,0.9fr) 54px minmax(88px,auto)}
 .lim .mbar{position:relative; overflow:visible}
 .lim .mbar i.pace{
   position:absolute; top:-3px; bottom:-3px; left:0; width:2px; height:auto;

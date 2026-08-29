@@ -43,6 +43,22 @@ test('the source-health pills read status and reason, never a capability field',
   assert.match(JS, /sp-status/, 'the pill still renders the lead status');
 });
 
+// A Codex pool label is "GPT-5.3-Codex-Spark · weekly" — 183px of text in a
+// 137px column, so the shared .mrow grid ellipsised it to "GPT-5.3-Codex-Sp…".
+// That is what hid one pool being reported under two lanes: both rows truncated
+// to something plausible. Measured across 1000-1600px, the widened column fits
+// the full string with no row overflow; the tooltip covers the narrow band
+// below that, where two panels still sit side by side. The track is capped
+// rather than content-sized so every row's meter still starts at the same x.
+test('a limits row shows the whole pool label, and carries it as a tooltip regardless', () => {
+  assert.match(CSS, /\.lim \.mrow\{grid-template-columns:minmax\(0,190px\)/,
+    'the limits label column is widened past the shared magnitude grid, and stays a fixed track');
+  assert.match(JS, /class="mname" title="'\+esc\(label\)\+'">'\+esc\(label\)/,
+    'the full label is the title, so an ellipsised row is still readable on hover');
+  assert.match(JS, /limRow\(lane\.name\+" · "\+\(w\.label\|\|""\)/,
+    'a Codex row is named pool + window duration');
+});
+
 // ── /api/usage payload: rhythm, mode, provider, previous window ────────────
 //
 // The dashboard-server route delegates its entire aggregation to an
