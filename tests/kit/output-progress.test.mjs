@@ -107,7 +107,7 @@ test('managed outcomes render degraded and failed states without green success',
 // until stdout and stderr report their queues flushed. Tested end-to-end
 // through a real child process and a real pipe — the buffer behavior being
 // pinned does not exist in-process.
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 const OUTPUT_MJS = fileURLToPath(new URL('../../src/lib/output.mjs', import.meta.url));
@@ -129,6 +129,48 @@ test('exitWhenFlushed propagates a nonzero exit code', () => {
   const r = runChild('exitWhenFlushed(3);');
   assert.equal(r.status, 3);
   assert.equal(r.stdout.length, PAYLOAD);
+});
+
+// ── SEC-5: a stalled pipe consumer must not hang the exit forever ──────────
+// Security review SEC-5 (MEDIUM). The exit sits inside two nested write
+// callbacks with no timeout and no fallback. The review measured it: a
+// consumer that OPENS the pipe and never reads it, plus a payload above the
+// ~64 KB pipe buffer, never exits — it took SIGKILL at 8 s. A draining
+// consumer, a consumer that reads one chunk and destroys, and one that
+// destroys immediately all exited in under a second, which is why the tests
+// written alongside the drain fix (above) did not see this: they all drain.
+//
+// The shape that hits it is ordinary — a paused pager, a `tee` into a blocked
+// sink, a lazy CI step. Availability only, but it is a new hang in a path that
+// previously could not hang: before the drain fix the bin called
+// process.exit(code) directly and returned immediately.
+
+test('SEC-5: a consumer that opens the pipe and never reads it still exits, bounded', () => {
+  // The parent holds the read end open without reading, exactly as the review
+  // did. Without the bounded fallback this never resolves.
+  const child = spawn(process.execPath, ['--input-type=module', '-e',
+    `import { exitWhenFlushed } from ${JSON.stringify(OUTPUT_MJS)};
+     process.stdout.write('x'.repeat(${PAYLOAD}));
+     exitWhenFlushed(7);`,
+  ], { stdio: ['ignore', 'pipe', 'ignore'] });
+  child.stdout.pause(); // open, never read — the stalled-consumer case
+
+  const started = Date.now();
+  return new Promise((resolve, reject) => {
+    const guard = setTimeout(() => {
+      child.kill('SIGKILL');
+      reject(new Error('exitWhenFlushed never exited against a stalled consumer'));
+    }, 15_000);
+    child.on('exit', (code) => {
+      clearTimeout(guard);
+      const elapsed = Date.now() - started;
+      try {
+        assert.equal(code, 7, 'the exit code must survive the fallback path');
+        assert.ok(elapsed < 10_000, `took ${elapsed}ms — the bounded fallback did not fire`);
+        resolve();
+      } catch (err) { reject(err); }
+    });
+  });
 });
 
 // ── sanitizeForTerminal — the render-time half of SEC-2 ─────────────────────

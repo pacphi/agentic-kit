@@ -1480,3 +1480,48 @@ test('SEC-2: the same hostile stores put zero control or bidi bytes into --json 
   assert.ok(!result.stdout.includes('SECURITY ALERT'));
   assert.ok(!result.stdout.includes('drowssap'));
 });
+
+// ── SEC-10: a value-taking flag must not swallow the next flag ─────────────
+// Security review SEC-10 (LOW). Under the bin's old `strict:false` parseArgs,
+// an option declared as taking a value consumed whatever followed it, flag or
+// not. The review's own two observations are the two cases below.
+
+test('SEC-10: --draft with no value refuses instead of eating --json (and exiting in human format)', () => {
+  const sb = sandbox();
+  writePromptsCorpus(sb);
+  writeCoachingCorpus(sb);
+  const result = ak(['usage', 'prompts', '--draft', '--json'], sb);
+  assert.equal(result.status, 2, 'a malformed invocation must fail, not proceed');
+  assert.match(result.stdout, /--draft/, 'and must say which flag was wrong');
+  // The bug this replaces: `--json` became the DRAFT ID, the command exited 2,
+  // and it printed prose — so `ak usage prompts --draft "$ID" --json | jq` with
+  // an unset $ID silently handed jq a human report.
+  assert.doesNotMatch(result.stdout, /^\s*\{/, 'the output is not JSON either way, but now it says why');
+});
+
+test('SEC-10: --dismiss with no value refuses instead of eating --window (silently defaulting it to 365d)', () => {
+  const sb = sandbox();
+  writePromptsCorpus(sb);
+  writeCoachingCorpus(sb);
+  const result = ak(['usage', 'prompts', '--dismiss', '--window', '30'], sb);
+  assert.equal(result.status, 2);
+  assert.match(result.stdout, /--dismiss/);
+  const ledgerFile = path.join(sb.cfg, 'agentic-kit', 'usage-outcome-ledger.json');
+  assert.equal(fs.existsSync(ledgerFile), false, 'and nothing was persisted on the way to refusing');
+});
+
+test('SEC-10: an unknown flag is refused rather than silently doing nothing', () => {
+  const sb = sandbox();
+  writePromptsCorpus(sb);
+  const result = ak(['usage', 'prompts', '--windwo', '30'], sb);
+  assert.equal(result.status, 2);
+  assert.match(result.stdout, /--windwo/, 'the typo is named, not swallowed');
+});
+
+test('SEC-10: ordinary well-formed invocations are unaffected', () => {
+  const sb = sandbox();
+  writePromptsCorpus(sb);
+  const result = ak(['usage', 'prompts', '--window', '30', '--json'], sb);
+  assert.equal(result.status, 0, result.stdout);
+  JSON.parse(result.stdout);
+});

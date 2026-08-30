@@ -1240,7 +1240,19 @@ import { renderUsage } from './usage-orchestrators.mjs';
       src='<details class="i-src"><summary>grounding &mdash; '+f.sources.length+" source"
         +(f.sources.length===1?"":"s")+"</summary><ul>"
         +f.sources.map(function(sc){
-          return "<li><a href=\""+esc(sc.url)+"\" target=\"_blank\" rel=\"noreferrer noopener\">"+esc(sc.label)+"</a></li>";
+          // Security review SEC-12: scheme-allowlist the href. `esc` does not
+          // touch ':', so `javascript:alert(1)` survived it intact. The only
+          // producer today is a hardcoded constant (MODEL_ROUTING_SOURCES),
+          // which is why the review ranked it LOW and called it latent — but
+          // the neighbouring prompts surface already gets this right with
+          // encodeURIComponent into a '#' fragment, and this one becomes live
+          // XSS the day a detector cites a data-derived URL. A source that is
+          // not plainly http(s) renders as TEXT, so it is still visible and
+          // still auditable; it just is not clickable.
+          var url=String(sc&&sc.url||"");
+          var label=esc(sc&&sc.label);
+          if(!/^https?:\/\//.test(url)) return "<li>"+label+" <span class=\"soft mono\">"+esc(url)+"</span></li>";
+          return "<li><a href=\""+esc(url)+"\" target=\"_blank\" rel=\"noreferrer noopener\">"+label+"</a></li>";
         }).join("")+"</ul></details>";
     }
     return '<article class="icard" data-sev="'+esc(f.severity||"info")+'">'

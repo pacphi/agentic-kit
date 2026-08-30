@@ -121,15 +121,39 @@ export async function withProgress(label, thunk, {
   }
 }
 
+/** How long the drain below is allowed to take before the process exits
+ *  anyway. Security review SEC-5 (MEDIUM): the exit used to sit inside two
+ *  nested write callbacks with no timeout and no fallback, so a consumer that
+ *  OPENS the pipe and never reads it hung the process forever — the review
+ *  measured 8 s and then SIGKILL, against a payload above the ~64 KB pipe
+ *  buffer. A paused pager, a `tee` into a blocked sink, or a lazy CI step is
+ *  enough. Before the drain fix the bin called `process.exit(code)` directly,
+ *  so this was a NEW hang in a path that previously could not hang.
+ *
+ *  Two seconds is chosen against the measured drain cost: 270 KB through a
+ *  real pipe to a real consumer took 789 ms, so this leaves generous headroom
+ *  for a slow-but-live reader while still bounding a dead one. */
+const FLUSH_TIMEOUT_MS = 2000;
+
 /** Exit once stdout and stderr have drained. `process.exit()` kills the
  *  process with piped output still queued — a pipe consumer sees at most one
  *  ~64KB buffer of any larger payload (`ak usage prompts --json | jq` loses
  *  three quarters of its document). A zero-length write's callback fires only
  *  after everything queued before it has been handed to the OS, so exiting
  *  from the second callback preserves hard-exit semantics (lingering timers
- *  or handles still can't keep the process alive) without the truncation. */
+ *  or handles still can't keep the process alive) without the truncation.
+ *
+ *  The drain RACES a bounded timer (SEC-5). Whichever finishes first exits
+ *  with the same code, so a stalled consumer costs the caller two seconds
+ *  rather than the process's whole life, and a live one is unaffected. The
+ *  timer is `unref`'d so it never becomes the reason the process stays up. */
 export function exitWhenFlushed(code) {
+  const fallback = setTimeout(() => process.exit(code), FLUSH_TIMEOUT_MS);
+  fallback.unref?.();
   process.stdout.write('', () => {
-    process.stderr.write('', () => process.exit(code));
+    process.stderr.write('', () => {
+      clearTimeout(fallback);
+      process.exit(code);
+    });
   });
 }

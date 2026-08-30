@@ -111,10 +111,19 @@ const PKG_ROOT = path.resolve(HERE, '..', '..');
 // dashboard — a larger inline-script surface (page.mjs, live-view.mjs,
 // client.mjs) that also renders transcript text, the one data source here
 // that is genuinely attacker-influenced (agents paste in web pages, repo
-// content) — had none. This is not "we found an XSS" (esc() discipline is
-// consistent across dashboard/client.mjs's ~1,200 lines); it's the layer
-// that turns one future missed esc() into a blocked console error instead
-// of a working exploit.
+// content) — had none. This is not "we found an XSS": esc() discipline is
+// consistent across dashboard/client.mjs's ~1,200 lines.
+//
+// WHAT THIS CSP DOES AND DOES NOT BUY (security review SEC-13). The comment
+// here used to claim it "turns one future missed esc() into a blocked console
+// error instead of a working exploit". That is true of a `<script src=…>`
+// injection, which `default-src 'none'` blocks, and of exfiltration, which
+// `connect-src 'self'` blocks. It is NOT true of the two shapes a missed
+// esc() actually produces: `script-src 'unsafe-inline'` permits inline
+// `<script>alert(1)</script>` AND inline event handlers, so `<img src=x
+// onerror=…>` runs — the blocked image load still fires onerror. No
+// vulnerability today; the correction is here so nobody reads this header as
+// licence to relax the escaping that is doing the real work.
 const DASH_CSP = [
   "default-src 'none'",
   "script-src 'unsafe-inline'",   // the two inline module scripts (live + main)
