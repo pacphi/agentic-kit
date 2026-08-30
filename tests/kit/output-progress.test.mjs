@@ -7,7 +7,9 @@
 // never touches the real stdout, so results don't depend on how tests are run.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { reportOutcome, withProgress } from '../../src/lib/output.mjs';
+import {
+  reportOutcome, withProgress, sanitizeForTerminal, dim, bold,
+} from '../../src/lib/output.mjs';
 
 const sink = () => {
   const writes = [];
@@ -127,4 +129,64 @@ test('exitWhenFlushed propagates a nonzero exit code', () => {
   const r = runChild('exitWhenFlushed(3);');
   assert.equal(r.status, 3);
   assert.equal(r.stdout.length, PAYLOAD);
+});
+
+// ── sanitizeForTerminal — the render-time half of SEC-2 ─────────────────────
+// The security review demonstrated four independent paths that carried raw
+// ESC/BEL/NUL bytes to the terminal, and captured every one of them with
+// stdout redirected to a FILE: the bytes land in the file and fire when it is
+// later `cat`'d. The stores now reject such text at rest; this is the last
+// line, and the only one covering `--deep`'s raw transcript text.
+//
+// The forbidden ranges are spelled out HERE, independently of the module's
+// own list, so narrowing that list fails this test rather than agreeing with
+// it. Written as numbers so this file carries none of the bytes it forbids.
+const FORBIDDEN = new RegExp(`[${[
+  [0x00, 0x08], [0x0b, 0x1f], [0x7f, 0x9f],
+  [0x200b, 0x200f], [0x202a, 0x202e], [0x2066, 0x2069],
+].map(([lo, hi]) => `${String.fromCharCode(lo)}-${String.fromCharCode(hi)}`).join('')}]`);
+
+const CH = (code) => String.fromCharCode(code);
+const ESC = CH(0x1b);
+const BEL = CH(0x07);
+
+test('sanitizeForTerminal removes every demonstrated control-sequence primitive', () => {
+  const cases = {
+    'screen clear': `${ESC}[2J`,
+    'cursor home': `${ESC}[1;1H`,
+    conceal: `${ESC}[8m HIDDEN ${ESC}[28m`,
+    'OSC-0 window title': `${ESC}]0;PWNED${BEL}`,
+    'OSC-52 clipboard write': `${ESC}]52;c;cm0gLXJmIH4=${BEL}`,
+    bell: BEL,
+    nul: CH(0x00),
+    backspace: CH(0x08),
+    'C1 CSI': CH(0x9b),
+    'bidi override': CH(0x202e),
+    'carriage-return line overwrite': `${CH(0x0d)}OVERWRITTEN`,
+  };
+  for (const [why, payload] of Object.entries(cases)) {
+    const out = sanitizeForTerminal(`before ${payload} after`);
+    assert.ok(!FORBIDDEN.test(out),
+      `${why}: output still carries a forbidden character: ${JSON.stringify(out)}`);
+  }
+});
+
+test('sanitizeForTerminal keeps tab and newline, which are legitimate in a message', () => {
+  assert.equal(sanitizeForTerminal('a\tb\nc'), 'a\tb\nc');
+});
+
+test('sanitizeForTerminal preserves the styling this module itself applied', () => {
+  const styled = `${dim('Billing:')} ${bold('subscription')}`;
+  assert.equal(sanitizeForTerminal(styled), styled,
+    'a blanket strip would have deleted the kit\'s own formatting everywhere');
+});
+
+test('sanitizeForTerminal strips hostile bytes that arrive INSIDE a styled message', () => {
+  const out = sanitizeForTerminal(dim(`name ${ESC}]0;PWNED${BEL} tail`));
+  // Built with fromCharCode rather than an escape so this file carries none
+  // of the bytes it is asserting about: strip the module's OWN styling first,
+  // then nothing forbidden may remain.
+  const ownSgr = new RegExp(`${ESC}\\[(?:0|1|2|1;3[1236])m`, 'g');
+  assert.ok(!FORBIDDEN.test(out.replace(ownSgr, '')),
+    'an OSC introducer must not survive just because the message was styled');
 });

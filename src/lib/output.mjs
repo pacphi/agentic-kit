@@ -1,6 +1,10 @@
 // Terminal output helpers, mirroring the shell kit's ok/warn/fail/dim voice.
 // Color only on a TTY and when NO_COLOR is unset; --json callers collect
 // structured results instead of printing.
+import { stripUnsafeChars } from './text-safety.mjs';
+
+const SGR_CODES = ['1;32', '1;33', '1;31', '1;36', '2', '1'];
+const RESET = '0';
 const useColor = process.stdout.isTTY && !process.env.NO_COLOR;
 const c = (code, s) => (useColor ? `\x1b[${code}m${s}\x1b[0m` : s);
 
@@ -11,11 +15,56 @@ export const cyan = (s) => c('1;36', s);
 export const dim = (s) => c('2', s);
 export const bold = (s) => c('1', s);
 
-export const ok = (msg) => console.log(`${green('✓')} ${msg}`);
-export const warn = (msg) => console.log(`${yellow('⚠')}  ${msg}`);
-export const fail = (msg) => console.log(`${red('✗')} ${msg}`);
-export const info = (msg) => console.log(`${dim('ℹ')}  ${msg}`);
-export const heading = (msg) => console.log(`\n${bold(msg)}`);
+/** Exactly the SGR sequences the helpers above emit — nothing else. Built
+ *  from SGR_CODES so adding a color here cannot forget to teach the sanitizer
+ *  about it. */
+const OWN_SGR_RE = new RegExp(
+  `\\x1b\\[(?:${[RESET, ...SGR_CODES].map((code) => code.replace(';', '\\;')).join('|')})m`, 'g',
+);
+
+/**
+ * The render-time half of the SEC-2 fix (security review, HIGH): strip every
+ * control and bidi character from a message before it becomes bytes on a
+ * terminal, while preserving the styling THIS module added.
+ *
+ * Why the message cannot simply be stripped whole: callers legitimately
+ * pre-style their text — `info(dim(line))` hands us a string that already
+ * contains our own escape codes — so a blanket strip would silently delete
+ * the kit's own formatting everywhere. The string is therefore split on the
+ * sequences this module emits, and only the pieces BETWEEN them are stripped.
+ *
+ * What that leaves, stated honestly: a hostile string could still forge one of
+ * those six color codes and render itself, say, red. It could not move the
+ * cursor, clear the screen, conceal text, ring the bell, or emit an OSC
+ * title/clipboard sequence — the primitives the review actually demonstrated.
+ * And in practice it cannot even do that much, because both routes that carry
+ * attacker-chosen text into these helpers strip it earlier: the stores REJECT
+ * such an entry outright (usage-label-store.mjs, usage-outcome-ledger.mjs) and
+ * `--deep`'s raw transcript text is stripped at `clipText`. This is the last
+ * line, not the only one.
+ *
+ * @param {unknown} value
+ * @returns {string}
+ */
+export function sanitizeForTerminal(value) {
+  const text = String(value ?? '');
+  let out = '';
+  let last = 0;
+  OWN_SGR_RE.lastIndex = 0;
+  for (let match = OWN_SGR_RE.exec(text); match; match = OWN_SGR_RE.exec(text)) {
+    out += stripUnsafeChars(text.slice(last, match.index)) + match[0];
+    last = match.index + match[0].length;
+  }
+  return out + stripUnsafeChars(text.slice(last));
+}
+
+const s = sanitizeForTerminal;
+
+export const ok = (msg) => console.log(`${green('✓')} ${s(msg)}`);
+export const warn = (msg) => console.log(`${yellow('⚠')}  ${s(msg)}`);
+export const fail = (msg) => console.log(`${red('✗')} ${s(msg)}`);
+export const info = (msg) => console.log(`${dim('ℹ')}  ${s(msg)}`);
+export const heading = (msg) => console.log(`\n${bold(s(msg))}`);
 
 /** Render a managed-operation result without collapsing degraded/skipped work
  * into a green success. Legacy `{ok, detail}` results remain supported. */

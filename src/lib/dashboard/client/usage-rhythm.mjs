@@ -10,7 +10,12 @@
 // PLACEHOLDER (see client.mjs's inject()), so importing it here would pull in
 // the stub, not the real escaper.
 function esc(s) {
-  return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+  var ranges = [0x00, 0x08, 0x0b, 0x1f, 0x7f, 0x9f, 0x200b, 0x200f, 0x202a, 0x202e, 0x2066, 0x2069];
+  var cls = '';
+  for (var i = 0; i < ranges.length; i += 2) {
+    cls += String.fromCharCode(ranges[i]) + '-' + String.fromCharCode(ranges[i + 1]);
+  }
+  return String(s == null ? '' : s).replace(new RegExp('[' + cls + ']', 'g'), '').replace(/[&<>"']/g, function (c) {
     return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
   });
 }

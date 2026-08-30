@@ -27,6 +27,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { configDir } from './paths.mjs';
+import { hasUnsafeChars } from './text-safety.mjs';
 import {
   detectAdoption, measureOutcome, currentEvidenceFor, OUTCOME_MIN_DAYS, DAY_MS,
 } from './usage-coaching.mjs';
@@ -116,10 +117,26 @@ export function saveLedger(filePath, ledger) {
   try { fs.chmodSync(filePath, 0o600); } catch { /* best effort on exotic filesystems */ }
 }
 
+/** True when ANY string anywhere in a loaded record carries a control or bidi
+ *  character. Security review SEC-2: this function used to validate only
+ *  `windowDays` and `status`, so every other field was trusted verbatim —
+ *  and `refutation` is printed straight to the terminal by
+ *  `printCoachingCard`, while `retired` is a terminal status no later
+ *  transition ever recomputes, so a poisoned refutation would render on
+ *  every pass forever. The walk is depth-bounded because a record's nesting
+ *  is shallow and fixed (`baseline`, `outcome`); a hand-edited file cannot
+ *  turn it into an unbounded recursion. */
+function recordHasUnsafeText(value, depth = 0) {
+  if (typeof value === 'string') return hasUnsafeChars(value);
+  if (depth >= 4 || !value || typeof value !== 'object') return false;
+  return Object.values(value).some((entry) => recordHasUnsafeText(entry, depth + 1));
+}
+
 /** Builds the working `Map<id, record>` from a loaded ledger, DISCARDING any
  *  record that is not a canonical-window record this build recognizes as
- *  valid (Fix round 1, C-1 + I-5): missing/mismatched `windowDays`, or a
- *  `status` outside the five-value enum. A discarded record is treated as
+ *  valid (Fix round 1, C-1 + I-5): missing/mismatched `windowDays`, a
+ *  `status` outside the five-value enum, or (SEC-2) any field carrying a
+ *  control or bidi character. A discarded record is treated as
  *  though it never existed — the next pass that sees its card proposes it
  *  fresh, exactly like a brand-new id. This is a legitimate simplification
  *  only because this ledger has never shipped: there is no real record to
@@ -130,6 +147,7 @@ function loadRecordsMap(ledger) {
     if (!r || typeof r !== 'object') continue;
     if (r.windowDays !== CANONICAL_WINDOW_DAYS) continue;
     if (!VALID_STATUSES.has(r.status)) continue;
+    if (recordHasUnsafeText(r)) continue;
     map.set(r.id, { ...r });
   }
   return map;

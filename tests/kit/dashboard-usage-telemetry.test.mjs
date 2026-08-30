@@ -7,6 +7,7 @@ import path from 'node:path';
 import { JS } from '../../src/lib/dashboard/client.mjs';
 import { renderPage } from '../../src/lib/dashboard/page.mjs';
 import { CSS } from '../../src/lib/dashboard/styles.mjs';
+import { esc as groupsEsc } from '../../src/lib/dashboard/groups.mjs';
 import { startDashboard } from '../../src/lib/dashboard-server.mjs';
 import { aggregate } from '../../src/lib/usage-aggregate.mjs';
 import { blankSession, addUsage, notePromptFingerprint } from '../../src/lib/usage-parsers.mjs';
@@ -1910,4 +1911,97 @@ test('the scorecard panel grafts are idempotent — a re-render reuses its conta
   // instead of inserting a second one; without that the scorecard would grow
   // a duplicate panel every few seconds.
   assert.match(JS, /function ensureBlock\(probeId,html,afterId\)\{\s*var existing=document\.getElementById\(probeId\);\s*if\(existing\)return existing;/);
+});
+
+// ── SEC-9: control and bidi characters never reach the DOM ─────────────────
+// The security review's LOW finding, and the DOM half of SEC-2's HIGH. `esc`
+// replaced only [&<>"'], so a 24-character label carrying U+202E and a raw ESC
+// cleared `isValidLabelName` and rendered six control/bidi codepoints into the
+// page — one of them INSIDE a title= attribute, where U+202E reverses the rest
+// of the cell and a row reads as a different label than the one it is.
+//
+// This drives the render functions DIRECTLY with hostile values rather than
+// through the store, on purpose: the store gate is the primary fix, and this
+// boundary must hold without depending on it.
+
+const DOM_FORBIDDEN = new RegExp(`[${[
+  [0x00, 0x08], [0x0b, 0x1f], [0x7f, 0x9f],
+  [0x200b, 0x200f], [0x202a, 0x202e], [0x2066, 0x2069],
+].map(([lo, hi]) => `${String.fromCharCode(lo)}-${String.fromCharCode(hi)}`).join('')}]`);
+
+const DOM_HOSTILE = `RLO${String.fromCharCode(0x202e)}drowssap `
+  + `${String.fromCharCode(0x1b)}[31mESC${String.fromCharCode(0x07)}`
+  + `${String.fromCharCode(0x1b)}]52;c;cm0gLXJmIH4=${String.fromCharCode(0x07)}`
+  + `${String.fromCharCode(0x00)}${String.fromCharCode(0x9b)}${String.fromCharCode(0x200b)}`;
+
+test('SEC-9: a hostile cluster label puts zero control or bidi codepoints in the patterns table (text OR title attribute)', () => {
+  const html = patternsTable({
+    ...PANEL_PROMPTS,
+    patterns: {
+      ...PANEL_PROMPTS.patterns,
+      clusters: [{
+        ...PANEL_PROMPTS.patterns.clusters[0],
+        label: { name: DOM_HOSTILE, source: 'enriched', descriptor: DOM_HOSTILE },
+      }],
+    },
+  });
+  assert.match(html, /<table class="pr-table"/, 'guard: the table actually rendered, so this is not a vacuous pass');
+  const hit = html.match(DOM_FORBIDDEN);
+  assert.equal(hit, null,
+    `rendered HTML carries U+${hit ? hit[0].charCodeAt(0).toString(16).padStart(4, '0') : ''}`);
+  assert.ok(html.includes('drowssap'),
+    'the LETTERS are ordinary text and stay; it is the U+202E that reversed the cell that must not');
+});
+
+test('SEC-9: hostile coaching-card prose puts zero control or bidi codepoints in the DOM', () => {
+  const html = coachingPanel({
+    coaching: {
+      cards: [{
+        id: `enriched-${DOM_HOSTILE}`, title: DOM_HOSTILE, finding: DOM_HOSTILE,
+        try: DOM_HOSTILE, basis: DOM_HOSTILE, status: 'proposed', stale: false,
+        dismissCount: 0, outcome: null, refutation: DOM_HOSTILE,
+        generatedAt: '2026-08-01T00:00:00.000Z', evidenceHash: 'a'.repeat(16),
+      }],
+      generatedAt: '2026-08-01T00:00:00.000Z',
+    },
+  });
+  assert.match(html, /<div class="pr-card"/, 'guard: a card actually rendered, so this is not a vacuous pass');
+  const hit = html.match(DOM_FORBIDDEN);
+  assert.equal(hit, null,
+    `rendered HTML carries U+${hit ? hit[0].charCodeAt(0).toString(16).padStart(4, '0') : ''}`);
+});
+
+test('SEC-9: esc still escapes the five HTML metacharacters it always did', () => {
+  const html = patternsTable({
+    ...PANEL_PROMPTS,
+    patterns: {
+      ...PANEL_PROMPTS.patterns,
+      clusters: [{
+        ...PANEL_PROMPTS.patterns.clusters[0],
+        label: { name: '<img src=x onerror=alert(1)> & "q" \'s\'', source: 'curated' },
+      }],
+    },
+  });
+  assert.ok(!html.includes('<img src=x'), 'the tag must not survive as markup');
+  assert.ok(html.includes('&lt;img src=x'), 'it survives as escaped text, as before');
+  assert.ok(html.includes('&quot;') && html.includes('&#39;') && html.includes('&amp;'));
+});
+
+test('SEC-9: the escaper actually SHIPPED to the browser is the stripping one, not a stale copy', () => {
+  // Three copies of `esc` exist by design: groups.mjs's (the real one,
+  // injected into the bundle via esc.toString()), and byte-identical on-disk
+  // copies in usage-rhythm.mjs / usage-prompts.mjs that exist so the
+  // direct-import tests above have something to run. client.mjs strips those
+  // two from the bundle. The tests above exercise the on-disk copies — so
+  // without this, groups.mjs could lose the strip and every one of them would
+  // stay green while the shipped page rendered raw control bytes.
+  // The CONTROL characters go; the printable payload text stays, which is
+  // exactly right — an OSC sequence without its introducer and terminator is
+  // inert prose, and rewriting a reader's visible text would be its own lie.
+  assert.equal(groupsEsc(`a${String.fromCharCode(0x1b)}]0;PWNED${String.fromCharCode(0x07)}b`),
+    'a]0;PWNEDb', 'groups.mjs\'s esc — the source of the injected copy — must strip');
+  assert.equal(groupsEsc(`x${String.fromCharCode(0x202e)}y`), 'xy');
+  assert.equal(groupsEsc('<b>&"\'</b>'), '&lt;b&gt;&amp;&quot;&#39;&lt;/b&gt;', 'and still escape');
+  assert.match(JS, /function esc\(s\) \{[\s\S]{0,600}?0x202e/,
+    'the bundle\'s one esc must be the stripping implementation, not the five-character escaper');
 });

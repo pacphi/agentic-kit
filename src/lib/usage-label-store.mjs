@@ -23,11 +23,12 @@
 // reported as `future: true` and never destroyed (the caller must refuse to
 // reconcile/overwrite it — see runPrompts); atomic tmp+rename write.
 //
-// INVARIANT (test-pinned): no label NAME ever exceeds 48 characters or
-// contains a newline (`isValidLabelName`, the same predicate
-// usage-enrich.mjs's response validation uses — ONE place owns what a legal
-// label value is). No card field ever contains a newline. Both are enforced
-// HERE, defensively, on every write — not merely trusted of the caller —
+// INVARIANT (test-pinned): no label NAME ever exceeds 48 characters, contains
+// a newline, or carries a control/bidi character (`isValidLabelName`, the same
+// predicate usage-enrich.mjs's response validation uses — ONE place owns what
+// a legal label value is). No card field ever contains a newline or such a
+// character either. All are enforced HERE, on every write AND every read —
+// not merely trusted of the caller —
 // because this is the layer-3 privacy boundary's last line of defense before
 // something reaches disk. Card prose (finding/try/basis) is deliberately NOT
 // held to the label's 48-char ceiling: "13 recurrences across 11 sessions, 9
@@ -43,6 +44,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { configDir } from './paths.mjs';
+import { hasUnsafeChars } from './text-safety.mjs';
 
 export const LABEL_STORE_SCHEMA_VERSION = 1;
 
@@ -84,6 +86,12 @@ export function isValidLabelName(name) {
   const trimmed = name.trim();
   if (!trimmed) return false;
   if (trimmed.length > MAX_LABEL_NAME_CHARS) return false;
+  // Security review SEC-2: checked on the RAW string, not the trimmed one.
+  // `String.prototype.trim` removes whitespace, and every character
+  // text-safety.mjs rejects is a control or a mark, not whitespace — except
+  // the ones trim WOULD eat, which must still fail. Checking the raw string
+  // means nothing gets in by hiding where a trim would have looked.
+  if (hasUnsafeChars(name)) return false;
   // Fix round 1, M-2: newline-checked against the TRIMMED name, matching the
   // length check above — every caller stores `.trim()`'d text (enrichLabels'
   // `item.name.trim()`), so a name like "Release ritual\n" (a trailing
@@ -92,11 +100,18 @@ export function isValidLabelName(name) {
   return !/[\r\n]/.test(trimmed);
 }
 
-/** No embedded newline — the one invariant every free-text CARD field is held
- *  to (prose length itself is not capped the way a label name is; see the
- *  module doc). `undefined`/non-string is invalid: a card field is required. */
+/** No embedded newline, and no control or bidi character — the invariants
+ *  every free-text CARD field is held to (prose length itself is not capped
+ *  the way a label name is; see the module doc). `undefined`/non-string is
+ *  invalid: a card field is required.
+ *
+ *  Security review SEC-2 added the second half. Card prose reaches the
+ *  terminal through `printCoachingCard` and the DOM through `coachingCard`,
+ *  and the review painted a fabricated red "ak: SECURITY ALERT" banner over a
+ *  cleared screen using nothing but a card's `finding` text. */
 function isSingleLineText(value) {
-  return typeof value === 'string' && value.length > 0 && !/[\r\n]/.test(value);
+  return typeof value === 'string' && value.length > 0
+    && !/[\r\n]/.test(value) && !hasUnsafeChars(value);
 }
 
 /** One stored label entry, or null if it fails the invariant — dropped, not

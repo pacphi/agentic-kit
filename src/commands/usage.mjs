@@ -3,6 +3,7 @@
 // aggregate `ak dashboard`'s Usage tab reads — no cost/token/percentile
 // arithmetic is redone here; see the score section below for the boundary.
 import { heading, info, ok, warn, dim } from '../lib/output.mjs';
+import { stripUnsafeChars } from '../lib/text-safety.mjs';
 import { readIndex } from '../lib/usage-index.mjs';
 import {
   BASELINE_TRAILING_DAYS, LAT_BUCKET_EDGES, LEN_BUCKET_EDGES, TAP_MAX_TOKENS,
@@ -921,12 +922,22 @@ function printPromptReport(agg, r) {
 
 // ── deep-pass printers ──────────────────────────────────────────────────────
 
-/** One-line rendering of a prompt: whitespace collapsed so a pasted paragraph
- *  stays one row, clipped, and 'transcript unavailable' rather than blank when
- *  the file that held it could not be re-read. */
+/** One-line rendering of a prompt: control and bidi characters removed,
+ *  whitespace collapsed so a pasted paragraph stays one row, clipped, and
+ *  'transcript unavailable' rather than blank when the file that held it
+ *  could not be re-read.
+ *
+ *  Security review SEC-2: the strip happens HERE, at the one funnel raw
+ *  transcript text passes through on its way to the `--deep` printers, rather
+ *  than only in output.mjs. Two reasons. This text never touches a store, so
+ *  the store gates that stop every other route do not see it. And the column
+ *  padding in `tableRow` counts raw `.length`, so stripping after the row is
+ *  built would leave every column shifted by the removed bytes — the
+ *  alignment damage the review measured, minus the fix. `\s+` was verified
+ *  NOT to match ESC, BEL or NUL, so the collapse below never covered this. */
 function clipText(text, max) {
   if (text == null) return 'transcript unavailable';
-  const one = String(text).replace(/\s+/g, ' ').trim();
+  const one = stripUnsafeChars(text).replace(/\s+/g, ' ').trim();
   return one.length > max ? `${one.slice(0, max - 1)}…` : one;
 }
 

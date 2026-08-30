@@ -2377,7 +2377,7 @@ sorted-key serialization of its evidence (`evidenceHash`,
 persisted beside the index (`usage-outcome-ledger.json`, mode 0600, atomic
 tmp+rename write; no field on a record ever holds prompt text — ids, hashes,
 counts, and host names only). `reconcile`
-(`usage-outcome-ledger.mjs:258`) is the pure transition function:
+(`usage-outcome-ledger.mjs:276`) is the pure transition function:
 
 ```text
 new card                      → proposed         (baseline snapshotted now)
@@ -2415,7 +2415,7 @@ refutation line — is pinned to the canonical one.
 `usage-outcome-ledger.mjs:60`): a dismissed card's hash changing is not
 enough to re-propose it — the canonical count must have worsened by at least
 50% relative to the count recorded AT DISMISSAL TIME (`hasWorsenedMaterially`,
-`usage-outcome-ledger.mjs:165`), measured against
+`usage-outcome-ledger.mjs:183`), measured against
 that frozen reference every pass, never a creeping one. Any single additional
 occurrence changes the evidence hash (it is one more instance of the exact
 thing being hashed), so gating on hash-change alone would have made a
@@ -2587,7 +2587,7 @@ firstSeen}`, the vocabulary's own store contract) and `cards` (synthesized
 card CONTENT: title/finding/try/basis/basisNumbers/evidenceHash/generatedAt —
 the outcome ledger, §22, tracks a card's LIFECYCLE, never its prose). Every
 entry is re-validated on both write AND read (`sanitizedEntries`,
-`usage-label-store.mjs:145`) — a malformed entry is dropped, never resurrected, rather than
+`usage-label-store.mjs:160`) — a malformed entry is dropped, never resurrected, rather than
 crashing the whole command or permanently excluding its cluster from future
 candidacy.
 

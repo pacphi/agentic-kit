@@ -361,3 +361,89 @@ test('INVARIANT walk: no string anywhere in a saved+reloaded store exceeds 48 ch
   walk(back);
   for (const entry of Object.values(back.labels)) assert.ok(entry.name.length <= 48);
 });
+
+// ── SEC-2: control and bidi characters are rejected at rest ─────────────────
+// The security review's HIGH finding. The only text invariants this store held
+// were "no CR/LF" and "at most 48 chars", so ESC, BEL, NUL and backspace all
+// passed — and it demonstrated, by running it, a fabricated red
+// "ak: SECURITY ALERT" banner painted over a cleared screen from a card's
+// prose, an OSC-0 window-title rewrite from a card id, and an OSC-52
+// clipboard write that fits inside the 48-character label-name budget.
+
+const ESC = String.fromCharCode(0x1b);
+const BEL = String.fromCharCode(0x07);
+const NUL = String.fromCharCode(0x00);
+const BS = String.fromCharCode(0x08);
+const RLO = String.fromCharCode(0x202e);
+const ZWSP = String.fromCharCode(0x200b);
+const CSI = String.fromCharCode(0x9b);
+
+const HOSTILE_NAMES = {
+  'ANSI colour': `${ESC}[31mRED${ESC}[0m`,
+  'screen clear + banner': `${ESC}[2J${ESC}[1;1H${ESC}[41;97m ALERT `,
+  'conceal': `benign${ESC}[8m HIDDEN ${ESC}[28m`,
+  'OSC-0 title rewrite': `${ESC}]0;PWNED${BEL}`,
+  'OSC-52 clipboard write': `${ESC}]52;c;cm0gLXJmIH4=${BEL}`,
+  bell: `${BEL}bell`,
+  nul: `${NUL}nul`,
+  backspace: `typo${BS}${BS}fix`,
+  'C1 CSI': `${CSI}31mRED`,
+  'bidi override': `RLO${RLO}drowssap`,
+  'zero-width': `inv${ZWSP}isible`,
+};
+
+test('isValidLabelName rejects every control and bidi character, not only CR/LF', () => {
+  for (const [why, name] of Object.entries(HOSTILE_NAMES)) {
+    assert.equal(isValidLabelName(name), false, `${why}: ${JSON.stringify(name)} must not be a legal label`);
+  }
+  assert.equal(isValidLabelName('Release ritual'), true, 'ordinary names still pass');
+  assert.equal(isValidLabelName('naïve 日本語 ✓ — em dash'), true, 'non-ASCII prose is not a control character');
+  assert.equal(isValidLabelName('  Release ritual  '), true, 'surrounding whitespace still trims, as before');
+});
+
+test('INVARIANT: a hostile label never survives a save+reload, however it got in', () => {
+  const file = tmpFile();
+  const labels = Object.fromEntries(Object.entries(HOSTILE_NAMES).map(([why, name], i) => (
+    [`k${i}`, { name, source: 'enriched', firstSeen: '2026-08-01T00:00:00.000Z', why }]
+  )));
+  labels.good = { name: 'Release ritual', source: 'enriched', firstSeen: '2026-08-01T00:00:00.000Z' };
+  saveLabelStore(file, { version: LABEL_STORE_SCHEMA_VERSION, labels, cards: {} });
+  const back = loadLabelStore(file);
+  assert.deepEqual(Object.keys(back.labels), ['good'], 'every hostile entry dropped, the legal one kept');
+  assert.ok(!fs.readFileSync(file, 'utf8').includes(ESC), 'no ESC byte reaches the file at all');
+});
+
+test('INVARIANT: a card whose prose carries a control or bidi character is dropped, not persisted', () => {
+  for (const field of ['title', 'finding', 'try', 'basis']) {
+    const file = tmpFile();
+    const card = {
+      title: 'A title', finding: 'A finding.', try: 'Try this.', basis: '3 occurrences.',
+      basisNumbers: [3], evidenceHash: 'c'.repeat(16), generatedAt: '2026-08-01T00:00:00.000Z',
+    };
+    card[field] = `${ESC}[2J${ESC}[1;1H${ESC}[41;97m  ak: SECURITY ALERT  ${ESC}[0m`;
+    saveLabelStore(file, { version: LABEL_STORE_SCHEMA_VERSION, labels: {}, cards: { 'enriched-x': card } });
+    const back = loadLabelStore(file);
+    assert.deepEqual(back.cards, {}, `a hostile ${field} must drop the whole card`);
+  }
+});
+
+test('SEC-2 read path: a hostile store written OUT OF BAND is sanitized on load, not just on save', () => {
+  const file = tmpFile();
+  // Hand-written bytes, never through saveLabelStore — the case the review
+  // actually exercised (an out-of-band edit, another build, a recovered file).
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, JSON.stringify({
+    version: LABEL_STORE_SCHEMA_VERSION,
+    labels: { evil: { name: `${ESC}]0;PWNED${BEL}`, source: 'enriched', firstSeen: null } },
+    cards: {
+      'enriched-evil': {
+        title: `${ESC}[41;97m ALERT `, finding: 'f', try: 't', basis: 'b',
+        basisNumbers: [], evidenceHash: 'e'.repeat(16), generatedAt: '2026-08-01T00:00:00.000Z',
+      },
+    },
+  }));
+  const back = loadLabelStore(file);
+  assert.deepEqual(back.labels, {}, 'the hostile label is dropped on READ');
+  assert.deepEqual(back.cards, {}, 'the hostile card is dropped on READ');
+  assert.deepEqual(back.dropped, { labels: 1, cards: 1 }, 'and both drops are counted honestly');
+});
