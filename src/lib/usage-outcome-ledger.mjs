@@ -139,10 +139,33 @@ function loadRecordsMap(ledger) {
  *  operator's displayed `--window`), so every baseline in the ledger is
  *  commensurable with every other one regardless of what window was
  *  displayed the day it was written.
+ *
+ *  Returns `null`, never a fabricated `{count: 0}`, when the canonical
+ *  evidence for this card's id is itself unmeasurable this pass (Fix round
+ *  2, N-2 — absent evidence must not be written as a measured zero, the
+ *  same evidence-honesty doctrine `currentEvidenceFor` already keeps).
+ *  Every reader of `record.baseline` (`detectAdoption`'s collapse route,
+ *  `measureOutcome`) already treats a missing/non-finite count as
+ *  "not comparable, no transition" via `Number.isFinite`, so a `null`
+ *  baseline here is the correct, already-handled input to both.
  *  @param {CoachingCard} card
- *  @param {{ currentPatterns?: object }} [adoptionInputs] */
+ *  @param {{ currentPatterns?: object }} [adoptionInputs]
+ *  @returns {({count: number}&Record<string, unknown>)|null} */
 function snapshotBaseline(card, adoptionInputs) {
-  return { count: 0, ...(currentEvidenceFor(card.id, adoptionInputs?.currentPatterns ?? {}) ?? {}) };
+  return currentEvidenceFor(card.id, adoptionInputs?.currentPatterns ?? {});
+}
+
+/** Fix round 1 I-1 / Fix round 2 N-2: true only when BOTH counts are real,
+ *  finite measurements — never `Number(null) === 0` standing in for
+ *  "unmeasurable" — and the current one is a material worsening of the
+ *  dismissal-time one. Either count being absent (not a number) always
+ *  reports "not comparable" rather than treating the gap as material. */
+function hasWorsenedMaterially(currentCount, dismissedAtCount) {
+  if (typeof currentCount !== 'number' || !Number.isFinite(currentCount)) return false;
+  if (typeof dismissedAtCount !== 'number' || !Number.isFinite(dismissedAtCount)) return false;
+  if (currentCount <= dismissedAtCount) return false;
+  if (dismissedAtCount <= 0) return true;
+  return (currentCount - dismissedAtCount) / dismissedAtCount >= DISMISS_MATERIALITY_RATIO;
 }
 
 function isoNow(now) { return new Date(now).toISOString(); }
@@ -237,65 +260,17 @@ export function reconcile(ledger, cards, { adoptionInputs = {}, now = Date.now()
   for (const card of cards ?? []) {
     seenIds.add(card.id);
     let record = records.get(card.id);
-
     if (!record) {
-      record = {
-        id: card.id, evidenceHash: card.evidenceHash, status: 'proposed',
-        generatedAt: card.generatedAt, statusAt: isoNow(now),
-        baseline: snapshotBaseline(card, adoptionInputs),
-        windowDays: CANONICAL_WINDOW_DAYS,
-      };
+      record = newRecord(card, adoptionInputs, now);
       records.set(card.id, record);
     } else if (record.status === 'dismissed') {
-      if (record.evidenceHash !== card.evidenceHash) {
-        const fresh = currentEvidenceFor(card.id, adoptionInputs.currentPatterns ?? {});
-        const currentCount = Number(fresh?.count);
-        const dismissedAtCount = Number(record.dismissedAtCount);
-        const worsenedMaterially = Number.isFinite(currentCount) && Number.isFinite(dismissedAtCount)
-          && currentCount > dismissedAtCount
-          && (dismissedAtCount <= 0 || (currentCount - dismissedAtCount) / dismissedAtCount >= DISMISS_MATERIALITY_RATIO);
-        if (worsenedMaterially) {
-          const dismissals = record.dismissCount ?? 1;
-          if (dismissals < DISMISS_PERMANENT_THRESHOLD) {
-            record.status = 'proposed';
-            record.evidenceHash = card.evidenceHash;
-            record.statusAt = isoNow(now);
-            record.baseline = snapshotBaseline(card, adoptionInputs);
-            delete record.dismissedAtCount;
-          } else {
-            record.evidenceHash = card.evidenceHash; // bookkeeping only; permanent
-          }
-        }
-        // else: hash moved but not materially — record left exactly as-is,
-        // including evidenceHash, so materiality keeps being measured from
-        // the ORIGINAL dismissal-time count every pass.
-      }
+      transitionDismissed(record, card, adoptionInputs, now);
     } else if (record.status === 'proposed') {
-      record.evidenceHash = card.evidenceHash; // display freshness only — baseline stays at proposal
-      const { adopted } = detectAdoption(card, { ...adoptionInputs, ledgerRecord: record });
-      if (adopted) {
-        record.status = 'adopted';
-        record.statusAt = isoNow(now);
-        record.baseline = snapshotBaseline(card, adoptionInputs); // re-anchor for outcome measurement
-        delete record.outcome; delete record.refutation;
-      }
+      transitionProposed(record, card, adoptionInputs, now);
     } else if (record.status === 'adopted') {
-      const outcome = measureOutcome(record, adoptionInputs.currentPatterns);
-      record.outcome = { ...outcome, measuredAt: isoNow(now) };
-      if (!outcome.improved) {
-        const adoptedAt = Date.parse(record.statusAt);
-        if (Number.isFinite(adoptedAt) && now - adoptedAt >= OUTCOME_MIN_DAYS * DAY_MS) {
-          record.status = 'retired';
-          record.statusAt = isoNow(now);
-          record.refutation = outcome.deltaText;
-        }
-      }
+      transitionAdopted(record, adoptionInputs, now);
     } else if (record.status === 'expired') {
-      record.status = 'proposed';
-      record.evidenceHash = card.evidenceHash;
-      record.statusAt = isoNow(now);
-      record.baseline = snapshotBaseline(card, adoptionInputs);
-      // generatedAt and dismissCount are deliberately left untouched.
+      transitionExpired(record, card, adoptionInputs, now);
     }
     // 'retired' and permanently-dismissed records reappearing as a live card
     // fall through unchanged above (no branch matches) — terminal in v1.
@@ -303,14 +278,96 @@ export function reconcile(ledger, cards, { adoptionInputs = {}, now = Date.now()
     outCards.push(annotate(card, records.get(card.id)));
   }
 
+  expireUnseenProposed(records, seenIds, now);
+
+  return { ledger: { version: LEDGER_SCHEMA_VERSION, records: [...records.values()] }, cards: outCards };
+}
+
+/** A card with no existing record — `proposed`, canonical baseline
+ *  snapshotted now (`null` if the canonical evidence is itself unmeasurable
+ *  this pass — Fix round 2, N-2), `windowDays: CANONICAL_WINDOW_DAYS`. */
+function newRecord(card, adoptionInputs, now) {
+  return {
+    id: card.id, evidenceHash: card.evidenceHash, status: 'proposed',
+    generatedAt: card.generatedAt, statusAt: isoNow(now),
+    baseline: snapshotBaseline(card, adoptionInputs),
+    windowDays: CANONICAL_WINDOW_DAYS,
+  };
+}
+
+/** `dismissed`: same evidence hash ⇒ unchanged (suppressed). A changed hash
+ *  re-proposes only when the CURRENT canonical count has worsened
+ *  materially since the count recorded at dismissal (`hasWorsenedMaterially`
+ *  — itself now null-safe per N-2) and the record has not yet hit
+ *  DISMISS_PERMANENT_THRESHOLD dismissals; otherwise the hash is bookkept
+ *  but the record stays exactly as it was — including for a NOT-material
+ *  change, whose evidenceHash is deliberately left untouched so materiality
+ *  keeps measuring from the ORIGINAL dismissal-time count every pass, never
+ *  a creeping reference. */
+function transitionDismissed(record, card, adoptionInputs, now) {
+  if (record.evidenceHash === card.evidenceHash) return;
+  const fresh = currentEvidenceFor(card.id, adoptionInputs.currentPatterns ?? {});
+  const currentCount = fresh ? fresh.count : undefined;
+  const dismissedAtCount = record.dismissedAtCount;
+  if (!hasWorsenedMaterially(currentCount, dismissedAtCount)) return;
+  const dismissals = record.dismissCount ?? 1;
+  if (dismissals >= DISMISS_PERMANENT_THRESHOLD) {
+    record.evidenceHash = card.evidenceHash; // bookkeeping only; permanent
+    return;
+  }
+  record.status = 'proposed';
+  record.evidenceHash = card.evidenceHash;
+  record.statusAt = isoNow(now);
+  record.baseline = snapshotBaseline(card, adoptionInputs);
+  delete record.dismissedAtCount;
+}
+
+/** `proposed`: evidence hash kept current for display (the baseline stays
+ *  frozen at proposal, which is what "collapsed since proposal" needs);
+ *  adoption predicate checked; true ⇒ `adopted`, baseline RE-snapshotted at
+ *  the adoption moment. */
+function transitionProposed(record, card, adoptionInputs, now) {
+  record.evidenceHash = card.evidenceHash;
+  const { adopted } = detectAdoption(card, { ...adoptionInputs, ledgerRecord: record });
+  if (!adopted) return;
+  record.status = 'adopted';
+  record.statusAt = isoNow(now);
+  record.baseline = snapshotBaseline(card, adoptionInputs);
+  delete record.outcome; delete record.refutation;
+}
+
+/** `adopted`: outcome measured every pass; not improved past
+ *  OUTCOME_MIN_DAYS since adoption ⇒ `retired` with `refutation`. */
+function transitionAdopted(record, adoptionInputs, now) {
+  const outcome = measureOutcome(record, adoptionInputs.currentPatterns);
+  record.outcome = { ...outcome, measuredAt: isoNow(now) };
+  if (outcome.improved) return;
+  const adoptedAt = Date.parse(record.statusAt);
+  if (!Number.isFinite(adoptedAt) || now - adoptedAt < OUTCOME_MIN_DAYS * DAY_MS) return;
+  record.status = 'retired';
+  record.statusAt = isoNow(now);
+  record.refutation = outcome.deltaText;
+}
+
+/** `expired` whose card fires again ⇒ back to `proposed`, fresh
+ *  evidenceHash/baseline/statusAt — `generatedAt` and `dismissCount` are
+ *  deliberately left untouched: "we lost the evidence" was never a verdict,
+ *  so its reappearance is not a new recommendation. */
+function transitionExpired(record, card, adoptionInputs, now) {
+  record.status = 'proposed';
+  record.evidenceHash = card.evidenceHash;
+  record.statusAt = isoNow(now);
+  record.baseline = snapshotBaseline(card, adoptionInputs);
+}
+
+/** `proposed` whose card did not fire this pass ⇒ `expired`. */
+function expireUnseenProposed(records, seenIds, now) {
   for (const [id, record] of records) {
     if (record.status === 'proposed' && !seenIds.has(id)) {
       record.status = 'expired';
       record.statusAt = isoNow(now);
     }
   }
-
-  return { ledger: { version: LEDGER_SCHEMA_VERSION, records: [...records.values()] }, cards: outCards };
 }
 
 /**
@@ -333,16 +390,23 @@ export function dismissCard(ledger, cardId, cards, { adoptionInputs = {}, now = 
   const card = (cards ?? []).find((c) => c.id === cardId);
   if (!card) return { ledger, found: false };
   const records = loadRecordsMap(ledger);
+  // Computed once and reused for both the (possible) new record's baseline
+  // and dismissedAtCount below, rather than calling currentEvidenceFor twice
+  // for the same card/context.
+  const freshBaseline = snapshotBaseline(card, adoptionInputs);
   const record = records.get(cardId) ?? {
     id: cardId, evidenceHash: card.evidenceHash, status: 'proposed',
-    generatedAt: card.generatedAt, statusAt: isoNow(now), baseline: { count: 0 },
-    windowDays: CANONICAL_WINDOW_DAYS,
+    generatedAt: card.generatedAt, statusAt: isoNow(now),
+    baseline: freshBaseline, windowDays: CANONICAL_WINDOW_DAYS,
   };
   record.status = 'dismissed';
   record.evidenceHash = card.evidenceHash;
   record.dismissCount = (record.dismissCount ?? 0) + 1;
   record.statusAt = isoNow(now);
-  record.dismissedAtCount = snapshotBaseline(card, adoptionInputs).count;
+  // Fix round 2, N-2: null, not a fabricated 0, when unmeasurable — the
+  // materiality gate (hasWorsenedMaterially) already treats a null/absent
+  // dismissedAtCount as "not comparable", never as "was zero".
+  record.dismissedAtCount = freshBaseline ? freshBaseline.count : null;
   records.set(cardId, record);
   return { ledger: { version: LEDGER_SCHEMA_VERSION, records: [...records.values()] }, found: true };
 }

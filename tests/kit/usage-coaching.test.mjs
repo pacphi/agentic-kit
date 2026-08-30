@@ -445,6 +445,74 @@ test('reconcile: a brand-new card proposes with a frozen baseline snapshot', () 
   assert.equal(out[0].id, 'release-ritual-skill');
 });
 
+// Fix round 2, N-2: a card can fire from the WINDOWED evidence `deriveCards`
+// saw (real, deterministic) while the CANONICAL 30d context genuinely cannot
+// measure that id this pass (e.g. its own fingerprint layer is absent) —
+// `currentEvidenceFor` correctly returns null for that. The baseline must
+// record that absence honestly, never fabricate a `{count: 0}` that would
+// misread as "measured, and it was zero".
+test('N-2: a new record\'s baseline is null (not {count:0}) when the canonical evidence is unmeasurable', () => {
+  const windowedCard = deriveCards({
+    promptPatterns: { clusters: [cluster({ key: 'kk', name: 'Release ritual', count: 12, sessions: 8, days: 4 })] },
+    promptBaselines: null, promptsByHost: null, insights: [], now: NOW,
+  });
+  // The canonical context has NO promptPatterns at all this pass — genuinely
+  // unmeasurable, structurally distinct from "measured and found nothing".
+  const { ledger } = reconcile(ledgerOf([]), windowedCard, {
+    now: NOW, adoptionInputs: { currentPatterns: { promptPatterns: null } },
+  });
+  assert.equal(ledger.records[0].status, 'proposed');
+  assert.equal(ledger.records[0].baseline, null, 'absent canonical evidence must never be written as a measured zero');
+});
+
+test('N-2: a null baseline is "not comparable" — no collapse-adoption, and measureOutcome reports honestly, never treating null as 0', () => {
+  const card = deriveCards({
+    promptPatterns: { clusters: [cluster({ key: 'kk', name: 'Release ritual', count: 12, sessions: 8, days: 4 })] },
+    promptBaselines: null, promptsByHost: null, insights: [], now: NOW,
+  }).find((c) => c.id === 'release-ritual-skill');
+
+  // detectAdoption's collapse route: a null baseline must never look like "0
+  // recorded at proposal", which numeric collapse math would treat as
+  // "already collapsed to <= 20% of nothing" and adopt spuriously.
+  const adoption = detectAdoption(card, {
+    ledgerRecord: { baseline: null },
+    currentPatterns: { promptPatterns: { clusters: [cluster({ key: 'kk', name: 'Release ritual', count: 1, sessions: 1, days: 1 })] } },
+  });
+  assert.deepEqual(adoption, { adopted: false, via: null }, 'a null baseline is not comparable, not "already at zero"');
+
+  // measureOutcome on a record with a null baseline: honestly "not measured",
+  // never Number(null) === 0 read as "improved from zero".
+  const outcome = measureOutcome({ id: 'release-ritual-skill', baseline: null },
+    { promptPatterns: { clusters: [cluster({ key: 'kk', name: 'Release ritual', count: 1, sessions: 1, days: 1 })] } });
+  assert.equal(outcome.improved, false);
+  assert.equal(outcome.deltaText, 'not measured this pass — evidence unavailable');
+});
+
+test('N-2: dismissedAtCount is null (not 0) when unmeasurable at dismissal, and a null reference never reads as "material"', () => {
+  const cards = deriveCards({
+    promptPatterns: { clusters: [cluster({ key: 'kk', name: 'Release ritual', count: 12, sessions: 8, days: 4 })] },
+    promptBaselines: null, promptsByHost: null, insights: [], now: NOW,
+  });
+  // Dismissed while the canonical context cannot measure this id at all.
+  const { ledger: dismissed } = dismissCard(ledgerOf([]), 'release-ritual-skill', cards, {
+    now: NOW, adoptionInputs: { currentPatterns: { promptPatterns: null } },
+  });
+  assert.equal(dismissed.records[0].dismissedAtCount, null);
+
+  // Evidence changes (hash moves) and a real canonical count NOW exists —
+  // must NOT read a null dismissedAtCount as "was 0", which would make ANY
+  // positive current count spuriously "material" and resurrect the card.
+  const laterCards = deriveCards({
+    promptPatterns: { clusters: [cluster({ key: 'kk', name: 'Release ritual', count: 30, sessions: 10, days: 5 })] },
+    promptBaselines: null, promptsByHost: null, insights: [], now: NOW,
+  });
+  const { ledger } = reconcile(dismissed, laterCards, {
+    now: NOW + DAY_MS,
+    adoptionInputs: { currentPatterns: { promptPatterns: { clusters: [cluster({ key: 'kk', name: 'Release ritual', count: 30, sessions: 10, days: 5 })] } } },
+  });
+  assert.equal(ledger.records[0].status, 'dismissed', 'an unmeasurable dismissal-time reference must never resurrect the card on the next real count');
+});
+
 test('reconcile: proposed -> adopted (via CLAUDE.md) -> retired after OUTCOME_MIN_DAYS of no improvement', () => {
   const cardsFor = (count) => deriveCards({
     promptPatterns: { clusters: [cluster({ key: 'kk', name: 'Commit-and-push instruction', count, sessions: 6, days: 3 })] },
