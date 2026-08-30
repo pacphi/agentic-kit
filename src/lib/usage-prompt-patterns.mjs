@@ -85,7 +85,7 @@ const RARE_SHARE = 0.05;
  * @property {number} instructions Members flagged `q === false`.
  * @property {number} qKnown Members carrying a `q` flag at all.
  * @property {number} personas Members flagged `o === true`.
- * @property {'question'|'instruction'|'mixed'|'unknown'} class
+ * @property {'question'|'other'|'mixed'|'unknown'} class
  */
 
 /** A sketch prepared for repeated comparison: the sorted array and its Set. */
@@ -492,13 +492,24 @@ function tokenStats(members) {
  * and `mixed` is reserved for a genuine tie — the honest answer when a majority
  * rule has nothing to pick.
  *
+ * Ruling A (final-triage item 1, prompts-view spec §2.3/§6.3 build): the
+ * non-question side is named `other` on THE WIRE, not `instruction` —
+ * `promptShape` only ever tests for interrogative-ness, so calling the other
+ * side "instruction" asserts imperativeness the shape rules never measured
+ * (the corpus's declarative feedback and bare acknowledgements land there
+ * too). Two render layers (the CLI's CLASS_LABELS, the dashboard's
+ * CLASS_LABEL) used to rewrite `instruction` to `other` for exactly this
+ * reason; the fix now lives at the SOURCE instead, so both surfaces render
+ * their own value unchanged. The `questions`/`instructions` PARAMETER names
+ * stay as they are — they are internal tally fields, not the class value.
+ *
  * @param {{ questions?: number, instructions?: number }} cluster
- * @returns {'question'|'instruction'|'mixed'|'unknown'}
+ * @returns {'question'|'other'|'mixed'|'unknown'}
  */
 export function classifyCluster({ questions = 0, instructions = 0 } = {}) {
   if (questions === 0 && instructions === 0) return 'unknown';
   if (questions > instructions) return 'question';
-  if (instructions > questions) return 'instruction';
+  if (instructions > questions) return 'other';
   return 'mixed';
 }
 

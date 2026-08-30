@@ -2879,9 +2879,12 @@ test('promptPatterns ships the frozen projection shape and nothing else', () => 
 // scan path stores `q: 1` and OMITS it when false; the clustering library reads
 // `m.q === true` / `m.q === false`. Passed through raw, `1 !== true` made every
 // cluster 'unknown', and even after mapping truthiness, a never-written `false`
-// left 'instruction' unreachable — so an instruction cluster looked exactly
-// like an unclassified one, and three of the four seed patterns could never
-// match. Always-set booleans fix both halves at once.
+// left the non-question class unreachable — so a cluster of instructions
+// looked exactly like an unclassified one, and three of the four seed
+// patterns could never match. Always-set booleans fix both halves at once.
+// (The non-question class was called 'instruction' at the time this defect
+// was fixed; Ruling A — final-triage item 1 — later renamed it 'other' on the
+// wire, unrelated to the boolean-coercion story this test pins.)
 test('promptPatterns classifies questions AND instructions, never a blanket unknown', () => {
   const a = aggregate(patternRecords(), aggOpts({ prompts: true }));
   const classes = a.promptPatterns.clusters.map((c) => c.class);
@@ -2893,7 +2896,7 @@ test('promptPatterns classifies questions AND instructions, never a blanket unkn
   assert.equal(question.sessions, 3);
   assert.equal(question.days, 2);
 
-  const instruction = clusterFor(a, 'instruction');
+  const instruction = clusterFor(a, 'other');
   assert.ok(instruction, 'an instruction carries no q flag at all — absent must read as measured-false');
   assert.equal(instruction.count, 3);
 });

@@ -512,7 +512,12 @@ test('the prompts payload carries no fixture prompt text, at any depth', async (
 // reaches this payload, and that name comes from the curated vocabulary.
 const CLUSTER_KEYS = new Set(['key', 'label', 'class', 'count', 'sessions', 'days', 'hosts',
   'medianTokens', 'sampleSessionIds']);
-const LABEL_KEYS = new Set(['name', 'source']);
+// `descriptor` (RULING B, final-triage item 2) rides beside `name` only on a
+// CHARACTERIZED label — the full "Recurring N-token X · N sessions · N hosts"
+// string, still machine-assembled from counts/bands, never prompt text. The
+// word-scan test above already covers it (it walks every string reachable
+// from the payload); this allowlist only needs to admit the key.
+const LABEL_KEYS = new Set(['name', 'source', 'descriptor']);
 
 test('every prompt-pattern entry carries only keys from the allowed set', async () => {
   const { prompts } = await promptsPayload();
@@ -617,19 +622,33 @@ const PANEL_PROMPTS = {
       { tokens: 1, prompts: 12, sessions: 9, days: 5, hosts: ['claude', 'codex'] },
       { tokens: 3, prompts: 8, sessions: 6, days: 4, hosts: ['codex'] },
     ],
+    // Ruling A (final-triage item 1): the SOURCE emits 'other' directly —
+    // never 'instruction' — so cluster `aaaa` carries `class: 'other'` here,
+    // the real wire shape, not a value this render layer used to rewrite.
+    // Ruling B (final-triage item 2): a characterized label now splits `name`
+    // (bare lead) from `descriptor` (full string) upstream — clusters `bbbb`/
+    // `cccc` carry both.
     clusters: [
       {
         key: 'aaaa', label: { name: 'Commit-and-push instruction', source: 'seed' },
-        class: 'instruction', count: 12, sessions: 9, days: 5, hosts: ['claude', 'codex'],
+        class: 'other', count: 12, sessions: 9, days: 5, hosts: ['claude', 'codex'],
         medianTokens: 3, sampleSessionIds: ['s1', 's2', 's3'],
       },
       {
-        key: 'bbbb', label: { name: 'Recurring 44-token prompt · 4 sessions · 1 host', source: 'characterized' },
+        key: 'bbbb',
+        label: {
+          name: 'Recurring 44-token prompt', source: 'characterized',
+          descriptor: 'Recurring 44-token prompt · 4 sessions · 1 host',
+        },
         class: 'question', count: 5, sessions: 4, days: 2, hosts: ['codex'],
         medianTokens: 44, sampleSessionIds: ['s5'],
       },
       {
-        key: 'cccc', label: { name: 'Recurring 9-token prompt · 3 sessions · 1 host', source: 'characterized' },
+        key: 'cccc',
+        label: {
+          name: 'Recurring 9-token prompt', source: 'characterized',
+          descriptor: 'Recurring 9-token prompt · 3 sessions · 1 host',
+        },
         class: 'unknown', count: 3, sessions: 3, days: 2, hosts: ['claude'],
         medianTokens: 9, sampleSessionIds: ['s7'],
       },
@@ -692,7 +711,7 @@ test('the repeated share counts every cluster, not the slice the table draws', (
       ...PANEL_PROMPTS.patterns,
       clusters: Array.from({ length: 40 }, (_v, i) => ({
         key: `k${i}`, label: { name: `Recurring ${i}-token prompt`, source: 'characterized' },
-        class: 'instruction', count: 2, sessions: 3, days: 2, hosts: ['claude'],
+        class: 'other', count: 2, sessions: 3, days: 2, hosts: ['claude'],
         medianTokens: i, sampleSessionIds: ['s1'],
       })),
     },
@@ -780,31 +799,41 @@ test('the patterns table carries the class, the suggested move, and masked sessi
 });
 
 // The shipped prompt-shape rules detect the INTERROGATIVE case only, so the
-// library's internal `instruction` value really means "not a question" and
-// covers imperatives and declaratives alike. Rendering that word would claim a
-// split the rules never made.
+// non-question wire value 'other' covers imperatives and declaratives alike.
+// RULING A (final-triage item 1): the SOURCE now emits 'other' directly
+// (usage-prompt-patterns.mjs's classifyCluster) — CLASS_LABEL is the identity
+// map, not a render-layer rewrite of a stored 'instruction' — so this pins
+// the wire value reaching the page unchanged, and that 'instruction' (the
+// library's OLD internal name) never does.
 test('a non-question cluster renders as "other", never as "instruction"', () => {
   const html = patternsTable(PANEL_PROMPTS);
   const chips = [...html.matchAll(/<span class="pr-cat"[^>]*>([^<]*)</g)].map((m) => m[1]);
   assert.deepEqual(chips, ['other', 'question', 'unclassified'],
     'class chips name what the rules measured, in row order');
   assert.doesNotMatch(html, /<span class="pr-cat"[^>]*>instruction</,
-    'the library value must not reach the page as a label');
+    'the library\'s old internal name must not reach the page as a label');
   assert.match(html,
-    /other = imperative or declarative — the shipped rules split only questions; the three-way split arrives with enrichment/,
+    /other = imperative or declarative, undifferentiated — the shape rules test only for a question; the three-way split arrives with enrichment/,
     'and the caption prints beside the table so the word is never left to be guessed at');
 });
 
-// The vocabulary's characterized descriptor ends in the class noun it picked,
-// so "Recurring 3-token instruction" smuggles the same claim in through the
-// NAME. Neutralised at the render layer; the Type column carries the class.
-test('a characterized name does not assert a class the rules never split', () => {
+// BELT, per Ruling A/B's own instruction to keep one: usage-prompt-
+// vocabulary.mjs's `labelFor` never emits this shape any more (a characterized
+// label always splits bare `name` from full `descriptor`, and the noun is
+// already 'prompt'/'question'/'mixed prompt', never 'instruction') — but this
+// file does not trust the payload's shape absolutely, so a label that still
+// arrives in the OLD form (the full descriptor packed into `name`, no
+// separate `descriptor` field — as an out-of-band store write or a stale
+// cached payload might) must still be neutralised rather than rendered
+// verbatim. Redundant by construction against a well-formed payload; not
+// redundant against a malformed one.
+test('a characterized name does not assert a class the rules never split (belt)', () => {
   const html = patternsTable({
     ...PANEL_PROMPTS,
     patterns: {
       ...PANEL_PROMPTS.patterns,
       clusters: [
-        { ...PANEL_PROMPTS.patterns.clusters[0], class: 'instruction',
+        { ...PANEL_PROMPTS.patterns.clusters[0], class: 'other',
           label: { name: 'Recurring 3-token instruction · 9 sessions · both hosts', source: 'characterized' } },
         { ...PANEL_PROMPTS.patterns.clusters[1], class: 'question',
           label: { name: 'Recurring 44-token question · 4 sessions · 1 host', source: 'characterized' } },
@@ -873,7 +902,7 @@ test('a capped table says how many rows it is not showing', () => {
       ...PANEL_PROMPTS.patterns,
       clusters: Array.from({ length: 40 }, (_v, i) => ({
         key: `k${i}`, label: { name: `Recurring ${i}-token prompt`, source: 'characterized' },
-        class: 'instruction', count: 2, sessions: 3, days: 2, hosts: ['claude'],
+        class: 'other', count: 2, sessions: 3, days: 2, hosts: ['claude'],
         medianTokens: i, sampleSessionIds: ['s1'],
       })),
     },

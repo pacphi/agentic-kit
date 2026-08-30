@@ -504,7 +504,16 @@ function promptClusterRow(cluster) {
   const label = labelFor(cluster, {});
   return {
     key: cluster.key,
-    label: { name: label.name, source: label.source },
+    // RULING B (final-triage item 2): `descriptor` rides along only for a
+    // characterized row (the full "Recurring N-token X · N sessions · N
+    // hosts" string) — a curated/seeded/enriched `name` already IS the whole
+    // thing, so there is no second string to publish. Left off rather than
+    // set to `undefined` so a consumer's `'descriptor' in label` reads true
+    // only when there is something there.
+    label: {
+      name: label.name, source: label.source,
+      ...(typeof label.descriptor === 'string' ? { descriptor: label.descriptor } : {}),
+    },
     class: cluster.class,
     count: cluster.size,
     sessions: cluster.sessions.size,
@@ -563,9 +572,16 @@ function promptTapLengths(typed) {
  * iterates sorted — so a rescan over an unchanged corpus reproduces this object
  * byte for byte, which is what the evidence-hash contract (spec §6.3) rests on.
  *
- * `labelFor` is applied with an EMPTY label store in v1: the kit owns no store
- * yet, so every name resolves to a seed pattern or to `characterize`, and each
- * row says which via `label.source`.
+ * `labelFor` is applied with an EMPTY label store HERE — every name below
+ * resolves to a seed pattern or to `characterize`, never a persisted one, and
+ * each row says which via `label.source`. That is not a v1 limitation left
+ * unfixed: `usage-prompt-vocabulary.mjs`'s `labelFor` store branch depends on
+ * nothing but a cluster's `key`, so re-checking the REAL persisted store
+ * (W5, spec §6.3 enrichment) against these already-published rows afterward —
+ * see that module's `withStoreLabel`, applied by `ak usage prompts`/the
+ * dashboard — is exactly equivalent to having threaded it through from here.
+ * Doing it post-hoc keeps this function, and `aggregate()`'s signature, free
+ * of a disk read.
  */
 function buildPromptPatterns(records, { cutoff, now }) {
   const fps = windowFingerprints(records, cutoff);

@@ -396,6 +396,25 @@ test('ak usage prompts reports every section from fingerprints alone', () => {
   fs.rmSync(sb.home, { recursive: true, force: true });
 });
 
+// Ruling A (final-triage item 1): the class column renders the WIRE value
+// directly ('other', never 'instruction') — CLASS_LABELS is now the identity
+// map (+ the one cosmetic unknown→unclassified relabel), not a rewrite of a
+// stored 'instruction'. `Commit-and-push instruction` is a legitimate CURATED
+// SEED NAME (unaffected by this ruling — seed/curated names are human-
+// authored) and legitimately contains the substring, so this pins the class
+// COLUMN specifically (the release cluster's row, identified the same way
+// the --json test locates it) rather than a blanket string search.
+test('ak usage prompts renders the class column as "other", never "instruction"', () => {
+  const sb = sandbox();
+  writePromptsCorpus(sb);
+  const result = ak(['usage', 'prompts'], sb);
+  assert.equal(result.status, 0, result.stderr);
+  const releaseRow = result.stdout.split('\n').find((l) => /\bother\s+characterized\b/.test(l));
+  assert.ok(releaseRow, `expected a characterized "other" row in:\n${result.stdout}`);
+  assert.match(result.stdout, /other = imperative or declarative, undifferentiated/);
+  fs.rmSync(sb.home, { recursive: true, force: true });
+});
+
 test('ak usage prompts --json is fingerprint-derived and carries no prompt text', () => {
   const sb = sandbox();
   writePromptsCorpus(sb);
@@ -416,7 +435,9 @@ test('ak usage prompts --json is fingerprint-derived and carries no prompt text'
   assert.ok(release, `no recurring cluster found in ${JSON.stringify(value.patterns.clusters)}`);
   assert.equal(release.sessions, 6);
   assert.ok(release.days >= 3, 'the fixture spreads the cluster over three billed days');
-  assert.equal(release.class, 'instruction', 'the release phrasings carry no question mark');
+  // Ruling A (final-triage item 1): the non-question wire value is 'other',
+  // never 'instruction' — the shape rules only test for interrogative-ness.
+  assert.equal(release.class, 'other', 'the release phrasings carry no question mark');
   assert.equal(value.patterns.reAsks.pairCount, 1, 'the fixture asks one thing twice, one turn apart');
   assert.equal(value.patterns.reAsks.gapHist['1'], 1, 'and the gap is one turn');
   // The privacy contract, asserted on the payload rather than argued for: this

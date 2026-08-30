@@ -360,7 +360,7 @@ Every turn body is passed through `maskSecrets` (`usage-aggregate.mjs:142-147` â
 23 secret shapes) **server-side, before
 serialization**, then length-capped at `MAX_TURN_CHARS` (40,000,
 `usage-aggregate.mjs:72`) with the marker appended
-(`usage-aggregate.mjs:1284-1293`). Two invariants:
+(`usage-aggregate.mjs:1300-1309`). Two invariants:
 
 * **Presence is the signal.** `truncated`/`originalChars` are emitted only
   when the slice fired, so a complete turn cannot be misread as abridged.

@@ -409,13 +409,16 @@ function hostCaveat(hosts, by) {
  * was a command rather than a statement. A cluster nobody could classify gets
  * no suggestion at all.
  */
+// Keyed on 'other' (RULING A, final-triage item 1) — the wire value
+// classifyCluster emits for "not a question" — not the library's old
+// 'instruction' name, which this table used to translate from.
 var MOVES = {
   question: {
     label: 'reporting gap', cls: 'gap',
     tip: 'Asked again and again across sessions, so the answer is state the agent already has '
       + 'and is not offering unprompted.',
   },
-  instruction: {
+  other: {
     label: 'encode candidate', cls: 'instr',
     tip: 'Re-typed across sessions, so it is worth writing down somewhere. WHICH artifact — a skill, '
       + 'a CLAUDE.md line, a role fragment — needs the imperative/declarative split that arrives '
@@ -438,18 +441,20 @@ function moveChip(cls) {
 /**
  * How a cluster's class is NAMED on this surface.
  *
- * The library's internal value for a non-question cluster is `instruction`, and
- * rendering that word would claim more than the shipped rules measured: the
- * prompt-shape rules detect the INTERROGATIVE case only, so "not a question"
- * covers imperatives and declaratives alike and the panel must not pick one.
- * `other` is the honest name, and CLASS_CAPTION prints beside the table so the
- * word is never left to be guessed at. The library's values are unchanged —
- * this is the render layer only.
+ * RULING A (final-triage item 1): this is the identity map now, for every
+ * value the library can actually emit — `other` is the SOURCE's own wire
+ * value (usage-prompt-patterns.mjs's `classifyCluster`) for a non-question
+ * cluster, not something this file rewrites from a stored `instruction`. The
+ * prompt-shape rules still detect the INTERROGATIVE case only, so "not a
+ * question" still covers imperatives and declaratives alike — CLASS_CAPTION
+ * prints beside the table so the word is never left to be guessed at.
+ * `unknown` is the one genuine relabel left: "unclassified" reads better in a
+ * chip than the internal name.
  */
-var CLASS_LABEL = { question: 'question', instruction: 'other', mixed: 'mixed', unknown: 'unclassified' };
+var CLASS_LABEL = { question: 'question', other: 'other', mixed: 'mixed', unknown: 'unclassified' };
 
-var CLASS_CAPTION = 'other = imperative or declarative — the shipped rules split only questions; '
-  + 'the three-way split arrives with enrichment';
+var CLASS_CAPTION = 'other = imperative or declarative, undifferentiated — the shape rules test only '
+  + 'for a question; the three-way split arrives with enrichment';
 
 function classChip(cls) {
   var known = Object.prototype.hasOwnProperty.call(CLASS_LABEL, cls);
@@ -473,21 +478,30 @@ function sessionLinks(c) {
 
 /**
  * What the Pattern column shows. A CURATED or SEEDED name is shown whole. A
- * CHARACTERIZED descriptor is trimmed to its leading clause, because the rest
- * of it — "· 6 sessions · both hosts" — is exactly what the Sessions and Hosts
- * columns beside it already say, and a table that prints the same fact twice
- * trains the reader to skip the column that matters.
+ * CHARACTERIZED name is the bare lead clause, because the rest of it —
+ * "· 6 sessions · both hosts" — is exactly what the Sessions and Hosts columns
+ * beside it already say, and a table that prints the same fact twice trains
+ * the reader to skip the column that matters.
  *
  * The full descriptor stays as the row's tooltip: it is the string the CLI
  * prints, where there are no columns to carry those numbers.
+ *
+ * RULING B (final-triage item 2): a well-formed characterized label already
+ * arrives split — `label.name` is the bare lead, `label.descriptor` the full
+ * string (usage-prompt-vocabulary.mjs's `labelFor`) — so this file no longer
+ * has to parse a session/host tail out of `name` itself for the common case.
  */
 /**
- * A characterized descriptor ends in the class NOUN the vocabulary picked —
- * "Recurring 3-token instruction". That is the same claim CLASS_LABEL exists to
- * refuse: the shipped rules never separated imperative from declarative. The
- * noun is neutralised to "prompt" here, which is also the vocabulary's own
- * fallback, and the Type column beside it carries the class. Neither repeats
- * the other, and neither over-states.
+ * A characterized lead ends in the class NOUN the vocabulary picked —
+ * "Recurring 3-token prompt", never "instruction" as of RULING A (the SOURCE
+ * emits the honest `other`/`prompt` pairing on the wire now — see
+ * usage-prompt-vocabulary.mjs's CLASS_NOUNS). `neutralizeLead` stays as a
+ * BELT, redundant by construction against a well-formed payload: this file
+ * does not trust the payload's shape absolutely, and a label that still
+ * arrives in the pre-Ruling-B form — the full descriptor packed into `name`,
+ * no separate `descriptor` field — is still neutralised rather than shown
+ * verbatim. The Type column beside it carries the class either way; neither
+ * repeats the other, and neither over-states.
  *
  * Only the known shape is rewritten. Anything else passes through untouched
  * rather than being pattern-matched into something this does not recognise.
@@ -506,15 +520,24 @@ function patternName(label) {
   if (label.source !== 'characterized') {
     return '<span class="pr-name" title="' + esc(full) + '">' + esc(full) + '</span>';
   }
-  // A characterized descriptor is MACHINE-generated, so the class noun is
+  // A characterized name is MACHINE-generated, so the class noun is
   // neutralised in the title as well as in the cell. A tooltip is a DOM
   // surface: a cell reading "prompt" whose hover reads "instruction" makes the
   // same over-claim the cell was cleaned of, and hides it where a reader is
   // less likely to challenge it.
-  var parts = full.split(' · ');
-  parts[0] = neutralizeLead(parts[0]);
-  var neutral = parts.join(' · ');
-  return '<span class="pr-name" title="' + esc(neutral) + '">' + esc(parts[0]) + '</span>';
+  //
+  // `descriptor` is read defensively, not trusted absolutely (the belt this
+  // function's doc comment describes): when present (the well-formed, post-
+  // Ruling-B shape), `full` IS the bare lead already, so `descriptor` supplies
+  // only the tail. When absent, this falls back to the pre-Ruling-B behaviour
+  // — splitting the tail out of `full` itself — so an out-of-band label that
+  // still arrives in the old shape is neutralised exactly as it always was.
+  var hasDescriptor = typeof label.descriptor === 'string';
+  var lead = hasDescriptor ? full : full.split(' · ')[0];
+  var tail = hasDescriptor ? label.descriptor.slice(lead.length) : full.slice(lead.length);
+  var neutralLead = neutralizeLead(lead);
+  var neutralFull = neutralLead + tail;
+  return '<span class="pr-name" title="' + esc(neutralFull) + '">' + esc(neutralLead) + '</span>';
 }
 
 export function patternsTable(p) {

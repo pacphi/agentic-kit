@@ -561,18 +561,19 @@ function printHostInterplay(agg, win) {
 }
 
 /**
- * What the `class` column PRINTS, which is not what the library stores.
- *
- * `promptShape` decides one thing — is this interrogative — and everything
- * else falls to the other side (usage-parsers.mjs). `classifyCluster` calls
- * that side `instruction`, which is the right internal name for the half the
- * seed predicates key on, but printing it would assert imperativeness the
- * rules never tested: the corpus's declarative feedback ("One thing I feel
- * that's missing is…") lands there too, and so does a bare `Yes`. `other` is
- * what the evidence supports. Render layer only — the stored value, the seed
- * predicates and their audit pins are untouched.
+ * What the `class` column PRINTS. As of RULING A (final-triage item 1), this
+ * is the identity map for every value the library can actually emit —
+ * `promptShape` decides one thing (is this interrogative) and everything else
+ * reads as `other` ON THE WIRE now (usage-prompt-patterns.mjs's
+ * `classifyCluster`), not as a render-layer rewrite of a stored `instruction`
+ * value. Printing it would still assert imperativeness the rules never
+ * tested: the corpus's declarative feedback ("One thing I feel that's
+ * missing is…") lands there too, and so does a bare `Yes` — which is exactly
+ * why the SOURCE was renamed rather than leaving this table to keep
+ * translating it. `unknown` is the one genuine relabel left: "unclassified"
+ * reads better in a table cell than the internal name.
  */
-const CLASS_LABELS = { question: 'question', instruction: 'other', mixed: 'mixed', unknown: 'unclassified' };
+const CLASS_LABELS = { question: 'question', other: 'other', mixed: 'mixed', unknown: 'unclassified' };
 
 /** Spec §3.1 KPI 4: the share of typed prompts sitting inside a cluster that
  *  recurs. `crossSessionClusters` has already applied the ≥3-sessions-or-≥2-days
@@ -605,8 +606,8 @@ function printClusters(clusters, totals) {
       [fmtMaybe(r.medianTokens), 5, true], [CLASS_LABELS[r.class] ?? r.class, 12], [r.label.source, 14],
     ]));
   }
-  info(dim('  other = imperative or declarative — the shipped shape rules split only questions;'));
-  info(dim('  the three-way split arrives with enrichment.'));
+  info(dim('  other = imperative or declarative, undifferentiated — the shape rules test only for a'));
+  info(dim('  question; the three-way split arrives with enrichment.'));
 }
 
 /** The stricter subset of the same phenomenon: identical normalized text, not

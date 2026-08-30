@@ -179,9 +179,9 @@ responses = Σ over included sessions of session.responses
 **Source:**
 
 - Filter: a parsed record with zero assistant turns is dropped entirely — "no
-  assistant turn → not a session" (`usage-aggregate.mjs:844`) — and a record whose
+  assistant turn → not a session" (`usage-aggregate.mjs:861`) — and a record whose
   last activity falls outside the requested window is dropped too
-  (`usage-aggregate.mjs:845`).
+  (`usage-aggregate.mjs:862`).
 - `responses` accumulation: Claude increments per assistant message
 (`usage-parsers.mjs:542-547`); Codex increments per `agent_message` event
 (`usage-parsers.mjs:846-851`).
@@ -682,7 +682,7 @@ renders "no sessions in window" instead of zeroed figures
 
 **Formula:** identical aggregation to every other bucket
 (`byHost[s.host]`, populated via `addTo()`, `usage-aggregate.mjs:631-640`,
-  called once per session at `usage-aggregate.mjs:930`), keyed by the literal string
+  called once per session at `usage-aggregate.mjs:946`), keyed by the literal string
 `"claude"` or `"codex"` assigned at parse time
 (`blankSession(id, 'claude')` / `blankSession(id, 'codex')`,
 `usage-parsers.mjs:603`, `:984`, `parseClaude`/`parseCodex` entry points).
@@ -746,7 +746,7 @@ punchcard[dow + "-" + hour] += 1   per assistant/agent_message response, at its 
 **Source:** incremented once per Claude assistant turn
 (`usage-parsers.mjs:545-547`, keyed by `punchKey(at)`) and once per Codex
 `agent_message` (`usage-parsers.mjs:846-851`), merged into the window-level
-`punchcard` object per session (`usage-aggregate.mjs:948`). Cell intensity is
+`punchcard` object per session (`usage-aggregate.mjs:964`). Cell intensity is
 linear against the single busiest cell in the window:
 `v = pcMax ? n/pcMax : 0` (`dashboard/client.mjs`) — this is a
 **relative**, not absolute, scale, so the heatmap's brightest cell is always
@@ -788,7 +788,7 @@ byModel[model].sessions  = count of DISTINCT sessions whose s.models includes th
 ```
 
 **Source:** cost/tokens/responses accumulate inside the usage-row loop
-(`usage-aggregate.mjs:713-740`); the `sessions` count is deliberately computed
+(`usage-aggregate.mjs:729-756`); the `sessions` count is deliberately computed
 **separately**, once per session over its `s.models` array
 (`usage-aggregate.mjs:859-866`) rather than inside the cost loop, precisely
 **so that a model can appear in `byModel` — with a nonzero session count —
@@ -826,7 +826,7 @@ time, someone was genuinely waiting on it — but it is never pushed into
 `rec.models` and `addUsage()` is never called for it, so it can no longer
 create a `byModel` row of any kind. It increments a separate
 `rec.exceptions` counter instead (`usage-parsers.mjs:562`), rolled up into
-`totals.exceptions` (`usage-aggregate.mjs:922`) and surfaced per-session
+`totals.exceptions` (`usage-aggregate.mjs:938`) and surfaced per-session
 (`usage-aggregate.mjs:796-797`, alongside the existing `sidechain`/`threadSource`
 flags — inspectable in the Sessions tab, never hidden). When
 `totals.exceptions > 0`, the panel header shows a small `"· N
@@ -1286,7 +1286,7 @@ p(q), over N samples, landing in bucket i (count n_i, running total `cum` before
   browser re-implementation `bucketPercentile` (`usage-rhythm.mjs:106-126`) is
   pinned to byte-identical output, and the browser's edge copies to the server
   constants, by `tests/kit/dashboard-usage-telemetry.test.mjs:1321-1339` and
-  `:1429-1435`.
+  `:1449-1455`.
 - Render: `lengthCard`/`latencyCard` and the `≥` prefix helper `fmtAtLeast` in
   `src/lib/dashboard/client/usage.mjs` (that bundle shares a basename with the
   CLI command module, so its render sites are cited by function name rather
@@ -1507,8 +1507,8 @@ bySource[k].cost    = Σ over sessions with that source of session.cost
 centre of the donut = round(main / (main + subagent) × 100) %
 ```
 
-**Source:** `sourceKey` (`usage-aggregate.mjs:881-883`). Both rows are created
-before the fold (`usage-aggregate.mjs:913`) so "no subagent sessions" renders
+**Source:** `sourceKey` (`usage-aggregate.mjs:897-899`). Both rows are created
+before the fold (`usage-aggregate.mjs:929`) so "no subagent sessions" renders
 as a zero rather than a row the UI silently drops. Claude's evidence is the
 `isSidechain` flag on any entry in the file (`usage-parsers.mjs:616`, decoded at
 `telemetry-records.mjs:244`); Codex's is the ledger-backed `thread_source`
@@ -1638,8 +1638,8 @@ browser in the tile's tooltip, `ak usage score` inline, since a terminal
 reader has nothing to hover.
 
 **Cost per session is a median over priced sessions only.** A session carries
-`_priced` when it had any usage rows at all (`usage-aggregate.mjs:826`), and
-only those costs enter the distribution (`usage-aggregate.mjs:927`). A session
+`_priced` when it had any usage rows at all (`usage-aggregate.mjs:842`), and
+only those costs enter the distribution (`usage-aggregate.mjs:943`). A session
 with no usage rows costs `$0` *structurally* — nothing was ever measured for it,
 the common case being a Codex subagent rollout whose tokens were stripped as a
 double-count (§16.2) — and letting those in would report "the typical session
@@ -1674,8 +1674,8 @@ this row              =  $4.50 × 2,000,000 / 1e6       = $9.00
 ```
 
 The window total is the sum of those per-row figures
-(`usage-aggregate.mjs:926`), carried on each session row as `cacheSavedUsd`
-(`usage-aggregate.mjs:804`) so it is auditable a row at a time rather than only
+(`usage-aggregate.mjs:942`), carried on each session row as `cacheSavedUsd`
+(`usage-aggregate.mjs:820`) so it is auditable a row at a time rather than only
 in aggregate, and rendered in the cache tile's subtitle as `saved ≈ $X vs
 uncached`.
 
@@ -1751,7 +1751,7 @@ byDay[day].exceptions += session.exceptions   attributed to the session's FIRST 
 ```
 
 **Source:** `totals.exceptions` and `totals.aborts` accumulate together at
-`usage-aggregate.mjs:922`; the per-day series lands on `byDay[s._day].exceptions`
+`usage-aggregate.mjs:938`; the per-day series lands on `byDay[s._day].exceptions`
 (`usage-aggregate.mjs:943-946`). Render is
 `relRate`/`relStat`/`relTrend` in `src/lib/dashboard/client/usage.mjs`;
 `printScoreReliability` (`src/commands/usage.mjs:238-264`) prints the CLI pair.
@@ -1770,7 +1770,7 @@ model, and each host signals that differently:
 person pressing stop; an exception is the turn failing. Summing them would
 report a deliberate interruption as a reliability problem and move a number
 that is supposed to mean "how often did this break". They are counted, carried
-(`aborts`, `usage-aggregate.mjs:779`) and displayed side by side, with the
+(`aborts`, `usage-aggregate.mjs:795`) and displayed side by side, with the
 distinction stated on the tile rather than left to the label.
 
 **Aborts are CODEX-ONLY evidence, and both surfaces say so.** `turn_aborted` is
@@ -1834,7 +1834,7 @@ byTool[name]                  += session.tools[name]      summed across sessions
 byDay[day].byModelFamily[fam] += rowCost                  fam = modelFamily(row.model)
 ```
 
-**Source:** the tool tally is folded into `byTool` at `usage-aggregate.mjs:949`;
+**Source:** the tool tally is folded into `byTool` at `usage-aggregate.mjs:965`;
 the per-day family split is `addCost(d.byModelFamily, modelFamily(row.model),
 rowCost)` (`usage-aggregate.mjs:733`), inside the usage-row pass because only a
 row knows its day. Render is `toolRows`/`modelMix` in

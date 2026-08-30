@@ -443,7 +443,7 @@ test('privacy: outputs carry only known keys and only input-supplied strings', (
     'prompts', 'taps', 'share', 'maxTokens', 'byHost',
   ]);
   const fps = corpus(mulberry32(3));
-  const allowed = new Set(['question', 'instruction', 'mixed', 'unknown']);
+  const allowed = new Set(['question', 'other', 'mixed', 'unknown']);
   for (const f of fps) {
     allowed.add(f.h); allowed.add(f.sessionId); allowed.add(f.day); allowed.add(f.host);
     for (const th of f.th) allowed.add(th);
@@ -477,8 +477,12 @@ test('privacy: outputs carry only known keys and only input-supplied strings', (
 // ── classifyCluster / crossSessionClusters ──────────────────────────────────
 
 test('classifyCluster takes the majority and never guesses an absent one', () => {
+  // Ruling A (final-triage item 1): the non-question side is named 'other' on
+  // the WIRE — 'instruction' would assert imperativeness the shape rules never
+  // tested. The `questions`/`instructions` PARAMETER names are internal tally
+  // fields and are unaffected.
   assert.equal(classifyCluster({ questions: 3, instructions: 1 }), 'question');
-  assert.equal(classifyCluster({ questions: 1, instructions: 3 }), 'instruction');
+  assert.equal(classifyCluster({ questions: 1, instructions: 3 }), 'other');
   assert.equal(classifyCluster({ questions: 2, instructions: 2 }), 'mixed');
   assert.equal(classifyCluster({ questions: 0, instructions: 0 }), 'unknown');
   assert.equal(classifyCluster({}), 'unknown');
@@ -505,7 +509,7 @@ test('crossSessionClusters attaches a class when the cluster lacks one', () => {
   const [out] = crossSessionClusters([
     { key: 'k', size: 3, sessions: new Set(['a', 'b', 'c']), days: new Set(['d']), questions: 0, instructions: 3 },
   ]);
-  assert.equal(out.class, 'instruction');
+  assert.equal(out.class, 'other');
 });
 
 // ── reAskPairs ──────────────────────────────────────────────────────────────
@@ -690,7 +694,7 @@ const cluster = (over = {}) => ({
   hosts: new Set(['claude', 'codex']),
   tokens: { min: 3, median: 3, max: 4 },
   questions: 0, instructions: 4, qKnown: 4, personas: 0,
-  class: 'instruction',
+  class: 'other', // Ruling A: the wire value for "not a question" — never 'instruction'
   ...over,
 });
 
@@ -752,7 +756,7 @@ test('seed: Release ritual needs a classified cluster, a short band and a wide s
   // mark, and the family is spelled both ways. A predicate that demanded
   // `instruction` could never match its own evidence.
   assert.equal(labelFor(hit).name, 'Release ritual');
-  assert.equal(labelFor({ ...hit, class: 'instruction' }).name, 'Release ritual');
+  assert.equal(labelFor({ ...hit, class: 'other' }).name, 'Release ritual');
   assert.equal(labelFor({ ...hit, class: 'mixed' }).name, 'Release ritual');
   // Same shape, one session: a procedure typed once is not a ritual.
   assert.notEqual(labelFor({ ...hit, sessions: spanning(1, 's') }).name, 'Release ritual');
@@ -764,7 +768,7 @@ test('seed: Release ritual needs a classified cluster, a short band and a wide s
 
 test('seed: Commit-and-push refuses bare acknowledgements and at-threshold spans', () => {
   const hit = cluster({
-    class: 'instruction', tokens: { min: 3, median: 3, max: 4 },
+    class: 'other', tokens: { min: 3, median: 3, max: 4 },
     sessions: spanning(11, 's'), days: spanning(9, 'd'), size: 13, instructions: 13, qKnown: 13,
   });
   assert.equal(labelFor(hit).name, 'Commit-and-push instruction');
@@ -807,9 +811,9 @@ test('seeds never fire on an unclassified cluster (absent q is not a class)', ()
 test('characterize speaks only in counts — no host name, id or hash', () => {
   const c = cluster({
     size: 21, tokens: { min: 2, median: 3, max: 5 },
-    sessions: spanning(21, 'session-'), hosts: new Set(['claude', 'codex']), class: 'instruction',
+    sessions: spanning(21, 'session-'), hosts: new Set(['claude', 'codex']), class: 'other',
   });
-  assert.equal(characterize(c), 'Recurring 3-token instruction · 21 sessions · both hosts');
+  assert.equal(characterize(c), 'Recurring 3-token prompt · 21 sessions · both hosts');
   for (const forbidden of ['claude', 'codex', 'session-0', 'k0', 'k1', '2026-08-01']) {
     assert.ok(!characterize(c).includes(forbidden), `characterize leaked ${forbidden}`);
   }
@@ -821,9 +825,12 @@ test('characterize pluralizes, names each class honestly, and counts hosts', () 
   assert.equal(of({ class: 'question' }), 'Recurring 7-token question · 1 session · 1 host');
   assert.equal(of({ class: 'mixed' }), 'Recurring 7-token mixed prompt · 1 session · 1 host');
   assert.equal(of({ class: 'unknown' }), 'Recurring 7-token prompt · 1 session · 1 host');
-  assert.equal(of({ class: 'instruction', hosts: new Set(['a', 'b', 'c']) }), 'Recurring 7-token instruction · 1 session · 3 hosts');
+  // Ruling A: 'other' (not-a-question, the shape rules' honest ceiling) reads
+  // identically to 'unknown' — "prompt" — because CLASS_NOUNS no longer has an
+  // 'instruction' entry to assert imperativeness from.
+  assert.equal(of({ class: 'other', hosts: new Set(['a', 'b', 'c']) }), 'Recurring 7-token prompt · 1 session · 3 hosts');
   // Nothing to count is nothing to say — no "0 sessions" segment.
-  assert.equal(of({ class: 'instruction', sessions: new Set(), hosts: new Set() }), 'Recurring 7-token instruction');
+  assert.equal(of({ class: 'other', sessions: new Set(), hosts: new Set() }), 'Recurring 7-token prompt');
 });
 
 test('characterize survives a cluster with no token stats at all', () => {
@@ -833,7 +840,7 @@ test('characterize survives a cluster with no token stats at all', () => {
 
 test('labelFor resolves store → seed → characterize, in that order', () => {
   const hit = cluster({
-    class: 'instruction', tokens: { min: 3, median: 3, max: 4 },
+    class: 'other', tokens: { min: 3, median: 3, max: 4 },
     sessions: spanning(11, 's'), days: spanning(9, 'd'), size: 13, instructions: 13, qKnown: 13,
   });
   // 3. no store, no seed → characterized
@@ -950,7 +957,17 @@ const MEASURED_CLUSTERS = [
 ];
 
 /** Build the cluster a measured row describes. `cls` drives the q counts so the
- *  shape is internally consistent with what `nearDupClusters` would emit. */
+ *  shape is internally consistent with what `nearDupClusters` would emit.
+ *
+ *  MEASURED_CLUSTERS' own `cls` column is a citation of the RESEARCH document's
+ *  published rule (§2, which calls the non-question side `instruction`) and is
+ *  deliberately left untouched by Ruling A — rewriting a citation to match a
+ *  later code rename would misrepresent what the research actually said. This
+ *  function is the one translation point: it derives the `instructions` COUNT
+ *  from the citation as before, but stamps the constructed cluster's `class`
+ *  field with the WIRE value `classifyCluster` actually emits post-ruling
+ *  ('other', never 'instruction') — so the audit exercises the real shape a
+ *  cluster carries in production, not the research paper's vocabulary. */
 function measured({ n, sessions, days, hosts, median, cls, personas = 0 }) {
   const q = cls === 'question' ? n : 0;
   const i = cls === 'instruction' ? n : 0;
@@ -959,7 +976,7 @@ function measured({ n, sessions, days, hosts, median, cls, personas = 0 }) {
     sessions: spanning(sessions, 's'), days: spanning(days, 'd'), hosts: spanning(hosts, 'host'),
     tokens: { min: median, median, max: median },
     questions: q, instructions: i, qKnown: q + i, personas,
-    class: cls,
+    class: cls === 'instruction' ? 'other' : cls,
   };
 }
 
@@ -991,8 +1008,13 @@ test('precision-first: the audit is not vacuous — every seed is exercised by i
 test('precision-first: unnamed measured clusters get a descriptor, not silence', () => {
   // "Silent" means no curated NAME, not no output — the panel still has a row to
   // render, and it says only what the counts support.
+  //
+  // Ruling A: the noun is 'prompt' (not 'instruction' — the shape rules never
+  // measured imperativeness). Ruling B (final-triage item 2): `name` is the
+  // BARE lead clause and the span/host tail moves to `descriptor`.
   const [, , shape] = MEASURED_CLUSTERS.find(([, ex]) => ex === 'Continue.');
   const label = labelFor(measured(shape));
   assert.equal(label.source, 'characterized');
-  assert.equal(label.name, 'Recurring 1-token instruction · 16 sessions · both hosts');
+  assert.equal(label.name, 'Recurring 1-token prompt');
+  assert.equal(label.descriptor, 'Recurring 1-token prompt · 16 sessions · both hosts');
 });

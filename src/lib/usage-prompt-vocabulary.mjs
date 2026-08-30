@@ -181,8 +181,11 @@ export const SEED_PATTERNS = [
       + 'would have printed a commit instruction over the corpus\'s second-largest cluster. The '
       + 'median-token floor separates a real two-word command from a bare acknowledgement, and the '
       + '6-session floor clears the at-threshold case. The band supplies the upper bound the floor '
-      + 'implies. Cost, accepted: `Push to remote` (4 sessions) is released to the generic descriptor.',
-    match: (s) => s.cls === 'instruction' && s.band === 'tap' && s.tokens >= 3 && s.sessions >= 6,
+      + 'implies. Cost, accepted: `Push to remote` (4 sessions) is released to the generic descriptor. '
+      + 'RULING A (final-triage item 1): matches `other`, the wire value classifyCluster now emits for '
+      + 'this shape — the predicate used to read the library\'s old `instruction` value; the library '
+      + 'itself was renamed, not this seed\'s intent.',
+    match: (s) => s.cls === 'other' && s.band === 'tap' && s.tokens >= 3 && s.sessions >= 6,
   },
   {
     id: 'progress-check-in',
@@ -212,31 +215,53 @@ export function matchSeed(cluster) {
 
 // ── the honest fallback ─────────────────────────────────────────────────────
 
-/** What each class is called in prose. `unknown` is deliberately just "prompt":
- *  a cluster nobody classified must not be described as though it were. */
-const CLASS_NOUNS = { question: 'question', instruction: 'instruction', mixed: 'mixed prompt' };
+/** What each class is called in prose. `unknown` and `other` both read as the
+ *  bare "prompt" — `other` covers imperatives AND declaratives (RULING A,
+ *  final-triage item 1: the shape rules only ever test for interrogative-ness,
+ *  so naming the other side "instruction" would assert imperativeness nobody
+ *  measured), and `unknown` is a cluster nobody classified at all. Two
+ *  genuinely different questions, one honest noun for both — the `class` chip
+ *  next to a characterized name is what still tells them apart. */
+const CLASS_NOUNS = { question: 'question', other: 'prompt', mixed: 'mixed prompt' };
+
+/**
+ * The lead clause plus the full descriptor, built once so `characterize` and
+ * `labelFor` (RULING B, final-triage item 2) never restate the same string
+ * two different ways. The lead is the class-noun clause alone ("Recurring
+ * 3-token prompt"); `full` appends the span/host tail
+ * ("Recurring 3-token prompt · 21 sessions · both hosts").
+ *
+ * IT EMITS COUNTS AND BANDS ONLY. No host name, no session id, no hash reaches
+ * either string, so nothing here can carry an identifier out of the index and
+ * into a rendered page — the caller renders host chips from `cluster.hosts` if
+ * it wants them named. A segment with nothing to count is omitted rather than
+ * rendered as a zero.
+ *
+ * @param {Partial<PromptCluster>} [cluster]
+ * @returns {{ lead: string, full: string }}
+ */
+function characterizeParts(cluster) {
+  const s = shapeOf(cluster);
+  const lead = `Recurring ${s.tokens}-token ${CLASS_NOUNS[s.cls] ?? 'prompt'}`;
+  const parts = [lead];
+  if (s.sessions > 0) parts.push(`${s.sessions} session${s.sessions === 1 ? '' : 's'}`);
+  if (s.hosts === 2) parts.push('both hosts');
+  else if (s.hosts > 0) parts.push(`${s.hosts} host${s.hosts === 1 ? '' : 's'}`);
+  return { lead, full: parts.join(' · ') };
+}
 
 /**
  * A descriptor for a cluster with no name — assembled from its metadata and
- * asserting nothing beyond it: "Recurring 3-token instruction · 21 sessions ·
- * both hosts".
- *
- * IT EMITS COUNTS AND BANDS ONLY. No host name, no session id, no hash reaches
- * the string, so nothing here can carry an identifier out of the index and into
- * a rendered page — the caller renders host chips from `cluster.hosts` if it
- * wants them named. A segment with nothing to count is omitted rather than
- * rendered as a zero.
+ * asserting nothing beyond it: "Recurring 3-token prompt · 21 sessions ·
+ * both hosts". The FULL string; `labelFor`'s characterized branch splits this
+ * into a bare `name` plus a `descriptor` (RULING B) via the same
+ * `characterizeParts` this calls, so the two can never drift apart.
  *
  * @param {Partial<PromptCluster>} [cluster]
  * @returns {string}
  */
 export function characterize(cluster) {
-  const s = shapeOf(cluster);
-  const parts = [`Recurring ${s.tokens}-token ${CLASS_NOUNS[s.cls] ?? 'prompt'}`];
-  if (s.sessions > 0) parts.push(`${s.sessions} session${s.sessions === 1 ? '' : 's'}`);
-  if (s.hosts === 2) parts.push('both hosts');
-  else if (s.hosts > 0) parts.push(`${s.hosts} host${s.hosts === 1 ? '' : 's'}`);
-  return parts.join(' · ');
+  return characterizeParts(cluster).full;
 }
 
 // ── resolution ──────────────────────────────────────────────────────────────
@@ -250,10 +275,21 @@ export function characterize(cluster) {
  * replaced: a person renaming a cluster, or a layer-3 pass settling a label on
  * it, permanently outranks the guess without anyone having to edit this file.
  *
+ * RULING B (final-triage item 2): for a `characterized` result, `name` is the
+ * BARE lead clause ("Recurring 1-token prompt") rather than the full
+ * descriptor — a CLI table already carries sessions/days/hosts in their own
+ * columns, and appending the same numbers inside the name cell was a
+ * truncated, duplicated "· 24 sessio…" beside them. `descriptor` carries the
+ * full string (lead + span/host tail) for a surface with no columns to spare
+ * (the dashboard's row title). Only a characterized result sets `descriptor`
+ * at all — a curated, seeded or enriched `name` is already the whole thing a
+ * person (or a layer-3 pass) chose to say, so there is no second string to
+ * carry.
+ *
  * @param {Partial<PromptCluster>} [cluster] A cluster from `nearDupClusters`.
  * @param {Record<string, { name?: string, source?: string, firstSeen?: string }>} [store]
  * @returns {{ name: string, source: 'curated'|'enriched'|'seed'|'characterized',
- *   firstSeen: string|null, seed: string|null }}
+ *   firstSeen: string|null, seed: string|null, descriptor?: string }}
  */
 export function labelFor(cluster, store) {
   const entry = typeof cluster?.key === 'string' ? store?.[cluster.key] : null;
@@ -268,5 +304,45 @@ export function labelFor(cluster, store) {
   }
   const seed = matchSeed(cluster);
   if (seed) return { name: seed.name, source: 'seed', firstSeen: null, seed: seed.id };
-  return { name: characterize(cluster), source: 'characterized', firstSeen: null, seed: null };
+  const { lead, full } = characterizeParts(cluster);
+  return {
+    name: lead, source: 'characterized', firstSeen: null, seed: null, descriptor: full,
+  };
+}
+
+// ── re-resolving a PUBLISHED row against a real store (W5 enrichment) ──────
+
+/**
+ * Re-checks one already-published cluster ROW (`promptClusterRow`'s output,
+ * not a raw `nearDupClusters` cluster) against a real label store, and
+ * returns the row unchanged unless the store actually names this key.
+ *
+ * WHY THIS IS EXACT, NOT AN APPROXIMATION: `labelFor`'s store branch depends
+ * on nothing but `cluster.key` — it never reads the shape fields (tokens,
+ * class, sessions, hosts, personas) a seed/characterize match would need. So
+ * re-checking the store after the row has already been reduced (aggregate
+ * time, `usage-aggregate.mjs`'s `buildPromptPatterns`, historically built
+ * with an empty `{}` store) is equivalent to having threaded the real store
+ * through from the start — a seed or characterized row the store does not
+ * cover is returned byte-for-byte identical, and a row the store DOES cover
+ * resolves exactly as `labelFor` would have resolved it at construction time.
+ * This is the seam `ak usage prompts`/the dashboard use to apply the
+ * persisted `usage-label-store.mjs` file without re-threading it through
+ * `aggregate()`/`usage-index.mjs`.
+ *
+ * @param {{ key: string, label: { name: string, source: string } }} row
+ * @param {Record<string, { name?: string, source?: string, firstSeen?: string }>} [store]
+ * @returns {{ key: string, label: { name: string, source: string } }}
+ */
+export function withStoreLabel(row, store) {
+  const entry = typeof row?.key === 'string' ? store?.[row.key] : null;
+  const stored = typeof entry?.name === 'string' ? entry.name.trim() : '';
+  if (!stored) return row;
+  return {
+    ...row,
+    label: {
+      name: stored,
+      source: STORE_SOURCES.has(entry.source) ? /** @type {'curated'|'enriched'} */ (entry.source) : 'curated',
+    },
+  };
 }
