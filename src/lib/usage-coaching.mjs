@@ -334,12 +334,18 @@ const RULES = [
 export const _rules = Object.fromEntries(RULES.map((r) => [r.id, r]));
 
 /**
+ * @typedef {{ id: string, title: string, finding: string, try: string,
+ *   basis: string, evidenceHash: string, generatedAt: string,
+ *   draft?: { kind: 'claude-md-line'|'skill-skeleton'|'link', text: string } }} CoachingCard
+ */
+
+/**
  * The deterministic v1 card set (spec §5), each card only when its evidence
  * condition holds. Pure: no I/O, no clock read beyond `now`.
  *
  * @param {{ promptPatterns: object|null, promptBaselines: object|null,
  *   promptsByHost: object|null, insights: Array<object>|null, now: number }} input
- * @returns {Array<object>} cards, in RULES order
+ * @returns {Array<CoachingCard>} cards, in RULES order
  */
 export function deriveCards({ promptPatterns, promptBaselines, promptsByHost, insights, now }) {
   const ctx = {
@@ -387,15 +393,23 @@ export function currentEvidenceFor(id, currentPatterns) {
 const cardSlug = (id) => id.replace(/-skill$/, '');
 
 /**
+ * @typedef {{ id: string, evidenceHash: string,
+ *   status: 'proposed'|'adopted'|'dismissed'|'expired'|'retired',
+ *   generatedAt: string, statusAt: string, baseline?: { count?: number },
+ *   outcome?: {improved:boolean, deltaText:string, measuredAt?:string}|null,
+ *   refutation?: string|null, dismissCount?: number }} LedgerRecord
+ */
+
+/**
  * Deterministic adoption predicates (spec §6.4), evaluated in the order
  * spec'd: a matching CLAUDE.md line, then a matching skill directory, then
  * "the target recurrence collapsed" (current count ≤ ADOPTION_COLLAPSE_RATIO
  * of the count recorded when this card was first proposed). Pure — every
  * input is caller-supplied.
  *
- * @param {object} card a card from `deriveCards`
+ * @param {CoachingCard} card a card from `deriveCards`
  * @param {{ claudeMdTexts?: string[], skillDirs?: string[],
- *   currentPatterns?: object, ledgerRecord?: object }} [inputs]
+ *   currentPatterns?: object, ledgerRecord?: LedgerRecord|null }} [inputs]
  * @returns {{ adopted: boolean, via: 'claude-md'|'skill-dir'|'collapse'|null }}
  */
 export function detectAdoption(card, { claudeMdTexts, skillDirs, currentPatterns, ledgerRecord } = {}) {

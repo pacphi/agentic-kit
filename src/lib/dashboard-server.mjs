@@ -784,7 +784,8 @@ function lazyLive(liveOptions = {}) {
  *           intelClientBuffer?: number, intelMaxClients?: number,
  *           discoverProjects?: () => Array<{ path: string, label: string, source?: string }>,
  *           machineWideIntel?: (projects: Array<any>) => any,
- *           models?: any, modelScopeKey?: string, system?: any, systemOptions?: any }} [opts]
+ *           models?: any, modelScopeKey?: string, system?: any, systemOptions?: any,
+ *           coachingLedger?: any }} [opts]
  * @returns {Promise<{ url: string, urlWithToken: string, port: number, token: string, close: () => Promise<void> }>}
  */
 export function startDashboard({
@@ -1681,7 +1682,9 @@ export function startDashboard({
  * `limits` already use on `startDashboard` — tests point it at a stub loader
  * so a poll never touches the real `~/.config/agentic-kit` ledger file.
  *
- * @param {object} agg the aggregate `handleUsage` already read (prompts:true)
+ * @param {{ promptPatterns?: object|null, promptBaselines?: object|null,
+ *   promptsByHost?: object|null, insights?: Array<object>|null }} agg the
+ *   aggregate `handleUsage` already read (prompts:true)
  * @param {{ loadLedger?: typeof loadLedger, ledgerPath?: string }} [coachingLedgerOverride]
  */
 function dashboardCoachingPayload(agg, coachingLedgerOverride) {

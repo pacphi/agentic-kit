@@ -14,6 +14,12 @@ import {
   detectAdoption, measureOutcome, currentEvidenceFor, OUTCOME_MIN_DAYS, DAY_MS,
 } from './usage-coaching.mjs';
 
+/**
+ * @typedef {import('./usage-coaching.mjs').CoachingCard} CoachingCard
+ * @typedef {import('./usage-coaching.mjs').LedgerRecord} LedgerRecord
+ * @typedef {{ version: number, records: Array<LedgerRecord> }} Ledger
+ */
+
 export const LEDGER_SCHEMA_VERSION = 1;
 
 /** A dismissed card whose evidence hash has changed gets ONE re-proposal
@@ -61,7 +67,9 @@ export function saveLedger(filePath, ledger) {
  *  fresh off the SAME evidence context that produced `card` this pass (not a
  *  re-guess: `adoptionInputs.currentPatterns` is that identical context,
  *  handed through unchanged), so the snapshot always matches what the card
- *  actually said. */
+ *  actually said.
+ *  @param {CoachingCard} card
+ *  @param {{ currentPatterns?: object }} [adoptionInputs] */
 function snapshotBaseline(card, adoptionInputs) {
   return { count: 0, ...(currentEvidenceFor(card.id, adoptionInputs?.currentPatterns ?? {}) ?? {}) };
 }
@@ -73,7 +81,9 @@ function isoNow(now) { return new Date(now).toISOString(); }
  *  the module doc: a rule-derived card's evidenceHash is refreshed in the same
  *  pass it would otherwise go stale in, because recomputing it costs nothing
  *  (spec §6.3's staleness is a Layer-3/inference concept; the field exists so
- *  a future enriched card has somewhere to report it). */
+ *  a future enriched card has somewhere to report it).
+ *  @param {CoachingCard} card
+ *  @param {LedgerRecord} record */
 function annotate(card, record) {
   return {
     ...card,
@@ -111,9 +121,11 @@ function annotate(card, record) {
  *    exception — see the loop below — because "we lost the evidence" is not a
  *    verdict the way retirement or a second dismissal is).
  *
- * @param {{ version: number, records: Array<object> }} ledger
- * @param {Array<object>} cards this pass's `deriveCards` output
- * @param {{ adoptionInputs?: object, now?: number }} [opts]
+ * @param {Ledger} ledger
+ * @param {Array<CoachingCard>} cards this pass's `deriveCards` output
+ * @param {{ adoptionInputs?: { claudeMdTexts?: string[], skillDirs?: string[],
+ *   currentPatterns?: object }, now?: number }} [opts]
+ * @returns {{ ledger: Ledger, cards: Array<object> }}
  */
 export function reconcile(ledger, cards, { adoptionInputs = {}, now = Date.now() } = {}) {
   const records = new Map((ledger?.records ?? []).map((r) => [r.id, { ...r }]));
@@ -187,11 +199,11 @@ export function reconcile(ledger, cards, { adoptionInputs = {}, now = Date.now()
  * pass actually derived; an id with no live evidence is rejected by the
  * caller printing the known-id list, not silently accepted here.
  *
- * @param {{ version: number, records: Array<object> }} ledger
+ * @param {Ledger} ledger
  * @param {string} cardId
- * @param {Array<object>} cards this pass's `deriveCards` output
+ * @param {Array<CoachingCard>} cards this pass's `deriveCards` output
  * @param {number} [now]
- * @returns {{ ledger: object, found: boolean }}
+ * @returns {{ ledger: Ledger, found: boolean }}
  */
 export function dismissCard(ledger, cardId, cards, now = Date.now()) {
   const card = (cards ?? []).find((c) => c.id === cardId);
