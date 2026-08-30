@@ -1262,10 +1262,18 @@ test('I-5: the Coaching caption agrees with a stale enriched card rendered direc
   const result = ak(['usage', 'prompts'], sb);
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stdout,
-    /rule-derived cards are free to recompute every scan and never go stale; an enriched card \(source: enriched\) is cached and can/,
+    /every card names its own source; a rule card is computed from your aggregate and recomputes free every scan, an enriched card was written by a model/,
     'the CLI caption must match the dashboard\'s own wording, not contradict it');
   assert.match(result.stdout, /A planted enriched card/);
   assert.match(result.stdout, /stale — recompute with ak usage prompts --enrich/);
+  // QE review F-9: the caption points at a marker every card carries, and the
+  // cards carry it. Before this, the ONLY marker either surface drew was the
+  // stale chip, so a FRESH enriched card — the state right after --enrich —
+  // was indistinguishable from a rule-derived one.
+  assert.match(result.stdout, /source: enriched — model-authored/,
+    'the enriched card must say so on its own face');
+  assert.match(result.stdout, /source: rule — computed from your aggregate/,
+    'and a rule card must say so too, so the distinction is visible without comparing cards');
   fs.rmSync(sb.home, { recursive: true, force: true });
 });
 

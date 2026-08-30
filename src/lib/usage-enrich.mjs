@@ -29,6 +29,9 @@
 import { evidenceHash } from './usage-evidence-hash.mjs';
 import { maskSecrets } from './usage-aggregate.mjs';
 import { isValidLabelName, CARD_ID_RE } from './usage-label-store.mjs';
+import {
+  pathWordsByNumber, vocabularyOf, numericClaims, claimIsGrounded,
+} from './usage-fabrication-gate.mjs';
 import { withStoreLabel } from './usage-prompt-vocabulary.mjs';
 
 /**
@@ -429,9 +432,15 @@ export async function synthesizeCards({
   const raw = await invoke(buildCardPrompt(findingsSummary, existing));
   const parsed = parseJsonArray(raw);
   const summaryNumbers = numbersInSummary(findingsSummary);
+  // QE review F-3: the same summary, indexed by the PATHS each number is
+  // reachable from, so a cited number can be bound to the dimension the prose
+  // attaches it to rather than merely to the summary as a whole.
+  const summaryPaths = pathWordsByNumber(findingsSummary);
+  const summaryVocabulary = vocabularyOf(summaryPaths);
 
   const dropped = {
-    badId: 0, badText: 0, noBasis: 0, unmatchedNumber: 0, duplicateId: 0, duplicateOfExisting: 0,
+    badId: 0, badText: 0, noBasis: 0, unmatchedNumber: 0, unboundNumber: 0,
+    duplicateId: 0, duplicateOfExisting: 0,
   };
   const cards = [];
   const seenIds = new Set();
@@ -456,11 +465,28 @@ export async function synthesizeCards({
       : [];
     if (!basisNumbers.length) { dropped.noBasis++; continue; }
 
-    // ANTI-FABRICATION GATE: every number stated in the model-authored prose
-    // (title is exempt — a stylistic number there asserts no evidence) plus
-    // every basisNumbers entry must be traceable to the supplied summary.
+    // ANTI-FABRICATION GATE, in two passes over the model-authored prose
+    // (title is exempt — a stylistic number there asserts no evidence).
+    //
+    // 1. EXISTENCE, unchanged: every numeral stated anywhere, plus every
+    //    basisNumbers entry, must appear somewhere in the supplied summary.
+    //    `basisNumbers` has no prose around it, so existence is all that can
+    //    be asked of it — and `citedEvidenceHash` is computed from it.
     const cited = [...CARD_FABRICATION_FIELDS.flatMap((field) => numbersInText(item[field])), ...basisNumbers];
     if (!cited.every((n) => summaryNumbers.has(n))) { dropped.unmatchedNumber++; continue; }
+
+    // 2. BINDING (QE review F-3, HIGH): a number must also measure the thing
+    //    the sentence attaches it to. Existence alone admitted 41 of the 100
+    //    integers 1..100 on a corpus this size, and degraded further as the
+    //    corpus grew — so "across 13 projects" passed on a summary carrying no
+    //    project data at all, because 13 happened to be some cluster's day
+    //    count. Counted separately from `unmatchedNumber` so the CLI summary
+    //    and --json can say WHICH kind of ungrounded claim was dropped.
+    const claims = CARD_FABRICATION_FIELDS
+      .flatMap((field) => numericClaims(item[field], summaryVocabulary));
+    if (!claims.every((claim) => claimIsGrounded(claim, summaryPaths))) {
+      dropped.unboundNumber++; continue;
+    }
 
     seenIds.add(slug);
     cards.push({

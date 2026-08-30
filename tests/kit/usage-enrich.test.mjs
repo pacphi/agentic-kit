@@ -697,3 +697,131 @@ test('INTEGRATION: one enriched card flows through reconcile exactly like a rule
   assert.equal(ledger.records.length, 1);
   assert.equal(ledger.records[0].id, 'enriched-my-enriched-card');
 });
+
+// ── QE review F-3 (HIGH): the gate binds numbers to DIMENSIONS, not to the
+// summary as a whole ────────────────────────────────────────────────────────
+// The gate this replaces flattened findingsSummary into one Set of every
+// finite number and passed a card if each cited numeral appeared SOMEWHERE.
+// Measured on a corpus this size, 41 of the 100 integers 1..100 were
+// admissible, and it degraded further as the corpus grew — so it was weakest
+// exactly where the tool was most useful.
+
+const F3_SUMMARY = {
+  clusters: [
+    { key: 'a', name: 'Commit-and-push instruction', class: 'other', count: 36, sessions: 34, days: 16 },
+    { key: 'b', name: 'variant', class: 'other', count: 6, sessions: 6, days: 1 },
+    { key: 'c', name: 'big', class: 'other', count: 9, sessions: 9, days: 1 },
+    { key: 'd', name: 'rel', class: 'question', count: 3, sessions: 3, days: 2 },
+    { key: 'e', name: 'z', class: 'other', count: 59, sessions: 22, days: 13 },
+  ],
+  hosts: {
+    claude: { typed: 662, taps: 40, tapShare: 6, questionShare: 30, p90TypedTokens: 80, personaOpeners: 10 },
+    codex: { typed: 1460, taps: 200, tapShare: 14, questionShare: 25, p90TypedTokens: 160, personaOpeners: 43 },
+  },
+  reAsks: { pairCount: 12, sessionCount: 7 },
+  exactRepeats: [{ count: 9, tokens: 1260, sessions: 9, days: 1 }],
+};
+
+const f3Card = (over) => ({
+  id: 'a-card', title: 'A title', finding: 'x', try: 'Do the thing.', basis: 'x',
+  basisNumbers: [36], ...over,
+});
+
+const synth = (items) => synthesizeCards({
+  findingsSummary: F3_SUMMARY, invoke: async () => JSON.stringify(items), now: Date.UTC(2026, 7, 1),
+});
+
+test('F-3: a card citing a real-but-UNRELATED number is dropped, and says which gate dropped it', async () => {
+  // The review's own demonstration, verbatim. 13 is a real number in the
+  // summary — some cluster's day count — and findingsSummary carries no
+  // project data of ANY kind, so "13 projects" was pure invention that the
+  // old existence-only gate accepted.
+  const out = await synth([f3Card({
+    finding: 'You spent 3 sessions waiting on releases that took 2 days to land, across 13 projects.',
+    basis: '3 release prompts over 2 days across 13 projects.',
+    basisNumbers: [3, 2, 13],
+  })]);
+  assert.equal(out.accepted, 0, 'the card must not survive');
+  assert.equal(out.dropped.unboundNumber, 1,
+    'and it is dropped for citing a dimension the summary has no path for, not for a missing value');
+  assert.equal(out.dropped.unmatchedNumber, 0, 'every number it cited DOES exist — that was the whole problem');
+});
+
+test('F-3: a fabricated dimension is caught even when every number is real', async () => {
+  const out = await synth([f3Card({
+    finding: 'Your 36 pull requests were reviewed in 16 days.',
+    basis: '36 pull requests, 16 days.',
+    basisNumbers: [36, 16],
+  })]);
+  assert.equal(out.accepted, 0);
+  assert.equal(out.dropped.unboundNumber, 1);
+});
+
+test('F-3: a number attached to the WRONG real dimension is dropped', async () => {
+  // 43 is codex's personaOpeners. Attaching it to `sessions` is a different
+  // claim about the same corpus, and existence alone could never see it.
+  const out = await synth([f3Card({
+    finding: 'You opened 43 sessions on codex this window.',
+    basis: '43 sessions.',
+    basisNumbers: [43],
+  })]);
+  assert.equal(out.accepted, 0);
+  assert.equal(out.dropped.unboundNumber, 1);
+});
+
+test('F-3: the numbers a REAL enriched card states still pass — all three from the live run', async () => {
+  // Calibration, and the half of this fix that is easy to get wrong: a gate
+  // that silently drops legitimate cards fails the operator just as badly,
+  // and they never learn it happened. These are the exact sentences a real
+  // `--enrich` invocation produced on this machine.
+  const live = [
+    {
+      id: 'automate-commit-push-ritual', title: 'Turn the commit-and-push instruction into a shortcut',
+      finding: "The 'Commit-and-push instruction' prompt recurs 36 times across 34 sessions over 16 days, with three additional near-identical variants each appearing 6 times across 6 sessions in a single day.",
+      try: 'Wrap this instruction in a slash-command, git alias, or hook so it is invoked rather than retyped each time.',
+      basis: 'Cluster counts of 36 (34 sessions, 16 days) plus three separate 6-count/6-session/1-day variants indicate the same instruction is being manually re-entered on a near-daily basis.',
+      basisNumbers: [36, 34, 16, 6],
+    },
+    {
+      id: 'reduce-large-prompt-retyping', title: 'Save the 1260-token prompt as a reusable template',
+      finding: 'A single 1260-token prompt was repeated 9 times across 9 different sessions within one day.',
+      try: 'Store that prompt as a file or snippet and reference it instead of composing it fresh each session.',
+      basis: 'The 1260-token recurring prompt cluster shows count 9, sessions 9, all within days: 1 — a large payload retyped session-over-session on the same day.',
+      basisNumbers: [1260, 9],
+    },
+    {
+      id: 'standardize-codex-persona-scaffolding', title: 'Persist the persona setup for Codex',
+      finding: 'Codex sessions show 43 persona-scaffolding openers compared to 10 on Claude, a gap much larger than the difference in typed tokens (1460 vs 662).',
+      try: 'Move the recurring persona text into a saved Codex config so it loads automatically.',
+      basis: 'personaOpeners of 43 (codex) vs 10 (claude) against typed totals of 1460 (codex) vs 662 (claude) shows persona re-entry scaling faster than overall typing volume on the codex host.',
+      basisNumbers: [43, 10, 1460, 662],
+    },
+  ];
+  const out = await synth(live);
+  assert.equal(out.dropped.unboundNumber, 0,
+    'no real card may be dropped by the binding gate — a silent false drop is its own failure');
+  assert.equal(out.dropped.unmatchedNumber, 0);
+  assert.equal(out.accepted, 3);
+});
+
+test('F-3: the existence check still fires first, and is reported separately', async () => {
+  const out = await synth([f3Card({
+    finding: 'This cluster recurred 777 times across 34 sessions.',
+    basis: '777 recurrences.',
+    basisNumbers: [777],
+  })]);
+  assert.equal(out.accepted, 0);
+  assert.equal(out.dropped.unmatchedNumber, 1, 'a number absent from the summary is still the FIRST thing checked');
+  assert.equal(out.dropped.unboundNumber, 0);
+});
+
+test('F-3: a number with no readable noun still passes on value presence alone', async () => {
+  // The deliberate fallback. "…, up from 12." attaches its number to nothing
+  // this gate can read, and refusing it would drop ordinary prose.
+  const out = await synth([f3Card({
+    finding: 'The cluster reached 36 recurrences, up from 6.',
+    basis: 'Now 36; was 6.',
+    basisNumbers: [36, 6],
+  })]);
+  assert.equal(out.accepted, 1, out.dropped && JSON.stringify(out.dropped));
+});

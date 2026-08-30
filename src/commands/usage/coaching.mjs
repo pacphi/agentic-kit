@@ -60,6 +60,16 @@ function coachingStatusLine(card) {
   return 'proposed';
 }
 
+/** The three-valued source line. Anything that is neither of the two known
+ *  sources reads as UNKNOWN rather than silently as "rule": only a corrupted
+ *  path produces one, and the wrong failure here would be presenting
+ *  model-authored text as machine-derived. */
+function sourceLine(card) {
+  if (card.source === 'enriched') return 'enriched — model-authored, numbers bound to your aggregate';
+  if (card.source === 'rule') return 'rule — computed from your aggregate';
+  return 'unknown — this card does not say where it came from';
+}
+
 /** `generatedAt` + the first 8 hex chars of `evidenceHash`, as a dim trailing
  *  line (Fix round 1, M-3) — METRICS.md §22 makes a point of every card carrying
  *  both; before this they existed on the object and in `--json` but reached
@@ -70,6 +80,17 @@ function printCoachingCard(card) {
   info(`  Try: ${card.try}`);
   info(dim(`  Basis: ${card.basis}`));
   info(`  Status: ${coachingStatusLine(card)}`);
+  // QE review F-9: `source` renders UNCONDITIONALLY. Both captions used to
+  // point the operator at "its own marker", but the only marker either surface
+  // drew was the STALE chip — and `coachingStaleHint` returns nothing unless
+  // the card IS stale. A FRESH enriched card, which is the state immediately
+  // after --enrich and the state an operator sees most, carried no marker at
+  // all and was byte-for-byte indistinguishable from a rule-derived card. That
+  // distinction is the operator's only defense against F-3 and F-4: a rule
+  // card's every number is a pure function of the aggregate, while an enriched
+  // card was written by a model and its numbers are bound to a dimension, not
+  // to the truth of the sentence.
+  info(dim(`  source: ${sourceLine(card)}`));
   if (card.draft) info(dim(`  Draft → ak usage prompts --draft ${card.id}`));
   if (card.status === 'proposed') info(dim(`  Dismiss → ak usage prompts --dismiss ${card.id}`));
   // W5 enrichment (METRICS.md §23): only an ENRICHED card's evidence can drift out
@@ -94,8 +115,9 @@ export function printCoaching(coaching) {
   // (usage-prompts.mjs) verbatim in spirit — the two surfaces disagreed
   // (this one claimed "nothing here goes stale" directly above a card that
   // could, and did, render "stale — recompute" beneath it).
-  info(dim('  rule-derived cards are free to recompute every scan and never go stale; an enriched card '
-    + '(source: enriched) is cached and can — see its own marker below. A card is only ever proposed, '
+  info(dim('  every card names its own source; a rule card is computed from your aggregate and '
+    + 'recomputes free every scan, an enriched card was written by a model from that same aggregate '
+    + 'and is cached, so only it can go stale. A card is only ever proposed, '
     + 'adopted, dismissed, expired, or retired'));
   if (coaching?.unavailable) {
     info(dim(`  coaching unavailable this run — ${coaching.reason}`));

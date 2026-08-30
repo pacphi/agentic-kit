@@ -2303,8 +2303,8 @@ row route through the existing `#usage/<id>` transcript reader — this table
 holds no transcript content of its own.
 
 **Coaching**, read-only (`coachingPanel`, whose own call renders each card below,
-`usage-prompts.mjs:768`; one card,
-`coachingCard`, `usage-prompts.mjs:731`) — the identical cards and ledger status §22 defines,
+`usage-prompts.mjs:799`; one card,
+`coachingCard`, `usage-prompts.mjs:761`) — the identical cards and ledger status §22 defines,
 reconciled server-side from the same lib and ledger `ak usage prompts` uses,
 so the two surfaces cannot disagree about a card's status any more than they
 can about a cluster's count. Every card renders finding → Try → basis → a
@@ -2422,7 +2422,7 @@ thing being hashed), so gating on hash-change alone would have made a
 dismissal survive only until the pattern's very next occurrence.
 
 **Adoption routes,** checked in order (`detectAdoption`,
-`usage-coaching.mjs:136`): a CLAUDE.md line matching the card's draft
+`usage-coaching.mjs:140`): a CLAUDE.md line matching the card's draft
 verbatim; a `.claude/skills/<slug>/` directory matching the card's id; or —
 **collapse, opt-in per rule** (`collapseIsAdoption`,
 `usage-coaching-rules.mjs:333`) — the current count falling to ≤20% of the
@@ -2511,9 +2511,9 @@ while debugging and never restored is the realistic way this regresses.
 
 **Delta-only labeling.** A candidate cluster is one whose label is still the
 honest fallback — `characterized`, never `curated`/`enriched`/`seed` — with
-at least 3 recurrences (`MIN_CANDIDATE_COUNT`, `usage-enrich.mjs:52`). A
+at least 3 recurrences (`MIN_CANDIDATE_COUNT`, `usage-enrich.mjs:55`). A
 settled label (from a prior `--enrich` run, or hand-curated) is never
-re-sent for judging: `labelCandidates` (`usage-enrich.mjs:123`, reading that
+re-sent for judging: `labelCandidates` (`usage-enrich.mjs:126`, reading that
 same floor again on each call) checks the store on BOTH
 sides of the boundary — the caller's own re-resolution against the store,
 AND a second, independent check inside the engine itself, so a caller
@@ -2529,13 +2529,13 @@ exemplar back.
 second consecutive `--enrich` run over an unchanged corpus:
 `lastSynthesis.findingsHash` (persisted in the label store) is compared
 against a fresh hash of the CURRENT findings summary
-(`findingsSummaryHash`, `usage-enrich.mjs:305`), and synthesis runs only when
+(`findingsSummaryHash`, `usage-enrich.mjs:308`), and synthesis runs only when
 that hash has moved OR a stored card reads stale (below). The hash is
 deliberately insensitive to a cluster's display NAME alone
-(`stripDisplayNames`, `usage-enrich.mjs:282`) — otherwise the very pass
+(`stripDisplayNames`, `usage-enrich.mjs:285`) — otherwise the very pass
 immediately after any labeling round would see the hash move on cosmetics
 only and re-spend a call for no new evidence. The prompt shows at most the
-top 40 clusters by count (`MAX_SYNTHESIS_CLUSTERS`, `usage-enrich.mjs:374`) —
+top 40 clusters by count (`MAX_SYNTHESIS_CLUSTERS`, `usage-enrich.mjs:377`) —
 a display cap only; validation
 below still reads the FULL, uncapped summary, so a card citing a number from
 cluster #41 is still checked for truth. Already-stored cards are named
@@ -2547,10 +2547,10 @@ backstop behind the steer.
 card's `finding`/`try`/`basis` text states — and every entry in its own
 `basisNumbers` — must be traceable to a number ACTUALLY present in the
 findings summary the model was shown (`numbersInSummary` /
-`CARD_FABRICATION_FIELDS`, `usage-enrich.mjs:83`). One unmatched number voids
+`CARD_FABRICATION_FIELDS`, `usage-enrich.mjs:86`). One unmatched number voids
 the WHOLE card, not just the offending field; `title` is exempt (a stylistic
 number there asserts no evidence). `findingsSummary` itself
-(`buildFindingsSummary`, `usage-enrich.mjs:224`) carries counts, cluster
+(`buildFindingsSummary`, `usage-enrich.mjs:227`) carries counts, cluster
 names, and shares only — no exemplar text exists in it to leak, by
 construction. Measured on
 this machine's real corpus (2026-08-30): the gate is set-membership over
@@ -2595,7 +2595,7 @@ candidacy.
 never re-judged — there is no staleness concept for it at all. A synthesized
 card's `evidenceHash` is frozen at synthesis time (no model call refreshes it);
 `isCardStale`
-(`usage-enrich.mjs:347`) recomputes, purely arithmetically, whether every
+(`usage-enrich.mjs:350`) recomputes, purely arithmetically, whether every
 number it cited is still present in CURRENT findings — if the corpus has
 moved enough that one has vanished, the card reads `stale`, rendered as a
 chip pointing back at `--enrich` on both surfaces (§20, §21). This is

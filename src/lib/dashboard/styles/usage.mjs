@@ -850,6 +850,14 @@ export const USAGE_CSS = `
 }
 .pr-card-status[data-status="adopted"]{color:var(--ok)}
 .pr-card-status[data-status="retired"]{color:var(--warn); text-transform:none; font-weight:400}
+/* F-9: every card names its own source, unconditionally. Deliberately quieter
+   than the status chip — this is provenance, not state, and it must be
+   readable without competing with the verdict beside it. */
+.pr-card-source{
+  flex:none; padding:1px 6px; border:1px solid var(--line); border-radius:9px;
+  font-size:10px; font-weight:600; letter-spacing:.03em; color:var(--ink-dim);
+}
+.pr-card-source[data-source="enriched"]{color:var(--ink-2); border-color:var(--line-2)}
 .pr-card-finding{margin:7px 0 0; font-size:12.5px; color:var(--ink-2); line-height:1.5}
 .pr-card-try{margin:7px 0 0; font-size:12.5px; color:var(--ink)}
 .pr-card-try b{font-weight:600}

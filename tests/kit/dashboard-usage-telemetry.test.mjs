@@ -2005,3 +2005,50 @@ test('SEC-9: the escaper actually SHIPPED to the browser is the stripping one, n
   assert.match(JS, /function esc\(s\) \{[\s\S]{0,600}?0x202e/,
     'the bundle\'s one esc must be the stripping implementation, not the five-character escaper');
 });
+
+// ── QE review F-9 (MEDIUM): both surfaces render `source`, unconditionally ──
+// Both captions told the operator to look for a distinguishing marker, and the
+// only marker either surface drew was the STALE chip — which renders nothing
+// unless the card IS stale. A FRESH enriched card, the state immediately after
+// --enrich and the one an operator sees most, carried no marker at all and was
+// byte-for-byte indistinguishable from a rule-derived card. That distinction
+// is the operator's only defense against F-3 and F-4.
+
+const sourceCard = (over) => ({
+  id: 'x', title: 'A title', finding: 'A finding.', try: 'Try this.', basis: '3 occurrences.',
+  status: 'proposed', stale: false, dismissCount: 0, outcome: null, refutation: null,
+  generatedAt: '2026-08-01T00:00:00.000Z', evidenceHash: 'a'.repeat(16), ...over,
+});
+
+test('F-9: a FRESH (not stale) enriched card still shows a source chip on the dashboard', () => {
+  const html = coachingPanel({
+    coaching: { cards: [sourceCard({ source: 'enriched', stale: false })], generatedAt: '2026-08-01T00:00:00.000Z' },
+  });
+  assert.match(html, /class="pr-card-source" data-source="enriched"/,
+    'the chip must not depend on staleness — that was exactly the bug');
+  assert.match(html, />enriched</);
+});
+
+test('F-9: a rule-derived card says so too, so the distinction is visible on one card alone', () => {
+  const html = coachingPanel({
+    coaching: { cards: [sourceCard({ source: 'rule' })], generatedAt: '2026-08-01T00:00:00.000Z' },
+  });
+  assert.match(html, /class="pr-card-source" data-source="rule"/);
+  assert.match(html, />rule</);
+});
+
+test('F-9: a card with no source reads as UNKNOWN, never silently as a rule card', () => {
+  const html = coachingPanel({
+    coaching: { cards: [sourceCard({})], generatedAt: '2026-08-01T00:00:00.000Z' },
+  });
+  assert.match(html, /data-source="unknown"/,
+    'the wrong failure would be presenting model-authored text as machine-derived');
+});
+
+test('F-9: the caption points at the chip every card carries, not at the stale marker', () => {
+  const html = coachingPanel({
+    coaching: { cards: [sourceCard({ source: 'enriched' })], generatedAt: '2026-08-01T00:00:00.000Z' },
+  });
+  assert.match(html, /Every card names its own source in the chip beside its status/);
+  assert.doesNotMatch(html, /see its own marker/, 'the old promise pointed at a marker a fresh card did not have');
+});

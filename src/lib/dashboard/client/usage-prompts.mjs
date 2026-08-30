@@ -736,10 +736,33 @@ function coachingStaleHint(card) {
     + '<code>ak usage prompts --enrich</code>.</p>';
 }
 
+/** QE review F-9: `source` renders UNCONDITIONALLY, beside the status chip.
+ *  The caption used to point at "its own marker", but the only marker drawn
+ *  was the STALE chip, and `coachingStaleHint` returns nothing unless the card
+ *  IS stale — so a FRESH enriched card, the state right after --enrich and the
+ *  one an operator sees most, was byte-for-byte indistinguishable from a
+ *  rule-derived card. That distinction is the operator's only defense against
+ *  F-3 and F-4. Mirrors the CLI's own `source:` line. */
+function coachingSourceChip(card) {
+  // Three-valued, not two: anything that is neither known source reads as
+  // UNKNOWN rather than silently as "rule". Only a corrupted path produces
+  // one, and the wrong failure here would be presenting model-authored text as
+  // machine-derived.
+  var source = card.source === 'enriched' || card.source === 'rule' ? card.source : 'unknown';
+  var TITLES = {
+    enriched: 'Written by a model from your aggregate; every number it states is bound to a dimension of that aggregate.',
+    rule: 'Computed from your aggregate by a fixed rule.',
+    unknown: 'This card does not say where it came from.',
+  };
+  return '<span class="pr-card-source" data-source="' + esc(source) + '" title="'
+    + esc(TITLES[source]) + '">' + esc(source) + '</span>';
+}
+
 function coachingCard(card) {
   return '<div class="pr-card" data-status="' + esc(card.status || 'proposed') + '"'
     + (card.stale ? ' data-stale="1"' : '') + '>'
-    + '<div class="pr-card-head"><h4>' + esc(card.title) + '</h4>' + coachingStatusChip(card) + '</div>'
+    + '<div class="pr-card-head"><h4>' + esc(card.title) + '</h4>' + coachingStatusChip(card)
+    + coachingSourceChip(card) + '</div>'
     + '<p class="pr-card-finding">' + esc(card.finding) + '</p>'
     + '<p class="pr-card-try"><b>Try:</b> ' + esc(card.try) + '</p>'
     + '<p class="pr-card-basis">' + esc(card.basis) + '</p>'
@@ -789,8 +812,10 @@ export function coachingPanel(p) {
       + 'result, not a missing one.</div>';
   }
   return '<div class="pr-cards">' + cards.map(coachingCard).join('') + '</div>'
-    + '<div class="pr-caveat">Rule-derived cards are free to recompute every scan and never go '
-    + 'stale; an enriched card (source: enriched) is cached and can — see its own marker. '
+    + '<div class="pr-caveat">Every card names its own source in the chip beside its status: a '
+    + '<b>rule</b> card is computed from your aggregate and recomputes free every scan, an '
+    + '<b>enriched</b> card was written by a model from that same aggregate and is cached, so only '
+    + 'it can go stale. '
     + 'Dismissal is CLI-only: <code>ak usage prompts --dismiss &lt;id&gt;</code>.</div>'
     + coachingSummaryLine(c.summary);
 }

@@ -78,7 +78,11 @@ export function deriveCards({ promptPatterns, promptBaselines, promptsByHost, in
   for (const rule of RULES) {
     const evidence = rule.evidence(ctx);
     if (!evidence || !rule.meetsBar(evidence, ctx)) continue;
-    cards.push(rule.card(evidence, now, ctx));
+    // QE review F-9: `source` is stamped EXPLICITLY rather than left implicit.
+    // Both surfaces now render it on every card, and a missing field defaulting
+    // to "rule" would fail in the one direction that matters — quietly claiming
+    // a model-authored card was computed from the aggregate.
+    cards.push({ ...rule.card(evidence, now, ctx), source: 'rule' });
   }
   return cards;
 }

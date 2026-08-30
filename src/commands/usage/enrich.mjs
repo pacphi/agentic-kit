@@ -147,7 +147,8 @@ function invocationFailedLine(err) {
  *  a caller reading `cardResult.dropped` never has to special-case "skipped"
  *  versus "ran and rejected nothing". */
 const NO_CARDS_DROPPED = {
-  badId: 0, badText: 0, noBasis: 0, unmatchedNumber: 0, duplicateId: 0, duplicateOfExisting: 0,
+  badId: 0, badText: 0, noBasis: 0, unmatchedNumber: 0, unboundNumber: 0,
+  duplicateId: 0, duplicateOfExisting: 0,
 };
 
 /**
