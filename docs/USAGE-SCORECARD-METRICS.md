@@ -1974,8 +1974,9 @@ why, is printed rather than left blank.
   missing: a trailing 90-day baseline needs a window before the displayed one,
   and all history has none. At a bounded window it is still `null` until the
   corpus carries `BASELINE_MIN_ACTIVE_DAYS` (30) days of typed prompts in that
-  trailing span — measured here, this machine has 22, so the honest answer is
-  that there is not yet a personal normal to compare against.
+  trailing span — measured here, this machine has 22 before a 7-day report
+  (16 before a 14-day one, and 1 Claude / 6 Codex before a 30-day one), so the
+  honest answer is that there is not yet a personal normal to compare against.
 - **Cluster names are provisional.** A seed is a shape predicate, not a
   reading of the text, so two different clusters can resolve to the same seed
   name; `source` on each row says whether the name came from a seed or from

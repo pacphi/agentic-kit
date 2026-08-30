@@ -419,6 +419,16 @@ function fmtMaybe(n) {
   return n == null || !Number.isFinite(n) ? 'not measured' : fmtNum(n);
 }
 
+/** What a truncated table owes its reader: the denominator it was sliced from.
+ *  Silence here is the one thing this report cannot afford — a 15-row slice of
+ *  561 clusters reads as "these are all the recurring clusters" — so every
+ *  table that caps its rows prints this, and prints nothing when nothing was
+ *  cut. `Re-asks` states its total before the rows for the same reason. */
+function showingNote(shown, total) {
+  if (shown >= total) return;
+  info(dim(`  showing ${fmtNum(shown)} of ${fmtNum(total)}`));
+}
+
 /** One fixed-width table row: `[text, width]` pads right, `[text, width, true]`
  *  pads left for a numeric column. */
 function tableRow(cells) {
@@ -463,6 +473,7 @@ function printTaps(pp, totals) {
     info(dim('  no samples'));
     return;
   }
+  showingNote(Math.min(TOP_TAP_LENGTHS, pp.tapLengths.length), pp.tapLengths.length);
   info(dim(tableRow([['tokens', 6, true], ['prompts', 8, true], ['sessions', 8, true], ['days', 5, true], ['hosts', 20]])));
   for (const r of pp.tapLengths.slice(0, TOP_TAP_LENGTHS)) {
     info(tableRow([
@@ -536,20 +547,76 @@ function printHostInterplay(agg, win) {
   }
 }
 
-function printClusters(clusters) {
+/**
+ * What the `class` column PRINTS, which is not what the library stores.
+ *
+ * `promptShape` decides one thing — is this interrogative — and everything
+ * else falls to the other side (usage-parsers.mjs). `classifyCluster` calls
+ * that side `instruction`, which is the right internal name for the half the
+ * seed predicates key on, but printing it would assert imperativeness the
+ * rules never tested: the corpus's declarative feedback ("One thing I feel
+ * that's missing is…") lands there too, and so does a bare `Yes`. `other` is
+ * what the evidence supports. Render layer only — the stored value, the seed
+ * predicates and their audit pins are untouched.
+ */
+const CLASS_LABELS = { question: 'question', instruction: 'other', mixed: 'mixed', unknown: 'unclassified' };
+
+/** Spec §3.1 KPI 4: the share of typed prompts sitting inside a cluster that
+ *  recurs. `crossSessionClusters` has already applied the ≥3-sessions-or-≥2-days
+ *  filter, so this is a straight sum over what the projection published. */
+function repeatedShare(clusters, totals) {
+  const typed = Number(totals?.typedPrompts) || 0;
+  if (!typed) return { prompts: 0, share: null };
+  const prompts = clusters.reduce((n, c) => n + (Number(c.count) || 0), 0);
+  return { prompts, share: prompts / typed };
+}
+
+function printClusters(clusters, totals) {
   heading('Recurring clusters');
   info(dim(`  near-duplicates at Jaccard ≥ ${PROMPT_CLUSTER_JACCARD}, kept when they span 3+ sessions or 2+ days`));
   if (!clusters.length) {
     info(dim('  no samples'));
     return;
   }
+  const repeated = repeatedShare(clusters, totals);
+  info(`REPEATED SHARE          ${fmtShare(repeated.share)}  `
+    + dim(`${fmtNum(repeated.prompts)} typed prompts across ${fmtNum(clusters.length)} recurring cluster${clusters.length === 1 ? '' : 's'}`));
+  info(dim('  what this does not model: whether the repetition was deliberate.'));
+  showingNote(Math.min(TOP_CLUSTERS, clusters.length), clusters.length);
   info(dim(tableRow([['pattern', 42], ['n', 4, true], ['sess', 5, true], ['days', 5, true],
     ['tok', 5, true], ['class', 12], ['source', 14]])));
   for (const r of clusters.slice(0, TOP_CLUSTERS)) {
     info(tableRow([
       [r.label.name.length > 42 ? `${r.label.name.slice(0, 41)}…` : r.label.name, 42],
       [fmtNum(r.count), 4, true], [fmtNum(r.sessions), 5, true], [fmtNum(r.days), 5, true],
-      [fmtMaybe(r.medianTokens), 5, true], [r.class, 12], [r.label.source, 14],
+      [fmtMaybe(r.medianTokens), 5, true], [CLASS_LABELS[r.class] ?? r.class, 12], [r.label.source, 14],
+    ]));
+  }
+  info(dim('  other = imperative or declarative — the shipped shape rules split only questions;'));
+  info(dim('  the three-way split arrives with enrichment.'));
+}
+
+/** The stricter subset of the same phenomenon: identical normalized text, not
+ *  a near-duplicate family. `key` is the fingerprint hash, printed short so a
+ *  reader can join a row to the `--json` projection; there is no text at this
+ *  tier, and the deep pass is where these rows get their words. */
+function printExactRepeats(rows) {
+  heading('Exact repeats');
+  info(dim('  identical normalized text, 3+ occurrences — the surplus a canonical form would remove'));
+  if (!rows.length) {
+    info(dim('  no samples'));
+    return;
+  }
+  const surplus = rows.reduce((n, r) => n + (Number(r.count) || 0) - 1, 0);
+  info(`SURPLUS PROMPTS         ${fmtNum(surplus)}  `
+    + dim(`retyped rather than reused, across ${fmtNum(rows.length)} group${rows.length === 1 ? '' : 's'}`));
+  showingNote(Math.min(TOP_CLUSTERS, rows.length), rows.length);
+  info(dim(tableRow([['key', 8], ['n', 4, true], ['sess', 5, true], ['days', 5, true],
+    ['tok', 5, true], ['hosts', 20]])));
+  for (const r of rows.slice(0, TOP_CLUSTERS)) {
+    info(tableRow([
+      [r.key.slice(0, 8), 8], [fmtNum(r.count), 4, true], [fmtNum(r.sessions), 5, true],
+      [fmtNum(r.days), 5, true], [fmtNum(r.tokens), 5, true], [r.hosts.join('+') || '—', 20],
     ]));
   }
 }
@@ -625,6 +692,12 @@ function promptReport(agg, win) {
 // only. This pass needs two things no aggregate can carry: the HASHES it owes
 // an exemplar for, and the transcript PATH of a session that holds one. The
 // cache is keyed by transcript path and is the only place both exist together.
+//
+// The distinction that makes this admissible: the cache as a PATTERNS SOURCE
+// was ruled out — two surfaces bound to an internal file format, and the
+// dashboard would have inherited the binding — whereas the cache as DISCOVERY
+// is one CLI-only call site answering "which transcript holds this hash",
+// which is a question about where files are, not about what the numbers say.
 //
 // That is a coupling to an internal file layout, and it is confined to this
 // one text-bearing, CLI-only tier on purpose: a pass that is about to open the
@@ -764,9 +837,8 @@ function shortPromptGroups(typed, maxTokens) {
     if (fp.host) g.hosts.add(fp.host);
     groups.set(fp.h, g);
   }
-  return [...groups.values()]
-    .sort((a, b) => b.prompts - a.prompts || (a.h < b.h ? -1 : 1))
-    .slice(0, DEEP_TOP_SHORT);
+  const all = [...groups.values()].sort((a, b) => b.prompts - a.prompts || (a.h < b.h ? -1 : 1));
+  return { rows: all.slice(0, DEEP_TOP_SHORT), total: all.length };
 }
 
 /** Persona-flagged typed prompts, grouped by exact text, longest first — the
@@ -783,9 +855,8 @@ function personaGroups(typed) {
     if (fp.host) g.hosts.add(fp.host);
     groups.set(fp.h, g);
   }
-  return [...groups.values()]
-    .sort((a, b) => b.tokens - a.tokens || (a.h < b.h ? -1 : 1))
-    .slice(0, DEEP_TOP_PERSONAS);
+  const all = [...groups.values()].sort((a, b) => b.tokens - a.tokens || (a.h < b.h ? -1 : 1));
+  return { rows: all.slice(0, DEEP_TOP_PERSONAS), total: all.length };
 }
 
 /**
@@ -896,6 +967,7 @@ function deepPass(entries, report, cutoffMs) {
   const typed = deepFingerprints(entries, cutoffMs);
   const shorts = shortPromptGroups(typed, TAP_MAX_TOKENS);
   const personas = personaGroups(typed);
+  const totals = { shortPrompts: shorts.total, personas: personas.total };
   const pairs = substantiveReAsks(typed);
   // A cluster's `key` IS one of its member hashes — the lexicographically
   // smallest, so it is stable across scans and needs no membership list to
@@ -904,7 +976,7 @@ function deepPass(entries, report, cutoffMs) {
   // the projection already did.
   const clusters = report.patterns.clusters.slice(0, TOP_CLUSTERS);
   const wanted = new Set([
-    ...shorts.map((g) => g.h), ...personas.map((g) => g.h), ...clusters.map((c) => c.key),
+    ...shorts.rows.map((g) => g.h), ...personas.rows.map((g) => g.h), ...clusters.map((c) => c.key),
   ]);
   const { text, bySession, cost } = collectExemplars({
     entries, cutoffMs, wanted,
@@ -913,7 +985,8 @@ function deepPass(entries, report, cutoffMs) {
   });
 
   return {
-    shortPrompts: shorts.map((g) => ({
+    totals,
+    shortPrompts: shorts.rows.map((g) => ({
       h: g.h, tokens: g.tokens, prompts: g.prompts,
       sessions: g.sessions.size, days: g.days.size, hosts: [...g.hosts].sort(),
       text: exemplarText(text, g.h),
@@ -923,7 +996,7 @@ function deepPass(entries, report, cutoffMs) {
       key: row.key, name: row.label.name, size: row.count, sessions: row.sessions,
       text: exemplarText(text, row.key),
     })),
-    personas: personas.map((g) => {
+    personas: personas.rows.map((g) => {
       const body = text.get(g.h) ?? null;
       return {
         h: g.h, tokens: g.tokens, prompts: g.prompts, sessions: g.sessions.size,
@@ -990,7 +1063,8 @@ function printPromptReport(agg, r) {
   printTypedPrompts(r.patterns, agg);
   printTaps(r.patterns, agg.totals ?? {});
   printHostInterplay(agg, r.win);
-  printClusters(r.patterns.clusters);
+  printClusters(r.patterns.clusters, agg.totals ?? {});
+  printExactRepeats(r.patterns.exactRepeats);
   printReAsks(r.patterns.reAsks);
   printHeadless(r.headless);
 }
@@ -1006,10 +1080,11 @@ function clipText(text, max) {
   return one.length > max ? `${one.slice(0, max - 1)}…` : one;
 }
 
-function printShortPrompts(rows) {
+function printShortPrompts(rows, total) {
   heading('Top short prompts');
   info(dim(`  every typed prompt of ${TAP_MAX_TOKENS} normalized tokens or fewer, by exact text`));
   if (!rows.length) return info(dim('  no samples'));
+  showingNote(rows.length, total);
   info(dim(tableRow([['n', 4, true], ['sess', 5, true], ['days', 5, true], ['hosts', 14], ['prompt', 60]])));
   for (const r of rows) {
     info(tableRow([[fmtNum(r.prompts), 4, true], [fmtNum(r.sessions), 5, true], [fmtNum(r.days), 5, true],
@@ -1039,10 +1114,11 @@ function printClusterExemplars(rows) {
   }
 }
 
-function printPersonas(rows) {
+function printPersonas(rows, total) {
   heading('Persona scaffolding');
   info(dim('  role assignments typed by hand — the text a managed prompt-fragment library would hold'));
   if (!rows.length) return info(dim('  no samples'));
+  showingNote(rows.length, total);
   info(dim(tableRow([['chars', 7, true], ['tok', 6, true], ['n', 3, true], ['hosts', 14], ['opener', 60]])));
   for (const r of rows) {
     info(tableRow([[fmtMaybe(r.chars), 7, true], [fmtNum(r.tokens), 6, true], [fmtNum(r.prompts), 3, true],
@@ -1060,10 +1136,10 @@ function printDeepPass(deep) {
       + `${fmtNum(c.unreadable)} transcript${c.unreadable === 1 ? '' : 's'} could not be re-read `
       + `(missing, or past the ${Math.round(MAX_DEEP_FILE_BYTES / 1024 / 1024)} MB read ceiling)`));
   }
-  printShortPrompts(deep.shortPrompts);
+  printShortPrompts(deep.shortPrompts, deep.totals.shortPrompts);
   printReAskPairs(deep.reAsks);
   printClusterExemplars(deep.clusters);
-  printPersonas(deep.personas);
+  printPersonas(deep.personas, deep.totals.personas);
 }
 
 async function runPrompts({ flags, deps }) {

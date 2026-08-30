@@ -498,7 +498,9 @@ test('ak usage prompts --deep --json carries exemplars under an explicit key', (
   assert.equal(deep.status, 0, deep.stderr);
   const value = JSON.parse(deep.stdout);
   assert.deepEqual(Object.keys(value.exemplars).sort(),
-    ['clusters', 'cost', 'personas', 'reAsks', 'shortPrompts']);
+    ['clusters', 'cost', 'personas', 'reAsks', 'shortPrompts', 'totals']);
+  assert.ok(value.exemplars.totals.shortPrompts >= value.exemplars.shortPrompts.length,
+    'the denominator a truncated table prints must travel with the rows');
   assert.ok(value.exemplars.reAsks.some((p) => p.ask.includes(reAsk.slice(0, 40))),
     're-ask text must reach --json at this tier, which is why the help says so');
   assert.ok(value.exemplars.cost.transcripts >= 1, 'the measured cost travels with the payload');
@@ -539,5 +541,117 @@ test('ak --help advertises the offline reports, not only the provider cache', ()
   assert.ok(line, 'the top-level help must carry a usage line');
   assert.match(line, /score/);
   assert.match(line, /prompts/);
+  fs.rmSync(sb.home, { recursive: true, force: true });
+});
+
+// ── the mask boundary, pinned on every path text can reach a terminal ───────
+// `--deep` is the only tier that prints prompt text, and `maskSecrets` is the
+// only thing standing between a pasted credential and the operator's scrollback.
+// There are FIVE distinct routes to a printed exemplar and every one masks
+// today; none was pinned, so a mask dropped from any single route would have
+// been invisible to this suite. The failure mode is a live key on screen.
+
+/** A key-shaped string `maskSecrets` recognises (`\bsk-[A-Za-z0-9_-]{12,}`),
+ *  with a tail no other fixture or source file contains — so asserting the
+ *  tail absent from stdout proves the RAW value never reached it, and cannot
+ *  be satisfied by the masked form, which keeps the `sk-` prefix. */
+const FIXTURE_SECRET = 'sk-ant-api03-ZZTESTFIXTUREKEY0000000000';
+const SECRET_TAIL = 'ZZTESTFIXTUREKEY';
+const MASKED = 'sk-…redacted';
+
+/** A corpus that routes one secret through all five exemplar paths.
+ *
+ *  The fifth — `deepReAskRow`'s fallback, taken when the pair's own session
+ *  could not be re-read — needs a transcript that survives in the index but
+ *  fails to open. The test turns `mask-fallback.jsonl` into a DIRECTORY after
+ *  the cache is warm: discovery skips it (`listClaude` requires `isFile`),
+ *  carry-forward keeps its cached record (`statSafe` succeeds on a directory),
+ *  and `readFileSync` throws EISDIR — portable, and true for every user,
+ *  unlike a chmod that root would ignore. Its two prompts are PERSONA-shaped
+ *  so both their hashes are in the wanted set and resolve from the readable
+ *  twins below, which is what makes the fallback print masked text rather
+ *  than 'transcript unavailable'. */
+function writeMaskCorpus(sb) {
+  const dir = path.join(sb.home, '.claude', 'projects', '-tmp-mask-fixture');
+  fs.mkdirSync(dir, { recursive: true });
+  const file = (id) => path.join(dir, `${id}.jsonl`);
+  const write = (id, prompts) => {
+    const at = Date.now() - 3_600_000;
+    const lines = [];
+    prompts.forEach((text, i) => {
+      lines.push(promptTurn(id, at + i * 20_000, text), replyTurn(id, at + i * 20_000 + 10_000));
+    });
+    fs.writeFileSync(file(id), lines.join('\n') + '\n');
+  };
+  const rotate = `Rotate ${FIXTURE_SECRET} in the deploy vault`;
+  const persona = `You are a release bot. Publish with ${FIXTURE_SECRET} now`;
+  // 1 — short prompts: the whole prompt is the key, one normalized token.
+  write('mask-short-1', [FIXTURE_SECRET]);
+  write('mask-short-2', [FIXTURE_SECRET]);
+  // 2 — cluster exemplars: a recurring family, three sessions.
+  write('mask-cluster-1', [rotate]);
+  write('mask-cluster-2', [`${rotate} today`]);
+  write('mask-cluster-3', [rotate]);
+  // 3 — persona openers, and the readable twins the fallback resolves through.
+  write('mask-persona-1', [persona]);
+  write('mask-persona-2', [`${persona} please`]);
+  // 4 — a re-ask whose own session IS readable, so both halves are located.
+  write('mask-reask', [
+    `Publish ${FIXTURE_SECRET} to the internal registry`,
+    `Publish ${FIXTURE_SECRET} to the internal registry again`,
+  ]);
+  // 5 — the fallback: same two persona texts, one session, this file goes away.
+  write('mask-fallback', [persona, `${persona} please`]);
+  return { fallbackFile: file('mask-fallback') };
+}
+
+/** The lines of one `--deep` section, up to the next section heading. */
+function section(stdout, title) {
+  const lines = stdout.split('\n');
+  const start = lines.findIndex((l) => l.trim() === title);
+  assert.notEqual(start, -1, `no ${JSON.stringify(title)} section in output`);
+  const rest = lines.slice(start + 1);
+  const end = rest.findIndex((l) => /^[A-Z][a-z]/.test(l) && !l.startsWith('ℹ'));
+  return (end === -1 ? rest : rest.slice(0, end)).join('\n');
+}
+
+test('ak usage prompts --deep masks secrets on every path text can reach the terminal', () => {
+  const sb = sandbox();
+  const { fallbackFile } = writeMaskCorpus(sb);
+  // Warm the index while the fallback transcript is still a readable file.
+  assert.equal(ak(['usage', 'prompts'], sb).status, 0);
+  fs.rmSync(fallbackFile);
+  fs.mkdirSync(fallbackFile);
+
+  const result = ak(['usage', 'prompts', '--deep'], sb);
+  assert.equal(result.status, 0, result.stderr);
+
+  // The whole-output claim first: the raw key never reaches a terminal at all.
+  assert.equal(result.stdout.includes(SECRET_TAIL), false,
+    'the raw key reached stdout — a mask was dropped somewhere on the deep path');
+
+  // …then each path individually, so a mask dropped from ONE of them fails here
+  // rather than hiding behind the others.
+  for (const title of ['Top short prompts', 'Cluster exemplars', 'Persona scaffolding']) {
+    assert.ok(section(result.stdout, title).includes(MASKED),
+      `${title} did not render the masked key — the exemplarText path is unpinned there`);
+  }
+
+  const reAsks = section(result.stdout, 'Re-ask pairs');
+  const located = reAsks.split('\n').filter((l) => l.includes('min apart'));
+  assert.ok(located.length, `no located re-ask row in:\n${reAsks}`);
+  const askLines = reAsks.split('\n').filter((l) => l.includes('ask   '));
+  const againLines = reAsks.split('\n').filter((l) => l.includes('again '));
+  assert.ok(askLines.some((l) => l.includes(MASKED)), 'the located ask is unmasked');
+  assert.ok(againLines.some((l) => l.includes(MASKED)), 'the located re-ask is unmasked');
+
+  // The fallback sub-path: the pair's own transcript could not be re-read, so
+  // the text came from `exemplarText` against another session — still masked.
+  const notLocated = reAsks.split('\n').findIndex((l) => l.includes('timing not located'));
+  assert.notEqual(notLocated, -1,
+    `the unreadable transcript must produce an unlocated pair:\n${reAsks}`);
+  assert.ok(reAsks.split('\n')[notLocated + 1].includes(MASKED),
+    'the fallback ask is unmasked — exemplarText was reached without maskSecrets');
+
   fs.rmSync(sb.home, { recursive: true, force: true });
 });
