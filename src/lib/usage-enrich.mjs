@@ -28,6 +28,7 @@
 import { evidenceHash } from './usage-evidence-hash.mjs';
 import { maskSecrets } from './usage-aggregate.mjs';
 import { isValidLabelName } from './usage-label-store.mjs';
+import { withStoreLabel } from './usage-prompt-vocabulary.mjs';
 
 /** Spec §6.3: settled labels are never re-judged. A candidate is a cluster
  *  with NO store entry (label source would be 'curated' or 'enriched' if it
@@ -351,4 +352,79 @@ export async function synthesizeCards({ findingsSummary, invoke, now }) {
   return {
     cards, proposed: parsed.length, accepted: cards.length, dropped,
   };
+}
+
+// ── shared read-path wiring (CLI + dashboard, deliverable §5) ─────────────
+// The three functions below are what let a PERSISTED store (usage-label-
+// store.mjs's file on disk) actually reach a render, on EVERY pass — not
+// only a pass that just ran `--enrich`. Both `ak usage prompts` and the
+// dashboard's `/api/usage` handler call all three, in this order, so the
+// two surfaces can never disagree about what a stored label/card currently
+// means: apply the label store, hydrate stored cards into the ledger's
+// `cards` input, then — once `reconcile` has run — mark staleness.
+
+/**
+ * Re-resolves every cluster in a `promptPatterns` projection against a real
+ * label store — equivalent to having threaded the store through at
+ * aggregate-build time (see `withStoreLabel`'s own doc for why this is
+ * exact, not an approximation). `promptPatterns` may be `null` (the window
+ * did not request `prompts: true`) or carry no `clusters` at all; both pass
+ * through unchanged rather than being reshaped into an empty projection.
+ *
+ * @param {{ clusters?: Array<object> }|null} promptPatterns
+ * @param {Record<string, object>} [labels]
+ * @returns {object|null}
+ */
+export function applyLabelStoreToPatterns(promptPatterns, labels) {
+  if (!promptPatterns || !Array.isArray(promptPatterns.clusters) || !promptPatterns.clusters.length) {
+    return promptPatterns;
+  }
+  return { ...promptPatterns, clusters: promptPatterns.clusters.map((c) => withStoreLabel(c, labels)) };
+}
+
+/**
+ * A persisted card store entry, restored to the `CoachingCard` shape
+ * `reconcile` expects — so an enriched card already on disk rejoins the
+ * ledger on EVERY pass (spec: "Enriched cards join reconcile exactly like
+ * rule cards"), not only the pass that synthesized it. The ledger tracks
+ * this card's LIFECYCLE (usage-outcome-ledger.mjs); this function only
+ * restores its CONTENT, which the ledger has never held.
+ *
+ * @param {Record<string, { title: string, finding: string, try: string,
+ *   basis: string, basisNumbers: number[], evidenceHash: string,
+ *   generatedAt: string }>} [cardsStore]
+ * @returns {Array<object>} CoachingCard-shaped objects, `source: 'enriched'`
+ */
+export function hydrateStoredCards(cardsStore) {
+  return Object.entries(cardsStore ?? {}).map(([id, entry]) => ({
+    id,
+    title: entry.title,
+    finding: entry.finding,
+    try: entry.try,
+    basis: entry.basis,
+    basisNumbers: entry.basisNumbers,
+    evidenceHash: entry.evidenceHash,
+    generatedAt: entry.generatedAt,
+    source: 'enriched',
+  }));
+}
+
+/**
+ * Patches `.stale` onto every ENRICHED card in an already-reconciled array,
+ * MUTATING it in place and returning it for chaining. This must run AFTER
+ * `reconcile` — `usage-outcome-ledger.mjs`'s `annotate` unconditionally sets
+ * `stale: false` on every card it returns (correct for a rule card, which
+ * recomputes fresh every pass and so never drifts — see that module's own
+ * doc), which would silently overwrite whatever this function set if called
+ * before. A rule card (`source !== 'enriched'`) is left untouched.
+ *
+ * @param {Array<{ source?: string, basisNumbers?: number[], evidenceHash?: string, stale?: boolean }>} cards
+ * @param {object} findingsSummary current findings, same shape buildFindingsSummary returns
+ * @returns {Array<object>}
+ */
+export function applyCardStaleness(cards, findingsSummary) {
+  for (const card of cards ?? []) {
+    if (card?.source === 'enriched') card.stale = isCardStale(card, findingsSummary);
+  }
+  return cards;
 }

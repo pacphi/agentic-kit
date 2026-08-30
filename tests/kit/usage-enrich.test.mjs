@@ -12,6 +12,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   enrichLabels, synthesizeCards, buildFindingsSummary, citedEvidenceHash, isCardStale,
+  applyLabelStoreToPatterns, hydrateStoredCards, applyCardStaleness,
 } from '../../src/lib/usage-enrich.mjs';
 import { withStoreLabel } from '../../src/lib/usage-prompt-vocabulary.mjs';
 import { loadLabelStore, saveLabelStore } from '../../src/lib/usage-label-store.mjs';
@@ -438,6 +439,66 @@ test('INTEGRATION: real aggregate -> candidate selection -> fake invoke -> label
   assert.equal(after.label.name, 'Integration-named cluster');
   assert.equal(after.label.source, 'enriched');
   fs.rmSync(dir, { recursive: true, force: true });
+});
+
+// ── shared read-path wiring (CLI + dashboard, deliverable §5) ─────────────
+
+test('applyLabelStoreToPatterns re-resolves every cluster, unchanged when the store has nothing for it', () => {
+  const pp = { clusters: [cluster({ key: 'k1' }), cluster({ key: 'k2', label: { name: 'Release ritual', source: 'seed' } })] };
+  const store = { k1: { name: 'A person named this', source: 'curated', firstSeen: '2026-01-01T00:00:00.000Z' } };
+  const out = applyLabelStoreToPatterns(pp, store);
+  assert.equal(out.clusters[0].label.name, 'A person named this');
+  assert.equal(out.clusters[0].label.source, 'curated');
+  assert.equal(out.clusters[1].label.name, 'Release ritual', 'a seed match with no store entry is untouched');
+  assert.equal(out.clusters[1].label.source, 'seed');
+});
+
+test('applyLabelStoreToPatterns passes null/empty patterns through unchanged', () => {
+  assert.equal(applyLabelStoreToPatterns(null, {}), null);
+  const empty = { clusters: [] };
+  assert.equal(applyLabelStoreToPatterns(empty, {}), empty);
+});
+
+test('hydrateStoredCards restores CoachingCard shape, keyed id becomes the card id, source is enriched', () => {
+  const store = {
+    'enriched-foo': {
+      title: 'Foo', finding: 'Bar happened 3 times.', try: 'Do X.', basis: '3 occurrences.',
+      basisNumbers: [3], evidenceHash: 'a'.repeat(16), generatedAt: '2026-08-01T00:00:00.000Z',
+    },
+  };
+  const [card] = hydrateStoredCards(store);
+  assert.equal(card.id, 'enriched-foo');
+  assert.equal(card.source, 'enriched');
+  assert.equal(card.title, 'Foo');
+  assert.deepEqual(card.basisNumbers, [3]);
+});
+
+test('hydrateStoredCards on an empty/absent store yields an empty array', () => {
+  assert.deepEqual(hydrateStoredCards({}), []);
+  assert.deepEqual(hydrateStoredCards(undefined), []);
+});
+
+test('applyCardStaleness marks a fresh enriched card not-stale and leaves a rule card untouched', () => {
+  const fresh = {
+    id: 'enriched-fresh', source: 'enriched', basisNumbers: [13, 11, 9],
+    evidenceHash: citedEvidenceHash(FINDINGS_SUMMARY, [13, 11, 9]),
+  };
+  const rule = { id: 'commit-push-claude-md', stale: false };
+  const cards = [fresh, rule];
+  applyCardStaleness(cards, FINDINGS_SUMMARY);
+  assert.equal(fresh.stale, false, 'the same findingsSummary it was synthesized against — nothing moved');
+  assert.equal(rule.stale, false, 'a rule card is untouched (still whatever the ledger already set) — this function never writes to a non-enriched card');
+});
+
+test('applyCardStaleness detects real drift once a fresh enriched card\'s evidence moves', () => {
+  const card = {
+    id: 'enriched-x', source: 'enriched', basisNumbers: [13, 11, 9],
+    evidenceHash: citedEvidenceHash(FINDINGS_SUMMARY, [13, 11, 9]),
+  };
+  const cards = [card];
+  const movedSummary = { ...FINDINGS_SUMMARY, clusters: [{ ...FINDINGS_SUMMARY.clusters[0], count: 30 }] };
+  applyCardStaleness(cards, movedSummary);
+  assert.equal(card.stale, true);
 });
 
 test('INTEGRATION: one enriched card flows through reconcile exactly like a rule card', async () => {
