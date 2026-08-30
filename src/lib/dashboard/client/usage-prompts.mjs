@@ -633,20 +633,37 @@ export function reAskPanel(p) {
  *  reports `false` — see its doc for why); the class still reads `data-status`
  *  off the raw value so a future enriched card's real staleness needs no
  *  markup change here, only a style for it. */
+/** Every value interpolated here — including `status` itself, which
+ *  originates in the on-disk ledger JSON — is escaped (Fix round 1, I-5): the
+ *  attribute copy was already escaped, but the text-node copy was not, so a
+ *  hostile `status` value (reachable only with write access to
+ *  `~/.config/agentic-kit`, but still) rendered as live markup rather than
+ *  text. `30d basis` mirrors the CLI's suffix (Fix round 1, C-1) — both
+ *  numbers in `deltaText`/`refutation` always come from the canonical 30-day
+ *  aggregate, never whatever window the dashboard is currently showing. */
 function coachingStatusChip(card) {
   var status = card.status || 'proposed';
-  var label = status;
+  var label = esc(status);
   if (status === 'adopted') {
     label = 'adopted ✓';
     if (card.outcome) {
       label += card.outcome.improved
-        ? ' — ' + esc(card.outcome.deltaText)
-        : ' — too early to tell (' + esc(card.outcome.deltaText) + ')';
+        ? ' — ' + esc(card.outcome.deltaText) + ' (30d basis)'
+        : ' — too early to tell (' + esc(card.outcome.deltaText) + ' (30d basis))';
     }
   } else if (status === 'retired' && card.refutation) {
-    label = 'retired — did not improve: ' + esc(card.refutation);
+    label = 'retired — did not improve: ' + esc(card.refutation) + ' (30d basis)';
   }
   return '<span class="pr-card-status" data-status="' + esc(status) + '">' + label + '</span>';
+}
+
+/** `generatedAt` + the first 8 hex chars of `evidenceHash`, as a dim trailing
+ *  line (Fix round 1, M-3) — spec §5 makes a point of every card carrying
+ *  both; before this fix they existed on the object and in the payload but
+ *  reached no rendered card on either surface. */
+function coachingAsOfLine(card) {
+  var hash = typeof card.evidenceHash === 'string' ? card.evidenceHash.slice(0, 8) : '';
+  return '<p class="pr-card-asof mono">as of ' + esc(card.generatedAt) + ' · ' + esc(hash) + '</p>';
 }
 
 /** The draft affordance: rendered text in a `<pre>`, never a clipboard API —
@@ -679,6 +696,7 @@ function coachingCard(card) {
     + '<p class="pr-card-basis">' + esc(card.basis) + '</p>'
     + coachingDraftBlock(card.draft)
     + coachingDismissHint(card)
+    + coachingAsOfLine(card)
     + '</div>';
 }
 
@@ -708,6 +726,10 @@ export function coachingPanel(p) {
   if (!c) {
     return '<div class="empty">coaching needs a rescan to compute &mdash; it will appear once the '
       + 'server has re-derived this window.</div>';
+  }
+  if (c.unavailable) {
+    return '<div class="empty">coaching is unavailable this poll &mdash; ' + esc(c.reason || 'unknown reason')
+      + '.</div>';
   }
   var cards = Array.isArray(c.cards) ? c.cards : [];
   if (!cards.length) {

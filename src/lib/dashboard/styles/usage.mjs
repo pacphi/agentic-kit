@@ -863,6 +863,7 @@ export const USAGE_CSS = `
 }
 .pr-card-dismiss-hint{margin:8px 0 0; font-size:11px; color:var(--ink-dim)}
 .pr-card-dismiss-hint code{font-family:var(--mono); font-size:10.5px; color:var(--ink-2)}
+.pr-card-asof{margin:8px 0 0; font-size:10px; color:var(--ink-dim)}
 .pr-card-ledger{margin:2px 0 0; font-size:11px; color:var(--ink-dim)}
 
 `;

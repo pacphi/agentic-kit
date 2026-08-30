@@ -131,7 +131,16 @@ function eventually(predicate, message, timeout = 1500) {
 }
 
 async function main() {
-  const { startDashboard } = await import('file://' + MOD);
+  const { startDashboard: realStartDashboard } = await import('file://' + MOD);
+  // Fix round 1, I-6: every /api/usage route now also computes coaching
+  // (dashboard-server.mjs's dashboardCoachingPayload), which by default
+  // reads the REAL ~/.config/agentic-kit ledger — the exact hazard `usage`/
+  // `limits` are already injected against throughout this file. A blank
+  // in-memory ledger keeps every call in this suite hermetic; wrapping
+  // startDashboard itself (rather than editing ~26 call sites) means no
+  // future call site can reintroduce the gap by omission.
+  const NULL_COACHING_LEDGER = { loadLedger: () => ({ version: 1, records: [] }), ledgerPath: '/dev/null/unused' };
+  const startDashboard = (opts = {}) => realStartDashboard({ coachingLedger: NULL_COACHING_LEDGER, ...opts });
 
   const STUB_STATUS = {
     overall: 'warn',

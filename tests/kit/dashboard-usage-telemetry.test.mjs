@@ -1,6 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { JS } from '../../src/lib/dashboard/client.mjs';
 import { renderPage } from '../../src/lib/dashboard/page.mjs';
 import { CSS } from '../../src/lib/dashboard/styles.mjs';
@@ -8,6 +11,7 @@ import { startDashboard } from '../../src/lib/dashboard-server.mjs';
 import { aggregate } from '../../src/lib/usage-aggregate.mjs';
 import { blankSession, addUsage, notePromptFingerprint } from '../../src/lib/usage-parsers.mjs';
 import { MODES } from '../../src/lib/usage-modes.mjs';
+import { loadLedger as realLoadLedger, saveLedger as realSaveLedger } from '../../src/lib/usage-outcome-ledger.mjs';
 import {
   deltaChip, sparklineSvg, histogram, stackedDays, donut2, rankedRows,
   bucketPercentile, bucketPositionPct,
@@ -385,6 +389,50 @@ test('/api/usage carries a coaching payload shaped {cards, summary}, computed re
   assert.ok(Array.isArray(prompts.coaching.cards));
   assert.deepEqual(prompts.coaching.summary, { proposed: 0, adopted: 0, dismissed: 0, expired: 0, retired: 0 },
     'PROMPT_RECORDS fires none of the six v1 rules, so the ledger summary must be all zeros, not absent');
+});
+
+// Fix round 1, M-8: dashboardCoachingPayload genuinely cannot save (it never
+// imports saveLedger) — this pins the READ-ONLY CONTRACT directly, on a REAL
+// ledger file with a REAL record, across several polls, rather than only
+// incidentally via a bogus ledgerPath that would throw if ever written to.
+test('M-8: the ledger file\'s bytes are byte-for-byte unchanged after several /api/usage polls', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-dash-m8-'));
+  const ledgerPath = path.join(dir, 'usage-outcome-ledger.json');
+  realSaveLedger(ledgerPath, {
+    version: 1,
+    records: [{
+      id: 'commit-push-claude-md', evidenceHash: 'a'.repeat(16), status: 'dismissed',
+      generatedAt: '2026-08-01T00:00:00.000Z', statusAt: '2026-08-01T00:00:00.000Z',
+      baseline: { count: 12, clusterKey: 'k', sessions: 8, days: 4 }, windowDays: 30, dismissCount: 1,
+    }],
+  });
+  const before = fs.readFileSync(ledgerPath);
+
+  const calls = [];
+  const srv = await startDashboard({
+    port: 0, fetchStatus: async () => ({ overall: 'ok', rows: [] }),
+    usage: { readIndex: spyReadIndex(PROMPT_RECORDS, calls) },
+    coachingLedger: { loadLedger: realLoadLedger, ledgerPath },
+  });
+  try {
+    for (let i = 0; i < 3; i++) {
+      const r = await get(`${srv.url}api/usage?days=7`, srv.token);
+      assert.equal(r.status, 200, `expected 200, got ${r.status}`);
+      const { coaching } = JSON.parse(r.body).prompts;
+      // PROMPT_RECORDS fires none of the six v1 rules (see the payload-shape
+      // test above), so the dismissed record has no live card to annotate
+      // this pass — but it survives untouched in the ledger the summary
+      // counts, which is what proves the poll actually READ the real file
+      // rather than a stub that returns an empty ledger.
+      assert.equal(coaching.summary.dismissed, 1, 'the poll must read the REAL ledger, not a no-op stub');
+    }
+  } finally {
+    await srv.close();
+  }
+
+  const after = fs.readFileSync(ledgerPath);
+  assert.ok(before.equals(after), 'the ledger file must be byte-for-byte unchanged after multiple dashboard polls');
+  fs.rmSync(dir, { recursive: true, force: true });
 });
 
 test('the projection reaches the payload with its published shape', async () => {
@@ -1000,11 +1048,14 @@ test('coachingPanel status chips: proposed, adopted (+ outcome line), dismissed,
   assert.match(adoptedNoOutcome, /adopted ✓/);
   assert.doesNotMatch(adoptedNoOutcome, /since adoption/, 'no outcome measured yet must not fabricate a delta');
 
+  // Fix round 1, C-1: outcome/refutation lines carry "(30d basis)" — both
+  // numbers always come from the canonical 30-day aggregate, never whatever
+  // window the dashboard is currently showing.
   const improved = coachingPanel({ coaching: { cards: [coachingCard({ status: 'adopted', outcome: { improved: true, deltaText: '12 → 2 since adoption' } })] } });
-  assert.match(improved, /adopted ✓ — 12 → 2 since adoption/);
+  assert.match(improved, /adopted ✓ — 12 → 2 since adoption \(30d basis\)/);
 
   const pending = coachingPanel({ coaching: { cards: [coachingCard({ status: 'adopted', outcome: { improved: false, deltaText: '12 → 11 since adoption' } })] } });
-  assert.match(pending, /too early to tell \(12 → 11 since adoption\)/);
+  assert.match(pending, /too early to tell \(12 → 11 since adoption \(30d basis\)\)/);
 
   const dismissed = coachingPanel({ coaching: { cards: [coachingCard({ status: 'dismissed' })] } });
   assert.match(dismissed, /data-status="dismissed"/);
@@ -1013,7 +1064,39 @@ test('coachingPanel status chips: proposed, adopted (+ outcome line), dismissed,
   assert.match(expired, /data-status="expired"/);
 
   const retired = coachingPanel({ coaching: { cards: [coachingCard({ status: 'retired', refutation: '12 → 13 since adoption' })] } });
-  assert.match(retired, /retired — did not improve: 12 → 13 since adoption/);
+  assert.match(retired, /retired — did not improve: 12 → 13 since adoption \(30d basis\)/);
+});
+
+// Fix round 1, I-5: `status` originates in the on-disk ledger JSON and was
+// escaped in the attribute copy but not the text-node copy — a hostile
+// status value rendered as live markup. Extended (per the review) to
+// outcome.deltaText and refutation too.
+test('coachingPanel escapes status, outcome.deltaText, and refutation — none render as live markup', () => {
+  const hostileStatus = coachingPanel({
+    coaching: { cards: [coachingCard({ status: '<img src=x onerror=alert(1)>' })] },
+  });
+  assert.doesNotMatch(hostileStatus, /<img/);
+  assert.match(hostileStatus, /&lt;img/);
+
+  const hostileDelta = coachingPanel({
+    coaching: { cards: [coachingCard({ status: 'adopted', outcome: { improved: true, deltaText: '<script>alert(2)</script>' } })] },
+  });
+  assert.doesNotMatch(hostileDelta, /<script>alert\(2\)/);
+  assert.match(hostileDelta, /&lt;script&gt;/);
+
+  const hostileRefutation = coachingPanel({
+    coaching: { cards: [coachingCard({ status: 'retired', refutation: '<svg onload=alert(3)>' })] },
+  });
+  assert.doesNotMatch(hostileRefutation, /<svg onload/);
+  assert.match(hostileRefutation, /&lt;svg onload/);
+});
+
+// Fix round 1, M-3: generatedAt + the first 8 hash chars render as a dim
+// trailing line on every card — before this fix they existed on the
+// payload but reached no rendered card.
+test('coachingPanel renders the as-of stamp and evidence-hash prefix on every card', () => {
+  const html = coachingPanel({ coaching: { cards: [coachingCard({ evidenceHash: 'deadbeef01234567' })] } });
+  assert.match(html, /<p class="pr-card-asof mono">as of 2026-08-29T00:00:00\.000Z · deadbeef<\/p>/);
 });
 
 test('coachingPanel renders a draft card\'s text inside a <pre>, and omits the block when there is no draft', () => {
@@ -1042,6 +1125,27 @@ test('coachingPanel names the absent-coaching state rather than rendering nothin
   const empty = coachingPanel({ coaching: { cards: [], summary: { proposed: 0, adopted: 0, dismissed: 0, expired: 0, retired: 0 } } });
   assert.match(empty, /no coaching card met its evidence bar/);
   assert.doesNotMatch(empty, /class="kpi"/);
+});
+
+// Fix round 1, I-2: a future-schema ledger (or a failed canonical-window
+// read) renders a named reason, not an empty section or the "no card met
+// its evidence bar" clean-result message (which would misleadingly imply
+// coaching WAS computed and simply found nothing).
+test('coachingPanel names the unavailable state with its reason, distinctly from "no cards fired"', () => {
+  const html = coachingPanel({
+    coaching: { cards: [], summary: null, unavailable: true, reason: 'ledger schema v2 is newer than this build (v1)' },
+  });
+  assert.match(html, /coaching is unavailable this poll/);
+  assert.match(html, /ledger schema v2 is newer than this build \(v1\)/);
+  assert.doesNotMatch(html, /no coaching card met its evidence bar/);
+});
+
+test('coachingPanel escapes the unavailable reason', () => {
+  const html = coachingPanel({
+    coaching: { cards: [], summary: null, unavailable: true, reason: '<img src=x onerror=alert(1)>' },
+  });
+  assert.doesNotMatch(html, /<img/);
+  assert.match(html, /&lt;img/);
 });
 
 test('coachingPanel escapes every card field — no raw HTML from the payload reaches the DOM', () => {
