@@ -1320,3 +1320,63 @@ test('I-7 ADVERSARIAL: a model that answers every label with a raw secret is mas
   fs.rmSync(sb.home, { recursive: true, force: true });
   fs.rmSync(shimDir, { recursive: true, force: true });
 });
+
+// ── Fix round 2: I-8/M-8 ────────────────────────────────────────────────────
+
+/** A store this build never writes: one card missing `basisNumbers` (the
+ *  exact shape isCardStale deliberately throws on) and one label with a
+ *  blank name (never a valid store entry — isValidLabelName rejects it).
+ *  Reaching this requires an out-of-band edit, a hand-recovered file,
+ *  another build, or corruption that still parses as JSON. */
+function writeBrokenLabelStoreFixture(sb) {
+  const file = labelStoreFile(sb);
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, JSON.stringify({
+    version: 1,
+    labels: {
+      blankname: { name: '', source: 'enriched', firstSeen: '2026-08-01T00:00:00.000Z' },
+    },
+    cards: {
+      'enriched-broken': {
+        title: 'Broken card', finding: 'X happened.', try: 'Do X.', basis: 'X basis.',
+        evidenceHash: 'a'.repeat(16), generatedAt: '2026-08-01T00:00:00.000Z',
+      },
+    },
+    lastSynthesis: null,
+  }, null, 2));
+}
+
+test('I-8/M-8: a malformed stored card (no basisNumbers) and a blank-name label no longer crash the command, plain or --enrich', () => {
+  const sb = sandbox();
+  writePromptsCorpus(sb);
+  writeBrokenLabelStoreFixture(sb);
+
+  // Plain pass: exercises applyCardStaleness (usage-enrich.mjs), which fires
+  // on EVERY pass, --enrich or not — the review's first crash site.
+  const plain = ak(['usage', 'prompts', '--window', '30'], sb);
+  assert.equal(plain.status, 0, plain.stderr);
+  assert.match(plain.stdout, /Recurring clusters/, 'the normal deterministic report still renders');
+  assert.match(plain.stdout, /Coaching/);
+  assert.doesNotMatch(plain.stdout, /TypeError/);
+  assert.doesNotMatch(plain.stderr, /TypeError/);
+
+  // --enrich pass: exercises runEnrichPass's OWN isCardStale call
+  // (usage/enrich.mjs), added in fix round 1 and sitting OUTSIDE the C-1
+  // try/catch — the review's second, newly-introduced crash site.
+  const shimDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-claude-shim-'));
+  writeClaudeShim(shimDir);
+  const enriched = ak(['usage', 'prompts', '--window', '30', '--enrich'], sb, { PATH: enrichPath(sb, shimDir) });
+  assert.equal(enriched.status, 0, enriched.stderr);
+  assert.doesNotMatch(enriched.stdout, /TypeError/);
+  assert.doesNotMatch(enriched.stderr, /TypeError/);
+
+  // Dropped on load, and not resurrected by the --enrich pass's own write.
+  const stored = JSON.parse(fs.readFileSync(labelStoreFile(sb), 'utf8'));
+  assert.equal(stored.labels.blankname, undefined,
+    'the blank-name label must not survive, nor be resurrected by the --enrich write');
+  assert.equal(stored.cards['enriched-broken'], undefined,
+    'the malformed card must not survive, nor be resurrected by the --enrich write');
+
+  fs.rmSync(sb.home, { recursive: true, force: true });
+  fs.rmSync(shimDir, { recursive: true, force: true });
+});

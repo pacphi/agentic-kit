@@ -1335,12 +1335,24 @@ test('coachingPanel escapes the unavailable reason', () => {
 });
 
 test('coachingPanel escapes every card field — no raw HTML from the payload reaches the DOM', () => {
+  // Fix round 2, M-10: extended to try/basis — the code already escaped both
+  // (usage-prompts.mjs:733-734, confirmed in fix round 1), only the pin was
+  // missing, and it matters more now that this prose is model-authored
+  // rather than a developer constant.
   const html = coachingPanel({
-    coaching: { cards: [coachingCard({ title: '<img src=x onerror=alert(1)>', finding: '<script>alert(2)</script>' })] },
+    coaching: {
+      cards: [coachingCard({
+        title: '<img src=x onerror=alert(1)>', finding: '<script>alert(2)</script>',
+        try: '<svg onload=alert(3)>', basis: '<a href=javascript:alert(4)>basis</a>',
+      })],
+    },
   });
   assert.doesNotMatch(html, /<img/);
   assert.doesNotMatch(html, /<script>/);
+  assert.doesNotMatch(html, /<svg/);
+  assert.doesNotMatch(html, /<a href=javascript:/);
   assert.match(html, /&lt;img/);
+  assert.match(html, /&lt;svg/);
 });
 
 // Structural by necessity: these assert what the SERVED DOCUMENT contains, so

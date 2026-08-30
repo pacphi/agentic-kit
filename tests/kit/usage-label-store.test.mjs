@@ -105,6 +105,110 @@ test('loadLabelStore reports a well-formed FUTURE version distinctly from a corr
   assert.deepEqual(JSON.parse(fs.readFileSync(file, 'utf8')), futureStore);
 });
 
+// ── Fix round 2, I-8/M-8: load-side sanitization ────────────────────────────
+// loadLabelStore used to return raw.labels/raw.cards VERBATIM — the same
+// entry validation saveLabelStore has always applied on write never ran on
+// read. This build never WRITES a malformed entry, so reaching one required
+// an out-of-band edit, a hand-recovered file, another build, or corruption
+// that still parses as JSON — but when it happened, a card missing
+// basisNumbers reached isCardStale (which deliberately THROWS for that
+// shape) and crashed the whole command, `--enrich` or not (I-8); and a label
+// entry with a blank name still read back as a real store entry, so
+// labelCandidates' bare-key-presence check permanently excluded its cluster
+// from ever being offered to enrichLabels again (M-8).
+
+test('loadLabelStore drops a card entry missing basisNumbers rather than returning it verbatim (I-8), and counts the drop', () => {
+  const file = tmpFile();
+  fs.writeFileSync(file, JSON.stringify({
+    version: LABEL_STORE_SCHEMA_VERSION,
+    labels: {},
+    cards: {
+      'enriched-broken': {
+        title: 'Broken card', finding: 'Something happened.', try: 'Do X.', basis: 'Some basis.',
+        // basisNumbers deliberately absent — the exact shape isCardStale throws on.
+        evidenceHash: 'a'.repeat(16), generatedAt: '2026-08-01T00:00:00.000Z',
+      },
+      'enriched-fine': {
+        title: 'Fine card', finding: 'This happened 3 times.', try: 'Do Y.', basis: '3 occurrences.',
+        basisNumbers: [3], evidenceHash: 'b'.repeat(16), generatedAt: '2026-08-01T00:00:00.000Z',
+      },
+    },
+  }));
+  const loaded = loadLabelStore(file);
+  assert.deepEqual(Object.keys(loaded.cards), ['enriched-fine'], 'the malformed card is dropped; the well-formed sibling survives');
+  assert.equal(loaded.dropped?.cards, 1);
+  assert.equal(loaded.dropped?.labels, 0);
+});
+
+test('loadLabelStore drops a label entry with a blank name rather than returning it verbatim (M-8), and counts the drop', () => {
+  const file = tmpFile();
+  fs.writeFileSync(file, JSON.stringify({
+    version: LABEL_STORE_SCHEMA_VERSION,
+    labels: {
+      blankname: { name: '', source: 'enriched', firstSeen: '2026-08-01T00:00:00.000Z' },
+      k1: { name: 'A real label', source: 'enriched', firstSeen: '2026-08-01T00:00:00.000Z' },
+    },
+    cards: {},
+  }));
+  const loaded = loadLabelStore(file);
+  assert.deepEqual(Object.keys(loaded.labels), ['k1'], 'the blank-name entry is dropped; the well-formed sibling survives');
+  assert.equal(loaded.dropped?.labels, 1);
+  assert.equal(loaded.dropped?.cards, 0);
+  // M-8's actual failure mode: the orphaned key must read back as absent —
+  // labelCandidates' `!store?.[c.key]` clause needs `undefined` here, not a
+  // truthy-but-useless entry, or the cluster stays permanently excluded.
+  assert.equal(loaded.labels.blankname, undefined);
+});
+
+test('loadLabelStore reports no `dropped` key at all when nothing was invalid — matching the optional `future` convention', () => {
+  const file = tmpFile();
+  fs.writeFileSync(file, JSON.stringify({
+    version: LABEL_STORE_SCHEMA_VERSION,
+    labels: { k1: { name: 'Fine', source: 'curated', firstSeen: null } },
+    cards: {},
+  }));
+  const loaded = loadLabelStore(file);
+  assert.equal('dropped' in loaded, false, 'a happy-path load must not grow a new key every caller has to account for');
+});
+
+test('a dropped entry is never resurrected: the on-disk file after a save reflects only what loadLabelStore actually returned', () => {
+  const file = tmpFile();
+  fs.writeFileSync(file, JSON.stringify({
+    version: LABEL_STORE_SCHEMA_VERSION,
+    labels: { blankname: { name: '', source: 'enriched', firstSeen: '2026-08-01T00:00:00.000Z' } },
+    cards: {
+      'enriched-broken': {
+        title: 'Broken', finding: 'X happened.', try: 'Do X.', basis: 'X basis.',
+        evidenceHash: 'a'.repeat(16), generatedAt: '2026-08-01T00:00:00.000Z',
+      },
+    },
+  }));
+  const loaded = loadLabelStore(file);
+  // The exact merge shape runEnrichPass uses: spread the loaded store,
+  // possibly add new entries (none here — simulating a pass that found
+  // nothing new to label/synthesize), then save.
+  saveLabelStore(file, { version: loaded.version, labels: { ...loaded.labels }, cards: { ...loaded.cards } });
+  const onDisk = JSON.parse(fs.readFileSync(file, 'utf8'));
+  assert.deepEqual(onDisk.labels, {}, 'the blank-name label must not reappear after a save that only ever saw the sanitized load');
+  assert.deepEqual(onDisk.cards, {}, 'the malformed card must not reappear either');
+});
+
+test('loadLabelStore sanitizes a FUTURE-version store\'s labels/cards too, not only the current version', () => {
+  const file = tmpFile();
+  fs.writeFileSync(file, JSON.stringify({
+    version: LABEL_STORE_SCHEMA_VERSION + 1,
+    labels: {
+      blankname: { name: '', source: 'enriched', firstSeen: '2027-01-01T00:00:00.000Z' },
+      zzz: { name: 'Something a newer ak wrote', source: 'enriched', firstSeen: '2027-01-01T00:00:00.000Z' },
+    },
+    cards: {},
+  }));
+  const loaded = loadLabelStore(file);
+  assert.equal(loaded.future, true);
+  assert.deepEqual(Object.keys(loaded.labels), ['zzz'], 'a malformed entry is dropped even under a future schema — it is never re-saved either way');
+  assert.equal(loaded.dropped?.labels, 1);
+});
+
 // ── save: atomic write ──────────────────────────────────────────────────────
 
 test('saveLabelStore writes atomically: the final file is valid JSON at the right version, and no tmp file is left behind', () => {
