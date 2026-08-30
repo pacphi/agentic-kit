@@ -177,6 +177,14 @@ function treeDigest(dir) {
 function ak(args, sb, extra = {}) {
   return spawnSync(process.execPath, [BIN, ...args], {
     encoding: 'utf8',
+    // Coaching adoption-detection (usage-outcome-ledger.mjs's
+    // gatherAdoptionInputs) reads CLAUDE.md/.claude/skills off process.cwd() —
+    // sandboxing HOME/XDG_CONFIG_HOME alone still leaves the subprocess's cwd
+    // at wherever the test runner started, i.e. this repo's own CLAUDE.md.
+    // `sb.home` is a fresh, empty tmpdir per test, so defaulting cwd there
+    // makes every test hermetic against this repo's real adoption state; a
+    // test that wants to plant a fixture CLAUDE.md sets `sb.cwd` explicitly.
+    cwd: sb.cwd ?? sb.home,
     env: {
       ...process.env,
       NO_COLOR: '1',
@@ -395,7 +403,7 @@ test('ak usage prompts --json is fingerprint-derived and carries no prompt text'
   assert.equal(result.status, 0, result.stderr);
   const value = JSON.parse(result.stdout);
   assert.deepEqual(Object.keys(value),
-    ['window', 'windowDays', 'generatedAt', 'sessions', 'typed', 'hosts', 'patterns', 'headless']);
+    ['window', 'windowDays', 'generatedAt', 'sessions', 'typed', 'hosts', 'patterns', 'headless', 'coaching']);
   assert.equal(value.window, 'all');
   // `patterns` is the aggregate's own promptPatterns projection, verbatim —
   // the same object the dashboard reads, not a CLI-side reshaping of it.
@@ -441,6 +449,168 @@ test('ak usage prompts says no samples rather than zero when nothing was fingerp
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stdout, /no samples/,
     'an empty corpus must report no samples, never a measured zero');
+  fs.rmSync(sb.home, { recursive: true, force: true });
+});
+
+// ── prompts: coaching cards + the outcome ledger (spec §5, §6.4) ───────────
+
+/** A corpus shaped to fire two of the six v1 cards through the real pipeline:
+ *  a "commit and push" family short/imperative/6-session/3-day enough to
+ *  seed-match `commit-and-push` (so commit-push-claude-md's count>=5 bar
+ *  clears), and ten same-session re-asks (so reask-delta's pairCount>=10 bar
+ *  clears — and, being draftless, exercises the "known id, no draft" error
+ *  path `--draft` has to cover). */
+const COMMIT_PUSH_PHRASINGS = [
+  'Commit and push', 'Commit push', 'Please commit and push',
+  'Commit and push now', 'Commit and push it', 'Commit and push please',
+];
+
+function writeCoachingCorpus(sb) {
+  const projectDir = path.join(sb.home, '.claude', 'projects', '-tmp-coaching-fixture');
+  fs.mkdirSync(projectDir, { recursive: true });
+  const write = (id, lines) => fs.writeFileSync(path.join(projectDir, `${id}.jsonl`), lines.join('\n') + '\n');
+  COMMIT_PUSH_PHRASINGS.forEach((text, i) => {
+    const at = Date.now() - (i % 3) * 86_400_000 - 3_600_000;
+    const id = `coaching-commit-${i}`;
+    write(id, [promptTurn(id, at, text), replyTurn(id, at + 10_000)]);
+  });
+  for (let i = 0; i < 10; i++) {
+    const at = Date.now() - i * 3_600_000 - 7_200_000;
+    const id = `coaching-reask-${i}`;
+    const ask = `Please summarize the release notes for milestone ${i}`;
+    write(id, [
+      promptTurn(id, at, ask), replyTurn(id, at + 10_000),
+      promptTurn(id, at + 20_000, `${ask} again`), replyTurn(id, at + 30_000),
+    ]);
+  }
+}
+
+test('ak usage prompts renders the Coaching section with a real proposed card', () => {
+  const sb = sandbox();
+  writeCoachingCorpus(sb);
+  const result = ak(['usage', 'prompts'], sb);
+  assert.equal(result.status, 0, result.stderr);
+  assert.ok(result.stdout.includes('Coaching'), 'missing the Coaching heading');
+  assert.ok(result.stdout.includes('Commit-and-push is retyped, not remembered'),
+    'the commit-push-claude-md card title did not render');
+  assert.match(result.stdout, /Try:/);
+  assert.match(result.stdout, /Basis:/);
+  assert.match(result.stdout, /Status: proposed/);
+  assert.match(result.stdout, /Draft → ak usage prompts --draft commit-push-claude-md/);
+  assert.match(result.stdout, /Dismiss → ak usage prompts --dismiss commit-push-claude-md/);
+  assert.equal(result.stdout.includes('Commit and push'), false, 'prompt text must never reach the coaching section');
+  fs.rmSync(sb.home, { recursive: true, force: true });
+});
+
+test('ak usage prompts --json coaching cards carry no prompt text and match the CLI ledgerSummary shape', () => {
+  const sb = sandbox();
+  writeCoachingCorpus(sb);
+  const result = ak(['usage', 'prompts', '--json'], sb);
+  assert.equal(result.status, 0, result.stderr);
+  const value = JSON.parse(result.stdout);
+  assert.ok(value.coaching, 'the --json payload must carry a coaching key');
+  assert.deepEqual(Object.keys(value.coaching).sort(), ['cards', 'ledgerSummary']);
+  const card = value.coaching.cards.find((c) => c.id === 'commit-push-claude-md');
+  assert.ok(card);
+  assert.equal(card.status, 'proposed');
+  assert.equal(value.coaching.ledgerSummary.proposed >= 1, true);
+  for (const p of COMMIT_PUSH_PHRASINGS) assert.equal(result.stdout.includes(p), false, `prompt text "${p}" leaked into --json`);
+  fs.rmSync(sb.home, { recursive: true, force: true });
+});
+
+test('ak usage prompts --draft <id> prints the draft verbatim and nothing else', () => {
+  const sb = sandbox();
+  writeCoachingCorpus(sb);
+  const result = ak(['usage', 'prompts', '--draft', 'commit-push-claude-md'], sb);
+  assert.equal(result.status, 0, result.stderr);
+  assert.ok(result.stdout.trim().length > 0, 'the draft must print something');
+  assert.doesNotMatch(result.stdout, /^ak usage/, 'the report banner must not print alongside a draft');
+  assert.doesNotMatch(result.stdout, /Coaching\n/);
+  assert.match(result.stdout, /commit and push it/i);
+  fs.rmSync(sb.home, { recursive: true, force: true });
+});
+
+test('ak usage prompts --draft <id> --json emits {id, kind, text}', () => {
+  const sb = sandbox();
+  writeCoachingCorpus(sb);
+  const result = ak(['usage', 'prompts', '--draft', 'commit-push-claude-md', '--json'], sb);
+  assert.equal(result.status, 0, result.stderr);
+  const value = JSON.parse(result.stdout);
+  assert.deepEqual(Object.keys(value).sort(), ['id', 'kind', 'text']);
+  assert.equal(value.id, 'commit-push-claude-md');
+  assert.equal(value.kind, 'claude-md-line');
+  fs.rmSync(sb.home, { recursive: true, force: true });
+});
+
+test('ak usage prompts --draft <unknown-id> errors and lists the known ids', () => {
+  const sb = sandbox();
+  writeCoachingCorpus(sb);
+  const result = ak(['usage', 'prompts', '--draft', 'not-a-real-card'], sb);
+  assert.equal(result.status, 2);
+  assert.match(result.stdout, /unknown card id/);
+  assert.match(result.stdout, /commit-push-claude-md/, 'the error must list at least one known id');
+  fs.rmSync(sb.home, { recursive: true, force: true });
+});
+
+test('ak usage prompts --draft <id-with-no-draft> errors and lists ONLY draft-bearing ids', () => {
+  const sb = sandbox();
+  writeCoachingCorpus(sb);
+  const result = ak(['usage', 'prompts', '--draft', 'reask-delta'], sb);
+  assert.equal(result.status, 2);
+  assert.match(result.stdout, /has no draft/);
+  assert.match(result.stdout, /commit-push-claude-md/, 'the error must offer a card that DOES have a draft');
+  assert.doesNotMatch(result.stdout, /reask-delta,|reask-delta$/m, 'the draftless card itself must not appear in its own "cards with a draft" list');
+  fs.rmSync(sb.home, { recursive: true, force: true });
+});
+
+test('ak usage prompts --dismiss <id> persists across invocations and survives a rescan', () => {
+  const sb = sandbox();
+  writeCoachingCorpus(sb);
+  const dismiss = ak(['usage', 'prompts', '--dismiss', 'commit-push-claude-md'], sb);
+  assert.equal(dismiss.status, 0, dismiss.stderr);
+  assert.match(dismiss.stdout, /Dismissed 'commit-push-claude-md'/);
+  const ledgerFile = path.join(sb.cfg, 'agentic-kit', 'usage-outcome-ledger.json');
+  assert.ok(fs.existsSync(ledgerFile), 'the ledger file must be written under the sandboxed config dir');
+  const ledger = JSON.parse(fs.readFileSync(ledgerFile, 'utf8'));
+  assert.equal(ledger.version, 1);
+  assert.equal(ledger.records.find((r) => r.id === 'commit-push-claude-md').status, 'dismissed');
+
+  const rescan = ak(['usage', 'prompts'], sb);
+  assert.equal(rescan.status, 0, rescan.stderr);
+  assert.match(rescan.stdout, /Status: dismissed/, 'a fresh process must read back the persisted dismissal');
+  fs.rmSync(sb.home, { recursive: true, force: true });
+});
+
+test('ak usage prompts --dismiss <id> --json emits a confirmation, not the full report', () => {
+  const sb = sandbox();
+  writeCoachingCorpus(sb);
+  const result = ak(['usage', 'prompts', '--dismiss', 'commit-push-claude-md', '--json'], sb);
+  assert.equal(result.status, 0, result.stderr);
+  const value = JSON.parse(result.stdout);
+  assert.deepEqual(value, { id: 'commit-push-claude-md', status: 'dismissed', dismissCount: 1 });
+  fs.rmSync(sb.home, { recursive: true, force: true });
+});
+
+test('ak usage prompts --dismiss <unknown-id> errors and lists the known ids, writing nothing', () => {
+  const sb = sandbox();
+  writeCoachingCorpus(sb);
+  const result = ak(['usage', 'prompts', '--dismiss', 'not-a-real-card'], sb);
+  assert.equal(result.status, 2);
+  assert.match(result.stdout, /unknown card id/);
+  // A normal run still writes the ledger (reconcile runs every invocation) —
+  // the pin here is narrower: the UNKNOWN id itself must never appear as a record.
+  const ledgerFile = path.join(sb.cfg, 'agentic-kit', 'usage-outcome-ledger.json');
+  const ledger = JSON.parse(fs.readFileSync(ledgerFile, 'utf8'));
+  assert.equal(ledger.records.some((r) => r.id === 'not-a-real-card'), false);
+  fs.rmSync(sb.home, { recursive: true, force: true });
+});
+
+test('ak usage prompts --help documents --draft and --dismiss', () => {
+  const sb = sandbox();
+  const result = ak(['usage', '--help'], sb);
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /--draft/);
+  assert.match(result.stdout, /--dismiss/);
   fs.rmSync(sb.home, { recursive: true, force: true });
 });
 

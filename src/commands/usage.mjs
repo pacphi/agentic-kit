@@ -21,6 +21,10 @@ import {
   readOpenRouterActivity,
   refreshOpenRouterActivity,
 } from '../lib/usage-openrouter.mjs';
+import { deriveCards } from '../lib/usage-coaching.mjs';
+import {
+  loadLedger, saveLedger, reconcile, dismissCard, summarizeLedger, defaultLedgerPath, gatherAdoptionInputs,
+} from '../lib/usage-outcome-ledger.mjs';
 
 export const options = {
   json: { type: 'boolean', default: false },
@@ -30,6 +34,10 @@ export const options = {
   // would make "the user asked for 14" indistinguishable from "nobody asked".
   window: { type: 'string' },
   deep: { type: 'boolean', default: false },
+  // Coaching (spec §5/§6.4), prompts-only: print one card's draft verbatim, or
+  // persist a dismissal. Both take a card id, so both are strings, not flags.
+  draft: { type: 'string' },
+  dismiss: { type: 'string' },
 };
 
 export const help = `ak usage — provider account analytics cache + offline scorecard summary
@@ -44,7 +52,7 @@ Usage:
   ak usage status
   ak usage refresh openrouter
   ak usage score [--window 7|14|30] [--json]
-  ak usage prompts [--window 7|14|30|all] [--deep] [--json]
+  ak usage prompts [--window 7|14|30|all] [--deep] [--json] [--draft ID] [--dismiss ID]
 
 \`ak usage prompts\` reads the prompt FINGERPRINTS the transcript scan already
 stores — a hash, a token count, a bounded token-hash sketch, and who wrote the
@@ -68,6 +76,7 @@ Options:
               behind each finding. Costs a few seconds; the report states how
               many it opened and how long it took. With --json the exemplars
               (which CONTAIN PROMPT TEXT) ride under an \`exemplars\` key.
+  --draft ID    prompts only: print that card's draft verbatim; --dismiss ID persists a dismissal
 
 Examples:
   ak usage status                    inspect the offline cache; no network
@@ -1142,6 +1151,104 @@ function printDeepPass(deep) {
   printPersonas(deep.personas, deep.totals.personas);
 }
 
+// ── coaching (spec §5, §6.4) — cards, the outcome ledger, --draft/--dismiss ─
+
+/** The chip text per ledger status, the same six states the dashboard renders
+ *  (usage-prompts.mjs's coaching card). `stale` never appears in v1 — every
+ *  proposed card's evidenceHash is refreshed the same pass it would go stale
+ *  in, because a rule-derived card costs nothing to recompute (spec §6.3) —
+ *  so this switch has no branch for it; there is nothing stale to report. */
+function coachingStatusLine(card) {
+  if (card.status === 'adopted') {
+    if (!card.outcome) return 'adopted ✓';
+    return card.outcome.improved
+      ? `adopted ✓ — ${card.outcome.deltaText}`
+      : `adopted ✓ — too early to tell (${card.outcome.deltaText})`;
+  }
+  if (card.status === 'retired') return `retired — did not improve: ${card.refutation}`;
+  if (card.status === 'dismissed') return 'dismissed';
+  if (card.status === 'expired') return 'expired — evidence no longer present';
+  return 'proposed';
+}
+
+function printCoachingCard(card) {
+  info(card.title);
+  info(dim(`  ${card.finding}`));
+  info(`  Try: ${card.try}`);
+  info(dim(`  Basis: ${card.basis}`));
+  info(`  Status: ${coachingStatusLine(card)}`);
+  if (card.draft) info(dim(`  Draft → ak usage prompts --draft ${card.id}`));
+  if (card.status === 'proposed') info(dim(`  Dismiss → ak usage prompts --dismiss ${card.id}`));
+}
+
+/** The Coaching section: cards rendered finding → Try → basis → status chip.
+ *  `coaching` is `{ cards, ledgerSummary }`, the same shape the --json payload
+ *  carries under `coaching` (spec: CLI names it `ledgerSummary`; the
+ *  dashboard payload names the identical shape `summary` — see
+ *  dashboard-server.mjs's promptsPayload). */
+function printCoaching(coaching) {
+  heading('Coaching');
+  info(dim('  rule-derived and free to recompute every scan (spec §6.3) — nothing here goes stale; '
+    + 'a card is only ever proposed, adopted, dismissed, expired, or retired'));
+  const cards = coaching?.cards ?? [];
+  if (!cards.length) {
+    info(dim('  no samples — no coaching card met its evidence bar this window'));
+    return;
+  }
+  for (const card of cards) printCoachingCard(card);
+  const s = coaching.ledgerSummary;
+  if (s) {
+    info(dim(`  ledger — ${fmtNum(s.proposed)} proposed · ${fmtNum(s.adopted)} adopted · `
+      + `${fmtNum(s.dismissed)} dismissed · ${fmtNum(s.expired)} expired · ${fmtNum(s.retired)} retired`));
+  }
+}
+
+function coachingProjection(cards, ledger) {
+  return { cards, ledgerSummary: summarizeLedger(ledger.records) };
+}
+
+/** Every rule-derived card id this pass, joined for an unknown-id error —
+ *  '(none this window)' rather than an empty string, so the error itself
+ *  never reads as though the command hung. */
+function knownCardIdsText(cards) {
+  return cards.map((c) => c.id).join(', ') || '(none this window)';
+}
+
+/** `--draft <id>`: print that one card's draft verbatim and nothing else —
+ *  json-safe (a minimal object under --json, the raw text otherwise), so a
+ *  caller can pipe either straight into a file. */
+function runDraftFlag(cards, id, json) {
+  const card = cards.find((c) => c.id === id);
+  if (!card) {
+    warn(`ak usage prompts --draft: unknown card id ${JSON.stringify(id)}. Known ids: ${knownCardIdsText(cards)}`);
+    return 2;
+  }
+  if (!card.draft) {
+    const withDraft = cards.filter((c) => c.draft).map((c) => c.id).join(', ') || '(none this window)';
+    warn(`ak usage prompts --draft: card ${JSON.stringify(id)} has no draft. Cards with a draft: ${withDraft}`);
+    return 2;
+  }
+  if (json) console.log(JSON.stringify({ id: card.id, kind: card.draft.kind, text: card.draft.text }, null, 2));
+  else console.log(card.draft.text);
+  return 0;
+}
+
+/** `--dismiss <id>`: persist the dismissal and print a confirmation. Ledger
+ *  writes are CLI-only (spec §3.3's privacy split; the dashboard's reconcile
+ *  is read-only — see dashboard-server.mjs's promptsPayload). */
+function runDismissFlag({ ledger, ledgerPath, save, cards, id, json }) {
+  const { ledger: next, found } = dismissCard(ledger, id, cards);
+  if (!found) {
+    warn(`ak usage prompts --dismiss: unknown card id ${JSON.stringify(id)}. Known ids: ${knownCardIdsText(cards)}`);
+    return 2;
+  }
+  save(ledgerPath, next);
+  const record = next.records.find((r) => r.id === id);
+  if (json) console.log(JSON.stringify({ id, status: 'dismissed', dismissCount: record.dismissCount }, null, 2));
+  else ok(`Dismissed '${id}' (dismissal ${fmtNum(record.dismissCount)}).`);
+  return 0;
+}
+
 async function runPrompts({ flags, deps }) {
   const win = parsePromptWindow(flags.window);
   if (win == null) {
@@ -1169,13 +1276,44 @@ async function runPrompts({ flags, deps }) {
     return 1;
   }
   const report = promptReport(agg, win);
+
+  // Coaching cards (spec §5) derive from the SAME aggregate — `agg.insights`
+  // is populated unconditionally by aggregate() (usage-aggregate.mjs), not
+  // only when `prompts: true`, so it needs no separate read here.
+  const cards = deriveCards({
+    promptPatterns: agg.promptPatterns, promptBaselines: agg.promptBaselines,
+    promptsByHost: agg.promptsByHost, insights: agg.insights, now: Date.now(),
+  });
+  const ledgerPath = deps.ledgerPath ?? defaultLedgerPath();
+  const loadLedgerFn = deps.loadLedger ?? loadLedger;
+  const saveLedgerFn = deps.saveLedger ?? saveLedger;
+  const adoptionInputs = deps.adoptionInputs ?? gatherAdoptionInputs();
+  const currentPatterns = { promptPatterns: agg.promptPatterns, promptsByHost: agg.promptsByHost, insights: agg.insights };
+  const { ledger, cards: reconciledCards } = reconcile(loadLedgerFn(ledgerPath), cards, {
+    adoptionInputs: { ...adoptionInputs, currentPatterns }, now: Date.now(),
+  });
+  // Ledger updates happen on EVERY invocation, not only --dismiss — reconcile
+  // above already computed adoption/outcome/expiry transitions; this is the
+  // one point that persists them (the dashboard's own reconcile never calls
+  // this, per its read-only contract).
+  saveLedgerFn(ledgerPath, ledger);
+
+  if (flags.draft != null) return runDraftFlag(reconciledCards, flags.draft, flags.json);
+  if (flags.dismiss != null) {
+    return runDismissFlag({
+      ledger, ledgerPath, save: saveLedgerFn, cards: reconciledCards, id: flags.dismiss, json: flags.json,
+    });
+  }
+
   const deep = flags.deep ? runDeepPass(agg, report, win, deps) : null;
+  const coaching = coachingProjection(reconciledCards, ledger);
   if (flags.json) {
-    const projection = promptProjection(agg, report);
+    const projection = { ...promptProjection(agg, report), coaching };
     console.log(JSON.stringify(deep ? { ...projection, exemplars: deep } : projection, null, 2));
     return 0;
   }
   printPromptReport(agg, report);
+  printCoaching(coaching);
   if (deep) printDeepPass(deep);
   return 0;
 }
@@ -1192,15 +1330,17 @@ function runDeepPass(agg, report, win, deps) {
   return deepPass(entries, report, cutoffMs);
 }
 
-// Exported ONLY for a direct-import unit test of the <$0.01 boundary
-// (true-zero vs a real sub-cent positive) — see tests/kit/usage-cli.test.mjs.
-// Constructing a SECOND fixture transcript whose priced total is exactly
-// zero is disproportionate: a session prices to exactly $0 only by carrying
-// no usage rows at all, which the aggregate's own cost distribution already
-// excludes (see usage-aggregate.mjs's `_priced`), so there is no fixture
-// shape that reaches the true-zero branch. Not part of this command's CLI
+// Exported ONLY for direct-import unit tests — see tests/kit/usage-cli.test.mjs
+// (the <$0.01 boundary, true-zero vs a real sub-cent positive: constructing a
+// SECOND fixture transcript whose priced total is exactly zero is
+// disproportionate, since a session prices to exactly $0 only by carrying no
+// usage rows at all, which the aggregate's own cost distribution already
+// excludes — see usage-aggregate.mjs's `_priced`) and
+// tests/kit/usage-coaching.test.mjs (the INTEGRATION REGRESSION PIN, which
+// renders the coaching section through the real CLI printer rather than a
+// hand-rolled restatement of it). Neither is part of this command's CLI
 // contract.
-export const __test = { fmtUsdMin };
+export const __test = { fmtUsdMin, printCoaching };
 
 /** `ak usage status` — a pure offline read of the OpenRouter activity cache. */
 function runOpenRouterStatus({ flags, cacheFile, read }) {
