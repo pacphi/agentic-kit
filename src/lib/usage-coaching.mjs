@@ -1,14 +1,21 @@
-// usage-coaching.mjs — the coaching ENGINE: evidence hashing, deriveCards,
-// currentEvidenceFor, deterministic adoption detection, and outcome
-// measurement (spec §5, §6.4). NO I/O and NO clock reads beyond the `now` a
-// caller passes in — the store (usage-outcome-ledger.mjs) is a separate,
-// small-I/O module that imports FROM here, never the reverse.
+// usage-coaching.mjs — the coaching ENGINE: deriveCards, currentEvidenceFor,
+// deterministic adoption detection, and outcome measurement (spec §5, §6.4).
+// NO I/O and NO clock reads beyond the `now` a caller passes in — the store
+// (usage-outcome-ledger.mjs) is a separate, small-I/O module that imports
+// FROM here, never the reverse.
 //
 // The six v1 RULES (each an evidence extractor, a propose-bar predicate, and
 // a card text builder) live in usage-coaching-rules.mjs, imported below —
 // split out once this file crossed the repo's file-size limit for a new lib.
 // This file owns the CONTRACT every rule is evaluated through; that module
 // owns what each rule actually says.
+//
+// `evidenceHash` itself lives in the leaf module usage-evidence-hash.mjs
+// (Fix round 3) — both this file's callers and usage-coaching-rules.mjs's
+// card builders need it, so it sits below both rather than inside either,
+// breaking what would otherwise be an engine<->rules import cycle. Re-
+// exported here unchanged, so every existing `evidenceHash` import stays
+// valid.
 //
 // v1 rules are RULE-DERIVED, not inferred (spec §9 step 5; §6.3 inference
 // refresh is a later wave). Every number a card states is read off one of the
@@ -27,38 +34,9 @@
 // — that distinction is what makes outcome measurement possible: a
 // recommendation that fully worked collapses its cluster out of existence,
 // and that has to read as "0", not as "unmeasured".
-import { createHash } from 'node:crypto';
 import { RULES } from './usage-coaching-rules.mjs';
 
-// ── evidence hashing (spec §5, §6.2) ────────────────────────────────────────
-
-/** Sort every object's keys, recursively, so two callers who built the same
- *  evidence in a different field order still hash identically. Arrays keep
- *  their order — order is part of an array's meaning, unlike an object's key
- *  order, which is not. */
-function canonicalize(value) {
-  if (Array.isArray(value)) return value.map(canonicalize);
-  if (value && typeof value === 'object') {
-    const out = {};
-    for (const key of Object.keys(value).sort()) out[key] = canonicalize(value[key]);
-    return out;
-  }
-  return value;
-}
-
-/**
- * A stable 16-hex-char sha256 over a canonical JSON serialization (sorted
- * keys, no whitespace) of `input`. Same inputs ⇒ same hash, on this process or
- * any other; any count change anywhere in `input` ⇒ a different hash — which
- * is the whole mechanism the ledger's staleness/decay logic rests on.
- *
- * @param {unknown} input
- * @returns {string}
- */
-export function evidenceHash(input) {
-  const json = JSON.stringify(canonicalize(input ?? {}));
-  return createHash('sha256').update(json).digest('hex').slice(0, 16);
-}
+export { evidenceHash } from './usage-evidence-hash.mjs';
 
 /** Adoption-by-collapse and outcome-improvement share this reasoning but not
  *  this exact number: collapse is the ADOPTION signal (spec §6.4 — "the

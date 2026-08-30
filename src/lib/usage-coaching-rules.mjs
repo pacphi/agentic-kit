@@ -2,16 +2,17 @@
 // an evidence extractor, a propose-bar predicate, and a card text builder.
 // Split out of usage-coaching.mjs on the status.mjs/status/*.mjs precedent
 // once that file crossed the repo's file-size limit for a new lib. The
-// ENGINE — evidenceHash, deriveCards, currentEvidenceFor, detectAdoption,
-// measureOutcome — stays in usage-coaching.mjs, which imports `RULES` from
-// here; this module imports `evidenceHash` back (a function declaration,
-// hoisted, so the cycle resolves cleanly — neither module needs the other's
-// export at TOP-LEVEL evaluation time, only inside function bodies that run
-// later). No behavior changed by this split — every export here is verbatim
-// from usage-coaching.mjs.
+// ENGINE — deriveCards, currentEvidenceFor, detectAdoption, measureOutcome —
+// stays in usage-coaching.mjs, which imports `RULES` from here. `evidenceHash`
+// (needed by the card builders below) lives in the leaf module
+// usage-evidence-hash.mjs, imported directly from there rather than back
+// through usage-coaching.mjs (Fix round 3 — that indirection was a real
+// engine<->rules import cycle; this module now has no dependency on
+// usage-coaching.mjs at all). No behavior changed by either split — every
+// export here is verbatim from the original usage-coaching.mjs.
 import { SEED_PATTERNS } from './usage-prompt-vocabulary.mjs';
 import { tapRowsOverThreshold } from './usage-insights.mjs';
-import { evidenceHash } from './usage-coaching.mjs';
+import { evidenceHash } from './usage-evidence-hash.mjs';
 
 // ── thresholds (exported so tests pin the exact boundary the rules use) ────
 
