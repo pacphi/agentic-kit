@@ -83,7 +83,7 @@ Three new detectors in the existing `DETECTORS` contract, all computable from fi
 |---|---|---|---|
 | `supervision-tap-share` | trend/warn | current-window tap share > operator's trailing-90d p75 for that host AND ≥20 taps | per-host split; the modelled-cost caveat verbatim |
 | `headless-share` | coach/info | headless response share > 25% (informational reframe; models on detectSubagentShare) | sessions + responses counts |
-| `host-prompt-asymmetry` | coach/info | p90 length ratio between hosts ≥1.5× OR persona-opening prompts ≥10 in window | the ratio; persona count; "no text on the wire" basis |
+| `host-prompt-asymmetry` | coach/info | p90 length ratio between hosts ≥1.5× (each host needs ≥50 typed prompts for the ratio to be compared at all) OR persona-opening prompts ≥10 in window | the ratio; persona count; "no text on the wire" basis |
 
 **No fixed percentages where a baseline can exist**: thresholds compare against the operator's own rolling history (per host), persisted as small aggregates in the index and recomputed each scan. Every fired finding prints the baseline it compared against.
 
