@@ -5,6 +5,7 @@ import { VIEWS, authHeaders, esc, setTab, syncHash } from './bootstrap.mjs';
 import { ago } from './intelligence.mjs';
 import { renderModelFacets, renderModelInventory, renderModelLifecycle } from './model-lifecycle.mjs';
 import { bucketPercentile, bucketPositionPct, deltaChip, donut2, histogram, rankedRows, sparklineSvg, stackedDays } from './usage-rhythm.mjs';
+import { coachingPlaceholder, hostInterplay, patternsTable, promptKpis, provenancePanel, reAskPanel, steerPanel, tapLengthPanel, taxonomyPlaceholder } from './usage-prompts.mjs';
 import { renderUsage } from './usage-orchestrators.mjs';
 
   // ══ Usage tab ══════════════════════════════════════════════════════════════
@@ -228,7 +229,7 @@ import { renderUsage } from './usage-orchestrators.mjs';
   export function setUsageView(v,session){
     usageView=v;
     if(session!==undefined)usageSession=session;
-    var headings={score:["Usage scorecard","Token consumption, API-equivalent cost, efficiency, and trends."],limits:["Provider limits","Current provider windows, reset timing, and available capacity."],findings:["Usage findings","Actionable anomalies, efficiency opportunities, and evidence-backed recommendations."],sessions:["Session usage","Browse retained sessions by project, category, duration, tokens, and cost."],models:["Models","Observed models in this window, configured routes, and the separate provider/local catalogue."],transcript:["Transcript detail","Inspect the selected session's locally retained, server-masked evidence."]},heading=headings[v]||headings.score;
+    var headings={score:["Usage scorecard","Token consumption, API-equivalent cost, efficiency, and trends."],limits:["Provider limits","Current provider windows, reset timing, and available capacity."],findings:["Usage findings","Actionable anomalies, efficiency opportunities, and evidence-backed recommendations."],prompts:["Prompt patterns","What you type across every host, which patterns repeat, and what to change — from fingerprints, never prompt text."],sessions:["Session usage","Browse retained sessions by project, category, duration, tokens, and cost."],models:["Models","Observed models in this window, configured routes, and the separate provider/local catalogue."],transcript:["Transcript detail","Inspect the selected session's locally retained, server-masked evidence."]},heading=headings[v]||headings.score;
     document.getElementById("usage-view-title").textContent=heading[0];document.getElementById("usage-view-description").textContent=heading[1];
     var btns=document.querySelectorAll("#usage-seg [data-view]");
     for(var i=0;i<btns.length;i++){var on=btns[i].getAttribute("data-view")===v;btns[i].setAttribute("aria-selected",on?"true":"false");btns[i].tabIndex=on?0:-1;}
@@ -255,6 +256,27 @@ import { renderUsage } from './usage-orchestrators.mjs';
     if(v==="limits"&&!LIMITS)loadLimits();
     if(v==="models"){loadModelLifecycle();if(!LIMITS)loadLimits();}
     var days=document.getElementById("usage-days");if(days)days.hidden=(v==="transcript");
+    syncAllHistoryChip(v);
+    // Prompts renders from the payload the poll already holds, so opening the
+    // tab is a re-render rather than a fetch. It is called here as well as from
+    // renderUsage because the panels are only in the DOM once this view exists.
+    if(v==="prompts"&&USAGE&&!USAGE.error)renderPrompts(USAGE);
+  }
+
+  // Whole-history is offered on the Prompts view alone: patterns are lifetime
+  // phenomena, where every other view's figures are about a recent window.
+  // Leaving Prompts with it selected drops back to 30d rather than carrying a
+  // 365-day window into a view whose chip row no longer shows it — a selected
+  // window the reader cannot see is worse than a narrower one they can.
+  function syncAllHistoryChip(v){
+    var all=document.getElementById("usage-days-all");
+    if(!all)return;
+    var on=(v==="prompts");
+    all.hidden=!on;
+    if(!on&&usageDays>=365){
+      var fallback=document.querySelector('#usage-days [data-days="30"]');
+      if(fallback)fallback.click();
+    }
   }
 
   // Explicit bridge from Observability metadata to the separately fetched,
@@ -1137,6 +1159,49 @@ import { renderUsage } from './usage-orchestrators.mjs';
     renderLimitsClaude();
     renderLimitsCodex();
     renderLimitsInsights();
+  }
+
+  // ══ Prompts view (spec §3) ═════════════════════════════════════════════════
+  // Panels are built by usage-prompts.mjs (pure string builders); this function
+  // owns only the DOM writes and the captions, which name the window every
+  // figure was computed over — a figure whose window is not stated is a figure
+  // a reader will attach to the wrong span.
+  export function renderPrompts(d){
+    var p=d&&d.prompts;
+    var kpis=document.getElementById("u-pr-kpis");
+    if(!kpis)return;
+    if(!p){
+      kpis.innerHTML='<div class="empty">this window carries no prompt-fingerprint layer &mdash; '
+        +'the sessions in it were parsed before prompt fingerprints shipped. Re-scan to populate it.</div>';
+      return;
+    }
+    var win=windowLabel();
+    kpis.innerHTML=promptKpis(p);
+    setText("u-pr-prov-note",win+" · every fingerprinted user-role turn");
+    document.getElementById("u-pr-provenance").innerHTML=provenancePanel(p);
+    setText("u-pr-steer-note",win+" · typed prompts only");
+    document.getElementById("u-pr-steer").innerHTML=steerPanel(p);
+    document.getElementById("u-pr-taps").innerHTML=tapLengthPanel(p);
+    document.getElementById("u-pr-taxonomy").innerHTML=taxonomyPlaceholder();
+    setText("u-pr-hosts-note",win+" · per host, unequal histories");
+    document.getElementById("u-pr-hosts").innerHTML=hostInterplay(p);
+    setText("u-pr-patterns-note",patternsNote(p,win));
+    document.getElementById("u-pr-reasks").innerHTML=reAskPanel(p);
+    document.getElementById("u-pr-patterns").innerHTML=patternsTable(p);
+    document.getElementById("u-pr-coaching").innerHTML=coachingPlaceholder();
+  }
+  function setText(id,txt){var el=document.getElementById(id);if(el)el.textContent=txt;}
+  function windowLabel(){return usageDays>=365?"all history":"last "+usageDays+"d";}
+  // The projection ships EVERY recurring cluster; the table draws a slice and
+  // says so in its own overflow line. This caption reports the true total, so
+  // the header and the table can never tell two different stories about how
+  // much repetition was found.
+  function patternsNote(p,win){
+    var pat=p.patterns;
+    if(!pat)return win;
+    var n=(pat.clusters||[]).length;
+    return win+" · "+n+" recurring cluster"+(n===1?"":"s")
+      +" · no prompt text on this surface";
   }
 
   export function renderFindings(d){

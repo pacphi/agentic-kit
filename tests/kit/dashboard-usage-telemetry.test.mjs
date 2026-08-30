@@ -6,12 +6,16 @@ import { renderPage } from '../../src/lib/dashboard/page.mjs';
 import { CSS } from '../../src/lib/dashboard/styles.mjs';
 import { startDashboard } from '../../src/lib/dashboard-server.mjs';
 import { aggregate } from '../../src/lib/usage-aggregate.mjs';
-import { blankSession, addUsage } from '../../src/lib/usage-parsers.mjs';
+import { blankSession, addUsage, notePromptFingerprint } from '../../src/lib/usage-parsers.mjs';
 import { MODES } from '../../src/lib/usage-modes.mjs';
 import {
   deltaChip, sparklineSvg, histogram, stackedDays, donut2, rankedRows,
   bucketPercentile, bucketPositionPct,
 } from '../../src/lib/dashboard/client/usage-rhythm.mjs';
+import {
+  coachingPlaceholder, hostInterplay, hostTapSeries, patternsTable, promptKpis,
+  provenancePanel, reAskPanel, steerPanel, tapLengthPanel, taxonomyPlaceholder,
+} from '../../src/lib/dashboard/client/usage-prompts.mjs';
 import {
   percentileFromBuckets, LAT_BUCKET_EDGES, LEN_BUCKET_EDGES,
   BASELINE_TRAILING_DAYS, BASELINE_MIN_ACTIVE_DAYS,
@@ -143,7 +147,11 @@ function spyReadIndex(records, calls) {
     const days = opts?.days ?? 14;
     const discovery = NOW - (opts?.lookbackDays ?? days) * DAY_MS;
     return aggregate(records.filter((r) => r.end >= discovery), {
-      days, now: NOW, cutoff: NOW - days * DAY_MS, deps: FIXTURE_DEPS, previous: !!opts?.previous,
+      days, now: NOW, cutoff: NOW - days * DAY_MS, deps: FIXTURE_DEPS,
+      // Both projection flags ride through from the caller's own options
+      // unchanged, so a payload that carries a projection is proof the server
+      // asked for it — not proof that this fake builds one unconditionally.
+      previous: !!opts?.previous, prompts: !!opts?.prompts,
     });
   };
 }
@@ -255,6 +263,583 @@ test('the baseline lookback reaches far enough back for promptBaselines to exist
   } finally {
     await srv.close();
   }
+});
+
+// ── the prompts payload (spec §3) ──────────────────────────────────────────
+//
+// `prompts.patterns` is `agg.promptPatterns` verbatim — the single projection
+// usage-aggregate.mjs builds and `ak usage prompts` also reads. These tests
+// therefore assert the SERVER's contribution (that it asks for the projection,
+// forwards it intact, and computes the headless fraction the shipped detector's
+// way) rather than re-testing the projection itself, which has its own pins.
+//
+// Fingerprints are built through the REAL scan-path helper rather than
+// hand-written, because the whole privacy claim is about what that helper
+// writes: a hand-rolled `{h,t,th,p}` would pass a pin it never actually tested.
+
+/** The prompts these fixtures type, kept as data so the privacy pin can scan
+ *  the payload for every word of them. */
+const FIXTURE_PROMPTS = {
+  instruction: 'Commit and push the payload branch.',
+  tap: 'yes',
+  persona: 'You are a staff release engineer. Review the changelog, confirm the semantic version, '
+    + 'and prepare the announcement copy for the maintainers list.',
+};
+
+function promptRecord(id, host, endMs, texts) {
+  const d = new Date(endMs);
+  const p = (n) => String(n).padStart(2, '0');
+  const day = `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+  const rec = blankSession(id, host);
+  Object.assign(rec, {
+    title: id, project: 'proj', prompts: texts.length, responses: 2,
+    start: endMs - 10 * 60_000, end: endMs,
+  });
+  rec.active = [[endMs - 10 * 60_000, endMs]];
+  addUsage(rec, day, 'claude-opus-5', { input: 500, output: 200, cacheRead: 0, cacheWrite: 0, responses: 2 });
+  rec.models = ['claude-opus-5'];
+  rec.lenSeconds = 600;
+  for (const text of texts) notePromptFingerprint(rec, text, 'prompt');
+  return rec;
+}
+
+/** Six sessions over four days and two hosts: one instruction repeated in
+ *  every session (a recurring cluster), a tap in every session, and a persona
+ *  opener on the Codex side only. Plus one session that types nothing, which
+ *  is what makes the headless fraction non-degenerate. */
+const PROMPT_RECORDS = [
+  ...Array.from({ length: 6 }, (_v, i) => promptRecord(
+    `p-${i}`, i % 2 ? 'codex' : 'claude', NOW - (1 + (i % 4)) * DAY_MS,
+    i % 2
+      ? [FIXTURE_PROMPTS.instruction, FIXTURE_PROMPTS.tap, FIXTURE_PROMPTS.persona]
+      : [FIXTURE_PROMPTS.instruction, FIXTURE_PROMPTS.tap],
+  )),
+  promptRecord('p-headless', 'claude', NOW - 2 * DAY_MS, []),
+];
+
+/** Every string that appears anywhere in `value`, at any depth, keys included
+ *  — the privacy pin walks values AND keys because a leak that arrives as an
+ *  object key is still a leak. */
+function allStrings(value, out = []) {
+  if (typeof value === 'string') out.push(value);
+  else if (Array.isArray(value)) for (const v of value) allStrings(v, out);
+  else if (value && typeof value === 'object') {
+    for (const [k, v] of Object.entries(value)) { out.push(k); allStrings(v, out); }
+  }
+  return out;
+}
+
+async function promptsPayload(days = 7) {
+  const calls = [];
+  const srv = await startDashboard({
+    port: 0, fetchStatus: async () => ({ overall: 'ok', rows: [] }),
+    usage: { readIndex: spyReadIndex(PROMPT_RECORDS, calls) },
+  });
+  try {
+    const r = await get(`${srv.url}api/usage?days=${days}`, srv.token);
+    assert.equal(r.status, 200, `expected 200, got ${r.status}`);
+    return { prompts: JSON.parse(r.body).prompts, calls };
+  } finally {
+    await srv.close();
+  }
+}
+
+test('/api/usage asks for the prompt projection and ships it intact', async () => {
+  const { prompts, calls } = await promptsPayload();
+  assert.ok(prompts, 'the payload must carry a prompts block');
+  assert.ok(calls.some((o) => o && o.prompts === true),
+    `the server must request the projection, got ${JSON.stringify(calls)}`);
+
+  // 6 typing sessions: 2 prompts each on claude (3 sessions), 3 each on codex
+  // (3 sessions) = 6 + 9 = 15 typed; one tap per typing session = 6.
+  assert.equal(prompts.typed, 15, 'typed counts provenance-human fingerprints only');
+  assert.equal(prompts.taps, 6, 'one tap per typing session');
+  assert.equal(prompts.tapShare, 0.4, 'tapShare is taps ÷ typed, not a second derivation');
+
+  assert.deepEqual(Object.keys(prompts.byHost).sort(), ['claude', 'codex']);
+  assert.equal(prompts.byHost.codex.personaOpeners, 3, 'the persona opener is a Codex-side shape');
+  assert.equal(prompts.byHost.claude.personaOpeners, 0);
+
+  for (const row of Object.values(prompts.statsByDay)) {
+    assert.ok(row.typed >= row.taps, 'a day cannot have more taps than typed prompts');
+  }
+
+  // No trailing history in this fixture, so a baseline would be an invention.
+  for (const b of Object.values(prompts.baselines)) {
+    assert.equal(b.tapShareP75_trailing90d, null,
+      'under BASELINE_MIN_ACTIVE_DAYS the baseline is null, never a number from a handful of days');
+  }
+});
+
+test('the projection reaches the payload with its published shape', async () => {
+  const { prompts } = await promptsPayload();
+  const pat = prompts.patterns;
+  assert.ok(pat, 'promptPatterns must survive into prompts.patterns');
+
+  assert.equal(pat.corpus.typed, 15, 'corpus.typed is the provenance-filtered population');
+  assert.ok(pat.corpus.fingerprints >= pat.corpus.typed,
+    'the fingerprinted population is the denominator typed sits inside');
+  assert.equal(pat.provenance.human, 15, 'every fixture prompt was typed by a person');
+  for (const tag of ['human', 'control', 'agent', 'adapter']) {
+    assert.equal(typeof pat.provenance[tag], 'number',
+      `every provenance tag renders, including ones this corpus never produced (${tag})`);
+  }
+
+  const lead = pat.clusters[0];
+  assert.equal(lead.count, 6, 'the instruction was typed once in each of the six typing sessions');
+  assert.equal(lead.sessions, 6, 'sessions is a COUNT, not a list');
+  assert.ok(lead.days >= 2, 'the cluster spans days, which is half of the recurrence disjunction');
+  assert.deepEqual(lead.hosts, ['claude', 'codex'], 'hosts is a sorted array of names');
+  assert.ok(lead.sampleSessionIds.length <= 3, 'at most three link ids, never a membership dump');
+  assert.equal(typeof lead.medianTokens, 'number');
+  assert.ok(lead.label.name.length > 0, 'every cluster is named');
+
+  assert.equal(typeof pat.reAsks.pairCount, 'number', 're-asks ship as counts, not as a pair list');
+  assert.equal(typeof pat.reAsks.sessionCount, 'number');
+  assert.ok(pat.reAsks.gapHist && typeof pat.reAsks.gapHist === 'object');
+  assert.ok(Array.isArray(pat.tapLengths) && Array.isArray(pat.exactRepeats));
+  assert.ok(!Number.isNaN(Date.parse(pat.computedAt)), 'the projection stamps when it was computed');
+});
+
+// Now that decoration converts the scan path's numeric q/o flags to the
+// booleans the clustering library reads, a cluster of six identical
+// instructions must actually be CLASSIFIED — the whole curated-naming layer
+// gates on this, and an 'unknown' here would mean the seam is not doing its job.
+test('a recurring instruction cluster is classified, not left unknown', async () => {
+  const { prompts } = await promptsPayload();
+  const classes = prompts.patterns.clusters.map((c) => c.class);
+  assert.ok(classes.some((c) => c !== 'unknown'),
+    `every cluster came back unclassified — the q/o decoration is not reaching the library: ${JSON.stringify(classes)}`);
+});
+
+test('the headless fraction excludes sessions that carry no fingerprint layer', async () => {
+  const { prompts } = await promptsPayload();
+  assert.equal(prompts.headless.sessions, 1, 'one fixture session typed nothing');
+  assert.equal(prompts.headless.responses, 2, 'and it carried two responses');
+  assert.ok(prompts.headless.share > 0 && prompts.headless.share < 1);
+  assert.equal(prompts.headless.measuredSessions, 7,
+    'the denominator is sessions that CARRY the layer, not every session');
+});
+
+// The acceptance criterion in spec §10, applied to the HTTP payload rather
+// than the index: nothing the operator typed may appear on this surface, in a
+// value or in a key. Word-level rather than whole-string, because a leak that
+// arrives truncated or normalized is still a leak.
+test('the prompts payload carries no fixture prompt text, at any depth', async () => {
+  const { prompts } = await promptsPayload();
+  const strings = allStrings(prompts);
+  assert.ok(strings.length > 0, 'the walk must actually find strings, or it proves nothing');
+
+  const words = [...new Set(Object.values(FIXTURE_PROMPTS)
+    .join(' ').toLowerCase().match(/[a-z]{4,}/g))];
+  assert.ok(words.length >= 10, `the fixture must supply real words to hunt for, got ${words.length}`);
+
+  for (const s of strings) {
+    const hay = s.toLowerCase();
+    for (const w of words) {
+      assert.ok(!hay.includes(w),
+        `prompt text leaked into the payload: ${JSON.stringify(w)} found in ${JSON.stringify(s)}`);
+    }
+  }
+});
+
+// A structural allowlist, so a field ADDED later cannot quietly carry text
+// past the word scan above. Cluster entries are the only place a name string
+// reaches this payload, and that name comes from the curated vocabulary.
+const CLUSTER_KEYS = new Set(['key', 'label', 'class', 'count', 'sessions', 'days', 'hosts',
+  'medianTokens', 'sampleSessionIds']);
+const LABEL_KEYS = new Set(['name', 'source']);
+
+test('every prompt-pattern entry carries only keys from the allowed set', async () => {
+  const { prompts } = await promptsPayload();
+  for (const c of prompts.patterns.clusters) {
+    for (const k of Object.keys(c)) assert.ok(CLUSTER_KEYS.has(k), `unexpected cluster key ${JSON.stringify(k)}`);
+    for (const k of Object.keys(c.label)) assert.ok(LABEL_KEYS.has(k), `unexpected label key ${JSON.stringify(k)}`);
+    assert.ok(c.sampleSessionIds.every((id) => typeof id === 'string'),
+      'session links are ids, which the masked /api/session route already governs');
+  }
+});
+
+// ── the bundle's one shared scope ──────────────────────────────────────────
+//
+// client.mjs concatenates every split module into ONE function scope, so two
+// files declaring the same top-level name is a SILENT override: the later
+// declaration wins, the earlier file's callers get the wrong function, and
+// nothing throws. This was not hypothetical — usage-prompts.mjs shipped a
+// `kpiCard` that system-readout.mjs's own `kpiCard` replaced, and the Prompts
+// KPI strip rendered with the System tab's markup. No console error, no failing
+// assertion; it was caught by looking at the page.
+//
+// `esc` is the one sanctioned duplicate: usage-rhythm.mjs and
+// usage-prompts.mjs each keep a copy on disk so the TESTS can import them as
+// real ESM (bootstrap.mjs's `esc` is a build-time placeholder), and client.mjs
+// strips both from the bundle.
+const BUNDLE_ORDER = [
+  'bootstrap.mjs', 'overview.mjs', 'intelligence.mjs', 'poll.mjs', 'usage-rhythm.mjs',
+  'usage-prompts.mjs', 'usage.mjs', 'model-lifecycle.mjs', 'usage-orchestrators.mjs',
+  'about.mjs', 'system-readout.mjs', 'system-projects.mjs', 'boot.mjs',
+];
+const STRIPPED_FROM_BUNDLE = new Set(['esc']);
+
+/** Top-level declarations in one split module. A file's top level is the
+ *  SMALLEST indentation any declaration in it uses — these files disagree about
+ *  whether module scope sits at column 0 or 2, and a fixed guess would either
+ *  miss real collisions or report function-local `var`s as global ones. */
+function topLevelNames(src) {
+  const decl = /^(\s*)(?:export\s+)?(?:function|var)\s+([A-Za-z_$][\w$]*)/;
+  const rows = [];
+  for (const line of src.split('\n')) {
+    const m = decl.exec(line);
+    if (m) rows.push({ indent: m[1].length, name: m[2] });
+  }
+  if (!rows.length) return new Set();
+  const top = Math.min(...rows.map((r) => r.indent));
+  return new Set(rows.filter((r) => r.indent === top).map((r) => r.name));
+}
+
+test('no two client modules declare the same top-level name', async () => {
+  const { readFileSync } = await import('node:fs');
+  const { join, dirname } = await import('node:path');
+  const { fileURLToPath } = await import('node:url');
+  const dir = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'src', 'lib', 'dashboard', 'client');
+
+  const owner = new Map();
+  const collisions = [];
+  for (const file of BUNDLE_ORDER) {
+    for (const name of topLevelNames(readFileSync(join(dir, file), 'utf8'))) {
+      if (owner.has(name) && !STRIPPED_FROM_BUNDLE.has(name)) {
+        collisions.push(`${name}: declared in ${owner.get(name)}, silently overridden by ${file}`);
+      }
+      if (!owner.has(name)) owner.set(name, file);
+    }
+  }
+  assert.deepEqual(collisions, [],
+    `${collisions.length} name(s) collide in the shared bundle scope:\n${collisions.join('\n')}`);
+  assert.ok(owner.size > 300, `expected the whole client surface, scanned only ${owner.size} names`);
+});
+
+test('the sanctioned duplicate escaper is stripped, leaving exactly one in the bundle', () => {
+  assert.equal((JS.match(/function esc\(/g) || []).length, 1,
+    'two hand copies of esc in one scope would let a later one silently replace the injected escaper');
+  assert.equal((JS.match(/^import /gm) || []).length, 0, 'no cross-file import survives into the classic script');
+  assert.equal((JS.match(/^\s*export /gm) || []).length, 0, 'no export keyword survives into the classic script');
+});
+
+// ── usage-prompts.mjs: the Prompts view's panels ───────────────────────────
+//
+// Imported as real ESM and exercised on their OUTPUT, not matched against the
+// bundle text: a regex over the served string proves a literal shipped, which
+// is not the same claim as "the panel renders this correctly". The only
+// structural assertions kept are the ones genuinely ABOUT the served artifact —
+// the page shell, the escaper strip and the collision scan above.
+
+const PANEL_PROMPTS = {
+  typed: 100, taps: 20, tapShare: 0.2,
+  byHost: {
+    claude: { typed: 60, taps: 6, tapShare: 0.1, p90TypedTokens: 80, personaOpeners: 0, questionShare: 0.3 },
+    codex: { typed: 40, taps: 14, tapShare: 0.35, p90TypedTokens: 160, personaOpeners: 7, questionShare: 0.3 },
+  },
+  statsByDay: {
+    '2026-08-18': { typed: 10, taps: 2, byHost: { claude: { typed: 10, taps: 2 } } },
+    '2026-08-19': { typed: 12, taps: 6, byHost: { codex: { typed: 12, taps: 6 } } },
+    '2026-08-20': { typed: 8, taps: 1, byHost: { claude: { typed: 8, taps: 1 } } },
+  },
+  baselines: { claude: { tapShareP75_trailing90d: 0.05 }, codex: { tapShareP75_trailing90d: null } },
+  headless: { sessions: 3, responses: 40, share: 0.25, measuredSessions: 10, measuredResponses: 160 },
+  patterns: {
+    corpus: { fingerprints: 250, typed: 100 },
+    provenance: { human: 100, control: 60, agent: 70, adapter: 20 },
+    tapLengths: [
+      { tokens: 1, prompts: 12, sessions: 9, days: 5, hosts: ['claude', 'codex'] },
+      { tokens: 3, prompts: 8, sessions: 6, days: 4, hosts: ['codex'] },
+    ],
+    clusters: [
+      {
+        key: 'aaaa', label: { name: 'Commit-and-push instruction', source: 'seed' },
+        class: 'instruction', count: 12, sessions: 9, days: 5, hosts: ['claude', 'codex'],
+        medianTokens: 3, sampleSessionIds: ['s1', 's2', 's3'],
+      },
+      {
+        key: 'bbbb', label: { name: 'Recurring 44-token prompt · 4 sessions · 1 host', source: 'characterized' },
+        class: 'question', count: 5, sessions: 4, days: 2, hosts: ['codex'],
+        medianTokens: 44, sampleSessionIds: ['s5'],
+      },
+      {
+        key: 'cccc', label: { name: 'Recurring 9-token prompt · 3 sessions · 1 host', source: 'characterized' },
+        class: 'unknown', count: 3, sessions: 3, days: 2, hosts: ['claude'],
+        medianTokens: 9, sampleSessionIds: ['s7'],
+      },
+    ],
+    reAsks: { pairCount: 7, sessionCount: 3, gapHist: { 1: 4, 2: 3 } },
+    exactRepeats: [{ key: 'dddd', count: 9, tokens: 2, sessions: 7, days: 4, hosts: ['claude'] }],
+    computedAt: '2026-08-20T12:00:00.000Z',
+  },
+};
+
+test('the KPI strip renders five tiles, each stating what it does not model', () => {
+  const html = promptKpis(PANEL_PROMPTS);
+  const tiles = [...html.matchAll(/<div class="kpi"[^>]*title="([^"]*)"/g)].map((m) => m[1]);
+  assert.equal(tiles.length, 5, 'spec §3.1 defines five KPIs');
+  for (const tip of tiles) {
+    assert.match(tip, /Does not model|reframe, not a criticism/,
+      `a KPI shipped without its does-not-model line: ${tip.slice(0, 60)}`);
+  }
+  assert.match(html, />100</, 'typed count comes from corpus.typed');
+  assert.match(html, /40% of fingerprinted turns/, '100 typed inside 250 fingerprinted turns');
+  assert.match(html, />20%</, '20 of 100 typed prompts sit in a recurring cluster');
+  assert.match(html, />30%</, 'the question share is weighted across hosts');
+});
+
+// An empty window must not be reported as a measured zero. This is the
+// distinction the whole payload draws with null-vs-0, and the panel is the
+// last place it can be thrown away.
+test('an empty corpus renders an absent state, never a zero', () => {
+  const html = promptKpis({
+    typed: 0, taps: 0, tapShare: null, byHost: {}, statsByDay: {}, baselines: {}, headless: {},
+    patterns: { corpus: { fingerprints: 0, typed: 0 }, provenance: {}, tapLengths: [], clusters: [], reAsks: {}, exactRepeats: [] },
+  });
+  assert.match(html, /no typed prompts in this window/);
+  assert.doesNotMatch(html, /0%/, 'a share of nothing is not a share of zero');
+  assert.doesNotMatch(html, /class="kpi"/, 'no tile claims a figure it could not compute');
+});
+
+test('a null share renders the absent mark rather than 0%', () => {
+  const html = promptKpis({
+    ...PANEL_PROMPTS, tapShare: null,
+    headless: { ...PANEL_PROMPTS.headless, share: null },
+  });
+  assert.match(html, /<div class="v">—<\/div>/, 'an unmeasured share prints the em dash');
+});
+
+// The chip is the only place a threshold is compared, so it must always name
+// what it compared against — a coloured chip with no baseline printed is a
+// judgement with its evidence removed.
+test('each per-host tap chip names the baseline it was compared against', () => {
+  const html = promptKpis(PANEL_PROMPTS);
+  assert.match(html, /claude[^<]*10%.*?your p75 5%/s, 'a host with a baseline prints it');
+  assert.match(html, /codex[^<]*35%.*?no baseline/s, 'a host without one says so instead of comparing to nothing');
+  assert.match(html, /data-tone="bad"/, 'claude is above its own p75, so the chip reads as a rise');
+});
+
+test('the repeated share counts every cluster, not the slice the table draws', () => {
+  const many = {
+    ...PANEL_PROMPTS,
+    patterns: {
+      ...PANEL_PROMPTS.patterns,
+      clusters: Array.from({ length: 40 }, (_v, i) => ({
+        key: `k${i}`, label: { name: `Recurring ${i}-token prompt`, source: 'characterized' },
+        class: 'instruction', count: 2, sessions: 3, days: 2, hosts: ['claude'],
+        medianTokens: i, sampleSessionIds: ['s1'],
+      })),
+    },
+  };
+  // 40 clusters × 2 = 80 of 100 typed, even though the table draws 25 rows.
+  assert.match(promptKpis(many), />80%</, 'the KPI sums the whole uncapped list');
+  assert.match(promptKpis(many), /40 recurring clusters/);
+});
+
+test('the provenance panel names every tag and says which slice the page uses', () => {
+  const html = provenancePanel(PANEL_PROMPTS);
+  assert.match(html, /You, typing/);
+  assert.match(html, /Control records/);
+  assert.match(html, /Agent and teammate deliveries/);
+  assert.match(html, /Tool-authored headless templates/);
+  assert.match(html, /40%/, '100 human of 250 fingerprinted turns');
+  assert.match(html, /Only the .*You, typing.* slice reaches any other figure/s,
+    'the panel must say the rest of the page sits behind this slice');
+  assert.match(html, /over-states rather than under-states/,
+    'and that the classification errs in one direction by design');
+});
+
+test('a provenance tag the corpus never produced still renders, at zero', () => {
+  const html = provenancePanel({
+    ...PANEL_PROMPTS,
+    patterns: { ...PANEL_PROMPTS.patterns, provenance: { human: 10, control: 0, agent: 0, adapter: 0 } },
+  });
+  assert.match(html, /Control records/, 'dropping an empty row turns "you have none" into "we did not look"');
+});
+
+test('how-you-steer splits only what the fingerprint layer measured, with a non-negative residue', () => {
+  const html = steerPanel(PANEL_PROMPTS);
+  assert.match(html, /Questions/);
+  assert.match(html, /Supervision taps/);
+  // 100 typed, 30% questions = 30, 20 taps → 50 residue, and the bars rank.
+  assert.match(html, /Statements and instructions<\/span>.*?50 · 50%/s);
+  const overlap = steerPanel({
+    ...PANEL_PROMPTS, taps: 90,
+    byHost: { claude: { typed: 100, questionShare: 0.9 } },
+  });
+  assert.doesNotMatch(overlap, /-\d/, 'a question that is also a tap must not produce a negative residue');
+});
+
+test('tap lengths render as a distribution, because no text exists at this layer', () => {
+  const html = tapLengthPanel(PANEL_PROMPTS);
+  assert.match(html, /1 token</, 'singular for a one-token tap');
+  assert.match(html, /3 tokens</);
+  assert.match(html, /12 · 9 sess/, 'each length carries its prompt and session counts');
+  const none = tapLengthPanel({ ...PANEL_PROMPTS, patterns: { ...PANEL_PROMPTS.patterns, tapLengths: [] } });
+  assert.match(none, /no supervision taps in this window/);
+});
+
+// A day the host did not type on is a BREAK in the trend, not a zero and not a
+// carried-forward neighbour: sparklineSvg renders a non-finite entry as a gap,
+// and this is the function that has to produce one.
+test('the per-host tap series gaps a day that host did not type on', () => {
+  const series = hostTapSeries(PANEL_PROMPTS.statsByDay, 'claude');
+  assert.equal(series.length, 3, 'one slot per day in the window, in order');
+  assert.equal(series[0], 0.2, '2026-08-18: 2 taps over 10 typed');
+  assert.equal(series[1], null, '2026-08-19 is codex-only, so claude has no share that day');
+  assert.equal(series[2], 0.125, '2026-08-20: 1 tap over 8 typed');
+});
+
+test('host interplay names both hosts and flags a thin history rather than trending it', () => {
+  const html = hostInterplay(PANEL_PROMPTS);
+  assert.match(html, /codex/);
+  assert.match(html, /claude/);
+  assert.match(html, /7<\/b> prompts open by assigning a role/, 'the persona count is a Codex-side fact here');
+  assert.match(html, /Windows are not equal/, 'the unequal-history caveat renders on the panel');
+  const thin = hostInterplay({
+    ...PANEL_PROMPTS,
+    byHost: { ...PANEL_PROMPTS.byHost, codex: { ...PANEL_PROMPTS.byHost.codex, typed: 4 } },
+  });
+  assert.match(thin, /is a shape, not yet a trend/, 'a host under the evidence floor is named as thin');
+});
+
+test('the patterns table carries the class, the suggested move, and masked session links', () => {
+  const html = patternsTable(PANEL_PROMPTS);
+  assert.match(html, /Commit-and-push instruction/, 'a seeded cluster shows its curated name');
+  assert.match(html, /CLAUDE\.md line/, 'an instruction cluster suggests a project instruction');
+  assert.match(html, /reporting gap/, 'a question cluster suggests the agent should have volunteered it');
+  assert.match(html, /needs classification/, 'an unclassified cluster gets no guessed move');
+  assert.match(html, /href="#usage\/s1"/, 'links go through the existing masked transcript route');
+  assert.match(html, /\+6/, '9 sessions with 3 sample ids leaves 6 behind the count');
+});
+
+// The vocabulary's own descriptor repeats the span columns. Trimming it is a
+// rendering choice, and it must not touch a curated name.
+test('a characterized descriptor is trimmed to its lead, a curated name is not', () => {
+  const html = patternsTable(PANEL_PROMPTS);
+  assert.match(html, />Recurring 44-token prompt</, 'the redundant span tail is dropped from the cell');
+  assert.match(html, /title="Recurring 44-token prompt · 4 sessions · 1 host"/, 'and kept as the tooltip');
+  assert.match(html, />Commit-and-push instruction</, 'a curated name is shown whole');
+});
+
+// The projection is uncapped so the KPI can be exact; the table caps for
+// display. Saying what is hidden is what stops the visible rows reading as the
+// whole finding.
+test('a capped table says how many rows it is not showing', () => {
+  const many = {
+    ...PANEL_PROMPTS,
+    patterns: {
+      ...PANEL_PROMPTS.patterns,
+      clusters: Array.from({ length: 40 }, (_v, i) => ({
+        key: `k${i}`, label: { name: `Recurring ${i}-token prompt`, source: 'characterized' },
+        class: 'instruction', count: 2, sessions: 3, days: 2, hosts: ['claude'],
+        medianTokens: i, sampleSessionIds: ['s1'],
+      })),
+    },
+  };
+  const html = patternsTable(many);
+  // One `scope="row"` per DATA row — counting `<tr>` would include the header.
+  assert.equal((html.match(/scope="row"/g) || []).length, 25, 'the table draws its display cap');
+  assert.match(html, /15<\/b> more recurring clusters not listed/);
+  assert.match(html, /Every figure above counts all 40/, 'and that the KPI above is not capped');
+  assert.doesNotMatch(patternsTable(PANEL_PROMPTS), /more recurring cluster/,
+    'an uncapped table must not claim it is hiding anything');
+});
+
+test('exact repeats render beside the clusters as the identical-text half', () => {
+  const html = patternsTable(PANEL_PROMPTS);
+  assert.match(html, /Typed verbatim, more than once/);
+  assert.match(html, /9&times;/, 'the count leads the row');
+  assert.match(html, /2-token prompt/);
+  assert.match(html, /7 sessions · 4 days/, 'the span is spelled out beside the count');
+  assert.match(html, /ak usage prompts/, 'and it points at where exemplar text actually lives');
+  // Counts on this view routinely come back as 1; "1 days" is the tell that a
+  // number was pasted into a sentence rather than written into one.
+  const one = patternsTable({
+    ...PANEL_PROMPTS,
+    patterns: {
+      ...PANEL_PROMPTS.patterns,
+      exactRepeats: [{ key: 'e1', count: 2, tokens: 5, sessions: 1, days: 1, hosts: ['claude'] }],
+    },
+  });
+  assert.match(one, /1 session · 1 day</);
+  assert.doesNotMatch(one, /1 sessions|1 days/);
+});
+
+test('re-asks report the immediate-repeat share, which is the load-bearing one', () => {
+  const html = reAskPanel(PANEL_PROMPTS);
+  assert.match(html, /7<\/b> re-asks/);
+  assert.match(html, /3<\/b> sessions/);
+  assert.match(html, /57%.*?very next turn/s, '4 of 7 pairs landed at gap 1');
+  const none = reAskPanel({ ...PANEL_PROMPTS, patterns: { ...PANEL_PROMPTS.patterns, reAsks: { pairCount: 0, sessionCount: 0, gapHist: {} } } });
+  assert.match(none, /No prompt was asked twice/);
+});
+
+// Labels reach this panel from a store a person or an inference pass writes,
+// so the escaper is load-bearing even though today's names are all generated.
+test('a hostile cluster label cannot inject markup', () => {
+  const html = patternsTable({
+    ...PANEL_PROMPTS,
+    patterns: {
+      ...PANEL_PROMPTS.patterns,
+      clusters: [{
+        ...PANEL_PROMPTS.patterns.clusters[0],
+        sampleSessionIds: ['"><script>alert(1)</script>'],
+        hosts: ['<img src=x onerror=alert(1)>'],
+        label: { name: '<script>alert(1)</script>', source: 'curated' },
+      }],
+      exactRepeats: [],
+    },
+  });
+  // The vector is an unescaped ANGLE BRACKET, not the substring "onerror":
+  // `&lt;img src=x onerror=alert(1)&gt;` is inert text in a text node, and
+  // asserting on the word alone would fail a correctly escaped payload.
+  assert.doesNotMatch(html, /<script/, 'no script element survives any field');
+  assert.doesNotMatch(html, /<img/, 'no img element survives a host chip');
+  assert.match(html, /&lt;script&gt;alert\(1\)&lt;\/script&gt;/, 'the label is escaped, not dropped');
+  assert.match(html, /&lt;img src=x onerror=alert\(1\)&gt;/, 'and so is the host chip');
+  assert.match(html, /href="#usage\/%22%3E%3Cscript%3E/,
+    'a session id reaches the href URI-encoded, so it cannot close the attribute');
+});
+
+test('the two unbuilt sections render a named gap, not a fabricated card', () => {
+  const taxonomy = taxonomyPlaceholder();
+  assert.match(taxonomy, /has not shipped/);
+  assert.match(taxonomy, /Deliberately blank rather than filled with a guess/);
+  const coaching = coachingPlaceholder();
+  assert.match(coaching, /outcome ledger/);
+  assert.match(coaching, /draft-only|draft/i, 'the contract is stated even before the cards exist');
+  for (const html of [taxonomy, coaching]) {
+    assert.doesNotMatch(html, /class="kpi"/, 'a placeholder must not look like a measured tile');
+  }
+});
+
+// Structural by necessity: these assert what the SERVED DOCUMENT contains, so
+// there is no behaviour to exercise instead — the panels cannot render into
+// containers the page never shipped, and the tab cannot route to a panel with
+// no ARIA relationship to it.
+test('the served page ships the Prompts rail entry and its panel containers', () => {
+  assert.match(PAGE, /id="usage-tab-prompts"[^>]*data-view="prompts"[^>]*aria-controls="v-prompts"/,
+    'the rail button must point at the view it opens');
+  assert.match(PAGE, /id="v-prompts"[^>]*role="tabpanel"[^>]*aria-labelledby="usage-tab-prompts"/,
+    'and the view must point back, or the tab relationship is one-way');
+  for (const id of ['u-pr-kpis', 'u-pr-provenance', 'u-pr-steer', 'u-pr-taps', 'u-pr-taxonomy',
+    'u-pr-hosts', 'u-pr-reasks', 'u-pr-patterns', 'u-pr-coaching']) {
+    assert.match(PAGE, new RegExp(`id="${id}"`), `panel container ${id} is missing from the served page`);
+  }
+  // Rail placement, spec §3: between Findings and Sessions.
+  const order = [...PAGE.matchAll(/data-view="(\w+)"/g)].map((m) => m[1]);
+  assert.ok(order.indexOf('prompts') > order.indexOf('findings')
+    && order.indexOf('prompts') < order.indexOf('sessions'),
+  `Prompts must sit between Findings and Sessions, order was ${JSON.stringify(order)}`);
+});
+
+test('the whole-history chip ships hidden, for the one view that needs it', () => {
+  assert.match(PAGE, /id="usage-days-all"[^>]*data-days="365"[^>]*hidden/,
+    'All-history starts hidden and is revealed by setUsageView, so other views keep the 7/14/30 row');
+  assert.match(JS, /usage-days-all/, 'and the client actually toggles it');
 });
 
 // ── usage-rhythm.mjs: rhythm/mode chart primitives (Task 8) ────────────────

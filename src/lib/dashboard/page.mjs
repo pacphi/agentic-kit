@@ -159,6 +159,7 @@ export function renderPage({ name, version }) {
         <button class="seg-btn" role="tab" id="usage-tab-score" data-view="score" aria-selected="true" aria-controls="v-score" type="button">Scorecard</button>
         <button class="seg-btn" role="tab" id="usage-tab-limits" data-view="limits" aria-selected="false" aria-controls="v-limits" tabindex="-1" type="button">Limits</button>
         <button class="seg-btn" role="tab" id="usage-tab-findings" data-view="findings" aria-selected="false" aria-controls="v-findings" tabindex="-1" type="button">Findings<span class="segbadge" id="u-findings-n" hidden></span></button>
+        <button class="seg-btn" role="tab" id="usage-tab-prompts" data-view="prompts" aria-selected="false" aria-controls="v-prompts" tabindex="-1" type="button">Prompts</button>
         <button class="seg-btn" role="tab" id="usage-tab-models" data-view="models" aria-selected="false" aria-controls="v-models" tabindex="-1" type="button">Models<span class="segbadge" id="mli-attention-n" hidden></span></button>
         <button class="seg-btn" role="tab" id="usage-tab-sessions" data-view="sessions" aria-selected="false" aria-controls="v-sessions" tabindex="-1" type="button">Sessions<span class="mono seg-n" id="u-sessions-n"></span></button>
         <button class="seg-btn" role="tab" id="usage-tab-transcript" data-view="transcript" aria-selected="false" aria-controls="v-transcript" tabindex="-1" type="button">Transcript</button>
@@ -167,6 +168,12 @@ export function renderPage({ name, version }) {
         <button class="chipf" type="button" data-days="7">7d</button>
         <button class="chipf on" type="button" data-days="14">14d</button>
         <button class="chipf" type="button" data-days="30">30d</button>
+        <!-- Patterns are lifetime phenomena, so the Prompts view alone offers a
+             whole-history window; setUsageView shows and hides this chip, and
+             drops back to 30d when a view that has no use for it is opened. 365
+             is the widest window clampDays will accept, so "All" is a real
+             ceiling rather than an unbounded promise. -->
+        <button class="chipf" type="button" id="usage-days-all" data-days="365" hidden>All</button>
       </div>
     </div>
     <div class="secondary-group" id="secondary-system" hidden>
@@ -503,6 +510,47 @@ export function renderPage({ name, version }) {
       <div class="ins-grid" id="u-insights"></div>
       <div class="foot">grounded in local measurement first; vendor benchmarks are labelled as such &middot;
         third-party &ldquo;model X vs Y&rdquo; blog comparisons are deliberately not used as evidence</div>
+    </section>
+
+    <section class="view" id="v-prompts" role="tabpanel" aria-labelledby="usage-tab-prompts" hidden>
+      <div class="note"><span class="i">&#8505;</span><span>What you actually type, across every host.
+        Every figure here is computed from prompt <b>fingerprints</b> &mdash; a hash, a token count, and a
+        provenance tag recorded at scan time. <b>No prompt text is stored in the index or sent to this page.</b>
+        Only turns a person typed are counted; agent deliveries, tool templates and slash records are
+        filtered out before anything below is measured. Exemplars live in <code>ak usage prompts</code>,
+        which reads your transcripts locally and prints nothing to any wire.</span></div>
+      <div class="hero" id="u-pr-kpis"></div>
+      <section class="strip">
+        <div class="sh"><h2>Who is typing</h2><span class="n mono" id="u-pr-prov-note"></span></div>
+        <div id="u-pr-provenance"></div>
+      </section>
+      <section class="strip">
+        <div class="sh"><h2>How you steer</h2><span class="n mono" id="u-pr-steer-note"></span></div>
+        <div class="two">
+          <div>
+            <div id="u-pr-steer"></div>
+            <h3 class="pr-sub">Supervision taps by length</h3>
+            <div id="u-pr-taps"></div>
+          </div>
+          <div id="u-pr-taxonomy"></div>
+        </div>
+      </section>
+      <section class="strip">
+        <div class="sh"><h2>Host interplay</h2><span class="n mono" id="u-pr-hosts-note"></span></div>
+        <div id="u-pr-hosts"></div>
+      </section>
+      <section class="strip">
+        <div class="sh"><h2>Repeated patterns</h2><span class="n mono" id="u-pr-patterns-note"></span></div>
+        <div id="u-pr-reasks"></div>
+        <div id="u-pr-patterns"></div>
+      </section>
+      <section class="strip">
+        <div class="sh"><h2>Coaching</h2><span class="n mono">not built yet</span></div>
+        <div id="u-pr-coaching"></div>
+      </section>
+      <div class="foot">clustering is deliberately loose &mdash; eleven wordings of one request outrank
+        eleven identical ones, because eleven wordings mean there is no canonical form to point at &middot;
+        pattern names come from a fixed curated vocabulary, never from what you typed</div>
     </section>
 
     <section class="view" id="v-sessions" role="tabpanel" aria-labelledby="usage-tab-sessions" hidden>

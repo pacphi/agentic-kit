@@ -105,6 +105,14 @@ let usageRhythmSrc = readSplit('usage-rhythm.mjs');
 usageRhythmSrc = inject(usageRhythmSrc, RHYTHM_ESC,
   '// esc: the bundle\'s single injected groups.mjs escaper (client.mjs strips\n'
   + "// this file's on-disk copy — see RHYTHM_ESC there).");
+// usage-prompts.mjs carries a byte-identical on-disk `esc` for the same reason
+// and is stripped with the same constant: two hand copies of the escaper in
+// one shared scope would let a later declaration silently replace the injected
+// groups.mjs one, and the copies are free to drift from it.
+let usagePromptsSrc = readSplit('usage-prompts.mjs');
+usagePromptsSrc = inject(usagePromptsSrc, RHYTHM_ESC,
+  '// esc: the bundle\'s single injected groups.mjs escaper (client.mjs strips\n'
+  + "// this file's on-disk copy — see RHYTHM_ESC there).");
 const usageSrc = readSplit('usage.mjs');
 const modelLifecycleSrc = readSplit('model-lifecycle.mjs');
 const usageOrchestratorsSrc = readSplit('usage-orchestrators.mjs');
@@ -119,5 +127,5 @@ const bootSrc = readSplit('boot.mjs');
 // sequence) running in the same relative order it always has.
 export const JS = `
 (function(){
-${bootstrapSrc}${overviewSrc}${intelligenceSrc}${pollSrc}${usageRhythmSrc}${usageSrc}${modelLifecycleSrc}${usageOrchestratorsSrc}${aboutSrc}${systemReadoutSrc}${systemProjectsSrc}${bootSrc}})();
+${bootstrapSrc}${overviewSrc}${intelligenceSrc}${pollSrc}${usageRhythmSrc}${usagePromptsSrc}${usageSrc}${modelLifecycleSrc}${usageOrchestratorsSrc}${aboutSrc}${systemReadoutSrc}${systemProjectsSrc}${bootSrc}})();
 `;

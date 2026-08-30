@@ -3,7 +3,7 @@
 // override comment for why this directory isn't run through the node lib.
 import { VIEWS, authHeaders, esc, setTab } from './bootstrap.mjs';
 import { mliDetail, mliRouteRows, renderModelFacets, renderModelRouteSort, renderModelSort } from './model-lifecycle.mjs';
-import { MODEL_PAGE, USAGE, fmtNum, loadLimits, loadModelInventory, loadModelLifecycle, loadUsage, modelRows, renderFindings, renderScore, renderSessions, renderSourceHealth, renderTranscript, sessionRow, setUsageView } from './usage.mjs';
+import { MODEL_PAGE, USAGE, fmtNum, loadLimits, loadModelInventory, loadModelLifecycle, loadUsage, modelRows, renderFindings, renderPrompts, renderScore, renderSessions, renderSourceHealth, renderTranscript, sessionRow, setUsageView } from './usage.mjs';
 
   export function renderUsage(){
     if(!USAGE)return;
@@ -15,6 +15,7 @@ import { MODEL_PAGE, USAGE, fmtNum, loadLimits, loadModelInventory, loadModelLif
     renderSourceHealth(USAGE.sourceHealth);
     renderScore(USAGE);
     renderFindings(USAGE);
+    renderPrompts(USAGE);
     renderSessions(USAGE);
     if(usageView==="transcript")renderTranscript();
   }
