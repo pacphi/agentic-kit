@@ -3046,3 +3046,45 @@ test('readIndex does not serve a promptPatterns caller a memoized answer without
   assert.notEqual(withPatterns, plain, 'the two must not coalesce into one answer');
   assert.ok(withPatterns.promptPatterns, 'the projection must actually be built');
 });
+
+// ── QE review F-8 (MEDIUM): the sampleSessionIds privacy bound, pinned ──────
+// The comment states the rationale — "A LINK AFFORDANCE, not a session list —
+// three is enough to click through and few enough that the projection cannot
+// become a membership dump" — and session ids are identifiers that ship on
+// every dashboard poll. Neither half was asserted: raising the cap from 3 to
+// 300 survived the suite, and so did replacing the field with `[]` outright.
+// The existing shape test asserts `length <= 3` over a fixture whose clusters
+// have three or fewer sessions, so it can never see either mutation.
+
+test('F-8: a cluster spanning MORE than three sessions publishes exactly three ids', () => {
+  const billed = (day) => [usageRow(day, 'claude-opus-5', { input: 10 })];
+  // Six sessions all typing the SAME prompt: one cluster, six sessions.
+  const records = ['s1', 's2', 's3', 's4', 's5', 's6'].map((id) => record(id, {
+    usage: billed('2026-07-24'), promptFPs: [fp(QUESTION_A)],
+  }));
+  const a = aggregate(records, aggOpts({ prompts: true }));
+  const cluster = a.promptPatterns.clusters.find((c) => c.sessions > 3);
+  assert.ok(cluster, 'guard: the fixture must actually produce a cluster with more than three sessions');
+  assert.equal(cluster.sampleSessionIds.length, 3,
+    'exactly three — not fewer (the field must not be emptied) and not more (not a membership dump)');
+});
+
+test('F-8: the published ids are drawn from that cluster\'s OWN sessions', () => {
+  const billed = (day) => [usageRow(day, 'claude-opus-5', { input: 10 })];
+  const own = ['own1', 'own2', 'own3', 'own4', 'own5'];
+  const records = [
+    ...own.map((id) => record(id, { usage: billed('2026-07-24'), promptFPs: [fp(QUESTION_A)] })),
+    // A different recurring prompt in unrelated sessions, so a bug that
+    // published ids from the wrong cluster has somewhere wrong to draw from.
+    ...['other1', 'other2', 'other3', 'other4'].map((id) => record(id, {
+      usage: billed('2026-07-24'), promptFPs: [fp(ORDER_A)],
+    })),
+  ];
+  const a = aggregate(records, aggOpts({ prompts: true }));
+  const cluster = a.promptPatterns.clusters.find((c) => c.sessions === own.length);
+  assert.ok(cluster, 'guard: the five-session cluster must exist');
+  assert.equal(cluster.sampleSessionIds.length, 3);
+  for (const id of cluster.sampleSessionIds) {
+    assert.ok(own.includes(id), `${id} is not one of this cluster's own sessions`);
+  }
+});

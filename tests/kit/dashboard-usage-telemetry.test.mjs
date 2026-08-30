@@ -2052,3 +2052,80 @@ test('F-9: the caption points at the chip every card carries, not at the stale m
   assert.match(html, /Every card names its own source in the chip beside its status/);
   assert.doesNotMatch(html, /see its own marker/, 'the old promise pointed at a marker a fresh card did not have');
 });
+
+// ── QE review F-5 (MEDIUM): the dashboard's read-only ledger contract ──────
+// Asserted in three separate places in the source — "Read-only — see
+// dashboardCoachingPayload's doc for why this must never call saveLedger",
+// "a dashboard poll can never mutate what `ak usage prompts --dismiss` owns",
+// and "the dashboard never writes the ledger" — and held by no test. The
+// review injected a real `saveLedger(ledgerPath, ledger)` into that function
+// and NOTHING failed; a coverage probe confirmed the path IS exercised, so the
+// survival was real rather than vacuous. The existing byte-comparison test
+// cannot see it: reconcile hands back an equivalent ledger, so re-serializing
+// it produces the same bytes.
+//
+// A regression here silently resurrects every dismissed card an operator
+// suppressed via the CLI, on the next dashboard poll.
+
+test('F-5: dashboard-server never references a ledger or store WRITER outside a comment', async () => {
+  // The strongest available statement of the contract, and the one that cannot
+  // rot: the writers are not in scope at all, so no edit inside
+  // dashboardCoachingPayload can reach one without failing here.
+  const { fileURLToPath } = await import('node:url');
+  const src = fs.readFileSync(
+    fileURLToPath(new URL('../../src/lib/dashboard-server.mjs', import.meta.url)), 'utf8');
+  for (const writer of ['saveLedger', 'saveLabelStore', 'writePrivateFileAtomic']) {
+    const uses = src.split('\n')
+      .map((line, i) => [i + 1, line.trim()])
+      .filter(([, line]) => line.includes(writer) && !line.startsWith('//') && !line.startsWith('*'));
+    assert.deepEqual(uses, [],
+      `${writer} is referenced in dashboard-server.mjs outside a comment: ${JSON.stringify(uses)}`);
+  }
+});
+
+test('F-5: no number of /api/usage polls creates the ledger file the dashboard was pointed at', () => {
+  // Behavioral half. `loadLedger` is overridden, so nothing reads from disk —
+  // which means the ONLY thing that could bring this path into existence is a
+  // write. Pointing it at a directory that does not exist makes the proof
+  // unambiguous: `writePrivateFileAtomic` mkdirs recursively, so if any poll
+  // wrote, the directory would be there.
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-dash-f5-'));
+  const neverWritten = path.join(dir, 'never-written');
+  const ledgerPath = path.join(neverWritten, 'usage-outcome-ledger.json');
+  const dismissed = {
+    version: 1,
+    records: [{
+      id: 'commit-push-claude-md', evidenceHash: 'a'.repeat(16), status: 'dismissed',
+      generatedAt: '2026-08-01T00:00:00.000Z', statusAt: '2026-08-01T00:00:00.000Z',
+      baseline: { count: 12, clusterKey: 'k', sessions: 8, days: 4 }, windowDays: 30, dismissCount: 1,
+    }],
+  };
+  return (async () => {
+    const calls = [];
+    let loads = 0;
+    const srv = await startDashboard({
+      port: 0,
+      fetchStatus: async () => ({ overall: 'ok', rows: [] }),
+      usage: { readIndex: spyReadIndex(PROMPT_RECORDS, calls) },
+      coachingLedger: {
+        loadLedger: () => { loads++; return JSON.parse(JSON.stringify(dismissed)); },
+        ledgerPath,
+      },
+      labelStore: NULL_LABEL_STORE,
+    });
+    try {
+      for (let i = 0; i < 3; i++) {
+        const r = await get(`${srv.url}api/usage?days=7`, srv.token);
+        assert.equal(r.status, 200, `expected 200, got ${r.status}`);
+        assert.equal(JSON.parse(r.body).prompts.coaching.summary.dismissed, 1,
+          'guard: the poll really did reconcile against the injected ledger');
+      }
+    } finally {
+      await srv.close();
+    }
+    assert.ok(loads >= 3, 'guard: the ledger was read on every poll, so the write path was reachable');
+    assert.equal(fs.existsSync(neverWritten), false,
+      'a poll wrote the ledger — every CLI dismissal would be resurrected on the next one');
+    fs.rmSync(dir, { recursive: true, force: true });
+  })();
+});

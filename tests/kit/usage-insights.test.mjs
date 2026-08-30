@@ -1113,3 +1113,42 @@ test('the three prompt detectors never touch prompt text, because there is none 
   // that the fixture never had a text field for a detector to reach for.
   assert.equal(JSON.stringify(agg).includes('"text"'), false);
 });
+
+// ── QE review F-6 (MEDIUM): the >=50-typed-per-host gate, pinned at its
+// LITERAL boundary ─────────────────────────────────────────────────────────
+// The spec row added by ed843f0 states "each host needs >=50 typed prompts for
+// the ratio to be compared at all", and the suite already had a floor test —
+// but it was written against `T.asymmetryMinTypedPerHost` and
+// `T.asymmetryMinTypedPerHost - 1`, so it MOVED with the constant. Lowering
+// that constant to 0 failed nothing. A documented threshold whose only test
+// tracks it is a comment.
+//
+// This matters past the detector: `codex-completion-criteria`'s propose bar
+// gates on the presence of `host-prompt-asymmetry`, so a regression here also
+// fabricates a coaching card off two thin hosts.
+
+test('F-6: 49 typed prompts on a host is not enough for the p90 ratio arm to fire', () => {
+  const agg = asymAgg({
+    claude: hostStats({ typed: 49, p90TypedTokens: 60 }),
+    codex: hostStats({ typed: 49, p90TypedTokens: 40 }),
+  });
+  assert.equal(fired(agg, 'host-prompt-asymmetry'), false,
+    'a 49-prompt host is not a comparison, it is an anecdote — 50 is the documented floor');
+});
+
+test('F-6: 50 typed prompts on both hosts IS enough, with the same 1.5x ratio', () => {
+  const agg = asymAgg({
+    claude: hostStats({ typed: 50, p90TypedTokens: 60 }),
+    codex: hostStats({ typed: 50, p90TypedTokens: 40 }),
+  });
+  assert.equal(fired(agg, 'host-prompt-asymmetry'), true,
+    'the boundary is inclusive at 50, so the two tests bracket the exact documented value');
+});
+
+test('F-6: 50 on one host and 49 on the other still does not fire — BOTH must clear it', () => {
+  const agg = asymAgg({
+    claude: hostStats({ typed: 50, p90TypedTokens: 60 }),
+    codex: hostStats({ typed: 49, p90TypedTokens: 40 }),
+  });
+  assert.equal(fired(agg, 'host-prompt-asymmetry'), false);
+});
