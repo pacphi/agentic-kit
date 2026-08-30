@@ -1290,8 +1290,8 @@ p(q), over N samples, landing in bucket i (count n_i, running total `cum` before
 - Render: `lengthCard`/`latencyCard` and the `≥` prefix helper `fmtAtLeast` in
   `src/lib/dashboard/client/usage.mjs` (that bundle shares a basename with the
   CLI command module, so its render sites are cited by function name rather
-  than by line); the CLI's own `fmtAtLeast` is `src/commands/usage.mjs:143-146`
-  and `printScoreRhythm` (`src/commands/usage.mjs:212-219`) prints the pair.
+  than by line); the CLI's own `fmtAtLeast` is `src/commands/usage.mjs:175-178`
+  and `printScoreRhythm` (`src/commands/usage.mjs:244-251`) prints the pair.
 
 **Worked example**, latency, computable by hand. `latHist = [10, 30, 20, 25,
 10, 5]`, so N = 100.
@@ -1435,7 +1435,7 @@ off each `turn_context`, last one wins since a session may renegotiate mid-run
 (`usage-parsers.mjs:697-702`); OpenCode's `mode` off each assistant message
 (`usage-opencode.mjs:240-241`). Render is `modeChart` in
 `src/lib/dashboard/client/usage.mjs`; the CLI table is `printScoreModeTable`
-(`src/commands/usage.mjs:234-236`).
+(`src/commands/usage.mjs:266-268`).
 
 **The mapping table**, in full (`usage-modes.mjs:6-17`), pinned value-by-value
 by `normalizeMode` assertions in `tests/kit/usage-modes.test.mjs:9-52`, and the
@@ -1649,7 +1649,7 @@ refactor can outweigh forty short sessions, and a mean would describe that one
 session rather than the run of them. P90 rides beside it precisely so the tail
 stays visible instead of being hidden by the choice of a robust centre. A
 positive figure that rounds away at two decimals prints `<$0.01`, never
-`$0.00` (`fmtUsdMin`, `src/commands/usage.mjs:96-99`) — "less than a cent" and
+`$0.00` (`fmtUsdMin`, `src/commands/usage.mjs:128-132`) — "less than a cent" and
 "nothing" are different claims.
 
 **What the cache saved, asked as a difference.** `cacheSavingPerMillion`
@@ -1688,8 +1688,9 @@ the caller widens that cutoff on purpose so older records survive to be
 aggregated here, and deriving the baseline from a widened bound would silently
 stretch it to whatever lookback the caller happened to pass. The dashboard route widens it to
 the depth the personal tap-share baseline needs rather than to the previous
-window alone: `windowDays + BASELINE_TRAILING_DAYS` (`lookbackDays`,
-`src/lib/dashboard-server.mjs:1437`). One extra window would be a strict
+window alone: `days + BASELINE_TRAILING_DAYS` (`lookbackDays`,
+`src/lib/dashboard-server.mjs:1437`); `ak usage score` applies the same rule
+(`src/commands/usage.mjs:349`). One extra window would be a strict
 subset — too shallow for `promptBaselines`, which needs
 BASELINE_MIN_ACTIVE_DAYS of history BEFORE the displayed window and returns
 null without it — while this depth is a strict superset of the previous window
@@ -1704,7 +1705,7 @@ which a zeroed totals object would misreport as "measured nothing"
 (`usage-aggregate.mjs:1213`). A chip self-suppresses when the baseline is null
 or zero, and a magnitude that rounds to zero prints flat rather than drawing an
 arrow the printed number does not support (`deltaChip`,
-`usage-rhythm.mjs:36-53`; `fmtDelta`, `src/commands/usage.mjs:152-163`).
+`usage-rhythm.mjs:36-53`; `fmtDelta`, `src/commands/usage.mjs:184-196`).
 
 **Engaged time by day is a sibling map, not a `byDay` field.** `byDay`'s
 presence contract is **billed days only** — a key exists exactly when tokens
@@ -1905,37 +1906,59 @@ reAsks          = reAskPairs(typed, J ≥ 0.8, window ≤ 6 turns)
 headlessShare   = Σ responses[typedPrompts = 0] / Σ responses[typedPrompts ≠ null]
 ```
 
-**Source:** the window is parsed by `parsePromptWindow`, where all history means
-`ALL_WINDOW_DAYS` (in the `ak usage prompts` command) — 365 days, which is all the
-index can hold, since `KEEP_MS` prunes a cache entry at 366
-(`usage-index.mjs:146`). The fingerprints come from the index CACHE
-(`readPromptEntries`, in the same command) because the aggregate
-publishes prompt counts but not the fingerprint layer itself; the command calls
-`readIndex` first, which rewrites that cache before aggregating, so the two
-never disagree. `decoratedFingerprints` (`:472`) attaches session, day and host
-and converts the stored numeric `q`/`o` flags to the booleans
-`usage-prompt-patterns.mjs` reads. The section arithmetic is `provenanceSplit`
-(`:521`), `tapLengthRows` (`:553`), `monthlyTapShare` (`:590`), `clusterRow`
-(`:650`), `headlessShare` (`:704`), assembled in `promptReport` (`:728`).
-Clustering runs at `CLUSTER_JACCARD` (`:403`) and re-asks at `REASK_JACCARD`
-(`:408`).
+**Source:** the repetition half of this report is not computed by the CLI at
+all. `aggregate(records, { prompts: true })` builds `agg.promptPatterns`
+(`buildPromptPatterns`, `usage-aggregate.mjs:570`) from the same records
+`buildPromptBaselines` reads, and `ak usage prompts` renders it — so this
+command and the dashboard's Prompts view cannot disagree about what a cluster
+is. Raw fingerprints have no public accessor: the layer is 2.8 MB on the
+reference corpus, and only aggregates ship, plus at most three session ids per
+cluster as a link into the masked session surface.
 
-The deep pass re-reads transcripts through the same per-host parsers the scan
-path uses (`reReadTurns`, `:801`) and re-derives each turn's hash under the
-scan path's own two gates — `kind === 'prompt'` and `provenanceOf` on the same
-text (`humanPromptTurns`, `:786`) — which is what makes the join exact.
-`exemplarCandidates` (`:870`) orders sessions by how many wanted exemplars each
-covers and `collectExemplars` (`:917`) opens them only while something is still
-unresolved, falling through to a smaller sibling transcript when one is past
-`MAX_DEEP_FILE_BYTES` (`:773`).
+`decoratePromptFP` (`usage-aggregate.mjs:474`) is the single place the
+decoration semantics live — session id, first-billed day, host, and the
+question/persona flags mapped to ALWAYS-SET booleans. That mapping is
+load-bearing twice: the scan path stores them as the number 1 and omits them
+when false, while the clustering library reads `=== true` / `=== false` and
+treats absent as unclassified, so `1 !== true` made every cluster report
+`unknown` and a never-written `false` left the `instruction` class unreachable.
+Thresholds are named exports beside it — `PROMPT_CLUSTER_JACCARD`
+(`usage-aggregate.mjs:437`) and `PROMPT_REASK_JACCARD` (`:442`) — so the panel,
+the CLI captions and the arithmetic quote one number each.
 
-**Worked example:** on the reference corpus at the all-history window, 5,681
-fingerprinted prompt turns carry 2,656 tagged `human` — a typed share of 46.8%
+The projection is OPT-IN and `null` when not requested, the same shape
+`previous` uses. `usage-index.mjs` forwards the flag (`:728`) and folds it into
+`scanKey` (`:501`), which decides both the single-flight identity and
+readIndex's memo — without the fold a `{prompts:true}` caller inside the memo
+TTL would be served an answer built without the projection.
+
+The CLI adds the window (`ALL_WINDOW_DAYS`, `src/commands/usage.mjs:393` — 365
+days, all the index can hold, since `KEEP_MS` prunes a cache entry at 366), the
+per-host and monthly folds off `promptsByHost` / `promptStatsByDay`
+(`monthlyTapShare`, `:490`), and the headless share, which is a property of the
+session rows rather than of the prompts (`headlessShare`, `:643`).
+
+The deep pass is the one tier that reads the index cache directly
+(`readPromptEntries`, `src/commands/usage.mjs:739`): it needs the HASHES it owes
+an exemplar for and the transcript PATH of a session holding one, and the cache
+is the only place both exist together. That coupling is confined to this
+text-bearing, CLI-only tier — a pass about to open the transcripts and print
+what was typed already has strictly more access than a fingerprint. It re-reads
+through the same per-host parsers the scan path uses (`reReadTurns`, `:809`) and
+re-derives each turn's hash under the scan path's own two gates —
+`kind === 'prompt'` and `provenanceOf` on the same text (`humanPromptTurns`,
+`:794`) — which is what makes the join exact. `exemplarCandidates` (`:876`)
+orders sessions by how many wanted exemplars each covers and `collectExemplars`
+(`:913`) opens them only while something is unresolved, falling through to a
+smaller sibling transcript when one is past `MAX_DEEP_FILE_BYTES` (`:723`).
+
+**Worked example:** on the reference corpus at the all-history window, 5,684
+fingerprinted prompt turns carry 2,656 tagged `human` — a typed share of 46.7%
 — of which 322 run to `TAP_MAX_TOKENS` (4) tokens or fewer, a 12.1% tap share.
 Per host that is 11.6% on Claude against 12.3% on Codex, and the monthly series
 separates them: Claude 14.6% → 10.9% across 2026-07 → 2026-08 while Codex runs
-7.7% → 15.5%. A `--deep` run over the same corpus opened 48 transcripts in
-0.6 s and resolved 59 of the 60 exemplars it wanted; the one it did not, and
+7.7% → 15.5%. A `--deep` run over the same corpus opened 51 transcripts in
+0.6 s and resolved 61 of the 62 exemplars it wanted; the one it did not, and
 why, is printed rather than left blank.
 
 **What this does not model:**
@@ -1952,8 +1975,9 @@ why, is printed rather than left blank.
   missing: a trailing 90-day baseline needs a window before the displayed one,
   and all history has none. At a bounded window it is still `null` until the
   corpus carries `BASELINE_MIN_ACTIVE_DAYS` (30) days of typed prompts in that
-  trailing span — measured here, this machine has 22, so the honest answer is
-  that there is not yet a personal normal to compare against.
+  trailing span — measured here, this machine has 22 before a 7-day report
+  (16 before a 14-day one, and 1 Claude / 6 Codex before a 30-day one), so the
+  honest answer is that there is not yet a personal normal to compare against.
 - **Cluster names are provisional.** A seed is a shape predicate, not a
   reading of the text, so two different clusters can resolve to the same seed
   name; `source` on each row says whether the name came from a seed or from
@@ -1965,6 +1989,14 @@ why, is printed rather than left blank.
   the text is in the payload.
 - **The deep pass cost is measured, not estimated.** The header states the
   transcripts opened and the wall time for that run; another corpus will differ.
+- **A cluster exemplar is the member its `key` names**, which is the
+  lexicographically smallest hash in the cluster — a real member, stable across
+  scans, and reachable without a membership list. It is not necessarily the
+  most frequent phrasing, which is the cost of not re-running the clustering
+  the projection already did.
+- **The projection is opt-in because it is not free.** Measured on the
+  reference corpus against a ~90 ms warm scan: +199 ms at 14 days (145
+  clusters), +616 ms at 30 (483), +901 ms over all history (561).
 
 ---
 
