@@ -894,6 +894,15 @@ async function main() {
     // Same principle as `usage` above: coaching reads a ledger file by
     // default, and this harness must not touch the user's real one either.
     coachingLedger: { loadLedger: () => ({ version: 1, records: [] }), ledgerPath: cachePath + '.coaching-unused' },
+    // W5 enrichment (spec §6.3): the SAME hazard, one file over — dashboard-
+    // server.mjs also reads the persisted label/card store on every poll.
+    // Missing this override was a REAL bug (caught live): a --enrich run on
+    // this developer's own machine during this wave's build populated
+    // ~/.config/agentic-kit/usage-prompt-labels.json for real, and every UI
+    // test run after that silently rendered THAT real data instead of the
+    // fixture corpus's honest-empty state — exactly the leak `coachingLedger`
+    // above already guards against for the ledger file.
+    labelStore: { loadLabelStore: () => ({ version: 1, labels: {}, cards: {} }), labelStorePath: cachePath + '.labels-unused' },
   });
   const ORIGIN = new URL(srv.url).origin;
   const modelHeaders = { 'x-dash-token': srv.token };
