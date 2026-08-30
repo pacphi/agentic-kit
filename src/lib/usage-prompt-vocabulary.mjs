@@ -1,6 +1,7 @@
 // usage-prompt-vocabulary.mjs — what a prompt cluster is CALLED.
 //
-// The Prompts view renders pattern names, never prompt text (spec §2.3): the
+// The Prompts view renders pattern names, never prompt text (ADR-0039 "The
+// privacy split: three surfaces, three different trust boundaries"): the
 // dashboard's whole privacy split rests on names being drawn from a curated
 // vocabulary rather than lifted from what the operator typed. This module is
 // that vocabulary, and the resolution order behind it.
@@ -15,7 +16,7 @@
 //        { [clusterKey]: { name, source: 'curated'|'enriched', firstSeen } }
 //
 //      `curated` is a name a person wrote; `enriched` is one layer-3 inference
-//      produced (spec §6.3) and then settled — settled labels are never
+//      produced (METRICS.md §23) and then settled — settled labels are never
 //      re-judged. This module never reads or writes the store; it is handed in,
 //      which keeps this file pure and keeps the storage decision with the
 //      caller.

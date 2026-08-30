@@ -64,14 +64,14 @@ import { renderPage } from './dashboard/page.mjs';
 // lazyUsage): the reason for that laziness is the transcript walk, which this
 // module does not do.
 import { BASELINE_TRAILING_DAYS } from './usage-aggregate.mjs';
-// Coaching (spec §5/§6.4) — static import, same reasoning as above.
+// Coaching (METRICS.md §22) — static import, same reasoning as above.
 import { deriveCards } from './usage-coaching.mjs';
 import {
   loadLedger, reconcile, defaultLedgerPath, summarizeLedger, gatherAdoptionInputs, CANONICAL_WINDOW_DAYS,
 } from './usage-outcome-ledger.mjs';
-// W5 enrichment (spec §6.3) — READ-ONLY here, same discipline as the ledger
+// W5 enrichment (METRICS.md §23) — READ-ONLY here, same discipline as the ledger
 // above: this server applies a persisted store, it never writes one (that
-// stays CLI-only, spec §2.3/§3.3 — saveLabelStore/makeInvoke/enrichLabels/
+// stays CLI-only, ADR-0039's privacy split — saveLabelStore/makeInvoke/enrichLabels/
 // synthesizeCards are deliberately never imported into this file at all).
 import {
   applyLabelStoreToPatterns, hydrateStoredCards, applyCardStaleness, buildFindingsSummary,
@@ -529,7 +529,7 @@ function bundledVersion(hostPkg, pkg) {
 const USAGE_TREE_PREVIEW = 25;
 
 /**
- * The Prompts view's half of the payload (spec §3): what the operator typed,
+ * The Prompts view's half of the payload (METRICS.md §21): what the operator typed,
  * how it splits per host and per day, the personal baselines the detectors
  * compare against, and the repetition projection.
  *
@@ -547,7 +547,7 @@ const USAGE_TREE_PREVIEW = 25;
  *
  * Prompt text cannot reach this object: every input is a fingerprint-derived
  * count, a curated cluster name, or a session id for the existing masked
- * session route (spec §2.3, §10).
+ * session route (ADR-0039's privacy split).
  */
 function promptsPayload(agg) {
   const t = agg.totals ?? {};
@@ -1457,7 +1457,7 @@ export function startDashboard({
               .catch(() => ({ openrouter: null }))
             : Promise.resolve({ openrouter: null }),
         ]);
-        // W5 enrichment (spec §6.3, deliverable §5): applied to EVERY poll,
+        // W5 enrichment (METRICS.md §23): applied to EVERY poll,
         // read-only — the store the CLI's `--enrich` writes, consulted here
         // exactly like `ak usage prompts` consults it, so the two surfaces
         // cannot disagree about what a cluster or a coaching card is called.
@@ -1474,7 +1474,7 @@ export function startDashboard({
         // the top level too would publish the same projection twice under two
         // names that could later drift apart.
         const { sessions: _sessions, projectTree, promptPatterns: _patterns, ...rollups } = agg || {};
-        // Coaching (spec §5/§6.4): derived server-side from the SAME lib +
+        // Coaching (METRICS.md §22): derived server-side from the SAME lib +
         // ledger the CLI uses, so the two surfaces never disagree about a
         // card's status. Read-only — see dashboardCoachingPayload's doc for
         // why this must never call saveLedger. `days`/`cwd` travel through so
@@ -1711,13 +1711,13 @@ function memoizedAdoptionInputs(cwd) {
 }
 
 /**
- * The Prompts view's coaching half (spec §5, §6.4): cards derived from THIS
+ * The Prompts view's coaching half (METRICS.md §22): cards derived from THIS
  * poll's aggregate, reconciled against the persisted ledger so status chips
  * (proposed/adopted/dismissed/expired/retired) match `ak usage prompts`
  * exactly — same lib, same ledger file, never a second projection that could
  * drift from the CLI's.
  *
- * READ-ONLY BY CONTRACT (spec §3.3's privacy split: dismissal is CLI-only).
+ * READ-ONLY BY CONTRACT (ADR-0039's privacy split: dismissal is CLI-only).
  * `reconcile` itself never writes anything — persistence is an explicit
  * extra step the CLI takes and this function deliberately does not, so a
  * dashboard poll can never mutate what `ak usage prompts --dismiss` owns.
@@ -1734,7 +1734,7 @@ function memoizedAdoptionInputs(cwd) {
  * `limits` already use on `startDashboard` — tests point it at a stub loader
  * so a poll never touches the real `~/.config/agentic-kit` ledger file.
  *
- * `labels`/`storedCards` (W5, spec §6.3/§6.4) are the persisted enrichment
+ * `labels`/`storedCards` (W5, METRICS.md §22/§23) are the persisted enrichment
  * store `handleUsage` already loaded once for this poll — READ-ONLY here
  * too, same contract as the ledger: a persisted enriched card rejoins
  * `reconcile` exactly like a rule card ("join reconcile exactly like rule

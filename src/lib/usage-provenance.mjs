@@ -1,4 +1,5 @@
-// usage-provenance.mjs — WHO wrote a prompt-kind turn (Prompts view spec §2.1).
+// usage-provenance.mjs — WHO wrote a prompt-kind turn (ADR-0039 "Provenance is
+// a closed four-tag vocabulary, one-directional by design").
 //
 // The parsers already answer "is this a user-role turn the harness did not
 // write" (usage-parsers' isHumanPrompt/userTurnKind and isCodexHumanMessage).

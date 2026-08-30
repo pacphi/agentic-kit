@@ -1,4 +1,4 @@
-// usage-enrich.mjs — the layer-3 enrichment ENGINE (spec §6.3): delta-only
+// usage-enrich.mjs — the layer-3 enrichment ENGINE (METRICS.md §23): delta-only
 // cluster labeling and coaching-card synthesis. Pure logic with an INJECTED
 // `invoke` (src/lib/llm-invoke.mjs's `makeInvoke().invoke`, or a fake one in
 // every test) — this module never spawns a process itself and never decides
@@ -9,7 +9,7 @@
 // Every guarantee below is therefore enforced HERE, not inherited from
 // precedent elsewhere.
 //
-// THE PRIVACY SPLIT IS LOAD-BEARING (spec §2.3). `enrichLabels` receives
+// THE PRIVACY SPLIT IS LOAD-BEARING (ADR-0039 "The privacy split"). `enrichLabels` receives
 // masked exemplar text ONLY (never raw), and defensively re-caps/re-masks it
 // anyway — the caller is trusted to have already done both, but this
 // function does not trust its own caller absolutely on the one boundary that
@@ -18,8 +18,9 @@
 // nothing else, and this module has no code path that could smuggle text
 // past that even if a caller tried.
 //
-// THE ANTI-FABRICATION GATE IS NOT OPTIONAL (spec §6.3's "never silently
-// spending tokens" extends to never silently INVENTING a number either).
+// THE ANTI-FABRICATION GATE IS NOT OPTIONAL (ADR-0039 "The anti-fabrication
+// gate" — "never silently spending tokens" extends to never silently
+// INVENTING a number either).
 // Every number a synthesized card states in its finding/try/basis text, and
 // every number in its own basisNumbers, must be traceable to a number that
 // is ACTUALLY present in the findingsSummary the model was given. A card
@@ -51,13 +52,13 @@ import { withStoreLabel } from './usage-prompt-vocabulary.mjs';
  *  'characterized', with enough recurrence to be worth a model call. */
 const MIN_CANDIDATE_COUNT = 3;
 
-/** The privacy split's numeric bounds (spec §2.3/§6.3), enforced HERE even
+/** The privacy split's numeric bounds (ADR-0039 "The privacy split"), enforced HERE even
  *  though the caller is expected to have already applied them — defense in
  *  depth on a load-bearing boundary, not a trust assumption. */
 const MAX_EXEMPLARS_PER_CLUSTER = 2;
 const MAX_EXEMPLAR_CHARS = 200;
 
-/** "Asks for 0..3 additional coaching suggestions" (spec §6.3) — a hard cap
+/** "Asks for 0..3 additional coaching suggestions" (METRICS.md §23) — a hard cap
  *  regardless of how many the model returns. */
 const MAX_SYNTHESIZED_CARDS = 3;
 
@@ -300,7 +301,7 @@ export function findingsSummaryHash(findingsSummary) {
 }
 
 /**
- * "The hash of the findingsSummary slice [a card] cites" (spec §6.3): the
+ * "The hash of the findingsSummary slice [a card] cites" (METRICS.md §23): the
  * subset of `basisNumbers` that is ACTUALLY present in `findingsSummary`,
  * hashed. At synthesis time (after the anti-fabrication gate has already
  * verified every basisNumbers entry IS present) this is every basisNumbers
@@ -323,7 +324,7 @@ export function citedEvidenceHash(findingsSummary, basisNumbers) {
 
 /**
  * True once a synthesized card's evidence has moved since it was cached —
- * "stale — recompute with --enrich" (spec §6.3/§6.5), never silently
+ * "stale — recompute with --enrich" (METRICS.md §23), never silently
  * re-spending a model call to check. Cheap: pure arithmetic over the CURRENT
  * findingsSummary, no invocation.
  *

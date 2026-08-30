@@ -2,7 +2,7 @@
 // reads it as text). See src/lib/dashboard/client/**'s eslint.config.mjs
 // override comment for why this directory isn't run through the node lib.
 
-// Pure string-building panels for the Usage tab's Prompts view (spec §3).
+// Pure string-building panels for the Usage tab's Prompts view (METRICS.md §21).
 // Split out of usage.mjs on the usage-rhythm.mjs precedent: no DOM access, no
 // fetch, no module-level state — every function takes the payload's `prompts`
 // block in and returns markup out, so the panels are unit-testable as real
@@ -69,7 +69,7 @@ function pat(p) { return (p && p.patterns) || null; }
 var PATTERN_ROWS = 25;
 var EXACT_ROWS = 6;
 
-// ── the KPI strip (spec §3.1) ───────────────────────────────────────────────
+// ── the KPI strip (METRICS.md §21) ──────────────────────────────────────────
 
 // Each tile states its formula and, on the second line, what it does NOT
 // model. The second line is the load-bearing half: every one of these numbers
@@ -684,7 +684,7 @@ function coachingStatusChip(card) {
 }
 
 /** `generatedAt` + the first 8 hex chars of `evidenceHash`, as a dim trailing
- *  line (Fix round 1, M-3) — spec §5 makes a point of every card carrying
+ *  line (Fix round 1, M-3) — METRICS.md §22 makes a point of every card carrying
  *  both; before this fix they existed on the object and in the payload but
  *  reached no rendered card on either surface. */
 function coachingAsOfLine(card) {
@@ -693,7 +693,7 @@ function coachingAsOfLine(card) {
 }
 
 /** The draft affordance: rendered text in a `<pre>`, never a clipboard API —
- *  spec §5's "Draft → produces a suggestion the operator edits and
+ *  METRICS.md §22's "Draft → produces a suggestion the operator edits and
  *  applies themselves. Nothing writes ... unprompted." A title attribute
  *  doubles the copy hint for a mouse user; the caption above the block is the
  *  one a screen reader announces. */
@@ -705,7 +705,7 @@ function coachingDraftBlock(draft) {
     + '</div>';
 }
 
-/** Dismissal is CLI-only (spec §3.3's privacy split) — the dashboard never
+/** Dismissal is CLI-only (ADR-0039's privacy split) — the dashboard never
  *  writes the ledger, so a proposed card renders the CLI command as a hint
  *  rather than a button that would have nothing to call. */
 function coachingDismissHint(card) {
@@ -714,13 +714,13 @@ function coachingDismissHint(card) {
     + '<code>ak usage prompts --dismiss ' + esc(card.id) + '</code></p>';
 }
 
-/** W5 enrichment (spec §6.3/§6.5): ONLY an enriched card's cached evidence
+/** W5 enrichment (METRICS.md §23): ONLY an enriched card's cached evidence
  *  can drift out from under it — a rule card's `stale` is always `false`
  *  (usage-outcome-ledger.mjs's `annotate`; recomputing one costs nothing, so
  *  there is nothing to go stale), so this chip+hint only ever appears on a
  *  `source: 'enriched'` card. NO LIVE RECOMPUTE BUTTON IN V1 — a button here
- *  would trigger inference from the dashboard, and spec §2.3 keeps inference
- *  CLI-only; the hint points at the command that does the same thing today. */
+ *  would trigger inference from the dashboard, and ADR-0039's privacy split
+ *  keeps inference CLI-only; the hint points at the command that does the same thing today. */
 function coachingStaleHint(card) {
   if (!card.stale) return '';
   return '<p class="pr-card-stale-hint"><span class="pr-card-stale-chip">stale</span> '
@@ -750,7 +750,7 @@ function coachingSummaryLine(s) {
 }
 
 /**
- * The Coaching section (spec §5): cards rendered finding → Try →
+ * The Coaching section (METRICS.md §22): cards rendered finding → Try →
  * basis → status chip, a draft affordance where the card carries one, and
  * a dismiss hint pointing at the CLI (the one place a dismissal can actually
  * be persisted). `p.coaching` is `{ cards, summary }` from the SAME lib +
@@ -759,7 +759,7 @@ function coachingSummaryLine(s) {
  * disagree about a card's status any more than they can about a cluster's
  * count.
  *
- * Rule-derived cards recompute free every scan (spec §6.3), so `stale` is
+ * Rule-derived cards recompute free every scan (METRICS.md §22), so `stale` is
  * always `false` for one and the caption below still calls that out. An
  * ENRICHED card (W5) is the one real exception — its cache can drift out
  * from under it, and `coachingCard`'s own stale hint is where that renders

@@ -1,4 +1,4 @@
-// usage-coaching-rules.mjs — the six v1 coaching rules (spec §5): for each,
+// usage-coaching-rules.mjs — the six v1 coaching rules (METRICS.md §22): for each,
 // an evidence extractor, a propose-bar predicate, and a card text builder.
 // Split out of usage-coaching.mjs on the status.mjs/status/*.mjs precedent
 // once that file crossed the repo's file-size limit for a new lib. The
@@ -121,7 +121,8 @@ function progressReportEvidence(ctx) {
 }
 
 /** Codex specifically (Fix round 1, I-3) — not "whichever host leads". The
- *  sibling effort this card points at (spec §8) is scoped to Codex by name
+ *  sibling effort this card points at (tracked separately, not part of this
+ *  build) is scoped to Codex by name
  *  ("the Codex analogue of `.claude/agents/`"); generalizing the HOST while
  *  the RECOMMENDATION TEXT stayed Codex-shaped produced wrong advice on a
  *  Claude-leading corpus (a card whose id says codex, whose rendered text
@@ -306,9 +307,9 @@ function roleLibraryCard(e, now) {
       // Fix round 1, I-3: `ak host pick` manages hosts/providers, not prompt
       // fragments — pointing there was a misdirection. The library itself
       // does not exist yet; this draft is a pointer to the tracked sibling
-      // effort (spec §8), not an instruction the operator can run today.
+      // effort, not an instruction the operator can run today.
       kind: 'link',
-      text: 'Sibling effort, tracked separately (prompts-view spec §8): a managed Codex '
+      text: 'Sibling effort, tracked separately: a managed Codex '
         + 'role-fragment library, the Codex analogue of `.claude/agents/`. Not yet built — this '
         + 'card is a pointer to that effort, not something to run today.',
     },

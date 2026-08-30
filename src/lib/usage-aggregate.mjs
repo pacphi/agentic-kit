@@ -255,7 +255,7 @@ export function modelFamily(id) {
 // ── prompt fingerprints: taps, shapes, and the operator's own baseline ──────
 
 /** Tokens at or below which a typed prompt reads as a supervision TAP — "yes",
- *  "go ahead", "lgtm ship it" — rather than an instruction (spec §3.1). Named
+ *  "go ahead", "lgtm ship it" — rather than an instruction (METRICS.md §2b). Named
  *  so the detector, the CLI and the view all quote ONE number. What it does not
  *  model: whether the tap was necessary. Some taps are legitimate approvals. */
 export const TAP_MAX_TOKENS = 4;
@@ -429,8 +429,9 @@ function buildPromptBaselines(records, { days, now }) {
 // link to the existing masked session surface. No prompt text exists here to
 // leak, which the tests pin structurally.
 
-/** The clustering threshold the Prompts view ships at (spec §3.2 panel 3),
- *  looser than the pattern library's own 0.8 default on purpose: phrasing
+/** The clustering threshold the Prompts view ships at (the Repeated-patterns
+ *  panel, METRICS.md §21), looser than the pattern library's own 0.8 default
+ *  on purpose: phrasing
  *  variance is the signal. Eleven wordings of one request outrank eleven
  *  identical ones, because eleven wordings prove there is no canonical form to
  *  point at; precision comes from the type filter, not from tightening this. */
@@ -525,7 +526,8 @@ function promptClusterRow(cluster) {
 }
 
 /** Counts per provenance tag over the WHOLE fingerprinted population — the
- *  denominator every typed figure sits behind (spec §2.1). Every tag in the
+ *  denominator every typed figure sits behind (ADR-0039's provenance ruling).
+ *  Every tag in the
  *  vocabulary gets a row, including ones this corpus never produced: a missing
  *  tag is evidence about the corpus, not a row to drop. */
 function promptProvenance(fps) {
@@ -570,14 +572,15 @@ function promptTapLengths(typed) {
  * Ordering is deterministic throughout — the clustering library sorts by size
  * then key, `exactRepeatGroups` by count then hash, and every Set it hands back
  * iterates sorted — so a rescan over an unchanged corpus reproduces this object
- * byte for byte, which is what the evidence-hash contract (spec §6.3) rests on.
+ * byte for byte, which is what the evidence-hash contract (coaching cards,
+ * METRICS.md §22) rests on.
  *
  * `labelFor` is applied with an EMPTY label store HERE — every name below
  * resolves to a seed pattern or to `characterize`, never a persisted one, and
  * each row says which via `label.source`. That is not a v1 limitation left
  * unfixed: `usage-prompt-vocabulary.mjs`'s `labelFor` store branch depends on
  * nothing but a cluster's `key`, so re-checking the REAL persisted store
- * (W5, spec §6.3 enrichment) against these already-published rows afterward —
+ * (W5, layer-3 enrichment — METRICS.md §23) against these already-published rows afterward —
  * see that module's `withStoreLabel`, applied by `ak usage prompts`/the
  * dashboard — is exactly equivalent to having threaded it through from here.
  * Doing it post-hoc keeps this function, and `aggregate()`'s signature, free

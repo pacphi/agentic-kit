@@ -805,7 +805,7 @@ renders "no sessions in window" instead of zeroed figures
 (`dashboard/client.mjs`).
 
 **Formula:** identical aggregation to every other bucket
-(`byHost[s.host]`, populated via `addTo()`, `usage-aggregate.mjs:631-640`,
+(`byHost[s.host]`, populated via `addTo()`, `usage-aggregate.mjs:648-657`,
   called once per session at `usage-aggregate.mjs:946`), keyed by the literal string
 `"claude"` or `"codex"` assigned at parse time
 (`blankSession(id, 'claude')` / `blankSession(id, 'codex')`,
@@ -1783,7 +1783,7 @@ positive figure that rounds away at two decimals prints `<$0.01`, never
 "nothing" are different claims.
 
 **What the cache saved, asked as a difference.** `cacheSavingPerMillion`
-(`usage-aggregate.mjs:691-700`) prices one million tokens twice through the
+(`usage-aggregate.mjs:711-720`) prices one million tokens twice through the
 *injected* pricer — once as fresh input, once as cache reads — and takes the
 gap; `cacheSavedFor` (`usage-aggregate.mjs:704-707`) scales that to the tokens
 a row actually read from cache. Nothing in that path knows what the cache
@@ -1826,7 +1826,7 @@ BASELINE_MIN_ACTIVE_DAYS of history BEFORE the displayed window and returns
 null without it — while this depth is a strict superset of the previous window
 at every supported width. A delta against an unknown-length window is not a delta. The upper bound
 is exclusive so a session ending exactly at the boundary belongs to the current
-window and is not counted in both (`usage-aggregate.mjs:846`). Asking for
+window and is not counted in both (`endMs`, `usage-aggregate.mjs:866`). Asking for
 `previous` without widening the lookback yields an all-zero baseline — the
 older records were never read off disk — and every chip self-suppresses
 against it rather than claiming a change it cannot measure. Leaving `previous`
@@ -1843,9 +1843,9 @@ landed on that day (`dayBucket`, `usage-aggregate.mjs:653-666`) — and that is
 what the active-day count and the streak above are counted from. Engaged time
 does not share that key set: a session that runs past midnight, or a day spent
 reading, produces worked time on a day that billed nothing. So
-`buildEngagedByDay` (`usage-aggregate.mjs:1087-1095`) keys its own map, cutting
+`buildEngagedByDay` (`usage-aggregate.mjs:1107-1114`) keys its own map, cutting
 each active interval at every local midnight it crosses
-(`splitAtLocalMidnight`, `usage-aggregate.mjs:1065-1073`) and unioning the pieces
+(`splitAtLocalMidnight`, `usage-aggregate.mjs:1085-1093`) and unioning the pieces
 per day, which makes the map sum exactly to `totals.engagedSeconds`. Folding it
 into `byDay` would have forced one of two lies: inventing zero-token `byDay`
 rows, or dropping real worked time. The consequence is visible on the tiles —

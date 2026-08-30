@@ -1,4 +1,4 @@
-// The Coaching section of `ak usage prompts` (spec §5, §6.4): rendering,
+// The Coaching section of `ak usage prompts` (METRICS.md §22): rendering,
 // the --json shapes, and the --draft/--dismiss flag handlers. Split out of
 // usage.mjs on the status.mjs/status/*.mjs precedent — usage.mjs stays the
 // command's orchestrator (window parsing, the aggregate read, the other
@@ -14,7 +14,7 @@ import {
   dismissCard, summarizeLedger, CANONICAL_WINDOW_DAYS, reconcile,
 } from '../../lib/usage-outcome-ledger.mjs';
 import { BASELINE_TRAILING_DAYS } from '../../lib/usage-aggregate.mjs';
-// W5 enrichment (spec §6.3) — folded into the SAME coaching-resolution
+// W5 enrichment (METRICS.md §23) — folded into the SAME coaching-resolution
 // orchestration below (resolveCoachingAndEnrichment) because an enriched
 // card joins reconcile exactly like a rule card; splitting the two into
 // separate call sites would mean two places deciding "is this pass allowed
@@ -58,7 +58,7 @@ function coachingStatusLine(card) {
 }
 
 /** `generatedAt` + the first 8 hex chars of `evidenceHash`, as a dim trailing
- *  line (Fix round 1, M-3) — spec §5 makes a point of every card carrying
+ *  line (Fix round 1, M-3) — METRICS.md §22 makes a point of every card carrying
  *  both; before this they existed on the object and in `--json` but reached
  *  no rendered card on either surface. */
 function printCoachingCard(card) {
@@ -69,7 +69,7 @@ function printCoachingCard(card) {
   info(`  Status: ${coachingStatusLine(card)}`);
   if (card.draft) info(dim(`  Draft → ak usage prompts --draft ${card.id}`));
   if (card.status === 'proposed') info(dim(`  Dismiss → ak usage prompts --dismiss ${card.id}`));
-  // W5 enrichment (spec §6.3): only an ENRICHED card's evidence can drift out
+  // W5 enrichment (METRICS.md §23): only an ENRICHED card's evidence can drift out
   // from under its cache — a rule card recomputes fresh every pass and so
   // `card.stale` is always false for it (usage-enrich.mjs's applyCardStaleness
   // never even writes that field on a non-enriched card).
@@ -132,7 +132,7 @@ export function knownCardIdsText(cards) {
 
 /** `--draft <id>`: print that one card's draft verbatim and nothing else —
  *  json-safe (a minimal object under --json, the raw text otherwise), so a
- *  caller can pipe either straight into a file. Draft-only, always (spec §5):
+ *  caller can pipe either straight into a file. Draft-only, always (METRICS.md §22):
  *  the draft TEXT lives on the card object `deriveCards` already produced,
  *  so this never touches the ledger — no load, no reconcile, no write (Fix
  *  round 1, M-7: a read-shaped flag must not mutate anything). */
@@ -153,7 +153,7 @@ export function runDraftFlag(cards, id, json) {
 }
 
 /** `--dismiss <id>`: persist the dismissal and print a confirmation. Ledger
- *  writes are CLI-only (spec §3.3's privacy split; the dashboard's reconcile
+ *  writes are CLI-only (ADR-0039's privacy split; the dashboard's reconcile
  *  is read-only — see dashboard-server.mjs's promptsPayload). The id is
  *  validated against `cards` (this pass's reconciled set) by the caller
  *  BEFORE this function is reached, so an unknown id never gets here (Fix
@@ -218,7 +218,7 @@ function resolveDismiss({
 
 /**
  * Resolves this pass's coaching state — the outcome-ledger reconcile,
- * optionally preceded by a `--enrich` pass (spec §6.3) — and applies the
+ * optionally preceded by a `--enrich` pass (METRICS.md §23) — and applies the
  * label store to the CANONICAL aggregate too. Split out of `runPrompts`
  * (usage.mjs) on the repo's complexity ceiling: this was the single largest
  * branch that function carried, and enrichment folds into the SAME
@@ -289,7 +289,7 @@ export async function resolveCoachingAndEnrichment({
   // staleness is judged against either.
   const findingsSummary = buildFindingsSummary(canonicalAgg);
 
-  // --enrich (spec §6.3): a NEW inference pass, CLI-only, opt-in. Skipped
+  // --enrich (METRICS.md §23): a NEW inference pass, CLI-only, opt-in. Skipped
   // entirely — not partially — when the label store itself is unreadable; a
   // readable ledger does not make a partial write to an unreadable store safe.
   const enrichment = (flags.enrich && !labelStore.future)

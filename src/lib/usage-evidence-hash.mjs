@@ -1,5 +1,6 @@
 // usage-evidence-hash.mjs — a leaf module: evidence hashing only, no
-// dependency on any other usage-coaching-* module (spec §5, §6.2). Split out
+// dependency on any other usage-coaching-* module (coaching cards, METRICS.md
+// §22). Split out
 // of usage-coaching.mjs (Fix round 3) to break the import cycle between the
 // engine (usage-coaching.mjs) and the rules table (usage-coaching-rules.mjs)
 // — both need `evidenceHash`, so it lives below both instead of inside

@@ -383,7 +383,7 @@ test run by `tests/kit/doc-citations.test.mjs`.
   — every candidate metric against the fields each host actually writes.
 - Research: [Scorecard additions](https://claude.ai/code/artifact/36adf798-625a-4d44-a84b-1dba7093e752)
   — the panel mockup and the absence rules each panel must honour.
-- Plan: `docs/superpowers/plans/2026-08-28-scorecard-matrix-a.md`
+- Plan (archived): [`docs/archive/2026-08-28-superpowers-plan-scorecard-matrix-a.md`](../archive/2026-08-28-superpowers-plan-scorecard-matrix-a.md)
 - `src/lib/usage-modes.mjs` (the taxonomy), `src/lib/usage-parsers.mjs` and
   `src/lib/usage-opencode.mjs` (per-host evidence), `src/lib/usage-aggregate.mjs` (percentiles,
   buckets, window arithmetic, cache differencing), `src/lib/usage-index.mjs` (`SCHEMA_VERSION`,

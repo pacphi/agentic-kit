@@ -1,5 +1,5 @@
-// The --enrich flow of `ak usage prompts` (spec §6.3, §3.3's CLI-only
-// inference boundary): gather masked exemplars for candidate clusters
+// The --enrich flow of `ak usage prompts` (METRICS.md §23; ADR-0039's
+// CLI-only inference boundary): gather masked exemplars for candidate clusters
 // through the SAME deep-pass machinery `--deep` uses, print a consent
 // preamble before invoking anything, run the two enrichment engine calls
 // (usage-enrich.mjs), persist the results, and report what changed. Split

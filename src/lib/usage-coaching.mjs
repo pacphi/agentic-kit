@@ -1,5 +1,6 @@
 // usage-coaching.mjs — the coaching ENGINE: deriveCards, currentEvidenceFor,
-// deterministic adoption detection, and outcome measurement (spec §5, §6.4).
+// deterministic adoption detection, and outcome measurement (coaching cards
+// and the outcome ledger, METRICS.md §22).
 // NO I/O and NO clock reads beyond the `now` a caller passes in — the store
 // (usage-outcome-ledger.mjs) is a separate, small-I/O module that imports
 // FROM here, never the reverse.
@@ -17,8 +18,8 @@
 // exported here unchanged, so every existing `evidenceHash` import stays
 // valid.
 //
-// v1 rules are RULE-DERIVED, not inferred (spec §9 step 5; §6.3 inference
-// refresh is a later wave). Every number a card states is read off one of the
+// v1 rules are RULE-DERIVED, not inferred (layer-3 inference refresh,
+// METRICS.md §23, is a later wave). Every number a card states is read off one of the
 // three inputs below — `promptPatterns` (the aggregate's opt-in repetition
 // projection, usage-aggregate.mjs's buildPromptPatterns), `promptsByHost` (the
 // same aggregate's per-host prompt figures), and `insights` (detectInsights'
@@ -39,8 +40,8 @@ import { RULES } from './usage-coaching-rules.mjs';
 export { evidenceHash } from './usage-evidence-hash.mjs';
 
 /** Adoption-by-collapse and outcome-improvement share this reasoning but not
- *  this exact number: collapse is the ADOPTION signal (spec §6.4 — "the
- *  target cluster's recurrence collapsed"), a stricter bar than "improved"
+ *  this exact number: collapse is the ADOPTION signal (ADR-0039's outcome-
+ *  ledger decision — "the target cluster's recurrence collapsed"), a stricter bar than "improved"
  *  (measureOutcome below), which only asks whether the count moved down at
  *  all. A card can be adopted by CLAUDE.md/skill-dir detection long before its
  *  recurrence collapses 80%, and outcome measurement has to track THAT case
@@ -48,7 +49,7 @@ export { evidenceHash } from './usage-evidence-hash.mjs';
 export const ADOPTION_COLLAPSE_RATIO = 0.2;
 
 /** How long an adopted-but-not-improving card is given before it is retired
- *  with its refutation shown (spec §6.4). */
+ *  with its refutation shown (METRICS.md §22). */
 export const OUTCOME_MIN_DAYS = 14;
 export const DAY_MS = 86_400_000;
 
@@ -59,7 +60,7 @@ export const DAY_MS = 86_400_000;
  */
 
 /**
- * The deterministic v1 card set (spec §5), each card only when its evidence
+ * The deterministic v1 card set (METRICS.md §22's six rules), each card only when its evidence
  * condition holds. Pure: no I/O, no clock read beyond `now`.
  *
  * @param {{ promptPatterns: object|null, promptBaselines: object|null,
@@ -122,8 +123,8 @@ const cardSlug = (id) => id.replace(/-skill$/, '');
  */
 
 /**
- * Deterministic adoption predicates (spec §6.4), evaluated in the order
- * spec'd: a matching CLAUDE.md line, then a matching skill directory, then
+ * Deterministic adoption predicates (METRICS.md §22's adoption routes),
+ * evaluated in order: a matching CLAUDE.md line, then a matching skill directory, then
  * "the target recurrence collapsed" (current count ≤ ADOPTION_COLLAPSE_RATIO
  * of the count recorded when this card was first proposed). Pure — every
  * input is caller-supplied.

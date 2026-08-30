@@ -207,7 +207,8 @@ export function blankSession(id, provider) {
   };
 }
 
-// ── prompt fingerprints (Prompts view spec §2.2) ────────────────────────────
+// ── prompt fingerprints (ADR-0039 "F1 fingerprints: the entry shape, the
+// bottom-64 sketch, and what it actually costs") ───────────────────────────
 
 /** Per-session cap on stored fingerprints. The corpus's busiest session
  *  carries a few hundred; 2,000 leaves an order of magnitude of headroom while
@@ -305,8 +306,9 @@ const PERSONA_OPENER_RE = /^(#\s*)?(instructions \(read first\)|you are (a|an|th
  * Deliberately shape-only, and deliberately NOT provenance: a machine-authored
  * template that opens with a persona is still RECORDED with `o`. That is a
  * recording choice, not a counting one — every shipped consumer filters to
- * `p === 'human'` before counting personas, because spec §2.1 makes provenance
- * filtering load-bearing for every figure in the Prompts view, so nothing today
+ * `p === 'human'` before counting personas, because ADR-0039's provenance
+ * ruling makes provenance filtering load-bearing for every figure in the
+ * Prompts view, so nothing today
  * reads a non-human `o`. Recording it blind is what would let a future consumer
  * ask for machine-authored persona counts by reading the raw fingerprints,
  * instead of needing a re-scan to get a flag that was never written.

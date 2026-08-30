@@ -19,7 +19,7 @@ import { deriveCards } from '../lib/usage-coaching.mjs';
 import {
   loadLedger, saveLedger, defaultLedgerPath, gatherAdoptionInputs,
 } from '../lib/usage-outcome-ledger.mjs';
-// The ledger reconcile, --enrich (spec §6.3), and --dismiss are ONE
+// The ledger reconcile, --enrich (METRICS.md §23), and --dismiss are ONE
 // orchestration (resolveCoachingAndEnrichment) — split out of runPrompts on
 // the repo's complexity ceiling; it in turn imports usage/enrich.mjs's
 // runEnrichPass (the --enrich flow: consent preamble, exemplar gathering,
@@ -44,11 +44,11 @@ export const options = {
   // would make "the user asked for 14" indistinguishable from "nobody asked".
   window: { type: 'string' },
   deep: { type: 'boolean', default: false },
-  // Coaching (spec §5/§6.4), prompts-only: print one card's draft verbatim, or
+  // Coaching (METRICS.md §22), prompts-only: print one card's draft verbatim, or
   // persist a dismissal. Both take a card id, so both are strings, not flags.
   draft: { type: 'string' },
   dismiss: { type: 'string' },
-  // Layer-3 enrichment (spec §6.3), prompts-only, opt-in, CLI-only inference.
+  // Layer-3 enrichment (METRICS.md §23), prompts-only, opt-in, CLI-only inference.
   enrich: { type: 'boolean', default: false },
 };
 
@@ -400,10 +400,11 @@ async function runScore({ flags, deps }) {
 }
 
 // ── prompts: what you actually type, read from fingerprints ────────────────
-// The Prompts view's CLI companion (spec §3.3). Everything in this section is
+// The Prompts view's CLI companion (`ak usage prompts`, METRICS.md §20).
+// Everything in this section is
 // derived from the per-prompt FINGERPRINTS the scan path persists — a hash of
 // the normalized text, a token count, a bounded token-hash sketch, a
-// provenance tag and two shape flags (spec §2.2). No prompt text is read, and
+// provenance tag and two shape flags (ADR-0039 "F1 fingerprints"). No prompt text is read, and
 // none is printed: the deep pass below is the one place text appears, and it
 // re-reads the transcripts on demand to get it.
 //
@@ -991,7 +992,7 @@ function printDeepPass(deep) {
 }
 
 // Coaching section rendering, --json shapes, and --draft/--dismiss handling
-// (spec §5, §6.4) live in ./usage/coaching.mjs (imported above) — split out
+// (METRICS.md §22) live in ./usage/coaching.mjs (imported above) — split out
 // on the status.mjs/status/*.mjs precedent once this file crossed the
 // repo's max-lines threshold. The --enrich flow itself lives in
 // ./usage/enrich.mjs for the same reason. runPrompts below is the only
@@ -1052,7 +1053,7 @@ async function runPrompts({ flags, deps }) {
     return 1;
   }
 
-  // W5 enrichment (spec §6.3): the persisted label store applies to EVERY
+  // W5 enrichment (METRICS.md §23): the persisted label store applies to EVERY
   // pass, --enrich or not — a settled label is a fact about the corpus, not
   // a one-time render. A newer-schema store reads as "no store" for THIS
   // pass (same I-2 rule the outcome ledger already follows below); the
@@ -1074,7 +1075,7 @@ async function runPrompts({ flags, deps }) {
   const activeLabels = labelStore.future ? {} : labelStore.labels;
   agg.promptPatterns = applyLabelStoreToPatterns(agg.promptPatterns, activeLabels);
 
-  // Coaching cards (spec §5) derive from the OPERATOR'S window, for display —
+  // Coaching cards (METRICS.md §22) derive from the OPERATOR'S window, for display —
   // `agg.insights` is populated unconditionally by aggregate()
   // (usage-aggregate.mjs), not only when `prompts: true`, so it needs no
   // separate read here.
@@ -1085,7 +1086,7 @@ async function runPrompts({ flags, deps }) {
 
   // --draft is a pure read over the RULE cards alone — no ledger, no
   // canonical fetch, no write (Fix round 1, M-7). Enriched cards carry no
-  // draft (spec §6.3's synthesis contract has none), so this stays scoped.
+  // draft (the synthesis contract, METRICS.md §23, has none), so this stays scoped.
   if (flags.draft != null) return runDraftFlag(ruleCards, flags.draft, flags.json);
 
   let report = promptReport(agg, win);
@@ -1098,7 +1099,7 @@ async function runPrompts({ flags, deps }) {
   const adoptionInputs = deps.adoptionInputs ?? gatherAdoptionInputs(cwd);
   const now = Date.now();
 
-  // The ledger reconcile, --enrich (spec §6.3), and --dismiss all live in ONE
+  // The ledger reconcile, --enrich (METRICS.md §23), and --dismiss all live in ONE
   // orchestration (usage/coaching.mjs's resolveCoachingAndEnrichment) — split
   // out on the repo's complexity ceiling, since this was the single largest
   // branch runPrompts carried. `report` may come back reassigned (a --enrich

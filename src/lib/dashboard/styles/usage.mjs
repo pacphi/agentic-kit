@@ -673,7 +673,7 @@ export const USAGE_CSS = `
 }
 .lim .legend .pace-key{width:2px; height:11px; border-radius:1px; background:var(--ink-2)}
 
-/* ── Prompts view (spec §3) ────────────────────────────────────────────────
+/* ── Prompts view (METRICS.md §21) ──────────────────────────────────────────
    Reuses the scorecard's own grammar wherever one exists — .kpi for the strip,
    .mbar for magnitude, .strip/.sh for section chrome — so a panel here is the
    same object a reader already knows from Scorecard. Only the shapes with no
@@ -831,7 +831,7 @@ export const USAGE_CSS = `
 .pr-pending b{color:var(--ink)}
 .pr-pending-note{color:var(--ink-dim) !important; font-size:11.5px !important}
 
-/* Coaching cards (spec §5, §6.4). One card per finding — the same visual
+/* Coaching cards (METRICS.md §22). One card per finding — the same visual
    weight as a .kpi tile, not a table row, because a card carries a Try and a
    basis a row has no place for. */
 .pr-cards{display:flex; flex-direction:column; gap:12px; margin-bottom:12px}

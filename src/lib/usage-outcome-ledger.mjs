@@ -1,4 +1,6 @@
-// usage-outcome-ledger.mjs — the coaching outcome ledger's store (spec §6.4):
+// usage-outcome-ledger.mjs — the coaching outcome ledger's store (ADR-0039
+// "The outcome ledger: canonical-30d basis, the transition matrix, the
+// materiality gate"; METRICS.md §22):
 // small I/O (a JSON file beside the usage-index cache) plus the ledger's own
 // state-transition logic. Card DERIVATION and its predicates live in
 // usage-coaching.mjs, which this module imports FROM — never the reverse.
@@ -46,7 +48,7 @@ export const LEDGER_SCHEMA_VERSION = 1;
 export const CANONICAL_WINDOW_DAYS = 30;
 
 /** A dismissed card whose evidence hash has changed gets ONE re-proposal
- *  (spec §6.4 decay); at this many dismissals it stops re-proposing even
+ *  (the ledger's decay rule, METRICS.md §22); at this many dismissals it stops re-proposing even
  *  across a hash change — the operator has said no twice. */
 export const DISMISS_PERMANENT_THRESHOLD = 2;
 
@@ -70,8 +72,8 @@ function blankLedger() {
 }
 
 /**
- * Distinguishes three shapes, per spec §10's "dismissal persistence survives
- * rescans AND SCHEMA BUMPS" (Fix round 1, I-2):
+ * Distinguishes three shapes, so that dismissal persistence survives
+ * rescans AND SCHEMA BUMPS (Fix round 1, I-2):
  *  - missing / unparseable JSON / not our recognizable shape at all ⇒
  *    CORRUPT — reads as blank, safe to overwrite (nothing recoverable).
  *  - `version === LEDGER_SCHEMA_VERSION` ⇒ the version this build owns.
@@ -177,15 +179,15 @@ function isoNow(now) { return new Date(now).toISOString(); }
  *  (Fix round 1, M-3): a card is re-derived fresh every pass, so its own
  *  `generatedAt` is always "now" — rendering that would make every card look
  *  freshly generated even when it has been sitting `proposed` for weeks. The
- *  record's `generatedAt` is the as-of stamp spec §6.3 means: when this
+ *  record's `generatedAt` is the as-of stamp METRICS.md §22 means: when this
  *  recommendation was FIRST proposed, frozen from that point on (see
  *  `reconcile`'s branches — nothing but initial creation and expired-resupply
  *  ever writes it).
  *
  * `stale` is always `false` in v1 — see the module doc: a rule-derived
  * card's evidenceHash is refreshed in the same pass it would otherwise go
- * stale in, because recomputing it costs nothing (spec §6.3's staleness is a
- * Layer-3/inference concept; the field exists so a future enriched card has
+ * stale in, because recomputing it costs nothing (staleness — METRICS.md §23 —
+ * is a Layer-3/inference concept; the field exists so a future enriched card has
  * somewhere to report it).
  *  @param {CoachingCard} card
  *  @param {LedgerRecord} record */
@@ -202,7 +204,8 @@ function annotate(card, record) {
 }
 
 /**
- * The pure ledger transition function (spec §6.4). Given the ledger as of the
+ * The pure ledger transition function (ADR-0039 "The outcome ledger";
+ * transition matrix at METRICS.md §22). Given the ledger as of the
  * last pass and the cards freshly derived this pass, returns the NEXT ledger
  * plus the cards annotated with each one's current ledger status. Does not
  * persist — the caller decides whether to `saveLedger` (the CLI does, on
@@ -371,7 +374,7 @@ function expireUnseenProposed(records, seenIds, now) {
 }
 
 /**
- * The explicit `--dismiss <id>` mutation (CLI-only — spec §3.3's privacy
+ * The explicit `--dismiss <id>` mutation (CLI-only — ADR-0039's privacy
  * split keeps dismissal off the dashboard). `cardId` must name a card this
  * pass actually derived; an id with no live evidence is rejected by the
  * caller printing the known-id list, not silently accepted here.

@@ -718,7 +718,8 @@ function detectUnrestrictedMode({ sessions, windowCost }) {
   })];
 }
 
-// ── v16 prompt detectors (Prompts view spec §4) ──────────────────────────────
+// ── v16 prompt detectors (ADR-0039 "Three prompt detectors, on the existing
+// adaptive-thresholds discipline"; formulas at METRICS.md §2b) ─────────────
 // All three read fingerprint-derived aggregates only — counts, shares and
 // length percentiles. No prompt text is stored by the index, so none of them
 // can read one, and each says so where the claim would otherwise be unfalsifiable.

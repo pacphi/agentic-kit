@@ -1,5 +1,5 @@
 // usage-prompt-patterns.mjs — repetition analysis over prompt FINGERPRINTS
-// (Prompts view spec §3.2 panel 3; research findings §4–§5).
+// (the Repeated-patterns panel, METRICS.md §21; research findings §4–§5).
 //
 // Every function here is PURE: it takes a collection of fingerprints and
 // returns counts, ids and sets. There is no I/O, no clock, no import beyond
@@ -25,7 +25,7 @@
 // honest answer and the one the coaching layer can act on safely.
 //
 // NO PROMPT TEXT EXISTS HERE TO LEAK. The fingerprint layer is the privacy
-// contract (spec §2.2); this module consumes it and emits only hashes, ids,
+// contract (ADR-0039 "F1 fingerprints"); this module consumes it and emits only hashes, ids,
 // counts and sets, pinned structurally by the tests.
 
 /**
@@ -492,8 +492,8 @@ function tokenStats(members) {
  * and `mixed` is reserved for a genuine tie — the honest answer when a majority
  * rule has nothing to pick.
  *
- * Ruling A (final-triage item 1, prompts-view spec §2.3/§6.3 build): the
- * non-question side is named `other` on THE WIRE, not `instruction` —
+ * Ruling A (ADR-0039 "The class-taxonomy ruling: `instruction` never reaches
+ * the wire"): the non-question side is named `other` on THE WIRE, not `instruction` —
  * `promptShape` only ever tests for interrogative-ness, so calling the other
  * side "instruction" asserts imperativeness the shape rules never measured
  * (the corpus's declarative feedback and bare acknowledgements land there
@@ -515,7 +515,8 @@ export function classifyCluster({ questions = 0, instructions = 0 } = {}) {
 
 /**
  * The recurring subset of a cluster list: everything spanning enough sessions
- * OR enough distinct days (spec §3.1 "Repeated share", findings §5.2). It is
+ * OR enough distinct days (the "Repeated share" KPI, METRICS.md §21;
+ * findings §5.2). It is
  * deliberately a disjunction — a prompt re-typed in three sessions on one busy
  * afternoon and one re-typed on two separate days are both the same finding,
  * "this was not written down anywhere".

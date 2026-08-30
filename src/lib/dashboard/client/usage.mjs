@@ -1168,7 +1168,7 @@ import { renderUsage } from './usage-orchestrators.mjs';
     renderLimitsInsights();
   }
 
-  // ══ Prompts view (spec §3) ═════════════════════════════════════════════════
+  // ══ Prompts view (METRICS.md §21) ══════════════════════════════════════════
   // Panels are built by usage-prompts.mjs (pure string builders); this function
   // owns only the DOM writes and the captions, which name the window every
   // figure was computed over — a figure whose window is not stated is a figure
