@@ -386,25 +386,55 @@ function hostCaveat(hosts, by) {
 /**
  * What a recurring cluster suggests doing about itself, keyed on its CLASS.
  *
- * The class is the durable signal: an instruction re-typed across sessions is
- * standing procedure with nowhere to live, and a question re-asked across
- * sessions is state the system could have volunteered. A cluster nobody could
- * classify gets no suggestion at all rather than the most likely one — the
- * move follows from knowing what the pattern IS.
+ * A question re-asked across sessions is state the system could have
+ * volunteered, which is a specific enough finding to name a specific move.
+ * Everything else only gets the weaker one: the rules do not split imperative
+ * from declarative (see CLASS_LABEL), so "this is worth writing down" is
+ * supportable but "this belongs in CLAUDE.md" is not — that needs to know it
+ * was a command rather than a statement. A cluster nobody could classify gets
+ * no suggestion at all.
  */
 var MOVES = {
-  instruction: { label: 'CLAUDE.md line', cls: 'instr' },
-  question: { label: 'reporting gap', cls: 'gap' },
-  mixed: { label: 'skill candidate', cls: 'skill' },
+  question: {
+    label: 'reporting gap', cls: 'gap',
+    tip: 'Asked again and again across sessions, so the answer is state the agent already has '
+      + 'and is not offering unprompted.',
+  },
+  instruction: {
+    label: 'encode candidate', cls: 'instr',
+    tip: 'Re-typed across sessions, so it is worth writing down somewhere. WHICH artifact — a skill, '
+      + 'a CLAUDE.md line, a role fragment — needs the imperative/declarative split that arrives '
+      + 'with enrichment.',
+  },
+  mixed: {
+    label: 'encode candidate', cls: 'instr',
+    tip: 'Re-typed across sessions in both question and non-question forms. Worth writing down; '
+      + 'which artifact needs the type split that arrives with enrichment.',
+  },
 };
 
 function moveChip(cls) {
   var m = MOVES[cls];
   if (!m) return '<span class="pr-move" data-kind="none">needs classification</span>';
-  return '<span class="pr-move" data-kind="' + esc(m.cls) + '">' + esc(m.label) + '</span>';
+  return '<span class="pr-move" data-kind="' + esc(m.cls) + '" title="' + esc(m.tip) + '">'
+    + esc(m.label) + '</span>';
 }
 
-var CLASS_LABEL = { question: 'question', instruction: 'instruction', mixed: 'mixed', unknown: 'unclassified' };
+/**
+ * How a cluster's class is NAMED on this surface.
+ *
+ * The library's internal value for a non-question cluster is `instruction`, and
+ * rendering that word would claim more than the shipped rules measured: the
+ * prompt-shape rules detect the INTERROGATIVE case only, so "not a question"
+ * covers imperatives and declaratives alike and the panel must not pick one.
+ * `other` is the honest name, and CLASS_CAPTION prints beside the table so the
+ * word is never left to be guessed at. The library's values are unchanged —
+ * this is the render layer only.
+ */
+var CLASS_LABEL = { question: 'question', instruction: 'other', mixed: 'mixed', unknown: 'unclassified' };
+
+var CLASS_CAPTION = 'other = imperative or declarative — the shipped rules split only questions; '
+  + 'the three-way split arrives with enrichment';
 
 function classChip(cls) {
   var known = Object.prototype.hasOwnProperty.call(CLASS_LABEL, cls);
@@ -436,10 +466,30 @@ function sessionLinks(c) {
  * The full descriptor stays as the row's tooltip: it is the string the CLI
  * prints, where there are no columns to carry those numbers.
  */
+/**
+ * A characterized descriptor ends in the class NOUN the vocabulary picked —
+ * "Recurring 3-token instruction". That is the same claim CLASS_LABEL exists to
+ * refuse: the shipped rules never separated imperative from declarative. The
+ * noun is neutralised to "prompt" here, which is also the vocabulary's own
+ * fallback, and the Type column beside it carries the class. Neither repeats
+ * the other, and neither over-states.
+ *
+ * Only the known shape is rewritten. Anything else passes through untouched
+ * rather than being pattern-matched into something this does not recognise.
+ */
+var CHARACTERIZED_LEAD = /^(Recurring \d+-token )(question|instruction|mixed prompt|prompt)$/;
+
+function neutralizeLead(lead) {
+  return CHARACTERIZED_LEAD.test(lead) ? lead.replace(CHARACTERIZED_LEAD, '$1prompt') : lead;
+}
+
 function patternName(label) {
   var full = String(label.name == null ? '' : label.name);
-  var lead = label.source === 'characterized' ? full.split(' · ')[0] : full;
-  return '<span class="pr-name" title="' + esc(full) + '">' + esc(lead) + '</span>';
+  if (label.source !== 'characterized') {
+    return '<span class="pr-name" title="' + esc(full) + '">' + esc(full) + '</span>';
+  }
+  return '<span class="pr-name" title="' + esc(full) + '">'
+    + esc(neutralizeLead(full.split(' · ')[0])) + '</span>';
 }
 
 export function patternsTable(p) {
@@ -459,19 +509,29 @@ export function patternsTable(p) {
     + '<th scope="col">Suggested move</th><th scope="col">Open</th></tr></thead><tbody>'
     + rows.map(patternRow).join('')
     + '</tbody></table></div>'
-    + overflowNote(all.length, rows.length, 'recurring cluster')
+    + '<div class="pr-caveat">' + esc(CLASS_CAPTION) + '</div>'
+    + countNote(all.length, rows.length, 'recurring cluster')
     + exactRepeatsBlock(pp);
 }
 
-/** Says what the table is NOT showing. Without it the visible rows read as the
- *  whole finding, which is the precise misreading a display cap creates. */
-function overflowNote(total, shown, noun) {
-  if (total <= shown) return '';
+/**
+ * A sliced list ALWAYS prints its denominator, whether or not it was cut.
+ *
+ * "Showing 6 of 6" costs a line and tells a reader they are looking at the
+ * whole thing; a line that appears only when something is hidden leaves them
+ * to infer completeness from silence, which is the same misreading a display
+ * cap creates in the first place. The projection carries the total, so this is
+ * never an estimate.
+ */
+function countNote(total, shown, noun) {
   var more = total - shown;
-  return '<div class="pr-more-note">Showing the ' + esc(num(shown)) + ' largest of '
-    + esc(num(total)) + ' &mdash; and <b>' + esc(num(more)) + '</b> more ' + esc(noun)
-    + (more === 1 ? '' : 's') + ' not listed. Every figure above counts all '
-    + esc(num(total)) + '.</div>';
+  return '<div class="pr-more-note">Showing <b>' + esc(num(shown)) + '</b> of <b>'
+    + esc(num(total)) + '</b> ' + esc(noun) + (total === 1 ? '' : 's')
+    + (more > 0
+      ? ' &mdash; the ' + esc(num(shown)) + ' largest. Every figure above counts all '
+        + esc(num(total)) + '.'
+      : ' &mdash; all of them.')
+    + '</div>';
 }
 
 function patternRow(c) {
@@ -511,6 +571,7 @@ function exactRepeatsBlock(pp) {
         + esc(num(r.tokens)) + '-token prompt <i>' + plural(r.sessions, 'session') + ' · '
         + plural(r.days, 'day') + '</i></span>';
     }).join('') + '</div>'
+    + countNote(all.length, rows.length, 'exact repeat')
     + '<p class="pr-exact-note">Identical normalized text, so these are exact by construction &mdash; '
     + 'the loose clusters above are where phrasing variance shows up. Exemplar text lives in '
     + '<code>ak usage prompts</code>, never here.</p></div>';

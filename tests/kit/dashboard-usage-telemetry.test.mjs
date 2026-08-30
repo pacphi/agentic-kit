@@ -708,11 +708,79 @@ test('host interplay names both hosts and flags a thin history rather than trend
 test('the patterns table carries the class, the suggested move, and masked session links', () => {
   const html = patternsTable(PANEL_PROMPTS);
   assert.match(html, /Commit-and-push instruction/, 'a seeded cluster shows its curated name');
-  assert.match(html, /CLAUDE\.md line/, 'an instruction cluster suggests a project instruction');
+  assert.match(html, /encode candidate/, 'a non-question cluster is worth writing down, artifact unnamed');
   assert.match(html, /reporting gap/, 'a question cluster suggests the agent should have volunteered it');
   assert.match(html, /needs classification/, 'an unclassified cluster gets no guessed move');
   assert.match(html, /href="#usage\/s1"/, 'links go through the existing masked transcript route');
   assert.match(html, /\+6/, '9 sessions with 3 sample ids leaves 6 behind the count');
+});
+
+// The shipped prompt-shape rules detect the INTERROGATIVE case only, so the
+// library's internal `instruction` value really means "not a question" and
+// covers imperatives and declaratives alike. Rendering that word would claim a
+// split the rules never made.
+test('a non-question cluster renders as "other", never as "instruction"', () => {
+  const html = patternsTable(PANEL_PROMPTS);
+  const chips = [...html.matchAll(/<span class="pr-cat"[^>]*>([^<]*)</g)].map((m) => m[1]);
+  assert.deepEqual(chips, ['other', 'question', 'unclassified'],
+    'class chips name what the rules measured, in row order');
+  assert.doesNotMatch(html, /<span class="pr-cat"[^>]*>instruction</,
+    'the library value must not reach the page as a label');
+  assert.match(html,
+    /other = imperative or declarative — the shipped rules split only questions; the three-way split arrives with enrichment/,
+    'and the caption prints beside the table so the word is never left to be guessed at');
+});
+
+// The vocabulary's characterized descriptor ends in the class noun it picked,
+// so "Recurring 3-token instruction" smuggles the same claim in through the
+// NAME. Neutralised at the render layer; the Type column carries the class.
+test('a characterized name does not assert a class the rules never split', () => {
+  const html = patternsTable({
+    ...PANEL_PROMPTS,
+    patterns: {
+      ...PANEL_PROMPTS.patterns,
+      clusters: [
+        { ...PANEL_PROMPTS.patterns.clusters[0], class: 'instruction',
+          label: { name: 'Recurring 3-token instruction · 9 sessions · both hosts', source: 'characterized' } },
+        { ...PANEL_PROMPTS.patterns.clusters[1], class: 'question',
+          label: { name: 'Recurring 44-token question · 4 sessions · 1 host', source: 'characterized' } },
+      ],
+    },
+  });
+  assert.match(html, />Recurring 3-token prompt</, 'the class noun is neutralised in the cell');
+  assert.match(html, />Recurring 44-token prompt</, 'for every class, so the Type column is the one source');
+  assert.doesNotMatch(html, />Recurring \d+-token (instruction|question)</,
+    'no class noun survives into a rendered name');
+  assert.match(html, /title="Recurring 3-token instruction · 9 sessions · both hosts"/,
+    'the vocabulary\'s own string stays as the tooltip, unedited');
+});
+
+test('a curated name is never rewritten, whatever words it contains', () => {
+  const html = patternsTable({
+    ...PANEL_PROMPTS,
+    patterns: {
+      ...PANEL_PROMPTS.patterns,
+      clusters: [{ ...PANEL_PROMPTS.patterns.clusters[0],
+        label: { name: 'Recurring 3-token instruction', source: 'curated' } }],
+    },
+  });
+  assert.match(html, />Recurring 3-token instruction</,
+    'a person or an enrichment pass wrote this name; the render layer does not second-guess it');
+});
+
+// A suggested move must not smuggle back the claim the class wording removed:
+// "CLAUDE.md line" asserts the prompt was a command, which is exactly the half
+// of the split the rules do not make.
+test('the non-question move names no artifact it cannot justify', () => {
+  const html = patternsTable(PANEL_PROMPTS);
+  // The CHIP LABEL must not name an artifact. The tooltip may still list the
+  // candidates it is choosing between — that is the explanation, not the claim.
+  const labels = [...html.matchAll(/<span class="pr-move"[^>]*>([^<]*)</g)].map((m) => m[1]);
+  assert.ok(!labels.includes('CLAUDE.md line'),
+    `naming the artifact needs the imperative/declarative split, got ${JSON.stringify(labels)}`);
+  assert.deepEqual(labels, ['encode candidate', 'reporting gap', 'needs classification']);
+  assert.match(html, /title="[^"]*needs the imperative\/declarative split[^"]*"/,
+    'the chip says what it is waiting on');
 });
 
 // The vocabulary's own descriptor repeats the span columns. Trimming it is a
@@ -742,10 +810,19 @@ test('a capped table says how many rows it is not showing', () => {
   const html = patternsTable(many);
   // One `scope="row"` per DATA row — counting `<tr>` would include the header.
   assert.equal((html.match(/scope="row"/g) || []).length, 25, 'the table draws its display cap');
-  assert.match(html, /15<\/b> more recurring clusters not listed/);
+  assert.match(html, /Showing <b>25<\/b> of <b>40<\/b> recurring clusters/);
   assert.match(html, /Every figure above counts all 40/, 'and that the KPI above is not capped');
-  assert.doesNotMatch(patternsTable(PANEL_PROMPTS), /more recurring cluster/,
-    'an uncapped table must not claim it is hiding anything');
+});
+
+// A denominator prints whether or not the list was cut. A line that appears
+// only when something is hidden leaves the reader to infer completeness from
+// silence, which is the same misreading a cap creates in the first place.
+test('an uncut list still prints its denominator', () => {
+  const html = patternsTable(PANEL_PROMPTS);
+  assert.match(html, /Showing <b>3<\/b> of <b>3<\/b> recurring clusters &mdash; all of them/);
+  assert.doesNotMatch(html, /largest/, 'nothing was cut, so nothing claims to be a top slice');
+  // The exact-repeat tail slices too, and is held to the same rule.
+  assert.match(html, /Showing <b>1<\/b> of <b>1<\/b> exact repeat &mdash; all of them/);
 });
 
 test('exact repeats render beside the clusters as the identical-text half', () => {

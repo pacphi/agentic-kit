@@ -1285,8 +1285,8 @@ p(q), over N samples, landing in bucket i (count n_i, running total `cum` before
 - Percentiles: `percentileFromBuckets` (`usage-aggregate.mjs:215-232`). The
   browser re-implementation `bucketPercentile` (`usage-rhythm.mjs:106-126`) is
   pinned to byte-identical output, and the browser's edge copies to the server
-  constants, by `tests/kit/dashboard-usage-telemetry.test.mjs:980-998` and
-  `:1088-1095`.
+  constants, by `tests/kit/dashboard-usage-telemetry.test.mjs:1057-1075` and
+  `:1165-1172`.
 - Render: `lengthCard`/`latencyCard` and the `≥` prefix helper `fmtAtLeast` in
   `src/lib/dashboard/client/usage.mjs` (that bundle shares a basename with the
   CLI command module, so its render sites are cited by function name rather
