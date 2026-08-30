@@ -831,4 +831,38 @@ export const USAGE_CSS = `
 .pr-pending b{color:var(--ink)}
 .pr-pending-note{color:var(--ink-dim) !important; font-size:11.5px !important}
 
+/* Coaching cards (spec §5, §6.4). One card per finding — the same visual
+   weight as a .kpi tile, not a table row, because a card carries a Try and a
+   basis a row has no place for. */
+.pr-cards{display:flex; flex-direction:column; gap:12px; margin-bottom:12px}
+.pr-card{
+  background:var(--panel-2); border-radius:var(--r-sm); padding:13px 14px;
+  border-left:3px solid var(--line-2);
+}
+.pr-card[data-status="adopted"]{border-left-color:var(--ok)}
+.pr-card[data-status="retired"]{border-left-color:var(--warn)}
+.pr-card[data-status="dismissed"],.pr-card[data-status="expired"]{opacity:.62}
+.pr-card-head{display:flex; align-items:baseline; justify-content:space-between; gap:10px; flex-wrap:wrap}
+.pr-card-head h4{margin:0; font-size:13.5px; font-weight:600; color:var(--ink)}
+.pr-card-status{
+  flex:none; font-size:10.5px; font-weight:600; letter-spacing:.03em; color:var(--ink-2);
+  text-transform:uppercase;
+}
+.pr-card-status[data-status="adopted"]{color:var(--ok)}
+.pr-card-status[data-status="retired"]{color:var(--warn); text-transform:none; font-weight:400}
+.pr-card-finding{margin:7px 0 0; font-size:12.5px; color:var(--ink-2); line-height:1.5}
+.pr-card-try{margin:7px 0 0; font-size:12.5px; color:var(--ink)}
+.pr-card-try b{font-weight:600}
+.pr-card-basis{margin:5px 0 0; font-size:11.5px; color:var(--ink-dim)}
+.pr-card-draft{margin-top:10px}
+.pr-card-draft-hint{margin:0 0 4px; font-size:10.5px; color:var(--ink-dim); text-transform:uppercase; letter-spacing:.04em}
+.pr-card-draft-pre{
+  margin:0; padding:9px 11px; background:var(--panel); border:1px solid var(--line);
+  border-radius:var(--r-sm); font-family:var(--mono); font-size:11.5px; color:var(--ink-2);
+  white-space:pre-wrap; word-break:break-word; max-height:220px; overflow-y:auto; cursor:text;
+}
+.pr-card-dismiss-hint{margin:8px 0 0; font-size:11px; color:var(--ink-dim)}
+.pr-card-dismiss-hint code{font-family:var(--mono); font-size:10.5px; color:var(--ink-2)}
+.pr-card-ledger{margin:2px 0 0; font-size:11px; color:var(--ink-dim)}
+
 `;

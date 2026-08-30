@@ -64,6 +64,11 @@ import { renderPage } from './dashboard/page.mjs';
 // lazyUsage): the reason for that laziness is the transcript walk, which this
 // module does not do.
 import { BASELINE_TRAILING_DAYS } from './usage-aggregate.mjs';
+// Coaching (spec §5/§6.4) — static import, same reasoning as above.
+import { deriveCards } from './usage-coaching.mjs';
+import {
+  loadLedger, reconcile, defaultLedgerPath, summarizeLedger, gatherAdoptionInputs,
+} from './usage-outcome-ledger.mjs';
 import { requestRejection } from './dashboard/request-security.mjs';
 import {
   readJsonSafe, mintToken, tokenMatches, sendJson, sendUnauthorized, sendNotFound, listenLoopback,
@@ -788,7 +793,7 @@ export function startDashboard({
   liveOptions = {}, liveIdleMs = 30_000, transcripts, transcriptOptions = {},
   transcriptClientBuffer = 64, transcriptMaxClients = 16,
   intelWatch, intelClientBuffer = 256, intelMaxClients = 32,
-  discoverProjects, machineWideIntel, models, modelScopeKey, system, systemOptions = {},
+  discoverProjects, machineWideIntel, models, modelScopeKey, system, systemOptions = {}, coachingLedger,
 } = {}) {
   const provide = fetchStatus || shellOutStatus(cwd);
   const usageApi = usage || lazyUsage();
@@ -1448,7 +1453,14 @@ export function startDashboard({
         const { sessions: _sessions, projectTree, promptPatterns: _patterns, ...rollups } = agg || {};
         sendJson(res, 200, {
           ...rollups,
-          prompts: promptsPayload(agg || {}),
+          prompts: {
+            ...promptsPayload(agg || {}),
+            // Coaching (spec §5/§6.4): derived server-side from the SAME lib +
+            // ledger the CLI uses, so the two surfaces never disagree about a
+            // card's status. Read-only — see dashboardCoachingPayload's doc
+            // for why this must never call saveLedger.
+            coaching: dashboardCoachingPayload(agg || {}, coachingLedger),
+          },
           // Account-level metadata has no session/host correlation key. Keep
           // it visibly separate instead of laundering it into local totals.
           providerAnalytics,
@@ -1651,4 +1663,37 @@ export function startDashboard({
       intelPool.clear();
     },
   });
+}
+
+/**
+ * The Prompts view's coaching half (spec §5, §6.4): cards derived from THIS
+ * poll's aggregate, reconciled against the persisted ledger so status chips
+ * (proposed/adopted/dismissed/expired/retired) match `ak usage prompts`
+ * exactly — same lib, same ledger file, never a second projection that could
+ * drift from the CLI's.
+ *
+ * READ-ONLY BY CONTRACT (spec §3.3's privacy split: dismissal is CLI-only).
+ * `reconcile` itself never writes anything — persistence is an explicit
+ * extra step the CLI takes and this function deliberately does not, so a
+ * dashboard poll can never mutate what `ak usage prompts --dismiss` owns.
+ *
+ * `coachingLedgerOverride` is the same injectable-dependency shape `usage`/
+ * `limits` already use on `startDashboard` — tests point it at a stub loader
+ * so a poll never touches the real `~/.config/agentic-kit` ledger file.
+ *
+ * @param {object} agg the aggregate `handleUsage` already read (prompts:true)
+ * @param {{ loadLedger?: typeof loadLedger, ledgerPath?: string }} [coachingLedgerOverride]
+ */
+function dashboardCoachingPayload(agg, coachingLedgerOverride) {
+  const load = coachingLedgerOverride?.loadLedger ?? loadLedger;
+  const ledgerPath = coachingLedgerOverride?.ledgerPath ?? defaultLedgerPath();
+  const cards = deriveCards({
+    promptPatterns: agg.promptPatterns, promptBaselines: agg.promptBaselines,
+    promptsByHost: agg.promptsByHost, insights: agg.insights, now: Date.now(),
+  });
+  const currentPatterns = { promptPatterns: agg.promptPatterns, promptsByHost: agg.promptsByHost, insights: agg.insights };
+  const { cards: annotated, ledger } = reconcile(load(ledgerPath), cards, {
+    adoptionInputs: { ...gatherAdoptionInputs(), currentPatterns }, now: Date.now(),
+  });
+  return { cards: annotated, summary: summarizeLedger(ledger.records) };
 }

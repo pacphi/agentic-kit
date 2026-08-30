@@ -891,6 +891,9 @@ async function main() {
     models: MODELS_STUB,
     modelScopeKey: 'ab'.repeat(32),
     system: SYSTEM_STUB,
+    // Same principle as `usage` above: coaching reads a ledger file by
+    // default, and this harness must not touch the user's real one either.
+    coachingLedger: { loadLedger: () => ({ version: 1, records: [] }), ledgerPath: cachePath + '.coaching-unused' },
   });
   const ORIGIN = new URL(srv.url).origin;
   const modelHeaders = { 'x-dash-token': srv.token };
@@ -2735,6 +2738,22 @@ async function main() {
       await page.evaluate(() => document.getElementById('usage-days-all')?.classList.contains('on'))
         && (await visibleText(page, '#u-pr-patterns-note')).includes('all history'),
       `All did not take effect; caption read ${JSON.stringify(await visibleText(page, '#u-pr-patterns-note'))}`);
+
+    // The Coaching section (spec §5): the fixture corpus carries no prompt
+    // fingerprints at all, so every one of the six v1 cards structurally
+    // cannot fire — the section is expected to render its honest "no card
+    // met its evidence bar" state, never blank and never the old
+    // "arrives with the outcome ledger" placeholder text it shipped with
+    // before this wave built the real thing.
+    const coachingText = await visibleText(page, '#u-pr-coaching');
+    check('the Coaching section renders content, not an empty container',
+      coachingText.trim().length > 0, 'u-pr-coaching was empty after switching to Prompts');
+    check('the Coaching section no longer shows the pre-ledger placeholder copy',
+      !coachingText.includes('arrives with the outcome ledger'),
+      `Coaching still reads as the unbuilt shell: ${JSON.stringify(coachingText)}`);
+    check('a fingerprint-free fixture corpus renders Coaching\'s honest empty state',
+      coachingText.includes('no coaching card met its evidence bar'),
+      `expected the evidence-bar empty state; got ${JSON.stringify(coachingText)}`);
 
     // NOT covered here: renderPrompts' no-fingerprint-layer branch. The bundle
     // is wrapped in an IIFE, so the renderer is not addressable from

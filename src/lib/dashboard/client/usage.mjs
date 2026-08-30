@@ -5,7 +5,7 @@ import { VIEWS, authHeaders, esc, setTab, syncHash } from './bootstrap.mjs';
 import { ago } from './intelligence.mjs';
 import { renderModelFacets, renderModelInventory, renderModelLifecycle } from './model-lifecycle.mjs';
 import { bucketPercentile, bucketPositionPct, deltaChip, donut2, histogram, rankedRows, sparklineSvg, stackedDays } from './usage-rhythm.mjs';
-import { coachingPlaceholder, hostInterplay, patternsTable, promptKpis, provenancePanel, reAskPanel, steerPanel, tapLengthPanel, taxonomyPlaceholder } from './usage-prompts.mjs';
+import { coachingPanel, hostInterplay, patternsTable, promptKpis, provenancePanel, reAskPanel, steerPanel, tapLengthPanel, taxonomyPlaceholder } from './usage-prompts.mjs';
 import { renderUsage } from './usage-orchestrators.mjs';
 
   // ══ Usage tab ══════════════════════════════════════════════════════════════
@@ -1180,6 +1180,9 @@ import { renderUsage } from './usage-orchestrators.mjs';
     if(!p){
       kpis.innerHTML='<div class="empty">this window carries no prompt-fingerprint layer &mdash; '
         +'the sessions in it were parsed before prompt fingerprints shipped. Re-scan to populate it.</div>';
+      var coachEl=document.getElementById("u-pr-coaching");
+      if(coachEl)coachEl.innerHTML='<div class="empty">coaching needs the prompt-fingerprint layer, '
+        +'same as the rest of this view &mdash; nothing to show until a re-scan populates it.</div>';
       return;
     }
     var win=windowLabel();
@@ -1195,7 +1198,7 @@ import { renderUsage } from './usage-orchestrators.mjs';
     setText("u-pr-patterns-note",patternsNote(p,win));
     document.getElementById("u-pr-reasks").innerHTML=reAskPanel(p);
     document.getElementById("u-pr-patterns").innerHTML=patternsTable(p);
-    document.getElementById("u-pr-coaching").innerHTML=coachingPlaceholder();
+    document.getElementById("u-pr-coaching").innerHTML=coachingPanel(p);
   }
   function setText(id,txt){var el=document.getElementById(id);if(el)el.textContent=txt;}
   function windowLabel(){return usageDays>=365?"all history":"last "+usageDays+"d";}

@@ -627,18 +627,95 @@ export function reAskPanel(p) {
     + '.</div>';
 }
 
-// The section ships as a labelled shell. Cards need the outcome ledger to
-// carry their evidence hash and their adopted/dismissed state, and a card
-// without those is a suggestion that cannot be measured, dismissed, or
-// retired — which is the thing this design set out not to build.
-export function coachingPlaceholder() {
-  return '<div class="pr-pending">'
-    + '<h4>Coaching arrives with the outcome ledger</h4>'
-    + '<p>Each card will pair a finding with one concrete change, the labelled basis for its estimate, '
-    + 'and a <b>draft-only</b> affordance &mdash; nothing writes to CLAUDE.md, creates a skill, or '
-    + 'changes configuration on its own.</p>'
-    + '<p class="pr-pending-note">Held back deliberately: a card carries the evidence hash of the '
-    + 'findings it came from, so a rescan can mark it stale, and an adopted card is measured against '
-    + 'what actually changed. Without that ledger a card is advice nobody can hold to account.</p>'
+/** The status chip: one of the ledger's five states, `adopted` decorated with
+ *  a check plus its outcome line once measured, `retired` with its refutation.
+ *  `stale` never appears in v1 (usage-outcome-ledger.mjs's `annotate` always
+ *  reports `false` — see its doc for why); the class still reads `data-status`
+ *  off the raw value so a future enriched card's real staleness needs no
+ *  markup change here, only a style for it. */
+function coachingStatusChip(card) {
+  var status = card.status || 'proposed';
+  var label = status;
+  if (status === 'adopted') {
+    label = 'adopted ✓';
+    if (card.outcome) {
+      label += card.outcome.improved
+        ? ' — ' + esc(card.outcome.deltaText)
+        : ' — too early to tell (' + esc(card.outcome.deltaText) + ')';
+    }
+  } else if (status === 'retired' && card.refutation) {
+    label = 'retired — did not improve: ' + esc(card.refutation);
+  }
+  return '<span class="pr-card-status" data-status="' + esc(status) + '">' + label + '</span>';
+}
+
+/** The draft affordance: rendered text in a `<pre>`, never a clipboard API —
+ *  spec §5's "Draft → produces a suggestion the operator edits and
+ *  applies themselves. Nothing writes ... unprompted." A title attribute
+ *  doubles the copy hint for a mouse user; the caption above the block is the
+ *  one a screen reader announces. */
+function coachingDraftBlock(draft) {
+  if (!draft) return '';
+  return '<div class="pr-card-draft">'
+    + '<p class="pr-card-draft-hint">Draft — select and copy:</p>'
+    + '<pre class="pr-card-draft-pre" title="Select and copy">' + esc(draft.text) + '</pre>'
     + '</div>';
+}
+
+/** Dismissal is CLI-only (spec §3.3's privacy split) — the dashboard never
+ *  writes the ledger, so a proposed card renders the CLI command as a hint
+ *  rather than a button that would have nothing to call. */
+function coachingDismissHint(card) {
+  if (card.status !== 'proposed') return '';
+  return '<p class="pr-card-dismiss-hint">Dismiss (CLI-only): '
+    + '<code>ak usage prompts --dismiss ' + esc(card.id) + '</code></p>';
+}
+
+function coachingCard(card) {
+  return '<div class="pr-card" data-status="' + esc(card.status || 'proposed') + '">'
+    + '<div class="pr-card-head"><h4>' + esc(card.title) + '</h4>' + coachingStatusChip(card) + '</div>'
+    + '<p class="pr-card-finding">' + esc(card.finding) + '</p>'
+    + '<p class="pr-card-try"><b>Try:</b> ' + esc(card.try) + '</p>'
+    + '<p class="pr-card-basis">' + esc(card.basis) + '</p>'
+    + coachingDraftBlock(card.draft)
+    + coachingDismissHint(card)
+    + '</div>';
+}
+
+function coachingSummaryLine(s) {
+  if (!s) return '';
+  return '<p class="pr-card-ledger mono">ledger &middot; ' + num(s.proposed) + ' proposed &middot; '
+    + num(s.adopted) + ' adopted &middot; ' + num(s.dismissed) + ' dismissed &middot; '
+    + num(s.expired) + ' expired &middot; ' + num(s.retired) + ' retired</p>';
+}
+
+/**
+ * The Coaching section (spec §5): cards rendered finding → Try →
+ * basis → status chip, a draft affordance where the card carries one, and
+ * a dismiss hint pointing at the CLI (the one place a dismissal can actually
+ * be persisted). `p.coaching` is `{ cards, summary }` from the SAME lib +
+ * ledger `ak usage prompts` reads, reconciled read-only server-side
+ * (dashboard-server.mjs's dashboardCoachingPayload) — the two surfaces cannot
+ * disagree about a card's status any more than they can about a cluster's
+ * count.
+ *
+ * Rule-derived cards recompute free every scan (spec §6.3), so there is no
+ * "stale — recompute" state to render here in v1 — the caption says so
+ * rather than a per-card marker for a state that cannot occur yet.
+ */
+export function coachingPanel(p) {
+  var c = p && p.coaching;
+  if (!c) {
+    return '<div class="empty">coaching needs a rescan to compute &mdash; it will appear once the '
+      + 'server has re-derived this window.</div>';
+  }
+  var cards = Array.isArray(c.cards) ? c.cards : [];
+  if (!cards.length) {
+    return '<div class="empty">no coaching card met its evidence bar this window. That is a clean '
+      + 'result, not a missing one.</div>';
+  }
+  return '<div class="pr-cards">' + cards.map(coachingCard).join('') + '</div>'
+    + '<div class="pr-caveat">Rule-derived and free to recompute every scan &mdash; nothing here goes '
+    + 'stale. Dismissal is CLI-only: <code>ak usage prompts --dismiss &lt;id&gt;</code>.</div>'
+    + coachingSummaryLine(c.summary);
 }

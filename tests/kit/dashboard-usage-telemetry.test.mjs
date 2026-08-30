@@ -13,7 +13,7 @@ import {
   bucketPercentile, bucketPositionPct,
 } from '../../src/lib/dashboard/client/usage-rhythm.mjs';
 import {
-  coachingPlaceholder, hostInterplay, hostTapSeries, patternsTable, promptKpis,
+  coachingPanel, hostInterplay, hostTapSeries, patternsTable, promptKpis,
   provenancePanel, reAskPanel, steerPanel, tapLengthPanel, taxonomyPlaceholder,
 } from '../../src/lib/dashboard/client/usage-prompts.mjs';
 import {
@@ -115,6 +115,13 @@ const FIXTURE_DEPS = {
   detectInsights: () => [],
 };
 
+// Every /api/usage route now also computes coaching (dashboard-server.mjs's
+// dashboardCoachingPayload), which by default reads the REAL
+// ~/.config/agentic-kit ledger — exactly the "tests must never read the real
+// ~/.config" hazard `usage`/`limits` are already injected to avoid here. A
+// blank in-memory ledger keeps every /api/usage test in this file hermetic.
+const NULL_COACHING_LEDGER = { loadLedger: () => ({ version: 1, records: [] }), ledgerPath: '/dev/null/unused' };
+
 function get(url, token) {
   return new Promise((resolve, reject) => {
     http.get(url, { headers: { 'x-dash-token': token } }, (res) => {
@@ -163,7 +170,7 @@ test('/api/usage payload carries rhythm, mode, provider and a previous-window pr
   // rides through from the caller's own options unchanged.
   const usage = { readIndex: spyReadIndex(FIXTURE_RECORDS, calls) };
   const srv = await startDashboard({
-    port: 0, fetchStatus: async () => ({ overall: 'ok', rows: [] }), usage,
+    port: 0, fetchStatus: async () => ({ overall: 'ok', rows: [] }), usage, coachingLedger: NULL_COACHING_LEDGER,
   });
   try {
     const r = await get(`${srv.url}api/usage?days=7`, srv.token);
@@ -246,7 +253,7 @@ test('the baseline lookback reaches far enough back for promptBaselines to exist
   const calls = [];
   const srv = await startDashboard({
     port: 0, fetchStatus: async () => ({ overall: 'ok', rows: [] }),
-    usage: { readIndex: spyReadIndex(trailing, calls) },
+    usage: { readIndex: spyReadIndex(trailing, calls) }, coachingLedger: NULL_COACHING_LEDGER,
   });
   try {
     const r = await get(`${srv.url}api/usage?days=7`, srv.token);
@@ -333,7 +340,7 @@ async function promptsPayload(days = 7) {
   const calls = [];
   const srv = await startDashboard({
     port: 0, fetchStatus: async () => ({ overall: 'ok', rows: [] }),
-    usage: { readIndex: spyReadIndex(PROMPT_RECORDS, calls) },
+    usage: { readIndex: spyReadIndex(PROMPT_RECORDS, calls) }, coachingLedger: NULL_COACHING_LEDGER,
   });
   try {
     const r = await get(`${srv.url}api/usage?days=${days}`, srv.token);
@@ -369,6 +376,15 @@ test('/api/usage asks for the prompt projection and ships it intact', async () =
     assert.equal(b.tapShareP75_trailing90d, null,
       'under BASELINE_MIN_ACTIVE_DAYS the baseline is null, never a number from a handful of days');
   }
+});
+
+test('/api/usage carries a coaching payload shaped {cards, summary}, computed read-only', async () => {
+  const { prompts } = await promptsPayload();
+  assert.ok(prompts.coaching, 'the prompts payload must carry a coaching key');
+  assert.deepEqual(Object.keys(prompts.coaching).sort(), ['cards', 'summary']);
+  assert.ok(Array.isArray(prompts.coaching.cards));
+  assert.deepEqual(prompts.coaching.summary, { proposed: 0, adopted: 0, dismissed: 0, expired: 0, retired: 0 },
+    'PROMPT_RECORDS fires none of the six v1 rules, so the ledger summary must be all zeros, not absent');
 });
 
 test('the projection reaches the payload with its published shape', async () => {
@@ -948,16 +964,93 @@ test('nothing typed leaves the steer split unclassified rather than zeroed', () 
   assert.doesNotMatch(html, /0%/, 'a split of nothing is not a split into zeroes');
 });
 
-test('the two unbuilt sections render a named gap, not a fabricated card', () => {
+test('the taxonomy section renders a named gap, not a fabricated card', () => {
   const taxonomy = taxonomyPlaceholder();
   assert.match(taxonomy, /has not shipped/);
   assert.match(taxonomy, /Deliberately blank rather than filled with a guess/);
-  const coaching = coachingPlaceholder();
-  assert.match(coaching, /outcome ledger/);
-  assert.match(coaching, /draft-only|draft/i, 'the contract is stated even before the cards exist');
-  for (const html of [taxonomy, coaching]) {
-    assert.doesNotMatch(html, /class="kpi"/, 'a placeholder must not look like a measured tile');
-  }
+  assert.doesNotMatch(taxonomy, /class="kpi"/, 'a placeholder must not look like a measured tile');
+});
+
+// ── coaching (spec §5, §6.4) ────────────────────────────────────────────────
+
+function coachingCard(overrides = {}) {
+  return {
+    id: 'commit-push-claude-md', title: 'Commit-and-push is retyped, not remembered',
+    finding: 'recurred 12 times across 8 sessions and 4 days.', try: 'Add one line to CLAUDE.md.',
+    basis: '12 recurrences across 8 sessions, 4 days.', evidenceHash: 'a'.repeat(16),
+    generatedAt: '2026-08-29T00:00:00.000Z', status: 'proposed', stale: false, dismissCount: 0,
+    outcome: null, refutation: null,
+    ...overrides,
+  };
+}
+
+test('coachingPanel renders each card\'s title, finding, Try, and basis', () => {
+  const html = coachingPanel({ coaching: { cards: [coachingCard()], summary: { proposed: 1, adopted: 0, dismissed: 0, expired: 0, retired: 0 } } });
+  assert.match(html, /Commit-and-push is retyped, not remembered/);
+  assert.match(html, /recurred 12 times across 8 sessions and 4 days\./);
+  assert.match(html, /<b>Try:<\/b> Add one line to CLAUDE\.md\./);
+  assert.match(html, /12 recurrences across 8 sessions, 4 days\./);
+});
+
+test('coachingPanel status chips: proposed, adopted (+ outcome line), dismissed, expired, retired (+ refutation)', () => {
+  const proposed = coachingPanel({ coaching: { cards: [coachingCard({ status: 'proposed' })] } });
+  assert.match(proposed, /data-status="proposed"/);
+
+  const adoptedNoOutcome = coachingPanel({ coaching: { cards: [coachingCard({ status: 'adopted' })] } });
+  assert.match(adoptedNoOutcome, /adopted ✓/);
+  assert.doesNotMatch(adoptedNoOutcome, /since adoption/, 'no outcome measured yet must not fabricate a delta');
+
+  const improved = coachingPanel({ coaching: { cards: [coachingCard({ status: 'adopted', outcome: { improved: true, deltaText: '12 → 2 since adoption' } })] } });
+  assert.match(improved, /adopted ✓ — 12 → 2 since adoption/);
+
+  const pending = coachingPanel({ coaching: { cards: [coachingCard({ status: 'adopted', outcome: { improved: false, deltaText: '12 → 11 since adoption' } })] } });
+  assert.match(pending, /too early to tell \(12 → 11 since adoption\)/);
+
+  const dismissed = coachingPanel({ coaching: { cards: [coachingCard({ status: 'dismissed' })] } });
+  assert.match(dismissed, /data-status="dismissed"/);
+
+  const expired = coachingPanel({ coaching: { cards: [coachingCard({ status: 'expired' })] } });
+  assert.match(expired, /data-status="expired"/);
+
+  const retired = coachingPanel({ coaching: { cards: [coachingCard({ status: 'retired', refutation: '12 → 13 since adoption' })] } });
+  assert.match(retired, /retired — did not improve: 12 → 13 since adoption/);
+});
+
+test('coachingPanel renders a draft card\'s text inside a <pre>, and omits the block when there is no draft', () => {
+  const withDraft = coachingPanel({
+    coaching: { cards: [coachingCard({ draft: { kind: 'claude-md-line', text: 'Commit and push once verified.' } })] },
+  });
+  assert.match(withDraft, /<pre class="pr-card-draft-pre"[^>]*>Commit and push once verified\.<\/pre>/);
+  assert.match(withDraft, /Draft — select and copy/, 'a copy hint substitutes for a clipboard API');
+
+  const withoutDraft = coachingPanel({ coaching: { cards: [coachingCard()] } });
+  assert.doesNotMatch(withoutDraft, /pr-card-draft-pre/, 'a card with no draft must render no draft block');
+});
+
+test('coachingPanel renders the CLI dismiss hint on a proposed card only', () => {
+  const proposed = coachingPanel({ coaching: { cards: [coachingCard({ status: 'proposed' })] } });
+  assert.match(proposed, /pr-card-dismiss-hint">Dismiss \(CLI-only\): <code>ak usage prompts --dismiss commit-push-claude-md<\/code>/);
+
+  const adopted = coachingPanel({ coaching: { cards: [coachingCard({ status: 'adopted' })] } });
+  assert.doesNotMatch(adopted, /pr-card-dismiss-hint/, 'a settled card offers no PER-CARD dismiss hint '
+    + '(the section caption still names the CLI command generically)');
+});
+
+test('coachingPanel names the absent-coaching state rather than rendering nothing', () => {
+  assert.match(coachingPanel({}), /needs a rescan/);
+  assert.match(coachingPanel({ coaching: null }), /needs a rescan/);
+  const empty = coachingPanel({ coaching: { cards: [], summary: { proposed: 0, adopted: 0, dismissed: 0, expired: 0, retired: 0 } } });
+  assert.match(empty, /no coaching card met its evidence bar/);
+  assert.doesNotMatch(empty, /class="kpi"/);
+});
+
+test('coachingPanel escapes every card field — no raw HTML from the payload reaches the DOM', () => {
+  const html = coachingPanel({
+    coaching: { cards: [coachingCard({ title: '<img src=x onerror=alert(1)>', finding: '<script>alert(2)</script>' })] },
+  });
+  assert.doesNotMatch(html, /<img/);
+  assert.doesNotMatch(html, /<script>/);
+  assert.match(html, /&lt;img/);
 });
 
 // Structural by necessity: these assert what the SERVED DOCUMENT contains, so
