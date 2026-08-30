@@ -142,12 +142,15 @@ function maskedExemplarsFor(key, exemplarsByKey) {
   });
 }
 
+/** QE review F-4 (HIGH): every candidate reaching here HAS at least one masked
+ *  exemplar, because `enrichLabels` filters on exactly that before building
+ *  the prompt. The `(no exemplar available)` branch this used to carry is
+ *  deleted rather than left unreachable — leaving it would be an invitation to
+ *  regress the gate it exists behind. */
 function buildLabelPrompt(candidates, exemplarsByKey) {
   const lines = candidates.map((c) => {
-    const exemplars = maskedExemplarsFor(c.key, exemplarsByKey);
-    const sampleLines = exemplars.length
-      ? exemplars.map((e, i) => `    ${i + 1}. ${JSON.stringify(e)}`).join('\n')
-      : '    (no exemplar available)';
+    const sampleLines = maskedExemplarsFor(c.key, exemplarsByKey)
+      .map((e, i) => `    ${i + 1}. ${JSON.stringify(e)}`).join('\n');
     return `- key: ${c.key}\n  count: ${c.count}, sessions: ${c.sessions}, days: ${c.days}\n  samples:\n${sampleLines}`;
   }).join('\n');
   return 'You are naming recurring prompt clusters for a developer-analytics tool. For each cluster '
@@ -164,14 +167,40 @@ function buildLabelPrompt(candidates, exemplarsByKey) {
  *   now: number }} input
  * @returns {Promise<{ entries: Record<string, {name: string, source: 'enriched', firstSeen: string}>,
  *   candidates: string[], labeled: number,
- *   dropped: { unknownKey: number, duplicateKey: number, invalidName: number } }>}
+ *   dropped: { unknownKey: number, duplicateKey: number, invalidName: number,
+ *     noExemplar: number } }>}
  */
 export async function enrichLabels({
   clusters, exemplarsByKey, store, invoke, now,
 }) {
-  const candidateRows = labelCandidates(clusters, store);
+  // QE review F-4 (HIGH): NO EVIDENCE, NO NAME. A candidate is by construction
+  // a cluster the seed registry declined to name, and the precision-first
+  // doctrine for seeds is explicit — "A SEED MUST BE PRECISE OR SILENT … a gap
+  // costs a generic descriptor for one release, a mislabel costs trust in the
+  // panel." The enrichment path was held to no such standard while writing to
+  // the same row of the same panel: `gatherCandidateExemplars` returns nothing
+  // for a cluster whose transcript is missing, unreadable, or written at a
+  // different SCHEMA_VERSION (and two Codex rollouts on the reference corpus
+  // already exceed MAX_DEEP_FILE_BYTES, between them the sole source for nine
+  // of the top thirty short prompts) — and the prompt then asked the model to
+  // name the cluster "based only on the sample text shown", of which there was
+  // none. The invented name persisted as `source: 'enriched'`, outranked
+  // everything on read, and was never revisited, because `labelCandidates`
+  // skips any key already in the store. So the honest
+  // "Recurring 9-token question" became "Database migration review",
+  // permanently.
+  //
+  // The gate is HERE, at the engine, not at the caller — this module's stated
+  // posture everywhere else (it re-masks and re-caps rather than trusting
+  // callers), and the only place that can guarantee a no-evidence cluster is
+  // never sent.
+  const eligible = labelCandidates(clusters, store);
+  const candidateRows = eligible.filter((c) => maskedExemplarsFor(c.key, exemplarsByKey).length > 0);
   const candidateKeys = candidateRows.map((c) => c.key);
-  const dropped = { unknownKey: 0, duplicateKey: 0, invalidName: 0 };
+  const dropped = {
+    unknownKey: 0, duplicateKey: 0, invalidName: 0,
+    noExemplar: eligible.length - candidateRows.length,
+  };
   if (!candidateRows.length) {
     return {
       entries: {}, candidates: [], labeled: 0, dropped,

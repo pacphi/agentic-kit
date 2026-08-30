@@ -125,7 +125,15 @@ function sanitizedLabelEntry(entry) {
   if (!entry || typeof entry !== 'object') return null;
   if (!isValidLabelName(entry.name)) return null;
   return {
-    name: entry.name,
+    // QE review F-10: TRIMMED on persist. `isValidLabelName` validates the
+    // trimmed name — length and newlines both — while this used to store the
+    // raw one, so the module's own stated invariant ("no label NAME ever
+    // exceeds 48 characters or contains a newline") was false on disk: a name
+    // of "  \n\n  Release ritual  \n\n  " persisted with its newlines intact,
+    // and a 48-character name plus padding exceeded the ceiling. No render was
+    // wrong (every read path trims and both surfaces escape), but an invariant
+    // that is only true after the reader repairs it is not an invariant.
+    name: entry.name.trim(),
     source: typeof entry.source === 'string' ? entry.source : 'curated',
     firstSeen: typeof entry.firstSeen === 'string' ? entry.firstSeen : null,
   };

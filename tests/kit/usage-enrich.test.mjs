@@ -111,7 +111,7 @@ test('a well-formed response labels every candidate it names', async () => {
     k2: { name: 'Progress check-in', source: 'enriched', firstSeen: new Date(NOW).toISOString() },
   });
   assert.equal(result.labeled, 2);
-  assert.deepEqual(result.dropped, { unknownKey: 0, duplicateKey: 0, invalidName: 0 });
+  assert.deepEqual(result.dropped, { unknownKey: 0, duplicateKey: 0, invalidName: 0, noExemplar: 0 });
 });
 
 test('malformed JSON in the response yields zero entries, not a throw', async () => {
@@ -824,4 +824,99 @@ test('F-3: a number with no readable noun still passes on value presence alone',
     basisNumbers: [36, 6],
   })]);
   assert.equal(out.accepted, 1, out.dropped && JSON.stringify(out.dropped));
+});
+
+// ── QE review F-4 (HIGH): no evidence, no name ─────────────────────────────
+// `gatherCandidateExemplars` returns nothing for a cluster whose transcript is
+// missing, unreadable, or written at a different SCHEMA_VERSION — and two
+// Codex rollouts on the reference corpus already exceed MAX_DEEP_FILE_BYTES,
+// between them the sole source for nine of the top thirty short prompts. The
+// prompt then asked the model to name the cluster "based only on the sample
+// text shown", of which there was none; the invented name persisted as
+// `source: 'enriched'`, outranked everything on read, and was never revisited
+// because `labelCandidates` skips any key already in the store.
+//
+// A candidate is BY CONSTRUCTION a cluster the seed registry declined to name,
+// so this converted precisely the case the precision-first doctrine protects
+// into the outcome it forbids.
+
+test('F-4: a candidate with no exemplar is never sent to the model at all', async () => {
+  let sentPrompt = null;
+  const invoke = async (prompt) => {
+    sentPrompt = prompt;
+    return JSON.stringify([{ key: 'k1', name: 'Release ritual' }, { key: 'k2', name: 'Database migration review' }]);
+  };
+  const clusters = [cluster({ key: 'k1' }), cluster({ key: 'k2' })];
+  // k2's transcript could not be re-read — the F-4 condition exactly.
+  const result = await enrichLabels({
+    clusters, exemplarsByKey: { k1: ['help me cut the release'] }, store: {}, invoke, now: NOW,
+  });
+  assert.ok(!sentPrompt.includes('k2'), 'the no-exemplar cluster must not appear in the prompt');
+  assert.ok(sentPrompt.includes('k1'), 'guard: the one WITH evidence still is sent');
+  assert.deepEqual(result.candidates, ['k1']);
+});
+
+test('F-4: a name the model returns for a cluster it was never asked about is not persisted', async () => {
+  const invoke = async () => JSON.stringify([
+    { key: 'k1', name: 'Release ritual' },
+    { key: 'k2', name: 'Database migration review' },
+  ]);
+  const clusters = [cluster({ key: 'k1' }), cluster({ key: 'k2' })];
+  const result = await enrichLabels({
+    clusters, exemplarsByKey: { k1: ['help me cut the release'] }, store: {}, invoke, now: NOW,
+  });
+  assert.deepEqual(Object.keys(result.entries), ['k1'],
+    'k2 keeps its honest generated name rather than gaining an invented one');
+  assert.equal(result.dropped.noExemplar, 1, 'and the exclusion is COUNTED, not silent');
+  assert.equal(result.dropped.unknownKey, 1, 'the volunteered name is also refused as an unasked key');
+});
+
+test('F-4: with no exemplars at all, nothing is sent and no invocation is even made', async () => {
+  let invoked = false;
+  const invoke = async () => { invoked = true; return '[]'; };
+  const clusters = [cluster({ key: 'k1' }), cluster({ key: 'k2' })];
+  const result = await enrichLabels({ clusters, exemplarsByKey: {}, store: {}, invoke, now: NOW });
+  assert.equal(invoked, false, 'no evidence anywhere means no call to pay for either');
+  assert.equal(result.dropped.noExemplar, 2);
+  assert.deepEqual(result.entries, {});
+});
+
+test('F-4: the prompt no longer carries a "(no exemplar available)" branch to regress into', async () => {
+  let sentPrompt = null;
+  const invoke = async (prompt) => { sentPrompt = prompt; return '[]'; };
+  await enrichLabels({
+    clusters: [cluster({ key: 'k1' })], exemplarsByKey: { k1: ['a sample'] }, store: {}, invoke, now: NOW,
+  });
+  assert.ok(!sentPrompt.includes('no exemplar available'),
+    'the branch is deleted, not left unreachable — leaving it invites regressing the gate');
+});
+
+// ── QE review F-7 (MEDIUM): the model's OUTPUT masking, pinned ──────────────
+// The input side was pinned ("exemplar text is masked before it reaches the
+// prompt, even if the caller forgot"); the output side was not, so removing
+// `maskSecrets` from the response path failed no test. Given F-4's echo path —
+// a model handed a short tap prompt is LIKELY to echo it — this is the layer
+// that keeps a secret out of a file at rest.
+
+test('F-7: a secret-shaped name the model returns is masked before it is persisted', async () => {
+  const secret = 'ghp_' + 'A'.repeat(36);
+  const invoke = async () => JSON.stringify([{ key: 'k1', name: secret }]);
+  const result = await enrichLabels({
+    clusters: [cluster({ key: 'k1' })], exemplarsByKey: { k1: ['a sample'] }, store: {}, invoke, now: NOW,
+  });
+  const persisted = result.entries.k1;
+  assert.ok(persisted, 'the masked name is still a legal label, so the entry survives');
+  assert.ok(!persisted.name.includes(secret), 'the raw secret must never reach the store');
+  assert.match(persisted.name, /redacted/);
+});
+
+test('F-7: an output the mask cannot rescue is dropped rather than persisted raw', async () => {
+  // A long secret masks down to something still valid; a name that is only a
+  // newline masks to nothing legal and must drop, not persist.
+  const invoke = async () => JSON.stringify([{ key: 'k1', name: '\n\n' }]);
+  const result = await enrichLabels({
+    clusters: [cluster({ key: 'k1' })], exemplarsByKey: { k1: ['a sample'] }, store: {}, invoke, now: NOW,
+  });
+  assert.deepEqual(result.entries, {});
+  assert.equal(result.dropped.invalidName, 1);
 });

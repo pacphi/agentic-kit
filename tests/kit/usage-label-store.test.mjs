@@ -564,3 +564,39 @@ test('SEC-6: the tmp path is unpredictable and never left behind', () => {
     'and the PID-derived name is not the one used');
   assert.equal(fs.statSync(file).mode & 0o777, 0o600, 'the store stays 0600');
 });
+
+// ── QE review F-10 (LOW): the module's stated invariant, made true on disk ──
+// `isValidLabelName` validates the TRIMMED name — length and newlines both —
+// while `sanitizedLabelEntry` persisted the RAW one, so the module doc's
+// "no label NAME ever exceeds 48 characters or contains a newline … enforced
+// HERE, defensively, on every write" was false of the bytes it wrote. No
+// render was wrong (every read path trims and both surfaces escape), but an
+// invariant that is only true after the reader repairs it is not an invariant.
+
+test('F-10: a name with surrounding whitespace and newlines persists TRIMMED', () => {
+  const file = tmpFile();
+  saveLabelStore(file, {
+    version: LABEL_STORE_SCHEMA_VERSION,
+    labels: { k1: { name: '  \n\n  Release ritual  \n\n  ', source: 'enriched', firstSeen: null } },
+    cards: {},
+  });
+  const onDisk = JSON.parse(fs.readFileSync(file, 'utf8'));
+  assert.equal(onDisk.labels.k1.name, 'Release ritual', 'the bytes on disk carry the trimmed name');
+  assert.ok(!onDisk.labels.k1.name.includes('\n'), 'and no newline survives the write');
+  assert.equal(loadLabelStore(file).labels.k1.name, 'Release ritual', 'round-trip');
+});
+
+test('F-10: INVARIANT walk — every persisted name is inside the ceiling and single-line', () => {
+  const file = tmpFile();
+  const padded = `   ${'x'.repeat(48)}   `;
+  saveLabelStore(file, {
+    version: LABEL_STORE_SCHEMA_VERSION,
+    labels: { k1: { name: padded, source: 'enriched', firstSeen: null } },
+    cards: {},
+  });
+  for (const entry of Object.values(loadLabelStore(file).labels)) {
+    assert.ok(entry.name.length <= 48,
+      `a 48-char name plus padding used to persist at ${entry.name.length}, over the stated ceiling`);
+    assert.equal(entry.name, entry.name.trim());
+  }
+});

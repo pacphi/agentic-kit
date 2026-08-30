@@ -2529,13 +2529,13 @@ exemplar back.
 second consecutive `--enrich` run over an unchanged corpus:
 `lastSynthesis.findingsHash` (persisted in the label store) is compared
 against a fresh hash of the CURRENT findings summary
-(`findingsSummaryHash`, `usage-enrich.mjs:308`), and synthesis runs only when
+(`findingsSummaryHash`, `usage-enrich.mjs:337`), and synthesis runs only when
 that hash has moved OR a stored card reads stale (below). The hash is
 deliberately insensitive to a cluster's display NAME alone
-(`stripDisplayNames`, `usage-enrich.mjs:285`) — otherwise the very pass
+(`stripDisplayNames`, `usage-enrich.mjs:314`) — otherwise the very pass
 immediately after any labeling round would see the hash move on cosmetics
 only and re-spend a call for no new evidence. The prompt shows at most the
-top 40 clusters by count (`MAX_SYNTHESIS_CLUSTERS`, `usage-enrich.mjs:377`) —
+top 40 clusters by count (`MAX_SYNTHESIS_CLUSTERS`, `usage-enrich.mjs:406`) —
 a display cap only; validation
 below still reads the FULL, uncapped summary, so a card citing a number from
 cluster #41 is still checked for truth. Already-stored cards are named
@@ -2550,7 +2550,7 @@ findings summary the model was shown (`numbersInSummary` /
 `CARD_FABRICATION_FIELDS`, `usage-enrich.mjs:86`). One unmatched number voids
 the WHOLE card, not just the offending field; `title` is exempt (a stylistic
 number there asserts no evidence). `findingsSummary` itself
-(`buildFindingsSummary`, `usage-enrich.mjs:227`) carries counts, cluster
+(`buildFindingsSummary`, `usage-enrich.mjs:256`) carries counts, cluster
 names, and shares only — no exemplar text exists in it to leak, by
 construction. Measured on
 this machine's real corpus (2026-08-30): the gate is set-membership over
@@ -2587,7 +2587,7 @@ firstSeen}`, the vocabulary's own store contract) and `cards` (synthesized
 card CONTENT: title/finding/try/basis/basisNumbers/evidenceHash/generatedAt —
 the outcome ledger, §22, tracks a card's LIFECYCLE, never its prose). Every
 entry is re-validated on both write AND read (`sanitizedEntries`,
-`usage-label-store.mjs:202`) — a malformed entry is dropped, never resurrected, rather than
+`usage-label-store.mjs:210`) — a malformed entry is dropped, never resurrected, rather than
 crashing the whole command or permanently excluding its cluster from future
 candidacy.
 
@@ -2595,7 +2595,7 @@ candidacy.
 never re-judged — there is no staleness concept for it at all. A synthesized
 card's `evidenceHash` is frozen at synthesis time (no model call refreshes it);
 `isCardStale`
-(`usage-enrich.mjs:350`) recomputes, purely arithmetically, whether every
+(`usage-enrich.mjs:379`) recomputes, purely arithmetically, whether every
 number it cited is still present in CURRENT findings — if the corpus has
 moved enough that one has vanished, the card reads `stale`, rendered as a
 chip pointing back at `--enrich` on both surfaces (§20, §21). This is

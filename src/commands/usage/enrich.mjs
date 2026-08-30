@@ -90,11 +90,20 @@ function gatherCandidateExemplars({ candidateKeys, win, agg, deps }) {
  *  operator typed. An operator consenting to send "their own prompts" would
  *  be consenting to something narrower than what actually goes. */
 function printConsentPreamble({
-  candidateCount, snippetCount, synthesisNeeded, describe,
+  candidateCount, snippetCount, withheldCount, synthesisNeeded, describe,
 }) {
   heading('Enrichment');
   info(`About to send ${candidateCount} cluster${candidateCount === 1 ? '' : 's'} `
     + `(${snippetCount} masked snippet${snippetCount === 1 ? '' : 's'}) to the model for naming.`);
+  // QE review F-4: the count above is what is ACTUALLY sent. A cluster whose
+  // transcript could not be re-read has no exemplar, and the engine now
+  // refuses to ask the model to name it from nothing — so saying so here keeps
+  // the consent line matching what happens.
+  if (withheldCount > 0) {
+    info(dim(`${withheldCount} further cluster${withheldCount === 1 ? '' : 's'} `
+      + `${withheldCount === 1 ? 'is' : 'are'} eligible but ${withheldCount === 1 ? 'has' : 'have'} no readable `
+      + 'sample text; they keep their honest generated names rather than being named from nothing.'));
+  }
   info(synthesisNeeded
     ? 'Also about to send a second call carrying the current findings summary (counts, labels, and '
       + 'shares only — capped to the top 40 clusters by count) for coaching suggestions.'
@@ -206,9 +215,16 @@ export async function runEnrichPass({
   const synthesisNeeded = !hashUnchanged || anyCardStale;
   const existingCards = hydratedStoredCards.map((c) => ({ id: c.id, title: c.title }));
 
+  // F-4: the clusters that will actually be sent are the ones an exemplar was
+  // found for; `enrichLabels` enforces the same rule independently.
+  const sendableCount = Object.keys(exemplarsByKey).length;
   if (!json) {
     printConsentPreamble({
-      candidateCount: candidateKeys.length, snippetCount, synthesisNeeded, describe: seam.describe,
+      candidateCount: sendableCount,
+      snippetCount,
+      withheldCount: Math.max(0, candidateKeys.length - sendableCount),
+      synthesisNeeded,
+      describe: seam.describe,
     });
   }
 
