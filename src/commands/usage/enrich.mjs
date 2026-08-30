@@ -16,7 +16,7 @@
 // `enrichment` key (usage.mjs adds that), just without a printed preamble.
 import { heading, info, warn, dim } from '../../lib/output.mjs';
 import {
-  enrichLabels, synthesizeCards,
+  enrichLabels, synthesizeCards, findingsSummaryHash, isCardStale, hydrateStoredCards,
 } from '../../lib/usage-enrich.mjs';
 import { saveLabelStore } from '../../lib/usage-label-store.mjs';
 import { makeInvoke, UNAVAILABLE_MESSAGE } from '../../lib/llm-invoke.mjs';
@@ -67,30 +67,79 @@ function gatherCandidateExemplars({ candidateKeys, win, agg, deps }) {
   return exemplarsByKey;
 }
 
-function printConsentPreamble({ candidateCount, snippetCount, describe }) {
+/** Fix round 1, M-3: the preamble now states BOTH calls `--enrich` can make,
+ *  not only the labeling one, and describes what is ACTUALLY about to
+ *  happen this pass rather than a fixed claim — when I-1(a)'s delta-gate
+ *  has decided synthesis will be skipped, saying "about to send a second
+ *  call" would itself be the exact kind of overclaim this fix exists to
+ *  remove. Ends "described above" (M-3) — nothing was ever literally
+ *  "shown". */
+function printConsentPreamble({
+  candidateCount, snippetCount, synthesisNeeded, describe,
+}) {
   heading('Enrichment');
   info(`About to send ${candidateCount} cluster${candidateCount === 1 ? '' : 's'} `
-    + `(${snippetCount} masked snippet${snippetCount === 1 ? '' : 's'}) to the model for naming, plus `
-    + 'the current aggregate counts for coaching suggestions. No prompt text leaves this machine '
-    + 'beyond what is shown above.');
+    + `(${snippetCount} masked snippet${snippetCount === 1 ? '' : 's'}) to the model for naming.`);
+  info(synthesisNeeded
+    ? 'Also about to send a second call carrying the current findings summary (counts, labels, and '
+      + 'shares only — capped to the top 40 clusters by count) for coaching suggestions.'
+    : dim('Coaching synthesis is unchanged since the last pass and will be skipped this run.'));
+  info('No prompt text leaves this machine beyond what is described above.');
   info(dim(`Billing: ${describe()}`));
 }
 
-function printEnrichSummary({ labelResult, cardResult }) {
-  const labelDroppedNote = labelResult.dropped ? ` (${labelResult.dropped} dropped)` : '';
+/** Fix round 1, M-1/M-4: both `labelResult.dropped` and `cardResult.dropped`
+ *  are categorized-reason objects, not a single number — this sums one for
+ *  the human-readable line while the categorized shape itself still reaches
+ *  `--json` untouched via `enrichmentProjection` (usage.mjs). Replaces the
+ *  old `proposed - accepted` computation for cards, which conflated a
+ *  genuine rejection with a card merely capped by MAX_SYNTHESIZED_CARDS. */
+function sumDropped(dropped) {
+  return Object.values(dropped ?? {}).reduce((n, v) => n + (Number(v) || 0), 0);
+}
+
+/** Printed the moment `enrichLabels` resolves, independent of what happens
+ *  to the synthesis call next — the label half's own persisted result must
+ *  never go unreported just because the SECOND invocation later fails
+ *  (C-2's own point: labels already paid for are not discarded, and the
+ *  operator should see that on the screen, not only infer it from the
+ *  file). */
+function printLabelSummary(labelResult) {
+  const labelDropped = sumDropped(labelResult.dropped);
+  const labelDroppedNote = labelDropped ? ` (${labelDropped} dropped)` : '';
   info(`Labeled ${labelResult.labeled} of ${labelResult.candidates.length} candidate cluster`
     + `${labelResult.candidates.length === 1 ? '' : 's'}${labelDroppedNote}.`);
-  const cardDropped = cardResult.proposed - cardResult.accepted;
-  const cardDroppedNote = cardDropped > 0 ? ` (${cardDropped} dropped)` : '';
+}
+
+function printCardSummary(cardResult) {
+  const cardDropped = sumDropped(cardResult.dropped);
+  const cardDroppedNote = cardDropped ? ` (${cardDropped} dropped)` : '';
   info(`Synthesized ${cardResult.accepted} new coaching card${cardResult.accepted === 1 ? '' : 's'}`
     + `${cardDroppedNote}.`);
 }
 
+/** Fix round 1, C-1: the one honest line for either invocation failing —
+ *  factored out so both the labeling and the synthesis call sites report it
+ *  identically. `err.message` already carries llm-invoke.mjs's own bounded
+ *  stderr tail. */
+function invocationFailedLine(err) {
+  return `ak usage prompts --enrich: invocation failed: ${err.message}; deterministic tiers are unaffected.`;
+}
+
+/** The `cardResult.dropped` shape when synthesis is SKIPPED this pass (I-1a)
+ *  — every reason zeroed, matching `synthesizeCards`'s own shape exactly, so
+ *  a caller reading `cardResult.dropped` never has to special-case "skipped"
+ *  versus "ran and rejected nothing". */
+const NO_CARDS_DROPPED = {
+  badId: 0, badText: 0, noBasis: 0, unmatchedNumber: 0, duplicateId: 0, duplicateOfExisting: 0,
+};
+
 /**
  * The whole `--enrich` flow. Returns `null` when nothing ran at all (no
- * invocation path available, or the label store is a newer schema this
- * build refuses to write to) — the caller's existing report still renders
- * normally either way (spec: exits 0, deterministic tiers unaffected).
+ * invocation path available, the label store is a newer schema this build
+ * refuses to write to, OR the invocation itself failed — Fix round 1, C-1)
+ * — the caller's existing report still renders normally either way (spec:
+ * exits 0, deterministic tiers unaffected).
  *
  * @param {{ agg: AggLike & { generatedAt: string }, findingsSummary: object,
  *   labelStore: LabelStore, labelStorePath: string, win: { days: number },
@@ -120,33 +169,104 @@ export async function runEnrichPass({
   const exemplarsByKey = gatherCandidateExemplars({
     candidateKeys, win, agg, deps,
   });
+  // M-3: a TRUE count of snippets, not of clusters that happen to have one
+  // — today's gather is ≤1 snippet per candidate, making the two equal, but
+  // this must stay a real count rather than an alias for candidate count.
+  const snippetCount = Object.values(exemplarsByKey).reduce((n, arr) => n + arr.length, 0);
+
+  // Fix round 1, I-1(a): the delta-gate for the coaching-synthesis call,
+  // mirroring the label half's own delta-only discipline. Skip ONLY when
+  // NEITHER signal says anything moved: the findingsSummary hash matches the
+  // last pass that actually completed synthesis, AND no already-stored
+  // enriched card reads stale against the CURRENT findings. `findingsHash`
+  // is computed from the SAME findingsSummary the caller already built from
+  // the canonical 30d aggregate (coaching.mjs), so this reads exactly what
+  // synthesizeCards would be shown if it ran.
+  const findingsHash = findingsSummaryHash(findingsSummary);
+  const hydratedStoredCards = hydrateStoredCards(labelStore.cards);
+  const anyCardStale = hydratedStoredCards.some((c) => isCardStale(c, findingsSummary));
+  const hashUnchanged = labelStore.lastSynthesis?.findingsHash === findingsHash;
+  const synthesisNeeded = !hashUnchanged || anyCardStale;
+  const existingCards = hydratedStoredCards.map((c) => ({ id: c.id, title: c.title }));
 
   if (!json) {
     printConsentPreamble({
-      candidateCount: candidateKeys.length, snippetCount: Object.keys(exemplarsByKey).length,
-      describe: seam.describe,
+      candidateCount: candidateKeys.length, snippetCount, synthesisNeeded, describe: seam.describe,
     });
   }
 
-  const labelResult = await enrichLabels({
-    clusters: agg.promptPatterns?.clusters ?? [], exemplarsByKey, store: labelStore.labels,
-    invoke: seam.invoke, now,
-  });
-  const cardResult = await synthesizeCards({ findingsSummary, invoke: seam.invoke, now });
+  // Fix round 1, C-1: an AVAILABLE but FAILING CLI (usage limit, expired
+  // auth, the 120s timeout) must never reach reportFatal. TWO SEPARATE
+  // try/catch blocks, not one around both calls — labeling and synthesis are
+  // independent halves, and a failure in the SECOND must never suppress
+  // reporting that the FIRST genuinely succeeded (see printLabelSummary's
+  // own doc). Either catch prints one honest line and returns null; the
+  // caller falls through to its normal deterministic render and returns 0,
+  // exactly like the "unavailable" path above.
+  let labelResult;
+  let persistedStore;
+  try {
+    labelResult = await enrichLabels({
+      clusters: agg.promptPatterns?.clusters ?? [], exemplarsByKey, store: labelStore.labels,
+      invoke: seam.invoke, now,
+    });
+    // Fix round 1, C-2: persist labels BEFORE the synthesis call. The write
+    // is already atomic and idempotent (usage-label-store.mjs), so doing it
+    // here costs nothing — and it means a failure on the SECOND invocation
+    // (the likely casualty near a usage limit, since the two calls are
+    // back-to-back) can never discard label work the first call already
+    // paid for. `lastSynthesis` carries forward unchanged: synthesis has not
+    // run yet at this point, successfully or otherwise.
+    persistedStore = {
+      version: 1,
+      labels: { ...labelStore.labels, ...labelResult.entries },
+      cards: { ...labelStore.cards },
+      lastSynthesis: labelStore.lastSynthesis,
+    };
+    saveLabelStore(labelStorePath, persistedStore);
+  } catch (err) {
+    if (!json) warn(invocationFailedLine(err));
+    return null;
+  }
+  if (!json) printLabelSummary(labelResult);
 
-  const nextCards = { ...labelStore.cards };
+  let cardResult;
+  try {
+    cardResult = synthesisNeeded
+      ? await synthesizeCards({
+        findingsSummary, invoke: seam.invoke, now, existingCards,
+      })
+      : { cards: [], proposed: 0, accepted: 0, dropped: NO_CARDS_DROPPED };
+  } catch (err) {
+    if (!json) warn(invocationFailedLine(err));
+    return null;
+  }
+  if (!json) {
+    if (synthesisNeeded) printCardSummary(cardResult);
+    else info('Coaching synthesis skipped — no evidence drift');
+  }
+
+  const nextCards = { ...persistedStore.cards };
   for (const card of cardResult.cards) {
     nextCards[card.id] = {
       title: card.title, finding: card.finding, try: card.try, basis: card.basis,
       basisNumbers: card.basisNumbers, evidenceHash: card.evidenceHash, generatedAt: card.generatedAt,
     };
   }
-  const nextStore = { version: 1, labels: { ...labelStore.labels, ...labelResult.entries }, cards: nextCards };
-  saveLabelStore(labelStorePath, nextStore);
-
-  if (!json) printEnrichSummary({ labelResult, cardResult });
+  // lastSynthesis only advances when synthesis actually RAN this pass — a
+  // skip carries the prior record forward untouched, and a FAILED synthesis
+  // never reaches here at all (the catch above returns first), so a failed
+  // attempt is correctly retried next pass rather than silently treated as
+  // done.
+  const nextLastSynthesis = synthesisNeeded
+    ? { findingsHash, at: new Date(now).toISOString() }
+    : labelStore.lastSynthesis;
+  const finalStore = {
+    version: 1, labels: persistedStore.labels, cards: nextCards, lastSynthesis: nextLastSynthesis,
+  };
+  saveLabelStore(labelStorePath, finalStore);
 
   return {
-    labelStore: nextStore, labelsChanged: labelResult.labeled > 0, labelResult, cardResult,
+    labelStore: finalStore, labelsChanged: labelResult.labeled > 0, labelResult, cardResult,
   };
 }

@@ -453,8 +453,10 @@ function moveChip(cls) {
  */
 var CLASS_LABEL = { question: 'question', other: 'other', mixed: 'mixed', unknown: 'unclassified' };
 
+// Fix round 1, M-6: enrichment (--enrich) has arrived and NAMES clusters —
+// it does not reclassify this split, which the old wording implied.
 var CLASS_CAPTION = 'other = imperative or declarative, undifferentiated — the shape rules test only '
-  + 'for a question; the three-way split arrives with enrichment';
+  + 'for a question; enrichment (--enrich) names clusters, it does not reclassify them into this split';
 
 function classChip(cls) {
   var known = Object.prototype.hasOwnProperty.call(CLASS_LABEL, cls);
@@ -652,10 +654,11 @@ export function reAskPanel(p) {
 
 /** The status chip: one of the ledger's five states, `adopted` decorated with
  *  a check plus its outcome line once measured, `retired` with its refutation.
- *  `stale` never appears in v1 (usage-outcome-ledger.mjs's `annotate` always
- *  reports `false` — see its doc for why); the class still reads `data-status`
- *  off the raw value so a future enriched card's real staleness needs no
- *  markup change here, only a style for it. */
+ *  This renders `card.status` — the ledger's own enum, which has never had a
+ *  `'stale'` value. Fix round 1, M-5: this comment used to claim "stale never
+ *  appears in v1", true only of `status` itself; an enriched card's real
+ *  staleness (`card.stale`, a separate boolean) is live today and rendered by
+ *  its own chip+hint below (`coachingStaleHint`), independent of this one. */
 /** Every value interpolated here — including `status` itself, which
  *  originates in the on-disk ledger JSON — is escaped (Fix round 1, I-5): the
  *  attribute copy was already escaped, but the text-node copy was not, so a

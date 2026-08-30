@@ -626,7 +626,9 @@ function printClusters(clusters, totals) {
     ]));
   }
   info(dim('  other = imperative or declarative, undifferentiated — the shape rules test only for a'));
-  info(dim('  question; the three-way split arrives with enrichment.'));
+  // Fix round 1, M-6: enrichment (--enrich) has arrived and NAMES clusters —
+  // it does not reclassify this split, which the old wording implied.
+  info(dim('  question; enrichment (--enrich) names clusters, it does not reclassify them into this split.'));
 }
 
 /** The stricter subset of the same phenomenon: identical normalized text, not
@@ -1256,9 +1258,16 @@ async function runPrompts({ flags, deps }) {
   const labelStorePath = deps.labelStorePath ?? defaultLabelStorePath();
   const labelStore = loadLabelStore(labelStorePath);
   if (labelStore.future) {
-    warn(`ak usage prompts: the label store at ${labelStorePath} is a newer schema `
-      + `(v${labelStore.version}) this build does not understand — enriched labels/cards are `
-      + 'unavailable this run, and the file was left untouched.');
+    // Fix round 1, I-4: guarded on `!flags.json` — this fires on EVERY pass
+    // (not only `--enrich`), and `warn` writes to stdout (output.mjs); an
+    // unguarded call here corrupts the `--json` document this function
+    // prints later, exactly the hazard the implementer already reasoned
+    // about and guarded for runEnrichPass's own copy of this same warning.
+    if (!flags.json) {
+      warn(`ak usage prompts: the label store at ${labelStorePath} is a newer schema `
+        + `(v${labelStore.version}) this build does not understand — enriched labels/cards are `
+        + 'unavailable this run, and the file was left untouched.');
+    }
   }
   const activeLabels = labelStore.future ? {} : labelStore.labels;
   agg.promptPatterns = applyLabelStoreToPatterns(agg.promptPatterns, activeLabels);

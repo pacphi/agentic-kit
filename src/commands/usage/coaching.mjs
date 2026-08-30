@@ -31,10 +31,11 @@ import { promptReport } from '../usage.mjs';
 function fmtNum(n) { return (Number(n) || 0).toLocaleString(); }
 
 /** The chip text per ledger status, the same six states the dashboard renders
- *  (usage-prompts.mjs's coaching card). `stale` never appears in v1 — every
- *  proposed card's evidenceHash is refreshed the same pass it would go stale
- *  in, because a rule-derived card costs nothing to recompute (spec §6.3) —
- *  so this switch has no branch for it; there is nothing stale to report.
+ *  (usage-prompts.mjs's coaching card). `stale` is a separate, dedicated line
+ *  `printCoachingCard` prints below this one (Fix round 1, M-5) — this
+ *  switch covers ledger STATUS only (proposed/adopted/dismissed/expired/
+ *  retired), which is orthogonal to an enriched card's staleness; the two
+ *  are not mutually exclusive (a `proposed` enriched card can also be stale).
  *
  *  Outcome/refutation lines carry "(30d basis)" (Fix round 1, C-1): both
  *  numbers in `deltaText`/`refutation` are always read from the CANONICAL
@@ -86,8 +87,13 @@ function printCoachingCard(card) {
  *  aggregate coaching needs could not be read this pass. */
 export function printCoaching(coaching) {
   heading('Coaching');
-  info(dim('  rule-derived and free to recompute every scan (spec §6.3) — nothing here goes stale; '
-    + 'a card is only ever proposed, adopted, dismissed, expired, or retired'));
+  // Fix round 1, I-5: ported from the dashboard's own caption
+  // (usage-prompts.mjs) verbatim in spirit — the two surfaces disagreed
+  // (this one claimed "nothing here goes stale" directly above a card that
+  // could, and did, render "stale — recompute" beneath it).
+  info(dim('  rule-derived cards are free to recompute every scan and never go stale; an enriched card '
+    + '(source: enriched) is cached and can — see its own marker below. A card is only ever proposed, '
+    + 'adopted, dismissed, expired, or retired'));
   if (coaching?.unavailable) {
     info(dim(`  coaching unavailable this run — ${coaching.reason}`));
     return;
@@ -248,9 +254,17 @@ export async function resolveCoachingAndEnrichment({
     // Fix round 1, I-2: refuse to reconcile/overwrite a well-formed ledger
     // from a newer schema — doing so would silently resurrect every
     // dismissed card the newer build had suppressed.
-    warn(`ak usage prompts: the outcome ledger at ${ledgerPath} is a newer schema `
-      + `(v${loadedLedger.version}) this build does not understand — coaching is unavailable `
-      + 'this run, and the file was left untouched.');
+    //
+    // Fix round 1, I-4: guarded on `!flags.json` — this is pre-existing from
+    // W4 (unguarded since before this wave), but the same defect as the W5
+    // label-store warn below it, so fixed in the same edit: `warn` writes to
+    // stdout (output.mjs), and an unguarded call here would corrupt the
+    // `--json` document runPrompts prints right after this returns.
+    if (!flags.json) {
+      warn(`ak usage prompts: the outcome ledger at ${ledgerPath} is a newer schema `
+        + `(v${loadedLedger.version}) this build does not understand — coaching is unavailable `
+        + 'this run, and the file was left untouched.');
+    }
     if (flags.dismiss != null) return { earlyReturn: 2 }; // nothing readable to dismiss against
     return {
       coaching: unavailableCoaching(`ledger schema v${loadedLedger.version} is newer than this build (v1)`),

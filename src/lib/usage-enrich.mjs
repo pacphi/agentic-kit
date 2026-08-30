@@ -266,22 +266,37 @@ function numbersInSummary(summary) {
   return out;
 }
 
+/** A cluster's display `name` is the one field in `findingsSummary` that can
+ *  change with NO evidence having moved at all — a same-pass label/re-curate
+ *  changes it, and `activeLabels` is re-applied before `findingsSummary` is
+ *  rebuilt on every later pass too. `numbersInSummary` (the anti-fabrication
+ *  gate's own universe, and `isCardStale`'s) already ignores every string
+ *  field including this one, for the same reason: a name is not evidence. */
+function stripDisplayNames(findingsSummary) {
+  const clusters = Array.isArray(findingsSummary?.clusters) ? findingsSummary.clusters : [];
+  return { ...findingsSummary, clusters: clusters.map(({ name: _name, ...rest }) => rest) };
+}
+
 /**
- * Fix round 1, I-1(a): a hash of the WHOLE findingsSummary — "has anything
- * about current findings moved at all since the last time synthesis
+ * Fix round 1, I-1(a): a hash of the findingsSummary's EVIDENCE — "has
+ * anything about current findings moved at all since the last time synthesis
  * actually ran" — distinct from `citedEvidenceHash`'s per-card question
  * ("has the evidence THIS card cited moved"). The caller
  * (usage/enrich.mjs's `runEnrichPass`) records this alongside `lastSynthesis`
  * and skips a NEW `synthesizeCards` call when it is unchanged AND no stored
- * card reads stale — new evidence (a cluster crossing the candidate floor,
- * a count moving) is exactly what would move this hash, so "unchanged" is a
- * real claim that nothing worth asking about again has appeared.
+ * card reads stale — new evidence (a cluster crossing the candidate floor, a
+ * count moving) is exactly what would move this hash, so "unchanged" is a
+ * real claim that nothing worth asking about again has appeared. Deliberately
+ * insensitive to a cluster's display `name` alone (`stripDisplayNames`) —
+ * otherwise the very next pass after ANY labeling round would see the hash
+ * move on cosmetics only and re-spend a synthesis call for no new evidence,
+ * defeating the two-consecutive-runs guarantee this exists to provide.
  *
  * @param {object} findingsSummary
  * @returns {string}
  */
 export function findingsSummaryHash(findingsSummary) {
-  return evidenceHash(findingsSummary ?? {});
+  return evidenceHash(stripDisplayNames(findingsSummary ?? {}));
 }
 
 /**

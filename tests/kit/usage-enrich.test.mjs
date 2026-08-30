@@ -12,7 +12,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   enrichLabels, synthesizeCards, buildFindingsSummary, citedEvidenceHash, isCardStale,
-  applyLabelStoreToPatterns, hydrateStoredCards, applyCardStaleness,
+  applyLabelStoreToPatterns, hydrateStoredCards, applyCardStaleness, findingsSummaryHash,
 } from '../../src/lib/usage-enrich.mjs';
 import { withStoreLabel } from '../../src/lib/usage-prompt-vocabulary.mjs';
 import { loadLabelStore, saveLabelStore } from '../../src/lib/usage-label-store.mjs';
@@ -503,6 +503,35 @@ test('isCardStale is true once the evidence has moved — a cited number no long
     clusters: [{ ...FINDINGS_SUMMARY.clusters[0], count: 20, sessions: 11, days: 9 }],
   };
   assert.equal(isCardStale(card, moved), true, 'the count moved from 13 to 20 — 13 no longer appears anywhere');
+});
+
+// ── findingsSummaryHash (I-1a's delta-gate primitive) ───────────────────────
+
+test('findingsSummaryHash is UNCHANGED by a cluster display name alone — a label/re-curate is not evidence moving', () => {
+  const before = findingsSummaryHash(FINDINGS_SUMMARY);
+  const relabeled = {
+    ...FINDINGS_SUMMARY,
+    clusters: [{ ...FINDINGS_SUMMARY.clusters[0], name: 'A brand new curated name' }],
+  };
+  assert.equal(findingsSummaryHash(relabeled), before,
+    'runEnrichPass rebuilds findingsSummary with activeLabels re-applied on every pass, including the '
+    + 'one right after a labeling round — if the hash moved on a name alone, the very next --enrich '
+    + 'would always see "evidence changed" with nothing actually new to synthesize about');
+});
+
+test('findingsSummaryHash CHANGES when a real evidence number moves, even though no name changed', () => {
+  const before = findingsSummaryHash(FINDINGS_SUMMARY);
+  const moved = {
+    ...FINDINGS_SUMMARY,
+    clusters: [{ ...FINDINGS_SUMMARY.clusters[0], count: 20 }],
+  };
+  assert.notEqual(findingsSummaryHash(moved), before);
+});
+
+test('findingsSummaryHash is stable and order-insensitive to key construction — same content, same hash', () => {
+  const a = findingsSummaryHash(FINDINGS_SUMMARY);
+  const b = findingsSummaryHash({ ...FINDINGS_SUMMARY });
+  assert.equal(a, b);
 });
 
 test('a deterministic rule card is never subject to isCardStale — the caller only calls it for source:"enriched" cards', () => {

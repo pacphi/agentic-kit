@@ -943,8 +943,11 @@ test('a non-question cluster renders as "other", never as "instruction"', () => 
     'class chips name what the rules measured, in row order');
   assert.doesNotMatch(html, /<span class="pr-cat"[^>]*>instruction</,
     'the library\'s old internal name must not reach the page as a label');
+  // Fix round 1, M-6: enrichment (--enrich) NAMES clusters, it does not
+  // reclassify them into this split — the old wording promised a split
+  // enrichment never delivers.
   assert.match(html,
-    /other = imperative or declarative, undifferentiated — the shape rules test only for a question; the three-way split arrives with enrichment/,
+    /other = imperative or declarative, undifferentiated — the shape rules test only for a question; enrichment \(--enrich\) names clusters, it does not reclassify them into this split/,
     'and the caption prints beside the table so the word is never left to be guessed at');
 });
 

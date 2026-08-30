@@ -1102,3 +1102,221 @@ test('ak usage prompts (no --enrich) applies a PREVIOUSLY persisted label withou
   fs.rmSync(sb.home, { recursive: true, force: true });
   fs.rmSync(shimDir, { recursive: true, force: true });
 });
+
+// ── Fix round 1: C-1, C-2, I-1, I-5, I-7 ────────────────────────────────────
+
+/** A `claude` that is PRESENT but FAILS every invocation — the review's
+ *  single most likely real-world failure (usage limit, expired auth, the
+ *  120s timeout), strictly worse than "absent" because it used to reach
+ *  `reportFatal` (a raw stack trace, exit 1, no report at all). */
+function writeFailingClaudeShim(dir, { message = 'Claude usage limit reached. Your limit will reset at 3pm.' } = {}) {
+  const bin = path.join(dir, 'claude');
+  fs.writeFileSync(bin, `#!/usr/bin/env node
+process.stderr.write(${JSON.stringify(message)});
+process.exit(1);
+`, { mode: 0o755 });
+  return bin;
+}
+
+test('C-1: an AVAILABLE but FAILING claude CLI prints one honest line, exits 0, and still renders the normal report — no stack trace', () => {
+  const sb = sandbox();
+  writePromptsCorpus(sb);
+  const shimDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-claude-shim-'));
+  writeFailingClaudeShim(shimDir);
+  const result = ak(['usage', 'prompts', '--window', '30', '--enrich'], sb, { PATH: enrichPath(sb, shimDir) });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /invocation failed:.*Claude usage limit reached/, 'one honest line naming the reason');
+  assert.match(result.stdout, /deterministic tiers are unaffected/);
+  assert.match(result.stdout, /Recurring clusters/, 'the normal deterministic report still renders');
+  assert.match(result.stdout, /Coaching/);
+  assert.doesNotMatch(result.stdout, /\bat invoke \(/, 'no stack trace frame reaches stdout');
+  assert.doesNotMatch(result.stderr, /\bat invoke \(/, 'no stack trace frame reaches stderr either');
+  assert.equal(fs.existsSync(labelStoreFile(sb)), false,
+    'the FIRST invocation failing leaves no partial store — nothing succeeded to persist');
+  fs.rmSync(sb.home, { recursive: true, force: true });
+  fs.rmSync(shimDir, { recursive: true, force: true });
+});
+
+/** Answers the label prompt normally, then fails every OTHER prompt (the
+ *  card/synthesis call) — the exact "second invocation is the casualty"
+ *  shape C-2 describes: the two calls are back-to-back, and a usage limit
+ *  hit mid-pass takes out whichever one runs second. */
+function writeLabelsSucceedCardsFailShim(dir) {
+  const bin = path.join(dir, 'claude');
+  fs.writeFileSync(bin, `#!/usr/bin/env node
+const prompt = process.argv[3] || '';
+if (prompt.includes('naming recurring prompt clusters')) {
+  const keys = [...prompt.matchAll(/key: ([0-9a-f]+)/g)].map((m) => m[1]);
+  process.stdout.write(JSON.stringify(keys.map((key) => ({ key, name: 'Shimmed cluster name' }))));
+} else {
+  process.stderr.write('Claude usage limit reached mid-pass.');
+  process.exit(1);
+}
+`, { mode: 0o755 });
+  return bin;
+}
+
+test('C-2: labels already paid for survive when the SECOND (synthesis) invocation fails', () => {
+  const sb = sandbox();
+  writePromptsCorpus(sb);
+  const shimDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-claude-shim-'));
+  writeLabelsSucceedCardsFailShim(shimDir);
+  const result = ak(['usage', 'prompts', '--window', '30', '--enrich'], sb, { PATH: enrichPath(sb, shimDir) });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /invocation failed:.*Claude usage limit reached mid-pass/);
+
+  const stored = JSON.parse(fs.readFileSync(labelStoreFile(sb), 'utf8'));
+  assert.equal(stored.version, 1);
+  const [entry] = Object.values(stored.labels);
+  assert.equal(entry.name, 'Shimmed cluster name',
+    'the label the FIRST call already paid for must survive the second call failing');
+  assert.equal(Object.keys(stored.cards).length, 0, 'no cards — the second call never completed');
+
+  // "Already paid for" only means something if it ALSO holds on the very
+  // next pass — the review's own pin.
+  const second = ak(['usage', 'prompts', '--window', '30', '--enrich'], sb, { PATH: enrichPath(sb, shimDir) });
+  assert.equal(second.status, 0, second.stderr);
+  assert.match(second.stdout, /Labeled 0 of 0 candidate clusters/, 'nothing re-sent for the already-settled cluster');
+
+  fs.rmSync(sb.home, { recursive: true, force: true });
+  fs.rmSync(shimDir, { recursive: true, force: true });
+});
+
+/** Fails loudly if invoked AT ALL. Swapped in for a SECOND `--enrich` run
+ *  after a first one has already settled everything, so "zero invocations"
+ *  is provable from stdout rather than inferred from a bare exit code — a
+ *  poisoned invocation would still exit 0 (C-1's own fix turns a failure
+ *  into a graceful no-op), so the distinguishing signal is this shim's
+ *  distinctive message reaching the "invocation failed" line, not the
+ *  status code. */
+function writePoisonShim(dir) {
+  const bin = path.join(dir, 'claude');
+  fs.writeFileSync(bin, `#!/usr/bin/env node
+process.stderr.write('POISON: this shim should never have been invoked');
+process.exit(1);
+`, { mode: 0o755 });
+  return bin;
+}
+
+test('I-1: two consecutive --enrich runs on an unchanged corpus make ZERO invocations on the second (labels settled + synthesis skipped)', () => {
+  const sb = sandbox();
+  writePromptsCorpus(sb);
+  const shimDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-claude-shim-'));
+  writeClaudeShim(shimDir);
+  const first = ak(['usage', 'prompts', '--window', '30', '--enrich'], sb, { PATH: enrichPath(sb, shimDir) });
+  assert.equal(first.status, 0, first.stderr);
+  assert.match(first.stdout, /Synthesized 0 new coaching cards/,
+    'the FIRST run has no prior lastSynthesis on disk, so synthesis runs exactly once');
+
+  const poisonDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-claude-poison-'));
+  writePoisonShim(poisonDir);
+  const second = ak(['usage', 'prompts', '--window', '30', '--enrich'], sb, { PATH: enrichPath(sb, poisonDir) });
+  assert.equal(second.status, 0, second.stderr);
+  assert.doesNotMatch(second.stdout, /POISON/,
+    'neither enrichLabels nor synthesizeCards may invoke the CLI when nothing about the corpus moved');
+  assert.match(second.stdout, /Labeled 0 of 0 candidate clusters/);
+  assert.match(second.stdout, /Coaching synthesis skipped — no evidence drift/);
+
+  fs.rmSync(sb.home, { recursive: true, force: true });
+  fs.rmSync(shimDir, { recursive: true, force: true });
+  fs.rmSync(poisonDir, { recursive: true, force: true });
+});
+
+/** A label store with one ENRICHED card whose `basisNumbers` cites a number
+ *  that cannot possibly appear in a real corpus (999999) and whose
+ *  `evidenceHash` is an arbitrary placeholder — guaranteed to disagree with
+ *  whatever `citedEvidenceHash` actually computes, so `isCardStale` reads
+ *  `true` regardless of the hash algorithm's specifics. Written directly to
+ *  disk: staleness is computed on every pass (`applyCardStaleness`, after
+ *  reconcile), so this needs no real `--enrich` run to exercise. */
+function writePlantedStaleCard(sb) {
+  const file = labelStoreFile(sb);
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, JSON.stringify({
+    version: 1,
+    labels: {},
+    cards: {
+      'a-planted-suggestion': {
+        title: 'A planted enriched card',
+        finding: 'This claim cites a number nowhere in the current corpus.',
+        try: 'Do something about it.',
+        basis: '999999 recurrences.',
+        basisNumbers: [999999],
+        evidenceHash: 'deliberately-wrong-hash-so-isCardStale-reads-true',
+        generatedAt: new Date(Date.now() - 86_400_000).toISOString(),
+      },
+    },
+    lastSynthesis: null,
+  }, null, 2));
+}
+
+test('I-5: the Coaching caption agrees with a stale enriched card rendered directly beneath it', () => {
+  const sb = sandbox();
+  writeCoachingCorpus(sb);
+  writePlantedStaleCard(sb);
+  const result = ak(['usage', 'prompts'], sb);
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout,
+    /rule-derived cards are free to recompute every scan and never go stale; an enriched card \(source: enriched\) is cached and can/,
+    'the CLI caption must match the dashboard\'s own wording, not contradict it');
+  assert.match(result.stdout, /A planted enriched card/);
+  assert.match(result.stdout, /stale — recompute with ak usage prompts --enrich/);
+  fs.rmSync(sb.home, { recursive: true, force: true });
+});
+
+/** ADVERSARIAL (I-7): answers EVERY candidate cluster's label with the raw
+ *  fixture secret, verbatim — simulating a model that, regardless of what
+ *  masked sample it was actually shown, produces something secret-shaped in
+ *  its own output (the concern the review names: "a model asked to name
+ *  this cluster can legitimately return the sample"). Input masking already
+ *  guarantees `FIXTURE_SECRET` itself never reaches the prompt text (proven
+ *  separately at the unit level); this shim tests the OTHER direction —
+ *  whatever the model's OUTPUT contains, before it is trusted onto disk. */
+function writeAdversarialLabelShim(dir) {
+  const bin = path.join(dir, 'claude');
+  fs.writeFileSync(bin, `#!/usr/bin/env node
+const prompt = process.argv[3] || '';
+if (prompt.includes('naming recurring prompt clusters')) {
+  const keys = [...prompt.matchAll(/key: ([0-9a-f]+)/g)].map((m) => m[1]);
+  process.stdout.write(JSON.stringify(keys.map((key) => ({ key, name: ${JSON.stringify(FIXTURE_SECRET)} }))));
+} else {
+  process.stdout.write('[]');
+}
+`, { mode: 0o755 });
+  return bin;
+}
+
+test('I-7 ADVERSARIAL: a model that answers every label with a raw secret is masked before it reaches disk or --json', () => {
+  const sb = sandbox();
+  writePromptsCorpus(sb);
+  writeMaskCorpus(sb);
+  const shimDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-claude-shim-'));
+  writeAdversarialLabelShim(shimDir);
+  const result = ak(['usage', 'prompts', '--window', '30', '--enrich', '--json'], sb, { PATH: enrichPath(sb, shimDir) });
+  assert.equal(result.status, 0, result.stderr);
+
+  // The masking guarantee under test (I-7): every candidate this
+  // adversarial shim answered got the SAME raw secret as its proposed name
+  // — if enrichLabels stored the model's output verbatim, it would be in
+  // this --json payload right now.
+  assert.doesNotMatch(result.stdout, new RegExp(SECRET_TAIL),
+    'the model-authored NAME must be masked before storage, exactly like the exemplar text it was shown');
+  const stored = JSON.parse(fs.readFileSync(labelStoreFile(sb), 'utf8'));
+  const names = Object.values(stored.labels).map((e) => e.name);
+  assert.ok(names.length > 0, 'at least one candidate must have been labeled for this test to mean anything');
+  for (const name of names) {
+    assert.doesNotMatch(name, new RegExp(SECRET_TAIL));
+  }
+  assert.ok(names.some((n) => n === MASKED),
+    'the masked placeholder, not silent rejection, is what replaced the raw secret');
+
+  // Defense in depth, unrelated to I-7: a full RELEASE_PHRASINGS sentence is
+  // well over the 48-char name ceiling either way, so it can never reach the
+  // store regardless of masking — this shim never actually offers one as a
+  // name (it always answers with FIXTURE_SECRET), so this is simply
+  // confirming the corpus's own prompt text never leaked some other way.
+  for (const phrase of RELEASE_PHRASINGS) assert.doesNotMatch(result.stdout, new RegExp(phrase.slice(0, 24)));
+
+  fs.rmSync(sb.home, { recursive: true, force: true });
+  fs.rmSync(shimDir, { recursive: true, force: true });
+});
