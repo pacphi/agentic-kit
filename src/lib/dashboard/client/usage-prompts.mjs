@@ -47,12 +47,14 @@ function share(v) {
 
 function ratio(a, b) { return b > 0 ? a / b : null; }
 
-/** "1 day" / "9 days". Counts on this view routinely come back as 1 — a single
- *  session, a single day — and "1 days" is the tell that a number was pasted
- *  into a sentence rather than written into one. */
+/** "1 day" / "9 days", as PLAIN TEXT — callers that interpolate into markup
+ *  escape it themselves, and callers passing it to an escaping slot do not
+ *  double-escape. Counts on this view routinely come back as 1, and "1 days"
+ *  is the tell that a number was pasted into a sentence rather than written
+ *  into one. */
 function plural(n, word) {
   var v = Number(n) || 0;
-  return esc(num(v)) + ' ' + esc(word) + (v === 1 ? '' : 's');
+  return num(v) + ' ' + word + (v === 1 ? '' : 's');
 }
 
 /** The projection, or null when this window has no fingerprint layer at all.
@@ -95,7 +97,21 @@ var TIP_HEADLESS = 'Responses from sessions with no human-typed prompt at all �
   + 'fraction rather than assumed headless: unknowable is not headless.\n'
   + 'This is a reframe, not a criticism — it is the share of the bill that rides on briefs.';
 
-function promptKpiCard(k, v, d, tip) {
+/**
+ * One KPI tile. EVERY caller-supplied value is text and is escaped here — the
+ * helper has no raw-HTML slot for a caller to reach through.
+ *
+ * `o.chips` is the one exception and it is not a slot: it takes the output of
+ * `hostChips` and nothing else, which is markup this file builds and escapes
+ * itself. An earlier signature took the whole detail line as raw HTML so a
+ * caller could pass `<span class="d-note">…</span>`; that worked only because
+ * all five callers happened to be careful, and it is exactly the helper a
+ * sixth caller passes a payload string to.
+ */
+function promptKpiCard(k, v, tip, o) {
+  var d = esc(o.detail == null ? '' : o.detail);
+  if (o.note) d += '<span class="d-note">' + esc(o.note) + '</span>';
+  if (o.chips) d += '<span class="d-note">' + o.chips + '</span>';
   return '<div class="kpi" title="' + esc(tip) + '">'
     + '<div class="k">' + esc(k) + '</div>'
     + '<div class="v">' + esc(v) + '</div>'
@@ -152,22 +168,21 @@ export function promptKpis(p) {
   var q = questionShare(p);
   var h = (p && p.headless) || {};
   return [
-    promptKpiCard('Typed prompts', num(typed),
-      esc(share(ratio(typed, corpus && corpus.fingerprints))) + ' of fingerprinted turns', TIP_TYPED),
-    promptKpiCard('Questions', share(q),
-      q == null ? 'no host reported a share'
-        : '<span class="d-note">instruction / feedback split arrives with enrichment</span>',
-      TIP_QUESTIONS),
-    promptKpiCard('Supervision taps', share(p.tapShare),
-      num(p.taps) + ' of ' + num(typed) + ' typed'
-      + '<span class="d-note">' + hostChips(p) + '</span>', TIP_TAPS),
+    promptKpiCard('Typed prompts', num(typed), TIP_TYPED,
+      { detail: share(ratio(typed, corpus && corpus.fingerprints)) + ' of fingerprinted turns' }),
+    promptKpiCard('Questions', share(q), TIP_QUESTIONS,
+      q == null
+        ? { detail: 'no host reported a share' }
+        : { note: 'instruction / feedback split arrives with enrichment' }),
+    promptKpiCard('Supervision taps', share(p.tapShare), TIP_TAPS,
+      { detail: num(p.taps) + ' of ' + num(typed) + ' typed', chips: hostChips(p) }),
     promptKpiCard('Repeated share', recurring == null ? '—' : share(ratio(recurring, typed)),
-      recurring == null ? 'patterns not computed'
-        : num(pp.clusters.length) + ' recurring cluster' + (pp.clusters.length === 1 ? '' : 's'),
-      TIP_REPEATED),
-    promptKpiCard('Headless share', share(h.share),
-      num(h.sessions) + ' session' + (h.sessions === 1 ? '' : 's') + ' &middot; '
-      + num(h.responses) + ' of ' + num(h.measuredResponses) + ' responses', TIP_HEADLESS),
+      TIP_REPEATED,
+      { detail: recurring == null ? 'patterns not computed'
+        : num(pp.clusters.length) + ' recurring cluster' + (pp.clusters.length === 1 ? '' : 's') }),
+    promptKpiCard('Headless share', share(h.share), TIP_HEADLESS,
+      { detail: plural(h.sessions, 'session') + ' · '
+        + num(h.responses) + ' of ' + num(h.measuredResponses) + ' responses' }),
   ].join('');
 }
 
@@ -485,11 +500,21 @@ function neutralizeLead(lead) {
 
 function patternName(label) {
   var full = String(label.name == null ? '' : label.name);
+  // A curated or seeded name is a HUMAN-authored string — a person or an
+  // enrichment pass chose those words — so it is shown whole and its title is
+  // the same string, whatever it contains.
   if (label.source !== 'characterized') {
     return '<span class="pr-name" title="' + esc(full) + '">' + esc(full) + '</span>';
   }
-  return '<span class="pr-name" title="' + esc(full) + '">'
-    + esc(neutralizeLead(full.split(' · ')[0])) + '</span>';
+  // A characterized descriptor is MACHINE-generated, so the class noun is
+  // neutralised in the title as well as in the cell. A tooltip is a DOM
+  // surface: a cell reading "prompt" whose hover reads "instruction" makes the
+  // same over-claim the cell was cleaned of, and hides it where a reader is
+  // less likely to challenge it.
+  var parts = full.split(' · ');
+  parts[0] = neutralizeLead(parts[0]);
+  var neutral = parts.join(' · ');
+  return '<span class="pr-name" title="' + esc(neutral) + '">' + esc(parts[0]) + '</span>';
 }
 
 export function patternsTable(p) {
@@ -568,8 +593,8 @@ function exactRepeatsBlock(pp) {
     + '<div class="pr-exact-rows">' + rows.map(function (r) {
       return '<span class="pr-exact-row">'
         + '<b class="tnum">' + esc(num(r.count)) + '&times;</b> '
-        + esc(num(r.tokens)) + '-token prompt <i>' + plural(r.sessions, 'session') + ' · '
-        + plural(r.days, 'day') + '</i></span>';
+        + esc(num(r.tokens)) + '-token prompt <i>' + esc(plural(r.sessions, 'session')) + ' · '
+        + esc(plural(r.days, 'day')) + '</i></span>';
     }).join('') + '</div>'
     + countNote(all.length, rows.length, 'exact repeat')
     + '<p class="pr-exact-note">Identical normalized text, so these are exact by construction &mdash; '

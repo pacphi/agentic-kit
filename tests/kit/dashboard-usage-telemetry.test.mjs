@@ -751,8 +751,13 @@ test('a characterized name does not assert a class the rules never split', () =>
   assert.match(html, />Recurring 44-token prompt</, 'for every class, so the Type column is the one source');
   assert.doesNotMatch(html, />Recurring \d+-token (instruction|question)</,
     'no class noun survives into a rendered name');
-  assert.match(html, /title="Recurring 3-token instruction · 9 sessions · both hosts"/,
-    'the vocabulary\'s own string stays as the tooltip, unedited');
+  // A tooltip is a DOM surface too. A cell reading "prompt" whose hover reads
+  // "instruction" makes the same over-claim the cell was cleaned of, and hides
+  // it where a reader is less likely to challenge it.
+  assert.match(html, /title="Recurring 3-token prompt · 9 sessions · both hosts"/,
+    'the title is neutralised alongside the cell, span segments intact');
+  assert.doesNotMatch(html, /instruction/,
+    'the machine-generated descriptor carries the word nowhere, attributes included');
 });
 
 test('a curated name is never rewritten, whatever words it contains', () => {
@@ -766,6 +771,8 @@ test('a curated name is never rewritten, whatever words it contains', () => {
   });
   assert.match(html, />Recurring 3-token instruction</,
     'a person or an enrichment pass wrote this name; the render layer does not second-guess it');
+  assert.match(html, /title="Recurring 3-token instruction"/,
+    'and its title is the same human-authored string, whatever words it contains');
 });
 
 // A suggested move must not smuggle back the claim the class wording removed:
@@ -879,6 +886,66 @@ test('a hostile cluster label cannot inject markup', () => {
   assert.match(html, /&lt;img src=x onerror=alert\(1\)&gt;/, 'and so is the host chip');
   assert.match(html, /href="#usage\/%22%3E%3Cscript%3E/,
     'a session id reaches the href URI-encoded, so it cannot close the attribute');
+});
+
+// ── absent states ──────────────────────────────────────────────────────────
+//
+// Every panel has a branch for "this window measured nothing", and the copy in
+// those branches is the whole point of the view: it is where a zero would
+// otherwise be invented. The KPI strip's branch was pinned from the start;
+// these are the rest, so the absent path is held to the same standard as the
+// populated one.
+
+/** The projection with one field emptied, so each absent branch is reached
+ *  without disturbing the others. */
+function withPatterns(over) {
+  return { ...PANEL_PROMPTS, patterns: { ...PANEL_PROMPTS.patterns, ...over } };
+}
+
+test('zero clusters reads as a clean result, not a missing measurement', () => {
+  const html = patternsTable(withPatterns({ clusters: [] }));
+  assert.match(html, /clean result, not a missing one/,
+    'no repetition found is an ANSWER; a bare empty table reads as a failure to look');
+  assert.doesNotMatch(html, /<table/, 'and no empty table shell is drawn around it');
+});
+
+test('a projection that was never computed says so, differently', () => {
+  const html = patternsTable({ ...PANEL_PROMPTS, patterns: null });
+  assert.match(html, /were not computed/);
+  assert.doesNotMatch(html, /clean result/,
+    '"not computed" and "none found" are different claims and must not share copy');
+});
+
+test('a single-host corpus draws no cross-host caveat', () => {
+  const html = hostInterplay({ ...PANEL_PROMPTS, byHost: { claude: PANEL_PROMPTS.byHost.claude } });
+  assert.match(html, /claude/);
+  assert.doesNotMatch(html, /Windows are not equal/,
+    'the caveat compares hosts; with one host there is no comparison to caveat');
+  assert.doesNotMatch(html, /shape, not yet a trend/,
+    'nor a thin-history note about a host that is the only one there is');
+});
+
+test('no host at all is named as such, not drawn as an empty grid', () => {
+  assert.match(hostInterplay({ ...PANEL_PROMPTS, byHost: {} }),
+    /no host carried a typed prompt in this window/);
+});
+
+test('the KPI tap chips say when there is no per-host split to show', () => {
+  const html = promptKpis({ ...PANEL_PROMPTS, byHost: {} });
+  assert.match(html, /no per-host split/);
+  assert.doesNotMatch(html, /your p75/, 'and compares against no baseline it does not have');
+});
+
+test('an absent provenance split is named, and an all-zero one is not divided by', () => {
+  assert.match(provenancePanel(withPatterns({ provenance: null })), /no provenance split/);
+  assert.match(provenancePanel(withPatterns({ provenance: { human: 0, control: 0, agent: 0, adapter: 0 } })),
+    /no fingerprinted turns in this window/);
+});
+
+test('nothing typed leaves the steer split unclassified rather than zeroed', () => {
+  const html = steerPanel(withPatterns({ corpus: { fingerprints: 40, typed: 0 } }));
+  assert.match(html, /nothing typed in this window to classify/);
+  assert.doesNotMatch(html, /0%/, 'a split of nothing is not a split into zeroes');
 });
 
 test('the two unbuilt sections render a named gap, not a fabricated card', () => {

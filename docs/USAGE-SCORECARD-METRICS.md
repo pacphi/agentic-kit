@@ -1285,12 +1285,12 @@ p(q), over N samples, landing in bucket i (count n_i, running total `cum` before
 - Percentiles: `percentileFromBuckets` (`usage-aggregate.mjs:215-232`). The
   browser re-implementation `bucketPercentile` (`usage-rhythm.mjs:106-126`) is
   pinned to byte-identical output, and the browser's edge copies to the server
-  constants, by `tests/kit/dashboard-usage-telemetry.test.mjs:1057-1075` and
-  `:1165-1172`.
+  constants, by `tests/kit/dashboard-usage-telemetry.test.mjs:1124-1142` and
+  `:1232-1239`.
 - Render: `lengthCard`/`latencyCard` and the `≥` prefix helper `fmtAtLeast` in
   `src/lib/dashboard/client/usage.mjs` (that bundle shares a basename with the
   CLI command module, so its render sites are cited by function name rather
-  than by line); the CLI's own `fmtAtLeast` is `src/commands/usage.mjs:177-180`
+  than by line); the CLI's own `fmtAtLeast` is `src/commands/usage.mjs:143-146`
   and `printScoreRhythm` (`src/commands/usage.mjs:212-219`) prints the pair.
 
 **Worked example**, latency, computable by hand. `latHist = [10, 30, 20, 25,
@@ -1435,7 +1435,7 @@ off each `turn_context`, last one wins since a session may renegotiate mid-run
 (`usage-parsers.mjs:697-702`); OpenCode's `mode` off each assistant message
 (`usage-opencode.mjs:240-241`). Render is `modeChart` in
 `src/lib/dashboard/client/usage.mjs`; the CLI table is `printScoreModeTable`
-(`src/commands/usage.mjs:268-270`).
+(`src/commands/usage.mjs:234-236`).
 
 **The mapping table**, in full (`usage-modes.mjs:6-17`), pinned value-by-value
 by `normalizeMode` assertions in `tests/kit/usage-modes.test.mjs:9-52`, and the
@@ -1490,8 +1490,8 @@ The raw string is kept beside the normalized one as `modeRaw`
 (`usage-parsers.mjs:198`) precisely because the mapping is a judgement call and
 a reader checking it needs the evidence it was made from. `not-recorded` is a
 first-class bucket key rather than a display fallback
-(`usage-aggregate.mjs:932-934`), it is always offered as a row by the CLI table
-even at zero (`printBucketTable`, `src/commands/usage.mjs:259-266`), and
+(`usage-aggregate.mjs:933-935`), it is always offered as a row by the CLI table
+even at zero (`printBucketTable`, `src/commands/usage.mjs:225-232`), and
 `segColor` forces it to the de-emphasis ink rather than letting a palette give
 it a series colour (`usage-rhythm.mjs:183-186`) — spend with no posture
 evidence must never read as a posture.
@@ -1686,12 +1686,11 @@ before it — the half-open interval `[now − 2d, now − d)`
 `now` and `d`, the window the UI is *showing*, and never from the parse cutoff:
 the caller widens that cutoff on purpose so older records survive to be
 aggregated here, and deriving the baseline from a widened bound would silently
-stretch it to whatever lookback the caller happened to pass. Both callers widen it to the
-depth the personal tap-share baseline needs rather than to the previous
-window alone: the dashboard route asks for `windowDays +
-BASELINE_TRAILING_DAYS` (`lookbackDays`, `src/lib/dashboard-server.mjs:1437`),
-and `readAgg` in `ak usage score` asks for the same. One extra window would be
-a strict subset — too shallow for `promptBaselines`, which needs
+stretch it to whatever lookback the caller happened to pass. The dashboard route widens it to
+the depth the personal tap-share baseline needs rather than to the previous
+window alone: `windowDays + BASELINE_TRAILING_DAYS` (`lookbackDays`,
+`src/lib/dashboard-server.mjs:1437`). One extra window would be a strict
+subset — too shallow for `promptBaselines`, which needs
 BASELINE_MIN_ACTIVE_DAYS of history BEFORE the displayed window and returns
 null without it — while this depth is a strict superset of the previous window
 at every supported width. A delta against an unknown-length window is not a delta. The upper bound
@@ -1705,7 +1704,7 @@ which a zeroed totals object would misreport as "measured nothing"
 (`usage-aggregate.mjs:1213`). A chip self-suppresses when the baseline is null
 or zero, and a magnitude that rounds to zero prints flat rather than drawing an
 arrow the printed number does not support (`deltaChip`,
-`usage-rhythm.mjs:36-53`; `fmtDelta`, `src/commands/usage.mjs:186-197`).
+`usage-rhythm.mjs:36-53`; `fmtDelta`, `src/commands/usage.mjs:152-163`).
 
 **Engaged time by day is a sibling map, not a `byDay` field.** `byDay`'s
 presence contract is **billed days only** — a key exists exactly when tokens
@@ -1754,7 +1753,7 @@ byDay[day].exceptions += session.exceptions   attributed to the session's FIRST 
 `usage-aggregate.mjs:922`; the per-day series lands on `byDay[s._day].exceptions`
 (`usage-aggregate.mjs:943-946`). Render is
 `relRate`/`relStat`/`relTrend` in `src/lib/dashboard/client/usage.mjs`;
-`printScoreReliability` (`src/commands/usage.mjs:272-298`) prints the CLI pair.
+`printScoreReliability` (`src/commands/usage.mjs:238-264`) prints the CLI pair.
 
 **Evidence, per host.** An "exception" is a turn that never resolved to a
 model, and each host signals that differently:

@@ -251,15 +251,22 @@ import { renderUsage } from './usage-orchestrators.mjs';
     if(v==="transcript"&&usageSession&&(!TRANSCRIPT||TRANSCRIPT.id!==usageSession)){
       loadTranscript(usageSession).then(renderTranscript);
     }
+    var days=document.getElementById("usage-days");if(days)days.hidden=(v==="transcript");
+    // BEFORE the per-view loaders, not after. Leaving Prompts with All (365)
+    // selected resets the window to 30, and a loader that ran first would have
+    // already fetched at 365: two requests in flight for different windows with
+    // no ordering guarantee, so a late 365 response paints year-wide figures
+    // under a chip row reading 30d. Settling the window first means each loader
+    // below fires once, at the window the reader can actually see.
+    syncAllHistoryChip(v);
     // Limits is LAZY like the tab itself: the Codex side may spawn one vendor
     // subprocess server-side, so it runs when the view is opened, not on poll.
     if(v==="limits"&&!LIMITS)loadLimits();
     if(v==="models"){loadModelLifecycle();if(!LIMITS)loadLimits();}
-    var days=document.getElementById("usage-days");if(days)days.hidden=(v==="transcript");
-    syncAllHistoryChip(v);
     // Prompts renders from the payload the poll already holds, so opening the
-    // tab is a re-render rather than a fetch. It is called here as well as from
-    // renderUsage because the panels are only in the DOM once this view exists.
+    // tab is a re-render rather than a fetch — cheap enough to run on entry so
+    // the view is populated before the next poll, even though page.mjs ships
+    // every u-pr-* container statically and renderUsage also calls this.
     if(v==="prompts"&&USAGE&&!USAGE.error)renderPrompts(USAGE);
   }
 

@@ -909,6 +909,11 @@ async function main() {
   const consoleErrors = [];
   const failedRequests = [];
   const modelRequests = [];
+  // Every /api/limits call, with its window. Leaving Prompts resets a 365-day
+  // selection, and the Limits loader must not have already fetched at the old
+  // window — two in-flight requests for different spans would let a late
+  // response paint year-wide figures under a chip row reading 30d.
+  const limitsRequests = [];
   // Capture the LOCATION too. A bare "Failed to load resource" is
   // undiagnosable, and a console listener that records only the message makes
   // the harness's own failures impossible to act on.
@@ -927,6 +932,7 @@ async function main() {
   page.on('request', (r) => {
     const u = r.url();
     if (/\/api\/models(?:\?|$)/.test(u)) modelRequests.push(u);
+    if (/\/api\/limits(?:\?|$)/.test(u)) limitsRequests.push(u);
     if (u.startsWith(ORIGIN) || /^(data|blob|about|chrome-extension):/.test(u)) return;
     offOriginRequests.push(`${r.resourceType()} ${u}`);
   });
@@ -2704,6 +2710,54 @@ async function main() {
       await page.getAttribute('#usage-tab-models', 'aria-selected') === 'true'
         && await page.evaluate(() => document.activeElement?.id) === 'usage-tab-models',
       'Models tab did not receive selection and focus after a second ArrowRight');
+
+    // ── the whole-history chip, which only one view offers ──
+    //
+    // Patterns are lifetime phenomena, so Prompts alone gets a 365-day option.
+    // The chip has to appear there, disappear elsewhere, and — the part worth a
+    // live browser — reset the WINDOW on the way out, so no other view inherits
+    // a span its chip row cannot show.
+    await page.click('#usage-tab-findings');
+    await page.waitForTimeout(200);
+    check('the whole-history chip is hidden on views that do not offer it',
+      await page.isHidden('#usage-days-all'),
+      'the All chip was visible outside Prompts');
+
+    await page.click('#usage-tab-prompts');
+    await page.waitForTimeout(200);
+    check('the whole-history chip appears on Prompts',
+      await page.isVisible('#usage-days-all'),
+      'the All chip did not appear on the one view that offers it');
+
+    await page.click('#usage-days-all');
+    await page.waitForTimeout(2500);
+    check('selecting All switches the window to 365 and marks the chip',
+      await page.evaluate(() => document.getElementById('usage-days-all')?.classList.contains('on'))
+        && (await visibleText(page, '#u-pr-patterns-note')).includes('all history'),
+      `All did not take effect; caption read ${JSON.stringify(await visibleText(page, '#u-pr-patterns-note'))}`);
+
+    // NOT covered here: renderPrompts' no-fingerprint-layer branch. The bundle
+    // is wrapped in an IIFE, so the renderer is not addressable from
+    // page.evaluate, and the only ways to reach it are to export a global from
+    // production code purely for this check or to serve a second fixture corpus
+    // parsed before fingerprints shipped. The branch is three lines and its
+    // sibling absent states are unit-pinned; a production hook for test
+    // convenience is the worse trade.
+
+    // The ordering pin. syncAllHistoryChip runs BEFORE the per-view loaders, so
+    // leaving Prompts@All for Limits fetches once, at the reset window — not
+    // once at 365 and again at 30 with no ordering guarantee between them.
+    limitsRequests.length = 0;
+    await page.click('#usage-tab-limits');
+    await page.waitForTimeout(2500);
+    const limitWindows = limitsRequests.map((u) => new URL(u).searchParams.get('days'));
+    check('leaving Prompts@All requests Limits once, at the reset window',
+      limitWindows.length > 0 && !limitWindows.includes('365'),
+      `Limits was fetched at ${JSON.stringify(limitWindows)} — a 365 request means the loader ran before the window reset`);
+    check('leaving Prompts drops the window back to 30d, chip and all',
+      await page.isHidden('#usage-days-all')
+        && await page.evaluate(() => document.querySelector('#usage-days [data-days="30"]')?.classList.contains('on')),
+      'the 365-day window survived into a view whose chip row cannot show it');
 
     // ── the specific zeros that were silently wrong ──
     await page.click('[data-view="sessions"]');
