@@ -69,6 +69,14 @@ import { deriveCards } from './usage-coaching.mjs';
 import {
   loadLedger, reconcile, defaultLedgerPath, summarizeLedger, gatherAdoptionInputs, CANONICAL_WINDOW_DAYS,
 } from './usage-outcome-ledger.mjs';
+// W5 enrichment (spec §6.3) — READ-ONLY here, same discipline as the ledger
+// above: this server applies a persisted store, it never writes one (that
+// stays CLI-only, spec §2.3/§3.3 — saveLabelStore/makeInvoke/enrichLabels/
+// synthesizeCards are deliberately never imported into this file at all).
+import {
+  applyLabelStoreToPatterns, hydrateStoredCards, applyCardStaleness, buildFindingsSummary,
+} from './usage-enrich.mjs';
+import { loadLabelStore, defaultLabelStorePath } from './usage-label-store.mjs';
 import { requestRejection } from './dashboard/request-security.mjs';
 import {
   readJsonSafe, mintToken, tokenMatches, sendJson, sendUnauthorized, sendNotFound, listenLoopback,
@@ -785,7 +793,8 @@ function lazyLive(liveOptions = {}) {
  *           discoverProjects?: () => Array<{ path: string, label: string, source?: string }>,
  *           machineWideIntel?: (projects: Array<any>) => any,
  *           models?: any, modelScopeKey?: string, system?: any, systemOptions?: any,
- *           coachingLedger?: any }} [opts]
+ *           coachingLedger?: any, labelStore?: { loadLabelStore?: typeof loadLabelStore,
+ *             labelStorePath?: string } }} [opts]
  * @returns {Promise<{ url: string, urlWithToken: string, port: number, token: string, close: () => Promise<void> }>}
  */
 export function startDashboard({
@@ -794,7 +803,8 @@ export function startDashboard({
   liveOptions = {}, liveIdleMs = 30_000, transcripts, transcriptOptions = {},
   transcriptClientBuffer = 64, transcriptMaxClients = 16,
   intelWatch, intelClientBuffer = 256, intelMaxClients = 32,
-  discoverProjects, machineWideIntel, models, modelScopeKey, system, systemOptions = {}, coachingLedger,
+  discoverProjects, machineWideIntel, models, modelScopeKey, system, systemOptions = {},
+  coachingLedger, labelStore: labelStoreOverride,
 } = {}) {
   const provide = fetchStatus || shellOutStatus(cwd);
   const usageApi = usage || lazyUsage();
@@ -1447,6 +1457,18 @@ export function startDashboard({
               .catch(() => ({ openrouter: null }))
             : Promise.resolve({ openrouter: null }),
         ]);
+        // W5 enrichment (spec §6.3, deliverable §5): applied to EVERY poll,
+        // read-only — the store the CLI's `--enrich` writes, consulted here
+        // exactly like `ak usage prompts` consults it, so the two surfaces
+        // cannot disagree about what a cluster or a coaching card is called.
+        // A newer-schema store reads as "no store" for this poll, same as
+        // the ledger's own I-2 rule below; there is nothing to warn INTO here
+        // (no terminal), so it degrades silently rather than failing the poll.
+        const loadStore = labelStoreOverride?.loadLabelStore ?? loadLabelStore;
+        const labelStorePath = labelStoreOverride?.labelStorePath ?? defaultLabelStorePath();
+        const store = loadStore(labelStorePath);
+        const labels = store.future ? {} : store.labels;
+        if (agg?.promptPatterns) agg.promptPatterns = applyLabelStoreToPatterns(agg.promptPatterns, labels);
         // promptPatterns is destructured OUT rather than spread: the Prompts
         // view reads it through `prompts.patterns` below, and leaving it at
         // the top level too would publish the same projection twice under two
@@ -1460,6 +1482,7 @@ export function startDashboard({
         // C-1) rather than whatever the dashboard's own selector is showing.
         const coaching = await dashboardCoachingPayload(agg || {}, days, {
           cwd, coachingLedger, readIndex: usageApi.readIndex,
+          labels, storedCards: store.future ? {} : store.cards,
         });
         sendJson(res, 200, {
           ...rollups,
@@ -1711,14 +1734,25 @@ function memoizedAdoptionInputs(cwd) {
  * `limits` already use on `startDashboard` — tests point it at a stub loader
  * so a poll never touches the real `~/.config/agentic-kit` ledger file.
  *
+ * `labels`/`storedCards` (W5, spec §6.3/§6.4) are the persisted enrichment
+ * store `handleUsage` already loaded once for this poll — READ-ONLY here
+ * too, same contract as the ledger: a persisted enriched card rejoins
+ * `reconcile` exactly like a rule card ("join reconcile exactly like rule
+ * cards"), and its staleness is patched on AFTER reconcile runs (`annotate`
+ * unconditionally sets `stale: false`, which would clobber it if this ran
+ * first — see usage-enrich.mjs's own doc on `applyCardStaleness`).
+ *
  * @param {{ promptPatterns?: object|null, promptBaselines?: object|null,
  *   promptsByHost?: object|null, insights?: Array<object>|null }} agg the
  *   aggregate `handleUsage` already read (prompts:true) at `days`
  * @param {number} days the window `agg` was read at
  * @param {{ cwd?: string, readIndex?: Function,
- *   coachingLedger?: { loadLedger?: typeof loadLedger, ledgerPath?: string } }} [opts]
+ *   coachingLedger?: { loadLedger?: typeof loadLedger, ledgerPath?: string },
+ *   labels?: Record<string, object>, storedCards?: Record<string, object> }} [opts]
  */
-async function dashboardCoachingPayload(agg, days, { cwd, readIndex, coachingLedger: coachingLedgerOverride } = {}) {
+async function dashboardCoachingPayload(agg, days, {
+  cwd, readIndex, coachingLedger: coachingLedgerOverride, labels, storedCards,
+} = {}) {
   const load = coachingLedgerOverride?.loadLedger ?? loadLedger;
   const ledgerPath = coachingLedgerOverride?.ledgerPath ?? defaultLedgerPath();
   const cards = deriveCards({
@@ -1742,12 +1776,18 @@ async function dashboardCoachingPayload(agg, days, { cwd, readIndex, coachingLed
       return { cards: [], summary: null, unavailable: true, reason: 'the canonical 30-day aggregate could not be read' };
     }
   }
+  if (canonicalAgg?.promptPatterns) {
+    canonicalAgg = { ...canonicalAgg, promptPatterns: applyLabelStoreToPatterns(canonicalAgg.promptPatterns, labels) };
+  }
   const currentPatterns = {
     promptPatterns: canonicalAgg.promptPatterns, promptsByHost: canonicalAgg.promptsByHost,
     promptBaselines: canonicalAgg.promptBaselines, insights: canonicalAgg.insights,
   };
-  const { cards: annotated, ledger } = reconcile(loadedLedger, cards, {
+  const findingsSummary = buildFindingsSummary(canonicalAgg);
+  const allCards = [...cards, ...hydrateStoredCards(storedCards)];
+  const { cards: annotated, ledger } = reconcile(loadedLedger, allCards, {
     adoptionInputs: { ...memoizedAdoptionInputs(cwd), currentPatterns }, now: Date.now(),
   });
+  applyCardStaleness(annotated, findingsSummary);
   return { cards: annotated, summary: summarizeLedger(ledger.records) };
 }

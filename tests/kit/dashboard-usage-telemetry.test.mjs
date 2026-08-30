@@ -13,6 +13,10 @@ import { blankSession, addUsage, notePromptFingerprint } from '../../src/lib/usa
 import { MODES } from '../../src/lib/usage-modes.mjs';
 import { loadLedger as realLoadLedger, saveLedger as realSaveLedger } from '../../src/lib/usage-outcome-ledger.mjs';
 import {
+  loadLabelStore as realLoadLabelStore, saveLabelStore as realSaveLabelStore,
+} from '../../src/lib/usage-label-store.mjs';
+import { citedEvidenceHash } from '../../src/lib/usage-enrich.mjs';
+import {
   deltaChip, sparklineSvg, histogram, stackedDays, donut2, rankedRows,
   bucketPercentile, bucketPositionPct,
 } from '../../src/lib/dashboard/client/usage-rhythm.mjs';
@@ -126,6 +130,14 @@ const FIXTURE_DEPS = {
 // blank in-memory ledger keeps every /api/usage test in this file hermetic.
 const NULL_COACHING_LEDGER = { loadLedger: () => ({ version: 1, records: [] }), ledgerPath: '/dev/null/unused' };
 
+// W5 enrichment (spec §6.3): the SAME hazard, one file over — dashboard-
+// server.mjs now also reads the persisted label/card store on every
+// /api/usage poll (read-only). A blank in-memory store keeps every test in
+// this file hermetic against the real ~/.config/agentic-kit label store too.
+const NULL_LABEL_STORE = {
+  loadLabelStore: () => ({ version: 1, labels: {}, cards: {} }), labelStorePath: '/dev/null/unused',
+};
+
 function get(url, token) {
   return new Promise((resolve, reject) => {
     http.get(url, { headers: { 'x-dash-token': token } }, (res) => {
@@ -174,7 +186,7 @@ test('/api/usage payload carries rhythm, mode, provider and a previous-window pr
   // rides through from the caller's own options unchanged.
   const usage = { readIndex: spyReadIndex(FIXTURE_RECORDS, calls) };
   const srv = await startDashboard({
-    port: 0, fetchStatus: async () => ({ overall: 'ok', rows: [] }), usage, coachingLedger: NULL_COACHING_LEDGER,
+    port: 0, fetchStatus: async () => ({ overall: 'ok', rows: [] }), usage, coachingLedger: NULL_COACHING_LEDGER, labelStore: NULL_LABEL_STORE,
   });
   try {
     const r = await get(`${srv.url}api/usage?days=7`, srv.token);
@@ -257,7 +269,7 @@ test('the baseline lookback reaches far enough back for promptBaselines to exist
   const calls = [];
   const srv = await startDashboard({
     port: 0, fetchStatus: async () => ({ overall: 'ok', rows: [] }),
-    usage: { readIndex: spyReadIndex(trailing, calls) }, coachingLedger: NULL_COACHING_LEDGER,
+    usage: { readIndex: spyReadIndex(trailing, calls) }, coachingLedger: NULL_COACHING_LEDGER, labelStore: NULL_LABEL_STORE,
   });
   try {
     const r = await get(`${srv.url}api/usage?days=7`, srv.token);
@@ -344,7 +356,7 @@ async function promptsPayload(days = 7) {
   const calls = [];
   const srv = await startDashboard({
     port: 0, fetchStatus: async () => ({ overall: 'ok', rows: [] }),
-    usage: { readIndex: spyReadIndex(PROMPT_RECORDS, calls) }, coachingLedger: NULL_COACHING_LEDGER,
+    usage: { readIndex: spyReadIndex(PROMPT_RECORDS, calls) }, coachingLedger: NULL_COACHING_LEDGER, labelStore: NULL_LABEL_STORE,
   });
   try {
     const r = await get(`${srv.url}api/usage?days=${days}`, srv.token);
@@ -412,7 +424,7 @@ test('M-8: the ledger file\'s bytes are byte-for-byte unchanged after several /a
   const srv = await startDashboard({
     port: 0, fetchStatus: async () => ({ overall: 'ok', rows: [] }),
     usage: { readIndex: spyReadIndex(PROMPT_RECORDS, calls) },
-    coachingLedger: { loadLedger: realLoadLedger, ledgerPath },
+    coachingLedger: { loadLedger: realLoadLedger, ledgerPath }, labelStore: NULL_LABEL_STORE,
   });
   try {
     for (let i = 0; i < 3; i++) {
@@ -432,6 +444,125 @@ test('M-8: the ledger file\'s bytes are byte-for-byte unchanged after several /a
 
   const after = fs.readFileSync(ledgerPath);
   assert.ok(before.equals(after), 'the ledger file must be byte-for-byte unchanged after multiple dashboard polls');
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+// ── W5 enrichment (spec §6.3/§6.4, deliverable §5): the dashboard applies a
+// PERSISTED store read-only — it never calls makeInvoke/enrichLabels/
+// synthesizeCards/saveLabelStore (none of those are even imported into
+// dashboard-server.mjs). These tests write the store directly with the real
+// usage-label-store.mjs module, the same way the M-8 test above writes a
+// real ledger, and prove the dashboard reads it without ever mutating it.
+
+test('a persisted enriched label applies to its cluster in the /api/usage payload, and the store file is untouched', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-dash-labels-'));
+  const labelStorePath = path.join(dir, 'usage-prompt-labels.json');
+
+  // Discover the real cluster key PROMPT_RECORDS produces, the same way a
+  // real `--enrich` pass would have — never a hand-guessed hash.
+  const before = await promptsPayload();
+  const cluster = before.prompts.patterns.clusters[0];
+  assert.ok(cluster, 'the fixture must produce at least one cluster to label');
+
+  realSaveLabelStore(labelStorePath, {
+    version: 1,
+    labels: { [cluster.key]: { name: 'Dashboard-enriched name', source: 'enriched', firstSeen: '2026-08-01T00:00:00.000Z' } },
+    cards: {},
+  });
+  const beforeBytes = fs.readFileSync(labelStorePath);
+
+  const calls = [];
+  const srv = await startDashboard({
+    port: 0, fetchStatus: async () => ({ overall: 'ok', rows: [] }),
+    usage: { readIndex: spyReadIndex(PROMPT_RECORDS, calls) }, coachingLedger: NULL_COACHING_LEDGER,
+    labelStore: { loadLabelStore: realLoadLabelStore, labelStorePath },
+  });
+  try {
+    for (let i = 0; i < 2; i++) {
+      const r = await get(`${srv.url}api/usage?days=7`, srv.token);
+      assert.equal(r.status, 200, `expected 200, got ${r.status}`);
+      const { patterns } = JSON.parse(r.body).prompts;
+      const labeled = patterns.clusters.find((c) => c.key === cluster.key);
+      assert.equal(labeled.label.name, 'Dashboard-enriched name');
+      assert.equal(labeled.label.source, 'enriched');
+    }
+  } finally {
+    await srv.close();
+  }
+
+  assert.ok(beforeBytes.equals(fs.readFileSync(labelStorePath)),
+    'the label store file must be byte-for-byte unchanged after multiple dashboard polls — read-only');
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test('a persisted enriched card rejoins coaching every poll, exactly like a rule card, and a stale one is marked stale', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-dash-cards-'));
+  const labelStorePath = path.join(dir, 'usage-prompt-labels.json');
+
+  const freshCard = {
+    title: 'A dashboard-visible enriched suggestion', finding: 'This recurred 6 times.',
+    try: 'Try the obvious thing.', basis: '6 recurrences.', basisNumbers: [6],
+    evidenceHash: 'will-be-replaced', generatedAt: '2026-08-01T00:00:00.000Z',
+  };
+  const staleCard = {
+    title: 'A stale suggestion', finding: 'This once recurred 999 times.',
+    try: 'Try something else.', basis: '999 recurrences.', basisNumbers: [999],
+    // Hashed against a summary that DID contain 999 — simulating "999 was
+    // real at synthesis time" — so the drift is genuine: the REAL current
+    // findingsSummary (built below) does not contain 999, so citedEvidenceHash
+    // recomputes a SMALLER present-set and the hash moves. Hashing against an
+    // empty/non-matching summary here would make both computations agree on
+    // "nothing present" and never trip staleness at all — not what this test
+    // means to prove.
+    evidenceHash: citedEvidenceHash({ onceTrue: 999 }, [999]), generatedAt: '2026-08-01T00:00:00.000Z',
+  };
+
+  // Compute the fresh card's REAL evidenceHash against what the fixture's
+  // own canonical findingsSummary will actually contain (6 typed prompts per
+  // typing session — see promptRecord/PROMPT_RECORDS above), so it reads as
+  // genuinely fresh rather than stale-by-construction.
+  const probe = await promptsPayload(30);
+  const summaryNumbers = new Set();
+  const walk = (v) => {
+    if (typeof v === 'number' && Number.isFinite(v)) summaryNumbers.add(v);
+    else if (Array.isArray(v)) v.forEach(walk);
+    else if (v && typeof v === 'object') Object.values(v).forEach(walk);
+  };
+  walk(probe.prompts.patterns);
+  walk(probe.prompts.byHost);
+  const realNumber = [...summaryNumbers].find((n) => Number.isInteger(n) && n > 0);
+  assert.ok(realNumber !== undefined, 'the fixture must carry at least one real positive integer to ground a card in');
+  freshCard.finding = `This recurred ${realNumber} times.`;
+  freshCard.basis = `${realNumber} recurrences.`;
+  freshCard.basisNumbers = [realNumber];
+  freshCard.evidenceHash = citedEvidenceHash(
+    { clusters: probe.prompts.patterns.clusters, byHost: probe.prompts.byHost }, [realNumber],
+  );
+
+  realSaveLabelStore(labelStorePath, {
+    version: 1, labels: {}, cards: { 'enriched-fresh': freshCard, 'enriched-stale': staleCard },
+  });
+
+  const calls = [];
+  const srv = await startDashboard({
+    port: 0, fetchStatus: async () => ({ overall: 'ok', rows: [] }),
+    usage: { readIndex: spyReadIndex(PROMPT_RECORDS, calls) }, coachingLedger: NULL_COACHING_LEDGER,
+    labelStore: { loadLabelStore: realLoadLabelStore, labelStorePath },
+  });
+  try {
+    const r = await get(`${srv.url}api/usage?days=30`, srv.token);
+    assert.equal(r.status, 200, r.body);
+    const { coaching } = JSON.parse(r.body).prompts;
+    const fresh = coaching.cards.find((c) => c.id === 'enriched-fresh');
+    const stale = coaching.cards.find((c) => c.id === 'enriched-stale');
+    assert.ok(fresh, `enriched-fresh must reconcile like a rule card: ${JSON.stringify(coaching.cards.map((c) => c.id))}`);
+    assert.equal(fresh.status, 'proposed');
+    assert.equal(fresh.stale, false);
+    assert.ok(stale, 'enriched-stale must also reconcile');
+    assert.equal(stale.stale, true, '999 does not appear anywhere in this fixture\'s findings — must read as stale');
+  } finally {
+    await srv.close();
+  }
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
@@ -1094,6 +1225,29 @@ test('coachingPanel status chips: proposed, adopted (+ outcome line), dismissed,
 
   const retired = coachingPanel({ coaching: { cards: [coachingCard({ status: 'retired', refutation: '12 → 13 since adoption' })] } });
   assert.match(retired, /retired — did not improve: 12 → 13 since adoption \(30d basis\)/);
+});
+
+// W5 enrichment (spec §6.3/§6.5, deliverable §5): a stale ENRICHED card
+// renders a chip + a hint pointing at the CLI — never a live Recompute
+// button (deferred; inference stays CLI-only per spec §2.3). A non-stale or
+// rule card renders neither.
+test('coachingPanel renders a stale chip + CLI hint for a stale enriched card, and nothing for a fresh or rule card', () => {
+  const stale = coachingPanel({
+    coaching: { cards: [coachingCard({ id: 'enriched-foo', source: 'enriched', stale: true })] },
+  });
+  assert.match(stale, /data-stale="1"/);
+  assert.match(stale, /<span class="pr-card-stale-chip">stale<\/span>/);
+  assert.match(stale, /recompute with <code>ak usage prompts --enrich<\/code>/);
+  assert.doesNotMatch(stale, /Recompute<\/button>|<button/, 'no live Recompute affordance in v1 — CLI-only');
+
+  const fresh = coachingPanel({
+    coaching: { cards: [coachingCard({ id: 'enriched-bar', source: 'enriched', stale: false })] },
+  });
+  assert.doesNotMatch(fresh, /data-stale/);
+  assert.doesNotMatch(fresh, /pr-card-stale-chip/);
+
+  const rule = coachingPanel({ coaching: { cards: [coachingCard({ status: 'proposed' })] } });
+  assert.doesNotMatch(rule, /data-stale/, 'a rule card never carries stale:true, so it must never render the hint');
 });
 
 // Fix round 1, I-5: `status` originates in the on-disk ledger JSON and was

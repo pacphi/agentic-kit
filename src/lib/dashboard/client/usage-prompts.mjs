@@ -711,13 +711,29 @@ function coachingDismissHint(card) {
     + '<code>ak usage prompts --dismiss ' + esc(card.id) + '</code></p>';
 }
 
+/** W5 enrichment (spec §6.3/§6.5): ONLY an enriched card's cached evidence
+ *  can drift out from under it — a rule card's `stale` is always `false`
+ *  (usage-outcome-ledger.mjs's `annotate`; recomputing one costs nothing, so
+ *  there is nothing to go stale), so this chip+hint only ever appears on a
+ *  `source: 'enriched'` card. NO LIVE RECOMPUTE BUTTON IN V1 — a button here
+ *  would trigger inference from the dashboard, and spec §2.3 keeps inference
+ *  CLI-only; the hint points at the command that does the same thing today. */
+function coachingStaleHint(card) {
+  if (!card.stale) return '';
+  return '<p class="pr-card-stale-hint"><span class="pr-card-stale-chip">stale</span> '
+    + 'this card\'s evidence has moved since it was generated — recompute with '
+    + '<code>ak usage prompts --enrich</code>.</p>';
+}
+
 function coachingCard(card) {
-  return '<div class="pr-card" data-status="' + esc(card.status || 'proposed') + '">'
+  return '<div class="pr-card" data-status="' + esc(card.status || 'proposed') + '"'
+    + (card.stale ? ' data-stale="1"' : '') + '>'
     + '<div class="pr-card-head"><h4>' + esc(card.title) + '</h4>' + coachingStatusChip(card) + '</div>'
     + '<p class="pr-card-finding">' + esc(card.finding) + '</p>'
     + '<p class="pr-card-try"><b>Try:</b> ' + esc(card.try) + '</p>'
     + '<p class="pr-card-basis">' + esc(card.basis) + '</p>'
     + coachingDraftBlock(card.draft)
+    + coachingStaleHint(card)
     + coachingDismissHint(card)
     + coachingAsOfLine(card)
     + '</div>';
@@ -740,9 +756,11 @@ function coachingSummaryLine(s) {
  * disagree about a card's status any more than they can about a cluster's
  * count.
  *
- * Rule-derived cards recompute free every scan (spec §6.3), so there is no
- * "stale — recompute" state to render here in v1 — the caption says so
- * rather than a per-card marker for a state that cannot occur yet.
+ * Rule-derived cards recompute free every scan (spec §6.3), so `stale` is
+ * always `false` for one and the caption below still calls that out. An
+ * ENRICHED card (W5) is the one real exception — its cache can drift out
+ * from under it, and `coachingCard`'s own stale hint is where that renders
+ * per-card, not here on the section caption.
  */
 export function coachingPanel(p) {
   var c = p && p.coaching;
@@ -760,7 +778,8 @@ export function coachingPanel(p) {
       + 'result, not a missing one.</div>';
   }
   return '<div class="pr-cards">' + cards.map(coachingCard).join('') + '</div>'
-    + '<div class="pr-caveat">Rule-derived and free to recompute every scan &mdash; nothing here goes '
-    + 'stale. Dismissal is CLI-only: <code>ak usage prompts --dismiss &lt;id&gt;</code>.</div>'
+    + '<div class="pr-caveat">Rule-derived cards are free to recompute every scan and never go '
+    + 'stale; an enriched card (source: enriched) is cached and can — see its own marker. '
+    + 'Dismissal is CLI-only: <code>ak usage prompts --dismiss &lt;id&gt;</code>.</div>'
     + coachingSummaryLine(c.summary);
 }
