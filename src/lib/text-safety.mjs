@@ -44,10 +44,22 @@
  *    U+009B (CSI); the range is taken whole because every codepoint in it is a
  *    control and none of them is legitimate prose.
  *  - 0x200b–0x200f, 0x202a–0x202e, 0x2066–0x2069: zero-width and directional
- *    marks, bidi overrides/embeddings, and bidi isolates. */
-const UNSAFE_RANGES = [
+ *    marks, bidi overrides/embeddings, and bidi isolates.
+ *  - 0x2028-0x2029: LINE SEPARATOR and PARAGRAPH SEPARATOR. Added in the
+ *    re-verification round (security seat, alongside SEC-16): every
+ *    single-line check in this codebase tests for CR/LF, which these two pass,
+ *    so a Unicode line separator could sit inside a stored label name. Inert
+ *    in a terminal and in HTML, but "single-line" should mean single-line.
+ *
+ *  EXPORTED because five hand-written copies of this list exist and cannot
+ *  import it: every function in the dashboard's client modules is
+ *  re-serialized into the browser bundle by its own source text, so each
+ *  carries its own copy. `tests/kit/text-safety.test.mjs` asserts every copy
+ *  against this array, and that test is the only thing standing between five
+ *  copies and five different answers. */
+export const UNSAFE_RANGES = [
   [0x00, 0x08], [0x0b, 0x1f], [0x7f, 0x9f],
-  [0x200b, 0x200f], [0x202a, 0x202e], [0x2066, 0x2069],
+  [0x200b, 0x200f], [0x2028, 0x2029], [0x202a, 0x202e], [0x2066, 0x2069],
 ];
 
 const UNSAFE_CLASS = `[${UNSAFE_RANGES
@@ -57,10 +69,6 @@ const UNSAFE_CLASS = `[${UNSAFE_RANGES
 const UNSAFE_ONE_RE = new RegExp(UNSAFE_CLASS);
 const UNSAFE_GLOBAL_RE = new RegExp(UNSAFE_CLASS, 'g');
 
-/** The character class itself, for the one consumer that cannot import it:
- *  the dashboard's `esc` lives in a module every function of which is
- *  re-serialized into the browser bundle and must stay self-contained. */
-export const UNSAFE_CHARS_CLASS = UNSAFE_CLASS;
 
 /**
  * Does this value carry a character no store entry may hold? The rejection

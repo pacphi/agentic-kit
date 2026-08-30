@@ -97,7 +97,7 @@ const pollSrc = readSplit('poll.mjs');
 // hand copy free to drift from it. Strip it here for exactly the reason the
 // cross-file `import` lines are stripped: it exists for the on-disk view only.
 const RHYTHM_ESC = `function esc(s) {
-  var ranges = [0x00, 0x08, 0x0b, 0x1f, 0x7f, 0x9f, 0x200b, 0x200f, 0x202a, 0x202e, 0x2066, 0x2069];
+  var ranges = [0x00, 0x08, 0x0b, 0x1f, 0x7f, 0x9f, 0x200b, 0x200f, 0x2028, 0x2029, 0x202a, 0x202e, 0x2066, 0x2069];
   var cls = '';
   for (var i = 0; i < ranges.length; i += 2) {
     cls += String.fromCharCode(ranges[i]) + '-' + String.fromCharCode(ranges[i + 1]);

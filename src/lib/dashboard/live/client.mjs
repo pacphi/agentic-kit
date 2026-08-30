@@ -22,7 +22,18 @@ export const LIVE_JS = `
   function storedTranscriptCollapsed(){try{return localStorage.getItem(TRANSCRIPT_COLLAPSE_KEY)==="true";}catch(_){return false;}}
   var state={snapshot:{schemaVersion:2,cursor:null,projects:[],sessions:[]},events:[],project:null,selected:null,node:null,browserLevel:"projects",scope:"live",historyWindow:"14d",historySnapshot:{schemaVersion:2,cursor:null,projects:[],sessions:[]},historyLoading:false,historyLoadingMore:false,historyError:false,historyPagination:null,historyCoverage:null,historyRequest:0,historyProjectKey:null,historyObserver:null,paused:false,pending:[],overflow:false,source:null,resyncing:false,lastAt:0,active:false,connection:{key:"connecting",text:"Connecting to local session telemetry…"},positions:{},pinned:{},seen:{},camera:{x:24,y:24,k:1},cameraEpoch:0,fitFor:null,pointer:null,transcriptCollapsed:storedTranscriptCollapsed(),playback:{mode:"live",events:[],items:[],index:0,playing:false,speed:1,timer:null,startAt:null,endAt:null,truncated:false,gap:false},transcript:{source:null,turns:[],seen:{},query:"",follow:true,unread:0,status:"idle",session:null}};
   function el(id){return document.getElementById(id);}
-  function esc(s){return String(s==null?"":s).replace(/[&<>"']/g,function(c){return{"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c];});}
+  // Security review SEC-15: this bundle renders raw transcript turn content
+  // (esc(t.content), in renderTranscript below), and dashboard-server.mjs's own
+  // CSP comment calls transcript text "the one data source here that is
+  // genuinely attacker-influenced". Nothing upstream strips it —
+  // session-security.mjs's maskTurns applies maskSecrets only. So this escaper
+  // carries the same control/bidi strip groups.mjs does. The ranges are
+  // text-safety.mjs's, hand copied because this whole file is a template
+  // literal served as a classic script and can import nothing, and asserted
+  // equal to the canonical list by tests/kit/text-safety.test.mjs.
+  // NOTE: no backticks or dollar-brace anywhere in this file — both would
+  // terminate the template literal this source lives inside.
+  function esc(s){var r=[0x00,0x08,0x0b,0x1f,0x7f,0x9f,0x200b,0x200f,0x2028,0x2029,0x202a,0x202e,0x2066,0x2069],c="";for(var i=0;i<r.length;i+=2){c+=String.fromCharCode(r[i])+"-"+String.fromCharCode(r[i+1]);}return String(s==null?"":s).replace(new RegExp("["+c+"]","g"),"").replace(/[&<>"']/g,function(ch){return{"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[ch];});}
   function short(s,n){s=String(s||"");return s.length>n?s.slice(0,n-1)+"…":s;}
   function title(s){return String(s||"activity").replace(/[._-]+/g," ").replace(/\\b\\w/g,function(c){return c.toUpperCase();});}
   function ago(v){var at=Date.parse(v||""),ms=Date.now()-at;if(!Number.isFinite(ms))return"";var s=Math.max(0,Math.round(ms/1000));if(s<5)return"just now";if(s<60)return s+"s ago";var m=Math.round(s/60);if(m<60)return m+"m ago";var h=Math.round(m/60);if(h<24)return h+"h ago";var d=Math.floor(h/24),rh=h%24;if(d<7)return d+"d "+rh+"h ago";var w=Math.floor(d/7),rd=d%7;if(w<52)return w+"w "+rd+"d ago";var y=Math.floor(w/52),rw=w%52;return y+"y "+rw+"w ago";}

@@ -50,11 +50,25 @@ export class ManifestRejected extends TypeError {
   }
 }
 
-function hasUnsafeControl(value) {
+/** A manifest field's own, STRICTER rule — deliberately not `text-safety.mjs`'s
+ *  `hasUnsafeChars`, and the difference is the point. A manifest field is an
+ *  identifier, not prose: a TAB or a NEWLINE inside one is as wrong as an ESC,
+ *  so this rejects the whole C0 range where text-safety keeps 0x09/0x0a.
+ *
+ *  Security review SEC-16 noted this as a fifth hand-written variant of the
+ *  same idea. It is kept separate rather than folded in, because switching to
+ *  the shared predicate would LOOSEN a security validator (tabs and newlines
+ *  would become legal here). What was folded in is the zero-width and
+ *  line-separator range it was missing: an invisible character inside an
+ *  adapter id is exactly the sort of thing this exists to refuse.
+ *  `tests/kit/text-safety.test.mjs` asserts the resulting relationship —
+ *  everything text-safety rejects, this rejects too. */
+export function hasUnsafeControl(value) {
   return [...value].some((character) => {
     const code = character.codePointAt(0);
     return code <= 0x1f || (code >= 0x7f && code <= 0x9f)
-      || (code >= 0x202a && code <= 0x202e) || (code >= 0x2066 && code <= 0x2069);
+      || (code >= 0x200b && code <= 0x200f) || (code >= 0x2028 && code <= 0x202e)
+      || (code >= 0x2066 && code <= 0x2069);
   });
 }
 

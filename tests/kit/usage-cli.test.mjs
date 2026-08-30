@@ -1533,3 +1533,51 @@ test('SEC-10: ordinary well-formed invocations are unaffected', () => {
   assert.equal(result.status, 0, result.stdout);
   JSON.parse(result.stdout);
 });
+
+test('a tampered label store tells the operator its entries were dropped, rather than silently shrinking', () => {
+  const sb = sandbox();
+  writePromptsCorpus(sb);
+  const dir = path.join(sb.cfg, 'agentic-kit');
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, 'usage-prompt-labels.json'), JSON.stringify({
+    version: 1,
+    labels: {
+      good: { name: 'Release ritual', source: 'enriched', firstSeen: null },
+      bad: { name: 'x'.repeat(200), source: 'enriched', firstSeen: null },
+    },
+    cards: {
+      'enriched-bad': { title: 't', finding: 'f', try: 'y', basis: 'b' },
+    },
+    lastSynthesis: null,
+  }));
+
+  const result = ak(['usage', 'prompts', '--window', '30'], sb);
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /dropped 1 label and 1 card from the label store/,
+    'failing closed is right; failing closed quietly is not');
+  assert.match(result.stdout, /were ignored, not repaired/);
+
+  // And it must not corrupt --json, the same hazard the future-schema warning
+  // beside it is guarded for.
+  const json = ak(['usage', 'prompts', '--window', '30', '--json'], sb);
+  assert.equal(json.status, 0, json.stderr);
+  JSON.parse(json.stdout);
+  assert.doesNotMatch(json.stdout, /dropped 1 label/);
+});
+
+test('a clean label store says nothing about drops', () => {
+  const sb = sandbox();
+  writePromptsCorpus(sb);
+  const dir = path.join(sb.cfg, 'agentic-kit');
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, 'usage-prompt-labels.json'), JSON.stringify({
+    version: 1,
+    labels: { good: { name: 'Release ritual', source: 'enriched', firstSeen: null } },
+    cards: {},
+    lastSynthesis: null,
+  }));
+  const result = ak(['usage', 'prompts', '--window', '30'], sb);
+  assert.equal(result.status, 0, result.stderr);
+  assert.doesNotMatch(result.stdout, /from the label store/,
+    'a warning that fires on a healthy store is noise, and noise is how warnings stop being read');
+});

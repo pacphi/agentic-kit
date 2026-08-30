@@ -1084,6 +1084,26 @@ async function runPrompts({ flags, deps }) {
         + 'unavailable this run, and the file was left untouched.');
     }
   }
+  // Security review, re-verification round (transparency): `loadLabelStore`
+  // has always counted the entries its read-side validation dropped, and
+  // nothing ever read that count — so a store edited out of band lost entries
+  // silently, and the operator saw a shorter list with no explanation.
+  // Failing closed is right; failing closed QUIETLY is not. Guarded on
+  // `!flags.json` for the same reason as the future-schema warning above:
+  // `warn` writes to stdout, and an unguarded call corrupts the JSON document
+  // this function prints later.
+  if (labelStore.dropped && !flags.json) {
+    const { labels: droppedLabels = 0, cards: droppedCards = 0 } = labelStore.dropped;
+    const parts = [
+      droppedLabels ? `${droppedLabels} label${droppedLabels === 1 ? '' : 's'}` : null,
+      droppedCards ? `${droppedCards} card${droppedCards === 1 ? '' : 's'}` : null,
+    ].filter(Boolean);
+    if (parts.length) {
+      warn(`ak usage prompts: dropped ${parts.join(' and ')} from the label store at `
+        + `${labelStorePath} — the entries did not pass this build's validation and were ignored, `
+        + 'not repaired. Re-run with --enrich to re-derive anything still missing.');
+    }
+  }
   const activeLabels = labelStore.future ? {} : labelStore.labels;
   agg.promptPatterns = applyLabelStoreToPatterns(agg.promptPatterns, activeLabels);
 
