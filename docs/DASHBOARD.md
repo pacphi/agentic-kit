@@ -40,6 +40,7 @@ permanent.
 | Usage | Scorecard | `#usage/score` | Usage scorecard | Token consumption, API-equivalent cost, efficiency, and trends |
 | Usage | Limits | `#usage/limits` | Provider limits | Current provider windows, reset timing, and available capacity |
 | Usage | Findings | `#usage/findings` | Usage findings | Actionable anomalies, efficiency opportunities, and evidence-backed recommendations |
+| Usage | Prompts | `#usage/prompts` | What you actually type | Prompt repetition, tap habits, and provenance by host, from prompt fingerprints — no prompt text; rule-derived coaching cards |
 | Usage | Sessions | `#usage/sessions` | Session usage | Retained sessions grouped by project, category, duration, tokens, and cost |
 | Usage | Models | `#usage/models` | Model lifecycle | Host inventory, lifecycle changes, consumers, swap impact, and evidence sources |
 | Usage | Transcript | `#usage/transcript` | Transcript detail | The selected session's locally retained, server-masked evidence |
@@ -158,8 +159,8 @@ Each count carries the sentence explaining what it counted; on Intelligence it i
 
 ## Usage
 
-Usage loads lazily when first opened. Scorecard, Limits, Findings, Sessions, Models, and Transcript share the
-same secondary rail; the 7/14/30-day filters remain aligned to its right.
+Usage loads lazily when first opened. Scorecard, Limits, Findings, Prompts, Models, Sessions, and
+Transcript share the same secondary rail; the 7/14/30-day filters remain aligned to its right.
 
 ### Scorecard
 
@@ -228,6 +229,27 @@ fetched to draw it. When the arithmetic falls outside the window — a snapshot 
 it describes, or a browser clock that disagrees with the vendor's — the tick is omitted rather than
 pinned to either end, because a mark at 0% or 100% would state a position the data cannot support.
 The legend appears only when at least one row actually carries a tick.
+
+### Prompts
+
+Prompts turns what you actually typed — never what the harness or a delegated agent produced —
+into repetition, habit, and coaching signal, host by host. Every figure derives from prompt
+**fingerprints** (a hash, a token count, a provenance tag recorded at scan time); no prompt text
+reaches the index or this page. The **KPI strip** reads Typed prompts (share of every
+fingerprinted turn), Questions, Supervision taps (against your own trailing-90d normal per host,
+where you have one), Repeated share, and Headless share. Below it, **Who is typing** shows the
+provenance split behind that Typed-prompts figure — most user-role turns are not typed by you at
+all — and **Host interplay** compares hosts on tap-share trend, typed length, and how much role
+scaffolding gets retyped by hand on each. **Repeated patterns** is the cluster table: a pattern's
+span, whether it reads as a question or something else, and — where the shape supports one — a
+suggested move. **Coaching** shows the same rule-derived suggestion cards `ak usage prompts`
+prints, read-only: a finding, a Try, a status chip, and a draft you can select and copy. Dismissal
+is CLI-only, so a proposed card carries a hint with the exact command rather than a button; a
+cached suggestion whose evidence has since moved carries a **stale** chip pointing at the CLI
+command that refreshes it, rather than a button here — inference stays off the dashboard by
+design. An **All** chip, offered on this view alone, widens the window to the full retained
+history; leaving Prompts drops it back to 30 days. Full formulas, thresholds, and sources:
+[Usage scorecard metrics](USAGE-SCORECARD-METRICS.md) §2a, §2b, §20–§23.
 
 ### Reading a session row
 
