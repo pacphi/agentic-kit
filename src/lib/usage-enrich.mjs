@@ -30,6 +30,20 @@ import { maskSecrets } from './usage-aggregate.mjs';
 import { isValidLabelName } from './usage-label-store.mjs';
 import { withStoreLabel } from './usage-prompt-vocabulary.mjs';
 
+/**
+ * @typedef {import('./usage-coaching.mjs').CoachingCard} CoachingCard
+ * @typedef {{ key: string, label: { name?: string, source?: string, descriptor?: string },
+ *   class?: string, count?: number, sessions?: number, days?: number, hosts?: string[],
+ *   medianTokens?: number, sampleSessionIds?: string[] }} ClusterRow the published cluster
+ *   shape (usage-aggregate.mjs's `promptClusterRow`)
+ * @typedef {{ clusters?: ClusterRow[], reAsks?: { pairCount?: number, sessionCount?: number },
+ *   exactRepeats?: Array<{ count?: number, tokens?: number, sessions?: number, days?: number }> }} PromptPatterns
+ * @typedef {{ promptPatterns?: PromptPatterns|null, promptsByHost?: Record<string, {
+ *   typed?: number, taps?: number, tapShare?: number|null, questionShare?: number|null,
+ *   p90TypedTokens?: number|null, personaOpeners?: number }>|null }} AggLike the slice of an
+ *   aggregate this module reads — never the whole `Aggregate` shape
+ */
+
 /** Spec §6.3: settled labels are never re-judged. A candidate is a cluster
  *  with NO store entry (label source would be 'curated' or 'enriched' if it
  *  had one — see usage-prompt-vocabulary.mjs's `withStoreLabel`) and NO seed
@@ -123,7 +137,7 @@ function buildLabelPrompt(candidates, exemplarsByKey) {
 }
 
 /**
- * @param {{ clusters: Array<object>, exemplarsByKey: Record<string, string[]>,
+ * @param {{ clusters: ClusterRow[], exemplarsByKey: Record<string, string[]>,
  *   store: Record<string, object>, invoke: (prompt: string) => Promise<string>,
  *   now: number }} input
  * @returns {Promise<{ entries: Record<string, {name: string, source: 'enriched', firstSeen: string}>,
@@ -177,7 +191,7 @@ function pctOf(share) {
  * text (cluster NAMES are curated-vocabulary strings, never raw text; every
  * other field is a number). This is the one input `synthesizeCards` sees.
  *
- * @param {{ promptPatterns?: object|null, promptsByHost?: object|null }} agg
+ * @param {AggLike} agg
  * @returns {object}
  */
 export function buildFindingsSummary(agg) {
@@ -268,7 +282,7 @@ export function citedEvidenceHash(findingsSummary, basisNumbers) {
  * value this function has an honest answer for — it throws rather than
  * silently reporting `false` (which would read as "confirmed fresh").
  *
- * @param {{ basisNumbers: number[], evidenceHash: string }} card
+ * @param {{ basisNumbers?: number[], evidenceHash?: string }} card
  * @param {object} findingsSummary current findings, same shape buildFindingsSummary returns
  * @returns {boolean}
  */
@@ -303,8 +317,9 @@ function isSingleLineNonEmpty(value) {
 /**
  * @param {{ findingsSummary: object, invoke: (prompt: string) => Promise<string>,
  *   now: number }} input
- * @returns {Promise<{ cards: Array<object>, proposed: number, accepted: number,
- *   dropped: Record<string, number> }>}
+ * @returns {Promise<{ cards: Array<{ id: string, title: string, finding: string, try: string,
+ *   basis: string, basisNumbers: number[], source: 'enriched', evidenceHash: string,
+ *   generatedAt: string }>, proposed: number, accepted: number, dropped: Record<string, number> }>}
  */
 export async function synthesizeCards({ findingsSummary, invoke, now }) {
   const raw = await invoke(buildCardPrompt(findingsSummary));
@@ -371,9 +386,9 @@ export async function synthesizeCards({ findingsSummary, invoke, now }) {
  * did not request `prompts: true`) or carry no `clusters` at all; both pass
  * through unchanged rather than being reshaped into an empty projection.
  *
- * @param {{ clusters?: Array<object> }|null} promptPatterns
+ * @param {PromptPatterns|null} [promptPatterns]
  * @param {Record<string, object>} [labels]
- * @returns {object|null}
+ * @returns {PromptPatterns|null|undefined}
  */
 export function applyLabelStoreToPatterns(promptPatterns, labels) {
   if (!promptPatterns || !Array.isArray(promptPatterns.clusters) || !promptPatterns.clusters.length) {
@@ -393,7 +408,7 @@ export function applyLabelStoreToPatterns(promptPatterns, labels) {
  * @param {Record<string, { title: string, finding: string, try: string,
  *   basis: string, basisNumbers: number[], evidenceHash: string,
  *   generatedAt: string }>} [cardsStore]
- * @returns {Array<object>} CoachingCard-shaped objects, `source: 'enriched'`
+ * @returns {Array<CoachingCard & { basisNumbers: number[], source: 'enriched' }>}
  */
 export function hydrateStoredCards(cardsStore) {
   return Object.entries(cardsStore ?? {}).map(([id, entry]) => ({

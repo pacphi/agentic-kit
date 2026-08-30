@@ -124,9 +124,14 @@ function sanitizedCardEntry(entry) {
  *    responsible for refusing to reconcile/overwrite when `.future` is set
  *    (this function only reports the shape).
  *
+ * @typedef {{ name: string, source: string, firstSeen: string|null }} LabelEntry
+ * @typedef {{ title: string, finding: string, try: string, basis: string,
+ *   basisNumbers: number[], evidenceHash: string, generatedAt: string }} CardEntry
+ * @typedef {{ version: number, labels: Record<string, LabelEntry>,
+ *   cards: Record<string, CardEntry>, future?: true }} LabelStore
+ *
  * @param {string} filePath
- * @returns {{ version: number, labels: Record<string, object>,
- *   cards: Record<string, object>, future?: true }}
+ * @returns {LabelStore}
  */
 export function loadLabelStore(filePath) {
   let raw;

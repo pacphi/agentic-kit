@@ -25,6 +25,11 @@ import {
   readPromptEntries, deepFingerprints, exemplarCandidates, collectExemplars, promptCacheFile,
 } from '../usage.mjs';
 
+/**
+ * @typedef {import('../../lib/usage-enrich.mjs').AggLike} AggLike
+ * @typedef {import('../../lib/usage-label-store.mjs').LabelStore} LabelStore
+ */
+
 /** Mirrors usage-enrich.mjs's own MIN_CANDIDATE_COUNT — kept as a second,
  *  explicit constant rather than an import so this file's candidate-key scan
  *  (which only needs KEYS, to gather exemplars for) stays decoupled from the
@@ -32,6 +37,7 @@ import {
  *  set from `clusters` itself and is the actual authority on who gets asked. */
 const MIN_CANDIDATE_COUNT = 3;
 
+/** @param {import('../../lib/usage-enrich.mjs').ClusterRow[]} [clusters] */
 function candidateKeysOf(clusters) {
   return (Array.isArray(clusters) ? clusters : [])
     .filter((c) => c?.label?.source === 'characterized' && Number(c.count) >= MIN_CANDIDATE_COUNT)
@@ -86,10 +92,10 @@ function printEnrichSummary({ labelResult, cardResult }) {
  * build refuses to write to) — the caller's existing report still renders
  * normally either way (spec: exits 0, deterministic tiers unaffected).
  *
- * @param {{ agg: object, findingsSummary: object, labelStore: object,
- *   labelStorePath: string, win: { days: number }, deps: object, now: number,
- *   json: boolean }} input
- * @returns {Promise<{ labelStore: object, labelsChanged: boolean,
+ * @param {{ agg: AggLike & { generatedAt: string }, findingsSummary: object,
+ *   labelStore: LabelStore, labelStorePath: string, win: { days: number },
+ *   deps: object, now: number, json: boolean }} input
+ * @returns {Promise<{ labelStore: LabelStore, labelsChanged: boolean,
  *   labelResult: object, cardResult: object }|null>}
  */
 export async function runEnrichPass({

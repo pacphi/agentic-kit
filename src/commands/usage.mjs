@@ -23,22 +23,18 @@ import {
 } from '../lib/usage-openrouter.mjs';
 import { deriveCards } from '../lib/usage-coaching.mjs';
 import {
-  loadLedger, saveLedger, reconcile, defaultLedgerPath, gatherAdoptionInputs,
+  loadLedger, saveLedger, defaultLedgerPath, gatherAdoptionInputs,
 } from '../lib/usage-outcome-ledger.mjs';
+// The ledger reconcile, --enrich (spec §6.3), and --dismiss are ONE
+// orchestration (resolveCoachingAndEnrichment) — split out of runPrompts on
+// the repo's complexity ceiling; it in turn imports usage/enrich.mjs's
+// runEnrichPass (the --enrich flow: consent preamble, exemplar gathering,
+// persistence), which reuses this file's exported deep-pass machinery.
 import {
-  printCoaching, coachingProjection, unavailableCoaching, knownCardIdsText,
-  runDraftFlag, runDismissFlag, canonicalCoachingAgg, currentPatternsOf,
+  printCoaching, runDraftFlag, resolveCoachingAndEnrichment,
 } from './usage/coaching.mjs';
-// W5 enrichment (spec §6.3): the engine (pure logic) plus the store it
-// reads/writes. runEnrichPass (the --enrich flow itself: consent preamble,
-// exemplar gathering, persistence) lives in ./usage/enrich.mjs — imported
-// below the exports it needs from THIS file, so it can reuse the deep-pass
-// machinery rather than re-deriving it.
-import {
-  applyLabelStoreToPatterns, hydrateStoredCards, applyCardStaleness, buildFindingsSummary,
-} from '../lib/usage-enrich.mjs';
+import { applyLabelStoreToPatterns } from '../lib/usage-enrich.mjs';
 import { loadLabelStore, defaultLabelStorePath } from '../lib/usage-label-store.mjs';
-import { runEnrichPass } from './usage/enrich.mjs';
 
 export const options = {
   json: { type: 'boolean', default: false },
@@ -701,8 +697,10 @@ function printHeadless(h) {
 
 /** The aggregate tier, assembled: the shared projection plus the one figure it
  *  does not carry (headless share, which is a property of the session rows
- *  rather than of the prompts). */
-function promptReport(agg, win) {
+ *  rather than of the prompts). Exported solely so usage/coaching.mjs's
+ *  `resolveCoachingAndEnrichment` can recompute it after a --enrich pass
+ *  changes `agg.promptPatterns` — not part of this command's own contract. */
+export function promptReport(agg, win) {
   return {
     win,
     patterns: agg.promptPatterns,
@@ -1289,89 +1287,25 @@ async function runPrompts({ flags, deps }) {
   const adoptionInputs = deps.adoptionInputs ?? gatherAdoptionInputs(cwd);
   const now = Date.now();
 
-  const loadedLedger = loadLedgerFn(ledgerPath);
-  let coaching;
-  let enrichment = null;
-  if (loadedLedger.future) {
-    // Fix round 1, I-2: refuse to reconcile/overwrite a well-formed ledger
-    // from a newer schema — doing so would silently resurrect every
-    // dismissed card the newer build had suppressed.
-    warn(`ak usage prompts: the outcome ledger at ${ledgerPath} is a newer schema `
-      + `(v${loadedLedger.version}) this build does not understand — coaching is unavailable `
-      + 'this run, and the file was left untouched.');
-    if (flags.dismiss != null) return 2; // nothing readable to dismiss against
-    coaching = unavailableCoaching(`ledger schema v${loadedLedger.version} is newer than this build (v1)`);
-  } else {
-    const canonicalAgg = await canonicalCoachingAgg(agg, win, readAgg);
-    if (!canonicalAgg) {
-      warn('ak usage prompts: could not read the canonical 30-day aggregate coaching needs — '
-        + 'coaching is unavailable this run.');
-      if (flags.dismiss != null) return 2;
-      coaching = unavailableCoaching('the canonical 30-day aggregate could not be read');
-    } else {
-      canonicalAgg.promptPatterns = applyLabelStoreToPatterns(canonicalAgg.promptPatterns, activeLabels);
-      const currentPatterns = currentPatternsOf(canonicalAgg);
-      // Ledger-facing evidence is always the CANONICAL 30d window (Fix round
-      // 1, C-1) — an enriched card's findingsSummary/evidenceHash follow the
-      // exact same rule, so switching --window cannot move what an enriched
-      // card's staleness is judged against either.
-      const findingsSummary = buildFindingsSummary(canonicalAgg);
-
-      // --enrich (spec §6.3): a NEW inference pass, CLI-only, opt-in.
-      // Skipped entirely — not partially — when the label store itself is
-      // unreadable; a readable ledger does not make a partial write to an
-      // unreadable store safe.
-      if (flags.enrich && !labelStore.future) {
-        enrichment = await runEnrichPass({
-          agg, findingsSummary, labelStore, labelStorePath, win, deps, now, json: flags.json,
-        });
-        if (enrichment?.labelsChanged) {
-          agg.promptPatterns = applyLabelStoreToPatterns(agg.promptPatterns, enrichment.labelStore.labels);
-          report = promptReport(agg, win); // re-render the clusters table with the new names
-          canonicalAgg.promptPatterns = applyLabelStoreToPatterns(
-            canonicalAgg.promptPatterns, enrichment.labelStore.labels,
-          );
-        }
-      }
-
-      // Persisted enriched cards rejoin reconcile on EVERY pass, not only the
-      // one that synthesized them (spec: "join reconcile exactly like rule
-      // cards") — hydrateStoredCards restores their content; the ledger
-      // still owns their lifecycle exactly like a rule card's.
-      const storedCards = hydrateStoredCards((enrichment?.labelStore ?? labelStore).cards);
-      const allCards = [...ruleCards, ...storedCards];
-      const { ledger, cards: reconciledCards } = reconcile(loadedLedger, allCards, {
-        adoptionInputs: { ...adoptionInputs, currentPatterns }, now,
-      });
-      // AFTER reconcile only — annotate() unconditionally sets stale:false,
-      // which would clobber this if it ran first (usage-enrich.mjs's own doc).
-      applyCardStaleness(reconciledCards, findingsSummary);
-
-      if (flags.dismiss != null) {
-        const knownIds = new Set(reconciledCards.map((c) => c.id));
-        if (!knownIds.has(flags.dismiss)) {
-          warn(`ak usage prompts --dismiss: unknown card id ${JSON.stringify(flags.dismiss)}. `
-            + `Known ids: ${knownCardIdsText(reconciledCards)}`);
-          return 2; // Fix round 1, M-7: no write for an id validated invalid
-        }
-        return runDismissFlag({
-          ledger, ledgerPath, save: saveLedgerFn, cards: reconciledCards, id: flags.dismiss, json: flags.json,
-          adoptionInputs: { ...adoptionInputs, currentPatterns }, now,
-        });
-      }
-
-      // Ledger updates happen on EVERY normal invocation — reconcile above
-      // already computed adoption/outcome/expiry transitions; this is the
-      // one point that persists them (the dashboard's own reconcile never
-      // calls this, per its read-only contract).
-      saveLedgerFn(ledgerPath, ledger);
-      coaching = coachingProjection(reconciledCards, ledger);
-    }
-  }
+  // The ledger reconcile, --enrich (spec §6.3), and --dismiss all live in ONE
+  // orchestration (usage/coaching.mjs's resolveCoachingAndEnrichment) — split
+  // out on the repo's complexity ceiling, since this was the single largest
+  // branch runPrompts carried. `report` may come back reassigned (a --enrich
+  // pass that actually changed a label re-renders it); `agg.promptPatterns`
+  // may be mutated in place for the same reason.
+  const resolved = await resolveCoachingAndEnrichment({
+    agg, report, win, ruleCards, activeLabels, labelStore, labelStorePath,
+    ledgerPath, loadLedgerFn, saveLedgerFn, readAgg, adoptionInputs, now, flags, deps,
+  });
+  if ('earlyReturn' in resolved) return resolved.earlyReturn;
+  const { coaching, enrichment } = resolved;
+  report = resolved.report;
 
   if (flags.json) {
-    const projection = { ...promptProjection(agg, report), coaching };
-    if (flags.enrich) projection.enrichment = enrichmentProjection(enrichment);
+    const projection = {
+      ...promptProjection(agg, report), coaching,
+      ...(flags.enrich ? { enrichment: enrichmentProjection(enrichment) } : {}),
+    };
     console.log(JSON.stringify(deep ? { ...projection, exemplars: deep } : projection, null, 2));
     return 0;
   }

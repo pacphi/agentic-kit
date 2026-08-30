@@ -1742,13 +1742,15 @@ function memoizedAdoptionInputs(cwd) {
  * unconditionally sets `stale: false`, which would clobber it if this ran
  * first — see usage-enrich.mjs's own doc on `applyCardStaleness`).
  *
- * @param {{ promptPatterns?: object|null, promptBaselines?: object|null,
- *   promptsByHost?: object|null, insights?: Array<object>|null }} agg the
- *   aggregate `handleUsage` already read (prompts:true) at `days`
+ * @param {import('./usage-enrich.mjs').AggLike & { promptBaselines?: object|null,
+ *   insights?: Array<object>|null }} agg the aggregate `handleUsage` already
+ *   read (prompts:true) at `days`
  * @param {number} days the window `agg` was read at
  * @param {{ cwd?: string, readIndex?: Function,
  *   coachingLedger?: { loadLedger?: typeof loadLedger, ledgerPath?: string },
- *   labels?: Record<string, object>, storedCards?: Record<string, object> }} [opts]
+ *   labels?: Record<string, object>,
+ *   storedCards?: Record<string, { title: string, finding: string, try: string,
+ *     basis: string, basisNumbers: number[], evidenceHash: string, generatedAt: string }> }} [opts]
  */
 async function dashboardCoachingPayload(agg, days, {
   cwd, readIndex, coachingLedger: coachingLedgerOverride, labels, storedCards,

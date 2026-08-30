@@ -1291,7 +1291,7 @@ p(q), over N samples, landing in bucket i (count n_i, running total `cum` before
   `src/lib/dashboard/client/usage.mjs` (that bundle shares a basename with the
   CLI command module, so its render sites are cited by function name rather
   than by line); the CLI's own `fmtAtLeast` is `src/commands/usage.mjs:211-214`
-  and `printScoreRhythm` (`src/commands/usage.mjs:244-251`) prints the pair.
+  and `printScoreRhythm` (`src/commands/usage.mjs:276-283`) prints the pair.
 
 **Worked example**, latency, computable by hand. `latHist = [10, 30, 20, 25,
 10, 5]`, so N = 100.
@@ -1939,7 +1939,7 @@ per-host and monthly folds off `promptsByHost` / `promptStatsByDay`
 session rows rather than of the prompts (`headlessShare`, `:643`).
 
 The deep pass is the one tier that reads the index cache directly
-(`readPromptEntries`, `src/commands/usage.mjs:752`): it needs the HASHES it owes
+(`readPromptEntries`, `src/commands/usage.mjs:783`): it needs the HASHES it owes
 an exemplar for and the transcript PATH of a session holding one, and the cache
 is the only place both exist together. That coupling is confined to this
 text-bearing, CLI-only tier — a pass about to open the transcripts and print

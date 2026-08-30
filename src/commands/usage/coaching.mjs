@@ -10,8 +10,23 @@
 // — the same reasoning usage-rhythm.mjs/usage-prompts.mjs already document
 // for their own copied `esc`).
 import { heading, info, ok, warn, dim } from '../../lib/output.mjs';
-import { dismissCard, summarizeLedger, CANONICAL_WINDOW_DAYS } from '../../lib/usage-outcome-ledger.mjs';
+import {
+  dismissCard, summarizeLedger, CANONICAL_WINDOW_DAYS, reconcile,
+} from '../../lib/usage-outcome-ledger.mjs';
 import { BASELINE_TRAILING_DAYS } from '../../lib/usage-aggregate.mjs';
+// W5 enrichment (spec §6.3) — folded into the SAME coaching-resolution
+// orchestration below (resolveCoachingAndEnrichment) because an enriched
+// card joins reconcile exactly like a rule card; splitting the two into
+// separate call sites would mean two places deciding "is this pass allowed
+// to write the ledger/store", which is exactly the kind of drift this
+// module's whole job is to prevent.
+import {
+  applyLabelStoreToPatterns, buildFindingsSummary, hydrateStoredCards, applyCardStaleness,
+} from '../../lib/usage-enrich.mjs';
+import { runEnrichPass } from './enrich.mjs';
+import { promptReport } from '../usage.mjs';
+
+/** @typedef {import('../../lib/usage-coaching.mjs').CoachingCard} CoachingCard */
 
 function fmtNum(n) { return (Number(n) || 0).toLocaleString(); }
 
@@ -170,4 +185,133 @@ export async function canonicalCoachingAgg(agg, win, readAgg) {
 
 export function currentPatternsOf(a) {
   return { promptPatterns: a.promptPatterns, promptsByHost: a.promptsByHost, promptBaselines: a.promptBaselines, insights: a.insights };
+}
+
+/** `--dismiss <id>`: validate against the reconciled set, then persist.
+ *  Returns the exit code `runPrompts` should return immediately. Split out
+ *  of `resolveCoachingAndEnrichment` purely to keep that function's own
+ *  cyclomatic complexity under the repo's ceiling.
+ *  @param {{ ledger: object, ledgerPath: string, saveLedgerFn: Function,
+ *    reconciledCards: Array<CoachingCard>, id: string, json?: boolean,
+ *    adoptionInputs: object, currentPatterns: object, now: number }} input
+ *  @returns {number} */
+function resolveDismiss({
+  ledger, ledgerPath, saveLedgerFn, reconciledCards, id, json, adoptionInputs, currentPatterns, now,
+}) {
+  const knownIds = new Set(reconciledCards.map((c) => c.id));
+  if (!knownIds.has(id)) {
+    warn(`ak usage prompts --dismiss: unknown card id ${JSON.stringify(id)}. `
+      + `Known ids: ${knownCardIdsText(reconciledCards)}`);
+    return 2; // Fix round 1, M-7: no write for an id validated invalid
+  }
+  return runDismissFlag({
+    ledger, ledgerPath, save: saveLedgerFn, cards: reconciledCards, id, json,
+    adoptionInputs: { ...adoptionInputs, currentPatterns }, now,
+  });
+}
+
+/**
+ * Resolves this pass's coaching state — the outcome-ledger reconcile,
+ * optionally preceded by a `--enrich` pass (spec §6.3) — and applies the
+ * label store to the CANONICAL aggregate too. Split out of `runPrompts`
+ * (usage.mjs) on the repo's complexity ceiling: this was the single largest
+ * branch that function carried, and enrichment folds into the SAME
+ * orchestration rather than a second one, so there is exactly one place
+ * deciding "is this pass allowed to write the ledger/store".
+ *
+ * Returns `{ earlyReturn: number }` when the caller must return THAT value
+ * immediately (an in-progress `--dismiss` resolved, or was rejected) —
+ * every other path returns `{ coaching, enrichment, report }`. `agg` is
+ * mutated in place (its `promptPatterns` may be reassigned to reflect a
+ * freshly-enriched label), which is why it is not part of the return shape;
+ * `report` IS, because `promptReport` builds a new object.
+ *
+ * @typedef {{ win: object, patterns: object|null, headless: { sessions: number,
+ *   headlessSessions: number, responses: number, headlessResponses: number,
+ *   share: number|null } }} PromptReport the shape `usage.mjs`'s own `promptReport` returns
+ *
+ * @param {{ agg: import('../../lib/usage-enrich.mjs').AggLike & { generatedAt: string, sessions?: Array<object> },
+ *   report: PromptReport, win: { days: number, label: string|number }, ruleCards: Array<CoachingCard>,
+ *   activeLabels: Record<string, object>,
+ *   labelStore: import('../../lib/usage-label-store.mjs').LabelStore, labelStorePath: string,
+ *   ledgerPath: string, loadLedgerFn: Function, saveLedgerFn: Function,
+ *   readAgg: Function, adoptionInputs: object,
+ *   now: number, flags: { enrich?: boolean, dismiss?: string|null, json?: boolean }, deps: object }} input
+ * @returns {Promise<{ earlyReturn: number }|{ coaching: object, enrichment: object|null, report: PromptReport }>}
+ */
+export async function resolveCoachingAndEnrichment({
+  agg, report, win, ruleCards, activeLabels, labelStore, labelStorePath,
+  ledgerPath, loadLedgerFn, saveLedgerFn, readAgg, adoptionInputs, now, flags, deps,
+}) {
+  const loadedLedger = loadLedgerFn(ledgerPath);
+  if (loadedLedger.future) {
+    // Fix round 1, I-2: refuse to reconcile/overwrite a well-formed ledger
+    // from a newer schema — doing so would silently resurrect every
+    // dismissed card the newer build had suppressed.
+    warn(`ak usage prompts: the outcome ledger at ${ledgerPath} is a newer schema `
+      + `(v${loadedLedger.version}) this build does not understand — coaching is unavailable `
+      + 'this run, and the file was left untouched.');
+    if (flags.dismiss != null) return { earlyReturn: 2 }; // nothing readable to dismiss against
+    return {
+      coaching: unavailableCoaching(`ledger schema v${loadedLedger.version} is newer than this build (v1)`),
+      enrichment: null, report,
+    };
+  }
+
+  const canonicalAgg = await canonicalCoachingAgg(agg, win, readAgg);
+  if (!canonicalAgg) {
+    warn('ak usage prompts: could not read the canonical 30-day aggregate coaching needs — '
+      + 'coaching is unavailable this run.');
+    if (flags.dismiss != null) return { earlyReturn: 2 };
+    return {
+      coaching: unavailableCoaching('the canonical 30-day aggregate could not be read'), enrichment: null, report,
+    };
+  }
+
+  canonicalAgg.promptPatterns = applyLabelStoreToPatterns(canonicalAgg.promptPatterns, activeLabels);
+  // Ledger-facing evidence is always the CANONICAL 30d window (Fix round 1,
+  // C-1) — an enriched card's findingsSummary/evidenceHash follow the exact
+  // same rule, so switching --window cannot move what an enriched card's
+  // staleness is judged against either.
+  const findingsSummary = buildFindingsSummary(canonicalAgg);
+
+  // --enrich (spec §6.3): a NEW inference pass, CLI-only, opt-in. Skipped
+  // entirely — not partially — when the label store itself is unreadable; a
+  // readable ledger does not make a partial write to an unreadable store safe.
+  const enrichment = (flags.enrich && !labelStore.future)
+    ? await runEnrichPass({ agg, findingsSummary, labelStore, labelStorePath, win, deps, now, json: flags.json })
+    : null;
+  if (enrichment?.labelsChanged) {
+    agg.promptPatterns = applyLabelStoreToPatterns(agg.promptPatterns, enrichment.labelStore.labels);
+    report = promptReport(agg, win); // re-render the clusters table with the new names
+    canonicalAgg.promptPatterns = applyLabelStoreToPatterns(canonicalAgg.promptPatterns, enrichment.labelStore.labels);
+  }
+
+  const currentPatterns = currentPatternsOf(canonicalAgg);
+  // Persisted enriched cards rejoin reconcile on EVERY pass, not only the one
+  // that synthesized them (spec: "join reconcile exactly like rule cards") —
+  // hydrateStoredCards restores their content; the ledger still owns their
+  // lifecycle exactly like a rule card's.
+  const storedCards = hydrateStoredCards((enrichment?.labelStore ?? labelStore).cards);
+  const { ledger, cards: reconciledCards } = reconcile(loadedLedger, [...ruleCards, ...storedCards], {
+    adoptionInputs: { ...adoptionInputs, currentPatterns }, now,
+  });
+  // AFTER reconcile only — annotate() unconditionally sets stale:false, which
+  // would clobber this if it ran first (usage-enrich.mjs's own doc).
+  applyCardStaleness(reconciledCards, findingsSummary);
+
+  if (flags.dismiss != null) {
+    const earlyReturn = resolveDismiss({
+      ledger, ledgerPath, saveLedgerFn, reconciledCards, id: flags.dismiss, json: flags.json,
+      adoptionInputs, currentPatterns, now,
+    });
+    return { earlyReturn, enrichment, report };
+  }
+
+  // Ledger updates happen on EVERY normal invocation — reconcile above
+  // already computed adoption/outcome/expiry transitions; this is the one
+  // point that persists them (the dashboard's own reconcile never calls
+  // this, per its read-only contract).
+  saveLedgerFn(ledgerPath, ledger);
+  return { coaching: coachingProjection(reconciledCards, ledger), enrichment, report };
 }

@@ -330,9 +330,9 @@ export function labelFor(cluster, store) {
  * persisted `usage-label-store.mjs` file without re-threading it through
  * `aggregate()`/`usage-index.mjs`.
  *
- * @param {{ key: string, label: { name: string, source: string } }} row
+ * @param {{ key: string, label: { name?: string, source?: string } }} row
  * @param {Record<string, { name?: string, source?: string, firstSeen?: string }>} [store]
- * @returns {{ key: string, label: { name: string, source: string } }}
+ * @returns {{ key: string, label: { name?: string, source?: string } }}
  */
 export function withStoreLabel(row, store) {
   const entry = typeof row?.key === 'string' ? store?.[row.key] : null;
