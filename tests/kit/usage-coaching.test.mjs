@@ -667,7 +667,12 @@ test('reconcile: a proposed card whose evidence disappears this pass expires', (
   assert.equal(ledger.records[0].status, 'proposed');
 
   // Next pass: the cluster is gone — deriveCards produces no card for this id.
-  const { ledger: next, cards: nextCards } = reconcile(ledger, [], { now: NOW + DAY_MS, adoptionInputs: {} });
+  // canonicalBasis is explicit since R-1 made it fail-safe: expiry is a
+  // verdict, and a caller now states that its cards came from the canonical
+  // window rather than getting one by omission.
+  const { ledger: next, cards: nextCards } = reconcile(ledger, [], {
+    now: NOW + DAY_MS, adoptionInputs: {}, canonicalBasis: true,
+  });
   assert.equal(next.records[0].status, 'expired');
   assert.equal(nextCards.length, 0, 'an expired record with no live card renders no card');
 });
@@ -685,7 +690,7 @@ test('reconcile: an expired record whose card fires again returns to proposed, k
   assert.equal(ledger.records[0].status, 'proposed');
 
   // Quiet pass: no card fires — expires.
-  ({ ledger } = reconcile(ledger, [], { now: NOW + DAY_MS, adoptionInputs: {} }));
+  ({ ledger } = reconcile(ledger, [], { now: NOW + DAY_MS, adoptionInputs: {}, canonicalBasis: true }));
   assert.equal(ledger.records[0].status, 'expired');
   assert.equal(ledger.records[0].generatedAt, originalGeneratedAt, 'expiry must not touch the as-of stamp');
 
@@ -710,7 +715,7 @@ test('reconcile: an expired record with a prior dismissCount keeps it across re-
     now: NOW + DAY_MS, adoptionInputs: { currentPatterns: releaseRitualCurrentPatternsAt(35) },
   });
   assert.equal(ledger.records[0].status, 'proposed');
-  ({ ledger } = reconcile(ledger, [], { now: NOW + 2 * DAY_MS, adoptionInputs: {} }));
+  ({ ledger } = reconcile(ledger, [], { now: NOW + 2 * DAY_MS, adoptionInputs: {}, canonicalBasis: true }));
   assert.equal(ledger.records[0].status, 'expired');
   assert.equal(ledger.records[0].dismissCount, 1);
 
@@ -1162,7 +1167,7 @@ test('F-2: a CANONICAL pass whose card genuinely stopped firing still expires it
     promptPatterns: { clusters: [c] }, promptBaselines: null, promptsByHost: null, insights: [], now: NOW,
   });
   let { ledger } = reconcile(ledgerOf([]), cards, { now: NOW, adoptionInputs: canonical });
-  ({ ledger } = reconcile(ledger, [], { now: NOW + DAY_MS, adoptionInputs: canonical }));
+  ({ ledger } = reconcile(ledger, [], { now: NOW + DAY_MS, adoptionInputs: canonical, canonicalBasis: true }));
   assert.equal(ledger.records[0].status, 'expired', 'the fix must not disarm real expiry');
 });
 
@@ -1231,4 +1236,33 @@ test('F-11 (P28): any recurrence after a zero-count dismissal is material', () =
   }));
   assert.equal(ledger.records[0].status, 'proposed',
     'a recurrence after a zero-count dismissal must re-propose exactly once');
+});
+
+test('R-1: the canonicalBasis DEFAULT is fail-safe — a caller that says nothing gets no expiry', () => {
+  // Both real call sites pass the flag explicitly, so nothing else in the
+  // suite exercises the default — which means the safety property itself was
+  // unpinned even after both call sites were covered. (Found by mutation:
+  // flipping the default back to `true` survived everything.) A future call
+  // site that forgets the argument is exactly the scenario R-1 is about, so
+  // the default is asserted on its own.
+  const c = cluster({ key: 'kk', name: 'Release ritual', count: 12, sessions: 8, days: 4 });
+  const canonical = { currentPatterns: { promptPatterns: { clusters: [c] } } };
+  const cards = deriveCards({
+    promptPatterns: { clusters: [c] }, promptBaselines: null, promptsByHost: null, insights: [], now: NOW,
+  });
+
+  let { ledger } = reconcile(ledgerOf([]), cards, { now: NOW, adoptionInputs: canonical });
+  assert.equal(ledger.records[0].status, 'proposed');
+
+  // No `canonicalBasis` at all, and no card this pass.
+  ({ ledger } = reconcile(ledger, [], { now: NOW + DAY_MS, adoptionInputs: canonical }));
+  assert.equal(ledger.records[0].status, 'proposed',
+    'a caller that did not state a canonical basis must not get an expiry by omission');
+
+  // Saying so explicitly is what earns it.
+  ({ ledger } = reconcile(ledger, [], {
+    now: NOW + 2 * DAY_MS, adoptionInputs: canonical, canonicalBasis: true,
+  }));
+  assert.equal(ledger.records[0].status, 'expired',
+    'and stating it still works, so the fail-safe default does not disarm real expiry');
 });

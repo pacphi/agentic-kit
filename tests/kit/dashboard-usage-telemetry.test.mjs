@@ -2135,3 +2135,78 @@ test('F-5: no number of /api/usage polls creates the ledger file the dashboard w
     fs.rmSync(dir, { recursive: true, force: true });
   })();
 });
+
+// ── QE re-verification R-1: F-2's WIRING, pinned at the DASHBOARD call site ─
+// Probe N7 flipped `canonicalBasis: days === CANONICAL_WINDOW_DAYS` to a bare
+// `true` here and survived. This payload is read-only so it can never PERSIST
+// an expiry — but both surfaces reconcile through one function precisely so
+// they cannot disagree about a card's status, and a dashboard that renders
+// "expired — evidence no longer present" over evidence that is entirely
+// present is telling the operator something false.
+
+test('R-1: a non-canonical dashboard poll does not report a proposed card as expired', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-dash-r1-'));
+  const ledgerPath = path.join(dir, 'usage-outcome-ledger.json');
+  const proposedRecord = {
+    version: 1,
+    records: [{
+      id: 'commit-push-claude-md', evidenceHash: 'a'.repeat(16), status: 'proposed',
+      generatedAt: '2026-08-01T00:00:00.000Z', statusAt: '2026-08-01T00:00:00.000Z',
+      baseline: { count: 12, clusterKey: 'k', sessions: 8, days: 4 }, windowDays: 30, dismissCount: 0,
+    }],
+  };
+  const calls = [];
+  const srv = await startDashboard({
+    port: 0,
+    fetchStatus: async () => ({ overall: 'ok', rows: [] }),
+    // PROMPT_RECORDS fires none of the six v1 rules, so NO card is derived on
+    // any poll — which is the "card did not fire this pass" condition, and the
+    // whole question is whether a NON-canonical poll may call that expiry.
+    usage: { readIndex: spyReadIndex(PROMPT_RECORDS, calls) },
+    coachingLedger: { loadLedger: () => JSON.parse(JSON.stringify(proposedRecord)), ledgerPath },
+    labelStore: NULL_LABEL_STORE,
+  });
+  try {
+    const narrow = await get(`${srv.url}api/usage?days=7`, srv.token);
+    assert.equal(narrow.status, 200, `expected 200, got ${narrow.status}`);
+    const summary = JSON.parse(narrow.body).prompts.coaching.summary;
+    assert.equal(summary.expired, 0,
+      'a 7-day view must not report a card expired on evidence it never looked at');
+    assert.equal(summary.proposed, 1);
+  } finally {
+    await srv.close();
+  }
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test('R-1: a CANONICAL dashboard poll still reports a genuinely unseen card as expired', async () => {
+  // The other half: the fail-safe default must not disarm real expiry at the
+  // one window where the ledger is entitled to draw that conclusion.
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-dash-r1b-'));
+  const ledgerPath = path.join(dir, 'usage-outcome-ledger.json');
+  const proposedRecord = {
+    version: 1,
+    records: [{
+      id: 'commit-push-claude-md', evidenceHash: 'a'.repeat(16), status: 'proposed',
+      generatedAt: '2026-08-01T00:00:00.000Z', statusAt: '2026-08-01T00:00:00.000Z',
+      baseline: { count: 12, clusterKey: 'k', sessions: 8, days: 4 }, windowDays: 30, dismissCount: 0,
+    }],
+  };
+  const calls = [];
+  const srv = await startDashboard({
+    port: 0,
+    fetchStatus: async () => ({ overall: 'ok', rows: [] }),
+    usage: { readIndex: spyReadIndex(PROMPT_RECORDS, calls) },
+    coachingLedger: { loadLedger: () => JSON.parse(JSON.stringify(proposedRecord)), ledgerPath },
+    labelStore: NULL_LABEL_STORE,
+  });
+  try {
+    const canonical = await get(`${srv.url}api/usage?days=30`, srv.token);
+    assert.equal(canonical.status, 200);
+    assert.equal(JSON.parse(canonical.body).prompts.coaching.summary.expired, 1,
+      'at the canonical window, a card that did not fire IS expired — the fix must not disarm that');
+  } finally {
+    await srv.close();
+  }
+  fs.rmSync(dir, { recursive: true, force: true });
+});

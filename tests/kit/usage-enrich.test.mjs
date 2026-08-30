@@ -47,11 +47,19 @@ test('candidates are clusters whose label source is "characterized" AND count >=
     cluster({ key: 'curated', count: 50, label: { name: 'A person named this', source: 'curated' } }),
     cluster({ key: 'enriched', count: 50, label: { name: 'A model named this', source: 'enriched' } }),
   ];
-  const result = await enrichLabels({
-    clusters, exemplarsByKey: { 'char-big': ['some short exemplar'] }, store: {}, invoke, now: NOW,
-  });
+  // QE re-verification R-2: EVERY cluster here gets an exemplar, so the count
+  // floor is the only thing that can exclude `char-small`. Supplying one only
+  // for `char-big` made F-4's noExemplar filter do the excluding instead —
+  // probe P21 (MIN_CANDIDATE_COUNT 3 -> 1) went from KILLED to SURVIVED, and
+  // this test kept its name while proving nothing about the clause it names.
+  const exemplarsByKey = Object.fromEntries(
+    clusters.map((c) => [c.key, ['some short exemplar']]),
+  );
+  const result = await enrichLabels({ clusters, exemplarsByKey, store: {}, invoke, now: NOW });
   assert.equal(result.candidates.length, 1);
   assert.deepEqual(result.candidates, ['char-big']);
+  assert.equal(result.dropped.noExemplar, 0,
+    'nothing here may be excluded for want of an exemplar — that would mask the floor again');
   assert.match(seen[0], /char-big/, 'the invoked prompt must mention the one real candidate');
   assert.doesNotMatch(seen[0], /char-small|seeded|curated|enriched\b.*named/, 'non-candidates must not reach the prompt');
 });

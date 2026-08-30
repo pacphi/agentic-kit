@@ -271,14 +271,25 @@ function annotate(card, record) {
  * @param {{ adoptionInputs?: { claudeMdTexts?: string[], skillDirs?: string[],
  *   currentPatterns?: object }, now?: number, canonicalBasis?: boolean }} [opts]
  *   `canonicalBasis` says whether `cards` were derived on the canonical
- *   30-day window. It defaults TRUE, which is the safe default for the
- *   evidence reads (they are canonical by construction, C-1) and makes this
- *   parameter opt-OUT: a caller displaying a different window must say so, and
- *   forfeits only the expiry transition (F-2).
+ *   30-day window, and gates the `proposed -> expired` transition (F-2).
+ *
+ *   It defaults to FALSE, and the direction is the point (QE re-verification
+ *   R-1). It shipped defaulting TRUE, making the guard opt-OUT — so a future
+ *   call site that simply forgot the argument would silently restore the F-2
+ *   bug, a display-only window switch persisting "expired — evidence no longer
+ *   present", with the whole suite green. Probes against both call sites
+ *   confirmed that: flipping either expression to `true` survived.
+ *
+ *   Defaulting FALSE inverts the failure. A caller must now EARN expiry by
+ *   stating that its cards came from the canonical window; forgetting costs a
+ *   card that lingers as `proposed` one pass longer, which the next canonical
+ *   pass corrects. Forgetting the other way wrote a false verdict to disk that
+ *   nothing later revisited. Between a transition delayed and a claim
+ *   fabricated, this module has exactly one defensible default.
  * @returns {{ ledger: Ledger, cards: Array<AnnotatedCard> }}
  */
 export function reconcile(ledger, cards, {
-  adoptionInputs = {}, now = Date.now(), canonicalBasis = true,
+  adoptionInputs = {}, now = Date.now(), canonicalBasis = false,
 } = {}) {
   const records = loadRecordsMap(ledger);
   const seenIds = new Set();

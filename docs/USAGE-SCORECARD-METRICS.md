@@ -2391,7 +2391,7 @@ sorted-key serialization of its evidence (`evidenceHash`,
 persisted beside the index (`usage-outcome-ledger.json`, mode 0600, atomic
 tmp+rename write; no field on a record ever holds prompt text — ids, hashes,
 counts, and host names only). `reconcile`
-(`usage-outcome-ledger.mjs:275`) is the pure transition function:
+(`usage-outcome-ledger.mjs:291`) is the pure transition function:
 
 ```text
 new card                      → proposed         (baseline snapshotted now)
@@ -2500,9 +2500,13 @@ store + `reconcile`), `usage-evidence-hash.mjs` (the shared hash). CLI wiring:
 - **Looking at a narrower window does not expire a card.** Which cards FIRE is
   a function of the operator's displayed window, while every ledger-facing
   read is canonical — so a card that stops firing at `--window 7` is not
-  evidence of anything, and `reconcile` skips the `proposed → expired`
-  transition entirely when the pass was derived on a non-canonical basis.
-  Nothing about a display choice is written to the ledger.
+  evidence of anything. `reconcile` performs the `proposed → expired`
+  transition ONLY when its caller states that the pass was derived on the
+  canonical window — the guard is opt-IN, so a caller that says nothing gets no
+  expiry. That direction is deliberate: forgetting to opt in costs a card that
+  lingers one pass longer, which the next canonical pass corrects, while
+  forgetting to opt out wrote a false verdict to disk that nothing later
+  revisited. Nothing about a display choice is written to the ledger.
 
 ---
 

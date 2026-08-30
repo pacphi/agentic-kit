@@ -1581,3 +1581,65 @@ test('a clean label store says nothing about drops', () => {
   assert.doesNotMatch(result.stdout, /from the label store/,
     'a warning that fires on a healthy store is noise, and noise is how warnings stop being read');
 });
+
+// ── QE re-verification R-1: F-2's WIRING, pinned at the CLI call site ──────
+// The ledger-level gate was pinned, but neither call site was: flipping
+// `canonicalBasis: win.days === CANONICAL_WINDOW_DAYS` to a bare `true` at
+// either surface silently restored F-2 with the whole suite green. This drives
+// the REAL CLI — no injected argument — and reads the persisted ledger off
+// disk, because a hand-fed flag is not evidence about wiring.
+
+/** A corpus whose commit-and-push habit sits ENTIRELY outside the last 7 days.
+ *  That gap is what makes the test discriminate: the canonical 30-day window
+ *  sees 20 occurrences and the card fires, while a `--window 7` view sees none
+ *  and it does not — which is precisely the "card stopped firing for a display
+ *  reason" case F-2 is about. A corpus spread evenly across the window instead
+ *  keeps clearing COMMIT_PUSH_MIN_COUNT at 7 days too, so there is no expiry
+ *  to suppress and the test proves nothing. */
+function writeGappedCommitPushCorpus(sb) {
+  const projectDir = path.join(sb.home, '.claude', 'projects', '-tmp-r1-gap-fixture');
+  fs.mkdirSync(projectDir, { recursive: true });
+  for (let i = 0; i < 20; i++) {
+    const dayAgo = 9 + i; // days 9..28: inside 30d, outside 7d
+    const text = COMMIT_PUSH_PHRASINGS[i % COMMIT_PUSH_PHRASINGS.length];
+    const at = Date.now() - dayAgo * 86_400_000 - 3_600_000;
+    const id = `r1-gap-${i}`;
+    fs.writeFileSync(path.join(projectDir, `${id}.jsonl`),
+      [promptTurn(id, at, text), replyTurn(id, at + 10_000)].join('\n') + '\n');
+  }
+}
+
+test('R-1: a display-only --window pass does not persist `expired` (real CLI, real ledger file)', () => {
+  const sb = sandbox();
+  writeGappedCommitPushCorpus(sb);
+  const ledgerFile = path.join(sb.cfg, 'agentic-kit', 'usage-outcome-ledger.json');
+
+  const run1 = ak(['usage', 'prompts', '--window', '30', '--json'], sb);
+  assert.equal(run1.status, 0, run1.stderr);
+  const proposed = JSON.parse(run1.stdout).coaching.cards.find((c) => c.id === 'commit-push-claude-md');
+  assert.ok(proposed, 'guard: the card must fire on the canonical window first');
+  assert.equal(proposed.status, 'proposed');
+  const before = JSON.parse(fs.readFileSync(ledgerFile, 'utf8')).records
+    .find((r) => r.id === 'commit-push-claude-md');
+  assert.equal(before.status, 'proposed');
+
+  // The operator merely LOOKS at 7 days. The habit is entirely older than
+  // that, so the card stops firing — while the canonical evidence behind it
+  // has not moved at all.
+  const run2 = ak(['usage', 'prompts', '--window', '7', '--json'], sb);
+  assert.equal(run2.status, 0, run2.stderr);
+  const shown = JSON.parse(run2.stdout).coaching.cards.find((c) => c.id === 'commit-push-claude-md');
+  assert.equal(shown, undefined, 'guard: the card must genuinely stop firing at the display window');
+
+  const after = JSON.parse(fs.readFileSync(ledgerFile, 'utf8')).records
+    .find((r) => r.id === 'commit-push-claude-md');
+  assert.equal(after.status, 'proposed',
+    'looking at a narrower window must not persist "expired — evidence no longer present"');
+  assert.equal(after.statusAt, before.statusAt, 'nor reset statusAt');
+
+  // And a canonical pass still sees it, unchanged.
+  const run3 = ak(['usage', 'prompts', '--window', '30', '--json'], sb);
+  const back = JSON.parse(run3.stdout).coaching.cards.find((c) => c.id === 'commit-push-claude-md');
+  assert.equal(back.status, 'proposed');
+  fs.rmSync(sb.home, { recursive: true, force: true });
+});
