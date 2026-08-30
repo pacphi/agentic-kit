@@ -41,6 +41,23 @@
 // table citation's OWN cell yields no anchor at all, it falls back to the
 // REST OF ITS ROW (every other cell on the same line) — never another row.
 //
+// Fix round 2 — the CALL-SITE marker (an affordance, not an escape hatch).
+// Round 1 fixed genuine call-site citations by DE-ANCHORING them — stripping
+// or requoting the identifier so the definition-site rule had nothing to gate
+// on. That made the citation's own NUMBER invisible to the gate again, and
+// five shipped wrong that way. Instead: a citation whose own sentence/cell
+// (the SAME context window used for quoted-string anchors below — own table
+// cell, or the ±3/+1 doc-line window in prose) contains the literal word
+// "call" — bare, or as "call site" — declares itself a call-site citation.
+// The named symbol still has to hit within ±TOLERANCE (unchanged); the
+// definition-site rule is the ONLY thing skipped, because a call site
+// legitimately isn't where the symbol is declared. No new syntax: "call" is
+// the word this doc already reaches for to describe an invocation, now read
+// deliberately instead of incidentally. A citation must still resolve some
+// anchor to pass at all — marking a citation "call" does not exempt it from
+// having a real symbol or quoted phrase nearby, only from the definition
+// check on that symbol.
+//
 // A failure names the citation and where its anchor actually lives now (if
 // found anywhere in the file), so re-anchoring is a one-line edit.
 import { test } from 'node:test';
@@ -79,6 +96,11 @@ function fileIndex() {
 // whatever follows the `=`/`:`/`(`.
 const IDENTIFIER_RE = /^[A-Za-z_$][\w$]{3,}$/;
 const IDENTIFIER_PREFIX_RE = /^([A-Za-z_$][\w$]{3,})\s*(?:=|:(?!:)|\()/;
+
+// Fix round 2 — the literal word "call" (never "calls"/"called"/"calling",
+// which \b already excludes), read from the citation's own sentence/cell as
+// a deliberate self-declaration that this citation is about a call site.
+const CALL_SITE_MARKER_RE = /\bcall\b/i;
 
 function escapeRegExp(s) { return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
 
@@ -212,6 +234,11 @@ function extractCitations(docText) {
     }
     c.idAnchors = [...idAnchors];
     c.strAnchors = [...strAnchors];
+    // Fix round 2 — the call-site marker, read from the SAME own-cell/prose
+    // context as the quoted-string anchors above (not the row-fallback: a
+    // marker is a deliberate per-citation declaration, never inherited from
+    // a sibling cell).
+    c.isCallSite = CALL_SITE_MARKER_RE.test(ownCellCtx);
   }
   return cites;
 }
@@ -268,6 +295,12 @@ function checkDoc(docRel, index) {
     // never claimed anything about this citation and must not be gated on;
     // only a symbol whose text-match is doing the work here has to prove
     // that text-match is a definition, not a call site.
+    //
+    // Fix round 2 — a citation self-declared as a call site (see the
+    // CALL_SITE_MARKER_RE header note) skips ONLY this rule; idHit/strHit
+    // above still had to pass, so the citation is not exempt from having a
+    // real anchor, only from that anchor having to be a declaration.
+    if (c.isCallSite) continue;
     const defMiss = idHitAnchors
       .map((a) => ({ a, at: soleDefinitionLine(a, rel, src) }))
       .find(({ at }) => at !== null && (at < lo + 1 || at > hi));

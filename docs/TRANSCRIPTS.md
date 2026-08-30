@@ -74,7 +74,7 @@ Each line has a top-level `type`. The parser (`parseClaude`,
 
 A real assistant completion also closes two pieces of per-entry evidence the
 transcript does not state outright. It **closes the latency window** the
-preceding human prompt opened, into one "noteLatencySample" call over the gap
+preceding human prompt opened, into one `noteLatencySample` call over the gap
 between them (`usage-parsers.mjs:572-576`); and it **conditionally sets `ctxLastTokens`** to the
 tokens actually in the model's window for that turn — fresh input plus what was
 served from cache — so the field always describes the last completion rather
@@ -110,8 +110,8 @@ Codex rollout lines carry `type` + `payload`. The parser (`parseCodex`,
 | `event_msg` → `agent_message` | A legacy-format model response |
 | `event_msg` → `item_completed` → `UserMessage` | A current-format prompt candidate; text blocks use the observed lowercase `text` discriminator; also gated below |
 | `event_msg` → `item_completed` → `AgentMessage` | A current-format model response; text blocks use the observed uppercase `Text` discriminator |
-| Human-prompt gate (`isCodexHumanMessage`, `usage-parsers.mjs:810-812`) | Codex carries no discipline of its own for telling a typed prompt apart from harness output or a mirrored cross-host envelope replayed into the rollout rather than typed there. Reuses "HARNESS_OUTPUT_RE" verbatim (Claude's own envelope markers reproduce byte-for-byte inside a mirrored rollout) plus two Codex-specific machine markers (CODEX_MACHINE_ENVELOPE_RE, "CODEX_MACHINE_ENVELOPE_RE = /", `usage-parsers.mjs:808`): a `<teammate-message` wrapper and the literal `"Another Claude session sent a message:"` prefix cross-session delivery uses. Only a message that passes the gate counts toward `rec.prompts`, sets the session title, or opens the prompt→agent-message latency window (`usage-parsers.mjs:832`); every `user_message`/`UserMessage` still gets a turn row either way, kind: 'context' instead of `'prompt'` when gated out (`:842`) — mirroring how a Claude harness-origin `user` entry is kept, not dropped (§3.2). Deliberately narrow: exact-twin cross-host dedup by flush timestamp is a recorded follow-up, not attempted here |
-| `event_msg` → `item_completed` → `CommandExecution`, `McpToolCall`, `FileChange`, `CollabAgentToolCall` | The four item kinds tallied as tool invocations, keyed by their own Codex names (CODEX_TOOL_ITEM_TYPES, `usage-parsers.mjs:885`, tallied via "CODEX_TOOL_ITEM_TYPES.has(decoded.unknownItemType)" at `:916-917`) |
+| Human-prompt gate (`isCodexHumanMessage`, `usage-parsers.mjs:810-812`) | Codex carries no discipline of its own for telling a typed prompt apart from harness output or a mirrored cross-host envelope replayed into the rollout rather than typed there. Reuses "HARNESS_OUTPUT_RE" verbatim (Claude's own envelope markers reproduce byte-for-byte inside a mirrored rollout) plus two Codex-specific machine markers (`CODEX_MACHINE_ENVELOPE_RE`, `usage-parsers.mjs:810`): a `<teammate-message` wrapper and the literal `"Another Claude session sent a message:"` prefix cross-session delivery uses. Only a message that passes the gate counts toward `rec.prompts`, sets the session title, or opens the prompt→agent-message latency window at this call (`usage-parsers.mjs:832`); every `user_message`/`UserMessage` still gets a turn row either way, kind: 'context' instead of `'prompt'` when gated out (`:842`) — mirroring how a Claude harness-origin `user` entry is kept, not dropped (§3.2). Deliberately narrow: exact-twin cross-host dedup by flush timestamp is a recorded follow-up, not attempted here |
+| `event_msg` → `item_completed` → `CommandExecution`, `McpToolCall`, `FileChange`, `CollabAgentToolCall` | The four item kinds tallied as tool invocations, keyed by their own Codex names (`CODEX_TOOL_ITEM_TYPES`, `usage-parsers.mjs:887`, tallied at this call: "CODEX_TOOL_ITEM_TYPES.has(decoded.unknownItemType)" — `usage-parsers.mjs:916-917`) |
 
 The parser normalizes both message generations into the same prompt/response
 turn model. Unknown `item_completed` item types are ignored for those metrics
@@ -310,9 +310,9 @@ transcript content leaves the module, and every step is a gate:
 ### 4.1 Locate, contain, bound
 
 1. **Id grammar before any filesystem access** — an id must match one of
-   exactly two shapes, or it is rejected with `ERR_INVALID_SESSION_ID`
-   (`invalidId`, `usage-index.mjs:950`) before any read happens:
-   * VALID_ID ("VALID_ID = /^[A-Za-z0-9._-]{1,128}$/", `usage-index.mjs:152`) — a plain
+   exactly two shapes, or it is rejected with `ERR_INVALID_SESSION_ID` at
+   this call: `invalidId(id)` (`usage-index.mjs:964`) before any read happens:
+   * `VALID_ID` (`/^[A-Za-z0-9._-]{1,128}$/`, `usage-index.mjs:152`) — a plain
      session id;
    * `VALID_SUBAGENT_ID` (`usage-index.mjs:168`) — a namespaced nested
      subagent id, EXACTLY `<parentId>/<stem>` with one slash, where the parent
@@ -323,10 +323,11 @@ transcript content leaves the module, and every step is a gate:
 2. **Locate by id** across both roots (`locate`, `usage-index.mjs:897-916`),
    consulting the scan cache when present but never requiring it —
    `readSession` works with no prior buildIndex. A namespaced id resolves
-   through locateSubagent ("return locateSubagent(nested.parentId,", `usage-index.mjs:914`), which builds the
+   through this call: `locateSubagent(nested.parentId, nested.stem, r.claude, id)`
+   (`usage-index.mjs:914`), which builds the
    nested path from the two **already-validated capture groups** rather than
    from raw request text.
-3. **Realpath containment** (`usage-index.mjs:905-919`) — the resolved file
+3. **Realpath containment** (`usage-index.mjs:988-1001`) — the resolved file
    must live under a transcript root *after* `realpathSync` collapses
    symlinks; a symlink planted inside a root pointing at `/etc/anything`
    passes a lexical `startsWith` but fails this. Roots are realpath'd too so
@@ -358,9 +359,9 @@ never renames a retained session model, changes historical token pricing, or rew
 
 Every turn body is passed through `maskSecrets` (`usage-aggregate.mjs:142-147` — the
 23 secret shapes) **server-side, before
-serialization**, then length-capped at MAX_TURN_CHARS (40,000,
-"MAX_TURN_CHARS", `usage-aggregate.mjs:72`) with the marker appended
-(`usage-aggregate.mjs:1300-1309`). Two invariants:
+serialization**, then length-capped at `MAX_TURN_CHARS` (40,000,
+`usage-aggregate.mjs:72`) with the marker appended at the truncation call
+("originalChars is measured", `usage-aggregate.mjs:1300-1309`). Two invariants:
 
 * **Presence is the signal.** `truncated`/`originalChars` are emitted only
   when the slice fired, so a complete turn cannot be misread as abridged.
@@ -519,8 +520,8 @@ was wrong before, for the curious.
 * **Transcript header once showed a hardcoded `$0.00`.** `readSession`'s
   assembled `meta` left cost undefined, and `fmtUsd(undefined)` renders the
   truthy string `"$0.00"` — a fixed-looking zero on a panel whose whole
-  subject is cost. `meta.cost` is now priced via `sessionCost()` from the
-  same per-model usage rows `aggregate()` uses (`usage-aggregate.mjs:1274`).
+  subject is cost. `meta.cost` is now priced via this call: `sessionCost(rec, deps)`
+  (`usage-aggregate.mjs:1300`) — over the same per-model usage rows aggregate() reads.
 * **Aggregate-side incidents** (the v4/v5 cache bumps, the Codex parsing
   defects) are recorded in `USAGE-SCORECARD-METRICS.md` Appendix A.
 
