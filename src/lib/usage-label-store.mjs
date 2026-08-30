@@ -53,7 +53,22 @@ export function defaultLabelStorePath() {
 }
 
 function blankStore() {
-  return { version: LABEL_STORE_SCHEMA_VERSION, labels: {}, cards: {} };
+  return {
+    version: LABEL_STORE_SCHEMA_VERSION, labels: {}, cards: {}, lastSynthesis: null,
+  };
+}
+
+/** One stored `lastSynthesis` record, or `null` if malformed — the same
+ *  drop-not-fabricate discipline as a label/card entry. Fix round 1, I-1(a):
+ *  records the findingsSummary hash and timestamp of the last pass that
+ *  ACTUALLY called `synthesizeCards` (never a skipped one — see
+ *  usage/enrich.mjs's runEnrichPass), so a later pass can tell "nothing has
+ *  moved since we last asked" without an invocation. */
+function sanitizedLastSynthesis(value) {
+  if (!value || typeof value !== 'object') return null;
+  if (typeof value.findingsHash !== 'string' || !value.findingsHash) return null;
+  if (typeof value.at !== 'string' || !value.at) return null;
+  return { findingsHash: value.findingsHash, at: value.at };
 }
 
 /**
@@ -69,7 +84,12 @@ export function isValidLabelName(name) {
   const trimmed = name.trim();
   if (!trimmed) return false;
   if (trimmed.length > MAX_LABEL_NAME_CHARS) return false;
-  return !/[\r\n]/.test(name);
+  // Fix round 1, M-2: newline-checked against the TRIMMED name, matching the
+  // length check above — every caller stores `.trim()`'d text (enrichLabels'
+  // `item.name.trim()`), so a name like "Release ritual\n" (a trailing
+  // newline a trim already removes) must not be rejected on the raw string
+  // alone; a newline INSIDE the trimmed text still fails, correctly.
+  return !/[\r\n]/.test(trimmed);
 }
 
 /** No embedded newline — the one invariant every free-text CARD field is held
@@ -127,8 +147,10 @@ function sanitizedCardEntry(entry) {
  * @typedef {{ name: string, source: string, firstSeen: string|null }} LabelEntry
  * @typedef {{ title: string, finding: string, try: string, basis: string,
  *   basisNumbers: number[], evidenceHash: string, generatedAt: string }} CardEntry
+ * @typedef {{ findingsHash: string, at: string }} LastSynthesis
  * @typedef {{ version: number, labels: Record<string, LabelEntry>,
- *   cards: Record<string, CardEntry>, future?: true }} LabelStore
+ *   cards: Record<string, CardEntry>, lastSynthesis: LastSynthesis|null,
+ *   future?: true }} LabelStore
  *
  * @param {string} filePath
  * @returns {LabelStore}
@@ -145,12 +167,19 @@ export function loadLabelStore(filePath) {
     && raw.labels && typeof raw.labels === 'object' && !Array.isArray(raw.labels)
     && raw.cards && typeof raw.cards === 'object' && !Array.isArray(raw.cards);
   if (!wellFormed) return blankStore();
+  // `lastSynthesis` is optional on read — a store written before this field
+  // existed has none, which reads as "never synthesized", correctly forcing
+  // the first --enrich after an upgrade to run synthesis once rather than
+  // assuming a hash match it never actually recorded.
+  const lastSynthesis = sanitizedLastSynthesis(raw.lastSynthesis);
   if (raw.version === LABEL_STORE_SCHEMA_VERSION) {
-    return { version: raw.version, labels: raw.labels, cards: raw.cards };
+    return {
+      version: raw.version, labels: raw.labels, cards: raw.cards, lastSynthesis,
+    };
   }
   if (raw.version > LABEL_STORE_SCHEMA_VERSION) {
     return {
-      version: raw.version, labels: raw.labels, cards: raw.cards, future: true,
+      version: raw.version, labels: raw.labels, cards: raw.cards, lastSynthesis, future: true,
     };
   }
   return blankStore();
@@ -170,7 +199,8 @@ export function loadLabelStore(filePath) {
  * contract runPrompts already honors for the outcome ledger).
  *
  * @param {string} filePath
- * @param {{ version: number, labels: Record<string, object>, cards: Record<string, object> }} store
+ * @param {{ version: number, labels: Record<string, object>, cards: Record<string, object>,
+ *   lastSynthesis?: object|null }} store
  */
 export function saveLabelStore(filePath, store) {
   const labels = Object.create(null);
@@ -183,7 +213,10 @@ export function saveLabelStore(filePath, store) {
     const sanitized = sanitizedCardEntry(entry);
     if (sanitized) cards[id] = sanitized;
   }
-  const next = { version: LABEL_STORE_SCHEMA_VERSION, labels, cards };
+  const lastSynthesis = sanitizedLastSynthesis(store?.lastSynthesis);
+  const next = {
+    version: LABEL_STORE_SCHEMA_VERSION, labels, cards, lastSynthesis,
+  };
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
   const tmp = `${filePath}.${process.pid}.tmp`;
   fs.writeFileSync(tmp, JSON.stringify(next, null, 2), { mode: 0o600 });

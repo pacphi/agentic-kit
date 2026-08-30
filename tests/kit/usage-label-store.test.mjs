@@ -33,14 +33,18 @@ test('defaultLabelStorePath sits beside the usage-index cache path convention (s
 test('a fresh/missing store loads at the current schema version with empty labels and cards', () => {
   const file = tmpFile();
   const store = loadLabelStore(file);
-  assert.deepEqual(store, { version: LABEL_STORE_SCHEMA_VERSION, labels: {}, cards: {} });
+  assert.deepEqual(store, {
+    version: LABEL_STORE_SCHEMA_VERSION, labels: {}, cards: {}, lastSynthesis: null,
+  });
 });
 
 test('a corrupt/unparseable file loads as blank — safe to overwrite, nothing recoverable', () => {
   const file = tmpFile();
   fs.writeFileSync(file, '{not valid json at all');
   const store = loadLabelStore(file);
-  assert.deepEqual(store, { version: LABEL_STORE_SCHEMA_VERSION, labels: {}, cards: {} });
+  assert.deepEqual(store, {
+    version: LABEL_STORE_SCHEMA_VERSION, labels: {}, cards: {}, lastSynthesis: null,
+  });
   assert.equal(store.future, undefined);
 });
 
@@ -48,7 +52,9 @@ test('a recognizable but malformed file (no labels/cards objects) also reads as 
   const file = tmpFile();
   fs.writeFileSync(file, JSON.stringify({ version: LABEL_STORE_SCHEMA_VERSION, labels: 'nope' }));
   const store = loadLabelStore(file);
-  assert.deepEqual(store, { version: LABEL_STORE_SCHEMA_VERSION, labels: {}, cards: {} });
+  assert.deepEqual(store, {
+    version: LABEL_STORE_SCHEMA_VERSION, labels: {}, cards: {}, lastSynthesis: null,
+  });
   assert.equal(store.future, undefined);
 });
 
@@ -63,11 +69,24 @@ test('loadLabelStore reads the CURRENT version normally, with no future flag', (
         basisNumbers: [3], evidenceHash: 'a'.repeat(16), generatedAt: '2026-08-01T00:00:00.000Z',
       },
     },
+    lastSynthesis: { findingsHash: 'd'.repeat(16), at: '2026-08-01T00:00:00.000Z' },
   };
   fs.writeFileSync(file, JSON.stringify(seeded));
   const store = loadLabelStore(file);
   assert.deepEqual(store, seeded);
   assert.equal(store.future, undefined);
+});
+
+test('loadLabelStore reads a store written before lastSynthesis existed as lastSynthesis: null, not a crash', () => {
+  const file = tmpFile();
+  fs.writeFileSync(file, JSON.stringify({
+    version: LABEL_STORE_SCHEMA_VERSION,
+    labels: { abc123: { name: 'Pre-upgrade label', source: 'enriched', firstSeen: '2026-01-01T00:00:00.000Z' } },
+    cards: {},
+  }));
+  const store = loadLabelStore(file);
+  assert.equal(store.lastSynthesis, null);
+  assert.deepEqual(Object.keys(store.labels), ['abc123'], 'pre-existing labels survive the upgrade untouched');
 });
 
 test('loadLabelStore reports a well-formed FUTURE version distinctly from a corrupt one, and never destroys it', () => {
@@ -104,9 +123,30 @@ test('saveLabelStore overwrites a prior version cleanly (round-trips through loa
     version: LABEL_STORE_SCHEMA_VERSION,
     labels: { k1: { name: 'Named cluster', source: 'enriched', firstSeen: '2026-08-01T00:00:00.000Z' } },
     cards: {},
+    lastSynthesis: null,
   };
   saveLabelStore(file, next);
   assert.deepEqual(loadLabelStore(file), next);
+});
+
+// Fix round 1, I-1(a): lastSynthesis round-trips, and a malformed one is
+// dropped to null rather than persisted — the same drop-not-fabricate
+// discipline every other entry in this store gets.
+test('saveLabelStore round-trips a real lastSynthesis record', () => {
+  const file = tmpFile();
+  const record = { findingsHash: 'e'.repeat(16), at: '2026-08-30T00:00:00.000Z' };
+  saveLabelStore(file, {
+    version: LABEL_STORE_SCHEMA_VERSION, labels: {}, cards: {}, lastSynthesis: record,
+  });
+  assert.deepEqual(loadLabelStore(file).lastSynthesis, record);
+});
+
+test('saveLabelStore drops a malformed lastSynthesis (missing findingsHash/at) to null rather than persisting garbage', () => {
+  const file = tmpFile();
+  saveLabelStore(file, {
+    version: LABEL_STORE_SCHEMA_VERSION, labels: {}, cards: {}, lastSynthesis: { findingsHash: 'only-one-field' },
+  });
+  assert.equal(loadLabelStore(file).lastSynthesis, null);
 });
 
 test('saveLabelStore creates its parent directory when it does not exist yet', () => {
@@ -133,6 +173,18 @@ test('isValidLabelName rejects empty, whitespace-only, oversize, or newline-bear
   assert.equal(isValidLabelName(null), false);
   assert.equal(isValidLabelName(undefined), false);
   assert.equal(isValidLabelName(42), false, 'not even a string');
+});
+
+// Fix round 1, M-2: the length check already reads `trimmed`; the newline
+// check must too, or a name whose ONLY newline is leading/trailing
+// whitespace a trim would remove anyway (what every caller actually stores —
+// enrichLabels' `item.name.trim()`) is rejected for whitespace that will
+// never reach disk. A newline INSIDE the trimmed text must still fail.
+test('isValidLabelName is consistent about trimming: a leading/trailing newline is fine, an interior one is not', () => {
+  assert.equal(isValidLabelName('Release ritual\n'), true, 'a trailing newline a trim removes must not fail validation');
+  assert.equal(isValidLabelName('\nRelease ritual'), true, 'same for a leading one');
+  assert.equal(isValidLabelName('  Release ritual\n  '), true, 'surrounding whitespace plus a trailing newline');
+  assert.equal(isValidLabelName('Release\nritual'), false, 'an interior newline survives trimming and must still fail');
 });
 
 // ── INVARIANT (test-pinned, brief W5 deliverable 3): no label value ever

@@ -101,10 +101,22 @@ function parseJsonArray(text) {
  *  (`usage-aggregate.mjs`'s `promptClusterRow`) after the caller has already
  *  re-resolved it against the real store (`withStoreLabel`) — a cluster with
  *  a settled label reads `label.source` as 'curated'/'enriched', not
- *  'characterized', so filtering on 'characterized' alone is the delta. */
-function labelCandidates(clusters) {
+ *  'characterized', so filtering on 'characterized' alone is the delta.
+ *
+ *  Fix round 1, I-6: `store` is also checked directly here (`!store?.[c.key]`)
+ *  — belt AND suspenders, matching the module's own stated posture of not
+ *  trusting a caller absolutely on a load-bearing boundary (the same
+ *  reasoning `maskedExemplarsFor` already applies to the privacy split). The
+ *  caller-side `withStoreLabel` application stays the primary mechanism
+ *  (`label.source` reflects the real resolution, including seed/curated
+ *  precedence this function has no way to reconstruct from `store` alone);
+ *  this is a second, independent check that can never disagree with it for a
+ *  settled key, and catches the case where a caller passes a real store
+ *  without having applied it to `clusters` first. */
+function labelCandidates(clusters, store) {
   return (Array.isArray(clusters) ? clusters : [])
-    .filter((c) => c?.label?.source === 'characterized' && Number(c.count) >= MIN_CANDIDATE_COUNT);
+    .filter((c) => c?.label?.source === 'characterized' && Number(c.count) >= MIN_CANDIDATE_COUNT
+      && !store?.[c.key]);
 }
 
 /** Masked, capped exemplar snippets for one cluster — the ≤2-per-cluster,
@@ -141,16 +153,18 @@ function buildLabelPrompt(candidates, exemplarsByKey) {
  *   store: Record<string, object>, invoke: (prompt: string) => Promise<string>,
  *   now: number }} input
  * @returns {Promise<{ entries: Record<string, {name: string, source: 'enriched', firstSeen: string}>,
- *   candidates: string[], labeled: number, dropped: number }>}
+ *   candidates: string[], labeled: number,
+ *   dropped: { unknownKey: number, duplicateKey: number, invalidName: number } }>}
  */
 export async function enrichLabels({
-  clusters, exemplarsByKey, store: _store, invoke, now,
+  clusters, exemplarsByKey, store, invoke, now,
 }) {
-  const candidateRows = labelCandidates(clusters);
+  const candidateRows = labelCandidates(clusters, store);
   const candidateKeys = candidateRows.map((c) => c.key);
+  const dropped = { unknownKey: 0, duplicateKey: 0, invalidName: 0 };
   if (!candidateRows.length) {
     return {
-      entries: {}, candidates: [], labeled: 0, dropped: 0,
+      entries: {}, candidates: [], labeled: 0, dropped,
     };
   }
 
@@ -160,13 +174,19 @@ export async function enrichLabels({
 
   const entries = {};
   const seen = new Set();
-  let dropped = 0;
   for (const item of parsed) {
     const key = item && typeof item.key === 'string' ? item.key : null;
-    if (!key || !askedKeys.has(key) || seen.has(key)) { dropped++; continue; }
-    if (!isValidLabelName(item.name)) { dropped++; continue; }
+    if (!key || !askedKeys.has(key)) { dropped.unknownKey++; continue; }
+    if (seen.has(key)) { dropped.duplicateKey++; continue; }
+    // Fix round 1, I-7: the model's OUTPUT is masked defensively, same as its
+    // input already was (`maskedExemplarsFor`) — a model asked to "name this
+    // cluster based on the sample" can legitimately echo the sample back,
+    // which for this corpus's short tap clusters comfortably fits under 48
+    // characters and would otherwise persist raw prompt text at rest.
+    const masked = maskSecrets(String(item?.name ?? ''));
+    if (!isValidLabelName(masked)) { dropped.invalidName++; continue; }
     seen.add(key);
-    entries[key] = { name: item.name.trim(), source: 'enriched', firstSeen: new Date(now).toISOString() };
+    entries[key] = { name: masked.trim(), source: 'enriched', firstSeen: new Date(now).toISOString() };
   }
 
   return {
@@ -247,6 +267,24 @@ function numbersInSummary(summary) {
 }
 
 /**
+ * Fix round 1, I-1(a): a hash of the WHOLE findingsSummary — "has anything
+ * about current findings moved at all since the last time synthesis
+ * actually ran" — distinct from `citedEvidenceHash`'s per-card question
+ * ("has the evidence THIS card cited moved"). The caller
+ * (usage/enrich.mjs's `runEnrichPass`) records this alongside `lastSynthesis`
+ * and skips a NEW `synthesizeCards` call when it is unchanged AND no stored
+ * card reads stale — new evidence (a cluster crossing the candidate floor,
+ * a count moving) is exactly what would move this hash, so "unchanged" is a
+ * real claim that nothing worth asking about again has appeared.
+ *
+ * @param {object} findingsSummary
+ * @returns {string}
+ */
+export function findingsSummaryHash(findingsSummary) {
+  return evidenceHash(findingsSummary ?? {});
+}
+
+/**
  * "The hash of the findingsSummary slice [a card] cites" (spec §6.3): the
  * subset of `basisNumbers` that is ACTUALLY present in `findingsSummary`,
  * hashed. At synthesis time (after the anti-fabrication gate has already
@@ -297,7 +335,48 @@ export function isCardStale(card, findingsSummary) {
 
 // ── synthesizeCards ──────────────────────────────────────────────────────
 
-function buildCardPrompt(findingsSummary) {
+/** Fix round 1, I-1(c): the prompt's OWN view of `findingsSummary.clusters`
+ *  is capped to the top-N by count. Measured on this machine's real corpus,
+ *  458 clusters cost ~21K tokens (~83 KB) on EVERY `--enrich`, and that is
+ *  the whole retained corpus, not "current findings" a synthesis pass needs
+ *  to reason about. This caps only what the model is SHOWN — the gate below
+ *  (`numbersInSummary`) still validates every returned number against the
+ *  FULL, uncapped `findingsSummary`, never this display-only slice, so a
+ *  response citing a number from cluster #41 is still checked for truth,
+ *  just never offered as something to name. `citedEvidenceHash` (used for
+ *  the stored evidenceHash and every later staleness check) ALSO always
+ *  reads the full summary, so a card's frozen hash and a later fresh one are
+ *  computed the same way regardless of how many clusters synthesis was
+ *  shown the day it was written — capping the prompt cannot manufacture a
+ *  false staleness signal. */
+const MAX_SYNTHESIS_CLUSTERS = 40;
+
+function cappedClustersFor(findingsSummary) {
+  const clusters = Array.isArray(findingsSummary?.clusters) ? findingsSummary.clusters : [];
+  if (clusters.length <= MAX_SYNTHESIS_CLUSTERS) return clusters;
+  return [...clusters]
+    .sort((a, b) => (Number(b.count) || 0) - (Number(a.count) || 0))
+    .slice(0, MAX_SYNTHESIS_CLUSTERS);
+}
+
+/** Fix round 1, I-1(b): existing enriched cards are named explicitly so the
+ *  model does not re-propose the same suggestion under a different slug —
+ *  live-run evidence: `enriched-reduce-large-prompt-retyping` and
+ *  `enriched-template-large-repeated-prompt` are the same suggestion twice,
+ *  different ids, both on disk. This is a best-effort steer, not a
+ *  guarantee (the model can still restate an idea under new-enough wording);
+ *  the mechanical, deterministic backstop is the id-collision drop below. */
+function buildCardPrompt(findingsSummary, existingCards) {
+  const totalClusters = Array.isArray(findingsSummary?.clusters) ? findingsSummary.clusters.length : 0;
+  const displaySummary = { ...findingsSummary, clusters: cappedClustersFor(findingsSummary) };
+  const clusterNote = totalClusters > MAX_SYNTHESIS_CLUSTERS
+    ? `\n\n(showing the top ${MAX_SYNTHESIS_CLUSTERS} of ${totalClusters} clusters by count — every number `
+      + 'above still belongs to the full corpus, not only what is listed here)'
+    : '';
+  const doNotDuplicate = (existingCards ?? []).length
+    ? '\n\nDo NOT propose a suggestion that duplicates any of these existing ones, by id or by '
+      + 'substance:\n' + existingCards.map((c) => `- ${c.id}: "${c.title}"`).join('\n')
+    : '';
   return 'You are proposing coaching suggestions for a developer, based ONLY on the aggregate '
     + 'numbers below — no prompt text was shared with you, and you must not imply that any was. '
     + 'Propose 0 to 3 NEW suggestions that are not obvious duplicates of standard advice. Every '
@@ -306,8 +385,7 @@ function buildCardPrompt(findingsSummary) {
     + 'number your suggestion is grounded in. Respond with ONLY a JSON array, no prose before or '
     + 'after it, in this exact shape:\n'
     + '[{"id":"kebab-case-slug","title":"...","finding":"...","try":"...","basis":"...",'
-    + '"basisNumbers":[...]}]\n\n'
-    + `Data:\n${JSON.stringify(findingsSummary, null, 2)}`;
+    + `"basisNumbers":[...]}]${doNotDuplicate}\n\nData:\n${JSON.stringify(displaySummary, null, 2)}${clusterNote}`;
 }
 
 function isSingleLineNonEmpty(value) {
@@ -316,18 +394,22 @@ function isSingleLineNonEmpty(value) {
 
 /**
  * @param {{ findingsSummary: object, invoke: (prompt: string) => Promise<string>,
- *   now: number }} input
+ *   now: number, existingCards?: Array<{ id: string, title: string }> }} input
  * @returns {Promise<{ cards: Array<{ id: string, title: string, finding: string, try: string,
  *   basis: string, basisNumbers: number[], source: 'enriched', evidenceHash: string,
  *   generatedAt: string }>, proposed: number, accepted: number, dropped: Record<string, number> }>}
  */
-export async function synthesizeCards({ findingsSummary, invoke, now }) {
-  const raw = await invoke(buildCardPrompt(findingsSummary));
+export async function synthesizeCards({
+  findingsSummary, invoke, now, existingCards,
+}) {
+  const existing = Array.isArray(existingCards) ? existingCards : [];
+  const existingIds = new Set(existing.map((c) => c.id));
+  const raw = await invoke(buildCardPrompt(findingsSummary, existing));
   const parsed = parseJsonArray(raw);
   const summaryNumbers = numbersInSummary(findingsSummary);
 
   const dropped = {
-    badId: 0, badText: 0, noBasis: 0, unmatchedNumber: 0, duplicateId: 0,
+    badId: 0, badText: 0, noBasis: 0, unmatchedNumber: 0, duplicateId: 0, duplicateOfExisting: 0,
   };
   const cards = [];
   const seenIds = new Set();
@@ -339,6 +421,11 @@ export async function synthesizeCards({ findingsSummary, invoke, now }) {
     const slug = typeof item.id === 'string' ? item.id : '';
     if (!CARD_ID_SLUG_RE.test(slug)) { dropped.badId++; continue; }
     if (seenIds.has(slug)) { dropped.duplicateId++; continue; }
+    // Fix round 1, I-1(b): the mechanical backstop for the do-not-duplicate
+    // ask above — a returned id that collides with an id already on disk is
+    // dropped outright, categorized separately from an in-response duplicate
+    // (`duplicateId`) so the CLI summary can say which happened.
+    if (existingIds.has(`${ENRICHED_ID_PREFIX}${slug}`)) { dropped.duplicateOfExisting++; continue; }
 
     if (!CARD_TEXT_FIELDS.every((field) => isSingleLineNonEmpty(item[field]))) { dropped.badText++; continue; }
 

@@ -72,6 +72,23 @@ test('a cluster with ANY store entry (curated or enriched) is never sent, even i
   assert.equal(invoked, false, 'settled labels are never re-judged — invoke must not even be called');
 });
 
+// Fix round 1, I-6: the engine no longer trusts the caller absolutely on the
+// delta-only boundary — `store` is checked directly, belt-and-suspenders
+// alongside the caller's own `withStoreLabel` application (which the test
+// above already covers as the primary mechanism). This proves the SECOND,
+// independent check: a settled key is excluded even when `clusters` was
+// handed in WITHOUT `withStoreLabel` having been applied first — i.e. the
+// row still literally reads `label.source: 'characterized'`.
+test('a store entry excludes its cluster even when the caller never applied withStoreLabel first', async () => {
+  const row = cluster({ key: 'unresolved-but-settled', count: 40 }); // label.source is STILL 'characterized'
+  const store = { 'unresolved-but-settled': { name: 'Already named', source: 'curated', firstSeen: '2026-01-01T00:00:00.000Z' } };
+  let invoked = false;
+  const invoke = async () => { invoked = true; return '[]'; };
+  const result = await enrichLabels({ clusters: [row], exemplarsByKey: {}, store, invoke, now: NOW });
+  assert.equal(result.candidates.length, 0, 'the store param alone must exclude a settled key');
+  assert.equal(invoked, false);
+});
+
 test('zero candidates never calls invoke at all', async () => {
   let invoked = false;
   const invoke = async () => { invoked = true; return '[]'; };
@@ -94,7 +111,7 @@ test('a well-formed response labels every candidate it names', async () => {
     k2: { name: 'Progress check-in', source: 'enriched', firstSeen: new Date(NOW).toISOString() },
   });
   assert.equal(result.labeled, 2);
-  assert.equal(result.dropped, 0);
+  assert.deepEqual(result.dropped, { unknownKey: 0, duplicateKey: 0, invalidName: 0 });
 });
 
 test('malformed JSON in the response yields zero entries, not a throw', async () => {
@@ -116,7 +133,9 @@ test('a name outside 1..48 trimmed chars is dropped', async () => {
   const exemplarsByKey = Object.fromEntries(clusters.map((c) => [c.key, ['x']]));
   const result = await enrichLabels({ clusters, exemplarsByKey, store: {}, invoke, now: NOW });
   assert.deepEqual(Object.keys(result.entries), ['k4']);
-  assert.equal(result.dropped, 3);
+  assert.equal(result.dropped.invalidName, 3, `all 3 rejections are invalid-name shape failures: ${JSON.stringify(result.dropped)}`);
+  assert.equal(result.dropped.unknownKey, 0);
+  assert.equal(result.dropped.duplicateKey, 0);
 });
 
 test('a newline in the name is dropped — newline injection', async () => {
@@ -124,7 +143,7 @@ test('a newline in the name is dropped — newline injection', async () => {
   const clusters = [cluster({ key: 'k1' })];
   const result = await enrichLabels({ clusters, exemplarsByKey: { k1: ['x'] }, store: {}, invoke, now: NOW });
   assert.deepEqual(result.entries, {});
-  assert.equal(result.dropped, 1);
+  assert.equal(result.dropped.invalidName, 1);
 });
 
 test('a response naming a key that was never asked about is dropped', async () => {
@@ -135,7 +154,22 @@ test('a response naming a key that was never asked about is dropped', async () =
   const clusters = [cluster({ key: 'k1' })];
   const result = await enrichLabels({ clusters, exemplarsByKey: { k1: ['x'] }, store: {}, invoke, now: NOW });
   assert.deepEqual(Object.keys(result.entries), ['k1']);
-  assert.equal(result.dropped, 1);
+  assert.equal(result.dropped.unknownKey, 1, `an unrecognized key must be categorized unknownKey: ${JSON.stringify(result.dropped)}`);
+});
+
+// Fix round 1, M-1: categorized drop counts, root-causing what the report's
+// concern #1 could not — a response naming the SAME key twice.
+test('a response naming the same key twice is categorized duplicateKey, only the first kept', async () => {
+  const invoke = async () => JSON.stringify([
+    { key: 'k1', name: 'First name' },
+    { key: 'k1', name: 'Second name' },
+  ]);
+  const clusters = [cluster({ key: 'k1' })];
+  const result = await enrichLabels({ clusters, exemplarsByKey: { k1: ['x'] }, store: {}, invoke, now: NOW });
+  assert.equal(result.entries.k1.name, 'First name');
+  assert.equal(result.dropped.duplicateKey, 1);
+  assert.equal(result.dropped.unknownKey, 0);
+  assert.equal(result.dropped.invalidName, 0);
 });
 
 test('a name is trimmed before it is stored', async () => {
@@ -177,6 +211,26 @@ test('exemplar text is masked before it reaches the prompt, even if the caller f
   await enrichLabels({ clusters, exemplarsByKey: { k1: [`my key is ${secret}`] }, store: {}, invoke, now: NOW });
   assert.doesNotMatch(seenPrompt, new RegExp(secret), 'a raw secret must never reach the prompt, defensively remasked');
 });
+
+// Fix round 1, I-7: input masking (the test above) was solid; OUTPUT masking
+// was not — a model asked to "name this cluster" can legitimately echo the
+// sample text back, and nothing re-masked its answer before it was stored.
+test('a secret echoed back in the PROPOSED NAME is masked before it is stored, not just the exemplar it came from', async () => {
+  const secret = 'sk-ant-api03-abcdefghijklmnopqrstuvwxyz0123456789ABCDEFGHIJKLMNOPQR';
+  const invoke = async () => JSON.stringify([{ key: 'k1', name: `Key is ${secret}` }]);
+  const clusters = [cluster({ key: 'k1' })];
+  const result = await enrichLabels({ clusters, exemplarsByKey: { k1: ['unrelated exemplar'] }, store: {}, invoke, now: NOW });
+  assert.doesNotMatch(JSON.stringify(result.entries), new RegExp(secret),
+    'the model\'s OUTPUT must be masked defensively, exactly like its input');
+});
+
+// The full ADVERSARIAL echo-shim scenario the review names (a shim that
+// echoes its OWN prompt back, RELEASE_PHRASINGS/FIXTURE_SECRET, the real CLI
+// pipeline end to end, the on-disk store AND the --enrich --json payload) is
+// a CLI-level concern — see tests/kit/usage-cli.test.mjs. The masking test
+// directly above is this property's unit-level pin: whatever the model
+// returns in `name`, masked before it is ever stored, independent of
+// whether it came from an echoed exemplar or was invented outright.
 
 // ── coaching synthesis: anti-fabrication gate (LOAD-BEARING) ───────────────
 
@@ -225,6 +279,33 @@ test('LOAD-BEARING: a mix of real and fabricated numbers in ONE field still drop
   }]);
   const result = await synthesizeCards({ findingsSummary: FINDINGS_SUMMARY, invoke, now: NOW });
   assert.equal(result.cards.length, 0, 'one fabricated number anywhere in finding/try/basis voids the whole card');
+});
+
+// Fix round 1, I-2: mutation-tested by the review — narrowing
+// CARD_FABRICATION_FIELDS to ['finding'] alone left the WHOLE suite green,
+// because every existing gate test plants its fabricated number in
+// `finding` or in `basisNumbers`. Nothing exercised `try` or `basis` in
+// isolation. Live evidence this is not hypothetical: the real verification
+// run's card 1 put its numbers in `basis` alone ("three separate
+// 6-count/6-session/1-day variants").
+test('LOAD-BEARING (I-2): a fabricated number appearing ONLY in "try" still drops the card', async () => {
+  const invoke = async () => JSON.stringify([{
+    id: 'try-only-fabrication', title: 'Title', finding: 'This recurred 13 times.',
+    try: 'Consider the 777 other instances too.', basis: '13 recurrences.', basisNumbers: [13],
+  }]);
+  const result = await synthesizeCards({ findingsSummary: FINDINGS_SUMMARY, invoke, now: NOW });
+  assert.equal(result.cards.length, 0, 'a fabricated number in "try" alone must still void the card');
+  assert.ok(result.dropped.unmatchedNumber >= 1, `expected unmatchedNumber, got ${JSON.stringify(result.dropped)}`);
+});
+
+test('LOAD-BEARING (I-2): a fabricated number appearing ONLY in "basis" still drops the card', async () => {
+  const invoke = async () => JSON.stringify([{
+    id: 'basis-only-fabrication', title: 'Title', finding: 'This recurred 13 times.',
+    try: 'Fix it.', basis: '13 recurrences, plus 42 related incidents.', basisNumbers: [13],
+  }]);
+  const result = await synthesizeCards({ findingsSummary: FINDINGS_SUMMARY, invoke, now: NOW });
+  assert.equal(result.cards.length, 0, 'a fabricated number in "basis" alone must still void the card');
+  assert.ok(result.dropped.unmatchedNumber >= 1, `expected unmatchedNumber, got ${JSON.stringify(result.dropped)}`);
 });
 
 test('a basisNumbers entry not present in findingsSummary drops the card even if finding/try/basis text is clean', () => {
@@ -298,6 +379,68 @@ test('more than 3 accepted candidates are capped at 3, deterministically (first 
   const result = await synthesizeCards({ findingsSummary: FINDINGS_SUMMARY, invoke, now: NOW });
   assert.equal(result.cards.length, 3);
   assert.deepEqual(result.cards.map((c) => c.id), ['enriched-card-0', 'enriched-card-1', 'enriched-card-2']);
+});
+
+// ── Fix round 1, I-1(b): the do-not-duplicate list ─────────────────────────
+
+test('existing card ids/titles are named explicitly in the prompt as a do-not-duplicate list', async () => {
+  let seenPrompt = '';
+  const invoke = async (p) => { seenPrompt = p; return '[]'; };
+  await synthesizeCards({
+    findingsSummary: FINDINGS_SUMMARY, invoke, now: NOW,
+    existingCards: [{ id: 'enriched-existing-one', title: 'An existing suggestion' }],
+  });
+  assert.match(seenPrompt, /Do NOT propose/i);
+  assert.match(seenPrompt, /enriched-existing-one/);
+  assert.match(seenPrompt, /An existing suggestion/);
+});
+
+test('a card whose id collides with an EXISTING stored card is dropped, categorized duplicateOfExisting', async () => {
+  const invoke = async () => JSON.stringify([{
+    id: 'existing-one', title: 'Title', finding: 'This recurred 13 times.',
+    try: 'Fix it.', basis: '13 recurrences.', basisNumbers: [13],
+  }]);
+  const result = await synthesizeCards({
+    findingsSummary: FINDINGS_SUMMARY, invoke, now: NOW,
+    existingCards: [{ id: 'enriched-existing-one', title: 'Already proposed' }],
+  });
+  assert.equal(result.cards.length, 0, 'a returned id colliding with an existing enriched card must be dropped');
+  assert.equal(result.dropped.duplicateOfExisting, 1);
+});
+
+test('no existingCards argument at all behaves exactly like an empty list — no crash, no do-not-duplicate section', async () => {
+  let seenPrompt = '';
+  const invoke = async (p) => { seenPrompt = p; return '[]'; };
+  await synthesizeCards({ findingsSummary: FINDINGS_SUMMARY, invoke, now: NOW });
+  assert.doesNotMatch(seenPrompt, /Do NOT propose/i);
+});
+
+// ── Fix round 1, I-1(c): the prompt's cluster view is capped, the gate is not
+
+test('the prompt shows at most the top-40 clusters by count; a card citing a number from cluster #41 is still validated against the FULL summary', async () => {
+  const manyClusters = Array.from({ length: 45 }, (_v, i) => ({
+    key: `k${i}`, name: null, class: 'other', count: 45 - i, sessions: 1, days: 1,
+  }));
+  const bigSummary = { ...FINDINGS_SUMMARY, clusters: manyClusters };
+  let seenPrompt = '';
+  const invoke = async (p) => {
+    seenPrompt = p;
+    // Cite a number that belongs ONLY to a low-count (capped-out) cluster —
+    // e.g. cluster #44 (index 44, count 1) — to prove the GATE still accepts
+    // it even though the PROMPT never showed that cluster.
+    return JSON.stringify([{
+      id: 'low-count-cluster', title: 'Title', finding: 'One cluster recurred just once.',
+      try: 'Investigate it.', basis: 'Count of 1.', basisNumbers: [1],
+    }]);
+  };
+  const result = await synthesizeCards({ findingsSummary: bigSummary, invoke, now: NOW });
+  // The prompt's displayed data shows only the top 40 by count (45..6), so
+  // the tail counts (5..1) must not appear in a "count": position — they may
+  // coincidentally appear elsewhere (e.g. a `sessions`/`days` value of 1),
+  // which is fine; what matters is the cap note and that the gate still
+  // accepted a card grounded in the untruncated full summary.
+  assert.match(seenPrompt, /top 40 of 45 clusters/);
+  assert.equal(result.cards.length, 1, 'the gate must accept a number from a cluster the PROMPT capped out, because the full summary still contains it');
 });
 
 test('no findings summary text (only exemplar-free counts) is ever echoed as a "text leak" — the gate is numeric only', async () => {
