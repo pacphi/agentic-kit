@@ -316,9 +316,9 @@ function roleLibraryCard(e, now) {
   };
 }
 
-/** Fix round 1, I-7: adoption-by-collapse is opt-in per rule. Spec §6.4's
- *  collapse clause is about "the TARGET CLUSTER's recurrence" — the pattern
- *  the card asks the operator to stop repeating — which is the two cluster
+/** Fix round 1, I-7: adoption-by-collapse is opt-in per rule. The collapse
+ *  clause (METRICS.md §22) is about "the TARGET CLUSTER's recurrence" — the
+ *  pattern the card asks the operator to stop repeating — which is the two cluster
  *  cards and reask-delta (collapsing the re-ask pairs IS the intended
  *  effect of stating acceptance criteria up front). The three
  *  statistic-backed cards (codex-completion-criteria's persona/length

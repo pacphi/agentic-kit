@@ -418,9 +418,10 @@ function buildPromptBaselines(records, { days, now }) {
 }
 
 // ── promptPatterns: the opt-in repetition projection ───────────────────────
-// Spec §3.2 panel 3 and §3.3's CLI. Built HERE, beside buildPromptBaselines,
-// because this is the layer that already reads `records` — and built only when
-// a caller asks (`prompts: true`), exactly as `previous` is.
+// Built HERE, beside buildPromptBaselines (ADR-0039 "The opt-in
+// `promptPatterns` projection"), because this is the layer that already
+// reads `records` — and built only when a caller asks (`prompts: true`),
+// exactly as `previous` is.
 //
 // RAW FINGERPRINTS NEVER GET A PUBLIC ACCESSOR. The fingerprint layer is 2.8 MB
 // on the reference corpus, so shipping it would put it on every dashboard poll,

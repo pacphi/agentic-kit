@@ -595,9 +595,10 @@ function printHostInterplay(agg, win) {
  */
 const CLASS_LABELS = { question: 'question', other: 'other', mixed: 'mixed', unknown: 'unclassified' };
 
-/** Spec §3.1 KPI 4: the share of typed prompts sitting inside a cluster that
- *  recurs. `crossSessionClusters` has already applied the ≥3-sessions-or-≥2-days
- *  filter, so this is a straight sum over what the projection published. */
+/** The "Repeated share" KPI (METRICS.md §21): the share of typed prompts
+ *  sitting inside a cluster that recurs. `crossSessionClusters` has already
+ *  applied the ≥3-sessions-or-≥2-days filter, so this is a straight sum over
+ *  what the projection published. */
 function repeatedShare(clusters, totals) {
   const typed = Number(totals?.typedPrompts) || 0;
   if (!typed) return { prompts: 0, share: null };
@@ -712,8 +713,8 @@ export function promptReport(agg, win) {
 }
 
 // ── the deep pass: exemplar TEXT, re-read on demand ────────────────────────
-// Spec §2.3's F2 pass and the CLI half of the privacy split. The aggregate
-// tier above knows THAT a request was retyped in 22 sessions; it cannot say
+// The CLI half of the privacy split (ADR-0039 "The privacy split"). The
+// aggregate tier above knows THAT a request was retyped in 22 sessions; it cannot say
 // what the request was, because the text was never stored. `deepPass` below
 // re-reads the transcripts to answer that, through the shared
 // exemplar-gathering machinery in ./usage/deep-pass.mjs (promptCacheFile,

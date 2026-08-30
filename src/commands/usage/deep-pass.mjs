@@ -7,8 +7,8 @@
 // this file instead. No behavior changed by this split — every function
 // below is verbatim from usage.mjs, moved as a unit.
 //
-// Spec §2.3's F2 pass and the CLI half of the privacy split. The aggregate
-// tier knows THAT a request was retyped in 22 sessions; it cannot say what
+// The CLI half of the privacy split (ADR-0039 "The privacy split"). The
+// aggregate tier knows THAT a request was retyped in 22 sessions; it cannot say what
 // the request was, because the text was never stored. This machinery
 // re-reads the transcripts to answer that — through the same per-host
 // parsers the scan path uses, so a turn re-fingerprints to the identical `h`

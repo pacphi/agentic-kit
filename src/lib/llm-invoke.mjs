@@ -17,10 +17,10 @@
 // and fix; it is also what makes this module's own tests able to prove "we
 // check the registry's name, not a literal" by swapping in a fake registry.
 //
-// NO SCHEDULED MACHINERY LIVES HERE. Spec §6.5's opt-in periodic digest is a
-// documentation-and-existing-governed-machinery concern (W6); this module
-// exposes exactly one on-demand invocation, called only from the CLI's
-// `--enrich` path.
+// NO SCHEDULED MACHINERY LIVES HERE. The opt-in periodic digest recipe
+// (METRICS.md §20) is a documentation-and-existing-governed-machinery
+// concern (W6); this module exposes exactly one on-demand invocation,
+// called only from the CLI's `--enrich` path.
 import { have, run } from './exec.mjs';
 import { HOST_REGISTRY } from './adapters/index.mjs';
 

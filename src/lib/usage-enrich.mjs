@@ -45,11 +45,12 @@ import { withStoreLabel } from './usage-prompt-vocabulary.mjs';
  *   aggregate this module reads — never the whole `Aggregate` shape
  */
 
-/** Spec §6.3: settled labels are never re-judged. A candidate is a cluster
- *  with NO store entry (label source would be 'curated' or 'enriched' if it
- *  had one — see usage-prompt-vocabulary.mjs's `withStoreLabel`) and NO seed
- *  match either (source would be 'seed'). Only the honest fallback,
- *  'characterized', with enough recurrence to be worth a model call. */
+/** Settled labels are never re-judged (METRICS.md §23). A candidate is a
+ *  cluster with NO store entry (label source would be 'curated' or
+ *  'enriched' if it had one — see usage-prompt-vocabulary.mjs's
+ *  `withStoreLabel`) and NO seed match either (source would be 'seed').
+ *  Only the honest fallback, 'characterized', with enough recurrence to be
+ *  worth a model call. */
 const MIN_CANDIDATE_COUNT = 3;
 
 /** The privacy split's numeric bounds (ADR-0039 "The privacy split"), enforced HERE even
