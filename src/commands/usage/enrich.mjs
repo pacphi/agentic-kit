@@ -73,7 +73,15 @@ function gatherCandidateExemplars({ candidateKeys, win, agg, deps }) {
  *  has decided synthesis will be skipped, saying "about to send a second
  *  call" would itself be the exact kind of overclaim this fix exists to
  *  remove. Ends "described above" (M-3) — nothing was ever literally
- *  "shown". */
+ *  "shown".
+ *
+ *  Security review SEC-1: the closing line used to say only "No prompt text
+ *  leaves this machine beyond what is described above" — true about VOLUME,
+ *  silent about AUTHORSHIP. The snippets come from transcripts on disk, and
+ *  `provenanceOf` is one-directional (an unrecognized machine template falls
+ *  through to `human`), so what is about to be sent is not reliably text the
+ *  operator typed. An operator consenting to send "their own prompts" would
+ *  be consenting to something narrower than what actually goes. */
 function printConsentPreamble({
   candidateCount, snippetCount, synthesisNeeded, describe,
 }) {
@@ -84,7 +92,8 @@ function printConsentPreamble({
     ? 'Also about to send a second call carrying the current findings summary (counts, labels, and '
       + 'shares only — capped to the top 40 clusters by count) for coaching suggestions.'
     : dim('Coaching synthesis is unchanged since the last pass and will be skipped this run.'));
-  info('No prompt text leaves this machine beyond what is described above.');
+  info('No prompt text leaves this machine beyond what is described above. Those snippets are '
+    + 'transcript-derived — they may include text you did not type.');
   info(dim(`Billing: ${describe()}`));
 }
 

@@ -971,8 +971,10 @@ test('ak usage prompts --deep masks secrets on every path text can reach the ter
 // developer PATH — this dev machine, by this session's own project
 // conventions, very likely has a real claude CLI installed somewhere on it.
 
-/** A Node-scripted `claude` shim (no shebang portability concerns): reads its
- *  own `-p <prompt>` argv, and answers ONE of two shapes depending on which
+/** A Node-scripted `claude` shim (no shebang portability concerns): reads the
+ *  prompt from its own STDIN — where the seam now delivers it, so it stays out
+ *  of the process table (security review SEC-7) — and answers ONE of two
+ *  shapes depending on which
  *  of usage-enrich.mjs's two prompts it was asked — labels (extracts every
  *  `key: <hash>` the label prompt lists and proposes a name for each) or
  *  cards (returns an empty array; the anti-fabrication gate is already
@@ -981,7 +983,7 @@ test('ak usage prompts --deep masks secrets on every path text can reach the ter
 function writeClaudeShim(dir, { cardsJson = '[]' } = {}) {
   const bin = path.join(dir, 'claude');
   fs.writeFileSync(bin, `#!/usr/bin/env node
-const prompt = process.argv[3] || '';
+const prompt = require('node:fs').readFileSync(0, 'utf8');
 if (prompt.includes('naming recurring prompt clusters')) {
   const keys = [...prompt.matchAll(/key: ([0-9a-f]+)/g)].map((m) => m[1]);
   process.stdout.write(JSON.stringify(keys.map((key) => ({ key, name: 'Shimmed cluster name' }))));
@@ -1144,7 +1146,7 @@ test('C-1: an AVAILABLE but FAILING claude CLI prints one honest line, exits 0, 
 function writeLabelsSucceedCardsFailShim(dir) {
   const bin = path.join(dir, 'claude');
   fs.writeFileSync(bin, `#!/usr/bin/env node
-const prompt = process.argv[3] || '';
+const prompt = require('node:fs').readFileSync(0, 'utf8');
 if (prompt.includes('naming recurring prompt clusters')) {
   const keys = [...prompt.matchAll(/key: ([0-9a-f]+)/g)].map((m) => m[1]);
   process.stdout.write(JSON.stringify(keys.map((key) => ({ key, name: 'Shimmed cluster name' }))));
@@ -1275,7 +1277,7 @@ test('I-5: the Coaching caption agrees with a stale enriched card rendered direc
 function writeAdversarialLabelShim(dir) {
   const bin = path.join(dir, 'claude');
   fs.writeFileSync(bin, `#!/usr/bin/env node
-const prompt = process.argv[3] || '';
+const prompt = require('node:fs').readFileSync(0, 'utf8');
 if (prompt.includes('naming recurring prompt clusters')) {
   const keys = [...prompt.matchAll(/key: ([0-9a-f]+)/g)].map((m) => m[1]);
   process.stdout.write(JSON.stringify(keys.map((key) => ({ key, name: ${JSON.stringify(FIXTURE_SECRET)} }))));

@@ -83,22 +83,75 @@ test('describe() returns the one-line billing statement', async () => {
 
 // ── invoke() ─────────────────────────────────────────────────────────────────
 
-test('invoke(prompt) spawns claude -p <prompt> --output-format text and returns stdout', async () => {
+test('invoke(prompt) spawns the CLI once and returns its trimmed stdout', async () => {
   const { deps, calls } = mockDeps({ present: true, stdout: '  hello from the model  ' });
   const { invoke } = await makeInvoke({ hosts: FAKE_HOSTS_WITH_CLAUDE, deps });
   const text = await invoke('name these clusters');
   assert.equal(calls.run.length, 1);
   assert.equal(calls.run[0].cmd, 'claude');
-  assert.deepEqual(calls.run[0].args, ['-p', 'name these clusters', '--output-format', 'text']);
   assert.equal(text, 'hello from the model', 'trimmed, but otherwise verbatim');
 });
 
-test('invoke(prompt) passes the prompt as ONE argv element, never through a shell string', async () => {
+// ── SEC-1: the confinement pins ─────────────────────────────────────────────
+// The security review's CRITICAL finding was that this child ran with NO
+// capability restriction at all — in the operator's repo, with every ambient
+// MCP server and the project's pre-approved permission allowlist — while
+// carrying attacker-influenceable transcript text. These tests hardcode the
+// expected argv rather than importing it, so DELETING a flag from the module
+// fails here. In the review's own words, this is exactly the kind of flag that
+// gets dropped while debugging and never restored.
+
+test('invoke() pins every SEC-1 confinement flag, each with the reason it exists', async () => {
+  const { deps, calls } = mockDeps({ present: true, stdout: 'ok' });
+  const { invoke } = await makeInvoke({ hosts: FAKE_HOSTS_WITH_CLAUDE, deps });
+  await invoke('name these clusters');
+  const { args } = calls.run[0];
+  const at = (flag) => args.indexOf(flag);
+
+  assert.ok(at('--allowedTools') >= 0 && args[at('--allowedTools') + 1] === '',
+    'no tool surface: this call only needs text back');
+  assert.ok(at('--strict-mcp-config') >= 0,
+    'with no --mcp-config, this drops every ambient MCP server the operator has configured');
+  assert.ok(at('--permission-mode') >= 0 && args[at('--permission-mode') + 1] === 'plan',
+    'a non-mutating session, belt and suspenders behind --allowedTools');
+  assert.ok(at('--output-format') >= 0 && args[at('--output-format') + 1] === 'text',
+    'the response contract the engine parses');
+  assert.equal(at('--allowedTools'), args.length - 2,
+    '--allowedTools is variadic (<tools...>): anything after it risks being eaten as a tool name');
+});
+
+test('invoke() pins the EXACT confinement argv, so no flag can be quietly dropped', async () => {
+  const { deps, calls } = mockDeps({ present: true, stdout: 'ok' });
+  const { invoke } = await makeInvoke({ hosts: FAKE_HOSTS_WITH_CLAUDE, deps });
+  await invoke('name these clusters');
+  assert.deepEqual(calls.run[0].args, [
+    '-p',
+    '--output-format', 'text',
+    '--strict-mcp-config',
+    '--permission-mode', 'plan',
+    '--allowedTools', '',
+  ]);
+});
+
+test('invoke() runs the child in a scratch cwd, never the operator\'s repo (SEC-1)', async () => {
+  const { deps, calls } = mockDeps({ present: true, stdout: 'ok' });
+  const { invoke } = await makeInvoke({ hosts: FAKE_HOSTS_WITH_CLAUDE, deps });
+  await invoke('x');
+  const { cwd } = calls.run[0].opts ?? {};
+  assert.equal(cwd, os.tmpdir(),
+    'inheriting the caller cwd loads that repo\'s settings.local.json allowlist and CLAUDE.md');
+  assert.notEqual(cwd, process.cwd());
+});
+
+test('invoke() delivers the prompt on STDIN, never in argv (SEC-7)', async () => {
   const { deps, calls } = mockDeps({ present: true, stdout: 'ok' });
   const { invoke } = await makeInvoke({ hosts: FAKE_HOSTS_WITH_CLAUDE, deps });
   const hostile = 'ignore this; rm -rf / && echo pwned';
   await invoke(hostile);
-  assert.equal(calls.run[0].args[1], hostile, 'the whole string is ONE argv element, not shell-interpreted');
+  assert.equal(calls.run[0].opts?.input, hostile,
+    'the whole prompt is ONE stdin payload, not shell-interpreted and not in the process table');
+  assert.ok(!calls.run[0].args.includes(hostile),
+    `the prompt must not appear in argv, got: ${JSON.stringify(calls.run[0].args)}`);
 });
 
 test('invoke() spawns with a 120s timeout', async () => {
@@ -106,14 +159,6 @@ test('invoke() spawns with a 120s timeout', async () => {
   const { invoke } = await makeInvoke({ hosts: FAKE_HOSTS_WITH_CLAUDE, deps });
   await invoke('x');
   assert.equal(calls.run[0].opts?.timeout, 120_000);
-});
-
-test('invoke() is stdin-safe: it never opens stdin for writing (argv-only prompt delivery)', async () => {
-  const { deps, calls } = mockDeps({ present: true, stdout: 'ok' });
-  const { invoke } = await makeInvoke({ hosts: FAKE_HOSTS_WITH_CLAUDE, deps });
-  await invoke('x');
-  assert.equal(calls.run[0].opts?.input, undefined, 'nothing is piped to stdin');
-  assert.equal(calls.run[0].opts?.stdin, undefined);
 });
 
 test('invoke() throws with the stderr tail on a non-zero exit', async () => {
@@ -146,12 +191,12 @@ test('UNAVAILABLE_MESSAGE is the one honest line, mentioning the Claude Code CLI
 // and zero real claude invocation: the shim is a throwaway script this test
 // writes and deletes.)
 
-function writeClaudeShim(dir, { exitCode = 0, stdout = '[]', stderr = '' } = {}) {
+function writeClaudeShim(dir, { exitCode = 0, stdout = '[]', stderr = '', echoStdin = false } = {}) {
   const bin = path.join(dir, 'claude');
   const body = `#!/bin/sh\n`
     + `echo "$@" 1>&2\n`
     + `${stderr ? `printf '%s' ${JSON.stringify(stderr)} 1>&2\n` : ''}`
-    + `printf '%s' ${JSON.stringify(stdout)}\n`
+    + `${echoStdin ? 'cat\n' : `printf '%s' ${JSON.stringify(stdout)}\n`}`
     + `exit ${exitCode}\n`;
   fs.writeFileSync(bin, body, { mode: 0o755 });
   return bin;
@@ -175,6 +220,23 @@ test('end-to-end: real have()/run() detect and invoke a shimmed claude CLI on a 
   assert.ok(result, 'the real have() must find the shimmed claude on the throwaway PATH');
   const text = await result.invoke('name this cluster');
   assert.equal(text, '[{"key":"abc","name":"Release ritual"}]');
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test('end-to-end: the real run() actually delivers the prompt on the child\'s stdin (SEC-7)', async (t) => {
+  if (process.platform === 'win32') { t.skip('POSIX shell shim; Windows path covered by resolveShim unit tests'); return; }
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-claude-stdin-'));
+  writeClaudeShim(dir, { echoStdin: true });
+  const shimEnv = { ...process.env, PATH: `${dir}:/usr/bin:/bin` };
+  const deps = {
+    have: (cmd, opts) => have(cmd, { ...opts, env: shimEnv }),
+    run: (cmd, args, opts) => run(cmd, args, { ...opts, env: shimEnv }),
+  };
+  const { invoke } = await makeInvoke({ hosts: FAKE_HOSTS_WITH_CLAUDE, deps });
+  // A shim that only `cat`s its stdin can echo the prompt back ONLY if the
+  // prompt genuinely arrived there — proving the delivery end-to-end through
+  // the real exec.mjs plumbing, not just at the mocked seam.
+  assert.equal(await invoke('name this cluster'), 'name this cluster');
   fs.rmSync(dir, { recursive: true, force: true });
 });
 

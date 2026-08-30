@@ -21,6 +21,17 @@
 // (METRICS.md §20) is a documentation-and-existing-governed-machinery
 // concern (W6); this module exposes exactly one on-demand invocation,
 // called only from the CLI's `--enrich` path.
+//
+// THE PROMPT CARRIES UNTRUSTED INPUT TO A MODEL. Everything this seam sends
+// is derived from transcripts on disk, and a transcript is not a trustworthy
+// document: anything that can write one — a malicious MCP server, a shared
+// machine, a pasted snippet the operator was induced to repeat — chooses the
+// exemplar text verbatim. Masking (`maskSecrets`) covers secret SHAPES; it
+// does nothing about INSTRUCTIONS, and nothing here can, because the model
+// reads the text either way. So the containment is not "clean the text", it
+// is CONFINE THE CHILD — see CONFINEMENT_ARGS below. Any future caller of
+// this seam inherits that threat model and must not weaken it.
+import os from 'node:os';
 import { have, run } from './exec.mjs';
 import { HOST_REGISTRY } from './adapters/index.mjs';
 
@@ -30,6 +41,35 @@ const CLAUDE_HOST_ID = 'claude';
 
 /** Spawn timeout for one invocation (spec: "spawn with timeout 120s"). */
 const INVOKE_TIMEOUT_MS = 120_000;
+
+/** THE CONFINEMENT ARGV (security review SEC-1, CRITICAL — do not drop any of
+ *  these, and read the header above before you think about it). This call
+ *  needs exactly one thing from the child: text on stdout. It needs no tools,
+ *  no MCP servers, and no ability to change anything — so it is given none,
+ *  and a prompt injection riding in on exemplar text has nothing to reach.
+ *
+ *  - `--allowedTools ''`   no tool surface at all.
+ *  - `--strict-mcp-config` with no `--mcp-config`, drops EVERY ambient MCP
+ *                          server the operator has configured. On a developer
+ *                          machine that set routinely includes shell
+ *                          execution, HTTP fetch, and mail/drive access.
+ *  - `--permission-mode plan`  a non-mutating session, behind the tool gate.
+ *  - `--output-format text`    the response contract the engine parses.
+ *
+ *  `--allowedTools` GOES LAST because it is declared variadic (`<tools...>`):
+ *  a flag placed after it risks being consumed as a tool name.
+ *
+ *  DELIBERATELY NOT `--bare`, though it exists and would also skip hooks and
+ *  CLAUDE.md discovery: its own help states that under `--bare` "OAuth and
+ *  keychain are never read", which would break the subscription auth path
+ *  DESCRIBE_TEXT promises the operator is being billed through. `cwd` below
+ *  covers the CLAUDE.md/project-settings half of what it would have bought. */
+const CONFINEMENT_ARGS = [
+  '--output-format', 'text',
+  '--strict-mcp-config',
+  '--permission-mode', 'plan',
+  '--allowedTools', '',
+];
 
 /** How many trailing characters of stderr a thrown error keeps — enough to
  *  carry the actual reason without letting a runaway child's stderr balloon
@@ -64,19 +104,29 @@ export async function makeInvoke({ hosts = HOST_REGISTRY, deps = {} } = {}) {
   if (!present) return null;
 
   /**
-   * One invocation: `<bin> -p <prompt> --output-format text`. The prompt
-   * travels as ONE argv element (exec.mjs's `run()` is execFile-based, shell
-   * ALWAYS false — see that module's own header — so there is no shell to
-   * interpret it) and nothing is written to the child's stdin, so a CLI that
-   * only reads its prompt from `-p` never blocks waiting on input that is
-   * never coming; `run()`'s own timeout (below) is the backstop either way.
+   * One confined invocation: `<bin> -p` plus CONFINEMENT_ARGS, with the prompt
+   * on STDIN. Three properties, each load-bearing:
+   *
+   * - The prompt is ONE stdin payload, never a shell string — `run()` spawns
+   *   with shell ALWAYS false (see exec.mjs's header), so there is nothing to
+   *   interpret it. Keeping it off argv also keeps it out of the process
+   *   table, which is world-readable to local users on Linux (SEC-7).
+   * - `cwd` is a scratch directory, NOT the operator's repo. Inheriting the
+   *   caller's cwd is what makes the child load that project's
+   *   `.claude/settings.local.json` — on this very machine a 16-entry
+   *   pre-approved allowlist including `Bash(node -e ' *)` — and its
+   *   CLAUDE.md (SEC-1).
+   * - `run()`'s timeout reaps the child's whole process GROUP, so a timeout
+   *   mid-call cannot leave unsupervised subprocesses behind (SEC-8).
    *
    * @param {string} prompt
    * @returns {Promise<string>}
    */
   async function invoke(prompt) {
-    const result = await runFn(bin, ['-p', String(prompt), '--output-format', 'text'], {
+    const result = await runFn(bin, ['-p', ...CONFINEMENT_ARGS], {
       timeout: INVOKE_TIMEOUT_MS,
+      cwd: os.tmpdir(),
+      input: String(prompt),
     });
     if (result.code !== 0) {
       const stderr = String(result.stderr ?? '');

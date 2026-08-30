@@ -48,6 +48,70 @@ test('run() passes args as an argv array, not shell-joined — a metacharacter-l
   assert.equal(r.stdout, hostile, 'the argument must arrive byte-for-byte, never re-parsed as shell syntax');
 });
 
+// security review SEC-7/SEC-8: `run()` grew an `input` option so a caller
+// with a sensitive payload (the inference seam's transcript-derived prompt)
+// can keep it out of argv, which `ps -ww` shows to the same user here and
+// /proc/<pid>/cmdline shows to ANY local user on Linux. Passing `input` also
+// switches the spawn to its own process GROUP so a timeout reaps the child's
+// own subprocesses rather than orphaning them.
+
+test('run() writes opts.input to the child stdin and keeps it out of argv (SEC-7)', async () => {
+  const secret = 'PROMPT-THAT-MUST-NOT-APPEAR-IN-THE-PROCESS-TABLE';
+  const r = await run(process.execPath, [
+    '-e',
+    'let d = ""; process.stdin.on("data", (c) => { d += c; })'
+    + '.on("end", () => process.stdout.write(JSON.stringify({ stdin: d, argv: process.argv.slice(1) })));',
+    // A bounded timeout so this fails FAST rather than hanging for the
+    // 120s default when `input` is not delivered and the child waits on an
+    // stdin `end` that never comes.
+  ], { input: secret, timeout: 5_000 });
+  assert.equal(r.code, 0, r.stderr);
+  const seen = JSON.parse(r.stdout);
+  assert.equal(seen.stdin, secret, 'the payload must arrive on stdin, byte-for-byte');
+  assert.ok(!JSON.stringify(seen.argv).includes(secret),
+    `the payload must never appear in argv, got: ${JSON.stringify(seen.argv)}`);
+});
+
+test('run() with input still reports a non-zero exit and its stderr', async () => {
+  const r = await run(process.execPath, ['-e', 'process.stderr.write("boom"); process.exit(4)'], {
+    input: 'ignored',
+  });
+  assert.equal(r.code, 4);
+  assert.match(r.stderr, /boom/);
+});
+
+test('run() with input tolerates a child that never reads stdin', async () => {
+  const r = await run(process.execPath, ['-e', 'process.stdout.write("done")'], {
+    input: 'x'.repeat(200_000),
+  });
+  assert.equal(r.code, 0, r.stderr);
+  assert.equal(r.stdout, 'done');
+});
+
+test('run() with input kills the whole process GROUP on timeout, not just the direct child (SEC-8)', async (t) => {
+  if (process.platform === 'win32') { t.skip('POSIX process groups'); return; }
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-group-kill-'));
+  const marker = path.join(dir, 'grandchild-survived');
+  try {
+    // The realistic shape of the SEC-8 repro: an agent CLI spawns a tool
+    // subprocess that INHERITS its process group, then the parent hangs. A
+    // direct-child kill leaves the grandchild running to completion; a group
+    // kill takes both. (A grandchild that calls setsid() for itself escapes
+    // any group kill — that is a property of process groups, not a gap here.)
+    const grandchild = 'setTimeout(() => require("node:fs").writeFileSync(process.argv[1], "x"), 1500);';
+    const hangingChild = 'require("node:child_process").spawn(process.execPath, '
+      + `['-e', ${JSON.stringify(grandchild)}, ${JSON.stringify(marker)}], { stdio: 'ignore' });`
+      + 'setInterval(() => {}, 1000);';
+    const r = await run(process.execPath, ['-e', hangingChild], { input: '', timeout: 300 });
+    assert.notEqual(r.code, 0, 'the timed-out run must report failure');
+    await new Promise((resolve) => { setTimeout(resolve, 2500); });
+    assert.equal(fs.existsSync(marker), false,
+      'the grandchild outlived the group kill and completed its work after run() returned');
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('have() reports true for a command that is definitely on PATH', async () => {
   assert.equal(await have(process.platform === 'win32' ? 'cmd' : 'sh'), true);
 });

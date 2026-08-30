@@ -2486,12 +2486,28 @@ itself.
 `makeInvoke` is the FIRST invocation seam this codebase has ever had — before
 it, nothing here spawned a process to read a model's answer. It detects the
 `claude` binary through the kit's own host registry (never a hardcoded
-literal), spawns it once per call — `claude -p <prompt> --output-format
-text`, the prompt as one argv element, 120s timeout — and `describe()` states
+literal), spawns it once per call — `claude -p --output-format text
+--strict-mcp-config --permission-mode plan --allowedTools ''`, the prompt on
+**stdin**, a scratch working directory, 120s timeout — and `describe()` states
 the **billing line** plainly: `"Claude Code CLI — your subscription"`. Without
 the binary on PATH, or a fatal invocation failure, `--enrich` prints one
 honest line and exits 0; every deterministic tier renders exactly as if
 `--enrich` had not been passed.
+
+**The child is confined, because the prompt is untrusted.** Exemplar text is
+transcript-derived, and anything that can write a transcript chooses it
+verbatim; masking covers secret *shapes*, not *instructions*. So the seam
+does not try to clean the text — it removes what an injection could reach.
+The child gets no tools (`--allowedTools ''`), no MCP servers at all
+(`--strict-mcp-config` with no `--mcp-config`, which drops every ambient
+server the operator has configured), a non-mutating session
+(`--permission-mode plan`), and a scratch working directory rather than the
+operator's repo — the last of which is what keeps the project's
+`.claude/settings.local.json` pre-approved allowlist and its `CLAUDE.md` out
+of the child's session. A timeout reaps the child's whole process group, so
+no subprocess outlives the call. These flags are pinned by an exact-argv
+test (`tests/kit/llm-invoke.test.mjs`), because a containment flag dropped
+while debugging and never restored is the realistic way this regresses.
 
 **Delta-only labeling.** A candidate cluster is one whose label is still the
 honest fallback — `characterized`, never `curated`/`enriched`/`seed` — with
