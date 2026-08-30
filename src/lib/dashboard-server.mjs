@@ -1715,8 +1715,8 @@ function memoizedAdoptionInputs(cwd) {
  *   promptsByHost?: object|null, insights?: Array<object>|null }} agg the
  *   aggregate `handleUsage` already read (prompts:true) at `days`
  * @param {number} days the window `agg` was read at
- * @param {{ cwd: string, readIndex: Function,
- *   coachingLedger?: { loadLedger?: typeof loadLedger, ledgerPath?: string } }} opts
+ * @param {{ cwd?: string, readIndex?: Function,
+ *   coachingLedger?: { loadLedger?: typeof loadLedger, ledgerPath?: string } }} [opts]
  */
 async function dashboardCoachingPayload(agg, days, { cwd, readIndex, coachingLedger: coachingLedgerOverride } = {}) {
   const load = coachingLedgerOverride?.loadLedger ?? loadLedger;

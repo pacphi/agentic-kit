@@ -33,6 +33,10 @@ import {
  * @typedef {import('./usage-coaching.mjs').CoachingCard} CoachingCard
  * @typedef {import('./usage-coaching.mjs').LedgerRecord} LedgerRecord
  * @typedef {{ version: number, records: Array<LedgerRecord> }} Ledger
+ * @typedef {CoachingCard & { status: LedgerRecord['status'], stale: boolean,
+ *   dismissCount: number, outcome: LedgerRecord['outcome'],
+ *   refutation: string|null }} AnnotatedCard the public shape `reconcile`
+ *   returns — a card's own fields plus the ledger's read of it (see `annotate`)
  */
 
 export const LEDGER_SCHEMA_VERSION = 1;
@@ -223,7 +227,7 @@ function annotate(card, record) {
  * @param {Array<CoachingCard>} cards this pass's `deriveCards` output
  * @param {{ adoptionInputs?: { claudeMdTexts?: string[], skillDirs?: string[],
  *   currentPatterns?: object }, now?: number }} [opts]
- * @returns {{ ledger: Ledger, cards: Array<object> }}
+ * @returns {{ ledger: Ledger, cards: Array<AnnotatedCard> }}
  */
 export function reconcile(ledger, cards, { adoptionInputs = {}, now = Date.now() } = {}) {
   const records = loadRecordsMap(ledger);

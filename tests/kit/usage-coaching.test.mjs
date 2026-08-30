@@ -685,7 +685,7 @@ test('C-1 repro: switching the displayed window alone can no longer fabricate an
   // Run 1: all-history window derives the card; proposed against the SAME
   // canonical (30d) count, per this fixture's constant-rate corpus, 42.
   const allWindowCards = cardsAtWindow(42);
-  let { ledger } = reconcile(ledgerOf([]), allWindowCards, {
+  const { ledger } = reconcile(ledgerOf([]), allWindowCards, {
     now: NOW, adoptionInputs: { currentPatterns: canonicalAt(42) },
   });
   assert.equal(ledger.records[0].status, 'proposed');

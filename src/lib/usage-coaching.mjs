@@ -27,7 +27,10 @@ import { SEED_PATTERNS } from './usage-prompt-vocabulary.mjs';
 // (Fix round 1, I-4): progress-report-taps must measure the identical
 // population it displays, not re-derive a looser one and drift from the
 // detector — reused, never reimplemented, so the two can never disagree.
-import { tapRowsOverThreshold, tapComparisonClause } from './usage-insights.mjs';
+// (The evidence object stays enum-only rather than reusing
+// tapComparisonClause's own free-text sentence — see progressReportEvidence's
+// `comparator` field below — so only tapRowsOverThreshold is needed here.)
+import { tapRowsOverThreshold } from './usage-insights.mjs';
 
 // ── evidence hashing (spec §5, §6.2) ────────────────────────────────────────
 
