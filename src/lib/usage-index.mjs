@@ -37,6 +37,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { configDir, claudeDir, codexDir } from './paths.mjs';
+import { writePrivateFileAtomic } from './file-write.mjs';
 import { readCodexStateResult } from './codex-state.mjs';
 import {
   defaultOpencodeDbPath, listSessionsResult as listOpencodeSessionsResult,
@@ -453,14 +454,10 @@ function idIndexFor(cache) {
 
 function writeCache(file, cache) {
   try {
-    fs.mkdirSync(path.dirname(file), { recursive: true });
-    const tmp = `${file}.${process.pid}.tmp`;
     // 0600, matching the 0600 transcripts this content derives from. `title` is
     // the ai-title, or the first 100 chars of the user's first prompt when there
     // is none — writing that world-readable downgrades the source's permissions.
-    fs.writeFileSync(tmp, JSON.stringify(cache), { mode: 0o600 });
-    fs.renameSync(tmp, file);
-    try { fs.chmodSync(file, 0o600); } catch { /* best effort on exotic filesystems */ }
+    writePrivateFileAtomic(file, JSON.stringify(cache));
   } catch { /* an unwritable cache costs a re-scan, not a failed panel */ }
 }
 

@@ -595,7 +595,10 @@ test('ak usage prompts --dismiss <id> persists across invocations and survives a
   writeCoachingCorpus(sb);
   const dismiss = ak(['usage', 'prompts', '--dismiss', 'commit-push-claude-md'], sb);
   assert.equal(dismiss.status, 0, dismiss.stderr);
-  assert.match(dismiss.stdout, /Dismissed 'commit-push-claude-md'/);
+  // SEC-11: the success path used to interpolate the id RAW while every
+  // rejection path already JSON-quoted it. It now quotes and clips like they
+  // do, so the quoting here is double, deliberately.
+  assert.match(dismiss.stdout, /Dismissed "commit-push-claude-md"/);
   const ledgerFile = path.join(sb.cfg, 'agentic-kit', 'usage-outcome-ledger.json');
   assert.ok(fs.existsSync(ledgerFile), 'the ledger file must be written under the sandboxed config dir');
   const ledger = JSON.parse(fs.readFileSync(ledgerFile, 'utf8'));

@@ -447,3 +447,120 @@ test('SEC-2 read path: a hostile store written OUT OF BAND is sanitized on load,
   assert.deepEqual(back.cards, {}, 'the hostile card is dropped on READ');
   assert.deepEqual(back.dropped, { labels: 1, cards: 1 }, 'and both drops are counted honestly');
 });
+
+// ── SEC-4: the card-id contract is enforced on READ, not only on write ─────
+// The write path validated the id shape against model output; the read path
+// accepted any key whatsoever and `hydrateStoredCards` turned it straight into
+// `card.id`. The review drove it end to end:
+//   ak usage prompts --dismiss "$(printf 'enriched-evil\033[31m\033]0;PWNED\007')"
+//   -> exit 0, and that byte sequence on disk as a card id.
+// Note the precise mechanism the review identified: --dismiss DOES check
+// membership before writing, so an id is accepted only if a card with that
+// byte-for-byte id already exists — and card ids were attacker-controlled
+// through the store, which is what made membership no protection at all.
+
+test('SEC-4: a card whose KEY is not a legal id is dropped on read, however it got there', () => {
+  const legal = {
+    title: 'A title', finding: 'A finding.', try: 'Try this.', basis: '3 occurrences.',
+    basisNumbers: [3], evidenceHash: 'c'.repeat(16), generatedAt: '2026-08-01T00:00:00.000Z',
+  };
+  const badKeys = {
+    'ANSI escape': `enriched-evil${ESC}[31m${ESC}]0;PWNED${BEL}`,
+    'path traversal': '../../etc/passwd',
+    'html': '<img src=x onerror=alert(1)>',
+    'whitespace': 'enriched evil',
+    'uppercase': 'Enriched-Evil',
+    'leading dash': '-enriched-evil',
+    'trailing dash': 'enriched-evil-',
+    'double dash': 'enriched--evil',
+    'over-long': `enriched-${'a'.repeat(200)}`,
+    'empty': '',
+  };
+  const file = tmpFile();
+  const cards = { 'enriched-good-card': legal };
+  for (const key of Object.values(badKeys)) cards[key] = { ...legal };
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, JSON.stringify({
+    version: LABEL_STORE_SCHEMA_VERSION, labels: {}, cards, lastSynthesis: null,
+  }));
+  const back = loadLabelStore(file);
+  assert.deepEqual(Object.keys(back.cards), ['enriched-good-card'],
+    'only the legally-shaped id survives; every other key is dropped with its entry');
+});
+
+test('SEC-4: the write path drops an illegally-keyed card too, so it cannot round-trip', () => {
+  const file = tmpFile();
+  saveLabelStore(file, {
+    version: LABEL_STORE_SCHEMA_VERSION,
+    labels: {},
+    cards: {
+      [`enriched-evil${ESC}]0;PWNED${BEL}`]: {
+        title: 't', finding: 'f', try: 'y', basis: 'b', basisNumbers: [],
+        evidenceHash: 'd'.repeat(16), generatedAt: '2026-08-01T00:00:00.000Z',
+      },
+    },
+  });
+  assert.deepEqual(loadLabelStore(file).cards, {});
+  assert.ok(!fs.readFileSync(file, 'utf8').includes('PWNED'), 'and the payload never reached the file');
+});
+
+test('SEC-4: a label key carrying control or bidi characters is dropped, ordinary keys are not', () => {
+  const file = tmpFile();
+  const entry = { name: 'Release ritual', source: 'enriched', firstSeen: null };
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, JSON.stringify({
+    version: LABEL_STORE_SCHEMA_VERSION,
+    labels: {
+      deadbeefdeadbeef: entry,
+      [`dead${ESC}]0;PWNED${BEL}beef`]: entry,
+      [`dead${String.fromCharCode(0x202e)}beef`]: entry,
+      [`${'f'.repeat(500)}`]: entry,
+    },
+    cards: {}, lastSynthesis: null,
+  }));
+  assert.deepEqual(Object.keys(loadLabelStore(file).labels), ['deadbeefdeadbeef']);
+});
+
+// ── SEC-6: the atomic write refuses a pre-created tmp path ─────────────────
+// The review verified the old behaviour mechanically: pre-creating the
+// predictable `<store>.<pid>.tmp` path as a symlink to a victim file caused
+// the victim to be overwritten with the store JSON, after which the rename
+// moved the symlink into place and the chmod re-permissioned the victim to
+// 0600. `'wx'` (O_EXCL) refuses an existing path, symlink included, without
+// following it — and the suffix is now random rather than the PID, so the
+// path an attacker would have to pre-create is not predictable either.
+
+test('SEC-6: a tmp path pre-created as a symlink cannot redirect the write to its target', () => {
+  const file = tmpFile();
+  const dir = path.dirname(file);
+  const victim = path.join(dir, 'victim.txt');
+  fs.writeFileSync(victim, 'ORIGINAL VICTIM CONTENT');
+  const victimModeBefore = fs.statSync(victim).mode & 0o777;
+
+  // The old, predictable path. With 'w' this was followed; with 'wx' it is not
+  // even reachable, because the suffix is no longer derived from the PID.
+  fs.symlinkSync(victim, `${file}.${process.pid}.tmp`);
+  saveLabelStore(file, {
+    version: LABEL_STORE_SCHEMA_VERSION,
+    labels: { deadbeef: { name: 'Release ritual', source: 'enriched', firstSeen: null } },
+    cards: {},
+  });
+
+  assert.equal(fs.readFileSync(victim, 'utf8'), 'ORIGINAL VICTIM CONTENT',
+    'the victim file must be untouched');
+  assert.equal(fs.statSync(victim).mode & 0o777, victimModeBefore,
+    'and its permissions must not have been rewritten by the store write\'s trailing chmod');
+  assert.equal(loadLabelStore(file).labels.deadbeef.name, 'Release ritual',
+    'while the store itself still wrote correctly');
+});
+
+test('SEC-6: the tmp path is unpredictable and never left behind', () => {
+  const file = tmpFile();
+  const dir = path.dirname(file);
+  saveLabelStore(file, { version: LABEL_STORE_SCHEMA_VERSION, labels: {}, cards: {} });
+  const leftovers = fs.readdirSync(dir).filter((n) => n.endsWith('.tmp'));
+  assert.deepEqual(leftovers, [], 'no tmp file survives a successful write');
+  assert.ok(!fs.existsSync(`${file}.${process.pid}.tmp`),
+    'and the PID-derived name is not the one used');
+  assert.equal(fs.statSync(file).mode & 0o777, 0o600, 'the store stays 0600');
+});

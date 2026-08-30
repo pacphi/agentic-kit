@@ -45,6 +45,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { configDir } from './paths.mjs';
 import { hasUnsafeChars } from './text-safety.mjs';
+import { writePrivateFileAtomic } from './file-write.mjs';
 
 export const LABEL_STORE_SCHEMA_VERSION = 1;
 
@@ -149,19 +150,60 @@ function sanitizedCardEntry(entry) {
   return out;
 }
 
-/** Applies `sanitizer` to every entry of `rawMap`, dropping (never fixing or
- *  truncating) any entry that fails it, and counting the drops. Fix round 2
+/**
+ * The KEY contracts, enforced on both sides of the file.
+ *
+ * Security review SEC-4 (MEDIUM): `sanitizedEntries` used to sanitize the
+ * entry VALUE only — `entries[key] = sanitized` accepted any key whatsoever.
+ * The write path already enforced the card-id shape against model output
+ * (`usage-enrich.mjs`'s `CARD_ID_SLUG_RE`); the read path did not, so a store
+ * edited out of band could name a card anything, and `hydrateStoredCards`
+ * turned that key straight into `card.id`. The review drove it end to end:
+ *
+ *   ak usage prompts --dismiss "$(printf 'enriched-evil\033[31m\033]0;PWNED\007')"
+ *   -> exit 0, "Dismissed 'enriched-evil<ESC>[31m<ESC>]0;PWNED<BEL>'"
+ *
+ * This is the same asymmetry the Fix-round-2 I-8/M-8 comment below closed for
+ * entry VALUES. The key was left out.
+ *
+ * A card id is the namespaced slug `synthesizeCards` builds
+ * (`enriched-<slug>`), which is exactly the shape CARD_ID_RE describes — the
+ * write path's own contract, now enforced on read as well. Exported so
+ * `usage-enrich.mjs` validates against the same definition rather than a
+ * second copy of it; this module already owns "what a legal label value is"
+ * for the same reason.
+ *
+ * A LABEL key is deliberately held to a WEAKER rule. It is a cluster key —
+ * `usage-prompt-patterns.mjs` makes those a SHA-256 hex prefix — but nothing
+ * in the format is load-bearing here, an orphaned key is inert (it simply
+ * matches no cluster), and pinning the store to today's hashing scheme would
+ * be this module inventing a contract the codebase does not otherwise have.
+ * What it does refuse is the part that made SEC-4 a finding at all: a key
+ * carrying control or bidi characters, or one long enough to be a payload.
+ */
+export const CARD_ID_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+
+const MAX_KEY_CHARS = 120;
+
+const isCardId = (key) => typeof key === 'string'
+  && key.length <= MAX_KEY_CHARS && CARD_ID_RE.test(key);
+const isLabelKey = (key) => typeof key === 'string'
+  && key.length > 0 && key.length <= MAX_KEY_CHARS && !hasUnsafeChars(key);
+
+/** Applies `sanitizer` to every entry of `rawMap` whose KEY passes
+ *  `keyIsValid`, dropping (never fixing or
+ *  truncating) any entry that fails either, and counting the drops. Fix round 2
  *  (I-8/M-8): shared by BOTH the read path (loadLabelStore) and the write
  *  path (saveLabelStore) now, so "what counts as a legal entry" is enforced
  *  identically on both sides of the file — a malformed entry can no longer
  *  survive on disk (write-time, unchanged since Fix round 1) NOR reach a
  *  caller in memory (read-time, new this round) just because it arrived by
  *  some path other than this module's own write. */
-function sanitizedEntries(rawMap, sanitizer) {
+function sanitizedEntries(rawMap, sanitizer, keyIsValid) {
   const entries = Object.create(null);
   let dropped = 0;
   for (const [key, entry] of Object.entries(rawMap ?? {})) {
-    const sanitized = sanitizer(entry);
+    const sanitized = keyIsValid(key) ? sanitizer(entry) : null;
     if (sanitized) entries[key] = sanitized;
     else dropped++;
   }
@@ -228,8 +270,8 @@ export function loadLabelStore(filePath) {
   // caller refuses to write a `future` store), so sanitizing what is READ
   // from one only removes a crash vector, never data this build could have
   // preserved correctly anyway.
-  const { entries: rawLabels, dropped: droppedLabels } = sanitizedEntries(raw.labels, sanitizedLabelEntry);
-  const { entries: rawCards, dropped: droppedCards } = sanitizedEntries(raw.cards, sanitizedCardEntry);
+  const { entries: rawLabels, dropped: droppedLabels } = sanitizedEntries(raw.labels, sanitizedLabelEntry, isLabelKey);
+  const { entries: rawCards, dropped: droppedCards } = sanitizedEntries(raw.cards, sanitizedCardEntry, isCardId);
   const dropped = droppedLabels || droppedCards ? { labels: droppedLabels, cards: droppedCards } : undefined;
   // sanitizedEntries accumulates on a null-prototype object (safe against a
   // key literally named "__proto__" hijacking the accumulator's own
@@ -268,15 +310,11 @@ export function loadLabelStore(filePath) {
  *   lastSynthesis?: object|null }} store
  */
 export function saveLabelStore(filePath, store) {
-  const { entries: labels } = sanitizedEntries(store?.labels, sanitizedLabelEntry);
-  const { entries: cards } = sanitizedEntries(store?.cards, sanitizedCardEntry);
+  const { entries: labels } = sanitizedEntries(store?.labels, sanitizedLabelEntry, isLabelKey);
+  const { entries: cards } = sanitizedEntries(store?.cards, sanitizedCardEntry, isCardId);
   const lastSynthesis = sanitizedLastSynthesis(store?.lastSynthesis);
   const next = {
     version: LABEL_STORE_SCHEMA_VERSION, labels, cards, lastSynthesis,
   };
-  fs.mkdirSync(path.dirname(filePath), { recursive: true });
-  const tmp = `${filePath}.${process.pid}.tmp`;
-  fs.writeFileSync(tmp, JSON.stringify(next, null, 2), { mode: 0o600 });
-  fs.renameSync(tmp, filePath);
-  try { fs.chmodSync(filePath, 0o600); } catch { /* best effort on exotic filesystems */ }
+  writePrivateFileAtomic(filePath, JSON.stringify(next, null, 2));
 }

@@ -281,6 +281,80 @@ test('maskSecrets tolerates non-string input', () => {
   assert.equal(maskSecrets(42), '42');
 });
 
+// ── SEC-3: the masking rules must be linear in input size ──────────────────
+// Security review SEC-3 (MEDIUM). Two of the SECRET_PATTERNS were quadratic:
+// a greedy character class both PRECEDED and FOLLOWED an alternation drawn
+// from the same character set, so a long run of secret-shaped words made the
+// engine rescan the tail once per alternation hit. Measured on this machine
+// before the fix: 40 KB in 137 ms, 200 KB in 3.4 s, 400 KB in 13.8 s — clean
+// O(n^2), 4x the cost for 2x the input.
+//
+// Reachable because `maskSecrets` runs on the FULL, untruncated turn body:
+// the parsers do not cap turn text, and MAX_TURN_CHARS is applied after the
+// mask, not before. A single planted prompt turn of a few hundred KB of
+// token-like text hung `ak usage prompts --deep`, and opening that session in
+// the dashboard hung the server's request handler.
+//
+// The fix bounds the key-NAME runs on either side of the alternation. A real
+// environment-variable name does not run to hundreds of kilobytes, so the
+// bound costs nothing a caller would notice — but it is a real narrowing, and
+// the ceiling test below states exactly where it now stops.
+
+test('SEC-3: masking a 200 KB run of secret-shaped words stays well under 100ms', () => {
+  for (const run of ['TOKEN', 'token', 'SECRET', 'password']) {
+    const payload = run.repeat(Math.ceil(200_000 / run.length));
+    const started = process.hrtime.bigint();
+    maskSecrets(payload);
+    const ms = Number(process.hrtime.bigint() - started) / 1e6;
+    assert.ok(ms < 100,
+      `a 200 KB run of "${run}" took ${ms.toFixed(0)}ms — the quadratic backtracking is back`);
+  }
+});
+
+test('SEC-3: cost grows about linearly, not quadratically, with input size', () => {
+  const time = (chars) => {
+    const payload = 'TOKEN'.repeat(chars / 5);
+    const started = process.hrtime.bigint();
+    maskSecrets(payload);
+    return Number(process.hrtime.bigint() - started) / 1e6;
+  };
+  time(50_000); // warm, so JIT compilation is not measured as growth
+  const small = Math.max(time(50_000), 0.05);
+  const large = Math.max(time(400_000), 0.05);
+  // 8x the input. Quadratic would be ~64x; this allows a very generous 16x so
+  // the test measures the complexity CLASS and not this machine's noise.
+  assert.ok(large / small < 16,
+    `8x the input cost ${(large / small).toFixed(1)}x the time (${small.toFixed(2)}ms -> ${large.toFixed(2)}ms)`);
+});
+
+test('SEC-3: every secret shape the bounded rules must still catch is still caught', () => {
+  // The exact strings the pre-fix rules masked. If bounding the key-name runs
+  // had narrowed real behavior, one of these would stop being redacted.
+  const cases = [
+    'MY_SECRET_KEY = abcdefghij',
+    'AWS_SECRET_ACCESS_KEY: wJalrXUtnFEMI/K7MDENG/bPxRfiCY',
+    'SOME_TOKEN_VALUE_X=abcdefghij',
+    'GITHUB_TOKEN=ghp_abcdefghijklmnop',
+    'DATABASE_PASSWORD="hunter2hunter2"',
+    'api_key = 9f8a7b6c5d4e3f2a1b0c',
+    '  client_secret: sekrit1234567890abcd',
+    'my_password_field = abcdefghij',
+    'private_key: MIIEpAIBAAKCAQEA1234',
+  ];
+  for (const line of cases) {
+    const out = maskSecrets(line);
+    assert.match(out, /redacted/, `${JSON.stringify(line)} must still be masked`);
+  }
+  // And the false-positive guard the case-sensitivity exists for still holds.
+  assert.equal(maskSecrets('tokens used = 10028979467'), 'tokens used = 10028979467');
+});
+
+test('SEC-3: the key-name bound is stated, not silent — a 64-char run still masks', () => {
+  const key = `${'A'.repeat(60)}_SECRET_${'B'.repeat(60)}`;
+  assert.match(maskSecrets(`${key}=abcdefghij`), /redacted/,
+    'ordinary environment-variable names, however verbose, are still covered');
+});
+
 // ── parsing ─────────────────────────────────────────────────────────────────
 
 test('buildIndex parses a Claude session into the Session contract', async () => {

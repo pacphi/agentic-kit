@@ -28,7 +28,7 @@
 // this is the single most load-bearing test in this wave.
 import { evidenceHash } from './usage-evidence-hash.mjs';
 import { maskSecrets } from './usage-aggregate.mjs';
-import { isValidLabelName } from './usage-label-store.mjs';
+import { isValidLabelName, CARD_ID_RE } from './usage-label-store.mjs';
 import { withStoreLabel } from './usage-prompt-vocabulary.mjs';
 
 /**
@@ -63,7 +63,12 @@ const MAX_EXEMPLAR_CHARS = 200;
  *  regardless of how many the model returns. */
 const MAX_SYNTHESIZED_CARDS = 3;
 
-const CARD_ID_SLUG_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+/** The id shape a synthesized card's slug must have. Security review SEC-4:
+ *  this used to be a second, local copy of the same regex the store now
+ *  enforces on READ. One definition, in the module that owns the file, so the
+ *  write path and the read path cannot drift apart again — which is exactly
+ *  how the asymmetry the review found came about. */
+const CARD_ID_SLUG_RE = CARD_ID_RE;
 const ENRICHED_ID_PREFIX = 'enriched-';
 
 /** Every free-text field a card must supply, shape-checked (non-empty,

@@ -74,6 +74,27 @@ export const MAX_TURN_CHARS = 40_000;
 // Each replacement keeps the human-readable prefix and drops the payload. The
 // replacement text cannot re-match its own pattern (the '…' is outside every
 // character class), which is what makes masking idempotent.
+/** How far the two CONTEXT rules below will look on either side of the word
+ *  that makes a key name secret-shaped — `MY_` in `MY_SECRET_KEY`, `_FIELD` in
+ *  `db_password_field`.
+ *
+ *  Security review SEC-3 (MEDIUM): those two rules used an UNBOUNDED greedy
+ *  class on both sides of the alternation, which is quadratic — for every
+ *  place the alternation matched, the trailing class rescanned the entire
+ *  remaining input. Measured here before the fix, on a run of secret-shaped
+ *  words: 40 KB in 137 ms, 200 KB in 3.4 s, 400 KB in 13.8 s. `maskSecrets`
+ *  runs on the FULL untruncated turn body, so a single planted transcript turn
+ *  of a few hundred KB hung `ak usage prompts --deep`, and opening that
+ *  session in the dashboard hung the server's request handler. Bounded, the
+ *  same 400 KB masks in well under a millisecond.
+ *
+ *  64 is a real ceiling, not a formality: a key name with more than 64
+ *  characters of prefix or suffix around its secret-shaped word no longer
+ *  matches these two rules. No environment variable, YAML key or TOML key in
+ *  practice comes close, and the shape-based rules above (which carry their
+ *  own prefixes and are already linear) are unaffected either way. */
+const MAX_KEY_NAME_CHARS = 64;
+
 /** @type {[RegExp, string][]} */
 // Order matters. PEM blocks are matched WHOLE and first: a later pattern that
 // nibbled at the base64 body would leave the armour behind, which reads as
@@ -114,7 +135,11 @@ const SECRET_PATTERNS = [
   // Deliberately case-SENSITIVE: with /i this matches prose like
   // "tokens used = 10028979467", and these transcripts discuss token counts
   // constantly. Uppercase-only tracks the actual env-var convention instead.
-  [/\b([A-Z][A-Z0-9_]*(?:SECRET|TOKEN|PASSWORD|PASSWD|API_?KEY|PRIVATE_KEY)[A-Z0-9_]*)(\s*[:=]\s*)("?)[^\s"']{8,}\3/g,
+  // The {0,MAX_KEY_NAME_CHARS} bounds are the SEC-3 fix, not cosmetic: an
+  // unbounded greedy class on BOTH sides of the alternation made this
+  // quadratic, because every alternation hit rescanned the whole tail. See
+  // MAX_KEY_NAME_CHARS.
+  [new RegExp(`\\b([A-Z][A-Z0-9_]{0,${MAX_KEY_NAME_CHARS}}(?:SECRET|TOKEN|PASSWORD|PASSWD|API_?KEY|PRIVATE_KEY)[A-Z0-9_]{0,${MAX_KEY_NAME_CHARS}})(\\s*[:=]\\s*)("?)[^\\s"']{8,}\\3`, 'g'),
     '$1$2$3…redacted$3'],
   // Quoted JSON/JS object key whose name says secret — "apiKey": "…", 'client_secret': '…'.
   // Case-insensitive is safe here: the quote delimiters are a shape prose never
@@ -126,7 +151,7 @@ const SECRET_PATTERNS = [
   // quoting required. Anchored to line-start-through-key-through-:/= so it
   // cannot match a key phrase floating mid-sentence ("tokens used = 10028979467"
   // fails: "used" — not a secret-shaped word — sits directly before "=").
-  [/^([ \t]*[A-Za-z0-9_-]*(?:secret|token|password|passwd|api_?key|private_?key)[A-Za-z0-9_-]*[ \t]*[:=][ \t]*)(["']?)[^\s"']{8,}\2/gim,
+  [new RegExp(`^([ \\t]*[A-Za-z0-9_-]{0,${MAX_KEY_NAME_CHARS}}(?:secret|token|password|passwd|api_?key|private_?key)[A-Za-z0-9_-]{0,${MAX_KEY_NAME_CHARS}}[ \\t]*[:=][ \\t]*)(["']?)[^\\s"']{8,}\\2`, 'gim'),
     '$1$2…redacted$2'],
 ];
 

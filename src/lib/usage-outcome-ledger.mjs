@@ -28,6 +28,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { configDir } from './paths.mjs';
 import { hasUnsafeChars } from './text-safety.mjs';
+import { writePrivateFileAtomic } from './file-write.mjs';
 import {
   detectAdoption, measureOutcome, currentEvidenceFor, OUTCOME_MIN_DAYS, DAY_MS,
 } from './usage-coaching.mjs';
@@ -103,18 +104,16 @@ export function loadLedger(filePath) {
   return blankLedger(); // recognizably ours but malformed → corrupt, safe to replace
 }
 
-/** Atomic write: tmp file in the same directory, then rename — the same
- *  pattern usage-index.mjs's writeCache uses, so a reader never observes a
- *  half-written ledger. Unlike that cache, a failed write here is NOT
- *  swallowed: the ledger's whole point is durable dismissal/outcome state, and
- *  a caller (the CLI's `--dismiss`) needs to know if the persist actually
- *  happened rather than print a confirmation that lied. */
+/** Atomic write: O_EXCL tmp file in the same directory, then rename — the
+ *  shared `writePrivateFileAtomic` all three usage stores now use, so a reader
+ *  never observes a half-written ledger and a pre-created tmp path cannot
+ *  redirect the write (security review SEC-6). Unlike the index cache, a
+ *  failed write here is NOT swallowed: the ledger's whole point is durable
+ *  dismissal/outcome state, and a caller (the CLI's `--dismiss`) needs to know
+ *  if the persist actually happened rather than print a confirmation that
+ *  lied. */
 export function saveLedger(filePath, ledger) {
-  fs.mkdirSync(path.dirname(filePath), { recursive: true });
-  const tmp = `${filePath}.${process.pid}.tmp`;
-  fs.writeFileSync(tmp, JSON.stringify(ledger, null, 2), { mode: 0o600 });
-  fs.renameSync(tmp, filePath);
-  try { fs.chmodSync(filePath, 0o600); } catch { /* best effort on exotic filesystems */ }
+  writePrivateFileAtomic(filePath, JSON.stringify(ledger, null, 2));
 }
 
 /** True when ANY string anywhere in a loaded record carries a control or bidi

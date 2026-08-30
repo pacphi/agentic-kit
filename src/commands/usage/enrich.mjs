@@ -20,7 +20,7 @@ import {
 } from '../../lib/usage-enrich.mjs';
 import { saveLabelStore } from '../../lib/usage-label-store.mjs';
 import { makeInvoke, UNAVAILABLE_MESSAGE } from '../../lib/llm-invoke.mjs';
-import { maskSecrets } from '../../lib/usage-aggregate.mjs';
+import { maskSecrets, MAX_TURN_CHARS } from '../../lib/usage-aggregate.mjs';
 import {
   readPromptEntries, deepFingerprints, exemplarCandidates, collectExemplars, promptCacheFile,
 } from './deep-pass.mjs';
@@ -62,7 +62,14 @@ function gatherCandidateExemplars({ candidateKeys, win, agg, deps }) {
   const exemplarsByKey = {};
   for (const key of candidateKeys) {
     const body = text.get(key);
-    if (body !== undefined) exemplarsByKey[key] = [maskSecrets(body)];
+    // Security review SEC-3: cap BEFORE masking. `maskSecrets` used to run on
+    // the raw, unbounded turn body here and only get sliced to 200 characters
+    // afterwards — so an attacker-planted turn of a few hundred KB paid the
+    // full masking cost for a snippet that was about to be thrown away. The
+    // rules themselves are linear now (usage-aggregate.mjs's
+    // MAX_KEY_NAME_CHARS), so this is defense in depth rather than the fix:
+    // one bound that holds even if a future rule is not.
+    if (body !== undefined) exemplarsByKey[key] = [maskSecrets(String(body).slice(0, MAX_TURN_CHARS))];
   }
   return exemplarsByKey;
 }

@@ -36,11 +36,11 @@ rewritten; rule 3 of the module header, `usage-index.mjs:22`):
 
 | Host | Store | Discovered by |
 |---|---|---|
-| Claude Code | `~/.claude/projects/<encoded-project-dir>/<sessionId>.jsonl` | `listClaude` (`usage-index.mjs:337-351`) — exactly one level of project directories |
-| Claude Code (subagent) | `~/.claude/projects/<encoded-project-dir>/<sessionId>/subagents/agent-<hash>.jsonl` | `listClaudeSubagents` (`usage-index.mjs:312-317`) — the one nested shape `listClaude` descends into |
-| Codex CLI | `~/.codex/sessions/<yyyy>/<mm>/<dd>/rollout-<ts>-<uuid>.jsonl` | `listCodex` (`usage-index.mjs:354-374`) — the `yyyy/mm/dd` tree walk |
+| Claude Code | `~/.claude/projects/<encoded-project-dir>/<sessionId>.jsonl` | `listClaude` (`usage-index.mjs:338-352`) — exactly one level of project directories |
+| Claude Code (subagent) | `~/.claude/projects/<encoded-project-dir>/<sessionId>/subagents/agent-<hash>.jsonl` | `listClaudeSubagents` (`usage-index.mjs:313-318`) — the one nested shape `listClaude` descends into |
+| Codex CLI | `~/.codex/sessions/<yyyy>/<mm>/<dd>/rollout-<ts>-<uuid>.jsonl` | `listCodex` (`usage-index.mjs:355-375`) — the `yyyy/mm/dd` tree walk |
 
-Roots come from `defaultRoots()` (`usage-index.mjs:287-292`) and are injectable
+Roots come from `defaultRoots()` (`usage-index.mjs:288-293`) and are injectable
 for tests. A malformed line is skipped, never fatal (`jsonLines`,
 `usage-parsers.mjs:169-175` — one corrupt line must not cost a whole file).
 
@@ -49,7 +49,7 @@ the parent under `<sessionId>/subagents/`. Discovery is that one nested shape
 and no more — not a recursive walk — so a directory that is not a session-id
 directory with a `subagents` child contributes nothing rather than being
 crawled. Each such record takes a **namespaced** id, `<sessionId>/<stem>`
-(`usage-index.mjs:317`), because Claude Code names every subagent file
+(`usage-index.mjs:318`), because Claude Code names every subagent file
 `agent-<hash>.jsonl` and that stem is not unique across two parent sessions; an
 unnamespaced id would silently collide two unrelated records into one. §4.1
 covers how a namespaced id is validated and resolved back to its file.
@@ -179,8 +179,8 @@ The same parsers serve two very different callers, switched by `withTurns`:
 
 | Path | Entry point | `withTurns` | Message bodies | Cached? |
 |---|---|---|---|---|
-| **Scan** — the aggregate index behind the Scorecard/Findings/Sessions views | `buildIndex` (`usage-index.mjs:569`) → `parseFile` (`usage-index.mjs:388`) | `false` | no turn list is built, and no body is retained — holding them would balloon memory across 3,000+ files (`parseClaude`'s own doc comment, `usage-parsers.mjs:602-606`). Since v14 the scan path does *read* one narrow slice: opencode's USER text parts, so a prompt can be fingerprinted (`loadTextParts`, `usage-opencode.mjs:276`). Only the fingerprint is kept; the text is discarded with the row. Measured at 45 µs/session materializing 0.6 MB on a 300-session store, against 125 µs and 61 MB for the reader path's unfiltered join | yes: per-file derived records in `~/.config/agentic-kit/usage-index.json`, keyed `(path, mtime, size)`, invalidated wholesale by `SCHEMA_VERSION` (`usage-index.mjs:141`) |
-| **Reader** — one transcript for the Transcript view | `readSession` (`usage-index.mjs:963`) | `true` | full turn list built | **never** — every call re-reads and re-parses the one file |
+| **Scan** — the aggregate index behind the Scorecard/Findings/Sessions views | `buildIndex` (`usage-index.mjs:566`) → `parseFile` (`usage-index.mjs:389`) | `false` | no turn list is built, and no body is retained — holding them would balloon memory across 3,000+ files (`parseClaude`'s own doc comment, `usage-parsers.mjs:602-606`). Since v14 the scan path does *read* one narrow slice: opencode's USER text parts, so a prompt can be fingerprinted (`loadTextParts`, `usage-opencode.mjs:276`). Only the fingerprint is kept; the text is discarded with the row. Measured at 45 µs/session materializing 0.6 MB on a 300-session store, against 125 µs and 61 MB for the reader path's unfiltered join | yes: per-file derived records in `~/.config/agentic-kit/usage-index.json`, keyed `(path, mtime, size)`, invalidated wholesale by `SCHEMA_VERSION` (`usage-index.mjs:142`) |
+| **Reader** — one transcript for the Transcript view | `readSession` (`usage-index.mjs:960`) | `true` | full turn list built | **never** — every call re-reads and re-parses the one file |
 
 ![Figure: one parser, two read paths — the scan path (withTurns false) caches per-file records keyed by path, mtime and size; the reader path (withTurns true) builds full turns and is never cached](assets/transcript-read-paths.svg)
 
@@ -188,19 +188,19 @@ The reader path being cache-free is load-bearing for maintainers: **turn-shape
 changes (like the `kind` field, §3) need no `SCHEMA_VERSION` bump**, because
 no turn is ever served from cache — whereas *session-record* fields (like
 `exceptions`) do, since stale cached records would otherwise sum `undefined`
-into totals (`usage-index.mjs:59-65`; the incidents behind that rule are
+into totals (`usage-index.mjs:60-66`; the incidents behind that rule are
 recorded in `USAGE-SCORECARD-METRICS.md` Appendix A). Schema v11 is that same
 rule applied again: it added `mode`/`modeRaw`, `latHist`/`latCount`,
 `lenSeconds`, `ctxWindow`/`ctxLastTokens` and `aborts` to the record, so every
 session had to be re-derived rather than read back as `undefined`
-(`usage-index.mjs:92-98`). v12 is the rule applied to a *wrong* value rather
+(`usage-index.mjs:93-99`). v12 is the rule applied to a *wrong* value rather
 than a missing one: v11 records persisted `modeRaw: "never/[object Object]"`
 and a null `mode` for every Codex session, because `sandbox_policy` is an
 object and was compared against string literals. Re-deriving is what clears
-them (`usage-index.mjs:99-104`). v14 is the plain form of the rule once more —
+them (`usage-index.mjs:100-105`). v14 is the plain form of the rule once more —
 `promptFPs`/`promptFPOverflow` (§3.3) are new *record* fields, so a v13 cache
 would read them as `undefined` for exactly the sessions already on disk
-(`usage-index.mjs:120-126`).
+(`usage-index.mjs:121-127`).
 
 ---
 
@@ -254,7 +254,7 @@ Two deliberate subtleties:
 * **Harness-output envelopes are excluded from the prompt *count* too.**
   `isHumanPrompt` shares `HARNESS_OUTPUT_RE`, so a session's `prompts` figure
   never counts stdout dumps or task notifications as things the person said
-  (`SCHEMA_VERSION` 5, `usage-index.mjs:66-69`; the correction this shipped
+  (`SCHEMA_VERSION` 5, `usage-index.mjs:67-70`; the correction this shipped
   with is in [Appendix A](#appendix-a--fix-history)).
 * **`tool-result` outranks `context`**: a `tool_result` block on an `isMeta`
   entry is still tool feedback.
@@ -304,43 +304,43 @@ string.
 
 ## 4. The `readSession` pipeline — how one session becomes a payload
 
-`readSession(id, opts)` (`usage-index.mjs:963-990`) is the only way
+`readSession(id, opts)` (`usage-index.mjs:960-987`) is the only way
 transcript content leaves the module, and every step is a gate:
 
 ### 4.1 Locate, contain, bound
 
 1. **Id grammar before any filesystem access** — an id must match one of
    exactly two shapes, or it is rejected with `ERR_INVALID_SESSION_ID` at
-   this call: `invalidId(id)` (`usage-index.mjs:964`) before any read happens:
-   * `VALID_ID` (`/^[A-Za-z0-9._-]{1,128}$/`, `usage-index.mjs:152`) — a plain
+   this call: `invalidId(id)` (`usage-index.mjs:961`) before any read happens:
+   * `VALID_ID` (`/^[A-Za-z0-9._-]{1,128}$/`, `usage-index.mjs:153`) — a plain
      session id;
-   * `VALID_SUBAGENT_ID` (`usage-index.mjs:168`) — a namespaced nested
+   * `VALID_SUBAGENT_ID` (`usage-index.mjs:169`) — a namespaced nested
      subagent id, EXACTLY `<parentId>/<stem>` with one slash, where the parent
      half reuses `VALID_ID`'s own charset and the child half must match the
      real on-disk `agent-…` shape. The namespaced grammar is a **narrowing**
      of the plain one, never a loosening: both are the same path-traversal
      guard, and a traversal shape is rejected at either tier.
-2. **Locate by id** across both roots (`locate`, `usage-index.mjs:897-916`),
+2. **Locate by id** across both roots (`locate`, `usage-index.mjs:894-913`),
    consulting the scan cache when present but never requiring it —
    `readSession` works with no prior buildIndex. A namespaced id resolves
    through this call: `locateSubagent(nested.parentId, nested.stem, r.claude, id)`
-   (`usage-index.mjs:914`), which builds the
+   (`usage-index.mjs:911`), which builds the
    nested path from the two **already-validated capture groups** rather than
    from raw request text.
-3. **Realpath containment** (`usage-index.mjs:988-1001`) — the resolved file
+3. **Realpath containment** (`usage-index.mjs:985-998`) — the resolved file
    must live under a transcript root *after* `realpathSync` collapses
    symlinks; a symlink planted inside a root pointing at `/etc/anything`
    passes a lexical `startsWith` but fails this. Roots are realpath'd too so
    a symlinked dotfiles setup still works.
-4. **Size cap** — `MAX_SESSION_BYTES` (64 MB, `usage-index.mjs:151`): a
+4. **Size cap** — `MAX_SESSION_BYTES` (64 MB, `usage-index.mjs:152`): a
    transcript is read whole and JSON-expands ~5×, so an unbounded read is a
    memory-amplification primitive. Oversized reads as unavailable, not risky.
 
 ### 4.2 Parse and price
 
 The file is parsed with `withTurns: true` by the provider's parser
-(`usage-index.mjs:932-937`), and `meta` is assembled by `sessionPayload`
-(`usage-aggregate.mjs:1249-1276`) with the same fields the Sessions view rows
+(`usage-index.mjs:929-934`), and `meta` is assembled by `sessionPayload`
+(`usage-aggregate.mjs:1274-1301`) with the same fields the Sessions view rows
 carry — `prompts`, `responses`, `exceptions`, `sidechain`, `threadSource`,
 `models`, `tools`, `skill`/`plugin`, worktree — plus a `cost` priced from the
 same per-model usage rows `aggregate()` uses.
@@ -357,11 +357,11 @@ never renames a retained session model, changes historical token pricing, or rew
 
 ### 4.3 Mask, then truncate — both marked, differently
 
-Every turn body is passed through `maskSecrets` (`usage-aggregate.mjs:142-147` — the
+Every turn body is passed through `maskSecrets` (`usage-aggregate.mjs:167-172` — the
 23 secret shapes) **server-side, before
 serialization**, then length-capped at `MAX_TURN_CHARS` (40,000,
 `usage-aggregate.mjs:72`) with the marker appended at the truncation call
-("originalChars is measured", `usage-aggregate.mjs:1300-1309`). Two invariants:
+("originalChars is measured", `usage-aggregate.mjs:1325-1334`). Two invariants:
 
 * **Presence is the signal.** `truncated`/`originalChars` are emitted only
   when the slice fired, so a complete turn cannot be misread as abridged.
@@ -513,7 +513,7 @@ was wrong before, for the curious.
   `isHumanPrompt` once counted `harness-output` envelopes as human prompts —
   32 claimed vs 20 real on the reference session. Cached session records
   carried the inflated counts, hence the wholesale `SCHEMA_VERSION` 5 cache
-  invalidation ("no longer count as human prompts", `usage-index.mjs:66-69`).
+  invalidation ("no longer count as human prompts", `usage-index.mjs:67-70`).
 * **Session expander fields shipped but unrendered.** The per-session fields
   §6.1's expander now renders (classification `basis` + confidence, the
   token split, flags) once travelled on the wire and rendered nowhere.
@@ -521,7 +521,7 @@ was wrong before, for the curious.
   assembled `meta` left cost undefined, and `fmtUsd(undefined)` renders the
   truthy string `"$0.00"` — a fixed-looking zero on a panel whose whole
   subject is cost. `meta.cost` is now priced via this call: `sessionCost(rec, deps)`
-  (`usage-aggregate.mjs:1300`) — over the same per-model usage rows aggregate() reads.
+  (`usage-aggregate.mjs:1325`) — over the same per-model usage rows aggregate() reads.
 * **Aggregate-side incidents** (the v4/v5 cache bumps, the Codex parsing
   defects) are recorded in `USAGE-SCORECARD-METRICS.md` Appendix A.
 

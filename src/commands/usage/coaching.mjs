@@ -130,6 +130,25 @@ export function knownCardIdsText(cards) {
   return cards.map((c) => c.id).join(', ') || '(none this window)';
 }
 
+/** How much of an operator-supplied id an error or confirmation line will echo
+ *  back. Security review SEC-11 (LOW): a 200 KB `--dismiss` value produced
+ *  205,156 bytes on stdout at exit 2, and the SUCCESS path at `runDismissFlag`
+ *  interpolated the id RAW while every rejection path already went through
+ *  `JSON.stringify`. Self-inflicted through argv only, which is why it is LOW
+ *  — but an id long enough to need clipping is already not an id, and one that
+ *  reaches the success path came from the store, which SEC-4 shows was not a
+ *  trustworthy source of ids either. */
+const MAX_ECHOED_ID_CHARS = 120;
+
+/** One id, safe to print: JSON-quoted (so control bytes render as escapes
+ *  rather than firing) and clipped. */
+export function echoId(id) {
+  const text = String(id ?? '');
+  return JSON.stringify(text.length > MAX_ECHOED_ID_CHARS
+    ? `${text.slice(0, MAX_ECHOED_ID_CHARS)}…`
+    : text);
+}
+
 /** `--draft <id>`: print that one card's draft verbatim and nothing else —
  *  json-safe (a minimal object under --json, the raw text otherwise), so a
  *  caller can pipe either straight into a file. Draft-only, always (METRICS.md §22):
@@ -139,12 +158,12 @@ export function knownCardIdsText(cards) {
 export function runDraftFlag(cards, id, json) {
   const card = cards.find((c) => c.id === id);
   if (!card) {
-    warn(`ak usage prompts --draft: unknown card id ${JSON.stringify(id)}. Known ids: ${knownCardIdsText(cards)}`);
+    warn(`ak usage prompts --draft: unknown card id ${echoId(id)}. Known ids: ${knownCardIdsText(cards)}`);
     return 2;
   }
   if (!card.draft) {
     const withDraft = cards.filter((c) => c.draft).map((c) => c.id).join(', ') || '(none this window)';
-    warn(`ak usage prompts --draft: card ${JSON.stringify(id)} has no draft. Cards with a draft: ${withDraft}`);
+    warn(`ak usage prompts --draft: card ${echoId(id)} has no draft. Cards with a draft: ${withDraft}`);
     return 2;
   }
   if (json) console.log(JSON.stringify({ id: card.id, kind: card.draft.kind, text: card.draft.text }, null, 2));
@@ -162,13 +181,13 @@ export function runDraftFlag(cards, id, json) {
 export function runDismissFlag({ ledger, ledgerPath, save, cards, id, json, adoptionInputs, now }) {
   const { ledger: next, found } = dismissCard(ledger, id, cards, { adoptionInputs, now });
   if (!found) {
-    warn(`ak usage prompts --dismiss: unknown card id ${JSON.stringify(id)}. Known ids: ${knownCardIdsText(cards)}`);
+    warn(`ak usage prompts --dismiss: unknown card id ${echoId(id)}. Known ids: ${knownCardIdsText(cards)}`);
     return 2;
   }
   save(ledgerPath, next);
   const record = next.records.find((r) => r.id === id);
   if (json) console.log(JSON.stringify({ id, status: 'dismissed', dismissCount: record.dismissCount }, null, 2));
-  else ok(`Dismissed '${id}' (dismissal ${fmtNum(record.dismissCount)}).`);
+  else ok(`Dismissed ${echoId(id)} (dismissal ${fmtNum(record.dismissCount)}).`);
   return 0;
 }
 
@@ -206,7 +225,7 @@ function resolveDismiss({
 }) {
   const knownIds = new Set(reconciledCards.map((c) => c.id));
   if (!knownIds.has(id)) {
-    warn(`ak usage prompts --dismiss: unknown card id ${JSON.stringify(id)}. `
+    warn(`ak usage prompts --dismiss: unknown card id ${echoId(id)}. `
       + `Known ids: ${knownCardIdsText(reconciledCards)}`);
     return 2; // Fix round 1, M-7: no write for an id validated invalid
   }
