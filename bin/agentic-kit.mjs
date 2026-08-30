@@ -4,7 +4,7 @@
 import { parseArgs } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
-import { fail, dim } from '../src/lib/output.mjs';
+import { fail, dim, exitWhenFlushed } from '../src/lib/output.mjs';
 
 const PKG_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -225,6 +225,6 @@ function reportFatal(err) {
 }
 
 main().then(
-  (code) => process.exit(code),
-  (err) => { reportFatal(err); process.exit(1); },
+  (code) => exitWhenFlushed(code),
+  (err) => { reportFatal(err); exitWhenFlushed(1); },
 );

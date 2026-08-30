@@ -97,3 +97,34 @@ test('managed outcomes render degraded and failed states without green success',
   assert.match(lines[1], /✗.*brain: exit 1/);
   assert.doesNotMatch(lines.join('\n'), /✓/);
 });
+
+// exitWhenFlushed — the pipe-safe exit for the bin entry. process.exit() kills
+// the process before a piped stdout drains, so any command whose output tops
+// the ~64KB pipe buffer (ak usage prompts --json is ~268KB on the reference
+// corpus) truncates for every `| jq` consumer. The fix defers the hard exit
+// until stdout and stderr report their queues flushed. Tested end-to-end
+// through a real child process and a real pipe — the buffer behavior being
+// pinned does not exist in-process.
+import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
+
+const OUTPUT_MJS = fileURLToPath(new URL('../../src/lib/output.mjs', import.meta.url));
+const PAYLOAD = 200 * 1024;
+
+const runChild = (tailJs) => spawnSync(process.execPath, ['--input-type=module', '-e',
+  `import { exitWhenFlushed } from ${JSON.stringify(OUTPUT_MJS)};
+   process.stdout.write('x'.repeat(${PAYLOAD}));
+   ${tailJs}`,
+], { encoding: 'utf8', maxBuffer: 4 * PAYLOAD });
+
+test('exitWhenFlushed delivers the full piped payload past the 64KB pipe buffer', () => {
+  const r = runChild('exitWhenFlushed(0);');
+  assert.equal(r.status, 0);
+  assert.equal(r.stdout.length, PAYLOAD);
+});
+
+test('exitWhenFlushed propagates a nonzero exit code', () => {
+  const r = runChild('exitWhenFlushed(3);');
+  assert.equal(r.status, 3);
+  assert.equal(r.stdout.length, PAYLOAD);
+});

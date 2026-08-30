@@ -71,3 +71,16 @@ export async function withProgress(label, thunk, {
     if (tty) out.write('\r\x1b[K'); // erase the ticker line
   }
 }
+
+/** Exit once stdout and stderr have drained. `process.exit()` kills the
+ *  process with piped output still queued — a pipe consumer sees at most one
+ *  ~64KB buffer of any larger payload (`ak usage prompts --json | jq` loses
+ *  three quarters of its document). A zero-length write's callback fires only
+ *  after everything queued before it has been handed to the OS, so exiting
+ *  from the second callback preserves hard-exit semantics (lingering timers
+ *  or handles still can't keep the process alive) without the truncation. */
+export function exitWhenFlushed(code) {
+  process.stdout.write('', () => {
+    process.stderr.write('', () => process.exit(code));
+  });
+}
