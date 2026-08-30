@@ -140,7 +140,21 @@ async function main() {
   // startDashboard itself (rather than editing ~26 call sites) means no
   // future call site can reintroduce the gap by omission.
   const NULL_COACHING_LEDGER = { loadLedger: () => ({ version: 1, records: [] }), ledgerPath: '/dev/null/unused' };
-  const startDashboard = (opts = {}) => realStartDashboard({ coachingLedger: NULL_COACHING_LEDGER, ...opts });
+  // Fix round 1, I-3: the SAME hazard, one file over (review-confirmed live
+  // with repro/probe-leak.mjs) — dashboard-server.mjs also reads the
+  // persisted label/card store unconditionally on every /api/usage poll and
+  // feeds it to dashboardCoachingPayload, regardless of the `usage`
+  // override above. `tests/ui/dashboard-ui.mjs` and dashboard-usage-
+  // telemetry.test.mjs both already wrap this; this file only had the
+  // ledger half wrapped, leaving every one of its ~25 startDashboard call
+  // sites able to serve this developer's REAL enriched cards to a
+  // fixture-only test.
+  const NULL_LABEL_STORE = {
+    loadLabelStore: () => ({ version: 1, labels: {}, cards: {} }), labelStorePath: '/dev/null/unused',
+  };
+  const startDashboard = (opts = {}) => realStartDashboard({
+    coachingLedger: NULL_COACHING_LEDGER, labelStore: NULL_LABEL_STORE, ...opts,
+  });
 
   const STUB_STATUS = {
     overall: 'warn',
