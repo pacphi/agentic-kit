@@ -169,6 +169,11 @@ export function detectAdoption(card, { claudeMdTexts, skillDirs, currentPatterns
   return { adopted: false, via: null };
 }
 
+/** The honest delta text for an adopted card whose canonical baseline held
+ *  nothing. QE review F-1: there is no comparison to make, and saying so is
+ *  the whole fix — see `measureOutcome`. */
+export const NOTHING_TO_MEASURE_TEXT = 'no occurrences in the canonical 30-day window — nothing to measure';
+
 /**
  * Current vs. the recorded baseline count, for an ADOPTED ledger record.
  * `improved` is a strict decrease — any real drop counts, since retirement
@@ -177,16 +182,35 @@ export function detectAdoption(card, { claudeMdTexts, skillDirs, currentPatterns
  * all this pass) reports as un-improved with an honest "not measured" delta
  * rather than a fabricated number.
  *
+ * `measurable` (QE review F-1, HIGH) says whether the comparison MEANS
+ * anything, and it is what stops the caller from turning arithmetic into a
+ * verdict. A baseline of zero cannot be improved on: a count cannot go below
+ * zero, so `current < baseline` is false FOREVER, and the ledger would retire
+ * the card 14 days later with "0 → 0 since adoption" no matter what the
+ * operator did. That is reachable on the DEFAULT path — `--window` defaults to
+ * `all`, so a card fires on all-time evidence while the ledger judges it on
+ * the canonical 30 days, and an operator who adopted the habit months ago has
+ * exactly zero recent occurrences. `improved` and `measurable` are separate
+ * because they answer different questions: "did it get better" and "was there
+ * anything to get better".
+ *
  * @param {{ id: string, baseline?: { count?: number } }} record
  * @param {object} currentPatterns same shape `currentEvidenceFor` takes
- * @returns {{ improved: boolean, deltaText: string }}
+ * @returns {{ measurable: boolean, improved: boolean, deltaText: string }}
  */
 export function measureOutcome(record, currentPatterns) {
   const baselineCount = Number(record?.baseline?.count);
   const fresh = currentEvidenceFor(record?.id, currentPatterns ?? {});
   const currentCount = Number(fresh?.count);
   if (!Number.isFinite(baselineCount) || !Number.isFinite(currentCount)) {
-    return { improved: false, deltaText: 'not measured this pass — evidence unavailable' };
+    return { measurable: false, improved: false, deltaText: 'not measured this pass — evidence unavailable' };
   }
-  return { improved: currentCount < baselineCount, deltaText: `${baselineCount} → ${currentCount} since adoption` };
+  if (baselineCount <= 0) {
+    return { measurable: false, improved: false, deltaText: NOTHING_TO_MEASURE_TEXT };
+  }
+  return {
+    measurable: true,
+    improved: currentCount < baselineCount,
+    deltaText: `${baselineCount} → ${currentCount} since adoption`,
+  };
 }

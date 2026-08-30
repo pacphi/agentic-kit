@@ -1057,3 +1057,178 @@ test('INTEGRATION: aggregate(records, {prompts:true}) -> deriveCards -> reconcil
   // Privacy pin: none of the six typed phrasings reached the rendered section.
   for (const p of COMMIT_PUSH_PHRASINGS) assert.equal(out.includes(p), false, `prompt text "${p}" leaked into the rendered coaching section`);
 });
+
+// ── QE review F-1 (HIGH): a zero baseline is not a refutation ───────────────
+// `improved` is `current < baseline`, and a count cannot go below zero, so a
+// card adopted against a zero canonical baseline was DETERMINISTICALLY retired
+// 14 days later with "0 → 0 since adoption" no matter what the operator did.
+// Reachable on the DEFAULT path: `--window` defaults to `all`, so a card fires
+// on all-time evidence while the ledger judges it on the canonical 30 days —
+// and an operator who adopted the habit months ago has exactly zero recent
+// occurrences. They saw one card asserting 24 recurrences and, directly
+// beneath it, a verdict that their fix had not worked.
+//
+// `detectAdoption`'s collapse route already carried this guard; the outcome
+// route did not, which is what makes it a miss rather than a design choice.
+
+test('F-1: a zero canonical baseline is reported as unmeasurable, not as a failure to improve', () => {
+  const out = measureOutcome({ id: 'release-ritual-skill', baseline: { count: 0 } }, {
+    promptPatterns: { clusters: [] },
+  });
+  assert.equal(out.measurable, false, 'there is no comparison to make');
+  assert.equal(out.improved, false);
+  assert.match(out.deltaText, /nothing to measure/,
+    'and the text says so rather than reporting the vacuous "0 → 0"');
+  assert.doesNotMatch(out.deltaText, /0 → 0/);
+});
+
+test('F-1: a card adopted at a zero baseline is NOT retired after the patience window elapses', () => {
+  const c = cluster({ key: 'kk', name: 'Release ritual', count: 12, sessions: 8, days: 4 });
+  const cards = deriveCards({
+    promptPatterns: { clusters: [c] }, promptBaselines: null, promptsByHost: null, insights: [], now: NOW,
+  });
+  // Canonical evidence is MEASURED and genuinely zero — structurally distinct
+  // from the N-2 "unmeasurable" case above, and the case F-1 is about.
+  const canonical = { promptPatterns: { clusters: [] } };
+  const adopted = { claudeMdTexts: ['- always run the release ritual skill'], skillDirs: ['release-ritual'], currentPatterns: canonical };
+
+  let { ledger } = reconcile(ledgerOf([]), cards, { now: NOW, adoptionInputs: adopted });
+  ({ ledger } = reconcile(ledger, cards, { now: NOW + DAY_MS, adoptionInputs: adopted }));
+  assert.equal(ledger.records[0].status, 'adopted', 'guard: the scenario must actually reach adopted');
+  assert.equal(ledger.records[0].baseline.count, 0, 'guard: at a measured-zero baseline');
+
+  // Well past OUTCOME_MIN_DAYS, with the operator having changed nothing back.
+  ({ ledger } = reconcile(ledger, cards, {
+    now: NOW + DAY_MS + (OUTCOME_MIN_DAYS + 1) * DAY_MS, adoptionInputs: adopted,
+  }));
+  assert.equal(ledger.records[0].status, 'adopted',
+    'a verdict the arithmetic could not have avoided is not a verdict');
+  assert.equal(ledger.records[0].refutation, undefined, 'and no refutation is written');
+  assert.equal(ledger.records[0].outcome.measurable, false);
+});
+
+test('F-1: a POSITIVE baseline that genuinely does not improve is still retired, as before', () => {
+  const c = cluster({ key: 'kk', name: 'Release ritual', count: 12, sessions: 8, days: 4 });
+  const cards = deriveCards({
+    promptPatterns: { clusters: [c] }, promptBaselines: null, promptsByHost: null, insights: [], now: NOW,
+  });
+  const canonical = { promptPatterns: { clusters: [c] } };
+  const adopted = { claudeMdTexts: ['- always run the release ritual skill'], skillDirs: ['release-ritual'], currentPatterns: canonical };
+
+  let { ledger } = reconcile(ledgerOf([]), cards, { now: NOW, adoptionInputs: adopted });
+  ({ ledger } = reconcile(ledger, cards, { now: NOW + DAY_MS, adoptionInputs: adopted }));
+  assert.equal(ledger.records[0].status, 'adopted');
+  ({ ledger } = reconcile(ledger, cards, {
+    now: NOW + DAY_MS + (OUTCOME_MIN_DAYS + 1) * DAY_MS, adoptionInputs: adopted,
+  }));
+  assert.equal(ledger.records[0].status, 'retired', 'the fix must not disarm real refutation');
+  assert.match(ledger.records[0].refutation, /12 → 12 since adoption/);
+});
+
+// ── QE review F-2 (MEDIUM): a display-only window must not persist `expired` ─
+// The C-1 fix made every ledger-facing EVIDENCE read canonical, but not the
+// decision about WHICH CARDS FIRE — and that is what drives proposed→expired.
+// Merely LOOKING at a narrower window wrote "evidence no longer present" to
+// disk when the evidence was entirely present, inflated the `N expired` line
+// on both surfaces, and reset statusAt.
+
+test('F-2: a non-canonical pass does not expire a proposed card whose canonical evidence never moved', () => {
+  const c = cluster({ key: 'kk', name: 'Release ritual', count: 12, sessions: 8, days: 4 });
+  const canonical = { currentPatterns: { promptPatterns: { clusters: [c] } } };
+  const cards = deriveCards({
+    promptPatterns: { clusters: [c] }, promptBaselines: null, promptsByHost: null, insights: [], now: NOW,
+  });
+
+  let { ledger } = reconcile(ledgerOf([]), cards, { now: NOW, adoptionInputs: canonical });
+  assert.equal(ledger.records[0].status, 'proposed');
+  const statusAtBefore = ledger.records[0].statusAt;
+
+  // `--window 7`: too few occurrences for the rule to fire, so NO cards this
+  // pass — while the canonical evidence behind it is unchanged.
+  ({ ledger } = reconcile(ledger, [], {
+    now: NOW + DAY_MS, adoptionInputs: canonical, canonicalBasis: false,
+  }));
+  assert.equal(ledger.records[0].status, 'proposed', 'looking is not a verdict');
+  assert.equal(ledger.records[0].statusAt, statusAtBefore, 'and statusAt is not reset by looking');
+  assert.deepEqual(summarizeLedger(ledger.records),
+    { proposed: 1, adopted: 0, dismissed: 0, expired: 0, retired: 0 },
+    'so the ledger summary line on both surfaces is not inflated either');
+});
+
+test('F-2: a CANONICAL pass whose card genuinely stopped firing still expires it', () => {
+  const c = cluster({ key: 'kk', name: 'Release ritual', count: 12, sessions: 8, days: 4 });
+  const canonical = { currentPatterns: { promptPatterns: { clusters: [c] } } };
+  const cards = deriveCards({
+    promptPatterns: { clusters: [c] }, promptBaselines: null, promptsByHost: null, insights: [], now: NOW,
+  });
+  let { ledger } = reconcile(ledgerOf([]), cards, { now: NOW, adoptionInputs: canonical });
+  ({ ledger } = reconcile(ledger, [], { now: NOW + DAY_MS, adoptionInputs: canonical }));
+  assert.equal(ledger.records[0].status, 'expired', 'the fix must not disarm real expiry');
+});
+
+// ── QE review F-11 (LOW): the numeric guards F-1 turns on, pinned at zero ───
+// Three mutations survived the suite: removing the collapse route's
+// `baselineCount > 0`, weakening `improved` from `<` to `<=`, and inverting
+// `hasWorsenedMaterially`'s zero-count branch. The suite covered these
+// functions' documented behaviours well and none of their behaviour AT ZERO,
+// which is exactly where F-1 lives.
+
+test('F-11 (P26): a zero baseline cannot fabricate a collapse-adoption', () => {
+  // Without the `baselineCount > 0` guard, `0 <= 0 * 0.2` is true and this
+  // reports adopted-by-collapse against a baseline that held nothing.
+  const inputs = (baselineCount) => ({
+    claudeMdTexts: [],
+    skillDirs: [],
+    currentPatterns: { promptPatterns: { clusters: [] } },
+    ledgerRecord: { baseline: { count: baselineCount } },
+  });
+  const zero = detectAdoption({ id: 'release-ritual-skill' }, inputs(0));
+  assert.equal(zero.adopted, false, 'nothing collapsed, because there was nothing there');
+  assert.equal(zero.via, null);
+  // The same call with a real baseline DOES collapse — so the assertion above
+  // is about the zero, not about the route being unreachable from here.
+  const positive = detectAdoption({ id: 'release-ritual-skill' }, inputs(10));
+  assert.deepEqual(positive, { adopted: true, via: 'collapse' },
+    'guard: a positive baseline whose count fell to zero is still a collapse-adoption');
+});
+
+test('F-11 (P27): improved is a STRICT decrease — an unchanged count is not an improvement', () => {
+  const same = measureOutcome({ id: 'release-ritual-skill', baseline: { count: 5 } }, {
+    promptPatterns: { clusters: [cluster({ key: 'kk', name: 'Release ritual', count: 5, sessions: 5, days: 5 })] },
+  });
+  assert.equal(same.improved, false, '5 → 5 is not improvement');
+  const down = measureOutcome({ id: 'release-ritual-skill', baseline: { count: 5 } }, {
+    promptPatterns: { clusters: [cluster({ key: 'kk', name: 'Release ritual', count: 4, sessions: 4, days: 4 })] },
+  });
+  assert.equal(down.improved, true, 'any real drop counts — the 14-day patience lives in the ledger, not here');
+});
+
+test('F-11 (P28): any recurrence after a zero-count dismissal is material', () => {
+  // `hasWorsenedMaterially` is not exported; drive it through the transition
+  // it gates. A card dismissed when its count was 0 has no denominator for the
+  // ratio, so ANY reappearance is material — inverting that branch would
+  // silently suppress the re-proposal forever.
+  const c = cluster({ key: 'kk', name: 'Release ritual', count: 12, sessions: 8, days: 4 });
+  const cards = deriveCards({
+    promptPatterns: { clusters: [c] }, promptBaselines: null, promptsByHost: null, insights: [], now: NOW,
+  });
+  const zeroCanonical = { currentPatterns: { promptPatterns: { clusters: [] } } };
+  let { ledger } = reconcile(ledgerOf([]), cards, { now: NOW, adoptionInputs: zeroCanonical });
+  ledger = dismissCard(ledger, 'release-ritual-skill', cards, {
+    adoptionInputs: zeroCanonical, now: NOW + DAY_MS,
+  }).ledger;
+  assert.equal(ledger.records[0].status, 'dismissed');
+  assert.equal(ledger.records[0].dismissedAtCount ?? 0, 0, 'guard: dismissed at a zero count');
+
+  // The habit comes back, and the evidence hash moves with it.
+  const worse = cluster({ key: 'kk', name: 'Release ritual', count: 20, sessions: 14, days: 9 });
+  const worseCards = deriveCards({
+    promptPatterns: { clusters: [worse] }, promptBaselines: null, promptsByHost: null, insights: [], now: NOW,
+  });
+  ({ ledger } = reconcile(ledger, worseCards, {
+    now: NOW + 2 * DAY_MS,
+    adoptionInputs: { currentPatterns: { promptPatterns: { clusters: [worse] } } },
+  }));
+  assert.equal(ledger.records[0].status, 'proposed',
+    'a recurrence after a zero-count dismissal must re-propose exactly once');
+});

@@ -47,9 +47,12 @@ function fmtNum(n) { return (Number(n) || 0).toLocaleString(); }
 function coachingStatusLine(card) {
   if (card.status === 'adopted') {
     if (!card.outcome) return 'adopted ✓';
-    return card.outcome.improved
-      ? `adopted ✓ — ${card.outcome.deltaText} (30d basis)`
-      : `adopted ✓ — too early to tell (${card.outcome.deltaText} (30d basis))`;
+    if (card.outcome.improved) return `adopted ✓ — ${card.outcome.deltaText} (30d basis)`;
+    // QE review F-1: an UNMEASURABLE outcome is not a "not yet", it is a
+    // "cannot". "Too early to tell" promises a verdict that, against a zero
+    // baseline, can never arrive — and the ledger no longer pretends one will.
+    if (card.outcome.measurable === false) return `adopted ✓ — ${card.outcome.deltaText}`;
+    return `adopted ✓ — too early to tell (${card.outcome.deltaText} (30d basis))`;
   }
   if (card.status === 'retired') return `retired — did not improve: ${card.refutation} (30d basis)`;
   if (card.status === 'dismissed') return 'dismissed';
@@ -326,8 +329,15 @@ export async function resolveCoachingAndEnrichment({
   // hydrateStoredCards restores their content; the ledger still owns their
   // lifecycle exactly like a rule card's.
   const storedCards = hydrateStoredCards((enrichment?.labelStore ?? labelStore).cards);
+  // QE review F-2: `ruleCards` derive from the OPERATOR'S window (deliberately
+  // — that is what the report shows), while every ledger-facing evidence read
+  // is canonical. Telling reconcile which basis the CARDS came from is what
+  // stops a display-only `--window` switch from persisting `expired` on a card
+  // whose canonical evidence never moved.
   const { ledger, cards: reconciledCards } = reconcile(loadedLedger, [...ruleCards, ...storedCards], {
-    adoptionInputs: { ...adoptionInputs, currentPatterns }, now,
+    adoptionInputs: { ...adoptionInputs, currentPatterns },
+    now,
+    canonicalBasis: win.days === CANONICAL_WINDOW_DAYS,
   });
   // AFTER reconcile only — annotate() unconditionally sets stale:false, which
   // would clobber this if it ran first (usage-enrich.mjs's own doc).

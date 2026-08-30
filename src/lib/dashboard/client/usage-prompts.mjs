@@ -678,9 +678,12 @@ function coachingStatusChip(card) {
   if (status === 'adopted') {
     label = 'adopted ✓';
     if (card.outcome) {
-      label += card.outcome.improved
-        ? ' — ' + esc(card.outcome.deltaText) + ' (30d basis)'
-        : ' — too early to tell (' + esc(card.outcome.deltaText) + ' (30d basis))';
+      // QE review F-1: an unmeasurable outcome is a "cannot", not a "not yet"
+      // — "too early to tell" would promise a verdict a zero baseline can
+      // never deliver. Mirrors usage/coaching.mjs's coachingStatusLine.
+      if (card.outcome.improved) label += ' — ' + esc(card.outcome.deltaText) + ' (30d basis)';
+      else if (card.outcome.measurable === false) label += ' — ' + esc(card.outcome.deltaText);
+      else label += ' — too early to tell (' + esc(card.outcome.deltaText) + ' (30d basis))';
     }
   } else if (status === 'retired' && card.refutation) {
     label = 'retired — did not improve: ' + esc(card.refutation) + ' (30d basis)';

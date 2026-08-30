@@ -269,10 +269,17 @@ function annotate(card, record) {
  * @param {Ledger} ledger
  * @param {Array<CoachingCard>} cards this pass's `deriveCards` output
  * @param {{ adoptionInputs?: { claudeMdTexts?: string[], skillDirs?: string[],
- *   currentPatterns?: object }, now?: number }} [opts]
+ *   currentPatterns?: object }, now?: number, canonicalBasis?: boolean }} [opts]
+ *   `canonicalBasis` says whether `cards` were derived on the canonical
+ *   30-day window. It defaults TRUE, which is the safe default for the
+ *   evidence reads (they are canonical by construction, C-1) and makes this
+ *   parameter opt-OUT: a caller displaying a different window must say so, and
+ *   forfeits only the expiry transition (F-2).
  * @returns {{ ledger: Ledger, cards: Array<AnnotatedCard> }}
  */
-export function reconcile(ledger, cards, { adoptionInputs = {}, now = Date.now() } = {}) {
+export function reconcile(ledger, cards, {
+  adoptionInputs = {}, now = Date.now(), canonicalBasis = true,
+} = {}) {
   const records = loadRecordsMap(ledger);
   const seenIds = new Set();
   const outCards = [];
@@ -298,7 +305,7 @@ export function reconcile(ledger, cards, { adoptionInputs = {}, now = Date.now()
     outCards.push(annotate(card, records.get(card.id)));
   }
 
-  expireUnseenProposed(records, seenIds, now);
+  expireUnseenProposed(records, seenIds, now, canonicalBasis);
 
   return { ledger: { version: LEDGER_SCHEMA_VERSION, records: [...records.values()] }, cards: outCards };
 }
@@ -357,11 +364,23 @@ function transitionProposed(record, card, adoptionInputs, now) {
 }
 
 /** `adopted`: outcome measured every pass; not improved past
- *  OUTCOME_MIN_DAYS since adoption ⇒ `retired` with `refutation`. */
+ *  OUTCOME_MIN_DAYS since adoption ⇒ `retired` with `refutation`.
+ *
+ *  QE review F-1 (HIGH): retirement now requires a MEASURABLE outcome, not
+ *  merely an un-improved one. Without that check a card adopted against a
+ *  zero canonical baseline was retired 14 days later with the refutation
+ *  "0 → 0 since adoption" — a verdict the arithmetic could not have avoided,
+ *  since a count cannot fall below zero. The operator saw one card asserting
+ *  24 recurrences and, directly beneath it, a claim that their fix had not
+ *  worked. `detectAdoption`'s collapse route already carried exactly this
+ *  guard (usage-coaching.mjs, `baselineCount > 0`); the outcome route did not,
+ *  which is what makes it a miss rather than a design choice. The two routes
+ *  now agree, and they agree through `measureOutcome` rather than through two
+ *  parallel numeric checks that could drift apart again. */
 function transitionAdopted(record, adoptionInputs, now) {
   const outcome = measureOutcome(record, adoptionInputs.currentPatterns);
   record.outcome = { ...outcome, measuredAt: isoNow(now) };
-  if (outcome.improved) return;
+  if (outcome.improved || !outcome.measurable) return;
   const adoptedAt = Date.parse(record.statusAt);
   if (!Number.isFinite(adoptedAt) || now - adoptedAt < OUTCOME_MIN_DAYS * DAY_MS) return;
   record.status = 'retired';
@@ -380,8 +399,29 @@ function transitionExpired(record, card, adoptionInputs, now) {
   record.baseline = snapshotBaseline(card, adoptionInputs);
 }
 
-/** `proposed` whose card did not fire this pass ⇒ `expired`. */
-function expireUnseenProposed(records, seenIds, now) {
+/** `proposed` whose card did not fire this pass ⇒ `expired`.
+ *
+ *  QE review F-2 (MEDIUM): only when the cards were derived on the CANONICAL
+ *  window. The C-1 fix made every ledger-facing EVIDENCE read canonical —
+ *  baselines, collapse, outcomes — but not the decision about WHICH CARDS
+ *  FIRE, and that is what drives this transition. Rule cards derive from the
+ *  operator's `--window` (deliberately, for display), so merely LOOKING at a
+ *  narrower window made a card stop firing, and the CLI persisted `expired` on
+ *  its way out. Reproduced with the canonical 30-day evidence identical on all
+ *  three runs:
+ *
+ *    ak usage prompts             -> proposed
+ *    ak usage prompts --window 7  -> expired   (PERSISTED)
+ *    ak usage prompts             -> proposed  (statusAt reset)
+ *
+ *  which wrote a claim the module knew to be false — "evidence no longer
+ *  present", when it was entirely present — inflated the `N expired` summary
+ *  on both surfaces, and reset `statusAt`. The module's own rule settles it:
+ *  a record must not change lifecycle state on evidence it has already
+ *  decided is not commensurable. A non-canonical pass still RENDERS whatever
+ *  it likes; it just does not get to write a verdict. */
+function expireUnseenProposed(records, seenIds, now, canonicalBasis) {
+  if (!canonicalBasis) return;
   for (const [id, record] of records) {
     if (record.status === 'proposed' && !seenIds.has(id)) {
       record.status = 'expired';

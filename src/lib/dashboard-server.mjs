@@ -1796,8 +1796,15 @@ async function dashboardCoachingPayload(agg, days, {
   };
   const findingsSummary = buildFindingsSummary(canonicalAgg);
   const allCards = [...cards, ...hydrateStoredCards(storedCards)];
+  // QE review F-2: the displayed cards come from the operator's day selector,
+  // so the same non-canonical-basis rule the CLI follows applies here. This
+  // payload is read-only, so no expiry could ever have been persisted from it
+  // — but it DID mis-render the count, and both surfaces reconcile through one
+  // function precisely so they cannot disagree about a card's status.
   const { cards: annotated, ledger } = reconcile(loadedLedger, allCards, {
-    adoptionInputs: { ...memoizedAdoptionInputs(cwd), currentPatterns }, now: Date.now(),
+    adoptionInputs: { ...memoizedAdoptionInputs(cwd), currentPatterns },
+    now: Date.now(),
+    canonicalBasis: days === CANONICAL_WINDOW_DAYS,
   });
   applyCardStaleness(annotated, findingsSummary);
   return { cards: annotated, summary: summarizeLedger(ledger.records) };
