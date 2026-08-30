@@ -29,6 +29,16 @@ import {
   printCoaching, coachingProjection, unavailableCoaching, knownCardIdsText,
   runDraftFlag, runDismissFlag, canonicalCoachingAgg, currentPatternsOf,
 } from './usage/coaching.mjs';
+// W5 enrichment (spec §6.3): the engine (pure logic) plus the store it
+// reads/writes. runEnrichPass (the --enrich flow itself: consent preamble,
+// exemplar gathering, persistence) lives in ./usage/enrich.mjs — imported
+// below the exports it needs from THIS file, so it can reuse the deep-pass
+// machinery rather than re-deriving it.
+import {
+  applyLabelStoreToPatterns, hydrateStoredCards, applyCardStaleness, buildFindingsSummary,
+} from '../lib/usage-enrich.mjs';
+import { loadLabelStore, defaultLabelStorePath } from '../lib/usage-label-store.mjs';
+import { runEnrichPass } from './usage/enrich.mjs';
 
 export const options = {
   json: { type: 'boolean', default: false },
@@ -42,6 +52,8 @@ export const options = {
   // persist a dismissal. Both take a card id, so both are strings, not flags.
   draft: { type: 'string' },
   dismiss: { type: 'string' },
+  // Layer-3 enrichment (spec §6.3), prompts-only, opt-in, CLI-only inference.
+  enrich: { type: 'boolean', default: false },
 };
 
 export const help = `ak usage — provider account analytics cache + offline scorecard summary
@@ -56,7 +68,7 @@ Usage:
   ak usage status
   ak usage refresh openrouter
   ak usage score [--window 7|14|30] [--json]
-  ak usage prompts [--window 7|14|30|all] [--deep] [--json] [--draft ID] [--dismiss ID]
+  ak usage prompts [--window 7|14|30|all] [--deep] [--enrich] [--json] [--draft ID] [--dismiss ID]
 
 \`ak usage prompts\` reads the prompt FINGERPRINTS the transcript scan already
 stores — a hash, a token count, a bounded token-hash sketch, and who wrote the
@@ -65,6 +77,14 @@ exception, and is opt-in for exactly that reason: it re-reads the transcripts
 to print the text behind each finding. That text goes to your terminal and is
 written nowhere — but with --json it is in the payload, so redirect that to a
 file only if you mean to.
+
+\`--enrich\` is a SEPARATE opt-in: a delta-only model call (the Claude Code
+CLI, your subscription) that names still-unnamed recurring clusters and
+proposes up to three coaching cards, grounded ONLY in masked exemplar
+snippets and aggregate counts — never a full prompt. It prints exactly what
+it is about to send before sending it. Settled labels are never re-judged.
+Without the Claude Code CLI on PATH, it prints one line and exits 0 — every
+deterministic tier of this report is unaffected.
 
 Environment:
   OPENROUTER_MANAGEMENT_KEY   required only for refresh; an inference key is
@@ -81,6 +101,9 @@ Options:
               many it opened and how long it took. With --json the exemplars
               (which CONTAIN PROMPT TEXT) ride under an \`exemplars\` key.
   --draft ID    prompts only: print that card's draft verbatim; --dismiss ID persists a dismissal
+  --enrich    prompts only: run the delta-inference labeling/coaching pass. Needs the Claude
+              Code CLI; prints what will be sent before it sends anything. With --json the
+              result rides under an \`enrichment\` key (counts only — never text).
 
 Examples:
   ak usage status                    inspect the offline cache; no network
@@ -741,7 +764,16 @@ const MAX_DEEP_FILE_BYTES = 64 * 1024 * 1024;
  *  the reference corpus opens for a full table. */
 const MAX_DEEP_TRANSCRIPTS = 400;
 
-function promptCacheFile() { return path.join(configDir(), 'usage-index.json'); }
+export function promptCacheFile() { return path.join(configDir(), 'usage-index.json'); }
+
+// This function and the other four exported below (readPromptEntries,
+// deepFingerprints, exemplarCandidates, collectExemplars) are exported
+// SOLELY so usage/enrich.mjs's --enrich flow can reuse this exact exemplar-
+// gathering machinery for its own, scoped-to-candidate-clusters pass rather
+// than re-deriving a second copy of it (spec §2.3's CLI-only privacy split
+// stays enforced by having exactly one place that opens a transcript at
+// all). Not part of this command's own CLI contract — see the __test export
+// at the bottom of this file for that boundary.
 
 /** Parsed session records from the index cache, each with the SOURCE it was
  *  parsed from — the cache is keyed by transcript path, which is what lets this
@@ -750,7 +782,7 @@ function promptCacheFile() { return path.join(configDir(), 'usage-index.json'); 
  *  schema): no exemplars is a reportable state, not an error.
  *
  *  @returns {Array<{ file: string, dbFile: string|null, rec: any }>} */
-function readPromptEntries(cacheFile) {
+export function readPromptEntries(cacheFile) {
   try {
     const raw = JSON.parse(fs.readFileSync(cacheFile, 'utf8'));
     if (raw?.schemaVersion !== SCHEMA_VERSION || !raw.entries) return [];
@@ -786,7 +818,7 @@ function firstBilledDay(rec) {
  * personas, so restating the mapping would be a second copy of a contract it
  * does not use.
  */
-function deepFingerprints(entries, cutoffMs) {
+export function deepFingerprints(entries, cutoffMs) {
   const out = [];
   for (const { rec } of entries) {
     if (!inWindow(rec, cutoffMs)) continue;
@@ -887,7 +919,7 @@ function personaGroups(typed) {
  * count. The same text exists in a dozen smaller transcripts; the pass just
  * has to be willing to look in the next one.
  */
-function exemplarCandidates(typed, wanted) {
+export function exemplarCandidates(typed, wanted) {
   const bySession = new Map();
   for (const fp of typed) {
     if (!wanted.has(fp.h) || !fp.sessionId) continue;
@@ -924,7 +956,7 @@ function reAskMinutes(turns, pair) {
  * still hold a hash nothing has answered yet, so a corpus where one big
  * session covers most of the table costs a handful of files.
  */
-function collectExemplars({ entries, cutoffMs, candidates, reAskSessions, wanted }) {
+export function collectExemplars({ entries, cutoffMs, candidates, reAskSessions, wanted }) {
   const byId = new Map();
   for (const entry of entries) if (inWindow(entry.rec, cutoffMs)) byId.set(entry.rec.id, entry);
   const text = new Map();            // hash → first verbatim text seen for it
@@ -1159,7 +1191,31 @@ function printDeepPass(deep) {
 // Coaching section rendering, --json shapes, and --draft/--dismiss handling
 // (spec §5, §6.4) live in ./usage/coaching.mjs (imported above) — split out
 // on the status.mjs/status/*.mjs precedent once this file crossed the
-// repo's max-lines threshold. runPrompts below is the only caller.
+// repo's max-lines threshold. The --enrich flow itself lives in
+// ./usage/enrich.mjs for the same reason. runPrompts below is the only
+// caller of either.
+
+/** The --json `enrichment` key: counts only, never text (spec: "--enrich
+ *  --json: enriched data included, still no text"). `null` when --enrich
+ *  was never able to run at all (no invocation path, or a future-schema
+ *  label store) — distinguished from "ran and did nothing" the same way
+ *  every other absent-vs-zero field on this payload is. */
+function enrichmentProjection(enrichment) {
+  if (!enrichment) return { ran: false };
+  return {
+    ran: true,
+    labels: {
+      candidates: enrichment.labelResult.candidates.length,
+      labeled: enrichment.labelResult.labeled,
+      dropped: enrichment.labelResult.dropped,
+    },
+    cards: {
+      proposed: enrichment.cardResult.proposed,
+      accepted: enrichment.cardResult.accepted,
+      dropped: enrichment.cardResult.dropped,
+    },
+  };
+}
 
 async function runPrompts({ flags, deps }) {
   const win = parsePromptWindow(flags.window);
@@ -1194,20 +1250,36 @@ async function runPrompts({ flags, deps }) {
     return 1;
   }
 
+  // W5 enrichment (spec §6.3): the persisted label store applies to EVERY
+  // pass, --enrich or not — a settled label is a fact about the corpus, not
+  // a one-time render. A newer-schema store reads as "no store" for THIS
+  // pass (same I-2 rule the outcome ledger already follows below); the
+  // write-refusal half of that rule is enforced inside runEnrichPass.
+  const labelStorePath = deps.labelStorePath ?? defaultLabelStorePath();
+  const labelStore = loadLabelStore(labelStorePath);
+  if (labelStore.future) {
+    warn(`ak usage prompts: the label store at ${labelStorePath} is a newer schema `
+      + `(v${labelStore.version}) this build does not understand — enriched labels/cards are `
+      + 'unavailable this run, and the file was left untouched.');
+  }
+  const activeLabels = labelStore.future ? {} : labelStore.labels;
+  agg.promptPatterns = applyLabelStoreToPatterns(agg.promptPatterns, activeLabels);
+
   // Coaching cards (spec §5) derive from the OPERATOR'S window, for display —
   // `agg.insights` is populated unconditionally by aggregate()
   // (usage-aggregate.mjs), not only when `prompts: true`, so it needs no
   // separate read here.
-  const cards = deriveCards({
+  const ruleCards = deriveCards({
     promptPatterns: agg.promptPatterns, promptBaselines: agg.promptBaselines,
     promptsByHost: agg.promptsByHost, insights: agg.insights, now: Date.now(),
   });
 
-  // --draft is a pure read over `cards` alone — no ledger, no canonical
-  // fetch, no write (Fix round 1, M-7).
-  if (flags.draft != null) return runDraftFlag(cards, flags.draft, flags.json);
+  // --draft is a pure read over the RULE cards alone — no ledger, no
+  // canonical fetch, no write (Fix round 1, M-7). Enriched cards carry no
+  // draft (spec §6.3's synthesis contract has none), so this stays scoped.
+  if (flags.draft != null) return runDraftFlag(ruleCards, flags.draft, flags.json);
 
-  const report = promptReport(agg, win);
+  let report = promptReport(agg, win);
   const deep = flags.deep ? runDeepPass(agg, report, win, deps) : null;
 
   const ledgerPath = deps.ledgerPath ?? defaultLedgerPath();
@@ -1219,6 +1291,7 @@ async function runPrompts({ flags, deps }) {
 
   const loadedLedger = loadLedgerFn(ledgerPath);
   let coaching;
+  let enrichment = null;
   if (loadedLedger.future) {
     // Fix round 1, I-2: refuse to reconcile/overwrite a well-formed ledger
     // from a newer schema — doing so would silently resurrect every
@@ -1236,10 +1309,43 @@ async function runPrompts({ flags, deps }) {
       if (flags.dismiss != null) return 2;
       coaching = unavailableCoaching('the canonical 30-day aggregate could not be read');
     } else {
+      canonicalAgg.promptPatterns = applyLabelStoreToPatterns(canonicalAgg.promptPatterns, activeLabels);
       const currentPatterns = currentPatternsOf(canonicalAgg);
-      const { ledger, cards: reconciledCards } = reconcile(loadedLedger, cards, {
+      // Ledger-facing evidence is always the CANONICAL 30d window (Fix round
+      // 1, C-1) — an enriched card's findingsSummary/evidenceHash follow the
+      // exact same rule, so switching --window cannot move what an enriched
+      // card's staleness is judged against either.
+      const findingsSummary = buildFindingsSummary(canonicalAgg);
+
+      // --enrich (spec §6.3): a NEW inference pass, CLI-only, opt-in.
+      // Skipped entirely — not partially — when the label store itself is
+      // unreadable; a readable ledger does not make a partial write to an
+      // unreadable store safe.
+      if (flags.enrich && !labelStore.future) {
+        enrichment = await runEnrichPass({
+          agg, findingsSummary, labelStore, labelStorePath, win, deps, now, json: flags.json,
+        });
+        if (enrichment?.labelsChanged) {
+          agg.promptPatterns = applyLabelStoreToPatterns(agg.promptPatterns, enrichment.labelStore.labels);
+          report = promptReport(agg, win); // re-render the clusters table with the new names
+          canonicalAgg.promptPatterns = applyLabelStoreToPatterns(
+            canonicalAgg.promptPatterns, enrichment.labelStore.labels,
+          );
+        }
+      }
+
+      // Persisted enriched cards rejoin reconcile on EVERY pass, not only the
+      // one that synthesized them (spec: "join reconcile exactly like rule
+      // cards") — hydrateStoredCards restores their content; the ledger
+      // still owns their lifecycle exactly like a rule card's.
+      const storedCards = hydrateStoredCards((enrichment?.labelStore ?? labelStore).cards);
+      const allCards = [...ruleCards, ...storedCards];
+      const { ledger, cards: reconciledCards } = reconcile(loadedLedger, allCards, {
         adoptionInputs: { ...adoptionInputs, currentPatterns }, now,
       });
+      // AFTER reconcile only — annotate() unconditionally sets stale:false,
+      // which would clobber this if it ran first (usage-enrich.mjs's own doc).
+      applyCardStaleness(reconciledCards, findingsSummary);
 
       if (flags.dismiss != null) {
         const knownIds = new Set(reconciledCards.map((c) => c.id));
@@ -1265,6 +1371,7 @@ async function runPrompts({ flags, deps }) {
 
   if (flags.json) {
     const projection = { ...promptProjection(agg, report), coaching };
+    if (flags.enrich) projection.enrichment = enrichmentProjection(enrichment);
     console.log(JSON.stringify(deep ? { ...projection, exemplars: deep } : projection, null, 2));
     return 0;
   }

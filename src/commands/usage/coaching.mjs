@@ -53,6 +53,11 @@ function printCoachingCard(card) {
   info(`  Status: ${coachingStatusLine(card)}`);
   if (card.draft) info(dim(`  Draft → ak usage prompts --draft ${card.id}`));
   if (card.status === 'proposed') info(dim(`  Dismiss → ak usage prompts --dismiss ${card.id}`));
+  // W5 enrichment (spec §6.3): only an ENRICHED card's evidence can drift out
+  // from under its cache — a rule card recomputes fresh every pass and so
+  // `card.stale` is always false for it (usage-enrich.mjs's applyCardStaleness
+  // never even writes that field on a non-enriched card).
+  if (card.stale) info(dim('  stale — recompute with ak usage prompts --enrich'));
   info(dim(`  as of ${card.generatedAt} · ${card.evidenceHash.slice(0, 8)}`));
 }
 

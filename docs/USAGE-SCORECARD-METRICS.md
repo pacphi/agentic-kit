@@ -1290,7 +1290,7 @@ p(q), over N samples, landing in bucket i (count n_i, running total `cum` before
 - Render: `lengthCard`/`latencyCard` and the `≥` prefix helper `fmtAtLeast` in
   `src/lib/dashboard/client/usage.mjs` (that bundle shares a basename with the
   CLI command module, so its render sites are cited by function name rather
-  than by line); the CLI's own `fmtAtLeast` is `src/commands/usage.mjs:175-178`
+  than by line); the CLI's own `fmtAtLeast` is `src/commands/usage.mjs:211-214`
   and `printScoreRhythm` (`src/commands/usage.mjs:244-251`) prints the pair.
 
 **Worked example**, latency, computable by hand. `latHist = [10, 30, 20, 25,
@@ -1435,7 +1435,7 @@ off each `turn_context`, last one wins since a session may renegotiate mid-run
 (`usage-parsers.mjs:697-702`); OpenCode's `mode` off each assistant message
 (`usage-opencode.mjs:240-241`). Render is `modeChart` in
 `src/lib/dashboard/client/usage.mjs`; the CLI table is `printScoreModeTable`
-(`src/commands/usage.mjs:279-281`).
+(`src/commands/usage.mjs:302-304`).
 
 **The mapping table**, in full (`usage-modes.mjs:6-17`), pinned value-by-value
 by `normalizeMode` assertions in `tests/kit/usage-modes.test.mjs:9-52`, and the
@@ -1607,7 +1607,7 @@ second, drifting way. `median` and `percentile` are exact over the values
 (`usage-aggregate.mjs:964-969`, `:974-979`), unlike §15's bucketed percentiles.
 Active days come from `byDay`'s key count and the streak from `activeStreak` in
 `src/lib/dashboard/client/usage.mjs`; the tiles are `cadenceCells` there, and
-`printScoreCadence` (`src/commands/usage.mjs:187-211`) in the CLI.
+`printScoreCadence` (`src/commands/usage.mjs:255-278`) in the CLI.
 
 **Autonomy divides by prompts a human typed, and only those.** The denominator
 is `totals.humanPrompts`, accumulated under an explicit main-thread guard
@@ -1649,7 +1649,7 @@ refactor can outweigh forty short sessions, and a mean would describe that one
 session rather than the run of them. P90 rides beside it precisely so the tail
 stays visible instead of being hidden by the choice of a robust centre. A
 positive figure that rounds away at two decimals prints `<$0.01`, never
-`$0.00` (`fmtUsdMin`, `src/commands/usage.mjs:128-132`) — "less than a cent" and
+`$0.00` (`fmtUsdMin`, `src/commands/usage.mjs:164-168`) — "less than a cent" and
 "nothing" are different claims.
 
 **What the cache saved, asked as a difference.** `cacheSavingPerMillion`
@@ -1705,7 +1705,7 @@ which a zeroed totals object would misreport as "measured nothing"
 (`usage-aggregate.mjs:1213`). A chip self-suppresses when the baseline is null
 or zero, and a magnitude that rounds to zero prints flat rather than drawing an
 arrow the printed number does not support (`deltaChip`,
-`usage-rhythm.mjs:36-53`; `fmtDelta`, `src/commands/usage.mjs:184-196`).
+`usage-rhythm.mjs:36-53`; `fmtDelta`, `src/commands/usage.mjs:220-231`).
 
 **Engaged time by day is a sibling map, not a `byDay` field.** `byDay`'s
 presence contract is **billed days only** — a key exists exactly when tokens

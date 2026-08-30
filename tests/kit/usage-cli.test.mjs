@@ -816,7 +816,7 @@ test('ak usage --help documents prompts, its windows, and what --deep prints', (
   const sb = sandbox();
   const result = ak(['usage', '--help'], sb);
   assert.equal(result.status, 0, result.stderr);
-  assert.match(result.stdout, /ak usage prompts \[--window 7\|14\|30\|all\] \[--deep\] \[--json\]/);
+  assert.match(result.stdout, /ak usage prompts \[--window 7\|14\|30\|all\] \[--deep\] \[--enrich\] \[--json\]/);
   assert.match(result.stdout, /default all/, 'the unusual default has to be stated where it is read');
   assert.match(result.stdout, /--deep/);
   // The one thing a reader must not have to discover by accident.
@@ -957,4 +957,148 @@ test('ak usage prompts --deep masks secrets on every path text can reach the ter
     'the fallback ask is unmasked — exemplarText was reached without maskSecrets');
 
   fs.rmSync(sb.home, { recursive: true, force: true });
+});
+
+// ── --enrich (W5, spec §6.3) — layer-3 enrichment, CLI-only inference ──────
+//
+// NO REAL NETWORK AND NO REAL CLAUDE CALL IN ANY TEST HERE. `ak` is a real
+// subprocess (spawnSync), so there is no in-process seam to inject a fake
+// `invoke` through — hermeticity comes from a THROWAWAY PATH, the same
+// technique sandbox()'s own fake `bin/npm` already uses for npm, and
+// llm-invoke.test.mjs uses for its own end-to-end pins. `ak()`'s third
+// argument (`extra`) overrides the constructed PATH entirely (it spreads
+// last), which is what lets a "claude absent" test exclude the real
+// developer PATH — this dev machine, by this session's own project
+// conventions, very likely has a real claude CLI installed somewhere on it.
+
+/** A Node-scripted `claude` shim (no shebang portability concerns): reads its
+ *  own `-p <prompt>` argv, and answers ONE of two shapes depending on which
+ *  of usage-enrich.mjs's two prompts it was asked — labels (extracts every
+ *  `key: <hash>` the label prompt lists and proposes a name for each) or
+ *  cards (returns an empty array; the anti-fabrication gate is already
+ *  pinned at the unit level in usage-enrich.test.mjs, so this shim keeps the
+ *  CLI-level pin focused on the label half actually reaching a render). */
+function writeClaudeShim(dir, { cardsJson = '[]' } = {}) {
+  const bin = path.join(dir, 'claude');
+  fs.writeFileSync(bin, `#!/usr/bin/env node
+const prompt = process.argv[3] || '';
+if (prompt.includes('naming recurring prompt clusters')) {
+  const keys = [...prompt.matchAll(/key: ([0-9a-f]+)/g)].map((m) => m[1]);
+  process.stdout.write(JSON.stringify(keys.map((key) => ({ key, name: 'Shimmed cluster name' }))));
+} else {
+  process.stdout.write(${JSON.stringify(cardsJson)});
+}
+`, { mode: 0o755 });
+  return bin;
+}
+
+/** Minimal PATH: the shim dir plus the sandbox's own npm-interception dir
+ *  (matching every other test's convention), core system dirs for `which`
+ *  et al., and — because the shim script below is itself a `#!/usr/bin/env
+ *  node` script — the directory THIS test process's own node lives in, which
+ *  is very likely NOT `/usr/bin` (nvm/mise/homebrew all install elsewhere).
+ *  Still deliberately EXCLUDING the developer's real PATH beyond that. */
+function enrichPath(sb, shimDir) {
+  return [shimDir, sb.bin, path.dirname(process.execPath), '/usr/bin', '/bin'].filter(Boolean).join(path.delimiter);
+}
+
+function labelStoreFile(sb) {
+  return path.join(sb.cfg, 'agentic-kit', 'usage-prompt-labels.json');
+}
+
+test('ak usage prompts --enrich with no claude CLI on PATH prints one honest line, exits 0, and renders the normal report', () => {
+  const sb = sandbox();
+  writePromptsCorpus(sb);
+  const result = ak(['usage', 'prompts', '--window', '30', '--enrich'], sb, {
+    PATH: [sb.bin, '/usr/bin', '/bin'].join(path.delimiter),
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /enrichment needs the Claude Code CLI; deterministic tiers are unaffected/);
+  assert.match(result.stdout, /Recurring clusters/, 'the normal deterministic report still renders');
+  assert.match(result.stdout, /Coaching/);
+  assert.equal(fs.existsSync(labelStoreFile(sb)), false, 'no label store is written when nothing ran');
+  fs.rmSync(sb.home, { recursive: true, force: true });
+});
+
+test('ak usage prompts --enrich with a shimmed claude CLI labels a candidate cluster, persists, and re-renders the name', () => {
+  const sb = sandbox();
+  writePromptsCorpus(sb);
+  const shimDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-claude-shim-'));
+  writeClaudeShim(shimDir);
+  const result = ak(['usage', 'prompts', '--window', '30', '--enrich'], sb, { PATH: enrichPath(sb, shimDir) });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /Enrichment/);
+  assert.match(result.stdout, /About to send \d+ clusters? \(\d+ masked snippets?\)/);
+  assert.match(result.stdout, /Billing: Claude Code CLI/);
+  assert.match(result.stdout, /Labeled \d+ of \d+ candidate cluster/);
+  assert.match(result.stdout, /Synthesized 0 new coaching cards/);
+  assert.match(result.stdout, /Shimmed cluster name/, 'the re-rendered clusters table shows the enriched name');
+  assert.match(result.stdout, /\benriched\b/, 'the source column reflects the new label');
+
+  const stored = JSON.parse(fs.readFileSync(labelStoreFile(sb), 'utf8'));
+  assert.equal(stored.version, 1);
+  const [entry] = Object.values(stored.labels);
+  assert.equal(entry.name, 'Shimmed cluster name');
+  assert.equal(entry.source, 'enriched');
+  fs.rmSync(sb.home, { recursive: true, force: true });
+  fs.rmSync(shimDir, { recursive: true, force: true });
+});
+
+test('ak usage prompts --enrich is delta-only: a second run never re-sends an already-settled label', () => {
+  const sb = sandbox();
+  writePromptsCorpus(sb);
+  const shimDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-claude-shim-'));
+  writeClaudeShim(shimDir);
+  const first = ak(['usage', 'prompts', '--window', '30', '--enrich'], sb, { PATH: enrichPath(sb, shimDir) });
+  assert.equal(first.status, 0, first.stderr);
+  const afterFirst = fs.readFileSync(labelStoreFile(sb), 'utf8');
+
+  const second = ak(['usage', 'prompts', '--window', '30', '--enrich'], sb, { PATH: enrichPath(sb, shimDir) });
+  assert.equal(second.status, 0, second.stderr);
+  assert.match(second.stdout, /Labeled 0 of 0 candidate clusters/,
+    'the settled cluster must not be a candidate again — settled labels are never re-judged');
+  assert.equal(fs.readFileSync(labelStoreFile(sb), 'utf8'), afterFirst,
+    'the store must be byte-identical — nothing changed, nothing was rewritten');
+
+  fs.rmSync(sb.home, { recursive: true, force: true });
+  fs.rmSync(shimDir, { recursive: true, force: true });
+});
+
+test('ak usage prompts --enrich --json includes an enrichment summary and never leaks the shim output as text', () => {
+  const sb = sandbox();
+  writePromptsCorpus(sb);
+  const shimDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-claude-shim-'));
+  writeClaudeShim(shimDir);
+  const result = ak(['usage', 'prompts', '--window', '30', '--enrich', '--json'], sb, { PATH: enrichPath(sb, shimDir) });
+  assert.equal(result.status, 0, result.stderr);
+  assert.doesNotMatch(result.stdout, /^Enrichment$/m, 'no human-readable status text mixed into --json stdout');
+  const value = JSON.parse(result.stdout);
+  assert.ok(value.enrichment, 'the enrichment key must be present');
+  assert.equal(value.enrichment.ran, true);
+  assert.equal(value.enrichment.labels.labeled, value.enrichment.labels.candidates);
+  assert.equal(value.enrichment.cards.accepted, 0);
+  const cluster = value.patterns.clusters.find((c) => c.label.source === 'enriched');
+  assert.ok(cluster, 'the enriched cluster must show up with source "enriched" in the json payload too');
+  assert.equal(cluster.label.name, 'Shimmed cluster name');
+  fs.rmSync(sb.home, { recursive: true, force: true });
+  fs.rmSync(shimDir, { recursive: true, force: true });
+});
+
+test('ak usage prompts (no --enrich) applies a PREVIOUSLY persisted label without any invocation', () => {
+  const sb = sandbox();
+  writePromptsCorpus(sb);
+  const shimDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-claude-shim-'));
+  writeClaudeShim(shimDir);
+  const enrichRun = ak(['usage', 'prompts', '--window', '30', '--enrich'], sb, { PATH: enrichPath(sb, shimDir) });
+  assert.equal(enrichRun.status, 0, enrichRun.stderr);
+
+  // A plain run, PATH excluding the shim entirely — if this needed to invoke
+  // anything it would fail closed (ENOENT), not silently succeed.
+  const plain = ak(['usage', 'prompts', '--window', '30'], sb, { PATH: [sb.bin, '/usr/bin', '/bin'].join(path.delimiter) });
+  assert.equal(plain.status, 0, plain.stderr);
+  assert.match(plain.stdout, /Shimmed cluster name/, 'a persisted label applies on every pass, not only the pass that wrote it');
+  assert.match(plain.stdout, /\benriched\b/);
+
+  fs.rmSync(sb.home, { recursive: true, force: true });
+  fs.rmSync(shimDir, { recursive: true, force: true });
 });
