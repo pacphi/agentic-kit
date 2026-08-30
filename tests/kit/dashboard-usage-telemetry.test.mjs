@@ -879,7 +879,13 @@ test('how-you-steer splits only what the fingerprint layer measured, with a non-
   assert.match(html, /Questions/);
   assert.match(html, /Supervision taps/);
   // 100 typed, 30% questions = 30, 20 taps → 50 residue, and the bars rank.
-  assert.match(html, /Statements and instructions<\/span>.*?50 · 50%/s);
+  assert.match(html, /Statements and instructions \(at least\)<\/span>.*?50 · 50%/s);
+  // Final review P4-M3: that 50 is a FLOOR. Both counts are subtracted in
+  // full, so every prompt that is BOTH a question and a tap is removed twice
+  // — and the panel now says so rather than presenting the floor as the split.
+  assert.match(html, /both counts are subtracted in full/,
+    'the overlap caveat must render beside the figure it qualifies');
+  assert.match(html, /do not sum to 100%/);
   const overlap = steerPanel({
     ...PANEL_PROMPTS, taps: 90,
     byHost: { claude: { typed: 100, questionShare: 0.9 } },

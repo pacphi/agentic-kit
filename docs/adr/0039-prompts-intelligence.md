@@ -313,6 +313,20 @@ size was what exposed.
   v1. Whether a future wave should extend it toward the kit's broader multi-provider fallback
   pattern (as `agentic-qe`'s own LLM router already does) is an open question this build does not
   answer.
+- **Learned recommendation ranking.** The spec's §6.4 asked that "adopted-and-worked raises the
+  ranking of similar future recommendations", and §6.3 for "plus a learned ranking". Neither is
+  built. Outcomes render on the card they belong to and reorder nothing. With six FIXED rules
+  there is nothing to rank yet, so the honest resolution is a recorded deferral rather than a
+  ranking layer built to satisfy a sentence; the day the rule set is open-ended, this becomes a
+  real question about what "similar" means across rules.
+- **Multi-project semantics of the adoption inputs' explicit-cwd contract.** `gatherAdoptionInputs`
+  reads CLAUDE.md and `.claude/skills/` from an EXPLICIT working directory (M-6 made that
+  explicit rather than ambient), and the CLI and the dashboard legitimately pass different ones:
+  the CLI reads where the operator invoked it, the dashboard reads where the server was started.
+  So the same card can read `adopted` on one surface and `proposed` on the other, correctly, for
+  an operator working across several projects. v1 discloses that at the code level and does not
+  attempt a cross-project notion of adoption — deciding whose CLAUDE.md counts is a design
+  question, not a defect to patch.
 
 ## Verification
 

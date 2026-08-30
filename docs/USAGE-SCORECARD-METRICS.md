@@ -1427,8 +1427,8 @@ p(q), over N samples, landing in bucket i (count n_i, running total `cum` before
 - Percentiles: `percentileFromBuckets` (`usage-aggregate.mjs:240-257`). The
   browser re-implementation `bucketPercentile` (`usage-rhythm.mjs:106-126`) is
   pinned to byte-identical output, and the browser's edge copies to the server
-  constants, by `tests/kit/dashboard-usage-telemetry.test.mjs:1519-1537` and
-  `:1617-1625`.
+  constants, by `tests/kit/dashboard-usage-telemetry.test.mjs:1525-1543` and
+  `:1623-1631`.
 - Render: `lengthCard`/`latencyCard` and the `≥` prefix helper `fmtAtLeast` in
   `src/lib/dashboard/client/usage.mjs` (that bundle shares a basename with the
   CLI command module, so its render sites are cited by function name rather
@@ -2261,7 +2261,7 @@ its formula and a "what this does not model" line in its own tooltip:
 | Repeated share | the sum of every cluster's `count` (the FULL list, never the table's slice) over `typed` |
 | Headless share | `headless.share`, absent-safe on an empty denominator |
 
-**Who is typing** (`provenancePanel`, `usage-prompts.mjs:263`) reads
+**Who is typing** (`provenancePanel`, `usage-prompts.mjs:275`) reads
 `patterns.provenance` — a
 row per tag in the closed vocabulary (§2a), including one this corpus never
 produced, at zero, so an empty row reads as "you have none of these" rather
@@ -2270,7 +2270,7 @@ behind the `human` slice and a reader who does not know how thin that slice
 is will read the rest as though it described all their traffic.
 
 **How you steer** (`steerPanel`, `usage-prompts.mjs:224`; `tapLengthPanel`,
-`usage-prompts.mjs:293`) splits
+`usage-prompts.mjs:305`) splits
 typed prompts into questions / supervision taps / "statements and
 instructions" (the residue — the shape rules do not split imperative from
 declarative), and beside it, taps by exact token length
@@ -2279,7 +2279,7 @@ layer, so a length distribution is the honest shape of "your top short
 prompts". A third slot names the missing subject-matter taxonomy rather than
 filling it with a guess (`taxonomyPlaceholder`).
 
-**Host interplay** (`hostInterplay`, `usage-prompts.mjs:350`) — one row per host: a tap-share
+**Host interplay** (`hostInterplay`, `usage-prompts.mjs:362`) — one row per host: a tap-share
 sparkline built from `statsByDay` (a day the host did not type on breaks the
 line rather than reading as zero), a p90-typed-length bar scaled against the
 longest host, and the typed persona-opener count. A caveat names any host
@@ -2287,8 +2287,8 @@ under 20 typed prompts as "a shape, not yet a trend" — windows are unequal
 per host by construction, so the panel says so rather than implying two
 hosts' histories are comparable.
 
-**Repeated patterns** (`patternsTable`, `usage-prompts.mjs:545`; `reAskPanel`,
-`usage-prompts.mjs:637`) — the
+**Repeated patterns** (`patternsTable`, `usage-prompts.mjs:557`; `reAskPanel`,
+`usage-prompts.mjs:649`) — the
 cluster table (Pattern / Type / n / Sessions / Days / Hosts / Suggested move /
 Open), capped at 25 rows with an explicit "showing N of K" line that also
 states the KPI above counts all of them; a compact "typed verbatim" tail for
@@ -2303,17 +2303,17 @@ row route through the existing `#usage/<id>` transcript reader — this table
 holds no transcript content of its own.
 
 **Coaching**, read-only (`coachingPanel`, whose own call renders each card below,
-`usage-prompts.mjs:799`; one card,
-`coachingCard`, `usage-prompts.mjs:761`) — the identical cards and ledger status §22 defines,
+`usage-prompts.mjs:811`; one card,
+`coachingCard`, `usage-prompts.mjs:773`) — the identical cards and ledger status §22 defines,
 reconciled server-side from the same lib and ledger `ak usage prompts` uses,
 so the two surfaces cannot disagree about a card's status any more than they
 can about a cluster's count. Every card renders finding → Try → basis → a
 status chip, a draft block (select-and-copy, no clipboard API) where the card
 carries one, and — because dismissal is CLI-only (§22) — a **hint**, not a
 button: `Dismiss (CLI-only): ak usage prompts --dismiss <id>`
-(`coachingDismissHint`, `usage-prompts.mjs:711`). An enriched card (§23)
+(`coachingDismissHint`, `usage-prompts.mjs:723`). An enriched card (§23)
 whose cached evidence has moved renders a **stale** chip with the same CLI
-pointer (`coachingStaleHint`, `usage-prompts.mjs:724`) — there is no live
+pointer (`coachingStaleHint`, `usage-prompts.mjs:736`) — there is no live
 Recompute button in v1; see
 §23 for why.
 
@@ -2333,6 +2333,20 @@ Recompute button in v1; see
   classification (release/git, explain, fix/debug, review…) needs a lexicon
   that has not shipped; forcing every prompt into one of these buckets today
   would read as coverage this view does not have.
+- **The three prompt detectors render in the Findings tab, not here.**
+  `tap-supervision-load`, `headless-share` and `host-prompt-asymmetry` reach
+  the reader through the standard `DETECTORS` registry and the standard card
+  grammar, alongside every other finding. This view deliberately carries no
+  duplicate panel for them: the spec sketched an "Also in Findings" cross-link
+  affordance, and the disclosure here is what shipped in its place — one
+  reading of a detector, in the tab whose job is detectors.
+- **The How-you-steer split does not sum, and its last row is a floor.** A
+  prompt can be both a question and a supervision tap ("done?"), and the
+  residue subtracts BOTH counts in full, so every prompt that is both is
+  removed twice. "Statements and instructions (at least)" is therefore a lower
+  bound, labelled and captioned as one. Computing the exact split needs an
+  overlap count the projection does not carry, and inventing one to make three
+  numbers add up would be the kind of tidiness this panel exists to refuse.
 
 ---
 
@@ -2470,6 +2484,25 @@ store + `reconcile`), `usage-evidence-hash.mjs` (the shared hash). CLI wiring:
 - **Retired and permanently-dismissed are terminal in v1.** A card whose
   evidence reappears after either status does not resurrect — treated as a
   considered verdict rather than something to keep re-litigating.
+- **Outcomes render; they do not RANK.** Adoption and outcome history is shown
+  on the card it belongs to and nowhere else. Nothing reorders, weights, or
+  suppresses future recommendations because a similar one was adopted and
+  worked. With six fixed rules there is nothing to rank yet, so this is a
+  documented deferral rather than a half-built feature — see ADR-0039's
+  Deferred list.
+- **A zero canonical baseline is not a refutation.** `improved` is a strict
+  decrease and a count cannot fall below zero, so a card adopted when the
+  canonical 30-day window held no occurrences could never improve on that
+  baseline. Such a card is NOT retired: it renders "no occurrences in the
+  canonical 30-day window — nothing to measure" and stays adopted. This is
+  reachable on the default path, where `--window` is `all`: a habit adopted
+  months ago fires on all-time evidence and has zero recent occurrences.
+- **Looking at a narrower window does not expire a card.** Which cards FIRE is
+  a function of the operator's displayed window, while every ledger-facing
+  read is canonical — so a card that stops firing at `--window 7` is not
+  evidence of anything, and `reconcile` skips the `proposed → expired`
+  transition entirely when the pass was derived on a non-canonical basis.
+  Nothing about a display choice is written to the ledger.
 
 ---
 
@@ -2634,12 +2667,35 @@ persistence, the result summary).
   there would trigger inference from a read-only surface the privacy split
   (ADR-0039 "The privacy split") keeps CLI-only — deferred, not merely
   unbuilt; see §21.
-- **The anti-fabrication gate is grounding, not provenance.** It proves a
-  cited number appears somewhere in what the model was shown; it does not
-  prove the model's SENTENCE around that number is the reason it appears
-  there. Measured directly (above): on real output it correctly rejects
-  invented large/specific numbers and is weaker against a small number that
-  coincides with an unrelated field.
+- **The anti-fabrication gate binds numbers to DIMENSIONS, not to sentences.**
+  A cited number must both appear in the summary AND be reachable under the
+  dimension the prose attaches it to, so "across 13 projects" is rejected on a
+  summary that carries no project data — even though 13 is a real number in it
+  (`usage-fabrication-gate.mjs`). What the gate still cannot tell you is
+  whether the SENTENCE is true: "3 sessions waiting on releases" binds fine if
+  3 is a real session count somewhere, because nothing here knows what
+  "waiting on releases" means. That is why `source` renders on every card.
+- **Every card names its source, unconditionally.** A `rule` card is computed
+  from your aggregate; an `enriched` card was written by a model from that same
+  aggregate. Both surfaces show it — a dim line on the CLI, a chip beside the
+  status chip on the dashboard — because the marker that used to be pointed at
+  (the stale chip) only ever appeared once a card HAD gone stale, leaving a
+  fresh enriched card indistinguishable from a rule-derived one.
+- **A cluster with no readable sample text is never named by the model.** If
+  the transcript holding a cluster's exemplar is missing, too large, or written
+  at a different index schema, the cluster keeps its honest generated name
+  ("Recurring 9-token question") rather than being sent for naming with nothing
+  to name it from. Exclusions are counted (`dropped.noExemplar`) and disclosed
+  in the consent preamble, not silent.
+- **Label-store keys are the cluster's minimum member hash, and can churn.** A
+  cluster's key is the lexicographically smallest fingerprint hash in it
+  (`usage-prompt-patterns.mjs`), so a NEW member hashing below the current
+  minimum re-keys the cluster. Its settled label is then orphaned, the cluster
+  re-offers as a candidate and costs one further invocation, and the orphaned
+  entry is never pruned. "Settled labels are never re-judged" is therefore true
+  of a stable corpus and bounded by this on a growing one; v1 does not prune
+  orphans, because no cheap stable cluster identity exists to key them by
+  instead.
 - **A consent-line exemplar count is real but ≤1 per cluster in practice**,
   not the ≤2/cluster the engine's own cap allows — today's exemplar-gathering
   can only produce one real exemplar per cluster (a published cluster's `key`

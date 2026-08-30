@@ -233,15 +233,27 @@ export function steerPanel(p) {
   var taps = Number(p.taps) || 0;
   var q = questionShare(p);
   var questions = q == null ? 0 : Math.round(q * typed);
-  // A tap can also be a question ("done?"), so the two overlap. The residue is
-  // what is left after the UNION, and can never go negative.
+  // A tap can also be a question ("done?"), so the two categories OVERLAP —
+  // and this subtracts both counts IN FULL, which double-removes every prompt
+  // that is both. So `rest` is a FLOOR on the statements-and-instructions
+  // count, not the count itself: the true residue is this number plus the
+  // overlap. (Final review P4-M3: the comment here used to claim this was
+  // "what is left after the UNION", which is what the arithmetic would need
+  // an overlap count to compute — and the wire carries none. On a panel whose
+  // whole point is honesty, a false comment beside a silently floored figure
+  // is the wrong thing to ship, so the figure is disclosed as a floor instead
+  // and the union is left deferred rather than implied.) `Math.max` keeps it
+  // off negative when the overlap is large.
   var rest = Math.max(0, typed - questions - taps);
   var rows = [
     { label: 'Questions', value: num(questions) + ' · ' + share(ratio(questions, typed)), share: ratio(questions, typed) * 100 },
     { label: 'Supervision taps', value: num(taps) + ' · ' + share(ratio(taps, typed)), share: ratio(taps, typed) * 100 },
-    { label: 'Statements and instructions', value: num(rest) + ' · ' + share(ratio(rest, typed)), share: ratio(rest, typed) * 100, dim: true },
+    { label: 'Statements and instructions (at least)', value: num(rest) + ' · ' + share(ratio(rest, typed)), share: ratio(rest, typed) * 100, dim: true },
   ].sort(function (a, b) { return b.share - a.share; });
-  return rankedRows(rows);
+  return rankedRows(rows)
+    + '<p class="pr-caveat">A prompt can be both a question and a supervision tap ("done?"), and '
+    + 'both counts are subtracted in full — so the last row is a FLOOR, and the three do not sum to '
+    + '100%. Reporting the exact split needs an overlap count this projection does not carry.</p>';
 }
 
 /** What each provenance tag means, in the operator's terms. `unrecognized` is
