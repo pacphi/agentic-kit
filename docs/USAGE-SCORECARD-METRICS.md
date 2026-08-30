@@ -458,7 +458,7 @@ this day carried the fingerprint layer", so a zero here is *measured*.
   every one of those still under `BASELINE_MIN_ACTIVE_DAYS` (30), so
   `supervision-tap-share` ran on its 10% floor on this corpus. Re-confirmed at
   the headline level a day later (2026-08-30, `ak usage prompts --window 7
-  --json`): `promptBaselines` still reads `tapShareP75_trailing90d: null` for
+  --json`): `hosts.baselines` still reads `tapShareP75_trailing90d: null` for
   every host at the 7-day window. That is the honest state of a machine still
   building history, not a structural block.
 - **`personaOpeners` counts only typed (`p === 'human'`) openers**, though the
@@ -1082,7 +1082,7 @@ will be misclassified or land in `Unclassified`; the confidence figure and
 `basis` string exist specifically so a reader can tell when that has
 happened rather than trusting the category blindly.
 No LLM-labelling layer exists for this classifier, for the `Unclassified`
-residue or otherwise — every category shown here comes from the two
+residue or otherwise — every category shown here comes from the three
 deterministic layers above; there is no session-classification inference
 path, opt-in or otherwise, anywhere in this codebase. The `--enrich` flag on
 `ak usage prompts` is a **different, unrelated** feature: it names recurring
@@ -2170,7 +2170,7 @@ what is specific to this CLI's own rendering:
 
 ### The scheduled digest recipe (opt-in, documentation only)
 
-Spec §6.5 sketches a periodic digest: layers 1–2 (fingerprints, baselines,
+This is a periodic digest recipe: layers 1–2 (fingerprints, baselines,
 detectors) are free and recompute on every scan, but layer 3 (`--enrich`)
 spends a model call, so it is on-demand by default — the view has no
 Recompute button (§21), and there is no scheduling code anywhere in this
@@ -2216,18 +2216,19 @@ install, suggest, or enable either of the above.
 **Displayed as:** a `Prompts` tab on the Usage rail, between `Findings` and
 `Models` (`VIEWS`, `src/lib/dashboard/client/bootstrap.mjs:89`; the tab button,
 `usage-tab-prompts`, `src/lib/dashboard/page.mjs:162`; its panel shell,
-id "v-prompts" (`src/lib/dashboard/page.mjs:515`). It reads the SAME
+id "v-prompts", `src/lib/dashboard/page.mjs:515`). It reads the SAME
 `agg.promptPatterns` projection §20 renders — one aggregate, two surfaces,
 never two answers about what a cluster is. Six panels, top to bottom, plus a
 whole-history chip offered on this view alone.
 
-**Payload source:** `/api/usage`'s `prompts` key (`promptsPayload`,
-`src/lib/dashboard-server.mjs:552`) — `{typed, taps, tapShare, byHost,
-statsByDay, baselines, patterns, headless, coaching}`. `patterns` is
-`agg.promptPatterns` (§20's `buildPromptPatterns`) verbatim, already
-re-resolved against the persisted label store on every poll (§23). `coaching`
-is a second, independent read (`dashboardCoachingPayload`,
-`dashboard-server.mjs:1755` — §22). The client renders the whole block in one
+**Payload source:** `/api/usage`'s `prompts` key — `{typed, taps, tapShare,
+byHost, statsByDay, baselines, patterns, headless, coaching}`. The first
+eight keys come from `promptsPayload` (`src/lib/dashboard-server.mjs:552`);
+`coaching` is merged in at the call site (`dashboard-server.mjs:1489`) since
+it is a second, independent read (`dashboardCoachingPayload`,
+`dashboard-server.mjs:1755` — §22). `patterns` is `agg.promptPatterns` (§20's
+`buildPromptPatterns`) verbatim, already re-resolved against the persisted
+label store on every poll (§23). The client renders the whole block in one
 pass (`renderPrompts` in `src/lib/dashboard/client/usage.mjs` — that bundle
 shares a basename with the CLI command module, so cited here by name, no
 line) from the poll it already holds — opening the tab re-renders, it does
@@ -2338,7 +2339,7 @@ rule invents a number `aggregate()` did not already produce:
 | `reask-delta` | `promptPatterns.reAsks.pairCount` ≥ 10 this window (`REASK_DELTA_MIN_PAIRS`) | none |
 | `codex-completion-criteria` | the `host-prompt-asymmetry` insight fired AND Codex's persona-opener count exceeds Claude's, or its p90 typed length is ≥1.5× Claude's | none |
 | `progress-report-taps` | the `supervision-tap-share` insight fired (its own presence is the whole gate) | none |
-| `codex-role-library` | Codex's `personaOpeners` ≥ 10 (`PERSONA_LIBRARY_MIN_COUNT`) — Claude leading produces no card, since Claude already has `.claude/agents/` | a pointer to a tracked sibling effort, not an instruction |
+| `codex-role-library` | Codex's `personaOpeners` ≥ 10 (`PERSONA_LIBRARY_MIN_COUNT`), independent of which host is doing more of the typing overall — the card exists because Claude already has `.claude/agents/` and Codex has no analogue yet | a pointer to a tracked sibling effort, not an instruction |
 
 A rule whose input structure is entirely absent (no `promptPatterns` at all)
 yields no card — absent is not a claim of zero. A rule whose input is
@@ -2358,7 +2359,7 @@ sorted-key serialization of its evidence (`evidenceHash`,
 `measure → recommend → adopt/dismiss → measure outcome → recalibrate` loop,
 persisted beside the index (`usage-outcome-ledger.json`, mode 0600, atomic
 tmp+rename write; no field on a record ever holds prompt text — ids, hashes,
-counts, host names, and curated label names only). `reconcile`
+counts, and host names only). `reconcile`
 (`usage-outcome-ledger.mjs:255`) is the pure transition function:
 
 ```text

@@ -276,6 +276,11 @@ size was what exposed.
   coaching.mjs`, via `promptReport` — remains, resolves cleanly today (every crossing binding is a
   hoisted function declaration), and is recorded here as a structural pattern worth a lint rule if
   it recurs elsewhere.
+- The archive move (item 7) takes both moved docs permanently outside markdownlint's and lychee's
+  coverage — `docs/archive` is excluded from both by pre-existing repo policy, so nothing enforces
+  internal-link or markdown hygiene on them from this point on. A real coverage loss the move
+  caused, not merely a lint technicality; the exclusion itself predates this build and is left
+  unchanged here.
 
 ### Deferred, deliberately
 
