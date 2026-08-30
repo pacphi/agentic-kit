@@ -8,15 +8,13 @@ import { heading, info, ok, warn, dim } from '../lib/output.mjs';
 import { configDir } from '../lib/paths.mjs';
 import { readIndex, SCHEMA_VERSION } from '../lib/usage-index.mjs';
 import {
-  BASELINE_TRAILING_DAYS, LAT_BUCKET_EDGES, LEN_BUCKET_EDGES, TAP_MAX_TOKENS, maskSecrets,
+  BASELINE_TRAILING_DAYS, LAT_BUCKET_EDGES, LEN_BUCKET_EDGES, TAP_MAX_TOKENS,
+  PROMPT_CLUSTER_JACCARD, PROMPT_REASK_JACCARD, maskSecrets,
 } from '../lib/usage-aggregate.mjs';
 import { parseClaude, parseCodex, promptFingerprint } from '../lib/usage-parsers.mjs';
 import { parseSession as parseOpencodeSession } from '../lib/usage-opencode.mjs';
-import {
-  crossSessionClusters, nearDupClusters, reAskPairs, tapStats,
-} from '../lib/usage-prompt-patterns.mjs';
-import { labelFor } from '../lib/usage-prompt-vocabulary.mjs';
-import { PROVENANCE_TAGS, provenanceOf } from '../lib/usage-provenance.mjs';
+import { reAskPairs } from '../lib/usage-prompt-patterns.mjs';
+import { provenanceOf } from '../lib/usage-provenance.mjs';
 import { MODES } from '../lib/usage-modes.mjs';
 import {
   openRouterActivityFile,
@@ -377,16 +375,14 @@ async function runScore({ flags, deps }) {
 // none is printed: the deep pass below is the one place text appears, and it
 // re-reads the transcripts on demand to get it.
 //
-// WHERE THE FINGERPRINTS COME FROM, stated plainly because it is the one
-// unobvious coupling here. The aggregate publishes prompt COUNTS
-// (totals.typedPrompts/tapCount, promptsByHost, promptStatsByDay,
-// promptBaselines) but not the fingerprints themselves — `records` never
-// leaves usage-index.mjs's scan(), and a session row carries only the folded
-// per-session projection. The index CACHE is therefore the only place the
-// fingerprint layer is readable from, so this section calls readIndex first
-// (which rescans and rewrites that cache, so it is never read stale) and then
-// reads the cache it just wrote. If a supported accessor ever lands on
-// usage-index.mjs, `readPromptRecords` is the single call site to move.
+// WHERE THE NUMBERS COME FROM. Every figure in the aggregate tier is read off
+// `agg.promptPatterns` — the opt-in projection usage-aggregate.mjs builds from
+// the records it already holds (`prompts: true`), plus the prompt counts the
+// aggregate has always published (totals, promptsByHost, promptStatsByDay,
+// promptBaselines). Raw fingerprints have no public accessor and this tier does
+// not want one: clustering, classification and the decoration semantics behind
+// them live in ONE place, so this command and the dashboard cannot disagree
+// about what a cluster is.
 
 const PROMPT_WINDOWS = ['7', '14', '30', 'all'];
 
@@ -395,17 +391,6 @@ const PROMPT_WINDOWS = ['7', '14', '30', 'all'];
  *  every queryable window at 365, so 365 days IS all the history this corpus
  *  can hold — not an arbitrary ceiling standing in for infinity. */
 const ALL_WINDOW_DAYS = 365;
-
-/** The clustering threshold the view ships at (spec §3.2 panel 3), looser than
- *  the pattern library's own 0.8 default on purpose: phrasing variance is the
- *  signal. Eleven wordings of one request outrank eleven identical ones,
- *  because eleven wordings prove there is no canonical form to point at. */
-const CLUSTER_JACCARD = 0.6;
-
-/** Re-asks keep the research's tighter 0.8 (findings §5.1). A re-ask is "I said
- *  the same thing again because that didn't work", which is a claim about near
- *  sameness; the loose threshold above would count a follow-up as a repeat. */
-const REASK_JACCARD = 0.8;
 
 const TOP_CLUSTERS = 15;
 const TOP_TAP_LENGTHS = 8;
@@ -417,75 +402,6 @@ function parsePromptWindow(raw) {
   return value === 'all'
     ? { label: 'all', days: ALL_WINDOW_DAYS }
     : { label: Number(value), days: Number(value) };
-}
-
-function promptCacheFile() { return path.join(configDir(), 'usage-index.json'); }
-
-/** Parsed session records from the index cache, each with the SOURCE it was
- *  parsed from — the cache is keyed by transcript path, which is what lets the
- *  deep pass re-read a specific session without re-implementing file
- *  discovery. `[]` for any reason at all (absent, corrupt, or written by a
- *  different schema): an empty corpus is a reportable state here — "nothing
- *  was measured" — not an error.
- *
- *  @returns {Array<{ file: string, dbFile: string|null, rec: any }>} */
-function readPromptEntries(cacheFile) {
-  try {
-    const raw = JSON.parse(fs.readFileSync(cacheFile, 'utf8'));
-    if (raw?.schemaVersion !== SCHEMA_VERSION || !raw.entries) return [];
-    return Object.entries(raw.entries)
-      .filter(([, e]) => e?.session)
-      .map(([file, e]) => ({ file, dbFile: e.dbFile ?? null, rec: e.session }));
-  } catch {
-    return [];
-  }
-}
-
-/** The day a record's tokens FIRST billed on — the attribution `byDay` and
- *  `promptStatsByDay` already use, restated here because the aggregate keeps
- *  it private and a prompt series keyed any other way would not line up with
- *  the per-day figures printed beside it. `null` when the record never billed. */
-function firstBilledDay(rec) {
-  let first = null;
-  for (const row of rec.usage ?? []) if (first === null || row.day < first) first = row.day;
-  return first;
-}
-
-/**
- * Every stored fingerprint in the window, decorated with WHERE it happened —
- * the input shape usage-prompt-patterns.mjs documents.
- *
- * TWO CONVERSIONS, both load-bearing. The scan path stores `q`/`o` as the
- * number 1 and OMITS them when false (usage-parsers.promptShape); the pattern
- * library reads them as booleans and treats ABSENT as "nobody classified this"
- * (usage-prompt-patterns.buildCluster). Passed through unchanged, every
- * cluster would report class `unknown` and zero personas — silently disabling
- * the type split, the persona seed, and three of the four seed patterns. An
- * absent flag here means "measured, and not that shape", because the cache is
- * schema-gated: every record in it was written by the current parser, which
- * always decides both flags.
- *
- * The record gate matches the aggregate's own (`!rec.responses` is not a
- * session; `rec.end < cutoff` is outside the window), so the counts here and
- * the counts the aggregate publishes are taken over the same population.
- */
-function decoratedFingerprints(entries, cutoffMs) {
-  const out = [];
-  for (const { rec } of entries) {
-    if (!inWindow(rec, cutoffMs)) continue;
-    const day = firstBilledDay(rec);
-    const host = rec.host ?? rec.provider ?? 'unknown';
-    for (const fp of rec.promptFPs) {
-      out.push({ ...fp, q: fp.q === 1, o: fp.o === 1, sessionId: rec.id, day, host });
-    }
-  }
-  return out;
-}
-
-/** The record gate, shared by the fingerprint fold and the deep pass so the
- *  two never read different populations. */
-function inWindow(rec, cutoffMs) {
-  return !!rec?.responses && Array.isArray(rec.promptFPs) && rec.end != null && rec.end >= cutoffMs;
 }
 
 // ── prompt formatters ───────────────────────────────────────────────────────
@@ -514,71 +430,44 @@ function tableRow(cells) {
 
 // ── prompt sections ─────────────────────────────────────────────────────────
 
-/** Counts per provenance tag over the whole fingerprinted population — the
- *  denominator every other figure sits behind (spec §2.1). Every tag in the
- *  vocabulary gets a row, including the ones this corpus never produced: a
- *  missing tag is evidence about the corpus, not a row to drop. */
-function provenanceSplit(fps) {
-  const counts = Object.create(null);
-  for (const tag of PROVENANCE_TAGS) counts[tag] = 0;
-  let other = 0;
-  for (const fp of fps) {
-    if (Object.hasOwn(counts, fp.p)) counts[fp.p]++;
-    else other++;
-  }
-  return other ? { ...counts, unrecognized: other } : counts;
-}
-
-function printTypedPrompts(fps, typed) {
+/** The typed-prompt headline, straight off the projection's own denominators.
+ *  Every provenance tag it publishes gets a row, including ones this corpus
+ *  never produced: a missing tag is evidence about the corpus, not a row to
+ *  drop. */
+function printTypedPrompts(pp, agg) {
   heading('Typed prompts');
-  const split = provenanceSplit(fps);
-  const share = fps.length ? typed.length / fps.length : null;
-  info(`TYPED                   ${fmtNum(typed.length)}  `
-    + dim(`${fmtShare(share)} of ${fmtNum(fps.length)} fingerprinted prompt turns`));
-  info(`  provenance            ${Object.entries(split).map(([k, v]) => `${k} ${fmtNum(v)}`).join(' · ')}`);
-  const questions = typed.filter((f) => f.q === true).length;
-  info(`QUESTIONS               ${fmtNum(questions)}  `
-    + dim(`${fmtShare(typed.length ? questions / typed.length : null)} of typed · the rest are instructions and statements`));
-  const personas = typed.filter((f) => f.o === true).length;
+  const { fingerprints, typed } = pp.corpus;
+  info(`TYPED                   ${fmtNum(typed)}  `
+    + dim(`${fmtShare(fingerprints ? typed / fingerprints : null)} of ${fmtNum(fingerprints)} fingerprinted prompt turns`));
+  info(`  provenance            ${Object.entries(pp.provenance).map(([k, v]) => `${k} ${fmtNum(v)}`).join(' · ')}`);
+  const personas = Object.values(agg.promptsByHost ?? {}).reduce((n, h) => n + (Number(h.personaOpeners) || 0), 0);
   info(`PERSONA OPENERS         ${fmtNum(personas)}  `
-    + dim('role assignments ("you are a…") typed by hand'));
-  if (!fps.length) {
+    + dim('role assignments ("you are a…") typed by hand · the question split is per host below'));
+  if (!fingerprints) {
     info(dim('  no samples — no session in this window carries the fingerprint layer'));
   }
 }
 
-/** Tap counts grouped by TOKEN LENGTH. This tier has no text, so "the top
- *  taps" can only be a length distribution — which is the honest shape of the
- *  question at this tier, and the deep pass prints the verbatim table. */
-function tapLengthRows(fps, maxTokens) {
-  const byLen = new Map();
-  for (const fp of fps) {
-    const t = Number(fp.t);
-    if (!Number.isFinite(t) || t > maxTokens) continue;
-    const r = byLen.get(t) ?? { tokens: t, prompts: 0, sessions: new Set(), days: new Set(), hosts: new Set() };
-    r.prompts++;
-    if (fp.sessionId) r.sessions.add(fp.sessionId);
-    if (fp.day) r.days.add(fp.day);
-    if (fp.host) r.hosts.add(fp.host);
-    byLen.set(t, r);
-  }
-  return [...byLen.values()].sort((a, b) => b.prompts - a.prompts || a.tokens - b.tokens);
-}
-
-function printTaps(taps, lengths) {
+/** Taps: the window counts from `totals`, the length spread from the
+ *  projection. There is no text at this tier, so "the top taps" can only be a
+ *  length distribution — which is the honest shape of the question here; the
+ *  deep pass prints the verbatim table. */
+function printTaps(pp, totals) {
   heading('Supervision taps');
-  info(`TAPS                    ${fmtNum(taps.taps)}  `
-    + dim(`${fmtShare(taps.prompts ? taps.share : null)} of typed · ${taps.maxTokens} normalized tokens or fewer`));
+  const typed = Number(totals.typedPrompts) || 0;
+  const taps = Number(totals.tapCount) || 0;
+  info(`TAPS                    ${fmtNum(taps)}  `
+    + dim(`${fmtShare(typed ? taps / typed : null)} of typed · ${TAP_MAX_TOKENS} normalized tokens or fewer`));
   info(dim('  what this does not model: whether the tap was necessary. Some are legitimate approvals.'));
-  if (!lengths.length) {
+  if (!pp.tapLengths.length) {
     info(dim('  no samples'));
     return;
   }
   info(dim(tableRow([['tokens', 6, true], ['prompts', 8, true], ['sessions', 8, true], ['days', 5, true], ['hosts', 20]])));
-  for (const r of lengths.slice(0, TOP_TAP_LENGTHS)) {
+  for (const r of pp.tapLengths.slice(0, TOP_TAP_LENGTHS)) {
     info(tableRow([
-      [r.tokens, 6, true], [fmtNum(r.prompts), 8, true], [fmtNum(r.sessions.size), 8, true],
-      [fmtNum(r.days.size), 5, true], [[...r.hosts].sort().join('+') || '—', 20],
+      [r.tokens, 6, true], [fmtNum(r.prompts), 8, true], [fmtNum(r.sessions), 8, true],
+      [fmtNum(r.days), 5, true], [r.hosts.join('+') || '—', 20],
     ]));
   }
 }
@@ -622,14 +511,16 @@ function printHostInterplay(agg, win) {
     return;
   }
   info(dim(tableRow([['host', 10], ['typed', 7, true], ['taps', 6, true], ['tap share', 10, true],
-    ['p90 tokens', 12, true], ['personas', 9, true], ['your p75', 10, true]])));
+    ['questions', 10, true], ['p90 tokens', 12, true], ['personas', 9, true], ['your p75', 10, true]])));
   for (const [host, s] of hosts.sort()) {
     info(tableRow([
       [host, 10], [fmtNum(s.typed), 7, true], [fmtNum(s.taps), 6, true], [fmtShare(s.tapShare), 10, true],
-      [fmtMaybe(s.p90TypedTokens), 12, true], [fmtNum(s.personaOpeners), 9, true],
-      [baselineCell(agg, host, win), 10, true],
+      [fmtShare(s.questionShare), 10, true], [fmtMaybe(s.p90TypedTokens), 12, true],
+      [fmtNum(s.personaOpeners), 9, true], [baselineCell(agg, host, win), 10, true],
     ]));
   }
+  info(dim('  "questions" is the share of that host\'s typed prompts that ASK rather than instruct;'));
+  info(dim('  the rest are instructions and declarative feedback, which the shape rules do not split.'));
   info(dim('  "your p75" is this host\'s own trailing-90d daily tap share — the operator\'s normal,'));
   info(dim('  not a fixed target. Windows are unequal per host, so compare a host to itself.'));
   if (win.label === 'all') {
@@ -645,56 +536,37 @@ function printHostInterplay(agg, win) {
   }
 }
 
-/** A cluster reduced to the row the panel renders: its curated-or-derived name,
- *  where that name came from, and the span it covers. */
-function clusterRow(cluster) {
-  const label = labelFor(cluster);
-  return {
-    key: cluster.key,
-    name: label.name,
-    labelSource: label.source,
-    seed: label.seed,
-    size: cluster.size,
-    sessions: cluster.sessions.size,
-    days: cluster.days.size,
-    hosts: [...cluster.hosts].sort(),
-    class: cluster.class,
-    tokens: cluster.tokens,
-    personas: cluster.personas,
-  };
-}
-
-function printClusters(rows) {
+function printClusters(clusters) {
   heading('Recurring clusters');
-  info(dim(`  near-duplicates at Jaccard ≥ ${CLUSTER_JACCARD}, kept when they span 3+ sessions or 2+ days`));
-  if (!rows.length) {
+  info(dim(`  near-duplicates at Jaccard ≥ ${PROMPT_CLUSTER_JACCARD}, kept when they span 3+ sessions or 2+ days`));
+  if (!clusters.length) {
     info(dim('  no samples'));
     return;
   }
   info(dim(tableRow([['pattern', 42], ['n', 4, true], ['sess', 5, true], ['days', 5, true],
     ['tok', 5, true], ['class', 12], ['source', 14]])));
-  for (const r of rows.slice(0, TOP_CLUSTERS)) {
+  for (const r of clusters.slice(0, TOP_CLUSTERS)) {
     info(tableRow([
-      [r.name.length > 42 ? `${r.name.slice(0, 41)}…` : r.name, 42],
-      [fmtNum(r.size), 4, true], [fmtNum(r.sessions), 5, true], [fmtNum(r.days), 5, true],
-      [fmtMaybe(r.tokens?.median), 5, true], [r.class, 12], [r.labelSource, 14],
+      [r.label.name.length > 42 ? `${r.label.name.slice(0, 41)}…` : r.label.name, 42],
+      [fmtNum(r.count), 4, true], [fmtNum(r.sessions), 5, true], [fmtNum(r.days), 5, true],
+      [fmtMaybe(r.medianTokens), 5, true], [r.class, 12], [r.label.source, 14],
     ]));
   }
 }
 
 function printReAsks(reAsks) {
   heading('Re-asks');
-  info(dim('  the same thing asked twice inside one session, within six turns'));
-  if (!reAsks.pairs.length) {
+  info(dim(`  the same thing asked twice inside one session, at Jaccard ≥ ${PROMPT_REASK_JACCARD}`));
+  if (!reAsks.pairCount) {
     info(dim('  no samples'));
     return;
   }
-  info(`PAIRS                   ${fmtNum(reAsks.pairs.length)}  `
-    + dim(`across ${fmtNum(reAsks.sessions)} session${reAsks.sessions === 1 ? '' : 's'}`));
-  const gaps = Object.entries(reAsks.gaps).sort((a, b) => Number(a[0]) - Number(b[0]));
+  info(`PAIRS                   ${fmtNum(reAsks.pairCount)}  `
+    + dim(`across ${fmtNum(reAsks.sessionCount)} session${reAsks.sessionCount === 1 ? '' : 's'}`));
+  const gaps = Object.entries(reAsks.gapHist).sort((a, b) => Number(a[0]) - Number(b[0]));
   info(`GAP DISTRIBUTION        ${gaps.map(([gap, n]) => `${gap} turn${gap === '1' ? '' : 's'} → ${n}`).join(' · ')}`);
-  const immediate = Number(reAsks.gaps[1]) || 0;
-  info(dim(`  ${fmtShare(immediate / reAsks.pairs.length)} land one turn apart — the immediately preceding response is what failed`));
+  const immediate = Number(reAsks.gapHist[1]) || 0;
+  info(dim(`  ${fmtShare(immediate / reAsks.pairCount)} land one turn apart — the immediately preceding response is what failed`));
 }
 
 /** Sessions that typed nothing at all: subagents, hooks and scheduled work.
@@ -723,21 +595,13 @@ function printHeadless(h) {
   info(dim('  rather than on steering. Sessions with no fingerprint layer are in neither half.'));
 }
 
-/** Everything the aggregate tier computes, in one pass, so the text report and
- *  the --json projection are provably the same numbers. */
-function promptReport(agg, fps, win) {
-  const typed = fps.filter((f) => f.p === 'human');
-  const clusters = crossSessionClusters(nearDupClusters(typed, { jaccard: CLUSTER_JACCARD }));
-  const reAsks = reAskPairs(typed, { jaccard: REASK_JACCARD });
+/** The aggregate tier, assembled: the shared projection plus the one figure it
+ *  does not carry (headless share, which is a property of the session rows
+ *  rather than of the prompts). */
+function promptReport(agg, win) {
   return {
     win,
-    fps,
-    typed,
-    taps: tapStats(typed, { maxTokens: TAP_MAX_TOKENS }),
-    tapLengths: tapLengthRows(typed, TAP_MAX_TOKENS),
-    clusters: clusters.map(clusterRow),
-    rawClusters: clusters.slice(0, TOP_CLUSTERS),
-    reAsks,
+    patterns: agg.promptPatterns,
     headless: headlessShare(agg.sessions),
   };
 }
@@ -755,6 +619,19 @@ function promptReport(agg, fps, win) {
 // run through `maskSecrets` before it is printed or serialized — the join is
 // computed on the raw text so the hash still matches, and only the rendering
 // is masked.
+//
+// WHY THIS TIER READS THE INDEX CACHE AND THE TIER ABOVE DOES NOT. Everything
+// above is read off `agg.promptPatterns`, which is deliberately aggregates
+// only. This pass needs two things no aggregate can carry: the HASHES it owes
+// an exemplar for, and the transcript PATH of a session that holds one. The
+// cache is keyed by transcript path and is the only place both exist together.
+//
+// That is a coupling to an internal file layout, and it is confined to this
+// one text-bearing, CLI-only tier on purpose: a pass that is about to open the
+// transcripts and print what the operator typed already has strictly more
+// access than a fingerprint, so withholding fingerprints from it would be an
+// obstacle rather than a boundary. `readPromptEntries` is the single call site
+// if a supported accessor ever lands.
 
 const DEEP_TOP_SHORT = 30;
 const DEEP_TOP_REASKS = 20;
@@ -776,6 +653,64 @@ const MAX_DEEP_FILE_BYTES = 64 * 1024 * 1024;
  *  somehow needs a new file per exemplar still finishes. Well clear of the ~50
  *  the reference corpus opens for a full table. */
 const MAX_DEEP_TRANSCRIPTS = 400;
+
+function promptCacheFile() { return path.join(configDir(), 'usage-index.json'); }
+
+/** Parsed session records from the index cache, each with the SOURCE it was
+ *  parsed from — the cache is keyed by transcript path, which is what lets this
+ *  pass re-read a specific session without re-implementing file discovery.
+ *  `[]` for any reason at all (absent, corrupt, or written by a different
+ *  schema): no exemplars is a reportable state, not an error.
+ *
+ *  @returns {Array<{ file: string, dbFile: string|null, rec: any }>} */
+function readPromptEntries(cacheFile) {
+  try {
+    const raw = JSON.parse(fs.readFileSync(cacheFile, 'utf8'));
+    if (raw?.schemaVersion !== SCHEMA_VERSION || !raw.entries) return [];
+    return Object.entries(raw.entries)
+      .filter(([, e]) => e?.session)
+      .map(([file, e]) => ({ file, dbFile: e.dbFile ?? null, rec: e.session }));
+  } catch {
+    return [];
+  }
+}
+
+/** The record gate, matching the aggregate's own (`!rec.responses` is not a
+ *  session; `rec.end < cutoff` is outside the window) so this pass and the
+ *  projection above read one population. */
+function inWindow(rec, cutoffMs) {
+  return !!rec?.responses && Array.isArray(rec.promptFPs) && rec.end != null && rec.end >= cutoffMs;
+}
+
+/** The day a record's tokens FIRST billed on — `promptStatsByDay`'s own
+ *  attribution, restated here because the aggregate keeps it private. */
+function firstBilledDay(rec) {
+  let first = null;
+  for (const row of rec.usage ?? []) if (first === null || row.day < first) first = row.day;
+  return first;
+}
+
+/**
+ * The typed fingerprints this pass targets exemplars with, decorated with where
+ * each happened. DELIBERATELY NOT the canonical decoration: the boolean `q`/`o`
+ * mapping lives once, in usage-aggregate's `decoratePromptFP`, and is what the
+ * CLASSIFICATION depends on — nothing here classifies anything. This pass reads
+ * `h` to join, `t`/`th` to group and pair, and the raw stored `o` flag to find
+ * personas, so restating the mapping would be a second copy of a contract it
+ * does not use.
+ */
+function deepFingerprints(entries, cutoffMs) {
+  const out = [];
+  for (const { rec } of entries) {
+    if (!inWindow(rec, cutoffMs)) continue;
+    const day = firstBilledDay(rec);
+    const host = rec.host ?? rec.provider ?? 'unknown';
+    for (const fp of rec.promptFPs) {
+      if (fp.p === 'human') out.push({ ...fp, sessionId: rec.id, day, host });
+    }
+  }
+  return out;
+}
 
 /** Prompt-kind turns a PERSON typed, in transcript order, each re-fingerprinted
  *  so it can be joined to the aggregate tier's findings by hash. Both gates are
@@ -841,7 +776,7 @@ function shortPromptGroups(typed, maxTokens) {
 function personaGroups(typed) {
   const groups = new Map();
   for (const fp of typed) {
-    if (fp.o !== true) continue;
+    if (fp.o !== 1) continue;   // the raw stored flag; see deepFingerprints
     const g = groups.get(fp.h) ?? { h: fp.h, tokens: fp.t, prompts: 0, sessions: new Set(), hosts: new Set() };
     g.prompts++;
     if (fp.sessionId) g.sessions.add(fp.sessionId);
@@ -878,16 +813,6 @@ function exemplarCandidates(typed, wanted) {
   return [...bySession.entries()]
     .map(([sessionId, hashes]) => ({ sessionId, hashes }))
     .sort((a, b) => b.hashes.size - a.hashes.size || (a.sessionId < b.sessionId ? -1 : 1));
-}
-
-/** The most frequent member of a cluster: the phrasing worth printing when a
- *  cluster holds eleven of them. */
-function clusterExemplarHash(cluster, counts) {
-  let best = null;
-  for (const h of cluster.hashes) {
-    if (best === null || (counts.get(h) ?? 0) > (counts.get(best) ?? 0)) best = h;
-  }
-  return best;
 }
 
 /** Minutes between the two asks of one pair, located by walking the session's
@@ -945,11 +870,15 @@ function collectExemplars({ entries, cutoffMs, candidates, reAskSessions, wanted
 }
 
 /** The pairs worth printing verbatim, and the token count each was measured at
- *  (which the fingerprints carry and the pair itself does not). */
-function substantiveReAsks(report) {
+ *  (which the fingerprints carry and the pair itself does not). Re-derived here
+ *  rather than read off the projection: `promptPatterns.reAsks` publishes
+ *  counts, and printing both halves of a pair needs the two HASHES the counts
+ *  are made of. Cheap — pairing is per session over a six-turn window, unlike
+ *  the clustering this pass deliberately does not repeat. */
+function substantiveReAsks(typed) {
   const tokensOf = new Map();
-  for (const fp of report.typed) if (!tokensOf.has(fp.h)) tokensOf.set(fp.h, fp.t);
-  return report.reAsks.pairs
+  for (const fp of typed) if (!tokensOf.has(fp.h)) tokensOf.set(fp.h, fp.t);
+  return reAskPairs(typed, { jaccard: PROMPT_REASK_JACCARD }).pairs
     .map((p) => ({ ...p, tokens: tokensOf.get(p.a) ?? 0 }))
     .filter((p) => p.tokens >= REASK_MIN_TOKENS)
     .sort((a, b) => a.gap - b.gap || b.tokens - a.tokens)
@@ -964,20 +893,22 @@ function substantiveReAsks(report) {
  */
 function deepPass(entries, report, cutoffMs) {
   const started = Date.now();
-  const counts = new Map();
-  for (const fp of report.typed) counts.set(fp.h, (counts.get(fp.h) ?? 0) + 1);
-  const shorts = shortPromptGroups(report.typed, TAP_MAX_TOKENS);
-  const personas = personaGroups(report.typed);
-  const pairs = substantiveReAsks(report);
-  const clusterHash = new Map(
-    report.rawClusters.map((c) => [c.key, clusterExemplarHash(c, counts)]).filter(([, h]) => h),
-  );
+  const typed = deepFingerprints(entries, cutoffMs);
+  const shorts = shortPromptGroups(typed, TAP_MAX_TOKENS);
+  const personas = personaGroups(typed);
+  const pairs = substantiveReAsks(typed);
+  // A cluster's `key` IS one of its member hashes — the lexicographically
+  // smallest, so it is stable across scans and needs no membership list to
+  // find. Printing that member rather than the most frequent one costs a
+  // slightly less representative phrasing and saves re-running the clustering
+  // the projection already did.
+  const clusters = report.patterns.clusters.slice(0, TOP_CLUSTERS);
   const wanted = new Set([
-    ...shorts.map((g) => g.h), ...personas.map((g) => g.h), ...clusterHash.values(),
+    ...shorts.map((g) => g.h), ...personas.map((g) => g.h), ...clusters.map((c) => c.key),
   ]);
   const { text, bySession, cost } = collectExemplars({
     entries, cutoffMs, wanted,
-    candidates: exemplarCandidates(report.typed, wanted),
+    candidates: exemplarCandidates(typed, wanted),
     reAskSessions: new Set(pairs.map((p) => p.sessionId)),
   });
 
@@ -988,9 +919,9 @@ function deepPass(entries, report, cutoffMs) {
       text: exemplarText(text, g.h),
     })),
     reAsks: pairs.map((p) => deepReAskRow(p, bySession.get(p.sessionId), text)),
-    clusters: report.clusters.slice(0, TOP_CLUSTERS).map((row) => ({
-      key: row.key, name: row.name, size: row.size, sessions: row.sessions,
-      text: exemplarText(text, clusterHash.get(row.key)),
+    clusters: clusters.map((row) => ({
+      key: row.key, name: row.label.name, size: row.count, sessions: row.sessions,
+      text: exemplarText(text, row.key),
     })),
     personas: personas.map((g) => {
       const body = text.get(g.h) ?? null;
@@ -1030,35 +961,25 @@ function deepReAskRow(pair, turns, text) {
   };
 }
 
-/** The --json shape: fingerprint-derived only — hashes, counts, token counts,
- *  shares and host names. No prompt text exists at this tier to leak. */
+/** The --json shape: the shared `promptPatterns` projection VERBATIM under
+ *  `patterns`, plus the per-host figures the aggregate has always published and
+ *  the window's headless share. Verbatim on purpose — a consumer diffing this
+ *  against the dashboard's own payload must see the identical object, not a
+ *  reshaped one. Fingerprint-derived throughout: hashes, counts, token counts,
+ *  shares, host names and session ids. No prompt text exists at this tier. */
 function promptProjection(agg, r) {
   return {
     window: r.win.label,
     windowDays: r.win.days,
     generatedAt: agg.generatedAt,
-    corpus: { fingerprints: r.fps.length, typed: r.typed.length, sessions: agg.totals?.sessions ?? 0 },
-    typed: {
-      total: r.typed.length,
-      byProvenance: provenanceSplit(r.fps),
-      questions: r.typed.filter((f) => f.q === true).length,
-      personaOpeners: r.typed.filter((f) => f.o === true).length,
-    },
-    taps: {
-      taps: r.taps.taps, prompts: r.taps.prompts, share: r.taps.prompts ? r.taps.share : null,
-      maxTokens: r.taps.maxTokens, byHost: r.taps.byHost,
-      byLength: r.tapLengths.map((t) => ({
-        tokens: t.tokens, prompts: t.prompts,
-        sessions: t.sessions.size, days: t.days.size, hosts: [...t.hosts].sort(),
-      })),
-    },
+    sessions: agg.totals?.sessions ?? 0,
+    typed: { total: agg.totals?.typedPrompts ?? 0, taps: agg.totals?.tapCount ?? 0 },
     hosts: {
       byHost: agg.promptsByHost ?? {},
       baselines: agg.promptBaselines ?? {},
       monthlyTapShare: monthlyTapShare(agg.promptStatsByDay),
     },
-    clusters: r.clusters,
-    reAsks: { pairs: r.reAsks.pairs.length, sessions: r.reAsks.sessions, gaps: r.reAsks.gaps },
+    patterns: r.patterns,
     headless: r.headless,
   };
 }
@@ -1066,11 +987,11 @@ function promptProjection(agg, r) {
 function printPromptReport(agg, r) {
   heading(`ak usage — prompts (${r.win.label === 'all' ? 'all history' : `last ${r.win.days}d`})`);
   info(dim('every figure below is derived from prompt fingerprints — no prompt text is read or stored'));
-  printTypedPrompts(r.fps, r.typed);
-  printTaps(r.taps, r.tapLengths);
+  printTypedPrompts(r.patterns, agg);
+  printTaps(r.patterns, agg.totals ?? {});
   printHostInterplay(agg, r.win);
-  printClusters(r.clusters);
-  printReAsks(r.reAsks);
+  printClusters(r.patterns.clusters);
+  printReAsks(r.patterns.reAsks);
   printHeadless(r.headless);
 }
 
@@ -1110,7 +1031,7 @@ function printReAskPairs(rows) {
 
 function printClusterExemplars(rows) {
   heading('Cluster exemplars');
-  info(dim('  one phrasing per recurring cluster — the most frequent member of each'));
+  info(dim('  one phrasing per recurring cluster — the member its key names, stable across scans'));
   if (!rows.length) return info(dim('  no samples'));
   for (const r of rows) {
     info(tableRow([[`${r.name}`, 42], [`${fmtNum(r.size)}×`, 6, true], [`${fmtNum(r.sessions)} sess`, 9, true]]));
@@ -1154,25 +1075,25 @@ async function runPrompts({ flags, deps }) {
   const readAgg = deps.readIndex ?? readIndex;
   let agg;
   try {
-    // Same widening as `score`, for the same reason: the per-host tap-share
-    // baseline printed beside each host is a percentile over the 90 days
-    // before this window, and it can only be built from records that were read.
-    agg = await readAgg({ days: win.days, lookbackDays: win.days + BASELINE_TRAILING_DAYS });
+    // `prompts: true` is what builds agg.promptPatterns — the same projection
+    // the dashboard's Prompts view reads, so the two cannot disagree. The
+    // lookback widening is the same as `score`'s and for the same reason: the
+    // per-host tap-share baseline printed beside each host is a percentile over
+    // the 90 days before this window, and it can only be built from records
+    // that were read.
+    agg = await readAgg({
+      days: win.days,
+      lookbackDays: win.days + BASELINE_TRAILING_DAYS,
+      prompts: true,
+    });
   } catch (error) {
     const message = String(error?.message ?? error);
     if (flags.json) console.log(JSON.stringify({ window: win.label, error: message }, null, 2));
     else warn(message);
     return 1;
   }
-  // Read AFTER readIndex, which rewrites this file as its last act before
-  // aggregating — so the fingerprints below are the same corpus the counts
-  // above were folded from, never a stale one.
-  const cutoffMs = Date.parse(agg.generatedAt) - win.days * 86_400_000;
-  // NOT `deps.cacheFile` — that name is already taken by the OpenRouter
-  // activity cache this command also manages, and they are different files.
-  const entries = readPromptEntries(deps.indexCacheFile ?? promptCacheFile());
-  const report = promptReport(agg, decoratedFingerprints(entries, cutoffMs), win);
-  const deep = flags.deep ? deepPass(entries, report, cutoffMs) : null;
+  const report = promptReport(agg, win);
+  const deep = flags.deep ? runDeepPass(agg, report, win, deps) : null;
   if (flags.json) {
     const projection = promptProjection(agg, report);
     console.log(JSON.stringify(deep ? { ...projection, exemplars: deep } : projection, null, 2));
@@ -1181,6 +1102,18 @@ async function runPrompts({ flags, deps }) {
   printPromptReport(agg, report);
   if (deep) printDeepPass(deep);
   return 0;
+}
+
+/** The deep pass's own read, kept out of runPrompts so the aggregate tier's
+ *  data path stays a single call. The cache is read AFTER readIndex, which
+ *  rewrites it as its last act before aggregating — so the fingerprints are the
+ *  same corpus the projection was built from, never a stale one. */
+function runDeepPass(agg, report, win, deps) {
+  // NOT `deps.cacheFile` — that name is already taken by the OpenRouter
+  // activity cache this command also manages, and they are different files.
+  const entries = readPromptEntries(deps.indexCacheFile ?? promptCacheFile());
+  const cutoffMs = Date.parse(agg.generatedAt) - win.days * 86_400_000;
+  return deepPass(entries, report, cutoffMs);
 }
 
 // Exported ONLY for a direct-import unit test of the <$0.01 boundary

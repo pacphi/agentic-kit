@@ -395,17 +395,22 @@ test('ak usage prompts --json is fingerprint-derived and carries no prompt text'
   assert.equal(result.status, 0, result.stderr);
   const value = JSON.parse(result.stdout);
   assert.deepEqual(Object.keys(value),
-    ['window', 'windowDays', 'generatedAt', 'corpus', 'typed', 'taps', 'hosts', 'clusters', 'reAsks', 'headless']);
+    ['window', 'windowDays', 'generatedAt', 'sessions', 'typed', 'hosts', 'patterns', 'headless']);
   assert.equal(value.window, 'all');
+  // `patterns` is the aggregate's own promptPatterns projection, verbatim —
+  // the same object the dashboard reads, not a CLI-side reshaping of it.
+  assert.deepEqual(Object.keys(value.patterns).sort(),
+    ['clusters', 'computedAt', 'corpus', 'exactRepeats', 'provenance', 'reAsks', 'tapLengths']);
   // The six release phrasings differ by one token each, so they cluster at the
   // panel's loose threshold and span six sessions — recurring on both arms of
   // the disjunction, not just one.
-  const release = value.clusters.find((c) => c.size >= 6);
-  assert.ok(release, `no recurring cluster found in ${JSON.stringify(value.clusters)}`);
+  const release = value.patterns.clusters.find((c) => c.count >= 6);
+  assert.ok(release, `no recurring cluster found in ${JSON.stringify(value.patterns.clusters)}`);
   assert.equal(release.sessions, 6);
   assert.ok(release.days >= 3, 'the fixture spreads the cluster over three billed days');
-  assert.equal(value.reAsks.pairs, 1, 'the fixture asks one thing twice, one turn apart');
-  assert.equal(value.reAsks.gaps['1'], 1, 'and the gap is one turn');
+  assert.equal(release.class, 'instruction', 'the release phrasings carry no question mark');
+  assert.equal(value.patterns.reAsks.pairCount, 1, 'the fixture asks one thing twice, one turn apart');
+  assert.equal(value.patterns.reAsks.gapHist['1'], 1, 'and the gap is one turn');
   // The privacy contract, asserted on the payload rather than argued for: this
   // projection is built from hashes, counts and token counts only.
   assert.equal(result.stdout.includes('semantic version'), false, 'cluster text must never reach --json');
