@@ -502,18 +502,24 @@ test('ak usage prompts renders the Coaching section with a real proposed card', 
   fs.rmSync(sb.home, { recursive: true, force: true });
 });
 
-test('ak usage prompts --json coaching cards carry no prompt text and match the CLI ledgerSummary shape', () => {
+test('ak usage prompts --json coaching cards carry no prompt text and match the CLI summary shape', () => {
   const sb = sandbox();
   writeCoachingCorpus(sb);
   const result = ak(['usage', 'prompts', '--json'], sb);
   assert.equal(result.status, 0, result.stderr);
   const value = JSON.parse(result.stdout);
   assert.ok(value.coaching, 'the --json payload must carry a coaching key');
-  assert.deepEqual(Object.keys(value.coaching).sort(), ['cards', 'ledgerSummary']);
+  // Fix round 1, M-2: one name on both surfaces — `summary`, matching the
+  // dashboard payload (this used to be `ledgerSummary` here).
+  assert.deepEqual(Object.keys(value.coaching).sort(), ['cards', 'summary']);
   const card = value.coaching.cards.find((c) => c.id === 'commit-push-claude-md');
   assert.ok(card);
   assert.equal(card.status, 'proposed');
-  assert.equal(value.coaching.ledgerSummary.proposed >= 1, true);
+  // Fix round 1, M-3: generatedAt + evidenceHash ride in --json too (they
+  // always did structurally; this pins that they still do post-refactor).
+  assert.match(card.generatedAt, /^\d{4}-\d{2}-\d{2}T/);
+  assert.match(card.evidenceHash, /^[0-9a-f]{16}$/);
+  assert.equal(value.coaching.summary.proposed >= 1, true);
   for (const p of COMMIT_PUSH_PHRASINGS) assert.equal(result.stdout.includes(p), false, `prompt text "${p}" leaked into --json`);
   fs.rmSync(sb.home, { recursive: true, force: true });
 });
@@ -591,17 +597,123 @@ test('ak usage prompts --dismiss <id> --json emits a confirmation, not the full 
   fs.rmSync(sb.home, { recursive: true, force: true });
 });
 
-test('ak usage prompts --dismiss <unknown-id> errors and lists the known ids, writing nothing', () => {
+// Fix round 1, M-7: the id is validated BEFORE any ledger write — an invalid
+// --dismiss must not trigger even the routine reconcile-save, so a first-ever
+// invocation with a bad id leaves no ledger file at all.
+test('ak usage prompts --dismiss <unknown-id> errors and writes NOTHING — no ledger file at all on a first run', () => {
   const sb = sandbox();
   writeCoachingCorpus(sb);
   const result = ak(['usage', 'prompts', '--dismiss', 'not-a-real-card'], sb);
   assert.equal(result.status, 2);
   assert.match(result.stdout, /unknown card id/);
-  // A normal run still writes the ledger (reconcile runs every invocation) —
-  // the pin here is narrower: the UNKNOWN id itself must never appear as a record.
   const ledgerFile = path.join(sb.cfg, 'agentic-kit', 'usage-outcome-ledger.json');
-  const ledger = JSON.parse(fs.readFileSync(ledgerFile, 'utf8'));
-  assert.equal(ledger.records.some((r) => r.id === 'not-a-real-card'), false);
+  assert.equal(fs.existsSync(ledgerFile), false, 'an invalid --dismiss must not create the ledger file');
+  fs.rmSync(sb.home, { recursive: true, force: true });
+});
+
+test('ak usage prompts --dismiss <unknown-id> leaves an EXISTING ledger byte-for-byte unchanged', () => {
+  const sb = sandbox();
+  writeCoachingCorpus(sb);
+  assert.equal(ak(['usage', 'prompts'], sb).status, 0); // establishes a real ledger file
+  const ledgerFile = path.join(sb.cfg, 'agentic-kit', 'usage-outcome-ledger.json');
+  const before = fs.readFileSync(ledgerFile, 'utf8');
+
+  const result = ak(['usage', 'prompts', '--dismiss', 'not-a-real-card'], sb);
+  assert.equal(result.status, 2);
+  assert.match(result.stdout, /unknown card id/);
+  assert.equal(fs.readFileSync(ledgerFile, 'utf8'), before, 'an invalid --dismiss must not touch an existing ledger, not even a routine reconcile-write');
+  fs.rmSync(sb.home, { recursive: true, force: true });
+});
+
+// Fix round 1, M-7: rejected before any I/O, so neither write can silently win.
+test('ak usage prompts --draft and --dismiss together are rejected before any I/O, exit 2, no write', () => {
+  const sb = sandbox();
+  writeCoachingCorpus(sb);
+  const result = ak(['usage', 'prompts', '--draft', 'commit-push-claude-md', '--dismiss', 'commit-push-claude-md'], sb);
+  assert.equal(result.status, 2);
+  assert.match(result.stdout, /--draft and --dismiss cannot be combined/);
+  const ledgerFile = path.join(sb.cfg, 'agentic-kit', 'usage-outcome-ledger.json');
+  assert.equal(fs.existsSync(ledgerFile), false, 'the combined-flags rejection must not touch the ledger at all');
+  fs.rmSync(sb.home, { recursive: true, force: true });
+});
+
+// Fix round 1, I-2: an older `ak` must never destroy a well-formed ledger a
+// newer schema wrote — that would silently resurrect every dismissed card.
+test('ak usage prompts renders "coaching unavailable" and leaves a future-schema ledger untouched', () => {
+  const sb = sandbox();
+  writeCoachingCorpus(sb);
+  const ledgerDir = path.join(sb.cfg, 'agentic-kit');
+  fs.mkdirSync(ledgerDir, { recursive: true });
+  const ledgerFile = path.join(ledgerDir, 'usage-outcome-ledger.json');
+  const futureLedger = {
+    version: 2,
+    records: [{ id: 'commit-push-claude-md', evidenceHash: 'f'.repeat(16), status: 'dismissed', dismissCount: 3 }],
+  };
+  fs.writeFileSync(ledgerFile, JSON.stringify(futureLedger));
+
+  const result = ak(['usage', 'prompts'], sb);
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /newer schema \(v2\)/);
+  assert.match(result.stdout, /coaching is unavailable this run/);
+  assert.equal(result.stdout.includes('Commit-and-push is retyped'), false, 'no card renders when coaching is unavailable');
+  assert.deepEqual(JSON.parse(fs.readFileSync(ledgerFile, 'utf8')), futureLedger,
+    'a future-schema ledger must be left byte-for-byte untouched, never overwritten');
+
+  const dismissAttempt = ak(['usage', 'prompts', '--dismiss', 'commit-push-claude-md'], sb);
+  assert.equal(dismissAttempt.status, 2, '--dismiss against an unreadable-schema ledger must fail closed');
+  assert.deepEqual(JSON.parse(fs.readFileSync(ledgerFile, 'utf8')), futureLedger);
+  fs.rmSync(sb.home, { recursive: true, force: true });
+});
+
+// ── C-1 repro at the CLI level (fabrication now impossible) ─────────────────
+//
+// The controller's own repro scenario: a corpus whose behaviour is
+// CONSTANT — the operator changes nothing — observed under two different
+// `--window` values. Before this fix, switching --window alone fabricated an
+// adoption. After it, ledger-facing reads always come from the canonical
+// 30-day aggregate, so a display-only window switch cannot move the ledger.
+function writeSteadyCommitPushCorpus(sb, days) {
+  const projectDir = path.join(sb.home, '.claude', 'projects', '-tmp-c1-repro-fixture');
+  fs.mkdirSync(projectDir, { recursive: true });
+  const write = (id, lines) => fs.writeFileSync(path.join(projectDir, `${id}.jsonl`), lines.join('\n') + '\n');
+  for (let i = 0; i < days; i++) {
+    const text = COMMIT_PUSH_PHRASINGS[i % COMMIT_PUSH_PHRASINGS.length];
+    const at = Date.now() - i * 86_400_000 - 3_600_000;
+    const id = `c1-repro-${i}`;
+    write(id, [promptTurn(id, at, text), replyTurn(id, at + 10_000)]);
+  }
+}
+
+test('C-1 repro at the CLI: switching --window alone cannot fabricate an adoption, an outcome, or a retirement', () => {
+  const sb = sandbox();
+  // One commit-and-push session per day for 40 days — a steady-rate corpus
+  // the operator never changes, mirroring the controller's own repro.
+  writeSteadyCommitPushCorpus(sb, 40);
+
+  // Run 1: default (all-history) window — proposes.
+  const run1 = ak(['usage', 'prompts', '--json'], sb);
+  assert.equal(run1.status, 0, run1.stderr);
+  const card1 = JSON.parse(run1.stdout).coaching.cards.find((c) => c.id === 'commit-push-claude-md');
+  assert.ok(card1, 'the steady corpus must clear the seed\'s own shape bar at the default window');
+  assert.equal(card1.status, 'proposed');
+
+  // Run 2: the operator switches to --window 7. NOTHING about the corpus
+  // changed. The DISPLAYED basis is allowed to differ (it honors the
+  // window); the STATUS must not, because the ledger never compares against
+  // the displayed count.
+  const run2 = ak(['usage', 'prompts', '--window', '7', '--json'], sb);
+  assert.equal(run2.status, 0, run2.stderr);
+  const card2 = JSON.parse(run2.stdout).coaching.cards.find((c) => c.id === 'commit-push-claude-md');
+  assert.ok(card2);
+  assert.equal(card2.status, 'proposed', 'a --window switch alone must never fabricate an adoption');
+  assert.equal(card2.outcome, null, 'no outcome may exist — nothing was ever adopted');
+
+  // Run 3: back to the default window — still proposed, still no outcome.
+  const run3 = ak(['usage', 'prompts', '--json'], sb);
+  const card3 = JSON.parse(run3.stdout).coaching.cards.find((c) => c.id === 'commit-push-claude-md');
+  assert.equal(card3.status, 'proposed');
+  assert.equal(card3.outcome, null);
+
   fs.rmSync(sb.home, { recursive: true, force: true });
 });
 

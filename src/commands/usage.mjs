@@ -24,6 +24,7 @@ import {
 import { deriveCards } from '../lib/usage-coaching.mjs';
 import {
   loadLedger, saveLedger, reconcile, dismissCard, summarizeLedger, defaultLedgerPath, gatherAdoptionInputs,
+  CANONICAL_WINDOW_DAYS,
 } from '../lib/usage-outcome-ledger.mjs';
 
 export const options = {
@@ -1157,20 +1158,32 @@ function printDeepPass(deep) {
  *  (usage-prompts.mjs's coaching card). `stale` never appears in v1 — every
  *  proposed card's evidenceHash is refreshed the same pass it would go stale
  *  in, because a rule-derived card costs nothing to recompute (spec §6.3) —
- *  so this switch has no branch for it; there is nothing stale to report. */
+ *  so this switch has no branch for it; there is nothing stale to report.
+ *
+ *  Outcome/refutation lines carry "(30d basis)" (Fix round 1, C-1): both
+ *  numbers in `deltaText`/`refutation` are always read from the CANONICAL
+ *  30-day aggregate regardless of what `--window` is displaying elsewhere on
+ *  this report, and the render must say so — otherwise a reader comparing
+ *  this line against the Recurring clusters table above it (which DOES
+ *  honor `--window`) would see two different counts for "the same" pattern
+ *  with no explanation. */
 function coachingStatusLine(card) {
   if (card.status === 'adopted') {
     if (!card.outcome) return 'adopted ✓';
     return card.outcome.improved
-      ? `adopted ✓ — ${card.outcome.deltaText}`
-      : `adopted ✓ — too early to tell (${card.outcome.deltaText})`;
+      ? `adopted ✓ — ${card.outcome.deltaText} (30d basis)`
+      : `adopted ✓ — too early to tell (${card.outcome.deltaText} (30d basis))`;
   }
-  if (card.status === 'retired') return `retired — did not improve: ${card.refutation}`;
+  if (card.status === 'retired') return `retired — did not improve: ${card.refutation} (30d basis)`;
   if (card.status === 'dismissed') return 'dismissed';
   if (card.status === 'expired') return 'expired — evidence no longer present';
   return 'proposed';
 }
 
+/** `generatedAt` + the first 8 hex chars of `evidenceHash`, as a dim trailing
+ *  line (Fix round 1, M-3) — spec §5 makes a point of every card carrying
+ *  both; before this they existed on the object and in `--json` but reached
+ *  no rendered card on either surface. */
 function printCoachingCard(card) {
   info(card.title);
   info(dim(`  ${card.finding}`));
@@ -1179,24 +1192,32 @@ function printCoachingCard(card) {
   info(`  Status: ${coachingStatusLine(card)}`);
   if (card.draft) info(dim(`  Draft → ak usage prompts --draft ${card.id}`));
   if (card.status === 'proposed') info(dim(`  Dismiss → ak usage prompts --dismiss ${card.id}`));
+  info(dim(`  as of ${card.generatedAt} · ${card.evidenceHash.slice(0, 8)}`));
 }
 
 /** The Coaching section: cards rendered finding → Try → basis → status chip.
- *  `coaching` is `{ cards, ledgerSummary }`, the same shape the --json payload
- *  carries under `coaching` (spec: CLI names it `ledgerSummary`; the
- *  dashboard payload names the identical shape `summary` — see
- *  dashboard-server.mjs's promptsPayload). */
+ *  `coaching` is `{ cards, summary }` — one name on both surfaces (Fix round
+ *  1, M-2: this used to be `ledgerSummary` here and `summary` on the
+ *  dashboard; collapsed to the dashboard's name before a consumer could come
+ *  to depend on both). `coaching.unavailable` (Fix round 1, I-2) renders a
+ *  named reason instead of an empty section — set when the on-disk ledger is
+ *  a schema newer than this build understands, or when the canonical 30d
+ *  aggregate coaching needs could not be read this pass. */
 function printCoaching(coaching) {
   heading('Coaching');
   info(dim('  rule-derived and free to recompute every scan (spec §6.3) — nothing here goes stale; '
     + 'a card is only ever proposed, adopted, dismissed, expired, or retired'));
+  if (coaching?.unavailable) {
+    info(dim(`  coaching unavailable this run — ${coaching.reason}`));
+    return;
+  }
   const cards = coaching?.cards ?? [];
   if (!cards.length) {
     info(dim('  no samples — no coaching card met its evidence bar this window'));
     return;
   }
   for (const card of cards) printCoachingCard(card);
-  const s = coaching.ledgerSummary;
+  const s = coaching.summary;
   if (s) {
     info(dim(`  ledger — ${fmtNum(s.proposed)} proposed · ${fmtNum(s.adopted)} adopted · `
       + `${fmtNum(s.dismissed)} dismissed · ${fmtNum(s.expired)} expired · ${fmtNum(s.retired)} retired`));
@@ -1204,7 +1225,15 @@ function printCoaching(coaching) {
 }
 
 function coachingProjection(cards, ledger) {
-  return { cards, ledgerSummary: summarizeLedger(ledger.records) };
+  return { cards, summary: summarizeLedger(ledger.records) };
+}
+
+/** The section/`--json` shape when the ledger cannot honestly be reconciled
+ *  this pass (Fix round 1, I-2) — `cards: []`/`summary: null` rather than
+ *  omitting the key, so a consumer reading `coaching.cards.length` still sees
+ *  an array, not a crash. */
+function unavailableCoaching(reason) {
+  return { cards: [], summary: null, unavailable: true, reason };
 }
 
 /** Every rule-derived card id this pass, joined for an unknown-id error —
@@ -1216,7 +1245,10 @@ function knownCardIdsText(cards) {
 
 /** `--draft <id>`: print that one card's draft verbatim and nothing else —
  *  json-safe (a minimal object under --json, the raw text otherwise), so a
- *  caller can pipe either straight into a file. */
+ *  caller can pipe either straight into a file. Draft-only, always (spec §5):
+ *  the draft TEXT lives on the card object `deriveCards` already produced,
+ *  so this never touches the ledger — no load, no reconcile, no write (Fix
+ *  round 1, M-7: a read-shaped flag must not mutate anything). */
 function runDraftFlag(cards, id, json) {
   const card = cards.find((c) => c.id === id);
   if (!card) {
@@ -1235,9 +1267,13 @@ function runDraftFlag(cards, id, json) {
 
 /** `--dismiss <id>`: persist the dismissal and print a confirmation. Ledger
  *  writes are CLI-only (spec §3.3's privacy split; the dashboard's reconcile
- *  is read-only — see dashboard-server.mjs's promptsPayload). */
-function runDismissFlag({ ledger, ledgerPath, save, cards, id, json }) {
-  const { ledger: next, found } = dismissCard(ledger, id, cards);
+ *  is read-only — see dashboard-server.mjs's promptsPayload). The id is
+ *  validated against `cards` (this pass's reconciled set) by the caller
+ *  BEFORE this function is reached, so an unknown id never gets here (Fix
+ *  round 1, M-7) — `dismissCard`'s own `found: false` path is unreachable in
+ *  practice but kept as the honest fallback that would fire if it ever were. */
+function runDismissFlag({ ledger, ledgerPath, save, cards, id, json, adoptionInputs, now }) {
+  const { ledger: next, found } = dismissCard(ledger, id, cards, { adoptionInputs, now });
   if (!found) {
     warn(`ak usage prompts --dismiss: unknown card id ${JSON.stringify(id)}. Known ids: ${knownCardIdsText(cards)}`);
     return 2;
@@ -1249,10 +1285,37 @@ function runDismissFlag({ ledger, ledgerPath, save, cards, id, json }) {
   return 0;
 }
 
+/** The CANONICAL 30-day evidence bundle every ledger-facing read uses (Fix
+ *  round 1, C-1) — `agg` when the operator's own `--window` already IS 30d
+ *  (no second read needed), otherwise a dedicated fetch at
+ *  CANONICAL_WINDOW_DAYS. Returns `null` on a failed fetch, which the caller
+ *  reads as "coaching unavailable this pass" rather than failing the whole
+ *  report — the rest of `ak usage prompts` does not depend on this read. */
+async function canonicalCoachingAgg(agg, win, readAgg) {
+  if (win.days === CANONICAL_WINDOW_DAYS) return agg;
+  try {
+    return await readAgg({
+      days: CANONICAL_WINDOW_DAYS, lookbackDays: CANONICAL_WINDOW_DAYS + BASELINE_TRAILING_DAYS, prompts: true,
+    });
+  } catch {
+    return null;
+  }
+}
+
+function currentPatternsOf(a) {
+  return { promptPatterns: a.promptPatterns, promptsByHost: a.promptsByHost, promptBaselines: a.promptBaselines, insights: a.insights };
+}
+
 async function runPrompts({ flags, deps }) {
   const win = parsePromptWindow(flags.window);
   if (win == null) {
     warn(`ak usage prompts: --window must be 7, 14, 30, or all (got ${JSON.stringify(flags.window)})`);
+    return 2;
+  }
+  // Fix round 1, M-7: rejected before any I/O — neither flag's write can
+  // silently win over the other.
+  if (flags.draft != null && flags.dismiss != null) {
+    warn('ak usage prompts: --draft and --dismiss cannot be combined in one run.');
     return 2;
   }
   const readAgg = deps.readIndex ?? readIndex;
@@ -1275,38 +1338,76 @@ async function runPrompts({ flags, deps }) {
     else warn(message);
     return 1;
   }
-  const report = promptReport(agg, win);
 
-  // Coaching cards (spec §5) derive from the SAME aggregate — `agg.insights`
-  // is populated unconditionally by aggregate() (usage-aggregate.mjs), not
-  // only when `prompts: true`, so it needs no separate read here.
+  // Coaching cards (spec §5) derive from the OPERATOR'S window, for display —
+  // `agg.insights` is populated unconditionally by aggregate()
+  // (usage-aggregate.mjs), not only when `prompts: true`, so it needs no
+  // separate read here.
   const cards = deriveCards({
     promptPatterns: agg.promptPatterns, promptBaselines: agg.promptBaselines,
     promptsByHost: agg.promptsByHost, insights: agg.insights, now: Date.now(),
   });
+
+  // --draft is a pure read over `cards` alone — no ledger, no canonical
+  // fetch, no write (Fix round 1, M-7).
+  if (flags.draft != null) return runDraftFlag(cards, flags.draft, flags.json);
+
+  const report = promptReport(agg, win);
+  const deep = flags.deep ? runDeepPass(agg, report, win, deps) : null;
+
   const ledgerPath = deps.ledgerPath ?? defaultLedgerPath();
   const loadLedgerFn = deps.loadLedger ?? loadLedger;
   const saveLedgerFn = deps.saveLedger ?? saveLedger;
-  const adoptionInputs = deps.adoptionInputs ?? gatherAdoptionInputs();
-  const currentPatterns = { promptPatterns: agg.promptPatterns, promptsByHost: agg.promptsByHost, insights: agg.insights };
-  const { ledger, cards: reconciledCards } = reconcile(loadLedgerFn(ledgerPath), cards, {
-    adoptionInputs: { ...adoptionInputs, currentPatterns }, now: Date.now(),
-  });
-  // Ledger updates happen on EVERY invocation, not only --dismiss — reconcile
-  // above already computed adoption/outcome/expiry transitions; this is the
-  // one point that persists them (the dashboard's own reconcile never calls
-  // this, per its read-only contract).
-  saveLedgerFn(ledgerPath, ledger);
+  const cwd = deps.cwd ?? process.cwd();
+  const adoptionInputs = deps.adoptionInputs ?? gatherAdoptionInputs(cwd);
+  const now = Date.now();
 
-  if (flags.draft != null) return runDraftFlag(reconciledCards, flags.draft, flags.json);
-  if (flags.dismiss != null) {
-    return runDismissFlag({
-      ledger, ledgerPath, save: saveLedgerFn, cards: reconciledCards, id: flags.dismiss, json: flags.json,
-    });
+  const loadedLedger = loadLedgerFn(ledgerPath);
+  let coaching;
+  if (loadedLedger.future) {
+    // Fix round 1, I-2: refuse to reconcile/overwrite a well-formed ledger
+    // from a newer schema — doing so would silently resurrect every
+    // dismissed card the newer build had suppressed.
+    warn(`ak usage prompts: the outcome ledger at ${ledgerPath} is a newer schema `
+      + `(v${loadedLedger.version}) this build does not understand — coaching is unavailable `
+      + 'this run, and the file was left untouched.');
+    if (flags.dismiss != null) return 2; // nothing readable to dismiss against
+    coaching = unavailableCoaching(`ledger schema v${loadedLedger.version} is newer than this build (v1)`);
+  } else {
+    const canonicalAgg = await canonicalCoachingAgg(agg, win, readAgg);
+    if (!canonicalAgg) {
+      warn('ak usage prompts: could not read the canonical 30-day aggregate coaching needs — '
+        + 'coaching is unavailable this run.');
+      if (flags.dismiss != null) return 2;
+      coaching = unavailableCoaching('the canonical 30-day aggregate could not be read');
+    } else {
+      const currentPatterns = currentPatternsOf(canonicalAgg);
+      const { ledger, cards: reconciledCards } = reconcile(loadedLedger, cards, {
+        adoptionInputs: { ...adoptionInputs, currentPatterns }, now,
+      });
+
+      if (flags.dismiss != null) {
+        const knownIds = new Set(reconciledCards.map((c) => c.id));
+        if (!knownIds.has(flags.dismiss)) {
+          warn(`ak usage prompts --dismiss: unknown card id ${JSON.stringify(flags.dismiss)}. `
+            + `Known ids: ${knownCardIdsText(reconciledCards)}`);
+          return 2; // Fix round 1, M-7: no write for an id validated invalid
+        }
+        return runDismissFlag({
+          ledger, ledgerPath, save: saveLedgerFn, cards: reconciledCards, id: flags.dismiss, json: flags.json,
+          adoptionInputs: { ...adoptionInputs, currentPatterns }, now,
+        });
+      }
+
+      // Ledger updates happen on EVERY normal invocation — reconcile above
+      // already computed adoption/outcome/expiry transitions; this is the
+      // one point that persists them (the dashboard's own reconcile never
+      // calls this, per its read-only contract).
+      saveLedgerFn(ledgerPath, ledger);
+      coaching = coachingProjection(reconciledCards, ledger);
+    }
   }
 
-  const deep = flags.deep ? runDeepPass(agg, report, win, deps) : null;
-  const coaching = coachingProjection(reconciledCards, ledger);
   if (flags.json) {
     const projection = { ...promptProjection(agg, report), coaching };
     console.log(JSON.stringify(deep ? { ...projection, exemplars: deep } : projection, null, 2));
