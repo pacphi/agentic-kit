@@ -5,9 +5,11 @@ import os from 'node:os';
 import path from 'node:path';
 import {
   evidenceHash, deriveCards, detectAdoption, measureOutcome, currentEvidenceFor,
-  RELEASE_RITUAL_MIN_COUNT, COMMIT_PUSH_MIN_COUNT, REASK_DELTA_MIN_PAIRS, PERSONA_LIBRARY_MIN_COUNT,
   OUTCOME_MIN_DAYS, DAY_MS,
 } from '../../src/lib/usage-coaching.mjs';
+import {
+  RELEASE_RITUAL_MIN_COUNT, COMMIT_PUSH_MIN_COUNT, REASK_DELTA_MIN_PAIRS, PERSONA_LIBRARY_MIN_COUNT,
+} from '../../src/lib/usage-coaching-rules.mjs';
 import {
   loadLedger, saveLedger, reconcile, dismissCard, summarizeLedger, defaultLedgerPath,
   gatherAdoptionInputs, LEDGER_SCHEMA_VERSION, DISMISS_PERMANENT_THRESHOLD, DISMISS_MATERIALITY_RATIO,

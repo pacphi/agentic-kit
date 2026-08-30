@@ -1435,7 +1435,7 @@ off each `turn_context`, last one wins since a session may renegotiate mid-run
 (`usage-parsers.mjs:697-702`); OpenCode's `mode` off each assistant message
 (`usage-opencode.mjs:240-241`). Render is `modeChart` in
 `src/lib/dashboard/client/usage.mjs`; the CLI table is `printScoreModeTable`
-(`src/commands/usage.mjs:266-268`).
+(`src/commands/usage.mjs:279-281`).
 
 **The mapping table**, in full (`usage-modes.mjs:6-17`), pinned value-by-value
 by `normalizeMode` assertions in `tests/kit/usage-modes.test.mjs:9-52`, and the
@@ -1939,7 +1939,7 @@ per-host and monthly folds off `promptsByHost` / `promptStatsByDay`
 session rows rather than of the prompts (`headlessShare`, `:643`).
 
 The deep pass is the one tier that reads the index cache directly
-(`readPromptEntries`, `src/commands/usage.mjs:739`): it needs the HASHES it owes
+(`readPromptEntries`, `src/commands/usage.mjs:752`): it needs the HASHES it owes
 an exemplar for and the transcript PATH of a session holding one, and the cache
 is the only place both exist together. That coupling is confined to this
 text-bearing, CLI-only tier — a pass about to open the transcripts and print
