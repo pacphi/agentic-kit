@@ -22,6 +22,25 @@
 // nearby falls back to a plain range check (the file has enough lines) —
 // there is nothing sharper to hold it to.
 //
+// Fix round 1, C-1 — the DEFINITION-SITE rule. A named symbol's word-boundary
+// match above only proves the TEXT appears somewhere in the widened window —
+// a call site (`printScoreReliability(agg);`) contains the identifier just as
+// much as its definition does, so a citation moved off a function's real
+// definition range onto an unrelated call-site line used to still pass. When
+// a named symbol resolves to EXACTLY ONE `function|const|let|var|class
+// <name>` declaration anywhere in the cited file, that declaration's line
+// must itself fall within the widened range — a call site or passing mention
+// elsewhere in the window no longer substitutes for it. A symbol with zero or
+// multiple such declarations is too ambiguous to gate on and relies on the
+// plain word-boundary check above instead.
+//
+// Fix round 1, I-2 — SAME-ROW fallback for table citations. Cell-scoping
+// (below) stops a neighbouring column's identifier from anchoring a
+// DIFFERENT fact's citation, but a `| `symbol` | prose (`file.mjs:N`) |` row
+// legitimately names its subject in one cell and cites it in another. When a
+// table citation's OWN cell yields no anchor at all, it falls back to the
+// REST OF ITS ROW (every other cell on the same line) — never another row.
+//
 // A failure names the citation and where its anchor actually lives now (if
 // found anywhere in the file), so re-anchoring is a one-line edit.
 import { test } from 'node:test';
@@ -68,6 +87,34 @@ function identifierIn(tok) {
   if (IDENTIFIER_RE.test(tok)) return tok;
   const m = IDENTIFIER_PREFIX_RE.exec(tok);
   return m ? m[1] : null;
+}
+
+// Fix round 1, C-1 — the definition-site rule. `name` is always a validated
+// identifier token (from identifierIn), never doc free text, so it is safe
+// to interpolate into a RegExp without escaping.
+function definitionRe(name) {
+  return new RegExp(
+    `^\\s*(?:export\\s+)?(?:default\\s+)?(?:async\\s+)?`
+    + `(?:function\\*?\\s+${name}\\b|(?:const|let|var|class)\\s+${name}\\b)`,
+  );
+}
+
+// The 1-indexed line where `name` is declared in `src` (identified by `rel`,
+// for caching), or null when there isn't EXACTLY one such declaration — 0 is
+// nothing to gate on, 2+ is too ambiguous to pick one, and both fall back to
+// the plain word-boundary check instead.
+const defLineCache = new Map();
+function soleDefinitionLine(name, rel, src) {
+  const key = `${rel} ${name}`;
+  if (defLineCache.has(key)) return defLineCache.get(key);
+  const re = definitionRe(name);
+  let hit = null, count = 0;
+  for (let i = 0; i < src.length; i++) {
+    if (re.test(src[i])) { count++; hit = i + 1; }
+  }
+  const result = count === 1 ? hit : null;
+  defLineCache.set(key, result);
+  return result;
 }
 
 // A markdown table row — citations and spans on one both restrict each
@@ -125,33 +172,44 @@ function extractCitations(docText) {
     spans.push({ tok: m[1].replace(/\s+/g, ' '), line: startLine, col: m.index - lineStartOffset[startLine - 1] });
   }
   for (const c of cites) {
-    const idAnchors = new Set();
-    for (const s of spans) {
-      if (s.line < c.docLine - 3 || s.line > c.docLine + 1) continue;
-      // Inside a table row, a candidate must be ON THAT ROW and in the SAME
-      // CELL as the citation — a neighbouring column is not "nearby prose",
-      // it is a different fact with its own citation.
-      if (c.table !== null) {
-        if (s.line !== c.docLine) continue;
-        if (cellIndexAt(maskedLines[s.line - 1], s.col) !== c.table) continue;
+    // Fix round 1, I-2: mine the citation's OWN cell first; a table citation
+    // whose own cell names nothing falls back to the REST OF ITS ROW (never
+    // another row) — see the file header. Non-table citations are unaffected
+    // (ownCellOnly never restricts anything for them).
+    const mineIds = (ownCellOnly) => {
+      const found = new Set();
+      for (const s of spans) {
+        if (s.line < c.docLine - 3 || s.line > c.docLine + 1) continue;
+        // Inside a table row, a candidate must be ON THAT ROW — and, on the
+        // own-cell pass, in the SAME CELL as the citation — a neighbouring
+        // column is not "nearby prose", it is a different fact with its own
+        // citation.
+        if (c.table !== null) {
+          if (s.line !== c.docLine) continue;
+          if (ownCellOnly && cellIndexAt(maskedLines[s.line - 1], s.col) !== c.table) continue;
+        }
+        if (/^[\w./-]+\.(mjs|cjs|js):\d/.test(s.tok) || /^:\d/.test(s.tok)) continue; // a citation, not an anchor
+        // A NAMED SYMBOL is the span's WHOLE content (or its unambiguous
+        // leading token) — `did not land` names nothing; `printCoaching` and
+        // `TAP_MAX_TOKENS = 4` both name themselves.
+        const id = identifierIn(s.tok);
+        if (id) found.add(id);
       }
-      if (/^[\w./-]+\.(mjs|cjs|js):\d/.test(s.tok) || /^:\d/.test(s.tok)) continue; // a citation, not an anchor
-      // A NAMED SYMBOL is the span's WHOLE content (or its unambiguous
-      // leading token) — `did not land` names nothing; `printCoaching` and
-      // `TAP_MAX_TOKENS = 4` both name themselves.
-      const id = identifierIn(s.tok);
-      if (id) idAnchors.add(id);
-    }
-    const ctxLo = c.table !== null ? c.docLine - 1 : Math.max(0, c.docLine - 4);
-    const ctxHi = c.table !== null ? c.docLine : c.docLine + 2;
-    const ctx = c.table !== null
-      ? (() => {
-        const cells = maskedLines[c.docLine - 1].split('|');
-        return cells[c.table] ?? '';
-      })()
-      : maskedLines.slice(ctxLo, ctxHi).join(' ');
+      return found;
+    };
+    let idAnchors = mineIds(true);
+    if (c.table !== null && idAnchors.size === 0) idAnchors = mineIds(false);
+
+    const ownCellCtx = c.table !== null
+      ? (maskedLines[c.docLine - 1].split('|')[c.table] ?? '')
+      : maskedLines.slice(Math.max(0, c.docLine - 4), c.docLine + 2).join(' ');
     const strAnchors = new Set();
-    for (const m of ctx.matchAll(/"([^"]{8,90})"/g)) strAnchors.add(m[1]);
+    for (const m of ownCellCtx.matchAll(/"([^"]{8,90})"/g)) strAnchors.add(m[1]);
+    // Same same-row fallback for quoted-string anchors: an empty own cell
+    // widens to the whole row, still never leaving it.
+    if (c.table !== null && strAnchors.size === 0) {
+      for (const m of maskedLines[c.docLine - 1].matchAll(/"([^"]{8,90})"/g)) strAnchors.add(m[1]);
+    }
     c.idAnchors = [...idAnchors];
     c.strAnchors = [...strAnchors];
   }
@@ -180,7 +238,8 @@ function checkDoc(docRel, index) {
     // Whitespace-normalized on both sides: doc wrapping and source wrapping
     // must not defeat a match on the same words.
     const window = src.slice(lo, hi).join(' ').replace(/\s+/g, ' ');
-    const idHit = c.idAnchors.some((a) => new RegExp(`\\b${escapeRegExp(a)}\\b`).test(window));
+    const idHitAnchors = c.idAnchors.filter((a) => new RegExp(`\\b${escapeRegExp(a)}\\b`).test(window));
+    const idHit = idHitAnchors.length > 0;
     const strHit = c.strAnchors.some((a) => window.includes(a.replace(/\s+/g, ' ')));
     if (!idHit && !strHit) {
       const findElsewhere = (a, wordBoundary) => {
@@ -197,6 +256,26 @@ function checkDoc(docRel, index) {
         `but none of its anchors (named symbol: ${c.idAnchors.join(', ') || '(none)'}` +
         `${c.strAnchors.length ? `; quoted: ${c.strAnchors.join(', ')}` : ''}) appear within ±${TOLERANCE} lines` +
         (seen ? ` (found elsewhere: ${seen})` : ' (anchors not found in file at all)'),
+      );
+      continue;
+    }
+    // Fix round 1, C-1 — the definition-site rule: a word-boundary hit above
+    // only proves the identifier's TEXT is somewhere in the window, which a
+    // call site satisfies just as well as a definition. Scoped to the
+    // anchors that ACTUALLY hit (idHitAnchors) — an identifier merely mined
+    // nearby (e.g. the subject of an adjacent sentence's own citation, within
+    // the ±3/+1 doc-line window but never matching this citation's window)
+    // never claimed anything about this citation and must not be gated on;
+    // only a symbol whose text-match is doing the work here has to prove
+    // that text-match is a definition, not a call site.
+    const defMiss = idHitAnchors
+      .map((a) => ({ a, at: soleDefinitionLine(a, rel, src) }))
+      .find(({ at }) => at !== null && (at < lo + 1 || at > hi));
+    if (defMiss) {
+      failures.push(
+        `${docRel}:${c.docLine} cites ${c.file}:${c.start}${c.end !== c.start ? '-' + c.end : ''} ` +
+        `for \`${defMiss.a}\`, but its sole definition is at ${c.file}:${defMiss.at} — outside ` +
+        `±${TOLERANCE} lines of this range (definition-site rule)`,
       );
     }
   }

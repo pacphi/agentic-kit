@@ -330,9 +330,10 @@ corpus, not only against a scripted shim, with the transcript retained as eviden
 
 Both citation-bearing reference documents are machine-checked: every `file:line` citation in
 `USAGE-SCORECARD-METRICS.md` and `TRANSCRIPTS.md` is verified against the current source on every
-test run by `tests/kit/doc-citations.test.mjs`, tightened during this same wave (§6 below) to
-require a named identifier, not a word fragment, wherever a citation's surrounding prose names
-one.
+test run by `tests/kit/doc-citations.test.mjs`, tightened during this build (word-boundary
+identifier matching, then — fix round 1 — a definition-site rule requiring a named symbol's
+citation to contain its one resolvable declaration, not merely a call site or passing mention,
+plus same-row anchor scoping for table citations whose own cell names nothing).
 
 ## References
 
