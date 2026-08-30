@@ -7,9 +7,18 @@
 // do these already-decoded records add up to", nothing about how they got
 // decoded.
 //
-// Zero imports from sibling usage-* modules by design: usage-parsers.mjs
-// imports `toMs`/`maskSecrets` FROM here, so this file must not import back
-// from it (or from usage-index.mjs) to keep that a one-way dependency.
+// The dependency rule, stated precisely because this file used to claim zero
+// sibling imports: usage-parsers.mjs imports `toMs`/`maskSecrets` FROM here, so
+// this file must never import back from it (or from usage-index.mjs). The three
+// modules it does import — usage-provenance, usage-prompt-patterns,
+// usage-prompt-vocabulary — are LEAVES: each has zero imports of its own, so
+// none of them can close a cycle through here. They are pure arithmetic over
+// already-decoded fingerprints, which is exactly this module's own subject.
+import { PROVENANCE_TAGS } from './usage-provenance.mjs';
+import {
+  crossSessionClusters, exactRepeatGroups, nearDupClusters, reAskPairs,
+} from './usage-prompt-patterns.mjs';
+import { labelFor } from './usage-prompt-vocabulary.mjs';
 
 /** Milliseconds from an epoch number, Date, or ISO string; NaN when unusable.
  *  Exported only for usage-parsers.mjs's own timestamp parsing — not part of
@@ -406,6 +415,179 @@ function buildPromptBaselines(records, { days, now }) {
     };
   }
   return out;
+}
+
+// ── promptPatterns: the opt-in repetition projection ───────────────────────
+// Spec §3.2 panel 3 and §3.3's CLI. Built HERE, beside buildPromptBaselines,
+// because this is the layer that already reads `records` — and built only when
+// a caller asks (`prompts: true`), exactly as `previous` is.
+//
+// RAW FINGERPRINTS NEVER GET A PUBLIC ACCESSOR. The fingerprint layer is 2.8 MB
+// on the reference corpus, so shipping it would put it on every dashboard poll,
+// and it would put decoration semantics in every consumer. Only this projection
+// ships: aggregates, plus a capped list of session ids per cluster so a view can
+// link to the existing masked session surface. No prompt text exists here to
+// leak, which the tests pin structurally.
+
+/** The clustering threshold the Prompts view ships at (spec §3.2 panel 3),
+ *  looser than the pattern library's own 0.8 default on purpose: phrasing
+ *  variance is the signal. Eleven wordings of one request outrank eleven
+ *  identical ones, because eleven wordings prove there is no canonical form to
+ *  point at; precision comes from the type filter, not from tightening this. */
+export const PROMPT_CLUSTER_JACCARD = 0.6;
+
+/** Re-asks keep the research's tighter 0.8 (findings §5.1). A re-ask is "that
+ *  didn't work, so I said it again", which is a claim about near sameness; the
+ *  looser threshold above would count an ordinary follow-up as a repeat. */
+export const PROMPT_REASK_JACCARD = 0.8;
+
+/** Session ids attached to a cluster so a view can link to the masked
+ *  `GET /api/session/:id` surface. A LINK AFFORDANCE, not a session list —
+ *  three is enough to click through and few enough that the projection cannot
+ *  become a membership dump. */
+const CLUSTER_SAMPLE_SESSIONS = 3;
+
+/**
+ * One stored fingerprint, decorated with WHERE it happened — the input shape
+ * usage-prompt-patterns.mjs documents. THIS IS THE ONLY PLACE THE DECORATION
+ * SEMANTICS LIVE; a second copy in a consumer is how the two surfaces drift.
+ *
+ * `q` and `o` are ALWAYS SET as booleans, and that is load-bearing twice over.
+ * The scan path stores them as the number 1 and OMITS them when false
+ * (usage-parsers.promptShape), while the clustering library reads `m.q === true`
+ * / `m.q === false` and treats an absent flag as "nobody classified this". Passed
+ * through raw, `1 !== true` made every cluster report `unknown`; and even mapped
+ * for truthiness, a never-written `false` left the `instruction` class
+ * unreachable, so an instruction cluster was indistinguishable from an
+ * unclassified one and three of the four seed patterns could never match.
+ *
+ * AN ABSENT FLAG THEREFORE MEANS "MEASURED, AND NOT THAT SHAPE" — not
+ * "unclassified". That reading is only sound because the parser decides both
+ * flags for every fingerprint it writes and the index cache is schema-gated, so
+ * every record reaching here was written by a parser that made both decisions.
+ *
+ * @param {{h: string, t: number, th: string[], p?: string, q?: 1, o?: 1}} fp
+ * @param {{id: string, host?: string, provider?: string}} rec the record the
+ *   fingerprint was stored on
+ * @param {string|null} day its first-billed day (promptStatsByDay's convention)
+ */
+function decoratePromptFP(fp, rec, day) {
+  return {
+    ...fp,
+    q: fp.q === 1,
+    o: fp.o === 1,
+    sessionId: rec.id,
+    day,
+    host: rec.host ?? rec.provider ?? 'unknown',
+  };
+}
+
+/** Every in-window fingerprint, decorated. The record gate matches
+ *  buildSessionRows' (no assistant turn is not a session; `end < cutoff` is
+ *  outside the window) so this projection and the window's own totals are taken
+ *  over one population. */
+function windowFingerprints(records, cutoff) {
+  const out = [];
+  for (const rec of records) {
+    if (!rec?.responses || !Array.isArray(rec.promptFPs)) continue;
+    if (rec.end == null || rec.end < cutoff) continue;
+    const day = firstBilledDay(rec);
+    for (const fp of rec.promptFPs) out.push(decoratePromptFP(fp, rec, day));
+  }
+  return out;
+}
+
+/** A cluster reduced to its published row. Sets become counts, except `hosts`,
+ *  which stays a sorted name list because a host chip is what a reader acts on
+ *  and the host set is small, closed and already public in `byHost`. */
+function promptClusterRow(cluster) {
+  const label = labelFor(cluster, {});
+  return {
+    key: cluster.key,
+    label: { name: label.name, source: label.source },
+    class: cluster.class,
+    count: cluster.size,
+    sessions: cluster.sessions.size,
+    days: cluster.days.size,
+    hosts: [...cluster.hosts],
+    medianTokens: cluster.tokens.median,
+    sampleSessionIds: [...cluster.sessions].slice(0, CLUSTER_SAMPLE_SESSIONS),
+  };
+}
+
+/** Counts per provenance tag over the WHOLE fingerprinted population — the
+ *  denominator every typed figure sits behind (spec §2.1). Every tag in the
+ *  vocabulary gets a row, including ones this corpus never produced: a missing
+ *  tag is evidence about the corpus, not a row to drop. */
+function promptProvenance(fps) {
+  const counts = Object.create(null);
+  for (const tag of PROVENANCE_TAGS) counts[tag] = 0;
+  let unrecognized = 0;
+  for (const fp of fps) {
+    if (Object.hasOwn(counts, fp.p)) counts[fp.p]++;
+    else unrecognized++;
+  }
+  return unrecognized ? { ...counts, unrecognized } : { ...counts };
+}
+
+/** Typed taps grouped by TOKEN LENGTH. No text exists at this layer, so "the
+ *  top taps" can only be a length distribution — which is the honest shape of
+ *  the question here; a verbatim table needs a transcript re-read. */
+function promptTapLengths(typed) {
+  const byLen = new Map();
+  for (const fp of typed) {
+    if (!isTapFP(fp)) continue;
+    const t = Number(fp.t) || 0;
+    const row = byLen.get(t)
+      ?? { tokens: t, prompts: 0, sessions: new Set(), days: new Set(), hosts: new Set() };
+    row.prompts++;
+    if (fp.sessionId) row.sessions.add(fp.sessionId);
+    if (fp.day) row.days.add(fp.day);
+    if (fp.host) row.hosts.add(fp.host);
+    byLen.set(t, row);
+  }
+  return [...byLen.values()]
+    .sort((a, b) => b.prompts - a.prompts || a.tokens - b.tokens)
+    .map((r) => ({
+      tokens: r.tokens, prompts: r.prompts,
+      sessions: r.sessions.size, days: r.days.size, hosts: [...r.hosts].sort(),
+    }));
+}
+
+/**
+ * The published repetition projection: which requests recur, which were asked
+ * twice in one sitting, and which are typed identically over and over.
+ *
+ * Ordering is deterministic throughout — the clustering library sorts by size
+ * then key, `exactRepeatGroups` by count then hash, and every Set it hands back
+ * iterates sorted — so a rescan over an unchanged corpus reproduces this object
+ * byte for byte, which is what the evidence-hash contract (spec §6.3) rests on.
+ *
+ * `labelFor` is applied with an EMPTY label store in v1: the kit owns no store
+ * yet, so every name resolves to a seed pattern or to `characterize`, and each
+ * row says which via `label.source`.
+ */
+function buildPromptPatterns(records, { cutoff, now }) {
+  const fps = windowFingerprints(records, cutoff);
+  const typed = fps.filter(isTypedFP);
+  const clusters = crossSessionClusters(nearDupClusters(typed, { jaccard: PROMPT_CLUSTER_JACCARD }));
+  const reAsks = reAskPairs(typed, { jaccard: PROMPT_REASK_JACCARD });
+  return {
+    corpus: { fingerprints: fps.length, typed: typed.length },
+    provenance: promptProvenance(fps),
+    tapLengths: promptTapLengths(typed),
+    clusters: clusters.map(promptClusterRow),
+    reAsks: {
+      pairCount: reAsks.pairs.length,
+      sessionCount: reAsks.sessions,
+      gapHist: { ...reAsks.gaps },
+    },
+    exactRepeats: exactRepeatGroups(typed).map((g) => ({
+      key: g.h, count: g.count, tokens: g.t,
+      sessions: g.sessions.size, days: g.days.size, hosts: [...g.hosts],
+    })),
+    computedAt: new Date(now).toISOString(),
+  };
 }
 
 /** Sum a record's per-model usage rows into one API-equivalent cost. Rows with
@@ -968,8 +1150,17 @@ function buildCodexRateLimits(sessions) {
  *  DISPLAYED one — `[now − 2·days, now − days)`, derived from `now`/`days` and
  *  not from `cutoff` (see previousWindow). Left off, `agg.previous` is `null` —
  *  "not requested", which a zeroed totals object would misreport as "measured
- *  nothing". */
-export function aggregate(records, { days, now, cutoff, deps, previous = false }) {
+ *  nothing".
+ *
+ *  `prompts: true` is the same pattern for the repetition projection
+ *  (`agg.promptPatterns`, see buildPromptPatterns): opt-in because clustering
+ *  the corpus costs real time on every scan and no default consumer needs it,
+ *  and `null` rather than an empty projection when it was not asked for. Any
+ *  caller adding an option here must also fold it into usage-index.mjs's
+ *  `scanKey` — it decides both the single-flight identity and readIndex's memo,
+ *  so an unfolded option lets a `{prompts:true}` caller be served an answer
+ *  built without it. */
+export function aggregate(records, { days, now, cutoff, deps, previous = false, prompts = false }) {
   // Null-prototype: these are keyed by transcript-derived strings (day, model id,
   // provider, project, category, tool name), so `__proto__` as a key must be an
   // ordinary bucket, not a prototype write that silently discards the data.
@@ -1015,6 +1206,10 @@ export function aggregate(records, { days, now, cutoff, deps, previous = false }
     // out of the rows.
     promptsByHost, promptStatsByDay,
     promptBaselines: buildPromptBaselines(records, { days, now }),
+    // The repetition projection reads the DISPLAY window (`cutoff`), unlike
+    // promptBaselines above, which deliberately reads the trailing window
+    // BEFORE it. Same records, two different questions.
+    promptPatterns: prompts ? buildPromptPatterns(records, { cutoff, now }) : null,
     punchcard, projectTree, sessions, codexRateLimits, rhythm,
     previous: previous ? previousWindow(records, { days, now, deps, rates }) : null,
     insights: [],

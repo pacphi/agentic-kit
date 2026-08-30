@@ -180,7 +180,7 @@ The same parsers serve two very different callers, switched by `withTurns`:
 | Path | Entry point | `withTurns` | Message bodies | Cached? |
 |---|---|---|---|---|
 | **Scan** — the aggregate index behind the Scorecard/Findings/Sessions views | `buildIndex` → `parseFile` (`usage-index.mjs:331`) | `false` | no turn list is built, and no body is retained — holding them would balloon memory across 3,000+ files (`usage-parsers.mjs:597-600`). Since v14 the scan path does *read* one narrow slice: opencode's USER text parts, so a prompt can be fingerprinted (`loadTextParts`, `usage-opencode.mjs:276`). Only the fingerprint is kept; the text is discarded with the row. Measured at 45 µs/session materializing 0.6 MB on a 300-session store, against 125 µs and 61 MB for the reader path's unfiltered join | yes: per-file derived records in `~/.config/agentic-kit/usage-index.json`, keyed `(path, mtime, size)`, invalidated wholesale by `SCHEMA_VERSION` (`usage-index.mjs:141`) |
-| **Reader** — one transcript for the Transcript view | `readSession` (`usage-index.mjs:874`) | `true` | full turn list built | **never** — every call re-reads and re-parses the one file |
+| **Reader** — one transcript for the Transcript view | `readSession` (`usage-index.mjs:884`) | `true` | full turn list built | **never** — every call re-reads and re-parses the one file |
 
 ![Figure: one parser, two read paths — the scan path (withTurns false) caches per-file records keyed by path, mtime and size; the reader path (withTurns true) builds full turns and is never cached](assets/transcript-read-paths.svg)
 
@@ -304,14 +304,14 @@ string.
 
 ## 4. The `readSession` pipeline — how one session becomes a payload
 
-`readSession(id, opts)` (`usage-index.mjs:874-930`) is the only way
+`readSession(id, opts)` (`usage-index.mjs:884-940`) is the only way
 transcript content leaves the module, and every step is a gate:
 
 ### 4.1 Locate, contain, bound
 
 1. **Id grammar before any filesystem access** — an id must match one of
    exactly two shapes, or it is rejected with `ERR_INVALID_SESSION_ID`
-   (`invalidId`, `usage-index.mjs:940`) before any read happens:
+   (`invalidId`, `usage-index.mjs:950`) before any read happens:
    * `VALID_ID` (`/^[A-Za-z0-9._-]{1,128}$/`, `usage-index.mjs:152`) — a plain
      session id;
    * `VALID_SUBAGENT_ID` (`usage-index.mjs:168`) — a namespaced nested
@@ -320,13 +320,13 @@ transcript content leaves the module, and every step is a gate:
      real on-disk `agent-…` shape. The namespaced grammar is a **narrowing**
      of the plain one, never a loosening: both are the same path-traversal
      guard, and a traversal shape is rejected at either tier.
-2. **Locate by id** across both roots (`locate`, `usage-index.mjs:873`),
+2. **Locate by id** across both roots (`locate`, `usage-index.mjs:883`),
    consulting the scan cache when present but never requiring it —
    `readSession` works with no prior `buildIndex`. A namespaced id resolves
-   through `locateSubagent` (`usage-index.mjs:808-816`), which builds the
+   through `locateSubagent` (`usage-index.mjs:818-826`), which builds the
    nested path from the two **already-validated capture groups** rather than
    from raw request text.
-3. **Realpath containment** (`usage-index.mjs:895-909`) — the resolved file
+3. **Realpath containment** (`usage-index.mjs:905-919`) — the resolved file
    must live under a transcript root *after* `realpathSync` collapses
    symlinks; a symlink planted inside a root pointing at `/etc/anything`
    passes a lexical `startsWith` but fails this. Roots are realpath'd too so
@@ -338,8 +338,8 @@ transcript content leaves the module, and every step is a gate:
 ### 4.2 Parse and price
 
 The file is parsed with `withTurns: true` by the provider's parser
-(`usage-index.mjs:922-927`), and `meta` is assembled by `sessionPayload`
-(`usage-aggregate.mjs:1055-1082`) with the same fields the Sessions view rows
+(`usage-index.mjs:932-937`), and `meta` is assembled by `sessionPayload`
+(`usage-aggregate.mjs:1249-1276`) with the same fields the Sessions view rows
 carry — `prompts`, `responses`, `exceptions`, `sidechain`, `threadSource`,
 `models`, `tools`, `skill`/`plugin`, worktree — plus a `cost` priced from the
 same per-model usage rows `aggregate()` uses.
@@ -356,11 +356,11 @@ never renames a retained session model, changes historical token pricing, or rew
 
 ### 4.3 Mask, then truncate — both marked, differently
 
-Every turn body is passed through `maskSecrets` (`usage-aggregate.mjs:133-138` — the
+Every turn body is passed through `maskSecrets` (`usage-aggregate.mjs:142-147` — the
 23 secret shapes) **server-side, before
 serialization**, then length-capped at `MAX_TURN_CHARS` (40,000,
-`usage-aggregate.mjs:63`) with the marker appended
-(`usage-aggregate.mjs:1090-1099`). Two invariants:
+`usage-aggregate.mjs:72`) with the marker appended
+(`usage-aggregate.mjs:1284-1293`). Two invariants:
 
 * **Presence is the signal.** `truncated`/`originalChars` are emitted only
   when the slice fired, so a complete turn cannot be misread as abridged.
@@ -520,7 +520,7 @@ was wrong before, for the curious.
   assembled `meta` left `cost` undefined, and `fmtUsd(undefined)` renders the
   truthy string `"$0.00"` — a fixed-looking zero on a panel whose whole
   subject is cost. `meta.cost` is now priced via `sessionCost()` from the
-  same per-model usage rows `aggregate()` uses (`usage-aggregate.mjs:1080`).
+  same per-model usage rows `aggregate()` uses (`usage-aggregate.mjs:1274`).
 * **Aggregate-side incidents** (the v4/v5 cache bumps, the Codex parsing
   defects) are recorded in `USAGE-SCORECARD-METRICS.md` Appendix A.
 

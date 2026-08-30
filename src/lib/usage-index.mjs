@@ -500,15 +500,17 @@ let _memo = null;
  *  case still changes the key instead of colliding with every other scan. */
 function scanKey(o = {}) {
   const roots = Object.entries(o.roots || {}).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
-  // lookbackDays and previous both change the RESULT — lookbackDays widens
-  // what scan() parses/returns, previous turns on aggregate's previous-window
-  // projection (agg.previous) — exactly like days/force/roots/cachePath
-  // already do, so both must be folded into the single-flight/memo identity
-  // too: two calls differing only by one of these must never coalesce into
-  // one answer (a {previous:true} caller must never be served a memoized
-  // {previous:false} answer, or vice versa).
+  // lookbackDays, previous and prompts all change the RESULT — lookbackDays
+  // widens what scan() parses/returns, previous turns on aggregate's
+  // previous-window projection (agg.previous), prompts turns on the repetition
+  // projection (agg.promptPatterns) — exactly like days/force/roots/cachePath
+  // already do, so every one must be folded into the single-flight/memo
+  // identity too: two calls differing only by one of these must never coalesce
+  // into one answer (a {previous:true} caller must never be served a memoized
+  // {previous:false} answer, or vice versa; likewise {prompts:true}).
   return JSON.stringify([
-    Number(o.days) || 14, Number(o.lookbackDays) || 0, !!o.previous, !!o.force, roots, o.cachePath || '',
+    Number(o.days) || 14, Number(o.lookbackDays) || 0,
+    !!o.previous, !!o.prompts, !!o.force, roots, o.cachePath || '',
   ]);
 }
 
@@ -538,6 +540,14 @@ function notify(onProgress, payload) {
  *           usage-aggregate.mjs's `previousWindow`); needs `lookbackDays` set
  *           wide enough for those older records to have been read at all.
  *           Forwarded to `aggregate`'s own `previous` option unchanged.
+ * @property {boolean} [prompts]    also have `aggregate` build the prompt
+ *           repetition projection (`agg.promptPatterns` — recurring clusters,
+ *           intra-session re-asks, exact repeats; see
+ *           usage-aggregate.mjs's `buildPromptPatterns`). Off by default
+ *           because clustering the corpus costs real time on every scan and
+ *           no default consumer reads it; `agg.promptPatterns` is `null` when
+ *           not requested. Forwarded to `aggregate`'s own `prompts` option
+ *           unchanged, and folded into `scanKey` like `previous` is.
  * @property {boolean} [force]      ignore cached per-file entries
  * @property {Function} [onProgress] called with { scanned, total, phase }
  * @property {{claude?: string, codex?: string, opencode?: string}} [roots] override transcript roots (tests; opencode = the SQLite store path)
@@ -715,7 +725,7 @@ function resolveCodexLedger(o, rawRoots) {
 async function scan(o = {}) {
   const {
     days = 14, lookbackDays, force = false, onProgress, roots, cachePath, now = Date.now(), deps: injected,
-    previous = false,
+    previous = false, prompts = false,
   } = o;
   const deps = await loadDeps(injected);
   const r = { ...defaultRoots(), ...(roots ?? {}) };
@@ -790,7 +800,7 @@ async function scan(o = {}) {
   // absorbing what should have been the previous window (the bug this fixes).
   const displayCutoff = now - days * DAY_MS;
   const result = aggregate(applyCodexLedger(records, ledger), {
-    days, now, cutoff: displayCutoff, deps, previous,
+    days, now, cutoff: displayCutoff, deps, previous, prompts,
   });
   const codexSourceHealth = finalizeCodexHealth(codexHealth, codexDiagnostics);
   addTelemetryDiagnostics(commonDiagnostics.codex, {

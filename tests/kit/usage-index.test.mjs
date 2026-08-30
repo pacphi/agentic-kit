@@ -2822,3 +2822,150 @@ test('a plain id is byte-identical to before namespaced ids existed', async () =
   assert.equal(found.meta.id, 'aaaa1111');
   assert.equal(found.meta.host, 'claude');
 });
+
+// ── promptPatterns: the opt-in repetition projection (spec §3.2 panel 3) ────
+// Computed FROM RECORDS inside the aggregate, exactly where buildPromptBaselines
+// already reads them, and shipped only when the caller asks. Raw fingerprints
+// never leave this module; the projection is the whole public surface.
+
+const QUESTION_A = 'why is the release build failing on macos?';
+const QUESTION_B = 'why is the release build failing on macos now?';
+const ORDER_A = 'run the whole verification suite twice';
+const ORDER_B = 'run the whole verification suite twice please';
+const PERSONA_A = 'You are a senior release engineer. Cut the tag.';
+const PERSONA_B = 'You are a senior release engineer. Cut the tag now.';
+
+/** Three families, each a near-duplicate pair spanning enough sessions or days
+ *  to survive the recurring filter: a question family, an instruction family
+ *  (nothing about it carries a `q` flag, which is the half that used to be
+ *  unreachable), and a hand-typed persona family. `q1` types the same question
+ *  twice in a row, which is simultaneously the third exact repeat and the one
+ *  intra-session re-ask. */
+function patternRecords() {
+  const billed = (day) => [usageRow(day, 'claude-opus-5', { input: 10 })];
+  return [
+    record('q1', { usage: billed('2026-07-24'), promptFPs: [fp(QUESTION_A), fp(QUESTION_A)] }),
+    record('q2', { usage: billed('2026-07-24'), promptFPs: [fp(QUESTION_B)] }),
+    record('q3', { end: NOW - 2 * DAY, usage: billed('2026-07-23'), promptFPs: [fp(QUESTION_A)] }),
+    record('i1', { usage: billed('2026-07-24'), promptFPs: [fp(ORDER_A)] }),
+    record('i2', { usage: billed('2026-07-24'), promptFPs: [fp(ORDER_B)] }),
+    record('i3', { end: NOW - 2 * DAY, usage: billed('2026-07-23'), promptFPs: [fp(ORDER_A)] }),
+    record('p1', { usage: billed('2026-07-24'), promptFPs: [fp(PERSONA_A)] }),
+    record('p2', { end: NOW - 2 * DAY, usage: billed('2026-07-23'), promptFPs: [fp(PERSONA_B)] }),
+  ];
+}
+
+const clusterFor = (a, cls) => a.promptPatterns.clusters.find((c) => c.class === cls);
+
+test('promptPatterns is absent unless the caller asks for it', () => {
+  const a = aggregate(patternRecords(), aggOpts());
+  assert.equal(a.promptPatterns, null,
+    'not requested is null, the same shape `previous` uses — never an empty projection');
+});
+
+test('promptPatterns ships the frozen projection shape and nothing else', () => {
+  const a = aggregate(patternRecords(), aggOpts({ prompts: true }));
+  assert.deepEqual(Object.keys(a.promptPatterns).sort(),
+    ['clusters', 'computedAt', 'corpus', 'exactRepeats', 'provenance', 'reAsks', 'tapLengths']);
+  assert.deepEqual(Object.keys(a.promptPatterns.clusters[0]).sort(),
+    ['class', 'count', 'days', 'hosts', 'key', 'label', 'medianTokens', 'sampleSessionIds', 'sessions']);
+  assert.deepEqual(Object.keys(a.promptPatterns.reAsks).sort(),
+    ['gapHist', 'pairCount', 'sessionCount']);
+  assert.equal(a.promptPatterns.computedAt, a.generatedAt,
+    'the projection is computed on the aggregate\'s own clock, so a rescan reproduces it');
+});
+
+// The defect this pins has two halves and needs both fixtures to prove. The
+// scan path stores `q: 1` and OMITS it when false; the clustering library reads
+// `m.q === true` / `m.q === false`. Passed through raw, `1 !== true` made every
+// cluster 'unknown', and even after mapping truthiness, a never-written `false`
+// left 'instruction' unreachable — so an instruction cluster looked exactly
+// like an unclassified one, and three of the four seed patterns could never
+// match. Always-set booleans fix both halves at once.
+test('promptPatterns classifies questions AND instructions, never a blanket unknown', () => {
+  const a = aggregate(patternRecords(), aggOpts({ prompts: true }));
+  const classes = a.promptPatterns.clusters.map((c) => c.class);
+  assert.equal(classes.includes('unknown'), false, `every cluster must be classified: ${classes}`);
+
+  const question = clusterFor(a, 'question');
+  assert.ok(question, `no question cluster in ${JSON.stringify(classes)}`);
+  assert.equal(question.count, 4, 'three asks of A plus one of B');
+  assert.equal(question.sessions, 3);
+  assert.equal(question.days, 2);
+
+  const instruction = clusterFor(a, 'instruction');
+  assert.ok(instruction, 'an instruction carries no q flag at all — absent must read as measured-false');
+  assert.equal(instruction.count, 3);
+});
+
+test('promptPatterns counts hand-typed personas, so the persona seed can fire', () => {
+  const a = aggregate(patternRecords(), aggOpts({ prompts: true }));
+  const persona = a.promptPatterns.clusters.find((c) => c.label.name === 'Persona scaffolding');
+  assert.ok(persona, `the persona family must reach its seed: ${
+    JSON.stringify(a.promptPatterns.clusters.map((c) => c.label))}`);
+  assert.equal(persona.label.source, 'seed');
+  assert.equal(persona.count, 2);
+});
+
+test('promptPatterns carries the re-ask and exact-repeat evidence', () => {
+  const a = aggregate(patternRecords(), aggOpts({ prompts: true }));
+  assert.deepEqual(a.promptPatterns.reAsks,
+    { pairCount: 1, sessionCount: 1, gapHist: { 1: 1 } },
+    'q1 asks the same thing twice in a row and nothing else does');
+  const repeat = a.promptPatterns.exactRepeats.find((r) => r.count === 3);
+  assert.ok(repeat, 'the thrice-typed question is an exact repeat');
+  assert.deepEqual(repeat.hosts, ['claude']);
+  assert.equal(repeat.sessions, 2);
+});
+
+// The privacy pin, asserted structurally rather than argued for: this
+// projection is built from hashes, counts, token counts and session ids.
+test('promptPatterns carries no prompt text', () => {
+  const a = aggregate(patternRecords(), aggOpts({ prompts: true }));
+  const wire = JSON.stringify(a.promptPatterns);
+  for (const text of [QUESTION_A, QUESTION_B, ORDER_A, ORDER_B, PERSONA_A, PERSONA_B]) {
+    assert.equal(wire.includes(text), false, `verbatim prompt text reached the projection: ${text}`);
+  }
+  for (const fragment of ['macos', 'verification', 'senior release engineer']) {
+    assert.equal(wire.includes(fragment), false, `a fragment of a prompt reached the projection: ${fragment}`);
+  }
+  assert.deepEqual(a.promptPatterns.clusters[0].sampleSessionIds.length <= 3, true,
+    'session links are capped at three — a link surface, not a session list');
+});
+
+test('promptPatterns is deterministic over an unchanged corpus', () => {
+  const records = patternRecords();
+  assert.deepEqual(
+    aggregate(records, aggOpts({ prompts: true })).promptPatterns,
+    aggregate(records, aggOpts({ prompts: true })).promptPatterns,
+  );
+});
+
+test('promptPatterns counts the whole fingerprinted corpus by provenance, taps by length', () => {
+  const a = aggregate([
+    record('mixed', {
+      usage: [usageRow('2026-07-24', 'claude-opus-5', { input: 10 })],
+      promptFPs: [fp(TAP), fp(TAP), fp(ORDER_A), fp(TAP, 'agent'), fp(ORDER_A, 'adapter')],
+    }),
+  ], aggOpts({ prompts: true }));
+  assert.deepEqual(a.promptPatterns.corpus, { fingerprints: 5, typed: 3 });
+  assert.deepEqual(a.promptPatterns.provenance, { human: 3, control: 0, agent: 1, adapter: 1 },
+    'every tag in the vocabulary gets a row, including the ones this corpus never produced');
+  assert.deepEqual(a.promptPatterns.tapLengths,
+    [{ tokens: 4, prompts: 2, sessions: 1, days: 1, hosts: ['claude'] }],
+    'the agent-authored tap is not the operator tapping');
+});
+
+// scanKey decides both the single-flight identity and readIndex's memo, so an
+// option that changes the RESULT must be folded into it — the same lesson
+// `force`, `lookbackDays` and `previous` each cost once. Without the fold a
+// {prompts:true} caller inside the TTL is served the projection-less answer.
+test('readIndex does not serve a promptPatterns caller a memoized answer without it', async () => {
+  _resetForTest();
+  const sb = sandbox();
+  const plain = await readIndex(opts(sb));
+  assert.equal(plain.promptPatterns, null, 'sanity: the default carries no projection');
+  const withPatterns = await readIndex(opts(sb, { prompts: true }));
+  assert.notEqual(withPatterns, plain, 'the two must not coalesce into one answer');
+  assert.ok(withPatterns.promptPatterns, 'the projection must actually be built');
+});
