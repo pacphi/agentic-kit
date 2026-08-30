@@ -23,6 +23,11 @@
 // and that has to read as "0", not as "unmeasured".
 import { createHash } from 'node:crypto';
 import { SEED_PATTERNS } from './usage-prompt-vocabulary.mjs';
+// The SAME host-threshold logic the supervision-tap-share detector fires on
+// (Fix round 1, I-4): progress-report-taps must measure the identical
+// population it displays, not re-derive a looser one and drift from the
+// detector — reused, never reimplemented, so the two can never disagree.
+import { tapRowsOverThreshold, tapComparisonClause } from './usage-insights.mjs';
 
 // ── evidence hashing (spec §5, §6.2) ────────────────────────────────────────
 
@@ -144,39 +149,48 @@ function completionCriteriaEvidence(ctx) {
   };
 }
 
-/** The total supervision-tap count across every host this window — a real,
- *  always-computable sum over `promptsByHost`, used only to track whether tap
- *  volume is trending down after this card is adopted.
+/** The supervision-tap count summed over the SAME host set the
+ *  supervision-tap-share detector fired on — `tapRowsOverThreshold` re-run
+ *  fresh against `ctx`, not the whole of `promptsByHost` (Fix round 1, I-4:
+ *  the displayed basis and the ledger baseline must be the same quantity, and
+ *  summing every host — including ones under their own threshold — made them
+ *  different numbers with nothing connecting them).
  *
- * DELIBERATELY NUMBERS-ONLY: this object becomes the ledger's `baseline`
- * snapshot (usage-outcome-ledger.mjs), and the ledger may never carry free
- * text — not even the detector's own prose, which is safe to DISPLAY (it is
- * template-and-numbers, never a prompt) but is still a string blob with no
- * place in a persisted record. The matched insight's `finding` is looked up
- * again, separately, only at card-BUILD time (progressReportCard, which
- * receives `ctx` directly) — never threaded through evidence/baseline. */
+ * `comparator` records WHICH rule justified each qualifying row — `'baseline'`
+ * when every row cleared its own trailing p75, `'floor'` when every row fell
+ * back to the absolute floor (no personal baseline yet), `'mixed'` when both
+ * occur — a fixed three-value enum, safe for the ledger, that lets the card
+ * state which comparator actually applied instead of asserting "your own
+ * trailing baseline" when a floor fallback is what actually fired.
+ *
+ * DELIBERATELY NUMBERS-AND-ENUMS-ONLY: this object becomes the ledger's
+ * `baseline` snapshot (usage-outcome-ledger.mjs), which may never carry free
+ * text — not even the detector's own prose, which is safe to DISPLAY but is
+ * still a string blob with no place in a persisted record. */
 function progressReportEvidence(ctx) {
   const insight = (ctx.insights ?? []).find((i) => i?.id === 'supervision-tap-share');
   if (!insight) return null;
-  const byHost = ctx.promptsByHost;
-  if (!byHost) return null;
-  let taps = 0;
-  for (const host of Object.keys(byHost)) taps += Number(byHost[host]?.taps) || 0;
-  return { count: taps };
+  if (!ctx.promptsByHost) return null;
+  const rows = tapRowsOverThreshold({ promptsByHost: ctx.promptsByHost, promptBaselines: ctx.promptBaselines });
+  if (!rows.length) return null; // the insight fired on a pass this ctx cannot reproduce (e.g. a stale snapshot)
+  const taps = rows.reduce((n, r) => n + r.taps, 0);
+  const withBaseline = rows.filter((r) => r.baseline !== null).length;
+  const comparator = withBaseline === rows.length ? 'baseline' : withBaseline === 0 ? 'floor' : 'mixed';
+  return { count: taps, hosts: rows.map((r) => r.host).sort(), comparator };
 }
 
-/** The host with the MOST retyped persona openers — "on one host" per spec,
- *  not specifically Codex (unlike codex-completion-criteria, which is a
- *  named-host comparison by design). */
+/** Codex specifically (Fix round 1, I-3) — not "whichever host leads". The
+ *  sibling effort this card points at (spec §8) is scoped to Codex by name
+ *  ("the Codex analogue of `.claude/agents/`"); generalizing the HOST while
+ *  the RECOMMENDATION TEXT stayed Codex-shaped produced wrong advice on a
+ *  Claude-leading corpus (a card whose id says codex, whose rendered text
+ *  said claude, and whose draft pointed at a command that manages hosts and
+ *  providers, not prompt fragments). A Claude-leading corpus now produces no
+ *  card at all — honest, since Claude already has `.claude/agents/`. */
 function roleLibraryEvidence(ctx) {
   const byHost = ctx.promptsByHost;
-  if (!byHost) return null;
-  let best = null;
-  for (const host of Object.keys(byHost).sort()) {
-    const n = Number(byHost[host]?.personaOpeners) || 0;
-    if (!best || n > best.count) best = { count: n, host };
-  }
-  return best ?? { count: 0, host: null };
+  if (!byHost || !byHost.codex) return null; // no codex data at all this window: absent, not zero
+  return { count: Number(byHost.codex.personaOpeners) || 0, host: 'codex' };
 }
 
 // ── per-rule firing bar (propose gate only — never applied to the raw
@@ -185,11 +199,20 @@ function roleLibraryEvidence(ctx) {
 const releaseRitualMeetsBar = (e) => e.count >= RELEASE_RITUAL_MIN_COUNT;
 const commitPushMeetsBar = (e) => e.count >= COMMIT_PUSH_MIN_COUNT;
 const reaskDeltaMeetsBar = (e) => e.count >= REASK_DELTA_MIN_PAIRS;
+
+/** The same 1.5× ratio the host-prompt-asymmetry detector itself requires
+ *  (usage-insights.mjs's `THRESHOLDS.asymmetryMinRatio`) — Fix round 1, M-4:
+ *  a bare `> 1` fired on a one-token difference, rendering "Codex prompts run
+ *  longer" when the measured ratio did not clear the bar the insight this
+ *  card leans on actually uses. */
+const COMPLETION_CRITERIA_LENGTH_RATIO = 1.5;
+
 function completionCriteriaMeetsBar(e, ctx) {
   const asymmetryPresent = (ctx.insights ?? []).some((i) => i?.id === 'host-prompt-asymmetry');
   if (!asymmetryPresent) return false;
   const personaFavorsCodex = e.count > e.otherCount;
-  const lengthFavorsCodex = e.p90Host != null && e.p90Other > 0 && e.p90Host / e.p90Other > 1;
+  const lengthFavorsCodex = e.p90Host != null && e.p90Other > 0
+    && e.p90Host / e.p90Other >= COMPLETION_CRITERIA_LENGTH_RATIO;
   return personaFavorsCodex || lengthFavorsCodex;
 }
 const progressReportMeetsBar = () => true; // the insight-presence gate already ran inside rawEvidence
@@ -263,37 +286,61 @@ function reaskDeltaCard(e, now) {
   };
 }
 
+/** Renders ONLY the arm(s) that actually fired (Fix round 1, M-4) —
+ *  recomputed here rather than threaded from `meetsBar`, but from the exact
+ *  same two comparisons, so it can never disagree with why the card exists.
+ *  A one-arm fire (e.g. personas favor codex, length does not clear
+ *  COMPLETION_CRITERIA_LENGTH_RATIO) must never render the OTHER arm's claim
+ *  — that was the bug: "Codex prompts run longer" printed unconditionally
+ *  even when the measured ratio (codex 273 vs claude 322 tokens) ran the
+ *  other way. */
 function completionCriteriaCard(e, now) {
   const evidence = { id: 'codex-completion-criteria', ...e };
-  const ratioText = e.p90Host != null && e.p90Other > 0
-    ? ` p90 typed length codex ${e.p90Host} vs claude ${e.p90Other} tokens.` : '';
+  const personaFavorsCodex = e.count > e.otherCount;
+  const lengthFavorsCodex = e.p90Host != null && e.p90Other > 0
+    && e.p90Host / e.p90Other >= COMPLETION_CRITERIA_LENGTH_RATIO;
+  const basisParts = [];
+  if (personaFavorsCodex) basisParts.push(`${e.count} persona openers on codex vs ${e.otherCount} on claude`);
+  if (lengthFavorsCodex) basisParts.push(`p90 typed length ${e.p90Host} tokens on codex vs ${e.p90Other} on claude`);
+  const findingArm = personaFavorsCodex && lengthFavorsCodex
+    ? 'retypes more role assignments and runs measurably longer prompts than Claude does'
+    : personaFavorsCodex ? 'retypes more role assignments than Claude does'
+      : 'runs measurably longer prompts than Claude does';
   return {
     id: 'codex-completion-criteria',
     title: 'Codex needs the finish line stated up front',
-    finding: 'Codex prompts run longer or open with more retyped roles than Claude\'s, which usually '
-      + 'means Codex is not being told what "done" looks like up front.',
+    finding: `Codex ${findingArm} — a pattern consistent with not being told what "done" looks like `
+      + 'up front, measured from prompt shape alone.',
     try: 'Tell Codex what "done" looks like in the first prompt — explicit completion criteria, '
       + 'not steering after the fact.',
-    basis: `codex ${e.count} persona openers vs claude ${e.otherCount}.${ratioText}`,
+    basis: `${basisParts.join('; ')}.`,
     evidenceHash: evidenceHash(evidence),
     generatedAt: new Date(now).toISOString(),
   };
 }
 
-function progressReportCard(e, now, ctx) {
+/** The comparator clause names WHICH rule actually fired (Fix round 1, I-4
+ *  extended) — never asserts "your own trailing baseline" when the floor
+ *  fallback is what fired, mirroring `tapComparisonClause`'s own wording so
+ *  the CLI/dashboard's language matches the Findings tab's for the same
+ *  underlying rule. */
+function progressReportComparatorText(e) {
+  if (e.comparator === 'baseline') return 'against your own trailing baseline';
+  if (e.comparator === 'floor') return 'against the floor used while there is no personal baseline yet';
+  return 'against the threshold each host was judged against';
+}
+
+function progressReportCard(e, now) {
   const evidence = { id: 'progress-report-taps', ...e };
-  // Display-only enrichment: the matched insight's own already-thresholded,
-  // number-dense sentence, looked up fresh from `ctx` — never carried through
-  // `evidence`/the ledger baseline (see progressReportEvidence's doc).
-  const insightFinding = (ctx?.insights ?? []).find((i) => i?.id === 'supervision-tap-share')?.finding;
+  const hostsText = e.hosts.join(', ');
   return {
     id: 'progress-report-taps',
     title: 'You are tapping for progress the agent already has',
-    finding: 'Supervision taps are elevated against your own trailing baseline — some of that is you '
-      + 'checking on progress the agent could have volunteered.',
+    finding: `Supervision taps on ${hostsText} are elevated ${progressReportComparatorText(e)} — some `
+      + 'of that is you checking on progress the agent could have volunteered.',
     try: 'Have the agent post an unprompted progress update at natural checkpoints (before/after each '
       + 'major step), so a check-in tap is not needed.',
-    basis: insightFinding || `${e.count} supervision taps recorded across all hosts this window.`,
+    basis: `${e.count} supervision taps recorded across ${hostsText} this window.`,
     evidenceHash: evidenceHash(evidence),
     generatedAt: new Date(now).toISOString(),
   };
@@ -303,30 +350,51 @@ function roleLibraryCard(e, now) {
   const evidence = { id: 'codex-role-library', ...e };
   return {
     id: 'codex-role-library',
-    title: 'A role gets retyped by hand on ' + e.host,
-    finding: `${e.count} persona/role assignments were retyped by hand on ${e.host} — the largest `
-      + 'measured pattern in this shape of prompt.',
-    try: `Move the retyped role assignment into a managed prompt-fragment library for ${e.host} workers, `
-      + 'instead of retyping it each session.',
-    basis: `${e.count} persona openers retyped on ${e.host}.`,
+    title: 'A role gets retyped by hand on Codex',
+    // No superlative (Fix round 1, M-5): "the largest measured pattern" was a
+    // fact about the RESEARCH corpus, not this operator's — nothing here
+    // ranks this recurrence against anything of theirs.
+    finding: `${e.count} persona/role assignments were retyped by hand on Codex this window — a `
+      + 'candidate for a managed prompt-fragment library.',
+    try: 'Move the retyped role assignment into a managed prompt-fragment library for Codex '
+      + 'workers, instead of retyping it each session.',
+    basis: `${e.count} persona openers retyped on Codex.`,
     evidenceHash: evidenceHash(evidence),
     generatedAt: new Date(now).toISOString(),
     draft: {
+      // Fix round 1, I-3: `ak host pick` manages hosts/providers, not prompt
+      // fragments — pointing there was a misdirection. The library itself
+      // does not exist yet; this draft is a pointer to the tracked sibling
+      // effort (spec §8), not an instruction the operator can run today.
       kind: 'link',
-      text: `Sibling effort: a managed ${e.host} role-fragment library (prompts-view spec §8) — `
-        + 'see `ak host pick`.',
+      text: 'Sibling effort, tracked separately (prompts-view spec §8): a managed Codex '
+        + 'role-fragment library, the Codex analogue of `.claude/agents/`. Not yet built — this '
+        + 'card is a pointer to that effort, not something to run today.',
     },
   };
 }
 
-/** @type {ReadonlyArray<{id: string, evidence: Function, meetsBar: Function, card: Function}>} */
+/** Fix round 1, I-7: adoption-by-collapse is opt-in per rule. Spec §6.4's
+ *  collapse clause is about "the TARGET CLUSTER's recurrence" — the pattern
+ *  the card asks the operator to stop repeating — which is the two cluster
+ *  cards and reask-delta (collapsing the re-ask pairs IS the intended
+ *  effect of stating acceptance criteria up front). The three
+ *  statistic-backed cards (codex-completion-criteria's persona/length
+ *  comparison, progress-report-taps' tap volume, codex-role-library's
+ *  persona count) can drop for reasons that have nothing to do with the
+ *  recommendation — recording that as "adopted" would be a fabricated
+ *  causal claim. Those three keep the CLAUDE.md/skill-dir routes only;
+ *  codex-role-library has neither (no draft kind matches those routes and
+ *  collapse is now off), so it has NO adoption route at all — honest: it
+ *  stays proposed until dismissed or expired, never auto-adopted.
+ *  @type {ReadonlyArray<{id: string, evidence: Function, meetsBar: Function, card: Function, collapseIsAdoption: boolean}>} */
 const RULES = [
-  { id: 'release-ritual-skill', evidence: releaseRitualEvidence, meetsBar: releaseRitualMeetsBar, card: releaseRitualSkillCard },
-  { id: 'commit-push-claude-md', evidence: commitPushEvidence, meetsBar: commitPushMeetsBar, card: commitPushClaudeMdCard },
-  { id: 'reask-delta', evidence: reaskDeltaEvidence, meetsBar: reaskDeltaMeetsBar, card: reaskDeltaCard },
-  { id: 'codex-completion-criteria', evidence: completionCriteriaEvidence, meetsBar: completionCriteriaMeetsBar, card: completionCriteriaCard },
-  { id: 'progress-report-taps', evidence: progressReportEvidence, meetsBar: progressReportMeetsBar, card: progressReportCard },
-  { id: 'codex-role-library', evidence: roleLibraryEvidence, meetsBar: roleLibraryMeetsBar, card: roleLibraryCard },
+  { id: 'release-ritual-skill', evidence: releaseRitualEvidence, meetsBar: releaseRitualMeetsBar, card: releaseRitualSkillCard, collapseIsAdoption: true },
+  { id: 'commit-push-claude-md', evidence: commitPushEvidence, meetsBar: commitPushMeetsBar, card: commitPushClaudeMdCard, collapseIsAdoption: true },
+  { id: 'reask-delta', evidence: reaskDeltaEvidence, meetsBar: reaskDeltaMeetsBar, card: reaskDeltaCard, collapseIsAdoption: true },
+  { id: 'codex-completion-criteria', evidence: completionCriteriaEvidence, meetsBar: completionCriteriaMeetsBar, card: completionCriteriaCard, collapseIsAdoption: false },
+  { id: 'progress-report-taps', evidence: progressReportEvidence, meetsBar: progressReportMeetsBar, card: progressReportCard, collapseIsAdoption: false },
+  { id: 'codex-role-library', evidence: roleLibraryEvidence, meetsBar: roleLibraryMeetsBar, card: roleLibraryCard, collapseIsAdoption: false },
 ];
 
 /** Exposed only for direct per-rule unit tests, the same precedent as
@@ -371,13 +439,14 @@ export function deriveCards({ promptPatterns, promptBaselines, promptsByHost, in
  * otherwise a real object with at least a `count`.
  *
  * `currentPatterns` carries the SAME ctx shape `deriveCards` takes minus
- * `now` — `{ promptPatterns, promptsByHost, insights }` — despite the
- * parameter's name (kept verbatim per the ledger contract this satisfies):
- * the two-hosts and per-host-taps rules need `promptsByHost`/`insights` too,
- * not only the cluster/reAsks halves the name suggests.
+ * `now` — `{ promptPatterns, promptsByHost, promptBaselines, insights }` —
+ * despite the parameter's name (kept verbatim per the ledger contract this
+ * satisfies): the two-hosts, per-host-taps and baseline-comparison rules
+ * need `promptsByHost`/`promptBaselines`/`insights` too, not only the
+ * cluster/reAsks halves the name suggests.
  *
  * @param {string} id
- * @param {{ promptPatterns?: object|null, promptsByHost?: object|null, insights?: Array<object>|null }} currentPatterns
+ * @param {{ promptPatterns?: object|null, promptsByHost?: object|null, promptBaselines?: object|null, insights?: Array<object>|null }} currentPatterns
  */
 export function currentEvidenceFor(id, currentPatterns) {
   const rule = RULES.find((r) => r.id === id);
@@ -385,6 +454,7 @@ export function currentEvidenceFor(id, currentPatterns) {
   const ctx = {
     promptPatterns: currentPatterns?.promptPatterns ?? null,
     promptsByHost: currentPatterns?.promptsByHost ?? null,
+    promptBaselines: currentPatterns?.promptBaselines ?? null,
     insights: Array.isArray(currentPatterns?.insights) ? currentPatterns.insights : [],
   };
   return rule.evidence(ctx);
@@ -429,12 +499,18 @@ export function detectAdoption(card, { claudeMdTexts, skillDirs, currentPatterns
     if (dirs.includes(slug)) return { adopted: true, via: 'skill-dir' };
   }
 
-  const baselineCount = Number(ledgerRecord?.baseline?.count);
-  if (Number.isFinite(baselineCount) && baselineCount > 0) {
-    const fresh = currentEvidenceFor(card.id, currentPatterns ?? {});
-    const currentCount = Number(fresh?.count);
-    if (Number.isFinite(currentCount) && currentCount <= baselineCount * ADOPTION_COLLAPSE_RATIO) {
-      return { adopted: true, via: 'collapse' };
+  // Fix round 1, I-7: collapse is adoption evidence only for rules about a
+  // recurring PATTERN the operator stops repeating — not for rules whose
+  // "count" is a derived statistic that can drop for unrelated reasons.
+  const rule = RULES.find((r) => r.id === card.id);
+  if (rule?.collapseIsAdoption) {
+    const baselineCount = Number(ledgerRecord?.baseline?.count);
+    if (Number.isFinite(baselineCount) && baselineCount > 0) {
+      const fresh = currentEvidenceFor(card.id, currentPatterns ?? {});
+      const currentCount = Number(fresh?.count);
+      if (Number.isFinite(currentCount) && currentCount <= baselineCount * ADOPTION_COLLAPSE_RATIO) {
+        return { adopted: true, via: 'collapse' };
+      }
     }
   }
 

@@ -10,7 +10,8 @@ import {
 } from '../../src/lib/usage-coaching.mjs';
 import {
   loadLedger, saveLedger, reconcile, dismissCard, summarizeLedger, defaultLedgerPath,
-  gatherAdoptionInputs, LEDGER_SCHEMA_VERSION, DISMISS_PERMANENT_THRESHOLD,
+  gatherAdoptionInputs, LEDGER_SCHEMA_VERSION, DISMISS_PERMANENT_THRESHOLD, DISMISS_MATERIALITY_RATIO,
+  CANONICAL_WINDOW_DAYS,
 } from '../../src/lib/usage-outcome-ledger.mjs';
 import { aggregate } from '../../src/lib/usage-aggregate.mjs';
 import { blankSession, addUsage, notePromptFingerprint } from '../../src/lib/usage-parsers.mjs';
@@ -132,23 +133,130 @@ test('codex-completion-criteria requires BOTH the host-prompt-asymmetry insight 
   assert.equal(card.draft, undefined, 'codex-completion-criteria must not carry a draft');
 });
 
-test('progress-report-taps fires exactly when supervision-tap-share is present, regardless of magnitude', () => {
-  const byHost = { claude: hostRow({ taps: 3 }) };
-  const withInsight = deriveCards({
-    promptPatterns: null, promptBaselines: null, promptsByHost: byHost,
-    insights: [insight('supervision-tap-share', { finding: 'taps are 40% of what you type on claude' })], now: NOW,
-  });
-  const card = withInsight.find((c) => c.id === 'progress-report-taps');
-  assert.ok(card);
-  assert.equal(card.draft, undefined);
-  assert.match(card.basis, /taps are 40% of what you type on claude/, 'basis reuses the detector\'s own evidence-honest sentence');
-  const withoutInsight = deriveCards({
-    promptPatterns: null, promptBaselines: null, promptsByHost: byHost, insights: [], now: NOW,
-  });
-  assert.equal(withoutInsight.find((c) => c.id === 'progress-report-taps'), undefined);
+// Fix round 1, M-4: the length arm needs the SAME 1.5x floor the
+// host-prompt-asymmetry detector itself uses (THRESHOLDS.asymmetryMinRatio)
+// — a bare ratio > 1 rendered "Codex prompts run longer" on a one-token
+// difference, and the finding must print only the arm that actually fired.
+test('codex-completion-criteria\'s length arm requires the detector\'s own 1.5x floor, and prints only the arm that fired', () => {
+  const insights = [insight('host-prompt-asymmetry')];
+  // Persona-only: length ratio does not clear 1.5x (273 vs 322 even favors
+  // claude) — this exact shape is the one the review caught rendering
+  // "Codex prompts run longer" when it should have been impossible.
+  const personaOnly = deriveCards({
+    promptPatterns: null, promptBaselines: null,
+    promptsByHost: {
+      codex: hostRow({ personaOpeners: 12, p90TypedTokens: 273 }),
+      claude: hostRow({ personaOpeners: 2, p90TypedTokens: 322 }),
+    },
+    insights, now: NOW,
+  }).find((c) => c.id === 'codex-completion-criteria');
+  assert.ok(personaOnly);
+  assert.doesNotMatch(personaOnly.finding, /runs measurably longer/, 'length claim must be impossible when the ratio favors claude');
+  assert.doesNotMatch(personaOnly.basis, /p90 typed length/);
+  assert.match(personaOnly.finding, /retypes more role assignments than Claude does/);
+
+  // A ratio just under 1.5x must not fire the length arm either.
+  const belowFloor = deriveCards({
+    promptPatterns: null, promptBaselines: null,
+    promptsByHost: {
+      codex: hostRow({ personaOpeners: 1, p90TypedTokens: 149 }),
+      claude: hostRow({ personaOpeners: 1, p90TypedTokens: 100 }),
+    },
+    insights, now: NOW,
+  }).find((c) => c.id === 'codex-completion-criteria');
+  assert.equal(belowFloor, undefined, '1.49x must not clear the 1.5x floor');
+
+  // At/above 1.5x, the length arm fires and states its own numbers.
+  const lengthOnly = deriveCards({
+    promptPatterns: null, promptBaselines: null,
+    promptsByHost: {
+      codex: hostRow({ personaOpeners: 1, p90TypedTokens: 150 }),
+      claude: hostRow({ personaOpeners: 1, p90TypedTokens: 100 }),
+    },
+    insights, now: NOW,
+  }).find((c) => c.id === 'codex-completion-criteria');
+  assert.ok(lengthOnly);
+  assert.match(lengthOnly.finding, /runs measurably longer prompts than Claude does/);
+  assert.doesNotMatch(lengthOnly.finding, /retypes more role assignments/);
+  assert.match(lengthOnly.basis, /p90 typed length 150 tokens on codex vs 100 on claude/);
+  assert.doesNotMatch(lengthOnly.finding, /which usually means/i, 'no causal assertion — measured phrasing only (M-4)');
 });
 
-test('codex-role-library fires at personaOpeners >= 10 on the leading host, not below', () => {
+// A host that clears tapRowsOverThreshold's real gates (taps >= THRESHOLDS.tapMinCount
+// [20] and share above its comparator) vs. one that does not, for the I-4 two-host pin.
+const OVER_THRESHOLD_HOST = hostRow({ typed: 100, taps: 25 }); // share 0.25 > the 0.10 absolute floor
+const UNDER_THRESHOLD_HOST = hostRow({ typed: 200, taps: 10 }); // taps < 20 AND share 0.05 < the floor
+
+test('progress-report-taps fires when supervision-tap-share is present AND at least one host clears its own threshold', () => {
+  const withBoth = deriveCards({
+    promptPatterns: null, promptBaselines: null,
+    promptsByHost: { claude: OVER_THRESHOLD_HOST },
+    insights: [insight('supervision-tap-share')], now: NOW,
+  });
+  const card = withBoth.find((c) => c.id === 'progress-report-taps');
+  assert.ok(card);
+  assert.equal(card.draft, undefined);
+
+  const withoutInsight = deriveCards({
+    promptPatterns: null, promptBaselines: null, promptsByHost: { claude: OVER_THRESHOLD_HOST },
+    insights: [], now: NOW,
+  });
+  assert.equal(withoutInsight.find((c) => c.id === 'progress-report-taps'), undefined);
+
+  // The insight fired historically but THIS ctx's own recomputation finds no
+  // host over threshold (e.g. a stale/mismatched snapshot) — no card, rather
+  // than fabricating a count from hosts that do not qualify.
+  const noQualifyingHost = deriveCards({
+    promptPatterns: null, promptBaselines: null, promptsByHost: { claude: UNDER_THRESHOLD_HOST },
+    insights: [insight('supervision-tap-share')], now: NOW,
+  });
+  assert.equal(noQualifyingHost.find((c) => c.id === 'progress-report-taps'), undefined);
+});
+
+// Fix round 1, I-4: the basis number and the ledger baseline number must be
+// the SAME quantity — pinned with a two-host fixture where only one host is
+// over its own threshold.
+test('progress-report-taps measures the SAME host population it displays (I-4 two-host pin)', () => {
+  const promptsByHost = { claude: OVER_THRESHOLD_HOST, codex: UNDER_THRESHOLD_HOST };
+  const insights = [insight('supervision-tap-share')];
+  const cards = deriveCards({ promptPatterns: null, promptBaselines: null, promptsByHost, insights, now: NOW });
+  const card = cards.find((c) => c.id === 'progress-report-taps');
+  assert.ok(card);
+  // Only claude's 25 taps count — codex never clears its own threshold.
+  assert.match(card.basis, /25 supervision taps recorded across claude this window\./);
+  assert.doesNotMatch(card.basis, /codex/, 'a host that never cleared its own threshold must not be counted');
+
+  const currentPatterns = { promptsByHost, insights };
+  const baseline = currentEvidenceFor('progress-report-taps', currentPatterns);
+  assert.equal(baseline.count, 25, 'the ledger baseline must be the identical quantity the basis states');
+  assert.deepEqual(baseline.hosts, ['claude']);
+});
+
+test('progress-report-taps states which comparator actually applied — never claims a baseline it did not use', () => {
+  const insights = [insight('supervision-tap-share')];
+  // No promptBaselines at all -> every qualifying row falls back to the
+  // absolute floor, never "your own trailing baseline".
+  const floorOnly = deriveCards({
+    promptPatterns: null, promptBaselines: null, promptsByHost: { claude: OVER_THRESHOLD_HOST },
+    insights, now: NOW,
+  }).find((c) => c.id === 'progress-report-taps');
+  assert.match(floorOnly.finding, /against the floor used while there is no personal baseline yet/);
+  assert.doesNotMatch(floorOnly.finding, /your own trailing baseline/);
+
+  // A real trailing-90d baseline for claude makes the row baseline-judged.
+  const withBaseline = deriveCards({
+    promptPatterns: null, promptsByHost: { claude: OVER_THRESHOLD_HOST },
+    promptBaselines: { claude: { tapShareP75_trailing90d: 0.05 } },
+    insights, now: NOW,
+  }).find((c) => c.id === 'progress-report-taps');
+  assert.match(withBaseline.finding, /against your own trailing baseline/);
+});
+
+// Fix round 1, I-3: codex-role-library is scoped to Codex specifically (its
+// id, and the spec §8 sibling effort it points at, are both Codex-shaped) —
+// "whichever host leads" produced wrong, Codex-specific advice rendered
+// under a Claude-leading corpus.
+test('codex-role-library fires at personaOpeners >= 10 on Codex, not below, and never on Claude leading', () => {
   const hit = deriveCards({
     promptPatterns: null, promptBaselines: null,
     promptsByHost: { codex: hostRow({ personaOpeners: PERSONA_LIBRARY_MIN_COUNT }), claude: hostRow({ personaOpeners: 1 }) },
@@ -162,7 +270,25 @@ test('codex-role-library fires at personaOpeners >= 10 on the leading host, not 
   const card = hit.find((c) => c.id === 'codex-role-library');
   assert.ok(card);
   assert.equal(card.draft.kind, 'link');
+  assert.match(card.title, /Codex/);
+  assert.doesNotMatch(card.try, /claude/i, 'the recommendation text must stay Codex-shaped');
+  assert.doesNotMatch(card.draft.text, /ak host pick/, 'must not point at a command that cannot manage prompt fragments (I-3)');
+  assert.doesNotMatch(card.finding, /largest measured pattern/i, 'no uncomputed superlative (M-5)');
   assert.equal(miss.find((c) => c.id === 'codex-role-library'), undefined);
+
+  // Claude leading, even by a wide margin, produces NO card at all — the
+  // recommendation (a managed Codex role-fragment library) does not apply.
+  const claudeLeading = deriveCards({
+    promptPatterns: null, promptBaselines: null,
+    promptsByHost: { codex: hostRow({ personaOpeners: 0 }), claude: hostRow({ personaOpeners: 40 }) },
+    insights: [], now: NOW,
+  });
+  assert.equal(claudeLeading.find((c) => c.id === 'codex-role-library'), undefined,
+    'a Claude-leading corpus must not produce Codex-specific advice');
+
+  // No codex host data at all this window: structurally absent, not a
+  // fabricated zero.
+  assert.equal(currentEvidenceFor('codex-role-library', { promptsByHost: { claude: hostRow() } }), null);
 });
 
 // ── evidence-honesty: absent inputs yield NO card, never a zero-count one ───
@@ -181,12 +307,15 @@ test('absent promptsByHost yields no host-keyed cards, distinctly from an empty 
   const insights = [insight('host-prompt-asymmetry'), insight('supervision-tap-share')];
   const absent = deriveCards({ promptPatterns: null, promptBaselines: null, promptsByHost: null, insights, now: NOW });
   assert.equal(absent.length, 0, 'null promptsByHost: absent, no card');
-  // An empty (but present) promptsByHost is measured-zero: codex-completion-criteria
-  // still cannot fire (needs both host rows), progress-report-taps CAN because it
-  // only needs the insight plus a (possibly empty) promptsByHost to sum over.
+  // An empty (but present) promptsByHost is measured-zero: no host clears
+  // any threshold, so NONE of the three host-keyed cards fire — correctly
+  // below the bar, not the "absent" case (which would also yield nothing,
+  // but for a structurally different reason — see currentEvidenceFor below).
   const empty = deriveCards({ promptPatterns: null, promptBaselines: null, promptsByHost: {}, insights, now: NOW });
-  assert.equal(empty.find((c) => c.id === 'codex-completion-criteria'), undefined);
-  assert.ok(empty.find((c) => c.id === 'progress-report-taps'), 'an empty but present promptsByHost is a real zero, not an absence');
+  assert.equal(empty.length, 0);
+  assert.deepEqual(currentEvidenceFor('progress-report-taps', { promptsByHost: {}, insights }), null,
+    'an empty promptsByHost has no rows to sum — no qualifying host, not a fabricated zero');
+  assert.equal(currentEvidenceFor('progress-report-taps', { promptsByHost: null, insights }), null);
 });
 
 // ── currentEvidenceFor ───────────────────────────────────────────────────────
@@ -233,6 +362,47 @@ test('detectAdoption: collapse route fires at <= 20% of the baseline count recor
     ledgerRecord, currentPatterns: { promptPatterns: { clusters: [cluster({ key: 'kk', name: 'Release ritual', count: 5, sessions: 4, days: 2 })] } },
   });
   assert.equal(notYet.adopted, false, '5 of 20 is 25%, above the 20% bar');
+});
+
+// Fix round 1, I-7: collapse is adoption evidence only for release-ritual-skill,
+// commit-push-claude-md, and reask-delta — a recurring PATTERN the operator
+// stops repeating. The three statistic-backed cards' "count" is a derived
+// number that can drop for reasons unrelated to the recommendation, so
+// recording that as "adopted" would be a fabricated causal claim.
+test('detectAdoption: collapse route is opt-in — the three statistic cards never adopt by collapse, even at a qualifying ratio', () => {
+  const completionCard = deriveCards({
+    promptPatterns: null, promptBaselines: null,
+    promptsByHost: { codex: hostRow({ personaOpeners: 20, p90TypedTokens: 200 }), claude: hostRow({ personaOpeners: 2, p90TypedTokens: 80 }) },
+    insights: [insight('host-prompt-asymmetry')], now: NOW,
+  }).find((c) => c.id === 'codex-completion-criteria');
+  const stillNotAdopted = detectAdoption(completionCard, {
+    ledgerRecord: { baseline: { count: 20 } },
+    currentPatterns: { promptsByHost: { codex: hostRow({ personaOpeners: 1 }), claude: hostRow({ personaOpeners: 20 }) } },
+  });
+  assert.deepEqual(stillNotAdopted, { adopted: false, via: null },
+    'a persona-opener drop from 20 to 1 (5%, well past the 20% collapse bar) must not read as adoption');
+
+  const progressCard = deriveCards({
+    promptPatterns: null, promptBaselines: null, promptsByHost: { claude: OVER_THRESHOLD_HOST },
+    insights: [insight('supervision-tap-share')], now: NOW,
+  }).find((c) => c.id === 'progress-report-taps');
+  const progressNotAdopted = detectAdoption(progressCard, {
+    ledgerRecord: { baseline: { count: 25 } },
+    currentPatterns: { promptsByHost: {}, insights: [] },
+  });
+  assert.deepEqual(progressNotAdopted, { adopted: false, via: null });
+
+  const roleCard = deriveCards({
+    promptPatterns: null, promptBaselines: null,
+    promptsByHost: { codex: hostRow({ personaOpeners: PERSONA_LIBRARY_MIN_COUNT }) },
+    insights: [], now: NOW,
+  }).find((c) => c.id === 'codex-role-library');
+  const roleNotAdopted = detectAdoption(roleCard, {
+    ledgerRecord: { baseline: { count: PERSONA_LIBRARY_MIN_COUNT } },
+    currentPatterns: { promptsByHost: { codex: hostRow({ personaOpeners: 0 }) } },
+  });
+  assert.deepEqual(roleNotAdopted, { adopted: false, via: null },
+    'codex-role-library has NO adoption route at all — no draft-based route matches its "link" kind, and collapse is off');
 });
 
 test('detectAdoption returns not-adopted when nothing matches any route', () => {
@@ -314,40 +484,110 @@ test('reconcile: proposed -> adopted (via CLAUDE.md) -> retired after OUTCOME_MI
   assert.equal(step4.cards[0].refutation, step4.ledger.records[0].refutation);
 });
 
+function releaseRitualCardsAt(count, opts = {}) {
+  return deriveCards({
+    promptPatterns: { clusters: [cluster({ key: 'kk', name: 'Release ritual', count, sessions: 8, days: 4, ...opts })] },
+    promptBaselines: null, promptsByHost: null, insights: [], now: NOW,
+  });
+}
+function releaseRitualCurrentPatternsAt(count) {
+  return { promptPatterns: { clusters: [cluster({ key: 'kk', name: 'Release ritual', count, sessions: 8, days: 4 })] } };
+}
+
 test('reconcile: dismissed stays suppressed while its evidenceHash is unchanged (never re-proposed)', () => {
   const c = cluster({ key: 'kk', name: 'Release ritual', count: 12, sessions: 8, days: 4 });
   const cards = deriveCards({ promptPatterns: { clusters: [c] }, promptBaselines: null, promptsByHost: null, insights: [], now: NOW });
-  const { ledger: dismissed } = dismissCard(ledgerOf([]), 'release-ritual-skill', cards, NOW);
+  const { ledger: dismissed } = dismissCard(ledgerOf([]), 'release-ritual-skill', cards, {
+    now: NOW, adoptionInputs: { currentPatterns: releaseRitualCurrentPatternsAt(12) },
+  });
   assert.equal(dismissed.records[0].status, 'dismissed');
   assert.equal(dismissed.records[0].dismissCount, 1);
+  assert.equal(dismissed.records[0].dismissedAtCount, 12);
 
   const { ledger, cards: out } = reconcile(dismissed, cards, { now: NOW + DAY_MS, adoptionInputs: {} });
   assert.equal(ledger.records[0].status, 'dismissed', 'unchanged evidence must not re-propose');
   assert.equal(out[0].status, 'dismissed');
 });
 
-test('reconcile: dismissed + changed evidence hash re-proposes exactly once, then a second dismissal makes it permanent', () => {
-  const cardsAt = (count) => deriveCards({
-    promptPatterns: { clusters: [cluster({ key: 'kk', name: 'Release ritual', count, sessions: 8, days: 4 })] },
-    promptBaselines: null, promptsByHost: null, insights: [], now: NOW,
+// Fix round 1, I-1: re-proposal is gated on MATERIALITY (count moved >= 50% in
+// the worsening direction since the count recorded at dismissal), not merely
+// on the evidence hash changing. Any single additional occurrence changes the
+// hash — gating on that alone meant a dismissal survived only until the very
+// next occurrence of the habit it was about.
+test('reconcile: dismiss, then the count ticks by one — still suppressed (I-1 pin)', () => {
+  const { ledger: dismissed } = dismissCard(ledgerOf([]), 'release-ritual-skill', releaseRitualCardsAt(20), {
+    now: NOW, adoptionInputs: { currentPatterns: releaseRitualCurrentPatternsAt(20) },
   });
-  const { ledger: firstDismiss } = dismissCard(ledgerOf([]), 'release-ritual-skill', cardsAt(12), NOW);
-  assert.equal(firstDismiss.records[0].dismissCount, 1);
+  assert.equal(dismissed.records[0].dismissedAtCount, 20);
 
-  // Evidence changes (count 12 -> 20 changes the hash) — decay allows one re-propose.
-  const changedCards = cardsAt(20);
-  const step1 = reconcile(firstDismiss, changedCards, { now: NOW + DAY_MS, adoptionInputs: { currentPatterns: { promptPatterns: { clusters: [cluster({ key: 'kk', name: 'Release ritual', count: 20, sessions: 8, days: 4 })] } } } });
-  assert.equal(step1.ledger.records[0].status, 'proposed', 'a changed hash re-proposes once after one dismissal');
+  const tickedCards = releaseRitualCardsAt(21);
+  assert.notEqual(dismissed.records[0].evidenceHash, tickedCards[0].evidenceHash, 'sanity: one more occurrence DOES change the hash');
+  const { ledger } = reconcile(dismissed, tickedCards, {
+    now: NOW + DAY_MS, adoptionInputs: { currentPatterns: releaseRitualCurrentPatternsAt(21) },
+  });
+  assert.equal(ledger.records[0].status, 'dismissed', '20 -> 21 is a 5% move, well under the 50% materiality bar');
+  assert.equal(ledger.records[0].evidenceHash, dismissed.records[0].evidenceHash,
+    'the hash is left untouched on a non-material change, so materiality keeps measuring from the ORIGINAL dismissal-time count');
+});
+
+test('reconcile: dismissed record re-proposes once it worsens materially (>= 50% up from the dismissal-time count)', () => {
+  const { ledger: dismissed } = dismissCard(ledgerOf([]), 'release-ritual-skill', releaseRitualCardsAt(20), {
+    now: NOW, adoptionInputs: { currentPatterns: releaseRitualCurrentPatternsAt(20) },
+  });
+
+  // Just under the 50% bar: still suppressed.
+  const almost = releaseRitualCardsAt(29); // (29-20)/20 = 45%
+  const stillSuppressed = reconcile(dismissed, almost, {
+    now: NOW + DAY_MS, adoptionInputs: { currentPatterns: releaseRitualCurrentPatternsAt(29) },
+  });
+  assert.equal(stillSuppressed.ledger.records[0].status, 'dismissed', '45% must not clear the 50% bar');
+
+  // At/above the bar: re-proposes with a fresh baseline.
+  const worsened = releaseRitualCardsAt(30); // (30-20)/20 = 50% exactly
+  assert.equal(DISMISS_MATERIALITY_RATIO, 0.5);
+  const step = reconcile(dismissed, worsened, {
+    now: NOW + DAY_MS, adoptionInputs: { currentPatterns: releaseRitualCurrentPatternsAt(30) },
+  });
+  assert.equal(step.ledger.records[0].status, 'proposed');
+  assert.equal(step.ledger.records[0].baseline.count, 30, 'the re-proposal freezes a FRESH baseline, not the old one');
+  assert.equal(step.ledger.records[0].dismissedAtCount, undefined, 'the frozen dismissal-time reference is cleared on re-proposal');
+
+  // A count that IMPROVED (moved down) since dismissal must not re-propose,
+  // even by a large margin — "worsening direction" is required, not just "changed".
+  const improved = releaseRitualCardsAt(2);
+  const stillSuppressedOnImprovement = reconcile(dismissed, improved, {
+    now: NOW + DAY_MS, adoptionInputs: { currentPatterns: releaseRitualCurrentPatternsAt(2) },
+  });
+  assert.equal(stillSuppressedOnImprovement.ledger.records[0].status, 'dismissed',
+    'a count that DROPPED since dismissal is not a "worsening" and must not resurrect the card');
+});
+
+test('reconcile: a materially-worsened re-proposal, dismissed again, becomes permanent across further hash changes', () => {
+  const { ledger: firstDismiss } = dismissCard(ledgerOf([]), 'release-ritual-skill', releaseRitualCardsAt(12), {
+    now: NOW, adoptionInputs: { currentPatterns: releaseRitualCurrentPatternsAt(12) },
+  });
+  assert.equal(firstDismiss.records[0].dismissCount, 1);
+  assert.equal(firstDismiss.records[0].dismissedAtCount, 12);
+
+  // 12 -> 20 is a 66.7% worsening — clears the materiality bar, decay allows one re-propose.
+  const step1 = reconcile(firstDismiss, releaseRitualCardsAt(20), {
+    now: NOW + DAY_MS, adoptionInputs: { currentPatterns: releaseRitualCurrentPatternsAt(20) },
+  });
+  assert.equal(step1.ledger.records[0].status, 'proposed', 'a materially worsened count re-proposes once after one dismissal');
   assert.equal(step1.ledger.records[0].baseline.count, 20, 'the re-proposal freezes a fresh baseline');
 
   // Dismiss again — dismissCount reaches the permanent threshold.
-  const { ledger: secondDismiss } = dismissCard(step1.ledger, 'release-ritual-skill', changedCards, NOW + DAY_MS);
+  const { ledger: secondDismiss } = dismissCard(step1.ledger, 'release-ritual-skill', releaseRitualCardsAt(20), {
+    now: NOW + DAY_MS, adoptionInputs: { currentPatterns: releaseRitualCurrentPatternsAt(20) },
+  });
   assert.equal(secondDismiss.records[0].dismissCount, DISMISS_PERMANENT_THRESHOLD);
   assert.equal(secondDismiss.records[0].status, 'dismissed');
 
-  // Evidence changes AGAIN — must NOT re-propose this time (permanent).
-  const step2 = reconcile(secondDismiss, cardsAt(30), { now: NOW + 2 * DAY_MS, adoptionInputs: {} });
-  assert.equal(step2.ledger.records[0].status, 'dismissed', `>= ${DISMISS_PERMANENT_THRESHOLD} dismissals must suppress permanently across further hash changes`);
+  // Evidence worsens materially AGAIN — must NOT re-propose this time (permanent).
+  const step2 = reconcile(secondDismiss, releaseRitualCardsAt(40), {
+    now: NOW + 2 * DAY_MS, adoptionInputs: { currentPatterns: releaseRitualCurrentPatternsAt(40) },
+  });
+  assert.equal(step2.ledger.records[0].status, 'dismissed', `>= ${DISMISS_PERMANENT_THRESHOLD} dismissals must suppress permanently across further material changes`);
 });
 
 test('reconcile: a proposed card whose evidence disappears this pass expires', () => {
@@ -362,12 +602,155 @@ test('reconcile: a proposed card whose evidence disappears this pass expires', (
   assert.equal(nextCards.length, 0, 'an expired record with no live card renders no card');
 });
 
+// Fix round 1, C-2: the module's own docblock always promised this ("we lost
+// the evidence" is not a verdict), but the code fell through to a permanent
+// `expired` chip. Its own row in the transition matrix, re-supplying the card
+// after one quiet pass.
+test('reconcile: an expired record whose card fires again returns to proposed, keeping generatedAt and dismissCount, with a fresh baseline', () => {
+  const cardsAt30 = releaseRitualCardsAt(30);
+  let { ledger } = reconcile(ledgerOf([]), cardsAt30, {
+    now: NOW, adoptionInputs: { currentPatterns: releaseRitualCurrentPatternsAt(30) },
+  });
+  const originalGeneratedAt = ledger.records[0].generatedAt;
+  assert.equal(ledger.records[0].status, 'proposed');
+
+  // Quiet pass: no card fires — expires.
+  ({ ledger } = reconcile(ledger, [], { now: NOW + DAY_MS, adoptionInputs: {} }));
+  assert.equal(ledger.records[0].status, 'expired');
+  assert.equal(ledger.records[0].generatedAt, originalGeneratedAt, 'expiry must not touch the as-of stamp');
+
+  // The pattern fires again, at DOUBLE its original strength — re-supply.
+  const cardsAt60 = releaseRitualCardsAt(60);
+  const resupply = reconcile(ledger, cardsAt60, {
+    now: NOW + 5 * DAY_MS, adoptionInputs: { currentPatterns: releaseRitualCurrentPatternsAt(60) },
+  });
+  assert.equal(resupply.ledger.records[0].status, 'proposed', 'an expired record must resurrect, not stay stuck at "evidence no longer present"');
+  assert.equal(resupply.ledger.records[0].generatedAt, originalGeneratedAt, 'generatedAt is the ORIGINAL proposal stamp, never overwritten by a re-supply');
+  assert.equal(resupply.ledger.records[0].baseline.count, 60, 'the baseline is FRESH at re-supply, not the pre-expiry one');
+  assert.equal(resupply.ledger.records[0].evidenceHash, cardsAt60[0].evidenceHash);
+  assert.equal(resupply.cards[0].status, 'proposed');
+});
+
+test('reconcile: an expired record with a prior dismissCount keeps it across re-supply', () => {
+  const { ledger: dismissed } = dismissCard(ledgerOf([]), 'release-ritual-skill', releaseRitualCardsAt(20), {
+    now: NOW, adoptionInputs: { currentPatterns: releaseRitualCurrentPatternsAt(20) },
+  });
+  // Materially worsens (20 -> 35, 75%) -> re-proposes once (I-1), then goes quiet -> expires.
+  let { ledger } = reconcile(dismissed, releaseRitualCardsAt(35), {
+    now: NOW + DAY_MS, adoptionInputs: { currentPatterns: releaseRitualCurrentPatternsAt(35) },
+  });
+  assert.equal(ledger.records[0].status, 'proposed');
+  ({ ledger } = reconcile(ledger, [], { now: NOW + 2 * DAY_MS, adoptionInputs: {} }));
+  assert.equal(ledger.records[0].status, 'expired');
+  assert.equal(ledger.records[0].dismissCount, 1);
+
+  const resupply = reconcile(ledger, releaseRitualCardsAt(50), {
+    now: NOW + 3 * DAY_MS, adoptionInputs: { currentPatterns: releaseRitualCurrentPatternsAt(50) },
+  });
+  assert.equal(resupply.ledger.records[0].status, 'proposed');
+  assert.equal(resupply.ledger.records[0].dismissCount, 1, 'prior dismissal history survives a re-supply');
+});
+
 test('reconcile: an adopted or dismissed record is untouched by evidence disappearing (expiry only applies to proposed)', () => {
   const c = cluster({ key: 'kk', name: 'Release ritual', count: 12, sessions: 8, days: 4 });
   const cards = deriveCards({ promptPatterns: { clusters: [c] }, promptBaselines: null, promptsByHost: null, insights: [], now: NOW });
-  const { ledger: dismissed } = dismissCard(ledgerOf([]), 'release-ritual-skill', cards, NOW);
+  const { ledger: dismissed } = dismissCard(ledgerOf([]), 'release-ritual-skill', cards, { now: NOW });
   const { ledger: next } = reconcile(dismissed, [], { now: NOW + DAY_MS, adoptionInputs: {} });
   assert.equal(next.records[0].status, 'dismissed', 'expiry is defined only for proposed records');
+});
+
+// ── C-1: the canonical window (ledger-facing evidence is never the displayed
+// window) ────────────────────────────────────────────────────────────────────
+//
+// Re-run of the review's own C-1 repro: a corpus whose behaviour is perfectly
+// CONSTANT (the operator changes nothing), observed at three different
+// windows. Before this fix, switching --window alone fabricated an adoption,
+// an outcome delta, and — 14 days later — a permanent retirement verdict,
+// none of it backed by anything the operator did. After it, ledger-facing
+// reads always come from the SAME canonical evidence regardless of which
+// window's cards are being displayed, so none of that is possible.
+
+test('C-1 repro: switching the displayed window alone can no longer fabricate an adoption', () => {
+  // The "operator changes nothing" corpus: a steady cluster whose count is
+  // proportional to the window (all/30d/7d), exactly like the review's
+  // one-commit-and-push-every-1.25-days-for-60-days scenario. `cardsAtWindow`
+  // stands in for what --window N would derive for DISPLAY; `canonical`
+  // stands in for the fixed 30d read the ledger must use regardless.
+  const cardsAtWindow = (count) => deriveCards({
+    promptPatterns: { clusters: [cluster({ key: 'kk', name: 'Release ritual', count, sessions: count, days: count })] },
+    promptBaselines: null, promptsByHost: null, insights: [], now: NOW,
+  });
+  const canonicalAt = (count) => ({ promptPatterns: { clusters: [cluster({ key: 'kk', name: 'Release ritual', count, sessions: count, days: count })] } });
+
+  // Run 1: all-history window derives the card; proposed against the SAME
+  // canonical (30d) count, per this fixture's constant-rate corpus, 42.
+  const allWindowCards = cardsAtWindow(42);
+  let { ledger } = reconcile(ledgerOf([]), allWindowCards, {
+    now: NOW, adoptionInputs: { currentPatterns: canonicalAt(42) },
+  });
+  assert.equal(ledger.records[0].status, 'proposed');
+  assert.equal(ledger.records[0].baseline.count, 42, 'the baseline is the CANONICAL count, not whatever the displayed window showed');
+
+  // Run 2: the operator switches to --window 7 (nothing else changes). The
+  // DISPLAYED card now derives from a 7-day slice (count 6), but the ledger
+  // read is STILL pinned to the canonical 30d count (42) — so 6-of-42 never
+  // even enters the collapse comparison.
+  const sevenDayCards = cardsAtWindow(6);
+  const step2 = reconcile(ledger, sevenDayCards, {
+    now: NOW + DAY_MS, adoptionInputs: { currentPatterns: canonicalAt(42) },
+  });
+  assert.equal(step2.ledger.records[0].status, 'proposed',
+    'a --window switch alone must never fabricate an adoption — the canonical count (42) never collapsed');
+  assert.equal(step2.cards[0].basis, sevenDayCards[0].basis,
+    'the RENDERED basis still honors the operator\'s window (spec: display stays windowed) — 7 recurrences, not 42');
+  assert.notEqual(step2.cards[0].basis, allWindowCards[0].basis, 'sanity: the two windows really do render different basis text');
+
+  // Run 3: back to the default window. Still proposed — no fabricated
+  // "adopted"/outcome ever entered the ledger.
+  const step3 = reconcile(step2.ledger, allWindowCards, {
+    now: NOW + 2 * DAY_MS, adoptionInputs: { currentPatterns: canonicalAt(42) },
+  });
+  assert.equal(step3.ledger.records[0].status, 'proposed');
+  assert.equal(step3.ledger.records[0].outcome, undefined, 'no outcome was ever measured, because no adoption was ever fabricated');
+});
+
+test('C-1: a new record\'s windowDays is always CANONICAL_WINDOW_DAYS, regardless of the cards\' own window', () => {
+  assert.equal(CANONICAL_WINDOW_DAYS, 30);
+  const cards = releaseRitualCardsAt(9); // a card that would fire at, say, --window 7 too
+  const { ledger } = reconcile(ledgerOf([]), cards, {
+    now: NOW, adoptionInputs: { currentPatterns: releaseRitualCurrentPatternsAt(9) },
+  });
+  assert.equal(ledger.records[0].windowDays, CANONICAL_WINDOW_DAYS);
+});
+
+test('C-1: a record loaded without windowDays (pre-fix shape) is discarded — treated as though it never existed', () => {
+  const legacyRecord = {
+    id: 'release-ritual-skill', evidenceHash: 'x'.repeat(16), status: 'dismissed',
+    generatedAt: new Date(NOW).toISOString(), statusAt: new Date(NOW).toISOString(),
+    baseline: { count: 999 }, dismissCount: 2,
+    // no windowDays — the pre-Fix-round-1 shape.
+  };
+  const cards = releaseRitualCardsAt(9);
+  const { ledger } = reconcile(ledgerOf([legacyRecord]), cards, {
+    now: NOW, adoptionInputs: { currentPatterns: releaseRitualCurrentPatternsAt(9) },
+  });
+  assert.equal(ledger.records.length, 1);
+  assert.equal(ledger.records[0].status, 'proposed', 'a windowDays-less record is discarded, so the card proposes fresh, not "still dismissed"');
+  assert.equal(ledger.records[0].windowDays, CANONICAL_WINDOW_DAYS);
+});
+
+test('I-5 (optional clamp): a record with a status outside the five-value enum is discarded on load', () => {
+  const corruptRecord = {
+    id: 'release-ritual-skill', evidenceHash: 'x'.repeat(16), status: '<img src=x onerror=alert(1)>',
+    generatedAt: new Date(NOW).toISOString(), statusAt: new Date(NOW).toISOString(),
+    baseline: { count: 999 }, windowDays: CANONICAL_WINDOW_DAYS,
+  };
+  const cards = releaseRitualCardsAt(9);
+  const { ledger } = reconcile(ledgerOf([corruptRecord]), cards, {
+    now: NOW, adoptionInputs: { currentPatterns: releaseRitualCurrentPatternsAt(9) },
+  });
+  assert.equal(ledger.records.length, 1);
+  assert.equal(ledger.records[0].status, 'proposed', 'an invalid status is discarded, not carried through to the DOM');
 });
 
 // ── version field ────────────────────────────────────────────────────────────
@@ -384,6 +767,49 @@ test('defaultLedgerPath sits beside the usage-index cache path convention (same 
   const p = defaultLedgerPath();
   assert.equal(path.basename(p), 'usage-outcome-ledger.json');
   assert.equal(path.basename(path.dirname(p)), 'agentic-kit');
+});
+
+// Fix round 1, I-2: spec §10 requires dismissal persistence to survive
+// "rescans AND SCHEMA BUMPS" — an older `ak` reading a NEWER, well-formed
+// ledger must not silently destroy it (that would resurrect every dismissed
+// card the newer build had suppressed). A CORRUPT/unparseable file is a
+// different case and stays safe to replace.
+test('loadLedger reports a well-formed FUTURE version distinctly from a corrupt one, and never destroys it', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-ledger-'));
+  const file = path.join(dir, 'usage-outcome-ledger.json');
+
+  // A newer ak wrote v2 with a dismissed record.
+  const futureLedger = {
+    version: 2, records: [{ id: 'release-ritual-skill', evidenceHash: 'a'.repeat(16), status: 'dismissed', dismissCount: 3 }],
+  };
+  fs.writeFileSync(file, JSON.stringify(futureLedger));
+  const loaded = loadLedger(file);
+  assert.equal(loaded.future, true);
+  assert.equal(loaded.version, 2);
+  assert.deepEqual(loaded.records, futureLedger.records, 'the future records must be reported, not discarded');
+
+  // The file on disk is untouched by the mere act of loading it.
+  assert.deepEqual(JSON.parse(fs.readFileSync(file, 'utf8')), futureLedger);
+
+  // A corrupt file (same directory, different name) is NOT a future version —
+  // it reads as blank, which is safe to overwrite (nothing recoverable).
+  const corruptFile = path.join(dir, 'corrupt.json');
+  fs.writeFileSync(corruptFile, '{not valid json');
+  const corruptLoaded = loadLedger(corruptFile);
+  assert.equal(corruptLoaded.future, undefined);
+  assert.deepEqual(corruptLoaded, { version: LEDGER_SCHEMA_VERSION, records: [] });
+
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test('loadLedger reads the CURRENT version normally, with no future flag', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-ledger-'));
+  const file = path.join(dir, 'usage-outcome-ledger.json');
+  fs.writeFileSync(file, JSON.stringify({ version: LEDGER_SCHEMA_VERSION, records: [] }));
+  const loaded = loadLedger(file);
+  assert.equal(loaded.future, undefined);
+  assert.equal(loaded.version, LEDGER_SCHEMA_VERSION);
+  fs.rmSync(dir, { recursive: true, force: true });
 });
 
 // ── atomic save (tmp+rename observable) ─────────────────────────────────────
@@ -456,14 +882,17 @@ test('no ledger field, at any depth, ever carries prompt text — walked structu
   // up here — it appears nowhere in any of the fixtures below, which is the
   // point: nothing downstream of a "prompt" can legitimately produce it.
   const c = cluster({ key: 'kk', name: 'Commit-and-push instruction', count: 12, sessions: 8, days: 4 });
-  const byHost = { codex: hostRow({ personaOpeners: 15, p90TypedTokens: 300 }), claude: hostRow({ personaOpeners: 1, p90TypedTokens: 40 }) };
+  const byHost = {
+    codex: hostRow({ personaOpeners: 15, p90TypedTokens: 300, taps: 25 }),
+    claude: hostRow({ personaOpeners: 1, p90TypedTokens: 40, taps: 25 }),
+  };
   const insights = [insight('host-prompt-asymmetry'), insight('supervision-tap-share')];
   const cards = deriveCards({ promptPatterns: { clusters: [c], reAsks: { pairCount: 15, sessionCount: 9 } }, promptBaselines: null, promptsByHost: byHost, insights, now: NOW });
   const currentPatterns = { promptPatterns: { clusters: [c], reAsks: { pairCount: 15, sessionCount: 9 } }, promptsByHost: byHost, insights };
 
   let ledger = ledgerOf([]);
   ({ ledger } = reconcile(ledger, cards, { now: NOW, adoptionInputs: { currentPatterns } }));
-  ({ ledger } = dismissCard(ledger, cards.find((x) => x.id === 'reask-delta').id, cards, NOW));
+  ({ ledger } = dismissCard(ledger, cards.find((x) => x.id === 'reask-delta').id, cards, { adoptionInputs: { currentPatterns }, now: NOW }));
   ({ ledger } = reconcile(ledger, cards, { now: NOW + OUTCOME_MIN_DAYS * DAY_MS, adoptionInputs: { skillDirs: ['release-ritual'], currentPatterns } }));
 
   const strings = allStrings(ledger);
@@ -472,8 +901,9 @@ test('no ledger field, at any depth, ever carries prompt text — walked structu
   // is allowed to carry, never free text off a card's finding/basis/try/draft.
   const CARD_IDS = /^(release-ritual-skill|commit-push-claude-md|reask-delta|codex-completion-criteria|progress-report-taps|codex-role-library)$/;
   for (const s of strings) {
-    const ok = /^(version|records|id|evidenceHash|status|generatedAt|statusAt|baseline|outcome|refutation|dismissCount|count|clusterKey|sessions|days|sessionCount|otherCount|host|otherHost|p90Host|p90Other|insightFinding|improved|deltaText|measuredAt)$/.test(s)
+    const ok = /^(version|records|id|evidenceHash|status|generatedAt|statusAt|baseline|outcome|refutation|dismissCount|dismissedAtCount|windowDays|count|clusterKey|sessions|days|sessionCount|otherCount|host|otherHost|hosts|comparator|p90Host|p90Other|improved|deltaText|measuredAt)$/.test(s)
       || /^(proposed|adopted|dismissed|expired|retired)$/.test(s)
+      || /^(baseline|floor|mixed)$/.test(s) // progress-report-taps' comparator enum
       || CARD_IDS.test(s)
       || /^[0-9a-f]{16}$/.test(s)
       || /^\d{4}-\d{2}-\d{2}T.*Z$/.test(s)
@@ -548,6 +978,12 @@ test('INTEGRATION: aggregate(records, {prompts:true}) -> deriveCards -> reconcil
   assert.match(out, /Coaching/);
   assert.match(out, /Commit-and-push is retyped, not remembered/);
   assert.match(out, /proposed/);
+  // Fix round 1, M-1: the rendered ledger-summary line actually renders (the
+  // pin used to call printCoaching with the wrong key, making this a no-op).
+  assert.match(out, /ledger — 1 proposed · 0 adopted · 0 dismissed · 0 expired · 0 retired/);
+  // Fix round 1, M-3: generatedAt + the evidence hash's first 8 chars render
+  // as a trailing line on every card.
+  assert.match(out, new RegExp(`as of ${annotatedCard.generatedAt.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')} · ${annotatedCard.evidenceHash.slice(0, 8)}`));
   // Privacy pin: none of the six typed phrasings reached the rendered section.
   for (const p of COMMIT_PUSH_PHRASINGS) assert.equal(out.includes(p), false, `prompt text "${p}" leaked into the rendered coaching section`);
 });

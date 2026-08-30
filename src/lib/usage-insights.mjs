@@ -736,7 +736,7 @@ function tapRowText(r) {
  *  backed by enough taps to be a pattern. A host with a personal baseline is
  *  compared against it; one without falls back to the absolute floor, and
  *  carries `baseline: null` so the evidence can say which rule applied. */
-function tapRowsOverThreshold(a) {
+export function tapRowsOverThreshold(a) {
   const byHost = a?.promptsByHost;
   if (!byHost || typeof byHost !== 'object') return [];
   const baselines = a?.promptBaselines ?? {};
@@ -760,7 +760,7 @@ function tapRowsOverThreshold(a) {
  *  their own history — and while no personal baseline is loaded, the floor is
  *  the ONLY path that runs, so the unconditional phrasing would be wrong every
  *  time rather than in an edge case. Mixed hosts defer to the split. */
-function tapComparisonClause(rows) {
+export function tapComparisonClause(rows) {
   const withBaseline = rows.filter((r) => r.baseline !== null).length;
   if (withBaseline === rows.length) return 'above your own recent normal';
   if (withBaseline === 0) {
