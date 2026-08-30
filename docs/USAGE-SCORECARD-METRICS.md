@@ -452,12 +452,15 @@ this day carried the fingerprint layer", so a zero here is *measured*.
   `ak usage score`/`ak usage prompts`) now request `lookbackDays: windowDays +
   BASELINE_TRAILING_DAYS`, wide enough for the baseline window to be reachable
   in principle — but reachable is not the same as populated. Measured on the
-  reference machine (2026-08-30, all-history window): the trailing 90-day span
-  before a 7-day report holds 22 active days per host, before a 14-day report
-  16, before a 30-day report 1 (Claude) and 6 (Codex) — every one of those
-  still under `BASELINE_MIN_ACTIVE_DAYS` (30), so `supervision-tap-share`
-  still runs on its 10% floor on this corpus today. That is the honest state
-  of a machine still building history, not a structural block.
+  reference machine during this build (2026-08-29, all-history window): the
+  trailing 90-day span before a 7-day report held 22 active days per host,
+  before a 14-day report 16, before a 30-day report 1 (Claude) and 6 (Codex) —
+  every one of those still under `BASELINE_MIN_ACTIVE_DAYS` (30), so
+  `supervision-tap-share` ran on its 10% floor on this corpus. Re-confirmed at
+  the headline level a day later (2026-08-30, `ak usage prompts --window 7
+  --json`): `promptBaselines` still reads `tapShareP75_trailing90d: null` for
+  every host at the 7-day window. That is the honest state of a machine still
+  building history, not a structural block.
 - **`personaOpeners` counts only typed (`p === 'human'`) openers**, though the
   `o` flag itself is provenance-blind — a tool's own template still carries
   `o`, and the aggregate filters it out before it reaches this figure, because

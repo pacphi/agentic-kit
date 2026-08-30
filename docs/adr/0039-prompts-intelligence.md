@@ -63,6 +63,9 @@ the median prompt on this corpus is stored complete and the tail costs a bounded
 instead of ~86 KB. Measured cost after the bound: the fingerprint layer runs ≈2.8 MB within a
 5.1 MB index (60-day window) — 13× the original spec estimate, corrected in the spec rather than
 left to contradict it, and a real, disclosed cost of the feature, not hidden in a rounding error.
+Re-confirmed live on this machine (2026-08-30, all-history scan): the fingerprint layer holds
+essentially the same share of a larger index (2.83 MB of 5.33 MB, ≈53%, against the original
+measurement's ≈55%) — the proportion, not just the absolute figure, holds as the corpus grows.
 Schema moved 14 → 15 (the harness-gate correction above) → 16 (the `q`/`o` shape flags), each
 bump forcing a full re-derive rather than letting a partial-schema record read new fields as
 `undefined`, the same discipline every prior schema bump in this kit has followed.
