@@ -14,6 +14,7 @@ import {
   loadLabelStore, saveLabelStore, defaultLabelStorePath, isValidLabelName,
   LABEL_STORE_SCHEMA_VERSION,
 } from '../../src/lib/usage-label-store.mjs';
+import { writePrivateFileAtomic } from '../../src/lib/file-write.mjs';
 
 function tmpFile(name = 'labels.json') {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-label-store-'));
@@ -599,4 +600,23 @@ test('F-10: INVARIANT walk — every persisted name is inside the ceiling and si
       `a 48-char name plus padding used to persist at ${entry.name.length}, over the stated ceiling`);
     assert.equal(entry.name, entry.name.trim());
   }
+});
+
+test('SEC-6: the tmp file is opened with O_EXCL, independently of the random suffix', () => {
+  // Two defenses ride together here and the symlink test above can only prove
+  // the pair: with an unpredictable suffix, an attacker cannot pre-create the
+  // path to exercise the flag at all. This pins the flag on its own, through
+  // the writer's existing fsImpl seam, so removing O_EXCL while keeping the
+  // random name — which is exactly what a "simplifying" edit would do — fails
+  // here rather than silently restoring symlink-following.
+  const flags = [];
+  const fsSpy = {
+    ...fs,
+    openSync: (target, flag, mode) => { flags.push([flag, mode]); return fs.openSync(target, flag, mode); },
+  };
+  const file = tmpFile();
+  writePrivateFileAtomic(file, '{"version":1}', { fsImpl: fsSpy });
+  assert.deepEqual(flags, [['wx', 0o600]],
+    "'wx' sets O_EXCL, which refuses an existing path — a symlink included — without following it");
+  assert.equal(fs.readFileSync(file, 'utf8'), '{"version":1}');
 });

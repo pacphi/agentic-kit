@@ -9,6 +9,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   reportOutcome, withProgress, sanitizeForTerminal, dim, bold,
+  ok, warn, fail, info, heading,
 } from '../../src/lib/output.mjs';
 
 const sink = () => {
@@ -231,4 +232,30 @@ test('sanitizeForTerminal strips hostile bytes that arrive INSIDE a styled messa
   const ownSgr = new RegExp(`${ESC}\\[(?:0|1|2|1;3[1236])m`, 'g');
   assert.ok(!FORBIDDEN.test(out.replace(ownSgr, '')),
     'an OSC introducer must not survive just because the message was styled');
+});
+
+test('SEC-2: every print helper actually APPLIES the sanitizer, not just exports it', () => {
+  // The gap this closes: the tests above prove `sanitizeForTerminal` works,
+  // and the end-to-end CLI test proves a hostile STORE never reaches stdout —
+  // but the store gate drops those entries before printing, so neither test
+  // fails if the helpers stop calling the sanitizer. `--deep` prints raw
+  // transcript text that no store gate ever sees, so the wiring itself has to
+  // be pinned.
+  const hostile = `payload ${ESC}[2J${ESC}[1;1H${ESC}]0;PWNED${BEL} tail`;
+  const printed = [];
+  const real = console.log;
+  console.log = (line) => { printed.push(String(line)); };
+  try {
+    ok(hostile); warn(hostile); fail(hostile); info(hostile); heading(hostile);
+  } finally {
+    console.log = real;
+  }
+  assert.equal(printed.length, 5, 'guard: all five helpers ran');
+  const ownSgr = new RegExp(`${ESC}\\[(?:0|1|2|1;3[1236])m`, 'g');
+  for (const [i, line] of printed.entries()) {
+    assert.ok(line.includes('payload') && line.includes('tail'),
+      `helper ${i} must still print the message`);
+    assert.ok(!FORBIDDEN.test(line.replace(ownSgr, '')),
+      `helper ${i} printed a forbidden character: ${JSON.stringify(line)}`);
+  }
 });
