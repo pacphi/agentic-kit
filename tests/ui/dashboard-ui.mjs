@@ -266,6 +266,7 @@ const USAGE_VIEWS = [
   ['score', '#v-score'],
   ['limits', '#v-limits'],
   ['findings', '#v-findings'],
+  ['prompts', '#v-prompts'],
   ['models', '#v-models'],
   ['sessions', '#v-sessions'],
   ['transcript', '#v-transcript'],
@@ -2226,8 +2227,12 @@ async function main() {
       `Models made ${modelRequests.length} request(s) before its tab opened: ${modelRequests.join(', ')}`);
     const usageSubmenu = await page.evaluate(() => [...document.querySelectorAll('#usage-seg [data-view]')]
       .map((button) => button.dataset.view));
-    check('Usage submenu puts Models before Sessions',
-      JSON.stringify(usageSubmenu) === JSON.stringify(['score', 'limits', 'findings', 'models', 'sessions', 'transcript']),
+    // Prompts sits between Findings and Sessions (spec §3 rail placement), so
+    // the shipped order gained an entry. Models-before-Sessions — the ordering
+    // decision this check was written to defend — is unchanged and still
+    // asserted, alongside the full order so a future insertion is deliberate.
+    check('Usage submenu puts Prompts after Findings, and Models before Sessions',
+      JSON.stringify(usageSubmenu) === JSON.stringify(['score', 'limits', 'findings', 'prompts', 'models', 'sessions', 'transcript']),
       `Usage submenu was ${JSON.stringify(usageSubmenu)}`);
     const modelPanelOwnership = await page.evaluate(() => [
       '#mli-observed-panel', '.mli-routes-panel', '#mli-catalog-explorer', '#mli-history', '#mli-consumers', '#mli-impact',
@@ -2683,13 +2688,22 @@ async function main() {
       horizontal.scroll > horizontal.client && horizontal.left > 0,
       `table scroll state was ${JSON.stringify(horizontal)}`);
     await page.setViewportSize({ width: 1440, height: 900 });
+    // Arrow-key navigation walks the rail in its rendered order, so inserting
+    // Prompts between Findings and Models moved Models one press further out.
+    // Both hops are asserted: the new neighbour, and that Models is still
+    // reachable by the keyboard — the property this check was defending.
     await page.click('#usage-tab-findings');
     await page.focus('#usage-tab-findings');
     await page.keyboard.press('ArrowRight');
-    check('usage/models follows Findings in arrow-key tab navigation',
+    check('usage/prompts follows Findings in arrow-key tab navigation',
+      await page.getAttribute('#usage-tab-prompts', 'aria-selected') === 'true'
+        && await page.evaluate(() => document.activeElement?.id) === 'usage-tab-prompts',
+      'Prompts tab did not receive selection and focus after ArrowRight');
+    await page.keyboard.press('ArrowRight');
+    check('usage/models follows Prompts in arrow-key tab navigation',
       await page.getAttribute('#usage-tab-models', 'aria-selected') === 'true'
         && await page.evaluate(() => document.activeElement?.id) === 'usage-tab-models',
-      'Models tab did not receive selection and focus after ArrowRight');
+      'Models tab did not receive selection and focus after a second ArrowRight');
 
     // ── the specific zeros that were silently wrong ──
     await page.click('[data-view="sessions"]');
