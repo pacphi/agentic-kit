@@ -2,19 +2,13 @@
 // offline text scorecard (`score`) rendered from the SAME local-transcript
 // aggregate `ak dashboard`'s Usage tab reads — no cost/token/percentile
 // arithmetic is redone here; see the score section below for the boundary.
-import fs from 'node:fs';
-import path from 'node:path';
 import { heading, info, ok, warn, dim } from '../lib/output.mjs';
-import { configDir } from '../lib/paths.mjs';
-import { readIndex, SCHEMA_VERSION } from '../lib/usage-index.mjs';
+import { readIndex } from '../lib/usage-index.mjs';
 import {
   BASELINE_TRAILING_DAYS, LAT_BUCKET_EDGES, LEN_BUCKET_EDGES, TAP_MAX_TOKENS,
   PROMPT_CLUSTER_JACCARD, PROMPT_REASK_JACCARD, maskSecrets,
 } from '../lib/usage-aggregate.mjs';
-import { parseClaude, parseCodex, promptFingerprint } from '../lib/usage-parsers.mjs';
-import { parseSession as parseOpencodeSession } from '../lib/usage-opencode.mjs';
 import { reAskPairs } from '../lib/usage-prompt-patterns.mjs';
-import { provenanceOf } from '../lib/usage-provenance.mjs';
 import { MODES } from '../lib/usage-modes.mjs';
 import {
   openRouterActivityFile,
@@ -29,12 +23,18 @@ import {
 // orchestration (resolveCoachingAndEnrichment) — split out of runPrompts on
 // the repo's complexity ceiling; it in turn imports usage/enrich.mjs's
 // runEnrichPass (the --enrich flow: consent preamble, exemplar gathering,
-// persistence), which reuses this file's exported deep-pass machinery.
+// persistence), which reuses the SAME shared deep-pass machinery this file
+// does — both import it from ./usage/deep-pass.mjs, so neither imports the
+// other for it.
 import {
   printCoaching, runDraftFlag, resolveCoachingAndEnrichment,
 } from './usage/coaching.mjs';
 import { applyLabelStoreToPatterns } from '../lib/usage-enrich.mjs';
 import { loadLabelStore, defaultLabelStorePath } from '../lib/usage-label-store.mjs';
+import {
+  promptCacheFile, readPromptEntries, deepFingerprints, exemplarCandidates, collectExemplars,
+  MAX_DEEP_FILE_BYTES,
+} from './usage/deep-pass.mjs';
 
 export const options = {
   json: { type: 'boolean', default: false },
@@ -713,35 +713,18 @@ export function promptReport(agg, win) {
 // ── the deep pass: exemplar TEXT, re-read on demand ────────────────────────
 // Spec §2.3's F2 pass and the CLI half of the privacy split. The aggregate
 // tier above knows THAT a request was retyped in 22 sessions; it cannot say
-// what the request was, because the text was never stored. This pass re-reads
-// the transcripts to answer that — through the same per-host parsers the scan
-// path uses, so a turn re-fingerprints to the identical `h` and joins back to
-// the findings exactly.
+// what the request was, because the text was never stored. `deepPass` below
+// re-reads the transcripts to answer that, through the shared
+// exemplar-gathering machinery in ./usage/deep-pass.mjs (promptCacheFile,
+// readPromptEntries, deepFingerprints, exemplarCandidates, collectExemplars —
+// see that file's own header for the privacy-boundary reasoning and why it
+// reads the index cache the tier above never does). `--enrich`
+// (usage/enrich.mjs) reuses the identical machinery for its own,
+// scoped-to-candidate-clusters pass rather than a second copy of it.
 //
-// THE BOUNDARY, which is the whole point of it being opt-in: the text goes to
-// stdout and nowhere else. Nothing here writes a file, and every exemplar is
-// run through `maskSecrets` before it is printed or serialized — the join is
-// computed on the raw text so the hash still matches, and only the rendering
-// is masked.
-//
-// WHY THIS TIER READS THE INDEX CACHE AND THE TIER ABOVE DOES NOT. Everything
-// above is read off `agg.promptPatterns`, which is deliberately aggregates
-// only. This pass needs two things no aggregate can carry: the HASHES it owes
-// an exemplar for, and the transcript PATH of a session that holds one. The
-// cache is keyed by transcript path and is the only place both exist together.
-//
-// The distinction that makes this admissible: the cache as a PATTERNS SOURCE
-// was ruled out — two surfaces bound to an internal file format, and the
-// dashboard would have inherited the binding — whereas the cache as DISCOVERY
-// is one CLI-only call site answering "which transcript holds this hash",
-// which is a question about where files are, not about what the numbers say.
-//
-// That is a coupling to an internal file layout, and it is confined to this
-// one text-bearing, CLI-only tier on purpose: a pass that is about to open the
-// transcripts and print what the operator typed already has strictly more
-// access than a fingerprint, so withholding fingerprints from it would be an
-// obstacle rather than a boundary. `readPromptEntries` is the single call site
-// if a supported accessor ever lands.
+// Every exemplar collected is run through `maskSecrets` before it is printed
+// or serialized below — the join is computed on the raw text so the hash
+// still matches, and only the rendering is masked.
 
 const DEEP_TOP_SHORT = 30;
 const DEEP_TOP_REASKS = 20;
@@ -751,123 +734,6 @@ const DEEP_TOP_PERSONAS = 20;
  *  are the actual evidence (findings §5.1). Both are counted at the aggregate
  *  tier; only the substantive ones are worth printing verbatim. */
 const REASK_MIN_TOKENS = 5;
-/** Same ceiling readSession applies, for the same reason: a transcript is read
- *  whole and JSON-expands at roughly 5x, so an unbounded read is a memory
- *  amplification. Above it the session contributes no exemplar — and the
- *  selection below falls through to the next session holding the same text,
- *  which is why the ceiling costs nothing in practice. Two Codex rollouts on
- *  the reference corpus (79 MB and 93 MB) sit above it today. */
-const MAX_DEEP_FILE_BYTES = 64 * 1024 * 1024;
-
-/** Hard stop on how many transcripts one deep pass will open, so a corpus that
- *  somehow needs a new file per exemplar still finishes. Well clear of the ~50
- *  the reference corpus opens for a full table. */
-const MAX_DEEP_TRANSCRIPTS = 400;
-
-export function promptCacheFile() { return path.join(configDir(), 'usage-index.json'); }
-
-// This function and the other four exported below (readPromptEntries,
-// deepFingerprints, exemplarCandidates, collectExemplars) are exported
-// SOLELY so usage/enrich.mjs's --enrich flow can reuse this exact exemplar-
-// gathering machinery for its own, scoped-to-candidate-clusters pass rather
-// than re-deriving a second copy of it (spec §2.3's CLI-only privacy split
-// stays enforced by having exactly one place that opens a transcript at
-// all). Not part of this command's own CLI contract — see the __test export
-// at the bottom of this file for that boundary.
-
-/** Parsed session records from the index cache, each with the SOURCE it was
- *  parsed from — the cache is keyed by transcript path, which is what lets this
- *  pass re-read a specific session without re-implementing file discovery.
- *  `[]` for any reason at all (absent, corrupt, or written by a different
- *  schema): no exemplars is a reportable state, not an error.
- *
- *  @returns {Array<{ file: string, dbFile: string|null, rec: any }>} */
-export function readPromptEntries(cacheFile) {
-  try {
-    const raw = JSON.parse(fs.readFileSync(cacheFile, 'utf8'));
-    if (raw?.schemaVersion !== SCHEMA_VERSION || !raw.entries) return [];
-    return Object.entries(raw.entries)
-      .filter(([, e]) => e?.session)
-      .map(([file, e]) => ({ file, dbFile: e.dbFile ?? null, rec: e.session }));
-  } catch {
-    return [];
-  }
-}
-
-/** The record gate, matching the aggregate's own (`!rec.responses` is not a
- *  session; `rec.end < cutoff` is outside the window) so this pass and the
- *  projection above read one population. */
-function inWindow(rec, cutoffMs) {
-  return !!rec?.responses && Array.isArray(rec.promptFPs) && rec.end != null && rec.end >= cutoffMs;
-}
-
-/** The day a record's tokens FIRST billed on — `promptStatsByDay`'s own
- *  attribution, restated here because the aggregate keeps it private. */
-function firstBilledDay(rec) {
-  let first = null;
-  for (const row of rec.usage ?? []) if (first === null || row.day < first) first = row.day;
-  return first;
-}
-
-/**
- * The typed fingerprints this pass targets exemplars with, decorated with where
- * each happened. DELIBERATELY NOT the canonical decoration: the boolean `q`/`o`
- * mapping lives once, in usage-aggregate's `decoratePromptFP`, and is what the
- * CLASSIFICATION depends on — nothing here classifies anything. This pass reads
- * `h` to join, `t`/`th` to group and pair, and the raw stored `o` flag to find
- * personas, so restating the mapping would be a second copy of a contract it
- * does not use.
- */
-export function deepFingerprints(entries, cutoffMs) {
-  const out = [];
-  for (const { rec } of entries) {
-    if (!inWindow(rec, cutoffMs)) continue;
-    const day = firstBilledDay(rec);
-    const host = rec.host ?? rec.provider ?? 'unknown';
-    for (const fp of rec.promptFPs) {
-      if (fp.p === 'human') out.push({ ...fp, sessionId: rec.id, day, host });
-    }
-  }
-  return out;
-}
-
-/** Prompt-kind turns a PERSON typed, in transcript order, each re-fingerprinted
- *  so it can be joined to the aggregate tier's findings by hash. Both gates are
- *  the scan path's own: `kind === 'prompt'` is what decides a fingerprint is
- *  written at all, and `provenanceOf` on the same text is what decides its
- *  tag — so this list is exactly the session's `human` fingerprints, in the
- *  same order. */
-function humanPromptTurns(turns) {
-  const out = [];
-  for (const t of turns ?? []) {
-    if (t?.kind !== 'prompt' || typeof t.text !== 'string') continue;
-    if (provenanceOf(t.text, { kind: 'prompt' }) !== 'human') continue;
-    out.push({ h: promptFingerprint(t.text).h, text: t.text, at: Date.parse(t.at) });
-  }
-  return out;
-}
-
-/** Re-parse one cached session's transcript WITH turns, through the parser its
- *  own provider owns. `dirName` only feeds project labelling, which this pass
- *  never reads, so the parent directory is sufficient. Returns `null` for
- *  anything unreadable — a vanished or oversized transcript costs its own
- *  exemplar and nothing else. */
-function reReadTurns({ file, dbFile, rec }) {
-  if (file.startsWith('opencode://')) {
-    if (!dbFile) return null;
-    try { return parseOpencodeSession({ dbFile, id: rec.id, withTurns: true })?.turns ?? null; } catch { return null; }
-  }
-  let raw;
-  try {
-    if (fs.statSync(file).size > MAX_DEEP_FILE_BYTES) return null;
-    raw = fs.readFileSync(file, 'utf8');
-  } catch { return null; }
-  try {
-    return rec.provider === 'codex'
-      ? parseCodex(raw, { id: rec.id, withTurns: true }).turns
-      : parseClaude(raw, { id: rec.id, dirName: path.basename(path.dirname(file)), withTurns: true }).turns;
-  } catch { return null; }
-}
 
 /** Exact-text groups among the SHORT typed prompts, biggest first — the
  *  "top 30 short prompts" table (findings §2.2). `h` is never sketched, so
@@ -905,33 +771,6 @@ function personaGroups(typed) {
   return { rows: all.slice(0, DEEP_TOP_PERSONAS), total: all.length };
 }
 
-/**
- * Sessions that could supply the wanted exemplars, most useful first: a
- * session holding four of them is opened before one holding a single hash, and
- * ties break on the id so the same corpus always opens the same files.
- *
- * A LIST rather than one pick per hash, which is what makes this robust. The
- * first version staked each hash on a single session and lost the exemplar
- * outright when that transcript could not be read — measured on this corpus,
- * two Codex rollouts of 79 MB and 93 MB sit above the read ceiling and between
- * them were the sole source for nine of the top thirty short prompts, every
- * one of which rendered "transcript unavailable" beside a perfectly good
- * count. The same text exists in a dozen smaller transcripts; the pass just
- * has to be willing to look in the next one.
- */
-export function exemplarCandidates(typed, wanted) {
-  const bySession = new Map();
-  for (const fp of typed) {
-    if (!wanted.has(fp.h) || !fp.sessionId) continue;
-    let hashes = bySession.get(fp.sessionId);
-    if (!hashes) bySession.set(fp.sessionId, (hashes = new Set()));
-    hashes.add(fp.h);
-  }
-  return [...bySession.entries()]
-    .map(([sessionId, hashes]) => ({ sessionId, hashes }))
-    .sort((a, b) => b.hashes.size - a.hashes.size || (a.sessionId < b.sessionId ? -1 : 1));
-}
-
 /** Minutes between the two asks of one pair, located by walking the session's
  *  own prompt order for the (a, b) hashes exactly `gap` apart — the same index
  *  space `reAskPairs` counted in. `null` when they cannot be located, which is
@@ -947,43 +786,6 @@ function reAskMinutes(turns, pair) {
     };
   }
   return null;
-}
-
-/**
- * Opens transcripts until every wanted exemplar is resolved, and no more than
- * that. Re-ask sessions are opened unconditionally (the pair's timing can only
- * come from the session it happened in); the rest are opened only while they
- * still hold a hash nothing has answered yet, so a corpus where one big
- * session covers most of the table costs a handful of files.
- */
-export function collectExemplars({ entries, cutoffMs, candidates, reAskSessions, wanted }) {
-  const byId = new Map();
-  for (const entry of entries) if (inWindow(entry.rec, cutoffMs)) byId.set(entry.rec.id, entry);
-  const text = new Map();            // hash → first verbatim text seen for it
-  const bySession = new Map();       // session id → its ordered human prompt turns
-  const attempted = new Set();
-  const cost = { transcripts: 0, unreadable: 0 };
-
-  const open = (id) => {
-    attempted.add(id);
-    const entry = byId.get(id);
-    if (!entry) return;
-    cost.transcripts++;
-    const reRead = reReadTurns(entry);
-    if (!reRead) { cost.unreadable++; return; }
-    const turns = humanPromptTurns(reRead);
-    bySession.set(id, turns);
-    for (const t of turns) if (wanted.has(t.h) && !text.has(t.h)) text.set(t.h, t.text);
-  };
-
-  for (const id of reAskSessions) open(id);
-  for (const c of candidates) {
-    if (cost.transcripts >= MAX_DEEP_TRANSCRIPTS) break;
-    if (attempted.has(c.sessionId)) continue;
-    if (![...c.hashes].some((h) => !text.has(h))) continue;
-    open(c.sessionId);
-  }
-  return { text, bySession, cost };
 }
 
 /** The pairs worth printing verbatim, and the token count each was measured at

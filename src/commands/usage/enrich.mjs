@@ -23,7 +23,7 @@ import { makeInvoke, UNAVAILABLE_MESSAGE } from '../../lib/llm-invoke.mjs';
 import { maskSecrets } from '../../lib/usage-aggregate.mjs';
 import {
   readPromptEntries, deepFingerprints, exemplarCandidates, collectExemplars, promptCacheFile,
-} from '../usage.mjs';
+} from './deep-pass.mjs';
 
 /**
  * @typedef {import('../../lib/usage-enrich.mjs').AggLike} AggLike

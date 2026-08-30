@@ -1939,18 +1939,23 @@ per-host and monthly folds off `promptsByHost` / `promptStatsByDay`
 session rows rather than of the prompts (`headlessShare`, `:643`).
 
 The deep pass is the one tier that reads the index cache directly
-(`readPromptEntries`, `src/commands/usage.mjs:783`): it needs the HASHES it owes
-an exemplar for and the transcript PATH of a session holding one, and the cache
-is the only place both exist together. That coupling is confined to this
-text-bearing, CLI-only tier — a pass about to open the transcripts and print
-what was typed already has strictly more access than a fingerprint. It re-reads
-through the same per-host parsers the scan path uses (`reReadTurns`, `:809`) and
-re-derives each turn's hash under the scan path's own two gates —
-`kind === 'prompt'` and `provenanceOf` on the same text (`humanPromptTurns`,
-`:794`) — which is what makes the join exact. `exemplarCandidates` (`:876`)
-orders sessions by how many wanted exemplars each covers and `collectExemplars`
-(`:913`) opens them only while something is unresolved, falling through to a
-smaller sibling transcript when one is past `MAX_DEEP_FILE_BYTES` (`:723`).
+(`readPromptEntries`, `src/commands/usage/deep-pass.mjs:69`): it needs the
+HASHES it owes an exemplar for and the transcript PATH of a session holding
+one, and the cache is the only place both exist together. That coupling is
+confined to this text-bearing, CLI-only tier — a pass about to open the
+transcripts and print what was typed already has strictly more access than a
+fingerprint. This exemplar-gathering machinery is shared: `ak usage prompts
+--deep` (usage.mjs) and `--enrich` (usage/enrich.mjs) both import it from
+`usage/deep-pass.mjs` rather than one importing it from the other. It
+re-reads through the same per-host parsers the scan path uses
+(`reReadTurns`, `deep-pass.mjs:139`) and re-derives each turn's hash under
+the scan path's own two gates — `kind === 'prompt'` and `provenanceOf` on
+the same text (`humanPromptTurns`, `deep-pass.mjs:124`) — which is what
+makes the join exact. `exemplarCandidates` (`deep-pass.mjs:170`) orders
+sessions by how many wanted exemplars each covers and `collectExemplars`
+(`deep-pass.mjs:190`) opens them only while something is unresolved, falling
+through to a smaller sibling transcript when one is past
+`MAX_DEEP_FILE_BYTES` (`deep-pass.mjs:53`).
 
 **Worked example:** on the reference corpus at the all-history window, 5,684
 fingerprinted prompt turns carry 2,656 tagged `human` — a typed share of 46.7%
