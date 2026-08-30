@@ -515,6 +515,54 @@ function bundledVersion(hostPkg, pkg) {
  *  renders before "load all"; the rest come from /api/sessions on demand. */
 const USAGE_TREE_PREVIEW = 25;
 
+/**
+ * The Prompts view's half of the payload (spec §3): what the operator typed,
+ * how it splits per host and per day, the personal baselines the detectors
+ * compare against, and the repetition projection.
+ *
+ * NOTHING IS RE-DERIVED HERE. `patterns` is `agg.promptPatterns` verbatim — the
+ * single projection usage-aggregate.mjs builds from the records it holds, which
+ * `ak usage prompts` reads too, so the two surfaces cannot disagree about what
+ * a cluster is. The per-host, per-day and baseline maps are likewise lifted
+ * from the aggregate that already computed them.
+ *
+ * The one figure computed here is `headless`, and it follows
+ * detectHeadlessShare's definition exactly rather than inventing a second one:
+ * sessions carrying the fingerprint layer, of which those that typed nothing. A
+ * session with no layer is excluded from BOTH halves of the fraction, because
+ * "unknowable" is not "headless".
+ *
+ * Prompt text cannot reach this object: every input is a fingerprint-derived
+ * count, a curated cluster name, or a session id for the existing masked
+ * session route (spec §2.3, §10).
+ */
+function promptsPayload(agg) {
+  const t = agg.totals ?? {};
+  const classified = (agg.sessions ?? []).filter((s) => Number.isFinite(s.typedPrompts));
+  const headless = classified.filter((s) => s.typedPrompts === 0);
+  const responses = classified.reduce((n, s) => n + (Number(s.responses) || 0), 0);
+  const headlessResponses = headless.reduce((n, s) => n + (Number(s.responses) || 0), 0);
+  return {
+    typed: t.typedPrompts ?? 0,
+    taps: t.tapCount ?? 0,
+    tapShare: t.tapShare ?? null,
+    byHost: agg.promptsByHost ?? {},
+    statsByDay: agg.promptStatsByDay ?? {},
+    baselines: agg.promptBaselines ?? {},
+    patterns: agg.promptPatterns ?? null,
+    headless: {
+      sessions: headless.length,
+      responses: headlessResponses,
+      // Null rather than 0 on an empty denominator: a window with no
+      // classified session never measured a headless share, which is not the
+      // claim "0% of it was headless" makes.
+      share: responses > 0 ? headlessResponses / responses : null,
+      measuredSessions: classified.length,
+      measuredResponses: responses,
+    },
+  };
+}
+
 /** Lazily bind usage-index.mjs. Deliberately NOT a static import: the module
  *  walks two transcript stores, and the panel must boot (and serve /api/status)
  *  without paying for that until the Usage tab is actually opened. Same named
@@ -1385,15 +1433,22 @@ export function startDashboard({
           // threshold without saying so. `days + BASELINE_TRAILING_DAYS` is
           // wider than `days * 2` for every window this server serves, so the
           // previous-window projection is unaffected.
-          usageApi.readIndex({ days, lookbackDays: days + BASELINE_TRAILING_DAYS, previous: true }),
+          usageApi.readIndex({
+            days, lookbackDays: days + BASELINE_TRAILING_DAYS, previous: true, prompts: true,
+          }),
           typeof usageApi.readProviderAnalytics === 'function'
             ? Promise.resolve(usageApi.readProviderAnalytics())
               .catch(() => ({ openrouter: null }))
             : Promise.resolve({ openrouter: null }),
         ]);
-        const { sessions: _sessions, projectTree, ...rollups } = agg || {};
+        // promptPatterns is destructured OUT rather than spread: the Prompts
+        // view reads it through `prompts.patterns` below, and leaving it at
+        // the top level too would publish the same projection twice under two
+        // names that could later drift apart.
+        const { sessions: _sessions, projectTree, promptPatterns: _patterns, ...rollups } = agg || {};
         sendJson(res, 200, {
           ...rollups,
+          prompts: promptsPayload(agg || {}),
           // Account-level metadata has no session/host correlation key. Keep
           // it visibly separate instead of laundering it into local totals.
           providerAnalytics,
