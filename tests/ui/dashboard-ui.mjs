@@ -3526,6 +3526,187 @@ async function main() {
     check('and survives a reload rather than snapping back to the default',
       c2.expanded === 'true' && c2.hidden === false, JSON.stringify(c2));
 
+    // ── the Coaching panel, driven end to end (redesign §2) ──────────────────
+    //
+    // The fixture corpus is fingerprint-free, so the real projection has no
+    // clusters to table — to exercise the INTERACTIONS (filter, sort, ≤5
+    // scroll, expand, the async masked-samples fetch, copy, dismiss, and the
+    // posture toggle) this stubs /api/usage with a rich `prompts` block MERGED
+    // onto the real base payload (so the other Usage sub-views keep rendering
+    // without error) plus the two prompts endpoints. It runs LAST, so nothing
+    // after it depends on the real payload. No real transcript is ever read —
+    // the samples endpoint is stubbed (the injection seam the brief calls for).
+    const baseUsage = await fetch(`${ORIGIN}/api/usage?days=14`, { headers: { 'x-dash-token': srv.token } })
+      .then((r) => r.json());
+    const mkCluster = (key, kind, name, source, count, sessions, days, hosts, sids) => ({
+      key, kind, label: { name, source }, class: 'other', count, sessions, days, hosts,
+      medianTokens: kind === 'tap' ? 2 : 30, sampleSessionIds: sids,
+    });
+    const RICH_PROMPTS = {
+      typed: 200, taps: 90, tapShare: 0.45,
+      byHost: {
+        codex: { typed: 120, taps: 40, tapShare: 0.33, p90TypedTokens: 167, personaOpeners: 5, questionShare: 0.2 },
+        claude: { typed: 80, taps: 8, tapShare: 0.1, p90TypedTokens: 385, personaOpeners: 1, questionShare: 0.3 },
+      },
+      statsByDay: {
+        '2026-08-18': { typed: 40, taps: 12, byHost: { codex: { typed: 40, taps: 12 } } },
+        '2026-08-19': { typed: 30, taps: 6, byHost: { claude: { typed: 30, taps: 6 } } },
+      },
+      baselines: { codex: { tapShareP75_trailing90d: 0.2 }, claude: { tapShareP75_trailing90d: 0.05 } },
+      headless: { sessions: 2, responses: 20, share: 0.15, measuredSessions: 8, measuredResponses: 130 },
+      patterns: {
+        corpus: { fingerprints: 500, typed: 200 },
+        provenance: { human: 200, control: 120, agent: 150, adapter: 30 },
+        tapLengths: [{ tokens: 1, prompts: 47, sessions: 23, days: 11, hosts: ['claude', 'codex'] }],
+        // Six clusters (> 5, so the table scrolls) across five distinct kinds.
+        clusters: [
+          mkCluster('k-commit', 'instruction', 'Commit-and-push instruction', 'seed', 35, 33, 15, ['claude', 'codex'], ['sess-alpha', 'sess-bravo', 'sess-charlie']),
+          mkCluster('k-yes', 'tap', 'Simple yes confirmation', 'enriched', 47, 23, 11, ['claude', 'codex'], ['sess-alpha']),
+          mkCluster('k-continue', 'tap', 'Continue confirmation', 'enriched', 40, 26, 12, ['claude', 'codex'], ['sess-bravo']),
+          mkCluster('k-status', 'question', 'Progress check-in', 'seed', 16, 16, 11, ['claude', 'codex'], ['sess-charlie']),
+          mkCluster('k-retry', 'reask', 'Retry nudge', 'characterized', 11, 10, 7, ['claude', 'codex'], ['sess-alpha']),
+          mkCluster('k-role', 'persona', 'Long role preamble', 'enriched', 9, 9, 1, ['codex'], ['sess-delta']),
+        ],
+        reAsks: { pairCount: 107, sessionCount: 29, gapHist: { 1: 33 } },
+        exactRepeats: [],
+      },
+      coaching: {
+        cards: [
+          { id: 'commit-push-claude-md', clusterKey: 'k-commit', targetKind: null,
+            title: 'Commit-and-push is retyped, not remembered', try: 'Add one line to CLAUDE.md so it commits and pushes on its own.',
+            finding: 'Typed in 33 of your sessions this window.', basis: '35 recurrences across 33 sessions.',
+            source: 'rule', status: 'proposed', stale: false, generatedAt: '2026-08-29T00:00:00.000Z',
+            evidenceHash: 'a'.repeat(16), draft: { kind: 'claude-md-line', text: 'After a change is verified, commit and push without being told.' } },
+          { id: 'reask-delta', clusterKey: null, targetKind: 'reask',
+            title: 'The same ask lands twice', try: 'State the acceptance criteria in the first ask.',
+            finding: '107 re-asks across 29 sessions.', basis: '107 re-ask pairs.',
+            source: 'rule', status: 'proposed', stale: false, generatedAt: '2026-08-29T00:00:00.000Z', evidenceHash: 'b'.repeat(16) },
+        ],
+        summary: null,
+      },
+    };
+    const usageDaysSeen = [];
+    const samplesWindows = [];
+    let dismissBody = null;
+    await page.route(/\/api\/usage(\?|$)/, (route) => {
+      usageDaysSeen.push(new URL(route.request().url()).searchParams.get('days'));
+      route.fulfill({ contentType: 'application/json', body: JSON.stringify({ ...baseUsage, prompts: RICH_PROMPTS }) });
+    });
+    await page.route(/\/api\/prompts\/samples/, (route) => {
+      samplesWindows.push(new URL(route.request().url()).searchParams.get('window'));
+      route.fulfill({ contentType: 'application/json',
+        body: JSON.stringify({ samples: ['commit and push', 'commit + push please'], occurrences: [
+          { sessionId: 'sess-alpha', day: '2026-08-20' }, { sessionId: 'sess-bravo', day: '2026-08-19' }] }) });
+    });
+    await page.route(/\/api\/prompts\/dismiss$/, (route) => {
+      dismissBody = route.request().postData();
+      route.fulfill({ contentType: 'application/json', body: JSON.stringify({ id: 'commit-push-claude-md', status: 'dismissed' }) });
+    });
+    await page.context().grantPermissions(['clipboard-read', 'clipboard-write'], { origin: ORIGIN });
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await page.waitForSelector('#panel-overview', { state: 'attached' });
+    await page.click('#tab-usage');
+    await page.click('#usage-tab-prompts');
+    await page.waitForSelector('#u-pr-coaching .pr-coach', { state: 'attached', timeout: 15000 });
+
+    // filter pills: All + one per kind present, each counted
+    const pillText = await visibleText(page, '#u-pr-coaching .pr-filters');
+    check('the Coaching panel derives a filter pill per kind present, with counts',
+      /All\s*6/.test(pillText) && /Taps\s*2/.test(pillText) && /Re-asks\s*1/.test(pillText)
+        && /Role preambles\s*1/.test(pillText) && /Questions\s*1/.test(pillText) && /Instructions\s*1/.test(pillText),
+      `pills read ${JSON.stringify(pillText)}`);
+
+    // default sort: Times typed, descending (35 > 47? no — counts: 47,40,35,16,11,9)
+    const order0 = await page.$$eval('#u-pr-coaching .prow', (rs) => rs.map((r) => r.getAttribute('data-pr-row')));
+    check('the table defaults to Times-typed descending',
+      order0.join(',') === 'k-yes,k-continue,k-commit,k-status,k-retry,k-role',
+      `order was ${order0.join(',')}`);
+
+    // ≤5 rows then scroll: six rows overflow the capped wrap
+    const scrollable = await page.$eval('#u-pr-coaching .pr-tablewrap', (el) => el.scrollHeight > el.clientHeight + 8);
+    check('the table caps at ~5 rows and scrolls the rest', scrollable, 'the tablewrap did not become scrollable with six rows');
+
+    // filter slices AND stacks with the active sort
+    await page.click('#u-pr-coaching [data-pr-filter="tap"]');
+    await page.waitForTimeout(60);
+    const tapRows = await page.$$eval('#u-pr-coaching .prow', (rs) => rs.map((r) => r.getAttribute('data-pr-row')));
+    check('a filter slices the table to its kind and keeps the sort',
+      tapRows.join(',') === 'k-yes,k-continue', `filtered rows were ${tapRows.join(',')}`);
+    await page.click('#u-pr-coaching [data-pr-filter="all"]');
+    await page.waitForTimeout(60);
+
+    // a sortable header re-sorts (Sessions descending: 33,26,23,16,10,9)
+    await page.click('#u-pr-coaching [data-pr-sort="sessions"]');
+    await page.waitForTimeout(60);
+    const bySessions = await page.$$eval('#u-pr-coaching .prow', (rs) => rs.map((r) => r.getAttribute('data-pr-row')));
+    check('clicking a header re-sorts the table by that column',
+      bySessions[0] === 'k-commit' && bySessions[1] === 'k-continue',
+      `by sessions the order was ${bySessions.join(',')}`);
+    const ariaSorted = await page.$eval('#u-pr-coaching th:nth-child(3)', (th) => th.getAttribute('aria-sort'));
+    check('the sorted header advertises its direction via aria-sort', ariaSorted === 'descending', `aria-sort was ${ariaSorted}`);
+
+    // expand a pattern → the async masked-samples fetch resolves into What-you-typed
+    await page.click('#u-pr-coaching [data-pr-open="k-commit"]');
+    await page.waitForSelector('#u-pr-coaching .detail-row', { state: 'attached' });
+    await page.waitForFunction(() => /commit and push/.test(document.querySelector('#u-pr-coaching .pr-typed')?.textContent || ''), null, { timeout: 4000 });
+    check('expanding a pattern fetches and shows its masked samples', true, 'unreachable — waitForFunction would have thrown');
+    check('the samples fetch used the SAME window as /api/usage (I-3)',
+      samplesWindows.length > 0 && usageDaysSeen.length > 0 && samplesWindows[0] === usageDaysSeen[0],
+      `samples window ${JSON.stringify(samplesWindows)} vs usage days ${JSON.stringify(usageDaysSeen)}`);
+
+    // seen-in shows the formatted date now the occurrences landed, and each
+    // link targets the real session (the short label is cosmetic; the nav hook
+    // carries the full id).
+    const seenText = await visibleText(page, '#u-pr-coaching .pr-seen');
+    const firstSeen = await page.$eval('#u-pr-coaching .pr-seen a', (a) => ({
+      target: a.getAttribute('data-pr-session'), href: a.getAttribute('href'),
+    }));
+    check('Seen in shows a formatted date and links to the real session once the fetch resolved',
+      /· Aug 20/.test(seenText) && firstSeen.target === 'sess-alpha' && firstSeen.href === '#usage/sess-alpha',
+      `seen-in read ${JSON.stringify(seenText)} / ${JSON.stringify(firstSeen)}`);
+
+    // the joined card's recommendation + draft render
+    check('the joined card renders its recommendation, no Try: prefix',
+      /Add one line to CLAUDE\.md/.test(await visibleText(page, '#u-pr-coaching .detail-row'))
+        && !/Try:/.test(await visibleText(page, '#u-pr-coaching .detail-row')),
+      'the recommendation did not render from the clusterKey-joined card');
+
+    // copy the draft → the button flips to its copied state (clipboard granted)
+    await page.click('#u-pr-coaching [data-pr-copy="k-commit"]');
+    await page.waitForTimeout(120);
+    check('the copy button confirms the copy',
+      await page.$eval('#u-pr-coaching [data-pr-copy="k-commit"]', (b) => b.classList.contains('copied') || b.getAttribute('title') === 'Copied'),
+      'the copy affordance gave no confirmation');
+    const clip = await page.evaluate(() => navigator.clipboard.readText().catch(() => ''));
+    check('the draft text reached the clipboard', /commit and push/.test(clip), `clipboard held ${JSON.stringify(clip)}`);
+
+    // dismiss → POST /api/prompts/dismiss with the card id, optimistic Dismissed…Undo
+    await page.click('#u-pr-coaching [data-pr-dismiss="commit-push-claude-md"]');
+    await page.waitForTimeout(120);
+    check('Dismiss posts the card id to /api/prompts/dismiss',
+      !!dismissBody && JSON.parse(dismissBody).id === 'commit-push-claude-md', `POST body was ${dismissBody}`);
+    check('Dismiss flips the row to its Dismissed…Undo state',
+      await page.$eval('#u-pr-coaching .coach-foot', (el) => el.classList.contains('done'))
+        && /Undo/.test(await visibleText(page, '#u-pr-coaching .coach-foot')),
+      'the dismissed state did not render');
+
+    // posture toggle: hidden suppresses the masked text view-wide; shown restores it
+    await page.click('#u-pr-posture [data-pr-posture="hidden"]');
+    await page.waitForTimeout(80);
+    check('hiding the prompt text suppresses What-you-typed and shows the terminal pointer',
+      /Prompt text is hidden/.test(await visibleText(page, '#u-pr-coaching .pr-typed'))
+        && await page.$$eval('#u-pr-coaching .verbatim', (v) => v.length === 0),
+      'the hidden posture still rendered sample text');
+    const samplesBeforeReshow = samplesWindows.length;
+    await page.click('#u-pr-posture [data-pr-posture="shown"]');
+    await page.waitForFunction(() => /commit and push/.test(document.querySelector('#u-pr-coaching .pr-typed')?.textContent || ''), null, { timeout: 4000 });
+    check('showing it again restores the masked text from cache, without a re-fetch',
+      samplesWindows.length === samplesBeforeReshow, `an extra samples fetch fired (${samplesBeforeReshow} → ${samplesWindows.length})`);
+
+    await page.unroute(/\/api\/usage(\?|$)/);
+    await page.unroute(/\/api\/prompts\/samples/);
+    await page.unroute(/\/api\/prompts\/dismiss$/);
+
     // ── nothing errored anywhere along the way ──
     // A 404 from /api/session/<id> is CORRECT behaviour for a session that does
     // not exist — the route was changed to stop answering 200-with-a-null-body.
