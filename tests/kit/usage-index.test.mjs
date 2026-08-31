@@ -312,19 +312,30 @@ test('SEC-3: masking a 200 KB run of secret-shaped words stays well under 100ms'
 });
 
 test('SEC-3: cost grows about linearly, not quadratically, with input size', () => {
-  const time = (chars) => {
+  // The MIN over several trials, not a single sample: one wall-clock read is
+  // spiked by GC or scheduler jitter — a shared CI runner once timed the large
+  // pass at 6ms against a ~2ms norm, an artefact that a single-sample ratio
+  // read as 21x "growth" — and the minimum is the closest estimate of the
+  // actual compute cost, immune to those spikes. The ratio is also independent
+  // of how fast the runner is: both sizes scale together, so only a change in
+  // complexity CLASS moves it. 8x the input is ~7x the min time when linear,
+  // ~64x when quadratic; a <20x gate separates the two with wide margin.
+  const minTime = (chars) => {
     const payload = 'TOKEN'.repeat(chars / 5);
-    const started = process.hrtime.bigint();
-    maskSecrets(payload);
-    return Number(process.hrtime.bigint() - started) / 1e6;
+    let best = Infinity;
+    for (let i = 0; i < 7; i++) {
+      const started = process.hrtime.bigint();
+      maskSecrets(payload);
+      best = Math.min(best, Number(process.hrtime.bigint() - started) / 1e6);
+    }
+    return Math.max(best, 0.05);
   };
-  time(50_000); // warm, so JIT compilation is not measured as growth
-  const small = Math.max(time(50_000), 0.05);
-  const large = Math.max(time(400_000), 0.05);
-  // 8x the input. Quadratic would be ~64x; this allows a very generous 16x so
-  // the test measures the complexity CLASS and not this machine's noise.
-  assert.ok(large / small < 16,
-    `8x the input cost ${(large / small).toFixed(1)}x the time (${small.toFixed(2)}ms -> ${large.toFixed(2)}ms)`);
+  minTime(100_000); // warm the JIT before either measured size
+  const small = minTime(100_000);
+  const large = minTime(800_000); // 8x the input
+  assert.ok(large / small < 20,
+    `8x the input cost ${(large / small).toFixed(1)}x the min time `
+    + `(${small.toFixed(2)}ms -> ${large.toFixed(2)}ms) — expected ~7x if linear`);
 });
 
 test('SEC-3: every secret shape the bounded rules must still catch is still caught', () => {
