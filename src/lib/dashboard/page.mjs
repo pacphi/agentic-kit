@@ -515,10 +515,17 @@ export function renderPage({ name, version }) {
     <section class="view" id="v-prompts" role="tabpanel" aria-labelledby="usage-tab-prompts" hidden>
       <div class="note"><span class="i">&#8505;</span><span>What you actually type, across every host.
         Every figure here is computed from prompt <b>fingerprints</b> &mdash; a hash, a token count, and a
-        provenance tag recorded at scan time. <b>No prompt text is stored in the index or sent to this page.</b>
-        Only turns a person typed are counted; agent deliveries, tool templates and slash records are
-        filtered out before anything below is measured. Exemplars live in <code>ak usage prompts</code>,
-        which reads your transcripts locally and prints nothing to any wire.</span></div>
+        provenance tag recorded at scan time. <b>No prompt text is stored in the index.</b> The Coaching
+        panel can show a pattern&rsquo;s own prompts back to you on demand &mdash; masked, with secrets
+        redacted server-side, from your local transcripts. Only turns a person typed are counted; agent
+        deliveries, tool templates and slash records are filtered out before anything below is measured.</span></div>
+      <div class="pr-toolbar">
+        <div class="pr-posture" id="u-pr-posture" role="group" aria-label="Prompt text visibility">
+          <span class="pt-lbl mono">prompt text</span>
+          <button type="button" class="pt-btn" data-pr-posture="shown" aria-pressed="true">shown</button>
+          <button type="button" class="pt-btn" data-pr-posture="hidden" aria-pressed="false">hidden</button>
+        </div>
+      </div>
       <div class="hero" id="u-pr-kpis"></div>
       <section class="strip">
         <div class="sh"><h2>Who is typing</h2><span class="n mono" id="u-pr-prov-note"></span></div>

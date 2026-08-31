@@ -1361,6 +1361,19 @@ test('the served page ships the Prompts rail entry and its panel containers', ()
   `Prompts must sit between Findings and Sessions, order was ${JSON.stringify(order)}`);
 });
 
+test('the served page ships the prompt-text posture toggle, and its note no longer over-promises', () => {
+  assert.match(PAGE, /id="u-pr-posture"[^>]*role="group"/, 'the shown/hidden toggle ships in the Prompts view');
+  assert.match(PAGE, /data-pr-posture="shown"[^>]*aria-pressed="true"/, 'default is shown');
+  assert.match(PAGE, /data-pr-posture="hidden"[^>]*aria-pressed="false"/);
+  assert.match(JS, /pt-posture/, 'the client persists the posture to localStorage');
+  // §5: prompt text now DOES reach the page (masked) — the note must not claim
+  // otherwise, or it lies about the very thing the Coaching panel does.
+  assert.doesNotMatch(PAGE, /No prompt text is stored in the index or sent to this page/,
+    'the stale "nothing sent to this page" promise is gone now that masked exemplars are fetched');
+  assert.match(PAGE, /masked, with secrets\s+redacted server-side/,
+    'the note states the new masked-on-demand reality instead');
+});
+
 test('the whole-history chip ships hidden, for the one view that needs it', () => {
   assert.match(PAGE, /id="usage-days-all"[^>]*data-days="365"[^>]*hidden/,
     'All-history starts hidden and is revealed by setUsageView, so other views keep the 7/14/30 row');

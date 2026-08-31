@@ -924,4 +924,13 @@ export const USAGE_CSS = `
 }
 .pr-card-source[data-source="enriched"]{color:var(--purple); border-color:color-mix(in srgb,var(--purple) 40%,var(--line))}
 .pr-card-source[data-source="rule"]{color:var(--accent); border-color:color-mix(in srgb,var(--accent) 40%,var(--line))}
+
+/* prompt-text posture toggle — top-right of the Prompts view (§2.2) */
+.pr-toolbar{display:flex; justify-content:flex-end; margin:0 0 16px}
+.pr-posture{display:inline-flex; align-items:center; border:1px solid var(--line); border-radius:8px; overflow:hidden; background:var(--panel)}
+.pt-lbl{padding:0 9px 0 12px; font-size:10px; text-transform:uppercase; letter-spacing:.08em; color:var(--ink-dim)}
+.pt-btn{padding:6px 12px; border:0; background:none; color:var(--ink-2); font:inherit; font-size:11.5px; cursor:pointer}
+.pt-btn:hover{color:var(--ink)}
+.pt-btn[aria-pressed="true"]{background:var(--accent-soft); color:var(--accent)}
+.pt-btn:focus-visible{outline:2px solid var(--accent); outline-offset:-2px}
 `;

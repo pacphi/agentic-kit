@@ -417,6 +417,33 @@ import { renderUsage } from './usage-orchestrators.mjs';
     });
   })();
 
+  // Prompt-text posture (§2.2, §4): a per-viewer shown/hidden toggle, remembered
+  // in localStorage (default shown). `hidden` suppresses the masked What-you-
+  // typed view-wide AND makes no samples fetch; switching back to `shown` on an
+  // open row fetches it then (if not already cached).
+  function setPosture(mode){
+    promptPosture=mode==="hidden"?"hidden":"shown";
+    try{localStorage.setItem("pt-posture",promptPosture);}catch(e){}
+    syncPostureButtons();
+    renderCoaching(true);
+    if(promptPosture==="shown"&&promptOpenKey)maybeFetchSamples(promptOpenKey);
+  }
+  function syncPostureButtons(){
+    var btns=document.querySelectorAll("[data-pr-posture]");
+    for(var i=0;i<btns.length;i++){
+      btns[i].setAttribute("aria-pressed",btns[i].getAttribute("data-pr-posture")===promptPosture?"true":"false");
+    }
+  }
+  (function wirePosture(){
+    try{var v=localStorage.getItem("pt-posture"); if(v==="hidden"||v==="shown")promptPosture=v;}catch(e){}
+    var group=document.getElementById("u-pr-posture");
+    if(group)group.addEventListener("click",function(e){
+      var b=e.target.closest?e.target.closest("[data-pr-posture]"):null;
+      if(b)setPosture(b.getAttribute("data-pr-posture"));
+    });
+    syncPostureButtons();
+  })();
+
   // titleTxt is optional and goes on the OUTER .kpi, so the whole card is the
   // hover target — a tooltip anchored to the number alone would be a 40px
   // target for a 200px card. Omitted entirely when not passed, so no card
