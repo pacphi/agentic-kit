@@ -10,7 +10,7 @@
 // never passed to execFile: Node does not execute batch files without a shell.
 // Instead, its sibling .ps1 shim runs through Windows PowerShell's `-File`
 // interface, preserving every caller argument as a separate argv element.
-import { execFile } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -77,7 +77,105 @@ export function resolveShim(cmd, args = [], { windows = isWindows, env = process
   return direct;
 }
 
-/** Run a command; never throws. Returns {code, stdout, stderr}. */
+/** Normalize whatever a failed spawn threw into `run()`'s never-throws shape.
+ *  A signal kill (the timeout path below) leaves `err.code` null, which lands
+ *  on 1 — non-zero, so a caller reading only the code can never mistake a
+ *  killed run's partial stdout for a completed one. */
+function failureResult(err, stdout = '', stderr = '') {
+  return {
+    code: typeof err.code === 'number' ? err.code : 1,
+    stdout: err.stdout ?? stdout ?? '',
+    stderr: err.stderr || stderr || String(err.message ?? err),
+  };
+}
+
+/** Kill the whole process GROUP led by a `detached` child, so subprocesses it
+ *  spawned die with it. Security review SEC-8 measured the alternative: a
+ *  grandchild of a timed-out `claude -p` survived the direct-child kill and
+ *  finished its work 5s after `run()` had already returned. SIGKILL rather
+ *  than SIGTERM because the case this exists for is a child that has stopped
+ *  responding. Falls back to the direct child where there is no group to
+ *  signal (Windows) or the group has already exited. */
+function killGroup(child) {
+  try {
+    if (typeof child.pid === 'number' && child.pid > 0) {
+      process.kill(-child.pid, 'SIGKILL');
+      return;
+    }
+  } catch { /* no process group, or it is already gone — fall through */ }
+  try { child.kill('SIGKILL'); } catch { /* already reaped */ }
+}
+
+/** Accumulate one child stream, capped at `maxBuffer` — `execFile` applies its
+ *  own cap internally, so the spawn-based path below has to reimplement it. */
+function captureStream(stream, encoding, maxBuffer, onOverflow) {
+  const state = { text: '', overflowed: false };
+  stream?.setEncoding?.(encoding);
+  stream?.on('data', (chunk) => {
+    if (state.overflowed) return;
+    state.text += chunk;
+    if (state.text.length > maxBuffer) {
+      state.text = state.text.slice(0, maxBuffer);
+      state.overflowed = true;
+      onOverflow();
+    }
+  });
+  return state;
+}
+
+/** The stdin-feeding, process-group variant of `run()`, used whenever a caller
+ *  passes `opts.input`. Two reasons it exists, both from the security review:
+ *  the payload stays out of argv (SEC-7 — `ps -ww` shows argv to the same user
+ *  here, and `/proc/<pid>/cmdline` shows it to ANY local user on Linux), and
+ *  the child leads its own process group so the timeout reaps its subprocesses
+ *  (SEC-8).
+ *
+ *  WHY `spawn` AND NOT `execFile`: execFile forwards only a fixed whitelist of
+ *  options through to spawn, and `detached` is not on it — passing it there is
+ *  silently ignored, and the child stays in the PARENT's process group, where
+ *  `process.kill(-pid)` fails ESRCH and the grandchild survives. Measured, not
+ *  assumed. The timeout is likewise managed here rather than handed to the
+ *  child process API, whose own `timeout` signals only the direct child. */
+function runWithInput(command, args, execOpts, { windows, input }) {
+  const { timeout, encoding, maxBuffer, cwd, env, signal } = execOpts;
+  return new Promise((resolve) => {
+    let child;
+    try {
+      child = spawn(command, args, { cwd, env, signal, shell: false, detached: !windows });
+    } catch (err) { resolve(failureResult(err)); return; }
+
+    let failure = null;
+    const abort = (reason) => { failure ??= reason; killGroup(child); };
+    const out = captureStream(child.stdout, encoding, maxBuffer,
+      () => abort('stdout maxBuffer length exceeded'));
+    const errOut = captureStream(child.stderr, encoding, maxBuffer,
+      () => abort('stderr maxBuffer length exceeded'));
+    const timer = setTimeout(() => abort(`timed out after ${timeout}ms`), timeout);
+    timer.unref?.();
+
+    child.on('error', (err) => {
+      clearTimeout(timer);
+      resolve(failureResult(err, out.text, errOut.text));
+    });
+    child.on('close', (code) => {
+      clearTimeout(timer);
+      const exitCode = typeof code === 'number' ? code : 1;
+      resolve({
+        code: failure ? exitCode || 1 : exitCode,
+        stdout: out.text,
+        stderr: failure ? errOut.text || failure : errOut.text,
+      });
+    });
+    // A child that exits without reading its input makes this write fail with
+    // EPIPE. That is the child's own non-zero exit to report, not a crash here.
+    child.stdin?.on('error', () => {});
+    child.stdin?.end(input);
+  });
+}
+
+/** Run a command; never throws. Returns {code, stdout, stderr}.
+ *  `opts.input` (a string) is delivered on the child's stdin instead of argv;
+ *  see `runWithInput` for the two guarantees that carries. */
 export async function run(cmd, args = [], opts = {}) {
   try {
     const env = opts.env ? { ...process.env, ...opts.env } : process.env;
@@ -88,7 +186,7 @@ export async function run(cmd, args = [], opts = {}) {
     if (invocation.resolved === false) {
       return { code: 1, stdout: '', stderr: `No safe Windows invocation found for ${cmd}` };
     }
-    const { stdout, stderr } = await pexecFile(invocation.command, invocation.args, {
+    const execOpts = {
       encoding: 'utf8',
       timeout: opts.timeout ?? 120_000,
       signal: opts.signal,
@@ -97,14 +195,16 @@ export async function run(cmd, args = [], opts = {}) {
       cwd: opts.cwd,
       env,
       shell: false,
-    });
+    };
+    if (typeof opts.input === 'string') {
+      return await runWithInput(invocation.command, invocation.args, execOpts, {
+        windows, input: opts.input,
+      });
+    }
+    const { stdout, stderr } = await pexecFile(invocation.command, invocation.args, execOpts);
     return { code: 0, stdout, stderr };
   } catch (err) {
-    return {
-      code: typeof err.code === 'number' ? err.code : 1,
-      stdout: err.stdout ?? '',
-      stderr: err.stderr || String(err.message ?? err),
-    };
+    return failureResult(err);
   }
 }
 

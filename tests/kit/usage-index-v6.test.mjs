@@ -8,6 +8,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { buildIndex, readSession, _resetForTest } from '../../src/lib/usage-index.mjs';
+import { parseClaude, parseCodex, promptFingerprint } from '../../src/lib/usage-parsers.mjs';
 
 const NOW = Date.parse('2026-07-25T12:00:00.000Z');
 const T0 = '2026-07-24T09:00:00.000Z';
@@ -128,17 +129,23 @@ test('parseCodex normalizes current item_completed messages and exposes bounded 
   assert.equal(s.responses, 1);
   assert.equal(s.tokens, 120);
   assert.equal(agg.sourceHealth.codex.status, 'ok');
+  // CommandExecution is TALLIED as a tool, so it is a shape this parser
+  // understands and must not also be reported as an unknown kind: doing both
+  // raised the unknown-item-types warning for a type nothing failed to
+  // handle, and spent one of the 32 diagnostic slots that exist to surface
+  // genuinely new shapes.
+  assert.equal(s.tools.CommandExecution, 1, 'tallied as the tool it is');
   assert.deepEqual(agg.sourceHealth.codex.diagnostics, {
     files: 1, cachedFiles: 0, parsedFiles: 1, unparsedFiles: 0,
     filesWithTokens: 1, filesWithResponses: 1,
     legacyEvents: 0, itemCompletedEvents: 3, tokenCountEvents: 1,
-    prompts: 1, responses: 1, unknownItemTypes: { CommandExecution: 1 }, unknownItemTypeOverflow: 0,
-    warnings: ['unknown-item-types'],
+    prompts: 1, responses: 1, unknownItemTypes: {}, unknownItemTypeOverflow: 0,
+    warnings: [],
     common: {
       unitsSeen: 1, unitsParsed: 1, unitsWithUsage: 1,
       unitsWithPrompts: 1, unitsWithResponses: 1,
       prompts: 1, responses: 1,
-      warnings: ['unknown-item-types'], unknownKinds: { CommandExecution: 1 }, unknownKindOverflow: 0,
+      warnings: [], unknownKinds: {}, unknownKindOverflow: 0,
     },
   });
 
@@ -260,4 +267,303 @@ test('buildIndex applies an injected Codex ledger: subagent stripped without a r
   _resetForTest();
   const without = await buildIndex(opts(sb, { force: true, codexState: null }));
   assert.equal(without.sessions.find((x) => x.id === 'dddd4444').tokens, 604000);
+});
+
+test('parseCodex v11: mode, duration, aborts, ctx window, typed tools', () => {
+  const plusSec = (t, s) => new Date(Date.parse(t) + s * 1000).toISOString();
+  const lines = [
+    JSON.stringify({ type: 'session_meta', payload: { id: 'cx1', cwd: '/tmp/p', thread_source: 'user' }, timestamp: T0 }),
+    JSON.stringify({ type: 'turn_context', payload: { model: 'gpt-5.6', approval_policy: 'never', sandbox_policy: 'workspace-write' }, timestamp: T0 }),
+    JSON.stringify({ type: 'event_msg', payload: { type: 'task_started', started_at: T0, model_context_window: 272000, turn_id: 't1' }, timestamp: T0 }),
+    JSON.stringify({ type: 'event_msg', payload: { type: 'user_message', message: 'go' }, timestamp: T0 }),
+    JSON.stringify({ type: 'event_msg', payload: { type: 'agent_message', message: 'done' }, timestamp: plusSec(T0, 6) }),
+    JSON.stringify({ type: 'event_msg', payload: { type: 'item_completed', item: { type: 'CommandExecution' } }, timestamp: plusSec(T0, 7) }),
+    JSON.stringify({ type: 'event_msg', payload: { type: 'task_complete', duration_ms: 9000, error: null, turn_id: 't1' }, timestamp: plusSec(T0, 9) }),
+    JSON.stringify({ type: 'event_msg', payload: { type: 'turn_aborted', reason: 'user_interrupt', turn_id: 't2' }, timestamp: plusSec(T0, 20) }),
+    JSON.stringify({ type: 'event_msg', payload: { type: 'token_count', info: { total_token_usage: { input_tokens: 5000, cached_input_tokens: 4000, output_tokens: 300 } } }, timestamp: plusSec(T0, 21) }),
+  ].join('\n');
+  const { session: rec } = parseCodex(lines, { id: 'cx1' });
+  assert.equal(rec.mode, 'auto-edit');
+  assert.equal(rec.modeRaw, 'never/workspace-write');
+  assert.equal(rec.latCount, 1);
+  assert.equal(rec.latHist[2], 1);           // 6s prompt→agent gap
+  assert.equal(rec.aborts, 1);
+  assert.equal(rec.ctxWindow, 272000);
+  assert.equal(rec.tools.CommandExecution, 1);
+});
+
+// The REAL wire shape. Surveyed over this machine's rollouts (2026-08-28,
+// 400 files): `sandbox_policy` is an OBJECT keyed `.type` in 1,110/1,110
+// occurrences — {"type":"danger-full-access"} (1004), {"type":"read-only"}
+// (59), and {"type":"workspace-write", …} with extra fields (47). The string
+// form the taxonomy was written against occurred ZERO times, so before the
+// extraction only the approval-only 'guarded' rule could ever fire for codex:
+// plan/auto-edit/unrestricted were unreachable on live data and modeRaw
+// persisted the failed toString "never/[object Object]".
+// `approval_policy` is a plain string in the same corpus ("never" 1524,
+// "on-request" 39), so only the sandbox half needs extracting.
+const turnCtx = (approval, sandbox) => JSON.stringify({
+  type: 'turn_context',
+  payload: { model: 'gpt-5.6', approval_policy: approval, sandbox_policy: sandbox },
+  timestamp: T0,
+});
+const codexModeOf = (id, approval, sandbox) => parseCodex([
+  JSON.stringify({ type: 'session_meta', payload: { id, cwd: '/tmp/p', thread_source: 'user' }, timestamp: T0 }),
+  turnCtx(approval, sandbox),
+].join('\n'), { id }).session;
+
+test('a genuinely unrecognized item type still reaches the unknown-kind diagnostics', () => {
+  // The other half of the rule: narrowing the diagnostic to types the parser
+  // does NOT tally must not silence it for the shapes it exists to surface.
+  const lines = [
+    JSON.stringify({ type: 'session_meta', payload: { id: 'cxu1', cwd: '/tmp/p', thread_source: 'user' }, timestamp: T0 }),
+    JSON.stringify({ type: 'event_msg', payload: { type: 'item_completed', item: { type: 'CommandExecution' } }, timestamp: T0 }),
+    JSON.stringify({ type: 'event_msg', payload: { type: 'item_completed', item: { type: 'SomeBrandNewThing' } }, timestamp: T0 }),
+  ].join('\n');
+  const { session, parseStats } = parseCodex(lines, { id: 'cxu1' });
+  assert.deepEqual(parseStats.unknownItemTypes, { SomeBrandNewThing: 1 },
+    'the tallied tool type is absent; the genuinely unknown one is present');
+  assert.equal(session.tools.CommandExecution, 1);
+  assert.equal(session.tools.SomeBrandNewThing, undefined, 'an unrecognized item is never tallied as a tool');
+});
+
+test('parseCodex: the object form of sandbox_policy maps to the taxonomy — unrestricted', () => {
+  const rec = codexModeOf('cxm1', 'never', { type: 'danger-full-access' });
+  assert.equal(rec.mode, 'unrestricted', 'codex\'s riskiest posture is no longer invisible to detectUnrestrictedMode');
+  assert.equal(rec.modeRaw, 'never/danger-full-access', 'the host spelling, not "[object Object]"');
+});
+
+test('parseCodex: the object form of sandbox_policy maps to the taxonomy — auto-edit', () => {
+  // The real workspace-write object carries siblings; only `.type` is read.
+  const rec = codexModeOf('cxm2', 'never', {
+    type: 'workspace-write', network_access: false, exclude_tmpdir_env_var: false, exclude_slash_tmp: false,
+  });
+  assert.equal(rec.mode, 'auto-edit');
+  assert.equal(rec.modeRaw, 'never/workspace-write');
+});
+
+test('parseCodex: the object form of sandbox_policy maps to the taxonomy — plan', () => {
+  const rec = codexModeOf('cxm3', 'on-request', { type: 'read-only' });
+  assert.equal(rec.mode, 'plan');
+  assert.equal(rec.modeRaw, 'on-request/read-only');
+});
+
+test('parseCodex: the object form of sandbox_policy maps to the taxonomy — guarded', () => {
+  const rec = codexModeOf('cxm4', 'on-request', { type: 'workspace-write' });
+  assert.equal(rec.mode, 'guarded', 'human-in-the-loop approval is the posture');
+  assert.equal(rec.modeRaw, 'on-request/workspace-write');
+});
+
+test('parseCodex: a sandbox_policy object with no .type contributes no sandbox evidence, never a guess', () => {
+  const rec = codexModeOf('cxm5', 'never', { network_access: true });
+  assert.equal(rec.mode, null, 'approval "never" alone matches no rule — unmapped, not assumed permissive');
+  assert.equal(rec.modeRaw, 'never', 'only the half that was actually observed');
+});
+
+// Codex's duration_ms is host-measured turn wall-clock and INCLUDES time the
+// turn spent blocked on an approval prompt, so a turn left awaiting approval
+// overnight is recorded as a multi-hour "response". The prompt-gap path
+// discards exactly that; the fallback must too, or the same wait becomes a
+// latency sample. Real corpus max: 94,079,450 ms ≈ 26.1 h.
+test('parseCodex: an idle-resume duration_ms is excluded from latency sampling, like the other two paths', () => {
+  const plusSec = (t, s) => new Date(Date.parse(t) + s * 1000).toISOString();
+  const lines = [
+    JSON.stringify({ type: 'session_meta', payload: { id: 'cx3', cwd: '/tmp/p', thread_source: 'user' }, timestamp: T0 }),
+    JSON.stringify({ type: 'event_msg', payload: { type: 'task_started', started_at: T0, model_context_window: 272000, turn_id: 't1' }, timestamp: T0 }),
+    JSON.stringify({ type: 'event_msg', payload: { type: 'task_complete', duration_ms: 94_079_450, error: null, turn_id: 't1' }, timestamp: plusSec(T0, 94_079) }),
+  ].join('\n');
+  const { session: rec } = parseCodex(lines, { id: 'cx3' });
+  assert.equal(rec.latCount, 0, '26.1 h is an idle resume / blocked approval, not a response latency');
+  assert.equal(rec.latHist, null, 'no sample at all — not an overflow-bucket entry beside genuinely slow turns');
+});
+
+test('parseCodex: a duration_ms inside the cap still samples through the fallback', () => {
+  const plusSec = (t, s) => new Date(Date.parse(t) + s * 1000).toISOString();
+  const lines = [
+    JSON.stringify({ type: 'session_meta', payload: { id: 'cx4', cwd: '/tmp/p', thread_source: 'user' }, timestamp: T0 }),
+    JSON.stringify({ type: 'event_msg', payload: { type: 'task_started', started_at: T0, model_context_window: 272000, turn_id: 't1' }, timestamp: T0 }),
+    JSON.stringify({ type: 'event_msg', payload: { type: 'task_complete', duration_ms: 45_000, error: null, turn_id: 't1' }, timestamp: plusSec(T0, 45) }),
+  ].join('\n');
+  const { session: rec } = parseCodex(lines, { id: 'cx4' });
+  assert.equal(rec.latCount, 1, 'the fallback is not disabled, only bounded');
+  assert.equal(rec.latHist[4], 1, '45s lands in the (30,60] bucket');
+});
+
+test('parseCodex v11: turn_aborted clears pending latency state so a later agent_message is not mis-sampled', () => {
+  const plusSec = (t, s) => new Date(Date.parse(t) + s * 1000).toISOString();
+  const lines = [
+    JSON.stringify({ type: 'session_meta', payload: { id: 'cx2', cwd: '/tmp/p', thread_source: 'user' }, timestamp: T0 }),
+    JSON.stringify({ type: 'event_msg', payload: { type: 'user_message', message: 'go' }, timestamp: T0 }),
+    JSON.stringify({ type: 'event_msg', payload: { type: 'turn_aborted', reason: 'user_interrupt', turn_id: 't1' }, timestamp: plusSec(T0, 3) }),
+    JSON.stringify({ type: 'event_msg', payload: { type: 'agent_message', message: 'unrelated' }, timestamp: plusSec(T0, 120) }),
+  ].join('\n');
+  const { session: rec } = parseCodex(lines, { id: 'cx2' });
+  assert.equal(rec.latCount, 0);
+});
+
+// Sub-agent rollouts replay their PARENT thread's entire prior history before
+// their own new turns (openai/codex thread_spawn behavior — see parseCodex's
+// own doc comment), including the parent's OWN session_meta line further down
+// the file. handleCodexMeta was last-wins, so that replayed parent meta
+// relabeled rec.threadSource subagent→user and re-keyed rec.id to the
+// parent's — letting the subagent's (parent-duplicating) token totals escape
+// finalizeCodexUsage's guard entirely. Measured on the reference corpus: 155
+// of 318 subagent-first rollouts relabeled this way.
+test('parseCodex: FIRST session_meta wins identity — a replayed parent meta cannot relabel a subagent rollout', () => {
+  const subagentThenParentReplay = [
+    JSON.stringify({ type: 'session_meta', payload: { id: 'subA', cwd: '/tmp/p', thread_source: 'subagent' }, timestamp: T0 }),
+    JSON.stringify({ type: 'event_msg', payload: { type: 'user_message', message: 'delegated task' }, timestamp: T0 }),
+    JSON.stringify({ type: 'event_msg', payload: { type: 'token_count', info: { total_token_usage: { input_tokens: 900000, cached_input_tokens: 800000, output_tokens: 9000, total_tokens: 909000 } } }, timestamp: T0 }),
+    // The thread_spawn replay: the PARENT's own session_meta line, later in the same file.
+    JSON.stringify({ type: 'session_meta', payload: { id: 'parentB', cwd: '/tmp/p', thread_source: 'user' }, timestamp: T1 }),
+  ].join('\n');
+  const { session: sub } = parseCodex(subagentThenParentReplay, { id: 'subA' });
+  assert.equal(sub.id, 'subA', "the file's own id, not the replayed parent's");
+  assert.equal(sub.threadSource, 'subagent', "the file's own identity — not relabeled by the replay");
+  assert.deepEqual(sub.usage, [], 'subagent usage stays stripped, not billed to the parent a second time');
+
+  // Inverse control: an ordinary single-meta user rollout is unaffected.
+  const singleMeta = [
+    JSON.stringify({ type: 'session_meta', payload: { id: 'userC', cwd: '/tmp/p', thread_source: 'user' }, timestamp: T0 }),
+    JSON.stringify({ type: 'event_msg', payload: { type: 'user_message', message: 'go' }, timestamp: T0 }),
+    JSON.stringify({ type: 'event_msg', payload: { type: 'token_count', info: { total_token_usage: { input_tokens: 100, cached_input_tokens: 40, output_tokens: 20, total_tokens: 120 } } }, timestamp: T0 }),
+  ].join('\n');
+  const { session: user } = parseCodex(singleMeta, { id: 'userC' });
+  assert.equal(user.id, 'userC');
+  assert.equal(user.threadSource, 'user');
+  assert.equal(user.usage.length, 1, 'a genuine single-meta user rollout still bills normally');
+});
+
+// M1 ruling (review round 2): provider/provenance join the SAME identity
+// latch as id/threadSource/cwd — a replayed parent's session_meta line is
+// not an observation about THIS record, for provider any more than for
+// identity. This is deliberately independent of handleCodexTurnContext's
+// own provider handling, which stays progressive (unrelated design choice).
+test('parseCodex: FIRST session_meta wins provider/provenance too — a replayed parent meta does not overwrite them', () => {
+  const subagentThenParentDifferentProvider = [
+    JSON.stringify({ type: 'session_meta', payload: { id: 'subP', cwd: '/tmp/p', thread_source: 'subagent', model_provider: 'openai' }, timestamp: T0 }),
+    JSON.stringify({ type: 'session_meta', payload: { id: 'parentP', cwd: '/tmp/p', thread_source: 'user', model_provider: 'azure' }, timestamp: T1 }),
+  ].join('\n');
+  const { session: sub } = parseCodex(subagentThenParentDifferentProvider, { id: 'subP' });
+  assert.equal(sub.inferenceProvider, 'openai', "the file's own provider, not the replayed parent's");
+  assert.equal(sub.providerProvenance, 'observed');
+
+  // Inverse control: an ordinary single-meta record is unaffected.
+  const singleMeta = [
+    JSON.stringify({ type: 'session_meta', payload: { id: 'userQ', cwd: '/tmp/p', thread_source: 'user', model_provider: 'openai' }, timestamp: T0 }),
+  ].join('\n');
+  const { session: user } = parseCodex(singleMeta, { id: 'userQ' });
+  assert.equal(user.inferenceProvider, 'openai');
+  assert.equal(user.providerProvenance, 'observed');
+});
+
+// Codex has no discipline of its own for distinguishing a typed prompt from
+// harness output or a mirrored cross-host envelope (Claude has isHumanPrompt
+// + HARNESS_OUTPUT_RE since schema v5). Measured on the reference corpus: 596
+// harness-shaped rows plus mirrored Claude-host envelopes (teammate
+// deliveries, cross-session messages) landing as Codex user_message events —
+// both distort prompts/humanPrompts/autonomy. Both message generations
+// (legacy user_message and item_completed UserMessage) must be gated.
+test('parseCodex: harness output and mirrored cross-host envelopes are excluded from prompts (both generations)', () => {
+  const legacyLines = [
+    JSON.stringify({ type: 'session_meta', payload: { id: 'cxh1', cwd: '/tmp/p', thread_source: 'user' }, timestamp: T0 }),
+    JSON.stringify({ type: 'event_msg', payload: { type: 'user_message', message: 'do the real thing' }, timestamp: T0 }),
+    JSON.stringify({ type: 'event_msg', payload: { type: 'user_message', message: '<task-notification>background task finished</task-notification>' }, timestamp: T0 }),
+    JSON.stringify({ type: 'event_msg', payload: { type: 'user_message', message: 'Another Claude session sent a message: hello' }, timestamp: T0 }),
+  ].join('\n');
+  const { session: legacy } = parseCodex(legacyLines, { id: 'cxh1' });
+  assert.equal(legacy.prompts, 1);
+
+  const itemLines = [
+    JSON.stringify({ type: 'session_meta', payload: { id: 'cxh2', cwd: '/tmp/p', thread_source: 'user' }, timestamp: T0 }),
+    JSON.stringify({ type: 'event_msg', payload: { type: 'item_completed', item: { type: 'UserMessage', content: [{ type: 'text', text: 'do the real thing' }] } }, timestamp: T0 }),
+    JSON.stringify({ type: 'event_msg', payload: { type: 'item_completed', item: { type: 'UserMessage', content: [{ type: 'text', text: '<task-notification>background task finished</task-notification>' }] } }, timestamp: T0 }),
+    JSON.stringify({ type: 'event_msg', payload: { type: 'item_completed', item: { type: 'UserMessage', content: [{ type: 'text', text: 'Another Claude session sent a message: hello' }] } }, timestamp: T0 }),
+  ].join('\n');
+  const { session: item } = parseCodex(itemLines, { id: 'cxh2' });
+  assert.equal(item.prompts, 1);
+});
+
+// ── v14 prompt fingerprints on the Codex path ───────────────────────────────
+
+// Codex's own gate (isCodexHumanMessage) already keeps harness output and
+// mirrored Claude envelopes out of kind 'prompt', so those turns must
+// contribute NO fingerprint — the fingerprint layer sits behind that gate, it
+// does not re-litigate it. What DOES reach it is codex's own share of typed
+// prompts and the ak-authored headless templates its workers are spawned with.
+test('parseCodex fingerprints prompt-kind turns only, and tags their provenance', () => {
+  const lines = [
+    JSON.stringify({ type: 'session_meta', payload: { id: 'cxfp1', cwd: '/tmp/p', thread_source: 'user' }, timestamp: T0 }),
+    JSON.stringify({ type: 'event_msg', payload: { type: 'user_message', message: 'why is the build failing on macos?' }, timestamp: T0 }),
+    JSON.stringify({ type: 'event_msg', payload: { type: 'user_message', message: 'Read the dependency handoff only. Make no tool calls.' }, timestamp: T0 }),
+    JSON.stringify({ type: 'event_msg', payload: { type: 'user_message', message: '<task-notification>background task finished</task-notification>' }, timestamp: T0 }),
+    JSON.stringify({ type: 'event_msg', payload: { type: 'user_message', message: 'Another Claude session sent a message: hello' }, timestamp: T0 }),
+  ].join('\n');
+  const { session: rec } = parseCodex(lines, { id: 'cxfp1' });
+  assert.equal(rec.prompts, 2);
+  assert.deepEqual(rec.promptFPs.map((f) => f.p), ['human', 'adapter']);
+  assert.equal(rec.promptFPs[0].t, 7);
+  assert.equal(rec.promptFPOverflow, 0);
+  assert.equal(JSON.stringify(rec.promptFPs).includes('macos'), false, 'no prompt text on the record');
+});
+
+// v16, on the Codex read path. The shape flags come from the SAME shared
+// implementation the Claude path uses (parseClaude has the mirror of this
+// test), which is the whole point: the Prompts view's host-asymmetry panel
+// compares persona-opener counts BETWEEN hosts, and two per-host copies of the
+// rule would make that comparison meaningless.
+test('parseCodex carries the v16 shape flags, omitted when the shape is absent', () => {
+  const msg = (text) => JSON.stringify({ type: 'event_msg', payload: { type: 'user_message', message: text }, timestamp: T0 });
+  const lines = [
+    JSON.stringify({ type: 'session_meta', payload: { id: 'cxshape', cwd: '/tmp/p', thread_source: 'user' }, timestamp: T0 }),
+    msg('why is the build failing on macos?'),
+    msg('You are a senior release engineer. Cut the tag.'),
+    msg('run the full check and report the exit code'),
+  ].join('\n');
+  const { session: rec } = parseCodex(lines, { id: 'cxshape' });
+  assert.deepEqual(rec.promptFPs.map((f) => f.q), [1, undefined, undefined]);
+  assert.deepEqual(rec.promptFPs.map((f) => f.o), [undefined, 1, undefined]);
+  assert.deepEqual(Object.keys(rec.promptFPs[2]).sort(), ['h', 'p', 't', 'th'],
+    'a plain instruction stores no flag keys at all');
+});
+
+// The token hashing/normalization is ONE implementation shared by every host —
+// the same sentence typed in Codex and in Claude must fingerprint identically,
+// or cross-host repetition analysis compares two different alphabets.
+test('a prompt fingerprints identically whichever host recorded it', () => {
+  const text = 'Run the full check and report the exit code.';
+  const codexLines = [
+    JSON.stringify({ type: 'session_meta', payload: { id: 'cxfp2', cwd: '/tmp/p', thread_source: 'user' }, timestamp: T0 }),
+    JSON.stringify({ type: 'event_msg', payload: { type: 'user_message', message: text }, timestamp: T0 }),
+  ].join('\n');
+  const { session: codex } = parseCodex(codexLines, { id: 'cxfp2' });
+  const { session: claude } = parseClaude(
+    JSON.stringify({ type: 'user', timestamp: T0, message: { role: 'user', content: text } }),
+    { id: 'clfp2' },
+  );
+  assert.deepEqual(codex.promptFPs, claude.promptFPs);
+  assert.deepEqual(codex.promptFPs, [{ ...promptFingerprint(text), p: 'human' }]);
+});
+
+// v15. The ambient browser-state block is harness output, but it carries
+// ATTRIBUTES (`source="ambient-ui-state"`), which the old `>` terminator could
+// not match. All 33 measured occurrences are on this host, where they counted
+// toward `prompts` and were then fingerprinted as `human` — the harness writing
+// in the operator's name. Both effects have to disappear, which is why this
+// asserts the count as well as the fingerprint. The regex is shared, so
+// parseClaude has the mirror of this test.
+test('parseCodex: an in-app-browser-context block is harness output, not a prompt', () => {
+  const msg = (text) => JSON.stringify({ type: 'event_msg', payload: { type: 'user_message', message: text }, timestamp: T0 });
+  const lines = [
+    JSON.stringify({ type: 'session_meta', payload: { id: 'cxbc', cwd: '/tmp/p', thread_source: 'user' }, timestamp: T0 }),
+    msg('run the tests'),
+    msg(' <in-app-browser-context source="ambient-ui-state">\nambient state\n</in-app-browser-context>'),
+    msg('<in-app-browser-context>bare</in-app-browser-context>'),
+    // Session-continuation prose still reaches kind 'prompt' — it is the person
+    // resuming — so it fingerprints, as control rather than as something typed.
+    msg('This session is being continued from a previous conversation that ran out of context.'),
+  ].join('\n');
+  const { session: rec } = parseCodex(lines, { id: 'cxbc' });
+  assert.equal(rec.prompts, 2, 'neither browser-context block counts as a prompt');
+  assert.deepEqual(rec.promptFPs.map((f) => f.p), ['human', 'control']);
 });

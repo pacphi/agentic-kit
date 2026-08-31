@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  THRESHOLDS as T, MODEL_ROUTING_SOURCES, detectInsights, _detectors,
+  THRESHOLDS as T, MODEL_ROUTING_SOURCES, TAP_COST_CAVEAT, detectInsights, _detectors,
 } from '../../src/lib/usage-insights.mjs';
 
 // ── Fixtures ─────────────────────────────────────────────────────────────────
@@ -18,6 +18,9 @@ function session(o = {}) {
     input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0,
     tools: {}, category: 'Feature build', confidence: 0.9, basis: 'title+tools',
     skill: null, plugin: null,
+    // v16: honest-absent by default, so an existing fixture cannot accidentally
+    // read as a headless session just because it predates the prompt layer.
+    typedPrompts: null, tapPrompts: null,
     ...o,
   };
   s.tokens = o.tokens ?? (s.input + s.output + s.cacheRead + s.cacheWrite);
@@ -39,6 +42,8 @@ function makeAgg(o = {}) {
     },
     byDay: o.byDay ?? {}, byModel: o.byModel ?? {}, byProvider: o.byProvider ?? {},
     byProject: o.byProject ?? {}, byCategory: o.byCategory ?? {},
+    promptsByHost: o.promptsByHost ?? {}, promptBaselines: o.promptBaselines ?? {},
+    promptStatsByDay: o.promptStatsByDay ?? {},
     punchcard: o.punchcard ?? {}, projectTree: [], sessions, insights: [],
   };
 }
@@ -600,10 +605,10 @@ test('the kitchen-sink fixture fires each detector at most once', () => {
 });
 
 // ── Direct per-detector unit tests ───────────────────────────────────────────
-// detectInsights composes these 13 detect() functions from a shared `ctx`
+// detectInsights composes these 15 detect() functions from a shared `ctx`
 // prelude (a/totals/sessions/windowCost/sessionCount). Calling each one
-// directly — bypassing detectInsights's flatMap+sort — proves the extraction
-// preserved firing behavior in isolation, independent of the other 12.
+// directly — bypassing detectInsights's flatMap+sort — proves each one's
+// firing behavior holds in isolation, independent of the other 14.
 
 function ctxFrom(agg) {
   const a = agg && typeof agg === 'object' ? agg : {};
@@ -700,4 +705,450 @@ const longSessionAgg = (longCost, totalCost) => makeAgg({
 test('_detectors[long-session-share] fires/does not fire directly on 8h+ session spend share', () => {
   assert.equal(_detectors['long-session-share'](ctxFrom(longSessionAgg(20, 100))).length, 0);
   assert.equal(_detectors['long-session-share'](ctxFrom(longSessionAgg(30, 100))).length, 1);
+});
+
+// ── latency-regression / unrestricted-mode ───────────────────────────────────
+// Brand new detectors, not extractions — so both the boundary-style and the
+// direct _detectors[] coverage are written together, same as everything above.
+
+// Session end time is start + minutes (see sessionEndMs in the source), so
+// each fixture gets a distinct `start` to make the half-split unambiguous.
+// latHist buckets: [0]<2s [1]2-5s [2]5-10s [3]10-30s [4]30-60s [5]60s+
+// (LAT_BUCKET_EDGES = [2, 5, 10, 30, 60] — pinned equal to the source's copy
+// by usage-index.test.mjs, not re-pinned here).
+const latSession = (start, latHist, latCount) => session({ start, minutes: 10, latHist, latCount });
+
+// First half: two sessions merging to [0,0,30,0,0,0] → bucket-interpolated
+// p50 7.5s. Second half: two sessions merging to [0,0,16,20,0,0] → p50 12s.
+// +4.5s absolute and +60% relative clear both floors.
+const latencyFiresAgg = () => makeAgg({
+  sessions: [
+    latSession('2026-07-01T00:00:00.000Z', [0, 0, 15, 0, 0, 0], 15),
+    latSession('2026-07-02T00:00:00.000Z', [0, 0, 15, 0, 0, 0], 15),
+    latSession('2026-07-20T00:00:00.000Z', [0, 0, 8, 10, 0, 0], 18),
+    latSession('2026-07-21T00:00:00.000Z', [0, 0, 8, 10, 0, 0], 18),
+  ],
+});
+
+// First half: 20 samples — under the 30-sample floor. Second half: 40
+// samples all in the 10-30s bucket (p50 20s), a jump that would clear both
+// the relative and absolute floors on delta alone if the sample gate did not
+// suppress it first.
+const latencyInsufficientAgg = () => makeAgg({
+  sessions: [
+    latSession('2026-05-01T00:00:00.000Z', [0, 0, 20, 0, 0, 0], 20),
+    latSession('2026-05-20T00:00:00.000Z', [0, 0, 0, 40, 0, 0], 40),
+  ],
+});
+
+// p50 15s -> 16s: +1s absolute (<2s) and +6.7% relative (<25%) — fails both
+// floors, not just one.
+const latencyModestAgg = () => makeAgg({
+  sessions: [
+    latSession('2026-06-01T00:00:00.000Z', [0, 0, 10, 20, 0, 0], 30),
+    latSession('2026-06-20T00:00:00.000Z', [0, 0, 10, 25, 0, 0], 35),
+  ],
+});
+
+test('latency-regression fires when the second half is both 25%+ and 2s+ slower', () => {
+  const ins = byId(detectInsights(latencyFiresAgg()), 'latency-regression');
+  assert.ok(ins);
+  assert.equal(ins.kind, 'trend');
+  assert.equal(ins.severity, 'warn');
+  assert.equal(ins.impact, null);
+  assert.match(ins.finding, /7\.5s/);
+  assert.match(ins.finding, /12s/);
+  assert.match(ins.evidence, /30/);
+  assert.match(ins.evidence, /36/);
+});
+
+test('latency-regression does not fire when either half has fewer than 30 samples', () => {
+  assert.equal(fired(latencyInsufficientAgg(), 'latency-regression'), false);
+});
+
+test('latency-regression does not fire on a modest increase that fails both thresholds', () => {
+  assert.equal(fired(latencyModestAgg(), 'latency-regression'), false);
+});
+
+test('latency-regression does not fire when sessions carry no latency histogram', () => {
+  const agg = makeAgg({
+    sessions: [
+      latSession('2026-04-01T00:00:00.000Z', null, 0),
+      latSession('2026-04-20T00:00:00.000Z', null, 0),
+    ],
+  });
+  assert.equal(fired(agg, 'latency-regression'), false);
+});
+
+test('_detectors[latency-regression] fires/does not fire directly, matching detectInsights', () => {
+  assert.equal(_detectors['latency-regression'](ctxFrom(latencyInsufficientAgg())).length, 0);
+  assert.equal(_detectors['latency-regression'](ctxFrom(latencyFiresAgg())).length, 1);
+});
+
+// ── AND-gate pinning ─────────────────────────────────────────────────────────
+// The two floors (relative and absolute) are combined with AND, not OR — each
+// of the next two fixtures clears exactly one floor and must still not fire.
+// p50s are placed by exact bucket arithmetic (verified against the real
+// percentileFromBuckets before being written here), not eyeballed.
+
+// Bucket [2,5): lo=2, hi=5. All 30 samples in that one bucket → cum=0, n=30,
+// frac=(N/2-cum)/n=0.5 → p50 = 2 + 3*0.5 = 3.5.
+// Bucket [5,10): lo=5, hi=10, cum=23 (bucket [2,5)), n=25 (bucket [5,10)),
+// N=48 → frac=(24-23)/25=0.04 → p50 = 5 + 5*0.04 = 5.2.
+// Delta: +1.7s absolute (<2s floor — FAILS), +48.6% relative (>=25% floor —
+// PASSES). Percent passes, absolute fails: must not fire.
+const latencyPercentOnlyAgg = () => makeAgg({
+  sessions: [
+    latSession('2026-03-01T00:00:00.000Z', [0, 30, 0, 0, 0, 0], 30),
+    latSession('2026-03-20T00:00:00.000Z', [0, 23, 25, 0, 0, 0], 48),
+  ],
+});
+
+test('latency-regression does not fire when only the relative floor clears (percent passes, absolute fails)', () => {
+  assert.equal(fired(latencyPercentOnlyAgg(), 'latency-regression'), false);
+});
+
+// Bucket [30,60): lo=30, hi=60. First half: cum=10 (bucket [10,30)), n=30
+// (bucket [30,60)), N=40 → frac=(20-10)/30=0.3333 → p50 = 30 + 30*0.3333 = 40.
+// Second half: cum=2, n=30, N=32 → frac=(16-2)/30=0.4667 → p50 = 30 + 30*0.4667 = 44.
+// Delta: +4s absolute (>=2s floor — PASSES), +10% relative (<25% floor —
+// FAILS). Absolute passes, percent fails: must not fire.
+const latencyAbsoluteOnlyAgg = () => makeAgg({
+  sessions: [
+    latSession('2026-02-01T00:00:00.000Z', [0, 0, 0, 10, 30, 0], 40),
+    latSession('2026-02-20T00:00:00.000Z', [0, 0, 0, 2, 30, 0], 32),
+  ],
+});
+
+test('latency-regression does not fire when only the absolute floor clears (absolute passes, percent fails)', () => {
+  assert.equal(fired(latencyAbsoluteOnlyAgg(), 'latency-regression'), false);
+});
+
+// Reuses the fires-fixture's own bucket shapes (p50 7.5s -> 12s: +4.5s
+// absolute and +60% relative, both comfortably clearing) but drops the first
+// half to 29 samples — one under the 30-sample floor. Both delta floors pass;
+// the sample floor alone must still suppress the finding.
+const latencySampleFloorAgg = () => makeAgg({
+  sessions: [
+    latSession('2026-01-01T00:00:00.000Z', [0, 0, 29, 0, 0, 0], 29),
+    latSession('2026-01-20T00:00:00.000Z', [0, 0, 16, 20, 0, 0], 36),
+  ],
+});
+
+test('latency-regression does not fire at 29 samples even when both delta floors would otherwise pass', () => {
+  assert.equal(fired(latencySampleFloorAgg(), 'latency-regression'), false);
+});
+
+// unrestricted-mode
+const unrestrictedAgg = () => makeAgg({
+  sessions: [
+    session({ mode: 'unrestricted', cost: 42, project: 'alpha' }),
+    session({ mode: 'guarded', cost: 58, project: 'beta' }),
+  ],
+});
+
+test('unrestricted-mode fires on a recorded unrestricted session, naming count/cost/project', () => {
+  const ins = byId(detectInsights(unrestrictedAgg()), 'unrestricted-mode');
+  assert.ok(ins);
+  assert.equal(ins.kind, 'coach');
+  assert.equal(ins.severity, 'info');
+  assert.equal(ins.impact, null);
+  assert.match(ins.finding, /1 session/);
+  assert.match(ins.finding, /1 project/);
+  assert.match(ins.finding, /\$42/);
+  assert.match(ins.evidence, /post-ledger/);
+});
+
+test('unrestricted-mode does not fire on null or not-recorded modes', () => {
+  const agg = makeAgg({
+    sessions: [
+      session({ mode: null, cost: 10 }),
+      session({ mode: 'not-recorded', cost: 10 }),
+      session({ cost: 10 }),   // no mode key observed at all
+    ],
+  });
+  assert.equal(fired(agg, 'unrestricted-mode'), false);
+});
+
+test('_detectors[unrestricted-mode] fires/does not fire directly, matching detectInsights', () => {
+  const none = makeAgg({ sessions: [session({ mode: 'guarded', cost: 10 })] });
+  assert.equal(_detectors['unrestricted-mode'](ctxFrom(none)).length, 0);
+  assert.equal(_detectors['unrestricted-mode'](ctxFrom(unrestrictedAgg())).length, 1);
+});
+
+// ── v16 prompt detectors (spec §4) ───────────────────────────────────────────
+//
+// All three read the aggregate's fingerprint-derived slices — promptsByHost,
+// promptBaselines and the session rows' typedPrompts — and none of them reads
+// a word of prompt text, which is the property the evidence lines claim and
+// these tests pin.
+
+/** A per-host prompt bucket in the shape usage-aggregate.sealPromptHosts emits. */
+const hostStats = (o = {}) => ({
+  typed: 100, taps: 20, tapShare: 0.2, p90TypedTokens: 40,
+  personaOpeners: 0, questionShare: 0.1, ...o,
+});
+
+const tapAgg = (o = {}) => makeAgg({
+  sessions: many(4, { cost: 10, ctxLastTokens: 150_000 }),
+  promptsByHost: o.promptsByHost,
+  promptBaselines: o.promptBaselines,
+});
+
+const overBaseline = () => tapAgg({
+  promptsByHost: { claude: hostStats({ typed: 100, taps: 22, tapShare: 0.22 }) },
+  promptBaselines: { claude: { tapShareP75_trailing90d: 0.12 } },
+});
+
+test('supervision-tap-share fires above the operator\'s OWN baseline, with enough taps', () => {
+  const ins = byId(detectInsights(overBaseline()), 'supervision-tap-share');
+  assert.ok(ins);
+  assert.equal(ins.kind, 'trend');
+  assert.equal(ins.severity, 'warn');
+  assert.equal(ins.impact, null, 'a token model is not a dollar claim');
+  assert.match(ins.evidence, /12%/, 'the finding prints the baseline it compared against');
+  assert.match(ins.evidence, /claude/);
+  assert.match(ins.evidence, new RegExp(TAP_COST_CAVEAT.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')),
+    'the modelled-cost caveat rides verbatim, never paraphrased');
+  // The finding sentence must describe the comparison the code ACTUALLY made.
+  // Here a real baseline existed, so "your own recent normal" is the truth.
+  assert.match(ins.finding, /your own recent normal/);
+  assert.doesNotMatch(ins.finding, /floor/,
+    'a card that beat a real baseline must not also claim it cleared a fallback floor');
+});
+
+test('supervision-tap-share does not fire AT the baseline — only above it', () => {
+  assert.equal(fired(tapAgg({
+    promptsByHost: { claude: hostStats({ taps: 22, tapShare: 0.12 }) },
+    promptBaselines: { claude: { tapShareP75_trailing90d: 0.12 } },
+  }), 'supervision-tap-share'), false);
+});
+
+test('supervision-tap-share needs the tap-count floor even when the share clears', () => {
+  const under = tapAgg({
+    promptsByHost: { claude: hostStats({ typed: 100, taps: T.tapMinCount - 1, tapShare: 0.9 }) },
+    promptBaselines: { claude: { tapShareP75_trailing90d: 0.12 } },
+  });
+  assert.equal(fired(under, 'supervision-tap-share'), false,
+    '19 taps is not a pattern, however extreme the share looks');
+
+  const at = tapAgg({
+    promptsByHost: { claude: hostStats({ typed: 100, taps: T.tapMinCount, tapShare: 0.9 }) },
+    promptBaselines: { claude: { tapShareP75_trailing90d: 0.12 } },
+  });
+  assert.equal(fired(at, 'supervision-tap-share'), true);
+});
+
+test('with no personal baseline yet, supervision-tap-share falls back to a STATED floor', () => {
+  const noBaseline = (tapShare) => tapAgg({
+    promptsByHost: { codex: hostStats({ typed: 200, taps: 40, tapShare }) },
+    promptBaselines: {},                       // under 30 active days of history
+  });
+  assert.equal(fired(noBaseline(T.tapAbsoluteFloorShare), 'supervision-tap-share'), false,
+    'at the floor is not above it');
+  const ins = byId(detectInsights(noBaseline(0.30)), 'supervision-tap-share');
+  assert.ok(ins);
+  assert.match(ins.evidence, /10%/, 'the fallback floor is printed, not silently applied');
+  assert.match(ins.evidence, /baseline/i);
+  // The finding must say the same thing the evidence does. Claiming "above your
+  // own recent normal" here would make the card contradict itself in one render
+  // — and with no history loaded this is the ONLY path that runs today.
+  assert.match(ins.finding, /10% floor/);
+  assert.doesNotMatch(ins.finding, /your own recent normal/,
+    'there is no personal normal to be above — the card must not invent one');
+});
+
+test('with a mix of hosts, the finding claims only what every fired host cleared', () => {
+  const mixed = tapAgg({
+    promptsByHost: {
+      claude: hostStats({ typed: 100, taps: 22, tapShare: 0.22 }),   // beat a real baseline
+      codex: hostStats({ typed: 200, taps: 40, tapShare: 0.30 }),    // only cleared the floor
+    },
+    promptBaselines: { claude: { tapShareP75_trailing90d: 0.12 } },
+  });
+  const ins = byId(detectInsights(mixed), 'supervision-tap-share');
+  assert.ok(ins);
+  assert.doesNotMatch(ins.finding, /your own recent normal/,
+    'one host had no baseline, so the summary sentence cannot claim a personal normal for both');
+  assert.doesNotMatch(ins.finding, /10% floor/,
+    'and the other DID have one, so it cannot claim the floor for both either');
+  assert.match(ins.finding, /judged against/, 'it defers to the per-host evidence line instead');
+  // The per-host split still names both rules explicitly.
+  assert.match(ins.evidence, /trailing-90d p75 of 12%/);
+  assert.match(ins.evidence, /10% floor/);
+});
+
+test('an explicit null baseline reads the same as an absent one', () => {
+  const agg = tapAgg({
+    promptsByHost: { claude: hostStats({ typed: 200, taps: 40, tapShare: 0.05 }) },
+    promptBaselines: { claude: { tapShareP75_trailing90d: null } },
+  });
+  assert.equal(fired(agg, 'supervision-tap-share'), false,
+    '5% is under the absolute floor, and there is no personal normal to beat');
+});
+
+test('supervision-tap-share stays silent when the prompt layer is absent entirely', () => {
+  assert.equal(fired(makeAgg({ sessions: many(4, { cost: 10 }) }), 'supervision-tap-share'), false);
+});
+
+test('_detectors[supervision-tap-share] matches detectInsights', () => {
+  assert.equal(_detectors['supervision-tap-share'](ctxFrom(overBaseline())).length, 1);
+  assert.equal(_detectors['supervision-tap-share'](ctxFrom(makeAgg())).length, 0);
+});
+
+// headless-share -------------------------------------------------------------
+
+/** `headless` sessions carry the fingerprint layer and typed nothing. */
+const headlessAgg = (headlessResponses, typedResponses) => makeAgg({
+  sessions: [
+    session({ typedPrompts: 0, tapPrompts: 0, responses: headlessResponses, cost: 10 }),
+    session({ typedPrompts: 5, tapPrompts: 1, responses: typedResponses, cost: 10 }),
+  ],
+});
+
+test('headless-share fires above a quarter of responses, as an info reframe', () => {
+  const ins = byId(detectInsights(headlessAgg(30, 70)), 'headless-share');
+  assert.ok(ins);
+  assert.equal(ins.kind, 'coach');
+  assert.equal(ins.severity, 'info');
+  assert.equal(ins.impact, null);
+  assert.match(ins.finding, /1 session/, 'the evidence carries both counts');
+  assert.match(ins.finding, /30/);
+});
+
+test('headless-share does not fire AT the threshold', () => {
+  assert.equal(fired(headlessAgg(25, 75), 'headless-share'), false);
+  assert.equal(fired(headlessAgg(26, 74), 'headless-share'), true);
+});
+
+test('headless-share ignores sessions with no fingerprint layer, rather than counting them headless', () => {
+  const agg = makeAgg({
+    sessions: [
+      session({ typedPrompts: null, responses: 900, cost: 10 }),   // pre-v16: unknowable
+      session({ typedPrompts: 0, tapPrompts: 0, responses: 10, cost: 10 }),
+      session({ typedPrompts: 4, tapPrompts: 0, responses: 90, cost: 10 }),
+    ],
+  });
+  const ins = byId(detectInsights(agg), 'headless-share');
+  assert.equal(ins, undefined,
+    '10 of the 100 CLASSIFIABLE responses are headless — the 900 unknowable ones are not evidence either way');
+});
+
+test('_detectors[headless-share] matches detectInsights', () => {
+  assert.equal(_detectors['headless-share'](ctxFrom(headlessAgg(30, 70))).length, 1);
+  assert.equal(_detectors['headless-share'](ctxFrom(headlessAgg(25, 75))).length, 0);
+});
+
+// host-prompt-asymmetry ------------------------------------------------------
+
+const asymAgg = (byHost) => makeAgg({ sessions: many(2, { cost: 10 }), promptsByHost: byHost });
+
+const ratioAgg = (claudeP90, codexP90, typed = 50) => asymAgg({
+  claude: hostStats({ typed, p90TypedTokens: claudeP90 }),
+  codex: hostStats({ typed, p90TypedTokens: codexP90 }),
+});
+
+test('host-prompt-asymmetry fires on a p90 length ratio between two well-evidenced hosts', () => {
+  const ins = byId(detectInsights(ratioAgg(60, 40)), 'host-prompt-asymmetry');
+  assert.ok(ins, '60:40 is exactly 1.5×');
+  assert.equal(ins.kind, 'coach');
+  assert.equal(ins.severity, 'info');
+  assert.equal(ins.impact, null);
+  assert.match(ins.evidence, /1\.5/, 'the ratio itself is on the card');
+  assert.match(ins.evidence, /no prompt text/i, 'and the basis: nothing was read');
+});
+
+test('host-prompt-asymmetry does not fire just under the ratio', () => {
+  assert.equal(fired(ratioAgg(59, 40), 'host-prompt-asymmetry'), false);
+});
+
+test('host-prompt-asymmetry needs BOTH hosts to clear the typed-prompt floor', () => {
+  assert.equal(fired(asymAgg({
+    claude: hostStats({ typed: T.asymmetryMinTypedPerHost, p90TypedTokens: 60 }),
+    codex: hostStats({ typed: T.asymmetryMinTypedPerHost - 1, p90TypedTokens: 40 }),
+  }), 'host-prompt-asymmetry'), false, 'a 49-prompt host is not a comparison, it is an anecdote');
+});
+
+test('host-prompt-asymmetry also fires on persona openers alone, with no ratio at all', () => {
+  const ins = byId(detectInsights(asymAgg({
+    claude: hostStats({ typed: 10, p90TypedTokens: 40, personaOpeners: 0 }),
+    codex: hostStats({ typed: 12, p90TypedTokens: 40, personaOpeners: T.personaOpenerMinCount }),
+  })), 'host-prompt-asymmetry');
+  assert.ok(ins, 'ten retyped role assignments is the role-library signal, ratio or no ratio');
+  assert.match(ins.evidence, /10 persona/);
+});
+
+test('host-prompt-asymmetry does not fire one persona opener short, with no ratio', () => {
+  assert.equal(fired(asymAgg({
+    claude: hostStats({ typed: 10, p90TypedTokens: 40, personaOpeners: 0 }),
+    codex: hostStats({ typed: 12, p90TypedTokens: 40, personaOpeners: T.personaOpenerMinCount - 1 }),
+  }), 'host-prompt-asymmetry'), false);
+});
+
+test('host-prompt-asymmetry stays silent on a single-host window', () => {
+  assert.equal(fired(asymAgg({ claude: hostStats({ typed: 500, p90TypedTokens: 400 }) }),
+    'host-prompt-asymmetry'), false, 'there is no other host to be asymmetric with');
+});
+
+test('_detectors[host-prompt-asymmetry] matches detectInsights', () => {
+  assert.equal(_detectors['host-prompt-asymmetry'](ctxFrom(ratioAgg(60, 40))).length, 1);
+  assert.equal(_detectors['host-prompt-asymmetry'](ctxFrom(ratioAgg(59, 40))).length, 0);
+});
+
+test('the three prompt detectors never touch prompt text, because there is none to touch', () => {
+  const agg = makeAgg({
+    sessions: [session({ typedPrompts: 0, tapPrompts: 0, responses: 40, cost: 10, ctxLastTokens: 150_000 }),
+      session({ typedPrompts: 40, tapPrompts: 30, responses: 60, cost: 10, ctxLastTokens: 150_000 })],
+    promptsByHost: {
+      claude: hostStats({ typed: 100, taps: 40, tapShare: 0.4, p90TypedTokens: 90, personaOpeners: 12 }),
+      codex: hostStats({ typed: 100, taps: 5, tapShare: 0.05, p90TypedTokens: 40 }),
+    },
+    promptBaselines: { claude: { tapShareP75_trailing90d: 0.12 } },
+  });
+  const ids = detectInsights(agg).map((i) => i.id);
+  for (const id of ['supervision-tap-share', 'headless-share', 'host-prompt-asymmetry']) {
+    assert.ok(ids.includes(id), `${id} expected to fire on this fixture`);
+  }
+  // The aggregate slices these read carry counts and shares only — the pin is
+  // that the fixture never had a text field for a detector to reach for.
+  assert.equal(JSON.stringify(agg).includes('"text"'), false);
+});
+
+// ── QE review F-6 (MEDIUM): the >=50-typed-per-host gate, pinned at its
+// LITERAL boundary ─────────────────────────────────────────────────────────
+// The spec row added by ed843f0 states "each host needs >=50 typed prompts for
+// the ratio to be compared at all", and the suite already had a floor test —
+// but it was written against `T.asymmetryMinTypedPerHost` and
+// `T.asymmetryMinTypedPerHost - 1`, so it MOVED with the constant. Lowering
+// that constant to 0 failed nothing. A documented threshold whose only test
+// tracks it is a comment.
+//
+// This matters past the detector: `codex-completion-criteria`'s propose bar
+// gates on the presence of `host-prompt-asymmetry`, so a regression here also
+// fabricates a coaching card off two thin hosts.
+
+test('F-6: 49 typed prompts on a host is not enough for the p90 ratio arm to fire', () => {
+  const agg = asymAgg({
+    claude: hostStats({ typed: 49, p90TypedTokens: 60 }),
+    codex: hostStats({ typed: 49, p90TypedTokens: 40 }),
+  });
+  assert.equal(fired(agg, 'host-prompt-asymmetry'), false,
+    'a 49-prompt host is not a comparison, it is an anecdote — 50 is the documented floor');
+});
+
+test('F-6: 50 typed prompts on both hosts IS enough, with the same 1.5x ratio', () => {
+  const agg = asymAgg({
+    claude: hostStats({ typed: 50, p90TypedTokens: 60 }),
+    codex: hostStats({ typed: 50, p90TypedTokens: 40 }),
+  });
+  assert.equal(fired(agg, 'host-prompt-asymmetry'), true,
+    'the boundary is inclusive at 50, so the two tests bracket the exact documented value');
+});
+
+test('F-6: 50 on one host and 49 on the other still does not fire — BOTH must clear it', () => {
+  const agg = asymAgg({
+    claude: hostStats({ typed: 50, p90TypedTokens: 60 }),
+    codex: hostStats({ typed: 49, p90TypedTokens: 40 }),
+  });
+  assert.equal(fired(agg, 'host-prompt-asymmetry'), false);
 });

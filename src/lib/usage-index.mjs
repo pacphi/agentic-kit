@@ -37,6 +37,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { configDir, claudeDir, codexDir } from './paths.mjs';
+import { writePrivateFileAtomic } from './file-write.mjs';
 import { readCodexStateResult } from './codex-state.mjs';
 import {
   defaultOpencodeDbPath, listSessionsResult as listOpencodeSessionsResult,
@@ -44,7 +45,7 @@ import {
 } from './usage-opencode.mjs';
 import {
   addTelemetryDiagnostics, emptyTelemetryDiagnostics, finalizeTelemetryDiagnostics,
-  MAX_TELEMETRY_UNKNOWN_KINDS, recordTelemetryUnit, telemetryCapabilities,
+  MAX_TELEMETRY_UNKNOWN_KINDS, recordTelemetryUnit,
 } from './usage-telemetry.mjs';
 import { parseClaude, parseCodex } from './usage-parsers.mjs';
 import { maskSecrets, applyCodexLedger, aggregate, sessionPayload } from './usage-aggregate.mjs';
@@ -88,8 +89,57 @@ export { MAX_TURN_CHARS, mergeIntervals, maskSecrets, normalizeSessionIdentity, 
  *      re-derived or the placeholder keeps showing as a real "model in play".
  *  v10: Codex rollout messages can arrive in the `item_completed` envelope;
  *       v9-cached records parsed from those files have token rows but zero
- *       prompts/responses, so every Codex record must be re-derived. */
-export const SCHEMA_VERSION = 10;
+ *       prompts/responses, so every Codex record must be re-derived.
+ *  v11: session records grow `mode`/`modeRaw` (cross-host permission
+ *       posture), `latHist`/`latCount` (response-latency histogram),
+ *       `lenSeconds` (this session's own engaged seconds), `ctxWindow`/
+ *       `ctxLastTokens` (model context-window detail), and `aborts`
+ *       (codex's explicit user-abort count). A v10-cached record carries
+ *       none of these, so every session must be re-derived or the new
+ *       fields silently read as undefined.
+ *  v12: Codex writes `sandbox_policy` as an object keyed `.type`, so v11
+ *       records persisted `modeRaw: "never/[object Object]"` and a null
+ *       `mode` for every Codex session — the taxonomy's plan/auto-edit/
+ *       unrestricted arms could not fire at all. The parser now extracts
+ *       `.type`, so every Codex record must be re-derived rather than left
+ *       carrying the failed stringification and its missing posture.
+ *  v13: two parseCodex defects corrected together, both inflating persisted
+ *       counts/identities. (a) `session_meta` was last-wins; a subagent
+ *       rollout replays its parent thread's history, including the parent's
+ *       OWN session_meta line, so a later meta relabeled `threadSource`
+ *       subagent→user and re-keyed `id` to the parent's — letting up to 155
+ *       of 318 observed subagent rollouts escape the finalizeCodexUsage
+ *       guard and double-bill the parent. The FIRST session_meta now wins
+ *       for identity (id/threadSource/cwd). (b) every `user_message`/
+ *       `UserMessage` counted toward `prompts` regardless of origin; Codex
+ *       carried no equivalent of the harness/mirror gate v5 already applies
+ *       to Claude, so harness output and mirrored cross-host envelopes
+ *       (task notifications, command stdout, teammate-message/cross-session
+ *       deliveries) inflated Codex prompt counts. A v12-cached Codex record
+ *       carries the old (possibly relabeled, possibly inflated) figures and
+ *       must be re-derived rather than trusted as-is.
+ *  v14: every session record grows `promptFPs` (one privacy-preserving
+ *       fingerprint per prompt-kind turn — normalized-text hash, token count,
+ *       bounded token-hash sketch, and a provenance tag saying who WROTE it) and
+ *       `promptFPOverflow`. A v13-cached record carries neither, so the
+ *       Prompts view would read an empty corpus for exactly the sessions
+ *       already on disk. Prompt TEXT is not part of this (or any) bump — see
+ *       usage-parsers.promptFingerprint.
+ *  v15: `in-app-browser-context` joins HARNESS_OUTPUT_RE. Measured: 33 such
+ *       turns reached kind 'prompt', so a v14 record counts them in `prompts`
+ *       (the harness writing in the operator's name) AND carries a `human`
+ *       fingerprint for each. Both figures change for an affected session, so
+ *       every record must be re-derived rather than corrected in place. The
+ *       provenance rules move with it — session-continuation prose is now
+ *       `control`, and the unevidenced `<command-args>` opener is gone — which
+ *       also re-tags cached fingerprints.
+ *  v16: fingerprints grow two optional SHAPE flags — `q` (question-shaped) and
+ *       `o` (persona opener) — decided from the text at fingerprint time, the
+ *       last moment it exists. A v15 record cannot be corrected in place
+ *       because the text is gone by then; the flags are only derivable on a
+ *       re-parse. Absent keys mean "not that shape" and are omitted rather
+ *       than stored as 0 — see usage-parsers.promptShape. */
+export const SCHEMA_VERSION = 16;
 
 const DAY_MS = 86_400_000;
 // One day of slack past dashboard-server.mjs's 365-day clampDays ceiling —
@@ -101,6 +151,47 @@ const KEEP_MS = 366 * DAY_MS;
  *  unavailable rather than risking the panel's process. */
 const MAX_SESSION_BYTES = 64 * 1024 * 1024;
 const VALID_ID = /^[A-Za-z0-9._-]{1,128}$/;
+/** A nested Claude subagent transcript's id: EXACTLY `<parentId>/<stem>`,
+ *  one slash. The parent segment reuses VALID_ID's own charset (capture
+ *  group 1) — a namespaced id's parent half can never be more permissive
+ *  than a plain id already is. The child segment (group 2) matches the REAL
+ *  on-disk shape Claude Code writes every subagent transcript with:
+ *  `agent-<hex>` when the Task tool call carried no name, or
+ *  `agent-<name>-<hex>` when it did (the name is the Agent tool's own
+ *  `name` parameter, charset [A-Za-z0-9_-]). Surveyed on this machine's real
+ *  corpus (404 files, 2026-08-28): most stems carry a name — a hex-only
+ *  pattern would leave most subagent sessions still unopenable, defeating
+ *  the point of this fix.
+ *
+ *  This regex is NOT the whole grammar: '.' IS in the parent charset, so
+ *  `.` and `..` match it. Use matchSubagentId(), never this constant
+ *  directly. */
+const VALID_SUBAGENT_ID = /^([A-Za-z0-9._-]{1,128})\/(agent-[A-Za-z0-9_-]{1,100})$/;
+
+/** The namespaced-id grammar, complete: VALID_SUBAGENT_ID's charsets PLUS
+ *  the dot-segment rejection, so this is character-for-character the rule
+ *  session-security.mjs's parseNamespacedSessionId applies at the HTTP tier
+ *  (PLAIN_ID_RE + `parentId === '.' || parentId === '..'` + SUBAGENT_STEM_RE).
+ *  The two tiers are kept as separate functions on purpose — the route's also
+ *  owns percent-decoding, which a library caller passing an already-decoded
+ *  id must not get — but they now accept exactly the same id set.
+ *
+ *  The dot check is what the charset cannot do and what matters most here:
+ *  the parent is the only place in this module where caller-shaped text
+ *  becomes a path SEGMENT rather than a filename stem, and path.join
+ *  collapses `..`. `readSession('../agent-x')` used to probe
+ *  `<claudeRoot>/subagents/agent-x.jsonl` — still inside the transcript root,
+ *  so the realpath containment check below could not catch it: containment
+ *  answers "did we leave the root?", not "did we leave the shape?".
+ *
+ *  @returns {{ parentId: string, stem: string }|null} */
+function matchSubagentId(id) {
+  const m = typeof id === 'string' ? VALID_SUBAGENT_ID.exec(id) : null;
+  if (!m) return null;
+  const [, parentId, stem] = m;
+  if (parentId === '.' || parentId === '..') return null;
+  return { parentId, stem };
+}
 
 // ── file discovery ──────────────────────────────────────────────────────────
 
@@ -180,14 +271,13 @@ function finalizeCodexHealth(root, diagnostics) {
   return { ...root, status, reason, diagnostics };
 }
 
-/** Attach the additive host-neutral telemetry contract to source health.
+/** Attach the additive host-neutral telemetry counters to source health.
  * Existing status/reason and Codex diagnostic keys remain where consumers
- * already find them; `diagnostics.common` and `capabilities` are the new
- * cross-host surface. */
-function attachTelemetryHealth(host, health, common, diagnostics = health.diagnostics) {
+ * already find them; `diagnostics.common` is the cross-host surface. It
+ * reports what was read — never a per-host claim about what could be read. */
+function attachTelemetryHealth(health, common, diagnostics = health.diagnostics) {
   return {
     ...health,
-    capabilities: telemetryCapabilities(host, health.status),
     diagnostics: {
       ...(diagnostics ?? {}),
       common: finalizeTelemetryDiagnostics(common),
@@ -202,7 +292,49 @@ function defaultRoots() {
   };
 }
 
-/** Claude transcripts: exactly one level of project directories. */
+/** `<projectDir>/<sessionId>/subagents/*.jsonl` — a session's own subagent
+ *  (sidechain) transcripts, real cost-bearing Claude work that otherwise
+ *  never enters the index: parseClaude already prices these bytes and marks
+ *  them `sidechain` from their own entries (isSidechain), so discovery was
+ *  the entire gap. Bounded to exactly this one nested shape — not a generic
+ *  recursive walk — so a directory entry that ISN'T a session-id dir with a
+ *  subagents child (e.g. Claude Code's own `memory` dir) just contributes
+ *  nothing, harmlessly.
+ *
+ *  The id is namespaced `<sessionId>/<stem>`: Claude Code names every
+ *  subagent file `agent-<hash>.jsonl`, and that stem is NOT guaranteed
+ *  unique across two different parent sessions, so an unnamespaced id could
+ *  silently collide two unrelated subagent records into one.
+ *
+ *  An unreadable (or absent — most sessions have none) subagents dir
+ *  degrades silently via readDirSafe, exactly like every other per-directory
+ *  read in this file: one bad nested entry must not abort the whole scan,
+ *  and this draws no new health signal — same convention, not a new one. */
+function listClaudeSubagents(projectDir, sessionId, projectDirName) {
+  const out = [];
+  const subDir = path.join(projectDir, sessionId, 'subagents');
+  for (const f of readDirSafe(subDir)) {
+    if (!f.isFile() || !f.name.endsWith('.jsonl')) continue;
+    const id = `${sessionId}/${f.name.slice(0, -6)}`;
+    // Discovery and resolution share ONE grammar. Without this, any other
+    // file appearing in a subagents/ dir (a summary, an index, a renamed
+    // stem) — or a parent dir name outside the plain-id charset — became a
+    // session row that answers 400 when clicked: a row disclosing title,
+    // project, tokens, cost and timing for a transcript the id grammar has
+    // decided is not addressable. Surveyed 2026-08-28: 411 files, 0 rejected,
+    // so this drops nothing today; it keeps the two sides from disagreeing
+    // when the on-disk shape next changes, at the point of discovery rather
+    // than as a 400 far from its cause.
+    if (!matchSubagentId(id)) continue;
+    out.push({
+      file: path.join(subDir, f.name), provider: 'claude', dirName: projectDirName, id,
+    });
+  }
+  return out;
+}
+
+/** Claude transcripts: one level of project directories, plus each session's
+ *  own nested subagents/ (see listClaudeSubagents). */
 function listClaude(root) {
   const out = [];
   for (const d of readDirSafe(root)) {
@@ -211,6 +343,8 @@ function listClaude(root) {
     for (const f of readDirSafe(dir)) {
       if (f.isFile() && f.name.endsWith('.jsonl')) {
         out.push({ file: path.join(dir, f.name), provider: 'claude', dirName: d.name, id: f.name.slice(0, -6) });
+      } else if (f.isDirectory()) {
+        out.push(...listClaudeSubagents(dir, f.name, d.name));
       }
     }
   }
@@ -320,14 +454,10 @@ function idIndexFor(cache) {
 
 function writeCache(file, cache) {
   try {
-    fs.mkdirSync(path.dirname(file), { recursive: true });
-    const tmp = `${file}.${process.pid}.tmp`;
     // 0600, matching the 0600 transcripts this content derives from. `title` is
     // the ai-title, or the first 100 chars of the user's first prompt when there
     // is none — writing that world-readable downgrades the source's permissions.
-    fs.writeFileSync(tmp, JSON.stringify(cache), { mode: 0o600 });
-    fs.renameSync(tmp, file);
-    try { fs.chmodSync(file, 0o600); } catch { /* best effort on exotic filesystems */ }
+    writePrivateFileAtomic(file, JSON.stringify(cache));
   } catch { /* an unwritable cache costs a re-scan, not a failed panel */ }
 }
 
@@ -367,7 +497,18 @@ let _memo = null;
  *  case still changes the key instead of colliding with every other scan. */
 function scanKey(o = {}) {
   const roots = Object.entries(o.roots || {}).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
-  return JSON.stringify([Number(o.days) || 14, !!o.force, roots, o.cachePath || '']);
+  // lookbackDays, previous and prompts all change the RESULT — lookbackDays
+  // widens what scan() parses/returns, previous turns on aggregate's
+  // previous-window projection (agg.previous), prompts turns on the repetition
+  // projection (agg.promptPatterns) — exactly like days/force/roots/cachePath
+  // already do, so every one must be folded into the single-flight/memo
+  // identity too: two calls differing only by one of these must never coalesce
+  // into one answer (a {previous:true} caller must never be served a memoized
+  // {previous:false} answer, or vice versa; likewise {prompts:true}).
+  return JSON.stringify([
+    Number(o.days) || 14, Number(o.lookbackDays) || 0,
+    !!o.previous, !!o.prompts, !!o.force, roots, o.cachePath || '',
+  ]);
 }
 
 /** Drop process-level state (single-flight promises, read memo, lazy deps). */
@@ -381,6 +522,29 @@ function notify(onProgress, payload) {
 /**
  * @typedef {object} IndexOptions
  * @property {number} [days]        window size in days (default 14)
+ * @property {number} [lookbackDays] widen the discovery/parse/cache cutoff to
+ *           this many days back instead of `days`, so records older than the
+ *           DISPLAYED window are still read off disk and handed to
+ *           `aggregate`. The `aggregate` call itself always filters the
+ *           CURRENT window's `sessions`/`totals` at the display cutoff
+ *           (`now - days * DAY_MS`), never the widened one — a caller must
+ *           pair this with `previous: true` (below) to actually get the
+ *           older records back out, via `previous.totals`/`previous.rhythm`,
+ *           rather than by hand-splitting a widened `sessions[]`. Undefined
+ *           (default) behaves exactly as `days` alone: no widening.
+ * @property {boolean} [previous]   also have `aggregate` project the
+ *           equal-length window immediately before the displayed one (see
+ *           usage-aggregate.mjs's `previousWindow`); needs `lookbackDays` set
+ *           wide enough for those older records to have been read at all.
+ *           Forwarded to `aggregate`'s own `previous` option unchanged.
+ * @property {boolean} [prompts]    also have `aggregate` build the prompt
+ *           repetition projection (`agg.promptPatterns` — recurring clusters,
+ *           intra-session re-asks, exact repeats; see
+ *           usage-aggregate.mjs's `buildPromptPatterns`). Off by default
+ *           because clustering the corpus costs real time on every scan and
+ *           no default consumer reads it; `agg.promptPatterns` is `null` when
+ *           not requested. Forwarded to `aggregate`'s own `prompts` option
+ *           unchanged, and folded into `scanKey` like `previous` is.
  * @property {boolean} [force]      ignore cached per-file entries
  * @property {Function} [onProgress] called with { scanned, total, phase }
  * @property {{claude?: string, codex?: string, opencode?: string}} [roots] override transcript roots (tests; opencode = the SQLite store path)
@@ -557,12 +721,22 @@ function resolveCodexLedger(o, rawRoots) {
 /** @param {IndexOptions} [o] */
 async function scan(o = {}) {
   const {
-    days = 14, force = false, onProgress, roots, cachePath, now = Date.now(), deps: injected,
+    days = 14, lookbackDays, force = false, onProgress, roots, cachePath, now = Date.now(), deps: injected,
+    previous = false, prompts = false,
   } = o;
   const deps = await loadDeps(injected);
   const r = { ...defaultRoots(), ...(roots ?? {}) };
   const cacheFile = cachePath ?? defaultCachePath();
-  const cutoff = now - days * DAY_MS;
+  // Widened when the caller passes lookbackDays (a server wanting a
+  // `previous`-window projection, e.g.) — every DISCOVERY/parse use below
+  // (candidates, opencode listing, carry-forward) shares this ONE value, so
+  // widening it here is the entire discovery-side effect. It does NOT reach
+  // `aggregate`'s own cutoff below — see displayCutoff — so the CURRENT
+  // window's `sessions`/`totals` never silently widen with it; only
+  // `aggregate`'s `previous` projection (when requested) reads the extra
+  // records this pulls in. Unset, `lookbackDays ?? days` is exactly `days` —
+  // today's behavior, unchanged.
+  const cutoff = now - (lookbackDays ?? days) * DAY_MS;
 
   // Primary transcript roots: read once at root level (cheap — not the
   // recursive per-file walk listClaude/listCodex still do below).
@@ -615,15 +789,24 @@ async function scan(o = {}) {
   // arrives later (or gets repaired) corrects old sessions without a cache
   // invalidation.
   const { ledger, health: codexLedgerHealth } = resolveCodexLedger(o, roots);
-  const result = aggregate(applyCodexLedger(records, ledger), { days, now, cutoff, deps });
+  // DISPLAY cutoff, deliberately distinct from the (possibly lookback-
+  // widened) discovery `cutoff` above: `records` may span further back than
+  // `days` so `previous` below has something to project from, but the
+  // CURRENT window's own sessions/totals must stay exactly `days` wide, or a
+  // `previous: true` caller would find its "current" totals silently
+  // absorbing what should have been the previous window (the bug this fixes).
+  const displayCutoff = now - days * DAY_MS;
+  const result = aggregate(applyCodexLedger(records, ledger), {
+    days, now, cutoff: displayCutoff, deps, previous, prompts,
+  });
   const codexSourceHealth = finalizeCodexHealth(codexHealth, codexDiagnostics);
   addTelemetryDiagnostics(commonDiagnostics.codex, {
     warnings: codexSourceHealth.diagnostics.warnings,
   });
   result.sourceHealth = {
-    claude: attachTelemetryHealth('claude', claudeHealth, commonDiagnostics.claude),
-    codex: attachTelemetryHealth('codex', codexSourceHealth, commonDiagnostics.codex),
-    opencode: attachTelemetryHealth('opencode', opencodeHealth, commonDiagnostics.opencode),
+    claude: attachTelemetryHealth(claudeHealth, commonDiagnostics.claude),
+    codex: attachTelemetryHealth(codexSourceHealth, commonDiagnostics.codex),
+    opencode: attachTelemetryHealth(opencodeHealth, commonDiagnostics.opencode),
     codexLedger: codexLedgerHealth,
   };
   return result;
@@ -639,12 +822,21 @@ async function scan(o = {}) {
 export async function readIndex(o = {}) {
   const { days = 14, maxAgeMs = 15_000, now = Date.now() } = o;
   // code-quality Finding 7: this used to hand-roll a SECOND "what counts as
-  // the same question" key that omitted `force` (and `deps`) — the exact
-  // mistake buildIndex's _inflight keying (scanKey, above) was written to
-  // prevent one layer up. readIndex({ force: true }) within maxAgeMs of a
-  // normal read would silently return the stale memoized aggregate and never
-  // reach buildIndex. Reusing scanKey means there is exactly one definition
-  // of "same question" for both the single-flight map and this memo.
+  // the same question" key that omitted `force` — the exact mistake
+  // buildIndex's _inflight keying (scanKey, above) was written to prevent one
+  // layer up. readIndex({ force: true }) within maxAgeMs of a normal read
+  // would silently return the stale memoized aggregate and never reach
+  // buildIndex. Reusing scanKey means there is exactly one definition of
+  // "same question" for both the single-flight map and this memo.
+  //
+  // scanKey deliberately does NOT fold in `deps` or `codexState`, and this
+  // comment says so rather than implying otherwise: both hold live objects
+  // (functions, Maps) that do not serialize, so keying on them would mean
+  // minting identity tokens through a WeakMap. Two calls differing ONLY by an
+  // injected pricer or ledger would therefore coalesce — a latent trap, not a
+  // live bug: production never injects `deps`, and tests sandbox `roots` and
+  // `cachePath` per test so their keys already differ. Ruled parked with that
+  // reason rather than left implied.
   const key = scanKey({ ...o, days });
   if (_memo && _memo.key === key && now - _memo.at < maxAgeMs) return _memo.agg;
   const agg = await buildIndex({ ...o, days });
@@ -661,9 +853,44 @@ function invalidId(id) {
   return err;
 }
 
+/** The project directory name for a resolved claude FILE — one level up for
+ *  a plain `<project>/<id>.jsonl`, three levels up for a nested subagent
+ *  transcript `<project>/<parentId>/subagents/<stem>.jsonl` (the extra
+ *  `subagents` and `<parentId>` levels a namespaced id resolves through).
+ *  Shared by locate()'s cache-hit path and its own nested-id fallback scan
+ *  below, so both agree on what "the project" means for the same file
+ *  shape — a cache-hit that instead reported the literal `subagents`
+ *  directory as the project would only ever surface when a transcript
+ *  carries no `cwd` at all (parseClaude's fallback path), but it would still
+ *  be wrong, so this file shape is resolved to the real project everywhere
+ *  a dirName is derived from a FILE, not just on the fresh-parse path. */
+function claudeDirNameFor(file) {
+  const parentDir = path.dirname(file);
+  return path.basename(parentDir) === 'subagents'
+    ? path.basename(path.dirname(path.dirname(parentDir)))
+    : path.basename(parentDir);
+}
+
+/** locate()'s namespaced-id branch, pulled out to keep locate() itself under
+ *  the project's complexity ceiling — the same reason listClaudeSubagents was
+ *  split out of listClaude on the discovery side. Resolves ONLY to a nested
+ *  Claude subagent transcript, constructing the candidate path from the two
+ *  VALIDATED capture groups `locate` already extracted — never by joining raw
+ *  request input. Returns `null` (not "fall through") on a miss: a namespaced
+ *  id is never a plain id too, so there is nothing else for locate to try. */
+function locateSubagent(parentId, stem, claudeRoot, id) {
+  for (const d of readDirSafe(claudeRoot)) {
+    if (!d.isDirectory()) continue;
+    const file = path.join(claudeRoot, d.name, parentId, 'subagents', `${stem}.jsonl`);
+    if (statSafe(file)) return { file, provider: 'claude', id, dirName: d.name };
+  }
+  return null;
+}
+
 /** Resolve an id to exactly one transcript file. Consults the index cache
  *  first; otherwise matches on FILE NAMES only — never opens a transcript it is
- *  not going to return. */
+ *  not going to return. A namespaced id (VALID_SUBAGENT_ID) resolves via
+ *  locateSubagent only — see there. */
 function locate(id, r, cacheFile) {
   const cache = readCache(cacheFile);
   const hitFile = idIndexFor(cache).get(id);
@@ -676,9 +903,12 @@ function locate(id, r, cacheFile) {
     // instead of silently rewriting the provider to claude.
     const provider = e?.session?.provider;
     if ((provider === 'claude' || provider === 'codex') && e.session.id === id && statSafe(hitFile)) {
-      return { file: hitFile, provider, id, dirName: provider === 'claude' ? path.basename(path.dirname(hitFile)) : null };
+      return { file: hitFile, provider, id, dirName: provider === 'claude' ? claudeDirNameFor(hitFile) : null };
     }
   }
+
+  const nested = matchSubagentId(id);
+  if (nested) return locateSubagent(nested.parentId, nested.stem, r.claude, id);
 
   for (const d of readDirSafe(r.claude)) {
     if (!d.isDirectory()) continue;
@@ -706,14 +936,29 @@ function locate(id, r, cacheFile) {
 /**
  * Read ONE session by id — never a corpus scan. Returns `{ meta, turns }` with
  * every text body run through `maskSecrets`, or `null` when no such session.
- * Throws `ERR_INVALID_SESSION_ID` for an id that fails the id grammar (the
- * path-traversal guard), before any filesystem access.
+ * Throws `ERR_INVALID_SESSION_ID` for an id that fails EITHER id grammar — a
+ * plain id (VALID_ID) or a namespaced Claude subagent id (matchSubagentId,
+ * `<parentId>/<stem>`) — before any filesystem access.
+ *
+ * The namespaced grammar accepts exactly the id set session-security.mjs's
+ * parseNamespacedSessionId accepts at the HTTP tier, dot-segment rejection
+ * included — so this guard is sound on its own and a caller reaching
+ * readSession from outside the route (a CLI, an MCP tool) inherits the same
+ * protection. That parity is enforced by matchSubagentId, not by these two
+ * grammars being kept in step by hand: the parity claim that used to stand
+ * here was false, because '.' is inside the parent charset.
+ *
+ * The plain grammar is deliberately NOT identical to parseSessionId's: it
+ * has no '.'/'..' exclusion, because a plain id is only ever used as a
+ * filename STEM (`${id}.jsonl`), where '..' yields the literal '...jsonl'.
+ * Only the namespaced parent becomes a path segment, which is why only it
+ * needs the check.
  *
  * @param {string} id
  * @param {IndexOptions} [o]
  */
 export async function readSession(id, o = {}) {
-  if (typeof id !== 'string' || !VALID_ID.test(id)) throw invalidId(id);
+  if (typeof id !== 'string' || (!VALID_ID.test(id) && !matchSubagentId(id))) throw invalidId(id);
   const r = { ...defaultRoots(), ...(o.roots ?? {}) };
 
   // opencode sessions live in the SQLite store, not a JSONL file — resolve
@@ -726,7 +971,11 @@ export async function readSession(id, o = {}) {
     if (parsed) {
       const rec = parsed.session;
       rec.title = maskSecrets(rec.title);
-      return sessionPayload(rec, parsed.turns);
+      // deps is not optional here: an opencode row whose messages carried no
+      // `cost` field keeps costObserved null by design, and sessionCost then
+      // falls back to the pricer. Omitting it threw on exactly the data state
+      // the null is there to represent.
+      return sessionPayload(rec, parsed.turns, await loadDeps(o.deps));
     }
   }
 

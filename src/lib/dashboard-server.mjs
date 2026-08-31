@@ -48,6 +48,7 @@
 // close() on SIGINT.
 import http from 'node:http';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execFile } from 'node:child_process';
@@ -59,6 +60,31 @@ import { drift as ruvectorDrift, managed as ruvectorManaged } from './ruvector.m
 import { loadKitConfig } from './config.mjs';
 import { resolveRoutes, routingSummary, divergedRoutes, retirementOf, ACTIVITIES } from './routing.mjs';
 import { renderPage } from './dashboard/page.mjs';
+// One constant, from a module with no imports of its own and no I/O — so this
+// is a static import where usage-index.mjs is deliberately lazy (see
+// lazyUsage): the reason for that laziness is the transcript walk, which this
+// module does not do.
+import { BASELINE_TRAILING_DAYS, PROMPT_CLUSTER_JACCARD, MAX_TURN_CHARS } from './usage-aggregate.mjs';
+// Pure repetition analysis (no I/O) — the SAME clustering buildPromptPatterns
+// runs, re-derived over the deep-pass fingerprints so the masked-samples
+// endpoint can resolve a cluster key to its member hashes (§4.2). Static import
+// because these functions never touch disk; the transcript walk they feed is
+// what stays lazy (the deep-pass module, dynamically imported in the handler).
+import { nearDupClusters, crossSessionClusters } from './usage-prompt-patterns.mjs';
+// Coaching (METRICS.md §22) — static import, same reasoning as above.
+import { deriveCards } from './usage-coaching.mjs';
+import {
+  loadLedger, saveLedger, dismissCard, reconcile, defaultLedgerPath, summarizeLedger,
+  gatherAdoptionInputs, CANONICAL_WINDOW_DAYS,
+} from './usage-outcome-ledger.mjs';
+// W5 enrichment (METRICS.md §23) — READ-ONLY here, same discipline as the ledger
+// above: this server applies a persisted store, it never writes one (that
+// stays CLI-only, ADR-0039's privacy split — saveLabelStore/makeInvoke/enrichLabels/
+// synthesizeCards are deliberately never imported into this file at all).
+import {
+  applyLabelStoreToPatterns, hydrateStoredCards, applyCardStaleness, buildFindingsSummary,
+} from './usage-enrich.mjs';
+import { loadLabelStore, defaultLabelStorePath, CARD_ID_RE } from './usage-label-store.mjs';
 import { requestRejection } from './dashboard/request-security.mjs';
 import {
   readJsonSafe, mintToken, tokenMatches, sendJson, sendUnauthorized, sendNotFound, listenLoopback,
@@ -77,9 +103,15 @@ import {
   maskTurns,
   parseSessionId,
   resolvesInsideRoot,
+  resolvesWithinRoot,
+  parseNamespacedSessionId,
+  resolvesNamespacedInsideRoot,
 } from './dashboard/session-security.mjs';
 
-export { maskMeta, maskTurns, parseSessionId, resolvesInsideRoot };
+export {
+  maskMeta, maskTurns, parseSessionId, resolvesInsideRoot,
+  parseNamespacedSessionId, resolvesNamespacedInsideRoot,
+};
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const PKG_ROOT = path.resolve(HERE, '..', '..');
@@ -88,10 +120,19 @@ const PKG_ROOT = path.resolve(HERE, '..', '..');
 // dashboard — a larger inline-script surface (page.mjs, live-view.mjs,
 // client.mjs) that also renders transcript text, the one data source here
 // that is genuinely attacker-influenced (agents paste in web pages, repo
-// content) — had none. This is not "we found an XSS" (esc() discipline is
-// consistent across dashboard/client.mjs's ~1,200 lines); it's the layer
-// that turns one future missed esc() into a blocked console error instead
-// of a working exploit.
+// content) — had none. This is not "we found an XSS": esc() discipline is
+// consistent across dashboard/client.mjs's ~1,200 lines.
+//
+// WHAT THIS CSP DOES AND DOES NOT BUY (security review SEC-13). The comment
+// here used to claim it "turns one future missed esc() into a blocked console
+// error instead of a working exploit". That is true of a `<script src=…>`
+// injection, which `default-src 'none'` blocks, and of exfiltration, which
+// `connect-src 'self'` blocks. It is NOT true of the two shapes a missed
+// esc() actually produces: `script-src 'unsafe-inline'` permits inline
+// `<script>alert(1)</script>` AND inline event handlers, so `<img src=x
+// onerror=…>` runs — the blocked image load still fires onerror. No
+// vulnerability today; the correction is here so nobody reads this header as
+// licence to relax the escaping that is doing the real work.
 const DASH_CSP = [
   "default-src 'none'",
   "script-src 'unsafe-inline'",   // the two inline module scripts (live + main)
@@ -505,6 +546,235 @@ function bundledVersion(hostPkg, pkg) {
  *  renders before "load all"; the rest come from /api/sessions on demand. */
 const USAGE_TREE_PREVIEW = 25;
 
+/**
+ * The Prompts view's half of the payload (METRICS.md §21): what the operator typed,
+ * how it splits per host and per day, the personal baselines the detectors
+ * compare against, and the repetition projection.
+ *
+ * NOTHING IS RE-DERIVED HERE. `patterns` is `agg.promptPatterns` verbatim — the
+ * single projection usage-aggregate.mjs builds from the records it holds, which
+ * `ak usage prompts` reads too, so the two surfaces cannot disagree about what
+ * a cluster is. The per-host, per-day and baseline maps are likewise lifted
+ * from the aggregate that already computed them.
+ *
+ * The one figure computed here is `headless`, and it follows
+ * detectHeadlessShare's definition exactly rather than inventing a second one:
+ * sessions carrying the fingerprint layer, of which those that typed nothing. A
+ * session with no layer is excluded from BOTH halves of the fraction, because
+ * "unknowable" is not "headless".
+ *
+ * Prompt text cannot reach this object: every input is a fingerprint-derived
+ * count, a curated cluster name, or a session id for the existing masked
+ * session route (ADR-0039's privacy split).
+ */
+function promptsPayload(agg) {
+  const t = agg.totals ?? {};
+  const classified = (agg.sessions ?? []).filter((s) => Number.isFinite(s.typedPrompts));
+  const headless = classified.filter((s) => s.typedPrompts === 0);
+  const responses = classified.reduce((n, s) => n + (Number(s.responses) || 0), 0);
+  const headlessResponses = headless.reduce((n, s) => n + (Number(s.responses) || 0), 0);
+  return {
+    typed: t.typedPrompts ?? 0,
+    taps: t.tapCount ?? 0,
+    tapShare: t.tapShare ?? null,
+    byHost: agg.promptsByHost ?? {},
+    statsByDay: agg.promptStatsByDay ?? {},
+    baselines: agg.promptBaselines ?? {},
+    patterns: agg.promptPatterns ?? null,
+    headless: {
+      sessions: headless.length,
+      responses: headlessResponses,
+      // Null rather than 0 on an empty denominator: a window with no
+      // classified session never measured a headless share, which is not the
+      // claim "0% of it was headless" makes.
+      share: responses > 0 ? headlessResponses / responses : null,
+      measuredSessions: classified.length,
+      measuredResponses: responses,
+    },
+  };
+}
+
+// ── masked verbatim samples for one cluster (Coaching redesign §4.2) ─────────
+//
+// A cluster-scoped instance of the SAME masked reader `/api/session/:id`
+// already is (spec §5): the cluster key selects which member hashes to resolve,
+// the deep-pass machinery re-reads the transcripts that hold them, and
+// `maskSecrets` is applied to every string before it leaves the process. No
+// unmasked text ever leaves; nothing is persisted.
+
+/** A cluster key is `sha256(normalizedText).slice(0,16)` — sixteen lowercase
+ *  hex chars, nothing else. Validated BEFORE any read, so a key carrying a path
+ *  separator, `..`, or any other shape is rejected outright and is never, under
+ *  any branch, treated as a filesystem path (§4.2 security (b)). */
+const CLUSTER_KEY_RE = /^[0-9a-f]{16}$/;
+
+/** How many DISTINCT masked phrasings one cluster's "what you typed" shows, and
+ *  how many `session · date` occurrences the "Seen in" strip lists — a link/
+ *  read affordance, capped so the response cannot become a membership dump. */
+const SAMPLES_PER_CLUSTER = 3;
+const CLUSTER_SAMPLE_SESSIONS = 3;
+const SAMPLE_DAY_MS = 86_400_000;
+
+/** The roots a transcript path must sit inside for the samples endpoint to open
+ *  it (§4.2 security (c)) — the claude/codex file trees `/api/session/:id`
+ *  already serves, plus opencode's single SQLite store. A cache entry whose path
+ *  falls outside all of these is dropped before any read. */
+const SAMPLE_READ_ROOTS = [
+  ...TRANSCRIPT_ROOTS,
+  path.join(os.homedir(), '.local', 'share', 'opencode'),
+];
+
+/** True only when the on-disk path a deep-pass entry will actually open is
+ *  contained within an allowed root. opencode entries carry a pseudo `file`
+ *  (`opencode://…`) and a real `dbFile`; claude/codex carry a real transcript
+ *  `file` — guard whichever will be read. */
+function entryInsideRoots(entry, roots) {
+  const p = typeof entry.file === 'string' && entry.file.startsWith('opencode://')
+    ? entry.dbFile : entry.file;
+  return roots.some((root) => resolvesWithinRoot(root, p));
+}
+
+/** The cluster's masked, distinct phrasings — key (hashes[0]) first, then the
+ *  rest in sorted order — capped at SAMPLES_PER_CLUSTER. Fails CLOSED: with no
+ *  masker there is no text, never raw text. `maskSecrets` runs on every string
+ *  (§4.2: masking before every egress). */
+function clusterSampleTexts(cluster, textMap, maskFn) {
+  if (typeof maskFn !== 'function') return [];
+  const out = [];
+  const seen = new Set();
+  for (const h of cluster.hashes) {
+    const raw = textMap.get(h);
+    if (typeof raw !== 'string') continue;
+    // Defense-in-depth (SEC-1): cap the input the masker sees BEFORE masking.
+    // The rule-148 bound restores linearity, but a hard character ceiling here
+    // guarantees this endpoint can never hand an unbounded attacker blob to any
+    // regex — the same MAX_TURN_CHARS ceiling the transcript reader applies. A
+    // genuine phrasing is far under it, so this never truncates a real sample.
+    const masked = maskFn(raw.length > MAX_TURN_CHARS ? raw.slice(0, MAX_TURN_CHARS) : raw);
+    if (seen.has(masked)) continue;
+    seen.add(masked);
+    out.push(masked);
+    if (out.length >= SAMPLES_PER_CLUSTER) break;
+  }
+  return out;
+}
+
+/** The `{ sessionId, day }` occurrences — the same shape the projection's
+ *  `sampleSessionIds` already publishes, one day per session (a record's
+ *  fingerprints all share its first-billed day). Sorted, capped, no text. */
+function clusterOccurrences(wanted, typed) {
+  const bySession = new Map();
+  for (const fp of typed) {
+    if (!wanted.has(fp.h) || !fp.sessionId || bySession.has(fp.sessionId)) continue;
+    bySession.set(fp.sessionId, fp.day ?? null);
+  }
+  return [...bySession.keys()].sort().slice(0, CLUSTER_SAMPLE_SESSIONS)
+    .map((sessionId) => ({ sessionId, day: bySession.get(sessionId) }));
+}
+
+/**
+ * Resolve one cluster key to its masked verbatim samples + occurrences, or
+ * `null` when the key names no cluster in this window (→ an honest 404, and no
+ * transcript is ever opened for it).
+ *
+ * The window's clusters are RE-DERIVED here from the deep-pass fingerprints with
+ * the SAME clustering `buildPromptPatterns` runs (`nearDupClusters` at
+ * `PROMPT_CLUSTER_JACCARD`, then `crossSessionClusters`). This is deliberately
+ * the validation set AND the hash source in one: the key is checked against a
+ * closed set of real 16-hex cluster keys (never a path), and the member hashes
+ * it resolves come from that very set — so "validated" and "resolvable" cannot
+ * diverge. It equals the `/api/usage` projection's key set by construction (same
+ * cache, same typed population, same params), so a key the client holds resolves.
+ */
+async function resolveClusterSamples(key, { cacheFile, roots, now, days, maskFn }) {
+  const { readPromptEntries, deepFingerprints, exemplarCandidates, collectExemplars, promptCacheFile } =
+    await import('../commands/usage/deep-pass.mjs');
+  // Guard every transcript path against the roots BEFORE anything is opened
+  // (§4.2 security (c)): a poisoned/out-of-root entry is dropped here, so it
+  // never joins the clustering and is never read.
+  const entries = readPromptEntries(cacheFile ?? promptCacheFile()).filter((e) => entryInsideRoots(e, roots));
+  const cutoffMs = now - days * SAMPLE_DAY_MS;
+  const typed = deepFingerprints(entries, cutoffMs);
+  const clusters = crossSessionClusters(nearDupClusters(typed, { jaccard: PROMPT_CLUSTER_JACCARD }));
+  const cluster = clusters.find((c) => c.key === key);
+  if (!cluster) return null;
+  const wanted = new Set(cluster.hashes);
+  const { text } = collectExemplars({
+    entries, cutoffMs, wanted,
+    candidates: exemplarCandidates(typed, wanted),
+    reAskSessions: new Set(),
+  });
+  return { samples: clusterSampleTexts(cluster, text, maskFn), occurrences: clusterOccurrences(wanted, typed) };
+}
+
+// ── coaching dismissal — the dashboard's ONE non-inference write (§4.3) ───────
+//
+// ADR-0039's privacy split keeps the dashboard READ-ONLY for inference; this
+// relaxes it for a single, local, loopback, token-gated write of one enum-shaped
+// flag (spec §4.3 / §6 amendment 3): a dismissal is not inference and not prompt
+// text. Every OTHER ledger write stays CLI-only. No prompt text touches this path.
+
+/** Cap on the request body: a `{ id }` object is a few dozen bytes, so anything
+ *  past this is not a legitimate dismissal and is refused before it is parsed. */
+const COACHING_BODY_MAX_BYTES = 4096;
+
+/** Read a small JSON request body, or `null` for anything unparseable or past
+ *  the size cap — the handler treats `null` as a bad request, never a throw. */
+function readJsonBody(req, maxBytes = COACHING_BODY_MAX_BYTES) {
+  return new Promise((resolve) => {
+    let body = '';
+    let over = false;
+    req.setEncoding('utf8');
+    req.on('data', (chunk) => {
+      if (over) return;
+      body += chunk;
+      if (body.length > maxBytes) { over = true; body = ''; }
+    });
+    req.on('end', () => {
+      if (over) { resolve(null); return; }
+      try { resolve(JSON.parse(body)); } catch { resolve(null); }
+    });
+    req.on('error', () => resolve(null));
+  });
+}
+
+/** The canonical-window DISMISSED record for `id`, if any — the pivot for both
+ *  idempotent dismiss (already dismissed ⇒ no-op) and undo (reverse it). */
+function findDismissed(ledger, id) {
+  return (ledger?.records ?? []).find(
+    (r) => r?.id === id && r.status === 'dismissed' && r.windowDays === CANONICAL_WINDOW_DAYS);
+}
+
+/**
+ * The canonical 30-day proposable-card set plus the evidence context a
+ * dismissal snapshots against — derived exactly the way `dashboardCoachingPayload`
+ * does (readIndex at the fixed canonical window, label store applied read-only,
+ * `deriveCards` + `hydrateStoredCards`, `gatherAdoptionInputs`), so a dismiss
+ * validates an id against the SAME cards the read path proposes. `currentPatterns`
+ * MUST be the canonical window (Fix round 1, C-1) — that is what a baseline is
+ * commensurable against.
+ */
+async function canonicalCoachingContext({ readIndex, loadStore, labelStorePath, cwd, now }) {
+  const agg = await readIndex({
+    days: CANONICAL_WINDOW_DAYS, lookbackDays: CANONICAL_WINDOW_DAYS + BASELINE_TRAILING_DAYS, prompts: true,
+  });
+  const store = loadStore(labelStorePath);
+  const labels = store.future ? {} : store.labels;
+  const patterns = agg?.promptPatterns ? applyLabelStoreToPatterns(agg.promptPatterns, labels) : agg?.promptPatterns;
+  const cards = deriveCards({
+    promptPatterns: patterns, promptBaselines: agg?.promptBaselines,
+    promptsByHost: agg?.promptsByHost, insights: agg?.insights, now,
+  });
+  const currentPatterns = {
+    promptPatterns: patterns, promptsByHost: agg?.promptsByHost,
+    promptBaselines: agg?.promptBaselines, insights: agg?.insights,
+  };
+  return {
+    allCards: [...cards, ...hydrateStoredCards(store.future ? {} : store.cards)],
+    adoptionInputs: { ...gatherAdoptionInputs(cwd), currentPatterns },
+  };
+}
+
 /** Lazily bind usage-index.mjs. Deliberately NOT a static import: the module
  *  walks two transcript stores, and the panel must boot (and serve /api/status)
  *  without paying for that until the Usage tab is actually opened. Same named
@@ -538,6 +808,18 @@ function clampInt(raw, fallback, min, max) {
   const n = Number.parseInt(String(raw ?? ''), 10);
   if (!Number.isFinite(n)) return fallback;
   return Math.min(max, Math.max(min, n));
+}
+
+/** A 500 that discloses nothing about the filesystem. Node's fs errors embed
+ *  the absolute path ("EACCES: permission denied, open
+ *  '/Users/<user>/.claude/projects/<project-slug>/<uuid>.jsonl'"), and project
+ *  slugs are derived from real working directories — so reflecting the raw
+ *  message hands a client the username, the directory layout, and the names of
+ *  projects worked on. The operator still gets the whole error on stderr, where
+ *  it belongs. */
+function serverFault(res, where, e, message) {
+  console.error(`[dashboard] ${where} failed:`, e);
+  sendJson(res, 500, { error: message });
 }
 
 // Observability History's window control — day-count approximations (a
@@ -709,7 +991,10 @@ function lazyLive(liveOptions = {}) {
  *           intelClientBuffer?: number, intelMaxClients?: number,
  *           discoverProjects?: () => Array<{ path: string, label: string, source?: string }>,
  *           machineWideIntel?: (projects: Array<any>) => any,
- *           models?: any, modelScopeKey?: string, system?: any, systemOptions?: any }} [opts]
+ *           models?: any, modelScopeKey?: string, system?: any, systemOptions?: any,
+ *           coachingLedger?: any, labelStore?: { loadLabelStore?: typeof loadLabelStore,
+ *             labelStorePath?: string },
+ *           promptSamples?: { cacheFile?: string, roots?: string[], now?: number } }} [opts]
  * @returns {Promise<{ url: string, urlWithToken: string, port: number, token: string, close: () => Promise<void> }>}
  */
 export function startDashboard({
@@ -719,6 +1004,7 @@ export function startDashboard({
   transcriptClientBuffer = 64, transcriptMaxClients = 16,
   intelWatch, intelClientBuffer = 256, intelMaxClients = 32,
   discoverProjects, machineWideIntel, models, modelScopeKey, system, systemOptions = {},
+  coachingLedger, labelStore: labelStoreOverride, promptSamples: promptSamplesOverride,
 } = {}) {
   const provide = fetchStatus || shellOutStatus(cwd);
   const usageApi = usage || lazyUsage();
@@ -941,11 +1227,24 @@ export function startDashboard({
     const qi = raw.indexOf('?');
     const url = qi < 0 ? raw : raw.slice(0, qi);
     const query = new URLSearchParams(qi < 0 ? '' : raw.slice(qi + 1));
-    if (req.method !== 'GET') { res.writeHead(405).end('method not allowed'); return; }
+    // GET serves the whole read-only panel; POST is ONLY ever a coaching write
+    // (§4.3) — every other method, and any other POST target, is refused.
+    if (req.method !== 'GET' && req.method !== 'POST') { res.writeHead(405).end('method not allowed'); return; }
     const rejected = requestRejection(req.headers);
     if (rejected) {
       res.writeHead(403, { 'content-type': 'text/plain; charset=utf-8' });
       res.end(rejected);
+      return;
+    }
+
+    // Handle POST entirely here and return, so none of the GET-only flow below
+    // (the HTML route, the exact/param GET dispatch) ever sees a write request.
+    // Same global token gate and requestRejection guards as every /api/ route.
+    if (req.method === 'POST') {
+      if (!checkToken(req, query)) { sendUnauthorized(res, 'Wrong or missing dashboard token.'); return; }
+      if (url === '/api/prompts/dismiss') { await handleDismiss(req, res); return; }
+      if (url === '/api/prompts/undismiss') { await handleUndismiss(req, res); return; }
+      res.writeHead(405).end('method not allowed');
       return;
     }
 
@@ -1345,16 +1644,62 @@ export function startDashboard({
     // all" control still knows the true count and calls /api/sessions for the rest.
     async function handleUsage(req, res, query) {
       try {
+        const days = clampDays(query.get('days'));
         const [agg, providerAnalytics] = await Promise.all([
-          usageApi.readIndex({ days: clampDays(query.get('days')) }),
+          // lookbackDays widens what usage-index.mjs reads off disk so records
+          // from the window BEFORE this one survive to be aggregated;
+          // previous:true is what actually turns those into agg.previous
+          // (totals + rhythm) — this window's own totals/sessions stay
+          // exactly `days` wide either way (usage-index.mjs's own display-
+          // cutoff guarantee).
+          //
+          // The width is the BASELINE's requirement, not the previous window's:
+          // `promptBaselines` reads the trailing BASELINE_TRAILING_DAYS before
+          // the window and needs BASELINE_MIN_ACTIVE_DAYS of it populated
+          // before it will claim a normal. At the old `days * 2` a 7-day
+          // window reached 14 days back and every baseline was structurally
+          // null, so every detector keyed on one fell back to its absolute
+          // threshold without saying so. `days + BASELINE_TRAILING_DAYS` is
+          // wider than `days * 2` for every window this server serves, so the
+          // previous-window projection is unaffected.
+          usageApi.readIndex({
+            days, lookbackDays: days + BASELINE_TRAILING_DAYS, previous: true, prompts: true,
+          }),
           typeof usageApi.readProviderAnalytics === 'function'
             ? Promise.resolve(usageApi.readProviderAnalytics())
               .catch(() => ({ openrouter: null }))
             : Promise.resolve({ openrouter: null }),
         ]);
-        const { sessions: _sessions, projectTree, ...rollups } = agg || {};
+        // W5 enrichment (METRICS.md §23): applied to EVERY poll,
+        // read-only — the store the CLI's `--enrich` writes, consulted here
+        // exactly like `ak usage prompts` consults it, so the two surfaces
+        // cannot disagree about what a cluster or a coaching card is called.
+        // A newer-schema store reads as "no store" for this poll, same as
+        // the ledger's own I-2 rule below; there is nothing to warn INTO here
+        // (no terminal), so it degrades silently rather than failing the poll.
+        const loadStore = labelStoreOverride?.loadLabelStore ?? loadLabelStore;
+        const labelStorePath = labelStoreOverride?.labelStorePath ?? defaultLabelStorePath();
+        const store = loadStore(labelStorePath);
+        const labels = store.future ? {} : store.labels;
+        if (agg?.promptPatterns) agg.promptPatterns = applyLabelStoreToPatterns(agg.promptPatterns, labels);
+        // promptPatterns is destructured OUT rather than spread: the Prompts
+        // view reads it through `prompts.patterns` below, and leaving it at
+        // the top level too would publish the same projection twice under two
+        // names that could later drift apart.
+        const { sessions: _sessions, projectTree, promptPatterns: _patterns, ...rollups } = agg || {};
+        // Coaching (METRICS.md §22): derived server-side from the SAME lib +
+        // ledger the CLI uses, so the two surfaces never disagree about a
+        // card's status. Read-only — see dashboardCoachingPayload's doc for
+        // why this must never call saveLedger. `days`/`cwd` travel through so
+        // ledger-facing evidence reads the CANONICAL 30d window (Fix round 1,
+        // C-1) rather than whatever the dashboard's own selector is showing.
+        const coaching = await dashboardCoachingPayload(agg || {}, days, {
+          cwd, coachingLedger, readIndex: usageApi.readIndex,
+          labels, storedCards: store.future ? {} : store.cards,
+        });
         sendJson(res, 200, {
           ...rollups,
+          prompts: { ...promptsPayload(agg || {}), coaching },
           // Account-level metadata has no session/host correlation key. Keep
           // it visibly separate instead of laundering it into local totals.
           providerAnalytics,
@@ -1365,7 +1710,7 @@ export function startDashboard({
           })),
         });
       } catch (e) {
-        sendJson(res, 500, { error: String(e && e.message || e) });
+        serverFault(res, '/api/usage', e, 'usage index unavailable');
       }
       return;
     }
@@ -1381,7 +1726,7 @@ export function startDashboard({
         const { detectLimitInsights } = await import('./usage-insights.mjs');
         sendJson(res, 200, { ...payload, insights: detectLimitInsights(payload, agg) ?? [] });
       } catch (e) {
-        sendJson(res, 500, { error: String(e && e.message || e) });
+        serverFault(res, '/api/limits', e, 'plan limits unavailable');
       }
       return;
     }
@@ -1447,22 +1792,33 @@ export function startDashboard({
         ));
         sendJson(res, 200, { sessions: all.slice(offset, offset + limit), total: all.length, offset, limit });
       } catch (e) {
-        sendJson(res, 500, { error: String(e && e.message || e) });
+        serverFault(res, '/api/sessions', e, 'usage index unavailable');
       }
       return;
     }
 
     async function handleSession(req, res, query, match) {
       // Validate BEFORE touching the index — a rejected id must never reach a
-      // filesystem call, so the 400 happens here and nowhere deeper.
+      // filesystem call, so the 400 happens here and nowhere deeper. Two
+      // shapes are accepted: a plain id (unchanged — parseSessionId/
+      // resolvesInsideRoot, exactly as before), or a namespaced
+      // `<parentId>/<stem>` Claude subagent id (Task 5 round 2), gated by
+      // its own dedicated parse+containment pair rather than loosening
+      // parseSessionId/resolvesInsideRoot — those two also gate the
+      // live-playback/SSE routes, which this fix does not touch.
       const id = parseSessionId(match[1]);
-      if (!id || !TRANSCRIPT_ROOTS.some((r) => resolvesInsideRoot(r, id))) {
+      const plainOk = !!id && TRANSCRIPT_ROOTS.some((r) => resolvesInsideRoot(r, id));
+      const nested = plainOk ? null : parseNamespacedSessionId(match[1]);
+      const nestedOk = !!nested
+        && TRANSCRIPT_ROOTS.some((r) => resolvesNamespacedInsideRoot(r, nested.parentId, nested.stem));
+      if (!plainOk && !nestedOk) {
         sendJson(res, 400, { error: 'invalid session id' });
         return;
       }
+      const effectiveId = plainOk ? id : `${nested.parentId}/${nested.stem}`;
       try {
         const maskFn = typeof usageApi.masker === 'function' ? await usageApi.masker() : usageApi.maskSecrets;
-        const found = await usageApi.readSession(id);
+        const found = await usageApi.readSession(effectiveId);
         // A well-formed id that matches no file is 404, not 200-with-a-null-body.
         // Returning 200 here made every nonexistent session look like an empty
         // one, and turned the route into a mild existence oracle.
@@ -1480,9 +1836,98 @@ export function startDashboard({
         });
       } catch (e) {
         // Includes the fail-closed path: no masker → no transcript, ever.
-        sendJson(res, 500, { error: String(e && e.message || e) });
+        serverFault(res, '/api/session/:id', e, 'session transcript unavailable');
       }
       return;
+    }
+
+    // Masked verbatim samples for ONE cluster (Coaching redesign §4.2). Token-
+    // gated (the global gate above) and loopback-only, like every /api/ route.
+    // The cluster key is validated as a 16-hex sketch hash and then against this
+    // window's own cluster set BEFORE any transcript is read — it is never a
+    // path. A resolution failure degrades to an honest empty result, never a
+    // stack trace or an absolute path (§4.2 security (a)–(f)).
+    async function handleSamples(req, res, query) {
+      const key = String(query.get('key') ?? '');
+      if (!CLUSTER_KEY_RE.test(key)) { sendJson(res, 404, { error: 'unknown cluster' }); return; }
+      const days = clampDays(query.get('window'));
+      try {
+        const maskFn = typeof usageApi.masker === 'function' ? await usageApi.masker() : usageApi.maskSecrets;
+        const resolved = await resolveClusterSamples(key, {
+          cacheFile: promptSamplesOverride?.cacheFile,
+          roots: promptSamplesOverride?.roots ?? SAMPLE_READ_ROOTS,
+          now: promptSamplesOverride?.now ?? Date.now(),
+          days, maskFn,
+        });
+        if (!resolved) { sendJson(res, 404, { error: 'unknown cluster' }); return; }
+        sendJson(res, 200, resolved);
+      } catch {
+        // Honest empty — a vanished/oversized transcript or an unreadable cache
+        // costs its samples and nothing else; the error itself never egresses.
+        sendJson(res, 200, { samples: [], occurrences: [] });
+      }
+      return;
+    }
+
+    // POST /api/prompts/dismiss — persist a coaching dismissal (§4.3). POST
+    // /api/prompts/undismiss reverses it. Both are token-gated + loopback-only
+    // (guarded above), validate the id BEFORE any read/write, and never carry
+    // prompt text. Two endpoints, not one `{ id, undo }` body: cleaner REST and
+    // undo needs no canonical read (see coachingUndismiss).
+    async function handleDismiss(req, res) { await coachingWrite(req, res, false); }
+    async function handleUndismiss(req, res) { await coachingWrite(req, res, true); }
+
+    async function coachingWrite(req, res, undo) {
+      const parsed = await readJsonBody(req);
+      const id = parsed && typeof parsed === 'object' ? parsed.id : undefined;
+      // Validate the id charset BEFORE touching the ledger — CARD_ID_RE rejects
+      // path separators, `..`, whitespace and uppercase, so a card id is never a
+      // path and a malformed request never reaches a read or a write.
+      if (typeof id !== 'string' || !CARD_ID_RE.test(id)) {
+        sendJson(res, 400, { error: 'invalid card id' });
+        return;
+      }
+      const load = coachingLedger?.loadLedger ?? loadLedger;
+      const save = coachingLedger?.saveLedger ?? saveLedger;
+      const ledgerPath = coachingLedger?.ledgerPath ?? defaultLedgerPath();
+      try {
+        const ledger = load(ledgerPath);
+        // A newer-schema ledger must never be overwritten by this build (I-2) —
+        // that would silently resurrect every dismissal a future ak suppressed.
+        if (ledger.future) { sendJson(res, 409, { error: 'ledger schema is newer than this build' }); return; }
+        if (undo) { coachingUndismiss(res, ledger, id, ledgerPath, save); return; }
+        await coachingDismiss(res, ledger, id, ledgerPath, save);
+      } catch (e) {
+        serverFault(res, `/api/prompts/${undo ? 'undismiss' : 'dismiss'}`, e, 'coaching ledger unavailable');
+      }
+    }
+
+    async function coachingDismiss(res, ledger, id, ledgerPath, save) {
+      // Idempotent: an already-dismissed card is a 200 no-op — no canonical read,
+      // no write, no dismissCount bump (so a double-click cannot drive a card to
+      // a permanent dismissal, which is a real state transition in the ledger).
+      if (findDismissed(ledger, id)) { sendJson(res, 200, { id, status: 'dismissed' }); return; }
+      const { allCards, adoptionInputs } = await canonicalCoachingContext({
+        readIndex: usageApi.readIndex,
+        loadStore: labelStoreOverride?.loadLabelStore ?? loadLabelStore,
+        labelStorePath: labelStoreOverride?.labelStorePath ?? defaultLabelStorePath(),
+        cwd, now: Date.now(),
+      });
+      const { ledger: next, found } = dismissCard(ledger, id, allCards, { adoptionInputs, now: Date.now() });
+      // An id that names no card this canonical pass derives → 404, no write.
+      if (!found) { sendJson(res, 404, { error: 'unknown card' }); return; }
+      save(ledgerPath, next);
+      sendJson(res, 200, { id, status: 'dismissed' });
+    }
+
+    function coachingUndismiss(res, ledger, id, ledgerPath, save) {
+      // Reversing a recorded dismissal needs no canonical derivation: a card
+      // dismissed and then undone must reappear even if its evidence has since
+      // collapsed. Removing the record is "as if never dismissed" — the next
+      // reconcile re-proposes it fresh. Nothing to undo → 404, no write.
+      if (!findDismissed(ledger, id)) { sendJson(res, 404, { error: 'no dismissal to undo' }); return; }
+      save(ledgerPath, { version: ledger.version, records: ledger.records.filter((r) => r.id !== id) });
+      sendJson(res, 200, { id, status: 'active' });
     }
 
     // Exact-path routes (O(1) lookup) win first, then the parametrized ones —
@@ -1503,6 +1948,7 @@ export function startDashboard({
       '/api/limits': handleLimits,
       '/api/system': handleSystem,
       '/api/sessions': handleSessions,
+      '/api/prompts/samples': handleSamples,
     };
     /** @type {Array<[RegExp, (req: any, res: any, query: any, match: RegExpExecArray) => Promise<void>]>} */
     const PARAM_ROUTES = [
@@ -1546,4 +1992,114 @@ export function startDashboard({
       intelPool.clear();
     },
   });
+}
+
+/** `gatherAdoptionInputs` costs a `readdir` plus up to two file reads, run on
+ *  EVERY `/api/usage` poll otherwise (Fix round 1, M-6) — memoized per `cwd`
+ *  for a minute, which is generous relative to how often CLAUDE.md/skill
+ *  directories actually change and cheap relative to a dashboard poll
+ *  interval. Module-level by design: one dashboard process serves one `cwd`
+ *  for its whole lifetime. */
+const ADOPTION_INPUTS_TTL_MS = 60_000;
+let _adoptionInputsMemo = null; // { cwd, at, value }
+
+function memoizedAdoptionInputs(cwd) {
+  const now = Date.now();
+  if (_adoptionInputsMemo && _adoptionInputsMemo.cwd === cwd && now - _adoptionInputsMemo.at < ADOPTION_INPUTS_TTL_MS) {
+    return _adoptionInputsMemo.value;
+  }
+  const value = gatherAdoptionInputs(cwd);
+  _adoptionInputsMemo = { cwd, at: now, value };
+  return value;
+}
+
+/**
+ * The Prompts view's coaching half (METRICS.md §22): cards derived from THIS
+ * poll's aggregate, reconciled against the persisted ledger so status chips
+ * (proposed/adopted/dismissed/expired/retired) match `ak usage prompts`
+ * exactly — same lib, same ledger file, never a second projection that could
+ * drift from the CLI's.
+ *
+ * READ-ONLY BY CONTRACT (ADR-0039's privacy split: dismissal is CLI-only).
+ * `reconcile` itself never writes anything — persistence is an explicit
+ * extra step the CLI takes and this function deliberately does not, so a
+ * dashboard poll can never mutate what `ak usage prompts --dismiss` owns.
+ *
+ * CANONICAL WINDOW (Fix round 1, C-1): ledger-facing evidence (baseline
+ * snapshots, adoption-by-collapse, outcome measurement) always reads a fixed
+ * CANONICAL_WINDOW_DAYS-day aggregate — `agg` itself when the dashboard's
+ * own `days` selector already IS that window, otherwise a dedicated extra
+ * `readIndex` call — never the days the operator is currently viewing. The
+ * DISPLAYED cards (`deriveCards` below) still read `agg` at the operator's
+ * own window, matching the rest of the Prompts view.
+ *
+ * `coachingLedgerOverride` is the same injectable-dependency shape `usage`/
+ * `limits` already use on `startDashboard` — tests point it at a stub loader
+ * so a poll never touches the real `~/.config/agentic-kit` ledger file.
+ *
+ * `labels`/`storedCards` (W5, METRICS.md §22/§23) are the persisted enrichment
+ * store `handleUsage` already loaded once for this poll — READ-ONLY here
+ * too, same contract as the ledger: a persisted enriched card rejoins
+ * `reconcile` exactly like a rule card ("join reconcile exactly like rule
+ * cards"), and its staleness is patched on AFTER reconcile runs (`annotate`
+ * unconditionally sets `stale: false`, which would clobber it if this ran
+ * first — see usage-enrich.mjs's own doc on `applyCardStaleness`).
+ *
+ * @param {import('./usage-enrich.mjs').AggLike & { promptBaselines?: object|null,
+ *   insights?: Array<object>|null }} agg the aggregate `handleUsage` already
+ *   read (prompts:true) at `days`
+ * @param {number} days the window `agg` was read at
+ * @param {{ cwd?: string, readIndex?: Function,
+ *   coachingLedger?: { loadLedger?: typeof loadLedger, ledgerPath?: string },
+ *   labels?: Record<string, object>,
+ *   storedCards?: Record<string, { title: string, finding: string, try: string,
+ *     basis: string, basisNumbers: number[], evidenceHash: string, generatedAt: string }> }} [opts]
+ */
+async function dashboardCoachingPayload(agg, days, {
+  cwd, readIndex, coachingLedger: coachingLedgerOverride, labels, storedCards,
+} = {}) {
+  const load = coachingLedgerOverride?.loadLedger ?? loadLedger;
+  const ledgerPath = coachingLedgerOverride?.ledgerPath ?? defaultLedgerPath();
+  const cards = deriveCards({
+    promptPatterns: agg.promptPatterns, promptBaselines: agg.promptBaselines,
+    promptsByHost: agg.promptsByHost, insights: agg.insights, now: Date.now(),
+  });
+  const loadedLedger = load(ledgerPath);
+  if (loadedLedger.future) {
+    return {
+      cards: [], summary: null, unavailable: true,
+      reason: `ledger schema v${loadedLedger.version} is newer than this build (v1)`,
+    };
+  }
+  let canonicalAgg = agg;
+  if (days !== CANONICAL_WINDOW_DAYS && typeof readIndex === 'function') {
+    try {
+      canonicalAgg = await readIndex({
+        days: CANONICAL_WINDOW_DAYS, lookbackDays: CANONICAL_WINDOW_DAYS + BASELINE_TRAILING_DAYS, prompts: true,
+      });
+    } catch {
+      return { cards: [], summary: null, unavailable: true, reason: 'the canonical 30-day aggregate could not be read' };
+    }
+  }
+  if (canonicalAgg?.promptPatterns) {
+    canonicalAgg = { ...canonicalAgg, promptPatterns: applyLabelStoreToPatterns(canonicalAgg.promptPatterns, labels) };
+  }
+  const currentPatterns = {
+    promptPatterns: canonicalAgg.promptPatterns, promptsByHost: canonicalAgg.promptsByHost,
+    promptBaselines: canonicalAgg.promptBaselines, insights: canonicalAgg.insights,
+  };
+  const findingsSummary = buildFindingsSummary(canonicalAgg);
+  const allCards = [...cards, ...hydrateStoredCards(storedCards)];
+  // QE review F-2: the displayed cards come from the operator's day selector,
+  // so the same non-canonical-basis rule the CLI follows applies here. This
+  // payload is read-only, so no expiry could ever have been persisted from it
+  // — but it DID mis-render the count, and both surfaces reconcile through one
+  // function precisely so they cannot disagree about a card's status.
+  const { cards: annotated, ledger } = reconcile(loadedLedger, allCards, {
+    adoptionInputs: { ...memoizedAdoptionInputs(cwd), currentPatterns },
+    now: Date.now(),
+    canonicalBasis: days === CANONICAL_WINDOW_DAYS,
+  });
+  applyCardStaleness(annotated, findingsSummary);
+  return { cards: annotated, summary: summarizeLedger(ledger.records) };
 }

@@ -7,9 +7,34 @@
 // Every function must therefore stay SELF-CONTAINED: no imports, no module
 // scope, no DOM — only parameters and the sibling names below.
 
-/** HTML-escape any value rendered into the page. */
+/** HTML-escape any value rendered into the page, after REMOVING the control
+ *  and bidi characters that escaping does not touch.
+ *
+ *  Security review SEC-9: `esc` replaced only [&<>"'], so a 24-character label
+ *  carrying U+202E and a raw ESC cleared `isValidLabelName` and rendered six
+ *  control/bidi codepoints into the DOM — one of them inside a `title=`
+ *  attribute — where the override reverses the rest of the cell and a row can
+ *  be made to read as a different label than the one it is. Spoofing, not
+ *  execution; the store gate (usage-label-store.mjs) is the primary fix and
+ *  this is the boundary that must not depend on it.
+ *
+ *  Strip BEFORE escaping: the passes are independent, and in this order no
+ *  stripped character can be reintroduced by an entity.
+ *
+ *  The ranges are the ones text-safety.mjs owns and documents — C0 minus TAB
+ *  and LF, DEL and C1, then the zero-width marks, bidi overrides and bidi
+ *  isolates, as inclusive `[lo, hi]` pairs. They are rebuilt from NUMBERS
+ *  here, rather than imported, because client.mjs ships this function by
+ *  injecting its own `esc.toString()` into the browser bundle, so every
+ *  function in this module must stay self-contained — and because a source
+ *  file carrying raw control bytes is unreviewable in a diff. */
 export function esc(s) {
-  return String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const ranges = [0x00, 0x08, 0x0b, 0x1f, 0x7f, 0x9f, 0x200b, 0x200f, 0x2028, 0x2029, 0x202a, 0x202e, 0x2066, 0x2069];
+  let cls = '';
+  for (let i = 0; i < ranges.length; i += 2) {
+    cls += `${String.fromCharCode(ranges[i])}-${String.fromCharCode(ranges[i + 1])}`;
+  }
+  return String(s == null ? '' : s).replace(new RegExp(`[${cls}]`, 'g'), '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
 
 /** Category map: every subsystem lands in exactly one tab; unknown/future

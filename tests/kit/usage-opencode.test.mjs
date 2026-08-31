@@ -9,6 +9,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { listSessions, parseSession, sessionExists } from '../../src/lib/usage-opencode.mjs';
+import { promptFingerprint } from '../../src/lib/usage-parsers.mjs';
 
 const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'ak-uo-'));
 const rm = (d) => fs.rmSync(d, { recursive: true, force: true });
@@ -54,13 +55,19 @@ const userMsg = (id, sessionId, at, text = null) => ({
   id, sessionId, at,
   data: { role: 'user', time: { created: at }, agent: 'build', ...(text ? { text } : {}) },
 });
-const assistantMsg = (id, sessionId, at, { model = 'kimi-k3', provider = 'opencode', tokens = {}, cost = null } = {}) => ({
+// tokens: null (an explicit, not-default, override) omits the `tokens` key
+// entirely — a token-LESS row, distinct from `tokens: {}` which still merges
+// onto the hardcoded defaults below. Same conditional-spread convention as
+// mode/error.
+const assistantMsg = (id, sessionId, at, { model = 'kimi-k3', provider = 'opencode', tokens = {}, cost = null, mode = null, error = null } = {}) => ({
   id, sessionId, at,
   data: {
     role: 'assistant', agent: 'build', path: { cwd: '/x', root: '/' },
     modelID: model, providerID: provider,
-    tokens: { total: 0, input: 100, output: 20, reasoning: 5, cache: { read: 40, write: 3 }, ...tokens },
+    ...(tokens !== null ? { tokens: { total: 0, input: 100, output: 20, reasoning: 5, cache: { read: 40, write: 3 }, ...tokens } } : {}),
     ...(cost != null ? { cost } : {}),
+    ...(mode != null ? { mode } : {}),
+    ...(error != null ? { error } : {}),
     time: { created: at, completed: at + 1000 }, finish: 'stop',
   },
 });
@@ -197,6 +204,51 @@ test('withTurns emits user/assistant turn rows with text and tool names; tool co
   rm(d);
 });
 
+test('assistant messages: mode (last wins), user→assistant latency gap, error → exception, ctxLastTokens', () => {
+  const d = tmp();
+  const dbFile = buildDb(path.join(d, 'opencode.db'), {
+    sessions: [{ id: 'ses_1', directory: '/x', title: 't', timeCreated: T }],
+    messages: [
+      userMsg('u1', 'ses_1', T, 'fix the auth flow'),
+      assistantMsg('a1', 'ses_1', T + 4_000, { mode: 'build', tokens: { input: 900, cache: { read: 20000 }, output: 10 } }),
+      // token-LESS: the error row must never overwrite ctxLastTokens with a
+      // fabricated 0 (evidence-gated — see recordAssistantUsage).
+      assistantMsg('a2', 'ses_1', T + 8_000, { error: { name: 'ProviderAuthError' }, tokens: null }),
+    ],
+  });
+  const { session } = parseSession({ dbFile, id: 'ses_1' });
+  assert.equal(session.mode, 'auto-edit');
+  assert.equal(session.modeRaw, 'build');
+  assert.equal(session.latHist[1], 1);        // 4s → 2-5s bucket
+  assert.equal(session.exceptions, 1);
+  assert.equal(session.ctxLastTokens, 20900);
+  rm(d);
+});
+
+test('an error row WITH evidence still records mode/model/usage/cost/ctx — only exceptions++ and no latency sample are error-specific', () => {
+  const d = tmp();
+  const dbFile = buildDb(path.join(d, 'opencode.db'), {
+    sessions: [{ id: 'ses_2', directory: '/x', title: 't', timeCreated: T }],
+    messages: [
+      userMsg('u1', 'ses_2', T, 'deploy the fix'),
+      assistantMsg('a1', 'ses_2', T + 3_000, {
+        model: 'claude-opus-5', mode: 'plan', cost: 0.5, error: { name: 'ProviderAuthError' },
+        tokens: { input: 10, cache: { read: 5 } },
+      }),
+    ],
+  });
+  const { session } = parseSession({ dbFile, id: 'ses_2' });
+  assert.equal(session.mode, 'plan', 'mode is recorded even on an error row');
+  assert.equal(session.modeRaw, 'plan');
+  const row = session.usage.find((r) => r.model === 'claude-opus-5');
+  assert.equal(row.costObserved, 0.5, 'cost is recorded even on an error row');
+  assert.deepEqual(session.models, ['claude-opus-5'], 'modelID is recorded even on an error row');
+  assert.equal(session.ctxLastTokens, 15, 'ctx is recorded even on an error row, when it carries tokens');
+  assert.equal(session.latHist, null, 'an error row never produces a latency sample');
+  assert.equal(session.exceptions, 1);
+  rm(d);
+});
+
 test('sessionExists tracks row presence', () => {
   const d = tmp();
   const dbFile = buildDb(path.join(d, 'opencode.db'), {
@@ -213,5 +265,53 @@ test('an absent db reads as no source, never a throw', () => {
   assert.deepEqual(listSessions({ dbFile: missing }), []);
   assert.equal(parseSession({ dbFile: missing, id: 'x' }), null);
   assert.equal(sessionExists({ dbFile: missing, id: 'x' }), false);
+  rm(d);
+});
+
+// ── v14 prompt fingerprints ─────────────────────────────────────────────────
+
+// The scan path is the one that matters here: it never loaded message PARTS
+// before (only turns did), so a fingerprint over an empty string would look
+// exactly like a session of attachment-only prompts. Asserting a real token
+// count and a 'human' tag is what makes a silently-broken text read fail loudly
+// rather than mislabelling every opencode prompt as 'control'.
+test('parseSession fingerprints user messages on the scan path, not only withTurns', () => {
+  const d = tmp();
+  const dbFile = buildDb(path.join(d, 'opencode.db'), {
+    sessions: [{ id: 'ses_fp', directory: '/x', title: 't', timeCreated: T }],
+    messages: [
+      userMsg('u1', 'ses_fp', T),
+      userMsg('u2', 'ses_fp', T + 2000),
+      assistantMsg('a1', 'ses_fp', T + 3000),
+    ],
+    parts: [
+      { id: 'p1', messageId: 'u1', sessionId: 'ses_fp', at: T, data: { type: 'text', text: 'Run the tests.' } },
+      { id: 'p2', messageId: 'u2', sessionId: 'ses_fp', at: T + 2000, data: { type: 'text', text: '<!-- generated-by: agentic-kit -->\n\nYou are an agentic-kit managed OpenCode execution worker.' } },
+      { id: 'p3', messageId: 'a1', sessionId: 'ses_fp', at: T + 3000, data: { type: 'text', text: 'done' } },
+    ],
+  });
+  const { session: lean } = parseSession({ dbFile, id: 'ses_fp' });
+  assert.deepEqual(lean.promptFPs.map((f) => f.p), ['human', 'adapter']);
+  assert.equal(lean.promptFPs[0].t, 3, 'the scan path really read the message text');
+  assert.deepEqual(lean.promptFPs[0], { ...promptFingerprint('Run the tests.'), p: 'human' });
+  assert.equal(lean.promptFPOverflow, 0);
+  assert.equal(JSON.stringify(lean.promptFPs).includes('Run the tests'), false, 'no prompt text on the record');
+
+  // withTurns must agree with it exactly — one text source, two read paths.
+  const { session: full } = parseSession({ dbFile, id: 'ses_fp', withTurns: true });
+  assert.deepEqual(full.promptFPs, lean.promptFPs);
+  rm(d);
+});
+
+test('a user message with no text part fingerprints as an attachment-only control turn', () => {
+  const d = tmp();
+  const dbFile = buildDb(path.join(d, 'opencode.db'), {
+    sessions: [{ id: 'ses_att', directory: '/x', title: 't', timeCreated: T }],
+    messages: [userMsg('u1', 'ses_att', T)],
+  });
+  const { session: rec } = parseSession({ dbFile, id: 'ses_att' });
+  assert.equal(rec.prompts, 1, 'it is still a prompt turn');
+  assert.deepEqual(rec.promptFPs.map((f) => f.p), ['control']);
+  assert.equal(rec.promptFPs[0].t, 0);
   rm(d);
 });

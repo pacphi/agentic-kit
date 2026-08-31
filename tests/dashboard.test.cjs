@@ -131,7 +131,30 @@ function eventually(predicate, message, timeout = 1500) {
 }
 
 async function main() {
-  const { startDashboard } = await import('file://' + MOD);
+  const { startDashboard: realStartDashboard } = await import('file://' + MOD);
+  // Fix round 1, I-6: every /api/usage route now also computes coaching
+  // (dashboard-server.mjs's dashboardCoachingPayload), which by default
+  // reads the REAL ~/.config/agentic-kit ledger — the exact hazard `usage`/
+  // `limits` are already injected against throughout this file. A blank
+  // in-memory ledger keeps every call in this suite hermetic; wrapping
+  // startDashboard itself (rather than editing ~26 call sites) means no
+  // future call site can reintroduce the gap by omission.
+  const NULL_COACHING_LEDGER = { loadLedger: () => ({ version: 1, records: [] }), ledgerPath: '/dev/null/unused' };
+  // Fix round 1, I-3: the SAME hazard, one file over (review-confirmed live
+  // with repro/probe-leak.mjs) — dashboard-server.mjs also reads the
+  // persisted label/card store unconditionally on every /api/usage poll and
+  // feeds it to dashboardCoachingPayload, regardless of the `usage`
+  // override above. `tests/ui/dashboard-ui.mjs` and dashboard-usage-
+  // telemetry.test.mjs both already wrap this; this file only had the
+  // ledger half wrapped, leaving every one of its ~25 startDashboard call
+  // sites able to serve this developer's REAL enriched cards to a
+  // fixture-only test.
+  const NULL_LABEL_STORE = {
+    loadLabelStore: () => ({ version: 1, labels: {}, cards: {} }), labelStorePath: '/dev/null/unused',
+  };
+  const startDashboard = (opts = {}) => realStartDashboard({
+    coachingLedger: NULL_COACHING_LEDGER, labelStore: NULL_LABEL_STORE, ...opts,
+  });
 
   const STUB_STATUS = {
     overall: 'warn',
@@ -427,7 +450,10 @@ async function main() {
   // testable without a 1.3 GB transcript corpus on disk, and the traversal tests
   // need a spy that PROVES no file read was attempted.
   // ══════════════════════════════════════════════════════════════════════════
-  const { parseSessionId, resolvesInsideRoot, maskTurns } = await import('file://' + MOD);
+  const {
+    parseSessionId, resolvesInsideRoot, maskTurns,
+    parseNamespacedSessionId, resolvesNamespacedInsideRoot,
+  } = await import('file://' + MOD);
 
   // ── the guard, as pure functions (no server, no I/O) ──
   await test('parseSessionId accepts a plain session id and decodes percent-encoding', async () => {
@@ -456,6 +482,41 @@ async function main() {
     assert(resolvesInsideRoot(root, '../abc') === false, 'a parent hop escapes the root');
     assert(resolvesInsideRoot(root, path.join('sub', 'abc')) === false, 'a nested path is not a bare id');
     assert(resolvesInsideRoot(root, path.resolve(path.sep, 'etc', 'passwd')) === false, 'an absolute path escapes the root');
+  });
+
+  // ── namespaced subagent session ids (Task 5 round 2) ──
+  await test('parseNamespacedSessionId accepts <parentId>/<stem>, decodes percent-encoding, and parses named subagents', async () => {
+    const r = parseNamespacedSessionId('fc8c05e0-c311-456e-a226-6dac4279199b/agent-a2fc4593254cc01b9');
+    assert(r && r.parentId === 'fc8c05e0-c311-456e-a226-6dac4279199b' && r.stem === 'agent-a2fc4593254cc01b9',
+      'a well-formed namespaced id must parse into its two segments');
+    const encoded = parseNamespacedSessionId('%66oo/agent-1');
+    assert(encoded && encoded.parentId === 'foo', 'percent-encoding is decoded BEFORE validation, never after');
+    // Most real subagent stems on this machine's corpus carry a Task-tool
+    // name, not just a bare hex tail — a hex-only pattern would leave most
+    // subagent sessions still unopenable.
+    const named = parseNamespacedSessionId('foo/agent-acourt-brutal_honesty-fb47a0cb49087a58');
+    assert(named && named.stem === 'agent-acourt-brutal_honesty-fb47a0cb49087a58', 'a named subagent stem must parse');
+  });
+
+  await test('parseNamespacedSessionId rejects traversal, backslash, extra slashes, absolutes, and a non-agent-* child', async () => {
+    const bad = [
+      '../etc/agent-1', '..%2fagent-1', 'foo/..', 'foo/../agent-1',
+      'foo\\bar/agent-1', 'foo/agent-1\\..\\..\\etc', 'a/b/agent-1', 'a//agent-1',
+      '/agent-1', 'foo/', '/foo/agent-1', 'C:%5CWindows/agent-1',
+      'foo/notanagent', 'foo/Agent-1', 'foo/agent-', 'foo/agent',
+      'foo/agent-1/extra', '', 'foo', 'agent-1', '..',
+    ];
+    for (const b of bad) {
+      assert(parseNamespacedSessionId(b) === null,
+        'must reject ' + JSON.stringify(b) + ', got ' + JSON.stringify(parseNamespacedSessionId(b)));
+    }
+  });
+
+  await test('resolvesNamespacedInsideRoot pins both segments to the transcript root, exactly as plain ids do', async () => {
+    const root = path.join(os.tmpdir(), 'ak-usage-root');
+    assert(resolvesNamespacedInsideRoot(root, 'abc', 'agent-1') === true, 'a well-formed pair resolves inside the root');
+    assert(resolvesNamespacedInsideRoot(root, '../abc', 'agent-1') === false, 'a parent-hop parent segment escapes the root');
+    assert(resolvesNamespacedInsideRoot(root, path.join('sub', 'abc'), 'agent-1') === false, 'a nested parent segment is not a bare id');
   });
 
   await test('maskTurns runs every turn body through the masker (and fails closed without one)', async () => {
@@ -504,7 +565,6 @@ async function main() {
       codex: { status: 'ok', reason: null },
       opencode: {
         status: 'degraded', reason: 'busy',
-        capabilities: { prompts: 'unavailable', toolCalls: 'unavailable' },
         diagnostics: { common: {
           unitsSeen: 0, unitsParsed: 0, unitsWithUsage: 0,
           unitsWithPrompts: 0, unitsWithResponses: 0,
@@ -607,8 +667,6 @@ async function main() {
       assert(Array.isArray(j.insights) && j.insights.length === 1, 'insights must survive');
       assert(j.sourceHealth.opencode.status === 'degraded' && j.sourceHealth.opencode.reason === 'busy',
         'source-health evidence must survive the dashboard route');
-      assert(j.sourceHealth.opencode.capabilities.toolCalls === 'unavailable',
-        'capability states must survive the dashboard route');
       assert(j.sourceHealth.opencode.diagnostics.common.warnings[0] === 'corrupt',
         'common telemetry diagnostics must survive the dashboard route');
       assert(spy.calls.readIndex.some((o) => o && o.days === 7), 'days must reach readIndex, got ' + JSON.stringify(spy.calls.readIndex));
@@ -661,6 +719,39 @@ async function main() {
       }
       assert(spy.calls.readSession.length === before,
         'readSession must NOT be called for any hostile id — got ' + (spy.calls.readSession.length - before) + ' call(s)');
+    });
+
+    // ── namespaced subagent session ids reach readSession end-to-end (Task 5 round 2) ──
+    await test('GET /api/session/:parentId/:stem → a namespaced subagent id reaches readSession end-to-end', async () => {
+      const before = spy.calls.readSession.length;
+      const r = await get(usageSrv.url + 'api/session/parent-uuid/agent-a2fc4593254cc01b9', usageSrv.token);
+      assert(r.status === 200, 'expected 200, got ' + r.status);
+      const j = JSON.parse(r.body);
+      assert(j.meta && j.meta.id === 'parent-uuid/agent-a2fc4593254cc01b9', 'meta must carry the namespaced id');
+      assert(spy.calls.readSession.length === before + 1
+        && spy.calls.readSession[spy.calls.readSession.length - 1] === 'parent-uuid/agent-a2fc4593254cc01b9',
+        'readSession must be called with the full namespaced id, unmangled');
+    });
+
+    await test('GET /api/session/:id traversal via a namespaced-shaped id → 400 and readSession is never reached', async () => {
+      const before = spy.calls.readSession.length;
+      const hostile = [
+        '/api/session/parent/../../../etc/passwd',
+        '/api/session/parent%2f..%2f..%2fetc%2fpasswd',
+        '/api/session/' + encodeURIComponent(path.resolve(path.sep, 'etc', 'passwd')) + '/agent-1',
+        '/api/session/parent/agent-1/extra',
+        '/api/session/parent/notanagent',
+        '/api/session/parent/Agent-1',
+        '/api/session/' + 'x'.repeat(129) + '/agent-1',
+      ];
+      for (const p of hostile) {
+        const r = await getRaw(usageSrv.port, p, usageSrv.token);
+        assert(r.status === 400, 'expected 400 for ' + p + ', got ' + r.status);
+        assert(!/root:|passwd/i.test(r.body), 'a rejected request must not echo file content: ' + p);
+      }
+      assert(spy.calls.readSession.length === before,
+        'readSession must NOT be called for any hostile namespaced-shaped id — got '
+        + (spy.calls.readSession.length - before) + ' call(s)');
     });
   } finally {
     await usageSrv.close();
@@ -785,7 +876,13 @@ async function main() {
       try {
         const r = await get(broken.url + 'api/limits', broken.token);
         assert(r.status === 500, 'expected 500, got ' + r.status);
-        contains(r.body, 'quota backend down');
+        // The body is a STABLE, non-reflective string. Node's fs errors embed
+        // the absolute path, and project slugs come from real working
+        // directories, so reflecting e.message hands the client the username,
+        // the directory layout, and project names. The operator gets the real
+        // error on stderr instead.
+        contains(r.body, 'plan limits unavailable');
+        assert(!r.body.includes('quota backend down'), 'the raw exception message must not be reflected');
       } finally { await broken.close(); }
     });
   } finally {
@@ -1173,7 +1270,7 @@ async function main() {
       contains(r.body, 'data-status="');
       contains(r.body, 'OpenCode');
       contains(r.body, 'SOURCE_HEALTH_GROUPS'); // Codex + its thread ledger render as one grouped chip
-      contains(r.body, 'provider account analytics');
+      contains(r.body, 'Provider account analytics');
       contains(r.body, 'never merged into transcript totals');
       contains(r.body, 'OpenRouter credits');
       contains(r.body, 'BYOK estimate');
@@ -1978,7 +2075,7 @@ async function main() {
   // is the suite where it matters most — the traversal-guard and credential-
   // leak tests live here and were the reviewer's cited example of a block
   // that could silently vanish with the old harness never noticing.
-  const EXPECTED = 77;
+  const EXPECTED = 82;
   if (passed + failed !== EXPECTED) {
     console.error(`\nPLAN MISMATCH: expected ${EXPECTED} tests, ran ${passed + failed}`);
     process.exit(1);

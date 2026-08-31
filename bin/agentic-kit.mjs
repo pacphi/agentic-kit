@@ -4,7 +4,7 @@
 import { parseArgs } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
-import { fail, dim } from '../src/lib/output.mjs';
+import { fail, dim, exitWhenFlushed } from '../src/lib/output.mjs';
 
 const PKG_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -53,7 +53,7 @@ Usage (ak = alias of agentic-kit):
   ak sync            converge to good: upgrade + heal + verify          [--dry-run] [--no-upgrade]
   ak dashboard       open the local web dashboard (localhost; auto-opens browser)  [--port N] [--no-open]
   ak admin           maintainer-only telemetry admin (localhost; GitHub/npm egress)  [--port N] [--no-open]
-  ak usage           inspect/refresh offline provider analytics  [status|refresh openrouter]
+  ak usage           offline scorecard, prompt patterns, provider cache  [status|score|prompts|refresh openrouter]
   ak models          inspect/refresh model lifecycle evidence  [status|refresh|diff|explain|plan]
   ak system          what this stack occupies on your machine   [--deep] [--json]
   ak about           what agentic-kit installs and configures, and why  [--category N]
@@ -142,12 +142,32 @@ async function main() {
     return 0;
   }
 
-  const { values, positionals } = parseArgs({
-    args: rest,
-    options: mod.options ?? {},
-    allowPositionals: true,
-    strict: false,
-  });
+  // strict:true — security review SEC-10. Under `strict:false` an option
+  // declared as taking a value swallows whatever follows it, flag or not:
+  // `ak usage prompts --draft --json` consumed `--json` AS THE DRAFT ID and
+  // then exited 2 in HUMAN format, so a script doing
+  // `ak usage prompts --draft "$ID" --json | jq` with `$ID` unset silently got
+  // prose instead of JSON. `--dismiss --window 30` likewise ate `--window`,
+  // leaving it defaulted to 365 days. Strict mode refuses all three (and the
+  // no-value-at-all case, which used to yield the string "true"), plus an
+  // unknown flag — which is a real behavior change, and the right one: a
+  // mistyped flag that silently does nothing is worse than one that says so.
+  let parsed;
+  try {
+    parsed = parseArgs({
+      args: rest,
+      options: mod.options ?? {},
+      allowPositionals: true,
+      strict: true,
+    });
+  } catch (err) {
+    if (!String(err?.code ?? '').startsWith('ERR_PARSE_ARGS_')) throw err;
+    fail(`ak ${cmd}: ${err.message}`);
+    console.log(mod.help ?? `ak ${cmd} — flags: ${
+      Object.keys(mod.options ?? {}).map((o) => `--${o}`).join(' ') || '(none)'}`);
+    return 2;
+  }
+  const { values, positionals } = parsed;
 
   // Experimental host-adapter bootstrap (Wave 4, adapter door) — the single
   // place every command passes through. Gated on the env var BEFORE anything
@@ -225,6 +245,6 @@ function reportFatal(err) {
 }
 
 main().then(
-  (code) => process.exit(code),
-  (err) => { reportFatal(err); process.exit(1); },
+  (code) => exitWhenFlushed(code),
+  (err) => { reportFatal(err); exitWhenFlushed(1); },
 );

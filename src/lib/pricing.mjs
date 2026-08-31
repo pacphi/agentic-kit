@@ -130,8 +130,12 @@ export const PRICES = {
  *
  * - **Regional-processing uplift.** OpenAI charges +10% on data-residency
  *   endpoints for models released on/after 2026-03-05. Codex CLI does not use
- *   those endpoints by default, and a transcript does not record which endpoint
- *   served it, so we cannot detect it.
+ *   those endpoints by default, and a rollout names no endpoint, so we cannot
+ *   detect it. Anthropic's equivalent is the 1.1x `inference_geo` uplift on
+ *   "us"-pinned inference; Claude transcripts DO carry `usage.inference_geo`
+ *   per assistant turn, but the only value observed locally is the literal
+ *   "not_available" — the key is recorded, the region is not, so there is
+ *   nothing to price on.
  * - **Large-prompt surcharge.** A 2x input / 1.5x output surcharge above ~272K
  *   input tokens has been reported for the GPT-5.6 line but is NOT restated on
  *   the current pricing page; it is left unmodelled rather than encoded on one
@@ -139,8 +143,16 @@ export const PRICES = {
  * - **`*-pro` models list no cached-input rate** (caching appears unsupported).
  *   Their transcripts therefore report zero cached tokens, so the 0.1x branch
  *   is simply never exercised for them.
- * - **Service tiers.** Batch / Flex / Priority multipliers are not applied; the
- *   transcripts do not record the tier a request used.
+ * - **Service tiers.** Batch / Flex / Priority multipliers are not applied.
+ *   Not for want of a field: Claude turns carry `usage.service_tier` and
+ *   `usage.speed`, and newer Codex rollouts carry a
+ *   `thread_settings.service_tier`. Semantics is the blocker: each corpus holds
+ *   exactly ONE value ("standard" / "standard" / "default"), so no mapping
+ *   from a recorded string to a published multiplier can be checked against
+ *   evidence — only asserted. The Codex field is configured INTENT, not a
+ *   record of the tier that served a request. And which billing SURFACE ran
+ *   (plain Messages API, Batch, Managed Agents) is recorded nowhere at all.
+ *   See docs/USAGE-SCORECARD-METRICS.md §13.3 for the key-presence census.
  */
 export const UNMODELLED_PRICING_FACTORS = Object.freeze([
   'regional-processing-uplift', 'large-prompt-surcharge', 'service-tiers',

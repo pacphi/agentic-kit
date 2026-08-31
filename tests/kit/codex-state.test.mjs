@@ -114,6 +114,32 @@ test('applyCodexLedger backfills thread_source and STRIPS a subagent’s usage',
   assert.deepEqual(out.usage, []); // replayed parent history must not double-bill
 });
 
+// reasoningOutput comes from the SAME replayed cumulative snapshot as the
+// tokens (finalizeCodexUsage reads both off the last token_count), so leaving
+// it behind kept 100% of the double-count in one field and rendered it beside
+// the zeroed totals as "in 0 · out 0 · … · reasoning 412K (in out)" — a
+// subset annotation pointing at an output total the same correction just
+// zeroed. Reachable only on the ledger path: parse-time detection returns
+// before reasoningOutput is ever set.
+test('applyCodexLedger strips reasoningOutput along with the replayed tokens', () => {
+  const [out] = applyCodexLedger(
+    [rec({ reasoningOutput: 412_000 })],
+    ledgerOf({ 'child-1': { threadSource: 'subagent' } }),
+  );
+  assert.deepEqual(out.usage, []);
+  assert.equal(out.reasoningOutput, 0, 'same replayed snapshot, same double-count');
+});
+
+test('applyCodexLedger strips a subagent whose ONLY replayed figure is reasoningOutput', () => {
+  // The early return must not let a record through just because usage is
+  // already empty while reasoningOutput still carries the inflation.
+  const [out] = applyCodexLedger(
+    [rec({ threadSource: 'subagent', usage: [], reasoningOutput: 412_000 })],
+    ledgerOf({ 'child-1': { threadSource: 'subagent' } }),
+  );
+  assert.equal(out.reasoningOutput, 0);
+});
+
 test('applyCodexLedger marks a spawn-edge child subagent even without a thread row', () => {
   const [out] = applyCodexLedger([rec()], ledgerOf({}, [['child-1', 'parent-1']]));
   assert.equal(out.threadSource, 'subagent');

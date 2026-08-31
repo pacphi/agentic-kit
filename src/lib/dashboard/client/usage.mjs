@@ -4,10 +4,22 @@
 import { VIEWS, authHeaders, esc, setTab, syncHash } from './bootstrap.mjs';
 import { ago } from './intelligence.mjs';
 import { renderModelFacets, renderModelInventory, renderModelLifecycle } from './model-lifecycle.mjs';
+import { bucketPercentile, bucketPositionPct, deltaChip, donut2, histogram, rankedRows, sparklineSvg, stackedDays } from './usage-rhythm.mjs';
+import { advisedClusters, coachingPanel, hostInterplay, promptKpis, provenancePanel, steerPanel, tapLengthPanel } from './usage-prompts.mjs';
 import { renderUsage } from './usage-orchestrators.mjs';
 
   // ══ Usage tab ══════════════════════════════════════════════════════════════
   export var USAGE=null, usageLoaded=false, usageBusy=false, TRANSCRIPT=null;
+  // Coaching panel (Prompts view) interaction state — owned here, passed into
+  // the pure builder so a re-render is idempotent (usage-prompts.mjs). `filter`
+  // is a kind or 'all'; `sort` a {key,dir}; `openKey` the one expanded cluster;
+  // `posture` the shown/hidden prompt-text toggle; `samples` a per-cluster fetch
+  // cache; `dismissed` the optimistic per-card dismissal map. `promptSamplesWindow`
+  // remembers which `usageDays` window the cache was filled under, so a window
+  // change can drop it rather than render stale samples (fable F3).
+  var promptFilter="all", promptSort={key:"count",dir:"desc"}, promptOpenKey=null,
+    promptPosture="shown", promptSamples={}, promptDismissed={}, promptSamplesWindow=null,
+    promptDismissError={};
   export var MODELS=null,MODEL_PAGE=null,modelRows=[],modelSnapshotId=null,modelsBusy=false,modelRequestSeq=0,modelSearchTimer=null;
   export var MODEL_LIMIT=50,modelSort="lifecycle",modelDirection="asc",modelRouteSort="model",modelRouteDirection="asc";
 
@@ -16,6 +28,16 @@ import { renderUsage } from './usage-orchestrators.mjs';
     if(n>=1000)return "$"+Math.round(n).toLocaleString();
     if(n>=10)return "$"+n.toFixed(0);
     return "$"+n.toFixed(2);
+  }
+  // A POSITIVE figure that rounds away at two decimals is not $0.00 — printing
+  // it that way beside a caption about excluding $0-by-construction sessions
+  // reads as "the median session was free", which is a different claim from
+  // "the median session cost less than a cent". The threshold is derived from
+  // fmtUsd's own output rather than restating its rounding rule, so the two
+  // cannot disagree. A true zero is left alone: it is not less than a cent.
+  function fmtUsdMin(n){
+    var v=Number(n)||0,txt=fmtUsd(v);
+    return (v>0&&txt==="$0.00")?"<$0.01":txt;
   }
   export function fmtNum(n){return (Number(n)||0).toLocaleString();}
   export function fmtTok(n){
@@ -80,7 +102,7 @@ import { renderUsage } from './usage-orchestrators.mjs';
       var grp=SOURCE_HEALTH_GROUPS[g],present=[];
       for(var p=0; p<grp.parts.length; p++){
         var part=grp.parts[p],item=health[part.key];
-        if(item) present.push({status:String(item.status||"not-read"),reason:item.reason,diagnostics:item.diagnostics,capabilities:item.capabilities,sub:part.sub});
+        if(item) present.push({status:String(item.status||"not-read"),reason:item.reason,diagnostics:item.diagnostics,sub:part.sub});
       }
       if(!present.length)continue;
       var lead=present.slice().sort(function(a,b){
@@ -92,8 +114,6 @@ import { renderUsage } from './usage-orchestrators.mjs';
         if(q&&q.files) d+=" · "+fmtNum(q.responses)+" responses / "+fmtNum(q.files)+" files";
         if(q&&q.warnings&&q.warnings.length) d+=" · "+q.warnings.join(", ");
         if(q&&q.common) d+=" · "+fmtNum(q.common.unitsParsed)+"/"+fmtNum(q.common.unitsSeen)+" parsed · "+fmtNum(q.common.prompts)+" prompts / "+fmtNum(q.common.responses)+" responses";
-        var caps=pt.capabilities;
-        if(caps) d+=" · tools "+String(caps.toolCalls||"unavailable");
         return pt.sub?pt.sub+": "+d:d;
       }).join(" · ");
       pills.push('<span class="source-pill" data-status="'+esc(lead.status)+'">'
@@ -108,6 +128,14 @@ import { renderUsage } from './usage-orchestrators.mjs';
   export function loadUsage(force){
     if(usageBusy)return Promise.resolve();
     usageBusy=true;
+    // The per-cluster samples cache is window-scoped: its keys resolve only
+    // against the window they were fetched under, so a window change must drop it
+    // (and collapse the open row, whose key may not exist in the new window)
+    // rather than render the prior window's masked text under the new one — a
+    // same-window poll leaves it untouched (fable F3 / I-3).
+    if(promptSamplesWindow!=null&&promptSamplesWindow!==usageDays){
+      promptSamples={}; promptOpenKey=null; promptSamplesWindow=null;
+    }
     var jobs=[fetch("/api/usage?days="+usageDays,{cache:"no-store",headers:authHeaders()}).then(function(r){return r.json();})
       .then(function(d){USAGE=d; usageLoaded=true;})];
     if(usageView==="transcript"&&usageSession&&(force||!TRANSCRIPT||TRANSCRIPT.id!==usageSession))
@@ -219,7 +247,7 @@ import { renderUsage } from './usage-orchestrators.mjs';
   export function setUsageView(v,session){
     usageView=v;
     if(session!==undefined)usageSession=session;
-    var headings={score:["Usage scorecard","Token consumption, API-equivalent cost, efficiency, and trends."],limits:["Provider limits","Current provider windows, reset timing, and available capacity."],findings:["Usage findings","Actionable anomalies, efficiency opportunities, and evidence-backed recommendations."],sessions:["Session usage","Browse retained sessions by project, category, duration, tokens, and cost."],models:["Models","Observed models in this window, configured routes, and the separate provider/local catalogue."],transcript:["Transcript detail","Inspect the selected session's locally retained, server-masked evidence."]},heading=headings[v]||headings.score;
+    var headings={score:["Usage scorecard","Token consumption, API-equivalent cost, efficiency, and trends."],limits:["Provider limits","Current provider windows, reset timing, and available capacity."],findings:["Usage findings","Actionable anomalies, efficiency opportunities, and evidence-backed recommendations."],prompts:["Prompt patterns","What you type across every host, which patterns repeat, and what to change — from fingerprints, with masked prompt text on demand."],sessions:["Session usage","Browse retained sessions by project, category, duration, tokens, and cost."],models:["Models","Observed models in this window, configured routes, and the separate provider/local catalogue."],transcript:["Transcript detail","Inspect the selected session's locally retained, server-masked evidence."]},heading=headings[v]||headings.score;
     document.getElementById("usage-view-title").textContent=heading[0];document.getElementById("usage-view-description").textContent=heading[1];
     var btns=document.querySelectorAll("#usage-seg [data-view]");
     for(var i=0;i<btns.length;i++){var on=btns[i].getAttribute("data-view")===v;btns[i].setAttribute("aria-selected",on?"true":"false");btns[i].tabIndex=on?0:-1;}
@@ -241,11 +269,39 @@ import { renderUsage } from './usage-orchestrators.mjs';
     if(v==="transcript"&&usageSession&&(!TRANSCRIPT||TRANSCRIPT.id!==usageSession)){
       loadTranscript(usageSession).then(renderTranscript);
     }
+    var days=document.getElementById("usage-days");if(days)days.hidden=(v==="transcript");
+    // BEFORE the per-view loaders, not after. Leaving Prompts with All (365)
+    // selected resets the window to 30, and a loader that ran first would have
+    // already fetched at 365: two requests in flight for different windows with
+    // no ordering guarantee, so a late 365 response paints year-wide figures
+    // under a chip row reading 30d. Settling the window first means each loader
+    // below fires once, at the window the reader can actually see.
+    syncAllHistoryChip(v);
     // Limits is LAZY like the tab itself: the Codex side may spawn one vendor
     // subprocess server-side, so it runs when the view is opened, not on poll.
     if(v==="limits"&&!LIMITS)loadLimits();
     if(v==="models"){loadModelLifecycle();if(!LIMITS)loadLimits();}
-    var days=document.getElementById("usage-days");if(days)days.hidden=(v==="transcript");
+    // Prompts renders from the payload the poll already holds, so opening the
+    // tab is a re-render rather than a fetch — cheap enough to run on entry so
+    // the view is populated before the next poll, even though page.mjs ships
+    // every u-pr-* container statically and renderUsage also calls this.
+    if(v==="prompts"&&USAGE&&!USAGE.error)renderPrompts(USAGE);
+  }
+
+  // Whole-history is offered on the Prompts view alone: patterns are lifetime
+  // phenomena, where every other view's figures are about a recent window.
+  // Leaving Prompts with it selected drops back to 30d rather than carrying a
+  // 365-day window into a view whose chip row no longer shows it — a selected
+  // window the reader cannot see is worse than a narrower one they can.
+  function syncAllHistoryChip(v){
+    var all=document.getElementById("usage-days-all");
+    if(!all)return;
+    var on=(v==="prompts");
+    all.hidden=!on;
+    if(!on&&usageDays>=365){
+      var fallback=document.querySelector('#usage-days [data-days="30"]');
+      if(fallback)fallback.click();
+    }
   }
 
   // Explicit bridge from Observability metadata to the separately fetched,
@@ -258,6 +314,154 @@ import { renderUsage } from './usage-orchestrators.mjs';
     setUsageView("transcript",id);
     return true;
   };
+
+  // Toggle the sort column/direction: same column flips asc/desc, a new column
+  // starts descending for a numeric field and ascending for the name.
+  function sortCoaching(key){
+    if(promptSort.key===key){promptSort={key:key,dir:promptSort.dir==="asc"?"desc":"asc"};}
+    else{promptSort={key:key,dir:key==="name"?"asc":"desc"};}
+    renderCoaching();
+  }
+  // Expand/collapse one pattern (one open at a time). On open, bring the row to
+  // the top of the capped scroll window so its panel is not stranded below the
+  // fold, then fetch its masked samples if the posture allows.
+  function toggleCoachRow(key){
+    promptOpenKey=promptOpenKey===key?null:key;
+    renderCoaching();
+    if(promptOpenKey){scrollOpenRowToTop();maybeFetchSamples(promptOpenKey);}
+  }
+  function scrollOpenRowToTop(){
+    var host=document.getElementById("u-pr-coaching");
+    var wrap=host&&host.querySelector(".pr-tablewrap");
+    var row=host&&host.querySelector('.prow[data-pr-row="'+cssAttr(promptOpenKey)+'"]');
+    if(!wrap||!row)return;
+    // 44px ≈ the sticky header, so the opened row clears it rather than hiding under it.
+    wrap.scrollTop+=(row.getBoundingClientRect().top-wrap.getBoundingClientRect().top)-44;
+  }
+  // Escape a cluster key for use inside a "..." attribute selector. Keys are
+  // 16-hex in production and short slugs in tests, but a quote/backslash must
+  // never break the selector regardless.
+  function cssAttr(v){return String(v==null?"":v).replace(/["\\]/g,"\\$&");}
+
+  // Fetch this cluster's masked samples on demand (§4.2, I-3). Gated on the
+  // SHOWN posture (hidden makes NO request); the SAME `usageDays` window as
+  // /api/usage, or the cluster key set will not resolve. Cached per key for the
+  // session (loading/ok/empty/error), so re-expanding never refetches; one
+  // in-flight fetch per row.
+  //
+  // The per-KEY cache is what keeps a late response from ever crossing rows:
+  // each response writes promptSamples[itsOwnKey], and the panel only ever reads
+  // promptSamples[openKey], so a late A cannot land in an open B regardless of
+  // arrival order. The `promptOpenKey===key` check below is therefore an
+  // OPTIMIZATION — it skips a wasted re-render when the row has since collapsed
+  // or another opened — not the safety property (QE F-2).
+  function maybeFetchSamples(key){
+    if(promptPosture!=="shown")return;
+    if(promptSamples[key])return;
+    promptSamplesWindow=usageDays;   // the window this cache belongs to (fable F3)
+    promptSamples[key]={state:"loading"};
+    renderCoaching(true);
+    var url="/api/prompts/samples?key="+encodeURIComponent(key)+"&window="+usageDays;
+    fetch(url,{cache:"no-store",headers:authHeaders()})
+      .then(function(r){return r.ok?r.json():null;})
+      .then(function(d){
+        if(!d||!Array.isArray(d.samples)){promptSamples[key]={state:"error"};}
+        else if(!d.samples.length){promptSamples[key]={state:"empty",occurrences:d.occurrences||[]};}
+        else{promptSamples[key]={state:"ok",samples:d.samples,occurrences:d.occurrences||[]};}
+        if(promptOpenKey===key)renderCoaching(true);
+      })
+      .catch(function(){promptSamples[key]={state:"error"}; if(promptOpenKey===key)renderCoaching(true);});
+  }
+
+  // Copy the open draft to the clipboard, flipping the button to a checkmark
+  // (CSS, via the `copied` class). Falls back to selecting the <pre> text when
+  // the clipboard API is unavailable or refused.
+  function copyDraft(key){
+    var pre=document.getElementById("pr-draft-"+key);
+    var btn=document.querySelector('[data-pr-copy="'+cssAttr(key)+'"]');
+    if(!pre)return;
+    function ok(){ if(!btn)return; btn.classList.add("copied"); btn.setAttribute("title","Copied");
+      setTimeout(function(){btn.classList.remove("copied"); btn.setAttribute("title","Copy to clipboard");},1400); }
+    try{
+      if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(pre.textContent).then(ok,function(){selectPre(pre);});}
+      else{selectPre(pre);}
+    }catch(e){selectPre(pre);}
+  }
+  function selectPre(pre){
+    try{var rg=document.createRange(); rg.selectNodeContents(pre); var s=window.getSelection();
+      s.removeAllRanges(); s.addRange(rg);}catch(e){}
+  }
+
+  // Dismiss / undo — the dashboard's one non-inference write (§4.3). Optimistic:
+  // the row reflects the new state immediately; a failed POST reverts it. Undo
+  // deletes the record server-side so the card is re-proposed next scan.
+  function postCoaching(path,id){
+    return fetch(path,{method:"POST",cache:"no-store",
+      headers:Object.assign({"content-type":"application/json"},authHeaders()),
+      body:JSON.stringify({id:id})}).then(function(r){return r.ok;});
+  }
+  // On a failed write the optimistic state reverts AND a brief inline "couldn't
+  // save" hint is surfaced (P6) instead of a silent no-op — a retry clears it.
+  function doDismiss(id){
+    promptDismissed[id]=true; promptDismissError[id]=false; renderCoaching(true);
+    postCoaching("/api/prompts/dismiss",id).then(function(okv){
+      if(!okv){promptDismissed[id]=false; promptDismissError[id]=true; renderCoaching(true);}
+    }).catch(function(){promptDismissed[id]=false; promptDismissError[id]=true; renderCoaching(true);});
+  }
+  function doUndismiss(id){
+    promptDismissed[id]=false; promptDismissError[id]=false; renderCoaching(true);
+    postCoaching("/api/prompts/undismiss",id).then(function(okv){
+      if(!okv){promptDismissed[id]=true; promptDismissError[id]=true; renderCoaching(true);}
+    }).catch(function(){promptDismissed[id]=true; promptDismissError[id]=true; renderCoaching(true);});
+  }
+
+  // One delegated listener on the static Coaching container (its innerHTML is
+  // rewritten every re-render, but the container itself is stable, so the
+  // listener attaches once). Each interactive control carries a data-pr-*
+  // attribute; this dispatches on it.
+  (function wireCoaching(){
+    var host=document.getElementById("u-pr-coaching");
+    if(!host)return;
+    host.addEventListener("click",function(e){
+      var sel="[data-pr-filter],[data-pr-sort],[data-pr-open],[data-pr-copy],[data-pr-dismiss],[data-pr-undismiss],[data-pr-session]";
+      var t=e.target.closest?e.target.closest(sel):null;
+      if(!t)return;
+      if(t.hasAttribute("data-pr-session")){e.preventDefault(); window.AKDashboardOpenTranscript(t.getAttribute("data-pr-session")); return;}
+      if(t.hasAttribute("data-pr-filter")){promptFilter=t.getAttribute("data-pr-filter"); renderCoaching(); return;}
+      if(t.hasAttribute("data-pr-sort")){sortCoaching(t.getAttribute("data-pr-sort")); return;}
+      if(t.hasAttribute("data-pr-open")){toggleCoachRow(t.getAttribute("data-pr-open")); return;}
+      if(t.hasAttribute("data-pr-copy")){copyDraft(t.getAttribute("data-pr-copy")); return;}
+      if(t.hasAttribute("data-pr-dismiss")){doDismiss(t.getAttribute("data-pr-dismiss")); return;}
+      if(t.hasAttribute("data-pr-undismiss")){doUndismiss(t.getAttribute("data-pr-undismiss"));}
+    });
+  })();
+
+  // Prompt-text posture (§2.2, §4): a per-viewer shown/hidden toggle, remembered
+  // in localStorage (default shown). `hidden` suppresses the masked What-you-
+  // typed view-wide AND makes no samples fetch; switching back to `shown` on an
+  // open row fetches it then (if not already cached).
+  function setPosture(mode){
+    promptPosture=mode==="hidden"?"hidden":"shown";
+    try{localStorage.setItem("pt-posture",promptPosture);}catch(e){}
+    syncPostureButtons();
+    renderCoaching(true);
+    if(promptPosture==="shown"&&promptOpenKey)maybeFetchSamples(promptOpenKey);
+  }
+  function syncPostureButtons(){
+    var btns=document.querySelectorAll("[data-pr-posture]");
+    for(var i=0;i<btns.length;i++){
+      btns[i].setAttribute("aria-pressed",btns[i].getAttribute("data-pr-posture")===promptPosture?"true":"false");
+    }
+  }
+  (function wirePosture(){
+    try{var v=localStorage.getItem("pt-posture"); if(v==="hidden"||v==="shown")promptPosture=v;}catch(e){}
+    var group=document.getElementById("u-pr-posture");
+    if(group)group.addEventListener("click",function(e){
+      var b=e.target.closest?e.target.closest("[data-pr-posture]"):null;
+      if(b)setPosture(b.getAttribute("data-pr-posture"));
+    });
+    syncPostureButtons();
+  })();
 
   // titleTxt is optional and goes on the OUTER .kpi, so the whole card is the
   // hover target — a tooltip anchored to the number alone would be a 40px
@@ -290,74 +494,341 @@ import { renderUsage } from './usage-orchestrators.mjs';
       +"open unions whole session spans; summed double-counts overlap.";
   }
 
-  // Host-neutral telemetry is deliberately separate from the scorecard's
-  // measured totals. A missing common envelope means an older API response,
-  // not zero observations; the UI says so rather than backfilling a claim.
-  var TELEMETRY_HOSTS=[
-    {key:"claude",label:"Claude"},
-    {key:"codex",label:"Codex transcript"},
-    {key:"opencode",label:"OpenCode"}
-  ];
-  var TELEMETRY_CATEGORIES=[
-    ["prompts","prompts"],["responses","responses"],["toolCalls","tools"],
-    ["commandExecutions","commands"],["fileChanges","file changes"],
-    ["mcpCalls","MCP"],["collaboration","collaboration"]
-  ];
-  function renderTelemetryCoverage(health){
-    var el=document.getElementById("u-telemetry-grid");
-    if(!el)return;
-    health=health||{};
-    el.innerHTML=TELEMETRY_HOSTS.map(function(host){
-      var source=health[host.key]||{},status=String(source.status||"not-read");
-      var common=source.diagnostics&&source.diagnostics.common;
-      var counts;
-      if(!common){
-        counts="coverage not reported by this API";
-      }else if(status==="ok"){
-        counts=fmtNum(common.unitsParsed)+"/"+fmtNum(common.unitsSeen)+" parsed · "+fmtNum(common.prompts)+" prompts · "+fmtNum(common.responses)+" responses";
-      }else if(common.unitsSeen>0){
-        counts=fmtNum(common.unitsParsed)+"/"+fmtNum(common.unitsSeen)+" parsed · "+fmtNum(common.prompts)+" prompts · "+fmtNum(common.responses)+" responses · partial coverage";
-      }else{
-        counts="coverage unavailable"+(source.reason?" · "+String(source.reason):"");
-      }
-      if(common&&common.warnings&&common.warnings.length) counts+=" · "+common.warnings.join(", ");
-      var capabilities=source.capabilities||{};
-      var caps=TELEMETRY_CATEGORIES.map(function(item){
-        var state=String(capabilities[item[0]]||"unavailable");
-        return '<span class="tc-cap" data-state="'+esc(state)+'" title="'+esc(item[1]+" capability: "+state)+'">'+esc(item[1])+" "+esc(state)+"</span>";
-      }).join("");
-      return '<article class="telemetry-card" data-status="'+esc(status)+'">'
-        +'<div class="tc-head"><span>'+esc(host.label)+"</span><span class=\"tc-status\">"+esc(status)+"</span></div>"
-        +'<div class="tc-counts">'+esc(counts)+"</div>"
-        +'<div class="tc-caps">'+caps+"</div></article>";
-    }).join("");
+  // ── panels grafted onto the served scorecard markup ───────────────────────
+  // page.mjs renders the scorecard's containers. The panels below arrived
+  // after that markup shipped and build their own container instead of growing
+  // the served template with ids it has no other reason to know about. Every
+  // one is IDEMPOTENT: renderScore runs on each poll, so a second call finds
+  // the container the first call built rather than stacking a duplicate.
+  //
+  // scoreBlock walks up to the direct child of #v-score that owns `id`, which
+  // is the granularity the scorecard's own layout uses (a .strip, a .two pair,
+  // the .hero grid) — so an inserted panel lands between whole sections, never
+  // inside one.
+  function scoreBlock(id){
+    var el=document.getElementById(id),view=document.getElementById("v-score");
+    if(!el||!view)return null;
+    while(el&&el.parentNode&&el.parentNode!==view)el=el.parentNode;
+    return (el&&el.parentNode===view)?el:null;
+  }
+  function ensureBlock(probeId,html,afterId){
+    var existing=document.getElementById(probeId);
+    if(existing)return existing;
+    var anchor=scoreBlock(afterId);
+    if(!anchor)return null;
+    var host=document.createElement("div");
+    host.innerHTML=html;
+    var node=host.firstElementChild;
+    if(!node)return null;
+    anchor.parentNode.insertBefore(node,anchor.nextSibling);
+    return document.getElementById(probeId);
+  }
+  // The same heading grammar the served markup uses, so an inserted panel is
+  // indistinguishable from a static one. `note` is escaped: every caller
+  // passes a literal caption, and a panel's live figures belong in its body
+  // (rewritten each render) rather than in a header this builds once.
+  function stripHtml(bodyId,heading,note){
+    return '<section class="strip"><div class="sh"><h2>'+esc(heading)+"</h2>"
+      +'<span class="n mono">'+esc(note)+"</span></div>"
+      +'<div id="'+esc(bodyId)+'"></div></section>';
+  }
+  // A legend the chart primitives do not draw for themselves. Reuses the
+  // scorecard's own .legend/.lg grammar so an external legend is the same
+  // object here as it is under the token bar. The label is always spelled out
+  // beside the swatch — the hue is a hint, never the only way to read a series.
+  function chartLegend(items){
+    return '<div class="legend">'+items.map(function(it){
+      return '<span class="lg"><i style="background:'+esc(it.color)+'"></i>'+esc(it.label)
+        +' <b class="tnum">'+esc(it.value)+"</b></span>";
+    }).join("")+"</div>";
   }
 
+  // byDay ascending. Shared by the day-bar strip and every per-day series
+  // below, so they cannot disagree about which days are in the window.
+  function dayRows(d){
+    var out=[],k;
+    for(k in (d.byDay||{}))out.push({day:k,v:d.byDay[k]});
+    out.sort(function(a,b){return a.day<b.day?-1:1;});
+    return out;
+  }
+  // engagedByDay is a SIBLING map with its own key set, not a byDay field:
+  // byDay's presence contract is billed days only, and a day worked but never
+  // billed still has engaged time. Sorting it separately keeps that day in the
+  // trend instead of dropping it to match a different question's day set.
+  function mapRows(map){
+    var out=[],k;
+    for(k in (map||{}))out.push({day:k,v:map[k]});
+    out.sort(function(a,b){return a.day<b.day?-1:1;});
+    return out;
+  }
+  function fmtRatio(n){
+    if(n==null||!isFinite(n))return "—";
+    return Math.abs(n)>=10?String(Math.round(n)):n.toFixed(1);
+  }
+  // Durations that span four orders of magnitude (a 1.4s reply, a 3h session)
+  // in one compact token. A whole number of hours prints as "2h", not "2.0h":
+  // the extra digit claims a precision a bucket floor does not have.
+  function fmtSecs(sec){
+    sec=Number(sec)||0;
+    // <=60, not <60: the latency histogram's overflow bucket floor IS 60s, and
+    // that value has to read "60s" so "≥60s" names the bucket edge the reader
+    // can see on the axis. Rolling it up to "1m" renamed the boundary.
+    if(sec<=60)return (sec<10?Math.round(sec*10)/10:Math.round(sec))+"s";
+    if(sec<5400)return Math.round(sec/60)+"m";
+    var h=Math.round(sec/360)/10;
+    return (h%1===0?String(h):h.toFixed(1))+"h";
+  }
+  // A value from a histogram's OVERFLOW bucket has no upper edge to
+  // interpolate towards, so the percentile reports that bucket's FLOOR.
+  // Printing it bare would state a figure the counts cannot support, so it is
+  // prefixed and reads "at least this". `lastEdge` is that floor.
+  function fmtAtLeast(v,lastEdge,fmt){
+    if(v==null||!isFinite(v))return "—";
+    return (v>=lastEdge?"≥":"")+fmt(v);
+  }
   // renderScore was one CC-41 function writing ~10 independent scorecard
   // regions (hero KPIs, cost-per-day bars, host cards, token bar/legend,
   // punchcard, models, OpenRouter, projects, categories) in sequence. Split
   // by region; each keeps its original logic verbatim, so the rendered DOM
   // and its ordering are unchanged.
+
+  // A hero tile's footer: the change against the previous equal-length window,
+  // and a per-day trend for the same figure. Both self-suppress when the data
+  // cannot support them (deltaChip is '' with no previous window, sparklineSvg
+  // is '' below two points), so a tile with neither renders exactly as it did
+  // before this row existed.
+  function kpiFoot(chip,spark){
+    return (chip||spark)?'<div class="kpi-foot">'+chip+spark+"</div>":"";
+  }
+  // The cache tile's own dollar claim. cacheSavedUsd is computed server-side
+  // as a DIFFERENCE — the same tokens priced as fresh input minus priced as
+  // cache reads, at the rate in effect on the day they were spent — so it
+  // cannot drift out of step with the pricing table the way a hardcoded
+  // discount factor would. Rendered only when there is a figure to render.
+  function cacheSubtitle(t){
+    var saved=Number(t.cacheSavedUsd)||0;
+    return "priced at 0.1&times; input"
+      +(saved>0?'<span class="d-note">saved &asymp; '+esc(fmtUsd(saved))+" vs uncached</span>":"");
+  }
+  var CACHE_TIP="Share of this window's tokens that were cache reads. Higher is cheaper, so a rise "
+    +"is the good direction.\nsaved ≈ prices the same cache-read tokens as fresh input and takes the "
+    +"gap, at each day's own rate.\nThe trend is that share recomputed per day. A day that billed no "
+    +"tokens has no share to compute, so the line breaks across it rather than carrying a neighbour's "
+    +"value forward.";
+  // Engaged time is the ONE hero trend drawn from a different day set. Said on
+  // the tile, because the tiles otherwise look directly comparable and are not.
+  var ENGAGED_TREND_NOTE="\ntrend covers days you worked; the other tiles' trends cover billed days.";
+
   function renderScoreHero(d){
-    var t=d.totals||{};
-    var cacheShare=pct(t.cacheRead,t.tokens);
+    var t=d.totals||{},p=(d.previous&&d.previous.totals)||{};
+    var rows=dayRows(d);
+    var cacheShare=pct(t.cacheRead,t.tokens),prevCacheShare=pct(p.cacheRead,p.tokens);
+    function spark(pick){return sparklineSvg(rows.map(pick),{});}
     document.getElementById("u-hero").innerHTML=
-      kpi("sessions",fmtNum(t.sessions),esc(fmtNum(t.responses))+" assistant turns","")
-      +kpi("api-equivalent",fmtUsd(t.cost),"list price &middot; not plan billing","accent")
-      +kpi("tokens",fmtTok(t.tokens),esc(fmtTok(t.output))+" out &middot; "+esc(fmtTok(t.cacheRead))+" cached","")
+      kpi("sessions",fmtNum(t.sessions),esc(fmtNum(t.responses))+" assistant turns"
+        +kpiFoot(deltaChip(t.sessions,p.sessions,{}),
+          spark(function(x){return fld(x.v,"sessions");})),"")
+      +kpi("api-equivalent",fmtUsd(t.cost),"list price &middot; not plan billing"
+        +kpiFoot(deltaChip(t.cost,p.cost,{downIsGood:true}),
+          spark(function(x){return fld(x.v,"cost");})),"accent")
+      +kpi("tokens",fmtTok(t.tokens),esc(fmtTok(t.output))+" out &middot; "+esc(fmtTok(t.cacheRead))+" cached"
+        +kpiFoot(deltaChip(t.tokens,p.tokens,{neutral:true}),
+          spark(function(x){return fld(x.v,"tokens");})),"")
       +kpi("engaged time",fmtHours(t.engagedSeconds),
         esc(fmtMins(t.spanMinutes))+" summed"
-        +'<span class="d-note">sessions overlap</span>',"",ladder(t))
-      +kpi("cache read",cacheShare.toFixed(1)+"%","priced at 0.1&times; input","warnv");
+        +'<span class="d-note">sessions overlap</span>'
+        +kpiFoot(deltaChip(t.engagedSeconds,p.engagedSeconds,{}),
+          sparklineSvg(mapRows(d.engagedByDay).map(function(x){return Number(x.v)||0;}),{})),
+        "",ladder(t)+ENGAGED_TREND_NOTE)
+      // Cache share is up-good, unlike the cost tile beside it: cache reads
+      // bill at 0.1× input, so a bigger share of them is a cheaper window.
+      // The delta is in percentage POINTS — a percent-of-a-percent would be
+      // read as a share change and is not what moved.
+      // A day that billed no tokens has no share to compute. It keeps its slot
+      // in the series as a null, which sparklineSvg draws as a BREAK — never a
+      // carried-forward value, which would state a figure for a day that has
+      // none, and never a dropped point, which would squeeze the time axis.
+      +kpi("cache read",cacheShare.toFixed(1)+"%",cacheSubtitle(t)
+        +kpiFoot(deltaChip(cacheShare,prevCacheShare,{unit:" pp"}),
+          spark(function(x){
+            var tok=fld(x.v,"tokens");
+            return tok?pct(fld(x.v,"cacheRead"),tok):null;
+          })),"warnv",CACHE_TIP);
     document.getElementById("u-asof").textContent=d.pricesAsOf?("rates as of "+d.pricesAsOf):"";
 
   }
 
+  // ── second KPI row: cadence, autonomy, unit economics ─────────────────────
+  var TIP_PER_DAY="Sessions ÷ active days.\nAn ACTIVE day is one this window actually billed tokens "
+    +"on — that is byDay's own contract, so a day worked but never billed is not counted and breaks "
+    +"the streak.\nStreak counts consecutive active days ending at the most recent one.\n"
+    +"Sessions INCLUDES delegated subagent sessions, which the harness dispatches rather than you — "
+    +"the how-you-run panel carries the main/subagent split.";
+  var TIP_AUTONOMY="Assistant responses ÷ prompts you typed — how far each prompt travels.\n"
+    +"Prompts are MAIN-THREAD only: a subagent's prompts are written by the harness, not by you, so "
+    +"counting them would inflate the denominator with work nobody asked for by hand.\nTouch rate is "
+    +"those same prompts per engaged hour.";
+  var TIP_PER_SESSION="Median api-equivalent cost of one session, and the 90th percentile of the same "
+    +"set.\nSessions with NO token evidence at all are excluded: they are structurally $0 (a Codex "
+    +"subagent rollout whose tokens were stripped as a double-count, say), not cheap, and folding "
+    +"them in would drag the median toward zero for a reason that is not about spend.\n<$0.01 means "
+    +"a real, positive figure smaller than a cent — not zero.";
+  var TIP_PER_HOUR="Api-equivalent cost ÷ engaged hours.\nEngaged time unions active sub-intervals "
+    +"split at 15-minute silences — not wall clock, and not the sum of session spans, which "
+    +"double-counts overlap.\n— when no engaged time was measured.";
+
+  function dayBefore(day){
+    var t=Date.parse(String(day)+"T00:00:00Z");
+    if(!isFinite(t))return null;
+    return new Date(t-86400000).toISOString().slice(0,10);
+  }
+  function activeStreak(days){
+    if(!days.length)return 0;
+    var n=1;
+    for(var i=days.length-1;i>0;i--){
+      if(dayBefore(days[i])!==days[i-1])break;
+      n++;
+    }
+    return n;
+  }
+  function cadenceCells(t,active,streak){
+    var perDay=active?(Number(t.sessions)||0)/active:null;
+    var auto=t.responsesPerPrompt,touch=t.humanPromptsPerHour;
+    var med=t.costPerSessionMedian,p90=t.costPerSessionP90,perHour=t.costPerEngagedHour;
+    return kpi("sessions / active day",fmtRatio(perDay),
+      esc(fmtNum(active))+" active day"+(active===1?"":"s")
+      +'<span class="d-note">streak '+esc(String(streak))+" day"+(streak===1?"":"s")+"</span>","",TIP_PER_DAY)
+      +kpi("autonomy",auto==null?"—":fmtRatio(auto)+"×",
+        auto==null?"no prompts you typed in window"
+          :(touch==null?"touch rate not recorded"
+            :esc(fmtRatio(touch))+" prompts / engaged hour"),"",TIP_AUTONOMY)
+      +kpi("cost / session",med==null?"—":fmtUsdMin(med),
+        med==null?"no priced sessions in window"
+          :"median &middot; excludes $0-by-construction"
+            +'<span class="d-note">P90 '+esc(p90==null?"—":fmtUsdMin(p90))+"</span>","",TIP_PER_SESSION)
+      +kpi("cost / engaged hour",perHour==null?"—":fmtUsd(perHour),
+        perHour==null?"no engaged time measured":"engaged time, not wall clock","",TIP_PER_HOUR);
+  }
+  function renderScoreCadence(d){
+    var body=ensureBlock("u-cadence",'<div class="hero hero-2" id="u-cadence"></div>',"u-hero");
+    if(!body)return;
+    var days=dayRows(d).map(function(x){return x.day;});
+    body.innerHTML=cadenceCells(d.totals||{},days.length,activeStreak(days));
+  }
+
+  // ── rhythm: how long sessions run, how long replies take ──────────────────
+  // The edges are restated from usage-aggregate.mjs's exported
+  // LAT_BUCKET_EDGES/LEN_BUCKET_EDGES: the payload ships the COUNTS, never the
+  // edges they were binned on, and this file is read as text into a browser
+  // bundle that cannot import that module. A test pins the copies equal, so a
+  // change to either goes red instead of silently re-labelling every bucket.
+  var LAT_EDGES=[2,5,10,30,60];
+  var LAT_LABELS=["≤2s","≤5s","≤10s","≤30s","≤60s",">60s"];
+  var LEN_EDGES=[300,900,2700,7200];
+  var LEN_LABELS=["≤5m","≤15m","≤45m","≤2h",">2h"];
+  var LAT_TIP="Wall-clock gap between a prompt and the response that answered it.\n"
+    +"codex host-measured · claude/opencode derived from event gaps — not streaming TTFT.\n"
+    +"The last bucket has no upper edge, so a percentile landing in it reports that bucket's "
+    +"floor: printed with ≥, read as \"at least this\".\n"
+    +"INCLUDES delegated subagent responses — the how-you-run panel carries the split.";
+  var LEN_TIP="Engaged length of one session — the union of its active sub-intervals, split at "
+    +"15-minute silences, not its first-to-last span.\nThe last bucket has no upper edge, so a "
+    +"percentile landing in it is printed with ≥.\n"
+    +"INCLUDES delegated subagent sessions — the how-you-run panel carries the split.";
+
+  function histMarker(value,edges,label){
+    var at=bucketPositionPct(edges,value);
+    return at==null?null:{atPct:at,label:label};
+  }
+  function histCard(o){
+    var counts=Array.isArray(o.counts)?o.counts:[];
+    var total=counts.reduce(function(a,n){return a+(Number(n)||0);},0);
+    return '<div class="rcard" title="'+esc(o.tip)+'">'
+      +'<div class="rcard-h"><span class="rcard-t">'+esc(o.title)+"</span>"
+      +'<span class="rcard-n mono">'+esc(total?o.note:"not measured")+"</span></div>"
+      +(total?histogram({counts:counts,labels:o.labels,
+        markers:(o.markers||[]).filter(Boolean)})
+        :'<div class="empty">'+esc(o.emptyText)+"</div>")+"</div>";
+  }
+  function lengthCard(r){
+    var med=r.lenMedianSeconds,p90=r.lenP90Seconds;
+    var medTxt=fmtAtLeast(med,7200,fmtSecs),p90Txt=fmtAtLeast(p90,7200,fmtSecs);
+    return histCard({title:"session length",counts:r.lenHist,labels:LEN_LABELS,
+      markers:[histMarker(med,LEN_EDGES,"median "+medTxt),histMarker(p90,LEN_EDGES,"P90 "+p90Txt)],
+      note:"median "+medTxt+" · P90 "+p90Txt,tip:LEN_TIP,
+      emptyText:"no session lengths in window."});
+  }
+  function latencyCard(r){
+    var p50=r.latP50,p95=r.latP95,n=Number(r.latCount)||0;
+    var p50Txt=fmtAtLeast(p50,60,fmtSecs),p95Txt=fmtAtLeast(p95,60,fmtSecs);
+    return histCard({title:"response latency",counts:r.latHist,labels:LAT_LABELS,
+      markers:[histMarker(p50,LAT_EDGES,"p50 "+p50Txt),histMarker(p95,LAT_EDGES,"p95 "+p95Txt)],
+      note:"p50 "+p50Txt+" · p95 "+p95Txt+" · n "+fmtNum(n),tip:LAT_TIP,
+      emptyText:"no response latency measured in window."});
+  }
+  function renderScoreRhythm(d){
+    var body=ensureBlock("u-rhythm",
+      stripHtml("u-rhythm","Your rhythm","session length · response latency"),"u-daybars");
+    if(!body)return;
+    var r=d.rhythm||{};
+    body.innerHTML='<div class="rhythm-grid">'+lengthCard(r)+latencyCard(r)+"</div>";
+  }
+
+  // ── how you run: posture, who drove, who served ───────────────────────────
+  // ADR-0038's closed posture vocabulary, ordered least to most permissive so
+  // the stack reads bottom-up as "how much rope was given", with the
+  // unobserved bucket at the base. Every color is a token AND is named in the
+  // legend beside the chart — the hue is a hint, never the only way to read it.
+  // 'not-recorded' is forced to the de-emphasis ink by the primitive itself,
+  // so it deliberately has no palette entry here.
+  var MODE_ORDER=["not-recorded","plan","guarded","auto-edit","unrestricted"];
+  var MODE_COLOR={plan:"var(--purple)",guarded:"var(--ok)","auto-edit":"var(--accent)",
+    unrestricted:"var(--fail)"};
+
+  function modeChart(d){
+    var byMode=d.byMode||{};
+    var present=MODE_ORDER.filter(function(k){
+      return Object.prototype.hasOwnProperty.call(byMode,k);
+    });
+    if(!present.length)return '<div class="hr-t">posture, by day</div>'
+      +'<div class="empty">no permission posture recorded in window.</div>';
+    var days=dayRows(d).map(function(x){return {day:x.day,parts:(x.v&&x.v.byMode)||{}};});
+    // Legend order is the stack read TOP-down, which is the reverse of the
+    // bottom-up paint order — so the entry your eye reaches first names the
+    // band your eye reaches first.
+    var legend=present.slice().reverse().map(function(k){
+      return {color:k==="not-recorded"?"var(--ink-dim)":(MODE_COLOR[k]||"var(--ink-dim)"),
+        label:k,value:fmtUsd(fld(byMode[k],"cost"))};
+    });
+    return '<div class="hr-t">posture, by day</div>'
+      +stackedDays({days:days,order:present,palette:MODE_COLOR})
+      +chartLegend(legend)
+      +'<p class="hr-note">Api-equivalent cost, stacked by the permission posture the transcript '
+      +'recorded. <b>not-recorded</b> is spend from a session that carried no posture evidence — '
+      +"held apart rather than folded into a real posture.</p>";
+  }
+  function sourceDonut(d){
+    var src=d.bySource||{};
+    var main=fld(src.main,"cost"),sub=fld(src.subagent,"cost"),total=main+sub;
+    return '<div class="hr-block"><div class="hr-t">main vs subagent</div>'
+      +(total?donut2({aValue:main,bValue:sub,aText:fmtUsd(main),bText:fmtUsd(sub),
+        aLabel:"main thread",bLabel:"subagent",centerLabel:Math.round(main/total*100)+"%"})
+        :'<div class="empty">no priced work in window.</div>')
+      +'<p class="hr-note">Share of api-equivalent cost; the ring reads main-thread. Subagent work '
+      +"is Claude's sidechain flag or Codex's ledger-backed thread source — either way, not a "
+      +"session a human was driving.</p></div>";
+  }
+  function renderScoreHowRun(d){
+    var body=ensureBlock("u-howrun",
+      stripHtml("u-howrun","How you run","permission posture · who drove"),"u-rhythm");
+    if(!body)return;
+    body.innerHTML='<div class="howrun"><div class="hr-block hr-chart">'+modeChart(d)+"</div>"
+      +'<div class="hr-side">'+sourceDonut(d)+"</div></div>";
+  }
+
   function renderScoreDayBars(d){
     // cost per day
-    var days=[],k;
-    for(k in (d.byDay||{}))days.push({day:k,v:d.byDay[k]});
-    days.sort(function(a,b){return a.day<b.day?-1:1;});
+    var days=dayRows(d);
     var maxDay=0;
     for(var i=0;i<days.length;i++)maxDay=Math.max(maxDay,fld(days[i].v,"cost"));
     document.getElementById("u-days-note").textContent="api-equivalent · "+usageDays+"-day window";
@@ -368,8 +839,6 @@ import { renderUsage } from './usage-orchestrators.mjs';
       return '<div class="daybar" title="'+esc(tip)+'"><div class="db-fill" style="height:'+h.toFixed(1)+'%"></div>'
         +'<span class="db-lab">'+esc(x.day.slice(8))+"</span></div>";
     }).join(""):'<div class="empty">no days in window.</div>';
-    renderTelemetryCoverage(d.sourceHealth);
-
   }
 
   function renderScoreHosts(d){
@@ -388,8 +857,13 @@ import { renderUsage } from './usage-orchestrators.mjs';
       var v=prov[name], cost=fld(v,"cost"), sess=fld(v,"sessions"), tok=fld(v,"tokens");
       var idle=!sess&&!cost;
       if(!idle)activeHosts++;
+      // hasOwnProperty, not a bare lookup: `name` comes from byHost's keys,
+      // which the loop above deliberately widens beyond the three known
+      // hosts, so `constructor`/`__proto__` would otherwise reach a
+      // prototype value and land unescaped inside a class attribute.
+      var dot=Object.prototype.hasOwnProperty.call(PDOT_CLASS,name)?PDOT_CLASS[name]:"c";
       return '<div class="pcard'+(idle?" idle":"")+'"><div class="ph"><span class="pdot '
-        +(PDOT_CLASS[name]||"c")+'"></span>'+esc(name)+"</div>"
+        +esc(dot)+'"></span>'+esc(name)+"</div>"
         +'<div class="pv mono">'+esc(fmtUsd(cost))+"</div>"
         +'<div class="pl">'+(idle?"no sessions in window":esc(fmtNum(sess))+" sessions &middot; "+esc(fmtTok(tok))+" tokens")+"</div></div>";
     }).join("");
@@ -429,8 +903,187 @@ import { renderUsage } from './usage-orchestrators.mjs';
     pcHtml+='<div class="pc-axis">';
     for(var ax=0;ax<24;ax++)pcHtml+="<span>"+(ax%3===0?ax:"")+"</span>";
     pcHtml+="</div>";
-    document.getElementById("u-punch").innerHTML=pcMax?pcHtml:'<div class="empty">no responses in window.</div>';
+    var PUNCH_NOTE="Counts responses, not elapsed time, and INCLUDES delegated subagent responses "
+      +"— a long agentic run dispatching subagents fills these cells even when nobody was typing. "
+      +"The how-you-run panel carries the main/subagent split.";
+    document.getElementById("u-punch").innerHTML=pcMax
+      ?pcHtml+'<p class="hr-note">'+esc(PUNCH_NOTE)+"</p>"
+      :'<div class="empty">no responses in window.</div>';
 
+  }
+
+  // ── tool mix and model mix over time ──────────────────────────────────────
+  var TOOL_TOP=8;
+  function toolRows(d){
+    var map=d.byTool||{},list=[],k;
+    for(k in map)list.push({name:k,n:Number(map[k])||0});
+    list.sort(function(a,b){return b.n-a.n;});
+    if(!list.length)return '<div class="empty">no tool calls recorded in window.</div>';
+    var top=list.slice(0,TOOL_TOP),tail=list.slice(TOOL_TOP);
+    var other=tail.reduce(function(s,x){return s+x.n;},0),max=top[0].n;
+    var rows=top.map(function(x){
+      return {label:x.name,value:fmtNum(x.n),share:pct(x.n,max),dim:false};
+    });
+    // The tail is FOLDED, never dropped: those calls happened, and a top-8
+    // list that quietly loses the rest misstates the total every share above
+    // it is read against. Dim, because Other is a residue, not a tool.
+    if(other>0)rows.push({label:"Other ("+tail.length+" tool"+(tail.length===1?"":"s")+")",
+      value:fmtNum(other),share:pct(other,max),dim:true});
+    return rankedRows(rows);
+  }
+
+  // Four series is the most a stacked day column can carry and still be read
+  // apart at this size; the rest fold into one de-emphasised band. Colors are
+  // assigned BY RANK, so the palette is deterministic rather than dependent on
+  // key order, and every band is named in the legend beside the chart.
+  var FAMILY_PALETTE=["var(--accent)","var(--purple)","var(--ok)","var(--warn)"];
+  var FAMILY_TOP=4;
+  function familyTotals(rows){
+    var tot={},i,k;
+    for(i=0;i<rows.length;i++){
+      var parts=(rows[i].v&&rows[i].v.byModelFamily)||{};
+      for(k in parts)tot[k]=(tot[k]||0)+(Number(parts[k])||0);
+    }
+    return tot;
+  }
+  function topFamilies(tot){
+    var list=[],k;
+    // modelFamily()'s own 'other' catch-all never competes for a top slot — it
+    // is the residue bucket, so it belongs in the fold no matter how big it is.
+    for(k in tot)if(k!=="other")list.push({name:k,cost:tot[k]});
+    list.sort(function(a,b){return b.cost-a.cost;});
+    return list.slice(0,FAMILY_TOP).map(function(x){return x.name;});
+  }
+  function foldFamilies(parts,keep){
+    var out={other:0},k;
+    for(k in parts){
+      var v=Number(parts[k])||0;
+      if(keep.indexOf(k)>=0)out[k]=(out[k]||0)+v; else out.other+=v;
+    }
+    return out;
+  }
+  function modelMix(d){
+    var rows=dayRows(d),tot=familyTotals(rows),keep=topFamilies(tot);
+    if(!keep.length&&!(tot.other>0))return '<div class="empty">no model spend in window.</div>';
+    var palette={};
+    keep.forEach(function(name,i){palette[name]=FAMILY_PALETTE[i%FAMILY_PALETTE.length];});
+    var days=rows.map(function(x){
+      return {day:x.day,parts:foldFamilies((x.v&&x.v.byModelFamily)||{},keep)};
+    });
+    var otherTotal=days.reduce(function(s,x){return s+(x.parts.other||0);},0);
+    var legend=keep.map(function(name){
+      return {color:palette[name],label:name,value:fmtUsd(tot[name])};
+    });
+    if(otherTotal>0)legend.push({color:"var(--ink-dim)",label:"other",value:fmtUsd(otherTotal)});
+    // Bottom-up: the fold sits at the base and the biggest family paints on
+    // top, so the legend read top-down is the stack read top-down.
+    return stackedDays({days:days,order:["other"].concat(keep.slice().reverse()),palette:palette})
+      +chartLegend(legend)
+      +'<p class="hr-note">Model ids are folded to a coarse family (<b>opus</b>, <b>gpt-5</b>, …). '
+      +"An id the fold does not recognise lands in <b>other</b> — never a guessed family, and never "
+      +"dropped, because its spend still has to land somewhere.</p>";
+  }
+  function renderScoreMix(d){
+    var pair=ensureBlock("u-toolmix",'<div class="two">'
+      +stripHtml("u-toolmix","Tool mix","invocations · top 8, tail folded")
+      +stripHtml("u-modelmix","Model mix over time","api-equivalent cost by model family")
+      +"</div>","u-punch");
+    if(!pair)return;
+    pair.innerHTML=toolRows(d)
+      +'<p class="hr-note">Invocations as each host recorded them, under each host\'s own tool '
+      +"names — nothing is renamed to make two hosts line up. A host that records no tool calls "
+      +"contributes nothing here rather than a zero, so these totals are not a cross-host "
+      +"comparison of how much tooling each one did.</p>";
+    var mix=document.getElementById("u-modelmix");
+    if(mix)mix.innerHTML=modelMix(d);
+  }
+
+  // ── reliability ───────────────────────────────────────────────────────────
+  var REL_TIP="Turns that never resolved to a model — a dropped connection, a rate-limit rejection, "
+    +"an auth failure. They are excluded from the model list (there is no model to attribute them "
+    +"to) and surfaced here instead of vanishing.\nRate is exceptions ÷ responses × 1000.";
+  var ABORT_TIP="Turns the transcript recorded as interrupted — the answer was stopped mid-flight. "
+    +"Counted apart from exceptions: an abort is a choice, not a failure.\n"
+    +"CODEX ONLY. Only codex rollouts carry an interrupt signal (turn_aborted); claude and "
+    +"opencode transcripts record nothing when you stop a turn. So the count and its rate are "
+    +"over codex responses alone, and a window with no codex sessions shows — (not 0), because "
+    +"nothing in it could have recorded an interrupt.";
+  // The per-day series rides the SAME first-billed-day attribution the session
+  // count uses, which is not the moment a turn dropped: a session that spans
+  // midnight lands all of its exceptions on one day. Said on the panel, because
+  // a reader will otherwise take a peak as "something broke that afternoon".
+  var REL_TREND_NOTE="Attributed to the day each session first billed — not the moment a turn "
+    +"dropped, so a session spanning midnight lands all of its exceptions on one day. A session that "
+    +"never billed has no day to attribute to and appears in neither this line nor the counts above.";
+
+  function relRate(t){
+    var r=Number(t&&t.responses)||0;
+    return r?(Number(t.exceptions)||0)/r*1000:null;
+  }
+  // Direction is stated in WORDS and in a glyph as well as in color — a
+  // reader who cannot separate the warn and ok tokens still gets the finding.
+  function relFlag(cur,prev){
+    if(cur==null||prev==null)return "";
+    if(cur>prev)return '<span class="rel-flag" data-sev="warn"><i aria-hidden="true">▲</i>'
+      +"higher than the previous window</span>";
+    if(cur<prev)return '<span class="rel-flag" data-sev="ok"><i aria-hidden="true">▼</i>'
+      +"lower than the previous window</span>";
+    return '<span class="rel-flag" data-sev="flat"><i aria-hidden="true">•</i>'
+      +"unchanged from the previous window</span>";
+  }
+  function relStat(o){
+    return '<div class="rel-stat" title="'+esc(o.tip)+'">'
+      +'<span class="rel-k">'+esc(o.label)+"</span>"
+      +'<span class="rel-v tnum">'+esc(o.value)+"</span>"
+      +'<span class="rel-sub">'+esc(o.sub)+"</span>"+(o.flag||"")+"</div>";
+  }
+  // The single worst day, named. "Worst" is a fact the counts already carry —
+  // no threshold is invented to decide what counts as a spike, because any
+  // constant this file picked would be a judgement the data never made.
+  function relWorstDay(rows){
+    var worst=null;
+    for(var i=0;i<rows.length;i++){
+      var n=fld(rows[i].v,"exceptions");
+      if(n>0&&(!worst||n>worst.n))worst={day:rows[i].day,n:n};
+    }
+    return worst;
+  }
+  function relTrend(d){
+    var rows=dayRows(d),series=rows.map(function(x){return fld(x.v,"exceptions");});
+    var total=series.reduce(function(a,n){return a+n;},0);
+    if(!total)return '<div class="rel-trend"><div class="hr-t">exceptions by day</div>'
+      +'<div class="empty">no exceptions on any day in this window.</div></div>';
+    var worst=relWorstDay(rows);
+    // Icon, words and color together — the day is named in text, so the flag
+    // survives a reader who cannot separate the status tokens.
+    var flag=worst?'<span class="rel-flag" data-sev="warn"><i aria-hidden="true">▲</i>worst day '
+      +esc(worst.day.slice(5))+" &middot; "+esc(fmtNum(worst.n))+" of "+esc(fmtNum(total))+"</span>":"";
+    return '<div class="rel-trend"><div class="hr-t">exceptions by day</div>'
+      +sparklineSvg(series,{w:640,h:44})+flag+"</div>";
+  }
+  function renderScoreReliability(d){
+    var body=ensureBlock("u-reliability",
+      stripHtml("u-reliability","Reliability","turns that never landed"),"u-models");
+    if(!body)return;
+    var t=d.totals||{},p=(d.previous&&d.previous.totals)||null;
+    var cur=relRate(t),exc=Number(t.exceptions)||0,ab=Number(t.aborts)||0,resp=Number(t.responses)||0;
+    // aborts is CODEX-ONLY evidence: turn_aborted is the only interrupt signal
+    // any host writes, so a claude-or-opencode window renders "—", not a 0 that
+    // reads as "you never interrupted a turn". The rate's denominator is codex
+    // responses for the same reason — dividing codex aborts by every host's
+    // responses dilutes it by an arbitrary amount that depends on host mix.
+    var cx=(d.byHost&&d.byHost.codex)||null;
+    var cxSess=Number(cx&&cx.sessions)||0,cxResp=Number(cx&&cx.responses)||0;
+    body.innerHTML='<div class="rel">'
+      +relStat({label:"exceptions / 1k responses",value:cur==null?"—":cur.toFixed(1),
+        sub:fmtNum(exc)+" of "+fmtNum(resp)+" responses",tip:REL_TIP,
+        flag:relFlag(cur,p?relRate(p):null)})
+      +relStat({label:"aborted turns",value:cxSess?fmtNum(ab):"—",
+        sub:cxSess
+          ?(cxResp?fmtRatio(ab/cxResp*1000)+" per 1k codex responses":"no codex responses in window")
+          :"no codex sessions — no other host records interrupts",
+        tip:ABORT_TIP})
+      +"</div>"+relTrend(d)+'<p class="hr-note">'+esc(REL_TREND_NOTE)+"</p>";
   }
 
   function renderScoreModels(d){
@@ -514,11 +1167,19 @@ import { renderUsage } from './usage-orchestrators.mjs';
 
   export function renderScore(d){
     renderScoreHero(d);
+    renderScoreCadence(d);
     renderScoreDayBars(d);
+    // Order is load-bearing here and nowhere else in this list: how-you-run
+    // anchors its container to the rhythm strip, which renderScoreRhythm has
+    // to have inserted first.
+    renderScoreRhythm(d);
+    renderScoreHowRun(d);
     renderScoreHosts(d);
     renderScoreTokBar(d);
     renderScorePunchcard(d);
+    renderScoreMix(d);
     renderScoreModels(d);
+    renderScoreReliability(d);
     renderScoreOpenRouter(d);
     renderScoreProjects(d);
     renderScoreCategories(d);
@@ -555,13 +1216,45 @@ import { renderUsage } from './usage-orchestrators.mjs';
     if(isNaN(d))return "";
     return "resets "+d.toLocaleString(undefined,{month:"short",day:"numeric",hour:"2-digit",minute:"2-digit"});
   }
+  // Where this window's own CLOCK is, as a share of its duration — the mark a
+  // straight-line burn would be sitting on right now, which is what turns a
+  // level into "ahead of pace" or "behind". Both halves come from the limits
+  // payload the meter already reads: `resetsAt` (epoch seconds) says when the
+  // window ends, `windowMinutes` how long it runs, so elapsed = duration −
+  // remaining. Nothing is fetched and nothing is assumed about window length.
+  //
+  // null — not a clamp — whenever the arithmetic falls outside [0, duration]:
+  // the snapshot is then older than its own window (it has already reset) or
+  // the browser clock disagrees with the vendor's, and a tick pinned to 0% or
+  // 100% would state a position instead of admitting it cannot compute one.
+  function paceShare(resetSec,windowMinutes){
+    var mins=Number(windowMinutes);
+    if(!resetSec||!isFinite(resetSec)||!isFinite(mins)||mins<=0)return null;
+    var total=mins*60000,elapsed=total-(resetSec*1000-Date.now());
+    if(!isFinite(elapsed)||elapsed<0||elapsed>total)return null;
+    return elapsed/total*100;
+  }
+  function paceTick(resetSec,windowMinutes){
+    var at=paceShare(resetSec,windowMinutes);
+    if(at==null)return "";
+    return '<i class="pace" style="left:'+at.toFixed(1)+'%" title="'
+      +esc(at.toFixed(0)+"% of this window's time has elapsed — a steady burn would sit here")
+      +'"></i>';
+  }
+  // Rendered only when at least one row actually carries a tick, so the key
+  // never explains a mark that is not on screen.
+  var PACE_LEGEND='<div class="legend" style="margin-top:11px"><span class="lg">'
+    +'<i class="pace-key"></i>tick = share of the window&rsquo;s time elapsed &middot; '
+    +"fill past it is ahead of a steady burn</span></div>";
+
   // One utilization row on the shared .mrow grid; fill color says how close to
   // the cap this window is (ok <70, warn ≥70, fail ≥90).
-  function limRow(label,usedPercent,resetSec,sub){
+  function limRow(label,usedPercent,resetSec,sub,windowMinutes){
     var p=Math.max(0,Math.min(100,Number(usedPercent)||0));
     var col=p>=90?"var(--fail)":(p>=70?"var(--warn)":"var(--ok)");
-    return '<div class="mrow"><span class="mname">'+esc(label)+"</span>"
-      +'<span class="mbar"><i style="width:'+p.toFixed(1)+"%;background:"+col+'"></i></span>'
+    return '<div class="mrow"><span class="mname" title="'+esc(label)+'">'+esc(label)+"</span>"
+      +'<span class="mbar"><i style="width:'+p.toFixed(1)+"%;background:"+col+'"></i>'
+      +paceTick(resetSec,windowMinutes)+"</span>"
       +'<span class="mval mono">'+p.toFixed(0)+"%</span>"
       +'<span class="msub mono">'+esc(sub||resetTxt(resetSec))+"</span></div>";
   }
@@ -577,9 +1270,11 @@ import { renderUsage } from './usage-orchestrators.mjs';
       // Claude's tee is push-only: FRESH means a session wrote it in the last
       // 10 minutes; anything older gets the stale badge rather than silence.
       if(cn)cn.textContent="statusline tee · "+limAge(c.fetchedAt)+(limStale(c.fetchedAt,600000)?" · stale":"");
+      var paced=false;
       claudeEl.innerHTML=c.windows.map(function(w){
-        return limRow("claude · "+(w.label||w.id),w.usedPercent,w.resetsAt);
-      }).join("");
+        if(paceShare(w.resetsAt,w.windowMinutes)!=null)paced=true;
+        return limRow("claude · "+(w.label||w.id),w.usedPercent,w.resetsAt,null,w.windowMinutes);
+      }).join("")+(paced?PACE_LEGEND:"");
     }else{
       if(cn)cn.textContent="no data";
       claudeEl.innerHTML='<div class="empty">no Claude limit data yet &mdash; it arrives while a Claude Code session runs '
@@ -594,15 +1289,17 @@ import { renderUsage } from './usage-orchestrators.mjs';
     var xn=document.getElementById("u-lim-codex-note");
     if(x&&x.lanes&&x.lanes.length){
       if(xn)xn.textContent=(x.planType?("plan "+x.planType+" · "):"")+"app-server · "+limAge(x.fetchedAt);
-      var html="";
+      var html="",paced=false;
       for(var i=0;i<x.lanes.length;i++){
         var lane=x.lanes[i];
         for(var j=0;j<(lane.windows||[]).length;j++){
           var w=lane.windows[j];
-          html+=limRow(lane.name+" · "+(w.label||""),w.usedPercent,w.resetsAt);
+          if(paceShare(w.resetsAt,w.windowMinutes)!=null)paced=true;
+          html+=limRow(lane.name+" · "+(w.label||""),w.usedPercent,w.resetsAt,null,w.windowMinutes);
         }
         if(!(lane.windows||[]).length)html+=limRow(lane.name,0,null,"no window reported");
       }
+      if(paced)html+=PACE_LEGEND;
       var rc=x.resetCredits;
       if(rc&&rc.availableCount>0){
         html+='<div class="legend" style="margin-top:11px"><span class="lg"><i style="background:var(--ok)"></i>'
@@ -637,6 +1334,64 @@ import { renderUsage } from './usage-orchestrators.mjs';
     renderLimitsInsights();
   }
 
+  // ══ Prompts view (METRICS.md §21) ══════════════════════════════════════════
+  // Panels are built by usage-prompts.mjs (pure string builders); this function
+  // owns only the DOM writes and the captions, which name the window every
+  // figure was computed over — a figure whose window is not stated is a figure
+  // a reader will attach to the wrong span.
+  export function renderPrompts(d){
+    var p=d&&d.prompts;
+    var kpis=document.getElementById("u-pr-kpis");
+    if(!kpis)return;
+    if(!p){
+      kpis.innerHTML='<div class="empty">this window carries no prompt-fingerprint layer &mdash; '
+        +'the sessions in it were parsed before prompt fingerprints shipped. Re-scan to populate it.</div>';
+      var coachEl=document.getElementById("u-pr-coaching");
+      if(coachEl)coachEl.innerHTML='<div class="empty">coaching needs the prompt-fingerprint layer, '
+        +'same as the rest of this view &mdash; nothing to show until a re-scan populates it.</div>';
+      return;
+    }
+    var win=windowLabel();
+    kpis.innerHTML=promptKpis(p);
+    setText("u-pr-prov-note",win+" · every fingerprinted user-role turn");
+    document.getElementById("u-pr-provenance").innerHTML=provenancePanel(p);
+    setText("u-pr-steer-note",win+" · typed prompts only");
+    document.getElementById("u-pr-steer").innerHTML=steerPanel(p);
+    document.getElementById("u-pr-taps").innerHTML=tapLengthPanel(p);
+    setText("u-pr-hosts-note",win+" · per host");
+    document.getElementById("u-pr-hosts").innerHTML=hostInterplay(p);
+    setText("u-pr-coaching-note",coachingNote(p,win));
+    renderCoaching();
+  }
+  // The Coaching panel owns interaction state (filter, sort, open row, prompt-
+  // text posture, the per-cluster samples cache, optimistic dismissals). A
+  // re-render is idempotent from `p` + that state, so every pill click, header
+  // sort, expand and dismiss is just `renderCoaching()` again.
+  function coachState(){
+    return {filter:promptFilter,sort:promptSort,openKey:promptOpenKey,
+      posture:promptPosture,samples:promptSamples,dismissed:promptDismissed,
+      dismissError:promptDismissError};
+  }
+  // `preserveScroll` holds the capped table's scroll position across a
+  // re-render — used when samples land under an already-open row, so the row
+  // does not jump. Expand/filter/sort re-render WITHOUT it (expand does its own
+  // scroll-to-top; filter/sort start from the top intentionally).
+  function renderCoaching(preserveScroll){
+    var host=document.getElementById("u-pr-coaching");
+    if(!host||!USAGE||!USAGE.prompts)return;
+    var wrap=host.querySelector(".pr-tablewrap"), top=wrap?wrap.scrollTop:0;
+    host.innerHTML=coachingPanel(USAGE.prompts,coachState());
+    if(preserveScroll){var w2=host.querySelector(".pr-tablewrap"); if(w2)w2.scrollTop=top;}
+  }
+  // The subtitle counts the ADVISED set the table actually draws (P15), not
+  // every recurring cluster — so the header and the rows below it agree.
+  function coachingNote(p,win){
+    var n=advisedClusters(p).length;
+    return win+" · "+n+" pattern"+(n===1?"":"s")+" with advice · click one for coaching";
+  }
+  function setText(id,txt){var el=document.getElementById(id);if(el)el.textContent=txt;}
+  function windowLabel(){return usageDays>=365?"all history":"last "+usageDays+"d";}
+
   export function renderFindings(d){
     var ins=Array.isArray(d.insights)?d.insights:[];
     var badge=document.getElementById("u-findings-n");
@@ -663,7 +1418,19 @@ import { renderUsage } from './usage-orchestrators.mjs';
       src='<details class="i-src"><summary>grounding &mdash; '+f.sources.length+" source"
         +(f.sources.length===1?"":"s")+"</summary><ul>"
         +f.sources.map(function(sc){
-          return "<li><a href=\""+esc(sc.url)+"\" target=\"_blank\" rel=\"noreferrer noopener\">"+esc(sc.label)+"</a></li>";
+          // Security review SEC-12: scheme-allowlist the href. `esc` does not
+          // touch ':', so `javascript:alert(1)` survived it intact. The only
+          // producer today is a hardcoded constant (MODEL_ROUTING_SOURCES),
+          // which is why the review ranked it LOW and called it latent — but
+          // the neighbouring prompts surface already gets this right with
+          // encodeURIComponent into a '#' fragment, and this one becomes live
+          // XSS the day a detector cites a data-derived URL. A source that is
+          // not plainly http(s) renders as TEXT, so it is still visible and
+          // still auditable; it just is not clickable.
+          var url=String(sc&&sc.url||"");
+          var label=esc(sc&&sc.label);
+          if(!/^https?:\/\//.test(url)) return "<li>"+label+" <span class=\"soft mono\">"+esc(url)+"</span></li>";
+          return "<li><a href=\""+esc(url)+"\" target=\"_blank\" rel=\"noreferrer noopener\">"+label+"</a></li>";
         }).join("")+"</ul></details>";
     }
     return '<article class="icard" data-sev="'+esc(f.severity||"info")+'">'
@@ -682,6 +1449,72 @@ import { renderUsage } from './usage-orchestrators.mjs';
   function dash(v){return (v==null||v==="")?"—":String(v);}
   function reportedIdentity(v){v=String(v==null?"":v).trim();return v&&!/^unknown$/i.test(v)?v:null;}
   function identityName(v){var raw=reportedIdentity(v);if(!raw)return"Not recorded";return{claude:"Claude Code",codex:"Codex",opencode:"OpenCode",anthropic:"Anthropic",openai:"OpenAI",openrouter:"OpenRouter",bedrock:"AWS Bedrock",vertex:"Google Vertex AI",foundry:"Microsoft Foundry",gateway:"Custom gateway",ollama:"Ollama",lmstudio:"LM Studio"}[raw.toLowerCase()]||raw;}
+
+  // ── per-session chips ─────────────────────────────────────────────────────
+  // Evidence the row already carries, shown only where the transcript
+  // established it. An ABSENT chip is itself the signal that the fact was
+  // never recorded — a chip that appeared with a guessed value would be
+  // indistinguishable from one that was measured.
+  var LAT_CHIP_TIP="This session's median response latency, interpolated from its own latency "
+    +"histogram — the same bucket math the window's rhythm panel uses.\ncodex host-measured · "
+    +"claude/opencode derived from event gaps — not streaming TTFT.\nA value in the last bucket "
+    +"has no upper edge and is printed with ≥.";
+  function sessionP50(sx){
+    return Array.isArray(sx.latHist)?bucketPercentile(sx.latHist,LAT_EDGES,0.5):null;
+  }
+  // The posture the transcript recorded, and NOTHING when it recorded none: an
+  // unobserved or unmapped raw value is not a posture, and a badge that guessed
+  // one would read exactly like an observed one. `modeRaw` is the host's own
+  // spelling, projected onto the session row by v11Projection, and rides in
+  // this badge's tooltip; the row's detail strip is where an unmapped raw
+  // value is surfaced, since there is no classified name to put on a badge.
+  function modeBadge(sx){
+    var mode=reportedIdentity(sx.mode);
+    if(!mode)return "";
+    var raw=reportedIdentity(sx.modeRaw);
+    return '<span class="s-chip s-mode" data-mode="'+esc(mode)+'" title="'
+      +esc("permission posture: "+mode
+        +(raw?" · recorded by the host as \""+raw+"\"":" · the host's own spelling was not recorded"))
+      +'">'+esc(mode)+"</span>";
+  }
+  // Context fill, and only when BOTH halves were observed: the last turn's
+  // context tokens AND that model's window. Codex records a window; claude and
+  // opencode do not, and this page carries no published-window table to fall
+  // back on — so the chip is omitted rather than divided by a guessed
+  // denominator, which would be a fabricated percentage.
+  function ctxChip(sx){
+    var used=Number(sx.ctxLastTokens),win=Number(sx.ctxWindow);
+    if(!isFinite(used)||!isFinite(win)||used<=0||win<=0)return "";
+    return '<span class="s-chip" title="'
+      +esc("context at the last turn: "+fmtTok(used)+" of "+fmtTok(win)
+        +" tokens — both recorded by the transcript")
+      +'">ctx '+esc(Math.min(100,used/win*100).toFixed(0))+"%</span>";
+  }
+  function sessionChips(sx){
+    var out="",len=Number(sx.lenSeconds)||0,p50=sessionP50(sx);
+    if(len>0)out+='<span class="s-chip" title="'
+      +esc("engaged length — this session's active sub-intervals unioned, split at 15-minute "
+        +"silences; not its first-to-last span, which the duration column shows")
+      +'">'+esc(fmtSecs(len))+"</span>";
+    if(p50!=null)out+='<span class="s-chip" title="'+esc(LAT_CHIP_TIP)+'">p50 '
+      +esc(fmtAtLeast(p50,60,fmtSecs))+"</span>";
+    return out+modeBadge(sx)+ctxChip(sx);
+  }
+
+  // THREE states, not two. A transcript that recorded a posture the taxonomy
+  // does not map still recorded a posture: printing "no posture evidence in
+  // this transcript" over a modeRaw sitting on the same row is a fabrication
+  // in the opposite direction from the usual one — denying data that exists.
+  // The host's own spelling is shown instead, labelled unrecognized so it is
+  // never mistaken for a classified posture.
+  function postureLine(sx){
+    var modeRaw=reportedIdentity(sx.modeRaw),modeName=reportedIdentity(sx.mode);
+    if(modeName)return esc(modeName)+" <span class='sd-conf'>("
+      +esc(modeRaw?"recorded by the host as \""+modeRaw+"\"":"host spelling not recorded")+")</span>";
+    return modeRaw
+      ? "Unrecognized <span class='sd-conf'>(host recorded \""+esc(modeRaw)+"\" — not in this taxonomy)</span>"
+      : "Not recorded <span class='sd-conf'>(no posture evidence in this transcript)</span>";
+  }
 
   /* The ten fields that shipped on the wire and rendered nowhere. Everything
      here comes from the row the browser already holds — no route, no fetch. */
@@ -708,7 +1541,21 @@ import { renderUsage } from './usage-orchestrators.mjs';
     var flags="skill "+dash(sx.skill)+" · plugin "+dash(sx.plugin)
       +" · sidechain "+(sx.sidechain==null?"—":(sx.sidechain?"yes":"no"))
       +" · worktree "+dash(sx.worktree);
-    var rows=[["execution host",esc(identityName(sx.host))],["inference provider",esc(provider)+" <span class='sd-conf'>("+esc(providerContext)+")</span>"],["models",esc(models)],["basis",esc(basis)+conf],["tokens",esc(toks)],
+    // Posture and rhythm are the row's own v11 evidence, spelled out here
+    // where the chips only had room for a badge. Both follow this strip's
+    // never-omit-a-line rule: a fact that was measured and found absent reads
+    // "Not recorded"/"—", not silence, which would teach the reader the field
+    // does not exist (ADR-0009 §5).
+    var posture=postureLine(sx);
+    var p50=sessionP50(sx);
+    var rhythm="engaged "+((Number(sx.lenSeconds)||0)>0?fmtSecs(sx.lenSeconds):"—")
+      +" · p50 "+(p50==null?"—":fmtAtLeast(p50,60,fmtSecs))
+      +" · latency samples "+fmtNum(Number(sx.latCount)||0)
+      // Same capability rule as the reliability panel, applied per row: only a
+      // codex transcript can record an interrupt, so a claude/opencode row
+      // reads "not recorded" rather than a measured-looking 0.
+      +" · aborts "+(sx.host==="codex"?fmtNum(Number(sx.aborts)||0):"not recorded for this host");
+    var rows=[["execution host",esc(identityName(sx.host))],["inference provider",esc(provider)+" <span class='sd-conf'>("+esc(providerContext)+")</span>"],["models",esc(models)],["posture",posture],["rhythm",esc(rhythm)],["basis",esc(basis)+conf],["tokens",esc(toks)],
       ["tools",esc(tools)],["flags",esc(flags)]];
     return '<div class="sdetail" id="sd-'+esc(sx.id)+'" hidden>'
       +rows.map(function(r){
@@ -733,8 +1580,14 @@ import { renderUsage } from './usage-orchestrators.mjs';
     var weak=(typeof sx.confidence==="number"&&sx.confidence<0.6)?"0":"1";
     var when=sx.start?new Date(sx.start):null;
     var whenTxt=when&&!isNaN(when)?when.toLocaleString(undefined,{month:"short",day:"numeric",hour:"2-digit",minute:"2-digit"}):"—";
-    // Session ids are validated against [A-Za-z0-9._-]{1,128} by parseSessionId
-    // before they are ever indexed, so they are safe AND unique as DOM ids.
+    // Ids are derived from raw filesystem names (usage-index.mjs listClaude /
+    // listClaudeSubagents), NOT validated at index time — parseSessionId is a
+    // request-path validator that never runs here — and a namespaced subagent
+    // id contains '/', which the charset once claimed for them does not.
+    // POSIX filenames permit '"', '<' and '>', so esc() is LOAD-BEARING, not
+    // belt-and-braces: every render of sx.id must keep it, or a project
+    // directory named with a quote breaks out of these attributes and, under
+    // this page's script-src 'unsafe-inline', executes.
     var sid=esc(sx.id);
     var wt=sx.worktree!=null?'<span class="s-wt" title="git worktree — the repo is the project">⑂'+esc(sx.worktree)+"</span>":"";
     return '<div class="srow" data-id="'+sid+'" title="open transcript">'
@@ -743,6 +1596,7 @@ import { renderUsage } from './usage-orchestrators.mjs';
       +'<span class="s-host s-'+esc(host)+'" title="'+esc(identityTip)+'" aria-label="Execution host: '+esc(identityName(host))+'">'+esc(identityName(host))+"</span>"
       +'<span class="s-title">'+esc(sx.title||"(untitled)")+wt+"</span>"
       +'<span class="cat'+(uncl?" uncl":"")+'" data-w="'+weak+'">'+esc(cat)+"</span>"
+      +'<span class="s-chips">'+sessionChips(sx)+"</span>"
       +'<span class="s-when mono">'+esc(whenTxt)+"</span>"
       +'<span class="s-dur mono">'+esc(fmtMins(sx.minutes))+"</span>"
       +'<span class="s-turns mono">'+esc((sx.prompts||0)+"/"+(sx.responses||0))+"</span>"

@@ -133,6 +133,66 @@ test('normalizeCodexLimits falls back to the legacy single-bucket view', () => {
   assert.equal(n.lanes[0].id, 'codex');
 });
 
+// ── One pool reported twice ─────────────────────────────────────────────────
+//
+// LIVE SHAPE, observed 2026-08-29: app-server reports the same weekly pool
+// under BOTH the named model-pool lane and the legacy generic `codex` lane —
+// identical windowDurationMins, identical resetsAt, identical usedPercent. The
+// panel drew two identical meters and the limit detectors counted one pool as
+// two. The named lane also carries a 5h window the generic lane never had.
+const CODEX_DUP_RESP = {
+  rateLimits: {
+    limitId: 'codex', limitName: null, planType: 'prolite',
+    primary: { usedPercent: 21, windowDurationMins: 10080, resetsAt: 1788624681 },
+    secondary: null,
+  },
+  rateLimitsByLimitId: {
+    codex_bengalfox: {
+      limitId: 'codex_bengalfox', limitName: 'GPT-5.3-Codex-Spark', planType: 'prolite',
+      primary: { usedPercent: 7, windowDurationMins: 300, resetsAt: 1788571234 },
+      secondary: { usedPercent: 21, windowDurationMins: 10080, resetsAt: 1788624681 },
+    },
+    codex: {
+      limitId: 'codex', limitName: null, planType: 'prolite',
+      primary: { usedPercent: 21, windowDurationMins: 10080, resetsAt: 1788624681 },
+      secondary: null,
+    },
+  },
+};
+
+test('a window reported under both the named pool and the generic codex lane renders once', () => {
+  const n = normalizeCodexLimits(CODEX_DUP_RESP);
+  // The generic lane held nothing but the duplicate, so it goes with it —
+  // an empty "codex" lane would still draw a "no window reported" row.
+  assert.deepEqual(n.lanes.map((l) => l.id), ['codex_bengalfox']);
+  const windows = n.lanes[0].windows;
+  assert.deepEqual(windows.map((w) => w.label), ['5h', 'weekly'],
+    'the named lane keeps BOTH its windows — dedup drops the copy, not the pool');
+  assert.equal(windows[1].usedPercent, 21);
+  assert.equal(windows[1].resetsAt, 1788624681);
+});
+
+test('lanes whose percentages differ are different pools, and both render', () => {
+  const resp = structuredClone(CODEX_DUP_RESP);
+  resp.rateLimitsByLimitId.codex.primary.usedPercent = 22;
+  const n = normalizeCodexLimits(resp);
+  assert.deepEqual(n.lanes.map((l) => l.id), ['codex_bengalfox', 'codex']);
+  assert.equal(n.lanes[1].windows.length, 1, 'the generic weekly survives on a percentage difference');
+  // Same guard on the reset instant: matching duration alone is not identity.
+  const other = structuredClone(CODEX_DUP_RESP);
+  other.rateLimitsByLimitId.codex.primary.resetsAt = 1788624999;
+  assert.equal(normalizeCodexLimits(other).lanes.length, 2);
+});
+
+test('a generic-only payload is untouched — older codex builds keep their one lane', () => {
+  const n = normalizeCodexLimits({
+    rateLimitsByLimitId: { codex: CODEX_DUP_RESP.rateLimitsByLimitId.codex },
+  });
+  assert.deepEqual(n.lanes.map((l) => l.id), ['codex']);
+  assert.equal(n.lanes[0].windows.length, 1);
+  assert.equal(n.lanes[0].windows[0].label, 'weekly');
+});
+
 test('normalizeCodexLimits returns null on nothing usable', () => {
   assert.equal(normalizeCodexLimits(null), null);
   assert.equal(normalizeCodexLimits({}), null);

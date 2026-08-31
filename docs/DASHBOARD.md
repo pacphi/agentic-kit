@@ -40,8 +40,9 @@ permanent.
 | Usage | Scorecard | `#usage/score` | Usage scorecard | Token consumption, API-equivalent cost, efficiency, and trends |
 | Usage | Limits | `#usage/limits` | Provider limits | Current provider windows, reset timing, and available capacity |
 | Usage | Findings | `#usage/findings` | Usage findings | Actionable anomalies, efficiency opportunities, and evidence-backed recommendations |
-| Usage | Sessions | `#usage/sessions` | Session usage | Retained sessions grouped by project, category, duration, tokens, and cost |
+| Usage | Prompts | `#usage/prompts` | What you actually type | Prompt repetition, tap habits, and provenance by host from prompt fingerprints; a coaching table where each pattern expands to its masked prompt text, a recommendation, and a copyable draft |
 | Usage | Models | `#usage/models` | Model lifecycle | Host inventory, lifecycle changes, consumers, swap impact, and evidence sources |
+| Usage | Sessions | `#usage/sessions` | Session usage | Retained sessions grouped by project, category, duration, tokens, and cost |
 | Usage | Transcript | `#usage/transcript` | Transcript detail | The selected session's locally retained, server-masked evidence |
 | Observability | Live | `#observability/live` | Observability · Live | Projects and roots with current presence or fresh meaningful activity |
 | Observability | History | `#observability/history` | Observability · History | Retained roots that are not currently Live |
@@ -158,8 +159,103 @@ Each count carries the sentence explaining what it counted; on Intelligence it i
 
 ## Usage
 
-Usage loads lazily when first opened. Scorecard, Limits, Findings, Sessions, Models, and Transcript share the
-same secondary rail; the 7/14/30-day filters remain aligned to its right.
+Usage loads lazily when first opened. Scorecard, Limits, Findings, Prompts, Models, Sessions, and
+Transcript share the same secondary rail; the 7/14/30-day filters remain aligned to its right.
+
+### Scorecard
+
+Scorecard reads top to bottom as one argument: what the window cost, how you spent it, and what that
+says about the way you work. Every figure is derived from locally retained transcripts, so every
+dollar is API-equivalent list price and never plan billing.
+
+**Two hero rows.** The first carries sessions, api-equivalent cost, tokens, engaged time, and cache
+read. Each tile pairs its figure with a change against the previous window of the same length and a
+per-day sparkline, so the number and its direction arrive together. The change is read
+directionally, not just arithmetically — a falling cost is good, a rising cache share is good, and a
+token count is neither — and the cache delta is stated in percentage points, because a percent of a
+percent would be read as something else. A day that billed no tokens has no share to plot, so the
+sparkline breaks there rather than carrying the previous value forward. **The engaged-time tile
+trends on a different set of days than its neighbours, and says so in its own tooltip:** its trend
+covers the days you worked, while every other trend covers the days that billed tokens. The second
+row answers unit economics — sessions per active day with its current streak, autonomy (responses
+per prompt you typed, and those same prompts per engaged hour), cost per session, and cost per
+engaged hour. Session counts, the rhythm histograms and the punchcard all **include delegated
+subagent sessions**, which the harness dispatches rather than you; the how-you-run panel carries the
+main/subagent split, and autonomy is the exception — its denominator is main-thread prompts only. Cost per session is a median over *priced* sessions only; a session with no token
+evidence at all is structurally zero rather than cheap, and folding it in would drag the median
+toward zero for a reason that is not about spend. A real figure under a cent renders `<$0.01`, never
+`$0.00`.
+
+**Rhythm & responsiveness** puts two histograms side by side, session length and response latency,
+each with its percentile markers laid over the bars. A percentile that lands in the open-ended
+top bucket renders with a `≥` prefix — the bucket has no upper edge, so the honest claim is a floor
+rather than a point. A window holding no samples reads `not measured` instead of a row of zero bars.
+**Response latency is the gap between a prompt and the response that answered it. It is not
+time-to-first-token**, which no local transcript records.
+
+**How you run** answers permission posture, who drove, and who served. Posture is a closed
+four-value vocabulary — guarded, auto-edit, plan, unrestricted — mapped from each host's own
+evidence; a raw value the taxonomy has not been taught yields **not-recorded**, which is a
+first-class row rendered in the de-emphasis ink rather than a display fallback, because spend with
+no posture evidence must never read as a posture. The delegation donut splits main-thread from
+subagent work, and its two halves are honest in different ways: Claude writes delegated work to its
+own nested transcript, so that cost is discovered, priced, and included, while a Codex subagent
+rollout reads `$0.00` by ledger design — its tokens replay the parent's and are stripped as a
+double-count, so the sessions stay visible and auditable at zero rather than billing the parent
+twice. The panel does not rank window cost by inference provider: a transcript host is not a vendor,
+and only Codex transcripts record who served the tokens, so that identity is reported per session on
+the Sessions detail strip — beside the provenance backing it — rather than as a window axis.
+
+**Tool mix** ranks tool invocations, top eight with the tail folded into a dimmed `Other` row rather
+than dropped. Names are the host's own — Codex's `CommandExecution` is not renamed to `Bash` —
+because the vocabularies are host-specific and a renamed row would assert a correspondence no
+evidence supports. **Model mix over time** stacks per-day cost by coarse model family, the top
+families coloured and the rest folded into a de-emphasised band.
+
+**Reliability** reports turns that never landed: exceptions per thousand responses, aborted turns,
+and a per-day exceptions sparkline that names the worst single day. Aborted turns are **codex-only
+evidence** — no other host records an interrupt — so the count appears only when the window holds a
+codex session, and otherwise reads `—` rather than a zero that would look measured.
+
+`ak usage score` prints the same scorecard figures in a terminal, offline, including the rhythm
+pair, the posture and served-by tables, and the reliability lines.
+
+### Limits
+
+Limits renders each vendor-reported window as a utilization meter. Every meter that can place one
+also carries a **pace tick** — the mark a steady burn would be sitting on right now, computed from
+the window's own length and reset time, so fill past the tick means ahead of pace. Nothing is
+fetched to draw it. When the arithmetic falls outside the window — a snapshot older than the window
+it describes, or a browser clock that disagrees with the vendor's — the tick is omitted rather than
+pinned to either end, because a mark at 0% or 100% would state a position the data cannot support.
+The legend appears only when at least one row actually carries a tick.
+
+### Prompts
+
+Prompts turns what you actually typed — never what the harness or a delegated agent produced —
+into repetition, habit, and coaching signal, host by host. Every figure derives from prompt
+**fingerprints** (a hash, a token count, a provenance tag recorded at scan time); no prompt text is
+stored in the index. The **KPI strip** reads Typed prompts (share of every fingerprinted turn),
+Questions, Supervision taps (against your own trailing-90d normal per host, where you have one),
+Repeated share, and Headless share. Below it, **Who is typing** shows the provenance split behind
+that Typed-prompts figure — most user-role turns are not typed by you at all — and **Host
+interplay** reads the asymmetry between hosts in plain language (how much more often you tap one,
+how much longer you write on the other, how much role scaffolding each gets retyped by hand), with
+the unequal-histories nuance in its own tooltip rather than a standing caveat.
+
+The **Coaching** panel is a kind-filterable, sortable pattern table — columns **Pattern · Times
+typed · Sessions · Days seen · Hosts**. Filter pills above the table slice by pattern kind and stack
+with the column sort; every header sorts; the table scrolls once it passes a handful of rows, with
+its header pinned. Expanding a pattern opens its coaching panel: where it was **seen** (up to three
+sessions, each a link to that session's masked transcript), **what you typed** (the pattern's own
+prompt text, shown inline and masked, fetched on demand — a **prompt text · shown / hidden** toggle
+at the top of the view suppresses it for screen-sharing and makes no fetch), a **recommendation**, a
+**draft** you can copy, and a **Dismiss** with an inline Undo. A pattern with no matching
+recommendation shows only where it was seen and what you typed, never a forced suggestion. Writing a
+recommendation is still CLI-only (`ak usage prompts --enrich`); the dashboard shows, dismisses,
+and reads, but runs no inference of its own. An **All** chip, offered on this view alone, widens the
+window to the full retained history; leaving Prompts drops it back to 30 days. Full formulas,
+thresholds, and sources: [Usage scorecard metrics](USAGE-SCORECARD-METRICS.md) §2a, §2b, §20–§23.
 
 ### Reading a session row
 
@@ -169,8 +265,19 @@ identity axes separate:
 - the compact host badge states only the execution host: Claude Code, Codex, or OpenCode;
 - the leading chevron expands an independent detail strip without opening the transcript;
 - the detail strip reports execution host, inference provider, provider provenance, model or models,
-  classification basis, token details, tools, and flags;
+  permission posture, rhythm, classification basis, token details, tools, and flags;
 - clicking the rest of the row opens the locally retained masked transcript.
+
+The row also carries chips for what that one session measured: its engaged length, its median
+response latency, a **posture badge**, and a **context-fill chip**. Both of the last two are
+evidence-gated. The posture badge appears only when the transcript recorded a posture this taxonomy
+maps, and its tooltip carries the host's own spelling of that value where the transcript recorded
+one, because the mapping is a judgment call and a reader checking it needs the evidence it was made
+from. The `ctx N%` chip
+appears only when **both** halves were observed — the last turn's context tokens and that model's
+window. Codex records a window; Claude Code and OpenCode do not, and the dashboard carries no
+published-window table to fall back on, so the chip is omitted rather than divided by a guessed
+denominator that would render as a fabricated percentage.
 
 Host, inference provider, provenance, and model are independent facts. The dashboard never derives a
 provider from a host name or model string. Codex `session_meta.model_provider` and equivalent
@@ -245,13 +352,6 @@ It points to the read-only `ak models plan` command, which can emit a copyable c
 The lifecycle payload is separate from the Usage session/transcript and Observability live/history
 payloads. Public catalogue enrichment cannot rename, re-price, add, or remove a retained session or
 transcript model record.
-
-The Scorecard view also shows a host-neutral **telemetry coverage** panel for Claude, Codex
-transcript evidence, and OpenCode. It reports parsed units and observed prompt/response totals, plus
-capability states (`supported`, `unsupported`, or `unavailable`). A readable source with no observed
-activity is a measured zero; an absent, degraded, or old API response is disclosed as unavailable or
-not reported rather than rendered as zero. The Codex transcript card does not merge the separate
-`codexLedger` corrective source into its coverage counts.
 
 ## Observability
 

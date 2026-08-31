@@ -186,6 +186,10 @@ than the colored-outline chip style originally shipped.
 
 #### 7.1 Cross-host telemetry coverage is additive and evidence-graded (2026-08-24)
 
+**[Superseded 2026-08-29: the capabilities matrix was removed with the telemetry-coverage panel —
+see [ADR-0038](0038-consistent-cross-host-session-metrics.md). `diagnostics.common` and the
+source-health pill described below still ship.]**
+
 Usage adds `sourceHealth.<host>.diagnostics.common` and
 `sourceHealth.<host>.capabilities` without changing existing status/reason or Codex-specific
 diagnostic fields. `supported`, `unsupported`, and `unavailable` are capability states, not

@@ -7,7 +7,10 @@
 // never touches the real stdout, so results don't depend on how tests are run.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { reportOutcome, withProgress } from '../../src/lib/output.mjs';
+import {
+  reportOutcome, withProgress, sanitizeForTerminal, dim, bold,
+  ok, warn, fail, info, heading,
+} from '../../src/lib/output.mjs';
 
 const sink = () => {
   const writes = [];
@@ -96,4 +99,175 @@ test('managed outcomes render degraded and failed states without green success',
   assert.match(lines[0], /⚠.*solver: fallback/);
   assert.match(lines[1], /✗.*brain: exit 1/);
   assert.doesNotMatch(lines.join('\n'), /✓/);
+});
+
+// exitWhenFlushed — the pipe-safe exit for the bin entry. process.exit() kills
+// the process before a piped stdout drains, so any command whose output tops
+// the ~64KB pipe buffer (ak usage prompts --json is ~268KB on the reference
+// corpus) truncates for every `| jq` consumer. The fix defers the hard exit
+// until stdout and stderr report their queues flushed. Tested end-to-end
+// through a real child process and a real pipe — the buffer behavior being
+// pinned does not exist in-process.
+import { spawn, spawnSync } from 'node:child_process';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+
+const OUTPUT_MJS = fileURLToPath(new URL('../../src/lib/output.mjs', import.meta.url));
+const PAYLOAD = 200 * 1024;
+
+const runChild = (tailJs) => spawnSync(process.execPath, ['--input-type=module', '-e',
+  `import { exitWhenFlushed } from ${JSON.stringify(pathToFileURL(OUTPUT_MJS).href)};
+   process.stdout.write('x'.repeat(${PAYLOAD}));
+   ${tailJs}`,
+], { encoding: 'utf8', maxBuffer: 4 * PAYLOAD });
+
+test('exitWhenFlushed delivers the full piped payload past the 64KB pipe buffer', () => {
+  const r = runChild('exitWhenFlushed(0);');
+  assert.equal(r.status, 0);
+  assert.equal(r.stdout.length, PAYLOAD);
+});
+
+test('exitWhenFlushed propagates a nonzero exit code', () => {
+  const r = runChild('exitWhenFlushed(3);');
+  assert.equal(r.status, 3);
+  assert.equal(r.stdout.length, PAYLOAD);
+});
+
+// ── SEC-5: a stalled pipe consumer must not hang the exit forever ──────────
+// Security review SEC-5 (MEDIUM). The exit sits inside two nested write
+// callbacks with no timeout and no fallback. The review measured it: a
+// consumer that OPENS the pipe and never reads it, plus a payload above the
+// ~64 KB pipe buffer, never exits — it took SIGKILL at 8 s. A draining
+// consumer, a consumer that reads one chunk and destroys, and one that
+// destroys immediately all exited in under a second, which is why the tests
+// written alongside the drain fix (above) did not see this: they all drain.
+//
+// The shape that hits it is ordinary — a paused pager, a `tee` into a blocked
+// sink, a lazy CI step. Availability only, but it is a new hang in a path that
+// previously could not hang: before the drain fix the bin called
+// process.exit(code) directly and returned immediately.
+
+// POSIX-only by OS design, not by omission: `process.stdout` writes to a pipe
+// are ASYNCHRONOUS on POSIX but SYNCHRONOUS on Windows (Node's documented
+// platform behavior). On Windows the `write(200 KB)` to a non-reading consumer
+// blocks INSIDE the write syscall — it fills the pipe buffer and waits for a
+// reader — so control never reaches exitWhenFlushed, and no timer can fire
+// while the event loop is blocked in that write. The bounded-exit-despite-a-
+// stalled-consumer guarantee is therefore a POSIX async-pipe property that
+// cannot be provided at this layer on Windows (the same is true of any program
+// writing to a stalled Windows pipe). The two tests above — where the consumer
+// DOES drain — cover exitWhenFlushed's flush-then-exit path on every OS,
+// Windows included; only this stalled-consumer bound is POSIX-specific.
+test('SEC-5: a consumer that opens the pipe and never reads it still exits, bounded',
+  { skip: process.platform === 'win32' }, () => {
+  // The parent holds the read end open without reading, exactly as the review
+  // did. Without the bounded fallback this never resolves.
+  const child = spawn(process.execPath, ['--input-type=module', '-e',
+    `import { exitWhenFlushed } from ${JSON.stringify(pathToFileURL(OUTPUT_MJS).href)};
+     process.stdout.write('x'.repeat(${PAYLOAD}));
+     exitWhenFlushed(7);`,
+  ], { stdio: ['ignore', 'pipe', 'ignore'] });
+  child.stdout.pause(); // open, never read — the stalled-consumer case
+
+  const started = Date.now();
+  return new Promise((resolve, reject) => {
+    const guard = setTimeout(() => {
+      child.kill('SIGKILL');
+      reject(new Error('exitWhenFlushed never exited against a stalled consumer'));
+    }, 15_000);
+    child.on('exit', (code) => {
+      clearTimeout(guard);
+      const elapsed = Date.now() - started;
+      try {
+        assert.equal(code, 7, 'the exit code must survive the fallback path');
+        assert.ok(elapsed < 10_000, `took ${elapsed}ms — the bounded fallback did not fire`);
+        resolve();
+      } catch (err) { reject(err); }
+    });
+  });
+});
+
+// ── sanitizeForTerminal — the render-time half of SEC-2 ─────────────────────
+// The security review demonstrated four independent paths that carried raw
+// ESC/BEL/NUL bytes to the terminal, and captured every one of them with
+// stdout redirected to a FILE: the bytes land in the file and fire when it is
+// later `cat`'d. The stores now reject such text at rest; this is the last
+// line, and the only one covering `--deep`'s raw transcript text.
+//
+// The forbidden ranges are spelled out HERE, independently of the module's
+// own list, so narrowing that list fails this test rather than agreeing with
+// it. Written as numbers so this file carries none of the bytes it forbids.
+const FORBIDDEN = new RegExp(`[${[
+  [0x00, 0x08], [0x0b, 0x1f], [0x7f, 0x9f],
+  [0x200b, 0x200f], [0x202a, 0x202e], [0x2066, 0x2069],
+].map(([lo, hi]) => `${String.fromCharCode(lo)}-${String.fromCharCode(hi)}`).join('')}]`);
+
+const CH = (code) => String.fromCharCode(code);
+const ESC = CH(0x1b);
+const BEL = CH(0x07);
+
+test('sanitizeForTerminal removes every demonstrated control-sequence primitive', () => {
+  const cases = {
+    'screen clear': `${ESC}[2J`,
+    'cursor home': `${ESC}[1;1H`,
+    conceal: `${ESC}[8m HIDDEN ${ESC}[28m`,
+    'OSC-0 window title': `${ESC}]0;PWNED${BEL}`,
+    'OSC-52 clipboard write': `${ESC}]52;c;cm0gLXJmIH4=${BEL}`,
+    bell: BEL,
+    nul: CH(0x00),
+    backspace: CH(0x08),
+    'C1 CSI': CH(0x9b),
+    'bidi override': CH(0x202e),
+    'carriage-return line overwrite': `${CH(0x0d)}OVERWRITTEN`,
+  };
+  for (const [why, payload] of Object.entries(cases)) {
+    const out = sanitizeForTerminal(`before ${payload} after`);
+    assert.ok(!FORBIDDEN.test(out),
+      `${why}: output still carries a forbidden character: ${JSON.stringify(out)}`);
+  }
+});
+
+test('sanitizeForTerminal keeps tab and newline, which are legitimate in a message', () => {
+  assert.equal(sanitizeForTerminal('a\tb\nc'), 'a\tb\nc');
+});
+
+test('sanitizeForTerminal preserves the styling this module itself applied', () => {
+  const styled = `${dim('Billing:')} ${bold('subscription')}`;
+  assert.equal(sanitizeForTerminal(styled), styled,
+    'a blanket strip would have deleted the kit\'s own formatting everywhere');
+});
+
+test('sanitizeForTerminal strips hostile bytes that arrive INSIDE a styled message', () => {
+  const out = sanitizeForTerminal(dim(`name ${ESC}]0;PWNED${BEL} tail`));
+  // Built with fromCharCode rather than an escape so this file carries none
+  // of the bytes it is asserting about: strip the module's OWN styling first,
+  // then nothing forbidden may remain.
+  const ownSgr = new RegExp(`${ESC}\\[(?:0|1|2|1;3[1236])m`, 'g');
+  assert.ok(!FORBIDDEN.test(out.replace(ownSgr, '')),
+    'an OSC introducer must not survive just because the message was styled');
+});
+
+test('SEC-2: every print helper actually APPLIES the sanitizer, not just exports it', () => {
+  // The gap this closes: the tests above prove `sanitizeForTerminal` works,
+  // and the end-to-end CLI test proves a hostile STORE never reaches stdout —
+  // but the store gate drops those entries before printing, so neither test
+  // fails if the helpers stop calling the sanitizer. `--deep` prints raw
+  // transcript text that no store gate ever sees, so the wiring itself has to
+  // be pinned.
+  const hostile = `payload ${ESC}[2J${ESC}[1;1H${ESC}]0;PWNED${BEL} tail`;
+  const printed = [];
+  const real = console.log;
+  console.log = (line) => { printed.push(String(line)); };
+  try {
+    ok(hostile); warn(hostile); fail(hostile); info(hostile); heading(hostile);
+  } finally {
+    console.log = real;
+  }
+  assert.equal(printed.length, 5, 'guard: all five helpers ran');
+  const ownSgr = new RegExp(`${ESC}\\[(?:0|1|2|1;3[1236])m`, 'g');
+  for (const [i, line] of printed.entries()) {
+    assert.ok(line.includes('payload') && line.includes('tail'),
+      `helper ${i} must still print the message`);
+    assert.ok(!FORBIDDEN.test(line.replace(ownSgr, '')),
+      `helper ${i} printed a forbidden character: ${JSON.stringify(line)}`);
+  }
 });

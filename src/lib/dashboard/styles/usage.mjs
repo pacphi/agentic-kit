@@ -127,6 +127,28 @@ export const USAGE_CSS = `
 .kpi .d-note{display:block; color:var(--ink-dim); font-size:11px; margin-top:2px}
 .kpi.accent .v{color:var(--accent)}
 .kpi.warnv .v{color:var(--warn)}
+/* The tile footer carries the change against the previous equal-length window
+   and the per-day trend for the same figure. space-between rather than a gap,
+   so the chip stays left and the sparkline anchors to the tile's right edge
+   instead of drifting with the chip's width. Each line is scaled to its OWN
+   min/max and the tiles do not all cover the same day set (Engaged time is
+   drawn from days worked, the rest from days billed), so these are shape
+   readings one tile at a time — not a row to compare across. Both halves
+   self-suppress when their data is absent, and the row is omitted entirely
+   when neither renders — so a tile never grows an empty band. */
+.kpi-foot{display:flex; align-items:center; justify-content:space-between; gap:10px; margin-top:9px; min-height:24px}
+/* The chip is the reading; the line is the shape. So the chip never shrinks or
+   wraps — a unit-suffixed delta ("0 pp") broke across two lines once the cache
+   tile gained a trend to share the row with — and the sparkline gives up width
+   instead, scaling inside its own viewBox. */
+.kpi-foot .dchip{flex:none; white-space:nowrap}
+.kpi-foot .spark{flex:0 1 auto; min-width:0; max-width:100%}
+/* The second KPI row is a continuation of the hero, not a new section: same
+   grid, pulled up so the two read as one block, and quieter numbers because
+   these are derived rates rather than the measured totals above them. */
+.hero-2{margin-top:-4px}
+.hero-2 .kpi{background:var(--panel-2); box-shadow:none}
+.hero-2 .kpi .v{font-size:22px}
 .note{
   display:flex; gap:9px; padding:10px 14px; margin-bottom:16px; border-radius:var(--r-sm);
   background:var(--accent-soft); color:var(--ink-2); font-size:12.5px; align-items:baseline;
@@ -178,19 +200,6 @@ export const USAGE_CSS = `
   transition:filter .15s ease;
 }
 .daybar:hover .db-fill{filter:brightness(1.35)}
-.telemetry-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:8px}
-.telemetry-card{min-width:0;padding:10px 12px;border:1px solid var(--line);border-radius:var(--r-sm);background:var(--panel-2)}
-.telemetry-card .tc-head{display:flex;align-items:center;justify-content:space-between;gap:8px;color:var(--ink);font-size:12px;font-weight:650}
-.telemetry-card .tc-status{font-size:9px;font-weight:650;text-transform:uppercase;letter-spacing:.06em;color:var(--ink-dim)}
-.telemetry-card[data-status="ok"] .tc-status{color:var(--ok)}
-.telemetry-card[data-status="degraded"] .tc-status{color:var(--warn)}
-.telemetry-card[data-status="absent"] .tc-status,.telemetry-card[data-status="not-read"] .tc-status{color:var(--ink-dim)}
-.telemetry-card .tc-counts{margin-top:5px;color:var(--ink-2);font-size:10px;line-height:1.45}
-.telemetry-card .tc-caps{display:flex;flex-wrap:wrap;gap:4px;margin-top:8px}
-.telemetry-card .tc-cap{padding:3px 5px;border:1px solid var(--line);border-radius:5px;color:var(--ink-dim);font:9px/1.1 ui-monospace,monospace}
-.telemetry-card .tc-cap[data-state="supported"]{border-color:color-mix(in srgb,var(--ok) 42%,var(--line));color:var(--ok)}
-.telemetry-card .tc-cap[data-state="unsupported"]{color:var(--ink-dim)}
-.telemetry-card .tc-cap[data-state="unavailable"]{border-color:color-mix(in srgb,var(--warn) 42%,var(--line));color:var(--warn)}
 .db-lab{font-family:var(--mono); font-size:9.5px; color:var(--ink-dim); margin-top:6px}
 
 /* punchcard */
@@ -343,7 +352,7 @@ export const USAGE_CSS = `
    which is silent: the row still renders, it just renders the wrong data under
    each heading. */
 .srow{
-  display:grid; grid-template-columns:18px 82px minmax(150px,2.1fr) minmax(90px,1fr) 106px 46px 60px 62px 68px 20px;
+  display:grid; grid-template-columns:18px 82px minmax(150px,2fr) minmax(80px,.55fr) minmax(155px,1.35fr) 106px 46px 60px 62px 68px 20px;
   gap:10px; align-items:center; padding:9px 13px; background:var(--panel); font-size:12.5px; cursor:pointer;
 }
 .srow:hover{background:var(--panel-2)}
@@ -351,6 +360,28 @@ export const USAGE_CSS = `
 .s-claude{color:var(--warn); background:color-mix(in srgb,var(--warn) 12%,transparent); border-color:color-mix(in srgb,var(--warn) 30%,transparent)}
 .s-codex{color:var(--accent); background:var(--accent-soft); border-color:color-mix(in srgb,var(--accent) 35%,transparent)}
 .s-title{overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+/* Per-session evidence chips, in their OWN column rather than crowded into
+   .s-title — the title is the row's identifier and must not be truncated to
+   make room for its annotations. Each chip renders only when the transcript
+   established that fact, so an absent chip is the signal that it was never
+   recorded; the cell overflows hidden rather than wrapping, which would give
+   this row a second line and halve the list's density.
+   The track is sized (155px floor) from the widest chip set measured across a
+   real 100-row corpus, which was 170px — so the common row does not truncate
+   at all. The rarer wider set still has to degrade somehow, and .s-mode is the
+   one chip that shrinks: the numbers beside it are short and must stay whole,
+   while a posture ellipsised to "unrestric…" is the same treatment .cat and
+   .s-title already get in this table, with the full value in its tooltip. */
+.s-chips{display:flex; gap:4px; overflow:hidden; min-width:0}
+.s-chip{
+  font-family:var(--mono); font-size:9.5px; color:var(--ink-dim); white-space:nowrap; flex:none;
+  border:1px solid var(--line); border-radius:100px; padding:1px 6px; background:var(--panel-2);
+}
+/* The posture chip always spells the posture out, so its tint is a second
+   channel and never the only one carrying "this session had a wide mandate". */
+.s-chip.s-mode{color:var(--ink-2); flex:0 1 auto; min-width:0; overflow:hidden; text-overflow:ellipsis}
+.s-chip.s-mode[data-mode="plan"]{color:var(--purple); border-color:color-mix(in srgb,var(--purple) 32%,transparent)}
+.s-chip.s-mode[data-mode="unrestricted"]{color:var(--warn); border-color:color-mix(in srgb,var(--warn) 32%,transparent)}
 .s-proj,.s-when,.s-dur,.s-turns,.s-tok{color:var(--ink-2); font-size:11.5px}
 .s-cost{text-align:right; color:var(--ink); font-size:12px}
 .s-tx{background:transparent; border:0; color:var(--ink-dim); font-size:14px; cursor:pointer; padding:0; border-radius:5px}
@@ -470,11 +501,448 @@ export const USAGE_CSS = `
      in the 20px glyph column and were clipped, and the transcript glyph wrapped
      onto a line of its own. Five columns for five cells is what makes the
      arithmetic close. The category is still reachable — it is on the project
-     header chips and on the Scorecard's category rows. */
+     header chips and on the Scorecard's category rows.
+     .s-chips joins the hidden set for the same arithmetic reason: it is an
+     ELEVENTH desktop column, and leaving it visible here would put six cells
+     into five tracks. Nothing it carries is lost — the row's detail strip
+     spells posture and rhythm out in full. */
   .srow{grid-template-columns:18px 58px 1fr 68px 20px}
-  .srow .s-proj,.srow .s-when,.srow .s-dur,.srow .s-turns,.srow .s-tok,.srow .cat{display:none}
+  .srow .s-proj,.srow .s-when,.srow .s-dur,.srow .s-turns,.srow .s-tok,.srow .cat,.srow .s-chips{display:none}
   .phead{grid-template-columns:16px 1fr 58px 66px}
   .phead .pchips,.phead .p-h,.phead .p-tok{display:none}
 }
 
+/* rhythm/mode chart primitives (usage-rhythm.mjs) — a small, self-contained
+   component family for the rhythm/mode panels: delta chips, sparklines, a
+   latency histogram, a stacked-by-day bar, a two-slice donut, and ranked
+   rows. Every numeric figure here carries .tnum (tabular-nums) explicitly,
+   same spirit as .mono elsewhere in this file — inherited font-variant-numeric
+   from body is not something a reader can see in the markup, so state it. */
+.tnum{font-variant-numeric:tabular-nums}
+
+/* delta chip */
+.dchip{display:inline-flex; align-items:center; gap:4px; font-size:12px; font-weight:600}
+.dchip-arrow{font-style:normal}
+.dchip[data-tone="good"]{color:var(--ok)}
+.dchip[data-tone="bad"]{color:var(--fail)}
+.dchip[data-tone="flat"]{color:var(--ink-dim)}
+
+/* sparkline */
+.spark{overflow:visible; vertical-align:middle}
+.spark-line{fill:none; stroke:var(--ink-dim); stroke-width:1.6}
+.spark-dot{fill:var(--accent)}
+
+/* histogram — sequential single hue; a positioned element always paints
+   above a non-positioned one regardless of DOM order (DOM order only breaks
+   ties WITHIN the same paint layer), so .hist-bars must ALSO be positioned —
+   not just come after .hist-markers in the markup — for it to paint over the
+   dashed marker lines. With both positioned (z-index:auto), DOM order then
+   correctly decides between them: markers first, bars second, so bars win.
+   The marker's own label sits above the plot box instead, so it is never
+   itself covered by a bar. */
+.hist-plot{position:relative}
+.hist-markers{position:absolute; inset:0; pointer-events:none}
+.hist-marker{position:absolute; top:0; bottom:0}
+.hist-marker-line{position:absolute; top:0; bottom:0; border-left:1px dashed var(--ink-dim)}
+.hist-marker-lab{position:absolute; top:-14px; left:3px; font-style:normal; font-size:9px; font-weight:600; color:var(--ink-dim); white-space:nowrap}
+.hist-bars{position:relative; display:flex; align-items:flex-end; gap:6px}
+.hist-bar{flex:1; min-width:0; display:flex; flex-direction:column; align-items:center; justify-content:flex-end}
+.hist-val{font-size:9.5px; color:var(--ink-2); margin-bottom:3px}
+.hist-fill{display:block; width:100%; border-radius:4px 4px 0 0; background:var(--accent)}
+.hist-labs{display:flex; gap:6px; margin-top:6px}
+.hist-lab{flex:1; min-width:0; text-align:center; font-size:9.5px; color:var(--ink-dim); overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+
+/* stacked days — order is bottom-up; segments render in a column-reverse
+   flex with a 2px gap, so the LAST key in order paints at the top of the
+   stack. not-recorded/other are forced to --ink-dim in JS (never a series
+   color), same "the uncategorized bucket is de-emphasis, not a hue" rule
+   renderScoreCategories already applies to Unclassified above. */
+.stackdays{display:flex; align-items:flex-end; gap:6px}
+.sday-col{flex:1; min-width:0; display:flex; flex-direction:column; align-items:center}
+.sday-bar{width:100%; display:flex; flex-direction:column-reverse; gap:2px}
+.sday-seg{display:block; width:100%}
+.sday-seg.top{border-radius:4px 4px 0 0}
+.sday-lab{margin-top:6px; font-family:var(--mono); font-size:9.5px; color:var(--ink-dim)}
+
+/* two-slice donut — a mask on the RING punches the hole; the center label is
+   a sibling, not a descendant, of the masked element, so it is never itself
+   clipped. Seams between slices are --line, not bare transparent, so a small
+   gap reads as a deliberate seam rather than a rendering gap. */
+.donut2-wrap{display:flex; align-items:center; gap:16px}
+.donut2{position:relative; width:88px; height:88px; flex:none}
+.donut2-ring{
+  display:block; width:100%; height:100%; border-radius:50%;
+  -webkit-mask:radial-gradient(farthest-side,transparent 61%,#000 62%);
+  mask:radial-gradient(farthest-side,transparent 61%,#000 62%);
+}
+.donut2-center{
+  position:absolute; inset:0; display:grid; place-items:center;
+  font-style:normal; font-size:13px; font-weight:700; color:var(--ink); text-align:center;
+}
+.donut2-legend{display:flex; flex-direction:column; gap:8px}
+.donut2-item{display:flex; align-items:center; gap:6px; font-size:12.5px; color:var(--ink-2)}
+.donut2-item i{width:8px; height:8px; border-radius:2px; display:inline-block; flex:none}
+.donut2-item b{color:var(--ink); font-weight:600}
+
+/* ranked rows — the same label/track/value grammar as .mrow above, kept as
+   its own small component so this file's chart primitives can evolve
+   independently of the scorecard's magnitude rows. */
+.rrows{display:flex; flex-direction:column; gap:7px}
+.rrow{display:grid; grid-template-columns:minmax(90px,1.2fr) 2fr auto; gap:10px; align-items:center}
+.rrow-label{font-size:12px; color:var(--ink); overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+.rrow-track{height:7px; border-radius:4px; background:var(--panel-2); overflow:hidden}
+.rrow-fill{display:block; height:100%; border-radius:4px; background:var(--accent)}
+.rrow-fill.dim{background:var(--ink-dim)}
+.rrow-val{font-size:12px; color:var(--ink); text-align:right}
+
+/* rhythm panel — two histogram cards side by side */
+.rhythm-grid{display:grid; gap:16px; grid-template-columns:repeat(auto-fit,minmax(280px,1fr))}
+.rcard{min-width:0; border:1px solid var(--line); border-radius:var(--r-sm); background:var(--panel-2); padding:12px 14px 13px}
+.rcard-h{display:flex; align-items:baseline; justify-content:space-between; gap:10px; margin-bottom:8px}
+.rcard-t{font-size:12px; font-weight:600; color:var(--ink)}
+.rcard-n{font-size:10.5px; color:var(--ink-dim)}
+/* A marker's label is drawn ABOVE the plot box (top:-14px) so a tall bar can
+   never cover it — which means the card has to reserve that strip, or the
+   label is clipped by the card instead. Two markers close together would
+   collide on one line, so the second sits a row higher; the reserved strip is
+   tall enough for both. */
+.rcard .hist{padding-top:30px}
+.rcard .hist-marker+.hist-marker .hist-marker-lab{top:-27px}
+
+/* how-you-run panel — the by-day posture chart beside the delegation donut.
+   The side column holds one 88px ring and its legend, so the stack takes the
+   larger share: a wider day chart is more days legible, where extra width in
+   the side column would only be padding around a fixed-size ring. */
+.howrun{display:grid; gap:18px; grid-template-columns:minmax(0,2fr) minmax(0,1fr)}
+.hr-block{min-width:0}
+.hr-side{display:flex; flex-direction:column; gap:16px; min-width:0}
+.hr-t{font-size:11px; font-weight:600; letter-spacing:.06em; text-transform:uppercase; color:var(--ink-dim); margin-bottom:10px}
+/* Every chart in this panel carries a sentence saying what its buckets mean
+   and what the de-emphasised bucket is holding — the charts split spend by
+   things (posture, who drove) whose absence is itself a finding. */
+.hr-note{margin:10px 0 0; font-size:11px; line-height:1.5; color:var(--ink-dim)}
+.hr-note b{color:var(--ink-2); font-weight:600}
+@media(max-width:820px){ .howrun{grid-template-columns:1fr} }
+
+/* reliability strip — a failure rate is a claim about the whole window, so it
+   is stated as a figure with its own denominator beside it, not as a gauge. */
+.rel{display:grid; gap:12px; grid-template-columns:repeat(auto-fit,minmax(240px,1fr))}
+.rel-stat{min-width:0; border:1px solid var(--line); border-radius:var(--r-sm); background:var(--panel-2); padding:12px 14px}
+.rel-k{display:block; font-size:10px; font-weight:600; letter-spacing:.07em; text-transform:uppercase; color:var(--ink-dim)}
+.rel-v{display:block; font-size:23px; font-weight:700; letter-spacing:-.02em; color:var(--ink); margin-top:5px}
+.rel-sub{display:block; font-size:11px; color:var(--ink-2); margin-top:4px}
+/* Direction is carried by the glyph and the wording as well as the color: a
+   reader who cannot separate --warn from --ok still gets the whole finding. */
+.rel-flag{display:inline-flex; align-items:center; gap:5px; margin-top:9px; font-size:11px; font-weight:600}
+.rel-flag i{font-style:normal}
+.rel-flag[data-sev="warn"]{color:var(--warn)}
+.rel-flag[data-sev="ok"]{color:var(--ok)}
+.rel-flag[data-sev="flat"]{color:var(--ink-dim)}
+/* The per-day exceptions line sits below the two stat cards at full strip
+   width, not inside the .rel grid — a third auto-fit cell would have squeezed
+   it to a third of the row, which is not enough horizontal room for one point
+   per day to read as a shape. max-width keeps it from stretching thin on a
+   wide window; the line never scales, so its stroke stays 1.6px everywhere. */
+.rel-trend{margin-top:14px}
+.rel-trend .spark{display:block; max-width:100%}
+.rel-trend .rel-flag{margin-top:2px}
+
+/* limits pace tick — where the window's own clock is, so a meter reads as
+   "ahead of pace" or "behind" rather than only as a level. Scoped to .lim so
+   the same .mbar the scorecard's magnitude rows use is untouched: the track
+   joins the positioned layer only here, and only here does it stop clipping,
+   which lets the tick stand 3px proud of a 7px bar instead of being lost
+   inside it. The fill already carries its own radius, so nothing else changes.
+   The tick overrides .mbar i's block/height/background by carrying a class
+   (0,2,1 beats 0,1,1). */
+/* A pool label — "GPT-5.3-Codex-Spark · weekly" — needs ~183px, where the
+   shared magnitude grid gives 137px and ellipsises the rest. Two rows both
+   truncating to something plausible is how one pool reported under two lanes
+   went unnoticed, so the limits label column is widened to fit: measured
+   1000-1600px, the full string fits with no row overflow. The cap is a MAX,
+   not a min — each .mrow is its own grid, so a content-sized track would let
+   every row start its meter at a different x and the panel would stop reading
+   as a stack of comparable bars. A fixed cap that yields under pressure keeps
+   them aligned; below ~950px the ellipsis returns and limRow's title carries
+   the full text. */
+.lim .mrow{grid-template-columns:minmax(0,190px) minmax(60px,0.9fr) 54px minmax(88px,auto)}
+.lim .mbar{position:relative; overflow:visible}
+.lim .mbar i.pace{
+  position:absolute; top:-3px; bottom:-3px; left:0; width:2px; height:auto;
+  border-radius:1px; background:var(--ink-2); transform:translateX(-1px);
+}
+.lim .legend .pace-key{width:2px; height:11px; border-radius:1px; background:var(--ink-2)}
+
+/* ── Prompts view (METRICS.md §21) ──────────────────────────────────────────
+   Reuses the scorecard's own grammar wherever one exists — .kpi for the strip,
+   .mbar for magnitude, .strip/.sh for section chrome — so a panel here is the
+   same object a reader already knows from Scorecard. Only the shapes with no
+   existing equivalent are new: the per-host interplay row, the sortable Coaching
+   table, and its expanded coaching panel.
+   Every colour is a token; nothing below hardcodes a hue, so the view follows
+   the viewer's theme with the rest of the panel. */
+
+/* Per-host tap chips inside a KPI's detail line. The tone says how the host
+   compares to its OWN trailing baseline, and the italic tail always names what
+   it was compared against — a chip that only carried a colour would be a
+   judgement with its evidence stripped off.
+   One chip per LINE rather than an inline run: "codex 17% your p75 12%" is
+   three facts, and inside a ~200px KPI card an inline chip wrapped mid-phrase
+   into a 2x2 block where "no baseline" and "yet" landed on separate rows. As a
+   full-width row the host and its share sit left, the comparison right, and the
+   phrase can no longer break between its own words. */
+.pr-chip{
+  display:flex; align-items:baseline; justify-content:space-between; gap:8px;
+  margin:4px 0 0; padding:2px 7px; border-radius:6px; background:var(--panel-2);
+  font-family:var(--mono); font-size:10.5px; white-space:nowrap;
+}
+.pr-chip i{font-style:normal; color:var(--ink-dim); overflow:hidden; text-overflow:ellipsis}
+.pr-chip[data-tone="good"]{color:var(--ok)}
+.pr-chip[data-tone="bad"]{color:var(--warn)}
+.pr-chip[data-tone="flat"]{color:var(--ink-2)}
+
+/* host interplay — one row per host, each carrying its trend, its p90 length
+   and its persona count. auto-fit rather than a fixed column count: two hosts
+   is the common case, but a machine with one (or four) must not leave a hole
+   or overflow the strip. */
+.pr-hosts{display:grid; gap:14px; grid-template-columns:repeat(auto-fit,minmax(260px,1fr))}
+.pr-host{background:var(--panel-2); border-radius:var(--r-sm); padding:13px 14px}
+.pr-host-name{
+  display:flex; align-items:baseline; justify-content:space-between; gap:8px;
+  font-size:13px; font-weight:600; margin-bottom:9px;
+}
+.pr-host-n{font-size:10.5px; font-weight:400; color:var(--ink-dim)}
+.pr-host-trend,.pr-host-len{display:flex; align-items:center; gap:10px; margin-bottom:8px}
+/* The meter STRETCHES and the sparkline does NOT. sparklineSvg emits width/
+   height attributes with no viewBox, so its path coordinates are pixels, not a
+   scalable space: growing the element widens the box and leaves the line
+   drawn at its original size inside a field of empty pixels. Letting it keep
+   its natural width and pushing the label away with auto margin puts the line
+   where the reader looks first, with no dead gap in front of it. */
+.pr-host-len .mbar{flex:1 1 auto; min-width:0; height:8px}
+.pr-host-trend .spark{flex:none}
+.pr-host-trend .pr-host-lab,.pr-host-trend .pr-none{margin-left:auto}
+.pr-host-lab{flex:none; font-size:10.5px; color:var(--ink-2)}
+.pr-host-persona{font-size:11.5px; color:var(--ink-2); padding-top:2px}
+.pr-host-persona b{color:var(--ink)}
+.pr-none{color:var(--ink-dim); font-size:11px; font-style:italic}
+.pr-caveat{
+  margin-top:12px; padding-top:10px; border-top:1px dashed var(--line);
+  font-size:11.5px; color:var(--ink-2);
+}
+.pr-caveat b{color:var(--ink)}
+
+/* the plain-language READ under the host cards (replaces the opaque caveat):
+   an accent-ruled line stating the asymmetry the panel measured. */
+.pr-host-read{
+  margin-top:14px; padding:10px 13px; border-left:2px solid var(--accent);
+  border-radius:0 var(--r-sm) var(--r-sm) 0; background:var(--panel-2);
+  font-size:12.5px; color:var(--ink-2); line-height:1.55;
+}
+.pr-host-read b{color:var(--ink); font-weight:600}
+.pr-host-read .tag{
+  margin-right:8px; font-size:9.5px; text-transform:uppercase; letter-spacing:.08em; color:var(--ink-dim);
+}
+
+/* the ? info-dot in a strip header — carries the nuance the header body no
+   longer states inline, on hover/focus. margin-right:auto keeps the header's
+   note pushed to the far right, with the dot next to the title. */
+.pr-infodot{
+  position:relative; display:inline-grid; place-items:center; width:16px; height:16px;
+  margin-right:auto; border-radius:50%; border:1px solid var(--line-2); color:var(--ink-dim);
+  font-family:var(--mono); font-size:10px; font-weight:700; cursor:help;
+}
+.pr-infodot:hover,.pr-infodot:focus-visible{color:var(--accent); border-color:var(--accent); outline:none}
+.pr-tip{
+  position:absolute; top:135%; left:0; z-index:30; width:300px; padding:11px 13px;
+  background:var(--panel-2); border:1px solid var(--line-2); border-radius:var(--r-sm);
+  box-shadow:var(--shadow); font-family:var(--sans); font-size:12px; font-weight:400;
+  line-height:1.5; color:var(--ink-2); text-align:left; opacity:0; pointer-events:none;
+  transition:opacity .14s;
+}
+.pr-infodot:hover .pr-tip,.pr-infodot:focus .pr-tip,.pr-infodot:focus-visible .pr-tip{opacity:1}
+.pr-tip b{color:var(--ink)}
+
+/* ── the Coaching panel (§2): re-ask insight, kind filters, sortable table ── */
+
+/* the re-ask insight line above the filters */
+.pr-insight{margin:0 0 14px; font-size:12.5px; color:var(--ink-2); line-height:1.5}
+.pr-insight b{color:var(--ink)}
+
+/* kind filter pills — the kind colour lives HERE (a swatch), never on a row */
+.pr-filters{display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin:0 0 14px}
+.fpill{
+  display:inline-flex; align-items:center; gap:7px; padding:5px 12px; border-radius:100px;
+  border:1px solid var(--line); background:var(--panel); color:var(--ink-2);
+  font:inherit; font-size:12px; cursor:pointer;
+}
+.fpill:hover{border-color:var(--accent); color:var(--ink)}
+.fpill.on{background:var(--accent-soft); border-color:var(--accent); color:var(--ink)}
+.fpill:focus-visible{outline:2px solid var(--accent); outline-offset:1px}
+.fpill .sw{width:8px; height:8px; border-radius:50%; flex:none}
+.fpill .fc{color:var(--ink-dim); font-size:11px}
+.fpill.on .fc{color:var(--accent)}
+.k-instruction{background:var(--accent)}
+.k-tap{background:var(--warn)}
+.k-persona{background:var(--purple)}
+.k-reask{background:var(--fail)}
+.k-question{background:var(--ok)}
+
+/* the sortable table. Caps at ~5 rows then scrolls, with a pinned header — the
+   BODY scrolls inside its own region rather than taking the whole page with it. */
+.pr-tablewrap{
+  overflow:auto; max-height:322px; border:1px solid var(--line); border-radius:var(--r-sm);
+  overscroll-behavior:contain;
+}
+.pr-tablewrap:focus-visible{outline:2px solid var(--accent); outline-offset:2px}
+.pr-coach{border-collapse:collapse; width:100%; font-size:13px}
+.pr-coach thead th{
+  position:sticky; top:0; z-index:1; text-align:left; padding:0;
+  background:var(--panel-2); border-bottom:1px solid var(--line-2);
+}
+.pr-coach thead th.tnum{text-align:right}
+.pr-coach thead th button{
+  width:100%; display:flex; align-items:center; gap:6px; padding:11px 12px;
+  background:none; border:0; cursor:pointer; text-align:inherit; justify-content:inherit;
+  font-family:var(--mono); font-size:10px; font-weight:600; letter-spacing:.07em;
+  text-transform:uppercase; color:var(--ink-dim);
+}
+.pr-coach thead th.tnum button{justify-content:flex-end}
+.pr-coach thead th button:hover{color:var(--ink)}
+.pr-coach thead th[aria-sort] button{color:var(--accent)}
+.pr-coach thead th button .arw{font-size:9px; opacity:.5}
+.pr-coach thead th[aria-sort] button .arw{opacity:1}
+.pr-coach tbody td,.pr-coach tbody th[scope=row]{
+  padding:0 12px; height:52px; border-bottom:1px solid var(--line); vertical-align:middle;
+  text-align:left; font-weight:400;
+}
+.pr-coach tbody tr:last-child td,.pr-coach tbody tr:last-child th[scope=row]{border-bottom:0}
+.pr-coach td.tnum{text-align:right; font-variant-numeric:tabular-nums; white-space:nowrap; color:var(--ink-2)}
+.prow.open{background:var(--accent-soft)}
+.pname-btn{
+  display:flex; align-items:center; gap:9px; width:100%; padding:8px 0;
+  background:none; border:0; cursor:pointer; text-align:left; color:var(--ink); font:inherit;
+}
+.pname-btn:hover .pr-name{color:var(--accent)}
+.pname-btn .chev{flex:none; width:9px; font-size:10px; color:var(--ink-dim); transition:transform .15s}
+.prow.open .pname-btn .chev{transform:rotate(90deg); color:var(--accent)}
+.pr-name{display:block; color:inherit; font-size:13px}
+.pr-hostchip{
+  display:inline-block; margin:0 4px 0 0; padding:1px 6px; border-radius:5px;
+  background:var(--panel); border:1px solid var(--line); font-family:var(--mono);
+  font-size:10.5px; color:var(--ink-2);
+}
+.pr-empty{padding:22px 12px; text-align:center; color:var(--ink-dim); font-size:12.5px}
+
+/* A sub-heading inside a strip column, for a second ranked list under the
+   first. Sized between .sh h2 and body text so it reads as subordinate. */
+.pr-sub{
+  margin:18px 0 8px; font-size:12px; font-weight:600; letter-spacing:.04em;
+  text-transform:uppercase; color:var(--ink-dim);
+}
+
+
+/* ── the expanded coaching panel (§2.3–2.5) ─────────────────────────────── */
+.detail-row td{padding:0; background:var(--panel-2); border-bottom:1px solid var(--line-2)}
+.coach{display:grid; gap:16px; max-width:860px; padding:6px 18px 20px 34px}
+.coach-sec h5,.coach .pr-seen{margin:0}
+.coach h5{
+  margin:0 0 8px; font-family:var(--mono); font-size:10px; font-weight:600;
+  letter-spacing:.09em; text-transform:uppercase; color:var(--ink-dim);
+}
+/* seen-in occurrence strip */
+.pr-seen{display:flex; gap:7px; flex-wrap:wrap; align-items:center}
+.occ-lab{font-size:9.5px; text-transform:uppercase; letter-spacing:.08em; color:var(--ink-dim); margin-right:3px}
+.occ-link{
+  padding:3px 9px; border:1px solid var(--line); border-radius:6px; background:var(--panel);
+  font-size:11px; color:var(--accent); text-decoration:none;
+}
+.occ-link:hover{border-color:var(--accent); background:var(--accent-soft)}
+.occ-more{font-size:10.5px; color:var(--ink-dim)}
+/* what you typed — masked, inline */
+.typed-load,.typed-empty,.typed-hidden{font-size:12px; color:var(--ink-dim)}
+.typed-hidden code,.typed-cap code{font-family:var(--mono); font-size:11px; color:var(--ink-2)}
+/* the command pointer in the advice-less Coaching empty state (P15) */
+.empty code{font-family:var(--mono); font-size:.92em; color:var(--accent)}
+.verbatim{
+  margin-bottom:6px; padding:10px 12px; background:var(--bg); border:1px solid var(--line);
+  border-left:2px solid var(--accent); border-radius:6px; font-family:var(--mono); font-size:12px;
+  color:var(--ink); line-height:1.55; white-space:pre-wrap; word-break:break-word;
+}
+.typed-cap{margin-top:6px; font-size:10px; color:var(--ink-dim)}
+.typed-cap .lock{color:var(--ok); margin-right:5px}
+/* recommendation */
+.rec-title{font-size:14px; font-weight:600; color:var(--ink); line-height:1.4}
+.rec-why{margin:6px 0 0; font-size:12.5px; color:var(--ink-2); line-height:1.5}
+/* the window-scope label on a kind-level card's rationale (QE F-1): brighter
+   and bolder than the finding it prefixes, so the two scopes read apart. */
+.rec-scope{font-weight:600; color:var(--ink)}
+/* draft + copy */
+.draft-wrap{position:relative}
+.draft-pre{
+  margin:0; padding:12px 14px; background:var(--bg); border:1px solid var(--line);
+  border-radius:var(--r-sm); font-family:var(--mono); font-size:11.5px; color:var(--ink-2);
+  line-height:1.6; white-space:pre-wrap; word-break:break-word; overflow-x:auto;
+}
+.pr-copy{
+  position:absolute; top:8px; right:8px; display:inline-grid; place-items:center; width:30px; height:30px;
+  border:1px solid var(--line); border-radius:7px; background:var(--panel); color:var(--ink-dim); cursor:pointer;
+}
+.pr-copy:hover{border-color:var(--accent); color:var(--accent); background:var(--accent-soft)}
+.pr-copy:focus-visible{outline:2px solid var(--accent); outline-offset:1px}
+.pr-copy.copied{border-color:var(--ok); color:var(--ok)}
+.pr-copy .ic-copy,.pr-copy .ic-check{display:inline-grid; place-items:center}
+.pr-copy .ic-check{display:none}
+.pr-copy.copied .ic-copy{display:none}
+.pr-copy.copied .ic-check{display:inline-grid}
+/* dismiss + source foot */
+.coach-foot{
+  display:flex; align-items:center; gap:14px; flex-wrap:wrap;
+  padding-top:14px; border-top:1px dashed var(--line);
+}
+.pr-dismiss{
+  padding:6px 13px; border:1px solid var(--line); border-radius:8px; background:var(--panel);
+  color:var(--ink-2); font:inherit; font-size:11.5px; cursor:pointer;
+}
+.pr-dismiss:hover{border-color:var(--fail); color:var(--fail)}
+.pr-dismiss:focus-visible{outline:2px solid var(--accent); outline-offset:1px}
+.dismiss-wrap{position:relative; display:inline-block}
+.dismiss-tip{
+  position:absolute; bottom:130%; left:0; z-index:30; width:290px; padding:11px 13px;
+  background:var(--panel); border:1px solid var(--line-2); border-radius:var(--r-sm);
+  box-shadow:var(--shadow); font-size:12px; line-height:1.5; color:var(--ink-2);
+  opacity:0; pointer-events:none; transition:opacity .14s;
+}
+.dismiss-wrap:hover .dismiss-tip,.dismiss-wrap:focus-within .dismiss-tip{opacity:1}
+.dismissed-note{display:none; align-items:center; gap:9px; font-size:12px; color:var(--ink-2)}
+.dismissed-note .undo{
+  padding:0; border:0; background:none; color:var(--accent); font:inherit; font-size:11.5px;
+  cursor:pointer; text-decoration:underline;
+}
+.coach-foot.done .dismiss-wrap{display:none}
+.coach-foot.done .dismissed-note{display:inline-flex}
+/* the inline "couldn't save" hint after a failed dismiss/undo POST (P6) */
+.dismiss-err{font-size:11.5px; color:var(--fail)}
+.coach-none{margin:0; font-size:12.5px; color:var(--ink-dim); font-style:italic}
+/* the card's source chip, right-aligned in the foot */
+.pr-card-source{
+  margin-left:auto; padding:1px 8px; border:1px solid var(--line); border-radius:20px;
+  font-family:var(--mono); font-size:10px; letter-spacing:.03em; color:var(--ink-dim);
+}
+.pr-card-source[data-source="enriched"]{color:var(--purple); border-color:color-mix(in srgb,var(--purple) 40%,var(--line))}
+.pr-card-source[data-source="rule"]{color:var(--accent); border-color:color-mix(in srgb,var(--accent) 40%,var(--line))}
+
+/* prompt-text posture toggle — right-aligned in the Coaching panel header, next
+   to its subtitle (§2.2, P16). The header centres (not baselines) so the
+   bordered toggle sits level with the heading, and the note takes the auto
+   margin so it and the toggle group to the right; the row wraps on narrow
+   widths rather than overflowing. */
+.sh-coach{align-items:center; flex-wrap:wrap}
+.sh-coach .n{margin-left:auto}
+.pr-posture{display:inline-flex; align-items:center; border:1px solid var(--line); border-radius:8px; overflow:hidden; background:var(--panel)}
+.pt-lbl{padding:0 9px 0 12px; font-size:10px; text-transform:uppercase; letter-spacing:.08em; color:var(--ink-dim)}
+.pt-btn{padding:6px 12px; border:0; background:none; color:var(--ink-2); font:inherit; font-size:11.5px; cursor:pointer}
+.pt-btn:hover{color:var(--ink)}
+.pt-btn[aria-pressed="true"]{background:var(--accent-soft); color:var(--accent)}
+.pt-btn:focus-visible{outline:2px solid var(--accent); outline-offset:-2px}
 `;

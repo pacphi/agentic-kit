@@ -266,6 +266,7 @@ const USAGE_VIEWS = [
   ['score', '#v-score'],
   ['limits', '#v-limits'],
   ['findings', '#v-findings'],
+  ['prompts', '#v-prompts'],
   ['models', '#v-models'],
   ['sessions', '#v-sessions'],
   ['transcript', '#v-transcript'],
@@ -301,9 +302,21 @@ const LIMITS_STUB = async () => ({
   },
   codex: {
     provider: 'codex', source: 'app-server', fetchedAt: Date.now() - 60_000, planType: 'prolite',
+    // Post-dedup shape (quota.mjs): app-server reports the weekly pool under
+    // BOTH the named lane and the legacy generic `codex` one, and the
+    // normalizer keeps the named copy — so what reaches the browser is a named
+    // lane carrying both windows, never a generic twin. The long pool name is
+    // the point: it is what the label column used to ellipsise.
     lanes: [
-      { id: 'codex', name: 'codex', planType: 'prolite', windows: [{ label: 'weekly', usedPercent: 3, windowMinutes: 10080, resetsAt: Math.round(Date.now() / 1000) + 500000 }] },
-      { id: 'codex_bengalfox', name: 'GPT-5.3-Codex-Spark', planType: 'prolite', windows: [] },
+      {
+        id: 'codex_bengalfox', name: 'GPT-5.3-Codex-Spark', planType: 'prolite',
+        windows: [
+          { label: '5h', usedPercent: 7, windowMinutes: 300, resetsAt: Math.round(Date.now() / 1000) + 9000 },
+          { label: 'weekly', usedPercent: 21, windowMinutes: 10080, resetsAt: Math.round(Date.now() / 1000) + 500000 },
+        ],
+      },
+      // A named pool whose windows are all unusable still gets a row saying so.
+      { id: 'codex_othermodel', name: 'GPT-5.3-Codex-Mini', planType: 'prolite', windows: [] },
     ],
     resetCredits: { availableCount: 2, credits: [{ status: 'available', title: 'Full reset', expiresAt: null }] },
   },
@@ -878,6 +891,18 @@ async function main() {
     models: MODELS_STUB,
     modelScopeKey: 'ab'.repeat(32),
     system: SYSTEM_STUB,
+    // Same principle as `usage` above: coaching reads a ledger file by
+    // default, and this harness must not touch the user's real one either.
+    coachingLedger: { loadLedger: () => ({ version: 1, records: [] }), ledgerPath: cachePath + '.coaching-unused' },
+    // W5 enrichment (spec §6.3): the SAME hazard, one file over — dashboard-
+    // server.mjs also reads the persisted label/card store on every poll.
+    // Missing this override was a REAL bug (caught live): a --enrich run on
+    // this developer's own machine during this wave's build populated
+    // ~/.config/agentic-kit/usage-prompt-labels.json for real, and every UI
+    // test run after that silently rendered THAT real data instead of the
+    // fixture corpus's honest-empty state — exactly the leak `coachingLedger`
+    // above already guards against for the ledger file.
+    labelStore: { loadLabelStore: () => ({ version: 1, labels: {}, cards: {} }), labelStorePath: cachePath + '.labels-unused' },
   });
   const ORIGIN = new URL(srv.url).origin;
   const modelHeaders = { 'x-dash-token': srv.token };
@@ -896,6 +921,11 @@ async function main() {
   const consoleErrors = [];
   const failedRequests = [];
   const modelRequests = [];
+  // Every /api/limits call, with its window. Leaving Prompts resets a 365-day
+  // selection, and the Limits loader must not have already fetched at the old
+  // window — two in-flight requests for different spans would let a late
+  // response paint year-wide figures under a chip row reading 30d.
+  const limitsRequests = [];
   // Capture the LOCATION too. A bare "Failed to load resource" is
   // undiagnosable, and a console listener that records only the message makes
   // the harness's own failures impossible to act on.
@@ -914,6 +944,7 @@ async function main() {
   page.on('request', (r) => {
     const u = r.url();
     if (/\/api\/models(?:\?|$)/.test(u)) modelRequests.push(u);
+    if (/\/api\/limits(?:\?|$)/.test(u)) limitsRequests.push(u);
     if (u.startsWith(ORIGIN) || /^(data|blob|about|chrome-extension):/.test(u)) return;
     offOriginRequests.push(`${r.resourceType()} ${u}`);
   });
@@ -2214,8 +2245,12 @@ async function main() {
       `Models made ${modelRequests.length} request(s) before its tab opened: ${modelRequests.join(', ')}`);
     const usageSubmenu = await page.evaluate(() => [...document.querySelectorAll('#usage-seg [data-view]')]
       .map((button) => button.dataset.view));
-    check('Usage submenu puts Models before Sessions',
-      JSON.stringify(usageSubmenu) === JSON.stringify(['score', 'limits', 'findings', 'models', 'sessions', 'transcript']),
+    // Prompts sits between Findings and Sessions (spec §3 rail placement), so
+    // the shipped order gained an entry. Models-before-Sessions — the ordering
+    // decision this check was written to defend — is unchanged and still
+    // asserted, alongside the full order so a future insertion is deliberate.
+    check('Usage submenu puts Prompts after Findings, and Models before Sessions',
+      JSON.stringify(usageSubmenu) === JSON.stringify(['score', 'limits', 'findings', 'prompts', 'models', 'sessions', 'transcript']),
       `Usage submenu was ${JSON.stringify(usageSubmenu)}`);
     const modelPanelOwnership = await page.evaluate(() => [
       '#mli-observed-panel', '.mli-routes-panel', '#mli-catalog-explorer', '#mli-history', '#mli-consumers', '#mli-impact',
@@ -2241,6 +2276,27 @@ async function main() {
       const arts = artifactsIn(text);
       check(`usage/${view} is free of rendering artifacts`, arts.length === 0,
         `found ${arts.join(', ')} — this is the class of bug unit tests cannot see`);
+      if (view === 'limits') {
+        // Truncation is what hid one pool being reported under two lanes: both
+        // rows ellipsised to the same plausible prefix. Measure the RENDERED
+        // row — a grid template that looks right in the stylesheet is not proof
+        // the string fits. Bars must also share an x, or the panel stops
+        // reading as a stack of comparable meters.
+        const rows = await page.evaluate(() => ({
+          labels: [...document.querySelectorAll('#u-lim-codex .mname, #u-lim-claude .mname')]
+            .map((el) => ({ text: el.textContent, title: el.getAttribute('title'), clipped: el.scrollWidth > el.clientWidth })),
+          barLefts: [...new Set([...document.querySelectorAll('#u-lim-codex .mbar')]
+            .map((el) => Math.round(el.getBoundingClientRect().left)))],
+        }));
+        check('a Codex pool label renders in full at desktop width',
+          rows.labels.length > 0 && rows.labels.every((l) => !l.clipped),
+          `clipped: ${JSON.stringify(rows.labels.filter((l) => l.clipped))}`);
+        check('every limits label carries its full text as a tooltip',
+          rows.labels.every((l) => l.title === l.text),
+          `labels were ${JSON.stringify(rows.labels)}`);
+        check('limits meters all start at the same x',
+          rows.barLefts.length === 1, `bar left edges were ${JSON.stringify(rows.barLefts)}`);
+      }
       if (view !== 'models') {
         const modelBoundary = await page.evaluate(() => {
           const models = document.getElementById('v-models');
@@ -2650,13 +2706,85 @@ async function main() {
       horizontal.scroll > horizontal.client && horizontal.left > 0,
       `table scroll state was ${JSON.stringify(horizontal)}`);
     await page.setViewportSize({ width: 1440, height: 900 });
+    // Arrow-key navigation walks the rail in its rendered order, so inserting
+    // Prompts between Findings and Models moved Models one press further out.
+    // Both hops are asserted: the new neighbour, and that Models is still
+    // reachable by the keyboard — the property this check was defending.
     await page.click('#usage-tab-findings');
     await page.focus('#usage-tab-findings');
     await page.keyboard.press('ArrowRight');
-    check('usage/models follows Findings in arrow-key tab navigation',
+    check('usage/prompts follows Findings in arrow-key tab navigation',
+      await page.getAttribute('#usage-tab-prompts', 'aria-selected') === 'true'
+        && await page.evaluate(() => document.activeElement?.id) === 'usage-tab-prompts',
+      'Prompts tab did not receive selection and focus after ArrowRight');
+    await page.keyboard.press('ArrowRight');
+    check('usage/models follows Prompts in arrow-key tab navigation',
       await page.getAttribute('#usage-tab-models', 'aria-selected') === 'true'
         && await page.evaluate(() => document.activeElement?.id) === 'usage-tab-models',
-      'Models tab did not receive selection and focus after ArrowRight');
+      'Models tab did not receive selection and focus after a second ArrowRight');
+
+    // ── the whole-history chip, which only one view offers ──
+    //
+    // Patterns are lifetime phenomena, so Prompts alone gets a 365-day option.
+    // The chip has to appear there, disappear elsewhere, and — the part worth a
+    // live browser — reset the WINDOW on the way out, so no other view inherits
+    // a span its chip row cannot show.
+    await page.click('#usage-tab-findings');
+    await page.waitForTimeout(200);
+    check('the whole-history chip is hidden on views that do not offer it',
+      await page.isHidden('#usage-days-all'),
+      'the All chip was visible outside Prompts');
+
+    await page.click('#usage-tab-prompts');
+    await page.waitForTimeout(200);
+    check('the whole-history chip appears on Prompts',
+      await page.isVisible('#usage-days-all'),
+      'the All chip did not appear on the one view that offers it');
+
+    await page.click('#usage-days-all');
+    await page.waitForTimeout(2500);
+    check('selecting All switches the window to 365 and marks the chip',
+      await page.evaluate(() => document.getElementById('usage-days-all')?.classList.contains('on'))
+        && (await visibleText(page, '#u-pr-coaching-note')).includes('all history'),
+      `All did not take effect; caption read ${JSON.stringify(await visibleText(page, '#u-pr-coaching-note'))}`);
+
+    // The Coaching panel (redesign §2): the fixture corpus carries no prompt
+    // fingerprints at all, so the panel has no clusters to table — it is
+    // expected to render its honest NAMED empty state (a clean "nothing
+    // repeated" or "not computed for this window"), never blank and never the
+    // old "not built yet" / card-wall placeholder copy it shipped with before.
+    const coachingText = await visibleText(page, '#u-pr-coaching');
+    check('the Coaching section renders content, not an empty container',
+      coachingText.trim().length > 0, 'u-pr-coaching was empty after switching to Prompts');
+    check('the Coaching section no longer shows the pre-redesign placeholder copy',
+      !coachingText.includes('arrives with the outcome ledger') && !coachingText.includes('not built yet'),
+      `Coaching still reads as the unbuilt shell: ${JSON.stringify(coachingText)}`);
+    check('a fingerprint-free fixture corpus renders the Coaching panel\'s honest empty state',
+      /clean result, not a missing one|were not computed/.test(coachingText),
+      `expected a named empty state; got ${JSON.stringify(coachingText)}`);
+
+    // NOT covered here: renderPrompts' no-fingerprint-layer branch. The bundle
+    // is wrapped in an IIFE, so the renderer is not addressable from
+    // page.evaluate, and the only ways to reach it are to export a global from
+    // production code purely for this check or to serve a second fixture corpus
+    // parsed before fingerprints shipped. The branch is three lines and its
+    // sibling absent states are unit-pinned; a production hook for test
+    // convenience is the worse trade.
+
+    // The ordering pin. syncAllHistoryChip runs BEFORE the per-view loaders, so
+    // leaving Prompts@All for Limits fetches once, at the reset window — not
+    // once at 365 and again at 30 with no ordering guarantee between them.
+    limitsRequests.length = 0;
+    await page.click('#usage-tab-limits');
+    await page.waitForTimeout(2500);
+    const limitWindows = limitsRequests.map((u) => new URL(u).searchParams.get('days'));
+    check('leaving Prompts@All requests Limits once, at the reset window',
+      limitWindows.length > 0 && !limitWindows.includes('365'),
+      `Limits was fetched at ${JSON.stringify(limitWindows)} — a 365 request means the loader ran before the window reset`);
+    check('leaving Prompts drops the window back to 30d, chip and all',
+      await page.isHidden('#usage-days-all')
+        && await page.evaluate(() => document.querySelector('#usage-days [data-days="30"]')?.classList.contains('on')),
+      'the 365-day window survived into a view whose chip row cannot show it');
 
     // ── the specific zeros that were silently wrong ──
     await page.click('[data-view="sessions"]');
@@ -3397,6 +3525,313 @@ async function main() {
     const c2 = await readCollapse();
     check('and survives a reload rather than snapping back to the default',
       c2.expanded === 'true' && c2.hidden === false, JSON.stringify(c2));
+
+    // ── the Coaching panel, driven end to end (redesign §2) ──────────────────
+    //
+    // The fixture corpus is fingerprint-free, so the real projection has no
+    // clusters to table — to exercise the INTERACTIONS (filter, sort, ≤5
+    // scroll, expand, the async masked-samples fetch, copy, dismiss, and the
+    // posture toggle) this stubs /api/usage with a rich `prompts` block MERGED
+    // onto the real base payload (so the other Usage sub-views keep rendering
+    // without error) plus the two prompts endpoints. It runs LAST, so nothing
+    // after it depends on the real payload. No real transcript is ever read —
+    // the samples endpoint is stubbed (the injection seam the brief calls for).
+    const baseUsage = await fetch(`${ORIGIN}/api/usage?days=14`, { headers: { 'x-dash-token': srv.token } })
+      .then((r) => r.json());
+    const mkCluster = (key, kind, name, source, count, sessions, days, hosts, sids) => ({
+      key, kind, label: { name, source }, class: 'other', count, sessions, days, hosts,
+      medianTokens: kind === 'tap' ? 2 : 30, sampleSessionIds: sids,
+    });
+    const RICH_PROMPTS = {
+      typed: 200, taps: 90, tapShare: 0.45,
+      byHost: {
+        codex: { typed: 120, taps: 40, tapShare: 0.33, p90TypedTokens: 167, personaOpeners: 5, questionShare: 0.2 },
+        claude: { typed: 80, taps: 8, tapShare: 0.1, p90TypedTokens: 385, personaOpeners: 1, questionShare: 0.3 },
+      },
+      statsByDay: {
+        '2026-08-18': { typed: 40, taps: 12, byHost: { codex: { typed: 40, taps: 12 } } },
+        '2026-08-19': { typed: 30, taps: 6, byHost: { claude: { typed: 30, taps: 6 } } },
+      },
+      baselines: { codex: { tapShareP75_trailing90d: 0.2 }, claude: { tapShareP75_trailing90d: 0.05 } },
+      headless: { sessions: 2, responses: 20, share: 0.15, measuredSessions: 8, measuredResponses: 130 },
+      patterns: {
+        corpus: { fingerprints: 500, typed: 200 },
+        provenance: { human: 200, control: 120, agent: 150, adapter: 30 },
+        tapLengths: [{ tokens: 1, prompts: 47, sessions: 23, days: 11, hosts: ['claude', 'codex'] }],
+        // Six clusters (> 5, so the table scrolls) across five distinct kinds.
+        clusters: [
+          mkCluster('k-commit', 'instruction', 'Commit-and-push instruction', 'seed', 35, 33, 15, ['claude', 'codex'], ['sess-alpha', 'sess-bravo', 'sess-charlie']),
+          mkCluster('k-yes', 'tap', 'Simple yes confirmation', 'enriched', 47, 23, 11, ['claude', 'codex'], ['sess-alpha']),
+          mkCluster('k-continue', 'tap', 'Continue confirmation', 'enriched', 40, 26, 12, ['claude', 'codex'], ['sess-bravo']),
+          mkCluster('k-status', 'question', 'Progress check-in', 'seed', 16, 16, 11, ['claude', 'codex'], ['sess-charlie']),
+          mkCluster('k-retry', 'reask', 'Retry nudge', 'characterized', 11, 10, 7, ['claude', 'codex'], ['sess-alpha']),
+          mkCluster('k-role', 'persona', 'Long role preamble', 'enriched', 9, 9, 1, ['codex'], ['sess-delta']),
+        ],
+        reAsks: { pairCount: 107, sessionCount: 29, gapHist: { 1: 33 } },
+        exactRepeats: [],
+      },
+      coaching: {
+        cards: [
+          { id: 'commit-push-claude-md', clusterKey: 'k-commit', targetKind: null,
+            title: 'Commit-and-push is retyped, not remembered', try: 'Add one line to CLAUDE.md so it commits and pushes on its own.',
+            finding: 'Typed in 33 of your sessions this window.', basis: '35 recurrences across 33 sessions.',
+            source: 'rule', status: 'proposed', stale: false, generatedAt: '2026-08-29T00:00:00.000Z',
+            evidenceHash: 'a'.repeat(16), draft: { kind: 'claude-md-line', text: 'After a change is verified, commit and push without being told.' } },
+          { id: 'reask-delta', clusterKey: null, targetKind: 'reask',
+            title: 'The same ask lands twice', try: 'State the acceptance criteria in the first ask.',
+            finding: '107 re-asks across 29 sessions.', basis: '107 re-ask pairs.',
+            source: 'rule', status: 'proposed', stale: false, generatedAt: '2026-08-29T00:00:00.000Z', evidenceHash: 'b'.repeat(16) },
+          // P15: the table shows only advice-bearing clusters, so every fixture
+          // cluster carries a card (the four taps/question/persona rows here) —
+          // otherwise they would be hidden and the pill/sort/scroll assertions
+          // below would have nothing to measure.
+          { id: 'yes-standing-rule', clusterKey: 'k-yes', targetKind: null,
+            title: 'Approvals that could stand as a rule', try: 'Let low-risk steps proceed without a confirmation tap.',
+            finding: '47 one-word approvals across 23 sessions.', basis: '47 taps.',
+            source: 'rule', status: 'proposed', stale: false, generatedAt: '2026-08-29T00:00:00.000Z', evidenceHash: 'c'.repeat(16),
+            draft: { kind: 'claude-md-line', text: 'Proceed through low-risk, reversible steps without asking for confirmation.' } },
+          { id: 'continue-standing-rule', clusterKey: 'k-continue', targetKind: null,
+            title: 'Continue nudges the agent could skip', try: 'Have the agent continue through checkpoints on its own.',
+            finding: '40 continue nudges across 26 sessions.', basis: '40 taps.',
+            source: 'rule', status: 'proposed', stale: false, generatedAt: '2026-08-29T00:00:00.000Z', evidenceHash: 'd'.repeat(16),
+            draft: { kind: 'claude-md-line', text: 'After finishing a step, continue to the next without waiting to be told.' } },
+          { id: 'status-checkins', clusterKey: 'k-status', targetKind: null,
+            title: 'Progress check-ins you keep asking for', try: 'Have the agent post progress at checkpoints.',
+            finding: '16 status prompts across 16 sessions.', basis: '16 check-ins.',
+            source: 'rule', status: 'proposed', stale: false, generatedAt: '2026-08-29T00:00:00.000Z', evidenceHash: 'e'.repeat(16),
+            draft: { kind: 'claude-md-line', text: 'Post a one-line progress update before and after each major step.' } },
+          { id: 'role-fragment', clusterKey: 'k-role', targetKind: null,
+            title: 'A retyped role preamble', try: 'Move the retyped role into a managed prompt fragment.',
+            finding: 'Nine ~1,260-token role preambles this window.', basis: '9 preambles.',
+            source: 'enriched', status: 'proposed', stale: false, generatedAt: '2026-08-29T00:00:00.000Z', evidenceHash: 'f'.repeat(16),
+            draft: { kind: 'fragment', text: 'role: senior-ts-engineer' } },
+        ],
+        summary: null,
+      },
+    };
+    const usageDaysSeen = [];
+    const samplesWindows = [];
+    let dismissBody = null;
+    await page.route(/\/api\/usage(\?|$)/, (route) => {
+      usageDaysSeen.push(new URL(route.request().url()).searchParams.get('days'));
+      route.fulfill({ contentType: 'application/json', body: JSON.stringify({ ...baseUsage, prompts: RICH_PROMPTS }) });
+    });
+    await page.route(/\/api\/prompts\/samples/, (route) => {
+      samplesWindows.push(new URL(route.request().url()).searchParams.get('window'));
+      route.fulfill({ contentType: 'application/json',
+        body: JSON.stringify({ samples: ['commit and push', 'commit + push please'], occurrences: [
+          { sessionId: 'sess-alpha', day: '2026-08-20' }, { sessionId: 'sess-bravo', day: '2026-08-19' }] }) });
+    });
+    await page.route(/\/api\/prompts\/dismiss$/, (route) => {
+      dismissBody = route.request().postData();
+      route.fulfill({ contentType: 'application/json', body: JSON.stringify({ id: 'commit-push-claude-md', status: 'dismissed' }) });
+    });
+    await page.context().grantPermissions(['clipboard-read', 'clipboard-write'], { origin: ORIGIN });
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await page.waitForSelector('#panel-overview', { state: 'attached' });
+    await page.click('#tab-usage');
+    await page.click('#usage-tab-prompts');
+    await page.waitForSelector('#u-pr-coaching .pr-coach', { state: 'attached', timeout: 15000 });
+
+    // filter pills: All + one per kind present, each counted
+    const pillText = await visibleText(page, '#u-pr-coaching .pr-filters');
+    check('the Coaching panel derives a filter pill per kind present, with counts',
+      /All\s*6/.test(pillText) && /Taps\s*2/.test(pillText) && /Re-asks\s*1/.test(pillText)
+        && /Role preambles\s*1/.test(pillText) && /Questions\s*1/.test(pillText) && /Instructions\s*1/.test(pillText),
+      `pills read ${JSON.stringify(pillText)}`);
+
+    // default sort: Times typed, descending (35 > 47? no — counts: 47,40,35,16,11,9)
+    const order0 = await page.$$eval('#u-pr-coaching .prow', (rs) => rs.map((r) => r.getAttribute('data-pr-row')));
+    check('the table defaults to Times-typed descending',
+      order0.join(',') === 'k-yes,k-continue,k-commit,k-status,k-retry,k-role',
+      `order was ${order0.join(',')}`);
+
+    // ≤5 rows then scroll: six rows overflow the capped wrap
+    const scrollable = await page.$eval('#u-pr-coaching .pr-tablewrap', (el) => el.scrollHeight > el.clientHeight + 8);
+    check('the table caps at ~5 rows and scrolls the rest', scrollable, 'the tablewrap did not become scrollable with six rows');
+
+    // filter slices AND stacks with the active sort
+    await page.click('#u-pr-coaching [data-pr-filter="tap"]');
+    await page.waitForTimeout(60);
+    const tapRows = await page.$$eval('#u-pr-coaching .prow', (rs) => rs.map((r) => r.getAttribute('data-pr-row')));
+    check('a filter slices the table to its kind and keeps the sort',
+      tapRows.join(',') === 'k-yes,k-continue', `filtered rows were ${tapRows.join(',')}`);
+    await page.click('#u-pr-coaching [data-pr-filter="all"]');
+    await page.waitForTimeout(60);
+
+    // a sortable header re-sorts (Sessions descending: 33,26,23,16,10,9)
+    await page.click('#u-pr-coaching [data-pr-sort="sessions"]');
+    await page.waitForTimeout(60);
+    const bySessions = await page.$$eval('#u-pr-coaching .prow', (rs) => rs.map((r) => r.getAttribute('data-pr-row')));
+    check('clicking a header re-sorts the table by that column',
+      bySessions[0] === 'k-commit' && bySessions[1] === 'k-continue',
+      `by sessions the order was ${bySessions.join(',')}`);
+    const ariaSorted = await page.$eval('#u-pr-coaching th:nth-child(3)', (th) => th.getAttribute('aria-sort'));
+    check('the sorted header advertises its direction via aria-sort', ariaSorted === 'descending', `aria-sort was ${ariaSorted}`);
+
+    // expand a pattern → the async masked-samples fetch resolves into What-you-typed
+    await page.click('#u-pr-coaching [data-pr-open="k-commit"]');
+    await page.waitForSelector('#u-pr-coaching .detail-row', { state: 'attached' });
+    await page.waitForFunction(() => /commit and push/.test(document.querySelector('#u-pr-coaching .pr-typed')?.textContent || ''), null, { timeout: 4000 });
+    check('expanding a pattern fetches and shows its masked samples', true, 'unreachable — waitForFunction would have thrown');
+    check('the samples fetch used the SAME window as /api/usage (I-3)',
+      samplesWindows.length > 0 && usageDaysSeen.length > 0 && samplesWindows[0] === usageDaysSeen[0],
+      `samples window ${JSON.stringify(samplesWindows)} vs usage days ${JSON.stringify(usageDaysSeen)}`);
+
+    // seen-in shows the formatted date now the occurrences landed, and each
+    // link targets the real session (the short label is cosmetic; the nav hook
+    // carries the full id).
+    const seenText = await visibleText(page, '#u-pr-coaching .pr-seen');
+    const firstSeen = await page.$eval('#u-pr-coaching .pr-seen a', (a) => ({
+      target: a.getAttribute('data-pr-session'), href: a.getAttribute('href'),
+    }));
+    check('Seen in shows a formatted date and links to the real session once the fetch resolved',
+      /· Aug 20/.test(seenText) && firstSeen.target === 'sess-alpha' && firstSeen.href === '#usage/sess-alpha',
+      `seen-in read ${JSON.stringify(seenText)} / ${JSON.stringify(firstSeen)}`);
+
+    // the joined card's recommendation + draft render
+    check('the joined card renders its recommendation, no Try: prefix',
+      /Add one line to CLAUDE\.md/.test(await visibleText(page, '#u-pr-coaching .detail-row'))
+        && !/Try:/.test(await visibleText(page, '#u-pr-coaching .detail-row')),
+      'the recommendation did not render from the clusterKey-joined card');
+
+    // The deliverable shot: the advice-only Coaching table (P15) with the
+    // prompt-text toggle relocated into the panel header (P16) and Taps-first
+    // filter pills (P5), one pattern expanded to its coaching card.
+    await shoot(page, 'coaching-advice-table');
+
+    // copy the draft → the button flips to its copied state (clipboard granted)
+    await page.click('#u-pr-coaching [data-pr-copy="k-commit"]');
+    await page.waitForTimeout(120);
+    check('the copy button confirms the copy',
+      await page.$eval('#u-pr-coaching [data-pr-copy="k-commit"]', (b) => b.classList.contains('copied') || b.getAttribute('title') === 'Copied'),
+      'the copy affordance gave no confirmation');
+    const clip = await page.evaluate(() => navigator.clipboard.readText().catch(() => ''));
+    check('the draft text reached the clipboard', /commit and push/.test(clip), `clipboard held ${JSON.stringify(clip)}`);
+
+    // dismiss → POST /api/prompts/dismiss with the card id, optimistic Dismissed…Undo
+    await page.click('#u-pr-coaching [data-pr-dismiss="commit-push-claude-md"]');
+    await page.waitForTimeout(120);
+    check('Dismiss posts the card id to /api/prompts/dismiss',
+      !!dismissBody && JSON.parse(dismissBody).id === 'commit-push-claude-md', `POST body was ${dismissBody}`);
+    check('Dismiss flips the row to its Dismissed…Undo state',
+      await page.$eval('#u-pr-coaching .coach-foot', (el) => el.classList.contains('done'))
+        && /Undo/.test(await visibleText(page, '#u-pr-coaching .coach-foot')),
+      'the dismissed state did not render');
+
+    // posture toggle: hidden suppresses the masked text view-wide; shown restores it
+    await page.click('#u-pr-posture [data-pr-posture="hidden"]');
+    await page.waitForTimeout(80);
+    check('hiding the prompt text suppresses What-you-typed and shows the terminal pointer',
+      /Prompt text is hidden/.test(await visibleText(page, '#u-pr-coaching .pr-typed'))
+        && await page.$$eval('#u-pr-coaching .verbatim', (v) => v.length === 0),
+      'the hidden posture still rendered sample text');
+    const samplesBeforeReshow = samplesWindows.length;
+    await page.click('#u-pr-posture [data-pr-posture="shown"]');
+    await page.waitForFunction(() => /commit and push/.test(document.querySelector('#u-pr-coaching .pr-typed')?.textContent || ''), null, { timeout: 4000 });
+    check('showing it again restores the masked text from cache, without a re-fetch',
+      samplesWindows.length === samplesBeforeReshow, `an extra samples fetch fired (${samplesBeforeReshow} → ${samplesWindows.length})`);
+
+    // ── fable F3: a window change invalidates the samples cache ───────────────
+    // The per-cluster cache is window-scoped; changing the window must drop it so
+    // re-opening the same pattern refetches under the new window rather than
+    // serving the prior window's masked text (I-3). Without the invalidation the
+    // cache-hit guard would serve stale samples and no second fetch would fire.
+    const winBefore = usageDaysSeen[usageDaysSeen.length - 1];
+    const samplesBeforeWin = samplesWindows.length;
+    const otherDay = await page.$$eval('#usage-days [data-days]', (chips, cur) => {
+      const c = chips.find((b) => b.getAttribute('data-days') !== cur && !b.hidden);
+      return c ? c.getAttribute('data-days') : null;
+    }, winBefore);
+    if (otherDay) {
+      await page.click(`#usage-days [data-days="${otherDay}"]`);
+      await page.waitForTimeout(150); // loadUsage + re-render under the new window
+      await page.waitForSelector('#u-pr-coaching .pr-coach', { state: 'attached' });
+      // the invalidation collapses the open row; if a regression left it open,
+      // close it ourselves so the re-open is deterministic either way — then a
+      // fresh open MUST refetch, since a surviving cache would serve a hit and
+      // never fetch (which is exactly what this pins).
+      if (await page.$('#u-pr-coaching .detail-row')) {
+        await page.click('#u-pr-coaching [data-pr-open="k-commit"]');
+        await page.waitForTimeout(60);
+      }
+      await page.click('#u-pr-coaching [data-pr-open="k-commit"]');
+      await page.waitForSelector('#u-pr-coaching .detail-row', { state: 'attached' });
+      await page.waitForTimeout(150);
+      check('a window change invalidates the samples cache, so re-opening refetches (fable F3)',
+        samplesWindows.length > samplesBeforeWin && samplesWindows[samplesWindows.length - 1] === otherDay,
+        `expected a refetch at window ${otherDay}; windows seen ${JSON.stringify(samplesWindows)} (before ${samplesBeforeWin})`);
+    } else {
+      check('a window change invalidates the samples cache (fable F3)', true, 'only one usable window chip — skipped');
+    }
+
+    // ── QE F-3: the hidden posture makes NO fetch for a FRESH row ─────────────
+    // The re-show test above only re-shows an ALREADY-cached row (guarded by the
+    // cache, not the posture). This opens a row that was never fetched while the
+    // posture is hidden — the ONLY path the `promptPosture!=="shown"` gate
+    // governs — and asserts zero samples traffic + no verbatim. Fails if that
+    // gate regresses (M13 survived without this).
+    await page.click('#u-pr-posture [data-pr-posture="hidden"]');
+    await page.waitForTimeout(60);
+    const samplesBeforeFresh = samplesWindows.length;
+    await page.click('#u-pr-coaching [data-pr-open="k-status"]'); // never expanded → uncached
+    await page.waitForSelector('#u-pr-coaching .detail-row', { state: 'attached' });
+    await page.waitForTimeout(150); // give any (buggy) fetch time to fire
+    check('opening a fresh row while hidden fetches nothing and renders no verbatim (QE F-3)',
+      samplesWindows.length === samplesBeforeFresh
+        && (await page.$$eval('#u-pr-coaching .verbatim', (v) => v.length === 0))
+        && /Prompt text is hidden/.test(await visibleText(page, '#u-pr-coaching .pr-typed')),
+      `hidden-posture open fetched samples (${samplesBeforeFresh} → ${samplesWindows.length}) or rendered text`);
+    await page.click('#u-pr-posture [data-pr-posture="shown"]'); // restore shown for the race below
+    await page.waitForTimeout(80);
+
+    // ── QE F-2: the async race — a late response never crosses rows ───────────
+    // Swap in a samples route that HOLDS each response until released, so we can
+    // open A, open B before A resolves, release A, and prove A's text lands in
+    // A's OWN (keyed) cache — never in the open B panel — and that a response for
+    // a since-collapsed row is a no-op. This pins the SAFETY invariant (the
+    // per-key cache); the openKey check is only an optimization, so this guards
+    // against a future non-keyed cache, honestly (QE F-2).
+    await page.unroute(/\/api\/prompts\/samples/);
+    const gate = {};
+    const gateText = { 'k-yes': 'RACE-ALPHA-YES', 'k-continue': 'RACE-BRAVO-CONTINUE', 'k-role': 'RACE-GAMMA-ROLE' };
+    await page.route(/\/api\/prompts\/samples/, async (route) => {
+      const key = new URL(route.request().url()).searchParams.get('key');
+      samplesWindows.push(new URL(route.request().url()).searchParams.get('window'));
+      await new Promise((res) => { gate[key] = res; });
+      await route.fulfill({ contentType: 'application/json',
+        body: JSON.stringify({ samples: [gateText[key] || 'x'], occurrences: [] }) });
+    });
+    const waitGate = async (key) => { for (let i = 0; i < 100 && !gate[key]; i++) await page.waitForTimeout(20); };
+    await page.click('#u-pr-coaching [data-pr-open="k-yes"]');       // open A
+    await waitGate('k-yes');
+    await page.click('#u-pr-coaching [data-pr-open="k-continue"]');  // open B before A resolves
+    await waitGate('k-continue');
+    gate['k-yes']();                                                 // release A (now collapsed)
+    await page.waitForTimeout(120);
+    check('a late response for a collapsed row never renders into the open row (QE F-2)',
+      !/RACE-ALPHA-YES/.test(await visibleText(page, '#u-pr-coaching .pr-typed')),
+      `A's late text leaked into B: ${JSON.stringify(await visibleText(page, '#u-pr-coaching .pr-typed'))}`);
+    gate['k-continue']();                                            // release B (still open)
+    await page.waitForFunction(() => /RACE-BRAVO-CONTINUE/.test(document.querySelector('#u-pr-coaching .pr-typed')?.textContent || ''), null, { timeout: 4000 });
+    check('the open row renders its OWN masked samples, never the other row\'s (QE F-2)',
+      /RACE-BRAVO-CONTINUE/.test(await visibleText(page, '#u-pr-coaching .pr-typed'))
+        && !/RACE-ALPHA-YES/.test(await visibleText(page, '#u-pr-coaching .pr-typed')),
+      `B panel read ${JSON.stringify(await visibleText(page, '#u-pr-coaching .pr-typed'))}`);
+    await page.click('#u-pr-coaching [data-pr-open="k-role"]');      // open C
+    await waitGate('k-role');
+    await page.click('#u-pr-coaching [data-pr-open="k-role"]');      // collapse C before it resolves
+    await page.waitForTimeout(40);
+    gate['k-role']();                                                // release the collapsed row
+    await page.waitForTimeout(120);
+    check('a late response for a since-collapsed row renders nothing (QE F-2)',
+      (await page.$$eval('#u-pr-coaching .detail-row', (r) => r.length)) === 0
+        && !/RACE-GAMMA-ROLE/.test(await visibleText(page, '#u-pr-coaching')),
+      'a collapsed row re-opened itself when its late samples arrived');
+
+    await page.unroute(/\/api\/usage(\?|$)/);
+    await page.unroute(/\/api\/prompts\/samples/);
+    await page.unroute(/\/api\/prompts\/dismiss$/);
 
     // ── nothing errored anywhere along the way ──
     // A 404 from /api/session/<id> is CORRECT behaviour for a session that does

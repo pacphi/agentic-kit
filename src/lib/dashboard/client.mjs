@@ -89,6 +89,35 @@ aboutSrc = inject(aboutSrc, 'var ABOUT = []; // PLACEHOLDER:ABOUT_JS', `var ABOU
 
 const intelligenceSrc = readSplit('intelligence.mjs');
 const pollSrc = readSplit('poll.mjs');
+// usage-rhythm.mjs declares its OWN `esc` on disk, and its comment says why:
+// the tests import it as real ESM, where bootstrap.mjs's `esc` is still the
+// build-time stub. In the concatenated bundle every file shares ONE scope, so
+// shipping that copy would declare `esc` twice — and a later function
+// declaration wins, silently replacing the injected groups.mjs escaper with a
+// hand copy free to drift from it. Strip it here for exactly the reason the
+// cross-file `import` lines are stripped: it exists for the on-disk view only.
+const RHYTHM_ESC = `function esc(s) {
+  var ranges = [0x00, 0x08, 0x0b, 0x1f, 0x7f, 0x9f, 0x200b, 0x200f, 0x2028, 0x2029, 0x202a, 0x202e, 0x2066, 0x2069];
+  var cls = '';
+  for (var i = 0; i < ranges.length; i += 2) {
+    cls += String.fromCharCode(ranges[i]) + '-' + String.fromCharCode(ranges[i + 1]);
+  }
+  return String(s == null ? '' : s).replace(new RegExp('[' + cls + ']', 'g'), '').replace(/[&<>"']/g, function (c) {
+    return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+  });
+}`;
+let usageRhythmSrc = readSplit('usage-rhythm.mjs');
+usageRhythmSrc = inject(usageRhythmSrc, RHYTHM_ESC,
+  '// esc: the bundle\'s single injected groups.mjs escaper (client.mjs strips\n'
+  + "// this file's on-disk copy — see RHYTHM_ESC there).");
+// usage-prompts.mjs carries a byte-identical on-disk `esc` for the same reason
+// and is stripped with the same constant: two hand copies of the escaper in
+// one shared scope would let a later declaration silently replace the injected
+// groups.mjs one, and the copies are free to drift from it.
+let usagePromptsSrc = readSplit('usage-prompts.mjs');
+usagePromptsSrc = inject(usagePromptsSrc, RHYTHM_ESC,
+  '// esc: the bundle\'s single injected groups.mjs escaper (client.mjs strips\n'
+  + "// this file's on-disk copy — see RHYTHM_ESC there).");
 const usageSrc = readSplit('usage.mjs');
 const modelLifecycleSrc = readSplit('model-lifecycle.mjs');
 const usageOrchestratorsSrc = readSplit('usage-orchestrators.mjs');
@@ -103,5 +132,5 @@ const bootSrc = readSplit('boot.mjs');
 // sequence) running in the same relative order it always has.
 export const JS = `
 (function(){
-${bootstrapSrc}${overviewSrc}${intelligenceSrc}${pollSrc}${usageSrc}${modelLifecycleSrc}${usageOrchestratorsSrc}${aboutSrc}${systemReadoutSrc}${systemProjectsSrc}${bootSrc}})();
+${bootstrapSrc}${overviewSrc}${intelligenceSrc}${pollSrc}${usageRhythmSrc}${usagePromptsSrc}${usageSrc}${modelLifecycleSrc}${usageOrchestratorsSrc}${aboutSrc}${systemReadoutSrc}${systemProjectsSrc}${bootSrc}})();
 `;

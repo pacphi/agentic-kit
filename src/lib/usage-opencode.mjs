@@ -29,7 +29,8 @@ import { withDb } from './sqlite.mjs';
 // definitions in usage-parsers.mjs. usage-index.mjs imports FROM this module
 // (defaultOpencodeDbPath, parseSession, …), but that is no longer a cycle:
 // this module depends only on usage-parsers.mjs, not on usage-index.mjs.
-import { addUsage, blankSession } from './usage-parsers.mjs';
+import { addUsage, blankSession, noteLatencySample, notePromptFingerprint } from './usage-parsers.mjs';
+import { normalizeMode } from './usage-modes.mjs';
 
 /** The live opencode store. Overridable via roots in tests. */
 export function defaultOpencodeDbPath() {
@@ -76,6 +77,12 @@ function activeIntervals(stamps) {
 
 const num = (v) => (Number.isFinite(Number(v)) ? Number(v) : 0);
 const parseJson = (raw) => { try { return JSON.parse(raw); } catch { return null; } };
+
+/** A prompt-to-response gap longer than this is an idle resume, not a real
+ *  wait for a reply — excluded from latency sampling (mirrors usage-parsers'
+ *  own MAX_LATENCY_SAMPLE_SECONDS, private there, so redeclared here rather
+ *  than exported cross-module for a single constant). */
+const MAX_LATENCY_SAMPLE_SECONDS = 3600;
 
 /** Incremental candidates: sessions whose latest message lands at/after
  *  cutoffMs. `mtimeMs` (latest message time) + `size` (message count) are the
@@ -149,8 +156,19 @@ function noteStamp(rec, at) {
 
 function recordUserMessage(rec, turns, { rowId, at, withTurns, partsByMessage }) {
   rec.prompts++;
-  if (!withTurns) return;
+  // Opens the prompt→assistant-message latency window; closed by the next
+  // recordAssistantMessage (mirrors parseClaude/parseCodex's latState).
+  rec.pendingPromptMs = at;
+  // Every opencode user message IS a prompt-kind turn (this source carries no
+  // harness-injected user rows), so it always fingerprints — on BOTH paths,
+  // which is why the scan path now loads user text parts (see loadTextParts).
+  // I1: that makes this the WIDEST of the three fingerprinted populations —
+  // claude gates on userTurnKind, codex additionally on
+  // CODEX_MACHINE_ENVELOPE_RE, opencode on nothing. Compare per provenance tag,
+  // never in total.
   const text = messagePartsText(partsByMessage, rowId, ['text']);
+  notePromptFingerprint(rec, text, 'prompt');
+  if (!withTurns) return;
   turns.push({ role: 'user', at: new Date(at).toISOString(), text, prompt: true, kind: 'prompt' });
 }
 
@@ -179,6 +197,15 @@ function recordAssistantUsage(rec, data, at) {
   usageRow.costObserved ??= null;
   if (Number.isFinite(Number(data.cost))) usageRow.costObserved = (usageRow.costObserved ?? 0) + Number(data.cost);
   rec.reasoningOutput += num(t.reasoning);
+  // Context pressure for THIS turn, evidence-gated: only a row that actually
+  // carries a tokens object can claim one — a token-less row (error or not)
+  // must never overwrite a real prior value with a fabricated 0 (mirrors
+  // parseClaude, which only ever reaches this line for a real usage entry).
+  // Overwritten every qualifying message so the field reflects the LAST
+  // completion, not a running total.
+  if (data.tokens !== null && typeof data.tokens === 'object') {
+    rec.ctxLastTokens = num(t.input) + num(cache.read);
+  }
   return model;
 }
 
@@ -194,6 +221,24 @@ function recordAssistantTurn(rec, turns, { rowId, at, model, partsByMessage }) {
 function recordAssistantMessage(rec, turns, { data, rowId, at, withTurns, partsByMessage }) {
   rec.responses++;
   if (at) { const pk = punchKey(at); rec.punchcard[pk] = (rec.punchcard[pk] ?? 0) + 1; }
+  // A provider/auth/network failure is a REAL logged row here — unlike
+  // parseClaude's synthetic all-zero placeholder, it still carries whatever
+  // mode/model/usage/cost evidence it has, and that evidence is kept. Only
+  // two effects are error-specific: it counts as an exception, and it can
+  // never BE a latency sample (an unanswered prompt is not a measured
+  // response time) — though the pending prompt is still consumed here so a
+  // later, unrelated assistant message is never mis-sampled against a stale
+  // prompt.
+  if (data.error != null) {
+    rec.exceptions++;
+    rec.pendingPromptMs = null;
+  } else if (rec.pendingPromptMs !== null && rec.pendingPromptMs !== undefined) {
+    const gapSeconds = (at - rec.pendingPromptMs) / 1000;
+    if (gapSeconds <= MAX_LATENCY_SAMPLE_SECONDS) noteLatencySample(rec, gapSeconds);
+    rec.pendingPromptMs = null;
+  }
+  const m = normalizeMode({ host: 'opencode', opencodeMode: data.mode });
+  if (m.raw) { rec.mode = m.mode; rec.modeRaw = m.raw; }
   const model = recordAssistantUsage(rec, data, at);
   if (withTurns) recordAssistantTurn(rec, turns, { rowId, at, model, partsByMessage });
 }
@@ -210,6 +255,40 @@ function processMessageRow(rec, turns, row, { withTurns, partsByMessage }) {
   }
   if (data.role !== 'assistant') return;
   recordAssistantMessage(rec, turns, { data, rowId: row.id, at, withTurns, partsByMessage });
+}
+
+/** The `part` rows a parse needs. `withTurns` wants every part (text, tool and
+ *  reasoning, for both roles) to build turn rows; the scan path wants only the
+ *  USER text parts, which is all a prompt fingerprint reads — the assistant
+ *  bodies it would otherwise pull in are the bulk of the store and are never
+ *  looked at there.
+ *
+ *  This is the one place the scan path reads message BODIES at all, so its cost
+ *  was measured rather than assumed. The live store on this machine is too
+ *  small to time (2 sessions, 2 parts; ~5 µs/session, where the two
+ *  `json_extract` predicates cannot pay for themselves because there is nothing
+ *  to exclude). Benchmarked instead against a synthetic store at realistic scale
+ *  — 300 sessions, 18k messages, 63k parts, 75 MB — the filtered query runs
+ *  **45 µs/session and materializes 0.6 MB**, against 125 µs/session and 61 MB
+ *  for the unfiltered join the reader path uses: 2.8x faster, and ~100x less
+ *  text pulled into memory. Only the fingerprints are retained; the text itself
+ *  is discarded with the row. */
+function loadTextParts(db, id, withTurns) {
+  if (withTurns) {
+    return db.prepare(`
+      SELECT p.message_id AS message_id, p.data AS data
+      FROM part p JOIN message m ON m.id = p.message_id
+      WHERE m.session_id = ? ORDER BY p.rowid ASC
+    `).all(id);
+  }
+  return db.prepare(`
+    SELECT p.message_id AS message_id, p.data AS data
+    FROM part p JOIN message m ON m.id = p.message_id
+    WHERE m.session_id = ?
+      AND json_extract(m.data, '$.role') = 'user'
+      AND json_extract(p.data, '$.type') = 'text'
+    ORDER BY p.rowid ASC
+  `).all(id);
 }
 
 /** Tool counts without the full turn payload: one lean query on the scan path. */
@@ -236,6 +315,10 @@ function initSessionRecord(srow) {
   rec.sidechain = !!srow.parent_id;
   rec.threadSource = srow.parent_id ? 'subagent' : null;
   if (worktree) rec.worktree = worktree;
+  // Transient parse-time state (the open prompt→assistant latency window,
+  // see recordUserMessage/recordAssistantMessage) — deleted before return in
+  // parseSession, never part of the returned session shape.
+  rec.pendingPromptMs = null;
   return rec;
 }
 
@@ -249,14 +332,7 @@ export function parseSession({ dbFile, id, withTurns = false }) {
     const srow = db.prepare('SELECT * FROM session WHERE id = ?').get(id);
     if (!srow) return null;
     const msgRows = db.prepare('SELECT id, time_created, data FROM message WHERE session_id = ? ORDER BY time_created ASC, id ASC').all(id);
-    const partRows = withTurns
-      ? db.prepare(`
-          SELECT p.message_id AS message_id, p.data AS data
-          FROM part p JOIN message m ON m.id = p.message_id
-          WHERE m.session_id = ? ORDER BY p.rowid ASC
-        `).all(id)
-      : [];
-    const partsByMessage = buildPartsIndex(partRows);
+    const partsByMessage = buildPartsIndex(loadTextParts(db, id, withTurns));
 
     const rec = initSessionRecord(srow);
     const turns = [];
@@ -265,7 +341,9 @@ export function parseSession({ dbFile, id, withTurns = false }) {
 
     if (!rec.title) rec.title = '(untitled)';
     rec.active = activeIntervals(rec.stamps);
+    rec.lenSeconds = Math.round(rec.active.reduce((n, [a, b]) => n + (b - a), 0) / 1000);
     delete rec.stamps;
+    delete rec.pendingPromptMs;
     return { session: rec, turns };
   });
   return result.ok ? result.value : null;

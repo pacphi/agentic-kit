@@ -35,11 +35,27 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import http from 'node:http';
-import { startDashboard } from '../../src/lib/dashboard-server.mjs';
+import { startDashboard as realStartDashboard } from '../../src/lib/dashboard-server.mjs';
 import { readMachineWideIntel } from '../../src/lib/dashboard/intel-history.mjs';
 import { resolveProjectIdentity } from '../../src/lib/live/project-label.mjs';
 
 const STUB_STATUS = { overall: 'ok', rows: [], drift: [] };
+
+// Fix round 1, I-3: every dashboard-server.mjs route computes coaching
+// (dashboardCoachingPayload) and reads the persisted label store, both
+// unconditionally, regardless of what this file actually asserts on — the
+// same hazard tests/dashboard.test.cjs and dashboard-usage-telemetry.test.mjs
+// already guard against. This file's own suites only touch /api/status
+// today (latent, per the review), but wrapping startDashboard here too means
+// no future call site — or a future route that also folds in coaching — can
+// reintroduce a real-~/.config leak into this file by omission.
+const NULL_COACHING_LEDGER = { loadLedger: () => ({ version: 1, records: [] }), ledgerPath: '/dev/null/unused' };
+const NULL_LABEL_STORE = {
+  loadLabelStore: () => ({ version: 1, labels: {}, cards: {} }), labelStorePath: '/dev/null/unused',
+};
+function startDashboard(opts = {}) {
+  return realStartDashboard({ coachingLedger: NULL_COACHING_LEDGER, labelStore: NULL_LABEL_STORE, ...opts });
+}
 
 function writeFile(file, data) {
   fs.mkdirSync(path.dirname(file), { recursive: true });
