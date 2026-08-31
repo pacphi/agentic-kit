@@ -2279,43 +2279,37 @@ layer, so a length distribution is the honest shape of "your top short
 prompts". A third slot names the missing subject-matter taxonomy rather than
 filling it with a guess (`taxonomyPlaceholder`).
 
-**Host interplay** (`hostInterplay`, `usage-prompts.mjs:362`) — one row per host: a tap-share
+**Host interplay** (`hostInterplay`, `usage-prompts.mjs:346`) — one row per host: a tap-share
 sparkline built from `statsByDay` (a day the host did not type on breaks the
 line rather than reading as zero), a p90-typed-length bar scaled against the
-longest host, and the typed persona-opener count. A caveat names any host
-under 20 typed prompts as "a shape, not yet a trend" — windows are unequal
-per host by construction, so the panel says so rather than implying two
-hosts' histories are comparable.
+longest host, and the typed persona-opener count. Below the rows, a
+plain-language **read** of the asymmetry (`hostRead`, `usage-prompts.mjs:388`) —
+e.g. "you tap codex more often but write claude longer" — stated only where
+both hosts carry the comparison; the unequal-histories nuance moves into the
+panel's `?` tooltip rather than a standing caveat.
 
-**Repeated patterns** (`patternsTable`, `usage-prompts.mjs:557`; `reAskPanel`,
-`usage-prompts.mjs:649`) — the
-cluster table (Pattern / Type / n / Sessions / Days / Hosts / Suggested move /
-Open), capped at 25 rows with an explicit "showing N of K" line that also
-states the KPI above counts all of them; a compact "typed verbatim" tail for
-exact repeats (capped at 6); and a one-line re-ask summary. The Type column
-reads `question` / `other` / `mixed` / `unclassified` — never `instruction` —
-because the shape rules test only for the interrogative case, and the caption
-beside the table says so. The Suggested-move chip is keyed off that same
-class: a question suggests closing a "reporting gap"; a non-question suggests
-"encode candidate" (which artifact is left to enrichment, §23); an
-unclassified cluster gets no suggestion. Up to three masked-session links per
-row route through the existing `#usage/<id>` transcript reader — this table
-holds no transcript content of its own.
-
-**Coaching**, read-only (`coachingPanel`, whose own call renders each card below,
-`usage-prompts.mjs:811`; one card,
-`coachingCard`, `usage-prompts.mjs:773`) — the identical cards and ledger status §22 defines,
-reconciled server-side from the same lib and ledger `ak usage prompts` uses,
-so the two surfaces cannot disagree about a card's status any more than they
-can about a cluster's count. Every card renders finding → Try → basis → a
-status chip, a draft block (select-and-copy, no clipboard API) where the card
-carries one, and — because dismissal is CLI-only (§22) — a **hint**, not a
-button: `Dismiss (CLI-only): ak usage prompts --dismiss <id>`
-(`coachingDismissHint`, `usage-prompts.mjs:723`). An enriched card (§23)
-whose cached evidence has moved renders a **stale** chip with the same CLI
-pointer (`coachingStaleHint`, `usage-prompts.mjs:736`) — there is no live
-Recompute button in v1; see
-§23 for why.
+**Coaching** (`coachingPanel`, `usage-prompts.mjs:620`) — the recurring-patterns
+table IS the coaching surface (the old split Repeated-patterns + Coaching
+card-wall are retired into it). Columns are Pattern · Times typed · Sessions ·
+Days seen · Hosts, every header sortable (`coachHeadCell`,
+`usage-prompts.mjs:579`); kind filter pills above the table (`coachingFilters`,
+`usage-prompts.mjs:540`) slice by the derived kind (§3) and stack with the
+sort; the table caps at ~5 rows then scrolls with a pinned header. Clicking a
+pattern opens an inline coaching panel (`coachDetailRow`, `usage-prompts.mjs:798`):
+**Seen in** — up to three `session · date` links through the existing
+`#usage/<id>` masked transcript reader (`coachSeenIn`, `usage-prompts.mjs:704`);
+**What you typed** — the pattern's own prompts, MASKED and fetched on demand
+from `GET /api/prompts/samples`, rendered inline and suppressed by a per-viewer
+shown/hidden toggle that also stops the fetch (`coachTyped`,
+`usage-prompts.mjs:726`); and, from the coaching card this pattern joins to (by
+`clusterKey` then `targetKind` — `cardForCluster`, `usage-prompts.mjs:676`) a
+**Recommendation**, a **Draft** with a copy button (`coachDraft`,
+`usage-prompts.mjs:763`), and a **Dismiss** that persists to `POST /api/prompts/dismiss` with an inline Undo (`coachFoot`, `usage-prompts.mjs:774`). A
+pattern with no matching card shows Seen-in + What-you-typed and a neutral note
+— never a force-fit recommendation. The cards, their source chip and ledger
+status are the same §22 defines, reconciled server-side from the same lib and
+ledger `ak usage prompts` uses, so the two surfaces cannot disagree about a
+card's status any more than they can about a cluster's count.
 
 **What this does not model:**
 
@@ -2358,7 +2352,7 @@ renderers. `--draft <id>` (CLI-only) prints a card's draft text; `--dismiss
 <id>` (CLI-only) is the one operator action this feature takes.
 
 **The six v1 rules,** each a `{evidence, meetsBar, card}` triple
-(`RULES`, `src/lib/usage-coaching-rules.mjs:333`) evaluated by `deriveCards`
+(`RULES`, `src/lib/usage-coaching-rules.mjs:346`) evaluated by `deriveCards`
 (`src/lib/usage-coaching.mjs:69`) against the SAME `promptPatterns` /
 `promptsByHost` / `insights` inputs §2b's detectors already computed — no
 rule invents a number `aggregate()` did not already produce:
@@ -2439,7 +2433,7 @@ dismissal survive only until the pattern's very next occurrence.
 `usage-coaching.mjs:140`): a CLAUDE.md line matching the card's draft
 verbatim; a `.claude/skills/<slug>/` directory matching the card's id; or —
 **collapse, opt-in per rule** (`collapseIsAdoption`,
-`usage-coaching-rules.mjs:333`) — the current count falling to ≤20% of the
+`usage-coaching-rules.mjs:346`) — the current count falling to ≤20% of the
 count at proposal (`ADOPTION_COLLAPSE_RATIO`). Collapse is the adoption
 signal only
 for the two seed-cluster cards and `reask-delta`, where the recommendation's
