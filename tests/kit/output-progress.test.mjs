@@ -109,13 +109,13 @@ test('managed outcomes render degraded and failed states without green success',
 // through a real child process and a real pipe — the buffer behavior being
 // pinned does not exist in-process.
 import { spawn, spawnSync } from 'node:child_process';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const OUTPUT_MJS = fileURLToPath(new URL('../../src/lib/output.mjs', import.meta.url));
 const PAYLOAD = 200 * 1024;
 
 const runChild = (tailJs) => spawnSync(process.execPath, ['--input-type=module', '-e',
-  `import { exitWhenFlushed } from ${JSON.stringify(OUTPUT_MJS)};
+  `import { exitWhenFlushed } from ${JSON.stringify(pathToFileURL(OUTPUT_MJS).href)};
    process.stdout.write('x'.repeat(${PAYLOAD}));
    ${tailJs}`,
 ], { encoding: 'utf8', maxBuffer: 4 * PAYLOAD });
@@ -150,7 +150,7 @@ test('SEC-5: a consumer that opens the pipe and never reads it still exits, boun
   // The parent holds the read end open without reading, exactly as the review
   // did. Without the bounded fallback this never resolves.
   const child = spawn(process.execPath, ['--input-type=module', '-e',
-    `import { exitWhenFlushed } from ${JSON.stringify(OUTPUT_MJS)};
+    `import { exitWhenFlushed } from ${JSON.stringify(pathToFileURL(OUTPUT_MJS).href)};
      process.stdout.write('x'.repeat(${PAYLOAD}));
      exitWhenFlushed(7);`,
   ], { stdio: ['ignore', 'pipe', 'ignore'] });

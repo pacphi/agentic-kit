@@ -983,6 +983,20 @@ test('ak usage prompts --deep masks secrets on every path text can reach the ter
  *  cards (returns an empty array; the anti-fabrication gate is already
  *  pinned at the unit level in usage-enrich.test.mjs, so this shim keeps the
  *  CLI-level pin focused on the label half actually reaching a render). */
+/** Windows cannot spawn a bare `#!/usr/bin/env node` shim, and `resolveShim`
+ *  (exec.mjs) discovers a CLI by PATHEXT (.CMD) and then runs its sibling .ps1
+ *  through PowerShell — the same contract the real `claude.cmd` install meets.
+ *  Every claude shim below writes an executable `claude` node script; this
+ *  gives it the two Windows companions (a .cmd discovery marker + a .ps1 that
+ *  runs node on that SAME shim body, no logic duplicated). A no-op on POSIX,
+ *  where the executable `claude` file is used directly. */
+function writeShimCompanions(bin) {
+  fs.writeFileSync(`${bin}.cmd`, `@node "%~dp0claude" %*\r\n`);
+  fs.writeFileSync(`${bin}.ps1`,
+    `& ${JSON.stringify(process.execPath)} (Join-Path $PSScriptRoot 'claude') @args\r\n`
+    + 'exit $LASTEXITCODE\r\n');
+}
+
 function writeClaudeShim(dir, { cardsJson = '[]' } = {}) {
   const bin = path.join(dir, 'claude');
   fs.writeFileSync(bin, `#!/usr/bin/env node
@@ -994,16 +1008,7 @@ if (prompt.includes('naming recurring prompt clusters')) {
   process.stdout.write(${JSON.stringify(cardsJson)});
 }
 `, { mode: 0o755 });
-  // Windows cannot spawn a bare shebang script, and `resolveShim` (exec.mjs)
-  // finds a shim by PATHEXT (.CMD) and then runs its sibling .ps1 through
-  // PowerShell — the same contract the real `claude.cmd` install satisfies. So
-  // give the shim both: a .cmd marker for discovery and a .ps1 that just runs
-  // node on the SAME shim body above (no logic duplicated). Harmless on POSIX,
-  // where the executable `claude` file is used directly.
-  fs.writeFileSync(`${bin}.cmd`, `@node "%~dp0claude" %*\r\n`);
-  fs.writeFileSync(`${bin}.ps1`,
-    `& ${JSON.stringify(process.execPath)} (Join-Path $PSScriptRoot 'claude') @args\r\n`
-    + 'exit $LASTEXITCODE\r\n');
+  writeShimCompanions(bin);
   return bin;
 }
 
@@ -1130,6 +1135,7 @@ function writeFailingClaudeShim(dir, { message = 'Claude usage limit reached. Yo
 process.stderr.write(${JSON.stringify(message)});
 process.exit(1);
 `, { mode: 0o755 });
+  writeShimCompanions(bin);
   return bin;
 }
 
@@ -1168,6 +1174,7 @@ if (prompt.includes('naming recurring prompt clusters')) {
   process.exit(1);
 }
 `, { mode: 0o755 });
+  writeShimCompanions(bin);
   return bin;
 }
 
@@ -1210,6 +1217,7 @@ function writePoisonShim(dir) {
 process.stderr.write('POISON: this shim should never have been invoked');
 process.exit(1);
 `, { mode: 0o755 });
+  writeShimCompanions(bin);
   return bin;
 }
 
@@ -1306,6 +1314,7 @@ if (prompt.includes('naming recurring prompt clusters')) {
   process.stdout.write('[]');
 }
 `, { mode: 0o755 });
+  writeShimCompanions(bin);
   return bin;
 }
 
