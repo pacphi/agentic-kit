@@ -878,7 +878,7 @@ punchcard[dow + "-" + hour] += 1   per assistant/agent_message response, at its 
 **Source:** incremented once per Claude assistant turn
 (`usage-parsers.mjs:545-547`, keyed by this call: `punchKey(at)`) and once per Codex
 `agent_message` (`usage-parsers.mjs:846-851`), merged into the window-level
-`punchcard` object per session (`usage-aggregate.mjs:1046`). Cell intensity is
+`punchcard` object per session (`usage-aggregate.mjs:1052`). Cell intensity is
 linear against the single busiest cell in the window:
 `v = pcMax ? n/pcMax : 0` (`dashboard/client.mjs`) — this is a
 **relative**, not absolute, scale, so the heatmap's brightest cell is always
@@ -920,7 +920,7 @@ byModel[model].sessions  = count of DISTINCT sessions whose s.models includes th
 ```
 
 **Source:** cost/tokens/responses accumulate inside the usage-row loop
-(`usage-aggregate.mjs:811-838`); the `sessions` count is deliberately computed
+(`usage-aggregate.mjs:817-844`); the `sessions` count is deliberately computed
 **separately**, once per session over its `s.models` array
 (`usage-aggregate.mjs:941-948`) rather than inside the cost loop, precisely
 **so that a model can appear in `byModel` — with a nonzero session count —
@@ -1675,7 +1675,7 @@ not delegated work that was free.
 
 **Codex — structurally `$0`, by ledger design.** A ledger-identified subagent
 has its usage rows removed outright (`applyCodexLedger`,
-`usage-aggregate.mjs:1322-1325`) and `finalizeCodexUsage` never writes one in the
+`usage-aggregate.mjs:1328-1331`) and `finalizeCodexUsage` never writes one in the
 first place (`usage-parsers.mjs:949`), because a subagent rollout replays its
 parent's entire cumulative token history and keeping it would bill the parent
 twice (§13c, **[C7]**). The record stays visible and auditable; its cost is zero
@@ -1750,7 +1750,7 @@ cacheSavedUsd        = Σ rows  (costOf(1M as input) - costOf(1M as cacheRead)) 
 **Source:** the derived block is `finishTotals` (`usage-aggregate.mjs:1088-1106`),
 which the previous-window projection calls too so a baseline is never derived a
 second, drifting way. `median` and `percentile` are exact over the values
-(`usage-aggregate.mjs:1046-1051`, `:999-1004`), unlike §15's bucketed percentiles.
+(`usage-aggregate.mjs:1073`, `:1083`), unlike §15's bucketed percentiles.
 Active days come from `byDay`'s key count and the streak from `activeStreak` in
 `src/lib/dashboard/client/usage.mjs`; the tiles are `cadenceCells` there, and
 `printScoreCadence` (`src/commands/usage.mjs:251-274`) in the CLI.
@@ -1784,8 +1784,8 @@ browser in the tile's tooltip, `ak usage score` inline, since a terminal
 reader has nothing to hover.
 
 **Cost per session is a median over priced sessions only.** A session carries
-`_priced` when it had any usage rows at all (`usage-aggregate.mjs:924`), and
-only those costs enter the distribution (`usage-aggregate.mjs:1025`). A session
+`_priced` when it had any usage rows at all (`usage-aggregate.mjs:930`), and
+only those costs enter the distribution (`usage-aggregate.mjs:1031`). A session
 with no usage rows costs `$0` *structurally* — nothing was ever measured for it,
 the common case being a Codex subagent rollout whose tokens were stripped as a
 double-count (§16.2) — and letting those in would report "the typical session
@@ -1801,7 +1801,7 @@ positive figure that rounds away at two decimals prints `<$0.01`, never
 **What the cache saved, asked as a difference.** `cacheSavingPerMillion`
 (`usage-aggregate.mjs:793-802`) prices one million tokens twice through the
 *injected* pricer — once as fresh input, once as cache reads — and takes the
-gap; `cacheSavedFor` (`usage-aggregate.mjs:786-789`) scales that to the tokens
+gap; `cacheSavedFor` (`usage-aggregate.mjs:792-795`) scales that to the tokens
 a row actually read from cache. Nothing in that path knows what the cache
 multiplier is, so the saving cannot drift out of step with §3's table the way a
 hard-coded "0.9 × input" would the day the multiplier changed. Both probes
@@ -1820,8 +1820,8 @@ this row              =  $4.50 × 2,000,000 / 1e6       = $9.00
 ```
 
 The window total is the sum of those per-row figures
-(`usage-aggregate.mjs:1024`), carried on each session row as `cacheSavedUsd`
-(`usage-aggregate.mjs:902`) so it is auditable a row at a time rather than only
+(`usage-aggregate.mjs:1030`), carried on each session row as `cacheSavedUsd`
+(`usage-aggregate.mjs:908`) so it is auditable a row at a time rather than only
 in aggregate, and rendered in the cache tile's subtitle as `saved ≈ $X vs
 uncached`.
 
@@ -1835,7 +1835,7 @@ aggregated here, and deriving the baseline from a widened bound would silently
 stretch it to whatever lookback the caller happened to pass. The dashboard route widens it to
 the depth the personal tap-share baseline needs rather than to the previous
 window alone: `days + BASELINE_TRAILING_DAYS` (`lookbackDays`,
-`src/lib/dashboard-server.mjs:1635`); `ak usage score` applies the same rule
+`src/lib/dashboard-server.mjs:1641`); `ak usage score` applies the same rule
 (`src/commands/usage.mjs:349`). One extra window would be a strict
 subset — too shallow for `promptBaselines`, which needs
 BASELINE_MIN_ACTIVE_DAYS of history BEFORE the displayed window and returns
@@ -1855,7 +1855,7 @@ arrow the printed number does not support (`deltaChip`,
 
 **Engaged time by day is a sibling map, not a `byDay` field.** `byDay`'s
 presence contract is **billed days only** — a key exists exactly when tokens
-landed on that day (`dayBucket`, `usage-aggregate.mjs:735-748`) — and that is
+landed on that day (`dayBucket`, `usage-aggregate.mjs:741-754`) — and that is
 what the active-day count and the streak above are counted from. Engaged time
 does not share that key set: a session that runs past midnight, or a day spent
 reading, produces worked time on a day that billed nothing. So
@@ -1918,7 +1918,7 @@ model, and each host signals that differently:
 person pressing stop; an exception is the turn failing. Summing them would
 report a deliberate interruption as a reliability problem and move a number
 that is supposed to mean "how often did this break". They are counted, carried
-(`aborts`, `usage-aggregate.mjs:877`) and displayed side by side, with the
+(`aborts`, `usage-aggregate.mjs:883`) and displayed side by side, with the
 distinction stated on the tile rather than left to the label.
 
 **Aborts are CODEX-ONLY evidence, and both surfaces say so.** `turn_aborted` is
@@ -1982,7 +1982,7 @@ byTool[name]                  += session.tools[name]      summed across sessions
 byDay[day].byModelFamily[fam] += rowCost                  fam = modelFamily(row.model)
 ```
 
-**Source:** the tool tally is folded into `byTool` at `usage-aggregate.mjs:1047`;
+**Source:** the tool tally is folded into `byTool` at `usage-aggregate.mjs:1053`;
 the per-day family split is this call: `addCost(d.byModelFamily, modelFamily(row.model),
 rowCost)` (`usage-aggregate.mjs:832`), inside the usage-row pass because only a
 row knows its day. Render is `toolRows`/`modelMix` in
@@ -2079,8 +2079,24 @@ when false, while the clustering library reads `=== true` / `=== false` and
 treats absent as unclassified, so `1 !== true` made every cluster report
 `unknown` and a never-written `false` left the `instruction` class unreachable.
 Thresholds are named exports beside it — `PROMPT_CLUSTER_JACCARD`
-(`usage-aggregate.mjs:475`) and `PROMPT_REASK_JACCARD` (`:467`) — so the panel,
+(`usage-aggregate.mjs:483`) and `PROMPT_REASK_JACCARD` (`:488`) — so the panel,
 the CLI captions and the arithmetic quote one number each.
+
+**The derived `kind`.** Each published cluster also carries one derived filter
+label, the single axis the dashboard's pills and the CLI's Coaching table slice
+by. It is a pure function of signals the cluster already holds, recomputed every
+scan with no new fingerprint data (`deriveKind`,
+`usage-aggregate.mjs:573`) — so the projection is the sole authority and the
+client only folds an unknown value in, never re-derives one. Precedence is
+FIRST-MATCH-WINS over a fixed order, most-actionable first: `reask` (a member
+hash is on the asked-again side of a re-ask pair) beats `persona`
+(`personas / size >= PERSONA_KIND_SHARE`, 0.5) beats `tap`
+(`tokens.median <= TAP_MAX_TOKENS`, 4) beats `question` (the shipped classifier
+read it as questions) beats `instruction` (everything else). A request that keeps
+coming back is the most actionable, so a re-ask wins even over a short or
+persona-shaped phrasing; the persona-share and tap-length thresholds are the very
+constants the persona and tap detectors read, so a cluster's label and those
+detectors' counts can never disagree.
 
 The projection is OPT-IN and `null` when not requested, the same shape
 `previous` uses. `usage-index.mjs` forwards the flag (`:753`) and folds it into
@@ -2238,11 +2254,11 @@ whole-history chip offered on this view alone.
 **Payload source:** `/api/usage`'s `prompts` key — `{typed, taps, tapShare,
 byHost, statsByDay, baselines, patterns, headless, coaching}`. The first
 eight keys come from promptsPayload
-(`promptsPayload`, `src/lib/dashboard-server.mjs:561`);
+(`promptsPayload`, `src/lib/dashboard-server.mjs:570`);
 `coaching` is merged in at the call site
-("...promptsPayload(agg || {}), coaching", `dashboard-server.mjs:1687`) since
+("...promptsPayload(agg || {}), coaching", `dashboard-server.mjs:1702`) since
 it is a second, independent read (`dashboardCoachingPayload`,
-`dashboard-server.mjs:2043` — §22). `patterns` is `agg.promptPatterns` (§20's
+`dashboard-server.mjs:2058` — §22). `patterns` is `agg.promptPatterns` (§20's
 `buildPromptPatterns`) verbatim, already re-resolved against the persisted
 label store on every poll (§23). The client renders the whole block in one
 pass (`renderPrompts` in `src/lib/dashboard/client/usage.mjs` — that bundle
@@ -2292,7 +2308,7 @@ table IS the coaching surface (the old split Repeated-patterns + Coaching
 card-wall are retired into it). Columns are Pattern · Times typed · Sessions ·
 Days seen · Hosts, every header sortable (`coachHeadCell`,
 `usage-prompts.mjs:579`); kind filter pills above the table (`coachingFilters`,
-`usage-prompts.mjs:540`) slice by the derived kind (§3) and stack with the
+`usage-prompts.mjs:540`) slice by the derived kind (§20) and stack with the
 sort; the table caps at ~5 rows then scrolls with a pinned header. Clicking a
 pattern opens an inline coaching panel (`coachDetailRow`, `usage-prompts.mjs:798`):
 **Seen in** — up to three `session · date` links through the existing
@@ -2459,7 +2475,7 @@ structural guarantee, not a convention a later diff could quietly violate).
 `usage-coaching-rules.mjs` (the six rules), `usage-outcome-ledger.mjs` (the
 store + `reconcile`), `usage-evidence-hash.mjs` (the shared hash). CLI wiring:
 `src/commands/usage/coaching.mjs`. Dashboard wiring:
-`dashboardCoachingPayload`, `dashboard-server.mjs:2043`.
+`dashboardCoachingPayload`, `dashboard-server.mjs:2058`.
 
 **What this does not model:**
 
