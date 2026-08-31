@@ -241,8 +241,8 @@ size was what exposed.
 
 The Prompts view this ADR records (§7, §21) split recurring patterns and coaching into two panels
 and showed no prompt text at all. A follow-on redesign (spec
-`docs/superpowers/specs/2026-08-31-coaching-panel-redesign.md`, archived on completion) folds both
-into ONE pattern-centric **Coaching** panel and shifts three postures the Decision above had fixed.
+[`docs/archive/2026-08-31-superpowers-spec-coaching-panel-redesign.md`](../archive/2026-08-31-superpowers-spec-coaching-panel-redesign.md))
+folds both into ONE pattern-centric **Coaching** panel and shifts three postures the Decision above had fixed.
 Each shift and its reasoning is recorded here; the living per-metric record stays
 `USAGE-SCORECARD-METRICS.md` §21/§22.
 
