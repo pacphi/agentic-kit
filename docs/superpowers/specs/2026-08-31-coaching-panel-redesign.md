@@ -76,12 +76,14 @@ display map. Pure function of the corpus; recomputed every scan; no new fingerpr
 ## 4. Backend contracts
 
 ### 4.1 Projection — `kind` per cluster
+
 `promptClusterRow` (`usage-aggregate.mjs`) gains `kind` (§3). `buildPromptPatterns` passes
 the re-ask "asked-again" hash set into the row builder. Tested: precedence order,
 boundary at each threshold, a cluster matching two signals takes the higher-precedence
 kind.
 
 ### 4.2 Masked verbatim — `GET /api/prompts/samples?key=<clusterKey>&window=<days>`
+
 Token-gated (existing global `/api/` gate), loopback-only. Resolves the cluster (by
 `key`, validated against the projection's own key set — never a raw filesystem path) to
 its member hashes, re-reads their transcripts through the **same deep-pass machinery the
@@ -95,6 +97,7 @@ guards every transcript path; `MAX_DEEP_FILE_BYTES` enforced before read; a reso
 failure returns an honest empty result, never a stack trace or a path.
 
 ### 4.3 Dismiss write — `POST /api/prompts/dismiss` body `{ id }`
+
 Token-gated, loopback-only. Validates `id` against `CARD_ID_SLUG_RE` **before** any write,
 then `dismissCard(ledger, id, now)` + atomic `saveLedger`. Relaxes ADR-0039's read-only
 dashboard-ledger rule for this **one non-inference, non-sensitive local write** (§6).
@@ -102,6 +105,7 @@ Idempotent; unknown id → 404 JSON, no write. A companion `POST /api/prompts/un
 (or `{ id, undo:true }`) reverses it. No prompt text touches this path.
 
 ### 4.4 Seen-in navigation
+
 The occurrence links target `#usage/<sessionId>` and must actually open that session's
 transcript. Fix the client link format against the router's real contract
 (`bootstrap.mjs`) — the earlier bug shipped links the router could not resolve.

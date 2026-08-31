@@ -988,7 +988,8 @@ function lazyLive(liveOptions = {}) {
  *           machineWideIntel?: (projects: Array<any>) => any,
  *           models?: any, modelScopeKey?: string, system?: any, systemOptions?: any,
  *           coachingLedger?: any, labelStore?: { loadLabelStore?: typeof loadLabelStore,
- *             labelStorePath?: string } }} [opts]
+ *             labelStorePath?: string },
+ *           promptSamples?: { cacheFile?: string, roots?: string[], now?: number } }} [opts]
  * @returns {Promise<{ url: string, urlWithToken: string, port: number, token: string, close: () => Promise<void> }>}
  */
 export function startDashboard({
